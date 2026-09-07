@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-label="星序">
+  <rect width="48" height="48" rx="14" fill="#1d2740"/>
+  <path d="M12 32 24 14l12 20" fill="none" stroke="#aebeff" stroke-width="1.5" opacity=".8"/>
+  <circle cx="12" cy="32" r="3" fill="#74d8c1"/>
+  <circle cx="24" cy="14" r="3" fill="#f3cb78"/>
+  <circle cx="36" cy="34" r="3" fill="#aebeff"/>
+  <path d="m24 21 1.5 3.2 3.5.4-2.6 2.4.7 3.5-3.1-1.8-3.1 1.8.7-3.5-2.6-2.4 3.5-.4z" fill="#fff"/>
+</svg>

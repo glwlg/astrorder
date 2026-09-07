@@ -1,0 +1,16 @@
+[project]
+name = "astrorder-hermes-connector"
+version = "0.1.0"
+description = "Embedded Astrorder transport for the Hermes Agent plugin lifecycle"
+requires-python = ">=3.11"
+dependencies = ["websockets>=13"]
+
+[project.entry-points."hermes_agent.plugins"]
+astrorder-hermes = "astrorder_hermes_plugin:register"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["astrorder_hermes_plugin"]

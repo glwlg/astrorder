@@ -1,0 +1,6 @@
+name: astrorder-hermes
+version: "0.1.0"
+description: Embedded Astrorder connector for Hermes Agent lifecycle hooks
+requires_env:
+  - ASTRORDER_CONNECTOR_SECRET
+  - ASTRORDER_HERMES_AGENT_ID

@@ -1,0 +1,1 @@
+"""Installable Astrorder connector artifacts."""

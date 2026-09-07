@@ -1,0 +1,25 @@
+import { MantineProvider } from '@mantine/core'
+import { render, screen } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
+import { MarkdownContent } from './MarkdownContent'
+
+describe('safe markdown rendering', () => {
+  it('does not mount raw HTML from an untrusted message', () => {
+    const { container } = render(
+      <MantineProvider><MarkdownContent value={'安全文本\n\n<script>alert("x")</script>'} /></MantineProvider>,
+    )
+
+    expect(screen.getByText('安全文本')).toBeInTheDocument()
+    expect(container.querySelector('script')).toBeNull()
+  })
+
+  it('rejects executable and protocol-relative link targets', () => {
+    const { container } = render(
+      <MantineProvider><MarkdownContent value={'[脚本](javascript:alert(1)) [外站](//evil.example/a) [本地](/api/v1/attachments/a)'} /></MantineProvider>,
+    )
+
+    expect(container.querySelector('a[href^="javascript:"]')).toBeNull()
+    expect(container.querySelector('a[href^="//"]')).toBeNull()
+    expect(container.querySelector('a[href="/api/v1/attachments/a"]')).not.toBeNull()
+  })
+})
