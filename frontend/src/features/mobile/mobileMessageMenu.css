@@ -1,0 +1,6 @@
+.m-message-popover { position:fixed; z-index:1100; display:flex; align-items:stretch; width:228px; max-width:calc(100vw - 24px); padding:5px; border:1px solid var(--astr-border); border-radius:14px; background:var(--astr-surface); color:var(--astr-text); box-shadow:0 8px 30px #0003; }
+.m-message-popover::after { content:''; position:absolute; width:9px; height:9px; left:var(--menu-arrow-x); bottom:-5px; background:var(--astr-surface); border-right:1px solid var(--astr-border); border-bottom:1px solid var(--astr-border); transform:translateX(-50%) rotate(45deg); }
+.m-message-popover[data-placement="below"]::after { bottom:auto; top:-5px; transform:translateX(-50%) rotate(225deg); }
+.m-message-popover button { border:0; background:transparent; color:inherit; flex:1; display:flex; align-items:center; justify-content:center; gap:5px; min-height:44px; padding:5px; border-radius:9px; font:inherit; font-size:12px; cursor:pointer; }
+.m-message-popover button:focus-visible, .m-message-popover button:hover { background:var(--astr-surface-muted); outline:2px solid var(--mantine-primary-color-filled); outline-offset:-2px; }
+.m-bubble { -webkit-touch-callout:none; user-select:text; }

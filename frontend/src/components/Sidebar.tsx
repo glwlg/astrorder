@@ -1,24 +1,26 @@
 import { IconAdjustments, IconLayoutDashboard, IconMessageCircle, IconSparkles } from '@tabler/icons-react'
 import { Group, NavLink, Stack, Text, ThemeIcon, Title } from '@mantine/core'
 import { NavLink as RouterNavLink } from 'react-router-dom'
-import type { Agent, Session } from '../domain/types'
+import type { Agent, Project, Session } from '../domain/types'
 import { SessionRail } from './SessionRail'
 
 const navItems = [
   { to: '/chat', label: '会话', icon: IconMessageCircle },
   { to: '/monitor', label: '监控室', icon: IconLayoutDashboard },
-  { to: '/agents', label: 'Agent 设置', icon: IconAdjustments },
+  { to: '/agents', label: '连接管理', icon: IconAdjustments },
 ]
 
 export function Sidebar({
   sessions,
   agents,
+  projects = [],
   activeSessionKey,
   onSelectSession,
   onNavigate,
 }: {
   sessions: Session[]
   agents: Record<string, Agent>
+  projects?: Project[]
   activeSessionKey?: string
   onSelectSession: (session: Session) => void
   onNavigate?: () => void
@@ -50,12 +52,13 @@ export function Sidebar({
       </nav>
       <div className="sidebar-divider" />
       <div className="rail-heading">
-        <Text size="xs" fw={700} c="dimmed">最近会话</Text>
+        <Text size="xs" fw={700} c="dimmed">项目会话</Text>
         <Text size="xs" c="dimmed">{sessions.length}</Text>
       </div>
       <SessionRail
         sessions={sessions}
         agents={agents}
+        projects={projects}
         activeSessionKey={activeSessionKey}
         onSelect={(session) => {
           onSelectSession(session)

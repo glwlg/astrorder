@@ -20,8 +20,9 @@ def configured(tmp_path: Path):
             "connector_secret": "connector-test-secret",
             "attachments_dir": tmp_path / "attachments",
             "static_dir": tmp_path / "static",
-            "allowed_origins": ("http://testserver", "http://localhost:8765"),
+            "allowed_origins": ("http://testserver", "http://localhost:30002"),
             "event_retention": 3,
+            "auto_connect_local_hermes": False,
         }
         values.update(overrides)
         return create_app(Settings(**values))
@@ -607,6 +608,9 @@ def test_history_cursor_is_opaque_and_pages_chronologically(configured):
                         },
                     }
                 )
+            # WebSocket send queues a frame; wait until all prior events are applied.
+            connector.send_json({"type": "ping"})
+            assert connector.receive_json() == {"type": "pong"}
             first = client.get(
                 "/api/v1/sessions/session-1/messages?agent_id=hermes-1&limit=2"
             ).json()

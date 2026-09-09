@@ -1,6 +1,6 @@
 # Astrorder embedded connectors
 
-These are installable connector artifacts for the Astrorder `/ws/v1/connector` role. They are not Desktop plugins, renderer bridges, stdout text scrapers, generic CLI chat wrappers, or ACP-only proxies. Neither artifact was installed into the user's Hermes or Codex profile by this task.
+These are connector artifacts for the Astrorder `/ws/v1/connector` role. They are not Desktop plugins, renderer bridges, stdout text scrapers, generic CLI chat wrappers, or ACP-only proxies. The authenticated local-Hermes flow may install only the checked Astrorder wrapper into the active Hermes profile after an explicit operator action; it never alters Hermes core, another profile, Desktop, gateway, Overlook, or Codex.
 
 The connector secret is intentionally separate from the browser secret. Both artifacts read only explicit `ASTRORDER_*` environment variables. They do not read Hermes/Codex credential files and do not contain secrets.
 
@@ -14,18 +14,18 @@ Install either the wheel in `dist/` or the source project into the Hermes Python
 uv pip install ./connectors/hermes
 ```
 
-The package exposes the documented `hermes_agent.plugins` entry-point group and `astrorder_hermes_plugin:register`. For a directory install, copy `plugin.yaml` and the `astrorder_hermes_plugin/` package into the user plugin directory, then enable it through the documented Hermes plugin command. This setup is operator-driven; the implementation does not edit an installed profile.
+The package exposes the documented `hermes_agent.plugins` entry-point group and `astrorder_hermes_plugin:register`. The local UI uses a tiny wrapper in `.hermes/plugins/astrorder-hermes` that dynamically loads this package from the project root. On an explicit local connection, the server copies only that checked wrapper into the active Hermes profile's `plugins/astrorder-hermes` directory and invokes `hermes plugins enable astrorder-hermes`; a mismatching pre-existing plugin is rejected rather than overwritten.
 
-Required process environment variables are `ASTRORDER_CONNECTOR_SECRET` and `ASTRORDER_HERMES_AGENT_ID`. Optional values are `ASTRORDER_CONNECTOR_ENDPOINT`, `ASTRORDER_HERMES_AGENT_NAME`, `ASTRORDER_HERMES_WORKSPACE`, and `ASTRORDER_HERMES_SESSION_KEY`. `ASTRORDER_HERMES_SESSION_KEY` is only useful for an existing authorized gateway route; it is not a new route or a credential.
+Required process environment variables are `ASTRORDER_CONNECTOR_SECRET` and `ASTRORDER_HERMES_AGENT_ID`. Optional values are `ASTRORDER_CONNECTOR_ENDPOINT`, `ASTRORDER_HERMES_AGENT_NAME`, `ASTRORDER_HERMES_WORKSPACE`, `ASTRORDER_PROJECT_ROOT`, `ASTRORDER_HERMES_CONNECT_ON_REGISTER`, and `ASTRORDER_HERMES_SESSION_KEY`. `ASTRORDER_HERMES_SESSION_KEY` is only useful for an existing authorized gateway route; it is not a new route or a credential.
 
 Advertised capabilities are exactly `chat` and `events`:
 
-- `chat`: a text `send` calls the documented `ctx.inject_message(content, role="user", session_key=...)` API. A `True` result means Hermes accepted the request for queue/async dispatch, not that delivery or the turn completed. The bridge reports `accepted` and does not fabricate `completed`.
+- `chat`: Astrorder-owned local TUI sessions are sent by the control server to documented TUI-gateway `prompt.submit`, using the server-private live ID mapped from the exact durable agent/session identity. A successful JSON-RPC result becomes `accepted`, never fabricated `completed`. Other Hermes host modes retain documented `ctx.inject_message(content, role="user", session_key=...)` behavior and require that host's existing authorized route.
 - `events`: `on_session_start`, `on_session_end`, `on_session_finalize`, `post_llm_call`, and stream observer hooks produce session and canonical `message.upsert` events. Stream updates use the documented `turn_id` as the stable coalescing identity.
 - `attachments`, `queue`, `stop`, `approvals`, and `history` are not advertised. The plugin API has no proof that these operations can be carried out through this bridge.
 - Observed canonical messages set `command_id` to `null`. Hermes `ctx.inject_message` has no documented client-command ID parameter and a passed browser ID is not claimed to be persisted by Hermes.
 
-The transport starts from the session lifecycle hook and owns a bidirectional WebSocket thread independent of Desktop. It performs one connection attempt and never replays a command after disconnect. A disconnect therefore remains visible to the server as `unknown` when appropriate.
+The transport starts during plugin registration when the explicit connector environment is present, then owns a bidirectional WebSocket thread independent of Desktop. Session lifecycle hooks report only actual sessions/messages. It performs one connection attempt and never replays a command after disconnect. A disconnect therefore remains visible to the server as `unknown` when appropriate.
 
 ## Codex artifact
 
@@ -78,4 +78,6 @@ The Codex app-server page currently labels WebSocket transport experimental/unsu
 
 ## Verification boundary
 
-`backend/tests/test_connector_artifacts.py` tests the hook registration, Hermes injection semantics, turn-ID stream coalescing, Codex JSON-RPC method construction, app-server notification mapping, stop/cancel path, and command-ID non-claim. These are inert source-compatible tests with fake transports/app-server objects. No prompt was sent to a real user's Hermes or Codex conversation. Native live-agent integration remains unverified until an operator supplies an isolated test agent/session and explicitly authorizes a non-destructive run.
+`backend/tests/test_connector_artifacts.py` tests the hook registration, Hermes injection semantics, turn-ID stream coalescing, Codex JSON-RPC method construction, app-server notification mapping, stop/cancel path, and command-ID non-claim. These are inert source-compatible tests with fake transports/app-server objects.
+
+The local Hermes path is additionally verified with `scripts/verify_native_hermes_local.py`: it starts a temporary loopback FastAPI server, an installed Hermes runtime using `tui_gateway.entry`, and a new owned `source: local` session; Chromium desktop/mobile then authenticate, render the agent/session, and submit one browser command through native `prompt.submit`. The evidence records opaque agent/session IDs, `accepted` command state, and four canonical messages without reading a user conversation or credentials. This does not validate Codex, existing Hermes sessions, Desktop/gateway injection, or a remote SSH host.

@@ -17,7 +17,7 @@ createRoot(document.getElementById('root')!).render(
     <MantineProvider theme={theme} defaultColorScheme="auto">
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
-          <Notifications />
+          <Notifications position="top-right" zIndex={3000} />
           <App />
         </BrowserRouter>
       </QueryClientProvider>

@@ -38,7 +38,7 @@ class CodexConnectorConfig:
         return cls(
             endpoint=os.environ.get(
                 "ASTRORDER_CONNECTOR_ENDPOINT",
-                "ws://127.0.0.1:8765/ws/v1/connector",
+                "ws://127.0.0.1:30002/ws/v1/connector",
             ),
             secret=secret,
             agent_id=agent_id,

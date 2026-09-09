@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { Command, Message } from '../domain/types'
-import { selectOutbox, useAstrorderStore } from './store'
+import type { Command, Message, Project } from '../domain/types'
+import { selectOutbox, selectProjects, useAstrorderStore } from './store'
 
 const session = {
   id: 'session-1',
@@ -45,6 +45,29 @@ beforeEach(() => {
 })
 
 describe('shared runtime store', () => {
+  it('keeps the native project catalog, including zero-session projects, after bootstrap hydration', () => {
+    const project: Project = {
+      id: 'project-row-empty',
+      source_id: 'source-remote',
+      connection_id: 'ssh-wsl',
+      project_id: 'empty-project-id',
+      project_name: '空项目',
+      workspace: '/empty',
+      session_count: 0,
+      updated_at: '2026-09-07T09:00:00Z',
+    }
+
+    useAstrorderStore.getState().hydrateBootstrap({
+      protocol_version: 1,
+      agents: [],
+      projects: [project],
+      sessions: [],
+      cursor: 1,
+    })
+
+    expect(selectProjects(useAstrorderStore.getState())).toEqual([project])
+  })
+
   it('keeps both same-text commands after an old bootstrap snapshot', () => {
     const store = useAstrorderStore.getState()
     store.addOutbox(command('command-1'))

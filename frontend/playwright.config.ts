@@ -2,7 +2,7 @@ import { defineConfig, devices } from '@playwright/test'
 
 const startDevServer = process.env.ASTRORDER_E2E_START_DEV_SERVER === '1'
 const executablePath = process.env.ASTRORDER_E2E_EXECUTABLE
-const defaultBaseUrl = startDevServer ? 'http://127.0.0.1:5173' : 'http://127.0.0.1:8765'
+const defaultBaseUrl = startDevServer ? 'http://127.0.0.1:30001' : 'http://127.0.0.1:30002'
 
 export default defineConfig({
   testDir: './e2e',
@@ -23,7 +23,7 @@ export default defineConfig({
   webServer: startDevServer
     ? {
         command: 'npm run dev -- --host 127.0.0.1',
-        url: 'http://127.0.0.1:5173',
+        url: 'http://127.0.0.1:30001',
         reuseExistingServer: !process.env.CI,
         timeout: 30_000,
       }

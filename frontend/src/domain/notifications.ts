@@ -1,0 +1,78 @@
+import type { EventEnvelope, EventNotification } from './types'
+
+function textValue(value: unknown, fallback: string): string {
+  return typeof value === 'string' && value.trim() ? value.trim() : fallback
+}
+
+function safeLabel(value: string): string {
+  return value
+    .replace(/(api[_-]?key|access[_-]?token|refresh[_-]?token|token|password|passwd|secret|authorization|private[_ -]?key)\s*[:=]\s*[^\s,;]+/gi, '$1=[REDACTED]')
+    .replaceAll('\r', ' ')
+    .replaceAll('\n', ' ')
+    .replaceAll(String.fromCharCode(0), ' ')
+    .slice(0, 160)
+}
+
+function scope(event: EventEnvelope): { agentId: string; sessionId: string } | null {
+  const agentId = typeof event.agent_id === 'string' && event.agent_id ? event.agent_id : typeof event.data.agent_id === 'string' ? event.data.agent_id : ''
+  const sessionId = typeof event.session_id === 'string' && event.session_id ? event.session_id : typeof event.data.session_id === 'string' ? event.data.session_id : ''
+  return agentId && sessionId ? { agentId, sessionId } : null
+}
+
+export function notificationForEvent(event: EventEnvelope): EventNotification | null {
+  const identity = scope(event)
+  if (!identity) return null
+
+  if (event.type === 'task.upsert') {
+    if (event.data.kind === 'tool') return null
+    const taskId = typeof event.data.id === 'string' ? event.data.id : ''
+    const status = typeof event.data.status === 'string' ? event.data.status : ''
+    if (!taskId || !['completed', 'failed', 'cancelled'].includes(status)) return null
+    const title = safeLabel(textValue(event.data.title, '后台任务'))
+    const failed = status !== 'completed'
+    return {
+      key: `${identity.agentId}::${identity.sessionId}::task::${taskId}::${status === 'cancelled' ? 'failed' : status}`,
+      kind: failed ? 'task_failed' : 'task_completed',
+      title: failed ? '任务失败' : '任务完成',
+      message: `${title}${status === 'cancelled' ? '已取消' : failed ? '未完成' : '已完成'}。`,
+      agent_id: identity.agentId,
+      session_id: identity.sessionId,
+      created_at: new Date().toISOString(),
+    }
+  }
+
+  if (event.type === 'approval.upsert' && event.data.state === 'pending') {
+    const approvalId = typeof event.data.id === 'string' ? event.data.id : ''
+    if (!approvalId) return null
+    return {
+      key: `${identity.agentId}::${identity.sessionId}::approval::${approvalId}::pending`,
+      kind: 'approval_pending',
+      title: '需要审批',
+      message: `${safeLabel(textValue(event.data.title, '有一项操作等待确认'))}。默认不会代为允许。`,
+      agent_id: identity.agentId,
+      session_id: identity.sessionId,
+      created_at: new Date().toISOString(),
+    }
+  }
+
+  return null
+}
+
+export type NotificationPermissionState = 'granted' | 'denied' | 'default' | 'unsupported'
+
+export function notificationPermission(): NotificationPermissionState {
+  if (typeof Notification === 'undefined') return 'unsupported'
+  return Notification.permission
+}
+
+export async function requestNotificationPermission(): Promise<NotificationPermissionState> {
+  if (typeof Notification === 'undefined') return 'unsupported'
+  if (Notification.permission !== 'default') return Notification.permission
+  return Notification.requestPermission()
+}
+
+export function deliverBrowserNotification(notification: EventNotification): boolean {
+  if (notificationPermission() !== 'granted') return false
+  new Notification(notification.title, { body: notification.message, tag: notification.key })
+  return true
+}

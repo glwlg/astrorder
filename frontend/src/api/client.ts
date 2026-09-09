@@ -4,12 +4,20 @@ import type {
   AuthSession,
   BootstrapPayload,
   Command,
+  ConnectionHistoryEntry,
   CommandPayload,
+  ConnectionsPayload,
   RuntimePayload,
   Session,
+  SshConnection,
+  SshConnectionSettings,
+  Task,
 } from '../domain/types'
 
 const API_PREFIX = '/api/v1'
+
+export interface SessionModelBinding { model: string; provider: string | null; deferred?: boolean; branch?: string }
+export interface CodexConnectionStatus { kind: 'codex'; state: 'disconnected' | 'connecting' | 'connected' | 'error' | 'authentication_required'; available: boolean; agent_id: string; session_count: number; auth_required: boolean; detail: string }
 
 export class ApiError extends Error {
   readonly status: number
@@ -41,6 +49,15 @@ async function parseResponse(response: Response): Promise<unknown> {
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers)
   headers.set('Accept', 'application/json')
+  let localToken: string | null = null
+  try {
+    if (typeof localStorage !== 'undefined' && typeof localStorage.getItem === 'function') {
+      localToken = localStorage.getItem('astrorder:token')
+    }
+  } catch {}
+  if (localToken && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${localToken}`)
+  }
   const response = await fetch(`${API_PREFIX}${path}`, {
     ...init,
     credentials: 'include',
@@ -75,11 +92,13 @@ export const api = {
   logout: () => request<void>('/auth/session', { method: 'DELETE' }),
   getBootstrap: () => request<BootstrapPayload>('/bootstrap'),
   getAgents: () => request<{ items: Agent[] }>('/agents'),
+  getSessionModel: (sessionId: string, agentId: string) => request<SessionModelBinding>(`${sessionPath(sessionId)}/model?agent_id=${encodeURIComponent(agentId)}`),
+  getOpenSessions: () => request<{ known_agent_ids: string[]; items: { agent_id: string; id: string }[] }>('/open-sessions'),
   getSessions: (agentId?: string) => {
     const query = agentId ? `?agent_id=${encodeURIComponent(agentId)}` : ''
     return request<{ items: Session[] }>(`/sessions${query}`)
   },
-  getMessages: (sessionId: string, agentId: string, before?: string, limit = 50) => {
+  getMessages: (sessionId: string, agentId: string, before?: string, limit = before ? 20 : 2) => {
     const query = new URLSearchParams({ agent_id: agentId, limit: String(limit) })
     if (before) query.set('before', before)
     return request<{ items: import('../domain/types').Message[]; next_cursor: string | null }>(
@@ -90,15 +109,64 @@ export const api = {
     request<{ items: Command[] }>(
       `${sessionPath(sessionId)}/commands?agent_id=${encodeURIComponent(agentId)}`,
     ),
+  getTasks: (sessionId: string, agentId: string) =>
+    request<{ items: Task[] }>(
+      `${sessionPath(sessionId)}/tasks?agent_id=${encodeURIComponent(agentId)}`,
+    ),
   uploadAttachment: (file: File) => {
     const form = new FormData()
     form.append('file', file, file.name)
     return request<Attachment>('/attachments', { method: 'POST', body: form })
   },
   createCommand: (payload: CommandPayload) => jsonRequest<Command>('/commands', payload),
+  createSession: (payload: { agent_id: string; workspace?: string | null; title?: string | null; project_id?: string | null; project_name?: string | null }) =>
+    jsonRequest<Session>('/sessions', payload),
+  updateSession: (sessionId: string, payload: { agent_id: string; title?: string | null; workspace?: string | null; status?: string | null }) =>
+    jsonRequest<Session>(sessionPath(sessionId), payload, 'PATCH'),
+  deleteSession: (sessionId: string, agentId: string) =>
+    request<{ ok: boolean; id: string }>(`${sessionPath(sessionId)}?agent_id=${encodeURIComponent(agentId)}`, {
+      method: 'DELETE',
+    }),
+  getSessionModels: (sessionId: string, agentId: string) => request<{ items: { provider: string; model: string; label: string }[] }>(`${sessionPath(sessionId)}/models?agent_id=${encodeURIComponent(agentId)}`),
+  setSessionModel: (sessionId: string, agentId: string, provider: string, model: string) => jsonRequest<{ provider: string; model: string; deferred?: boolean }>(`${sessionPath(sessionId)}/model`, { agent_id: agentId, provider, model }),
   getRuntime: () => request<RuntimePayload>('/runtime'),
   launchRuntime: (kind: string, workspace: string) =>
     jsonRequest<{ agent_id: string; status: string }>('/runtime/launch', { kind, workspace }),
+  getUserActivity: () => request<{ items: Array<{ agent_id: string; id: string; last_user_at: string }> }>('/user-activity'),
+  getConnections: () => request<ConnectionsPayload>('/connections'),
+  getEnvironments: () => request<{ items: Array<{ id: string; name: string; method: 'local' | 'ssh'; discovered: boolean; os?: string; agents: Array<{ kind: 'hermes' | 'codex'; available: boolean; state: string; detail: string; executable?: string }> }> }>('/environments'),
+  discoverEnvironment: (id: string) => request(`/environments/${encodeURIComponent(id)}/discover`, { method: 'POST' }),
+  changeEnvironmentAgent: (id: string, kind: string, connect: boolean) => request(`/environments/${encodeURIComponent(id)}/agents/${kind}/${connect ? 'connect' : 'disconnect'}`, { method: 'POST' }),
+  getCodexConnection: () => request<CodexConnectionStatus>('/connections/codex'),
+  connectCodex: () => request<CodexConnectionStatus>('/connections/codex/connect', { method: 'POST' }),
+  disconnectCodex: () => request<CodexConnectionStatus>('/connections/codex/disconnect', { method: 'POST' }),
+  getConnectionHistory: (connectionId: string, before?: string) =>
+    request<{ items: ConnectionHistoryEntry[]; next_cursor: string | null }>(
+      `/connections/${encodeURIComponent(connectionId)}/history?limit=50${before ? `&before=${encodeURIComponent(before)}` : ''}`,
+    ),
+  connectLocalHermes: () => request<ConnectionsPayload>('/connections/local/connect', { method: 'POST' }),
+  disconnectLocalHermes: () => request<ConnectionsPayload>('/connections/local/disconnect', { method: 'POST' }),
+  saveSshConnection: (settings: SshConnectionSettings) =>
+    jsonRequest<SshConnection>('/connections/ssh', settings, 'PUT'),
+  updateSshConnection: (connectionId: string, settings: SshConnectionSettings) =>
+    jsonRequest<SshConnection>(`/connections/ssh/${encodeURIComponent(connectionId)}`, settings, 'PUT'),
+  testSshConnection: (connectionId?: string) =>
+    request<ConnectionsPayload>(
+      connectionId ? `/connections/ssh/${encodeURIComponent(connectionId)}/test` : '/connections/ssh/test',
+      { method: 'POST' },
+    ),
+  connectSshConnection: (connectionId?: string) =>
+    request<ConnectionsPayload>(
+      connectionId ? `/connections/ssh/${encodeURIComponent(connectionId)}/connect` : '/connections/ssh/connect',
+      { method: 'POST' },
+    ),
+  disconnectSshConnection: (connectionId?: string) =>
+    request<ConnectionsPayload>(
+      connectionId ? `/connections/ssh/${encodeURIComponent(connectionId)}/disconnect` : '/connections/ssh/disconnect',
+      { method: 'POST' },
+    ),
+  deleteSshConnection: (connectionId: string) =>
+    request<ConnectionsPayload>(`/connections/ssh/${encodeURIComponent(connectionId)}`, { method: 'DELETE' }),
 }
 
 export type ApiClient = typeof api

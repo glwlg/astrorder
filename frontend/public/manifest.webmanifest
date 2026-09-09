@@ -1,0 +1,15 @@
+{
+  "id": "/mobile",
+  "name": "星序 · Astrorder",
+  "short_name": "星序",
+  "lang": "zh-CN",
+  "start_url": "/mobile",
+  "scope": "/mobile",
+  "display": "standalone",
+  "background_color": "#1d2740",
+  "theme_color": "#1d2740",
+  "icons": [
+    { "src": "/pwa-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/pwa-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

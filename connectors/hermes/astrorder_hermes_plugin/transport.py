@@ -11,10 +11,17 @@ from typing import Any
 class HermesTransport:
     """One-shot bidirectional connector transport; it never resends commands after a disconnect."""
 
-    def __init__(self, endpoint: str, secret: str, on_command: Callable[[dict[str, Any]], None]):
+    def __init__(
+        self,
+        endpoint: str,
+        secret: str,
+        on_command: Callable[[dict[str, Any]], None],
+        on_connected: Callable[[], None] | None = None,
+    ):
         self.endpoint = endpoint
         self.secret = secret
         self.on_command = on_command
+        self.on_connected = on_connected
         self._outgoing: queue.Queue[dict[str, Any] | None] = queue.Queue()
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
@@ -67,6 +74,8 @@ class HermesTransport:
                     ensure_ascii=False,
                 )
             )
+            if self.on_connected is not None:
+                self.on_connected()
             sender = asyncio.create_task(self._send_outgoing(socket))
             try:
                 async for value in socket:

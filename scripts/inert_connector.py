@@ -151,7 +151,7 @@ async def handle_command(socket, command: dict[str, Any]) -> bool:
 
 
 async def run() -> None:
-    endpoint = os.environ.get("ASTRORDER_CONNECTOR_ENDPOINT", "ws://127.0.0.1:8765/ws/v1/connector")
+    endpoint = os.environ.get("ASTRORDER_CONNECTOR_ENDPOINT", "ws://127.0.0.1:30002/ws/v1/connector")
     secret = os.environ.get("ASTRORDER_CONNECTOR_SECRET")
     if not secret:
         raise RuntimeError("ASTRORDER_CONNECTOR_SECRET is required for the inert fixture")

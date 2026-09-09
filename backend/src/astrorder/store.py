@@ -3,13 +3,15 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import re
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
-from sqlalchemy import create_engine, delete, func, select
+from sqlalchemy import create_engine, delete, func, select, text, update
 from sqlalchemy import event as sqlalchemy_event
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
@@ -21,9 +23,13 @@ from .models import (
     AttachmentRow,
     Base,
     CommandRow,
+    ConnectionHistoryRow,
     EventRow,
     MessageRow,
+    ProjectRow,
     SessionRow,
+    SshConnectionRow,
+    TaskRow,
 )
 from .timeutil import isoformat, parse_timestamp, utc_now
 
@@ -57,6 +63,37 @@ if Engine:
 def _hash_payload(payload: dict[str, Any]) -> str:
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+_SENSITIVE_TEXT = re.compile(
+    r"(?i)\b(api[_-]?key|access[_-]?token|refresh[_-]?token|token|password|passwd|secret|authorization|private[_ -]?key)\s*[:=]\s*[^\s,;]+"
+)
+_SENSITIVE_KEY = re.compile(
+    r"(?i)(api[_-]?key|access[_-]?token|refresh[_-]?token|token|password|passwd|secret|authorization|private[_ -]?key|credential|connection[_-]?string)"
+)
+
+
+def _redact_text(value: str, limit: int = 2000) -> str:
+    return _SENSITIVE_TEXT.sub(r"\1=[REDACTED]", value).replace("\x00", " ").replace("\r", " ").replace("\n", " ").strip()[:limit]
+
+
+def _redact_structured(value: Any, depth: int = 0) -> Any:
+    if depth > 16:
+        return "[REDACTED]"
+    if isinstance(value, dict):
+        return {
+            str(key): "[REDACTED]"
+            if _SENSITIVE_KEY.search(str(key))
+            else _redact_structured(item, depth + 1)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_structured(item, depth + 1) for item in value]
+    if isinstance(value, tuple):
+        return [_redact_structured(item, depth + 1) for item in value]
+    if isinstance(value, str):
+        return _redact_text(value)
+    return value
 
 
 def encode_history_cursor(row_id: int) -> str:
@@ -99,6 +136,11 @@ def _agent_wire(row: AgentRow) -> dict[str, Any]:
         "status": row.status,
         "capabilities": list(row.capabilities or []),
         "limitation": row.limitation,
+        "source_id": row.source_id or row.id,
+        "connection_id": row.connection_id,
+        "profile_name": row.profile_name,
+        "runtime_id": row.runtime_id or row.id,
+        "control_state": row.control_state,
     }
 
 
@@ -109,6 +151,29 @@ def _session_wire(row: SessionRow) -> dict[str, Any]:
         "title": row.title,
         "workspace": row.workspace,
         "status": row.status,
+        "updated_at": isoformat(row.updated_at),
+        "source_id": row.source_id or row.agent_id,
+        "connection_id": row.connection_id,
+        "source_session_id": row.source_session_id or row.id,
+        "project_id": row.project_id,
+        "project_name": row.project_name,
+        "history_state": row.history_state,
+        "native_kind": row.native_kind,
+        "control_state": row.control_state,
+    }
+
+
+def _project_wire(row: ProjectRow) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "source_id": row.source_id,
+        "connection_id": row.connection_id,
+        "agent_id": row.agent_id,
+        "profile_name": row.profile_name,
+        "project_id": row.project_id,
+        "project_name": row.project_name,
+        "workspace": row.workspace,
+        "session_count": row.session_count,
         "updated_at": isoformat(row.updated_at),
     }
 
@@ -143,6 +208,58 @@ def _command_wire(row: CommandRow) -> dict[str, Any]:
     }
 
 
+def _task_wire(row: TaskRow) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "session_id": row.session_id,
+        "agent_id": row.agent_id,
+        "kind": row.kind,
+        "title": row.title,
+        "status": row.status,
+        "progress": row.progress,
+        "command": row.command,
+        "logs": list(row.logs or []),
+        "target_id": row.target_id,
+        "created_at": isoformat(row.created_at),
+        "updated_at": isoformat(row.updated_at),
+    }
+
+
+def _ssh_connection_wire(row: SshConnectionRow) -> dict[str, Any]:
+    settings = {
+        "host": row.host,
+        "port": row.port,
+        "user": row.user,
+        "ssh_config_alias": row.ssh_config_alias,
+        "identity_file": row.identity_file,
+        "hermes_path": row.hermes_path,
+        "workspace": row.workspace,
+    }
+    return {
+        "id": row.id,
+        "display_name": row.display_name or row.ssh_config_alias or row.host or row.id,
+        "profile_name": row.profile_name or "default",
+        "state": row.state,
+        "settings": settings,
+        "detail": row.detail,
+        "remote_os": row.remote_os,
+        "agent_id": row.agent_id,
+        "runtime_id": row.runtime_id,
+    }
+
+
+def _connection_history_wire(row: ConnectionHistoryRow) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "connection_id": row.connection_id,
+        "stage": row.stage,
+        "state": row.state,
+        "detail": row.detail,
+        "details": _redact_structured(dict(row.details or {})),
+        "created_at": isoformat(row.created_at),
+    }
+
+
 def _event_wire(row: EventRow) -> dict[str, Any]:
     return {
         "id": row.event_id,
@@ -165,6 +282,72 @@ class Store:
         self.engine = create_engine(settings.database_url, connect_args=connect_args)
         self.session_factory = sessionmaker(self.engine, expire_on_commit=False, class_=Session)
         Base.metadata.create_all(self.engine)
+        self._migrate_schema()
+        from .native_identity_migration import migrate_native_identity
+
+        with self.session() as db:
+            migrate_native_identity(db)
+
+    def _migrate_schema(self) -> None:
+        """Apply additive SQLite migrations without rewriting user data."""
+        additions = {
+            "agents": {
+                "source_id": "VARCHAR(256)",
+                "connection_id": "VARCHAR(64)",
+                "profile_name": "VARCHAR(128)",
+                "runtime_id": "VARCHAR(256)",
+                "control_state": "VARCHAR(32) NOT NULL DEFAULT 'unknown'",
+            },
+            "sessions": {
+                "source_id": "VARCHAR(256)",
+                "connection_id": "VARCHAR(64)",
+                "source_session_id": "VARCHAR(256)",
+                "project_id": "VARCHAR(256)",
+                "project_name": "VARCHAR(512)",
+                "history_state": "VARCHAR(32) NOT NULL DEFAULT 'local'",
+                "native_kind": "VARCHAR(32)",
+                "control_state": "VARCHAR(32) NOT NULL DEFAULT 'unknown'",
+            },
+            "ssh_connections": {
+                "display_name": "VARCHAR(256)",
+                "profile_name": "VARCHAR(128)",
+                "remote_os": "VARCHAR(64)",
+                "agent_id": "VARCHAR(256)",
+                "runtime_id": "VARCHAR(256)",
+            },
+        }
+        with self.engine.begin() as db:
+            for table, columns in additions.items():
+                present = {
+                    str(row[1]) for row in db.exec_driver_sql(f"PRAGMA table_info({table})").fetchall()
+                }
+                for name, definition in columns.items():
+                    if name not in present:
+                        db.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
+            db.exec_driver_sql(
+                "UPDATE agents SET source_id = id WHERE source_id IS NULL OR source_id = ''"
+            )
+            db.exec_driver_sql(
+                "UPDATE agents SET runtime_id = id WHERE runtime_id IS NULL OR runtime_id = ''"
+            )
+            db.exec_driver_sql(
+                "UPDATE sessions SET source_id = (SELECT source_id FROM agents WHERE agents.id = sessions.agent_id) "
+                "WHERE source_id IS NULL OR source_id = ''"
+            )
+            db.exec_driver_sql(
+                "UPDATE sessions SET source_session_id = id WHERE source_session_id IS NULL OR source_session_id = ''"
+            )
+            db.exec_driver_sql(
+                "UPDATE ssh_connections SET profile_name = 'default' "
+                "WHERE profile_name IS NULL OR profile_name = ''"
+            )
+            legacy = db.execute(text("SELECT id FROM ssh_connections WHERE id = 'default'")).fetchone()
+            if legacy is not None:
+                migrated_id = f"ssh-{uuid4().hex[:24]}"
+                db.execute(
+                    text("UPDATE ssh_connections SET id = :new_id WHERE id = 'default'"),
+                    {"new_id": migrated_id},
+                )
 
     @contextmanager
     def session(self) -> Iterator[Session]:
@@ -191,6 +374,50 @@ class Store:
             rows = db.scalars(select(AgentRow).order_by(AgentRow.id)).all()
             return [_agent_wire(row) for row in rows]
 
+    def reconcile_legacy_local_source(
+        self, *, source_id: str, current_agent_id: str, profile_name: str
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Attach provenance-free local preview rows to the active stable source.
+
+        Old Astrorder rows used ``local-hermes-<runtime>`` as both source and runtime identity.
+        Only that explicit legacy shape is eligible: rows with a profile or connection provenance,
+        non-local agent IDs, and already-stable source IDs are left untouched.  Agent/session and
+        message IDs remain unchanged so history and opaque routing still resolve to their original
+        rows; only source grouping and control state are reconciled.
+        """
+        if not source_id or not current_agent_id or not profile_name:
+            return {"agents": [], "sessions": []}
+        reconciled_agents: list[dict[str, Any]] = []
+        reconciled_sessions: list[dict[str, Any]] = []
+        with self.session() as db:
+            current = db.get(AgentRow, current_agent_id)
+            if current is None:
+                return {"agents": [], "sessions": []}
+            candidates = db.scalars(select(AgentRow).where(AgentRow.kind == "hermes")).all()
+            for agent in candidates:
+                if agent.id == current_agent_id or not agent.id.startswith("local-hermes-"):
+                    continue
+                if agent.connection_id is not None or agent.profile_name is not None:
+                    continue
+                if (agent.source_id or agent.id) != agent.id:
+                    continue
+                agent.source_id = source_id
+                agent.profile_name = profile_name
+                agent.control_state = "readonly"
+                agent.status = "disconnected"
+                agent.updated_at = utc_now()
+                reconciled_agents.append(_agent_wire(agent))
+                sessions = db.scalars(
+                    select(SessionRow).where(SessionRow.agent_id == agent.id)
+                ).all()
+                for session in sessions:
+                    session.source_id = source_id
+                    session.connection_id = None
+                    session.control_state = "readonly"
+                    session.updated_at = session.updated_at or utc_now()
+                    reconciled_sessions.append(_session_wire(session))
+        return {"agents": reconciled_agents, "sessions": reconciled_sessions}
+
     def upsert_agent(self, data: dict[str, Any], *, status: str | None = None) -> dict[str, Any]:
         with self.session() as db:
             row = db.get(AgentRow, data["id"])
@@ -202,6 +429,11 @@ class Store:
                     status=status or data["status"],
                     capabilities=list(data.get("capabilities", [])),
                     limitation=data.get("limitation"),
+                    source_id=data.get("source_id") or data["id"],
+                    connection_id=data.get("connection_id"),
+                    profile_name=data.get("profile_name"),
+                    runtime_id=data.get("runtime_id") or data["id"],
+                    control_state=data.get("control_state", "unknown"),
                     updated_at=utc_now(),
                 )
                 db.add(row)
@@ -211,6 +443,11 @@ class Store:
                 row.status = status or data["status"]
                 row.capabilities = list(data.get("capabilities", []))
                 row.limitation = data.get("limitation")
+                row.source_id = data.get("source_id") or row.source_id or row.id
+                row.connection_id = data.get("connection_id")
+                row.profile_name = data.get("profile_name")
+                row.runtime_id = data.get("runtime_id") or row.runtime_id or row.id
+                row.control_state = data.get("control_state", row.control_state or "unknown")
                 row.updated_at = utc_now()
             db.flush()
             return _agent_wire(row)
@@ -225,6 +462,41 @@ class Store:
             db.flush()
             return _agent_wire(row)
 
+    def update_session(self, agent_id: str, session_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
+        with self.session() as db:
+            row = db.execute(
+                select(SessionRow).where(SessionRow.agent_id == agent_id, SessionRow.id == session_id)
+            ).scalar_one_or_none()
+            if row is None:
+                return None
+            if "title" in updates and isinstance(updates["title"], str):
+                row.title = updates["title"].strip()
+            if "status" in updates and isinstance(updates["status"], str):
+                row.status = updates["status"]
+            if "workspace" in updates:
+                row.workspace = updates["workspace"]
+            row.updated_at = utc_now()
+            db.flush()
+            return _session_wire(row)
+
+    def delete_session(self, agent_id: str, session_id: str) -> bool:
+        with self.session() as db:
+            row = db.execute(
+                select(SessionRow).where(SessionRow.agent_id == agent_id, SessionRow.id == session_id)
+            ).scalar_one_or_none()
+            if row is None:
+                return False
+            db.delete(row)
+            # 级联清除该会话的消息与指令
+            for msg in db.scalars(select(MessageRow).where(MessageRow.agent_id == agent_id, MessageRow.session_id == session_id)).all():
+                db.delete(msg)
+            for cmd in db.scalars(select(CommandRow).where(CommandRow.agent_id == agent_id, CommandRow.session_id == session_id)).all():
+                db.delete(cmd)
+            for task in db.scalars(select(TaskRow).where(TaskRow.agent_id == agent_id, TaskRow.session_id == session_id)).all():
+                db.delete(task)
+            db.flush()
+            return True
+
     def get_session(self, agent_id: str, session_id: str) -> dict[str, Any] | None:
         with self.session() as db:
             row = db.execute(
@@ -237,7 +509,56 @@ class Store:
             query = select(SessionRow).order_by(SessionRow.updated_at.desc(), SessionRow.row_id.desc())
             if agent_id is not None:
                 query = query.where(SessionRow.agent_id == agent_id)
-            return [_session_wire(row) for row in db.scalars(query).all()]
+            result: list[dict[str, Any]] = []
+            seen: set[tuple[str, str]] = set()
+            for row in db.scalars(query).all():
+                # 只有当具有相同的 session id 时才去重；
+                # 绝不能用 (source_id, source_session_id) 去重把同 native 会话的真正 session 顶掉
+                key = (row.agent_id, row.id)
+                if key in seen:
+                    continue
+                seen.add(key)
+                result.append(_session_wire(row))
+            return result
+
+    def list_projects(self) -> list[dict[str, Any]]:
+        with self.session() as db:
+            rows = db.scalars(select(ProjectRow).order_by(ProjectRow.updated_at.desc(), ProjectRow.id)).all()
+            return [_project_wire(row) for row in rows]
+
+    def upsert_projects(self, projects: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        canonical: list[dict[str, Any]] = []
+        with self.session() as db:
+            for data in projects:
+                source_id = str(data.get("source_id") or "")
+                project_id = str(data.get("project_id") or "")
+                if not source_id or not project_id:
+                    continue
+                row_id = f"project:{source_id}\0{project_id}"
+                updated_at = data.get("updated_at") or utc_now()
+                if not isinstance(updated_at, datetime):
+                    updated_at = parse_timestamp(str(updated_at))
+                row = db.get(ProjectRow, row_id)
+                values = {
+                    "source_id": source_id,
+                    "connection_id": data.get("connection_id"),
+                    "agent_id": data.get("agent_id"),
+                    "profile_name": data.get("profile_name"),
+                    "project_id": project_id,
+                    "project_name": data.get("project_name"),
+                    "workspace": data.get("workspace"),
+                    "session_count": max(0, int(data.get("session_count") or 0)),
+                    "updated_at": updated_at,
+                }
+                if row is None:
+                    row = ProjectRow(id=row_id, **values)
+                    db.add(row)
+                else:
+                    for key, value in values.items():
+                        setattr(row, key, value)
+                canonical.append(_project_wire(row))
+            db.flush()
+            return canonical
 
     def upsert_session(self, data: dict[str, Any]) -> dict[str, Any]:
         with self.session() as db:
@@ -256,6 +577,14 @@ class Store:
                     title=data.get("title", ""),
                     workspace=data.get("workspace"),
                     status=data["status"],
+                    source_id=data.get("source_id") or data["agent_id"],
+                    connection_id=data.get("connection_id"),
+                    source_session_id=data.get("source_session_id") or data["id"],
+                    project_id=data.get("project_id"),
+                    project_name=data.get("project_name"),
+                    history_state=data.get("history_state", "local"),
+                    native_kind=data.get("native_kind"),
+                    control_state=data.get("control_state", "unknown"),
                     updated_at=updated_at,
                 )
                 db.add(row)
@@ -263,7 +592,32 @@ class Store:
                 row.title = data.get("title", "")
                 row.workspace = data.get("workspace")
                 row.status = data["status"]
+                row.source_id = data.get("source_id") or row.source_id or data["agent_id"]
+                row.connection_id = data.get("connection_id")
+                row.source_session_id = data.get("source_session_id") or row.source_session_id or data["id"]
+                row.project_id = data.get("project_id")
+                row.project_name = data.get("project_name")
+                row.history_state = data.get("history_state", row.history_state or "local")
+                row.native_kind = data.get("native_kind", row.native_kind)
+                row.control_state = data.get("control_state", row.control_state or "unknown")
                 row.updated_at = updated_at
+            db.flush()
+            return _session_wire(row)
+
+    def set_session_history_state(
+        self, agent_id: str, session_id: str, history_state: str
+    ) -> dict[str, Any] | None:
+        with self.session() as db:
+            row = db.execute(
+                select(SessionRow).where(
+                    SessionRow.agent_id == agent_id,
+                    SessionRow.id == session_id,
+                )
+            ).scalar_one_or_none()
+            if row is None:
+                return None
+            row.history_state = history_state
+            row.updated_at = utc_now()
             db.flush()
             return _session_wire(row)
 
@@ -397,6 +751,19 @@ class Store:
             ).all()
             return [_command_wire(row) for row in rows]
 
+    def upsert_task(self, data: dict[str, Any]) -> dict[str, Any]:
+        with self.session() as db:
+            return self._upsert_task_in(db, data)
+
+    def list_tasks(self, agent_id: str, session_id: str) -> list[dict[str, Any]]:
+        with self.session() as db:
+            rows = db.scalars(
+                select(TaskRow)
+                .where(TaskRow.agent_id == agent_id, TaskRow.session_id == session_id)
+                .order_by(TaskRow.updated_at.desc(), TaskRow.row_id.desc())
+            ).all()
+            return [_task_wire(row) for row in rows]
+
     def pending_commands(self, agent_id: str) -> list[dict[str, Any]]:
         with self.session() as db:
             rows = db.scalars(
@@ -415,6 +782,145 @@ class Store:
             ).all()
             return [_command_wire(row) for row in rows]
 
+    def get_ssh_connection(self, connection_id: str | None = None) -> dict[str, Any] | None:
+        with self.session() as db:
+            if connection_id is None:
+                row = db.scalars(select(SshConnectionRow).order_by(SshConnectionRow.id)).first()
+            else:
+                row = db.get(SshConnectionRow, connection_id)
+            return _ssh_connection_wire(row) if row is not None else None
+
+    def list_ssh_connections(self) -> list[dict[str, Any]]:
+        with self.session() as db:
+            rows = db.scalars(select(SshConnectionRow).order_by(SshConnectionRow.id)).all()
+            return [_ssh_connection_wire(row) for row in rows]
+
+    def save_ssh_connection(
+        self,
+        settings: dict[str, object],
+        *,
+        connection_id: str | None = None,
+        state: str,
+        detail: str,
+    ) -> dict[str, Any]:
+        with self.session() as db:
+            row = db.get(SshConnectionRow, connection_id) if connection_id else None
+            if row is None:
+                row = SshConnectionRow(
+                    id=connection_id or f"ssh-{uuid4().hex[:24]}",
+                    port=22,
+                    state=state,
+                    detail=detail,
+                    updated_at=utc_now(),
+                )
+                db.add(row)
+            row.display_name = settings.get("display_name") or None
+            row.profile_name = settings.get("profile_name") or "default"
+            row.host = settings.get("host") or None
+            row.port = int(settings["port"])
+            row.user = settings.get("user") or None
+            row.ssh_config_alias = settings.get("ssh_config_alias") or None
+            row.identity_file = settings.get("identity_file") or None
+            row.hermes_path = settings.get("hermes_path") or None
+            row.workspace = settings.get("workspace") or None
+            row.state = state
+            row.detail = detail
+            row.updated_at = utc_now()
+            db.flush()
+            return _ssh_connection_wire(row)
+
+    def update_ssh_connection_state(
+        self,
+        connection_id: str | None,
+        state: str,
+        detail: str,
+        *,
+        remote_os: str | None = None,
+        agent_id: str | None = None,
+        runtime_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        with self.session() as db:
+            row = db.get(SshConnectionRow, connection_id) if connection_id else None
+            if row is None and connection_id is None:
+                row = db.scalars(select(SshConnectionRow).order_by(SshConnectionRow.id)).first()
+            if row is None:
+                return None
+            row.state = state
+            row.detail = detail
+            if remote_os is not None:
+                row.remote_os = remote_os
+            if agent_id is not None:
+                row.agent_id = agent_id
+            if runtime_id is not None:
+                row.runtime_id = runtime_id
+            row.updated_at = utc_now()
+            db.flush()
+            return _ssh_connection_wire(row)
+
+    def append_connection_history(
+        self,
+        connection_id: str,
+        stage: str,
+        state: str,
+        detail: str,
+        details: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        safe_detail = _redact_text(str(detail))
+        safe_details = _redact_structured(details or {})
+        with self.session() as db:
+            row = ConnectionHistoryRow(
+                id=f"history-{uuid4()}",
+                connection_id=connection_id,
+                stage=str(stage)[:64],
+                state=str(state)[:32],
+                detail=safe_detail,
+                details=safe_details if isinstance(safe_details, dict) else {},
+                created_at=utc_now(),
+            )
+            db.add(row)
+            db.flush()
+            return _connection_history_wire(row)
+
+    def list_connection_history(
+        self, connection_id: str, before: str | None, limit: int
+    ) -> tuple[list[dict[str, Any]], str | None]:
+        with self.session() as db:
+            query = select(ConnectionHistoryRow).where(
+                ConnectionHistoryRow.connection_id == connection_id
+            )
+            if before is not None:
+                query = query.where(ConnectionHistoryRow.row_id < decode_history_cursor(before))
+            rows = db.scalars(
+                query.order_by(ConnectionHistoryRow.row_id.desc()).limit(limit + 1)
+            ).all()
+            has_more = len(rows) > limit
+            rows = rows[:limit]
+            rows.reverse()
+            next_cursor = encode_history_cursor(rows[0].row_id) if has_more and rows else None
+            return [_connection_history_wire(row) for row in rows], next_cursor
+
+    def delete_ssh_connection(self, connection_id: str) -> bool:
+        with self.session() as db:
+            row = db.get(SshConnectionRow, connection_id)
+            if row is None:
+                return False
+            db.delete(row)
+            return True
+
+    def mark_ssh_connections_disconnected(self) -> None:
+        with self.session() as db:
+            rows = db.scalars(
+                select(SshConnectionRow).where(
+                    SshConnectionRow.state.in_({"connecting", "connected", "ready"})
+                )
+            ).all()
+            for row in rows:
+                row.state = "disconnected"
+                row.detail = "Astrorder restarted; reconnect explicitly"
+                row.agent_id = None
+                row.runtime_id = None
+                row.updated_at = utc_now()
+
     def set_command_state(
         self,
         agent_id: str,
@@ -422,8 +928,15 @@ class Store:
         command_id: str,
         state: str,
         error: str | None,
+        *,
+        preserve_progress: bool = False,
     ) -> dict[str, Any]:
         with self.session() as db:
+            if preserve_progress:
+                blocked = {'completed', 'failed', 'cancelled'}
+                if state == 'accepted':
+                    blocked.add('running')
+                db.execute(update(CommandRow).where(CommandRow.agent_id == agent_id, CommandRow.session_id == session_id, CommandRow.id == command_id, CommandRow.state.not_in(blocked)).values(state=state, error=error, updated_at=utc_now()))
             row = db.execute(
                 select(CommandRow).where(
                     CommandRow.agent_id == agent_id,
@@ -433,9 +946,10 @@ class Store:
             ).scalar_one_or_none()
             if row is None:
                 raise UnknownCommand(command_id)
-            row.state = state
-            row.error = error
-            row.updated_at = utc_now()
+            if not preserve_progress:
+                row.state = state
+                row.error = error
+                row.updated_at = utc_now()
             db.flush()
             return _command_wire(row)
 
@@ -493,8 +1007,11 @@ class Store:
                 MessageRow.agent_id == agent_id, MessageRow.session_id == session_id
             )
             if before is not None:
-                query = query.where(MessageRow.row_id < decode_history_cursor(before))
-            rows = db.scalars(query.order_by(MessageRow.row_id.desc()).limit(limit + 1)).all()
+                anchor = db.scalar(query.where(MessageRow.row_id == decode_history_cursor(before)))
+                if anchor is None:
+                    raise ValueError("History cursor is outside this session")
+                query = query.where((MessageRow.created_at < anchor.created_at) | ((MessageRow.created_at == anchor.created_at) & (MessageRow.row_id < anchor.row_id)))
+            rows = db.scalars(query.order_by(MessageRow.created_at.desc(), MessageRow.row_id.desc()).limit(limit + 1)).all()
             has_more = len(rows) > limit
             rows = rows[:limit]
             rows.reverse()
@@ -550,6 +1067,11 @@ class Store:
                         status=data["status"],
                         capabilities=list(data.get("capabilities", [])),
                         limitation=data.get("limitation"),
+                        source_id=data.get("source_id") or agent_id,
+                        connection_id=data.get("connection_id"),
+                        profile_name=data.get("profile_name"),
+                        runtime_id=data.get("runtime_id") or agent_id,
+                        control_state=data.get("control_state", "unknown"),
                         updated_at=utc_now(),
                     )
                     db.add(row)
@@ -559,13 +1081,29 @@ class Store:
                     row.status = data["status"]
                     row.capabilities = list(data.get("capabilities", []))
                     row.limitation = data.get("limitation")
+                    row.source_id = data.get("source_id") or row.source_id or agent_id
+                    row.connection_id = data.get("connection_id")
+                    row.profile_name = data.get("profile_name")
+                    row.runtime_id = data.get("runtime_id") or row.runtime_id or agent_id
+                    row.control_state = data.get("control_state", row.control_state or "unknown")
                     row.updated_at = utc_now()
                 db.flush()
                 canonical = _agent_wire(row)
             elif event_type == "session.upsert":
                 canonical = self._upsert_session_in(db, data)
+            elif event_type == "session.delete":
+                canonical = data
+                del_id = data.get("id") or session_id
+                if del_id:
+                    row = db.execute(
+                        select(SessionRow).where(SessionRow.agent_id == agent_id, SessionRow.id == del_id)
+                    ).scalar_one_or_none()
+                    if row is not None:
+                        db.delete(row)
             elif event_type == "message.upsert":
                 canonical = self._upsert_message_in(db, data)
+            elif event_type == "task.upsert":
+                canonical = self._upsert_task_in(db, data)
             elif event_type == "command.upsert":
                 command_id = data.get("id")
                 row = db.execute(
@@ -592,6 +1130,45 @@ class Store:
             )
             return _event_wire(row)
 
+    def _upsert_task_in(self, db: Session, data: dict[str, Any]) -> dict[str, Any]:
+        row = db.execute(
+            select(TaskRow).where(
+                TaskRow.agent_id == data["agent_id"],
+                TaskRow.session_id == data["session_id"],
+                TaskRow.id == data["id"],
+            )
+        ).scalar_one_or_none()
+        created_at = data["created_at"]
+        updated_at = data["updated_at"]
+        if not isinstance(created_at, datetime):
+            created_at = parse_timestamp(str(created_at))
+        if not isinstance(updated_at, datetime):
+            updated_at = parse_timestamp(str(updated_at))
+        values = {
+            "kind": data["kind"],
+            "title": data.get("title", ""),
+            "status": data["status"],
+            "progress": data.get("progress"),
+            "command": data.get("command"),
+            "logs": list(data.get("logs", [])),
+            "target_id": data.get("target_id"),
+            "created_at": created_at,
+            "updated_at": updated_at,
+        }
+        if row is None:
+            row = TaskRow(
+                id=data["id"],
+                session_id=data["session_id"],
+                agent_id=data["agent_id"],
+                **values,
+            )
+            db.add(row)
+        else:
+            for key, value in values.items():
+                setattr(row, key, value)
+        db.flush()
+        return _task_wire(row)
+
     def _upsert_session_in(self, db: Session, data: dict[str, Any]) -> dict[str, Any]:
         row = db.execute(
             select(SessionRow).where(SessionRow.agent_id == data["agent_id"], SessionRow.id == data["id"])
@@ -606,22 +1183,44 @@ class Store:
                 title=data.get("title", ""),
                 workspace=data.get("workspace"),
                 status=data["status"],
+                source_id=data.get("source_id") or data["agent_id"],
+                connection_id=data.get("connection_id"),
+                source_session_id=data.get("source_session_id") or data["id"],
+                project_id=data.get("project_id"),
+                project_name=data.get("project_name"),
+                history_state=data.get("history_state", "local"),
+                control_state=data.get("control_state", "unknown"),
                 updated_at=updated_at,
             )
             db.add(row)
         else:
-            row.title = data.get("title", "")
-            row.workspace = data.get("workspace")
+            if data.get("title") and data["title"] != data["id"]:
+                row.title = data["title"]
+            if "workspace" in data and ("project_id" in data or not row.project_id):
+                row.workspace = data["workspace"]
             row.status = data["status"]
+            row.source_id = data.get("source_id") or row.source_id or data["agent_id"]
+            row.connection_id = data.get("connection_id")
+            row.source_session_id = data.get("source_session_id") or row.source_session_id or data["id"]
+            if "project_id" in data:
+                row.project_id = data["project_id"]
+            if "project_name" in data:
+                row.project_name = data["project_name"]
+            row.history_state = data.get("history_state", row.history_state or "local")
+            row.control_state = data.get("control_state", row.control_state or "unknown")
             row.updated_at = updated_at
         db.flush()
         return _session_wire(row)
 
     def _upsert_message_in(self, db: Session, data: dict[str, Any]) -> dict[str, Any]:
+        agent_id = data["agent_id"]
+        session_id = data["session_id"]
+        target_session_id = session_id
+
         row = db.execute(
             select(MessageRow).where(
-                MessageRow.agent_id == data["agent_id"],
-                MessageRow.session_id == data["session_id"],
+                MessageRow.agent_id == agent_id,
+                MessageRow.session_id == target_session_id,
                 MessageRow.id == data["id"],
             )
         ).scalar_one_or_none()
@@ -639,7 +1238,7 @@ class Store:
         }
         if row is None:
             row = MessageRow(
-                id=data["id"], session_id=data["session_id"], agent_id=data["agent_id"], **values
+                id=data["id"], session_id=target_session_id, agent_id=agent_id, **values
             )
             db.add(row)
         else:

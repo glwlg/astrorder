@@ -1,0 +1,16 @@
+.agents-page { max-width:none; min-width:0; }
+.agents-page .agent-section, .agents-page .runtime-section, .agents-page .connections-list-section, .agents-page .connection-toolbar, .agents-page .connection-table, .agents-page .route-heading { width:100%; max-width:none; }
+.agent-status-list .agent-card { padding:16px; box-shadow:none; }
+.agent-status-list .agent-card > .mantine-Stack-root { gap:10px; }
+.composer-card { border-radius:22px; }
+.composer-card .composer-input { flex:none; width:100%; }
+.composer-card .composer-input textarea { border:0; background:transparent; padding:8px 10px; box-shadow:none; }
+.composer-toolbar-spacer { flex:1; }
+.composer-row .session-model-control { max-width:60%; }
+.composer-row { min-height:36px; align-items:center; gap:8px; }
+.composer-row .attachment-button { width:36px; height:36px; padding:0; }
+.composer-row .session-model-control .mantine-Button-root { height:36px; padding:0 8px; background:transparent; color:var(--astr-text); font-size:13px; font-weight:500; }
+.composer-row .session-model-control .mantine-Button-inner { align-items:center; }
+.composer-row .session-model-control .mantine-Button-section { margin-inline:0; }
+.composer-row .session-model-control .mantine-Button-label { margin-inline:6px; line-height:20px; }
+.composer-card .send-button { background:var(--astr-text); color:var(--astr-surface); width:36px; height:36px; padding:0; flex-shrink:0; }

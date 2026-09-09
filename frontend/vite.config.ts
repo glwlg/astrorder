@@ -1,6 +1,8 @@
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vitest/config'
 
+const backendUrl = process.env.ASTRORDER_BACKEND_URL || 'http://127.0.0.1:30002'
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
@@ -9,9 +11,9 @@ export default defineConfig({
     port: 30001,
     strictPort: true,
     proxy: {
-      '/api': 'http://127.0.0.1:30002',
-      '/health': 'http://127.0.0.1:30002',
-      '/ws': { target: 'ws://127.0.0.1:30002', ws: true },
+      '/api': backendUrl,
+      '/health': backendUrl,
+      '/ws': { target: backendUrl.replace(/^http/, 'ws'), ws: true },
     },
   },
   test: {

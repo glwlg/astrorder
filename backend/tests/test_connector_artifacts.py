@@ -41,13 +41,41 @@ class FakeTransport:
         self.started = False
 
 
+def test_post_llm_does_not_reemit_user_input_after_reply():
+    transport = FakeTransport()
+    bridge = HermesBridge(FakeContext(), HermesConnectorConfig(
+        endpoint='ws://127.0.0.1:30002/ws/v1/connector', secret='test-only',
+        agent_id='hermes-test', agent_name='Hermes test'), transport=transport)
+    bridge._on_post_llm_call('session', '你好', '你好！')
+    rows = [e['data'] for e in transport.events if e['type'] == 'message.upsert']
+    assert [r['role'] for r in rows] == ['assistant']
+
+
+def test_stream_reasoning_and_tool_callbacks_emit_transcript_activity():
+    transport = FakeTransport()
+    bridge = HermesBridge(FakeContext(), HermesConnectorConfig(
+        endpoint='ws://127.0.0.1:30002/ws/v1/connector', secret='test-only',
+        agent_id='hermes-test', agent_name='Hermes test'), transport=transport)
+    bridge._on_stream_delta('session', turn_id='turn', delta='检查', kind='reasoning')
+    bridge._on_stream_delta('session', turn_id='turn', delta='数据', kind='reasoning')
+    bridge._on_pre_tool_call(session_id='session', tool_name='execute_code', tool_call_id='call')
+    bridge._on_post_tool_call(session_id='session', tool_name='execute_code', tool_call_id='call', result='done')
+    rows = [e['data'] for e in transport.events if e['type'] == 'message.upsert']
+    assert [r['kind'] for r in rows] == ['thinking', 'thinking', 'tool', 'tool']
+    assert rows[0]['id'] == rows[1]['id']
+    assert rows[1]['text'] == '检查数据'
+    assert rows[2]['id'] == rows[3]['id']
+    assert rows[3]['tool']['status'] == 'completed'
+    assert rows[3]['text'] == 'done'
+
+
 def test_hermes_public_hook_registration_and_text_command():
     context = FakeContext()
     transport = FakeTransport()
     bridge = HermesBridge(
         context,
         HermesConnectorConfig(
-            endpoint="ws://127.0.0.1:8765/ws/v1/connector",
+            endpoint="ws://127.0.0.1:30002/ws/v1/connector",
             secret="test-only",
             agent_id="hermes-test",
             agent_name="Hermes test",
@@ -62,9 +90,13 @@ def test_hermes_public_hook_registration_and_text_command():
         "on_stream_start",
         "on_stream_delta",
         "on_stream_end",
+        "pre_tool_call",
+        "post_tool_call",
+        "subagent_start",
+        "subagent_stop",
     }
     context.hooks["on_session_start"]("session-1", platform="cli")
-    assert transport.agent["capabilities"] == ["chat", "events"]
+    assert transport.agent["capabilities"] == ["chat", "events", "task_events"]
     assert any(event["type"] == "session.upsert" for event in transport.events)
     bridge._on_command(
         {
@@ -84,13 +116,34 @@ def test_hermes_public_hook_registration_and_text_command():
     assert updates[-1]["data"]["state"] == "accepted"
 
 
+def test_hermes_registers_a_connecting_agent_before_any_session_starts():
+    context = FakeContext()
+    transport = FakeTransport()
+
+    HermesBridge(
+        context,
+        HermesConnectorConfig(
+            endpoint="ws://127.0.0.1:30002/ws/v1/connector",
+            secret="test-only",
+            agent_id="hermes-test",
+            agent_name="Hermes test",
+        ),
+        transport=transport,
+    ).register()
+
+    assert transport.started is True
+    assert transport.agent["status"] == "connecting"
+    assert transport.agent["capabilities"] == ["chat", "events", "task_events"]
+    assert not any(event["type"] == "session.upsert" for event in transport.events)
+
+
 def test_hermes_does_not_claim_attachment_or_command_id_support():
     context = FakeContext()
     transport = FakeTransport()
     bridge = HermesBridge(
         context,
         HermesConnectorConfig(
-            endpoint="ws://127.0.0.1:8765/ws/v1/connector",
+            endpoint="ws://127.0.0.1:30002/ws/v1/connector",
             secret="test-only",
             agent_id="hermes-test",
             agent_name="Hermes test",
@@ -113,13 +166,47 @@ def test_hermes_does_not_claim_attachment_or_command_id_support():
     assert "attachment" in update["data"]["error"].lower()
 
 
+def test_hermes_emits_public_tool_and_subagent_task_events_without_scraping_output():
+    context = FakeContext()
+    transport = FakeTransport()
+    HermesBridge(
+        context,
+        HermesConnectorConfig(
+            endpoint="ws://127.0.0.1:30002/ws/v1/connector",
+            secret="test-only",
+            agent_id="hermes-test",
+            agent_name="Hermes test",
+        ),
+        transport=transport,
+    ).register()
+
+    context.hooks["pre_tool_call"](
+        tool_name="pytest", args={"command": "pytest -q"}, session_id="session-1", tool_call_id="tool-1"
+    )
+    context.hooks["post_tool_call"](
+        tool_name="pytest", result={"summary": "2 passed"}, session_id="session-1", tool_call_id="tool-1"
+    )
+    context.hooks["subagent_start"](
+        session_id="session-1", parent_turn_id="turn-1", child_session_id="child-1", child_role="reviewer", child_goal="review changes"
+    )
+    context.hooks["subagent_stop"](
+        session_id="session-1", parent_turn_id="turn-1", child_session_id="child-1", child_role="reviewer", child_status="completed", child_summary="done"
+    )
+
+    tasks = [event["data"] for event in transport.events if event["type"] == "task.upsert"]
+    assert [task["status"] for task in tasks[:2]] == ["running", "completed"]
+    assert tasks[0]["session_id"] == "session-1"
+    assert tasks[-1]["kind"] == "subagent"
+    assert "pytest" in tasks[0]["title"]
+
+
 def test_hermes_stream_coalesces_only_by_reliable_turn_id():
     context = FakeContext()
     transport = FakeTransport()
     bridge = HermesBridge(
         context,
         HermesConnectorConfig(
-            endpoint="ws://127.0.0.1:8765/ws/v1/connector",
+            endpoint="ws://127.0.0.1:30002/ws/v1/connector",
             secret="test-only",
             agent_id="hermes-test",
             agent_name="Hermes test",
@@ -181,7 +268,7 @@ def test_codex_companion_maps_app_server_stream_and_cancel():
     app_server = FakeAppServer()
     bridge = CodexBridge(
         CodexConnectorConfig(
-            endpoint="ws://127.0.0.1:8765/ws/v1/connector",
+            endpoint="ws://127.0.0.1:30002/ws/v1/connector",
             secret="test-only",
             agent_id="codex-test",
             agent_name="Codex test",

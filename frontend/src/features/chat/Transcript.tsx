@@ -1,8 +1,10 @@
 import { IconArrowDown, IconPaperclip, IconRefresh, IconTool } from '@tabler/icons-react'
-import { Anchor, Badge, Button, Group, Paper, Stack, Text } from '@mantine/core'
+import { Anchor, Button, Group, Paper, Stack, Text } from '@mantine/core'
 import type { Attachment, Message, OutboxEntry } from '../../domain/types'
 import { useStickToBottom } from '../../hooks/useStickToBottom'
 import { MarkdownContent } from '../../components/MarkdownContent'
+import { LazyDetails } from '../../components/LazyDetails'
+import { useOlderMessages } from '../../hooks/useOlderMessages'
 
 function attachmentHref(attachment: Attachment): string | undefined {
   try {
@@ -52,6 +54,15 @@ function messageLabel(message: Message): string {
 function MessageItem({ message }: { message: Message }) {
   const isUser = message.role === 'user'
   const isActivity = message.kind !== 'message' || message.role === 'tool'
+  if (isActivity) return (
+    <article className={`message-activity message-kind-${message.kind}`} data-testid={`message-${message.id}`}>
+      <LazyDetails className="activity-fold" summary={<>{messageLabel(message)}{message.tool?.status === 'running' ? ' · 运行中' : message.tool?.status === 'failed' ? ' · 失败' : ''}</>}>
+        {message.text && <MarkdownContent value={message.text} />}
+        {message.tool?.arguments != null && <pre className="tool-payload">{JSON.stringify(message.tool.arguments, null, 2)}</pre>}
+        <AttachmentList attachments={message.attachments} />
+      </LazyDetails>
+    </article>
+  )
   return (
     <article
       className={`message-row message-${message.role} message-kind-${message.kind}`}
@@ -60,7 +71,7 @@ function MessageItem({ message }: { message: Message }) {
     >
       <div className="message-meta">
         <span>{messageLabel(message)}</span>
-        <time dateTime={message.created_at}>{new Date(message.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</time>
+        {Date.parse(message.created_at) > 0 && <time dateTime={message.created_at}>{new Date(message.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</time>}
       </div>
       <Paper className={`message-bubble ${isUser ? 'message-bubble-user' : isActivity ? 'message-bubble-activity' : ''}`} withBorder={!isActivity} radius="lg" p="sm">
         {message.text && <MarkdownContent value={message.text} />}
@@ -70,42 +81,6 @@ function MessageItem({ message }: { message: Message }) {
         <AttachmentList attachments={message.attachments} />
       </Paper>
     </article>
-  )
-}
-
-const outboxStateLabels: Record<string, string> = {
-  submitting: '提交中',
-  received: '已收到',
-  queued: '已排队',
-  accepted: '已接受',
-  running: '执行中',
-  completed: '已完成',
-  failed: '失败',
-  unknown: '结果未知',
-  cancelled: '已取消',
-}
-
-function OutboxReceipt({ entry }: { entry: OutboxEntry }) {
-  const state = entry.status
-  const color = state === 'failed' ? 'red' : state === 'unknown' ? 'yellow' : state === 'completed' ? 'teal' : 'indigo'
-  return (
-    <Paper className="outbox-receipt" withBorder radius="md" p="sm" data-testid={`outbox-${entry.command.id}`}>
-      <Group justify="space-between" align="flex-start" gap="xs" wrap="nowrap">
-        <div className="outbox-copy">
-          <Text size="xs" fw={700}>发送记录 · {entry.command.text || '图片/附件'}</Text>
-          {entry.command.attachments.length > 0 && (
-            <Text size="xs" c="dimmed">{entry.command.attachments.map((item) => item.name).join('、')}</Text>
-          )}
-          {entry.error && <Text size="xs" c="red">{entry.error}</Text>}
-        </div>
-        <Badge color={color} variant="light">{outboxStateLabels[state] || state}</Badge>
-      </Group>
-      {state === 'unknown' && (
-        <Text className="outbox-help" size="xs" c="dimmed">
-          服务连接中断，未自动重发。请等待事件回放或明确再次提交。
-        </Text>
-      )}
-    </Paper>
   )
 }
 
@@ -126,8 +101,10 @@ export function Transcript({
   onRetry?: () => void
   hasMoreHistory?: boolean
   loadingOlder?: boolean
-  onLoadOlder?: () => void
+  onLoadOlder?: () => unknown
 }) {
+  const visibleMessages = messages.filter((message) => message.kind !== 'message' || message.role !== 'assistant' || message.text.trim() || message.attachments.length || message.tool)
+  const isActivity = (message: Message | null) => Boolean(message && (message.kind !== 'message' || message.role === 'tool'))
   const contentVersion = `${messages.map((item) => item.id).join(',')}|${outbox.map((item) => `${item.command.id}:${item.status}`).join(',')}`
   const {
     setContainerRef,
@@ -136,6 +113,7 @@ export function Transcript({
     scrollToBottom,
     capturePrependAnchor,
   } = useStickToBottom<HTMLDivElement>({ contentVersion })
+  const older = useOlderMessages({ hasMore: hasMoreHistory, loading: loadingOlder, load: () => onLoadOlder?.(), capture: capturePrependAnchor })
   return (
     <section className="transcript-wrap" aria-label="会话记录">
       {!following && (
@@ -153,7 +131,10 @@ export function Transcript({
       <div
         className="transcript"
         ref={setContainerRef}
-        onScroll={onScroll}
+        onScroll={event => { onScroll(); older.onScroll(event) }}
+        onWheel={older.onWheel}
+        onTouchStart={older.onTouchStart}
+        onTouchMove={older.onTouchMove}
         role="log"
         aria-live="polite"
         aria-relevant="additions text"
@@ -164,10 +145,7 @@ export function Transcript({
             size="compact-sm"
             variant="subtle"
             loading={loadingOlder}
-            onClick={() => {
-              capturePrependAnchor()
-              onLoadOlder?.()
-            }}
+            onClick={() => void older.request()}
           >
             {loadingOlder ? '正在读取更早记录…' : '读取更早记录'}
           </Button>
@@ -188,13 +166,34 @@ export function Transcript({
             <Text c="dimmed" size="xs">发送后，只有服务端确认的消息会进入正式记录。</Text>
           </Stack>
         )}
-        {messages.map((message) => <MessageItem key={message.id} message={message} />)}
-        {outbox.length > 0 && (
-          <div className="outbox-list" aria-label="发送记录">
-            <Text className="outbox-heading" size="xs" c="dimmed">发送记录（不等同于正式消息）</Text>
-            {outbox.map((entry) => <OutboxReceipt entry={entry} key={entry.command.id} />)}
-          </div>
-        )}
+        {visibleMessages.map((message, idx) => {
+          const prevMessage = idx > 0 ? visibleMessages[idx - 1] : null
+          if (isActivity(message)) {
+            if (isActivity(prevMessage)) return null
+            const pack: Message[] = []
+            for (let i = idx; i < visibleMessages.length && isActivity(visibleMessages[i]); i++) pack.push(visibleMessages[i])
+            return <section className="activity-pack" aria-label="思考与工具" key={message.id}>
+              <LazyDetails summary={`思考与工具 · ${pack.length} 项`}>
+                <div className="activity-timeline">{pack.map((item) => <MessageItem message={item} key={item.id} />)}</div>
+              </LazyDetails>
+            </section>
+          }
+          const currentDate = new Date(message.created_at).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
+          const prevDate = prevMessage ? new Date(prevMessage.created_at).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' }) : null
+          const showDateDivider = Date.parse(message.created_at) > 0 && currentDate !== prevDate
+          return (
+            <div key={message.id} style={{ display: 'contents' }}>
+              {showDateDivider && (
+                <div style={{ textAlign: 'center', margin: '14px 0 6px', width: '100%' }}>
+                  <span style={{ fontSize: '11px', color: 'var(--astr-muted)', background: 'var(--astr-surface-muted)', padding: '2px 10px', borderRadius: '10px' }}>
+                    {currentDate}
+                  </span>
+                </div>
+              )}
+              <MessageItem message={message} />
+            </div>
+          )
+        })}
       </div>
     </section>
   )

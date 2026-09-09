@@ -1,0 +1,15 @@
+name: astrorder-hermes
+version: "0.1.0"
+description: Astrorder's local Hermes lifecycle connector
+managed_by: astrorder
+requires_env:
+  - ASTRORDER_CONNECTOR_SECRET
+  - ASTRORDER_HERMES_AGENT_ID
+provides_hooks:
+  - on_session_start
+  - on_session_end
+  - on_session_finalize
+  - post_llm_call
+  - on_stream_start
+  - on_stream_delta
+  - on_stream_end

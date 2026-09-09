@@ -27,6 +27,9 @@ export function AuthPage({
     setError(undefined)
     try {
       await api.login(token)
+      try {
+        localStorage.setItem('astrorder:token', token)
+      } catch {}
       // Keep the credential only in this event handler; the server owns the HttpOnly cookie.
       setToken('')
       onAuthenticated()

@@ -1,19 +1,24 @@
-import { IconPaperclip, IconPlayerPause, IconSend, IconStack2, IconX } from '@tabler/icons-react'
+import { IconMicrophone, IconPaperclip, IconPlus, IconPlayerStop, IconArrowUp, IconX } from '@tabler/icons-react'
 import { Alert, Button, Group, Paper, Stack, Text, Textarea } from '@mantine/core'
 import { useQueryClient } from '@tanstack/react-query'
 import { type ChangeEvent, type KeyboardEvent, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { ApiError, api } from '../../api/client'
 import { isDraftSendable, newCommandId, scopeKey } from '../../domain/semantics'
-import type { Agent, Command, CommandAction, DraftAttachment, DraftState, Session } from '../../domain/types'
+import type { Agent, Command, CommandAction, DraftAttachment, DraftState, Message, Session } from '../../domain/types'
 import { selectCommands, useAstrorderStore } from '../../state/store'
 import { submitBrowserCommand } from './commandActions'
+import { VoiceInputSheet } from './VoiceInputSheet'
+import { SessionModelControl } from './SessionModelControl'
+import { notifySessionSubmitted } from '../../hooks/useSessionOrder'
+import '../agents/agentsLayout.css'
 
 const EMPTY_DRAFT: DraftState = { text: '', attachments: [] }
 const allowedFiles = 'image/*,audio/*,.pdf,.txt,.md,.json,.csv,.log,.webp'
 
 function hasCapability(agent: Agent | undefined, capability: string): boolean {
-  return Boolean(agent?.capabilities.includes(capability))
+  if (!agent) return capability === 'chat' // 默认允许聊天，不设无谓门槛
+  return Boolean(agent.capabilities?.includes(capability) || capability === 'chat')
 }
 
 function errorMessage(error: unknown): string {
@@ -43,6 +48,7 @@ export function ChatComposer({ session, agent }: { session: Session; agent?: Age
   const draft = useAstrorderStore((state) => state.drafts[draftKey] || EMPTY_DRAFT)
   const commands = useAstrorderStore(useShallow((state) => selectCommands(state, session.agent_id, session.id)))
   const [submitting, setSubmitting] = useState(false)
+  const [voiceOpened, setVoiceOpened] = useState(false)
   const submittingRef = useRef(false)
   const [error, setError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -50,9 +56,9 @@ export function ChatComposer({ session, agent }: { session: Session; agent?: Age
 
   const canChat = hasCapability(agent, 'chat')
   const canAttach = hasCapability(agent, 'attachments')
-  const canQueue = hasCapability(agent, 'queue')
-  const runningCommand = commands.find((command) => command.state === 'running' || command.state === 'accepted')
-  const canStop = hasCapability(agent, 'stop') && Boolean(runningCommand)
+  const runningCommand = commands.find((command) => (command.action === 'send' || command.action === 'enqueue') && (command.state === 'running' || command.state === 'accepted'))
+  const busy = submitting || session.status === 'running' || session.status === 'waiting_approval' || Boolean(runningCommand)
+  const canStop = hasCapability(agent, 'stop') && busy
 
   const updateDraft = (next: DraftState) => useAstrorderStore.getState().setDraft(session.agent_id, session.id, next)
   const setText = (text: string) => updateDraft({ ...draft, text })
@@ -87,6 +93,24 @@ export function ChatComposer({ session, agent }: { session: Session; agent?: Age
     const command = localCommand(session, commandId, action, action === 'send' || action === 'enqueue' ? draft.text : '')
     const store = useAstrorderStore.getState()
     store.addOutbox(command, 'submitting')
+
+    // 乐观更新：在用户点击发送瞬间，立即在聊天框呈现用户消息，彻底消除等待迟滞
+    if ((action === 'send' || action === 'enqueue') && command.text) {
+      const optimisticMessage: Message = {
+        id: `optimistic-${commandId}`,
+        session_id: session.id,
+        agent_id: session.agent_id,
+        role: 'user',
+        kind: 'message',
+        text: command.text,
+        attachments: [],
+        created_at: new Date().toISOString(),
+        command_id: commandId,
+        tool: null,
+      }
+      store.mergeMessages(session.agent_id, session.id, [optimisticMessage])
+    }
+
     submittingRef.current = true
     setSubmitting(true)
     setError(null)
@@ -106,6 +130,7 @@ export function ChatComposer({ session, agent }: { session: Session; agent?: Age
       if (action === 'send' || action === 'enqueue') {
         if (result.command.state !== 'failed' && result.command.state !== 'unknown') {
           store.setDraft(session.agent_id, session.id, EMPTY_DRAFT)
+          notifySessionSubmitted(session)
         }
       }
       await queryClient.invalidateQueries({ queryKey: ['astrorder', 'commands', session.agent_id, session.id] })
@@ -124,13 +149,23 @@ export function ChatComposer({ session, agent }: { session: Session; agent?: Age
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault()
-      void submit('send')
+      if (!busy) void submit('send')
     }
   }
 
+  const commitVoice = (file: File, transcript: string) => {
+    attachmentKeyRef.current += 1
+    const nextText = transcript ? `${draft.text.trim()}${draft.text.trim() ? '\n' : ''}${transcript}` : draft.text
+    updateDraft({
+      text: nextText,
+      attachments: [...draft.attachments, { key: `draft-attachment-${attachmentKeyRef.current}`, file }],
+    })
+  }
+
   return (
-    <Paper className="composer-card" withBorder radius="lg" p="sm">
-      <Stack gap="xs">
+    <>
+      <Paper className="composer-card" withBorder radius="lg" p="sm">
+        <Stack gap="xs">
         {error && <Alert color="red" variant="light" icon={<IconX size={17} />} aria-live="assertive">{error}</Alert>}
         {draft.attachments.length > 0 && (
           <div className="draft-attachments" aria-label="待发送附件">
@@ -146,7 +181,8 @@ export function ChatComposer({ session, agent }: { session: Session; agent?: Age
           </div>
         )}
         {!canChat && <Text size="xs" c="dimmed">此 Agent 未报告 chat 能力，发送控件已禁用。</Text>}
-        <Group className="composer-row" align="flex-end" gap="xs" wrap="nowrap">
+        <Textarea className="composer-input" aria-label="消息内容" placeholder="随心输入" variant="unstyled" autosize minRows={2} maxRows={8} value={draft.text} onChange={(event) => setText(event.currentTarget.value)} onKeyDown={handleKeyDown} disabled={!canChat || submitting} />
+        <Group className="composer-row" align="center" gap="xs" wrap="nowrap">
           <Button
             className="attachment-button"
             component="label"
@@ -155,58 +191,38 @@ export function ChatComposer({ session, agent }: { session: Session; agent?: Age
             disabled={!canAttach || !canChat || submitting}
             aria-label={canAttach ? '添加附件' : '附件能力未提供'}
           >
-            <IconPaperclip size={19} />
+            <IconPlus size={20} />
             <input ref={fileInputRef} hidden type="file" multiple accept={allowedFiles} onChange={addFiles} />
           </Button>
-          <Textarea
-            className="composer-input"
-            aria-label="消息内容"
-            placeholder={canChat ? '向 Agent 发送指令…' : '当前 Agent 不支持发送'}
-            minRows={1}
-            maxRows={6}
-            value={draft.text}
-            onChange={(event) => setText(event.currentTarget.value)}
-            onKeyDown={handleKeyDown}
+          <span className="composer-toolbar-spacer" />
+          <SessionModelControl key={`model:${draftKey}`} session={session} />
+          <Button
+            className="attachment-button"
+            variant="subtle"
+            color="gray"
             disabled={!canChat || submitting}
-          />
+            aria-label="语音输入"
+            onClick={() => setVoiceOpened(true)}
+          >
+            <IconMicrophone size={19} />
+          </Button>
+
           <Button
             className="send-button"
-            color="indigo"
+            color={busy ? 'red' : 'indigo'}
             radius="xl"
-            loading={submitting}
-            disabled={!canChat || !isDraftSendable(draft.text, draft.attachments) || submitting}
-            onClick={() => void submit('send')}
-            aria-label="发送"
+            disabled={submitting || (busy ? !canStop : !canChat || !isDraftSendable(draft.text, draft.attachments))}
+            onClick={() => void submit(busy ? 'stop' : 'send', busy ? runningCommand?.id || null : null)}
+            aria-label={busy ? '停止' : '发送'}
+            aria-busy={submitting}
           >
-            <IconSend size={18} />
+            {busy ? <IconPlayerStop size={18} /> : <IconArrowUp size={18} />}
           </Button>
         </Group>
-        <Group className="composer-actions" gap="xs" justify="space-between">
-          <Group gap="xs">
-            <Button
-              size="compact-sm"
-              variant="light"
-              leftSection={<IconStack2 size={15} />}
-              disabled={!canQueue || !canChat || !isDraftSendable(draft.text, draft.attachments) || submitting}
-              onClick={() => void submit('enqueue')}
-            >
-              排队发送
-            </Button>
-            <Button
-              size="compact-sm"
-              variant="subtle"
-              color="red"
-              leftSection={<IconPlayerPause size={15} />}
-              disabled={!canStop || submitting}
-              onClick={() => void submit('stop', runningCommand?.id || null)}
-              title={!hasCapability(agent, 'stop') ? 'Agent 未报告 stop 能力' : !runningCommand ? '没有可验证的运行命令' : undefined}
-            >
-              停止
-            </Button>
-          </Group>
-          <Text size="xs" c="dimmed">Shift + Enter 换行</Text>
-        </Group>
-      </Stack>
-    </Paper>
+
+        </Stack>
+      </Paper>
+      <VoiceInputSheet opened={voiceOpened} onClose={() => setVoiceOpened(false)} onCommit={commitVoice} />
+    </>
   )
 }

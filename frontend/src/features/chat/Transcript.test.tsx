@@ -1,6 +1,7 @@
 import { MantineProvider } from '@mantine/core'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+afterEach(cleanup)
 import type { Message } from '../../domain/types'
 import { Transcript } from './Transcript'
 
@@ -18,6 +19,25 @@ const message: Message = {
 }
 
 describe('transcript follow mode', () => {
+  it('groups reasoning and tools into folds and hides empty assistant bubbles', () => {
+    render(<MantineProvider><Transcript outbox={[]} messages={[
+      { ...message, id: 'thinking', kind: 'thinking', text: '检查数据' },
+      { ...message, id: 'tool', kind: 'tool', role: 'tool', text: '工具结果', tool: { name: 'execute_code', arguments: { code: 'print(1)' } } },
+      { ...message, id: 'empty', text: '' },
+      { ...message, id: 'answer', text: '最终答复' },
+    ]} /></MantineProvider>)
+    const pack = screen.getByRole('region', { name: '思考与工具' })
+    expect(pack.querySelectorAll('details')).toHaveLength(1)
+    expect(pack.querySelector('details')).not.toHaveAttribute('open')
+    expect(screen.queryByText('工具 · execute_code')).not.toBeInTheDocument()
+    fireEvent.click(pack.querySelector('summary')!)
+    expect(pack.querySelectorAll('.activity-fold')).toHaveLength(2)
+    expect(screen.queryByText('检查数据')).not.toBeInTheDocument()
+    expect(screen.getByText('工具 · execute_code')).toBeInTheDocument()
+    expect(screen.queryByTestId('message-empty')).not.toBeInTheDocument()
+    expect(screen.getByText('最终答复')).toBeInTheDocument()
+  })
+
   it('pauses only after a real scroll away from the bottom and resumes manually', async () => {
     render(
       <MantineProvider>

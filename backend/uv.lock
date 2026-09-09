@@ -43,11 +43,23 @@ wheels = [
 ]
 
 [[package]]
+name = "astrorder-codex-connector"
+version = "0.1.0"
+source = { editable = "../connectors/codex" }
+dependencies = [
+    { name = "websockets" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "websockets", specifier = ">=13" }]
+
+[[package]]
 name = "astrorder-server"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },
+    { name = "astrorder-codex-connector" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "pydantic-settings" },
@@ -67,6 +79,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "aiosqlite" },
+    { name = "astrorder-codex-connector", editable = "../connectors/codex" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "pydantic-settings" },

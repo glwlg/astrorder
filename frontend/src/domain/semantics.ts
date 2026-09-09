@@ -4,11 +4,24 @@ export function scopeKey(agentId: string, sessionId: string): string {
   return `${agentId}::${sessionId}`
 }
 
-export function mergeMessagesById<T extends { id: string }>(existing: T[], incoming: T[]): T[] {
+export function mergeMessagesById<T extends { id: string; role?: string; text?: string; command_id?: string | null }>(existing: T[], incoming: T[]): T[] {
   const result = [...existing]
   const positions = new Map(result.map((item, index) => [item.id, index]))
 
   for (const item of incoming) {
+    // Only a correlated command can replace its optimistic projection.
+    if (!positions.has(item.id) && item.role === 'user' && !item.id.startsWith('optimistic-') && item.command_id) {
+      const optimisticIdx = result.findIndex(
+        (m) => m.id.startsWith('optimistic-') && m.role === 'user' && m.command_id === item.command_id,
+      )
+      if (optimisticIdx !== -1) {
+        positions.delete(result[optimisticIdx].id)
+        positions.set(item.id, optimisticIdx)
+        result[optimisticIdx] = item
+        continue
+      }
+    }
+
     const position = positions.get(item.id)
     if (position === undefined) {
       positions.set(item.id, result.length)

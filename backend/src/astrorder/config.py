@@ -6,10 +6,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 DEFAULT_ORIGINS = (
-    "http://127.0.0.1:8765",
-    "http://localhost:8765",
-    "http://127.0.0.1:5173",
-    "http://localhost:5173",
+    "http://127.0.0.1:30001",
+    "http://localhost:30001",
+    "http://127.0.0.1:30002",
+    "http://localhost:30002",
 )
 DEFAULT_ATTACHMENT_TYPES = (
     "application/json",
@@ -51,7 +51,7 @@ class Settings:
     """
 
     host: str = "127.0.0.1"
-    port: int = 8765
+    port: int = 30002
     database_url: str = "sqlite:///./astrorder.sqlite3"
     browser_secret: str | None = None
     connector_secret: str | None = None
@@ -65,6 +65,8 @@ class Settings:
     launch_enabled: bool = False
     hermes_executable: str | None = None
     codex_executable: str | None = None
+    auto_connect_local_hermes: bool = True
+    max_ssh_connections: int = 32
 
     def __post_init__(self) -> None:
         if not 1 <= self.port <= 65535:
@@ -73,6 +75,8 @@ class Settings:
             raise ValueError("max_attachment_size must be positive")
         if self.event_retention < 1:
             raise ValueError("event_retention must be positive")
+        if self.max_ssh_connections < 1:
+            raise ValueError("max_ssh_connections must be positive")
         if not self.database_url.startswith("sqlite"):
             raise ValueError("database_url must use SQLite")
         object.__setattr__(self, "attachments_dir", Path(self.attachments_dir))
@@ -98,12 +102,50 @@ class Settings:
         env = os.environ
         workspaces = _csv(env.get("ASTRORDER_ALLOWED_WORKSPACES"), ())
         static_value = env.get("ASTRORDER_STATIC_DIR")
+        browser_secret = env.get("ASTRORDER_BROWSER_SECRET") or env.get("ASTRORDER_SECRET")
+        if not browser_secret:
+            token_candidates = (
+                Path(".token"),
+                Path(__file__).resolve().parent.parent.parent.parent / ".token",
+                Path(__file__).resolve().parent.parent.parent / ".token",
+            )
+            for c in token_candidates:
+                if c.is_file():
+                    content = c.read_text(encoding="utf-8").strip()
+                    if content:
+                        browser_secret = content
+                        break
+            if not browser_secret:
+                import secrets
+                browser_secret = secrets.token_urlsafe(24)
+                target_file = token_candidates[1] if token_candidates[1].parent.is_dir() else token_candidates[0]
+                target_file.write_text(browser_secret, encoding="utf-8")
+
+        connector_secret = env.get("ASTRORDER_CONNECTOR_SECRET")
+        if not connector_secret:
+            conn_token_candidates = (
+                Path(".connector_token"),
+                Path(__file__).resolve().parent.parent.parent.parent / ".connector_token",
+                Path(__file__).resolve().parent.parent.parent / ".connector_token",
+            )
+            for c in conn_token_candidates:
+                if c.is_file():
+                    content = c.read_text(encoding="utf-8").strip()
+                    if content:
+                        connector_secret = content
+                        break
+            if not connector_secret:
+                import secrets
+                connector_secret = secrets.token_urlsafe(24)
+                target_file = conn_token_candidates[1] if conn_token_candidates[1].parent.is_dir() else conn_token_candidates[0]
+                target_file.write_text(connector_secret, encoding="utf-8")
+
         return cls(
             host=env.get("ASTRORDER_HOST", "127.0.0.1"),
-            port=_int(env.get("ASTRORDER_PORT"), 8765),
+            port=_int(env.get("ASTRORDER_PORT"), 30002),
             database_url=env.get("ASTRORDER_DATABASE_URL", "sqlite:///./astrorder.sqlite3"),
-            browser_secret=env.get("ASTRORDER_BROWSER_SECRET") or env.get("ASTRORDER_SECRET"),
-            connector_secret=env.get("ASTRORDER_CONNECTOR_SECRET"),
+            browser_secret=browser_secret,
+            connector_secret=connector_secret,
             attachments_dir=Path(env.get("ASTRORDER_ATTACHMENTS_DIR", "data/attachments")),
             static_dir=Path(static_value) if static_value else None,
             allowed_origins=_csv(env.get("ASTRORDER_ALLOWED_ORIGINS"), DEFAULT_ORIGINS),
@@ -118,4 +160,14 @@ class Settings:
             launch_enabled=_bool(env.get("ASTRORDER_ENABLE_LAUNCH")),
             hermes_executable=env.get("ASTRORDER_HERMES_EXECUTABLE") or None,
             codex_executable=env.get("ASTRORDER_CODEX_EXECUTABLE") or None,
+            auto_connect_local_hermes=_bool(env.get("ASTRORDER_AUTO_CONNECT_LOCAL_HERMES", "1")),
+            max_ssh_connections=_int(env.get("ASTRORDER_MAX_SSH_CONNECTIONS"), 32),
         )
+
+    def connector_endpoint(self) -> str:
+        host = self.host
+        if host in {"", "0.0.0.0", "::"}:
+            host = "127.0.0.1"
+        if ":" in host and not host.startswith("["):
+            host = f"[{host}]"
+        return f"ws://{host}:{self.port}/ws/v1/connector"

@@ -31,14 +31,40 @@ export interface Agent {
   status: AgentStatus
   capabilities: string[]
   limitation: string | null
+  source_id?: string
+  connection_id?: string | null
+  profile_name?: string | null
+  runtime_id?: string
 }
 
 export interface Session {
+  native_kind?: string | null
+  is_open?: boolean
   id: string
   agent_id: string
   title: string
   workspace: string | null
   status: SessionStatus
+  updated_at: string
+  source_id?: string
+  connection_id?: string | null
+  source_session_id?: string
+  project_id?: string | null
+  project_name?: string | null
+  history_state?: string
+  control_state?: string
+}
+
+export interface Project {
+  id: string
+  source_id: string
+  connection_id?: string | null
+  agent_id?: string | null
+  profile_name?: string | null
+  project_id: string
+  project_name?: string | null
+  workspace?: string | null
+  session_count: number
   updated_at: string
 }
 
@@ -85,6 +111,31 @@ export interface CommandPayload {
   target_id: string | null
 }
 
+export type TaskKind = 'background' | 'todo' | 'subagent' | 'tool'
+export type TaskStatus = 'pending' | 'running' | 'waiting_approval' | 'completed' | 'failed' | 'cancelled' | 'unknown'
+
+export interface TaskLog {
+  id: string
+  text: string
+  level: string
+  created_at: string
+}
+
+export interface Task {
+  id: string
+  session_id: string
+  agent_id: string
+  kind: TaskKind
+  title: string
+  status: TaskStatus
+  progress: Record<string, unknown> | null
+  command: string | null
+  logs: TaskLog[]
+  target_id: string | null
+  created_at: string
+  updated_at: string
+}
+
 export interface EventEnvelope {
   id: string
   cursor: number
@@ -97,7 +148,9 @@ export interface EventEnvelope {
 export interface BootstrapPayload {
   protocol_version: number
   agents: Agent[]
+  projects?: Project[]
   sessions: Session[]
+  tasks?: Task[]
   cursor: number
 }
 
@@ -112,6 +165,18 @@ export interface Approval {
   data: Record<string, unknown>
 }
 
+export type EventNotificationKind = 'task_completed' | 'task_failed' | 'approval_pending'
+
+export interface EventNotification {
+  key: string
+  kind: EventNotificationKind
+  title: string
+  message: string
+  agent_id: string
+  session_id: string
+  created_at: string
+}
+
 export interface RuntimeItem {
   kind: string
   available: boolean
@@ -121,6 +186,74 @@ export interface RuntimeItem {
 
 export interface RuntimePayload {
   items: RuntimeItem[]
+}
+
+export type LocalHermesConnectionState =
+  | 'discovered'
+  | 'installed'
+  | 'connecting'
+  | 'connected'
+  | 'offline'
+  | 'error'
+
+export interface LocalHermesConnection {
+  kind: 'hermes'
+  state: LocalHermesConnectionState
+  available: boolean
+  version: string | null
+  agent_id: string | null
+  source_id?: string
+  profile_name?: string
+  runtime_id?: string | null
+  session_id: string | null
+  detail: string
+}
+
+export interface SshConnectionSettings {
+  connection_id?: string | null
+  display_name?: string | null
+  profile_name?: string | null
+  host: string | null
+  port: number
+  user: string | null
+  ssh_config_alias: string | null
+  identity_file: string | null
+  hermes_path: string | null
+  workspace: string | null
+}
+
+export interface ConnectionHistoryEntry {
+  id: string
+  connection_id: string
+  stage: string
+  state: string
+  detail: string
+  details: Record<string, unknown>
+  created_at: string
+}
+
+export interface SshConnection {
+  id: string
+  display_name: string
+  profile_name: string
+  state: 'unconfigured' | 'configured' | 'validated' | 'connecting' | 'connected' | 'disconnected' | 'error'
+  settings: SshConnectionSettings | null
+  detail: string
+  remote_os: string | null
+  agent_id: string | null
+  runtime_id: string | null
+}
+
+export interface SshConnectionsCollection {
+  items: SshConnection[]
+  state: SshConnection['state']
+  settings: SshConnectionSettings | null
+  detail: string
+}
+
+export interface ConnectionsPayload {
+  local: LocalHermesConnection
+  ssh: SshConnectionsCollection
 }
 
 export interface AuthSession {

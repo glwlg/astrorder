@@ -9,7 +9,7 @@ npm install
 npm run dev
 ```
 
-Vite 会把 `/api` 和 `/ws` 代理到 `127.0.0.1:8765`。生产构建：
+Vite 固定在 `127.0.0.1:30001`，并把 `/api`、`/health` 和 `/ws` 代理到 `127.0.0.1:30002`。生产构建：
 
 ```text
 npm run test
@@ -27,4 +27,4 @@ npm run build
 
 ## 集成浏览器测试
 
-`npm run test:e2e` 使用 `playwright.config.ts` 启动 Vite；FastAPI 需要另行运行。设置 `ASTRORDER_E2E_TOKEN` 只适用于隔离的认证环境，设置 `ASTRORDER_E2E_NO_SERVER=1` 可连接已经运行的前端服务。
+`npm run test:e2e` 默认连接显式的 `ASTRORDER_E2E_BASE_URL`；仅 `ASTRORDER_E2E_START_DEV_SERVER=1` 时启动 Vite（端口 30001）。FastAPI 需要另行运行。设置 `ASTRORDER_E2E_TOKEN` 只适用于隔离的认证环境。

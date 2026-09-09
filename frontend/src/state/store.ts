@@ -9,18 +9,24 @@ import type {
   ConnectionStatus,
   DraftState,
   EventEnvelope,
+  EventNotification,
   Message,
   OutboxEntry,
   OutboxStatus,
+  Project,
   Session,
+  Task,
 } from '../domain/types'
 
 export interface AstrorderStore {
   agents: Record<string, Agent>
+  projects: Record<string, Project>
   sessions: Record<string, Session>
   messages: Record<string, Record<string, Message>>
   commands: Record<string, Command>
+  tasks: Record<string, Task>
   approvals: Record<string, Approval>
+  notifications: Record<string, EventNotification>
   outbox: Record<string, OutboxEntry>
   drafts: Record<string, DraftState>
   cursor: number
@@ -32,6 +38,8 @@ export interface AstrorderStore {
   mergeMessages: (agentId: string, sessionId: string, items: Message[]) => void
   mergeMessagesPrepend: (agentId: string, sessionId: string, items: Message[]) => void
   mergeCommands: (items: Command[]) => void
+  mergeTasks: (items: Task[]) => void
+  addNotification: (notification: EventNotification) => boolean
   addOutbox: (command: Command, status?: OutboxStatus) => void
   updateOutboxAttachments: (
     agentId: string,
@@ -58,6 +66,10 @@ function commandKey(command: Command): string {
   return scopeKey(command.agent_id, command.session_id) + `::${command.id}`
 }
 
+function taskKey(task: Task): string {
+  return scopeKey(task.agent_id, task.session_id) + `::${task.id}`
+}
+
 function messageMap(items: Message[]): Record<string, Message> {
   return Object.fromEntries(items.map((item) => [item.id, item]))
 }
@@ -68,6 +80,8 @@ function mergeCommandIntoState(
 ): Pick<AstrorderStore, 'commands' | 'outbox'> {
   const key = commandKey(incoming)
   const current = state.commands[key]
+  const terminal = (value: Command['state']) => ['completed', 'failed', 'cancelled'].includes(value)
+  if (current && terminal(current.state) && !terminal(incoming.state)) return { commands: state.commands, outbox: state.outbox }
   const command = current ? { ...current, ...incoming } : incoming
   const commands = { ...state.commands, [key]: command }
   const outboxKey = commandKey(incoming)
@@ -129,10 +143,13 @@ function normalizeApproval(event: EventEnvelope): Approval | null {
 
 export const useAstrorderStore = create<AstrorderStore>((set) => ({
   agents: {},
+  projects: {},
   sessions: {},
   messages: {},
   commands: {},
+  tasks: {},
   approvals: {},
+  notifications: {},
   outbox: {},
   drafts: {},
   cursor: 0,
@@ -144,15 +161,21 @@ export const useAstrorderStore = create<AstrorderStore>((set) => ({
 
   hydrateBootstrap: (payload) =>
     set((state) => {
-      const agents = { ...state.agents }
+      const agents: Record<string, Agent> = {}
       for (const agent of payload.agents) agents[agent.id] = agent
-      const sessions = { ...state.sessions }
+      const projects: Record<string, Project> = {}
+      for (const project of payload.projects || []) projects[project.id] = project
+      const sessions: Record<string, Session> = {}
       for (const session of payload.sessions) {
         sessions[scopeKey(session.agent_id, session.id)] = session
       }
+      const tasks: Record<string, Task> = {}
+      for (const task of payload.tasks || []) tasks[taskKey(task)] = task
       return {
         agents,
+        projects,
         sessions,
+        tasks,
         // A delayed or old snapshot may never move the cursor backwards.
         cursor: Math.max(state.cursor, payload.cursor),
         resyncRequired: false,
@@ -196,6 +219,23 @@ export const useAstrorderStore = create<AstrorderStore>((set) => ({
       }
       return next
     }),
+
+  mergeTasks: (items) =>
+    set((state) => {
+      const tasks = { ...state.tasks }
+      for (const task of items) tasks[taskKey(task)] = { ...tasks[taskKey(task)], ...task }
+      return { tasks }
+    }),
+
+  addNotification: (notification) => {
+    let added = false
+    set((state) => {
+      if (state.notifications[notification.key]) return state
+      added = true
+      return { notifications: { ...state.notifications, [notification.key]: notification } }
+    })
+    return added
+  },
 
   addOutbox: (command, status = command.state) =>
     set((state) => ({
@@ -254,11 +294,28 @@ export const useAstrorderStore = create<AstrorderStore>((set) => ({
         return { ...base, agents: { ...state.agents, [agent.id]: agent } }
       }
 
+      if (event.type === 'project.upsert') {
+        const project = event.data as unknown as Project
+        if (!project.id || !project.source_id || !project.project_id) return base
+        return { ...base, projects: { ...state.projects, [project.id]: project } }
+      }
+
       if (event.type === 'session.upsert') {
         const session = event.data as unknown as Session
         if (!session.id || !session.agent_id) return base
         const key = scopeKey(session.agent_id, session.id)
         return { ...base, sessions: { ...state.sessions, [key]: session } }
+      }
+
+      if (event.type === 'session.delete') {
+        const data = event.data as { id?: string; agent_id?: string }
+        const delSessionId = data?.id || event.session_id
+        const delAgentId = data?.agent_id || event.agent_id
+        if (!delSessionId || !delAgentId) return base
+        const key = scopeKey(delAgentId, delSessionId)
+        const nextSessions = { ...state.sessions }
+        delete nextSessions[key]
+        return { ...base, sessions: nextSessions }
       }
 
       if (event.type === 'message.upsert') {
@@ -275,6 +332,13 @@ export const useAstrorderStore = create<AstrorderStore>((set) => ({
         if (!command.id || !command.session_id || !command.agent_id) return base
         const next = mergeCommandIntoState({ ...state, ...base }, command)
         return { ...base, ...next }
+      }
+
+      if (event.type === 'task.upsert') {
+        const task = event.data as unknown as Task
+        if (!task.id || !task.session_id || !task.agent_id) return base
+        const key = taskKey(task)
+        return { ...base, tasks: { ...state.tasks, [key]: { ...state.tasks[key], ...task } } }
       }
 
       if (event.type === 'approval.upsert') {
@@ -299,10 +363,13 @@ export const useAstrorderStore = create<AstrorderStore>((set) => ({
   resetRuntime: () =>
     set({
       agents: {},
+      projects: {},
       sessions: {},
       messages: {},
       commands: {},
+      tasks: {},
       approvals: {},
+      notifications: {},
       outbox: {},
       drafts: {},
       cursor: 0,
@@ -316,6 +383,12 @@ export function selectSessions(state: AstrorderStore): Session[] {
   return Object.values(state.sessions).sort((a, b) => b.updated_at.localeCompare(a.updated_at))
 }
 
+export function selectProjects(state: AstrorderStore): Project[] {
+  return Object.values(state.projects).sort(
+    (a, b) => b.updated_at.localeCompare(a.updated_at) || (a.project_name || '').localeCompare(b.project_name || '') || a.id.localeCompare(b.id),
+  )
+}
+
 export function selectMessages(state: AstrorderStore, agentId: string, sessionId: string): Message[] {
   return Object.values(state.messages[scopeKey(agentId, sessionId)] || {})
 }
@@ -324,6 +397,12 @@ export function selectCommands(state: AstrorderStore, agentId: string, sessionId
   return Object.values(state.commands).filter(
     (command) => command.agent_id === agentId && command.session_id === sessionId,
   )
+}
+
+export function selectTasks(state: AstrorderStore, agentId: string, sessionId: string): Task[] {
+  return Object.values(state.tasks)
+    .filter((task) => task.agent_id === agentId && task.session_id === sessionId)
+    .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
 }
 
 export function selectOutbox(state: AstrorderStore, agentId: string, sessionId: string): OutboxEntry[] {

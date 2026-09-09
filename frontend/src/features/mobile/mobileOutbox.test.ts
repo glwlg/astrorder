@@ -1,0 +1,112 @@
+import { describe, expect, it, vi } from 'vitest'
+import type { Command, CommandPayload } from '../../domain/types'
+import { MobileOutbox, type OutboxEntry } from './mobileOutbox'
+
+const payload = (id: string): CommandPayload => ({ id, agent_id: 'agent', session_id: 'native', action: 'send', text: 'same text', attachment_ids: [], target_id: null })
+const receipt = (p: CommandPayload, state: Command['state']): Command => ({ ...p, state, attachments: [], created_at: '2026-09-08T00:00:00Z', error: null })
+
+describe('durable mobile outbox (inert transport)', () => {
+  it('halts behind a rejected entry instead of silently skipping to a later turn', async () => {
+    const send = vi.fn(async (p: CommandPayload) => receipt(p, 'failed'))
+    const outbox = new MobileOutbox({ load: async () => [], save: async () => {} }, { send, upload: vi.fn() })
+    await outbox.enqueue(payload('rejected-first'), [])
+    await outbox.enqueue(payload('must-wait'), [])
+    await outbox.flush('agent', 'native')
+    await outbox.flush('agent', 'native')
+    expect(send).toHaveBeenCalledTimes(1)
+    expect(outbox.entries[1].state).toBe('queued')
+  })
+  it('does not clear or submit anything when durable storage rejects the write', async () => {
+    const send = vi.fn()
+    const outbox = new MobileOutbox({ load: async () => [], save: async () => { throw new Error('quota') } }, { send, upload: vi.fn() })
+    await expect(outbox.enqueue(payload('must-stay-in-composer'), [])).rejects.toThrow('quota')
+    expect(outbox.entries).toEqual([])
+    expect(send).not.toHaveBeenCalled()
+  })
+  it('retires an accepted native turn only after observing running then idle', async () => {
+    const outbox = new MobileOutbox({ load: async () => [], save: async () => {} }, { send: async p => receipt(p, 'accepted'), upload: vi.fn() })
+    const session = { id: 'native', agent_id: 'agent', title: 'inert', workspace: null, updated_at: '2026-09-08T00:00:00Z' }
+    await outbox.load()
+    await outbox.enqueue(payload('turn'), [])
+    await outbox.flush('agent', 'native')
+    await outbox.reconcile([], [{ ...session, status: 'idle' }])
+    expect(outbox.entries).toHaveLength(1)
+    await outbox.reconcile([], [{ ...session, status: 'running' }])
+    await outbox.reconcile([], [{ ...session, status: 'idle' }])
+    expect(outbox.entries).toEqual([])
+  })
+  it('cancels only local queued entries and retries only confirmed failures with a new ID', async () => {
+    const send = vi.fn(async (p: CommandPayload) => receipt(p, 'failed'))
+    const outbox = new MobileOutbox({ load: async () => [], save: async () => {} }, { send, upload: vi.fn() })
+    await outbox.load()
+    await outbox.enqueue(payload('draft'), [])
+    await outbox.remove('agent', 'native', 'draft')
+    expect(outbox.entries).toEqual([])
+    await outbox.enqueue(payload('rejected'), [])
+    await outbox.flush('agent', 'native')
+    await outbox.retry('agent', 'native', 'rejected')
+    expect(outbox.entries[0].payload.id).not.toBe('rejected')
+    expect(outbox.entries[0].state).toBe('queued')
+    expect(send).toHaveBeenCalledTimes(1)
+  })
+  it('persists offline files and quote text, then uploads before submitting their IDs', async () => {
+    let stored: OutboxEntry[] = []
+    const storage = { load: async () => stored, save: async (rows: OutboxEntry[]) => { stored = rows } }
+    const file = new File(['offline file'], 'note.txt', { type: 'text/plain' })
+    const upload = vi.fn(async () => ({ id: 'uploaded', name: file.name, media_type: file.type, url: '/api/v1/attachments/uploaded' }))
+    const send = vi.fn(async (p: CommandPayload) => {
+      expect(p.attachment_ids).toEqual(['uploaded'])
+      expect(p.text).toBe('> quoted\n\nreply')
+      return receipt(p, 'accepted')
+    })
+    const first = new MobileOutbox(storage, { send, upload })
+    await first.load()
+    await first.enqueue({ ...payload('with-file'), text: '> quoted\n\nreply' }, [file])
+    expect(upload).not.toHaveBeenCalled()
+    expect(stored[0].files[0].name).toBe('note.txt')
+    const second = new MobileOutbox(storage, { send, upload })
+    await second.load()
+    await second.flush('agent', 'native')
+    expect(upload).toHaveBeenCalledWith(file)
+    expect(send).toHaveBeenCalledTimes(1)
+    expect(second.entries[0].state).toBe('accepted')
+    expect(second.entries[0].files).toEqual([])
+  })
+  it('retains ambiguous delivery across reload and never resubmits it automatically', async () => {
+    let stored: OutboxEntry[] = []
+    const storage = { load: async () => stored, save: async (rows: OutboxEntry[]) => { stored = structuredClone(rows) } }
+    const send = vi.fn(async () => { throw new TypeError('network lost after write') })
+    const first = new MobileOutbox(storage, { send, upload: vi.fn() })
+    await first.load()
+    await first.enqueue(payload('uncertain'), [])
+    await first.flush('agent', 'native')
+    expect(first.entries[0].state).toBe('unknown')
+    const reloaded = new MobileOutbox(storage, { send, upload: vi.fn() })
+    await reloaded.load()
+    await reloaded.flush('agent', 'native')
+    expect(send).toHaveBeenCalledTimes(1)
+    expect(reloaded.entries[0].payload.id).toBe('uncertain')
+  })
+  it('persists before dispatch, keeps received receipts and does not burst-send the next turn', async () => {
+    let stored: OutboxEntry[] = []
+    const send = vi.fn(async (p: CommandPayload) => {
+      expect(stored.find(row => row.payload.id === p.id)?.state).toBe('submitting')
+      return receipt(p, 'received')
+    })
+    const outbox = new MobileOutbox({ load: async () => stored, save: async rows => { stored = structuredClone(rows) } }, { send, upload: vi.fn() })
+    await outbox.load()
+    await outbox.enqueue(payload('first'), [])
+    await outbox.enqueue(payload('second'), [])
+    await outbox.flush('agent', 'native')
+    await outbox.flush('agent', 'native')
+    expect(send).toHaveBeenCalledTimes(1)
+    expect(outbox.entries.map(row => [row.payload.id, row.state])).toEqual([['first', 'received'], ['second', 'queued']])
+    await outbox.reconcile([receipt(payload('first'), 'accepted')], [])
+    expect(outbox.entries[0].state).toBe('accepted')
+    await outbox.flush('agent', 'native')
+    expect(send).toHaveBeenCalledTimes(1)
+    await outbox.reconcile([receipt(payload('first'), 'completed')], [])
+    await outbox.flush('agent', 'native')
+    expect(send.mock.calls.map(([p]) => p.id)).toEqual(['first', 'second'])
+  })
+})

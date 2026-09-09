@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid4
@@ -10,7 +11,7 @@ from fastapi import WebSocket
 
 from .config import Settings
 from .events import EventHub
-from .schemas import AgentModel, MessageModel, SessionModel
+from .schemas import AgentModel, MessageModel, SessionModel, TaskModel
 from .store import DuplicateCommand, ScopeNotFound, Store, UnknownCommand
 
 logger = logging.getLogger(__name__)
@@ -19,7 +20,9 @@ logger = logging.getLogger(__name__)
 KNOWN_EVENT_TYPES = {
     "agent.upsert",
     "session.upsert",
+    "session.delete",
     "message.upsert",
+    "task.upsert",
     "command.upsert",
     "approval.upsert",
 }
@@ -46,6 +49,10 @@ class CommandRejected(RuntimeError):
         super().__init__(detail)
 
 
+NativeCommandHandler = Callable[[dict[str, Any]], Awaitable[tuple[str, str | None]]]
+NativeHistoryHandler = Callable[[str], Awaitable[list[dict[str, Any]]]]
+
+
 @dataclass
 class ConnectorConnection:
     websocket: WebSocket
@@ -64,10 +71,35 @@ class ControlService:
         self.hub = hub
         self.settings = settings
         self.connections: dict[str, ConnectorConnection] = {}
+        self._native_command_handlers: dict[str, NativeCommandHandler] = {}
+        self._native_history_handlers: dict[str, NativeHistoryHandler] = {}
+        try:
+            self._loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self._loop = None
+
+    def register_native_command_handler(self, agent_id: str, handler: NativeCommandHandler) -> None:
+        self._native_command_handlers[agent_id] = handler
+
+    def clear_native_command_handler(self, agent_id: str) -> None:
+        self._native_command_handlers.pop(agent_id, None)
+
+    def register_native_history_handler(self, agent_id: str, handler: NativeHistoryHandler) -> None:
+        self._native_history_handlers[agent_id] = handler
+
+    def clear_native_history_handler(self, agent_id: str) -> None:
+        self._native_history_handlers.pop(agent_id, None)
 
     def _publish(self, event: dict[str, Any] | None) -> None:
         if event is not None:
-            self.hub.publish(event)
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+            if self._loop is not None and loop is not self._loop and not self._loop.is_closed():
+                self._loop.call_soon_threadsafe(self.hub.publish, event)
+            else:
+                self.hub.publish(event)
 
     def _server_event(
         self,
@@ -87,11 +119,76 @@ class ControlService:
         self._publish(event)
         return event
 
+    def record_native_sessions(self, sessions: list[dict[str, Any]]) -> None:
+        """Persist read-only native history discovered outside the connector event stream."""
+        for data in sessions:
+            canonical = self.store.upsert_session(data)
+            self._server_event(
+                "session.upsert",
+                agent_id=canonical["agent_id"],
+                session_id=canonical["id"],
+                data=canonical,
+            )
+
+    def delete_session(self, agent_id: str, session_id: str) -> bool:
+        success = self.store.delete_session(agent_id, session_id)
+        if success:
+            self._server_event(
+                "session.delete",
+                agent_id=agent_id,
+                session_id=session_id,
+                data={"id": session_id, "agent_id": agent_id},
+            )
+        return success
+
+    def record_native_projects(self, projects: list[dict[str, Any]]) -> None:
+        """Persist the native project catalog, including projects with no sessions."""
+        for canonical in self.store.upsert_projects(projects):
+            self._server_event(
+                "project.upsert",
+                agent_id=canonical.get("agent_id"),
+                session_id=None,
+                data=canonical,
+            )
+
+    def mark_persisted_connectors_disconnected(self) -> None:
+        """A process restart cannot preserve a live WebSocket, so stale rows must not look controllable."""
+        for agent in self.store.list_agents():
+            if agent["status"] == "disconnected":
+                continue
+            updated = self.store.set_agent_status(agent["id"], "disconnected")
+            if updated is not None:
+                self._server_event("agent.upsert", agent_id=agent["id"], session_id=None, data=updated)
+
     async def register_connector(self, websocket: WebSocket, agent: dict[str, Any]) -> ConnectorConnection:
         existing = self.connections.get(agent["id"])
         if existing is not None:
             await self.disconnect(existing, "Connector connection replaced")
         canonical = self.store.upsert_agent(agent)
+        if (
+            canonical.get("kind") == "hermes"
+            and canonical.get("connection_id") is None
+            and str(canonical.get("source_id") or "").startswith("hermes-local-")
+        ):
+            reconciled = self.store.reconcile_legacy_local_source(
+                source_id=str(canonical["source_id"]),
+                current_agent_id=str(canonical["id"]),
+                profile_name=str(canonical.get("profile_name") or "default"),
+            )
+            for legacy_agent in reconciled["agents"]:
+                self._server_event(
+                    "agent.upsert",
+                    agent_id=legacy_agent["id"],
+                    session_id=None,
+                    data=legacy_agent,
+                )
+            for legacy_session in reconciled["sessions"]:
+                self._server_event(
+                    "session.upsert",
+                    agent_id=legacy_session["agent_id"],
+                    session_id=legacy_session["id"],
+                    data=legacy_session,
+                )
         connection = ConnectorConnection(websocket=websocket, agent=canonical)
         self.connections[canonical["id"]] = connection
         hello_event = self._server_event(
@@ -106,6 +203,8 @@ class ControlService:
         agent_id = connection.agent["id"]
         if self.connections.get(agent_id) is connection:
             self.connections.pop(agent_id, None)
+            # Native RPC handlers belong to ConnectionController, not this event
+            # socket. Only explicit runtime disconnect clears those handlers.
             for session_id, command_id in tuple(connection.sent):
                 command = self.store.get_command(agent_id, session_id, command_id)
                 if command and command["state"] in {"accepted", "running", "received"}:
@@ -129,6 +228,9 @@ class ControlService:
                 )
 
     def _capability_error(self, agent: dict[str, Any], command: dict[str, Any]) -> str | None:
+        native_stop = agent["id"] in self._native_command_handlers and command["action"] == "stop"
+        if native_stop and command.get("target_id") != command["session_id"]:
+            return "停止原生会话必须使用当前会话 ID；未停止其他任务。"
         required = {
             "send": "chat",
             "enqueue": "queue",
@@ -136,7 +238,7 @@ class ControlService:
             "approve": "approvals",
             "cancel": "stop",
         }[command["action"]]
-        if required not in agent["capabilities"]:
+        if required not in agent["capabilities"] and not native_stop:
             return f"Action {command['action']} is unsupported by this connector"
         if command["attachments"] and "attachments" not in agent["capabilities"]:
             return "Attachments are unsupported by this connector"
@@ -151,6 +253,10 @@ class ControlService:
         session = self.store.get_session(payload["agent_id"], payload["session_id"])
         if session is None:
             raise CommandRejected("Session was not found", 404)
+        legacy_local = session.get("history_state") == "local" and session.get("control_state") == "unknown"
+        # 允许用户在任意历史会话或活动会话中直接发消息交互，不再阻塞抛错
+        if session.get("control_state") not in {"owned", "live"} and not legacy_local:
+            pass
         try:
             attachments = self.store.attachment_rows(payload["attachment_ids"])
         except ScopeNotFound:
@@ -166,6 +272,7 @@ class ControlService:
             raise
         if not created:
             return command
+
         self._server_event(
             "command.upsert",
             agent_id=command["agent_id"],
@@ -192,7 +299,8 @@ class ControlService:
                 await self._send_command(connection, command)
             return self.store.get_command(command["agent_id"], command["session_id"], command["id"]) or command
 
-        if connection is None:
+        native_handler = self._native_command_handlers.get(agent["id"])
+        if connection is None and native_handler is None:
             detail = "Connector is not connected; submission was not attempted"
             updated = self.store.set_command_state(
                 command["agent_id"], command["session_id"], command["id"], "failed", detail
@@ -205,6 +313,30 @@ class ControlService:
             )
             raise CommandRejected(detail)
 
+        if native_handler is not None:
+            try:
+                state, error = await native_handler(command)
+            except Exception as exc:  # noqa: BLE001 - the outcome cannot be confirmed after a native RPC failure
+                logger.exception("native_handler execution failed: %s", exc)
+                state, error = "unknown", f"Native Hermes command execution error: {exc}"
+            if state not in {"accepted", "failed", "unknown"}:
+                state, error = "unknown", "Native Hermes returned an invalid command outcome"
+            confirmed = self.store.get_command(command['agent_id'], command['session_id'], command['id'])
+            if confirmed and (confirmed['state'] in {'completed', 'failed', 'cancelled'} or (state == 'accepted' and confirmed['state'] == 'running')):
+                return confirmed
+            if state == "accepted" and connection is not None:
+                connection.sent.add((command["session_id"], command["id"]))
+            updated = self.store.set_command_state(
+                command["agent_id"], command["session_id"], command["id"], state, error, preserve_progress=True
+            )
+            self._server_event(
+                "command.upsert",
+                agent_id=command["agent_id"],
+                session_id=command["session_id"],
+                data=updated,
+            )
+            return updated
+
         try:
             await self._send_command(connection, command)
         except (OSError, RuntimeError):
@@ -215,6 +347,36 @@ class ControlService:
             if unknown is not None:
                 return unknown
         return self.store.get_command(command["agent_id"], command["session_id"], command["id"]) or command
+
+    async def load_native_history(self, agent_id: str, session_id: str) -> list[dict[str, Any]]:
+        session = self.store.get_session(agent_id, session_id)
+        if session is None:
+            raise CommandRejected("Session was not found", 404)
+        handler = self._native_history_handlers.get(agent_id)
+        if handler is None:
+            raise CommandRejected("会话所属运行时尚未连接，暂时无法同步消息。", 503)
+        try:
+            messages = await handler(session_id)
+        except Exception as exc:
+            self.store.set_session_history_state(agent_id, session_id, "error")
+            raise CommandRejected("原生会话消息同步失败，请稍后重试。", 502) from exc
+        updated_session = self.store.set_session_history_state(agent_id, session_id, "loaded")
+        if updated_session is not None:
+            self._server_event(
+                "session.upsert",
+                agent_id=agent_id,
+                session_id=session_id,
+                data=updated_session,
+            )
+        for message in messages:
+            canonical = self.store.upsert_message(message)
+            self._server_event(
+                "message.upsert",
+                agent_id=agent_id,
+                session_id=session_id,
+                data=canonical,
+            )
+        return messages
 
     async def _send_command(self, connection: ConnectorConnection, command: dict[str, Any]) -> None:
         connection.sent.add((command["session_id"], command["id"]))
@@ -267,6 +429,13 @@ class ControlService:
                 raise ProtocolError("Message references an unknown attachment") from None
             canonical_data = model.model_dump()
             canonical_data["attachments"] = canonical_attachments
+        elif event_type == "task.upsert":
+            model = TaskModel.model_validate(data)
+            if model.agent_id != agent_id or model.session_id != session_id:
+                raise ProtocolError("Task event identity does not match envelope")
+            if self.store.get_session(agent_id, session_id) is None:
+                raise ProtocolError("Task event references an unknown session")
+            canonical_data = model.model_dump()
         elif event_type == "command.upsert":
             command_id = data.get("id")
             state = data.get("state")

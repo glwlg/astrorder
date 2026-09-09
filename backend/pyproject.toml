@@ -3,7 +3,10 @@ name = "astrorder-server"
 version = "0.1.0"
 description = "星序 · Astrorder independent Agent control server"
 requires-python = ">=3.11"
-dependencies = ["fastapi", "uvicorn[standard]", "sqlalchemy", "pydantic-settings", "aiosqlite", "python-multipart", "httpx", "websockets"]
+dependencies = ["fastapi", "uvicorn[standard]", "sqlalchemy", "pydantic-settings", "aiosqlite", "python-multipart", "httpx", "websockets", "astrorder-codex-connector"]
+
+[tool.uv.sources]
+astrorder-codex-connector = { path = "../connectors/codex", editable = true }
 
 [project.scripts]
 astrorder-server = "astrorder.__main__:main"

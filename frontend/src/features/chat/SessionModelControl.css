@@ -1,0 +1,8 @@
+.session-model-control { flex:0 1 auto; padding:0; min-width:0; max-width:100%; }
+.session-model-control .mantine-Button-root { max-width:100%; }
+.session-model-control .mantine-Button-label { display:flex; align-items:center; min-width:0; overflow:hidden; white-space:nowrap; }
+.session-model-control .mantine-Button-label > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.session-model-options { max-height:min(45vh,360px); overflow:auto; display:grid; gap:6px; }
+.session-model-option { display:flex; align-items:center; gap:9px; padding:10px 12px; border:1px solid var(--mantine-color-default-border); border-radius:9px; min-width:0; }
+.session-model-option span { flex:1; overflow-wrap:anywhere; }.session-model-option svg { flex-shrink:0; }
+.session-model-option[aria-pressed='true'] { border-color:var(--mantine-primary-color-filled); background:var(--mantine-primary-color-light); }

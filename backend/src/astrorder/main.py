@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -15,6 +16,9 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from .api import router
 from .auth import authorize_browser_websocket, authorize_connector_websocket
 from .config import Settings
+from .connections import ConnectionController
+from .native_codex import CodexConnection
+from .environment_connections import EnvironmentConnections
 from .events import EventHub
 from .runtime import ProcessSupervisor
 from .schemas import AgentModel
@@ -65,11 +69,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.store = store
         app.state.hub = hub
         app.state.service = service
+        service.mark_persisted_connectors_disconnected()
+        store.mark_ssh_connections_disconnected()
         app.state.attachments = AttachmentManager(runtime_settings, store)
         app.state.supervisor = ProcessSupervisor(runtime_settings)
+        app.state.connections = ConnectionController(runtime_settings, store)
+        app.state.codex = CodexConnection(runtime_settings, store, service)
+        app.state.environments = EnvironmentConnections(runtime_settings, store, service, app.state.connections, app.state.codex)
+        restore_task = None
+        if runtime_settings.auto_connect_local_hermes:
+            restore_task = asyncio.create_task(asyncio.to_thread(app.state.environments.restore))
         try:
             yield
         finally:
+            if restore_task is not None:
+                await restore_task
+            await asyncio.to_thread(app.state.codex.disconnect)
+            await asyncio.to_thread(app.state.environments.shutdown)
+            app.state.connections.shutdown(service)
             await service.shutdown()
             await app.state.supervisor.shutdown()
             store.close()
@@ -79,7 +96,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         CORSMiddleware,
         allow_origins=list(runtime_settings.allowed_origins),
         allow_credentials=True,
-        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type"],
     )
     app.include_router(router)

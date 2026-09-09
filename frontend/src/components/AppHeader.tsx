@@ -3,6 +3,7 @@ import { ActionIcon, Group, Title, Tooltip } from '@mantine/core'
 import { useComputedColorScheme, useMantineColorScheme } from '@mantine/core'
 import { useState } from 'react'
 import { ConnectionBadge } from './Status'
+import { NotificationPermissionControl } from './NotificationPermissionControl'
 
 export function AppHeader({
   connection,
@@ -37,6 +38,7 @@ export function AppHeader({
           <Title className="mobile-header-title" order={2} size="h4">星序 · Astrorder</Title>
         </Group>
         <Group gap="xs" wrap="nowrap">
+          <NotificationPermissionControl />
           <ConnectionBadge status={connection} />
           <Tooltip label={computed === 'dark' ? '切换浅色' : '切换深色'}>
             <ActionIcon variant="subtle" onClick={toggleTheme} aria-label="切换主题">

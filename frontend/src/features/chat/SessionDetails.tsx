@@ -3,6 +3,8 @@ import { Badge, Divider, Group, Paper, Stack, Text, Title } from '@mantine/core'
 import type { Agent, Approval, Command, Message, Session } from '../../domain/types'
 import { AgentStatusBadge, SessionStatusLabel } from '../../components/Status'
 import { MarkdownContent } from '../../components/MarkdownContent'
+import { SessionRuntimeFacts } from '../../components/SessionRuntimeFacts'
+import { LazyDetails } from '../../components/LazyDetails'
 
 const capabilityLabels: Record<string, string> = {
   chat: '聊天',
@@ -11,7 +13,7 @@ const capabilityLabels: Record<string, string> = {
   attachments: '附件',
   approvals: '审批',
   launch: '启动',
-  history: '历史',
+  history: '消息记录',
   events: '事件',
 }
 
@@ -52,6 +54,8 @@ export function SessionDetails({
         {agent ? <AgentStatusBadge status={agent.status} /> : <Badge color="gray" variant="light">Agent 未返回</Badge>}
       </Group>
       <Divider />
+      <SessionRuntimeFacts session={session} agent={agent} />
+      <Divider />
       <section>
         <Text size="xs" fw={700} c="dimmed" mb="xs">能力</Text>
         <Group gap={6}>
@@ -84,7 +88,7 @@ export function SessionDetails({
         </section>
       )}
       <section>
-        <Text size="xs" fw={700} c="dimmed" mb="xs">工具与命令活动</Text>
+        <LazyDetails summary="工具与命令活动">
         <Stack gap="xs">
           {activities.length === 0 && commands.length === 0 && <Text size="xs" c="dimmed">暂无活动事件。</Text>}
           {activities.map((message) => (
@@ -107,6 +111,7 @@ export function SessionDetails({
             )
           })}
         </Stack>
+        </LazyDetails>
       </section>
     </Stack>
   )

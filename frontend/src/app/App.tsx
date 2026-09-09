@@ -1,6 +1,8 @@
 import { IconAlertTriangle, IconLoader2 } from '@tabler/icons-react'
 import { Alert, Button, Center, Loader, Paper, Stack, Text, Title } from '@mantine/core'
-import { Navigate, Route, Routes } from 'react-router-dom'
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
+import { useMediaQuery } from '@mantine/hooks'
+import { MobileWorkspace } from '../features/mobile/MobileWorkspace'
 import { useQueryClient } from '@tanstack/react-query'
 import { ApiError } from '../api/client'
 import { AuthPage } from '../components/AuthPage'
@@ -33,12 +35,15 @@ function BootstrapError({ error, retry }: { error: unknown; retry: () => void })
 }
 
 function AuthenticatedApp() {
+  const mobileViewport = useMediaQuery('(max-width: 767px)')
+  const location = useLocation()
   const queryClient = useQueryClient()
   const bootstrap = useBootstrap(true)
   useEventStream(true, queryClient)
 
   if (bootstrap.isLoading) return <LoadingPage label="正在读取已认证工作台…" />
   if (bootstrap.error) return <BootstrapError error={bootstrap.error} retry={() => void bootstrap.refetch()} />
+  if (mobileViewport || location.pathname.startsWith('/mobile')) return <MobileWorkspace />
 
   return (
     <Routes>
