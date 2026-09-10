@@ -8,7 +8,7 @@ import { useAstrorderStore } from '../../state/store'
 import { ChatComposer } from './ChatComposer'
 
 const session: Session = { id: 'native-one', agent_id: 'hermes', title: 'one', workspace: null, status: 'idle', updated_at: '2026-01-01T00:00:00Z' }
-const agent: Agent = { id: 'hermes', name: 'Hermes', kind: 'hermes', status: 'ready', capabilities: ['chat', 'stop'], limitation: null }
+const agent: Agent = { id: 'hermes', name: 'Hermes', kind: 'hermes', status: 'ready', capabilities: ['chat', 'stop', 'attachments'], limitation: null }
 afterEach(() => { cleanup(); vi.restoreAllMocks(); useAstrorderStore.getState().resetRuntime() })
 it('embeds the model picker and swaps the primary send button for native stop until completion', async () => {
   useAstrorderStore.getState().resetRuntime()
@@ -33,5 +33,24 @@ it('embeds the model picker and swaps the primary send button for native stop un
   expect(screen.getByRole('button', { name: '停止' })).toBeInTheDocument()
   view.rerender(wrap(session))
   expect(screen.getByRole('button', { name: '发送' })).toBeInTheDocument()
+  client.clear()
+})
+it('pastes clipboard images into the draft instead of ignoring them', async () => {
+  useAstrorderStore.getState().resetRuntime()
+  vi.spyOn(api, 'getSessionModel').mockResolvedValue({ model: 'native-model', provider: 'provider' })
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(<MantineProvider><QueryClientProvider client={client}><ChatComposer session={session} agent={agent} /></QueryClientProvider></MantineProvider>)
+  const file = new File(['png'], 'shot.png', { type: 'image/png' })
+  fireEvent.paste(screen.getByLabelText('消息内容'), { clipboardData: { files: [file], items: [{ kind: 'file', type: 'image/png', getAsFile: () => file }] } })
+  expect(await screen.findByText('shot.png')).toBeInTheDocument()
+  client.clear()
+})
+it('does not swap send for stop just because native activity is recent', async () => {
+  useAstrorderStore.getState().resetRuntime()
+  vi.spyOn(api, 'getSessionModel').mockResolvedValue({ model: 'native-model', provider: 'provider' })
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(<MantineProvider><QueryClientProvider client={client}><ChatComposer session={{ ...session, live: true }} agent={agent} /></QueryClientProvider></MantineProvider>)
+  expect(screen.getByRole('button', { name: '发送' })).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: '停止' })).not.toBeInTheDocument()
   client.clear()
 })

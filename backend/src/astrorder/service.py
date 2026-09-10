@@ -73,6 +73,7 @@ class ControlService:
         self.connections: dict[str, ConnectorConnection] = {}
         self._native_command_handlers: dict[str, NativeCommandHandler] = {}
         self._native_history_handlers: dict[str, NativeHistoryHandler] = {}
+        self.hermes_approvals = None
         try:
             self._loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -80,18 +81,43 @@ class ControlService:
 
     def register_native_command_handler(self, agent_id: str, handler: NativeCommandHandler) -> None:
         self._native_command_handlers[agent_id] = handler
+        self._publish_capabilities(agent_id)
 
     def clear_native_command_handler(self, agent_id: str) -> None:
         self._native_command_handlers.pop(agent_id, None)
 
     def register_native_history_handler(self, agent_id: str, handler: NativeHistoryHandler) -> None:
         self._native_history_handlers[agent_id] = handler
+        self._publish_capabilities(agent_id)
+
+    def effective_agent(self, agent):
+        result = dict(agent)
+        capabilities = set(agent.get('capabilities', []))
+        native = agent['id'] in self._native_command_handlers
+        history = agent['id'] in self._native_history_handlers
+        if history:
+            capabilities.add('history')
+        if native and agent.get('kind') == 'hermes':
+            capabilities.update({'stop', 'attachments'})
+            result['limitation'] = '停止仅作用于当前运行时拥有活动句柄的会话。图片经原生字节接口发送，其他文件进入会话工作区。其他客户端本地图片仅在 Hermes 目录内可预览。星序待发队列不等同于原生排队。'
+            if self.hermes_approvals and agent['id'] in self.hermes_approvals.supported:
+                capabilities.add('approvals')
+                result['limitation'] = '停止与审批仅作用于当前运行时的会话；审批只允许本次或拒绝。图片经原生字节接口发送，其他文件进入会话工作区。其他客户端本地图片仅在 Hermes 目录内可预览。星序待发队列不等同于原生排队。'
+        result['capabilities'] = sorted(capabilities)
+        return result
+
+    def _publish_capabilities(self, agent_id):
+        agent = self.store.get_agent(agent_id)
+        if isinstance(agent, dict):
+            self._server_event('agent.upsert', agent_id=agent_id, session_id=None, data=agent)
 
     def clear_native_history_handler(self, agent_id: str) -> None:
         self._native_history_handlers.pop(agent_id, None)
 
     def _publish(self, event: dict[str, Any] | None) -> None:
         if event is not None:
+            if event.get('type') == 'agent.upsert':
+                event = {**event, 'data': self.effective_agent(event['data'])}
             try:
                 loop = asyncio.get_running_loop()
             except RuntimeError:
@@ -109,6 +135,8 @@ class ControlService:
         session_id: str | None,
         data: dict[str, Any],
     ) -> dict[str, Any] | None:
+        if event_type == 'agent.upsert':
+            data = self.effective_agent(data)
         event = self.store.append_event(
             event_id=f"server-{uuid4()}",
             event_type=event_type,
@@ -140,6 +168,46 @@ class ControlService:
                 data={"id": session_id, "agent_id": agent_id},
             )
         return success
+
+    def delete_project(
+        self,
+        *,
+        project_key: str | None = None,
+        project_id: str | None = None,
+        source_id: str | None = None,
+        workspace: str | None = None,
+        session_keys: list[tuple[str, str]] | None = None,
+        delete_sessions: bool = True,
+    ) -> dict[str, Any]:
+        success, deleted_sessions = self.store.delete_project(
+            project_key=project_key,
+            project_id=project_id,
+            source_id=source_id,
+            workspace=workspace,
+            session_keys=session_keys,
+            delete_sessions=delete_sessions,
+        )
+        if success:
+            self._server_event(
+                "project.delete",
+                agent_id=None,
+                session_id=None,
+                data={
+                    "project_key": project_key,
+                    "project_id": project_id,
+                    "source_id": source_id,
+                    "workspace": workspace,
+                    "deleted_sessions": deleted_sessions,
+                },
+            )
+            for sess in deleted_sessions:
+                self._server_event(
+                    "session.delete",
+                    agent_id=sess["agent_id"],
+                    session_id=sess["id"],
+                    data={"id": sess["id"], "agent_id": sess["agent_id"]},
+                )
+        return {"ok": success, "deleted_sessions": deleted_sessions}
 
     def record_native_projects(self, projects: list[dict[str, Any]]) -> None:
         """Persist the native project catalog, including projects with no sessions."""
@@ -228,6 +296,7 @@ class ControlService:
                 )
 
     def _capability_error(self, agent: dict[str, Any], command: dict[str, Any]) -> str | None:
+        agent = self.effective_agent(agent)
         native_stop = agent["id"] in self._native_command_handlers and command["action"] == "stop"
         if native_stop and command.get("target_id") != command["session_id"]:
             return "停止原生会话必须使用当前会话 ID；未停止其他任务。"
@@ -300,6 +369,8 @@ class ControlService:
             return self.store.get_command(command["agent_id"], command["session_id"], command["id"]) or command
 
         native_handler = self._native_command_handlers.get(agent["id"])
+        if agent.get('kind') == 'hermes' and command['action'] in {'approve','cancel'} and self.hermes_approvals:
+            native_handler = self.hermes_approvals.submit
         if connection is None and native_handler is None:
             detail = "Connector is not connected; submission was not attempted"
             updated = self.store.set_command_state(

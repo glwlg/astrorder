@@ -1,8 +1,9 @@
-import { IconInfoCircle, IconSparkles } from '@tabler/icons-react'
-import { ActionIcon, Drawer, Group, Paper, Text, Title } from '@mantine/core'
+import { IconInfoCircle, IconSparkles, IconX } from '@tabler/icons-react'
+import { ActionIcon, Button, Drawer, Group, Paper, Text, Title } from '@mantine/core'
 import { useDisclosure, useMediaQuery } from '@mantine/hooks'
 import { useQueryClient } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useShallow } from 'zustand/react/shallow'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { ApiError, api } from '../../api/client'
@@ -10,6 +11,7 @@ import { newCommandId, scopeKey } from '../../domain/semantics'
 import type { Approval, Command, Session, Task } from '../../domain/types'
 import { EmptyState } from '../../components/EmptyState'
 import { SessionStatusLabel } from '../../components/Status'
+import { sessionActivityStatus } from '../../components/sessionRailModel'
 import { AgentKindBadge } from '../../components/SessionRuntimeFacts'
 import { selectApprovals, selectCommands, selectOutbox, selectSessions, selectTasks, useAstrorderStore } from '../../state/store'
 import { useSessionResources } from '../../hooks/useAstrorderData'
@@ -52,8 +54,10 @@ export function ChatPage() {
     [searchParams, sessionId, sessions],
   )
   const [detailsOpened, { open: openDetails, close: closeDetails }] = useDisclosure(false)
+  const [detailsPinned, setDetailsPinned] = useState(false)
   const [taskDetailsOpened, { open: openTaskDetails, close: closeTaskDetails }] = useDisclosure(false)
   const [selectedTask, setSelectedTask] = useState<Task | null>(null)
+  const [previewImage, setPreviewImage] = useState<string | null>(null)
   const mobileTaskSheet = useMediaQuery('(max-width: 767px)')
   const resources = useSessionResources(selected, true)
   const modelBinding = useSessionModel(selected)
@@ -144,7 +148,7 @@ export function ChatPage() {
   const resourceError = resources.messages.error || resources.commands.error || resources.tasks.error
   return (
     <div className="route-page chat-page">
-      <div className="chat-layout">
+      <div className={`chat-layout${detailsPinned ? ' has-details' : ''}`}>
         <section className="chat-column">
           <Paper className="chat-heading" withBorder radius="lg" p="md">
             <Group justify="space-between" align="flex-start" wrap="nowrap">
@@ -155,13 +159,15 @@ export function ChatPage() {
               </div>
               <Group gap="xs" wrap="nowrap">
                 <AgentKindBadge agent={agent} />
-                <SessionStatusLabel status={selected.status} />
-                <ActionIcon className="mobile-details-button" hiddenFrom="md" variant="light" onClick={openDetails} aria-label="打开会话详情">
+                <SessionStatusLabel status={sessionActivityStatus(selected)} />
+                {!!approvals.length && <Button size="compact-sm" color="yellow" variant="light" onClick={openDetails}>等待授权 · {approvals.length}</Button>}
+                <ActionIcon className="chat-details-button" variant="subtle" onClick={openDetails} aria-label="打开会话详情" title="会话详情">
                   <IconInfoCircle size={18} />
                 </ActionIcon>
               </Group>
             </Group>
           </Paper>
+          <SessionRuntimeBar messages={messages} commands={commands} tasks={tasks} nativeBranch={modelBinding.data?.branch ?? null} onTaskOpen={(task) => { setSelectedTask(task); openTaskDetails() }} />
           <Transcript
             key={`transcript:${scopeKey(selected.agent_id, selected.id)}`}
             messages={messages}
@@ -170,23 +176,50 @@ export function ChatPage() {
             hasMoreHistory={Boolean(resources.messages.hasNextPage)}
             loadingOlder={resources.messages.isFetchingNextPage}
             onLoadOlder={() => resources.messages.fetchNextPage()}
+            onImageClick={(url) => setPreviewImage(url)}
             error={resourceError ? errorText(resourceError) : undefined}
             onRetry={() => {
               void resources.messages.refetch()
               void resources.commands.refetch()
             }}
           />
-          <SessionRuntimeBar messages={messages} commands={commands} tasks={tasks} nativeBranch={modelBinding.data?.branch ?? null} onTaskOpen={(task) => { setSelectedTask(task); openTaskDetails() }} />
           <ChatComposer key={`composer:${scopeKey(selected.agent_id, selected.id)}`} session={selected} agent={agent} />
         </section>
-        <aside className="desktop-details">
+        {detailsPinned && <aside className="desktop-details">
+          <Button variant="subtle" size="compact-sm" onClick={() => setDetailsPinned(false)}>收起详情侧栏</Button>
           <SessionDetails session={selected} agent={agent} commands={commands} messages={messages} approvals={approvals} onApproval={(approval, action) => void handleApproval(approval, action)} />
-        </aside>
+        </aside>}
       </div>
-      <DrawerDetails opened={detailsOpened} onClose={closeDetails} session={selected} agent={agent} commands={commands} messages={messages} approvals={approvals} onApproval={(approval, action) => void handleApproval(approval, action)} />
+      <DrawerDetails opened={detailsOpened} onClose={closeDetails} onPin={() => { setDetailsPinned(true); closeDetails() }} session={selected} agent={agent} commands={commands} messages={messages} approvals={approvals} onApproval={(approval, action) => void handleApproval(approval, action)} />
       <Drawer opened={taskDetailsOpened} onClose={() => { closeTaskDetails(); setSelectedTask(null) }} title="任务详情" position={mobileTaskSheet ? 'bottom' : 'right'} size={mobileTaskSheet ? 'min(88vh, 620px)' : 'min(92vw, 520px)'}>
         {selectedTask && <TaskDetails task={selectedTask} canStop={Boolean(agent?.capabilities.includes('stop') && selectedTask.target_id && ['pending', 'running', 'waiting_approval'].includes(selectedTask.status))} onStop={(task) => void handleStopTask(task)} onJumpToLatest={() => window.scrollTo({ top: document.body.scrollHeight, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })} onClose={() => { closeTaskDetails(); setSelectedTask(null) }} />}
       </Drawer>
+      {previewImage &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            className="desktop-lightbox"
+            role="dialog"
+            aria-label="图片预览"
+            onClick={() => setPreviewImage(null)}
+          >
+            <button
+              type="button"
+              className="desktop-lightbox-close"
+              aria-label="关闭图片"
+              onClick={() => setPreviewImage(null)}
+            >
+              <IconX size={24} />
+            </button>
+            <img
+              className="desktop-lightbox-image"
+              src={previewImage}
+              alt="放大预览"
+              onClick={(e) => e.stopPropagation()}
+            />
+          </div>,
+          document.body,
+        )}
     </div>
   )
 }
@@ -194,10 +227,12 @@ export function ChatPage() {
 function DrawerDetails({
   opened,
   onClose,
+  onPin,
   ...props
 }: {
   opened: boolean
   onClose: () => void
+  onPin: () => void
   session: Session
   agent?: import('../../domain/types').Agent
   commands: Command[]
@@ -207,6 +242,7 @@ function DrawerDetails({
 }) {
   return (
     <Drawer opened={opened} onClose={onClose} title="会话详情" position="right" size="min(92vw, 380px)">
+      <Button visibleFrom="md" variant="subtle" size="compact-sm" onClick={onPin}>固定详情侧栏</Button>
       <SessionDetails {...props} />
     </Drawer>
   )

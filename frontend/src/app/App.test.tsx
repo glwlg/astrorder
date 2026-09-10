@@ -96,4 +96,27 @@ describe('isolated browser API fixture scope — not production Agent data', () 
     expect(await screen.findByRole('heading', { name: '监控室' })).toBeInTheDocument()
     expect(screen.getByTestId('monitor-card-agent-b-shared')).toHaveTextContent('会话 B')
   })
+
+  it('redirects PC desktop viewport away from /mobile route to desktop workspace', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = String(input)
+      if (url.endsWith('/auth/session')) {
+        return new Response(JSON.stringify({ authenticated: true }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      if (url.endsWith('/bootstrap')) {
+        return new Response(JSON.stringify({ protocol_version: 1, agents: [], sessions: [], cursor: 0 }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      return new Response(JSON.stringify({ items: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    })
+    vi.stubGlobal('WebSocket', class {
+      close() {}
+    })
+
+    renderApp(['/mobile'])
+
+    // On PC wide viewport (default jsdom is desktop), /mobile redirects to /chat
+    expect(await screen.findByText('还没有可用会话')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getAllByRole('link', { name: /监控室/ })[0]).toBeInTheDocument())
+    expect(screen.queryByRole('heading', { name: '移动工作台' })).not.toBeInTheDocument()
+  })
 })

@@ -22,9 +22,14 @@ export function useSessionModel(session: Session | null) {
     await client.cancelQueries({ queryKey, exact: true })
     const result = await api.setSessionModel(session.id, session.agent_id, provider, model)
     await client.cancelQueries({ queryKey, exact: true })
-    // The backend response is native-verified; never reuse another session's binding.
     client.setQueryData<SessionModelBinding>(queryKey, previous => ({ ...previous, ...result }))
     return result
   }
-  return { ...query, label, change }
+  const changeEffort = async (effort: string) => {
+    if (!session) throw new Error('尚未选择会话')
+    const result = await api.setSessionReasoning(session.id, session.agent_id, effort)
+    client.setQueryData<SessionModelBinding>(queryKey, previous => previous ? { ...previous, effort: result.effort } : previous)
+    return result
+  }
+  return { ...query, label, change, changeEffort, effort: binding?.effort || null }
 }

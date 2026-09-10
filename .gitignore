@@ -2,6 +2,7 @@ frontend/node_modules/
 frontend/dist/
 frontend/playwright-report/
 frontend/test-results/
+frontend/vite.hosts.local.json
 backend/.venv/
 **/__pycache__/
 **/.pytest_cache/
@@ -19,3 +20,9 @@ backend/.venv/
 .runtime/
 .token
 .connector_token
+.runtime*
+.test_*
+.stitch/
+data/
+test-results/
+

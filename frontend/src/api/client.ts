@@ -16,7 +16,7 @@ import type {
 
 const API_PREFIX = '/api/v1'
 
-export interface SessionModelBinding { model: string; provider: string | null; deferred?: boolean; branch?: string }
+export interface SessionModelBinding { model: string; provider: string | null; deferred?: boolean; branch?: string; effort?: string | null }
 export interface CodexConnectionStatus { kind: 'codex'; state: 'disconnected' | 'connecting' | 'connected' | 'error' | 'authentication_required'; available: boolean; agent_id: string; session_count: number; auth_required: boolean; detail: string }
 
 export class ApiError extends Error {
@@ -87,18 +87,20 @@ function sessionPath(sessionId: string): string {
 }
 
 export const api = {
+  getObservations: (agentId: string, sessionId?: string) => request<{ status: { installed?: boolean; trusted?: boolean; needs_review?: boolean; last_event_at?: number }; items: { id: string; event: string; label: string; observed_at: number; tool_name?: string }[] }>(`/agents/${encodeURIComponent(agentId)}/observations${sessionId ? '?session_id='+encodeURIComponent(sessionId) : ''}`),
+  installObserver: (agentId: string) => jsonRequest(`/agents/${encodeURIComponent(agentId)}/observer`, {}),
   getAuthSession: () => request<AuthSession>('/auth/session'),
   login: (token: string) => jsonRequest<AuthSession>('/auth/session', { token }),
   logout: () => request<void>('/auth/session', { method: 'DELETE' }),
   getBootstrap: () => request<BootstrapPayload>('/bootstrap'),
   getAgents: () => request<{ items: Agent[] }>('/agents'),
   getSessionModel: (sessionId: string, agentId: string) => request<SessionModelBinding>(`${sessionPath(sessionId)}/model?agent_id=${encodeURIComponent(agentId)}`),
-  getOpenSessions: () => request<{ known_agent_ids: string[]; items: { agent_id: string; id: string }[] }>('/open-sessions'),
+  getOpenSessions: () => request<{ known_agent_ids: string[]; items: { agent_id: string; id: string }[]; live?: { agent_id: string; id: string }[] }>('/open-sessions'),
   getSessions: (agentId?: string) => {
     const query = agentId ? `?agent_id=${encodeURIComponent(agentId)}` : ''
     return request<{ items: Session[] }>(`/sessions${query}`)
   },
-  getMessages: (sessionId: string, agentId: string, before?: string, limit = before ? 20 : 2) => {
+  getMessages: (sessionId: string, agentId: string, before?: string, limit = 20) => {
     const query = new URLSearchParams({ agent_id: agentId, limit: String(limit) })
     if (before) query.set('before', before)
     return request<{ items: import('../domain/types').Message[]; next_cursor: string | null }>(
@@ -127,12 +129,25 @@ export const api = {
     request<{ ok: boolean; id: string }>(`${sessionPath(sessionId)}?agent_id=${encodeURIComponent(agentId)}`, {
       method: 'DELETE',
     }),
+  deleteProject: (payload: {
+    project_key?: string
+    project_id?: string
+    source_id?: string
+    workspace?: string | null
+    session_keys?: Array<{ agent_id: string; id: string }>
+    delete_sessions?: boolean
+  }) =>
+    jsonRequest<{ ok: boolean; deleted_sessions: Array<{ agent_id: string; id: string }> }>(
+      '/projects/delete',
+      payload,
+    ),
   getSessionModels: (sessionId: string, agentId: string) => request<{ items: { provider: string; model: string; label: string }[] }>(`${sessionPath(sessionId)}/models?agent_id=${encodeURIComponent(agentId)}`),
   setSessionModel: (sessionId: string, agentId: string, provider: string, model: string) => jsonRequest<{ provider: string; model: string; deferred?: boolean }>(`${sessionPath(sessionId)}/model`, { agent_id: agentId, provider, model }),
+  setSessionReasoning: (sessionId: string, agentId: string, effort: string) => jsonRequest<{ effort: string }>(`${sessionPath(sessionId)}/reasoning`, { agent_id: agentId, effort }),
   getRuntime: () => request<RuntimePayload>('/runtime'),
   launchRuntime: (kind: string, workspace: string) =>
     jsonRequest<{ agent_id: string; status: string }>('/runtime/launch', { kind, workspace }),
-  getUserActivity: () => request<{ items: Array<{ agent_id: string; id: string; last_user_at: string }> }>('/user-activity'),
+  getUserActivity: () => request<{ items: Array<{ agent_id: string; id: string; last_user_at: string }>; live?: Array<{ agent_id: string; id: string }> }>('/user-activity'),
   getConnections: () => request<ConnectionsPayload>('/connections'),
   getEnvironments: () => request<{ items: Array<{ id: string; name: string; method: 'local' | 'ssh'; discovered: boolean; os?: string; agents: Array<{ kind: 'hermes' | 'codex'; available: boolean; state: string; detail: string; executable?: string }> }> }>('/environments'),
   discoverEnvironment: (id: string) => request(`/environments/${encodeURIComponent(id)}/discover`, { method: 'POST' }),

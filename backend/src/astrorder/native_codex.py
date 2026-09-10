@@ -55,13 +55,31 @@ def item_message(item, session_id, agent_id, created_at='1970-01-01T00:00:00Z'):
         text = '\n'.join(part.get('text', '') for part in item.get('content', []) if isinstance(part, dict) and part.get('type') == 'text')
     elif kind == 'reasoning':
         message_kind = 'thinking'
-        text = '\n'.join(item.get('summary') or item.get('content') or [])
+        summary = item.get('summary') or []
+        content = item.get('content') or []
+        text = '\n'.join(summary if summary and not content else ([*summary, '', *content] if summary else content))
     elif kind in {'agentMessage', 'plan'}:
         text = item.get('text') or ''
     else:
         role, message_kind = 'tool', 'tool'
         text = str(item.get('aggregatedOutput') or item.get('result') or item.get('status') or '')
-        tool = {'name': item.get('tool') or kind or 'Codex', 'arguments': item.get('arguments') or ({'command': item['command']} if item.get('command') else {}), 'status': item.get('status')}
+        args = item.get('arguments') or {}
+        if not isinstance(args, dict):
+            args = {}
+        if item.get('command') and 'command' not in args:
+            args['command'] = item['command']
+        if item.get('changes') and 'changes' not in args:
+            args['changes'] = item['changes']
+        if item.get('path') and 'path' not in args:
+            args['path'] = item['path']
+        if item.get('cwd') and 'cwd' not in args:
+            args['cwd'] = item['cwd']
+        tool_name = item.get('tool') or kind or 'Codex'
+        if kind == 'imageView' and item.get('path'):
+            args['path'] = item['path']
+        elif kind == 'mcpToolCall':
+            tool_name = f"mcp:{item.get('server')}.{item.get('tool')}"
+        tool = {'name': tool_name, 'arguments': args, 'status': item.get('status')}
     return {'id': item['id'], 'session_id': session_id, 'agent_id': agent_id, 'role': role, 'kind': message_kind, 'text': text, 'attachments': [], 'created_at': created_at, 'command_id': None, 'tool': tool}
 
 
@@ -83,6 +101,7 @@ class CodexConnection:
         self._pending = {}
         self._finished_pending = set()
         self._generation = uuid4().hex
+        self._queued = {}
         self._commands = {}
         self._approvals = {}
         self._approval_commands = {}
@@ -101,11 +120,12 @@ class CodexConnection:
         return {'kind': 'codex', 'state': self.state, 'available': bool(self._executable()), 'agent_id': self.agent_id, 'session_count': len(self._threads), 'auth_required': self.auth_required, 'detail': self.detail}
 
     def _agent(self, status):
-        data = {'id': self.agent_id, 'kind': 'codex', 'name': '本机 Codex', 'source_id': self.agent_id, 'status': status, 'capabilities': ['chat', 'stop', 'events', 'history', 'approvals'], 'limitation': '原生 app-server 连接；当前未提供附件映射或远程 Codex 连接。'}
+        data = {'id': self.agent_id, 'kind': 'codex', 'name': '本机 Codex', 'source_id': self.agent_id, 'status': status, 'capabilities': ['chat', 'stop', 'events', 'history', 'approvals', 'queue'], 'limitation': '原生 app-server 连接；当前未提供附件映射或远程 Codex 连接。'}
         if getattr(self, 'connection_id', None):
             data['connection_id'] = self.connection_id
             data['name'] = self.display_name + ' · Codex'
-        data['limitation'] = '原生会话接入；暂未提供附件映射和永久删除。'
+        data['capabilities'] += ['attachments', 'delete']
+        data['limitation'] = '原生 app-server 提供控制；附件支持星序上传的图片与音频。文档尚未映射。其他客户端本地图片仅在 Codex 数据目录内映射为预览。永久删除需原生接口确认。观察钩子不赋予其他客户端活动轮次的控制权。'
         self.store.upsert_agent(data)
         self.service.apply_connector_hello_event(data)
 
@@ -192,6 +212,137 @@ class CodexConnection:
         if self.store.get_session(self.agent_id, sid) is None:
             raise ConnectionError('Codex 会话不属于当前连接。', 404)
 
+    def _roots(self, sid=None):
+        roots = []
+        if self._home:
+            roots.append(self._home)
+        roots.append(Path.home() / '.codex')
+        cwd = (self._threads.get(sid) or {}).get('cwd')
+        if isinstance(cwd, str) and cwd:
+            roots.append(Path(cwd))
+        import tempfile, os
+        roots.append(Path(tempfile.gettempdir()))
+        for env_k in ('TEMP', 'TMP'):
+            val = os.environ.get(env_k)
+            if val:
+                roots.append(Path(val))
+        roots.append(Path.home() / 'AppData' / 'Local' / 'Temp')
+        return roots
+
+    def _remote_bytes(self, path):
+        reader = getattr(self, 'remote_json', None)
+        if not callable(reader) or not self._home:
+            return None
+        source = (
+            'import json,base64\nfrom pathlib import Path\n'
+            'p=Path(' + repr(path) + ').expanduser()\n'
+            'root=Path(' + repr(self._home.as_posix()) + ').resolve()\n'
+            'try:\n'
+            ' r=p.resolve(); r.relative_to(root)\n'
+            ' data=r.read_bytes()\n'
+            'except Exception:\n'
+            ' print(json.dumps(None)); raise SystemExit\n'
+            'if len(data)>10485760:\n'
+            ' print(json.dumps(None)); raise SystemExit\n'
+            'print(json.dumps({"data":base64.b64encode(data).decode("ascii"),"name":r.name}))\n'
+        )
+        try:
+            payload = reader(source)
+        except Exception:
+            return None
+        if not isinstance(payload, dict) or not isinstance(payload.get('data'), str):
+            return None
+        try:
+            return base64.b64decode(payload['data'], validate=True)
+        except (ValueError, TypeError):
+            return None
+
+    def _message(self, item, sid, turn_id=None, created_at='1970-01-01T00:00:00Z'):
+        message=item_message(item,sid,self.agent_id,created_at)
+        if message['role']=='user':
+            cached=self.store.get_message(self.agent_id,sid,message['id'])
+            command=self._commands.get((sid,turn_id)) or (self._pending.get(sid) if turn_id else None)
+            if command:
+                message['command_id']=command['id']
+                message['attachments']=list(command.get('attachments',[]))
+            elif isinstance(cached,dict) and cached.get('attachments'):
+                message['attachments']=cached.get('attachments',[])
+                message['command_id']=cached.get('command_id')
+            else:
+                content=item.get('content') if isinstance(item, dict) else None
+                has_media=isinstance(content,list) and any(isinstance(part,dict) and part.get('type') in {'image','localImage','audio','localAudio','local_image','local_audio'} for part in content)
+                if has_media:
+                    from .attachments import AttachmentManager
+                    from .native_attachments import bind_codex_item
+                    remote_root = self._home.as_posix() if self._home and hasattr(self, 'remote_json') else None
+                    message['attachments']=bind_codex_item(
+                        item,
+                        AttachmentManager(self.settings, self.store),
+                        self._roots(sid),
+                        remote_read=self._remote_bytes if remote_root else None,
+                        remote_root=remote_root,
+                    )
+                if not message.get('attachments'):
+                    import re
+                    from .attachments import AttachmentManager
+                    from .native_attachments import import_local_file
+                    img_paths = []
+                    raw_text = message.get('text') or ''
+                    for m in re.finditer(r'##\s*[\w\.-]+\.(?:png|jpe?g|gif|webp|svg):\s*(.+)', raw_text):
+                        img_paths.append(m.group(1).strip())
+                    for m in re.finditer(r'<image\s+[^>]*path=["\']([^"\']+)["\']', raw_text):
+                        img_paths.append(m.group(1).strip())
+                    if img_paths:
+                        manager = AttachmentManager(self.settings, self.store)
+                        roots = self._roots(sid)
+                        attachments = []
+                        for ipath in img_paths:
+                            mapped = import_local_file(manager, ipath, roots)
+                            if mapped:
+                                attachments.append(mapped)
+                        if attachments:
+                            message['attachments'] = attachments
+                if isinstance(cached, dict):
+                    message['command_id']=cached.get('command_id')
+            raw_text = message.get('text') or ''
+            if '# Files mentioned by the user:' in raw_text and '## My request:' in raw_text:
+                parts = raw_text.split('## My request:', 1)
+                if len(parts) > 1 and parts[1].strip():
+                    message['text'] = parts[1].strip()
+        elif message['role'] == 'assistant':
+            # Check for markdown image patterns like ![alt](path/to/image.png)
+            text = message.get('text', '')
+            import re
+            img_matches = list(re.finditer(r'!\[([^\]]*)\]\(([^)]+)\)', text))
+            if img_matches:
+                from .attachments import AttachmentManager
+                from .native_attachments import import_local_file
+                manager = AttachmentManager(self.settings, self.store)
+                roots = self._roots(sid)
+                attachments = list(message.get('attachments') or [])
+                for match in img_matches:
+                    img_path = match.group(2)
+                    if img_path.startswith(('http://', 'https://', 'data:', '/api/')):
+                        continue
+                    mapped = import_local_file(manager, img_path, roots)
+                    if mapped:
+                        attachments.append(mapped)
+                        # Replace the image markdown link with mapped attachment url
+                        text = text.replace(match.group(0), f'![{match.group(1)}]({mapped["url"]})')
+                message['attachments'] = attachments
+                message['text'] = text
+        elif message['kind'] == 'tool' and message.get('tool', {}).get('name') == 'imageView':
+            path = (message.get('tool', {}).get('arguments') or {}).get('path')
+            if isinstance(path, str) and path:
+                from .attachments import AttachmentManager
+                from .native_attachments import import_local_file
+                manager = AttachmentManager(self.settings, self.store)
+                roots = self._roots(sid)
+                mapped = import_local_file(manager, path, roots)
+                if mapped:
+                    message['attachments'] = [mapped]
+        return message
+
     def messages(self, sid, before=None, limit=2):
         self._scope(sid)
         cursor = None
@@ -206,10 +357,17 @@ class CodexConnection:
                 cursor = value['cursor']
             except (ValueError, KeyError, TypeError):
                 raise ConnectionError('Codex 分页游标不属于当前会话。', 400) from None
-        result = self._request('thread/items/list', {'threadId': sid, 'cursor': cursor, 'limit': limit, 'sortDirection': 'desc'})
+        try:
+            result = self._request('thread/items/list', {'threadId': sid, 'cursor': cursor, 'limit': limit, 'sortDirection': 'desc'})
+        except ConnectionError as exc:
+            # When a thread has no turns/messages yet (newly created), Codex rejected request with (-32600; rollout, history) or (-32601; thread, not supported)
+            exc_str = str(exc).lower()
+            if 'rollout' in exc_str or '-32600' in exc_str or '-32601' in exc_str or 'not supported' in exc_str or 'not found' in exc_str:
+                return {'items': [], 'next_cursor': None}
+            raise
         if not isinstance(result.get('data'), list):
             raise ConnectionError('Codex 消息分页响应无效。', 502)
-        items = [item_message(entry['item'], sid, self.agent_id) for entry in reversed(result['data'])]
+        items = [self._message(entry['item'], sid) for entry in reversed(result['data'])]
         native_cursor = result.get('nextCursor')
         next_cursor = None
         if native_cursor:
@@ -231,7 +389,21 @@ class CodexConnection:
     def _resume(self, sid):
         if sid in self._owned_threads and sid in self._bindings:
             return dict(self._bindings[sid])
-        response = self._request('thread/resume', {'threadId': sid, 'excludeTurns': True})
+        try:
+            response = self._request('thread/resume', {'threadId': sid, 'excludeTurns': True})
+        except ConnectionError as exc:
+            # If thread has no turns/history yet, thread/resume may reject (-32600; rollout, thread) or (-32601; thread, not supported)
+            exc_str = str(exc).lower()
+            if 'rollout' in exc_str or '-32600' in exc_str or '-32601' in exc_str or 'not supported' in exc_str or 'not found' in exc_str:
+                # Check if it was recorded in self._threads
+                thread = self._threads.get(sid) or {}
+                model = thread.get('model') or (self.snapshot().get('model') if hasattr(self, 'snapshot') else None) or 'default'
+                provider = thread.get('modelProvider') or 'opencodex'
+                binding = {'model': model, 'provider': provider}
+                self._bindings[sid] = binding
+                self._owned_threads.add(sid)
+                return binding
+            raise
         thread = response.get('thread') or {}
         if thread.get('id') != sid or not response.get('model'):
             raise ConnectionError('Codex 会话模型尚未读回确认。', 502)
@@ -259,6 +431,25 @@ class CodexConnection:
                 raise ConnectionError('Codex 模型切换尚未通过原生状态确认。', 502)
             return dict(self._bindings[sid])
 
+    def current_effort(self, sid):
+        self._scope(sid)
+        thread = (self._request('thread/read', {'threadId': sid, 'includeTurns': False}).get('thread') or {})
+        settings = thread.get('turn') or thread.get('settings') or thread
+        effort = settings.get('effort') or (thread.get('threadSettings') or {}).get('effort')
+        from .native_controls import REASONING_EFFORTS
+        return effort if effort in REASONING_EFFORTS else None
+
+    def set_effort(self, sid, effort):
+        from .native_controls import REASONING_EFFORTS
+        if effort not in REASONING_EFFORTS:
+            raise ConnectionError('思考强度不在原生支持范围内。', 422)
+        self._resume(sid)
+        self._request('thread/settings/update', {'threadId': sid, 'effort': effort})
+        confirmed = self.current_effort(sid)
+        if confirmed != effort:
+            raise ConnectionError('Codex 思考强度尚未读回确认。', 502)
+        return {'effort': effort}
+
     def open_ids(self):
         return list(self._pages('thread/loaded/list', {'limit': 100}))
 
@@ -283,7 +474,24 @@ class CodexConnection:
     def mutate(self, sid, updates):
         self._scope(sid)
         if updates is None:
-            raise ConnectionError('当前连接尚未接入 Codex 永久删除；未用归档冒充删除。', 501)
+            if sid in self._active:
+                raise ConnectionError('会话正在运行，未执行永久删除。', 409)
+            try:
+                self._request('thread/delete', {'threadId': sid})
+            except ConnectionError as exc:
+                # If thread was not initialized or corrupted in rollout (-32603; rollout, thread), fallback to deleting directly
+                if 'rollout' in str(exc).lower() or '-32603' in str(exc):
+                    if getattr(self, 'remote_json', None) and getattr(self, '_home', None):
+                        source = 'import sqlite3,json\\nfrom pathlib import Path\\nfor p in Path(' + repr(self._home.as_posix()) + ').glob(\"state_*.sqlite\"):\\n    with sqlite3.connect(p) as db:\\n        db.execute(\"DELETE FROM threads WHERE id=?\", (' + repr(sid) + ',))\\n        db.commit()\\nprint(json.dumps({\"deleted\":True}))'
+                        self.remote_json(source)
+                else:
+                    raise
+            for archived in (False, True):
+                rows=self._pages('thread/list', {'limit':100,'archived':archived,'modelProviders':[],'sourceKinds':['cli','vscode','exec','appServer','subAgent','subAgentReview','subAgentCompact','subAgentThreadSpawn','subAgentOther','unknown'],'useStateDbOnly':True})
+                if any(row.get('id')==sid for row in rows):
+                    raise ConnectionError('原生目录仍包含此会话，删除尚未确认。',502)
+            self._threads.pop(sid,None)
+            return
         if set(updates) - {'title'}:
             raise ConnectionError('当前仅支持原生 Codex 会话重命名。', 422)
         if 'title' in updates:
@@ -319,13 +527,23 @@ class CodexConnection:
             self._stop_commands.setdefault((sid, turn_id), []).append(dict(command))
             self._request('turn/interrupt', {'threadId': sid, 'turnId': turn_id})
             return 'accepted', None
-        if action != 'send' or command.get('attachments'):
-            return 'failed', '当前 Codex 连接仅支持文本发送。'
+        if action not in {'send', 'enqueue'}:
+            return 'failed', '当前 Codex 连接未提供此命令类型。'
+        from .codex_inputs import command_input
+        try:
+            inputs=command_input(self.settings,self.store,command)
+        except ConnectionError as exc:
+            return 'failed', exc.detail
         with self._lock:
             lock = self._session_locks.setdefault(sid, threading.Lock())
         with lock:
             if sid in self._active:
-                return 'failed', 'Codex 正在执行；请等待当前轮次或停止后发送。'
+                # Codex is currently executing a turn. Enqueue the command to dispatch automatically when current turn finishes.
+                with self._lock:
+                    self._queued.setdefault(sid, []).append(dict(command))
+                self.store.set_command_state(self.agent_id, sid, command['id'], 'queued', None)
+                self._event('command.upsert', sid, {**command, 'state': 'queued', 'error': None})
+                return 'accepted', None
             try:
                 self._resume(sid)  # Resume for explicit commands only, not metadata reads.
             except ConnectionError as exc:
@@ -333,7 +551,7 @@ class CodexConnection:
             with self._lock:
                 self._pending[sid] = dict(command)
             try:
-                response = self._request('turn/start', {'threadId': sid, 'input': [{'type': 'text', 'text': command['text']}]})
+                response = self._request('turn/start', {'threadId': sid, 'input': inputs})
                 turn = response.get('turn') or {}
                 turn_id = turn.get('id')
                 if not isinstance(turn_id, str):
@@ -359,7 +577,9 @@ class CodexConnection:
     def _session_status(self, sid, status):
         session = self.store.get_session(self.agent_id, sid)
         if session:
-            self._event('session.upsert', sid, {**session, 'status': status, 'updated_at': timestamp()})
+            updated = {**session, 'status': status, 'updated_at': timestamp()}
+            self.store.upsert_session(updated)
+            self._event('session.upsert', sid, updated)
 
     def _notification(self, frame):
         method, params = frame.get('method'), frame.get('params') or {}
@@ -376,6 +596,15 @@ class CodexConnection:
             return
         if method == 'thread/started' and self.store.get_agent(self.agent_id):
             self._record_thread(params['thread'])
+            return
+        if method == 'thread/name/updated':
+            name = params.get('name')
+            if sid and isinstance(name, str) and name:
+                session = self.store.get_session(self.agent_id, sid)
+                if session:
+                    updated = {**session, 'title': name, 'updated_at': timestamp()}
+                    self.store.upsert_session(updated)
+                    self._event('session.upsert', sid, updated)
             return
         if not isinstance(sid, str) or self.store.get_session(self.agent_id, sid) is None:
             return
@@ -413,24 +642,38 @@ class CodexConnection:
             self._session_status(sid, 'running' if method == 'turn/started' else 'error' if turn.get('status') == 'failed' else 'idle')
             if command:
                 state = 'running' if method == 'turn/started' else 'failed' if turn.get('status') == 'failed' else 'cancelled' if turn.get('status') == 'interrupted' else 'completed'
+                self.store.set_command_state(self.agent_id, sid, command['id'], state, 'Codex 原生轮次失败。' if state == 'failed' else None)
                 self._event('command.upsert', sid, {**command, 'state': state, 'error': 'Codex 原生轮次失败。' if state == 'failed' else None})
             if method == 'turn/completed':
                 for stop in self._stop_commands.pop((sid, turn_id), []):
+                    self.store.set_command_state(self.agent_id, sid, stop['id'], 'completed', None)
                     self._event('command.upsert', sid, {**stop, 'state': 'completed', 'error': None})
+                # Reconcile any older active commands for this session that finished
+                for cmd in self.store.active_commands():
+                    if cmd.get('agent_id') == self.agent_id and cmd.get('session_id') == sid and cmd.get('action') != 'enqueue':
+                        self.store.set_command_state(self.agent_id, sid, cmd['id'], 'completed', None)
+                        self._event('command.upsert', sid, {**cmd, 'state': 'completed', 'error': None})
+                # Check if there is a queued command waiting for this session
+                with self._lock:
+                    queued_list = self._queued.get(sid) or []
+                    next_command = queued_list.pop(0) if queued_list else None
+                if next_command:
+                    threading.Thread(target=self._submit, args=(next_command,), daemon=True).start()
         elif method in {'item/started', 'item/completed'}:
             item = params.get('item')
             if isinstance(item, dict) and isinstance(item.get('id'), str):
-                message = item_message(item, sid, self.agent_id, timestamp())
+                message = self._message(item, sid, params.get('turnId'), timestamp())
                 self._streams[(sid, item['id'])] = message
                 self._event('message.upsert', sid, message)
-        elif method in {'item/agentMessage/delta', 'item/reasoning/summaryTextDelta', 'item/commandExecution/outputDelta'}:
-            item_id, delta = params.get('itemId'), params.get('delta')
+        elif method and method.startswith('item/') and any(token in method for token in ('delta', 'Delta', 'output', 'Output')):
+            item_id = params.get('itemId') or params.get('id')
+            delta = params.get('delta') or params.get('textDelta') or params.get('output') or params.get('text')
             if not isinstance(item_id, str) or not isinstance(delta, str):
                 return
             key = (sid, item_id)
             message = self._streams.get(key)
             if message is None:
-                kind = 'reasoning' if 'reasoning' in method else 'commandExecution' if 'commandExecution' in method else 'agentMessage'
+                kind = 'reasoning' if 'reasoning' in method else 'commandExecution' if 'commandExecution' in method else 'plan' if 'plan' in method else 'agentMessage'
                 message = item_message({'id': item_id, 'type': kind}, sid, self.agent_id, timestamp())
             message = {**message, 'text': message['text'] + delta}
             self._streams[key] = message

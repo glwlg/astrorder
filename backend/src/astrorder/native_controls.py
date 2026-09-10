@@ -92,3 +92,33 @@ def set_session_model(rpc, session_id: str, provider: str, model: str) -> dict[s
         if info.get('model') != model or info.get('provider') != provider:
             raise ConnectionError('模型切换尚未通过原生状态读回确认。', 502)
     return {'provider': provider, 'model': model}
+
+
+REASONING_EFFORTS = ('none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max')
+
+
+def current_session_reasoning(rpc, session_id: str) -> str | None:
+    resumed = result(rpc, 'session.resume', {'session_id': session_id, 'lazy': True})
+    handle = resumed.get('session_id')
+    if not handle:
+        return None
+    try:
+        data = result(rpc, 'config.get', {'session_id': handle, 'key': 'reasoning'})
+    except ConnectionError:
+        return None
+    effort = data.get('value')
+    return effort if effort in REASONING_EFFORTS else None
+
+
+def set_session_reasoning(rpc, session_id: str, effort: str) -> dict[str, str]:
+    if effort not in REASONING_EFFORTS:
+        raise ConnectionError('思考强度不在原生支持范围内。', 422)
+    resumed = result(rpc, 'session.resume', {'session_id': session_id, 'lazy': True})
+    handle = resumed.get('session_id')
+    if not handle:
+        raise ConnectionError('原生运行时未返回会话句柄。', 502)
+    result(rpc, 'config.set', {'session_id': handle, 'key': 'reasoning', 'value': effort})
+    confirmed = current_session_reasoning(rpc, session_id)
+    if confirmed != effort:
+        raise ConnectionError('思考强度尚未通过原生状态读回确认。', 502)
+    return {'effort': effort}

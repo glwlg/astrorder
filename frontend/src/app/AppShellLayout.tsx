@@ -42,7 +42,7 @@ export function AppShellLayout() {
         if (val >= 220 && val <= 600) return val
       }
     } catch {}
-    return 280
+    return 300
   })
 
   const isResizingRef = useRef(false)
@@ -102,7 +102,7 @@ export function AppShellLayout() {
   return (
     <AppShell
       className="astrorder-shell"
-      header={{ height: 64 }}
+      header={{ height: 48 }}
       navbar={{ width: sidebarWidth, breakpoint: 'md', collapsed: { mobile: true } }}
       padding={0}
     >

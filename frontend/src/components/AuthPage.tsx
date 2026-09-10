@@ -1,5 +1,5 @@
-import { IconKey, IconLock, IconRefresh, IconSparkles } from '@tabler/icons-react'
-import { Alert, Button, Group, PasswordInput, Paper, Stack, Text, ThemeIcon, Title } from '@mantine/core'
+import { IconKey, IconLock, IconRefresh } from '@tabler/icons-react'
+import { Alert, Button, Group, PasswordInput, Paper, Stack, Text, Title } from '@mantine/core'
 import { type FormEvent, useState } from 'react'
 import { ApiError, api } from '../api/client'
 
@@ -45,9 +45,7 @@ export function AuthPage({
       <Paper className="auth-card" withBorder radius="xl" p={{ base: 'lg', sm: 'xl' }}>
         <Stack gap="lg">
           <Group gap="sm" align="center">
-            <ThemeIcon className="brand-mark" size={46} radius="xl" variant="light" color="indigo">
-              <IconSparkles size={25} stroke={1.5} />
-            </ThemeIcon>
+            <img className="brand-mark brand-mark-lg" src="/pwa-192.png" width={46} height={46} alt="" />
             <div>
               <Title order={1} size="h2">星序 · Astrorder</Title>
               <Text size="sm" c="dimmed">群星各有所长，协作自有秩序</Text>

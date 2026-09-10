@@ -23,3 +23,9 @@ it('does not fold case-sensitive Linux paths, but matches equivalent Windows sep
   expect(groups).toHaveLength(3)
   expect(groups.find(g => g.sessions.some(s => s.id === 'win-one'))?.sessions.map(s => s.id)).toEqual(['win-one', 'win-two'])
 })
+it('treats live activity as running for the rail filter without requiring status running', () => {
+  const live = { ...session('live', 'P:/work'), live: true }
+  const idle = session('idle', 'P:/other')
+  const groups = buildProjectGroups([live, idle], {}, [], '', 'running')
+  expect(groups.flatMap(g => g.sessions).map(s => s.id)).toEqual(['live'])
+})

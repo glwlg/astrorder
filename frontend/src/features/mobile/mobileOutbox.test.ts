@@ -16,6 +16,14 @@ describe('durable mobile outbox (inert transport)', () => {
     expect(send).toHaveBeenCalledTimes(1)
     expect(outbox.entries[1].state).toBe('queued')
   })
+  it('keeps the native rejection text on a failed send', async () => {
+    const send = vi.fn(async (p: CommandPayload) => ({ ...receipt(p, 'failed'), error: '该会话正由 Hermes 桌面端占用。' }))
+    const outbox = new MobileOutbox({ load: async () => [], save: async () => {} }, { send, upload: vi.fn() })
+    await outbox.enqueue(payload('blocked'), [])
+    await outbox.flush('agent', 'native')
+    expect(outbox.entries[0].state).toBe('failed')
+    expect(outbox.entries[0].error).toContain('桌面端占用')
+  })
   it('does not clear or submit anything when durable storage rejects the write', async () => {
     const send = vi.fn()
     const outbox = new MobileOutbox({ load: async () => [], save: async () => { throw new Error('quota') } }, { send, upload: vi.fn() })

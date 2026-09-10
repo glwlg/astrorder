@@ -44,7 +44,8 @@ class RemoteCodex(CodexConnection):
 
     def remote_json(self, source):
         try:
-            result = subprocess.run(self.ssh_argv() + [build_remote_python_command(source)], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding='utf-8', timeout=30, check=False, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+            loader = 'import sys\nexec(compile(sys.stdin.read(), "<astrorder-remote>", "exec"))'
+            result = subprocess.run(self.ssh_argv() + [build_remote_python_command(loader)], input=source, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding='utf-8', timeout=30, check=False, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
             if result.returncode:
                 raise ConnectionError('SSH 探测失败；请检查连接、主机指纹及远端 Python。', 502)
             return json.loads(result.stdout)
@@ -57,6 +58,16 @@ class RemoteCodex(CodexConnection):
     def _client(self, config, on_notification, **kwargs):
         source = 'import os\nfrom pathlib import Path\np=' + repr(self.remote_executable) + '\nos.environ["PATH"]=str(Path(p).parent)+os.pathsep+os.environ.get("PATH", "")\nos.execv(p,[p,"app-server","--listen","stdio://"])\n'
         return CodexAppServer(config, on_notification, **kwargs, launch_argv=self.ssh_argv() + [build_remote_python_command(source)])
+
+    def open_ids(self):
+        if not self._home:
+            return []
+        source = 'import sqlite3,json\\nfrom pathlib import Path\\n' + inspect.getsource(stored_model) + '\\np=Path(' + repr(self._home.as_posix()) + ')\\ndb_path=p/\"state.db\"\\nres=[]\\nif db_path.is_file():\\n    with sqlite3.connect(db_path) as db:\\n        for r in db.execute(\"SELECT id FROM threads WHERE archived=0 ORDER BY updated_at DESC LIMIT 50\"):\\n            res.append(r[0])\\nprint(json.dumps(res))'
+        try:
+            res = self.remote_json(source)
+            return res if isinstance(res, list) else []
+        except Exception:
+            return []
 
     def model(self, sid):
         self._scope(sid)

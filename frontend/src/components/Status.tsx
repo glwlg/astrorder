@@ -1,5 +1,5 @@
 import { IconAlertCircle, IconCircleCheck, IconLoader2, IconPlugConnected, IconPlug } from '@tabler/icons-react'
-import { Badge, Group, Text } from '@mantine/core'
+import { ActionIcon, Badge, Group, Text, Tooltip } from '@mantine/core'
 import type { AgentStatus, ConnectionStatus, SessionStatus } from '../domain/types'
 
 const agentLabels: Record<AgentStatus, string> = {
@@ -43,8 +43,17 @@ export function ConnectionBadge({ status }: { status: ConnectionStatus }) {
   const label = status === 'connected' ? '实时连接' : status === 'connecting' ? '连接中' : status === 'error' ? '连接异常' : '离线'
   const color = status === 'connected' ? 'teal' : status === 'error' ? 'red' : status === 'connecting' ? 'yellow' : 'gray'
   return (
-    <Badge className="connection-badge" color={color} variant="light" leftSection={<IconPlugConnected size={13} />}>
-      {label}
-    </Badge>
+    <Tooltip label={`连接状态：${label}`}>
+      <ActionIcon
+        className="connection-badge"
+        color={color}
+        variant="light"
+        size="md"
+        radius="md"
+        aria-label={`连接状态：${label}`}
+      >
+        <IconPlugConnected size={16} />
+      </ActionIcon>
+    </Tooltip>
   )
 }

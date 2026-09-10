@@ -1,7 +1,7 @@
 import { IconMicrophone, IconPaperclip, IconPlus, IconPlayerStop, IconArrowUp, IconX } from '@tabler/icons-react'
 import { Alert, Button, Group, Paper, Stack, Text, Textarea } from '@mantine/core'
 import { useQueryClient } from '@tanstack/react-query'
-import { type ChangeEvent, type KeyboardEvent, useRef, useState } from 'react'
+import { type ChangeEvent, type ClipboardEvent, type KeyboardEvent, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { ApiError, api } from '../../api/client'
 import { isDraftSendable, newCommandId, scopeKey } from '../../domain/semantics'
@@ -10,6 +10,7 @@ import { selectCommands, useAstrorderStore } from '../../state/store'
 import { submitBrowserCommand } from './commandActions'
 import { VoiceInputSheet } from './VoiceInputSheet'
 import { SessionModelControl } from './SessionModelControl'
+import { clipboardFiles } from './composerMedia'
 import { notifySessionSubmitted } from '../../hooks/useSessionOrder'
 import '../agents/agentsLayout.css'
 
@@ -59,19 +60,32 @@ export function ChatComposer({ session, agent }: { session: Session; agent?: Age
   const runningCommand = commands.find((command) => (command.action === 'send' || command.action === 'enqueue') && (command.state === 'running' || command.state === 'accepted'))
   const busy = submitting || session.status === 'running' || session.status === 'waiting_approval' || Boolean(runningCommand)
   const canStop = hasCapability(agent, 'stop') && busy
+  const hasDraft = isDraftSendable(draft.text, draft.attachments)
+  // 当且仅当系统处于执行中且输入框完全为空时，按钮才作为紧急打断的“停止”按钮；若有草稿输入，则作为发送/转向
+  const isStopAction = busy && !hasDraft
 
   const updateDraft = (next: DraftState) => useAstrorderStore.getState().setDraft(session.agent_id, session.id, next)
   const setText = (text: string) => updateDraft({ ...draft, text })
 
   const addFiles = (event: ChangeEvent<HTMLInputElement>) => {
-    const files = [...(event.currentTarget.files || [])]
-    if (files.length === 0) return
+    addDroppedFiles([...(event.currentTarget.files || [])])
+    event.currentTarget.value = ''
+  }
+
+  const addDroppedFiles = (files: File[]) => {
+    if (!files.length || !canAttach) return
     const additions: DraftAttachment[] = files.map((file) => {
       attachmentKeyRef.current += 1
       return { key: `draft-attachment-${attachmentKeyRef.current}`, file }
     })
     updateDraft({ ...draft, attachments: [...draft.attachments, ...additions] })
-    event.currentTarget.value = ''
+  }
+
+  const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    const files = clipboardFiles(event)
+    if (!files.length || !canAttach) return
+    event.preventDefault()
+    addDroppedFiles(files)
   }
 
   const removeAttachment = (key: string) => {
@@ -149,7 +163,7 @@ export function ChatComposer({ session, agent }: { session: Session; agent?: Age
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault()
-      if (!busy) void submit('send')
+      if (!submitting && hasDraft) void submit('send')
     }
   }
 
@@ -181,7 +195,7 @@ export function ChatComposer({ session, agent }: { session: Session; agent?: Age
           </div>
         )}
         {!canChat && <Text size="xs" c="dimmed">此 Agent 未报告 chat 能力，发送控件已禁用。</Text>}
-        <Textarea className="composer-input" aria-label="消息内容" placeholder="随心输入" variant="unstyled" autosize minRows={2} maxRows={8} value={draft.text} onChange={(event) => setText(event.currentTarget.value)} onKeyDown={handleKeyDown} disabled={!canChat || submitting} />
+        <Textarea className="composer-input" aria-label="消息内容" placeholder="随心输入，可粘贴图片" variant="unstyled" autosize minRows={2} maxRows={8} value={draft.text} onChange={(event) => setText(event.currentTarget.value)} onPaste={handlePaste} onKeyDown={handleKeyDown} disabled={!canChat || submitting} />
         <Group className="composer-row" align="center" gap="xs" wrap="nowrap">
           <Button
             className="attachment-button"
@@ -209,14 +223,14 @@ export function ChatComposer({ session, agent }: { session: Session; agent?: Age
 
           <Button
             className="send-button"
-            color={busy ? 'red' : 'indigo'}
+            color={isStopAction ? 'red' : 'indigo'}
             radius="xl"
-            disabled={submitting || (busy ? !canStop : !canChat || !isDraftSendable(draft.text, draft.attachments))}
-            onClick={() => void submit(busy ? 'stop' : 'send', busy ? runningCommand?.id || null : null)}
-            aria-label={busy ? '停止' : '发送'}
+            disabled={submitting || (isStopAction ? !canStop : !canChat || !hasDraft)}
+            onClick={() => void submit(isStopAction ? 'stop' : 'send', isStopAction ? runningCommand?.id || null : null)}
+            aria-label={isStopAction ? '停止' : '发送'}
             aria-busy={submitting}
           >
-            {busy ? <IconPlayerStop size={18} /> : <IconArrowUp size={18} />}
+            {isStopAction ? <IconPlayerStop size={18} /> : <IconArrowUp size={18} />}
           </Button>
         </Group>
 

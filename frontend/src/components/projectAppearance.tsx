@@ -109,6 +109,27 @@ export function savePinnedProjects(pins: string[]): void {
   } catch {}
 }
 
+export function purgeProjectPreferences(projectKey: string): void {
+  try {
+    const app = loadProjectAppearance()
+    if (projectKey in app) {
+      delete app[projectKey]
+      saveProjectAppearance(app)
+    }
+    const pins = loadPinnedProjects()
+    if (pins.includes(projectKey)) {
+      savePinnedProjects(pins.filter(k => k !== projectKey))
+    }
+    const orderRaw = localStorage.getItem('astrorder:project_order')
+    if (orderRaw) {
+      const order = JSON.parse(orderRaw)
+      if (Array.isArray(order) && order.includes(projectKey)) {
+        localStorage.setItem('astrorder:project_order', JSON.stringify(order.filter(k => k !== projectKey)))
+      }
+    }
+  } catch {}
+}
+
 export const ICON_COMPONENT_MAP: Record<string, React.ComponentType<{ size?: number; color?: string; style?: React.CSSProperties }>> = {
   folder: IconFolder,
   rocket: IconRocket,

@@ -2,8 +2,10 @@ import type { Session } from '../domain/types'
 import { scopeKey } from '../domain/semantics'
 
 export function isSessionOpen(session: Session): boolean {
+  if (session.live === true) return true
+  if (session.status === 'running' || session.status === 'waiting_approval') return true
   if (typeof session.is_open === 'boolean') return session.is_open
-  return session.status === 'running' || session.status === 'waiting_approval' || ['owned', 'live'].includes(session.control_state || '')
+  return false
 }
 
 export function adjacentOpenSession(sessions: Session[], current: Session | null, direction: number): Session | undefined {

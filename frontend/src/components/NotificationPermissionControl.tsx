@@ -1,5 +1,5 @@
 import { IconBell } from '@tabler/icons-react'
-import { Button } from '@mantine/core'
+import { ActionIcon, Tooltip } from '@mantine/core'
 import { useState } from 'react'
 import { notificationPermission, requestNotificationPermission, type NotificationPermissionState } from '../domain/notifications'
 
@@ -17,17 +17,19 @@ export function NotificationPermissionControl() {
   }
   const disabled = permission !== 'default'
   return (
-    <Button
-      variant="subtle"
-      size="compact-sm"
-      leftSection={<IconBell size={16} />}
-      onClick={() => void enable()}
-      disabled={disabled}
-      aria-live="polite"
-      aria-label={labels[permission]}
-      style={{ minHeight: 44 }}
-    >
-      {labels[permission]}
-    </Button>
+    <Tooltip label={labels[permission]}>
+      <ActionIcon
+        variant="subtle"
+        size="md"
+        radius="md"
+        onClick={() => void enable()}
+        disabled={disabled}
+        aria-live="polite"
+        aria-label={labels[permission]}
+        color={permission === 'granted' ? 'teal' : undefined}
+      >
+        <IconBell size={18} />
+      </ActionIcon>
+    </Tooltip>
   )
 }

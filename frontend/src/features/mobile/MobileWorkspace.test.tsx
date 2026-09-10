@@ -30,7 +30,8 @@ beforeEach(() => {
 describe('independent mobile composer', () => {
   it('shows native connection, agent, model and branch in runtime status', async () => {
     mount()
-    fireEvent.click(screen.getByRole('button', { name: '运行状态' }))
+    fireEvent.click(screen.getByRole('button', { name: '会话操作' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: '运行状态' }))
     const facts = screen.getByLabelText('运行信息')
     await waitFor(() => expect(facts).toHaveTextContent('feature/native'))
     expect(facts).toHaveTextContent('p/bound-model')
@@ -74,6 +75,24 @@ describe('independent mobile composer', () => {
     const project = view.container.querySelector('.m-project-list > section:not(.m-pinned-sessions)')!
     expect(pinned.compareDocumentPosition(project) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(project.querySelectorAll('.m-session-row')).toHaveLength(0)
+  })
+  it('opens the session drawer from a left-edge right swipe', async () => {
+    const view = mount()
+    const shell = view.container.querySelector('.mobile-workspace')!
+    fireEvent.touchStart(shell, { touches: [{ clientX: 8, clientY: 300 }] })
+    fireEvent.touchEnd(shell, { changedTouches: [{ clientX: 112, clientY: 307 }] })
+    expect(await screen.findByRole('dialog', { name: '会话列表' })).toBeInTheDocument()
+    expect(view.container.querySelector('.m-session-sheet')).toBeInTheDocument()
+  })
+  it('does not close the session drawer on a vertical list scroll', async () => {
+    const view = mount()
+    fireEvent.click(screen.getByRole('button', { name: '打开会话列表' }))
+    const sheet = await screen.findByRole('dialog', { name: '会话列表' })
+    fireEvent.touchStart(sheet, { touches: [{ clientX: 180, clientY: 220 }] })
+    fireEvent.touchMove(sheet, { touches: [{ clientX: 168, clientY: 390 }] })
+    fireEvent.touchEnd(sheet)
+    expect(screen.getByRole('dialog', { name: '会话列表' })).toBeInTheDocument()
+    expect(view.container.querySelector('.m-session-sheet')).toBeInTheDocument()
   })
   it('stores an offline file and draft before clearing without uploading', async () => {
     const upload = vi.spyOn(api, 'uploadAttachment').mockRejectedValue(new Error('must not upload offline'))

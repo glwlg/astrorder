@@ -18,3 +18,28 @@ it('loads once per upward wheel gesture even when two messages fit the viewport'
   fireEvent.wheel(screen.getByRole('log'), { deltaY: -100 })
   expect(load).toHaveBeenCalledTimes(1)
 })
+it('keeps diagonal inner swipes available for open-session navigation', () => {
+  const onSwipe = vi.fn()
+  render(<MobileTranscript messages={[]} busy={false} hasOlder={false} loadingOlder={false} loadOlder={vi.fn()} onMessageAction={vi.fn()} onImage={vi.fn()} onSwipe={onSwipe} />)
+  const log = screen.getByRole('log')
+  fireEvent.touchStart(log, { touches: [{ clientX: 260, clientY: 300 }] })
+  fireEvent.touchEnd(log, { changedTouches: [{ clientX: 140, clientY: 360 }] })
+  expect(onSwipe).toHaveBeenCalledWith({ direction: 1, vertical: 1, cut: 'next-down' })
+})
+it('leaves a right swipe that starts at the bezel for the session drawer', () => {
+  const onSwipe = vi.fn()
+  render(<MobileTranscript messages={[]} busy={false} hasOlder={false} loadingOlder={false} loadOlder={vi.fn()} onMessageAction={vi.fn()} onImage={vi.fn()} onSwipe={onSwipe} />)
+  const log = screen.getByRole('log')
+  fireEvent.touchStart(log, { touches: [{ clientX: 8, clientY: 300 }] })
+  fireEvent.touchEnd(log, { changedTouches: [{ clientX: 120, clientY: 306 }] })
+  expect(onSwipe).not.toHaveBeenCalled()
+})
+
+it('does not let a diagonal bezel gesture switch sessions', () => {
+  const onSwipe = vi.fn()
+  render(<MobileTranscript messages={[]} busy={false} hasOlder={false} loadingOlder={false} loadOlder={vi.fn()} onMessageAction={vi.fn()} onImage={vi.fn()} onSwipe={onSwipe} />)
+  const log = screen.getByRole('log')
+  fireEvent.touchStart(log, { touches: [{ clientX: 32, clientY: 300 }] })
+  fireEvent.touchEnd(log, { changedTouches: [{ clientX: 180, clientY: 380 }] })
+  expect(onSwipe).not.toHaveBeenCalled()
+})

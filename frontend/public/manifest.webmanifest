@@ -1,10 +1,10 @@
 {
-  "id": "/mobile",
+  "id": "/",
   "name": "星序 · Astrorder",
   "short_name": "星序",
   "lang": "zh-CN",
-  "start_url": "/mobile",
-  "scope": "/mobile",
+  "start_url": "/",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#1d2740",
   "theme_color": "#1d2740",

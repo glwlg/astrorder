@@ -1,5 +1,5 @@
-import { IconAdjustments, IconLayoutDashboard, IconMessageCircle, IconSparkles } from '@tabler/icons-react'
-import { Group, NavLink, Stack, Text, ThemeIcon, Title } from '@mantine/core'
+import { IconAdjustments, IconLayoutDashboard, IconMessageCircle } from '@tabler/icons-react'
+import { NavLink, Stack, Text } from '@mantine/core'
 import { NavLink as RouterNavLink } from 'react-router-dom'
 import type { Agent, Project, Session } from '../domain/types'
 import { SessionRail } from './SessionRail'
@@ -26,16 +26,7 @@ export function Sidebar({
   onNavigate?: () => void
 }) {
   return (
-    <Stack className="sidebar-content" gap="lg">
-      <Group className="sidebar-brand" gap="sm" wrap="nowrap">
-        <ThemeIcon className="brand-mark" size={38} radius="xl" variant="light" color="indigo">
-          <IconSparkles size={21} stroke={1.5} />
-        </ThemeIcon>
-        <div>
-          <Title order={1} size="h4">星序 · Astrorder</Title>
-          <Text size="xs" c="dimmed">独立 Agent 控制台</Text>
-        </div>
-      </Group>
+    <Stack className="sidebar-content" gap="md">
       <nav aria-label="主导航">
         <Stack gap={4}>
           {navItems.map(({ to, label, icon: Icon }) => (
@@ -46,6 +37,9 @@ export function Sidebar({
               label={label}
               leftSection={<Icon size={19} stroke={1.7} />}
               onClick={onNavigate}
+              variant="light"
+              color="gray"
+              className="sidebar-nav-link"
             />
           ))}
         </Stack>

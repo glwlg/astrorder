@@ -6,6 +6,7 @@ export type OutboxEntry = {
   attachments: Attachment[]
   state: Command['state'] | 'submitting'
   sawRunning?: boolean
+  acceptedAt?: number
   error?: string
 }
 export interface OutboxStorage {
@@ -92,8 +93,9 @@ export class MobileOutbox {
         const next = command ? { ...row, state: command.state, error: command.error || undefined } : row
         const session = sessions.find(s => s.id === row.payload.session_id && s.agent_id === row.payload.agent_id)
         if (['accepted', 'running'].includes(next.state)) {
-          if (row.sawRunning && session?.status === 'idle') return []
+          if (session?.status === 'idle' && (row.sawRunning || (row.acceptedAt && Date.now() - row.acceptedAt > 15000))) return []
           if (session?.status === 'running') return [{ ...next, sawRunning: true }]
+          if (next.state === 'accepted' && !row.acceptedAt) return [{ ...next, acceptedAt: Date.now() }]
         }
         return [next]
       })

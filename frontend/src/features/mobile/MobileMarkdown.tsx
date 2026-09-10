@@ -16,6 +16,7 @@ export function MobileMarkdown({ value }: { value: string }) {
   return <div className="markdown-content"><ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml components={{
     pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
     a: ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>,
+    img: ({ src, alt }) => <img src={src} alt={alt || ''} loading="lazy" style={{ maxWidth: '100%', borderRadius: 8, marginTop: 8, marginBottom: 8, display: 'block' }} />,
     table: ({ children }) => <div style={{ overflowX: 'auto' }}><table>{children}</table></div>,
   }}>{value}</ReactMarkdown></div>
 }

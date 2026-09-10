@@ -5,6 +5,7 @@ import io
 import json
 import subprocess
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -15,6 +16,7 @@ from astrorder.connections import (
     HermesRuntime,
     LocalHermesController,
     build_ssh_validation_argv,
+    hermes_command_rejection,
     paginate_native_session_rows,
 )
 from astrorder.events import EventHub
@@ -272,6 +274,100 @@ def test_local_tui_command_maps_durable_session_identity_to_live_gateway_id(tmp_
             {"session_id": "live-tui-session-id", "text": "opaque command", "surface": "hud"},
         )
     ]
+
+
+def test_local_tui_image_is_attached_as_bytes_before_submit(tmp_path: Path):
+    raw = b"\x89PNG\r\n\x1a\nimage"
+    (tmp_path / "safe.blob").write_bytes(raw)
+    controller = LocalHermesController(
+        Settings(
+            browser_secret="browser-test-secret",
+            connector_secret="connector-test-secret",
+            database_url=f"sqlite:///{(tmp_path / 'state.sqlite3').as_posix()}",
+            attachments_dir=tmp_path,
+        ),
+        project_root=tmp_path,
+        runtime_finder=lambda: None,
+    )
+    controller._state = "connected"
+    controller._process = FakeProcess()
+    controller._runtime_session_id = "durable-session-key"
+    controller._tui_session_id = "live-tui-session-id"
+    store = Mock()
+    store.get_attachment.return_value = {"storage_name": "safe.blob", "media_type": "image/png", "name": "shot.png"}
+    controller.store = store
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    def rpc(method: str, params: dict[str, object], timeout: float = 15):
+        del timeout
+        calls.append((method, params))
+        if method == "image.attach_bytes":
+            return {"result": {"attached": True, "path": "/native/shot.png"}}
+        if method == "prompt.submit":
+            return {"result": {"accepted": True}}
+        raise AssertionError(method)
+
+    controller._rpc = rpc
+    state, error = controller.submit_tui_command(
+        {"session_id": "durable-session-key", "text": "看图", "attachments": [{"id": "upload-id"}]}
+    )
+    assert (state, error) == ("accepted", None)
+    assert calls[0][0] == "image.attach_bytes"
+    assert "content_base64" in calls[0][1]
+    assert calls[1] == ("prompt.submit", {"session_id": "live-tui-session-id", "text": "看图", "surface": "hud"})
+    assert str(tmp_path) not in str(calls)
+    assert "C:\\" not in str(calls)
+
+
+def test_hermes_command_rejection_names_desktop_owner_instead_of_generic_failure():
+    message = (
+        "Session 20260909_155350_370016 already has a live owner (desktop, pid 27196). "
+        "Only one surface at a time may run a session, because a second one would "
+        "reason from a transcript that does not include the first one's work."
+    )
+    text = hermes_command_rejection(
+        {"error": {"code": 4090, "message": message, "data": {"reason": "SESSION_NOT_OWNED"}}}
+    )
+    assert "桌面端占用" in text
+    assert "pid 27196" not in text
+    generic = hermes_command_rejection({"error": {"code": 32, "message": "unknown method"}})
+    assert generic == "本机 Hermes 拒绝了命令投递：unknown method"
+
+
+def test_local_tui_owned_session_keeps_native_rejection_reason(tmp_path: Path):
+    controller = LocalHermesController(
+        Settings(
+            browser_secret="browser-test-secret",
+            connector_secret="connector-test-secret",
+            database_url=f"sqlite:///{(tmp_path / 'state.sqlite3').as_posix()}",
+            attachments_dir=tmp_path / "attachments",
+        ),
+        project_root=tmp_path,
+        runtime_finder=lambda: None,
+    )
+    controller._state = "connected"
+    controller._process = FakeProcess()
+    controller._runtime_session_id = "durable-session-key"
+    controller._tui_session_id = "live-tui-session-id"
+
+    def rpc(method: str, params: dict[str, object], timeout: float = 15):
+        del timeout, params
+        assert method == "prompt.submit"
+        return {
+            "error": {
+                "code": 4090,
+                "message": "Session durable-session-key already has a live owner (desktop, pid 1).",
+                "data": {"reason": "SESSION_NOT_OWNED"},
+            }
+        }
+
+    controller._rpc = rpc
+    state, error = controller.submit_tui_command(
+        {"session_id": "durable-session-key", "text": "消息发送测试"}
+    )
+    assert state == "failed"
+    assert error is not None
+    assert "桌面端占用" in error
 
 
 def test_service_startup_marks_persisted_connectors_disconnected(tmp_path: Path):

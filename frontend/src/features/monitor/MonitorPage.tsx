@@ -30,7 +30,7 @@ function MonitorCard({ session, agent, onOpen }: { session: Session; agent?: Age
         </Group>
         <Group gap="xs" wrap="wrap">
           {agent && <AgentStatusBadge status={agent.status} />}
-          {activeCommand && <Badge color="indigo" variant="light" leftSection={<IconBolt size={13} />}>指令执行中</Badge>}
+          {activeCommand && <Badge color="dark" variant="light" leftSection={<IconBolt size={13} />}>指令执行中</Badge>}
           {approvals.length > 0 && <Badge color="yellow" variant="light" leftSection={<IconShieldCheck size={13} />}>{approvals.length} 个待确认</Badge>}
         </Group>
         <div className="monitor-activity-list" aria-label="最近活动">
@@ -62,7 +62,7 @@ export function MonitorPage() {
   }, [sessions])
   const queuedCommands = useMemo(() => commands.filter((command) => command.state === 'queued').sort((a, b) => a.created_at.localeCompare(b.created_at)), [commands])
   const counts = useMemo(() => ({
-    running: orderedSessions.filter((session) => session.status === 'running').length,
+    running: orderedSessions.filter((session) => session.status === 'running' || session.live).length,
     waiting: orderedSessions.filter((session) => session.status === 'waiting_approval').length,
   }), [orderedSessions])
 
@@ -75,7 +75,7 @@ export function MonitorPage() {
           <Text c="dimmed" mt={5}>按事件观察多个会话的运行状态、工具活动和待确认操作。</Text>
         </div>
         <Group gap="sm">
-          <Group className="monitor-summary" gap="xs"><Badge color="indigo" variant="light" leftSection={<IconBolt size={13} />}>{counts.running} 运行中</Badge><Badge color="yellow" variant="light" leftSection={<IconClock size={13} />}>{counts.waiting} 待确认</Badge><Badge color={queuedCommands.length ? 'yellow' : 'gray'} variant="light" leftSection={<IconListCheck size={13} />}>{queuedCommands.length} 待机</Badge><Text size="sm" c="dimmed">{orderedSessions.length} 个会话</Text></Group>
+          <Group className="monitor-summary" gap="xs"><Badge color="dark" variant="light" leftSection={<IconBolt size={13} />}>{counts.running} 运行中</Badge><Badge color="yellow" variant="light" leftSection={<IconClock size={13} />}>{counts.waiting} 待确认</Badge><Badge color={queuedCommands.length ? 'yellow' : 'gray'} variant="light" leftSection={<IconListCheck size={13} />}>{queuedCommands.length} 待机</Badge><Text size="sm" c="dimmed">{orderedSessions.length} 个会话</Text></Group>
           <SegmentedControl value={layout} onChange={setLayout} data={[{ label: '网格', value: 'grid' }, { label: '列表', value: 'list' }]} aria-label="监控室布局" />
         </Group>
       </Group>

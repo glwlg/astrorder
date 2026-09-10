@@ -6,6 +6,7 @@ import { useQuery } from '@tanstack/react-query'
 import { api } from '../../api/client'
 import type { Session } from '../../domain/types'
 import { useSessionModel } from '../../hooks/useSessionModel'
+import { REASONING_EFFORTS } from './composerMedia'
 import './SessionModelControl.css'
 
 type Choice = { provider: string; model: string; label: string }
@@ -33,14 +34,32 @@ export function SessionModelControl({ session }: { session: Session }) {
       notifications.show({ message: error instanceof Error ? error.message : '模型切换未确认', color: 'red' })
     } finally { setChanging(false) }
   }
+  const applyEffort = async (effort: string) => {
+    if (changing || effort === model.effort) return
+    setChanging(true)
+    try {
+      await model.changeEffort(effort)
+      notifications.show({ message: '思考强度已由原生端确认', color: 'teal' })
+    } catch (error) {
+      notifications.show({ message: error instanceof Error ? error.message : '思考强度未确认', color: 'red' })
+    } finally { setChanging(false) }
+  }
+  const effortLabel = REASONING_EFFORTS.find(item => item.value === model.effort)?.label
   return <>
     <Group className="session-model-control" gap="xs" wrap="nowrap">
-
-      <Button size="xs" variant="light" aria-label="选择会话模型" title={model.label} leftSection={<IconCpu size={15} />} rightSection={<IconChevronDown size={14} />} onClick={() => { setChoice(null); setSearch(''); setOpened(true) }}><span>{model.label}</span></Button>
+      <Button size="xs" variant="light" aria-label="选择会话模型" title={model.label} leftSection={<IconCpu size={15} />} rightSection={<IconChevronDown size={14} />} onClick={() => { setChoice(null); setSearch(''); setOpened(true) }}><span>{model.label}{effortLabel ? ` · ${effortLabel}` : ''}</span></Button>
     </Group>
     <Modal opened={opened} onClose={() => setOpened(false)} title="切换会话模型" size="lg" centered>
       <Stack gap="sm">
         <Text size="sm">当前模型：{model.label}</Text>
+        <div>
+          <Text size="xs" c="dimmed" mb={6}>思考强度</Text>
+          <Group gap={6}>
+            {REASONING_EFFORTS.map(item => (
+              <Button key={item.value} size="compact-xs" variant={model.effort === item.value ? 'filled' : 'light'} aria-pressed={model.effort === item.value} aria-label={`思考强度 ${item.label}`} disabled={changing} onClick={() => void applyEffort(item.value)}>{item.label}</Button>
+            ))}
+          </Group>
+        </div>
         <TextInput aria-label="搜索模型" placeholder="搜索模型或提供商" value={search} onChange={event => setSearch(event.currentTarget.value)} />
         <div className="session-model-options">
           {options.isFetching && <Text size="sm" c="dimmed">读取可用模型…</Text>}

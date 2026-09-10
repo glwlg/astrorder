@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import logging
 import queue
 import re
 import shlex
@@ -17,7 +18,9 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from .connections import ConnectionError, _windows_hide_flags
+from .connections import ConnectionError, _windows_hide_flags, hermes_command_rejection
+
+logger = logging.getLogger(__name__)
 
 
 def _safe_process_line(value: str, maximum: int = 400) -> str:
@@ -362,6 +365,10 @@ class SshNativeRuntime:
         ).hexdigest()[:24]
         self._tui_session_id: str | None = None
         self._runtime_session_id: str | None = None
+        self.service: Any = None
+        self.store: Any = None
+        self._tui_to_session: dict[str, str] = {}
+        self._active_submitted_commands: dict[str, str] = {}
 
     @property
     def agent_id(self) -> str:
@@ -555,8 +562,12 @@ class SshNativeRuntime:
                     if waiter is not None:
                         waiter.put(frame)
                 params = frame.get("params")
-                if frame.get("method") == "event" and isinstance(params, dict) and params.get("type") == "gateway.ready":
-                    self._gateway_ready.set()
+                if frame.get("method") == "event" and isinstance(params, dict):
+                    event_type = params.get("type")
+                    if event_type == "gateway.ready":
+                        self._gateway_ready.set()
+                    elif event_type == "message.complete":
+                        self._on_message_complete(params)
 
         def drain_stderr() -> None:
             stream = getattr(process, "stderr", None)
@@ -568,6 +579,29 @@ class SshNativeRuntime:
 
         threading.Thread(target=read_stdout, name=f"astrorder-ssh-rpc-{self.connection_id}", daemon=True).start()
         threading.Thread(target=drain_stderr, name=f"astrorder-ssh-stderr-{self.connection_id}", daemon=True).start()
+
+    def _on_message_complete(self, params: dict[str, Any]) -> None:
+        tui_sid = params.get("session_id")
+        session_id = self._tui_to_session.get(str(tui_sid)) or self._runtime_session_id
+        agent_id = self._agent_id
+        if not session_id or not agent_id or not self.store:
+            return
+        cmd_id = self._active_submitted_commands.pop(session_id, None)
+        to_complete: list[str] = [cmd_id] if cmd_id else []
+        if not to_complete:
+            try:
+                for c in self.store.list_commands(agent_id, session_id):
+                    if c.get("state") in {"accepted", "running"}:
+                        to_complete.append(c["id"])
+            except Exception as exc:
+                logger.debug("Failed listing commands for SSH completion: %s", exc)
+        for cid in to_complete:
+            try:
+                updated = self.store.set_command_state(agent_id, session_id, cid, "completed", None)
+                if self.service is not None:
+                    self.service._server_event("command.upsert", agent_id=agent_id, session_id=session_id, data=updated)
+            except Exception as exc:
+                logger.debug("Failed completing SSH command %s: %s", cid, exc)
 
     def start(self) -> None:
         with self._lock:
@@ -748,6 +782,28 @@ class SshNativeRuntime:
             return []
         return json.loads(response.stdout).get('items', [])
 
+    def read_presence(self, session_ids):
+        from . import native_user_activity
+        if self._metadata is None:
+            return {'items': [], 'open_ids': [], 'live_ids': []}
+        payload = {'database': self._metadata.profile_home.rstrip('/\\') + '/state.db', 'session_ids': session_ids}
+        command = build_remote_stdin_bootstrap_command(interpreter=self._metadata.python_path, fallback_interpreter=None)
+        response = self._command_runner(
+            [*self._base_ssh_argv(), self._target(), command],
+            input=build_bootstrap_stdin(Path(native_user_activity.__file__).read_text(encoding='utf-8'), payload),
+            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=15,
+            check=False, creationflags=_windows_hide_flags(),
+        )
+        if response.returncode:
+            return {'items': [], 'open_ids': [], 'live_ids': []}
+        try:
+            data = json.loads(response.stdout)
+        except ValueError:
+            return {'items': [], 'open_ids': [], 'live_ids': []}
+        if isinstance(data, dict) and 'items' in data:
+            return {'items': data.get('items') or [], 'open_ids': data.get('open_ids') or [], 'live_ids': data.get('live_ids') or []}
+        return {'items': [], 'open_ids': [], 'live_ids': []}
+
     def load_native_history_page(self, session_id: str, before: str | None, limit: int) -> dict[str, Any]:
         from . import native_history_page
         if self._metadata is None:
@@ -794,35 +850,28 @@ class SshNativeRuntime:
             text_value = command.get("text")
             if not isinstance(text_value, str):
                 return "failed", "远程 Hermes 命令文本无效。"
-            # 先上报 user message 确保用户消息在 Agent 回复之前入库
-            from datetime import UTC, datetime
-            from uuid import uuid4
-            user_msg_id = f"hermes-user-{uuid4()}"
-            user_msg = {
-                "id": user_msg_id,
-                "session_id": session_id,
-                "agent_id": command.get("agent_id") or self._agent_id,
-                "role": "user",
-                "kind": "message",
-                "text": text_value,
-                "attachments": [],
-                "created_at": datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
-                "command_id": command.get("id"),
-            }
+            from .hermes_inputs import rollback, stage
+            settings = getattr(self, "app_settings", None)
             store = getattr(self, "store", None)
-            if store is not None:
-                try:
-                    store.upsert_message(user_msg)
-                except Exception as e:
-                    logger.debug("Failed to pre-upsert user message in ssh submit: %s", e)
-
+            try:
+                text_value, attached = stage(self.rpc, tui_id, command, settings, store)
+            except ConnectionError as exc:
+                return "failed", exc.detail
             response = self.rpc("prompt.submit", {"session_id": tui_id, "text": text_value, "surface": "hud"}, timeout=20)
             if response is None:
+                rollback(self.rpc, tui_id, attached)
                 return "unknown", "远程 Hermes 未确认命令投递结果；不会自动重发。"
             if response.get("error") is not None:
-                return "failed", "远程 Hermes 拒绝了命令投递。"
+                rollback(self.rpc, tui_id, attached)
+                return "failed", hermes_command_rejection(response, remote=True)
             if not isinstance(response.get("result"), dict):
+                rollback(self.rpc, tui_id, attached)
                 return "unknown", "远程 Hermes 返回了无法确认的命令结果；不会自动重发。"
+            if tui_id and session_id:
+                self._tui_to_session[str(tui_id)] = str(session_id)
+            cmd_id = command.get("id")
+            if session_id and isinstance(cmd_id, str):
+                self._active_submitted_commands[str(session_id)] = cmd_id
             return "accepted", None
 
     def stop(self) -> None:

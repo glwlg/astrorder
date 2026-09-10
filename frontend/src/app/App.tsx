@@ -14,7 +14,7 @@ import { MonitorPage } from '../features/monitor/MonitorPage'
 import { AgentsPage } from '../features/agents/AgentsPage'
 
 function LoadingPage({ label = '正在连接星序…' }: { label?: string }) {
-  return <Center className="loading-page"><Stack align="center" gap="sm"><Loader size="md" color="indigo" /><Text c="dimmed">{label}</Text></Stack></Center>
+  return <Center className="loading-page"><Stack align="center" gap="sm"><Loader size="md" color="gray" /><Text c="dimmed">{label}</Text></Stack></Center>
 }
 
 function BootstrapError({ error, retry }: { error: unknown; retry: () => void }) {
@@ -34,16 +34,37 @@ function BootstrapError({ error, retry }: { error: unknown; retry: () => void })
   )
 }
 
+const MOBILE_MEDIA_QUERY = '(max-width: 767px), (orientation: landscape) and (max-height: 500px)'
+
+function checkIsMobileViewport(): boolean {
+  if (typeof window === 'undefined') return false
+  if (window.innerWidth < 768) return true
+  if (window.innerHeight <= 500 && window.innerWidth > window.innerHeight) return true
+  return window.matchMedia(MOBILE_MEDIA_QUERY).matches
+}
+
 function AuthenticatedApp() {
-  const mobileViewport = useMediaQuery('(max-width: 767px)')
+  const mobileViewport = useMediaQuery(MOBILE_MEDIA_QUERY, checkIsMobileViewport())
   const location = useLocation()
   const queryClient = useQueryClient()
   const bootstrap = useBootstrap(true)
-  useEventStream(true, queryClient)
+  useEventStream(Boolean(bootstrap.data), queryClient)
 
   if (bootstrap.isLoading) return <LoadingPage label="正在读取已认证工作台…" />
   if (bootstrap.error) return <BootstrapError error={bootstrap.error} retry={() => void bootstrap.refetch()} />
-  if (mobileViewport || location.pathname.startsWith('/mobile')) return <MobileWorkspace />
+
+  const isMobilePath = location.pathname.startsWith('/mobile')
+  const forceMobile = new URLSearchParams(location.search).get('view') === 'mobile'
+  const isMobile = mobileViewport || forceMobile
+
+  if (isMobile) {
+    return <MobileWorkspace />
+  }
+
+  if (isMobilePath) {
+    const desktopPath = location.pathname.replace(/^\/mobile/, '') || '/chat'
+    return <Navigate to={`${desktopPath}${location.search}`} replace />
+  }
 
   return (
     <Routes>

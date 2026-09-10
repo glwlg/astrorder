@@ -96,7 +96,7 @@ def test_open_sessions_http_is_private_and_keeps_native_ids(tmp_path):
         assert client.get('/api/v1/open-sessions').status_code == 401
         response = client.get('/api/v1/open-sessions', headers={'Authorization': 'Bearer test-only'})
         assert response.status_code == 200
-        assert response.json() == {'known_agent_ids': ['source'], 'items': [{'agent_id': 'source', 'id': 'native-id'}]}
+        assert response.json() == {'known_agent_ids': ['source'], 'items': [{'agent_id': 'source', 'id': 'native-id'}], 'live': []}
 
 
 def test_session_model_switch_is_session_scoped_and_verified():
@@ -112,3 +112,23 @@ def test_session_model_switch_is_session_scoped_and_verified():
     assert calls[2][1]['value'] == 'm --provider p --session'
     assert calls[2][1]['session_id'] == 'handle'
     with pytest.raises(ConnectionError): set_session_model(rpc, 'native', 'p', 'not-in-catalog')
+
+
+def test_reasoning_is_session_scoped_and_read_back():
+    from astrorder.native_controls import set_session_reasoning
+    current = 'medium'
+    def rpc(method, params):
+        nonlocal current
+        if method == 'session.resume':
+            return {'result': {'session_id': 'handle'}}
+        if method == 'config.get':
+            assert params['key'] == 'reasoning'
+            return {'result': {'value': current}}
+        if method == 'config.set':
+            assert params == {'session_id': 'handle', 'key': 'reasoning', 'value': 'high'}
+            current = 'high'
+            return {'result': {'value': 'high'}}
+        raise AssertionError(method)
+    assert set_session_reasoning(rpc, 'native', 'high') == {'effort': 'high'}
+    with pytest.raises(ConnectionError):
+        set_session_reasoning(rpc, 'native', 'nope')

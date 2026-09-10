@@ -24,6 +24,13 @@ it('replaces the transcript on in-app navigation, including the same native ID i
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const view = render(<MantineProvider><QueryClientProvider client={client}><MemoryRouter initialEntries={['/chat/one?agent_id=codex']}><Switcher /><Routes><Route path="/chat/:sessionId" element={<ChatPage />} /></Routes></MemoryRouter></QueryClientProvider></MantineProvider>)
   expect(await screen.findByText('body:codex/one')).toBeInTheDocument()
+  expect(view.container.querySelector('.desktop-details')).not.toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: '打开会话详情' }))
+  expect(await screen.findByRole('dialog', { name: '会话详情' })).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: '固定详情侧栏' }))
+  expect(view.container.querySelector('.desktop-details')).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: '收起详情侧栏' }))
+  expect(view.container.querySelector('.desktop-details')).not.toBeInTheDocument()
   for (const target of ['codex/two', 'hermes/one', 'codex/one', 'codex/two', 'codex/one']) {
     fireEvent.click(screen.getByRole('button', { name: target }))
     await waitFor(() => expect(screen.getByRole('heading', { level: 2, name: target })).toBeInTheDocument())

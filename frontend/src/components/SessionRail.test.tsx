@@ -170,4 +170,62 @@ describe('SessionRail project-first grouping', () => {
     const dots = document.querySelectorAll('.session-row .status-dot')
     expect(dots.length).toBeGreaterThan(0)
   })
+
+  it('allows deleting a project and cascades its sessions upon user confirmation', async () => {
+    useAstrorderStore.getState().resetRuntime()
+    useAstrorderStore.getState().hydrateBootstrap({
+      protocol_version: 1,
+      cursor: 10,
+      agents: Object.values(agents),
+      projects,
+      sessions,
+    })
+
+    const deleteSpy = vi.spyOn(api, 'deleteProject').mockResolvedValue({
+      ok: true,
+      deleted_sessions: [{ agent_id: 'local', id: 'local-1' }],
+    })
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+    function ConnectedRail() {
+      const state = useAstrorderStore()
+      return (
+        <SessionRail
+          sessions={Object.values(state.sessions)}
+          agents={state.agents}
+          projects={Object.values(state.projects)}
+          onSelect={() => {}}
+        />
+      )
+    }
+
+    const view = render(
+      <MantineProvider>
+        <ConnectedRail />
+      </MantineProvider>,
+    )
+
+    try {
+      const actionButtons = view.container.querySelectorAll('.session-project-actions button[aria-label=\"项目操作\"]')
+      expect(actionButtons.length).toBeGreaterThan(0)
+      fireEvent.click(actionButtons[0])
+
+      const deleteItem = await screen.findByRole('menuitem', { name: '删除项目' })
+      expect(deleteItem).toBeInTheDocument()
+      fireEvent.click(deleteItem)
+
+      await waitFor(() => expect(confirmSpy).toHaveBeenCalled())
+      await waitFor(() => expect(deleteSpy).toHaveBeenCalledTimes(1))
+
+      // 验证 store 中该会话被清理
+      await waitFor(() => {
+        expect(useAstrorderStore.getState().sessions[scopeKey('local', 'local-1')]).toBeUndefined()
+      })
+    } finally {
+      deleteSpy.mockRestore()
+      confirmSpy.mockRestore()
+      view.unmount()
+      useAstrorderStore.getState().resetRuntime()
+    }
+  })
 })

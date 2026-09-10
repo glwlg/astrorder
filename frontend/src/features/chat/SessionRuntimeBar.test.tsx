@@ -78,9 +78,11 @@ describe('SessionRuntimeBar', () => {
       </MantineProvider>,
     )
 
-    expect(screen.getAllByText('未报告')).toHaveLength(5)
+    expect(screen.queryByText('未报告')).not.toBeInTheDocument()
     expect(screen.queryByText('main')).not.toBeInTheDocument()
-    expect(screen.getByText('暂无排队')).toBeInTheDocument()
+    expect(screen.queryByText('暂无排队')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '展开运行详情' }))
+    expect(screen.getAllByText('未报告')).toHaveLength(5)
   })
 
   it('opens a real task from the background-task summary instead of parsing a demo value', () => {

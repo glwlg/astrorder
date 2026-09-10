@@ -23,6 +23,21 @@ export function notificationForEvent(event: EventEnvelope): EventNotification | 
   const identity = scope(event)
   if (!identity) return null
 
+  if (event.type === 'native.observation') {
+    const name = event.data.event
+    const observed = event.data.observed_at
+    if (event.data.notification !== true || typeof observed !== 'number' || Math.abs(Date.now() / 1000 - observed) > 60) return null
+    if (!['Stop', 'Interrupt', 'PermissionRequest'].includes(String(name))) return null
+    const approval = name === 'PermissionRequest'
+    return {
+      key: `${identity.agentId}::${identity.sessionId}::observation::${String(event.data.id)}`,
+      kind: approval ? 'approval_pending' : name === 'Interrupt' ? 'task_failed' : 'task_completed',
+      title: approval ? '原生端等待审批' : name === 'Interrupt' ? '原生轮次已中断' : safeLabel(textValue(event.data.session_title, 'Codex 回复完成')),
+      message: approval ? '请在原生客户端处理；观察钩子不会代为授权。' : typeof event.data.preview === 'string' && event.data.preview ? safeLabel(event.data.preview) : '本轮已结束，原生回复摘要暂不可用。',
+      agent_id: identity.agentId, session_id: identity.sessionId, created_at: new Date(observed * 1000).toISOString(),
+    }
+  }
+
   if (event.type === 'task.upsert') {
     if (event.data.kind === 'tool') return null
     const taskId = typeof event.data.id === 'string' ? event.data.id : ''

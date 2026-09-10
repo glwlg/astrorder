@@ -31,11 +31,16 @@ export function AppHeader({
   return (
     <div className="app-header">
       <Group h="100%" justify="space-between" wrap="nowrap">
-        <Group gap="sm" wrap="nowrap">
+        <Group gap="sm" wrap="nowrap" className="header-brand-group">
           <ActionIcon className="mobile-menu-button" hiddenFrom="md" variant="subtle" onClick={onMenu} aria-label="打开导航">
             <IconMenu2 size={21} />
           </ActionIcon>
-          <Title className="mobile-header-title" order={2} size="h4">星序 · Astrorder</Title>
+          <Group gap={8} wrap="nowrap" className="header-brand" align="center">
+            <img className="brand-mark" src="/pwa-192.png" width={26} height={26} alt="星序" style={{ borderRadius: 6, display: 'block' }} />
+            <Title order={1} size="h4" style={{ fontSize: '15px', fontWeight: 600, letterSpacing: '-0.01em', margin: 0, whiteSpace: 'nowrap' }}>
+              星序 · Astrorder
+            </Title>
+          </Group>
         </Group>
         <Group gap="xs" wrap="nowrap">
           <NotificationPermissionControl />

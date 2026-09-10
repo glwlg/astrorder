@@ -207,4 +207,49 @@ describe('shared runtime store', () => {
       expect.objectContaining({ command: expect.objectContaining({ text: 'Codex send' }), status: 'accepted' }),
     ])
   })
+
+  it('removes project and associated sessions on project.delete event', () => {
+    const project: Project = {
+      id: 'project-del-test',
+      source_id: 'src-1',
+      project_id: 'pid-1',
+      project_name: 'ToDelete',
+      session_count: 1,
+      updated_at: '2026-09-09T00:00:00Z',
+    }
+    const session = {
+      id: 'sess-to-del',
+      agent_id: 'ag-1',
+      title: 'Session To Delete',
+      workspace: null,
+      status: 'idle' as const,
+      updated_at: '2026-09-09T00:00:00Z',
+    }
+    useAstrorderStore.getState().hydrateBootstrap({
+      protocol_version: 1,
+      agents: [],
+      projects: [project],
+      sessions: [session],
+      cursor: 1,
+    })
+
+    expect(selectProjects(useAstrorderStore.getState())).toHaveLength(1)
+    expect(Object.keys(useAstrorderStore.getState().sessions)).toHaveLength(1)
+
+    useAstrorderStore.getState().applyEvent({
+      id: 'ev-del-proj',
+      cursor: 2,
+      type: 'project.delete',
+      agent_id: null,
+      session_id: null,
+      data: {
+        project_key: 'project-del-test',
+        project_id: 'pid-1',
+        deleted_sessions: [{ agent_id: 'ag-1', id: 'sess-to-del' }],
+      },
+    })
+
+    expect(selectProjects(useAstrorderStore.getState())).toHaveLength(0)
+    expect(Object.keys(useAstrorderStore.getState().sessions)).toHaveLength(0)
+  })
 })

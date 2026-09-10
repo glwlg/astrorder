@@ -22,4 +22,14 @@ describe('safe markdown rendering', () => {
     expect(container.querySelector('a[href^="//"]')).toBeNull()
     expect(container.querySelector('a[href="/api/v1/attachments/a"]')).not.toBeNull()
   })
+
+  it('renders local file links and image preview buttons', () => {
+    const { container } = render(
+      <MantineProvider>
+        <MarkdownContent value={'[方案](<C:/Users/test/file.drawio>) [预览](<C:/Users/test/pic.png>)'} />
+      </MantineProvider>,
+    )
+    expect(container.querySelector('.markdown-file-link')).not.toBeNull()
+    expect(container.querySelector('.markdown-image-link')).not.toBeNull()
+  })
 })

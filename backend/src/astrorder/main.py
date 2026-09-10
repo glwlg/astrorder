@@ -76,12 +76,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.connections = ConnectionController(runtime_settings, store)
         app.state.codex = CodexConnection(runtime_settings, store, service)
         app.state.environments = EnvironmentConnections(runtime_settings, store, service, app.state.connections, app.state.codex)
+        from .hermes_approvals import HermesApprovals
+        service.hermes_approvals = HermesApprovals(app.state.connections, service)
+        from .native_observers import NativeObservers
+        observers = NativeObservers(app)
+        app.state.observers = observers
+        observer_task = asyncio.create_task(observers.run())
         restore_task = None
         if runtime_settings.auto_connect_local_hermes:
             restore_task = asyncio.create_task(asyncio.to_thread(app.state.environments.restore))
         try:
             yield
         finally:
+            observers.stopping.set()
+            await observer_task
             if restore_task is not None:
                 await restore_task
             await asyncio.to_thread(app.state.codex.disconnect)
@@ -95,6 +103,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(runtime_settings.allowed_origins),
+        allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+)(:\d+)?$",
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type"],

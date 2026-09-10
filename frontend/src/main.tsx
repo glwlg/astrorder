@@ -8,9 +8,10 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter } from 'react-router-dom'
 import App from './app/App.tsx'
 import './index.css'
+import './workspaceVisuals.css'
 
 const queryClient = new QueryClient()
-const theme = createTheme({ primaryColor: 'indigo', defaultRadius: 'md' })
+const theme = createTheme({ primaryColor: 'dark', defaultRadius: 'md' })
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

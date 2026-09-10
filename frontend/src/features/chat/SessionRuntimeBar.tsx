@@ -84,15 +84,14 @@ function taskSummary(tasks: Task[], kind: Task['kind']): string | null {
   return `${matching.length} 个任务`
 }
 
-function buildSummary(messages: Message[], commands: Command[], tasks: Task[], nativeBranch?: string | null): RuntimeSummary {
-  const activeCommands = commands.filter((command) => command.state === 'running' || command.state === 'accepted').length
+function buildSummary(messages: Message[], _commands: Command[], tasks: Task[], nativeBranch?: string | null): RuntimeSummary {
   const branchFromTool = reportString(latestValue(messages, ['branch', 'git_branch', 'git.branch']))
 
 
   return {
     branch: nativeBranch === undefined ? branchFromTool : nativeBranch === '' ? '非 Git 工作区' : nativeBranch,
     changes: changeString(latestValue(messages, ['changed_files', 'changes.files', 'git.changed_files'])),
-    backgroundTasks: taskSummary(tasks, 'background') || taskString(latestValue(messages, ['background_tasks', 'tasks.background', 'task_queue'])) || (activeCommands > 0 ? `${activeCommands} 个活动` : null),
+    backgroundTasks: taskSummary(tasks, 'background') || taskString(latestValue(messages, ['background_tasks', 'tasks.background', 'task_queue'])),
     todo: taskSummary(tasks, 'todo') || progressString(latestValue(messages, ['todo', 'todo_progress', 'tasks.todo'])),
     subagents: taskSummary(tasks, 'subagent') || progressString(latestValue(messages, ['subagents', 'sub_agents', 'agents.subagents'])),
   }
@@ -106,7 +105,8 @@ function buildDetails(messages: Message[]): RuntimeDetail[] {
   })
 }
 
-function SummaryItem({ icon, label, value, taskTitle, onClick }: { icon: React.ReactNode; label: string; value: string | null; taskTitle?: string; onClick?: () => void }) {
+function SummaryItem({ icon, label, value, taskTitle, onClick, showUnknown }: { icon: React.ReactNode; label: string; value: string | null; taskTitle?: string; onClick?: () => void; showUnknown?: boolean }) {
+  if (value === null && !showUnknown) return null
   const content = <>
     <Group gap={6} wrap="nowrap"><span className="runtime-summary-icon" aria-hidden="true">{icon}</span><Text size="xs" c="dimmed">{label}</Text></Group>
     <Text size="sm" fw={600} mt={4} truncate title={value || '未报告'}>{value || '未报告'}</Text>
@@ -125,14 +125,14 @@ export function SessionRuntimeBar({ messages, commands, tasks = [], onTaskOpen, 
     <Paper className="runtime-summary-bar" withBorder radius="lg" p="sm" aria-label="运行摘要">
       <Group justify="space-between" align="flex-start" gap="sm" wrap="wrap">
         <SimpleGrid className="runtime-summary-grid" cols={{ base: 2, sm: 5 }} spacing="sm">
-          <SummaryItem icon={<IconGitBranch size={15} />} label="分支" value={summary.branch} />
-          <SummaryItem icon={<IconListCheck size={15} />} label="改动" value={summary.changes} />
-          <SummaryItem icon={<IconPlayerPlay size={15} />} label="后台任务" value={summary.backgroundTasks} taskTitle={firstTask('background')?.title} onClick={firstTask('background') && onTaskOpen ? () => onTaskOpen(firstTask('background')!) : undefined} />
-          <SummaryItem icon={<IconListCheck size={15} />} label="待办" value={summary.todo} taskTitle={firstTask('todo')?.title} onClick={firstTask('todo') && onTaskOpen ? () => onTaskOpen(firstTask('todo')!) : undefined} />
-          <SummaryItem icon={<IconUsersGroup size={15} />} label="子代理" value={summary.subagents} taskTitle={firstTask('subagent')?.title} onClick={firstTask('subagent') && onTaskOpen ? () => onTaskOpen(firstTask('subagent')!) : undefined} />
+          <SummaryItem showUnknown={expanded} icon={<IconGitBranch size={15} />} label="分支" value={summary.branch} />
+          <SummaryItem showUnknown={expanded} icon={<IconListCheck size={15} />} label="改动" value={summary.changes} />
+          <SummaryItem showUnknown={expanded} icon={<IconPlayerPlay size={15} />} label="后台任务" value={summary.backgroundTasks} taskTitle={firstTask('background')?.title} onClick={firstTask('background') && onTaskOpen ? () => onTaskOpen(firstTask('background')!) : undefined} />
+          <SummaryItem showUnknown={expanded} icon={<IconListCheck size={15} />} label="待办" value={summary.todo} taskTitle={firstTask('todo')?.title} onClick={firstTask('todo') && onTaskOpen ? () => onTaskOpen(firstTask('todo')!) : undefined} />
+          <SummaryItem showUnknown={expanded} icon={<IconUsersGroup size={15} />} label="子代理" value={summary.subagents} taskTitle={firstTask('subagent')?.title} onClick={firstTask('subagent') && onTaskOpen ? () => onTaskOpen(firstTask('subagent')!) : undefined} />
         </SimpleGrid>
         <Group gap="xs" wrap="nowrap">
-          <Badge color={queued > 0 ? 'yellow' : 'gray'} variant="light">{queued > 0 ? `${queued} 个排队` : '暂无排队'}</Badge>
+          {queued > 0 && <Badge color="yellow" variant="light">{queued} 个排队</Badge>}
           <Button
             size="compact-sm"
             variant="subtle"
@@ -148,7 +148,7 @@ export function SessionRuntimeBar({ messages, commands, tasks = [], onTaskOpen, 
       {expanded && <Stack id="runtime-summary-details" className="runtime-summary-details" gap="xs" mt="sm" aria-label="公开运行日志">
         {details.length === 0 ? <Text size="xs" c="dimmed">服务端尚未报告公开工具日志。</Text> : details.map((detail) => (
           <Group key={detail.id} className="runtime-summary-detail" justify="space-between" gap="sm" wrap="wrap">
-            <Badge variant="outline" color="indigo">{detail.name}</Badge>
+            <Badge variant="outline" color="gray">{detail.name}</Badge>
             <Text size="xs" c="dimmed">{detail.text}</Text>
           </Group>
         ))}

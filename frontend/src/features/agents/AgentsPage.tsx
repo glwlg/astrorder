@@ -17,9 +17,10 @@ import { useAstrorderStore } from '../../state/store'
 import { connectionNotice } from './connectionNotice'
 import './agentsLayout.css'
 import { EnvironmentConnections } from './EnvironmentConnections'
+import { NativeObservationPanel } from '../../components/NativeObservationPanel'
 
 const capabilityLabels: Record<string, string> = {
-  chat: '聊天', stop: '停止', queue: '排队', attachments: '附件', approvals: '审批', launch: '启动', history: '消息记录', events: '事件',
+  chat: '聊天', stop: '停止', queue: '原生排队', attachments: '附件', approvals: '审批', launch: '启动', history: '消息记录', events: '事件', task_events: '任务事件', delete: '原生删除',
 }
 
 const localStateLabels: Record<LocalHermesConnection['state'], string> = {
@@ -104,10 +105,11 @@ function AgentCard({ agent }: { agent: Agent }) {
           <AgentStatusBadge status={agent.status} />
         </Group>
         <div>
-          <Text size="xs" fw={700} c="dimmed" mb="xs">已报告能力</Text>
-          <Group gap={6}>{agent.capabilities.length > 0 ? agent.capabilities.map((capability) => <Badge key={capability} variant="outline" color="indigo">{capabilityLabels[capability] || capability}</Badge>) : <Text size="sm" c="dimmed">未报告能力</Text>}</Group>
+          <Text size="xs" fw={700} c="dimmed" mb="xs">有效接入能力 · 插件与原生通道汇总</Text>
+          <Group gap={6}>{agent.capabilities.length > 0 ? agent.capabilities.map((capability) => <Badge key={capability} variant="outline" color="gray">{capabilityLabels[capability] || capability}</Badge>) : <Text size="sm" c="dimmed">未报告能力</Text>}</Group>
         </div>
         {agent.limitation && <Alert color="yellow" variant="light" icon={<IconShieldOff size={17} />}>{connectionNotice(agent.limitation)}</Alert>}
+        {agent.kind==='codex' && <NativeObservationPanel agentId={agent.id} />}
       </Stack>
     </Paper>
   )
@@ -158,7 +160,7 @@ function LocalHermesCard({ connection, busy, onConnect, onDisconnect }: {
           <Badge color={localStateColor(connection.state)} variant="light">{localStateLabels[connection.state]}</Badge>
         </Group>
         <Text size="sm">{connection.detail}</Text>
-        <Group gap="xs"><Text size="xs" c="dimmed">运行时元数据</Text><Badge variant="outline" color="indigo">{connection.version || '未报告版本'}</Badge></Group>
+        <Group gap="xs"><Text size="xs" c="dimmed">运行时元数据</Text><Badge variant="outline" color="gray">{connection.version || '未报告版本'}</Badge></Group>
         <Text size="xs" c="dimmed">连接本机 Hermes 将启动 Astrorder 本地运行时，自动同步项目工作区与会话列表。</Text>
         <Group>
           <Button leftSection={<IconPlugConnected size={16} />} loading={busy && !isConnected} disabled={!connection.available || busy || isConnected} onClick={() => void onConnect()}>连接本机 Hermes</Button>

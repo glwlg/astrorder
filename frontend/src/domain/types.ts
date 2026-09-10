@@ -46,6 +46,8 @@ export interface Session {
   workspace: string | null
   status: SessionStatus
   updated_at: string
+  last_user_at?: string
+  live?: boolean
   source_id?: string
   connection_id?: string | null
   source_session_id?: string
@@ -146,6 +148,7 @@ export interface EventEnvelope {
 }
 
 export interface BootstrapPayload {
+  approvals?: Approval[]
   protocol_version: number
   agents: Agent[]
   projects?: Project[]

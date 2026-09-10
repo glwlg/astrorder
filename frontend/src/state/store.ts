@@ -177,6 +177,7 @@ export const useAstrorderStore = create<AstrorderStore>((set) => ({
         sessions,
         tasks,
         // A delayed or old snapshot may never move the cursor backwards.
+        approvals: payload.cursor >= state.cursor ? { ...state.approvals, ...Object.fromEntries((payload.approvals || []).map(a => [a.id, a])) } : state.approvals,
         cursor: Math.max(state.cursor, payload.cursor),
         resyncRequired: false,
       }
@@ -298,6 +299,32 @@ export const useAstrorderStore = create<AstrorderStore>((set) => ({
         const project = event.data as unknown as Project
         if (!project.id || !project.source_id || !project.project_id) return base
         return { ...base, projects: { ...state.projects, [project.id]: project } }
+      }
+
+      if (event.type === 'project.delete') {
+        const data = event.data as {
+          project_key?: string
+          project_id?: string
+          source_id?: string
+          workspace?: string
+          deleted_sessions?: Array<{ agent_id: string; id: string }>
+        }
+        const nextProjects = { ...state.projects }
+        for (const [pKey, p] of Object.entries(nextProjects)) {
+          if (
+            pKey === data?.project_key ||
+            p.id === data?.project_key ||
+            (data?.project_id && p.project_id === data.project_id && (!data.source_id || p.source_id === data.source_id)) ||
+            (data?.workspace && p.workspace === data.workspace)
+          ) {
+            delete nextProjects[pKey]
+          }
+        }
+        const nextSessions = { ...state.sessions }
+        for (const s of data?.deleted_sessions || []) {
+          delete nextSessions[scopeKey(s.agent_id, s.id)]
+        }
+        return { ...base, projects: nextProjects, sessions: nextSessions }
       }
 
       if (event.type === 'session.upsert') {

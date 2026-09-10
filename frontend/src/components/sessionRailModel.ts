@@ -1,6 +1,10 @@
-import type { Agent, Project, Session } from '../domain/types'
+import type { Agent, Project, Session, SessionStatus } from '../domain/types'
 
 export type RailFilter = 'all' | 'running' | 'unread' | 'pinned' | 'recent'
+
+export function sessionActivityStatus(session: Pick<Session, 'status' | 'live'>): SessionStatus {
+  return session.live ? 'running' : session.status
+}
 
 export function formatRelativeTime(isoString?: string): string {
   if (!isoString) return ''
@@ -94,7 +98,7 @@ function sessionMatches(session: Session, query: string, filter: RailFilter): bo
   const decorated = session as SessionDecorations
   const searchable = `${session.title} ${session.workspace || ''} ${session.project_name || ''}`.toLocaleLowerCase()
   if (query && !searchable.includes(query)) return false
-  if (filter === 'running') return session.status === 'running'
+  if (filter === 'running') return sessionActivityStatus(session) === 'running'
   if (filter === 'unread') return decorated.unread === true
   if (filter === 'pinned') return decorated.pinned === true
   if (filter === 'recent') { const age = Date.now() - Date.parse(session.updated_at); return Number.isFinite(age) && age >= 0 && age <= 86400000 }

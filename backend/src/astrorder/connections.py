@@ -35,6 +35,30 @@ class ConnectionError(RuntimeError):
         super().__init__(detail)
 
 
+def hermes_command_rejection(response: object, *, remote: bool = False) -> str:
+    """Keep the native refusal reason. Do not collapse exclusive-session locks into a generic failure."""
+    prefix = "远程 Hermes" if remote else "本机 Hermes"
+    error = response.get("error") if isinstance(response, dict) else None
+    if not isinstance(error, dict):
+        return f"{prefix} 拒绝了命令投递。"
+    message = str(error.get("message") or "").strip()
+    data = error.get("data") if isinstance(error.get("data"), dict) else {}
+    reason = str(data.get("reason") or "")
+    lowered = message.lower()
+    if reason == "SESSION_NOT_OWNED" or "already has a live owner" in lowered:
+        if "desktop" in lowered:
+            return (
+                "该会话正由 Hermes 桌面端占用。同一会话同时只能有一个入口发送，"
+                "请先在桌面关闭这个会话，或改在桌面输入。"
+            )
+        return "该会话正由另一个 Hermes 入口占用。同一会话同时只能有一个入口发送。"
+    if reason == "SESSION_COORDINATION_UNAVAILABLE" or "active-session registry" in lowered:
+        return "Hermes 无法确认该会话的占用状态，未投递。"
+    if message:
+        return f"{prefix} 拒绝了命令投递：{message}"
+    return f"{prefix} 拒绝了命令投递。"
+
+
 @dataclass(frozen=True)
 class HermesRuntime:
     executable: Path
@@ -264,6 +288,8 @@ def discover_hermes_runtime(settings: Settings) -> HermesRuntime | None:
         runtime_python = _candidate_runtime_python(resolved)
         if runtime_python is None:
             continue
+        # If --version times out (e.g. git network check), skip probing and accept the runtime directly
+        version = "Hermes Agent"
         try:
             result = subprocess.run(
                 [str(resolved), "--version"],
@@ -272,16 +298,16 @@ def discover_hermes_runtime(settings: Settings) -> HermesRuntime | None:
                 text=True,
                 encoding="utf-8",
                 errors="replace",
-                timeout=5,
+                timeout=2,
                 check=False,
                 creationflags=_windows_hide_flags(),
             )
+            if result.returncode == 0:
+                match = re.search(r"Hermes Agent v([A-Za-z0-9._-]+)", result.stdout or "")
+                if match:
+                    version = f"Hermes Agent v{match.group(1)}"
         except (OSError, subprocess.TimeoutExpired):
-            continue
-        if result.returncode != 0:
-            continue
-        match = re.search(r"Hermes Agent v([A-Za-z0-9._-]+)", result.stdout or "")
-        version = f"Hermes Agent v{match.group(1)}" if match else "Hermes Agent"
+            pass
         return HermesRuntime(executable=resolved, python=runtime_python, version=version)
     return None
 
@@ -324,6 +350,10 @@ class LocalHermesController:
         self._responses: dict[str, queue.Queue[dict[str, Any]]] = {}
         self._response_lock = threading.Lock()
         self._discovery_callback: Callable[[Any], None] | None = None
+        self.service: Any = None
+        self.store: Any = None
+        self._tui_to_session: dict[str, str] = {}
+        self._active_submitted_commands: dict[str, str] = {}
 
     @property
     def _plugin_root(self) -> Path:
@@ -483,12 +513,12 @@ class LocalHermesController:
                     if waiter is not None:
                         waiter.put(frame)
                 params = frame.get("params")
-                if (
-                    frame.get("method") == "event"
-                    and isinstance(params, dict)
-                    and params.get("type") == "gateway.ready"
-                ):
-                    self._gateway_ready.set()
+                if frame.get("method") == "event" and isinstance(params, dict):
+                    event_type = params.get("type")
+                    if event_type == "gateway.ready":
+                        self._gateway_ready.set()
+                    elif event_type == "message.complete":
+                        self._on_message_complete(params)
 
         def drain_stderr() -> None:
             stream = getattr(process, "stderr", None)
@@ -521,6 +551,29 @@ class LocalHermesController:
         finally:
             with self._response_lock:
                 self._responses.pop(request_id, None)
+
+    def _on_message_complete(self, params: dict[str, Any]) -> None:
+        tui_sid = params.get("session_id")
+        session_id = self._tui_to_session.get(str(tui_sid)) or self._runtime_session_id
+        agent_id = self._agent_id
+        if not session_id or not agent_id or not self.store:
+            return
+        cmd_id = self._active_submitted_commands.pop(session_id, None)
+        to_complete: list[str] = [cmd_id] if cmd_id else []
+        if not to_complete:
+            try:
+                for c in self.store.list_commands(agent_id, session_id):
+                    if c.get("state") in {"accepted", "running"}:
+                        to_complete.append(c["id"])
+            except Exception as exc:
+                logger.debug("Failed listing commands for completion: %s", exc)
+        for cid in to_complete:
+            try:
+                updated = self.store.set_command_state(agent_id, session_id, cid, "completed", None)
+                if self.service is not None:
+                    self.service._server_event("command.upsert", agent_id=agent_id, session_id=session_id, data=updated)
+            except Exception as exc:
+                logger.debug("Failed completing command %s: %s", cid, exc)
 
     def set_discovery_callback(self, callback: Callable[[Any], None] | None) -> None:
         self._discovery_callback = callback
@@ -724,43 +777,32 @@ class LocalHermesController:
             text = command.get("text")
             if not isinstance(text, str):
                 return "failed", "本机 Hermes 命令文本无效。"
-            # 先上报 user message 确保用户消息在 Agent 回复之前入库
-            from datetime import UTC, datetime
-            from uuid import uuid4
-            user_msg_id = f"hermes-user-{uuid4()}"
-            user_msg = {
-                "id": user_msg_id,
-                "session_id": session_id,
-                "agent_id": command.get("agent_id") or "local-hermes-default",
-                "role": "user",
-                "kind": "message",
-                "text": text,
-                "attachments": [],
-                "created_at": datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
-                "command_id": command.get("id"),
-            }
+            from .hermes_inputs import rollback, stage
+            settings = getattr(self, "settings", None)
+            store = getattr(self, "store", None)
             try:
-                self.store.upsert_message(user_msg)
-                self.service._server_event(
-                    "message.upsert",
-                    agent_id=user_msg["agent_id"],
-                    session_id=user_msg["session_id"],
-                    data=user_msg,
-                )
-            except Exception as e:
-                logger.debug("Failed to pre-upsert user message: %s", e)
-
+                text, attached = stage(self._rpc, tui_id, command, settings, store)
+            except ConnectionError as exc:
+                return "failed", exc.detail
             response = self._rpc(
                 "prompt.submit",
                 {"session_id": tui_id, "text": text, "surface": "hud"},
                 timeout=20,
             )
             if response is None:
+                rollback(self._rpc, tui_id, attached)
                 return "unknown", "本机 Hermes 未确认命令投递结果；不会自动重发。"
             if response.get("error") is not None:
-                return "failed", "本机 Hermes 拒绝了命令投递。"
+                rollback(self._rpc, tui_id, attached)
+                return "failed", hermes_command_rejection(response)
             if not isinstance(response.get("result"), dict):
+                rollback(self._rpc, tui_id, attached)
                 return "unknown", "本机 Hermes 返回了无法确认的命令结果；不会自动重发。"
+            if tui_id and session_id:
+                self._tui_to_session[str(tui_id)] = str(session_id)
+            cmd_id = command.get("id")
+            if session_id and isinstance(cmd_id, str):
+                self._active_submitted_commands[str(session_id)] = cmd_id
             return "accepted", None
 
     def disconnect(self) -> dict[str, object]:
@@ -797,6 +839,7 @@ class ConnectionController:
         self.settings = settings
         self.store = store
         self.local = LocalHermesController(settings)
+        self.local.store = store
         self._ssh_runtimes: dict[str, Any] = {}
         self._ssh_lock = threading.RLock()
 
@@ -972,6 +1015,8 @@ class ConnectionController:
             service.register_native_command_handler(agent_id, self._submit_owned_tui_command)
 
     def connect_local(self, service) -> dict[str, object]:
+        self.local.store = self.store
+        self.local.service = service
         self.local.set_discovery_callback(lambda discovery: self._record_native_discovery(service, discovery))
         self.local.connect()
         self._register_local_command_handler(service)
@@ -1097,6 +1142,9 @@ class ConnectionController:
                 Path(__file__).resolve().parents[3] / ".hermes" / "plugins" / "astrorder-hermes",
                 connector_secret=self.settings.connector_secret,
             )
+            runtime.store = self.store
+            runtime.app_settings = self.settings
+            runtime.service = service
             try:
                 runtime.start()
                 self._record_history(resolved_id, "deploy", "completed", "远程插件部署和 bridge 启动命令已返回。", {"phase": "deploy"})

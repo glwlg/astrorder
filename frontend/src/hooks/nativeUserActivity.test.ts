@@ -16,3 +16,20 @@ it('reorders for native user activity once and ignores replies and replayed snap
  expect(hook.result.current.map(s => s.id)).toEqual(['current', 'other'])
  hook.unmount()
 })
+it('sorts by bootstrap last_user_at before native activity events', () => {
+ const rows = [session('stale', '2026-09-06T00:00:00Z'), { ...session('fresh', '2026-09-06T00:00:00Z'), last_user_at: '2026-09-09T04:00:00Z' }]
+ const hook = renderHook(() => useSessionOrder(rows))
+ expect(hook.result.current.map(s => s.id)).toEqual(['fresh', 'stale'])
+ expect(hook.result.current[0].updated_at).toBe('2026-09-09T04:00:00Z')
+ hook.unmount()
+ })
+ it('keeps live activity off session.status so send is not blocked', () => {
+ const rows = [{ ...session('current', '2026-09-06T00:00:00Z'), live: true }]
+ const hook = renderHook(() => useSessionOrder(rows))
+ expect(hook.result.current[0].status).toBe('idle')
+ expect(hook.result.current[0].live).toBe(true)
+ act(() => window.dispatchEvent(new CustomEvent(nativeActivityEvent, { detail: { items: [], live: [{ agent_id: 'h', id: 'current', last_user_at: '2026-09-09T04:00:00Z' }] } })))
+ expect(hook.result.current[0].status).toBe('idle')
+ expect(hook.result.current[0].live).toBe(true)
+ hook.unmount()
+ })

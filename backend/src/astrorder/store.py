@@ -526,6 +526,123 @@ class Store:
             rows = db.scalars(select(ProjectRow).order_by(ProjectRow.updated_at.desc(), ProjectRow.id)).all()
             return [_project_wire(row) for row in rows]
 
+    def delete_project(
+        self,
+        *,
+        project_key: str | None = None,
+        project_id: str | None = None,
+        source_id: str | None = None,
+        workspace: str | None = None,
+        session_keys: list[tuple[str, str]] | None = None,
+        delete_sessions: bool = True,
+    ) -> tuple[bool, list[dict[str, Any]]]:
+        deleted_sessions: list[dict[str, Any]] = []
+        found_project = False
+        with self.session() as db:
+            project_rows: list[ProjectRow] = []
+            if project_key:
+                row = db.get(ProjectRow, project_key)
+                if row is not None:
+                    project_rows.append(row)
+                elif "\0" in project_key:
+                    parts = project_key.split("\0", 1)
+                    src = parts[0].removeprefix("project:").removeprefix("workspace:")
+                    pid = parts[1]
+                    matched = db.scalars(
+                        select(ProjectRow).where(
+                            ProjectRow.source_id == src,
+                            ProjectRow.project_id == pid,
+                        )
+                    ).all()
+                    project_rows.extend(matched)
+
+            if not project_rows and project_id:
+                query = select(ProjectRow).where(ProjectRow.project_id == project_id)
+                if source_id:
+                    query = query.where(ProjectRow.source_id == source_id)
+                project_rows.extend(db.scalars(query).all())
+
+            if not project_rows and workspace:
+                project_rows.extend(
+                    db.scalars(select(ProjectRow).where(ProjectRow.workspace == workspace)).all()
+                )
+
+            seen_pids = set()
+            unique_project_rows: list[ProjectRow] = []
+            for prow in project_rows:
+                if prow.id not in seen_pids:
+                    seen_pids.add(prow.id)
+                    unique_project_rows.append(prow)
+
+            if unique_project_rows:
+                found_project = True
+                for prow in unique_project_rows:
+                    db.delete(prow)
+
+            if delete_sessions:
+                candidate_sessions: list[SessionRow] = []
+                if session_keys:
+                    for agent_id, sess_id in session_keys:
+                        srow = db.execute(
+                            select(SessionRow).where(
+                                SessionRow.agent_id == agent_id, SessionRow.id == sess_id
+                            )
+                        ).scalar_one_or_none()
+                        if srow is not None:
+                            candidate_sessions.append(srow)
+
+                for prow in unique_project_rows:
+                    if prow.project_id and prow.project_id != "__no_project__":
+                        q = select(SessionRow).where(SessionRow.project_id == prow.project_id)
+                        if prow.source_id:
+                            q = q.where(SessionRow.source_id == prow.source_id)
+                        candidate_sessions.extend(db.scalars(q).all())
+                    if prow.workspace:
+                        candidate_sessions.extend(
+                            db.scalars(select(SessionRow).where(SessionRow.workspace == prow.workspace)).all()
+                        )
+
+                if project_id and project_id != "__no_project__":
+                    q = select(SessionRow).where(SessionRow.project_id == project_id)
+                    if source_id:
+                        q = q.where(SessionRow.source_id == source_id)
+                    candidate_sessions.extend(db.scalars(q).all())
+
+                if workspace:
+                    candidate_sessions.extend(
+                        db.scalars(select(SessionRow).where(SessionRow.workspace == workspace)).all()
+                    )
+
+                seen_sessions = set()
+                for srow in candidate_sessions:
+                    skey = (srow.agent_id, srow.id)
+                    if skey in seen_sessions:
+                        continue
+                    seen_sessions.add(skey)
+                    deleted_sessions.append({"agent_id": srow.agent_id, "id": srow.id, "title": srow.title})
+                    for msg in db.scalars(
+                        select(MessageRow).where(
+                            MessageRow.agent_id == srow.agent_id, MessageRow.session_id == srow.id
+                        )
+                    ).all():
+                        db.delete(msg)
+                    for cmd in db.scalars(
+                        select(CommandRow).where(
+                            CommandRow.agent_id == srow.agent_id, CommandRow.session_id == srow.id
+                        )
+                    ).all():
+                        db.delete(cmd)
+                    for task in db.scalars(
+                        select(TaskRow).where(
+                            TaskRow.agent_id == srow.agent_id, TaskRow.session_id == srow.id
+                        )
+                    ).all():
+                        db.delete(task)
+                    db.delete(srow)
+
+            db.flush()
+            return found_project or bool(deleted_sessions), deleted_sessions
+
     def upsert_projects(self, projects: list[dict[str, Any]]) -> list[dict[str, Any]]:
         canonical: list[dict[str, Any]] = []
         with self.session() as db:
@@ -571,7 +688,9 @@ class Store:
             if not isinstance(updated_at, datetime):
                 updated_at = parse_timestamp(str(updated_at))
             if row is None:
-                row = SessionRow(
+                # Use insert ... on conflict do update to prevent multi-threaded race condition
+                from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+                stmt = sqlite_insert(SessionRow).values(
                     id=data["id"],
                     agent_id=data["agent_id"],
                     title=data.get("title", ""),
@@ -586,8 +705,30 @@ class Store:
                     native_kind=data.get("native_kind"),
                     control_state=data.get("control_state", "unknown"),
                     updated_at=updated_at,
+                ).on_conflict_do_update(
+                    index_elements=[SessionRow.agent_id, SessionRow.id],
+                    set_={
+                        "title": data.get("title", ""),
+                        "workspace": data.get("workspace"),
+                        "status": data["status"],
+                        "source_id": data.get("source_id") or data["agent_id"],
+                        "connection_id": data.get("connection_id"),
+                        "source_session_id": data.get("source_session_id") or data["id"],
+                        "project_id": data.get("project_id"),
+                        "project_name": data.get("project_name"),
+                        "history_state": data.get("history_state", "local"),
+                        "native_kind": data.get("native_kind"),
+                        "control_state": data.get("control_state", "unknown"),
+                        "updated_at": updated_at,
+                    }
                 )
-                db.add(row)
+                db.execute(stmt)
+                db.flush()
+                row = db.execute(
+                    select(SessionRow).where(
+                        SessionRow.agent_id == data["agent_id"], SessionRow.id == data["id"]
+                    )
+                ).scalar_one()
             else:
                 row.title = data.get("title", "")
                 row.workspace = data.get("workspace")
@@ -601,7 +742,7 @@ class Store:
                 row.native_kind = data.get("native_kind", row.native_kind)
                 row.control_state = data.get("control_state", row.control_state or "unknown")
                 row.updated_at = updated_at
-            db.flush()
+                db.flush()
             return _session_wire(row)
 
     def set_session_history_state(

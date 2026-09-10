@@ -16,7 +16,7 @@ settings = Settings(
     port=30013, database_url=os.environ['ASTRORDER_E2E_DATABASE'],
     attachments_dir=Path(os.environ['ASTRORDER_E2E_ATTACHMENTS']),
     browser_secret=os.environ['ASTRORDER_E2E_TOKEN'], connector_secret=uuid4().hex,
-    allowed_origins=('http://127.0.0.1:30013',), static_dir=root / 'frontend' / 'dist',
+    allowed_origins=('http://127.0.0.1:30013',), static_dir=Path(os.environ.get('ASTRORDER_E2E_STATIC_DIR', str(root / 'frontend' / 'dist'))),
     auto_connect_local_hermes=False,
 )
 app = create_app(settings)
@@ -33,6 +33,8 @@ async def fixture_lifespan(app):
     async with base_lifespan(app):
         service = app.state.service
         store = app.state.store
+        # Activity polling must not discover a real local installation in an inert fixture.
+        app.state.connections.local.snapshot = lambda: {'agent_id': None}
         def create_fixture_session(*, agent_id, workspace, title):
             assert agent_id == 'mobile-protocol-fixture'
             row = {'id': 'fixture-created-' + uuid4().hex, 'agent_id': agent_id, 'title': title or '新会话', 'workspace': workspace, 'status': 'idle', 'updated_at': now()}

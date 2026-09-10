@@ -5,6 +5,7 @@ import { AgentStatusBadge, SessionStatusLabel } from '../../components/Status'
 import { MarkdownContent } from '../../components/MarkdownContent'
 import { SessionRuntimeFacts } from '../../components/SessionRuntimeFacts'
 import { LazyDetails } from '../../components/LazyDetails'
+import { NativeObservationPanel } from '../../components/NativeObservationPanel'
 
 const capabilityLabels: Record<string, string> = {
   chat: '聊天',
@@ -15,6 +16,8 @@ const capabilityLabels: Record<string, string> = {
   launch: '启动',
   history: '消息记录',
   events: '事件',
+  task_events: '任务事件',
+  delete: '原生删除',
 }
 
 function commandState(command: Command): { label: string; color: string; icon: React.ReactNode } {
@@ -60,7 +63,7 @@ export function SessionDetails({
         <Text size="xs" fw={700} c="dimmed" mb="xs">能力</Text>
         <Group gap={6}>
           {(agent?.capabilities || []).map((capability) => (
-            <Badge key={capability} variant="outline" color="indigo">{capabilityLabels[capability] || capability}</Badge>
+            <Badge key={capability} variant="outline" color="gray">{capabilityLabels[capability] || capability}</Badge>
           ))}
           {!agent?.capabilities.length && <Text size="xs" c="dimmed">未报告能力，交互控件保持禁用。</Text>}
         </Group>
@@ -88,6 +91,7 @@ export function SessionDetails({
         </section>
       )}
       <section>
+        {agent?.kind==='codex' && <NativeObservationPanel agentId={agent.id} sessionId={session.id} />}
         <LazyDetails summary="工具与命令活动">
         <Stack gap="xs">
           {activities.length === 0 && commands.length === 0 && <Text size="xs" c="dimmed">暂无活动事件。</Text>}

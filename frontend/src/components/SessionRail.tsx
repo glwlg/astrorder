@@ -33,7 +33,7 @@ import type { Agent, Project, Session } from '../domain/types'
 import { scopeKey } from '../domain/semantics'
 import { StatusDot } from './Status'
 import { AgentKindBadge } from './SessionRuntimeFacts'
-import { buildProjectGroups, formatRelativeTime, type ProjectGroup, type RailFilter } from './sessionRailModel'
+import { buildProjectGroups, formatRelativeTime, sessionActivityStatus, type ProjectGroup, type RailFilter } from './sessionRailModel'
 import { api } from '../api/client'
 import './sessionPins.css'
 import { useAstrorderStore } from '../state/store'
@@ -42,6 +42,7 @@ import {
   savePinnedProjects,
   loadProjectAppearance,
   saveProjectAppearance,
+  purgeProjectPreferences,
   ProjectAppearanceModal,
   ProjectGlyph,
   type ProjectAppearanceMap,
@@ -64,7 +65,23 @@ export function SessionRail({
   const [filter, setFilter] = useState('')
   const sessions = useSessionOrder(incomingSessions)
   const [statusFilter, setStatusFilter] = useState<RailFilter>('all')
-  const [agentFilter, setAgentFilter] = useState('all')
+  const [agentFilter, setAgentFilter] = useState(() => {
+    try {
+      return localStorage.getItem('astrorder:agent-filter') || localStorage.getItem('astrorder:desktop-agent-filter') || 'all'
+    } catch {
+      return 'all'
+    }
+  })
+
+  const updateAgentFilter = (value: string) => {
+    setAgentFilter(value)
+    try {
+      localStorage.setItem('astrorder:agent-filter', value)
+      localStorage.setItem('astrorder:desktop-agent-filter', value)
+    } catch {
+      // ignore
+    }
+  }
   const [createProject, setCreateProject] = useState<ProjectGroup | null>(null)
   const [createOpened, setCreateOpened] = useState(false)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
@@ -204,14 +221,99 @@ export function SessionRail({
     }
   }
 
+  const handleDeleteProject = async (project: ProjectGroup) => {
+    const sessionCount = project.sessionCount || project.sessions.length
+    const prompt = sessionCount > 0
+      ? `确定删除项目“${project.label}”吗？\n此操作将同时删除该项目及其包含的 ${sessionCount} 个会话。`
+      : `确定删除项目“${project.label}”吗？`
+    if (!window.confirm(prompt)) return
+
+    try {
+      let projectId: string | undefined
+      let sourceId: string | undefined
+      if (project.key.startsWith('project:')) {
+        const parts = project.key.replace('project:', '').split('\u0000', 2)
+        sourceId = parts[0]
+        projectId = parts[1]
+      }
+
+      const sessionKeys = project.sessions.map((s) => ({ agent_id: s.agent_id, id: s.id }))
+      const res = await api.deleteProject({
+        project_key: project.key,
+        project_id: projectId,
+        source_id: sourceId,
+        workspace: project.workspace,
+        session_keys: sessionKeys,
+        delete_sessions: true,
+      })
+
+      useAstrorderStore.setState((state) => {
+        const nextSessions = { ...state.sessions }
+        const nextProjects = { ...state.projects }
+
+        const deletedSet = new Set(
+          (res.deleted_sessions || sessionKeys).map((s) => scopeKey(s.agent_id, s.id)),
+        )
+        for (const sKey of deletedSet) {
+          delete nextSessions[sKey]
+        }
+
+        for (const [pKey, p] of Object.entries(nextProjects)) {
+          if (
+            pKey === project.key ||
+            p.id === project.key ||
+            (projectId && p.project_id === projectId) ||
+            (project.workspace && p.workspace === project.workspace)
+          ) {
+            delete nextProjects[pKey]
+          }
+        }
+
+        return { sessions: nextSessions, projects: nextProjects }
+      })
+
+      purgeProjectPreferences(project.key)
+      setPinnedProjects((prev) => prev.filter((k) => k !== project.key))
+      setProjectOrder((prev) => prev.filter((k) => k !== project.key))
+      setProjectAppearance((prev) => {
+        const next = { ...prev }
+        delete next[project.key]
+        return next
+      })
+
+      if (activeSessionKey && project.sessions.some((s) => scopeKey(s.agent_id, s.id) === activeSessionKey)) {
+        const remainingSessions = incomingSessions.filter(
+          (s) => !project.sessions.some((ps) => ps.id === s.id && ps.agent_id === s.agent_id),
+        )
+        if (remainingSessions.length > 0) {
+          onSelect(remainingSessions[0])
+        }
+      }
+    } catch (err) {
+      console.error('删除项目失败', err)
+      window.alert('删除项目失败，请重试')
+    }
+  }
+
   const copySessionId = (session: Session) => {
     void navigator.clipboard.writeText(session.id)
   }
 
   return (
     <Stack className="session-rail" gap="sm">
-      <Group gap="xs" wrap="nowrap"><AgentSessionFilter agents={agents} value={agentFilter} onChange={setAgentFilter} /><Button size="xs" onClick={() => { setCreateProject(null); setCreateOpened(true) }} aria-label="新建会话"><IconPlus size={16} /></Button></Group>
-      {createOpened && <NewSessionDialog agents={agents} project={createProject} onClose={() => setCreateOpened(false)} onCreated={session => { setAgentFilter('all'); setFilter(''); setStatusFilter('all'); onSelect(session); if (createProject) setCollapsed(previous => ({ ...previous, [`project:${createProject.key}`]: false })) }} />}
+      <Group gap="xs" wrap="nowrap"><AgentSessionFilter agents={agents} value={agentFilter} onChange={updateAgentFilter} /><Button size="xs" onClick={() => { setCreateProject(null); setCreateOpened(true) }} aria-label="新建会话"><IconPlus size={16} /></Button></Group>
+      {createOpened && (
+        <NewSessionDialog
+          agents={agents}
+          project={createProject}
+          initialAgentId={agentFilter}
+          onClose={() => setCreateOpened(false)}
+          onCreated={session => {
+            onSelect(session)
+            if (createProject) setCollapsed(previous => ({ ...previous, [`project:${createProject.key}`]: false }))
+          }}
+        />
+      )}
       <input
         className="session-search"
         aria-label="搜索会话"
@@ -249,7 +351,7 @@ export function SessionRail({
           <div className="session-pinned-heading"><IconPinned size={15} />置顶会话</div>
           {groups.flatMap(project => project.sessions).filter(s => pinnedSessions[scopeKey(s.agent_id, s.id)]).map(session => <div className="session-row-wrapper" key={scopeKey(session.agent_id, session.id)}>
             <UnstyledButton className={`session-row is-pinned ${scopeKey(session.agent_id, session.id) === activeSessionKey ? 'is-active' : ''}`} onClick={() => onSelect(session)}>
-              <span className="session-row-title">{session.title || '未命名会话'}</span><div className="session-row-info"><AgentKindBadge agent={agents[session.agent_id]} /><span className="session-row-time">{formatRelativeTime(session.updated_at)}</span><StatusDot status={session.status} /></div>
+              <span className="session-row-title">{session.title || '未命名会话'}</span><div className="session-row-info"><AgentKindBadge agent={agents[session.agent_id]} /><span className="session-row-time">{formatRelativeTime(session.updated_at)}</span><StatusDot status={sessionActivityStatus(session)} /></div>
             </UnstyledButton>
             <div className="session-row-actions has-pinned"><button className="session-action-btn is-active" aria-label="取消置顶" onClick={e => togglePin(session, e)}><IconPinned size={14} /></button>
               <Menu position="bottom-end" withinPortal><Menu.Target><button className="session-action-btn" aria-label="更多操作"><IconDotsVertical size={14} /></button></Menu.Target><Menu.Dropdown>
@@ -372,6 +474,18 @@ export function SessionRail({
                       >
                         新建会话
                       </Menu.Item>
+                      {!project.key.startsWith('unmarked:') && (
+                        <>
+                          <Menu.Divider />
+                          <Menu.Item
+                            color="red"
+                            leftSection={<IconTrash size={14} />}
+                            onClick={() => void handleDeleteProject(project)}
+                          >
+                            删除项目
+                          </Menu.Item>
+                        </>
+                      )}
                     </Menu.Dropdown>
                   </Menu>
                 </div>
@@ -394,7 +508,7 @@ export function SessionRail({
                           <div className="session-row-info">
                             <AgentKindBadge agent={agents[session.agent_id]} />
                             <span className="session-row-time">{formatRelativeTime(session.updated_at)}</span>
-                            <StatusDot status={session.status} />
+                            <StatusDot status={sessionActivityStatus(session)} />
                           </div>
                         </UnstyledButton>
                         <div className={`session-row-actions ${isPinned ? 'has-pinned' : ''}`}>

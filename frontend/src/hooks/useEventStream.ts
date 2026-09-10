@@ -20,7 +20,7 @@ export function useEventStream(authenticated: boolean, queryClient: QueryClient)
     const poll = async () => {
       try {
         const result = await api.getUserActivity()
-        if (!stopped) window.dispatchEvent(new CustomEvent(nativeActivityEvent, { detail: result.items }))
+        if (!stopped) window.dispatchEvent(new CustomEvent(nativeActivityEvent, { detail: result }))
       } catch { /* A temporarily unavailable source must not discard its last activity. */ }
       if (!stopped) timer = setTimeout(() => void poll(), 5000)
     }
@@ -50,6 +50,13 @@ export function useEventStream(authenticated: boolean, queryClient: QueryClient)
           deliverBrowserNotification(notification)
         }
         store.applyEvent(event)
+        if (event.type === 'native.observation') {
+          void queryClient.invalidateQueries({ queryKey: ['astrorder', 'observations', event.agent_id] })
+          if (event.data.event === 'UserPromptSubmit' && typeof event.data.observed_at === 'number') {
+            window.dispatchEvent(new CustomEvent(nativeActivityEvent, { detail: [{ agent_id: event.agent_id, id: event.session_id, last_user_at: new Date(event.data.observed_at * 1000).toISOString() }] }))
+          }
+          if (event.data.event === 'Stop') void queryClient.invalidateQueries({ queryKey: ['astrorder', 'messages', event.agent_id, event.session_id] })
+        }
         if (useAstrorderStore.getState().resyncRequired) {
           void queryClient.invalidateQueries({ queryKey: ['astrorder', 'bootstrap'] })
           void queryClient.invalidateQueries({ queryKey: ['astrorder', 'messages'] })
