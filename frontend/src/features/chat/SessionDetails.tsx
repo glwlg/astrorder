@@ -111,6 +111,7 @@ export function SessionDetails({
                   <Text size="xs" lineClamp={1}>{command.action === 'enqueue' ? '排队指令' : command.action === 'stop' ? '停止指令' : '浏览器指令'}</Text>
                   <Badge size="xs" color={state.color} variant="light" leftSection={state.icon}>{state.label}</Badge>
                 </Group>
+                {command.error && <Text size="xs" c={state.color} mt={4} style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{command.error}</Text>}
               </Paper>
             )
           })}

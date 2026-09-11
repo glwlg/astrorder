@@ -1,0 +1,19 @@
+sequenceDiagram
+    participant U as 客户
+    participant F as 前端
+    participant B as 后端
+    participant DB as 数据库
+
+    U->>F: 提交订单
+    F->>B: POST /orders
+    B->>DB: 写入订单
+    DB-->>B: 订单ID
+    B-->>F: 201 创建成功
+    F-->>U: 展示订单号
+
+    U->>F: 查看订单
+    F->>B: GET /orders/:id
+    B->>DB: 查询
+    DB-->>B: 订单详情
+    B-->>F: 200 返回
+    F-->>U: 渲染页面

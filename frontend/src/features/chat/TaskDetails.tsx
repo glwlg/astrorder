@@ -2,6 +2,8 @@ import { IconArrowDown, IconCopy, IconPlayerStop, IconX } from '@tabler/icons-re
 import { Badge, Button, Code, Group, Paper, ScrollArea, Stack, Text, Textarea } from '@mantine/core'
 import { useState } from 'react'
 import type { Task } from '../../domain/types'
+import { ConfirmPopover } from '../../components/ConfirmPopover'
+import { confirmationCoordinatesFromEvent, type ConfirmationCoordinates } from '../../components/confirmationPosition'
 
 const statusLabels: Record<Task['status'], string> = {
   pending: '等待中',
@@ -37,6 +39,7 @@ export function TaskDetails({
 }) {
   const [copied, setCopied] = useState(false)
   const [logFilter, setLogFilter] = useState('')
+  const [stopConfirmation, setStopConfirmation] = useState<ConfirmationCoordinates | undefined>(undefined)
   const logs = task.logs.filter((log) => !logFilter.trim() || log.text.toLowerCase().includes(logFilter.trim().toLowerCase()))
 
   const copyCommand = async () => {
@@ -45,9 +48,15 @@ export function TaskDetails({
     setCopied(true)
   }
 
-  const stop = () => {
+  const requestStop = (event?: { clientX: number; clientY: number }) => {
     if (!onStop || !canStop || !task.target_id) return
-    if (window.confirm(`确认停止任务“${task.title}”？`)) onStop(task)
+    setStopConfirmation(confirmationCoordinatesFromEvent(event))
+  }
+
+  const confirmStop = () => {
+    if (!onStop || !canStop || !task.target_id) return
+    onStop(task)
+    setStopConfirmation(undefined)
   }
 
   return (
@@ -95,8 +104,17 @@ export function TaskDetails({
 
       <Group justify="space-between" mt="auto" wrap="wrap">
         <Button variant="subtle" leftSection={<IconX size={16} />} onClick={onClose}>返回</Button>
-        {canStop && task.target_id ? <Button color="red" variant="light" leftSection={<IconPlayerStop size={16} />} onClick={stop}>停止任务</Button> : <Text size="xs" c="dimmed">停止不可用：connector 未报告可停止能力。</Text>}
+        {canStop && task.target_id ? <Button color="red" variant="light" leftSection={<IconPlayerStop size={16} />} onClick={(event) => requestStop(event)}>停止任务</Button> : <Text size="xs" c="dimmed">停止不可用：connector 未报告可停止能力。</Text>}
       </Group>
+      <ConfirmPopover
+        opened={stopConfirmation !== undefined}
+        coords={stopConfirmation}
+        title="停止任务？"
+        message={`确认停止任务“${task.title}”？这会中断该任务正在执行的操作。`}
+        confirmLabel="停止任务"
+        onConfirm={confirmStop}
+        onCancel={() => setStopConfirmation(undefined)}
+      />
     </Stack>
   )
 }

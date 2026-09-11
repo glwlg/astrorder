@@ -1,7 +1,7 @@
 .mobile-workspace .tabler-icon { flex-shrink:0; stroke-width:1.75; vertical-align:middle; }
 .mobile-workspace { overscroll-behavior-x:none; touch-action:pan-y; }
 .m-transcript { touch-action:pan-y; }
-.m-header-actions button,.m-card-head>button,.m-sheet>header>button { display:inline-flex; align-items:center; justify-content:center; }
+.m-header-actions button,.m-card-head>button,.m-sheet>header>button,.m-sheet-header-actions button { display:inline-flex; align-items:center; justify-content:center; }
 .m-brand .m-brand-mark { padding:0; border:0; border-radius:11px; box-shadow:0 2px 7px #1d274022; object-fit:cover; }
 .m-header-actions button { background:var(--m-surface); border-color:var(--m-border); }
 .m-quick-actions button { display:inline-flex; align-items:center; gap:5px; padding:6px 9px; }

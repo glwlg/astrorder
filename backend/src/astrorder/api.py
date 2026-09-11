@@ -383,7 +383,7 @@ async def messages(
     request: Request,
     agent_id: str = Query(..., min_length=1, max_length=256),
     before: str | None = Query(default=None, max_length=512),
-    limit: int = Query(default=2, ge=1, le=200),
+    limit: int = Query(default=50, ge=1, le=200),
 ) -> dict[str, object]:
     _private(request)
     if request.app.state.store.get_session(agent_id, session_id) is None:
@@ -392,9 +392,11 @@ async def messages(
     if session is None:
         raise HTTPException(status_code=404, detail="Session was not found")
     codex = _codex(request, agent_id)
-    if codex and (before is None or before.startswith('codex:')):
+    if codex and (before is None or before.startswith('codex:') or not before.startswith('native:')):
         try:
-            return await asyncio.to_thread(codex.messages, session_id, before, limit)
+            page = await asyncio.to_thread(codex.messages, session_id, before, limit)
+            if page.get('items') or not request.app.state.store.list_messages(agent_id, session_id, None, 1)[0]:
+                return page
         except ConnectionError as exc:
             if before or not request.app.state.store.list_messages(agent_id, session_id, None, 1)[0]:
                 raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
@@ -501,6 +503,11 @@ class SessionReasoningSelection(BaseModel):
     effort: str = Field(min_length=1, max_length=32)
 
 
+class SessionApprovalModeSelection(BaseModel):
+    agent_id: str = Field(min_length=1, max_length=256)
+    mode: str = Field(min_length=1, max_length=32)
+
+
 @router.post("/api/v1/sessions/{session_id}/reasoning")
 def session_reasoning(session_id: str, payload: SessionReasoningSelection, request: Request) -> dict[str, object]:
     _private(request)
@@ -512,6 +519,36 @@ def session_reasoning(session_id: str, payload: SessionReasoningSelection, reque
         if codex:
             return codex.set_effort(session_id, payload.effort)
         return set_session_reasoning(runtime_rpc(request.app.state.connections, payload.agent_id), session_id, payload.effort)
+    except ConnectionError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
+
+
+@router.get("/api/v1/sessions/{session_id}/approval-mode")
+def session_approval_mode(session_id: str, request: Request, agent_id: str = Query(..., min_length=1)) -> dict[str, object]:
+    _private(request)
+    if request.app.state.store.get_session(agent_id, session_id) is None:
+        raise HTTPException(status_code=404, detail="Session was not found")
+    try:
+        codex = _codex(request, agent_id)
+        if codex:
+            return {"mode": codex.get_approval_mode(session_id)}
+        from .native_controls import current_session_approval_mode, runtime_rpc
+        return {"mode": current_session_approval_mode(runtime_rpc(request.app.state.connections, agent_id), session_id)}
+    except ConnectionError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
+
+
+@router.post("/api/v1/sessions/{session_id}/approval-mode")
+def session_approval_mode_select(session_id: str, payload: SessionApprovalModeSelection, request: Request) -> dict[str, object]:
+    _private(request)
+    if request.app.state.store.get_session(payload.agent_id, session_id) is None:
+        raise HTTPException(status_code=404, detail="Session was not found")
+    try:
+        codex = _codex(request, payload.agent_id)
+        if codex:
+            return codex.set_approval_mode(session_id, payload.mode)
+        from .native_controls import runtime_rpc, set_session_approval_mode
+        return set_session_approval_mode(runtime_rpc(request.app.state.connections, payload.agent_id), session_id, payload.mode)
     except ConnectionError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
 
@@ -573,11 +610,231 @@ def download_attachment(attachment_id: str, request: Request) -> FileResponse:
     )
 
 
+@router.get("/api/v1/files/tree")
+def get_files_tree(
+    request: Request,
+    path: str = Query(default=""),
+    depth: int = Query(default=3),
+    session_id: str = Query(default=""),
+    connection_id: str = Query(default=""),
+) -> dict[str, object]:
+    _private(request)
+    import json, urllib.parse
+    cleaned_path = urllib.parse.unquote(path).strip().strip('<>').strip('"\'')
+
+    # 优先根据 session_id 或 connection_id 判断是否为 SSH 远程项目
+    resolved_cid = connection_id
+    if not resolved_cid and session_id:
+        try:
+            sess = request.app.state.store.find_session_by_id(session_id)
+            if sess and sess.get("connection_id") and sess["connection_id"] != "local":
+                resolved_cid = sess["connection_id"]
+                if not cleaned_path and sess.get("workspace"):
+                    cleaned_path = sess["workspace"]
+        except Exception:
+            pass
+
+    # 如果是远程 SSH 环境，通过 SSH 执行远端 Python 获取目录树
+    if resolved_cid and resolved_cid != "local":
+        ssh_conn = request.app.state.store.get_ssh_connection(resolved_cid)
+        if not ssh_conn:
+            raise HTTPException(status_code=404, detail="SSH 连接不存在")
+        from .ssh_transport import SshNativeRuntime, build_remote_python_command
+        runtime = SshNativeRuntime(
+            ssh_conn["settings"],
+            ssh_conn["id"],
+            0,
+            None,
+            None,
+            connector_secret=None,
+        )
+        argv = [a for a in runtime._base_ssh_argv() if a != "-T"] + ["-o", "BatchMode=yes", runtime._target()]
+
+        remote_script = f"""
+import json, os
+from pathlib import Path
+
+def walk(p, depth={max(1, min(depth, 5))}):
+    if depth <= 0: return []
+    items = []
+    ignored = {{'.git', '.venv', 'node_modules', '__pycache__', '.pytest_cache', '.ruff_cache', 'dist'}}
+    try:
+        entries = sorted(list(p.iterdir()), key=lambda e: (not e.is_dir(), e.name.lower()))
+        for x in entries:
+            if x.name in ignored: continue
+            is_dir = x.is_dir()
+            node = {{'name': x.name, 'path': str(x), 'is_dir': is_dir}}
+            if is_dir:
+                node['children'] = walk(x, depth - 1)
+            else:
+                try: node['size'] = x.stat().st_size
+                except: node['size'] = 0
+            items.append(node)
+    except Exception:
+        pass
+    return items
+
+raw_target = {repr(cleaned_path)} or os.path.expanduser('~')
+target = Path(raw_target).expanduser().resolve()
+if not target.exists() or not target.is_dir():
+    import sys
+    sys.exit(44)
+
+print(json.dumps({{'root': str(target), 'name': target.name or str(target), 'items': walk(target, {depth})}}))
+"""
+        cmd = build_remote_python_command(remote_script)
+        try:
+            res = subprocess.run(
+                argv + [cmd],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=False,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            if res.returncode == 44:
+                raise HTTPException(status_code=404, detail="远程工作区目录不存在")
+            if res.returncode != 0:
+                raise HTTPException(status_code=502, detail="远程执行目录树提取失败")
+            output_lines = [line.strip() for line in res.stdout.strip().splitlines() if line.strip()]
+            for line in reversed(output_lines):
+                try:
+                    return json.loads(line)
+                except Exception:
+                    continue
+            raise HTTPException(status_code=502, detail="远程目录树解析失败")
+        except subprocess.TimeoutExpired:
+            raise HTTPException(status_code=504, detail="读取远程目录树超时")
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"获取远程文件树失败: {exc}")
+
+    if not cleaned_path:
+        cleaned_path = os.getcwd()
+
+    try:
+        root = Path(cleaned_path).resolve()
+    except (OSError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid directory path")
+
+    if not root.exists() or not root.is_dir():
+        raise HTTPException(status_code=404, detail="Directory not found")
+
+    def walk_tree(current_dir: Path, current_depth: int) -> list[dict[str, object]]:
+        if current_depth <= 0:
+            return []
+        items = []
+        try:
+            # 过滤掉常见大体积或缓存目录
+            ignored = {".git", ".venv", "node_modules", "__pycache__", ".pytest_cache", ".ruff_cache", "dist"}
+            entries = sorted(list(current_dir.iterdir()), key=lambda x: (not x.is_dir(), x.name.lower()))
+            for entry in entries:
+                if entry.name in ignored:
+                    continue
+                is_dir = entry.is_dir()
+                node: dict[str, object] = {
+                    "name": entry.name,
+                    "path": str(entry),
+                    "is_dir": is_dir,
+                }
+                if is_dir:
+                    node["children"] = walk_tree(entry, current_depth - 1)
+                else:
+                    try:
+                        node["size"] = entry.stat().st_size
+                    except Exception:
+                        node["size"] = 0
+                items.append(node)
+        except Exception:
+            pass
+        return items
+
+    return {
+        "root": str(root),
+        "name": root.name or str(root),
+        "items": walk_tree(root, depth),
+    }
+
+
 @router.get("/api/v1/files/raw")
-def get_raw_file(request: Request, path: str = Query(...), download: bool = Query(default=False)) -> FileResponse:
+def get_raw_file(
+    request: Request,
+    path: str = Query(...),
+    download: bool = Query(default=False),
+    session_id: str = Query(default=""),
+    connection_id: str = Query(default=""),
+) -> Response:
     _private(request)
     import mimetypes, urllib.parse
     cleaned_path = urllib.parse.unquote(path).strip().strip('<>').strip('"\'')
+
+    resolved_cid = connection_id
+    if not resolved_cid and session_id:
+        try:
+            sess = request.app.state.store.find_session_by_id(session_id)
+            if sess and sess.get("connection_id") and sess["connection_id"] != "local":
+                resolved_cid = sess["connection_id"]
+        except Exception:
+            pass
+
+    # 如果是远程 SSH 路径，通过 SSH 读取内容
+    if resolved_cid and resolved_cid != "local":
+        ssh_conn = request.app.state.store.get_ssh_connection(resolved_cid)
+        if not ssh_conn:
+            raise HTTPException(status_code=404, detail="SSH 连接不存在")
+        from .ssh_transport import SshNativeRuntime, build_remote_python_command
+        runtime = SshNativeRuntime(
+            ssh_conn["settings"],
+            ssh_conn["id"],
+            0,
+            None,
+            None,
+            connector_secret=None,
+        )
+        argv = [a for a in runtime._base_ssh_argv() if a != "-T"] + ["-o", "BatchMode=yes", runtime._target()]
+        remote_script = f"""
+import os, sys
+from pathlib import Path
+target = Path({repr(cleaned_path)}).expanduser().resolve()
+if not target.exists() or not target.is_file():
+    sys.exit(44)
+sys.stdout.buffer.write(target.read_bytes())
+"""
+        cmd = build_remote_python_command(remote_script)
+        try:
+            res = subprocess.run(
+                argv + [cmd],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=15,
+                check=False,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                startupinfo=_windows_hide_startupinfo(),
+            )
+            if res.returncode == 44:
+                raise HTTPException(status_code=404, detail="远程文件不存在")
+            if res.returncode != 0:
+                raise HTTPException(status_code=502, detail="读取远程文件失败")
+            file_bytes = res.stdout
+            file_name = cleaned_path.rstrip("/").split("/")[-1] or "file"
+            media_type, _ = mimetypes.guess_type(file_name)
+            headers = {}
+            if download:
+                headers["Content-Disposition"] = f'attachment; filename="{file_name}"'
+            return Response(
+                content=file_bytes,
+                media_type=media_type or "application/octet-stream",
+                headers=headers,
+            )
+        except subprocess.TimeoutExpired:
+            raise HTTPException(status_code=504, detail="读取远程文件超时")
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"读取远程文件失败: {exc}")
+
+    # 本地文件读取
     try:
         resolved = Path(cleaned_path).resolve()
     except (OSError, ValueError):
@@ -591,6 +848,368 @@ def get_raw_file(request: Request, path: str = Query(...), download: bool = Quer
         str(resolved),
         media_type=media_type,
         filename=resolved.name if download else None,
+    )
+
+
+def _run_git(args: list[str], cwd: str, connection_id: str | None = None, app_state = None) -> tuple[int, str, str]:
+    """在本地或远程 SSH 环境中执行 git 命令"""
+    import subprocess, shutil, shlex
+    if connection_id and connection_id != "local" and app_state:
+        controller = getattr(app_state, "environments", None) or getattr(app_state, "connections", None)
+        conn = None
+        if controller:
+            all_conns = controller.snapshot().get("connections", [])
+            for c in all_conns:
+                if str(c.get("id")) == str(connection_id):
+                    conn = c
+                    break
+        if conn and conn.get("kind") == "ssh":
+            host = conn.get("host") or "127.0.0.1"
+            port = int(conn.get("port") or 22)
+            user = conn.get("user") or "root"
+            from .ssh_transport import _resolve_best_ssh_executable
+            ssh_bin = _resolve_best_ssh_executable() or "ssh"
+            inner_cmd = f"cd {shlex.quote(cwd)} && git " + " ".join(shlex.quote(a) for a in args)
+            cmd = [
+                ssh_bin,
+                "-o", "BatchMode=yes",
+                "-o", "StrictHostKeyChecking=accept-new",
+                "-p", str(port),
+                "-l", user,
+                host,
+                inner_cmd,
+            ]
+            from .connections import _windows_hide_flags, _windows_hide_startupinfo
+            proc = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                creationflags=_windows_hide_flags(),
+                startupinfo=_windows_hide_startupinfo(),
+            )
+            return proc.returncode, proc.stdout, proc.stderr
+
+    # 本地执行
+    git_bin = shutil.which("git") or "git"
+    from .connections import _windows_hide_flags, _windows_hide_startupinfo
+    proc = subprocess.run(
+        [git_bin] + args,
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        creationflags=_windows_hide_flags(),
+        startupinfo=_windows_hide_startupinfo(),
+    )
+    return proc.returncode, proc.stdout, proc.stderr
+
+
+@router.get("/api/v1/git/status")
+async def get_git_status(request: Request, workspace: str | None = None, session_id: str | None = None, connection_id: str | None = None) -> dict[str, object]:
+    _private(request)
+    import os, re
+    cwd = workspace or os.getcwd()
+    cid = connection_id
+
+    if session_id and (not workspace or not cid):
+        try:
+            sess = request.app.state.store.find_session_by_id(session_id)
+            if sess:
+                if not workspace and sess.get("workspace"):
+                    cwd = sess["workspace"]
+                if not cid and sess.get("connection_id") and sess["connection_id"] != "local":
+                    cid = sess["connection_id"]
+        except Exception:
+            pass
+
+    # 1. 查询当前分支及所有本地分支
+    rc, stdout, stderr = _run_git(["branch", "--no-color"], cwd=cwd, connection_id=cid, app_state=request.app.state)
+    current_branch = "master"
+    branches = []
+    if rc == 0 and stdout:
+        for line in stdout.splitlines():
+            clean = line.strip()
+            if not clean:
+                continue
+            if clean.startswith("*"):
+                name = clean[1:].strip().replace("(HEAD detached at ", "").replace(")", "")
+                current_branch = name
+                branches.append(name)
+            else:
+                branches.append(clean)
+    else:
+        # 尝试 symbolic-ref
+        rc_sym, stdout_sym, _ = _run_git(["symbolic-ref", "--short", "HEAD"], cwd=cwd, connection_id=cid, app_state=request.app.state)
+        if rc_sym == 0 and stdout_sym.strip():
+            current_branch = stdout_sym.strip()
+            branches = [current_branch]
+
+    # 2. 查询短 diff 统计：git diff --stat HEAD 或 git diff --stat (工作区 + 暂存区)
+    rc_diff, stdout_diff, _ = _run_git(["diff", "--stat"], cwd=cwd, connection_id=cid, app_state=request.app.state)
+    # 也把暂存区的一并加总
+    rc_staged, stdout_staged, _ = _run_git(["diff", "--cached", "--stat"], cwd=cwd, connection_id=cid, app_state=request.app.state)
+    
+    combined_diff_stat = (stdout_diff or "") + "\n" + (stdout_staged or "")
+    insertions = 0
+    deletions = 0
+    changed_files = 0
+    for line in combined_diff_stat.splitlines():
+        # 匹配: 45 files changed, 4141 insertions(+), 321 deletions(-)
+        m_ins = re.search(r"(\d+)\s+insertion", line)
+        if m_ins:
+            insertions += int(m_ins.group(1))
+        m_del = re.search(r"(\d+)\s+deletion", line)
+        if m_del:
+            deletions += int(m_del.group(1))
+        m_files = re.search(r"(\d+)\s+file", line)
+        if m_files:
+            changed_files += int(m_files.group(1))
+
+    # 3. 获取未跟踪文件数与修改列表
+    rc_status, stdout_status, _ = _run_git(["status", "--porcelain"], cwd=cwd, connection_id=cid, app_state=request.app.state)
+    modified_files = []
+    if rc_status == 0 and stdout_status:
+        for line in stdout_status.splitlines():
+            line_str = line.strip()
+            if not line_str:
+                continue
+            status_code = line[:2].strip()
+            path_str = line[3:].strip()
+            modified_files.append({"status": status_code, "path": path_str})
+
+    return {
+        "branch": current_branch,
+        "branches": branches if branches else [current_branch],
+        "insertions": insertions,
+        "deletions": deletions,
+        "changed_files": len(modified_files),
+        "files": modified_files,
+        "workspace": cwd,
+    }
+
+
+@router.post("/api/v1/git/branch")
+async def switch_or_create_branch(request: Request) -> dict[str, object]:
+    _private(request)
+    import os
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+
+    branch_name = str(payload.get("branch") or "").strip()
+    create_new = bool(payload.get("create", False))
+    workspace = payload.get("workspace") or os.getcwd()
+    session_id = payload.get("session_id")
+    connection_id = payload.get("connection_id")
+
+    if not branch_name:
+        raise HTTPException(status_code=400, detail="Branch name is required")
+
+    cid = connection_id
+    if session_id and (not workspace or not cid):
+        try:
+            sess = request.app.state.store.find_session_by_id(session_id)
+            if sess:
+                if not workspace and sess.get("workspace"):
+                    workspace = sess["workspace"]
+                if not cid and sess.get("connection_id") and sess["connection_id"] != "local":
+                    cid = sess["connection_id"]
+        except Exception:
+            pass
+
+    args = ["checkout", "-b", branch_name] if create_new else ["checkout", branch_name]
+    rc, stdout, stderr = _run_git(args, cwd=workspace, connection_id=cid, app_state=request.app.state)
+    if rc != 0:
+        detail = stderr.strip() or stdout.strip() or f"Git checkout exited with code {rc}"
+        raise HTTPException(status_code=400, detail=detail)
+
+    return {"status": "ok", "current_branch": branch_name}
+
+
+@router.get("/api/v1/git/diff-raw")
+async def get_git_diff_raw(request: Request, path: str | None = None, workspace: str | None = None, session_id: str | None = None, connection_id: str | None = None) -> Response:
+    _private(request)
+    import os
+    from fastapi.responses import Response
+    cwd = workspace or os.getcwd()
+    cid = connection_id
+
+    if session_id and (not workspace or not cid):
+        try:
+            sess = request.app.state.store.find_session_by_id(session_id)
+            if sess:
+                if not workspace and sess.get("workspace"):
+                    cwd = sess["workspace"]
+                if not cid and sess.get("connection_id") and sess["connection_id"] != "local":
+                    cid = sess["connection_id"]
+        except Exception:
+            pass
+
+    args = ["diff"]
+    if path:
+        args.extend(["--", path])
+
+    rc, stdout, _ = _run_git(args, cwd=cwd, connection_id=cid, app_state=request.app.state)
+    # 如果工作区没有未暂存 diff，尝试 git diff --cached
+    if not stdout.strip():
+        args_cached = ["diff", "--cached"]
+        if path:
+            args_cached.extend(["--", path])
+        rc_c, stdout_c, _ = _run_git(args_cached, cwd=cwd, connection_id=cid, app_state=request.app.state)
+        if stdout_c.strip():
+            stdout = stdout_c
+
+    # 如果是新建未跟踪文件，输出模拟的全文添加 diff
+    if not stdout.strip() and path:
+        args_untracked = ["status", "--porcelain", "--", path]
+        rc_u, stdout_u, _ = _run_git(args_untracked, cwd=cwd, connection_id=cid, app_state=request.app.state)
+        if stdout_u.strip().startswith("??"):
+            full_path = os.path.join(cwd, path)
+            try:
+                content = ""
+                if os.path.isfile(full_path):
+                    with open(full_path, "r", encoding="utf-8", errors="replace") as f:
+                        content = f.read()
+                lines = content.splitlines()
+                simulated = [
+                    f"diff --git a/{path} b/{path}",
+                    "new file mode 100644",
+                    "--- /dev/null",
+                    f"+++ b/{path}",
+                    f"@@ -0,0 +1,{len(lines)} @@",
+                ] + [f"+{line}" for line in lines]
+                stdout = "\n".join(simulated)
+            except Exception:
+                pass
+
+    return Response(content=stdout or "No changes detected.", media_type="text/plain; charset=utf-8")
+
+
+@router.post("/api/v1/system/open-browser")
+async def open_system_browser(request: Request) -> dict[str, object]:
+    _private(request)
+    import webbrowser, sys, subprocess
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+    url = str(payload.get("url") or "").strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="URL is required")
+    if not url.startswith("http://") and not url.startswith("https://"):
+        url = f"http://{url}"
+    try:
+        if sys.platform == "win32":
+            import os
+            # On Windows, os.startfile(url) or subprocess rundll32/cmd start
+            try:
+                os.startfile(url)
+            except Exception:
+                subprocess.Popen(["cmd.exe", "/c", "start", "", url], shell=False)
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", url])
+        else:
+            subprocess.Popen(["xdg-open", url])
+        return {"status": "ok", "opened": url}
+    except Exception:
+        try:
+            webbrowser.open(url)
+            return {"status": "ok", "opened": url}
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Failed to open browser: {exc}")
+
+
+@router.get("/api/v1/browser/proxy")
+@router.post("/api/v1/browser/proxy")
+async def proxy_browser(request: Request, url: str | None = None):
+    _private(request)
+    import httpx
+    import re
+    from fastapi.responses import Response
+
+    clean_url = (url or "").strip()
+    if not clean_url and request.method == "POST":
+        try:
+            payload = await request.json()
+            clean_url = str(payload.get("url") or "").strip()
+        except Exception:
+            pass
+
+    if not clean_url:
+        target_param = request.query_params.get("url")
+        if target_param:
+            clean_url = target_param.strip()
+
+    if not clean_url:
+        raise HTTPException(status_code=400, detail="URL is required")
+    if not clean_url.startswith("http://") and not clean_url.startswith("https://"):
+        clean_url = f"http://{clean_url}"
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+    }
+
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=15.0, verify=False) as client:
+            resp = await client.get(clean_url, headers=headers)
+    except Exception as exc:
+        err_html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head><meta charset="utf-8"><title>代理访问异常</title>
+        <style>body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 32px; background: #0b0f19; color: #f3f4f6; }} .card {{ background: #1f2937; border-radius: 8px; padding: 24px; max-width: 600px; margin: 40px auto; border: 1px solid #374151; }} h3 {{ margin-top: 0; color: #ef4444; }} code {{ background: #111827; padding: 2px 6px; border-radius: 4px; color: #93c5fd; }}</style>
+        </head>
+        <body>
+            <div class="card">
+                <h3>无法直接在内嵌代理中加载该网址</h3>
+                <p>请求地址: <code>{clean_url}</code></p>
+                <p>错误详情: {str(exc)}</p>
+                <p style="color: #9ca3af; font-size: 14px; margin-top: 16px;">建议：点击右上角的 🖥️ 设备浏览器图标，直接在系统的原生 Edge / Chrome 中打开该页面。</p>
+            </div>
+        </body>
+        </html>
+        """
+        return Response(content=err_html, media_type="text/html", status_code=502)
+
+    content_type = resp.headers.get("content-type", "text/html")
+    body = resp.content
+
+    # 如果是 HTML，注入 <base href="..."> 使得页面内部的相对路径（图片、脚本、样式）正确加载
+    if "text/html" in content_type.lower():
+        try:
+            html_text = resp.text
+            final_url = str(resp.url)
+            # 在 <head> 后注入 <base> 标签
+            if "<head>" in html_text or "<HEAD>" in html_text:
+                html_text = re.sub(r"(<head[^>]*>)", rf'\1\n  <base href="{final_url}">', html_text, count=1, flags=re.IGNORECASE)
+            else:
+                html_text = f'<base href="{final_url}">' + html_text
+            body = html_text.encode("utf-8", errors="replace")
+        except Exception:
+            body = resp.content
+
+    response_headers = dict(resp.headers)
+    # 彻底剥离跨域与嵌入限制头，允许 iframe 正常渲染
+    for h in ["x-frame-options", "content-security-policy", "content-security-policy-report-only", "content-encoding", "content-length"]:
+        response_headers.pop(h, None)
+        response_headers.pop(h.title(), None)
+        response_headers.pop(h.upper(), None)
+
+    # 允许当前源以任何形式嵌入
+    response_headers["Access-Control-Allow-Origin"] = "*"
+    response_headers["X-Content-Type-Options"] = "nosniff"
+
+    return Response(
+        content=body,
+        status_code=resp.status_code,
+        headers=response_headers,
+        media_type=content_type,
     )
 
 
@@ -622,6 +1241,115 @@ async def open_system_file(request: Request) -> dict[str, object]:
         return {"status": "ok", "opened": str(resolved)}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to open file: {exc}")
+
+
+@router.post("/api/v1/system/write-file")
+async def write_system_file(request: Request) -> dict[str, object]:
+    _private(request)
+    import urllib.parse
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+    raw_path = str(payload.get("path") or "").strip().strip('<>').strip('"\'')
+    content = payload.get("content")
+    session_id = payload.get("session_id") or ""
+    connection_id = payload.get("connection_id") or ""
+
+    if not raw_path or content is None:
+        raise HTTPException(status_code=400, detail="Path and content are required")
+    cleaned_path = urllib.parse.unquote(raw_path)
+
+    # 允许保存代码、脚本、配置、设计图与文本文件
+    allowed_exts = {
+        ".drawio", ".xml", ".svg", ".json", ".md", ".txt",
+        ".py", ".ts", ".tsx", ".js", ".jsx", ".rs", ".go", ".c", ".cpp", ".h",
+        ".css", ".scss", ".less", ".html", ".sql", ".yaml", ".yml",
+        ".sh", ".bash", ".bat", ".ps1", ".toml", ".ini", ".env", ".dockerfile",
+        ".mmd", ".excalidraw"
+    }
+
+    resolved_cid = connection_id
+    if not resolved_cid and session_id:
+        try:
+            sess = request.app.state.store.find_session_by_id(session_id)
+            if sess and sess.get("connection_id") and sess["connection_id"] != "local":
+                resolved_cid = sess["connection_id"]
+        except Exception:
+            pass
+
+    # 如果是远程 SSH 路径，通过 SSH 远程原子写入
+    if resolved_cid and resolved_cid != "local":
+        suffix = ("." + cleaned_path.split(".")[-1].lower()) if "." in cleaned_path else ""
+        if not suffix and cleaned_path.rstrip("/").split("/")[-1].lower().startswith("dockerfile"):
+            suffix = ".dockerfile"
+        if suffix not in allowed_exts:
+            raise HTTPException(status_code=403, detail=f"Extension {suffix} is not allowed for write")
+
+        ssh_conn = request.app.state.store.get_ssh_connection(resolved_cid)
+        if not ssh_conn:
+            raise HTTPException(status_code=404, detail="SSH 连接不存在")
+        from .ssh_transport import SshNativeRuntime, build_remote_python_command
+        runtime = SshNativeRuntime(
+            ssh_conn["settings"],
+            ssh_conn["id"],
+            0,
+            None,
+            None,
+            connector_secret=None,
+        )
+        argv = [a for a in runtime._base_ssh_argv() if a != "-T"] + ["-o", "BatchMode=yes", runtime._target()]
+        remote_script = f"""
+import sys
+from pathlib import Path
+target = Path({repr(cleaned_path)}).expanduser().resolve()
+target.parent.mkdir(parents=True, exist_ok=True)
+tmp_file = target.with_suffix(target.suffix + '.tmp')
+tmp_file.write_bytes(sys.stdin.buffer.read())
+tmp_file.replace(target)
+"""
+        cmd = build_remote_python_command(remote_script)
+        try:
+            content_bytes = str(content).encode("utf-8")
+            res = subprocess.run(
+                argv + [cmd],
+                input=content_bytes,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=15,
+                check=False,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            if res.returncode != 0:
+                raise HTTPException(status_code=500, detail="远程写入文件失败")
+            return {"status": "ok", "path": cleaned_path}
+        except subprocess.TimeoutExpired:
+            raise HTTPException(status_code=504, detail="写入远程文件超时")
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"远程写入文件失败: {exc}")
+
+    # 本地写入
+    try:
+        resolved = Path(cleaned_path).resolve()
+    except (OSError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid file path")
+
+    suffix = resolved.suffix.lower()
+    if not suffix and resolved.name.lower().startswith("dockerfile"):
+        suffix = ".dockerfile"
+    if suffix not in allowed_exts:
+        raise HTTPException(status_code=403, detail=f"Extension {resolved.suffix} is not allowed for write")
+
+    try:
+        resolved.parent.mkdir(parents=True, exist_ok=True)
+        tmp_file = resolved.with_suffix(resolved.suffix + ".tmp")
+        tmp_file.write_text(str(content), encoding="utf-8")
+        tmp_file.replace(resolved)
+        return {"status": "ok", "path": str(resolved)}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to write file: {exc}")
 
 
 @router.get("/api/v1/runtime")

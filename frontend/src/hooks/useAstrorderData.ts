@@ -1,11 +1,18 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
 import { api } from '../api/client'
 import { migrateSessionPins } from '../domain/migrateSessionPins'
+import {
+  INITIAL_HISTORY_LIMIT,
+  OLDER_HISTORY_LIMIT,
+  needsUserTurnBackfill,
+} from '../domain/sessionHistoryPolicy'
 import type { Message, Session } from '../domain/types'
 import { selectMessages, useAstrorderStore } from '../state/store'
 import { visibleTranscript } from '../domain/visibleTranscript'
+
+const EMPTY_STORED_MESSAGES: Message[] = []
 
 export function mergeHistoryPages(
   agentId: string,
@@ -54,33 +61,57 @@ export function useBootstrap(authenticated: boolean) {
 export function useSessionResources(session: Session | null, authenticated: boolean) {
   const agentId = session?.agent_id
   const sessionId = session?.id
-  const view = useMemo(() => ({
-    id: crypto.randomUUID(),
-    baseline: new Set(agentId && sessionId ? selectMessages(useAstrorderStore.getState(), agentId, sessionId).map(m => m.id) : []),
-  }), [agentId, sessionId])
-  const stored = useAstrorderStore(useShallow(state => agentId && sessionId ? selectMessages(state, agentId, sessionId) : []))
+  const stored = useAstrorderStore(useShallow((state) =>
+    agentId && sessionId ? selectMessages(state, agentId, sessionId) : EMPTY_STORED_MESSAGES,
+  ))
+
   const messages = useInfiniteQuery({
-    queryKey: ['astrorder', 'messages', session?.agent_id, session?.id, view.id],
-    queryFn: ({ pageParam }) => api.getMessages(session!.id, session!.agent_id, pageParam, pageParam ? 20 : 2),
+    queryKey: ['astrorder', 'messages', session?.agent_id, session?.id],
+    queryFn: ({ pageParam }) => api.getMessages(
+      session!.id,
+      session!.agent_id,
+      pageParam,
+      pageParam ? OLDER_HISTORY_LIMIT : INITIAL_HISTORY_LIMIT,
+    ),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage) => lastPage.next_cursor || undefined,
     enabled: authenticated && Boolean(session),
     retry: false,
-    staleTime: 5_000,
+    staleTime: 30_000,
+    gcTime: 1000 * 60 * 60 * 24,
   })
+
+  const autoFetchedRef = useRef<Record<string, number>>({})
+  const fetchNextPageRef = useRef(messages.fetchNextPage)
+  fetchNextPageRef.current = messages.fetchNextPage
+  const hasNextPage = messages.hasNextPage
+  const isFetchingNextPage = messages.isFetchingNextPage
+  const pages = messages.data?.pages
+  useEffect(() => {
+    if (!session || !pages || pages.length === 0 || isFetchingNextPage) return
+    const sKey = `${session.agent_id}::${session.id}`
+    const fetchedCount = autoFetchedRef.current[sKey] || 0
+    const allLoaded = pages.flatMap((page) => page.items)
+    if (!needsUserTurnBackfill({ items: allLoaded, hasNextPage, autoFetchedPages: fetchedCount })) return
+    autoFetchedRef.current[sKey] = fetchedCount + 1
+    void fetchNextPageRef.current()
+  }, [session, pages, hasNextPage, isFetchingNextPage])
+
   const commands = useQuery({
     queryKey: ['astrorder', 'commands', session?.agent_id, session?.id],
     queryFn: () => api.getCommands(session!.id, session!.agent_id),
     enabled: authenticated && Boolean(session),
     retry: false,
-    staleTime: 5_000,
+    staleTime: 30_000,
+    gcTime: 1000 * 60 * 60 * 24,
   })
   const tasks = useQuery({
     queryKey: ['astrorder', 'tasks', session?.agent_id, session?.id],
     queryFn: () => api.getTasks(session!.id, session!.agent_id),
     enabled: authenticated && Boolean(session),
     retry: false,
-    staleTime: 5_000,
+    staleTime: 30_000,
+    gcTime: 1000 * 60 * 60 * 24,
   })
   useEffect(() => {
     if (session && messages.data) {
@@ -93,9 +124,16 @@ export function useSessionResources(session: Session | null, authenticated: bool
   useEffect(() => {
     if (tasks.data) useAstrorderStore.getState().mergeTasks(tasks.data.items)
   }, [tasks.data])
-  const visibleMessages = messages.data
-    ? visibleTranscript(stored, messages.data.pages.flatMap(page => page.items), view.baseline)
-    : stored.slice(-2)
+
+  const visibleMessages = useMemo(() => {
+    if (!session) return []
+    if (messages.data && messages.data.pages.length > 0) {
+      const loadedItems = messages.data.pages.flatMap(page => page.items)
+      return visibleTranscript(stored, loadedItems, new Set())
+    }
+    return stored
+  }, [session, messages.data, stored])
+
   return { messages, commands, tasks, visibleMessages }
 }
 

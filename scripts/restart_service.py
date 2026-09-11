@@ -19,5 +19,6 @@ time.sleep(1)
 # 2. Start new production server
 log = open(ROOT / '.runtime/production.log', 'ab', buffering=0)
 python_exe = str(ROOT / 'backend/.venv/Scripts/python.exe')
-proc = subprocess.Popen([python_exe, 'scripts/run_production.py'], cwd=str(ROOT), stdout=log, stderr=log)
+DETACHED = 0x00000008
+proc = subprocess.Popen([python_exe, 'scripts/run_production.py'], cwd=str(ROOT), stdout=log, stderr=log, creationflags=DETACHED)
 print('Started new production process PID:', proc.pid)

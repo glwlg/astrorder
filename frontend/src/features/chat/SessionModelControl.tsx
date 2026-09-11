@@ -1,7 +1,13 @@
 import { useState } from 'react'
-import { Button, Group, Modal, Stack, Text, TextInput, UnstyledButton } from '@mantine/core'
+import { ActionIcon, Popover, Slider, Text, TextInput, UnstyledButton } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { IconCheck, IconChevronDown, IconCpu } from '@tabler/icons-react'
+import {
+  IconBolt,
+  IconCheck,
+  IconChevronDown,
+  IconChevronRight,
+  IconRefresh,
+} from '@tabler/icons-react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../../api/client'
 import type { Session } from '../../domain/types'
@@ -10,12 +16,24 @@ import { REASONING_EFFORTS } from './composerMedia'
 import './SessionModelControl.css'
 
 type Choice = { provider: string; model: string; label: string }
+
+const EFFORT_MARKS = [
+  { value: 0, label: '' },
+  { value: 1, label: '' },
+  { value: 2, label: '' },
+  { value: 3, label: '' },
+  { value: 4, label: '' },
+]
+
 export function SessionModelControl({ session }: { session: Session }) {
   const model = useSessionModel(session)
   const [opened, setOpened] = useState(false)
+  const [view, setView] = useState<'main' | 'models'>('main')
   const [search, setSearch] = useState('')
   const [choice, setChoice] = useState<Choice | null>(null)
   const [changing, setChanging] = useState(false)
+  const [draftEffortIndex, setDraftEffortIndex] = useState<number | null>(null)
+
   const options = useQuery({
     queryKey: ['astrorder', 'model-options', session.agent_id, session.id],
     queryFn: () => api.getSessionModels(session.id, session.agent_id),
@@ -23,53 +41,213 @@ export function SessionModelControl({ session }: { session: Session }) {
     staleTime: 30000,
     retry: false,
   })
-  const apply = async () => {
-    if (!choice || changing) return
+
+  const applyChoice = async (target: Choice) => {
+    setChoice(target)
     setChanging(true)
     try {
-      const result = await model.change(choice.provider, choice.model)
-      setOpened(false)
-      notifications.show({ message: result.deferred ? '原生运行时已确认，下轮使用新模型' : '原生模型切换已确认', color: 'teal' })
+      await model.change(target.provider, target.model)
+      setView('main')
     } catch (error) {
-      notifications.show({ message: error instanceof Error ? error.message : '模型切换未确认', color: 'red' })
-    } finally { setChanging(false) }
+      notifications.show({
+        message: error instanceof Error ? error.message : '模型切换未确认',
+        color: 'red',
+      })
+    } finally {
+      setChanging(false)
+    }
   }
-  const applyEffort = async (effort: string) => {
-    if (changing || effort === model.effort) return
+
+  const applyEffortByIndex = async (index: number) => {
+    const effortObj = REASONING_EFFORTS[index]
+    if (!effortObj || effortObj.value === model.effort) {
+      setDraftEffortIndex(null)
+      return
+    }
+    if (changing) return
     setChanging(true)
     try {
-      await model.changeEffort(effort)
-      notifications.show({ message: '思考强度已由原生端确认', color: 'teal' })
+      await model.changeEffort(effortObj.value)
     } catch (error) {
-      notifications.show({ message: error instanceof Error ? error.message : '思考强度未确认', color: 'red' })
-    } finally { setChanging(false) }
+      setDraftEffortIndex(null)
+      notifications.show({
+        message: error instanceof Error ? error.message : '思考强度未确认',
+        color: 'red',
+      })
+    } finally {
+      setChanging(false)
+      setDraftEffortIndex(null)
+    }
   }
-  const effortLabel = REASONING_EFFORTS.find(item => item.value === model.effort)?.label
-  return <>
-    <Group className="session-model-control" gap="xs" wrap="nowrap">
-      <Button size="xs" variant="light" aria-label="选择会话模型" title={model.label} leftSection={<IconCpu size={15} />} rightSection={<IconChevronDown size={14} />} onClick={() => { setChoice(null); setSearch(''); setOpened(true) }}><span>{model.label}{effortLabel ? ` · ${effortLabel}` : ''}</span></Button>
-    </Group>
-    <Modal opened={opened} onClose={() => setOpened(false)} title="切换会话模型" size="lg" centered>
-      <Stack gap="sm">
-        <Text size="sm">当前模型：{model.label}</Text>
-        <div>
-          <Text size="xs" c="dimmed" mb={6}>思考强度</Text>
-          <Group gap={6}>
-            {REASONING_EFFORTS.map(item => (
-              <Button key={item.value} size="compact-xs" variant={model.effort === item.value ? 'filled' : 'light'} aria-pressed={model.effort === item.value} aria-label={`思考强度 ${item.label}`} disabled={changing} onClick={() => void applyEffort(item.value)}>{item.label}</Button>
-            ))}
-          </Group>
-        </div>
-        <TextInput aria-label="搜索模型" placeholder="搜索模型或提供商" value={search} onChange={event => setSearch(event.currentTarget.value)} />
-        <div className="session-model-options">
-          {options.isFetching && <Text size="sm" c="dimmed">读取可用模型…</Text>}
-          {options.data?.items.filter(item => item.label.toLocaleLowerCase().includes(search.toLocaleLowerCase())).map(item => <UnstyledButton key={JSON.stringify([item.provider, item.model])} className="session-model-option" aria-pressed={choice?.provider === item.provider && choice?.model === item.model} onClick={() => setChoice(item)}>
-            <IconCpu size={17} /><span>{item.label}</span>{choice?.provider === item.provider && choice?.model === item.model && <IconCheck size={17} />}
-          </UnstyledButton>)}
-        </div>
-        {options.isError && <Button variant="subtle" onClick={() => void options.refetch()}>重新读取可用模型</Button>}
-        <Group justify="flex-end"><Button variant="default" onClick={() => setOpened(false)}>取消</Button><Button aria-label="确认切换模型" disabled={!choice} loading={changing} onClick={() => void apply()}>确认切换模型</Button></Group>
-      </Stack>
-    </Modal>
-  </>
+
+  const currentEffortIndex = Math.max(
+    0,
+    REASONING_EFFORTS.findIndex((item) => item.value === model.effort),
+  )
+  const sliderIndex = draftEffortIndex ?? currentEffortIndex
+  const effortLabel = REASONING_EFFORTS[sliderIndex]?.label || '中'
+  const displayModelName = model.label
+
+  return (
+    <Popover
+      opened={opened}
+      onChange={(open) => {
+        setOpened(open)
+        if (!open) setView('main')
+      }}
+      position="top-end"
+      offset={10}
+      shadow="md"
+      radius={16}
+      withArrow={false}
+    >
+      <Popover.Target>
+        <button
+          type="button"
+          className="codex-model-pill"
+          aria-label="选择会话模型"
+          title={model.label}
+          onClick={() => {
+            setOpened((v) => !v)
+            setView('main')
+          }}
+        >
+          <span className="codex-model-pill-text">{displayModelName}</span>
+          {effortLabel && <span className="codex-model-pill-effort">{effortLabel}</span>}
+          <IconChevronDown size={14} className="codex-model-pill-arrow" />
+        </button>
+      </Popover.Target>
+
+      <Popover.Dropdown className="codex-model-popover-dropdown">
+        {view === 'main' ? (
+          <div className="codex-model-card">
+            <div className="codex-model-header-row">
+              <span className="codex-model-icon-bolt" title="思维与推理">
+                <IconBolt size={18} />
+              </span>
+              <button
+                type="button"
+                className="codex-model-title-btn"
+                aria-label="切换到选择模型"
+                onClick={() => setView('models')}
+              >
+                <span className="codex-model-effort-highlight">{effortLabel}</span>
+                <IconChevronRight size={15} />
+              </button>
+              <ActionIcon
+                variant="subtle"
+                color="gray"
+                size="sm"
+                aria-label="刷新模型"
+                onClick={() => void options.refetch()}
+                loading={options.isFetching}
+              >
+                <IconRefresh size={16} />
+              </ActionIcon>
+            </div>
+
+            <button
+              type="button"
+              className="codex-model-name-label"
+              onClick={() => setView('models')}
+            >
+              {displayModelName}
+            </button>
+
+            <div className="codex-model-slider-wrap">
+              <Slider
+                size="md"
+                color="#0066cc"
+                min={0}
+                max={4}
+                step={1}
+                marks={EFFORT_MARKS}
+                value={sliderIndex}
+                thumbLabel="思考强度"
+                onChange={setDraftEffortIndex}
+                onChangeEnd={(val) => void applyEffortByIndex(val)}
+                label={(val) => REASONING_EFFORTS[val]?.label}
+                styles={{
+                  root: { width: '100%' },
+                  track: {
+                    height: 18,
+                    borderRadius: 999,
+                    backgroundColor: '#e5e7eb',
+                  },
+                  bar: {
+                    borderRadius: 999,
+                    backgroundColor: '#0066cc',
+                  },
+                  thumb: {
+                    width: 22,
+                    height: 22,
+                    border: '2px solid #ffffff',
+                    backgroundColor: '#ffffff',
+                    boxShadow: '0 1px 4px rgba(0,0,0,0.22)',
+                  },
+                  mark: {
+                    width: 4,
+                    height: 4,
+                    borderRadius: '50%',
+                    backgroundColor: 'rgba(0,0,0,0.25)',
+                    transform: 'translate(-50%, -50%)',
+                  },
+
+                }}
+              />
+            </div>
+          </div>
+        ) : (
+          <div className="codex-model-list-panel">
+            <div className="codex-model-list-head">
+              <Text size="xs" c="dimmed" fw={600}>
+                选择模型
+              </Text>
+              <TextInput
+                size="xs"
+                placeholder="搜索模型…"
+                value={search}
+                onChange={(e) => setSearch(e.currentTarget.value)}
+                autoFocus
+                mt={4}
+              />
+            </div>
+            <div className="codex-model-list-scroll">
+              <div className="codex-model-list-section-title">默认 · 推荐模型集</div>
+              {options.isFetching && (
+                <Text size="xs" c="dimmed" p="xs">
+                  读取可用模型…
+                </Text>
+              )}
+              {options.data?.items
+                .filter((item) =>
+                  item.label.toLowerCase().includes(search.toLowerCase()),
+                )
+                .map((item) => {
+                  const isSelected =
+                    (choice?.provider === item.provider && choice?.model === item.model) ||
+                    (!choice &&
+                      model.data?.provider === item.provider &&
+                      model.data?.model === item.model) ||
+                    model.label.includes(item.model)
+
+                  return (
+                    <UnstyledButton
+                      key={JSON.stringify([item.provider, item.model])}
+                      className={"codex-model-menu-item" + (isSelected ? " is-selected" : "")}
+                      onClick={() => void applyChoice(item)}
+                      disabled={changing}
+                    >
+                      <span className="codex-model-menu-item-text">{item.label}</span>
+                      {isSelected && <IconCheck size={16} className="codex-model-check-icon" />}
+                    </UnstyledButton>
+                  )
+                })}
+            </div>
+          </div>
+        )}
+      </Popover.Dropdown>
+    </Popover>
+  )
 }
+

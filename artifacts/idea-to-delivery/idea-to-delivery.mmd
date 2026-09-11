@@ -1,0 +1,17 @@
+flowchart LR
+    A[💡 产生想法] --> B[✏️ 画出草图]
+    B --> C[🔨 动手实现]
+    C --> D[✅ 检查效果]
+    D --> E[🚀 完成交付]
+    D -. 调整优化 .-> B
+
+    classDef idea fill:#fff3bf,stroke:#f08c00,color:#343a40
+    classDef plan fill:#d0ebff,stroke:#1971c2,color:#343a40
+    classDef build fill:#e5dbff,stroke:#7048e8,color:#343a40
+    classDef check fill:#c3fae8,stroke:#099268,color:#343a40
+    classDef done fill:#d3f9d8,stroke:#2f9e44,color:#343a40
+    class A idea
+    class B plan
+    class C build
+    class D check
+    class E done

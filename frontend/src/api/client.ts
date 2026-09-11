@@ -100,7 +100,7 @@ export const api = {
     const query = agentId ? `?agent_id=${encodeURIComponent(agentId)}` : ''
     return request<{ items: Session[] }>(`/sessions${query}`)
   },
-  getMessages: (sessionId: string, agentId: string, before?: string, limit = 20) => {
+  getMessages: (sessionId: string, agentId: string, before?: string, limit = 50) => {
     const query = new URLSearchParams({ agent_id: agentId, limit: String(limit) })
     if (before) query.set('before', before)
     return request<{ items: import('../domain/types').Message[]; next_cursor: string | null }>(
@@ -144,6 +144,8 @@ export const api = {
   getSessionModels: (sessionId: string, agentId: string) => request<{ items: { provider: string; model: string; label: string }[] }>(`${sessionPath(sessionId)}/models?agent_id=${encodeURIComponent(agentId)}`),
   setSessionModel: (sessionId: string, agentId: string, provider: string, model: string) => jsonRequest<{ provider: string; model: string; deferred?: boolean }>(`${sessionPath(sessionId)}/model`, { agent_id: agentId, provider, model }),
   setSessionReasoning: (sessionId: string, agentId: string, effort: string) => jsonRequest<{ effort: string }>(`${sessionPath(sessionId)}/reasoning`, { agent_id: agentId, effort }),
+  getSessionApprovalMode: (sessionId: string, agentId: string) => request<{ mode: import('../domain/types').ApprovalMode }>(`${sessionPath(sessionId)}/approval-mode?agent_id=${encodeURIComponent(agentId)}`),
+  setSessionApprovalMode: (sessionId: string, agentId: string, mode: import('../domain/types').ApprovalMode) => jsonRequest<{ mode: import('../domain/types').ApprovalMode }>(`${sessionPath(sessionId)}/approval-mode`, { agent_id: agentId, mode }),
   getRuntime: () => request<RuntimePayload>('/runtime'),
   launchRuntime: (kind: string, workspace: string) =>
     jsonRequest<{ agent_id: string; status: string }>('/runtime/launch', { kind, workspace }),

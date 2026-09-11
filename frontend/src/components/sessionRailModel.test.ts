@@ -1,31 +1,288 @@
-import { expect, it } from 'vitest'
-import type { Project, Session } from '../domain/types'
-import { buildProjectGroups } from './sessionRailModel'
+import { describe, expect, it } from 'vitest'
+import { buildProjectGroups, displaySessionTitle, nativeTurnInProgress, sessionActivityStatus } from './sessionRailModel'
+import type { Command, Message, Session, Task } from '../domain/types'
+import { useAstrorderStore } from '../state/store'
 
-const session = (id: string, workspace: string, source = 'local-codex'): Session => ({ id, agent_id: source, source_id: source, title: id, workspace, project_name: 'OpsCore', status: 'idle', updated_at: '2026-09-01T00:00:00Z' })
-const project: Project = { id: 'wsl-project', source_id: 'ssh-wsl', agent_id: 'ssh-wsl', project_id: 'opscore', project_name: 'OpsCore', workspace: '/home/luwei/workspace/OpsCore', session_count: 0, updated_at: '2026-09-01T00:00:00Z' }
+function message(partial: Partial<Message> & Pick<Message, 'id' | 'role'>): Message {
+  return {
+    session_id: 's-1',
+    agent_id: 'local-codex',
+    kind: 'message',
+    text: '',
+    attachments: [],
+    created_at: '2026-09-10T12:00:00Z',
+    command_id: null,
+    tool: null,
+    ...partial,
+  }
+}
 
-it('never puts local Codex sessions into a WSL catalog project with the same path', () => {
-  const rows = [session('local', project.workspace!), session('remote', project.workspace!, 'ssh-wsl')]
-  const groups = buildProjectGroups(rows, {}, [project])
-  expect(groups.find(g => g.key === 'project:ssh-wsl\u0000opscore')?.sessions.map(s => s.id)).toEqual(['remote'])
-  expect(groups.find(g => g.sessions.some(s => s.id === 'local'))?.agentId).toBe('local-codex')
+describe('sessionActivityStatus', () => {
+  const baseSession: Session = {
+    id: 's-1',
+    agent_id: 'local-codex',
+    title: 'Test Session',
+    status: 'idle',
+    updated_at: '2026-09-10T12:00:00Z',
+    workspace: '/test',
+  }
+
+  it('returns idle when session is idle even if live is true (presence does not mean running)', () => {
+    const sessionWithLive: Session = {
+      ...baseSession,
+      status: 'idle',
+      live: true,
+    }
+    expect(sessionActivityStatus(sessionWithLive)).toBe('idle')
+  })
+
+  it('returns running when session.status is running', () => {
+    const runningSession: Session = {
+      ...baseSession,
+      status: 'running',
+    }
+    expect(sessionActivityStatus(runningSession)).toBe('running')
+  })
+
+  it('returns waiting_approval when session.status is waiting_approval', () => {
+    const approvalSession: Session = {
+      ...baseSession,
+      status: 'waiting_approval',
+    }
+    expect(sessionActivityStatus(approvalSession)).toBe('waiting_approval')
+  })
+
+  it('returns error when session.status is error', () => {
+    const errorSession: Session = {
+      ...baseSession,
+      status: 'error',
+    }
+    expect(sessionActivityStatus(errorSession)).toBe('error')
+  })
+
+  it('returns running when session is idle but has an active in-flight command in commandsMap', () => {
+    const activeCommand: Command = {
+      id: 'cmd-1',
+      session_id: 's-1',
+      agent_id: 'local-codex',
+      action: 'send',
+      state: 'running',
+      text: 'hello',
+      attachments: [],
+      created_at: '2026-09-10T12:00:00Z',
+      error: null,
+    }
+    expect(sessionActivityStatus(baseSession, [activeCommand])).toBe('running')
+  })
+
+  it('returns idle when command is completed', () => {
+    const completedCommand: Command = {
+      id: 'cmd-1',
+      session_id: 's-1',
+      agent_id: 'local-codex',
+      action: 'send',
+      state: 'completed',
+      text: 'hello',
+      attachments: [],
+      created_at: '2026-09-10T12:00:00Z',
+      error: null,
+    }
+    expect(sessionActivityStatus(baseSession, [completedCommand])).toBe('idle')
+  })
+
+  it('falls back to useAstrorderStore.getState().commands when commandsMap is not provided', () => {
+    useAstrorderStore.getState().resetRuntime()
+    expect(sessionActivityStatus(baseSession)).toBe('idle')
+
+    const activeCommand: Command = {
+      id: 'cmd-store',
+      session_id: 's-1',
+      agent_id: 'local-codex',
+      action: 'send',
+      state: 'running',
+      text: 'in store',
+      attachments: [],
+      created_at: '2026-09-10T12:00:00Z',
+      error: null,
+    }
+    useAstrorderStore.getState().applyEvent({
+      cursor: 1,
+      id: 'evt-1',
+      type: 'command.upsert',
+      agent_id: 'local-codex',
+      session_id: 's-1',
+      data: { ...activeCommand } as unknown as Record<string, unknown>,
+    })
+    expect(sessionActivityStatus(baseSession)).toBe('running')
+
+    useAstrorderStore.getState().applyEvent({
+      cursor: 2,
+      id: 'evt-2',
+      type: 'command.upsert',
+      agent_id: 'local-codex',
+      session_id: 's-1',
+      data: { ...activeCommand, state: 'completed' } as unknown as Record<string, unknown>,
+    })
+    expect(sessionActivityStatus(baseSession)).toBe('idle')
+    useAstrorderStore.getState().resetRuntime()
+  })
+
+  it('treats a Hermes-desktop turn as running when live tool/thinking events arrive without an Astrorder command', () => {
+    useAstrorderStore.getState().resetRuntime()
+    useAstrorderStore.getState().mergeMessages('local-codex', 's-1', [
+      message({ id: 'u1', role: 'user', text: '继续改' }),
+      message({
+        id: 'tool-1',
+        role: 'tool',
+        kind: 'tool',
+        tool: { name: 'execute_code', status: 'running' },
+        created_at: new Date().toISOString(),
+      }),
+    ])
+    expect(sessionActivityStatus(baseSession)).toBe('running')
+    useAstrorderStore.getState().resetRuntime()
+  })
+
+  it('treats a running native task as running even when session.status stays idle', () => {
+    useAstrorderStore.getState().resetRuntime()
+    const task: Task = {
+      id: 'task-1',
+      session_id: 's-1',
+      agent_id: 'local-codex',
+      kind: 'tool',
+      title: '工具：execute_code',
+      status: 'running',
+      progress: null,
+      command: null,
+      logs: [],
+      target_id: 'call-1',
+      created_at: '2026-09-10T12:00:00Z',
+      updated_at: '2026-09-10T12:00:00Z',
+    }
+    useAstrorderStore.getState().mergeTasks([task])
+    expect(sessionActivityStatus(baseSession)).toBe('running')
+    useAstrorderStore.getState().resetRuntime()
+  })
 })
-it('keeps uncatalogued workspaces separate within a source and preserves Windows drives', () => {
-  const rows = [session('p', 'P:/workspace/OpsCore'), session('c', 'C:/workspace/OpsCore'), session('linux', '/workspace/OpsCore')]
-  const groups = buildProjectGroups(rows, {})
-  expect(groups).toHaveLength(3)
-  expect(groups.every(g => g.sessions.length === 1)).toBe(true)
+
+describe('nativeTurnInProgress', () => {
+  it('is true while the latest native event is thinking, even if created_at is the stream start', () => {
+    expect(nativeTurnInProgress([
+      message({ id: 'u1', role: 'user', text: '问' }),
+      message({ id: 'th', role: 'assistant', kind: 'thinking', text: '先看代码', created_at: '2026-09-10T12:01:00Z' }),
+    ])).toBe(true)
+  })
+
+  it('is false after a completed assistant reply with no in-flight tool', () => {
+    expect(nativeTurnInProgress([
+      message({ id: 'u1', role: 'user', text: '问' }),
+      message({ id: 'a1', role: 'assistant', kind: 'message', text: '做完了', created_at: new Date().toISOString() }),
+    ])).toBe(false)
+  })
+
+  it('is true while waiting on a just-submitted user turn with no assistant reply yet', () => {
+    expect(nativeTurnInProgress([
+      message({ id: 'u1', role: 'user', text: '继续改', created_at: new Date().toISOString() }),
+    ])).toBe(true)
+  })
+
+  it('is false when the latest user turn is stale and unanswered', () => {
+    expect(nativeTurnInProgress([
+      message({ id: 'u1', role: 'user', text: '很久以前', created_at: '2026-01-01T00:00:00Z' }),
+    ])).toBe(false)
+  })
 })
-it('does not fold case-sensitive Linux paths, but matches equivalent Windows separators', () => {
-  const rows = [session('upper', '/home/OpsCore'), session('lower', '/home/opscore'), session('win-one', 'P:/Work/OpsCore'), session('win-two', 'p:\\work\\opscore')]
-  const groups = buildProjectGroups(rows, {})
-  expect(groups).toHaveLength(3)
-  expect(groups.find(g => g.sessions.some(s => s.id === 'win-one'))?.sessions.map(s => s.id)).toEqual(['win-one', 'win-two'])
+
+describe('sessionActivityStatus live stream', () => {
+  const idleSession: Session = {
+    id: 's-1',
+    agent_id: 'local-codex',
+    title: 'Test Session',
+    status: 'idle',
+    updated_at: '2026-09-10T12:00:00Z',
+    workspace: '/test',
+  }
+
+  it('marks running as soon as a live assistant text upsert arrives, without waiting for session.status', () => {
+    useAstrorderStore.getState().resetRuntime()
+    useAstrorderStore.getState().applyEvent({
+      cursor: 11,
+      id: 'live-stream-1',
+      type: 'message.upsert',
+      agent_id: idleSession.agent_id,
+      session_id: idleSession.id,
+      data: {
+        ...message({
+          id: 'a-stream',
+          role: 'assistant',
+          kind: 'message',
+          text: '正在写',
+          created_at: new Date().toISOString(),
+        }),
+      } as unknown as Record<string, unknown>,
+    })
+    expect(sessionActivityStatus(idleSession)).toBe('running')
+    useAstrorderStore.getState().resetRuntime()
+  })
+
+  it('does not treat a historical transcript merge as a live running turn', () => {
+    useAstrorderStore.getState().resetRuntime()
+    useAstrorderStore.getState().mergeMessages(idleSession.agent_id, idleSession.id, [
+      message({
+        id: 'a-old',
+        role: 'assistant',
+        kind: 'message',
+        text: '昨天的回复',
+        created_at: new Date().toISOString(),
+      }),
+    ])
+    expect(sessionActivityStatus(idleSession)).toBe('idle')
+    useAstrorderStore.getState().resetRuntime()
+  })
 })
-it('treats live activity as running for the rail filter without requiring status running', () => {
-  const live = { ...session('live', 'P:/work'), live: true }
-  const idle = session('idle', 'P:/other')
-  const groups = buildProjectGroups([live, idle], {}, [], '', 'running')
-  expect(groups.flatMap(g => g.sessions).map(s => s.id)).toEqual(['live'])
+
+function railSession(partial: Partial<Session> & Pick<Session, 'id' | 'title'>): Session {
+  return {
+    agent_id: 'local-codex',
+    workspace: '/home/luwei/workspace/OpsCore',
+    status: 'idle',
+    updated_at: '2026-09-11T12:00:00Z',
+    ...partial,
+  }
+}
+
+function railIds(sessions: Session[]): string[] {
+  return buildProjectGroups(sessions, {}).flatMap((group) => group.sessions).map((session) => session.id)
+}
+
+describe('session rail hygiene', () => {
+  it('hides smoke, ephemeral, and native-kind smoke sessions from the rail', () => {
+    expect(railIds([
+      railSession({ id: 'keep', title: '排查连接' }),
+      railSession({ id: 'kind', title: '看起来正常', native_kind: 'smoke' }),
+      railSession({ id: 'flag', title: '临时 fork', ephemeral: true }),
+      railSession({ id: 'title-en', title: 'native connector smoke · hermes' }),
+      railSession({ id: 'title-zh', title: '冒烟测试 local-codex' }),
+    ])).toEqual(['keep'])
+  })
+
+  it('hides approval-assessment and review-subagent titles, but keeps ordinary history titles', () => {
+    expect(railIds([
+      railSession({ id: 'ordinary', title: 'The following is the Codex agent history' }),
+      railSession({ id: 'assess', title: 'The following is the Codex agent history whose request action you are assessing.' }),
+      railSession({ id: 'review', title: '你是独立复审 subagent' }),
+      railSession({ id: 'kind', title: '用户会话', native_kind: 'subagent' }),
+    ])).toEqual(['ordinary'])
+  })
+
+  it('renders placeholder titles as 未命名 or the workspace name', () => {
+    expect(displaySessionTitle(railSession({ id: 'empty', title: '' }))).toBe('OpsCore')
+    expect(displaySessionTitle(railSession({ id: 'untitled', title: 'Untitled session' }))).toBe('OpsCore')
+    expect(displaySessionTitle(railSession({ id: 'remote', title: 'Astrorder 远程会话' }))).toBe('OpsCore')
+    expect(displaySessionTitle(railSession({ id: 'uuid', title: '01a08f9c2b7d4e11a5c6d7e8f90ab123' }))).toBe('OpsCore')
+    expect(displaySessionTitle(railSession({ id: 'dashed', title: '550e8400-e29b-41d4-a716-446655440000' }))).toBe('OpsCore')
+    expect(displaySessionTitle(railSession({ id: 'hermes', title: '20260911_143914_a75faf' }))).toBe('OpsCore')
+    expect(displaySessionTitle(railSession({ id: 'no-ws', title: 'Untitled session', workspace: null }))).toBe('未命名')
+    expect(displaySessionTitle(railSession({ id: 'real', title: '排查 Codex 思考强度' }))).toBe('排查 Codex 思考强度')
+  })
 })

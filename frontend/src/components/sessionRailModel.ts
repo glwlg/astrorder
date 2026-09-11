@@ -1,9 +1,83 @@
-import type { Agent, Project, Session, SessionStatus } from '../domain/types'
+import type { Agent, Command, Message, Project, Session, SessionStatus, Task } from '../domain/types'
+import { scopeKey } from '../domain/semantics'
+import { selectMessages, useAstrorderStore } from '../state/store'
 
 export type RailFilter = 'all' | 'running' | 'unread' | 'pinned' | 'recent'
 
-export function sessionActivityStatus(session: Pick<Session, 'status' | 'live'>): SessionStatus {
-  return session.live ? 'running' : session.status
+const NATIVE_ACTIVITY_STALE_MS = 120_000
+const OPEN_USER_TURN_MS = 45_000
+export const LIVE_ACTIVITY_MS = 15_000
+
+function isActivityMessage(message: Message): boolean {
+  return message.kind === 'thinking' || message.kind === 'tool' || message.role === 'tool'
+}
+
+function ageMs(iso: string | undefined, now: number): number | null {
+  if (!iso) return null
+  const ts = Date.parse(iso)
+  if (!Number.isFinite(ts)) return null
+  const age = now - ts
+  return age >= 0 ? age : 0
+}
+
+export function nativeTurnInProgress(messages: Message[], now = Date.now()): boolean {
+  if (messages.length === 0) return false
+  if (messages.some((message) => message.tool?.status === 'running' || message.tool?.status === 'pending')) {
+    return true
+  }
+  const sorted = [...messages].sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at))
+  const last = sorted[sorted.length - 1]
+  if (!last) return false
+  if (last.kind === 'thinking') return true
+  if (isActivityMessage(last)) {
+    const age = ageMs(last.created_at, now)
+    return age != null && age < NATIVE_ACTIVITY_STALE_MS
+  }
+  if (last.role === 'user') {
+    const age = ageMs(last.created_at, now)
+    return age != null && age < OPEN_USER_TURN_MS
+  }
+  return false
+}
+
+export function sessionActivityStatus(
+  session: Partial<Pick<Session, 'id' | 'agent_id' | 'status' | 'live'>>,
+  commandsMap?: Record<string, Command> | Command[],
+): SessionStatus {
+  if (session.status === 'running' || session.status === 'waiting_approval' || session.status === 'error') {
+    return session.status
+  }
+  if (session.agent_id && session.id) {
+    try {
+      const state = useAstrorderStore.getState()
+      const commands = commandsMap
+        ? (Array.isArray(commandsMap) ? commandsMap : Object.values(commandsMap))
+        : Object.values(state.commands || {})
+      const hasRunning = commands.some(
+        (c) =>
+          c.agent_id === session.agent_id &&
+          c.session_id === session.id &&
+          (c.state === 'running' || c.state === 'accepted' || c.state === 'received'),
+      )
+      if (hasRunning) return 'running'
+
+      const tasks = Object.values(state.tasks || {}).filter(
+        (task: Task) => task.agent_id === session.agent_id && task.session_id === session.id,
+      )
+      if (tasks.some((task) => task.status === 'waiting_approval')) return 'waiting_approval'
+      if (tasks.some((task) => task.status === 'running' || task.status === 'pending')) return 'running'
+
+      const liveAt = state.liveActivityAt?.[scopeKey(session.agent_id, session.id)]
+      if (typeof liveAt === 'number' && Date.now() - liveAt >= 0 && Date.now() - liveAt < LIVE_ACTIVITY_MS) {
+        return 'running'
+      }
+
+      if (nativeTurnInProgress(selectMessages(state, session.agent_id, session.id))) return 'running'
+    } catch {
+      // fallback if store is not available
+    }
+  }
+  return session.status || 'idle'
 }
 
 export function formatRelativeTime(isoString?: string): string {
@@ -87,16 +161,51 @@ function connectionScope(source: string, connectionId: string | null | undefined
   return `source:${source}`
 }
 
+const PLACEHOLDER_TITLES = new Set(['untitled', 'untitled session', 'astrorder 远程会话', '未命名', '未命名会话', 'new session', '新会话'])
+const HEX_ID = /^[0-9a-f]{8,}$/i
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const HERMES_STAMP = /^\d{8}_\d{6}_[0-9a-f]+$/i
+
 function isScheduledSession(session: Session): boolean {
   const title = session.title || ''
   return title.includes('每晚整理') || title.includes('OV 记忆') || title.startsWith('补发柳如烟')
 }
 
+function workspaceBasename(workspace: string | null | undefined): string {
+  if (!workspace) return ''
+  const normalized = workspace.replaceAll('\\', '/').replace(/\/+$/, '')
+  return normalized.split('/').filter(Boolean).pop() || ''
+}
+
+export function isPlaceholderTitle(title: string | null | undefined): boolean {
+  const value = (title || '').trim()
+  if (!value) return true
+  if (PLACEHOLDER_TITLES.has(value.toLowerCase())) return true
+  return HEX_ID.test(value) || UUID.test(value) || HERMES_STAMP.test(value)
+}
+
+export function displaySessionTitle(session: Pick<Session, 'title' | 'workspace'>): string {
+  const title = (session.title || '').trim()
+  if (!isPlaceholderTitle(title)) return title
+  return workspaceBasename(session.workspace) || '未命名'
+}
+
+export function isHiddenRailSession(session: Session): boolean {
+  if (session.native_kind === 'subagent' || session.native_kind === 'smoke') return true
+  if (session.ephemeral === true) return true
+  if ((session as Session & { archived?: boolean }).archived === true) return true
+  if (isScheduledSession(session)) return true
+  const title = session.title || ''
+  if (/native connector smoke/i.test(title) || title.includes('冒烟测试')) return true
+  if (/whose request action you are assessing/i.test(title)) return true
+  if (title.includes('独立复审') || /\bsubagent\b/i.test(title)) return true
+  return false
+}
+
 function sessionMatches(session: Session, query: string, filter: RailFilter): boolean {
-  if (session.native_kind === 'subagent') return false
-  if (isScheduledSession(session)) return false
+  if (isHiddenRailSession(session)) return false
   const decorated = session as SessionDecorations
-  const searchable = `${session.title} ${session.workspace || ''} ${session.project_name || ''}`.toLocaleLowerCase()
+  const searchable = `${session.title} ${displaySessionTitle(session)} ${session.workspace || ''} ${session.project_name || ''}`.toLocaleLowerCase()
   if (query && !searchable.includes(query)) return false
   if (filter === 'running') return sessionActivityStatus(session) === 'running'
   if (filter === 'unread') return decorated.unread === true

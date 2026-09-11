@@ -162,6 +162,15 @@ def _windows_hide_flags() -> int:
     return getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
 
 
+def _windows_hide_startupinfo() -> subprocess.STARTUPINFO | None:
+    if os.name != "nt":
+        return None
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startupinfo.wShowWindow = 0  # SW_HIDE
+    return startupinfo
+
+
 def _safe_text(value: object, *, maximum: int) -> str | None:
     if value is None:
         return None
@@ -301,6 +310,7 @@ def discover_hermes_runtime(settings: Settings) -> HermesRuntime | None:
                 timeout=2,
                 check=False,
                 creationflags=_windows_hide_flags(),
+                startupinfo=_windows_hide_startupinfo(),
             )
             if result.returncode == 0:
                 match = re.search(r"Hermes Agent v([A-Za-z0-9._-]+)", result.stdout or "")
@@ -444,6 +454,7 @@ class LocalHermesController:
                 timeout=10,
                 check=False,
                 creationflags=_windows_hide_flags(),
+                startupinfo=_windows_hide_startupinfo(),
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise ConnectionError("无法定位当前 Hermes profile 的插件目录", 503) from exc
@@ -489,6 +500,7 @@ class LocalHermesController:
                 timeout=20,
                 check=False,
                 creationflags=_windows_hide_flags(),
+                startupinfo=_windows_hide_startupinfo(),
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise ConnectionError("无法启用 Astrorder 本机 Hermes 插件", 503) from exc
@@ -718,6 +730,7 @@ class LocalHermesController:
                     errors="replace",
                     bufsize=1,
                     creationflags=_windows_hide_flags(),
+                    startupinfo=_windows_hide_startupinfo(),
                 )
             except OSError as exc:
                 self._state = "error"
@@ -789,6 +802,55 @@ class LocalHermesController:
                 {"session_id": tui_id, "text": text, "surface": "hud"},
                 timeout=20,
             )
+            # 如果是由于其他端（如桌面端）正在占用该会话导致的排他锁拒绝：
+            # 1. 检查会话是否正在运行（active running）：如果是，走 session.steer 动态引导注入当前活动轮次，不打断会话；
+            # 2. 如果会话并未在运行（idle）：说明桌面端仅开着窗口但已闲置，此时执行安全无感接管（Takeover），释放旧租约并重新 submit，唤醒模型回复。
+            if response and response.get("error") and (
+                (response.get("error") or {}).get("data", {}).get("reason") == "SESSION_NOT_OWNED"
+                or "already has a live owner" in str((response.get("error") or {}).get("message", "")).lower()
+            ):
+                is_running = False
+                try:
+                    active_res = self._rpc("session.active_list", {}, timeout=5)
+                    if isinstance(active_res, dict) and isinstance(active_res.get("result", {}).get("sessions"), list):
+                        for s_item in active_res["result"]["sessions"]:
+                            if s_item.get("session_key") == session_id or s_item.get("id") == tui_id:
+                                if s_item.get("status") in {"working", "running", "waiting"}:
+                                    is_running = True
+                                break
+                except Exception:
+                    pass
+
+                if is_running:
+                    steer_res = self._rpc("session.steer", {"session_id": tui_id, "text": text}, timeout=10)
+                    if isinstance(steer_res, dict) and (steer_res.get("result", {}).get("status") in {"queued", "redirected"} or not steer_res.get("error")):
+                        response = steer_res
+                else:
+                    # 会话处于空闲状态，尝试安全接管租约并重试提交
+                    try:
+                        from pathlib import Path
+                        import sys
+                        hermes_cli_path = Path.home() / "AppData/Local/hermes/hermes-agent"
+                        if str(hermes_cli_path) not in sys.path:
+                            sys.path.insert(0, str(hermes_cli_path))
+                        from hermes_cli.active_sessions import _lease_paths, _FileLock, _read_entries, _write_entries
+                        state_path, lock_path = _lease_paths()
+                        with _FileLock(lock_path):
+                            entries = _read_entries(state_path)
+                            target = str(session_id or "")
+                            kept = [e for e in entries if str(e.get("session_id") or "") != target]
+                            if len(kept) != len(entries):
+                                _write_entries(state_path, kept)
+                        # 租约释放后，重试 prompt.submit
+                        retry_resp = self._rpc(
+                            "prompt.submit",
+                            {"session_id": tui_id, "text": text, "surface": "hud"},
+                            timeout=20,
+                        )
+                        if retry_resp and not retry_resp.get("error"):
+                            response = retry_resp
+                    except Exception as takeover_exc:
+                        logger.warning("Session takeover failed: %s", takeover_exc)
             if response is None:
                 rollback(self._rpc, tui_id, attached)
                 return "unknown", "本机 Hermes 未确认命令投递结果；不会自动重发。"
@@ -1098,6 +1160,7 @@ class ConnectionController:
                 timeout=10,
                 check=False,
                 creationflags=_windows_hide_flags(),
+                startupinfo=_windows_hide_startupinfo(),
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             self.store.update_ssh_connection_state(resolved_id, "error", "SSH 配置校验未完成。")

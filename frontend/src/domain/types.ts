@@ -8,6 +8,8 @@ export type Capability =
   | 'history'
   | 'events'
 
+export type ApprovalMode = 'manual' | 'auto' | 'full_access'
+
 export type AgentKind = 'hermes' | 'codex'
 export type AgentStatus = 'disconnected' | 'connecting' | 'ready' | 'error'
 export type SessionStatus = 'idle' | 'running' | 'waiting_approval' | 'error'
@@ -39,6 +41,7 @@ export interface Agent {
 
 export interface Session {
   native_kind?: string | null
+  ephemeral?: boolean
   is_open?: boolean
   id: string
   agent_id: string

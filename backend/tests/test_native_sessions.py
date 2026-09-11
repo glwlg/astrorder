@@ -109,3 +109,25 @@ def test_same_native_session_id_isolated_by_source_identity() -> None:
     assert left.sessions[0]["id"] == right.sessions[0]["id"] == "shared-native-id"
     assert left.sessions[0]["agent_id"] != right.sessions[0]["agent_id"]
     assert left.sessions[0]["source_id"] != right.sessions[0]["source_id"]
+
+
+def test_discovery_maps_hermes_active_list_working_status_to_running() -> None:
+    def rpc(method: str, params: dict[str, object], **_: object) -> dict[str, object]:
+        del params
+        if method == "session.list":
+            return {"result": {"sessions": [{"id": "native-hot", "title": "hot"}]}}
+        if method == "session.active_list":
+            return {"result": {"sessions": [{"session_key": "native-hot", "id": "tui-hot", "status": "working"}]}}
+        return {"result": {"projects": []}}
+
+    result = discover_native_sessions(
+        rpc,
+        source_id="source-one",
+        agent_id="runtime-one",
+        connection_id=None,
+        profile_name="default",
+        default_workspace=None,
+        page_size=1,
+    )
+    assert result.sessions[0]["status"] == "running"
+

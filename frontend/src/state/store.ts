@@ -29,6 +29,7 @@ export interface AstrorderStore {
   notifications: Record<string, EventNotification>
   outbox: Record<string, OutboxEntry>
   drafts: Record<string, DraftState>
+  liveActivityAt: Record<string, number>
   cursor: number
   seenEventIds: Record<string, true>
   connection: ConnectionStatus
@@ -152,6 +153,7 @@ export const useAstrorderStore = create<AstrorderStore>((set) => ({
   notifications: {},
   outbox: {},
   drafts: {},
+  liveActivityAt: {},
   cursor: 0,
   seenEventIds: {},
   connection: 'disconnected',
@@ -351,7 +353,11 @@ export const useAstrorderStore = create<AstrorderStore>((set) => ({
         const key = scopeKey(message.agent_id, message.session_id)
         const current = Object.values(state.messages[key] || {})
         const merged = mergeMessagesById(current, [message])
-        return { ...base, messages: { ...state.messages, [key]: messageMap(merged) } }
+        return {
+          ...base,
+          messages: { ...state.messages, [key]: messageMap(merged) },
+          liveActivityAt: { ...state.liveActivityAt, [key]: Date.now() },
+        }
       }
 
       if (event.type === 'command.upsert') {
@@ -365,7 +371,12 @@ export const useAstrorderStore = create<AstrorderStore>((set) => ({
         const task = event.data as unknown as Task
         if (!task.id || !task.session_id || !task.agent_id) return base
         const key = taskKey(task)
-        return { ...base, tasks: { ...state.tasks, [key]: { ...state.tasks[key], ...task } } }
+        const sessionKey = scopeKey(task.agent_id, task.session_id)
+        return {
+          ...base,
+          tasks: { ...state.tasks, [key]: { ...state.tasks[key], ...task } },
+          liveActivityAt: { ...state.liveActivityAt, [sessionKey]: Date.now() },
+        }
       }
 
       if (event.type === 'approval.upsert') {
@@ -399,6 +410,7 @@ export const useAstrorderStore = create<AstrorderStore>((set) => ({
       notifications: {},
       outbox: {},
       drafts: {},
+      liveActivityAt: {},
       cursor: 0,
       seenEventIds: {},
       connection: 'disconnected',

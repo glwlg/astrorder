@@ -4,10 +4,12 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import os
 import queue
 import re
 import shutil
 import sqlite3
+import tempfile
 import threading
 from datetime import UTC, datetime
 from pathlib import Path
@@ -17,10 +19,60 @@ from astrorder_codex_connector.app_server import CodexAppServer, CodexRpcRejecte
 from astrorder_codex_connector.config import CodexConnectorConfig
 
 from .connections import ConnectionError
+from .system_environment import load_system_environment
 
 
 def timestamp(value=None):
     return datetime.fromtimestamp(value, UTC).isoformat() if isinstance(value, (float, int)) else datetime.now(UTC).isoformat()
+
+
+_FAILURE_DETAIL_KEYS = ('message', 'detail', 'userMessage', 'errorMessage', 'reason', 'description', 'error', 'failure', 'lastError')
+
+
+def _redact_failure_detail(value):
+    text = str(value or '').replace('\x00', ' ').replace('\r', ' ').replace('\n', ' ').strip()
+    text = re.sub(
+        r'(?i)(password|passwd|token|secret|authorization|api[_ -]?key)(\s*[:=]\s*)[^\s,;]+',
+        r'\1\2[REDACTED]',
+        text,
+    )
+    return text[:1000]
+
+
+def codex_turn_failure_reason(turn, params):
+    """Project the native failure message without exposing credential values."""
+    def extract(value, depth=0):
+        if depth > 3:
+            return None
+        if isinstance(value, str):
+            return _redact_failure_detail(value) or None
+        if isinstance(value, dict):
+            for key in _FAILURE_DETAIL_KEYS:
+                detail = extract(value.get(key), depth + 1)
+                if detail:
+                    return detail
+        if isinstance(value, (list, tuple)):
+            for entry in value:
+                detail = extract(entry, depth + 1)
+                if detail:
+                    return detail
+        return None
+
+    for value in (
+        turn.get('error') if isinstance(turn, dict) else None,
+        turn.get('failure') if isinstance(turn, dict) else None,
+        turn.get('lastError') if isinstance(turn, dict) else None,
+        turn.get('errorMessage') if isinstance(turn, dict) else None,
+        turn.get('message') if isinstance(turn, dict) else None,
+        params.get('error') if isinstance(params, dict) else None,
+        params.get('failure') if isinstance(params, dict) else None,
+        params.get('errorMessage') if isinstance(params, dict) else None,
+        params.get('message') if isinstance(params, dict) else None,
+    ):
+        detail = extract(value)
+        if detail:
+            return detail
+    return 'Codex 原生轮次失败，原生端未返回详细原因。'
 
 
 def stored_model(home, sid):
@@ -41,6 +93,21 @@ def stored_model(home, sid):
                 binding['branch'] = row[2]
             return binding
         return None
+    finally:
+        db.close()
+
+def stored_effort(home, sid):
+    files = [(int(match.group(1)), file) for file in home.glob('state_*.sqlite') if (match := re.fullmatch(r'state_(\d+)\.sqlite', file.name))]
+    if not files:
+        return None
+    database = max(files, key=lambda pair: pair[0])[1]
+    db = sqlite3.connect(database.resolve().as_uri() + '?mode=ro', uri=True, timeout=3)
+    try:
+        columns = {row[1] for row in db.execute('PRAGMA table_info(threads)')}
+        if 'reasoning_effort' not in columns:
+            return None
+        row = db.execute('SELECT reasoning_effort FROM threads WHERE id = ?', (sid,)).fetchone()
+        return row[0] if row and isinstance(row[0], str) else None
     finally:
         db.close()
 
@@ -105,6 +172,8 @@ class CodexConnection:
         self._commands = {}
         self._approvals = {}
         self._approval_commands = {}
+        self._approval_modes = {}
+        self._efforts = {}
         self._stop_commands = {}
         self._streams = {}
         self._lock = threading.RLock()
@@ -137,7 +206,13 @@ class CodexConnection:
             return client.request(method, params, timeout=30)
         except CodexRpcRejected as exc:
             raise ConnectionError(f'Codex 原生接口 {method} 拒绝请求：{exc}', 422) from None
-        except (RuntimeError, OSError, queue.Empty, TimeoutError):
+        except RuntimeError as exc:
+            detail = _redact_failure_detail(exc)
+            raise ConnectionError(
+                f'Codex 原生请求 {method} 未确认：{detail}' if detail else f'Codex 原生请求 {method} 未确认。',
+                502,
+            ) from None
+        except (OSError, queue.Empty, TimeoutError):
             raise ConnectionError(f'Codex 原生请求 {method} 未确认。', 502) from None
 
     def _pages(self, method, params):
@@ -165,7 +240,12 @@ class CodexConnection:
                 self.client.stop()
             self.state, self.detail = 'connecting', '正在与 Codex 原生接口握手…'
             config = CodexConnectorConfig(endpoint='', secret='', agent_id=self.agent_id, agent_name='本机 Codex', executable=executable, workspace=Path.cwd(), allowed_workspaces=self.settings.allowed_workspaces)
-            self.client = self.client_factory(config, self._notification, on_close=self._closed)
+            self.client = self.client_factory(
+                config,
+                self._notification,
+                on_close=self._closed,
+                environment=load_system_environment(),
+            )
             try:
                 self.client.start()
                 initialized = self._request('initialize', {'clientInfo': {'name': 'astrorder', 'title': 'Astrorder', 'version': '0.1.0'}, 'capabilities': {'experimentalApi': True}})
@@ -178,6 +258,7 @@ class CodexConnection:
                 self._threads = {}
                 for row in rows:
                     self._record_thread(row)
+                self._purge_archived_sessions()
                 if self.auth_required:
                     self.state, self.detail = 'authentication_required', 'Codex 需要登录；请在本机 Codex 完成登录后重连。'
                 else:
@@ -193,10 +274,45 @@ class CodexConnection:
                     self._agent('error')
                 raise ConnectionError(self.detail, 502) from None
 
+    def _archived_ids_from_db(self):
+        home = self._home or (Path.home() / '.codex')
+        dbs = sorted(home.glob('state_*.sqlite'))
+        if not dbs and (home / 'state.db').is_file():
+            dbs = [home / 'state.db']
+        res = set()
+        for db in dbs:
+            if db.is_file():
+                try:
+                    with sqlite3.connect(db) as conn:
+                        for r in conn.cursor().execute("SELECT id FROM threads WHERE archived=1"):
+                            res.add(r[0])
+                except (OSError, sqlite3.Error):
+                    pass
+        return res
+
+    def _purge_archived_sessions(self):
+        try:
+            archived_ids = self._archived_ids_from_db()
+            for aid in archived_ids:
+                if self.store.get_session(self.agent_id, aid) is not None:
+                    self.service.delete_session(self.agent_id, aid)
+        except ConnectionError:
+            pass
+
     def _record_thread(self, thread):
         sid = thread.get('id') if isinstance(thread, dict) else None
         if not isinstance(sid, str) or not sid:
             raise ConnectionError('Codex 未返回原生 thread ID。', 502)
+        is_archived = bool(
+            thread.get('archived')
+            or (isinstance(thread.get('status'), dict) and thread.get('status', {}).get('type') == 'archived')
+            or thread.get('status') == 'archived'
+        )
+        if is_archived:
+            self._threads.pop(sid, None)
+            if self.store.get_session(self.agent_id, sid) is not None:
+                self.service.delete_session(self.agent_id, sid)
+            return None
         self._threads[sid] = thread
         status = (thread.get('status') or {}).get('type')
         cwd = thread.get('cwd')
@@ -220,7 +336,6 @@ class CodexConnection:
         cwd = (self._threads.get(sid) or {}).get('cwd')
         if isinstance(cwd, str) and cwd:
             roots.append(Path(cwd))
-        import tempfile, os
         roots.append(Path(tempfile.gettempdir()))
         for env_k in ('TEMP', 'TMP'):
             val = os.environ.get(env_k)
@@ -248,7 +363,7 @@ class CodexConnection:
         )
         try:
             payload = reader(source)
-        except Exception:
+        except ConnectionError:
             return None
         if not isinstance(payload, dict) or not isinstance(payload.get('data'), str):
             return None
@@ -283,7 +398,6 @@ class CodexConnection:
                         remote_root=remote_root,
                     )
                 if not message.get('attachments'):
-                    import re
                     from .attachments import AttachmentManager
                     from .native_attachments import import_local_file
                     img_paths = []
@@ -312,7 +426,6 @@ class CodexConnection:
         elif message['role'] == 'assistant':
             # Check for markdown image patterns like ![alt](path/to/image.png)
             text = message.get('text', '')
-            import re
             img_matches = list(re.finditer(r'!\[([^\]]*)\]\(([^)]+)\)', text))
             if img_matches:
                 from .attachments import AttachmentManager
@@ -356,24 +469,61 @@ class CodexConnection:
                     raise ValueError()
                 cursor = value['cursor']
             except (ValueError, KeyError, TypeError):
+                stored_items, next_cursor = self.store.list_messages(self.agent_id, sid, before, limit)
+                if stored_items:
+                    return {'items': stored_items, 'next_cursor': next_cursor}
                 raise ConnectionError('Codex 分页游标不属于当前会话。', 400) from None
+        use_items_list = True
         try:
             result = self._request('thread/items/list', {'threadId': sid, 'cursor': cursor, 'limit': limit, 'sortDirection': 'desc'})
         except ConnectionError as exc:
-            # When a thread has no turns/messages yet (newly created), Codex rejected request with (-32600; rollout, history) or (-32601; thread, not supported)
             exc_str = str(exc).lower()
-            if 'rollout' in exc_str or '-32600' in exc_str or '-32601' in exc_str or 'not supported' in exc_str or 'not found' in exc_str:
+            if '-32601' in exc_str or 'not supported' in exc_str:
+                use_items_list = False
+            elif 'rollout' in exc_str or '-32600' in exc_str or 'not found' in exc_str:
+                stored, next_c = self.store.list_messages(self.agent_id, sid, before, limit)
+                if stored:
+                    return {'items': stored, 'next_cursor': next_c}
                 return {'items': [], 'next_cursor': None}
-            raise
-        if not isinstance(result.get('data'), list):
-            raise ConnectionError('Codex 消息分页响应无效。', 502)
-        items = [self._message(entry['item'], sid) for entry in reversed(result['data'])]
-        native_cursor = result.get('nextCursor')
-        next_cursor = None
-        if native_cursor:
-            payload = {'thread': sid, 'agent': self.agent_id, 'cursor': native_cursor}
-            next_cursor = 'codex:' + base64.urlsafe_b64encode(json.dumps(payload, separators=(',', ':')).encode()).decode().rstrip('=')
-        return {'items': items, 'next_cursor': next_cursor}
+            else:
+                raise
+
+        if use_items_list:
+            if not isinstance(result.get('data'), list):
+                raise ConnectionError('Codex 消息分页响应无效。', 502)
+            items = [self._message(entry['item'], sid) for entry in reversed(result['data'])]
+            for m in items:
+                self.store.upsert_message(m)
+            native_cursor = result.get('nextCursor')
+            next_cursor = None
+            if native_cursor:
+                payload = {'thread': sid, 'agent': self.agent_id, 'cursor': native_cursor}
+                next_cursor = 'codex:' + base64.urlsafe_b64encode(json.dumps(payload, separators=(',', ':')).encode()).decode().rstrip('=')
+            return {'items': items, 'next_cursor': next_cursor}
+
+        # Fallback: 当前 Codex 版本不支持 thread/items/list，从 thread/read(includeTurns=True) 同步
+        try:
+            thread_data = self._request('thread/read', {'threadId': sid, 'includeTurns': True})
+            turns = (thread_data.get('thread') or {}).get('turns') or []
+            first_user_text = None
+            for turn in turns:
+                turn_id = turn.get('id')
+                for item in turn.get('items') or []:
+                    msg = self._message(item, sid, turn_id=turn_id)
+                    if not first_user_text and msg.get('role') == 'user' and msg.get('text'):
+                        first_user_text = msg['text']
+                    self.store.upsert_message(msg)
+            if first_user_text:
+                session_row = self.store.get_session(self.agent_id, sid)
+                if session_row and (session_row.get('title') == sid or not session_row.get('title')):
+                    cleaned_title = first_user_text.strip().splitlines()[0][:60]
+                    if cleaned_title:
+                        self.store.upsert_session({**session_row, 'title': cleaned_title})
+        except Exception:
+            pass
+
+        stored_items, next_cursor = self.store.list_messages(self.agent_id, sid, before, limit)
+        return {'items': stored_items, 'next_cursor': next_cursor}
 
     def model(self, sid):
         self._scope(sid)
@@ -413,6 +563,10 @@ class CodexConnection:
         if isinstance(branch, str):
             binding['branch'] = branch
         self._bindings[sid] = binding
+        from .native_controls import REASONING_EFFORTS
+        effort = response.get('reasoningEffort')
+        if effort in REASONING_EFFORTS:
+            self._efforts[sid] = effort
         self._owned_threads.add(sid)
         return binding
 
@@ -433,11 +587,14 @@ class CodexConnection:
 
     def current_effort(self, sid):
         self._scope(sid)
-        thread = (self._request('thread/read', {'threadId': sid, 'includeTurns': False}).get('thread') or {})
-        settings = thread.get('turn') or thread.get('settings') or thread
-        effort = settings.get('effort') or (thread.get('threadSettings') or {}).get('effort')
         from .native_controls import REASONING_EFFORTS
-        return effort if effort in REASONING_EFFORTS else None
+        if sid in self._efforts:
+            return self._efforts[sid]
+        if self._home:
+            val = stored_effort(self._home, sid)
+            if val in REASONING_EFFORTS:
+                return val
+        return None
 
     def set_effort(self, sid, effort):
         from .native_controls import REASONING_EFFORTS
@@ -445,10 +602,22 @@ class CodexConnection:
             raise ConnectionError('思考强度不在原生支持范围内。', 422)
         self._resume(sid)
         self._request('thread/settings/update', {'threadId': sid, 'effort': effort})
-        confirmed = self.current_effort(sid)
-        if confirmed != effort:
-            raise ConnectionError('Codex 思考强度尚未读回确认。', 502)
-        return {'effort': effort}
+        with self._binding_changed:
+            confirmed = self._binding_changed.wait_for(lambda: self._efforts.get(sid) == effort, timeout=3)
+            if not confirmed:
+                raise ConnectionError('Codex 思考强度尚未读回确认。', 502)
+            return {'effort': effort}
+
+    def get_approval_mode(self, sid):
+        self._scope(sid)
+        return self._approval_modes.get(sid, 'auto')
+
+    def set_approval_mode(self, sid, mode):
+        self._scope(sid)
+        if mode not in {'manual', 'auto', 'full_access'}:
+            raise ConnectionError('不支持的审批模式；可选 manual、auto、full_access。', 422)
+        self._approval_modes[sid] = mode
+        return {'mode': mode}
 
     def open_ids(self):
         return list(self._pages('thread/loaded/list', {'limit': 100}))
@@ -538,12 +707,28 @@ class CodexConnection:
             lock = self._session_locks.setdefault(sid, threading.Lock())
         with lock:
             if sid in self._active:
-                # Codex is currently executing a turn. Enqueue the command to dispatch automatically when current turn finishes.
-                with self._lock:
-                    self._queued.setdefault(sid, []).append(dict(command))
-                self.store.set_command_state(self.agent_id, sid, command['id'], 'queued', None)
-                self._event('command.upsert', sid, {**command, 'state': 'queued', 'error': None})
-                return 'accepted', None
+                # Codex 当前正在执行轮次：优先尝试 turn/steer 无感注入当前轮次进行动态引导（不打断会话），失败时再降级进入排队
+                active_turn_id = self._active[sid]
+                try:
+                    steer_params = {
+                        'threadId': sid,
+                        'expectedTurnId': active_turn_id,
+                        'input': inputs,
+                    }
+                    self._request('turn/steer', steer_params)
+                    # turn/steer 成功注入当前活动轮次，将 command 关联至当前轮次并标记为 accepted
+                    self._commands[(sid, active_turn_id)] = dict(command)
+                    self.store.set_command_state(self.agent_id, sid, command['id'], 'accepted', None)
+                    self._event('command.upsert', sid, {**command, 'state': 'accepted', 'error': None})
+                    return 'accepted', None
+                except Exception as steer_exc:
+                    logger.info("Codex turn/steer not accepted or supported (%s); enqueuing command instead.", steer_exc)
+                    # Enqueue the command to dispatch automatically when current turn finishes.
+                    with self._lock:
+                        self._queued.setdefault(sid, []).append(dict(command))
+                    self.store.set_command_state(self.agent_id, sid, command['id'], 'queued', None)
+                    self._event('command.upsert', sid, {**command, 'state': 'queued', 'error': None})
+                    return 'accepted', None
             try:
                 self._resume(sid)  # Resume for explicit commands only, not metadata reads.
             except ConnectionError as exc:
@@ -551,7 +736,16 @@ class CodexConnection:
             with self._lock:
                 self._pending[sid] = dict(command)
             try:
-                response = self._request('turn/start', {'threadId': sid, 'input': inputs})
+                mode = self.get_approval_mode(sid)
+                turn_params = {'threadId': sid, 'input': inputs}
+                if mode == 'full_access':
+                    turn_params['approvalPolicy'] = 'never'
+                    turn_params['sandboxPolicy'] = {'type': 'dangerFullAccess'}
+                elif mode == 'manual':
+                    turn_params['approvalPolicy'] = 'untrusted'
+                else:
+                    turn_params['approvalPolicy'] = 'on-request'
+                response = self._request('turn/start', turn_params)
                 turn = response.get('turn') or {}
                 turn_id = turn.get('id')
                 if not isinstance(turn_id, str):
@@ -586,6 +780,10 @@ class CodexConnection:
         sid = params.get('threadId')
         if 'id' in frame:
             if method in {'item/commandExecution/requestApproval', 'item/fileChange/requestApproval'} and self.store.get_session(self.agent_id, sid):
+                mode = self.get_approval_mode(sid) if sid else 'auto'
+                if mode == 'full_access':
+                    self.client.send({'id': frame['id'], 'result': {'decision': 'accept'}})
+                    return
                 key = f"codex-approval-{self._generation}-{frame['id']}"
                 data = {'id': key, 'agent_id': self.agent_id, 'session_id': sid, 'title': 'Codex 请求执行授权', 'detail': str(params.get('command') or params.get('reason') or method), 'state': 'pending', 'target_id': key, 'data': {}}
                 self._approvals[key] = {'native_id': frame['id'], 'session_id': sid, 'data': data}
@@ -596,6 +794,14 @@ class CodexConnection:
             return
         if method == 'thread/started' and self.store.get_agent(self.agent_id):
             self._record_thread(params['thread'])
+            return
+        if method in {'thread/archived', 'thread/archive', 'thread/deleted'} or (
+            method == 'thread/updated' and (params.get('thread') or {}).get('archived')
+        ):
+            target_sid = sid or params.get('id') or (params.get('thread') or {}).get('id')
+            if target_sid:
+                self._threads.pop(target_sid, None)
+                self.service.delete_session(self.agent_id, target_sid)
             return
         if method == 'thread/name/updated':
             name = params.get('name')
@@ -610,10 +816,14 @@ class CodexConnection:
             return
         if method == 'thread/settings/updated':
             settings = params.get('threadSettings') or {}
-            if isinstance(settings.get('model'), str) and isinstance(settings.get('modelProvider'), str):
-                with self._binding_changed:
+            from .native_controls import REASONING_EFFORTS
+            with self._binding_changed:
+                if isinstance(settings.get('model'), str) and isinstance(settings.get('modelProvider'), str):
                     self._bindings[sid] = {**self._bindings.get(sid, {}), 'model': settings['model'], 'provider': settings['modelProvider']}
-                    self._binding_changed.notify_all()
+                effort = settings.get('effort')
+                if effort in REASONING_EFFORTS:
+                    self._efforts[sid] = effort
+                self._binding_changed.notify_all()
             return
         if method == 'serverRequest/resolved':
             with self._lock:
@@ -640,10 +850,11 @@ class CodexConnection:
                     self._active.pop(sid, None)
                     command = self._commands.pop((sid, turn_id), None) or self._pending.get(sid)
             self._session_status(sid, 'running' if method == 'turn/started' else 'error' if turn.get('status') == 'failed' else 'idle')
+            failure_reason = codex_turn_failure_reason(turn, params) if method == 'turn/completed' and turn.get('status') == 'failed' else None
             if command:
                 state = 'running' if method == 'turn/started' else 'failed' if turn.get('status') == 'failed' else 'cancelled' if turn.get('status') == 'interrupted' else 'completed'
-                self.store.set_command_state(self.agent_id, sid, command['id'], state, 'Codex 原生轮次失败。' if state == 'failed' else None)
-                self._event('command.upsert', sid, {**command, 'state': state, 'error': 'Codex 原生轮次失败。' if state == 'failed' else None})
+                self.store.set_command_state(self.agent_id, sid, command['id'], state, failure_reason if state == 'failed' else None)
+                self._event('command.upsert', sid, {**command, 'state': state, 'error': failure_reason if state == 'failed' else None})
             if method == 'turn/completed':
                 for stop in self._stop_commands.pop((sid, turn_id), []):
                     self.store.set_command_state(self.agent_id, sid, stop['id'], 'completed', None)

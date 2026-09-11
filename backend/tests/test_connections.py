@@ -352,14 +352,23 @@ def test_local_tui_owned_session_keeps_native_rejection_reason(tmp_path: Path):
 
     def rpc(method: str, params: dict[str, object], timeout: float = 15):
         del timeout, params
-        assert method == "prompt.submit"
-        return {
-            "error": {
-                "code": 4090,
-                "message": "Session durable-session-key already has a live owner (desktop, pid 1).",
-                "data": {"reason": "SESSION_NOT_OWNED"},
+        if method == "prompt.submit":
+            return {
+                "error": {
+                    "code": 4090,
+                    "message": "Session durable-session-key already has a live owner (desktop, pid 1).",
+                    "data": {"reason": "SESSION_NOT_OWNED"},
+                }
             }
-        }
+        if method == "session.steer":
+            # 模拟会话未在运行或不支持 steer 导致 steer 拒绝，回退展示桌面端占用错误
+            return {
+                "error": {
+                    "code": 4010,
+                    "message": "agent does not support steer",
+                }
+            }
+        raise AssertionError(f"Unexpected method {method}")
 
     controller._rpc = rpc
     state, error = controller.submit_tui_command(
@@ -368,6 +377,117 @@ def test_local_tui_owned_session_keeps_native_rejection_reason(tmp_path: Path):
     assert state == "failed"
     assert error is not None
     assert "桌面端占用" in error
+
+
+def test_local_tui_owned_session_steers_when_live_owner_rejects(tmp_path: Path):
+    controller = LocalHermesController(
+        Settings(
+            browser_secret="browser-test-secret",
+            connector_secret="connector-test-secret",
+            database_url=f"sqlite:///{(tmp_path / 'state.sqlite3').as_posix()}",
+            attachments_dir=tmp_path / "attachments",
+        ),
+        project_root=tmp_path,
+        runtime_finder=lambda: None,
+    )
+    controller._state = "connected"
+    controller._process = FakeProcess()
+    controller._runtime_session_id = "durable-session-key"
+    controller._tui_session_id = "live-tui-session-id"
+
+    calls = []
+
+    def rpc(method: str, params: dict[str, object], timeout: float = 15):
+        del timeout
+        calls.append((method, dict(params)))
+        if method == "session.active_list":
+            return {
+                "result": {
+                    "sessions": [
+                        {"session_key": "durable-session-key", "id": "live-tui-session-id", "status": "working"}
+                    ]
+                }
+            }
+        if method == "prompt.submit":
+            return {
+                "error": {
+                    "code": 4090,
+                    "message": "Session durable-session-key already has a live owner (desktop, pid 1).",
+                    "data": {"reason": "SESSION_NOT_OWNED"},
+                }
+            }
+        if method == "session.steer":
+            return {"result": {"status": "queued", "text": params.get("text")}}
+        raise AssertionError(f"Unexpected method {method}")
+
+    controller._rpc = rpc
+    state, error = controller.submit_tui_command(
+        {"session_id": "durable-session-key", "text": "方向修正：请改用异步实现"}
+    )
+    assert state == "accepted"
+    assert error is None
+    assert len(calls) == 3
+    assert calls[0][0] == "prompt.submit"
+    assert calls[1][0] == "session.active_list"
+    assert calls[2] == ("session.steer", {"session_id": "live-tui-session-id", "text": "方向修正：请改用异步实现"})
+
+
+def test_local_tui_owned_session_takes_over_when_idle(tmp_path: Path):
+    controller = LocalHermesController(
+        Settings(
+            browser_secret="browser-test-secret",
+            connector_secret="connector-test-secret",
+            database_url=f"sqlite:///{(tmp_path / 'state.sqlite3').as_posix()}",
+            attachments_dir=tmp_path / "attachments",
+        ),
+        project_root=tmp_path,
+        runtime_finder=lambda: None,
+    )
+    controller._state = "connected"
+    controller._process = FakeProcess()
+    controller._runtime_session_id = "durable-session-key"
+    controller._tui_session_id = "live-tui-session-id"
+
+    calls = []
+    submits = 0
+
+    def rpc(method: str, params: dict[str, object], timeout: float = 15):
+        nonlocal submits
+        del timeout
+        calls.append((method, dict(params)))
+        if method == "session.active_list":
+            return {
+                "result": {
+                    "sessions": [
+                        {"session_key": "durable-session-key", "id": "live-tui-session-id", "status": "idle"}
+                    ]
+                }
+            }
+        if method == "prompt.submit":
+            submits += 1
+            if submits == 1:
+                # 首次被桌面端占用拒绝
+                return {
+                    "error": {
+                        "code": 4090,
+                        "message": "Session durable-session-key already has a live owner (desktop, pid 1).",
+                        "data": {"reason": "SESSION_NOT_OWNED"},
+                    }
+                }
+            # 第二次接管租约后提交成功
+            return {"result": {"session_id": "live-tui-session-id"}}
+        raise AssertionError(f"Unexpected method {method}")
+
+    controller._rpc = rpc
+    state, error = controller.submit_tui_command(
+        {"session_id": "durable-session-key", "text": "闲置状态下的接管消息"}
+    )
+    assert state == "accepted"
+    assert error is None
+    assert len(calls) == 3
+    assert calls[0][0] == "prompt.submit"
+    assert calls[1][0] == "session.active_list"
+    assert calls[2][0] == "prompt.submit"
 
 
 def test_service_startup_marks_persisted_connectors_disconnected(tmp_path: Path):

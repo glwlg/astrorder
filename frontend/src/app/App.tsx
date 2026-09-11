@@ -12,6 +12,7 @@ import { useEventStream } from '../hooks/useEventStream'
 import { ChatPage } from '../features/chat/ChatPage'
 import { MonitorPage } from '../features/monitor/MonitorPage'
 import { AgentsPage } from '../features/agents/AgentsPage'
+import { PluginsPage } from '../features/plugins/PluginsPage'
 
 function LoadingPage({ label = '正在连接星序…' }: { label?: string }) {
   return <Center className="loading-page"><Stack align="center" gap="sm"><Loader size="md" color="gray" /><Text c="dimmed">{label}</Text></Stack></Center>
@@ -74,6 +75,7 @@ function AuthenticatedApp() {
         <Route path="chat/:sessionId" element={<ChatPage />} />
         <Route path="monitor" element={<MonitorPage />} />
         <Route path="agents" element={<AgentsPage />} />
+        <Route path="plugins" element={<PluginsPage />} />
         <Route path="*" element={<Navigate to="/chat" replace />} />
       </Route>
     </Routes>

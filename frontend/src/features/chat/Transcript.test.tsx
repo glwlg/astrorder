@@ -2,7 +2,7 @@ import { MantineProvider } from '@mantine/core'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 afterEach(cleanup)
-import type { Message } from '../../domain/types'
+import type { Approval, Message } from '../../domain/types'
 import { Transcript } from './Transcript'
 
 const message: Message = {
@@ -16,6 +16,17 @@ const message: Message = {
   created_at: '2026-01-01T00:00:00Z',
   command_id: null,
   tool: null,
+}
+
+const pendingApproval: Approval = {
+  id: 'approval-1',
+  agent_id: 'agent-1',
+  session_id: 'session-1',
+  title: 'Codex 请求执行授权',
+  detail: '/usr/bin/zsh -lc "echo 123"',
+  state: 'pending',
+  target_id: 'call-1',
+  data: {},
 }
 
 describe('transcript follow mode', () => {
@@ -64,5 +75,26 @@ describe('transcript follow mode', () => {
     await waitFor(() => expect(screen.queryByTestId('return-bottom')).not.toBeInTheDocument())
     expect(scrollTo).toHaveBeenLastCalledWith({ top: 1000, behavior: 'auto' })
     expect(transcript.scrollTop).toBe(1000)
+  })
+
+  it('renders pending approvals inline in the conversation stream and triggers approval actions', () => {
+    const onApproval = vi.fn()
+    render(
+      <MantineProvider>
+        <Transcript
+          messages={[message]}
+          outbox={[]}
+          approvals={[pendingApproval]}
+          onApproval={onApproval}
+        />
+      </MantineProvider>,
+    )
+    expect(screen.getByRole('region', { name: '对话待处理审批' })).toBeInTheDocument()
+    expect(screen.getByText('Codex 请求执行授权')).toBeInTheDocument()
+    expect(screen.getByText(/echo 123/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '允许' }))
+    expect(onApproval).toHaveBeenCalledWith(pendingApproval, 'approve')
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    expect(onApproval).toHaveBeenCalledWith(pendingApproval, 'cancel')
   })
 })

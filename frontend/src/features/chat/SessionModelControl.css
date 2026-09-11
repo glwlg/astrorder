@@ -1,8 +1,172 @@
 .session-model-control { flex:0 1 auto; padding:0; min-width:0; max-width:100%; }
-.session-model-control .mantine-Button-root { max-width:100%; }
-.session-model-control .mantine-Button-label { display:flex; align-items:center; min-width:0; overflow:hidden; white-space:nowrap; }
-.session-model-control .mantine-Button-label > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.session-model-options { max-height:min(45vh,360px); overflow:auto; display:grid; gap:6px; }
-.session-model-option { display:flex; align-items:center; gap:9px; padding:10px 12px; border:1px solid var(--mantine-color-default-border); border-radius:9px; min-width:0; }
-.session-model-option span { flex:1; overflow-wrap:anywhere; }.session-model-option svg { flex-shrink:0; }
-.session-model-option[aria-pressed='true'] { border-color:var(--mantine-primary-color-filled); background:var(--mantine-primary-color-light); }
+
+/* Capsule pill button at the bottom of composer */
+.codex-model-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--astr-border);
+  background: color-mix(in srgb, var(--astr-surface-muted) 85%, var(--astr-surface));
+  color: var(--astr-text);
+  font-size: 12px;
+  font-weight: 550;
+  cursor: pointer;
+  transition: all 140ms ease;
+  user-select: none;
+  white-space: nowrap;
+  max-width: 240px;
+}
+.codex-model-pill:hover {
+  border-color: color-mix(in srgb, var(--astr-indigo) 40%, var(--astr-border));
+  background: var(--astr-surface-muted);
+}
+.codex-model-pill-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.codex-model-pill-effort {
+  color: var(--astr-muted);
+  font-weight: 500;
+  font-size: 11px;
+}
+.codex-model-pill-arrow {
+  color: var(--astr-muted);
+  flex-shrink: 0;
+}
+
+/* Popover Dropdown */
+.codex-model-popover-dropdown {
+  padding: 0 !important;
+  border-radius: 18px !important;
+  border: 1px solid var(--astr-border) !important;
+  background: var(--astr-surface) !important;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12) !important;
+  overflow: hidden;
+}
+
+/* Main Effort & Model Card */
+.codex-model-card {
+  width: 230px;
+  padding: 12px 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--astr-surface);
+}
+
+.codex-model-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.codex-model-icon-bolt {
+  display: flex;
+  align-items: center;
+  color: var(--astr-muted);
+}
+.codex-model-title-btn {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 6px;
+  color: #0066cc;
+}
+.codex-model-title-btn:hover {
+  background: color-mix(in srgb, #0066cc 10%, transparent);
+}
+.codex-model-effort-highlight {
+  font-size: 14px;
+  font-weight: 600;
+  color: #0066cc;
+}
+
+.codex-model-name-label {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--astr-text);
+  cursor: pointer;
+  margin: 2px 0 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.codex-model-name-label:hover {
+  color: #0066cc;
+}
+
+.codex-model-slider-wrap {
+  padding: 0 4px;
+}
+
+/* Model List Sub-panel */
+.codex-model-list-panel {
+  width: 240px;
+  padding: 10px 10px 8px;
+  display: flex;
+  flex-direction: column;
+}
+
+.codex-model-list-head {
+  padding-bottom: 6px;
+}
+
+.codex-model-list-scroll {
+  max-height: 280px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+}
+
+.codex-model-list-section-title {
+  padding: 6px 8px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--astr-muted);
+}
+
+.codex-model-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--astr-text);
+  cursor: pointer;
+  transition: background 120ms ease;
+  text-align: left;
+}
+.codex-model-menu-item:hover {
+  background: var(--astr-surface-muted);
+}
+.codex-model-menu-item.is-selected {
+  background: color-mix(in srgb, var(--astr-surface-muted) 90%, var(--astr-surface));
+  font-weight: 600;
+}
+.codex-model-menu-item-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.codex-model-check-icon {
+  color: var(--astr-text);
+  flex-shrink: 0;
+  margin-left: 8px;
+}
+

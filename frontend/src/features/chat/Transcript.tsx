@@ -1,12 +1,17 @@
-import { IconArrowDown, IconPaperclip, IconRefresh, IconTool } from '@tabler/icons-react'
+import { IconArrowDown, IconPaperclip, IconRefresh, IconTool, IconVectorTriangle } from '@tabler/icons-react'
 import { Anchor, Button, Group, Paper, Stack, Text } from '@mantine/core'
-import type { Attachment, Message, OutboxEntry } from '../../domain/types'
+import { IconShieldCheck } from '@tabler/icons-react'
+import type { Approval, Attachment, Message, OutboxEntry, Session } from '../../domain/types'
 import { useStickToBottom } from '../../hooks/useStickToBottom'
 import { MarkdownContent } from '../../components/MarkdownContent'
 import { LazyDetails } from '../../components/LazyDetails'
 import { MessageBody } from '../../components/MessageBody'
 import { useOlderMessages } from '../../hooks/useOlderMessages'
 import { describeTool, PackSummary, ToolLineIcon } from './toolPresentation'
+import { artifactViewerRegistry } from '../sidecar/registry'
+import { resolveArtifactFromPath } from '../sidecar/resolver'
+import { useSidecarStore } from '../sidecar/sidecarStore'
+import { useAstrorderStore } from '../../state/store'
 
 function attachmentHref(attachment: Attachment): string | undefined {
   try {
@@ -18,24 +23,94 @@ function attachmentHref(attachment: Attachment): string | undefined {
   }
 }
 
-function AttachmentList({ attachments, onImageClick }: { attachments: Attachment[]; onImageClick?: (url: string) => void }) {
+function AttachmentList({
+  attachments,
+  onImageClick,
+  session,
+}: {
+  attachments: Attachment[]
+  onImageClick?: (url: string) => void
+  session?: Session | null
+}) {
+  const defaultSession = useAstrorderStore((state) => Object.values(state.sessions)[0] as Session | undefined)
+  const currentSession = session || defaultSession
+  const openArtifact = useSidecarStore((state) => state.openArtifact)
+
   if (attachments.length === 0) return null
   return (
     <div className="message-attachments">
       {attachments.map((attachment) => {
         const href = attachmentHref(attachment)
         const isImage = attachment.media_type.startsWith('image/') && href
-        return isImage ? (
-          <button
-            type="button"
-            className="attachment-image-link"
-            key={attachment.id}
-            onClick={() => onImageClick?.(href)}
-            aria-label={`查看图片：${attachment.name}`}
-          >
-            <img className="attachment-image" src={href} alt={attachment.name} loading="lazy" />
-          </button>
-        ) : href ? (
+        const isDrawio = /\.(drawio|drawio\.xml|drawio\.svg)$/i.test(attachment.name)
+
+        if (isImage) {
+          return (
+            <button
+              type="button"
+              className="attachment-image-link"
+              key={attachment.id}
+              onClick={() => onImageClick?.(href)}
+              aria-label={`查看图片：${attachment.name}`}
+            >
+              <img className="attachment-image" src={href} alt={attachment.name} loading="lazy" />
+            </button>
+          )
+        }
+
+        if (isDrawio && href && currentSession) {
+          return (
+            <button
+              type="button"
+              className="attachment-file attachment-artifact-link"
+              key={attachment.id}
+              onClick={() => {
+                const artifact = resolveArtifactFromPath(href, currentSession, {
+                  name: attachment.name,
+                  mediaType: attachment.media_type,
+                })
+                const viewer = artifactViewerRegistry.findViewer(artifact)
+                if (viewer) {
+                  openArtifact(artifact, viewer.id)
+                } else {
+                  window.open(href, '_blank')
+                }
+              }}
+              title={`在右侧打开图表：${attachment.name}`}
+            >
+              <IconVectorTriangle size={15} aria-hidden="true" style={{ color: 'var(--astr-indigo)' }} />
+              <span>{attachment.name}</span>
+            </button>
+          )
+        }
+
+        // 检查是否能由任何内置工件查看器处理（如 HTML、Mermaid、Excalidraw、Diff、3D 模型等）
+        if (href && currentSession) {
+          const artifact = resolveArtifactFromPath(href, currentSession, {
+            name: attachment.name,
+            mediaType: attachment.media_type,
+          })
+          const viewer = artifactViewerRegistry.findViewer(artifact)
+          if (viewer) {
+            const Icon = viewer.icon
+            return (
+              <button
+                type="button"
+                className="attachment-file attachment-artifact-link"
+                key={attachment.id}
+                onClick={() => openArtifact(artifact, viewer.id)}
+                title={`在右侧打开${viewer.title}：${attachment.name}`}
+              >
+                <span style={{ display: 'inline-flex', color: 'var(--astr-indigo)' }}>
+                  <Icon size={15} />
+                </span>
+                <span>{attachment.name}</span>
+              </button>
+            )
+          }
+        }
+
+        return href ? (
           <Anchor className="attachment-file" href={href} target="_blank" rel="noreferrer" key={attachment.id}>
             <IconPaperclip size={15} aria-hidden="true" />
             <span>{attachment.name}</span>
@@ -59,7 +134,15 @@ function messageLabel(message: Message): string {
   return 'Agent'
 }
 
-function MessageItem({ message, onImageClick }: { message: Message; onImageClick?: (url: string) => void }) {
+function MessageItem({
+  message,
+  onImageClick,
+  session,
+}: {
+  message: Message
+  onImageClick?: (url: string) => void
+  session?: Session | null
+}) {
   const isUser = message.role === 'user'
   const isActivity = message.kind !== 'message' || message.role === 'tool'
   if (isActivity) {
@@ -85,7 +168,7 @@ function MessageItem({ message, onImageClick }: { message: Message; onImageClick
           {message.tool?.arguments != null && Object.keys(message.tool.arguments).length > 0 && (
             <pre className="tool-payload">{JSON.stringify(message.tool.arguments, null, 2)}</pre>
           )}
-          <AttachmentList attachments={message.attachments} onImageClick={onImageClick} />
+          <AttachmentList attachments={message.attachments} onImageClick={onImageClick} session={session} />
         </LazyDetails>
       </article>
     )
@@ -100,11 +183,18 @@ function MessageItem({ message, onImageClick }: { message: Message; onImageClick
         {Date.parse(message.created_at) > 0 && <time dateTime={message.created_at}>{new Date(message.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</time>}
       </div>
       <Paper className={`message-bubble ${isUser ? 'message-bubble-user' : isActivity ? 'message-bubble-activity' : ''}`} withBorder={!isActivity} radius="lg" p="sm">
-        {message.text && <MessageBody value={message.text} user={isUser} onImageClick={onImageClick} renderMarkdown={value => <MarkdownContent value={value} onImageClick={onImageClick} />} />}
+        {message.text && (
+          <MessageBody
+            value={message.text}
+            user={isUser}
+            onImageClick={onImageClick}
+            renderMarkdown={(value) => <MarkdownContent value={value} onImageClick={onImageClick} session={session} />}
+          />
+        )}
         {message.tool && (
           <pre className="tool-payload">{JSON.stringify(message.tool, null, 2)}</pre>
         )}
-        <AttachmentList attachments={message.attachments} onImageClick={onImageClick} />
+        <AttachmentList attachments={message.attachments} onImageClick={onImageClick} session={session} />
       </Paper>
     </article>
   )
@@ -113,6 +203,10 @@ function MessageItem({ message, onImageClick }: { message: Message; onImageClick
 export function Transcript({
   messages,
   outbox,
+  approvals = [],
+  canApprove = true,
+  onApproval,
+  composerHeight,
   loading,
   error,
   onRetry,
@@ -120,9 +214,14 @@ export function Transcript({
   loadingOlder = false,
   onLoadOlder,
   onImageClick,
+  session,
 }: {
   messages: Message[]
   outbox: OutboxEntry[]
+  approvals?: Approval[]
+  canApprove?: boolean
+  onApproval?: (approval: Approval, action: 'approve' | 'cancel') => void
+  composerHeight?: number
   loading?: boolean
   error?: string
   onRetry?: () => void
@@ -130,10 +229,11 @@ export function Transcript({
   loadingOlder?: boolean
   onLoadOlder?: () => unknown
   onImageClick?: (url: string) => void
+  session?: Session | null
 }) {
   const visibleMessages = messages.filter((message) => message.kind !== 'message' || message.role !== 'assistant' || message.text.trim() || message.attachments.length || message.tool)
   const isActivity = (message: Message | null) => Boolean(message && (message.kind !== 'message' || message.role === 'tool'))
-  const contentVersion = `${messages.map((item) => item.id).join(',')}|${outbox.map((item) => `${item.command.id}:${item.status}`).join(',')}`
+  const contentVersion = `${messages.map((item) => item.id).join(',')}|${outbox.map((item) => `${item.command.id}:${item.status}`).join(',')}|${approvals.map((item) => item.id).join(',')}|${composerHeight ?? 0}`
   const {
     setContainerRef,
     following,
@@ -204,7 +304,7 @@ export function Transcript({
               for (let i = idx; i < visibleMessages.length && isActivity(visibleMessages[i]); i++) pack.push(visibleMessages[i])
               return <section className="activity-pack" aria-label="思考与工具" key={message.id}>
                 <LazyDetails summary={<PackSummary pack={pack} />}>
-                  <div className="activity-timeline">{pack.map((item) => <MessageItem message={item} key={item.id} onImageClick={onImageClick} />)}</div>
+                  <div className="activity-timeline">{pack.map((item) => <MessageItem message={item} key={item.id} onImageClick={onImageClick} session={session} />)}</div>
                 </LazyDetails>
               </section>
             }
@@ -220,10 +320,49 @@ export function Transcript({
                     </span>
                   </div>
                 )}
-                <MessageItem message={message} onImageClick={onImageClick} />
+                <MessageItem message={message} onImageClick={onImageClick} session={session} />
               </div>
             )
           })}
+          {approvals.length > 0 && (
+            <section className="transcript-approvals" aria-label="对话待处理审批">
+              <Stack gap="xs" mt="xs">
+                {approvals.map((approval) => (
+                  <Paper className="approval-card transcript-approval-card" withBorder p="sm" radius="md" key={approval.id}>
+                    <Group gap={6} mb={4}>
+                      <IconShieldCheck size={16} style={{ color: 'var(--astr-yellow)' }} />
+                      <Text size="sm" fw={600}>{approval.title}</Text>
+                    </Group>
+                    {approval.detail && (
+                      <div className="approval-card-detail">
+                        <MarkdownContent value={approval.detail} onImageClick={onImageClick} />
+                      </div>
+                    )}
+                    {canApprove && onApproval ? (
+                      <Group mt="xs" gap="xs">
+                        <button
+                          className="approval-button approval-approve"
+                          type="button"
+                          onClick={() => onApproval(approval, 'approve')}
+                        >
+                          允许
+                        </button>
+                        <button
+                          className="approval-button approval-cancel"
+                          type="button"
+                          onClick={() => onApproval(approval, 'cancel')}
+                        >
+                          取消
+                        </button>
+                      </Group>
+                    ) : (
+                      <Text size="xs" c="dimmed" mt="xs">Agent 未报告审批能力，操作已禁用。</Text>
+                    )}
+                  </Paper>
+                ))}
+              </Stack>
+            </section>
+          )}
         </div>
       </div>
     </section>

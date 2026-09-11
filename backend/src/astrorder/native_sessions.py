@@ -21,6 +21,29 @@ class NativeDiscovery:
     projects: list[dict[str, Any]] = field(default_factory=list)
 
 
+_ACTIVE_STATUS = {"working": "running", "running": "running", "waiting": "waiting_approval"}
+
+
+def active_native_session_status(rpc: Callable[..., dict[str, Any] | None]) -> dict[str, str]:
+    try:
+        response = rpc("session.active_list", {})
+    except Exception:
+        return {}
+    result = response.get("result") if isinstance(response, dict) else None
+    rows = result.get("sessions") if isinstance(result, dict) else None
+    if not isinstance(rows, list):
+        return {}
+    mapped: dict[str, str] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        key = row.get("session_key") or row.get("id")
+        raw = row.get("status")
+        if isinstance(key, str) and key and raw in _ACTIVE_STATUS:
+            mapped[key] = _ACTIVE_STATUS[raw]
+    return mapped
+
+
 def _project_info(node: dict[str, Any]) -> tuple[str | None, str | None, str | None]:
     raw_id = node.get("id") or node.get("project_id") or node.get("key")
     raw_name = node.get("name") or node.get("title") or node.get("label")
@@ -98,6 +121,7 @@ def discover_native_sessions(
     page_size: int = 100,
 ) -> NativeDiscovery:
     rows, complete = paginate_native_session_rows(rpc, page_size=page_size)
+    active_status = active_native_session_status(rpc)
     project_response = rpc(
         "projects.tree",
         {
@@ -211,7 +235,7 @@ def discover_native_sessions(
                 "agent_id": agent_id,
                 "title": str(title),
                 "workspace": str(workspace) if workspace else None,
-                "status": "idle",
+                "status": active_status.get(durable_id) or active_status.get(native_id) or "idle",
                 "updated_at": updated_at,
                 "source_id": source_id,
                 "connection_id": connection_id,

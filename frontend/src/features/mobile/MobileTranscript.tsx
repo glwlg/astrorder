@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { IconCheck, IconChevronDown } from '@tabler/icons-react'
-import type { Message } from '../../domain/types'
+import type { Approval, Message } from '../../domain/types'
 import { MobileMarkdown as MarkdownContent } from './MobileMarkdown'
 import { useStickToBottom } from '../../hooks/useStickToBottom'
 import { useOlderMessages } from '../../hooks/useOlderMessages'
@@ -11,12 +11,13 @@ import { describeTool, PackSummary, ToolLineIcon } from '../chat/toolPresentatio
 
 export interface MessageActionAnchor { text: string; x: number; y: number; element: HTMLElement }
 
-export function MobileTranscript({ messages, busy, loadOlder, hasOlder, loadingOlder, onMessageAction, onImage, onSwipe, onSwipePreview }: {
-  messages: Message[]; busy: boolean; loadOlder: () => unknown; hasOlder: boolean; loadingOlder: boolean
+export function MobileTranscript({ messages, approvals = [], onApproval, busy, loadOlder, hasOlder, loadingOlder, onMessageAction, onImage, onSwipe, onSwipePreview }: {
+  messages: Message[]; approvals?: Approval[]; onApproval?: (approval: Approval, action: 'approve' | 'cancel') => void
+  busy: boolean; loadOlder: () => unknown; hasOlder: boolean; loadingOlder: boolean
   onMessageAction: (anchor: MessageActionAnchor) => void; onImage: (url: string) => void; onSwipe: (gesture: SessionSwipeGesture) => void
   onSwipePreview?: (pose: import('./mobileGestures').SessionCardPose | null) => void
 }) {
-  const { setContainerRef, following, onScroll, scrollToBottom, capturePrependAnchor } = useStickToBottom<HTMLDivElement>({ contentVersion: messages.map(m => m.id + ':' + m.text.length).join('|') })
+  const { setContainerRef, following, onScroll, scrollToBottom, capturePrependAnchor } = useStickToBottom<HTMLDivElement>({ contentVersion: `${messages.map(m => m.id + ':' + m.text.length).join('|')}|${approvals.map(a => a.id).join('|')}` })
   const older = useOlderMessages({ hasMore: hasOlder, loading: loadingOlder, load: loadOlder, capture: capturePrependAnchor })
   const touch = useRef<{ x: number; y: number } | null>(null)
   const hold = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -61,6 +62,22 @@ export function MobileTranscript({ messages, busy, loadOlder, hasOlder, loadingO
         </article>
       })}
       {busy && (!rows.length || rows[rows.length - 1].role === 'user') && <div className="m-thinking-placeholder">··· 正在思考与响应中…</div>}
+      {approvals.length > 0 && (
+        <section className="m-native-approvals" aria-label="对话待处理审批">
+          {approvals.map(approval => (
+            <div key={approval.id} className="approval-card" style={{ padding: '10px 12px', borderRadius: 10, margin: '8px 0' }}>
+              <h4 style={{ margin: '0 0 6px', fontSize: 13, fontWeight: 600 }}>{approval.title}</h4>
+              {approval.detail && <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 160, overflow: 'auto', margin: '0 0 8px', fontSize: 12 }}>{approval.detail}</pre>}
+              {onApproval && (
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button className="approval-button approval-approve" type="button" onClick={() => onApproval(approval, 'approve')}>允许本次</button>
+                  <button className="approval-button approval-cancel" type="button" onClick={() => onApproval(approval, 'cancel')}>拒绝</button>
+                </div>
+              )}
+            </div>
+          ))}
+        </section>
+      )}
     </div>
     {!following && <button className="m-return-bottom" aria-label="回到底部" onClick={scrollToBottom}><IconChevronDown size={19} /></button>}
   </>

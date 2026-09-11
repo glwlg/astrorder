@@ -59,7 +59,7 @@ def test_api_imports_only_requested_page_without_full_resume_or_live_replay(tmp_
         endpoint = '/api/v1/sessions/native/messages'
         assert client.get(endpoint, params={'agent_id': 'source'}).status_code == 401
         cursor = store.latest_cursor()
-        response = client.get(endpoint, params={'agent_id': 'source'}, headers={'Authorization': 'Bearer test-only'})
+        response = client.get(endpoint, params={'agent_id': 'source', 'limit': 2}, headers={'Authorization': 'Bearer test-only'})
         assert response.status_code == 200
         page = response.json()
         assert [row['text'] for row in page['items']] == ['message-499', 'message-500']

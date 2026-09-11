@@ -1,10 +1,8 @@
 import { AppShell, Drawer } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
-import { useQueryClient } from '@tanstack/react-query'
 import { useShallow } from 'zustand/react/shallow'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useRef, useState } from 'react'
-import { api } from '../api/client'
 import { scopeKey } from '../domain/semantics'
 import type { Session } from '../domain/types'
 import { selectProjects, selectSessions, useAstrorderStore } from '../state/store'
@@ -23,7 +21,6 @@ function routePart(value: string): string {
 export function AppShellLayout() {
   const navigate = useNavigate()
   const location = useLocation()
-  const queryClient = useQueryClient()
   const [mobileOpened, { open: openMobile, close: closeMobile }] = useDisclosure(false)
   const sessions = useAstrorderStore(useShallow(selectSessions))
   const projects = useAstrorderStore(useShallow(selectProjects))
@@ -87,17 +84,6 @@ export function AppShellLayout() {
     navigate(`/chat/${encodeURIComponent(session.id)}?agent_id=${encodeURIComponent(session.agent_id)}`)
   }
 
-  const logout = async () => {
-    try {
-      await api.logout()
-    } finally {
-      try {
-        localStorage.removeItem('astrorder:token')
-      } catch {}
-      useAstrorderStore.getState().resetRuntime()
-      queryClient.clear()
-    }
-  }
 
   return (
     <AppShell
@@ -106,8 +92,8 @@ export function AppShellLayout() {
       navbar={{ width: sidebarWidth, breakpoint: 'md', collapsed: { mobile: true } }}
       padding={0}
     >
-      <AppShell.Header>
-        <AppHeader connection={connection} onMenu={openMobile} onLogout={logout} />
+      <AppShell.Header className="sidebar-header">
+        <AppHeader connection={connection} onMenu={openMobile} />
       </AppShell.Header>
       <AppShell.Navbar className="desktop-navbar" p="md" style={{ width: sidebarWidth }}>
         <Sidebar sessions={sessions} agents={agents} projects={projects} activeSessionKey={activeSessionKey} onSelectSession={selectSession} />

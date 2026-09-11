@@ -24,6 +24,7 @@ import {
   Tooltip,
   UnstyledButton,
 } from '@mantine/core'
+import { notifications } from '@mantine/notifications'
 import { useEffect, useMemo, useState } from 'react'
 import { useSessionOrder } from '../hooks/useSessionOrder'
 import { AgentSessionFilter, matchesAgent } from './AgentSessionFilter'
@@ -32,11 +33,14 @@ import { moveProject, PROJECT_ORDER_KEY, readProjectOrder, reconcileProjectOrder
 import type { Agent, Project, Session } from '../domain/types'
 import { scopeKey } from '../domain/semantics'
 import { StatusDot } from './Status'
+import { ConfirmPopover } from './ConfirmPopover'
+import { confirmationCoordinatesFromEvent, type ConfirmationCoordinates } from './confirmationPosition'
 import { AgentKindBadge } from './SessionRuntimeFacts'
-import { buildProjectGroups, formatRelativeTime, sessionActivityStatus, type ProjectGroup, type RailFilter } from './sessionRailModel'
+import { buildProjectGroups, displaySessionTitle, formatRelativeTime, sessionActivityStatus, type ProjectGroup, type RailFilter } from './sessionRailModel'
 import { api } from '../api/client'
 import './sessionPins.css'
 import { useAstrorderStore } from '../state/store'
+import { useShallow } from 'zustand/react/shallow'
 import {
   loadPinnedProjects,
   savePinnedProjects,
@@ -48,6 +52,10 @@ import {
   type ProjectAppearanceMap,
   type ProjectAppearanceEntry,
 } from './projectAppearance'
+
+type PendingConfirmation =
+  | { kind: 'delete-session'; session: Session; coords: ConfirmationCoordinates }
+  | { kind: 'delete-project'; project: ProjectGroup; coords: ConfirmationCoordinates }
 
 export function SessionRail({
   sessions: incomingSessions,
@@ -64,6 +72,9 @@ export function SessionRail({
 }) {
   const [filter, setFilter] = useState('')
   const sessions = useSessionOrder(incomingSessions)
+  const commands = useAstrorderStore(useShallow((state) => state.commands))
+  useAstrorderStore((state) => state.messages)
+  useAstrorderStore((state) => state.tasks)
   const [statusFilter, setStatusFilter] = useState<RailFilter>('all')
   const [agentFilter, setAgentFilter] = useState(() => {
     try {
@@ -114,6 +125,8 @@ export function SessionRail({
   const [renameTarget, setRenameTarget] = useState<Session | null>(null)
   const [renameTitle, setRenameTitle] = useState('')
   const [renameLoading, setRenameLoading] = useState(false)
+  const [confirmation, setConfirmation] = useState<PendingConfirmation | null>(null)
+  const [confirmationLoading, setConfirmationLoading] = useState(false)
 
   // 新建会话加载中
   const creatingForProject = createOpened ? createProject?.key : null
@@ -136,6 +149,12 @@ export function SessionRail({
     try { localStorage.setItem(PROJECT_ORDER_KEY, JSON.stringify(stableOrder)) } catch {}
   }, [stableOrder, projectOrder])
   const reorderProject = (source: string, target: string) => {
+    if (pinnedProjects.includes(source) && pinnedProjects.includes(target)) {
+      const nextPinned = moveProject(pinnedProjects, source, target)
+      setPinnedProjects(nextPinned)
+      savePinnedProjects(nextPinned)
+      return
+    }
     const next = moveProject(stableOrder, source, target)
     setProjectOrder(next)
     try { localStorage.setItem(PROJECT_ORDER_KEY, JSON.stringify(next)) } catch {}
@@ -143,15 +162,19 @@ export function SessionRail({
   const groups = useMemo(() => {
     const visible = buildProjectGroups(decoratedSessions.filter(s => matchesAgent(s, agents, agentFilter)), agents, projects, filter.trim().toLocaleLowerCase(), statusFilter).filter(p => agentFilter === 'all' || p.sessions.length > 0)
     const byKey = new Map(visible.map(project => [project.key, project]))
-    return stableOrder.flatMap(key => byKey.has(key) ? [byKey.get(key)!] : [])
-  }, [agents, decoratedSessions, filter, projects, statusFilter, stableOrder, agentFilter])
+    const ordered = stableOrder.flatMap(key => byKey.has(key) ? [byKey.get(key)!] : [])
+    const pinnedSet = new Set(pinnedProjects)
+    const pinned = pinnedProjects.flatMap(key => byKey.has(key) ? [byKey.get(key)!] : [])
+    const unpinned = ordered.filter(p => !pinnedSet.has(p.key))
+    return [...pinned, ...unpinned]
+  }, [agents, decoratedSessions, filter, projects, statusFilter, stableOrder, agentFilter, pinnedProjects])
 
   const toggle = (key: string) => setCollapsed((current) => ({ ...current, [key]: !current[key] }))
 
   const togglePinProject = (projectKey: string, event?: React.MouseEvent) => {
     event?.stopPropagation()
     setPinnedProjects((prev) => {
-      const next = prev.includes(projectKey) ? prev.filter((k) => k !== projectKey) : [...prev, projectKey]
+      const next = prev.includes(projectKey) ? prev.filter((k) => k !== projectKey) : [projectKey, ...prev]
       savePinnedProjects(next)
       return next
     })
@@ -207,8 +230,11 @@ export function SessionRail({
     }
   }
 
-  const handleDeleteSession = async (session: Session) => {
-    if (!window.confirm(`确定删除会话“${session.title || session.id}”吗？`)) return
+  const requestDeleteSession = (session: Session, event?: { clientX: number; clientY: number }) => {
+    setConfirmation({ kind: 'delete-session', session, coords: confirmationCoordinatesFromEvent(event) })
+  }
+
+  const deleteSession = async (session: Session) => {
     try {
       await api.deleteSession(session.id, session.agent_id)
       useAstrorderStore.setState((state) => {
@@ -218,16 +244,17 @@ export function SessionRail({
       })
     } catch (err) {
       console.error('删除会话失败', err)
+      notifications.show({ color: 'red', message: '删除会话失败，请重试' })
     }
   }
 
-  const handleDeleteProject = async (project: ProjectGroup) => {
+  const requestDeleteProject = (project: ProjectGroup, event?: { clientX: number; clientY: number }) => {
     const sessionCount = project.sessionCount || project.sessions.length
-    const prompt = sessionCount > 0
-      ? `确定删除项目“${project.label}”吗？\n此操作将同时删除该项目及其包含的 ${sessionCount} 个会话。`
-      : `确定删除项目“${project.label}”吗？`
-    if (!window.confirm(prompt)) return
+    if (project.key.startsWith('unmarked:') && sessionCount === 0) return
+    setConfirmation({ kind: 'delete-project', project, coords: confirmationCoordinatesFromEvent(event) })
+  }
 
+  const deleteProject = async (project: ProjectGroup) => {
     try {
       let projectId: string | undefined
       let sourceId: string | undefined
@@ -291,7 +318,33 @@ export function SessionRail({
       }
     } catch (err) {
       console.error('删除项目失败', err)
-      window.alert('删除项目失败，请重试')
+      notifications.show({ color: 'red', message: '删除项目失败，请重试' })
+    }
+  }
+
+  const confirmationTitle = confirmation?.kind === 'delete-project'
+    ? (confirmation.project.key.startsWith('unmarked:') ? '清空未标记会话？' : '删除项目？')
+    : '删除会话？'
+  const confirmationMessage = confirmation?.kind === 'delete-project'
+    ? (() => {
+        const sessionCount = confirmation.project.sessionCount || confirmation.project.sessions.length
+        return confirmation.project.key.startsWith('unmarked:')
+          ? `确定删除未标记项目中的全部会话吗？\n此操作将删除其中的 ${sessionCount} 个会话。`
+          : (sessionCount > 0
+              ? `确定删除项目“${confirmation.project.label}”吗？\n此操作将同时删除该项目及其包含的 ${sessionCount} 个会话。`
+              : `确定删除项目“${confirmation.project.label}”吗？`)
+      })()
+    : confirmation ? `确定删除会话“${confirmation.session.title || confirmation.session.id}”吗？` : ''
+
+  const confirmDeletion = async () => {
+    if (!confirmation || confirmationLoading) return
+    setConfirmationLoading(true)
+    try {
+      if (confirmation.kind === 'delete-project') await deleteProject(confirmation.project)
+      else await deleteSession(confirmation.session)
+    } finally {
+      setConfirmationLoading(false)
+      setConfirmation(null)
     }
   }
 
@@ -349,18 +402,32 @@ export function SessionRail({
         <>
         {groups.some(project => project.sessions.some(s => pinnedSessions[scopeKey(s.agent_id, s.id)])) && <section className="session-pinned-section" aria-label="置顶会话">
           <div className="session-pinned-heading"><IconPinned size={15} />置顶会话</div>
-          {groups.flatMap(project => project.sessions).filter(s => pinnedSessions[scopeKey(s.agent_id, s.id)]).map(session => <div className="session-row-wrapper" key={scopeKey(session.agent_id, session.id)}>
-            <UnstyledButton className={`session-row is-pinned ${scopeKey(session.agent_id, session.id) === activeSessionKey ? 'is-active' : ''}`} onClick={() => onSelect(session)}>
-              <span className="session-row-title">{session.title || '未命名会话'}</span><div className="session-row-info"><AgentKindBadge agent={agents[session.agent_id]} /><span className="session-row-time">{formatRelativeTime(session.updated_at)}</span><StatusDot status={sessionActivityStatus(session)} /></div>
-            </UnstyledButton>
-            <div className="session-row-actions has-pinned"><button className="session-action-btn is-active" aria-label="取消置顶" onClick={e => togglePin(session, e)}><IconPinned size={14} /></button>
-              <Menu position="bottom-end" withinPortal><Menu.Target><button className="session-action-btn" aria-label="更多操作"><IconDotsVertical size={14} /></button></Menu.Target><Menu.Dropdown>
-                <Menu.Item leftSection={<IconEdit size={14} />} onClick={() => openRenameModal(session)}>重命名</Menu.Item>
-                <Menu.Item leftSection={<IconCopy size={14} />} onClick={() => copySessionId(session)}>复制 ID</Menu.Item>
-                <Menu.Item color="red" leftSection={<IconTrash size={14} />} onClick={() => void handleDeleteSession(session)}>删除会话</Menu.Item>
-              </Menu.Dropdown></Menu>
-            </div>
-          </div>)}
+          {groups.flatMap(project => project.sessions).filter(s => pinnedSessions[scopeKey(s.agent_id, s.id)]).map(session => {
+            const key = scopeKey(session.agent_id, session.id)
+            const isRunning = sessionActivityStatus(session, commands) === 'running'
+            const projectColor = session.project_id ? projectAppearance[`project:${session.project_id}`]?.color : undefined
+            return (
+              <div className={`session-row-wrapper ${isRunning ? 'is-running' : ''}`} key={key}>
+                <UnstyledButton className={`session-row is-pinned ${key === activeSessionKey ? 'is-active' : ''} ${isRunning ? 'is-running' : ''}`} onClick={() => onSelect(session)}>
+                  <span
+                    aria-hidden="true"
+                    className="arc-border arc-row session-running-arc"
+                    style={{
+                      '--arc-c1': projectColor || (session.agent_id.includes('codex') ? 'var(--astr-teal, #12b886)' : 'var(--astr-indigo, #6366f1)'),
+                    } as React.CSSProperties}
+                  />
+                  <span className="session-row-title">{displaySessionTitle(session)}</span><div className="session-row-info"><AgentKindBadge agent={agents[session.agent_id]} /><span className="session-row-time">{formatRelativeTime(session.updated_at)}</span><StatusDot status={sessionActivityStatus(session, commands)} /></div>
+                </UnstyledButton>
+                <div className="session-row-actions has-pinned"><button className="session-action-btn is-active" aria-label="取消置顶" onClick={e => togglePin(session, e)}><IconPinned size={14} /></button>
+                  <Menu position="bottom-end" withinPortal><Menu.Target><button className="session-action-btn" aria-label="更多操作"><IconDotsVertical size={14} /></button></Menu.Target><Menu.Dropdown>
+                    <Menu.Item leftSection={<IconEdit size={14} />} onClick={() => openRenameModal(session)}>重命名</Menu.Item>
+                    <Menu.Item leftSection={<IconCopy size={14} />} onClick={() => copySessionId(session)}>复制 ID</Menu.Item>
+                    <Menu.Item color="red" leftSection={<IconTrash size={14} />} onClick={(event) => requestDeleteSession(session, event)}>删除会话</Menu.Item>
+                  </Menu.Dropdown></Menu>
+                </div>
+              </div>
+            )
+          })}
         </section>}
         {groups.map((project) => {
           const projectCollapseKey = `project:${project.key}`
@@ -474,18 +541,14 @@ export function SessionRail({
                       >
                         新建会话
                       </Menu.Item>
-                      {!project.key.startsWith('unmarked:') && (
-                        <>
-                          <Menu.Divider />
-                          <Menu.Item
-                            color="red"
-                            leftSection={<IconTrash size={14} />}
-                            onClick={() => void handleDeleteProject(project)}
-                          >
-                            删除项目
-                          </Menu.Item>
-                        </>
-                      )}
+                      <Menu.Divider />
+                      <Menu.Item
+                        color="red"
+                        leftSection={<IconTrash size={14} />}
+                        onClick={(event) => requestDeleteProject(project, event)}
+                      >
+                        删除项目
+                      </Menu.Item>
                     </Menu.Dropdown>
                   </Menu>
                 </div>
@@ -495,20 +558,28 @@ export function SessionRail({
                   {visibleSessions.map((session) => {
                     const key = scopeKey(session.agent_id, session.id)
                     const isPinned = pinnedSessions[key] === true
+                    const isRunning = sessionActivityStatus(session, commands) === 'running'
                     return (
-                      <div className="session-row-wrapper" key={key}>
+                      <div className={`session-row-wrapper ${isRunning ? 'is-running' : ''}`} key={key}>
                         <UnstyledButton
-                          className={`session-row ${key === activeSessionKey ? 'is-active' : ''} ${isPinned ? 'is-pinned' : ''}`}
+                          className={`session-row ${key === activeSessionKey ? 'is-active' : ''} ${isPinned ? 'is-pinned' : ''} ${isRunning ? 'is-running' : ''}`}
                           onClick={() => onSelect(session)}
                           aria-current={key === activeSessionKey ? 'page' : undefined}
                         >
-                          <span className="session-row-title" title={session.title || '未命名会话'}>
-                            {session.title || '未命名会话'}
+                          <span
+                            aria-hidden="true"
+                            className="arc-border arc-row session-running-arc"
+                            style={{
+                              '--arc-c1': projectCustom?.color || (session.agent_id.includes('codex') ? 'var(--astr-teal, #12b886)' : 'var(--astr-indigo, #6366f1)'),
+                            } as React.CSSProperties}
+                          />
+                          <span className="session-row-title" title={displaySessionTitle(session)}>
+                            {displaySessionTitle(session)}
                           </span>
                           <div className="session-row-info">
                             <AgentKindBadge agent={agents[session.agent_id]} />
                             <span className="session-row-time">{formatRelativeTime(session.updated_at)}</span>
-                            <StatusDot status={sessionActivityStatus(session)} />
+                            <StatusDot status={sessionActivityStatus(session, commands)} />
                           </div>
                         </UnstyledButton>
                         <div className={`session-row-actions ${isPinned ? 'has-pinned' : ''}`}>
@@ -550,7 +621,7 @@ export function SessionRail({
                               <Menu.Item
                                 color="red"
                                 leftSection={<IconTrash size={14} />}
-                                onClick={() => void handleDeleteSession(session)}
+                                onClick={(event) => requestDeleteSession(session, event)}
                               >
                                 删除会话
                               </Menu.Item>
@@ -629,6 +700,18 @@ export function SessionRail({
           onSave={handleSaveAppearance}
         />
       )}
+      <ConfirmPopover
+        opened={confirmation !== null}
+        coords={confirmation?.coords}
+        title={confirmationTitle}
+        message={confirmationMessage}
+        confirmLabel="删除"
+        loading={confirmationLoading}
+        onConfirm={confirmDeletion}
+        onCancel={() => {
+          if (!confirmationLoading) setConfirmation(null)
+        }}
+      />
     </Stack>
   )
 }

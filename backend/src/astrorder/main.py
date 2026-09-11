@@ -114,6 +114,93 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def health() -> dict[str, str | int]:
         return {"status": "ok", "service": "astrorder", "protocol_version": 1}
 
+    @app.websocket("/ws/v1/terminal")
+    async def terminal_websocket(websocket: WebSocket) -> None:
+        if not authorize_browser_websocket(websocket, runtime_settings):
+            await websocket.close(code=4401)
+            return
+
+        session_id = websocket.query_params.get("session_id")
+        workspace_dir = None
+        ssh_argv = None
+        remote_workspace = None
+
+        if session_id:
+            try:
+                session_obj = websocket.app.state.store.find_session_by_id(session_id)
+                if session_obj:
+                    cid = session_obj.get("connection_id")
+                    if cid and cid != "local":
+                        # 这是一个 SSH 远程会话
+                        ssh_conn = websocket.app.state.store.get_ssh_connection(cid)
+                        if ssh_conn:
+                            from .ssh_transport import SshNativeRuntime
+                            runtime = SshNativeRuntime(
+                                ssh_conn["settings"],
+                                ssh_conn["id"],
+                                0,
+                                None,
+                                None,
+                                connector_secret=None,
+                            )
+                            # 构建带 -tt 交互式伪终端分配的 SSH 命令
+                            base = [a for a in runtime._base_ssh_argv() if a != "-T"]
+                            ssh_argv = base + ["-tt", runtime._target()]
+                            remote_workspace = session_obj.get("workspace")
+                    elif session_obj.get("workspace"):
+                        workspace_dir = session_obj["workspace"]
+            except Exception:
+                pass
+
+        await websocket.accept()
+        from .terminal_service import TerminalSession
+
+        term = TerminalSession(
+            workspace=workspace_dir,
+            ssh_argv=ssh_argv,
+            remote_workspace=remote_workspace,
+        )
+        try:
+            await term.start()
+        except Exception as exc:
+            await websocket.send_text(f"\r\n\x1b[31m启动终端失败: {exc}\x1b[0m\r\n")
+            await websocket.close()
+            return
+
+        # 必须在一个专用线程中执行阻塞式 PTY 读取，避免阻塞 asyncio 事件循环
+        async def read_pty_loop():
+            loop = asyncio.get_running_loop()
+            try:
+                while True:
+                    # 阻塞式从 PTY 读入数据
+                    chunk = await loop.run_in_executor(None, term.read_sync)
+                    if not chunk:
+                        break
+                    await websocket.send_text(chunk)
+            except Exception:
+                pass
+
+        read_task = asyncio.create_task(read_pty_loop())
+
+        try:
+            while True:
+                msg = await websocket.receive_text()
+                # 支持控制包（如 resize）或普通键盘键入
+                if msg.startswith("{\"type\":\"resize\""):
+                    try:
+                        import json
+                        data = json.loads(msg)
+                        term.resize(int(data.get("cols", 80)), int(data.get("rows", 24)))
+                    except Exception:
+                        pass
+                else:
+                    term.write_sync(msg)
+        except (WebSocketDisconnect, Exception):
+            pass
+        finally:
+            read_task.cancel()
+            await term.close()
+
     @app.websocket("/ws/v1/events")
     async def browser_events(websocket: WebSocket) -> None:
         if not authorize_browser_websocket(websocket, runtime_settings):

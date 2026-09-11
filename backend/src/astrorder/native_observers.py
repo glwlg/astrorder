@@ -98,6 +98,7 @@ class NativeObservers:
             await asyncio.gather(*(one(c) for c in self.clients()))
             await asyncio.to_thread(self.app.state.service.hermes_approvals.poll)
             await asyncio.to_thread(self._reconcile_commands)
+            await asyncio.to_thread(self._sync_hermes_activity)
             try: await asyncio.wait_for(self.stopping.wait(),timeout=5)
             except TimeoutError: pass
 
@@ -155,6 +156,38 @@ class NativeObservers:
                             service._server_event("command.upsert", agent_id=aid, session_id=sid, data=updated)
             except Exception:
                 pass
+
+    def _sync_hermes_activity(self):
+        from .native_sessions import active_native_session_status
+
+        connections = getattr(self.app.state, "connections", None)
+        service = getattr(self.app.state, "service", None)
+        store = getattr(self.app.state, "store", None)
+        if not connections or not service or not store:
+            return
+        runtime = getattr(connections, "local", None)
+        if runtime is None or getattr(runtime, "_state", None) != "connected":
+            return
+        rpc = getattr(runtime, "_rpc", None)
+        agent_id = getattr(runtime, "_agent_id", None)
+        if not callable(rpc) or not agent_id:
+            return
+        try:
+            active = active_native_session_status(rpc)
+        except Exception:
+            return
+        for session in store.list_sessions(agent_id):
+            sid = session.get("id")
+            if not isinstance(sid, str) or not sid:
+                continue
+            source_sid = session.get("source_session_id") or sid
+            desired = active.get(sid) or active.get(source_sid)
+            current = session.get("status") or "idle"
+            if current == "error" or not desired or current == desired:
+                continue
+            updated = {**session, "status": desired}
+            canonical = store.upsert_session(updated)
+            service._server_event("session.upsert", agent_id=agent_id, session_id=sid, data=canonical)
 
     def recent(self,agent_id,session_id=None):
         with self.app.state.store.session() as db:

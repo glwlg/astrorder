@@ -122,3 +122,43 @@ def set_session_reasoning(rpc, session_id: str, effort: str) -> dict[str, str]:
     if confirmed != effort:
         raise ConnectionError('思考强度尚未通过原生状态读回确认。', 502)
     return {'effort': effort}
+
+
+HERMES_APPROVAL_MAP = {
+    'manual': 'manual',
+    'auto': 'smart',
+    'full_access': 'off',
+}
+HERMES_APPROVAL_REVERSE = {
+    'manual': 'manual',
+    'smart': 'auto',
+    'off': 'full_access',
+}
+
+
+def current_session_approval_mode(rpc, session_id: str) -> str:
+    resumed = result(rpc, 'session.resume', {'session_id': session_id, 'lazy': True})
+    handle = resumed.get('session_id')
+    if not handle:
+        return 'auto'
+    try:
+        data = result(rpc, 'config.get', {'session_id': handle, 'key': 'approvals.mode'})
+    except ConnectionError:
+        return 'auto'
+    raw = data.get('value')
+    return HERMES_APPROVAL_REVERSE.get(raw, 'auto')
+
+
+def set_session_approval_mode(rpc, session_id: str, mode: str) -> dict[str, str]:
+    if mode not in HERMES_APPROVAL_MAP:
+        raise ConnectionError('不支持的审批模式；可选 manual、auto、full_access。', 422)
+    native_val = HERMES_APPROVAL_MAP[mode]
+    resumed = result(rpc, 'session.resume', {'session_id': session_id, 'lazy': True})
+    handle = resumed.get('session_id')
+    if not handle:
+        raise ConnectionError('原生运行时未返回会话句柄。', 502)
+    try:
+        result(rpc, 'config.set', {'session_id': handle, 'key': 'approvals.mode', 'value': native_val})
+    except ConnectionError as exc:
+        raise ConnectionError(f'Hermes 审批模式设置未确认：{exc.detail}', 502) from None
+    return {'mode': mode}

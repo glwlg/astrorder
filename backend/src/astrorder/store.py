@@ -497,6 +497,13 @@ class Store:
             db.flush()
             return True
 
+    def find_session_by_id(self, session_id: str) -> dict[str, Any] | None:
+        with self.session() as db:
+            row = db.execute(
+                select(SessionRow).where(SessionRow.id == session_id).order_by(SessionRow.row_id.desc())
+            ).scalars().first()
+            return _session_wire(row) if row else None
+
     def get_session(self, agent_id: str, session_id: str) -> dict[str, Any] | None:
         with self.session() as db:
             row = db.execute(

@@ -122,6 +122,22 @@ describe('shared runtime store', () => {
     expect(useAstrorderStore.getState().messages['agent-2::session-1']?.['message-1'].text).toBe('Codex')
   })
 
+  it('stamps liveActivityAt on websocket message upserts but not on history merges', () => {
+    const store = useAstrorderStore.getState()
+    store.mergeMessages(session.agent_id, session.id, [message('history-1', '历史')])
+    expect(useAstrorderStore.getState().liveActivityAt['agent-1::session-1']).toBeUndefined()
+
+    store.applyEvent({
+      id: 'live-1',
+      cursor: 3,
+      type: 'message.upsert',
+      agent_id: session.agent_id,
+      session_id: session.id,
+      data: { ...message('live-1', '流式正文', session.agent_id), role: 'assistant' },
+    })
+    expect(useAstrorderStore.getState().liveActivityAt['agent-1::session-1']).toBeGreaterThan(Date.now() - 1000)
+  })
+
   it('applies a late command acknowledgement to the exact outbox id', () => {
     const store = useAstrorderStore.getState()
     store.addOutbox({ ...command('command-1'), state: 'unknown', error: '连接中断' })

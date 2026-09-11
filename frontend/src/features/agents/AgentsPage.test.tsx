@@ -66,6 +66,26 @@ describe('Agent settings connection controls', () => {
     fireEvent.click(screen.getAllByRole('button', { name: '接入' })[1])
     await waitFor(() => expect(api.changeEnvironmentAgent).toHaveBeenCalledWith('local', 'codex', true))
   })
+  it('shows the persisted connection failure instead of labeling a failed Agent as discovered', async () => {
+    vi.mocked(api.getEnvironments).mockResolvedValueOnce({
+      items: [{
+        id: 'debian',
+        name: 'Debian',
+        method: 'ssh',
+        discovered: true,
+        agents: [{
+          kind: 'hermes',
+          available: true,
+          state: 'error',
+          detail: '远端 Astrorder bootstrap [project_activation_required]：Astrorder plugin is not already enabled.',
+        }],
+      }],
+    })
+    renderPage()
+    expect(await screen.findByText('连接失败')).toBeInTheDocument()
+    expect(screen.getByText('远端 Astrorder bootstrap [project_activation_required]：Astrorder plugin is not already enabled.')).toBeInTheDocument()
+    expect(screen.queryByText('已发现')).not.toBeInTheDocument()
+  })
   it('saves SSH without Agent-specific fields and discovers before any Agent is connected', async () => {
     renderPage()
     fireEvent.click(screen.getByRole('button', { name: '添加 SSH 连接' }))

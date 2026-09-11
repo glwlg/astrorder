@@ -1,5 +1,5 @@
 import { MantineProvider } from '@mantine/core'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Task } from '../../domain/types'
 import { TaskDetails } from './TaskDetails'
@@ -40,11 +40,17 @@ describe('TaskDetails', () => {
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith('pytest -q')
   })
 
-  it('requires explicit confirmation before stopping a supported task', () => {
+  it('requires explicit UI confirmation before stopping a supported task', async () => {
     const onStop = vi.fn()
     render(<MantineProvider><TaskDetails task={task} canStop onStop={onStop} onJumpToLatest={vi.fn()} onClose={vi.fn()} /></MantineProvider>)
-    fireEvent.click(screen.getByRole('button', { name: '停止任务' }))
-    expect(window.confirm).toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: '停止任务' }), { clientX: 420, clientY: 180 })
+    const confirmation = await screen.findByRole('dialog', { name: '停止任务？' })
+    expect(window.confirm).not.toHaveBeenCalled()
+    expect(onStop).not.toHaveBeenCalled()
+    expect(confirmation).toHaveStyle({ left: '428px', top: '188px' })
+
+    fireEvent.click(within(confirmation).getByRole('button', { name: '停止任务' }))
     expect(onStop).toHaveBeenCalledWith(task)
   })
 })

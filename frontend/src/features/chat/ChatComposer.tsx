@@ -1,7 +1,7 @@
 import { IconMicrophone, IconPaperclip, IconPlus, IconPlayerStop, IconArrowUp, IconX } from '@tabler/icons-react'
 import { Alert, Button, Group, Paper, Stack, Text, Textarea } from '@mantine/core'
 import { useQueryClient } from '@tanstack/react-query'
-import { type ChangeEvent, type ClipboardEvent, type KeyboardEvent, useRef, useState } from 'react'
+import { type ChangeEvent, type ClipboardEvent, type KeyboardEvent, useEffect, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { ApiError, api } from '../../api/client'
 import { isDraftSendable, newCommandId, scopeKey } from '../../domain/semantics'
@@ -10,9 +10,11 @@ import { selectCommands, useAstrorderStore } from '../../state/store'
 import { submitBrowserCommand } from './commandActions'
 import { VoiceInputSheet } from './VoiceInputSheet'
 import { SessionModelControl } from './SessionModelControl'
+import { GitStatusBar } from './GitStatusBar'
 import { clipboardFiles } from './composerMedia'
 import { notifySessionSubmitted } from '../../hooks/useSessionOrder'
 import '../agents/agentsLayout.css'
+import { ApprovalModeControl } from './ApprovalModeControl'
 
 const EMPTY_DRAFT: DraftState = { text: '', attachments: [] }
 const allowedFiles = 'image/*,audio/*,.pdf,.txt,.md,.json,.csv,.log,.webp'
@@ -43,7 +45,15 @@ function localCommand(session: Session, id: string, action: CommandAction, text:
   }
 }
 
-export function ChatComposer({ session, agent }: { session: Session; agent?: Agent }) {
+export function ChatComposer({
+  session,
+  agent,
+  onHeightChange,
+}: {
+  session: Session
+  agent?: Agent
+  onHeightChange?: (height: number) => void
+}) {
   const queryClient = useQueryClient()
   const draftKey = scopeKey(session.agent_id, session.id)
   const draft = useAstrorderStore((state) => state.drafts[draftKey] || EMPTY_DRAFT)
@@ -52,8 +62,37 @@ export function ChatComposer({ session, agent }: { session: Session; agent?: Age
   const [voiceOpened, setVoiceOpened] = useState(false)
   const submittingRef = useRef(false)
   const [error, setError] = useState<string | null>(null)
+  const [submittedCommandId, setSubmittedCommandId] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const attachmentKeyRef = useRef(0)
+  const cardRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const el = cardRef.current
+    if (!el) return
+    let lastHeight = -1
+    const update = () => {
+      const rect = el.getBoundingClientRect()
+      const height = Math.ceil(rect.height || el.offsetHeight || 124)
+      if (height > 0 && height !== lastHeight) {
+        lastHeight = height
+        el.parentElement?.style.setProperty('--composer-height', `${height}px`)
+        onHeightChange?.(height)
+      }
+    }
+    update()
+    if (typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(update)
+      observer.observe(el)
+      return () => {
+        observer.disconnect()
+        el.parentElement?.style.removeProperty('--composer-height')
+      }
+    }
+    return () => {
+      el.parentElement?.style.removeProperty('--composer-height')
+    }
+  }, [onHeightChange])
 
   const canChat = hasCapability(agent, 'chat')
   const canAttach = hasCapability(agent, 'attachments')
@@ -63,6 +102,11 @@ export function ChatComposer({ session, agent }: { session: Session; agent?: Age
   const hasDraft = isDraftSendable(draft.text, draft.attachments)
   // 当且仅当系统处于执行中且输入框完全为空时，按钮才作为紧急打断的“停止”按钮；若有草稿输入，则作为发送/转向
   const isStopAction = busy && !hasDraft
+  const submittedCommand = submittedCommandId ? commands.find((item) => item.id === submittedCommandId) : undefined
+  const submittedCommandError = submittedCommand && (submittedCommand.state === 'failed' || submittedCommand.state === 'unknown')
+    ? submittedCommand.error || (submittedCommand.state === 'failed' ? '原生命令执行失败。' : '原生命令执行结果未确认。')
+    : null
+  const visibleError = error || submittedCommandError
 
   const updateDraft = (next: DraftState) => useAstrorderStore.getState().setDraft(session.agent_id, session.id, next)
   const setText = (text: string) => updateDraft({ ...draft, text })
@@ -128,6 +172,7 @@ export function ChatComposer({ session, agent }: { session: Session; agent?: Age
     submittingRef.current = true
     setSubmitting(true)
     setError(null)
+    setSubmittedCommandId(commandId)
     try {
       const result = await submitBrowserCommand({
         commandId,
@@ -178,9 +223,10 @@ export function ChatComposer({ session, agent }: { session: Session; agent?: Age
 
   return (
     <>
-      <Paper className="composer-card" withBorder radius="lg" p="sm">
+      <Paper ref={cardRef} className="composer-card" withBorder radius="lg" p="sm">
+        <GitStatusBar session={session} />
         <Stack gap="xs">
-        {error && <Alert color="red" variant="light" icon={<IconX size={17} />} aria-live="assertive">{error}</Alert>}
+        {visibleError && <Alert color="red" variant="light" icon={<IconX size={17} />} aria-live="assertive">{visibleError}</Alert>}
         {draft.attachments.length > 0 && (
           <div className="draft-attachments" aria-label="待发送附件">
             {draft.attachments.map((item) => (
@@ -208,6 +254,7 @@ export function ChatComposer({ session, agent }: { session: Session; agent?: Age
             <IconPlus size={20} />
             <input ref={fileInputRef} hidden type="file" multiple accept={allowedFiles} onChange={addFiles} />
           </Button>
+          <ApprovalModeControl session={session} />
           <span className="composer-toolbar-spacer" />
           <SessionModelControl key={`model:${draftKey}`} session={session} />
           <Button

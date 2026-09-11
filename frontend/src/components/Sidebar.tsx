@@ -1,4 +1,4 @@
-import { IconAdjustments, IconLayoutDashboard, IconMessageCircle } from '@tabler/icons-react'
+import { IconAdjustments, IconLayoutDashboard, IconMessageCircle, IconPuzzle } from '@tabler/icons-react'
 import { NavLink, Stack, Text } from '@mantine/core'
 import { NavLink as RouterNavLink } from 'react-router-dom'
 import type { Agent, Project, Session } from '../domain/types'
@@ -8,6 +8,7 @@ const navItems = [
   { to: '/chat', label: '会话', icon: IconMessageCircle },
   { to: '/monitor', label: '监控室', icon: IconLayoutDashboard },
   { to: '/agents', label: '连接管理', icon: IconAdjustments },
+  { to: '/plugins', label: '插件管理', icon: IconPuzzle },
 ]
 
 export function Sidebar({

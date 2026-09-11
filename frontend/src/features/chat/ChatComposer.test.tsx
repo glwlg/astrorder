@@ -1,6 +1,6 @@
 import { MantineProvider } from '@mantine/core'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { api } from '../../api/client'
 import type { Agent, Session } from '../../domain/types'
@@ -45,6 +45,30 @@ it('pastes clipboard images into the draft instead of ignoring them', async () =
   expect(await screen.findByText('shot.png')).toBeInTheDocument()
   client.clear()
 })
+
+it('shows the native failure detail returned by a failed command', async () => {
+  useAstrorderStore.getState().resetRuntime()
+  vi.spyOn(api, 'getSessionModel').mockResolvedValue({ model: 'native-model', provider: 'provider' })
+  const create = vi.spyOn(api, 'createCommand').mockImplementation(async input => ({ ...input, state: 'accepted', attachments: [], created_at: session.updated_at, error: null, target_id: input.target_id ?? null }))
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(<MantineProvider><QueryClientProvider client={client}><ChatComposer session={session} agent={agent} /></QueryClientProvider></MantineProvider>)
+
+  fireEvent.change(screen.getByLabelText('消息内容'), { target: { value: 'hello' } })
+  fireEvent.click(screen.getByRole('button', { name: '发送' }))
+  await waitFor(() => expect(create).toHaveBeenCalledOnce())
+  const submitted = create.mock.calls[0][0]
+  act(() => useAstrorderStore.getState().mergeCommands([{
+    ...submitted,
+    state: 'failed',
+    attachments: [],
+    created_at: session.updated_at,
+    error: 'Missing environment variable: OPENCODEX_API_AUTH_TOKEN.',
+  }]))
+
+  expect(await screen.findByText('Missing environment variable: OPENCODEX_API_AUTH_TOKEN.')).toBeInTheDocument()
+  client.clear()
+})
+
 it('does not swap send for stop just because native activity is recent', async () => {
   useAstrorderStore.getState().resetRuntime()
   vi.spyOn(api, 'getSessionModel').mockResolvedValue({ model: 'native-model', provider: 'provider' })
@@ -52,5 +76,26 @@ it('does not swap send for stop just because native activity is recent', async (
   render(<MantineProvider><QueryClientProvider client={client}><ChatComposer session={{ ...session, live: true }} agent={agent} /></QueryClientProvider></MantineProvider>)
   expect(screen.getByRole('button', { name: '发送' })).toBeInTheDocument()
   expect(screen.queryByRole('button', { name: '停止' })).not.toBeInTheDocument()
+  client.clear()
+})
+
+it('syncs its measured height to parent style as --composer-height and invokes onHeightChange', async () => {
+  useAstrorderStore.getState().resetRuntime()
+  vi.spyOn(api, 'getSessionModel').mockResolvedValue({ model: 'native-model', provider: 'provider' })
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const onHeightChange = vi.fn()
+  const { container } = render(
+    <MantineProvider>
+      <QueryClientProvider client={client}>
+        <div className="chat-column">
+          <ChatComposer session={session} agent={agent} onHeightChange={onHeightChange} />
+        </div>
+      </QueryClientProvider>
+    </MantineProvider>,
+  )
+  const column = container.querySelector('.chat-column') as HTMLElement
+  expect(column).not.toBeNull()
+  await waitFor(() => expect(column.style.getPropertyValue('--composer-height')).toBeTruthy())
+  expect(onHeightChange).toHaveBeenCalled()
   client.clear()
 })

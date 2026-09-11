@@ -171,6 +171,22 @@ describe('SessionRail project-first grouping', () => {
     expect(dots.length).toBeGreaterThan(0)
   })
 
+  it('renders running arc border for sessions that are currently running', () => {
+    const runningSessions: Session[] = [
+      { ...sessions[0], id: 'run-1', status: 'running' },
+      { ...sessions[1], id: 'idle-1', status: 'idle' },
+    ]
+    render(
+      <MantineProvider>
+        <SessionRail sessions={runningSessions} agents={agents} projects={projects} onSelect={vi.fn()} />
+      </MantineProvider>,
+    )
+    const runningRows = document.querySelectorAll('.session-row.is-running')
+    expect(runningRows.length).toBeGreaterThanOrEqual(1)
+    const runningArcs = document.querySelectorAll('.session-running-arc')
+    expect(runningArcs.length).toBeGreaterThanOrEqual(1)
+  })
+
   it('allows deleting a project and cascades its sessions upon user confirmation', async () => {
     useAstrorderStore.getState().resetRuntime()
     useAstrorderStore.getState().hydrateBootstrap({
@@ -185,7 +201,7 @@ describe('SessionRail project-first grouping', () => {
       ok: true,
       deleted_sessions: [{ agent_id: 'local', id: 'local-1' }],
     })
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
 
     function ConnectedRail() {
       const state = useAstrorderStore()
@@ -206,21 +222,100 @@ describe('SessionRail project-first grouping', () => {
     )
 
     try {
-      const actionButtons = view.container.querySelectorAll('.session-project-actions button[aria-label=\"项目操作\"]')
+      const actionButtons = view.container.querySelectorAll('.session-project-actions button[aria-label="项目操作"]')
       expect(actionButtons.length).toBeGreaterThan(0)
       fireEvent.click(actionButtons[0])
 
       const deleteItem = await screen.findByRole('menuitem', { name: '删除项目' })
       expect(deleteItem).toBeInTheDocument()
-      fireEvent.click(deleteItem)
+      fireEvent.click(deleteItem, { clientX: 640, clientY: 200 })
 
-      await waitFor(() => expect(confirmSpy).toHaveBeenCalled())
+      const confirmation = await screen.findByRole('dialog', { name: '删除项目？' })
+      expect(confirmSpy).not.toHaveBeenCalled()
+      expect(confirmation).toHaveStyle({ left: '648px', top: '208px' })
+      fireEvent.click(screen.getByRole('button', { name: '删除' }))
       await waitFor(() => expect(deleteSpy).toHaveBeenCalledTimes(1))
 
       // 验证 store 中该会话被清理
       await waitFor(() => {
         expect(useAstrorderStore.getState().sessions[scopeKey('local', 'local-1')]).toBeUndefined()
       })
+    } finally {
+      deleteSpy.mockRestore()
+      confirmSpy.mockRestore()
+      view.unmount()
+      useAstrorderStore.getState().resetRuntime()
+    }
+  })
+
+  it('pins project to top when pinned and reveals delete menu for unmarked project', async () => {
+    useAstrorderStore.getState().resetRuntime()
+    const unmarkedSession: Session = {
+      id: 'unmarked-1',
+      agent_id: 'local',
+      source_id: 'local',
+      title: '未标记会话',
+      status: 'idle',
+      updated_at: '2026-09-09T10:00:00Z',
+      workspace: null,
+    }
+    useAstrorderStore.getState().hydrateBootstrap({
+      protocol_version: 1,
+      cursor: 11,
+      agents: Object.values(agents),
+      projects,
+      sessions: [...sessions, unmarkedSession],
+    })
+
+    const deleteSpy = vi.spyOn(api, 'deleteProject').mockResolvedValue({
+      ok: true,
+      deleted_sessions: [{ agent_id: 'local', id: 'unmarked-1' }],
+    })
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+
+    function ConnectedRail() {
+      const state = useAstrorderStore()
+      return (
+        <SessionRail
+          sessions={Object.values(state.sessions)}
+          agents={state.agents}
+          projects={Object.values(state.projects)}
+          onSelect={() => {}}
+        />
+      )
+    }
+
+    const view = render(
+      <MantineProvider>
+        <ConnectedRail />
+      </MantineProvider>,
+    )
+
+    try {
+      // 1. Verify project pinning moves the project to top
+      const pinButtons = view.container.querySelectorAll('.session-project-actions button[aria-label="置顶项目"]')
+      expect(pinButtons.length).toBeGreaterThan(1)
+      const lastPinButton = pinButtons[pinButtons.length - 1]
+      fireEvent.click(lastPinButton)
+
+      const groups = view.container.querySelectorAll('.session-project-group')
+      const firstGroupPinBtn = groups[0].querySelector('button[aria-label="置顶项目"]')
+      expect(firstGroupPinBtn?.classList.contains('is-active')).toBe(true)
+
+      // 2. Verify unmarked project shows "删除项目" menu
+      const unmarkedGroup = Array.from(groups).find(g => g.textContent?.includes('未标记项目'))
+      expect(unmarkedGroup).toBeDefined()
+      const unmarkedMenuBtn = unmarkedGroup!.querySelector('button[aria-label="项目操作"]')!
+      fireEvent.click(unmarkedMenuBtn)
+
+      const deleteItem = await screen.findByRole('menuitem', { name: '删除项目' })
+      expect(deleteItem).toBeInTheDocument()
+      fireEvent.click(deleteItem, { clientX: 360, clientY: 240 })
+
+      expect(await screen.findByRole('dialog', { name: '清空未标记会话？' })).toBeInTheDocument()
+      expect(confirmSpy).not.toHaveBeenCalled()
+      fireEvent.click(screen.getByRole('button', { name: '删除' }))
+      await waitFor(() => expect(deleteSpy).toHaveBeenCalled())
     } finally {
       deleteSpy.mockRestore()
       confirmSpy.mockRestore()

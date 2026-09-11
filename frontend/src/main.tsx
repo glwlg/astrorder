@@ -10,7 +10,13 @@ import App from './app/App.tsx'
 import './index.css'
 import './workspaceVisuals.css'
 
-const queryClient = new QueryClient()
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      gcTime: 1000 * 60 * 60 * 24,
+    },
+  },
+})
 const theme = createTheme({ primaryColor: 'dark', defaultRadius: 'md' })
 
 createRoot(document.getElementById('root')!).render(

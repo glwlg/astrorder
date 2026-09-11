@@ -16,7 +16,13 @@ it('replaces the transcript on in-app navigation, including the same native ID i
   const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
   useAstrorderStore.getState().resetRuntime()
   useAstrorderStore.getState().hydrateBootstrap({ protocol_version: 1, cursor: 0, agents: ['codex', 'hermes'].map(id => ({ id, name: id, kind: id as 'codex' | 'hermes', status: 'ready', capabilities: ['chat'], limitation: null })), sessions: [['codex', 'one'], ['codex', 'two'], ['hermes', 'one']].map(([agent_id, id]) => ({ id, agent_id, title: `${agent_id}/${id}`, workspace: null, status: 'idle', updated_at: '2026-01-01T00:00:00Z' })) })
-  vi.spyOn(api, 'getMessages').mockImplementation(async (session_id, agent_id) => ({ items: [{ id: 'native-item', session_id, agent_id, role: 'assistant', kind: 'message', text: `body:${agent_id}/${session_id}`, created_at: '2026-01-01T00:00:00Z', attachments: [], command_id: null, tool: null }], next_cursor: 'older' }))
+  vi.spyOn(api, 'getMessages').mockImplementation(async (session_id, agent_id) => ({
+    items: [
+      { id: 'native-user', session_id, agent_id, role: 'user', kind: 'message', text: `ask:${agent_id}/${session_id}`, created_at: '2026-01-01T00:00:00Z', attachments: [], command_id: null, tool: null },
+      { id: 'native-item', session_id, agent_id, role: 'assistant', kind: 'message', text: `body:${agent_id}/${session_id}`, created_at: '2026-01-01T00:00:01Z', attachments: [], command_id: null, tool: null },
+    ],
+    next_cursor: 'older',
+  }))
   vi.spyOn(api, 'getCommands').mockResolvedValue({ items: [] })
   vi.spyOn(api, 'getTasks').mockResolvedValue({ items: [] })
   vi.spyOn(api, 'getSessionModel').mockResolvedValue({ model: 'model', provider: 'provider' })
@@ -39,8 +45,8 @@ it('replaces the transcript on in-app navigation, including the same native ID i
     expect(view.container.querySelectorAll('.history-button')).toHaveLength(1)
     for (const other of ['codex/one', 'codex/two', 'hermes/one'].filter(value => value !== target)) expect(screen.queryByText(`body:${other}`)).not.toBeInTheDocument()
   }
-  expect(selectMessages(useAstrorderStore.getState(), 'codex', 'one')).toHaveLength(1)
-  expect(selectMessages(useAstrorderStore.getState(), 'codex', 'two')).toHaveLength(1)
+  expect(selectMessages(useAstrorderStore.getState(), 'codex', 'one')).toHaveLength(2)
+  expect(selectMessages(useAstrorderStore.getState(), 'codex', 'two')).toHaveLength(2)
   expect(errors.mock.calls.some(args => args.join(' ').includes('same key'))).toBe(false)
   client.clear()
 })

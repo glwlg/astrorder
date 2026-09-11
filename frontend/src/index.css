@@ -126,7 +126,7 @@ a { color: inherit; }
 .session-action-btn.is-active { color: var(--astr-indigo); opacity: 1; }
 
 .session-row-wrapper { position: relative; width: 100%; display: flex; align-items: center; border-radius: 7px; }
-.session-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; min-height: 40px; text-align: left; padding: 9px 8px; border: 1px solid transparent; border-radius: 7px; color: var(--astr-text); transition: background 0.15s; }
+.session-row { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; min-height: 40px; text-align: left; padding: 9px 8px; border: 1px solid transparent; border-radius: 7px; color: var(--astr-text); transition: background 0.15s; }
 .session-row:hover, .session-row:focus-visible { background: var(--astr-surface-muted); }
 .session-row.is-active { background: color-mix(in srgb, var(--astr-indigo) 11%, transparent); border-color: color-mix(in srgb, var(--astr-indigo) 24%, var(--astr-border)); }
 .session-row.is-pinned { border-left: 3px solid var(--astr-indigo); }
@@ -167,7 +167,7 @@ a { color: inherit; }
 .session-details { background: var(--astr-surface); border: 1px solid var(--astr-border); border-radius: 12px; padding: 16px; min-height: 100%; }
 .mobile-details-button { display: none; }
 .transcript-wrap { position: relative; flex: 1 1 0; min-height: 180px; overflow: hidden; }
-.transcript { height: 100%; min-height: 0; width: 100%; overflow-y: auto; overscroll-behavior: contain; padding: 4px 8px 18px 2px; scrollbar-gutter: stable; }
+.transcript { height: 100%; min-height: 0; width: 100%; overflow-y: auto; overscroll-behavior: contain; padding: 4px 8px calc(var(--composer-height, 124px) + var(--composer-bottom, 18px) + var(--composer-gap, 28px)) 2px; scrollbar-gutter: stable; }
 .transcript-inner { width: 100%; display: flex; flex-direction: column; gap: 12px; }
 .transcript-status, .transcript-empty { margin: auto; text-align: center; padding: 24px; }
 .transcript-error { background: color-mix(in srgb, var(--astr-red) 6%, var(--astr-surface)); }
@@ -201,6 +201,19 @@ a { color: inherit; }
 .markdown-image-button { display: inline-block; max-width: 100%; border: none; background: transparent; padding: 0; cursor: zoom-in; border-radius: 8px; overflow: hidden; }
 .markdown-image-button img { display: block; max-width: 100%; max-height: 380px; object-fit: contain; border-radius: 8px; }
 .desktop-lightbox { position: fixed; inset: 0; z-index: 99999; background: rgba(0, 0, 0, 0.85); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; cursor: zoom-out; }
+@keyframes confirmPopoverFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+.confirm-popover-card {
+  transition: transform 0.12s ease, opacity 0.12s ease;
+}
 .desktop-lightbox-close { position: absolute; top: 20px; right: 20px; background: rgba(255, 255, 255, 0.15); border: none; color: #fff; width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: background 0.2s; }
 .desktop-lightbox-close:hover { background: rgba(255, 255, 255, 0.3); }
 .desktop-lightbox-image { max-width: 90vw; max-height: 90vh; object-fit: contain; border-radius: 6px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); cursor: default; }
@@ -237,6 +250,10 @@ a { color: inherit; }
 .draft-attachment > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .draft-remove { display: grid; place-items: center; padding: 0; border: 0; background: transparent; color: inherit; cursor: pointer; }
 .approval-card { background: color-mix(in srgb, var(--astr-yellow) 7%, var(--astr-surface)); }
+.transcript-approvals { margin-top: 10px; width: 100%; }
+.transcript-approval-card { border-color: color-mix(in srgb, var(--astr-yellow) 35%, var(--astr-border)); box-shadow: var(--astr-shadow-soft); }
+.approval-card-detail { margin: 6px 0 8px; font-size: 12px; }
+.approval-card-detail pre { margin: 0; white-space: pre-wrap; word-break: break-all; }
 .approval-button { padding: 5px 10px; border-radius: 6px; border: 1px solid var(--astr-border); cursor: pointer; font-size: 12px; }
 .approval-approve { color: var(--astr-teal); background: color-mix(in srgb, var(--astr-teal) 8%, var(--astr-surface)); }
 .approval-cancel { color: var(--astr-red); background: color-mix(in srgb, var(--astr-red) 6%, var(--astr-surface)); }

@@ -9,7 +9,7 @@ from threading import RLock
 
 from astrorder_codex_connector.app_server import CodexAppServer
 
-from .connections import ConnectionError, validate_ssh_settings
+from .connections import ConnectionError, validate_ssh_settings, _windows_hide_flags, _windows_hide_startupinfo
 from .models import AgentConnectionChoice
 from .native_codex import CodexConnection, stored_model
 from .ssh_transport import SshNativeRuntime, build_remote_python_command
@@ -40,12 +40,26 @@ class RemoteCodex(CodexConnection):
         super().__init__(settings, store, service, client_factory=self._client)
 
     def ssh_argv(self):
-        return ['-o' if part == '-o' else 'StrictHostKeyChecking=yes' if part == 'StrictHostKeyChecking=ask' else part for part in self.transport._base_ssh_argv()] + ['--', self.transport._target()]
+        return [
+            '-o' if part == '-o' else 'StrictHostKeyChecking=yes' if part == 'StrictHostKeyChecking=ask' else part
+            for part in self.transport._base_ssh_argv()
+        ] + [self.transport._target()]
 
     def remote_json(self, source):
         try:
             loader = 'import sys\nexec(compile(sys.stdin.read(), "<astrorder-remote>", "exec"))'
-            result = subprocess.run(self.ssh_argv() + [build_remote_python_command(loader)], input=source, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding='utf-8', timeout=30, check=False, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+            result = subprocess.run(
+                self.ssh_argv() + [build_remote_python_command(loader)],
+                input=source,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                encoding='utf-8',
+                timeout=30,
+                check=False,
+                creationflags=_windows_hide_flags(),
+                startupinfo=_windows_hide_startupinfo(),
+            )
             if result.returncode:
                 raise ConnectionError('SSH 探测失败；请检查连接、主机指纹及远端 Python。', 502)
             return json.loads(result.stdout)
@@ -55,9 +69,68 @@ class RemoteCodex(CodexConnection):
     def _executable(self):
         return self.remote_executable
 
-    def _client(self, config, on_notification, **kwargs):
-        source = 'import os\nfrom pathlib import Path\np=' + repr(self.remote_executable) + '\nos.environ["PATH"]=str(Path(p).parent)+os.pathsep+os.environ.get("PATH", "")\nos.execv(p,[p,"app-server","--listen","stdio://"])\n'
-        return CodexAppServer(config, on_notification, **kwargs, launch_argv=self.ssh_argv() + [build_remote_python_command(source)])
+    def _archived_ids_from_db(self):
+        home_path = self._home.as_posix() if self._home else '~/.codex'
+        source = f'''
+import sqlite3, json
+from pathlib import Path
+home = Path({home_path!r}).expanduser()
+dbs = sorted(home.glob("state_*.sqlite"))
+if not dbs and (home / "state.db").is_file():
+    dbs = [home / "state.db"]
+res = []
+for db in dbs:
+    if db.is_file():
+        try:
+            with sqlite3.connect(db) as conn:
+                for r in conn.cursor().execute("SELECT id FROM threads WHERE archived=1"):
+                    res.append(r[0])
+        except Exception:
+            pass
+print(json.dumps(res))
+'''
+        try:
+            res = self.remote_json(source)
+            return set(res) if isinstance(res, list) else set()
+        except ConnectionError:
+            return set()
+
+    def _client(self, config, on_notification, environment=None, **kwargs):
+        child_environment = dict(environment or {})
+        source = (
+            'import json, os\n'
+            'from pathlib import Path\n'
+            'bootstrap=bytearray()\n'
+            'while True:\n'
+            ' chunk=os.read(0, 1)\n'
+            ' if not chunk:\n'
+            '  raise RuntimeError("Codex bootstrap stdin closed before payload")\n'
+            ' if chunk == b"\\n":\n'
+            '  break\n'
+            ' bootstrap.extend(chunk)\n'
+            'payload=json.loads(bootstrap.decode("utf-8"))\n'
+            'forwarded=payload.get("environment")\n'
+            'remote_path=os.environ.get("PATH", "")\n'
+            'if isinstance(forwarded, dict):\n'
+            ' for key,value in forwarded.items():\n'
+            '  if not isinstance(key, str) or not key or "=" in key or "\\x00" in key:\n'
+            '   continue\n'
+            '  if key.casefold() == "path":\n'
+            '   continue\n'
+            '  if not os.environ.get(key):\n'
+            '   os.environ[key]=str(value)\n'
+            'p=' + repr(self.remote_executable) + '\n'
+            'os.environ["PATH"]=str(Path(p).parent)+os.pathsep+remote_path\n'
+            'os.execv(p,[p,"app-server","--listen","stdio://"])\n'
+        )
+        return CodexAppServer(
+            config,
+            on_notification,
+            **kwargs,
+            launch_argv=self.ssh_argv() + [build_remote_python_command(source)],
+            environment=child_environment,
+            bootstrap_stdin={'environment': child_environment},
+        )
 
     def open_ids(self):
         if not self._home:
@@ -66,7 +139,7 @@ class RemoteCodex(CodexConnection):
         try:
             res = self.remote_json(source)
             return res if isinstance(res, list) else []
-        except Exception:
+        except ConnectionError:
             return []
 
     def model(self, sid):
@@ -164,17 +237,28 @@ class EnvironmentConnections:
             return self.snapshot()
 
     def restore(self):
+        pairs = [('local', 'codex'), ('local', 'hermes')]
+        for cid, kind in pairs:
+            with self.store.session() as db:
+                choice = db.get(AgentConnectionChoice, cid + ':' + kind)
+                legacy_id = ('local-hermes-default' if kind == 'hermes' else 'local-codex') if cid == 'local' else f'ssh-{kind}-{cid}'
+                enabled = bool(choice.enabled) if choice is not None else self.store.get_agent(legacy_id) is not None
+            if enabled:
+                try:
+                    self.change(cid, kind, True)
+                except Exception as exc:
+                    logger.warning("Failed to restore %s:%s connection: %s", cid, kind, exc)
+
         for row in self.store.list_ssh_connections():
             try:
                 self.discover(row['id'])
             except ConnectionError:
                 continue
-        pairs = [('local', 'hermes'), ('local', 'codex')]
-        pairs += [(row['id'], kind) for row in self.store.list_ssh_connections() for kind in ('hermes', 'codex')]
-        for cid, kind in pairs:
+        ssh_pairs = [(row['id'], kind) for row in self.store.list_ssh_connections() for kind in ('hermes', 'codex')]
+        for cid, kind in ssh_pairs:
             with self.store.session() as db:
                 choice = db.get(AgentConnectionChoice, cid + ':' + kind)
-                legacy_id = ('local-hermes-default' if kind == 'hermes' else 'local-codex') if cid == 'local' else f'ssh-{kind}-{cid}'
+                legacy_id = f'ssh-{kind}-{cid}'
                 enabled = bool(choice.enabled) if choice is not None else self.store.get_agent(legacy_id) is not None
             if enabled:
                 try:

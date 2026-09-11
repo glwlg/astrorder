@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import os
 import logging
 import queue
 import re
@@ -18,7 +19,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from .connections import ConnectionError, _windows_hide_flags, hermes_command_rejection
+from .connections import ConnectionError, _windows_hide_flags, _windows_hide_startupinfo, hermes_command_rejection
 
 logger = logging.getLogger(__name__)
 
@@ -325,6 +326,16 @@ class SshRuntimeMetadata:
     hermes_version: str
 
 
+def _resolve_best_ssh_executable(custom: str | None = None) -> str | None:
+    if custom:
+        return custom
+    if os.name == "nt":
+        win_ssh = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "OpenSSH", "ssh.exe")
+        if os.path.isfile(win_ssh):
+            return win_ssh
+    return shutil.which("ssh")
+
+
 class SshNativeRuntime:
     """Owns one SSH stdio/reverse-tunnel native Hermes runtime."""
 
@@ -347,7 +358,7 @@ class SshNativeRuntime:
         self.project_root = project_root
         self.plugin_root = plugin_root
         self.connector_secret = connector_secret
-        self.ssh_executable = ssh_executable or shutil.which("ssh")
+        self.ssh_executable = _resolve_best_ssh_executable(ssh_executable)
         self._popen_factory = popen_factory
         self._command_runner = command_runner
         self._process: subprocess.Popen | Any | None = None
@@ -505,6 +516,7 @@ class SshNativeRuntime:
                 timeout=60,
                 check=False,
                 creationflags=_windows_hide_flags(),
+                startupinfo=_windows_hide_startupinfo(),
             )
         except subprocess.TimeoutExpired as exc:
             raise ConnectionError("远端 Astrorder 插件部署超时。", 504) from exc
@@ -649,6 +661,7 @@ class SshNativeRuntime:
                     errors="replace",
                     bufsize=1,
                     creationflags=_windows_hide_flags(),
+                    startupinfo=_windows_hide_startupinfo(),
                 )
             except OSError as exc:
                 raise ConnectionError("无法启动远程 Hermes SSH bridge。", 503) from exc
@@ -777,6 +790,7 @@ class SshNativeRuntime:
             input=build_bootstrap_stdin(Path(native_user_activity.__file__).read_text(encoding='utf-8'), payload),
             capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=15,
             check=False, creationflags=_windows_hide_flags(),
+            startupinfo=_windows_hide_startupinfo(),
         )
         if response.returncode:
             return []
@@ -793,6 +807,7 @@ class SshNativeRuntime:
             input=build_bootstrap_stdin(Path(native_user_activity.__file__).read_text(encoding='utf-8'), payload),
             capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=15,
             check=False, creationflags=_windows_hide_flags(),
+            startupinfo=_windows_hide_startupinfo(),
         )
         if response.returncode:
             return {'items': [], 'open_ids': [], 'live_ids': []}
@@ -815,6 +830,7 @@ class SshNativeRuntime:
             input=build_bootstrap_stdin(Path(native_history_page.__file__).read_text(encoding='utf-8'), payload),
             capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=15,
             check=False, creationflags=_windows_hide_flags(),
+            startupinfo=_windows_hide_startupinfo(),
         )
         try:
             page = json.loads(response.stdout)
@@ -858,6 +874,14 @@ class SshNativeRuntime:
             except ConnectionError as exc:
                 return "failed", exc.detail
             response = self.rpc("prompt.submit", {"session_id": tui_id, "text": text_value, "surface": "hud"}, timeout=20)
+            # 如果是由于其他端正在占用该会话导致的排他锁拒绝，尝试以无感引导（session.steer）注入当前活动轮次，不打断会话
+            if response and response.get("error") and (
+                (response.get("error") or {}).get("data", {}).get("reason") == "SESSION_NOT_OWNED"
+                or "already has a live owner" in str((response.get("error") or {}).get("message", "")).lower()
+            ):
+                steer_res = self.rpc("session.steer", {"session_id": tui_id, "text": text_value}, timeout=10)
+                if isinstance(steer_res, dict) and (steer_res.get("result", {}).get("status") in {"queued", "redirected"} or not steer_res.get("error")):
+                    response = steer_res
             if response is None:
                 rollback(self.rpc, tui_id, attached)
                 return "unknown", "远程 Hermes 未确认命令投递结果；不会自动重发。"

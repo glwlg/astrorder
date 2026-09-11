@@ -1,0 +1,217 @@
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { ActionIcon, Button, Group, LoadingOverlay, Paper, Select, Text, Tooltip } from '@mantine/core'
+import { IconDeviceFloppy, IconDownload, IconRefresh } from '@tabler/icons-react'
+import Editor from '@monaco-editor/react'
+import type { ViewerContext } from '../../types'
+
+const EXT_TO_LANG: Record<string, string> = {
+  ts: 'typescript',
+  tsx: 'typescript',
+  js: 'javascript',
+  jsx: 'javascript',
+  py: 'python',
+  json: 'json',
+  rs: 'rust',
+  go: 'go',
+  c: 'c',
+  cpp: 'cpp',
+  h: 'c',
+  css: 'css',
+  scss: 'scss',
+  less: 'less',
+  html: 'html',
+  xml: 'xml',
+  sql: 'sql',
+  yaml: 'yaml',
+  yml: 'yaml',
+  sh: 'shell',
+  bash: 'shell',
+  bat: 'bat',
+  ps1: 'powershell',
+  md: 'markdown',
+  dockerfile: 'dockerfile',
+}
+
+function detectLanguage(fileName: string): string {
+  const lower = fileName.toLowerCase()
+  if (lower.endsWith('dockerfile')) return 'dockerfile'
+  const dot = lower.lastIndexOf('.')
+  if (dot === -1) return 'plaintext'
+  const ext = lower.slice(dot + 1)
+  return EXT_TO_LANG[ext] || 'plaintext'
+}
+
+export function MonacoViewer({ artifact, onSave, onDirtyChange }: ViewerContext) {
+  const onDirtyChangeRef = useRef(onDirtyChange)
+  onDirtyChangeRef.current = onDirtyChange
+
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [content, setContent] = useState('')
+  const [language, setLanguage] = useState(() => detectLanguage(artifact.name))
+  const [dirty, setDirty] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const initialContentRef = useRef('')
+
+  const fetchContent = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await fetch(artifact.readUrl)
+      if (!res.ok) throw new Error(`读取失败 (${res.status})`)
+      const text = await res.text()
+      setContent(text)
+      initialContentRef.current = text
+      setDirty(false)
+      onDirtyChangeRef.current?.(false)
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : '文件读取失败'
+      setError(msg)
+    } finally {
+      setLoading(false)
+    }
+  }, [artifact.readUrl])
+
+  useEffect(() => {
+    void fetchContent()
+  }, [fetchContent])
+
+  const handleEditorChange = (value: string | undefined) => {
+    const val = value ?? ''
+    setContent(val)
+    const isNowDirty = val !== initialContentRef.current
+    setDirty(isNowDirty)
+    onDirtyChangeRef.current?.(isNowDirty)
+  }
+
+  const handleSave = useCallback(async () => {
+    if (!onSave || !artifact.writable) return
+    setSaving(true)
+    try {
+      const ok = await onSave(content)
+      if (ok) {
+        initialContentRef.current = content
+        setDirty(false)
+        onDirtyChangeRef.current?.(false)
+      }
+    } finally {
+      setSaving(false)
+    }
+  }, [artifact.writable, content, onSave])
+
+  // 监听键盘快捷键 (Ctrl+S / Cmd+S)
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
+        e.preventDefault()
+        e.stopPropagation()
+        if (dirty && !saving) {
+          void handleSave()
+        }
+      }
+    }
+    window.addEventListener('keydown', onKeyDown, { capture: true })
+    return () => {
+      window.removeEventListener('keydown', onKeyDown, { capture: true })
+    }
+  }, [dirty, saving, handleSave])
+
+  return (
+    <div className="monaco-viewer-pane" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <Paper p="xs" withBorder style={{ borderBottom: '1px solid var(--astr-border)', borderRadius: 0 }}>
+        <Group justify="space-between" wrap="nowrap">
+          <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
+            <Text size="xs" fw={600} truncate title={artifact.name}>
+              {artifact.name}
+            </Text>
+            <Select
+              size="xs"
+              data={[
+                { value: 'typescript', label: 'TypeScript' },
+                { value: 'javascript', label: 'JavaScript' },
+                { value: 'python', label: 'Python' },
+                { value: 'json', label: 'JSON' },
+                { value: 'rust', label: 'Rust' },
+                { value: 'go', label: 'Go' },
+                { value: 'sql', label: 'SQL' },
+                { value: 'yaml', label: 'YAML' },
+                { value: 'shell', label: 'Shell' },
+                { value: 'markdown', label: 'Markdown' },
+                { value: 'plaintext', label: '纯文本' },
+              ]}
+              value={language}
+              onChange={(val) => val && setLanguage(val)}
+              style={{ width: 110 }}
+            />
+            {dirty && (
+              <Text size="xs" c="yellow" fw={500}>
+                ● 未保存
+              </Text>
+            )}
+          </Group>
+          <Group gap={6} wrap="nowrap">
+            {artifact.writable && onSave && (
+              <Tooltip label="保存修改 (Ctrl+S)">
+                <Button
+                  size="compact-xs"
+                  variant="filled"
+                  color="blue"
+                  leftSection={<IconDeviceFloppy size={13} />}
+                  disabled={!dirty || saving}
+                  loading={saving}
+                  onClick={() => void handleSave()}
+                >
+                  保存
+                </Button>
+              </Tooltip>
+            )}
+            <ActionIcon
+              variant="subtle"
+              size="sm"
+              title="重新加载"
+              onClick={() => void fetchContent()}
+            >
+              <IconRefresh size={14} />
+            </ActionIcon>
+            <ActionIcon
+              variant="subtle"
+              size="sm"
+              title="下载文件"
+              onClick={() => window.open(`${artifact.readUrl}&download=1`, '_blank')}
+            >
+              <IconDownload size={14} />
+            </ActionIcon>
+          </Group>
+        </Group>
+      </Paper>
+
+      <div style={{ flex: 1, position: 'relative', minHeight: 0 }}>
+        <LoadingOverlay visible={loading} />
+        {error ? (
+          <div style={{ padding: 24, textAlign: 'center', color: 'var(--astr-muted)' }}>
+            <Text size="sm">{error}</Text>
+            <Button size="xs" mt="md" variant="light" onClick={() => void fetchContent()}>
+              重试
+            </Button>
+          </div>
+        ) : (
+          <Editor
+            height="100%"
+            language={language}
+            value={content}
+            theme="vs-dark"
+            onChange={handleEditorChange}
+            options={{
+              minimap: { enabled: true },
+              fontSize: 13,
+              scrollBeyondLastLine: false,
+              wordWrap: 'on',
+              automaticLayout: true,
+              tabSize: 2,
+            }}
+          />
+        )}
+      </div>
+    </div>
+  )
+}

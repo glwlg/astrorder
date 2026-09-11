@@ -174,10 +174,14 @@ class HermesBridge:
         return (session_id, turn_id) if session_id and turn_id else None
 
     def _on_stream_start(self, session_id: str, turn_id: str = "", **_kwargs: Any) -> None:
+        if session_id:
+            with self._lock:
+                self._session_id = session_id
         key = self._stream_key(session_id, turn_id)
         if key is not None:
             with self._lock:
                 self._streams[key] = {"text": "", "created_at": _timestamp()}
+        self._send_session("running")
 
     def _on_stream_delta(
         self, session_id: str, turn_id: str = "", delta: str = "", kind: str = "text", **_kwargs: Any
@@ -264,6 +268,9 @@ class HermesBridge:
         event_id = tool_call_id or task_id
         if not session_id or not event_id:
             return
+        with self._lock:
+            self._session_id = session_id or self._session_id
+        self._send_session("running")
         self._emit_message(
             message_id=f"hermes-tool-{event_id}", session_id=session_id,
             role="tool", kind="tool", text="",

@@ -47,7 +47,7 @@ export function ConnectionBadge({ status }: { status: ConnectionStatus }) {
       <ActionIcon
         className="connection-badge"
         color={color}
-        variant="light"
+        variant="subtle"
         size="md"
         radius="md"
         aria-label={`连接状态：${label}`}
