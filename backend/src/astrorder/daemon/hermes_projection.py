@@ -38,18 +38,25 @@ class HermesCommandFrameRouter:
         command = self.store.get_command(agent_id, session_id, command_id)
         if command is None:
             raise DaemonBridgeError("Hermes completion command was not found")
-        if command.get("state") in {"completed", "failed", "cancelled"}:
-            return
-        updated = self.store.set_command_state(
-            agent_id,
-            session_id,
-            command_id,
-            "completed",
-            None,
-        )
-        self.service._server_event(
-            "command.upsert",
-            agent_id=agent_id,
-            session_id=session_id,
-            data=updated,
-        )
+        if command.get("state") not in {"completed", "failed", "cancelled"}:
+            updated = self.store.set_command_state(
+                agent_id,
+                session_id,
+                command_id,
+                "completed",
+                None,
+            )
+            self.service._server_event(
+                "command.upsert",
+                agent_id=agent_id,
+                session_id=session_id,
+                data=updated,
+            )
+        session = self.store.update_session(agent_id, session_id, {"status": "idle"})
+        if session is not None:
+            self.service._server_event(
+                "session.upsert",
+                agent_id=agent_id,
+                session_id=session_id,
+                data=session,
+            )

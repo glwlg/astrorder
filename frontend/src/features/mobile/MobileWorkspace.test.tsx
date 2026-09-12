@@ -2,7 +2,7 @@ import { MantineProvider } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../../api/client'
 import { selectMessages, useAstrorderStore } from '../../state/store'
@@ -20,6 +20,10 @@ function mount() {
 }
 beforeEach(() => {
   memory.rows = []
+  const preferences = { appearance: {}, session_pins: {}, pinned_projects: [], project_order: [] }
+  vi.spyOn(api, 'getPreferences').mockResolvedValue(preferences)
+  vi.spyOn(api, 'importPreferences').mockImplementation(async values => ({ ...preferences, ...values, appearance: values.appearance as typeof preferences.appearance || {} }))
+  vi.spyOn(api, 'updatePreferences').mockImplementation(async values => ({ ...preferences, ...values, appearance: values.appearance as typeof preferences.appearance || {} }))
   vi.spyOn(api, 'getOpenSessions').mockResolvedValue({ known_agent_ids: [], items: [] })
   vi.spyOn(api, 'getSessionModel').mockResolvedValue({ provider: 'p', model: 'bound-model', branch: 'feature/native' })
   vi.spyOn(api, 'getConnections').mockResolvedValue({ local: { kind: 'hermes', state: 'connected', available: true, version: null, agent_id: 'inert', profile_name: 'fixture', session_id: 'native-test', detail: '' }, ssh: { items: [], state: 'unconfigured', settings: null, detail: '' } })
@@ -64,6 +68,39 @@ describe('independent mobile composer', () => {
     expect(within(composer).queryByRole('button', { name: '选择会话模型' })).not.toBeInTheDocument()
     expect(within(composer).queryByRole('button', { name: /当前审批模式/ })).not.toBeInTheDocument()
     expect(within(composer).queryByRole('button', { name: '会话操作' })).not.toBeInTheDocument()
+  })
+  it('sends an idle session directly and shows the user message immediately', async () => {
+    useAstrorderStore.getState().setConnection('connected')
+    const create = vi.spyOn(api, 'createCommand').mockImplementation(async input => ({ ...input, state: 'accepted', attachments: [], created_at: session.updated_at, error: null }))
+    mount()
+    fireEvent.change(screen.getByLabelText('消息内容'), { target: { value: '直接发送' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送' }))
+    expect(selectMessages(useAstrorderStore.getState(), 'inert', 'native-test').some(message => message.text === '直接发送')).toBe(true)
+    await waitFor(() => expect(create).toHaveBeenCalledWith(expect.objectContaining({ text: '直接发送', action: 'send' })))
+    expect(memory.rows).toEqual([])
+  })
+  it('keeps sending available while skill evolution runs in the background', async () => {
+    useAstrorderStore.getState().setConnection('connected')
+    useAstrorderStore.getState().mergeTasks([{ id: 'skill-task', session_id: session.id, agent_id: session.agent_id, kind: 'background', title: '工具：skill_manage', status: 'running', progress: { blocking: false }, command: null, logs: [], target_id: 'call', created_at: session.updated_at, updated_at: session.updated_at }])
+    const create = vi.spyOn(api, 'createCommand').mockImplementation(async input => ({ ...input, state: 'accepted', attachments: [], created_at: session.updated_at, error: null }))
+    mount()
+    fireEvent.change(screen.getByLabelText('消息内容'), { target: { value: '继续提问' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送' }))
+    await waitFor(() => expect(create).toHaveBeenCalledWith(expect.objectContaining({ text: '继续提问', action: 'send' })))
+  })
+  it('queues while the agent is running and can send that entry as guidance', async () => {
+    useAstrorderStore.getState().setConnection('connected')
+    useAstrorderStore.getState().hydrateBootstrap({ protocol_version: 1, cursor: 1, agents: [{ id: 'inert', kind: 'hermes', name: '协议测试', status: 'ready', capabilities: ['chat', 'stop', 'attachments'], limitation: null }], sessions: [{ ...session, status: 'running' }] })
+    const create = vi.spyOn(api, 'createCommand').mockImplementation(async input => ({ ...input, state: 'accepted', attachments: [], created_at: session.updated_at, error: null }))
+    mount()
+    fireEvent.change(screen.getByLabelText('消息内容'), { target: { value: '排队消息' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送' }))
+    await waitFor(() => expect(memory.rows[0]?.state).toBe('queued'))
+    expect(create).not.toHaveBeenCalled()
+    expect(selectMessages(useAstrorderStore.getState(), 'inert', 'native-test')).toEqual([])
+    fireEvent.click(screen.getByRole('button', { name: /消息队列/ }))
+    fireEvent.click(screen.getByRole('button', { name: '立即引导' }))
+    await waitFor(() => expect(create).toHaveBeenCalledWith(expect.objectContaining({ text: '排队消息', action: 'send' })))
   })
   it('confirms model selection inside the mobile sheet, without a native browser confirm', async () => {
     vi.spyOn(api, 'getSessionModels').mockResolvedValue({ items: [{ provider: 'p', model: 'm', label: 'Provider · m' }] })
@@ -114,7 +151,8 @@ describe('independent mobile composer', () => {
     expect(screen.queryByLabelText('按 Agent 筛选')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '筛选' }))
     expect(screen.getByRole('button', { name: '未读' })).toBeInTheDocument()
-    expect(screen.getByLabelText('按 Agent 筛选')).toBeInTheDocument()
+    expect(screen.getByLabelText('按连接筛选')).toBeInTheDocument()
+    expect(screen.getByRole('group', { name: '按 Agent 类型筛选' })).toBeInTheDocument()
   })
   it('opens the session drawer from a left-edge right swipe', async () => {
     const view = mount()
@@ -131,8 +169,49 @@ describe('independent mobile composer', () => {
     fireEvent.touchStart(sheet, { touches: [{ clientX: 180, clientY: 220 }] })
     fireEvent.touchMove(sheet, { touches: [{ clientX: 168, clientY: 390 }] })
     fireEvent.touchEnd(sheet)
+    expect(sheet.style.transform).toBe('')
+    expect(sheet.style.animation).toBe('')
     expect(screen.getByRole('dialog', { name: '会话列表' })).toBeInTheDocument()
     expect(view.container.querySelector('.m-session-sheet')).toBeInTheDocument()
+  })
+  it('leaves taps untouched before click dispatch, including after reopening', () => {
+    mount()
+    for (let attempt = 0; attempt < 3; attempt++) {
+      fireEvent.click(screen.getByRole('button', { name: '打开会话列表' }))
+      const sheet = screen.getByRole('dialog', { name: '会话列表' })
+      const filter = within(sheet).getByRole('button', { name: '筛选' })
+      const before = filter.getAttribute('aria-pressed')
+      fireEvent.touchStart(filter, { touches: [{ clientX: 250, clientY: 40 }] })
+      fireEvent.touchEnd(filter)
+      expect(sheet.style.transform).toBe('')
+      expect(sheet.style.animation).toBe('')
+      fireEvent.click(filter)
+      expect(filter.getAttribute('aria-pressed')).not.toBe(before)
+      const row = within(sheet).getByRole('button', { name: '隔离移动测试' })
+      fireEvent.touchStart(row, { touches: [{ clientX: 150, clientY: 220 }] })
+      fireEvent.touchEnd(row)
+      expect(sheet.style.transform).toBe('')
+      fireEvent.click(row)
+      expect(screen.queryByRole('dialog', { name: '会话列表' })).not.toBeInTheDocument()
+    }
+  })
+  it('settles an incomplete swipe without replaying entry, and still closes on a full swipe', async () => {
+    mount()
+    fireEvent.click(screen.getByRole('button', { name: '打开会话列表' }))
+    const sheet = screen.getByRole('dialog', { name: '会话列表' })
+    fireEvent.touchStart(sheet, { touches: [{ clientX: 280, clientY: 220 }] })
+    fireEvent.touchMove(sheet, { touches: [{ clientX: 190, clientY: 220 }] })
+    expect(sheet.style.transform).toBe('translate3d(-90px, 0, 0)')
+    fireEvent.touchEnd(sheet)
+    await waitFor(() => expect(sheet.style.transition).toBe('none'))
+    expect(sheet.style.transform).toBe('translate3d(0px, 0, 0)')
+    expect(sheet.style.animation).toBe('none')
+    fireEvent.touchStart(sheet, { touches: [{ clientX: 280, clientY: 220 }] })
+    fireEvent.touchMove(sheet, { touches: [{ clientX: 140, clientY: 220 }] })
+    fireEvent.touchEnd(sheet)
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '会话列表' })).not.toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: '打开会话列表' }))
+    expect(screen.getByRole('dialog', { name: '会话列表' }).style.transform).toBe('')
   })
   it('stores an offline file and draft before clearing without uploading', async () => {
     const upload = vi.spyOn(api, 'uploadAttachment').mockRejectedValue(new Error('must not upload offline'))
@@ -219,5 +298,24 @@ describe('independent mobile composer', () => {
     fireEvent.click(within(confirmation).getByRole('button', { name: '停止任务' }))
 
     await waitFor(() => expect(stop).toHaveBeenCalledWith(expect.objectContaining({ agent_id: session.agent_id, session_id: session.id, action: 'stop' })))
+  })
+
+  it('updates an open task from store events and does not stop it after completion', async () => {
+    const task = { id: 'live-task', session_id: session.id, agent_id: session.agent_id, kind: 'background' as const, title: '实时任务', status: 'running' as const, progress: null, command: null, logs: [], target_id: 'native-turn', created_at: session.updated_at, updated_at: session.updated_at }
+    useAstrorderStore.getState().mergeTasks([task])
+    const stop = vi.spyOn(api, 'createCommand')
+    mount()
+    fireEvent.click(await screen.findByRole('button', { name: '实时任务' }))
+    fireEvent.click(screen.getByRole('button', { name: '停止任务' }))
+    const confirmation = await screen.findByRole('dialog', { name: '停止任务？' })
+    act(() => useAstrorderStore.getState().mergeTasks([{ ...task, status: 'completed', logs: [{ id: 'final', text: '最终日志', level: 'info', created_at: session.updated_at }] }]))
+    expect(screen.getByText('completed')).toBeInTheDocument()
+    expect(screen.getByText('最终日志')).toBeInTheDocument()
+    // Only the already-open confirmation remains, and it rechecks the live task.
+    expect(screen.getAllByRole('button', { name: '停止任务' })).toHaveLength(1)
+    fireEvent.click(within(confirmation).getByRole('button', { name: '停止任务' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '停止任务？' })).not.toBeInTheDocument())
+    expect(stop).not.toHaveBeenCalled()
+    expect(screen.queryByRole('button', { name: '停止任务' })).not.toBeInTheDocument()
   })
 })

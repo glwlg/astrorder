@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from service_lifecycle import (
+    INDEPENDENT_PROCESS_FLAGS,
     command_line_for_pid,
     current_listening_pids,
     select_owned_daemon_pid,
@@ -104,7 +105,7 @@ def start_daemon(
         cwd=str(ROOT / "backend"),
         stdout=log,
         stderr=log,
-        creationflags=0x00000008 | 0x08000000,
+        creationflags=INDEPENDENT_PROCESS_FLAGS,
     )
     path = metadata_path or runtime / "session-daemon.json"
     path.write_text(

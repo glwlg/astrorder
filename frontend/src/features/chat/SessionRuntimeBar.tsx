@@ -1,139 +1,51 @@
-import { IconChevronDown, IconChevronUp, IconGitBranch, IconListCheck, IconPlayerPlay, IconUsersGroup } from '@tabler/icons-react'
+import { IconChevronDown, IconChevronUp, IconListCheck, IconPlayerPlay, IconUsersGroup } from '@tabler/icons-react'
 import { Badge, Button, Group, Paper, SimpleGrid, Stack, Text } from '@mantine/core'
 import { useState } from 'react'
-import type { Command, Message, Task } from '../../domain/types'
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
+import type { Command, Task } from '../../domain/types'
 
-type RuntimePayload = Record<string, unknown>
-
-type RuntimeSummary = {
-  branch: string | null
-  changes: string | null
-  backgroundTasks: string | null
-  todo: string | null
-  subagents: string | null
+const taskStatusLabels: Record<Task['status'], string> = {
+  pending: '等待中', running: '运行中', waiting_approval: '待审批',
+  completed: '已完成', failed: '失败', cancelled: '已取消', unknown: '状态未知',
 }
 
-type RuntimeDetail = {
-  id: string
-  name: string
-  text: string
-}
-
-function payloadValue(payload: RuntimePayload, paths: string[]): unknown {
-  for (const path of paths) {
-    let current: unknown = payload
-    for (const segment of path.split('.')) {
-      if (!current || typeof current !== 'object' || !(segment in current)) {
-        current = undefined
-        break
-      }
-      current = (current as RuntimePayload)[segment]
-    }
-    if (current !== undefined && current !== null) return current
-  }
-  return null
-}
-
-function reportString(value: unknown): string | null {
-  if (typeof value === 'string' && value.trim()) return value.trim()
-  if (typeof value === 'number' && Number.isFinite(value)) return String(value)
-  return null
-}
-
-function progressString(value: unknown): string | null {
-  if (!value || typeof value !== 'object') return reportString(value)
-  const record = value as RuntimePayload
-  const completed = reportString(record.completed ?? record.done ?? record.running)
-  const total = reportString(record.total ?? record.count)
-  if (completed && total) return `${completed} / ${total}`
-  return reportString(record.label ?? record.status)
-}
-
-function changeString(value: unknown): string | null {
-  if (Array.isArray(value)) return `${value.length} 个文件`
-  const reported = reportString(value)
-  return reported ? `${reported} 个文件` : null
-}
-
-function taskString(value: unknown): string | null {
-  if (Array.isArray(value)) return `${value.length} 个任务`
-  const record = progressString(value)
-  return record ? record : reportString(value)
-}
-
-function toolMessages(messages: Message[]): Message[] {
-  return messages.filter((message) => message.kind === 'tool' && message.tool && typeof message.tool === 'object')
-}
-
-function latestValue(messages: Message[], paths: string[]): unknown {
-  for (const message of [...toolMessages(messages)].reverse()) {
-    const value = payloadValue(message.tool as RuntimePayload, paths)
-    if (value !== null) return value
-  }
-  return null
-}
-
-function taskSummary(tasks: Task[], kind: Task['kind']): string | null {
-  const matching = tasks.filter((task) => task.kind === kind)
-  if (matching.length === 0) return null
-  const running = matching.filter((task) => task.status === 'running' || task.status === 'pending').length
-  const progress = matching.find((task) => task.progress)?.progress
-  const reportedProgress = progressString(progress)
-  if (reportedProgress) return reportedProgress
-  if (running > 0) return `${running} 个活动`
-  return `${matching.length} 个任务`
-}
-
-function buildSummary(messages: Message[], _commands: Command[], tasks: Task[], nativeBranch?: string | null): RuntimeSummary {
-  const branchFromTool = reportString(latestValue(messages, ['branch', 'git_branch', 'git.branch']))
-
-
-  return {
-    branch: nativeBranch === undefined ? branchFromTool : nativeBranch === '' ? '非 Git 工作区' : nativeBranch,
-    changes: changeString(latestValue(messages, ['changed_files', 'changes.files', 'git.changed_files'])),
-    backgroundTasks: taskSummary(tasks, 'background') || taskString(latestValue(messages, ['background_tasks', 'tasks.background', 'task_queue'])),
-    todo: taskSummary(tasks, 'todo') || progressString(latestValue(messages, ['todo', 'todo_progress', 'tasks.todo'])),
-    subagents: taskSummary(tasks, 'subagent') || progressString(latestValue(messages, ['subagents', 'sub_agents', 'agents.subagents'])),
-  }
-}
-
-function buildDetails(messages: Message[]): RuntimeDetail[] {
-  return [...toolMessages(messages)].reverse().slice(0, 8).map((message) => {
-    const payload = message.tool as RuntimePayload
-    const name = reportString(payload.name ?? payload.tool_name) || '公开工具活动'
-    return { id: message.id, name, text: message.text || '服务端未提供活动摘要。' }
-  })
-}
-
-function SummaryItem({ icon, label, value, taskTitle, onClick, showUnknown }: { icon: React.ReactNode; label: string; value: string | null; taskTitle?: string; onClick?: () => void; showUnknown?: boolean }) {
-  if (value === null && !showUnknown) return null
+function SummaryItem({ icon, label, value, onClick }: { icon: React.ReactNode; label: string; value: string | null; onClick?: () => void }) {
+  if (value === null) return null
   const content = <>
     <Group gap={6} wrap="nowrap"><span className="runtime-summary-icon" aria-hidden="true">{icon}</span><Text size="xs" c="dimmed">{label}</Text></Group>
     <Text size="sm" fw={600} mt={4} truncate title={value || '未报告'}>{value || '未报告'}</Text>
   </>
   return (
-    onClick ? <button type="button" className="runtime-summary-item runtime-summary-item-button" onClick={onClick} aria-label={`查看${label}${taskTitle ? `：${taskTitle}` : value ? `：${value}` : ''}`}>{content}</button> : <div className="runtime-summary-item">{content}</div>
+    onClick ? <button type="button" className="runtime-summary-item runtime-summary-item-button" onClick={onClick} aria-label={`查看${label}${value ? `：${value}` : ''}`}>{content}</button> : <div className="runtime-summary-item">{content}</div>
   )
 }
 
-export function SessionRuntimeBar({ messages, commands, tasks = [], onTaskOpen, nativeBranch }: { messages: Message[]; commands: Command[]; tasks?: Task[]; onTaskOpen?: (task: Task) => void; nativeBranch?: string | null }) {
-  const [summary, details] = [buildSummary(messages, commands, tasks, nativeBranch), buildDetails(messages)]
-  const firstTask = (kind: Task['kind']) => tasks.find((task) => task.kind === kind)
+export function SessionRuntimeBar({ commands, tasks = [], onTaskOpen }: { commands: Command[]; tasks?: Task[]; onTaskOpen?: (task: Task) => void }) {
+  const reducedMotion = useReducedMotion()
+  const backgroundTasks = tasks.filter((task) => task.kind === 'background' && task.status === 'running')
+  const todos = tasks.filter((task) => task.kind === 'todo' && task.status !== 'cancelled')
+  const subagents = tasks.filter((task) => task.kind === 'subagent')
+  const details = [...backgroundTasks, ...todos, ...subagents]
+  const otherDetails = [...backgroundTasks, ...todos]
+  const summary = {
+    backgroundTasks: backgroundTasks.length ? `${backgroundTasks.length} 个运行中` : null,
+    todo: todos.length ? `${todos.filter((task) => task.status === 'completed').length} / ${todos.length}` : null,
+    subagents: subagents.length ? `${subagents.filter((task) => ['running', 'pending', 'waiting_approval'].includes(task.status)).length} 个活动 / ${subagents.length} 个` : null,
+  }
   const queued = commands.filter((command) => command.state === 'queued').length
   const [expanded, setExpanded] = useState(false)
+  if (!summary.backgroundTasks && !summary.todo && !summary.subagents && queued === 0) return null
   return (
     <Paper className="runtime-summary-bar" withBorder radius="lg" p="sm" aria-label="运行摘要">
       <Group justify="space-between" align="flex-start" gap="sm" wrap="wrap">
-        <SimpleGrid className="runtime-summary-grid" cols={{ base: 2, sm: 5 }} spacing="sm">
-          <SummaryItem showUnknown={expanded} icon={<IconGitBranch size={15} />} label="分支" value={summary.branch} />
-          <SummaryItem showUnknown={expanded} icon={<IconListCheck size={15} />} label="改动" value={summary.changes} />
-          <SummaryItem showUnknown={expanded} icon={<IconPlayerPlay size={15} />} label="后台任务" value={summary.backgroundTasks} taskTitle={firstTask('background')?.title} onClick={firstTask('background') && onTaskOpen ? () => onTaskOpen(firstTask('background')!) : undefined} />
-          <SummaryItem showUnknown={expanded} icon={<IconListCheck size={15} />} label="待办" value={summary.todo} taskTitle={firstTask('todo')?.title} onClick={firstTask('todo') && onTaskOpen ? () => onTaskOpen(firstTask('todo')!) : undefined} />
-          <SummaryItem showUnknown={expanded} icon={<IconUsersGroup size={15} />} label="子代理" value={summary.subagents} taskTitle={firstTask('subagent')?.title} onClick={firstTask('subagent') && onTaskOpen ? () => onTaskOpen(firstTask('subagent')!) : undefined} />
+        <SimpleGrid className="runtime-summary-grid" cols={{ base: 2, sm: 3 }} spacing="sm">
+          <SummaryItem icon={<IconPlayerPlay size={15} />} label="后台任务" value={summary.backgroundTasks} onClick={() => setExpanded(true)} />
+          <SummaryItem icon={<IconListCheck size={15} />} label="待办" value={summary.todo} onClick={() => setExpanded(true)} />
+          <SummaryItem icon={<IconUsersGroup size={15} />} label="子代理" value={summary.subagents} onClick={() => setExpanded(true)} />
         </SimpleGrid>
         <Group gap="xs" wrap="nowrap">
           {queued > 0 && <Badge color="yellow" variant="light">{queued} 个排队</Badge>}
-          <Button
+          {details.length > 0 && <Button
             size="compact-sm"
             variant="subtle"
             rightSection={expanded ? <IconChevronUp size={15} /> : <IconChevronDown size={15} />}
@@ -142,17 +54,49 @@ export function SessionRuntimeBar({ messages, commands, tasks = [], onTaskOpen, 
             onClick={() => setExpanded((value) => !value)}
           >
             {expanded ? '收起运行详情' : '展开运行详情'}
-          </Button>
+          </Button>}
         </Group>
       </Group>
-      {expanded && <Stack id="runtime-summary-details" className="runtime-summary-details" gap="xs" mt="sm" aria-label="公开运行日志">
-        {details.length === 0 ? <Text size="xs" c="dimmed">服务端尚未报告公开工具日志。</Text> : details.map((detail) => (
-          <Group key={detail.id} className="runtime-summary-detail" justify="space-between" gap="sm" wrap="wrap">
-            <Badge variant="outline" color="gray">{detail.name}</Badge>
-            <Text size="xs" c="dimmed">{detail.text}</Text>
-          </Group>
-        ))}
-      </Stack>}
+      <AnimatePresence initial={false}>
+        {expanded && details.length > 0 && <motion.div
+          id="runtime-summary-details"
+          className="runtime-summary-details"
+          aria-label="运行任务列表"
+          initial={reducedMotion ? false : { opacity: 0, height: 0 }}
+          animate={{ opacity: 1, height: 'auto' }}
+          exit={{ opacity: 0, height: 0 }}
+          transition={{ duration: 0.3, ease: [0.2, 0.8, 0.2, 1] }}
+        >
+          <Stack gap="xs" mt="sm">
+            {otherDetails.map((task) => (
+              <Group key={task.id} className="runtime-summary-detail" justify="space-between" gap="sm" wrap="wrap">
+                <Badge variant="outline" color="blue">{taskStatusLabels[task.status]}</Badge>
+                {onTaskOpen ? <Button variant="subtle" size="compact-sm" onClick={() => onTaskOpen(task)}>{task.title}</Button> : <Text size="xs">{task.title}</Text>}
+              </Group>
+            ))}
+            {subagents.length > 0 && <section className="subagent-flow" aria-label="子代理分支">
+              <div className="subagent-root"><IconUsersGroup size={15} /><Text size="xs" fw={600}>主会话</Text></div>
+              <div className="subagent-branches">
+                <motion.span className="subagent-trunk" initial={reducedMotion ? false : { scaleY: 0 }} animate={{ scaleY: 1 }} transition={{ duration: 0.4 }} />
+                {subagents.map((task, index) => {
+                  const active = ['running', 'pending', 'waiting_approval'].includes(task.status)
+                  return <motion.div
+                    className={`subagent-node ${active ? 'is-active' : ''}`}
+                    key={task.id}
+                    initial={reducedMotion ? false : { opacity: 0, x: -10 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: reducedMotion ? 0 : 0.12 + index * 0.06 }}
+                  >
+                    <span className="subagent-node-dot" aria-hidden="true" />
+                    {onTaskOpen ? <button type="button" onClick={() => onTaskOpen(task)}>{task.title}</button> : <Text size="xs">{task.title}</Text>}
+                    <Badge size="xs" variant="light" color={task.status === 'failed' ? 'red' : active ? 'blue' : 'gray'}>{taskStatusLabels[task.status]}</Badge>
+                  </motion.div>
+                })}
+              </div>
+            </section>}
+          </Stack>
+        </motion.div>}
+      </AnimatePresence>
     </Paper>
   )
 }

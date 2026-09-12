@@ -12,6 +12,7 @@ import { artifactViewerRegistry } from '../sidecar/registry'
 import { resolveArtifactFromPath } from '../sidecar/resolver'
 import { useSidecarStore } from '../sidecar/sidecarStore'
 import { useAstrorderStore } from '../../state/store'
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 
 function attachmentHref(attachment: Attachment): string | undefined {
   try {
@@ -150,7 +151,7 @@ function MessageItem({
     const isThinking = message.kind === 'thinking'
     return (
       <article className={`message-activity message-kind-${message.kind}`} data-testid={`message-${message.id}`}>
-        <LazyDetails className={`activity-fold ${desc.isFailed ? 'is-failed' : ''}`} summary={
+        <LazyDetails className={`activity-fold ${desc.isFailed ? 'is-failed' : ''}`} loading={desc.isRunning} summary={
           <span className="activity-fold-summary">
             <span className="activity-icon"><ToolLineIcon icon={desc.iconKey} size={14} /></span>
             <span className="activity-title">{desc.target || desc.fullTitle}</span>
@@ -232,31 +233,33 @@ export function Transcript({
   onImageClick?: (url: string) => void
   session?: Session | null
 }) {
+  const reducedMotion = useReducedMotion()
+  const enter = reducedMotion ? {} : { opacity: 0, y: 10, scale: 0.99 }
   const visibleMessages = messages.filter((message) => message.kind !== 'message' || message.role !== 'assistant' || message.text.trim() || message.attachments.length || message.tool)
   const isActivity = (message: Message | null) => Boolean(message && (message.kind !== 'message' || message.role === 'tool'))
-  const contentVersion = `${messages.map((item) => item.id).join(',')}|${outbox.map((item) => `${item.command.id}:${item.status}`).join(',')}|${approvals.map((item) => item.id).join(',')}|${composerHeight ?? 0}`
+  const outboundVersion = outbox.map((item) => item.command.id).join(',')
+  const contentVersion = `${messages.map((item) => `${item.id}:${item.text.length}`).join(',')}|${outbox.map((item) => `${item.command.id}:${item.status}`).join(',')}|${approvals.map((item) => item.id).join(',')}|${composerHeight ?? 0}`
   const {
     setContainerRef,
     following,
     onScroll,
     scrollToBottom,
     capturePrependAnchor,
-  } = useStickToBottom<HTMLDivElement>({ contentVersion })
+  } = useStickToBottom<HTMLDivElement>({ contentVersion, forceFollowVersion: outboundVersion })
   const older = useOlderMessages({ hasMore: hasMoreHistory, loading: loadingOlder, load: () => onLoadOlder?.(), capture: capturePrependAnchor })
+  const busy = session?.status === 'running' || session?.status === 'waiting_approval'
   return (
     <section className="transcript-wrap" aria-label="会话记录">
       {!following && (
-        <Button
+        <button
+          type="button"
           className="return-bottom"
-          size="xs"
-          variant="subtle"
-          color="gray"
-          leftSection={<IconArrowDown size={15} />}
+          aria-label="回到底部"
           onClick={scrollToBottom}
           data-testid="return-bottom"
         >
-          回到底部
-        </Button>
+          {busy ? <span className="return-bottom-wave" aria-hidden="true"><i /><i /><i /></span> : <IconArrowDown size={17} />}
+        </button>
       )}
       <div
         className="transcript"
@@ -297,23 +300,24 @@ export function Transcript({
               <Text c="dimmed" size="xs">发送后，只有服务端确认的消息会进入正式记录。</Text>
             </Stack>
           )}
+          <AnimatePresence initial={false}>
           {visibleMessages.map((message, idx) => {
             const prevMessage = idx > 0 ? visibleMessages[idx - 1] : null
             if (isActivity(message)) {
               if (isActivity(prevMessage)) return null
               const pack: Message[] = []
               for (let i = idx; i < visibleMessages.length && isActivity(visibleMessages[i]); i++) pack.push(visibleMessages[i])
-              return <section className="activity-pack" aria-label="思考与工具" key={message.id}>
-                <LazyDetails summary={<PackSummary pack={pack} />}>
+              return <motion.section className="activity-pack" aria-label="思考与工具" key={message.id} layout="position" initial={enter} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.28, ease: [0.2, 0.8, 0.2, 1] }}>
+                <LazyDetails loading={busy && idx + pack.length === visibleMessages.length} summary={<PackSummary pack={pack} />}>
                   <div className="activity-timeline">{pack.map((item) => <MessageItem message={item} key={item.id} onImageClick={onImageClick} session={session} />)}</div>
                 </LazyDetails>
-              </section>
+              </motion.section>
             }
             const currentDate = new Date(message.created_at).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
             const prevDate = prevMessage ? new Date(prevMessage.created_at).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' }) : null
             const showDateDivider = Date.parse(message.created_at) > 0 && currentDate !== prevDate
             return (
-              <div key={message.id} style={{ display: 'contents' }}>
+              <motion.div className="transcript-message-entry" key={message.id} layout="position" initial={enter} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.28, ease: [0.2, 0.8, 0.2, 1] }}>
                 {showDateDivider && (
                   <div style={{ textAlign: 'center', margin: '14px 0 6px', width: '100%' }}>
                     <span style={{ fontSize: '11px', color: 'var(--astr-muted)', background: 'var(--astr-surface-muted)', padding: '2px 10px', borderRadius: '10px' }}>
@@ -322,9 +326,10 @@ export function Transcript({
                   </div>
                 )}
                 <MessageItem message={message} onImageClick={onImageClick} session={session} />
-              </div>
+              </motion.div>
             )
           })}
+          </AnimatePresence>
           {approvals.length > 0 && (
             <section className="transcript-approvals" aria-label="对话待处理审批">
               <Stack gap="xs" mt="xs">

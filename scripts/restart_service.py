@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 
 from service_lifecycle import (
+    INDEPENDENT_PROCESS_FLAGS,
     command_line_for_pid,
     current_listening_pids,
     select_owned_app_pid,
@@ -33,16 +34,23 @@ def restart() -> int:
 
     log = (ROOT / ".runtime" / "production.log").open("ab", buffering=0)
     python_exe = str(ROOT / "backend/.venv/Scripts/python.exe")
-    detached = 0x00000008
-    no_window = 0x08000000
-    proc = subprocess.Popen(
+    subprocess.Popen(
         [python_exe, "scripts/run_production.py"],
         cwd=str(ROOT),
         stdout=log,
         stderr=log,
-        creationflags=detached | no_window,
+        creationflags=INDEPENDENT_PROCESS_FLAGS,
     )
-    return proc.pid
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        pids = current_listening_pids(APP_PORT)
+        if pids:
+            pid = select_owned_app_pid(pids, command_line_for_pid)
+            if pid is None:
+                raise RuntimeError("Started process did not become the verified Astrorder App Server.")
+            return pid
+        time.sleep(0.1)
+    raise RuntimeError("Astrorder App Server did not become ready within 30 seconds; inspect .runtime/production.log.")
 
 
 if __name__ == "__main__":

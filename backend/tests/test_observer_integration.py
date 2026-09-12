@@ -37,3 +37,22 @@ def test_install_is_idempotent_preserves_other_hooks_and_drains_metadata(tmp_pat
         assert client.get('/api/v1/agents/local-codex/observations').status_code==401
         response=client.get('/api/v1/agents/local-codex/observations',headers={'Authorization':'Bearer test-browser'})
         assert response.status_code==200 and len(response.json()['items'])==1
+
+def test_observed_permission_is_visible_and_decidable(tmp_path):
+    settings=Settings(database_url=f'sqlite:///{tmp_path}/cache.db',attachments_dir=tmp_path/'attachments',auto_connect_local_hermes=False,browser_secret='test-browser',connector_secret='test-connector')
+    app=create_app(settings); headers={'Authorization':'Bearer test-browser'}
+    with TestClient(app) as client:
+        app.state.store.upsert_agent({'id':'local-codex','kind':'codex','name':'fixture','status':'ready','capabilities':['chat']})
+        app.state.store.upsert_session({'id':SID,'agent_id':'local-codex','title':'fixture','status':'idle','workspace':None,'updated_at':'2026-09-12T00:00:00Z'})
+        spool=tmp_path/'astrorder-observer/events'; spool.mkdir(parents=True)
+        approval_id='b'*32
+        (spool/(approval_id+'.json')).write_text(json.dumps({'id':approval_id,'session_id':SID,'event':'PermissionRequest','turn_id':'turn','tool_name':'Bash','detail':'echo hello','approval_pending':True,'observed_at':time.time()}))
+        native=SimpleNamespace(_home=tmp_path,state='connected',agent_id='local-codex',_request=Mock())
+        app.state.observers.collect(native)
+        bootstrap=client.get('/api/v1/bootstrap',headers=headers).json()
+        assert bootstrap['approvals'][0]['detail']=='echo hello'
+        assert 'approvals' in next(agent for agent in bootstrap['agents'] if agent['id']=='local-codex')['capabilities']
+        response=client.post('/api/v1/commands',headers=headers,json={'id':'approve-observed','agent_id':'local-codex','session_id':SID,'action':'approve','text':'','attachment_ids':[],'target_id':approval_id})
+        assert response.status_code==200 and response.json()['state']=='completed'
+        decision=json.loads((tmp_path/'astrorder-observer/decisions'/(approval_id+'.json')).read_text())
+        assert decision=={'id':approval_id,'decision':'allow'}

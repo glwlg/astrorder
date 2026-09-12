@@ -17,6 +17,8 @@ import './SessionModelControl.css'
 
 type Choice = { provider: string; model: string; label: string }
 
+const EFFORT_COLORS = ['#93c5fd', '#60a5fa', '#3b82f6', '#0066cc', '#1e40af']
+
 const EFFORT_MARKS = [
   { value: 0, label: '' },
   { value: 1, label: '' },
@@ -131,8 +133,11 @@ export function SessionModelControl({ session }: { session: Session }) {
                 aria-label="切换到选择模型"
                 onClick={() => setView('models')}
               >
-                <span className="codex-model-effort-highlight">{effortLabel}</span>
-                <IconChevronRight size={15} />
+                <span className="codex-model-effort-row">
+                  <span className="codex-model-effort-highlight">{effortLabel}</span>
+                  <IconChevronRight size={15} />
+                </span>
+                <span className="codex-model-name-label">{displayModelName}</span>
               </button>
               <ActionIcon
                 variant="subtle"
@@ -146,18 +151,11 @@ export function SessionModelControl({ session }: { session: Session }) {
               </ActionIcon>
             </div>
 
-            <button
-              type="button"
-              className="codex-model-name-label"
-              onClick={() => setView('models')}
-            >
-              {displayModelName}
-            </button>
-
             <div className="codex-model-slider-wrap">
               <Slider
-                size="md"
-                color="#0066cc"
+                size={18}
+                thumbSize={22}
+                color={EFFORT_COLORS[sliderIndex]}
                 min={0}
                 max={4}
                 step={1}
@@ -170,29 +168,30 @@ export function SessionModelControl({ session }: { session: Session }) {
                 styles={{
                   root: { width: '100%' },
                   track: {
-                    height: 18,
                     borderRadius: 999,
-                    backgroundColor: '#e5e7eb',
                   },
                   bar: {
                     borderRadius: 999,
-                    backgroundColor: '#0066cc',
+                    // Mantine extends both ends; intermediate fills must stop at the thumb.
+                    width: sliderIndex === 4 ? undefined : `calc(${sliderIndex * 25}% + var(--slider-size))`,
                   },
                   thumb: {
-                    width: 22,
-                    height: 22,
                     border: '2px solid #ffffff',
                     backgroundColor: '#ffffff',
                     boxShadow: '0 1px 4px rgba(0,0,0,0.22)',
                   },
+                  markWrapper: {
+                    top: '50%',
+                    insetInlineStart: 'var(--mark-offset)',
+                  },
                   mark: {
                     width: 4,
                     height: 4,
+                    border: 0,
                     borderRadius: '50%',
                     backgroundColor: 'rgba(0,0,0,0.25)',
                     transform: 'translate(-50%, -50%)',
                   },
-
                 }}
               />
             </div>
@@ -250,4 +249,3 @@ export function SessionModelControl({ session }: { session: Session }) {
     </Popover>
   )
 }
-

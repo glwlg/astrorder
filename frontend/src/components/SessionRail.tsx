@@ -1,6 +1,5 @@
 import {
   IconChevronDown,
-  IconChevronRight,
   IconChevronUp,
   IconCopy,
   IconDotsVertical,
@@ -25,11 +24,12 @@ import {
   UnstyledButton,
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { useMemo, useState, type CSSProperties } from 'react'
 import { useSessionOrder } from '../hooks/useSessionOrder'
 import { AgentSessionFilter, matchesAgent } from './AgentSessionFilter'
 import { NewSessionDialog } from './NewSessionDialog'
-import { moveProject, PROJECT_ORDER_KEY, readProjectOrder, reconcileProjectOrder } from './projectOrder'
+import { moveProject, reconcileProjectOrder } from './projectOrder'
+import { useWorkspacePreferences } from '../hooks/useWorkspacePreferences'
 import type { Agent, Project, Session } from '../domain/types'
 import { scopeKey } from '../domain/semantics'
 import { StatusDot } from './Status'
@@ -42,16 +42,11 @@ import './sessionPins.css'
 import { useAstrorderStore } from '../state/store'
 import { useShallow } from 'zustand/react/shallow'
 import {
-  loadPinnedProjects,
-  savePinnedProjects,
-  loadProjectAppearance,
-  saveProjectAppearance,
-  purgeProjectPreferences,
   ProjectAppearanceModal,
   ProjectGlyph,
-  type ProjectAppearanceMap,
   type ProjectAppearanceEntry,
 } from './projectAppearance'
+import { SessionActivityBorder } from './AnimatedStatus'
 
 type PendingConfirmation =
   | { kind: 'delete-session'; session: Session; coords: ConfirmationCoordinates }
@@ -104,9 +99,8 @@ export function SessionRail({
   const [createOpened, setCreateOpened] = useState(false)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
 
-  // 本地置顶项目与外观状态
-  const [pinnedProjects, setPinnedProjects] = useState<string[]>(() => loadPinnedProjects())
-  const [projectAppearance, setProjectAppearance] = useState<ProjectAppearanceMap>(() => loadProjectAppearance())
+  const { preferences, updatePreferences, removeProjectPreferences } = useWorkspacePreferences()
+  const { pinned_projects: pinnedProjects, appearance: projectAppearance, session_pins: pinnedSessions, project_order: projectOrder } = preferences
   const [appearanceTarget, setAppearanceTarget] = useState<ProjectGroup | null>(null)
 
   // 项目下会话默认只显示4个，展开更多状态
@@ -118,15 +112,6 @@ export function SessionRail({
       return next
     })
   }
-
-  // 本地置顶会话存储
-  const [pinnedSessions, setPinnedSessions] = useState<Record<string, boolean>>(() => {
-    try {
-      return JSON.parse(localStorage.getItem('astrorder_pinned_sessions') || '{}')
-    } catch {
-      return {}
-    }
-  })
 
   // 重命名弹窗状态
   const [renameTarget, setRenameTarget] = useState<Session | null>(null)
@@ -146,25 +131,13 @@ export function SessionRail({
     }))
   }, [sessions, pinnedSessions])
 
-  const [projectOrder, setProjectOrder] = useState(readProjectOrder)
   const [draggedProject, setDraggedProject] = useState<string | null>(null)
   const allGroups = useMemo(() => buildProjectGroups(decoratedSessions, agents, projects), [decoratedSessions, agents, projects])
   const stableOrder = useMemo(() => reconcileProjectOrder(projectOrder, allGroups.map(project => project.key)), [projectOrder, allGroups])
-  useEffect(() => {
-    if (stableOrder.length === projectOrder.length && stableOrder.every((key, index) => key === projectOrder[index])) return
-    setProjectOrder(stableOrder)
-    try { localStorage.setItem(PROJECT_ORDER_KEY, JSON.stringify(stableOrder)) } catch {}
-  }, [stableOrder, projectOrder])
   const reorderProject = (source: string, target: string) => {
-    if (pinnedProjects.includes(source) && pinnedProjects.includes(target)) {
-      const nextPinned = moveProject(pinnedProjects, source, target)
-      setPinnedProjects(nextPinned)
-      savePinnedProjects(nextPinned)
-      return
-    }
-    const next = moveProject(stableOrder, source, target)
-    setProjectOrder(next)
-    try { localStorage.setItem(PROJECT_ORDER_KEY, JSON.stringify(next)) } catch {}
+    void updatePreferences(value => pinnedProjects.includes(source) && pinnedProjects.includes(target)
+      ? { pinned_projects: moveProject(value.pinned_projects, source, target) }
+      : { project_order: moveProject(reconcileProjectOrder(value.project_order, allGroups.map(project => project.key)), source, target) })
   }
   const groups = useMemo(() => {
     const visible = buildProjectGroups(decoratedSessions.filter(s => matchesAgent(s, agents, agentFilter)), agents, projects, filter.trim().toLocaleLowerCase(), statusFilter).filter(p => agentFilter === 'all' || p.sessions.length > 0)
@@ -180,31 +153,18 @@ export function SessionRail({
 
   const togglePinProject = (projectKey: string, event?: React.MouseEvent) => {
     event?.stopPropagation()
-    setPinnedProjects((prev) => {
-      const next = prev.includes(projectKey) ? prev.filter((k) => k !== projectKey) : [projectKey, ...prev]
-      savePinnedProjects(next)
-      return next
-    })
+    void updatePreferences(value => ({ pinned_projects: value.pinned_projects.includes(projectKey)
+      ? value.pinned_projects.filter(key => key !== projectKey) : [projectKey, ...value.pinned_projects] }))
   }
 
   const handleSaveAppearance = (projectKey: string, entry: ProjectAppearanceEntry) => {
-    setProjectAppearance((prev) => {
-      const next = { ...prev, [projectKey]: entry }
-      saveProjectAppearance(next)
-      return next
-    })
+    void updatePreferences({ appearance: { [projectKey]: entry } })
   }
 
   const togglePin = (session: Session, event: React.MouseEvent) => {
     event.stopPropagation()
     const key = scopeKey(session.agent_id, session.id)
-    setPinnedSessions((prev) => {
-      const next = { ...prev, [key]: !prev[key] }
-      try {
-        localStorage.setItem('astrorder_pinned_sessions', JSON.stringify(next))
-      } catch {}
-      return next
-    })
+    void updatePreferences(value => ({ session_pins: { [key]: !value.session_pins[key] } }))
   }
 
   const handleCreateSession = async (project: ProjectGroup, event: React.MouseEvent) => {
@@ -306,14 +266,7 @@ export function SessionRail({
         return { sessions: nextSessions, projects: nextProjects }
       })
 
-      purgeProjectPreferences(project.key)
-      setPinnedProjects((prev) => prev.filter((k) => k !== project.key))
-      setProjectOrder((prev) => prev.filter((k) => k !== project.key))
-      setProjectAppearance((prev) => {
-        const next = { ...prev }
-        delete next[project.key]
-        return next
-      })
+      await removeProjectPreferences(project.key)
 
       if (activeSessionKey && project.sessions.some((s) => scopeKey(s.agent_id, s.id) === activeSessionKey)) {
         const remainingSessions = incomingSessions.filter(
@@ -361,7 +314,8 @@ export function SessionRail({
 
   return (
     <Stack className="session-rail" gap="sm">
-      <Group gap="xs" wrap="nowrap"><AgentSessionFilter agents={agents} value={agentFilter} onChange={updateAgentFilter} /><Button size="xs" onClick={() => { setCreateProject(null); setCreateOpened(true) }} aria-label="新建会话"><IconPlus size={16} /></Button></Group>
+      <div className="session-rail-controls">
+      <Group gap="xs" wrap="nowrap"><AgentSessionFilter agents={agents} value={agentFilter} onChange={updateAgentFilter} /><Button size="xs" variant="subtle" color="gray" px={0} w={36} onClick={() => { setCreateProject(null); setCreateOpened(true) }} aria-label="新建会话"><IconPlus size={17} /></Button></Group>
       {createOpened && (
         <NewSessionDialog
           agents={agents}
@@ -401,6 +355,8 @@ export function SessionRail({
           </button>
         ))}
       </div>
+      </div>
+      <div className="session-rail-list">
       {groups.length === 0 ? (
         <Text className="rail-empty" size="sm" c="dimmed">
           {filter || statusFilter !== 'all' ? '没有符合条件的项目或会话' : '尚无会话'}
@@ -411,13 +367,14 @@ export function SessionRail({
           <div className="session-pinned-heading"><IconPinned size={15} />置顶会话</div>
           {groups.flatMap(project => project.sessions).filter(s => pinnedSessions[scopeKey(s.agent_id, s.id)]).map(session => {
             const key = scopeKey(session.agent_id, session.id)
-            const isRunning = sessionActivityStatus(session, commands) === 'running'
+            const activityStatus = sessionActivityStatus(session, commands)
+            const isRunning = activityStatus === 'running'
             const projectColor = session.project_id ? projectAppearance[`project:${session.project_id}`]?.color : undefined
             return (
               <div className={`session-row-wrapper ${isRunning ? 'is-running' : ''}`} key={key} style={sessionRunningStyle(session, projectColor)}>
-                <span aria-hidden="true" className="session-running-arc" />
+                <SessionActivityBorder status={activityStatus} />
                 <UnstyledButton className={`session-row is-pinned ${key === activeSessionKey ? 'is-active' : ''} ${isRunning ? 'is-running' : ''}`} onClick={() => onSelect(session)}>
-                  <span className="session-row-title">{displaySessionTitle(session)}</span><div className="session-row-info"><AgentKindBadge agent={agents[session.agent_id]} /><span className="session-row-time">{formatRelativeTime(session.updated_at)}</span><StatusDot status={sessionActivityStatus(session, commands)} /></div>
+                  <span className="session-row-title">{displaySessionTitle(session)}</span><div className="session-row-info"><AgentKindBadge agent={agents[session.agent_id]} iconOnly /><span className="session-row-time">{formatRelativeTime(session.updated_at)}</span><StatusDot status={activityStatus} /></div>
                 </UnstyledButton>
                 <div className="session-row-actions has-pinned"><button className="session-action-btn is-active" aria-label="取消置顶" onClick={e => togglePin(session, e)}><IconPinned size={14} /></button>
                   <Menu position="bottom-end" withinPortal><Menu.Target><button className="session-action-btn" aria-label="更多操作"><IconDotsVertical size={14} /></button></Menu.Target><Menu.Dropdown>
@@ -454,12 +411,16 @@ export function SessionRail({
                   setDraggedProject(null)
                 }}
               >
-                <button type="button" draggable
-                  className="session-project-drag"
-                  aria-label={`调整 ${project.label} 顺序`}
-                  title="拖拽调整项目顺序；也可用上下方向键移动"
-                  onClick={(event) => event.stopPropagation()}
-                  onDragStart={(event) => { setDraggedProject(project.key); event.dataTransfer.setData('text/plain', project.key); event.dataTransfer.effectAllowed = 'move' }}
+                <UnstyledButton
+                  className="session-project-title"
+                  draggable
+                  title="点击展开或收起；拖拽调整顺序"
+                  onClick={() => toggle(projectCollapseKey)}
+                  onDragStart={(event) => {
+                    setDraggedProject(project.key)
+                    event.dataTransfer.setData('text/plain', project.key)
+                    event.dataTransfer.effectAllowed = 'move'
+                  }}
                   onDragEnd={() => setDraggedProject(null)}
                   onKeyDown={(event) => {
                     if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
@@ -468,15 +429,10 @@ export function SessionRail({
                     const target = groups[index + (event.key === 'ArrowUp' ? -1 : 1)]
                     if (target) reorderProject(project.key, target.key)
                   }}
-                >⠿</button>
-                <UnstyledButton
-                  className="session-project-title"
-                  onClick={() => toggle(projectCollapseKey)}
                   aria-expanded={!projectCollapsed}
                   aria-label={`${project.label}${project.remoteLabel ? ` ${project.remoteLabel}` : ''}，${project.sessionCount} 个会话`}
                   data-project-key={project.key}
                 >
-                  {projectCollapsed ? <IconChevronRight size={15} /> : <IconChevronDown size={15} />}
                   <ProjectGlyph
                     iconName={projectCustom?.icon}
                     colorName={projectCustom?.color}
@@ -559,10 +515,11 @@ export function SessionRail({
                   {visibleSessions.map((session) => {
                     const key = scopeKey(session.agent_id, session.id)
                     const isPinned = pinnedSessions[key] === true
-                    const isRunning = sessionActivityStatus(session, commands) === 'running'
+                    const activityStatus = sessionActivityStatus(session, commands)
+                    const isRunning = activityStatus === 'running'
                     return (
                       <div className={`session-row-wrapper ${isRunning ? 'is-running' : ''}`} key={key} style={sessionRunningStyle(session, projectCustom?.color)}>
-                        <span aria-hidden="true" className="session-running-arc" />
+                        <SessionActivityBorder status={activityStatus} />
                         <UnstyledButton
                           className={`session-row ${key === activeSessionKey ? 'is-active' : ''} ${isPinned ? 'is-pinned' : ''} ${isRunning ? 'is-running' : ''}`}
                           onClick={() => onSelect(session)}
@@ -572,9 +529,9 @@ export function SessionRail({
                             {displaySessionTitle(session)}
                           </span>
                           <div className="session-row-info">
-                            <AgentKindBadge agent={agents[session.agent_id]} />
+                            <AgentKindBadge agent={agents[session.agent_id]} iconOnly />
                             <span className="session-row-time">{formatRelativeTime(session.updated_at)}</span>
-                            <StatusDot status={sessionActivityStatus(session, commands)} />
+                            <StatusDot status={activityStatus} />
                           </div>
                         </UnstyledButton>
                         <div className={`session-row-actions ${isPinned ? 'has-pinned' : ''}`}>
@@ -654,6 +611,7 @@ export function SessionRail({
         })}
         </>
       )}
+      </div>
 
       {/* 会话重命名模态弹窗 */}
       <Modal

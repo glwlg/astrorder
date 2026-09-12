@@ -87,3 +87,48 @@ def test_connection_controller_uses_daemon_ssh_factory_without_stopping_proxy_on
         assert proxies[0].stopped == 0
     finally:
         store.close()
+
+
+def test_daemon_ssh_factory_receives_saved_connection_display_name(tmp_path):
+    settings = Settings(database_url=f"sqlite:///{tmp_path}/daemon-ssh-display-name.db")
+    store = Store(settings)
+    service = ControlService(store, EventHub(), settings)
+    captured = {}
+
+    class Proxy:
+        daemon_owned = True
+        agent_id = "ssh-hermes-fixture"
+        runtime_id = agent_id
+        metadata = None
+        service = None
+        store = None
+        app_settings = None
+
+        def start(self):
+            return None
+
+        def wait_gateway(self, timeout=20):
+            return True
+
+        def snapshot(self):
+            return {"alive": True, "agent_id": self.agent_id, "runtime_id": self.runtime_id}
+
+    def factory(row):
+        captured.update(row)
+        return Proxy()
+
+    controller = ConnectionController(settings, store, daemon_ssh_factory=factory)
+    row = controller.save_ssh(
+        {
+            "display_name": "Debian",
+            "host": "debian.example",
+            "port": 22,
+            "user": "operator",
+        }
+    )
+    try:
+        controller.connect_ssh(service, row["id"])
+        assert captured["display_name"] == "Debian"
+        assert captured["settings"]["display_name"] == "Debian"
+    finally:
+        store.close()

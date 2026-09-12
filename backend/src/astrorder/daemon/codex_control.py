@@ -85,11 +85,14 @@ class DaemonCodexController:
         if parent_session_id:
             self.connection._scope(parent_session_id)
         fields: dict[str, Any] = {
-            "agent_type": "codex",
+            "agent_type": self._agent_type(),
             "cwd": path,
             "ephemeral": bool(ephemeral),
             "title": title or "新会话",
         }
+        runtime_params = self._runtime_params()
+        if runtime_params:
+            fields["params"] = runtime_params
         if parent_session_id:
             fields["parent_session_id"] = parent_session_id
         try:
@@ -129,6 +132,9 @@ class DaemonCodexController:
             "control_state": "owned",
             "project_name": Path(path).name or None,
         }
+        connection_id = getattr(self.connection, "connection_id", None)
+        if isinstance(connection_id, str) and connection_id:
+            row["connection_id"] = connection_id
         if ephemeral:
             row["ephemeral"] = True
         return row
@@ -168,8 +174,22 @@ class DaemonCodexController:
         except ConnectionError as exc:
             return "failed", exc.detail
         with self.connection._lock:
-            if session_id in self.connection._active:
-                return "failed", "daemon-owned Codex does not support turn steering yet."
+            active_turn_id = self.connection._active.get(session_id)
+        if isinstance(active_turn_id, str) and active_turn_id:
+            try:
+                response = await self.bridge.request_control(
+                    "session.steer",
+                    {"session_id": session_id, "turn_id": active_turn_id, "input": inputs},
+                )
+                result = response.get("result")
+                if not isinstance(result, Mapping) or result.get("turn_id") != active_turn_id:
+                    return "unknown", "daemon did not confirm the active Codex turn; command will not retry."
+                with self.connection._lock:
+                    self.connection._commands[(session_id, active_turn_id)] = dict(command)
+                return "accepted", None
+            except DaemonBridgeError:
+                return "unknown", "daemon Codex steering was not confirmed; command will not retry."
+        with self.connection._lock:
             self.connection._pending[session_id] = dict(command)
         try:
             await self._attach(session_id)
@@ -257,8 +277,8 @@ class DaemonCodexController:
     async def _attach(self, session_id: str) -> None:
         fields: dict[str, Any] = {
             "session_id": session_id,
-            "agent_type": "codex",
-            "params": {},
+            "agent_type": self._agent_type(),
+            "params": self._runtime_params(),
         }
         threads = getattr(self.connection, "_threads", {})
         thread = threads.get(session_id) if isinstance(threads, Mapping) else None
@@ -266,6 +286,23 @@ class DaemonCodexController:
         if isinstance(cwd, str) and cwd:
             fields["cwd"] = cwd
         await self.bridge.request_control("session.spawn", fields)
+
+    def _agent_type(self) -> str:
+        connection_id = getattr(self.connection, "connection_id", None)
+        return "codex-ssh" if isinstance(connection_id, str) and connection_id else "codex"
+
+    def _runtime_params(self) -> dict[str, Any]:
+        connection_id = getattr(self.connection, "connection_id", None)
+        if not isinstance(connection_id, str) or not connection_id:
+            return {}
+        ssh_settings = getattr(self.connection, "ssh_settings", None)
+        executable = getattr(self.connection, "remote_executable", None)
+        if not isinstance(ssh_settings, Mapping) or not isinstance(executable, str) or not executable:
+            raise ConnectionError("远程 Codex daemon binding 配置不完整。", 503)
+        return {
+            "connection_id": connection_id,
+            "ssh_settings": {**dict(ssh_settings), "codex_executable": executable},
+        }
 
     def _settings(
         self,

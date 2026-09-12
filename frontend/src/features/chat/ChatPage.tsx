@@ -22,7 +22,6 @@ import { sessionActivityStatus } from '../../components/sessionRailModel'
 import { AgentKindBadge } from '../../components/SessionRuntimeFacts'
 import { selectApprovals, selectCommands, selectOutbox, selectSessions, selectTasks, useAstrorderStore } from '../../state/store'
 import { useSessionResources } from '../../hooks/useAstrorderData'
-import { useSessionModel } from '../../hooks/useSessionModel'
 import { ChatComposer } from './ChatComposer'
 import { QuickOpen } from './QuickOpen'
 
@@ -204,18 +203,18 @@ export function ChatPage() {
     }
   }, [selected])
   const [taskDetailsOpened, { open: openTaskDetails, close: closeTaskDetails }] = useDisclosure(false)
-  const [selectedTask, setSelectedTask] = useState<Task | null>(null)
+  const [taskSelection, setTaskSelection] = useState<Pick<Task, 'id' | 'agent_id' | 'session_id'> | null>(null)
   const [previewImage, setPreviewImage] = useState<string | null>(null)
   const [quickOpenOpened, setQuickOpenOpened] = useState(false)
   const [composerHeight, setComposerHeight] = useState<number>(124)
   const mobileTaskSheet = useMediaQuery('(max-width: 767px)')
   const resources = useSessionResources(selected, true)
-  const modelBinding = useSessionModel(selected)
   const messages = resources.visibleMessages
   const commands = useAstrorderStore(useShallow((state) => selected ? selectCommands(state, selected.agent_id, selected.id) : NO_COMMANDS))
   const outbox = useAstrorderStore(useShallow((state) => selected ? selectOutbox(state, selected.agent_id, selected.id) : NO_OUTBOX))
   const approvals = useAstrorderStore(useShallow((state) => selected ? selectApprovals(state, selected.agent_id, selected.id) : NO_APPROVALS))
   const tasks = useAstrorderStore(useShallow((state) => selected ? selectTasks(state, selected.agent_id, selected.id) : NO_TASKS))
+  const selectedTask = tasks.find((task) => task.id === taskSelection?.id && task.agent_id === taskSelection.agent_id && task.session_id === taskSelection.session_id) ?? null
   const agent = useMemo(() => {
     if (!selected) return undefined
     // 优先精确匹配
@@ -347,7 +346,7 @@ export function ChatPage() {
               </Group>
             </Group>
           </Paper>
-          <SessionRuntimeBar messages={messages} commands={commands} tasks={tasks} nativeBranch={modelBinding.data?.branch ?? null} onTaskOpen={(task) => { setSelectedTask(task); openTaskDetails() }} />
+          <SessionRuntimeBar key={scopeKey(selected.agent_id, selected.id)} commands={commands} tasks={tasks} onTaskOpen={(task) => { setTaskSelection({ id: task.id, agent_id: task.agent_id, session_id: task.session_id }); openTaskDetails() }} />
           <Transcript
             key={`transcript:${scopeKey(selected.agent_id, selected.id)}`}
             session={selected}
@@ -433,8 +432,8 @@ export function ChatPage() {
         )}
       </div>
       <DrawerDetails opened={detailsOpened} onClose={closeDetails} onPin={() => { setDetailsPinned(true); closeDetails() }} session={selected} agent={agent} commands={commands} messages={messages} approvals={approvals} onApproval={(approval, action) => void handleApproval(approval, action)} />
-      <Drawer opened={taskDetailsOpened} onClose={() => { closeTaskDetails(); setSelectedTask(null) }} title="任务详情" position={mobileTaskSheet ? 'bottom' : 'right'} size={mobileTaskSheet ? 'min(88vh, 620px)' : 'min(92vw, 520px)'}>
-        {selectedTask && <TaskDetails task={selectedTask} canStop={Boolean(agent?.capabilities.includes('stop') && selectedTask.target_id && ['pending', 'running', 'waiting_approval'].includes(selectedTask.status))} onStop={(task) => void handleStopTask(task)} onJumpToLatest={() => window.scrollTo({ top: document.body.scrollHeight, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })} onClose={() => { closeTaskDetails(); setSelectedTask(null) }} />}
+      <Drawer opened={taskDetailsOpened && selectedTask !== null} onClose={() => { closeTaskDetails(); setTaskSelection(null) }} title="任务详情" position={mobileTaskSheet ? 'bottom' : 'right'} size={mobileTaskSheet ? 'min(88vh, 620px)' : 'min(92vw, 520px)'}>
+        {selectedTask && <TaskDetails task={selectedTask} canStop={Boolean(agent?.capabilities.includes('stop') && selectedTask.target_id && ['pending', 'running', 'waiting_approval'].includes(selectedTask.status))} onStop={(task) => void handleStopTask(task)} onJumpToLatest={() => window.scrollTo({ top: document.body.scrollHeight, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })} onClose={() => { closeTaskDetails(); setTaskSelection(null) }} />}
       </Drawer>
       {previewImage &&
         typeof document !== 'undefined' &&

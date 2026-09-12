@@ -265,9 +265,12 @@ async def test_daemon_bridge_forwards_explicit_runtime_control_requests(tmp_path
             return {"status": "idle", "handle": "opaque-handle"}
 
         async def command(self, action, request):
-            assert action == "session.approve"
-            assert request["request_id"] != "approval-request"
-            assert request["decision"] == "accept"
+            assert action in {"session.approve", "session.steer"}
+            if action == "session.approve":
+                assert request["request_id"] != "approval-request"
+                assert request["decision"] == "accept"
+            else:
+                assert request["turn_id"] == "turn-1"
             return {"status": "running", "accepted": True}
 
     settings = Settings(
@@ -306,10 +309,15 @@ async def test_daemon_bridge_forwards_explicit_runtime_control_requests(tmp_path
                 "decision": "accept",
             },
         )
+        steered = await bridge.request_control(
+            "session.steer",
+            {"session_id": "control-session", "turn_id": "turn-1", "input": [{"type": "text", "text": "补充"}]},
+        )
 
         assert spawned["daemon_id"] == "daemon-control"
         assert spawned["result"] == {"status": "idle", "handle": "opaque-handle"}
         assert approved["result"] == {"status": "running", "accepted": True}
+        assert steered["result"] == {"status": "running", "accepted": True}
         assert daemon.status()["control-session"]["status"] == "running"
     finally:
         store.close()

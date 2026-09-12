@@ -19,6 +19,8 @@ class FakeBridge:
             return {"result": {"status": "idle", "attached": True}}
         if action == "session.send":
             return {"result": {"status": "running", "turn_id": "daemon-turn-1", "accepted": True}}
+        if action == "session.steer":
+            return {"result": {"status": "running", "turn_id": "daemon-turn-1", "accepted": True}}
         if action == "session.interrupt":
             return {"result": {"status": "running", "turn_id": "daemon-turn-1", "accepted": True}}
         if action == "session.approve":
@@ -139,9 +141,20 @@ async def test_daemon_codex_controller_routes_exact_command_and_projection_ident
         assert connection._active["thread-1"] == "daemon-turn-1"
         assert connection._pending == {}
 
+        steer = {**send, "id": "steer-1", "text": "补充要求"}
+        assert await controller.submit(steer) == ("accepted", None)
+        assert bridge.calls[2] == (
+            "session.steer",
+            {
+                "session_id": "thread-1",
+                "turn_id": "daemon-turn-1",
+                "input": [{"type": "text", "text": "补充要求"}],
+            },
+        )
+
         stop = {**send, "id": "stop-1", "action": "stop", "text": "", "target_id": "thread-1"}
         assert await controller.submit(stop) == ("accepted", None)
-        assert bridge.calls[2] == (
+        assert bridge.calls[3] == (
             "session.interrupt",
             {"session_id": "thread-1", "turn_id": "daemon-turn-1"},
         )
@@ -149,7 +162,7 @@ async def test_daemon_codex_controller_routes_exact_command_and_projection_ident
 
         approve = {**send, "id": "approve-1", "action": "approve", "text": "", "target_id": "ui-approval"}
         assert await controller.submit(approve) == ("accepted", None)
-        assert bridge.calls[3] == (
+        assert bridge.calls[4] == (
             "session.approve",
             {"session_id": "thread-1", "approval_id": "codex:71", "decision": "accept"},
         )
@@ -275,6 +288,50 @@ def test_daemon_codex_controller_creates_a_session_from_daemon_native_identity()
                 "cwd": "C:/allowed",
                 "ephemeral": True,
                 "title": "Daemon thread",
+            },
+        )
+    ]
+
+
+def test_daemon_codex_controller_routes_remote_connection_through_exact_ssh_runtime():
+    bridge = FakeBridge()
+    connection = FakeCodexConnection()
+    connection.agent_id = "ssh-codex-ssh-debian"
+    connection.connection_id = "ssh-debian"
+    connection.display_name = "Debian"
+    connection.remote_executable = "/home/operator/.local/bin/codex"
+    connection.ssh_settings = {
+        "display_name": "Debian",
+        "host": "debian.example",
+        "port": 22,
+        "user": "operator",
+    }
+    connection._threads = {"thread-1": {"cwd": "/home/operator/workspace/project"}}
+    connection.validate_workspace = lambda workspace: workspace or "/home/operator/workspace/project"
+    controller = DaemonCodexController(bridge, FakeRouter(), connection)
+
+    created = controller.create("/home/operator/workspace/project", "Remote daemon thread")
+
+    assert created["agent_id"] == "ssh-codex-ssh-debian"
+    assert created["connection_id"] == "ssh-debian"
+    assert bridge.calls == [
+        (
+            "session.create",
+            {
+                "agent_type": "codex-ssh",
+                "cwd": "/home/operator/workspace/project",
+                "ephemeral": False,
+                "title": "Remote daemon thread",
+                "params": {
+                    "connection_id": "ssh-debian",
+                    "ssh_settings": {
+                        "display_name": "Debian",
+                        "host": "debian.example",
+                        "port": 22,
+                        "user": "operator",
+                        "codex_executable": "/home/operator/.local/bin/codex",
+                    },
+                },
             },
         )
     ]

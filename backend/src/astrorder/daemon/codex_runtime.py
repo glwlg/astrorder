@@ -101,6 +101,11 @@ class CodexDaemonRuntime:
         self._sessions: dict[str, _OwnedCodexSession] = {}
         self._lock = threading.RLock()
 
+    def set_emitter(self, emit: FrameEmitter) -> None:
+        if not callable(emit):
+            raise TypeError("emit must be callable")
+        self.emit = emit
+
     async def spawn(self, request: Mapping[str, Any]) -> Mapping[str, Any]:
         session_id = _session_id(request)
         workspace = self._workspace(request.get("cwd"))
@@ -157,11 +162,7 @@ class CodexDaemonRuntime:
                 },
             )
             await asyncio.to_thread(client.send, {"method": "initialized", "params": {}})
-            resumed = await asyncio.to_thread(
-                client.request,
-                "thread/resume",
-                {"threadId": session_id, "excludeTurns": True},
-            )
+            resumed = await self._resume(client, session_id)
             thread = resumed.get("thread") if isinstance(resumed, Mapping) else None
             if not isinstance(thread, Mapping) or thread.get("id") != session_id:
                 raise DaemonProtocolError("Codex did not confirm the requested native thread")
@@ -332,6 +333,8 @@ class CodexDaemonRuntime:
         owned = self._owned(session_id)
         if action == "session.send":
             return await self._send(session_id, owned, request)
+        if action == "session.steer":
+            return await self._steer(session_id, owned, request)
         if action == "session.interrupt":
             return await self._interrupt(session_id, owned, request)
         if action == "session.approve":
@@ -388,6 +391,27 @@ class CodexDaemonRuntime:
                 owned.status = terminal
             status = owned.status
         return {"status": status, "turn_id": turn_id, "accepted": True}
+
+    async def _steer(
+        self,
+        session_id: str,
+        owned: _OwnedCodexSession,
+        request: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        turn_id = request.get("turn_id")
+        inputs = request.get("input")
+        if not isinstance(turn_id, str) or not turn_id:
+            raise DaemonProtocolError("Codex steer requires a native turn_id")
+        _validate_input(inputs)
+        with self._lock:
+            if owned.active_turn_id != turn_id:
+                raise DaemonProtocolError("Codex turn is not the active daemon-owned turn")
+        await asyncio.to_thread(
+            owned.client.request,
+            "turn/steer",
+            {"threadId": session_id, "expectedTurnId": turn_id, "input": [dict(item) for item in inputs]},
+        )
+        return {"status": "running", "turn_id": turn_id, "accepted": True}
 
     async def _interrupt(
         self,
@@ -474,6 +498,15 @@ class CodexDaemonRuntime:
         ):
             raise DaemonProtocolError("Codex workspace is outside daemon allowlist")
         return candidate
+
+    async def _resume(
+        self, client: CodexAppServerClient, session_id: str
+    ) -> Mapping[str, Any]:
+        return await asyncio.to_thread(
+            client.request,
+            "thread/resume",
+            {"threadId": session_id, "excludeTurns": True},
+        )
 
     def _on_notification(
         self,

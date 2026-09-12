@@ -1,44 +1,10 @@
-import type { Agent, Command, Message, Project, Session, SessionStatus, Task } from '../domain/types'
+import type { Agent, Command, Project, Session, SessionStatus, Task } from '../domain/types'
 import { isEphemeralSession, scopeKey } from '../domain/semantics'
-import { selectMessages, useAstrorderStore } from '../state/store'
+import { useAstrorderStore } from '../state/store'
 
 export type RailFilter = 'all' | 'running' | 'unread' | 'pinned' | 'recent'
 
-const NATIVE_ACTIVITY_STALE_MS = 120_000
-const OPEN_USER_TURN_MS = 45_000
 export const LIVE_ACTIVITY_MS = 15_000
-
-function isActivityMessage(message: Message): boolean {
-  return message.kind === 'thinking' || message.kind === 'tool' || message.role === 'tool'
-}
-
-function ageMs(iso: string | undefined, now: number): number | null {
-  if (!iso) return null
-  const ts = Date.parse(iso)
-  if (!Number.isFinite(ts)) return null
-  const age = now - ts
-  return age >= 0 ? age : 0
-}
-
-export function nativeTurnInProgress(messages: Message[], now = Date.now()): boolean {
-  if (messages.length === 0) return false
-  if (messages.some((message) => message.tool?.status === 'running' || message.tool?.status === 'pending')) {
-    return true
-  }
-  const sorted = [...messages].sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at))
-  const last = sorted[sorted.length - 1]
-  if (!last) return false
-  if (last.kind === 'thinking') return true
-  if (isActivityMessage(last)) {
-    const age = ageMs(last.created_at, now)
-    return age != null && age < NATIVE_ACTIVITY_STALE_MS
-  }
-  if (last.role === 'user') {
-    const age = ageMs(last.created_at, now)
-    return age != null && age < OPEN_USER_TURN_MS
-  }
-  return false
-}
 
 export function sessionActivityStatus(
   session: Partial<Pick<Session, 'id' | 'agent_id' | 'status' | 'live'>>,
@@ -64,15 +30,16 @@ export function sessionActivityStatus(
       const tasks = Object.values(state.tasks || {}).filter(
         (task: Task) => task.agent_id === session.agent_id && task.session_id === session.id,
       )
-      if (tasks.some((task) => task.status === 'waiting_approval')) return 'waiting_approval'
-      if (tasks.some((task) => task.status === 'running' || task.status === 'pending')) return 'running'
+      const detachedTasks = tasks.filter((task) =>
+        (task.kind === 'background' || task.kind === 'subagent') && task.progress?.blocking !== false,
+      )
+      if (detachedTasks.some((task) => task.status === 'waiting_approval')) return 'waiting_approval'
+      if (detachedTasks.some((task) => task.status === 'running' || (task.kind === 'subagent' && task.status === 'pending'))) return 'running'
 
       const liveAt = state.liveActivityAt?.[scopeKey(session.agent_id, session.id)]
       if (typeof liveAt === 'number' && Date.now() - liveAt >= 0 && Date.now() - liveAt < LIVE_ACTIVITY_MS) {
         return 'running'
       }
-
-      if (nativeTurnInProgress(selectMessages(state, session.agent_id, session.id))) return 'running'
     } catch {
       // fallback if store is not available
     }

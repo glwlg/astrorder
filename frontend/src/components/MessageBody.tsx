@@ -16,6 +16,14 @@ export function MessageBody({
   attachmentNames?: string[]
   renderMarkdown: (value: string) => ReactNode
 }) {
+  const nativeSummary = value.startsWith('[CONTEXT COMPACTION — REFERENCE ONLY]')
+  const modelNotice = value.startsWith('[System: The active model for this chat has changed to ')
+  if (nativeSummary || modelNotice) return <LazyDetails summary={nativeSummary ? '上下文压缩摘要' : '模型已切换'}>
+    {renderMarkdown(value)}
+  </LazyDetails>
+  if (!user && /^(正在压缩上下文|上下文压缩完成|上下文压缩失败|上下文压缩状态未确认)$/.test(value)) {
+    return <div role="status" aria-live="polite">{value === '正在压缩上下文' ? '正在压缩上下文，请稍候…' : value}</div>
+  }
   if (!user && value.trim() === 'Operation interrupted.') return <div className="message-interrupted">
     <span><IconPlayerPause size={16} />本轮已中断</span>
     <LazyDetails summary="查看原始记录"><code>{value}</code></LazyDetails>

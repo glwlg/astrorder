@@ -11,6 +11,7 @@ it('installs at the application root, never at a selected native session URL', (
   expect(manifest.start_url).toBe('/')
   expect(manifest.scope).toBe('/')
   expect(manifest.display).toBe('standalone')
+  expect(manifest.display_override).toEqual(['window-controls-overlay'])
   expect(manifest.icons.map((icon: { sizes: string }) => icon.sizes)).toContain('192x192')
   expect(manifest.icons.map((icon: { sizes: string }) => icon.sizes)).toContain('512x512')
   for (const icon of manifest.icons) expect(existsSync(resolve('public', icon.src.slice(1)))).toBe(true)

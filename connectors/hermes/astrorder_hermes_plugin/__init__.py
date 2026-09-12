@@ -160,6 +160,7 @@ class HermesBridge:
         # This callback reports completion, not a new user turn. Native history
         # owns user rows; command submission already emits its correlated echo.
         with self._lock:
+            self._session_id = session_id
             streamed = session_id in self._streamed_sessions
             self._streamed_sessions.discard(session_id)
         if not streamed:
@@ -169,6 +170,7 @@ class HermesBridge:
                 role="assistant",
                 text=assistant_response,
             )
+        self._send_session("idle")
 
     def _stream_key(self, session_id: str, turn_id: str) -> tuple[str, str] | None:
         return (session_id, turn_id) if session_id and turn_id else None
@@ -235,6 +237,7 @@ class HermesBridge:
         title: str,
         status: str,
         target_id: str | None = None,
+        progress: dict[str, Any] | None = None,
         logs: list[dict[str, Any]] | None = None,
         created_at: str | None = None,
     ) -> None:
@@ -246,7 +249,7 @@ class HermesBridge:
             "kind": kind,
             "title": _safe_text(title, 240),
             "status": status,
-            "progress": None,
+            "progress": progress,
             "command": None,
             "logs": logs or [],
             "target_id": target_id,
@@ -268,21 +271,24 @@ class HermesBridge:
         event_id = tool_call_id or task_id
         if not session_id or not event_id:
             return
+        background = tool_name.startswith("skill_")
         with self._lock:
             self._session_id = session_id or self._session_id
-        self._send_session("running")
+        if not background:
+            self._send_session("running")
         self._emit_message(
             message_id=f"hermes-tool-{event_id}", session_id=session_id,
             role="tool", kind="tool", text="",
-            tool={"name": tool_name or "未命名", "call_id": event_id, "status": "running"},
+            tool={"name": tool_name or "未命名", "call_id": event_id, "status": "running", "background": background},
         )
         self._emit_task(
             task_id=f"tool:{event_id}",
             session_id=session_id,
-            kind="tool",
+            kind="background" if background else "tool",
             title=f"工具：{tool_name or '未命名'}",
             status="running",
             target_id=event_id,
+            progress={"blocking": False} if background else None,
         )
 
     def _on_post_tool_call(
@@ -299,20 +305,22 @@ class HermesBridge:
         event_id = tool_call_id or task_id
         if not session_id or not event_id:
             return
+        background = tool_name.startswith("skill_")
         failed = isinstance(result, dict) and bool(result.get("error"))
         summary = _safe_text(result) if result is not None else "服务端未提供工具结果。"
         self._emit_message(
             message_id=f"hermes-tool-{event_id}", session_id=session_id,
             role="tool", kind="tool", text=summary,
-            tool={"name": tool_name or "未命名", "call_id": event_id, "status": "failed" if failed else "completed"},
+            tool={"name": tool_name or "未命名", "call_id": event_id, "status": "failed" if failed else "completed", "background": background},
         )
         self._emit_task(
             task_id=f"tool:{event_id}",
             session_id=session_id,
-            kind="tool",
+            kind="background" if background else "tool",
             title=f"工具：{tool_name or '未命名'}",
             status="failed" if failed else "completed",
             target_id=event_id,
+            progress={"blocking": False} if background else None,
             logs=[{"id": f"tool-log:{event_id}", "text": summary, "level": "error" if failed else "info", "created_at": _timestamp()}],
         )
 

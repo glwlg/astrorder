@@ -2,6 +2,7 @@
 import asyncio
 import inspect
 import re
+import threading
 import time
 from pathlib import Path
 from uuid import UUID
@@ -9,7 +10,7 @@ from uuid import UUID
 from sqlalchemy import select
 
 from .models import EventRow
-from .observer_io import read_spool
+from .observer_io import read_spool, write_decision
 
 LABELS={'SessionStart':'原生会话已打开','SessionEnd':'原生会话已关闭','UserPromptSubmit':'原生端提交了消息','PreToolUse':'工具开始执行','PostToolUse':'工具执行结束','PermissionRequest':'原生端等待审批','SubagentStart':'子代理已启动','SubagentStop':'子代理已结束','Stop':'原生轮次已结束','Interrupt':'原生轮次已中断'}
 
@@ -45,6 +46,10 @@ def validate_observation(row):
     for key in ('turn_id','tool_call_id','tool_name','subagent_id'):
         value=row.get(key)
         if isinstance(value,str) and len(value)<=160 and all(ord(c)>=32 for c in value): data[key]=value
+    if data['event']=='PermissionRequest' and row.get('approval_pending') is True:
+        data['approval_pending']=True
+        detail=row.get('detail')
+        if isinstance(detail,str): data['detail']=detail[:2000]
     data['label']=LABELS[data['event']]
     data['notification']=data['event'] in ('Stop','Interrupt','PermissionRequest') and time.time()-data['observed_at']<60
     return data
@@ -69,6 +74,9 @@ class NativeObservers:
         self.app=app
         self.states={}
         self.ack={}
+        self.pending={}
+        self.supported=set()
+        self.lock=threading.RLock()
         self.stopping=asyncio.Event()
 
     def clients(self):
@@ -80,14 +88,16 @@ class NativeObservers:
         aid=client.agent_id
         home=client._home.as_posix()
         acknowledged=self.ack.get(aid,[])
+        with self.lock: pending_ids=[key[2] for key in self.pending if key[0]==aid]
         if hasattr(client,'remote_json'):
-            source='import json,re\nfrom pathlib import Path\n'+inspect.getsource(read_spool)+'\nprint(json.dumps(read_spool('+repr(home)+','+repr(acknowledged)+')))'
+            source='import json,re\nfrom pathlib import Path\n'+inspect.getsource(read_spool)+'\nprint(json.dumps(read_spool('+repr(home)+','+repr(acknowledged)+','+repr(pending_ids)+')))'
             response=client.remote_json(source)
         else:
-            response=read_spool(Path(home),acknowledged)
+            response=read_spool(Path(home),acknowledged,pending_ids)
         self.ack[aid]=[]
         state=self.states.setdefault(aid,{})
         state.update({'installed':response['installed'],'poll_ok':True})
+        present=set(response.get('pending',[]))
         for raw in response['items']:
             try: data=validate_observation(raw)
             except (ValueError,TypeError,AttributeError):
@@ -107,10 +117,51 @@ class NativeObservers:
                 data['session_title']=session.get('title','') if session else ''
                 try: data['preview']=reply_preview(client,data['session_id'],data.get('turn_id'))
                 except (RuntimeError,OSError,ValueError): data['preview']=''
+            if data.get('approval_pending'):
+                present.add(data['id'])
+                key=(aid,data['session_id'],data['id'])
+                with self.lock:
+                    if key not in self.pending:
+                        approval={'id':f"observer-approval:{aid}:{data['id']}",'agent_id':aid,'session_id':data['session_id'],'target_id':data['id'],'title':'Codex 请求执行授权'+((' · '+data['tool_name']) if data.get('tool_name') else ''),'detail':data.get('detail') or data.get('tool_name') or '原生 Codex 操作等待授权','state':'pending','data':{'source':'codex-observer'}}
+                        self.pending[key]=(client,approval)
+                        if aid not in self.supported:
+                            self.supported.add(aid); self.app.state.service._publish_capabilities(aid)
+                        self.app.state.service._server_event('approval.upsert',agent_id=aid,session_id=data['session_id'],data=approval)
             event=self.app.state.store.append_event(event_id='observer-'+data['id'],event_type='native.observation',agent_id=aid,session_id=data['session_id'],data=data)
             self.app.state.service._publish(event)
-            self.ack[aid].append(data['id'])
+            if not data.get('approval_pending'): self.ack[aid].append(data['id'])
             state['last_event_at']=max(state.get('last_event_at',0),data['observed_at'])
+        with self.lock:
+            for key in [key for key in self.pending if key[0]==aid and key[2] not in present]:
+                _,approval=self.pending.pop(key)
+                self.app.state.service._server_event('approval.upsert',agent_id=aid,session_id=key[1],data={**approval,'state':'resolved'})
+
+    def matches(self,command):
+        with self.lock: return (command['agent_id'],command['session_id'],command.get('target_id')) in self.pending
+
+    async def submit(self,command):
+        return await asyncio.to_thread(self.respond,command)
+
+    def respond(self,command):
+        aid,sid,rid=command['agent_id'],command['session_id'],command.get('target_id')
+        with self.lock:
+            record=self.pending.get((aid,sid,rid))
+            if not record: return 'failed','审批已过期或不属于当前会话。'
+            client,approval=record; home=client._home.as_posix()
+            if hasattr(client,'remote_json'):
+                source='import json,os,re\nfrom pathlib import Path\n'+inspect.getsource(write_decision)+'\nprint(json.dumps(write_decision('+repr(home)+','+repr(rid)+','+repr('allow' if command['action']=='approve' else 'deny')+')))'
+                written=client.remote_json(source) is True
+            else:
+                written=write_decision(Path(home),rid,'allow' if command['action']=='approve' else 'deny')
+            if not written: return 'failed','原生审批已过期；未发送决定。'
+            self.pending.pop((aid,sid,rid),None)
+            self.app.state.service._server_event('approval.upsert',agent_id=aid,session_id=sid,data={**approval,'state':'approved' if command['action']=='approve' else 'rejected'})
+            updated=self.app.state.store.set_command_state(aid,sid,command['id'],'completed',None)
+            self.app.state.service._server_event('command.upsert',agent_id=aid,session_id=sid,data=updated)
+            return 'accepted',None
+
+    def snapshot(self):
+        with self.lock: return [dict(record[1]) for record in self.pending.values()]
 
     async def run(self):
         while not self.stopping.is_set():

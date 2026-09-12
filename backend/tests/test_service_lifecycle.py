@@ -76,7 +76,7 @@ def test_restart_refuses_to_kill_an_unverified_listener(monkeypatch):
 
 def test_restart_terminates_only_verified_app_listener_and_never_queries_daemon(monkeypatch, tmp_path):
     calls: list[object] = []
-    states = iter([[111], []])
+    states = iter([[111], [], [444]])
     monkeypatch.setattr(restart_service, "current_listening_pids", lambda port: calls.append(port) or next(states))
     monkeypatch.setattr(
         restart_service,
@@ -99,4 +99,8 @@ def test_restart_terminates_only_verified_app_listener_and_never_queries_daemon(
 
     assert restart_service.restart() == 444
     assert calls[:3] == [30001, ("terminate", 111), 30001]
+    assert calls[3] == ("popen", [str(tmp_path / "backend/.venv/Scripts/python.exe"), "scripts/run_production.py"], calls[3][2])
+    assert calls[4] == 30001
     assert 30009 not in calls
+    popen = next(call for call in calls if isinstance(call, tuple) and call[0] == "popen")
+    assert popen[2]["creationflags"] & 0x01000000

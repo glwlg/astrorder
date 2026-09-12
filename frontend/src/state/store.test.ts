@@ -153,6 +153,19 @@ describe('shared runtime store', () => {
     expect(useAstrorderStore.getState().liveActivityAt['agent-1::session-1']).toBeGreaterThan(Date.now() - 1000)
   })
 
+  it('does not stamp live activity for non-blocking background events', () => {
+    const store = useAstrorderStore.getState()
+    store.applyEvent({
+      id: 'background-message', cursor: 4, type: 'message.upsert', agent_id: session.agent_id, session_id: session.id,
+      data: { ...message('background-message', '技能进化', session.agent_id), role: 'tool', kind: 'tool', tool: { name: 'skill_manage', status: 'running', background: true } },
+    })
+    store.applyEvent({
+      id: 'background-task', cursor: 5, type: 'task.upsert', agent_id: session.agent_id, session_id: session.id,
+      data: { id: 'background-task', agent_id: session.agent_id, session_id: session.id, kind: 'background', title: '工具：skill_manage', status: 'running', progress: { blocking: false }, command: null, logs: [], target_id: 'call', created_at: session.updated_at, updated_at: session.updated_at },
+    })
+    expect(useAstrorderStore.getState().liveActivityAt['agent-1::session-1']).toBeUndefined()
+  })
+
   it('applies a late command acknowledgement to the exact outbox id', () => {
     const store = useAstrorderStore.getState()
     store.addOutbox({ ...command('command-1'), state: 'unknown', error: '连接中断' })

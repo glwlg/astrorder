@@ -104,3 +104,18 @@ def test_start_script_passes_explicit_ssh_opt_in_without_secret_argument(monkeyp
     starter.main(["--port", "30133", "--enable-ssh"])
 
     assert captured == {"port": 30133, "runtime_args": ["--enable-ssh"]}
+
+
+def test_daemon_process_breaks_away_from_the_callers_job(monkeypatch, tmp_path):
+    monkeypatch.setattr(service, "ROOT", tmp_path)
+    monkeypatch.setattr(service, "current_listening_pids", lambda _port: [])
+    calls = []
+
+    class Process:
+        pid = 222
+
+    monkeypatch.setattr(service.subprocess, "Popen", lambda *args, **kwargs: calls.append((args, kwargs)) or Process())
+    (tmp_path / "backend/.venv/Scripts").mkdir(parents=True)
+
+    assert service.start_daemon(metadata_path=tmp_path / "daemon.json") == 222
+    assert calls[0][1]["creationflags"] & 0x01000000

@@ -49,6 +49,25 @@ def test_post_llm_does_not_reemit_user_input_after_reply():
     bridge._on_post_llm_call('session', '你好', '你好！')
     rows = [e['data'] for e in transport.events if e['type'] == 'message.upsert']
     assert [r['role'] for r in rows] == ['assistant']
+    sessions = [e['data'] for e in transport.events if e['type'] == 'session.upsert']
+    assert sessions[-1]['status'] == 'idle'
+
+
+def test_background_skill_tool_is_visible_without_marking_session_running():
+    transport = FakeTransport()
+    bridge = HermesBridge(FakeContext(), HermesConnectorConfig(
+        endpoint='ws://127.0.0.1:30002/ws/v1/connector', secret='test-only',
+        agent_id='hermes-test', agent_name='Hermes test'), transport=transport)
+    bridge._session_id = 'session'
+    bridge._on_pre_tool_call(session_id='session', tool_name='skill_manage', tool_call_id='call')
+    bridge._on_post_tool_call(session_id='session', tool_name='skill_manage', tool_call_id='call', result='done')
+    messages = [e['data'] for e in transport.events if e['type'] == 'message.upsert']
+    tasks = [e['data'] for e in transport.events if e['type'] == 'task.upsert']
+    assert messages[-1]['tool']['background'] is True
+    assert tasks[-1]['kind'] == 'background'
+    assert tasks[-1]['progress'] == {'blocking': False}
+    bridge._on_post_llm_call('session', 'background', 'finished')
+    assert [e['data']['status'] for e in transport.events if e['type'] == 'session.upsert'] == ['idle']
 
 
 def test_stream_reasoning_and_tool_callbacks_emit_transcript_activity():

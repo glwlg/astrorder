@@ -5,6 +5,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, expect, it, vi } from 'vitest'
 import { api } from '../../api/client'
 import { SessionModelControl } from './SessionModelControl'
+import { REASONING_EFFORTS } from './composerMedia'
 
 const session = {
   id: 'native',
@@ -18,6 +19,16 @@ const session = {
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
+})
+
+it('offers exactly the five enabled thinking levels', () => {
+  expect(REASONING_EFFORTS).toEqual([
+    { value: 'low', label: '低' },
+    { value: 'medium', label: '中' },
+    { value: 'high', label: '高' },
+    { value: 'xhigh', label: '超高' },
+    { value: 'max', label: '最高' },
+  ])
 })
 
 it('desktop shows the bound native model and switches the exact session', async () => {
@@ -40,7 +51,9 @@ it('desktop shows the bound native model and switches the exact session', async 
   fireEvent.click(screen.getByRole('button', { name: '选择会话模型' }))
   
   const switchBtn = await screen.findByRole('button', { name: '切换到选择模型' })
-  fireEvent.click(switchBtn)
+  expect(switchBtn).toHaveTextContent('p/bound')
+  expect(switchBtn.querySelector('.codex-model-effort-highlight')).toBeInTheDocument()
+  fireEvent.click(switchBtn.querySelector('.codex-model-name-label')!)
   
   const targetItem = await screen.findByText('Provider · next')
   fireEvent.click(targetItem)
@@ -64,6 +77,24 @@ async function openEffortSlider() {
   fireEvent.click(await screen.findByRole('button', { name: '选择会话模型' }))
   return screen.findByRole('slider', { name: '思考强度' })
 }
+
+it.each(['#93c5fd', '#60a5fa', '#3b82f6', '#0066cc', '#1e40af'].map((color, index) => ({ color, index })))(
+  'uses the color and fill endpoint for effort $index',
+  async ({ color, index }) => {
+    vi.spyOn(api, 'getSessionModel').mockResolvedValue({
+      model: 'bound', provider: 'p', effort: REASONING_EFFORTS[index].value,
+    })
+    vi.spyOn(api, 'getSessionModels').mockResolvedValue({ items: [] })
+    renderControl()
+    await waitFor(() => expect(screen.getByRole('button', { name: '选择会话模型' })).toHaveTextContent('p/bound'))
+    const slider = await openEffortSlider()
+    expect(slider).toHaveAttribute('aria-valuenow', String(index))
+    const root = document.querySelector<HTMLElement>('.mantine-Slider-root')!
+    expect(root.style.getPropertyValue('--slider-color')).toBe(color)
+    const bar = root.querySelector<HTMLElement>('.mantine-Slider-bar')!
+    expect(bar.style.width).toBe(index === 4 ? '' : `calc(${index * 25}% + var(--slider-size))`)
+  },
+)
 
 it('commits thinking effort once when the slider is released, not while dragging', async () => {
   vi.spyOn(api, 'getSessionModel').mockResolvedValue({ model: 'bound', provider: 'p', effort: 'medium' })

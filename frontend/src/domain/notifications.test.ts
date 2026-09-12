@@ -36,8 +36,12 @@ describe('event notifications', () => {
     expect(notificationForEvent(event)).toBeNull()
   })
 
-  it('creates stable source-session keys for terminal tasks and pending approvals', () => {
-    const completed = notificationForEvent(taskEvent('completed'))
+  it('does not notify for Codex command execution results', () => {
+    expect(notificationForEvent(taskEvent('completed', 'codex:background:command-1'))).toBeNull()
+    expect(notificationForEvent(taskEvent('failed', 'codex:background:command-2'))).toBeNull()
+  })
+
+  it('only notifies for failed terminal tasks and pending approvals', () => {
     const failed = notificationForEvent(taskEvent('failed'))
     const approval = notificationForEvent({
       id: 'approval-envelope-1',
@@ -48,14 +52,21 @@ describe('event notifications', () => {
       data: { id: 'approval-1', state: 'pending', title: '需要确认', detail: '允许继续' },
     })
 
-    expect(completed?.key).toBe('agent-1::session-1::task::task-1::completed')
+    expect(notificationForEvent(taskEvent('completed'))).toBeNull()
     expect(failed?.key).toBe('agent-1::session-1::task::task-1::failed')
     expect(approval?.key).toBe('agent-1::session-1::approval::approval-1::pending')
     expect(notificationForEvent(taskEvent('running'))).toBeNull()
   })
 
+  it('lets the actionable approval event own observer approval notifications', () => {
+    expect(notificationForEvent({
+      id: 'observation', cursor: 3, type: 'native.observation', agent_id: 'agent-1', session_id: 'session-1',
+      data: { id: 'native-request', event: 'PermissionRequest', observed_at: Date.now() / 1000, notification: true, approval_pending: true },
+    })).toBeNull()
+  })
+
   it('deduplicates repeated terminal events by stable event identity, not text or time', () => {
-    const notification = notificationForEvent(taskEvent('completed'))
+    const notification = notificationForEvent(taskEvent('failed'))
     expect(notification).not.toBeNull()
     const store = useAstrorderStore.getState()
 

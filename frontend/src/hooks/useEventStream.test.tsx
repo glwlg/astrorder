@@ -19,7 +19,7 @@ afterEach(() => {
   mocks.show.mockReset()
 })
 
-function taskEvent(envelopeId: string): EventEnvelope {
+function taskEvent(envelopeId: string, status = 'completed'): EventEnvelope {
   return {
     id: envelopeId,
     cursor: 1,
@@ -32,7 +32,7 @@ function taskEvent(envelopeId: string): EventEnvelope {
       session_id: 'session-1',
       kind: 'background',
       title: '后台构建',
-      status: 'completed',
+      status,
       progress: null,
       command: null,
       logs: [],
@@ -66,7 +66,7 @@ describe('event stream notifications', () => {
     view.unmount()
   })
 
-  it('shows an in-app notification once for repeated terminal events and does not request permission', () => {
+  it('shows one notification for repeated failures and none for normal completion', () => {
     vi.stubGlobal('Notification', { permission: 'default', requestPermission: vi.fn() })
     let options: { onEvent: (event: EventEnvelope) => void } | undefined
     mocks.connectEventStream.mockImplementation((nextOptions) => {
@@ -76,8 +76,11 @@ describe('event stream notifications', () => {
     render(<QueryClientProvider client={new QueryClient()}><StreamHarness /></QueryClientProvider>)
 
     act(() => {
-      options?.onEvent(taskEvent('envelope-1'))
-      options?.onEvent(taskEvent('envelope-2'))
+      options?.onEvent(taskEvent('completed'))
+      const failed = taskEvent('envelope-1', 'failed')
+      failed.cursor = 2
+      options?.onEvent(failed)
+      options?.onEvent({ ...failed, id: 'envelope-2', cursor: 3 })
     })
 
     expect(mocks.show).toHaveBeenCalledOnce()

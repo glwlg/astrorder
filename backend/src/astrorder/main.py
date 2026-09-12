@@ -28,45 +28,22 @@ from .store import Store
 logger = logging.getLogger(__name__)
 
 
-async def apply_model_route(app, agent_id: str, session_id: str, target) -> None:
-    agent = app.state.store.get_agent(agent_id)
-    if not isinstance(agent, dict):
-        raise LookupError("model routing Agent is unavailable")
-    if agent.get("kind") == "codex":
-        environments = getattr(app.state, "environments", None)
-        runtime = environments.for_agent(agent_id) if environments is not None else None
-        local_codex = getattr(app.state, "codex", None)
-        if runtime is None and getattr(local_codex, "agent_id", None) == agent_id:
-            runtime = local_codex
-    elif agent.get("kind") == "hermes":
-        runtime = app.state.connections.get_runtime_by_agent_id(agent_id)
-    else:
-        raise RuntimeError("model routing Agent kind is unsupported")
+async def restore_hermes_model(
+    app, agent_id: str, session_id: str, provider: str, model: str, effort: str | None = None
+) -> None:
+    runtime = app.state.connections.get_runtime_by_agent_id(agent_id)
     if runtime is None:
-        raise RuntimeError("model routing runtime is unavailable")
-    model_result = await asyncio.to_thread(
-        runtime.set_model,
-        session_id,
-        target.provider,
-        target.model,
-    )
-    if (
-        not isinstance(model_result, dict)
-        or model_result.get("provider") != target.provider
-        or model_result.get("model") != target.model
-    ):
-        raise RuntimeError("native model readback did not match route")
-    if target.effort is not None:
-        effort_result = await asyncio.to_thread(
-            runtime.set_effort,
-            session_id,
-            target.effort,
-        )
-        if (
-            not isinstance(effort_result, dict)
-            or effort_result.get("effort") != target.effort
-        ):
-            raise RuntimeError("native reasoning readback did not match route")
+        raise RuntimeError("Hermes runtime is unavailable")
+    current = await asyncio.to_thread(runtime.model, session_id)
+    model_changed = current.get("provider") != provider or current.get("model") != model
+    if model_changed:
+        result = await asyncio.to_thread(runtime.set_model, session_id, provider, model)
+        if not isinstance(result, dict) or result.get("provider") != provider or result.get("model") != model:
+            raise RuntimeError("Hermes model readback did not match the saved binding")
+    if effort is not None and (model_changed or current.get("effort") != effort):
+        result = await asyncio.to_thread(runtime.set_effort, session_id, effort)
+        if not isinstance(result, dict) or result.get("effort") != effort:
+            raise RuntimeError("Hermes reasoning readback did not match the saved binding")
 
 
 class SpaStaticFiles(StaticFiles):
@@ -148,6 +125,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if app.state.daemon_bridge is None:
                 raise ValueError("daemon Hermes projection requires the Session Daemon bridge")
             from .daemon.hermes_projection import HermesCommandFrameRouter
+            from .daemon.hermes_compaction_projection import HermesCompactionFrameRouter
+
+            app.state.hermes_compaction_frame_router = HermesCompactionFrameRouter(
+                app.state.daemon_bridge, store, service,
+            )
 
             app.state.hermes_command_frame_router = HermesCommandFrameRouter(
                 app.state.daemon_bridge,
@@ -194,6 +176,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         app.state.codex = CodexConnection(runtime_settings, store, service)
         app.state.codex_native_frame_router = None
+        daemon_codex_controller_factory = None
         if runtime_settings.daemon_codex_enabled:
             if app.state.daemon_bridge is None:
                 raise ValueError("daemon Codex requires the Session Daemon bridge")
@@ -202,29 +185,31 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
             codex_native_frame_router = CodexNativeFrameRouter(app.state.daemon_bridge)
             app.state.codex_native_frame_router = codex_native_frame_router
-            app.state.codex.set_daemon_controller_factory(
-                lambda connection: DaemonCodexController(
+            def daemon_codex_controller_factory(connection):
+                return DaemonCodexController(
                     app.state.daemon_bridge,
                     codex_native_frame_router,
                     connection,
                 )
-            )
-        if runtime_settings.model_routing_enabled:
-            from .model_routing import ModelRouter
 
-            service.model_router = ModelRouter(
-                store,
-                runtime_settings,
-                lambda agent_id, session_id, target: apply_model_route(
-                    app, agent_id, session_id, target
-                ),
-            )
-        app.state.environments = EnvironmentConnections(runtime_settings, store, service, app.state.connections, app.state.codex)
+            app.state.codex.set_daemon_controller_factory(daemon_codex_controller_factory)
+        app.state.environments = EnvironmentConnections(
+            runtime_settings,
+            store,
+            service,
+            app.state.connections,
+            app.state.codex,
+            daemon_codex_controller_factory=daemon_codex_controller_factory,
+        )
+        service.hermes_model_restorer = lambda agent_id, session_id, provider, model, effort: restore_hermes_model(
+            app, agent_id, session_id, provider, model, effort
+        )
         from .hermes_approvals import HermesApprovals
         service.hermes_approvals = HermesApprovals(app.state.connections, service)
         from .native_observers import NativeObservers
         observers = NativeObservers(app)
         app.state.observers = observers
+        service.observer_approvals = observers
         observer_task = asyncio.create_task(observers.run())
         restore_tasks: list[asyncio.Task[None]] = []
         if runtime_settings.daemon_codex_enabled:
@@ -244,6 +229,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         finally:
             if app.state.hermes_command_frame_router is not None:
                 app.state.hermes_command_frame_router.close()
+                app.state.hermes_compaction_frame_router.close()
             for unregister in app.state.daemon_pty_unregistrations:
                 unregister()
             daemon_stopping.set()
@@ -273,7 +259,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_origins=list(runtime_settings.allowed_origins),
         allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+)(:\d+)?$",
         allow_credentials=True,
-        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type"],
     )
     app.include_router(router)

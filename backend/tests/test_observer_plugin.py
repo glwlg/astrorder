@@ -1,6 +1,8 @@
 import json
 from unittest.mock import Mock
+
 import pytest
+
 from astrorder import observer_plugin as plugin
 
 def test_migrate_only_owned_hooks_after_native_plugin_verification(tmp_path,monkeypatch):
@@ -13,6 +15,8 @@ def test_migrate_only_owned_hooks_after_native_plugin_verification(tmp_path,monk
     assert json.loads((tmp_path/'hooks.json').read_text())['hooks']['Stop'][0]['hooks']==[original['hooks']['Stop'][0]['hooks'][0]]
     manifest=json.loads((tmp_path/'astrorder-observer/marketplace/plugins/astrorder/.codex-plugin/plugin.json').read_text(encoding='utf-8'))
     assert manifest['interface']['displayName']=='Astrorder · 星序'
+    hooks=json.loads((tmp_path/'astrorder-observer/marketplace/plugins/astrorder/hooks/hooks.json').read_text(encoding='utf-8'))['hooks']
+    assert hooks['PermissionRequest'][0]['hooks'][0]['timeout']==600 and hooks['Stop'][0]['hooks'][0]['timeout']==3
     assert plugin.install_plugin(tmp_path,'python','print("test")','codex')['removed']==0
 
 def test_failed_plugin_verification_preserves_legacy(tmp_path,monkeypatch):

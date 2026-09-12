@@ -11,6 +11,13 @@ class Base(DeclarativeBase):
     pass
 
 
+class WorkspacePreferenceRow(Base):
+    __tablename__ = "workspace_preferences"
+
+    key: Mapped[str] = mapped_column(String(1100), primary_key=True)
+    value: Mapped[Any] = mapped_column(JSON, nullable=True)
+
+
 class AgentRow(Base):
     __tablename__ = "agents"
 
@@ -53,6 +60,9 @@ class SessionRow(Base):
     native_kind: Mapped[str | None] = mapped_column(String(32), nullable=True)
     ephemeral: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
     control_state: Mapped[str] = mapped_column(String(32), nullable=False, default="unknown")
+    selected_model_provider: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    selected_model: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    selected_reasoning_effort: Mapped[str | None] = mapped_column(String(32), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 
@@ -116,27 +126,6 @@ class CommandRow(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     payload_hash: Mapped[str] = mapped_column(String(128), nullable=False)
-
-
-class ModelRouteRow(Base):
-    __tablename__ = "model_routes"
-    __table_args__ = (
-        UniqueConstraint(
-            "agent_id", "session_id", "command_id", name="uq_model_routes_command"
-        ),
-    )
-
-    row_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    agent_id: Mapped[str] = mapped_column(String(256), nullable=False, index=True)
-    session_id: Mapped[str] = mapped_column(String(256), nullable=False, index=True)
-    command_id: Mapped[str] = mapped_column(String(256), nullable=False)
-    tier: Mapped[str] = mapped_column(String(16), nullable=False)
-    provider: Mapped[str] = mapped_column(String(128), nullable=False)
-    model: Mapped[str] = mapped_column(String(512), nullable=False)
-    effort: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    reason: Mapped[str] = mapped_column(String(64), nullable=False)
-    cost_units: Mapped[int] = mapped_column(Integer, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
 
 
 class TaskRow(Base):

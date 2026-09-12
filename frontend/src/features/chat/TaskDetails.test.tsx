@@ -1,8 +1,10 @@
 import { MantineProvider } from '@mantine/core'
-import { fireEvent, render, screen, within } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Task } from '../../domain/types'
 import { TaskDetails } from './TaskDetails'
+
+afterEach(cleanup)
 
 const task: Task = {
   id: 'task-1',
@@ -52,5 +54,16 @@ describe('TaskDetails', () => {
 
     fireEvent.click(within(confirmation).getByRole('button', { name: '停止任务' }))
     expect(onStop).toHaveBeenCalledWith(task)
+  })
+
+  it('updates completion and logs and removes the stop action when the task changes', () => {
+    const props = { onJumpToLatest: vi.fn(), onClose: vi.fn(), onStop: vi.fn() }
+    const { rerender } = render(<MantineProvider><TaskDetails task={task} canStop {...props} /></MantineProvider>)
+    expect(screen.getByRole('button', { name: '停止任务' })).toBeInTheDocument()
+    const completed: Task = { ...task, status: 'completed', logs: [{ ...task.logs[0], text: '测试通过' }] }
+    rerender(<MantineProvider><TaskDetails task={completed} canStop={false} {...props} /></MantineProvider>)
+    expect(screen.getByText('已完成')).toBeInTheDocument()
+    expect(screen.getByText('测试通过')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '停止任务' })).not.toBeInTheDocument()
   })
 })

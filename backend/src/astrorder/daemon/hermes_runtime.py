@@ -184,6 +184,10 @@ class HermesDaemonRuntime:
                 set_completion_callback = getattr(controller, "set_command_completion_callback", None)
                 if self._emit is not None and callable(set_completion_callback):
                     set_completion_callback(self._command_completed)
+                if self._emit is not None:
+                    set_compaction = getattr(controller, 'set_compaction_callback', None)
+                    if callable(set_compaction):
+                        set_compaction(self._compaction_updated)
         snapshot = await asyncio.to_thread(controller.snapshot)
         state = snapshot.get("state") if isinstance(snapshot, Mapping) else None
         if created or state not in {"connecting", "connected"}:
@@ -213,6 +217,14 @@ class HermesDaemonRuntime:
             ),
             loop,
         )
+
+    def _compaction_updated(self, agent_id: str, session_id: str, update: dict) -> None:
+        if self._loop is not None and not self._loop.is_closed() and self._emit is not None:
+            asyncio.run_coroutine_threadsafe(
+                self._emit(session_id, 'hermes.compaction', {
+                    'agent_id': agent_id, 'session_id': session_id, **update,
+                }), self._loop,
+            )
 
 
 def _session_id(request: Mapping[str, Any]) -> str:

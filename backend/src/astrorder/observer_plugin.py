@@ -66,8 +66,8 @@ def install_plugin(home, python, source, codex):
         command=executable+' '+ ' '.join('"'+arg.replace(chr(92),'/')+'"' for arg in argv[1:])
     else:
         command=shlex.join(argv)
-    manifest={'name':'astrorder','version':'0.2.0','description':'星序：原生会话活动观察与通知','interface':{'displayName':'Astrorder · 星序','shortDescription':'会话、工具、子代理活动与完成通知'},'hooks':'./hooks/hooks.json'}
-    hooks={'description':'Astrorder · 星序观察钩子','hooks':{event:[{'hooks':[{'type':'command','command':command,'timeout':3,'statusMessage':MARKER}]}] for event in EVENTS}}
+    manifest={'name':'astrorder','version':'0.2.1','description':'星序：原生会话活动观察与通知','interface':{'displayName':'Astrorder · 星序','shortDescription':'会话、工具、子代理活动与完成通知'},'hooks':'./hooks/hooks.json'}
+    hooks={'description':'Astrorder · 星序观察钩子','hooks':{event:[{'hooks':[{'type':'command','command':command,'timeout':600 if event=='PermissionRequest' else 3,'statusMessage':MARKER}]}] for event in EVENTS}}
     marketplace={'name':'astrorder-local','interface':{'displayName':'星序本地插件'},'plugins':[{'name':'astrorder','source':{'source':'local','path':'./plugins/astrorder'},'policy':{'installation':'AVAILABLE','authentication':'ON_USE'},'category':'Productivity'}]}
     for path,data in [(plugin/'.codex-plugin/plugin.json',manifest),(plugin/'hooks/hooks.json',hooks),(root/'.agents/plugins/marketplace.json',marketplace)]:
         path.write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')

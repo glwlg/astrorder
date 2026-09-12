@@ -74,7 +74,8 @@ class ControlService:
         self._native_command_handlers: dict[str, NativeCommandHandler] = {}
         self._native_history_handlers: dict[str, NativeHistoryHandler] = {}
         self.hermes_approvals = None
-        self.model_router: Any = None
+        self.observer_approvals = None
+        self.hermes_model_restorer: Callable[[str, str, str, str, str | None], Awaitable[None]] | None = None
         try:
             self._loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -104,6 +105,8 @@ class ControlService:
             if self.hermes_approvals and agent['id'] in self.hermes_approvals.supported:
                 capabilities.add('approvals')
                 result['limitation'] = '停止与审批仅作用于当前运行时的会话；审批只允许本次或拒绝。图片经原生字节接口发送，其他文件进入会话工作区。其他客户端本地图片仅在 Hermes 目录内可预览。星序待发队列不等同于原生排队。'
+        if self.observer_approvals and agent['id'] in self.observer_approvals.supported:
+            capabilities.add('approvals')
         result['capabilities'] = sorted(capabilities)
         return result
 
@@ -363,25 +366,28 @@ class ControlService:
             )
             raise CommandRejected(capability_error)
 
-        if self.model_router is not None and command["action"] == "send":
-            try:
-                await self.model_router.route(command, agent_kind=agent["kind"])
-            except Exception:  # noqa: BLE001 - native details must not enter command errors
-                detail = "模型路由未通过原生读回确认；消息未发送。"
-                updated = self.store.set_command_state(
-                    command["agent_id"],
-                    command["session_id"],
-                    command["id"],
-                    "failed",
-                    detail,
-                )
-                self._server_event(
-                    "command.upsert",
-                    agent_id=command["agent_id"],
-                    session_id=command["session_id"],
-                    data=updated,
-                )
-                raise CommandRejected(detail) from None
+        if agent["kind"] == "hermes" and command["action"] == "send":
+            binding = self.store.get_session_model_binding(command["agent_id"], command["session_id"])
+            if binding is not None:
+                try:
+                    if self.hermes_model_restorer is None:
+                        raise RuntimeError("Hermes model restorer is unavailable")
+                    await self.hermes_model_restorer(
+                        command["agent_id"], command["session_id"], binding["provider"],
+                        binding["model"], binding.get("effort")
+                    )
+                except Exception:  # noqa: BLE001 - sending with a different model would violate the saved binding
+                    detail = "保存的会话模型未通过原生读回确认；消息未发送。"
+                    updated = self.store.set_command_state(
+                        command["agent_id"], command["session_id"], command["id"], "failed", detail
+                    )
+                    self._server_event(
+                        "command.upsert",
+                        agent_id=command["agent_id"],
+                        session_id=command["session_id"],
+                        data=updated,
+                    )
+                    raise CommandRejected(detail) from None
 
         connection = self.connections.get(agent["id"])
         if payload["action"] == "enqueue":
@@ -390,6 +396,8 @@ class ControlService:
             return self.store.get_command(command["agent_id"], command["session_id"], command["id"]) or command
 
         native_handler = self._native_command_handlers.get(agent["id"])
+        if command['action'] in {'approve','cancel'} and self.observer_approvals and self.observer_approvals.matches(command):
+            native_handler = self.observer_approvals.submit
         if agent.get('kind') == 'hermes' and command['action'] in {'approve','cancel'} and self.hermes_approvals:
             native_handler = self.hermes_approvals.submit
         if connection is None and native_handler is None:

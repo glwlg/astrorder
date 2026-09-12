@@ -3,13 +3,15 @@ import { isNearBottom } from '../domain/semantics'
 
 interface StickOptions {
   contentVersion: string | number
+  forceFollowVersion?: string | number
 }
 
-export function useStickToBottom<T extends HTMLElement>({ contentVersion }: StickOptions) {
+export function useStickToBottom<T extends HTMLElement>({ contentVersion, forceFollowVersion }: StickOptions) {
   const containerRef = useRef<T | null>(null)
   const followRef = useRef(true)
   const programmaticScrollRef = useRef(false)
   const prependHeightRef = useRef<number | null>(null)
+  const previousForceFollowRef = useRef(forceFollowVersion)
   const [following, setFollowing] = useState(true)
 
   const setContainerRef = useCallback((element: T | null) => {
@@ -52,8 +54,10 @@ export function useStickToBottom<T extends HTMLElement>({ contentVersion }: Stic
       return
     }
 
-    if (followRef.current) scrollToBottom()
-  }, [contentVersion, scrollToBottom])
+    const forceFollow = previousForceFollowRef.current !== forceFollowVersion
+    previousForceFollowRef.current = forceFollowVersion
+    if (followRef.current || forceFollow) scrollToBottom()
+  }, [contentVersion, forceFollowVersion, scrollToBottom])
 
   const onScroll = useCallback(() => {
     const element = containerRef.current

@@ -45,11 +45,11 @@ export class MobileOutbox {
   enqueue(payload: CommandPayload, files: File[]) {
     return this.run(() => this.commit([...this.entries, { payload, files, attachments: [], state: 'queued' }]))
   }
-  flush(agentId: string, sessionId: string) {
+  flush(agentId: string, sessionId: string, commandId?: string) {
     return this.run(async () => {
       const scoped = this.entries.filter(row => row.payload.agent_id === agentId && row.payload.session_id === sessionId)
       if (scoped.some(inFlight)) return
-      const queued = scoped[0]
+      const queued = commandId ? scoped.find(row => row.payload.id === commandId) : scoped[0]
       if (!queued || queued.state !== 'queued') return
       let entry = queued
       const update = async (next: OutboxEntry) => {

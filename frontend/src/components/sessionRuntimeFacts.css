@@ -1,6 +1,6 @@
 .agent-kind-badge { display:inline-flex; align-items:center; gap:4px; white-space:nowrap; flex-shrink:0; padding:2px 6px; border:1px solid var(--astr-border); border-radius:6px; font-size:11px; line-height:1.4; color:var(--astr-muted); }
 .agent-kind-badge[data-agent-kind="hermes"] { color:var(--mantine-color-indigo-5); }
-.agent-kind-badge[data-agent-kind="codex"] { color:var(--mantine-color-teal-6); }
+.agent-kind-badge[data-agent-kind="codex"] { color:var(--astr-text); }
 .session-runtime-facts { display:grid; grid-template-columns:52px minmax(0,1fr); gap:13px 12px; margin:0; font-size:12px; line-height:1.6; }
 .session-runtime-facts dt { color:var(--astr-muted); }
 .session-runtime-facts dd { margin:0; min-width:0; overflow-wrap:anywhere; }

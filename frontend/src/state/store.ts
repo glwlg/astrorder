@@ -356,7 +356,7 @@ export const useAstrorderStore = create<AstrorderStore>((set) => ({
         return {
           ...base,
           messages: { ...state.messages, [key]: messageMap(merged) },
-          liveActivityAt: { ...state.liveActivityAt, [key]: Date.now() },
+          liveActivityAt: message.tool?.background === true ? state.liveActivityAt : { ...state.liveActivityAt, [key]: Date.now() },
         }
       }
 
@@ -375,7 +375,7 @@ export const useAstrorderStore = create<AstrorderStore>((set) => ({
         return {
           ...base,
           tasks: { ...state.tasks, [key]: { ...state.tasks[key], ...task } },
-          liveActivityAt: { ...state.liveActivityAt, [sessionKey]: Date.now() },
+          liveActivityAt: task.progress?.blocking === false ? state.liveActivityAt : { ...state.liveActivityAt, [sessionKey]: Date.now() },
         }
       }
 

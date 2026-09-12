@@ -16,8 +16,10 @@ from .auth import COOKIE_NAME, browser_authenticated, require_browser, validate_
 from .connections import ConnectionError, _windows_hide_startupinfo
 from .schemas import AuthRequest, CommandSubmission, RuntimeLaunch, SshConnectionSettings
 from .service import CommandRejected
+from .workspace_preferences import router as preferences_router
 
 router = APIRouter()
+router.include_router(preferences_router)
 logger = logging.getLogger(__name__)
 
 
@@ -143,7 +145,7 @@ def bootstrap(request: Request) -> dict[str, object]:
         "projects": store.list_projects(),
         "sessions": sessions,
         "cursor": store.latest_cursor(),
-        "approvals": request.app.state.service.hermes_approvals.snapshot() if request.app.state.service.hermes_approvals else [],
+        "approvals": (request.app.state.service.hermes_approvals.snapshot() if request.app.state.service.hermes_approvals else []) + (request.app.state.service.observer_approvals.snapshot() if request.app.state.service.observer_approvals else []),
     }
 
 
@@ -480,7 +482,8 @@ def session_models(session_id: str, request: Request, agent_id: str = Query(...,
 def session_model(session_id: str, payload: SessionModelSelection, request: Request) -> dict[str, object]:
     _private(request)
     from .native_controls import runtime_rpc, set_session_model
-    if request.app.state.store.get_session(payload.agent_id, session_id) is None:
+    session = request.app.state.store.get_session(payload.agent_id, session_id)
+    if session is None:
         raise HTTPException(status_code=404, detail="Session was not found")
     try:
         codex = _codex(request, payload.agent_id)
@@ -488,8 +491,16 @@ def session_model(session_id: str, payload: SessionModelSelection, request: Requ
             return codex.set_model(session_id, payload.provider, payload.model)
         runtime = request.app.state.connections.get_runtime_by_agent_id(payload.agent_id)
         if getattr(runtime, "daemon_owned", False):
-            return runtime.set_model(session_id, payload.provider, payload.model)
-        return set_session_model(runtime_rpc(request.app.state.connections, payload.agent_id), session_id, payload.provider, payload.model)
+            binding = runtime.set_model(session_id, payload.provider, payload.model)
+        else:
+            binding = set_session_model(runtime_rpc(request.app.state.connections, payload.agent_id), session_id, payload.provider, payload.model)
+        if request.app.state.store.get_agent(payload.agent_id).get("kind") == "hermes":
+            if binding.get("provider") != payload.provider or binding.get("model") != payload.model:
+                raise ConnectionError('模型切换尚未通过原生状态读回确认。', 502)
+            request.app.state.store.set_session_model_binding(
+                payload.agent_id, session_id, payload.provider, payload.model
+            )
+        return binding
     except ConnectionError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
 
@@ -509,6 +520,9 @@ def read_session_model(session_id: str, request: Request, agent_id: str = Query(
             except ConnectionError:
                 binding['effort'] = None
             return binding
+        saved = request.app.state.store.get_session_model_binding(agent_id, session_id)
+        if saved:
+            return {**saved, 'effort': saved.get('effort')}
         runtime = request.app.state.connections.get_runtime_by_agent_id(agent_id)
         if getattr(runtime, "daemon_owned", False):
             return runtime.model(session_id)
@@ -543,8 +557,16 @@ def session_reasoning(session_id: str, payload: SessionReasoningSelection, reque
             return codex.set_effort(session_id, payload.effort)
         runtime = request.app.state.connections.get_runtime_by_agent_id(payload.agent_id)
         if getattr(runtime, "daemon_owned", False):
-            return runtime.set_effort(session_id, payload.effort)
-        return set_session_reasoning(runtime_rpc(request.app.state.connections, payload.agent_id), session_id, payload.effort)
+            result = runtime.set_effort(session_id, payload.effort)
+        else:
+            result = set_session_reasoning(runtime_rpc(request.app.state.connections, payload.agent_id), session_id, payload.effort)
+        if request.app.state.store.get_agent(payload.agent_id).get("kind") == "hermes":
+            if result.get("effort") != payload.effort:
+                raise ConnectionError('思考强度尚未通过原生状态读回确认。', 502)
+            request.app.state.store.set_session_reasoning_binding(
+                payload.agent_id, session_id, payload.effort
+            )
+        return result
     except ConnectionError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
 
@@ -1485,24 +1507,6 @@ tmp_file.replace(target)
 def runtime(request: Request) -> dict[str, object]:
     _private(request)
     return {"items": request.app.state.supervisor.items()}
-
-
-@router.get("/api/v1/model-routing")
-def model_routing_status(request: Request) -> dict[str, object]:
-    _private(request)
-    from .timeutil import utc_now
-
-    settings = request.app.state.settings
-    now = utc_now()
-    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    return {
-        "enabled": settings.model_routing_enabled,
-        "daily_budget_units": settings.model_routing_daily_budget_units,
-        "small_cost_units": settings.model_routing_small_cost_units,
-        "large_cost_units": settings.model_routing_large_cost_units,
-        "large_text_threshold": settings.model_routing_large_text_threshold,
-        "usage": request.app.state.store.model_routing_usage(day_start),
-    }
 
 
 @router.get("/api/v1/connections")

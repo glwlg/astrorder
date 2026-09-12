@@ -5,8 +5,9 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { IconSun, IconMoon, IconDeviceDesktop, IconBell, IconRefresh, IconPlayerPlay, IconInfoCircle, IconNotes, IconPlayerStop, IconSend, IconMessageCircle, IconCheck, IconX, IconMicrophone, IconPlus, IconDotsVertical, IconCpu, IconLoader2, IconPlugConnected, IconFilter } from '@tabler/icons-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useShallow } from 'zustand/react/shallow'
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { api } from '../../api/client'
-import type { Approval, Session, Task } from '../../domain/types'
+import type { Approval, Command, Message, Session, Task } from '../../domain/types'
 import { scopeKey } from '../../domain/semantics'
 import { requestNotificationPermission } from '../../domain/notifications'
 import { selectApprovals, selectCommands, selectProjects, selectSessions, selectTasks, useAstrorderStore } from '../../state/store'
@@ -22,8 +23,8 @@ import { confirmationCoordinatesFromEvent, type ConfirmationCoordinates } from '
 import { AgentSessionFilter, matchesAgent } from '../../components/AgentSessionFilter'
 import { adjacentOpenSession, isSessionOpen } from '../../components/sessionVisibility'
 import { clipboardFiles, REASONING_EFFORTS } from '../chat/composerMedia'
-import { PROJECT_ORDER_KEY, readProjectOrder, reconcileProjectOrder } from '../../components/projectOrder'
-import { loadPinnedProjects, loadProjectAppearance, purgeProjectPreferences } from '../../components/projectAppearance'
+import { reconcileProjectOrder } from '../../components/projectOrder'
+import { useWorkspacePreferences } from '../../hooks/useWorkspacePreferences'
 import { MobileSessionDrawer } from './MobileSessionDrawer'
 import { MobileSessionDeck, type SessionCardCut } from './MobileSessionDeck'
 import { VoiceInputSheet } from '../chat/VoiceInputSheet'
@@ -37,6 +38,7 @@ import { MobileAttachmentPreview } from './MobileAttachmentPreview'
 import { MobileOutbox } from './mobileOutbox'
 import { NativeObservationPanel } from '../../components/NativeObservationPanel'
 import { ApprovalModeControl } from '../chat/ApprovalModeControl'
+import { submitBrowserCommand } from '../chat/commandActions'
 import { mobileOutboxStorage } from './mobileOutboxStorage'
 import { closesSessionDrawerFromSwipe, opensSessionDrawerFromEdge, startsAtSessionDrawerEdge, suppressNativeHold, type SessionCardPose, type SessionSwipeGesture } from './mobileGestures'
 import './mobile.css'
@@ -66,6 +68,7 @@ type MobileConfirmation =
   | { kind: 'stop-all'; session: Session; coords: ConfirmationCoordinates }
 
 export function MobileWorkspace() {
+  const reducedMotion = useReducedMotion()
   const navigate = useNavigate()
   const location = useLocation()
   const queryClient = useQueryClient()
@@ -117,11 +120,14 @@ export function MobileWorkspace() {
   const tasks = useAstrorderStore(useShallow(state => selected ? selectTasks(state, selected.agent_id, selected.id) : []))
   const commands = useAstrorderStore(useShallow(state => selected ? selectCommands(state, selected.agent_id, selected.id) : []))
   const activeTasks = tasks.filter(task => task.status === 'running' || task.status === 'waiting_approval')
+  const blockingActiveTasks = activeTasks.filter(task => task.progress?.blocking !== false)
   const approvals = useAstrorderStore(useShallow(state => selected ? selectApprovals(state, selected.agent_id, selected.id) : []))
-  const nativeBusy = selected?.status === 'running' || selected?.status === 'waiting_approval' || activeTasks.length > 0
+  const runningCommand = commands.some(command => (command.action === 'send' || command.action === 'enqueue') && (command.state === 'running' || command.state === 'accepted'))
+  const nativeBusy = selected?.status === 'running' || selected?.status === 'waiting_approval' || blockingActiveTasks.length > 0 || runningCommand
   const [messageAction, setMessageAction] = useState<(MessageActionAnchor & { sessionKey: string }) | null>(null)
   const closeMessageMenu = useCallback(() => setMessageAction(null), [])
-  const [task, setTask] = useState<Task | null>(null)
+  const [taskSelection, setTaskSelection] = useState<Pick<Task, 'id' | 'agent_id' | 'session_id'> | null>(null)
+  const task = tasks.find(item => item.id === taskSelection?.id && item.agent_id === taskSelection.agent_id && item.session_id === taskSelection.session_id) ?? null
   const [voice, setVoice] = useState(false)
   const [image, setImage] = useState<string | null>(null)
   const [artifactPath, setArtifactPath] = useState<string | null>(null)
@@ -143,7 +149,7 @@ export function MobileWorkspace() {
   const queue = useSyncExternalStore(outbox.subscribe, outbox.snapshot)
   const [outboxReady, setOutboxReady] = useState(false)
   useEffect(() => { let mounted = true; void outbox.load().then(() => { if (mounted) setOutboxReady(true) }).catch(error => notifications.show({ message: messageError(error), color: 'red' })); return () => { mounted = false } }, [outbox])
-  const pending = queue.filter(row => row.payload.agent_id === selected?.agent_id && row.payload.session_id === selected?.id)
+  const pending = queue.filter(row => row.payload.agent_id === selected?.agent_id && row.payload.session_id === selected?.id && !['accepted', 'running', 'completed'].includes(row.state))
   const busy = nativeBusy || pending.some(row => ['submitting', 'accepted', 'running'].includes(row.state))
   const canDispatch = !nativeBusy && connection === 'connected' && agents[selected?.agent_id || '']?.status === 'ready' && resources.commands.isSuccess
   useEffect(() => { if (outboxReady) void outbox.reconcile(commands, sessions).catch(error => notifications.show({ message: messageError(error), color: 'red' })) }, [outbox, outboxReady, commands, sessions])
@@ -174,13 +180,10 @@ export function MobileWorkspace() {
   const [confirmationLoading, setConfirmationLoading] = useState(false)
   const [search, setSearch] = useState('')
 
-  const [pins, setPins] = useState<Record<string, boolean>>(() => { try { return JSON.parse(localStorage.getItem('astrorder_pinned_sessions') || '{}') } catch { return {} } })
-  const appearance = useMemo(loadProjectAppearance, [])
-  const [order, setOrder] = useState(readProjectOrder)
-  const [pinnedProjects] = useState<string[]>(() => loadPinnedProjects())
+  const { preferences, updatePreferences, removeProjectPreferences } = useWorkspacePreferences()
+  const { session_pins: pins, appearance, project_order: order, pinned_projects: pinnedProjects } = preferences
   const allGroups = useMemo(() => buildProjectGroups(sessions, agents, projects), [sessions, agents, projects])
   const stableOrder = useMemo(() => reconcileProjectOrder(order, allGroups.map(p => p.key)), [order, allGroups])
-  useEffect(() => { if (stableOrder.length !== order.length) { setOrder(stableOrder); localStorage.setItem(PROJECT_ORDER_KEY, JSON.stringify(stableOrder)) } }, [stableOrder, order])
   const visible = navigableSessions.filter(s => {
     if (!matchesAgent(s, agents, agentFilter)) return false
     if (filter === 'pinned' && !pins[scopeKey(s.agent_id, s.id)]) return false
@@ -197,7 +200,7 @@ export function MobileWorkspace() {
     const unpinned = ordered.filter(p => !pinnedSet.has(p.key))
     return [...pinned, ...unpinned]
   }, [stableOrder, grouped, pinnedProjects])
-  const notify = (message: string, color = 'blue') => notifications.show({ message, color })
+  const notify = (message: string, color = 'blue') => notifications.show({ message, color, autoClose: color === 'red' ? 5000 : 2200, withCloseButton: color === 'red' })
   const [modelSearch, setModelSearch] = useState('')
   const [modelChoices, setModelChoices] = useState<{ provider: string; model: string; label: string }[]>([])
   const [modelLoading, setModelLoading] = useState(false)
@@ -246,14 +249,34 @@ export function MobileWorkspace() {
     const body = quickText ?? (quote ? quote.split('\n').map(line => `> ${line}`).join('\n') + '\n\n' + text : text)
     const chosenFiles = quickText ? [] : files
     if (!body.trim() && !chosenFiles.length) return
+    const commandId = crypto.randomUUID()
+    const direct = canDispatch && pending.length === 0
     sending.current = true; setSubmitting(true)
     try {
-      if (!outboxReady) await outbox.load()
-      await outbox.enqueue({ id: crypto.randomUUID(), agent_id: selected.agent_id, session_id: selected.id, action: 'send', text: body, attachment_ids: [], target_id: null }, chosenFiles)
+      if (direct) {
+        const store = useAstrorderStore.getState()
+        const command: Command = { id: commandId, agent_id: selected.agent_id, session_id: selected.id, action: 'send', state: 'received', text: body, attachments: [], created_at: new Date().toISOString(), error: null, target_id: null }
+        const optimisticMessage: Message = { id: `optimistic-${commandId}`, agent_id: selected.agent_id, session_id: selected.id, role: 'user', kind: 'message', text: body, attachments: [], created_at: command.created_at, command_id: commandId, tool: null }
+        store.addOutbox(command, 'submitting')
+        store.mergeMessages(selected.agent_id, selected.id, [optimisticMessage])
+        const result = await submitBrowserCommand({ commandId, session: selected, text: body, files: chosenFiles, action: 'send', uploadAttachment: api.uploadAttachment, createCommand: api.createCommand })
+        store.updateOutboxAttachments(selected.agent_id, selected.id, commandId, result.attachments)
+        store.mergeCommands([result.command])
+        if (result.command.state === 'failed' || result.command.state === 'unknown') {
+          notify(result.command.error || '原生命令执行失败', 'red')
+          return
+        }
+        await queryClient.invalidateQueries({ queryKey: ['astrorder', 'commands', selected.agent_id, selected.id] })
+        await queryClient.invalidateQueries({ queryKey: ['astrorder', 'messages', selected.agent_id, selected.id] })
+      } else {
+        if (!outboxReady) await outbox.load()
+        await outbox.enqueue({ id: commandId, agent_id: selected.agent_id, session_id: selected.id, action: 'send', text: body, attachment_ids: [], target_id: null }, chosenFiles)
+        notify('已保存到待发队列')
+      }
       notifySessionSubmitted(selected)
       if (!quickText) { setText(''); updateFiles([]); setQuote('') }
-      if (!canDispatch) notify('已保存到待发队列')
     } catch (error) {
+      if (direct) useAstrorderStore.getState().markOutboxError(selected.agent_id, selected.id, commandId, messageError(error), 'unknown')
       notify(messageError(error), 'red')
     } finally { sending.current = false; setSubmitting(false) }
   }
@@ -337,7 +360,7 @@ export function MobileWorkspace() {
         return { sessions: nextSessions, projects: nextProjects }
       })
 
-      purgeProjectPreferences(project.key)
+      await removeProjectPreferences(project.key)
 
       if (selected && project.sessions.some((s) => s.id === selected.id && s.agent_id === selected.agent_id)) {
         const remainingSessions = sessions.filter(
@@ -367,9 +390,14 @@ export function MobileWorkspace() {
   const drawerWidth = () => drawerSheet.current?.getBoundingClientRect().width || Math.min(window.innerWidth * 0.88, 380)
   const clearDrawerSettleTimer = () => { if (drawerSettleTimer.current !== null) { window.clearTimeout(drawerSettleTimer.current); drawerSettleTimer.current = null } }
   useEffect(() => () => clearDrawerSettleTimer(), [])
+  useEffect(() => {
+    clearDrawerSettleTimer()
+    drawerTouch.current = null
+    setDrawerOffset(null)
+    setDrawerSettling(false)
+  }, [sheet])
   const handleDrawerTouchStart = (event: TouchEvent<Element>) => {
     if (sheet === 'sessions' && (event.target as Element | null)?.closest('.m-session-sheet') && event.touches[0]) {
-      clearDrawerSettleTimer()
       drawerTouch.current = { x: event.touches[0].clientX, y: event.touches[0].clientY, currentX: event.touches[0].clientX, currentY: event.touches[0].clientY }
     }
   }
@@ -379,9 +407,10 @@ export function MobileWorkspace() {
       const dx = event.touches[0].clientX - drawerTouch.current.x
       const dy = event.touches[0].clientY - drawerTouch.current.y
       if (dx >= -80 || Math.abs(dx) < Math.abs(dy) * 1.6) {
-        if (drawerOffset !== null) { setDrawerSettling(true); setDrawerOffset(0) }
+        if (drawerOffset !== null && drawerOffset !== 0) { setDrawerSettling(true); setDrawerOffset(0) }
         return
       }
+      clearDrawerSettleTimer()
       setDrawerSettling(false)
       setDrawerOffset(Math.max(-drawerWidth(), Math.min(0, dx)))
     }
@@ -393,6 +422,8 @@ export function MobileWorkspace() {
     const endX = start.currentX
     const endY = start.currentY
     const shouldClose = closesSessionDrawerFromSwipe(start.x, start.y, endX, endY)
+    // Leave taps and list scrolling untouched so the browser can dispatch click.
+    if (!shouldClose && (drawerOffset === null || drawerOffset === 0)) return
     const targetOffset = shouldClose ? -drawerWidth() : 0
     setDrawerSettling(true)
     setDrawerOffset(targetOffset)
@@ -400,17 +431,18 @@ export function MobileWorkspace() {
     drawerSettleTimer.current = window.setTimeout(() => {
       drawerSettleTimer.current = null
       if (shouldClose) setSheet(null)
-      setDrawerOffset(null)
+      setDrawerOffset(0)
       setDrawerSettling(false)
     }, 220)
   }
   const handleDrawerTouchCancel = () => {
     if (sheet !== 'sessions' || !drawerTouch.current) return
     drawerTouch.current = null
+    if (drawerOffset === null || drawerOffset === 0) return
     setDrawerSettling(true)
     setDrawerOffset(0)
     clearDrawerSettleTimer()
-    drawerSettleTimer.current = window.setTimeout(() => { drawerSettleTimer.current = null; setDrawerOffset(null); setDrawerSettling(false) }, 220)
+    drawerSettleTimer.current = window.setTimeout(() => { drawerSettleTimer.current = null; setDrawerOffset(0); setDrawerSettling(false) }, 220)
   }
   const handleWorkspaceTouchStart = (event: TouchEvent<HTMLDivElement>) => {
     const point = event.touches[0]
@@ -455,7 +487,10 @@ export function MobileWorkspace() {
     try {
       if (confirmation.kind === 'delete-session') await deleteSession(confirmation.session)
       else if (confirmation.kind === 'delete-project') await deleteProject(confirmation.project)
-      else await executeStop(confirmation.session)
+      else {
+        if (confirmation.kind === 'stop-task' && !tasks.some(item => item.id === confirmation.task.id && item.agent_id === confirmation.task.agent_id && item.session_id === confirmation.task.session_id && ['pending', 'running', 'waiting_approval'].includes(item.status))) return
+        await executeStop(confirmation.session)
+      }
     } finally {
       setConfirmationLoading(false)
       setConfirmation(null)
@@ -499,11 +534,13 @@ export function MobileWorkspace() {
         </Menu>
       </div>
       <MobileTranscript messages={messages} approvals={approvals} onApproval={(approval, action) => void handleApproval(approval, action)} busy={busy} loadOlder={() => resources.messages.fetchNextPage()} hasOlder={!!resources.messages.hasNextPage} loadingOlder={resources.messages.isFetchingNextPage} onMessageAction={anchor => setMessageAction({ ...anchor, sessionKey: key })} onImage={setImage} onFile={(path) => setArtifactPath(resolveMobileFilePath(path, selected?.workspace))} onSwipe={switchSession} onSwipePreview={setSessionDrag} />
-      {!!pending.length && <button className="m-queue-banner" onClick={() => setSheet('queue')}>消息队列 ({pending.length}) · {queueLabels[pending[0].state]}{pending[0].error ? ` · ${pending[0].error}` : ''}</button>}
+      <AnimatePresence initial={false}>
+        {!!pending.length && <motion.button className="m-queue-banner" initial={reducedMotion ? false : { opacity: 0, y: 8, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -6, scale: 0.98 }} transition={{ duration: 0.25 }} onClick={() => setSheet('queue')}>消息队列 ({pending.length}) · {queueLabels[pending[0].state]}{pending[0].error ? ` · ${pending[0].error}` : ''}</motion.button>}
+      </AnimatePresence>
     </MobileSessionDeck> : <div className="m-empty">从左上角选择会话，或新建会话</div>}</main>
     <section className="m-composer-float">
 
-      {!!activeTasks.length && <div className="m-active-tasks">{activeTasks.map(item => <button key={item.id} onClick={() => { setTask(item); setSheet('task') }}><span className="m-dot online" />{item.title}</button>)}</div>}
+      {!!activeTasks.length && <div className="m-active-tasks">{activeTasks.map(item => <button key={item.id} onClick={() => { setTaskSelection({ id: item.id, agent_id: item.agent_id, session_id: item.session_id }); setSheet('task') }}><span className="m-dot online" />{item.title}</button>)}</div>}
       {!!approvals.length && <button className="m-queue-banner" onClick={() => setSheet('status')}>等待授权 · {approvals.length} 项</button>}
       {quote && <div className="m-quote"><span>{quote}</span><button aria-label="取消引用" onClick={() => setQuote('')}><IconX size={16} /></button></div>}
       {!!files.length && <div className="m-attachments">{files.map((file, i) => <MobileAttachmentPreview key={`${file.name}-${i}`} file={file} onOpen={setImage} onRemove={() => updateFiles(files.filter((_, n) => n !== i))} />)}</div>}
@@ -518,11 +555,11 @@ export function MobileWorkspace() {
     {sheet && <div className={`m-backdrop ${sheet === 'sessions' ? 'm-session-backdrop' : ''}`} onClick={() => setSheet(null)} onTouchStartCapture={handleDrawerTouchStart} onTouchMoveCapture={handleDrawerTouchMove} onTouchEndCapture={handleDrawerTouchEnd} onTouchCancelCapture={handleDrawerTouchCancel}><section ref={node => { drawerSheet.current = node }} style={sheet === 'sessions' && drawerOffset !== null ? { transform: `translate3d(${drawerOffset}px, 0, 0)`, transition: drawerSettling ? 'transform .22s cubic-bezier(.2,.8,.2,1)' : 'none', animation: 'none' } : undefined} className={`m-sheet ${sheet === 'sessions' ? 'm-session-sheet' : ''}`} role="dialog" aria-label={sheet === 'sessions' ? '会话列表' : '详情'} onClick={e => e.stopPropagation()} onTouchStart={handleDrawerTouchStart} onTouchMove={handleDrawerTouchMove} onTouchEnd={handleDrawerTouchEnd} onTouchCancel={handleDrawerTouchCancel}><div className="m-handle" /><header><h2>{({ sessions: '会话', status: '运行状态', task: '任务详情', models: '选择模型', queue: '消息队列', connections: '连接管理' })[sheet]}</h2><div className="m-sheet-header-actions">{sheet === 'sessions' && <><button aria-label="筛选" aria-pressed={filtersOpen} onClick={() => setFiltersOpen(open => !open)}><IconFilter size={18} /></button><button aria-label="新建会话" onClick={() => { setCreateProject(null); setCreateOpened(true) }}><IconPlus size={20} /></button></>}<button aria-label="关闭面板" onClick={() => setSheet(null)}><IconX size={20} /></button></div></header>
       {sheet === 'connections' && <div className="m-sheet-body"><EnvironmentConnections embedded /></div>}
       {sheet === 'sessions' && filtersOpen && <><div className="m-drawer-filter-row"><AgentSessionFilter agents={agents} value={agentFilter} onChange={updateAgentFilter} /></div><nav className="m-filters">{[['all','全部'],['unread','未读'],['open','开放中'],['pinned','置顶'],['recent','24小时']].map(([id,label]) => <button className={filter === id ? 'active' : ''} key={id} onClick={() => setFilter(id)}>{label}</button>)}</nav></>}
-      {sheet === 'sessions' && <><input className="m-search" aria-label="搜索会话" placeholder="搜索会话" value={search} onChange={e => setSearch(e.target.value)} /><MobileSessionDrawer groups={groups} pins={pins} selectedKey={key} appearance={appearance} onSelect={select} onCreate={project => { setCreateProject(project); setCreateOpened(true) }} onDeleteProject={requestDeleteProject} onDeleteSession={requestDeleteSession} onPin={s => { const next = { ...pins, [scopeKey(s.agent_id,s.id)]: !pins[scopeKey(s.agent_id,s.id)] }; setPins(next); localStorage.setItem('astrorder_pinned_sessions', JSON.stringify(next)) }} /></>}
+      {sheet === 'sessions' && <><input className="m-search" aria-label="搜索会话" placeholder="搜索会话" value={search} onChange={e => setSearch(e.target.value)} /><MobileSessionDrawer groups={groups} pins={pins} pinnedProjects={pinnedProjects} onPinProject={project => { void updatePreferences(value => ({ pinned_projects: value.pinned_projects.includes(project.key) ? value.pinned_projects.filter(key => key !== project.key) : [project.key, ...value.pinned_projects] })) }} selectedKey={key} appearance={appearance} onSelect={select} onCreate={project => { setCreateProject(project); setCreateOpened(true) }} onDeleteProject={requestDeleteProject} onDeleteSession={requestDeleteSession} onPin={s => { const sessionKey = scopeKey(s.agent_id, s.id); void updatePreferences(value => ({ session_pins: { [sessionKey]: !value.session_pins[sessionKey] } })) }} /></>}
       {sheet === 'status' && selected && <div className="m-sheet-body"><MobileApprovals session={selected} approvals={approvals} /><SessionRuntimeFacts session={selected} agent={agents[selected.agent_id]} /><button onClick={() => void copy(selected.id)}>复制会话 ID</button>{agents[selected.agent_id]?.kind==='codex' && <NativeObservationPanel agentId={selected.agent_id} sessionId={selected.id} />}</div>}
-      {sheet === 'task' && task && <div className="m-sheet-body"><p>{task.title}</p><p>{task.status}</p><pre>{task.command}</pre><button onClick={() => void copy(task.logs.map(log => log.text).join('\n'))}>复制日志</button><button onClick={e => { const pre=e.currentTarget.parentElement?.querySelector('.m-task-log'); if(pre) pre.scrollTop=pre.scrollHeight }}>跳到底部</button><pre className="m-task-log">{task.logs.map(log => log.text).join('\n')}</pre><button onClick={(event) => requestStopTask(task, event)}>停止任务</button></div>}
+      {sheet === 'task' && task && <div className="m-sheet-body"><p>{task.title}</p><p>{task.status}</p><pre>{task.command}</pre><button onClick={() => void copy(task.logs.map(log => log.text).join('\n'))}>复制日志</button><button onClick={e => { const pre=e.currentTarget.parentElement?.querySelector('.m-task-log'); if(pre) pre.scrollTop=pre.scrollHeight }}>跳到底部</button><pre className="m-task-log">{task.logs.map(log => log.text).join('\n')}</pre>{['pending', 'running', 'waiting_approval'].includes(task.status) && agents[task.agent_id]?.capabilities.includes('stop') && <button onClick={(event) => requestStopTask(task, event)}>停止任务</button>}</div>}
       {sheet === 'models' && <div className="m-sheet-body m-model-panel">{selected && <ApprovalModeControl session={selected} variant="panel" />}<div className="m-effort-row">{REASONING_EFFORTS.map(item => <button key={item.value} aria-pressed={sessionModel.effort === item.value} aria-label={`思考强度 ${item.label}`} disabled={modelLoading} onClick={() => void sessionModel.changeEffort(item.value).catch(error => notify(messageError(error), 'red'))}>{item.label}</button>)}</div><input className="m-search" aria-label="搜索模型" placeholder="搜索模型或提供商" value={modelSearch} onChange={e => setModelSearch(e.target.value)} />{modelLoading && <p>正在处理原生模型请求…</p>}<div className="m-model-list">{modelChoices.filter(choice => choice.label.toLowerCase().includes(modelSearch.toLowerCase())).map(choice => <button className="m-model-choice" aria-pressed={modelSelection?.provider === choice.provider && modelSelection?.model === choice.model} key={`${choice.provider}/${choice.model}`} disabled={modelLoading} onClick={() => setModelSelection(choice)}><IconCpu size={17} /><span>{choice.label}</span>{modelSelection?.provider === choice.provider && modelSelection?.model === choice.model && <IconCheck size={17} />}</button>)}</div>{!modelLoading && !modelChoices.length && <p>原生运行时未返回可用模型。</p>}{modelSelection && <div className="m-model-confirm"><small>{modelSelection.label}</small><button aria-label="确认切换模型" disabled={modelLoading} onClick={() => void chooseModel(modelSelection.provider, modelSelection.model)}>{modelLoading ? '切换中…' : '确认切换模型'}</button></div>}</div>}
-      {sheet === 'queue' && <div className="m-sheet-body">{pending.map(entry => <article className="m-outbox-entry" key={entry.payload.id} data-command-id={entry.payload.id}><p>{entry.payload.text || '附件消息'}</p><small>{queueLabels[entry.state]}{entry.error ? ` · ${entry.error}` : ''}</small><div>{[...entry.attachments, ...entry.files].map((file, i) => <span key={i}>{file.name} </span>)}</div>{['queued', 'failed', 'cancelled'].includes(entry.state) && <button onClick={() => void outbox.remove(entry.payload.agent_id, entry.payload.session_id, entry.payload.id).catch(error => notify(messageError(error), 'red'))}>移除待发消息</button>}{entry.state === 'failed' && <button onClick={() => void outbox.retry(entry.payload.agent_id, entry.payload.session_id, entry.payload.id).catch(error => notify(messageError(error), 'red'))}>重新发送</button>}</article>)}<button onClick={() => void flush()}>核对结果 / 发送下一条</button></div>}
+      {sheet === 'queue' && <div className="m-sheet-body"><AnimatePresence initial={false}>{pending.map((entry, index) => <motion.article className="m-outbox-entry" key={entry.payload.id} data-command-id={entry.payload.id} layout initial={reducedMotion ? false : { opacity: 0, y: 12, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, x: 36, scale: 0.96 }} transition={{ duration: 0.25, delay: reducedMotion ? 0 : index * 0.04 }}><p>{entry.payload.text || '附件消息'}</p><small>{queueLabels[entry.state]}{entry.error ? ` · ${entry.error}` : ''}</small><div>{[...entry.attachments, ...entry.files].map((file, i) => <span key={i}>{file.name} </span>)}</div>{entry.state === 'queued' && <button onClick={() => void outbox.flush(entry.payload.agent_id, entry.payload.session_id, entry.payload.id).catch(error => notify(messageError(error), 'red'))}>立即引导</button>}{['queued', 'failed', 'cancelled'].includes(entry.state) && <button onClick={() => void outbox.remove(entry.payload.agent_id, entry.payload.session_id, entry.payload.id).catch(error => notify(messageError(error), 'red'))}>移除待发消息</button>}{entry.state === 'failed' && <button onClick={() => void outbox.retry(entry.payload.agent_id, entry.payload.session_id, entry.payload.id).catch(error => notify(messageError(error), 'red'))}>重新发送</button>}</motion.article>)}</AnimatePresence><button onClick={() => void flush()}>核对结果 / 发送下一条</button></div>}
     </section></div>}
     {image && <div className="m-lightbox" role="dialog" aria-label="图片预览" onClick={() => setImage(null)}><button aria-label="关闭图片"><IconX size={22} /></button><img src={image} alt="预览" /></div>}
     {artifactPath && <MobileArtifactSheet path={artifactPath} workspace={selected?.workspace} connectionId={selected?.connection_id} onClose={() => setArtifactPath(null)} />}

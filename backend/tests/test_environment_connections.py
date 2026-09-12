@@ -246,3 +246,86 @@ def test_remote_codex_bootstrap_leaves_json_rpc_bytes_after_environment_payload(
     finally:
         connection.disconnect()
         store.close()
+
+
+def test_remote_codex_environment_uses_daemon_controller_factory_when_enabled(tmp_path, monkeypatch):
+    settings = Settings(database_url=f"sqlite:///{tmp_path}/remote-daemon-codex.db", auto_connect_local_hermes=False)
+    store = Store(settings)
+    service = ControlService(store, EventHub(), settings)
+    remote = store.save_ssh_connection(
+        {"display_name": "Debian", "host": "debian.example", "port": 22, "user": "operator"},
+        state="disconnected",
+        detail="fixture",
+    )
+
+    class Controller:
+        def activate(self):
+            return None
+
+        async def submit(self, _command):
+            return "accepted", None
+
+        def close(self):
+            return None
+
+    hermes = SimpleNamespace(
+        snapshot=lambda _service: {
+            "local": {"available": False, "state": "offline", "agent_id": None, "detail": "fixture"},
+            "ssh": {"items": []},
+        }
+    )
+    local_codex = SimpleNamespace(
+        snapshot=lambda: {
+            "available": False,
+            "state": "disconnected",
+            "agent_id": "local-codex",
+            "detail": "fixture",
+            "daemon_mode": True,
+        }
+    )
+    monkeypatch.setattr(
+        RemoteCodex,
+        "_client",
+        lambda _self, config, on_notification, **kwargs: FakeClient(config, on_notification, **kwargs),
+    )
+    monkeypatch.setattr(
+        RemoteCodex,
+        "remote_json",
+        lambda _self, _source: {
+            "os": "Linux",
+            "items": [
+                {"kind": "hermes", "available": False, "executable": None},
+                {"kind": "codex", "available": True, "executable": "/home/operator/.local/bin/codex"},
+            ],
+        },
+    )
+    environments = EnvironmentConnections(
+        settings,
+        store,
+        service,
+        hermes,
+        local_codex,
+        daemon_codex_controller_factory=lambda _connection: Controller(),
+    )
+    environments.discovered[remote["id"]] = {
+        "os": "Linux",
+        "items": [
+            {"kind": "hermes", "available": False, "executable": None},
+            {"kind": "codex", "available": True, "executable": "/home/operator/.local/bin/codex"},
+        ],
+    }
+    try:
+        environments.change(remote["id"], "codex", True)
+        codex = next(
+            agent
+            for environment in environments.snapshot()["items"]
+            if environment["id"] == remote["id"]
+            for agent in environment["agents"]
+            if agent["kind"] == "codex"
+        )
+        assert codex["daemon_mode"] is True
+        runtime = environments.remote[remote["id"]]
+        assert runtime.ssh_settings["display_name"] == "Debian"
+    finally:
+        environments.shutdown()
+        store.close()

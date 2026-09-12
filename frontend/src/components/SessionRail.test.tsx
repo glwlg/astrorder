@@ -3,9 +3,16 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { api } from '../api/client'
 import { useAstrorderStore } from '../state/store'
 import { scopeKey } from '../domain/semantics'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { SessionRail } from './SessionRail'
 import type { Agent, Project, Session } from '../domain/types'
+
+beforeEach(() => {
+  const preferences = { appearance: {}, session_pins: {}, pinned_projects: [], project_order: [] }
+  vi.spyOn(api, 'getPreferences').mockResolvedValue(preferences)
+  vi.spyOn(api, 'importPreferences').mockImplementation(async values => ({ ...preferences, ...values, appearance: values.appearance as typeof preferences.appearance || {} }))
+  vi.spyOn(api, 'updatePreferences').mockImplementation(async values => ({ ...preferences, ...values, appearance: values.appearance as typeof preferences.appearance || {} }))
+})
 
 const agents: Record<string, Agent> = {
   local: {
@@ -152,6 +159,8 @@ describe('SessionRail project-first grouping', () => {
     expect(screen.queryByRole('region', { name: /WSL 开发 会话/ })).not.toBeInTheDocument()
     expect(screen.queryByText('Astrorder-owned')).not.toBeInTheDocument()
     expect(screen.queryByText('本机 Hermes')).not.toBeInTheDocument()
+    expect(document.querySelector('.session-project-drag')).not.toBeInTheDocument()
+    expect(remoteProject).toHaveAttribute('draggable', 'true')
   })
 
   it('renders relative time and status dots on the right side of session rows', () => {
@@ -169,6 +178,9 @@ describe('SessionRail project-first grouping', () => {
     expect(titles[0].closest('.session-project-sessions')).toBeInTheDocument()
     const dots = document.querySelectorAll('.session-row .status-dot')
     expect(dots.length).toBeGreaterThan(0)
+    const badge = document.querySelector('.session-row .agent-kind-badge')
+    expect(badge?.textContent).toBe('')
+    expect(badge?.querySelector('svg, img')).not.toBeNull()
   })
 
   it('renders running arc border for sessions that are currently running', () => {
@@ -185,6 +197,7 @@ describe('SessionRail project-first grouping', () => {
     expect(runningRows.length).toBeGreaterThanOrEqual(1)
     const runningArcs = document.querySelectorAll('.session-row-wrapper.is-running > .session-running-arc')
     expect(runningArcs.length).toBeGreaterThanOrEqual(1)
+    expect(runningArcs[0].querySelector('rect')).not.toBeNull()
   })
 
   it('allows deleting a project and cascades its sessions upon user confirmation', async () => {
@@ -298,9 +311,8 @@ describe('SessionRail project-first grouping', () => {
       const lastPinButton = pinButtons[pinButtons.length - 1]
       fireEvent.click(lastPinButton)
 
+      await waitFor(() => expect(view.container.querySelector('.session-project-group button[aria-label="置顶项目"]')).toHaveClass('is-active'))
       const groups = view.container.querySelectorAll('.session-project-group')
-      const firstGroupPinBtn = groups[0].querySelector('button[aria-label="置顶项目"]')
-      expect(firstGroupPinBtn?.classList.contains('is-active')).toBe(true)
 
       // 2. Verify unmarked project shows "删除项目" menu
       const unmarkedGroup = Array.from(groups).find(g => g.textContent?.includes('未标记项目'))

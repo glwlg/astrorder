@@ -20,6 +20,7 @@ from astrorder_codex_connector.app_server import CodexAppServer, CodexRpcRejecte
 from astrorder_codex_connector.config import CodexConnectorConfig
 
 from .codex_policy import codex_turn_policy
+from .codex_tasks import project_task_history, project_tasks
 from .connections import ConnectionError
 from .system_environment import load_system_environment
 
@@ -297,6 +298,7 @@ class CodexConnection:
                     self.service.register_native_command_handler(self.agent_id, self.submit)
                     self._activate_daemon_controller()
                     self.state, self.detail = 'connected', '原生握手、会话目录与命令通道已就绪。'
+                    self._reconcile_tasks()
                 return self.snapshot()
             except Exception as exc:  # noqa: BLE001 - every failed connection must close its owned transport
                 self._close_daemon_controller()
@@ -493,6 +495,7 @@ class CodexConnection:
 
     def messages(self, sid, before=None, limit=2):
         self._scope(sid)
+        history_started = timestamp()
         cursor = None
         if before:
             try:
@@ -526,6 +529,7 @@ class CodexConnection:
         if use_items_list:
             if not isinstance(result.get('data'), list):
                 raise ConnectionError('Codex 消息分页响应无效。', 502)
+            project_task_history(self, sid, result['data'], history_started, refresh_unknown=not before)
             items = [self._message(entry['item'], sid) for entry in reversed(result['data'])]
             for m in items:
                 self.store.upsert_message(m)
@@ -540,6 +544,8 @@ class CodexConnection:
         try:
             thread_data = self._request('thread/read', {'threadId': sid, 'includeTurns': True})
             turns = (thread_data.get('thread') or {}).get('turns') or []
+            entries = ({'item': item} for turn in reversed(turns) for item in reversed(turn.get('items') or []))
+            project_task_history(self, sid, entries, history_started, refresh_unknown=not before)
             first_user_text = None
             for turn in turns:
                 turn_id = turn.get('id')
@@ -864,6 +870,8 @@ class CodexConnection:
             return
         if not isinstance(sid, str) or self.store.get_session(self.agent_id, sid) is None:
             return
+        if method in {'turn/plan/updated', 'item/started', 'item/completed', 'item/commandExecution/outputDelta'}:
+            project_tasks(self, method, params, timestamp())
         if method == 'thread/settings/updated':
             settings = params.get('threadSettings') or {}
             from .native_controls import REASONING_EFFORTS
@@ -948,6 +956,11 @@ class CodexConnection:
             self._agent('disconnected')
 
     def _retire_inflight(self):
+        for session in self.store.list_sessions(self.agent_id):
+            sid = session['id']
+            for task in self.store.list_tasks(self.agent_id, sid):
+                if task['id'].startswith('codex:') and task['status'] in {'running', 'pending', 'waiting_approval'}:
+                    self._event('task.upsert', sid, {**task, 'status': 'unknown', 'updated_at': timestamp()})
         for command in self.store.active_commands():
             if command['agent_id'] == self.agent_id:
                 self._event('command.upsert', command['session_id'], {**command, 'state': 'unknown', 'error': 'Codex 连接已断开，执行结果未确认；不会自动重发。'})
@@ -965,6 +978,18 @@ class CodexConnection:
         self._owned_threads.clear()
         self._bindings.clear()
         self._generation = uuid4().hex
+
+    def _reconcile_tasks(self):
+        for sid in self._threads:
+            if not any(task['status'] == 'unknown' and task['id'].startswith('codex:')
+                       for task in self.store.list_tasks(self.agent_id, sid)):
+                continue
+            started = timestamp()
+            entries = self._pages('thread/items/list', {'threadId': sid, 'limit': 200, 'sortDirection': 'desc'})
+            try:
+                project_task_history(self, sid, entries, started, refresh_unknown=True)
+            except ConnectionError:
+                logger.warning('Codex task reconciliation failed for %s; task state remains unknown', sid)
 
     def disconnect(self):
         with self._lifecycle:

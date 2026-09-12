@@ -43,7 +43,11 @@ class RemoteCodex(CodexConnection):
         self.display_name = row.get('display_name') or self.connection_id
         self.agent_id = 'ssh-codex-' + self.connection_id
         self.remote_executable = executable
-        self.ssh_settings = validate_ssh_settings(row['settings'])
+        self.ssh_settings = validate_ssh_settings({
+            **row['settings'],
+            'display_name': self.display_name,
+            'profile_name': row.get('profile_name') or row['settings'].get('profile_name') or 'default',
+        })
         self.transport = SshNativeRuntime(self.ssh_settings, self.connection_id, 0, Path.cwd(), Path.cwd(), connector_secret=None)
         super().__init__(settings, store, service, client_factory=self._client)
 
@@ -231,9 +235,19 @@ print(json.dumps(res))
         return result['path']
 
 class EnvironmentConnections:
-    def __init__(self, settings, store, service, hermes, codex):
+    def __init__(
+        self,
+        settings,
+        store,
+        service,
+        hermes,
+        codex,
+        *,
+        daemon_codex_controller_factory=None,
+    ):
         self.settings, self.store, self.service = settings, store, service
         self.hermes, self.codex = hermes, codex
+        self.daemon_codex_controller_factory = daemon_codex_controller_factory
         self.remote = {}
         self.discovered = {}
         self.lock = RLock()
@@ -307,7 +321,17 @@ class EnvironmentConnections:
                     found = next(x for x in self.discovered[cid]['items'] if x['kind'] == 'codex')
                     if not found['available']:
                         raise ConnectionError('该 SSH 环境未发现 Codex。', 404)
-                    self.remote[cid] = RemoteCodex(self.settings, self.store, self.service, self._row(cid), found['executable'])
+                    self.remote[cid] = RemoteCodex(
+                        self.settings,
+                        self.store,
+                        self.service,
+                        self._row(cid),
+                        found['executable'],
+                    )
+                    if self.daemon_codex_controller_factory is not None:
+                        self.remote[cid].set_daemon_controller_factory(
+                            self.daemon_codex_controller_factory
+                        )
                 self.remote[cid].connect()
             elif cid in self.remote:
                 self.remote[cid].disconnect()

@@ -10,7 +10,7 @@
   --astr-shadow-soft: 0 1px 3px rgb(25 35 55 / 4%);
   --astr-shadow: 0 4px 20px rgb(25 35 55 / 6%);
   --astr-header-height: 48px;
-  --astr-reading-width: 860px;
+  --astr-reading-width: 920px;
 }
 :root[data-mantine-color-scheme='dark'] {
   --astr-bg: #15181e;
@@ -46,13 +46,11 @@
 .sidebar-note { display: none; }
 .session-project-header { border-color: transparent; background: transparent; box-shadow: none; padding: 2px 0; border-radius: 6px; }
 .session-project-sessions { margin-left: 14px; padding-left: 5px; border-left-color: color-mix(in srgb, var(--astr-border) 60%, transparent); }
-.session-project-drag { opacity: 0; }
-.session-project-header:hover .session-project-drag, .session-project-header:focus-within .session-project-drag { opacity: 1; }
 .session-project-source { background: transparent; border: 0; font-size: 11px; }
-.session-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 8px; padding: 8px; min-height: 42px; overflow: visible; }
-.session-row-title { grid-column: 1 / -1; font-size: 13px; line-height: 1.5; }
-.session-row-info { grid-column: 1 / -1; width: 100%; gap: 6px; }
-.session-row-info .session-row-time { margin-left: auto; }
+.session-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding: 5px 8px; min-height: 34px; overflow: visible; }
+.session-row-title { grid-column: auto; font-size: 13px; line-height: 1.35; }
+.session-row-info { grid-column: auto; width: auto; gap: 7px; }
+.session-row-info .session-row-time { margin-left: 0; }
 .session-row-info .agent-kind-badge { border: 0; background: transparent; padding: 0; font-size: 10px; }
 .session-row.is-active { border-color: transparent; background: color-mix(in srgb, var(--astr-indigo) 9%, transparent); }
 .session-row.is-active .session-row-title { color: var(--astr-text); }
@@ -73,13 +71,14 @@
 .session-details { border: 0; border-radius: 0; min-height: 0; padding: 16px 0; background: transparent; }
 .transcript-wrap { position: relative; flex: 1 1 0; min-height: 180px; overflow: hidden; width: 100%; height: 100%; }
 .transcript { width: 100%; height: 100%; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 14px 0 calc(var(--composer-height, 124px) + var(--composer-bottom, 18px) + var(--composer-gap, 28px)) 0; scrollbar-gutter: auto; }
-.transcript-inner { width: min(100%, var(--astr-reading-width)); margin-inline: auto; display: flex; flex-direction: column; gap: 16px; padding: 0 16px; }
+.transcript-inner { width: min(100%, var(--astr-reading-width)); margin-inline: auto; display: flex; flex-direction: column; gap: 12px; padding: 0 16px; }
 .message-row { width: 100%; gap: 7px; flex-shrink: 0; }
 .message-user { width: fit-content; max-width: 85%; }
 .message-meta { font-size: 12px; padding: 0; }
 .message-bubble { box-shadow: none; }
 .message-assistant .message-bubble, .message-system .message-bubble { padding: 0; background: transparent; border: 0; border-radius: 0; }
-.message-bubble-user { padding: 10px 14px; border: 0; border-radius: 14px; background: #F3F3F3; }
+.message-bubble-user { padding: 10px 14px; border: 0; border-radius: 14px; color: #232936; background: #F3F3F3; }
+:root[data-mantine-color-scheme='dark'] .message-bubble-user { color: var(--astr-text); background: var(--astr-surface-muted); }
 .markdown-content { font-size: 14px; line-height: 1.75; }
 .markdown-content p { margin: .55em 0; }
 .markdown-content ul, .markdown-content ol { margin: .65em 0; }
@@ -87,7 +86,7 @@
 .markdown-content h1, .markdown-content h2, .markdown-content h3 { line-height: 1.5; margin: 1em 0 .5em; }
 .markdown-content h1 { font-size: 20px; }.markdown-content h2 { font-size: 18px; }.markdown-content h3 { font-size: 16px; }
 .activity-pack { width: 100%; flex-shrink: 0; }
-.activity-pack > details > summary { font-size: 12px; color: var(--astr-muted); cursor: pointer; padding: 5px 0; }
+.activity-pack > details > summary { font-size: 12px; color: var(--astr-muted); cursor: pointer; padding: 2px 0; }
 .runtime-summary-bar { width: min(100%, var(--astr-reading-width)); margin-inline: auto; padding: 6px 14px; border: 0; border-radius: 0; box-shadow: none; background: transparent; max-height: 28vh; overflow-y: auto; flex-shrink: 0; }
 .runtime-summary-bar > .mantine-Group-root { align-items: center; }
 .runtime-summary-grid { display: flex; flex-wrap: wrap; gap: 12px; min-width: 0; flex: 1 1 200px; }
@@ -140,7 +139,7 @@
   .chat-page { padding: 0 14px 12px; }
 }
 @media (pointer: coarse) {
-  .session-project-drag, .session-project-actions { opacity: 1; }
+  .session-project-actions { opacity: 1; }
   .m-composer > button { min-height: 44px; }
 }
 @media (prefers-reduced-motion: no-preference) {
@@ -293,81 +292,19 @@
   padding-bottom: 8px;
 }
 
-/* Running session border — verbatim port of Hermes desktop's `.arc-border.arc-row`.
-   A 300%-sized linear-gradient layer slides via transform::translate (compositor
-   only, zero per-frame style recalc). The host's mask + overflow clip it to a ring.
-   This is the same animation the overlook sidebar uses; it does NOT depend on
-   @property / conic-gradient, which don't animate reliably in some webviews. */
-@keyframes session-running-arc {
-  0%   { transform: translate(-10%, -10%); }
-  100% { transform: translate(-50%, -50%); }
-}
-
 .session-running-arc {
-  --arc-c0: color-mix(in srgb, var(--session-running-color, var(--astr-indigo, #5b6cff)) 0%, transparent);
-  --arc-c1: var(--session-running-color, var(--astr-indigo, #5b6cff));
-  /* c2 ties to c1 (45%) so each spike has a falloff tail instead of 3 lone dots. */
-  --arc-c2: color-mix(in srgb, var(--session-running-color, var(--astr-indigo, #5b6cff)) 45%, transparent);
-  --arc-angle: 160deg;
-  --arc-width: 2px;
-  --arc-standoff: 0px;
-  /* Match .session-row's border-radius (7px) so the ring is concentric. */
-  --arc-radius: 7px;
-  --arc-duration: 2.23s;
-
   pointer-events: none;
   position: absolute;
-  overflow: hidden;
-  border-radius: calc(var(--arc-radius) + var(--arc-standoff));
-  inset: calc(var(--arc-standoff) * -1);
-  padding: var(--arc-width);
+  inset: 0;
+  width: 100%;
+  height: 100%;
   z-index: 4;
-  opacity: 0;
-  -webkit-mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  mask-composite: exclude;
-}
-
-.session-running-arc::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 300%;
-  height: 300%;
-  background: linear-gradient(
-    var(--arc-angle),
-    transparent 0%,
-    var(--arc-c0) 15%,
-    var(--arc-c1) 20%,
-    var(--arc-c2) 25%,
-    transparent 35%,
-    transparent 40%,
-    var(--arc-c0) 55%,
-    var(--arc-c1) 60%,
-    var(--arc-c2) 65%,
-    transparent 75%,
-    transparent 80%,
-    var(--arc-c0) 95%,
-    var(--arc-c1) 100%
-  );
-  will-change: transform;
-  animation: session-running-arc var(--arc-duration) linear infinite;
+  color: var(--session-running-color, var(--astr-indigo, #5b6cff));
 }
 
 .session-row-wrapper.is-running,
 .m-session-row.is-running {
   position: relative;
-}
-
-.session-row-wrapper.is-running > .session-running-arc,
-.m-session-row.is-running > .session-running-arc {
-  opacity: 1;
 }
 
 /* Subtle tint on the running row so state reads even before the arc paints. */
@@ -376,10 +313,31 @@
   background: color-mix(in srgb, var(--session-running-color, var(--astr-indigo, #5b6cff)) 7%, transparent);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .session-running-arc::before {
-    animation: none;
+@media (display-mode: standalone) and (min-width: 62em) {
+  .astrorder-shell .sidebar-header {
+    height: 0 !important;
+    min-height: 0 !important;
+    border: 0;
   }
+  .app-header {
+    position: fixed;
+    inset: 0 12px auto auto;
+    width: auto;
+    height: var(--astr-header-height);
+    padding: 0;
+    background: transparent !important;
+    border: 0;
+    z-index: 300;
+    pointer-events: none;
+  }
+  .app-header > .mantine-Group-root { width: auto; }
+  .app-header .header-brand-group { display: none; }
+  .app-header .header-actions { pointer-events: auto; }
+  .astrorder-shell .desktop-navbar {
+    top: 0 !important;
+    height: 100dvh !important;
+  }
+  .chat-heading { padding-right: 152px !important; }
 }
 
 @media (display-mode: window-controls-overlay) {
@@ -597,3 +555,29 @@
 .sidechat-viewer > .transcript-wrap { min-height:0; }
 
 .sidechat-viewer-loading { display:flex; align-items:center; justify-content:center; color:var(--astr-muted); font-size:13px; }
+
+.sidebar-primary-nav {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+}
+.sidebar-primary-nav .sidebar-nav-link {
+  min-width: 0;
+  padding-inline: 10px;
+}
+.session-rail-controls {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: var(--mantine-spacing-sm);
+}
+.session-rail-list {
+  display: flex;
+  flex: 1 1 0;
+  min-height: 0;
+  flex-direction: column;
+  gap: var(--mantine-spacing-sm);
+  overflow-y: auto;
+  padding-right: 1px;
+  scrollbar-width: thin;
+}

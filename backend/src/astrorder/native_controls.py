@@ -64,6 +64,11 @@ def current_session_model(rpc, session_id: str) -> dict[str, Any]:
         model, provider = match.groups() if match else (None, None)
     if not isinstance(model, str) or not model or model in {'unknown', '(unknown)'}:
         raise ConnectionError('原生会话未返回模型信息。', 502)
+    if provider == 'custom':
+        catalog = result(rpc, 'model.options', {'session_id': resumed['session_id'], 'explicit_only': True, 'include_unconfigured': False})
+        current = [row.get('slug') for row in catalog.get('providers', []) if isinstance(row, dict) and row.get('is_current') is True and row.get('slug')]
+        if len(current) == 1:
+            provider = current[0]
     binding = {'model': model, 'provider': provider if isinstance(provider, str) and provider not in {'', 'unknown', '(unknown)'} else None}
     if isinstance(info.get('branch'), str):
         binding['branch'] = info['branch']
@@ -87,10 +92,14 @@ def set_session_model(rpc, session_id: str, provider: str, model: str) -> dict[s
         if info.get('model') != model or info.get('provider') != provider:
             raise ConnectionError('待切换模型尚未通过原生状态读回确认。', 502)
         return {'provider': provider, 'model': model, 'deferred': True}
+    if (resumed.get('info') or {}).get('lazy'):
+        # A lazy Hermes watch session reports profile defaults until its agent is
+        # built. This read-only native call builds it using the selected override.
+        result(rpc, 'process.list', {'session_id': handle})
     status = result(rpc, 'session.status', {'session_id': handle})
     if f'Model: {model} ({provider})' not in str(status.get('output', '')):
         # The agent may still be building, while the native session already has its new override.
-        info = result(rpc, 'session.resume', {'session_id': session_id, 'lazy': True}).get('info') or {}
+        info = current_session_model(rpc, session_id)
         if info.get('model') != model or info.get('provider') != provider:
             raise ConnectionError('模型切换尚未通过原生状态读回确认。', 502)
     return {'provider': provider, 'model': model}

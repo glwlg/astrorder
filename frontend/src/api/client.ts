@@ -15,6 +15,7 @@ import type {
 } from '../domain/types'
 
 const API_PREFIX = '/api/v1'
+import type { PreferencePatch, WorkspacePreferences } from '../hooks/useWorkspacePreferences'
 
 export interface SessionModelBinding { model: string; provider: string | null; deferred?: boolean; branch?: string; effort?: string | null }
 export interface CodexConnectionStatus { kind: 'codex'; state: 'disconnected' | 'connecting' | 'connected' | 'error' | 'authentication_required'; available: boolean; agent_id: string; session_count: number; auth_required: boolean; detail: string; daemon_mode: boolean }
@@ -87,6 +88,9 @@ function sessionPath(sessionId: string): string {
 }
 
 export const api = {
+  getPreferences: () => request<WorkspacePreferences>('/preferences'),
+  importPreferences: (values: PreferencePatch) => jsonRequest<WorkspacePreferences>('/preferences/import', values),
+  updatePreferences: (values: PreferencePatch) => jsonRequest<WorkspacePreferences>('/preferences', values, 'PATCH'),
   getObservations: (agentId: string, sessionId?: string) => request<{ status: { installed?: boolean; trusted?: boolean; needs_review?: boolean; last_event_at?: number }; items: { id: string; event: string; label: string; observed_at: number; tool_name?: string }[] }>(`/agents/${encodeURIComponent(agentId)}/observations${sessionId ? '?session_id='+encodeURIComponent(sessionId) : ''}`),
   installObserver: (agentId: string) => jsonRequest(`/agents/${encodeURIComponent(agentId)}/observer`, {}),
   getAuthSession: () => request<AuthSession>('/auth/session'),

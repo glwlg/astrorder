@@ -32,7 +32,7 @@ def install_observer(home, python, source):
             own=lambda h: h.get('statusMessage')==MARKER and 'astrorder-observer' in h.get('command','')
             handlers=[h for h in group.get('hooks',[]) if not own(h)]
             if handlers or not group.get('hooks'): kept.append({**group,'hooks':handlers})
-        kept.append({'hooks':[{'type':'command','command':command,'timeout':3,'statusMessage':MARKER}]})
+        kept.append({'hooks':[{'type':'command','command':command,'timeout':600 if event=='PermissionRequest' else 3,'statusMessage':MARKER}]})
         data['hooks'][event]=kept
     after=(json.dumps(data,ensure_ascii=False,indent=2)+'\n').encode('utf-8')
     if before and before!=after:
@@ -45,7 +45,7 @@ def install_observer(home, python, source):
     assert json.loads(config.read_text(encoding='utf-8'))==data and script.read_text(encoding='utf-8')==source
     return {'installed':True,'events':list(EVENTS),'script_sha256':hashlib.sha256(source.encode()).hexdigest(),'trust':'requires_native_review'}
 
-def read_spool(home, acknowledge=()):
+def read_spool(home, acknowledge=(), pending=()):
     directory=Path(home)/'astrorder-observer'
     spool=directory/'events'
     for key in acknowledge:
@@ -58,4 +58,18 @@ def read_spool(home, acknowledge=()):
             row=json.loads(path.read_text(encoding='utf-8'))
             if isinstance(row,dict) and path.stem==row.get('id'): items.append(row)
         except (ValueError,OSError): continue
-    return {'installed':(directory/'observer.py').is_file(),'items':items}
+    present=[key for key in pending if isinstance(key,str) and re.fullmatch(r'[a-f0-9]{32}(?:[a-f0-9]{32})?',key) and (spool/(key+'.json')).is_file()]
+    return {'installed':(directory/'observer.py').is_file(),'items':items,'pending':present}
+
+def write_decision(home, approval_id, decision):
+    if not isinstance(approval_id,str) or not re.fullmatch(r'[a-f0-9]{32}(?:[a-f0-9]{32})?',approval_id): return False
+    if decision not in ('allow','deny'): return False
+    directory=Path(home)/'astrorder-observer'; event=directory/'events'/(approval_id+'.json')
+    try:
+        row=json.loads(event.read_text(encoding='utf-8'))
+        if row.get('id')!=approval_id or row.get('event')!='PermissionRequest' or row.get('approval_pending') is not True: return False
+        decisions=directory/'decisions'; decisions.mkdir(mode=0o700,parents=True,exist_ok=True)
+        temp=decisions/(approval_id+'.tmp'); target=decisions/(approval_id+'.json')
+        temp.write_text(json.dumps({'id':approval_id,'decision':decision}),encoding='utf-8'); temp.chmod(0o600); os.replace(temp,target)
+        return True
+    except (OSError,ValueError,AttributeError): return False

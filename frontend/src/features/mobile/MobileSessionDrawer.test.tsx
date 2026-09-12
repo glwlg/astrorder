@@ -47,6 +47,8 @@ function mount(overrides: Partial<Parameters<typeof MobileSessionDrawer>[0]> = {
     <MobileSessionDrawer
       groups={groups}
       pins={{}}
+      pinnedProjects={[]}
+      onPinProject={vi.fn()}
       selectedKey={scopeKey('local', 'sess-m-1')}
       appearance={{}}
       onSelect={vi.fn()}
@@ -93,6 +95,35 @@ describe('MobileSessionDrawer', () => {
     mount()
     const row = screen.getByRole('button', { name: '会话 1' }).closest('.m-session-row')
     expect(row).toHaveClass('m-hold')
+  })
+
+  it('renders the shared animated border for a running session', () => {
+    const runningGroups = [{ ...groups[0], sessions: [{ ...groups[0].sessions[0], status: 'running' as const }] }]
+    mount({ groups: runningGroups })
+    const row = screen.getByRole('button', { name: '会话 1' }).closest('.m-session-row')
+    expect(row).toHaveClass('is-running')
+    expect(row?.querySelector('.session-running-arc[data-status="running"] rect')).not.toBeNull()
+  })
+
+  it('opens session actions from the visible menu without selecting or swallowing the next tap', () => {
+    const onSelect = vi.fn()
+    const onPin = vi.fn()
+    mount({ onSelect, onPin })
+    fireEvent.click(screen.getByRole('button', { name: '会话操作 会话 1' }))
+    expect(onSelect).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('menuitem', { name: '置顶' }))
+    expect(onPin).toHaveBeenCalledWith(groups[0].sessions[0])
+    fireEvent.click(screen.getByRole('button', { name: '会话 1' }))
+    expect(onSelect).toHaveBeenCalledWith(groups[0].sessions[0])
+  })
+
+  it.each([false, true])('offers project pin toggling when pinned=%s', pinned => {
+    const onPinProject = vi.fn()
+    mount({ onPinProject, pinnedProjects: pinned ? [groups[0].key] : [] })
+    fireEvent.click(screen.getByRole('button', { name: '项目操作 移动项目A' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: pinned ? '取消置顶项目' : '置顶项目' }))
+    expect(onPinProject).toHaveBeenCalledWith(groups[0])
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
   })
 
   it('hides project create/delete as always-visible actions and offers them from the project menu', () => {

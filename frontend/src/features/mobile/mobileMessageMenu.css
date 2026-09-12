@@ -4,3 +4,6 @@
 .m-message-popover button { border:0; background:transparent; color:inherit; flex:1; display:flex; align-items:center; justify-content:center; gap:5px; min-height:44px; padding:5px; border-radius:9px; font:inherit; font-size:12px; cursor:pointer; }
 .m-message-popover button:focus-visible, .m-message-popover button:hover { background:var(--astr-surface-muted); outline:2px solid var(--mantine-primary-color-filled); outline-offset:-2px; }
 .m-bubble { -webkit-touch-callout:none; user-select:text; }
+.m-drawer-menu { box-sizing:border-box; flex-direction:column; left:clamp(12px, var(--menu-x), calc(100vw - 240px)); max-height:calc(100dvh - 24px); overflow:auto; }
+.m-drawer-menu button { flex:none; justify-content:flex-start; padding:10px 12px; gap:9px; }
+.m-drawer-menu::after { display:none; }

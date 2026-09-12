@@ -36,15 +36,15 @@ export function AppShellLayout() {
       const stored = localStorage.getItem(SIDEBAR_WIDTH_KEY)
       if (stored) {
         const val = parseInt(stored, 10)
-        if (val >= 220 && val <= 600) return val
+        if (val >= 260 && val <= 420) return val
       }
     } catch {}
-    return 300
+    return 328
   })
 
   const isResizingRef = useRef(false)
   const startXRef = useRef(0)
-  const startWidthRef = useRef(280)
+  const startWidthRef = useRef(328)
 
   const handleResizerMouseDown = (e: React.MouseEvent) => {
     e.preventDefault()
@@ -57,7 +57,7 @@ export function AppShellLayout() {
     const handleMouseMove = (moveEvent: MouseEvent) => {
       if (!isResizingRef.current) return
       const delta = moveEvent.clientX - startXRef.current
-      const newWidth = Math.min(Math.max(startWidthRef.current + delta, 220), 600)
+      const newWidth = Math.min(Math.max(startWidthRef.current + delta, 260), 420)
       setSidebarWidth(newWidth)
     }
 

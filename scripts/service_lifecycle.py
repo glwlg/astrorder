@@ -8,6 +8,7 @@ from collections.abc import Callable
 APP_MARKER = "scripts/run_production.py"
 DAEMON_MODULE_MARKER = "astrorder.daemon.session_daemon"
 DAEMON_FILE_MARKER = "astrorder/daemon/session_daemon.py"
+INDEPENDENT_PROCESS_FLAGS = 0x00000008 | 0x08000000 | 0x01000000
 
 
 def listening_pids(netstat_output: str, port: int) -> list[int]:

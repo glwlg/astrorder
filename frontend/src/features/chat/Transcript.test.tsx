@@ -2,7 +2,7 @@ import { MantineProvider } from '@mantine/core'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 afterEach(cleanup)
-import type { Approval, Message } from '../../domain/types'
+import type { Approval, Message, OutboxEntry, Session } from '../../domain/types'
 import { Transcript } from './Transcript'
 
 const message: Message = {
@@ -29,6 +29,20 @@ const pendingApproval: Approval = {
   data: {},
 }
 
+const runningSession: Session = {
+  id: 'session-1', agent_id: 'agent-1', title: '会话', workspace: null,
+  status: 'running', updated_at: '2026-01-01T00:00:00Z',
+}
+
+const outbound: OutboxEntry = {
+  command: {
+    id: 'command-1', session_id: 'session-1', agent_id: 'agent-1', action: 'send',
+    state: 'accepted', text: '新消息', attachments: [], created_at: '2026-01-01T00:00:00Z', error: null,
+  },
+  status: 'accepted',
+  error: null,
+}
+
 describe('transcript follow mode', () => {
   it('groups reasoning and tools into folds and hides empty assistant bubbles', () => {
     render(<MantineProvider><Transcript outbox={[]} messages={[
@@ -47,6 +61,23 @@ describe('transcript follow mode', () => {
     expect(screen.getByText(/execute_code/)).toBeInTheDocument()
     expect(screen.queryByTestId('message-empty')).not.toBeInTheDocument()
     expect(screen.getByText('最终答复')).toBeInTheDocument()
+  })
+
+  it('uses an animated loader for the latest folded activity while the session is running', () => {
+    const view = render(<MantineProvider><Transcript outbox={[]} session={runningSession} messages={[
+      { ...message, id: 'thinking', kind: 'thinking', text: '正在处理' },
+    ]} /></MantineProvider>)
+    const summary = screen.getByRole('region', { name: '思考与工具' }).querySelector('summary')!
+    expect(summary.querySelector('.lazy-details-indicator.is-loading')).not.toBeNull()
+    expect(summary.querySelectorAll('.lazy-details-indicator svg circle')).toHaveLength(5)
+    expect(summary.querySelector('.lazy-details-indicator svg path')).not.toBeNull()
+    expect(summary.textContent).not.toMatch(/[▶▸]/)
+
+    view.rerender(<MantineProvider><Transcript outbox={[]} session={{ ...runningSession, status: 'idle' }} messages={[
+      { ...message, id: 'thinking', kind: 'thinking', text: '处理完成' },
+    ]} /></MantineProvider>)
+    expect(summary.querySelector('.lazy-details-indicator.is-loading')).toBeNull()
+    expect(summary.querySelector('.lazy-details-indicator svg')).not.toBeNull()
   })
 
   it('pauses only after a real scroll away from the bottom and resumes manually', async () => {
@@ -74,6 +105,35 @@ describe('transcript follow mode', () => {
     fireEvent.click(screen.getByTestId('return-bottom'))
     await waitFor(() => expect(screen.queryByTestId('return-bottom')).not.toBeInTheDocument())
     expect(scrollTo).toHaveBeenLastCalledWith({ top: 1000, behavior: 'auto' })
+    expect(transcript.scrollTop).toBe(1000)
+  })
+
+  it('returns to the bottom when a message is sent and shows animated dots while running', async () => {
+    const view = render(
+      <MantineProvider>
+        <Transcript messages={[message]} outbox={[]} session={runningSession} />
+      </MantineProvider>,
+    )
+    const transcript = screen.getByRole('log')
+    Object.defineProperties(transcript, {
+      clientHeight: { configurable: true, value: 100 },
+      scrollHeight: { configurable: true, value: 1000 },
+      scrollTop: { configurable: true, writable: true, value: 100 },
+    })
+    Object.defineProperty(transcript, 'scrollTo', {
+      configurable: true,
+      value: vi.fn(({ top }: { top: number }) => { transcript.scrollTop = top }),
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    fireEvent.scroll(transcript)
+    await waitFor(() => expect(screen.getByTestId('return-bottom').querySelector('.return-bottom-wave')).not.toBeNull())
+
+    view.rerender(
+      <MantineProvider>
+        <Transcript messages={[message]} outbox={[outbound]} session={runningSession} />
+      </MantineProvider>,
+    )
+    await waitFor(() => expect(screen.queryByTestId('return-bottom')).not.toBeInTheDocument())
     expect(transcript.scrollTop).toBe(1000)
   })
 

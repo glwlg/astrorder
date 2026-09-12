@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildProjectGroups, displaySessionTitle, nativeTurnInProgress, sessionActivityStatus } from './sessionRailModel'
+import { buildProjectGroups, displaySessionTitle, sessionActivityStatus } from './sessionRailModel'
 import type { Command, Message, Session, Task } from '../domain/types'
 import { useAstrorderStore } from '../state/store'
 
@@ -127,30 +127,14 @@ describe('sessionActivityStatus', () => {
     useAstrorderStore.getState().resetRuntime()
   })
 
-  it('treats a Hermes-desktop turn as running when live tool/thinking events arrive without an Astrorder command', () => {
-    useAstrorderStore.getState().resetRuntime()
-    useAstrorderStore.getState().mergeMessages('local-codex', 's-1', [
-      message({ id: 'u1', role: 'user', text: '继续改' }),
-      message({
-        id: 'tool-1',
-        role: 'tool',
-        kind: 'tool',
-        tool: { name: 'execute_code', status: 'running' },
-        created_at: new Date().toISOString(),
-      }),
-    ])
-    expect(sessionActivityStatus(baseSession)).toBe('running')
-    useAstrorderStore.getState().resetRuntime()
-  })
-
   it('treats a running native task as running even when session.status stays idle', () => {
     useAstrorderStore.getState().resetRuntime()
     const task: Task = {
       id: 'task-1',
       session_id: 's-1',
       agent_id: 'local-codex',
-      kind: 'tool',
-      title: '工具：execute_code',
+      kind: 'background',
+      title: '后台命令',
       status: 'running',
       progress: null,
       command: null,
@@ -163,33 +147,21 @@ describe('sessionActivityStatus', () => {
     expect(sessionActivityStatus(baseSession)).toBe('running')
     useAstrorderStore.getState().resetRuntime()
   })
-})
 
-describe('nativeTurnInProgress', () => {
-  it('is true while the latest native event is thinking, even if created_at is the stream start', () => {
-    expect(nativeTurnInProgress([
-      message({ id: 'u1', role: 'user', text: '问' }),
-      message({ id: 'th', role: 'assistant', kind: 'thinking', text: '先看代码', created_at: '2026-09-10T12:01:00Z' }),
-    ])).toBe(true)
-  })
-
-  it('is false after a completed assistant reply with no in-flight tool', () => {
-    expect(nativeTurnInProgress([
-      message({ id: 'u1', role: 'user', text: '问' }),
-      message({ id: 'a1', role: 'assistant', kind: 'message', text: '做完了', created_at: new Date().toISOString() }),
-    ])).toBe(false)
-  })
-
-  it('is true while waiting on a just-submitted user turn with no assistant reply yet', () => {
-    expect(nativeTurnInProgress([
-      message({ id: 'u1', role: 'user', text: '继续改', created_at: new Date().toISOString() }),
-    ])).toBe(true)
-  })
-
-  it('is false when the latest user turn is stale and unanswered', () => {
-    expect(nativeTurnInProgress([
-      message({ id: 'u1', role: 'user', text: '很久以前', created_at: '2026-01-01T00:00:00Z' }),
-    ])).toBe(false)
+  it('keeps non-blocking skill evolution visible without marking the session running', () => {
+    useAstrorderStore.getState().resetRuntime()
+    useAstrorderStore.getState().mergeMessages('local-codex', 's-1', [message({
+      id: 'skill-tool', role: 'tool', kind: 'tool',
+      tool: { name: 'skill_manage', status: 'running', background: true },
+      created_at: new Date().toISOString(),
+    })])
+    useAstrorderStore.getState().mergeTasks([{
+      id: 'skill-task', session_id: 's-1', agent_id: 'local-codex', kind: 'background',
+      title: '工具：skill_manage', status: 'running', progress: { blocking: false }, command: null,
+      logs: [], target_id: 'call-1', created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    }])
+    expect(sessionActivityStatus(baseSession)).toBe('idle')
+    useAstrorderStore.getState().resetRuntime()
   })
 })
 
@@ -222,6 +194,21 @@ describe('sessionActivityStatus live stream', () => {
       } as unknown as Record<string, unknown>,
     })
     expect(sessionActivityStatus(idleSession)).toBe('running')
+    useAstrorderStore.getState().resetRuntime()
+  })
+
+  it('does not mark an idle session running when opening history with unfinished activity rows', () => {
+    useAstrorderStore.getState().resetRuntime()
+    useAstrorderStore.getState().mergeMessages(idleSession.agent_id, idleSession.id, [
+      message({ id: 'thinking-old', role: 'assistant', kind: 'thinking', text: '历史思考', created_at: new Date().toISOString() }),
+      message({ id: 'tool-old', role: 'tool', kind: 'tool', tool: { name: 'execute_code', status: 'running' }, created_at: new Date().toISOString() }),
+    ])
+    const now = new Date().toISOString()
+    useAstrorderStore.getState().mergeTasks([
+      { id: 'tool-task-old', session_id: idleSession.id, agent_id: idleSession.agent_id, kind: 'tool', title: '历史工具', status: 'running', progress: null, command: null, logs: [], target_id: 'tool-old', created_at: now, updated_at: now },
+      { id: 'todo-old', session_id: idleSession.id, agent_id: idleSession.agent_id, kind: 'todo', title: '未执行待办', status: 'pending', progress: null, command: null, logs: [], target_id: null, created_at: now, updated_at: now },
+    ])
+    expect(sessionActivityStatus(idleSession)).toBe('idle')
     useAstrorderStore.getState().resetRuntime()
   })
 

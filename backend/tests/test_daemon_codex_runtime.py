@@ -57,6 +57,8 @@ class FakeCodexAppServer:
             return {"thread": {"id": params["threadId"], "name": "Daemon-created session"}}
         if method == "turn/start":
             return {"turn": {"id": "turn-1", "status": "inProgress"}}
+        if method == "turn/steer":
+            return {}
         if method == "thread/settings/update":
             return {}
         raise AssertionError(method)
@@ -169,6 +171,20 @@ async def test_daemon_owned_codex_runtime_keeps_native_transport_and_wals_notifi
             await socket.send(
                 json.dumps(
                     {
+                        "action": "session.steer",
+                        "request_id": "steer-1",
+                        "session_id": "native-thread-1",
+                        "turn_id": "turn-1",
+                        "input": [{"type": "text", "text": "补充要求"}],
+                    }
+                )
+            )
+            steered = json.loads(await socket.recv())
+            assert steered["result"] == {"status": "running", "turn_id": "turn-1", "accepted": True}
+
+            await socket.send(
+                json.dumps(
+                    {
                         "action": "session.settings",
                         "request_id": "settings-1",
                         "session_id": "native-thread-1",
@@ -206,6 +222,14 @@ async def test_daemon_owned_codex_runtime_keeps_native_transport_and_wals_notifi
                     ],
                     "approvalPolicy": "on-request",
                     "sandboxPolicy": {"type": "workspaceWrite"},
+                },
+            ),
+            (
+                "turn/steer",
+                {
+                    "threadId": "native-thread-1",
+                    "expectedTurnId": "turn-1",
+                    "input": [{"type": "text", "text": "补充要求"}],
                 },
             ),
             (

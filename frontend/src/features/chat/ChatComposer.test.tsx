@@ -7,9 +7,17 @@ import type { Agent, Session } from '../../domain/types'
 import { useAstrorderStore } from '../../state/store'
 import { ChatComposer } from './ChatComposer'
 
+const queueMemory = vi.hoisted(() => ({ rows: [] as never[] }))
+vi.mock('../mobile/mobileOutboxStorage', () => ({
+  mobileOutboxStorage: {
+    load: async () => queueMemory.rows,
+    save: async (rows: never[]) => { queueMemory.rows = rows },
+  },
+}))
+
 const session: Session = { id: 'native-one', agent_id: 'hermes', title: 'one', workspace: null, status: 'idle', updated_at: '2026-01-01T00:00:00Z' }
 const agent: Agent = { id: 'hermes', name: 'Hermes', kind: 'hermes', status: 'ready', capabilities: ['chat', 'stop', 'attachments'], limitation: null }
-afterEach(() => { cleanup(); vi.restoreAllMocks(); useAstrorderStore.getState().resetRuntime() })
+afterEach(() => { cleanup(); vi.restoreAllMocks(); queueMemory.rows = []; useAstrorderStore.getState().resetRuntime() })
 it('embeds the model picker and swaps the primary send button for native stop until completion', async () => {
   useAstrorderStore.getState().resetRuntime()
   vi.spyOn(api, 'getSessionModel').mockResolvedValue({ model: 'native-model', provider: 'provider' })
@@ -68,6 +76,24 @@ it('shows the native failure detail returned by a failed command', async () => {
   }]))
 
   expect(await screen.findByText('Missing environment variable: OPENCODEX_API_AUTH_TOKEN.')).toBeInTheDocument()
+  client.clear()
+})
+
+it('queues while a session is running and steers only after explicit confirmation', async () => {
+  vi.spyOn(api, 'getSessionModel').mockResolvedValue({ model: 'native-model', provider: 'provider' })
+  const create = vi.spyOn(api, 'createCommand').mockImplementation(async input => ({ ...input, state: 'accepted', attachments: [], created_at: session.updated_at, error: null, target_id: input.target_id ?? null }))
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(<MantineProvider><QueryClientProvider client={client}><ChatComposer session={{ ...session, status: 'running' }} agent={agent} /></QueryClientProvider></MantineProvider>)
+
+  fireEvent.change(screen.getByLabelText('消息内容'), { target: { value: '先排队' } })
+  fireEvent.click(screen.getByRole('button', { name: '加入队列' }))
+  expect(await screen.findByText('先排队')).toBeInTheDocument()
+  expect(create).not.toHaveBeenCalled()
+
+  fireEvent.click(screen.getByRole('button', { name: '立即引导' }))
+  await waitFor(() => expect(create).toHaveBeenCalledOnce())
+  expect(create.mock.calls[0][0]).toMatchObject({ action: 'send', text: '先排队' })
+  await waitFor(() => expect(screen.queryByText('先排队')).not.toBeInTheDocument())
   client.clear()
 })
 

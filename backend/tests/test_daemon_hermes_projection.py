@@ -24,6 +24,11 @@ def test_hermes_completion_router_completes_exact_command_and_rejects_unknown_id
                 "session_id": "native-hermes-session",
                 "state": "accepted",
             }
+            self.session = {
+                "id": "native-hermes-session",
+                "agent_id": "daemon-hermes",
+                "status": "running",
+            }
 
         def get_command(self, agent_id, session_id, command_id):
             if (agent_id, session_id, command_id) == (
@@ -44,6 +49,15 @@ def test_hermes_completion_router_completes_exact_command_and_rejects_unknown_id
             )
             self.command = {**self.command, "state": state, "error": error}
             return dict(self.command)
+
+        def update_session(self, agent_id, session_id, updates):
+            assert (agent_id, session_id, updates) == (
+                "daemon-hermes",
+                "native-hermes-session",
+                {"status": "idle"},
+            )
+            self.session = {**self.session, **updates}
+            return dict(self.session)
 
     class FakeService:
         def __init__(self) -> None:
@@ -67,14 +81,35 @@ def test_hermes_completion_router_completes_exact_command_and_rejects_unknown_id
     )
 
     assert store.command["state"] == "completed"
+    assert store.session["status"] == "idle"
     assert service.events == [
         (
             "command.upsert",
             "daemon-hermes",
             "native-hermes-session",
             store.command,
-        )
+        ),
+        (
+            "session.upsert",
+            "daemon-hermes",
+            "native-hermes-session",
+            store.session,
+        ),
     ]
+
+    store.session["status"] = "running"
+    service.events.clear()
+    bridge.handler(
+        "native-hermes-session",
+        {
+            "agent_id": "daemon-hermes",
+            "session_id": "native-hermes-session",
+            "command_id": "command-exact-id",
+        },
+    )
+    assert store.session["status"] == "idle"
+    assert [event[0] for event in service.events] == ["session.upsert"]
+
     with pytest.raises(DaemonBridgeError, match="not found"):
         bridge.handler(
             "native-hermes-session",

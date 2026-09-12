@@ -6,7 +6,7 @@ import json
 import re
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -27,7 +27,6 @@ from .models import (
     DaemonCheckpointRow,
     EventRow,
     MessageRow,
-    ModelRouteRow,
     ProjectRow,
     SessionRow,
     SshConnectionRow,
@@ -211,21 +210,6 @@ def _command_wire(row: CommandRow) -> dict[str, Any]:
     }
 
 
-def _model_route_wire(row: ModelRouteRow) -> dict[str, Any]:
-    return {
-        "agent_id": row.agent_id,
-        "session_id": row.session_id,
-        "command_id": row.command_id,
-        "tier": row.tier,
-        "provider": row.provider,
-        "model": row.model,
-        "effort": row.effort,
-        "reason": row.reason,
-        "cost_units": row.cost_units,
-        "created_at": isoformat(row.created_at),
-    }
-
-
 def _task_wire(row: TaskRow) -> dict[str, Any]:
     return {
         "id": row.id,
@@ -326,6 +310,9 @@ class Store:
                 "native_kind": "VARCHAR(32)",
                 "ephemeral": "BOOLEAN NOT NULL DEFAULT 0",
                 "control_state": "VARCHAR(32) NOT NULL DEFAULT 'unknown'",
+                "selected_model_provider": "VARCHAR(160)",
+                "selected_model": "VARCHAR(160)",
+                "selected_reasoning_effort": "VARCHAR(32)",
             },
             "ssh_connections": {
                 "display_name": "VARCHAR(256)",
@@ -847,6 +834,45 @@ class Store:
             db.flush()
             return _session_wire(row)
 
+    def set_session_model_binding(
+        self, agent_id: str, session_id: str, provider: str, model: str
+    ) -> dict[str, str]:
+        with self.session() as db:
+            row = db.execute(
+                select(SessionRow).where(SessionRow.agent_id == agent_id, SessionRow.id == session_id)
+            ).scalar_one_or_none()
+            if row is None:
+                raise ScopeNotFound("session not found")
+            row.selected_model_provider = provider
+            row.selected_model = model
+            db.flush()
+            return {"provider": provider, "model": model}
+
+    def set_session_reasoning_binding(
+        self, agent_id: str, session_id: str, effort: str
+    ) -> dict[str, str]:
+        with self.session() as db:
+            row = db.execute(
+                select(SessionRow).where(SessionRow.agent_id == agent_id, SessionRow.id == session_id)
+            ).scalar_one_or_none()
+            if row is None:
+                raise ScopeNotFound("session not found")
+            row.selected_reasoning_effort = effort
+            db.flush()
+            return {"effort": effort}
+
+    def get_session_model_binding(self, agent_id: str, session_id: str) -> dict[str, str] | None:
+        with self.session() as db:
+            row = db.execute(
+                select(SessionRow).where(SessionRow.agent_id == agent_id, SessionRow.id == session_id)
+            ).scalar_one_or_none()
+            if row is None or not row.selected_model_provider or not row.selected_model:
+                return None
+            binding = {"provider": row.selected_model_provider, "model": row.selected_model}
+            if row.selected_reasoning_effort:
+                binding["effort"] = row.selected_reasoning_effort
+            return binding
+
     def get_attachment_row(self, attachment_id: str) -> AttachmentRow | None:
         with self.session() as db:
             return db.get(AttachmentRow, attachment_id)
@@ -967,78 +993,6 @@ class Store:
                 )
             ).scalar_one_or_none()
             return _command_wire(row) if row else None
-
-    def record_model_route(
-        self, route: dict[str, Any], *, created_at: datetime | None = None
-    ) -> tuple[dict[str, Any], bool]:
-        with self.session() as db:
-            existing = db.execute(
-                select(ModelRouteRow).where(
-                    ModelRouteRow.agent_id == route["agent_id"],
-                    ModelRouteRow.session_id == route["session_id"],
-                    ModelRouteRow.command_id == route["command_id"],
-                )
-            ).scalar_one_or_none()
-            if existing is not None:
-                return _model_route_wire(existing), False
-            row = ModelRouteRow(
-                agent_id=route["agent_id"],
-                session_id=route["session_id"],
-                command_id=route["command_id"],
-                tier=route["tier"],
-                provider=route["provider"],
-                model=route["model"],
-                effort=route.get("effort"),
-                reason=route["reason"],
-                cost_units=route["cost_units"],
-                created_at=created_at or utc_now(),
-            )
-            db.add(row)
-            db.flush()
-            return _model_route_wire(row), True
-
-    def model_routing_units(self, agent_id: str, day_start: datetime) -> int:
-        with self.session() as db:
-            value = db.scalar(
-                select(func.coalesce(func.sum(ModelRouteRow.cost_units), 0)).where(
-                    ModelRouteRow.agent_id == agent_id,
-                    ModelRouteRow.created_at >= day_start,
-                    ModelRouteRow.created_at < day_start + timedelta(days=1),
-                )
-            )
-            return int(value or 0)
-
-    def model_routing_usage(self, day_start: datetime) -> list[dict[str, Any]]:
-        with self.session() as db:
-            rows = db.execute(
-                select(
-                    ModelRouteRow.agent_id,
-                    func.sum(ModelRouteRow.cost_units),
-                    func.count(ModelRouteRow.row_id),
-                )
-                .where(
-                    ModelRouteRow.created_at >= day_start,
-                    ModelRouteRow.created_at < day_start + timedelta(days=1),
-                )
-                .group_by(ModelRouteRow.agent_id)
-                .order_by(ModelRouteRow.agent_id)
-            ).all()
-            return [
-                {"agent_id": agent_id, "cost_units": int(units), "commands": int(commands)}
-                for agent_id, units, commands in rows
-            ]
-
-    def latest_model_route(self, agent_id: str, session_id: str) -> dict[str, Any] | None:
-        with self.session() as db:
-            row = db.scalars(
-                select(ModelRouteRow)
-                .where(
-                    ModelRouteRow.agent_id == agent_id,
-                    ModelRouteRow.session_id == session_id,
-                )
-                .order_by(ModelRouteRow.row_id.desc())
-            ).first()
-            return _model_route_wire(row) if row is not None else None
 
     def list_commands(self, agent_id: str, session_id: str) -> list[dict[str, Any]]:
         with self.session() as db:

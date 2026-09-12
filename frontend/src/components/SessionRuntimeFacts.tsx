@@ -1,14 +1,14 @@
 import { useQuery } from '@tanstack/react-query'
-import { IconRobot, IconTerminal2 } from '@tabler/icons-react'
 import type { Agent, Session } from '../domain/types'
 import { api } from '../api/client'
 import { useSessionModel } from '../hooks/useSessionModel'
 import { useAstrorderStore } from '../state/store'
+import { AgentBrandIcon } from './AgentBrandIcon'
 import './sessionRuntimeFacts.css'
 
-export function AgentKindBadge({ agent }: { agent?: Agent }) {
+export function AgentKindBadge({ agent, iconOnly = false }: { agent?: Agent; iconOnly?: boolean }) {
   const label = agent?.kind === 'hermes' ? 'Hermes' : agent?.kind === 'codex' ? 'Codex' : 'Agent 未识别'
-  return <span className="agent-kind-badge" data-agent-kind={agent?.kind || 'unknown'} title={agent?.name}>{agent?.kind === 'codex' ? <IconTerminal2 size={13} /> : <IconRobot size={13} />}{label}</span>
+  return <span className="agent-kind-badge" data-agent-kind={agent?.kind || 'unknown'} title={agent?.name} aria-label={iconOnly ? label : undefined}><AgentBrandIcon kind={agent?.kind} size={13} />{!iconOnly && label}</span>
 }
 
 export function SessionRuntimeFacts({ session, agent }: { session: Session; agent?: Agent }) {

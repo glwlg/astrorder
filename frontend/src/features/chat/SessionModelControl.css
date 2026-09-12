@@ -59,9 +59,10 @@
 }
 
 .codex-model-header-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) 22px;
   align-items: center;
-  justify-content: space-between;
+  gap: 6px;
 }
 .codex-model-icon-bolt {
   display: flex;
@@ -70,17 +71,30 @@
 }
 .codex-model-title-btn {
   display: flex;
+  flex-direction: column;
   align-items: center;
   gap: 3px;
+  min-width: 0;
+  max-width: 100%;
+  justify-self: center;
   background: transparent;
   border: 0;
   cursor: pointer;
-  padding: 2px 6px;
+  padding: 5px 6px;
   border-radius: 6px;
   color: #0066cc;
 }
 .codex-model-title-btn:hover {
   background: color-mix(in srgb, #0066cc 10%, transparent);
+}
+.codex-model-title-btn:focus-visible {
+  outline: 2px solid #0066cc;
+  outline-offset: 2px;
+}
+.codex-model-effort-row {
+  display: flex;
+  align-items: center;
+  gap: 3px;
 }
 .codex-model-effort-highlight {
   font-size: 14px;
@@ -89,21 +103,14 @@
 }
 
 .codex-model-name-label {
-  background: transparent;
-  border: 0;
-  padding: 0;
+  max-width: 100%;
   text-align: center;
   font-size: 13px;
   font-weight: 600;
   color: var(--astr-text);
-  cursor: pointer;
-  margin: 2px 0 6px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.codex-model-name-label:hover {
-  color: #0066cc;
 }
 
 .codex-model-slider-wrap {

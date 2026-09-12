@@ -365,6 +365,8 @@ class LocalHermesController:
         self.store: Any = None
         self._tui_to_session: dict[str, str] = {}
         self._active_submitted_commands: dict[str, str] = {}
+        self._compaction_callback = None
+        self._compactions: dict[str, dict[str, Any]] = {}
 
     @property
     def _plugin_root(self) -> Path:
@@ -527,6 +529,7 @@ class LocalHermesController:
                         waiter.put(frame)
                 params = frame.get("params")
                 if frame.get("method") == "event" and isinstance(params, dict):
+                    self._on_compaction_event(params)
                     event_type = params.get("type")
                     if event_type == "gateway.ready":
                         self._gateway_ready.set()
@@ -558,7 +561,13 @@ class LocalHermesController:
                 + "\n"
             )
             stream.flush()
-            return waiter.get(timeout=timeout)
+            response = waiter.get(timeout=timeout)
+            if method == 'session.resume' and isinstance(response.get('result'), dict):
+                handle = response['result'].get('session_id')
+                native_id = params.get('session_id')
+                if isinstance(handle, str) and isinstance(native_id, str):
+                    self._tui_to_session[handle] = native_id
+            return response
         except (OSError, queue.Empty):
             return None
         finally:
@@ -598,6 +607,27 @@ class LocalHermesController:
 
     def set_discovery_callback(self, callback: Callable[[Any], None] | None) -> None:
         self._discovery_callback = callback
+
+    def set_compaction_callback(self, callback) -> None:
+        self._compaction_callback = callback
+
+    def _on_compaction_event(self, params: dict[str, Any]) -> None:
+        from .hermes_compaction import compaction_update
+
+        session_id = self._tui_to_session.get(str(params.get('session_id')))
+        if not session_id or not self._agent_id or self._compaction_callback is None:
+            return
+        update = compaction_update(params, self._compactions.get(session_id))
+        if update is None:
+            return
+        if update['state'] == 'running':
+            self._compactions[session_id] = update
+        else:
+            self._compactions.pop(session_id, None)
+        try:
+            self._compaction_callback(self._agent_id, session_id, update)
+        except Exception:
+            logger.exception('Failed forwarding Hermes compaction status')
 
     def set_command_completion_callback(
         self, callback: Callable[[str, str, str], None] | None
@@ -786,6 +816,7 @@ class LocalHermesController:
             text = command.get("text")
             if not isinstance(text, str):
                 return "failed", "本机 Hermes 命令文本无效。"
+            self._tui_to_session[str(tui_id)] = str(session_id)
             from .hermes_inputs import rollback, stage, stage_daemon_attachments
             settings = getattr(self, "settings", None)
             store = getattr(self, "store", None)
@@ -1349,7 +1380,15 @@ class ConnectionController:
                 "正在请求守护进程启动远程 SSH bridge。",
                 {"phase": "daemon_spawn"},
             )
-            runtime = self._daemon_ssh_factory(remote)
+            daemon_remote = {
+                **remote,
+                "settings": {
+                    **remote["settings"],
+                    "display_name": remote["display_name"],
+                    "profile_name": remote["profile_name"],
+                },
+            }
+            runtime = self._daemon_ssh_factory(daemon_remote)
             runtime.store = self.store
             runtime.app_settings = self.settings
             runtime.service = service

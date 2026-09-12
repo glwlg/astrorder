@@ -51,6 +51,35 @@ def test_running_model_change_verifies_pending_selection_instead_of_old_live_mod
     assert set_session_model(rpc, 'native', 'p', 'm') == {'provider': 'p', 'model': 'm', 'deferred': True}
 
 
+@pytest.mark.parametrize('current', ['p', 'other', None])
+def test_lazy_custom_model_switch_requires_session_scoped_provider_readback(current):
+    built = False
+
+    def rpc(method, params):
+        nonlocal built
+        if method == 'model.options':
+            if 'session_id' in params:
+                assert params['session_id'] == 'handle'
+                return {'result': {'providers': [{'slug': current, 'is_current': True}]}}
+            return {'result': {'providers': [{'slug': 'p', 'models': ['m']}]}}
+        if method == 'session.resume':
+            return {'result': {'session_id': 'handle', 'info': {'model': 'm' if built else 'old', 'provider': 'custom' if built else None, 'lazy': not built}}}
+        if method == 'config.set':
+            return {'result': {'value': 'm'}}
+        if method == 'process.list':
+            built = True
+            return {'result': {'processes': []}}
+        if method == 'session.status':
+            return {'result': {'output': 'Model: m (custom)'}}
+        raise AssertionError(method)
+
+    if current == 'p':
+        assert set_session_model(rpc, 'native', 'p', 'm') == {'provider': 'p', 'model': 'm'}
+    else:
+        with pytest.raises(ConnectionError, match='读回确认'):
+            set_session_model(rpc, 'native', 'p', 'm')
+
+
 def test_model_catalog_filters_unconfigured_and_strips_extra_fields():
     def rpc(method, params):
         assert method == 'model.options'

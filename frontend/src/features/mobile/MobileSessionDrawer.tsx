@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type TouchEvent as ReactTouchEvent } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type TouchEvent as ReactTouchEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { IconChevronDown, IconChevronRight, IconDotsVertical, IconPin, IconPinned, IconPlus, IconTrash } from '@tabler/icons-react'
 import type { Session } from '../../domain/types'
@@ -8,13 +8,15 @@ import { ProjectGlyph, type ProjectAppearanceMap } from '../../components/projec
 import { useAstrorderStore } from '../../state/store'
 import { useShallow } from 'zustand/react/shallow'
 import './mobileMessageMenu.css'
+import { SessionActivityBorder } from '../../components/AnimatedStatus'
 
 type SessionMenu = { session: Session; x: number; y: number }
 type ProjectMenu = { project: ProjectGroup; x: number; y: number }
 
-export function MobileSessionDrawer({ groups, pins, selectedKey, appearance, onSelect, onPin, onCreate, onDeleteProject, onDeleteSession }: {
+export function MobileSessionDrawer({ groups, pins, pinnedProjects, selectedKey, appearance, onSelect, onPin, onPinProject, onCreate, onDeleteProject, onDeleteSession }: {
   groups: ProjectGroup[]; pins: Record<string, boolean>; selectedKey: string; appearance: ProjectAppearanceMap
   onSelect: (session: Session) => void; onPin: (session: Session) => void
+  pinnedProjects: string[]; onPinProject: (project: ProjectGroup) => void
   onCreate?: (project: ProjectGroup) => void
   onDeleteProject?: (project: ProjectGroup, event?: { clientX: number; clientY: number }) => void
   onDeleteSession?: (session: Session, event?: { clientX: number; clientY: number }) => void
@@ -25,6 +27,7 @@ export function MobileSessionDrawer({ groups, pins, selectedKey, appearance, onS
   const [projectMenu, setProjectMenu] = useState<ProjectMenu | null>(null)
   const suppressSelect = useRef(false)
   const hold = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
   const commands = useAstrorderStore(useShallow((state) => state.commands))
   useAstrorderStore((state) => state.messages)
   useAstrorderStore((state) => state.tasks)
@@ -34,6 +37,23 @@ export function MobileSessionDrawer({ groups, pins, selectedKey, appearance, onS
   const pinned = groups.flatMap((group) => group.sessions).filter((session) => pins[scopeKey(session.agent_id, session.id)])
   const cancelHold = () => { if (hold.current) clearTimeout(hold.current); hold.current = null }
   useEffect(() => () => cancelHold(), [])
+  useLayoutEffect(() => {
+    const anchor = sessionMenu || projectMenu
+    if (!anchor) return
+    const update = () => {
+      const menu = menuRef.current
+      if (!menu) return
+      const viewport = window.visualViewport
+      const height = menu.getBoundingClientRect().height
+      const topEdge = (viewport?.offsetTop || 0) + 12
+      const top = sessionMenu ? anchor.y - height - 8 : anchor.y + 8
+      menu.style.top = `${Math.max(topEdge, Math.min(top, topEdge + (viewport?.height || window.innerHeight) - height - 24))}px`
+    }
+    update()
+    window.addEventListener('resize', update)
+    window.visualViewport?.addEventListener('resize', update)
+    return () => { window.removeEventListener('resize', update); window.visualViewport?.removeEventListener('resize', update) }
+  }, [sessionMenu, projectMenu])
   useEffect(() => {
     if (!sessionMenu && !projectMenu) return
     const close = (event: PointerEvent) => {
@@ -57,7 +77,8 @@ export function MobileSessionDrawer({ groups, pins, selectedKey, appearance, onS
   const row = (session: Session) => {
     const key = scopeKey(session.agent_id, session.id)
     const title = displaySessionTitle(session)
-    const isRunning = sessionActivityStatus(session, commands) === 'running'
+    const activityStatus = sessionActivityStatus(session, commands)
+    const isRunning = activityStatus === 'running'
     const projectColor = appearance[session.project_id || '']?.color
     return <div
       className={`m-session-row m-hold ${key === selectedKey ? 'selected' : ''} ${isRunning ? 'is-running' : ''}`}
@@ -66,7 +87,7 @@ export function MobileSessionDrawer({ groups, pins, selectedKey, appearance, onS
         '--session-running-color': projectColor || (session.agent_id.includes('codex') ? 'var(--astr-teal, #12b886)' : 'var(--astr-indigo, #5b6cff)'),
       } as CSSProperties}
     >
-      <span aria-hidden="true" className="session-running-arc" />
+      <SessionActivityBorder status={activityStatus} />
       <button
         aria-label={title}
         onClick={() => {
@@ -79,6 +100,7 @@ export function MobileSessionDrawer({ groups, pins, selectedKey, appearance, onS
         }}
         onTouchStart={(event: ReactTouchEvent<HTMLButtonElement>) => {
           cancelHold()
+          suppressSelect.current = false
           const point = event.touches[0]
           hold.current = setTimeout(() => openSessionMenu(session, point.clientX, point.clientY), 500)
         }}
@@ -89,6 +111,14 @@ export function MobileSessionDrawer({ groups, pins, selectedKey, appearance, onS
         <span>{title}</span>
         <small>{formatRelativeTime(session.updated_at)}</small>
       </button>
+      <button className="m-session-more" aria-label={`会话操作 ${title}`} onClick={event => {
+        event.stopPropagation()
+        cancelHold()
+        suppressSelect.current = false
+        setProjectMenu(null)
+        const rect = event.currentTarget.getBoundingClientRect()
+        setSessionMenu({ session, x: rect.right, y: rect.bottom })
+      }}><IconDotsVertical size={16} /></button>
     </div>
   }
 
@@ -111,6 +141,7 @@ export function MobileSessionDrawer({ groups, pins, selectedKey, appearance, onS
             {collapsedNow ? <IconChevronRight size={15} /> : <IconChevronDown size={15} />}
             <ProjectGlyph iconName={appearance[project.key]?.icon} colorName={appearance[project.key]?.color} size={16} />
             <b>{project.label}</b><small>{project.remoteLabel}</small><span>{project.sessionCount}</span>
+            {pinnedProjects.includes(project.key) && <IconPinned size={14} aria-label="已置顶" />}
           </button>
           <button
             className="m-project-more"
@@ -118,7 +149,8 @@ export function MobileSessionDrawer({ groups, pins, selectedKey, appearance, onS
             onClick={(event) => {
               event.stopPropagation()
               setSessionMenu(null)
-              setProjectMenu({ project, x: event.clientX, y: event.clientY })
+              const rect = event.currentTarget.getBoundingClientRect()
+              setProjectMenu({ project, x: rect.right, y: rect.bottom })
             }}
           >
             <IconDotsVertical size={16} />
@@ -131,7 +163,7 @@ export function MobileSessionDrawer({ groups, pins, selectedKey, appearance, onS
       </section>
     })}
     {sessionMenu && createPortal(
-      <div role="menu" aria-label="会话操作" className="m-message-popover" style={{ left: Math.max(12, sessionMenu.x - 114), top: Math.max(12, sessionMenu.y - 64) }}>
+      <div ref={menuRef} role="menu" aria-label="会话操作" className="m-message-popover m-drawer-menu" style={{ '--menu-x': `${sessionMenu.x - 114}px` } as CSSProperties}>
         <button role="menuitem" onClick={() => { onPin(sessionMenu.session); setSessionMenu(null) }}>
           {pins[scopeKey(sessionMenu.session.agent_id, sessionMenu.session.id)] ? <IconPinned size={17} /> : <IconPin size={17} />}
           {pins[scopeKey(sessionMenu.session.agent_id, sessionMenu.session.id)] ? '取消置顶' : '置顶'}
@@ -143,7 +175,11 @@ export function MobileSessionDrawer({ groups, pins, selectedKey, appearance, onS
       document.body,
     )}
     {projectMenu && createPortal(
-      <div role="menu" aria-label={`项目操作 ${projectMenu.project.label}`} className="m-message-popover" style={{ left: Math.max(12, projectMenu.x - 114), top: Math.max(12, projectMenu.y + 8) }}>
+      <div ref={menuRef} role="menu" aria-label={`项目操作 ${projectMenu.project.label}`} className="m-message-popover m-drawer-menu" style={{ '--menu-x': `${projectMenu.x - 114}px` } as CSSProperties}>
+        <button role="menuitem" onClick={() => { onPinProject(projectMenu.project); setProjectMenu(null) }}>
+          {pinnedProjects.includes(projectMenu.project.key) ? <IconPinned size={17} /> : <IconPin size={17} />}
+          {pinnedProjects.includes(projectMenu.project.key) ? '取消置顶项目' : '置顶项目'}
+        </button>
         {onCreate && <button role="menuitem" onClick={() => { onCreate(projectMenu.project); setProjectMenu(null) }}><IconPlus size={17} />新建会话</button>}
         {onDeleteProject && !projectMenu.project.key.startsWith('unmarked:') && (
           <button role="menuitem" onClick={(event) => { onDeleteProject(projectMenu.project, event); setProjectMenu(null) }}>

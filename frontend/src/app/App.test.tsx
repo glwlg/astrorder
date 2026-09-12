@@ -5,6 +5,8 @@ import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 
+const emptyPreferences = { appearance: {}, session_pins: {}, pinned_projects: [], project_order: [] }
+
 function renderApp(initialEntries = ['/']) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
@@ -42,6 +44,9 @@ describe('isolated browser API fixture scope — not production Agent data', () 
       if (url.endsWith('/bootstrap')) {
         return new Response(JSON.stringify({ protocol_version: 1, agents: [], sessions: [], cursor: 0 }), { status: 200, headers: { 'Content-Type': 'application/json' } })
       }
+      if (url.endsWith('/preferences')) {
+        return new Response(JSON.stringify(emptyPreferences), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
       return new Response(JSON.stringify({ items: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
     })
     vi.stubGlobal('WebSocket', class {
@@ -74,6 +79,7 @@ describe('isolated browser API fixture scope — not production Agent data', () 
           ],
         })
       }
+      if (url.endsWith('/preferences')) return json(emptyPreferences)
       if (url.includes('/messages?') && url.includes('agent_id=agent-b')) {
         return json({ next_cursor: null, items: [{ id: 'message-b', session_id: 'shared', agent_id: 'agent-b', role: 'assistant', kind: 'message', text: '来自 B', attachments: [], created_at: '2026-01-02T00:00:00Z', command_id: null, tool: null }] })
       }
@@ -105,6 +111,9 @@ describe('isolated browser API fixture scope — not production Agent data', () 
       }
       if (url.endsWith('/bootstrap')) {
         return new Response(JSON.stringify({ protocol_version: 1, agents: [], sessions: [], cursor: 0 }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      if (url.endsWith('/preferences')) {
+        return new Response(JSON.stringify(emptyPreferences), { status: 200, headers: { 'Content-Type': 'application/json' } })
       }
       return new Response(JSON.stringify({ items: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
     })

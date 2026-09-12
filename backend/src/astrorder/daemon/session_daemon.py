@@ -25,6 +25,7 @@ SESSION_STATUSES = frozenset({"running", "waiting_approval", "idle", "error"})
 RUNTIME_ACTIONS = frozenset(
     {
         "session.send",
+        "session.steer",
         "session.interrupt",
         "session.approve",
         "session.settings",
@@ -687,6 +688,7 @@ def create_session_daemon(
     pty_config: Any | None = None,
     hermes_runtime: Any | None = None,
     ssh_runtime: Any | None = None,
+    remote_codex_runtime: Any | None = None,
     shutdown_event: asyncio.Event | None = None,
 ) -> SessionDaemon:
     """Create a daemon and register only explicitly enabled runtime adapters."""
@@ -695,6 +697,7 @@ def create_session_daemon(
         or pty_config is not None
         or hermes_runtime is not None
         or ssh_runtime is not None
+        or remote_codex_runtime is not None
     ) and secret is None:
         raise ValueError("a daemon secret is required when registering runtime adapters")
     daemon = SessionDaemon(
@@ -712,7 +715,11 @@ def create_session_daemon(
         from .pty_runtime import PtyDaemonRuntime
 
         daemon.register_runtime("pty", PtyDaemonRuntime(pty_config, emit=daemon.publish))
-    for agent_type, runtime in (("hermes", hermes_runtime), ("ssh", ssh_runtime)):
+    for agent_type, runtime in (
+        ("hermes", hermes_runtime),
+        ("ssh", ssh_runtime),
+        ("codex-ssh", remote_codex_runtime),
+    ):
         if runtime is None:
             continue
         set_emitter = getattr(runtime, "set_emitter", None)
@@ -733,6 +740,7 @@ async def _run_forever(
     pty_config: Any | None = None,
     hermes_runtime: Any | None = None,
     ssh_runtime: Any | None = None,
+    remote_codex_runtime: Any | None = None,
 ) -> None:
     stopping = asyncio.Event()
     daemon = create_session_daemon(
@@ -743,6 +751,7 @@ async def _run_forever(
         pty_config=pty_config,
         hermes_runtime=hermes_runtime,
         ssh_runtime=ssh_runtime,
+        remote_codex_runtime=remote_codex_runtime,
         shutdown_event=stopping,
     )
     server = await daemon.serve(host, port)
@@ -820,6 +829,7 @@ def main(argv: list[str] | None = None) -> None:
             lambda: LocalHermesController(hermes_settings)
         )
     ssh_runtime = None
+    remote_codex_runtime = None
     if args.enable_ssh:
         if not secret:
             parser.error("ASTRORDER_SESSION_DAEMON_SECRET is required with --enable-ssh")
@@ -858,6 +868,19 @@ def main(argv: list[str] | None = None) -> None:
             )
 
         ssh_runtime = SshDaemonRuntimeRegistry(ssh_factory)
+        if args.enable_codex:
+            from .remote_codex_runtime import RemoteCodexDaemonRuntime
+
+            def remote_codex_factory(
+                connection_id: str, raw_settings: Mapping[str, Any]
+            ) -> RemoteCodexDaemonRuntime:
+                return RemoteCodexDaemonRuntime(
+                    connection_id,
+                    raw_settings,
+                    emit=lambda *_args, **_kwargs: None,
+                )
+
+            remote_codex_runtime = SshDaemonRuntimeRegistry(remote_codex_factory)
     asyncio.run(
         _run_forever(
             args.host,
@@ -869,6 +892,7 @@ def main(argv: list[str] | None = None) -> None:
             pty_config=pty_config,
             hermes_runtime=hermes_runtime,
             ssh_runtime=ssh_runtime,
+            remote_codex_runtime=remote_codex_runtime,
         )
     )
 

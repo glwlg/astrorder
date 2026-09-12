@@ -30,6 +30,7 @@ CONTROL_ACTIONS = frozenset(
         "session.create",
         "session.spawn",
         "session.send",
+        "session.steer",
         "session.interrupt",
         "session.approve",
         "session.settings",

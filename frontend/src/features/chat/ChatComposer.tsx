@@ -1,7 +1,7 @@
 import { IconMicrophone, IconPaperclip, IconPlus, IconPlayerStop, IconArrowUp, IconX } from '@tabler/icons-react'
 import { Alert, Button, Group, Paper, Stack, Text, Textarea } from '@mantine/core'
 import { useQueryClient } from '@tanstack/react-query'
-import { type ChangeEvent, type ClipboardEvent, type KeyboardEvent, useEffect, useRef, useState } from 'react'
+import { type ChangeEvent, type ClipboardEvent, type KeyboardEvent, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { ApiError, api } from '../../api/client'
 import { isDraftSendable, newCommandId, scopeKey } from '../../domain/semantics'
@@ -15,6 +15,8 @@ import { clipboardFiles } from './composerMedia'
 import { notifySessionSubmitted } from '../../hooks/useSessionOrder'
 import '../agents/agentsLayout.css'
 import { ApprovalModeControl } from './ApprovalModeControl'
+import { MobileOutbox } from '../mobile/mobileOutbox'
+import { mobileOutboxStorage } from '../mobile/mobileOutboxStorage'
 
 const EMPTY_DRAFT: DraftState = { text: '', attachments: [] }
 const allowedFiles = 'image/*,audio/*,.pdf,.txt,.md,.json,.csv,.log,.webp'
@@ -63,6 +65,16 @@ export function ChatComposer({
   const submittingRef = useRef(false)
   const [error, setError] = useState<string | null>(null)
   const [submittedCommandId, setSubmittedCommandId] = useState<string | null>(null)
+  const [outbox] = useState(() => new MobileOutbox(mobileOutboxStorage, {
+    upload: api.uploadAttachment,
+    send: async payload => {
+      const result = await api.createCommand(payload)
+      useAstrorderStore.getState().mergeCommands([result])
+      return result
+    },
+  }))
+  const queue = useSyncExternalStore(outbox.subscribe, outbox.snapshot)
+  const [outboxReady, setOutboxReady] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const attachmentKeyRef = useRef(0)
   const cardRef = useRef<HTMLDivElement>(null)
@@ -97,16 +109,34 @@ export function ChatComposer({
   const canChat = hasCapability(agent, 'chat')
   const canAttach = hasCapability(agent, 'attachments')
   const runningCommand = commands.find((command) => (command.action === 'send' || command.action === 'enqueue') && (command.state === 'running' || command.state === 'accepted'))
-  const busy = submitting || session.status === 'running' || session.status === 'waiting_approval' || Boolean(runningCommand)
+  const nativeBusy = session.status === 'running' || session.status === 'waiting_approval' || Boolean(runningCommand)
+  const busy = submitting || nativeBusy
+  const pending = queue.filter(row => row.payload.agent_id === session.agent_id && row.payload.session_id === session.id && !['accepted', 'running', 'completed'].includes(row.state))
   const canStop = hasCapability(agent, 'stop') && busy
   const hasDraft = isDraftSendable(draft.text, draft.attachments)
-  // 当且仅当系统处于执行中且输入框完全为空时，按钮才作为紧急打断的“停止”按钮；若有草稿输入，则作为发送/转向
+  // 执行中且输入为空时停止；有草稿时先排队，由用户显式选择是否立即引导。
   const isStopAction = busy && !hasDraft
   const submittedCommand = submittedCommandId ? commands.find((item) => item.id === submittedCommandId) : undefined
   const submittedCommandError = submittedCommand && (submittedCommand.state === 'failed' || submittedCommand.state === 'unknown')
     ? submittedCommand.error || (submittedCommand.state === 'failed' ? '原生命令执行失败。' : '原生命令执行结果未确认。')
     : null
   const visibleError = error || submittedCommandError
+
+  useEffect(() => {
+    let mounted = true
+    void outbox.load().then(() => { if (mounted) setOutboxReady(true) }).catch(nextError => setError(errorMessage(nextError)))
+    return () => { mounted = false }
+  }, [outbox])
+
+  useEffect(() => {
+    if (outboxReady) void outbox.reconcile(commands, [session]).catch(nextError => setError(errorMessage(nextError)))
+  }, [commands, outbox, outboxReady, session])
+
+  useEffect(() => {
+    if (outboxReady && !nativeBusy && agent?.status === 'ready' && pending.some(row => row.state === 'queued')) {
+      void outbox.flush(session.agent_id, session.id).catch(nextError => setError(errorMessage(nextError)))
+    }
+  }, [agent?.status, nativeBusy, outbox, outboxReady, pending, session.agent_id, session.id])
 
   const updateDraft = (next: DraftState) => useAstrorderStore.getState().setDraft(session.agent_id, session.id, next)
   const setText = (text: string) => updateDraft({ ...draft, text })
@@ -146,6 +176,32 @@ export function ChatComposer({
       }
     }
     if (submitting || submittingRef.current) return
+
+    if (action === 'send' && nativeBusy) {
+      submittingRef.current = true
+      setSubmitting(true)
+      setError(null)
+      try {
+        if (!outboxReady) await outbox.load()
+        await outbox.enqueue({
+          id: newCommandId(),
+          agent_id: session.agent_id,
+          session_id: session.id,
+          action: 'send',
+          text: draft.text,
+          attachment_ids: [],
+          target_id: null,
+        }, files)
+        updateDraft(EMPTY_DRAFT)
+        notifySessionSubmitted(session)
+      } catch (nextError) {
+        setError(errorMessage(nextError))
+      } finally {
+        submittingRef.current = false
+        setSubmitting(false)
+      }
+      return
+    }
 
     const commandId = newCommandId()
     const command = localCommand(session, commandId, action, action === 'send' || action === 'enqueue' ? draft.text : '')
@@ -205,6 +261,25 @@ export function ChatComposer({
     }
   }
 
+  const steerQueued = async (commandId: string) => {
+    if (submitting || submittingRef.current) return
+    submittingRef.current = true
+    setSubmitting(true)
+    setError(null)
+    try {
+      await outbox.flush(session.agent_id, session.id, commandId)
+      const failed = outbox.snapshot().find(row => row.payload.id === commandId && (row.state === 'failed' || row.state === 'unknown'))
+      if (failed?.error) setError(failed.error)
+      await queryClient.invalidateQueries({ queryKey: ['astrorder', 'commands', session.agent_id, session.id] })
+      await queryClient.invalidateQueries({ queryKey: ['astrorder', 'messages', session.agent_id, session.id] })
+    } catch (nextError) {
+      setError(errorMessage(nextError))
+    } finally {
+      submittingRef.current = false
+      setSubmitting(false)
+    }
+  }
+
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault()
@@ -226,7 +301,16 @@ export function ChatComposer({
       <Paper ref={cardRef} className="composer-card" withBorder radius="lg" p="sm">
         <GitStatusBar session={session} />
         <Stack gap="xs">
-        {visibleError && <Alert color="red" variant="light" icon={<IconX size={17} />} aria-live="assertive">{visibleError}</Alert>}
+        {pending.map(entry => (
+          <Paper key={entry.payload.id} withBorder radius="md" p="xs" aria-label="待发消息">
+            <Group justify="space-between" gap="xs" wrap="nowrap">
+              <Text size="sm" lineClamp={1}>{entry.payload.text || '附件消息'}</Text>
+              {entry.state === 'queued' && <Button size="compact-xs" variant="light" onClick={() => void steerQueued(entry.payload.id)}>立即引导</Button>}
+              {entry.state !== 'queued' && <Text size="xs" c="dimmed">{entry.state === 'submitting' ? '发送中' : '已提交'}</Text>}
+            </Group>
+          </Paper>
+        ))}
+        {visibleError && <Alert color="red" variant="light" icon={<IconX size={17} />} withCloseButton onClose={() => { setError(null); setSubmittedCommandId(null) }} aria-live="assertive">{visibleError}</Alert>}
         {draft.attachments.length > 0 && (
           <div className="draft-attachments" aria-label="待发送附件">
             {draft.attachments.map((item) => (
@@ -274,7 +358,7 @@ export function ChatComposer({
             radius="xl"
             disabled={submitting || (isStopAction ? !canStop : !canChat || !hasDraft)}
             onClick={() => void submit(isStopAction ? 'stop' : 'send', isStopAction ? session.id : null)}
-            aria-label={isStopAction ? '停止' : '发送'}
+            aria-label={isStopAction ? '停止' : nativeBusy ? '加入队列' : '发送'}
             aria-busy={submitting}
           >
             {isStopAction ? <IconPlayerStop size={18} /> : <IconArrowUp size={18} />}
