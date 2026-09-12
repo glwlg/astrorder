@@ -1,4 +1,10 @@
-import type { Message } from './types'
+import type { Message, Session } from './types'
+
+export function isEphemeralSession(session: Pick<Session, 'ephemeral' | 'title'>): boolean {
+  // Exact marker emitted by older side-chat builds that lost the wire flag.
+  // Do not hide ordinary titles merely discussing side chat.
+  return session.ephemeral === true || session.title === '[侧边聊天]'
+}
 
 export function scopeKey(agentId: string, sessionId: string): string {
   return `${agentId}::${sessionId}`

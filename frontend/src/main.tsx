@@ -7,8 +7,11 @@ import { Notifications } from '@mantine/notifications'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter } from 'react-router-dom'
 import App from './app/App.tsx'
+import { installGlobalNativeHoldBlocker } from './features/mobile/mobileGestures'
 import './index.css'
 import './workspaceVisuals.css'
+
+installGlobalNativeHoldBlocker()
 
 const queryClient = new QueryClient({
   defaultOptions: {

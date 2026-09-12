@@ -27,7 +27,9 @@ it('embeds the model picker and swaps the primary send button for native stop un
   await waitFor(() => expect(screen.getByRole('button', { name: '停止' })).toBeEnabled())
   fireEvent.click(screen.getByRole('button', { name: '停止' }))
   await waitFor(() => expect(create).toHaveBeenCalledTimes(2))
-  expect(create.mock.calls[1][0]).toMatchObject({ action: 'stop', text: '', target_id: create.mock.calls[0][0].id, session_id: session.id })
+  // Native stop requires target_id == session_id (the session to interrupt),
+  // not a command id — see service._capability_error.
+  expect(create.mock.calls[1][0]).toMatchObject({ action: 'stop', text: '', target_id: session.id, session_id: session.id })
   useAstrorderStore.getState().resetRuntime()
   view.rerender(wrap({ ...session, status: 'running' }))
   expect(screen.getByRole('button', { name: '停止' })).toBeInTheDocument()

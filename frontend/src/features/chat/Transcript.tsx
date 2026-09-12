@@ -188,6 +188,7 @@ function MessageItem({
             value={message.text}
             user={isUser}
             onImageClick={onImageClick}
+            attachmentNames={message.attachments.filter((attachment) => attachment.media_type.startsWith('image/')).map((attachment) => attachment.name)}
             renderMarkdown={(value) => <MarkdownContent value={value} onImageClick={onImageClick} session={session} />}
           />
         )}

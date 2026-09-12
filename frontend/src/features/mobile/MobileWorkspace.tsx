@@ -16,6 +16,7 @@ import { useSessionOrder, notifySessionSubmitted } from '../../hooks/useSessionO
 import { buildProjectGroups, displaySessionTitle } from '../../components/sessionRailModel'
 import type { ProjectGroup } from '../../components/sessionRailModel'
 import { NewSessionDialog } from '../../components/NewSessionDialog'
+import { BrandMark } from '../../components/BrandMark'
 import { ConfirmPopover } from '../../components/ConfirmPopover'
 import { confirmationCoordinatesFromEvent, type ConfirmationCoordinates } from '../../components/confirmationPosition'
 import { AgentSessionFilter, matchesAgent } from '../../components/AgentSessionFilter'
@@ -27,6 +28,7 @@ import { MobileSessionDrawer } from './MobileSessionDrawer'
 import { MobileSessionDeck, type SessionCardCut } from './MobileSessionDeck'
 import { VoiceInputSheet } from '../chat/VoiceInputSheet'
 import { MobileTranscript, type MessageActionAnchor } from './MobileTranscript'
+import { MobileArtifactSheet } from './MobileArtifactSheet'
 import { MobileMessageMenu } from './MobileMessageMenu'
 import { EnvironmentConnections } from '../agents/EnvironmentConnections'
 import { MobileApprovals } from './MobileApprovals'
@@ -36,12 +38,27 @@ import { MobileOutbox } from './mobileOutbox'
 import { NativeObservationPanel } from '../../components/NativeObservationPanel'
 import { ApprovalModeControl } from '../chat/ApprovalModeControl'
 import { mobileOutboxStorage } from './mobileOutboxStorage'
-import { closesSessionDrawerFromSwipe, opensSessionDrawerFromEdge, startsAtSessionDrawerEdge, type SessionCardPose, type SessionSwipeGesture } from './mobileGestures'
+import { closesSessionDrawerFromSwipe, opensSessionDrawerFromEdge, startsAtSessionDrawerEdge, suppressNativeHold, type SessionCardPose, type SessionSwipeGesture } from './mobileGestures'
 import './mobile.css'
 import './mobilePolish.css'
 
 const messageError = (error: unknown) => error instanceof Error ? error.message : '操作未确认，请检查连接。'
 const queueLabels = { queued: '排队待发', submitting: '发送中', received: '等待原生确认', accepted: '已接受，等待本轮结束', running: '执行中', unknown: '结果未确认，未自动重发', failed: '未发送成功，内容已保留', cancelled: '已取消', completed: '已完成' }
+
+/** 把附件 URL 或 markdown 相对路径解析为文件系统绝对路径 */
+function resolveMobileFilePath(raw: string, workspace?: string | null): string {
+  const decoded = decodeURIComponent(raw.trim().replace(/^<|>$/g, ''))
+  // 附件 URL（/api/v1/attachments/...）直接用 name
+  if (decoded.startsWith('/api/v1/')) return decoded
+  // 已是绝对路径
+  if (/^[a-zA-Z]:[/\\]/.test(decoded) || decoded.startsWith('/')) return decoded
+  // 相对路径拼 workspace
+  if (workspace) {
+    const sep = workspace.includes('\\') ? '\\' : '/'
+    return `${workspace.replace(/[/\\]+$/, '')}${sep}${decoded}`
+  }
+  return decoded
+}
 type MobileConfirmation =
   | { kind: 'delete-session'; session: Session; coords: ConfirmationCoordinates }
   | { kind: 'delete-project'; project: ProjectGroup; coords: ConfirmationCoordinates }
@@ -107,6 +124,7 @@ export function MobileWorkspace() {
   const [task, setTask] = useState<Task | null>(null)
   const [voice, setVoice] = useState(false)
   const [image, setImage] = useState<string | null>(null)
+  const [artifactPath, setArtifactPath] = useState<string | null>(null)
   const [drafts, setDrafts] = useState<Record<string, string>>(() => { try { return JSON.parse(localStorage.getItem('astrorder:mobile-drafts') || '{}') } catch { return {} } })
   const key = selected ? scopeKey(selected.agent_id, selected.id) : ''
   useEffect(closeMessageMenu, [key, closeMessageMenu])
@@ -444,9 +462,9 @@ export function MobileWorkspace() {
     }
   }
 
-  return <div className="mobile-workspace" data-mobile-shell="independent" onTouchStartCapture={handleWorkspaceTouchStart} onTouchMoveCapture={handleWorkspaceTouchMove} onTouchEndCapture={handleWorkspaceTouchEnd} onTouchCancelCapture={() => { edgeTouch.current = null }}>
+  return <div className="mobile-workspace" data-mobile-shell="independent" onContextMenuCapture={(event) => suppressNativeHold(event.nativeEvent)} onTouchStartCapture={handleWorkspaceTouchStart} onTouchMoveCapture={handleWorkspaceTouchMove} onTouchEndCapture={handleWorkspaceTouchEnd} onTouchCancelCapture={() => { edgeTouch.current = null }}>
     {createOpened && <NewSessionDialog agents={agents} project={createProject} initialAgentId={agentFilter !== 'all' ? agentFilter : undefined} onClose={() => setCreateOpened(false)} onCreated={session => { setSearch(''); select(session) }} />}
-    <header className="m-header"><div className="m-brand"><button className="m-session-nav" aria-label="打开会话列表" onClick={() => { setSheet('sessions'); void openState.refetch() }}><IconMessageCircle size={21} /></button><img className="m-brand-mark" src="/pwa-192.png" alt="" /><strong>星序</strong><span className={`m-dot ${connection === 'connected' ? 'online' : ''}`} aria-label={connection === 'connected' ? '已连接' : '连接中'} /></div><div className="m-header-actions">
+    <header className="m-header"><div className="m-brand"><button className="m-session-nav" aria-label="打开会话列表" onClick={() => { setSheet('sessions'); void openState.refetch() }}><IconMessageCircle size={21} /></button><BrandMark className="m-brand-mark" size={26} alt="" /><strong>星序</strong><span className={`m-dot ${connection === 'connected' ? 'online' : ''}`} aria-label={connection === 'connected' ? '已连接' : '连接中'} /></div><div className="m-header-actions">
       <button aria-label="新建会话" onClick={() => { setCreateProject(null); setCreateOpened(true) }}><IconPlus size={21} /></button>
       <Menu position="bottom-end" width={210} withinPortal>
         <Menu.Target><button aria-label="应用设置"><IconDotsVertical size={21} /></button></Menu.Target>
@@ -460,23 +478,16 @@ export function MobileWorkspace() {
       </Menu>
     </div></header>
     <main className="m-main">{selected ? <MobileSessionDeck sessionKey={key} cut={sessionTransition} drag={sessionDrag}>
-      <div className="m-card-head"><div><h1>{displaySessionTitle(selected)}</h1><small><AgentKindBadge agent={agents[selected.agent_id]} /> {agents[selected.agent_id]?.name || selected.agent_id}</small></div><button aria-label="会话信息" onClick={() => setSheet('status')}><IconDotsVertical size={20} /></button></div>
-      <MobileTranscript messages={messages} approvals={approvals} onApproval={(approval, action) => void handleApproval(approval, action)} busy={busy} loadOlder={() => resources.messages.fetchNextPage()} hasOlder={!!resources.messages.hasNextPage} loadingOlder={resources.messages.isFetchingNextPage} onMessageAction={anchor => setMessageAction({ ...anchor, sessionKey: key })} onImage={setImage} onSwipe={switchSession} onSwipePreview={setSessionDrag} />
-      {!!pending.length && <button className="m-queue-banner" onClick={() => setSheet('queue')}>消息队列 ({pending.length}) · {queueLabels[pending[0].state]}{pending[0].error ? ` · ${pending[0].error}` : ''}</button>}
-    </MobileSessionDeck> : <div className="m-empty">从左上角选择会话，或新建会话</div>}</main>
-    <section className="m-composer-float">
-
-      {!!activeTasks.length && <div className="m-active-tasks">{activeTasks.map(item => <button key={item.id} onClick={() => { setTask(item); setSheet('task') }}><span className="m-dot online" />{item.title}</button>)}</div>}
-      {!!approvals.length && <button className="m-queue-banner" onClick={() => setSheet('status')}>等待授权 · {approvals.length} 项</button>}
-      {quote && <div className="m-quote"><span>{quote}</span><button aria-label="取消引用" onClick={() => setQuote('')}><IconX size={16} /></button></div>}
-      {!!files.length && <div className="m-attachments">{files.map((file, i) => <MobileAttachmentPreview key={`${file.name}-${i}`} file={file} onOpen={setImage} onRemove={() => updateFiles(files.filter((_, n) => n !== i))} />)}</div>}
-      <div className="m-composer"><input hidden ref={fileInput} type="file" multiple accept="image/*,audio/*,.pdf,.txt,.md,.json,.csv,.log" onChange={e => { updateFiles([...files, ...Array.from(e.target.files || [])]); e.target.value = '' }} />
-        <textarea ref={textarea} aria-label="消息内容" placeholder="输入消息，可粘贴图片…" rows={1} value={text} onPaste={event => { const pasted = clipboardFiles(event); if (pasted.length) { event.preventDefault(); updateFiles([...files, ...pasted]) } }} onChange={e => { setText(e.target.value); e.target.style.height = '35px'; e.target.style.height = `${Math.min(140, Math.max(35, e.target.scrollHeight))}px` }} />
-        <div className="m-composer-tools"><button aria-label="添加附件" onClick={() => fileInput.current?.click()}><IconPlus size={21} /></button>
-        {selected && <ApprovalModeControl session={selected} compact />}
-        <button className="m-model-trigger" aria-label="选择会话模型" title={sessionModel.label} disabled={!selected} onClick={() => void openModels()}><IconCpu size={15} /><span>{sessionModel.label}</span></button>
-        <Menu position="top-end" width={230} withinPortal>
-          <Menu.Target><button aria-label="会话操作" disabled={!selected}><IconDotsVertical size={20} /></button></Menu.Target>
+      <div className="m-card-head">
+        <div>
+          <h1>{displaySessionTitle(selected)}</h1>
+          <small><AgentKindBadge agent={agents[selected.agent_id]} /> {agents[selected.agent_id]?.name || selected.agent_id}</small>
+          <button className="m-model-chip" aria-label="选择会话模型" title={sessionModel.label} onClick={() => void openModels()}>
+            <IconCpu size={14} /><span>{sessionModel.label}</span>
+          </button>
+        </div>
+        <Menu position="bottom-end" width={230} withinPortal>
+          <Menu.Target><button aria-label="会话操作"><IconDotsVertical size={20} /></button></Menu.Target>
           <Menu.Dropdown>
             <Menu.Item leftSection={<IconPlayerPlay size={17} />} onClick={() => void send('继续')}>继续</Menu.Item>
             <Menu.Item leftSection={<IconInfoCircle size={17} />} onClick={() => setSheet('status')}>运行状态</Menu.Item>
@@ -486,9 +497,21 @@ export function MobileWorkspace() {
             <Menu.Item color="red" leftSection={<IconPlayerStop size={17} />} onClick={(event) => requestStopAll(event)}>终止全部任务</Menu.Item>
           </Menu.Dropdown>
         </Menu>
-        {text && <button aria-label="清空输入内容" onClick={() => { setText(''); if (textarea.current) textarea.current.style.height = '35px' }}><IconX size={18} /></button>}
-        <button aria-label="语音消息" onClick={() => setVoice(true)}><IconMicrophone size={21} /></button><button className="m-send" data-stop={busy && !text && !files.length} aria-label={busy && !text && !files.length ? '停止' : '发送'} disabled={submitting || !selected} onClick={() => busy && !text && !files.length ? void stop() : void send()}>{submitting ? <IconLoader2 className="m-spin" size={20} /> : busy && !text && !files.length ? <IconPlayerStop size={19} /> : <IconSend size={20} />}</button>
-        </div>
+      </div>
+      <MobileTranscript messages={messages} approvals={approvals} onApproval={(approval, action) => void handleApproval(approval, action)} busy={busy} loadOlder={() => resources.messages.fetchNextPage()} hasOlder={!!resources.messages.hasNextPage} loadingOlder={resources.messages.isFetchingNextPage} onMessageAction={anchor => setMessageAction({ ...anchor, sessionKey: key })} onImage={setImage} onFile={(path) => setArtifactPath(resolveMobileFilePath(path, selected?.workspace))} onSwipe={switchSession} onSwipePreview={setSessionDrag} />
+      {!!pending.length && <button className="m-queue-banner" onClick={() => setSheet('queue')}>消息队列 ({pending.length}) · {queueLabels[pending[0].state]}{pending[0].error ? ` · ${pending[0].error}` : ''}</button>}
+    </MobileSessionDeck> : <div className="m-empty">从左上角选择会话，或新建会话</div>}</main>
+    <section className="m-composer-float">
+
+      {!!activeTasks.length && <div className="m-active-tasks">{activeTasks.map(item => <button key={item.id} onClick={() => { setTask(item); setSheet('task') }}><span className="m-dot online" />{item.title}</button>)}</div>}
+      {!!approvals.length && <button className="m-queue-banner" onClick={() => setSheet('status')}>等待授权 · {approvals.length} 项</button>}
+      {quote && <div className="m-quote"><span>{quote}</span><button aria-label="取消引用" onClick={() => setQuote('')}><IconX size={16} /></button></div>}
+      {!!files.length && <div className="m-attachments">{files.map((file, i) => <MobileAttachmentPreview key={`${file.name}-${i}`} file={file} onOpen={setImage} onRemove={() => updateFiles(files.filter((_, n) => n !== i))} />)}</div>}
+      <div className="m-composer"><input hidden ref={fileInput} type="file" multiple accept="image/*,audio/*,.pdf,.txt,.md,.json,.csv,.log" onChange={e => { updateFiles([...files, ...Array.from(e.target.files || [])]); e.target.value = '' }} />
+        <button aria-label="添加附件" onClick={() => fileInput.current?.click()}><IconPlus size={21} /></button>
+        <textarea ref={textarea} aria-label="消息内容" placeholder="输入消息，可粘贴图片…" rows={1} value={text} onPaste={event => { const pasted = clipboardFiles(event); if (pasted.length) { event.preventDefault(); updateFiles([...files, ...pasted]) } }} onChange={e => { setText(e.target.value); e.target.style.height = '35px'; e.target.style.height = `${Math.min(140, Math.max(35, e.target.scrollHeight))}px` }} />
+        <button aria-label="语音消息" onClick={() => setVoice(true)}><IconMicrophone size={21} /></button>
+        <button className="m-send" data-stop={busy && !text && !files.length} aria-label={busy && !text && !files.length ? '停止' : '发送'} disabled={submitting || !selected} onClick={() => busy && !text && !files.length ? void stop() : void send()}>{submitting ? <IconLoader2 className="m-spin" size={20} /> : busy && !text && !files.length ? <IconPlayerStop size={19} /> : <IconSend size={20} />}</button>
       </div>
     </section>
     {messageAction?.sessionKey === key && <MobileMessageMenu anchor={messageAction} onClose={closeMessageMenu} onCopy={() => void copy(messageAction.text)} onQuote={() => { setQuote(messageAction.text); textarea.current?.focus({ preventScroll: true }) }} />}
@@ -498,10 +521,11 @@ export function MobileWorkspace() {
       {sheet === 'sessions' && <><input className="m-search" aria-label="搜索会话" placeholder="搜索会话" value={search} onChange={e => setSearch(e.target.value)} /><MobileSessionDrawer groups={groups} pins={pins} selectedKey={key} appearance={appearance} onSelect={select} onCreate={project => { setCreateProject(project); setCreateOpened(true) }} onDeleteProject={requestDeleteProject} onDeleteSession={requestDeleteSession} onPin={s => { const next = { ...pins, [scopeKey(s.agent_id,s.id)]: !pins[scopeKey(s.agent_id,s.id)] }; setPins(next); localStorage.setItem('astrorder_pinned_sessions', JSON.stringify(next)) }} /></>}
       {sheet === 'status' && selected && <div className="m-sheet-body"><MobileApprovals session={selected} approvals={approvals} /><SessionRuntimeFacts session={selected} agent={agents[selected.agent_id]} /><button onClick={() => void copy(selected.id)}>复制会话 ID</button>{agents[selected.agent_id]?.kind==='codex' && <NativeObservationPanel agentId={selected.agent_id} sessionId={selected.id} />}</div>}
       {sheet === 'task' && task && <div className="m-sheet-body"><p>{task.title}</p><p>{task.status}</p><pre>{task.command}</pre><button onClick={() => void copy(task.logs.map(log => log.text).join('\n'))}>复制日志</button><button onClick={e => { const pre=e.currentTarget.parentElement?.querySelector('.m-task-log'); if(pre) pre.scrollTop=pre.scrollHeight }}>跳到底部</button><pre className="m-task-log">{task.logs.map(log => log.text).join('\n')}</pre><button onClick={(event) => requestStopTask(task, event)}>停止任务</button></div>}
-      {sheet === 'models' && <div className="m-sheet-body m-model-panel"><div className="m-effort-row">{REASONING_EFFORTS.map(item => <button key={item.value} aria-pressed={sessionModel.effort === item.value} aria-label={`思考强度 ${item.label}`} disabled={modelLoading} onClick={() => void sessionModel.changeEffort(item.value).catch(error => notify(messageError(error), 'red'))}>{item.label}</button>)}</div><input className="m-search" aria-label="搜索模型" placeholder="搜索模型或提供商" value={modelSearch} onChange={e => setModelSearch(e.target.value)} />{modelLoading && <p>正在处理原生模型请求…</p>}<div className="m-model-list">{modelChoices.filter(choice => choice.label.toLowerCase().includes(modelSearch.toLowerCase())).map(choice => <button className="m-model-choice" aria-pressed={modelSelection?.provider === choice.provider && modelSelection?.model === choice.model} key={`${choice.provider}/${choice.model}`} disabled={modelLoading} onClick={() => setModelSelection(choice)}><IconCpu size={17} /><span>{choice.label}</span>{modelSelection?.provider === choice.provider && modelSelection?.model === choice.model && <IconCheck size={17} />}</button>)}</div>{!modelLoading && !modelChoices.length && <p>原生运行时未返回可用模型。</p>}{modelSelection && <div className="m-model-confirm"><small>{modelSelection.label}</small><button aria-label="确认切换模型" disabled={modelLoading} onClick={() => void chooseModel(modelSelection.provider, modelSelection.model)}>{modelLoading ? '切换中…' : '确认切换模型'}</button></div>}</div>}
+      {sheet === 'models' && <div className="m-sheet-body m-model-panel">{selected && <ApprovalModeControl session={selected} variant="panel" />}<div className="m-effort-row">{REASONING_EFFORTS.map(item => <button key={item.value} aria-pressed={sessionModel.effort === item.value} aria-label={`思考强度 ${item.label}`} disabled={modelLoading} onClick={() => void sessionModel.changeEffort(item.value).catch(error => notify(messageError(error), 'red'))}>{item.label}</button>)}</div><input className="m-search" aria-label="搜索模型" placeholder="搜索模型或提供商" value={modelSearch} onChange={e => setModelSearch(e.target.value)} />{modelLoading && <p>正在处理原生模型请求…</p>}<div className="m-model-list">{modelChoices.filter(choice => choice.label.toLowerCase().includes(modelSearch.toLowerCase())).map(choice => <button className="m-model-choice" aria-pressed={modelSelection?.provider === choice.provider && modelSelection?.model === choice.model} key={`${choice.provider}/${choice.model}`} disabled={modelLoading} onClick={() => setModelSelection(choice)}><IconCpu size={17} /><span>{choice.label}</span>{modelSelection?.provider === choice.provider && modelSelection?.model === choice.model && <IconCheck size={17} />}</button>)}</div>{!modelLoading && !modelChoices.length && <p>原生运行时未返回可用模型。</p>}{modelSelection && <div className="m-model-confirm"><small>{modelSelection.label}</small><button aria-label="确认切换模型" disabled={modelLoading} onClick={() => void chooseModel(modelSelection.provider, modelSelection.model)}>{modelLoading ? '切换中…' : '确认切换模型'}</button></div>}</div>}
       {sheet === 'queue' && <div className="m-sheet-body">{pending.map(entry => <article className="m-outbox-entry" key={entry.payload.id} data-command-id={entry.payload.id}><p>{entry.payload.text || '附件消息'}</p><small>{queueLabels[entry.state]}{entry.error ? ` · ${entry.error}` : ''}</small><div>{[...entry.attachments, ...entry.files].map((file, i) => <span key={i}>{file.name} </span>)}</div>{['queued', 'failed', 'cancelled'].includes(entry.state) && <button onClick={() => void outbox.remove(entry.payload.agent_id, entry.payload.session_id, entry.payload.id).catch(error => notify(messageError(error), 'red'))}>移除待发消息</button>}{entry.state === 'failed' && <button onClick={() => void outbox.retry(entry.payload.agent_id, entry.payload.session_id, entry.payload.id).catch(error => notify(messageError(error), 'red'))}>重新发送</button>}</article>)}<button onClick={() => void flush()}>核对结果 / 发送下一条</button></div>}
     </section></div>}
     {image && <div className="m-lightbox" role="dialog" aria-label="图片预览" onClick={() => setImage(null)}><button aria-label="关闭图片"><IconX size={22} /></button><img src={image} alt="预览" /></div>}
+    {artifactPath && <MobileArtifactSheet path={artifactPath} workspace={selected?.workspace} connectionId={selected?.connection_id} onClose={() => setArtifactPath(null)} />}
     <VoiceInputSheet opened={voice} onClose={() => setVoice(false)} onCommit={(file, transcript) => { updateFiles([...files, file]); if (transcript) setText(text + (text ? '\n' : '') + transcript) }} />
     <ConfirmPopover
       opened={confirmation !== null}

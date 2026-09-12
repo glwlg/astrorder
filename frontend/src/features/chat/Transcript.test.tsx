@@ -97,4 +97,32 @@ describe('transcript follow mode', () => {
     fireEvent.click(screen.getByRole('button', { name: '取消' }))
     expect(onApproval).toHaveBeenCalledWith(pendingApproval, 'cancel')
   })
+
+  it('renders a native image reference once when the same image is already attached', () => {
+    render(
+      <MantineProvider>
+        <Transcript
+          outbox={[]}
+          messages={[
+            {
+              ...message,
+              role: 'user',
+              text: '请查看\n@image:C:\\native\\upload.png',
+              attachments: [
+                {
+                  id: 'upload-1',
+                  name: 'upload.png',
+                  media_type: 'image/png',
+                  url: '/api/v1/attachments/upload-1',
+                },
+              ],
+            },
+          ]}
+        />
+      </MantineProvider>,
+    )
+
+    expect(screen.getAllByAltText('upload.png')).toHaveLength(1)
+    expect(screen.queryByText(/@image:/)).not.toBeInTheDocument()
+  })
 })

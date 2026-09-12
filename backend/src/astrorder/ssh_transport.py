@@ -380,6 +380,7 @@ class SshNativeRuntime:
         self.store: Any = None
         self._tui_to_session: dict[str, str] = {}
         self._active_submitted_commands: dict[str, str] = {}
+        self._command_completion_callback: Callable[[str, str, str], None] | None = None
 
     @property
     def agent_id(self) -> str:
@@ -596,9 +597,17 @@ class SshNativeRuntime:
         tui_sid = params.get("session_id")
         session_id = self._tui_to_session.get(str(tui_sid)) or self._runtime_session_id
         agent_id = self._agent_id
-        if not session_id or not agent_id or not self.store:
+        if not session_id or not agent_id:
             return
         cmd_id = self._active_submitted_commands.pop(session_id, None)
+        callback = self._command_completion_callback
+        if cmd_id and callback is not None:
+            try:
+                callback(agent_id, session_id, cmd_id)
+            except Exception as exc:  # noqa: BLE001 - native reader must remain alive
+                logger.debug("Failed forwarding SSH command completion: %s", exc)
+        if not self.store:
+            return
         to_complete: list[str] = [cmd_id] if cmd_id else []
         if not to_complete:
             try:
@@ -614,6 +623,11 @@ class SshNativeRuntime:
                     self.service._server_event("command.upsert", agent_id=agent_id, session_id=session_id, data=updated)
             except Exception as exc:
                 logger.debug("Failed completing SSH command %s: %s", cid, exc)
+
+    def set_command_completion_callback(
+        self, callback: Callable[[str, str, str], None] | None
+    ) -> None:
+        self._command_completion_callback = callback
 
     def start(self) -> None:
         with self._lock:
@@ -840,6 +854,15 @@ class SshNativeRuntime:
             raise ConnectionError("远端原生消息分页读取失败。", 502)
         return {'items': page['items'], 'next_cursor': page['next_cursor']}
 
+    def submit_inline(self, command: dict[str, Any]) -> tuple[str, str | None]:
+        inline = command.get("attachments")
+        if not isinstance(inline, list) or not inline:
+            return "failed", "守护进程 SSH Hermes inline附件无效。"
+        forwarded = dict(command)
+        forwarded.pop("attachments", None)
+        forwarded["_daemon_inline_attachments"] = inline
+        return self.submit(forwarded)
+
     def submit(self, command: dict[str, Any]) -> tuple[str, str | None]:
         with self._lock:
             if self._process is None or self._process.poll() is not None:
@@ -866,11 +889,22 @@ class SshNativeRuntime:
             text_value = command.get("text")
             if not isinstance(text_value, str):
                 return "failed", "远程 Hermes 命令文本无效。"
-            from .hermes_inputs import rollback, stage
+            from .hermes_inputs import rollback, stage, stage_daemon_attachments
             settings = getattr(self, "app_settings", None)
             store = getattr(self, "store", None)
             try:
-                text_value, attached = stage(self.rpc, tui_id, command, settings, store)
+                inline = command.get("_daemon_inline_attachments")
+                if inline is not None:
+                    text_value, attached = stage_daemon_attachments(
+                        self.rpc,
+                        tui_id,
+                        text_value,
+                        inline,
+                        maximum=settings.max_attachment_size,
+                        allowed_types=settings.allowed_attachment_types,
+                    )
+                else:
+                    text_value, attached = stage(self.rpc, tui_id, command, settings, store)
             except ConnectionError as exc:
                 return "failed", exc.detail
             response = self.rpc("prompt.submit", {"session_id": tui_id, "text": text_value, "surface": "hud"}, timeout=20)

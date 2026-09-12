@@ -30,7 +30,7 @@ vi.mock('../../hooks/useAstrorderData', () => ({
 vi.mock('../../api/client', () => ({
   ApiError: class ApiError extends Error { detail = this.message },
   api: {
-    getEnvironments: vi.fn(async () => ({ items: [{ id: 'local', name: '本机', method: 'local', discovered: true, agents: [{ kind: 'hermes', available: true, state: 'discovered', detail: '' }, { kind: 'codex', available: true, state: 'disconnected', detail: '' }] }] })),
+    getEnvironments: vi.fn(async () => ({ items: [{ id: 'local', name: '本机', method: 'local', discovered: true, agents: [{ kind: 'hermes', available: true, state: 'discovered', detail: '', daemon_mode: true }, { kind: 'codex', available: true, state: 'disconnected', detail: '', daemon_mode: true }] }] })),
     getConnections: vi.fn(async () => ({ ssh: { items: [] } })),
     discoverEnvironment: vi.fn(async () => ({})),
     changeEnvironmentAgent: vi.fn(async () => ({})),
@@ -62,6 +62,8 @@ describe('Agent settings connection controls', () => {
     renderPage()
     expect(await screen.findByText('Hermes', { exact: true })).toBeInTheDocument()
     expect(screen.getByText('Codex', { exact: true })).toBeInTheDocument()
+    expect(screen.getByTestId('environment-daemon-mode-local-hermes')).toHaveTextContent('守护进程托管')
+    expect(screen.getByTestId('environment-daemon-mode-local-codex')).toHaveTextContent('守护进程托管')
     expect(api.changeEnvironmentAgent).not.toHaveBeenCalled()
     fireEvent.click(screen.getAllByRole('button', { name: '接入' })[1])
     await waitFor(() => expect(api.changeEnvironmentAgent).toHaveBeenCalledWith('local', 'codex', true))

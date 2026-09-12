@@ -17,7 +17,7 @@ import type {
 const API_PREFIX = '/api/v1'
 
 export interface SessionModelBinding { model: string; provider: string | null; deferred?: boolean; branch?: string; effort?: string | null }
-export interface CodexConnectionStatus { kind: 'codex'; state: 'disconnected' | 'connecting' | 'connected' | 'error' | 'authentication_required'; available: boolean; agent_id: string; session_count: number; auth_required: boolean; detail: string }
+export interface CodexConnectionStatus { kind: 'codex'; state: 'disconnected' | 'connecting' | 'connected' | 'error' | 'authentication_required'; available: boolean; agent_id: string; session_count: number; auth_required: boolean; detail: string; daemon_mode: boolean }
 
 export class ApiError extends Error {
   readonly status: number
@@ -121,7 +121,7 @@ export const api = {
     return request<Attachment>('/attachments', { method: 'POST', body: form })
   },
   createCommand: (payload: CommandPayload) => jsonRequest<Command>('/commands', payload),
-  createSession: (payload: { agent_id: string; workspace?: string | null; title?: string | null; project_id?: string | null; project_name?: string | null }) =>
+  createSession: (payload: { agent_id: string; workspace?: string | null; title?: string | null; project_id?: string | null; project_name?: string | null; parent_session_id?: string | null; ephemeral?: boolean }) =>
     jsonRequest<Session>('/sessions', payload),
   updateSession: (sessionId: string, payload: { agent_id: string; title?: string | null; workspace?: string | null; status?: string | null }) =>
     jsonRequest<Session>(sessionPath(sessionId), payload, 'PATCH'),
@@ -151,7 +151,7 @@ export const api = {
     jsonRequest<{ agent_id: string; status: string }>('/runtime/launch', { kind, workspace }),
   getUserActivity: () => request<{ items: Array<{ agent_id: string; id: string; last_user_at: string }>; live?: Array<{ agent_id: string; id: string }> }>('/user-activity'),
   getConnections: () => request<ConnectionsPayload>('/connections'),
-  getEnvironments: () => request<{ items: Array<{ id: string; name: string; method: 'local' | 'ssh'; discovered: boolean; os?: string; agents: Array<{ kind: 'hermes' | 'codex'; available: boolean; state: string; detail: string; executable?: string }> }> }>('/environments'),
+  getEnvironments: () => request<{ items: Array<{ id: string; name: string; method: 'local' | 'ssh'; discovered: boolean; os?: string; agents: Array<{ kind: 'hermes' | 'codex'; available: boolean; state: string; detail: string; executable?: string; daemon_mode?: boolean }> }> }>('/environments'),
   discoverEnvironment: (id: string) => request(`/environments/${encodeURIComponent(id)}/discover`, { method: 'POST' }),
   changeEnvironmentAgent: (id: string, kind: string, connect: boolean) => request(`/environments/${encodeURIComponent(id)}/agents/${kind}/${connect ? 'connect' : 'disconnect'}`, { method: 'POST' }),
   getCodexConnection: () => request<CodexConnectionStatus>('/connections/codex'),
@@ -184,6 +184,14 @@ export const api = {
     ),
   deleteSshConnection: (connectionId: string) =>
     request<ConnectionsPayload>(`/connections/ssh/${encodeURIComponent(connectionId)}`, { method: 'DELETE' }),
+  searchFiles: (params: { q?: string; sessionId?: string; connectionId?: string; limit?: number }) => {
+    const query = new URLSearchParams()
+    if (params.q) query.set('q', params.q)
+    if (params.sessionId) query.set('session_id', params.sessionId)
+    if (params.connectionId) query.set('connection_id', params.connectionId)
+    if (params.limit) query.set('limit', String(params.limit))
+    return request<{ root: string; items: Array<{ path: string; name: string; size: number }> }>(`/files/search?${query.toString()}`)
+  },
 }
 
 export type ApiClient = typeof api

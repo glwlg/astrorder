@@ -14,6 +14,7 @@ export const monacoViewer: ArtifactViewer = {
     '.ts', '.tsx', '.js', '.jsx', '.py', '.json', '.rs', '.go', '.c', '.cpp',
     '.h', '.css', '.scss', '.sql', '.yaml', '.yml', '.txt', '.log', '.toml',
     '.ini', '.env', '.dockerfile', '.sh', '.bash', '.cmd', '.bat', '.ps1',
+    '.md', '.markdown', '.xml', '.html.bak', '.conf', '.cfg', '.properties',
   ],
   mimeTypes: ['text/plain', 'application/json', 'text/javascript', 'text/x-python'],
   component: MonacoViewer,

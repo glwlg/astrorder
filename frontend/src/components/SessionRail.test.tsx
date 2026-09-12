@@ -183,7 +183,7 @@ describe('SessionRail project-first grouping', () => {
     )
     const runningRows = document.querySelectorAll('.session-row.is-running')
     expect(runningRows.length).toBeGreaterThanOrEqual(1)
-    const runningArcs = document.querySelectorAll('.session-running-arc')
+    const runningArcs = document.querySelectorAll('.session-row-wrapper.is-running > .session-running-arc')
     expect(runningArcs.length).toBeGreaterThanOrEqual(1)
   })
 

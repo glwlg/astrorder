@@ -55,6 +55,16 @@ describe('independent mobile composer', () => {
     expect(await screen.findByText('p/bound-model')).toBeVisible()
     expect(api.getSessionModel).toHaveBeenCalledWith('native-test', 'inert')
   })
+  it('keeps the composer to attach, input, voice and send', () => {
+    mount()
+    const composer = document.querySelector('.m-composer') as HTMLElement
+    expect(within(composer).getByRole('button', { name: '添加附件' })).toBeInTheDocument()
+    expect(within(composer).getByRole('button', { name: '语音消息' })).toBeInTheDocument()
+    expect(within(composer).getByRole('button', { name: '发送' })).toBeInTheDocument()
+    expect(within(composer).queryByRole('button', { name: '选择会话模型' })).not.toBeInTheDocument()
+    expect(within(composer).queryByRole('button', { name: /当前审批模式/ })).not.toBeInTheDocument()
+    expect(within(composer).queryByRole('button', { name: '会话操作' })).not.toBeInTheDocument()
+  })
   it('confirms model selection inside the mobile sheet, without a native browser confirm', async () => {
     vi.spyOn(api, 'getSessionModels').mockResolvedValue({ items: [{ provider: 'p', model: 'm', label: 'Provider · m' }] })
     const change = vi.spyOn(api, 'setSessionModel').mockResolvedValue({ provider: 'p', model: 'm' })
@@ -62,6 +72,7 @@ describe('independent mobile composer', () => {
     vi.spyOn(notifications, 'show')
     mount()
     fireEvent.click(screen.getByRole('button', { name: '选择会话模型' }))
+    expect(await screen.findByText('应如何批准操作？')).toBeInTheDocument()
     fireEvent.click(await screen.findByRole('button', { name: 'Provider · m' }))
     fireEvent.click(screen.getByRole('button', { name: '确认切换模型' }))
     await waitFor(() => expect(change).toHaveBeenCalledWith('native-test', 'inert', 'p', 'm'))

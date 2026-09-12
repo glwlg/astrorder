@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { Command, Message, Project } from '../domain/types'
-import { selectOutbox, selectProjects, useAstrorderStore } from './store'
+import { selectOutbox, selectProjects, selectSessions, useAstrorderStore } from './store'
 
 const session = {
   id: 'session-1',
@@ -45,6 +45,21 @@ beforeEach(() => {
 })
 
 describe('shared runtime store', () => {
+  it('excludes temporary side chats from catalogs but retains scoped data for the composer', () => {
+    const child = { ...session, id: 'child', title: '自动生成标题', ephemeral: true }
+    const legacy = { ...session, id: 'legacy', title: '[侧边聊天]' }
+    const ordinary = { ...session, id: 'ordinary', title: '修复[侧边聊天]功能' }
+    useAstrorderStore.getState().hydrateBootstrap({
+      protocol_version: 1, agents: [], sessions: [child, legacy, ordinary], cursor: 1,
+    })
+    expect(selectSessions(useAstrorderStore.getState()).map(s => s.id)).toEqual(['ordinary'])
+    expect(useAstrorderStore.getState().sessions['agent-1::child']).toEqual(child)
+    useAstrorderStore.getState().applyEvent({
+      id: 'side-running', cursor: 2, type: 'session.upsert',
+      agent_id: child.agent_id, session_id: child.id, data: { ...child, status: 'running' },
+    })
+    expect(selectSessions(useAstrorderStore.getState()).map(s => s.id)).toEqual(['ordinary'])
+  })
   it('keeps the native project catalog, including zero-session projects, after bootstrap hydration', () => {
     const project: Project = {
       id: 'project-row-empty',

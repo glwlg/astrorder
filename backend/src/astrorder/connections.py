@@ -360,6 +360,7 @@ class LocalHermesController:
         self._responses: dict[str, queue.Queue[dict[str, Any]]] = {}
         self._response_lock = threading.Lock()
         self._discovery_callback: Callable[[Any], None] | None = None
+        self._command_completion_callback: Callable[[str, str, str], None] | None = None
         self.service: Any = None
         self.store: Any = None
         self._tui_to_session: dict[str, str] = {}
@@ -568,9 +569,17 @@ class LocalHermesController:
         tui_sid = params.get("session_id")
         session_id = self._tui_to_session.get(str(tui_sid)) or self._runtime_session_id
         agent_id = self._agent_id
-        if not session_id or not agent_id or not self.store:
+        if not session_id or not agent_id:
             return
         cmd_id = self._active_submitted_commands.pop(session_id, None)
+        callback = self._command_completion_callback
+        if cmd_id and callback is not None:
+            try:
+                callback(agent_id, session_id, cmd_id)
+            except Exception as exc:  # noqa: BLE001 - native reader must remain alive
+                logger.debug("Failed forwarding command completion: %s", exc)
+        if not self.store:
+            return
         to_complete: list[str] = [cmd_id] if cmd_id else []
         if not to_complete:
             try:
@@ -589,6 +598,11 @@ class LocalHermesController:
 
     def set_discovery_callback(self, callback: Callable[[Any], None] | None) -> None:
         self._discovery_callback = callback
+
+    def set_command_completion_callback(
+        self, callback: Callable[[str, str, str], None] | None
+    ) -> None:
+        self._command_completion_callback = callback
 
     def discover_native_sessions(self) -> Any:
         from .native_sessions import discover_native_sessions
@@ -628,6 +642,9 @@ class LocalHermesController:
                     self._state = "error"
                     self._detail = "本机 Hermes 未在限定时间内就绪。"
             return
+        with self._lock:
+            self._state = "connected"
+            self._detail = "本机 Hermes TUI gateway 已就绪。"
         try:
             discovery = self.discover_native_sessions()
             callback = self._discovery_callback
@@ -636,35 +653,6 @@ class LocalHermesController:
         except (OSError, RuntimeError, ValueError):
             with self._lock:
                 self._detail = "本机 Hermes 已启动，但现有 session/project discovery 暂不可用。"
-        created = self._rpc(
-            "session.create",
-            {"source": "local", "cwd": str(self.project_root), "title": "Astrorder 本机联调"},
-        )
-        result = created.get("result") if isinstance(created, dict) else None
-        tui_session_id = result.get("session_id") if isinstance(result, dict) else None
-        durable_session_id = result.get("stored_session_id") if isinstance(result, dict) else None
-        if (
-            not isinstance(tui_session_id, str)
-            or not tui_session_id
-            or not isinstance(durable_session_id, str)
-            or not durable_session_id
-        ):
-            with self._lock:
-                self._state = "error"
-                self._detail = "本机 Hermes 未能创建隔离会话。"
-            return
-        with self._lock:
-            self._tui_session_id = tui_session_id
-            self._runtime_session_id = durable_session_id
-        # This is a new runtime-owned session, never an existing user session. It does not autoapprove tools.
-        self._rpc(
-            "prompt.submit",
-            {
-                "session_id": tui_session_id,
-                "text": "Astrorder native connector smoke test. Reply with exactly: 已连接。 Do not use tools.",
-            },
-            timeout=20,
-        )
 
     def create_session(self, workspace: str | None = None, title: str | None = None) -> dict[str, Any]:
         with self._lock:
@@ -678,7 +666,6 @@ class LocalHermesController:
             }
             created = self._rpc("session.create", params)
             result = created.get("result") if isinstance(created, dict) else None
-            tui_session_id = result.get("session_id") if isinstance(result, dict) else None
             durable_session_id = result.get("stored_session_id") if isinstance(result, dict) else None
             if not durable_session_id:
                 raise ConnectionError("本机 Hermes session.create 未返回有效的会话 ID。", 502)
@@ -762,6 +749,15 @@ class LocalHermesController:
                 self._state = "offline"
                 self._detail = "本机 Hermes 连接已断开；不会自动重发命令。"
 
+    def submit_tui_command_inline(self, command: dict[str, object]) -> tuple[str, str | None]:
+        inline = command.get("attachments")
+        if not isinstance(inline, list) or not inline:
+            return "failed", "守护进程 Hermes inline附件无效。"
+        forwarded = dict(command)
+        forwarded.pop("attachments", None)
+        forwarded["_daemon_inline_attachments"] = inline
+        return self.submit_tui_command(forwarded)
+
     def submit_tui_command(self, command: dict[str, object]) -> tuple[str, str | None]:
         with self._lock:
             self._refresh_process_state()
@@ -790,11 +786,22 @@ class LocalHermesController:
             text = command.get("text")
             if not isinstance(text, str):
                 return "failed", "本机 Hermes 命令文本无效。"
-            from .hermes_inputs import rollback, stage
+            from .hermes_inputs import rollback, stage, stage_daemon_attachments
             settings = getattr(self, "settings", None)
             store = getattr(self, "store", None)
             try:
-                text, attached = stage(self._rpc, tui_id, command, settings, store)
+                inline = command.get("_daemon_inline_attachments")
+                if inline is not None:
+                    text, attached = stage_daemon_attachments(
+                        self._rpc,
+                        tui_id,
+                        text,
+                        inline,
+                        maximum=settings.max_attachment_size,
+                        allowed_types=settings.allowed_attachment_types,
+                    )
+                else:
+                    text, attached = stage(self._rpc, tui_id, command, settings, store)
             except ConnectionError as exc:
                 return "failed", exc.detail
             response = self._rpc(
@@ -897,13 +904,22 @@ class LocalHermesController:
 
 
 class ConnectionController:
-    def __init__(self, settings: Settings, store: Store):
+    def __init__(
+        self,
+        settings: Settings,
+        store: Store,
+        *,
+        local_controller: Any | None = None,
+        daemon_ssh_factory: Callable[[dict[str, Any]], Any] | None = None,
+    ):
         self.settings = settings
         self.store = store
-        self.local = LocalHermesController(settings)
+        self.local = local_controller or LocalHermesController(settings)
         self.local.store = store
+        self.local.app_settings = settings
         self._ssh_runtimes: dict[str, Any] = {}
         self._ssh_lock = threading.RLock()
+        self._daemon_ssh_factory = daemon_ssh_factory
 
     def _record_history(
         self,
@@ -927,11 +943,20 @@ class ConnectionController:
 
     def snapshot(self, service) -> dict[str, object]:
         agent_id = self.local.snapshot().get("agent_id")
-        self.local.sync_connection(bool(agent_id and agent_id in service.connections))
+        local_connected = bool(agent_id and agent_id in service.connections)
+        if getattr(self.local, "daemon_owned", False) and isinstance(agent_id, str):
+            projected_agent = self.store.get_agent(agent_id)
+            local_connected = bool(projected_agent and projected_agent.get("status") == "ready")
+        self.local.sync_connection(local_connected)
         items = self.store.list_ssh_connections()
         for item in items:
             runtime = self._ssh_runtimes.get(str(item["id"]))
-            if runtime is not None and runtime.agent_id in service.connections:
+            runtime_agent_id = getattr(runtime, "agent_id", None) if runtime is not None else None
+            runtime_connected = bool(runtime_agent_id and runtime_agent_id in service.connections)
+            if runtime is not None and getattr(runtime, "daemon_owned", False) and isinstance(runtime_agent_id, str):
+                projected_agent = self.store.get_agent(runtime_agent_id)
+                runtime_connected = bool(projected_agent and projected_agent.get("status") == "ready")
+            if runtime is not None and runtime_connected:
                 if item["state"] != "connected":
                     self.store.update_ssh_connection_state(
                         str(item["id"]),
@@ -946,6 +971,9 @@ class ConnectionController:
                     str(item["id"]), "error", "远程 SSH bridge 已退出；未自动重发命令。"
                 )
         items = self.store.list_ssh_connections()
+        for item in items:
+            runtime = self._ssh_runtimes.get(str(item["id"]))
+            item["daemon_mode"] = bool(getattr(runtime, "daemon_owned", False))
         legacy = items[0] if items else None
         return {
             "local": self.local.snapshot(),
@@ -971,6 +999,14 @@ class ConnectionController:
         runtime = self.get_runtime_by_agent_id(agent_id)
         if runtime is None:
             raise ConnectionError("会话所属运行时未连接。", 503)
+        if getattr(runtime, "daemon_owned", False):
+            mutate = getattr(runtime, "mutate_session", None)
+            if not callable(mutate):
+                raise ConnectionError("守护进程托管的 Hermes 尚未投影原生会话修改。", 409)
+            mutate(session_id, updates)
+            return
+        if getattr(runtime, "supports_native_mutation", True) is False:
+            raise ConnectionError("守护进程托管的 Hermes 尚未投影原生会话修改。", 409)
         rpc = runtime._rpc if runtime is self.local else runtime.rpc
 
         def call(method: str, params: dict[str, Any]) -> dict[str, Any]:
@@ -1055,11 +1091,15 @@ class ConnectionController:
         return runtime.create_session(workspace=workspace, title=title)
 
     async def _submit_owned_tui_command(self, command: dict[str, object]) -> tuple[str, str | None]:
+        if getattr(self.local, "daemon_owned", False):
+            return await self.local.submit_tui_command(command)
         return await asyncio.to_thread(self.local.submit_tui_command, command)
 
     async def _submit_owned_ssh_command(
         self, runtime: Any, command: dict[str, object]
     ) -> tuple[str, str | None]:
+        if getattr(runtime, "daemon_owned", False):
+            return await runtime.submit(command)
         return await asyncio.to_thread(runtime.submit, command)
 
     async def _load_native_history(self, runtime: Any, session_id: str) -> list[dict[str, Any]]:
@@ -1083,7 +1123,7 @@ class ConnectionController:
         self.local.connect()
         self._register_local_command_handler(service)
         agent_id = self.local.snapshot().get("agent_id")
-        if isinstance(agent_id, str):
+        if isinstance(agent_id, str) and getattr(self.local, "supports_native_history", True):
             service.register_native_history_handler(
                 agent_id,
                 lambda session_id: self._load_native_history(self.local, session_id),
@@ -1182,12 +1222,14 @@ class ConnectionController:
         return updated
 
     def connect_ssh(self, service, connection_id: str | None = None) -> dict[str, object]:
-        from .ssh_transport import SshNativeRuntime
-
         resolved_id = self._resolve_ssh_id(connection_id)
         remote = self.store.get_ssh_connection(resolved_id)
         if remote is None:
             raise ConnectionError("SSH connection 不存在。", 404)
+        if self._daemon_ssh_factory is not None:
+            return self._connect_ssh_via_daemon(service, resolved_id, remote)
+        from .ssh_transport import SshNativeRuntime
+
         with self._ssh_lock:
             existing_runtime = self._ssh_runtimes.get(resolved_id)
             if existing_runtime is not None and existing_runtime.snapshot()["alive"]:
@@ -1289,6 +1331,71 @@ class ConnectionController:
                 self._record_history(resolved_id, stage, "failed", detail, {"phase": stage, "status_code": status})
                 raise ConnectionError(detail, status) from exc
 
+    def _connect_ssh_via_daemon(self, service, connection_id: str, remote: dict[str, Any]) -> dict[str, object]:
+        assert self._daemon_ssh_factory is not None
+        with self._ssh_lock:
+            existing_runtime = self._ssh_runtimes.get(connection_id)
+            if existing_runtime is not None and existing_runtime.snapshot()["alive"]:
+                return self.snapshot(service)
+            self.store.update_ssh_connection_state(
+                connection_id,
+                "connecting",
+                "正在请求守护进程启动远程 Hermes SSH bridge。",
+            )
+            self._record_history(
+                connection_id,
+                "daemon_spawn",
+                "running",
+                "正在请求守护进程启动远程 SSH bridge。",
+                {"phase": "daemon_spawn"},
+            )
+            runtime = self._daemon_ssh_factory(remote)
+            runtime.store = self.store
+            runtime.app_settings = self.settings
+            runtime.service = service
+            try:
+                runtime.start()
+                agent_id = getattr(runtime, "agent_id", None)
+                if not isinstance(agent_id, str) or not agent_id:
+                    raise ConnectionError("守护进程未确认远程 Hermes Agent identity。", 502)
+                self._ssh_runtimes[connection_id] = runtime
+                service.register_native_command_handler(
+                    agent_id,
+                    lambda command, current=runtime: self._submit_owned_ssh_command(current, command),
+                )
+                updated = self.store.update_ssh_connection_state(
+                    connection_id,
+                    "connecting",
+                    "SSH bridge 已由守护进程启动，等待 native connector handshake。",
+                    agent_id=agent_id,
+                    runtime_id=getattr(runtime, "runtime_id", None),
+                )
+                if updated is None:
+                    raise ConnectionError("SSH connection 状态无法保存。", 500)
+                self._record_history(
+                    connection_id,
+                    "daemon_spawn",
+                    "completed",
+                    "守护进程已确认 SSH bridge 启动；等待 native connector handshake。",
+                    {"phase": "daemon_spawn"},
+                )
+                return self.snapshot(service)
+            except Exception as exc:
+                self._ssh_runtimes.pop(connection_id, None)
+                if isinstance(exc, ConnectionError):
+                    detail, status = exc.detail, exc.status_code
+                else:
+                    detail, status = "守护进程未确认远程 Hermes SSH bridge 启动。", 502
+                self.store.update_ssh_connection_state(connection_id, "error", detail)
+                self._record_history(
+                    connection_id,
+                    "daemon_spawn",
+                    "failed",
+                    detail,
+                    {"phase": "daemon_spawn", "status_code": status},
+                )
+                raise ConnectionError(detail, status) from exc
+
     def disconnect_ssh(self, service, connection_id: str | None = None) -> dict[str, object]:
         resolved_id = self._resolve_ssh_id(connection_id)
         runtime = self._ssh_runtimes.pop(resolved_id, None)
@@ -1314,8 +1421,24 @@ class ConnectionController:
         return self.snapshot(service)
 
     def shutdown(self, service) -> None:
-        self.disconnect_local(service)
+        if getattr(self.local, "daemon_owned", False):
+            agent_id = self.local.snapshot().get("agent_id")
+            if isinstance(agent_id, str):
+                service.clear_native_command_handler(agent_id)
+                service.clear_native_history_handler(agent_id)
+            self.local.close_for_app_shutdown()
+        else:
+            self.disconnect_local(service)
         for connection_id in tuple(self._ssh_runtimes):
+            runtime = self._ssh_runtimes.get(connection_id)
+            if getattr(runtime, "daemon_owned", False):
+                self._ssh_runtimes.pop(connection_id, None)
+                agent_id = getattr(runtime, "agent_id", None)
+                if isinstance(agent_id, str):
+                    service.clear_native_command_handler(agent_id)
+                    service.clear_native_history_handler(agent_id)
+                runtime.close_for_app_shutdown()
+                continue
             try:
                 self.disconnect_ssh(service, connection_id)
             except ConnectionError:

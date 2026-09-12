@@ -1,5 +1,5 @@
 import type { Agent, Command, Message, Project, Session, SessionStatus, Task } from '../domain/types'
-import { scopeKey } from '../domain/semantics'
+import { isEphemeralSession, scopeKey } from '../domain/semantics'
 import { selectMessages, useAstrorderStore } from '../state/store'
 
 export type RailFilter = 'all' | 'running' | 'unread' | 'pinned' | 'recent'
@@ -192,7 +192,7 @@ export function displaySessionTitle(session: Pick<Session, 'title' | 'workspace'
 
 export function isHiddenRailSession(session: Session): boolean {
   if (session.native_kind === 'subagent' || session.native_kind === 'smoke') return true
-  if (session.ephemeral === true) return true
+  if (isEphemeralSession(session)) return true
   if ((session as Session & { archived?: boolean }).archived === true) return true
   if (isScheduledSession(session)) return true
   const title = session.title || ''

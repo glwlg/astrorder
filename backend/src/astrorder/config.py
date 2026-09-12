@@ -75,6 +75,25 @@ class Settings:
     codex_executable: str | None = None
     auto_connect_local_hermes: bool = True
     max_ssh_connections: int = 32
+    session_daemon_enabled: bool = False
+    session_daemon_endpoint: str = "ws://127.0.0.1:30009"
+    session_daemon_secret: str | None = None
+    session_daemon_request_timeout: float = 30.0
+    daemon_codex_enabled: bool = False
+    daemon_pty_enabled: bool = False
+    daemon_hermes_enabled: bool = False
+    daemon_ssh_enabled: bool = False
+    model_routing_enabled: bool = False
+    model_routing_daily_budget_units: int = 100
+    model_routing_large_text_threshold: int = 2000
+    model_routing_small_cost_units: int = 1
+    model_routing_large_cost_units: int = 5
+    hermes_small_model: str | None = None
+    hermes_large_model: str | None = None
+    codex_small_model: str | None = None
+    codex_large_model: str | None = None
+    model_routing_small_effort: str = "low"
+    model_routing_large_effort: str = "high"
 
     def __post_init__(self) -> None:
         if not 1 <= self.port <= 65535:
@@ -85,8 +104,57 @@ class Settings:
             raise ValueError("event_retention must be positive")
         if self.max_ssh_connections < 1:
             raise ValueError("max_ssh_connections must be positive")
+        if self.model_routing_daily_budget_units < 1:
+            raise ValueError("model routing daily budget must be positive")
+        if self.model_routing_large_text_threshold < 1:
+            raise ValueError("model routing large text threshold must be positive")
+        if (
+            self.model_routing_small_cost_units < 1
+            or self.model_routing_large_cost_units < self.model_routing_small_cost_units
+        ):
+            raise ValueError("model routing cost units are invalid")
+        routing_targets = (
+            self.hermes_small_model,
+            self.hermes_large_model,
+            self.codex_small_model,
+            self.codex_large_model,
+        )
+        if self.model_routing_enabled and any(
+            not isinstance(target, str)
+            or "/" not in target
+            or target.startswith("/")
+            or target.endswith("/")
+            for target in routing_targets
+        ):
+            raise ValueError("enabled model routing requires exact provider/model targets")
+        if not 0 < self.session_daemon_request_timeout <= 300:
+            raise ValueError("session daemon request timeout must be between 0 and 300 seconds")
         if not self.database_url.startswith("sqlite"):
             raise ValueError("database_url must use SQLite")
+        if self.daemon_codex_enabled and (
+            not self.session_daemon_enabled
+            or not isinstance(self.session_daemon_secret, str)
+            or not self.session_daemon_secret
+        ):
+            raise ValueError("daemon Codex requires an enabled Session Daemon with a secret")
+        if self.daemon_pty_enabled and (
+            not self.session_daemon_enabled
+            or not isinstance(self.session_daemon_secret, str)
+            or not self.session_daemon_secret
+        ):
+            raise ValueError("daemon PTY requires an enabled Session Daemon with a secret")
+        if self.daemon_hermes_enabled and (
+            not self.session_daemon_enabled
+            or not isinstance(self.session_daemon_secret, str)
+            or not self.session_daemon_secret
+        ):
+            raise ValueError("daemon Hermes requires an enabled Session Daemon with a secret")
+        if self.daemon_ssh_enabled and (
+            not self.session_daemon_enabled
+            or not isinstance(self.session_daemon_secret, str)
+            or not self.session_daemon_secret
+        ):
+            raise ValueError("daemon SSH requires an enabled Session Daemon with a secret")
         object.__setattr__(self, "attachments_dir", Path(self.attachments_dir))
         if self.static_dir is not None:
             object.__setattr__(self, "static_dir", Path(self.static_dir))
@@ -170,6 +238,41 @@ class Settings:
             codex_executable=env.get("ASTRORDER_CODEX_EXECUTABLE") or None,
             auto_connect_local_hermes=_bool(env.get("ASTRORDER_AUTO_CONNECT_LOCAL_HERMES", "1")),
             max_ssh_connections=_int(env.get("ASTRORDER_MAX_SSH_CONNECTIONS"), 32),
+            session_daemon_enabled=_bool(env.get("ASTRORDER_SESSION_DAEMON_ENABLED")),
+            session_daemon_endpoint=env.get(
+                "ASTRORDER_SESSION_DAEMON_ENDPOINT", "ws://127.0.0.1:30009"
+            ),
+            session_daemon_secret=env.get("ASTRORDER_SESSION_DAEMON_SECRET") or None,
+            session_daemon_request_timeout=float(
+                _int(env.get("ASTRORDER_SESSION_DAEMON_REQUEST_TIMEOUT"), 30)
+            ),
+            daemon_codex_enabled=_bool(env.get("ASTRORDER_DAEMON_CODEX_ENABLED")),
+            daemon_pty_enabled=_bool(env.get("ASTRORDER_DAEMON_PTY_ENABLED")),
+            daemon_hermes_enabled=_bool(env.get("ASTRORDER_DAEMON_HERMES_ENABLED")),
+            daemon_ssh_enabled=_bool(env.get("ASTRORDER_DAEMON_SSH_ENABLED")),
+            model_routing_enabled=_bool(env.get("ASTRORDER_MODEL_ROUTING_ENABLED")),
+            model_routing_daily_budget_units=_int(
+                env.get("ASTRORDER_MODEL_ROUTING_DAILY_BUDGET_UNITS"), 100
+            ),
+            model_routing_large_text_threshold=_int(
+                env.get("ASTRORDER_MODEL_ROUTING_LARGE_TEXT_THRESHOLD"), 2000
+            ),
+            model_routing_small_cost_units=_int(
+                env.get("ASTRORDER_MODEL_ROUTING_SMALL_COST_UNITS"), 1
+            ),
+            model_routing_large_cost_units=_int(
+                env.get("ASTRORDER_MODEL_ROUTING_LARGE_COST_UNITS"), 5
+            ),
+            hermes_small_model=env.get("ASTRORDER_HERMES_SMALL_MODEL") or None,
+            hermes_large_model=env.get("ASTRORDER_HERMES_LARGE_MODEL") or None,
+            codex_small_model=env.get("ASTRORDER_CODEX_SMALL_MODEL") or None,
+            codex_large_model=env.get("ASTRORDER_CODEX_LARGE_MODEL") or None,
+            model_routing_small_effort=env.get(
+                "ASTRORDER_MODEL_ROUTING_SMALL_EFFORT", "low"
+            ),
+            model_routing_large_effort=env.get(
+                "ASTRORDER_MODEL_ROUTING_LARGE_EFFORT", "high"
+            ),
         )
 
     def connector_endpoint(self) -> str:

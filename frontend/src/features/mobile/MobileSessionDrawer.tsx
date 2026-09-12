@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type TouchEvent as ReactTouchEvent } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type TouchEvent as ReactTouchEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { IconChevronDown, IconChevronRight, IconDotsVertical, IconPin, IconPinned, IconPlus, IconTrash } from '@tabler/icons-react'
 import type { Session } from '../../domain/types'
@@ -28,6 +28,7 @@ export function MobileSessionDrawer({ groups, pins, selectedKey, appearance, onS
   const commands = useAstrorderStore(useShallow((state) => state.commands))
   useAstrorderStore((state) => state.messages)
   useAstrorderStore((state) => state.tasks)
+  useAstrorderStore((state) => state.liveActivityAt)
   const currentProjectKey = groups.find((group) => group.sessions.some((session) => scopeKey(session.agent_id, session.id) === selectedKey))?.key
   const isCollapsed = (key: string) => collapsed[key] ?? key !== currentProjectKey
   const pinned = groups.flatMap((group) => group.sessions).filter((session) => pins[scopeKey(session.agent_id, session.id)])
@@ -58,15 +59,14 @@ export function MobileSessionDrawer({ groups, pins, selectedKey, appearance, onS
     const title = displaySessionTitle(session)
     const isRunning = sessionActivityStatus(session, commands) === 'running'
     const projectColor = appearance[session.project_id || '']?.color
-    return <div className={`m-session-row ${key === selectedKey ? 'selected' : ''} ${isRunning ? 'is-running' : ''}`} key={key}>
-      <span
-        aria-hidden="true"
-        className="arc-border arc-row session-running-arc"
-        style={{
-          '--arc-c1': projectColor || (session.agent_id.includes('codex') ? 'var(--astr-teal, #12b886)' : 'var(--astr-indigo, #6366f1)'),
-          '--arc-radius': '7px',
-        } as React.CSSProperties}
-      />
+    return <div
+      className={`m-session-row m-hold ${key === selectedKey ? 'selected' : ''} ${isRunning ? 'is-running' : ''}`}
+      key={key}
+      style={{
+        '--session-running-color': projectColor || (session.agent_id.includes('codex') ? 'var(--astr-teal, #12b886)' : 'var(--astr-indigo, #5b6cff)'),
+      } as CSSProperties}
+    >
+      <span aria-hidden="true" className="session-running-arc" />
       <button
         aria-label={title}
         onClick={() => {

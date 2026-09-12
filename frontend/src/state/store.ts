@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { eventIsNew, mergeMessagesById, scopeKey } from '../domain/semantics'
+import { eventIsNew, isEphemeralSession, mergeMessagesById, scopeKey } from '../domain/semantics'
 import type {
   Agent,
   Approval,
@@ -419,7 +419,9 @@ export const useAstrorderStore = create<AstrorderStore>((set) => ({
 }))
 
 export function selectSessions(state: AstrorderStore): Session[] {
-  return Object.values(state.sessions).sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+  return Object.values(state.sessions)
+    .filter(session => !isEphemeralSession(session))
+    .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
 }
 
 export function selectProjects(state: AstrorderStore): Project[] {

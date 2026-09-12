@@ -39,7 +39,8 @@
 * { box-sizing: border-box; }
 html, body, #root { min-height: 100%; overscroll-behavior-x: none; }
 html, body { margin: 0; }
-body { min-width: 320px; background: var(--astr-bg); color: var(--astr-text); }
+body { min-width: 320px; background: var(--astr-bg); color: var(--astr-text); -webkit-touch-callout: none; }
+textarea, input, select, [contenteditable="true"], .m-select-text { -webkit-touch-callout: default; }
 button, input, textarea { font: inherit; }
 a { color: inherit; }
 
@@ -87,7 +88,7 @@ a { color: inherit; }
   font-weight: 600;
 }
 .sidebar-brand { padding: 2px 4px; }
-.brand-mark { flex: 0 0 auto; width: 38px; height: 38px; border-radius: 12px; object-fit: cover; display: block; }
+.brand-mark { flex: 0 0 auto; width: 38px; height: 38px; border-radius: 12px; object-fit: contain; display: block; background: transparent; }
 .brand-mark-lg { width: 46px; height: 46px; border-radius: 14px; }
 .sidebar-divider { border-top: 1px solid var(--astr-border); }
 .rail-heading { display: flex; justify-content: space-between; align-items: center; padding: 0 4px; }

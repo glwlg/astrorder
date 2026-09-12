@@ -30,6 +30,7 @@ export function CodexConnectionCard() {
     <Stack gap="sm">
       <Group justify="space-between"><Group gap="xs"><IconTerminal2 size={21} /><Text fw={700}>本机 Codex</Text></Group><Badge color={connected ? 'teal' : 'gray'}>{connected ? '已连接' : query.data?.auth_required ? '需要登录' : '未连接'}</Badge></Group>
       <Text size="sm" c="dimmed">{query.data?.detail || '通过原生 app-server 接管 Codex 会话，保留原生 thread ID。'}</Text>
+      {query.data?.daemon_mode && <Badge data-testid="codex-daemon-mode" variant="light" color="indigo">守护进程托管</Badge>}
       {query.data && <Text size="xs">{query.data.session_count} 个原生会话</Text>}
       <Group><Button loading={busy} onClick={() => void change()}>{connected ? '断开 Codex' : '连接 Codex'}</Button><Button variant="subtle" onClick={() => void query.refetch()}>刷新状态</Button></Group>
     </Stack>

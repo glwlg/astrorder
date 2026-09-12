@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, DateTime, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -51,6 +51,7 @@ class SessionRow(Base):
     project_name: Mapped[str | None] = mapped_column(String(512), nullable=True)
     history_state: Mapped[str] = mapped_column(String(32), nullable=False, default="local")
     native_kind: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    ephemeral: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
     control_state: Mapped[str] = mapped_column(String(32), nullable=False, default="unknown")
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
@@ -117,6 +118,27 @@ class CommandRow(Base):
     payload_hash: Mapped[str] = mapped_column(String(128), nullable=False)
 
 
+class ModelRouteRow(Base):
+    __tablename__ = "model_routes"
+    __table_args__ = (
+        UniqueConstraint(
+            "agent_id", "session_id", "command_id", name="uq_model_routes_command"
+        ),
+    )
+
+    row_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    agent_id: Mapped[str] = mapped_column(String(256), nullable=False, index=True)
+    session_id: Mapped[str] = mapped_column(String(256), nullable=False, index=True)
+    command_id: Mapped[str] = mapped_column(String(256), nullable=False)
+    tier: Mapped[str] = mapped_column(String(16), nullable=False)
+    provider: Mapped[str] = mapped_column(String(128), nullable=False)
+    model: Mapped[str] = mapped_column(String(512), nullable=False)
+    effort: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    reason: Mapped[str] = mapped_column(String(64), nullable=False)
+    cost_units: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+
+
 class TaskRow(Base):
     __tablename__ = "tasks"
     __table_args__ = (UniqueConstraint("agent_id", "session_id", "id", name="uq_tasks_scope"),)
@@ -181,3 +203,14 @@ class EventRow(Base):
     session_id: Mapped[str | None] = mapped_column(String(256), nullable=True, index=True)
     data: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class DaemonCheckpointRow(Base):
+    """Durable App Server acknowledgement for one daemon WAL stream."""
+
+    __tablename__ = "daemon_checkpoints"
+
+    daemon_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    session_id: Mapped[str] = mapped_column(String(256), primary_key=True)
+    seq_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)

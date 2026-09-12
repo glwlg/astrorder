@@ -78,3 +78,36 @@ it('renders pending approvals inline and invokes approval callbacks', () => {
   fireEvent.click(screen.getByRole('button', { name: '拒绝' }))
   expect(onApproval).toHaveBeenCalledWith(pendingApproval, 'cancel')
 })
+
+it('renders a native image reference once when the same image is already attached', () => {
+  render(
+    <MobileTranscript
+      messages={[
+        {
+          ...row,
+          kind: 'message',
+          role: 'user',
+          text: '请查看\n@image:C:\\native\\upload.png',
+          attachments: [
+            {
+              id: 'upload-1',
+              name: 'upload.png',
+              media_type: 'image/png',
+              url: '/api/v1/attachments/upload-1',
+            },
+          ],
+        },
+      ]}
+      busy={false}
+      hasOlder={false}
+      loadingOlder={false}
+      loadOlder={vi.fn()}
+      onMessageAction={vi.fn()}
+      onImage={vi.fn()}
+      onSwipe={vi.fn()}
+    />,
+  )
+
+  expect(screen.getAllByAltText('upload.png')).toHaveLength(1)
+  expect(screen.queryByText(/@image:/)).not.toBeInTheDocument()
+})

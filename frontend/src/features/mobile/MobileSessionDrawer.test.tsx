@@ -89,6 +89,12 @@ describe('MobileSessionDrawer', () => {
     expect(onDeleteSession).toHaveBeenCalledWith(groups[0].sessions[0], expect.objectContaining({ clientX: 140, clientY: 220 }))
   })
 
+  it('marks session rows as hold targets so the browser callout is CSS-disabled', () => {
+    mount()
+    const row = screen.getByRole('button', { name: '会话 1' }).closest('.m-session-row')
+    expect(row).toHaveClass('m-hold')
+  })
+
   it('hides project create/delete as always-visible actions and offers them from the project menu', () => {
     const onCreate = vi.fn()
     const onDeleteProject = vi.fn()

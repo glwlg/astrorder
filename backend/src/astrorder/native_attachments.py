@@ -91,7 +91,7 @@ def ingest(manager: AttachmentManager, name: str, media_type: str, data: bytes) 
         raise
 
 
-def import_local_file(manager: AttachmentManager, path: str, roots: list[Path]) -> dict[str, str] | None:
+def _read_local_media(manager: AttachmentManager, path: str, roots: list[Path]) -> tuple[Path, str, bytes] | None:
     try:
         candidate = Path(path)
         resolved = candidate.resolve()
@@ -106,10 +106,36 @@ def import_local_file(manager: AttachmentManager, path: str, roots: list[Path]) 
     media = sniff(data)
     if media is None or len(data) > manager.settings.max_attachment_size:
         return None
+    return resolved, media, data
+
+
+def import_local_file(manager: AttachmentManager, path: str, roots: list[Path]) -> dict[str, str] | None:
+    local_media = _read_local_media(manager, path, roots)
+    if local_media is None:
+        return None
+    resolved, media, data = local_media
     try:
         return ingest(manager, resolved.name, media, data)
     except AttachmentError:
         return None
+
+
+def _matches_cached_media(
+    manager: AttachmentManager,
+    attachment: object,
+    resolved: Path,
+    media: str,
+    data: bytes,
+) -> bool:
+    if not isinstance(attachment, dict):
+        return False
+    if attachment.get('name') != resolved.name or attachment.get('media_type') != media:
+        return False
+    size = attachment.get('size')
+    if size is None and isinstance(attachment.get('id'), str):
+        stored = manager.store.get_attachment(attachment['id'])
+        size = stored.get('size') if stored else None
+    return size == len(data)
 
 
 def import_data_url(manager: AttachmentManager, url: str, name: str = 'attachment') -> dict[str, str] | None:
@@ -147,10 +173,16 @@ def bind_hermes_refs(message: dict, manager: AttachmentManager, roots: list[Path
         if path is None:
             kept.append(line)
             continue
-        mapped = import_local_file(manager, path, roots)
-        if mapped:
-            attachments.append(mapped)
-        else:
+        local_media = _read_local_media(manager, path, roots)
+        if local_media is None:
+            kept.append(line)
+            continue
+        resolved, media, data = local_media
+        if any(_matches_cached_media(manager, attachment, resolved, media, data) for attachment in attachments):
+            continue
+        try:
+            attachments.append(ingest(manager, resolved.name, media, data))
+        except AttachmentError:
             kept.append(line)
     message['text'] = '\n'.join(kept).strip('\n')
     message['attachments'] = attachments

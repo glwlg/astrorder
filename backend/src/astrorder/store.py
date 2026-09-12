@@ -6,7 +6,7 @@ import json
 import re
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -24,8 +24,10 @@ from .models import (
     Base,
     CommandRow,
     ConnectionHistoryRow,
+    DaemonCheckpointRow,
     EventRow,
     MessageRow,
+    ModelRouteRow,
     ProjectRow,
     SessionRow,
     SshConnectionRow,
@@ -159,6 +161,7 @@ def _session_wire(row: SessionRow) -> dict[str, Any]:
         "project_name": row.project_name,
         "history_state": row.history_state,
         "native_kind": row.native_kind,
+        "ephemeral": row.ephemeral,
         "control_state": row.control_state,
     }
 
@@ -205,6 +208,21 @@ def _command_wire(row: CommandRow) -> dict[str, Any]:
         "created_at": isoformat(row.created_at),
         "error": row.error,
         "target_id": row.target_id,
+    }
+
+
+def _model_route_wire(row: ModelRouteRow) -> dict[str, Any]:
+    return {
+        "agent_id": row.agent_id,
+        "session_id": row.session_id,
+        "command_id": row.command_id,
+        "tier": row.tier,
+        "provider": row.provider,
+        "model": row.model,
+        "effort": row.effort,
+        "reason": row.reason,
+        "cost_units": row.cost_units,
+        "created_at": isoformat(row.created_at),
     }
 
 
@@ -306,6 +324,7 @@ class Store:
                 "project_name": "VARCHAR(512)",
                 "history_state": "VARCHAR(32) NOT NULL DEFAULT 'local'",
                 "native_kind": "VARCHAR(32)",
+                "ephemeral": "BOOLEAN NOT NULL DEFAULT 0",
                 "control_state": "VARCHAR(32) NOT NULL DEFAULT 'unknown'",
             },
             "ssh_connections": {
@@ -326,6 +345,12 @@ class Store:
                         db.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
             db.exec_driver_sql(
                 "UPDATE agents SET source_id = id WHERE source_id IS NULL OR source_id = ''"
+            )
+            # Older side-chat builds dropped ephemeral before persistence.
+            # Only the exact application-generated marker is a legacy match.
+            db.exec_driver_sql(
+                "UPDATE sessions SET ephemeral = 1 WHERE title = ? AND ephemeral = 0",
+                ("[侧边聊天]",),
             )
             db.exec_driver_sql(
                 "UPDATE agents SET runtime_id = id WHERE runtime_id IS NULL OR runtime_id = ''"
@@ -363,6 +388,55 @@ class Store:
 
     def close(self) -> None:
         self.engine.dispose()
+
+    @staticmethod
+    def _validate_daemon_checkpoint_key(daemon_id: str, session_id: str) -> None:
+        if not isinstance(daemon_id, str) or not daemon_id or len(daemon_id) > 128:
+            raise ValueError("daemon_id must be a non-empty string up to 128 characters")
+        if not isinstance(session_id, str) or not session_id or len(session_id) > 256:
+            raise ValueError("session_id must be a non-empty string up to 256 characters")
+
+    def get_daemon_checkpoint(self, daemon_id: str, session_id: str) -> int:
+        self._validate_daemon_checkpoint_key(daemon_id, session_id)
+        with self.session() as db:
+            row = db.get(
+                DaemonCheckpointRow,
+                {"daemon_id": daemon_id, "session_id": session_id},
+            )
+            return row.seq_id if row is not None else 0
+
+    def list_daemon_checkpoints(self, daemon_id: str) -> dict[str, int]:
+        self._validate_daemon_checkpoint_key(daemon_id, "checkpoint-probe")
+        with self.session() as db:
+            rows = db.scalars(
+                select(DaemonCheckpointRow)
+                .where(DaemonCheckpointRow.daemon_id == daemon_id)
+                .order_by(DaemonCheckpointRow.session_id)
+            ).all()
+            return {row.session_id: row.seq_id for row in rows}
+
+    def set_daemon_checkpoint(self, daemon_id: str, session_id: str, seq_id: int) -> int:
+        self._validate_daemon_checkpoint_key(daemon_id, session_id)
+        if not isinstance(seq_id, int) or isinstance(seq_id, bool) or seq_id < 0:
+            raise ValueError("seq_id must be a non-negative integer")
+        with self.session() as db:
+            row = db.get(
+                DaemonCheckpointRow,
+                {"daemon_id": daemon_id, "session_id": session_id},
+            )
+            if row is None:
+                row = DaemonCheckpointRow(
+                    daemon_id=daemon_id,
+                    session_id=session_id,
+                    seq_id=seq_id,
+                    updated_at=utc_now(),
+                )
+                db.add(row)
+            elif seq_id > row.seq_id:
+                row.seq_id = seq_id
+                row.updated_at = utc_now()
+            db.flush()
+            return row.seq_id
 
     def get_agent(self, agent_id: str) -> dict[str, Any] | None:
         with self.session() as db:
@@ -710,6 +784,7 @@ class Store:
                     project_name=data.get("project_name"),
                     history_state=data.get("history_state", "local"),
                     native_kind=data.get("native_kind"),
+                    ephemeral=data.get("ephemeral") is True,
                     control_state=data.get("control_state", "unknown"),
                     updated_at=updated_at,
                 ).on_conflict_do_update(
@@ -725,6 +800,8 @@ class Store:
                         "project_name": data.get("project_name"),
                         "history_state": data.get("history_state", "local"),
                         "native_kind": data.get("native_kind"),
+                        # Native snapshots cannot promote temporary sessions.
+                        "ephemeral": SessionRow.ephemeral | (data.get("ephemeral") is True),
                         "control_state": data.get("control_state", "unknown"),
                         "updated_at": updated_at,
                     }
@@ -747,6 +824,7 @@ class Store:
                 row.project_name = data.get("project_name")
                 row.history_state = data.get("history_state", row.history_state or "local")
                 row.native_kind = data.get("native_kind", row.native_kind)
+                row.ephemeral = row.ephemeral or data.get("ephemeral") is True
                 row.control_state = data.get("control_state", row.control_state or "unknown")
                 row.updated_at = updated_at
                 db.flush()
@@ -889,6 +967,78 @@ class Store:
                 )
             ).scalar_one_or_none()
             return _command_wire(row) if row else None
+
+    def record_model_route(
+        self, route: dict[str, Any], *, created_at: datetime | None = None
+    ) -> tuple[dict[str, Any], bool]:
+        with self.session() as db:
+            existing = db.execute(
+                select(ModelRouteRow).where(
+                    ModelRouteRow.agent_id == route["agent_id"],
+                    ModelRouteRow.session_id == route["session_id"],
+                    ModelRouteRow.command_id == route["command_id"],
+                )
+            ).scalar_one_or_none()
+            if existing is not None:
+                return _model_route_wire(existing), False
+            row = ModelRouteRow(
+                agent_id=route["agent_id"],
+                session_id=route["session_id"],
+                command_id=route["command_id"],
+                tier=route["tier"],
+                provider=route["provider"],
+                model=route["model"],
+                effort=route.get("effort"),
+                reason=route["reason"],
+                cost_units=route["cost_units"],
+                created_at=created_at or utc_now(),
+            )
+            db.add(row)
+            db.flush()
+            return _model_route_wire(row), True
+
+    def model_routing_units(self, agent_id: str, day_start: datetime) -> int:
+        with self.session() as db:
+            value = db.scalar(
+                select(func.coalesce(func.sum(ModelRouteRow.cost_units), 0)).where(
+                    ModelRouteRow.agent_id == agent_id,
+                    ModelRouteRow.created_at >= day_start,
+                    ModelRouteRow.created_at < day_start + timedelta(days=1),
+                )
+            )
+            return int(value or 0)
+
+    def model_routing_usage(self, day_start: datetime) -> list[dict[str, Any]]:
+        with self.session() as db:
+            rows = db.execute(
+                select(
+                    ModelRouteRow.agent_id,
+                    func.sum(ModelRouteRow.cost_units),
+                    func.count(ModelRouteRow.row_id),
+                )
+                .where(
+                    ModelRouteRow.created_at >= day_start,
+                    ModelRouteRow.created_at < day_start + timedelta(days=1),
+                )
+                .group_by(ModelRouteRow.agent_id)
+                .order_by(ModelRouteRow.agent_id)
+            ).all()
+            return [
+                {"agent_id": agent_id, "cost_units": int(units), "commands": int(commands)}
+                for agent_id, units, commands in rows
+            ]
+
+    def latest_model_route(self, agent_id: str, session_id: str) -> dict[str, Any] | None:
+        with self.session() as db:
+            row = db.scalars(
+                select(ModelRouteRow)
+                .where(
+                    ModelRouteRow.agent_id == agent_id,
+                    ModelRouteRow.session_id == session_id,
+                )
+                .order_by(ModelRouteRow.row_id.desc())
+            ).first()
+            return _model_route_wire(row) if row is not None else None
 
     def list_commands(self, agent_id: str, session_id: str) -> list[dict[str, Any]]:
         with self.session() as db:
@@ -1337,6 +1487,7 @@ class Store:
                 project_id=data.get("project_id"),
                 project_name=data.get("project_name"),
                 history_state=data.get("history_state", "local"),
+                ephemeral=data.get("ephemeral") is True,
                 control_state=data.get("control_state", "unknown"),
                 updated_at=updated_at,
             )
@@ -1355,6 +1506,7 @@ class Store:
             if "project_name" in data:
                 row.project_name = data["project_name"]
             row.history_state = data.get("history_state", row.history_state or "local")
+            row.ephemeral = row.ephemeral or data.get("ephemeral") is True
             row.control_state = data.get("control_state", row.control_state or "unknown")
             row.updated_at = updated_at
         db.flush()

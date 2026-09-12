@@ -256,6 +256,13 @@ function railIds(sessions: Session[]): string[] {
 }
 
 describe('session rail hygiene', () => {
+  it('hides the exact legacy side-chat marker without hiding ordinary discussion titles', () => {
+    expect(railIds([
+      railSession({ id: 'legacy', title: '[侧边聊天]' }),
+      railSession({ id: 'normal', title: '修复[侧边聊天]功能' }),
+      railSession({ id: 'plain', title: '侧边聊天' }),
+    ])).toEqual(['normal', 'plain'])
+  })
   it('hides smoke, ephemeral, and native-kind smoke sessions from the rail', () => {
     expect(railIds([
       railSession({ id: 'keep', title: '排查连接' }),

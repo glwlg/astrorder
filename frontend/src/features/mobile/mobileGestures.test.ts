@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { closesSessionDrawerFromSwipe, opensSessionDrawerFromEdge, sessionCardPose, sessionSwipeDirection, sessionSwipeGesture } from './mobileGestures'
+import { closesSessionDrawerFromSwipe, installGlobalNativeHoldBlocker, opensSessionDrawerFromEdge, sessionCardPose, sessionSwipeDirection, sessionSwipeGesture, suppressNativeHold } from './mobileGestures'
 
 describe('mobile gesture arbitration', () => {
   it('opens the session drawer only from a mostly horizontal left-edge right swipe', () => {
@@ -32,5 +32,47 @@ describe('mobile gesture arbitration', () => {
     expect(closesSessionDrawerFromSwipe(280, 320, 220, 470)).toBe(false)
     expect(closesSessionDrawerFromSwipe(280, 320, 250, 328)).toBe(false)
     expect(closesSessionDrawerFromSwipe(280, 120, 270, 420)).toBe(false)
+  })
+
+  it('blocks native long-press menus except inside text fields', () => {
+    const button = document.createElement('button')
+    document.body.append(button)
+    const blocked = new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+    button.addEventListener('contextmenu', suppressNativeHold)
+    button.dispatchEvent(blocked)
+    expect(blocked.defaultPrevented).toBe(true)
+
+    const field = document.createElement('textarea')
+    document.body.append(field)
+    const allowed = new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+    field.addEventListener('contextmenu', suppressNativeHold)
+    field.dispatchEvent(allowed)
+    expect(allowed.defaultPrevented).toBe(false)
+  })
+
+  it('global blocker only cancels touch-triggered long-press, not desktop right-click', () => {
+    const target = document.createElement('div')
+    document.body.append(target)
+    const detach = installGlobalNativeHoldBlocker()
+    try {
+      target.dispatchEvent(new TouchEvent('touchstart', { bubbles: true, cancelable: true, touches: [{ clientX: 10, clientY: 10, identifier: 1, target }] as never }))
+      const hold = new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+      target.dispatchEvent(hold)
+      expect(hold.defaultPrevented).toBe(true)
+
+      target.dispatchEvent(new TouchEvent('touchend', { bubbles: true, cancelable: true }))
+      const click = new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+      target.dispatchEvent(click)
+      expect(click.defaultPrevented).toBe(false)
+
+      const field = document.createElement('textarea')
+      document.body.append(field)
+      field.dispatchEvent(new TouchEvent('touchstart', { bubbles: true, cancelable: true, touches: [{ clientX: 2, clientY: 2, identifier: 2, target: field }] as never }))
+      const editMenu = new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+      field.dispatchEvent(editMenu)
+      expect(editMenu.defaultPrevented).toBe(false)
+    } finally {
+      detach()
+    }
   })
 })

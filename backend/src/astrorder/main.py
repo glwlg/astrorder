@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -16,16 +16,57 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from .api import router
 from .auth import authorize_browser_websocket, authorize_connector_websocket
 from .config import Settings
-from .connections import ConnectionController
-from .native_codex import CodexConnection
+from .connections import ConnectionController, ConnectionError
 from .environment_connections import EnvironmentConnections
 from .events import EventHub
+from .native_codex import CodexConnection
 from .runtime import ProcessSupervisor
 from .schemas import AgentModel
 from .service import ControlService, ProtocolError
 from .store import Store
 
 logger = logging.getLogger(__name__)
+
+
+async def apply_model_route(app, agent_id: str, session_id: str, target) -> None:
+    agent = app.state.store.get_agent(agent_id)
+    if not isinstance(agent, dict):
+        raise LookupError("model routing Agent is unavailable")
+    if agent.get("kind") == "codex":
+        environments = getattr(app.state, "environments", None)
+        runtime = environments.for_agent(agent_id) if environments is not None else None
+        local_codex = getattr(app.state, "codex", None)
+        if runtime is None and getattr(local_codex, "agent_id", None) == agent_id:
+            runtime = local_codex
+    elif agent.get("kind") == "hermes":
+        runtime = app.state.connections.get_runtime_by_agent_id(agent_id)
+    else:
+        raise RuntimeError("model routing Agent kind is unsupported")
+    if runtime is None:
+        raise RuntimeError("model routing runtime is unavailable")
+    model_result = await asyncio.to_thread(
+        runtime.set_model,
+        session_id,
+        target.provider,
+        target.model,
+    )
+    if (
+        not isinstance(model_result, dict)
+        or model_result.get("provider") != target.provider
+        or model_result.get("model") != target.model
+    ):
+        raise RuntimeError("native model readback did not match route")
+    if target.effort is not None:
+        effort_result = await asyncio.to_thread(
+            runtime.set_effort,
+            session_id,
+            target.effort,
+        )
+        if (
+            not isinstance(effort_result, dict)
+            or effort_result.get("effort") != target.effort
+        ):
+            raise RuntimeError("native reasoning readback did not match route")
 
 
 class SpaStaticFiles(StaticFiles):
@@ -69,12 +110,115 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.store = store
         app.state.hub = hub
         app.state.service = service
+        daemon_stopping = asyncio.Event()
+        daemon_task: asyncio.Task[None] | None = None
+        app.state.daemon_bridge = None
+        if runtime_settings.session_daemon_enabled:
+            from .daemon.bridge import DaemonBridge
+
+            app.state.daemon_bridge = DaemonBridge(
+                store,
+                service,
+                runtime_settings.session_daemon_endpoint,
+                secret=runtime_settings.session_daemon_secret,
+                request_timeout=runtime_settings.session_daemon_request_timeout,
+            )
+            daemon_task = asyncio.create_task(app.state.daemon_bridge.run(daemon_stopping))
+        app.state.daemon_terminal_relay = None
+        app.state.daemon_pty_unregistrations = []
+        if runtime_settings.daemon_pty_enabled:
+            if app.state.daemon_bridge is None:
+                raise ValueError("daemon PTY requires the Session Daemon bridge")
+            from .daemon.terminal_relay import DaemonTerminalRelay
+
+            app.state.daemon_terminal_relay = DaemonTerminalRelay(
+                app.state.daemon_bridge,
+                secret=runtime_settings.session_daemon_secret,
+            )
+            app.state.daemon_pty_unregistrations = [
+                app.state.daemon_bridge.register_native_frame_handler(
+                    "pty.output", lambda _session_id, _payload: None
+                ),
+                app.state.daemon_bridge.register_native_frame_handler(
+                    "pty.closed", lambda _session_id, _payload: None
+                ),
+            ]
+        app.state.hermes_command_frame_router = None
+        if runtime_settings.daemon_hermes_enabled or runtime_settings.daemon_ssh_enabled:
+            if app.state.daemon_bridge is None:
+                raise ValueError("daemon Hermes projection requires the Session Daemon bridge")
+            from .daemon.hermes_projection import HermesCommandFrameRouter
+
+            app.state.hermes_command_frame_router = HermesCommandFrameRouter(
+                app.state.daemon_bridge,
+                store,
+                service,
+            )
         service.mark_persisted_connectors_disconnected()
         store.mark_ssh_connections_disconnected()
         app.state.attachments = AttachmentManager(runtime_settings, store)
         app.state.supervisor = ProcessSupervisor(runtime_settings)
-        app.state.connections = ConnectionController(runtime_settings, store)
+        app.state.daemon_hermes_controller = None
+        local_hermes_controller = None
+        if runtime_settings.daemon_hermes_enabled:
+            if app.state.daemon_bridge is None:
+                raise ValueError("daemon Hermes requires the Session Daemon bridge")
+            from .daemon.hermes_control import DaemonHermesController
+
+            local_hermes_controller = DaemonHermesController(app.state.daemon_bridge)
+            app.state.daemon_hermes_controller = local_hermes_controller
+        app.state.daemon_ssh_factory = None
+        daemon_ssh_factory = None
+        if runtime_settings.daemon_ssh_enabled:
+            if app.state.daemon_bridge is None:
+                raise ValueError("daemon SSH requires the Session Daemon bridge")
+            from .daemon.ssh_control import DaemonSshController
+
+            def daemon_ssh_factory(row):
+                connection_id = row.get("id") if isinstance(row, dict) else None
+                ssh_settings = row.get("settings") if isinstance(row, dict) else None
+                if not isinstance(connection_id, str) or not connection_id or not isinstance(ssh_settings, dict):
+                    raise ValueError("saved SSH connection identity is invalid")
+                return DaemonSshController(
+                    app.state.daemon_bridge,
+                    connection_id=connection_id,
+                    ssh_settings=ssh_settings,
+                )
+
+            app.state.daemon_ssh_factory = daemon_ssh_factory
+        app.state.connections = ConnectionController(
+            runtime_settings,
+            store,
+            local_controller=local_hermes_controller,
+            daemon_ssh_factory=daemon_ssh_factory,
+        )
         app.state.codex = CodexConnection(runtime_settings, store, service)
+        app.state.codex_native_frame_router = None
+        if runtime_settings.daemon_codex_enabled:
+            if app.state.daemon_bridge is None:
+                raise ValueError("daemon Codex requires the Session Daemon bridge")
+            from .daemon.codex_control import DaemonCodexController
+            from .daemon.codex_projection import CodexNativeFrameRouter
+
+            codex_native_frame_router = CodexNativeFrameRouter(app.state.daemon_bridge)
+            app.state.codex_native_frame_router = codex_native_frame_router
+            app.state.codex.set_daemon_controller_factory(
+                lambda connection: DaemonCodexController(
+                    app.state.daemon_bridge,
+                    codex_native_frame_router,
+                    connection,
+                )
+            )
+        if runtime_settings.model_routing_enabled:
+            from .model_routing import ModelRouter
+
+            service.model_router = ModelRouter(
+                store,
+                runtime_settings,
+                lambda agent_id, session_id, target: apply_model_route(
+                    app, agent_id, session_id, target
+                ),
+            )
         app.state.environments = EnvironmentConnections(runtime_settings, store, service, app.state.connections, app.state.codex)
         from .hermes_approvals import HermesApprovals
         service.hermes_approvals = HermesApprovals(app.state.connections, service)
@@ -82,17 +226,41 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         observers = NativeObservers(app)
         app.state.observers = observers
         observer_task = asyncio.create_task(observers.run())
-        restore_task = None
+        restore_tasks: list[asyncio.Task[None]] = []
+        if runtime_settings.daemon_codex_enabled:
+            async def restore_daemon_codex() -> None:
+                try:
+                    await asyncio.to_thread(app.state.codex.connect)
+                except ConnectionError as exc:
+                    logger.warning("daemon Codex projection restore failed: %s", exc)
+
+            restore_tasks.append(asyncio.create_task(restore_daemon_codex()))
         if runtime_settings.auto_connect_local_hermes:
-            restore_task = asyncio.create_task(asyncio.to_thread(app.state.environments.restore))
+            restore_tasks.append(
+                asyncio.create_task(asyncio.to_thread(app.state.environments.restore))
+            )
         try:
             yield
         finally:
+            if app.state.hermes_command_frame_router is not None:
+                app.state.hermes_command_frame_router.close()
+            for unregister in app.state.daemon_pty_unregistrations:
+                unregister()
+            daemon_stopping.set()
+            if daemon_task is not None:
+                try:
+                    await asyncio.wait_for(daemon_task, timeout=0.5)
+                except TimeoutError:
+                    daemon_task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await daemon_task
             observers.stopping.set()
             await observer_task
-            if restore_task is not None:
+            for restore_task in restore_tasks:
                 await restore_task
             await asyncio.to_thread(app.state.codex.disconnect)
+            if app.state.codex_native_frame_router is not None:
+                app.state.codex_native_frame_router.close()
             await asyncio.to_thread(app.state.environments.shutdown)
             app.state.connections.shutdown(service)
             await service.shutdown()
@@ -121,6 +289,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return
 
         session_id = websocket.query_params.get("session_id")
+        session_obj = None
         workspace_dir = None
         ssh_argv = None
         remote_workspace = None
@@ -151,6 +320,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         workspace_dir = session_obj["workspace"]
             except Exception:
                 pass
+
+        relay = websocket.app.state.daemon_terminal_relay
+        if relay is not None and isinstance(session_obj, dict):
+            from .daemon.terminal_relay import daemon_pty_target
+
+            target = daemon_pty_target(session_obj)
+            if target is not None:
+                agent_id, native_session_id, workspace = target
+                await relay.serve(
+                    websocket,
+                    agent_id=agent_id,
+                    session_id=native_session_id,
+                    workspace=workspace,
+                )
+                return
 
         await websocket.accept()
         from .terminal_service import TerminalSession

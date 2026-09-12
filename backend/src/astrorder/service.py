@@ -74,6 +74,7 @@ class ControlService:
         self._native_command_handlers: dict[str, NativeCommandHandler] = {}
         self._native_history_handlers: dict[str, NativeHistoryHandler] = {}
         self.hermes_approvals = None
+        self.model_router: Any = None
         try:
             self._loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -361,6 +362,26 @@ class ControlService:
                 data=updated,
             )
             raise CommandRejected(capability_error)
+
+        if self.model_router is not None and command["action"] == "send":
+            try:
+                await self.model_router.route(command, agent_kind=agent["kind"])
+            except Exception:  # noqa: BLE001 - native details must not enter command errors
+                detail = "模型路由未通过原生读回确认；消息未发送。"
+                updated = self.store.set_command_state(
+                    command["agent_id"],
+                    command["session_id"],
+                    command["id"],
+                    "failed",
+                    detail,
+                )
+                self._server_event(
+                    "command.upsert",
+                    agent_id=command["agent_id"],
+                    session_id=command["session_id"],
+                    data=updated,
+                )
+                raise CommandRejected(detail) from None
 
         connection = self.connections.get(agent["id"])
         if payload["action"] == "enqueue":

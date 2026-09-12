@@ -24,6 +24,7 @@ import { selectApprovals, selectCommands, selectOutbox, selectSessions, selectTa
 import { useSessionResources } from '../../hooks/useAstrorderData'
 import { useSessionModel } from '../../hooks/useSessionModel'
 import { ChatComposer } from './ChatComposer'
+import { QuickOpen } from './QuickOpen'
 
 import { SessionDetails } from './SessionDetails'
 import { SessionRuntimeBar } from './SessionRuntimeBar'
@@ -142,8 +143,16 @@ export function ChatPage() {
         return
       }
 
-      // 2. 文件树快捷键：Ctrl + P (屏蔽浏览器原生打印)
+      // 2. Quick Open 快捷键：Ctrl + P (屏蔽浏览器原生打印，模糊搜文件)
       if (isCtrlOrMeta && !e.altKey && !e.shiftKey && (e.key === 'p' || e.key === 'P')) {
+        e.preventDefault()
+        e.stopPropagation()
+        setQuickOpenOpened(true)
+        return
+      }
+
+      // 文件树快捷键：Ctrl + Shift + E
+      if (isCtrlOrMeta && !e.altKey && e.shiftKey && (e.key === 'e' || e.key === 'E')) {
         e.preventDefault()
         e.stopPropagation()
         useSidecarStore
@@ -197,6 +206,7 @@ export function ChatPage() {
   const [taskDetailsOpened, { open: openTaskDetails, close: closeTaskDetails }] = useDisclosure(false)
   const [selectedTask, setSelectedTask] = useState<Task | null>(null)
   const [previewImage, setPreviewImage] = useState<string | null>(null)
+  const [quickOpenOpened, setQuickOpenOpened] = useState(false)
   const [composerHeight, setComposerHeight] = useState<number>(124)
   const mobileTaskSheet = useMediaQuery('(max-width: 767px)')
   const resources = useSessionResources(selected, true)
@@ -452,6 +462,7 @@ export function ChatPage() {
           </div>,
           document.body,
         )}
+      {selected && <QuickOpen session={selected} opened={quickOpenOpened} onClose={() => setQuickOpenOpened(false)} />}
     </div>
   )
 }

@@ -1,5 +1,5 @@
-from typing import Any
 import re
+from typing import Any
 
 from .connections import ConnectionError
 
@@ -8,6 +8,8 @@ def runtime_rpc(connections, agent_id):
     runtime = connections.get_runtime_by_agent_id(agent_id)
     if runtime is None:
         raise ConnectionError('会话所属运行时未连接。', 503)
+    if getattr(runtime, 'daemon_owned', False):
+        raise ConnectionError('守护进程托管的 Hermes 尚未提供该显式控制接口。', 503)
     return runtime._rpc if runtime is connections.local else runtime.rpc
 
 

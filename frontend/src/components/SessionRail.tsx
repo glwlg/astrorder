@@ -25,7 +25,7 @@ import {
   UnstyledButton,
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { useSessionOrder } from '../hooks/useSessionOrder'
 import { AgentSessionFilter, matchesAgent } from './AgentSessionFilter'
 import { NewSessionDialog } from './NewSessionDialog'
@@ -57,6 +57,12 @@ type PendingConfirmation =
   | { kind: 'delete-session'; session: Session; coords: ConfirmationCoordinates }
   | { kind: 'delete-project'; project: ProjectGroup; coords: ConfirmationCoordinates }
 
+function sessionRunningStyle(session: Session, accent?: string): CSSProperties {
+  return {
+    '--session-running-color': accent || (session.agent_id.includes('codex') ? 'var(--astr-teal, #12b886)' : 'var(--astr-indigo, #5b6cff)'),
+  } as CSSProperties
+}
+
 export function SessionRail({
   sessions: incomingSessions,
   agents,
@@ -75,6 +81,7 @@ export function SessionRail({
   const commands = useAstrorderStore(useShallow((state) => state.commands))
   useAstrorderStore((state) => state.messages)
   useAstrorderStore((state) => state.tasks)
+  useAstrorderStore((state) => state.liveActivityAt)
   const [statusFilter, setStatusFilter] = useState<RailFilter>('all')
   const [agentFilter, setAgentFilter] = useState(() => {
     try {
@@ -407,15 +414,9 @@ export function SessionRail({
             const isRunning = sessionActivityStatus(session, commands) === 'running'
             const projectColor = session.project_id ? projectAppearance[`project:${session.project_id}`]?.color : undefined
             return (
-              <div className={`session-row-wrapper ${isRunning ? 'is-running' : ''}`} key={key}>
+              <div className={`session-row-wrapper ${isRunning ? 'is-running' : ''}`} key={key} style={sessionRunningStyle(session, projectColor)}>
+                <span aria-hidden="true" className="session-running-arc" />
                 <UnstyledButton className={`session-row is-pinned ${key === activeSessionKey ? 'is-active' : ''} ${isRunning ? 'is-running' : ''}`} onClick={() => onSelect(session)}>
-                  <span
-                    aria-hidden="true"
-                    className="arc-border arc-row session-running-arc"
-                    style={{
-                      '--arc-c1': projectColor || (session.agent_id.includes('codex') ? 'var(--astr-teal, #12b886)' : 'var(--astr-indigo, #6366f1)'),
-                    } as React.CSSProperties}
-                  />
                   <span className="session-row-title">{displaySessionTitle(session)}</span><div className="session-row-info"><AgentKindBadge agent={agents[session.agent_id]} /><span className="session-row-time">{formatRelativeTime(session.updated_at)}</span><StatusDot status={sessionActivityStatus(session, commands)} /></div>
                 </UnstyledButton>
                 <div className="session-row-actions has-pinned"><button className="session-action-btn is-active" aria-label="取消置顶" onClick={e => togglePin(session, e)}><IconPinned size={14} /></button>
@@ -560,19 +561,13 @@ export function SessionRail({
                     const isPinned = pinnedSessions[key] === true
                     const isRunning = sessionActivityStatus(session, commands) === 'running'
                     return (
-                      <div className={`session-row-wrapper ${isRunning ? 'is-running' : ''}`} key={key}>
+                      <div className={`session-row-wrapper ${isRunning ? 'is-running' : ''}`} key={key} style={sessionRunningStyle(session, projectCustom?.color)}>
+                        <span aria-hidden="true" className="session-running-arc" />
                         <UnstyledButton
                           className={`session-row ${key === activeSessionKey ? 'is-active' : ''} ${isPinned ? 'is-pinned' : ''} ${isRunning ? 'is-running' : ''}`}
                           onClick={() => onSelect(session)}
                           aria-current={key === activeSessionKey ? 'page' : undefined}
                         >
-                          <span
-                            aria-hidden="true"
-                            className="arc-border arc-row session-running-arc"
-                            style={{
-                              '--arc-c1': projectCustom?.color || (session.agent_id.includes('codex') ? 'var(--astr-teal, #12b886)' : 'var(--astr-indigo, #6366f1)'),
-                            } as React.CSSProperties}
-                          />
                           <span className="session-row-title" title={displaySessionTitle(session)}>
                             {displaySessionTitle(session)}
                           </span>

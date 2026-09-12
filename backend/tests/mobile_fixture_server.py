@@ -34,7 +34,29 @@ async def fixture_lifespan(app):
         service = app.state.service
         store = app.state.store
         # Activity polling must not discover a real local installation in an inert fixture.
-        app.state.connections.local.snapshot = lambda: {'agent_id': None}
+        app.state.connections.local.snapshot = lambda: {
+            'kind': 'hermes',
+            'state': 'offline',
+            'available': False,
+            'agent_id': None,
+            'source_id': 'fixture-local-hermes',
+            'profile_name': 'fixture',
+            'runtime_id': None,
+            'session_id': None,
+            'version': None,
+            'detail': 'Inert daemon Hermes fixture; no native Agent was started.',
+            'daemon_mode': True,
+        }
+        app.state.codex.snapshot = lambda: {
+            'kind': 'codex',
+            'state': 'connected',
+            'available': True,
+            'agent_id': 'daemon-codex-fixture',
+            'session_count': 0,
+            'auth_required': False,
+            'detail': '隔离 daemon Codex 状态；未启动原生 Agent。',
+            'daemon_mode': True,
+        }
         def create_fixture_session(*, agent_id, workspace, title):
             assert agent_id == 'mobile-protocol-fixture'
             row = {'id': 'fixture-created-' + uuid4().hex, 'agent_id': agent_id, 'title': title or '新会话', 'workspace': workspace, 'status': 'idle', 'updated_at': now()}
@@ -68,7 +90,11 @@ async def fixture_lifespan(app):
             service.accept_connector_event(agent_id, {'id': uuid4().hex, 'type': kind, 'agent_id': agent_id, 'session_id': sid, 'data': data})
 
         def state(sid, status):
-            publish('session.upsert', sid, {**store.get_session(agent_id, sid), 'status': status, 'updated_at': now()})
+            row = {**store.get_session(agent_id, sid), 'status': status, 'updated_at': now()}
+            # Mimic native title/status sync with no Astrorder lifecycle metadata.
+            if row.pop('ephemeral', False):
+                row['title'] = '临时协议回显'
+            publish('session.upsert', sid, row)
 
         def receipt(command, status):
             publish('command.upsert', command['session_id'], {**command, 'state': status, 'error': 'Fixture rejection' if status == 'failed' else None})

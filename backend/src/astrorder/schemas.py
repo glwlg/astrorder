@@ -37,6 +37,7 @@ class SessionModel(WireModel):
     project_name: str | None = Field(default=None, max_length=512)
     history_state: str = Field(default="local", max_length=32)
     native_kind: str | None = Field(default=None, max_length=32)
+    ephemeral: bool = False
     control_state: str = Field(default="unknown", max_length=32)
 
 

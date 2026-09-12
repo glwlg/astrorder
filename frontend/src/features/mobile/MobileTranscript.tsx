@@ -11,10 +11,10 @@ import { describeTool, PackSummary, ToolLineIcon } from '../chat/toolPresentatio
 
 export interface MessageActionAnchor { text: string; x: number; y: number; element: HTMLElement }
 
-export function MobileTranscript({ messages, approvals = [], onApproval, busy, loadOlder, hasOlder, loadingOlder, onMessageAction, onImage, onSwipe, onSwipePreview }: {
+export function MobileTranscript({ messages, approvals = [], onApproval, busy, loadOlder, hasOlder, loadingOlder, onMessageAction, onImage, onFile, onSwipe, onSwipePreview }: {
   messages: Message[]; approvals?: Approval[]; onApproval?: (approval: Approval, action: 'approve' | 'cancel') => void
   busy: boolean; loadOlder: () => unknown; hasOlder: boolean; loadingOlder: boolean
-  onMessageAction: (anchor: MessageActionAnchor) => void; onImage: (url: string) => void; onSwipe: (gesture: SessionSwipeGesture) => void
+  onMessageAction: (anchor: MessageActionAnchor) => void; onImage: (url: string) => void; onFile?: (path: string) => void; onSwipe: (gesture: SessionSwipeGesture) => void
   onSwipePreview?: (pose: import('./mobileGestures').SessionCardPose | null) => void
 }) {
   const { setContainerRef, following, onScroll, scrollToBottom, capturePrependAnchor } = useStickToBottom<HTMLDivElement>({ contentVersion: `${messages.map(m => m.id + ':' + m.text.length).join('|')}|${approvals.map(a => a.id).join('|')}` })
@@ -47,17 +47,17 @@ export function MobileTranscript({ messages, approvals = [], onApproval, busy, l
               </span>}>
                 {item.text && (item.kind === 'thinking' ? <div className="m-thinking-content"><MarkdownContent value={item.text} /></div> : <pre className="m-tool-output">{item.text}</pre>)}
                 {item.tool?.arguments != null && Object.keys(item.tool.arguments).length > 0 && <pre className="m-tool-args">{JSON.stringify(item.tool.arguments, null, 2)}</pre>}
-                {!!item.attachments?.length && <div className="m-thumbs">{item.attachments.map(a => a.media_type.startsWith('image/') ? <button key={a.id} onClick={() => onImage(a.url)}><img src={a.url} alt={a.name} /></button> : <a key={a.id} href={a.url} target="_blank" rel="noreferrer">{a.name}</a>)}</div>}
+                {!!item.attachments?.length && <div className="m-thumbs">{item.attachments.map(a => a.media_type.startsWith('image/') ? <button key={a.id} onClick={() => onImage(a.url)}><img src={a.url} alt={a.name} /></button> : onFile ? <button key={a.id} className="m-file-link" onClick={() => onFile(a.url)}>{a.name}</button> : <a key={a.id} href={a.url} target="_blank" rel="noreferrer">{a.name}</a>)}</div>}
               </LazyDetails>
             })}</div>
           </LazyDetails>
         }
-        return <article key={m.id} className={`m-msg ${m.role === 'user' ? 'm-user' : 'm-assistant'}`} data-message-id={m.id}
+        return <article key={m.id} className={`m-msg m-hold ${m.role === 'user' ? 'm-user' : 'm-assistant'}`} data-message-id={m.id}
           tabIndex={0}
           onContextMenu={e => { e.preventDefault(); cancelHold(); const rect = e.currentTarget.getBoundingClientRect(); onMessageAction({ text: m.text, x: e.clientX || rect.left + rect.width / 2, y: e.clientY || rect.top + 20, element: e.currentTarget }) }}
           onTouchStart={e => { cancelHold(); const element = e.currentTarget; const point = e.touches[0]; hold.current = setTimeout(() => { onMessageAction({ text: m.text, x: point.clientX, y: point.clientY, element }); navigator.vibrate?.(20) }, 500) }}>
-          {m.text.trim() && <div className="m-bubble"><MessageBody value={m.text} user={m.role === 'user'} renderMarkdown={value => <MarkdownContent value={value} />} /></div>}
-          {!!m.attachments.length && <div className="m-thumbs">{m.attachments.map(a => a.media_type.startsWith('image/') ? <button key={a.id} onClick={() => onImage(a.url)}><img src={a.url} alt={a.name} /></button> : <a key={a.id} href={a.url} target="_blank" rel="noreferrer">{a.name}</a>)}</div>}
+          {m.text.trim() && <div className="m-bubble"><MessageBody value={m.text} user={m.role === 'user'} attachmentNames={m.attachments.filter((attachment) => attachment.media_type.startsWith('image/')).map((attachment) => attachment.name)} renderMarkdown={value => <MarkdownContent value={value} onFileClick={onFile} onImageClick={onImage} />} /></div>}
+          {!!m.attachments.length && <div className="m-thumbs">{m.attachments.map(a => a.media_type.startsWith('image/') ? <button key={a.id} onClick={() => onImage(a.url)}><img src={a.url} alt={a.name} /></button> : onFile ? <button key={a.id} className="m-file-link" onClick={() => onFile(a.url)}>{a.name}</button> : <a key={a.id} href={a.url} target="_blank" rel="noreferrer">{a.name}</a>)}</div>}
           {m.role === 'user' && <small className="m-delivered"><IconCheck size={12} /> 已送达</small>}
         </article>
       })}

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import os
 import sqlite3
 import subprocess
+from pathlib import Path
 
 from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
@@ -10,12 +13,12 @@ from pydantic import BaseModel, Field
 
 from .attachments import AttachmentError
 from .auth import COOKIE_NAME, browser_authenticated, require_browser, validate_origin
-from .connections import ConnectionError
+from .connections import ConnectionError, _windows_hide_startupinfo
 from .schemas import AuthRequest, CommandSubmission, RuntimeLaunch, SshConnectionSettings
 from .service import CommandRejected
-from pathlib import Path
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def _settings(request: Request):
@@ -190,6 +193,8 @@ class CreateSessionPayload(BaseModel):
     title: str | None = Field(default=None, max_length=512)
     project_id: str | None = Field(default=None, max_length=256)
     project_name: str | None = Field(default=None, max_length=256)
+    parent_session_id: str | None = Field(default=None, max_length=256)
+    ephemeral: bool = Field(default=False)
 
 
 @router.get("/api/v1/open-sessions")
@@ -226,11 +231,21 @@ def create_session(payload: CreateSessionPayload, request: Request) -> dict[str,
     _private(request)
     try:
         codex = _codex(request, payload.agent_id)
-        data = codex.create(payload.workspace, payload.title) if codex else request.app.state.connections.create_session_for_agent(
-            agent_id=payload.agent_id,
-            workspace=payload.workspace,
-            title=payload.title,
-        )
+        if codex:
+            data = codex.create(
+                payload.workspace,
+                payload.title,
+                ephemeral=payload.ephemeral,
+                parent_session_id=payload.parent_session_id,
+            )
+        else:
+            data = request.app.state.connections.create_session_for_agent(
+                agent_id=payload.agent_id,
+                workspace=payload.workspace,
+                title=payload.title,
+            )
+        if payload.ephemeral:
+            data["ephemeral"] = True
         # 关联 project_id 与 project_name
         store = request.app.state.store
         project_id = payload.project_id
@@ -263,7 +278,7 @@ def create_session(payload: CreateSessionPayload, request: Request) -> dict[str,
     except ConnectionError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
     except Exception as exc:
-        logger.exception("Failed to create session: %s", exc)
+        logger.exception("Failed to create session")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
@@ -418,8 +433,7 @@ async def messages(
                     cached = request.app.state.store.get_message(agent_id, session_id, item['id'])
                     if cached and cached.get('attachments'):
                         item['attachments'] = cached['attachments']
-                    else:
-                        bind_hermes_refs(item, manager, roots)
+                    bind_hermes_refs(item, manager, roots)
                     request.app.state.store.upsert_message(item)
                 # Import just this page, without broadcasting it as fresh live messages.
                 return {'items': items, 'next_cursor': page['next_cursor']}
@@ -454,6 +468,9 @@ def session_models(session_id: str, request: Request, agent_id: str = Query(...,
         codex = _codex(request, agent_id)
         if codex:
             return {'items': codex.models(session_id)}
+        runtime = request.app.state.connections.get_runtime_by_agent_id(agent_id)
+        if getattr(runtime, "daemon_owned", False):
+            return {"items": runtime.models(session_id)}
         return {"items": model_choices(runtime_rpc(request.app.state.connections, agent_id))}
     except ConnectionError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
@@ -469,6 +486,9 @@ def session_model(session_id: str, payload: SessionModelSelection, request: Requ
         codex = _codex(request, payload.agent_id)
         if codex:
             return codex.set_model(session_id, payload.provider, payload.model)
+        runtime = request.app.state.connections.get_runtime_by_agent_id(payload.agent_id)
+        if getattr(runtime, "daemon_owned", False):
+            return runtime.set_model(session_id, payload.provider, payload.model)
         return set_session_model(runtime_rpc(request.app.state.connections, payload.agent_id), session_id, payload.provider, payload.model)
     except ConnectionError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
@@ -489,6 +509,9 @@ def read_session_model(session_id: str, request: Request, agent_id: str = Query(
             except ConnectionError:
                 binding['effort'] = None
             return binding
+        runtime = request.app.state.connections.get_runtime_by_agent_id(agent_id)
+        if getattr(runtime, "daemon_owned", False):
+            return runtime.model(session_id)
         rpc = runtime_rpc(request.app.state.connections, agent_id)
         binding = current_session_model(rpc, session_id)
         from .native_controls import current_session_reasoning
@@ -518,6 +541,9 @@ def session_reasoning(session_id: str, payload: SessionReasoningSelection, reque
         codex = _codex(request, payload.agent_id)
         if codex:
             return codex.set_effort(session_id, payload.effort)
+        runtime = request.app.state.connections.get_runtime_by_agent_id(payload.agent_id)
+        if getattr(runtime, "daemon_owned", False):
+            return runtime.set_effort(session_id, payload.effort)
         return set_session_reasoning(runtime_rpc(request.app.state.connections, payload.agent_id), session_id, payload.effort)
     except ConnectionError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
@@ -532,6 +558,9 @@ def session_approval_mode(session_id: str, request: Request, agent_id: str = Que
         codex = _codex(request, agent_id)
         if codex:
             return {"mode": codex.get_approval_mode(session_id)}
+        runtime = request.app.state.connections.get_runtime_by_agent_id(agent_id)
+        if getattr(runtime, "daemon_owned", False):
+            return {"mode": runtime.get_approval_mode(session_id)}
         from .native_controls import current_session_approval_mode, runtime_rpc
         return {"mode": current_session_approval_mode(runtime_rpc(request.app.state.connections, agent_id), session_id)}
     except ConnectionError as exc:
@@ -547,6 +576,9 @@ def session_approval_mode_select(session_id: str, payload: SessionApprovalModeSe
         codex = _codex(request, payload.agent_id)
         if codex:
             return codex.set_approval_mode(session_id, payload.mode)
+        runtime = request.app.state.connections.get_runtime_by_agent_id(payload.agent_id)
+        if getattr(runtime, "daemon_owned", False):
+            return runtime.set_approval_mode(session_id, payload.mode)
         from .native_controls import runtime_rpc, set_session_approval_mode
         return set_session_approval_mode(runtime_rpc(request.app.state.connections, payload.agent_id), session_id, payload.mode)
     except ConnectionError as exc:
@@ -755,6 +787,103 @@ print(json.dumps({{'root': str(target), 'name': target.name or str(target), 'ite
         "name": root.name or str(root),
         "items": walk_tree(root, depth),
     }
+
+
+@router.get("/api/v1/files/search")
+def search_files(
+    request: Request,
+    q: str = Query(default="", max_length=256),
+    limit: int = Query(default=30, ge=1, le=100),
+    session_id: str = Query(default=""),
+    connection_id: str = Query(default=""),
+) -> dict[str, object]:
+    """模糊搜索工作区文件（Quick Open）。只匹配文件名，跳过常见缓存目录。"""
+    _private(request)
+    import urllib.parse
+
+    query = q.strip().lower()
+    resolved_cid = connection_id
+    cleaned_path = ""
+    if not resolved_cid and session_id:
+        try:
+            sess = request.app.state.store.find_session_by_id(session_id)
+            if sess and sess.get("connection_id") and sess["connection_id"] != "local":
+                resolved_cid = sess["connection_id"]
+            if sess and sess.get("workspace"):
+                cleaned_path = sess["workspace"]
+        except Exception:
+            pass
+
+    ignored = {".git", ".venv", "node_modules", "__pycache__", ".pytest_cache", ".ruff_cache", "dist", ".idea", ".vscode"}
+
+    if resolved_cid and resolved_cid != "local":
+        ssh_conn = request.app.state.store.get_ssh_connection(resolved_cid)
+        if not ssh_conn:
+            raise HTTPException(status_code=404, detail="SSH 连接不存在")
+        from .ssh_transport import SshNativeRuntime, build_remote_python_command
+        import json as _json
+        runtime = SshNativeRuntime(ssh_conn["settings"], ssh_conn["id"], 0, None, None, connector_secret=None)
+        argv = [a for a in runtime._base_ssh_argv() if a != "-T"] + ["-o", "BatchMode=yes", runtime._target()]
+        remote_script = f"""
+import json, os
+from pathlib import Path
+query = {_json.dumps(query)}
+limit = {limit}
+ignored = {{"{ '", "'.join(sorted(ignored)) }"}}
+results = []
+root = Path({_json.dumps(cleaned_path) or "os.path.expanduser('~')"}).expanduser().resolve()
+for dirpath, dirnames, filenames in os.walk(root):
+    dirnames[:] = [d for d in dirnames if d not in ignored]
+    for name in filenames:
+        if len(results) >= limit:
+            break
+        if not query or query in name.lower():
+            full = Path(dirpath) / name
+            try:
+                results.append({{"path": str(full), "name": name, "size": full.stat().st_size}})
+            except Exception:
+                results.append({{"path": str(full), "name": name, "size": 0}})
+    if len(results) >= limit:
+        break
+print(json.dumps({{"root": str(root), "items": results}}))
+"""
+        cmd = build_remote_python_command(remote_script)
+        try:
+            res = subprocess.run(argv + [cmd], capture_output=True, text=True, timeout=15, check=False, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            output_lines = [line.strip() for line in res.stdout.strip().splitlines() if line.strip()]
+            for line in reversed(output_lines):
+                try:
+                    return _json.loads(line)
+                except Exception:
+                    continue
+            raise HTTPException(status_code=502, detail="远程文件搜索解析失败")
+        except subprocess.TimeoutExpired:
+            raise HTTPException(status_code=504, detail="远程文件搜索超时")
+
+    if not cleaned_path:
+        cleaned_path = os.getcwd()
+    try:
+        root = Path(cleaned_path).resolve()
+    except (OSError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid directory path")
+    if not root.is_dir():
+        raise HTTPException(status_code=404, detail="Directory not found")
+
+    results: list[dict[str, object]] = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in ignored]
+        for name in filenames:
+            if len(results) >= limit:
+                break
+            if not query or query in name.lower():
+                full = Path(dirpath) / name
+                try:
+                    results.append({"path": str(full), "name": name, "size": full.stat().st_size})
+                except Exception:
+                    results.append({"path": str(full), "name": name, "size": 0})
+        if len(results) >= limit:
+            break
+    return {"root": str(root), "items": results}
 
 
 @router.get("/api/v1/files/raw")
@@ -1356,6 +1485,24 @@ tmp_file.replace(target)
 def runtime(request: Request) -> dict[str, object]:
     _private(request)
     return {"items": request.app.state.supervisor.items()}
+
+
+@router.get("/api/v1/model-routing")
+def model_routing_status(request: Request) -> dict[str, object]:
+    _private(request)
+    from .timeutil import utc_now
+
+    settings = request.app.state.settings
+    now = utc_now()
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    return {
+        "enabled": settings.model_routing_enabled,
+        "daily_budget_units": settings.model_routing_daily_budget_units,
+        "small_cost_units": settings.model_routing_small_cost_units,
+        "large_cost_units": settings.model_routing_large_cost_units,
+        "large_text_threshold": settings.model_routing_large_text_threshold,
+        "usage": request.app.state.store.model_routing_usage(day_start),
+    }
 
 
 @router.get("/api/v1/connections")

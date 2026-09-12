@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from astrorder_codex_connector.app_server import CodexRpcRejected
 from astrorder.config import Settings
 from astrorder.connections import ConnectionError
 from astrorder.events import EventHub
@@ -68,6 +69,92 @@ def test_connected_means_initialized_catalog_and_scoped_native_handler(tmp_path)
         assert connection.snapshot()['state'] == 'disconnected'
         assert connection.agent_id not in service._native_command_handlers
         assert store.get_agent(connection.agent_id)['status'] == 'disconnected'
+    finally:
+        connection.disconnect()
+        store.close()
+
+
+@pytest.mark.asyncio
+async def test_codex_can_explicitly_delegate_commands_to_a_daemon_controller(tmp_path):
+    settings = Settings(
+        database_url=f'sqlite:///{tmp_path}/daemon-controller.db',
+        auto_connect_local_hermes=False,
+        codex_executable=sys.executable,
+    )
+    store = Store(settings)
+    service = ControlService(store, EventHub(), settings)
+    connection = CodexConnection(settings, store, service, client_factory=FakeClient)
+
+    class Controller:
+        activated = False
+        closed = False
+        calls: list[dict[str, object]] = []
+        model_calls: list[tuple[str, str, str]] = []
+        effort_calls: list[tuple[str, str]] = []
+        create_calls: list[tuple[str | None, str | None, bool, str | None]] = []
+
+        def activate(self):
+            self.activated = True
+
+        def close(self):
+            self.closed = True
+
+        async def submit(self, command):
+            self.calls.append(dict(command))
+            return 'accepted', None
+
+        def set_model(self, session_id, provider, model):
+            self.model_calls.append((session_id, provider, model))
+            return {'model': model, 'provider': provider}
+
+        def set_effort(self, session_id, effort):
+            self.effort_calls.append((session_id, effort))
+            return {'effort': effort}
+
+        def create(self, workspace, title, *, ephemeral=False, parent_session_id=None):
+            self.create_calls.append((workspace, title, ephemeral, parent_session_id))
+            return {
+                'id': 'daemon-created-thread',
+                'agent_id': 'local-codex',
+                'workspace': workspace,
+                'title': title,
+                'status': 'idle',
+            }
+
+    controller = Controller()
+    connection.set_daemon_controller_factory(lambda current: controller if current is connection else None)
+    try:
+        assert connection.connect()['daemon_mode'] is True
+        assert controller.activated is True
+        command = await service.submit_browser_command(
+            {
+                'id': 'daemon-command',
+                'agent_id': connection.agent_id,
+                'session_id': SID,
+                'action': 'send',
+                'text': 'daemon-owned command',
+                'attachment_ids': [],
+                'target_id': None,
+            }
+        )
+        assert command['state'] == 'accepted'
+        assert controller.calls[0]['id'] == 'daemon-command'
+        assert connection.set_model(SID, 'fixture-provider', 'fixture-model') == {
+            'model': 'fixture-model', 'provider': 'fixture-provider'
+        }
+        assert connection.set_effort(SID, 'high') == {'effort': 'high'}
+        assert controller.model_calls == [(SID, 'fixture-provider', 'fixture-model')]
+        assert controller.effort_calls == [(SID, 'high')]
+        assert connection.create('C:/daemon-workspace', 'Daemon-created', ephemeral=True) == {
+            'id': 'daemon-created-thread',
+            'agent_id': 'local-codex',
+            'workspace': 'C:/daemon-workspace',
+            'title': 'Daemon-created',
+            'status': 'idle',
+        }
+        assert controller.create_calls == [('C:/daemon-workspace', 'Daemon-created', True, None)]
+        connection.disconnect()
+        assert controller.closed is True
     finally:
         connection.disconnect()
         store.close()
@@ -363,6 +450,31 @@ def test_codex_effort_change_is_confirmed_by_settings_notification_not_thread_re
         connection.connect()
         assert connection.set_effort(SID, 'high') == {'effort': 'high'}
         assert connection.current_effort(SID) == 'high'
+    finally:
+        connection.disconnect()
+        store.close()
+
+
+def test_codex_effort_never_updates_after_resume_reports_thread_not_found(tmp_path):
+    class MissingThreadClient(FakeClient):
+        settings_update_calls = 0
+
+        def request(self, method, params, timeout=30):
+            if method == 'thread/resume':
+                raise CodexRpcRejected({'code': -32600, 'message': f'thread not found: {params["threadId"]}'})
+            if method == 'thread/settings/update':
+                type(self).settings_update_calls += 1
+                raise CodexRpcRejected({'code': -32600, 'message': f'thread not found: {params["threadId"]}'})
+            return super().request(method, params, timeout)
+
+    connection, store = _codex_connection(tmp_path, MissingThreadClient, name='missing-thread-effort.db')
+    try:
+        connection.connect()
+        with pytest.raises(ConnectionError, match='thread not found'):
+            connection.set_effort(SID, 'high')
+        # A failed resume must stop the control flow. Sending settings/update to
+        # that same absent thread is the regression shown in the UI toast.
+        assert MissingThreadClient.settings_update_calls == 0
     finally:
         connection.disconnect()
         store.close()

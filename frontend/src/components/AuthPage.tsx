@@ -2,6 +2,7 @@ import { IconKey, IconLock, IconRefresh } from '@tabler/icons-react'
 import { Alert, Button, Group, PasswordInput, Paper, Stack, Text, Title } from '@mantine/core'
 import { type FormEvent, useState } from 'react'
 import { ApiError, api } from '../api/client'
+import { BrandMark } from './BrandMark'
 
 function errorDetail(error: unknown): string {
   if (error instanceof ApiError) return error.detail
@@ -45,7 +46,7 @@ export function AuthPage({
       <Paper className="auth-card" withBorder radius="xl" p={{ base: 'lg', sm: 'xl' }}>
         <Stack gap="lg">
           <Group gap="sm" align="center">
-            <img className="brand-mark brand-mark-lg" src="/pwa-192.png" width={46} height={46} alt="" />
+            <BrandMark className="brand-mark brand-mark-lg" size={46} alt="" />
             <div>
               <Title order={1} size="h2">星序 · Astrorder</Title>
               <Text size="sm" c="dimmed">群星各有所长，协作自有秩序</Text>

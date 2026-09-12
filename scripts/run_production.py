@@ -10,6 +10,17 @@ ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / '.runtime' / 'production.json'
 
 
+def _enabled(value: object) -> bool:
+    return str(value or '').strip().casefold() in {'1', 'true', 'yes', 'on'}
+
+
+def required_credential_keys(environment: dict[str, object]) -> tuple[str, ...]:
+    keys = ['ASTRORDER_BROWSER_SECRET', 'ASTRORDER_CONNECTOR_SECRET']
+    if _enabled(environment.get('ASTRORDER_SESSION_DAEMON_ENABLED')):
+        keys.append('ASTRORDER_SESSION_DAEMON_SECRET')
+    return tuple(keys)
+
+
 def protect_bytes(value: bytes, *, decrypt: bool = False) -> bytes:
     """Windows current-user DPAPI; never persist plaintext service credentials."""
     class Blob(ctypes.Structure):
@@ -28,20 +39,26 @@ def protect_bytes(value: bytes, *, decrypt: bool = False) -> bytes:
 
 def main():
     import uvicorn
+
     from astrorder.config import Settings
 
 
     config = json.loads(CONFIG.read_text(encoding='utf-8'))
-    for key, value in config['environment'].items():
+    environment = config['environment']
+    for key, value in environment.items():
         if not key.startswith('ASTRORDER_') or key.endswith('SECRET'):
             raise ValueError('Invalid public production setting')
         os.environ[key] = str(value)
     encrypted = ROOT / '.runtime' / 'production.credentials.dpapi'
     credentials = json.loads(protect_bytes(encrypted.read_bytes(), decrypt=True))
-    for key in ('ASTRORDER_BROWSER_SECRET', 'ASTRORDER_CONNECTOR_SECRET'):
+    for key in required_credential_keys(environment):
         if not credentials.get(key):
             raise ValueError('Production credential missing')
         os.environ[key] = credentials[key]
+    if _enabled(environment.get('ASTRORDER_SESSION_DAEMON_ENABLED')):
+        from production_daemon import ensure_production_daemon
+
+        ensure_production_daemon(environment, root=ROOT)
     os.chdir(ROOT)
     settings = Settings.from_env()
     from astrorder.main import create_app

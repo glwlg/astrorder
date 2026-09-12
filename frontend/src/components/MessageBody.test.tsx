@@ -1,16 +1,18 @@
 import { render, screen, cleanup, fireEvent } from '@testing-library/react'
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import { MessageBody } from './MessageBody'
 afterEach(cleanup)
-it('presents native local image references without fetching arbitrary local files', () => {
+it('shows an @image reference exactly once, in the attachment area, and strips the raw path from the body', () => {
  const text = '请查看\n@image:C:\\private\\upload.png'
- const { container } = render(<MessageBody value={text} user renderMarkdown={value => <p>{value}</p>} />)
- expect(screen.getByText('请查看')).toBeInTheDocument()
- expect(screen.getByText('upload.png')).toBeInTheDocument()
- expect(screen.getByText('本地图片 · 尚无可用预览')).toBeInTheDocument()
- expect(container.querySelector('img, a')).toBeNull()
- fireEvent.click(screen.getByText('查看原始引用'))
- expect(screen.getByText('@image:C:\\private\\upload.png')).toBeInTheDocument()
+ const renderMarkdown = vi.fn((value: string) => <p>{value}</p>)
+ render(<MessageBody value={text} user onImageClick={vi.fn()} renderMarkdown={renderMarkdown} />)
+ // Exactly one image, in the attachment area
+ expect(screen.getAllByAltText('upload.png')).toHaveLength(1)
+ // The raw @image path must NOT be forwarded to the markdown body (would re-render as a second image/link)
+ const bodyArg = renderMarkdown.mock.calls[0][0]
+ expect(bodyArg).not.toContain('@image:')
+ expect(bodyArg).not.toContain('upload.png')
+ expect(bodyArg.trim()).toBe('请查看')
 })
 it('localizes only exact native interruption notices, preserving raw evidence', () => {
  render(<MessageBody value="Operation interrupted." renderMarkdown={value => <p>{value}</p>} />)

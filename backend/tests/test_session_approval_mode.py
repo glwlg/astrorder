@@ -60,13 +60,16 @@ async def test_codex_approval_mode_defaults_to_auto_and_injects_policies(tmp_pat
         # 默认模式是 auto
         assert connection.get_approval_mode(SID) == 'auto'
 
-        # 默认 auto 提交时注入 on-request
+        # “帮我批准” must be the documented Auto preset: routine work within
+        # the workspace runs in a workspace-write sandbox; only boundary
+        # crossings are reviewed, first by Codex's auto reviewer.
         command = {'id': 'cmd-1', 'agent_id': connection.agent_id, 'session_id': SID, 'action': 'send', 'text': 'hello', 'attachment_ids': [], 'target_id': None}
         status, _error = await connection.submit(command)
         assert status == 'accepted'
         turn_start_params = next(params for method, params in connection.client.calls if method == 'turn/start')
         assert turn_start_params.get('approvalPolicy') == 'on-request'
-        assert turn_start_params.get('sandboxPolicy') is None
+        assert turn_start_params.get('sandboxPolicy') == {'type': 'workspaceWrite'}
+        assert turn_start_params.get('approvalsReviewer') == 'auto_review'
 
         # 切换到 manual
         connection.set_approval_mode(SID, 'manual')

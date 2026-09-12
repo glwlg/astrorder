@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { IconPhoto, IconPlayerPause } from '@tabler/icons-react'
+import { IconPlayerPause } from '@tabler/icons-react'
 import { LazyDetails } from './LazyDetails'
 
 /** Presentation only: preserve native text, parse file mentions, and never turn filesystem references into arbitrary external URLs. */
@@ -7,11 +7,13 @@ export function MessageBody({
   value,
   user = false,
   onImageClick,
+  attachmentNames = [],
   renderMarkdown,
 }: {
   value: string
   user?: boolean
   onImageClick?: (url: string) => void
+  attachmentNames?: string[]
   renderMarkdown: (value: string) => ReactNode
 }) {
   if (!user && value.trim() === 'Operation interrupted.') return <div className="message-interrupted">
@@ -22,18 +24,21 @@ export function MessageBody({
 
   let text = value
   const extractedImages: Array<{ name: string; path: string }> = []
+  const hasAttachedImage = (name: string) => attachmentNames.some(
+    (attachmentName) => attachmentName.toLowerCase() === name.toLowerCase(),
+  )
 
   // Parse Codex-style mentioned files wrapper
   if (text.includes('# Files mentioned by the user:')) {
     const fileMatches = [...text.matchAll(/##\s*([\w\.-]+\.(?:png|jpe?g|gif|webp|svg)):\s*([^\r\n]+)/gi)]
     for (const m of fileMatches) {
-      extractedImages.push({ name: m[1], path: m[2].trim() })
+      if (!hasAttachedImage(m[1])) extractedImages.push({ name: m[1], path: m[2].trim() })
     }
     const imgTagMatches = [...text.matchAll(/<image\s+[^>]*path=["']([^"']+)["']/gi)]
     for (const m of imgTagMatches) {
       const p = m[1].trim()
       const n = p.split(/[/\\]/).pop() || 'image.png'
-      if (!extractedImages.some(x => x.path === p)) {
+      if (!hasAttachedImage(n) && !extractedImages.some(x => x.path === p)) {
         extractedImages.push({ name: n, path: p })
       }
     }
@@ -54,6 +59,13 @@ export function MessageBody({
       references.push(line.trim())
     } else {
       lines.push(line)
+    }
+  }
+  for (const reference of references) {
+    const path = reference.replace(/^@image:/, '').trim()
+    const name = path.split(/[/\\]/).pop() || 'image.png'
+    if (!hasAttachedImage(name) && !extractedImages.some((img) => img.path === path)) {
+      extractedImages.push({ name, path })
     }
   }
 
@@ -78,11 +90,6 @@ export function MessageBody({
         </div>
       )}
       {lines.join('\n').trim() && renderMarkdown(lines.join('\n'))}
-      {references.map((reference, index) => <div className="native-image-reference" key={`${index}:${reference}`}>
-        <IconPhoto size={20} aria-hidden="true" /><div><strong>{reference.split(/[\\/]/).pop()}</strong><small>本地图片 · 尚无可用预览</small>
-          <LazyDetails summary="查看原始引用"><code>{reference}</code></LazyDetails>
-        </div>
-      </div>)}
     </>
   )
 }

@@ -30,7 +30,7 @@ export function SidecarWelcomeMenu({
     {
       icon: <IconFolder size={18} color="var(--astr-blue, #3b82f6)" />,
       label: '文件',
-      shortcut: 'Ctrl+P',
+      shortcut: 'Ctrl+Shift+E',
       onClick: onOpenFileTree,
     },
     {

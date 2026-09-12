@@ -71,3 +71,51 @@ def test_api_imports_only_requested_page_without_full_resume_or_live_replay(tmp_
         assert older.json()['items'][-1]['text'] == 'message-498'
         assert store.latest_cursor() == cursor
         app.state.service.load_native_history.assert_not_called()
+
+
+def test_api_keeps_native_image_reference_out_of_cached_history_responses(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from fastapi.testclient import TestClient
+
+    from astrorder.config import Settings
+    from astrorder.main import create_app
+
+    native_root = tmp_path / 'native'
+    native_root.mkdir()
+    image = native_root / 'upload.png'
+    image.write_bytes(b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde')
+    raw_page = {
+        'items': [
+            {
+                'id': 'user-image-1',
+                'role': 'user',
+                'content': f'请查看\n@image:{image}',
+                'timestamp': 1,
+            }
+        ],
+        'next_cursor': None,
+    }
+    monkeypatch.setattr('astrorder.native_attachments.hermes_roots', lambda: [native_root])
+    app = create_app(
+        Settings(
+            database_url=f'sqlite:///{tmp_path}/cache.db',
+            attachments_dir=tmp_path / 'attachments',
+            browser_secret='test-only',
+            auto_connect_local_hermes=False,
+        )
+    )
+    with TestClient(app) as client:
+        store = app.state.store
+        store.upsert_agent({'id': 'source', 'kind': 'hermes', 'name': 'inert', 'status': 'ready', 'capabilities': [], 'limitation': None})
+        store.upsert_session({'id': 'native', 'agent_id': 'source', 'source_id': 'source', 'title': 'native', 'status': 'idle', 'workspace': None, 'updated_at': '2026-01-01T00:00:00Z', 'history_state': 'available'})
+        app.state.connections.get_runtime_by_agent_id = lambda aid: SimpleNamespace(load_native_history_page=lambda sid, before, limit: raw_page)
+
+        endpoint = '/api/v1/sessions/native/messages'
+        first = client.get(endpoint, params={'agent_id': 'source'}, headers={'Authorization': 'Bearer test-only'}).json()['items'][0]
+        second = client.get(endpoint, params={'agent_id': 'source'}, headers={'Authorization': 'Bearer test-only'}).json()['items'][0]
+
+        assert first['text'] == '请查看'
+        assert second['text'] == '请查看'
+        assert len(first['attachments']) == len(second['attachments']) == 1
+        assert first['attachments'][0]['id'] == second['attachments'][0]['id']

@@ -7,8 +7,11 @@
 .composer-card .composer-input textarea { border:0; background:transparent; padding:8px 10px; box-shadow:none; }
 .composer-toolbar-spacer { flex:1; }
 .composer-row .session-model-control { max-width:60%; }
+.composer-row .codex-model-pill { min-width:0; flex:0 1 auto; }
+.composer-row .codex-model-pill-text { min-width:0; }
+.composer-row .codex-model-pill-effort { flex-shrink:0; }
 .composer-row { min-height:36px; align-items:center; gap:8px; }
-.composer-row .attachment-button { width:36px; height:36px; padding:0; }
+.composer-row .attachment-button { width:36px; height:36px; padding:0; flex-shrink:0; }
 .composer-row .session-model-control .mantine-Button-root { height:36px; padding:0 8px; background:transparent; color:var(--astr-text); font-size:13px; font-weight:500; }
 .composer-row .session-model-control .mantine-Button-inner { align-items:center; }
 .composer-row .session-model-control .mantine-Button-section { margin-inline:0; }

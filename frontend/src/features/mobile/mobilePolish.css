@@ -2,7 +2,7 @@
 .mobile-workspace { overscroll-behavior-x:none; touch-action:pan-y; }
 .m-transcript { touch-action:pan-y; }
 .m-header-actions button,.m-card-head>button,.m-sheet>header>button,.m-sheet-header-actions button { display:inline-flex; align-items:center; justify-content:center; }
-.m-brand .m-brand-mark { padding:0; border:0; border-radius:11px; box-shadow:0 2px 7px #1d274022; object-fit:cover; }
+.m-brand .m-brand-mark { padding:0; border:0; border-radius:8px; box-shadow:none; object-fit:contain; background:transparent; }
 .m-header-actions button { background:var(--m-surface); border-color:var(--m-border); }
 .m-quick-actions button { display:inline-flex; align-items:center; gap:5px; padding:6px 9px; }
 .m-quick-actions button:nth-child(-n+2) { color:var(--m-primary); background:color-mix(in srgb,var(--m-primary) 5%,var(--m-surface)); }

@@ -3,16 +3,24 @@ from __future__ import annotations
 
 import inspect
 import json
+import logging
 import subprocess
 from pathlib import Path
 from threading import RLock
 
 from astrorder_codex_connector.app_server import CodexAppServer
 
-from .connections import ConnectionError, validate_ssh_settings, _windows_hide_flags, _windows_hide_startupinfo
+from .connections import (
+    ConnectionError,
+    _windows_hide_flags,
+    _windows_hide_startupinfo,
+    validate_ssh_settings,
+)
 from .models import AgentConnectionChoice
 from .native_codex import CodexConnection, stored_model
 from .ssh_transport import SshNativeRuntime, build_remote_python_command
+
+logger = logging.getLogger(__name__)
 
 DISCOVERY = r'''
 import json, os, platform, shutil
@@ -154,6 +162,67 @@ print(json.dumps(res))
             raise ConnectionError('远程原生记录未提供模型绑定。', 502)
         return binding
 
+    @staticmethod
+    def _is_thread_not_found(error: ConnectionError) -> bool:
+        text = str(error).casefold()
+        return 'thread not found' in text or ('thread' in text and 'not found' in text)
+
+    def _rollout_path(self, sid: str) -> str | None:
+        """Read only the native rollout path for a known remote thread.
+
+        `thread/list` is state-db-backed, but a freshly spawned app-server can
+        still reject a valid ID lookup. The protocol documents a path-based
+        resume; use the state DB's path as a single, verified fallback.
+        """
+        homes = []
+        if self._home:
+            homes.append(self._home.as_posix())
+        homes.append('~/.codex')
+        source = (
+            'import json, sqlite3\nfrom pathlib import Path\n'
+            f'homes={homes!r}\n'
+            f'sid={sid!r}\n'
+            'found=None\n'
+            'for raw_home in homes:\n'
+            ' home=Path(raw_home).expanduser()\n'
+            ' dbs=sorted(home.glob("state_*.sqlite"))\n'
+            ' if (home / "state.db").is_file(): dbs.append(home / "state.db")\n'
+            ' for db_path in dbs:\n'
+            '  try:\n'
+            '   with sqlite3.connect(db_path.resolve().as_uri()+"?mode=ro", uri=True) as db:\n'
+            '    cols={row[1] for row in db.execute("PRAGMA table_info(threads)")}\n'
+            '    if not {"id", "rollout_path"}.issubset(cols): continue\n'
+            '    row=db.execute("SELECT rollout_path FROM threads WHERE id=?", (sid,)).fetchone()\n'
+            '    if row and isinstance(row[0], str) and row[0] and Path(row[0]).is_file():\n'
+            '     found=row[0]; break\n'
+            '  except (OSError, sqlite3.Error):\n'
+            '   continue\n'
+            ' if found: break\n'
+            'print(json.dumps(found))\n'
+        )
+        try:
+            value = self.remote_json(source)
+        except ConnectionError:
+            return None
+        if not isinstance(value, str) or not value or len(value) > 4096 or any(ord(char) < 32 for char in value):
+            return None
+        return value
+
+    def _resume(self, sid):
+        try:
+            return super()._resume(sid)
+        except ConnectionError as exc:
+            if not self._is_thread_not_found(exc):
+                raise
+            rollout_path = self._rollout_path(sid)
+            if not rollout_path:
+                raise
+            response = self._request(
+                'thread/resume',
+                {'threadId': sid, 'path': rollout_path, 'excludeTurns': True},
+            )
+            return self._bind_resumed_thread(sid, response)
+
     def validate_workspace(self, workspace):
         source = 'import json\nfrom pathlib import Path\np=Path(' + repr(workspace or '~') + ').expanduser().resolve()\nprint(json.dumps({"path":str(p),"exists":p.is_dir()}))'
         result = self.remote_json(source)
@@ -190,8 +259,15 @@ class EnvironmentConnections:
         local = self.hermes.snapshot(self.service)['local']
         c = self.codex.snapshot()
         items = [{'id': 'local', 'name': '本机', 'method': 'local', 'discovered': True, 'agents': [
-            {'kind': 'hermes', 'available': local['available'], 'state': local['state'], 'agent_id': local.get('agent_id'), 'detail': local['detail']},
-            {'kind': 'codex', 'available': c['available'], 'state': c['state'], 'agent_id': c['agent_id'], 'detail': c['detail']},
+            {
+                'kind': 'hermes',
+                'available': local['available'],
+                'state': local['state'],
+                'agent_id': local.get('agent_id'),
+                'detail': local['detail'],
+                'daemon_mode': bool(local.get('daemon_mode')),
+            },
+            {'kind': 'codex', 'available': c['available'], 'state': c['state'], 'agent_id': c['agent_id'], 'detail': c['detail'], 'daemon_mode': bool(c.get('daemon_mode'))},
         ]}]
         ssh_states = {row['id']: row for row in self.hermes.snapshot(self.service)['ssh']['items']}
         for row in self.store.list_ssh_connections():
@@ -201,7 +277,15 @@ class EnvironmentConnections:
             for kind in ('hermes', 'codex'):
                 found = next((x for x in (discovered or {}).get('items', []) if x['kind'] == kind), {})
                 active = self.remote[cid].snapshot() if kind == 'codex' and cid in self.remote else ssh_states.get(cid, {}) if kind == 'hermes' else {}
-                entries.append({'kind': kind, 'available': found.get('available', active.get('state') == 'connected'), 'state': active.get('state', 'disconnected'), 'agent_id': active.get('agent_id'), 'detail': active.get('detail', ''), 'executable': found.get('executable')})
+                entries.append({
+                    'kind': kind,
+                    'available': found.get('available', active.get('state') == 'connected'),
+                    'state': active.get('state', 'disconnected'),
+                    'agent_id': active.get('agent_id'),
+                    'detail': active.get('detail', ''),
+                    'executable': found.get('executable'),
+                    'daemon_mode': bool(active.get('daemon_mode')),
+                })
             items.append({'id': cid, 'name': row.get('display_name') or cid, 'method': 'ssh', 'discovered': bool(discovered), 'os': (discovered or {}).get('os'), 'agents': entries})
         return {'items': items}
 

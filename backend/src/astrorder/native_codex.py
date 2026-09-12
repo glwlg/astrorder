@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import logging
 import os
 import queue
 import re
@@ -18,8 +19,11 @@ from uuid import uuid4
 from astrorder_codex_connector.app_server import CodexAppServer, CodexRpcRejected
 from astrorder_codex_connector.config import CodexConnectorConfig
 
+from .codex_policy import codex_turn_policy
 from .connections import ConnectionError
 from .system_environment import load_system_environment
+
+logger = logging.getLogger(__name__)
 
 
 def timestamp(value=None):
@@ -180,13 +184,41 @@ class CodexConnection:
         self._binding_changed = threading.Condition(self._lock)
         self._lifecycle = threading.Lock()
         self._session_locks = {}
+        self._daemon_controller_factory = None
+        self._daemon_controller = None
 
     def _executable(self):
         value = self.settings.codex_executable or shutil.which('codex')
         return str(Path(value)) if value and Path(value).is_file() else None
 
     def snapshot(self):
-        return {'kind': 'codex', 'state': self.state, 'available': bool(self._executable()), 'agent_id': self.agent_id, 'session_count': len(self._threads), 'auth_required': self.auth_required, 'detail': self.detail}
+        return {'kind': 'codex', 'state': self.state, 'available': bool(self._executable()), 'agent_id': self.agent_id, 'session_count': len(self._threads), 'auth_required': self.auth_required, 'detail': self.detail, 'daemon_mode': self._daemon_controller_factory is not None}
+
+    def set_daemon_controller_factory(self, factory):
+        if factory is not None and not callable(factory):
+            raise TypeError('daemon controller factory must be callable')
+        self._close_daemon_controller()
+        self._daemon_controller_factory = factory
+
+    def _activate_daemon_controller(self):
+        factory = self._daemon_controller_factory
+        if factory is None:
+            return
+        controller = factory(self)
+        if controller is None or not callable(getattr(controller, 'activate', None)) or not callable(getattr(controller, 'submit', None)):
+            raise ConnectionError('daemon Codex controller is invalid.', 503)
+        controller.activate()
+        self._daemon_controller = controller
+        self.service.register_native_command_handler(self.agent_id, controller.submit)
+
+    def _close_daemon_controller(self):
+        controller, self._daemon_controller = self._daemon_controller, None
+        close = getattr(controller, 'close', None)
+        if callable(close):
+            try:
+                close()
+            except Exception:
+                logger.warning('daemon Codex controller cleanup failed')
 
     def _agent(self, status):
         data = {'id': self.agent_id, 'kind': 'codex', 'name': '本机 Codex', 'source_id': self.agent_id, 'status': status, 'capabilities': ['chat', 'stop', 'events', 'history', 'approvals', 'queue'], 'limitation': '原生 app-server 连接；当前未提供附件映射或远程 Codex 连接。'}
@@ -263,9 +295,11 @@ class CodexConnection:
                     self.state, self.detail = 'authentication_required', 'Codex 需要登录；请在本机 Codex 完成登录后重连。'
                 else:
                     self.service.register_native_command_handler(self.agent_id, self.submit)
+                    self._activate_daemon_controller()
                     self.state, self.detail = 'connected', '原生握手、会话目录与命令通道已就绪。'
                 return self.snapshot()
             except Exception as exc:  # noqa: BLE001 - every failed connection must close its owned transport
+                self._close_daemon_controller()
                 self.client.stop()
                 self.client = None
                 self.state, self.detail = 'error', exc.detail if isinstance(exc, ConnectionError) else 'Codex 连接未完成；未标记为已连接。'
@@ -321,6 +355,7 @@ class CodexConnection:
         if getattr(self, 'connection_id', None):
             data['connection_id'] = self.connection_id
         data['native_kind'] = 'subagent' if isinstance(source, dict) and 'subAgent' in source else source if isinstance(source, str) else None
+        data['ephemeral'] = thread.get('ephemeral') is True
         self.service.record_native_sessions([data])
         return data
 
@@ -536,24 +571,12 @@ class CodexConnection:
             raise ConnectionError('Codex 原生记录尚未提供模型绑定；未使用全局默认模型代替。', 502)
         return self._resume(sid)
 
-    def _resume(self, sid):
-        if sid in self._owned_threads and sid in self._bindings:
-            return dict(self._bindings[sid])
-        try:
-            response = self._request('thread/resume', {'threadId': sid, 'excludeTurns': True})
-        except ConnectionError as exc:
-            # If thread has no turns/history yet, thread/resume may reject (-32600; rollout, thread) or (-32601; thread, not supported)
-            exc_str = str(exc).lower()
-            if 'rollout' in exc_str or '-32600' in exc_str or '-32601' in exc_str or 'not supported' in exc_str or 'not found' in exc_str:
-                # Check if it was recorded in self._threads
-                thread = self._threads.get(sid) or {}
-                model = thread.get('model') or (self.snapshot().get('model') if hasattr(self, 'snapshot') else None) or 'default'
-                provider = thread.get('modelProvider') or 'opencodex'
-                binding = {'model': model, 'provider': provider}
-                self._bindings[sid] = binding
-                self._owned_threads.add(sid)
-                return binding
-            raise
+    def _bind_resumed_thread(self, sid, response):
+        """Validate and cache a real native thread/resume response.
+
+        Callers must never fabricate this state from a failed resume: downstream
+        controls such as thread/settings/update require an actually loaded thread.
+        """
         thread = response.get('thread') or {}
         if thread.get('id') != sid or not response.get('model'):
             raise ConnectionError('Codex 会话模型尚未读回确认。', 502)
@@ -570,11 +593,19 @@ class CodexConnection:
         self._owned_threads.add(sid)
         return binding
 
+    def _resume(self, sid):
+        if sid in self._owned_threads and sid in self._bindings:
+            return dict(self._bindings[sid])
+        response = self._request('thread/resume', {'threadId': sid, 'excludeTurns': True})
+        return self._bind_resumed_thread(sid, response)
+
     def models(self, sid):
         provider = self.model(sid)['provider']
         return [{'provider': provider, 'model': row.get('model') or row['id'], 'label': row.get('displayName') or row.get('model') or row['id']} for row in self._pages('model/list', {'limit': 100, 'includeHidden': False}) if not row.get('hidden')]
 
     def set_model(self, sid, provider, model):
+        if self._daemon_controller is not None:
+            return self._daemon_controller.set_model(sid, provider, model)
         if not any(row['provider'] == provider and row['model'] == model for row in self.models(sid)):
             raise ConnectionError('所选模型不在当前 Codex 原生目录中。', 422)
         self._resume(sid)
@@ -597,6 +628,8 @@ class CodexConnection:
         return None
 
     def set_effort(self, sid, effort):
+        if self._daemon_controller is not None:
+            return self._daemon_controller.set_effort(sid, effort)
         from .native_controls import REASONING_EFFORTS
         if effort not in REASONING_EFFORTS:
             raise ConnectionError('思考强度不在原生支持范围内。', 422)
@@ -622,10 +655,33 @@ class CodexConnection:
     def open_ids(self):
         return list(self._pages('thread/loaded/list', {'limit': 100}))
 
-    def create(self, workspace, title):
+    def create(self, workspace, title, ephemeral=False, parent_session_id=None):
+        if self._daemon_controller is not None:
+            return self._daemon_controller.create(
+                workspace,
+                title,
+                ephemeral=ephemeral,
+                parent_session_id=parent_session_id,
+            )
         path = self.validate_workspace(workspace)
-        response = self._request('thread/start', {'cwd': path, 'ephemeral': False, 'persistExtendedHistory': True})
+        if parent_session_id:
+            self._scope(parent_session_id)
+            response = self._request('thread/fork', {
+                'threadId': parent_session_id,
+                'cwd': path,
+                'ephemeral': bool(ephemeral),
+                'excludeTurns': True,
+                'deferGoalContinuation': True,
+            })
+        else:
+            response = self._request('thread/start', {
+                'cwd': path,
+                'ephemeral': bool(ephemeral),
+                'persistExtendedHistory': not ephemeral,
+            })
         data = self._record_thread(response.get('thread'))
+        if ephemeral:
+            data['ephemeral'] = True
         if response.get('model'):
             self._owned_threads.add(data['id'])
             self._bindings[data['id']] = {'model': response['model'], 'provider': response.get('modelProvider')}
@@ -738,13 +794,7 @@ class CodexConnection:
             try:
                 mode = self.get_approval_mode(sid)
                 turn_params = {'threadId': sid, 'input': inputs}
-                if mode == 'full_access':
-                    turn_params['approvalPolicy'] = 'never'
-                    turn_params['sandboxPolicy'] = {'type': 'dangerFullAccess'}
-                elif mode == 'manual':
-                    turn_params['approvalPolicy'] = 'untrusted'
-                else:
-                    turn_params['approvalPolicy'] = 'on-request'
+                turn_params.update(codex_turn_policy(mode))
                 response = self._request('turn/start', turn_params)
                 turn = response.get('turn') or {}
                 turn_id = turn.get('id')
@@ -918,6 +968,7 @@ class CodexConnection:
 
     def disconnect(self):
         with self._lifecycle:
+            self._close_daemon_controller()
             self.service.clear_native_command_handler(self.agent_id)
             client, self.client = self.client, None
             if client:

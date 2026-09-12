@@ -2,6 +2,7 @@ import { IconMenu2, IconMoon, IconSun } from '@tabler/icons-react'
 import { ActionIcon, Group, Title, Tooltip } from '@mantine/core'
 import { useComputedColorScheme, useMantineColorScheme } from '@mantine/core'
 import { useEffect } from 'react'
+import { BrandMark } from './BrandMark'
 import { ConnectionBadge } from './Status'
 import { NotificationPermissionControl } from './NotificationPermissionControl'
 
@@ -32,7 +33,7 @@ export function AppHeader({
             <IconMenu2 size={21} />
           </ActionIcon>
           <Group gap={8} wrap="nowrap" className="header-brand" align="center">
-            <img className="brand-mark" src="/pwa-192.png" width={20} height={20} alt="星序" style={{ width: 20, height: 20, borderRadius: 5, display: 'block' }} />
+            <BrandMark className="brand-mark" size={20} />
             <Title order={1} size="h4" style={{ fontSize: '15px', fontWeight: 600, letterSpacing: '-0.01em', margin: 0, whiteSpace: 'nowrap' }}>
               星序 · Astrorder
             </Title>

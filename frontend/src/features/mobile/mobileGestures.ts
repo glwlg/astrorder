@@ -111,3 +111,41 @@ export function sessionDragPreview(dx: number, dy: number): SessionCardPose | nu
 export function sessionSwipeDirection(startX: number, startY: number, endX: number, endY: number): SessionSwipeDirection | null {
   return sessionSwipeGesture(startX, startY, endX, endY)?.direction ?? null
 }
+
+const NATIVE_HOLD_FIELDS = 'textarea, input, select, [contenteditable="true"], .m-select-text'
+
+export function allowsNativeTextHold(target: EventTarget | null): boolean {
+  return target instanceof Element && Boolean(target.closest(NATIVE_HOLD_FIELDS))
+}
+
+/** Block the browser callout/context menu so custom long-press can run. Never stopPropagation — our handlers still need the event. */
+export function suppressNativeHold(event: Event): void {
+  if (allowsNativeTextHold(event.target)) return
+  event.preventDefault()
+}
+
+/**
+ * Global guard: cancels the browser long-press menu *only* when a touch gesture
+ * immediately precedes it (touch long-press on Android/iOS emits a synthetic
+ * contextmenu). Desktop right-click — no touchstart — is left alone.
+ */
+export function installGlobalNativeHoldBlocker(root: Pick<Document, 'addEventListener' | 'removeEventListener'> = document): () => void {
+  let touchTarget: EventTarget | null = null
+  const reset = (): void => { touchTarget = null }
+  const onTouchStart = (event: Event): void => { touchTarget = event.target }
+  const onContextMenu = (event: Event): void => {
+    if (touchTarget === null) return
+    if (allowsNativeTextHold(event.target)) return
+    event.preventDefault()
+  }
+  root.addEventListener('touchstart', onTouchStart, { capture: true, passive: true } as AddEventListenerOptions)
+  root.addEventListener('touchend', reset, { capture: true, passive: true } as AddEventListenerOptions)
+  root.addEventListener('touchcancel', reset, { capture: true, passive: true } as AddEventListenerOptions)
+  root.addEventListener('contextmenu', onContextMenu, { capture: true } as AddEventListenerOptions)
+  return () => {
+    root.removeEventListener('touchstart', onTouchStart, { capture: true } as EventListenerOptions)
+    root.removeEventListener('touchend', reset, { capture: true } as EventListenerOptions)
+    root.removeEventListener('touchcancel', reset, { capture: true } as EventListenerOptions)
+    root.removeEventListener('contextmenu', onContextMenu, { capture: true } as EventListenerOptions)
+  }
+}

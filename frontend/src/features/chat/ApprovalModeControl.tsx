@@ -45,9 +45,11 @@ export const APPROVAL_MODES: ApprovalModeItem[] = [
 export function ApprovalModeControl({
   session,
   compact = false,
+  variant = 'capsule',
 }: {
   session: Session
   compact?: boolean
+  variant?: 'capsule' | 'panel'
 }) {
   const queryClient = useQueryClient()
   const [opened, setOpened] = useState(false)
@@ -123,6 +125,71 @@ export function ApprovalModeControl({
 
   const ActiveIcon = activeItem.icon
 
+  const options = (
+    <Stack gap="xs">
+      <div className="approval-mode-header">
+        <Text size="sm" fw={650}>
+          应如何批准操作？
+        </Text>
+        <Text size="xs" c="dimmed" mt={2}>
+          控制执行系统命令与编辑文件时的权限等级
+        </Text>
+      </div>
+
+      <Stack gap={4} className="approval-mode-options">
+        {APPROVAL_MODES.map((item) => {
+          const isSelected = item.key === currentMode
+          const ItemIcon = item.icon
+          const itemIsFull = item.key === 'full_access'
+
+          return (
+            <UnstyledButton
+              key={item.key}
+              className={`approval-mode-option ${isSelected ? 'is-selected' : ''} ${itemIsFull ? 'is-full-option' : ''}`}
+              onClick={() => mutation.mutate(item.key)}
+              role="button"
+              aria-pressed={isSelected}
+            >
+              <Group wrap="nowrap" align="flex-start" gap="sm" style={{ width: '100%' }}>
+                <div
+                  className="approval-mode-option-icon"
+                  style={{ color: itemIsFull ? '#e8590c' : item.color }}
+                >
+                  <ItemIcon size={18} />
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <Text
+                    size="xs"
+                    fw={600}
+                    style={{
+                      color: isSelected && itemIsFull ? '#e8590c' : undefined,
+                    }}
+                  >
+                    {item.label}
+                  </Text>
+                  <Text size="xs" c="dimmed" mt={2} style={{ lineHeight: 1.35 }}>
+                    {item.description}
+                  </Text>
+                </div>
+                {isSelected && (
+                  <IconCheck
+                    size={16}
+                    className="approval-mode-option-check"
+                    style={{ color: itemIsFull ? '#e8590c' : 'var(--astr-teal)' }}
+                  />
+                )}
+              </Group>
+            </UnstyledButton>
+          )
+        })}
+      </Stack>
+    </Stack>
+  )
+
+  if (variant === 'panel') {
+    return <div className="approval-mode-panel">{options}</div>
+  }
+
   return (
     <Popover
       opened={opened}
@@ -147,64 +214,7 @@ export function ApprovalModeControl({
       </Popover.Target>
 
       <Popover.Dropdown className="approval-mode-dropdown">
-        <Stack gap="xs">
-          <div className="approval-mode-header">
-            <Text size="sm" fw={650}>
-              应如何批准操作？
-            </Text>
-            <Text size="xs" c="dimmed" mt={2}>
-              控制执行系统命令与编辑文件时的权限等级
-            </Text>
-          </div>
-
-          <Stack gap={4} className="approval-mode-options">
-            {APPROVAL_MODES.map((item) => {
-              const isSelected = item.key === currentMode
-              const ItemIcon = item.icon
-              const itemIsFull = item.key === 'full_access'
-
-              return (
-                <UnstyledButton
-                  key={item.key}
-                  className={`approval-mode-option ${isSelected ? 'is-selected' : ''} ${itemIsFull ? 'is-full-option' : ''}`}
-                  onClick={() => mutation.mutate(item.key)}
-                  role="button"
-                  aria-pressed={isSelected}
-                >
-                  <Group wrap="nowrap" align="flex-start" gap="sm" style={{ width: '100%' }}>
-                    <div
-                      className="approval-mode-option-icon"
-                      style={{ color: itemIsFull ? '#e8590c' : item.color }}
-                    >
-                      <ItemIcon size={18} />
-                    </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <Text
-                        size="xs"
-                        fw={600}
-                        style={{
-                          color: isSelected && itemIsFull ? '#e8590c' : undefined,
-                        }}
-                      >
-                        {item.label}
-                      </Text>
-                      <Text size="xs" c="dimmed" mt={2} style={{ lineHeight: 1.35 }}>
-                        {item.description}
-                      </Text>
-                    </div>
-                    {isSelected && (
-                      <IconCheck
-                        size={16}
-                        className="approval-mode-option-check"
-                        style={{ color: itemIsFull ? '#e8590c' : 'var(--astr-teal)' }}
-                      />
-                    )}
-                  </Group>
-                </UnstyledButton>
-              )
-            })}
-          </Stack>
-        </Stack>
+        {options}
       </Popover.Dropdown>
     </Popover>
   )

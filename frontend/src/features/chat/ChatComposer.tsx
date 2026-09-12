@@ -273,7 +273,7 @@ export function ChatComposer({
             color={isStopAction ? 'red' : 'indigo'}
             radius="xl"
             disabled={submitting || (isStopAction ? !canStop : !canChat || !hasDraft)}
-            onClick={() => void submit(isStopAction ? 'stop' : 'send', isStopAction ? runningCommand?.id || null : null)}
+            onClick={() => void submit(isStopAction ? 'stop' : 'send', isStopAction ? session.id : null)}
             aria-label={isStopAction ? '停止' : '发送'}
             aria-busy={submitting}
           >
