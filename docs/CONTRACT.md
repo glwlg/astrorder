@@ -1,56 +1,112 @@
-# Protocol v1 — frozen baseline for parallel development
+# Protocol v1 — 核心通信协议与数据契约规范
 
-All JSON is snake_case. Base /api/v1. Timestamps ISO-8601 UTC. Message, session, and command IDs are opaque strings scoped by agent_id + session_id; never text-derived. Connector source event IDs are opaque and deduplicated by (agent_id, event.id), while server-assigned cursors are global and monotonic. Objects below define stable wire shapes, not backend module structure. Additive optional fields allowed; incompatible changes require integration phase reconciliation.
+所有 JSON 通信字段命名遵循 `snake_case`。接口基址为 `/api/v1`。时间戳统一遵循 ISO-8601 UTC（格式：`YYYY-MM-DDTHH:mm:ss.sssZ`）。
+消息、会话与指令标识符均采用由 `agent_id + session_id` 作用域隔离的不透明字符串，绝不采用易冲突的文本派生 ID。连接器源事件通过 `(agent_id, event.id)` 去重，服务端游标（`cursor`）保持全局严格单调递增。
 
-## Native session authority (supersedes legacy ownership language below)
+---
 
-Astrorder is a controller for Hermes/Codex, not a second session system. `Session.id` is the unchanged native persistent session/thread ID. Source/agent identity scopes collisions; it must never be encoded into the copied ID. Native runtime handles are private transport details, not list entries. Discovery and connector events address the same record. Local session/message storage is a cache, not authority for native rename/delete. Hermes title/delete operations must succeed and be read back before cache mutations. Codex retains its native thread ID; unsupported native operations must not fall back to local-only success.
+## 1. 原生会话权威性原则 (Native Session Authority)
 
-Legacy `history-*` session aliases are converted once on startup using recorded `source_session_id`, with scoped messages, commands, tasks and event references preserved transactionally. Conflicting records abort migration rather than discarding content. The frontend migrates old pin preference keys only; project appearance/order keys stay untouched. `history_state` remains an internal cache-loading compatibility field, not a user-facing session type. Native ID maps are no longer maintained by controllers.
+星序是 Codex、Hermes、Grok 与 SSH 远端服务器的**控制面与观察面**，坚决不构建平行割裂的第二套会话对账系统：
+- `Session.id` 始终严格对齐底层原生的持久会话或线程 ID（如 Codex Thread ID、Hermes Session Key）。
+- 智能体命名空间（`agent_id`）用于隔离跨智能体 ID 碰撞，绝不将私有内部信息拼接至会话 ID 中。
+- 本地数据库（SQLite）仅作为高速缓存与离线工件投影，原生状态才是不可动摇的权威真值。
 
-## Shared types
-Capability = chat | stop | queue | attachments | approvals | launch | history | events.
-Agent = {id, kind: hermes|codex, name, status: disconnected|connecting|ready|error, capabilities: string[], limitation: string|null}.
-Session = {id, agent_id, title, workspace: string|null, status: idle|running|waiting_approval|error, updated_at}.
-Attachment = {id, name, media_type, url}; URL is authenticated same-origin download route, not arbitrary filesystem path.
-Message = {id, session_id, agent_id, role: user|assistant|system|tool, kind: message|thinking|tool, text, attachments: Attachment[], created_at, command_id: string|null, tool: object|null}. Canonical ID assigned by connector/server from reliable identity; not text equality.
-Command = {id, session_id, agent_id, action: send|enqueue|stop|approve|cancel, state: received|queued|accepted|running|completed|failed|unknown|cancelled, text, attachments: Attachment[], created_at, error: string|null, target_id: string|null}. Command.id is browser-generated UUID and idempotency key. Approval/cancel target is target_id; reject unsupported actions. Commands are NOT Message objects. UI renders durable outbox receipts separately from the canonical transcript.
-Event = {id: string, cursor: integer, type: string, agent_id: string|null, session_id: string|null, data: object}. Durable cursor monotonically increases, duplicate event id ignored, bounded replay with snapshot fallback. Event types: agent.upsert, session.upsert, message.upsert, command.upsert, approval.upsert, resync_required; data is corresponding full object, not ambiguous text delta. Internal streaming adapters can coalesce into message.upsert.
-Error response = {detail: string}. Do not expose stack, tokens or local private paths.
+---
 
-## Browser HTTP
-GET /health -> {status:"ok", service:"astrorder", protocol_version:1}; unauthenticated, no private state.
-GET /api/v1/bootstrap -> {protocol_version:1, agents:Agent[], sessions:Session[], cursor:integer}; authenticated. Empty lists mean none connected, not mocked sample data.
-GET /api/v1/agents -> {items:Agent[]}.
-GET /api/v1/sessions?agent_id=optional -> {items:Session[]}.
-GET /api/v1/sessions/{id}/messages?agent_id=REQUIRED&before=optional&limit=50 -> {items:Message[], next_cursor:string|null}. The browser opens with the newest page (default 50) and automatically continues older pages until the latest user turn is included, then pages of 30 on upward browsing. Already-fetched pages stay in TanStack Query memory while the app stays open, so switching sessions does not reset the transcript. Cursors are opaque and source/session-scoped, never UI row counts. Hermes reasoning/tool annotations can accompany their source records. Reads must not broadcast imported pages as fresh live messages.
-GET /api/v1/sessions/{id}/commands?agent_id=REQUIRED -> {items:Command[]}.
-POST /api/v1/commands body {id,agent_id,session_id,action,text:"",attachment_ids:[],target_id:null} -> Command. Same id+payload returns existing command, changed payload with same id ->409. Unknown agent/session ->404; unavailable or unsupported ->409 without losing stored attempted command when appropriate. If a connector write is ambiguous, the server returns the persisted Command in state unknown rather than converting it to failed or retrying it. No successful execution claim before connector confirmation.
-POST /api/v1/attachments multipart file -> Attachment (bounded content types/size). GET /api/v1/attachments/{id} authenticated.
-POST /api/v1/auth/session body {token:string} -> {authenticated:true}; validate configured secret, issue HttpOnly SameSite cookie. GET /api/v1/auth/session -> {authenticated:boolean}. DELETE ->204. No token in URL or localStorage. Reject unsafe cross-origin requests. Local dev may use Authorization: Bearer via explicit test/client API; browser uses cookie.
-GET /api/v1/runtime -> {items:[{kind,available,capabilities,reason}]}.
-POST /api/v1/runtime/launch body {kind,workspace} -> {agent_id,status} only when /runtime reports launch as available; only allowlisted runtime/workspaces, no arbitrary shell command; unavailable capability ->409/501 with explicit explanation. Current implementation intentionally reports managed Hermes and Codex launch unavailable: a detached CLI/app-server process is not a connected Agent.
-GET /api/v1/connections -> {local:LocalHermesConnection, ssh:SshConnection}; authenticated. LocalHermesConnection = {kind:"hermes", state: discovered|installed|connecting|connected|offline|error, available:boolean, version:string|null, agent_id:string|null, session_id:string|null, detail:string}. `session_id` is the durable Hermes session identity when one exists; no executable path, connector secret, browser secret, or raw runtime stderr is returned.
-POST /api/v1/connections/local/connect -> Connections payload. The server discovers only a known local Hermes executable, installs a checked Astrorder wrapper only into the active Hermes profile, enables it through the Hermes CLI, then starts an owned TUI-gateway process and fresh `source: local` session. Browser callers never send endpoint/secret values. A local command is routed to the owned gateway's documented `prompt.submit` only when its exact agent_id + durable session_id matches; the live gateway ID remains server-private. `accepted` is dispatch acceptance, not completion; unknown outcomes are never resent.
-POST /api/v1/connections/local/disconnect -> Connections payload. Stops only the TUI-gateway process created by Astrorder; it does not stop Desktop, a gateway, Overlook, or unrelated Hermes processes.
-PUT /api/v1/connections/ssh body {host:string|null,port:1..65535,user:string|null,ssh_config_alias:string|null,identity_file:string|null,hermes_path:string|null,workspace:string|null} -> SshConnection. Extra fields (including passwords/private-key contents) are rejected. `host` and alias use strict non-shell syntax; identity_file is stored only as a reference.
-POST /api/v1/connections/ssh/test -> SshConnection runs local `ssh -G` argument validation only; it does not open a remote connection, change host-key policy, read identity contents, or contact a guessed host. POST /api/v1/connections/ssh/connect returns a clear non-connected result until an operator has explicitly provisioned the remote native connector; POST /api/v1/connections/ssh/disconnect only clears Astrorder's remote connection state.
+## 2. 核心共享类型 (Core Shared Types)
 
-## Native local Codex connection
+### 2.1 智能体定义 (Agent)
+```typescript
+type AgentKind = 'hermes' | 'codex' | 'grok' | 'ssh'
+type AgentStatus = 'disconnected' | 'connecting' | 'connected' | 'ready' | 'error'
+type ControlState = 'ready' | 'owned' | 'waiting_approval' | 'unknown'
 
-- `GET /api/v1/connections/codex` returns the local Codex connection state; authenticated `POST .../connect` and `POST .../disconnect` operate only the owned app-server transport. Connection does not create a thread or send a prompt.
-- Ready requires native initialization, account-state inspection, complete native thread catalog discovery, and command-handler registration. Thread IDs and item IDs remain native.
-- Message reads use native `thread/items/list` with bounded descending pages. Model display reads only model/provider/branch metadata from the native state database under the `codexHome` returned by initialization; it must not resume an already-active thread just to display a label.
-- Explicit control resumes an eligible native thread without returning its transcript. Model changes require native settings confirmation. Other clients' active threads are not forcibly interrupted or taken over.
-- Completed/cancelled/failed command events must not be downgraded by late HTTP acceptance receipts. Disconnect leaves unconfirmed execution unknown, never automatically resent.
-- Current scope is local Codex. Remote Codex, attachment mapping and permanent deletion are not integrated. Do not use archive as a deletion substitute.
+interface Agent {
+  id: string
+  kind: AgentKind
+  name: string
+  status: AgentStatus
+  capabilities: string[]
+  limitation: string | null
+  source_id?: string | null
+  connection_id?: string | null
+  profile_name?: string | null
+  runtime_id?: string | null
+  control_state: ControlState
+  daemon_mode?: boolean
+  updated_at: string
+}
+```
 
-## Browser WebSocket
-/ws/v1/events?after=<cursor> authenticates browser cookie; validate Origin. Frame = Event. On connect replay events after cursor, then live. Never submit commands over WS: HTTP is single browser command channel. On resync_required refetch bootstrap AND selected transcript/outbox. Heartbeat optional protocol {type:"ping"}/{type:"pong"}, never mistaken for Event.
+### 2.2 会话定义 (Session)
+```typescript
+type SessionStatus = 'idle' | 'running' | 'waiting_approval' | 'error'
+type ApprovalMode = 'ask' | 'auto' | 'full'
+type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'max'
 
-## Embedded Connector boundary
-/ws/v1/connector requires separate role credential in Authorization header, not browser cookie. Initial hello {type:"hello",protocol_version:1,agent:Agent}; after server validation connector may send {type:"event",event:Event} (server assigns canonical cursor, validates identity). Server sends {type:"command",command:Command}. A connector may send additive {type:"pull"} to request intentionally queued enqueue commands after reconnect; unknown commands are never pulled or resent. Connector confirms via command.upsert states with SAME command id. Never fabricate underlying message-command association. Define/document exact missing details in backend connector README and report for integration; browser contract remains unchanged.
-Connector connects from actual Hermes/Codex extension lifecycle, not Desktop renderer. For the local Hermes path, Astrorder owns a documented TUI-gateway JSON-RPC process and uses the loaded plugin for Agent/session/message observation; `prompt.submit` is the native chat transport for only that new owned session. Unsupported native lifecycle hooks must be documented with source evidence and capability disabled. A test connector proves protocol, NOT native integration.
+interface Session {
+  id: string
+  agent_id: string
+  title: string
+  workspace?: string | null
+  status: SessionStatus
+  project_id?: string | null
+  project_name?: string | null
+  selected_model?: string | null
+  selected_reasoning_effort?: ReasoningEffort | null
+  selected_approval_mode?: ApprovalMode | null
+  history_state: 'local' | 'pending' | 'ready'
+  updated_at: string
+}
+```
 
-## Safety and semantics
-Server defaults 127.0.0.1:30002, with the Vite development origin at 127.0.0.1:30001. Auth fails closed for private endpoints when not configured. No exposure of secrets in /health. Cookie Origin validation for mutations/WS. Attachments never arbitrary local reads. SSH uses fixed argv with `shell=False` and never disables host-key verification. On process restart every persisted connector is marked disconnected before a new live hello arrives; historical rows remain visible but are not controllable. No automatic resend after ambiguous submission; HTTP idempotency alone cannot prove native exactly-once across a crash. Preserve unknown and require explicit reconciliation.
+### 2.3 消息定义 (Message)
+```typescript
+type MessageRole = 'user' | 'assistant' | 'tool' | 'system'
+type MessageKind = 'text' | 'thinking' | 'tool_call' | 'tool_result' | 'file'
+
+interface Message {
+  id: string
+  session_id: string
+  agent_id: string
+  role: MessageRole
+  kind: MessageKind
+  text: string
+  attachments?: Attachment[]
+  tool?: {
+    name: string
+    arguments?: Record<string, any>
+    result?: any
+  } | null
+  command_id?: string | null
+  created_at: string
+}
+```
+
+---
+
+## 3. 关键 REST 与 WebSocket 接口规范
+
+### 3.1 鉴权与初始化
+- `POST /api/v1/auth/session`：通过有效访问凭证换取 HttpOnly Session Cookie。
+- `GET /api/v1/auth/session`：查询当前浏览器连接的会话鉴权有效性。
+- `GET /api/v1/bootstrap`：拉取星序全局启动快照（智能体列表、活动项目、会话列表、审批待决队列与最新事件游标）。
+
+### 3.2 会话与指令控制
+- `POST /api/v1/sessions/{id}/commands`：向底层 Agent 运行时提交用户指令（纯文本、附件或工具执行），返回受理凭证（`state: 'accepted'`）。
+- `POST /api/v1/sessions/{id}/stop`：向底层 Agent 运行时发送中断请求（映射为 Codex `turn/interrupt` 或 Hermes 停止信号）。
+- `PATCH /api/v1/sessions/{id}/model`：动态调整当前会话的模型绑定及思考深度（`reasoning_effort`）。
+- `PATCH /api/v1/sessions/{id}/approval-mode`：配置审批拦截模式（`ask` 询问 / `auto` 智能 / `full` 完全信任）。
+
+### 3.3 工件与工作区边界 API
+- `GET /api/v1/sessions/{id}/artifacts/content?path=...`：读取受控工作区内的文件内容（带 ETag / SHA-256 校验）。
+- `PUT /api/v1/sessions/{id}/artifacts/content?path=...`：受控写回工作区文件，强校验会话工作区物理路径，防范目录穿越。
+
+### 3.4 交互终端与 PTY Relay
+- `POST /api/v1/terminals`：创建当前会话作用域的交互式终端实例。
+- `GET /api/v1/terminals/{id}`：获取终端运行状态与输出缓冲。
+- `DELETE /api/v1/terminals/{id}`：优雅释放与终止指定终端子进程。
+
+### 3.5 双工事件流 (Event Stream)
+- `GET /ws/v1/events?after={cursor}`：浏览器全双工事件通道。支持断线自动回补重传缺失游标后的增量事件帧（`message.upsert`、`session.upsert`、`task.upsert`、`command.upsert`）。
