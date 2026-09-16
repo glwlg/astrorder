@@ -219,6 +219,49 @@ def test_agent_gateway_lists_and_reads_sessions(tmp_path):
         assert close_data["ok"] is True
         assert close_data["event"]["collapse"] is True
 
+        # Test machines.dispatch
+        dispatched = client.post(
+            "/api/v1/agent/mcp",
+            headers={"Authorization": "Bearer connector-test"},
+            json={
+                "jsonrpc": "2.0",
+                "id": 9,
+                "method": "tools/call",
+                "params": {"name": "machines_dispatch", "arguments": {"machine_id": "local", "title": "本地委托"}},
+            },
+        )
+        assert dispatched.status_code == 200
+        disp_data = json.loads(dispatched.json()["result"]["content"][0]["text"])
+        assert disp_data["ok"] is True
+        assert disp_data["machine_id"] == "local"
+
+        # Test monitor.sessions.add & remove & layout
+        mon_add = client.post(
+            "/api/v1/agent/mcp",
+            headers={"Authorization": "Bearer connector-test"},
+            json={
+                "jsonrpc": "2.0",
+                "id": 10,
+                "method": "tools/call",
+                "params": {"name": "monitor_sessions_add", "arguments": {"key": new_key}},
+            },
+        )
+        assert mon_add.status_code == 200
+        assert json.loads(mon_add.json()["result"]["content"][0]["text"])["ok"] is True
+
+        mon_layout = client.post(
+            "/api/v1/agent/mcp",
+            headers={"Authorization": "Bearer connector-test"},
+            json={
+                "jsonrpc": "2.0",
+                "id": 11,
+                "method": "tools/call",
+                "params": {"name": "monitor_layout_set", "arguments": {"columns": 3}},
+            },
+        )
+        assert mon_layout.status_code == 200
+        assert json.loads(mon_layout.json()["result"]["content"][0]["text"])["columns"] == 3
+
 
 def test_invoke_unknown_capability():
     class Store:

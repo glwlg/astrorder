@@ -21,6 +21,10 @@ Tools:
 - plugins_configure (toggle or configure an Astrorder plugin: plugin_id, optional enabled, optional config)
 - plugins_open (open a specific plugin or artifact viewer in user UI: plugin_id, optional path, url, title, session_key)
 - plugins_close (close a plugin tab or collapse the sidecar panel: optional plugin_id, tab_id, collapse)
+- machines_dispatch (dispatch a task or delegate session creation onto a specific target machine/host: machine_id, optional agent_kind, title, workspace, prompt)
+- monitor_sessions_add (add session keys into Astrorder Monitor room dashboard for live visual tracking: key or keys)
+- monitor_sessions_remove (remove a session from Monitor room dashboard: key)
+- monitor_layout_set (configure Monitor room grid layout columns: columns 1-4)
 
 When a message includes a session key like `agent_id::session_id`, call `sessions_read` with `{ "key": "agent_id::session_id" }`. It returns the latest page of messages, `count`, `has_more`, and `next_cursor`. If you need earlier history, pass `before: next_cursor`.
 Prefer using `sessions_read` directly when you have a session key. If looking for a session, prefer `sessions_search` over `sessions_list` to save tokens.

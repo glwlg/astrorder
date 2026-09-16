@@ -111,6 +111,39 @@ export function useEventStream(authenticated: boolean, queryClient: QueryClient)
             }
           }
         }
+        if (event.type === 'monitor.control' && event.data) {
+          const payload = event.data as Record<string, unknown>
+          const action = payload.action
+          const MONITOR_STORAGE_KEY = 'astrorder:monitor-sessions'
+          const GRID_STORAGE_KEY = 'astrorder:monitor-grid-cols'
+          if (action === 'add_sessions') {
+            const keys = (payload.keys as string[]) || []
+            try {
+              const raw = localStorage.getItem(MONITOR_STORAGE_KEY)
+              const current: string[] = raw ? JSON.parse(raw) : []
+              const next = [...current]
+              for (const k of keys) {
+                if (!next.includes(k)) next.push(k)
+              }
+              localStorage.setItem(MONITOR_STORAGE_KEY, JSON.stringify(next))
+              window.dispatchEvent(new CustomEvent('astrorder:monitor-sessions-changed', { detail: next }))
+            } catch {}
+          } else if (action === 'remove_session') {
+            const keyToRemove = String(payload.key || '')
+            try {
+              const raw = localStorage.getItem(MONITOR_STORAGE_KEY)
+              const current: string[] = raw ? JSON.parse(raw) : []
+              const next = current.filter((k) => k !== keyToRemove)
+              localStorage.setItem(MONITOR_STORAGE_KEY, JSON.stringify(next))
+              window.dispatchEvent(new CustomEvent('astrorder:monitor-sessions-changed', { detail: next }))
+            } catch {}
+          } else if (action === 'set_layout') {
+            const cols = Number(payload.columns || 2)
+            try {
+              localStorage.setItem(GRID_STORAGE_KEY, String(cols))
+            } catch {}
+          }
+        }
         if (useAstrorderStore.getState().resyncRequired) {
           void queryClient.invalidateQueries({ queryKey: ['astrorder', 'bootstrap'] })
           void queryClient.invalidateQueries({ queryKey: ['astrorder', 'messages'] })

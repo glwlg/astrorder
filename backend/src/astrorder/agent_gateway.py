@@ -105,6 +105,43 @@ CAPABILITIES: list[dict[str, Any]] = [
             "collapse": "optional boolean to collapse the entire sidecar panel"
         },
     },
+    {
+        "id": "machines.dispatch",
+        "summary": "Dispatch a task or delegate session creation onto a specific target machine (local or SSH remote host).",
+        "input": {
+            "machine_id": "target machine ID (from machines_list: 'local' or 'ssh-...')",
+            "agent_kind": "optional target agent kind on that machine ('codex', 'hermes', 'grok')",
+            "title": "optional session title",
+            "workspace": "optional workspace directory on that machine",
+            "prompt": "optional initial prompt text to send immediately after creation"
+        },
+    },
+    {
+        "id": "monitor.sessions.add",
+        "summary": "Add one or more sessions into the Astrorder Monitor room dashboard for live visual tracking.",
+        "input": {
+            "key": "session key (agent_id::session_id)",
+            "keys": "optional list of session keys",
+            "agent_id": "optional",
+            "session_id": "optional"
+        },
+    },
+    {
+        "id": "monitor.sessions.remove",
+        "summary": "Remove a session from the Astrorder Monitor room dashboard.",
+        "input": {
+            "key": "session key (agent_id::session_id)",
+            "agent_id": "optional",
+            "session_id": "optional"
+        },
+    },
+    {
+        "id": "monitor.layout.set",
+        "summary": "Configure Astrorder Monitor room grid layout columns (1, 2, 3, or 4).",
+        "input": {
+            "columns": "integer 1, 2, 3, or 4"
+        },
+    },
 ]
 
 
@@ -538,6 +575,126 @@ def _plugins_close(payload: dict[str, Any], ctx: AgentContext) -> dict[str, Any]
     return {"ok": True, "event": event_data}
 
 
+def _machines_dispatch(payload: dict[str, Any], ctx: AgentContext) -> dict[str, Any]:
+    machine_id = payload.get("machine_id")
+    if not isinstance(machine_id, str) or not machine_id.strip():
+        raise AgentApiError("invalid_input", "machine_id is required")
+    machine_id = machine_id.strip()
+
+    agent_kind = payload.get("agent_kind")
+    if agent_kind is not None and isinstance(agent_kind, str):
+        agent_kind = agent_kind.strip().lower()
+
+    agents = current_agents(ctx.store)
+    candidate = None
+    if machine_id == "local":
+        for a in agents:
+            if not str(a.get("id") or "").startswith("ssh-"):
+                if not agent_kind or a.get("kind") == agent_kind:
+                    candidate = a
+                    break
+    else:
+        # Match by connection_id or agent_id
+        for a in agents:
+            cid = a.get("connection_id")
+            aid = a.get("id")
+            if cid == machine_id or aid == machine_id or aid.endswith(machine_id):
+                if not agent_kind or a.get("kind") == agent_kind:
+                    candidate = a
+                    break
+
+    if candidate is None:
+        raise AgentApiError("not_found", f"No matching agent found on machine '{machine_id}'")
+
+    # Create session on target agent
+    create_payload = {
+        "agent_id": candidate["id"],
+        "title": payload.get("title") or f"远程派生任务 ({machine_id})",
+        "workspace": payload.get("workspace"),
+    }
+    created = _sessions_create(create_payload, ctx)
+    created_session = created.get("session") or {}
+
+    # If initial prompt is provided, dispatch it
+    prompt = payload.get("prompt")
+    sent_result = None
+    if isinstance(prompt, str) and prompt.strip():
+        sent_result = _sessions_send({"key": created_session.get("key"), "text": prompt.strip()}, ctx)
+
+    return {
+        "ok": True,
+        "machine_id": machine_id,
+        "agent": public_agent(candidate),
+        "session": created_session,
+        "sent": sent_result,
+    }
+
+
+def _monitor_sessions_add(payload: dict[str, Any], ctx: AgentContext) -> dict[str, Any]:
+    keys_to_add: list[str] = []
+    if isinstance(payload.get("keys"), list):
+        for k in payload["keys"]:
+            if isinstance(k, str) and k.strip():
+                keys_to_add.append(k.strip())
+    elif payload.get("key"):
+        keys_to_add.append(str(payload["key"]).strip())
+    elif payload.get("agent_id") and payload.get("session_id"):
+        keys_to_add.append(f"{payload['agent_id']}::{payload['session_id']}")
+    else:
+        raise AgentApiError("invalid_input", "key or keys list is required")
+
+    if ctx.service is not None:
+        ctx.service._server_event(
+            "monitor.control",
+            agent_id=None,
+            session_id=None,
+            data={"action": "add_sessions", "keys": keys_to_add},
+        )
+
+    return {"ok": True, "added_keys": keys_to_add}
+
+
+def _monitor_sessions_remove(payload: dict[str, Any], ctx: AgentContext) -> dict[str, Any]:
+    try:
+        agent_id, session_id = parse_session_key(payload)
+        key = f"{agent_id}::{session_id}"
+    except Exception:
+        if payload.get("key"):
+            key = str(payload["key"]).strip()
+        else:
+            raise AgentApiError("invalid_input", "key is required") from None
+
+    if ctx.service is not None:
+        ctx.service._server_event(
+            "monitor.control",
+            agent_id=None,
+            session_id=None,
+            data={"action": "remove_session", "key": key},
+        )
+
+    return {"ok": True, "removed_key": key}
+
+
+def _monitor_layout_set(payload: dict[str, Any], ctx: AgentContext) -> dict[str, Any]:
+    cols = payload.get("columns")
+    if not isinstance(cols, int):
+        try:
+            cols = int(cols)
+        except (TypeError, ValueError) as exc:
+            raise AgentApiError("invalid_input", "columns must be an integer (1-4)") from exc
+    cols = max(1, min(cols, 4))
+
+    if ctx.service is not None:
+        ctx.service._server_event(
+            "monitor.control",
+            agent_id=None,
+            session_id=None,
+            data={"action": "set_layout", "columns": cols},
+        )
+
+    return {"ok": True, "columns": cols}
+
+
 HANDLERS: dict[str, Callable[[dict[str, Any], AgentContext], dict[str, Any]]] = {
     "catalog.list": _catalog,
     "sessions.list": _sessions_list,
@@ -553,6 +710,10 @@ HANDLERS: dict[str, Callable[[dict[str, Any], AgentContext], dict[str, Any]]] = 
     "plugins.configure": _plugins_configure,
     "plugins.open": _plugins_open,
     "plugins.close": _plugins_close,
+    "machines.dispatch": _machines_dispatch,
+    "monitor.sessions.add": _monitor_sessions_add,
+    "monitor.sessions.remove": _monitor_sessions_remove,
+    "monitor.layout.set": _monitor_layout_set,
 }
 
 
