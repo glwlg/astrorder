@@ -14,6 +14,20 @@ it('merges Agents on the same explicit remote connection and not another connect
   const separated = buildProjectGroups([{ ...row, connection_id: 'other' }], {}, [{ ...project, connection_id: 'wsl' }])
   expect(separated).toHaveLength(2)
 })
+
+it('labels remote projects by connection, not the catalog Agent kind', () => {
+  const agents = {
+    'remote-hermes': { id: 'remote-hermes', kind: 'hermes' as const, name: 'WSL · Hermes', status: 'ready' as const, capabilities: [], limitation: null, connection_id: 'wsl' },
+    'remote-codex': { id: 'remote-codex', kind: 'codex' as const, name: 'WSL · Codex', status: 'ready' as const, capabilities: [], limitation: null, connection_id: 'wsl' },
+  }
+  const groups = buildProjectGroups(
+    [{ ...row, agent_id: 'remote-codex', source_id: 'remote-codex', connection_id: 'wsl' }],
+    agents,
+    [{ ...project, connection_id: 'wsl', source_id: 'remote-hermes', agent_id: 'remote-hermes' }],
+  )
+  expect(groups).toHaveLength(1)
+  expect(groups[0].remoteLabel).toBe('WSL')
+})
 it('filters native subagents, never ordinary conversations by their title', () => {
   const groups = buildProjectGroups([row, { ...row, id: 'internal', native_kind: 'subagent' }], {})
   expect(groups.flatMap(g => g.sessions).map(s => s.id)).toEqual(['native'])

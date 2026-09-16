@@ -9,6 +9,8 @@ import { selectProjects, selectSessions, useAstrorderStore } from '../state/stor
 import { AppHeader } from '../components/AppHeader'
 import { ErrorBoundary } from '../components/ErrorBoundary'
 import { Sidebar } from '../components/Sidebar'
+import { BackgroundTasks } from '../components/BackgroundTasks'
+import { DesktopTitlebar } from '../components/DesktopTitlebar'
 
 function routePart(value: string): string {
   try {
@@ -45,10 +47,12 @@ export function AppShellLayout() {
   const isResizingRef = useRef(false)
   const startXRef = useRef(0)
   const startWidthRef = useRef(328)
+  const [isResizing, setIsResizing] = useState(false)
 
   const handleResizerMouseDown = (e: React.MouseEvent) => {
     e.preventDefault()
     isResizingRef.current = true
+    setIsResizing(true)
     startXRef.current = e.clientX
     startWidthRef.current = sidebarWidth
     document.body.style.cursor = 'col-resize'
@@ -64,6 +68,7 @@ export function AppShellLayout() {
     const handleMouseUp = () => {
       if (!isResizingRef.current) return
       isResizingRef.current = false
+      setIsResizing(false)
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
       window.removeEventListener('mousemove', handleMouseMove)
@@ -92,6 +97,7 @@ export function AppShellLayout() {
       navbar={{ width: sidebarWidth, breakpoint: 'md', collapsed: { mobile: true } }}
       padding={0}
     >
+      <DesktopTitlebar />
       <AppShell.Header className="sidebar-header">
         <AppHeader connection={connection} onMenu={openMobile} />
       </AppShell.Header>
@@ -99,6 +105,7 @@ export function AppShellLayout() {
         <Sidebar sessions={sessions} agents={agents} projects={projects} activeSessionKey={activeSessionKey} onSelectSession={selectSession} />
         <div
           className="sidebar-resizer"
+          data-resizing={isResizing}
           onMouseDown={handleResizerMouseDown}
           role="separator"
           aria-label="拖拽调整侧边栏宽度"
@@ -121,6 +128,7 @@ export function AppShellLayout() {
       >
         <Sidebar sessions={sessions} agents={agents} projects={projects} activeSessionKey={activeSessionKey} onSelectSession={selectSession} onNavigate={closeMobile} />
       </Drawer>
+      <BackgroundTasks />
     </AppShell>
   )
 }

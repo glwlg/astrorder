@@ -14,7 +14,7 @@ import tempfile
 import threading
 from datetime import UTC, datetime
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from astrorder_codex_connector.app_server import CodexAppServer, CodexRpcRejected
 from astrorder_codex_connector.config import CodexConnectorConfig
@@ -29,6 +29,18 @@ logger = logging.getLogger(__name__)
 
 def timestamp(value=None):
     return datetime.fromtimestamp(value, UTC).isoformat() if isinstance(value, (float, int)) else datetime.now(UTC).isoformat()
+
+
+def turn_timestamp(turn_id, started_at=None):
+    if isinstance(started_at, (float, int)):
+        return timestamp(started_at)
+    try:
+        value = UUID(turn_id)
+        if value.version == 7:
+            return timestamp((value.int >> 80) / 1000)
+    except (AttributeError, TypeError, ValueError):
+        pass
+    return '1970-01-01T00:00:00Z'
 
 
 _FAILURE_DETAIL_KEYS = ('message', 'detail', 'userMessage', 'errorMessage', 'reason', 'description', 'error', 'failure', 'lastError')
@@ -118,6 +130,8 @@ def stored_effort(home, sid):
 
 
 def item_message(item, session_id, agent_id, created_at='1970-01-01T00:00:00Z'):
+    from .handoff import visible_handoff_user_text
+
     if not isinstance(item, dict) or not isinstance(item.get('id'), str):
         raise ConnectionError('Codex 未返回原生消息 ID。', 502)
     kind = item.get('type')
@@ -125,6 +139,7 @@ def item_message(item, session_id, agent_id, created_at='1970-01-01T00:00:00Z'):
     if kind == 'userMessage':
         role = 'user'
         text = '\n'.join(part.get('text', '') for part in item.get('content', []) if isinstance(part, dict) and part.get('type') == 'text')
+        text = visible_handoff_user_text(text)
     elif kind == 'reasoning':
         message_kind = 'thinking'
         summary = item.get('summary') or []
@@ -226,12 +241,14 @@ class CodexConnection:
         if getattr(self, 'connection_id', None):
             data['connection_id'] = self.connection_id
             data['name'] = self.display_name + ' · Codex'
-        data['capabilities'] += ['attachments', 'delete']
+        data['capabilities'] += ['attachments', 'delete', 'launch', 'task_events']
         data['limitation'] = '原生 app-server 提供控制；附件支持星序上传的图片与音频。文档尚未映射。其他客户端本地图片仅在 Codex 数据目录内映射为预览。永久删除需原生接口确认。观察钩子不赋予其他客户端活动轮次的控制权。'
         self.store.upsert_agent(data)
         self.service.apply_connector_hello_event(data)
 
     def _request(self, method, params):
+        if self._daemon_controller is not None:
+            return self._daemon_controller.request_native(method, params)
         client = self.client
         if client is None:
             raise ConnectionError('Codex 尚未连接。', 503)
@@ -266,24 +283,28 @@ class CodexConnection:
         with self._lifecycle:
             if self.state == 'connected':
                 return self.snapshot()
-            executable = self._executable()
-            if not executable:
-                raise ConnectionError('未发现本机 Codex CLI，请先安装 Codex。', 503)
-            if self.client:
-                self.client.stop()
             self.state, self.detail = 'connecting', '正在与 Codex 原生接口握手…'
-            config = CodexConnectorConfig(endpoint='', secret='', agent_id=self.agent_id, agent_name='本机 Codex', executable=executable, workspace=Path.cwd(), allowed_workspaces=self.settings.allowed_workspaces)
-            self.client = self.client_factory(
-                config,
-                self._notification,
-                on_close=self._closed,
-                environment=load_system_environment(),
-            )
             try:
-                self.client.start()
+                if self._daemon_controller_factory is not None:
+                    self._activate_daemon_controller()
+                else:
+                    executable = self._executable()
+                    if not executable:
+                        raise ConnectionError('未发现本机 Codex CLI，请先安装 Codex。', 503)
+                    if self.client:
+                        self.client.stop()
+                    config = CodexConnectorConfig(endpoint='', secret='', agent_id=self.agent_id, agent_name='本机 Codex', executable=executable, workspace=Path.cwd(), allowed_workspaces=self.settings.allowed_workspaces)
+                    self.client = self.client_factory(
+                        config,
+                        self._notification,
+                        on_close=self._closed,
+                        environment=load_system_environment(),
+                    )
+                    self.client.start()
                 initialized = self._request('initialize', {'clientInfo': {'name': 'astrorder', 'title': 'Astrorder', 'version': '0.1.0'}, 'capabilities': {'experimentalApi': True}})
                 self._home = Path(initialized['codexHome']) if initialized.get('codexHome') else None
-                self.client.send({'method': 'initialized', 'params': {}})
+                if self.client is not None:
+                    self.client.send({'method': 'initialized', 'params': {}})
                 account = self._request('account/read', {'refreshToken': False})
                 self.auth_required = bool(account.get('requiresOpenaiAuth') and not account.get('account'))
                 rows = list(self._pages('thread/list', {'limit': 100, 'sortKey': 'updated_at', 'sortDirection': 'desc', 'archived': False, 'modelProviders': [], 'sourceKinds': ['cli', 'vscode', 'exec', 'appServer', 'subAgent', 'subAgentReview', 'subAgentCompact', 'subAgentThreadSpawn', 'subAgentOther', 'unknown'], 'useStateDbOnly': True}))
@@ -295,14 +316,16 @@ class CodexConnection:
                 if self.auth_required:
                     self.state, self.detail = 'authentication_required', 'Codex 需要登录；请在本机 Codex 完成登录后重连。'
                 else:
-                    self.service.register_native_command_handler(self.agent_id, self.submit)
-                    self._activate_daemon_controller()
+                    if self._daemon_controller is None:
+                        self.service.register_native_command_handler(self.agent_id, self.submit)
                     self.state, self.detail = 'connected', '原生握手、会话目录与命令通道已就绪。'
                     self._reconcile_tasks()
                 return self.snapshot()
             except Exception as exc:  # noqa: BLE001 - every failed connection must close its owned transport
+                logger.exception('Codex connection failed')
                 self._close_daemon_controller()
-                self.client.stop()
+                if self.client is not None:
+                    self.client.stop()
                 self.client = None
                 self.state, self.detail = 'error', exc.detail if isinstance(exc, ConnectionError) else 'Codex 连接未完成；未标记为已连接。'
                 self.service.clear_native_command_handler(self.agent_id)
@@ -352,7 +375,8 @@ class CodexConnection:
         self._threads[sid] = thread
         status = (thread.get('status') or {}).get('type')
         cwd = thread.get('cwd')
-        data = {'id': sid, 'agent_id': self.agent_id, 'source_id': self.agent_id, 'source_session_id': sid, 'title': thread.get('name') or str(thread.get('preview') or '')[:160] or sid, 'workspace': cwd, 'status': 'running' if status == 'active' else 'error' if status == 'systemError' else 'idle', 'updated_at': timestamp(thread.get('updatedAt')), 'history_state': 'available', 'control_state': 'owned', 'project_id': thread.get('projectId'), 'project_name': Path(cwd).name if cwd else None}
+        title = str(thread.get('name') or thread.get('preview') or sid)[:160]
+        data = {'id': sid, 'agent_id': self.agent_id, 'source_id': self.agent_id, 'source_session_id': sid, 'title': title, 'workspace': cwd, 'status': 'running' if status == 'active' else 'error' if status == 'systemError' else 'idle', 'updated_at': timestamp(thread.get('updatedAt')), 'history_state': 'available', 'control_state': 'owned', 'project_id': thread.get('projectId'), 'project_name': Path(cwd).name if cwd else None}
         source = thread.get('source')
         if getattr(self, 'connection_id', None):
             data['connection_id'] = self.connection_id
@@ -530,7 +554,10 @@ class CodexConnection:
             if not isinstance(result.get('data'), list):
                 raise ConnectionError('Codex 消息分页响应无效。', 502)
             project_task_history(self, sid, result['data'], history_started, refresh_unknown=not before)
-            items = [self._message(entry['item'], sid) for entry in reversed(result['data'])]
+            items = [
+                self._message(entry['item'], sid, entry.get('turnId'), turn_timestamp(entry.get('turnId')))
+                for entry in reversed(result['data'])
+            ]
             for m in items:
                 self.store.upsert_message(m)
             native_cursor = result.get('nextCursor')
@@ -549,8 +576,9 @@ class CodexConnection:
             first_user_text = None
             for turn in turns:
                 turn_id = turn.get('id')
+                created_at = turn_timestamp(turn_id, turn.get('startedAt'))
                 for item in turn.get('items') or []:
-                    msg = self._message(item, sid, turn_id=turn_id)
+                    msg = self._message(item, sid, turn_id=turn_id, created_at=created_at)
                     if not first_user_text and msg.get('role') == 'user' and msg.get('text'):
                         first_user_text = msg['text']
                     self.store.upsert_message(msg)
@@ -609,6 +637,106 @@ class CodexConnection:
         provider = self.model(sid)['provider']
         return [{'provider': provider, 'model': row.get('model') or row['id'], 'label': row.get('displayName') or row.get('model') or row['id']} for row in self._pages('model/list', {'limit': 100, 'includeHidden': False}) if not row.get('hidden')]
 
+    def commands(self, sid):
+        self._scope(sid)
+        return [
+            {'name': 'compact', 'description': '压缩当前会话上下文', 'input_hint': None},
+            {'name': 'review', 'description': '审查当前工作区变更', 'input_hint': '可选：审查要求'},
+        ]
+
+    def mentions(self, sid):
+        self._scope(sid)
+        thread = self._threads.get(sid) or {}
+        cwd = thread.get('cwd') or str(self.settings.allowed_workspaces[0] if self.settings.allowed_workspaces else Path.cwd())
+        response = (
+            self._daemon_controller.request_native('skills/list', {'cwds': [cwd]})
+            if self._daemon_controller is not None
+            else self._request('skills/list', {'cwds': [cwd]})
+        )
+        return [
+            {
+                'name': skill['name'],
+                'description': skill.get('shortDescription') or skill.get('description') or '',
+                'path': skill['path'],
+                'kind': 'skill',
+            }
+            for group in response.get('data', [])
+            if isinstance(group, dict)
+            for skill in group.get('skills', [])
+            if isinstance(skill, dict) and skill.get('enabled') is not False
+            and isinstance(skill.get('name'), str) and isinstance(skill.get('path'), str)
+        ]
+
+    def command_input(self, command):
+        import ntpath
+        import posixpath
+
+        from .codex_inputs import command_input
+
+        inputs = command_input(self.settings, self.store, command)
+        text = command.get('text')
+        if not isinstance(text, str):
+            return inputs
+        pattern = re.compile(r'(?<!\S)@(?:"([^"]+)"|([^\s@]+))')
+        names = [quoted or plain for quoted, plain in pattern.findall(text)]
+        link_pattern = re.compile(r'\[([^\]\n]+)\]\(([^)\n]+)\)')
+        links = link_pattern.findall(text)
+        if not names and not links:
+            return inputs
+        skills = {
+            item['name']: item
+            for item in self.mentions(command['session_id'])
+        } if names else {}
+        thread = self._threads.get(command['session_id']) or {}
+        workspace = str(thread.get('cwd') or command.get('workspace') or '')
+        path_module = ntpath if re.match(r'^[A-Za-z]:|\\', workspace) else posixpath
+        selected = []
+        for name in dict.fromkeys(names):
+            skill = skills.get(name)
+            if skill:
+                selected.append({'type': 'skill', 'name': name, 'path': skill['path']})
+                continue
+            if not workspace:
+                continue
+            root = path_module.normpath(workspace)
+            path = path_module.normpath(name if path_module.isabs(name) else path_module.join(root, name))
+            try:
+                if path_module.commonpath([root, path]) != root:
+                    continue
+            except ValueError:
+                continue
+            selected.append({'type': 'mention', 'name': name, 'path': path})
+        selected_links = set()
+        for label, destination in links:
+            if not workspace or '://' in destination or destination.startswith(('#', '/api/')):
+                continue
+            root = path_module.normpath(workspace)
+            path = path_module.normpath(
+                destination if path_module.isabs(destination) else path_module.join(root, destination)
+            )
+            try:
+                if path_module.commonpath([root, path]) != root:
+                    continue
+            except ValueError:
+                continue
+            selected.append({'type': 'mention', 'name': label, 'path': path})
+            selected_links.add(destination)
+        if not selected:
+            return inputs
+        selected_names = {item['name'] for item in selected}
+        cleaned = pattern.sub(
+            lambda match: '' if (match.group(1) or match.group(2)) in selected_names else match.group(0),
+            text,
+        )
+        cleaned = link_pattern.sub(
+            lambda match: '' if match.group(2) in selected_links else match.group(0),
+            cleaned,
+        ).strip()
+        base = [item for item in inputs if item.get('type') != 'text']
+        if cleaned:
+            base.append({'type': 'text', 'text': cleaned})
+        return selected + base
+
     def set_model(self, sid, provider, model):
         if self._daemon_controller is not None:
             return self._daemon_controller.set_model(sid, provider, model)
@@ -649,6 +777,10 @@ class CodexConnection:
 
     def get_approval_mode(self, sid):
         self._scope(sid)
+        if sid not in self._approval_modes:
+            saved = self.store.get_session_approval_mode_binding(self.agent_id, sid)
+            if saved:
+                self._approval_modes[sid] = saved
         return self._approval_modes.get(sid, 'auto')
 
     def set_approval_mode(self, sid, mode):
@@ -656,6 +788,7 @@ class CodexConnection:
         if mode not in {'manual', 'auto', 'full_access'}:
             raise ConnectionError('不支持的审批模式；可选 manual、auto、full_access。', 422)
         self._approval_modes[sid] = mode
+        self.store.set_session_approval_mode_binding(self.agent_id, sid, mode)
         return {'mode': mode}
 
     def open_ids(self):
@@ -677,7 +810,7 @@ class CodexConnection:
                 'cwd': path,
                 'ephemeral': bool(ephemeral),
                 'excludeTurns': True,
-                'deferGoalContinuation': True,
+                **({'deferGoalContinuation': True} if not ephemeral else {}),
             })
         else:
             response = self._request('thread/start', {
@@ -705,6 +838,8 @@ class CodexConnection:
     def mutate(self, sid, updates):
         self._scope(sid)
         if updates is None:
+            if self._daemon_controller is not None:
+                return self._daemon_controller.delete(sid)
             if sid in self._active:
                 raise ConnectionError('会话正在运行，未执行永久删除。', 409)
             try:
@@ -726,6 +861,8 @@ class CodexConnection:
         if set(updates) - {'title'}:
             raise ConnectionError('当前仅支持原生 Codex 会话重命名。', 422)
         if 'title' in updates:
+            if self._daemon_controller is not None:
+                return self._daemon_controller.rename(sid, updates['title'])
             self._request('thread/name/set', {'threadId': sid, 'name': updates['title']})
             thread = self._request('thread/read', {'threadId': sid, 'includeTurns': False}).get('thread') or {}
             if thread.get('id') != sid or thread.get('name') != updates['title']:
@@ -760,9 +897,40 @@ class CodexConnection:
             return 'accepted', None
         if action not in {'send', 'enqueue'}:
             return 'failed', '当前 Codex 连接未提供此命令类型。'
-        from .codex_inputs import command_input
+        slash = command.get('text', '').strip().split(maxsplit=1)
+        if action == 'send' and slash and slash[0] == '/compact':
+            if len(slash) > 1:
+                return 'failed', '/compact 不接受参数。'
+            if self._daemon_controller is not None:
+                return self._daemon_controller.submit_slash(command, 'compact', None)
+            self._resume(sid)
+            self._request('thread/compact/start', {'threadId': sid})
+            updated = self.store.set_command_state(self.agent_id, sid, command['id'], 'completed', None)
+            self._event('command.upsert', sid, updated)
+            return 'accepted', None
+        if action == 'send' and slash and slash[0] == '/review':
+            if self._daemon_controller is not None:
+                return self._daemon_controller.submit_slash(
+                    command, 'review', slash[1].strip() if len(slash) > 1 else None
+                )
+            self._resume(sid)
+            target = (
+                {'type': 'custom', 'instructions': slash[1].strip()}
+                if len(slash) > 1 and slash[1].strip()
+                else {'type': 'uncommittedChanges'}
+            )
+            response = self._request('review/start', {'threadId': sid, 'target': target, 'delivery': 'inline'})
+            turn = response.get('turn') or {}
+            turn_id = turn.get('id')
+            if not isinstance(turn_id, str):
+                return 'unknown', 'Codex 未返回审查轮次 ID；不会自动重发。'
+            with self._lock:
+                self._commands[(sid, turn_id)] = dict(command)
+                if turn.get('status') not in {'completed', 'failed', 'interrupted'}:
+                    self._active[sid] = turn_id
+            return 'accepted', None
         try:
-            inputs=command_input(self.settings,self.store,command)
+            inputs = self.command_input(command)
         except ConnectionError as exc:
             return 'failed', exc.detail
         with self._lock:
@@ -870,7 +1038,7 @@ class CodexConnection:
             return
         if not isinstance(sid, str) or self.store.get_session(self.agent_id, sid) is None:
             return
-        if method in {'turn/plan/updated', 'item/started', 'item/completed', 'item/commandExecution/outputDelta'}:
+        if method in {'turn/plan/updated', 'item/started', 'item/completed'}:
             project_tasks(self, method, params, timestamp())
         if method == 'thread/settings/updated':
             settings = params.get('threadSettings') or {}

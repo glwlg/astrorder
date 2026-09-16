@@ -8,7 +8,7 @@ export function AstrorderLoader({ size = 14 }: { size?: number }) {
       <motion.g
         initial={false}
         animate={{ rotate: reducedMotion ? 0 : 360 }}
-        transition={{ duration: 5, repeat: reducedMotion ? 0 : Infinity, ease: 'linear' }}
+        transition={{ duration: 2.4, repeat: reducedMotion ? 0 : Infinity, ease: 'linear' }}
         style={{ transformOrigin: '16px 16px' }}
       >
         <circle cx="16" cy="16" r="12" stroke="currentColor" strokeWidth="2" strokeDasharray="13 6" />
@@ -20,8 +20,8 @@ export function AstrorderLoader({ size = 14 }: { size?: number }) {
       <motion.path
         d="M16 8c1 5 3 7 8 8-5 1-7 3-8 8-1-5-3-7-8-8 5-1 7-3 8-8Z"
         fill="currentColor"
-        animate={reducedMotion ? undefined : { scale: [0.92, 1.06, 0.92], opacity: [0.5, 1, 0.5] }}
-        transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
+        animate={reducedMotion ? undefined : { scale: [0.85, 1.15, 0.85], opacity: [0.45, 1, 0.45] }}
+        transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
         style={{ transformOrigin: '16px 16px' }}
       />
     </svg>

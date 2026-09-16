@@ -10,7 +10,7 @@ export type Capability =
 
 export type ApprovalMode = 'manual' | 'auto' | 'full_access'
 
-export type AgentKind = 'hermes' | 'codex'
+export type AgentKind = string
 export type AgentStatus = 'disconnected' | 'connecting' | 'ready' | 'error'
 export type SessionStatus = 'idle' | 'running' | 'waiting_approval' | 'error'
 export type MessageRole = 'user' | 'assistant' | 'system' | 'tool'
@@ -58,6 +58,8 @@ export interface Session {
   project_name?: string | null
   history_state?: string
   control_state?: string
+  handoff_from_agent_id?: string | null
+  handoff_from_session_id?: string | null
 }
 
 export interface Project {
@@ -104,6 +106,19 @@ export interface Command {
   created_at: string
   error: string | null
   target_id?: string | null
+}
+
+export interface AgentCommand {
+  name: string
+  description: string
+  input_hint: string | null
+}
+
+export interface AgentMention {
+  name: string
+  description: string
+  kind: 'skill' | 'file'
+  path: string
 }
 
 export interface CommandPayload {
@@ -276,6 +291,14 @@ export interface DraftAttachment {
 export interface DraftState {
   text: string
   attachments: DraftAttachment[]
+  sessionRefs?: SessionRef[]
+}
+
+export interface SessionRef {
+  key: string
+  agent_id: string
+  id: string
+  title: string
 }
 
 export type OutboxStatus = 'submitting' | CommandState

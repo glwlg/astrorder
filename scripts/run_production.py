@@ -4,6 +4,7 @@ from __future__ import annotations
 import ctypes
 import json
 import os
+import threading
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -37,12 +38,7 @@ def protect_bytes(value: bytes, *, decrypt: bool = False) -> bytes:
         ctypes.windll.kernel32.LocalFree(output.data)
 
 
-def main():
-    import uvicorn
-
-    from astrorder.config import Settings
-
-
+def load_production_environment() -> dict[str, str]:
     config = json.loads(CONFIG.read_text(encoding='utf-8'))
     environment = config['environment']
     for key, value in environment.items():
@@ -55,6 +51,39 @@ def main():
         if not credentials.get(key):
             raise ValueError('Production credential missing')
         os.environ[key] = credentials[key]
+    return {key: str(value) for key, value in environment.items()}
+
+
+def stop_when_desktop_exits(server, raw_pid: str | None) -> None:
+    if raw_pid is None:
+        return
+    try:
+        pid = int(raw_pid)
+    except ValueError as exc:
+        raise ValueError('ASTRORDER_DESKTOP_PID must be an integer') from exc
+    if pid <= 0:
+        raise ValueError('ASTRORDER_DESKTOP_PID must be positive')
+
+    def watch() -> None:
+        synchronize = 0x00100000
+        handle = ctypes.windll.kernel32.OpenProcess(synchronize, False, pid)
+        if handle:
+            try:
+                ctypes.windll.kernel32.WaitForSingleObject(handle, 0xFFFFFFFF)
+            finally:
+                ctypes.windll.kernel32.CloseHandle(handle)
+        server.should_exit = True
+
+    threading.Thread(target=watch, name='desktop-lifetime', daemon=True).start()
+
+
+def main():
+    import uvicorn
+
+    from astrorder.config import Settings
+
+
+    environment = load_production_environment()
     if _enabled(environment.get('ASTRORDER_SESSION_DAEMON_ENABLED')):
         from production_daemon import ensure_production_daemon
 
@@ -64,7 +93,22 @@ def main():
     from astrorder.main import create_app
     if not settings.static_dir or not (settings.static_dir / 'index.html').is_file():
         raise RuntimeError('Build frontend assets before starting production')
-    uvicorn.run(create_app(settings), host=settings.host, port=settings.port, workers=1, reload=False, access_log=False)
+    application = create_app(settings)
+    server = uvicorn.Server(
+        uvicorn.Config(
+            application,
+            host=settings.host,
+            port=settings.port,
+            workers=1,
+            reload=False,
+            access_log=False,
+        )
+    )
+
+    application.state.desktop_shutdown = lambda: setattr(server, "should_exit", True)
+
+    stop_when_desktop_exits(server, os.environ.get('ASTRORDER_DESKTOP_PID'))
+    server.run()
 
 
 if __name__ == '__main__':

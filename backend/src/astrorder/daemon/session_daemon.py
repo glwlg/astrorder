@@ -10,6 +10,7 @@ import argparse
 import asyncio
 import hmac
 import json
+import logging
 import os
 import time
 from collections import deque
@@ -21,10 +22,16 @@ from uuid import uuid4
 
 from websockets.exceptions import ConnectionClosed
 
+from .errors import DaemonProtocolError
+
+logger = logging.getLogger(__name__)
+
 SESSION_STATUSES = frozenset({"running", "waiting_approval", "idle", "error"})
 RUNTIME_ACTIONS = frozenset(
     {
         "session.send",
+        "session.compact",
+        "session.review",
         "session.steer",
         "session.interrupt",
         "session.approve",
@@ -36,6 +43,7 @@ RUNTIME_ACTIONS = frozenset(
         "session.rename",
         "session.close",
         "session.models",
+        "session.commands",
         "session.model.read",
         "session.model.set",
         "session.reasoning.set",
@@ -45,8 +53,6 @@ RUNTIME_ACTIONS = frozenset(
 )
 
 
-class DaemonProtocolError(ValueError):
-    """A daemon caller supplied an invalid local IPC value."""
 
 
 class SessionRuntime(Protocol):
@@ -115,7 +121,10 @@ class SessionDaemon:
         self._runtime_control_sessions: set[str] = set()
         self._agent_control_sessions: dict[str, str] = {}
         self._pending_connector_events: dict[str, deque[dict[str, Any]]] = {}
+        self._connector_agents: dict[str, dict[str, Any]] = {}
+        self._connector_sockets: dict[str, Any] = {}
         self._runtime_lock = asyncio.Lock()
+        self._maintenance = False
         self._shutdown_event = shutdown_event
 
     def register_runtime(self, agent_type: str, runtime: SessionRuntime) -> None:
@@ -211,6 +220,17 @@ class SessionDaemon:
             }
         return result
 
+    def runtime_status(self) -> dict[str, dict[str, Any]]:
+        result: dict[str, dict[str, Any]] = {}
+        for agent_type, runtime in self._runtime_registry.items():
+            status = getattr(runtime, "status", None)
+            if callable(status):
+                value = status()
+                if not isinstance(value, Mapping):
+                    raise DaemonProtocolError("runtime status must be an object")
+                result[agent_type] = dict(value)
+        return result
+
     async def publish(
         self,
         session_id: str,
@@ -255,6 +275,8 @@ class SessionDaemon:
             self._runtime_control_sessions.clear()
             self._agent_control_sessions.clear()
             self._pending_connector_events.clear()
+            self._connector_agents.clear()
+            self._connector_sockets.clear()
         shutdowns = [getattr(runtime, "shutdown", None) for runtime in runtimes]
         await asyncio.gather(
             *(shutdown() for shutdown in shutdowns if callable(shutdown)),
@@ -321,6 +343,9 @@ class SessionDaemon:
                     ):
                         raise DaemonProtocolError("connector hello is invalid")
                     agent_id = candidate
+                    self._connector_agents[agent_id] = dict(agent)
+                    self._connector_sockets[agent_id] = socket
+                    await self._record_connector_hello(agent_id, agent)
                     continue
                 if frame.get("type") == "event":
                     event = frame.get("event")
@@ -335,6 +360,12 @@ class SessionDaemon:
             await socket.close(code=1008, reason="invalid connector frame")
         except ConnectionClosed:
             return
+        finally:
+            if agent_id is not None and self._connector_sockets.get(agent_id) is socket:
+                self._connector_sockets.pop(agent_id, None)
+                agent = self._connector_agents.pop(agent_id, None)
+                if agent is not None:
+                    await self._record_connector_hello(agent_id, {**agent, "status": "disconnected"})
 
     def _connector_authenticated(self, socket: Any) -> bool:
         if self._connector_secret is None:
@@ -347,6 +378,15 @@ class SessionDaemon:
         supplied = authorization[len(prefix) :]
         return bool(supplied) and hmac.compare_digest(supplied, self._connector_secret)
 
+    async def _record_connector_hello(self, agent_id: str, agent: Mapping[str, Any]) -> None:
+        payload = dict(agent)
+        control_session_id = self._agent_control_sessions.get(agent_id)
+        if control_session_id is not None:
+            await self.publish(control_session_id, "connector.hello", payload)
+            return
+        pending = self._pending_connector_events.setdefault(agent_id, deque(maxlen=200))
+        pending.append({"_daemon_event": "connector.hello", "agent": payload})
+
     async def _record_connector_event(self, agent_id: str, event: Mapping[str, Any]) -> None:
         if event.get("agent_id") != agent_id:
             raise DaemonProtocolError("connector event agent identity does not match hello")
@@ -357,6 +397,13 @@ class SessionDaemon:
         if session_id is not None and (not isinstance(session_id, str) or not session_id):
             raise DaemonProtocolError("connector event session identity is invalid")
         payload = dict(event)
+        if event_type == "agent.upsert":
+            agent = event.get("data")
+            if not isinstance(agent, Mapping) or agent.get("id") != agent_id:
+                raise DaemonProtocolError("connector agent update identity does not match hello")
+            current = self._connector_agents.get(agent_id)
+            if current is not None:
+                self._connector_agents[agent_id] = {**current, **dict(agent)}
         if session_id is not None:
             await self.publish(session_id, "connector.event", payload)
             return
@@ -415,27 +462,75 @@ class SessionDaemon:
         if not isinstance(request, dict):
             return self.handle_request(raw)
         action = request.get("action")
-        if action not in {"daemon.shutdown", "session.create", "session.spawn", *RUNTIME_ACTIONS}:
+        if action not in {
+            "daemon.shutdown", "daemon.status", "session.create", "session.spawn",
+            "runtime.request", *RUNTIME_ACTIONS,
+        }:
             return self.handle_request(raw)
         request_id = request.get("request_id")
         if request_id is not None and (not isinstance(request_id, str) or not request_id):
             return {"action": "error", "detail": "request_id must be a non-empty string"}
         try:
+            if action == "daemon.status":
+                return {
+                    "action": "daemon.status.result",
+                    "request_id": request_id,
+                    "daemon_id": self.daemon_id,
+                    "sessions": self.status(),
+                    "connectors": [dict(agent) for agent in self._connector_agents.values()],
+                    "runtimes": await asyncio.to_thread(self.runtime_status),
+                }
             if action == "daemon.shutdown":
                 return await self._shutdown_request(request)
             if action == "session.create":
                 return await self._create_runtime(request)
             if action == "session.spawn":
                 return await self._spawn_runtime(request)
+            if action == "runtime.request":
+                return await self._request_runtime(request)
             return await self._dispatch_runtime_action(action, request)
         except DaemonProtocolError as exc:
             return {"action": "error", "request_id": request_id, "detail": str(exc)}
-        except Exception:  # noqa: BLE001 - native adapter failures must not expose transport details
+        except Exception:
+            logger.exception("daemon runtime action failed: %s", action)
             return {"action": "error", "request_id": request_id, "detail": "runtime action failed"}
+
+    async def _request_runtime(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        agent_type = request.get("agent_type")
+        runtime = self._runtime_registry.get(agent_type) if isinstance(agent_type, str) else None
+        query = getattr(runtime, "query", None)
+        if not callable(query):
+            raise DaemonProtocolError("agent type does not support runtime requests")
+        async with self._runtime_lock:
+            if self._maintenance:
+                raise DaemonProtocolError("daemon is stopping")
+            result = await query(dict(request))
+        if not isinstance(result, Mapping):
+            raise DaemonProtocolError("runtime request result must be an object")
+        return {
+            "action": "runtime.request.result",
+            "request_id": request.get("request_id"),
+            "daemon_id": self.daemon_id,
+            "result": dict(result),
+        }
 
     async def _shutdown_request(self, request: Mapping[str, Any]) -> dict[str, Any]:
         if self._secret is None:
             raise DaemonProtocolError("daemon shutdown requires authenticated IPC")
+        confirm_active = request.get("confirm_active", False)
+        if not isinstance(confirm_active, bool):
+            raise DaemonProtocolError("confirm_active must be a boolean")
+        async with self._runtime_lock:
+            active = {
+                session_id: wal.status
+                for session_id, wal in self._sessions.items()
+                if wal.status in {"running", "waiting_approval"}
+            }
+            if active and not confirm_active:
+                raise DaemonProtocolError(
+                    "daemon has active sessions; explicit confirmation is required"
+                )
+            self._maintenance = True
         await self.shutdown()
         if self._shutdown_event is not None:
             self._shutdown_event.set()
@@ -455,6 +550,8 @@ class SessionDaemon:
         if runtime is None or not callable(create):
             raise DaemonProtocolError("agent type does not support daemon session creation")
         async with self._runtime_lock:
+            if self._maintenance:
+                raise DaemonProtocolError("daemon is stopping")
             result = await create(dict(request))
             if not isinstance(result, Mapping):
                 raise DaemonProtocolError("runtime create result must be an object")
@@ -499,6 +596,8 @@ class SessionDaemon:
         if runtime is None:
             raise DaemonProtocolError("agent type is not registered")
         async with self._runtime_lock:
+            if self._maintenance:
+                raise DaemonProtocolError("daemon is stopping")
             if session_id in self._session_runtimes:
                 if self._session_agent_types.get(session_id) != agent_type:
                     raise DaemonProtocolError("session is owned by a different agent type")
@@ -548,31 +647,34 @@ class SessionDaemon:
         self._validate_session_id(session_id)
         if action == "session.disconnect":
             return await self._disconnect_runtime(session_id, request)
-        runtime = self._session_runtimes.get(session_id)
-        if runtime is None:
-            raise DaemonProtocolError("session is not daemon-owned")
-        result = await runtime.command(action, dict(request))
-        if not isinstance(result, Mapping):
-            raise DaemonProtocolError("runtime command result must be an object")
-        result_data = dict(result)
-        status = result_data.get("status")
-        if status is not None:
-            if status not in SESSION_STATUSES:
-                raise DaemonProtocolError("runtime command status is invalid")
-            self._sessions[session_id].status = status
-        try:
-            json.dumps(result_data)
-        except (TypeError, ValueError) as exc:
-            raise DaemonProtocolError("runtime command result is not JSON-safe") from exc
-        if (
-            action == "session.delete" and result_data.get("deleted") == session_id
-            or action == "session.close" and result_data.get("closed") is True
-        ):
-            self._session_runtimes.pop(session_id, None)
-            self._session_agent_types.pop(session_id, None)
-            self._session_runtime_metadata.pop(session_id, None)
-            self._runtime_control_sessions.discard(session_id)
-            self._sessions.pop(session_id, None)
+        async with self._runtime_lock:
+            if self._maintenance:
+                raise DaemonProtocolError("daemon is stopping")
+            runtime = self._session_runtimes.get(session_id)
+            if runtime is None:
+                raise DaemonProtocolError("session is not daemon-owned")
+            result = await runtime.command(action, dict(request))
+            if not isinstance(result, Mapping):
+                raise DaemonProtocolError("runtime command result must be an object")
+            result_data = dict(result)
+            status = result_data.get("status")
+            if status is not None:
+                if status not in SESSION_STATUSES:
+                    raise DaemonProtocolError("runtime command status is invalid")
+                self._sessions[session_id].status = status
+            try:
+                json.dumps(result_data)
+            except (TypeError, ValueError) as exc:
+                raise DaemonProtocolError("runtime command result is not JSON-safe") from exc
+            if (
+                action == "session.delete" and result_data.get("deleted") == session_id
+                or action == "session.close" and result_data.get("closed") is True
+            ):
+                self._session_runtimes.pop(session_id, None)
+                self._session_agent_types.pop(session_id, None)
+                self._session_runtime_metadata.pop(session_id, None)
+                self._runtime_control_sessions.discard(session_id)
+                self._sessions.pop(session_id, None)
         return {
             "action": f"{action}.result",
             "request_id": request.get("request_id"),
@@ -639,7 +741,10 @@ class SessionDaemon:
         self._agent_control_sessions[agent_id] = control_session_id
         pending = tuple(self._pending_connector_events.pop(agent_id, ()))
         for event in pending:
-            await self.publish(control_session_id, "connector.event", event)
+            if event.get("_daemon_event") == "connector.hello":
+                await self.publish(control_session_id, "connector.hello", event["agent"])
+            else:
+                await self.publish(control_session_id, "connector.event", event)
 
     @staticmethod
     def _validate_session_id(session_id: Any) -> None:
@@ -672,6 +777,8 @@ class SessionDaemon:
                     "request_id": request_id,
                     "daemon_id": self.daemon_id,
                     "sessions": self.status(),
+                    "connectors": [dict(agent) for agent in self._connector_agents.values()],
+                    "runtimes": self.runtime_status(),
                 }
         except DaemonProtocolError as exc:
             return {"action": "error", "request_id": request_id, "detail": str(exc)}
@@ -689,6 +796,8 @@ def create_session_daemon(
     hermes_runtime: Any | None = None,
     ssh_runtime: Any | None = None,
     remote_codex_runtime: Any | None = None,
+    grok_runtime: Any | None = None,
+    remote_grok_runtime: Any | None = None,
     shutdown_event: asyncio.Event | None = None,
 ) -> SessionDaemon:
     """Create a daemon and register only explicitly enabled runtime adapters."""
@@ -698,6 +807,8 @@ def create_session_daemon(
         or hermes_runtime is not None
         or ssh_runtime is not None
         or remote_codex_runtime is not None
+        or grok_runtime is not None
+        or remote_grok_runtime is not None
     ) and secret is None:
         raise ValueError("a daemon secret is required when registering runtime adapters")
     daemon = SessionDaemon(
@@ -719,6 +830,8 @@ def create_session_daemon(
         ("hermes", hermes_runtime),
         ("ssh", ssh_runtime),
         ("codex-ssh", remote_codex_runtime),
+        ("grok", grok_runtime),
+        ("grok-ssh", remote_grok_runtime),
     ):
         if runtime is None:
             continue
@@ -741,6 +854,8 @@ async def _run_forever(
     hermes_runtime: Any | None = None,
     ssh_runtime: Any | None = None,
     remote_codex_runtime: Any | None = None,
+    grok_runtime: Any | None = None,
+    remote_grok_runtime: Any | None = None,
 ) -> None:
     stopping = asyncio.Event()
     daemon = create_session_daemon(
@@ -752,12 +867,24 @@ async def _run_forever(
         hermes_runtime=hermes_runtime,
         ssh_runtime=ssh_runtime,
         remote_codex_runtime=remote_codex_runtime,
+        grok_runtime=grok_runtime,
+        remote_grok_runtime=remote_grok_runtime,
         shutdown_event=stopping,
     )
+    codex_observer_task = None
+    if codex_config is not None:
+        from .codex_runtime import forward_codex_desktop_stops
+
+        codex_observer_task = asyncio.create_task(
+            forward_codex_desktop_stops(codex_config, daemon.publish, stopping)
+        )
     server = await daemon.serve(host, port)
     try:
         await stopping.wait()
     finally:
+        if codex_observer_task is not None:
+            codex_observer_task.cancel()
+            await asyncio.gather(codex_observer_task, return_exceptions=True)
         server.close()
         await server.wait_closed()
         await daemon.shutdown()
@@ -778,6 +905,10 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--pty-allowed-workspace", action="append", default=[])
     parser.add_argument("--enable-hermes", action="store_true")
     parser.add_argument("--enable-ssh", action="store_true")
+    parser.add_argument("--enable-grok", action="store_true")
+    parser.add_argument("--grok-executable")
+    parser.add_argument("--grok-workspace")
+    parser.add_argument("--grok-allowed-workspace", action="append", default=[])
     args = parser.parse_args(argv)
     secret = os.environ.get("ASTRORDER_SESSION_DAEMON_SECRET") or None
     connector_secret = os.environ.get("ASTRORDER_CONNECTOR_SECRET") or None
@@ -808,6 +939,24 @@ def main(argv: list[str] | None = None) -> None:
         pty_config = PtyDaemonRuntimeConfig(
             allowed_workspaces=tuple(args.pty_allowed_workspace),
         )
+    grok_runtime = None
+    if args.enable_grok:
+        if not secret:
+            parser.error("ASTRORDER_SESSION_DAEMON_SECRET is required with --enable-grok")
+        if not args.grok_executable or not args.grok_workspace:
+            parser.error("--grok-executable and --grok-workspace are required with --enable-grok")
+        from .grok_runtime import GrokDaemonRuntime, GrokDaemonRuntimeConfig
+
+        grok_runtime = GrokDaemonRuntime(
+            GrokDaemonRuntimeConfig(
+                executable=args.grok_executable,
+                workspace=Path(args.grok_workspace),
+                allowed_workspaces=tuple(
+                    Path(item) for item in (args.grok_allowed_workspace or [args.grok_workspace])
+                ),
+            ),
+            emit=lambda *_args, **_kwargs: None,
+        )
     hermes_runtime = None
     if args.enable_hermes:
         if not secret:
@@ -830,6 +979,7 @@ def main(argv: list[str] | None = None) -> None:
         )
     ssh_runtime = None
     remote_codex_runtime = None
+    remote_grok_runtime = None
     if args.enable_ssh:
         if not secret:
             parser.error("ASTRORDER_SESSION_DAEMON_SECRET is required with --enable-ssh")
@@ -881,6 +1031,19 @@ def main(argv: list[str] | None = None) -> None:
                 )
 
             remote_codex_runtime = SshDaemonRuntimeRegistry(remote_codex_factory)
+        if args.enable_grok:
+            from .remote_grok_runtime import RemoteGrokDaemonRuntime
+
+            def remote_grok_factory(
+                connection_id: str, raw_settings: Mapping[str, Any]
+            ) -> RemoteGrokDaemonRuntime:
+                return RemoteGrokDaemonRuntime(
+                    connection_id,
+                    raw_settings,
+                    emit=lambda *_args, **_kwargs: None,
+                )
+
+            remote_grok_runtime = SshDaemonRuntimeRegistry(remote_grok_factory)
     asyncio.run(
         _run_forever(
             args.host,
@@ -893,6 +1056,8 @@ def main(argv: list[str] | None = None) -> None:
             hermes_runtime=hermes_runtime,
             ssh_runtime=ssh_runtime,
             remote_codex_runtime=remote_codex_runtime,
+            grok_runtime=grok_runtime,
+            remote_grok_runtime=remote_grok_runtime,
         )
     )
 

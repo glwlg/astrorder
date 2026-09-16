@@ -1,102 +1,149 @@
 # 星序 · Astrorder
 
-群星各有所长，协作自有秩序。
-
-星序是一套本机优先、跨设备的 **Hermes / Codex 控制工作台**。它不是第二套会话系统，也不依赖 Hermes Desktop：会话 ID、线程、模型、批准模式都以原生运行时为准，星序只做控制面、观察面和工件工作台。
-
-电脑用侧栏 + 对话 + 右侧 Sidecar；手机用独立工作台（抽屉 / 对话 / Sheet）。界面以中文为主，支持明暗主题。
+<div align="center">
+  <img src="docs/assets/logo.png" alt="星序 Astrorder Logo" width="160" />
+  <h3>群星各有所长，协作自有秩序。</h3>
+  <p><strong>本机优先、多智能体协同的下一代 AI 代理控制工作台</strong></p>
+  <p>原生直连 Codex · Hermes · Grok · SSH 远端服务器 | 桌面 / 移动端统一掌控</p>
+</div>
 
 ---
 
-## 能做什么
+## 🌟 什么是星序？
 
-### 原生 Agent 接入
+星序是一套专注于工程落地与沉浸式人机协作的 **AI Agent 控制中心与工件工作台**。
 
-- **本机自动发现** Hermes 与 Codex，一键接入或断开。不会用示例数据假装「已连接」。
-- **SSH 远程环境**：保存主机 / alias / 端口 / 用户 / 私钥路径引用，再发现远端 Agent。不存密码或私钥内容，不关闭 host-key 校验，不拼接 shell 字符串。
-- 星序只操作自己拉起的 TUI-gateway / Codex app-server；不断开 Desktop、Overlook 或其他无关进程。
-- 指令走 HTTP，事件走 WebSocket。`accepted` 只表示原生运行时接受调度，不伪造 `completed`；结果不明时保持 `unknown`，不自动重发。
+它**不做平庸的包装壳**，也不建立割裂的第二套对话体系：
+- **真原生直连**：会话 ID、线程上下文、模型调用、审批状态与原生 Agent 运行时（Codex app-server、Hermes CLI 等）完全同源一致。
+- **大小内核分离架构**：守护小内核（Session Daemon）保障底层 Agent、PTY 终端与任务流永不断联；大内核支持随时热重载升级。
+- **全方位可视化 Sidecar**：代码、终端、浏览器、流程图、3D 模型、Diff 对比同屏协同，真正让 Agent 产物触手可及。
+- **跨端无缝体验**：桌面端宽屏多栏工件台与移动端原生手势抽屉卡片随心切换。
 
-### 会话与对话
+---
 
-- 按项目分组的会话轨：搜索、置顶、筛选、新建 / 删除会话与项目。
-- 权威转录：用户 / 助手 / 思考 / 工具调用分区展示，Markdown + GFM，代码与本地路径可点开。
-- 输入条：文本、图片 / 文件附件、粘贴、语音、停止、队列。草稿与附件在断线后仍保留。
-- 同一条已接受指令不会长出平行的乐观气泡；两条合法相同内容仍是两条。
-- 流式时默认贴底；向上浏览会暂停跟随，手动回到底部后恢复。
-- 附件走认证同源下载，灯箱预览图片。
+## 🖥️ 核心能力概览
 
-### 原生控制
+### 1. 沉浸式多栏工件台（Desktop Sidecar）
 
-- **模型**：读取运行时已认证的模型目录，切换需原生 `config.set` 确认。
-- **思考强度**：minimal / low / medium / high / max；桌面滑块松手后提交。
-- **批准模式**：请求批准 / 帮我批准 / 完全访问，写回原生会话。
-- Git 状态条：当前分支、改动统计，可打开工作区 Diff。
+右侧 Sidecar 深度融合会话记忆，多 Tab 自由拖拽与分屏，Agent 输出的每一个文件或产物均可即时打开、交互与修改：
 
-### 桌面 Sidecar 工作台
+![桌面端工作台](docs/assets/workspace-desktop.png)
 
-对话右侧是可拖宽的多 Tab 工作台，按会话记忆布局，切换会话不会串 Tab：
-
-| 能力 | 说明 |
+| 核心工件能力 | 描述与特性 |
 |---|---|
-| 文件树 | 浏览当前会话工作区 |
-| Monaco | 代码 / 文本编辑与写回 |
-| 终端 | 本机或 SSH 工作区交互终端 |
-| 浏览器 | 内嵌浏览会话相关页面 |
-| Git Diff | 工作区变更树与文件对比 |
-| Draw.io / Mermaid / Excalidraw | 流程图、架构图、手绘白板 |
-| HTML / 3D | 静态页与 Three.js 预览 |
-| 侧边聊天 | 相对主会话的旁路对话 |
-| 决策状态机 | 从消息 / 工具时间线观察决策 |
-
-对话里的工作区路径、附件和工具产物会解析成统一工件，再交给对应查看器。插件可在「插件管理」里开关和调参。
-
-### 手机工作台
-
-窄屏或横屏矮窗口自动进入独立壳，不把桌面 Sidecar 硬塞进 390px：
-
-- 左缘滑开会话抽屉；抽屉内竖滑不关，斜滑切换开放会话。
-- 模型、批准、连接、队列、任务用底部 Sheet，一次只做一件事。
-- 附件预览、语音输入、系统通知、会话卡片切换。
-
-### 监控室
-
-独立路由，桌面多会话网格 / 列表，展示运行状态、最近工具活动、待批准事项，并钻回对应对话。与聊天共用同一份事件流，没有第二套对账管道。
-
-### 安全边界
-
-- 默认只绑回环：开发 `127.0.0.1:30001`（Vite）→ `30002`（API / WS）；生产可单进程托管 SPA + API。
-- 浏览器密钥与连接器密钥必须分开。浏览器凭证只进 HttpOnly Cookie，不进 URL 或 localStorage。
-- 附件、工作区文件读写都限制在会话工作区；路径穿越会被拒绝。
-- 空列表就是没有已连接 Agent，不会填充假数据。
+| **工作区文件树** | 树状即时浏览当前工程上下文，支持工作区安全沙箱限制与快速定位 |
+| **Monaco 代码编辑器** | 完整 IDE 级语法高亮、只读预览与快速写回，毫秒级响应代码改动 |
+| **全功能交互终端** | 基于 xterm.js 的真实 PTY / 本机 / SSH 交互终端，随时接管环境操作 |
+| **实时内置浏览器** | 边开发边预览 Web 页面，会话内即时验证前端界面与交互效果 |
+| **Git 变更树与 Diff** | 分支状态追踪、改动文件统计，可视化行级 Diff 审查 |
+| **图形化白板与架构** | 原生集成 Draw.io / Mermaid / Excalidraw，架构演进与流程梳理一览无余 |
+| **HTML / 3D 预览器** | 支持静态网页直接渲染与 Three.js 3D 模型交互式预览 |
+| **独立旁路侧聊 (Sidechat)** | 与主工作区分离的轻量讨论频道，不污染主会话上下文 |
 
 ---
 
-## 技术栈
+### 2. 多智能体原生统一接入与环境管理
 
-| 层 | 选型 |
+支持本地 Agent 自动嗅探与无侵入接入，亦可跨越网络连接远程开发机：
+
+![连接中心](docs/assets/connections.png)
+
+- **原生 Agent 自动发现**：自动侦测本机安装的 Codex、Hermes 等运行时，一键连接或解绑，拒绝伪造假状态。
+- **安全 SSH 远程环境**：支持通过私钥引用与别名跨网段托管远程服务器上的 Agent，无明文存储、无 shell 拼接注入风险。
+- **多模型与思考模式无缝切换**：动态拉取已授权的模型目录，实时调整模型思考强度（minimal / low / medium / high / max），无缝写入底层运行时。
+- **三档安全审批策略**：支持「每次询问」、「帮我批准」、「完全访问」，将安全边界的主动权牢牢掌握在开发者手中。
+
+![连接与环境详情](docs/assets/connection-detail.png)
+
+---
+
+### 3. 全景监控室（Monitor Room）
+
+为团队与多任务并行开发者打造的统揽控制台：
+
+![监控室视图](docs/assets/monitor.png)
+
+- **多 Agent 运行态阵列**：直观呈现实时运行中、待审批（Waiting Approval）、已就绪与异常任务。
+- **工具调用与审计流**：即时观测工具执行序列与输入输出，透明追踪每一步决策。
+- **快速钻取**：在监控室点击任意卡片，平滑跳转回对应会话与 Sidecar 现场。
+
+---
+
+### 4. 移动端独立交互工作台
+
+专为移动端触屏定制的响应式架构，并非桌面端的机械挤压：
+
+![移动端工作台](docs/assets/workspace-mobile.png)
+
+- **边沿滑动手势**：左侧滑动呼出会话抽屉，垂直与斜向手势智能分流，多任务快速切换。
+- **底部任务卡片 (Sheet)**：审批确认、模型微调、语音输入一触即达。
+- **断网持久缓存**：移动网络不稳定时自动队列化，草稿、附件与未完成指令永不丢失。
+
+---
+
+## 🏗️ 领先的大内核与小内核分离架构
+
+星序创新性地采用**大小内核分离模式**，解决 Agent 自迭代维护时的自杀式死锁：
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│               客户端 UI (Web / 桌面端 Electron / 移动端)      │
+└──────────────────────────────┬──────────────────────────────┘
+                               │ WebSocket / HTTP (30001)
+                               ▼
+┌─────────────────────────────────────────────────────────────┐
+│ 大内核：App Server (FastAPI / Uvicorn)                       │
+│ · 负责：业务 API、静态前端托管、Sidecar 工件解析、SQLite 存储   │
+│ · 特性：支持随时重启、高频热更，不影响正在运行的 Agent 任务   │
+└──────────────────────────────┬──────────────────────────────┘
+                               │ Loopback IPC (WebSocket / JSON-RPC)
+                               ▼
+┌─────────────────────────────────────────────────────────────┐
+│ 小内核：Session Daemon (常驻稳定守护核)                      │
+│ · 负责：真实 Agent 宿主 (Codex / Hermes / SSH / PTY 子进程)  │
+│ · 特性：内存 WAL 环形缓冲 (Ring Buffer)、无感断线重连与增量重放 │
+└─────────────────────────────────────────────────────────────┘
+```
+
+- **永不断连的 Agent 守护**：会话由守护小内核常驻托管。大内核更新维护时，Agent 子进程和 SSH 连接照常执行，无须担心被进程树强杀。
+- **状态增量补推 (WAL Replay)**：连接恢复后基于 `seq_id` 自动对齐重放遗漏事件帧，无感知缝合。
+
+---
+
+## 🛠️ 技术栈
+
+| 模块 | 技术选型 |
 |---|---|
-| 前端 | React / TypeScript / Vite · Mantine · TanStack Query · Zustand · Monaco · xterm |
-| 后端 | FastAPI / Pydantic / SQLAlchemy / SQLite / Uvicorn |
-| 连接器 | `connectors/hermes` 插件 + 自有 TUI-gateway；`connectors/codex` 走 Codex app-server JSON-RPC |
-| 测试 | Vitest / Playwright · pytest / Ruff |
-
-协议见 [`docs/CONTRACT.md`](docs/CONTRACT.md)。星序是控制器：`Session.id` 就是原生持久会话 / 线程 ID。
+| **前端界面** | React 18 · TypeScript · Vite · Mantine UI · Zustand · Monaco Editor · xterm.js · Lucide Icons |
+| **后端服务** | Python 3.11+ · FastAPI · Pydantic · SQLAlchemy · SQLite · Uvicorn · Asyncio |
+| **桌面客户端**| Electron · 本地独立安装包 |
+| **Agent 连接器** | Codex app-server JSON-RPC 协议 · Hermes 插件与 TUI Gateway · 原生 SSH PTY 协议 |
+| **质量与测试** | Vitest · Playwright · pytest · Ruff |
 
 ---
 
-## 运行
+## 🚀 快速开始
 
-前置：Python 3.11、`uv`、Node/npm。生产和联调都只绑回环，不要把服务暴露到公网。分别设置 `ASTRORDER_BROWSER_SECRET` 与 `ASTRORDER_CONNECTOR_SECRET`。
+### 依赖要求
+- Python 3.11 或更高版本，推荐安装 `uv`
+- Node.js 18+ 与 npm
 
-```text
+### 1. 安装依赖
+
+```bash
+# 后端依赖
 cd backend && uv sync --extra dev
+
+# 前端依赖
 cd ../frontend && npm ci
 ```
 
-开发（两个终端）：
+### 2. 开发运行
 
-```text
+推荐在两个独立终端分别启动：
+
+```bash
+# 终端 1：启动后端大内核
 cd backend
 ASTRORDER_HOST=127.0.0.1 \
 ASTRORDER_PORT=30002 \
@@ -105,16 +152,18 @@ ASTRORDER_CONNECTOR_SECRET='<connector-secret>' \
 ASTRORDER_ALLOWED_ORIGINS='http://127.0.0.1:30001,http://localhost:30001' \
 uv run astrorder-server
 
+# 终端 2：启动前端开发服务器
 cd frontend
 npm run dev
 ```
 
-打开 `http://127.0.0.1:30001`。Vite 代理 `/api`、`/health`、`/ws` 到 30002。5173 留给其他项目。
+打开浏览器访问 `http://127.0.0.1:30001`。
 
-单进程部署：先 `cd frontend && npm run build`，再让 FastAPI 托管静态资源：
+### 3. 单进程托管部署
 
-```text
-cd backend
+```bash
+cd frontend && npm run build
+cd ../backend
 ASTRORDER_HOST=127.0.0.1 \
 ASTRORDER_PORT=30002 \
 ASTRORDER_BROWSER_SECRET='<browser-secret>' \
@@ -124,39 +173,26 @@ ASTRORDER_STATIC_DIR='../frontend/dist' \
 uv run astrorder-server
 ```
 
-Windows 可用 `scripts/start_silent.py` / `scripts/setup_shortcuts.py` 做后台启动和桌面快捷方式。
+---
+
+## 🛡️ 安全与防护
+
+1. **默认回环保护**：默认仅监听 `127.0.0.1` 回环地址，切勿在无反向代理认证的情况下暴露至公网。
+2. **凭据双轨隔离**：浏览器访问凭证使用 HttpOnly Cookie 存储，与 Agent 连接器通讯凭据物理隔离。
+3. **工作区沙箱限制**：所有代码读写、附件管理均严格绑定在当前项目路径，坚决防范路径穿越攻击。
 
 ---
 
-## 验证
+## 📚 延伸文档
 
-```text
-cd backend
-uv run pytest -q
-uv run ruff check .
-uv run ruff check ../connectors --output-format=concise
-uv run ruff check ../scripts --output-format=concise
-
-cd ../frontend
-npm run test
-npm run lint
-npm run build
-```
-
-真实浏览器联调必须用私有临时 SQLite、测试密钥和 `scripts/inert_connector.py`，不要拿用户会话做门禁。安全门禁脚本：`scripts/verify_isolated_security.py`。Playwright：`npm run test:e2e`（需指定本机 Chromium 与隔离服务地址）。
-
-本机 Hermes 连接会在当前 profile 的 `plugins/astrorder-hermes` 写入经过一致性检查的 wrapper，并启用插件；不改 Hermes core、其他 profile、Desktop 或 Overlook。移除时先断开星序，再 `hermes plugins disable/remove astrorder-hermes`。
+- [产品设计目标与愿景](docs/PRODUCT.md)
+- [核心通信协议规范](docs/CONTRACT.md)
+- [大小内核分离架构深度设计](docs/design/dual-kernel-architecture.md)
+- [工件查看器与 Sidecar 设计](docs/design/artifact-viewers-and-drawio-sidecar.md)
+- [连接器能力与限制说明](connectors/README.md)
 
 ---
 
-## 文档
-
-- 产品目标：[`docs/PRODUCT.md`](docs/PRODUCT.md)
-- 协议：[`docs/CONTRACT.md`](docs/CONTRACT.md)
-- 工件 / Sidecar 设计：[`docs/design/artifact-viewers-and-drawio-sidecar.md`](docs/design/artifact-viewers-and-drawio-sidecar.md)
-- 待优化清单：[`docs/tasks/optimization-backlog.md`](docs/tasks/optimization-backlog.md)
-- 连接器能力与限制：[`connectors/README.md`](connectors/README.md)
-- 联调报告：[`docs/reports/integration.md`](docs/reports/integration.md)
-- 本机 Hermes / SSH 实机结果：[`docs/reports/hermes-local-ssh.md`](docs/reports/hermes-local-ssh.md)
-
-`Hermes-plugins/overlook` 仅作只读交互参考，不修改运行中的中继或 Desktop 插件。
+<div align="center">
+  <sub>Astrorder · 让每一个 Agent 都有序奔涌</sub>
+</div>

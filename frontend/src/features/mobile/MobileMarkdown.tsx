@@ -7,10 +7,28 @@ function CodeBlock({ children }: { children?: ReactNode }) {
   const element = useRef<HTMLPreElement>(null)
   const [wrap, setWrap] = useState(false)
   const [copied, setCopied] = useState(false)
-  return <div className="m-code-block"><div className="m-code-actions">
-    <button onClick={() => setWrap(!wrap)}>{wrap ? '取消换行' : '换行'}</button>
-    <button onClick={async () => { try { await navigator.clipboard.writeText(element.current?.textContent || ''); setCopied(true) } catch { setCopied(false) } }}>{copied ? '已复制' : '复制'}</button>
-  </div><pre ref={element} style={{ whiteSpace: wrap ? 'pre-wrap' : 'pre', wordBreak: wrap ? 'break-all' : 'normal' }}>{children}</pre></div>
+
+  let language = ''
+  if (children && typeof children === 'object' && 'props' in children) {
+    const props = (children as { props?: { className?: string } }).props
+    if (typeof props?.className === 'string') {
+      const match = props.className.match(/language-(\w+)/)
+      if (match) language = match[1]
+    }
+  }
+
+  return (
+    <div className="m-code-block">
+      <div className="m-code-actions">
+        {language ? <span className="m-code-lang">{language.toUpperCase()}</span> : <span />}
+        <div className="m-code-btns">
+          <button onClick={() => setWrap(!wrap)}>{wrap ? '取消换行' : '换行'}</button>
+          <button onClick={async () => { try { await navigator.clipboard.writeText(element.current?.textContent || ''); setCopied(true) } catch { setCopied(false) } }}>{copied ? '已复制' : '复制'}</button>
+        </div>
+      </div>
+      <pre ref={element} style={{ whiteSpace: wrap ? 'pre-wrap' : 'pre', wordBreak: wrap ? 'break-all' : 'normal' }}>{children}</pre>
+    </div>
+  )
 }
 
 const LOCAL_FILE_RE = /^(?:[a-zA-Z]:[/\\]|\/|\.{1,2}\/|(?!\w+:\/\/)[^\s]+\.[a-zA-Z0-9]{1,8}$)/
@@ -36,6 +54,6 @@ export function MobileMarkdown({ value, onFileClick, onImageClick }: {
       }
       return <img src={src} alt={alt || ''} loading="lazy" style={{ maxWidth: '100%', borderRadius: 8, marginTop: 8, marginBottom: 8, display: 'block' }} />
     },
-    table: ({ children }) => <div style={{ overflowX: 'auto' }}><table>{children}</table></div>,
+    table: ({ children }) => <div className="m-table-wrap"><table>{children}</table></div>,
   }}>{value}</ReactMarkdown></div>
 }

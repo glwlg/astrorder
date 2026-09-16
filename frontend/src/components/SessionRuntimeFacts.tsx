@@ -3,11 +3,11 @@ import type { Agent, Session } from '../domain/types'
 import { api } from '../api/client'
 import { useSessionModel } from '../hooks/useSessionModel'
 import { useAstrorderStore } from '../state/store'
-import { AgentBrandIcon } from './AgentBrandIcon'
+import { AgentBrandIcon, agentKindLabel } from './AgentBrandIcon'
 import './sessionRuntimeFacts.css'
 
 export function AgentKindBadge({ agent, iconOnly = false }: { agent?: Agent; iconOnly?: boolean }) {
-  const label = agent?.kind === 'hermes' ? 'Hermes' : agent?.kind === 'codex' ? 'Codex' : 'Agent 未识别'
+  const label = agentKindLabel(agent?.kind)
   return <span className="agent-kind-badge" data-agent-kind={agent?.kind || 'unknown'} title={agent?.name} aria-label={iconOnly ? label : undefined}><AgentBrandIcon kind={agent?.kind} size={13} />{!iconOnly && label}</span>
 }
 

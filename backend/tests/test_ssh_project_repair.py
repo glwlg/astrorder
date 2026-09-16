@@ -11,6 +11,7 @@ from astrorder.config import Settings
 from astrorder.connections import ConnectionError, paginate_native_session_rows
 from astrorder.native_sessions import discover_native_sessions
 from astrorder.ssh_transport import (
+    _REMOTE_BRIDGE,
     _REMOTE_INSTALL,
     SshNativeRuntime,
     build_bootstrap_stdin,
@@ -99,6 +100,10 @@ def test_ssh_runtime_explicitly_preserves_system_host_key_verification(tmp_path:
 def test_remote_bootstrap_never_silently_enables_profile_global_plugin() -> None:
     assert '["plugins", "enable", "astrorder-hermes"]' not in _REMOTE_INSTALL
     assert "project_activation_required" in _REMOTE_INSTALL
+
+
+def test_remote_bridge_loads_enabled_plugins_before_starting_gateway() -> None:
+    assert _REMOTE_BRIDGE.index("discover_and_load()") < _REMOTE_BRIDGE.index("tui_gateway.entry")
 
 
 def test_install_preserves_structured_bootstrap_failure_detail(tmp_path: Path) -> None:

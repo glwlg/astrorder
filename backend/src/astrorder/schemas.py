@@ -11,7 +11,7 @@ class WireModel(BaseModel):
 
 class AgentModel(WireModel):
     id: str = Field(min_length=1, max_length=256)
-    kind: Literal["hermes", "codex"]
+    kind: str = Field(min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$")
     name: str = Field(min_length=1, max_length=256)
     status: Literal["disconnected", "connecting", "ready", "error"]
     capabilities: list[str] = Field(default_factory=list, max_length=32)
@@ -39,6 +39,8 @@ class SessionModel(WireModel):
     native_kind: str | None = Field(default=None, max_length=32)
     ephemeral: bool = False
     control_state: str = Field(default="unknown", max_length=32)
+    handoff_from_agent_id: str | None = Field(default=None, max_length=256)
+    handoff_from_session_id: str | None = Field(default=None, max_length=256)
 
 
 class AttachmentModel(WireModel):
@@ -124,7 +126,7 @@ class AuthRequest(BaseModel):
 class RuntimeLaunch(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    kind: Literal["hermes", "codex"]
+    kind: str = Field(min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$")
     workspace: str = Field(min_length=1, max_length=2000)
 
 

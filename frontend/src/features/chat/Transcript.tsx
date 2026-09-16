@@ -1,6 +1,7 @@
 import { IconArrowDown, IconPaperclip, IconRefresh, IconTool, IconVectorTriangle } from '@tabler/icons-react'
-import { Anchor, Button, Group, Paper, Stack, Text } from '@mantine/core'
-import { IconShieldCheck } from '@tabler/icons-react'
+import { ActionIcon, Anchor, Button, Group, Paper, Stack, Text, Tooltip } from '@mantine/core'
+import { IconCheck, IconCopy, IconEdit, IconShieldCheck } from '@tabler/icons-react'
+import { useMemo, useState } from 'react'
 import type { Approval, Attachment, Message, OutboxEntry, Session } from '../../domain/types'
 import { useStickToBottom } from '../../hooks/useStickToBottom'
 import { MarkdownContent } from '../../components/MarkdownContent'
@@ -8,6 +9,9 @@ import { LazyDetails } from '../../components/LazyDetails'
 import { MessageBody } from '../../components/MessageBody'
 import { useOlderMessages } from '../../hooks/useOlderMessages'
 import { describeTool, PackSummary, ToolLineIcon } from './toolPresentation'
+import { ShinyText } from '../../components/animations/ShinyText'
+import { StarBorder } from '../../components/animations/StarBorder'
+import { AstrorderLoader } from '../../components/AnimatedStatus'
 import { artifactViewerRegistry } from '../sidecar/registry'
 import { resolveArtifactFromPath } from '../sidecar/resolver'
 import { useSidecarStore } from '../sidecar/sidecarStore'
@@ -24,20 +28,26 @@ function attachmentHref(attachment: Attachment): string | undefined {
   }
 }
 
-function AttachmentList({
+export function AttachmentList({
   attachments,
   onImageClick,
   session,
+  onGalleryClick,
 }: {
   attachments: Attachment[]
   onImageClick?: (url: string) => void
   session?: Session | null
+  onGalleryClick?: (url: string, allImages: string[]) => void
 }) {
   const defaultSession = useAstrorderStore((state) => Object.values(state.sessions)[0] as Session | undefined)
   const currentSession = session || defaultSession
   const openArtifact = useSidecarStore((state) => state.openArtifact)
 
   if (attachments.length === 0) return null
+  const allImageUrls = attachments
+    .filter((a) => a.media_type.startsWith('image/'))
+    .map((a) => attachmentHref(a))
+    .filter(Boolean) as string[]
   return (
     <div className="message-attachments">
       {attachments.map((attachment) => {
@@ -51,7 +61,7 @@ function AttachmentList({
               type="button"
               className="attachment-image-link"
               key={attachment.id}
-              onClick={() => onImageClick?.(href)}
+              onClick={() => onGalleryClick ? onGalleryClick(href, allImageUrls) : onImageClick?.(href)}
               aria-label={`查看图片：${attachment.name}`}
             >
               <img className="attachment-image" src={href} alt={attachment.name} loading="lazy" />
@@ -138,14 +148,27 @@ function messageLabel(message: Message): string {
 function MessageItem({
   message,
   onImageClick,
+  onGalleryClick,
   session,
+  isLatest,
+  onEdit,
 }: {
   message: Message
   onImageClick?: (url: string) => void
+  onGalleryClick?: (url: string, allImages: string[]) => void
   session?: Session | null
+  isLatest?: boolean
+  onEdit?: (text: string) => void
 }) {
   const isUser = message.role === 'user'
   const isActivity = message.kind !== 'message' || message.role === 'tool'
+  const [copied, setCopied] = useState(false)
+  const handleCopy = () => {
+    if (!message.text) return
+    void navigator.clipboard.writeText(message.text)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1600)
+  }
   if (isActivity) {
     const desc = describeTool(message)
     const isThinking = message.kind === 'thinking'
@@ -156,7 +179,7 @@ function MessageItem({
             <span className="activity-icon"><ToolLineIcon icon={desc.iconKey} size={14} /></span>
             <span className="activity-title">{desc.target || desc.fullTitle}</span>
             {desc.isFailed && <span className="activity-badge is-failed">失败</span>}
-            {desc.isRunning && <span className="activity-badge is-running">执行中</span>}
+            {desc.isRunning && <span className="activity-badge is-running"><ShinyText text="执行中" speed={1.5} /></span>}
           </span>
         }>
           {message.text && (
@@ -176,19 +199,17 @@ function MessageItem({
   }
   return (
     <article
-      className={`message-row message-${message.role} message-kind-${message.kind}`}
+      className={`message-row message-${message.role} message-kind-${message.kind} ${isLatest ? 'is-latest-message' : ''}`}
       data-testid={`message-${message.id}`}
       aria-label={`${messageLabel(message)}消息`}
     >
-      <div className="message-meta">
-        {Date.parse(message.created_at) > 0 && <time dateTime={message.created_at}>{new Date(message.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</time>}
-      </div>
       <Paper className={`message-bubble ${isUser ? 'message-bubble-user' : isActivity ? 'message-bubble-activity' : ''}`} withBorder={!isActivity} radius="lg" p="sm">
         {message.text && (
           <MessageBody
             value={message.text}
             user={isUser}
             onImageClick={onImageClick}
+            onGalleryClick={onGalleryClick}
             attachmentNames={message.attachments.filter((attachment) => attachment.media_type.startsWith('image/')).map((attachment) => attachment.name)}
             renderMarkdown={(value) => <MarkdownContent value={value} onImageClick={onImageClick} session={session} />}
           />
@@ -196,8 +217,41 @@ function MessageItem({
         {message.tool && (
           <pre className="tool-payload">{JSON.stringify(message.tool, null, 2)}</pre>
         )}
-        <AttachmentList attachments={message.attachments} onImageClick={onImageClick} session={session} />
+        <AttachmentList attachments={message.attachments} onImageClick={onImageClick} onGalleryClick={onGalleryClick} session={session} />
       </Paper>
+      <div className="message-meta">
+        {Date.parse(message.created_at) > 0 && <time dateTime={message.created_at}>{new Date(message.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</time>}
+        <div className="message-actions-bar">
+          {message.text && (
+            <Tooltip label={copied ? '已复制' : '复制内容'} position="top" withArrow>
+              <ActionIcon
+                variant="subtle"
+                size="xs"
+                color="gray"
+                onClick={handleCopy}
+                aria-label="复制消息"
+                className="message-action-btn"
+              >
+                {copied ? <IconCheck size={13} color="var(--astr-teal, #12b886)" /> : <IconCopy size={13} />}
+              </ActionIcon>
+            </Tooltip>
+          )}
+          {isUser && onEdit && (
+            <Tooltip label="编辑消息" position="top" withArrow>
+              <ActionIcon
+                variant="subtle"
+                size="xs"
+                color="gray"
+                onClick={() => onEdit(message.text)}
+                aria-label="编辑消息"
+                className="message-action-btn"
+              >
+                <IconEdit size={13} />
+              </ActionIcon>
+            </Tooltip>
+          )}
+        </div>
+      </div>
     </article>
   )
 }
@@ -216,7 +270,9 @@ export function Transcript({
   loadingOlder = false,
   onLoadOlder,
   onImageClick,
+  onGalleryClick,
   session,
+  onEditLastUserMessage,
 }: {
   messages: Message[]
   outbox: OutboxEntry[]
@@ -231,12 +287,14 @@ export function Transcript({
   loadingOlder?: boolean
   onLoadOlder?: () => unknown
   onImageClick?: (url: string) => void
+  onGalleryClick?: (url: string, allImages: string[]) => void
   session?: Session | null
+  onEditLastUserMessage?: (text: string) => void
 }) {
   const reducedMotion = useReducedMotion()
   const enter = reducedMotion ? {} : { opacity: 0, y: 10, scale: 0.99 }
   const visibleMessages = messages.filter((message) => message.kind !== 'message' || message.role !== 'assistant' || message.text.trim() || message.attachments.length || message.tool)
-  const isActivity = (message: Message | null) => Boolean(message && (message.kind !== 'message' || message.role === 'tool'))
+  const isActivity = (message: Message | null) => Boolean(message && (message.kind !== 'message' || message.role === 'tool' || (message.role === 'assistant' && !message.text.trim())))
   const outboundVersion = outbox.map((item) => item.command.id).join(',')
   const contentVersion = `${messages.map((item) => `${item.id}:${item.text.length}`).join(',')}|${outbox.map((item) => `${item.command.id}:${item.status}`).join(',')}|${approvals.map((item) => item.id).join(',')}|${composerHeight ?? 0}`
   const {
@@ -248,6 +306,15 @@ export function Transcript({
   } = useStickToBottom<HTMLDivElement>({ contentVersion, forceFollowVersion: outboundVersion })
   const older = useOlderMessages({ hasMore: hasMoreHistory, loading: loadingOlder, load: () => onLoadOlder?.(), capture: capturePrependAnchor })
   const busy = session?.status === 'running' || session?.status === 'waiting_approval'
+  const lastVisibleMessage = visibleMessages[visibleMessages.length - 1]
+  const isWaiting = Boolean(session?.status === 'running' && (!lastVisibleMessage || lastVisibleMessage.role === 'user'))
+
+  const lastUserMessageId = useMemo(() => {
+    for (let i = visibleMessages.length - 1; i >= 0; i--) {
+      if (visibleMessages[i].role === 'user') return visibleMessages[i].id
+    }
+    return null
+  }, [visibleMessages])
   return (
     <section className="transcript-wrap" aria-label="会话记录">
       {!following && (
@@ -303,15 +370,50 @@ export function Transcript({
           <AnimatePresence initial={false}>
           {visibleMessages.map((message, idx) => {
             const prevMessage = idx > 0 ? visibleMessages[idx - 1] : null
+            // 判断过程块：连续的非普通用户消息（包括思考、工具活动等过程性输出）
+            // 当后续出现了最终的 assistant 回复（或会话结束生成完毕），该过程块自动收起为类似 Codex 的“用时 X 分钟 Y 秒”或“过程概要”
             if (isActivity(message)) {
               if (isActivity(prevMessage)) return null
               const pack: Message[] = []
               for (let i = idx; i < visibleMessages.length && isActivity(visibleMessages[i]); i++) pack.push(visibleMessages[i])
-              return <motion.section className="activity-pack" aria-label="思考与工具" key={message.id} layout="position" initial={enter} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.28, ease: [0.2, 0.8, 0.2, 1] }}>
-                <LazyDetails loading={busy && idx + pack.length === visibleMessages.length} summary={<PackSummary pack={pack} />}>
-                  <div className="activity-timeline">{pack.map((item) => <MessageItem message={item} key={item.id} onImageClick={onImageClick} session={session} />)}</div>
-                </LazyDetails>
-              </motion.section>
+              const remaining = visibleMessages.slice(idx + pack.length)
+              const isLatestActivity = !remaining.some(isActivity)
+              // 如果该会话仍然在运行，且该活动块之后尚未出现 assistant 的最终文本答复，则保持展开；
+              // 一旦会话完成（!busy）或当前轮次已产出了最终文本回复，该活动块自动折叠收起，对齐 Codex
+              const hasSubsequentFinalReply = remaining.some(m => m.role === 'assistant' && m.kind === 'message' && m.text.trim())
+              const isPackRunning = Boolean(busy && isLatestActivity)
+              const shouldOpen = isPackRunning && !hasSubsequentFinalReply
+              return (
+                <motion.section
+                  className="activity-pack"
+                  aria-label="思考与工具"
+                  key={message.id}
+                  layout="position"
+                  initial={enter}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.28, ease: [0.2, 0.8, 0.2, 1] }}
+                >
+                  <LazyDetails
+                    key={`activity-pack-${message.id}-${shouldOpen}`}
+                    defaultOpen={shouldOpen}
+                    loading={isPackRunning}
+                    summary={<PackSummary pack={pack} isRunning={isPackRunning} />}
+                  >
+                    <div className="activity-timeline">
+                      {pack.map((item) => (
+                        <MessageItem
+                          message={item}
+                          key={item.id}
+                          onImageClick={onImageClick}
+                          onGalleryClick={onGalleryClick}
+                          session={session}
+                        />
+                      ))}
+                    </div>
+                  </LazyDetails>
+                </motion.section>
+              )
             }
             const currentDate = new Date(message.created_at).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
             const prevDate = prevMessage ? new Date(prevMessage.created_at).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' }) : null
@@ -325,16 +427,45 @@ export function Transcript({
                     </span>
                   </div>
                 )}
-                <MessageItem message={message} onImageClick={onImageClick} session={session} />
+                <MessageItem
+                  message={message}
+                  onImageClick={onImageClick}
+                  onGalleryClick={onGalleryClick}
+                  session={session}
+                  isLatest={idx === visibleMessages.length - 1}
+                  onEdit={message.id === lastUserMessageId ? onEditLastUserMessage : undefined}
+                />
               </motion.div>
             )
           })}
+          {isWaiting && (
+            <motion.div
+              key="waiting-response-indicator"
+              className="message-row message-assistant message-waiting-row"
+              layout="position"
+              initial={{ opacity: 0, y: 8, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              transition={{ duration: 0.22 }}
+            >
+              <div className="message-waiting-bubble">
+                <span className="waiting-spinner">
+                  <AstrorderLoader size={15} />
+                </span>
+                <ShinyText text="正在思考并准备回复…" speed={1.8} className="waiting-text" />
+                <span className="waiting-dots" aria-hidden="true">
+                  <i /><i /><i />
+                </span>
+              </div>
+            </motion.div>
+          )}
           </AnimatePresence>
           {approvals.length > 0 && (
             <section className="transcript-approvals" aria-label="对话待处理审批">
               <Stack gap="xs" mt="xs">
                 {approvals.map((approval) => (
-                  <Paper className="approval-card transcript-approval-card" withBorder p="sm" radius="md" key={approval.id}>
+                  <StarBorder color="#eab308" speed="3.5s" borderRadius="var(--mantine-radius-md, 8px)" key={approval.id}>
+                    <Paper className="approval-card transcript-approval-card" withBorder p="sm" radius="md" style={{ background: 'transparent' }}>
                     <Group gap={6} mb={4}>
                       <IconShieldCheck size={16} style={{ color: 'var(--astr-yellow)' }} />
                       <Text size="sm" fw={600}>{approval.title}</Text>
@@ -365,6 +496,7 @@ export function Transcript({
                       <Text size="xs" c="dimmed" mt="xs">Agent 未报告审批能力，操作已禁用。</Text>
                     )}
                   </Paper>
+                  </StarBorder>
                 ))}
               </Stack>
             </section>

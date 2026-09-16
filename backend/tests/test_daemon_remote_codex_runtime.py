@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import PurePosixPath
 from typing import ClassVar
 
@@ -42,6 +43,8 @@ class FakeCodexAppServer:
                 "model": "remote-model",
                 "modelProvider": "remote-provider",
             }
+        if method == "model/list":
+            return {"data": [{"id": "remote-model", "modelProvider": "remote-provider"}]}
         raise AssertionError(method)
 
 
@@ -50,6 +53,13 @@ class PathResumeCodexAppServer(FakeCodexAppServer):
         if method == "thread/resume" and "path" not in params:
             self.calls.append((method, dict(params)))
             raise CodexRpcRejected({"code": -32600, "message": "thread not found"})
+        return super().request(method, params, timeout)
+
+
+class UpgradedCodexAppServer(FakeCodexAppServer):
+    def request(self, method, params, timeout=30):
+        if method == "model/list" and self is type(self).instances[0]:
+            raise RuntimeError("Codex transport closed before response: upgraded")
         return super().request(method, params, timeout)
 
 
@@ -99,9 +109,77 @@ async def test_remote_codex_registry_binds_exact_connection_and_preserves_posix_
     assert client.config.agent_id == "ssh-codex-ssh-debian"
     assert client.config.agent_name == "Debian · Codex"
     assert client.config.workspace == PurePosixPath("/home/operator/workspace/project")
+    assert client.kwargs["environment"]["PATH"] == os.environ["PATH"]
 
     await registry.disconnect_session("remote-thread-1")
     assert client.stopped is True
+
+
+@pytest.mark.asyncio
+async def test_remote_codex_registry_routes_catalog_requests_to_exact_connection():
+    FakeCodexAppServer.instances.clear()
+
+    async def emit(*_args, **_kwargs):
+        return {}
+
+    registry = SshDaemonRuntimeRegistry(
+        lambda connection_id, settings: RemoteCodexDaemonRuntime(
+            connection_id, settings, emit=emit, client_factory=FakeCodexAppServer
+        )
+    )
+    request = {
+        "method": "model/list",
+        "request_params": {},
+        "params": {
+            "connection_id": "ssh-debian",
+            "ssh_settings": {
+                "host": "debian.example",
+                "port": 22,
+                "user": "operator",
+                "codex_executable": "/home/operator/.local/bin/codex",
+            },
+        },
+    }
+
+    result = await registry.query(request)
+
+    assert result == {"data": [{"id": "remote-model", "modelProvider": "remote-provider"}]}
+    assert FakeCodexAppServer.instances[0].calls[-1] == ("model/list", {})
+    await registry.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_remote_codex_catalog_reconnects_after_remote_upgrade():
+    UpgradedCodexAppServer.instances.clear()
+
+    async def emit(*_args, **_kwargs):
+        return {}
+
+    registry = SshDaemonRuntimeRegistry(
+        lambda connection_id, settings: RemoteCodexDaemonRuntime(
+            connection_id, settings, emit=emit, client_factory=UpgradedCodexAppServer
+        )
+    )
+    request = {
+        "method": "model/list",
+        "request_params": {},
+        "params": {
+            "connection_id": "ssh-debian",
+            "ssh_settings": {
+                "host": "debian.example",
+                "port": 22,
+                "user": "operator",
+                "codex_executable": "/home/operator/.local/bin/codex",
+            },
+        },
+    }
+
+    assert await registry.query(request) == {
+        "data": [{"id": "remote-model", "modelProvider": "remote-provider"}]
+    }
+    assert len(UpgradedCodexAppServer.instances) == 2
+    assert UpgradedCodexAppServer.instances[0].stopped is True
+    await registry.shutdown()
 
 
 @pytest.mark.asyncio

@@ -1,0 +1,60 @@
+{
+  "name": "astrorder-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "check": "node --check main.js && node --check preload.js && node --check service-status.js",
+    "dist": "electron-builder --win nsis --config.directories.output=release"
+  },
+  "devDependencies": {
+    "electron": "^44.3.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.astrorder.desktop",
+    "productName": "Astrorder",
+    "files": [
+      "main.js",
+      "preload.js",
+      "preview-preload.js",
+      "image-preview.html",
+      "service-status.html",
+      "service-status.js",
+      "splash.html"
+    ],
+    "extraFiles": [
+      {
+        "from": "../backend",
+        "to": "server/backend",
+        "filter": ["**/*", "!tests/**", "!.pytest_cache/**", "!**/__pycache__/**"]
+      },
+      {
+        "from": "../connectors/codex",
+        "to": "server/connectors/codex",
+        "filter": ["**/*", "!**/__pycache__/**", "!.pytest_cache/**"]
+      },
+      {
+        "from": "../scripts",
+        "to": "server/scripts",
+        "filter": ["**/*.py", "!**/__pycache__/**"]
+      },
+      {
+        "from": "../frontend/dist",
+        "to": "server/frontend/dist"
+      },
+      {
+        "from": "../frontend/public/favicon.ico",
+        "to": "server/frontend/public/favicon.ico"
+      }
+    ],
+    "win": {
+      "icon": "../frontend/public/pwa-512.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}

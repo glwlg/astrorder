@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from ..native_controls import (
+    agent_commands,
     current_session_approval_mode,
     current_session_model,
     current_session_reasoning,
@@ -13,11 +14,12 @@ from ..native_controls import (
     set_session_model,
     set_session_reasoning,
 )
-from .session_daemon import DaemonProtocolError
+from .errors import DaemonProtocolError
 
 NATIVE_SESSION_CONTROL_ACTIONS = frozenset(
     {
         "session.models",
+        "session.commands",
         "session.model.read",
         "session.model.set",
         "session.reasoning.set",
@@ -42,6 +44,8 @@ def execute_native_session_control(
         raise DaemonProtocolError("Hermes native control session identity is invalid")
     if action == "session.models":
         return {"status": "idle", "items": model_choices(rpc)}
+    if action == "session.commands":
+        return {"status": "idle", "items": agent_commands(rpc, session_id)}
     if action == "session.model.read":
         binding = current_session_model(rpc, session_id)
         binding["effort"] = current_session_reasoning(rpc, session_id)

@@ -63,6 +63,11 @@ class SessionRow(Base):
     selected_model_provider: Mapped[str | None] = mapped_column(String(160), nullable=True)
     selected_model: Mapped[str | None] = mapped_column(String(160), nullable=True)
     selected_reasoning_effort: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    selected_approval_mode: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    handoff_from_agent_id: Mapped[str | None] = mapped_column(String(256), nullable=True, index=True)
+    handoff_from_session_id: Mapped[str | None] = mapped_column(String(256), nullable=True, index=True)
+    handoff_context: Mapped[str | None] = mapped_column(Text, nullable=True)
+    handoff_context_consumed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 

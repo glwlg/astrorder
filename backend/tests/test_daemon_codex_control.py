@@ -1,17 +1,24 @@
 """Daemon-owned Codex App-side control projection tests."""
 from __future__ import annotations
 
+import asyncio
 import threading
 
 import pytest
 
+from astrorder.connections import ConnectionError
+from astrorder.daemon.bridge import DaemonBridgeError
 from astrorder.daemon.codex_control import DaemonCodexController
 
 
 class FakeBridge:
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, object]]] = []
-        self.on_settings = None
+        self.status_handler = None
+
+    def register_status_handler(self, handler):
+        self.status_handler = handler
+        return lambda: None
 
     async def request_control(self, action: str, fields: dict[str, object]) -> dict[str, object]:
         self.calls.append((action, dict(fields)))
@@ -26,9 +33,15 @@ class FakeBridge:
         if action == "session.approve":
             return {"result": {"status": "waiting_approval", "accepted": True}}
         if action == "session.settings":
-            if self.on_settings is not None:
-                self.on_settings(fields)
-            return {"result": {"status": "idle", "accepted": True}}
+            return {
+                "result": {
+                    "status": "idle",
+                    "accepted": True,
+                    **{key: value for key, value in fields.items() if key != "session_id"},
+                }
+            }
+        if action == "session.delete":
+            return {"result": {"status": "idle", "deleted": fields["session_id"]}}
         if action == "session.create":
             return {
                 "result": {
@@ -39,6 +52,31 @@ class FakeBridge:
                 }
             }
         raise AssertionError(action)
+
+
+class ActiveDesktopBridge(FakeBridge):
+    async def request_control(self, action: str, fields: dict[str, object]) -> dict[str, object]:
+        self.calls.append((action, dict(fields)))
+        if action == "session.spawn":
+            raise DaemonBridgeError("Codex thread already has an active writer")
+        if action == "runtime.request":
+            return {"result": {"accepted": True, "transport": "codex-desktop-cdp"}}
+        raise AssertionError(action)
+
+
+class RejectedQueryBridge(FakeBridge):
+    async def request_control(self, action: str, fields: dict[str, object]) -> dict[str, object]:
+        raise DaemonBridgeError(
+            "Codex rejected request (-32601; thread/items/list is not supported yet)"
+        )
+
+
+class UnavailableDesktopBridge(FakeBridge):
+    async def request_control(self, action: str, fields: dict[str, object]) -> dict[str, object]:
+        self.calls.append((action, dict(fields)))
+        if action == "session.spawn":
+            raise DaemonBridgeError("Codex thread already has an active writer")
+        raise DaemonBridgeError("Codex Desktop debugging endpoint is unavailable")
 
 
 class FakeRouter:
@@ -63,6 +101,7 @@ class FakeCodexConnection:
     def __init__(self) -> None:
         self._lock = threading.RLock()
         self._threads = {"thread-1": {"cwd": "C:/allowed"}}
+        self._owned_threads = {"thread-1"}
         self._pending: dict[str, dict[str, object]] = {}
         self._commands: dict[tuple[str, str], dict[str, object]] = {}
         self._active: dict[str, str] = {}
@@ -88,12 +127,117 @@ class FakeCodexConnection:
 
     def models(self, _session_id: str):
         return [
-            {"provider": "fixture-provider", "model": "fixture-model"},
-            {"provider": "fixture-provider", "model": "fixture-next-model"},
+            {
+                "provider": "fixture-provider",
+                "model": "fixture-model",
+                "label": "Fixture model",
+                "supported_efforts": ["low", "medium", "high"],
+            },
+            {
+                "provider": "fixture-provider",
+                "model": "fixture-next-model",
+                "label": "Fixture next model",
+                "supported_efforts": ["low", "medium", "high"],
+            },
         ]
+
+    def model(self, _session_id: str):
+        return dict(self._bindings["thread-1"])
+
+    def _pages(self, method: str, _params: dict[str, object]):
+        assert method == "model/list"
+        for model in ("fixture-model", "fixture-next-model"):
+            yield {
+                "id": model,
+                "model": model,
+                "supportedReasoningEfforts": [
+                    {"reasoningEffort": "low"},
+                    {"reasoningEffort": "medium"},
+                    {"reasoningEffort": "high"},
+                ],
+            }
 
     def validate_workspace(self, workspace: str | None) -> str:
         return workspace or "C:/allowed"
+
+    def _scope(self, session_id: str) -> None:
+        if session_id not in self._threads:
+            raise AssertionError(session_id)
+
+
+def test_daemon_codex_controller_clears_stale_runtime_turn_after_status_refresh():
+    bridge = FakeBridge()
+    connection = FakeCodexConnection()
+    connection._active["thread-1"] = "stale-turn"
+    connection._commands[("thread-1", "stale-turn")] = {"id": "send-1"}
+    controller = DaemonCodexController(bridge, FakeRouter(), connection)
+    controller.activate()
+
+    bridge.status_handler({})
+
+    assert connection._active == {}
+    assert connection._commands == {}
+
+
+@pytest.mark.asyncio
+async def test_daemon_codex_controller_injects_into_desktop_active_writer():
+    bridge = ActiveDesktopBridge()
+    controller = DaemonCodexController(bridge, FakeRouter(), FakeCodexConnection())
+    command = {
+        "id": "desktop-send",
+        "agent_id": "daemon-codex",
+        "session_id": "thread-1",
+        "action": "send",
+        "text": "继续",
+        "attachments": [],
+        "target_id": None,
+    }
+
+    assert await controller.submit(command) == ("accepted", None)
+    assert bridge.calls[-1] == (
+        "runtime.request",
+        {
+            "agent_type": "codex",
+            "method": "desktop/submit",
+            "request_params": {
+                "threadId": "thread-1",
+                "input": [{"type": "text", "text": "继续"}],
+            },
+            "params": {},
+        },
+    )
+
+
+    assert controller.connection.notifications == [
+        {
+            "method": "turn/started",
+            "params": {
+                "threadId": "thread-1",
+                "turn": {"id": "desktop-send", "status": "inProgress"},
+            },
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_daemon_codex_controller_reports_unavailable_desktop_cdp():
+    controller = DaemonCodexController(
+        UnavailableDesktopBridge(), FakeRouter(), FakeCodexConnection()
+    )
+    command = {
+        "id": "desktop-send",
+        "agent_id": "daemon-codex",
+        "session_id": "thread-1",
+        "action": "send",
+        "text": "继续",
+        "attachments": [],
+        "target_id": None,
+    }
+
+    assert await controller.submit(command) == (
+        "failed",
+        "Codex Desktop 当前未开放 CDP；请通过 Codex CDP 快捷方式启动。",
+    )
 
 
 @pytest.mark.asyncio
@@ -133,6 +277,7 @@ async def test_daemon_codex_controller_routes_exact_command_and_projection_ident
                         "approvalPolicy": "on-request",
                         "sandboxPolicy": {"type": "workspaceWrite"},
                         "approvalsReviewer": "auto_review",
+                        "model": "fixture-model",
                     },
                 },
             ),
@@ -186,6 +331,7 @@ async def test_daemon_codex_controller_stages_attachment_inputs_before_ipc(monke
     captured: list[dict[str, object]] = []
 
     def input_for_command(_settings, _store, command):
+        asyncio.run(asyncio.sleep(0))
         captured.append(dict(command))
         return [
             {"type": "text", "text": command["text"]},
@@ -219,6 +365,7 @@ async def test_daemon_codex_controller_stages_attachment_inputs_before_ipc(monke
                     "approvalPolicy": "on-request",
                     "sandboxPolicy": {"type": "workspaceWrite"},
                     "approvalsReviewer": "auto_review",
+                    "model": "fixture-model",
                 },
             },
         )
@@ -226,24 +373,12 @@ async def test_daemon_codex_controller_stages_attachment_inputs_before_ipc(monke
         controller.close()
 
 
-def test_daemon_codex_controller_updates_model_and_effort_only_after_projection():
+def test_daemon_codex_controller_updates_model_and_effort_after_daemon_confirmation():
     bridge = FakeBridge()
     router = FakeRouter()
     connection = FakeCodexConnection()
     controller = DaemonCodexController(bridge, router, connection)
 
-    def project_settings(fields):
-        with connection._binding_changed:
-            if "model" in fields:
-                connection._bindings["thread-1"] = {
-                    "model": fields["model"],
-                    "provider": "fixture-provider",
-                }
-            if "effort" in fields:
-                connection._efforts["thread-1"] = fields["effort"]
-            connection._binding_changed.notify_all()
-
-    bridge.on_settings = project_settings
     assert controller.set_model("thread-1", "fixture-provider", "fixture-next-model") == {
         "model": "fixture-next-model",
         "provider": "fixture-provider",
@@ -261,6 +396,76 @@ def test_daemon_codex_controller_updates_model_and_effort_only_after_projection(
         ),
         ("session.settings", {"session_id": "thread-1", "effort": "high"}),
     ]
+
+
+def test_daemon_codex_controller_updates_desktop_effort_for_active_writer():
+    bridge = ActiveDesktopBridge()
+    connection = FakeCodexConnection()
+    controller = DaemonCodexController(bridge, FakeRouter(), connection)
+
+    assert controller.set_effort("thread-1", "high") == {"effort": "high"}
+    assert bridge.calls == [
+        ("session.spawn", {"session_id": "thread-1", "agent_type": "codex", "cwd": "C:/allowed", "params": {}}),
+        (
+            "runtime.request",
+            {
+                "agent_type": "codex",
+                "method": "desktop/settings",
+                "request_params": {
+                    "threadId": "thread-1",
+                    "updates": {"effort": "high", "effortIndex": 2},
+                },
+                "params": {},
+            },
+        ),
+    ]
+
+
+def test_daemon_codex_controller_uses_desktop_model_picker_for_active_writer():
+    bridge = ActiveDesktopBridge()
+    controller = DaemonCodexController(bridge, FakeRouter(), FakeCodexConnection())
+
+    assert controller.set_model("thread-1", "fixture-provider", "fixture-next-model") == {
+        "model": "fixture-next-model",
+        "provider": "fixture-provider",
+    }
+    assert bridge.calls == [
+        ("session.spawn", {"session_id": "thread-1", "agent_type": "codex", "cwd": "C:/allowed", "params": {}}),
+        (
+            "runtime.request",
+            {
+                "agent_type": "codex",
+                "method": "desktop/settings",
+                "request_params": {
+                    "threadId": "thread-1",
+                    "updates": {"model": "fixture-next-model", "modelLabel": "Fixture next model"},
+                },
+                "params": {},
+            },
+        ),
+    ]
+
+
+def test_daemon_codex_controller_preserves_native_query_rejection():
+    controller = DaemonCodexController(
+        RejectedQueryBridge(), FakeRouter(), FakeCodexConnection()
+    )
+
+    with pytest.raises(ConnectionError, match=r"-32601.*not supported") as rejected:
+        controller.request_native("thread/items/list", {"threadId": "thread-1"})
+
+    assert rejected.value.status_code == 422
+
+
+def test_daemon_codex_controller_deletes_through_the_owning_daemon():
+    bridge = FakeBridge()
+    connection = FakeCodexConnection()
+    controller = DaemonCodexController(bridge, FakeRouter(), connection)
+
+    controller.delete("thread-1")
+
+    assert bridge.calls == [("session.delete", {"session_id": "thread-1"})]
+    assert "thread-1" not in connection._threads
 
 
 def test_daemon_codex_controller_creates_a_session_from_daemon_native_identity():

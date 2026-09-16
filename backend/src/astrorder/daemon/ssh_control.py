@@ -159,6 +159,21 @@ class DaemonSshController:
             "updated_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         }
 
+    def rpc(self, method: str, params: dict[str, Any], timeout: float = 15) -> dict[str, Any] | None:
+        del timeout
+        response = self._control(
+            "runtime.request",
+            {
+                "agent_type": "ssh",
+                "method": method,
+                "request_params": dict(params),
+                "params": self._connection_params(),
+            },
+            "守护进程未返回 SSH Hermes 原生请求结果。",
+        )
+        result = response.get("result")
+        return dict(result) if isinstance(result, Mapping) else None
+
     def load_native_history_page(
         self, session_id: str, before: str | None, limit: int
     ) -> dict[str, Any]:
@@ -259,6 +274,13 @@ class DaemonSshController:
             raise ConnectionError("守护进程返回了无效的 SSH Hermes 模型目录。", 502)
         return items
 
+    def commands(self, session_id: str) -> list[dict[str, str | None]]:
+        result = self._native_control(session_id, "session.commands")
+        items = result.get("items")
+        if not isinstance(items, list):
+            raise ConnectionError("守护进程返回了无效的 Agent 命令目录。", 502)
+        return items
+
     def model(self, session_id: str) -> dict[str, Any]:
         result = self._native_control(session_id, "session.model.read")
         return {key: result.get(key) for key in ("provider", "model", "branch", "effort") if key in result}
@@ -344,6 +366,11 @@ class DaemonSshController:
         except DaemonBridgeError:
             return "unknown", "daemon SSH delivery was not confirmed; command will not retry."
         result = response.get("result")
+        if isinstance(result, Mapping) and result.get("completed") is True:
+            from .hermes_control import record_completed_slash
+
+            record_completed_slash(self, command, str(result.get("output") or "命令已执行"))
+            return "accepted", None
         if not isinstance(result, Mapping) or result.get("accepted") is not True:
             return "unknown", "daemon SSH did not confirm native command acceptance; command will not retry."
         return "accepted", None

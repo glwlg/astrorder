@@ -6,7 +6,7 @@ import threading
 from collections.abc import Callable, Mapping
 from typing import Any, Protocol
 
-from .session_daemon import DaemonProtocolError
+from .errors import DaemonProtocolError
 
 
 class HermesController(Protocol):
@@ -14,7 +14,17 @@ class HermesController(Protocol):
 
     def snapshot(self) -> Mapping[str, Any]: ...
 
-    def create_session(self, workspace: str | None = None, title: str | None = None) -> Mapping[str, Any]: ...
+    def create_session(
+        self,
+        workspace: str | None = None,
+        title: str | None = None,
+        *,
+        provider: str | None = None,
+        model: str | None = None,
+        effort: str | None = None,
+    ) -> Mapping[str, Any]: ...
+
+    def branch_session(self, parent_session_id: str, title: str | None = None) -> Mapping[str, Any]: ...
 
     def submit_tui_command(self, command: dict[str, Any]) -> tuple[str, str | None]: ...
 
@@ -64,7 +74,32 @@ class HermesDaemonRuntime:
             raise DaemonProtocolError("Hermes workspace is invalid")
         if title is not None and (not isinstance(title, str) or not title or len(title) > 512):
             raise DaemonProtocolError("Hermes title is invalid")
-        created = await asyncio.to_thread(controller.create_session, workspace, title)
+        provider, model, effort = request.get("provider"), request.get("model"), request.get("effort")
+        if bool(provider) != bool(model) or any(
+            value is not None and not isinstance(value, str) for value in (provider, model, effort)
+        ):
+            raise DaemonProtocolError("Hermes model selection is invalid")
+        parent_session_id = request.get("parent_session_id")
+        if parent_session_id is not None and (
+            not isinstance(parent_session_id, str) or not parent_session_id
+        ):
+            raise DaemonProtocolError("Hermes parent session ID is invalid")
+        create = controller.create_session if parent_session_id is None else controller.branch_session
+        args = (workspace, title) if parent_session_id is None else (parent_session_id, title)
+        kwargs = (
+            {
+                key: value
+                for key, value in {
+                    "provider": provider,
+                    "model": model,
+                    "effort": effort,
+                }.items()
+                if value is not None
+            }
+            if parent_session_id is None
+            else {}
+        )
+        created = await asyncio.to_thread(create, *args, **kwargs)
         session_id = created.get("id") if isinstance(created, Mapping) else None
         if not isinstance(session_id, str) or not session_id:
             raise DaemonProtocolError("Hermes did not return a native session ID")
@@ -138,6 +173,13 @@ class HermesDaemonRuntime:
             attachments = request.get("attachments")
             if not isinstance(text, str) or not text and not attachments:
                 raise DaemonProtocolError("Hermes command text is invalid")
+            if text.lstrip().startswith("/") and not attachments:
+                result = await asyncio.to_thread(self._slash, controller, session_id, text.strip())
+                if result.get("completed"):
+                    return {"status": "idle", "accepted": True, **result}
+                text = result.get("message")
+                if not isinstance(text, str) or not text:
+                    raise DaemonProtocolError("Hermes slash command did not produce an executable message")
             command = {"action": "send", "session_id": session_id, "text": text}
             if attachments is not None:
                 if not isinstance(attachments, list) or not attachments:
@@ -161,6 +203,49 @@ class HermesDaemonRuntime:
         if state != "accepted":
             raise DaemonProtocolError(detail or "Hermes did not accept the command")
         return {"status": "running", "accepted": True}
+
+    @staticmethod
+    def _slash(controller: HermesController, session_id: str, command: str) -> dict[str, Any]:
+        rpc = getattr(controller, "_rpc", None)
+        if not callable(rpc):
+            rpc = getattr(controller, "rpc", None)
+        if not callable(rpc):
+            raise DaemonProtocolError("Hermes slash transport is unavailable")
+        from ..native_controls import result
+
+        resumed = result(rpc, "session.resume", {"session_id": session_id, "lazy": False})
+        handle = resumed.get("session_id")
+        if not isinstance(handle, str) or not handle:
+            raise DaemonProtocolError("Hermes did not return a live session handle")
+        parts = command.lstrip("/").split(maxsplit=1)
+        dispatched = rpc(
+            "command.dispatch",
+            {
+                "session_id": handle,
+                "name": parts[0],
+                "arg": parts[1] if len(parts) > 1 else "",
+            },
+        )
+        executed = (
+            dispatched["result"]
+            if isinstance(dispatched, Mapping)
+            and not dispatched.get("error")
+            and isinstance(dispatched.get("result"), Mapping)
+            else result(rpc, "slash.exec", {"session_id": handle, "command": command})
+        )
+        if executed.get("type") == "alias" and isinstance(executed.get("target"), str):
+            executed = result(
+                rpc,
+                "command.dispatch",
+                {"session_id": handle, "name": executed["target"].lstrip("/"), "arg": ""},
+            )
+        directive = executed.get("type")
+        if directive in {"send", "skill"}:
+            return {"message": executed.get("message")}
+        if directive == "prefill":
+            raise DaemonProtocolError(executed.get("notice") or "该命令需要补充参数")
+        output = executed.get("output") or executed.get("display") or executed.get("notice")
+        return {"completed": True, "output": str(output or "命令已执行")}
 
     async def shutdown(self) -> None:
         with self._lock:

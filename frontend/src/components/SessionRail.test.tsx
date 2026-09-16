@@ -2,6 +2,7 @@ import { MantineProvider } from '@mantine/core'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { api } from '../api/client'
 import { useAstrorderStore } from '../state/store'
+import { useBackgroundTasks } from '../state/backgroundTasks'
 import { scopeKey } from '../domain/semantics'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { SessionRail } from './SessionRail'
@@ -24,6 +25,15 @@ const agents: Record<string, Agent> = {
     limitation: null,
     source_id: 'source-local',
     profile_name: 'hermes',
+  },
+  codex: {
+    id: 'codex',
+    kind: 'codex',
+    name: '本机 Codex',
+    status: 'ready',
+    capabilities: [],
+    limitation: null,
+    source_id: 'source-codex',
   },
   remote: {
     id: 'remote',
@@ -172,6 +182,7 @@ describe('SessionRail project-first grouping', () => {
 
     const titles = screen.getAllByText('本机会话')
     expect(titles.length).toBeGreaterThan(0)
+    expect(titles[0].closest('.session-row')).toHaveAttribute('draggable', 'true')
     // 确保有相对时间展示区
     const times = document.querySelectorAll('.session-row-time')
     expect(times.length).toBeGreaterThan(0)
@@ -334,5 +345,60 @@ describe('SessionRail project-first grouping', () => {
       view.unmount()
       useAstrorderStore.getState().resetRuntime()
     }
+  })
+})
+
+describe('SessionRail local handoff', () => {
+  it('chooses the target agent, model, and effort before handoff', async () => {
+    const target: Session = {
+      ...sessions[0],
+      id: 'codex-target',
+      agent_id: 'codex',
+      handoff_from_agent_id: 'local',
+      handoff_from_session_id: 'local-1',
+    }
+    const probe: Session = { ...sessions[0], id: 'codex-existing', agent_id: 'codex', title: 'Codex 会话', project_id: 'codex-project', project_name: 'Codex 项目' }
+    const models = vi.spyOn(api, 'getSessionModels').mockResolvedValue({
+      items: [{ provider: 'openai', model: 'gpt-6', label: 'GPT-6' }],
+    })
+    let finishHandoff!: (session: Session) => void
+    const handoff = vi.spyOn(api, 'handoffSession').mockReturnValue(new Promise((resolve) => { finishHandoff = resolve }))
+    const onSelect = vi.fn()
+    const view = render(
+      <MantineProvider>
+        <SessionRail sessions={[sessions[0], probe]} agents={agents} onSelect={onSelect} />
+      </MantineProvider>,
+    )
+
+    const row = view.container.querySelector('.session-row-title[title="本机会话"]')!.closest('.session-row-wrapper')!
+    fireEvent.click(row.querySelector('button[aria-label="更多操作"]')!)
+    fireEvent.click(await screen.findByRole('menuitem', { name: '转交' }))
+
+    expect(await screen.findByRole('dialog', { name: '转交会话' })).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('目标 Agent'), { target: { value: 'codex' } })
+    await waitFor(() => expect(models).toHaveBeenCalledWith('codex-existing', 'codex'))
+    await screen.findByRole('option', { name: 'GPT-6' })
+    fireEvent.change(screen.getByLabelText('模型'), { target: { value: JSON.stringify(['openai', 'gpt-6']) } })
+    fireEvent.change(screen.getByLabelText('思考程度'), { target: { value: 'high' } })
+    fireEvent.click(screen.getByRole('button', { name: '转交' }))
+
+    await waitFor(() => expect(handoff).toHaveBeenCalledWith('local-1', 'local', 'codex', expect.any(String), {
+      provider: 'openai', model: 'gpt-6', effort: 'high',
+    }))
+    expect(screen.queryByRole('dialog', { name: '转交会话' })).not.toBeInTheDocument()
+    expect(Object.values(useBackgroundTasks.getState().tasks)[0]).toMatchObject({ status: 'running', title: '转交会话' })
+    await act(async () => finishHandoff(target))
+    const task = Object.values(useBackgroundTasks.getState().tasks)[0]
+    expect(task).toMatchObject({ status: 'completed' })
+    expect(onSelect).not.toHaveBeenCalled()
+    task.action?.()
+    expect(onSelect).toHaveBeenCalledWith(target)
+    expect(useAstrorderStore.getState().sessions[scopeKey('codex', 'codex-target')]).toEqual(target)
+
+    models.mockRestore()
+    handoff.mockRestore()
+    view.unmount()
+    useBackgroundTasks.getState().dismiss(task.id)
+    useAstrorderStore.getState().resetRuntime()
   })
 })

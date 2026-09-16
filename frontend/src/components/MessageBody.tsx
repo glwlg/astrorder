@@ -1,18 +1,21 @@
 import type { ReactNode } from 'react'
 import { IconPlayerPause } from '@tabler/icons-react'
 import { LazyDetails } from './LazyDetails'
+import { CodeCommentsBlock, extractCodeComments } from './CodeCommentsBlock'
 
 /** Presentation only: preserve native text, parse file mentions, and never turn filesystem references into arbitrary external URLs. */
 export function MessageBody({
   value,
   user = false,
   onImageClick,
+  onGalleryClick,
   attachmentNames = [],
   renderMarkdown,
 }: {
   value: string
   user?: boolean
   onImageClick?: (url: string) => void
+  onGalleryClick?: (url: string, allImages: string[]) => void
   attachmentNames?: string[]
   renderMarkdown: (value: string) => ReactNode
 }) {
@@ -28,7 +31,18 @@ export function MessageBody({
     <span><IconPlayerPause size={16} />本轮已中断</span>
     <LazyDetails summary="查看原始记录"><code>{value}</code></LazyDetails>
   </div>
-  if (!user) return renderMarkdown(value)
+  if (!user) {
+    const { comments, cleanText } = extractCodeComments(value)
+    if (comments.length > 0) {
+      return (
+        <>
+          {cleanText && renderMarkdown(cleanText)}
+          <CodeCommentsBlock comments={comments} />
+        </>
+      )
+    }
+    return renderMarkdown(value)
+  }
 
   let text = value
   const extractedImages: Array<{ name: string; path: string }> = []
@@ -83,12 +97,13 @@ export function MessageBody({
         <div className="message-attachments message-extracted-images">
           {extractedImages.map((img, idx) => {
             const rawUrl = `/api/v1/files/raw?path=${encodeURIComponent(img.path)}`
+            const allUrls = extractedImages.map(i => `/api/v1/files/raw?path=${encodeURIComponent(i.path)}`)
             return (
               <button
                 type="button"
                 className="attachment-image-link"
                 key={`${idx}:${img.path}`}
-                onClick={() => onImageClick?.(rawUrl)}
+                onClick={() => onGalleryClick ? onGalleryClick(rawUrl, allUrls) : onImageClick?.(rawUrl)}
                 aria-label={`查看图片：${img.name}`}
               >
                 <img className="attachment-image" src={rawUrl} alt={img.name} loading="lazy" />

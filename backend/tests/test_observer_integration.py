@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from astrorder.config import Settings
 from astrorder.main import create_app
+from astrorder.native_observers import NativeObservers
 from astrorder.observer_io import install_observer, read_spool
 
 SID='01992890-4444-7777-8888-000000000001'
@@ -56,3 +57,14 @@ def test_observed_permission_is_visible_and_decidable(tmp_path):
         assert response.status_code==200 and response.json()['state']=='completed'
         decision=json.loads((tmp_path/'astrorder-observer/decisions'/(approval_id+'.json')).read_text())
         assert decision=={'id':approval_id,'decision':'allow'}
+
+def test_local_trust_status_rechecks_native_config_when_catalog_is_stale(tmp_path, monkeypatch):
+    (tmp_path/'config.toml').write_text('[plugins.fixture]\nenabled = true\n')
+    hook={'pluginId':'astrorder@astrorder-local','trustStatus':'untrusted','enabled':True}
+    native=SimpleNamespace(_home=tmp_path,state='connected',agent_id='local-codex',_request=Mock(return_value={'data':[{'hooks':[hook]}]}),_executable=lambda:'codex')
+    verify=Mock(return_value={'trusted':True,'needs_review':False})
+    monkeypatch.setattr('astrorder.observer_plugin.verify_plugin',verify)
+    observer=NativeObservers(SimpleNamespace(state=SimpleNamespace(environments=SimpleNamespace(codex=native,remote={}))))
+    assert observer.status('local-codex')['trusted'] is True
+    assert observer.status('local-codex')['needs_review'] is False
+    verify.assert_called_once_with(tmp_path,'codex')

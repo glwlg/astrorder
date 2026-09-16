@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { AnimatePresence, motion } from 'motion/react'
 import { ActionIcon, Popover, Slider, Text, TextInput, UnstyledButton } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import {
@@ -122,7 +123,7 @@ export function SessionModelControl({ session }: { session: Session }) {
 
       <Popover.Dropdown className="codex-model-popover-dropdown">
         {view === 'main' ? (
-          <div className="codex-model-card">
+          <div className="codex-model-card" style={{ '--effort-color': EFFORT_COLORS[sliderIndex] } as React.CSSProperties}>
             <div className="codex-model-header-row">
               <span className="codex-model-icon-bolt" title="思维与推理">
                 <IconBolt size={18} />
@@ -134,7 +135,18 @@ export function SessionModelControl({ session }: { session: Session }) {
                 onClick={() => setView('models')}
               >
                 <span className="codex-model-effort-row">
-                  <span className="codex-model-effort-highlight">{effortLabel}</span>
+                  <AnimatePresence mode="popLayout" initial={false}>
+                    <motion.span
+                      key={effortLabel}
+                      initial={{ opacity: 0, y: -3, scale: 0.95 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 3, scale: 0.95 }}
+                      transition={{ duration: 0.16, ease: 'easeOut' }}
+                      className="codex-model-effort-highlight"
+                    >
+                      {effortLabel}
+                    </motion.span>
+                  </AnimatePresence>
                   <IconChevronRight size={15} />
                 </span>
                 <span className="codex-model-name-label">{displayModelName}</span>

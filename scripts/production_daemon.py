@@ -64,6 +64,18 @@ def production_daemon_spec(
             runtime_args.extend(["--pty-allowed-workspace", item])
     if _enabled(environment.get("ASTRORDER_DAEMON_HERMES_ENABLED")):
         runtime_args.append("--enable-hermes")
+    if _enabled(environment.get("ASTRORDER_DAEMON_GROK_ENABLED")):
+        executable = environment.get("ASTRORDER_GROK_EXECUTABLE")
+        workspace = environment.get("ASTRORDER_DAEMON_GROK_WORKSPACE") or str(root)
+        if not executable or not workspace or not allowed:
+            raise ValueError(
+                "production daemon Grok requires executable, workspace and allowed workspaces"
+            )
+        runtime_args.extend(
+            ["--enable-grok", "--grok-executable", executable, "--grok-workspace", workspace]
+        )
+        for item in allowed:
+            runtime_args.extend(["--grok-allowed-workspace", item])
     if _enabled(environment.get("ASTRORDER_DAEMON_SSH_ENABLED")):
         runtime_args.append("--enable-ssh")
     return port, runtime_args

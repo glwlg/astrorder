@@ -117,6 +117,8 @@ def test_hermes_public_hook_registration_and_text_command():
     context.hooks["on_session_start"]("session-1", platform="cli")
     assert transport.agent["capabilities"] == ["chat", "events", "task_events"]
     assert any(event["type"] == "session.upsert" for event in transport.events)
+    context.hooks["on_session_finalize"](session_id="session-1")
+    assert transport.started is True
     bridge._on_command(
         {
             "id": "command-1",

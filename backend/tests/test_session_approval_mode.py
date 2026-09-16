@@ -144,3 +144,21 @@ def test_session_approval_mode_api_endpoints(tmp_path):
         res = client.get(f'/api/v1/sessions/{SID}/approval-mode?agent_id=local-codex', headers=headers)
         assert res.status_code == 200
         assert res.json() == {'mode': 'full_access'}
+
+
+def test_session_approval_mode_persists_across_reconnect(tmp_path):
+    db_path = f'sqlite:///{tmp_path}/persist.db'
+    settings = Settings(database_url=db_path, auto_connect_local_hermes=False, browser_secret='test-token')
+    store = Store(settings)
+    service = ControlService(store, EventHub(), settings)
+    conn1 = CodexConnection(settings, store, service, client_factory=RecordingClient)
+    conn1.connect()
+    conn1.set_approval_mode(SID, 'full_access')
+    conn1.disconnect()
+
+    # 新建实例连接，验证从 DB 恢复持久化配置
+    conn2 = CodexConnection(settings, store, service, client_factory=RecordingClient)
+    conn2.connect()
+    assert conn2.get_approval_mode(SID) == 'full_access'
+    conn2.disconnect()
+    store.close()

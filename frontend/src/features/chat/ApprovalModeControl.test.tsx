@@ -1,7 +1,7 @@
 import { MantineProvider } from '@mantine/core'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../../api/client'
 import type { Session } from '../../domain/types'
 import { ApprovalModeControl } from './ApprovalModeControl'
@@ -37,6 +37,10 @@ function renderControl(session = testSession) {
 }
 
 describe('ApprovalModeControl', () => {
+  beforeEach(() => {
+    localStorage.clear()
+  })
+
   it('renders default auto approval mode capsule button', async () => {
     vi.spyOn(api, 'getSessionApprovalMode').mockResolvedValue({ mode: 'auto' })
     renderControl()

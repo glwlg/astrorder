@@ -1,0 +1,23 @@
+.astr-spotlight-card {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--astr-border, rgba(0, 0, 0, 0.08));
+  background: var(--astr-surface, #ffffff);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  --spotlight-x: 50%;
+  --spotlight-y: 50%;
+  --spotlight-color: rgba(59, 130, 246, 0.3);
+}
+.astr-spotlight-card:hover {
+  border-color: color-mix(in srgb, var(--astr-indigo, #5b6cff) 35%, var(--astr-border));
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.05);
+}
+
+.astr-spotlight-card::before {
+  display: none !important;
+}
+
+.astr-spotlight-card:hover::before,
+.astr-spotlight-card:focus-within::before {
+  opacity: 1;
+}

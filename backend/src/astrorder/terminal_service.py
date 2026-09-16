@@ -10,6 +10,21 @@ from typing import Optional
 logger = logging.getLogger("astrorder.terminal")
 
 
+def terminal_environment() -> dict[str, str]:
+    """Return a real terminal environment without mutating the service process."""
+    environment = dict(os.environ)
+    environment["TERM"] = "xterm-256color"
+    environment["COLORTERM"] = "truecolor"
+    return environment
+
+
+def winpty_environment(environment: dict[str, str]) -> str:
+    """Encode a Windows environment block accepted by pywinpty."""
+    return "\0".join(
+        f"{key}={value}" for key, value in sorted(environment.items(), key=lambda item: item[0].casefold())
+    ) + "\0"
+
+
 def find_shell(is_remote_linux: bool = False) -> str:
     """按平台与要求探测 Shell:
     Windows: 优先 pwsh.exe (PowerShell 7) > git bash > powershell.exe > cmd.exe
@@ -70,6 +85,7 @@ class TerminalSession:
         self._is_ssh = bool(ssh_argv)
 
     async def start(self) -> None:
+        environment = terminal_environment()
         if self._is_ssh and self.ssh_argv:
             # 远程 SSH 会话：通过 subprocess.Popen 带有 -tt 伪终端标志启动
             # 兼容跨平台与 Windows 的 OpenSSH 交互
@@ -81,6 +97,7 @@ class TerminalSession:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 bufsize=0,
+                env=environment,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
             # 如果指定了远端工作区，进入后自动 cd 过去
@@ -104,7 +121,7 @@ class TerminalSession:
             from winpty import PTY
 
             self.pty = PTY(120, 30)
-            self.pty.spawn(shell_path, cwd=working_dir)
+            self.pty.spawn(shell_path, cwd=working_dir, env=winpty_environment(environment))
         else:
             # Linux / macOS 使用标准 pty
             import pty
@@ -116,6 +133,7 @@ class TerminalSession:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 bufsize=0,
+                env=environment,
             )
 
     def read_sync(self) -> str:

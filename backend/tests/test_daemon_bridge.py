@@ -7,6 +7,7 @@ import json
 import pytest
 
 from astrorder.config import Settings
+from astrorder.daemon.bridge import DaemonBridge
 from astrorder.daemon.session_daemon import SessionDaemon
 from astrorder.events import EventHub
 from astrorder.service import ControlService
@@ -99,6 +100,73 @@ def test_daemon_checkpoint_is_persistent_and_scoped_to_daemon_instance(tmp_path)
 
 
 @pytest.mark.asyncio
+async def test_daemon_bridge_retires_missing_owned_sessions_after_daemon_restart(tmp_path):
+    class RestartedDaemonSocket:
+        request = None
+
+        async def send(self, raw):
+            self.request = json.loads(raw)
+
+        async def recv(self):
+            action = self.request["action"]
+            payload = {
+                "action": f"{action}.result",
+                "request_id": self.request["request_id"],
+                "daemon_id": "daemon-new",
+            }
+            if action == "daemon.status":
+                payload.update({"sessions": {}, "connectors": []})
+            else:
+                payload["sessions"] = {}
+            return json.dumps(payload)
+
+    settings = Settings(
+        database_url=f"sqlite:///{tmp_path}/daemon-restart.sqlite3",
+        auto_connect_local_hermes=False,
+    )
+    store = Store(settings)
+    store.upsert_agent(agent())
+    store.upsert_session(session_event()["data"])
+    store.create_command(
+        command={
+            "id": "command-1",
+            "agent_id": "daemon-codex",
+            "session_id": "session-1",
+            "action": "send",
+            "text": "继续",
+            "attachment_ids": [],
+            "target_id": None,
+        },
+        attachments=[],
+        initial_state="running",
+    )
+    store.upsert_task(
+        {
+            "id": "task-1",
+            "agent_id": "daemon-codex",
+            "session_id": "session-1",
+            "kind": "tool",
+            "title": "running tool",
+            "status": "running",
+            "created_at": "2026-09-15T03:00:00Z",
+            "updated_at": "2026-09-15T03:00:00Z",
+        }
+    )
+    bridge = DaemonBridge(store, ControlService(store, EventHub(), settings), "ws://127.0.0.1:1")
+    bridge._daemon_id = "daemon-old"
+    try:
+        await bridge._synchronize(RestartedDaemonSocket())
+
+        assert store.get_session("daemon-codex", "session-1")["status"] == "idle"
+        command = store.get_command("daemon-codex", "session-1", "command-1")
+        assert command["state"] == "unknown"
+        assert "小内核已重启" in command["error"]
+        assert store.list_tasks("daemon-codex", "session-1")[0]["status"] == "unknown"
+    finally:
+        store.close()
+
+
+@pytest.mark.asyncio
 async def test_daemon_bridge_replays_only_unacknowledged_frames_after_app_restart(tmp_path):
     from astrorder.daemon.bridge import DaemonBridge
 
@@ -163,6 +231,52 @@ async def test_daemon_bridge_projects_session_null_agent_event_from_runtime_cont
         await DaemonBridge(store, ControlService(store, EventHub(), settings), endpoint).synchronize_once()
         assert store.get_agent("daemon-codex")["status"] == "ready"
         assert store.get_daemon_checkpoint("daemon-agent-control", "daemon-hermes-control") == 1
+    finally:
+        store.close()
+        server.close()
+        await server.wait_closed()
+
+
+@pytest.mark.asyncio
+async def test_daemon_bridge_projects_connector_hello_from_runtime_control_wal(tmp_path):
+    from astrorder.daemon.bridge import DaemonBridge
+
+    settings = Settings(
+        database_url=f"sqlite:///{tmp_path}/connector-hello.sqlite3",
+        auto_connect_local_hermes=False,
+    )
+    daemon = SessionDaemon(capacity=8, daemon_id="daemon-connector-hello")
+    daemon.record("daemon-hermes-control", "connector.hello", {
+        **agent(), "id": "daemon-hermes", "kind": "hermes", "name": "Daemon Hermes"
+    })
+    server = await daemon.serve("127.0.0.1", 0)
+    endpoint = f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}"
+    store = Store(settings)
+    try:
+        await DaemonBridge(store, ControlService(store, EventHub(), settings), endpoint).synchronize_once()
+        assert store.get_agent("daemon-hermes")["status"] == "ready"
+    finally:
+        store.close()
+        server.close()
+        await server.wait_closed()
+
+
+@pytest.mark.asyncio
+async def test_daemon_bridge_restores_connector_that_remained_attached_across_app_restart(tmp_path):
+    settings = Settings(
+        database_url=f"sqlite:///{tmp_path}/connector-restart.sqlite3",
+        auto_connect_local_hermes=False,
+    )
+    daemon = SessionDaemon(capacity=8, daemon_id="daemon-connector-restart")
+    connected = {**agent(), "id": "daemon-hermes", "kind": "hermes", "name": "Daemon Hermes"}
+    daemon._connector_agents["daemon-hermes"] = connected
+    server = await daemon.serve("127.0.0.1", 0)
+    endpoint = f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}"
+    store = Store(settings)
+    store.upsert_agent({**connected, "status": "disconnected"})
+    try:
+        await DaemonBridge(store, ControlService(store, EventHub(), settings), endpoint).synchronize_once()
+        assert store.get_agent("daemon-hermes")["status"] == "ready"
     finally:
         store.close()
         server.close()

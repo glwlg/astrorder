@@ -43,8 +43,8 @@ function taskEvent(envelopeId: string, status = 'completed'): EventEnvelope {
   }
 }
 
-function StreamHarness() {
-  useEventStream(true, new QueryClient())
+function StreamHarness({ client = new QueryClient() }: { client?: QueryClient }) {
+  useEventStream(true, client)
   return null
 }
 
@@ -64,6 +64,29 @@ describe('event stream notifications', () => {
     expect(mocks.show).not.toHaveBeenCalled()
     expect(useAstrorderStore.getState().cursor).toBe(6)
     view.unmount()
+  })
+
+  it('refreshes the transcript when a command completes', () => {
+    let options: { onEvent: (event: EventEnvelope) => void } | undefined
+    mocks.connectEventStream.mockImplementation((next) => { options = next; return vi.fn() })
+    const client = new QueryClient()
+    const invalidate = vi.spyOn(client, 'invalidateQueries').mockResolvedValue()
+    render(<StreamHarness client={client} />)
+
+    act(() => {
+      options?.onEvent({
+        id: 'command-completed',
+        cursor: 1,
+        type: 'command.upsert',
+        agent_id: 'agent-1',
+        session_id: 'session-1',
+        data: { state: 'completed' },
+      })
+    })
+
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: ['astrorder', 'messages', 'agent-1', 'session-1'],
+    })
   })
 
   it('shows one notification for repeated failures and none for normal completion', () => {

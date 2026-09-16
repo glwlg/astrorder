@@ -1,5 +1,5 @@
 import { IconAlertTriangle, IconLoader2 } from '@tabler/icons-react'
-import { Alert, Button, Center, Loader, Paper, Stack, Text, Title } from '@mantine/core'
+import { Alert, Button, Center, Paper, Stack, Text, Title } from '@mantine/core'
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { useMediaQuery } from '@mantine/hooks'
 import { MobileWorkspace } from '../features/mobile/MobileWorkspace'
@@ -11,11 +11,29 @@ import { useAuthSession, useBootstrap } from '../hooks/useAstrorderData'
 import { useEventStream } from '../hooks/useEventStream'
 import { ChatPage } from '../features/chat/ChatPage'
 import { MonitorPage } from '../features/monitor/MonitorPage'
-import { AgentsPage } from '../features/agents/AgentsPage'
 import { PluginsPage } from '../features/plugins/PluginsPage'
+import { AstrorderLoader } from '../components/AnimatedStatus'
+import { ShinyText } from '../components/animations/ShinyText'
 
-function LoadingPage({ label = '正在连接星序…' }: { label?: string }) {
-  return <Center className="loading-page"><Stack align="center" gap="sm"><Loader size="md" color="gray" /><Text c="dimmed">{label}</Text></Stack></Center>
+function LoadingPage({ label = '正在启动星序工作台…' }: { label?: string }) {
+  return (
+    <div className="astrorder-boot-splash" role="status" aria-live="polite" aria-label={label}>
+      <div className="splash-orbit-container">
+        <div className="splash-orbit-halo" />
+        <div className="splash-loader-wrap">
+          <AstrorderLoader size={54} />
+        </div>
+      </div>
+      <h1 className="splash-title">星序 · Astrorder</h1>
+      <p className="splash-subtitle">群星各有所长，协作自有秩序</p>
+      <div className="splash-progress-track">
+        <div className="splash-progress-bar" />
+      </div>
+      <div className="splash-status-text">
+        <ShinyText text={label} speed={1.8} />
+      </div>
+    </div>
+  )
 }
 
 function BootstrapError({ error, retry }: { error: unknown; retry: () => void }) {
@@ -74,7 +92,6 @@ function AuthenticatedApp() {
         <Route path="chat" element={<ChatPage />} />
         <Route path="chat/:sessionId" element={<ChatPage />} />
         <Route path="monitor" element={<MonitorPage />} />
-        <Route path="agents" element={<AgentsPage />} />
         <Route path="plugins" element={<PluginsPage />} />
         <Route path="*" element={<Navigate to="/chat" replace />} />
       </Route>

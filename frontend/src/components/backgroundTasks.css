@@ -1,0 +1,14 @@
+.background-tasks { position:fixed; right:20px; bottom:20px; z-index:1200; display:flex; flex-direction:column; align-items:flex-end; gap:10px; }
+.background-tasks-trigger { display:flex; align-items:center; gap:8px; min-height:40px; padding:0 12px; border-radius:999px; background:var(--astr-indigo,#5b6cff); color:#fff; box-shadow:0 8px 24px #0003; font-size:13px; font-weight:600; }
+.background-tasks-trigger:hover { filter:brightness(1.06); }
+.background-tasks-count { min-width:20px; height:20px; padding:0 6px; display:grid; place-items:center; border-radius:999px; background:#ffffff26; font-size:11px; }
+.background-tasks-panel { width:min(340px,calc(100vw - 32px)); max-height:min(420px,calc(100vh - 100px)); overflow:hidden; background:var(--astr-surface,#fff); }
+.background-tasks-list { max-height:350px; overflow:auto; border-top:1px solid var(--astr-border,#e9ecef); }
+.background-task { display:grid; grid-template-columns:28px minmax(0,1fr) auto; align-items:center; gap:8px; padding:12px 14px; border-bottom:1px solid var(--astr-border,#e9ecef); }
+.background-task:last-child { border-bottom:0; }
+.background-task-icon { display:grid; place-items:center; color:var(--astr-indigo,#5b6cff); }
+.background-task[data-status='completed'] .background-task-icon { color:var(--mantine-color-teal-6); }
+.background-task[data-status='failed'] .background-task-icon { color:var(--mantine-color-red-6); }
+.background-task-copy { min-width:0; }
+.background-task-copy .mantine-Text-root { overflow-wrap:anywhere; }
+.background-task-actions { display:flex; align-items:center; gap:4px; }

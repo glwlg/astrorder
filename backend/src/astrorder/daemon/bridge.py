@@ -30,6 +30,8 @@ CONTROL_ACTIONS = frozenset(
         "session.create",
         "session.spawn",
         "session.send",
+        "session.compact",
+        "session.review",
         "session.steer",
         "session.interrupt",
         "session.approve",
@@ -41,14 +43,17 @@ CONTROL_ACTIONS = frozenset(
         "session.rename",
         "session.close",
         "session.models",
+        "session.commands",
         "session.model.read",
         "session.model.set",
         "session.reasoning.set",
         "session.approval.read",
         "session.approval.set",
+        "runtime.request",
     }
 )
 NativeFrameHandler = Callable[[str, Mapping[str, Any]], None]
+StatusHandler = Callable[[Mapping[str, Any]], None]
 
 
 class DaemonBridgeError(RuntimeError):
@@ -102,6 +107,12 @@ class DaemonBridge:
         self._overflowed_sessions: set[tuple[str, str]] = set()
         self._native_frame_handlers: dict[str, NativeFrameHandler] = {}
         self._native_frame_handlers_lock = threading.RLock()
+        self._status_handlers: list[StatusHandler] = []
+        self._runtime_status: dict[str, Any] = {}
+
+    @property
+    def runtime_status(self) -> Mapping[str, Any]:
+        return dict(self._runtime_status)
 
     @staticmethod
     def _validate_endpoint(endpoint: str) -> str:
@@ -124,7 +135,7 @@ class DaemonBridge:
             self.endpoint,
             open_timeout=self.request_timeout,
             close_timeout=self.request_timeout,
-            max_size=2_000_000,
+            max_size=16_000_000,
         ) as socket:
             await self._handshake(socket)
             return await self._synchronize(socket)
@@ -139,12 +150,36 @@ class DaemonBridge:
             self.endpoint,
             open_timeout=self.request_timeout,
             close_timeout=self.request_timeout,
-            max_size=2_000_000,
+            max_size=16_000_000,
         ) as socket:
             await self._handshake(socket)
             response = await self._request(socket, action, fields)
         self._daemon_id_from(response)
         return response
+
+    async def refresh_status(self) -> None:
+        """Refresh App-side session state from the daemon authority."""
+        async with websockets.connect(
+            self.endpoint,
+            open_timeout=self.request_timeout,
+            close_timeout=self.request_timeout,
+            max_size=16_000_000,
+        ) as socket:
+            await self._handshake(socket)
+            status = await self._request(socket, "daemon.status", {})
+        daemon_id, _ = self._apply_status(status)
+        self._daemon_id = daemon_id
+
+    def register_status_handler(self, handler: StatusHandler) -> Callable[[], None]:
+        if not callable(handler):
+            raise TypeError("daemon status handler must be callable")
+        self._status_handlers.append(handler)
+
+        def unregister() -> None:
+            if handler in self._status_handlers:
+                self._status_handlers.remove(handler)
+
+        return unregister
 
     def register_native_frame_handler(
         self, event: str, handler: NativeFrameHandler
@@ -184,7 +219,7 @@ class DaemonBridge:
                     self.endpoint,
                     open_timeout=self.request_timeout,
                     close_timeout=self.request_timeout,
-                    max_size=2_000_000,
+                    max_size=16_000_000,
                 ) as socket:
                     await self._handshake(socket)
                     await self._synchronize(socket)
@@ -200,12 +235,15 @@ class DaemonBridge:
 
     async def _synchronize(self, socket: Any) -> DaemonSyncReport:
         status = await self._request(socket, "daemon.status", {})
-        daemon_id = self._daemon_id_from(status)
-        if self._daemon_id is not None and self._daemon_id != daemon_id:
+        daemon_id, status_sessions = self._apply_status(status)
+        identity_changed = self._daemon_id is not None and self._daemon_id != daemon_id
+        if identity_changed:
             self._overflowed_sessions.clear()
-        status_sessions = status.get("sessions")
-        if not isinstance(status_sessions, Mapping):
-            raise DaemonBridgeError("daemon status sessions must be an object")
+        connectors = status.get("connectors")
+        if not isinstance(connectors, list):
+            raise DaemonBridgeError("daemon status connectors must be an array")
+        for agent in connectors:
+            self._project_connector_hello(agent)
 
         checkpoints = self.store.list_daemon_checkpoints(daemon_id)
         requested = dict(checkpoints)
@@ -244,6 +282,87 @@ class DaemonBridge:
             replayed_frames=replayed_frames,
             overflowed_sessions=tuple(overflowed),
         )
+
+    def _apply_status(self, response: Mapping[str, Any]) -> tuple[str, Mapping[str, Any]]:
+        daemon_id = self._daemon_id_from(response)
+        runtimes = response.get("runtimes", {})
+        if not isinstance(runtimes, Mapping) or any(
+            not isinstance(key, str) or not isinstance(value, Mapping)
+            for key, value in runtimes.items()
+        ):
+            raise DaemonBridgeError("daemon runtime status is invalid")
+        self._runtime_status = {key: dict(value) for key, value in runtimes.items()}
+        sessions = response.get("sessions")
+        if not isinstance(sessions, Mapping):
+            raise DaemonBridgeError("daemon status sessions must be an object")
+        for session_id, state in sessions.items():
+            self._validate_session_id(session_id)
+            if not isinstance(state, Mapping) or state.get("status") not in {
+                "idle", "running", "waiting_approval", "error"
+            }:
+                raise DaemonBridgeError("daemon session status is invalid")
+        self._retire_missing_sessions(set(sessions))
+        for session in self.store.list_sessions():
+            state = sessions.get(session["id"])
+            if (
+                session.get("control_state") == "owned"
+                and isinstance(state, Mapping)
+                and session["status"] != state["status"]
+            ):
+                updated = self.store.update_session(
+                    session["agent_id"], session["id"], {"status": state["status"]}
+                )
+                if updated is not None:
+                    self.service._server_event(
+                        "session.upsert",
+                        agent_id=session["agent_id"],
+                        session_id=session["id"],
+                        data=updated,
+                    )
+        for handler in tuple(self._status_handlers):
+            handler(sessions)
+        return daemon_id, sessions
+
+    def _retire_missing_sessions(self, current_session_ids: set[str]) -> None:
+        reason = "小内核已重启，上一条指令的执行结果无法确认；不会自动重发。"
+        for session in self.store.list_sessions():
+            session_id = session["id"]
+            if session.get("control_state") != "owned" or session_id in current_session_ids:
+                continue
+            agent_id = session["agent_id"]
+            for command in self.store.list_commands(agent_id, session_id):
+                if command["state"] not in {"received", "queued", "accepted", "running"}:
+                    continue
+                updated = self.store.set_command_state(
+                    agent_id, session_id, command["id"], "unknown", reason
+                )
+                self.service._server_event(
+                    "command.upsert",
+                    agent_id=agent_id,
+                    session_id=session_id,
+                    data=updated,
+                )
+            for task in self.store.list_tasks(agent_id, session_id):
+                if task["status"] not in {"pending", "running", "waiting_approval"}:
+                    continue
+                updated_task = self.store.upsert_task({**task, "status": "unknown"})
+                self.service._server_event(
+                    "task.upsert",
+                    agent_id=agent_id,
+                    session_id=session_id,
+                    data=updated_task,
+                )
+            if session["status"] in {"running", "waiting_approval"}:
+                updated_session = self.store.update_session(
+                    agent_id, session_id, {"status": "idle"}
+                )
+                if updated_session is not None:
+                    self.service._server_event(
+                        "session.upsert",
+                        agent_id=agent_id,
+                        session_id=session_id,
+                        data=updated_session,
+                    )
 
     async def _receive_live_frames(self, socket: Any, stopping: asyncio.Event) -> None:
         while not stopping.is_set():
@@ -346,7 +465,9 @@ class DaemonBridge:
         payload = frame.get("payload")
         if not isinstance(payload, Mapping):
             raise DaemonBridgeError("daemon frame payload must be an object")
-        if event == "connector.event":
+        if event == "connector.hello":
+            self._project_connector_hello(payload)
+        elif event == "connector.event":
             agent_id = payload.get("agent_id")
             if not isinstance(agent_id, str) or not agent_id:
                 raise DaemonBridgeError("daemon connector event agent ID is invalid")
@@ -359,6 +480,18 @@ class DaemonBridge:
         else:
             self._project_native_frame(event, session_id, payload)
         self.store.set_daemon_checkpoint(daemon_id, session_id, seq_id)
+
+    def _project_connector_hello(self, payload: Any) -> None:
+        if not isinstance(payload, Mapping):
+            raise DaemonBridgeError("daemon connector hello must be an object")
+        agent_id = payload.get("id")
+        if not isinstance(agent_id, str) or not agent_id:
+            raise DaemonBridgeError("daemon connector hello agent ID is invalid")
+        try:
+            agent = self.store.upsert_agent(dict(payload))
+            self.service.apply_connector_hello_event(agent)
+        except (TypeError, ValueError, ProtocolError) as exc:
+            raise DaemonBridgeError(f"daemon connector hello was rejected: {exc}") from exc
 
     def _project_native_frame(
         self, event: Any, session_id: str, payload: Mapping[str, Any]

@@ -1,5 +1,8 @@
 import type {
   Agent,
+  AgentKind,
+  AgentCommand,
+  AgentMention,
   Attachment,
   AuthSession,
   BootstrapPayload,
@@ -97,6 +100,7 @@ export const api = {
   login: (token: string) => jsonRequest<AuthSession>('/auth/session', { token }),
   logout: () => request<void>('/auth/session', { method: 'DELETE' }),
   getBootstrap: () => request<BootstrapPayload>('/bootstrap'),
+  getPresence: () => request<{ items: Array<{ agent_id: string; id: string; last_user_at: string }>; open?: Array<{ agent_id: string; id: string }>; live?: Array<{ agent_id: string; id: string }> }>('/presence'),
   getAgents: () => request<{ items: Agent[] }>('/agents'),
   getSessionModel: (sessionId: string, agentId: string) => request<SessionModelBinding>(`${sessionPath(sessionId)}/model?agent_id=${encodeURIComponent(agentId)}`),
   getOpenSessions: () => request<{ known_agent_ids: string[]; items: { agent_id: string; id: string }[]; live?: { agent_id: string; id: string }[] }>('/open-sessions'),
@@ -104,6 +108,8 @@ export const api = {
     const query = agentId ? `?agent_id=${encodeURIComponent(agentId)}` : ''
     return request<{ items: Session[] }>(`/sessions${query}`)
   },
+  syncSession: (sessionId: string, agentId: string) =>
+    request<Session>(`${sessionPath(sessionId)}/sync?agent_id=${encodeURIComponent(agentId)}`, { method: 'POST' }),
   getMessages: (sessionId: string, agentId: string, before?: string, limit = 50) => {
     const query = new URLSearchParams({ agent_id: agentId, limit: String(limit) })
     if (before) query.set('before', before)
@@ -127,12 +133,23 @@ export const api = {
   createCommand: (payload: CommandPayload) => jsonRequest<Command>('/commands', payload),
   createSession: (payload: { agent_id: string; workspace?: string | null; title?: string | null; project_id?: string | null; project_name?: string | null; parent_session_id?: string | null; ephemeral?: boolean }) =>
     jsonRequest<Session>('/sessions', payload),
+  handoffSession: (sessionId: string, sourceAgentId: string, targetAgentId: string, operationId: string, selection: { provider: string; model: string; effort: string }) =>
+    jsonRequest<Session>(`${sessionPath(sessionId)}/handoff`, { operation_id: operationId, source_agent_id: sourceAgentId, target_agent_id: targetAgentId, ...selection }),
+  cancelHandoff: async (operationId: string) => {
+    const result = await jsonRequest<{ cancelled: boolean }>(`/handoffs/${encodeURIComponent(operationId)}/cancel`, {})
+    if (!result.cancelled) throw new Error('转交任务已结束，无法取消')
+  },
   updateSession: (sessionId: string, payload: { agent_id: string; title?: string | null; workspace?: string | null; status?: string | null }) =>
     jsonRequest<Session>(sessionPath(sessionId), payload, 'PATCH'),
   deleteSession: (sessionId: string, agentId: string) =>
     request<{ ok: boolean; id: string }>(`${sessionPath(sessionId)}?agent_id=${encodeURIComponent(agentId)}`, {
       method: 'DELETE',
     }),
+  batchDeleteSessions: (sessions: Array<{ agent_id: string; id: string }>) =>
+    jsonRequest<{ ok: boolean; deleted: Array<{ agent_id: string; id: string }>; failed: Array<{ agent_id: string; id: string; error: string }> }>(
+      '/sessions/batch-delete',
+      { sessions },
+    ),
   deleteProject: (payload: {
     project_key?: string
     project_id?: string
@@ -146,6 +163,8 @@ export const api = {
       payload,
     ),
   getSessionModels: (sessionId: string, agentId: string) => request<{ items: { provider: string; model: string; label: string }[] }>(`${sessionPath(sessionId)}/models?agent_id=${encodeURIComponent(agentId)}`),
+  getAgentCommands: (sessionId: string, agentId: string) => request<{ items: AgentCommand[] }>(`${sessionPath(sessionId)}/agent-commands?agent_id=${encodeURIComponent(agentId)}`),
+  getAgentMentions: (sessionId: string, agentId: string) => request<{ items: AgentMention[] }>(`${sessionPath(sessionId)}/agent-mentions?agent_id=${encodeURIComponent(agentId)}`),
   setSessionModel: (sessionId: string, agentId: string, provider: string, model: string) => jsonRequest<{ provider: string; model: string; deferred?: boolean }>(`${sessionPath(sessionId)}/model`, { agent_id: agentId, provider, model }),
   setSessionReasoning: (sessionId: string, agentId: string, effort: string) => jsonRequest<{ effort: string }>(`${sessionPath(sessionId)}/reasoning`, { agent_id: agentId, effort }),
   getSessionApprovalMode: (sessionId: string, agentId: string) => request<{ mode: import('../domain/types').ApprovalMode }>(`${sessionPath(sessionId)}/approval-mode?agent_id=${encodeURIComponent(agentId)}`),
@@ -155,7 +174,7 @@ export const api = {
     jsonRequest<{ agent_id: string; status: string }>('/runtime/launch', { kind, workspace }),
   getUserActivity: () => request<{ items: Array<{ agent_id: string; id: string; last_user_at: string }>; live?: Array<{ agent_id: string; id: string }> }>('/user-activity'),
   getConnections: () => request<ConnectionsPayload>('/connections'),
-  getEnvironments: () => request<{ items: Array<{ id: string; name: string; method: 'local' | 'ssh'; discovered: boolean; os?: string; agents: Array<{ kind: 'hermes' | 'codex'; available: boolean; state: string; detail: string; executable?: string; daemon_mode?: boolean }> }> }>('/environments'),
+  getEnvironments: () => request<{ items: Array<{ id: string; name: string; method: 'local' | 'ssh'; discovered: boolean; os?: string; agents: Array<{ kind: AgentKind; available: boolean; state: string; detail: string; executable?: string; daemon_mode?: boolean }> }> }>('/environments'),
   discoverEnvironment: (id: string) => request(`/environments/${encodeURIComponent(id)}/discover`, { method: 'POST' }),
   changeEnvironmentAgent: (id: string, kind: string, connect: boolean) => request(`/environments/${encodeURIComponent(id)}/agents/${kind}/${connect ? 'connect' : 'disconnect'}`, { method: 'POST' }),
   getCodexConnection: () => request<CodexConnectionStatus>('/connections/codex'),

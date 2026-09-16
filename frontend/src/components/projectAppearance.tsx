@@ -133,7 +133,7 @@ export function ProjectGlyph({
   style?: React.CSSProperties
 }) {
   const Comp = (iconName && ICON_COMPONENT_MAP[iconName]) || IconFolder
-  const hexColor = (colorName && PROJECT_APPEARANCE_COLORS[colorName]) || undefined
+  const hexColor = (colorName && (PROJECT_APPEARANCE_COLORS[colorName] || colorName)) || undefined
   return <Comp size={size} color={hexColor} style={{ flexShrink: 0, ...style }} />
 }
 

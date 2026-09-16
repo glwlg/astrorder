@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Loader, TextInput } from '@mantine/core'
+import { motion } from 'motion/react'
 import { IconFile, IconSearch } from '@tabler/icons-react'
 import { api } from '../../api/client'
 import { resolveArtifactFromPath } from '../sidecar/resolver'
@@ -109,13 +110,22 @@ export function QuickOpen({ session, opened, onClose }: QuickOpenProps) {
   if (!opened) return null
 
   return createPortal(
-    <div
+    <motion.div
       aria-label="快速打开文件"
       className="quick-open-backdrop"
       onMouseDown={onClose}
       role="dialog"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.14 }}
     >
-      <div className="quick-open-card" onMouseDown={(e) => e.stopPropagation()}>
+      <motion.div
+        className="quick-open-card"
+        onMouseDown={(e) => e.stopPropagation()}
+        initial={{ opacity: 0, scale: 0.96, y: -10 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        transition={{ type: 'spring', stiffness: 500, damping: 32 }}
+      >
         <TextInput
           ref={inputRef}
           aria-label="搜索文件名"
@@ -143,8 +153,8 @@ export function QuickOpen({ session, opened, onClose }: QuickOpenProps) {
           ))}
           {emptyHint && <div className="quick-open-empty">{emptyHint}</div>}
         </div>
-      </div>
-    </div>,
+      </motion.div>
+    </motion.div>,
     document.body,
   )
 }

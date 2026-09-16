@@ -11,6 +11,7 @@ from fastapi import WebSocket
 
 from .config import Settings
 from .events import EventHub
+from .handoff import HANDOFF_USER_MARKER
 from .schemas import AgentModel, MessageModel, SessionModel, TaskModel
 from .store import DuplicateCommand, ScopeNotFound, Store, UnknownCommand
 
@@ -51,6 +52,7 @@ class CommandRejected(RuntimeError):
 
 NativeCommandHandler = Callable[[dict[str, Any]], Awaitable[tuple[str, str | None]]]
 NativeHistoryHandler = Callable[[str], Awaitable[list[dict[str, Any]]]]
+ModelBindingRestorer = Callable[[str, str, str, str, str | None], Awaitable[None]]
 
 
 @dataclass
@@ -72,21 +74,43 @@ class ControlService:
         self.settings = settings
         self.connections: dict[str, ConnectorConnection] = {}
         self._native_command_handlers: dict[str, NativeCommandHandler] = {}
+        self._native_command_capabilities: dict[str, tuple[set[str], str | None]] = {}
         self._native_history_handlers: dict[str, NativeHistoryHandler] = {}
-        self.hermes_approvals = None
-        self.observer_approvals = None
-        self.hermes_model_restorer: Callable[[str, str, str, str, str | None], Awaitable[None]] | None = None
+        self._model_binding_restorers: dict[str, ModelBindingRestorer] = {}
+        self._approval_handlers: list[Any] = []
         try:
             self._loop = asyncio.get_running_loop()
         except RuntimeError:
             self._loop = None
 
-    def register_native_command_handler(self, agent_id: str, handler: NativeCommandHandler) -> None:
+    def register_native_command_handler(
+        self,
+        agent_id: str,
+        handler: NativeCommandHandler,
+        *,
+        capabilities: set[str] | None = None,
+        limitation: str | None = None,
+    ) -> None:
         self._native_command_handlers[agent_id] = handler
+        if capabilities is not None or limitation is not None:
+            self._native_command_capabilities[agent_id] = (capabilities or set(), limitation)
         self._publish_capabilities(agent_id)
 
     def clear_native_command_handler(self, agent_id: str) -> None:
         self._native_command_handlers.pop(agent_id, None)
+        self._native_command_capabilities.pop(agent_id, None)
+
+    def register_model_binding_restorer(self, kind: str, restorer: ModelBindingRestorer) -> None:
+        self._model_binding_restorers[kind] = restorer
+
+    def preserves_model_binding(self, kind: str) -> bool:
+        return kind in self._model_binding_restorers
+
+    def register_approval_handler(self, handler: Any) -> None:
+        self._approval_handlers.append(handler)
+
+    def approval_snapshot(self) -> list[dict[str, Any]]:
+        return [item for handler in self._approval_handlers for item in handler.snapshot()]
 
     def register_native_history_handler(self, agent_id: str, handler: NativeHistoryHandler) -> None:
         self._native_history_handlers[agent_id] = handler
@@ -95,18 +119,23 @@ class ControlService:
     def effective_agent(self, agent):
         result = dict(agent)
         capabilities = set(agent.get('capabilities', []))
-        native = agent['id'] in self._native_command_handlers
         history = agent['id'] in self._native_history_handlers
         if history:
             capabilities.add('history')
-        if native and agent.get('kind') == 'hermes':
-            capabilities.update({'stop', 'attachments'})
-            result['limitation'] = '停止仅作用于当前运行时拥有活动句柄的会话。图片经原生字节接口发送，其他文件进入会话工作区。其他客户端本地图片仅在 Hermes 目录内可预览。星序待发队列不等同于原生排队。'
-            if self.hermes_approvals and agent['id'] in self.hermes_approvals.supported:
-                capabilities.add('approvals')
-                result['limitation'] = '停止与审批仅作用于当前运行时的会话；审批只允许本次或拒绝。图片经原生字节接口发送，其他文件进入会话工作区。其他客户端本地图片仅在 Hermes 目录内可预览。星序待发队列不等同于原生排队。'
-        if self.observer_approvals and agent['id'] in self.observer_approvals.supported:
+        native_capabilities = self._native_command_capabilities.get(agent['id'])
+        if native_capabilities:
+            capabilities.update(native_capabilities[0])
+            if native_capabilities[1]:
+                result['limitation'] = native_capabilities[1]
+        if any(agent['id'] in handler.supported for handler in self._approval_handlers):
             capabilities.add('approvals')
+        kind = agent.get('kind')
+        if kind == 'hermes':
+            capabilities.update({'history', 'approvals', 'launch', 'delete', 'queue'})
+        elif kind == 'grok':
+            capabilities.update({'history', 'launch', 'delete', 'queue', 'approvals', 'task_events', 'attachments'})
+        elif kind == 'codex':
+            capabilities.update({'launch', 'task_events'})
         result['capabilities'] = sorted(capabilities)
         return result
 
@@ -154,7 +183,10 @@ class ControlService:
     def record_native_sessions(self, sessions: list[dict[str, Any]]) -> None:
         """Persist read-only native history discovered outside the connector event stream."""
         for data in sessions:
+            previous = self.store.get_session(data["agent_id"], data["id"])
             canonical = self.store.upsert_session(data)
+            if canonical == previous:
+                continue
             self._server_event(
                 "session.upsert",
                 agent_id=canonical["agent_id"],
@@ -366,13 +398,12 @@ class ControlService:
             )
             raise CommandRejected(capability_error)
 
-        if agent["kind"] == "hermes" and command["action"] == "send":
+        if command["action"] == "send":
             binding = self.store.get_session_model_binding(command["agent_id"], command["session_id"])
-            if binding is not None:
+            restorer = self._model_binding_restorers.get(agent["kind"])
+            if binding is not None and restorer is not None:
                 try:
-                    if self.hermes_model_restorer is None:
-                        raise RuntimeError("Hermes model restorer is unavailable")
-                    await self.hermes_model_restorer(
+                    await restorer(
                         command["agent_id"], command["session_id"], binding["provider"],
                         binding["model"], binding.get("effort")
                     )
@@ -396,10 +427,12 @@ class ControlService:
             return self.store.get_command(command["agent_id"], command["session_id"], command["id"]) or command
 
         native_handler = self._native_command_handlers.get(agent["id"])
-        if command['action'] in {'approve','cancel'} and self.observer_approvals and self.observer_approvals.matches(command):
-            native_handler = self.observer_approvals.submit
-        if agent.get('kind') == 'hermes' and command['action'] in {'approve','cancel'} and self.hermes_approvals:
-            native_handler = self.hermes_approvals.submit
+        if command['action'] in {'approve', 'cancel'}:
+            approval_handler = next(
+                (handler for handler in self._approval_handlers if handler.matches(command)), None
+            )
+            if approval_handler is not None:
+                native_handler = approval_handler.submit
         if connection is None and native_handler is None:
             detail = "Connector is not connected; submission was not attempted"
             updated = self.store.set_command_state(
@@ -413,16 +446,31 @@ class ControlService:
             )
             raise CommandRejected(detail)
 
+        handoff_context = (
+            self.store.claim_session_handoff_context(command["agent_id"], command["session_id"])
+            if command["action"] == "send"
+            else None
+        )
+        forwarded_command = (
+            {**command, "text": f"{handoff_context}\n\n{HANDOFF_USER_MARKER}\n{command['text']}"}
+            if handoff_context
+            else command
+        )
+
         if native_handler is not None:
             try:
-                state, error = await native_handler(command)
-            except Exception as exc:  # noqa: BLE001 - the outcome cannot be confirmed after a native RPC failure
-                logger.exception("native_handler execution failed: %s", exc)
-                state, error = "unknown", f"Native Hermes command execution error: {exc}"
+                state, error = await native_handler(forwarded_command)
+            except Exception as exc:
+                logger.exception("native_handler execution failed")
+                state, error = "unknown", f"Native command execution error: {exc}"
             if state not in {"accepted", "failed", "unknown"}:
-                state, error = "unknown", "Native Hermes returned an invalid command outcome"
+                state, error = "unknown", "Native runtime returned an invalid command outcome"
             confirmed = self.store.get_command(command['agent_id'], command['session_id'], command['id'])
             if confirmed and (confirmed['state'] in {'completed', 'failed', 'cancelled'} or (state == 'accepted' and confirmed['state'] == 'running')):
+                if handoff_context and confirmed['state'] == 'failed':
+                    self.store.restore_session_handoff_context(
+                        command["agent_id"], command["session_id"], handoff_context
+                    )
                 return confirmed
             if state == "accepted" and connection is not None:
                 connection.sent.add((command["session_id"], command["id"]))
@@ -435,10 +483,14 @@ class ControlService:
                 session_id=command["session_id"],
                 data=updated,
             )
+            if handoff_context and state == "failed":
+                self.store.restore_session_handoff_context(
+                    command["agent_id"], command["session_id"], handoff_context
+                )
             return updated
 
         try:
-            await self._send_command(connection, command)
+            await self._send_command(connection, forwarded_command)
         except (OSError, RuntimeError):
             await self.disconnect(
                 connection, "Submission outcome is unknown; connector disconnected before confirmation"

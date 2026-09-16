@@ -29,7 +29,7 @@ def _production_module():
     return module
 
 
-def test_production_credentials_require_daemon_secret_only_when_enabled():
+def test_production_credentials_require_daemon_secret_only_when_enabled(monkeypatch):
     production = _production_module()
 
     assert production.required_credential_keys({}) == (
@@ -43,6 +43,19 @@ def test_production_credentials_require_daemon_secret_only_when_enabled():
         "ASTRORDER_CONNECTOR_SECRET",
         "ASTRORDER_SESSION_DAEMON_SECRET",
     )
+    monkeypatch.setenv("ASTRORDER_DESKTOP_PID", "123")
+    assert production.required_credential_keys(
+        {"ASTRORDER_SESSION_DAEMON_ENABLED": "1"}
+    )[-1] == "ASTRORDER_SESSION_DAEMON_SECRET"
+
+
+def test_desktop_parent_pid_must_be_valid():
+    production = _production_module()
+
+    with pytest.raises(ValueError, match="integer"):
+        production.stop_when_desktop_exits(object(), "not-a-pid")
+    with pytest.raises(ValueError, match="positive"):
+        production.stop_when_desktop_exits(object(), "0")
 
 
 def test_production_daemon_builds_only_public_runtime_arguments(tmp_path):

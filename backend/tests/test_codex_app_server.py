@@ -36,10 +36,17 @@ def test_app_server_passes_child_environment_and_writes_bootstrap_before_protoco
         allowed_workspaces=(),
     )
 
-    server = CodexAppServer(config, lambda _frame: None, environment=environment, bootstrap_stdin=bootstrap)
+    server = CodexAppServer(
+        config,
+        lambda _frame: None,
+        environment=environment,
+        bootstrap_stdin=bootstrap,
+        launch_argv=['ssh', 'remote', 'codex'],
+    )
     server.start()
 
     assert captured['kwargs']['env'] == environment
+    assert captured['kwargs']['cwd'] is None
     assert json.loads(process.stdin.getvalue()) == bootstrap
 
 

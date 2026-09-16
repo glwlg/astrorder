@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>星序服务状态</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; background: #111; color: #eee; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; -webkit-app-region: drag; }
+    main { width: min(680px, calc(100vw - 48px)); }
+    h1 { font-size: 24px; margin-bottom: 24px; }
+    section { border: 1px solid #343434; border-radius: 12px; padding: 18px; margin: 12px 0; background: #191919; }
+    header { display: flex; justify-content: space-between; align-items: center; }
+    h2 { margin: 0; font-size: 17px; }
+    p { color: #aaa; }
+    button { border: 0; border-radius: 8px; padding: 9px 14px; margin-right: 8px; cursor: pointer; -webkit-app-region: no-drag; }
+    button:disabled { opacity: .45; cursor: default; }
+    #error { color: #ff8c8c; min-height: 24px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>星序服务</h1>
+    <section data-target="app"><header><h2>大内核</h2><span>正在检查</span></header><p>提供网页、API 和实时连接。</p><div></div></section>
+    <section data-target="daemon"><header><h2>小内核</h2><span>正在检查</span></header><p>托管会话、终端和 Agent 进程。</p><div></div></section>
+    <p id="error"></p>
+  </main>
+  <script src="service-status.js"></script>
+</body>
+</html>

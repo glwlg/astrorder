@@ -4,11 +4,11 @@ from __future__ import annotations
 import subprocess
 from collections.abc import Callable
 
-
 APP_MARKER = "scripts/run_production.py"
 DAEMON_MODULE_MARKER = "astrorder.daemon.session_daemon"
 DAEMON_FILE_MARKER = "astrorder/daemon/session_daemon.py"
 INDEPENDENT_PROCESS_FLAGS = 0x00000008 | 0x08000000 | 0x01000000
+HIDDEN_PROCESS_FLAGS = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
 def listening_pids(netstat_output: str, port: int) -> list[int]:
@@ -59,6 +59,7 @@ def current_listening_pids(port: int) -> list[int]:
         text=True,
         encoding="utf-8",
         errors="replace",
+        creationflags=HIDDEN_PROCESS_FLAGS,
     )
     return listening_pids(completed.stdout, port)
 
@@ -75,6 +76,7 @@ def command_line_for_pid(pid: int) -> str | None:
             text=True,
             encoding="utf-8",
             errors="replace",
+            creationflags=HIDDEN_PROCESS_FLAGS,
         )
     except OSError:
         return None
@@ -89,7 +91,12 @@ def command_line_for_pid(pid: int) -> str | None:
 
 def terminate_verified_pid(pid: int) -> None:
     """Terminate exactly one already-verified PID; never use /T process-tree kill."""
-    subprocess.run(["taskkill", "/F", "/PID", str(pid)], check=True, capture_output=True)
+    subprocess.run(
+        ["taskkill", "/F", "/PID", str(pid)],
+        check=True,
+        capture_output=True,
+        creationflags=HIDDEN_PROCESS_FLAGS,
+    )
 
 
 def _contains_marker(command: str | None, marker: str) -> bool:

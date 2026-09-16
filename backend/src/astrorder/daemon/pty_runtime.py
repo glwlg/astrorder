@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from ..terminal_service import TerminalSession
-from .session_daemon import DaemonProtocolError
+from .errors import DaemonProtocolError
 
 
 class TerminalLike(Protocol):

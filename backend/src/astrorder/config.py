@@ -73,6 +73,7 @@ class Settings:
     launch_enabled: bool = False
     hermes_executable: str | None = None
     codex_executable: str | None = None
+    grok_executable: str | None = None
     auto_connect_local_hermes: bool = True
     max_ssh_connections: int = 32
     session_daemon_enabled: bool = False
@@ -83,6 +84,7 @@ class Settings:
     daemon_pty_enabled: bool = False
     daemon_hermes_enabled: bool = False
     daemon_ssh_enabled: bool = False
+    daemon_grok_enabled: bool = False
 
     def __post_init__(self) -> None:
         if not 1 <= self.port <= 65535:
@@ -121,6 +123,12 @@ class Settings:
             or not self.session_daemon_secret
         ):
             raise ValueError("daemon SSH requires an enabled Session Daemon with a secret")
+        if self.daemon_grok_enabled and (
+            not self.session_daemon_enabled
+            or not isinstance(self.session_daemon_secret, str)
+            or not self.session_daemon_secret
+        ):
+            raise ValueError("daemon Grok requires an enabled Session Daemon with a secret")
         object.__setattr__(self, "attachments_dir", Path(self.attachments_dir))
         if self.static_dir is not None:
             object.__setattr__(self, "static_dir", Path(self.static_dir))
@@ -202,6 +210,7 @@ class Settings:
             launch_enabled=_bool(env.get("ASTRORDER_ENABLE_LAUNCH")),
             hermes_executable=env.get("ASTRORDER_HERMES_EXECUTABLE") or None,
             codex_executable=env.get("ASTRORDER_CODEX_EXECUTABLE") or None,
+            grok_executable=env.get("ASTRORDER_GROK_EXECUTABLE") or None,
             auto_connect_local_hermes=_bool(env.get("ASTRORDER_AUTO_CONNECT_LOCAL_HERMES", "1")),
             max_ssh_connections=_int(env.get("ASTRORDER_MAX_SSH_CONNECTIONS"), 32),
             session_daemon_enabled=_bool(env.get("ASTRORDER_SESSION_DAEMON_ENABLED")),
@@ -216,6 +225,7 @@ class Settings:
             daemon_pty_enabled=_bool(env.get("ASTRORDER_DAEMON_PTY_ENABLED")),
             daemon_hermes_enabled=_bool(env.get("ASTRORDER_DAEMON_HERMES_ENABLED")),
             daemon_ssh_enabled=_bool(env.get("ASTRORDER_DAEMON_SSH_ENABLED")),
+            daemon_grok_enabled=_bool(env.get("ASTRORDER_DAEMON_GROK_ENABLED")),
         )
 
     def connector_endpoint(self) -> str:

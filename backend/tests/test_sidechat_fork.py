@@ -21,7 +21,7 @@ def test_sidechat_forks_parent_with_no_history_in_response():
     connection._scope.assert_called_once_with('parent')
     connection._request.assert_called_once_with('thread/fork', {
         'threadId': 'parent', 'cwd': 'workspace', 'ephemeral': True,
-        'excludeTurns': True, 'deferGoalContinuation': True,
+        'excludeTurns': True,
     })
     assert result == {'id': 'child', 'ephemeral': True}
 

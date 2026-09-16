@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>星序 · Astrorder</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f9fafc;
+      --fg: #192132;
+      --muted: #647084;
+      --accent: #3b82f6;
+      --accent-glow: rgba(59, 130, 246, 0.4);
+      --title-grad-0: #111827;
+      --title-grad-1: #2563eb;
+      --track-bg: rgba(0, 0, 0, 0.08);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #15181e;
+        --fg: #e5e9f1;
+        --muted: #8a94a6;
+        --title-grad-0: #ffffff;
+        --title-grad-1: #60a5fa;
+        --track-bg: rgba(255, 255, 255, 0.08);
+      }
+    }
+    :root[data-theme='light'] {
+      color-scheme: light;
+      --bg: #f9fafc;
+      --fg: #192132;
+      --muted: #647084;
+      --title-grad-0: #111827;
+      --title-grad-1: #2563eb;
+      --track-bg: rgba(0, 0, 0, 0.08);
+    }
+    :root[data-theme='dark'] {
+      color-scheme: dark;
+      --bg: #15181e;
+      --fg: #e5e9f1;
+      --muted: #8a94a6;
+      --title-grad-0: #ffffff;
+      --title-grad-1: #60a5fa;
+      --track-bg: rgba(255, 255, 255, 0.08);
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", sans-serif;
+      overflow: hidden;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    /* 顶部 48px 窗口标题栏拖动区，与系统控制按钮完美对齐 */
+    .titlebar-drag-region {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 32px;
+      -webkit-app-region: drag;
+      z-index: 100;
+    }
+    /* 核心舞台居中 */
+    .splash-stage {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      padding-top: 32px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: radial-gradient(circle 500px at 50% 45%, rgba(59, 130, 246, 0.08), transparent 70%), var(--bg);
+      transition: background 0.2s ease, color 0.2s ease;
+    }
+    /* 星轨容器 */
+    .orbit-container {
+      position: relative;
+      width: 80px;
+      height: 80px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 24px;
+    }
+    /* 星轨脉冲外晕 */
+    .orbit-halo {
+      position: absolute;
+      inset: -16px;
+      border-radius: 50%;
+      background: radial-gradient(circle, var(--accent-glow) 0%, transparent 70%);
+      animation: pulse-halo 2.4s ease-in-out infinite;
+      pointer-events: none;
+    }
+    @keyframes pulse-halo {
+      0%, 100% { transform: scale(0.85); opacity: 0.35; }
+      50% { transform: scale(1.25); opacity: 0.85; }
+    }
+    /* 星轨 SVG */
+    .orbit-svg {
+      width: 64px;
+      height: 64px;
+      overflow: visible;
+      filter: drop-shadow(0 0 12px rgba(59, 130, 246, 0.6));
+    }
+    .orbit-ring {
+      transform-origin: 16px 16px;
+      animation: orbit-rotate 3s linear infinite;
+    }
+    @keyframes orbit-rotate {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+    .orbit-star {
+      transform-origin: 16px 16px;
+      animation: star-breathe 1.8s ease-in-out infinite;
+    }
+    @keyframes star-breathe {
+      0%, 100% { transform: scale(0.88); opacity: 0.6; }
+      50% { transform: scale(1.15); opacity: 1; }
+    }
+    /* 标题与标语 */
+    .splash-title {
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      margin: 0 0 8px;
+      background: linear-gradient(135deg, var(--title-grad-0) 0%, var(--title-grad-1) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .splash-subtitle {
+      font-size: 13px;
+      color: var(--muted);
+      letter-spacing: 0.04em;
+      margin: 0 0 32px;
+      opacity: 0.85;
+    }
+    /* 进度条轨道 */
+    .progress-track {
+      width: 160px;
+      height: 2px;
+      border-radius: 999px;
+      background: var(--track-bg);
+      position: relative;
+      overflow: hidden;
+      margin-bottom: 12px;
+    }
+    .progress-bar {
+      position: absolute;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      width: 40%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, transparent, #3b82f6, #60a5fa, transparent);
+      animation: scan-line 1.6s ease-in-out infinite;
+    }
+    @keyframes scan-line {
+      0% { transform: translateX(-100%); }
+      100% { transform: translateX(350%); }
+    }
+    .splash-hint {
+      font-size: 12px;
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      opacity: 0.65;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .orbit-ring, .progress-bar, .orbit-halo, .orbit-star { animation: none; }
+      .progress-bar { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="titlebar-drag-region"></div>
+  <main class="splash-stage">
+    <div class="orbit-container">
+      <div class="orbit-halo"></div>
+      <svg class="orbit-svg" viewBox="0 0 32 32" fill="none">
+        <g class="orbit-ring" style="color: #60a5fa;">
+          <circle cx="16" cy="16" r="12" stroke="currentColor" stroke-width="2" stroke-dasharray="13 6" />
+          <circle cx="16" cy="4" r="2.2" fill="currentColor" />
+          <circle cx="28" cy="16" r="2.2" fill="currentColor" />
+          <circle cx="16" cy="28" r="2.2" fill="currentColor" />
+          <circle cx="4" cy="16" r="2.2" fill="currentColor" />
+        </g>
+        <path class="orbit-star" d="M16 8c1 5 3 7 8 8-5 1-7 3-8 8-1-5-3-7-8-8 5-1 7-3 8-8Z" fill="#3b82f6" />
+      </svg>
+    </div>
+    <h1 class="splash-title">星序 · Astrorder</h1>
+    <p class="splash-subtitle">群星各有所长，协作自有秩序</p>
+    <div class="progress-track">
+      <div class="progress-bar"></div>
+    </div>
+    <div class="splash-hint">正在启动核心控制台…</div>
+  </main>
+</body>
+</html>

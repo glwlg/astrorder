@@ -1,4 +1,5 @@
 import pytest
+from starlette.websockets import WebSocketDisconnect
 
 from astrorder.daemon.terminal_relay import (
     DaemonTerminalRelay,
@@ -72,3 +73,73 @@ async def test_terminal_relay_forwards_only_exact_terminal_controls_and_output()
         ("session.resize", {"session_id": runtime_id, "cols": 120, "rows": 40}),
     ]
     assert browser.sent == ["hello"]
+
+
+@pytest.mark.asyncio
+async def test_terminal_relay_disconnect_detaches_without_closing_daemon_pty():
+    class Bridge:
+        endpoint = "ws://127.0.0.1:30124"
+
+        def __init__(self):
+            self.calls = []
+
+        async def request_control(self, action, fields):
+            self.calls.append((action, dict(fields)))
+            return {"result": {"accepted": True}}
+
+    class Browser:
+        async def accept(self):
+            return None
+
+        async def receive_text(self):
+            raise WebSocketDisconnect()
+
+    bridge = Bridge()
+    relay = DaemonTerminalRelay(bridge, secret="test-only-daemon-secret")
+
+    await relay.serve(
+        Browser(), agent_id="agent-a", session_id="session-a", workspace="C:/workspace"
+    )
+
+    assert [action for action, _fields in bridge.calls] == ["session.spawn"]
+
+
+@pytest.mark.asyncio
+async def test_terminal_relay_closes_daemon_pty_only_for_explicit_browser_close():
+    class Bridge:
+        endpoint = "ws://127.0.0.1:30124"
+
+        def __init__(self):
+            self.calls = []
+
+        async def request_control(self, action, fields):
+            self.calls.append((action, dict(fields)))
+            return {"result": {"accepted": True}}
+
+    class Browser:
+        received = False
+
+        async def accept(self):
+            return None
+
+        async def receive_text(self):
+            if self.received:
+                raise WebSocketDisconnect()
+            self.received = True
+            return '{"type":"close"}'
+
+    bridge = Bridge()
+    relay = DaemonTerminalRelay(bridge, secret="test-only-daemon-secret")
+    runtime_id = terminal_runtime_id("agent-a", "session-a")
+
+    await relay.serve(
+        Browser(), agent_id="agent-a", session_id="session-a", workspace="C:/workspace"
+    )
+
+    assert bridge.calls == [
+        (
+            "session.spawn",
+            {"session_id": runtime_id, "agent_type": "pty", "cwd": "C:/workspace", "params": {}},
+        ),
+        ("session.close", {"session_id": runtime_id}),
+    ]

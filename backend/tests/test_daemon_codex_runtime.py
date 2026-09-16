@@ -3,13 +3,23 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from typing import ClassVar
 
 import pytest
 import websockets
+from astrorder_codex_connector.app_server import CodexRpcRejected
 
-from astrorder.daemon.codex_runtime import CodexDaemonRuntime, CodexDaemonRuntimeConfig
-from astrorder.daemon.session_daemon import SessionDaemon, create_session_daemon
+from astrorder.daemon.codex_runtime import (
+    CodexDaemonRuntime,
+    CodexDaemonRuntimeConfig,
+    forward_codex_desktop_stops,
+)
+from astrorder.daemon.session_daemon import (
+    DaemonProtocolError,
+    SessionDaemon,
+    create_session_daemon,
+)
 
 
 class FakeCodexAppServer:
@@ -45,7 +55,7 @@ class FakeCodexAppServer:
                 "model": "fixture-model",
                 "modelProvider": "fixture-provider",
             }
-        if method == "thread/start":
+        if method in {"thread/start", "thread/fork"}:
             return {
                 "thread": {"id": "native-created-1", "cwd": params["cwd"]},
                 "model": "fixture-model",
@@ -61,6 +71,10 @@ class FakeCodexAppServer:
             return {}
         if method == "thread/settings/update":
             return {}
+        if method == "thread/delete":
+            return {}
+        if method == "thread/list":
+            return {"data": []}
         raise AssertionError(method)
 
     def notify(self, frame: dict[str, object]) -> None:
@@ -74,6 +88,122 @@ async def wait_for_status(daemon: SessionDaemon, session_id: str, status: str) -
             raise AssertionError(f"{session_id} did not reach {status}")
         await asyncio.sleep(0.01)
 
+
+@pytest.mark.asyncio
+async def test_codex_runtime_routes_desktop_submission_without_app_server(tmp_path):
+    calls = []
+
+    async def submit(thread_id, inputs):
+        calls.append((thread_id, inputs))
+        return {"accepted": True, "transport": "codex-desktop-cdp"}
+
+    runtime = CodexDaemonRuntime(
+        CodexDaemonRuntimeConfig(
+            executable="fixture-codex",
+            workspace=tmp_path,
+            allowed_workspaces=(tmp_path,),
+            agent_id="daemon-codex",
+            agent_name="Daemon Codex",
+        ),
+        emit=lambda *_args, **_kwargs: None,
+        desktop_submit=submit,
+    )
+
+    result = await runtime.query(
+        {
+            "method": "desktop/submit",
+            "request_params": {
+                "threadId": "thread-1",
+                "input": [{"type": "text", "text": "继续"}],
+            },
+        }
+    )
+
+    assert result == {"accepted": True, "transport": "codex-desktop-cdp"}
+    assert calls == [("thread-1", [{"type": "text", "text": "继续"}])]
+
+
+@pytest.mark.asyncio
+async def test_codex_desktop_stop_is_forwarded_as_native_completion(tmp_path):
+    home = tmp_path / ".codex"
+    events = home / "astrorder-observer" / "events"
+    events.mkdir(parents=True)
+    config = CodexDaemonRuntimeConfig(
+        executable="fixture-codex",
+        workspace=tmp_path,
+        allowed_workspaces=(tmp_path,),
+        agent_id="daemon-codex",
+        agent_name="Daemon Codex",
+        environment={"CODEX_HOME": str(home)},
+    )
+    stopping = asyncio.Event()
+    forwarded = asyncio.Event()
+    calls = []
+
+    async def emit(*args, **kwargs):
+        calls.append((args, kwargs))
+        forwarded.set()
+        return {}
+
+    task = asyncio.create_task(
+        forward_codex_desktop_stops(config, emit, stopping, poll_interval=0.01)
+    )
+    await asyncio.sleep(0.02)
+    event_id = "a" * 32
+    (events / f"{event_id}.json").write_text(
+        json.dumps(
+            {
+                "id": event_id,
+                "event": "Stop",
+                "session_id": "thread-1",
+                "turn_id": "turn-1",
+                "observed_at": time.time(),
+            }
+        ),
+        encoding="utf-8",
+    )
+    await asyncio.wait_for(forwarded.wait(), timeout=1)
+    stopping.set()
+    await task
+
+    assert calls[0][0][:2] == ("thread-1", "codex.notification")
+    assert calls[0][0][2]["frame"]["params"]["turn"] == {
+        "id": "turn-1",
+        "status": "completed",
+    }
+
+
+@pytest.mark.asyncio
+async def test_codex_runtime_preserves_native_query_rejection(tmp_path):
+    class RejectingCatalog(FakeCodexAppServer):
+        def request(self, method, params, timeout=30):
+            if method == "thread/items/list":
+                raise CodexRpcRejected(
+                    {"code": -32601, "message": "thread/items/list is not supported yet"}
+                )
+            return super().request(method, params, timeout)
+
+    runtime = CodexDaemonRuntime(
+        CodexDaemonRuntimeConfig(
+            executable="fixture-codex",
+            workspace=tmp_path,
+            allowed_workspaces=(tmp_path,),
+            agent_id="daemon-codex",
+            agent_name="Daemon Codex",
+        ),
+        emit=lambda *_args, **_kwargs: None,
+        client_factory=RejectingCatalog,
+    )
+
+    with pytest.raises(DaemonProtocolError, match=r"-32601.*not supported"):
+        await runtime.query(
+            {
+                "method": "thread/items/list",
+                "request_params": {"threadId": "thread-1"},
+            }
+        )
+
+    await runtime.shutdown()
 
 def test_codex_daemon_factory_requires_authenticated_ipc(tmp_path):
     config = CodexDaemonRuntimeConfig(
@@ -161,6 +291,7 @@ async def test_daemon_owned_codex_runtime_keeps_native_transport_and_wals_notifi
                         "params": {
                             "approvalPolicy": "on-request",
                             "sandboxPolicy": {"type": "workspaceWrite"},
+                            "model": "fixture-next-model",
                         },
                     }
                 )
@@ -194,7 +325,29 @@ async def test_daemon_owned_codex_runtime_keeps_native_transport_and_wals_notifi
                 )
             )
             updated = json.loads(await socket.recv())
-            assert updated["result"] == {"status": "running", "accepted": True}
+            assert updated["result"] == {
+                "status": "running",
+                "accepted": True,
+                "model": "fixture-next-model",
+                "effort": "high",
+            }
+
+            await socket.send(
+                json.dumps(
+                    {
+                        "action": "session.settings",
+                        "request_id": "max-settings-1",
+                        "session_id": "native-thread-1",
+                        "effort": "max",
+                    }
+                )
+            )
+            max_updated = json.loads(await socket.recv())
+            assert max_updated["result"] == {
+                "status": "running",
+                "accepted": True,
+                "effort": "max",
+            }
 
         client = FakeCodexAppServer.instances[0]
         assert client.started is True
@@ -222,6 +375,7 @@ async def test_daemon_owned_codex_runtime_keeps_native_transport_and_wals_notifi
                     ],
                     "approvalPolicy": "on-request",
                     "sandboxPolicy": {"type": "workspaceWrite"},
+                    "model": "fixture-next-model",
                 },
             ),
             (
@@ -236,6 +390,7 @@ async def test_daemon_owned_codex_runtime_keeps_native_transport_and_wals_notifi
                 "thread/settings/update",
                 {"threadId": "native-thread-1", "model": "fixture-next-model", "effort": "high"},
             ),
+            ("thread/settings/update", {"threadId": "native-thread-1", "effort": "max"}),
         ]
         assert daemon.status()["native-thread-1"]["status"] == "running"
 
@@ -317,7 +472,54 @@ async def test_daemon_owned_codex_runtime_creates_native_thread_without_app_serv
         assert not any(
             method in {"thread/name/set", "thread/read"} for method, _params in client.calls
         )
+        async with websockets.connect(endpoint) as socket:
+            await socket.send(json.dumps({"action": "daemon.handshake", "secret": "test-only-daemon-secret"}))
+            await socket.recv()
+            await socket.send(json.dumps({
+                "action": "session.delete",
+                "request_id": "delete-1",
+                "session_id": "native-created-1",
+            }))
+            deleted = json.loads(await socket.recv())
+        assert deleted["result"]["deleted"] == "native-created-1"
+        assert "native-created-1" not in daemon.status()
+        assert client.stopped is True
     finally:
         await runtime.shutdown()
         server.close()
         await server.wait_closed()
+
+@pytest.mark.asyncio
+async def test_ephemeral_codex_fork_omits_incompatible_goal_continuation_flag(tmp_path):
+    FakeCodexAppServer.instances.clear()
+    runtime = CodexDaemonRuntime(
+        CodexDaemonRuntimeConfig(
+            executable="fixture-codex",
+            workspace=tmp_path,
+            allowed_workspaces=(tmp_path,),
+            agent_id="daemon-codex",
+            agent_name="Daemon Codex",
+        ),
+        emit=lambda *_args, **_kwargs: None,
+        client_factory=FakeCodexAppServer,
+    )
+
+    created = await runtime.create(
+        {
+            "cwd": str(tmp_path),
+            "parent_session_id": "source-thread",
+            "ephemeral": True,
+        }
+    )
+
+    assert created["session_id"] == "native-created-1"
+    assert (
+        "thread/fork",
+        {
+            "threadId": "source-thread",
+            "cwd": str(tmp_path),
+            "ephemeral": True,
+            "excludeTurns": True,
+        },
+    ) in FakeCodexAppServer.instances[0].calls
+    await runtime.shutdown()

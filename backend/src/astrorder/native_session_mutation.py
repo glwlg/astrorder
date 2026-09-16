@@ -68,7 +68,13 @@ def delete_native_session(rpc: NativeRpc, session_id: str) -> None:
                 closed = _call(rpc, "session.close", {"session_id": row["id"]})
                 if closed.get("closed") is not True:
                     raise NativeMutationError("native session handle did not close")
-            deleted = _call(rpc, "session.delete", {"session_id": session_id})
+            try:
+                deleted = _call(rpc, "session.delete", {"session_id": session_id})
+            except NativeMutationError as exc2:
+                if exc2.code == 4007:
+                    deleted = None
+                else:
+                    raise
         else:
             raise
     if deleted is not None and deleted.get("deleted") != session_id:

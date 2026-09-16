@@ -2,3 +2,14 @@
 .session-pinned-heading { display:flex; align-items:center; gap:7px; padding:6px 9px; color:var(--mantine-primary-color-filled); font-size:12px; font-weight:650; }
 .session-rail-filters { overflow-x:auto; gap:4px; }
 .session-rail-filters .session-filter { flex-shrink:0; padding-inline:9px; }
+
+.session-batch-checkbox {
+  margin-left: 6px;
+  margin-right: 4px;
+  flex-shrink: 0;
+}
+.session-row-wrapper .session-batch-checkbox + .session-row,
+.session-row-wrapper .session-batch-checkbox ~ .session-row {
+  flex: 1 1 0;
+  min-width: 0;
+}

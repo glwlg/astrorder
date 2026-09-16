@@ -1,13 +1,13 @@
-import { type TouchEvent, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import { Menu, useMantineColorScheme } from '@mantine/core'
+import { type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type TouchEvent, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { Button, Group, Menu, Modal, TextInput, useMantineColorScheme } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { IconSun, IconMoon, IconDeviceDesktop, IconBell, IconRefresh, IconPlayerPlay, IconInfoCircle, IconNotes, IconPlayerStop, IconSend, IconMessageCircle, IconCheck, IconX, IconMicrophone, IconPlus, IconDotsVertical, IconCpu, IconLoader2, IconPlugConnected, IconFilter } from '@tabler/icons-react'
+import { IconSun, IconMoon, IconDeviceDesktop, IconBell, IconRefresh, IconPlayerPlay, IconInfoCircle, IconNotes, IconPlayerStop, IconSend, IconMessageCircle, IconCheck, IconX, IconMicrophone, IconPlus, IconDotsVertical, IconCpu, IconLoader2, IconPlugConnected, IconFilter, IconTransfer, IconEdit, IconCopy, IconTrash } from '@tabler/icons-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useShallow } from 'zustand/react/shallow'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { api } from '../../api/client'
-import type { Approval, Command, Message, Session, Task } from '../../domain/types'
+import type { AgentCommand, AgentMention, Approval, Command, Message, Session, Task } from '../../domain/types'
 import { scopeKey } from '../../domain/semantics'
 import { requestNotificationPermission } from '../../domain/notifications'
 import { selectApprovals, selectCommands, selectProjects, selectSessions, selectTasks, useAstrorderStore } from '../../state/store'
@@ -35,12 +35,17 @@ import { EnvironmentConnections } from '../agents/EnvironmentConnections'
 import { MobileApprovals } from './MobileApprovals'
 import { AgentKindBadge, SessionRuntimeFacts } from '../../components/SessionRuntimeFacts'
 import { MobileAttachmentPreview } from './MobileAttachmentPreview'
-import { MobileOutbox } from './mobileOutbox'
+import { MobileOutbox, type OutboxEntry } from './mobileOutbox'
 import { NativeObservationPanel } from '../../components/NativeObservationPanel'
 import { ApprovalModeControl } from '../chat/ApprovalModeControl'
 import { submitBrowserCommand } from '../chat/commandActions'
 import { mobileOutboxStorage } from './mobileOutboxStorage'
-import { closesSessionDrawerFromSwipe, opensSessionDrawerFromEdge, startsAtSessionDrawerEdge, suppressNativeHold, type SessionCardPose, type SessionSwipeGesture } from './mobileGestures'
+import { closesSessionDrawerFromSwipe, hapticFeedback, opensSessionDrawerFromEdge, queueSwipeZone, startsAtSessionDrawerEdge, suppressNativeHold, type SessionCardPose, type SessionSwipeGesture } from './mobileGestures'
+import { HandoffDialog } from '../../components/HandoffDialog'
+import { BackgroundTasks } from '../../components/BackgroundTasks'
+import { agentKindLabel } from '../../components/AgentBrandIcon'
+import { AgentCommandMenu, AgentMentionMenu, filterAgentCommands, filterAgentMentions, formatAgentMention, useAgentCommands, useAgentMentions, useFileMentions } from '../chat/AgentCommandMenu'
+import { ClickSpark } from '../../components/animations/ClickSpark'
 import './mobile.css'
 import './mobilePolish.css'
 
@@ -95,7 +100,7 @@ export function MobileWorkspace() {
   const route = new URLSearchParams(location.search)
   const routeId = location.pathname.match(/\/chat\/([^/]+)$/)?.[1]
   const selected = navigableSessions.find(s => s.id === (routeId ? decodeURIComponent(routeId) : '') && s.agent_id === route.get('agent_id')) || null
-  const [sheet, setSheet] = useState<'sessions' | 'status' | 'task' | 'models' | 'queue' | 'connections' | null>(null)
+  const [sheet, setSheet] = useState<'sessions' | 'status' | 'task' | 'models' | 'connections' | null>(null)
   const [sessionTransition, setSessionTransition] = useState<SessionCardCut>('next-down')
   const [sessionDrag, setSessionDrag] = useState<SessionCardPose | null>(null)
   const edgeTouch = useRef<{ x: number; y: number } | null>(null)
@@ -120,10 +125,9 @@ export function MobileWorkspace() {
   const tasks = useAstrorderStore(useShallow(state => selected ? selectTasks(state, selected.agent_id, selected.id) : []))
   const commands = useAstrorderStore(useShallow(state => selected ? selectCommands(state, selected.agent_id, selected.id) : []))
   const activeTasks = tasks.filter(task => task.status === 'running' || task.status === 'waiting_approval')
-  const blockingActiveTasks = activeTasks.filter(task => task.progress?.blocking !== false)
+  const activeSubagents = tasks.filter(task => task.kind === 'subagent' && (task.status === 'running' || task.status === 'waiting_approval' || task.status === 'pending') && task.progress?.blocking !== false)
   const approvals = useAstrorderStore(useShallow(state => selected ? selectApprovals(state, selected.agent_id, selected.id) : []))
-  const runningCommand = commands.some(command => (command.action === 'send' || command.action === 'enqueue') && (command.state === 'running' || command.state === 'accepted'))
-  const nativeBusy = selected?.status === 'running' || selected?.status === 'waiting_approval' || blockingActiveTasks.length > 0 || runningCommand
+  const nativeBusy = selected?.status === 'running' || selected?.status === 'waiting_approval' || activeSubagents.length > 0
   const [messageAction, setMessageAction] = useState<(MessageActionAnchor & { sessionKey: string }) | null>(null)
   const closeMessageMenu = useCallback(() => setMessageAction(null), [])
   const [taskSelection, setTaskSelection] = useState<Pick<Task, 'id' | 'agent_id' | 'session_id'> | null>(null)
@@ -163,6 +167,8 @@ export function MobileWorkspace() {
   }, [outbox, outboxReady, canDispatch, selected, queue])
   const sending = useRef(false)
   const [submitting, setSubmitting] = useState(false)
+  const queueHold = useRef<{ pointerId: number; entry: OutboxEntry; startY: number; armed: boolean } | null>(null)
+  const [queueLift, setQueueLift] = useState<{ id: string; text: string; x: number; y: number; zone: 'send' | 'edit' | null } | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
   const textarea = useRef<HTMLTextAreaElement>(null)
   const [filter, setFilter] = useState('all')
@@ -179,6 +185,106 @@ export function MobileWorkspace() {
   const [confirmation, setConfirmation] = useState<MobileConfirmation | null>(null)
   const [confirmationLoading, setConfirmationLoading] = useState(false)
   const [search, setSearch] = useState('')
+  const [handoffTarget, setHandoffTarget] = useState<Session | null>(null)
+  const [renameSession, setRenameSession] = useState<Session | null>(null)
+  const [renameTitle, setRenameTitle] = useState('')
+  const [renameLoading, setRenameLoading] = useState(false)
+  const [commandIndex, setCommandIndex] = useState(0)
+  const [dismissedMenuText, setDismissedMenuText] = useState<string | null>(null)
+
+  const commandMenuOpen = /^\/[^\s]*$/.test(text) && dismissedMenuText !== text
+  const resourcesReady = !agents[selected?.agent_id || ''] || agents[selected?.agent_id || '']?.status === 'ready'
+  const commandQuery = useAgentCommands(selected, resourcesReady && !!selected)
+  const agentCommands = commandMenuOpen && selected
+    ? filterAgentCommands(commandQuery.data?.items || [], text)
+    : []
+  const mentionMatch = text.match(/(?:^|\s)@[^\s@]*$/)
+  const mentionMenuOpen = Boolean(mentionMatch) && dismissedMenuText !== text
+  const mentionText = mentionMatch?.[0].trim().slice(1) || ''
+  const mentionQuery = useAgentMentions(selected, resourcesReady && !!selected)
+  const fileMentionQuery = useFileMentions(selected, mentionText, mentionMenuOpen && resourcesReady && !!selected)
+  const agentMentions = mentionMenuOpen && selected
+    ? filterAgentMentions(
+        [...(mentionQuery.data?.items || []), ...(fileMentionQuery.data || [])],
+        text,
+      )
+    : []
+
+  const selectAgentCommand = (item: AgentCommand) => {
+    const next = `/${item.name}${item.input_hint ? ' ' : ''}`
+    setText(next)
+    setDismissedMenuText(next)
+    setCommandIndex(0)
+    textarea.current?.focus()
+  }
+
+  const selectAgentMention = (item: AgentMention) => {
+    setText(text.replace(/@[^\s@]*$/, formatAgentMention(item)))
+    setCommandIndex(0)
+    textarea.current?.focus()
+  }
+
+  const handleKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    const choices = mentionMenuOpen ? agentMentions : agentCommands
+    if (choices.length && ['ArrowDown', 'ArrowUp'].includes(event.key)) {
+      event.preventDefault()
+      setCommandIndex(index => (index + (event.key === 'ArrowDown' ? 1 : -1) + choices.length) % choices.length)
+      return
+    }
+    if (choices.length && (event.key === 'Tab' || (event.key === 'Enter' && !event.shiftKey))) {
+      event.preventDefault()
+      if (mentionMenuOpen) selectAgentMention(agentMentions[Math.min(commandIndex, agentMentions.length - 1)])
+      else selectAgentCommand(agentCommands[Math.min(commandIndex, agentCommands.length - 1)])
+      return
+    }
+    if (event.key === 'Escape' && (commandMenuOpen || mentionMenuOpen)) {
+      event.preventDefault()
+      setDismissedMenuText(text)
+      return
+    }
+    if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+      event.preventDefault()
+      if (!submitting) void send()
+    }
+  }
+
+  const handoffTargets = (session: Session) => {
+    const source = agents[session.agent_id]
+    if (!source || source.connection_id != null) return []
+    return Object.values(agents).filter((agent) =>
+      agent.kind !== source.kind && agent.connection_id == null && agent.status === 'ready',
+    )
+  }
+
+  const openRename = (s: Session) => {
+    setRenameSession(s)
+    setRenameTitle(s.title || '')
+  }
+
+  const handleRename = async () => {
+    if (!renameSession || !renameTitle.trim()) return
+    setRenameLoading(true)
+    try {
+      const updated = await api.updateSession(renameSession.id, {
+        agent_id: renameSession.agent_id,
+        title: renameTitle.trim(),
+      })
+      useAstrorderStore.setState((state) => ({
+        sessions: { ...state.sessions, [scopeKey(updated.agent_id, updated.id)]: updated },
+      }))
+      setRenameSession(null)
+      notify('会话已重命名', 'teal')
+    } catch (e) {
+      notify(e instanceof Error ? e.message : '重命名失败', 'red')
+    } finally {
+      setRenameLoading(false)
+    }
+  }
+
+  const copySessionId = (s: Session) => {
+    void navigator.clipboard?.writeText(s.id)
+    notify('已复制会话 ID', 'teal')
+  }
 
   const { preferences, updatePreferences, removeProjectPreferences } = useWorkspacePreferences()
   const { session_pins: pins, appearance, project_order: order, pinned_projects: pinnedProjects } = preferences
@@ -221,6 +327,21 @@ export function MobileWorkspace() {
     finally { setModelLoading(false) }
   }
   const refresh = async () => { await queryClient.invalidateQueries({ queryKey: ['astrorder'] }); notify('进度已对齐最新状态') }
+  const handoffPeer = useMemo(() => {
+    if (!selected) return null
+    if (selected.handoff_from_agent_id && selected.handoff_from_session_id) {
+      const source = sessions.find((session) =>
+        session.agent_id === selected.handoff_from_agent_id
+        && session.id === selected.handoff_from_session_id,
+      )
+      return source ? { session: source, label: `来自 ${agentKindLabel(agents[source.agent_id]?.kind)}` } : null
+    }
+    const target = sessions.find((session) =>
+      session.handoff_from_agent_id === selected.agent_id
+      && session.handoff_from_session_id === selected.id,
+    )
+    return target ? { session: target, label: `已转交至 ${agentKindLabel(agents[target.agent_id]?.kind)}` } : null
+  }, [agents, selected, sessions])
   const handleApproval = async (approval: Approval, action: 'approve' | 'cancel') => {
     if (!selected || !approval.target_id) return
     try {
@@ -240,12 +361,25 @@ export function MobileWorkspace() {
     }
   }
   useEffect(() => {
-    const resume = () => { if (document.visibilityState === 'visible') void queryClient.invalidateQueries({ queryKey: ['astrorder'] }) }
+    const resume = () => {
+      if (document.visibilityState === 'visible') {
+        void queryClient.invalidateQueries({ queryKey: ['astrorder'] })
+        if (selected) {
+          void api.getMessages(selected.id, selected.agent_id).then(res => {
+            useAstrorderStore.getState().mergeMessages(selected.agent_id, selected.id, res.items)
+          }).catch(() => {})
+          void api.getCommands(selected.id, selected.agent_id).then(res => {
+            useAstrorderStore.getState().mergeCommands(res.items)
+          }).catch(() => {})
+        }
+      }
+    }
     window.addEventListener('online', resume); document.addEventListener('visibilitychange', resume)
     return () => { window.removeEventListener('online', resume); document.removeEventListener('visibilitychange', resume) }
-  }, [queryClient])
+  }, [queryClient, selected])
   const send = async (quickText?: string) => {
     if (!selected || sending.current) return
+    hapticFeedback(12)
     const body = quickText ?? (quote ? quote.split('\n').map(line => `> ${line}`).join('\n') + '\n\n' + text : text)
     const chosenFiles = quickText ? [] : files
     if (!body.trim() && !chosenFiles.length) return
@@ -274,25 +408,85 @@ export function MobileWorkspace() {
         notify('已保存到待发队列')
       }
       notifySessionSubmitted(selected)
-      if (!quickText) { setText(''); updateFiles([]); setQuote('') }
+      if (!quickText) {
+        setText('')
+        updateFiles([])
+        setQuote('')
+        if (textarea.current) textarea.current.style.height = '35px'
+      }
     } catch (error) {
       if (direct) useAstrorderStore.getState().markOutboxError(selected.agent_id, selected.id, commandId, messageError(error), 'unknown')
       notify(messageError(error), 'red')
     } finally { sending.current = false; setSubmitting(false) }
   }
-  const flush = async () => {
-    if (!selected) return
+  const sendPress = useRef(false)
+  const pressSend = (event?: { preventDefault(): void; button?: number }) => {
+    if (typeof event?.button === 'number' && event.button !== 0) return
+    if (submitting || !selected) return
+    if (event) {
+      event.preventDefault()
+      sendPress.current = true
+    } else if (sendPress.current) {
+      sendPress.current = false
+      return
+    }
+    if (busy && !text && !files.length) void stop()
+    else void send()
+  }
+  const editQueued = async (entry: OutboxEntry) => {
     try {
-      const result = await api.getCommands(selected.id, selected.agent_id)
-      useAstrorderStore.getState().mergeCommands(result.items)
-      await outbox.reconcile(result.items, sessions)
-      if (canDispatch) {
-        await outbox.flush(selected.agent_id, selected.id)
-        const failed = outbox.snapshot().find(row => row.payload.agent_id === selected.agent_id && row.payload.session_id === selected.id && (row.state === 'failed' || row.state === 'unknown') && row.error)
-        if (failed?.error) notify(failed.error, 'red')
-      }
-      else notify('会话正在运行或连接未就绪，队列已保留')
-    } catch (error) { notify(messageError(error), 'red') }
+      await outbox.remove(entry.payload.agent_id, entry.payload.session_id, entry.payload.id)
+      const nextText = entry.payload.text
+        ? (text ? entry.payload.text + '\n' + text : entry.payload.text)
+        : text
+      setText(nextText)
+      if (entry.files.length) updateFiles([...entry.files, ...files])
+      textarea.current?.focus({ preventScroll: true })
+    } catch (error) {
+      notify(messageError(error), 'red')
+    }
+  }
+  const finishQueueDrag = (y: number) => {
+    const hold = queueHold.current
+    queueHold.current = null
+    setQueueLift(null)
+    if (!hold?.armed) return
+    const zone = queueSwipeZone(hold.startY, y)
+    if (zone === 'send' && hold.entry.state === 'queued') {
+      void outbox.flush(hold.entry.payload.agent_id, hold.entry.payload.session_id, hold.entry.payload.id).catch(error => notify(messageError(error), 'red'))
+    } else if (zone === 'send' && hold.entry.state === 'failed') {
+      void outbox.retry(hold.entry.payload.agent_id, hold.entry.payload.session_id, hold.entry.payload.id).catch(error => notify(messageError(error), 'red'))
+    } else if (zone === 'edit') {
+      void editQueued(hold.entry)
+    }
+  }
+  const onQueuePointerDown = (entry: OutboxEntry, event: ReactPointerEvent<HTMLElement>) => {
+    if (event.button !== 0 || !['queued', 'failed', 'cancelled'].includes(entry.state)) return
+    event.preventDefault()
+    event.stopPropagation()
+    const pointerId = event.pointerId
+    const startY = event.clientY
+    queueHold.current = { pointerId, entry, startY, armed: false }
+    event.currentTarget.setPointerCapture?.(pointerId)
+  }
+  const onQueuePointerMove = (event: ReactPointerEvent<HTMLElement>) => {
+    const hold = queueHold.current
+    if (!hold || hold.pointerId !== event.pointerId) return
+    if (!hold.armed) {
+      if (Math.abs(event.clientY - hold.startY) < 8) return
+      hold.armed = true
+      hapticFeedback(12)
+      setQueueLift({ id: hold.entry.payload.id, text: hold.entry.payload.text || '附件消息', x: event.clientX, y: event.clientY, zone: queueSwipeZone(hold.startY, event.clientY) })
+      return
+    }
+    event.preventDefault()
+    setQueueLift(prev => prev ? { ...prev, x: event.clientX, y: event.clientY, zone: queueSwipeZone(hold.startY, event.clientY) } : prev)
+  }
+  const onQueuePointerUp = (event: ReactPointerEvent<HTMLElement>) => {
+    const hold = queueHold.current
+    if (!hold || hold.pointerId !== event.pointerId) return
+    event.currentTarget.releasePointerCapture?.(event.pointerId)
+    finishQueueDrag(event.clientY)
   }
   const executeStop = async (session: Session) => {
     const targetId = session.id
@@ -306,6 +500,7 @@ export function MobileWorkspace() {
   }
   const stop = async () => {
     if (!selected) return
+    hapticFeedback(12)
     await executeStop(selected)
   }
   const requestStopTask = (task: Task, event?: { clientX: number; clientY: number }) => {
@@ -461,6 +656,7 @@ export function MobileWorkspace() {
     if (!start || sheet) return
     const point = event.changedTouches[0]
     if (!point || !opensSessionDrawerFromEdge(start.x, start.y, point.clientX, point.clientY)) return
+    hapticFeedback(15)
     setSheet('sessions')
     void openState.refetch()
   }
@@ -497,9 +693,9 @@ export function MobileWorkspace() {
     }
   }
 
-  return <div className="mobile-workspace" data-mobile-shell="independent" onContextMenuCapture={(event) => suppressNativeHold(event.nativeEvent)} onTouchStartCapture={handleWorkspaceTouchStart} onTouchMoveCapture={handleWorkspaceTouchMove} onTouchEndCapture={handleWorkspaceTouchEnd} onTouchCancelCapture={() => { edgeTouch.current = null }}>
+  return <div className="mobile-workspace" data-mobile-shell="independent" data-queue-drop={queueLift?.zone || undefined} onContextMenuCapture={(event) => suppressNativeHold(event.nativeEvent)} onTouchStartCapture={handleWorkspaceTouchStart} onTouchMoveCapture={handleWorkspaceTouchMove} onTouchEndCapture={handleWorkspaceTouchEnd} onTouchCancelCapture={() => { edgeTouch.current = null }}>
     {createOpened && <NewSessionDialog agents={agents} project={createProject} initialAgentId={agentFilter !== 'all' ? agentFilter : undefined} onClose={() => setCreateOpened(false)} onCreated={session => { setSearch(''); select(session) }} />}
-    <header className="m-header"><div className="m-brand"><button className="m-session-nav" aria-label="打开会话列表" onClick={() => { setSheet('sessions'); void openState.refetch() }}><IconMessageCircle size={21} /></button><BrandMark className="m-brand-mark" size={26} alt="" /><strong>星序</strong><span className={`m-dot ${connection === 'connected' ? 'online' : ''}`} aria-label={connection === 'connected' ? '已连接' : '连接中'} /></div><div className="m-header-actions">
+    <header className="m-header"><div className="m-brand"><button className="m-session-nav" aria-label="打开会话列表" onClick={() => { setSheet('sessions'); void openState.refetch() }}><IconMessageCircle size={21} /></button><div className="m-brand-home-btn" onClick={() => navigate('/chat')} role="button" aria-label="返回工作台首页"><BrandMark className="m-brand-mark" size={26} alt="" /><strong>星序</strong></div><span className={`m-dot ${connection === 'connected' ? 'online' : ''}`} aria-label={connection === 'connected' ? '已连接' : '连接中'} /></div><div className="m-header-actions">
       <button aria-label="新建会话" onClick={() => { setCreateProject(null); setCreateOpened(true) }}><IconPlus size={21} /></button>
       <Menu position="bottom-end" width={210} withinPortal>
         <Menu.Target><button aria-label="应用设置"><IconDotsVertical size={21} /></button></Menu.Target>
@@ -520,13 +716,29 @@ export function MobileWorkspace() {
           <button className="m-model-chip" aria-label="选择会话模型" title={sessionModel.label} onClick={() => void openModels()}>
             <IconCpu size={14} /><span>{sessionModel.label}</span>
           </button>
+          {handoffPeer && (
+            <button className="m-model-chip" aria-label={handoffPeer.label} title={handoffPeer.session.title} onClick={() => select(handoffPeer.session)}>
+              <IconTransfer size={13} /><span>{handoffPeer.label}</span>
+            </button>
+          )}
         </div>
         <Menu position="bottom-end" width={230} withinPortal>
           <Menu.Target><button aria-label="会话操作"><IconDotsVertical size={20} /></button></Menu.Target>
           <Menu.Dropdown>
             <Menu.Item leftSection={<IconPlayerPlay size={17} />} onClick={() => void send('继续')}>继续</Menu.Item>
             <Menu.Item leftSection={<IconInfoCircle size={17} />} onClick={() => setSheet('status')}>运行状态</Menu.Item>
+            <Menu.Item leftSection={<IconEdit size={17} />} onClick={() => openRename(selected)}>重命名</Menu.Item>
+            <Menu.Item leftSection={<IconCopy size={17} />} onClick={() => copySessionId(selected)}>复制 ID</Menu.Item>
             <Menu.Item leftSection={<IconNotes size={17} />} onClick={() => void send('帮我总结当前会话的最新进展与遗留事项')}>总结进展</Menu.Item>
+            {selected && handoffTargets(selected).length > 0 && (
+              <Menu.Item
+                leftSection={<IconTransfer size={17} />}
+                disabled={selected.status !== 'idle'}
+                onClick={() => setHandoffTarget(selected)}
+              >
+                转交
+              </Menu.Item>
+            )}
             <Menu.Label>内容区斜滑切换开放会话</Menu.Label>
             <Menu.Divider />
             <Menu.Item color="red" leftSection={<IconPlayerStop size={17} />} onClick={(event) => requestStopAll(event)}>终止全部任务</Menu.Item>
@@ -534,32 +746,46 @@ export function MobileWorkspace() {
         </Menu>
       </div>
       <MobileTranscript messages={messages} approvals={approvals} onApproval={(approval, action) => void handleApproval(approval, action)} busy={busy} loadOlder={() => resources.messages.fetchNextPage()} hasOlder={!!resources.messages.hasNextPage} loadingOlder={resources.messages.isFetchingNextPage} onMessageAction={anchor => setMessageAction({ ...anchor, sessionKey: key })} onImage={setImage} onFile={(path) => setArtifactPath(resolveMobileFilePath(path, selected?.workspace))} onSwipe={switchSession} onSwipePreview={setSessionDrag} />
-      <AnimatePresence initial={false}>
-        {!!pending.length && <motion.button className="m-queue-banner" initial={reducedMotion ? false : { opacity: 0, y: 8, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -6, scale: 0.98 }} transition={{ duration: 0.25 }} onClick={() => setSheet('queue')}>消息队列 ({pending.length}) · {queueLabels[pending[0].state]}{pending[0].error ? ` · ${pending[0].error}` : ''}</motion.button>}
-      </AnimatePresence>
     </MobileSessionDeck> : <div className="m-empty">从左上角选择会话，或新建会话</div>}</main>
     <section className="m-composer-float">
 
+      <AnimatePresence initial={false}>
+        {pending.map(entry => (
+          <motion.article className={queueLift?.id === entry.payload.id ? 'm-queue-item is-lifted' : 'm-queue-item'} key={entry.payload.id} data-command-id={entry.payload.id} aria-label="排队消息" layout initial={reducedMotion ? false : { opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, x: 24 }} transition={{ duration: 0.2 }} onPointerDown={event => onQueuePointerDown(entry, event)} onPointerMove={onQueuePointerMove} onPointerUp={onQueuePointerUp} onPointerCancel={onQueuePointerUp} onTouchStart={event => event.stopPropagation()}>
+            <p>{entry.payload.text || '附件消息'}</p>
+            {entry.state !== 'queued' && <small>{queueLabels[entry.state]}</small>}
+            <div className="m-queue-actions">
+              <button type="button" aria-label="删除" onPointerDown={event => { event.stopPropagation(); event.preventDefault(); void outbox.remove(entry.payload.agent_id, entry.payload.session_id, entry.payload.id).catch(error => notify(messageError(error), 'red')) }} onClick={event => event.stopPropagation()}><IconTrash size={16} /></button>
+            </div>
+          </motion.article>
+        ))}
+      </AnimatePresence>
       {!!activeTasks.length && <div className="m-active-tasks">{activeTasks.map(item => <button key={item.id} onClick={() => { setTaskSelection({ id: item.id, agent_id: item.agent_id, session_id: item.session_id }); setSheet('task') }}><span className="m-dot online" />{item.title}</button>)}</div>}
       {!!approvals.length && <button className="m-queue-banner" onClick={() => setSheet('status')}>等待授权 · {approvals.length} 项</button>}
       {quote && <div className="m-quote"><span>{quote}</span><button aria-label="取消引用" onClick={() => setQuote('')}><IconX size={16} /></button></div>}
       {!!files.length && <div className="m-attachments">{files.map((file, i) => <MobileAttachmentPreview key={`${file.name}-${i}`} file={file} onOpen={setImage} onRemove={() => updateFiles(files.filter((_, n) => n !== i))} />)}</div>}
-      <div className="m-composer"><input hidden ref={fileInput} type="file" multiple accept="image/*,audio/*,.pdf,.txt,.md,.json,.csv,.log" onChange={e => { updateFiles([...files, ...Array.from(e.target.files || [])]); e.target.value = '' }} />
-        <button aria-label="添加附件" onClick={() => fileInput.current?.click()}><IconPlus size={21} /></button>
-        <textarea ref={textarea} aria-label="消息内容" placeholder="输入消息，可粘贴图片…" rows={1} value={text} onPaste={event => { const pasted = clipboardFiles(event); if (pasted.length) { event.preventDefault(); updateFiles([...files, ...pasted]) } }} onChange={e => { setText(e.target.value); e.target.style.height = '35px'; e.target.style.height = `${Math.min(140, Math.max(35, e.target.scrollHeight))}px` }} />
-        <button aria-label="语音消息" onClick={() => setVoice(true)}><IconMicrophone size={21} /></button>
-        <button className="m-send" data-stop={busy && !text && !files.length} aria-label={busy && !text && !files.length ? '停止' : '发送'} disabled={submitting || !selected} onClick={() => busy && !text && !files.length ? void stop() : void send()}>{submitting ? <IconLoader2 className="m-spin" size={20} /> : busy && !text && !files.length ? <IconPlayerStop size={19} /> : <IconSend size={20} />}</button>
+      <div style={{ position: 'relative' }}>
+      <AgentCommandMenu agent={agents[selected?.agent_id || '']} items={agentCommands} activeIndex={commandIndex} onSelect={selectAgentCommand} />
+      <AgentMentionMenu agent={agents[selected?.agent_id || '']} items={agentMentions} activeIndex={commandIndex} onSelect={selectAgentMention} />
+      <div className="m-composer">
+        <input hidden ref={fileInput} type="file" multiple accept="image/*,audio/*,.pdf,.txt,.md,.json,.csv,.log" onChange={e => { updateFiles([...files, ...Array.from(e.target.files || [])]); e.target.value = '' }} />
+          <button aria-label="添加附件" onClick={() => fileInput.current?.click()}><IconPlus size={20} /></button>
+          <textarea ref={textarea} aria-label="消息内容" placeholder="输入消息…" rows={1} value={text} onPaste={event => { const pasted = clipboardFiles(event); if (pasted.length) { event.preventDefault(); updateFiles([...files, ...pasted]) } }} onKeyDown={handleKeyDown} onChange={e => { setCommandIndex(0); setDismissedMenuText(null); setText(e.target.value); e.target.style.height = '34px'; e.target.style.height = `${Math.min(140, Math.max(34, e.target.scrollHeight))}px` }} />
+          <button aria-label="语音消息" onClick={() => setVoice(true)}><IconMicrophone size={19} /></button>
+          <ClickSpark className="m-send-spark" sparkColor={busy && !text && !files.length ? '#ef4444' : '#3b82f6'} sparkSize={10} sparkRadius={28} sparkCount={8}>
+            <button type="button" className="m-send" data-stop={busy && !text && !files.length} aria-label={busy && !text && !files.length ? '停止' : '发送'} disabled={submitting || !selected} onPointerDown={pressSend} onClick={() => pressSend()}>{submitting ? <IconLoader2 className="m-spin" size={18} /> : busy && !text && !files.length ? <IconPlayerStop size={17} /> : <IconSend size={18} />}</button>
+          </ClickSpark>
+        </div>
       </div>
     </section>
     {messageAction?.sessionKey === key && <MobileMessageMenu anchor={messageAction} onClose={closeMessageMenu} onCopy={() => void copy(messageAction.text)} onQuote={() => { setQuote(messageAction.text); textarea.current?.focus({ preventScroll: true }) }} />}
-    {sheet && <div className={`m-backdrop ${sheet === 'sessions' ? 'm-session-backdrop' : ''}`} onClick={() => setSheet(null)} onTouchStartCapture={handleDrawerTouchStart} onTouchMoveCapture={handleDrawerTouchMove} onTouchEndCapture={handleDrawerTouchEnd} onTouchCancelCapture={handleDrawerTouchCancel}><section ref={node => { drawerSheet.current = node }} style={sheet === 'sessions' && drawerOffset !== null ? { transform: `translate3d(${drawerOffset}px, 0, 0)`, transition: drawerSettling ? 'transform .22s cubic-bezier(.2,.8,.2,1)' : 'none', animation: 'none' } : undefined} className={`m-sheet ${sheet === 'sessions' ? 'm-session-sheet' : ''}`} role="dialog" aria-label={sheet === 'sessions' ? '会话列表' : '详情'} onClick={e => e.stopPropagation()} onTouchStart={handleDrawerTouchStart} onTouchMove={handleDrawerTouchMove} onTouchEnd={handleDrawerTouchEnd} onTouchCancel={handleDrawerTouchCancel}><div className="m-handle" /><header><h2>{({ sessions: '会话', status: '运行状态', task: '任务详情', models: '选择模型', queue: '消息队列', connections: '连接管理' })[sheet]}</h2><div className="m-sheet-header-actions">{sheet === 'sessions' && <><button aria-label="筛选" aria-pressed={filtersOpen} onClick={() => setFiltersOpen(open => !open)}><IconFilter size={18} /></button><button aria-label="新建会话" onClick={() => { setCreateProject(null); setCreateOpened(true) }}><IconPlus size={20} /></button></>}<button aria-label="关闭面板" onClick={() => setSheet(null)}><IconX size={20} /></button></div></header>
+    {sheet && <div className={`m-backdrop ${sheet === 'sessions' ? 'm-session-backdrop' : ''}`} onClick={() => setSheet(null)} onTouchStartCapture={handleDrawerTouchStart} onTouchMoveCapture={handleDrawerTouchMove} onTouchEndCapture={handleDrawerTouchEnd} onTouchCancelCapture={handleDrawerTouchCancel}><section ref={node => { drawerSheet.current = node }} style={sheet === 'sessions' && drawerOffset !== null ? { transform: `translate3d(${drawerOffset}px, 0, 0)`, transition: drawerSettling ? 'transform .22s cubic-bezier(.2,.8,.2,1)' : 'none', animation: 'none' } : undefined} className={`m-sheet ${sheet === 'sessions' ? 'm-session-sheet' : ''}`} role="dialog" aria-label={sheet === 'sessions' ? '会话列表' : '详情'} onClick={e => e.stopPropagation()} onTouchStart={handleDrawerTouchStart} onTouchMove={handleDrawerTouchMove} onTouchEnd={handleDrawerTouchEnd} onTouchCancel={handleDrawerTouchCancel}><div className="m-handle" /><header><h2>{({ sessions: '会话', status: '运行状态', task: '任务详情', models: '选择模型', connections: '连接管理' })[sheet]}</h2><div className="m-sheet-header-actions">{sheet === 'sessions' && <><button aria-label="筛选" aria-pressed={filtersOpen} onClick={() => setFiltersOpen(open => !open)}><IconFilter size={18} /></button><button aria-label="新建会话" onClick={() => { setCreateProject(null); setCreateOpened(true) }}><IconPlus size={20} /></button></>}<button aria-label="关闭面板" onClick={() => setSheet(null)}><IconX size={20} /></button></div></header>
       {sheet === 'connections' && <div className="m-sheet-body"><EnvironmentConnections embedded /></div>}
       {sheet === 'sessions' && filtersOpen && <><div className="m-drawer-filter-row"><AgentSessionFilter agents={agents} value={agentFilter} onChange={updateAgentFilter} /></div><nav className="m-filters">{[['all','全部'],['unread','未读'],['open','开放中'],['pinned','置顶'],['recent','24小时']].map(([id,label]) => <button className={filter === id ? 'active' : ''} key={id} onClick={() => setFilter(id)}>{label}</button>)}</nav></>}
-      {sheet === 'sessions' && <><input className="m-search" aria-label="搜索会话" placeholder="搜索会话" value={search} onChange={e => setSearch(e.target.value)} /><MobileSessionDrawer groups={groups} pins={pins} pinnedProjects={pinnedProjects} onPinProject={project => { void updatePreferences(value => ({ pinned_projects: value.pinned_projects.includes(project.key) ? value.pinned_projects.filter(key => key !== project.key) : [project.key, ...value.pinned_projects] })) }} selectedKey={key} appearance={appearance} onSelect={select} onCreate={project => { setCreateProject(project); setCreateOpened(true) }} onDeleteProject={requestDeleteProject} onDeleteSession={requestDeleteSession} onPin={s => { const sessionKey = scopeKey(s.agent_id, s.id); void updatePreferences(value => ({ session_pins: { [sessionKey]: !value.session_pins[sessionKey] } })) }} /></>}
+      {sheet === 'sessions' && <><div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}><input className="m-search" aria-label="搜索会话" placeholder="搜索会话" value={search} onChange={e => setSearch(e.target.value)} />{search && <button aria-label="清空搜索" onClick={() => setSearch('')} style={{ position: 'absolute', right: 8, padding: 4, display: 'inline-flex', alignItems: 'center', color: 'var(--m-muted)' }}><IconX size={16} /></button>}</div><MobileSessionDrawer groups={groups} pins={pins} pinnedProjects={pinnedProjects} onPinProject={project => { void updatePreferences(value => ({ pinned_projects: value.pinned_projects.includes(project.key) ? value.pinned_projects.filter(key => key !== project.key) : [project.key, ...value.pinned_projects] })) }} selectedKey={key} appearance={appearance} onSelect={select} onCreate={project => { setCreateProject(project); setCreateOpened(true) }} onDeleteProject={requestDeleteProject} onDeleteSession={requestDeleteSession} onPin={s => { const sessionKey = scopeKey(s.agent_id, s.id); void updatePreferences(value => ({ session_pins: { [sessionKey]: !value.session_pins[sessionKey] } })) }} agents={agents} onHandoffSession={setHandoffTarget} onRenameSession={openRename} onCopySessionId={copySessionId} isSearching={Boolean(search.trim())} /></>}
       {sheet === 'status' && selected && <div className="m-sheet-body"><MobileApprovals session={selected} approvals={approvals} /><SessionRuntimeFacts session={selected} agent={agents[selected.agent_id]} /><button onClick={() => void copy(selected.id)}>复制会话 ID</button>{agents[selected.agent_id]?.kind==='codex' && <NativeObservationPanel agentId={selected.agent_id} sessionId={selected.id} />}</div>}
       {sheet === 'task' && task && <div className="m-sheet-body"><p>{task.title}</p><p>{task.status}</p><pre>{task.command}</pre><button onClick={() => void copy(task.logs.map(log => log.text).join('\n'))}>复制日志</button><button onClick={e => { const pre=e.currentTarget.parentElement?.querySelector('.m-task-log'); if(pre) pre.scrollTop=pre.scrollHeight }}>跳到底部</button><pre className="m-task-log">{task.logs.map(log => log.text).join('\n')}</pre>{['pending', 'running', 'waiting_approval'].includes(task.status) && agents[task.agent_id]?.capabilities.includes('stop') && <button onClick={(event) => requestStopTask(task, event)}>停止任务</button>}</div>}
       {sheet === 'models' && <div className="m-sheet-body m-model-panel">{selected && <ApprovalModeControl session={selected} variant="panel" />}<div className="m-effort-row">{REASONING_EFFORTS.map(item => <button key={item.value} aria-pressed={sessionModel.effort === item.value} aria-label={`思考强度 ${item.label}`} disabled={modelLoading} onClick={() => void sessionModel.changeEffort(item.value).catch(error => notify(messageError(error), 'red'))}>{item.label}</button>)}</div><input className="m-search" aria-label="搜索模型" placeholder="搜索模型或提供商" value={modelSearch} onChange={e => setModelSearch(e.target.value)} />{modelLoading && <p>正在处理原生模型请求…</p>}<div className="m-model-list">{modelChoices.filter(choice => choice.label.toLowerCase().includes(modelSearch.toLowerCase())).map(choice => <button className="m-model-choice" aria-pressed={modelSelection?.provider === choice.provider && modelSelection?.model === choice.model} key={`${choice.provider}/${choice.model}`} disabled={modelLoading} onClick={() => setModelSelection(choice)}><IconCpu size={17} /><span>{choice.label}</span>{modelSelection?.provider === choice.provider && modelSelection?.model === choice.model && <IconCheck size={17} />}</button>)}</div>{!modelLoading && !modelChoices.length && <p>原生运行时未返回可用模型。</p>}{modelSelection && <div className="m-model-confirm"><small>{modelSelection.label}</small><button aria-label="确认切换模型" disabled={modelLoading} onClick={() => void chooseModel(modelSelection.provider, modelSelection.model)}>{modelLoading ? '切换中…' : '确认切换模型'}</button></div>}</div>}
-      {sheet === 'queue' && <div className="m-sheet-body"><AnimatePresence initial={false}>{pending.map((entry, index) => <motion.article className="m-outbox-entry" key={entry.payload.id} data-command-id={entry.payload.id} layout initial={reducedMotion ? false : { opacity: 0, y: 12, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, x: 36, scale: 0.96 }} transition={{ duration: 0.25, delay: reducedMotion ? 0 : index * 0.04 }}><p>{entry.payload.text || '附件消息'}</p><small>{queueLabels[entry.state]}{entry.error ? ` · ${entry.error}` : ''}</small><div>{[...entry.attachments, ...entry.files].map((file, i) => <span key={i}>{file.name} </span>)}</div>{entry.state === 'queued' && <button onClick={() => void outbox.flush(entry.payload.agent_id, entry.payload.session_id, entry.payload.id).catch(error => notify(messageError(error), 'red'))}>立即引导</button>}{['queued', 'failed', 'cancelled'].includes(entry.state) && <button onClick={() => void outbox.remove(entry.payload.agent_id, entry.payload.session_id, entry.payload.id).catch(error => notify(messageError(error), 'red'))}>移除待发消息</button>}{entry.state === 'failed' && <button onClick={() => void outbox.retry(entry.payload.agent_id, entry.payload.session_id, entry.payload.id).catch(error => notify(messageError(error), 'red'))}>重新发送</button>}</motion.article>)}</AnimatePresence><button onClick={() => void flush()}>核对结果 / 发送下一条</button></div>}
     </section></div>}
     {image && <div className="m-lightbox" role="dialog" aria-label="图片预览" onClick={() => setImage(null)}><button aria-label="关闭图片"><IconX size={22} /></button><img src={image} alt="预览" /></div>}
     {artifactPath && <MobileArtifactSheet path={artifactPath} workspace={selected?.workspace} connectionId={selected?.connection_id} onClose={() => setArtifactPath(null)} />}
@@ -584,5 +810,49 @@ export function MobileWorkspace() {
         if (!confirmationLoading) setConfirmation(null)
       }}
     />
+    {handoffTarget && (
+      <HandoffDialog
+        source={handoffTarget}
+        targets={handoffTargets(handoffTarget)}
+        sessions={sessions}
+        onClose={() => setHandoffTarget(null)}
+        onTransferred={(created, target) => {
+          useAstrorderStore.setState((state) => ({
+            sessions: { ...state.sessions, [scopeKey(created.agent_id, created.id)]: created },
+          }))
+          notifications.show({ color: 'teal', message: `已转交给 ${agentKindLabel(target.kind)}` })
+        }}
+        onOpenTransferred={(session) => select(session)}
+      />
+    )}
+    <Modal
+      opened={renameSession !== null}
+      onClose={() => setRenameSession(null)}
+      title="重命名会话"
+      centered
+      size="sm"
+    >
+      <form
+        onSubmit={(e) => {
+          e.preventDefault()
+          void handleRename()
+        }}
+      >
+        <TextInput
+          label="会话名称"
+          data-autofocus
+          value={renameTitle}
+          onChange={(e) => setRenameTitle(e.currentTarget.value)}
+          placeholder="输入新的会话名称"
+          mb="md"
+        />
+        <Group justify="flex-end" gap="xs">
+          <Button variant="default" onClick={() => setRenameSession(null)}>取消</Button>
+          <Button type="submit" loading={renameLoading} disabled={!renameTitle.trim()}>保存</Button>
+        </Group>
+      </form>
+    </Modal>
+    {queueLift && <div className="m-queue-ghost" data-zone={queueLift.zone || undefined} style={{ left: queueLift.x, top: queueLift.y }}>{queueLift.text}</div>}
+    <BackgroundTasks />
   </div>
 }

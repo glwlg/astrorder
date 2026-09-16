@@ -8,7 +8,7 @@ export const LIVE_ACTIVITY_MS = 15_000
 
 export function sessionActivityStatus(
   session: Partial<Pick<Session, 'id' | 'agent_id' | 'status' | 'live'>>,
-  commandsMap?: Record<string, Command> | Command[],
+  _commandsMap?: Record<string, Command> | Command[],
 ): SessionStatus {
   if (session.status === 'running' || session.status === 'waiting_approval' || session.status === 'error') {
     return session.status
@@ -16,25 +16,15 @@ export function sessionActivityStatus(
   if (session.agent_id && session.id) {
     try {
       const state = useAstrorderStore.getState()
-      const commands = commandsMap
-        ? (Array.isArray(commandsMap) ? commandsMap : Object.values(commandsMap))
-        : Object.values(state.commands || {})
-      const hasRunning = commands.some(
-        (c) =>
-          c.agent_id === session.agent_id &&
-          c.session_id === session.id &&
-          (c.state === 'running' || c.state === 'accepted' || c.state === 'received'),
-      )
-      if (hasRunning) return 'running'
-
       const tasks = Object.values(state.tasks || {}).filter(
         (task: Task) => task.agent_id === session.agent_id && task.session_id === session.id,
       )
-      const detachedTasks = tasks.filter((task) =>
-        (task.kind === 'background' || task.kind === 'subagent') && task.progress?.blocking !== false,
-      )
+      const detachedTasks = tasks.filter((task) => {
+        if (task.kind !== 'subagent') return false
+        return task.progress?.blocking !== false
+      })
       if (detachedTasks.some((task) => task.status === 'waiting_approval')) return 'waiting_approval'
-      if (detachedTasks.some((task) => task.status === 'running' || (task.kind === 'subagent' && task.status === 'pending'))) return 'running'
+      if (detachedTasks.some((task) => task.status === 'running' || task.status === 'pending')) return 'running'
 
       const liveAt = state.liveActivityAt?.[scopeKey(session.agent_id, session.id)]
       if (typeof liveAt === 'number' && Date.now() - liveAt >= 0 && Date.now() - liveAt < LIVE_ACTIVITY_MS) {
@@ -118,13 +108,14 @@ function remoteLabel(
 ): string | null {
   const isRemote = Boolean(connectionId || agent?.connection_id || sourceId?.startsWith('hermes-ssh-'))
   if (!isRemote) return null
-  return agent?.name?.trim() || connectionId || '远程'
+  const name = agent?.name?.trim().replace(/\s*·\s*(?:Codex|Hermes)$/i, '')
+  return name || connectionId || '远程'
 }
 
 function connectionScope(source: string, connectionId: string | null | undefined, agent: Agent | undefined): string {
   const connection = connectionId || agent?.connection_id
   if (connection) return `connection:${connection}`
-  if (source === 'local-codex' || source.startsWith('local-hermes-') || source.startsWith('hermes-local-')) return 'connection:local'
+  if (agent) return 'connection:local'
   return `source:${source}`
 }
 

@@ -43,6 +43,9 @@ class HermesApprovals:
     async def submit(self,command):
         return await asyncio.to_thread(self.respond,command)
 
+    def matches(self,command):
+        with self.lock:return (command['agent_id'],command['session_id'],command.get('target_id')) in self.pending
+
     def respond(self,command):
         aid,sid,rid=command['agent_id'],command['session_id'],command.get('target_id')
         with self.lock:

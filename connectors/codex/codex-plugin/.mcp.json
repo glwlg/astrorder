@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "astrorder": {
+      "type": "http",
+      "url": "http://127.0.0.1:30001/api/v1/agent/mcp",
+      "bearer_token_env_var": "ASTRORDER_AGENT_TOKEN"
+    }
+  }
+}
+

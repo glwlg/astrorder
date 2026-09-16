@@ -1,10 +1,18 @@
 """Project structured Codex runtime notifications into durable task records."""
+import threading
+
 from .schemas import TaskModel
 
 
-def project_tasks(connection, method, params, now, *, history_before=None, protected=None):
+def project_tasks(
+    connection, method, params, now, *, history_before=None, protected=None, existing=None
+):
     sid = params['threadId']
-    existing = {task['id']: task for task in connection.store.list_tasks(connection.agent_id, sid)}
+    if existing is None:
+        existing = {
+            task['id']: task
+            for task in connection.store.list_tasks(connection.agent_id, sid)
+        }
 
     def emit(task_id, kind, title, status, command=None, output=None):
         previous = existing.get(task_id, {})
@@ -24,6 +32,7 @@ def project_tasks(connection, method, params, now, *, history_before=None, prote
             logs=logs, created_at=previous.get('created_at', now), updated_at=now,
         ).model_dump()
         connection._event('task.upsert', sid, task)
+        existing[task_id] = task
 
     if method == 'turn/plan/updated':
         plan = params.get('plan')
@@ -47,19 +56,6 @@ def project_tasks(connection, method, params, now, *, history_before=None, prote
             text = item.get('text')
             if isinstance(text, str) and text.strip():
                 emit('codex:todo:0', 'todo', '执行计划', 'unknown', output=text)
-        elif item.get('type') == 'commandExecution':
-            task_id = f"codex:background:{item['id']}"
-            # Only native PTY processes belong here; ordinary tool calls stay in the transcript.
-            if not item.get('processId') and task_id not in existing:
-                return
-            statuses = {'inProgress': 'running', 'completed': 'completed', 'failed': 'failed', 'declined': 'cancelled'}
-            status = statuses.get(item.get('status'), 'unknown')
-            if status == 'completed' and item.get('exitCode') not in (None, 0):
-                status = 'failed'
-            command = item.get('command')
-            if not isinstance(command, str):
-                return
-            emit(task_id, 'background', command, status, command, item.get('aggregatedOutput'))
         elif item.get('type') == 'collabAgentToolCall':
             states = item.get('agentsStates')
             if not isinstance(states, dict):
@@ -77,40 +73,49 @@ def project_tasks(connection, method, params, now, *, history_before=None, prote
             if isinstance(child_id, str) and item.get('kind') in statuses:
                 emit(f'codex:subagent:{child_id}', 'subagent', item.get('agentPath') or child_id,
                      statuses[item['kind']])
-    elif method == 'item/commandExecution/outputDelta':
-        task_id = f"codex:background:{params.get('itemId')}"
-        task = existing.get(task_id)
-        delta = params.get('delta')
-        if task and isinstance(delta, str):
-            output = ''.join(log['text'] for log in task['logs']) + delta
-            emit(task_id, task['kind'], task['title'], task['status'], task['command'], output)
-
-
 def project_task_history(connection, sid, entries, started, *, refresh_unknown=False):
     """Consume newest-first history without rolling back live or newer-page state."""
-    tasks = connection.store.list_tasks(connection.agent_id, sid)
-    protected = {task['id'] for task in tasks if not refresh_unknown or task['status'] != 'unknown'}
-    # A plan is a snapshot: older snapshots must not restore removed steps.
-    plan_seen = any(task['kind'] == 'todo' and task['id'] in protected for task in tasks)
-    for entry in entries:
-        item = entry.get('item')
-        if not isinstance(item, dict):
-            continue
-        method = 'item/completed'
-        params = {'threadId': sid, 'item': item}
-        is_plan = item.get('type') == 'plan'
-        if item.get('type') == 'dynamicToolCall' and item.get('tool') == 'update_plan':
-            args = item.get('arguments')
-            if item.get('success') is not True or not isinstance(args, dict) or not isinstance(args.get('plan'), list):
+    with connection._lock:
+        lock = connection._session_locks.setdefault(f'history:{sid}', threading.Lock())
+    if not lock.acquire(blocking=False):
+        return
+    try:
+        tasks = connection.store.list_tasks(connection.agent_id, sid)
+        existing = {task['id']: task for task in tasks}
+        protected = {
+            task['id'] for task in tasks if not refresh_unknown or task['status'] != 'unknown'
+        }
+        # A plan is a snapshot: older snapshots must not restore removed steps.
+        plan_seen = any(task['kind'] == 'todo' and task['id'] in protected for task in tasks)
+        for entry in entries:
+            item = entry.get('item')
+            if not isinstance(item, dict):
                 continue
-            is_plan = True
-            method = 'turn/plan/updated'
-            params['plan'] = [
-                {**step, 'status': 'inProgress' if step.get('status') == 'in_progress' else step.get('status')}
-                if isinstance(step, dict) else step for step in args['plan']
-            ]
-        if is_plan:
-            if plan_seen:
-                continue
-            plan_seen = True
-        project_tasks(connection, method, params, started, history_before=started, protected=protected)
+            method = 'item/completed'
+            params = {'threadId': sid, 'item': item}
+            is_plan = item.get('type') == 'plan'
+            if item.get('type') == 'dynamicToolCall' and item.get('tool') == 'update_plan':
+                args = item.get('arguments')
+                if item.get('success') is not True or not isinstance(args, dict) or not isinstance(args.get('plan'), list):
+                    continue
+                is_plan = True
+                method = 'turn/plan/updated'
+                params['plan'] = [
+                    {**step, 'status': 'inProgress' if step.get('status') == 'in_progress' else step.get('status')}
+                    if isinstance(step, dict) else step for step in args['plan']
+                ]
+            if is_plan:
+                if plan_seen:
+                    continue
+                plan_seen = True
+            project_tasks(
+                connection,
+                method,
+                params,
+                started,
+                history_before=started,
+                protected=protected,
+                existing=existing,
+            )
+    finally:
+        lock.release()

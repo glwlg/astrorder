@@ -12,6 +12,14 @@ def test_current_model_comes_from_each_native_session_not_global_catalog():
     assert current_session_model(rpc, 'b') == {'model': 'model-b', 'provider': 'native-provider'}
 
 
+def test_current_model_unwraps_native_custom_provider_slug():
+    def rpc(method, params):
+        assert method == 'session.resume'
+        return {'result': {'session_id': 'private', 'info': {'model': 'm', 'provider': 'custom:ocx'}}}
+
+    assert current_session_model(rpc, 'native') == {'model': 'm', 'provider': 'ocx'}
+
+
 def test_missing_native_model_is_not_replaced_by_a_global_default():
     def rpc(method, params):
         if method == 'session.resume': return {'result': {'session_id': 'private', 'info': {}}}

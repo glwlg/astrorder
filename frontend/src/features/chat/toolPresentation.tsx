@@ -1,3 +1,4 @@
+import { ShinyText } from '../../components/animations/ShinyText'
 import {
   IconBolt,
   IconBulb,
@@ -245,11 +246,11 @@ export function formatPackSummary(pack: Message[]): string {
   return title
 }
 
-export function PackSummary({ pack }: { pack: Message[] }) {
+export function PackSummary({ pack, isRunning: propIsRunning }: { pack: Message[]; isRunning?: boolean }) {
   if (!pack.length) return <span>思考与工具</span>
 
   const hasFailed = pack.some(m => m.tool?.status === 'failed')
-  const isRunning = pack.some(m => m.tool?.status === 'running')
+  const isRunning = propIsRunning ?? pack.some(m => m.tool?.status === 'running')
 
   if (pack.length === 1) {
     const desc = describeTool(pack[0])
@@ -267,13 +268,23 @@ export function PackSummary({ pack }: { pack: Message[] }) {
   const isAllCmd = descriptions.every(d => d.iconKey === 'terminal')
   const isAllThinking = descriptions.every(d => d.iconKey === 'thinking')
 
+  // 计算整个过程包的耗时（起始时间至结束时间）
+  let durationText = ''
+  const timestamps = pack.map(m => Date.parse(m.created_at)).filter(t => !isNaN(t) && t > 0)
+  if (timestamps.length >= 2) {
+    const totalSecs = Math.max(1, Math.round((Math.max(...timestamps) - Math.min(...timestamps)) / 1000))
+    const m = Math.floor(totalSecs / 60)
+    const s = totalSecs % 60
+    durationText = m > 0 ? `用时 ${m} 分钟 ${s} 秒` : `用时 ${s} 秒`
+  }
+
   if (isAllCmd) {
     return (
       <span className="pack-summary-row">
         <ToolLineIcon icon="terminal" size={14} className="pack-summary-icon" />
-        <span>运行了 {pack.length} 个命令</span>
+        <span>运行了 {pack.length} 个命令{durationText ? ` · ${durationText}` : ''}</span>
         {hasFailed && <span className="activity-badge is-failed">有失败项</span>}
-        {isRunning && <span className="activity-badge is-running">运行中</span>}
+        {isRunning && <span className="activity-badge is-running"><ShinyText text="运行中" speed={1.5} /></span>}
       </span>
     )
   }
@@ -282,8 +293,8 @@ export function PackSummary({ pack }: { pack: Message[] }) {
     return (
       <span className="pack-summary-row">
         <ToolLineIcon icon="thinking" size={14} className="pack-summary-icon" />
-        <span>思考过程 · {pack.length} 项</span>
-        {isRunning && <span className="activity-badge is-running">运行中</span>}
+        <span>{durationText || `思考过程 · ${pack.length} 项`}</span>
+        {isRunning && <span className="activity-badge is-running"><ShinyText text="运行中" speed={1.5} /></span>}
       </span>
     )
   }
@@ -306,9 +317,9 @@ export function PackSummary({ pack }: { pack: Message[] }) {
           <span>{item.label}</span>
         </span>
       ))}
-      <span className="pack-summary-count">(共 {pack.length} 项)</span>
+      <span className="pack-summary-count">(共 {pack.length} 项{durationText ? ` · ${durationText}` : ''})</span>
       {hasFailed && <span className="activity-badge is-failed">有失败项</span>}
-      {isRunning && <span className="activity-badge is-running">运行中</span>}
+      {isRunning && <span className="activity-badge is-running"><ShinyText text="运行中" speed={1.5} /></span>}
     </span>
   )
 }

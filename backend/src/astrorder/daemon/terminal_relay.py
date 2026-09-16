@@ -104,18 +104,27 @@ class DaemonTerminalRelay:
         try:
             while True:
                 message = await browser_socket.receive_text()
+                if self._is_explicit_close(message):
+                    await self.bridge.request_control(
+                        "session.close", {"session_id": runtime_id}
+                    )
+                    break
                 await self._forward_input(runtime_id, message)
         except (WebSocketDisconnect, RuntimeError):
             pass
         finally:
             stream_task.cancel()
             await asyncio.gather(stream_task, return_exceptions=True)
-            try:
-                await self.bridge.request_control(
-                    "session.close", {"session_id": runtime_id}
-                )
-            except DaemonBridgeError:
-                pass
+
+    @staticmethod
+    def _is_explicit_close(message: str) -> bool:
+        if not message.startswith("{"):
+            return False
+        try:
+            payload = json.loads(message)
+        except json.JSONDecodeError:
+            return False
+        return isinstance(payload, Mapping) and payload.get("type") == "close"
 
     async def _forward_input(self, runtime_id: str, message: str) -> None:
         try:

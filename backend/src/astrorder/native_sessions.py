@@ -295,6 +295,8 @@ def history_messages(
 
 
 def project_history_messages(raw_messages, *, durable_session_id, native_session_id, source_id, agent_id):
+    from .handoff import visible_handoff_user_text
+
     messages: list[dict[str, Any]] = []
     anchor = "start"
     activity_index = 0
@@ -332,6 +334,11 @@ def project_history_messages(raw_messages, *, durable_session_id, native_session
         message_key = hashlib.sha256(
             f"{source_id}\0{native_session_id}\0{native_row_id}".encode()
         ).hexdigest()[:48]
+        message_text = _message_text(
+            item.get("text") if "text" in item else item.get("content") or item.get("context")
+        )
+        if role == "user":
+            message_text = visible_handoff_user_text(message_text)
         messages.append(
             {
                 "id": f"history-message-{message_key}",
@@ -339,7 +346,7 @@ def project_history_messages(raw_messages, *, durable_session_id, native_session
                 "agent_id": agent_id,
                 "role": role if role in {"user", "assistant", "system", "tool"} else "system",
                 "kind": kind,
-                "text": _message_text(item.get("text") if "text" in item else item.get("content") or item.get("context")),
+                "text": message_text,
                 "attachments": [],
                 "created_at": created_at,
                 "command_id": None,

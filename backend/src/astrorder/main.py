@@ -1,20 +1,24 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .api import router
+from .attachments import AttachmentManager
 from .auth import authorize_browser_websocket, authorize_connector_websocket
+from .background_tasks import BackgroundTaskRegistry
 from .config import Settings
 from .connections import ConnectionController, ConnectionError
 from .environment_connections import EnvironmentConnections
@@ -51,7 +55,13 @@ class SpaStaticFiles(StaticFiles):
 
     async def get_response(self, path: str, scope):
         try:
-            return await super().get_response(path, scope)
+            response = await super().get_response(path, scope)
+            name = path.replace("\\", "/").rsplit("/", 1)[-1]
+            if name in {"sw.js", "sw-astrorder.js", "registerSW.js", "index.html"} or name.startswith("workbox-") or name.startswith("sw-"):
+                response.headers["Cache-Control"] = "no-cache"
+            elif path.startswith("assets/") or path.endswith((".js", ".css", ".png", ".ico", ".svg")):
+                response.headers["Cache-Control"] = "public, max-age=2592000, immutable"
+            return response
         except StarletteHTTPException as exc:
             request_path = str(scope.get("path", ""))
             reserved = request_path in {"/api", "/ws", "/health"} or request_path.startswith(
@@ -81,12 +91,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         store = Store(runtime_settings)
         hub = EventHub()
         service = ControlService(store, hub, runtime_settings)
-        from .attachments import AttachmentManager
 
         app.state.settings = runtime_settings
         app.state.store = store
         app.state.hub = hub
         app.state.service = service
+        app.state.background_tasks = BackgroundTaskRegistry()
         daemon_stopping = asyncio.Event()
         daemon_task: asyncio.Task[None] | None = None
         app.state.daemon_bridge = None
@@ -100,7 +110,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 secret=runtime_settings.session_daemon_secret,
                 request_timeout=runtime_settings.session_daemon_request_timeout,
             )
-            daemon_task = asyncio.create_task(app.state.daemon_bridge.run(daemon_stopping))
         app.state.daemon_terminal_relay = None
         app.state.daemon_pty_unregistrations = []
         if runtime_settings.daemon_pty_enabled:
@@ -124,8 +133,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if runtime_settings.daemon_hermes_enabled or runtime_settings.daemon_ssh_enabled:
             if app.state.daemon_bridge is None:
                 raise ValueError("daemon Hermes projection requires the Session Daemon bridge")
-            from .daemon.hermes_projection import HermesCommandFrameRouter
             from .daemon.hermes_compaction_projection import HermesCompactionFrameRouter
+            from .daemon.hermes_projection import HermesCommandFrameRouter
 
             app.state.hermes_compaction_frame_router = HermesCompactionFrameRouter(
                 app.state.daemon_bridge, store, service,
@@ -138,6 +147,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         service.mark_persisted_connectors_disconnected()
         store.mark_ssh_connections_disconnected()
+        if app.state.daemon_bridge is not None:
+            daemon_task = asyncio.create_task(app.state.daemon_bridge.run(daemon_stopping))
         app.state.attachments = AttachmentManager(runtime_settings, store)
         app.state.supervisor = ProcessSupervisor(runtime_settings)
         app.state.daemon_hermes_controller = None
@@ -193,6 +204,76 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 )
 
             app.state.codex.set_daemon_controller_factory(daemon_codex_controller_factory)
+        app.state.grok_projection = None
+        local_grok = None
+        grok_factory = None
+        if runtime_settings.daemon_grok_enabled:
+            if app.state.daemon_bridge is None or not runtime_settings.grok_executable:
+                raise ValueError("daemon Grok requires its executable and Session Daemon bridge")
+            from .grok_connection import GrokConnection, GrokProjection, local_grok_sessions
+
+            app.state.grok_projection = GrokProjection(app.state.daemon_bridge, store, service)
+            local_grok = GrokConnection(
+                app.state.daemon_bridge,
+                store,
+                service,
+                executable=runtime_settings.grok_executable,
+                session_reader=local_grok_sessions,
+            )
+
+            def grok_factory(row, executable):
+                from .environment_connections import RemoteCodex
+
+                probe = RemoteCodex(runtime_settings, store, service, row, "")
+
+                def remote_sessions(session_id):
+                    source = (
+                        "import json\nfrom pathlib import Path\n"
+                        f"sid={session_id!r}\n"
+                        "root=Path.home()/'.grok'/'sessions'\n"
+                        "if sid is None:\n"
+                        " out=[]\n"
+                        " for p in root.rglob('summary.json') if root.is_dir() else ():\n"
+                        "  try: out.append(json.loads(p.read_text(encoding='utf-8')))\n"
+                        "  except (OSError,ValueError): pass\n"
+                        "else:\n"
+                        " out=[]\n"
+                        " for p in root.rglob(str(sid)+'/updates.jsonl') if root.is_dir() else ():\n"
+                        "  for line in p.read_text(encoding='utf-8',errors='replace').splitlines():\n"
+                        "   try: out.append(json.loads(line))\n"
+                        "   except ValueError: pass\n"
+                        "  break\n"
+                        "print(json.dumps(out))\n"
+                    )
+                    result = probe.remote_json(source)
+                    return result if isinstance(result, list) else []
+
+                def delete_remote_session(session_id: str) -> None:
+                    source = (
+                        "import json, shutil\nfrom pathlib import Path\n"
+                        f"sid={session_id!r}\n"
+                        "root=Path.home()/'.grok'/'sessions'\n"
+                        "for p in root.rglob(str(sid)) if root.is_dir() else ():\n"
+                        " if p.is_dir() and root in p.parents:\n"
+                        "  shutil.rmtree(p, ignore_errors=True)\n"
+                        "print(json.dumps({'ok': True}))\n"
+                    )
+                    try:
+                        probe.remote_json(source)
+                    except Exception:
+                        pass
+
+                return GrokConnection(
+                    app.state.daemon_bridge,
+                    store,
+                    service,
+                    executable=executable,
+                    session_reader=remote_sessions,
+                    session_deleter=delete_remote_session,
+                    connection_id=row["id"],
+                    ssh_settings=row["settings"],
+                    display_name=row.get("display_name") or row["id"],
+                )
         app.state.environments = EnvironmentConnections(
             runtime_settings,
             store,
@@ -200,16 +281,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             app.state.connections,
             app.state.codex,
             daemon_codex_controller_factory=daemon_codex_controller_factory,
+            grok=local_grok,
+            grok_factory=grok_factory,
         )
-        service.hermes_model_restorer = lambda agent_id, session_id, provider, model, effort: restore_hermes_model(
-            app, agent_id, session_id, provider, model, effort
+        service.register_model_binding_restorer(
+            "hermes",
+            lambda agent_id, session_id, provider, model, effort: restore_hermes_model(
+                app, agent_id, session_id, provider, model, effort
+            ),
         )
         from .hermes_approvals import HermesApprovals
-        service.hermes_approvals = HermesApprovals(app.state.connections, service)
+        app.state.hermes_approvals = HermesApprovals(app.state.connections, service)
+        service.register_approval_handler(app.state.hermes_approvals)
         from .native_observers import NativeObservers
         observers = NativeObservers(app)
         app.state.observers = observers
-        service.observer_approvals = observers
+        service.register_approval_handler(observers)
         observer_task = asyncio.create_task(observers.run())
         restore_tasks: list[asyncio.Task[None]] = []
         if runtime_settings.daemon_codex_enabled:
@@ -220,6 +307,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     logger.warning("daemon Codex projection restore failed: %s", exc)
 
             restore_tasks.append(asyncio.create_task(restore_daemon_codex()))
+        if local_grok is not None:
+            async def restore_daemon_grok() -> None:
+                try:
+                    await asyncio.to_thread(local_grok.connect)
+                except ConnectionError as exc:
+                    logger.warning("daemon Grok projection restore failed: %s", exc)
+
+            restore_tasks.append(asyncio.create_task(restore_daemon_grok()))
         if runtime_settings.auto_connect_local_hermes:
             restore_tasks.append(
                 asyncio.create_task(asyncio.to_thread(app.state.environments.restore))
@@ -227,6 +322,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             yield
         finally:
+            app.state.background_tasks.cancel_all()
             if app.state.hermes_command_frame_router is not None:
                 app.state.hermes_command_frame_router.close()
                 app.state.hermes_compaction_frame_router.close()
@@ -248,6 +344,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if app.state.codex_native_frame_router is not None:
                 app.state.codex_native_frame_router.close()
             await asyncio.to_thread(app.state.environments.shutdown)
+            if app.state.grok_projection is not None:
+                app.state.grok_projection.close()
             app.state.connections.shutdown(service)
             await service.shutdown()
             await app.state.supervisor.shutdown()
@@ -262,11 +360,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type"],
     )
+    app.add_middleware(GZipMiddleware, minimum_size=1000)
     app.include_router(router)
 
     @app.get("/health")
-    def health() -> dict[str, str | int]:
+    async def health() -> dict[str, str | int]:
         return {"status": "ok", "service": "astrorder", "protocol_version": 1}
+
+    @app.post("/_desktop/shutdown", include_in_schema=False)
+    async def desktop_shutdown(request: Request) -> dict[str, bool]:
+        callback = getattr(request.app.state, "desktop_shutdown", None)
+        authorization = request.headers.get("authorization", "")
+        supplied = authorization[7:] if authorization.startswith("Bearer ") else ""
+        client = request.client.host if request.client else ""
+        if callback is None:
+            raise HTTPException(status_code=404)
+        if client not in {"127.0.0.1", "::1"} or not hmac.compare_digest(
+            supplied, runtime_settings.browser_secret or ""
+        ):
+            raise HTTPException(status_code=403, detail="Desktop shutdown is not allowed")
+        callback()
+        return {"stopping": True}
 
     @app.websocket("/ws/v1/terminal")
     async def terminal_websocket(websocket: WebSocket) -> None:
@@ -440,6 +554,59 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     await websocket.app.state.service._dispatch_queued(connection)
                 elif frame_type == "ping":
                     await connection.send({"type": "pong"})
+                elif frame_type == "agent_invoke":
+                    from .agent_gateway import AgentApiError, AgentContext, invoke
+
+                    request_id = frame.get("id")
+                    capability = frame.get("capability")
+                    payload = frame.get("input") if isinstance(frame.get("input"), dict) else {}
+                    store = websocket.app.state.store
+                    service = getattr(websocket.app.state, "service", None)
+
+                    def read_messages(agent_id: str, session_id: str, before: str | None, limit: int) -> dict:
+                        environments = getattr(websocket.app.state, "environments", None)
+                        resolver = getattr(environments, "runtime_for_agent", None)
+                        runtime = resolver(agent_id) if callable(resolver) else None
+                        reader = getattr(runtime, "messages", None)
+                        if callable(reader):
+                            try:
+                                page = reader(session_id, before, limit)
+                                if isinstance(page, dict):
+                                    return page
+                            except (ConnectionError, ValueError, TypeError, OSError):
+                                pass
+                        items, cursor = store.list_messages(agent_id, session_id, before, limit)
+                        return {"items": items, "next": cursor}
+
+                    def runtime_resolver(agent_id: str):
+                        environments = getattr(websocket.app.state, "environments", None)
+                        resolver = getattr(environments, "runtime_for_agent", None)
+                        return resolver(agent_id) if callable(resolver) else None
+
+                    try:
+                        if not isinstance(capability, str) or not capability:
+                            raise AgentApiError("invalid_input", "capability is required")
+                        data = await asyncio.to_thread(
+                            invoke,
+                            capability,
+                            payload,
+                            AgentContext(
+                                store=store,
+                                read_messages=read_messages,
+                                service=service,
+                                runtime_resolver=runtime_resolver,
+                            ),
+                        )
+                        await connection.send({"type": "agent_result", "id": request_id, "ok": True, "data": data})
+                    except AgentApiError as exc:
+                        await connection.send(
+                            {
+                                "type": "agent_result",
+                                "id": request_id,
+                                "ok": False,
+                                "error": {"code": exc.code, "message": exc.message},
+                            }
+                        )
                 else:
                     await connection.send({"type": "error", "detail": "Unsupported connector frame"})
         except WebSocketDisconnect:

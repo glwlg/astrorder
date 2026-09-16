@@ -59,13 +59,19 @@ def test_stop_verified_daemon_uses_authenticated_graceful_shutdown(monkeypatch, 
         lambda _pid: "python -m astrorder.daemon.session_daemon --port 30009",
     )
     calls = []
-    monkeypatch.setattr(service, "graceful_shutdown", lambda port, secret: calls.append((port, secret)))
+    monkeypatch.setattr(
+        service,
+        "graceful_shutdown",
+        lambda port, secret, *, confirm_active=False: calls.append(
+            (port, secret, confirm_active)
+        ),
+    )
     assert service.stop_daemon(
         port=30009,
         secret="test-only-daemon-secret",
         metadata_path=tmp_path / "session-daemon.json",
     ) == 222
-    assert calls == [(30009, "test-only-daemon-secret")]
+    assert calls == [(30009, "test-only-daemon-secret", False)]
 
 
 def test_start_script_passes_explicit_hermes_opt_in_without_secret_argument(monkeypatch):
@@ -118,4 +124,5 @@ def test_daemon_process_breaks_away_from_the_callers_job(monkeypatch, tmp_path):
     (tmp_path / "backend/.venv/Scripts").mkdir(parents=True)
 
     assert service.start_daemon(metadata_path=tmp_path / "daemon.json") == 222
+    assert calls[0][0][0][0].endswith("pythonw.exe")
     assert calls[0][1]["creationflags"] & 0x01000000

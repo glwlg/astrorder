@@ -32,7 +32,7 @@ export function useAuthSession() {
     queryKey: ['astrorder', 'auth-session'],
     queryFn: api.getAuthSession,
     retry: false,
-    staleTime: 0,
+    staleTime: 60_000,
   })
 }
 
@@ -64,6 +64,15 @@ export function useSessionResources(session: Session | null, authenticated: bool
   const stored = useAstrorderStore(useShallow((state) =>
     agentId && sessionId ? selectMessages(state, agentId, sessionId) : EMPTY_STORED_MESSAGES,
   ))
+  const sync = useQuery({
+    queryKey: ['astrorder', 'session-sync', session?.agent_id, session?.id],
+    queryFn: () => api.syncSession(session!.id, session!.agent_id),
+    enabled: authenticated && Boolean(session),
+    retry: false,
+    staleTime: 0,
+  })
+  const ready = authenticated && Boolean(session)
+  void sync.data
 
   const messages = useInfiniteQuery({
     queryKey: ['astrorder', 'messages', session?.agent_id, session?.id],
@@ -75,7 +84,7 @@ export function useSessionResources(session: Session | null, authenticated: bool
     ),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage) => lastPage.next_cursor || undefined,
-    enabled: authenticated && Boolean(session),
+    enabled: ready,
     retry: false,
     staleTime: 30_000,
     gcTime: 1000 * 60 * 60 * 24,
@@ -100,7 +109,7 @@ export function useSessionResources(session: Session | null, authenticated: bool
   const commands = useQuery({
     queryKey: ['astrorder', 'commands', session?.agent_id, session?.id],
     queryFn: () => api.getCommands(session!.id, session!.agent_id),
-    enabled: authenticated && Boolean(session),
+    enabled: ready,
     retry: false,
     staleTime: 30_000,
     gcTime: 1000 * 60 * 60 * 24,
@@ -108,7 +117,7 @@ export function useSessionResources(session: Session | null, authenticated: bool
   const tasks = useQuery({
     queryKey: ['astrorder', 'tasks', session?.agent_id, session?.id],
     queryFn: () => api.getTasks(session!.id, session!.agent_id),
-    enabled: authenticated && Boolean(session),
+    enabled: ready,
     retry: false,
     staleTime: 30_000,
     gcTime: 1000 * 60 * 60 * 24,

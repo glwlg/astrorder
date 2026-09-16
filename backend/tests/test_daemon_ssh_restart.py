@@ -39,6 +39,9 @@ async def test_ssh_daemon_owner_survives_app_proxy_restart_for_exact_connection(
                 "source_id": f"hermes-ssh-{self.connection_id}",
             }
 
+        def wait_gateway(self, timeout=20):
+            return True
+
         def create_session(self, workspace=None, title=None):
             del workspace, title
             raise AssertionError("not used")

@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { createJSONStorage, persist } from 'zustand/middleware'
 import type { ArtifactRef } from '../../domain/artifact'
 
 export type SidecarTabType = 'details' | 'artifact'
@@ -26,6 +27,8 @@ export interface SidecarState {
   sidecarWidth: number
   activeSessionKey: string | null
   sessionMemories: Record<string, SessionSidecarMemory>
+  mountedTabs: Record<string, SidecarTab[]>
+  tabCloseHandlers: Record<string, () => void>
   openArtifact: (artifact: ArtifactRef, viewerId: string) => void
   openDetails: () => void
   closeTab: (tabId: string) => void
@@ -41,9 +44,34 @@ export interface SidecarState {
   openBrowser: (sessionId: string, agentId: string, initialUrl?: string, connectionId?: string) => void
   switchSession: (sessionKey: string) => void
   resetSessionSidecar: () => void
+  registerTabCloseHandler: (agentId: string, tabId: string, handler: () => void) => () => void
 }
 
-export const useSidecarStore = create<SidecarState>((set, get) => ({
+function tabLifecycleKey(agentId: string, tabId: string) {
+  return JSON.stringify([agentId, tabId])
+}
+
+const unavailableStorage = {
+  getItem: (_key: string) => null,
+  setItem: (_key: string, _value: string) => undefined,
+  removeItem: (_key: string) => undefined,
+}
+
+function sidecarStorage() {
+  try {
+    const storage = globalThis.localStorage
+    if (
+      typeof storage?.getItem === 'function'
+      && typeof storage?.setItem === 'function'
+      && typeof storage?.removeItem === 'function'
+    ) return storage
+  } catch {
+    // Persistent storage can be unavailable in privacy-restricted contexts.
+  }
+  return unavailableStorage
+}
+
+export const useSidecarStore = create<SidecarState>()(persist((set, get) => ({
   isOpen: false,
   activeTabId: '',
   tabs: [],
@@ -51,19 +79,23 @@ export const useSidecarStore = create<SidecarState>((set, get) => ({
   sidecarWidth: 50, // 默认 50% 宽度（对半平分）
   activeSessionKey: null,
   sessionMemories: {},
+  mountedTabs: {},
+  tabCloseHandlers: {},
 
   switchSession: (sessionKey: string) => {
-    const { activeSessionKey, tabs, activeTabId, isOpen, sessionMemories } = get()
+    const { activeSessionKey, tabs, activeTabId, isOpen, sessionMemories, mountedTabs } = get()
     if (activeSessionKey === sessionKey) return
 
     // 1. 保存前一个会话的侧边栏状态（标签页、活动Tab、展开状态）
     const nextMemories = { ...sessionMemories }
+    const nextMountedTabs = { ...mountedTabs }
     if (activeSessionKey) {
       nextMemories[activeSessionKey] = {
         tabs,
         activeTabId,
         isOpen,
       }
+      nextMountedTabs[activeSessionKey] = tabs
     }
 
     // 2. 恢复目标会话的记忆状态，若无记忆则默认 tabs 为空、activeTabId 为空（展示 Codex 菜单）
@@ -72,19 +104,19 @@ export const useSidecarStore = create<SidecarState>((set, get) => ({
       set({
         activeSessionKey: sessionKey,
         sessionMemories: nextMemories,
+        mountedTabs: { ...nextMountedTabs, [sessionKey]: targetMemory.tabs || [] },
         tabs: targetMemory.tabs || [],
         activeTabId: targetMemory.activeTabId || '',
         isOpen: targetMemory.isOpen,
-        dirtyTabs: {},
       })
     } else {
       set({
         activeSessionKey: sessionKey,
         sessionMemories: nextMemories,
+        mountedTabs: { ...nextMountedTabs, [sessionKey]: [] },
         tabs: [],
         activeTabId: '',
         isOpen: false,
-        dirtyTabs: {},
       })
     }
   },
@@ -443,10 +475,31 @@ export const useSidecarStore = create<SidecarState>((set, get) => ({
   },
 
   closeTab: (tabId: string) => {
-    const { tabs, activeTabId, dirtyTabs, activeSessionKey, sessionMemories } = get()
+    const {
+      tabs,
+      activeTabId,
+      dirtyTabs,
+      activeSessionKey,
+      sessionMemories,
+      mountedTabs,
+      tabCloseHandlers,
+    } = get()
+    const closingTab = tabs.find((tab) => tab.id === tabId)
+    const lifecycleKey = closingTab?.artifact?.agentId
+      ? tabLifecycleKey(closingTab.artifact.agentId, tabId)
+      : null
+    if (lifecycleKey) {
+      try {
+        tabCloseHandlers[lifecycleKey]?.()
+      } catch {
+        // A plugin cleanup failure must not trap an otherwise closable tab.
+      }
+    }
     const nextTabs = tabs.filter((t) => t.id !== tabId)
     const nextDirty = { ...dirtyTabs }
+    const nextCloseHandlers = { ...tabCloseHandlers }
     delete nextDirty[tabId]
+    if (lifecycleKey) delete nextCloseHandlers[lifecycleKey]
 
     let nextActiveId = activeTabId
     if (activeTabId === tabId) {
@@ -459,6 +512,10 @@ export const useSidecarStore = create<SidecarState>((set, get) => ({
       tabs: nextTabs,
       activeTabId: nextActiveId,
       dirtyTabs: nextDirty,
+      mountedTabs: activeSessionKey
+        ? { ...mountedTabs, [activeSessionKey]: nextTabs }
+        : mountedTabs,
+      tabCloseHandlers: nextCloseHandlers,
     })
 
     if (activeSessionKey) {
@@ -507,9 +564,28 @@ export const useSidecarStore = create<SidecarState>((set, get) => ({
     }))
   },
 
+  registerTabCloseHandler: (agentId: string, tabId: string, handler: () => void) => {
+    const key = tabLifecycleKey(agentId, tabId)
+    set((state) => ({ tabCloseHandlers: { ...state.tabCloseHandlers, [key]: handler } }))
+    return () => {
+      const current = get().tabCloseHandlers
+      if (current[key] !== handler) return
+      const next = { ...current }
+      delete next[key]
+      set({ tabCloseHandlers: next })
+    }
+  },
+
   setSidecarWidth: (width: number) => {
     const clamped = Math.max(20, Math.min(80, width))
     if (get().sidecarWidth === clamped) return
     set({ sidecarWidth: clamped })
   },
+}), {
+  name: 'astrorder:sidecar:v1',
+  storage: createJSONStorage(sidecarStorage),
+  partialize: (state) => ({
+    sessionMemories: state.sessionMemories,
+    sidecarWidth: state.sidecarWidth,
+  }),
 }))

@@ -141,3 +141,23 @@ async def test_daemon_ssh_controller_submits_after_exact_connection_session_bind
             },
         ),
     ]
+
+
+def test_daemon_ssh_controller_routes_native_rpc_through_daemon():
+    class FakeBridge:
+        async def request_control(self, action, fields):
+            assert action == "runtime.request"
+            assert fields["agent_type"] == "ssh"
+            assert fields["method"] == "approval.pending"
+            assert fields["request_params"] == {"session_id": "native-1"}
+            return {"result": {"result": {"approvals": []}}}
+
+    controller = DaemonSshController(
+        FakeBridge(),
+        connection_id="remote-a",
+        ssh_settings={"host": "remote.example", "port": 22},
+    )
+
+    assert controller.rpc("approval.pending", {"session_id": "native-1"}) == {
+        "result": {"approvals": []}
+    }

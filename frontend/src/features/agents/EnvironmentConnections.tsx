@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { Badge, Button, Drawer, Group, Paper, Stack, Text, TextInput, Title } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { SpotlightCard } from '../../components/animations/SpotlightCard'
+import { AgentBrandIcon, agentKindLabel } from '../../components/AgentBrandIcon'
 import { api } from '../../api/client'
 import type { SshConnection } from '../../domain/types'
 
@@ -34,16 +36,20 @@ export function EnvironmentConnections({ embedded = false }: { embedded?: boolea
     <Group justify="space-between" mb="lg"><div>{!embedded && <Title order={2}>连接管理</Title>}<Text c="dimmed">先配置 SSH，再发现并选择接入 Agent；本机自动发现。</Text></div><Button onClick={() => edit()}>添加 SSH 连接</Button></Group>
     {query.isLoading && <Text>正在发现本机 Agent…</Text>}
     {query.isError && <Button variant="subtle" onClick={() => void query.refetch()}>重新读取连接环境</Button>}
-    <Stack gap="md">{query.data?.items.map(environment => <Paper key={environment.id} className="environment-row" withBorder radius="lg" p="md">
+    <Stack gap="md">{query.data?.items.map(environment => (
+      <SpotlightCard key={environment.id} spotlightColor="rgba(59, 130, 246, 0.22)" radius="var(--mantine-radius-lg, 16px)">
+        <Paper className="environment-row" withBorder={false} p="md" style={{ background: 'transparent' }}>
       <Group justify="space-between"><div><Title order={3} size="h4">{environment.name}</Title><Text size="xs" c="dimmed">{environment.method === 'local' ? '本机自动发现' : `SSH · ${environment.os || '尚未探测系统'}`}</Text></div><Group gap="xs">
         {environment.method === 'ssh' && <Button variant="subtle" onClick={() => edit(connections.data?.ssh.items.find(row => row.id === environment.id))}>配置 SSH</Button>}
         <Button variant="default" loading={busy === environment.id} disabled={!!busy} onClick={() => void run(environment.id, () => api.discoverEnvironment(environment.id))}>{environment.discovered ? '重新发现' : '验证 SSH 并发现 Agent'}</Button>
       </Group></Group>
       <Stack gap="xs" mt="md">{environment.agents.map(agent => <Group className="environment-agent" key={agent.kind} justify="space-between" wrap="nowrap">
-        <div><Group gap="xs"><Text fw={600}>{agent.kind === 'hermes' ? 'Hermes' : 'Codex'}</Text><Badge color={agent.state === 'connected' ? 'teal' : agent.state === 'error' ? 'red' : 'gray'}>{agent.state === 'connected' ? '已接入' : agent.state === 'error' ? '连接失败' : agent.state === 'authentication_required' ? '需要登录' : agent.available ? '已发现' : environment.discovered ? '未安装' : '待发现'}</Badge>{agent.daemon_mode && <Badge data-testid={`environment-daemon-mode-${environment.id}-${agent.kind}`} color="indigo" variant="light">守护进程托管</Badge>}</Group>{agent.detail && <Text size="xs" c={agent.state === 'error' ? 'red' : 'dimmed'} style={{ overflowWrap: 'anywhere' }}>{agent.detail}</Text>}{agent.executable && <Text size="xs" c="dimmed" style={{ overflowWrap: 'anywhere' }}>{agent.executable}</Text>}</div>
+        <div><Group gap="xs"><AgentBrandIcon kind={agent.kind} size={18} /><Text fw={600}>{agentKindLabel(agent.kind)}</Text><Badge color={agent.state === 'connected' ? 'teal' : agent.state === 'error' ? 'red' : 'gray'}>{agent.state === 'connected' ? '已接入' : agent.state === 'error' ? '连接失败' : agent.state === 'authentication_required' ? '需要登录' : agent.available ? '已发现' : environment.discovered ? '未安装' : '待发现'}</Badge>{agent.daemon_mode && <Badge data-testid={`environment-daemon-mode-${environment.id}-${agent.kind}`} color="indigo" variant="light">守护进程托管</Badge>}</Group>{agent.detail && <Text size="xs" c={agent.state === 'error' ? 'red' : 'dimmed'} style={{ overflowWrap: 'anywhere' }}>{agent.detail}</Text>}{agent.executable && <Text size="xs" c="dimmed" style={{ overflowWrap: 'anywhere' }}>{agent.executable}</Text>}</div>
         <Button size="xs" variant={agent.state === 'connected' ? 'default' : 'filled'} loading={busy === `${environment.id}:${agent.kind}`} disabled={!!busy || (!agent.available && agent.state !== 'connected')} onClick={() => void run(`${environment.id}:${agent.kind}`, () => api.changeEnvironmentAgent(environment.id, agent.kind, agent.state !== 'connected'))}>{agent.state === 'connected' ? '断开' : '接入'}</Button>
       </Group>)}</Stack>
-    </Paper>)}</Stack>
+    </Paper>
+      </SpotlightCard>
+    ))}</Stack>
     <Drawer opened={editing !== null} onClose={() => setEditing(null)} title={editing === 'new' ? '配置 SSH 连接' : '修改 SSH 连接'} position="right" size="md">
       <Stack>{([['display_name', '连接名称'], ['ssh_config_alias', 'SSH 配置别名'], ['host', '主机'], ['port', '端口'], ['user', '用户'], ['identity_file', '私钥文件引用（不读取或上传）']] as const).map(([field, label]) => <TextInput key={field} label={label} value={form[field]} onChange={event => { const value = event.currentTarget.value; setForm(current => ({ ...current, [field]: value })) }} />)}
         <Text size="sm" c="dimmed">使用系统 SSH 和已审核的主机指纹；保存后自动发现 Agent，不会自动启动或接入它们。</Text>

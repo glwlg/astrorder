@@ -5,8 +5,9 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import type { ViewerContext } from '../../types'
+import { useSidecarStore } from '../../sidecarStore'
 
-export function XtermViewer({ artifact }: ViewerContext) {
+export function XtermViewer({ artifact, isActive = true }: ViewerContext) {
   const terminalRef = useRef<HTMLDivElement>(null)
   const termInstance = useRef<Terminal | null>(null)
   const fitAddon = useRef<FitAddon | null>(null)
@@ -105,6 +106,22 @@ export function XtermViewer({ artifact }: ViewerContext) {
       termInstance.current?.dispose()
     }
   }, [artifact.id])
+
+  useEffect(() => useSidecarStore.getState().registerTabCloseHandler(
+    artifact.agentId,
+    artifact.id,
+    () => {
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: 'close' }))
+      }
+    },
+  ), [artifact.agentId, artifact.id])
+
+  useEffect(() => {
+    if (!isActive) return
+    fitAddon.current?.fit()
+    termInstance.current?.focus()
+  }, [isActive])
 
   const handleClear = () => {
     termInstance.current?.clear()

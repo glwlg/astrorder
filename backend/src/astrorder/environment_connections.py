@@ -26,12 +26,14 @@ DISCOVERY = r'''
 import json, os, platform, shutil
 from pathlib import Path
 items = []
-for kind in ('hermes', 'codex'):
+for kind in ('hermes', 'codex', 'grok'):
     executable = shutil.which(kind)
     if not executable:
         candidates = [Path.home()/'.local/bin'/kind, Path.home()/'bin'/kind]
         if kind == 'codex':
             candidates += sorted((Path.home()/'.nvm/versions/node').glob('*/bin/codex'), reverse=True)
+        if kind == 'grok':
+            candidates += [Path.home()/'.grok/bin/grok']
         executable = next((str(p) for p in candidates if p.is_file() and os.access(p, os.X_OK)), None)
     items.append({'kind': kind, 'available': bool(executable), 'executable': executable})
 print(json.dumps({'os': platform.system(), 'items': items}))
@@ -244,13 +246,23 @@ class EnvironmentConnections:
         codex,
         *,
         daemon_codex_controller_factory=None,
+        grok=None,
+        grok_factory=None,
     ):
         self.settings, self.store, self.service = settings, store, service
         self.hermes, self.codex = hermes, codex
         self.daemon_codex_controller_factory = daemon_codex_controller_factory
+        self.grok, self.grok_factory = grok, grok_factory
+        self.remote_grok = {}
         self.remote = {}
         self.discovered = {}
         self.lock = RLock()
+        self._runtime_resolvers = [self._codex_for_agent]
+        hermes_resolver = getattr(self.hermes, 'get_runtime_by_agent_id', None)
+        if callable(hermes_resolver):
+            self._runtime_resolvers.append(hermes_resolver)
+        if self.grok is not None:
+            self._runtime_resolvers.append(self._grok_for_agent)
 
     def _row(self, connection_id):
         row = self.store.get_ssh_connection(connection_id)
@@ -272,7 +284,7 @@ class EnvironmentConnections:
     def snapshot(self):
         local = self.hermes.snapshot(self.service)['local']
         c = self.codex.snapshot()
-        items = [{'id': 'local', 'name': '本机', 'method': 'local', 'discovered': True, 'agents': [
+        local_agents = [
             {
                 'kind': 'hermes',
                 'available': local['available'],
@@ -282,15 +294,20 @@ class EnvironmentConnections:
                 'daemon_mode': bool(local.get('daemon_mode')),
             },
             {'kind': 'codex', 'available': c['available'], 'state': c['state'], 'agent_id': c['agent_id'], 'detail': c['detail'], 'daemon_mode': bool(c.get('daemon_mode'))},
-        ]}]
+        ]
+        if self.grok is not None:
+            g = self.grok.snapshot()
+            local_agents.append({'kind': 'grok', 'available': g['available'], 'state': g['state'], 'agent_id': g['agent_id'], 'detail': g['detail'], 'daemon_mode': bool(g.get('daemon_mode'))})
+        items = [{'id': 'local', 'name': '本机', 'method': 'local', 'discovered': True, 'agents': local_agents}]
         ssh_states = {row['id']: row for row in self.hermes.snapshot(self.service)['ssh']['items']}
         for row in self.store.list_ssh_connections():
             cid = row['id']
             discovered = self.discovered.get(cid)
             entries = []
-            for kind in ('hermes', 'codex'):
+            kinds = ('hermes', 'codex', 'grok') if self.grok_factory is not None else ('hermes', 'codex')
+            for kind in kinds:
                 found = next((x for x in (discovered or {}).get('items', []) if x['kind'] == kind), {})
-                active = self.remote[cid].snapshot() if kind == 'codex' and cid in self.remote else ssh_states.get(cid, {}) if kind == 'hermes' else {}
+                active = self.remote[cid].snapshot() if kind == 'codex' and cid in self.remote else self.remote_grok[cid].snapshot() if kind == 'grok' and cid in self.remote_grok else ssh_states.get(cid, {}) if kind == 'hermes' else {}
                 entries.append({
                     'kind': kind,
                     'available': found.get('available', active.get('state') == 'connected'),
@@ -304,17 +321,36 @@ class EnvironmentConnections:
         return {'items': items}
 
     def change(self, cid, kind, connect):
-        if kind not in {'hermes', 'codex'}:
+        if kind not in {'hermes', 'codex', 'grok'}:
             raise ConnectionError('不支持的 Agent 类型。', 422)
         with self.lock:
             if cid == 'local':
                 if kind == 'codex':
                     (self.codex.connect if connect else self.codex.disconnect)()
+                elif kind == 'grok':
+                    if self.grok is None:
+                        raise ConnectionError('Grok Build 未启用。', 503)
+                    (self.grok.connect if connect else self.grok.disconnect)()
                 else:
                     (self.hermes.connect_local if connect else self.hermes.disconnect_local)(self.service)
             elif kind == 'hermes':
                 self._row(cid)
                 (self.hermes.connect_ssh if connect else self.hermes.disconnect_ssh)(self.service, cid)
+            elif kind == 'grok' and connect:
+                if self.grok_factory is None:
+                    raise ConnectionError('远程 Grok Build 未启用。', 503)
+                if cid not in self.remote_grok:
+                    self.discover(cid)
+                    found = next(x for x in self.discovered[cid]['items'] if x['kind'] == 'grok')
+                    if not found['available']:
+                        raise ConnectionError('该 SSH 环境未发现 Grok Build。', 404)
+                    self.remote_grok[cid] = self.grok_factory(
+                        self._row(cid), found['executable']
+                    )
+                self.remote_grok[cid].connect()
+            elif kind == 'grok':
+                if cid in self.remote_grok:
+                    self.remote_grok[cid].disconnect()
             elif connect:
                 if cid not in self.remote:
                     self.discover(cid)
@@ -346,10 +382,12 @@ class EnvironmentConnections:
 
     def restore(self):
         pairs = [('local', 'codex'), ('local', 'hermes')]
+        if self.grok is not None:
+            pairs.append(('local', 'grok'))
         for cid, kind in pairs:
             with self.store.session() as db:
                 choice = db.get(AgentConnectionChoice, cid + ':' + kind)
-                legacy_id = ('local-hermes-default' if kind == 'hermes' else 'local-codex') if cid == 'local' else f'ssh-{kind}-{cid}'
+                legacy_id = ('local-hermes-default' if kind == 'hermes' else f'local-{kind}') if cid == 'local' else f'ssh-{kind}-{cid}'
                 enabled = bool(choice.enabled) if choice is not None else self.store.get_agent(legacy_id) is not None
             if enabled:
                 try:
@@ -362,7 +400,8 @@ class EnvironmentConnections:
                 self.discover(row['id'])
             except ConnectionError:
                 continue
-        ssh_pairs = [(row['id'], kind) for row in self.store.list_ssh_connections() for kind in ('hermes', 'codex')]
+        kinds = ('hermes', 'codex', 'grok') if self.grok_factory is not None else ('hermes', 'codex')
+        ssh_pairs = [(row['id'], kind) for row in self.store.list_ssh_connections() for kind in kinds]
         for cid, kind in ssh_pairs:
             with self.store.session() as db:
                 choice = db.get(AgentConnectionChoice, cid + ':' + kind)
@@ -374,9 +413,31 @@ class EnvironmentConnections:
                 except ConnectionError:
                     continue
 
-    def for_agent(self, agent_id):
+    def _codex_for_agent(self, agent_id):
         return next((c for c in [self.codex, *self.remote.values()] if c.agent_id == agent_id), None)
+
+    def _grok_for_agent(self, agent_id):
+        return next(
+            (c for c in [self.grok, *self.remote_grok.values()] if c is not None and c.agent_id == agent_id),
+            None,
+        )
+
+    def register_runtime_resolver(self, resolver):
+        if not callable(resolver):
+            raise TypeError('runtime resolver must be callable')
+        self._runtime_resolvers.append(resolver)
+
+    def runtime_for_agent(self, agent_id):
+        return next((runtime for resolver in self._runtime_resolvers if (runtime := resolver(agent_id)) is not None), None)
+
+    def for_agent(self, agent_id):
+        """Compatibility lookup for Codex-specific callers."""
+        return self._codex_for_agent(agent_id)
 
     def shutdown(self):
         for connection in self.remote.values():
             connection.disconnect()
+        for connection in self.remote_grok.values():
+            connection.disconnect()
+        if self.grok is not None:
+            self.grok.disconnect()

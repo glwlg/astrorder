@@ -21,25 +21,57 @@ interface TreeNode {
   children?: TreeNode[]
 }
 
+const FILE_TREE_EXPANSION_PREFIX = 'astrorder:filetree:expanded:v1:'
+
+function expansionStorageKey(artifact: ViewerContext['artifact']): string {
+  return `${FILE_TREE_EXPANSION_PREFIX}${encodeURIComponent([
+    artifact.agentId,
+    artifact.sessionId,
+    artifact.connectionId || 'local',
+    artifact.path || '.',
+  ].join('\u0000'))}`
+}
+
+function readExpandedPaths(key: string): Set<string> {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(key) || '[]')
+    return new Set(Array.isArray(value) ? value.filter((path): path is string => typeof path === 'string') : [])
+  } catch {
+    return new Set()
+  }
+}
+
+function writeExpandedPaths(key: string, paths: Set<string>): void {
+  try {
+    localStorage.setItem(key, JSON.stringify([...paths]))
+  } catch {
+    // Unavailable storage must not prevent browsing files.
+  }
+}
+
 function FileTreeNodeItem({
   node,
   sessionId,
   agentId,
   connectionId,
+  expandedPaths,
+  onToggleDirectory,
   level = 0,
 }: {
   node: TreeNode
   sessionId: string
   agentId: string
   connectionId?: string
+  expandedPaths: Set<string>
+  onToggleDirectory: (path: string) => void
   level?: number
 }) {
-  const [opened, setOpened] = useState(level < 1)
+  const opened = expandedPaths.has(node.path)
   const openArtifact = useSidecarStore((s) => s.openArtifact)
 
   const handleFileClick = () => {
     if (node.is_dir) {
-      setOpened(!opened)
+      onToggleDirectory(node.path)
       return
     }
 
@@ -110,6 +142,8 @@ function FileTreeNodeItem({
               sessionId={sessionId}
               agentId={agentId}
               connectionId={connectionId}
+              expandedPaths={expandedPaths}
+              onToggleDirectory={onToggleDirectory}
               level={level + 1}
             />
           ))}
@@ -124,6 +158,18 @@ export function FileTreeViewer({ artifact }: ViewerContext) {
   const [error, setError] = useState<string | null>(null)
   const [treeData, setTreeData] = useState<TreeNode[]>([])
   const [rootPath, setRootPath] = useState('')
+  const storageKey = expansionStorageKey(artifact)
+  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(() => readExpandedPaths(storageKey))
+
+  const toggleDirectory = useCallback((path: string) => {
+    setExpandedPaths((current) => {
+      const next = new Set(current)
+      if (next.has(path)) next.delete(path)
+      else next.add(path)
+      writeExpandedPaths(storageKey, next)
+      return next
+    })
+  }, [storageKey])
 
   const fetchTree = useCallback(async () => {
     setLoading(true)
@@ -142,7 +188,7 @@ export function FileTreeViewer({ artifact }: ViewerContext) {
     } finally {
       setLoading(false)
     }
-  }, [artifact.path])
+  }, [artifact.connectionId, artifact.path, artifact.sessionId])
 
   useEffect(() => {
     void fetchTree()
@@ -187,6 +233,8 @@ export function FileTreeViewer({ artifact }: ViewerContext) {
                 sessionId={artifact.sessionId}
                 agentId={artifact.agentId}
                 connectionId={artifact.connectionId}
+                expandedPaths={expandedPaths}
+                onToggleDirectory={toggleDirectory}
                 level={0}
               />
             ))}

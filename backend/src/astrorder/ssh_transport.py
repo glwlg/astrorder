@@ -249,7 +249,12 @@ def main():
         if not Path(cwd).is_absolute() or not Path(cwd).is_dir():
             emit({"ok": False, "code": "invalid_workspace", "detail": "remote workspace is not an existing directory"}, 2)
         os.chdir(cwd)
-    os.execvpe(python_command[0], [*python_command, "-u", "-m", "tui_gateway.entry"], env)
+    entry = (
+        "from hermes_cli.plugins import get_plugin_manager;"
+        "get_plugin_manager().discover_and_load();"
+        "from tui_gateway.entry import main;main()"
+    )
+    os.execvpe(python_command[0], [*python_command, "-u", "-c", entry], env)
 
 main()
 '''
@@ -589,6 +594,8 @@ class SshNativeRuntime:
                     safe_line = _safe_process_line(line)
                     if safe_line:
                         self._stderr_tail.append(safe_line)
+                        if safe_line.startswith("[astrorder-hermes] connector failed:"):
+                            logger.warning("%s: %s", self.connection_id, safe_line)
 
         threading.Thread(target=read_stdout, name=f"astrorder-ssh-rpc-{self.connection_id}", daemon=True).start()
         threading.Thread(target=drain_stderr, name=f"astrorder-ssh-stderr-{self.connection_id}", daemon=True).start()
@@ -635,6 +642,9 @@ class SshNativeRuntime:
                 return
             metadata = self._metadata or self._install()
             self._remote_port = 23000 + (int(hashlib.sha256(self.connection_id.encode()).hexdigest()[:6], 16) % 20000)
+            agent_name = str(self.settings.get("display_name") or "远程")
+            if not agent_name.endswith("Hermes"):
+                agent_name += " · Hermes"
             bridge_payload = {
                 "python_path": metadata.python_path,
                 "python_command": list(metadata.python_command),
@@ -644,7 +654,7 @@ class SshNativeRuntime:
                     "ASTRORDER_CONNECTOR_ENDPOINT": f"ws://127.0.0.1:{self._remote_port}/ws/v1/connector",
                     "ASTRORDER_CONNECTOR_SECRET": self.connector_secret or "",
                     "ASTRORDER_HERMES_AGENT_ID": self._agent_id,
-                    "ASTRORDER_HERMES_AGENT_NAME": str(self.settings.get("display_name") or "远程 Hermes"),
+                    "ASTRORDER_HERMES_AGENT_NAME": agent_name,
                     "ASTRORDER_HERMES_SOURCE_ID": self._source_id,
                     "ASTRORDER_HERMES_CONNECTION_ID": self.connection_id,
                     "ASTRORDER_HERMES_PROFILE_NAME": str(self.settings.get("profile_name") or "default"),

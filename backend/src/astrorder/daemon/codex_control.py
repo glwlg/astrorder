@@ -28,6 +28,7 @@ class DaemonCodexController:
         self.router = router
         self.connection = connection
         self._unregister = None
+        self._unregister_status = None
         self._lock = threading.RLock()
 
     def activate(self) -> None:
@@ -36,41 +37,162 @@ class DaemonCodexController:
                 return
             agent_id = self._agent_id()
             self._unregister = self.router.register(agent_id, self._on_notification)
+            self._unregister_status = self.bridge.register_status_handler(self._on_status)
 
     def close(self) -> None:
         with self._lock:
             unregister, self._unregister = self._unregister, None
+            unregister_status, self._unregister_status = self._unregister_status, None
         if unregister is not None:
             unregister()
+        if unregister_status is not None:
+            unregister_status()
+
+    def request_native(self, method: str, params: Mapping[str, Any]) -> dict[str, Any]:
+        try:
+            response = asyncio.run(self.bridge.request_control(
+                "runtime.request",
+                {
+                    "agent_type": self._agent_type(),
+                    "method": method,
+                    "request_params": dict(params),
+                    "params": self._runtime_params(),
+                },
+            ))
+        except DaemonBridgeError as exc:
+            detail = str(exc)
+            if "Codex rejected request" in detail:
+                raise ConnectionError(f"Codex 原生接口 {method} 拒绝请求：{detail}", 422) from exc
+            raise ConnectionError(f"小内核未确认 Codex 原生请求 {method}。", 503) from exc
+        result = response.get("result")
+        if not isinstance(result, Mapping):
+            raise ConnectionError(f"小内核返回的 Codex 原生响应 {method} 无效。", 502)
+        return dict(result)
 
     def set_model(self, session_id: str, provider: str, model: str) -> dict[str, Any]:
         choices = self.connection.models(session_id)
-        if not any(
-            row.get("provider") == provider and row.get("model") == model
+        choice = next((
+            row
             for row in choices
             if isinstance(row, Mapping)
-        ):
+            and row.get("provider") == provider
+            and row.get("model") == model
+        ), None)
+        if choice is None:
             raise ConnectionError("所选模型不在当前 Codex 原生目录中。", 422)
-        return self._settings(
+        self._settings(
             session_id,
             {"model": model},
-            lambda: self.connection._bindings.get(session_id, {}).get("model") == model
-            and self.connection._bindings.get(session_id, {}).get("provider") == provider,
-            lambda: dict(self.connection._bindings[session_id]),
-            "Codex 模型切换尚未通过原生状态确认。",
+            desktop_updates={"model": model, "modelLabel": choice.get("label") or model},
         )
+        with self.connection._binding_changed:
+            self.connection._bindings[session_id] = {"model": model, "provider": provider}
+            self.connection._binding_changed.notify_all()
+        return dict(self.connection._bindings[session_id])
 
     def set_effort(self, session_id: str, effort: str) -> dict[str, Any]:
         from ..native_controls import REASONING_EFFORTS
 
         if effort not in REASONING_EFFORTS:
             raise ConnectionError("思考强度不在原生支持范围内。", 422)
-        return self._settings(
+        binding = self.connection.model(session_id)
+        model = binding.get("model")
+        catalog = list(
+            self.connection._pages("model/list", {"limit": 100, "includeHidden": False})
+        )
+        native_model = next(
+            (
+                row
+                for row in catalog
+                if isinstance(row, Mapping) and (row.get("model") or row.get("id")) == model
+            ),
+            None,
+        )
+        supported = [
+            row.get("reasoningEffort")
+            for row in (native_model.get("supportedReasoningEfforts") or [] if native_model else [])
+            if isinstance(row, Mapping) and isinstance(row.get("reasoningEffort"), str)
+        ]
+        if effort not in supported:
+            raise ConnectionError("当前模型不支持所选思考强度。", 422)
+        self._settings(
             session_id,
             {"effort": effort},
-            lambda: self.connection._efforts.get(session_id) == effort,
-            lambda: {"effort": effort},
-            "Codex 思考强度尚未读回确认。",
+            desktop_updates={"effort": effort, "effortIndex": supported.index(effort)},
+        )
+        with self.connection._binding_changed:
+            self.connection._efforts[session_id] = effort
+            self.connection._binding_changed.notify_all()
+        return {"effort": effort}
+
+    def submit_slash(
+        self, command: dict[str, Any], name: str, argument: str | None
+    ) -> tuple[str, str | None]:
+        try:
+            return asyncio.run(self._submit_slash(command, name, argument))
+        except (DaemonBridgeError, RuntimeError) as exc:
+            return "unknown", f"Codex /{name} 执行结果未确认：{exc}"
+
+    async def _submit_slash(
+        self, command: dict[str, Any], name: str, argument: str | None
+    ) -> tuple[str, str | None]:
+        session_id = command["session_id"]
+        await self._attach(session_id)
+        response = await self.bridge.request_control(
+            f"session.{name}",
+            {"session_id": session_id, **({"instructions": argument} if argument else {})},
+        )
+        result = response.get("result")
+        if not isinstance(result, Mapping):
+            return "unknown", f"Codex /{name} 未返回有效结果。"
+        if name == "compact":
+            updated = self.connection.store.set_command_state(
+                self._agent_id(), session_id, command["id"], "completed", None
+            )
+            self.connection._event("command.upsert", session_id, updated)
+            return "accepted", None
+        turn_id = result.get("turn_id")
+        if not isinstance(turn_id, str):
+            return "unknown", "Codex /review 未返回审查轮次。"
+        with self.connection._lock:
+            self.connection._commands[(session_id, turn_id)] = dict(command)
+            self.connection._active[session_id] = turn_id
+        return "accepted", None
+
+    def delete(self, session_id: str) -> None:
+        self.connection._scope(session_id)
+        with self.connection._lock:
+            if session_id in self.connection._active:
+                raise ConnectionError("会话正在运行，未执行永久删除。", 409)
+        try:
+            response = asyncio.run(
+                self.bridge.request_control("session.delete", {"session_id": session_id})
+            )
+        except DaemonBridgeError as exc:
+            raise ConnectionError(self._daemon_error(exc, "删除"), 503) from exc
+        result = response.get("result")
+        if not isinstance(result, Mapping) or result.get("deleted") != session_id:
+            raise ConnectionError("守护进程未确认 Codex 会话删除。", 502)
+        with self.connection._lock:
+            self.connection._threads.pop(session_id, None)
+            self.connection._owned_threads.discard(session_id)
+            self.connection._bindings.pop(session_id, None)
+            self.connection._efforts.pop(session_id, None)
+
+    def rename(self, session_id: str, title: str) -> None:
+        self.connection._scope(session_id)
+        try:
+            response = asyncio.run(self._rename(session_id, title))
+        except DaemonBridgeError as exc:
+            raise ConnectionError(self._daemon_error(exc, "重命名"), 503) from exc
+        result = response.get("result")
+        if not isinstance(result, Mapping) or result.get("title") != title:
+            raise ConnectionError("守护进程未确认 Codex 会话重命名。", 502)
+
+    async def _rename(self, session_id: str, title: str) -> dict[str, Any]:
+        await self._attach(session_id)
+        return await self.bridge.request_control(
+            "session.rename", {"session_id": session_id, "title": title}
         )
 
     def create(
@@ -166,7 +288,12 @@ class DaemonCodexController:
         if not isinstance(attachments, list):
             return "failed", "Codex command attachments are invalid."
         try:
-            inputs = command_input(
+            build_inputs = getattr(self.connection, "command_input", None)
+            inputs = await asyncio.to_thread(
+                build_inputs,
+                command,
+            ) if callable(build_inputs) else await asyncio.to_thread(
+                command_input,
                 getattr(self.connection, "settings", None),
                 getattr(self.connection, "store", None),
                 command,
@@ -194,6 +321,10 @@ class DaemonCodexController:
         try:
             await self._attach(session_id)
             policy = codex_turn_policy(self.connection.get_approval_mode(session_id))
+            with self.connection._lock:
+                model = (self.connection._bindings.get(session_id) or {}).get("model")
+            if isinstance(model, str) and model:
+                policy["model"] = model
             response = await self.bridge.request_control(
                 "session.send",
                 {
@@ -213,7 +344,39 @@ class DaemonCodexController:
                     if result.get("status") not in {"idle", "error"}:
                         self.connection._active[session_id] = turn_id
             return "accepted", None
-        except DaemonBridgeError:
+        except DaemonBridgeError as exc:
+            if "active writer" in str(exc):
+                if self._agent_type() == "codex" and inputs and all(
+                    item.get("type") in {"text", "image"} for item in inputs
+                ):
+                    try:
+                        response = await self.bridge.request_control(
+                            "runtime.request",
+                            {
+                                "agent_type": "codex",
+                                "method": "desktop/submit",
+                                "request_params": {"threadId": session_id, "input": inputs},
+                                "params": {},
+                            },
+                        )
+                        result = response.get("result")
+                        if isinstance(result, Mapping) and result.get("accepted") is True:
+                            self.connection._notification(
+                                {
+                                    "method": "turn/started",
+                                    "params": {
+                                        "threadId": session_id,
+                                        "turn": {"id": command["id"], "status": "inProgress"},
+                                    },
+                                }
+                            )
+                            return "accepted", None
+                    except DaemonBridgeError as desktop_error:
+                        detail = str(desktop_error)
+                        if "debugging endpoint is unavailable" in detail:
+                            return "failed", "Codex Desktop 当前未开放 CDP；请通过 Codex CDP 快捷方式启动。"
+                        return "failed", f"Codex Desktop 接管失败：{detail}"
+                return "failed", "该 Codex 会话正在其他客户端中运行，且不支持 CDP 接管。"
             return "unknown", "daemon Codex delivery was not confirmed; command will not retry."
         finally:
             with self.connection._lock:
@@ -308,26 +471,52 @@ class DaemonCodexController:
         self,
         session_id: str,
         updates: Mapping[str, str],
-        confirmed,
-        result,
-        timeout_detail: str,
-    ) -> dict[str, Any]:
-        async def send() -> None:
+        *,
+        desktop_updates: Mapping[str, Any] | None = None,
+    ) -> None:
+        async def send() -> dict[str, Any]:
             await self._attach(session_id)
-            await self.bridge.request_control(
+            return await self.bridge.request_control(
                 "session.settings", {"session_id": session_id, **dict(updates)}
             )
 
         try:
-            asyncio.run(send())
+            response = asyncio.run(send())
         except DaemonBridgeError as exc:
-            raise ConnectionError("守护进程未确认 Codex 设置修改。", 503) from exc
+            if "active writer" in str(exc) and self._agent_type() == "codex" and desktop_updates:
+                for _attempt in range(2):
+                    try:
+                        response = asyncio.run(
+                            self.bridge.request_control(
+                                "runtime.request",
+                                {
+                                    "agent_type": "codex",
+                                    "method": "desktop/settings",
+                                    "request_params": {
+                                        "threadId": session_id,
+                                        "updates": dict(desktop_updates),
+                                    },
+                                    "params": {},
+                                },
+                            )
+                        )
+                        result = response.get("result")
+                        if isinstance(result, Mapping) and result.get("accepted") is True:
+                            return
+                    except DaemonBridgeError:
+                        continue
+            raise ConnectionError(self._daemon_error(exc, "设置修改"), 503) from exc
         except RuntimeError as exc:
             raise ConnectionError("Codex 设置必须从服务端同步控制路径调用。", 503) from exc
-        with self.connection._binding_changed:
-            if not self.connection._binding_changed.wait_for(confirmed, timeout=3):
-                raise ConnectionError(timeout_detail, 502)
-            return result()
+        result = response.get("result")
+        if not isinstance(result, Mapping) or any(result.get(key) != value for key, value in updates.items()):
+            raise ConnectionError("守护进程未确认 Codex 设置修改。", 502)
+
+    @staticmethod
+    def _daemon_error(exc: DaemonBridgeError, action: str) -> str:
+        if "active writer" in str(exc):
+            return f"该 Codex 会话正在其他客户端中运行，无法从星序执行{action}。"
+        return f"守护进程未确认 Codex 会话{action}。"
 
     def _agent_id(self) -> str:
         agent_id = getattr(self.connection, "agent_id", None)
@@ -337,3 +526,35 @@ class DaemonCodexController:
 
     def _on_notification(self, frame: dict[str, Any]) -> None:
         self.connection._notification(frame)
+
+    def _on_status(self, sessions: Mapping[str, Any]) -> None:
+        with self.connection._lock:
+            stale = {
+                session_id
+                for session_id in self.connection._active
+                if session_id not in sessions
+                or sessions[session_id].get("status") not in {"running", "waiting_approval"}
+            }
+            for session_id in stale:
+                self.connection._active.pop(session_id, None)
+                self.connection._pending.pop(session_id, None)
+                self.connection._commands = {
+                    key: value
+                    for key, value in self.connection._commands.items()
+                    if key[0] != session_id
+                }
+                self.connection._stop_commands = {
+                    key: value
+                    for key, value in self.connection._stop_commands.items()
+                    if key[0] != session_id
+                }
+                self.connection._approval_commands = {
+                    key: value
+                    for key, value in self.connection._approval_commands.items()
+                    if key[0] != session_id
+                }
+                self.connection._approvals = {
+                    key: value
+                    for key, value in self.connection._approvals.items()
+                    if value.get("session_id") != session_id
+                }

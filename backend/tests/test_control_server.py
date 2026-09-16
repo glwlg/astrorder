@@ -8,7 +8,9 @@ from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 from astrorder.config import Settings
+from astrorder.daemon.bridge import DaemonBridge
 from astrorder.main import create_app
+from astrorder.service import ControlService
 
 
 @pytest.fixture
@@ -103,6 +105,43 @@ def test_private_state_fails_closed_without_configured_secret(configured):
         assert "traceback" not in response.text.lower()
 
 
+def test_desktop_shutdown_route_precedes_static_mount(configured):
+    app = configured()
+    calls = []
+    app.state.desktop_shutdown = lambda: calls.append(True)
+    with TestClient(app, client=("127.0.0.1", 12345)) as client:
+        response = client.post(
+            "/_desktop/shutdown",
+            headers={"Authorization": "Bearer browser-test-secret"},
+        )
+    assert response.json() == {"stopping": True}
+    assert calls == [True]
+
+
+def test_daemon_projection_starts_after_stale_connectors_are_disconnected(configured, monkeypatch):
+    order = []
+    original_mark = ControlService.mark_persisted_connectors_disconnected
+
+    def mark_disconnected(self):
+        order.append("marked")
+        return original_mark(self)
+
+    async def run_bridge(_self, stopping):
+        order.append("bridge")
+        await stopping.wait()
+
+    monkeypatch.setattr(ControlService, "mark_persisted_connectors_disconnected", mark_disconnected)
+    monkeypatch.setattr(DaemonBridge, "run", run_bridge)
+    app = configured(
+        session_daemon_enabled=True,
+        session_daemon_secret="daemon-test-secret",
+        session_daemon_endpoint="ws://127.0.0.1:30009",
+    )
+
+    with TestClient(app):
+        assert order == ["marked", "bridge"]
+
+
 def test_browser_auth_origin_and_safe_error(configured):
     app = configured()
     with TestClient(app) as client:
@@ -119,6 +158,27 @@ def test_browser_auth_origin_and_safe_error(configured):
         response = client.get("/api/v1/bootstrap")
         assert response.status_code == 200
         assert response.json()["agents"] == []
+
+
+def test_bootstrap_does_not_scan_presence(configured, monkeypatch):
+    import astrorder.api as api_mod
+
+    calls: list[str] = []
+
+    def fake_presence(request):
+        calls.append("presence")
+        return {"items": [], "open": [], "live": []}
+
+    monkeypatch.setattr(api_mod, "_collect_presence", fake_presence)
+    app = configured()
+    with TestClient(app) as client:
+        login(client)
+        assert client.get("/api/v1/bootstrap").status_code == 200
+        assert calls == []
+        response = client.get("/api/v1/presence")
+        assert response.status_code == 200
+        assert response.json() == {"items": [], "open": [], "live": []}
+        assert calls == ["presence"]
 
 
 def test_connector_role_is_separate_and_origin_checked(configured):
@@ -659,7 +719,13 @@ def test_static_spa_serves_client_routes_without_shadowing_api(configured, tmp_p
             response = client.get(route)
             assert response.status_code == 200, route
             assert "星序 SPA" in response.text
-        assert client.get("/assets/app.js").text == "console.log('asset')"
+        asset = client.get("/assets/app.js")
+        assert asset.text == "console.log('asset')"
+        assert "max-age=2592000" in asset.headers.get("cache-control", "")
+        (static_dir / "sw.js").write_text("/* sw */", encoding="utf-8")
+        sw = client.get("/sw.js")
+        assert sw.text == "/* sw */"
+        assert "no-cache" in sw.headers.get("cache-control", "")
         assert client.get("/api/v1/not-a-route").status_code == 404
 
 

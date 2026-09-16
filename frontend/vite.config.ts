@@ -1,6 +1,7 @@
 import react from '@vitejs/plugin-react'
 import { existsSync, readFileSync } from 'node:fs'
 import { defineConfig } from 'vitest/config'
+import { VitePWA } from 'vite-plugin-pwa'
 
 const backendUrl = process.env.ASTRORDER_BACKEND_URL || 'http://127.0.0.1:30002'
 // Optional machine-local host allowlist; never commit private hostnames.
@@ -12,7 +13,23 @@ if (!Array.isArray(allowedHosts) || !allowedHosts.every(host => typeof host === 
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    VitePWA({
+      disable: process.env.VITEST === 'true',
+      registerType: 'autoUpdate',
+      injectRegister: false,
+      manifest: false,
+      filename: 'sw-astrorder.js',
+      includeAssets: ['favicon.png', 'favicon.ico', 'apple-touch-icon.png', 'pwa-192.png', 'pwa-512.png'],
+      workbox: {
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2,webmanifest}'],
+        navigateFallback: '/index.html',
+        navigateFallbackDenylist: [/^\/api\//, /^\/ws\//, /^\/health/],
+        maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
+      },
+    }),
+  ],
   server: {
     host: '127.0.0.1',
     port: 30001,

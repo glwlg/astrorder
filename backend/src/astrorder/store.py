@@ -13,6 +13,7 @@ from uuid import uuid4
 
 from sqlalchemy import create_engine, delete, func, select, text, update
 from sqlalchemy import event as sqlalchemy_event
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
@@ -162,6 +163,8 @@ def _session_wire(row: SessionRow) -> dict[str, Any]:
         "native_kind": row.native_kind,
         "ephemeral": row.ephemeral,
         "control_state": row.control_state,
+        "handoff_from_agent_id": row.handoff_from_agent_id,
+        "handoff_from_session_id": row.handoff_from_session_id,
     }
 
 
@@ -313,6 +316,11 @@ class Store:
                 "selected_model_provider": "VARCHAR(160)",
                 "selected_model": "VARCHAR(160)",
                 "selected_reasoning_effort": "VARCHAR(32)",
+                "handoff_from_agent_id": "VARCHAR(256)",
+                "handoff_from_session_id": "VARCHAR(256)",
+                "handoff_context": "TEXT",
+                "handoff_context_consumed": "BOOLEAN NOT NULL DEFAULT 0",
+                "selected_approval_mode": "VARCHAR(32)",
             },
             "ssh_connections": {
                 "display_name": "VARCHAR(256)",
@@ -348,6 +356,9 @@ class Store:
             )
             db.exec_driver_sql(
                 "UPDATE sessions SET source_session_id = id WHERE source_session_id IS NULL OR source_session_id = ''"
+            )
+            db.exec_driver_sql(
+                "UPDATE sessions SET title = substr(title, 1, 512) WHERE length(title) > 512"
             )
             db.exec_driver_sql(
                 "UPDATE ssh_connections SET profile_name = 'default' "
@@ -747,6 +758,7 @@ class Store:
 
     def upsert_session(self, data: dict[str, Any]) -> dict[str, Any]:
         with self.session() as db:
+            title = str(data.get("title", ""))[:512]
             row = db.execute(
                 select(SessionRow).where(
                     SessionRow.agent_id == data["agent_id"], SessionRow.id == data["id"]
@@ -757,11 +769,10 @@ class Store:
                 updated_at = parse_timestamp(str(updated_at))
             if row is None:
                 # Use insert ... on conflict do update to prevent multi-threaded race condition
-                from sqlalchemy.dialects.sqlite import insert as sqlite_insert
                 stmt = sqlite_insert(SessionRow).values(
                     id=data["id"],
                     agent_id=data["agent_id"],
-                    title=data.get("title", ""),
+                    title=title,
                     workspace=data.get("workspace"),
                     status=data["status"],
                     source_id=data.get("source_id") or data["agent_id"],
@@ -773,11 +784,13 @@ class Store:
                     native_kind=data.get("native_kind"),
                     ephemeral=data.get("ephemeral") is True,
                     control_state=data.get("control_state", "unknown"),
+                    handoff_from_agent_id=data.get("handoff_from_agent_id"),
+                    handoff_from_session_id=data.get("handoff_from_session_id"),
                     updated_at=updated_at,
                 ).on_conflict_do_update(
                     index_elements=[SessionRow.agent_id, SessionRow.id],
                     set_={
-                        "title": data.get("title", ""),
+                        "title": title,
                         "workspace": data.get("workspace"),
                         "status": data["status"],
                         "source_id": data.get("source_id") or data["agent_id"],
@@ -790,6 +803,8 @@ class Store:
                         # Native snapshots cannot promote temporary sessions.
                         "ephemeral": SessionRow.ephemeral | (data.get("ephemeral") is True),
                         "control_state": data.get("control_state", "unknown"),
+                        "handoff_from_agent_id": data.get("handoff_from_agent_id"),
+                        "handoff_from_session_id": data.get("handoff_from_session_id"),
                         "updated_at": updated_at,
                     }
                 )
@@ -801,7 +816,7 @@ class Store:
                     )
                 ).scalar_one()
             else:
-                row.title = data.get("title", "")
+                row.title = title
                 row.workspace = data.get("workspace")
                 row.status = data["status"]
                 row.source_id = data.get("source_id") or row.source_id or data["agent_id"]
@@ -813,6 +828,8 @@ class Store:
                 row.native_kind = data.get("native_kind", row.native_kind)
                 row.ephemeral = row.ephemeral or data.get("ephemeral") is True
                 row.control_state = data.get("control_state", row.control_state or "unknown")
+                row.handoff_from_agent_id = data.get("handoff_from_agent_id", row.handoff_from_agent_id)
+                row.handoff_from_session_id = data.get("handoff_from_session_id", row.handoff_from_session_id)
                 row.updated_at = updated_at
                 db.flush()
             return _session_wire(row)
@@ -860,6 +877,72 @@ class Store:
             row.selected_reasoning_effort = effort
             db.flush()
             return {"effort": effort}
+
+    def set_session_approval_mode_binding(
+        self, agent_id: str, session_id: str, mode: str
+    ) -> dict[str, str]:
+        with self.session() as db:
+            row = db.execute(
+                select(SessionRow).where(SessionRow.agent_id == agent_id, SessionRow.id == session_id)
+            ).scalar_one_or_none()
+            if row is None:
+                raise ScopeNotFound("session not found")
+            row.selected_approval_mode = mode
+            db.flush()
+            return {"mode": mode}
+
+    def get_session_approval_mode_binding(
+        self, agent_id: str, session_id: str
+    ) -> str | None:
+        with self.session() as db:
+            row = db.execute(
+                select(SessionRow).where(SessionRow.agent_id == agent_id, SessionRow.id == session_id)
+            ).scalar_one_or_none()
+            return row.selected_approval_mode if row and row.selected_approval_mode else None
+
+    def set_session_handoff_context(self, agent_id: str, session_id: str, context: str) -> None:
+        with self.session() as db:
+            row = db.execute(
+                select(SessionRow).where(SessionRow.agent_id == agent_id, SessionRow.id == session_id)
+            ).scalar_one()
+            row.handoff_context = context
+            row.handoff_context_consumed = False
+            db.flush()
+
+    def pending_session_handoff_context(self, agent_id: str, session_id: str) -> str | None:
+        with self.session() as db:
+            row = db.execute(
+                select(SessionRow).where(SessionRow.agent_id == agent_id, SessionRow.id == session_id)
+            ).scalar_one_or_none()
+            return row.handoff_context if row and not row.handoff_context_consumed else None
+
+    def claim_session_handoff_context(self, agent_id: str, session_id: str) -> str | None:
+        with self.session() as db:
+            return db.execute(
+                update(SessionRow)
+                .where(
+                    SessionRow.agent_id == agent_id,
+                    SessionRow.id == session_id,
+                    SessionRow.handoff_context.is_not(None),
+                    SessionRow.handoff_context_consumed.is_(False),
+                )
+                .values(handoff_context_consumed=True)
+                .returning(SessionRow.handoff_context)
+            ).scalar_one_or_none()
+
+    def restore_session_handoff_context(
+        self, agent_id: str, session_id: str, context: str
+    ) -> None:
+        with self.session() as db:
+            db.execute(
+                update(SessionRow)
+                .where(
+                    SessionRow.agent_id == agent_id,
+                    SessionRow.id == session_id,
+                    SessionRow.handoff_context == context,
+                )
+                .values(handoff_context_consumed=False)
+            )
 
     def get_session_model_binding(self, agent_id: str, session_id: str) -> dict[str, str] | None:
         with self.session() as db:
@@ -1006,6 +1089,19 @@ class Store:
     def upsert_task(self, data: dict[str, Any]) -> dict[str, Any]:
         with self.session() as db:
             return self._upsert_task_in(db, data)
+
+    def get_task(
+        self, agent_id: str, session_id: str, task_id: str
+    ) -> dict[str, Any] | None:
+        with self.session() as db:
+            row = db.execute(
+                select(TaskRow).where(
+                    TaskRow.agent_id == agent_id,
+                    TaskRow.session_id == session_id,
+                    TaskRow.id == task_id,
+                )
+            ).scalar_one_or_none()
+            return _task_wire(row) if row else None
 
     def list_tasks(self, agent_id: str, session_id: str) -> list[dict[str, Any]]:
         with self.session() as db:
@@ -1207,38 +1303,26 @@ class Store:
 
     def upsert_message(self, data: dict[str, Any]) -> dict[str, Any]:
         with self.session() as db:
-            row = db.execute(
+            return self._upsert_message_in(db, data)
+
+    def upsert_messages(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        with self.session() as db:
+            return [self._upsert_message_in(db, item) for item in items]
+
+    def get_messages(
+        self, agent_id: str, session_id: str, message_ids: list[str]
+    ) -> list[dict[str, Any]]:
+        if not message_ids:
+            return []
+        with self.session() as db:
+            rows = db.scalars(
                 select(MessageRow).where(
-                    MessageRow.agent_id == data["agent_id"],
-                    MessageRow.session_id == data["session_id"],
-                    MessageRow.id == data["id"],
+                    MessageRow.agent_id == agent_id,
+                    MessageRow.session_id == session_id,
+                    MessageRow.id.in_(message_ids),
                 )
-            ).scalar_one_or_none()
-            created_at = data["created_at"]
-            if not isinstance(created_at, datetime):
-                created_at = parse_timestamp(str(created_at))
-            values = {
-                "role": data["role"],
-                "kind": data["kind"],
-                "text": data.get("text", ""),
-                "attachments": list(data.get("attachments", [])),
-                "created_at": created_at,
-                "command_id": data.get("command_id"),
-                "tool": data.get("tool"),
-            }
-            if row is None:
-                row = MessageRow(
-                    id=data["id"],
-                    session_id=data["session_id"],
-                    agent_id=data["agent_id"],
-                    **values,
-                )
-                db.add(row)
-            else:
-                for key, value in values.items():
-                    setattr(row, key, value)
-            db.flush()
-            return _message_wire(row)
+            ).all()
+            return [_message_wire(row) for row in rows]
 
     def get_message(self, agent_id: str, session_id: str, message_id: str) -> dict[str, Any] | None:
         with self.session() as db:
@@ -1383,13 +1467,6 @@ class Store:
             return _event_wire(row)
 
     def _upsert_task_in(self, db: Session, data: dict[str, Any]) -> dict[str, Any]:
-        row = db.execute(
-            select(TaskRow).where(
-                TaskRow.agent_id == data["agent_id"],
-                TaskRow.session_id == data["session_id"],
-                TaskRow.id == data["id"],
-            )
-        ).scalar_one_or_none()
         created_at = data["created_at"]
         updated_at = data["updated_at"]
         if not isinstance(created_at, datetime):
@@ -1407,21 +1484,31 @@ class Store:
             "created_at": created_at,
             "updated_at": updated_at,
         }
-        if row is None:
-            row = TaskRow(
+        db.execute(
+            sqlite_insert(TaskRow)
+            .values(
                 id=data["id"],
                 session_id=data["session_id"],
                 agent_id=data["agent_id"],
                 **values,
             )
-            db.add(row)
-        else:
-            for key, value in values.items():
-                setattr(row, key, value)
+            .on_conflict_do_update(
+                index_elements=[TaskRow.agent_id, TaskRow.session_id, TaskRow.id],
+                set_=values,
+            )
+        )
         db.flush()
+        row = db.execute(
+            select(TaskRow).where(
+                TaskRow.agent_id == data["agent_id"],
+                TaskRow.session_id == data["session_id"],
+                TaskRow.id == data["id"],
+            )
+        ).scalar_one()
         return _task_wire(row)
 
     def _upsert_session_in(self, db: Session, data: dict[str, Any]) -> dict[str, Any]:
+        title = str(data.get("title", ""))[:512]
         row = db.execute(
             select(SessionRow).where(SessionRow.agent_id == data["agent_id"], SessionRow.id == data["id"])
         ).scalar_one_or_none()
@@ -1432,7 +1519,7 @@ class Store:
             row = SessionRow(
                 id=data["id"],
                 agent_id=data["agent_id"],
-                title=data.get("title", ""),
+                title=title,
                 workspace=data.get("workspace"),
                 status=data["status"],
                 source_id=data.get("source_id") or data["agent_id"],
@@ -1443,12 +1530,14 @@ class Store:
                 history_state=data.get("history_state", "local"),
                 ephemeral=data.get("ephemeral") is True,
                 control_state=data.get("control_state", "unknown"),
+                handoff_from_agent_id=data.get("handoff_from_agent_id"),
+                handoff_from_session_id=data.get("handoff_from_session_id"),
                 updated_at=updated_at,
             )
             db.add(row)
         else:
-            if data.get("title") and data["title"] != data["id"]:
-                row.title = data["title"]
+            if title and title != data["id"]:
+                row.title = title
             if "workspace" in data and ("project_id" in data or not row.project_id):
                 row.workspace = data["workspace"]
             row.status = data["status"]
@@ -1462,6 +1551,8 @@ class Store:
             row.history_state = data.get("history_state", row.history_state or "local")
             row.ephemeral = row.ephemeral or data.get("ephemeral") is True
             row.control_state = data.get("control_state", row.control_state or "unknown")
+            row.handoff_from_agent_id = data.get("handoff_from_agent_id", row.handoff_from_agent_id)
+            row.handoff_from_session_id = data.get("handoff_from_session_id", row.handoff_from_session_id)
             row.updated_at = updated_at
         db.flush()
         return _session_wire(row)
@@ -1471,13 +1562,6 @@ class Store:
         session_id = data["session_id"]
         target_session_id = session_id
 
-        row = db.execute(
-            select(MessageRow).where(
-                MessageRow.agent_id == agent_id,
-                MessageRow.session_id == target_session_id,
-                MessageRow.id == data["id"],
-            )
-        ).scalar_one_or_none()
         created_at = data["created_at"]
         if not isinstance(created_at, datetime):
             created_at = parse_timestamp(str(created_at))
@@ -1490,15 +1574,24 @@ class Store:
             "command_id": data.get("command_id"),
             "tool": data.get("tool"),
         }
-        if row is None:
-            row = MessageRow(
+        db.execute(
+            sqlite_insert(MessageRow)
+            .values(
                 id=data["id"], session_id=target_session_id, agent_id=agent_id, **values
             )
-            db.add(row)
-        else:
-            for key, value in values.items():
-                setattr(row, key, value)
+            .on_conflict_do_update(
+                index_elements=[MessageRow.agent_id, MessageRow.session_id, MessageRow.id],
+                set_=values,
+            )
+        )
         db.flush()
+        row = db.execute(
+            select(MessageRow).where(
+                MessageRow.agent_id == agent_id,
+                MessageRow.session_id == target_session_id,
+                MessageRow.id == data["id"],
+            )
+        ).scalar_one()
         return _message_wire(row)
 
     def _event_exists(self, db: Session, event_id: str, agent_id: str | None) -> bool:

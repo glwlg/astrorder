@@ -26,6 +26,8 @@ _HOST_RE = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?")
 _NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]{0,63}")
 _ALIAS_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}")
 _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
+_HERMES_NATIVE_CAPABILITIES = {"stop", "attachments", "history", "approvals", "launch", "delete", "queue"}
+_HERMES_NATIVE_LIMITATION = "停止仅作用于当前运行时拥有活动句柄的会话。图片经原生字节接口发送，其他文件进入会话工作区。其他客户端本地图片仅在 Hermes 目录内可预览。星序待发队列不等同于原生排队。"
 
 
 class ConnectionError(RuntimeError):
@@ -491,6 +493,16 @@ class LocalHermesController:
 
     def _enable_project_plugin(self, runtime: HermesRuntime, environment: dict[str, str]) -> None:
         self._install_profile_plugin(runtime, environment)
+        plugins_dir = self._active_profile_plugins_dir(runtime, environment)
+        config_path = plugins_dir.parent / "config.yaml"
+        token = self.settings.connector_secret or self.settings.browser_secret or ""
+        if token:
+            from .agent_mcp import ensure_url_mcp_yaml
+            ensure_url_mcp_yaml(
+                config_path,
+                f"http://127.0.0.1:{self.settings.port}/api/v1/agent/mcp",
+                token,
+            )
         try:
             result = self._command_runner(
                 [str(runtime.executable), "plugins", "enable", "astrorder-hermes"],
@@ -684,21 +696,51 @@ class LocalHermesController:
             with self._lock:
                 self._detail = "本机 Hermes 已启动，但现有 session/project discovery 暂不可用。"
 
-    def create_session(self, workspace: str | None = None, title: str | None = None) -> dict[str, Any]:
+    def create_session(
+        self,
+        workspace: str | None = None,
+        title: str | None = None,
+        *,
+        provider: str | None = None,
+        model: str | None = None,
+        effort: str | None = None,
+    ) -> dict[str, Any]:
         with self._lock:
             self._refresh_process_state()
             if self._state != "connected" or self._process is None:
                 raise ConnectionError("本机 Hermes 未连接；无法新建会话。", 503)
+            if bool(provider) != bool(model):
+                raise ConnectionError("Hermes provider 与 model 必须同时提供。", 422)
+            if model:
+                from .native_controls import model_choices
+
+                if not any(
+                    row["provider"] == provider and row["model"] == model
+                    for row in model_choices(self._rpc)
+                ):
+                    raise ConnectionError("所选模型不在原生运行时返回的可用列表中。", 422)
+            if effort:
+                from .native_controls import REASONING_EFFORTS
+
+                if effort not in REASONING_EFFORTS:
+                    raise ConnectionError("思考强度不在原生支持范围内。", 422)
             params: dict[str, Any] = {
                 "source": "local",
                 "cwd": workspace or str(self.project_root),
                 "title": title or "新会话",
             }
+            if model:
+                params.update({"provider": provider, "model": model})
+            if effort:
+                params["reasoning_effort"] = effort
             created = self._rpc("session.create", params)
             result = created.get("result") if isinstance(created, dict) else None
             durable_session_id = result.get("stored_session_id") if isinstance(result, dict) else None
             if not durable_session_id:
                 raise ConnectionError("本机 Hermes session.create 未返回有效的会话 ID。", 502)
+            info = result.get("info") if isinstance(result.get("info"), dict) else {}
+            if model and (info.get("provider"), info.get("model")) != (provider, model):
+                raise ConnectionError("Hermes 新会话未确认所选模型。", 502)
             # 严格使用当前已注册生效的 agent_id，确保与 DB 中的 agents 表主键对齐
             agent_id = self._agent_id or f"local-hermes-{self._profile_name or 'default'}"
             return {
@@ -710,6 +752,37 @@ class LocalHermesController:
                 "source_id": self._source_id or f"hermes-local-{self._profile_name or 'default'}",
                 "connection_id": None,
                 "source_session_id": durable_session_id,
+                "history_state": "live",
+                "control_state": "owned",
+                "updated_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+            }
+
+    def branch_session(self, parent_session_id: str, title: str | None = None) -> dict[str, Any]:
+        with self._lock:
+            self._refresh_process_state()
+            if self._state != "connected" or self._process is None:
+                raise ConnectionError("本机 Hermes 未连接；无法分叉会话。", 503)
+            response = self._rpc(
+                "session.branch",
+                {"session_id": parent_session_id, "name": title or "转交摘要"},
+            )
+            result = response.get("result") if isinstance(response, dict) else None
+            session_id = result.get("stored_session_id") if isinstance(result, dict) else None
+            handle = result.get("session_id") if isinstance(result, dict) else None
+            if not isinstance(session_id, str) or not session_id:
+                raise ConnectionError("本机 Hermes session.branch 未返回有效的会话 ID。", 502)
+            if isinstance(handle, str) and handle:
+                self._tui_to_session[handle] = session_id
+            agent_id = self._agent_id or f"local-hermes-{self._profile_name or 'default'}"
+            return {
+                "id": session_id,
+                "agent_id": agent_id,
+                "title": title or "转交摘要",
+                "workspace": str(self.project_root),
+                "status": "idle",
+                "source_id": self._source_id or f"hermes-local-{self._profile_name or 'default'}",
+                "connection_id": None,
+                "source_session_id": session_id,
                 "history_state": "live",
                 "control_state": "owned",
                 "updated_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
@@ -788,6 +861,11 @@ class LocalHermesController:
         forwarded["_daemon_inline_attachments"] = inline
         return self.submit_tui_command(forwarded)
 
+    def commands(self, session_id: str) -> list[dict[str, str | None]]:
+        from .native_controls import agent_commands
+
+        return agent_commands(self._rpc, session_id)
+
     def submit_tui_command(self, command: dict[str, object]) -> tuple[str, str | None]:
         with self._lock:
             self._refresh_process_state()
@@ -797,7 +875,7 @@ class LocalHermesController:
             if command.get("action") == "stop":
                 from .native_commands import interrupt_session
                 return interrupt_session(self._rpc, session_id)
-            if command.get("action", "send") != "send":
+            if command.get("action", "send") not in ("send", "enqueue"):
                 return "failed", "该原生操作不能作为消息投递。"
             # 允许在当前活动会话，或属于该 Agent 的任意历史会话中投递指令
             # 如果是历史会话，动态 resume 到当前 TUI 运行时
@@ -1029,6 +1107,8 @@ class ConnectionController:
     def mutate_session_for_agent(self, agent_id: str, session_id: str, updates: dict[str, Any] | None) -> None:
         runtime = self.get_runtime_by_agent_id(agent_id)
         if runtime is None:
+            if updates is None:
+                return
             raise ConnectionError("会话所属运行时未连接。", 503)
         if getattr(runtime, "daemon_owned", False):
             mutate = getattr(runtime, "mutate_session", None)
@@ -1115,11 +1195,32 @@ class ConnectionController:
         if verified.get("title") != updates["title"]:
             raise ConnectionError("原生标题读回不一致；未修改本地缓存。", 502)
 
-    def create_session_for_agent(self, agent_id: str, workspace: str | None = None, title: str | None = None) -> dict[str, Any]:
+    def create_session_for_agent(
+        self,
+        agent_id: str,
+        workspace: str | None = None,
+        title: str | None = None,
+        *,
+        parent_session_id: str | None = None,
+        provider: str | None = None,
+        model: str | None = None,
+        effort: str | None = None,
+    ) -> dict[str, Any]:
         runtime = self.get_runtime_by_agent_id(agent_id)
         if runtime is None:
             raise ConnectionError("会话所属运行时未连接；不会转到其他连接创建。", 503)
-        return runtime.create_session(workspace=workspace, title=title)
+        if parent_session_id:
+            branch = getattr(runtime, "branch_session", None)
+            if not callable(branch):
+                raise ConnectionError("会话所属运行时不支持原生分叉。", 409)
+            return branch(parent_session_id, title)
+        return runtime.create_session(
+            workspace=workspace,
+            title=title,
+            provider=provider,
+            model=model,
+            effort=effort,
+        )
 
     async def _submit_owned_tui_command(self, command: dict[str, object]) -> tuple[str, str | None]:
         if getattr(self.local, "daemon_owned", False):
@@ -1145,7 +1246,12 @@ class ConnectionController:
     def _register_local_command_handler(self, service) -> None:
         agent_id = self.local.snapshot().get("agent_id")
         if isinstance(agent_id, str):
-            service.register_native_command_handler(agent_id, self._submit_owned_tui_command)
+            service.register_native_command_handler(
+                agent_id,
+                self._submit_owned_tui_command,
+                capabilities=_HERMES_NATIVE_CAPABILITIES,
+                limitation=_HERMES_NATIVE_LIMITATION,
+            )
 
     def connect_local(self, service) -> dict[str, object]:
         self.local.store = self.store
@@ -1305,6 +1411,8 @@ class ConnectionController:
                 service.register_native_command_handler(
                     runtime.agent_id,
                     lambda command, current=runtime: self._submit_owned_ssh_command(current, command),
+                    capabilities=_HERMES_NATIVE_CAPABILITIES,
+                    limitation=_HERMES_NATIVE_LIMITATION,
                 )
                 service.register_native_history_handler(
                     runtime.agent_id,
@@ -1401,6 +1509,8 @@ class ConnectionController:
                 service.register_native_command_handler(
                     agent_id,
                     lambda command, current=runtime: self._submit_owned_ssh_command(current, command),
+                    capabilities=_HERMES_NATIVE_CAPABILITIES,
+                    limitation=_HERMES_NATIVE_LIMITATION,
                 )
                 updated = self.store.update_ssh_connection_state(
                     connection_id,

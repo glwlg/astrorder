@@ -28,6 +28,8 @@ export function SidecarHost({
   onCloseSidecar,
 }: SidecarHostProps) {
   const tabs = useSidecarStore((state) => state.tabs)
+  const mountedTabs = useSidecarStore((state) => state.mountedTabs)
+  const activeSessionKey = useSidecarStore((state) => state.activeSessionKey)
   const activeTabId = useSidecarStore((state) => state.activeTabId)
   const dirtyTabs = useSidecarStore((state) => state.dirtyTabs)
   const setActiveTabId = useSidecarStore((state) => state.setActiveTabId)
@@ -35,6 +37,10 @@ export function SidecarHost({
   const setTabDirty = useSidecarStore((state) => state.setTabDirty)
 
   const activeTab = tabs.find((t) => t.id === activeTabId)
+  const currentSessionKey = `${session.agent_id}:${session.id}`
+  const liveSessionTabs = activeSessionKey
+    ? { ...mountedTabs, [activeSessionKey]: tabs }
+    : mountedTabs
 
   const handleOpenFileTree = () => {
     useSidecarStore
@@ -127,13 +133,19 @@ export function SidecarHost({
       }}
     >
       <div
+        className="sidecar-header-bar"
         style={{
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
           borderBottom: '1px solid var(--astr-border)',
-          padding: '4px 8px',
-          minHeight: '38px',
+          height: 'var(--astr-header-height, 48px)',
+          minHeight: 'var(--astr-header-height, 48px)',
+          maxHeight: 'var(--astr-header-height, 48px)',
+          padding: '0 10px',
+          boxSizing: 'border-box',
+          background: 'var(--astr-surface)',
+          flexShrink: 0,
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0, flex: 1, overflow: 'hidden' }}>
@@ -164,9 +176,9 @@ export function SidecarHost({
         </Tooltip>
       </div>
 
-      <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
-        {/* 当没有 Tab 或未激活任何 Tab 时，展现 Codex 风格的欢迎菜单 */}
-        {!activeTab ? (
+      <div style={{ flex: 1, minHeight: 0, overflow: 'auto', position: 'relative' }}>
+        {/* 没有活动 Tab 时显示操作菜单；已打开的插件保持挂载，仅切换可见性。 */}
+        {!activeTab && (
           <SidecarWelcomeMenu
             session={session}
             onOpenFileTree={handleOpenFileTree}
@@ -175,7 +187,8 @@ export function SidecarHost({
             onOpenSideChat={handleOpenSideChat}
             onOpenAgentGraph={handleOpenAgentGraph}
           />
-        ) : activeTab.type === 'details' ? (
+        )}
+        {activeTab?.type === 'details' && (
           <div style={{ padding: '8px 16px' }}>
             <SessionDetails
               session={session}
@@ -186,31 +199,41 @@ export function SidecarHost({
               onApproval={onApproval}
             />
           </div>
-        ) : activeTab.artifact ? (
-          (() => {
-            const viewer = artifactViewerRegistry.findViewer(activeTab.artifact)
-            if (!viewer) {
-              return <div style={{ padding: 16 }}>暂无支持的查看器</div>
-            }
-            const ViewerComponent = viewer.component
+        )}
+        {Object.entries(liveSessionTabs).flatMap(([ownerSessionKey, ownerTabs]) =>
+          ownerTabs.filter((tab) => tab.type === 'artifact' && tab.artifact).map((tab) => {
+            const artifact = tab.artifact!
+            const viewer = artifactViewerRegistry.findViewer(artifact)
+            const isActive = ownerSessionKey === currentSessionKey && tab.id === activeTabId
             return (
-              <ViewerComponent
-                key={activeTab.id}
-                artifact={activeTab.artifact}
-                onDirtyChange={(dirty) => setTabDirty(activeTab.id, dirty)}
-                onSave={(content) =>
-                  handleSaveContent(
-                    activeTab.artifact?.path,
-                    content,
-                    activeTab.artifact?.sessionId,
-                    activeTab.artifact?.connectionId,
+              <div
+                key={`${ownerSessionKey}:${tab.id}`}
+                aria-hidden={!isActive}
+                style={{ display: isActive ? 'block' : 'none', height: '100%', minHeight: 0 }}
+              >
+                {viewer ? (() => {
+                  const ViewerComponent = viewer.component
+                  return (
+                    <ViewerComponent
+                      artifact={artifact}
+                      isActive={isActive}
+                      onDirtyChange={(dirty) => setTabDirty(tab.id, dirty)}
+                      onSave={(content) =>
+                        handleSaveContent(
+                          artifact.path,
+                          content,
+                          artifact.sessionId,
+                          artifact.connectionId,
+                        )
+                      }
+                      onClose={() => closeTab(tab.id)}
+                    />
                   )
-                }
-                onClose={() => closeTab(activeTab.id)}
-              />
+                })() : <div style={{ padding: 16 }}>暂无支持的查看器</div>}
+              </div>
             )
-          })()
-        ) : null}
+          }),
+        )}
       </div>
     </aside>
   )

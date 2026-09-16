@@ -33,7 +33,7 @@ def verify_plugin(home, codex):
         send({'id':2,'method':'hooks/list','params':{'cwds':[]}})
         hooks=[h for entry in response(2)['data'] for h in entry['hooks'] if h.get('pluginId')=='astrorder@astrorder-local']
         if len(hooks)!=10 or any(h['source']!='plugin' for h in hooks): raise RuntimeError('Plugin hook ownership not confirmed')
-        return {'plugin_hooks':len(hooks),'source':'plugin','needs_review':any(h['trustStatus'] in ('untrusted','modified') for h in hooks)}
+        return {'plugin_hooks':len(hooks),'source':'plugin','trusted':bool(hooks) and all(h.get('trustStatus') in ('trusted','managed') and h.get('enabled') for h in hooks),'needs_review':any(h.get('trustStatus') in ('untrusted','modified') for h in hooks)}
     finally:
         process.stdin.close()
         try: process.wait(timeout=5)
@@ -67,6 +67,22 @@ def install_plugin(home, python, source, codex):
     else:
         command=shlex.join(argv)
     manifest={'name':'astrorder','version':'0.2.1','description':'星序：原生会话活动观察与通知','interface':{'displayName':'Astrorder · 星序','shortDescription':'会话、工具、子代理活动与完成通知'},'hooks':'./hooks/hooks.json'}
+    skill_dir=plugin/'skills/astrorder'
+    skill_dir.mkdir(parents=True,exist_ok=True)
+    (skill_dir/'SKILL.md').write_text(
+        '---\nname: astrorder\ndescription: Use the Astrorder MCP server to read sessions, list agents and machines.\n---\n\n'
+        'Use the MCP server named astrorder only. Tools: catalog_list, sessions_list (compact, limit 30), sessions_search, sessions_read, agents_list, machines_list, projects_list. '
+        'Session keys look like agent_id::session_id. Call sessions_read with {"key":"agent_id::session_id"}.\n',
+        encoding='utf-8',
+    )
+    manifest['skills']='./skills/'
+    port=os.environ.get('ASTRORDER_PORT','30001')
+    token=os.environ.get('ASTRORDER_AGENT_TOKEN') or os.environ.get('ASTRORDER_BROWSER_SECRET') or os.environ.get('ASTRORDER_CONNECTOR_SECRET') or ''
+    mcp_server={'type':'http','url':f'http://127.0.0.1:{port}/api/v1/agent/mcp','bearer_token_env_var':'ASTRORDER_AGENT_TOKEN'}
+    if token:
+        mcp_server['env']={'ASTRORDER_AGENT_TOKEN':token}
+    (plugin/'.mcp.json').write_text(json.dumps({'mcpServers':{'astrorder':mcp_server}},ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+    manifest['mcpServers']='./.mcp.json'
     hooks={'description':'Astrorder · 星序观察钩子','hooks':{event:[{'hooks':[{'type':'command','command':command,'timeout':600 if event=='PermissionRequest' else 3,'statusMessage':MARKER}]}] for event in EVENTS}}
     marketplace={'name':'astrorder-local','interface':{'displayName':'星序本地插件'},'plugins':[{'name':'astrorder','source':{'source':'local','path':'./plugins/astrorder'},'policy':{'installation':'AVAILABLE','authentication':'ON_USE'},'category':'Productivity'}]}
     for path,data in [(plugin/'.codex-plugin/plugin.json',manifest),(plugin/'hooks/hooks.json',hooks),(root/'.agents/plugins/marketplace.json',marketplace)]:

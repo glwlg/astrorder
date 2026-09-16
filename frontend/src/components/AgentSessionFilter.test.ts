@@ -6,6 +6,7 @@ const agents: Record<string, Agent> = {
  h: { id: 'h', name: 'Hermes', kind: 'hermes', source_id: 'hermes-local-digest', status: 'ready', capabilities: ['chat'], limitation: null },
  c: { id: 'c', name: 'Codex', kind: 'codex', source_id: 'local-codex', status: 'ready', capabilities: ['chat'], limitation: null },
  r: { id: 'r', name: 'WSL Codex', kind: 'codex', connection_id: 'ssh-wsl', status: 'ready', capabilities: ['chat'], limitation: null },
+ x: { id: 'x', name: 'Claude', kind: 'claude-code', status: 'ready', capabilities: ['chat'], limitation: null },
 }
 it('filters type or exact Agent without sorting sessions', () => {
  const rows = ['r', 'h', 'c'].map(agent_id => ({ agent_id }) as Session)
@@ -14,6 +15,7 @@ it('filters type or exact Agent without sorting sessions', () => {
  expect(rows.filter(s => matchesAgent(s, agents, 'connection:local|kind:hermes')).map(s => s.agent_id)).toEqual(['h'])
  expect(rows.filter(s => matchesAgent(s, agents, 'r')).map(s => s.agent_id)).toEqual(['r'])
  expect(rows.filter(s => matchesAgent(s, agents, 'all'))).toEqual(rows)
+ expect(matchesAgent({ agent_id: 'x' } as Session, agents, 'connection:local|kind:claude-code')).toBe(true)
 })
 it('allows local peer Agents but isolates remote connection candidates', () => {
  expect(agentEnvironment(agents.h)).toBe(agentEnvironment(agents.c))

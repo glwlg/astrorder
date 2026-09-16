@@ -1,5 +1,5 @@
-import { IconAlertCircle, IconCircleCheck, IconLoader2, IconPlugConnected, IconPlug } from '@tabler/icons-react'
-import { ActionIcon, Badge, Group, Text, Tooltip } from '@mantine/core'
+import { IconPlugConnected } from '@tabler/icons-react'
+import { ActionIcon, Group, Text, Tooltip } from '@mantine/core'
 import type { AgentStatus, ConnectionStatus, SessionStatus } from '../domain/types'
 
 const agentLabels: Record<AgentStatus, string> = {
@@ -21,12 +21,11 @@ export function StatusDot({ status }: { status: AgentStatus | SessionStatus | Co
 }
 
 export function AgentStatusBadge({ status }: { status: AgentStatus }) {
-  const color = status === 'ready' ? 'teal' : status === 'error' ? 'red' : status === 'connecting' ? 'yellow' : 'gray'
-  const Icon = status === 'ready' ? IconCircleCheck : status === 'error' ? IconAlertCircle : status === 'connecting' ? IconLoader2 : IconPlug
   return (
-    <Badge className="status-badge" color={color} variant="light" leftSection={<Icon size={13} />}>
-      {agentLabels[status]}
-    </Badge>
+    <span className={`agent-status-tag is-${status}`}>
+      <span className="status-indicator-dot" />
+      <span>{agentLabels[status]}</span>
+    </span>
   )
 }
 

@@ -1,27 +1,41 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type TouchEvent as ReactTouchEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { IconChevronDown, IconChevronRight, IconDotsVertical, IconPin, IconPinned, IconPlus, IconTrash } from '@tabler/icons-react'
-import type { Session } from '../../domain/types'
+import { IconChevronDown, IconChevronRight, IconCopy, IconDotsVertical, IconEdit, IconPin, IconPinned, IconPlus, IconTrash, IconTransfer } from '@tabler/icons-react'
+import type { Agent, Session } from '../../domain/types'
 import { scopeKey } from '../../domain/semantics'
 import { displaySessionTitle, formatRelativeTime, sessionActivityStatus, type ProjectGroup } from '../../components/sessionRailModel'
-import { ProjectGlyph, type ProjectAppearanceMap } from '../../components/projectAppearance'
+import { ProjectGlyph, PROJECT_APPEARANCE_COLORS, type ProjectAppearanceMap } from '../../components/projectAppearance'
 import { useAstrorderStore } from '../../state/store'
 import { useShallow } from 'zustand/react/shallow'
 import './mobileMessageMenu.css'
 import { SessionActivityBorder } from '../../components/AnimatedStatus'
+import { AgentBrandIcon } from '../../components/AgentBrandIcon'
+import { StatusDot } from '../../components/Status'
+import { hapticFeedback } from './mobileGestures'
 
 type SessionMenu = { session: Session; x: number; y: number }
 type ProjectMenu = { project: ProjectGroup; x: number; y: number }
 
-export function MobileSessionDrawer({ groups, pins, pinnedProjects, selectedKey, appearance, onSelect, onPin, onPinProject, onCreate, onDeleteProject, onDeleteSession }: {
+export function MobileSessionDrawer({ groups, pins, pinnedProjects, selectedKey, appearance, onSelect, onPin, onPinProject, onCreate, onDeleteProject, onDeleteSession, agents, onHandoffSession, onRenameSession, onCopySessionId, isSearching }: {
   groups: ProjectGroup[]; pins: Record<string, boolean>; selectedKey: string; appearance: ProjectAppearanceMap
   onSelect: (session: Session) => void; onPin: (session: Session) => void
   pinnedProjects: string[]; onPinProject: (project: ProjectGroup) => void
   onCreate?: (project: ProjectGroup) => void
   onDeleteProject?: (project: ProjectGroup, event?: { clientX: number; clientY: number }) => void
   onDeleteSession?: (session: Session, event?: { clientX: number; clientY: number }) => void
+  agents?: Record<string, Agent>
+  onHandoffSession?: (session: Session) => void
+  onRenameSession?: (session: Session) => void
+  onCopySessionId?: (session: Session) => void
+  isSearching?: boolean
 }) {
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('astrorder:mobile-collapsed-projects') || '{}')
+    } catch {
+      return {}
+    }
+  })
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [sessionMenu, setSessionMenu] = useState<SessionMenu | null>(null)
   const [projectMenu, setProjectMenu] = useState<ProjectMenu | null>(null)
@@ -33,7 +47,20 @@ export function MobileSessionDrawer({ groups, pins, pinnedProjects, selectedKey,
   useAstrorderStore((state) => state.tasks)
   useAstrorderStore((state) => state.liveActivityAt)
   const currentProjectKey = groups.find((group) => group.sessions.some((session) => scopeKey(session.agent_id, session.id) === selectedKey))?.key
-  const isCollapsed = (key: string) => collapsed[key] ?? key !== currentProjectKey
+  const isCollapsed = (key: string) => {
+    if (isSearching) return false
+    return collapsed[key] ?? key !== currentProjectKey
+  }
+  const toggleCollapsed = (key: string) => {
+    const nextState = !isCollapsed(key)
+    setCollapsed((prev) => {
+      const next = { ...prev, [key]: nextState }
+      try {
+        localStorage.setItem('astrorder:mobile-collapsed-projects', JSON.stringify(next))
+      } catch {}
+      return next
+    })
+  }
   const pinned = groups.flatMap((group) => group.sessions).filter((session) => pins[scopeKey(session.agent_id, session.id)])
   const cancelHold = () => { if (hold.current) clearTimeout(hold.current); hold.current = null }
   useEffect(() => () => cancelHold(), [])
@@ -71,7 +98,16 @@ export function MobileSessionDrawer({ groups, pins, pinnedProjects, selectedKey,
     suppressSelect.current = true
     setProjectMenu(null)
     setSessionMenu({ session, x, y })
-    navigator.vibrate?.(20)
+    hapticFeedback(20)
+  }
+
+  const handoffTargets = (session: Session) => {
+    if (!agents) return []
+    const source = agents[session.agent_id]
+    if (!source || source.connection_id != null) return []
+    return Object.values(agents).filter((agent) =>
+      agent.kind !== source.kind && agent.connection_id == null && agent.status === 'ready',
+    )
   }
 
   const row = (session: Session) => {
@@ -79,12 +115,16 @@ export function MobileSessionDrawer({ groups, pins, pinnedProjects, selectedKey,
     const title = displaySessionTitle(session)
     const activityStatus = sessionActivityStatus(session, commands)
     const isRunning = activityStatus === 'running'
-    const projectColor = appearance[session.project_id || '']?.color
+    const parentGroup = groups.find(g => g.sessions.some(s => s.id === session.id && s.agent_id === session.agent_id))
+    const projectColor = (parentGroup && appearance[parentGroup.key]?.color) ||
+      appearance[session.project_id || '']?.color ||
+      (session.project_id ? appearance[`project:${session.project_id}`]?.color : undefined)
+    const resolvedAccent = (projectColor && (PROJECT_APPEARANCE_COLORS[projectColor] || projectColor)) || undefined
     return <div
       className={`m-session-row m-hold ${key === selectedKey ? 'selected' : ''} ${isRunning ? 'is-running' : ''}`}
       key={key}
       style={{
-        '--session-running-color': projectColor || (session.agent_id.includes('codex') ? 'var(--astr-teal, #12b886)' : 'var(--astr-indigo, #5b6cff)'),
+        '--session-running-color': resolvedAccent || (session.agent_id.includes('codex') ? 'var(--astr-teal, #12b886)' : 'var(--astr-indigo, #5b6cff)'),
       } as CSSProperties}
     >
       <SessionActivityBorder status={activityStatus} />
@@ -102,14 +142,31 @@ export function MobileSessionDrawer({ groups, pins, pinnedProjects, selectedKey,
           cancelHold()
           suppressSelect.current = false
           const point = event.touches[0]
-          hold.current = setTimeout(() => openSessionMenu(session, point.clientX, point.clientY), 500)
+          hold.current = setTimeout(() => {
+            openSessionMenu(session, point.clientX, point.clientY)
+            hapticFeedback(20)
+          }, 500)
         }}
         onTouchMove={cancelHold}
         onTouchEnd={cancelHold}
         onTouchCancel={cancelHold}
       >
+        {agents?.[session.agent_id] && (
+          <span className="m-session-icon" aria-hidden="true">
+            <AgentBrandIcon kind={agents[session.agent_id].kind} size={15} />
+          </span>
+        )}
+        {parentGroup && appearance[parentGroup.key]?.icon && (
+          <ProjectGlyph
+            iconName={appearance[parentGroup.key]?.icon}
+            colorName={appearance[parentGroup.key]?.color}
+            size={13}
+            style={{ opacity: 0.85 }}
+          />
+        )}
         <span>{title}</span>
         <small>{formatRelativeTime(session.updated_at)}</small>
+        {activityStatus !== 'idle' && <StatusDot status={activityStatus} />}
       </button>
       <button className="m-session-more" aria-label={`会话操作 ${title}`} onClick={event => {
         event.stopPropagation()
@@ -136,7 +193,7 @@ export function MobileSessionDrawer({ groups, pins, pinnedProjects, selectedKey,
             className="m-project-toggle"
             aria-expanded={!collapsedNow}
             aria-label={project.label}
-            onClick={() => setCollapsed((prev) => ({ ...prev, [project.key]: !collapsedNow }))}
+            onClick={() => toggleCollapsed(project.key)}
           >
             {collapsedNow ? <IconChevronRight size={15} /> : <IconChevronDown size={15} />}
             <ProjectGlyph iconName={appearance[project.key]?.icon} colorName={appearance[project.key]?.color} size={16} />
@@ -158,7 +215,22 @@ export function MobileSessionDrawer({ groups, pins, pinnedProjects, selectedKey,
         </div>
         {!collapsedNow && <div className="m-project-sessions">
           {visible.map(row)}
-          {regular.length > 5 && <button className="m-disclosure" onClick={() => setExpanded((prev) => ({ ...prev, [project.key]: !prev[project.key] }))}>{showAll ? '收起' : `展开显示 ${regular.length - 5}`}</button>}
+          {regular.length > 5 && (
+            <button
+              className="m-disclosure-chip"
+              onClick={() => setExpanded((prev) => ({ ...prev, [project.key]: !prev[project.key] }))}
+              aria-label={showAll ? '收起更多会话' : `展开剩余 ${regular.length - 5} 个会话`}
+            >
+              <IconChevronDown
+                size={14}
+                style={{
+                  transform: showAll ? 'rotate(180deg)' : 'none',
+                  transition: 'transform 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
+                }}
+              />
+              <span>{showAll ? '收起会话' : `展开更多 (${regular.length - 5})`}</span>
+            </button>
+          )}
         </div>}
       </section>
     })}
@@ -168,6 +240,26 @@ export function MobileSessionDrawer({ groups, pins, pinnedProjects, selectedKey,
           {pins[scopeKey(sessionMenu.session.agent_id, sessionMenu.session.id)] ? <IconPinned size={17} /> : <IconPin size={17} />}
           {pins[scopeKey(sessionMenu.session.agent_id, sessionMenu.session.id)] ? '取消置顶' : '置顶'}
         </button>
+        {onRenameSession && (
+          <button role="menuitem" onClick={() => { onRenameSession(sessionMenu.session); setSessionMenu(null) }}>
+            <IconEdit size={17} />重命名
+          </button>
+        )}
+        <button role="menuitem" onClick={() => { void (onCopySessionId ? onCopySessionId(sessionMenu.session) : navigator.clipboard?.writeText(sessionMenu.session.id)); setSessionMenu(null) }}>
+          <IconCopy size={17} />复制 ID
+        </button>
+        {onHandoffSession && handoffTargets(sessionMenu.session).length > 0 && (
+          <button
+            role="menuitem"
+            disabled={sessionMenu.session.status !== 'idle'}
+            onClick={() => {
+              onHandoffSession(sessionMenu.session)
+              setSessionMenu(null)
+            }}
+          >
+            <IconTransfer size={17} />转交
+          </button>
+        )}
         {onDeleteSession && <button role="menuitem" onClick={() => { onDeleteSession(sessionMenu.session, { clientX: sessionMenu.x, clientY: sessionMenu.y }); setSessionMenu(null) }}>
           <IconTrash size={17} />删除
         </button>}

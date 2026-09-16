@@ -103,8 +103,10 @@ class HermesBridge:
         if session_id == self._session_id:
             self._send_session("idle" if completed else "error")
 
-    def _on_session_finalize(self, **_kwargs: Any) -> None:
-        self.transport.stop()
+    def _on_session_finalize(self, session_id: str | None = None, **_kwargs: Any) -> None:
+        with self._lock:
+            if session_id == self._session_id:
+                self._session_id = None
 
     def _send_session(self, status: str) -> None:
         session_id = self._session_id

@@ -1,0 +1,53 @@
+.astr-star-border-wrap {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  padding: 1px;
+}
+
+@keyframes astr-star-border-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.astr-sb-glow-top,
+.astr-sb-glow-bottom {
+  position: absolute;
+  width: 250%;
+  height: 250%;
+  top: -75%;
+  left: -75%;
+  pointer-events: none;
+  opacity: 0.85;
+}
+
+.astr-sb-glow-top {
+  background: conic-gradient(
+    from 0deg at 50% 50%,
+    transparent 0deg,
+    transparent 280deg,
+    var(--sb-color, #3b82f6) 330deg,
+    transparent 360deg
+  );
+  animation: astr-star-border-spin var(--sb-speed, 4s) linear infinite;
+}
+
+.astr-sb-glow-bottom {
+  display: none;
+}
+
+.astr-sb-inner {
+  position: relative;
+  background: var(--astr-surface, #ffffff);
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .astr-sb-glow-top {
+    animation: none;
+    opacity: 0.5;
+  }
+}
+

@@ -91,7 +91,7 @@ def start_daemon(
     existing = existing_verified_daemon(current_listening_pids(port), command_line_for_pid)
     if existing is not None:
         return existing
-    python_executable = str(ROOT / "backend/.venv/Scripts/python.exe")
+    python_executable = str(ROOT / "backend/.venv/Scripts/pythonw.exe")
     argv = daemon_argv(
         python_executable=python_executable,
         port=port,
@@ -115,7 +115,7 @@ def start_daemon(
     return proc.pid
 
 
-def graceful_shutdown(port: int, secret: str) -> None:
+def graceful_shutdown(port: int, secret: str, *, confirm_active: bool = False) -> None:
     if not isinstance(secret, str) or not secret:
         raise RuntimeError("ASTRORDER_SESSION_DAEMON_SECRET is required for graceful daemon shutdown")
 
@@ -141,7 +141,9 @@ def graceful_shutdown(port: int, secret: str) -> None:
                 return response
 
             await call("daemon.handshake", {"secret": secret})
-            response = await call("daemon.shutdown", {})
+            response = await call("daemon.shutdown", {"confirm_active": confirm_active})
+            if response.get("action") == "error":
+                raise RuntimeError(response.get("detail") or "daemon shutdown was refused")
             if response.get("result") != {"stopping": True}:
                 raise RuntimeError("daemon graceful shutdown was not confirmed")
 
@@ -149,12 +151,16 @@ def graceful_shutdown(port: int, secret: str) -> None:
 
 
 def stop_daemon(
-    *, port: int = DEFAULT_PORT, secret: str | None = None, metadata_path: Path | None = None
+    *,
+    port: int = DEFAULT_PORT,
+    secret: str | None = None,
+    metadata_path: Path | None = None,
+    confirm_active: bool = False,
 ) -> int | None:
     pid = existing_verified_daemon(current_listening_pids(port), command_line_for_pid)
     if pid is None:
         return None
-    graceful_shutdown(port, secret or "")
+    graceful_shutdown(port, secret or "", confirm_active=confirm_active)
     deadline = time.monotonic() + 10
     while current_listening_pids(port):
         if time.monotonic() >= deadline:

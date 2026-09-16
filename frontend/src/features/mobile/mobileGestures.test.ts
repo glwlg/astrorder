@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { closesSessionDrawerFromSwipe, installGlobalNativeHoldBlocker, opensSessionDrawerFromEdge, sessionCardPose, sessionSwipeDirection, sessionSwipeGesture, suppressNativeHold } from './mobileGestures'
+import { closesSessionDrawerFromSwipe, installGlobalNativeHoldBlocker, opensSessionDrawerFromEdge, queueSwipeZone, sessionCardPose, sessionSwipeDirection, sessionSwipeGesture, suppressNativeHold } from './mobileGestures'
 
 describe('mobile gesture arbitration', () => {
   it('opens the session drawer only from a mostly horizontal left-edge right swipe', () => {
@@ -74,5 +74,11 @@ describe('mobile gesture arbitration', () => {
     } finally {
       detach()
     }
+  })
+
+  it('maps queue swipes by vertical direction', () => {
+    expect(queueSwipeZone(400, 360)).toBe('send')
+    expect(queueSwipeZone(400, 440)).toBe('edit')
+    expect(queueSwipeZone(400, 400)).toBeNull()
   })
 })

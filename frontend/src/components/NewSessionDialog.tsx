@@ -6,29 +6,21 @@ import type { Agent, Session } from '../domain/types'
 import { scopeKey } from '../domain/semantics'
 import { useAstrorderStore } from '../state/store'
 import type { ProjectGroup } from './sessionRailModel'
+import { agentKindLabel } from './AgentBrandIcon'
 
 export function agentEnvironment(agent: Agent): string {
-  if (agent.connection_id) return agent.connection_id
-  const source = agent.source_id || agent.id
-  if (source === 'local-codex' || source.startsWith('hermes-local-') || source.startsWith('local-hermes-')) return 'local'
-  return source
+  return agent.connection_id || 'local'
 }
 export function agentLabel(agent: Agent): string {
-  return `${agent.kind === 'codex' ? 'Codex' : 'Hermes'} · ${agent.name || agent.id} · ${agent.connection_id || '本机'}`
+  return `${agentKindLabel(agent.kind)} · ${agent.name || agent.id} · ${agent.connection_id || '本机'}`
 }
 export function NewSessionDialog({ agents, project, initialAgentId, onClose, onCreated }: { agents: Record<string, Agent>; project: ProjectGroup | null; initialAgentId?: string; onClose: () => void; onCreated: (session: Session) => void }) {
   const owner = project?.agentId ? agents[project.agentId] : null
   const choices = Object.values(agents).filter(agent => agent.status === 'ready' && (!project || (owner && agentEnvironment(owner) === agentEnvironment(agent))))
   const [agentId, setAgentId] = useState(() => {
     if (initialAgentId && choices.some(a => a.id === initialAgentId)) return initialAgentId
-    if (initialAgentId === 'codex') {
-      const match = choices.find(a => a.kind === 'codex')
-      if (match) return match.id
-    }
-    if (initialAgentId === 'hermes') {
-      const match = choices.find(a => a.kind === 'hermes')
-      if (match) return match.id
-    }
+    const match = choices.find(a => a.kind === initialAgentId)
+    if (match) return match.id
     return choices.length === 1 ? choices[0].id : ''
   })
   const [workspace, setWorkspace] = useState(project?.workspace || '')

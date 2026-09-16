@@ -8,10 +8,10 @@ from astrorder.service import CommandRejected, ControlService
 from astrorder.store import Store
 
 
-def setup(tmp_path):
+def setup(tmp_path, kind="hermes"):
     settings = Settings(database_url=f"sqlite:///{tmp_path / 'binding.sqlite3'}")
     store = Store(settings)
-    store.upsert_agent({"id": "hermes", "kind": "hermes", "name": "Hermes", "status": "ready", "capabilities": ["chat"], "limitation": None})
+    store.upsert_agent({"id": "hermes", "kind": kind, "name": "Agent", "status": "ready", "capabilities": ["chat"], "limitation": None})
     store.upsert_session({"id": "session", "agent_id": "hermes", "title": "Session", "workspace": None, "status": "idle", "updated_at": "2026-09-12T00:00:00Z"})
     return store, ControlService(store, EventHub(), settings)
 
@@ -21,8 +21,8 @@ def payload(command_id="command"):
 
 
 @pytest.mark.asyncio
-async def test_saved_hermes_model_is_restored_before_send(tmp_path):
-    store, service = setup(tmp_path)
+async def test_registered_agent_model_is_restored_before_send(tmp_path):
+    store, service = setup(tmp_path, kind="claude-code")
     store.set_session_model_binding("hermes", "session", "ocx", "gpt-5.6-sol")
     store.set_session_reasoning_binding("hermes", "session", "xhigh")
     order = []
@@ -34,7 +34,7 @@ async def test_saved_hermes_model_is_restored_before_send(tmp_path):
         order.append(("send", command["id"]))
         return "accepted", None
 
-    service.hermes_model_restorer = restore
+    service.register_model_binding_restorer("claude-code", restore)
     service.register_native_command_handler("hermes", send)
     result = await service.submit_browser_command(payload())
 
@@ -54,12 +54,36 @@ async def test_saved_hermes_model_is_restored_before_send(tmp_path):
 async def test_send_stops_when_saved_model_cannot_be_restored(tmp_path):
     store, service = setup(tmp_path)
     store.set_session_model_binding("hermes", "session", "ocx", "gpt-5.6-sol")
-    service.hermes_model_restorer = lambda *_: (_ for _ in ()).throw(RuntimeError("failed"))
+    service.register_model_binding_restorer(
+        "hermes", lambda *_: (_ for _ in ()).throw(RuntimeError("failed"))
+    )
 
     with pytest.raises(CommandRejected, match="保存的会话模型"):
         await service.submit_browser_command(payload())
 
     assert store.get_command("hermes", "session", "command")["state"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_failed_dispatch_keeps_handoff_context_for_the_next_send(tmp_path):
+    store, service = setup(tmp_path)
+    store.set_session_handoff_context("hermes", "session", "交接上下文")
+    attempts = []
+
+    async def send(command):
+        attempts.append(command["text"])
+        return ("failed", "not sent") if len(attempts) == 1 else ("accepted", None)
+
+    service.register_native_command_handler("hermes", send)
+
+    await service.submit_browser_command(payload("first"))
+    await service.submit_browser_command(payload("second"))
+
+    assert attempts == [
+        "交接上下文\n\n<用户的新消息>\nhello",
+        "交接上下文\n\n<用户的新消息>\nhello",
+    ]
+    assert store.pending_session_handoff_context("hermes", "session") is None
 
 
 def test_model_api_saves_only_hermes_binding_and_reads_it_without_native_state(tmp_path):

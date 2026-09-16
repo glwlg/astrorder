@@ -117,3 +117,32 @@ async def test_daemon_owned_pty_keeps_terminal_process_and_wals_output(tmp_path)
 
     await daemon.shutdown()
     assert terminal.closed is True
+
+
+@pytest.mark.asyncio
+async def test_daemon_owned_pty_spawn_reattaches_to_the_same_running_runtime(tmp_path):
+    FakeTerminal.instances.clear()
+    daemon = SessionDaemon(capacity=8, secret="test-only-daemon-secret")
+    runtime = PtyDaemonRuntime(
+        PtyDaemonRuntimeConfig(allowed_workspaces=(tmp_path,)),
+        emit=daemon.publish,
+        terminal_factory=FakeTerminal,
+    )
+    daemon.register_runtime("pty", runtime)
+    request = {
+        "action": "session.spawn",
+        "request_id": "spawn-1",
+        "session_id": "terminal-session-1",
+        "agent_type": "pty",
+        "cwd": str(tmp_path),
+        "params": {},
+    }
+
+    first = await daemon._spawn_runtime(request)
+    second = await daemon._spawn_runtime({**request, "request_id": "spawn-2"})
+
+    assert first["result"] == {"status": "running"}
+    assert second["result"] == {"status": "running", "attached": True}
+    assert len(FakeTerminal.instances) == 1
+
+    await daemon.shutdown()

@@ -38,19 +38,33 @@ export function MobileMessageMenu({ anchor, onClose, onCopy, onQuote }: { anchor
     if (bubble) { const range = document.createRange(); range.selectNodeContents(bubble); const selection = window.getSelection(); selection?.removeAllRanges(); selection?.addRange(range) }
     onClose()
   }
-  return createPortal(<div ref={menu} role="menu" aria-label="消息操作" className="m-message-popover" data-placement={position?.below ? 'below' : 'above'} style={{ left: position?.left, top: position?.top, visibility: position ? 'visible' : 'hidden', '--menu-arrow-x': `${position?.arrow || 20}px` } as CSSProperties}
-    onKeyDown={event => {
-      if (event.key === 'Escape') { event.preventDefault(); onClose(); anchor.element.focus({ preventScroll: true }) }
-      if (event.key === 'Tab') onClose()
-      if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) {
-        event.preventDefault()
-        const buttons = Array.from(menu.current?.querySelectorAll('button') || [])
-        const index = buttons.indexOf(document.activeElement as HTMLButtonElement)
-        buttons[(index + (event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 1) + buttons.length) % buttons.length]?.focus()
-      }
-    }}>
-    <button role="menuitem" onClick={() => { onCopy(); onClose() }}><IconCopy size={17} />复制</button>
-    <button role="menuitem" onClick={select}><IconTextSize size={17} />选择</button>
-    <button role="menuitem" onClick={() => { onQuote(); onClose() }}><IconQuote size={17} />引用</button>
-  </div>, document.body)
+  return createPortal(
+    <div
+      ref={menu}
+      role="menu"
+      aria-label="消息操作"
+      className="m-message-popover"
+      data-placement={position?.below ? 'below' : 'above'}
+      style={{
+        left: position?.left,
+        top: position?.top,
+        visibility: position ? 'visible' : 'hidden',
+      } as CSSProperties}
+      onKeyDown={event => {
+        if (event.key === 'Escape') { event.preventDefault(); onClose(); anchor.element.focus({ preventScroll: true }) }
+        if (event.key === 'Tab') onClose()
+        if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) {
+          event.preventDefault()
+          const buttons = Array.from(menu.current?.querySelectorAll('button') || [])
+          const index = buttons.indexOf(document.activeElement as HTMLButtonElement)
+          buttons[(index + (event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 1) + buttons.length) % buttons.length]?.focus()
+        }
+      }}
+    >
+        <button role="menuitem" onClick={() => { onCopy(); onClose() }}><IconCopy size={17} />复制</button>
+        <button role="menuitem" onClick={select}><IconTextSize size={17} />选择</button>
+        <button role="menuitem" onClick={() => { onQuote(); onClose() }}><IconQuote size={17} />引用</button>
+    </div>,
+    document.body
+  )
 }

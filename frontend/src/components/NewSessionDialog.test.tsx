@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, expect, it, vi } from 'vitest'
 import { api } from '../api/client'
 import type { Agent } from '../domain/types'
-import { NewSessionDialog } from './NewSessionDialog'
+import { agentEnvironment, agentLabel, NewSessionDialog } from './NewSessionDialog'
 const agents: Record<string, Agent> = Object.fromEntries(['hermes', 'codex'].map(kind => [kind, { id: kind, kind, name: kind, source_id: 'local-' + kind, status: 'ready', capabilities: ['chat'], limitation: null }])) as Record<string, Agent>
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
 it('requires explicit Agent selection and uses the returned native ID', async () => {
@@ -17,4 +17,10 @@ it('requires explicit Agent selection and uses the returned native ID', async ()
  fireEvent.click(screen.getByRole('button', { name: '创建会话' }))
  await waitFor(() => expect(create).toHaveBeenCalledWith(expect.objectContaining({ agent_id: 'codex', workspace: '/work' })))
  expect(onCreated).toHaveBeenCalledWith(created)
+})
+
+it('uses generic labels and treats Agents without a connection as local', () => {
+ const agent: Agent = { id: 'claude', kind: 'claude-code', name: 'Claude', status: 'ready', capabilities: ['chat'], limitation: null }
+ expect(agentLabel(agent)).toBe('Claude Code · Claude · 本机')
+ expect(agentEnvironment(agent)).toBe('local')
 })

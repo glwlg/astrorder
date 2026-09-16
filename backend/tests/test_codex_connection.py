@@ -34,7 +34,7 @@ class FakeClient:
         if method == 'thread/items/list':
             assert params['sortDirection'] == 'desc'
             assert isinstance(params['limit'], int) and 1 <= params['limit'] <= 200
-            return {'data': [{'turnId': 'turn', 'item': {'id': 'native-item-2', 'type': 'agentMessage', 'text': 'answer'}}, {'turnId': 'turn', 'item': {'id': 'native-item-1', 'type': 'userMessage', 'content': [{'type': 'text', 'text': 'question'}]}}], 'nextCursor': 'native-opaque-cursor'}
+            return {'data': [{'turnId': SID, 'item': {'id': 'native-item-2', 'type': 'agentMessage', 'text': 'answer'}}, {'turnId': SID, 'item': {'id': 'native-item-1', 'type': 'userMessage', 'content': [{'type': 'text', 'text': 'question'}]}}], 'nextCursor': 'native-opaque-cursor'}
         if method == 'thread/resume':
             assert params['excludeTurns'] is True
             return {'thread': THREAD, 'model': self.model, 'modelProvider': 'native-provider'}
@@ -61,6 +61,7 @@ def test_connected_means_initialized_catalog_and_scoped_native_handler(tmp_path)
         assert not any(method in {'thread/start', 'thread/resume', 'turn/start'} for method, _ in connection.client.calls)
         page = connection.messages(SID, None, 2)
         assert [m['id'] for m in page['items']] == ['native-item-1', 'native-item-2']
+        assert all(m['created_at'] != '1970-01-01T00:00:00Z' for m in page['items'])
         assert page['next_cursor']
         assert connection.model(SID)['model'] == 'native-model'
         assert connection.set_model(SID, 'native-provider', 'other')['model'] == 'other'
@@ -122,6 +123,8 @@ async def test_codex_can_explicitly_delegate_commands_to_a_daemon_controller(tmp
             }
 
     controller = Controller()
+    daemon_client = FakeClient(None, lambda _frame: None)
+    controller.request_native = daemon_client.request
     connection.set_daemon_controller_factory(lambda current: controller if current is connection else None)
     try:
         assert connection.connect()['daemon_mode'] is True
@@ -391,6 +394,7 @@ def test_messages_falls_back_to_thread_read_and_store_when_items_list_not_suppor
                         **THREAD,
                         'turns': [{
                             'id': 'turn-1',
+                            'startedAt': 1757908800,
                             'items': [
                                 {'id': 'item-user-1', 'type': 'userMessage', 'content': [{'type': 'text', 'text': '画个图'}]},
                                 {'id': 'item-agent-1', 'type': 'agentMessage', 'text': '正在处理'},
@@ -411,6 +415,7 @@ def test_messages_falls_back_to_thread_read_and_store_when_items_list_not_suppor
         assert [m['id'] for m in page['items']] == ['item-user-1', 'item-agent-1']
         assert page['items'][0]['text'] == '画个图'
         assert page['items'][1]['text'] == '正在处理'
+        assert all(m['created_at'] != '1970-01-01T00:00:00Z' for m in page['items'])
     finally:
         connection.disconnect()
         store.close()
@@ -528,3 +533,26 @@ def test_current_effort_reads_native_sqlite_without_resume_or_thread_read(tmp_pa
     finally:
         connection.disconnect()
         store.close()
+def test_codex_command_input_projects_skill_and_file_mentions(monkeypatch):
+    from astrorder.native_codex import CodexConnection
+
+    connection = CodexConnection.__new__(CodexConnection)
+    connection.settings = None
+    connection.store = None
+    connection._threads = {"thread-1": {"cwd": "/repo"}}
+    connection.mentions = lambda _sid: [{
+        "name": "openai-docs", "path": "/skills/openai-docs", "kind": "skill"
+    }]
+    monkeypatch.setattr(
+        "astrorder.codex_inputs.command_input",
+        lambda _settings, _store, command: [{"type": "text", "text": command["text"]}],
+    )
+
+    assert connection.command_input({
+        "session_id": "thread-1",
+        "text": '@openai-docs [My File.md](docs/My File.md) explain this',
+    }) == [
+        {"type": "skill", "name": "openai-docs", "path": "/skills/openai-docs"},
+        {"type": "mention", "name": "My File.md", "path": "/repo/docs/My File.md"},
+        {"type": "text", "text": "explain this"},
+    ]

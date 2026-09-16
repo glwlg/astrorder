@@ -60,6 +60,20 @@ def require_browser(request: Request, settings: Settings) -> None:
         raise HTTPException(status_code=401, detail="Authentication required")
 
 
+def require_agent(request: Request, settings: Settings) -> str:
+    token = request.cookies.get(COOKIE_NAME) or _bearer(request.headers)
+    if _matches(token, settings.connector_secret):
+        return "connector"
+    if _matches(token, settings.browser_secret):
+        origin = request.headers.get("origin")
+        if origin:
+            validate_origin(origin, settings, request.headers.get("host"))
+        return "browser"
+    if not settings.browser_secret and not settings.connector_secret:
+        raise HTTPException(status_code=503, detail="Authentication is not configured")
+    raise HTTPException(status_code=401, detail="Authentication required")
+
+
 def browser_authenticated(request: Request, settings: Settings) -> bool:
     if not settings.browser_secret:
         return False

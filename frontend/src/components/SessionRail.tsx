@@ -1,4 +1,5 @@
 import {
+  IconChecklist,
   IconChevronDown,
   IconChevronUp,
   IconCopy,
@@ -9,9 +10,11 @@ import {
   IconPinned,
   IconPlus,
   IconTrash,
+  IconTransfer,
 } from '@tabler/icons-react'
 import {
   Button,
+  Checkbox,
   Collapse,
   Group,
   Loader,
@@ -25,9 +28,12 @@ import {
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useMemo, useState, type CSSProperties } from 'react'
+import { AnimatePresence, LayoutGroup, motion } from 'motion/react'
+import { VariableProximity } from './animations/VariableProximity'
 import { useSessionOrder } from '../hooks/useSessionOrder'
 import { AgentSessionFilter, matchesAgent } from './AgentSessionFilter'
 import { NewSessionDialog } from './NewSessionDialog'
+import { HandoffDialog } from './HandoffDialog'
 import { moveProject, reconcileProjectOrder } from './projectOrder'
 import { useWorkspacePreferences } from '../hooks/useWorkspacePreferences'
 import type { Agent, Project, Session } from '../domain/types'
@@ -44,6 +50,7 @@ import { useShallow } from 'zustand/react/shallow'
 import {
   ProjectAppearanceModal,
   ProjectGlyph,
+  PROJECT_APPEARANCE_COLORS,
   type ProjectAppearanceEntry,
 } from './projectAppearance'
 import { SessionActivityBorder } from './AnimatedStatus'
@@ -51,10 +58,12 @@ import { SessionActivityBorder } from './AnimatedStatus'
 type PendingConfirmation =
   | { kind: 'delete-session'; session: Session; coords: ConfirmationCoordinates }
   | { kind: 'delete-project'; project: ProjectGroup; coords: ConfirmationCoordinates }
+  | { kind: 'batch-delete-sessions'; count: number; sessions: Session[]; coords?: ConfirmationCoordinates }
 
 function sessionRunningStyle(session: Session, accent?: string): CSSProperties {
+  const resolvedAccent = (accent && (PROJECT_APPEARANCE_COLORS[accent] || accent)) || undefined
   return {
-    '--session-running-color': accent || (session.agent_id.includes('codex') ? 'var(--astr-teal, #12b886)' : 'var(--astr-indigo, #5b6cff)'),
+    '--session-running-color': resolvedAccent || (session.agent_id.includes('codex') ? 'var(--astr-teal, #12b886)' : 'var(--astr-indigo, #5b6cff)'),
   } as CSSProperties
 }
 
@@ -119,6 +128,9 @@ export function SessionRail({
   const [renameLoading, setRenameLoading] = useState(false)
   const [confirmation, setConfirmation] = useState<PendingConfirmation | null>(null)
   const [confirmationLoading, setConfirmationLoading] = useState(false)
+  const [handoffTarget, setHandoffTarget] = useState<Session | null>(null)
+  const [batchMode, setBatchMode] = useState(false)
+  const [selectedSessionKeys, setSelectedSessionKeys] = useState<Set<string>>(new Set())
 
   // 新建会话加载中
   const creatingForProject = createOpened ? createProject?.key : null
@@ -211,10 +223,31 @@ export function SessionRail({
       })
     } catch (err) {
       console.error('删除会话失败', err)
-      notifications.show({ color: 'red', message: '删除会话失败，请重试' })
+      notifications.show({ color: 'red', message: err instanceof Error ? err.message : '删除会话失败，请重试' })
     }
   }
 
+  const handoffTargets = (session: Session) => {
+    const source = agents[session.agent_id]
+    if (!source || source.connection_id != null) return []
+    return Object.values(agents).filter((agent) =>
+      agent.kind !== source.kind && agent.connection_id == null && agent.status === 'ready',
+    )
+  }
+
+  const handoffItems = (session: Session) => {
+    if (!handoffTargets(session).length) return null
+    return <>
+      <Menu.Divider />
+      <Menu.Item
+        leftSection={<IconTransfer size={14} />}
+        disabled={session.status !== 'idle'}
+        onClick={() => setHandoffTarget(session)}
+      >
+        转交
+      </Menu.Item>
+    </>
+  }
   const requestDeleteProject = (project: ProjectGroup, event?: { clientX: number; clientY: number }) => {
     const sessionCount = project.sessionCount || project.sessions.length
     if (project.key.startsWith('unmarked:') && sessionCount === 0) return
@@ -284,27 +317,133 @@ export function SessionRail({
 
   const confirmationTitle = confirmation?.kind === 'delete-project'
     ? (confirmation.project.key.startsWith('unmarked:') ? '清空未标记会话？' : '删除项目？')
-    : '删除会话？'
+    : confirmation?.kind === 'batch-delete-sessions'
+      ? '批量删除会话？'
+      : '删除会话？'
   const confirmationMessage = confirmation?.kind === 'delete-project'
     ? (() => {
         const sessionCount = confirmation.project.sessionCount || confirmation.project.sessions.length
         return confirmation.project.key.startsWith('unmarked:')
           ? `确定删除未标记项目中的全部会话吗？\n此操作将删除其中的 ${sessionCount} 个会话。`
-          : (sessionCount > 0
-              ? `确定删除项目“${confirmation.project.label}”吗？\n此操作将同时删除该项目及其包含的 ${sessionCount} 个会话。`
-              : `确定删除项目“${confirmation.project.label}”吗？`)
-      })()
-    : confirmation ? `确定删除会话“${confirmation.session.title || confirmation.session.id}”吗？` : ''
+              : (sessionCount > 0
+                  ? `确定删除项目“${confirmation.project.label}”吗？\n此操作将同时删除该项目及其包含的 ${sessionCount} 个会话。`
+                  : `确定删除项目“${confirmation.project.label}”吗？`)
+          })()
+    : confirmation?.kind === 'batch-delete-sessions'
+      ? `确定删除选中的 ${confirmation.count} 个会话吗？\n此操作将永久移除这些会话且无法撤销。`
+      : confirmation?.kind === 'delete-session'
+        ? `确定删除会话“${confirmation.session.title || confirmation.session.id}”吗？`
+        : ''
 
   const confirmDeletion = async () => {
     if (!confirmation || confirmationLoading) return
     setConfirmationLoading(true)
     try {
       if (confirmation.kind === 'delete-project') await deleteProject(confirmation.project)
+      else if (confirmation.kind === 'batch-delete-sessions') await executeBatchDelete(confirmation.sessions)
       else await deleteSession(confirmation.session)
     } finally {
       setConfirmationLoading(false)
       setConfirmation(null)
+    }
+  }
+
+  const allFilteredSessions = useMemo(() => {
+    return groups.flatMap((p) => p.sessions)
+  }, [groups])
+
+  const [lastSelectedKey, setLastSelectedKey] = useState<string | null>(null)
+
+  const toggleSelectSession = (key: string, event?: React.MouseEvent) => {
+    const isShift = Boolean(event && event.shiftKey)
+    if (isShift && lastSelectedKey) {
+      const prevIdx = allFilteredSessions.findIndex(
+        (s) => scopeKey(s.agent_id, s.id) === lastSelectedKey,
+      )
+      const curIdx = allFilteredSessions.findIndex(
+        (s) => scopeKey(s.agent_id, s.id) === key,
+      )
+      if (prevIdx !== -1 && curIdx !== -1) {
+        const start = Math.min(prevIdx, curIdx)
+        const end = Math.max(prevIdx, curIdx)
+        const range = allFilteredSessions.slice(start, end + 1)
+        setSelectedSessionKeys((prev) => {
+          const next = new Set(prev)
+          for (const s of range) {
+            next.add(scopeKey(s.agent_id, s.id))
+          }
+          return next
+        })
+        setLastSelectedKey(key)
+        return
+      }
+    }
+
+    setSelectedSessionKeys((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+    setLastSelectedKey(key)
+  }
+
+  const isAllSelected =
+    allFilteredSessions.length > 0 &&
+    allFilteredSessions.every((s) => selectedSessionKeys.has(scopeKey(s.agent_id, s.id)))
+
+  const toggleSelectAll = () => {
+    if (isAllSelected) {
+      setSelectedSessionKeys(new Set())
+    } else {
+      setSelectedSessionKeys(new Set(allFilteredSessions.map((s) => scopeKey(s.agent_id, s.id))))
+    }
+  }
+
+  const requestBatchDelete = (event?: { clientX: number; clientY: number }) => {
+    const selected = allFilteredSessions.filter((s) =>
+      selectedSessionKeys.has(scopeKey(s.agent_id, s.id)),
+    )
+    if (!selected.length) return
+    setConfirmation({
+      kind: 'batch-delete-sessions',
+      count: selected.length,
+      sessions: selected,
+      coords: confirmationCoordinatesFromEvent(event),
+    })
+  }
+
+  const executeBatchDelete = async (targetSessions: Session[]) => {
+    try {
+      const res = await api.batchDeleteSessions(
+        targetSessions.map((s) => ({ agent_id: s.agent_id, id: s.id })),
+      )
+      const deletedSet = new Set(res.deleted.map((d) => scopeKey(d.agent_id, d.id)))
+      useAstrorderStore.setState((state) => {
+        const nextSessions = { ...state.sessions }
+        for (const key of deletedSet) {
+          delete nextSessions[key]
+        }
+        return { sessions: nextSessions }
+      })
+      if (activeSessionKey && deletedSet.has(activeSessionKey)) {
+        const remaining = sessions.filter((s) => !deletedSet.has(scopeKey(s.agent_id, s.id)))
+        if (remaining.length > 0) {
+          onSelect(remaining[0])
+        }
+      }
+      notifications.show({
+        color: 'teal',
+        message: '已成功删除 ' + res.deleted.length + ' 个会话',
+      })
+      setBatchMode(false)
+      setSelectedSessionKeys(new Set())
+    } catch (err) {
+      console.error('批量删除会话失败', err)
+      notifications.show({
+        color: 'red',
+        message: err instanceof Error ? err.message : '批量删除会话失败，请重试',
+      })
     }
   }
 
@@ -315,7 +454,27 @@ export function SessionRail({
   return (
     <Stack className="session-rail" gap="sm">
       <div className="session-rail-controls">
-      <Group gap="xs" wrap="nowrap"><AgentSessionFilter agents={agents} value={agentFilter} onChange={updateAgentFilter} /><Button size="xs" variant="subtle" color="gray" px={0} w={36} onClick={() => { setCreateProject(null); setCreateOpened(true) }} aria-label="新建会话"><IconPlus size={17} /></Button></Group>
+      <Group gap="xs" wrap="nowrap">
+        <AgentSessionFilter agents={agents} value={agentFilter} onChange={updateAgentFilter} />
+        <Tooltip label={batchMode ? '退出批量管理' : '批量管理会话'} withArrow position="bottom">
+          <Button
+            size="xs"
+            variant={batchMode ? 'filled' : 'subtle'}
+            color={batchMode ? 'indigo' : 'gray'}
+            px={0}
+            w={36}
+            onClick={() => {
+              setBatchMode(prev => !prev)
+              setSelectedSessionKeys(new Set())
+            }}
+            aria-label={batchMode ? '退出批量管理' : '批量管理会话'}
+            aria-pressed={batchMode}
+          >
+            <IconChecklist size={17} />
+          </Button>
+        </Tooltip>
+        <Button size="xs" variant="subtle" color="gray" px={0} w={36} onClick={() => { setCreateProject(null); setCreateOpened(true) }} aria-label="新建会话"><IconPlus size={17} /></Button>
+      </Group>
       {createOpened && (
         <NewSessionDialog
           agents={agents}
@@ -336,25 +495,85 @@ export function SessionRail({
         onChange={(event) => setFilter(event.currentTarget.value)}
       />
       <div className="session-rail-filters" role="tablist" aria-label="会话筛选">
-        {([
-          ['all', '全部'],
-          ['running', '运行中'],
-          ['unread', '未读'],
-          ['pinned', '置顶'],
-          ['recent', '24小时'],
-        ] as const).map(([value, label]) => (
-          <button
-            className={`session-filter ${statusFilter === value ? 'is-active' : ''}`}
-            key={value}
-            type="button"
-            role="tab"
-            aria-selected={statusFilter === value}
-            onClick={() => setStatusFilter(value)}
-          >
-            {label}
-          </button>
-        ))}
+        <LayoutGroup id="session-rail-filters-group">
+          {([
+            ['all', '全部'],
+            ['running', '运行中'],
+            ['unread', '未读'],
+            ['pinned', '置顶'],
+            ['recent', '24小时'],
+          ] as const).map(([value, label]) => {
+            const isActive = statusFilter === value
+            return (
+              <button
+                className={`session-filter ${isActive ? 'is-active' : ''}`}
+                key={value}
+                type="button"
+                role="tab"
+                aria-selected={isActive}
+                onClick={() => setStatusFilter(value)}
+                style={{ position: 'relative' }}
+              >
+                {isActive && (
+                  <motion.span
+                    layoutId="session-filter-pill-bg"
+                    style={{
+                      position: 'absolute',
+                      inset: 0,
+                      borderRadius: 999,
+                      background: 'color-mix(in srgb, var(--astr-indigo, #5b6cff) 12%, var(--astr-surface))',
+                      border: '1px solid color-mix(in srgb, var(--astr-indigo, #5b6cff) 30%, transparent)',
+                      zIndex: 0,
+                    }}
+                    transition={{ type: 'spring', stiffness: 450, damping: 30 }}
+                  />
+                )}
+                <span style={{ position: 'relative', zIndex: 1 }}>
+                  <VariableProximity label={label} active={isActive} />
+                </span>
+              </button>
+            )
+          })}
+        </LayoutGroup>
       </div>
+      {batchMode && (
+        <div className="session-batch-toolbar" style={{ padding: '6px 8px', background: 'var(--astr-subtle, rgba(0,0,0,0.04))', border: '1px solid var(--mantine-color-default-border)', borderRadius: 8, marginTop: 4 }}>
+          <Group justify="space-between" align="center" gap="xs" wrap="nowrap">
+            <Group gap={6} wrap="nowrap">
+              <Checkbox
+                size="xs"
+                checked={isAllSelected && allFilteredSessions.length > 0}
+                indeterminate={selectedSessionKeys.size > 0 && !isAllSelected}
+                onChange={toggleSelectAll}
+                label={`全选 (${selectedSessionKeys.size}/${allFilteredSessions.length})`}
+              />
+            </Group>
+            <Group gap={6} wrap="nowrap">
+              <Button
+                size="compact-xs"
+                color="red"
+                variant="light"
+                leftSection={<IconTrash size={13} />}
+                disabled={selectedSessionKeys.size === 0}
+                onClick={(e) => requestBatchDelete(e)}
+              >
+                {`删除 (${selectedSessionKeys.size})`}
+              </Button>
+              <Button
+                size="compact-xs"
+                variant="subtle"
+                color="gray"
+                onClick={() => {
+                  setBatchMode(false)
+                  setSelectedSessionKeys(new Set())
+                }}
+              >
+                退出
+              </Button>
+            </Group>
+          </Group>
+        </div>
+      )}
       </div>
       <div className="session-rail-list">
       {groups.length === 0 ? (
@@ -365,27 +584,76 @@ export function SessionRail({
         <>
         {groups.some(project => project.sessions.some(s => pinnedSessions[scopeKey(s.agent_id, s.id)])) && <section className="session-pinned-section" aria-label="置顶会话">
           <div className="session-pinned-heading"><IconPinned size={15} />置顶会话</div>
+          <AnimatePresence initial={false}>
           {groups.flatMap(project => project.sessions).filter(s => pinnedSessions[scopeKey(s.agent_id, s.id)]).map(session => {
             const key = scopeKey(session.agent_id, session.id)
             const activityStatus = sessionActivityStatus(session, commands)
             const isRunning = activityStatus === 'running'
-            const projectColor = session.project_id ? projectAppearance[`project:${session.project_id}`]?.color : undefined
+            const parentProject = groups.find(p => p.sessions.some(s => s.id === session.id && s.agent_id === session.agent_id))
+            const projectCustom = (parentProject && projectAppearance[parentProject.key]) ||
+              (session.project_id ? projectAppearance[`project:${session.project_id}`] : undefined)
+            const projectColor = projectCustom?.color
             return (
-              <div className={`session-row-wrapper ${isRunning ? 'is-running' : ''}`} key={key} style={sessionRunningStyle(session, projectColor)}>
+              <motion.div
+                initial={{ opacity: 0, y: -4 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                transition={{ type: 'spring', stiffness: 450, damping: 35 }}
+                className={`session-row-wrapper ${isRunning ? 'is-running' : ''}`}
+                key={key}
+                style={sessionRunningStyle(session, projectColor)}
+              >
+                {batchMode && (
+                  <Checkbox
+                    className="session-batch-checkbox"
+                    size="xs"
+                    checked={selectedSessionKeys.has(key)}
+                    onChange={(e) => toggleSelectSession(key, e.nativeEvent as unknown as React.MouseEvent)}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                )}
                 <SessionActivityBorder status={activityStatus} />
-                <UnstyledButton className={`session-row is-pinned ${key === activeSessionKey ? 'is-active' : ''} ${isRunning ? 'is-running' : ''}`} onClick={() => onSelect(session)}>
-                  <span className="session-row-title">{displaySessionTitle(session)}</span><div className="session-row-info"><AgentKindBadge agent={agents[session.agent_id]} iconOnly /><span className="session-row-time">{formatRelativeTime(session.updated_at)}</span><StatusDot status={activityStatus} /></div>
+                <UnstyledButton
+                  className={`session-row is-pinned ${key === activeSessionKey ? 'is-active' : ''} ${isRunning ? 'is-running' : ''}`}
+                  onClick={(e) => batchMode ? toggleSelectSession(key, e) : onSelect(session)}
+                  draggable={!batchMode}
+                  onDragStart={(event) => {
+                    if (batchMode) return
+                    event.dataTransfer.setData('application/x-astrorder-session', JSON.stringify({
+                      agent_id: session.agent_id,
+                      id: session.id,
+                      title: session.title || '未命名会话',
+                      key,
+                    }))
+                    event.dataTransfer.setData('text/plain', key)
+                    event.dataTransfer.effectAllowed = 'copy'
+                  }}
+                >
+                  <span className="session-row-title">
+                    {projectCustom?.icon && (
+                      <ProjectGlyph
+                        iconName={projectCustom.icon}
+                        colorName={projectCustom.color}
+                        size={13}
+                        style={{ marginRight: 5, verticalAlign: 'text-bottom', opacity: 0.85 }}
+                      />
+                    )}
+                    {displaySessionTitle(session)}
+                  </span>
+                  <div className="session-row-info"><AgentKindBadge agent={agents[session.agent_id]} iconOnly /><span className="session-row-time">{formatRelativeTime(session.updated_at)}</span><StatusDot status={activityStatus} /></div>
                 </UnstyledButton>
-                <div className="session-row-actions has-pinned"><button className="session-action-btn is-active" aria-label="取消置顶" onClick={e => togglePin(session, e)}><IconPinned size={14} /></button>
+                {!batchMode && <div className="session-row-actions has-pinned"><button className="session-action-btn is-active" aria-label="取消置顶" onClick={e => togglePin(session, e)}><IconPinned size={14} /></button>
                   <Menu position="bottom-end" withinPortal><Menu.Target><button className="session-action-btn" aria-label="更多操作"><IconDotsVertical size={14} /></button></Menu.Target><Menu.Dropdown>
                     <Menu.Item leftSection={<IconEdit size={14} />} onClick={() => openRenameModal(session)}>重命名</Menu.Item>
                     <Menu.Item leftSection={<IconCopy size={14} />} onClick={() => copySessionId(session)}>复制 ID</Menu.Item>
+                    {handoffItems(session)}
                     <Menu.Item color="red" leftSection={<IconTrash size={14} />} onClick={(event) => requestDeleteSession(session, event)}>删除会话</Menu.Item>
                   </Menu.Dropdown></Menu>
-                </div>
-              </div>
+                </div>}
+              </motion.div>
             )
           })}
+          </AnimatePresence>
         </section>}
         {groups.map((project) => {
           const projectCollapseKey = `project:${project.key}`
@@ -512,18 +780,48 @@ export function SessionRail({
               </div>
               <Collapse expanded={!projectCollapsed}>
                 <Stack className="session-project-sessions" gap={4} mt={8}>
+                  <AnimatePresence initial={false}>
                   {visibleSessions.map((session) => {
                     const key = scopeKey(session.agent_id, session.id)
                     const isPinned = pinnedSessions[key] === true
                     const activityStatus = sessionActivityStatus(session, commands)
                     const isRunning = activityStatus === 'running'
                     return (
-                      <div className={`session-row-wrapper ${isRunning ? 'is-running' : ''}`} key={key} style={sessionRunningStyle(session, projectCustom?.color)}>
+                      <motion.div
+                        initial={{ opacity: 0, y: 4 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 0.95 }}
+                        transition={{ type: 'spring', stiffness: 450, damping: 35 }}
+                        className={`session-row-wrapper ${isRunning ? 'is-running' : ''}`}
+                        key={key}
+                        style={sessionRunningStyle(session, projectCustom?.color)}
+                      >
+                        {batchMode && (
+                          <Checkbox
+                            className="session-batch-checkbox"
+                            size="xs"
+                            checked={selectedSessionKeys.has(key)}
+                            onChange={(e) => toggleSelectSession(key, e.nativeEvent as unknown as React.MouseEvent)}
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                        )}
                         <SessionActivityBorder status={activityStatus} />
                         <UnstyledButton
                           className={`session-row ${key === activeSessionKey ? 'is-active' : ''} ${isPinned ? 'is-pinned' : ''} ${isRunning ? 'is-running' : ''}`}
-                          onClick={() => onSelect(session)}
+                          onClick={(e) => batchMode ? toggleSelectSession(key, e) : onSelect(session)}
                           aria-current={key === activeSessionKey ? 'page' : undefined}
+                          draggable={!batchMode}
+                          onDragStart={(event) => {
+                            if (batchMode) return
+                            event.dataTransfer.setData('application/x-astrorder-session', JSON.stringify({
+                              agent_id: session.agent_id,
+                              id: session.id,
+                              title: session.title || '未命名会话',
+                              key,
+                            }))
+                            event.dataTransfer.setData('text/plain', key)
+                            event.dataTransfer.effectAllowed = 'copy'
+                          }}
                         >
                           <span className="session-row-title" title={displaySessionTitle(session)}>
                             {displaySessionTitle(session)}
@@ -534,7 +832,7 @@ export function SessionRail({
                             <StatusDot status={activityStatus} />
                           </div>
                         </UnstyledButton>
-                        <div className={`session-row-actions ${isPinned ? 'has-pinned' : ''}`}>
+                        {!batchMode && <div className={`session-row-actions ${isPinned ? 'has-pinned' : ''}`}>
                           <Tooltip label={isPinned ? '取消置顶' : '置顶'} withArrow position="top">
                             <button
                               type="button"
@@ -569,6 +867,7 @@ export function SessionRail({
                               <Menu.Item leftSection={<IconCopy size={14} />} onClick={() => copySessionId(session)}>
                                 复制 ID
                               </Menu.Item>
+                              {handoffItems(session)}
                               <Menu.Divider />
                               <Menu.Item
                                 color="red"
@@ -579,10 +878,11 @@ export function SessionRail({
                               </Menu.Item>
                             </Menu.Dropdown>
                           </Menu>
-                        </div>
-                      </div>
+                        </div>}
+                      </motion.div>
                     )
                   })}
+                  </AnimatePresence>
                   {hasMoreSessions && (
                     <UnstyledButton
                       className="session-expand-more-btn"
@@ -653,7 +953,19 @@ export function SessionRail({
           onSave={handleSaveAppearance}
         />
       )}
-      <ConfirmPopover
+      {handoffTarget && <HandoffDialog
+        source={handoffTarget}
+        targets={handoffTargets(handoffTarget)}
+        sessions={sessions}
+        onClose={() => setHandoffTarget(null)}
+        onTransferred={(created, target) => {
+          useAstrorderStore.setState((state) => ({
+            sessions: { ...state.sessions, [scopeKey(created.agent_id, created.id)]: created },
+          }))
+          notifications.show({ color: 'teal', message: `已转交给 ${target.kind === 'codex' ? 'Codex' : 'Hermes'}` })
+        }}
+        onOpenTransferred={onSelect}
+      />}      <ConfirmPopover
         opened={confirmation !== null}
         coords={confirmation?.coords}
         title={confirmationTitle}

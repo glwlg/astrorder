@@ -7,16 +7,159 @@
     <link rel="icon" type="image/png" sizes="64x64" href="/favicon.png" />
     <link rel="icon" href="/favicon.ico" sizes="any" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
-    <meta name="theme-color" content="#f6f8fb" />
+    <meta name="theme-color" content="#15181e" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="星序" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="modulepreload" href="/src/main.tsx" />
     <title>星序 · Astrorder</title>
+    <style id="astrorder-boot-splash">
+      :root {
+        --splash-bg: #15181e;
+        --splash-fg: #e5e9f1;
+        --splash-muted: #8a94a6;
+        --splash-accent: #3b82f6;
+        --splash-glow: rgba(59, 130, 246, 0.4);
+      }
+      @media (prefers-color-scheme: light) {
+        :root {
+          --splash-bg: #f6f8fb;
+          --splash-fg: #192132;
+          --splash-muted: #647084;
+          --splash-accent: #2563eb;
+          --splash-glow: rgba(37, 99, 235, 0.3);
+        }
+      }
+      html, body {
+        margin: 0;
+        padding: 0;
+        background: var(--splash-bg);
+        color: var(--splash-fg);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", sans-serif;
+      }
+      #app-splash-root {
+        position: fixed;
+        inset: 0;
+        padding-top: 32px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        background: radial-gradient(circle 500px at 50% 45%, var(--splash-glow), transparent 75%), var(--splash-bg);
+        z-index: 99999;
+        pointer-events: none;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+      .splash-orbit-box {
+        position: relative;
+        width: 72px;
+        height: 72px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-bottom: 20px;
+      }
+      .splash-orbit-halo {
+        position: absolute;
+        inset: -12px;
+        border-radius: 50%;
+        background: radial-gradient(circle, var(--splash-glow) 0%, transparent 70%);
+        animation: splash-halo-pulse 2.4s ease-in-out infinite;
+      }
+      @keyframes splash-halo-pulse {
+        0%, 100% { transform: scale(0.85); opacity: 0.3; }
+        50% { transform: scale(1.25); opacity: 0.85; }
+      }
+      .splash-orbit-svg {
+        width: 56px;
+        height: 56px;
+        overflow: visible;
+        filter: drop-shadow(0 0 10px var(--splash-glow));
+      }
+      .splash-ring {
+        transform-origin: 16px 16px;
+        animation: splash-spin 2.6s linear infinite;
+      }
+      @keyframes splash-spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+      }
+      .splash-core-star {
+        transform-origin: 16px 16px;
+        animation: splash-star-pulse 1.8s ease-in-out infinite;
+      }
+      @keyframes splash-star-pulse {
+        0%, 100% { transform: scale(0.88); opacity: 0.55; }
+        50% { transform: scale(1.15); opacity: 1; }
+      }
+      .splash-header-title {
+        font-size: 20px;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        margin: 0 0 6px;
+        color: var(--splash-fg);
+      }
+      .splash-header-sub {
+        font-size: 12px;
+        color: var(--splash-muted);
+        letter-spacing: 0.04em;
+        margin: 0 0 24px;
+        opacity: 0.85;
+      }
+      .splash-bar-track {
+        width: 140px;
+        height: 2px;
+        border-radius: 999px;
+        background: rgba(128, 128, 128, 0.18);
+        position: relative;
+        overflow: hidden;
+      }
+      .splash-bar-fill {
+        position: absolute;
+        top: 0;
+        left: 0;
+        bottom: 0;
+        width: 45%;
+        border-radius: 999px;
+        background: linear-gradient(90deg, transparent, var(--splash-accent), transparent);
+        animation: splash-sweep 1.5s ease-in-out infinite;
+      }
+      @keyframes splash-sweep {
+        0% { transform: translateX(-100%); }
+        100% { transform: translateX(350%); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .splash-ring, .splash-core-star, .splash-orbit-halo, .splash-bar-fill { animation: none; }
+        .splash-bar-fill { width: 100%; }
+      }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div id="app-splash-root" aria-label="正在加载星序工作台">
+        <div class="splash-orbit-box">
+          <div class="splash-orbit-halo"></div>
+          <svg class="splash-orbit-svg" viewBox="0 0 32 32" fill="none">
+            <g class="splash-ring" style="color: var(--splash-accent);">
+              <circle cx="16" cy="16" r="12" stroke="currentColor" stroke-width="2" stroke-dasharray="13 6" />
+              <circle cx="16" cy="4" r="2.2" fill="currentColor" />
+              <circle cx="28" cy="16" r="2.2" fill="currentColor" />
+              <circle cx="16" cy="28" r="2.2" fill="currentColor" />
+              <circle cx="4" cy="16" r="2.2" fill="currentColor" />
+            </g>
+            <path class="splash-core-star" d="M16 8c1 5 3 7 8 8-5 1-7 3-8 8-1-5-3-7-8-8 5-1 7-3 8-8Z" fill="var(--splash-accent)" />
+          </svg>
+        </div>
+        <div class="splash-header-title">星序 · Astrorder</div>
+        <div class="splash-header-sub">群星各有所长，协作自有秩序</div>
+        <div class="splash-bar-track">
+          <div class="splash-bar-fill"></div>
+        </div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

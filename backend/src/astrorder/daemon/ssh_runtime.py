@@ -6,7 +6,7 @@ import threading
 from collections.abc import Callable, Mapping
 from typing import Any, Protocol
 
-from .session_daemon import DaemonProtocolError
+from .errors import DaemonProtocolError
 
 
 class SshController(Protocol):
@@ -84,6 +84,22 @@ class SshDaemonRuntime:
             "agent_id": agent_id,
             **_identity_metadata(snapshot),
         }
+
+    async def query(self, request: Mapping[str, Any]) -> Mapping[str, Any]:
+        method = request.get("method")
+        if method not in {"session.active_list", "approval.pending", "approval.respond"}:
+            raise DaemonProtocolError("SSH runtime request is unsupported")
+        params = request.get("request_params", {})
+        if not isinstance(params, Mapping):
+            raise DaemonProtocolError("SSH runtime request params must be an object")
+        controller, _agent_id, _snapshot = await self._controller_ready()
+        rpc = getattr(controller, "rpc", None)
+        if not callable(rpc):
+            raise DaemonProtocolError("SSH child does not support runtime requests")
+        result = await asyncio.to_thread(rpc, method, dict(params))
+        if not isinstance(result, Mapping):
+            raise DaemonProtocolError("SSH child runtime request result is invalid")
+        return dict(result)
 
     async def command(self, action: str, request: Mapping[str, Any]) -> Mapping[str, Any]:
         session_id = _session_id(request)
@@ -190,9 +206,12 @@ class SshDaemonRuntime:
                 if self._emit is not None and callable(set_completion_callback):
                     set_completion_callback(self._command_completed)
         snapshot = await asyncio.to_thread(controller.snapshot)
-        if created or not isinstance(snapshot, Mapping) or not snapshot.get("alive"):
+        started = created or not isinstance(snapshot, Mapping) or not snapshot.get("alive")
+        if started:
             await asyncio.to_thread(controller.start)
             snapshot = await asyncio.to_thread(controller.snapshot)
+            if not await asyncio.to_thread(controller.wait_gateway, 20):
+                raise DaemonProtocolError("SSH Hermes gateway did not become ready")
         agent_id = snapshot.get("agent_id") if isinstance(snapshot, Mapping) else None
         if not snapshot.get("alive") or not isinstance(agent_id, str) or not agent_id:
             raise DaemonProtocolError("SSH runtime did not confirm a native bridge")
@@ -266,6 +285,18 @@ class SshDaemonRuntimeRegistry:
             raise DaemonProtocolError("SSH child spawn result is invalid")
         async with self._lock:
             self._sessions[session_id] = connection_id
+        return dict(result)
+
+    async def query(self, request: Mapping[str, Any]) -> Mapping[str, Any]:
+        _connection_id, runtime = await self._runtime_for_request(request)
+        query = getattr(runtime, "query", None)
+        if not callable(query):
+            raise DaemonProtocolError("SSH child does not support runtime requests")
+        result = await query(
+            {"method": request.get("method"), "request_params": request.get("request_params", {})}
+        )
+        if not isinstance(result, Mapping):
+            raise DaemonProtocolError("SSH child runtime request result is invalid")
         return dict(result)
 
     async def create(self, request: Mapping[str, Any]) -> Mapping[str, Any]:

@@ -69,6 +69,47 @@ def test_daemon_status_identifies_the_running_daemon_instance():
     assert replay["daemon_id"] == "daemon-test"
 
 
+def test_daemon_status_includes_registered_runtime_status():
+    class FixtureRuntime:
+        async def spawn(self, request):
+            return {"status": "idle"}
+
+        async def command(self, action, request):
+            return {"status": "idle"}
+
+        def status(self):
+            return {"desktop_cdp": {"available": True}}
+
+    daemon = SessionDaemon(secret="test-secret")
+    daemon.register_runtime("codex", FixtureRuntime())
+
+    status = daemon.handle_request('{"action":"daemon.status","request_id":"status-1"}')
+
+    assert status["runtimes"] == {"codex": {"desktop_cdp": {"available": True}}}
+
+
+@pytest.mark.asyncio
+async def test_daemon_shutdown_requires_confirmation_for_active_sessions():
+    stopping = asyncio.Event()
+    daemon = SessionDaemon(secret="test-secret", shutdown_event=stopping)
+    daemon.record("session-a", "turn_started", {}, status="running")
+
+    refused = await daemon.handle_message(
+        '{"action":"daemon.shutdown","request_id":"stop-1"}'
+    )
+    accepted = await daemon.handle_message(
+        '{"action":"daemon.shutdown","request_id":"stop-2","confirm_active":true}'
+    )
+
+    assert refused == {
+        "action": "error",
+        "request_id": "stop-1",
+        "detail": "daemon has active sessions; explicit confirmation is required",
+    }
+    assert accepted["result"] == {"stopping": True}
+    assert stopping.is_set()
+
+
 def test_runtime_registry_requires_a_daemon_secret():
     class FixtureRuntime:
         async def spawn(self, request):
@@ -439,6 +480,8 @@ async def test_websocket_daemon_replays_sync_reports_status_and_streams_live_fra
                 "sessions": {
                     "session-a": {"status": "running", "min_seq_id": 1, "max_seq_id": 2}
                 },
+                "connectors": [],
+                "runtimes": {},
             }
 
             live = await daemon.publish(
@@ -485,6 +528,29 @@ async def test_websocket_daemon_waits_for_sync_before_streaming_live_frames():
     finally:
         server.close()
         await server.wait_closed()
+
+
+@pytest.mark.asyncio
+async def test_connector_agent_update_refreshes_daemon_status_snapshot():
+    daemon = SessionDaemon()
+    daemon._connector_agents["hermes-1"] = {
+        "id": "hermes-1",
+        "kind": "hermes",
+        "status": "connecting",
+    }
+
+    await daemon._record_connector_event(
+        "hermes-1",
+        {
+            "id": "agent-ready-1",
+            "type": "agent.upsert",
+            "agent_id": "hermes-1",
+            "session_id": None,
+            "data": {"id": "hermes-1", "kind": "hermes", "status": "ready"},
+        },
+    )
+
+    assert daemon._connector_agents["hermes-1"]["status"] == "ready"
 
 
 @pytest.mark.asyncio

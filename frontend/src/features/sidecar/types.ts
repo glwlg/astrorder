@@ -3,6 +3,7 @@ import type { ArtifactRef } from '../../domain/artifact'
 
 export interface ViewerContext {
   artifact: ArtifactRef
+  isActive?: boolean
   onSave?: (content: string) => Promise<boolean>
   onDirtyChange?: (dirty: boolean) => void
   onClose?: () => void

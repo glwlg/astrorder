@@ -85,7 +85,7 @@ async def test_daemon_owned_ssh_runtime_routes_exact_remote_sessions_without_loc
     }
     assert interrupted["result"] == {"status": "running", "accepted": True}
     assert ssh.start_calls == 1
-    assert ssh.wait_gateway_calls == 0
+    assert ssh.wait_gateway_calls == 1
     assert ssh.commands == [
         {
             "action": "send",
@@ -226,6 +226,9 @@ async def test_daemon_ssh_runtime_preserves_command_id_and_wals_native_completio
         def snapshot(self):
             return {"alive": True, "agent_id": self.agent_id, "id": "remote-a"}
 
+        def wait_gateway(self, timeout=20):
+            return True
+
         def create_session(self, workspace=None, title=None):
             del workspace, title
             raise AssertionError("not used")
@@ -295,3 +298,34 @@ def test_ssh_native_runtime_reports_exact_command_completion_without_store(tmp_p
     assert completed == [
         (runtime.agent_id, "native-remote-session", "ssh-command-exact-id")
     ]
+
+
+@pytest.mark.asyncio
+async def test_daemon_owned_ssh_runtime_routes_approval_queries():
+    class Controller:
+        agent_id = "ssh-hermes-remote-a"
+
+        def start(self):
+            return None
+
+        def wait_gateway(self, timeout=20):
+            return True
+
+        def snapshot(self):
+            return {"alive": True, "agent_id": self.agent_id}
+
+        def rpc(self, method, params):
+            return {"result": {"method": method, "params": params}}
+
+        def stop(self):
+            return None
+
+    runtime = SshDaemonRuntime(Controller)
+
+    result = await runtime.query(
+        {"method": "approval.pending", "request_params": {"session_id": "native-1"}}
+    )
+
+    assert result == {
+        "result": {"method": "approval.pending", "params": {"session_id": "native-1"}}
+    }

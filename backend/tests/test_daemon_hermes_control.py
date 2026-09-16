@@ -44,7 +44,13 @@ def test_daemon_hermes_controller_connects_and_creates_from_daemon_confirmed_ide
     assert controller.snapshot()["available"] is True
 
     connected = controller.connect()
-    created = controller.create_session("C:/workspace/project", "Daemon owned Hermes")
+    created = controller.create_session(
+        "C:/workspace/project",
+        "Daemon owned Hermes",
+        provider="ocx",
+        model="google-antigravity/gemini-3.8-flash",
+        effort="high",
+    )
     updated_at = created.pop("updated_at")
 
     assert datetime.fromisoformat(updated_at).tzinfo is not None
@@ -78,6 +84,9 @@ def test_daemon_hermes_controller_connects_and_creates_from_daemon_confirmed_ide
                 "agent_type": "hermes",
                 "cwd": "C:/workspace/project",
                 "title": "Daemon owned Hermes",
+                "provider": "ocx",
+                "model": "google-antigravity/gemini-3.8-flash",
+                "effort": "high",
             },
         ),
     ]
@@ -245,3 +254,43 @@ def test_daemon_hermes_controller_renames_only_after_native_readback():
             {"session_id": "native-session", "title": "Renamed"},
         ),
     ]
+
+def test_daemon_hermes_controller_branches_through_daemon_create():
+    class FakeBridge:
+        def __init__(self):
+            self.calls = []
+
+        async def request_control(self, action, fields):
+            self.calls.append((action, dict(fields)))
+            if action == "session.spawn":
+                return {
+                    "result": {
+                        "status": "idle",
+                        "agent_id": "local-hermes-default",
+                        "source_id": "hermes-source",
+                    }
+                }
+            return {
+                "result": {
+                    "session_id": "summary-fork",
+                    "status": "idle",
+                    "agent_id": "local-hermes-default",
+                    "source_id": "hermes-source",
+                }
+            }
+
+    bridge = FakeBridge()
+    controller = DaemonHermesController(bridge)
+    controller.connect()
+
+    fork = controller.branch_session("source-session", "转交摘要")
+
+    assert fork["id"] == "summary-fork"
+    assert bridge.calls[-1] == (
+        "session.create",
+        {
+            "agent_type": "hermes",
+            "parent_session_id": "source-session",
+            "title": "转交摘要",
+        },
+    )

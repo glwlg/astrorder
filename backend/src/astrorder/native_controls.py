@@ -18,8 +18,11 @@ def result(rpc, method, params):
         params = {**params, 'omit_messages': True, 'defer_history': True}
     response = rpc(method, params)
     if not isinstance(response, dict) or response.get('error') or not isinstance(response.get('result'), dict):
-        code = (response.get('error') or {}).get('code') if isinstance(response, dict) else None
-        raise ConnectionError(f'原生接口 {method} 未确认（{code or "无响应"}）。', 502)
+        error = response.get('error') or {} if isinstance(response, dict) else {}
+        code = error.get('code')
+        message = error.get('message')
+        detail = f'：{message}' if isinstance(message, str) and message else ''
+        raise ConnectionError(f'原生接口 {method} 未确认（{code or "无响应"}）{detail}。', 502)
     return response['result']
 
 
@@ -38,6 +41,26 @@ def model_choices(rpc) -> list[dict[str, str]]:
                 continue
             choices[(slug, model)] = {'provider': slug, 'model': model, 'label': f'{provider.get("name") or slug} · {model}'}
     return list(choices.values())
+
+
+def agent_commands(rpc, session_id: str) -> list[dict[str, str | None]]:
+    catalog = result(rpc, 'commands.catalog', {'session_id': session_id})
+    metadata = catalog.get('commands') if isinstance(catalog.get('commands'), dict) else {}
+    items = []
+    for pair in catalog.get('pairs', []):
+        if not isinstance(pair, list) or len(pair) < 2 or not isinstance(pair[0], str):
+            continue
+        name = pair[0].lstrip('/')
+        if not name or any(item['name'] == name for item in items):
+            continue
+        meta = metadata.get(pair[0]) if isinstance(metadata.get(pair[0]), dict) else {}
+        mode = meta.get('argument_mode')
+        items.append({
+            'name': name,
+            'description': str(pair[1]),
+            'input_hint': '输入参数' if mode in {'text', 'mixed', 'options'} else None,
+        })
+    return items
 
 
 def open_native_session_ids(rpc) -> list[str]:
@@ -64,6 +87,8 @@ def current_session_model(rpc, session_id: str) -> dict[str, Any]:
         model, provider = match.groups() if match else (None, None)
     if not isinstance(model, str) or not model or model in {'unknown', '(unknown)'}:
         raise ConnectionError('原生会话未返回模型信息。', 502)
+    if isinstance(provider, str) and provider.startswith('custom:'):
+        provider = provider.removeprefix('custom:') or provider
     if provider == 'custom':
         catalog = result(rpc, 'model.options', {'session_id': resumed['session_id'], 'explicit_only': True, 'include_unconfigured': False})
         current = [row.get('slug') for row in catalog.get('providers', []) if isinstance(row, dict) and row.get('is_current') is True and row.get('slug')]

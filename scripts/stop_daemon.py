@@ -10,10 +10,12 @@ from daemon_service import stop_daemon
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Stop Astrorder Session Daemon")
     parser.add_argument("--port", type=int, default=30009)
+    parser.add_argument("--confirm-active", action="store_true")
     args = parser.parse_args(argv)
     pid = stop_daemon(
         port=args.port,
         secret=os.environ.get("ASTRORDER_SESSION_DAEMON_SECRET") or None,
+        confirm_active=args.confirm_active,
     )
     print("Session Daemon was not listening." if pid is None else f"Stopped Session Daemon PID: {pid}")
 

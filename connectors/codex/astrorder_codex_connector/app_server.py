@@ -69,7 +69,7 @@ class CodexAppServer:
             startupinfo.wShowWindow = 0
         self.process = subprocess.Popen(
             self.launch_argv or [self.config.executable, "app-server", "--listen", "stdio://"],
-            cwd=str(self.config.workspace),
+            cwd=None if self.launch_argv else str(self.config.workspace),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,

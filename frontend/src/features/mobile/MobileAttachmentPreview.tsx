@@ -9,5 +9,18 @@ export function MobileAttachmentPreview({ file, onOpen, onRemove }: { file: File
     setUrl(next)
     return () => URL.revokeObjectURL(next)
   }, [file])
-  return <span className="m-attachment-preview">{url ? <button aria-label={`预览 ${file.name}`} onClick={() => onOpen(url)}><img src={url} alt={file.name} style={{ width: 54, height: 54, objectFit: 'cover', borderRadius: 7 }} /></button> : file.name}<button aria-label={`移除 ${file.name}`} onClick={onRemove}><IconX size={15} /></button></span>
+  return (
+    <span className="m-attachment-preview">
+      {url ? (
+        <button className="m-attachment-thumb-btn" aria-label={`预览 ${file.name}`} onClick={() => onOpen(url)}>
+          <img src={url} alt={file.name} />
+        </button>
+      ) : (
+        <span className="m-attachment-file-pill">{file.name}</span>
+      )}
+      <button className="m-attachment-remove-btn" aria-label={`移除 ${file.name}`} onClick={onRemove}>
+        <IconX size={11} stroke={2.6} />
+      </button>
+    </span>
+  )
 }

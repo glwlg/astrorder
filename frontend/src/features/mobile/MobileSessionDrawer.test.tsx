@@ -150,4 +150,38 @@ describe('MobileSessionDrawer', () => {
     expect(screen.queryByRole('menuitem', { name: '删除项目' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'ops' })).toBeInTheDocument()
   })
+
+  it('offers handoff action in session menu when target agents are available', () => {
+    const onHandoffSession = vi.fn()
+    const agents = {
+      local: { id: 'local', kind: 'hermes' as const, name: 'Hermes', status: 'ready' as const, capabilities: ['chat'], limitation: null },
+      codex: { id: 'codex', kind: 'codex' as const, name: 'Codex', status: 'ready' as const, capabilities: ['chat'], limitation: null },
+    }
+    mount({ agents, onHandoffSession })
+
+    fireEvent.click(screen.getByRole('button', { name: '会话操作 会话 1' }))
+    const handoffItem = screen.getByRole('menuitem', { name: '转交' })
+    expect(handoffItem).toBeInTheDocument()
+    fireEvent.click(handoffItem)
+    expect(onHandoffSession).toHaveBeenCalledWith(groups[0].sessions[0])
+  })
+
+  it('offers rename and copy id in session menu', () => {
+    const onRenameSession = vi.fn()
+    const onCopySessionId = vi.fn()
+    mount({ onRenameSession, onCopySessionId })
+
+    fireEvent.click(screen.getByRole('button', { name: '会话操作 会话 1' }))
+    const renameItem = screen.getByRole('menuitem', { name: '重命名' })
+    const copyItem = screen.getByRole('menuitem', { name: '复制 ID' })
+    expect(renameItem).toBeInTheDocument()
+    expect(copyItem).toBeInTheDocument()
+
+    fireEvent.click(renameItem)
+    expect(onRenameSession).toHaveBeenCalledWith(groups[0].sessions[0])
+
+    fireEvent.click(screen.getByRole('button', { name: '会话操作 会话 1' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '复制 ID' }))
+    expect(onCopySessionId).toHaveBeenCalledWith(groups[0].sessions[0])
+  })
 })

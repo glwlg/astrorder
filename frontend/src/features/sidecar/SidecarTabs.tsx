@@ -1,4 +1,5 @@
-import { ActionIcon, Paper, Text, Tooltip } from '@mantine/core'
+import { ActionIcon, Text, Tooltip } from '@mantine/core'
+import { LayoutGroup, motion } from 'motion/react'
 import {
   IconFolder,
   IconInfoCircle,
@@ -27,15 +28,19 @@ export function SidecarTabs({
   if (tabs.length === 0) return null
 
   return (
+    <LayoutGroup id="sidecar-tabs-nav">
     <div
       className="sidecar-tabs-bar"
       style={{
         display: 'flex',
         alignItems: 'center',
-        gap: '4px',
+        gap: '2px',
         overflowX: 'auto',
         maxWidth: '100%',
-        padding: '2px 0',
+        padding: '3px',
+        background: 'color-mix(in srgb, var(--astr-surface-muted) 85%, var(--astr-surface))',
+        borderRadius: '8px',
+        border: '1px solid var(--astr-border)',
       }}
     >
       {tabs.map((tab) => {
@@ -44,26 +49,43 @@ export function SidecarTabs({
         const viewer = tab.artifact ? artifactViewerRegistry.findViewer(tab.artifact) : null
 
         return (
-          <Paper
+          <div
             key={tab.id}
-            px={8}
-            py={3}
-            radius="sm"
-            withBorder={isActive}
             style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              cursor: 'pointer',
-              background: isActive ? 'var(--astr-card)' : 'transparent',
-              borderColor: isActive ? 'var(--astr-border)' : 'transparent',
-              fontSize: '12px',
-              userSelect: 'none',
-              transition: 'background 0.1s ease',
-              whiteSpace: 'nowrap',
+              position: 'relative',
+              display: 'inline-flex',
             }}
             onClick={() => onSelect(tab.id)}
           >
+            {isActive && (
+              <motion.div
+                layoutId="sidecar-active-tab-pill"
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  borderRadius: '6px',
+                  background: 'var(--astr-surface)',
+                  border: '1px solid var(--astr-border)',
+                  boxShadow: '0 1px 4px rgba(0, 0, 0, 0.1), 0 1px 2px rgba(0, 0, 0, 0.06)',
+                  zIndex: 0,
+                }}
+                transition={{ type: 'spring', stiffness: 400, damping: 28 }}
+              />
+            )}
+            <div
+              style={{
+                position: 'relative',
+                zIndex: 1,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '4px 9px',
+                cursor: 'pointer',
+                fontSize: '12px',
+                userSelect: 'none',
+                whiteSpace: 'nowrap',
+              }}
+            >
             {/* 图标 */}
             {tab.type === 'details' ? (
               <IconInfoCircle size={14} color="var(--astr-muted)" />
@@ -80,7 +102,7 @@ export function SidecarTabs({
             )}
 
             {/* 标题 */}
-            <Text size="xs" fw={isActive ? 600 : 400} c={isActive ? undefined : 'dimmed'}>
+            <Text size="xs" fw={isActive ? 650 : 450} c={isActive ? 'var(--astr-text)' : 'dimmed'}>
               {tab.title}
             </Text>
 
@@ -115,9 +137,11 @@ export function SidecarTabs({
                 <IconX size={12} />
               </ActionIcon>
             )}
-          </Paper>
+            </div>
+          </div>
         )
       })}
     </div>
+    </LayoutGroup>
   )
 }

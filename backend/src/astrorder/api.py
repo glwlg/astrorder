@@ -6,14 +6,18 @@ import os
 import sqlite3
 import subprocess
 from pathlib import Path
+from uuid import uuid4
 
 from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
 from .attachments import AttachmentError
-from .auth import COOKIE_NAME, browser_authenticated, require_browser, validate_origin
+from .agent_gateway import AgentApiError, AgentContext, CAPABILITIES, invoke
+from .auth import COOKIE_NAME, browser_authenticated, require_agent, require_browser, validate_origin
 from .connections import ConnectionError, _windows_hide_startupinfo
+from .daemon.bridge import DaemonBridgeError
+from .handoff import HANDOFF_CONTEXT_MESSAGE_ID, SUMMARY_PROMPT, build_handoff_prompt
 from .schemas import AuthRequest, CommandSubmission, RuntimeLaunch, SshConnectionSettings
 from .service import CommandRejected
 from .workspace_preferences import router as preferences_router
@@ -21,6 +25,11 @@ from .workspace_preferences import router as preferences_router
 router = APIRouter()
 router.include_router(preferences_router)
 logger = logging.getLogger(__name__)
+
+
+class AgentInvokeRequest(BaseModel):
+    capability: str = Field(min_length=1, max_length=128)
+    input: dict[str, object] = Field(default_factory=dict)
 
 
 def _settings(request: Request):
@@ -31,12 +40,56 @@ def _private(request: Request) -> None:
     require_browser(request, _settings(request))
 
 
+def _agent_context(request: Request) -> AgentContext:
+    def read_messages(agent_id: str, session_id: str, before: str | None, limit: int) -> dict:
+        runtime = _agent_runtime(request, agent_id)
+        reader = getattr(runtime, "messages", None)
+        if callable(reader):
+            try:
+                page = reader(session_id, before, limit)
+                if isinstance(page, dict):
+                    return page
+            except (ConnectionError, ValueError, TypeError, OSError):
+                pass
+        items, cursor = request.app.state.store.list_messages(agent_id, session_id, before, limit)
+        return {"items": items, "next": cursor}
+
+    return AgentContext(
+        store=request.app.state.store,
+        read_messages=read_messages,
+        service=getattr(request.app.state, "service", None),
+        runtime_resolver=lambda aid: _agent_runtime(request, aid),
+    )
+
+
 def _codex(request: Request, agent_id: str):
     environments = getattr(request.app.state, 'environments', None)
     if environments:
         return environments.for_agent(agent_id)
     connection = getattr(request.app.state, 'codex', None)
     return connection if connection and connection.agent_id == agent_id else None
+
+
+def _agent_runtime(request: Request, agent_id: str):
+    environments = getattr(request.app.state, "environments", None)
+    resolver = getattr(environments, "runtime_for_agent", None)
+    if callable(resolver):
+        runtime = resolver(agent_id)
+        if runtime is not None:
+            return runtime
+    connections = getattr(request.app.state, "connections", None)
+    resolver = getattr(connections, "get_runtime_by_agent_id", None)
+    runtime = resolver(agent_id) if callable(resolver) else None
+    return runtime if runtime is not None else _codex(request, agent_id)
+
+
+def _mutate_agent_session(request: Request, agent_id: str, session_id: str, updates):
+    runtime = _agent_runtime(request, agent_id)
+    for name in ("mutate", "mutate_session"):
+        mutate = getattr(runtime, name, None)
+        if callable(mutate):
+            return mutate(session_id, updates)
+    return request.app.state.connections.mutate_session_for_agent(agent_id, session_id, updates)
 
 
 def _local_hermes_database(runtime):
@@ -131,22 +184,63 @@ def bootstrap(request: Request) -> dict[str, object]:
     from .agent_registry import current_agents
     store = request.app.state.store
     sessions = store.sessions_for_bootstrap()
-    presence_rows = _collect_presence(request)
-    by_key = {(row['agent_id'], row['id']): row for row in presence_rows.get('items', [])}
-    live = {(row['agent_id'], row['id']) for row in presence_rows.get('live', [])}
-    for session in sessions:
-        key = (session['agent_id'], session['id'])
-        if key in by_key:
-            session['last_user_at'] = by_key[key]['last_user_at']
-        session['live'] = key in live
     return {
         "protocol_version": 1,
         "agents": [request.app.state.service.effective_agent(a) for a in current_agents(store)],
         "projects": store.list_projects(),
         "sessions": sessions,
         "cursor": store.latest_cursor(),
-        "approvals": (request.app.state.service.hermes_approvals.snapshot() if request.app.state.service.hermes_approvals else []) + (request.app.state.service.observer_approvals.snapshot() if request.app.state.service.observer_approvals else []),
+        "approvals": request.app.state.service.approval_snapshot(),
     }
+
+
+@router.get("/api/v1/agent/catalog")
+def agent_catalog(request: Request) -> dict[str, object]:
+    require_agent(request, _settings(request))
+    return {"items": CAPABILITIES}
+
+
+@router.post("/api/v1/agent/invoke")
+def agent_invoke(request: Request, body: AgentInvokeRequest) -> dict[str, object]:
+    require_agent(request, _settings(request))
+    try:
+        return invoke(body.capability, dict(body.input), _agent_context(request))
+    except AgentApiError as exc:
+        status = 404 if exc.code == "not_found" else 400
+        raise HTTPException(status_code=status, detail=exc.message) from None
+
+
+@router.post("/api/v1/agent/mcp")
+async def agent_mcp(request: Request) -> Response:
+    require_agent(request, _settings(request))
+    from .agent_mcp import handle_rpc
+
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON") from None
+    ctx = _agent_context(request)
+
+    def invoker(capability: str, payload: dict) -> dict:
+        return invoke(capability, payload, ctx)
+
+    if isinstance(body, list):
+        replies = await asyncio.to_thread(
+            lambda: [handle_rpc(item, invoker) for item in body if isinstance(item, dict)]
+        )
+        return JSONResponse([item for item in replies if item is not None])
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Invalid JSON-RPC")
+    reply = await asyncio.to_thread(handle_rpc, body, invoker)
+    if reply is None:
+        return Response(status_code=202)
+    return JSONResponse(reply)
+
+
+@router.get("/api/v1/presence")
+async def presence(request: Request) -> dict[str, list]:
+    _private(request)
+    return await asyncio.to_thread(_collect_presence, request)
 
 
 @router.get("/api/v1/agents")
@@ -189,6 +283,41 @@ def sessions(request: Request, agent_id: str | None = None) -> dict[str, object]
     return {"items": request.app.state.store.list_sessions(agent_id)}
 
 
+@router.get("/api/v1/codex-desktop/status")
+async def codex_desktop_status(request: Request) -> dict[str, object]:
+    _private(request)
+    bridge = request.app.state.daemon_bridge
+    if bridge is None:
+        raise HTTPException(status_code=503, detail="Session Daemon is unavailable")
+    try:
+        await bridge.refresh_status()
+    except DaemonBridgeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+    status = bridge.runtime_status.get("codex", {}).get("desktop_cdp")
+    if not isinstance(status, dict):
+        return {"available": False, "detail": "Codex Desktop control is not configured"}
+    return status
+
+
+@router.post("/api/v1/sessions/{session_id}/sync")
+async def sync_session(
+    session_id: str,
+    request: Request,
+    agent_id: str = Query(..., min_length=1, max_length=256),
+) -> dict[str, object]:
+    _private(request)
+    session = request.app.state.store.get_session(agent_id, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session was not found")
+    bridge = request.app.state.daemon_bridge
+    if bridge is not None and session.get("control_state") == "owned":
+        try:
+            await bridge.refresh_status()
+        except DaemonBridgeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from None
+    return request.app.state.store.get_session(agent_id, session_id) or session
+
+
 class CreateSessionPayload(BaseModel):
     agent_id: str = Field(min_length=1, max_length=256)
     workspace: str | None = Field(default=None, max_length=2000)
@@ -197,6 +326,9 @@ class CreateSessionPayload(BaseModel):
     project_name: str | None = Field(default=None, max_length=256)
     parent_session_id: str | None = Field(default=None, max_length=256)
     ephemeral: bool = Field(default=False)
+    provider: str | None = Field(default=None, max_length=256)
+    model: str | None = Field(default=None, max_length=256)
+    effort: str | None = Field(default=None, max_length=32)
 
 
 @router.get("/api/v1/open-sessions")
@@ -206,25 +338,31 @@ async def open_sessions(request: Request) -> dict[str, object]:
     store = request.app.state.store
     def read(agent_id):
         try:
-            codex = _codex(request, agent_id)
-            ids = codex.open_ids() if codex else open_native_session_ids(runtime_rpc(request.app.state.connections, agent_id))
+            runtime = _agent_runtime(request, agent_id)
+            read_open_ids = getattr(runtime, "open_ids", None)
+            if callable(read_open_ids):
+                ids = read_open_ids()
+            elif getattr(runtime, "daemon_owned", False):
+                return agent_id, None
+            else:
+                ids = open_native_session_ids(runtime_rpc(request.app.state.connections, agent_id))
             return agent_id, ids
         except (ConnectionError, OSError, TimeoutError, RuntimeError):
             return agent_id, None
-    results = await asyncio.gather(*(asyncio.to_thread(read, agent['id']) for agent in store.list_agents() if agent['kind'] == 'hermes' or _codex(request, agent['id'])))
-    presence_rows = await asyncio.to_thread(_collect_presence, request)
+    results = await asyncio.gather(
+        *(asyncio.to_thread(read, agent['id']) for agent in store.list_agents())
+    )
     known = [agent_id for agent_id, ids in results if ids is not None]
-    items = {(row['agent_id'], row['id']): row for row in presence_rows['open']}
+    items = {}
     for agent_id, ids in results:
         if ids is None:
             continue
         for session_id in ids:
             items[(agent_id, session_id)] = {'agent_id': agent_id, 'id': session_id}
-    live = {(row['agent_id'], row['id']) for row in presence_rows['live']}
     return {
-        'known_agent_ids': list(dict.fromkeys([*known, *[row['agent_id'] for row in presence_rows['open']]])),
+        'known_agent_ids': list(dict.fromkeys(known)),
         'items': list(items.values()),
-        'live': [{'agent_id': agent_id, 'id': session_id} for agent_id, session_id in live],
+        'live': [],
     }
 
 
@@ -232,20 +370,42 @@ async def open_sessions(request: Request) -> dict[str, object]:
 def create_session(payload: CreateSessionPayload, request: Request) -> dict[str, object]:
     _private(request)
     try:
-        codex = _codex(request, payload.agent_id)
-        if codex:
-            data = codex.create(
+        runtime = _agent_runtime(request, payload.agent_id)
+        create = getattr(runtime, "create", None)
+        if callable(create):
+            data = create(
                 payload.workspace,
                 payload.title,
                 ephemeral=payload.ephemeral,
                 parent_session_id=payload.parent_session_id,
             )
         else:
-            data = request.app.state.connections.create_session_for_agent(
-                agent_id=payload.agent_id,
-                workspace=payload.workspace,
-                title=payload.title,
-            )
+            if runtime is None:
+                raise ConnectionError("会话所属运行时未连接；不会转到其他 Agent 创建。", 503)
+            if payload.parent_session_id:
+                branch = getattr(runtime, "branch_session", None)
+                if not callable(branch):
+                    raise ConnectionError("会话所属运行时不支持原生分叉。", 409)
+                data = branch(payload.parent_session_id, payload.title)
+            else:
+                create = getattr(runtime, "create_session", None)
+                if not callable(create):
+                    data = request.app.state.connections.create_session_for_agent(
+                        agent_id=payload.agent_id,
+                        workspace=payload.workspace,
+                        title=payload.title,
+                        provider=payload.provider,
+                        model=payload.model,
+                        effort=payload.effort,
+                    )
+                else:
+                    data = create(
+                        workspace=payload.workspace,
+                        title=payload.title,
+                        provider=payload.provider,
+                        model=payload.model,
+                        effort=payload.effort,
+                    )
         if payload.ephemeral:
             data["ephemeral"] = True
         # 关联 project_id 与 project_name
@@ -284,6 +444,319 @@ def create_session(payload: CreateSessionPayload, request: Request) -> dict[str,
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+class HandoffSessionPayload(BaseModel):
+    operation_id: str = Field(min_length=1, max_length=256)
+    source_agent_id: str = Field(min_length=1, max_length=256)
+    target_agent_id: str = Field(min_length=1, max_length=256)
+    provider: str | None = Field(default=None, min_length=1, max_length=160)
+    model: str | None = Field(default=None, min_length=1, max_length=160)
+    effort: str | None = Field(default=None, min_length=1, max_length=32)
+
+
+async def _handoff_messages(
+    request: Request, agent: dict[str, object], session: dict[str, object]
+) -> list[dict[str, object]]:
+    runtime = _agent_runtime(request, agent["id"])
+    reader = getattr(runtime, "messages", None)
+    if callable(reader):
+        page = await asyncio.to_thread(reader, session["id"], None, 100)
+        items = page.get("items") if isinstance(page, dict) else None
+    else:
+        reader = getattr(runtime, "load_native_history_page", None)
+        if not callable(reader):
+            raise ConnectionError("源 Agent 暂不支持读取分叉摘要。", 503)
+        page = await asyncio.to_thread(reader, session["id"], None, 100)
+        raw_items = page.get("items") if isinstance(page, dict) else None
+        if not isinstance(raw_items, list):
+            raise ConnectionError("源 Agent 返回了无效的分叉消息。", 502)
+        from .native_sessions import project_history_messages
+
+        items = project_history_messages(
+            raw_items,
+            durable_session_id=session["id"],
+            native_session_id=session["id"],
+            source_id=session.get("source_id") or agent["id"],
+            agent_id=agent["id"],
+        )
+    if not isinstance(items, list):
+        raise ConnectionError("源 Agent 返回了无效的分叉消息。", 502)
+    return items
+
+
+async def _wait_handoff_summary(
+    request: Request, agent_id: str, session_id: str, command_id: str, cancel_event: asyncio.Event
+) -> None:
+    deadline = asyncio.get_running_loop().time() + 300
+    while True:
+        if cancel_event.is_set():
+            raise ConnectionError("转交已取消。", 409)
+        command = request.app.state.store.get_command(agent_id, session_id, command_id)
+        state = command.get("state") if command else None
+        if state == "completed":
+            return
+        if state in {"failed", "cancelled", "unknown"}:
+            raise ConnectionError(
+                (command or {}).get("error") or "源 Agent 未能完成交接摘要。", 502
+            )
+        if asyncio.get_running_loop().time() >= deadline:
+            raise ConnectionError("等待源 Agent 生成交接摘要超时。", 504)
+        await asyncio.sleep(0.1)
+
+
+async def _wait_handoff_result(
+    request: Request,
+    source_agent: dict[str, object],
+    fork: dict[str, object],
+    known_assistant_ids: set[str],
+    cancel_event: asyncio.Event,
+) -> str:
+    deadline = asyncio.get_running_loop().time() + 10
+    while True:
+        if cancel_event.is_set():
+            raise ConnectionError("转交已取消。", 409)
+        messages = await _handoff_messages(request, source_agent, fork)
+        summaries = [
+            item["text"].strip()
+            for item in messages
+            if item.get("role") == "assistant"
+            and item.get("kind") == "message"
+            and item.get("id") not in known_assistant_ids
+            and isinstance(item.get("text"), str)
+            and item["text"].strip()
+        ]
+        if summaries:
+            return summaries[-1]
+        if asyncio.get_running_loop().time() >= deadline:
+            raise ConnectionError("源 Agent 已完成总结，但未返回可用的交接摘要。", 502)
+        await asyncio.sleep(0.2)
+
+
+def _delete_handoff_fork(request: Request, agent_id: str, session_id: str) -> None:
+    _mutate_agent_session(request, agent_id, session_id, None)
+    if not request.app.state.service.delete_session(agent_id, session_id):
+        raise ConnectionError("临时分叉已从原生运行时删除，但本地记录删除失败。", 500)
+
+
+async def _summarize_handoff(
+    request: Request,
+    source_agent: dict[str, object],
+    source: dict[str, object],
+    cancel_event: asyncio.Event,
+) -> str:
+    if cancel_event.is_set():
+        raise ConnectionError("转交已取消。", 409)
+    fork = await asyncio.to_thread(
+        create_session,
+        CreateSessionPayload(
+            agent_id=source_agent["id"],
+            workspace=source.get("workspace"),
+            title="转交摘要",
+            parent_session_id=source["id"],
+            ephemeral=True,
+        ),
+        request,
+    )
+    command_id: str | None = None
+    try:
+        before = await _handoff_messages(request, source_agent, fork)
+        known_assistant_ids = {
+            item.get("id")
+            for item in before
+            if item.get("role") == "assistant" and isinstance(item.get("id"), str)
+        }
+        command_id = f"handoff-summary-{uuid4().hex}"
+        await request.app.state.service.submit_browser_command(
+            {
+                "id": command_id,
+                "agent_id": source_agent["id"],
+                "session_id": fork["id"],
+                "action": "send",
+                "text": SUMMARY_PROMPT,
+                "attachment_ids": [],
+                "target_id": None,
+            }
+        )
+        await _wait_handoff_summary(
+            request, source_agent["id"], fork["id"], command_id, cancel_event
+        )
+        return await _wait_handoff_result(
+            request, source_agent, fork, known_assistant_ids, cancel_event
+        )
+    except ConnectionError:
+        if cancel_event.is_set() and command_id:
+            try:
+                await request.app.state.service.submit_browser_command(
+                    {
+                        "id": f"handoff-stop-{uuid4().hex}",
+                        "agent_id": source_agent["id"],
+                        "session_id": fork["id"],
+                        "action": "stop",
+                        "text": "",
+                        "attachment_ids": [],
+                        "target_id": fork["id"],
+                    }
+                )
+            except Exception:
+                logger.exception("Failed to stop cancelled handoff summary")
+        raise
+    finally:
+        try:
+            await asyncio.to_thread(
+                _delete_handoff_fork, request, source_agent["id"], fork["id"]
+            )
+        except Exception as exc:
+            raise ConnectionError("临时交接分叉删除失败。", 502) from exc
+
+
+@router.post("/api/v1/sessions/{session_id}/handoff")
+async def handoff_session(
+    session_id: str, payload: HandoffSessionPayload, request: Request
+) -> dict[str, object]:
+    _private(request)
+    store = request.app.state.store
+    source_agent = store.get_agent(payload.source_agent_id)
+    target_agent = store.get_agent(payload.target_agent_id)
+    source = store.get_session(payload.source_agent_id, session_id)
+    if source_agent is None or target_agent is None or source is None:
+        raise HTTPException(status_code=404, detail="源会话或目标 Agent 不存在。")
+    if (
+        source_agent["kind"] == target_agent["kind"]
+        or {source_agent["kind"], target_agent["kind"]} != {"codex", "hermes"}
+    ):
+        raise HTTPException(status_code=422, detail="转交仅支持 Codex 与 Hermes 之间进行。")
+    if source_agent.get("connection_id") is not None or target_agent.get("connection_id") is not None:
+        raise HTTPException(status_code=422, detail="当前仅支持同一台机器上的本地会话转交。")
+    if target_agent.get("status") != "ready":
+        raise HTTPException(status_code=409, detail="目标 Agent 当前未就绪。")
+    if bool(payload.provider) != bool(payload.model):
+        raise HTTPException(status_code=422, detail="目标模型的 provider 与 model 必须同时提供。")
+    bridge = request.app.state.daemon_bridge
+    if bridge is not None and source.get("control_state") == "owned":
+        try:
+            await bridge.refresh_status()
+        except DaemonBridgeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from None
+        source = store.get_session(payload.source_agent_id, session_id) or source
+    if source.get("status") != "idle":
+        raise HTTPException(status_code=409, detail="源会话仍在运行或等待审批，暂不能转交。")
+
+    try:
+        cancel_event = request.app.state.background_tasks.start(payload.operation_id)
+    except ValueError:
+        raise HTTPException(status_code=409, detail="转交任务 ID 已在使用。")
+    target = None
+    try:
+        summary = await _summarize_handoff(request, source_agent, source, cancel_event)
+        if cancel_event.is_set():
+            raise ConnectionError("转交已取消。", 409)
+        prompt = build_handoff_prompt(
+            source,
+            "Codex" if source_agent["kind"] == "codex" else "Hermes",
+            summary,
+        )
+        created = await asyncio.to_thread(
+            create_session,
+            CreateSessionPayload(
+                agent_id=payload.target_agent_id,
+                workspace=source.get("workspace"),
+                title=source.get("title") or "转交会话",
+                project_name=source.get("project_name"),
+                provider=payload.provider if target_agent["kind"] == "hermes" else None,
+                model=payload.model if target_agent["kind"] == "hermes" else None,
+                effort=payload.effort if target_agent["kind"] == "hermes" else None,
+            ),
+            request,
+        )
+        if cancel_event.is_set():
+            raise ConnectionError("转交已取消。", 409)
+        target = store.upsert_session(
+            {
+                **created,
+                "handoff_from_agent_id": payload.source_agent_id,
+                "handoff_from_session_id": session_id,
+            }
+        )
+        request.app.state.service._server_event(
+            "session.upsert",
+            agent_id=target["agent_id"],
+            session_id=target["id"],
+            data=target,
+        )
+        if payload.provider and payload.model and target_agent["kind"] != "hermes":
+            await asyncio.to_thread(
+                session_model,
+                target["id"],
+                SessionModelSelection(
+                    agent_id=target["agent_id"], provider=payload.provider, model=payload.model
+                ),
+                request,
+            )
+        if payload.effort and target_agent["kind"] != "hermes":
+            await asyncio.to_thread(
+                session_reasoning,
+                target["id"],
+                SessionReasoningSelection(agent_id=target["agent_id"], effort=payload.effort),
+                request,
+            )
+        if cancel_event.is_set():
+            raise ConnectionError("转交已取消。", 409)
+        store.set_session_handoff_context(target["agent_id"], target["id"], prompt)
+        context_message = store.upsert_message(
+            {
+                "id": HANDOFF_CONTEXT_MESSAGE_ID,
+                "agent_id": target["agent_id"],
+                "session_id": target["id"],
+                "role": "system",
+                "kind": "message",
+                "text": f"交接摘要\n\n{summary}",
+                "attachments": [],
+                "created_at": target["updated_at"],
+                "command_id": None,
+                "tool": {"handoff_context": True},
+            }
+        )
+        request.app.state.service._server_event(
+            "message.upsert",
+            agent_id=target["agent_id"],
+            session_id=target["id"],
+            data=context_message,
+        )
+        if target_agent["kind"] == "hermes":
+            if payload.provider and payload.model:
+                store.set_session_model_binding(
+                    target["agent_id"], target["id"], payload.provider, payload.model
+                )
+            if payload.effort:
+                store.set_session_reasoning_binding(
+                    target["agent_id"], target["id"], payload.effort
+                )
+        if cancel_event.is_set():
+            raise ConnectionError("转交已取消。", 409)
+        return store.get_session(target["agent_id"], target["id"]) or target
+    except Exception as exc:
+        if target is not None:
+            try:
+                await asyncio.to_thread(
+                    _delete_handoff_fork, request, target["agent_id"], target["id"]
+                )
+            except Exception as cleanup_exc:
+                raise HTTPException(
+                    status_code=502, detail="转交失败，且目标会话清理失败。"
+                ) from cleanup_exc
+        if isinstance(exc, (ConnectionError, CommandRejected)):
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
+        raise
+    finally:
+        request.app.state.background_tasks.finish(payload.operation_id, cancel_event)
+
+
+@router.post("/api/v1/background-tasks/{operation_id}/cancel")
+@router.post("/api/v1/handoffs/{operation_id}/cancel")
+async def cancel_handoff(operation_id: str, request: Request) -> dict[str, bool]:
+    _private(request)
+    return {"cancelled": request.app.state.background_tasks.cancel(operation_id)}
+
+
 class UpdateSessionPayload(BaseModel):
     agent_id: str = Field(min_length=1, max_length=256)
     title: str | None = Field(default=None, max_length=512)
@@ -299,11 +772,7 @@ def update_session(session_id: str, payload: UpdateSessionPayload, request: Requ
     if request.app.state.store.get_session(agent_id, session_id) is None:
         raise HTTPException(status_code=404, detail="Session was not found")
     try:
-        codex = _codex(request, agent_id)
-        if codex:
-            codex.mutate(session_id, updates)
-        else:
-            request.app.state.connections.mutate_session_for_agent(agent_id, session_id, updates)
+        _mutate_agent_session(request, agent_id, session_id, updates)
     except ConnectionError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
     updated = request.app.state.store.update_session(agent_id, session_id, updates)
@@ -324,17 +793,45 @@ def delete_session(session_id: str, agent_id: str = Query(..., min_length=1), re
     if request.app.state.store.get_session(agent_id, session_id) is None:
         raise HTTPException(status_code=404, detail="Session was not found")
     try:
-        codex = _codex(request, agent_id)
-        if codex:
-            codex.mutate(session_id, None)
-        else:
-            request.app.state.connections.mutate_session_for_agent(agent_id, session_id, None)
+        _mutate_agent_session(request, agent_id, session_id, None)
     except ConnectionError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
-    success = request.app.state.service.delete_session(agent_id, session_id)
-    if not success:
-        raise HTTPException(status_code=404, detail="Session was not found")
+    request.app.state.service.delete_session(agent_id, session_id)
     return {"ok": True, "id": session_id}
+
+
+class BatchDeleteSessionsPayload(BaseModel):
+    sessions: list[dict[str, str]]
+
+
+@router.post("/api/v1/sessions/batch-delete")
+def batch_delete_sessions_endpoint(
+    payload: BatchDeleteSessionsPayload,
+    request: Request = None,
+) -> dict[str, object]:
+    _private(request)
+    deleted: list[dict[str, str]] = []
+    failed: list[dict[str, str]] = []
+    for item in payload.sessions:
+        agent_id = str(item.get("agent_id") or "")
+        session_id = str(item.get("session_id") or item.get("id") or "")
+        if not agent_id or not session_id:
+            continue
+        if request.app.state.store.get_session(agent_id, session_id) is None:
+            continue
+        try:
+            _mutate_agent_session(request, agent_id, session_id, None)
+        except Exception:
+            pass
+        try:
+            success = request.app.state.service.delete_session(agent_id, session_id)
+            if success:
+                deleted.append({"agent_id": agent_id, "id": session_id})
+            else:
+                failed.append({"agent_id": agent_id, "id": session_id, "error": "删除未生效"})
+        except Exception as exc:
+            failed.append({"agent_id": agent_id, "id": session_id, "error": str(exc)})
+    return {"ok": True, "deleted": deleted, "failed": failed}
 
 
 class DeleteProjectPayload(BaseModel):
@@ -375,11 +872,7 @@ def delete_project_endpoint(
     if body.delete_sessions and session_tuples:
         for agent_id, session_id in session_tuples:
             try:
-                codex = _codex(request, agent_id)
-                if codex:
-                    codex.mutate(session_id, None)
-                else:
-                    request.app.state.connections.mutate_session_for_agent(agent_id, session_id, None)
+                _mutate_agent_session(request, agent_id, session_id, None)
             except Exception:
                 pass
 
@@ -403,15 +896,17 @@ async def messages(
     limit: int = Query(default=50, ge=1, le=200),
 ) -> dict[str, object]:
     _private(request)
-    if request.app.state.store.get_session(agent_id, session_id) is None:
-        raise HTTPException(status_code=404, detail="Session was not found")
     session = request.app.state.store.get_session(agent_id, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session was not found")
-    codex = _codex(request, agent_id)
-    if codex and (before is None or before.startswith('codex:') or not before.startswith('native:')):
+    runtime = _agent_runtime(request, agent_id)
+    reader = getattr(runtime, "messages", None)
+    if callable(reader) and (before is None or before.startswith('codex:') or not before.startswith('native:')):
         try:
-            page = await asyncio.to_thread(codex.messages, session_id, before, limit)
+            page = await asyncio.to_thread(reader, session_id, before, limit)
+            context = request.app.state.store.get_message(agent_id, session_id, HANDOFF_CONTEXT_MESSAGE_ID)
+            if before is None and context and all(item.get('id') != context['id'] for item in page.get('items', [])):
+                page['items'] = [context, *page.get('items', [])]
             if page.get('items') or not request.app.state.store.list_messages(agent_id, session_id, None, 1)[0]:
                 return page
         except ConnectionError as exc:
@@ -419,24 +914,32 @@ async def messages(
                 raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
     if before is None or before.startswith('native:'):
         def read_page():
-            runtime = request.app.state.connections.get_runtime_by_agent_id(agent_id)
             reader = getattr(runtime, 'load_native_history_page', None)
             return reader(session_id, before, limit) if callable(reader) else None
         try:
             page = await asyncio.to_thread(read_page)
             if page is not None:
-                from .native_sessions import project_history_messages
                 from .attachments import AttachmentManager
                 from .native_attachments import bind_hermes_refs, hermes_roots
+                from .native_sessions import project_history_messages
                 items = project_history_messages(page['items'], durable_session_id=session_id, native_session_id=session_id, source_id=session.get('source_id') or agent_id, agent_id=agent_id)
                 manager = AttachmentManager(request.app.state.settings, request.app.state.store)
                 roots = hermes_roots()
+                cached = {
+                    item['id']: item
+                    for item in request.app.state.store.get_messages(
+                        agent_id, session_id, [item['id'] for item in items]
+                    )
+                }
                 for item in items:
-                    cached = request.app.state.store.get_message(agent_id, session_id, item['id'])
-                    if cached and cached.get('attachments'):
-                        item['attachments'] = cached['attachments']
+                    previous = cached.get(item['id'])
+                    if previous and previous.get('attachments'):
+                        item['attachments'] = previous['attachments']
                     bind_hermes_refs(item, manager, roots)
-                    request.app.state.store.upsert_message(item)
+                request.app.state.store.upsert_messages(items)
+                context = request.app.state.store.get_message(agent_id, session_id, HANDOFF_CONTEXT_MESSAGE_ID)
+                if before is None and context and all(item.get('id') != context['id'] for item in items):
+                    items.insert(0, context)
                 # Import just this page, without broadcasting it as fresh live messages.
                 return {'items': items, 'next_cursor': page['next_cursor']}
         except ValueError:
@@ -467,13 +970,45 @@ def session_models(session_id: str, request: Request, agent_id: str = Query(...,
     if request.app.state.store.get_session(agent_id, session_id) is None:
         raise HTTPException(status_code=404, detail="Session was not found")
     try:
-        codex = _codex(request, agent_id)
-        if codex:
-            return {'items': codex.models(session_id)}
-        runtime = request.app.state.connections.get_runtime_by_agent_id(agent_id)
+        runtime = _agent_runtime(request, agent_id)
+        models = getattr(runtime, "models", None)
+        if callable(models):
+            return {"items": models(session_id)}
         if getattr(runtime, "daemon_owned", False):
-            return {"items": runtime.models(session_id)}
+            raise ConnectionError("会话所属运行时未提供模型目录。", 503)
         return {"items": model_choices(runtime_rpc(request.app.state.connections, agent_id))}
+    except ConnectionError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
+
+
+@router.get("/api/v1/sessions/{session_id}/agent-commands")
+def session_agent_commands(
+    session_id: str, request: Request, agent_id: str = Query(..., min_length=1)
+) -> dict[str, object]:
+    _private(request)
+    if request.app.state.store.get_session(agent_id, session_id) is None:
+        raise HTTPException(status_code=404, detail="Session was not found")
+    try:
+        runtime = _agent_runtime(request, agent_id)
+        commands = getattr(runtime, "commands", None)
+        if not callable(commands):
+            raise ConnectionError("当前 Agent 未提供原生命令目录。", 503)
+        return {"items": commands(session_id)}
+    except ConnectionError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
+
+
+@router.get("/api/v1/sessions/{session_id}/agent-mentions")
+def session_agent_mentions(
+    session_id: str, request: Request, agent_id: str = Query(..., min_length=1)
+) -> dict[str, object]:
+    _private(request)
+    if request.app.state.store.get_session(agent_id, session_id) is None:
+        raise HTTPException(status_code=404, detail="Session was not found")
+    try:
+        runtime = _agent_runtime(request, agent_id)
+        mentions = getattr(runtime, "mentions", None)
+        return {"items": mentions(session_id) if callable(mentions) else []}
     except ConnectionError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
 
@@ -486,15 +1021,16 @@ def session_model(session_id: str, payload: SessionModelSelection, request: Requ
     if session is None:
         raise HTTPException(status_code=404, detail="Session was not found")
     try:
-        codex = _codex(request, payload.agent_id)
-        if codex:
-            return codex.set_model(session_id, payload.provider, payload.model)
-        runtime = request.app.state.connections.get_runtime_by_agent_id(payload.agent_id)
-        if getattr(runtime, "daemon_owned", False):
-            binding = runtime.set_model(session_id, payload.provider, payload.model)
+        runtime = _agent_runtime(request, payload.agent_id)
+        set_model = getattr(runtime, "set_model", None)
+        if callable(set_model):
+            binding = set_model(session_id, payload.provider, payload.model)
+        elif getattr(runtime, "daemon_owned", False):
+            raise ConnectionError("会话所属运行时不支持模型切换。", 503)
         else:
             binding = set_session_model(runtime_rpc(request.app.state.connections, payload.agent_id), session_id, payload.provider, payload.model)
-        if request.app.state.store.get_agent(payload.agent_id).get("kind") == "hermes":
+        agent = request.app.state.store.get_agent(payload.agent_id)
+        if agent and request.app.state.service.preserves_model_binding(agent["kind"]):
             if binding.get("provider") != payload.provider or binding.get("model") != payload.model:
                 raise ConnectionError('模型切换尚未通过原生状态读回确认。', 502)
             request.app.state.store.set_session_model_binding(
@@ -512,20 +1048,22 @@ def read_session_model(session_id: str, request: Request, agent_id: str = Query(
     if request.app.state.store.get_session(agent_id, session_id) is None:
         raise HTTPException(status_code=404, detail="Session was not found")
     try:
-        codex = _codex(request, agent_id)
-        if codex:
-            binding = dict(codex.model(session_id))
+        saved = request.app.state.store.get_session_model_binding(agent_id, session_id)
+        agent = request.app.state.store.get_agent(agent_id)
+        if saved and agent and request.app.state.service.preserves_model_binding(agent["kind"]):
+            return {**saved, 'effort': saved.get('effort')}
+        runtime = _agent_runtime(request, agent_id)
+        model = getattr(runtime, "model", None)
+        if callable(model):
+            binding = dict(model(session_id))
             try:
-                binding['effort'] = codex.current_effort(session_id)
+                current_effort = getattr(runtime, "current_effort", None)
+                binding['effort'] = current_effort(session_id) if callable(current_effort) else binding.get('effort')
             except ConnectionError:
                 binding['effort'] = None
             return binding
-        saved = request.app.state.store.get_session_model_binding(agent_id, session_id)
-        if saved:
-            return {**saved, 'effort': saved.get('effort')}
-        runtime = request.app.state.connections.get_runtime_by_agent_id(agent_id)
         if getattr(runtime, "daemon_owned", False):
-            return runtime.model(session_id)
+            raise ConnectionError("会话所属运行时未提供模型状态。", 503)
         rpc = runtime_rpc(request.app.state.connections, agent_id)
         binding = current_session_model(rpc, session_id)
         from .native_controls import current_session_reasoning
@@ -552,15 +1090,16 @@ def session_reasoning(session_id: str, payload: SessionReasoningSelection, reque
     if request.app.state.store.get_session(payload.agent_id, session_id) is None:
         raise HTTPException(status_code=404, detail="Session was not found")
     try:
-        codex = _codex(request, payload.agent_id)
-        if codex:
-            return codex.set_effort(session_id, payload.effort)
-        runtime = request.app.state.connections.get_runtime_by_agent_id(payload.agent_id)
-        if getattr(runtime, "daemon_owned", False):
-            result = runtime.set_effort(session_id, payload.effort)
+        runtime = _agent_runtime(request, payload.agent_id)
+        set_effort = getattr(runtime, "set_effort", None)
+        if callable(set_effort):
+            result = set_effort(session_id, payload.effort)
+        elif getattr(runtime, "daemon_owned", False):
+            raise ConnectionError("会话所属运行时不支持思考强度设置。", 503)
         else:
             result = set_session_reasoning(runtime_rpc(request.app.state.connections, payload.agent_id), session_id, payload.effort)
-        if request.app.state.store.get_agent(payload.agent_id).get("kind") == "hermes":
+        agent = request.app.state.store.get_agent(payload.agent_id)
+        if agent and request.app.state.service.preserves_model_binding(agent["kind"]):
             if result.get("effort") != payload.effort:
                 raise ConnectionError('思考强度尚未通过原生状态读回确认。', 502)
             request.app.state.store.set_session_reasoning_binding(
@@ -576,16 +1115,34 @@ def session_approval_mode(session_id: str, request: Request, agent_id: str = Que
     _private(request)
     if request.app.state.store.get_session(agent_id, session_id) is None:
         raise HTTPException(status_code=404, detail="Session was not found")
+    saved = request.app.state.store.get_session_approval_mode_binding(agent_id, session_id)
     try:
-        codex = _codex(request, agent_id)
-        if codex:
-            return {"mode": codex.get_approval_mode(session_id)}
-        runtime = request.app.state.connections.get_runtime_by_agent_id(agent_id)
+        runtime = _agent_runtime(request, agent_id)
+        get_mode = getattr(runtime, "get_approval_mode", None)
+        if callable(get_mode):
+            mode = get_mode(session_id)
+            if saved is not None and mode != saved:
+                set_mode = getattr(runtime, "set_approval_mode", None)
+                if callable(set_mode):
+                    with suppress(Exception):
+                        set_mode(session_id, saved)
+                        mode = saved
+            return {"mode": mode}
         if getattr(runtime, "daemon_owned", False):
-            return {"mode": runtime.get_approval_mode(session_id)}
+            if saved is not None:
+                return {"mode": saved}
+            raise ConnectionError("会话所属运行时不支持审批模式读取。", 503)
         from .native_controls import current_session_approval_mode, runtime_rpc
-        return {"mode": current_session_approval_mode(runtime_rpc(request.app.state.connections, agent_id), session_id)}
+        mode = current_session_approval_mode(runtime_rpc(request.app.state.connections, agent_id), session_id)
+        if saved is not None and mode != saved:
+            from .native_controls import set_session_approval_mode
+            with suppress(Exception):
+                set_session_approval_mode(runtime_rpc(request.app.state.connections, agent_id), session_id, saved)
+                mode = saved
+        return {"mode": mode}
     except ConnectionError as exc:
+        if saved is not None:
+            return {"mode": saved}
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
 
 
@@ -595,14 +1152,18 @@ def session_approval_mode_select(session_id: str, payload: SessionApprovalModeSe
     if request.app.state.store.get_session(payload.agent_id, session_id) is None:
         raise HTTPException(status_code=404, detail="Session was not found")
     try:
-        codex = _codex(request, payload.agent_id)
-        if codex:
-            return codex.set_approval_mode(session_id, payload.mode)
-        runtime = request.app.state.connections.get_runtime_by_agent_id(payload.agent_id)
+        runtime = _agent_runtime(request, payload.agent_id)
+        set_mode = getattr(runtime, "set_approval_mode", None)
+        if callable(set_mode):
+            result = set_mode(session_id, payload.mode)
+            request.app.state.store.set_session_approval_mode_binding(payload.agent_id, session_id, payload.mode)
+            return result
         if getattr(runtime, "daemon_owned", False):
-            return runtime.set_approval_mode(session_id, payload.mode)
+            raise ConnectionError("会话所属运行时不支持审批模式设置。", 503)
         from .native_controls import runtime_rpc, set_session_approval_mode
-        return set_session_approval_mode(runtime_rpc(request.app.state.connections, payload.agent_id), session_id, payload.mode)
+        result = set_session_approval_mode(runtime_rpc(request.app.state.connections, payload.agent_id), session_id, payload.mode)
+        request.app.state.store.set_session_approval_mode_binding(payload.agent_id, session_id, payload.mode)
+        return result
     except ConnectionError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
 
@@ -1006,41 +1567,53 @@ def _run_git(args: list[str], cwd: str, connection_id: str | None = None, app_st
     """在本地或远程 SSH 环境中执行 git 命令"""
     import subprocess, shutil, shlex
     if connection_id and connection_id != "local" and app_state:
-        controller = getattr(app_state, "environments", None) or getattr(app_state, "connections", None)
-        conn = None
-        if controller:
-            all_conns = controller.snapshot().get("connections", [])
-            for c in all_conns:
-                if str(c.get("id")) == str(connection_id):
-                    conn = c
-                    break
-        if conn and conn.get("kind") == "ssh":
-            host = conn.get("host") or "127.0.0.1"
-            port = int(conn.get("port") or 22)
-            user = conn.get("user") or "root"
-            from .ssh_transport import _resolve_best_ssh_executable
-            ssh_bin = _resolve_best_ssh_executable() or "ssh"
+        ssh_conn = None
+        store = getattr(app_state, "store", None)
+        if store:
+            try:
+                ssh_conn = store.get_ssh_connection(connection_id)
+            except Exception:
+                pass
+        if not ssh_conn:
+            controller = getattr(app_state, "environments", None) or getattr(app_state, "connections", None)
+            if controller:
+                for item in getattr(store, "list_ssh_connections", lambda: [])():
+                    if str(item.get("id")) == str(connection_id):
+                        ssh_conn = item
+                        break
+        if ssh_conn:
+            from .ssh_transport import SshNativeRuntime
+            settings = ssh_conn.get("settings") or ssh_conn
+            runtime = SshNativeRuntime(
+                settings,
+                str(ssh_conn.get("id") or connection_id),
+                0,
+                None,
+                None,
+                connector_secret=None,
+            )
             inner_cmd = f"cd {shlex.quote(cwd)} && git " + " ".join(shlex.quote(a) for a in args)
-            cmd = [
-                ssh_bin,
+            argv = [a for a in runtime._base_ssh_argv() if a != "-T"] + [
                 "-o", "BatchMode=yes",
                 "-o", "StrictHostKeyChecking=accept-new",
-                "-p", str(port),
-                "-l", user,
-                host,
+                runtime._target(),
                 inner_cmd,
             ]
             from .connections import _windows_hide_flags, _windows_hide_startupinfo
-            proc = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                creationflags=_windows_hide_flags(),
-                startupinfo=_windows_hide_startupinfo(),
-            )
-            return proc.returncode, proc.stdout, proc.stderr
+            try:
+                proc = subprocess.run(
+                    argv,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    creationflags=_windows_hide_flags(),
+                    startupinfo=_windows_hide_startupinfo(),
+                    timeout=30,
+                )
+                return proc.returncode, proc.stdout, proc.stderr
+            except Exception as e:
+                return 1, "", str(e)
 
     # 本地执行
     git_bin = shutil.which("git") or "git"
@@ -1059,7 +1632,7 @@ def _run_git(args: list[str], cwd: str, connection_id: str | None = None, app_st
 
 
 @router.get("/api/v1/git/status")
-async def get_git_status(request: Request, workspace: str | None = None, session_id: str | None = None, connection_id: str | None = None) -> dict[str, object]:
+def get_git_status(request: Request, workspace: str | None = None, session_id: str | None = None, connection_id: str | None = None) -> dict[str, object]:
     _private(request)
     import os, re
     cwd = workspace or os.getcwd()
@@ -1173,7 +1746,9 @@ async def switch_or_create_branch(request: Request) -> dict[str, object]:
             pass
 
     args = ["checkout", "-b", branch_name] if create_new else ["checkout", branch_name]
-    rc, stdout, stderr = _run_git(args, cwd=workspace, connection_id=cid, app_state=request.app.state)
+    rc, stdout, stderr = await asyncio.to_thread(
+        _run_git, args, cwd=workspace, connection_id=cid, app_state=request.app.state
+    )
     if rc != 0:
         detail = stderr.strip() or stdout.strip() or f"Git checkout exited with code {rc}"
         raise HTTPException(status_code=400, detail=detail)
@@ -1182,7 +1757,7 @@ async def switch_or_create_branch(request: Request) -> dict[str, object]:
 
 
 @router.get("/api/v1/git/diff-raw")
-async def get_git_diff_raw(request: Request, path: str | None = None, workspace: str | None = None, session_id: str | None = None, connection_id: str | None = None) -> Response:
+def get_git_diff_raw(request: Request, path: str | None = None, workspace: str | None = None, session_id: str | None = None, connection_id: str | None = None) -> Response:
     _private(request)
     import os
     from fastapi.responses import Response

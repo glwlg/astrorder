@@ -1,0 +1,40 @@
+.astr-glare-card {
+  position: relative;
+  overflow: hidden;
+  display: block;
+}
+
+.astr-glare-sheen {
+  content: '';
+  position: absolute;
+  top: -120%;
+  left: -120%;
+  width: 250%;
+  height: 250%;
+  background: linear-gradient(
+    115deg,
+    transparent 0%,
+    transparent 42%,
+    var(--glare-color, #ffffff) 48%,
+    var(--glare-color, #ffffff) 52%,
+    transparent 58%,
+    transparent 100%
+  );
+  opacity: 0;
+  pointer-events: none;
+  z-index: 5;
+  transform: rotate(25deg);
+  transition: opacity 0.15s ease, transform 0.65s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.astr-glare-card:hover .astr-glare-sheen {
+  opacity: var(--glare-opacity, 0.08);
+  transform: translate(80%, 80%) rotate(25deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .astr-glare-sheen {
+    display: none;
+  }
+}
+

@@ -14,6 +14,7 @@ dependencies = [
     "websockets",
     "astrorder-codex-connector",
     "pywinpty>=3.0.5",
+    "pywin32>=311; sys_platform == 'win32'",
 ]
 
 [tool.uv.sources]
@@ -21,6 +22,7 @@ astrorder-codex-connector = { path = "../connectors/codex", editable = true }
 
 [project.scripts]
 astrorder-server = "astrorder.__main__:main"
+astrorder-agent = "astrorder.agent_cli:main"
 
 [project.optional-dependencies]
 dev = ["pytest", "pytest-asyncio", "ruff"]

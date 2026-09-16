@@ -15,6 +15,7 @@ async def test_daemon_owned_hermes_controller_routes_exact_sessions_without_stor
             self.connect_calls = 0
             self.shutdown_calls = 0
             self.commands: list[dict[str, object]] = []
+            self.creates: list[dict[str, object]] = []
 
         def connect(self):
             self.connect_calls += 1
@@ -23,7 +24,8 @@ async def test_daemon_owned_hermes_controller_routes_exact_sessions_without_stor
         def snapshot(self):
             return {"state": "connected", "agent_id": "daemon-hermes", "detail": "ready"}
 
-        def create_session(self, workspace=None, title=None):
+        def create_session(self, workspace=None, title=None, **options):
+            self.creates.append({"workspace": workspace, "title": title, **options})
             return {
                 "id": "hermes-created-session",
                 "workspace": workspace,
@@ -65,6 +67,9 @@ async def test_daemon_owned_hermes_controller_routes_exact_sessions_without_stor
             "agent_type": "hermes",
             "cwd": "C:/allowed",
             "title": "Daemon Hermes session",
+            "provider": "ocx",
+            "model": "google-antigravity/gemini-3.8-flash",
+            "effort": "high",
         }
     )
     interrupted = await daemon._dispatch_runtime_action(
@@ -81,6 +86,15 @@ async def test_daemon_owned_hermes_controller_routes_exact_sessions_without_stor
     }
     assert interrupted["result"] == {"status": "running", "accepted": True}
     assert controller.connect_calls == 1
+    assert controller.creates == [
+        {
+            "workspace": "C:/allowed",
+            "title": "Daemon Hermes session",
+            "provider": "ocx",
+            "model": "google-antigravity/gemini-3.8-flash",
+            "effort": "high",
+        }
+    ]
     assert controller.commands == [
         {
             "action": "send",
@@ -351,3 +365,38 @@ def test_local_hermes_gateway_ready_does_not_create_or_prompt_a_smoke_session(tm
     assert controller.snapshot()["state"] == "connected"
     assert discoveries == [{"sessions": []}]
     assert rpc_calls == []
+
+@pytest.mark.asyncio
+async def test_daemon_owned_hermes_create_branches_parent_session():
+    class BranchingController:
+        def __init__(self):
+            self.calls = []
+
+        def connect(self):
+            return {"state": "connected"}
+
+        def snapshot(self):
+            return {"state": "connected", "agent_id": "daemon-hermes"}
+
+        def branch_session(self, parent_session_id, title=None):
+            self.calls.append((parent_session_id, title))
+            return {"id": "hermes-summary-fork", "status": "idle"}
+
+        def shutdown(self):
+            pass
+
+    controller = BranchingController()
+    daemon = SessionDaemon(secret="test-only-daemon-secret")
+    daemon.register_runtime("hermes", HermesDaemonRuntime(lambda: controller))
+
+    created = await daemon._create_runtime(
+        {
+            "action": "session.create",
+            "agent_type": "hermes",
+            "parent_session_id": "hermes-source",
+            "title": "转交摘要",
+        }
+    )
+
+    assert created["result"]["session_id"] == "hermes-summary-fork"
+    assert controller.calls == [("hermes-source", "转交摘要")]

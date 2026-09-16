@@ -17,6 +17,7 @@ import {
 } from '@tabler/icons-react'
 import type { Session } from '../../domain/types'
 import { useSidecarStore } from '../sidecar/sidecarStore'
+import { CountUp } from '../../components/animations/CountUp'
 
 interface GitStatusBarProps {
   session: Session
@@ -269,7 +270,7 @@ export function GitStatusBar({ session }: GitStatusBarProps) {
             {changedFiles > 0 ? (
               <>
                 <span style={{ fontSize: '11px', color: 'var(--astr-muted)' }}>
-                  {changedFiles} 个文件变更
+                  <CountUp to={changedFiles} duration={0.5} /> 个文件变更
                 </span>
                 <span
                   style={{
@@ -279,7 +280,7 @@ export function GitStatusBar({ session }: GitStatusBarProps) {
                     fontSize: '12px',
                   }}
                 >
-                  +{insertions}
+                  +<CountUp to={insertions} duration={0.6} />
                 </span>
                 <span
                   style={{
@@ -289,7 +290,7 @@ export function GitStatusBar({ session }: GitStatusBarProps) {
                     fontSize: '12px',
                   }}
                 >
-                  -{deletions}
+                  -<CountUp to={deletions} duration={0.6} />
                 </span>
               </>
             ) : (

@@ -1,23 +1,24 @@
 import {
   IconFolder,
   IconInfoCircle,
-  IconLayoutSidebarRightCollapse,
   IconLayoutSidebarRightExpand,
   IconSparkles,
+  IconTransfer,
   IconX,
 } from '@tabler/icons-react'
-import { ActionIcon, Button, Drawer, Group, Paper, Title, Tooltip } from '@mantine/core'
+import { ActionIcon, Button, Drawer, Group, Title, Tooltip } from '@mantine/core'
 import { useDisclosure, useMediaQuery } from '@mantine/hooks'
 import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useShallow } from 'zustand/react/shallow'
-import { useParams, useSearchParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ApiError, api } from '../../api/client'
 import { newCommandId, scopeKey } from '../../domain/semantics'
 import type { Approval, Command, Session, Task } from '../../domain/types'
 import { EmptyState } from '../../components/EmptyState'
 import { SessionStatusLabel } from '../../components/Status'
+import { WelcomeView } from './WelcomeView'
 import { sessionActivityStatus } from '../../components/sessionRailModel'
 import { AgentKindBadge } from '../../components/SessionRuntimeFacts'
 import { selectApprovals, selectCommands, selectOutbox, selectSessions, selectTasks, useAstrorderStore } from '../../state/store'
@@ -31,6 +32,7 @@ import { TaskDetails } from './TaskDetails'
 import { Transcript } from './Transcript'
 import { SidecarHost } from '../sidecar/SidecarHost'
 import { useSidecarStore } from '../sidecar/sidecarStore'
+import { BlurText } from '../../components/animations/BlurText'
 import { ErrorBoundary } from '../../components/ErrorBoundary'
 
 
@@ -57,12 +59,28 @@ export function ChatPage() {
   const { sessionId } = useParams()
   const [searchParams] = useSearchParams()
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
   const sessions = useAstrorderStore(useShallow(selectSessions))
   const agents = useAstrorderStore((state) => state.agents)
   const selected = useMemo(
     () => resolveSession(sessions, sessionId ? decodeURIComponent(sessionId) : undefined, searchParams.get('agent_id')),
     [searchParams, sessionId, sessions],
   )
+  const handoffPeer = useMemo(() => {
+    if (!selected) return null
+    if (selected.handoff_from_agent_id && selected.handoff_from_session_id) {
+      const source = sessions.find((session) =>
+        session.agent_id === selected.handoff_from_agent_id
+        && session.id === selected.handoff_from_session_id,
+      )
+      return source ? { session: source, label: `来自 ${agents[source.agent_id]?.kind === 'codex' ? 'Codex' : 'Hermes'}` } : null
+    }
+    const target = sessions.find((session) =>
+      session.handoff_from_agent_id === selected.agent_id
+      && session.handoff_from_session_id === selected.id,
+    )
+    return target ? { session: target, label: `已转交至 ${agents[target.agent_id]?.kind === 'codex' ? 'Codex' : 'Hermes'}` } : null
+  }, [agents, selected, sessions])
   const [detailsOpened, { open: openDetails, close: closeDetails }] = useDisclosure(false)
   const [detailsPinned, setDetailsPinned] = useState(false)
   const layoutRef = useRef<HTMLDivElement>(null)
@@ -204,7 +222,18 @@ export function ChatPage() {
   }, [selected])
   const [taskDetailsOpened, { open: openTaskDetails, close: closeTaskDetails }] = useDisclosure(false)
   const [taskSelection, setTaskSelection] = useState<Pick<Task, 'id' | 'agent_id' | 'session_id'> | null>(null)
-  const [previewImage, setPreviewImage] = useState<string | null>(null)
+  const [gallery, setGallery] = useState<{ images: string[]; index: number } | null>(null)
+  const openGallery = (images: string[], index: number) => {
+    const desktop = (window as unknown as { astrorderDesktop?: { openPreview?: (payload: { images: string[]; index: number }) => Promise<void> } }).astrorderDesktop
+    if (desktop?.openPreview) {
+      const abs = images.map((src) => {
+        try { return new URL(src, window.location.origin).href } catch { return src }
+      })
+      void desktop.openPreview({ images: abs, index })
+      return
+    }
+    setGallery({ images, index })
+  }
   const [quickOpenOpened, setQuickOpenOpened] = useState(false)
   const [composerHeight, setComposerHeight] = useState<number>(124)
   const mobileTaskSheet = useMediaQuery('(max-width: 767px)')
@@ -289,7 +318,7 @@ export function ChatPage() {
   if (!selected) {
     return (
       <div className="route-page chat-page">
-        <EmptyState icon={<IconInfoCircle />} title="请选择一个会话" description="左侧会话列表为空或存在同名 ID 的不同 Agent，请从明确的 Agent 路由进入。" />
+        <WelcomeView sessions={sessions} agents={agents} />
       </div>
     )
   }
@@ -307,45 +336,49 @@ export function ChatPage() {
         }}
       >
         <section className="chat-column">
-          <Paper className="chat-heading" withBorder radius="lg" p="md">
+          <div className="chat-heading">
             <Group justify="space-between" align="center" wrap="nowrap">
               <div className="chat-title-block">
                 <Group gap={8} wrap="nowrap" align="center">
                   <IconFolder size={17} className="chat-title-icon" />
-                  <Title order={2} size="h4" className="chat-title-text">{selected.title || '未命名会话'}</Title>
+                  <Title order={2} size="h4" className="chat-title-text">
+                    <BlurText text={selected.title || '未命名会话'} />
+                  </Title>
                 </Group>
+                {handoffPeer && <Button
+                  variant="subtle"
+                  size="compact-xs"
+                  leftSection={<IconTransfer size={13} />}
+                  onClick={() => navigate(`/chat/${encodeURIComponent(handoffPeer.session.id)}?agent_id=${encodeURIComponent(handoffPeer.session.agent_id)}`)}
+                >
+                  {handoffPeer.label}
+                </Button>}
               </div>
-              <Group gap="xs" wrap="nowrap">
+              <Group gap="xs" wrap="nowrap" className="chat-heading-actions">
                 <AgentKindBadge agent={agent} />
                 <SessionStatusLabel status={sessionActivityStatus(selected, commands)} />
                 {!!approvals.length && <Button size="compact-sm" color="yellow" variant="light" onClick={openDetails}>等待授权 · {approvals.length}</Button>}
-                <ActionIcon className="chat-details-button" variant="subtle" onClick={openDetails} aria-label="打开会话详情" title="会话详情">
-                  <IconInfoCircle size={18} />
-                </ActionIcon>
-                <Tooltip label={showRightPanel ? '收起工作台侧边栏' : '展开工作台侧边栏'}>
-                  <ActionIcon
-                    variant="subtle"
-                    color={showRightPanel ? 'blue' : 'gray'}
-                    onClick={() => {
-                      if (showRightPanel) {
-                        setSidecarOpen(false)
-                        setDetailsPinned(false)
-                      } else {
-                        setSidecarOpen(true)
-                      }
-                    }}
-                    aria-label={showRightPanel ? '收起工作台侧边栏' : '展开工作台侧边栏'}
-                  >
-                    {showRightPanel ? (
-                      <IconLayoutSidebarRightCollapse size={18} />
-                    ) : (
-                      <IconLayoutSidebarRightExpand size={18} />
-                    )}
+                <Tooltip label="会话详情" position="bottom">
+                  <ActionIcon className="chat-details-button" variant="subtle" size="sm" onClick={openDetails} aria-label="打开会话详情">
+                    <IconInfoCircle size={16} />
                   </ActionIcon>
                 </Tooltip>
+                {!showRightPanel && (
+                  <Tooltip label="展开工作台侧边栏" position="bottom-end">
+                    <ActionIcon
+                      variant="subtle"
+                      size="sm"
+                      color="gray"
+                      onClick={() => setSidecarOpen(true)}
+                      aria-label="展开工作台侧边栏"
+                    >
+                      <IconLayoutSidebarRightExpand size={16} />
+                    </ActionIcon>
+                  </Tooltip>
+                )}
               </Group>
             </Group>
-          </Paper>
+          </div>
           <SessionRuntimeBar key={scopeKey(selected.agent_id, selected.id)} commands={commands} tasks={tasks} onTaskOpen={(task) => { setTaskSelection({ id: task.id, agent_id: task.agent_id, session_id: task.session_id }); openTaskDetails() }} />
           <Transcript
             key={`transcript:${scopeKey(selected.agent_id, selected.id)}`}
@@ -360,41 +393,47 @@ export function ChatPage() {
             hasMoreHistory={Boolean(resources.messages.hasNextPage)}
             loadingOlder={resources.messages.isFetchingNextPage}
             onLoadOlder={() => resources.messages.fetchNextPage()}
-            onImageClick={(url) => setPreviewImage(url)}
-            error={resourceError ? errorText(resourceError) : undefined}
-            onRetry={() => {
-              void resources.messages.refetch()
-              void resources.commands.refetch()
+            onImageClick={(url) => openGallery([url], 0)}
+            onGalleryClick={(url, allImages) => {
+              const idx = allImages.indexOf(url)
+              openGallery(allImages, idx >= 0 ? idx : 0)
             }}
-          />
+            error={resourceError ? errorText(resourceError) : undefined}
+           onRetry={() => {
+             void resources.messages.refetch()
+             void resources.commands.refetch()
+           }}
+            onEditLastUserMessage={(text) => {
+              useAstrorderStore.getState().setDraft(selected.agent_id, selected.id, { text, attachments: [] })
+              const el = document.querySelector<HTMLTextAreaElement>('.composer-input textarea')
+              if (el) {
+                el.focus()
+                el.setSelectionRange(el.value.length, el.value.length)
+              }
+            }}
+         />
           <ChatComposer
             key={`composer:${scopeKey(selected.agent_id, selected.id)}`}
             session={selected}
             agent={agent}
             onHeightChange={setComposerHeight}
+            onPreviewImage={openGallery}
           />
         </section>
-        {showRightPanel && (
-          <aside className="desktop-details" style={{ position: 'relative', width: '100%', padding: 0 }}>
+        <aside
+          className="desktop-details"
+          style={{ position: 'relative', width: '100%', padding: 0, display: showRightPanel ? 'block' : 'none' }}
+        >
             {/* 左右分界自由拖拽条 */}
             <div
               className="sidecar-resizer"
+              data-resizing={isResizing}
               onMouseDown={(e) => {
                 e.preventDefault()
                 setIsResizing(true)
               }}
-              style={{
-                position: 'absolute',
-                top: 0,
-                bottom: 0,
-                left: -6,
-                width: 12,
-                cursor: 'col-resize',
-                zIndex: 50,
-                background: isResizing ? 'var(--astr-indigo)' : 'transparent',
-                transition: 'background 0.15s ease',
-              }}
-              title="拖动调整对话与侧边栏宽度比例"
+              onDoubleClick={() => setSidecarWidth(50)}
+              title="拖动调整对话与侧边栏宽度比例，双击复位为 50%"
             />
             {/* 拖拽过程中覆盖遮罩，防止 iframe（如 drawio/html）吃掉鼠标 mousemove 事件 */}
             {isResizing && (
@@ -410,7 +449,7 @@ export function ChatPage() {
                 }}
               />
             )}
-            {sidecarOpen ? (
+            <div style={{ display: sidecarOpen ? 'block' : 'none', height: '100%' }}>
               <ErrorBoundary fallbackTitle="侧边栏加载异常">
                 <SidecarHost
                   session={selected}
@@ -422,39 +461,70 @@ export function ChatPage() {
                   onCloseSidecar={() => setSidecarOpen(false)}
                 />
               </ErrorBoundary>
-            ) : (
+            </div>
+            {!sidecarOpen && detailsPinned && (
               <div style={{ padding: '16px 0 0 18px' }}>
                 <Button variant="subtle" size="compact-sm" onClick={() => setDetailsPinned(false)}>收起详情侧栏</Button>
                 <SessionDetails session={selected} agent={agent} commands={commands} messages={messages} approvals={approvals} onApproval={(approval, action) => void handleApproval(approval, action)} />
               </div>
             )}
           </aside>
-        )}
       </div>
       <DrawerDetails opened={detailsOpened} onClose={closeDetails} onPin={() => { setDetailsPinned(true); closeDetails() }} session={selected} agent={agent} commands={commands} messages={messages} approvals={approvals} onApproval={(approval, action) => void handleApproval(approval, action)} />
       <Drawer opened={taskDetailsOpened && selectedTask !== null} onClose={() => { closeTaskDetails(); setTaskSelection(null) }} title="任务详情" position={mobileTaskSheet ? 'bottom' : 'right'} size={mobileTaskSheet ? 'min(88vh, 620px)' : 'min(92vw, 520px)'}>
         {selectedTask && <TaskDetails task={selectedTask} canStop={Boolean(agent?.capabilities.includes('stop') && selectedTask.target_id && ['pending', 'running', 'waiting_approval'].includes(selectedTask.status))} onStop={(task) => void handleStopTask(task)} onJumpToLatest={() => window.scrollTo({ top: document.body.scrollHeight, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })} onClose={() => { closeTaskDetails(); setTaskSelection(null) }} />}
       </Drawer>
-      {previewImage &&
+      {gallery && gallery.images.length > 0 &&
         typeof document !== 'undefined' &&
         createPortal(
           <div
             className="desktop-lightbox"
             role="dialog"
             aria-label="图片预览"
-            onClick={() => setPreviewImage(null)}
+            onClick={() => setGallery(null)}
           >
             <button
               type="button"
               className="desktop-lightbox-close"
               aria-label="关闭图片"
-              onClick={() => setPreviewImage(null)}
+              onClick={() => setGallery(null)}
             >
               <IconX size={24} />
             </button>
+            {gallery.images.length > 1 && (
+              <>
+                <button
+                  type="button"
+                  className="desktop-lightbox-nav prev"
+                  aria-label="上一张图片"
+                  disabled={gallery.index <= 0}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setGallery(g => g ? { ...g, index: Math.max(0, g.index - 1) } : null)
+                  }}
+                >
+                  ‹
+                </button>
+                <button
+                  type="button"
+                  className="desktop-lightbox-nav next"
+                  aria-label="下一张图片"
+                  disabled={gallery.index >= gallery.images.length - 1}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setGallery(g => g ? { ...g, index: Math.min(g.images.length - 1, g.index + 1) } : null)
+                  }}
+                >
+                  ›
+                </button>
+                <div className="desktop-lightbox-counter" onClick={(e) => e.stopPropagation()}>
+                  {gallery.index + 1} / {gallery.images.length}
+                </div>
+              </>
+            )}
             <img
               className="desktop-lightbox-image"
-              src={previewImage}
+              src={gallery.images[gallery.index]}
               alt="放大预览"
               onClick={(e) => e.stopPropagation()}
             />

@@ -11,7 +11,7 @@ export function MobileSessionDeck({ sessionKey, cut, drag, children }: { session
   const leave = sessionCardPose(active, 'leave')
   const enter = sessionCardPose(active, 'enter')
   return (
-    <div className="m-session-deck">
+    <div className="m-session-deck" data-session-key={sessionKey}>
       <AnimatePresence initial={false}>
         <motion.div
           key={sessionKey}

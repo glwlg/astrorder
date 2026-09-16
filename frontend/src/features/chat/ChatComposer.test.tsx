@@ -18,7 +18,7 @@ vi.mock('../mobile/mobileOutboxStorage', () => ({
 const session: Session = { id: 'native-one', agent_id: 'hermes', title: 'one', workspace: null, status: 'idle', updated_at: '2026-01-01T00:00:00Z' }
 const agent: Agent = { id: 'hermes', name: 'Hermes', kind: 'hermes', status: 'ready', capabilities: ['chat', 'stop', 'attachments'], limitation: null }
 afterEach(() => { cleanup(); vi.restoreAllMocks(); queueMemory.rows = []; useAstrorderStore.getState().resetRuntime() })
-it('embeds the model picker and swaps the primary send button for native stop until completion', async () => {
+it('embeds the model picker and follows the native session status for stop', async () => {
   useAstrorderStore.getState().resetRuntime()
   vi.spyOn(api, 'getSessionModel').mockResolvedValue({ model: 'native-model', provider: 'provider' })
   const create = vi.spyOn(api, 'createCommand').mockImplementation(async input => ({ ...input, state: input.action === 'stop' ? 'completed' : 'running', attachments: [], created_at: session.updated_at, error: null, target_id: input.target_id ?? null }))
@@ -32,15 +32,15 @@ it('embeds the model picker and swaps the primary send button for native stop un
   expect(screen.queryByRole('button', { name: '停止' })).not.toBeInTheDocument()
   fireEvent.change(screen.getByLabelText('消息内容'), { target: { value: 'hello' } })
   fireEvent.click(screen.getByRole('button', { name: '发送' }))
-  await waitFor(() => expect(screen.getByRole('button', { name: '停止' })).toBeEnabled())
+  await waitFor(() => expect(create).toHaveBeenCalledOnce())
+  expect(screen.queryByRole('button', { name: '停止' })).not.toBeInTheDocument()
+  view.rerender(wrap({ ...session, status: 'running' }))
+  expect(screen.getByRole('button', { name: '停止' })).toBeEnabled()
   fireEvent.click(screen.getByRole('button', { name: '停止' }))
   await waitFor(() => expect(create).toHaveBeenCalledTimes(2))
   // Native stop requires target_id == session_id (the session to interrupt),
   // not a command id — see service._capability_error.
   expect(create.mock.calls[1][0]).toMatchObject({ action: 'stop', text: '', target_id: session.id, session_id: session.id })
-  useAstrorderStore.getState().resetRuntime()
-  view.rerender(wrap({ ...session, status: 'running' }))
-  expect(screen.getByRole('button', { name: '停止' })).toBeInTheDocument()
   view.rerender(wrap(session))
   expect(screen.getByRole('button', { name: '发送' })).toBeInTheDocument()
   client.clear()
@@ -94,6 +94,41 @@ it('queues while a session is running and steers only after explicit confirmatio
   await waitFor(() => expect(create).toHaveBeenCalledOnce())
   expect(create.mock.calls[0][0]).toMatchObject({ action: 'send', text: '先排队' })
   await waitFor(() => expect(screen.queryByText('先排队')).not.toBeInTheDocument())
+  client.clear()
+})
+
+it('edits a queued message by removing from queue and writing text back to input', async () => {
+  useAstrorderStore.getState().resetRuntime()
+  vi.spyOn(api, 'getSessionModel').mockResolvedValue({ model: 'native-model', provider: 'provider' })
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(<MantineProvider><QueryClientProvider client={client}><ChatComposer session={{ ...session, status: 'running' }} agent={agent} /></QueryClientProvider></MantineProvider>)
+
+  const input = screen.getByLabelText('消息内容')
+  fireEvent.change(input, { target: { value: '待编辑消息' } })
+  fireEvent.click(screen.getByRole('button', { name: '加入队列' }))
+  expect(await screen.findByText('待编辑消息')).toBeInTheDocument()
+  expect(input).toHaveValue('')
+
+  fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+  await waitFor(() => expect(screen.queryByLabelText('排队消息')).not.toBeInTheDocument())
+  expect(input).toHaveValue('待编辑消息')
+  client.clear()
+})
+
+it('deletes a queued message directly from outbox', async () => {
+  useAstrorderStore.getState().resetRuntime()
+  vi.spyOn(api, 'getSessionModel').mockResolvedValue({ model: 'native-model', provider: 'provider' })
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(<MantineProvider><QueryClientProvider client={client}><ChatComposer session={{ ...session, status: 'running' }} agent={agent} /></QueryClientProvider></MantineProvider>)
+
+  const input = screen.getByLabelText('消息内容')
+  fireEvent.change(input, { target: { value: '待删除消息' } })
+  fireEvent.click(screen.getByRole('button', { name: '加入队列' }))
+  expect(await screen.findByText('待删除消息')).toBeInTheDocument()
+
+  fireEvent.click(screen.getByRole('button', { name: '删除' }))
+  await waitFor(() => expect(screen.queryByLabelText('排队消息')).not.toBeInTheDocument())
+  expect(input).toHaveValue('')
   client.clear()
 })
 

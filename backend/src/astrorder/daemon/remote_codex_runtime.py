@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import posixpath
 import subprocess
 from collections.abc import Mapping
@@ -18,7 +19,7 @@ from ..connections import (
 )
 from ..ssh_transport import SshNativeRuntime, build_remote_python_command
 from .codex_runtime import CodexDaemonRuntime
-from .session_daemon import DaemonProtocolError
+from .errors import DaemonProtocolError
 
 
 class RemoteCodexDaemonRuntime(CodexDaemonRuntime):
@@ -68,7 +69,7 @@ class RemoteCodexDaemonRuntime(CodexDaemonRuntime):
         super().__init__(config, emit=emit, client_factory=self._client)
 
     def _client(self, config, on_notification, environment=None, **kwargs):
-        child_environment = dict(environment or {})
+        child_environment = dict(os.environ if environment is None else environment)
         source = (
             "import json, os\n"
             "from pathlib import Path\n"

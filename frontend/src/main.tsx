@@ -10,8 +10,25 @@ import App from './app/App.tsx'
 import { installGlobalNativeHoldBlocker } from './features/mobile/mobileGestures'
 import './index.css'
 import './workspaceVisuals.css'
+import { registerSW } from 'virtual:pwa-register'
 
 installGlobalNativeHoldBlocker()
+
+if (typeof window !== 'undefined' && 'astrorderDesktop' in window) {
+  document.documentElement.classList.add('is-desktop-app')
+}
+
+if (import.meta.env.PROD) {
+  registerSW({
+    immediate: true,
+    onRegisteredSW(_url, registration) {
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') void registration?.update()
+      })
+    },
+  })
+}
+
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -20,9 +37,15 @@ const queryClient = new QueryClient({
     },
   },
 })
-const theme = createTheme({ primaryColor: 'dark', defaultRadius: 'md' })
+const theme = createTheme({ primaryColor: 'indigo', defaultRadius: 'md' })
 
-createRoot(document.getElementById('root')!).render(
+const rootEl = document.getElementById('root')!
+const staticSplash = document.getElementById('app-splash-root')
+if (staticSplash) {
+  staticSplash.remove()
+}
+
+createRoot(rootEl).render(
   <StrictMode>
     <MantineProvider theme={theme} defaultColorScheme="auto">
       <QueryClientProvider client={queryClient}>

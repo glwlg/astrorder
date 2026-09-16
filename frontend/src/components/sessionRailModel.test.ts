@@ -60,7 +60,7 @@ describe('sessionActivityStatus', () => {
     expect(sessionActivityStatus(errorSession)).toBe('error')
   })
 
-  it('returns running when session is idle but has an active in-flight command in commandsMap', () => {
+  it('uses session status rather than command delivery state', () => {
     const activeCommand: Command = {
       id: 'cmd-1',
       session_id: 's-1',
@@ -72,7 +72,7 @@ describe('sessionActivityStatus', () => {
       created_at: '2026-09-10T12:00:00Z',
       error: null,
     }
-    expect(sessionActivityStatus(baseSession, [activeCommand])).toBe('running')
+    expect(sessionActivityStatus(baseSession, [activeCommand])).toBe('idle')
   })
 
   it('returns idle when command is completed', () => {
@@ -90,7 +90,7 @@ describe('sessionActivityStatus', () => {
     expect(sessionActivityStatus(baseSession, [completedCommand])).toBe('idle')
   })
 
-  it('falls back to useAstrorderStore.getState().commands when commandsMap is not provided', () => {
+  it('does not promote a stored command delivery state to session activity', () => {
     useAstrorderStore.getState().resetRuntime()
     expect(sessionActivityStatus(baseSession)).toBe('idle')
 
@@ -113,7 +113,7 @@ describe('sessionActivityStatus', () => {
       session_id: 's-1',
       data: { ...activeCommand } as unknown as Record<string, unknown>,
     })
-    expect(sessionActivityStatus(baseSession)).toBe('running')
+    expect(sessionActivityStatus(baseSession)).toBe('idle')
 
     useAstrorderStore.getState().applyEvent({
       cursor: 2,
@@ -127,7 +127,7 @@ describe('sessionActivityStatus', () => {
     useAstrorderStore.getState().resetRuntime()
   })
 
-  it('treats a running native task as running even when session.status stays idle', () => {
+  it('does not treat a background task as the main session running', () => {
     useAstrorderStore.getState().resetRuntime()
     const task: Task = {
       id: 'task-1',
@@ -144,7 +144,7 @@ describe('sessionActivityStatus', () => {
       updated_at: '2026-09-10T12:00:00Z',
     }
     useAstrorderStore.getState().mergeTasks([task])
-    expect(sessionActivityStatus(baseSession)).toBe('running')
+    expect(sessionActivityStatus(baseSession)).toBe('idle')
     useAstrorderStore.getState().resetRuntime()
   })
 

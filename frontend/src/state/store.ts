@@ -61,7 +61,7 @@ export interface AstrorderStore {
   resetRuntime: () => void
 }
 
-const emptyDraft = (): DraftState => ({ text: '', attachments: [] })
+const emptyDraft = (): DraftState => ({ text: '', attachments: [], sessionRefs: [] })
 
 function commandKey(command: Command): string {
   return scopeKey(command.agent_id, command.session_id) + `::${command.id}`

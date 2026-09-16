@@ -170,7 +170,7 @@ class NativeObservers:
                 except (RuntimeError, OSError, ValueError):
                     self.states.setdefault(client.agent_id,{})['poll_ok']=False
             await asyncio.gather(*(one(c) for c in self.clients()))
-            await asyncio.to_thread(self.app.state.service.hermes_approvals.poll)
+            await asyncio.to_thread(self.app.state.hermes_approvals.poll)
             await asyncio.to_thread(self._reconcile_commands)
             await asyncio.to_thread(self._sync_hermes_activity)
             try: await asyncio.wait_for(self.stopping.wait(),timeout=1)
@@ -322,6 +322,15 @@ class NativeObservers:
                 state['configured_events']=len(hooks)
                 state['trusted']=bool(hooks) and all(h.get('trustStatus') in ('trusted','managed') and h.get('enabled') for h in hooks)
                 state['needs_review']=any(h.get('trustStatus') in ('untrusted','modified') for h in hooks)
+                if state['needs_review'] and not hasattr(client,'remote_json') and client._home:
+                    from .observer_plugin import verify_plugin
+                    config=client._home/'config.toml'
+                    modified=config.stat().st_mtime_ns if config.exists() else 0
+                    cached=self.states.setdefault(agent_id,{})
+                    if cached.get('verified_config_mtime')!=modified:
+                        cached.update(verify_plugin(client._home,client._executable()))
+                        cached['verified_config_mtime']=modified
+                    state.update({key:cached[key] for key in ('trusted','needs_review') if key in cached})
             except (RuntimeError, OSError, ValueError, KeyError):
                 state['native_status_available']=False
         return state

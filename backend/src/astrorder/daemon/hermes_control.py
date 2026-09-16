@@ -7,6 +7,7 @@ import threading
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
+from uuid import uuid4
 
 from ..connections import ConnectionError
 from .bridge import DaemonBridge, DaemonBridgeError
@@ -18,6 +19,25 @@ def hermes_runtime_control_id(connection_scope: str) -> str:
         raise ValueError("connection scope must be a non-empty string up to 256 characters")
     digest = hashlib.sha256(f"astrorder-hermes-runtime\0{connection_scope}".encode()).hexdigest()
     return f"daemon-hermes-{digest[:48]}"
+
+
+def record_completed_slash(controller: Any, command: Mapping[str, Any], output: str) -> None:
+    agent_id, session_id, command_id = command["agent_id"], command["session_id"], command["id"]
+    message = controller.store.upsert_message({
+        "id": f"hermes:slash:{uuid4()}",
+        "session_id": session_id,
+        "agent_id": agent_id,
+        "role": "assistant",
+        "kind": "message",
+        "text": output,
+        "attachments": [],
+        "created_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        "command_id": command_id,
+        "tool": None,
+    })
+    updated = controller.store.set_command_state(agent_id, session_id, command_id, "completed", None)
+    controller.service._server_event("message.upsert", agent_id=agent_id, session_id=session_id, data=message)
+    controller.service._server_event("command.upsert", agent_id=agent_id, session_id=session_id, data=updated)
 
 
 class DaemonHermesController:
@@ -120,7 +140,15 @@ class DaemonHermesController:
         """Release App-only projection state without stopping the daemon runtime."""
         self.set_discovery_callback(None)
 
-    def create_session(self, workspace: str | None = None, title: str | None = None) -> dict[str, object]:
+    def create_session(
+        self,
+        workspace: str | None = None,
+        title: str | None = None,
+        *,
+        provider: str | None = None,
+        model: str | None = None,
+        effort: str | None = None,
+    ) -> dict[str, object]:
         with self._lock:
             agent_id = self._agent_id
         if not agent_id:
@@ -129,9 +157,17 @@ class DaemonHermesController:
             raise ConnectionError("本机 Hermes workspace 无效。", 422)
         if title is not None and (not isinstance(title, str) or not title):
             raise ConnectionError("本机 Hermes 标题无效。", 422)
+        create_request = {
+            "agent_type": "hermes",
+            "cwd": workspace,
+            "title": title or "新会话",
+            "provider": provider,
+            "model": model,
+            "effort": effort,
+        }
         result = self._control(
             "session.create",
-            {"agent_type": "hermes", "cwd": workspace, "title": title or "新会话"},
+            {key: value for key, value in create_request.items() if value is not None},
             "守护进程未确认本机 Hermes 新会话创建。",
         ).get("result")
         self._assert_identity(result)
@@ -148,6 +184,40 @@ class DaemonHermesController:
             "workspace": workspace,
             "status": result.get("status", "idle"),
             "source_id": source_id,
+            "connection_id": None,
+            "source_session_id": session_id,
+            "history_state": "live",
+            "control_state": "owned",
+            "updated_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        }
+
+    def branch_session(self, parent_session_id: str, title: str | None = None) -> dict[str, object]:
+        with self._lock:
+            agent_id = self._agent_id
+        if not agent_id:
+            raise ConnectionError("守护进程托管的本机 Hermes 尚未连接；无法分叉会话。", 503)
+        result = self._control(
+            "session.create",
+            {
+                "agent_type": "hermes",
+                "parent_session_id": parent_session_id,
+                "title": title or "转交摘要",
+            },
+            "守护进程未确认本机 Hermes 会话分叉。",
+        ).get("result")
+        self._assert_identity(result)
+        if not isinstance(result, Mapping):
+            raise ConnectionError("守护进程未返回本机 Hermes 分叉会话。", 502)
+        session_id = result.get("session_id")
+        if not isinstance(session_id, str) or not session_id:
+            raise ConnectionError("守护进程未返回本机 Hermes 分叉会话 ID。", 502)
+        return {
+            "id": session_id,
+            "agent_id": agent_id,
+            "title": title or "转交摘要",
+            "workspace": result.get("workspace"),
+            "status": result.get("status", "idle"),
+            "source_id": result.get("source_id") or self._source_id,
             "connection_id": None,
             "source_session_id": session_id,
             "history_state": "live",
@@ -239,6 +309,13 @@ class DaemonHermesController:
             raise ConnectionError("守护进程返回了无效的 Hermes 模型目录。", 502)
         return items
 
+    def commands(self, session_id: str) -> list[dict[str, str | None]]:
+        result = self._native_control(session_id, "session.commands")
+        items = result.get("items")
+        if not isinstance(items, list):
+            raise ConnectionError("守护进程返回了无效的 Hermes 命令目录。", 502)
+        return items
+
     def model(self, session_id: str) -> dict[str, Any]:
         result = self._native_control(session_id, "session.model.read")
         return {key: result.get(key) for key in ("provider", "model", "branch", "effort") if key in result}
@@ -320,6 +397,9 @@ class DaemonHermesController:
         except DaemonBridgeError:
             return "unknown", "daemon Hermes delivery was not confirmed; command will not retry."
         result = response.get("result")
+        if isinstance(result, Mapping) and result.get("completed") is True:
+            record_completed_slash(self, command, str(result.get("output") or "命令已执行"))
+            return "accepted", None
         if not isinstance(result, Mapping) or result.get("accepted") is not True:
             return "unknown", "daemon Hermes did not confirm native command acceptance; command will not retry."
         return "accepted", None

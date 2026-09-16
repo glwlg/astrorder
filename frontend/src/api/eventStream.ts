@@ -64,9 +64,27 @@ export function connectEventStream({
   }
 
   connect()
+
+  const onWake = () => {
+    if (stopped) return
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer)
+      socket?.close()
+      socket = null
+      connect()
+    }
+  }
+  const onVisibilityChange = () => {
+    if (document.visibilityState === 'visible') onWake()
+  }
+  window.addEventListener('online', onWake)
+  document.addEventListener('visibilitychange', onVisibilityChange)
+
   return () => {
     stopped = true
     if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer)
+    window.removeEventListener('online', onWake)
+    document.removeEventListener('visibilitychange', onVisibilityChange)
     socket?.close()
     socket = null
   }

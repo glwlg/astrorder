@@ -6,22 +6,22 @@
   align-items: center;
   gap: 6px;
   height: 28px;
-  padding: 0 10px;
+  padding: 0 8px;
   border-radius: 999px;
-  border: 1px solid var(--astr-border);
-  background: color-mix(in srgb, var(--astr-surface-muted) 85%, var(--astr-surface));
+  border: 1px solid transparent;
+  background: transparent;
   color: var(--astr-text);
   font-size: 12px;
   font-weight: 550;
   cursor: pointer;
-  transition: all 140ms ease;
+  transition: background 140ms ease, color 140ms ease;
   user-select: none;
   white-space: nowrap;
   max-width: 240px;
 }
 .codex-model-pill:hover {
-  border-color: color-mix(in srgb, var(--astr-indigo) 40%, var(--astr-border));
-  background: var(--astr-surface-muted);
+  background: color-mix(in srgb, var(--astr-text) 7%, transparent);
+  border-color: transparent;
 }
 .codex-model-pill-text {
   overflow: hidden;
@@ -82,13 +82,14 @@
   cursor: pointer;
   padding: 5px 6px;
   border-radius: 6px;
-  color: #0066cc;
+  color: var(--effort-color, #0066cc);
+  transition: color 0.45s cubic-bezier(0.4, 0, 0.2, 1), background 0.15s ease;
 }
 .codex-model-title-btn:hover {
-  background: color-mix(in srgb, #0066cc 10%, transparent);
+  background: color-mix(in srgb, var(--effort-color, #0066cc) 10%, transparent);
 }
 .codex-model-title-btn:focus-visible {
-  outline: 2px solid #0066cc;
+  outline: 2px solid var(--effort-color, #0066cc);
   outline-offset: 2px;
 }
 .codex-model-effort-row {
@@ -99,7 +100,8 @@
 .codex-model-effort-highlight {
   font-size: 14px;
   font-weight: 600;
-  color: #0066cc;
+  color: var(--effort-color, #0066cc);
+  transition: color 0.45s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .codex-model-name-label {
@@ -115,6 +117,38 @@
 
 .codex-model-slider-wrap {
   padding: 0 4px;
+}
+
+.codex-model-slider-wrap .mantine-Slider-track {
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+.codex-model-slider-wrap .mantine-Slider-track::before {
+  inset-inline: calc(var(--slider-thumb-size) / -2) !important;
+}
+.codex-model-slider-wrap .mantine-Slider-bar {
+  inset-inline-start: calc(var(--slider-thumb-size) / -2) !important;
+  transition: width 0.28s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.45s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+.codex-model-slider-wrap .mantine-Slider-root:has([aria-valuenow="4"]) .mantine-Slider-bar {
+  width: calc(100% + var(--slider-thumb-size)) !important;
+}
+.codex-model-slider-wrap .mantine-Slider-thumb {
+  transform: translate(-50%, -50%);
+  transition: inset-inline-start 0.28s cubic-bezier(0.16, 1, 0.3, 1), transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.3s ease;
+  cursor: grab;
+}
+.codex-model-slider-wrap .mantine-Slider-thumb:active,
+.codex-model-slider-wrap .mantine-Slider-thumb[data-dragging] {
+  cursor: grabbing;
+  transform: translate(-50%, -50%) scale(1.14) !important;
+  box-shadow: 0 2px 12px color-mix(in srgb, var(--slider-color, #0066cc) 50%, transparent) !important;
+}
+.codex-model-slider-wrap .mantine-Slider-mark {
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), background-color 0.45s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.codex-model-slider-wrap .mantine-Slider-markWrapper:hover .mantine-Slider-mark {
+  transform: translate(-50%, -50%) scale(1.5);
 }
 
 /* Model List Sub-panel */

@@ -9,16 +9,25 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import re
 import threading
+import time
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
-from astrorder_codex_connector.app_server import CodexAppServer
+from astrorder_codex_connector.app_server import CodexAppServer, CodexRpcRejected
 from astrorder_codex_connector.config import CodexConnectorConfig
 
-from .session_daemon import DaemonProtocolError
+from ..native_controls import REASONING_EFFORTS
+from .codex_desktop import (
+    codex_desktop_status,
+    send_codex_desktop_message,
+    set_codex_desktop_settings,
+)
+from .errors import DaemonProtocolError
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +47,88 @@ CodexClientFactory = Callable[..., CodexAppServerClient]
 _APPROVAL_METHODS = frozenset(
     {"item/commandExecution/requestApproval", "item/fileChange/requestApproval"}
 )
-_TURN_OPTION_KEYS = frozenset({"approvalPolicy", "sandboxPolicy", "approvalsReviewer"})
+_TURN_OPTION_KEYS = frozenset({"approvalPolicy", "sandboxPolicy", "approvalsReviewer", "model"})
+_QUERY_METHODS = frozenset({
+    "account/read", "hooks/list", "model/list", "skills/list", "thread/items/list", "thread/list", "thread/loaded/list", "thread/read"
+})
+
+
+async def forward_codex_desktop_stops(
+    config: CodexDaemonRuntimeConfig,
+    emit: FrameEmitter,
+    stopping: asyncio.Event,
+    *,
+    poll_interval: float = 0.5,
+) -> None:
+    configured_home = (config.environment or {}).get("CODEX_HOME")
+    home = Path(configured_home or os.environ.get("CODEX_HOME") or Path.home() / ".codex")
+    directory = home / "astrorder-observer" / "events"
+
+    def files_after(cursor: tuple[int, str]) -> tuple[list[Path], tuple[int, str]]:
+        files = sorted(
+            (
+                (path.stat().st_mtime_ns, path.name, path)
+                for path in directory.glob("*.json")
+                if not path.is_symlink() and path.stat().st_size <= 8192
+            ),
+            key=lambda item: (item[0], item[1]),
+        )
+        fresh = [path for modified, name, path in files if (modified, name) > cursor]
+        latest = (files[-1][0], files[-1][1]) if files else cursor
+        return fresh, latest
+
+    try:
+        _, cursor = await asyncio.to_thread(files_after, (0, ""))
+    except OSError:
+        cursor = (0, "")
+    while not stopping.is_set():
+        try:
+            paths, cursor = await asyncio.to_thread(files_after, cursor)
+            for path in paths:
+                try:
+                    row = json.loads(await asyncio.to_thread(path.read_text, encoding="utf-8"))
+                except (OSError, ValueError):
+                    continue
+                event_id = row.get("id") if isinstance(row, Mapping) else None
+                session_id = row.get("session_id") if isinstance(row, Mapping) else None
+                observed_at = row.get("observed_at") if isinstance(row, Mapping) else None
+                if (
+                    row.get("event") != "Stop"
+                    or not isinstance(event_id, str)
+                    or path.stem != event_id
+                    or re.fullmatch(r"[a-f0-9]{32}(?:[a-f0-9]{32})?", event_id) is None
+                    or not isinstance(session_id, str)
+                    or not session_id
+                    or len(session_id) > 256
+                    or not isinstance(observed_at, (int, float))
+                    or abs(time.time() - observed_at) > 300
+                ):
+                    continue
+                turn_id = row.get("turn_id")
+                if not isinstance(turn_id, str) or not turn_id:
+                    turn_id = event_id
+                await emit(
+                    session_id,
+                    "codex.notification",
+                    {
+                        "agent_id": config.agent_id,
+                        "frame": {
+                            "method": "turn/completed",
+                            "params": {
+                                "threadId": session_id,
+                                "turn": {"id": turn_id, "status": "completed"},
+                            },
+                        },
+                    },
+                    timestamp=observed_at,
+                    status="idle",
+                )
+        except OSError:
+            pass
+        try:
+            await asyncio.wait_for(stopping.wait(), timeout=poll_interval)
+        except TimeoutError:
+            pass
 
 
 @dataclass(frozen=True)
@@ -79,6 +169,7 @@ class CodexDaemonRuntimeConfig:
 class _OwnedCodexSession:
     client: CodexAppServerClient
     loop: asyncio.AbstractEventLoop
+    ephemeral: bool = False
     status: str = "idle"
     active_turn_id: str | None = None
     completed_turn_statuses: dict[str, str] = field(default_factory=dict)
@@ -94,17 +185,97 @@ class CodexDaemonRuntime:
         *,
         emit: FrameEmitter,
         client_factory: CodexClientFactory = CodexAppServer,
+        desktop_submit=send_codex_desktop_message,
     ) -> None:
         self.config = config
         self.emit = emit
         self.client_factory = client_factory
+        self.desktop_submit = desktop_submit
         self._sessions: dict[str, _OwnedCodexSession] = {}
         self._lock = threading.RLock()
+        self._catalog_client: CodexAppServerClient | None = None
+        self._catalog_initialized: dict[str, Any] | None = None
 
     def set_emitter(self, emit: FrameEmitter) -> None:
         if not callable(emit):
             raise TypeError("emit must be callable")
         self.emit = emit
+
+    def status(self) -> Mapping[str, Any]:
+        return {"desktop_cdp": codex_desktop_status()}
+
+    async def query(self, request: Mapping[str, Any]) -> Mapping[str, Any]:
+        method = request.get("method")
+        params = request.get("request_params", {})
+        if method == "desktop/submit":
+            if not isinstance(params, Mapping):
+                raise DaemonProtocolError("Codex Desktop request params must be an object")
+            return await self.desktop_submit(
+                params.get("threadId"), params.get("input", params.get("text"))
+            )
+        if method == "desktop/settings":
+            if not isinstance(params, Mapping):
+                raise DaemonProtocolError("Codex Desktop request params must be an object")
+            updates = params.get("updates")
+            if not isinstance(updates, Mapping):
+                raise DaemonProtocolError("Codex Desktop settings must be an object")
+            return await set_codex_desktop_settings(params.get("threadId"), dict(updates))
+        if method != "initialize" and method not in _QUERY_METHODS:
+            raise DaemonProtocolError(f"Codex runtime request is not read-only: {method}")
+        if not isinstance(params, Mapping):
+            raise DaemonProtocolError("Codex runtime request params must be an object")
+        return await asyncio.to_thread(self._query, method, dict(params))
+
+    def _query(
+        self, method: str, params: dict[str, Any], *, retry_closed: bool = True
+    ) -> Mapping[str, Any]:
+        with self._lock:
+            client = self._catalog_client
+            if client is None:
+                client = self.client_factory(
+                    CodexConnectorConfig(
+                        endpoint="",
+                        secret="",
+                        agent_id=self.config.agent_id,
+                        agent_name=self.config.agent_name,
+                        executable=self.config.executable,
+                        workspace=self.config.workspace,
+                        allowed_workspaces=self.config.allowed_workspaces,
+                        thread_id=None,
+                    ),
+                    lambda _frame: None,
+                    environment=self.config.environment,
+                )
+                client.start()
+                initialized = client.request(
+                    "initialize",
+                    {
+                        "clientInfo": {
+                            "name": "astrorder-daemon",
+                            "title": "Astrorder Session Daemon",
+                            "version": "0.1.0",
+                        },
+                        "capabilities": {"experimentalApi": True},
+                    },
+                )
+                client.send({"method": "initialized", "params": {}})
+                self._catalog_client = client
+                self._catalog_initialized = dict(initialized)
+            if method == "initialize":
+                return dict(self._catalog_initialized or {})
+            try:
+                return client.request(method, params)
+            except CodexRpcRejected as exc:
+                raise DaemonProtocolError(str(exc)) from None
+            except RuntimeError as exc:
+                if not retry_closed or not str(exc).startswith(
+                    "Codex transport closed before response"
+                ):
+                    raise
+                client.stop()
+                self._catalog_client = None
+                self._catalog_initialized = None
+                return self._query(method, params, retry_closed=False)
 
     async def spawn(self, request: Mapping[str, Any]) -> Mapping[str, Any]:
         session_id = _session_id(request)
@@ -174,10 +345,15 @@ class CodexDaemonRuntime:
             if isinstance(provider, str) and provider:
                 result["provider"] = provider
             return result
-        except Exception:
+        except Exception as exc:
             with self._lock:
                 self._sessions.pop(session_id, None)
-            await asyncio.to_thread(client.stop)
+            try:
+                await asyncio.to_thread(client.stop)
+            except Exception:
+                logger.exception("failed to stop Codex client after spawn rejection")
+            if "active writer" in str(exc).casefold():
+                raise DaemonProtocolError("Codex thread already has an active writer") from None
             raise
 
     async def create(self, request: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -236,7 +412,7 @@ class CodexDaemonRuntime:
             on_close=on_close,
             environment=self.config.environment,
         )
-        owned = _OwnedCodexSession(client=client, loop=loop)
+        owned = _OwnedCodexSession(client=client, loop=loop, ephemeral=ephemeral)
         session_id: str | None = None
         try:
             await asyncio.to_thread(client.start)
@@ -272,7 +448,7 @@ class CodexDaemonRuntime:
                         "cwd": str(workspace),
                         "ephemeral": ephemeral,
                         "excludeTurns": True,
-                        "deferGoalContinuation": True,
+                        **({"deferGoalContinuation": True} if not ephemeral else {}),
                     },
                 )
             thread = created.get("thread") if isinstance(created, Mapping) else None
@@ -333,6 +509,33 @@ class CodexDaemonRuntime:
         owned = self._owned(session_id)
         if action == "session.send":
             return await self._send(session_id, owned, request)
+        if action == "session.compact":
+            await asyncio.to_thread(
+                owned.client.request, "thread/compact/start", {"threadId": session_id}
+            )
+            return {"status": "idle", "completed": True}
+        if action == "session.review":
+            instructions = request.get("instructions")
+            if instructions is not None and not isinstance(instructions, str):
+                raise DaemonProtocolError("Codex review instructions are invalid")
+            target = (
+                {"type": "custom", "instructions": instructions.strip()}
+                if isinstance(instructions, str) and instructions.strip()
+                else {"type": "uncommittedChanges"}
+            )
+            response = await asyncio.to_thread(
+                owned.client.request,
+                "review/start",
+                {"threadId": session_id, "target": target, "delivery": "inline"},
+            )
+            turn = response.get("turn") if isinstance(response, Mapping) else None
+            turn_id = turn.get("id") if isinstance(turn, Mapping) else None
+            if not isinstance(turn_id, str) or not turn_id:
+                raise DaemonProtocolError("Codex did not confirm a review turn ID")
+            with self._lock:
+                owned.active_turn_id = turn_id
+                owned.status = "running"
+            return {"status": "running", "turn_id": turn_id}
         if action == "session.steer":
             return await self._steer(session_id, owned, request)
         if action == "session.interrupt":
@@ -341,6 +544,10 @@ class CodexDaemonRuntime:
             return await self._approve(session_id, owned, request)
         if action == "session.settings":
             return await self._settings(session_id, owned, request)
+        if action == "session.delete":
+            return await self._delete(session_id, owned)
+        if action == "session.rename":
+            return await self._rename(session_id, owned, request)
         raise DaemonProtocolError("Codex runtime action is unsupported")
 
     async def shutdown(self) -> None:
@@ -348,6 +555,10 @@ class CodexDaemonRuntime:
         with self._lock:
             clients = [owned.client for owned in self._sessions.values()]
             self._sessions.clear()
+            if self._catalog_client is not None:
+                clients.append(self._catalog_client)
+                self._catalog_client = None
+                self._catalog_initialized = None
         await asyncio.gather(*(asyncio.to_thread(client.stop) for client in clients))
 
     async def _send(
@@ -470,7 +681,7 @@ class CodexDaemonRuntime:
             update["model"] = model
         effort = request.get("effort")
         if effort is not None:
-            if effort not in {"low", "medium", "high", "xhigh"}:
+            if effort not in REASONING_EFFORTS:
                 raise DaemonProtocolError("Codex effort is invalid")
             update["effort"] = effort
         if len(update) == 1:
@@ -478,7 +689,44 @@ class CodexDaemonRuntime:
         await asyncio.to_thread(owned.client.request, "thread/settings/update", update)
         with self._lock:
             status = owned.status
-        return {"status": status, "accepted": True}
+        return {"status": status, "accepted": True, **{key: value for key, value in update.items() if key != "threadId"}}
+
+    async def _delete(self, session_id: str, owned: _OwnedCodexSession) -> dict[str, Any]:
+        with self._lock:
+            if owned.active_turn_id or owned.status in {"running", "waiting_approval"}:
+                raise DaemonProtocolError("Codex session is active")
+        if not owned.ephemeral:
+            await asyncio.to_thread(
+                owned.client.request, "thread/delete", {"threadId": session_id}
+            )
+            for archived in (False, True):
+                rows = await asyncio.to_thread(
+                    owned.client.request,
+                    "thread/list",
+                    {"limit": 100, "archived": archived, "modelProviders": [], "useStateDbOnly": True},
+                )
+                if any(row.get("id") == session_id for row in rows.get("data", [])):
+                    raise DaemonProtocolError("Codex session delete was not confirmed")
+        with self._lock:
+            self._sessions.pop(session_id, None)
+        await asyncio.to_thread(owned.client.stop)
+        return {"status": "idle", "deleted": session_id}
+
+    async def _rename(
+        self,
+        session_id: str,
+        owned: _OwnedCodexSession,
+        request: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        title = request.get("title")
+        if not isinstance(title, str) or not title.strip() or len(title) > 512 or any(
+            char in title for char in "\x00\r\n"
+        ):
+            raise DaemonProtocolError("Codex title is invalid")
+        await asyncio.to_thread(
+            owned.client.request, "thread/name/set", {"threadId": session_id, "name": title}
+        )
+        return {"status": owned.status, "title": title}
 
     def _owned(self, session_id: str) -> _OwnedCodexSession:
         with self._lock:

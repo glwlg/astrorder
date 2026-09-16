@@ -40,7 +40,9 @@ export function MobileTranscript({ messages, approvals = [], onApproval, busy, l
           if (i && activity(rows[i - 1])) return null
           const pack: Message[] = []
           for (let n = i; n < rows.length && activity(rows[n]); n++) pack.push(rows[n])
-          return <LazyDetails className="m-think-pack" key={m.id} loading={busy && i + pack.length === rows.length} summary={<PackSummary pack={pack} />}>
+          const isLatestActivity = !rows.slice(i + pack.length).some(activity)
+          const isPackRunning = Boolean(busy && isLatestActivity)
+          return <LazyDetails className="m-think-pack" key={m.id} loading={isPackRunning} summary={<PackSummary pack={pack} isRunning={isPackRunning} />}>
             <div className="m-think-rail">{pack.map(item => {
               const desc = describeTool(item)
               return <LazyDetails className={`m-fold ${desc.isFailed ? 'is-failed' : ''}`} key={item.id} loading={desc.isRunning} summary={<span className="m-fold-summary">
@@ -58,9 +60,9 @@ export function MobileTranscript({ messages, approvals = [], onApproval, busy, l
         }
         return <motion.article key={m.id} layout="position" initial={enter} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.28, ease: [0.2, 0.8, 0.2, 1] }} className={`m-msg m-hold ${m.role === 'user' ? 'm-user' : 'm-assistant'}`} data-message-id={m.id}
           tabIndex={0}
-          onContextMenu={e => { e.preventDefault(); cancelHold(); const rect = e.currentTarget.getBoundingClientRect(); onMessageAction({ text: m.text, x: e.clientX || rect.left + rect.width / 2, y: e.clientY || rect.top + 20, element: e.currentTarget }) }}
+          onContextMenu={e => { e.preventDefault(); e.stopPropagation(); cancelHold(); const rect = e.currentTarget.getBoundingClientRect(); onMessageAction({ text: m.text, x: e.clientX || rect.left + rect.width / 2, y: e.clientY || rect.top + 20, element: e.currentTarget }) }}
           onTouchStart={e => { cancelHold(); const element = e.currentTarget; const point = e.touches[0]; hold.current = setTimeout(() => { onMessageAction({ text: m.text, x: point.clientX, y: point.clientY, element }); navigator.vibrate?.(20) }, 500) }}>
-          {m.text.trim() && <div className="m-bubble"><MessageBody value={m.text} user={m.role === 'user'} attachmentNames={m.attachments.filter((attachment) => attachment.media_type.startsWith('image/')).map((attachment) => attachment.name)} renderMarkdown={value => <MarkdownContent value={value} onFileClick={onFile} onImageClick={onImage} />} /></div>}
+          {m.text.trim() && <div className="m-bubble"><MessageBody value={m.text} user={m.role === 'user'} onImageClick={onImage} attachmentNames={m.attachments.filter((attachment) => attachment.media_type.startsWith('image/')).map((attachment) => attachment.name)} renderMarkdown={value => <MarkdownContent value={value} onFileClick={onFile} onImageClick={onImage} />} /></div>}
           {!!m.attachments.length && <div className="m-thumbs">{m.attachments.map(a => a.media_type.startsWith('image/') ? <button key={a.id} onClick={() => onImage(a.url)}><img src={a.url} alt={a.name} /></button> : onFile ? <button key={a.id} className="m-file-link" onClick={() => onFile(a.url)}>{a.name}</button> : <a key={a.id} href={a.url} target="_blank" rel="noreferrer">{a.name}</a>)}</div>}
           {m.role === 'user' && <small className="m-delivered"><IconCheck size={12} /> 已送达</small>}
         </motion.article>
@@ -84,6 +86,10 @@ export function MobileTranscript({ messages, approvals = [], onApproval, busy, l
         </section>
       )}
     </div>
-    {!following && <button className="m-return-bottom" aria-label="回到底部" onClick={scrollToBottom}><IconChevronDown size={19} /></button>}
+    {!following && (
+      <button className="m-return-bottom" aria-label="回到底部" onClick={scrollToBottom}>
+        {busy ? <span className="return-bottom-wave" aria-hidden="true"><i /><i /><i /></span> : <IconChevronDown size={19} />}
+      </button>
+    )}
   </>
 }

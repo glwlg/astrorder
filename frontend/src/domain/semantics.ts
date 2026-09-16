@@ -44,8 +44,8 @@ export function mergeMessages(existing: Message[], incoming: Message[]): Message
   return mergeMessagesById(existing, incoming)
 }
 
-export function isDraftSendable(text: string, attachments: Array<unknown>): boolean {
-  return text.trim().length > 0 || attachments.length > 0
+export function isDraftSendable(text: string, attachments: Array<unknown>, extras: Array<unknown> = []): boolean {
+  return text.trim().length > 0 || attachments.length > 0 || extras.length > 0
 }
 
 export function isNearBottom({

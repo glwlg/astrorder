@@ -24,6 +24,14 @@ const SESSION_DIAGONAL_MIN_Y = 28
 const SESSION_DIAGONAL_MAX_SLOPE = 1.15
 const MAX_DIAGONAL_DRIFT = 180
 
+export function hapticFeedback(pattern: number | number[] = 15): void {
+  try {
+    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+      navigator.vibrate(pattern)
+    }
+  } catch {}
+}
+
 function isDirectionalSwipe(startX: number, startY: number, endX: number, endY: number, threshold: number): boolean {
   const dx = endX - startX
   const dy = endY - startY
@@ -115,7 +123,9 @@ export function sessionSwipeDirection(startX: number, startY: number, endX: numb
 const NATIVE_HOLD_FIELDS = 'textarea, input, select, [contenteditable="true"], .m-select-text'
 
 export function allowsNativeTextHold(target: EventTarget | null): boolean {
-  return target instanceof Element && Boolean(target.closest(NATIVE_HOLD_FIELDS))
+  if (!(target instanceof Element)) return false
+  if (target.closest('.m-msg, .m-bubble, .m-hold')) return false
+  return Boolean(target.closest(NATIVE_HOLD_FIELDS))
 }
 
 /** Block the browser callout/context menu so custom long-press can run. Never stopPropagation — our handlers still need the event. */
@@ -148,4 +158,11 @@ export function installGlobalNativeHoldBlocker(root: Pick<Document, 'addEventLis
     root.removeEventListener('touchcancel', reset, { capture: true } as EventListenerOptions)
     root.removeEventListener('contextmenu', onContextMenu, { capture: true } as EventListenerOptions)
   }
+}
+
+export function queueSwipeZone(startY: number, y: number): 'send' | 'edit' | null {
+  const dy = y - startY
+  if (dy < 0) return 'send'
+  if (dy > 0) return 'edit'
+  return null
 }

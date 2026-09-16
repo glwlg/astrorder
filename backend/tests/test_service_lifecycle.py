@@ -33,6 +33,26 @@ def test_listening_pids_matches_exact_port_and_ignores_daemon_and_connections():
     assert service_lifecycle.listening_pids(output, 30009) == [222]
 
 
+def test_status_commands_do_not_create_windows_console(monkeypatch):
+    calls = []
+
+    class Completed:
+        stdout = ""
+        returncode = 0
+
+    monkeypatch.setattr(
+        service_lifecycle.subprocess,
+        "run",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or Completed(),
+    )
+    service_lifecycle.current_listening_pids(30001)
+    service_lifecycle.command_line_for_pid(123)
+
+    assert all(
+        call[1]["creationflags"] == service_lifecycle.HIDDEN_PROCESS_FLAGS for call in calls
+    )
+
+
 def test_select_owned_app_pid_requires_exact_production_entrypoint():
     assert service_lifecycle.select_owned_app_pid(
         [111],

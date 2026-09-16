@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import json
 import queue
+import re
+import sys
 import threading
 from collections.abc import Callable
 from typing import Any
@@ -48,8 +50,13 @@ class HermesTransport:
     def _run(self) -> None:
         try:
             asyncio.run(self._session())
-        except Exception:  # noqa: BLE001 - transport thread must fail closed on connection errors
-            return
+        except Exception as exc:  # noqa: BLE001 - transport thread must fail closed on connection errors
+            detail = re.sub(r"(?i)(bearer\s+)[^\s,;]+", r"\1[REDACTED]", str(exc))[:400]
+            print(
+                f"[astrorder-hermes] connector failed: {type(exc).__name__}: {detail}",
+                file=sys.stderr,
+                flush=True,
+            )
 
     async def _connect(self):
         import websockets

@@ -42,7 +42,7 @@ def test_native_raw_projection_preserves_reasoning_and_tool_arguments():
     assert any(row['kind'] == 'tool' and row['text'] == 'result' for row in projected)
 
 
-def test_api_imports_only_requested_page_without_full_resume_or_live_replay(tmp_path):
+def test_api_imports_only_requested_page_without_full_resume_or_live_replay(tmp_path, monkeypatch):
     from types import SimpleNamespace
     from unittest.mock import AsyncMock
     from fastapi.testclient import TestClient
@@ -59,8 +59,25 @@ def test_api_imports_only_requested_page_without_full_resume_or_live_replay(tmp_
         endpoint = '/api/v1/sessions/native/messages'
         assert client.get(endpoint, params={'agent_id': 'source'}).status_code == 401
         cursor = store.latest_cursor()
+        get_message = store.get_message
+        get_message_calls = 0
+
+        def counted_get_message(*args):
+            nonlocal get_message_calls
+            get_message_calls += 1
+            return get_message(*args)
+
+        monkeypatch.setattr(store, 'get_message', counted_get_message)
+        monkeypatch.setattr(
+            store,
+            'upsert_message',
+            lambda _item: (_ for _ in ()).throw(
+                AssertionError('native history must use one batch transaction')
+            ),
+        )
         response = client.get(endpoint, params={'agent_id': 'source', 'limit': 2}, headers={'Authorization': 'Bearer test-only'})
         assert response.status_code == 200
+        assert get_message_calls == 1
         page = response.json()
         assert [row['text'] for row in page['items']] == ['message-499', 'message-500']
         assert len(store.list_messages('source', 'native', None, 200)[0]) == 2

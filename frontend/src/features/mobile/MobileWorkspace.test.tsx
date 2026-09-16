@@ -18,6 +18,12 @@ afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 function mount() {
   return render(<MantineProvider><QueryClientProvider client={new QueryClient()}><MemoryRouter initialEntries={['/mobile/chat/native-test?agent_id=inert']}><MobileWorkspace /></MemoryRouter></QueryClientProvider></MantineProvider>)
 }
+async function dropQueued(zone: 'send' | 'edit') {
+  const item = document.querySelector('.m-queue-item') as HTMLElement
+  fireEvent.pointerDown(item, { pointerId: 1, button: 0, clientX: 80, clientY: 400 })
+  fireEvent.pointerMove(item, { pointerId: 1, clientX: 80, clientY: zone === 'send' ? 380 : 420 })
+  fireEvent.pointerUp(item, { pointerId: 1, button: 0, clientX: 80, clientY: zone === 'send' ? 380 : 420 })
+}
 beforeEach(() => {
   memory.rows = []
   const preferences = { appearance: {}, session_pins: {}, pinned_projects: [], project_order: [] }
@@ -79,6 +85,14 @@ describe('independent mobile composer', () => {
     await waitFor(() => expect(create).toHaveBeenCalledWith(expect.objectContaining({ text: '直接发送', action: 'send' })))
     expect(memory.rows).toEqual([])
   })
+  it('sends on pointer down so dismissing the keyboard does not eat the tap', async () => {
+    useAstrorderStore.getState().setConnection('connected')
+    const create = vi.spyOn(api, 'createCommand').mockImplementation(async input => ({ ...input, state: 'accepted', attachments: [], created_at: session.updated_at, error: null }))
+    mount()
+    fireEvent.change(screen.getByLabelText('消息内容'), { target: { value: '按下即发' } })
+    fireEvent.pointerDown(screen.getByRole('button', { name: '发送' }), { button: 0 })
+    await waitFor(() => expect(create).toHaveBeenCalledWith(expect.objectContaining({ text: '按下即发', action: 'send' })))
+  })
   it('keeps sending available while skill evolution runs in the background', async () => {
     useAstrorderStore.getState().setConnection('connected')
     useAstrorderStore.getState().mergeTasks([{ id: 'skill-task', session_id: session.id, agent_id: session.agent_id, kind: 'background', title: '工具：skill_manage', status: 'running', progress: { blocking: false }, command: null, logs: [], target_id: 'call', created_at: session.updated_at, updated_at: session.updated_at }])
@@ -98,9 +112,19 @@ describe('independent mobile composer', () => {
     await waitFor(() => expect(memory.rows[0]?.state).toBe('queued'))
     expect(create).not.toHaveBeenCalled()
     expect(selectMessages(useAstrorderStore.getState(), 'inert', 'native-test')).toEqual([])
-    fireEvent.click(screen.getByRole('button', { name: /消息队列/ }))
-    fireEvent.click(screen.getByRole('button', { name: '立即引导' }))
+    await dropQueued('send')
     await waitFor(() => expect(create).toHaveBeenCalledWith(expect.objectContaining({ text: '排队消息', action: 'send' })))
+  })
+  it('edits a queued message back into the composer', async () => {
+    useAstrorderStore.getState().setConnection('connected')
+    useAstrorderStore.getState().hydrateBootstrap({ protocol_version: 1, cursor: 1, agents: [{ id: 'inert', kind: 'hermes', name: '协议测试', status: 'ready', capabilities: ['chat', 'stop', 'attachments'], limitation: null }], sessions: [{ ...session, status: 'running' }] })
+    mount()
+    fireEvent.change(screen.getByLabelText('消息内容'), { target: { value: '待编辑消息' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送' }))
+    await waitFor(() => expect(memory.rows[0]?.state).toBe('queued'))
+    await dropQueued('edit')
+    await waitFor(() => expect(screen.getByLabelText('消息内容')).toHaveValue('待编辑消息'))
+    expect(memory.rows).toEqual([])
   })
   it('confirms model selection inside the mobile sheet, without a native browser confirm', async () => {
     vi.spyOn(api, 'getSessionModels').mockResolvedValue({ items: [{ provider: 'p', model: 'm', label: 'Provider · m' }] })
@@ -161,6 +185,40 @@ describe('independent mobile composer', () => {
     fireEvent.touchEnd(shell, { changedTouches: [{ clientX: 112, clientY: 307 }] })
     expect(await screen.findByRole('dialog', { name: '会话列表' })).toBeInTheDocument()
     expect(view.container.querySelector('.m-session-sheet')).toBeInTheDocument()
+  })
+  it('swipes through open session cards in an infinite loop', async () => {
+    useAstrorderStore.getState().hydrateBootstrap({
+      protocol_version: 1,
+      cursor: 1,
+      agents: [{ id: 'inert', kind: 'hermes', name: '协议测试', status: 'ready', capabilities: ['chat'], limitation: null }],
+      sessions: [
+        { ...session, id: 'session-1', is_open: true },
+        { ...session, id: 'session-2', is_open: true },
+      ],
+    })
+    const view = render(
+      <MantineProvider>
+        <QueryClientProvider client={new QueryClient()}>
+          <MemoryRouter initialEntries={['/mobile/chat/session-2?agent_id=inert']}>
+            <MobileWorkspace />
+          </MemoryRouter>
+        </QueryClientProvider>
+      </MantineProvider>,
+    )
+    const transcript = view.container.querySelector('.m-transcript')!
+    // Swipe next from session-2 (the tail) -> should loop back to session-1
+    fireEvent.touchStart(transcript, { touches: [{ clientX: 260, clientY: 300 }] })
+    fireEvent.touchEnd(transcript, { changedTouches: [{ clientX: 140, clientY: 390 }] })
+    await waitFor(() => {
+      expect(view.container.querySelector('.m-session-deck')).toHaveAttribute('data-session-key', 'inert::session-1')
+    })
+    // Swipe previous from session-1 (the head) -> should loop back to session-2
+    const nextTranscript = view.container.querySelector('.m-session-stage:last-child .m-transcript')!
+    fireEvent.touchStart(nextTranscript, { touches: [{ clientX: 140, clientY: 390 }] })
+    fireEvent.touchEnd(nextTranscript, { changedTouches: [{ clientX: 260, clientY: 300 }] })
+    await waitFor(() => {
+      expect(view.container.querySelector('.m-session-deck')).toHaveAttribute('data-session-key', 'inert::session-2')
+    })
   })
   it('does not close the session drawer on a vertical list scroll', async () => {
     const view = mount()
@@ -317,5 +375,68 @@ describe('independent mobile composer', () => {
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '停止任务？' })).not.toBeInTheDocument())
     expect(stop).not.toHaveBeenCalled()
     expect(screen.queryByRole('button', { name: '停止任务' })).not.toBeInTheDocument()
+  })
+
+  it('opens agent command menu on typing / in mobile composer and selects command', async () => {
+    vi.spyOn(api, 'getAgentCommands').mockResolvedValue({
+      items: [
+        { name: 'compact', description: '压缩上下文', input_hint: null },
+      ],
+    })
+    mount()
+    const input = screen.getByRole('textbox', { name: '消息内容' })
+    fireEvent.change(input, { target: { value: '/' } })
+    const listbox = await screen.findByRole('listbox', { name: 'Agent 命令' })
+    expect(listbox).toBeInTheDocument()
+    expect(screen.getByText('/compact')).toBeInTheDocument()
+    fireEvent.click(screen.getByText('/compact'))
+    expect(input).toHaveValue('/compact')
+  })
+
+  it('opens agent mention menu on typing @ in mobile composer and selects mention', async () => {
+    vi.spyOn(api, 'getAgentMentions').mockResolvedValue({
+      items: [
+        { name: 'browser', description: '浏览器操作技能', kind: 'skill' as const, path: '/skills/browser' },
+      ],
+    })
+    vi.spyOn(api, 'searchFiles').mockResolvedValue({ root: '/workspace', items: [] })
+    mount()
+    const input = screen.getByRole('textbox', { name: '消息内容' })
+    fireEvent.change(input, { target: { value: '@' } })
+    const listbox = await screen.findByRole('listbox', { name: '可提及资源' })
+    expect(listbox).toBeInTheDocument()
+    expect(screen.getByText('@browser')).toBeInTheDocument()
+    fireEvent.click(screen.getByText('@browser'))
+    expect(input).toHaveValue('@browser ')
+  })
+
+  it('offers handoff dialog from session menu when another agent is available', async () => {
+    useAstrorderStore.getState().hydrateBootstrap({
+      protocol_version: 1,
+      cursor: 0,
+      agents: [
+        { id: 'inert', kind: 'hermes', name: 'Hermes', status: 'ready', capabilities: ['chat', 'stop', 'attachments'], limitation: null },
+        { id: 'codex', kind: 'codex', name: 'Codex', status: 'ready', capabilities: ['chat'], limitation: null },
+      ],
+      sessions: [session],
+    })
+    mount()
+    fireEvent.click(screen.getByRole('button', { name: '会话操作' }))
+    const handoffItem = await screen.findByRole('menuitem', { name: '转交' })
+    expect(handoffItem).toBeInTheDocument()
+    fireEvent.click(handoffItem)
+    expect(await screen.findByRole('dialog', { name: '转交会话' })).toBeInTheDocument()
+  })
+
+  it('opens rename modal and updates session title', async () => {
+    const update = vi.spyOn(api, 'updateSession').mockResolvedValue({ ...session, title: '新会话标题' })
+    mount()
+    fireEvent.click(screen.getByRole('button', { name: '会话操作' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: '重命名' }))
+    const dialog = await screen.findByRole('dialog', { name: '重命名会话' })
+    const input = within(dialog).getByRole('textbox', { name: '会话名称' })
+    fireEvent.change(input, { target: { value: '新会话标题' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(update).toHaveBeenCalledWith(session.id, { agent_id: session.agent_id, title: '新会话标题' }))
   })
 })
