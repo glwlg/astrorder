@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { notifications as mantineNotifications } from '@mantine/notifications'
 import type { QueryClient } from '@tanstack/react-query'
 import { connectEventStream, type EventStreamStatus } from '../api/eventStream'
@@ -12,7 +12,9 @@ function storeStatus(status: EventStreamStatus) {
   useAstrorderStore.getState().setConnection(connection)
 }
 
-export function useEventStream(authenticated: boolean, queryClient: QueryClient): void {
+export function useEventStream(authenticated: boolean, queryClient: QueryClient, navigate?: (to: string) => void): void {
+  const navigateRef = useRef(navigate)
+  navigateRef.current = navigate
   useEffect(() => {
     if (!authenticated) return
     let stopped = false
@@ -43,9 +45,29 @@ export function useEventStream(authenticated: boolean, queryClient: QueryClient)
           mantineNotifications.show({
             id: notification.key,
             title: notification.title,
-            message: notification.message,
+            message: `${notification.message}（点击跳转）`,
             color: notification.kind === 'task_failed' ? 'red' : notification.kind === 'approval_pending' ? 'yellow' : 'teal',
-            autoClose: 8000,
+            autoClose: 10000,
+            style: { cursor: 'pointer' },
+            onClick: () => {
+              if (notification.session_id && notification.agent_id) {
+                const isMobile = typeof window !== 'undefined' && (
+                  window.location.pathname.startsWith('/mobile') ||
+                  window.innerWidth < 768 ||
+                  window.matchMedia?.('(max-width: 767px)').matches
+                )
+                const prefix = isMobile ? '/mobile' : ''
+                const targetPath = prefix + '/chat/' + encodeURIComponent(notification.session_id) + '?agent_id=' + encodeURIComponent(notification.agent_id)
+                const nav = navigateRef.current || navigate
+                if (nav) {
+                  nav(targetPath)
+                } else if (typeof window !== 'undefined') {
+                  window.history.pushState({}, '', targetPath)
+                  window.dispatchEvent(new PopStateEvent('popstate'))
+                }
+                mantineNotifications.hide(notification.key)
+              }
+            },
           })
           deliverBrowserNotification(notification)
         }
@@ -86,22 +108,28 @@ export function useEventStream(authenticated: boolean, queryClient: QueryClient)
               sidecar.openSideChat(sid, aid, titleStr)
             } else if (pid === 'agentgraph') {
               sidecar.openAgentGraph(sid, aid, titleStr)
+            } else if (pid === 'blackboard') {
+              sidecar.openBlackboard(sid, aid)
             } else {
               // Artifact viewers like drawio, mermaid, excalidraw, diff, three, html, monaco
               const filePath = pathStr || titleStr || pid
               const name = filePath.split(/[\\/]/).pop() || filePath
+              let targetViewer = `${pid}-viewer`
+              if (pid === 'html' || filePath.toLowerCase().endsWith('.html') || filePath.toLowerCase().endsWith('.htm')) {
+                targetViewer = 'html-viewer'
+              }
               const artifact: ArtifactRef = {
                 id: `artifact:${pid}:${sid}:${filePath}`,
                 name: titleStr || name,
                 kind: 'workspace_file',
                 path: filePath,
-                mediaType: 'text/plain',
-                readUrl: urlStr || '',
+                mediaType: pid === 'html' || filePath.toLowerCase().endsWith('.html') ? 'text/html' : 'text/plain',
+                readUrl: urlStr || (filePath ? `/api/v1/files/raw?path=${encodeURIComponent(filePath)}` : ''),
                 writable: true,
                 sessionId: sid,
                 agentId: aid,
               }
-              sidecar.openArtifact(artifact, `${pid}-viewer`)
+              sidecar.openArtifact(artifact, targetViewer)
             }
           } else if (action === 'close') {
             if (payload.collapse) {
@@ -143,6 +171,12 @@ export function useEventStream(authenticated: boolean, queryClient: QueryClient)
               localStorage.setItem(GRID_STORAGE_KEY, String(cols))
             } catch {}
           }
+        }
+        if (event.type === 'swarm.telemetry.event' && event.data) {
+          window.dispatchEvent(new CustomEvent('astrorder:swarm-telemetry-changed', { detail: event.data }))
+        }
+        if (event.type === 'swarm.sos.event' && event.data) {
+          window.dispatchEvent(new CustomEvent('astrorder:swarm-sos-changed', { detail: event.data }))
         }
         if (useAstrorderStore.getState().resyncRequired) {
           void queryClient.invalidateQueries({ queryKey: ['astrorder', 'bootstrap'] })

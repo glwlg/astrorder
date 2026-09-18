@@ -60,6 +60,9 @@ export interface Session {
   control_state?: string
   handoff_from_agent_id?: string | null
   handoff_from_session_id?: string | null
+  parent_session_id?: string | null
+  parent_agent_id?: string | null
+  parent_session_key?: string | null
 }
 
 export interface Project {
@@ -310,3 +313,38 @@ export interface OutboxEntry {
 }
 
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error'
+
+
+export interface BotGroupMember {
+  machine_id: string
+  agent_id: string
+  name?: string | null
+  alias?: string | null
+  system_role_prompt?: string | null
+}
+
+export interface BotGroup {
+  id: string
+  name: string
+  description?: string | null
+  members: BotGroupMember[]
+  max_hops: number
+  active_hop?: number
+  active_speaker_agent_id?: string | null
+  active_speakers?: string[]
+  created_at: string
+  updated_at: string
+}
+
+export interface GroupMessage {
+  id: string
+  group_id: string
+  sender_type: 'user' | 'agent'
+  sender_id: string
+  sender_name?: string | null
+  text: string
+  mentions: string[]
+  hop_count: number
+  attachments?: string[]
+  created_at: string
+}

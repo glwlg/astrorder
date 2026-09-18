@@ -57,7 +57,12 @@ export function MonacoViewer({ artifact, onSave, onDirtyChange }: ViewerContext)
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(artifact.readUrl)
+      const headers: Record<string, string> = {}
+      try {
+        const token = localStorage.getItem('astrorder:token')
+        if (token) headers['Authorization'] = `Bearer ${token}`
+      } catch {}
+      const res = await fetch(artifact.readUrl, { headers })
       if (!res.ok) throw new Error(`读取失败 (${res.status})`)
       const text = await res.text()
       setContent(text)
@@ -75,6 +80,20 @@ export function MonacoViewer({ artifact, onSave, onDirtyChange }: ViewerContext)
   useEffect(() => {
     void fetchContent()
   }, [fetchContent])
+
+  const editorRef = useRef<any>(null)
+  const handleEditorMount = (editor: any) => {
+    editorRef.current = editor
+    const line = (artifact.metadata as any)?.line
+    if (typeof line === 'number' && line > 0) {
+      setTimeout(() => {
+        try {
+          editor.revealLineInCenter(line)
+          editor.setPosition({ lineNumber: line, column: 1 })
+        } catch {}
+      }, 80)
+    }
+  }
 
   const handleEditorChange = (value: string | undefined) => {
     const val = value ?? ''
@@ -196,6 +215,7 @@ export function MonacoViewer({ artifact, onSave, onDirtyChange }: ViewerContext)
           </div>
         ) : (
           <Editor
+            onMount={handleEditorMount}
             height="100%"
             language={language}
             value={content}

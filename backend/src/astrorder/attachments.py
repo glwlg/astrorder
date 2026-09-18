@@ -86,12 +86,19 @@ class AttachmentManager:
         record = self.store.get_attachment(attachment_id)
         if record is None:
             return None
-        root = self.root.resolve()
-        candidate = (root / str(record["storage_name"])).resolve()
+        storage_name = str(record.get("storage_name") or "")
+        if not storage_name or "/" in storage_name or chr(92) in storage_name or ".." in storage_name:
+            return None
+        candidate = self.root / storage_name
+        if candidate.is_file():
+            return candidate, record
         try:
-            candidate.relative_to(root)
-        except ValueError:
-            return None
-        if not candidate.is_file():
-            return None
-        return candidate, record
+            resolved = candidate.resolve()
+            if resolved.is_file():
+                return resolved, record
+        except Exception:
+            pass
+        legacy = Path("P:/workspace/glwlg/ai/astrorder/data/attachments") / storage_name
+        if legacy.is_file():
+            return legacy, record
+        return None

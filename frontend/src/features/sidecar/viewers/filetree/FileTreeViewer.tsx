@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ActionIcon, Badge, Button, Collapse, Group, LoadingOverlay, Paper, ScrollArea, Text } from '@mantine/core'
+import { ActionIcon, Badge, Button, Collapse, Group, LoadingOverlay, Menu, Paper, ScrollArea, Text } from '@mantine/core'
+import { notifications } from '@mantine/notifications'
 import {
+  IconCheck,
   IconChevronDown,
   IconChevronRight,
+  IconCopy,
+  IconDownload,
   IconFile,
   IconFolder,
   IconFolderOpen,
@@ -55,7 +59,10 @@ function FileTreeNodeItem({
   agentId,
   connectionId,
   expandedPaths,
+  selectedPath,
+  onSelectPath,
   onToggleDirectory,
+  onCopyFiles,
   level = 0,
 }: {
   node: TreeNode
@@ -63,13 +70,18 @@ function FileTreeNodeItem({
   agentId: string
   connectionId?: string
   expandedPaths: Set<string>
+  selectedPath: string | null
+  onSelectPath: (path: string) => void
   onToggleDirectory: (path: string) => void
+  onCopyFiles: (paths: string[]) => Promise<void>
   level?: number
 }) {
   const opened = expandedPaths.has(node.path)
+  const isSelected = selectedPath === node.path
+  const [menuOpened, setMenuOpened] = useState(false)
   const openArtifact = useSidecarStore((s) => s.openArtifact)
 
-  const handleFileClick = () => {
+  const openFile = () => {
     if (node.is_dir) {
       onToggleDirectory(node.path)
       return
@@ -89,49 +101,102 @@ function FileTreeNodeItem({
     if (viewer) {
       openArtifact(artifact, viewer.id)
     } else {
-      // 默认用代码编辑器打开查看
       openArtifact(artifact, 'monaco-viewer')
     }
   }
 
+  const handleClick = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    setMenuOpened(false)
+    onSelectPath(node.path)
+  }
+
+  const handleDoubleClick = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    openFile()
+  }
+
   return (
     <div>
-      <Group
-        gap={4}
-        wrap="nowrap"
-        onClick={handleFileClick}
-        style={{
-          padding: '3px 6px',
-          paddingLeft: 6 + level * 14,
-          borderRadius: 4,
-          cursor: 'pointer',
-          userSelect: 'none',
-          fontSize: 12,
-        }}
-        className="file-tree-row"
-      >
-        {node.is_dir ? (
-          <>
-            {opened ? <IconChevronDown size={13} color="gray" /> : <IconChevronRight size={13} color="gray" />}
-            {opened ? <IconFolderOpen size={14} color="#f59e0b" /> : <IconFolder size={14} color="#f59e0b" />}
-          </>
-        ) : (
-          <>
-            <span style={{ width: 13 }} />
-            <IconFile size={14} color="var(--astr-muted)" />
-          </>
-        )}
+      <Menu shadow="md" width={180} opened={menuOpened} onChange={setMenuOpened} trigger="hover" openDelay={9999999} withinPortal>
+        <Menu.Target>
+          <Group
+            gap={4}
+            wrap="nowrap"
+            onClick={handleClick}
+            onDoubleClick={handleDoubleClick}
+            onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onSelectPath(node.path); setMenuOpened(true) }}
+            style={{
+              padding: '3px 6px',
+              paddingLeft: 6 + level * 14,
+              borderRadius: 4,
+              cursor: 'pointer',
+              userSelect: 'none',
+              fontSize: 12,
+              backgroundColor: isSelected ? 'var(--astr-hover, rgba(59, 130, 246, 0.15))' : undefined,
+              outline: isSelected ? '1px solid var(--astr-blue, #3b82f6)' : 'none',
+            }}
+            className="file-tree-row"
+          >
+            {node.is_dir ? (
+              <>
+                <span
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onToggleDirectory(node.path)
+                  }}
+                  style={{ display: 'inline-flex', alignItems: 'center' }}
+                >
+                  {opened ? <IconChevronDown size={13} color="gray" /> : <IconChevronRight size={13} color="gray" />}
+                </span>
+                {opened ? <IconFolderOpen size={14} color="#f59e0b" /> : <IconFolder size={14} color="#f59e0b" />}
+              </>
+            ) : (
+              <>
+                <span style={{ width: 13 }} />
+                <IconFile size={14} color="var(--astr-muted)" />
+              </>
+            )}
 
-        <Text size="xs" truncate style={{ flex: 1 }}>
-          {node.name}
-        </Text>
+            <Text size="xs" truncate style={{ flex: 1, fontWeight: isSelected ? 600 : 400 }}>
+              {node.name}
+            </Text>
 
-        {!node.is_dir && node.size !== undefined && node.size > 0 && (
-          <Text size="10px" c="dimmed">
-            {node.size > 1024 ? `${(node.size / 1024).toFixed(1)}KB` : `${node.size}B`}
-          </Text>
-        )}
-      </Group>
+            {!node.is_dir && node.size !== undefined && node.size > 0 && (
+              <Text size="10px" c="dimmed">
+                {node.size > 1024 ? `${(node.size / 1024).toFixed(1)}KB` : `${node.size}B`}
+              </Text>
+            )}
+          </Group>
+        </Menu.Target>
+
+        <Menu.Dropdown>
+          <Menu.Item
+            leftSection={<IconCopy size={14} />}
+            onClick={() => void onCopyFiles([node.path])}
+          >
+            复制文件 (Ctrl+C)
+          </Menu.Item>
+          <Menu.Item
+            leftSection={<IconDownload size={14} />}
+            onClick={() => {
+              const url = `/api/v1/files/raw?path=${encodeURIComponent(node.path)}&download=1&session_id=${encodeURIComponent(sessionId)}&connection_id=${encodeURIComponent(connectionId || '')}`
+              window.open(url, '_blank')
+            }}
+          >
+            下载 / 另存为
+          </Menu.Item>
+          <Menu.Divider />
+          <Menu.Item
+            onClick={() => {
+              void navigator.clipboard.writeText(node.path)
+              notifications.show({ message: '路径已复制到剪贴板', color: 'teal', icon: <IconCheck size={14} /> })
+            }}
+          >
+            复制路径
+          </Menu.Item>
+        </Menu.Dropdown>
+      </Menu>
 
       {node.is_dir && node.children && (
         <Collapse expanded={opened}>
@@ -143,7 +208,10 @@ function FileTreeNodeItem({
               agentId={agentId}
               connectionId={connectionId}
               expandedPaths={expandedPaths}
+              selectedPath={selectedPath}
+              onSelectPath={onSelectPath}
               onToggleDirectory={onToggleDirectory}
+              onCopyFiles={onCopyFiles}
               level={level + 1}
             />
           ))}
@@ -160,6 +228,8 @@ export function FileTreeViewer({ artifact }: ViewerContext) {
   const [rootPath, setRootPath] = useState('')
   const storageKey = expansionStorageKey(artifact)
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(() => readExpandedPaths(storageKey))
+  const [selectedPath, setSelectedPath] = useState<string | null>(null)
+  const [copying, setCopying] = useState(false)
 
   const toggleDirectory = useCallback((path: string) => {
     setExpandedPaths((current) => {
@@ -194,8 +264,94 @@ export function FileTreeViewer({ artifact }: ViewerContext) {
     void fetchTree()
   }, [fetchTree])
 
+  const handleCopyFiles = useCallback(async (paths: string[]) => {
+    if (!paths.length) return
+    setCopying(true)
+    const id = notifications.show({
+      loading: true,
+      title: '正在复制文件',
+      message: '正在准备文件句柄与剪贴板数据…',
+      autoClose: false,
+    })
+
+    try {
+      const res = await fetch('/api/v1/files/stage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          paths,
+          session_id: artifact.sessionId,
+          connection_id: artifact.connectionId || null,
+        }),
+      })
+
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}))
+        throw new Error(errJson.detail || `暂存文件失败 (${res.status})`)
+      }
+
+      const data = await res.json()
+      const localPaths: string[] = data.local_paths || []
+      if (!localPaths.length) {
+        throw new Error('未获取到有效物理文件路径')
+      }
+
+      if (!data.clipboard_set) {
+        const desktopApi = (window as unknown as { astrorderDesktop?: { setClipboardFiles?: (paths: string[]) => Promise<boolean> } }).astrorderDesktop
+        if (desktopApi?.setClipboardFiles) {
+          const ok = await desktopApi.setClipboardFiles(localPaths)
+          if (!ok) throw new Error('写入 Windows 剪贴板失败')
+        }
+      }
+
+      notifications.update({
+        id,
+        color: 'teal',
+        title: '已复制到系统剪贴板',
+        message: `已复制 ${localPaths.length} 个文件/文件夹，可直接在 Xftp 或资源管理器中按 Ctrl+V 传输！`,
+        icon: <IconCheck size={16} />,
+        autoClose: 4000,
+        loading: false,
+      })
+    } catch (err: unknown) {
+      notifications.update({
+        id,
+        color: 'red',
+        title: '复制文件失败',
+        message: err instanceof Error ? err.message : '未知错误',
+        autoClose: 5000,
+        loading: false,
+      })
+    } finally {
+      setCopying(false)
+    }
+  }, [artifact.connectionId, artifact.sessionId])
+
+  useEffect(() => {
+    const onKeyDown = (e: globalThis.KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
+        const activeTag = (document.activeElement?.tagName || '').toLowerCase()
+        if (activeTag === 'input' || activeTag === 'textarea') return
+        const sel = window.getSelection()
+        if (sel && sel.toString().trim().length > 0) return
+
+        if (selectedPath) {
+          e.preventDefault()
+          void handleCopyFiles([selectedPath])
+        }
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [handleCopyFiles, selectedPath])
+
   return (
-    <div className="filetree-viewer-pane" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div
+      className="filetree-viewer-pane"
+      style={{ display: 'flex', flexDirection: 'column', height: '100%' }}
+      tabIndex={0}
+      onClick={() => setSelectedPath(null)}
+    >
       <Paper p="xs" withBorder style={{ borderBottom: '1px solid var(--astr-border)', borderRadius: 0 }}>
         <Group justify="space-between" wrap="nowrap">
           <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
@@ -208,7 +364,22 @@ export function FileTreeViewer({ artifact }: ViewerContext) {
             </Badge>
           </Group>
           <Group gap={6} wrap="nowrap">
-            <ActionIcon variant="subtle" size="sm" title="刷新文件树" onClick={() => void fetchTree()}>
+            {selectedPath && (
+              <Button
+                size="compact-xs"
+                variant="light"
+                color="blue"
+                leftSection={<IconCopy size={12} />}
+                loading={copying}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  void handleCopyFiles([selectedPath])
+                }}
+              >
+                复制到剪贴板
+              </Button>
+            )}
+            <ActionIcon variant="subtle" size="sm" title="刷新文件树" onClick={(e) => { e.stopPropagation(); void fetchTree() }}>
               <IconRefresh size={14} />
             </ActionIcon>
           </Group>
@@ -216,7 +387,7 @@ export function FileTreeViewer({ artifact }: ViewerContext) {
       </Paper>
 
       <div style={{ flex: 1, position: 'relative', minHeight: 0 }}>
-        <LoadingOverlay visible={loading} />
+        <LoadingOverlay visible={loading || copying} />
         {error ? (
           <div style={{ padding: 24, textAlign: 'center', color: 'var(--astr-muted)' }}>
             <Text size="sm">{error}</Text>
@@ -234,7 +405,10 @@ export function FileTreeViewer({ artifact }: ViewerContext) {
                 agentId={artifact.agentId}
                 connectionId={artifact.connectionId}
                 expandedPaths={expandedPaths}
+                selectedPath={selectedPath}
+                onSelectPath={setSelectedPath}
                 onToggleDirectory={toggleDirectory}
+                onCopyFiles={handleCopyFiles}
                 level={0}
               />
             ))}

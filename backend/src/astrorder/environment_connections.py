@@ -61,10 +61,8 @@ class RemoteCodex(CodexConnection):
 
     def remote_json(self, source):
         try:
-            loader = 'import sys\nexec(compile(sys.stdin.read(), "<astrorder-remote>", "exec"))'
             result = subprocess.run(
-                self.ssh_argv() + [build_remote_python_command(loader)],
-                input=source,
+                self.ssh_argv() + [build_remote_python_command(source)],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
                 text=True,
@@ -110,7 +108,12 @@ print(json.dumps(res))
             return set()
 
     def _client(self, config, on_notification, environment=None, **kwargs):
+        import os
         child_environment = dict(environment or {})
+        for k in ("OPENCODEX_API_AUTH_TOKEN", "STARSHIP_SESSION_KEY", "GROK45_API_KEY", "EMBED__API_KEY"):
+            v = os.environ.get(k)
+            if v and k not in child_environment:
+                child_environment[k] = v
         source = (
             'import json, os\n'
             'from pathlib import Path\n'

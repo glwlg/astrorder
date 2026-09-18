@@ -8,15 +8,17 @@ import { useEventStream } from './useEventStream'
 const mocks = vi.hoisted(() => ({
   connectEventStream: vi.fn(),
   show: vi.fn(),
+  hide: vi.fn(),
 }))
 
 vi.mock('../api/eventStream', () => ({ connectEventStream: mocks.connectEventStream }))
-vi.mock('@mantine/notifications', () => ({ notifications: { show: mocks.show } }))
+vi.mock('@mantine/notifications', () => ({ notifications: { show: mocks.show, hide: mocks.hide } }))
 
 afterEach(() => {
   useAstrorderStore.getState().resetRuntime()
   mocks.connectEventStream.mockReset()
   mocks.show.mockReset()
+  mocks.hide.mockReset()
 })
 
 function taskEvent(envelopeId: string, status = 'completed'): EventEnvelope {
@@ -109,5 +111,34 @@ describe('event stream notifications', () => {
     expect(mocks.show).toHaveBeenCalledOnce()
     expect(vi.mocked(Notification.requestPermission)).not.toHaveBeenCalled()
     expect(Object.keys(useAstrorderStore.getState().notifications)).toHaveLength(1)
+  })
+
+  it('navigates internally to mobile route when clicked on mobile without opening external window', () => {
+    let options: { onEvent: (event: EventEnvelope) => void } | undefined
+    mocks.connectEventStream.mockImplementation((nextOptions) => {
+      options = nextOptions
+      return vi.fn()
+    })
+    const navigate = vi.fn()
+    window.history.pushState({}, '', '/mobile/chat/old-session')
+    function CustomHarness() {
+      useEventStream(true, new QueryClient(), navigate)
+      return null
+    }
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <CustomHarness />
+      </QueryClientProvider>,
+    )
+    act(() => {
+      const failed = taskEvent('fail-1', 'failed')
+      failed.cursor = 2
+      options?.onEvent(failed)
+    })
+    expect(mocks.show).toHaveBeenCalledOnce()
+    const toastProps = mocks.show.mock.calls[0][0]
+    expect(typeof toastProps.onClick).toBe('function')
+    toastProps.onClick()
+    expect(navigate).toHaveBeenCalledWith('/mobile/chat/session-1?agent_id=agent-1')
   })
 })

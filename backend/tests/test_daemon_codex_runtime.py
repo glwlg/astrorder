@@ -287,6 +287,8 @@ async def test_daemon_owned_codex_runtime_keeps_native_transport_and_wals_notifi
                         "input": [
                             {"type": "text", "text": "same text is not an identity"},
                             {"type": "image", "url": "data:image/png;base64,aGVsbG8="},
+                            {"type": "mention", "name": "KubernetesTerminalView.vue", "path": "P:/workspace/src/KubernetesTerminalView.vue"},
+                            {"type": "skill", "name": "openai-docs", "path": "C:/Users/luwei/.codex/skills/openai-docs"},
                         ],
                         "params": {
                             "approvalPolicy": "on-request",
@@ -372,6 +374,8 @@ async def test_daemon_owned_codex_runtime_keeps_native_transport_and_wals_notifi
                     "input": [
                         {"type": "text", "text": "same text is not an identity"},
                         {"type": "image", "url": "data:image/png;base64,aGVsbG8="},
+                        {"type": "mention", "name": "KubernetesTerminalView.vue", "path": "P:/workspace/src/KubernetesTerminalView.vue"},
+                        {"type": "skill", "name": "openai-docs", "path": "C:/Users/luwei/.codex/skills/openai-docs"},
                     ],
                     "approvalPolicy": "on-request",
                     "sandboxPolicy": {"type": "workspaceWrite"},

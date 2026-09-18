@@ -1038,7 +1038,7 @@ class CodexConnection:
             return
         if not isinstance(sid, str) or self.store.get_session(self.agent_id, sid) is None:
             return
-        if method in {'turn/plan/updated', 'item/started', 'item/completed'}:
+        if method in {'turn/plan/updated', 'turn/goal/updated', 'goal/updated', 'goal/created', 'item/started', 'item/completed'}:
             project_tasks(self, method, params, timestamp())
         if method == 'thread/settings/updated':
             settings = params.get('threadSettings') or {}

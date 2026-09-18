@@ -18,7 +18,10 @@ def tool_name(capability_id: str) -> str:
 
 
 def capability_id(name: str) -> str:
-    return name.replace("_", ".", 1)
+    for item in CAPABILITIES:
+        if tool_name(item["id"]) == name:
+            return item["id"]
+    return name.replace("_", ".")
 
 
 def tools() -> list[dict[str, Any]]:

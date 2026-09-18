@@ -48,6 +48,14 @@ def project_tasks(
                 emit(task['id'], 'todo', task['title'], 'cancelled')
         for index, step in enumerate(plan):
             emit(f'codex:todo:{index}', 'todo', step['step'], statuses[step['status']])
+    elif method in {'turn/goal/updated', 'goal/updated', 'goal/created'}:
+        goal = params.get('goal') or params
+        objective = goal.get('objective') or goal.get('title') or goal.get('text')
+        if isinstance(objective, str) and objective.strip():
+            goal_status = goal.get('status', 'running')
+            status_map = {'pending': 'pending', 'running': 'running', 'active': 'running', 'in_progress': 'running', 'completed': 'completed', 'blocked': 'failed', 'failed': 'failed'}
+            mapped_status = status_map.get(goal_status, 'running')
+            emit('codex:goal:current', 'todo', f'目标: {objective.strip()}', mapped_status)
     elif method in {'item/started', 'item/completed'}:
         item = params.get('item')
         if not isinstance(item, dict) or not isinstance(item.get('id'), str):
@@ -104,6 +112,16 @@ def project_task_history(connection, sid, entries, started, *, refresh_unknown=F
                     {**step, 'status': 'inProgress' if step.get('status') == 'in_progress' else step.get('status')}
                     if isinstance(step, dict) else step for step in args['plan']
                 ]
+            elif item.get('type') == 'dynamicToolCall' and item.get('tool') in {'create_goal', 'update_goal'}:
+                args = item.get('arguments')
+                if isinstance(args, dict):
+                    obj = args.get('objective') or args.get('goal') or args.get('title')
+                    if isinstance(obj, str) and obj.strip():
+                        method = 'turn/goal/updated'
+                        params['goal'] = {'objective': obj.strip(), 'status': args.get('status', 'running')}
+                    elif item.get('tool') == 'update_goal' and args.get('status'):
+                        method = 'turn/goal/updated'
+                        params['goal'] = {'status': args['status']}
             if is_plan:
                 if plan_seen:
                     continue

@@ -1,6 +1,6 @@
 import { IconAlertTriangle, IconLoader2 } from '@tabler/icons-react'
 import { Alert, Button, Center, Paper, Stack, Text, Title } from '@mantine/core'
-import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
+import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { useMediaQuery } from '@mantine/hooks'
 import { MobileWorkspace } from '../features/mobile/MobileWorkspace'
 import { useQueryClient } from '@tanstack/react-query'
@@ -10,7 +10,9 @@ import { AppShellLayout } from './AppShellLayout'
 import { useAuthSession, useBootstrap } from '../hooks/useAstrorderData'
 import { useEventStream } from '../hooks/useEventStream'
 import { ChatPage } from '../features/chat/ChatPage'
+import { GroupsPage } from '../features/chat/GroupsPage'
 import { MonitorPage } from '../features/monitor/MonitorPage'
+import { SwarmPage } from '../features/monitor/SwarmPage'
 import { PluginsPage } from '../features/plugins/PluginsPage'
 import { AstrorderLoader } from '../components/AnimatedStatus'
 import { ShinyText } from '../components/animations/ShinyText'
@@ -65,9 +67,10 @@ function checkIsMobileViewport(): boolean {
 function AuthenticatedApp() {
   const mobileViewport = useMediaQuery(MOBILE_MEDIA_QUERY, checkIsMobileViewport())
   const location = useLocation()
+  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const bootstrap = useBootstrap(true)
-  useEventStream(Boolean(bootstrap.data), queryClient)
+  useEventStream(Boolean(bootstrap.data), queryClient, navigate)
 
   if (bootstrap.isLoading) return <LoadingPage label="正在读取已认证工作台…" />
   if (bootstrap.error) return <BootstrapError error={bootstrap.error} retry={() => void bootstrap.refetch()} />
@@ -91,7 +94,10 @@ function AuthenticatedApp() {
         <Route index element={<Navigate to="/chat" replace />} />
         <Route path="chat" element={<ChatPage />} />
         <Route path="chat/:sessionId" element={<ChatPage />} />
+        <Route path="groups" element={<GroupsPage />} />
+        <Route path="groups/:groupId" element={<GroupsPage />} />
         <Route path="monitor" element={<MonitorPage />} />
+        <Route path="swarm" element={<SwarmPage />} />
         <Route path="plugins" element={<PluginsPage />} />
         <Route path="*" element={<Navigate to="/chat" replace />} />
       </Route>

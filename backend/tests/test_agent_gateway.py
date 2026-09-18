@@ -262,6 +262,252 @@ def test_agent_gateway_lists_and_reads_sessions(tmp_path):
         assert mon_layout.status_code == 200
         assert json.loads(mon_layout.json()["result"]["content"][0]["text"])["columns"] == 3
 
+        # Test blackboard.set & get & delete
+        bb_set = client.post(
+            "/api/v1/agent/mcp",
+            headers={"Authorization": "Bearer connector-test"},
+            json={
+                "jsonrpc": "2.0",
+                "id": 12,
+                "method": "tools/call",
+                "params": {"name": "blackboard_set", "arguments": {"key": "auth_spec", "value": {"endpoint": "/refresh", "ttl": 3600}}},
+            },
+        )
+        assert bb_set.status_code == 200
+        assert json.loads(bb_set.json()["result"]["content"][0]["text"])["ok"] is True
+
+        bb_get = client.post(
+            "/api/v1/agent/mcp",
+            headers={"Authorization": "Bearer connector-test"},
+            json={
+                "jsonrpc": "2.0",
+                "id": 13,
+                "method": "tools/call",
+                "params": {"name": "blackboard_get", "arguments": {"key": "auth_spec"}},
+            },
+        )
+        assert bb_get.status_code == 200
+        get_data = json.loads(bb_get.json()["result"]["content"][0]["text"])
+        assert get_data["exists"] is True
+        assert get_data["value"]["ttl"] == 3600
+
+        bb_list = client.post(
+            "/api/v1/agent/mcp",
+            headers={"Authorization": "Bearer connector-test"},
+            json={
+                "jsonrpc": "2.0",
+                "id": 14,
+                "method": "tools/call",
+                "params": {"name": "blackboard_get", "arguments": {}},
+            },
+        )
+        assert bb_list.status_code == 200
+        list_data = json.loads(bb_list.json()["result"]["content"][0]["text"])
+        assert "auth_spec" in list_data["items"]
+
+        bb_del = client.post(
+            "/api/v1/agent/mcp",
+            headers={"Authorization": "Bearer connector-test"},
+            json={
+                "jsonrpc": "2.0",
+                "id": 15,
+                "method": "tools/call",
+                "params": {"name": "blackboard_delete", "arguments": {"key": "auth_spec"}},
+            },
+        )
+        assert bb_del.status_code == 200
+        assert json.loads(bb_del.json()["result"]["content"][0]["text"])["ok"] is True
+
+        # Test swarm.milestone declare, list, resolve
+        ms_dec = client.post(
+            "/api/v1/agent/mcp",
+            headers={"Authorization": "Bearer connector-test"},
+            json={
+                "jsonrpc": "2.0",
+                "id": 16,
+                "method": "tools/call",
+                "params": {"name": "swarm_milestone_declare", "arguments": {"milestone_id": "backend_ready", "title": "后端接口已就绪", "wake_session_key": new_key, "wake_prompt": "启动前端联调"}},
+            },
+        )
+        assert ms_dec.status_code == 200
+        assert json.loads(ms_dec.json()["result"]["content"][0]["text"])["ok"] is True
+
+        ms_list = client.post(
+            "/api/v1/agent/mcp",
+            headers={"Authorization": "Bearer connector-test"},
+            json={
+                "jsonrpc": "2.0",
+                "id": 17,
+                "method": "tools/call",
+                "params": {"name": "swarm_milestone_list", "arguments": {}},
+            },
+        )
+        assert ms_list.status_code == 200
+        ms_items = json.loads(ms_list.json()["result"]["content"][0]["text"])["items"]
+        assert any(item["id"] == "backend_ready" and item["status"] == "pending" for item in ms_items)
+
+        ms_res = client.post(
+            "/api/v1/agent/mcp",
+            headers={"Authorization": "Bearer connector-test"},
+            json={
+                "jsonrpc": "2.0",
+                "id": 18,
+                "method": "tools/call",
+                "params": {"name": "swarm_milestone_resolve", "arguments": {"milestone_id": "backend_ready", "result": {"api_url": "/api/v1/login"}}},
+            },
+        )
+        assert ms_res.status_code == 200
+        res_data = json.loads(ms_res.json()["result"]["content"][0]["text"])
+        assert res_data["ok"] is True
+        assert res_data["milestone"]["status"] == "resolved"
+        assert res_data["milestone"]["result"]["api_url"] == "/api/v1/login"
+
+        # Test swarm.telemetry report & get
+        tel_rep = client.post(
+            "/api/v1/agent/mcp",
+            headers={"Authorization": "Bearer connector-test"},
+            json={
+                "jsonrpc": "2.0",
+                "id": 19,
+                "method": "tools/call",
+                "params": {
+                    "name": "swarm_telemetry_report",
+                    "arguments": {
+                        "key": new_key,
+                        "progress": 75,
+                        "phase": "running_tests",
+                        "status": "ok",
+                        "summary": "7/7 tests passed, building bundle",
+                        "artifacts": ["dist/bundle.js"],
+                    },
+                },
+            },
+        )
+        assert tel_rep.status_code == 200
+        assert json.loads(tel_rep.json()["result"]["content"][0]["text"])["ok"] is True
+
+        tel_get = client.post(
+            "/api/v1/agent/mcp",
+            headers={"Authorization": "Bearer connector-test"},
+            json={
+                "jsonrpc": "2.0",
+                "id": 20,
+                "method": "tools/call",
+                "params": {"name": "swarm_telemetry_get", "arguments": {"key": new_key}},
+            },
+        )
+        assert tel_get.status_code == 200
+        rep_data = json.loads(tel_get.json()["result"]["content"][0]["text"])
+        assert rep_data["exists"] is True
+        assert rep_data["report"]["progress"] == 75
+        assert rep_data["report"]["phase"] == "running_tests"
+
+        # Test swarm.sos escalate, list, resolve
+        sos_esc = client.post(
+            "/api/v1/agent/mcp",
+            headers={"Authorization": "Bearer connector-test"},
+            json={
+                "jsonrpc": "2.0",
+                "id": 21,
+                "method": "tools/call",
+                "params": {
+                    "name": "swarm_sos_escalate",
+                    "arguments": {
+                        "key": new_key,
+                        "reason": "Port 3000 collision",
+                        "context": "EADDRINUSE 0.0.0.0:3000",
+                    },
+                },
+            },
+        )
+        assert sos_esc.status_code == 200
+        sos_data = json.loads(sos_esc.json()["result"]["content"][0]["text"])
+        assert sos_data["ok"] is True
+        sos_id = sos_data["sos"]["id"]
+        assert sos_data["sos"]["status"] == "active"
+
+        sos_list = client.post(
+            "/api/v1/agent/mcp",
+            headers={"Authorization": "Bearer connector-test"},
+            json={
+                "jsonrpc": "2.0",
+                "id": 22,
+                "method": "tools/call",
+                "params": {"name": "swarm_sos_list", "arguments": {}},
+            },
+        )
+        assert sos_list.status_code == 200
+        assert any(s["id"] == sos_id for s in json.loads(sos_list.json()["result"]["content"][0]["text"])["items"])
+
+        sos_res = client.post(
+            "/api/v1/agent/mcp",
+            headers={"Authorization": "Bearer connector-test"},
+            json={
+                "jsonrpc": "2.0",
+                "id": 23,
+                "method": "tools/call",
+                "params": {"name": "swarm_sos_resolve", "arguments": {"sos_id": sos_id, "resolution": "Assigned port 3005"}},
+            },
+        )
+        assert sos_res.status_code == 200
+        res_sos = json.loads(sos_res.json()["result"]["content"][0]["text"])
+        assert res_sos["ok"] is True
+        assert res_sos["sos"]["status"] == "resolved"
+
+        # Test swarm.lock acquire, list, release
+        lock_acq = client.post(
+            "/api/v1/agent/mcp",
+            headers={"Authorization": "Bearer connector-test"},
+            json={
+                "jsonrpc": "2.0",
+                "id": 24,
+                "method": "tools/call",
+                "params": {"name": "swarm_lock_acquire", "arguments": {"resource": "db:schema", "owner_key": new_key, "ttl_seconds": 60}},
+            },
+        )
+        assert lock_acq.status_code == 200
+        assert json.loads(lock_acq.json()["result"]["content"][0]["text"])["acquired"] is True
+
+        # Conflicting acquire by another worker
+        lock_conflict = client.post(
+            "/api/v1/agent/mcp",
+            headers={"Authorization": "Bearer connector-test"},
+            json={
+                "jsonrpc": "2.0",
+                "id": 25,
+                "method": "tools/call",
+                "params": {"name": "swarm_lock_acquire", "arguments": {"resource": "db:schema", "owner_key": "other_worker"}},
+            },
+        )
+        assert lock_conflict.status_code == 200
+        assert json.loads(lock_conflict.json()["result"]["content"][0]["text"])["acquired"] is False
+
+        lock_list = client.post(
+            "/api/v1/agent/mcp",
+            headers={"Authorization": "Bearer connector-test"},
+            json={
+                "jsonrpc": "2.0",
+                "id": 26,
+                "method": "tools/call",
+                "params": {"name": "swarm_lock_list", "arguments": {}},
+            },
+        )
+        assert lock_list.status_code == 200
+        assert any(l["resource"] == "db:schema" for l in json.loads(lock_list.json()["result"]["content"][0]["text"])["items"])
+
+        lock_rel = client.post(
+            "/api/v1/agent/mcp",
+            headers={"Authorization": "Bearer connector-test"},
+            json={
+                "jsonrpc": "2.0",
+                "id": 27,
+                "method": "tools/call",
+                "params": {"name": "swarm_lock_release", "arguments": {"resource": "db:schema", "owner_key": new_key}},
+            },
+        )
+        assert lock_rel.status_code == 200
+        assert json.loads(lock_rel.json()["result"]["content"][0]["text"])["released"] is True
+
 
 def test_invoke_unknown_capability():
     class Store:

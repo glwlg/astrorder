@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type TouchEvent as ReactTouchEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { IconChevronDown, IconChevronRight, IconCopy, IconDotsVertical, IconEdit, IconPin, IconPinned, IconPlus, IconTrash, IconTransfer } from '@tabler/icons-react'
+import { IconChevronDown, IconChevronRight, IconCopy, IconDotsVertical, IconEdit, IconPin, IconPinned, IconPlus, IconTrash, IconTransfer, IconDeviceDesktop, IconGitBranch } from '@tabler/icons-react'
 import type { Agent, Session } from '../../domain/types'
 import { scopeKey } from '../../domain/semantics'
 import { displaySessionTitle, formatRelativeTime, sessionActivityStatus, type ProjectGroup } from '../../components/sessionRailModel'
@@ -16,7 +16,7 @@ import { hapticFeedback } from './mobileGestures'
 type SessionMenu = { session: Session; x: number; y: number }
 type ProjectMenu = { project: ProjectGroup; x: number; y: number }
 
-export function MobileSessionDrawer({ groups, pins, pinnedProjects, selectedKey, appearance, onSelect, onPin, onPinProject, onCreate, onDeleteProject, onDeleteSession, agents, onHandoffSession, onRenameSession, onCopySessionId, isSearching }: {
+export function MobileSessionDrawer({ groups, pins, pinnedProjects, selectedKey, appearance, onSelect, onPin, onPinProject, onCreate, onDeleteProject, onDeleteSession, agents, onHandoffSession, onRenameSession, onCopySessionId, onForkSession, onForkWorktreeSession, isSearching }: {
   groups: ProjectGroup[]; pins: Record<string, boolean>; selectedKey: string; appearance: ProjectAppearanceMap
   onSelect: (session: Session) => void; onPin: (session: Session) => void
   pinnedProjects: string[]; onPinProject: (project: ProjectGroup) => void
@@ -27,6 +27,8 @@ export function MobileSessionDrawer({ groups, pins, pinnedProjects, selectedKey,
   onHandoffSession?: (session: Session) => void
   onRenameSession?: (session: Session) => void
   onCopySessionId?: (session: Session) => void
+  onForkSession?: (session: Session) => void
+  onForkWorktreeSession?: (session: Session) => void
   isSearching?: boolean
 }) {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => {
@@ -248,6 +250,16 @@ export function MobileSessionDrawer({ groups, pins, pinnedProjects, selectedKey,
         <button role="menuitem" onClick={() => { void (onCopySessionId ? onCopySessionId(sessionMenu.session) : navigator.clipboard?.writeText(sessionMenu.session.id)); setSessionMenu(null) }}>
           <IconCopy size={17} />复制 ID
         </button>
+        {onForkSession && (
+          <button role="menuitem" onClick={() => { onForkSession(sessionMenu.session); setSessionMenu(null) }}>
+            <IconDeviceDesktop size={17} />创建聊天分支
+          </button>
+        )}
+        {onForkWorktreeSession && (
+          <button role="menuitem" onClick={() => { onForkWorktreeSession(sessionMenu.session); setSessionMenu(null) }}>
+            <IconGitBranch size={17} />在新工作树中创建分支
+          </button>
+        )}
         {onHandoffSession && handoffTargets(sessionMenu.session).length > 0 && (
           <button
             role="menuitem"

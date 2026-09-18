@@ -20,9 +20,12 @@ function makeMessage(override: Partial<Message>): Message {
 
 describe('unwrapCommand', () => {
   it('unwraps zsh and bash -c wrappers', () => {
-    expect(unwrapCommand('/usr/bin/zsh -lc "git diff 2e4cd54..HEAD"')).toBe('git diff 2e4cd54..HEAD')
-    expect(unwrapCommand("/bin/bash -c 'pytest -q'")).toBe('pytest -q')
-    expect(unwrapCommand('npm test')).toBe('npm test')
+   expect(unwrapCommand('/usr/bin/zsh -lc "git diff 2e4cd54..HEAD"')).toBe('git diff 2e4cd54..HEAD')
+   expect(unwrapCommand("/bin/bash -c 'pytest -q'")).toBe('pytest -q')
+   expect(unwrapCommand('npm test')).toBe('npm test')
+    expect(unwrapCommand('"C:\\path\\pwsh.exe" -Command "python -c \"print(1)\""')).toBe('python -c "print(1)"')
+    expect(unwrapCommand('powershell -NoProfile -ExecutionPolicy Bypass -Command "cd desktop; npm run check"')).toBe('cd desktop; npm run check')
+    expect(unwrapCommand('cmd.exe /c "dir /b"')).toBe('dir /b')
   })
 })
 

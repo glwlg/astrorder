@@ -6,6 +6,14 @@
 .mobile-workspace button { font:inherit; color:inherit; cursor:pointer; border:0; background:transparent; }
 .mobile-workspace button:focus-visible { outline:2px solid var(--m-primary); outline-offset:2px; }
 .mobile-workspace button:disabled { opacity:.5; }
+html, body {
+  touch-action: manipulation;
+}
+@media screen and (max-width: 767px) {
+  input, textarea, select {
+    font-size: 16px !important;
+  }
+}
 .m-header { flex:none; padding:max(env(safe-area-inset-top),10px) 16px 10px; background:color-mix(in srgb, var(--m-surface) 85%, transparent); backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px); border-bottom:1px solid color-mix(in srgb, var(--m-border) 60%, transparent); display:flex; justify-content:space-between; align-items:center; min-height:56px; z-index:10; }
 .m-brand { display:flex; gap:8px; align-items:center; }.m-brand strong { font-size:1.05rem; letter-spacing:-0.01em; font-weight:700; }.m-brand-mark { display:block; width:26px; height:26px; border-radius:7px; }
 .m-session-nav { width:34px; height:34px; display:inline-flex; align-items:center; justify-content:center; border-radius:8px; color:var(--m-text); transition:background .15s ease; }

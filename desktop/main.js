@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, Tray, clipboard, dialog, ipcMain, nativeImage, net, session, shell } = require('electron')
+const { app, BrowserWindow, Menu, Tray, clipboard, dialog, ipcMain, nativeImage, net, session, shell, Notification } = require('electron')
 const { execFile } = require('node:child_process')
 const { existsSync, readFileSync, writeFileSync } = require('node:fs')
 const path = require('node:path')
@@ -403,6 +403,38 @@ ipcMain.handle('preview:copy', (_event, dataUrl) => {
     return false
   }
 })
+ipcMain.handle('clipboard:set-files', async (_event, paths) => {
+  if (!Array.isArray(paths) || paths.length === 0) return false
+  const validPaths = paths.filter(p => typeof p === 'string' && p.trim())
+  if (validPaths.length === 0) return false
+  const psScript = `
+$paths = $env:ASTRORDER_CLIP_FILES -split ";" | Where-Object { $_.Trim() -ne "" }
+Add-Type -AssemblyName System.Windows.Forms
+$strCol = New-Object System.Collections.Specialized.StringCollection
+foreach ($p in $paths) { $strCol.Add($p.Trim()) }
+if ($strCol.Count -gt 0) {
+    $data = New-Object System.Windows.Forms.DataObject
+    $data.SetFileDropList($strCol)
+    [System.Windows.Forms.Clipboard]::SetDataObject($data, $true)
+    Write-Output "OK"
+}
+`
+  return new Promise((resolve) => {
+    execFile('powershell', ['-NoProfile', '-STA', '-Command', psScript], {
+      env: { ...process.env, ASTRORDER_CLIP_FILES: validPaths.join(';') },
+      windowsHide: true,
+      timeout: 5000,
+    }, (err, stdout) => {
+      if (err) {
+        console.error('Failed to set clipboard file drop list:', err)
+        resolve(false)
+      } else {
+        resolve(stdout.trim().includes('OK'))
+      }
+    })
+  })
+})
+
 ipcMain.handle('preview:save', async (_event, dataUrl) => {
   if (!dataUrl || !previewWindow || previewWindow.isDestroyed()) return false
   try {
@@ -443,11 +475,67 @@ ipcMain.handle('window:close', () => {
 ipcMain.handle('window:isMaximized', () => {
   return window && !window.isDestroyed() ? window.isMaximized() : false
 })
+ipcMain.handle('notification:show', (_event, { title, body, tag }) => {
+  try {
+    if (window && !window.isDestroyed()) {
+      window.flashFrame(true)
+    }
+    const publicDir = path.join(root || path.resolve(__dirname, '..'), 'frontend', 'public')
+    const pngPath = path.join(publicDir, 'pwa-512.png')
+    const icoPath = path.join(publicDir, 'favicon.ico')
+    const brandIcon = existsSync(pngPath) ? pngPath : existsSync(icoPath) ? icoPath : undefined
+
+    // 1. 尝试现代 Windows Toast 通知
+    if (Notification.isSupported()) {
+      try {
+        const notif = new Notification({
+          title: title || '星序',
+          body: body || '',
+          icon: brandIcon,
+          silent: false,
+        })
+        notif.on('click', () => {
+          if (window && !window.isDestroyed()) {
+            window.flashFrame(false)
+            if (window.isMinimized()) window.restore()
+            window.show()
+            window.focus()
+          }
+        })
+        notif.show()
+      } catch (toastErr) {
+        console.error('Failed to display Windows Toast', toastErr)
+      }
+    }
+
+    // 2. 开发模式或 Windows 系统备用：使用无蓝色大圆圈的极简优雅气泡通知
+    if (tray && process.platform === 'win32' && (!app.isPackaged || !Notification.isSupported())) {
+      try {
+        tray.displayBalloon({
+          iconType: 'none',
+          title: title || '星序',
+          content: body || '',
+          noSound: false,
+        })
+      } catch (trayErr) {
+        console.error('Failed to display tray balloon', trayErr)
+      }
+    }
+    return true
+  } catch (err) {
+    console.error('Failed to display native notification', err)
+    return false
+  }
+})
 
 if (!app.requestSingleInstanceLock()) app.quit()
 else {
   app.on('second-instance', () => showApp())
-  app.whenReady().then(async () => {
+  if (process.platform === 'win32') {
+  app.setAppUserModelId(app.isPackaged ? 'com.astrorder.desktop' : '星序')
+}
+
+app.whenReady().then(async () => {
     Menu.setApplicationMenu(null)
     await configureRoot()
     await session.defaultSession.clearCache()
@@ -490,7 +578,7 @@ else {
       const isCtrlOrCmd = process.platform === 'darwin' ? input.meta : input.control
       if ((isCtrlOrCmd && input.key.toLowerCase() === 'r') || input.key === 'F5') {
         event.preventDefault()
-        window.reload()
+        window.webContents.reloadIgnoringCache()
       } else if ((isCtrlOrCmd && input.shift && input.key.toLowerCase() === 'i') || input.key === 'F12') {
         event.preventDefault()
         window.webContents.toggleDevTools()
@@ -505,6 +593,7 @@ else {
     })
     tray = new Tray(path.join(root, 'frontend', 'public', 'favicon.ico'))
     tray.on('double-click', showApp)
+    tray.on('balloon-click', showApp)
     rebuildMenu()
     await refresh()
     if (states.daemon.startup_task !== 'not_installed') {

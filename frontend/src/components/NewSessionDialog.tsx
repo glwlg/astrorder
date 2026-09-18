@@ -23,7 +23,8 @@ export function NewSessionDialog({ agents, project, initialAgentId, onClose, onC
     if (match) return match.id
     return choices.length === 1 ? choices[0].id : ''
   })
-  const [workspace, setWorkspace] = useState(project?.workspace || '')
+    const projectWorkspace = project?.workspace || project?.sessions?.find(s => s.workspace)?.workspace || ''
+  const [workspace, setWorkspace] = useState(projectWorkspace)
   const [title, setTitle] = useState('')
   const [busy, setBusy] = useState(false)
   const create = async () => {
@@ -43,7 +44,7 @@ export function NewSessionDialog({ agents, project, initialAgentId, onClose, onC
       <NativeSelect label="选择 Agent" value={agentId} onChange={event => setAgentId(event.currentTarget.value)} data={[{ value: '', label: '请选择 Agent' }, ...choices.map(agent => ({ value: agent.id, label: agentLabel(agent) }))]} disabled={busy} />
       {!choices.length && <Text size="sm" c="dimmed">该环境暂无已接入 Agent，请先在连接管理中接入。</Text>}
       <TextInput label="会话名称（选填，留空由 Agent 自动命名）" placeholder="留空由 Agent 自动命名" value={title} onChange={event => setTitle(event.currentTarget.value)} disabled={busy} />
-      <TextInput label="工作区" value={workspace} onChange={event => setWorkspace(event.currentTarget.value)} placeholder="使用所选 Agent 环境的路径" disabled={busy || !!project?.workspace} />
+      <TextInput label="工作区" value={workspace} onChange={event => setWorkspace(event.currentTarget.value)} placeholder="使用所选 Agent 环境的路径" disabled={busy || !!projectWorkspace} />
       <Group justify="flex-end"><Button variant="default" onClick={onClose} disabled={busy}>取消</Button><Button onClick={() => void create()} loading={busy} disabled={!agentId}>创建会话</Button></Group>
     </Stack>
   </Modal>

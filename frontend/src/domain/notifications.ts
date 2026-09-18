@@ -7,9 +7,7 @@ function textValue(value: unknown, fallback: string): string {
 function safeLabel(value: string): string {
   return value
     .replace(/(api[_-]?key|access[_-]?token|refresh[_-]?token|token|password|passwd|secret|authorization|private[_ -]?key)\s*[:=]\s*[^\s,;]+/gi, '$1=[REDACTED]')
-    .replaceAll('\r', ' ')
-    .replaceAll('\n', ' ')
-    .replaceAll(String.fromCharCode(0), ' ')
+    .replace(/[\r\n\0]/g, ' ')
     .slice(0, 160)
 }
 
@@ -27,14 +25,29 @@ export function notificationForEvent(event: EventEnvelope): EventNotification | 
     const name = event.data.event
     const observed = event.data.observed_at
     if (event.data.approval_pending === true || event.data.notification !== true || typeof observed !== 'number' || Math.abs(Date.now() / 1000 - observed) > 60) return null
-    if (!['Interrupt', 'PermissionRequest'].includes(String(name))) return null
+    if (!['Interrupt', 'PermissionRequest', 'Stop'].includes(String(name))) return null
+    if (name === 'Stop') {
+      const sessionTitle = safeLabel(textValue(event.data.session_title, '会话'))
+      const preview = safeLabel(textValue(event.data.preview, ''))
+      return {
+        key: `${identity.agentId}::${identity.sessionId}::observation::${String(event.data.id)}`,
+        kind: 'task_completed',
+        title: '会话已完成',
+        message: preview ? `${sessionTitle}：${preview}` : `${sessionTitle} 已完成回复。`,
+        agent_id: identity.agentId,
+        session_id: identity.sessionId,
+        created_at: new Date(observed * 1000).toISOString(),
+      }
+    }
     const approval = name === 'PermissionRequest'
     return {
       key: `${identity.agentId}::${identity.sessionId}::observation::${String(event.data.id)}`,
       kind: approval ? 'approval_pending' : 'task_failed',
-      title: approval ? '原生端等待审批' : '原生轮次已中断',
+      title: approval ? '原生端等待审批' : '原生执行已中断',
       message: approval ? '请在原生客户端处理；观察钩子不会代为授权。' : '本轮未正常完成。',
-      agent_id: identity.agentId, session_id: identity.sessionId, created_at: new Date(observed * 1000).toISOString(),
+      agent_id: identity.agentId,
+      session_id: identity.sessionId,
+      created_at: new Date(observed * 1000).toISOString(),
     }
   }
 
@@ -48,7 +61,7 @@ export function notificationForEvent(event: EventEnvelope): EventNotification | 
     return {
       key: `${identity.agentId}::${identity.sessionId}::task::${taskId}::${status === 'cancelled' ? 'failed' : status}`,
       kind: failed ? 'task_failed' : 'task_completed',
-      title: failed ? '任务失败' : '任务完成',
+      title: failed ? '任务失败' : '任务已完成',
       message: `${title}${status === 'cancelled' ? '已取消' : failed ? '未完成' : '已完成'}。`,
       agent_id: identity.agentId,
       session_id: identity.sessionId,
@@ -62,8 +75,8 @@ export function notificationForEvent(event: EventEnvelope): EventNotification | 
     return {
       key: `${identity.agentId}::${identity.sessionId}::approval::${approvalId}::pending`,
       kind: 'approval_pending',
-      title: '需要审批',
-      message: `${safeLabel(textValue(event.data.title, '有一项操作等待确认'))}。默认不会代为允许。`,
+      title: '操作等待审批',
+      message: safeLabel(textValue(event.data.title, '有一个操作等待授权确认')),
       agent_id: identity.agentId,
       session_id: identity.sessionId,
       created_at: new Date().toISOString(),
@@ -73,21 +86,74 @@ export function notificationForEvent(event: EventEnvelope): EventNotification | 
   return null
 }
 
+const NOTIFICATION_ENABLED_KEY = 'astrorder:system_notification_enabled'
+
+export function isSystemNotificationEnabled(): boolean {
+  if (typeof window === 'undefined') return true
+  try {
+    const val = localStorage.getItem(NOTIFICATION_ENABLED_KEY)
+    return val === null ? true : val === 'true'
+  } catch {
+    return true
+  }
+}
+
+export function setSystemNotificationEnabled(enabled: boolean): void {
+  if (typeof window === 'undefined') return
+  try {
+    localStorage.setItem(NOTIFICATION_ENABLED_KEY, String(enabled))
+  } catch {}
+}
+
 export type NotificationPermissionState = 'granted' | 'denied' | 'default' | 'unsupported'
 
 export function notificationPermission(): NotificationPermissionState {
+  if (!isSystemNotificationEnabled()) return 'default'
+  if (typeof window !== 'undefined' && (window as any).astrorderDesktop?.notify) return 'granted'
   if (typeof Notification === 'undefined') return 'unsupported'
   return Notification.permission
 }
 
 export async function requestNotificationPermission(): Promise<NotificationPermissionState> {
+  if (typeof window !== 'undefined' && (window as any).astrorderDesktop?.notify) return 'granted'
   if (typeof Notification === 'undefined') return 'unsupported'
   if (Notification.permission !== 'default') return Notification.permission
   return Notification.requestPermission()
 }
 
 export function deliverBrowserNotification(notification: EventNotification): boolean {
-  if (notificationPermission() !== 'granted') return false
-  new Notification(notification.title, { body: notification.message, tag: notification.key })
-  return true
+  if (!isSystemNotificationEnabled()) return false
+  if (typeof window !== 'undefined' && (window as any).astrorderDesktop?.notify) {
+    try {
+      void (window as any).astrorderDesktop.notify({
+        title: notification.title,
+        body: notification.message,
+        tag: notification.key,
+      })
+      return true
+    } catch {
+      // Fall through
+    }
+  }
+  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return false
+  try {
+    const n = new Notification(notification.title, { body: notification.message, tag: notification.key })
+    n.onclick = (e) => {
+      e.preventDefault()
+      window.focus?.()
+      const isMobile = typeof window !== 'undefined' && (
+        window.location.pathname.startsWith('/mobile') ||
+        window.innerWidth < 768 ||
+        window.matchMedia?.('(max-width: 767px)').matches
+      )
+      const prefix = isMobile ? '/mobile' : ''
+      const targetPath = prefix + '/chat/' + encodeURIComponent(notification.session_id) + '?agent_id=' + encodeURIComponent(notification.agent_id)
+      window.history.pushState({}, '', targetPath)
+      window.dispatchEvent(new PopStateEvent('popstate'))
+      n.close?.()
+    }
+    return true
+  } catch {
+    return false
+  }
 }

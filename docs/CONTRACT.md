@@ -108,5 +108,15 @@ interface Message {
 - `GET /api/v1/terminals/{id}`：获取终端运行状态与输出缓冲。
 - `DELETE /api/v1/terminals/{id}`：优雅释放与终止指定终端子进程。
 
-### 3.5 双工事件流 (Event Stream)
+### 3.5 多智能体群组（Bot Groups）API
+- `GET /api/v1/bot-groups`：查询当前用户定义的多智能体协作群列表。
+- `POST /api/v1/bot-groups`：创建包含指定成员（`machine_id`、`agent_id`、`alias`）的协作群。
+- `GET /api/v1/bot-groups/{id}/messages`：拉取群内交互消息与多方流式讨论记录。
+- `POST /api/v1/bot-groups/{id}/messages`：向群组提交指令，自动解析 `@成员` 并驱动多智能体协同响应。
+- `POST /api/v1/bot-groups/{id}/stop`：紧急打断并终止当前群内正在进行的智能体接力执行。
+
+### 3.6 会话分叉与 Git Worktree 隔离
+- `POST /api/v1/sessions/{id}/fork`：根据指定会话一键派生新会话。若设置 `worktree: true`，系统将自动基于 Git Worktree 在宿主机上检出独立工作区路径，实现多分支安全并行探索。
+
+### 3.7 双工事件流 (Event Stream)
 - `GET /ws/v1/events?after={cursor}`：浏览器全双工事件通道。支持断线自动回补重传缺失游标后的增量事件帧（`message.upsert`、`session.upsert`、`task.upsert`、`command.upsert`）。

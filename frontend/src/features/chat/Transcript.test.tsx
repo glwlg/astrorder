@@ -76,8 +76,9 @@ describe('transcript follow mode', () => {
     view.rerender(<MantineProvider><Transcript outbox={[]} session={{ ...runningSession, status: 'idle' }} messages={[
       { ...message, id: 'thinking', kind: 'thinking', text: '处理完成' },
     ]} /></MantineProvider>)
-    expect(summary.querySelector('.lazy-details-indicator.is-loading')).toBeNull()
-    expect(summary.querySelector('.lazy-details-indicator svg')).not.toBeNull()
+    const updatedSummary = screen.getByRole('region', { name: '思考与工具' }).querySelector('summary')!
+    expect(updatedSummary.querySelector('.lazy-details-indicator.is-loading')).toBeNull()
+    expect(updatedSummary.querySelector('.lazy-details-indicator svg')).not.toBeNull()
   })
 
   it('pauses only after a real scroll away from the bottom and resumes manually', async () => {

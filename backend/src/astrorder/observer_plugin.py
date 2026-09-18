@@ -71,14 +71,14 @@ def install_plugin(home, python, source, codex):
     skill_dir.mkdir(parents=True,exist_ok=True)
     (skill_dir/'SKILL.md').write_text(
         '---\nname: astrorder\ndescription: Use the Astrorder MCP server to read sessions, list agents and machines.\n---\n\n'
-        'Use the MCP server named astrorder only. Tools: catalog_list, sessions_list (compact, limit 30), sessions_search, sessions_read, agents_list, machines_list, projects_list. '
-        'Session keys look like agent_id::session_id. Call sessions_read with {"key":"agent_id::session_id"}.\n',
+        'ALWAYS call the Astrorder MCP tools directly (e.g. mcp:astrorder.machines_dispatch, mcp:astrorder.sessions_create, mcp:astrorder.plugins_open, mcp:astrorder.blackboard_set). '
+        'NEVER write custom Python scripts or execute terminal commands to call Astrorder. Use native MCP tool calls only.\n',
         encoding='utf-8',
     )
     manifest['skills']='./skills/'
     port=os.environ.get('ASTRORDER_PORT','30001')
     token=os.environ.get('ASTRORDER_AGENT_TOKEN') or os.environ.get('ASTRORDER_BROWSER_SECRET') or os.environ.get('ASTRORDER_CONNECTOR_SECRET') or ''
-    mcp_server={'type':'http','url':f'http://127.0.0.1:{port}/api/v1/agent/mcp','bearer_token_env_var':'ASTRORDER_AGENT_TOKEN'}
+    mcp_server={'type':'http','url':f'http://127.0.0.1:{port}/api/v1/agent/mcp','bearer_token_env_var':'ASTRORDER_AGENT_TOKEN','default_tools_approval_mode':'approve'}
     if token:
         mcp_server['env']={'ASTRORDER_AGENT_TOKEN':token}
     (plugin/'.mcp.json').write_text(json.dumps({'mcpServers':{'astrorder':mcp_server}},ensure_ascii=False,indent=2)+'\n',encoding='utf-8')

@@ -1,5 +1,5 @@
-import { Alert, Badge, Button, Checkbox, Group, Paper, SimpleGrid, Stack, Text, TextInput, Title } from '@mantine/core'
-import { useState } from 'react'
+import { Alert, Badge, Button, Checkbox, Group, Paper, SimpleGrid, Stack, Switch, Text, TextInput, Title } from '@mantine/core'
+import { useEffect, useState } from 'react'
 import { useMediaQuery } from '@mantine/hooks'
 import { useShallow } from 'zustand/react/shallow'
 import { AgentStatusBadge } from '../../components/Status'
@@ -10,6 +10,8 @@ import { useAstrorderStore } from '../../state/store'
 import './agentsLayout.css'
 import { EnvironmentConnections } from './EnvironmentConnections'
 import { NativeObservationPanel } from '../../components/NativeObservationPanel'
+import { api } from '../../api/client'
+import { notifications } from '@mantine/notifications'
 
 const allCapabilities: { key: string; label: string }[] = [
   { key: 'chat', label: '对话交互' },
@@ -84,6 +86,33 @@ function remoteStateColor(state: SshConnection['state']): string {
 function AgentCard({ agent }: { agent: Agent }) {
   const brand = agentKindLabel(agent.kind)
   const name = agent.name.includes(brand) ? agent.name : `${agent.name} · ${brand}`
+  const [mcpEnabled, setMcpEnabled] = useState(true)
+  const [loadingMcp, setLoadingMcp] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    void api.getAgentMcpStatus(agent.id).then((res) => {
+      if (active) setMcpEnabled(res.enabled)
+    }).catch(() => {})
+    return () => { active = false }
+  }, [agent.id])
+
+  const handleToggleMcp = async (val: boolean) => {
+    setLoadingMcp(true)
+    try {
+      await api.toggleAgentMcpStatus(agent.id, val)
+      setMcpEnabled(val)
+      notifications.show({
+        color: val ? 'teal' : 'gray',
+        message: `已${val ? '允许' : '禁止'} ${agent.name} 调度星序平台 (MCP)`,
+      })
+    } catch (e: any) {
+      notifications.show({ color: 'red', message: e.message || '修改 MCP 权限失败' })
+    } finally {
+      setLoadingMcp(false)
+    }
+  }
+
   return (
     <SpotlightCard spotlightColor={agent.kind === 'codex' ? 'rgba(16, 185, 129, 0.22)' : 'rgba(59, 130, 246, 0.22)'} radius="var(--mantine-radius-lg, 16px)">
       <Paper className="agent-card" withBorder={false} p="lg" style={{ background: 'transparent' }}>
@@ -92,6 +121,26 @@ function AgentCard({ agent }: { agent: Agent }) {
           <Group gap="sm" wrap="nowrap"><span className={`agent-card-mark agent-kind-${agent.kind}`} aria-hidden="true"><AgentBrandIcon kind={agent.kind} size={24} /></span><div><Title order={3} size="h4">{name}</Title><Text size="xs" c="dimmed">{brand} · {agent.id}</Text></div></Group>
           <AgentStatusBadge status={agent.status} />
         </Group>
+        <Paper withBorder radius="md" p="xs" style={{ background: 'var(--astr-surface-muted)' }}>
+          <Group justify="space-between" align="center">
+            <div>
+              <Text size="xs" fw={700}>
+                星序 MCP 调度授权
+              </Text>
+              <Text size="11px" c="dimmed">
+                {mcpEnabled ? '允许此 Agent 发现并调用星序平台能力与跨机协同' : '已禁止此 Agent 调度星序 MCP 工具链'}
+              </Text>
+            </div>
+            <Switch
+              checked={mcpEnabled}
+              onChange={(e) => void handleToggleMcp(e.currentTarget.checked)}
+              disabled={loadingMcp}
+              color="indigo"
+              size="xs"
+              aria-label="切换星序 MCP 权限"
+            />
+          </Group>
+        </Paper>
         <div>
           <Text size="xs" fw={600} c="dimmed" mb={8} style={{ letterSpacing: '0.02em' }}>
             支持能力与通道规格

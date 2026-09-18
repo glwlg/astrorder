@@ -3,6 +3,7 @@ import { ActionIcon, Group, Text, Tooltip, useComputedColorScheme, useMantineCol
 import { IconMoon, IconSun } from '@tabler/icons-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { BrandMark } from './BrandMark'
+import { NotificationPermissionControl } from './NotificationPermissionControl'
 
 export function DesktopTitlebar() {
   const [isDesktop, setIsDesktop] = useState(false)
@@ -35,6 +36,7 @@ export function DesktopTitlebar() {
       </Group>
       <div className="desktop-titlebar-drag-spacer" onDoubleClick={handleDoubleClick} />
       <div className="desktop-titlebar-actions">
+        <NotificationPermissionControl />
         <Tooltip label={computed === 'dark' ? '切换浅色' : '切换深色'}>
           <ActionIcon
             variant="subtle"

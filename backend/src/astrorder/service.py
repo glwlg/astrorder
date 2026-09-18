@@ -460,6 +460,15 @@ class ControlService:
         if native_handler is not None:
             try:
                 state, error = await native_handler(forwarded_command)
+                if state == "accepted" and command["action"] == "send":
+                    updated_sess = self.store.update_session(command["agent_id"], command["session_id"], {"status": "running"})
+                    if updated_sess:
+                        self._server_event(
+                            "session.upsert",
+                            agent_id=command["agent_id"],
+                            session_id=command["session_id"],
+                            data=updated_sess,
+                        )
             except Exception as exc:
                 logger.exception("native_handler execution failed")
                 state, error = "unknown", f"Native command execution error: {exc}"

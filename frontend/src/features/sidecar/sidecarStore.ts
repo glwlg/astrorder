@@ -40,8 +40,9 @@ export interface SidecarState {
   openFileTree: (sessionId: string, agentId: string, workspacePath?: string, workspaceName?: string, connectionId?: string) => void
   openSideChat: (sessionId: string, agentId: string, workspaceName?: string, connectionId?: string) => void
   openAgentGraph: (sessionId: string, agentId: string, workspaceName?: string, connectionId?: string) => void
-  openGitDiff: (sessionId: string, agentId: string, workspacePath?: string, connectionId?: string) => void
+  openGitDiff: (sessionId: string, agentId: string, workspacePath?: string, connectionId?: string, baseBranch?: string) => void
   openBrowser: (sessionId: string, agentId: string, initialUrl?: string, connectionId?: string) => void
+  openBlackboard: (sessionId?: string, agentId?: string, connectionId?: string) => void
   switchSession: (sessionKey: string) => void
   resetSessionSidecar: () => void
   registerTabCloseHandler: (agentId: string, tabId: string, handler: () => void) => () => void
@@ -222,8 +223,8 @@ export const useSidecarStore = create<SidecarState>()(persist((set, get) => ({
     }
   },
 
-  openGitDiff: (sessionId: string, agentId: string, workspacePath?: string, connectionId?: string) => {
-    const tabId = `gitdifftree:${sessionId}`
+  openGitDiff: (sessionId: string, agentId: string, workspacePath?: string, connectionId?: string, baseBranch?: string) => {
+    const tabId = `gitdifftree:${sessionId}:${baseBranch || 'working-tree'}`
     const { tabs, activeSessionKey, sessionMemories } = get()
     const existingIndex = tabs.findIndex((t) => t.id === tabId)
     if (existingIndex >= 0) {
@@ -232,12 +233,13 @@ export const useSidecarStore = create<SidecarState>()(persist((set, get) => ({
         activeTabId: tabId,
       })
     } else {
+      const title = baseBranch ? `审查 (${baseBranch})` : '审查'
       const gitArtifact: ArtifactRef = {
         id: tabId,
-        name: '代码变更',
+        name: title,
         kind: 'workspace_file',
         mediaType: 'application/x-git-diff-tree',
-        readUrl: '',
+        readUrl: baseBranch ? `?base_branch=${encodeURIComponent(baseBranch)}` : '',
         writable: false,
         path: workspacePath,
         sessionId,
@@ -247,7 +249,7 @@ export const useSidecarStore = create<SidecarState>()(persist((set, get) => ({
       const newTab: SidecarTab = {
         id: tabId,
         type: 'artifact',
-        title: '代码变更',
+        title,
         artifact: gitArtifact,
         viewerId: 'git-diff-viewer',
         closable: true,
@@ -296,6 +298,52 @@ export const useSidecarStore = create<SidecarState>()(persist((set, get) => ({
         title: workspaceName ? `终端 (${workspaceName})` : '终端',
         artifact: terminalArtifact,
         viewerId: 'xterm-viewer',
+        closable: true,
+      }
+      set({
+        isOpen: true,
+        activeTabId: tabId,
+        tabs: [...tabs, newTab],
+      })
+    }
+    if (activeSessionKey) {
+      const curr = get()
+      set({
+        sessionMemories: {
+          ...sessionMemories,
+          [activeSessionKey]: { tabs: curr.tabs, activeTabId: curr.activeTabId, isOpen: true },
+        },
+      })
+    }
+  },
+
+  openBlackboard: (sessionId?: string, agentId?: string, connectionId?: string) => {
+    const tabId = sessionId ? `blackboard:${sessionId}` : 'blackboard:global'
+    const { tabs, activeSessionKey, sessionMemories } = get()
+    const existingIndex = tabs.findIndex((t) => t.id === tabId)
+    if (existingIndex >= 0) {
+      set({
+        isOpen: true,
+        activeTabId: tabId,
+      })
+    } else {
+      const bbArtifact: ArtifactRef = {
+        id: tabId,
+        name: '作战黑板',
+        kind: 'workspace_file',
+        mediaType: 'application/x-blackboard',
+        readUrl: '',
+        writable: true,
+        sessionId: sessionId || 'global',
+        agentId: agentId || '',
+        connectionId,
+      }
+      const newTab: SidecarTab = {
+        id: tabId,
+        type: 'artifact',
+        title: '作战黑板',
+        artifact: bbArtifact,
+        viewerId: 'blackboard-viewer',
         closable: true,
       }
       set({

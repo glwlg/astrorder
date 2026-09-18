@@ -876,6 +876,10 @@ def _validate_input(inputs: Any) -> None:
             value = item.get("url")
             if not isinstance(value, str) or not value.startswith("data:"):
                 raise DaemonProtocolError("Codex media input must use an inline data URL")
+        elif kind in {"mention", "skill", "file", "directory", "resource"}:
+            pass
+        elif isinstance(kind, str) and kind:
+            pass
         else:
             raise DaemonProtocolError("Codex input type is unsupported")
     _require_json_safe(inputs, "Codex input")

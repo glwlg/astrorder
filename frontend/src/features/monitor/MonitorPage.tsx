@@ -106,7 +106,7 @@ interface MonitorCardProps {
   onResizeCornerStart?: (index: number, e: MouseEvent<HTMLDivElement>, wrapperEl: HTMLElement | null) => void
 }
 
-function MonitorCard({
+export function MonitorCard({
   session,
   agent,
   slotIndex = 0,
@@ -609,11 +609,16 @@ export function MonitorPage() {
     return result
   }, [candidateSessions, slotOrder])
 
+  // 伴星过滤：拥有父会话血缘的子任务（伴星）默认不平铺在普通监控室网格/列表中，保持监控大盘干净独立
+  const gridVisibleSessions = useMemo(() => {
+    return orderedSessions.filter((s) => !s.parent_session_id && !s.parent_session_key)
+  }, [orderedSessions])
+
   const candidates = useMemo(() => {
-    const shown = new Set(orderedSessions.map(session => scopeKey(session.agent_id, session.id)))
+    const shown = new Set(gridVisibleSessions.map(session => scopeKey(session.agent_id, session.id)))
     const query = search.trim().toLowerCase()
-    return sessions.filter(session => !shown.has(scopeKey(session.agent_id, session.id)) && (!query || (session.title + ' ' + (session.workspace || '') + ' ' + (agents[session.agent_id]?.name || '')).toLowerCase().includes(query)))
-  }, [agents, orderedSessions, search, sessions])
+    return sessions.filter(session => !session.parent_session_id && !session.parent_session_key && !shown.has(scopeKey(session.agent_id, session.id)) && (!query || (session.title + ' ' + (session.workspace || '') + ' ' + (agents[session.agent_id]?.name || '')).toLowerCase().includes(query)))
+  }, [agents, gridVisibleSessions, search, sessions])
 
   const saveManual = (next: string[]) => {
     setManualKeys(next)
@@ -895,7 +900,9 @@ export function MonitorPage() {
               </Group>
             )}
           <span className="monitor-stat-divider" />
-          <Text size="xs" c="dimmed">{orderedSessions.length} 个会话</Text>
+          <Text size="xs" c="dimmed">
+            {`${gridVisibleSessions.length} 个会话`}
+          </Text>
         </Group>
         <Button variant="subtle" color="gray" size="xs" leftSection={<IconPlus size={14} />} onClick={() => setPickerOpen(true)}>添加会话</Button>
         <Popover opened={layoutMenuOpened} onChange={setLayoutMenuOpened} position="bottom-end" shadow="md" radius="md">
@@ -939,7 +946,15 @@ export function MonitorPage() {
             </div>
           </Popover.Dropdown>
         </Popover>
-        <SegmentedControl value={layout} onChange={setLayout} data={[{ label: '网格', value: 'grid' }, { label: '列表', value: 'list' }]} aria-label="监控室布局" />
+        <SegmentedControl
+          value={layout}
+          onChange={setLayout}
+          data={[
+            { label: '网格', value: 'grid' },
+            { label: '列表', value: 'list' },
+          ]}
+          aria-label="监控室布局"
+        />
         </Group>
       </Group>
       {queuedCommands.length > 0 && <Paper className="monitor-queue" withBorder radius="lg" p="md" mb="md" aria-label="待机队列"><Group justify="space-between" mb="sm"><div><Title order={3} size="h4">待机队列</Title><Text size="sm" c="dimmed">等待发送的会话消息。</Text></div><Badge color="yellow" variant="light">{queuedCommands.length} 项</Badge></Group><Stack gap="xs">{queuedCommands.map((command: Command) => { const session = sessions.find(item => scopeKey(item.agent_id, item.id) === scopeKey(command.agent_id, command.session_id)); return <Button key={command.agent_id + '::' + command.id} className="monitor-queue-item" variant="subtle" justify="space-between" onClick={() => session && navigate('/chat/' + encodeURIComponent(session.id) + '?agent_id=' + encodeURIComponent(session.agent_id))}><span>{command.text || '无文本命令'}</span><Text component="span" size="xs" c="dimmed">{session?.title || '会话未返回'}</Text></Button> })}</Stack></Paper>}
@@ -947,7 +962,7 @@ export function MonitorPage() {
         : layout === 'list' ? (
           <div className="monitor-list-view">
             <Stack gap={8}>
-              {orderedSessions.map((session) => {
+              {gridVisibleSessions.map((session) => {
                 const key = scopeKey(session.agent_id, session.id)
                 return (
                   <MonitorListRow
@@ -963,7 +978,7 @@ export function MonitorPage() {
           </div>
         ) : (
           <div className="monitor-grid monitor-layout-grid">
-            {orderedSessions.map((session, slotIdx) => {
+            {gridVisibleSessions.map((session, slotIdx) => {
               const key = scopeKey(session.agent_id, session.id)
               const size = slotSizes[slotIdx] || { height: 520 }
               const isBeingLifted = liftedDrag?.sourceIndex === slotIdx

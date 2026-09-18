@@ -229,16 +229,16 @@ export function buildProjectGroups(
     const nativeKey = `project:${source}\u0000${pid}`
     if (pid && pid !== '__no_project__' && (groups.has(nativeKey) || projectAliases.has(nativeKey))) {
       key = projectAliases.get(nativeKey) || nativeKey
-    } else if (ws) {
+    } else if (pname && nameToProject.has(`${source}\u0000${pname}`)) {
+      key = nameToProject.get(`${source}\u0000${pname}`)!
+} else if (ws) {
       // Paths only identify projects within their native connection/source.
       if (workspaceToProject.has(`${location}\u0000${ws}`)) {
         key = workspaceToProject.get(`${location}\u0000${ws}`)!
       } else {
         key = `workspace:${location}\u0000${ws}`
       }
-    } else if (pname && nameToProject.has(`${source}\u0000${pname}`)) {
-      key = nameToProject.get(`${source}\u0000${pname}`)!
-    } else if (pid === '__no_project__' || pname === 'home') {
+        } else if (pid === '__no_project__' || pname === 'home') {
       const homeKey = `project:${source}\u0000__no_project__`
       if (groups.has(homeKey)) key = homeKey
     }

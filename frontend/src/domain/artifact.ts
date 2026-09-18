@@ -16,4 +16,6 @@ export interface ArtifactRef {
   mediaType: string
   /** 是否支持保存写回 */
   writable: boolean
+  /** 扩展元数据，如代码行号定位 { line: 123 } */
+  metadata?: Record<string, unknown>
 }

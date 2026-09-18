@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { IconCheck, IconChevronDown } from '@tabler/icons-react'
+import { IconCheck, IconChecks, IconChevronDown } from '@tabler/icons-react'
 import type { Approval, Message } from '../../domain/types'
 import { MobileMarkdown as MarkdownContent } from './MobileMarkdown'
 import { useStickToBottom } from '../../hooks/useStickToBottom'
@@ -7,7 +7,7 @@ import { useOlderMessages } from '../../hooks/useOlderMessages'
 import { LazyDetails } from '../../components/LazyDetails'
 import { MessageBody } from '../../components/MessageBody'
 import { sessionSwipeGesture, sessionDragPreview, startsAtSessionDrawerEdge, type SessionSwipeGesture } from './mobileGestures'
-import { describeTool, PackSummary, ToolLineIcon } from '../chat/toolPresentation'
+import { describeTool, PackSummary, ShellOutputBlock, ToolLineIcon, unwrapCommand } from '../chat/toolPresentation'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 
 export interface MessageActionAnchor { text: string; x: number; y: number; element: HTMLElement }
@@ -45,14 +45,29 @@ export function MobileTranscript({ messages, approvals = [], onApproval, busy, l
           return <LazyDetails className="m-think-pack" key={m.id} loading={isPackRunning} summary={<PackSummary pack={pack} isRunning={isPackRunning} />}>
             <div className="m-think-rail">{pack.map(item => {
               const desc = describeTool(item)
+              const itemArgs = (item.tool?.arguments && typeof item.tool.arguments === 'object') ? (item.tool.arguments as Record<string, unknown>) : {}
+              const isCmd = desc.iconKey === 'terminal' || Boolean(itemArgs.command || itemArgs.cmd)
+              const unwrapped = unwrapCommand(String(itemArgs.command || itemArgs.cmd || ''))
+              const itemStatus = desc.isFailed ? 'failed' : desc.isRunning ? 'running' : 'success'
+              const foldTitle = isCmd
+                ? `${desc.isRunning ? '运行' : desc.isFailed ? '运行失败' : '已运行'} ${unwrapped || desc.target || desc.fullTitle}`
+                : (desc.target || desc.fullTitle)
               return <LazyDetails className={`m-fold ${desc.isFailed ? 'is-failed' : ''}`} key={item.id} loading={desc.isRunning} summary={<span className="m-fold-summary">
                 <span className="m-fold-icon"><ToolLineIcon icon={desc.iconKey} size={14} /></span>
-                <span className="m-fold-title">{desc.target || desc.fullTitle}</span>
+                <span className="m-fold-title">{foldTitle}</span>
                 {desc.isFailed && <span className="m-badge is-failed">失败</span>}
                 {desc.isRunning && <span className="m-badge is-running">执行中</span>}
               </span>}>
-                {item.text && (item.kind === 'thinking' ? <div className="m-thinking-content"><MarkdownContent value={item.text} /></div> : <pre className="m-tool-output">{item.text}</pre>)}
-                {item.tool?.arguments != null && Object.keys(item.tool.arguments).length > 0 && <pre className="m-tool-args">{JSON.stringify(item.tool.arguments, null, 2)}</pre>}
+                {item.kind === 'thinking' ? (
+                  item.text && <div className="m-thinking-content"><MarkdownContent value={item.text} /></div>
+                ) : isCmd ? (
+                  <ShellOutputBlock command={unwrapped || desc.fullTitle} output={item.text} status={itemStatus} />
+                ) : (
+                  <>
+                    {item.text && <pre className="m-tool-output">{item.text}</pre>}
+                    {item.tool?.arguments != null && Object.keys(item.tool.arguments).length > 0 && <pre className="m-tool-args">{JSON.stringify(item.tool.arguments, null, 2)}</pre>}
+                  </>
+                )}
                 {!!item.attachments?.length && <div className="m-thumbs">{item.attachments.map(a => a.media_type.startsWith('image/') ? <button key={a.id} onClick={() => onImage(a.url)}><img src={a.url} alt={a.name} /></button> : onFile ? <button key={a.id} className="m-file-link" onClick={() => onFile(a.url)}>{a.name}</button> : <a key={a.id} href={a.url} target="_blank" rel="noreferrer">{a.name}</a>)}</div>}
               </LazyDetails>
             })}</div>
@@ -64,7 +79,15 @@ export function MobileTranscript({ messages, approvals = [], onApproval, busy, l
           onTouchStart={e => { cancelHold(); const element = e.currentTarget; const point = e.touches[0]; hold.current = setTimeout(() => { onMessageAction({ text: m.text, x: point.clientX, y: point.clientY, element }); navigator.vibrate?.(20) }, 500) }}>
           {m.text.trim() && <div className="m-bubble"><MessageBody value={m.text} user={m.role === 'user'} onImageClick={onImage} attachmentNames={m.attachments.filter((attachment) => attachment.media_type.startsWith('image/')).map((attachment) => attachment.name)} renderMarkdown={value => <MarkdownContent value={value} onFileClick={onFile} onImageClick={onImage} />} /></div>}
           {!!m.attachments.length && <div className="m-thumbs">{m.attachments.map(a => a.media_type.startsWith('image/') ? <button key={a.id} onClick={() => onImage(a.url)}><img src={a.url} alt={a.name} /></button> : onFile ? <button key={a.id} className="m-file-link" onClick={() => onFile(a.url)}>{a.name}</button> : <a key={a.id} href={a.url} target="_blank" rel="noreferrer">{a.name}</a>)}</div>}
-          {m.role === 'user' && <small className="m-delivered"><IconCheck size={12} /> 已送达</small>}
+          {m.role === 'user' && (
+            <small className="m-delivered" style={{ color: rows.slice(i + 1).some(r => r.role !== 'user') ? 'var(--m-primary, #4c6ef5)' : 'var(--m-muted, #868e96)' }}>
+              {rows.slice(i + 1).some(r => r.role !== 'user') ? (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}><IconChecks size={13} /> 已响应</span>
+              ) : (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}><IconCheck size={13} /> 已发送</span>
+              )}
+            </small>
+          )}
         </motion.article>
       })}
       </AnimatePresence>

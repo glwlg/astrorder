@@ -68,3 +68,36 @@ def test_local_trust_status_rechecks_native_config_when_catalog_is_stale(tmp_pat
     assert observer.status('local-codex')['trusted'] is True
     assert observer.status('local-codex')['needs_review'] is False
     verify.assert_called_once_with(tmp_path,'codex')
+
+def test_stale_permission_request_is_discarded_and_acknowledged(tmp_path):
+    settings = Settings(
+        database_url=f'sqlite:///{tmp_path}/cache.db',
+        attachments_dir=tmp_path/'attachments',
+        auto_connect_local_hermes=False,
+        browser_secret='test-browser',
+        connector_secret='test-connector',
+    )
+    app = create_app(settings)
+    headers = {'Authorization': 'Bearer test-browser'}
+    with TestClient(app) as client:
+        app.state.store.upsert_agent({'id':'local-codex','kind':'codex','name':'fixture','status':'ready','capabilities':['chat']})
+        app.state.store.upsert_session({'id':SID,'agent_id':'local-codex','title':'fixture','status':'idle','workspace':None,'updated_at':'2026-09-12T00:00:00Z'})
+        spool = tmp_path/'astrorder-observer/events'
+        spool.mkdir(parents=True)
+        approval_id = 'c'*32
+        # Event is older than 600s (e.g. 700s ago)
+        (spool/(approval_id+'.json')).write_text(json.dumps({
+            'id': approval_id,
+            'session_id': SID,
+            'event': 'PermissionRequest',
+            'turn_id': 'turn',
+            'tool_name': 'Bash',
+            'detail': 'stale echo',
+            'approval_pending': True,
+            'observed_at': time.time() - 700,
+        }))
+        native = SimpleNamespace(_home=tmp_path, state='connected', agent_id='local-codex', _request=Mock())
+        app.state.observers.collect(native)
+        bootstrap = client.get('/api/v1/bootstrap', headers=headers).json()
+        assert len(bootstrap['approvals']) == 0
+        assert approval_id in app.state.observers.ack.get('local-codex', [])

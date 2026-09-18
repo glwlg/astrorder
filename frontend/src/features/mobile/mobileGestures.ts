@@ -152,11 +152,18 @@ export function installGlobalNativeHoldBlocker(root: Pick<Document, 'addEventLis
   root.addEventListener('touchend', reset, { capture: true, passive: true } as AddEventListenerOptions)
   root.addEventListener('touchcancel', reset, { capture: true, passive: true } as AddEventListenerOptions)
   root.addEventListener('contextmenu', onContextMenu, { capture: true } as AddEventListenerOptions)
+  const onGesture = (event: Event): void => { event.preventDefault() }
+  root.addEventListener('gesturestart', onGesture, { capture: true, passive: false } as AddEventListenerOptions)
+  root.addEventListener('gesturechange', onGesture, { capture: true, passive: false } as AddEventListenerOptions)
+  root.addEventListener('gestureend', onGesture, { capture: true, passive: false } as AddEventListenerOptions)
   return () => {
     root.removeEventListener('touchstart', onTouchStart, { capture: true } as EventListenerOptions)
     root.removeEventListener('touchend', reset, { capture: true } as EventListenerOptions)
     root.removeEventListener('touchcancel', reset, { capture: true } as EventListenerOptions)
     root.removeEventListener('contextmenu', onContextMenu, { capture: true } as EventListenerOptions)
+    root.removeEventListener('gesturestart', onGesture, { capture: true } as EventListenerOptions)
+    root.removeEventListener('gesturechange', onGesture, { capture: true } as EventListenerOptions)
+    root.removeEventListener('gestureend', onGesture, { capture: true } as EventListenerOptions)
   }
 }
 

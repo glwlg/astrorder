@@ -130,7 +130,8 @@ describe('SessionRail project-first grouping', () => {
     }
     const view = render(<MantineProvider><ConnectedRail /></MantineProvider>)
     try {
-      fireEvent.click(view.container.querySelectorAll('[aria-label="新建会话"]')[0])
+      const localBtn = screen.getAllByRole('button', { name: '新建会话' })[1]
+      fireEvent.click(localBtn)
       fireEvent.change(await screen.findByLabelText('选择 Agent'), { target: { value: sessions[0].agent_id } })
       fireEvent.click(screen.getByRole('button', { name: '创建会话' }))
       await waitFor(() => expect(request).toHaveBeenCalledTimes(1))
@@ -400,5 +401,22 @@ describe('SessionRail local handoff', () => {
     view.unmount()
     useBackgroundTasks.getState().dismiss(task.id)
     useAstrorderStore.getState().resetRuntime()
+  })
+
+  it('displays fork submenu in session menu', async () => {
+    const onSelect = vi.fn()
+    const view = render(
+      <MantineProvider>
+        <SessionRail sessions={[sessions[0]]} agents={agents} onSelect={onSelect} />
+      </MantineProvider>,
+    )
+
+    const row = view.container.querySelector('.session-row-wrapper')!
+    const moreBtn = row.querySelector('button[aria-label="更多操作"]')!
+    fireEvent.click(moreBtn)
+
+    const forkItem = await screen.findByRole('menuitem', { name: /分叉/ })
+    expect(forkItem).toBeInTheDocument()
+    view.unmount()
   })
 })

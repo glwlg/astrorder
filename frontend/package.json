@@ -10,9 +10,13 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "sync": "python ../scripts/dev_hot_sync.py",
+    "build:sync": "tsc -b && vite build && python ../scripts/dev_hot_sync.py"
   },
   "dependencies": {
+    "@json-render/core": "^0.20.0",
+    "@json-render/react": "^0.20.0",
     "@mantine/core": "^9.6.0",
     "@mantine/hooks": "^9.6.0",
     "@mantine/notifications": "^9.6.0",

@@ -48,7 +48,8 @@ export interface AstrorderStore {
     commandId: string,
     attachments: Command['attachments'],
   ) => void
-  markOutboxError: (
+    removeOutbox: (agentId: string, sessionId: string, commandId: string) => void
+markOutboxError: (
     agentId: string,
     sessionId: string,
     commandId: string,
@@ -58,6 +59,7 @@ export interface AstrorderStore {
   applyEvent: (event: EventEnvelope) => void
   setDraft: (agentId: string, sessionId: string, draft: DraftState) => void
   setDraftText: (agentId: string, sessionId: string, text: string) => void
+  updateSession: (agentId: string, sessionId: string, patch: Partial<Session>) => void
   resetRuntime: () => void
 }
 
@@ -262,6 +264,14 @@ export const useAstrorderStore = create<AstrorderStore>((set) => ({
       }
     }),
 
+  removeOutbox: (agentId, sessionId, commandId) =>
+    set((storeState) => {
+      const key = scopeKey(agentId, sessionId) + `::${commandId}`
+      const next = { ...storeState.outbox }
+      delete next[key]
+      return { outbox: next }
+          }),
+
   markOutboxError: (agentId, sessionId, commandId, error, status = 'unknown') =>
     set((storeState) => {
       const key = scopeKey(agentId, sessionId) + `::${commandId}`
@@ -396,6 +406,13 @@ export const useAstrorderStore = create<AstrorderStore>((set) => ({
       const key = scopeKey(agentId, sessionId)
       const current = state.drafts[key] || emptyDraft()
       return { drafts: { ...state.drafts, [key]: { ...current, text } } }
+    }),
+  updateSession: (agentId, sessionId, patch) =>
+    set((state) => {
+      const key = scopeKey(agentId, sessionId)
+      const current = state.sessions[key]
+      if (!current) return state
+      return { sessions: { ...state.sessions, [key]: { ...current, ...patch } } }
     }),
 
   resetRuntime: () =>

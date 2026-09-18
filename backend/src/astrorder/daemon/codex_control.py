@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
 from collections.abc import Mapping
 from datetime import UTC, datetime
@@ -14,6 +15,7 @@ from ..connections import ConnectionError
 from .bridge import DaemonBridge, DaemonBridgeError
 from .codex_projection import CodexNativeFrameRouter
 
+logger = logging.getLogger(__name__)
 
 class DaemonCodexController:
     """Delegate exact Codex turns to the daemon while retaining App projection.
@@ -315,7 +317,8 @@ class DaemonCodexController:
                     self.connection._commands[(session_id, active_turn_id)] = dict(command)
                 return "accepted", None
             except DaemonBridgeError:
-                return "unknown", "daemon Codex steering was not confirmed; command will not retry."
+                with self.connection._lock:
+                    self.connection._active.pop(session_id, None)
         with self.connection._lock:
             self.connection._pending[session_id] = dict(command)
         try:
@@ -333,6 +336,9 @@ class DaemonCodexController:
                     "params": policy,
                 },
             )
+            if response.get("ok") is False:
+                err = response.get("error") or "daemon request rejected"
+                raise DaemonBridgeError(err if isinstance(err, str) else str(err))
             result = response.get("result")
             turn_id = result.get("turn_id") if isinstance(result, Mapping) else None
             if not isinstance(turn_id, str) or not turn_id:
@@ -345,9 +351,11 @@ class DaemonCodexController:
                         self.connection._active[session_id] = turn_id
             return "accepted", None
         except DaemonBridgeError as exc:
+            detail = str(exc)
+            logger.warning("daemon Codex send failed for session %s: %s", session_id, detail)
             if "active writer" in str(exc):
                 if self._agent_type() == "codex" and inputs and all(
-                    item.get("type") in {"text", "image"} for item in inputs
+                    item.get("type") in {"text", "image", "audio", "skill", "mention", "file"} for item in inputs
                 ):
                     try:
                         response = await self.bridge.request_control(
@@ -377,7 +385,7 @@ class DaemonCodexController:
                             return "failed", "Codex Desktop 当前未开放 CDP；请通过 Codex CDP 快捷方式启动。"
                         return "failed", f"Codex Desktop 接管失败：{detail}"
                 return "failed", "该 Codex 会话正在其他客户端中运行，且不支持 CDP 接管。"
-            return "unknown", "daemon Codex delivery was not confirmed; command will not retry."
+            return "failed", f"Codex 指令下发失败：{detail}"
         finally:
             with self.connection._lock:
                 self.connection._pending.pop(session_id, None)

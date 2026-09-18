@@ -1,11 +1,13 @@
 import { useState } from 'react'
 import {
+  ActionIcon,
   Badge,
   Button,
   Card,
   Collapse,
   Divider,
   Group,
+  Modal,
   Paper,
   Select,
   SimpleGrid,
@@ -14,11 +16,13 @@ import {
   Text,
   TextInput,
   Title,
+  Tooltip,
 } from '@mantine/core'
 import {
   IconAdjustments,
   IconChevronDown,
   IconChevronUp,
+  IconInfoCircle,
   IconPuzzle,
 } from '@tabler/icons-react'
 import { artifactViewerRegistry } from '../sidecar/registry'
@@ -32,6 +36,7 @@ function PluginCard({ viewer }: { viewer: ArtifactViewer }) {
   const getPluginConfig = usePluginSettingsStore((s) => s.getPluginConfig)
 
   const [expanded, setExpanded] = useState(false)
+  const [infoOpened, setInfoOpened] = useState(false)
   const Icon = viewer.icon
   const hasOptions = viewer.configOptions && viewer.configOptions.length > 0
 
@@ -71,10 +76,36 @@ function PluginCard({ viewer }: { viewer: ArtifactViewer }) {
             <Text size="xs" c="dimmed" mt={4}>
               {viewer.description || '为工作区提供专有媒体与格式的交互渲染与处理支持。'}
             </Text>
+            {viewer.id === 'blackboard-viewer' && (
+              <Group gap={6} mt={6}>
+                <Badge size="xs" color="indigo" variant="light">
+                  星序多 Agent 核心总线
+                </Badge>
+                <Badge size="xs" color="cyan" variant="light">
+                  json-render 视觉引擎
+                </Badge>
+                <Badge size="xs" color="teal" variant="light">
+                  星系自动物理隔离
+                </Badge>
+              </Group>
+            )}
           </div>
         </Group>
 
-        <Group gap="xs" wrap="nowrap">
+        <Group gap="xs" wrap="nowrap" align="center">
+          {/* 叹号说明按钮：点击弹窗查看能力与支持组件 */}
+          <Tooltip label="查看插件说明与支持能力" withArrow>
+            <ActionIcon
+              size="sm"
+              variant="subtle"
+              color="gray"
+              onClick={() => setInfoOpened(true)}
+              aria-label={`查看 ${viewer.title} 说明`}
+            >
+              <IconInfoCircle size={17} />
+            </ActionIcon>
+          </Tooltip>
+
           <Switch
             checked={isEnabled}
             onChange={(e) => togglePlugin(viewer.id, e.currentTarget.checked)}
@@ -85,6 +116,7 @@ function PluginCard({ viewer }: { viewer: ArtifactViewer }) {
         </Group>
       </Group>
 
+      {/* 参数配置折叠区 */}
       {hasOptions && (
         <>
           <Divider my="sm" />
@@ -167,6 +199,146 @@ function PluginCard({ viewer }: { viewer: ArtifactViewer }) {
           </Collapse>
         </>
       )}
+
+      {/* 插件能力说明与支持组件清单弹窗 */}
+      <Modal
+        opened={infoOpened}
+        onClose={() => setInfoOpened(false)}
+        size="lg"
+        radius="lg"
+        centered
+        title={
+          <Group gap="xs">
+            <div
+              style={{
+                width: 28,
+                height: 28,
+                borderRadius: 6,
+                background: 'rgba(99, 102, 241, 0.1)',
+                color: 'var(--astr-indigo, #5B5BD6)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <Icon size={18} />
+            </div>
+            <Text fw={700} size="md">
+              {viewer.title} · 能力说明
+            </Text>
+            {viewer.version && (
+              <Badge size="xs" variant="light" color="indigo">
+                v{viewer.version}
+              </Badge>
+            )}
+          </Group>
+        }
+      >
+        <Stack gap="md">
+          <Text size="sm" c="dimmed" style={{ lineHeight: 1.6 }}>
+            {viewer.documentation?.summary || viewer.description || '为工作区提供专有交互呈现与处理能力。'}
+          </Text>
+
+          {/* 专属能力章节 */}
+          {viewer.documentation?.sections?.map((sec, idx) => (
+            <div
+              key={idx}
+              style={{
+                padding: '10px 12px',
+                borderRadius: 8,
+                background: 'var(--astr-surface-muted, #F8FAFC)',
+                border: '1px solid var(--astr-border, #E5E7EB)',
+              }}
+            >
+              <Text size="xs" fw={700} c="var(--astr-text, #1E293B)" mb={4}>
+                {sec.title}
+              </Text>
+              <Text size="11.5px" c="dimmed" style={{ whiteSpace: 'pre-wrap', lineHeight: 1.55 }}>
+                {sec.content}
+              </Text>
+            </div>
+          ))}
+
+          {/* 支持的组件清单 (主要针对黑板等 json-render 插件) */}
+          {viewer.documentation?.supportedComponents && viewer.documentation.supportedComponents.length > 0 && (
+            <div>
+              <Group justify="space-between" mb={8}>
+                <Text size="xs" fw={700} c="dimmed" style={{ letterSpacing: '0.4px', textTransform: 'uppercase' }}>
+                  当前支持的可视化组件清单 (json-render 组件库)
+                </Text>
+                <Badge size="xs" variant="light" color="indigo">
+                  共 {viewer.documentation.supportedComponents.length} 项组件
+                </Badge>
+              </Group>
+
+              <div
+                style={{
+                  maxHeight: 280,
+                  overflowY: 'auto',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 6,
+                  paddingRight: 4,
+                }}
+              >
+                {viewer.documentation.supportedComponents.map((comp) => (
+                  <div
+                    key={comp.name}
+                    style={{
+                      padding: '8px 10px',
+                      borderRadius: 6,
+                      background: 'var(--astr-surface-muted, #F8FAFC)',
+                      border: '1px solid var(--astr-border, #E5E7EB)',
+                      fontSize: 11.5,
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <code style={{ fontFamily: 'monospace', fontWeight: 700, color: '#5B5BD6' }}>
+                          {comp.name}
+                        </code>
+                        <span style={{ fontWeight: 600, color: '#1E293B' }}>- {comp.label}</span>
+                      </div>
+                      {comp.triggerKeys && comp.triggerKeys.length > 0 && (
+                        <div style={{ display: 'flex', gap: 4 }}>
+                          {comp.triggerKeys.map((tk, tIdx) => (
+                            <Badge key={tIdx} size="xs" variant="outline" color="gray" style={{ fontSize: 9.5 }}>
+                              {tk}
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <Text size="11px" c="dimmed" style={{ lineHeight: 1.45 }}>
+                      {comp.description}
+                    </Text>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 支持的文件扩展名 */}
+          {viewer.extensions && viewer.extensions.length > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11 }}>
+              <span style={{ color: '#64748B' }}>关联文件类型:</span>
+              <Group gap={4}>
+                {viewer.extensions.map((ext) => (
+                  <Badge key={ext} size="xs" variant="light" color="gray">
+                    {ext}
+                  </Badge>
+                ))}
+              </Group>
+            </div>
+          )}
+
+          <Group justify="flex-end" mt="xs">
+            <Button size="xs" variant="default" onClick={() => setInfoOpened(false)}>
+              关闭
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
     </Card>
   )
 }

@@ -34,6 +34,7 @@ import { SidecarHost } from '../sidecar/SidecarHost'
 import { useSidecarStore } from '../sidecar/sidecarStore'
 import { BlurText } from '../../components/animations/BlurText'
 import { ErrorBoundary } from '../../components/ErrorBoundary'
+import { BotGroupChatPage } from './BotGroupChatPage'
 
 
 const NO_COMMANDS: Command[] = []
@@ -66,6 +67,21 @@ export function ChatPage() {
     () => resolveSession(sessions, sessionId ? decodeURIComponent(sessionId) : undefined, searchParams.get('agent_id')),
     [searchParams, sessionId, sessions],
   )
+
+  const [activeBotGroup, setActiveBotGroup] = useState<import('../../domain/types').BotGroup | null>(null)
+  useEffect(() => {
+    if (sessionId && sessionId.startsWith('group-')) {
+      let mounted = true
+      void api.getBotGroup(sessionId).then(res => {
+        if (mounted) setActiveBotGroup(res.group)
+      }).catch(() => {
+        if (mounted) setActiveBotGroup(null)
+      })
+      return () => { mounted = false }
+    } else {
+      setActiveBotGroup(null)
+    }
+  }, [sessionId])
   const handoffPeer = useMemo(() => {
     if (!selected) return null
     if (selected.handoff_from_agent_id && selected.handoff_from_session_id) {
@@ -311,6 +327,14 @@ export function ChatPage() {
     }
   }
 
+  if (activeBotGroup) {
+    return (
+      <div className="route-page chat-page">
+        <BotGroupChatPage group={activeBotGroup} agents={agents} />
+      </div>
+    )
+  }
+
   if (sessions.length === 0) {
     return <EmptyState icon={<IconSparkles />} title="还没有可用会话" description="认证成功，但服务端没有返回 Agent 会话。连接真实 Agent 后，会话会出现在这里。" />
   }
@@ -416,6 +440,7 @@ export function ChatPage() {
             key={`composer:${scopeKey(selected.agent_id, selected.id)}`}
             session={selected}
             agent={agent}
+            tasks={tasks}
             onHeightChange={setComposerHeight}
             onPreviewImage={openGallery}
           />

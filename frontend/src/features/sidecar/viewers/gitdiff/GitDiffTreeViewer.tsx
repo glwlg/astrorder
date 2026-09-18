@@ -198,6 +198,13 @@ function GitTreeNodeItem({
 }
 
 export function GitDiffTreeViewer({ artifact }: ViewerContext) {
+  const baseBranch = useMemo(() => {
+    try {
+      return new URLSearchParams(artifact.readUrl || '').get('base_branch') || undefined
+    } catch {
+      return undefined
+    }
+  }, [artifact.readUrl])
   const [loading, setLoading] = useState(true)
   const [files, setFiles] = useState<GitFileEntry[]>([])
   const [insertions, setInsertions] = useState(0)
@@ -222,6 +229,7 @@ export function GitDiffTreeViewer({ artifact }: ViewerContext) {
       if (artifact.path) params.set('workspace', artifact.path)
       if (artifact.sessionId) params.set('session_id', artifact.sessionId)
       if (artifact.connectionId) params.set('connection_id', artifact.connectionId)
+      if (baseBranch) params.set('base_branch', baseBranch)
 
       const resp = await fetch(`/api/v1/git/status?${params.toString()}`, { headers })
       if (resp.ok) {
@@ -233,7 +241,7 @@ export function GitDiffTreeViewer({ artifact }: ViewerContext) {
     } finally {
       setLoading(false)
     }
-  }, [artifact.path, artifact.sessionId, artifact.connectionId])
+  }, [artifact.path, artifact.sessionId, artifact.connectionId, baseBranch])
 
   useEffect(() => {
     void fetchStatus()
@@ -246,6 +254,7 @@ export function GitDiffTreeViewer({ artifact }: ViewerContext) {
     if (artifact.path) params.set('workspace', artifact.path)
     if (artifact.sessionId) params.set('session_id', artifact.sessionId)
     if (artifact.connectionId) params.set('connection_id', artifact.connectionId)
+    if (baseBranch) params.set('base_branch', baseBranch)
 
     const diffArtifact = {
       id: `gitdiff:${artifact.sessionId || 'current'}:${filePath}`,
@@ -268,6 +277,7 @@ export function GitDiffTreeViewer({ artifact }: ViewerContext) {
     if (artifact.path) params.set('workspace', artifact.path)
     if (artifact.sessionId) params.set('session_id', artifact.sessionId)
     if (artifact.connectionId) params.set('connection_id', artifact.connectionId)
+    if (baseBranch) params.set('base_branch', baseBranch)
 
     const allDiffArtifact = {
       id: `gitdiff:${artifact.sessionId || 'current'}:ALL`,
@@ -293,7 +303,7 @@ export function GitDiffTreeViewer({ artifact }: ViewerContext) {
           <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
             <IconFileDiff size={16} color="var(--astr-blue, #3b82f6)" />
             <Text size="xs" fw={600} truncate>
-              代码变更 ({files.length})
+              {baseBranch ? `对照 ${baseBranch} (${files.length})` : `未暂存 (${files.length})`}
             </Text>
             <Badge size="xs" color="teal" variant="light">
               +{insertions}

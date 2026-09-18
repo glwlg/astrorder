@@ -10,6 +10,8 @@ contextBridge.exposeInMainWorld('astrorderDesktop', {
   maximize: () => ipcRenderer.invoke('window:maximize'),
   close: () => ipcRenderer.invoke('window:close'),
   isMaximized: () => ipcRenderer.invoke('window:isMaximized'),
+  notify: (payload) => ipcRenderer.invoke('notification:show', payload),
+  setClipboardFiles: (paths) => ipcRenderer.invoke('clipboard:set-files', paths),
 })
 
 window.addEventListener('DOMContentLoaded', () => {

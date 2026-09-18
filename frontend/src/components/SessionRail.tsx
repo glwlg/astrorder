@@ -11,8 +11,12 @@ import {
   IconPlus,
   IconTrash,
   IconTransfer,
+  IconGitFork,
+  IconDeviceDesktop,
+  IconGitBranch,
 } from '@tabler/icons-react'
 import {
+  Badge,
   Button,
   Checkbox,
   Collapse,
@@ -27,13 +31,14 @@ import {
   UnstyledButton,
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { useMemo, useState, type CSSProperties } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { AnimatePresence, LayoutGroup, motion } from 'motion/react'
 import { VariableProximity } from './animations/VariableProximity'
 import { useSessionOrder } from '../hooks/useSessionOrder'
 import { AgentSessionFilter, matchesAgent } from './AgentSessionFilter'
 import { NewSessionDialog } from './NewSessionDialog'
 import { HandoffDialog } from './HandoffDialog'
+import { ForkWorktreeDialog } from './ForkWorktreeDialog'
 import { moveProject, reconcileProjectOrder } from './projectOrder'
 import { useWorkspacePreferences } from '../hooks/useWorkspacePreferences'
 import type { Agent, Project, Session } from '../domain/types'
@@ -47,6 +52,7 @@ import { api } from '../api/client'
 import './sessionPins.css'
 import { useAstrorderStore } from '../state/store'
 import { useShallow } from 'zustand/react/shallow'
+import { AddProjectModal } from './AddProjectModal'
 import {
   ProjectAppearanceModal,
   ProjectGlyph,
@@ -106,6 +112,7 @@ export function SessionRail({
   }
   const [createProject, setCreateProject] = useState<ProjectGroup | null>(null)
   const [createOpened, setCreateOpened] = useState(false)
+  const [addProjectOpened, setAddProjectOpened] = useState(false)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
 
   const { preferences, updatePreferences, removeProjectPreferences } = useWorkspacePreferences()
@@ -129,6 +136,55 @@ export function SessionRail({
   const [confirmation, setConfirmation] = useState<PendingConfirmation | null>(null)
   const [confirmationLoading, setConfirmationLoading] = useState(false)
   const [handoffTarget, setHandoffTarget] = useState<Session | null>(null)
+  const [forkWorktreeTarget, setForkWorktreeTarget] = useState<Session | null>(null)
+  const [forkLoading, setForkLoading] = useState(false)
+
+  const handleForkChatBranch = async (session: Session) => {
+    if (forkLoading) return
+    setForkLoading(true)
+    try {
+      const created = await api.forkSession(session.id, {
+        agent_id: session.agent_id,
+        worktree: false,
+      })
+      useAstrorderStore.setState((state) => ({
+        sessions: { ...state.sessions, [scopeKey(created.agent_id, created.id)]: created },
+      }))
+      notifications.show({ color: 'teal', message: '已创建聊天分支' })
+      onSelect(created)
+    } catch (err) {
+      notifications.show({
+        color: 'red',
+        message: err instanceof Error ? err.message : '创建聊天分支失败，请重试',
+      })
+    } finally {
+      setForkLoading(false)
+    }
+  }
+
+  const forkMenuItems = (session: Session) => (
+    <Menu.Sub>
+      <Menu.Sub.Target>
+        <Menu.Sub.Item leftSection={<IconGitFork size={14} />}>
+          分叉
+        </Menu.Sub.Item>
+      </Menu.Sub.Target>
+      <Menu.Sub.Dropdown onClick={(e) => e.stopPropagation()}>
+        <Menu.Item
+          leftSection={<IconDeviceDesktop size={14} />}
+          onClick={() => void handleForkChatBranch(session)}
+        >
+          创建聊天分支
+        </Menu.Item>
+        <Menu.Item
+          leftSection={<IconGitBranch size={14} />}
+          onClick={() => setForkWorktreeTarget(session)}
+        >
+          在新工作树中创建聊天分支
+        </Menu.Item>
+      </Menu.Sub.Dropdown>
+    </Menu.Sub>
+  )
   const [batchMode, setBatchMode] = useState(false)
   const [selectedSessionKeys, setSelectedSessionKeys] = useState<Set<string>>(new Set())
 
@@ -473,8 +529,27 @@ export function SessionRail({
             <IconChecklist size={17} />
           </Button>
         </Tooltip>
-        <Button size="xs" variant="subtle" color="gray" px={0} w={36} onClick={() => { setCreateProject(null); setCreateOpened(true) }} aria-label="新建会话"><IconPlus size={17} /></Button>
+        <Tooltip label="新增项目" withArrow position="bottom">
+          <Button
+            size="xs"
+            variant="subtle"
+            color="gray"
+            px={0}
+            w={36}
+            onClick={() => setAddProjectOpened(true)}
+            aria-label="新增项目"
+          >
+            <IconPlus size={17} />
+          </Button>
+        </Tooltip>
       </Group>
+      {addProjectOpened && (
+        <AddProjectModal
+          opened={addProjectOpened}
+          onClose={() => setAddProjectOpened(false)}
+          agents={agents}
+        />
+      )}
       {createOpened && (
         <NewSessionDialog
           agents={agents}
@@ -646,6 +721,7 @@ export function SessionRail({
                   <Menu position="bottom-end" withinPortal><Menu.Target><button className="session-action-btn" aria-label="更多操作"><IconDotsVertical size={14} /></button></Menu.Target><Menu.Dropdown>
                     <Menu.Item leftSection={<IconEdit size={14} />} onClick={() => openRenameModal(session)}>重命名</Menu.Item>
                     <Menu.Item leftSection={<IconCopy size={14} />} onClick={() => copySessionId(session)}>复制 ID</Menu.Item>
+                    {forkMenuItems(session)}
                     {handoffItems(session)}
                     <Menu.Item color="red" leftSection={<IconTrash size={14} />} onClick={(event) => requestDeleteSession(session, event)}>删除会话</Menu.Item>
                   </Menu.Dropdown></Menu>
@@ -867,6 +943,7 @@ export function SessionRail({
                               <Menu.Item leftSection={<IconCopy size={14} />} onClick={() => copySessionId(session)}>
                                 复制 ID
                               </Menu.Item>
+                              {forkMenuItems(session)}
                               {handoffItems(session)}
                               <Menu.Divider />
                               <Menu.Item
@@ -951,6 +1028,15 @@ export function SessionRail({
           projectLabel={appearanceTarget.label}
           appearance={projectAppearance}
           onSave={handleSaveAppearance}
+        />
+      )}
+      {forkWorktreeTarget && (
+        <ForkWorktreeDialog
+          session={forkWorktreeTarget}
+          onClose={() => setForkWorktreeTarget(null)}
+          onCreated={(newSession) => {
+            onSelect(newSession)
+          }}
         />
       )}
       {handoffTarget && <HandoffDialog

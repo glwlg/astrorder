@@ -724,9 +724,14 @@ class LocalHermesController:
 
                 if effort not in REASONING_EFFORTS:
                     raise ConnectionError("思考强度不在原生支持范围内。", 422)
+            fallback_ws = (
+                "P:/workspace/glwlg/ai/astrorder"
+                if Path("P:/workspace/glwlg/ai/astrorder").is_dir()
+                else str(self.project_root)
+            )
             params: dict[str, Any] = {
                 "source": "local",
-                "cwd": workspace or str(self.project_root),
+                "cwd": workspace or fallback_ws,
                 "title": title or "新会话",
             }
             if model:

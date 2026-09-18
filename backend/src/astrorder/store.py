@@ -165,6 +165,8 @@ def _session_wire(row: SessionRow) -> dict[str, Any]:
         "control_state": row.control_state,
         "handoff_from_agent_id": row.handoff_from_agent_id,
         "handoff_from_session_id": row.handoff_from_session_id,
+        "parent_session_id": row.handoff_from_session_id,
+        "parent_agent_id": row.handoff_from_agent_id,
     }
 
 
@@ -803,8 +805,8 @@ class Store:
                         # Native snapshots cannot promote temporary sessions.
                         "ephemeral": SessionRow.ephemeral | (data.get("ephemeral") is True),
                         "control_state": data.get("control_state", "unknown"),
-                        "handoff_from_agent_id": data.get("handoff_from_agent_id"),
-                        "handoff_from_session_id": data.get("handoff_from_session_id"),
+                        "handoff_from_agent_id": func.coalesce(data.get("handoff_from_agent_id"), SessionRow.handoff_from_agent_id),
+                        "handoff_from_session_id": func.coalesce(data.get("handoff_from_session_id"), SessionRow.handoff_from_session_id),
                         "updated_at": updated_at,
                     }
                 )
@@ -828,8 +830,8 @@ class Store:
                 row.native_kind = data.get("native_kind", row.native_kind)
                 row.ephemeral = row.ephemeral or data.get("ephemeral") is True
                 row.control_state = data.get("control_state", row.control_state or "unknown")
-                row.handoff_from_agent_id = data.get("handoff_from_agent_id", row.handoff_from_agent_id)
-                row.handoff_from_session_id = data.get("handoff_from_session_id", row.handoff_from_session_id)
+                row.handoff_from_agent_id = data.get("handoff_from_agent_id") or row.handoff_from_agent_id
+                row.handoff_from_session_id = data.get("handoff_from_session_id") or row.handoff_from_session_id
                 row.updated_at = updated_at
                 db.flush()
             return _session_wire(row)
@@ -1551,8 +1553,8 @@ class Store:
             row.history_state = data.get("history_state", row.history_state or "local")
             row.ephemeral = row.ephemeral or data.get("ephemeral") is True
             row.control_state = data.get("control_state", row.control_state or "unknown")
-            row.handoff_from_agent_id = data.get("handoff_from_agent_id", row.handoff_from_agent_id)
-            row.handoff_from_session_id = data.get("handoff_from_session_id", row.handoff_from_session_id)
+            row.handoff_from_agent_id = data.get("handoff_from_agent_id") or row.handoff_from_agent_id
+            row.handoff_from_session_id = data.get("handoff_from_session_id") or row.handoff_from_session_id
             row.updated_at = updated_at
         db.flush()
         return _session_wire(row)

@@ -84,7 +84,7 @@ class NativeObservers:
         return [env.codex,*env.remote.values()]
 
     def collect(self, client):
-        if not client._home or client.state!='connected': return
+        if not client._home or client.state != 'connected': return
         aid=client.agent_id
         home=client._home.as_posix()
         acknowledged=self.ack.get(aid,[])
@@ -118,6 +118,10 @@ class NativeObservers:
                 try: data['preview']=reply_preview(client,data['session_id'],data.get('turn_id'))
                 except (RuntimeError,OSError,ValueError): data['preview']=''
             if data.get('approval_pending'):
+                is_stale_approval = (time.time() - data['observed_at'] > 600)
+                if is_stale_approval:
+                    self.ack[aid].append(data['id'])
+                    continue
                 present.add(data['id'])
                 key=(aid,data['session_id'],data['id'])
                 with self.lock:
@@ -167,12 +171,21 @@ class NativeObservers:
         while not self.stopping.is_set():
             async def one(client):
                 try: await asyncio.to_thread(self.collect,client)
-                except (RuntimeError, OSError, ValueError):
+                except Exception:
                     self.states.setdefault(client.agent_id,{})['poll_ok']=False
             await asyncio.gather(*(one(c) for c in self.clients()))
-            await asyncio.to_thread(self.app.state.hermes_approvals.poll)
-            await asyncio.to_thread(self._reconcile_commands)
-            await asyncio.to_thread(self._sync_hermes_activity)
+            try:
+                await asyncio.to_thread(self.app.state.hermes_approvals.poll)
+            except Exception:
+                pass
+            try:
+                await asyncio.to_thread(self._reconcile_commands)
+            except Exception:
+                pass
+            try:
+                await asyncio.to_thread(self._sync_hermes_activity)
+            except Exception:
+                pass
             try: await asyncio.wait_for(self.stopping.wait(),timeout=1)
             except TimeoutError: pass
 

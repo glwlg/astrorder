@@ -1,6 +1,6 @@
 import { IconArrowDown, IconPaperclip, IconRefresh, IconTool, IconVectorTriangle } from '@tabler/icons-react'
 import { ActionIcon, Anchor, Button, Group, Paper, Stack, Text, Tooltip } from '@mantine/core'
-import { IconCheck, IconCopy, IconEdit, IconShieldCheck } from '@tabler/icons-react'
+import { IconCheck, IconChecks, IconCopy, IconEdit, IconShieldCheck } from '@tabler/icons-react'
 import { useMemo, useState } from 'react'
 import type { Approval, Attachment, Message, OutboxEntry, Session } from '../../domain/types'
 import { useStickToBottom } from '../../hooks/useStickToBottom'
@@ -8,7 +8,7 @@ import { MarkdownContent } from '../../components/MarkdownContent'
 import { LazyDetails } from '../../components/LazyDetails'
 import { MessageBody } from '../../components/MessageBody'
 import { useOlderMessages } from '../../hooks/useOlderMessages'
-import { describeTool, PackSummary, ToolLineIcon } from './toolPresentation'
+import { describeTool, PackSummary, ShellOutputBlock, ToolLineIcon, unwrapCommand } from './toolPresentation'
 import { ShinyText } from '../../components/animations/ShinyText'
 import { StarBorder } from '../../components/animations/StarBorder'
 import { AstrorderLoader } from '../../components/AnimatedStatus'
@@ -152,6 +152,7 @@ function MessageItem({
   session,
   isLatest,
   onEdit,
+  hasAssistantReplied = false,
 }: {
   message: Message
   onImageClick?: (url: string) => void
@@ -159,9 +160,15 @@ function MessageItem({
   session?: Session | null
   isLatest?: boolean
   onEdit?: (text: string) => void
+  hasAssistantReplied?: boolean
 }) {
   const isUser = message.role === 'user'
   const isActivity = message.kind !== 'message' || message.role === 'tool'
+  const isReviewMode = isUser && (
+    message.text.includes('检查我未提交的更改') ||
+    message.text.includes('审查我的更改') ||
+    message.text.startsWith('/review')
+  )
   const [copied, setCopied] = useState(false)
   const handleCopy = () => {
     if (!message.text) return
@@ -172,25 +179,34 @@ function MessageItem({
   if (isActivity) {
     const desc = describeTool(message)
     const isThinking = message.kind === 'thinking'
+    const toolArgs = (message.tool?.arguments && typeof message.tool.arguments === 'object') ? (message.tool.arguments as Record<string, unknown>) : {}
+    const isCommand = desc.iconKey === 'terminal' || Boolean(toolArgs.command || toolArgs.cmd)
+    const unwrappedCmd = unwrapCommand(String(toolArgs.command || toolArgs.cmd || ''))
+    const cmdStatus = desc.isFailed ? 'failed' : desc.isRunning ? 'running' : 'success'
+    const foldTitle = isCommand
+      ? `${desc.isRunning ? '运行' : desc.isFailed ? '运行失败' : '已运行'} ${unwrappedCmd || desc.target || desc.fullTitle}`
+      : (desc.target || desc.fullTitle)
     return (
       <article className={`message-activity message-kind-${message.kind}`} data-testid={`message-${message.id}`}>
         <LazyDetails className={`activity-fold ${desc.isFailed ? 'is-failed' : ''}`} loading={desc.isRunning} summary={
           <span className="activity-fold-summary">
             <span className="activity-icon"><ToolLineIcon icon={desc.iconKey} size={14} /></span>
-            <span className="activity-title">{desc.target || desc.fullTitle}</span>
+            <span className="activity-title">{foldTitle}</span>
             {desc.isFailed && <span className="activity-badge is-failed">失败</span>}
             {desc.isRunning && <span className="activity-badge is-running"><ShinyText text="执行中" speed={1.5} /></span>}
           </span>
         }>
-          {message.text && (
-            isThinking ? (
-              <div className="activity-thinking-content"><MarkdownContent value={message.text} /></div>
-            ) : (
-              <pre className="tool-output">{message.text}</pre>
-            )
-          )}
-          {message.tool?.arguments != null && Object.keys(message.tool.arguments).length > 0 && (
-            <pre className="tool-payload">{JSON.stringify(message.tool.arguments, null, 2)}</pre>
+          {isThinking ? (
+            message.text && <div className="activity-thinking-content"><MarkdownContent value={message.text} /></div>
+          ) : isCommand ? (
+            <ShellOutputBlock command={unwrappedCmd || desc.fullTitle} output={message.text} status={cmdStatus} />
+          ) : (
+            <>
+              {message.text && <pre className="tool-output">{message.text}</pre>}
+              {message.tool?.arguments != null && Object.keys(message.tool.arguments).length > 0 && (
+                <pre className="tool-payload">{JSON.stringify(message.tool.arguments, null, 2)}</pre>
+              )}
+            </>
           )}
           <AttachmentList attachments={message.attachments} onImageClick={onImageClick} session={session} />
         </LazyDetails>
@@ -220,7 +236,21 @@ function MessageItem({
         <AttachmentList attachments={message.attachments} onImageClick={onImageClick} onGalleryClick={onGalleryClick} session={session} />
       </Paper>
       <div className="message-meta">
+        {isReviewMode && (
+          <span className="message-review-mode-tag" style={{ fontSize: '11px', color: 'var(--astr-muted)', userSelect: 'none' }}>
+            审查模式
+          </span>
+        )}
         {Date.parse(message.created_at) > 0 && <time dateTime={message.created_at}>{new Date(message.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</time>}
+        {isUser && (
+          <span
+            className="message-status-ticks"
+            title={hasAssistantReplied ? 'Agent 已响应' : '已发送'}
+            style={{ display: 'inline-flex', alignItems: 'center', color: hasAssistantReplied ? 'var(--astr-indigo, #5b6cff)' : 'var(--astr-muted)' }}
+          >
+            {hasAssistantReplied ? <IconChecks size={14} /> : <IconCheck size={14} />}
+          </span>
+        )}
         <div className="message-actions-bar">
           {message.text && (
             <Tooltip label={copied ? '已复制' : '复制内容'} position="top" withArrow>
@@ -418,6 +448,7 @@ export function Transcript({
             const currentDate = new Date(message.created_at).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
             const prevDate = prevMessage ? new Date(prevMessage.created_at).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' }) : null
             const showDateDivider = Date.parse(message.created_at) > 0 && currentDate !== prevDate
+            const hasAssistantReplied = message.role === 'user' && visibleMessages.slice(idx + 1).some(m => m.role !== 'user')
             return (
               <motion.div className="transcript-message-entry" key={message.id} layout="position" initial={enter} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.28, ease: [0.2, 0.8, 0.2, 1] }}>
                 {showDateDivider && (
@@ -434,6 +465,7 @@ export function Transcript({
                   session={session}
                   isLatest={idx === visibleMessages.length - 1}
                   onEdit={message.id === lastUserMessageId ? onEditLastUserMessage : undefined}
+                  hasAssistantReplied={hasAssistantReplied}
                 />
               </motion.div>
             )

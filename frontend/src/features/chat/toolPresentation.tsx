@@ -2,14 +2,18 @@ import { ShinyText } from '../../components/animations/ShinyText'
 import {
   IconBolt,
   IconBulb,
+  IconCheck,
+  IconCopy,
   IconEdit,
   IconFileText,
   IconPhoto,
   IconSearch,
   IconTerminal2,
   IconTool,
+  IconX,
 } from '@tabler/icons-react'
 import type { Message } from '../../domain/types'
+import { useState, type MouseEvent } from 'react'
 
 export type ToolIconKey =
   | 'terminal'
@@ -23,9 +27,11 @@ export type ToolIconKey =
 
 export function unwrapCommand(raw: string): string {
   if (!raw) return ''
-  const trimmed = raw.trim()
-  const shellPattern = /^(?:\/(?:usr\/)?bin\/)?(?:zsh|bash|sh)\s+-[a-zA-Z]*c\s+(['"])([\s\S]*)\1\s*$/
-  const match = trimmed.match(shellPattern)
+  let trimmed = raw.trim()
+
+  // 1. Windows pwsh / powershell 包装调用
+  const pwshPattern = /^(?:"[^"]*(?:pwsh|powershell)(?:\.exe)?"|'[^']*(?:pwsh|powershell)(?:\.exe)?'|(?:[^\s"']*[\\/])?(?:pwsh|powershell)(?:\.exe)?)\s+[\s\S]*?(?:-Command|-c)\s+(['"])([\s\S]*)\1\s*$/i
+  let match = trimmed.match(pwshPattern)
   if (match) {
     let inner = match[2]
     if (match[1] === '"') {
@@ -33,8 +39,33 @@ export function unwrapCommand(raw: string): string {
     } else {
       inner = inner.replace(/\\'/g, "'")
     }
-    return inner.trim()
+    trimmed = inner.trim()
   }
+
+  // 2. Unix shells (bash, zsh, sh -c "...")
+  const unixPattern = /^(?:\/(?:usr\/)?bin\/)?(?:zsh|bash|sh)\s+-[a-zA-Z]*c\s+(['"])([\s\S]*)\1\s*$/i
+  match = trimmed.match(unixPattern)
+  if (match) {
+    let inner = match[2]
+    if (match[1] === '"') {
+      inner = inner.replace(/\\"/g, '"').replace(/\\\\/g, '\\')
+    } else {
+      inner = inner.replace(/\\'/g, "'")
+    }
+    trimmed = inner.trim()
+  }
+
+  // 3. cmd /c "..."
+  const cmdPattern = /^(?:"[^"]*cmd(?:\.exe)?"|'[^']*cmd(?:\.exe)?'|(?:[^\s"']*[\\/])?cmd(?:\.exe)?)\s+\/[a-zA-Z]\s+(['"]?)([\s\S]*?)\1\s*$/i
+  match = trimmed.match(cmdPattern)
+  if (match) {
+    trimmed = match[2].trim()
+  }
+
+  // 4. 清洗 PowerShell UTF-8 编码设置样板代码
+  const utf8Boilerplate = /^try\s*\{\s*\[Console\]::OutputEncoding\s*=\s*\[System\.Text\.Encoding\]::UTF8\s*\}\s*catch\s*\{\s*\}\s*;?\s*[\r\n]*/i
+  trimmed = trimmed.replace(utf8Boilerplate, '').trim()
+
   return trimmed
 }
 
@@ -98,19 +129,19 @@ export function describeTool(message: Message): ToolDescription {
   }
 
   const tool = message.tool || { name: 'tool', arguments: {} }
-  const name = String(tool.name || '')
-  const args = (tool.arguments && typeof tool.arguments === 'object') ? (tool.arguments as Record<string, unknown>) : {}
+ const name = String(tool.name || '')
+ const args = (tool.arguments && typeof tool.arguments === 'object') ? (tool.arguments as Record<string, unknown>) : {}
 
   // 1. Shell commands
-  if (name === 'commandExecution' || name === 'terminal' || name === 'bash' || name === 'sh' || name === 'exec' || args.command) {
-    const rawCmd = String(args.command || '')
+  if (name === 'commandExecution' || name === 'terminal' || name === 'bash' || name === 'sh' || name === 'exec' || name === 'exec_command' || Boolean(args.command) || Boolean(args.cmd)) {
+    const rawCmd = String(args.command || args.cmd || '')
     const cmd = unwrapCommand(rawCmd) || name
     let action = '运行'
-    if (/^git\s/i.test(cmd)) action = 'Git'
-    else if (/^(?:pytest|python\s+-m\s+pytest|npm\s+test|vitest|cargo\s+test)\b/i.test(cmd)) action = '测试'
-    else if (/^(?:cat|head|tail|sed)\b/i.test(cmd)) action = '查看'
-    else if (/^(?:rg|grep|find)\b/i.test(cmd)) action = '搜索'
-    else if (/^(?:docker|systemctl|service)\b/i.test(cmd)) action = '服务'
+   if (/^git\s/i.test(cmd)) action = 'Git'
+   else if (/^(?:pytest|python\s+-m\s+pytest|npm\s+test|vitest|cargo\s+test)\b/i.test(cmd)) action = '测试'
+   else if (/^(?:cat|head|tail|sed)\b/i.test(cmd)) action = '查看'
+   else if (/^(?:rg|grep|find)\b/i.test(cmd)) action = '搜索'
+   else if (/^(?:docker|systemctl|service)\b/i.test(cmd)) action = '服务'
 
     const target = cmd.length > 70 ? cmd.slice(0, 67) + '...' : cmd
     return {
@@ -321,5 +352,63 @@ export function PackSummary({ pack, isRunning: propIsRunning }: { pack: Message[
       {hasFailed && <span className="activity-badge is-failed">有失败项</span>}
       {isRunning && <span className="activity-badge is-running"><ShinyText text="运行中" speed={1.5} /></span>}
     </span>
+  )
+}
+
+export function ShellOutputBlock({
+  command,
+  output,
+  status = "success",
+}: {
+  command: string
+  output?: string | null
+  status?: "success" | "failed" | "running"
+}) {
+  const [copied, setCopied] = useState(false)
+  const handleCopy = (e: MouseEvent<HTMLButtonElement>) => {
+    e.stopPropagation()
+    const content = output ? `$ ${command}\n${output}` : `$ ${command}`
+    void navigator.clipboard.writeText(content)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1600)
+  }
+
+  return (
+    <div className="shell-terminal-card" aria-label="终端执行输出">
+      <div className="shell-terminal-header">
+        <span className="shell-terminal-label">Shell</span>
+        <button
+          type="button"
+          className="shell-terminal-copy"
+          onClick={handleCopy}
+          title="复制终端命令与输出"
+          aria-label="复制终端输出"
+        >
+          {copied ? <IconCheck size={12} color="var(--astr-teal, #12b886)" /> : <IconCopy size={12} />}
+        </button>
+      </div>
+      <div className="shell-terminal-body">
+        <div className="shell-command-line">
+          <span className="shell-prompt">$</span>
+          <span className="shell-command-text">{command}</span>
+        </div>
+        {output && <div className="shell-output-text">{output}</div>}
+      </div>
+      <div className="shell-terminal-footer">
+        {status === "failed" ? (
+          <span className="shell-status-badge is-failed">
+            <IconX size={12} /> 失败
+          </span>
+        ) : status === "running" ? (
+          <span className="shell-status-badge is-running">
+            <ShinyText text="执行中…" speed={1.5} />
+          </span>
+        ) : (
+          <span className="shell-status-badge is-success">
+            <IconCheck size={12} /> 成功
+          </span>
+        )}
+      </div>
+    </div>
   )
 }

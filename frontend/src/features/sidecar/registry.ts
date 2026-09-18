@@ -13,6 +13,7 @@ import { mermaidViewer } from './viewers/mermaid'
 import { monacoViewer } from './viewers/monaco'
 import { xtermViewer } from './viewers/terminal'
 import { threeViewer } from './viewers/three'
+import { blackboardViewer } from './viewers/blackboard'
 
 class ArtifactViewerRegistry {
   private viewers: ArtifactViewer[] = []
@@ -20,6 +21,7 @@ class ArtifactViewerRegistry {
 
   constructor() {
     // 插件自声明式注册
+    this.register(blackboardViewer)
     this.register(drawioViewer)
     this.register(mermaidViewer)
     this.register(excalidrawViewer)
@@ -122,6 +124,14 @@ class ArtifactViewerRegistry {
       if (priority > maxPriority) {
         maxPriority = priority
         bestViewer = viewer
+      }
+    }
+
+    // 如果没有特定专用查看器匹配，且该文件为非图片非音频的代码/文本，默认回退到 Monaco 代码编辑器
+    if (!bestViewer && isEnabled('monaco-viewer')) {
+      const isImgOrAudio = /.(png|jpe?g|webp|gif|bmp|ico|tiff?|mp3|wav|ogg|aac|flac)$/i.test(lowerName)
+      if (!isImgOrAudio) {
+        return this.getViewerById('monaco-viewer')
       }
     }
 

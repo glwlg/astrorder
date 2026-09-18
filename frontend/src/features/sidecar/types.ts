@@ -43,4 +43,15 @@ export interface ArtifactViewer {
   }
   /** 可配置选项声明 */
   configOptions?: ViewerConfigOption[]
+  /** 插件注册能力说明、文档与支持的组件清单（点击插件右上角叹号查看） */
+  documentation?: {
+    summary?: string
+    sections?: Array<{ title: string; content: string }>
+    supportedComponents?: Array<{
+      name: string
+      label: string
+      description: string
+      triggerKeys?: string[]
+    }>
+  }
 }

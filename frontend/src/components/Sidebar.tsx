@@ -1,16 +1,21 @@
-import { IconAdjustments, IconLayoutDashboard, IconMessageCircle, IconPuzzle, IconSettings } from '@tabler/icons-react'
+import { IconAdjustments, IconLayoutDashboard, IconMessageCircle, IconPuzzle, IconSettings, IconTopologyStarRing, IconUsers, IconWorld } from '@tabler/icons-react'
 import { ActionIcon, Modal, NavLink, Stack, Tabs, Text } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useState } from 'react'
-import { NavLink as RouterNavLink } from 'react-router-dom'
+import { NavLink as RouterNavLink, useLocation } from 'react-router-dom'
 import type { Agent, Project, Session } from '../domain/types'
 import { AgentsPage } from '../features/agents/AgentsPage'
 import { PluginsPage } from '../features/plugins/PluginsPage'
+import { NetworkSettingsPage } from '../features/network/NetworkSettingsPage'
 import { SessionRail } from './SessionRail'
+import { BotGroupRail } from './BotGroupRail'
+import { SwarmRootRail } from './SwarmRootRail'
 
 const navItems = [
-  { to: '/chat', label: '会话', icon: IconMessageCircle },
-  { to: '/monitor', label: '监控室', icon: IconLayoutDashboard },
+  { to: '/chat', label: '会话', icon: IconMessageCircle, id: 'chat' },
+  { to: '/monitor', label: '监控室', icon: IconLayoutDashboard, id: 'monitor' },
+  { to: '/swarm', label: '星图', icon: IconTopologyStarRing, id: 'swarm' },
+  { to: '/groups', label: '群聊', icon: IconUsers, id: 'groups' },
 ]
 
 function addSessionToMonitor(sessionKey: string, title?: string) {
@@ -49,15 +54,27 @@ export function Sidebar({
   onSelectSession: (session: Session) => void
   onNavigate?: () => void
 }) {
+  const location = useLocation()
   const [settingsOpened, setSettingsOpened] = useState(false)
   const [isMonitorDragOver, setIsMonitorDragOver] = useState(false)
+
+  const isSwarm = location.pathname.startsWith('/swarm')
+  const isGroups = location.pathname.startsWith('/groups') || location.pathname.startsWith('/chat/group-')
+  const isMonitor = location.pathname.startsWith('/monitor')
+  const isChat = !isSwarm && !isGroups && !isMonitor
+
   return (
     <>
       <Stack className="sidebar-content" gap="md">
         <nav aria-label="主导航">
           <div className="sidebar-primary-nav">
-            {navItems.map(({ to, label, icon: Icon }) => {
+            {navItems.map(({ to, label, icon: Icon, id }) => {
               const isMonitor = to === '/monitor'
+              const isActive =
+                (id === 'swarm' && isSwarm) ||
+                (id === 'groups' && isGroups) ||
+                (id === 'monitor' && isMonitor) ||
+                (id === 'chat' && isChat)
               return (
                 <NavLink
                   component={RouterNavLink}
@@ -66,7 +83,8 @@ export function Sidebar({
                   label={label}
                   leftSection={<Icon size={16} stroke={1.8} />}
                   onClick={onNavigate}
-                  className={`sidebar-nav-link ${isMonitor && isMonitorDragOver ? 'is-drag-over' : ''}`}
+                  data-active={isActive ? 'true' : undefined}
+                  className={`sidebar-nav-link ${isActive ? 'active' : ''} ${isMonitor && isMonitorDragOver ? 'is-drag-over' : ''}`}
                   onDragOver={isMonitor ? (e) => {
                     e.preventDefault()
                     e.dataTransfer.dropEffect = 'copy'
@@ -99,25 +117,40 @@ export function Sidebar({
           </div>
         </nav>
         <div className="sidebar-divider" />
-        <div className="rail-heading">
-          <Text size="xs" fw={700} c="dimmed">项目会话</Text>
-          <div className="rail-heading-actions">
-            <Text size="xs" c="dimmed">{sessions.length}</Text>
-            <ActionIcon variant="subtle" color="gray" size="sm" aria-label="打开设置" title="设置" onClick={() => setSettingsOpened(true)}>
-              <IconSettings size={16} />
-            </ActionIcon>
-          </div>
-        </div>
-        <SessionRail
-          sessions={sessions}
-          agents={agents}
-          projects={projects}
-          activeSessionKey={activeSessionKey}
-          onSelect={(session) => {
-            onSelectSession(session)
-            onNavigate?.()
-          }}
-        />
+        {isSwarm ? (
+          <SwarmRootRail
+            sessions={sessions}
+            agents={agents}
+            onNavigate={onNavigate}
+          />
+        ) : isGroups ? (
+          <BotGroupRail
+            agents={agents}
+            onNavigate={onNavigate}
+          />
+        ) : (
+          <>
+            <div className="rail-heading">
+              <Text size="xs" fw={700} c="dimmed">项目会话</Text>
+              <div className="rail-heading-actions">
+                <Text size="xs" c="dimmed">{sessions.length}</Text>
+                <ActionIcon variant="subtle" color="gray" size="sm" aria-label="打开设置" title="设置" onClick={() => setSettingsOpened(true)}>
+                  <IconSettings size={16} />
+                </ActionIcon>
+              </div>
+            </div>
+            <SessionRail
+              sessions={sessions}
+              agents={agents}
+              projects={projects}
+              activeSessionKey={activeSessionKey}
+              onSelect={(session) => {
+                onSelectSession(session)
+                onNavigate?.()
+              }}
+            />
+          </>
+        )}
       </Stack>
       <Modal
         className="settings-modal"
@@ -133,9 +166,11 @@ export function Sidebar({
         <Tabs defaultValue="connections" keepMounted={true} className="settings-tabs">
           <Tabs.List>
             <Tabs.Tab value="connections" leftSection={<IconAdjustments size={16} />}>连接</Tabs.Tab>
+            <Tabs.Tab value="network" leftSection={<IconWorld size={16} />}>网络与移动端</Tabs.Tab>
             <Tabs.Tab value="plugins" leftSection={<IconPuzzle size={16} />}>插件</Tabs.Tab>
           </Tabs.List>
           <Tabs.Panel value="connections" className="settings-tab-panel"><AgentsPage /></Tabs.Panel>
+          <Tabs.Panel value="network" className="settings-tab-panel"><NetworkSettingsPage /></Tabs.Panel>
           <Tabs.Panel value="plugins" className="settings-tab-panel"><PluginsPage /></Tabs.Panel>
         </Tabs>
       </Modal>

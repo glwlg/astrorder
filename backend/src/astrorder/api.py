@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
+import json
 import logging
 import os
 import sqlite3
@@ -146,7 +148,7 @@ async def create_auth_session(payload: AuthRequest, request: Request) -> JSONRes
     settings = _settings(request)
     if not settings.browser_secret:
         raise HTTPException(status_code=503, detail="Authentication is not configured")
-    validate_origin(request.headers.get("origin"), settings)
+    validate_origin(request.headers.get("origin"), settings, request.headers.get("host"), getattr(request.app.state, "store", None))
     import hmac
 
     if not hmac.compare_digest(payload.token, settings.browser_secret):
@@ -172,7 +174,7 @@ def get_auth_session(request: Request) -> dict[str, bool]:
 @router.delete("/api/v1/auth/session", status_code=204)
 def delete_auth_session(request: Request) -> Response:
     settings = _settings(request)
-    validate_origin(request.headers.get("origin"), settings)
+    validate_origin(request.headers.get("origin"), settings, request.headers.get("host"), getattr(request.app.state, "store", None))
     response = Response(status_code=204)
     response.delete_cookie(COOKIE_NAME, path="/")
     return response
@@ -200,11 +202,21 @@ def agent_catalog(request: Request) -> dict[str, object]:
     return {"items": CAPABILITIES}
 
 
+@router.get("/api/v1/blackboard")
+def blackboard_list(request: Request, namespace: str = Query(default="global", max_length=128)) -> dict[str, object]:
+    require_browser(request, _settings(request))
+    return invoke("blackboard.get", {"namespace": namespace}, _agent_context(request))
+
+
 @router.post("/api/v1/agent/invoke")
 def agent_invoke(request: Request, body: AgentInvokeRequest) -> dict[str, object]:
     require_agent(request, _settings(request))
+    payload_dict = dict(body.input)
+    client_agent_id = request.headers.get("x-astrorder-agent-id")
+    if client_agent_id and "caller_agent_id" not in payload_dict:
+        payload_dict["caller_agent_id"] = client_agent_id
     try:
-        return invoke(body.capability, dict(body.input), _agent_context(request))
+        return invoke(body.capability, payload_dict, _agent_context(request))
     except AgentApiError as exc:
         status = 404 if exc.code == "not_found" else 400
         raise HTTPException(status_code=status, detail=exc.message) from None
@@ -213,6 +225,13 @@ def agent_invoke(request: Request, body: AgentInvokeRequest) -> dict[str, object
 @router.post("/api/v1/agent/mcp")
 async def agent_mcp(request: Request) -> Response:
     require_agent(request, _settings(request))
+    client_agent_id = request.headers.get("x-astrorder-agent-id")
+    if client_agent_id:
+        from .models import WorkspacePreferenceRow
+        with request.app.state.store.session() as db:
+            row = db.get(WorkspacePreferenceRow, f"agent_mcp_enabled:{client_agent_id}")
+            if row and row.value is False:
+                raise HTTPException(status_code=403, detail=f"Astrorder MCP has been disabled for agent '{client_agent_id}'.")
     from .agent_mcp import handle_rpc
 
     try:
@@ -222,6 +241,8 @@ async def agent_mcp(request: Request) -> Response:
     ctx = _agent_context(request)
 
     def invoker(capability: str, payload: dict) -> dict:
+        if client_agent_id and "caller_agent_id" not in payload:
+            payload["caller_agent_id"] = client_agent_id
         return invoke(capability, payload, ctx)
 
     if isinstance(body, list):
@@ -369,6 +390,20 @@ async def open_sessions(request: Request) -> dict[str, object]:
 @router.post("/api/v1/sessions")
 def create_session(payload: CreateSessionPayload, request: Request) -> dict[str, object]:
     _private(request)
+    # 自动解析默认工作区，防止未显式提供 workspace 时落入 server 目录
+    if not (payload.workspace or "").strip():
+        store = request.app.state.store
+        ws = None
+        for s in store.list_sessions()[:30]:
+            sws = (s.get("workspace") or "").strip()
+            if sws and not sws.lower().endswith("server") and "devapp" not in sws.lower():
+                ws = sws
+                break
+        if not ws:
+            default_p = Path("P:/workspace/glwlg/ai/astrorder")
+            ws = str(default_p) if default_p.is_dir() else str(Path.home())
+        payload.workspace = ws
+
     try:
         runtime = _agent_runtime(request, payload.agent_id)
         create = getattr(runtime, "create", None)
@@ -442,6 +477,177 @@ def create_session(payload: CreateSessionPayload, request: Request) -> dict[str,
     except Exception as exc:
         logger.exception("Failed to create session")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+class ForkSessionPayload(BaseModel):
+    agent_id: str = Field(min_length=1, max_length=256)
+    title: str | None = Field(default=None, max_length=512)
+    worktree: bool = Field(default=False)
+    branch_name: str | None = Field(default=None, max_length=256)
+    worktree_path: str | None = Field(default=None, max_length=2000)
+
+
+def _create_local_git_worktree(
+    workspace: str, branch_name: str | None, worktree_path: str | None
+) -> tuple[str, Path]:
+    ws_path = Path(workspace).expanduser().resolve()
+    if not ws_path.is_dir():
+        raise HTTPException(status_code=400, detail="工作区目录不存在，无法创建工作树分支。")
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(ws_path), "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            check=False,
+            encoding="utf-8",
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"检查 Git 仓库失败: {exc}") from exc
+    if proc.returncode != 0:
+        raise HTTPException(status_code=400, detail="当前工作区不是 Git 仓库，无法创建工作树分支。")
+
+    repo_root = Path(proc.stdout.strip()).resolve()
+    branch = (branch_name or "").strip()
+    if not branch:
+        branch = f"branch-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+
+    if worktree_path and worktree_path.strip():
+        target_path = Path(worktree_path.strip()).expanduser().resolve()
+    else:
+        target_path = (repo_root.parent / f"{repo_root.name}-worktrees" / branch).resolve()
+
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+
+    add_proc = subprocess.run(
+        ["git", "-C", str(repo_root), "worktree", "add", "-b", branch, str(target_path)],
+        capture_output=True,
+        text=True,
+        check=False,
+        encoding="utf-8",
+    )
+    if add_proc.returncode != 0:
+        err = add_proc.stderr.strip() or add_proc.stdout.strip()
+        if "already exists" in err.lower():
+            retry_proc = subprocess.run(
+                ["git", "-C", str(repo_root), "worktree", "add", str(target_path), branch],
+                capture_output=True,
+                text=True,
+                check=False,
+                encoding="utf-8",
+            )
+            if retry_proc.returncode != 0:
+                retry_err = retry_proc.stderr.strip() or retry_proc.stdout.strip()
+                raise HTTPException(status_code=400, detail=f"创建 Git 工作树失败: {retry_err}")
+        else:
+            raise HTTPException(status_code=400, detail=f"创建 Git 工作树失败: {err}")
+
+    return branch, target_path
+
+
+def _create_remote_git_worktree(
+    request: Request, connection_id: str, workspace: str, branch_name: str | None, worktree_path: str | None
+) -> tuple[str, str]:
+    ssh_conn = request.app.state.store.get_ssh_connection(connection_id)
+    if not ssh_conn:
+        raise HTTPException(status_code=404, detail="SSH 连接不存在")
+    from .ssh_transport import SshNativeRuntime, build_remote_python_command
+    runtime = SshNativeRuntime(
+        ssh_conn["settings"],
+        ssh_conn["id"],
+        0,
+        None,
+        None,
+        connector_secret=None,
+    )
+    argv = [a for a in runtime._base_ssh_argv() if a != "-T"] + ["-o", "BatchMode=yes", runtime._target()]
+
+    remote_script = f"""
+import subprocess, sys, os
+from pathlib import Path
+from datetime import datetime
+
+ws = {json.dumps(workspace)}
+branch = {json.dumps(branch_name or "")}.strip() or f"branch-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+custom_path = {json.dumps(worktree_path or "")}.strip()
+
+try:
+    proc = subprocess.run(["git", "-C", ws, "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=False)
+    if proc.returncode != 0:
+        print("ERROR:NOT_GIT_REPO:" + (proc.stderr.strip() or "not a git repo"))
+        sys.exit(1)
+    repo_root = Path(proc.stdout.strip())
+    target = Path(custom_path) if custom_path else (repo_root.parent / f"{repo_root.name}-worktrees" / branch)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    add_proc = subprocess.run(["git", "-C", str(repo_root), "worktree", "add", "-b", branch, str(target)], capture_output=True, text=True, check=False)
+    if add_proc.returncode != 0:
+        err = add_proc.stderr.strip()
+        if "already exists" in err.lower():
+            retry = subprocess.run(["git", "-C", str(repo_root), "worktree", "add", str(target), branch], capture_output=True, text=True, check=False)
+            if retry.returncode != 0:
+                print("ERROR:WORKTREE_FAILED:" + retry.stderr.strip())
+                sys.exit(1)
+        else:
+            print("ERROR:WORKTREE_FAILED:" + err)
+            sys.exit(1)
+    print("SUCCESS:" + branch + "\t" + str(target))
+except Exception as e:
+    print("ERROR:" + str(e))
+    sys.exit(1)
+"""
+    cmd = build_remote_python_command(remote_script)
+    full_argv = argv + [cmd]
+    res = subprocess.run(full_argv, capture_output=True, text=True, timeout=15)
+    out = res.stdout.strip()
+    if res.returncode != 0 or not out.startswith("SUCCESS:"):
+        err = out.replace("ERROR:", "").strip() or res.stderr.strip()
+        raise HTTPException(status_code=400, detail=f"远端创建 Git 工作树失败: {err}")
+    _, data = out.split("SUCCESS:", 1)
+    b_name, w_path = data.split("	", 1)
+    return b_name.strip(), w_path.strip()
+
+
+@router.post("/api/v1/sessions/{session_id}/fork")
+def fork_session(session_id: str, payload: ForkSessionPayload, request: Request) -> dict[str, object]:
+    _private(request)
+    store = request.app.state.store
+    source = store.get_session(payload.agent_id, session_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="原会话不存在。")
+
+    workspace = source.get("workspace")
+    branch_name = None
+    if payload.worktree:
+        if not workspace:
+            raise HTTPException(status_code=400, detail="当前会话没有关联工作区，无法创建工作树分支。")
+        agent = store.get_agent(payload.agent_id)
+        connection_id = agent.get("connection_id") if agent else None
+        if connection_id and connection_id != "local":
+            branch_name, workspace = _create_remote_git_worktree(
+                request, connection_id, workspace, payload.branch_name, payload.worktree_path
+            )
+        else:
+            branch_name, target_path = _create_local_git_worktree(
+                workspace, payload.branch_name, payload.worktree_path
+            )
+            workspace = str(target_path)
+
+    default_title = (
+        f"{source.get('title') or '新会话'} ({branch_name})"
+        if branch_name
+        else (f"{source.get('title') or '新会话'} (分支)")
+    )
+    title = payload.title.strip() if payload.title and payload.title.strip() else default_title
+
+    create_payload = CreateSessionPayload(
+        agent_id=payload.agent_id,
+        workspace=workspace,
+        title=title,
+        project_id=source.get("project_id"),
+        project_name=source.get("project_name"),
+        parent_session_id=session_id,
+    )
+    return create_session(create_payload, request)
+
 
 
 class HandoffSessionPayload(BaseModel):
@@ -841,6 +1047,37 @@ class DeleteProjectPayload(BaseModel):
     workspace: str | None = None
     session_keys: list[dict[str, str]] | None = None
     delete_sessions: bool = True
+
+
+class CreateProjectPayload(BaseModel):
+    workspace: str
+    name: str | None = None
+    connection_id: str | None = None
+    agent_id: str | None = None
+
+
+@router.post("/api/v1/projects")
+def create_project_endpoint(payload: CreateProjectPayload, request: Request) -> dict[str, object]:
+    _private(request)
+    store = request.app.state.store
+    ws = payload.workspace.strip()
+    norm_ws = ws.replace("\\", "/").rstrip("/")
+    folder_name = norm_ws.split("/")[-1] if "/" in norm_ws else (Path(ws).name or ws)
+    p_name = (payload.name or "").strip() or folder_name
+    conn_id = payload.connection_id if payload.connection_id and payload.connection_id != "local" else None
+    source_id = conn_id or "local"
+    project_id = str(uuid4())
+    project_data = {
+        "project_id": project_id,
+        "project_name": p_name,
+        "workspace": ws,
+        "source_id": source_id,
+        "connection_id": conn_id,
+        "agent_id": payload.agent_id or "codex",
+        "session_count": 0,
+    }
+    canonical = store.upsert_projects([project_data])
+    return {"project": canonical[0] if canonical else project_data}
 
 
 @router.post("/api/v1/projects/delete")
@@ -1314,7 +1551,9 @@ print(json.dumps({{'root': str(target), 'name': target.name or str(target), 'ite
             output_lines = [line.strip() for line in res.stdout.strip().splitlines() if line.strip()]
             for line in reversed(output_lines):
                 try:
-                    return json.loads(line)
+                    data = json.loads(line)
+                    data["drives"] = ["~", "/"]
+                    return data
                 except Exception:
                     continue
             raise HTTPException(status_code=502, detail="远程目录树解析失败")
@@ -1365,9 +1604,16 @@ print(json.dumps({{'root': str(target), 'name': target.name or str(target), 'ite
             pass
         return items
 
+    drives = []
+    if (not resolved_cid or resolved_cid == "local") and os.name == "nt":
+        import string
+        drives = [f"{d}:\\" for d in string.ascii_uppercase if os.path.exists(f"{d}:\\")]
+
     return {
         "root": str(root),
         "name": root.name or str(root),
+        "parent": str(root.parent) if root.parent != root else None,
+        "drives": drives,
         "items": walk_tree(root, depth),
     }
 
@@ -1467,6 +1713,15 @@ print(json.dumps({{"root": str(root), "items": results}}))
         if len(results) >= limit:
             break
     return {"root": str(root), "items": results}
+
+
+from .staging_files import StageFilesPayload, stage_files_handler
+
+
+@router.post("/api/v1/files/stage")
+def stage_files_endpoint(payload: StageFilesPayload, request: Request) -> dict[str, object]:
+    _private(request)
+    return stage_files_handler(payload, request)
 
 
 @router.get("/api/v1/files/raw")
@@ -1632,7 +1887,7 @@ def _run_git(args: list[str], cwd: str, connection_id: str | None = None, app_st
 
 
 @router.get("/api/v1/git/status")
-def get_git_status(request: Request, workspace: str | None = None, session_id: str | None = None, connection_id: str | None = None) -> dict[str, object]:
+def get_git_status(request: Request, workspace: str | None = None, session_id: str | None = None, connection_id: str | None = None, base_branch: str | None = None) -> dict[str, object]:
     _private(request)
     import os, re
     cwd = workspace or os.getcwd()
@@ -1650,7 +1905,7 @@ def get_git_status(request: Request, workspace: str | None = None, session_id: s
             pass
 
     # 1. 查询当前分支及所有本地分支
-    rc, stdout, stderr = _run_git(["branch", "--no-color"], cwd=cwd, connection_id=cid, app_state=request.app.state)
+    rc, stdout, stderr = _run_git(["branch", "-a", "--no-color"], cwd=cwd, connection_id=cid, app_state=request.app.state)
     current_branch = "master"
     branches = []
     if rc == 0 and stdout:
@@ -1658,10 +1913,16 @@ def get_git_status(request: Request, workspace: str | None = None, session_id: s
             clean = line.strip()
             if not clean:
                 continue
+            if " -> " in clean:
+                clean = clean.split(" -> ")[-1].strip()
             if clean.startswith("*"):
                 name = clean[1:].strip().replace("(HEAD detached at ", "").replace(")", "")
                 current_branch = name
-                branches.append(name)
+                clean = name
+            if clean.startswith("remotes/"):
+                clean = clean[len("remotes/"):]
+            if clean and clean not in branches:
+                branches.append(clean)
             else:
                 branches.append(clean)
     else:
@@ -1672,6 +1933,39 @@ def get_git_status(request: Request, workspace: str | None = None, session_id: s
             branches = [current_branch]
 
     # 2. 查询短 diff 统计：git diff --stat HEAD 或 git diff --stat (工作区 + 暂存区)
+    if base_branch:
+        rc_diff, stdout_diff, _ = _run_git(["diff", "--stat", f"{base_branch}...HEAD"], cwd=cwd, connection_id=cid, app_state=request.app.state)
+        insertions = 0
+        deletions = 0
+        for line in (stdout_diff or "").splitlines():
+            m_ins = re.search(r"(d+)s+insertion", line)
+            if m_ins:
+                insertions += int(m_ins.group(1))
+            m_del = re.search(r"(d+)s+deletion", line)
+            if m_del:
+                deletions += int(m_del.group(1))
+        rc_name, stdout_name, _ = _run_git(["diff", "--name-status", f"{base_branch}...HEAD"], cwd=cwd, connection_id=cid, app_state=request.app.state)
+        modified_files = []
+        if rc_name == 0 and stdout_name:
+            for line in stdout_name.splitlines():
+                line_str = line.strip()
+                if not line_str:
+                    continue
+                parts = line_str.split("	", 1)
+                status_code = parts[0][:2].strip()
+                path_str = parts[1].strip() if len(parts) > 1 else line_str
+                modified_files.append({"status": status_code, "path": path_str})
+        return {
+            "branch": current_branch,
+            "branches": branches if branches else [current_branch],
+            "insertions": insertions,
+            "deletions": deletions,
+            "changed_files": len(modified_files),
+            "files": modified_files,
+            "workspace": cwd,
+            "base_branch": base_branch,
+        }
+
     rc_diff, stdout_diff, _ = _run_git(["diff", "--stat"], cwd=cwd, connection_id=cid, app_state=request.app.state)
     # 也把暂存区的一并加总
     rc_staged, stdout_staged, _ = _run_git(["diff", "--cached", "--stat"], cwd=cwd, connection_id=cid, app_state=request.app.state)
@@ -1757,7 +2051,7 @@ async def switch_or_create_branch(request: Request) -> dict[str, object]:
 
 
 @router.get("/api/v1/git/diff-raw")
-def get_git_diff_raw(request: Request, path: str | None = None, workspace: str | None = None, session_id: str | None = None, connection_id: str | None = None) -> Response:
+def get_git_diff_raw(request: Request, path: str | None = None, base_branch: str | None = None, workspace: str | None = None, session_id: str | None = None, connection_id: str | None = None) -> Response:
     _private(request)
     import os
     from fastapi.responses import Response
@@ -1774,6 +2068,13 @@ def get_git_diff_raw(request: Request, path: str | None = None, workspace: str |
                     cid = sess["connection_id"]
         except Exception:
             pass
+
+    if base_branch:
+        args = ["diff", f"{base_branch}...HEAD"]
+        if path:
+            args.extend(["--", path])
+        rc, stdout, _ = _run_git(args, cwd=cwd, connection_id=cid, app_state=request.app.state)
+        return Response(content=stdout or "No changes detected.", media_type="text/plain; charset=utf-8")
 
     args = ["diff"]
     if path:
@@ -2272,3 +2573,120 @@ def launch_runtime(payload: RuntimeLaunch, request: Request) -> dict[str, str]:
         return request.app.state.supervisor.launch(payload.kind, payload.workspace)
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
+class AgentMcpTogglePayload(BaseModel):
+    agent_id: str = Field(min_length=1, max_length=256)
+    enabled: bool = True
+
+
+@router.get("/api/v1/agents/{agent_id}/mcp")
+def get_agent_mcp_status(agent_id: str, request: Request) -> dict[str, object]:
+    _private(request)
+    from sqlalchemy import select
+    from .models import WorkspacePreferenceRow
+    with request.app.state.store.session() as db:
+        row = db.get(WorkspacePreferenceRow, f"agent_mcp_enabled:{agent_id}")
+        enabled = row.value if row and isinstance(row.value, bool) else True
+    return {"agent_id": agent_id, "enabled": enabled}
+
+
+@router.post("/api/v1/agents/{agent_id}/mcp")
+def toggle_agent_mcp_status(agent_id: str, payload: AgentMcpTogglePayload, request: Request) -> dict[str, object]:
+    _private(request)
+    from sqlalchemy.dialects.sqlite import insert
+    from .models import WorkspacePreferenceRow
+    with request.app.state.store.session() as db:
+        stmt = insert(WorkspacePreferenceRow).values(key=f"agent_mcp_enabled:{agent_id}", value=payload.enabled)
+        stmt = stmt.on_conflict_do_update(index_elements=["key"], set_={"value": payload.enabled})
+        db.execute(stmt)
+    return {"agent_id": agent_id, "enabled": payload.enabled}
+
+
+class NetworkConfigPatch(BaseModel):
+    public_url: str | None = None
+    allowed_origins: list[str] | None = None
+
+
+def _get_local_ip() -> str:
+    import socket
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
+
+
+@router.get("/api/v1/network/config")
+def get_network_config(request: Request) -> dict[str, Any]:
+    _private(request)
+    settings = _settings(request)
+    import json
+    from .models import WorkspacePreferenceRow
+    store = request.app.state.store
+    with store.session() as db:
+        origins_row = db.get(WorkspacePreferenceRow, "network:allowed_origins")
+        pub_row = db.get(WorkspacePreferenceRow, "network:public_url")
+        
+        origins_val = origins_row.value if origins_row else None
+        allowed_list = list(origins_val) if isinstance(origins_val, list) else list(settings.allowed_origins)
+        
+        pub_val = pub_row.value if pub_row else None
+        pub_url = str(pub_val).strip() if pub_val else "https://ao.651971564.xyz"
+        if pub_url and pub_url not in allowed_list:
+            allowed_list.append(pub_url)
+            
+        return {
+            "public_url": pub_url,
+            "allowed_origins": allowed_list,
+            "local_ip": _get_local_ip(),
+            "port": settings.port,
+            "token": settings.browser_secret,
+        }
+
+
+@router.post("/api/v1/network/config")
+def update_network_config(payload: NetworkConfigPatch, request: Request) -> dict[str, Any]:
+    _private(request)
+    settings = _settings(request)
+    import json
+    from .models import WorkspacePreferenceRow
+    from sqlalchemy.dialects.sqlite import insert
+    store = request.app.state.store
+
+    with store.session() as db:
+        if payload.public_url is not None:
+            clean_pub = payload.public_url.strip()
+            stmt = insert(WorkspacePreferenceRow).values(key="network:public_url", value=clean_pub)
+            stmt = stmt.on_conflict_do_update(index_elements=["key"], set_={"value": clean_pub})
+            db.execute(stmt)
+
+        if payload.allowed_origins is not None:
+            cleaned = [str(o).strip().rstrip("/") for o in payload.allowed_origins if str(o).strip()]
+            cleaned = list(dict.fromkeys(cleaned))
+            stmt = insert(WorkspacePreferenceRow).values(key="network:allowed_origins", value=cleaned)
+            stmt = stmt.on_conflict_do_update(index_elements=["key"], set_={"value": cleaned})
+            db.execute(stmt)
+
+            try:
+                object.__setattr__(settings, "allowed_origins", tuple(cleaned))
+            except Exception:
+                pass
+
+            from pathlib import Path
+            for p in [
+                Path("P:/workspace/glwlg/ai/astrorder/.runtime/production.json"),
+                Path("P:/DevApp/Astrorder/server/.runtime/production.json"),
+            ]:
+                if p.is_file():
+                    try:
+                        cfg = json.loads(p.read_text(encoding="utf-8"))
+                        cfg["environment"]["ASTRORDER_ALLOWED_ORIGINS"] = ",".join(cleaned)
+                        if payload.public_url:
+                            cfg["environment"]["ASTRORDER_PUBLIC_URL"] = payload.public_url.strip()
+                        p.write_text(json.dumps(cfg, indent=2, ensure_ascii=False), encoding="utf-8")
+                    except Exception:
+                        pass
+
+    return get_network_config(request)

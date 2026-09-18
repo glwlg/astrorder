@@ -133,6 +133,8 @@ export const api = {
   createCommand: (payload: CommandPayload) => jsonRequest<Command>('/commands', payload),
   createSession: (payload: { agent_id: string; workspace?: string | null; title?: string | null; project_id?: string | null; project_name?: string | null; parent_session_id?: string | null; ephemeral?: boolean }) =>
     jsonRequest<Session>('/sessions', payload),
+  forkSession: (sessionId: string, payload: { agent_id: string; title?: string | null; worktree?: boolean; branch_name?: string | null; worktree_path?: string | null }) =>
+    jsonRequest<Session>(`${sessionPath(sessionId)}/fork`, payload),
   handoffSession: (sessionId: string, sourceAgentId: string, targetAgentId: string, operationId: string, selection: { provider: string; model: string; effort: string }) =>
     jsonRequest<Session>(`${sessionPath(sessionId)}/handoff`, { operation_id: operationId, source_agent_id: sourceAgentId, target_agent_id: targetAgentId, ...selection }),
   cancelHandoff: async (operationId: string) => {
@@ -145,6 +147,51 @@ export const api = {
     request<{ ok: boolean; id: string }>(`${sessionPath(sessionId)}?agent_id=${encodeURIComponent(agentId)}`, {
       method: 'DELETE',
     }),
+  getBlackboard: (namespace = 'global') =>
+    request<{ namespace: string; items: Record<string, unknown>; count: number }>(`/blackboard?namespace=${encodeURIComponent(namespace)}`),
+  setBlackboard: (key: string, value: unknown, namespace = 'global') =>
+    jsonRequest<{ ok: boolean; key: string; value: unknown }>('/agent/invoke', {
+      capability: 'blackboard.set',
+      input: { namespace, key, value },
+    }),
+  deleteBlackboard: (key: string, namespace = 'global') =>
+    jsonRequest<{ ok: boolean; key: string }>('/agent/invoke', {
+      capability: 'blackboard.delete',
+      input: { namespace, key },
+    }),
+  getTelemetry: (key?: string) =>
+    jsonRequest<{ items?: Record<string, any>; report?: any; exists?: boolean }>('/agent/invoke', {
+      capability: 'swarm.telemetry.get',
+      input: { key },
+    }),
+  getAgentMcpStatus: (agentId: string) =>
+    request<{ agent_id: string; enabled: boolean }>(`/agents/${encodeURIComponent(agentId)}/mcp`),
+  toggleAgentMcpStatus: (agentId: string, enabled: boolean) =>
+    jsonRequest<{ agent_id: string; enabled: boolean }>(`/agents/${encodeURIComponent(agentId)}/mcp`, {
+      agent_id: agentId,
+      enabled,
+    }),
+  listSos: () =>
+    jsonRequest<{ items: any[]; count: number }>('/agent/invoke', {
+      capability: 'swarm.sos.list',
+      input: {},
+    }),
+  listBotGroups: () =>
+    request<{ items: import('../domain/types').BotGroup[]; count: number }>('/bot-groups'),
+  getBotGroup: (groupId: string) =>
+    request<{ group: import('../domain/types').BotGroup }>(`/bot-groups/${encodeURIComponent(groupId)}`),
+  createBotGroup: (payload: { name: string; description?: string | null; members: import('../domain/types').BotGroupMember[]; max_hops?: number }) =>
+    jsonRequest<{ group: import('../domain/types').BotGroup; ok: boolean }>('/bot-groups', payload),
+  updateBotGroup: (groupId: string, payload: Partial<{ name: string; description: string; members: import('../domain/types').BotGroupMember[]; max_hops: number }>) =>
+    jsonRequest<{ group: import('../domain/types').BotGroup; ok: boolean }>(`/bot-groups/${encodeURIComponent(groupId)}`, payload, 'PATCH'),
+  deleteBotGroup: (groupId: string) =>
+    request<{ ok: boolean; id: string }>(`/bot-groups/${encodeURIComponent(groupId)}`, { method: 'DELETE' }),
+  listGroupMessages: (groupId: string) =>
+    request<{ items: import('../domain/types').GroupMessage[]; count: number }>(`/bot-groups/${encodeURIComponent(groupId)}/messages`),
+  sendGroupMessage: (groupId: string, payload: { text: string; target_agent_id?: string | null; mentions?: string[] }) =>
+    jsonRequest<{ ok: boolean; message: import('../domain/types').GroupMessage; target_agent_id: string | null; history_count: number }>(`/bot-groups/${encodeURIComponent(groupId)}/messages`, payload),
+  stopGroup: (groupId: string) =>
+    jsonRequest<{ ok: boolean; group: import('../domain/types').BotGroup }>(`/bot-groups/${encodeURIComponent(groupId)}/stop`, {}),
   batchDeleteSessions: (sessions: Array<{ agent_id: string; id: string }>) =>
     jsonRequest<{ ok: boolean; deleted: Array<{ agent_id: string; id: string }>; failed: Array<{ agent_id: string; id: string; error: string }> }>(
       '/sessions/batch-delete',
@@ -162,6 +209,16 @@ export const api = {
       '/projects/delete',
       payload,
     ),
+  createProject: (payload: {
+    workspace: string
+    name?: string
+    connection_id?: string | null
+    agent_id?: string | null
+  }) =>
+    jsonRequest<{ project: import('../domain/types').Project }>(
+      '/projects',
+      payload,
+    ),
   getSessionModels: (sessionId: string, agentId: string) => request<{ items: { provider: string; model: string; label: string }[] }>(`${sessionPath(sessionId)}/models?agent_id=${encodeURIComponent(agentId)}`),
   getAgentCommands: (sessionId: string, agentId: string) => request<{ items: AgentCommand[] }>(`${sessionPath(sessionId)}/agent-commands?agent_id=${encodeURIComponent(agentId)}`),
   getAgentMentions: (sessionId: string, agentId: string) => request<{ items: AgentMention[] }>(`${sessionPath(sessionId)}/agent-mentions?agent_id=${encodeURIComponent(agentId)}`),
@@ -173,6 +230,10 @@ export const api = {
   launchRuntime: (kind: string, workspace: string) =>
     jsonRequest<{ agent_id: string; status: string }>('/runtime/launch', { kind, workspace }),
   getUserActivity: () => request<{ items: Array<{ agent_id: string; id: string; last_user_at: string }>; live?: Array<{ agent_id: string; id: string }> }>('/user-activity'),
+  getNetworkConfig: () =>
+    request<{ public_url: string; allowed_origins: string[]; local_ip: string; port: number; token: string }>('/network/config'),
+  updateNetworkConfig: (payload: { public_url?: string; allowed_origins?: string[] }) =>
+    jsonRequest<{ public_url: string; allowed_origins: string[]; local_ip: string; port: number; token: string }>('/network/config', payload),
   getConnections: () => request<ConnectionsPayload>('/connections'),
   getEnvironments: () => request<{ items: Array<{ id: string; name: string; method: 'local' | 'ssh'; discovered: boolean; os?: string; agents: Array<{ kind: AgentKind; available: boolean; state: string; detail: string; executable?: string; daemon_mode?: boolean }> }> }>('/environments'),
   discoverEnvironment: (id: string) => request(`/environments/${encodeURIComponent(id)}/discover`, { method: 'POST' }),

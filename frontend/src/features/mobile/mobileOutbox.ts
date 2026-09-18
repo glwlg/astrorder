@@ -78,7 +78,7 @@ export class MobileOutbox {
     })
   }
   remove(agentId: string, sessionId: string, id: string) {
-    return this.run(() => this.commit(this.entries.filter(row => !(row.payload.id === id && row.payload.agent_id === agentId && row.payload.session_id === sessionId && ['queued', 'failed', 'cancelled'].includes(row.state)))))
+    return this.run(() => this.commit(this.entries.filter(row => !(row.payload.id === id && row.payload.agent_id === agentId && row.payload.session_id === sessionId))))
   }
   retry(agentId: string, sessionId: string, id: string) {
     return this.run(() => this.commit(this.entries.map(row => row.payload.id === id && row.payload.agent_id === agentId && row.payload.session_id === sessionId && row.state === 'failed'
@@ -93,7 +93,10 @@ export class MobileOutbox {
         const next = command ? { ...row, state: command.state, error: command.error || undefined } : row
         const session = sessions.find(s => s.id === row.payload.session_id && s.agent_id === row.payload.agent_id)
         if (['accepted', 'running'].includes(next.state)) {
-          if (session?.status === 'idle' && (row.sawRunning || (row.acceptedAt && Date.now() - row.acceptedAt > 15000))) return []
+          if (session?.status === 'idle' && row.sawRunning) return []
+          if (session?.status === 'idle' && row.acceptedAt && Date.now() - row.acceptedAt > 15000) {
+            return [{ ...next, state: 'unknown' as const, error: '服务端重启或执行未确认，可点击重试' }]
+          }
           if (session?.status === 'running') return [{ ...next, sawRunning: true }]
           if (next.state === 'accepted' && !row.acceptedAt) return [{ ...next, acceptedAt: Date.now() }]
         }
