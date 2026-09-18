@@ -93,24 +93,29 @@
 
 星序创新性地采用**大小内核分离模式**，解决 Agent 自迭代维护时的自杀式死锁：
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│               客户端 UI (Web / 桌面端 Electron / 移动端)      │
-└──────────────────────────────┬──────────────────────────────┘
-                               │ WebSocket / HTTP (30001)
-                               ▼
-┌─────────────────────────────────────────────────────────────┐
-│ 大内核：App Server (FastAPI / Uvicorn)                       │
-│ · 负责：业务 API、静态前端托管、Sidecar 工件解析、SQLite 存储   │
-│ · 特性：支持随时重启、高频热更，不影响正在运行的 Agent 任务   │
-└──────────────────────────────┬──────────────────────────────┘
-                               │ Loopback IPC (WebSocket / JSON-RPC)
-                               ▼
-┌─────────────────────────────────────────────────────────────┐
-│ 小内核：Session Daemon (常驻稳定守护核)                      │
-│ · 负责：真实 Agent 宿主 (Codex / Hermes / SSH / PTY 子进程)  │
-│ · 特性：内存 WAL 环形缓冲 (Ring Buffer)、无感断线重连与增量重放 │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    UI["📱 💻 客户端 UI<br/>(Web 浏览器 / 桌面端 Electron / 移动端触屏工作台)"]
+
+    subgraph BigKernel ["大内核：App Server (业务功能核 · 支持高频热更与随时重启)"]
+        AS["🚀 <b>FastAPI / Uvicorn 服务</b> (Port 30001 / 30002)<br/>• 业务 REST API & 静态前端资源托管<br/>• Sidecar 多栏工件处理引擎 (Monaco / xterm / Diff / 白板 / 3D)<br/>• 数据持久化落地 (SQLite) & 状态统一投影"]
+    end
+
+    subgraph SmallKernel ["小内核：Session Daemon (常驻守护核 · 稳定驻留 · 绝不杀进程)"]
+        SD["🛡️ <b>Asyncio 守护核心</b> (Port 30009)<br/>• 真实 Agent 宿主 (Codex app-server / Hermes / Grok / SSH / PTY 子进程树)<br/>• 内存 WAL 环形缓冲池 (Ring Buffer，保证大内核断线无损)<br/>• 审批拦截转发与指令中断控制 (turn/interrupt, approval response)"]
+    end
+
+    UI <==>|"WebSocket 双工流 / HTTP API"| AS
+    AS <==>|"本地轻量 IPC (Loopback WebSocket / JSON-RPC)"| SD
+
+    classDef default fill:#1e293b,stroke:#475569,stroke-width:1.5px,color:#f8fafc;
+    classDef clientNode fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc;
+    classDef bigKernelNode fill:#0f172a,stroke:#818cf8,stroke-width:2px,color:#f8fafc;
+    classDef smallKernelNode fill:#0f172a,stroke:#059669,stroke-width:2px,color:#f8fafc;
+
+    class UI clientNode;
+    class AS bigKernelNode;
+    class SD smallKernelNode;
 ```
 
 - **永不断连的 Agent 守护**：会话由守护小内核常驻托管。大内核更新维护时，Agent 子进程和 SSH 连接照常执行，无须担心被进程树强杀。
