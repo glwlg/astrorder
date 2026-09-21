@@ -1,11 +1,12 @@
 import { MantineProvider } from '@mantine/core'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { api } from '../../api/client'
 import type { Agent, Session } from '../../domain/types'
 import { useAstrorderStore } from '../../state/store'
 import { ChatComposer } from './ChatComposer'
+import { draftStorage } from './draftStorage'
 
 const queueMemory = vi.hoisted(() => ({ rows: [] as never[] }))
 vi.mock('../mobile/mobileOutboxStorage', () => ({
@@ -17,6 +18,13 @@ vi.mock('../mobile/mobileOutboxStorage', () => ({
 
 const session: Session = { id: 'native-one', agent_id: 'hermes', title: 'one', workspace: null, status: 'idle', updated_at: '2026-01-01T00:00:00Z' }
 const agent: Agent = { id: 'hermes', name: 'Hermes', kind: 'hermes', status: 'ready', capabilities: ['chat', 'stop', 'attachments'], limitation: null }
+const savedDrafts = new Map<string, any>()
+beforeEach(() => {
+  savedDrafts.clear()
+  vi.spyOn(draftStorage, 'load').mockImplementation(async key => savedDrafts.get(key))
+  vi.spyOn(draftStorage, 'save').mockImplementation(async (key, draft) => { savedDrafts.set(key, draft) })
+  vi.spyOn(draftStorage, 'remove').mockImplementation(async key => { savedDrafts.delete(key) })
+})
 afterEach(() => { cleanup(); vi.restoreAllMocks(); queueMemory.rows = []; useAstrorderStore.getState().resetRuntime() })
 it('embeds the model picker and follows the native session status for stop', async () => {
   useAstrorderStore.getState().resetRuntime()
@@ -53,6 +61,32 @@ it('pastes clipboard images into the draft instead of ignoring them', async () =
   const file = new File(['png'], 'shot.png', { type: 'image/png' })
   fireEvent.paste(screen.getByLabelText('消息内容'), { clipboardData: { files: [file], items: [{ kind: 'file', type: 'image/png', getAsFile: () => file }] } })
   expect(await screen.findByText('shot.png')).toBeInTheDocument()
+  client.clear()
+})
+
+it('persists text and arbitrary file attachments and restores them after remount', async () => {
+  vi.spyOn(api, 'getSessionModel').mockResolvedValue({ model: 'native-model', provider: 'provider' })
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const wrap = () => <MantineProvider><QueryClientProvider client={client}><ChatComposer session={session} agent={agent} /></QueryClientProvider></MantineProvider>
+  const view = render(wrap())
+  await waitFor(() => expect(draftStorage.load).toHaveBeenCalled())
+
+  fireEvent.change(screen.getByLabelText('消息内容'), { target: { value: '重启后继续' } })
+  const input = view.container.querySelector('input[type="file"]') as HTMLInputElement
+  expect(input).not.toHaveAttribute('accept')
+  const file = new File(['archive'], 'project.zip', { type: 'application/zip' })
+  fireEvent.change(input, { target: { files: [file] } })
+  await waitFor(() => expect(savedDrafts.get('hermes::native-one')).toMatchObject({ text: '重启后继续' }))
+  expect(savedDrafts.get('hermes::native-one').attachments[0].file.name).toBe('project.zip')
+
+  window.dispatchEvent(new Event('beforeunload'))
+  expect(draftStorage.save).toHaveBeenCalled()
+  view.unmount()
+  useAstrorderStore.getState().resetRuntime()
+  render(wrap())
+
+  expect(await screen.findByDisplayValue('重启后继续')).toBeInTheDocument()
+  expect(await screen.findByText('project.zip')).toBeInTheDocument()
   client.clear()
 })
 

@@ -10,7 +10,7 @@ import subprocess
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
@@ -32,6 +32,15 @@ logger = logging.getLogger(__name__)
 class AgentInvokeRequest(BaseModel):
     capability: str = Field(min_length=1, max_length=128)
     input: dict[str, object] = Field(default_factory=dict)
+
+
+class QueuedCommandRef(BaseModel):
+    agent_id: str = Field(min_length=1, max_length=256)
+    session_id: str = Field(min_length=1, max_length=256)
+
+
+class QueuedCommandEdit(QueuedCommandRef):
+    text: str = Field(min_length=1, max_length=200_000)
 
 
 def _settings(request: Request):
@@ -336,7 +345,26 @@ async def sync_session(
             await bridge.refresh_status()
         except DaemonBridgeError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from None
-    return request.app.state.store.get_session(agent_id, session_id) or session
+    latest_session = request.app.state.store.get_session(agent_id, session_id) or session
+    if latest_session.get("status") == "running":
+        active_cmds = [
+            c for c in request.app.state.store.list_commands(agent_id, session_id)
+            if c.get("state") in {"running", "accepted"}
+        ]
+        if not active_cmds:
+            runtime = _agent_runtime(request, agent_id)
+            active_turn = getattr(runtime, "_active", {}).get(session_id) if runtime else None
+            if not active_turn:
+                updated = request.app.state.store.update_session(agent_id, session_id, {"status": "idle"})
+                if updated is not None:
+                    request.app.state.service._server_event(
+                        "session.upsert",
+                        agent_id=agent_id,
+                        session_id=session_id,
+                        data=updated,
+                    )
+                    latest_session = updated
+    return latest_session
 
 
 class CreateSessionPayload(BaseModel):
@@ -350,13 +378,17 @@ class CreateSessionPayload(BaseModel):
     provider: str | None = Field(default=None, max_length=256)
     model: str | None = Field(default=None, max_length=256)
     effort: str | None = Field(default=None, max_length=32)
+    blackboard_scope: str = Field(default="session", pattern="^(session|swarm|group)$")
+    blackboard_scope_id: str | None = Field(default=None, max_length=256)
 
 
 @router.get("/api/v1/open-sessions")
 async def open_sessions(request: Request) -> dict[str, object]:
     _private(request)
     from .native_controls import open_native_session_ids, runtime_rpc
+    from .jev_client import get_jev_key, evaluate_session_swipe_worthiness
     store = request.app.state.store
+
     def read(agent_id):
         try:
             runtime = _agent_runtime(request, agent_id)
@@ -370,6 +402,7 @@ async def open_sessions(request: Request) -> dict[str, object]:
             return agent_id, ids
         except (ConnectionError, OSError, TimeoutError, RuntimeError):
             return agent_id, None
+
     results = await asyncio.gather(
         *(asyncio.to_thread(read, agent['id']) for agent in store.list_agents())
     )
@@ -380,6 +413,40 @@ async def open_sessions(request: Request) -> dict[str, object]:
             continue
         for session_id in ids:
             items[(agent_id, session_id)] = {'agent_id': agent_id, 'id': session_id}
+
+    # Jev 智能移动端滑动判定层：
+    jev_key = get_jev_key(store)
+    if jev_key:
+        try:
+            recent_candidates = store.list_sessions()[:12]
+            for s in recent_candidates:
+                aid = s.get("agent_id")
+                sid = s.get("id")
+                if not aid or not sid:
+                    continue
+                if s.get("status") in {"running", "waiting_approval"}:
+                    items[(aid, sid)] = {'agent_id': aid, 'id': sid}
+                    continue
+                if (aid, sid) in items:
+                    continue
+                up_at = s.get("updated_at")
+                if not up_at:
+                    continue
+                try:
+                    from datetime import datetime, timezone
+                    diff_sec = (datetime.now(timezone.utc) - datetime.fromisoformat(up_at.replace('Z', '+00:00'))).total_seconds()
+                    if diff_sec > 3600:
+                        continue
+                except Exception:
+                    continue
+
+                msgs = store.list_messages(sid, limit=5)
+                eval_res = await asyncio.to_thread(evaluate_session_swipe_worthiness, s, msgs or [], store=store)
+                if eval_res.get("worthy") is True:
+                    items[(aid, sid)] = {'agent_id': aid, 'id': sid}
+        except Exception as e:
+            logger.warning("Jev open_sessions evaluation skipped: %s", e)
+
     return {
         'known_agent_ids': list(dict.fromkeys(known)),
         'items': list(items.values()),
@@ -465,6 +532,18 @@ def create_session(payload: CreateSessionPayload, request: Request) -> dict[str,
             data["project_name"] = project_name
 
         canonical = request.app.state.store.upsert_session(data)
+        session_key = f"{canonical['agent_id']}::{canonical['id']}"
+        if payload.blackboard_scope == "group":
+            if not payload.blackboard_scope_id:
+                raise ValueError("blackboard_scope_id is required for group sessions")
+            blackboard_namespace = f"group:{payload.blackboard_scope_id}"
+        elif payload.blackboard_scope == "swarm":
+            blackboard_namespace = f"swarm:{payload.blackboard_scope_id or session_key}"
+        else:
+            blackboard_namespace = f"session:{session_key}"
+        request.app.state.store.set_session_blackboard_namespace(
+            canonical["agent_id"], canonical["id"], blackboard_namespace
+        )
         request.app.state.service._server_event(
             "session.upsert",
             agent_id=canonical["agent_id"],
@@ -751,6 +830,19 @@ async def _summarize_handoff(
 ) -> str:
     if cancel_event.is_set():
         raise ConnectionError("转交已取消。", 409)
+
+    # 1. 优先尝试 Jev 快速提炼交接包（秒级响应、节省大模型 Token）
+    from .jev_client import get_jev_key, curate_handoff_summary
+    if get_jev_key(request.app.state.store):
+        try:
+            source_msgs = request.app.state.store.list_messages(source["id"], limit=20)
+            curated = curate_handoff_summary(source_msgs or [], source, store=request.app.state.store)
+            if curated.get("ok") and curated.get("summary"):
+                logger.info("Handoff summary curated via Jev model successfully.")
+                return curated["summary"]
+        except Exception as e:
+            logger.warning("Jev handoff curation fallback to standard fork summary: %s", e)
+
     fork = await asyncio.to_thread(
         create_session,
         CreateSessionPayload(
@@ -1029,6 +1121,15 @@ def batch_delete_sessions_endpoint(
             _mutate_agent_session(request, agent_id, session_id, None)
         except Exception:
             pass
+        if agent_id == "local-codex":
+            try:
+                codex_home = Path.home() / ".codex"
+                for sp in codex_home.glob("state_*.sqlite"):
+                    with sqlite3.connect(sp) as db:
+                        db.execute("DELETE FROM threads WHERE id=?", (session_id,))
+                        db.commit()
+            except Exception:
+                pass
         try:
             success = request.app.state.service.delete_session(agent_id, session_id)
             if success:
@@ -1286,6 +1387,7 @@ def read_session_model(session_id: str, request: Request, agent_id: str = Query(
         raise HTTPException(status_code=404, detail="Session was not found")
     try:
         saved = request.app.state.store.get_session_model_binding(agent_id, session_id)
+        saved_effort = request.app.state.store.get_session_reasoning_binding(agent_id, session_id)
         agent = request.app.state.store.get_agent(agent_id)
         if saved and agent and request.app.state.service.preserves_model_binding(agent["kind"]):
             return {**saved, 'effort': saved.get('effort')}
@@ -1295,16 +1397,17 @@ def read_session_model(session_id: str, request: Request, agent_id: str = Query(
             binding = dict(model(session_id))
             try:
                 current_effort = getattr(runtime, "current_effort", None)
-                binding['effort'] = current_effort(session_id) if callable(current_effort) else binding.get('effort')
+                native_effort = current_effort(session_id) if callable(current_effort) else binding.get('effort')
+                binding['effort'] = saved_effort or native_effort
             except ConnectionError:
-                binding['effort'] = None
+                binding['effort'] = saved_effort
             return binding
         if getattr(runtime, "daemon_owned", False):
             raise ConnectionError("会话所属运行时未提供模型状态。", 503)
         rpc = runtime_rpc(request.app.state.connections, agent_id)
         binding = current_session_model(rpc, session_id)
         from .native_controls import current_session_reasoning
-        binding['effort'] = current_session_reasoning(rpc, session_id)
+        binding['effort'] = saved_effort or current_session_reasoning(rpc, session_id)
         return binding
     except ConnectionError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
@@ -1335,13 +1438,11 @@ def session_reasoning(session_id: str, payload: SessionReasoningSelection, reque
             raise ConnectionError("会话所属运行时不支持思考强度设置。", 503)
         else:
             result = set_session_reasoning(runtime_rpc(request.app.state.connections, payload.agent_id), session_id, payload.effort)
-        agent = request.app.state.store.get_agent(payload.agent_id)
-        if agent and request.app.state.service.preserves_model_binding(agent["kind"]):
-            if result.get("effort") != payload.effort:
-                raise ConnectionError('思考强度尚未通过原生状态读回确认。', 502)
-            request.app.state.store.set_session_reasoning_binding(
-                payload.agent_id, session_id, payload.effort
-            )
+        if result.get("effort") != payload.effort:
+            raise ConnectionError('思考强度尚未通过原生状态读回确认。', 502)
+        request.app.state.store.set_session_reasoning_binding(
+            payload.agent_id, session_id, payload.effort
+        )
         return result
     except ConnectionError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
@@ -1417,6 +1518,33 @@ def commands(
     return {"items": request.app.state.store.list_commands(agent_id, session_id)}
 
 
+@router.patch("/api/v1/commands/{command_id}")
+def edit_queued_command(command_id: str, payload: QueuedCommandEdit, request: Request) -> dict[str, object]:
+    _private(request)
+    try:
+        return request.app.state.service.update_queued_command(payload.agent_id, payload.session_id, command_id, payload.text)
+    except (CommandRejected, ConnectionError) as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
+
+
+@router.delete("/api/v1/commands/{command_id}")
+def delete_queued_command(command_id: str, request: Request, agent_id: str = Query(...), session_id: str = Query(...)) -> dict[str, object]:
+    _private(request)
+    try:
+        return request.app.state.service.cancel_queued_command(agent_id, session_id, command_id)
+    except (CommandRejected, ConnectionError) as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
+
+
+@router.post("/api/v1/commands/{command_id}/send")
+async def send_queued_command(command_id: str, payload: QueuedCommandRef, request: Request) -> dict[str, object]:
+    _private(request)
+    try:
+        return await request.app.state.service.send_queued_command(payload.agent_id, payload.session_id, command_id)
+    except (CommandRejected, ConnectionError) as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
+
+
 @router.get("/api/v1/sessions/{session_id}/tasks")
 def tasks(
     session_id: str,
@@ -1440,10 +1568,10 @@ async def create_command(payload: CommandSubmission, request: Request) -> JSONRe
 
 
 @router.post("/api/v1/attachments", status_code=201)
-async def upload_attachment(request: Request, file: UploadFile = File(...)) -> dict[str, str]:  # noqa: B008
+async def upload_attachment(request: Request, file: UploadFile = File(...), source_path: str | None = Form(None)) -> dict[str, str]:  # noqa: B008
     _private(request)
     try:
-        return await request.app.state.attachments.save(file)
+        return await request.app.state.attachments.save(file, source_path)
     except AttachmentError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from None
 
@@ -1467,12 +1595,14 @@ def get_files_tree(
     request: Request,
     path: str = Query(default=""),
     depth: int = Query(default=3),
+    reveal_path: str = Query(default=""),
     session_id: str = Query(default=""),
     connection_id: str = Query(default=""),
 ) -> dict[str, object]:
     _private(request)
     import json, urllib.parse
     cleaned_path = urllib.parse.unquote(path).strip().strip('<>').strip('"\'')
+    cleaned_reveal_path = urllib.parse.unquote(reveal_path).strip().strip('<>').strip('"\'')
 
     # 优先根据 session_id 或 connection_id 判断是否为 SSH 远程项目
     resolved_cid = connection_id
@@ -1506,8 +1636,11 @@ def get_files_tree(
 import json, os
 from pathlib import Path
 
+raw_reveal = {repr(cleaned_reveal_path)}
+reveal = Path(raw_reveal).expanduser().resolve() if raw_reveal else None
+
 def walk(p, depth={max(1, min(depth, 5))}):
-    if depth <= 0: return []
+    if depth <= 0 and not (reveal and (p == reveal or p in reveal.parents)): return []
     items = []
     ignored = {{'.git', '.venv', 'node_modules', '__pycache__', '.pytest_cache', '.ruff_cache', 'dist'}}
     try:
@@ -1531,6 +1664,9 @@ target = Path(raw_target).expanduser().resolve()
 if not target.exists() or not target.is_dir():
     import sys
     sys.exit(44)
+if reveal:
+    try: reveal.relative_to(target)
+    except ValueError: reveal = None
 
 print(json.dumps({{'root': str(target), 'name': target.name or str(target), 'items': walk(target, {depth})}}))
 """
@@ -1575,8 +1711,17 @@ print(json.dumps({{'root': str(target), 'name': target.name or str(target), 'ite
     if not root.exists() or not root.is_dir():
         raise HTTPException(status_code=404, detail="Directory not found")
 
+    reveal = None
+    if cleaned_reveal_path:
+        try:
+            candidate = Path(cleaned_reveal_path).resolve()
+            candidate.relative_to(root)
+            reveal = candidate
+        except (OSError, ValueError):
+            reveal = None
+
     def walk_tree(current_dir: Path, current_depth: int) -> list[dict[str, object]]:
-        if current_depth <= 0:
+        if current_depth <= 0 and not (reveal and (current_dir == reveal or current_dir in reveal.parents)):
             return []
         items = []
         try:
@@ -2249,6 +2394,7 @@ async def open_system_file(request: Request) -> dict[str, object]:
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON")
     raw_path = str(payload.get("path") or "").strip().strip('<>').strip('"\'')
+    action = str(payload.get("action") or "open")
     if not raw_path:
         raise HTTPException(status_code=400, detail="Path is required")
     cleaned_path = urllib.parse.unquote(raw_path)
@@ -2259,7 +2405,14 @@ async def open_system_file(request: Request) -> dict[str, object]:
     if not resolved.exists():
         raise HTTPException(status_code=404, detail="File does not exist")
     try:
-        if sys.platform == "win32":
+        if action == "reveal" and sys.platform == "win32":
+            args = ["explorer.exe", str(resolved)] if resolved.is_dir() else ["explorer.exe", "/select,", str(resolved)]
+            subprocess.Popen(args)
+        elif action == "reveal" and sys.platform == "darwin":
+            subprocess.Popen(["open", str(resolved)] if resolved.is_dir() else ["open", "-R", str(resolved)])
+        elif action == "reveal":
+            subprocess.Popen(["xdg-open", str(resolved if resolved.is_dir() else resolved.parent)])
+        elif sys.platform == "win32":
             os.startfile(str(resolved))
         elif sys.platform == "darwin":
             subprocess.Popen(["open", str(resolved)])
@@ -2675,18 +2828,85 @@ def update_network_config(payload: NetworkConfigPatch, request: Request) -> dict
                 pass
 
             from pathlib import Path
-            for p in [
-                Path("P:/workspace/glwlg/ai/astrorder/.runtime/production.json"),
-                Path("P:/DevApp/Astrorder/server/.runtime/production.json"),
-            ]:
-                if p.is_file():
-                    try:
-                        cfg = json.loads(p.read_text(encoding="utf-8"))
-                        cfg["environment"]["ASTRORDER_ALLOWED_ORIGINS"] = ",".join(cleaned)
-                        if payload.public_url:
-                            cfg["environment"]["ASTRORDER_PUBLIC_URL"] = payload.public_url.strip()
-                        p.write_text(json.dumps(cfg, indent=2, ensure_ascii=False), encoding="utf-8")
-                    except Exception:
-                        pass
+            p = Path(os.environ["LOCALAPPDATA"]) / "Astrorder/production.json"
+            if p.is_file():
+                try:
+                    cfg = json.loads(p.read_text(encoding="utf-8"))
+                    cfg["environment"]["ASTRORDER_ALLOWED_ORIGINS"] = ",".join(cleaned)
+                    if payload.public_url:
+                        cfg["environment"]["ASTRORDER_PUBLIC_URL"] = payload.public_url.strip()
+                    p.write_text(json.dumps(cfg, indent=2, ensure_ascii=False), encoding="utf-8")
+                except Exception:
+                    pass
 
     return get_network_config(request)
+
+
+class JevConfigPatch(BaseModel):
+    api_key: str | None = None
+
+
+@router.get("/api/v1/services/jev/config")
+def get_jev_config(request: Request) -> dict[str, Any]:
+    _private(request)
+    from .jev_client import get_jev_key
+    key = get_jev_key(request.app.state.store)
+    masked = f"{key[:10]}...{key[-8:]}" if key and len(key) > 20 else ("已配置" if key else "")
+    return {
+        "configured": bool(key),
+        "masked_key": masked,
+    }
+
+
+@router.post("/api/v1/services/jev/config")
+def update_jev_config(payload: JevConfigPatch, request: Request) -> dict[str, Any]:
+    _private(request)
+    from .jev_client import set_jev_key
+    set_jev_key(request.app.state.store, payload.api_key)
+    return get_jev_config(request)
+
+
+@router.post("/api/v1/services/jev/test")
+def test_jev_connection(payload: JevConfigPatch, request: Request) -> dict[str, Any]:
+    _private(request)
+    from .jev_client import evaluate_blackboard_component
+    key = (payload.api_key or "").strip() or None
+    try:
+        res = evaluate_blackboard_component("Ping health check probe: system metrics and status.", store=request.app.state.store, api_key=key)
+        return {"ok": True, "details": res}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+class JevFilterPayload(BaseModel):
+    command: str = ""
+    output: str = ""
+
+
+@router.post("/api/v1/tools/jev-filter")
+def jev_filter_endpoint(payload: JevFilterPayload, request: Request) -> dict[str, Any]:
+    _private(request)
+    from .jev_client import filter_terminal_output
+    return filter_terminal_output(payload.command, payload.output, store=request.app.state.store)
+
+
+class JevHandoffCuratePayload(BaseModel):
+    session_id: str
+    agent_id: str
+
+
+@router.post("/api/v1/sessions/handoff-curate")
+def jev_handoff_curate_endpoint(payload: JevHandoffCuratePayload, request: Request) -> dict[str, Any]:
+    _private(request)
+    from .jev_client import curate_handoff_summary
+    store = request.app.state.store
+    session_row = store.get_session(payload.agent_id, payload.session_id)
+    if not session_row:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    
+    all_msgs = []
+    try:
+        all_msgs = store.list_messages(payload.session_id, limit=20)
+    except Exception:
+        pass
+    return curate_handoff_summary(all_msgs, session_row, store=store)

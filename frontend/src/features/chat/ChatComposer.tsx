@@ -1,4 +1,4 @@
-import { IconMicrophone, IconPaperclip, IconPlus, IconPlayerStop, IconArrowUp, IconX, IconCheck } from '@tabler/icons-react'
+import { IconBrain, IconMicrophone, IconPaperclip, IconPlus, IconPlayerStop, IconArrowUp, IconX, IconCheck } from '@tabler/icons-react'
 import { Alert, Badge, Button, Group, Paper, Stack, Text, Textarea } from '@mantine/core'
 import { useQueryClient } from '@tanstack/react-query'
 import { type ChangeEvent, type ClipboardEvent, type DragEvent, type KeyboardEvent, useEffect, useRef, useState, useSyncExternalStore } from 'react'
@@ -21,6 +21,8 @@ import { MobileOutbox, type OutboxEntry } from '../mobile/mobileOutbox'
 import { mobileOutboxStorage } from '../mobile/mobileOutboxStorage'
 import { AgentCommandMenu, AgentMentionMenu, buildCommandMenuItems, type CommandMenuItem, filterAgentMentions, formatAgentMention, useAgentCommands, useAgentMentions, useFileMentions, useGitBranches } from './AgentCommandMenu'
 import { useSidecarStore } from '../sidecar/sidecarStore'
+import { expandSystemMentions } from './systemMentions'
+import { usePersistentDraft } from './draftStorage'
 
 const EMPTY_DRAFT: DraftState = { text: '', attachments: [], sessionRefs: [] }
 
@@ -48,30 +50,13 @@ function parseSessionDrag(event: DragEvent): SessionRef | null {
 }
 
 function composeOutgoingText(text: string, refs: SessionRef[]): string {
-  let processed = text
-  const hasSwarmMention = /(?:^|\s)@(群星|stars)(?:\s|$)/i.test(processed)
-  if (hasSwarmMention) {
-    processed = processed.replace(/(?:^|\s)@(群星|stars)(?:\s|$)/gi, ' ').trim()
-    const swarmDirective = [
-      '【星序 · 群星多 Agent 协同作战指令】',
-      '你当前担任本次任务的“主星 (Lead Star)”。请遵循星序协同规范执行：',
-      '1. 必须直接通过原生工具调用发起 Astrorder MCP 工具调用 (如 mcp:astrorder.machines_dispatch / mcp:astrorder.sessions_create / mcp:astrorder.blackboard_set / mcp:astrorder.monitor_sessions_add / mcp:astrorder.plugins_open 等)；',
-      '2. 严禁自己写 Python 脚本或敲终端命令行去模拟调用星序接口！直接发起原生 MCP 工具调用；',
-      '3. 派生伴星时记得声明 parent_key (即当前会话 key) 以便星图拓扑正确连线，不要一个人在当前单个上下文中硬扛全流程，跨机器/跨环境派生伴星执行；',
-      '4. 共享契约与状态发布至黑板 (mcp:astrorder.blackboard_set)。星序黑板配备了基于 json-render 的智能可视化引擎，当你写入符合结构化契约的对象时，人类将在监控室看到精美UI（如 StepTimeline 阶段流水线、MetricGrid 指标矩阵、ApiEndpointsCard 接口卡、ResourceUsageBar 资源负载条、TestReport 测试报告、CveSecurityReport 漏洞报告、Checklist 清单、StatusCard 状态卡等），请优先使用结构化对象发布；阶段依赖使用军令门禁 (mcp:astrorder.swarm_milestone_declare / resolve) 协调。',
-      '----------------------------------------',
-      processed,
-    ].join('\n')
-    processed = swarmDirective
-  }
+  const processed = expandSystemMentions(text)
 
   if (!refs.length) return processed
   const lines = refs.map((ref) => `- ${ref.title || '未命名会话'} (${ref.key})`)
   const block = `星序会话引用：\n${lines.join('\n')}\n需要这些会话的内容时，调用 Astrorder MCP 工具 sessions_read，参数 key 为上列会话键。`
   return processed.trim() ? `${block}\n\n${processed}` : block
 }
-const allowedFiles = 'image/*,audio/*,.pdf,.txt,.md,.json,.csv,.log,.webp'
-
 function hasCapability(agent: Agent | undefined, capability: string): boolean {
   if (!agent) return capability === 'chat' // 默认允许聊天，不设无谓门槛
   return Boolean(agent.capabilities?.includes(capability) || capability === 'chat')
@@ -102,18 +87,20 @@ export function ChatComposer({
   session,
   agent,
   tasks = [],
+  usage,
   onHeightChange,
   onPreviewImage,
 }: {
   session: Session
   agent?: Agent
   tasks?: Task[]
+  usage?: { last_input_tokens: number; context_window: number }
   onHeightChange?: (height: number) => void
   onPreviewImage?: (images: string[], index: number) => void
 }) {
   const queryClient = useQueryClient()
   const draftKey = scopeKey(session.agent_id, session.id)
-  const draft = useAstrorderStore((state) => state.drafts[draftKey] || EMPTY_DRAFT)
+  const { draft, setDraft: updateDraft } = usePersistentDraft(session.agent_id, session.id)
   const commands = useAstrorderStore(useShallow((state) => selectCommands(state, session.agent_id, session.id)))
   const [submitting, setSubmitting] = useState(false)
   const [voiceOpened, setVoiceOpened] = useState(false)
@@ -216,7 +203,6 @@ export function ChatComposer({
     }
   }, [agent?.status, nativeBusy, outbox, outboxReady, pending, session.agent_id, session.id])
 
-  const updateDraft = (next: DraftState) => useAstrorderStore.getState().setDraft(session.agent_id, session.id, next)
   const setText = (text: string) => updateDraft({ ...draft, text })
   const addSessionRef = (ref: SessionRef) => {
     const selfKey = scopeKey(session.agent_id, session.id)
@@ -759,10 +745,21 @@ ${draft.text}` : entry.payload.text)
             aria-label={canAttach ? '添加附件' : '附件能力未提供'}
           >
             <IconPlus size={20} />
-            <input ref={fileInputRef} hidden type="file" multiple accept={allowedFiles} onChange={addFiles} />
+            <input ref={fileInputRef} hidden type="file" multiple onChange={addFiles} />
           </Button>
           <ApprovalModeControl session={session} />
           <span className="composer-toolbar-spacer" />
+          {usage && (
+            <Badge
+              variant="light"
+              color="gray"
+              size="sm"
+              leftSection={<IconBrain size={13} />}
+              title="当前上下文用量"
+            >
+              {(usage.last_input_tokens / 1000).toFixed(1)}k / {(usage.context_window / 1000).toFixed(0)}k
+            </Badge>
+          )}
           <SessionModelControl key={`model:${draftKey}`} session={session} />
           <Button
             className="attachment-button"

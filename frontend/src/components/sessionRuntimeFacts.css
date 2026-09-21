@@ -4,6 +4,12 @@
 .session-runtime-facts { display:grid; grid-template-columns:52px minmax(0,1fr); gap:13px 12px; margin:0; font-size:12px; line-height:1.6; }
 .session-runtime-facts dt { color:var(--astr-muted); }
 .session-runtime-facts dd { margin:0; min-width:0; overflow-wrap:anywhere; }
-.session-runtime-facts small { display:block; color:var(--astr-muted); font-size:11px; margin-top:3px; }
+.session-runtime-facts small { color:var(--astr-muted); font-size:11px; }
+.session-runtime-facts small.inline-state { display:inline-block; margin-left:8px; }
+.session-runtime-facts .nowrap-id { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%; }
+.session-runtime-facts .clickable-id { font-family:ui-monospace, monospace; text-decoration:underline; text-decoration-style:dashed; text-underline-offset:3px; color:var(--astr-text); }
+.session-runtime-facts .clickable-id:active { color:var(--astr-indigo, #5b5bd6); }
+.native-observation-box .mantine-Button-root { flex-shrink:0 !important; white-space:nowrap !important; min-width:52px !important; }
+
 .activity-pack > details > summary { cursor:pointer; color:var(--astr-muted); font-size:12px; }
 .activity-pack > details[open] > summary { margin-bottom:10px; }

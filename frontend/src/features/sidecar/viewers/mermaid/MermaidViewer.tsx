@@ -10,7 +10,7 @@ mermaid.initialize({
   securityLevel: 'loose',
 })
 
-export function MermaidViewer({ artifact, onSave, onDirtyChange }: ViewerContext) {
+export function MermaidViewer({ artifact, onSave, onDirtyChange, toolbarAction }: ViewerContext) {
   const containerRef = useRef<HTMLDivElement>(null)
   const onDirtyChangeRef = useRef(onDirtyChange)
   onDirtyChangeRef.current = onDirtyChange
@@ -117,6 +117,7 @@ export function MermaidViewer({ artifact, onSave, onDirtyChange }: ViewerContext
             )}
           </Group>
           <Group gap={6} wrap="nowrap">
+            {toolbarAction}
             <Button
               size="compact-xs"
               variant={isEditing ? 'light' : 'subtle'}

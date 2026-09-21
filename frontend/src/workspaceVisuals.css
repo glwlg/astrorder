@@ -640,6 +640,12 @@
   background: transparent !important;
   transition: all 0.16s ease;
 }
+.sidebar-primary-nav .sidebar-nav-link .mantine-NavLink-section {
+  margin-inline: 0 !important;
+}
+.sidebar-primary-nav .sidebar-nav-link .mantine-NavLink-body {
+  display: none;
+}
 .sidebar-primary-nav .sidebar-nav-link:hover {
   color: var(--astr-text);
   background: color-mix(in srgb, var(--astr-text) 5%, transparent) !important;
@@ -673,69 +679,46 @@
   scrollbar-width: thin;
 }
 
-/* Desktop app dedicated 32px top titlebar & window control accommodation */
-.is-desktop-app {
-  --astr-desktop-titlebar-height: 32px;
-}
+/* Electron uses the native Windows frame; the web app starts below it. */
 .is-desktop-app .mantine-Notifications-root {
-  top: calc(var(--astr-desktop-titlebar-height, 32px) + 12px) !important;
+  top: 12px !important;
   pointer-events: none;
 }
 .is-desktop-app .mantine-Notification-root {
   pointer-events: auto;
 }
-.desktop-window-titlebar {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 32px;
-  z-index: 90;
-  display: flex;
-  align-items: center;
-  padding-left: 12px;
-  padding-right: 140px;
-  background: #F7F7F7;
-  user-select: none;
-  -webkit-user-select: none;
-  -webkit-app-region: drag;
-  app-region: drag;
-  box-sizing: border-box;
-}
-:root[data-mantine-color-scheme='dark'] .desktop-window-titlebar {
-  background: var(--astr-surface, #1c2028);
-}
-.desktop-titlebar-brand {
-  -webkit-app-region: drag;
-  app-region: drag;
-  pointer-events: none;
-}
-.desktop-titlebar-drag-spacer {
-  flex: 1;
-  height: 100%;
-  -webkit-app-region: drag;
-  app-region: drag;
-}
-.desktop-titlebar-actions {
-  display: flex;
-  align-items: center;
-  margin-right: 8px;
-  -webkit-app-region: no-drag;
-  app-region: no-drag;
-}
 .is-desktop-app .astrorder-shell .sidebar-header {
-  top: var(--astr-desktop-titlebar-height) !important;
+  top: 0 !important;
+  height: var(--astr-header-height) !important;
+  min-height: var(--astr-header-height) !important;
+  border-right: 1px solid var(--astr-border) !important;
+}
+.is-desktop-app .app-header {
+  position: relative !important;
+  inset: auto !important;
+  width: 100% !important;
+  height: 100% !important;
+  padding: 0 12px !important;
+  background: color-mix(in srgb, var(--astr-surface-muted) 38%, var(--astr-surface)) !important;
+  border-bottom: 1px solid var(--astr-border) !important;
+  pointer-events: auto !important;
+}
+.is-desktop-app .app-header > .mantine-Group-root {
+  width: 100% !important;
+}
+.is-desktop-app .app-header .header-brand-group {
+  display: flex !important;
 }
 .is-desktop-app .astrorder-shell .desktop-navbar {
-  top: var(--astr-desktop-titlebar-height) !important;
-  height: calc(100dvh - var(--astr-desktop-titlebar-height)) !important;
+  top: var(--astr-header-height) !important;
+  height: calc(100dvh - var(--astr-header-height)) !important;
 }
 .is-desktop-app .astrorder-shell .shell-main {
-  padding-top: var(--astr-desktop-titlebar-height) !important;
+  padding-top: 0 !important;
   min-height: 100dvh;
 }
 .is-desktop-app .astrorder-shell .route-page {
-  height: calc(100dvh - var(--astr-desktop-titlebar-height)) !important;
+  height: 100dvh !important;
 }
 
 /* Desktop app: guarantee all 3 column headers align precisely at 48px */
@@ -761,10 +744,10 @@
   padding-top: 0 !important;
 }
 .is-desktop-app .chat-layout:not(.has-details) .chat-heading {
-  padding-right: 0 !important;
+  padding-right: 16px !important;
 }
 .is-desktop-app .desktop-details .sidecar-header-bar {
-  padding-right: 0 !important;
+  padding-right: 10px !important;
   height: var(--astr-header-height, 48px) !important;
   min-height: var(--astr-header-height, 48px) !important;
   max-height: var(--astr-header-height, 48px) !important;

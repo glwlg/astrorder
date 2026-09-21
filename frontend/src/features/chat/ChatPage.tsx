@@ -8,7 +8,7 @@ import {
 } from '@tabler/icons-react'
 import { ActionIcon, Button, Drawer, Group, Title, Tooltip } from '@mantine/core'
 import { useDisclosure, useMediaQuery } from '@mantine/hooks'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQueryClient, useQuery } from '@tanstack/react-query'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useShallow } from 'zustand/react/shallow'
@@ -67,6 +67,8 @@ export function ChatPage() {
     () => resolveSession(sessions, sessionId ? decodeURIComponent(sessionId) : undefined, searchParams.get('agent_id')),
     [searchParams, sessionId, sessions],
   )
+
+  const sessionUsage = useQuery({ queryKey: ['astrorder', 'session_usage', selected?.id, selected?.agent_id], queryFn: () => selected ? api.getSessionUsage(selected.id, selected.agent_id) : Promise.reject(), enabled: Boolean(selected), retry: false, staleTime: 5000, refetchInterval: selected?.status === 'running' ? 3000 : false })
 
   const [activeBotGroup, setActiveBotGroup] = useState<import('../../domain/types').BotGroup | null>(null)
   useEffect(() => {
@@ -171,6 +173,20 @@ export function ChatPage() {
             selected.id,
             selected.agent_id,
             selected.title || undefined,
+            selected.connection_id || undefined,
+          )
+        return
+      }
+
+      // 黑板快捷键：Ctrl + Alt + B
+      if (isCtrlOrMeta && e.altKey && (e.key === 'b' || e.key === 'B')) {
+        e.preventDefault()
+        e.stopPropagation()
+        useSidecarStore
+          .getState()
+          .openBlackboard(
+            selected.id,
+            selected.agent_id,
             selected.connection_id || undefined,
           )
         return
@@ -441,6 +457,7 @@ export function ChatPage() {
             session={selected}
             agent={agent}
             tasks={tasks}
+            usage={sessionUsage.data}
             onHeightChange={setComposerHeight}
             onPreviewImage={openGallery}
           />

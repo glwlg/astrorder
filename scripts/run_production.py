@@ -8,7 +8,17 @@ import threading
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-CONFIG = ROOT / '.runtime' / 'production.json'
+
+
+def durable_root() -> Path:
+    local_app_data = os.environ.get('LOCALAPPDATA')
+    if not local_app_data:
+        raise RuntimeError('LOCALAPPDATA is unavailable')
+    return Path(local_app_data) / 'Astrorder'
+
+
+CONFIG = durable_root() / 'production.json'
+CREDENTIALS = durable_root() / 'production.credentials.dpapi'
 
 
 def _enabled(value: object) -> bool:
@@ -45,8 +55,7 @@ def load_production_environment() -> dict[str, str]:
         if not key.startswith('ASTRORDER_') or key.endswith('SECRET'):
             raise ValueError('Invalid public production setting')
         os.environ[key] = str(value)
-    encrypted = ROOT / '.runtime' / 'production.credentials.dpapi'
-    credentials = json.loads(protect_bytes(encrypted.read_bytes(), decrypt=True))
+    credentials = json.loads(protect_bytes(CREDENTIALS.read_bytes(), decrypt=True))
     for key in required_credential_keys(environment):
         if not credentials.get(key):
             raise ValueError('Production credential missing')

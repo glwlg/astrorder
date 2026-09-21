@@ -15,6 +15,12 @@ import { xtermViewer } from './viewers/terminal'
 import { threeViewer } from './viewers/three'
 import { blackboardViewer } from './viewers/blackboard'
 
+const NON_PREVIEWABLE_EXTENSIONS = /\.(?:exe|dll|msi|msix|appx|com|bin|so|dylib|a|o|obj|class|jar|war|wasm|zip|7z|rar|gz|bz2|xz|tar|pdf|docx|xlsx|pptx|woff2?|ttf|otf)$/i
+
+export function isNonPreviewableFile(fileNameOrPath: string): boolean {
+  return NON_PREVIEWABLE_EXTENSIONS.test(fileNameOrPath.toLowerCase().split(/[?#]/)[0])
+}
+
 class ArtifactViewerRegistry {
   private viewers: ArtifactViewer[] = []
   private cachedExtensionRegex: RegExp | null = null
@@ -128,7 +134,7 @@ class ArtifactViewerRegistry {
     }
 
     // 如果没有特定专用查看器匹配，且该文件为非图片非音频的代码/文本，默认回退到 Monaco 代码编辑器
-    if (!bestViewer && isEnabled('monaco-viewer')) {
+    if (!bestViewer && isEnabled('monaco-viewer') && !isNonPreviewableFile(lowerName)) {
       const isImgOrAudio = /.(png|jpe?g|webp|gif|bmp|ico|tiff?|mp3|wav|ogg|aac|flac)$/i.test(lowerName)
       if (!isImgOrAudio) {
         return this.getViewerById('monaco-viewer')

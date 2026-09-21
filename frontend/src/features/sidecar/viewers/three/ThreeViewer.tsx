@@ -4,7 +4,7 @@ import { IconDownload, IconRefresh } from '@tabler/icons-react'
 import * as THREE from 'three'
 import type { ViewerContext } from '../../types'
 
-export function ThreeViewer({ artifact }: ViewerContext) {
+export function ThreeViewer({ artifact, toolbarAction }: ViewerContext) {
   const mountRef = useRef<HTMLDivElement>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -124,6 +124,7 @@ export function ThreeViewer({ artifact }: ViewerContext) {
             </Text>
           </Group>
           <Group gap={6} wrap="nowrap">
+            {toolbarAction}
             <ActionIcon
               variant="subtle"
               size="sm"

@@ -83,10 +83,10 @@ export function SessionModelControl({ session }: { session: Session }) {
     }
   }
 
-  const currentEffortIndex = Math.max(
-    0,
-    REASONING_EFFORTS.findIndex((item) => item.value === model.effort),
-  )
+  const resolvedEffortIndex = REASONING_EFFORTS.findIndex((item) => item.value === model.effort)
+  const currentEffortIndex = resolvedEffortIndex >= 0
+    ? resolvedEffortIndex
+    : REASONING_EFFORTS.findIndex((item) => item.value === 'medium')
   const sliderIndex = draftEffortIndex ?? currentEffortIndex
   const effortLabel = REASONING_EFFORTS[sliderIndex]?.label || '中'
   const displayModelName = model.label

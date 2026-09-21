@@ -101,3 +101,36 @@ def test_stale_permission_request_is_discarded_and_acknowledged(tmp_path):
         bootstrap = client.get('/api/v1/bootstrap', headers=headers).json()
         assert len(bootstrap['approvals']) == 0
         assert approval_id in app.state.observers.ack.get('local-codex', [])
+
+def test_full_access_permission_is_auto_allowed_without_pending_approval(tmp_path):
+    settings=Settings(database_url=f'sqlite:///{tmp_path}/cache.db',attachments_dir=tmp_path/'attachments',auto_connect_local_hermes=False,browser_secret='test-browser',connector_secret='test-connector')
+    app=create_app(settings); headers={'Authorization':'Bearer test-browser'}
+    with TestClient(app) as client:
+        app.state.store.upsert_agent({'id':'local-codex','kind':'codex','name':'fixture','status':'ready','capabilities':['chat']})
+        app.state.store.upsert_session({'id':SID,'agent_id':'local-codex','title':'fixture','status':'idle','workspace':None,'updated_at':'2026-09-12T00:00:00Z'})
+        app.state.store.set_session_approval_mode_binding('local-codex',SID,'full_access')
+        spool=tmp_path/'astrorder-observer/events'; spool.mkdir(parents=True)
+        approval_id='d'*32
+        (spool/(approval_id+'.json')).write_text(json.dumps({'id':approval_id,'session_id':SID,'event':'PermissionRequest','turn_id':'turn','tool_call_id':'call-1','tool_name':'Bash','detail':'whoami','approval_pending':True,'observed_at':time.time()}))
+        native=SimpleNamespace(_home=tmp_path,state='connected',agent_id='local-codex',_request=Mock())
+        app.state.observers.collect(native)
+        assert client.get('/api/v1/bootstrap',headers=headers).json()['approvals']==[]
+        assert json.loads((tmp_path/'astrorder-observer/decisions'/(approval_id+'.json')).read_text())=={'id':approval_id,'decision':'allow'}
+
+def test_completed_tool_resolves_observer_approval(tmp_path):
+    settings=Settings(database_url=f'sqlite:///{tmp_path}/cache.db',attachments_dir=tmp_path/'attachments',auto_connect_local_hermes=False,browser_secret='test-browser',connector_secret='test-connector')
+    app=create_app(settings); headers={'Authorization':'Bearer test-browser'}
+    with TestClient(app) as client:
+        app.state.store.upsert_agent({'id':'local-codex','kind':'codex','name':'fixture','status':'ready','capabilities':['chat']})
+        app.state.store.upsert_session({'id':SID,'agent_id':'local-codex','title':'fixture','status':'idle','workspace':None,'updated_at':'2026-09-12T00:00:00Z'})
+        spool=tmp_path/'astrorder-observer/events'; spool.mkdir(parents=True)
+        approval_id='e'*32
+        permission={'id':approval_id,'session_id':SID,'event':'PermissionRequest','turn_id':'turn','tool_call_id':'call-1','tool_name':'Bash','detail':'whoami','approval_pending':True,'observed_at':time.time()}
+        (spool/(approval_id+'.json')).write_text(json.dumps(permission))
+        native=SimpleNamespace(_home=tmp_path,state='connected',agent_id='local-codex',_request=Mock())
+        app.state.observers.collect(native)
+        assert len(client.get('/api/v1/bootstrap',headers=headers).json()['approvals'])==1
+        completed={**permission,'id':'f'*32,'event':'PostToolUse','approval_pending':False,'observed_at':time.time()}
+        (spool/('f'*32+'.json')).write_text(json.dumps(completed))
+        app.state.observers.collect(native)
+        assert client.get('/api/v1/bootstrap',headers=headers).json()['approvals']==[]

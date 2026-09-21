@@ -12,13 +12,13 @@ import {
   Stack,
   Text,
   TextInput,
-  Tooltip,
+  
   UnstyledButton,
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import {
   IconArrowUp,
-  IconCheck,
+  
   IconFolder,
   IconFolderPlus,
   IconRefresh,
@@ -27,8 +27,8 @@ import {
 import { useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
-import type { Agent, Project, Session } from '../domain/types'
-import { useAstrorderStore } from '../state/store'
+import type { Agent } from '../domain/types'
+// useAstrorderStore
 
 interface DirectoryItem {
   name: string
@@ -92,7 +92,7 @@ export function AddProjectModal({
       if (!mounted) return
       const list: Array<{ value: string; label: string }> = [{ value: 'local', label: '本机 (Local)' }]
       const sshList = res.ssh || []
-      for (const conn of sshList) {
+      for (const conn of Object.values(sshList || {})) {
         if (conn && conn.id) {
           const name = conn.display_name || conn.host || conn.id
           list.push({

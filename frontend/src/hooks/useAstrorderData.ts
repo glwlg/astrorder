@@ -3,6 +3,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
 import { api } from '../api/client'
 import { migrateSessionPins } from '../domain/migrateSessionPins'
+import { scopeKey } from '../domain/semantics'
 import {
   INITIAL_HISTORY_LIMIT,
   OLDER_HISTORY_LIMIT,
@@ -72,7 +73,16 @@ export function useSessionResources(session: Session | null, authenticated: bool
     staleTime: 0,
   })
   const ready = authenticated && Boolean(session)
-  void sync.data
+  useEffect(() => {
+    if (sync.data) {
+      useAstrorderStore.setState((state) => ({
+        sessions: {
+          ...state.sessions,
+          [scopeKey(sync.data.agent_id, sync.data.id)]: sync.data,
+        },
+      }))
+    }
+  }, [sync.data])
 
   const messages = useInfiniteQuery({
     queryKey: ['astrorder', 'messages', session?.agent_id, session?.id],

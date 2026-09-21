@@ -1,12 +1,14 @@
 """Connection-first Agent discovery and owned remote Codex stdio transport."""
 from __future__ import annotations
 
+import base64
 import inspect
 import json
 import logging
 import subprocess
 from pathlib import Path
 from threading import RLock
+from uuid import UUID
 
 from astrorder_codex_connector.app_server import CodexAppServer
 
@@ -17,8 +19,13 @@ from .connections import (
     validate_ssh_settings,
 )
 from .models import AgentConnectionChoice
-from .native_codex import CodexConnection, stored_model
-from .ssh_transport import SshNativeRuntime, build_remote_python_command
+from .native_codex import CodexConnection, rollout_item_timestamps, stored_model
+from .ssh_transport import (
+    SshNativeRuntime,
+    build_bootstrap_stdin,
+    build_remote_python_command,
+    build_remote_stdin_bootstrap_command,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +47,54 @@ print(json.dumps({'os': platform.system(), 'items': items}))
 '''
 
 class RemoteCodex(CodexConnection):
+    def _stage_attachment(self, sid, attachment_id, _source, record, data):
+        try:
+            UUID(str(attachment_id))
+        except ValueError:
+            raise ConnectionError('远程 Codex 附件身份无效；未发送。', 422) from None
+        thread = self._threads.get(sid) or {}
+        workspace = thread.get('cwd')
+        name = Path(str(record.get('name') or 'attachment')).name
+        if not isinstance(workspace, str) or not workspace:
+            raise ConnectionError('远程 Codex 会话工作目录不可用；附件未发送。', 422)
+        source = '''import base64, json, os, sys
+from pathlib import Path
+payload=json.loads(sys.stdin.buffer.readline())
+root=Path(payload['workspace']).expanduser().resolve()
+name=payload['name']
+if not isinstance(name,str) or Path(name).name != name:
+ raise RuntimeError('unsafe attachment name')
+directory=root/'.astrorder'/'attachments'/payload['attachment_id']
+directory.mkdir(parents=True,exist_ok=True)
+try:
+ directory.resolve().relative_to(root)
+except ValueError:
+ raise RuntimeError('unsafe attachment directory')
+target=directory/name
+temporary=directory/('.'+name+'.tmp')
+temporary.write_bytes(base64.b64decode(payload['content_base64'],validate=True))
+os.replace(temporary,target)
+print(json.dumps(str(target)))'''
+        try:
+            staged = self.remote_json(source, {
+                'workspace': workspace,
+                'name': name,
+                'attachment_id': str(attachment_id),
+                'content_base64': base64.b64encode(data).decode('ascii'),
+            })
+        except ConnectionError:
+            raise ConnectionError('远程 Codex 文件暂存失败；附件未发送。', 502) from None
+        if not isinstance(staged, str) or not staged:
+            raise ConnectionError('远程 Codex 文件暂存失败；附件未发送。', 502)
+        return staged
+
+    def _history_timestamps(self, sid, item_ids):
+        if not self._home:
+            return {}
+        source = 'import json\n' + inspect.getsource(rollout_item_timestamps) + '\nprint(json.dumps(rollout_item_timestamps(' + repr(self._home.as_posix()) + ',' + repr(sid) + ',' + repr(item_ids) + ')))'
+        result = self.remote_json(source)
+        return result if isinstance(result, dict) else {}
+
     def __init__(self, settings, store, service, row, executable):
         self.connection_id = row['id']
         self.display_name = row.get('display_name') or self.connection_id
@@ -59,10 +114,11 @@ class RemoteCodex(CodexConnection):
             for part in self.transport._base_ssh_argv()
         ] + [self.transport._target()]
 
-    def remote_json(self, source):
+    def remote_json(self, source, payload=None):
         try:
             result = subprocess.run(
-                self.ssh_argv() + [build_remote_python_command(source)],
+                self.ssh_argv() + [build_remote_stdin_bootstrap_command()],
+                input=build_bootstrap_stdin(source, payload or {}),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
                 text=True,

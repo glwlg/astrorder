@@ -38,6 +38,7 @@ export interface SidecarState {
   setSidecarWidth: (width: number) => void
   openTerminal: (sessionId: string, agentId: string, workspaceName?: string, connectionId?: string) => void
   openFileTree: (sessionId: string, agentId: string, workspacePath?: string, workspaceName?: string, connectionId?: string) => void
+  revealFileInTree: (sessionId: string, agentId: string, filePath: string, workspacePath?: string, workspaceName?: string, connectionId?: string) => void
   openSideChat: (sessionId: string, agentId: string, workspaceName?: string, connectionId?: string) => void
   openAgentGraph: (sessionId: string, agentId: string, workspaceName?: string, connectionId?: string) => void
   openGitDiff: (sessionId: string, agentId: string, workspacePath?: string, connectionId?: string, baseBranch?: string) => void
@@ -175,6 +176,26 @@ export const useSidecarStore = create<SidecarState>()(persist((set, get) => ({
         },
       })
     }
+  },
+
+  revealFileInTree: (sessionId, agentId, filePath, workspacePath, workspaceName, connectionId) => {
+    get().openFileTree(sessionId, agentId, workspacePath, workspaceName, connectionId)
+    const tabId = `filetree:${sessionId}`
+    const current = get()
+    const tabs = current.tabs.map((tab) => tab.id === tabId && tab.artifact ? {
+      ...tab,
+      artifact: {
+        ...tab.artifact,
+        metadata: { ...tab.artifact.metadata, revealPath: filePath, revealAt: Date.now() },
+      },
+    } : tab)
+    set({
+      tabs,
+      sessionMemories: current.activeSessionKey ? {
+        ...current.sessionMemories,
+        [current.activeSessionKey]: { tabs, activeTabId: tabId, isOpen: true },
+      } : current.sessionMemories,
+    })
   },
 
   openAgentGraph: (sessionId: string, agentId: string, _workspaceName?: string, connectionId?: string) => {
@@ -329,7 +350,7 @@ export const useSidecarStore = create<SidecarState>()(persist((set, get) => ({
     } else {
       const bbArtifact: ArtifactRef = {
         id: tabId,
-        name: '作战黑板',
+        name: '黑板',
         kind: 'workspace_file',
         mediaType: 'application/x-blackboard',
         readUrl: '',
@@ -341,7 +362,7 @@ export const useSidecarStore = create<SidecarState>()(persist((set, get) => ({
       const newTab: SidecarTab = {
         id: tabId,
         type: 'artifact',
-        title: '作战黑板',
+        title: '黑板',
         artifact: bbArtifact,
         viewerId: 'blackboard-viewer',
         closable: true,
@@ -415,9 +436,13 @@ export const useSidecarStore = create<SidecarState>()(persist((set, get) => ({
     const existingIndex = tabs.findIndex((t) => t.id === tabId)
     const url = initialUrl || 'https://www.bing.com'
     if (existingIndex >= 0) {
+      const nextTabs = tabs.map((tab, index) => index === existingIndex && tab.artifact
+        ? { ...tab, artifact: { ...tab.artifact, readUrl: url, agentId, connectionId } }
+        : tab)
       set({
         isOpen: true,
         activeTabId: tabId,
+        tabs: nextTabs,
       })
     } else {
       const browserArtifact: ArtifactRef = {
@@ -436,7 +461,7 @@ export const useSidecarStore = create<SidecarState>()(persist((set, get) => ({
         type: 'artifact',
         title: '浏览器',
         artifact: browserArtifact,
-        viewerId: 'html-preview-viewer',
+        viewerId: 'html-viewer',
         closable: true,
       }
       set({

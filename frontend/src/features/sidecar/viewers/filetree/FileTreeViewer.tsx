@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ActionIcon, Badge, Button, Collapse, Group, LoadingOverlay, Menu, Paper, ScrollArea, Text } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import {
@@ -53,6 +53,22 @@ function writeExpandedPaths(key: string, paths: Set<string>): void {
   }
 }
 
+function pathKey(path: string): string {
+  const normalized = path.replace(/\\/g, '/').replace(/\/$/, '')
+  return /^[a-z]:\//i.test(normalized) ? normalized.toLowerCase() : normalized
+}
+
+function findParentPaths(nodes: TreeNode[], target: string, parents: string[] = []): string[] | null {
+  for (const node of nodes) {
+    if (pathKey(node.path) === pathKey(target)) return parents
+    if (node.children) {
+      const found = findParentPaths(node.children, target, [...parents, node.path])
+      if (found) return found
+    }
+  }
+  return null
+}
+
 function FileTreeNodeItem({
   node,
   sessionId,
@@ -100,8 +116,6 @@ function FileTreeNodeItem({
     const viewer = artifactViewerRegistry.findViewer(artifact)
     if (viewer) {
       openArtifact(artifact, viewer.id)
-    } else {
-      openArtifact(artifact, 'monaco-viewer')
     }
   }
 
@@ -137,6 +151,7 @@ function FileTreeNodeItem({
               outline: isSelected ? '1px solid var(--astr-blue, #3b82f6)' : 'none',
             }}
             className="file-tree-row"
+            data-file-path={node.path}
           >
             {node.is_dir ? (
               <>
@@ -186,6 +201,21 @@ function FileTreeNodeItem({
           >
             下载 / 另存为
           </Menu.Item>
+          {(!connectionId || connectionId === 'local') && (
+            <Menu.Item
+              leftSection={<IconFolderOpen size={14} />}
+              onClick={async () => {
+                const response = await fetch('/api/v1/system/open-file', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ path: node.path, action: 'reveal' }),
+                })
+                if (!response.ok) notifications.show({ color: 'red', message: '无法在资源管理器中打开' })
+              }}
+            >
+              在资源管理器中打开
+            </Menu.Item>
+          )}
           <Menu.Divider />
           <Menu.Item
             onClick={() => {
@@ -222,6 +252,7 @@ function FileTreeNodeItem({
 }
 
 export function FileTreeViewer({ artifact }: ViewerContext) {
+  const paneRef = useRef<HTMLDivElement>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [treeData, setTreeData] = useState<TreeNode[]>([])
@@ -230,6 +261,8 @@ export function FileTreeViewer({ artifact }: ViewerContext) {
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(() => readExpandedPaths(storageKey))
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const [copying, setCopying] = useState(false)
+  const revealPath = typeof artifact.metadata?.revealPath === 'string' ? artifact.metadata.revealPath : null
+  const revealAt = artifact.metadata?.revealAt
 
   const toggleDirectory = useCallback((path: string) => {
     setExpandedPaths((current) => {
@@ -247,7 +280,7 @@ export function FileTreeViewer({ artifact }: ViewerContext) {
     try {
       const queryPath = artifact.path || ''
       const res = await fetch(
-        `/api/v1/files/tree?path=${encodeURIComponent(artifact.path || '')}&session_id=${encodeURIComponent(artifact.sessionId)}&connection_id=${encodeURIComponent(artifact.connectionId || '')}`,
+        `/api/v1/files/tree?path=${encodeURIComponent(artifact.path || '')}&reveal_path=${encodeURIComponent(revealPath || '')}&session_id=${encodeURIComponent(artifact.sessionId)}&connection_id=${encodeURIComponent(artifact.connectionId || '')}`,
       )
       if (!res.ok) throw new Error(`获取文件树失败 (${res.status})`)
       const data = await res.json()
@@ -258,11 +291,28 @@ export function FileTreeViewer({ artifact }: ViewerContext) {
     } finally {
       setLoading(false)
     }
-  }, [artifact.connectionId, artifact.path, artifact.sessionId])
+  }, [artifact.connectionId, artifact.path, artifact.sessionId, revealPath])
 
   useEffect(() => {
     void fetchTree()
   }, [fetchTree])
+
+  useEffect(() => {
+    if (!revealPath || !treeData.length) return
+    const parents = findParentPaths(treeData, revealPath)
+    if (!parents) return
+    setSelectedPath(revealPath)
+    setExpandedPaths((current) => {
+      const next = new Set([...current, ...parents])
+      writeExpandedPaths(storageKey, next)
+      return next
+    })
+    requestAnimationFrame(() => {
+      const row = [...(paneRef.current?.querySelectorAll<HTMLElement>('[data-file-path]') || [])]
+        .find((element) => pathKey(element.dataset.filePath || '') === pathKey(revealPath))
+      row?.scrollIntoView({ block: 'center' })
+    })
+  }, [revealAt, revealPath, storageKey, treeData])
 
   const handleCopyFiles = useCallback(async (paths: string[]) => {
     if (!paths.length) return
@@ -348,6 +398,7 @@ export function FileTreeViewer({ artifact }: ViewerContext) {
   return (
     <div
       className="filetree-viewer-pane"
+      ref={paneRef}
       style={{ display: 'flex', flexDirection: 'column', height: '100%' }}
       tabIndex={0}
       onClick={() => setSelectedPath(null)}

@@ -4,6 +4,7 @@ from astrorder.main import create_app
 
 AUTH_HEADERS = {"Authorization": "Bearer browser-test"}
 
+
 def test_bot_groups_crud_and_messages(tmp_path):
     app = create_app(
         Settings(
@@ -28,13 +29,18 @@ def test_bot_groups_crud_and_messages(tmp_path):
                     "agent_id": "local-codex",
                     "name": "Codex",
                     "alias": "前端工程师",
+                    "model_provider": "openai",
+                    "model_name": "gpt-5",
+                    "thinking_effort": "high",
+                    "approval_policy": "manual",
+                    "workspace": "P:/workspace/demo",
                 },
                 {
                     "machine_id": "ssh-debian",
                     "agent_id": "ssh-hermes-deb",
                     "name": "Hermes",
                     "alias": "运维专家",
-                }
+                },
             ],
             "max_hops": 4,
         }
@@ -44,6 +50,9 @@ def test_bot_groups_crud_and_messages(tmp_path):
         gid = group["id"]
         assert group["name"] == "跨机协同专家群"
         assert len(group["members"]) == 2
+        assert group["members"][0]["model_name"] == "gpt-5"
+        assert group["members"][0]["workspace"] == "P:/workspace/demo"
+        assert group["member_states"]["local-codex"]["status"] == "idle"
 
         get_resp = client.get(f"/api/v1/bot-groups/{gid}", headers=AUTH_HEADERS)
         assert get_resp.status_code == 200
@@ -51,7 +60,9 @@ def test_bot_groups_crud_and_messages(tmp_path):
         msg_payload = {
             "text": "请 @Hermes 检查远程系统负载，然后通知 @Codex",
         }
-        msg_resp = client.post(f"/api/v1/bot-groups/{gid}/messages", json=msg_payload, headers=AUTH_HEADERS)
+        msg_resp = client.post(
+            f"/api/v1/bot-groups/{gid}/messages", json=msg_payload, headers=AUTH_HEADERS
+        )
         assert msg_resp.status_code == 200
         data = msg_resp.json()
         assert data["ok"] is True

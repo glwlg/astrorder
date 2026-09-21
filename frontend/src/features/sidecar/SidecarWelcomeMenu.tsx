@@ -2,6 +2,7 @@ import { Text, UnstyledButton } from '@mantine/core'
 import {
   IconBrain,
   IconFolder,
+  IconChalkboard,
   IconMessages,
   IconSparkles,
   IconTerminal2,
@@ -16,6 +17,7 @@ interface SidecarWelcomeMenuProps {
   onOpenBrowser: () => void
   onOpenSideChat: () => void
   onOpenAgentGraph: () => void
+  onOpenBlackboard?: () => void
 }
 
 export function SidecarWelcomeMenu({
@@ -25,8 +27,15 @@ export function SidecarWelcomeMenu({
   onOpenBrowser,
   onOpenSideChat,
   onOpenAgentGraph,
+  onOpenBlackboard,
 }: SidecarWelcomeMenuProps) {
   const menuItems = [
+    {
+      icon: <IconChalkboard size={18} color="var(--astr-indigo, #6366f1)" />,
+      label: "黑板",
+      shortcut: "Ctrl+Alt+B",
+      onClick: onOpenBlackboard || onOpenFileTree,
+    },
     {
       icon: <IconFolder size={18} color="var(--astr-blue, #3b82f6)" />,
       label: '文件',

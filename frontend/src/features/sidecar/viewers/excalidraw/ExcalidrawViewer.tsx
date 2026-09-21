@@ -5,7 +5,7 @@ import type { ViewerContext } from '../../types'
 
 const EXCALIDRAW_ORIGIN = 'https://excalidraw.com'
 
-export function ExcalidrawViewer({ artifact, onSave, onDirtyChange }: ViewerContext) {
+export function ExcalidrawViewer({ artifact, onSave, onDirtyChange, toolbarAction }: ViewerContext) {
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const onDirtyChangeRef = useRef(onDirtyChange)
   onDirtyChangeRef.current = onDirtyChange
@@ -84,6 +84,7 @@ export function ExcalidrawViewer({ artifact, onSave, onDirtyChange }: ViewerCont
             )}
           </Group>
           <Group gap={6} wrap="nowrap">
+            {toolbarAction}
             {artifact.writable && onSave && (
               <Tooltip label="保存到工作区">
                 <Button

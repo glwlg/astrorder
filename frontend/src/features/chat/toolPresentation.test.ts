@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { describeTool, formatPackSummary, unwrapCommand } from './toolPresentation'
+import { describeTool, fileChangeDiffs, formatPackSummary, unwrapCommand } from './toolPresentation'
 import type { Message } from '../../domain/types'
 
 function makeMessage(override: Partial<Message>): Message {
@@ -69,6 +69,23 @@ describe('describeTool', () => {
     expect(desc.iconKey).toBe('edit')
     expect(desc.action).toBe('编辑')
     expect(desc.target).toBe('CameraView.vue')
+  })
+
+  it('extracts renderable diffs from file changes', () => {
+    const msg = makeMessage({
+      tool: {
+        name: 'fileChange',
+        arguments: {
+          changes: [
+            { path: '/repo/src/App.tsx', diff: '@@ -1 +1 @@\n-old\n+new' },
+            { path: '/repo/src/empty.ts', diff: '' },
+          ],
+        },
+      },
+    })
+    expect(fileChangeDiffs(msg)).toEqual([
+      { file: 'App.tsx', diff: '@@ -1 +1 @@\n-old\n+new' },
+    ])
   })
 
   it('describes thinking message with first line', () => {

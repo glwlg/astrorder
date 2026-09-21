@@ -1,7 +1,7 @@
-import { IconArrowDown, IconArrowsMaximize, IconArrowsMinimize, IconArrowUpRight, IconBolt, IconCircleCheck, IconClock, IconGridDots, IconLoader2, IconPlus, IconShieldCheck, IconX } from '@tabler/icons-react'
+import { IconArrowDown, IconArrowsMaximize, IconArrowsMinimize, IconArrowUpRight, IconBolt, IconCircleCheck, IconClock, IconGridDots, IconLoader2, IconPlus, IconShieldCheck, IconTrash, IconX } from '@tabler/icons-react'
 import { ActionIcon, Badge, Button, Group, Modal, Paper, Popover, SegmentedControl, Stack, Text, Textarea, TextInput, Title, Tooltip } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { IconAlertTriangle, IconArrowUp, IconCheck, IconFolder, IconPlayerStop } from '@tabler/icons-react'
+import { IconAlertTriangle, IconArrowUp, IconCheck, IconFolder, IconPaperclip, IconPlayerStop } from '@tabler/icons-react'
 import { AgentBrandIcon } from '../../components/AgentBrandIcon'
 import { describeTool, PackSummary, ToolLineIcon } from '../chat/toolPresentation'
 import { ShinyText } from '../../components/animations/ShinyText'
@@ -10,7 +10,7 @@ import { LazyDetails } from '../../components/LazyDetails'
 import { ClickSpark } from '../../components/animations/ClickSpark'
 import { SessionModelControl } from '../chat/SessionModelControl'
 import { ApprovalModeControl } from '../chat/ApprovalModeControl'
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api/client'
@@ -20,18 +20,30 @@ import { isHiddenRailSession } from '../../components/sessionRailModel'
 import { useSessionResources } from '../../hooks/useAstrorderData'
 import { selectApprovals, selectCommands, selectMessages, selectSessions, useAstrorderStore } from '../../state/store'
 import { newCommandId, scopeKey } from '../../domain/semantics'
+import { MobileOutbox, type OutboxEntry } from '../mobile/mobileOutbox'
+import { mobileOutboxStorage } from '../mobile/mobileOutboxStorage'
+import { clipboardFiles } from '../chat/composerMedia'
+import { submitBrowserCommand } from '../chat/commandActions'
+import { usePersistentDraft } from '../chat/draftStorage'
 
 const STORAGE_KEY = 'astrorder:monitor-sessions'
+const AUTO_STORAGE_KEY = 'astrorder:monitor-auto-sessions'
+const EXCLUDED_STORAGE_KEY = 'astrorder:monitor-excluded-sessions'
 const SIZES_STORAGE_KEY = 'astrorder:monitor-slot-sizes'
 const ORDER_STORAGE_KEY = 'astrorder:monitor-slot-order'
+const STALE_AFTER_MS = 30 * 60 * 1000
+
+type MonitorQueueItem =
+  | { source: 'local'; entry: OutboxEntry; id: string; agentId: string; sessionId: string; text: string }
+  | { source: 'server'; command: Command; id: string; agentId: string; sessionId: string; text: string }
 
 function active(session: Session) {
   return session.status === 'running' || session.status === 'waiting_approval' || session.live === true
 }
 
-function savedSessions(): string[] {
+function savedSessions(key = STORAGE_KEY): string[] {
   try {
-    const value = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]')
+    const value = JSON.parse(localStorage.getItem(key) || '[]')
     return Array.isArray(value) ? value.filter(item => typeof item === 'string') : []
   } catch { return [] }
 }
@@ -121,18 +133,32 @@ export function MonitorCard({
   onHeaderMouseDown,
   onResizeCornerStart,
 }: MonitorCardProps) {
+  const status = session.status === 'idle' && session.live ? 'running' : session.status
   const resources = useSessionResources(session, true)
   const commands = useAstrorderStore(useShallow((state) => selectCommands(state, session.agent_id, session.id)))
   const messages = useAstrorderStore(useShallow((state) => selectMessages(state, session.agent_id, session.id)))
   const isInitialLoading = Boolean((resources?.messages?.isLoading || resources?.messages?.isPending) && messages.length === 0)
   const approvals = useAstrorderStore(useShallow((state) => selectApprovals(state, session.agent_id, session.id)))
-  const [draft, setDraft] = useState('')
+  const { draft, setDraft } = usePersistentDraft(session.agent_id, session.id)
   const [sending, setSending] = useState(false)
   const [error, setError] = useState('')
   const scrollRef = useRef<HTMLDivElement>(null)
   const wrapperRef = useRef<HTMLDivElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const previousStatusRef = useRef(status)
+  const previousActiveCommandRef = useRef<string | null>(null)
+  const completionTimeoutRef = useRef<number | null>(null)
+  const [completionFlash, setCompletionFlash] = useState(false)
   const activeCommand = commands.find((command) => command.state === 'running' || command.state === 'accepted')
-  const isStopAction = session.status === 'running' && !draft.trim()
+  const isStopAction = session.status === 'running' && !draft.text.trim() && !draft.attachments.length
+
+  const addFiles = (files: File[]) => {
+    if (!files.length) return
+    setDraft({
+      ...draft,
+      attachments: [...draft.attachments, ...files.map(file => ({ key: crypto.randomUUID(), file }))],
+    })
+  }
 
   const visibleMessages = useMemo(() => {
     return messages.filter((message) => message.kind !== 'message' || message.role !== 'assistant' || message.text.trim() || message.attachments?.length || message.tool)
@@ -144,6 +170,26 @@ export function MonitorCard({
     }
   }, [visibleMessages.length, activeCommand])
 
+  useEffect(() => {
+    const previousStatus = previousStatusRef.current
+    const previousActiveCommand = previousActiveCommandRef.current
+    previousStatusRef.current = status
+    previousActiveCommandRef.current = activeCommand?.id || null
+    const sessionFinished = ['running', 'waiting_approval'].includes(previousStatus) && status === 'idle'
+    const commandFinished = previousActiveCommand !== null && !activeCommand
+    if (!sessionFinished && !commandFinished) return
+    setCompletionFlash(true)
+    if (completionTimeoutRef.current !== null) window.clearTimeout(completionTimeoutRef.current)
+    completionTimeoutRef.current = window.setTimeout(() => {
+      setCompletionFlash(false)
+      completionTimeoutRef.current = null
+    }, 1900)
+  }, [activeCommand, status])
+
+  useEffect(() => () => {
+    if (completionTimeoutRef.current !== null) window.clearTimeout(completionTimeoutRef.current)
+  }, [])
+
   const scrollToBottom = () => {
     if (scrollRef.current) {
       scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
@@ -151,29 +197,30 @@ export function MonitorCard({
   }
 
   const send = async (action: 'send' | 'stop' = 'send') => {
-    const text = draft.trim()
-    if (action === 'send' && !text) return
+    const text = draft.text.trim()
+    if (action === 'send' && !text && !draft.attachments.length) return
     if (sending) return
     setSending(true); setError('')
     try {
-      const command = await api.createCommand({
-        id: newCommandId(),
-        agent_id: session.agent_id,
-        session_id: session.id,
+      const result = await submitBrowserCommand({
+        commandId: newCommandId(),
+        session,
         action,
         text: action === 'stop' ? '' : text,
-        attachment_ids: [],
-        target_id: action === 'stop' ? session.id : null,
+        files: action === 'stop' ? [] : draft.attachments.map(item => item.file),
+        targetId: action === 'stop' ? session.id : null,
+        uploadAttachment: api.uploadAttachment,
+        createCommand: api.createCommand,
       })
+      const command = result.command
       useAstrorderStore.getState().mergeCommands([command])
       if (command.state === 'failed' || command.state === 'unknown') throw new Error(command.error || '消息发送结果未确认。')
-      if (action === 'send') setDraft('')
+      if (action === 'send') setDraft({ text: '', attachments: [], sessionRefs: [] })
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '消息发送失败。')
     } finally { setSending(false) }
   }
 
-  const status = session.status === 'idle' && session.live ? 'running' : session.status
   const workspaceShort = session.workspace ? session.workspace.replace(/\\/g, "/").split("/").filter(Boolean).slice(-2).join("/") : ""
   const isActivity = (message: typeof messages[0] | null) => Boolean(message && (message.kind !== 'message' || message.role === 'tool'))
 
@@ -208,7 +255,7 @@ export function MonitorCard({
       }}
     >
         <Paper
-          className={'monitor-card monitor-' + status + (isFloating ? ' is-solid-lifted' : '')}
+          className={'monitor-card monitor-' + status + (completionFlash ? ' is-completion-flash' : '') + (isFloating ? ' is-solid-lifted' : '')}
           data-testid={'monitor-card-' + session.agent_id + '-' + session.id}
           withBorder={false}
           style={{ height: '100%', minHeight: 0 }}
@@ -363,6 +410,19 @@ export function MonitorCard({
           {/* Full-Fidelity Miniature Composer Footer */}
           <div className="monitor-card-footer">
             <div className="monitor-composer-inner">
+              {draft.attachments.length > 0 && (
+                <div className="draft-attachments" aria-label="待发送附件">
+                  {draft.attachments.map(item => (
+                    <span className="draft-attachment" key={item.key} title={item.file.name}>
+                      <IconPaperclip size={14} aria-hidden="true" />
+                      <span className="draft-name">{item.file.name}</span>
+                      <button type="button" className="draft-remove" aria-label={`移除 ${item.file.name}`} onClick={() => setDraft({ ...draft, attachments: draft.attachments.filter(candidate => candidate.key !== item.key) })}>
+                        <IconX size={13} />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
               <Textarea
                 className="monitor-composer-textarea"
                 aria-label={'发送到 ' + (session.title || '未命名会话')}
@@ -371,8 +431,14 @@ export function MonitorCard({
                 autosize
                 minRows={1}
                 maxRows={3}
-                value={draft}
-                onChange={(e) => setDraft(e.currentTarget.value)}
+                value={draft.text}
+                onChange={(e) => setDraft({ ...draft, text: e.currentTarget.value })}
+                onPaste={(event) => {
+                  const files = clipboardFiles(event)
+                  if (!files.length) return
+                  event.preventDefault()
+                  addFiles(files)
+                }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                     e.preventDefault()
@@ -382,6 +448,10 @@ export function MonitorCard({
                 disabled={sending}
               />
               <div className="monitor-composer-toolbar">
+                <ActionIcon variant="subtle" color="gray" size="sm" aria-label="添加附件" disabled={sending} onClick={() => fileInputRef.current?.click()}>
+                  <IconPaperclip size={15} />
+                </ActionIcon>
+                <input ref={fileInputRef} hidden type="file" multiple onChange={event => { addFiles(Array.from(event.currentTarget.files || [])); event.currentTarget.value = '' }} />
                 <ApprovalModeControl session={session} compact />
                 <SessionModelControl session={session} />
                 <span style={{ flex: 1 }} />
@@ -391,7 +461,7 @@ export function MonitorCard({
                     radius="xl"
                     color={isStopAction ? 'red' : 'indigo'}
                     aria-label={isStopAction ? '停止' : '发送消息'}
-                    disabled={sending || (!isStopAction && !draft.trim())}
+                    disabled={sending || (!isStopAction && !draft.text.trim() && !draft.attachments.length)}
                     onClick={() => void send(isStopAction ? 'stop' : 'send')}
                     className="monitor-send-btn"
                   >
@@ -525,6 +595,20 @@ export function MonitorPage() {
   const [pickerOpen, setPickerOpen] = useState(false)
   const [search, setSearch] = useState('')
   const [manualKeys, setManualKeys] = useState(savedSessions)
+  const [autoKeys, setAutoKeys] = useState(() => savedSessions(AUTO_STORAGE_KEY))
+  const [excludedKeys, setExcludedKeys] = useState(() => savedSessions(EXCLUDED_STORAGE_KEY))
+  const [editingQueued, setEditingQueued] = useState<MonitorQueueItem | null>(null)
+  const [queuedText, setQueuedText] = useState('')
+  const [queueBusyId, setQueueBusyId] = useState<string | null>(null)
+  const [queueOutbox] = useState(() => new MobileOutbox(mobileOutboxStorage, {
+    upload: api.uploadAttachment,
+    send: async payload => {
+      const command = await api.createCommand(payload)
+      useAstrorderStore.getState().mergeCommands([command])
+      return command
+    },
+  }))
+  const queue = useSyncExternalStore(queueOutbox.subscribe, queueOutbox.snapshot)
   const [slotSizes, setSlotSizes] = useState<Record<number, SlotSize>>(savedSlotSizes)
   const [slotOrder, setSlotOrder] = useState<string[]>(savedOrder)
   const [resizingInfo, setResizingInfo] = useState<{ slotIndex: number; width: number; height: number; isSnapped?: boolean } | null>(null)
@@ -555,11 +639,17 @@ export function MonitorPage() {
       const customEvent = e as CustomEvent<string[]>
       if (Array.isArray(customEvent.detail)) {
         setManualKeys(customEvent.detail)
+        setAutoKeys(savedSessions(AUTO_STORAGE_KEY))
+        setExcludedKeys(savedSessions(EXCLUDED_STORAGE_KEY))
       }
     }
     window.addEventListener('astrorder:monitor-sessions-changed', handleUpdate)
     return () => window.removeEventListener('astrorder:monitor-sessions-changed', handleUpdate)
   }, [])
+
+  useEffect(() => {
+    void queueOutbox.load().catch(error => notifications.show({ color: 'red', message: error instanceof Error ? error.message : '待机队列加载失败' }))
+  }, [queueOutbox])
 
   // Pointer-based physical lift & drag state
   const [liftedDrag, setLiftedDrag] = useState<{
@@ -578,11 +668,29 @@ export function MonitorPage() {
   const sessions = useAstrorderStore(useShallow((state) => selectSessions(state).filter(session => !isHiddenRailSession(session))))
   const agents = useAstrorderStore((state) => state.agents)
   const commands = useAstrorderStore(useShallow((state) => Object.values(state.commands)))
+  const messagesBySession = useAstrorderStore((state) => state.messages)
   const manual = useMemo(() => new Set(manualKeys), [manualKeys])
+  const automatic = useMemo(() => new Set(autoKeys), [autoKeys])
+  const excluded = useMemo(() => new Set(excludedKeys), [excludedKeys])
+
+  useEffect(() => {
+    const next = new Set(autoKeys)
+    for (const session of sessions) {
+      const key = scopeKey(session.agent_id, session.id)
+      if (active(session) && !manual.has(key) && !excluded.has(key)) next.add(key)
+    }
+    if (next.size === autoKeys.length && autoKeys.every(key => next.has(key))) return
+    const values = [...next]
+    setAutoKeys(values)
+    try { localStorage.setItem(AUTO_STORAGE_KEY, JSON.stringify(values)) } catch {}
+  }, [autoKeys, excluded, manual, sessions])
 
   const candidateSessions = useMemo(() => {
-    return sessions.filter(session => active(session) || manual.has(scopeKey(session.agent_id, session.id)))
-  }, [manual, sessions])
+    return sessions.filter(session => {
+      const key = scopeKey(session.agent_id, session.id)
+      return !excluded.has(key) && (manual.has(key) || automatic.has(key))
+    })
+  }, [automatic, excluded, manual, sessions])
 
   const focusedSession = useMemo(() => {
     if (!focusedKey) return null
@@ -623,6 +731,41 @@ export function MonitorPage() {
   const saveManual = (next: string[]) => {
     setManualKeys(next)
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(next)) } catch {}
+  }
+
+  const saveAutomatic = (next: string[]) => {
+    setAutoKeys(next)
+    try { localStorage.setItem(AUTO_STORAGE_KEY, JSON.stringify(next)) } catch {}
+  }
+
+  const saveExcluded = (next: string[]) => {
+    setExcludedKeys(next)
+    try { localStorage.setItem(EXCLUDED_STORAGE_KEY, JSON.stringify(next)) } catch {}
+  }
+
+  const addManual = (key: string) => {
+    if (!manual.has(key)) saveManual([...manualKeys, key])
+    if (automatic.has(key)) saveAutomatic(autoKeys.filter(item => item !== key))
+    if (excluded.has(key)) saveExcluded(excludedKeys.filter(item => item !== key))
+  }
+
+  const removeFromMonitor = (key: string) => {
+    if (manual.has(key)) saveManual(manualKeys.filter(item => item !== key))
+    if (automatic.has(key)) saveAutomatic(autoKeys.filter(item => item !== key))
+    if (!excluded.has(key)) saveExcluded([...excludedKeys, key])
+  }
+
+  const cleanStaleAutomaticSessions = () => {
+    const now = Date.now()
+    const stale = new Set(sessions.filter(session => {
+      const key = scopeKey(session.agent_id, session.id)
+      if (!automatic.has(key) || active(session)) return false
+      const messageTimes = Object.values(messagesBySession[key] || {}).map(message => Date.parse(message.created_at)).filter(Number.isFinite)
+      const lastMessageAt = messageTimes.length ? Math.max(...messageTimes) : Date.parse(session.updated_at)
+      return Number.isFinite(lastMessageAt) && now - lastMessageAt >= STALE_AFTER_MS
+    }).map(session => scopeKey(session.agent_id, session.id)))
+    saveAutomatic(autoKeys.filter(key => !stale.has(key)))
+    notifications.show({ color: stale.size ? 'teal' : 'gray', message: stale.size ? `已清理 ${stale.size} 个过时会话` : '没有可清理的过时会话' })
   }
 
   const saveSizes = (next: Record<number, SlotSize>) => {
@@ -795,7 +938,46 @@ export function MonitorPage() {
     window.addEventListener('mouseup', onMouseUp)
   }
 
-  const queuedCommands = useMemo(() => commands.filter((command) => command.state === 'queued').sort((a, b) => a.created_at.localeCompare(b.created_at)), [commands])
+  const queuedCommands = useMemo<MonitorQueueItem[]>(() => {
+    const local = queue.filter(entry => entry.state === 'queued').map(entry => ({ source: 'local' as const, entry, id: entry.payload.id, agentId: entry.payload.agent_id, sessionId: entry.payload.session_id, text: entry.payload.text || '' }))
+    const localIds = new Set(local.map(item => `${item.agentId}::${item.sessionId}::${item.id}`))
+    const server = commands.filter(command => command.state === 'queued' && !localIds.has(`${command.agent_id}::${command.session_id}::${command.id}`)).map(command => ({ source: 'server' as const, command, id: command.id, agentId: command.agent_id, sessionId: command.session_id, text: command.text || '' }))
+    return [...local, ...server]
+  }, [commands, queue])
+  const sendQueued = async (item: MonitorQueueItem) => {
+    setQueueBusyId(item.id)
+    try {
+      if (item.source === 'local') await queueOutbox.flush(item.agentId, item.sessionId, item.id)
+      else useAstrorderStore.getState().mergeCommands([await api.sendQueuedCommand(item.id, item.agentId, item.sessionId)])
+      const failed = item.source === 'local' ? queueOutbox.snapshot().find(entry => entry.payload.id === item.id && ['failed', 'unknown'].includes(entry.state)) : null
+      notifications.show(failed ? { color: 'red', message: failed.error || '消息发送未确认' } : { color: 'teal', message: '排队消息已发送' })
+    } catch (error) {
+      notifications.show({ color: 'red', message: error instanceof Error ? error.message : '排队消息发送失败' })
+    } finally {
+      setQueueBusyId(null)
+    }
+  }
+  const deleteQueued = async (item: MonitorQueueItem) => {
+    setQueueBusyId(item.id)
+    try {
+      if (item.source === 'local') await queueOutbox.remove(item.agentId, item.sessionId, item.id)
+      else useAstrorderStore.getState().mergeCommands([await api.deleteQueuedCommand(item.id, item.agentId, item.sessionId)])
+    } catch (error) {
+      notifications.show({ color: 'red', message: error instanceof Error ? error.message : '排队消息删除失败' })
+    } finally {
+      setQueueBusyId(null)
+    }
+  }
+  const saveQueuedEdit = async () => {
+    if (!editingQueued) return
+    try {
+      if (editingQueued.source === 'local') await queueOutbox.updateText(editingQueued.agentId, editingQueued.sessionId, editingQueued.id, queuedText.trim())
+      else useAstrorderStore.getState().mergeCommands([await api.editQueuedCommand(editingQueued.id, editingQueued.agentId, editingQueued.sessionId, queuedText.trim())])
+      setEditingQueued(null)
+    } catch (error) {
+      notifications.show({ color: 'red', message: error instanceof Error ? error.message : '排队消息保存失败' })
+    }
+  }
   const counts = useMemo(() => ({ running: orderedSessions.filter(active).length, waiting: orderedSessions.filter(session => session.status === 'waiting_approval').length }), [orderedSessions])
 
   const liftedSession = liftedDrag !== null ? orderedSessions[liftedDrag.sourceIndex] : null
@@ -830,7 +1012,7 @@ export function MonitorPage() {
           key = e.dataTransfer.getData('text/plain')
         }
         if (key && !manualKeys.includes(key)) {
-          saveManual([...manualKeys, key])
+          addManual(key)
           notifications.show({
             color: 'teal',
             message: `已将“${title}”加入监控室`,
@@ -905,6 +1087,7 @@ export function MonitorPage() {
           </Text>
         </Group>
         <Button variant="subtle" color="gray" size="xs" leftSection={<IconPlus size={14} />} onClick={() => setPickerOpen(true)}>添加会话</Button>
+        <Button variant="subtle" color="gray" size="xs" leftSection={<IconTrash size={14} />} onClick={cleanStaleAutomaticSessions}>清理过时会话</Button>
         <Popover opened={layoutMenuOpened} onChange={setLayoutMenuOpened} position="bottom-end" shadow="md" radius="md">
           <Popover.Target>
             <Button
@@ -957,8 +1140,32 @@ export function MonitorPage() {
         />
         </Group>
       </Group>
-      {queuedCommands.length > 0 && <Paper className="monitor-queue" withBorder radius="lg" p="md" mb="md" aria-label="待机队列"><Group justify="space-between" mb="sm"><div><Title order={3} size="h4">待机队列</Title><Text size="sm" c="dimmed">等待发送的会话消息。</Text></div><Badge color="yellow" variant="light">{queuedCommands.length} 项</Badge></Group><Stack gap="xs">{queuedCommands.map((command: Command) => { const session = sessions.find(item => scopeKey(item.agent_id, item.id) === scopeKey(command.agent_id, command.session_id)); return <Button key={command.agent_id + '::' + command.id} className="monitor-queue-item" variant="subtle" justify="space-between" onClick={() => session && navigate('/chat/' + encodeURIComponent(session.id) + '?agent_id=' + encodeURIComponent(session.agent_id))}><span>{command.text || '无文本命令'}</span><Text component="span" size="xs" c="dimmed">{session?.title || '会话未返回'}</Text></Button> })}</Stack></Paper>}
-      {orderedSessions.length === 0 ? <EmptyState icon={<IconCircleCheck />} title="暂无进行中的会话" description="会话开始运行后会自动出现，也可以手动添加会话。" />
+      {queuedCommands.length > 0 && (
+        <Paper className="monitor-queue" withBorder radius="lg" p="md" mb="md" aria-label="待机队列">
+          <Group justify="space-between" mb="sm"><div><Title order={3} size="h4">待机队列</Title><Text size="sm" c="dimmed">等待发送的会话消息。</Text></div><Badge color="yellow" variant="light">{queuedCommands.length} 项</Badge></Group>
+          <Stack gap="xs">
+            {queuedCommands.map(item => {
+              const session = sessions.find(session => scopeKey(session.agent_id, session.id) === scopeKey(item.agentId, item.sessionId))
+              return (
+                <Paper key={`${item.agentId}::${item.id}`} className="monitor-queue-item" withBorder p="xs" radius="md">
+                  <Group justify="space-between" gap="xs" wrap="nowrap">
+                    <button className="monitor-queue-link" type="button" onClick={() => session && navigate('/chat/' + encodeURIComponent(session.id) + '?agent_id=' + encodeURIComponent(session.agent_id))}>
+                      <span>{item.text || '附件消息'}</span>
+                      <small>{session?.title || '会话未返回'}</small>
+                    </button>
+                    <Group gap={6} wrap="nowrap">
+                      <Button size="compact-xs" variant="light" loading={queueBusyId === item.id} onClick={() => void sendQueued(item)}>发送</Button>
+                      <Button size="compact-xs" variant="subtle" onClick={() => { setEditingQueued(item); setQueuedText(item.text) }}>编辑</Button>
+                      <Button size="compact-xs" variant="subtle" color="red" disabled={queueBusyId === item.id} onClick={() => void deleteQueued(item)}>删除</Button>
+                    </Group>
+                  </Group>
+                </Paper>
+              )
+            })}
+          </Stack>
+        </Paper>
+      )}
+      {orderedSessions.length === 0 ? <EmptyState icon={<IconCircleCheck />} title="监控室暂无会话" description="运行中的会话会自动加入，也可以手动添加会话。" />
         : layout === 'list' ? (
           <div className="monitor-list-view">
             <Stack gap={8}>
@@ -970,7 +1177,7 @@ export function MonitorPage() {
                     session={session}
                     agent={agents[session.agent_id]}
                     onOpen={() => navigate('/chat/' + encodeURIComponent(session.id) + '?agent_id=' + encodeURIComponent(session.agent_id))}
-                    onRemove={!active(session) && manual.has(key) ? () => saveManual(manualKeys.filter(item => item !== key)) : undefined}
+                    onRemove={() => removeFromMonitor(key)}
                   />
                 )
               })}
@@ -1018,7 +1225,7 @@ export function MonitorPage() {
                   isFocused={false}
                   onToggleFocus={() => setFocusedKey(key)}
                   onOpen={() => navigate('/chat/' + encodeURIComponent(session.id) + '?agent_id=' + encodeURIComponent(session.agent_id))}
-                  onRemove={!active(session) && manual.has(key) ? () => saveManual(manualKeys.filter(item => item !== key)) : undefined}
+                  onRemove={() => removeFromMonitor(key)}
                   onHeaderMouseDown={handleHeaderMouseDown}
                   onResizeCornerStart={handleResizeCornerStart}
                 />
@@ -1062,7 +1269,7 @@ export function MonitorPage() {
                   type="button"
                   className="monitor-picker-row"
                   onClick={() => {
-                    saveManual([...manualKeys, key])
+                    addManual(key)
                     setPickerOpen(false)
                     setSearch('')
                   }}
@@ -1079,6 +1286,13 @@ export function MonitorPage() {
             <Text size="sm" c="dimmed" ta="center" py="lg">没有可添加的会话</Text>
           )}
         </div>
+      </Modal>
+      <Modal opened={Boolean(editingQueued)} onClose={() => setEditingQueued(null)} title="编辑排队消息" centered>
+        <Textarea aria-label="排队消息内容" value={queuedText} onChange={event => setQueuedText(event.currentTarget.value)} minRows={4} autosize />
+        <Group justify="flex-end" mt="md">
+          <Button variant="default" onClick={() => setEditingQueued(null)}>取消</Button>
+          <Button onClick={() => void saveQueuedEdit()} disabled={!queuedText.trim() && !(editingQueued?.source === 'local' && (editingQueued.entry.files.length || editingQueued.entry.attachments.length))}>保存</Button>
+        </Group>
       </Modal>
     </div>
   )

@@ -7,7 +7,7 @@ import { useOlderMessages } from '../../hooks/useOlderMessages'
 import { LazyDetails } from '../../components/LazyDetails'
 import { MessageBody } from '../../components/MessageBody'
 import { sessionSwipeGesture, sessionDragPreview, startsAtSessionDrawerEdge, type SessionSwipeGesture } from './mobileGestures'
-import { describeTool, PackSummary, ShellOutputBlock, ToolLineIcon, unwrapCommand } from '../chat/toolPresentation'
+import { describeTool, FileChangeDiffBlock, fileChangeDiffs, PackSummary, ShellOutputBlock, ToolLineIcon, unwrapCommand } from '../chat/toolPresentation'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 
 export interface MessageActionAnchor { text: string; x: number; y: number; element: HTMLElement }
@@ -47,6 +47,7 @@ export function MobileTranscript({ messages, approvals = [], onApproval, busy, l
               const desc = describeTool(item)
               const itemArgs = (item.tool?.arguments && typeof item.tool.arguments === 'object') ? (item.tool.arguments as Record<string, unknown>) : {}
               const isCmd = desc.iconKey === 'terminal' || Boolean(itemArgs.command || itemArgs.cmd)
+              const hasFileDiff = fileChangeDiffs(item).length > 0
               const unwrapped = unwrapCommand(String(itemArgs.command || itemArgs.cmd || ''))
               const itemStatus = desc.isFailed ? 'failed' : desc.isRunning ? 'running' : 'success'
               const foldTitle = isCmd
@@ -62,6 +63,8 @@ export function MobileTranscript({ messages, approvals = [], onApproval, busy, l
                   item.text && <div className="m-thinking-content"><MarkdownContent value={item.text} /></div>
                 ) : isCmd ? (
                   <ShellOutputBlock command={unwrapped || desc.fullTitle} output={item.text} status={itemStatus} />
+                ) : hasFileDiff ? (
+                  <FileChangeDiffBlock message={item} />
                 ) : (
                   <>
                     {item.text && <pre className="m-tool-output">{item.text}</pre>}

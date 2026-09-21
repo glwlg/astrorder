@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ActionIcon, Button, Group, LoadingOverlay, Paper, Select, Text, Tooltip } from '@mantine/core'
-import { IconDeviceFloppy, IconDownload, IconRefresh } from '@tabler/icons-react'
+import { IconBook2, IconDeviceFloppy, IconDownload, IconRefresh, IconSparkles, IconCode } from '@tabler/icons-react'
+import { BlackboardItemRenderer } from '../../../monitor/BlackboardJsonRender'
+import { MarkdownContent } from '../../../../components/MarkdownContent'
 import Editor from '@monaco-editor/react'
 import type { ViewerContext } from '../../types'
 
@@ -41,7 +43,7 @@ function detectLanguage(fileName: string): string {
   return EXT_TO_LANG[ext] || 'plaintext'
 }
 
-export function MonacoViewer({ artifact, onSave, onDirtyChange }: ViewerContext) {
+export function MonacoViewer({ artifact, onSave, onDirtyChange, toolbarAction }: ViewerContext) {
   const onDirtyChangeRef = useRef(onDirtyChange)
   onDirtyChangeRef.current = onDirtyChange
 
@@ -49,8 +51,45 @@ export function MonacoViewer({ artifact, onSave, onDirtyChange }: ViewerContext)
   const [error, setError] = useState<string | null>(null)
   const [content, setContent] = useState('')
   const [language, setLanguage] = useState(() => detectLanguage(artifact.name))
+  const isMarkdown = /\.(?:md|markdown)$/i.test(artifact.name)
+  const [isReadingMode, setIsReadingMode] = useState(isMarkdown)
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [visualRendered, setVisualRendered] = useState<any>(null)
+  const [visualizing, setVisualizing] = useState(false)
+  const [isVisualMode, setIsVisualMode] = useState(false)
+
+  const handleJevVisualize = async () => {
+    if (visualRendered) {
+      setIsVisualMode(!isVisualMode)
+      return
+    }
+    if (!content.trim() || visualizing) return
+    setVisualizing(true)
+    try {
+      const res = await fetch('/api/v1/agent/invoke', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          capability: 'blackboard.auto_render',
+          input: {
+            key: 'temp_preview',
+            content: content.slice(0, 3500),
+            title: artifact.name || '工件智能视觉化',
+          }
+        })
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setVisualRendered(data.rendered)
+        setIsVisualMode(true)
+      }
+    } catch {
+      // fallback
+    } finally {
+      setVisualizing(false)
+    }
+  }
   const initialContentRef = useRef('')
 
   const fetchContent = useCallback(async () => {
@@ -169,6 +208,19 @@ export function MonacoViewer({ artifact, onSave, onDirtyChange }: ViewerContext)
             )}
           </Group>
           <Group gap={6} wrap="nowrap">
+            {toolbarAction}
+            {isMarkdown && (
+              <Tooltip label={isReadingMode ? '编辑 Markdown' : '阅读 Markdown'}>
+                <ActionIcon
+                  variant="subtle"
+                  size="sm"
+                  aria-label={isReadingMode ? '编辑 Markdown' : '阅读 Markdown'}
+                  onClick={() => setIsReadingMode((value) => !value)}
+                >
+                  {isReadingMode ? <IconCode size={14} /> : <IconBook2 size={14} />}
+                </ActionIcon>
+              </Tooltip>
+            )}
             {artifact.writable && onSave && (
               <Tooltip label="保存修改 (Ctrl+S)">
                 <Button
@@ -184,6 +236,17 @@ export function MonacoViewer({ artifact, onSave, onDirtyChange }: ViewerContext)
                 </Button>
               </Tooltip>
             )}
+            <Button
+              size="compact-xs"
+              variant="light"
+              color="teal"
+              leftSection={isVisualMode ? <IconCode size={13} /> : <IconSparkles size={13} />}
+              loading={visualizing}
+              onClick={handleJevVisualize}
+              title={isVisualMode ? '切换回代码编辑器' : '使用 Jev 决策自动转为 Generative UI 卡片'}
+            >
+              {isVisualMode ? '代码视图' : 'Jev 视觉化'}
+            </Button>
             <ActionIcon
               variant="subtle"
               size="sm"
@@ -212,6 +275,14 @@ export function MonacoViewer({ artifact, onSave, onDirtyChange }: ViewerContext)
             <Button size="xs" mt="md" variant="light" onClick={() => void fetchContent()}>
               重试
             </Button>
+          </div>
+        ) : isReadingMode && isMarkdown ? (
+          <div style={{ padding: '20px 24px', height: '100%', overflowY: 'auto', background: 'var(--astr-surface)' }}>
+            <MarkdownContent value={content} />
+          </div>
+        ) : isVisualMode && visualRendered ? (
+          <div style={{ padding: 16, height: '100%', overflowY: 'auto', background: 'var(--astr-surface)' }}>
+            <BlackboardItemRenderer itemKey="visual_preview" itemValue={visualRendered} />
           </div>
         ) : (
           <Editor

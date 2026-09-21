@@ -4,13 +4,52 @@ import {
   IconFileText,
 } from '@tabler/icons-react'
 import { Anchor } from '@mantine/core'
+import { isValidElement, useEffect, useState, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import mermaid from 'mermaid'
 import type { Session } from '../domain/types'
-import { artifactViewerRegistry } from '../features/sidecar/registry'
+import { artifactViewerRegistry, isNonPreviewableFile } from '../features/sidecar/registry'
 import { resolveArtifactFromPath } from '../features/sidecar/resolver'
 import { useSidecarStore } from '../features/sidecar/sidecarStore'
 import { useAstrorderStore } from '../state/store'
+
+mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'default' })
+let mermaidDiagramId = 0
+
+function MermaidDiagram({ code }: { code: string }) {
+  const [svg, setSvg] = useState('')
+  const [failed, setFailed] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    const id = `markdown-mermaid-${++mermaidDiagramId}`
+    setSvg('')
+    setFailed(false)
+    void mermaid.render(id, code).then((result) => {
+      if (active) setSvg(result.svg)
+    }).catch(() => {
+      if (active) setFailed(true)
+    })
+    return () => { active = false }
+  }, [code])
+
+  if (failed) return <pre className="markdown-code-block"><code>{code}</code></pre>
+  return (
+    <div className="markdown-mermaid" aria-label="Mermaid 图表">
+      {svg ? <div dangerouslySetInnerHTML={{ __html: svg }} /> : <span>正在渲染图表…</span>}
+    </div>
+  )
+}
+
+function mermaidSource(children: ReactNode): string | null {
+  const child = isValidElement<{ className?: string; children?: ReactNode }>(children) ? children : null
+  if (!child) return null
+  const code = String(child.props.children || '').replace(/\n$/, '').trim()
+  const language = child.props.className || ''
+  const looksLikeMermaid = /^(?:flowchart|graph|sequenceDiagram|classDiagram|stateDiagram(?:-v2)?|erDiagram|gantt|pie|mindmap|timeline|gitGraph|journey)\b/.test(code)
+  return /(?:^|\s)language-mermaid(?:\s|$)/.test(language) || looksLikeMermaid ? code : null
+}
 
 function cleanHref(raw: string | undefined): string {
   if (!raw) return ''
@@ -40,7 +79,7 @@ function isLocalPath(path: string): boolean {
   if (path.startsWith('file://')) return true
   if (/^\/(?:Users|home|tmp|var|private|opt|etc|mnt)\b/i.test(path)) return true
   // 委托注册表：只要是任何已注册插件声明支持的后缀，统一视为工件路径
-  return artifactViewerRegistry.isSupportedExtension(path)
+  return artifactViewerRegistry.isSupportedExtension(path) || isNonPreviewableFile(path)
 }
 
 function safeUrl(value: string | undefined): string | undefined {
@@ -133,18 +172,17 @@ export function MarkdownContent({
         openArtifact(artifact, viewer.id)
         return
       }
+      useSidecarStore.getState().revealFileInTree(
+        currentSession.id,
+        currentSession.agent_id,
+        fullPath,
+        currentSession.workspace || undefined,
+        currentSession.project_name || currentSession.title,
+        currentSession.connection_id || undefined,
+      )
+      return
     }
-
-    try {
-      const res = await fetch('/api/v1/system/open-file', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: fullPath }),
-      })
-      if (!res.ok) throw new Error('打开文件失败')
-    } catch {
-      window.open(`/api/v1/files/raw?path=${encodeURIComponent(fullPath)}&download=1`, '_blank')
-    }
+    window.open(`/api/v1/files/raw?path=${encodeURIComponent(fullPath)}&download=1`, '_blank')
   }
 
   return (
@@ -183,8 +221,8 @@ export function MarkdownContent({
               const matchedViewer = dummyArtifact ? artifactViewerRegistry.findViewer(dummyArtifact) : null
 
               const Icon = matchedViewer ? matchedViewer.icon : IconFileText
-              const badgeText = matchedViewer ? matchedViewer.badgeLabel || '[工件]' : '[打开]'
-              const actionTitle = matchedViewer ? `在右侧打开${matchedViewer.title}：${cleaned}` : `在本地打开：${cleaned}`
+              const badgeText = matchedViewer ? matchedViewer.badgeLabel || '[工件]' : '[文件]'
+              const actionTitle = matchedViewer ? `在右侧打开${matchedViewer.title}：${cleaned}` : `在文件树中定位：${cleaned}`
               const linkClass = matchedViewer
                 ? `markdown-local-link markdown-file-link markdown-${matchedViewer.id.replace('-viewer', '')}-link`
                 : 'markdown-local-link markdown-file-link'
@@ -263,7 +301,10 @@ export function MarkdownContent({
             )
           },
           table: (props) => <div className="markdown-table-wrap"><table>{props.children}</table></div>,
-          pre: (props) => <pre className="markdown-code-block">{props.children}</pre>,
+          pre: (props) => {
+            const code = mermaidSource(props.children)
+            return code ? <MermaidDiagram code={code} /> : <pre className="markdown-code-block">{props.children}</pre>
+          },
         }}
       >
         {normalizedValue}

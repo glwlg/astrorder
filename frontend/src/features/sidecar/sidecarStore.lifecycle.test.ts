@@ -46,4 +46,17 @@ describe('sidecar tab lifecycle', () => {
 
     unregister()
   })
+
+  it('reuses the browser tab and navigates it to the latest tool URL', () => {
+    const store = useSidecarStore.getState()
+    store.switchSession('agent-browser:session-browser')
+    store.openBrowser('session-browser', 'agent-browser', 'https://example.test/start')
+    useSidecarStore.getState().openBrowser('session-browser', 'agent-browser', 'https://example.test/results')
+
+    const state = useSidecarStore.getState()
+    expect(state.tabs).toHaveLength(1)
+    expect(state.tabs[0].artifact?.readUrl).toBe('https://example.test/results')
+    expect(state.tabs[0].viewerId).toBe('html-viewer')
+    expect(state.isOpen).toBe(true)
+  })
 })

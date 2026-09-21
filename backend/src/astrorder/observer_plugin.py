@@ -42,7 +42,7 @@ def verify_plugin(home, codex):
 EVENTS=('SessionStart','SessionEnd','UserPromptSubmit','PreToolUse','PostToolUse','PermissionRequest','SubagentStart','SubagentStop','Stop','Interrupt')
 MARKER='Astrorder passive observation'
 
-def install_plugin(home, python, source, codex):
+def install_plugin(home, python, source, codex, agent_id='local-codex'):
     home=Path(home)
     root=home/'astrorder-observer/marketplace'
     plugin=root/'plugins/astrorder'
@@ -78,7 +78,7 @@ def install_plugin(home, python, source, codex):
     manifest['skills']='./skills/'
     port=os.environ.get('ASTRORDER_PORT','30001')
     token=os.environ.get('ASTRORDER_AGENT_TOKEN') or os.environ.get('ASTRORDER_BROWSER_SECRET') or os.environ.get('ASTRORDER_CONNECTOR_SECRET') or ''
-    mcp_server={'type':'http','url':f'http://127.0.0.1:{port}/api/v1/agent/mcp','bearer_token_env_var':'ASTRORDER_AGENT_TOKEN','default_tools_approval_mode':'approve'}
+    mcp_server={'type':'http','url':f'http://127.0.0.1:{port}/api/v1/agent/mcp','bearer_token_env_var':'ASTRORDER_AGENT_TOKEN','default_tools_approval_mode':'approve','headers':{'X-Astrorder-Agent-Id':agent_id}}
     if token:
         mcp_server['env']={'ASTRORDER_AGENT_TOKEN':token}
     (plugin/'.mcp.json').write_text(json.dumps({'mcpServers':{'astrorder':mcp_server}},ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
@@ -92,6 +92,16 @@ def install_plugin(home, python, source, codex):
     if config.exists():
         backup=home/'astrorder-observer'/('config-before-plugin-'+str(time.time_ns())+'.toml')
         backup.write_bytes(config.read_bytes()); backup.chmod(0o600)
+        lines=config.read_text(encoding='utf-8').splitlines()
+        section='[mcp_servers.astrorder.http_headers]'
+        if section in lines:
+            start=lines.index(section)+1
+            end=next((i for i in range(start,len(lines)) if lines[i].startswith('[')),len(lines))
+            header='X-Astrorder-Agent-Id = '+json.dumps(agent_id)
+            existing=next((i for i in range(start,end) if lines[i].startswith('X-Astrorder-Agent-Id =')),None)
+            if existing is None: lines.insert(start,header)
+            else: lines[existing]=header
+            config.write_text('\n'.join(lines)+'\n',encoding='utf-8')
     for args in [('plugin','marketplace','add',str(root),'--json'),('plugin','add','astrorder@astrorder-local','--json')]:
         result=subprocess.run([str(codex),*args],env=env,capture_output=True,text=True,encoding='utf-8',timeout=60,check=False)
         if result.returncode: raise RuntimeError('Native plugin installation failed: '+str(result.returncode))

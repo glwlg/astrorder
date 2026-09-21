@@ -80,6 +80,11 @@ export class MobileOutbox {
   remove(agentId: string, sessionId: string, id: string) {
     return this.run(() => this.commit(this.entries.filter(row => !(row.payload.id === id && row.payload.agent_id === agentId && row.payload.session_id === sessionId))))
   }
+  updateText(agentId: string, sessionId: string, id: string, text: string) {
+    return this.run(() => this.commit(this.entries.map(row => row.state === 'queued' && row.payload.id === id && row.payload.agent_id === agentId && row.payload.session_id === sessionId
+      ? { ...row, payload: { ...row.payload, text } }
+      : row)))
+  }
   retry(agentId: string, sessionId: string, id: string) {
     return this.run(() => this.commit(this.entries.map(row => row.payload.id === id && row.payload.agent_id === agentId && row.payload.session_id === sessionId && row.state === 'failed'
       ? { ...row, payload: { ...row.payload, id: crypto.randomUUID() }, state: 'queued', error: undefined, sawRunning: false }

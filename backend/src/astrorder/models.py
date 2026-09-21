@@ -94,6 +94,7 @@ class AttachmentRow(Base):
     media_type: Mapped[str] = mapped_column(String(128), nullable=False)
     size: Mapped[int] = mapped_column(Integer, nullable=False)
     storage_name: Mapped[str] = mapped_column(String(512), nullable=False, unique=True)
+    source_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 
@@ -207,4 +208,28 @@ class DaemonCheckpointRow(Base):
     daemon_id: Mapped[str] = mapped_column(String(128), primary_key=True)
     session_id: Mapped[str] = mapped_column(String(256), primary_key=True)
     seq_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class TokenMetricRow(Base):
+    """Granular or daily token consumption metric per session/model."""
+
+    __tablename__ = "token_metrics"
+    __table_args__ = (
+        UniqueConstraint("agent_id", "session_id", "model", "date", name="uq_token_metrics_daily"),
+    )
+
+    row_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    agent_id: Mapped[str] = mapped_column(String(256), nullable=False, index=True)
+    session_id: Mapped[str] = mapped_column(String(256), nullable=False, index=True)
+    model: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    provider: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    date: Mapped[str] = mapped_column(String(10), nullable=False, index=True)  # YYYY-MM-DD
+    input_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    cached_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    reasoning_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    context_window: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_input_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)

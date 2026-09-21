@@ -86,7 +86,7 @@ async def test_failed_dispatch_keeps_handoff_context_for_the_next_send(tmp_path)
     assert store.pending_session_handoff_context("hermes", "session") is None
 
 
-def test_model_api_saves_only_hermes_binding_and_reads_it_without_native_state(tmp_path):
+def test_model_api_saves_hermes_model_and_all_confirmed_reasoning_bindings(tmp_path):
     app = create_app(Settings(
         database_url=f"sqlite:///{tmp_path / 'api.sqlite3'}",
         attachments_dir=tmp_path / "attachments",
@@ -95,13 +95,18 @@ def test_model_api_saves_only_hermes_binding_and_reads_it_without_native_state(t
     ))
 
     class Runtime:
+        def __init__(self, agent_id):
+            self.agent_id = agent_id
+
         daemon_owned = True
 
         def set_model(self, _session_id, provider, model):
             return {"provider": provider, "model": model}
 
         def model(self, _session_id):
-            raise AssertionError("saved Hermes binding should not require native model state")
+            if self.agent_id == "hermes":
+                raise AssertionError("saved Hermes binding should not require native model state")
+            return {"provider": "openai", "model": "gpt-5.6-sol", "effort": "low"}
 
         def set_effort(self, _session_id, effort):
             return {"effort": effort}
@@ -116,7 +121,7 @@ def test_model_api_saves_only_hermes_binding_and_reads_it_without_native_state(t
                 "id": "session", "agent_id": agent_id, "title": "Session",
                 "workspace": None, "status": "idle", "updated_at": "2026-09-12T00:00:00Z",
             })
-        app.state.connections.get_runtime_by_agent_id = lambda _agent_id: Runtime()
+        app.state.connections.get_runtime_by_agent_id = lambda agent_id: Runtime(agent_id)
         headers = {"Authorization": "Bearer test-token"}
 
         response = client.post(
@@ -148,6 +153,20 @@ def test_model_api_saves_only_hermes_binding_and_reads_it_without_native_state(t
         )
         assert response.status_code == 200
         assert app.state.store.get_session_model_binding("codex", "session") is None
+        response = client.post(
+            "/api/v1/sessions/session/reasoning",
+            json={"agent_id": "codex", "effort": "medium"},
+            headers=headers,
+        )
+        assert response.status_code == 200
+        assert app.state.store.get_session_reasoning_binding("codex", "session") == "medium"
+        assert client.get(
+            "/api/v1/sessions/session/model?agent_id=codex", headers=headers
+        ).json() == {"provider": "openai", "model": "gpt-5.6-sol", "effort": "medium"}
+
+    reopened = Store(Settings(database_url=f"sqlite:///{tmp_path / 'api.sqlite3'}"))
+    assert reopened.get_session_reasoning_binding("codex", "session") == "medium"
+    reopened.close()
 
 
 @pytest.mark.asyncio

@@ -220,6 +220,30 @@ async def test_daemon_codex_controller_injects_into_desktop_active_writer():
 
 
 @pytest.mark.asyncio
+async def test_daemon_codex_controller_projects_file_mentions_for_existing_desktop_runtime():
+    bridge = ActiveDesktopBridge()
+    connection = FakeCodexConnection()
+    connection.command_input = lambda _command: [
+        {"type": "text", "text": "检查文件"},
+        {"type": "mention", "name": "report.pdf", "path": "P:/repo/report.pdf"},
+    ]
+    controller = DaemonCodexController(bridge, FakeRouter(), connection)
+    command = {
+        "id": "desktop-file",
+        "agent_id": "daemon-codex",
+        "session_id": "thread-1",
+        "action": "send",
+        "text": "检查文件",
+        "attachments": [{"id": "attachment-1"}],
+        "target_id": None,
+    }
+    assert await controller.submit(command) == ("accepted", None)
+    assert bridge.calls[-1][1]["request_params"]["input"] == [
+        {"type": "text", "text": "[report.pdf](<P:/repo/report.pdf>)\n检查文件"}
+    ]
+
+
+@pytest.mark.asyncio
 async def test_daemon_codex_controller_reports_unavailable_desktop_cdp():
     controller = DaemonCodexController(
         UnavailableDesktopBridge(), FakeRouter(), FakeCodexConnection()

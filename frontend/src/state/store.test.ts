@@ -104,6 +104,20 @@ describe('shared runtime store', () => {
     ])
   })
 
+  it('clears approvals that are absent from an authoritative reconnect snapshot', () => {
+    const store = useAstrorderStore.getState()
+    store.applyEvent({
+      id: 'approval-event', cursor: 1, type: 'approval.upsert',
+      agent_id: session.agent_id, session_id: session.id,
+      data: { id: 'approval-1', state: 'pending', target_id: 'tool-1' },
+    })
+    expect(Object.keys(useAstrorderStore.getState().approvals)).toEqual(['approval-1'])
+
+    store.hydrateBootstrap({ protocol_version: 1, agents: [], sessions: [], approvals: [], cursor: 1 })
+
+    expect(useAstrorderStore.getState().approvals).toEqual({})
+  })
+
   it('keeps route-scoped transcripts separate when ids are reused', () => {
     const store = useAstrorderStore.getState()
     store.mergeMessages('agent-1', session.id, [message('message-1', 'Hermes')])

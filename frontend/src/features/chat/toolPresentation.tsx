@@ -1,6 +1,7 @@
 import { ShinyText } from '../../components/animations/ShinyText'
 import {
   IconBolt,
+  IconSparkles,
   IconBulb,
   IconCheck,
   IconCopy,
@@ -14,6 +15,8 @@ import {
 } from '@tabler/icons-react'
 import type { Message } from '../../domain/types'
 import { useState, type MouseEvent } from 'react'
+import { api } from '../../api/client'
+import { JsonRenderView } from '../monitor/BlackboardJsonRender'
 
 export type ToolIconKey =
   | 'terminal'
@@ -77,6 +80,36 @@ export interface ToolDescription {
   fullTitle: string
   isFailed: boolean
   isRunning: boolean
+}
+
+export function fileChangeDiffs(message: Message): Array<{ file: string; diff: string }> {
+  const args = message.tool?.arguments
+  if (!args || typeof args !== 'object') return []
+  const changes = (args as Record<string, unknown>).changes
+  if (!Array.isArray(changes)) return []
+  return changes.flatMap((change: unknown) => {
+    if (!change || typeof change !== 'object') return []
+    const item = change as { path?: unknown; diff?: unknown }
+    if (typeof item.diff !== 'string' || !item.diff.trim()) return []
+    const path = typeof item.path === 'string' ? item.path : '文件变更'
+    return [{ file: path.split(/[/\\]/).pop() || path, diff: item.diff }]
+  })
+}
+
+export function FileChangeDiffBlock({ message }: { message: Message }) {
+  const changes = fileChangeDiffs(message)
+  if (!changes.length) return null
+  return (
+    <div className="file-change-diffs">
+      {changes.map((change, index) => (
+        <JsonRenderView
+          key={`${change.file}-${index}`}
+          itemKey={change.file}
+          itemValue={{ file: change.file, diff: change.diff }}
+        />
+      ))}
+    </div>
+  )
 }
 
 export function ToolLineIcon({
@@ -290,7 +323,7 @@ export function PackSummary({ pack, isRunning: propIsRunning }: { pack: Message[
         <ToolLineIcon icon={desc.iconKey} size={14} className="pack-summary-icon" />
         <span className="pack-summary-title">{desc.fullTitle}</span>
         {desc.isFailed && <span className="activity-badge is-failed">失败</span>}
-        {desc.isRunning && <span className="activity-badge is-running">执行中</span>}
+        {isRunning && <span className="activity-badge is-running">执行中</span>}
       </span>
     )
   }
@@ -365,6 +398,28 @@ export function ShellOutputBlock({
   status?: "success" | "failed" | "running"
 }) {
   const [copied, setCopied] = useState(false)
+  const [filteredOutput, setFilteredOutput] = useState<string | null>(null)
+  const [filtering, setFiltering] = useState(false)
+  const [showFiltered, setShowFiltered] = useState(true)
+
+  const handleJevFilter = async (e: MouseEvent<HTMLButtonElement>) => {
+    e.stopPropagation()
+    if (filteredOutput !== null) {
+      setShowFiltered(!showFiltered)
+      return
+    }
+    if (!output || filtering) return
+    setFiltering(true)
+    try {
+      const res = await api.filterWithJev({ command, output })
+      setFilteredOutput(res.filtered)
+      setShowFiltered(true)
+    } catch {
+      // fallback
+    } finally {
+      setFiltering(false)
+    }
+  }
   const handleCopy = (e: MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation()
     const content = output ? `$ ${command}\n${output}` : `$ ${command}`
@@ -377,6 +432,19 @@ export function ShellOutputBlock({
     <div className="shell-terminal-card" aria-label="终端执行输出">
       <div className="shell-terminal-header">
         <span className="shell-terminal-label">Shell</span>
+        {output && output.length > 250 && (
+          <button
+            type="button"
+            className={`shell-terminal-copy ${filteredOutput && showFiltered ? 'is-active' : ''}`}
+            onClick={handleJevFilter}
+            title={filteredOutput ? (showFiltered ? '显示完整原始日志' : '切换至 Jev 降噪精简视图') : '使用 Jev 语义降噪过滤'}
+            aria-label="Jev 语义降噪"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 6px', width: 'auto', fontSize: 10, color: filteredOutput && showFiltered ? '#10b981' : 'var(--astr-muted)' }}
+          >
+            <IconSparkles size={11} />
+            <span>{filtering ? '降噪中…' : (filteredOutput ? (showFiltered ? '已降噪 (查看原始)' : '查看降噪') : 'Jev 降噪')}</span>
+          </button>
+        )}
         <button
           type="button"
           className="shell-terminal-copy"
@@ -392,7 +460,7 @@ export function ShellOutputBlock({
           <span className="shell-prompt">$</span>
           <span className="shell-command-text">{command}</span>
         </div>
-        {output && <div className="shell-output-text">{output}</div>}
+        {output && <div className="shell-output-text">{filteredOutput && showFiltered ? filteredOutput : output}</div>}
       </div>
       <div className="shell-terminal-footer">
         {status === "failed" ? (

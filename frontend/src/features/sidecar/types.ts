@@ -4,6 +4,7 @@ import type { ArtifactRef } from '../../domain/artifact'
 export interface ViewerContext {
   artifact: ArtifactRef
   isActive?: boolean
+  toolbarAction?: ReactNode
   onSave?: (content: string) => Promise<boolean>
   onDirtyChange?: (dirty: boolean) => void
   onClose?: () => void

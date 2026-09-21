@@ -331,6 +331,9 @@ class Store:
                 "agent_id": "VARCHAR(256)",
                 "runtime_id": "VARCHAR(256)",
             },
+            "attachments": {
+                "source_path": "TEXT",
+            },
         }
         with self.engine.begin() as db:
             for table, columns in additions.items():
@@ -568,6 +571,13 @@ class Store:
                 db.delete(cmd)
             for task in db.scalars(select(TaskRow).where(TaskRow.agent_id == agent_id, TaskRow.session_id == session_id)).all():
                 db.delete(task)
+            # Cascade clean session blackboard and swarm blackboard (if root)
+            from .models import WorkspacePreferenceRow
+            from sqlalchemy import delete
+            sess_key = f"{agent_id}::{session_id}"
+            db.execute(delete(WorkspacePreferenceRow).where(WorkspacePreferenceRow.key.startswith(f"blackboard:session:{sess_key}:")))
+            db.execute(delete(WorkspacePreferenceRow).where(WorkspacePreferenceRow.key.startswith(f"blackboard:swarm:{sess_key}:")))
+            db.execute(delete(WorkspacePreferenceRow).where(WorkspacePreferenceRow.key == f"blackboard_scope:{sess_key}"))
             db.flush()
             return True
 
@@ -584,6 +594,33 @@ class Store:
                 select(SessionRow).where(SessionRow.agent_id == agent_id, SessionRow.id == session_id)
             ).scalar_one_or_none()
             return _session_wire(row) if row else None
+
+    def set_session_blackboard_namespace(self, agent_id: str, session_id: str, namespace: str) -> None:
+        from .models import WorkspacePreferenceRow
+
+        key = f"blackboard_scope:{agent_id}::{session_id}"
+        with self.session() as db:
+            db.execute(
+                sqlite_insert(WorkspacePreferenceRow)
+                .values(key=key, value=namespace)
+                .on_conflict_do_update(index_elements=["key"], set_={"value": namespace})
+            )
+
+    def get_session_blackboard_namespace(self, agent_id: str, session_id: str) -> str | None:
+        from .models import WorkspacePreferenceRow
+
+        with self.session() as db:
+            row = db.get(WorkspacePreferenceRow, f"blackboard_scope:{agent_id}::{session_id}")
+            if row and isinstance(row.value, str) and row.value:
+                return row.value
+
+            suffix = f":{agent_id}"
+            for candidate in db.scalars(
+                select(WorkspacePreferenceRow).where(WorkspacePreferenceRow.key.startswith("group_session:"))
+            ).all():
+                if candidate.key.endswith(suffix) and str(candidate.value).strip('"') == session_id:
+                    return f"group:{candidate.key[len('group_session:'):-len(suffix)]}"
+        return None
 
     def list_sessions(self, agent_id: str | None = None) -> list[dict[str, Any]]:
         with self.session() as db:
@@ -818,7 +855,9 @@ class Store:
                     )
                 ).scalar_one()
             else:
-                row.title = title
+                placeholders = {"", "\u65b0\u4f1a\u8bdd", "\u672a\u547d\u540d", "\u672a\u547d\u540d\u4f1a\u8bdd", "untitled", data["id"]}
+                if title not in placeholders or row.title in placeholders:
+                    row.title = title
                 row.workspace = data.get("workspace")
                 row.status = data["status"]
                 row.source_id = data.get("source_id") or row.source_id or data["agent_id"]
@@ -879,6 +918,13 @@ class Store:
             row.selected_reasoning_effort = effort
             db.flush()
             return {"effort": effort}
+
+    def get_session_reasoning_binding(self, agent_id: str, session_id: str) -> str | None:
+        with self.session() as db:
+            row = db.execute(
+                select(SessionRow).where(SessionRow.agent_id == agent_id, SessionRow.id == session_id)
+            ).scalar_one_or_none()
+            return row.selected_reasoning_effort if row and row.selected_reasoning_effort else None
 
     def set_session_approval_mode_binding(
         self, agent_id: str, session_id: str, mode: str
@@ -969,6 +1015,7 @@ class Store:
         media_type: str,
         size: int,
         storage_name: str,
+        source_path: str | None = None,
     ) -> dict[str, Any]:
         with self.session() as db:
             row = AttachmentRow(
@@ -977,6 +1024,7 @@ class Store:
                 media_type=media_type,
                 size=size,
                 storage_name=storage_name,
+                source_path=source_path,
                 created_at=utc_now(),
             )
             db.add(row)
@@ -994,6 +1042,7 @@ class Store:
                 "media_type": row.media_type,
                 "size": row.size,
                 "storage_name": row.storage_name,
+                "source_path": row.source_path,
                 "created_at": isoformat(row.created_at),
             }
 
@@ -1303,6 +1352,22 @@ class Store:
             db.flush()
             return _command_wire(row)
 
+    def update_queued_command_text(self, agent_id: str, session_id: str, command_id: str, text: str) -> dict[str, Any]:
+        with self.session() as db:
+            row = db.execute(select(CommandRow).where(
+                CommandRow.agent_id == agent_id,
+                CommandRow.session_id == session_id,
+                CommandRow.id == command_id,
+            )).scalar_one_or_none()
+            if row is None:
+                raise UnknownCommand(command_id)
+            if row.state != "queued":
+                raise ValueError("Command is no longer queued")
+            row.text = text
+            row.updated_at = utc_now()
+            db.flush()
+            return _command_wire(row)
+
     def upsert_message(self, data: dict[str, Any]) -> dict[str, Any]:
         with self.session() as db:
             return self._upsert_message_in(db, data)
@@ -1538,7 +1603,8 @@ class Store:
             )
             db.add(row)
         else:
-            if title and title != data["id"]:
+            placeholders = {"", "\u65b0\u4f1a\u8bdd", "\u672a\u547d\u540d", "\u672a\u547d\u540d\u4f1a\u8bdd", "untitled", data["id"]}
+            if title not in placeholders or row.title in placeholders:
                 row.title = title
             if "workspace" in data and ("project_id" in data or not row.project_id):
                 row.workspace = data["workspace"]
@@ -1576,6 +1642,61 @@ class Store:
             "command_id": data.get("command_id"),
             "tool": data.get("tool"),
         }
+        alias_pattern = re.compile(r"item-\d+")
+        matching = db.scalars(
+            select(MessageRow).where(
+                MessageRow.agent_id == agent_id,
+                MessageRow.session_id == target_session_id,
+                MessageRow.role == data["role"],
+                MessageRow.kind == data["kind"],
+                MessageRow.text == values["text"],
+            )
+        ).all()
+        if alias_pattern.fullmatch(data["id"]):
+            canonical = next((row for row in matching if not alias_pattern.fullmatch(row.id)), None)
+            if canonical:
+                for duplicate in matching:
+                    if alias_pattern.fullmatch(duplicate.id):
+                        db.delete(duplicate)
+                if values["attachments"] and not canonical.attachments:
+                    canonical.attachments = values["attachments"]
+                if values["tool"] and not canonical.tool:
+                    canonical.tool = values["tool"]
+                db.flush()
+                return _message_wire(canonical)
+        if data["role"] == "user" and data.get("command_id"):
+            correlated = db.scalars(
+                select(MessageRow)
+                .where(
+                    MessageRow.agent_id == agent_id,
+                    MessageRow.session_id == target_session_id,
+                    MessageRow.role == "user",
+                    MessageRow.command_id == data["command_id"],
+                )
+                .order_by(MessageRow.created_at.desc(), MessageRow.row_id.desc())
+            ).all()
+            if correlated:
+                row = correlated[0]
+                for duplicate in correlated[1:]:
+                    db.delete(duplicate)
+                if created_at >= row.created_at:
+                    for key, value in values.items():
+                        setattr(row, key, value)
+                elif values["attachments"] and not row.attachments:
+                    row.attachments = values["attachments"]
+                db.flush()
+                return _message_wire(row)
+        existing = db.execute(
+            select(MessageRow).where(
+                MessageRow.agent_id == agent_id,
+                MessageRow.session_id == target_session_id,
+                MessageRow.id == data["id"],
+            )
+        ).scalar_one_or_none()
+        if existing:
+            if not data.get("authoritative_created_at"):
+                values["created_at"] = existing.created_at
+            values["command_id"] = values["command_id"] or existing.command_id
         db.execute(
             sqlite_insert(MessageRow)
             .values(
@@ -1586,6 +1707,8 @@ class Store:
                 set_=values,
             )
         )
+        if existing:
+            db.expire(existing)
         db.flush()
         row = db.execute(
             select(MessageRow).where(
@@ -1594,6 +1717,11 @@ class Store:
                 MessageRow.id == data["id"],
             )
         ).scalar_one()
+        if not alias_pattern.fullmatch(data["id"]):
+            for duplicate in matching:
+                if alias_pattern.fullmatch(duplicate.id):
+                    db.delete(duplicate)
+            db.flush()
         return _message_wire(row)
 
     def _event_exists(self, db: Session, event_id: str, agent_id: str | None) -> bool:

@@ -43,6 +43,72 @@ def turn_timestamp(turn_id, started_at=None):
     return '1970-01-01T00:00:00Z'
 
 
+def rollout_item_timestamps(home, sid, item_ids):
+    import json
+    import sqlite3
+    from pathlib import Path
+
+    home = Path(home).expanduser()
+    wanted = set(item_ids)
+    if not wanted:
+        return {}
+    databases = sorted(home.glob('state_*.sqlite'))
+    if (home / 'state.db').is_file():
+        databases.append(home / 'state.db')
+    rollout = None
+    for database in reversed(databases):
+        try:
+            with sqlite3.connect(database.resolve().as_uri() + '?mode=ro', uri=True) as db:
+                columns = {row[1] for row in db.execute('PRAGMA table_info(threads)')}
+                if {'id', 'rollout_path'}.issubset(columns):
+                    row = db.execute('SELECT rollout_path FROM threads WHERE id=?', (sid,)).fetchone()
+                    if row and isinstance(row[0], str) and Path(row[0]).is_file():
+                        rollout = Path(row[0])
+                        break
+        except (OSError, sqlite3.Error):
+            continue
+    if rollout is None:
+        matches = list((home / 'sessions').glob(f'**/rollout-*{sid}*.jsonl'))
+        rollout = matches[0] if matches else None
+    if rollout is None:
+        return {}
+    result = {}
+    try:
+        with rollout.open('rb') as stream:
+            stream.seek(0, 2)
+            position = stream.tell()
+            pending = b''
+            while position > 0 and len(result) < len(wanted):
+                size = min(65536, position)
+                position -= size
+                stream.seek(position)
+                parts = (stream.read(size) + pending).splitlines()
+                pending = parts[0]
+                for raw_line in reversed(parts[1:]):
+                    try:
+                        record = json.loads(raw_line)
+                    except (UnicodeDecodeError, ValueError):
+                        continue
+                    payload = record.get('payload') or {}
+                    item = payload.get('item') if payload.get('type') == 'item_completed' else payload if record.get('type') == 'response_item' else None
+                    item_id = item.get('id') if isinstance(item, dict) else None
+                    if item_id in wanted and isinstance(record.get('timestamp'), str):
+                        result.setdefault(item_id, record['timestamp'])
+            if pending and len(result) < len(wanted):
+                try:
+                    record = json.loads(pending)
+                except (UnicodeDecodeError, ValueError):
+                    record = {}
+                payload = record.get('payload') or {}
+                item = payload.get('item') if payload.get('type') == 'item_completed' else payload if record.get('type') == 'response_item' else None
+                item_id = item.get('id') if isinstance(item, dict) else None
+                if item_id in wanted and isinstance(record.get('timestamp'), str):
+                    result.setdefault(item_id, record['timestamp'])
+    except OSError:
+        return {}
+    return result
+
+
 _FAILURE_DETAIL_KEYS = ('message', 'detail', 'userMessage', 'errorMessage', 'reason', 'description', 'error', 'failure', 'lastError')
 
 
@@ -372,10 +438,15 @@ class CodexConnection:
             if self.store.get_session(self.agent_id, sid) is not None:
                 self.service.delete_session(self.agent_id, sid)
             return None
+        title = str(thread.get('name') or thread.get('preview') or sid)[:160]
+        if 'whose request action you are assessing' in title.lower():
+            self._threads.pop(sid, None)
+            if self.store.get_session(self.agent_id, sid) is not None:
+                self.service.delete_session(self.agent_id, sid)
+            return None
         self._threads[sid] = thread
         status = (thread.get('status') or {}).get('type')
         cwd = thread.get('cwd')
-        title = str(thread.get('name') or thread.get('preview') or sid)[:160]
         data = {'id': sid, 'agent_id': self.agent_id, 'source_id': self.agent_id, 'source_session_id': sid, 'title': title, 'workspace': cwd, 'status': 'running' if status == 'active' else 'error' if status == 'systemError' else 'idle', 'updated_at': timestamp(thread.get('updatedAt')), 'history_state': 'available', 'control_state': 'owned', 'project_id': thread.get('projectId'), 'project_name': Path(cwd).name if cwd else None}
         source = thread.get('source')
         if getattr(self, 'connection_id', None):
@@ -554,12 +625,18 @@ class CodexConnection:
             if not isinstance(result.get('data'), list):
                 raise ConnectionError('Codex 消息分页响应无效。', 502)
             project_task_history(self, sid, result['data'], history_started, refresh_unknown=not before)
-            items = [
-                self._message(entry['item'], sid, entry.get('turnId'), turn_timestamp(entry.get('turnId')))
-                for entry in reversed(result['data'])
-            ]
-            for m in items:
-                self.store.upsert_message(m)
+            entries = list(reversed(result['data']))
+            exact_times = self._history_timestamps(sid, [entry['item'].get('id') for entry in entries if isinstance(entry.get('item'), dict)])
+            items = []
+            for entry in entries:
+                item = entry['item']
+                exact_time = exact_times.get(item.get('id'))
+                message = self._message(item, sid, entry.get('turnId'), exact_time or turn_timestamp(entry.get('turnId')))
+                if exact_time:
+                    message['authoritative_created_at'] = True
+                items.append(message)
+            items = [self.store.upsert_message(m) for m in items]
+            items = list({item['id']: item for item in items}.values())
             native_cursor = result.get('nextCursor')
             next_cursor = None
             if native_cursor:
@@ -571,6 +648,7 @@ class CodexConnection:
         try:
             thread_data = self._request('thread/read', {'threadId': sid, 'includeTurns': True})
             turns = (thread_data.get('thread') or {}).get('turns') or []
+            exact_times = self._history_timestamps(sid, [item.get('id') for turn in turns for item in (turn.get('items') or []) if isinstance(item, dict)])
             entries = ({'item': item} for turn in reversed(turns) for item in reversed(turn.get('items') or []))
             project_task_history(self, sid, entries, history_started, refresh_unknown=not before)
             first_user_text = None
@@ -578,7 +656,10 @@ class CodexConnection:
                 turn_id = turn.get('id')
                 created_at = turn_timestamp(turn_id, turn.get('startedAt'))
                 for item in turn.get('items') or []:
-                    msg = self._message(item, sid, turn_id=turn_id, created_at=created_at)
+                    exact_time = exact_times.get(item.get('id'))
+                    msg = self._message(item, sid, turn_id=turn_id, created_at=exact_time or created_at)
+                    if exact_time:
+                        msg['authoritative_created_at'] = True
                     if not first_user_text and msg.get('role') == 'user' and msg.get('text'):
                         first_user_text = msg['text']
                     self.store.upsert_message(msg)
@@ -593,6 +674,9 @@ class CodexConnection:
 
         stored_items, next_cursor = self.store.list_messages(self.agent_id, sid, before, limit)
         return {'items': stored_items, 'next_cursor': next_cursor}
+
+    def _history_timestamps(self, sid, item_ids):
+        return rollout_item_timestamps(self._home or Path.home() / '.codex', sid, item_ids)
 
     def model(self, sid):
         self._scope(sid)
@@ -673,8 +757,18 @@ class CodexConnection:
 
         from .codex_inputs import command_input
 
-        inputs = command_input(self.settings, self.store, command)
-        text = command.get('text')
+        inputs = command_input(
+            self.settings,
+            self.store,
+            command,
+            lambda attachment_id, path, record, data: self._stage_attachment(
+                command['session_id'], attachment_id, path, record, data
+            ),
+        )
+        text = next(
+            (item.get('text') for item in inputs if item.get('type') == 'text'),
+            command.get('text'),
+        )
         if not isinstance(text, str):
             return inputs
         pattern = re.compile(r'(?<!\S)@(?:"([^"]+)"|([^\s@]+))')
@@ -736,6 +830,43 @@ class CodexConnection:
         if cleaned:
             base.append({'type': 'text', 'text': cleaned})
         return selected + base
+
+    def _stage_attachment(self, sid, attachment_id, _source, record, data):
+        try:
+            UUID(str(attachment_id))
+        except ValueError:
+            raise ConnectionError('Codex 附件身份无效；未发送。', 422) from None
+        thread = self._threads.get(sid) or {}
+        workspace_value = thread.get('cwd')
+        if not isinstance(workspace_value, str) or not workspace_value:
+            raise ConnectionError('Codex 会话工作目录不可用；附件未发送。', 422)
+        workspace = Path(workspace_value).expanduser().resolve()
+        source_value = record.get('source_path')
+        if isinstance(source_value, str) and source_value:
+            source = Path(source_value).expanduser()
+            try:
+                resolved_source = source.resolve(strict=True)
+                same_content = resolved_source.is_file() and resolved_source.stat().st_size == len(data) and resolved_source.read_bytes() == data
+            except OSError:
+                same_content = False
+            if same_content and (
+                resolved_source.is_relative_to(workspace)
+                or self.get_approval_mode(sid) == 'full_access'
+            ):
+                return str(resolved_source)
+        directory = workspace / '.astrorder' / 'attachments' / str(attachment_id)
+        directory.mkdir(parents=True, exist_ok=True)
+        if not directory.resolve().is_relative_to(workspace):
+            raise ConnectionError('Codex 附件目录不安全；未发送。', 422)
+        name = Path(str(record.get('name') or 'attachment')).name
+        target = directory / name
+        temporary = directory / f'.{name}.{uuid4().hex}.tmp'
+        try:
+            temporary.write_bytes(data)
+            os.replace(temporary, target)
+        finally:
+            temporary.unlink(missing_ok=True)
+        return str(target)
 
     def set_model(self, sid, provider, model):
         if self._daemon_controller is not None:
@@ -870,6 +1001,37 @@ class CodexConnection:
 
     async def submit(self, command):
         return await asyncio.to_thread(self._submit, command)
+
+    def update_queued(self, session_id: str, command_id: str, text: str):
+        with self._lock:
+            command = next((item for item in self._queued.get(session_id, []) if item.get('id') == command_id), None)
+            if command is None:
+                raise ConnectionError('排队消息已不在 Codex 队列中。', 409)
+            command['text'] = text
+        updated = self.store.update_queued_command_text(self.agent_id, session_id, command_id, text)
+        self._event('command.upsert', session_id, updated)
+        return updated
+
+    def remove_queued(self, session_id: str, command_id: str):
+        with self._lock:
+            queued = self._queued.get(session_id, [])
+            command = next((item for item in queued if item.get('id') == command_id), None)
+            if command is None:
+                raise ConnectionError('排队消息已不在 Codex 队列中。', 409)
+            queued.remove(command)
+        updated = self.store.set_command_state(self.agent_id, session_id, command_id, 'cancelled', None)
+        self._event('command.upsert', session_id, updated)
+        return updated
+
+    def send_queued(self, session_id: str, command_id: str):
+        with self._lock:
+            queued = self._queued.get(session_id, [])
+            command = next((item for item in queued if item.get('id') == command_id), None)
+            if command is None:
+                raise ConnectionError('排队消息已不在 Codex 队列中。', 409)
+            queued.remove(command)
+        self._submit(command)
+        return self.store.get_command(self.agent_id, session_id, command_id)
 
     def _submit(self, command):
         sid = command['session_id']
@@ -1096,11 +1258,47 @@ class CodexConnection:
                     next_command = queued_list.pop(0) if queued_list else None
                 if next_command:
                     threading.Thread(target=self._submit, args=(next_command,), daemon=True).start()
+                # 会话回复完成后，如果会话名仍是“新会话”或占位符，自动读取原生命名或提取首条提问重命名
+                try:
+                    sess = self.store.get_session(self.agent_id, sid)
+                    if sess and (not sess.get('title') or sess.get('title') in {'新会话', '未命名', '未命名会话', 'untitled'} or sess.get('title') == sid):
+                        auto_t = None
+                        try:
+                            th_data = self._request('thread/read', {'threadId': sid, 'includeTurns': False}).get('thread') or {}
+                            t_name = th_data.get('name') or th_data.get('title')
+                            if t_name and isinstance(t_name, str) and t_name.strip() not in {'新会话', '未命名', 'untitled'} and t_name != sid:
+                                auto_t = t_name.strip()[:60]
+                        except Exception:
+                            pass
+                        if not auto_t:
+                            msgs, _ = self.store.list_messages(self.agent_id, sid)
+                            user_msgs = [m for m in msgs if m.get('role') == 'user' and m.get('text')]
+                            if user_msgs:
+                                raw_t = user_msgs[0]['text'].strip()
+                                cl = re.sub(r'【[^】]+】', '', raw_t)
+                                cl = re.sub(r'@(?:"[^"]+"|[^s@]+)', '', cl).strip()
+                                fl = cl.splitlines()[0].strip() if cl else raw_t.splitlines()[0].strip()
+                                if fl and fl not in {'新会话', '未命名', 'untitled'} and fl != sid:
+                                    auto_t = fl[:50]
+                        if auto_t:
+                            up_s = {**sess, 'title': auto_t, 'updated_at': timestamp()}
+                            self.store.upsert_session(up_s)
+                            self._event('session.upsert', sid, up_s)
+                            try:
+                                self._request('thread/name/set', {'threadId': sid, 'name': auto_t})
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
         elif method in {'item/started', 'item/completed'}:
             item = params.get('item')
             if isinstance(item, dict) and isinstance(item.get('id'), str):
+                key = (sid, item['id'])
+                previous = self._streams.get(key)
                 message = self._message(item, sid, params.get('turnId'), timestamp())
-                self._streams[(sid, item['id'])] = message
+                if previous and previous.get('text') and not message.get('text'):
+                    message = {**message, 'text': previous['text']}
+                self._streams[key] = message
                 self._event('message.upsert', sid, message)
         elif method and method.startswith('item/') and any(token in method for token in ('delta', 'Delta', 'output', 'Output')):
             item_id = params.get('itemId') or params.get('id')

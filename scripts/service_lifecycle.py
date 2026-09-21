@@ -70,7 +70,7 @@ def command_line_for_pid(pid: int) -> str | None:
         return None
     try:
         completed = subprocess.run(
-            ["wmic", "process", "where", f"ProcessId={pid}", "get", "CommandLine", "/value"],
+            ["powershell", "-NoProfile", "-Command", f"[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; (Get-CimInstance Win32_Process -Filter 'ProcessId = {pid}').CommandLine"],
             capture_output=True,
             check=False,
             text=True,
@@ -82,11 +82,8 @@ def command_line_for_pid(pid: int) -> str | None:
         return None
     if completed.returncode != 0:
         return None
-    for line in completed.stdout.splitlines():
-        if line.startswith("CommandLine="):
-            value = line.partition("=")[2].strip()
-            return value or None
-    return None
+    out = completed.stdout.strip()
+    return out or None
 
 
 def terminate_verified_pid(pid: int) -> None:

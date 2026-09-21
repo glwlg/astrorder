@@ -3,28 +3,467 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>星序服务状态</title>
+  <title>星序 · 服务控制中心</title>
   <style>
-    :root { color-scheme: dark; font-family: system-ui, sans-serif; background: #111; color: #eee; }
-    body { margin: 0; min-height: 100vh; display: grid; place-items: center; -webkit-app-region: drag; }
-    main { width: min(680px, calc(100vw - 48px)); }
-    h1 { font-size: 24px; margin-bottom: 24px; }
-    section { border: 1px solid #343434; border-radius: 12px; padding: 18px; margin: 12px 0; background: #191919; }
-    header { display: flex; justify-content: space-between; align-items: center; }
-    h2 { margin: 0; font-size: 17px; }
-    p { color: #aaa; }
-    button { border: 0; border-radius: 8px; padding: 9px 14px; margin-right: 8px; cursor: pointer; -webkit-app-region: no-drag; }
-    button:disabled { opacity: .45; cursor: default; }
-    #error { color: #ff8c8c; min-height: 24px; }
+    :root {
+      color-scheme: light dark;
+      --bg: #f8fafc;
+      --fg: #0f172a;
+      --card-bg: rgba(255, 255, 255, 0.85);
+      --card-border: rgba(226, 232, 240, 0.9);
+      --card-border-hover: rgba(203, 213, 225, 1);
+      --muted: #64748b;
+      --subtext: #475569;
+      --btn-bg: #f1f5f9;
+      --btn-fg: #1e293b;
+      --btn-border: #e2e8f0;
+      --btn-hover-bg: #e2e8f0;
+      --primary: #3b82f6;
+      --primary-hover: #2563eb;
+      --primary-fg: #ffffff;
+      --danger: #ef4444;
+      --danger-bg: #fef2f2;
+      --danger-border: #fecaca;
+      --status-running-bg: rgba(34, 197, 94, 0.1);
+      --status-running-fg: #16a34a;
+      --status-running-border: rgba(34, 197, 94, 0.25);
+      --status-stopped-bg: rgba(100, 116, 139, 0.1);
+      --status-stopped-fg: #64748b;
+      --status-stopped-border: rgba(100, 116, 139, 0.2);
+      --status-conflict-bg: rgba(239, 68, 68, 0.1);
+      --status-conflict-fg: #dc2626;
+      --status-conflict-border: rgba(239, 68, 68, 0.25);
+      --status-unhealthy-bg: rgba(245, 158, 11, 0.1);
+      --status-unhealthy-fg: #d97706;
+      --status-unhealthy-border: rgba(245, 158, 11, 0.25);
+      --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+      --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.06), 0 2px 4px -2px rgba(0, 0, 0, 0.04);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0b0f17;
+        --fg: #f8fafc;
+        --card-bg: rgba(22, 27, 38, 0.72);
+        --card-border: rgba(255, 255, 255, 0.08);
+        --card-border-hover: rgba(255, 255, 255, 0.15);
+        --muted: #94a3b8;
+        --subtext: #cbd5e1;
+        --btn-bg: rgba(255, 255, 255, 0.06);
+        --btn-fg: #f1f5f9;
+        --btn-border: rgba(255, 255, 255, 0.1);
+        --btn-hover-bg: rgba(255, 255, 255, 0.12);
+        --primary: #3b82f6;
+        --primary-hover: #60a5fa;
+        --primary-fg: #ffffff;
+        --danger: #f87171;
+        --danger-bg: rgba(239, 68, 68, 0.1);
+        --danger-border: rgba(239, 68, 68, 0.2);
+        --status-running-bg: rgba(34, 197, 94, 0.12);
+        --status-running-fg: #4ade80;
+        --status-running-border: rgba(34, 197, 94, 0.3);
+        --status-stopped-bg: rgba(148, 163, 184, 0.1);
+        --status-stopped-fg: #94a3b8;
+        --status-stopped-border: rgba(148, 163, 184, 0.2);
+        --status-conflict-bg: rgba(239, 68, 68, 0.15);
+        --status-conflict-fg: #f87171;
+        --status-conflict-border: rgba(239, 68, 68, 0.3);
+        --status-unhealthy-bg: rgba(245, 158, 11, 0.15);
+        --status-unhealthy-fg: #fbbf24;
+        --status-unhealthy-border: rgba(245, 158, 11, 0.3);
+        --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
+        --shadow-md: 0 8px 24px -4px rgba(0, 0, 0, 0.4);
+      }
+    }
+
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", sans-serif;
+      user-select: none;
+      -webkit-user-select: none;
+      overflow-x: hidden;
+    }
+
+    .titlebar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 32px;
+      -webkit-app-region: drag;
+      z-index: 1000;
+      background: transparent;
+    }
+
+    .viewport {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 48px 24px 32px;
+      background:
+        radial-gradient(ellipse 650px 380px at 50% 30%, rgba(59, 130, 246, 0.08), transparent 70%),
+        var(--bg);
+      position: relative;
+    }
+
+    .container {
+      width: min(580px, 100%);
+      margin: 0 auto;
+    }
+
+    .brand-header {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 28px;
+    }
+
+    .brand-icon {
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, rgba(59, 130, 246, 0.15), rgba(96, 165, 250, 0.25));
+      border: 1px solid rgba(59, 130, 246, 0.3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 4px 14px rgba(59, 130, 246, 0.2);
+      flex-shrink: 0;
+    }
+
+    .brand-title {
+      margin: 0;
+      font-size: 20px;
+      font-weight: 650;
+      letter-spacing: -0.01em;
+      line-height: 1.25;
+    }
+
+    .brand-desc {
+      margin: 3px 0 0;
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+
+    .cards {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .service-card {
+      background: var(--card-bg);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid var(--card-border);
+      border-radius: 14px;
+      padding: 18px 20px;
+      box-shadow: var(--shadow-sm);
+      transition: all 0.2s ease;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .service-card:hover {
+      border-color: var(--card-border-hover);
+      box-shadow: var(--shadow-md);
+    }
+
+    .card-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .card-title-group {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .service-icon-box {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(59, 130, 246, 0.08);
+      color: var(--primary);
+    }
+
+    .card-title {
+      margin: 0;
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--fg);
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 9999px;
+      font-size: 12px;
+      font-weight: 500;
+      border: 1px solid transparent;
+      transition: all 0.2s ease;
+    }
+
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    .status-running {
+      background: var(--status-running-bg);
+      color: var(--status-running-fg);
+      border-color: var(--status-running-border);
+    }
+    .status-running .status-dot {
+      box-shadow: 0 0 6px currentColor;
+    }
+
+    .status-stopped {
+      background: var(--status-stopped-bg);
+      color: var(--status-stopped-fg);
+      border-color: var(--status-stopped-border);
+    }
+
+    .status-conflict {
+      background: var(--status-conflict-bg);
+      color: var(--status-conflict-fg);
+      border-color: var(--status-conflict-border);
+    }
+
+    .status-unhealthy {
+      background: var(--status-unhealthy-bg);
+      color: var(--status-unhealthy-fg);
+      border-color: var(--status-unhealthy-border);
+    }
+
+    .status-unknown {
+      background: var(--status-stopped-bg);
+      color: var(--status-stopped-fg);
+      border-color: var(--status-stopped-border);
+    }
+
+    .card-desc {
+      margin: 0;
+      font-size: 13px;
+      color: var(--subtext);
+      line-height: 1.5;
+    }
+
+    .card-actions {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      padding-top: 4px;
+    }
+
+    button.btn {
+      appearance: none;
+      border: 1px solid var(--btn-border);
+      background: var(--btn-bg);
+      color: var(--btn-fg);
+      padding: 6px 14px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s ease;
+      -webkit-app-region: no-drag;
+    }
+
+    button.btn:hover:not(:disabled) {
+      background: var(--btn-hover-bg);
+      transform: translateY(-1px);
+    }
+
+    button.btn:active:not(:disabled) {
+      transform: translateY(0);
+    }
+
+    button.btn-primary {
+      background: var(--primary);
+      color: var(--primary-fg);
+      border-color: var(--primary);
+    }
+
+    button.btn-primary:hover:not(:disabled) {
+      background: var(--primary-hover);
+      border-color: var(--primary-hover);
+      box-shadow: 0 2px 8px rgba(59, 130, 246, 0.35);
+    }
+
+    button.btn-danger {
+      color: var(--danger);
+      background: transparent;
+      border-color: transparent;
+    }
+
+    button.btn-danger:hover:not(:disabled) {
+      background: var(--danger-bg);
+      border-color: var(--danger-border);
+    }
+
+    button.btn:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+      transform: none !important;
+    }
+
+    #error-box {
+      min-height: 24px;
+      margin-top: 16px;
+      font-size: 13px;
+      color: var(--danger);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      opacity: 0;
+      transition: opacity 0.2s ease;
+    }
+
+    #error-box.visible {
+      opacity: 1;
+    }
+
+    .footer-bar {
+      margin-top: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding-top: 16px;
+      border-top: 1px solid var(--card-border);
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .refresh-hint {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .spinner {
+      width: 12px;
+      height: 12px;
+      border: 2px solid currentColor;
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
   </style>
 </head>
 <body>
-  <main>
-    <h1>星序服务</h1>
-    <section data-target="app"><header><h2>大内核</h2><span>正在检查</span></header><p>提供网页、API 和实时连接。</p><div></div></section>
-    <section data-target="daemon"><header><h2>小内核</h2><span>正在检查</span></header><p>托管会话、终端和 Agent 进程。</p><div></div></section>
-    <p id="error"></p>
-  </main>
+  <div class="titlebar"></div>
+  <div class="viewport">
+    <div class="container">
+      <div class="brand-header">
+        <div class="brand-icon">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+          </svg>
+        </div>
+        <div>
+          <h1 class="brand-title">星序服务控制中心</h1>
+          <p class="brand-desc">内核服务运行状态监控与快捷调度</p>
+        </div>
+      </div>
+
+      <div class="cards">
+        <!-- 大内核 Card -->
+        <section class="service-card" data-target="app">
+          <div class="card-top">
+            <div class="card-title-group">
+              <div class="service-icon-box">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect width="20" height="14" x="2" y="3" rx="2"></rect>
+                  <line x1="8" x2="16" y1="21" y2="21"></line>
+                  <line x1="12" x2="12" y1="17" y2="21"></line>
+                </svg>
+              </div>
+              <h2 class="card-title">大内核 (App Server)</h2>
+            </div>
+            <div class="status-badge status-unknown">
+              <span class="status-dot"></span>
+              <span class="status-text">正在检查</span>
+            </div>
+          </div>
+          <p class="card-desc">提供主界面、Web/API 服务及实时 WebSocket 连接支撑。</p>
+          <div class="card-actions"></div>
+        </section>
+
+        <!-- 小内核 Card -->
+        <section class="service-card" data-target="daemon">
+          <div class="card-top">
+            <div class="card-title-group">
+              <div class="service-icon-box">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 2v4"></path>
+                  <path d="m16.2 7.8 2.9-2.9"></path>
+                  <path d="M18 12h4"></path>
+                  <path d="m16.2 16.2 2.9 2.9"></path>
+                  <path d="M12 18v4"></path>
+                  <path d="m4.9 19.1 2.9-2.9"></path>
+                  <path d="M2 12h4"></path>
+                  <path d="m4.9 4.9 2.9 2.9"></path>
+                </svg>
+              </div>
+              <h2 class="card-title">小内核 (Session Daemon)</h2>
+            </div>
+            <div class="status-badge status-unknown">
+              <span class="status-dot"></span>
+              <span class="status-text">正在检查</span>
+            </div>
+          </div>
+          <p class="card-desc">托管会话上下文、执行终端以及各 Agent 后台任务进程。</p>
+          <div class="card-actions"></div>
+        </section>
+      </div>
+
+      <div id="error-box">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="12" y1="8" x2="12" y2="12"></line>
+          <line x1="12" y1="16" x2="12.01" y2="16"></line>
+        </svg>
+        <span id="error-text"></span>
+      </div>
+
+      <div class="footer-bar">
+        <div class="refresh-hint">
+          <span class="spinner"></span>
+          <span>状态自动轮询同步</span>
+        </div>
+        <span>星序 · Astrorder</span>
+      </div>
+    </div>
+  </div>
   <script src="service-status.js"></script>
 </body>
 </html>

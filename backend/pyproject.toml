@@ -15,6 +15,7 @@ dependencies = [
     "astrorder-codex-connector",
     "pywinpty>=3.0.5",
     "pywin32>=311; sys_platform == 'win32'",
+    "browser-harness==0.1.13",
 ]
 
 [tool.uv.sources]

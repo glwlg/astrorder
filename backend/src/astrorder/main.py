@@ -17,6 +17,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .api import router
 from .bot_groups import router as bot_groups_router
+from .analytics import router as analytics_router
 from .attachments import AttachmentManager
 from .auth import authorize_browser_websocket, authorize_connector_websocket
 from .background_tasks import BackgroundTaskRegistry
@@ -364,6 +365,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_middleware(GZipMiddleware, minimum_size=1000)
     app.include_router(router)
     app.include_router(bot_groups_router)
+    app.include_router(analytics_router)
 
     @app.get("/health")
     async def health() -> dict[str, str | int]:

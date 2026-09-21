@@ -6,7 +6,7 @@ import type { ViewerContext } from '../../types'
 const DRAWIO_EMBED_ORIGIN = 'https://embed.diagrams.net'
 const DRAWIO_EMBED_URL = `${DRAWIO_EMBED_ORIGIN}/?embed=1&proto=json&configure=1&spin=1&libraries=1`
 
-export function DrawioViewer({ artifact, onSave, onDirtyChange, onClose: _onClose }: ViewerContext) {
+export function DrawioViewer({ artifact, onSave, onDirtyChange, onClose: _onClose, toolbarAction }: ViewerContext) {
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const onDirtyChangeRef = useRef(onDirtyChange)
   onDirtyChangeRef.current = onDirtyChange
@@ -126,6 +126,7 @@ export function DrawioViewer({ artifact, onSave, onDirtyChange, onClose: _onClos
             )}
           </Group>
           <Group gap={6} wrap="nowrap">
+            {toolbarAction}
             {artifact.writable && onSave && (
               <Tooltip label="保存到工作区">
                 <Button

@@ -1,3 +1,5 @@
+import json
+import sqlite3
 import sys
 from types import SimpleNamespace
 
@@ -7,12 +9,21 @@ from astrorder_codex_connector.app_server import CodexRpcRejected
 from astrorder.config import Settings
 from astrorder.connections import ConnectionError
 from astrorder.events import EventHub
-from astrorder.native_codex import CodexConnection
+from astrorder.native_codex import CodexConnection, rollout_item_timestamps
 from astrorder.service import ControlService
 from astrorder.store import Store
 
 SID = '01992890-4444-7777-8888-000000000001'
 THREAD = {'id': SID, 'name': 'Native Codex', 'cwd': None, 'createdAt': 1, 'updatedAt': 2, 'status': {'type': 'notLoaded'}, 'modelProvider': 'native-provider', 'gitInfo': {'branch': 'native-branch'}}
+
+
+def test_rollout_item_timestamps_reads_message_level_order(tmp_path):
+    rollout = tmp_path / f'rollout-{SID}.jsonl'
+    rollout.write_text(json.dumps({'timestamp': '2026-09-20T05:15:50.461Z', 'type': 'event_msg', 'payload': {'type': 'item_completed', 'item': {'id': 'user-1'}}}) + '\n' + json.dumps({'timestamp': '2026-09-20T05:15:59.766Z', 'type': 'response_item', 'payload': {'id': 'reply-1'}}) + '\n')
+    with sqlite3.connect(tmp_path / 'state_1.sqlite') as db:
+        db.execute('CREATE TABLE threads (id TEXT, rollout_path TEXT)')
+        db.execute('INSERT INTO threads VALUES (?, ?)', (SID, str(rollout)))
+    assert rollout_item_timestamps(tmp_path, SID, ['user-1', 'reply-1']) == {'user-1': '2026-09-20T05:15:50.461Z', 'reply-1': '2026-09-20T05:15:59.766Z'}
 
 class FakeClient:
     def __init__(self, config, on_notification, **kwargs):
@@ -70,6 +81,24 @@ def test_connected_means_initialized_catalog_and_scoped_native_handler(tmp_path)
         assert connection.snapshot()['state'] == 'disconnected'
         assert connection.agent_id not in service._native_command_handlers
         assert store.get_agent(connection.agent_id)['status'] == 'disconnected'
+    finally:
+        connection.disconnect()
+        store.close()
+
+
+def test_empty_completion_keeps_streamed_reasoning_text(tmp_path):
+    settings = Settings(database_url=f'sqlite:///{tmp_path}/reasoning.db', auto_connect_local_hermes=False, codex_executable=sys.executable)
+    store = Store(settings)
+    service = ControlService(store, EventHub(), settings)
+    connection = CodexConnection(settings, store, service, client_factory=FakeClient)
+    try:
+        connection.connect()
+        common = {'threadId': SID, 'turnId': 'turn-1'}
+        connection.client.notify({'method': 'item/started', 'params': {**common, 'item': {'id': 'reasoning-1', 'type': 'reasoning'}}})
+        connection.client.notify({'method': 'item/reasoning/summaryTextDelta', 'params': {**common, 'itemId': 'reasoning-1', 'delta': '正在检查配置'}})
+        connection.client.notify({'method': 'item/completed', 'params': {**common, 'item': {'id': 'reasoning-1', 'type': 'reasoning'}}})
+
+        assert store.get_message(connection.agent_id, SID, 'reasoning-1')['text'] == '正在检查配置'
     finally:
         connection.disconnect()
         store.close()
@@ -545,7 +574,7 @@ def test_codex_command_input_projects_skill_and_file_mentions(monkeypatch):
     }]
     monkeypatch.setattr(
         "astrorder.codex_inputs.command_input",
-        lambda _settings, _store, command: [{"type": "text", "text": command["text"]}],
+        lambda _settings, _store, command, _stage: [{"type": "text", "text": command["text"]}],
     )
 
     assert connection.command_input({
@@ -556,3 +585,37 @@ def test_codex_command_input_projects_skill_and_file_mentions(monkeypatch):
         {"type": "mention", "name": "My File.md", "path": "/repo/docs/My File.md"},
         {"type": "text", "text": "explain this"},
     ]
+
+
+def test_codex_stages_document_inside_session_workspace(tmp_path):
+    from astrorder.native_codex import CodexConnection
+
+    connection = CodexConnection.__new__(CodexConnection)
+    connection._threads = {"thread-1": {"cwd": str(tmp_path)}}
+    attachment_id = "5d9d99ea-53cd-44d8-a59d-3ee480e5c379"
+    staged = connection._stage_attachment(
+        "thread-1", attachment_id, None, {"name": "report.pdf"}, b"%PDF"
+    )
+    assert staged == str(tmp_path / ".astrorder" / "attachments" / attachment_id / "report.pdf")
+    assert (tmp_path / ".astrorder" / "attachments" / attachment_id / "report.pdf").read_bytes() == b"%PDF"
+
+
+def test_codex_uses_original_attachment_path_when_session_can_read_it(tmp_path):
+    from astrorder.native_codex import CodexConnection
+
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    source = workspace / "report.pdf"
+    source.write_bytes(b"%PDF")
+    connection = CodexConnection.__new__(CodexConnection)
+    connection._threads = {"thread-1": {"cwd": str(workspace)}}
+    connection.get_approval_mode = lambda _sid: "auto"
+    staged = connection._stage_attachment(
+        "thread-1",
+        "5d9d99ea-53cd-44d8-a59d-3ee480e5c379",
+        None,
+        {"name": "report.pdf", "source_path": str(source)},
+        b"%PDF",
+    )
+    assert staged == str(source.resolve())
+    assert not (workspace / ".astrorder").exists()

@@ -270,7 +270,7 @@ def test_agent_gateway_lists_and_reads_sessions(tmp_path):
                 "jsonrpc": "2.0",
                 "id": 12,
                 "method": "tools/call",
-                "params": {"name": "blackboard_set", "arguments": {"key": "auth_spec", "value": {"endpoint": "/refresh", "ttl": 3600}}},
+                "params": {"name": "blackboard_set", "arguments": {"namespace": "session:local-codex::sess-1", "key": "auth_spec", "value": {"endpoint": "/refresh", "ttl": 3600}}},
             },
         )
         assert bb_set.status_code == 200
@@ -283,7 +283,7 @@ def test_agent_gateway_lists_and_reads_sessions(tmp_path):
                 "jsonrpc": "2.0",
                 "id": 13,
                 "method": "tools/call",
-                "params": {"name": "blackboard_get", "arguments": {"key": "auth_spec"}},
+                "params": {"name": "blackboard_get", "arguments": {"namespace": "session:local-codex::sess-1", "key": "auth_spec"}},
             },
         )
         assert bb_get.status_code == 200
@@ -298,7 +298,7 @@ def test_agent_gateway_lists_and_reads_sessions(tmp_path):
                 "jsonrpc": "2.0",
                 "id": 14,
                 "method": "tools/call",
-                "params": {"name": "blackboard_get", "arguments": {}},
+                "params": {"name": "blackboard_get", "arguments": {"namespace": "session:local-codex::sess-1"}},
             },
         )
         assert bb_list.status_code == 200
@@ -312,7 +312,7 @@ def test_agent_gateway_lists_and_reads_sessions(tmp_path):
                 "jsonrpc": "2.0",
                 "id": 15,
                 "method": "tools/call",
-                "params": {"name": "blackboard_delete", "arguments": {"key": "auth_spec"}},
+                "params": {"name": "blackboard_delete", "arguments": {"namespace": "session:local-codex::sess-1", "key": "auth_spec"}},
             },
         )
         assert bb_del.status_code == 200
@@ -508,6 +508,151 @@ def test_agent_gateway_lists_and_reads_sessions(tmp_path):
         assert lock_rel.status_code == 200
         assert json.loads(lock_rel.json()["result"]["content"][0]["text"])["released"] is True
 
+        # Test sessions.create with ephemeral and parent_key (Satellite DAG)
+        satellite = client.post(
+            "/api/v1/agent/mcp",
+            headers={"Authorization": "Bearer connector-test"},
+            json={
+                "jsonrpc": "2.0",
+                "id": 28,
+                "method": "tools/call",
+                "params": {
+                    "name": "sessions_create",
+                    "arguments": {
+                        "agent_id": "local-codex",
+                        "title": "Satellite Probe",
+                        "parent_key": new_key,
+                        "ephemeral": True,
+                    },
+                },
+            },
+        )
+        assert satellite.status_code == 200
+        sat_data = json.loads(satellite.json()["result"]["content"][0]["text"])
+        assert sat_data["session"]["ephemeral"] is True
+        assert sat_data["session"]["parent_session_key"] == new_key
+        sat_key = sat_data["session"]["key"]
+
+        # Test sessions.list with pagination & ephemeral filter
+        paginated = client.post(
+            "/api/v1/agent/mcp",
+            headers={"Authorization": "Bearer connector-test"},
+            json={
+                "jsonrpc": "2.0",
+                "id": 29,
+                "method": "tools/call",
+                "params": {
+                    "name": "sessions_list",
+                    "arguments": {"agent_id": "local-codex", "limit": 1, "offset": 0},
+                },
+            },
+        )
+        assert paginated.status_code == 200
+        page_data = json.loads(paginated.json()["result"]["content"][0]["text"])
+        assert len(page_data["items"]) == 1
+        assert page_data["limit"] == 1
+        assert page_data["offset"] == 0
+        assert page_data["has_more"] is True
+
+        eph_filter = client.post(
+            "/api/v1/agent/mcp",
+            headers={"Authorization": "Bearer connector-test"},
+            json={
+                "jsonrpc": "2.0",
+                "id": 30,
+                "method": "tools/call",
+                "params": {
+                    "name": "sessions_list",
+                    "arguments": {"agent_id": "local-codex", "ephemeral": True},
+                },
+            },
+        )
+        assert eph_filter.status_code == 200
+        eph_items = json.loads(eph_filter.json()["result"]["content"][0]["text"])["items"]
+        assert any(item["key"] == sat_key for item in eph_items)
+
+        # Test sessions.tree (DAG topology)
+        tree_resp = client.post(
+            "/api/v1/agent/mcp",
+            headers={"Authorization": "Bearer connector-test"},
+            json={
+                "jsonrpc": "2.0",
+                "id": 31,
+                "method": "tools/call",
+                "params": {
+                    "name": "sessions_tree",
+                    "arguments": {"key": new_key},
+                },
+            },
+        )
+        assert tree_resp.status_code == 200
+        tree_data = json.loads(tree_resp.json()["result"]["content"][0]["text"])
+        assert tree_data["ok"] is True
+        assert tree_data["tree"]["key"] == new_key
+        assert tree_data["tree"]["satellite_count"] == 1
+        assert tree_data["tree"]["children"][0]["key"] == sat_key
+
+        # Test blackboard.components.list & schema for DataTable
+        comp_list = client.post(
+            "/api/v1/agent/mcp",
+            headers={"Authorization": "Bearer connector-test"},
+            json={
+                "jsonrpc": "2.0",
+                "id": 32,
+                "method": "tools/call",
+                "params": {"name": "blackboard_components_list", "arguments": {}},
+            },
+        )
+        assert comp_list.status_code == 200
+        comps = json.loads(comp_list.json()["result"]["content"][0]["text"])["items"]
+        assert any(c["id"] == "DataTable" for c in comps)
+
+        dt_schema = client.post(
+            "/api/v1/agent/mcp",
+            headers={"Authorization": "Bearer connector-test"},
+            json={
+                "jsonrpc": "2.0",
+                "id": 33,
+                "method": "tools/call",
+                "params": {"name": "blackboard_component_schema", "arguments": {"component_id": "DataTable"}},
+            },
+        )
+        assert dt_schema.status_code == 200
+        dt_data = json.loads(dt_schema.json()["result"]["content"][0]["text"])
+        assert dt_data["ok"] is True
+        assert "columns" in dt_data["schema"]
+
+        # Test sessions.delete
+        del_sat = client.post(
+            "/api/v1/agent/mcp",
+            headers={"Authorization": "Bearer connector-test"},
+            json={
+                "jsonrpc": "2.0",
+                "id": 34,
+                "method": "tools/call",
+                "params": {"name": "sessions_delete", "arguments": {"key": sat_key}},
+            },
+        )
+        assert del_sat.status_code == 200
+        del_res = json.loads(del_sat.json()["result"]["content"][0]["text"])
+        assert del_res["ok"] is True
+        assert len(del_res["deleted"]) == 1
+
+        # Batch delete root
+        batch_del = client.post(
+            "/api/v1/agent/mcp",
+            headers={"Authorization": "Bearer connector-test"},
+            json={
+                "jsonrpc": "2.0",
+                "id": 35,
+                "method": "tools/call",
+                "params": {"name": "sessions_delete", "arguments": {"keys": [new_key]}},
+            },
+        )
+        assert batch_del.status_code == 200
+        batch_res = json.loads(batch_del.json()["result"]["content"][0]["text"])
+        assert batch_res["ok"] is True
+        assert len(batch_res["deleted"]) == 1
 
 def test_invoke_unknown_capability():
     class Store:

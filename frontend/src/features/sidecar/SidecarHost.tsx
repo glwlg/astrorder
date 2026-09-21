@@ -1,6 +1,6 @@
 import { notifications } from '@mantine/notifications'
 import { ActionIcon, Tooltip } from '@mantine/core'
-import { IconLayoutSidebarRightCollapse, IconPlus } from '@tabler/icons-react'
+import { IconFolderSearch, IconLayoutSidebarRightCollapse, IconPlus } from '@tabler/icons-react'
 import { SidecarTabs } from './SidecarTabs'
 import { SidecarWelcomeMenu } from './SidecarWelcomeMenu'
 import { SessionDetails } from '../chat/SessionDetails'
@@ -75,6 +75,10 @@ export function SidecarHost({
     useSidecarStore
       .getState()
       .openSideChat(session.id, session.agent_id, session.title || undefined, session.connection_id || undefined)
+  }
+
+  const handleOpenBlackboard = () => {
+    useSidecarStore.getState().openBlackboard(session.id, session.agent_id, session.connection_id || undefined)
   }
 
   const handleOpenAgentGraph = () => {
@@ -169,11 +173,13 @@ export function SidecarHost({
           </Tooltip>
         </div>
 
-        <Tooltip label="收起侧边栏">
-          <ActionIcon variant="subtle" size="sm" color="gray" onClick={onCloseSidecar}>
-            <IconLayoutSidebarRightCollapse size={16} />
-          </ActionIcon>
-        </Tooltip>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <Tooltip label="收起工作台">
+            <ActionIcon variant="subtle" size="sm" color="gray" onClick={onCloseSidecar} aria-label="收起工作台">
+              <IconLayoutSidebarRightCollapse size={16} />
+            </ActionIcon>
+          </Tooltip>
+        </div>
       </div>
 
       <div style={{ flex: 1, minHeight: 0, overflow: 'auto', position: 'relative' }}>
@@ -186,6 +192,7 @@ export function SidecarHost({
             onOpenBrowser={handleOpenBrowser}
             onOpenSideChat={handleOpenSideChat}
             onOpenAgentGraph={handleOpenAgentGraph}
+            onOpenBlackboard={handleOpenBlackboard}
           />
         )}
         {activeTab?.type === 'details' && (
@@ -213,10 +220,31 @@ export function SidecarHost({
               >
                 {viewer ? (() => {
                   const ViewerComponent = viewer.component
+                  const toolbarAction = artifact.path && artifact.mediaType !== 'application/x-directory' ? (
+                    <Tooltip label="在文件树中定位">
+                      <ActionIcon
+                        variant="subtle"
+                        size="sm"
+                        color="gray"
+                        aria-label="在文件树中定位"
+                        onClick={() => useSidecarStore.getState().revealFileInTree(
+                          artifact.sessionId,
+                          artifact.agentId,
+                          artifact.path!,
+                          session.workspace || undefined,
+                          session.project_name || session.title,
+                          artifact.connectionId,
+                        )}
+                      >
+                        <IconFolderSearch size={16} />
+                      </ActionIcon>
+                    </Tooltip>
+                  ) : undefined
                   return (
                     <ViewerComponent
                       artifact={artifact}
                       isActive={isActive}
+                      toolbarAction={toolbarAction}
                       onDirtyChange={(dirty) => setTabDirty(tab.id, dirty)}
                       onSave={(content) =>
                         handleSaveContent(

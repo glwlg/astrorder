@@ -123,9 +123,9 @@ export function SwarmDagView({
   const [isWideInspector, setIsWideInspector] = useState(false)
   const [blackboardModalOpen, setBlackboardModalOpen] = useState(false)
   const [telemetries, setTelemetries] = useState<Record<string, { progress?: number; phase?: string; summary?: string; status?: string }>>({})
-  const [blackboardScope, setBlackboardScope] = useState<'swarm' | 'global'>('swarm')
+  const [blackboardScope, setBlackboardScope] = useState<'swarm' | 'session'>('swarm')
   const [swarmBlackboard, setSwarmBlackboard] = useState<Record<string, unknown>>({})
-  const [globalBlackboard, setGlobalBlackboard] = useState<Record<string, unknown>>({})
+  const [sessionBlackboard, setSessionBlackboard] = useState<Record<string, unknown>>({})
   const [activeSosKeys, setActiveSosKeys] = useState<Set<string>>(new Set())
   const [zoom, setZoom] = useState(1)
   const [pan, setPan] = useState({ x: 60, y: 70 })
@@ -222,6 +222,21 @@ export function SwarmDagView({
       constellationKeys.add(cKey)
     }
 
+    // 补充：包含所有被标记为主星/群星的根会话，以及显式选中的 activeRootKey，即便目前伴星数为 0
+    for (const s of allSessions) {
+      const k = scopeKey(s.agent_id, s.id)
+      const title = s.title || ''
+      const isCandidate = (
+        title.includes('主星') ||
+        title.includes('群星') ||
+        title.includes('星系') ||
+        k === activeRootKey
+      )
+      if (isCandidate && !parentMap.has(k)) {
+        constellationKeys.add(k)
+      }
+    }
+
     // 拓扑分层 (Rank assignment)
     const levelMap = new Map<string, number>()
     const computeLevel = (k: string, visited = new Set<string>()): number => {
@@ -259,10 +274,13 @@ export function SwarmDagView({
     let currentY = 0
     const CONSTELLATION_GAP = 28
 
-    // 一次只展示一个选中的主星拓扑
-    const selectedTargetKey = activeRootKey && rootKeys.includes(activeRootKey)
-      ? activeRootKey
-      : (rootKeys.length > 0 ? rootKeys[0] : null)
+    // 一次只展示一个选中的主星拓扑；优先匹配当前选中的 activeRootKey
+    let selectedTargetKey: string | null = null
+    if (activeRootKey && (sessionMap.has(activeRootKey) || rootKeys.includes(activeRootKey))) {
+      selectedTargetKey = activeRootKey
+    } else if (rootKeys.length > 0) {
+      selectedTargetKey = rootKeys[0]
+    }
     const targetRoots = selectedTargetKey ? [selectedTargetKey] : []
 
     for (const rootKey of targetRoots) {
@@ -377,14 +395,16 @@ export function SwarmDagView({
       rootCount: roots,
       workerCount: workers,
     }
-  }, [allSessions, agents, collapsedRootKeys])
+  }, [allSessions, agents, collapsedRootKeys, activeRootKey])
 
-  // 默认选中第一个主星或伴星
+  // 默认选中当前主星或其伴星
   useEffect(() => {
-    if (!selectedKey && nodes.length > 0) {
+    if (activeRootKey && nodes.some((n) => n.key === activeRootKey)) {
+      setSelectedKey(activeRootKey)
+    } else if (nodes.length > 0 && (!selectedKey || !nodes.some((n) => n.key === selectedKey))) {
       setSelectedKey(nodes[0].key)
     }
-  }, [nodes[0]?.key, selectedKey])
+  }, [activeRootKey, nodes, selectedKey])
 
   const selectedNode = useMemo(() => {
     return nodes.find((n) => n.key === selectedKey) || null
@@ -421,16 +441,16 @@ export function SwarmDagView({
         setSwarmBlackboard({})
       }
     }
-    const fetchGlobalBlackboard = async () => {
+    const fetchSessionBlackboard = async () => {
       try {
-        const res = await api.getBlackboard('global')
-        setGlobalBlackboard(res.items || {})
+        const res = await api.getBlackboard(`session:${selectedNode ? selectedNode.key : ""}`)
+        setSessionBlackboard(res.items || {})
       } catch {
-        setGlobalBlackboard({})
+        setSessionBlackboard({})
       }
     }
     void fetchSwarmBlackboard()
-    void fetchGlobalBlackboard()
+    void fetchSessionBlackboard()
   }, [constellationRootKey])
 
   const handleMouseDown = (e: MouseEvent<HTMLDivElement>) => {
@@ -1219,7 +1239,7 @@ export function SwarmDagView({
             <div>
               <Group justify="space-between" mb={8}>
                 <Text size="xs" fw={700} c="dimmed" style={{ letterSpacing: '0.4px', textTransform: 'uppercase' }}>
-                  作战黑板 (BLACKBOARD)
+                  黑板
                 </Text>
                 <Group gap={6}>
                   <Button
@@ -1239,27 +1259,27 @@ export function SwarmDagView({
                 size="xs"
                 fullWidth
                 value={blackboardScope}
-                onChange={(val: string) => setBlackboardScope(val as 'swarm' | 'global')}
+                onChange={(val: string) => setBlackboardScope(val as 'swarm' | 'session')}
                 data={[
                   { label: `🪐 星系黑板 (${Object.keys(swarmBlackboard).length})`, value: 'swarm' },
-                  { label: `🌐 全局共享 (${Object.keys(globalBlackboard).length})`, value: 'global' },
+                  { label: `📝 会话私有 (${Object.keys(sessionBlackboard).length})`, value: 'session' },
                 ]}
                 mb={10}
               />
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {Object.keys(blackboardScope === 'swarm' ? swarmBlackboard : globalBlackboard).length > 0 ? (
-                  Object.entries(blackboardScope === 'swarm' ? swarmBlackboard : globalBlackboard).slice().reverse().map(([k, v]) => (
+                {Object.keys(blackboardScope === 'swarm' ? swarmBlackboard : sessionBlackboard).length > 0 ? (
+                  Object.entries(blackboardScope === 'swarm' ? swarmBlackboard : sessionBlackboard).slice().reverse().map(([k, v]) => (
                     <BlackboardItemRenderer
                       key={k}
                       itemKey={k}
                       itemValue={v}
-                      namespace={blackboardScope === 'swarm' && constellationRootKey ? `swarm:${constellationRootKey}` : 'global'}
+                      namespace={blackboardScope === 'swarm' ? (constellationRootKey ? `swarm:${constellationRootKey}` : 'swarm:default') : (selectedNode ? `session:${selectedNode.key}` : 'session:default')}
                       onUpdated={() => {
                         if (blackboardScope === 'swarm' && constellationRootKey) {
                           void api.getBlackboard(`swarm:${constellationRootKey}`).then((res) => setSwarmBlackboard(res.items || {}))
                         } else {
-                          void api.getBlackboard('global').then((res) => setGlobalBlackboard(res.items || {}))
+                          void api.getBlackboard(`session:${selectedNode ? selectedNode.key : ""}`).then((res) => setSessionBlackboard(res.items || {}))
                         }
                       }}
                     />
@@ -1276,7 +1296,7 @@ export function SwarmDagView({
                       border: '1px dashed var(--astr-border, #E5E7EB)',
                     }}
                   >
-                    {blackboardScope === 'swarm' ? '当前星系暂无专属黑板变量' : '全局空间暂无共享黑板变量'}
+                    {blackboardScope === 'swarm' ? '当前星系暂无专属黑板变量' : '当前节点暂无会话私有黑板变量'}
                   </div>
                 )}
               </div>
@@ -1394,15 +1414,15 @@ export function SwarmDagView({
           <Group gap="xs">
             <IconActivity size={20} color="#5B5BD6" />
             <Text fw={700} size="md">
-              星序 · 分布式作战黑板
+              星序 · 分布式黑板
             </Text>
             <SegmentedControl
               size="xs"
               value={blackboardScope}
-              onChange={(val: string) => setBlackboardScope(val as 'swarm' | 'global')}
+              onChange={(val: string) => setBlackboardScope(val as 'swarm' | 'session')}
               data={[
                 { label: `🪐 星系黑板 (${Object.keys(swarmBlackboard).length})`, value: 'swarm' },
-                { label: `🌐 全局共享 (${Object.keys(globalBlackboard).length})`, value: 'global' },
+                { label: `📝 会话私有 (${Object.keys(sessionBlackboard).length})`, value: 'session' },
               ]}
             />
           </Group>
@@ -1416,17 +1436,17 @@ export function SwarmDagView({
           }}
           className="space-y-4"
         >
-          {Object.entries(blackboardScope === 'swarm' ? swarmBlackboard : globalBlackboard).slice().reverse().map(([k, v]) => (
+          {Object.entries(blackboardScope === 'swarm' ? swarmBlackboard : sessionBlackboard).slice().reverse().map(([k, v]) => (
             <BlackboardItemRenderer
                       key={k}
                       itemKey={k}
                       itemValue={v}
-                      namespace={blackboardScope === 'swarm' && constellationRootKey ? `swarm:${constellationRootKey}` : 'global'}
+                      namespace={blackboardScope === 'swarm' ? (constellationRootKey ? `swarm:${constellationRootKey}` : 'swarm:default') : (selectedNode ? `session:${selectedNode.key}` : 'session:default')}
                       onUpdated={() => {
                         if (blackboardScope === 'swarm' && constellationRootKey) {
                           void api.getBlackboard(`swarm:${constellationRootKey}`).then((res) => setSwarmBlackboard(res.items || {}))
                         } else {
-                          void api.getBlackboard('global').then((res) => setGlobalBlackboard(res.items || {}))
+                          void api.getBlackboard(`session:${selectedNode ? selectedNode.key : ""}`).then((res) => setSessionBlackboard(res.items || {}))
                         }
                       }}
                     />
@@ -1471,7 +1491,7 @@ export function SwarmDagView({
               </div>
               <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.6 }}>
                 <li>删除主星会话与 <strong>{deleteModalData.sessions.length - 1} 个关联伴星会话</strong>（共 {deleteModalData.sessions.length} 个）；</li>
-                <li>彻底清空专属作战黑板（空间：<code style={{ fontFamily: 'monospace' }}>swarm:{deleteModalData.rootNode.key}</code>）；</li>
+                <li>彻底清空专属黑板（空间：<code style={{ fontFamily: 'monospace' }}>swarm:{deleteModalData.rootNode.key}</code>）；</li>
                 <li>自动从监控室视图及待办队列中移除。</li>
               </ul>
             </div>

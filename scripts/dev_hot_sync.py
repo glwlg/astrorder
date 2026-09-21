@@ -43,24 +43,22 @@ def hot_sync(*, restart_backend: bool = True) -> None:
         )
         print("  [OK] Linked Python .pth to live backend/src & connectors")
 
-    # 2. Sync connectors & .hermes
+    # 2. Sync runtime scripts, connectors & .hermes
+    shutil.copytree(DEV_ROOT / "scripts", INSTALLED_ROOT / "scripts", dirs_exist_ok=True)
     shutil.copytree(DEV_ROOT / "connectors", INSTALLED_ROOT / "connectors", dirs_exist_ok=True)
     shutil.copytree(DEV_ROOT / ".hermes", INSTALLED_ROOT / ".hermes", dirs_exist_ok=True)
-    print("  [OK] Synced live plugins & connectors metadata")
+    print("  [OK] Synced live scripts, plugins & connectors metadata")
 
     # 3. Point static dir to dev frontend/dist
-    conf_paths = [
-        INSTALLED_ROOT / ".runtime/production.json",
-        DEV_ROOT / ".runtime/production.json",
-        Path(os.environ.get("LOCALAPPDATA", "")) / "Astrorder/production.json",
-    ]
+    conf_paths = [Path(os.environ["LOCALAPPDATA"]) / "Astrorder/production.json"]
     for cp in conf_paths:
         if cp.is_file():
             try:
                 data = json.loads(cp.read_text(encoding="utf-8"))
                 env = data.setdefault("environment", {})
                 env["ASTRORDER_STATIC_DIR"] = str(DEV_ROOT / "frontend/dist")
-                env["ASTRORDER_DATABASE_URL"] = "sqlite:///C:/Users/luwei/AppData/Local/Astrorder/data/astrorder.sqlite3"
+                database = Path(os.environ["LOCALAPPDATA"]) / "Astrorder/data/astrorder.sqlite3"
+                env["ASTRORDER_DATABASE_URL"] = f"sqlite:///{database.as_posix()}"
                 env["ASTRORDER_ALLOWED_WORKSPACES"] = "P:/workspace,C:/Users/luwei,P:\\DevApp\\Astrorder\\server"
                 env["ASTRORDER_DAEMON_CODEX_WORKSPACE"] = "P:\\workspace\\glwlg\\ai\\astrorder"
                 env["ASTRORDER_DAEMON_GROK_WORKSPACE"] = "P:\\workspace\\glwlg\\ai\\astrorder"
@@ -75,6 +73,15 @@ def hot_sync(*, restart_backend: bool = True) -> None:
         venv_python = INSTALLED_ROOT / 'backend/.venv/Scripts/python.exe'
         desktop_service_script = INSTALLED_ROOT / 'scripts/desktop_service.py'
         try:
+            # 获取当前运行中的 Astrorder 进程 PID
+            run_env = os.environ.copy()
+            try:
+                ps = 'Get-Process Astrorder -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id'
+                pids = [int(line.strip()) for line in subprocess.check_output(['powershell', '-Command', ps]).decode().split() if line.strip()]
+                if pids:
+                    run_env['ASTRORDER_DESKTOP_PID'] = str(pids[0])
+            except Exception:
+                pass
             run_res = subprocess.run(
                 [str(venv_python), str(desktop_service_script), 'app', 'restart'],
                 cwd=str(INSTALLED_ROOT),
@@ -82,6 +89,7 @@ def hot_sync(*, restart_backend: bool = True) -> None:
                 text=True,
                 encoding='utf-8',
                 check=False,
+                env=run_env,
             )
             out = run_res.stdout.strip() or run_res.stderr.strip()
             if run_res.returncode == 0:

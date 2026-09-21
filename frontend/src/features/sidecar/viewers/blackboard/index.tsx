@@ -1,43 +1,30 @@
-import { useEffect, useState } from 'react'
-import {
-  ActionIcon,
-  Badge,
-  Button,
-  Card,
-  Group,
-  Modal,
-  Paper,
-  ScrollArea,
-  Stack,
-  Text,
-  TextInput,
-  Textarea,
-  Tooltip,
-} from '@mantine/core'
-import {
-  IconChalkboard,
-  IconCopy,
-  IconPlus,
-  IconRefresh,
-  IconTrash,
-} from '@tabler/icons-react'
-import { notifications } from '@mantine/notifications'
+import { IconChalkboard } from '@tabler/icons-react'
+import type { ArtifactRef } from '../../../../domain/artifact'
 import type { ArtifactViewer, ViewerContext } from '../../types'
-import { api } from '../../../../api/client'
+import { SidecarBlackboardPanel } from '../../../chat/SidecarBlackboardPanel'
 
 export const blackboardViewer: ArtifactViewer = {
   id: 'blackboard-viewer',
-  title: '作战黑板 (Blackboard)',
+  title: '黑板',
   description: '多 Agent 任务协同共享记忆、规格参数与产出物实时看板',
   version: '0.1.0',
   badgeLabel: '[黑板]',
   tabColor: 'var(--astr-indigo, #6366f1)',
   icon: IconChalkboard,
   extensions: ['.blackboard', '.bb.json'],
+  supports: (artifact: ArtifactRef): number => {
+    if (
+      artifact.mediaType === 'application/x-blackboard' ||
+      artifact.id.startsWith('blackboard:')
+    ) {
+      return 100
+    }
+    return 0
+  },
   capabilities: { canEdit: true },
   component: BlackboardViewerComponent,
   documentation: {
-    summary: '作战黑板是星序专为多 Agent 协同设计的分布式共享记忆总线与通信中枢。结合 json-render 视觉引擎，实现“Agent 读写纯 JSON 契约，人类操作员查看高保真交互 UI”。',
+    summary: '黑板是星序专为多 Agent 协同设计的分布式共享记忆总线与通信中枢。结合 json-render 视觉引擎，实现“Agent 读写纯 JSON 契约，人类操作员查看高保真交互 UI”。',
     sections: [
       {
         title: '星系命名空间物理隔离 (Namespace Scoping)',
@@ -160,195 +147,8 @@ export const blackboardViewer: ArtifactViewer = {
 }
 
 export function BlackboardViewerComponent({ artifact }: ViewerContext) {
-  const namespace = artifact.sessionId ? `session:${artifact.sessionId}` : 'global'
-  const [items, setItems] = useState<Record<string, unknown>>({})
-  const [loading, setLoading] = useState(false)
-  const [createOpened, setCreateOpened] = useState(false)
-  const [newKey, setNewKey] = useState('')
-  const [newVal, setNewVal] = useState('')
-
-  const fetchItems = async () => {
-    setLoading(true)
-    try {
-      const res = await api.getBlackboard(namespace)
-      setItems(res.items || {})
-    } catch {
-      // fallback
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    void fetchItems()
-  }, [namespace])
-
-  const handleSave = async () => {
-    if (!newKey.trim()) return
-    let parsed: unknown = newVal
-    try {
-      parsed = JSON.parse(newVal)
-    } catch {
-      // raw string
-    }
-    try {
-      await api.setBlackboard(newKey.trim(), parsed, namespace)
-      notifications.show({ color: 'teal', message: `已发布黑板项: ${newKey}` })
-      setCreateOpened(false)
-      setNewKey('')
-      setNewVal('')
-      void fetchItems()
-    } catch (e: any) {
-      notifications.show({ color: 'red', message: e.message || '写入黑板失败' })
-    }
-  }
-
-  const handleDelete = async (key: string) => {
-    try {
-      await api.deleteBlackboard(key, namespace)
-      notifications.show({ color: 'gray', message: `已移除: ${key}` })
-      void fetchItems()
-    } catch (e: any) {
-      notifications.show({ color: 'red', message: e.message || '删除失败' })
-    }
-  }
-
-  const entries = Object.entries(items)
-
-  return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        height: '100%',
-        padding: 14,
-        background: 'var(--astr-surface)',
-        boxSizing: 'border-box',
-      }}
-    >
-      <Group justify="space-between" align="center" mb="md">
-        <Group gap="xs">
-          <IconChalkboard size={18} color="var(--astr-indigo)" />
-          <Text fw={700} size="sm">
-            黑板共享区
-          </Text>
-          <Badge size="xs" variant="light" color="indigo">
-            {namespace}
-          </Badge>
-        </Group>
-        <Group gap={6}>
-          <Tooltip label="刷新" withArrow>
-            <ActionIcon variant="subtle" color="gray" size="sm" onClick={fetchItems} loading={loading}>
-              <IconRefresh size={14} />
-            </ActionIcon>
-          </Tooltip>
-          <Button
-            size="compact-xs"
-            variant="light"
-            color="indigo"
-            leftSection={<IconPlus size={13} />}
-            onClick={() => setCreateOpened(true)}
-          >
-            写入参数
-          </Button>
-        </Group>
-      </Group>
-
-      <ScrollArea style={{ flex: 1 }}>
-        {entries.length === 0 ? (
-          <Paper withBorder p="xl" radius="md" style={{ textAlign: 'center', background: 'transparent' }}>
-            <Text size="sm" c="dimmed">
-              当前黑板暂无共享参数。
-            </Text>
-            <Text size="xs" c="dimmed" mt={4}>
-              Agent 在协同过程中可随时调用 blackboard_set 写入契约与情报。
-            </Text>
-          </Paper>
-        ) : (
-          <Stack gap="xs">
-            {entries.map(([k, val]) => {
-              const valStr = typeof val === 'object' ? JSON.stringify(val, null, 2) : String(val)
-              return (
-                <Card withBorder radius="md" p="sm" key={k} style={{ background: 'var(--astr-surface-muted)' }}>
-                  <Group justify="space-between" align="center" mb={6}>
-                    <Text fw={700} size="xs" style={{ fontFamily: 'monospace' }}>
-                      {k}
-                    </Text>
-                    <Group gap={4}>
-                      <ActionIcon
-                        size="xs"
-                        variant="subtle"
-                        color="gray"
-                        onClick={() => {
-                          void navigator.clipboard.writeText(valStr)
-                          notifications.show({ color: 'teal', message: '已复制参数值' })
-                        }}
-                        title="复制值"
-                      >
-                        <IconCopy size={12} />
-                      </ActionIcon>
-                      <ActionIcon
-                        size="xs"
-                        variant="subtle"
-                        color="red"
-                        onClick={() => void handleDelete(k)}
-                        title="删除"
-                      >
-                        <IconTrash size={12} />
-                      </ActionIcon>
-                    </Group>
-                  </Group>
-                  <Paper
-                    withBorder
-                    p="xs"
-                    radius="sm"
-                    style={{
-                      background: 'var(--astr-surface)',
-                      fontFamily: 'monospace',
-                      fontSize: 11,
-                      whiteSpace: 'pre-wrap',
-                      wordBreak: 'break-all',
-                      maxHeight: 180,
-                      overflowY: 'auto',
-                    }}
-                  >
-                    {valStr}
-                  </Paper>
-                </Card>
-              )
-            })}
-          </Stack>
-        )}
-      </ScrollArea>
-
-      <Modal opened={createOpened} onClose={() => setCreateOpened(false)} title="向黑板写入参数" centered size="sm">
-        <Stack gap="sm">
-          <TextInput
-            label="参数 Key"
-            placeholder="如 api_contract, auth_token"
-            value={newKey}
-            onChange={(e) => setNewKey(e.currentTarget.value)}
-            required
-          />
-          <Textarea
-            label="参数值 (Value)"
-            placeholder="支持任意字符串或合法 JSON"
-            minRows={3}
-            maxRows={8}
-            autosize
-            value={newVal}
-            onChange={(e) => setNewVal(e.currentTarget.value)}
-          />
-          <Group justify="flex-end" mt="xs">
-            <Button variant="default" size="xs" onClick={() => setCreateOpened(false)}>
-              取消
-            </Button>
-            <Button size="xs" color="indigo" onClick={handleSave} disabled={!newKey.trim()}>
-              确认写入
-            </Button>
-          </Group>
-        </Stack>
-      </Modal>
-    </div>
-  )
+  const namespace = artifact.sessionId && artifact.agentId
+    ? `session:${artifact.agentId}::${artifact.sessionId}`
+    : artifact.sessionId ? `session:${artifact.sessionId}` : 'default'
+  return <SidecarBlackboardPanel namespace={namespace} />
 }

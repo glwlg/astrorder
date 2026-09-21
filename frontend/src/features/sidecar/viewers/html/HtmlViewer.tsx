@@ -11,7 +11,7 @@ import {
 } from '@tabler/icons-react'
 import type { ViewerContext } from '../../types'
 
-export function HtmlViewer({ artifact }: ViewerContext) {
+export function HtmlViewer({ artifact, toolbarAction }: ViewerContext) {
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const [loading, setLoading] = useState(true)
   const [urlInput, setUrlInput] = useState(artifact.readUrl || 'about:blank')
@@ -162,6 +162,7 @@ export function HtmlViewer({ artifact }: ViewerContext) {
           </Tooltip>
 
           <Group gap={4} wrap="nowrap">
+            {toolbarAction}
             {/* 思路 1：唤起宿主设备原生浏览器 */}
             <Tooltip label="在电脑设备默认浏览器中打开（原生 Edge / Chrome / Safari）">
               <ActionIcon

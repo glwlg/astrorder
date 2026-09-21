@@ -30,11 +30,16 @@ CAPABILITIES: list[dict[str, Any]] = [
         "summary": "List Astrorder agent APIs on this instance.",
         "input": {},
     },
-    {
-        "id": "sessions.list",
-        "summary": "List sessions visible to this Astrorder instance.",
-        "input": {"agent_id": "optional agent id filter", "limit": "optional maximum returned count (default 30, max 100)"},
-    },
+   {
+       "id": "sessions.list",
+       "summary": "List sessions visible to this Astrorder instance.",
+        "input": {
+            "agent_id": "optional agent id filter",
+            "limit": "optional maximum returned count (default 30, max 200)",
+            "offset": "optional integer offset for pagination (default 0)",
+            "ephemeral": "optional boolean filter to include only temporary or persistent sessions",
+        },
+   },
     {
         "id": "sessions.search",
         "summary": "Search sessions by title, workspace, project, or id.",
@@ -60,14 +65,37 @@ CAPABILITIES: list[dict[str, Any]] = [
         "summary": "List projects grouped by this Astrorder instance.",
         "input": {},
     },
+   {
+       "id": "sessions.create",
+       "summary": "Create a new session under a specified agent.",
+        "input": {
+            "agent_id": "target agent id",
+            "title": "optional session title",
+            "workspace": "optional workspace path",
+            "ephemeral": "optional boolean to mark as temporary/probe/review session",
+            "parent_key": "optional parent session key (agent_id::session_id) for DAG tracing",
+        },
+   },
     {
-        "id": "sessions.create",
-        "summary": "Create a new session under a specified agent.",
-        "input": {"agent_id": "target agent id", "title": "optional session title", "workspace": "optional workspace path"},
+        "id": "sessions.delete",
+        "summary": "Delete one or more sessions and clean up their runtime resources.",
+        "input": {
+            "key": "session key to delete (agent_id::session_id)",
+            "keys": "optional list of session keys for batch deletion",
+            "agent_id": "optional agent id if key is omitted",
+            "session_id": "optional session id if key is omitted",
+        },
     },
     {
-        "id": "sessions.send",
-        "summary": "Send a prompt instruction to a session.",
+        "id": "sessions.tree",
+        "summary": "Query session hierarchy and satellite DAG topology starting from a root session key, or list all mission swarm trees.",
+        "input": {
+            "key": "optional root session key (agent_id::session_id)",
+        },
+    },
+   {
+       "id": "sessions.send",
+       "summary": "Send a prompt instruction to a session.",
         "input": {"key": "agent_id::session_id", "text": "instruction text to send", "agent_id": "optional", "session_id": "optional"},
     },
     {
@@ -103,6 +131,17 @@ CAPABILITIES: list[dict[str, Any]] = [
             "plugin_id": "optional plugin ID to close",
             "tab_id": "optional specific tab ID to close",
             "collapse": "optional boolean to collapse the entire sidecar panel"
+        },
+    },
+    {
+        "id": "browser.run",
+        "summary": "Run a bounded browser task in the current visible Edge window using Jev. Later calls continue the same page and login state unless reset is true. Returns the final visible page state and action trace.",
+        "input": {
+            "url": "initial http/https page URL",
+            "goal": "complete browser goal with a visible completion condition",
+            "inputs": "optional object mapping visible field labels to exact values to type",
+            "max_steps": "optional action limit (default 30, maximum 60)",
+            "reset": "optional boolean; open a fresh browser window instead of continuing the current page",
         },
     },
     {
@@ -147,7 +186,7 @@ CAPABILITIES: list[dict[str, Any]] = [
         "summary": "Read shared mission state, specifications or facts from the Astrorder Blackboard.",
         "input": {
             "key": "specific blackboard key, or omit to list all keys",
-            "namespace": "optional namespace scope (default 'global')"
+            "namespace": "optional namespace scope (default: current session, group or swarm)"
         },
     },
     {
@@ -156,7 +195,7 @@ CAPABILITIES: list[dict[str, Any]] = [
         "input": {
             "key": "blackboard key",
             "value": "data payload (string, object, array, or number)",
-            "namespace": "optional namespace scope (default 'global')"
+            "namespace": "optional namespace scope (default: current session, group or swarm)"
         },
     },
     {
@@ -173,10 +212,20 @@ CAPABILITIES: list[dict[str, Any]] = [
         "input": {},
     },
     {
+        "id": "blackboard.auto_render",
+        "summary": "Analyze unformatted text or summary and use Jev decision model to automatically determine the best json-render UI component, formatting it directly to Blackboard.",
+        "input": {
+            "key": "blackboard key to publish to",
+            "content": "raw mission status, log, test result, or facts to render",
+            "title": "optional card title",
+            "namespace": "optional namespace scope (default automatically resolved)"
+        },
+    },
+    {
         "id": "blackboard.component.schema",
         "summary": "Query exact JSON schema, required fields and copyable example payload for a specific Blackboard Generative UI component.",
         "input": {
-            "component_id": "component name, e.g. 'StepTimeline', 'MetricGrid', 'ApiEndpointsCard', 'ResourceUsageBar', 'TestReport', 'CveSecurityReport', 'DiffViewer', 'Checklist', 'TerminalLog', 'ArchitectureFlow', 'StatusCard', 'MultiNodeClusterSummary', 'HostNodeTelemetryCard', 'MissionSpecCard', 'GomokuBoard'"
+            "component_id": "component name, e.g. 'StepTimeline', 'MetricGrid', 'DataTable', 'ApiEndpointsCard', 'ResourceUsageBar', 'TestReport', 'CveSecurityReport', 'DiffViewer', 'Checklist', 'TerminalLog', 'ArchitectureFlow', 'StatusCard', 'MultiNodeClusterSummary', 'HostNodeTelemetryCard', 'MissionSpecCard', 'GomokuBoard'"
         },
     },
     {
@@ -307,6 +356,7 @@ def public_session(session: dict[str, Any]) -> dict[str, Any]:
         "parent_session_key": parent_key,
         "parent_session_id": parent_sid,
         "parent_agent_id": parent_aid,
+        "ephemeral": bool(session.get("ephemeral")),
     }
 
 
@@ -351,11 +401,28 @@ def _sessions_list(payload: dict[str, Any], ctx: AgentContext) -> dict[str, Any]
             limit = int(limit)
         except (TypeError, ValueError) as exc:
             raise AgentApiError("invalid_input", "limit must be an integer") from exc
-    limit = max(1, min(limit, 100))
+    limit = max(1, min(limit, 200))
+    offset = payload.get("offset", 0)
+    if not isinstance(offset, int):
+        try:
+            offset = int(offset)
+        except (TypeError, ValueError) as exc:
+            raise AgentApiError("invalid_input", "offset must be an integer") from exc
+    offset = max(0, offset)
+    ephemeral_filter = payload.get("ephemeral")
+    if ephemeral_filter is not None and not isinstance(ephemeral_filter, bool):
+        if str(ephemeral_filter).lower() in ("true", "1"):
+            ephemeral_filter = True
+        elif str(ephemeral_filter).lower() in ("false", "0"):
+            ephemeral_filter = False
+        else:
+            raise AgentApiError("invalid_input", "ephemeral must be a boolean")
     rows = ctx.store.list_sessions(agent_id if isinstance(agent_id, str) and agent_id else None)
+    if ephemeral_filter is not None:
+        rows = [r for r in rows if bool(r.get("ephemeral")) == ephemeral_filter]
     total = len(rows)
-    sliced = rows[:limit]
-    return {"items": [public_session(row) for row in sliced], "total": total, "has_more": total > limit}
+    sliced = rows[offset:offset + limit]
+    return {"items": [public_session(row) for row in sliced], "total": total, "offset": offset, "limit": limit, "has_more": total > (offset + limit)}
 
 
 def _sessions_search(payload: dict[str, Any], ctx: AgentContext) -> dict[str, Any]:
@@ -462,7 +529,7 @@ def _projects_list(_payload: dict[str, Any], ctx: AgentContext) -> dict[str, Any
 
 
 KNOWN_PLUGINS: list[dict[str, Any]] = [
-    {"id": "blackboard", "title": "作战黑板 (Blackboard)", "description": "多 Agent 任务协同共享记忆、规格参数与产出物实时看板", "category": "collaboration", "extensions": [".json", ".yaml", ".yml", ".md"]},
+    {"id": "blackboard", "title": "黑板", "description": "多 Agent 任务协同共享记忆、规格参数与产出物实时看板", "category": "collaboration", "extensions": [".json", ".yaml", ".yml", ".md"]},
     {"id": "drawio", "title": "Draw.io 架构图", "description": "交互式查看、编辑和绘制 .drawio 架构设计与流程图", "category": "design", "extensions": [".drawio", ".drawio.xml"]},
     {"id": "mermaid", "title": "Mermaid 图表", "description": "实时渲染 Mermaid 流程图、时序图、类图与状态机", "category": "diagram", "extensions": [".mmd", ".mermaid"]},
     {"id": "excalidraw", "title": "Excalidraw 手绘白板", "description": "手绘草图、原型交互画板查看与编辑", "category": "whiteboard", "extensions": [".excalidraw"]},
@@ -492,6 +559,10 @@ def _sessions_create(payload: dict[str, Any], ctx: AgentContext) -> dict[str, An
     parent_aid = payload.get("parent_agent_id")
     if payload.get("parent_key") and "::" in str(payload.get("parent_key")):
         parent_aid, parent_sid = str(payload.get("parent_key")).split("::", 1)
+    ephemeral = False
+    if "ephemeral" in payload:
+        raw_eph = payload.get("ephemeral")
+        ephemeral = True if raw_eph in (True, "true", "True", 1, "1") else False
 
     data: dict[str, Any] = {}
     if ctx.runtime_resolver is not None:
@@ -536,8 +607,25 @@ def _sessions_create(payload: dict[str, Any], ctx: AgentContext) -> dict[str, An
         data["history_state"] = "available"
     if "updated_at" not in data:
         data["updated_at"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    data["ephemeral"] = ephemeral
 
     canonical = ctx.store.upsert_session(data)
+    session_namespace = f"session:{canonical['agent_id']}::{canonical['id']}"
+    if parent_sid:
+        root_aid = str(parent_aid or agent_id)
+        root_sid = str(parent_sid)
+        visited: set[str] = set()
+        while f"{root_aid}::{root_sid}" not in visited:
+            visited.add(f"{root_aid}::{root_sid}")
+            parent = ctx.store.get_session(root_aid, root_sid)
+            if not parent or not parent.get("parent_session_id"):
+                break
+            root_aid = str(parent.get("parent_agent_id") or root_aid)
+            root_sid = str(parent["parent_session_id"])
+        session_namespace = f"swarm:{root_aid}::{root_sid}"
+        ctx.store.set_session_blackboard_namespace(root_aid, root_sid, session_namespace)
+        ctx.store.set_session_blackboard_namespace(str(parent_aid or agent_id), str(parent_sid), session_namespace)
+    ctx.store.set_session_blackboard_namespace(canonical["agent_id"], canonical["id"], session_namespace)
     if ctx.service is not None:
         ctx.service._server_event("session.upsert", agent_id=canonical["agent_id"], session_id=canonical["id"], data=canonical)
     return {"session": public_session(canonical)}
@@ -622,6 +710,111 @@ def _sessions_stop(payload: dict[str, Any], ctx: AgentContext) -> dict[str, Any]
     return {"command_id": command_id, "state": created.get("state", "received"), "session_key": session_key(session)}
 
 
+def _sessions_delete(payload: dict[str, Any], ctx: AgentContext) -> dict[str, Any]:
+    keys = payload.get("keys")
+    targets: list[tuple[str, str]] = []
+    if isinstance(keys, list):
+        for k in keys:
+            if isinstance(k, str) and "::" in k:
+                aid, sid = k.split("::", 1)
+                targets.append((aid.strip(), sid.strip()))
+    elif payload.get("key") or (payload.get("agent_id") and payload.get("session_id")):
+        aid, sid = parse_session_key(payload)
+        targets.append((aid, sid))
+    else:
+        raise AgentApiError("invalid_input", "key, keys, or agent_id+session_id is required")
+
+    deleted: list[dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
+    for aid, sid in targets:
+        if not aid or not sid:
+            continue
+        if ctx.store.get_session(aid, sid) is None:
+            failed.append({"agent_id": aid, "session_id": sid, "error": "not_found"})
+            continue
+
+        if ctx.runtime_resolver is not None:
+            runtime = ctx.runtime_resolver(aid)
+            for name in ("mutate", "mutate_session"):
+                mutate = getattr(runtime, name, None)
+                if callable(mutate):
+                    try:
+                        mutate(sid, None)
+                    except Exception:
+                        pass
+                    break
+
+        success = False
+        if ctx.service is not None and hasattr(ctx.service, "delete_session"):
+            try:
+                success = ctx.service.delete_session(aid, sid)
+            except Exception as exc:
+                failed.append({"agent_id": aid, "session_id": sid, "error": str(exc)})
+                continue
+        elif ctx.store is not None:
+            try:
+                success = ctx.store.delete_session(aid, sid)
+            except Exception as exc:
+                failed.append({"agent_id": aid, "session_id": sid, "error": str(exc)})
+                continue
+
+        if success:
+            deleted.append({"agent_id": aid, "session_id": sid, "key": f"{aid}::{sid}"})
+        else:
+            failed.append({"agent_id": aid, "session_id": sid, "error": "delete_failed"})
+
+    return {
+        "ok": len(failed) == 0,
+        "deleted": deleted,
+        "failed": failed,
+        "count": len(deleted),
+    }
+
+
+def _sessions_tree(payload: dict[str, Any], ctx: AgentContext) -> dict[str, Any]:
+    root_key = payload.get("key")
+    if root_key is not None and not isinstance(root_key, str):
+        raise AgentApiError("invalid_input", "key must be a string")
+
+    rows = ctx.store.list_sessions()
+    sessions = [public_session(r) for r in rows]
+    by_key = {s["key"]: s for s in sessions}
+    children_map: dict[str, list[dict[str, Any]]] = {}
+
+    for s in sessions:
+        pkey = s.get("parent_session_key")
+        if pkey:
+            children_map.setdefault(pkey, []).append(s)
+
+    def attach_children(node: dict[str, Any], depth: int = 0) -> dict[str, Any]:
+        k = node["key"]
+        children = children_map.get(k, [])
+        sub_nodes = [attach_children(dict(c), depth + 1) for c in children] if depth < 10 else []
+        return {
+            **node,
+            "children": sub_nodes,
+            "satellite_count": len(children),
+        }
+
+    if root_key:
+        root = by_key.get(root_key)
+        if root is None:
+            raise AgentApiError("not_found", f"Session '{root_key}' was not found")
+        tree = attach_children(dict(root))
+        return {"ok": True, "tree": tree}
+
+    roots = [s for s in sessions if not s.get("parent_session_key") or s.get("parent_session_key") not in by_key]
+    trees = [attach_children(dict(r)) for r in roots]
+    swarm_trees = [t for t in trees if t.get("satellite_count", 0) > 0]
+    return {
+        "ok": True,
+        "trees": trees,
+        "swarm_trees": swarm_trees,
+        "total_trees": len(trees),
+        "swarm_count": len(swarm_trees),
+    }
+
+
 def _plugins_list(_payload: dict[str, Any], ctx: AgentContext) -> dict[str, Any]:
     settings: dict[str, Any] = {}
     try:
@@ -694,6 +887,8 @@ def _plugins_open(payload: dict[str, Any], ctx: AgentContext) -> dict[str, Any]:
     elif payload.get("session_id"):
         session_id = str(payload.get("session_id"))
         agent_id = str(payload.get("agent_id") or "")
+    else:
+        agent_id = str(payload.get("agent_id") or payload.get("caller_agent_id") or "") or None
 
     raw_path = payload.get("path")
     norm_path = str(raw_path).replace("\\", "/") if raw_path else None
@@ -862,18 +1057,28 @@ def _monitor_layout_set(payload: dict[str, Any], ctx: AgentContext) -> dict[str,
 
 def _resolve_blackboard_ns(payload: dict[str, Any], ctx: AgentContext) -> str:
     raw_ns = payload.get("namespace")
-    if isinstance(raw_ns, str) and raw_ns.strip() and raw_ns.strip() != "global":
-        return raw_ns.strip()
+    val = raw_ns.strip() if isinstance(raw_ns, str) else ""
+    if val and val not in {"global", "default", "session:default"}:
+        if not val.startswith("session:"):
+            return val
+        session_ref = val[len("session:"):]
+        if "::" in session_ref:
+            aid, sid = session_ref.split("::", 1)
+        else:
+            aid = str(payload.get("caller_agent_id") or payload.get("agent_id") or "")
+            found = ctx.store.get_session(aid, session_ref) if aid else ctx.store.find_session_by_id(session_ref)
+            if not found:
+                raise AgentApiError("not_found", f"Session '{session_ref}' was not found")
+            aid, sid = str(found["agent_id"]), str(found["id"])
+        return ctx.store.get_session_blackboard_namespace(aid, sid) or f"session:{aid}::{sid}"
 
-    target_key = payload.get("session_key") or payload.get("parent_key")
-    if not target_key:
-        aid = payload.get("agent_id") or payload.get("caller_agent_id")
-        sid = payload.get("session_id") or payload.get("caller_session_id")
-        if aid and sid:
-            target_key = f"{aid}::{sid}"
+    group_id = payload.get("group_id")
+    if isinstance(group_id, str) and group_id.strip():
+        return f"group:{group_id.strip()}"
 
-    if target_key and isinstance(target_key, str) and "::" in target_key:
-        curr_key = target_key
+    parent_key = payload.get("parent_key")
+    if parent_key and isinstance(parent_key, str) and "::" in parent_key:
+        curr_key = parent_key
         visited = set()
         while curr_key and curr_key not in visited:
             visited.add(curr_key)
@@ -889,7 +1094,21 @@ def _resolve_blackboard_ns(payload: dict[str, Any], ctx: AgentContext) -> str:
                 break
         return f"swarm:{curr_key}"
 
-    return str(raw_ns or "global").strip()
+    aid = payload.get("caller_agent_id") or payload.get("agent_id")
+    sid = payload.get("caller_session_id") or payload.get("session_id")
+    session_key = payload.get("session_key")
+    if isinstance(session_key, str) and "::" in session_key:
+        aid, sid = session_key.split("::", 1)
+        return ctx.store.get_session_blackboard_namespace(aid, sid) or f"session:{session_key}"
+    if aid and sid:
+        return ctx.store.get_session_blackboard_namespace(str(aid), str(sid)) or f"session:{aid}::{sid}"
+    if aid:
+        active = [row for row in ctx.store.list_sessions(str(aid)) if row.get("status") in {"running", "waiting_approval"}]
+        if len(active) == 1:
+            sid = str(active[0]["id"])
+            return ctx.store.get_session_blackboard_namespace(str(aid), sid) or f"session:{aid}::{sid}"
+        raise AgentApiError("invalid_input", "No unique active session; pass session_key explicitly")
+    raise AgentApiError("invalid_input", "Blackboard namespace could not be resolved; pass session_key explicitly")
 
 
 def _blackboard_get(payload: dict[str, Any], ctx: AgentContext) -> dict[str, Any]:
@@ -980,6 +1199,7 @@ def _blackboard_delete(payload: dict[str, Any], ctx: AgentContext) -> dict[str, 
 
 
 BLACKBOARD_COMPONENT_CATALOG: list[dict[str, Any]] = [
+    {"id": "DataTable", "title": "结构化数据表格", "category": "table", "summary": "支持多列自定义表头、徽标与等宽高亮染色的只读数据表格"},
     {"id": "StepTimeline", "title": "任务阶段与流水线时间线", "category": "workflow", "summary": "呈现 CI/CD 流水线、任务阶段交接与步骤执行进度"},
     {"id": "MetricGrid", "title": "核心监控与 KPI 指标矩阵", "category": "metrics", "summary": "多列 Bento 呈现 QPS、耗时、内存、准确率等关键数值指标"},
     {"id": "ApiEndpointsCard", "title": "REST / RPC 接口契约清单", "category": "api", "summary": "呈现带 HTTP 方法染色、URL 路径、状态码与描述的 API 列表"},
@@ -999,6 +1219,39 @@ BLACKBOARD_COMPONENT_CATALOG: list[dict[str, Any]] = [
 ]
 
 BLACKBOARD_SCHEMAS: dict[str, dict[str, Any]] = {
+    "DataTable": {
+        "component_id": "DataTable",
+        "title": "结构化数据表格",
+        "schema": {
+            "title": "string (可选表格总标题)",
+            "columns": [
+                {
+                    "key": "string (字段键名，必需)",
+                    "label": "string (表头展示名称，可选，缺省同 key)",
+                    "type": "'text' | 'badge' | 'mono' (列展示样式，可选)"
+                }
+            ],
+            "rows": [
+                "object (键值对应各列 key 的数据行对象，必需)"
+            ],
+            "caption": "string (表格底部备注说明，可选)"
+        },
+        "example": {
+            "title": "全星域 Agent 会话健康度与审计状态表",
+            "columns": [
+                {"key": "agent", "label": "Agent 标识", "type": "mono"},
+                {"key": "machine", "label": "所在服务器"},
+                {"key": "status", "label": "健康度", "type": "badge"},
+                {"key": "sessions", "label": "活跃会话数"}
+            ],
+            "rows": [
+                {"agent": "local-codex", "machine": "本机", "status": "ok", "sessions": 43},
+                {"agent": "ssh-codex-debian", "machine": "Debian", "status": "ok", "sessions": 19},
+                {"agent": "ssh-hermes-wsl", "machine": "WSL", "status": "ok", "sessions": 4}
+            ],
+            "caption": "审计耗时 1.2s，共扫描 3 台主机节点"
+        }
+    },
     "StepTimeline": {
         "component_id": "StepTimeline",
         "title": "任务阶段与流水线时间线",
@@ -1246,6 +1499,69 @@ BLACKBOARD_SCHEMAS: dict[str, dict[str, Any]] = {
 
 def _blackboard_components_list(payload: dict[str, Any], ctx: AgentContext) -> dict[str, Any]:
     return {"ok": True, "count": len(BLACKBOARD_COMPONENT_CATALOG), "items": BLACKBOARD_COMPONENT_CATALOG}
+
+
+def _blackboard_auto_render(payload: dict[str, Any], ctx: AgentContext) -> dict[str, Any]:
+    key = payload.get("key")
+    content = payload.get("content")
+    if not isinstance(key, str) or not key.strip():
+        raise AgentApiError("invalid_input", "key is required")
+    if not isinstance(content, str) or not content.strip():
+        raise AgentApiError("invalid_input", "content is required")
+    title = payload.get("title") or key.strip().replace("_", " ").title()
+    
+    from .jev_client import evaluate_blackboard_component
+    try:
+        eval_res = evaluate_blackboard_component(content.strip(), store=ctx.store)
+        comp = eval_res.get("component") or "StatusCard"
+    except Exception as e:
+        # Jev key 未配置或调用失败时的优雅回退
+        comp = "StatusCard"
+        eval_res = {"fallback": True, "error": str(e)}
+
+    # 根据推荐的组件类型组装 json-render 结构
+    rendered_value: dict[str, Any] = {"component": comp, "title": title}
+    lines = [line.strip() for line in content.strip().splitlines() if line.strip()]
+
+    if comp == "StepTimeline":
+        steps = []
+        for idx, line in enumerate(lines, 1):
+            status = "completed" if any(w in line.lower() for w in ["ok", "pass", "done", "成功", "完成"]) else ("failed" if any(w in line.lower() for w in ["fail", "error", "err", "失败"]) else ("running" if idx == len(lines) else "pending"))
+            steps.append({"title": line, "status": status})
+        rendered_value["steps"] = steps or [{"title": content, "status": "completed"}]
+    elif comp == "MetricGrid":
+        metrics = []
+        for line in lines[:8]:
+            if ":" in line or "=" in line or "：" in line:
+                parts = line.replace("：", ":").replace("=", ":").split(":", 1)
+                metrics.append({"label": parts[0].strip(), "value": parts[1].strip()})
+            else:
+                metrics.append({"label": f"Metric {len(metrics)+1}", "value": line})
+        rendered_value["metrics"] = metrics
+    elif comp == "Checklist":
+        items = []
+        for line in lines:
+            checked = any(w in line.lower() for w in ["[x]", "done", "pass", "ok", "完成", "通过"])
+            clean_label = line.replace("[x]", "").replace("[ ]", "").strip()
+            items.append({"label": clean_label, "checked": checked})
+        rendered_value["items"] = items
+    elif comp == "CveSecurityReport":
+        rendered_value["summary"] = content[:300]
+        rendered_value["severity"] = "high" if any(w in content.lower() for w in ["high", "critical", "严重"]) else "medium"
+        rendered_value["findings"] = [{"title": l, "severity": "medium"} for l in lines[:5]]
+    elif comp == "TestReport":
+        rendered_value["total"] = len(lines)
+        passed = sum(1 for l in lines if any(w in l.lower() for w in ["pass", "ok", "通过", "成功"]))
+        rendered_value["passed"] = passed
+        rendered_value["failed"] = len(lines) - passed
+        rendered_value["tests"] = [{"name": l, "status": "passed" if any(w in l.lower() for w in ["pass", "ok"]) else "failed"} for l in lines[:10]]
+    else:
+        rendered_value["status"] = "info"
+        rendered_value["description"] = content
+
+    # 写入黑板
+    set_res = _blackboard_set({**payload, "key": key, "value": rendered_value}, ctx)
+    return {"ok": True, "namespace": set_res["namespace"], "key": key, "component": comp, "jev_decision": eval_res, "rendered": rendered_value}
 
 
 def _blackboard_component_schema(payload: dict[str, Any], ctx: AgentContext) -> dict[str, Any]:
@@ -1683,6 +1999,31 @@ def _lock_list(_payload: dict[str, Any], ctx: AgentContext) -> dict[str, Any]:
     return {"items": active_locks, "count": len(active_locks)}
 
 
+def _browser_run(payload: dict[str, Any], ctx: AgentContext) -> dict[str, Any]:
+    url = payload.get("url")
+    goal = payload.get("goal")
+    inputs = payload.get("inputs")
+    if not isinstance(url, str) or not isinstance(goal, str):
+        raise AgentApiError("invalid_input", "url and goal are required")
+    if inputs is not None and not isinstance(inputs, dict):
+        raise AgentApiError("invalid_input", "inputs must be an object mapping field labels to values")
+    try:
+        max_steps = int(payload.get("max_steps", 30))
+        from .jev_browser import run_browser_task
+
+        result = run_browser_task(
+            url=url,
+            goal=goal,
+            inputs=inputs,
+            store=ctx.store,
+            max_steps=max_steps,
+            reset=payload.get("reset") is True,
+        )
+        return result
+    except (ValueError, RuntimeError) as exc:
+        raise AgentApiError("browser_task_failed", str(exc)) from exc
+
+
 HANDLERS: dict[str, Callable[[dict[str, Any], AgentContext], dict[str, Any]]] = {
     "catalog.list": _catalog,
     "sessions.list": _sessions_list,
@@ -1694,10 +2035,13 @@ HANDLERS: dict[str, Callable[[dict[str, Any], AgentContext], dict[str, Any]]] = 
     "sessions.create": _sessions_create,
     "sessions.send": _sessions_send,
     "sessions.stop": _sessions_stop,
+    "sessions.delete": _sessions_delete,
+    "sessions.tree": _sessions_tree,
     "plugins.list": _plugins_list,
     "plugins.configure": _plugins_configure,
     "plugins.open": _plugins_open,
     "plugins.close": _plugins_close,
+    "browser.run": _browser_run,
     "machines.dispatch": _machines_dispatch,
     "monitor.sessions.add": _monitor_sessions_add,
     "monitor.sessions.remove": _monitor_sessions_remove,
@@ -1707,6 +2051,7 @@ HANDLERS: dict[str, Callable[[dict[str, Any], AgentContext], dict[str, Any]]] = 
     "blackboard.delete": _blackboard_delete,
     "blackboard.components.list": _blackboard_components_list,
     "blackboard.component.schema": _blackboard_component_schema,
+    "blackboard.auto_render": _blackboard_auto_render,
     "swarm.milestone.declare": _milestone_declare,
     "swarm.milestone.resolve": _milestone_resolve,
     "swarm.milestone.list": _milestone_list,

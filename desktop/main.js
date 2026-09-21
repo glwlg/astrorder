@@ -187,7 +187,7 @@ async function configureRoot() {
       }, error => error ? reject(new Error('初始化服务端配置失败')) : resolve())
     })
   }
-  const production = JSON.parse(readFileSync(path.join(root, '.runtime', 'production.json'), 'utf8'))
+  const production = JSON.parse(readFileSync(path.join(process.env.LOCALAPPDATA, 'Astrorder', 'production.json'), 'utf8'))
   const port = Number(production.environment?.ASTRORDER_PORT || 30001)
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('生产端口配置无效')
   appUrl = `http://127.0.0.1:${port}`
@@ -373,23 +373,6 @@ ipcMain.handle('services:run', async (event, target, action) => {
   await run(target, action)
   return states
 })
-ipcMain.handle('window:set-theme', (_event, theme) => {
-  if (!window || window.isDestroyed()) return
-  const isDark = theme === 'dark'
-  try {
-    window.setTitleBarOverlay({
-      color: isDark ? '#1c2028' : '#F7F7F7',
-      symbolColor: isDark ? '#a7b1c1' : '#555e6d',
-      height: 32,
-    })
-  } catch {}
-})
-ipcMain.handle('window:set-overlay', (_event, options) => {
-  if (!window || window.isDestroyed() || !options) return
-  try {
-    window.setTitleBarOverlay(options)
-  } catch {}
-})
 ipcMain.handle('preview:open', (_event, payload) => openPreview(payload))
 ipcMain.handle('preview:resolve', (_event, url) => fetchPreviewImage(url))
 ipcMain.on('preview:close', () => closePreview())
@@ -547,12 +530,6 @@ app.whenReady().then(async () => {
       backgroundColor: isDark ? '#15181e' : '#f9fafc',
       width: 1440, height: 900, minWidth: 960, minHeight: 640,
       icon: path.join(root, 'frontend', 'public', 'favicon.ico'),
-      titleBarStyle: 'hidden',
-      titleBarOverlay: {
-        color: isDark ? '#1c2028' : '#F7F7F7',
-        symbolColor: isDark ? '#a7b1c1' : '#555e6d',
-        height: 32,
-      },
       webPreferences: {
         preload: path.join(__dirname, 'preload.js'),
         contextIsolation: true,

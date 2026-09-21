@@ -63,6 +63,16 @@ it('desktop shows the bound native model and switches the exact session', async 
   expect(notifications.show).not.toHaveBeenCalled()
 })
 
+it('shows the native default medium effort when the runtime has not reported one', async () => {
+  vi.spyOn(api, 'getSessionModel').mockResolvedValue({ model: 'bound', provider: 'p', effort: null })
+  vi.spyOn(api, 'getSessionModels').mockResolvedValue({ items: [] })
+  renderControl()
+
+  await waitFor(() => expect(screen.getByRole('button', { name: '选择会话模型' })).toHaveTextContent('中'))
+  const slider = await openEffortSlider()
+  expect(slider).toHaveAttribute('aria-valuenow', '1')
+})
+
 function renderControl() {
   return render(
     <MantineProvider>

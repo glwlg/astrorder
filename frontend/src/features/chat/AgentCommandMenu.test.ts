@@ -48,4 +48,12 @@ describe('agent composer menus', () => {
     expect(formatAgentMention({ name: 'browser', description: '', kind: 'skill', path: '/skills/browser' }))
       .toBe('@browser ')
   })
+
+  it('offers the Astrorder browser command for Chinese and English searches', () => {
+    for (const text of ['@浏览', '@browser']) {
+      const item = filterAgentMentions([], text)[0]
+      expect(item.path).toBe('system:browser')
+      expect(formatAgentMention(item)).toBe('@浏览器 ')
+    }
+  })
 })

@@ -16,7 +16,7 @@ import {
   IconGitBranch,
 } from '@tabler/icons-react'
 import {
-  Badge,
+  
   Button,
   Checkbox,
   Collapse,
@@ -31,7 +31,7 @@ import {
   UnstyledButton,
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { useEffect, useMemo, useState, type CSSProperties } from 'react'
+import {  useMemo, useState, type CSSProperties } from 'react'
 import { AnimatePresence, LayoutGroup, motion } from 'motion/react'
 import { VariableProximity } from './animations/VariableProximity'
 import { useSessionOrder } from '../hooks/useSessionOrder'

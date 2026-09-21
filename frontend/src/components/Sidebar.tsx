@@ -1,5 +1,5 @@
-import { IconAdjustments, IconLayoutDashboard, IconMessageCircle, IconPuzzle, IconSettings, IconTopologyStarRing, IconUsers, IconWorld } from '@tabler/icons-react'
-import { ActionIcon, Modal, NavLink, Stack, Tabs, Text } from '@mantine/core'
+import { IconAdjustments, IconLayoutDashboard, IconMessageCircle, IconPuzzle, IconSettings, IconTopologyStarRing, IconUsers, IconChartBar, IconWorld } from '@tabler/icons-react'
+import { ActionIcon, Modal, NavLink, Stack, Tabs, Text, Tooltip } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useState } from 'react'
 import { NavLink as RouterNavLink, useLocation } from 'react-router-dom'
@@ -16,6 +16,7 @@ const navItems = [
   { to: '/monitor', label: '监控室', icon: IconLayoutDashboard, id: 'monitor' },
   { to: '/swarm', label: '星图', icon: IconTopologyStarRing, id: 'swarm' },
   { to: '/groups', label: '群聊', icon: IconUsers, id: 'groups' },
+  { to: '/analytics', label: '统计', icon: IconChartBar, id: 'analytics' },
 ]
 
 function addSessionToMonitor(sessionKey: string, title?: string) {
@@ -25,6 +26,10 @@ function addSessionToMonitor(sessionKey: string, title?: string) {
     if (!current.includes(sessionKey)) {
       const next = [...current, sessionKey]
       localStorage.setItem('astrorder:monitor-sessions', JSON.stringify(next))
+      for (const storageKey of ['astrorder:monitor-auto-sessions', 'astrorder:monitor-excluded-sessions']) {
+        const values: string[] = JSON.parse(localStorage.getItem(storageKey) || '[]')
+        localStorage.setItem(storageKey, JSON.stringify(values.filter(key => key !== sessionKey)))
+      }
       window.dispatchEvent(new CustomEvent('astrorder:monitor-sessions-changed', { detail: next }))
       notifications.show({
         color: 'teal',
@@ -60,8 +65,9 @@ export function Sidebar({
 
   const isSwarm = location.pathname.startsWith('/swarm')
   const isGroups = location.pathname.startsWith('/groups') || location.pathname.startsWith('/chat/group-')
-  const isMonitor = location.pathname.startsWith('/monitor')
-  const isChat = !isSwarm && !isGroups && !isMonitor
+  const isMonitorRoute = location.pathname.startsWith('/monitor')
+  const isAnalytics = location.pathname.startsWith('/analytics')
+  const isChat = !isSwarm && !isGroups && !isMonitorRoute && !isAnalytics
 
   return (
     <>
@@ -69,49 +75,51 @@ export function Sidebar({
         <nav aria-label="主导航">
           <div className="sidebar-primary-nav">
             {navItems.map(({ to, label, icon: Icon, id }) => {
-              const isMonitor = to === '/monitor'
+              const isThisMonitor = id === 'monitor'
               const isActive =
                 (id === 'swarm' && isSwarm) ||
                 (id === 'groups' && isGroups) ||
-                (id === 'monitor' && isMonitor) ||
+                (id === 'monitor' && isMonitorRoute) ||
+                (id === 'analytics' && isAnalytics) ||
                 (id === 'chat' && isChat)
               return (
-                <NavLink
-                  component={RouterNavLink}
-                  to={to}
-                  key={to}
-                  label={label}
-                  leftSection={<Icon size={16} stroke={1.8} />}
-                  onClick={onNavigate}
-                  data-active={isActive ? 'true' : undefined}
-                  className={`sidebar-nav-link ${isActive ? 'active' : ''} ${isMonitor && isMonitorDragOver ? 'is-drag-over' : ''}`}
-                  onDragOver={isMonitor ? (e) => {
-                    e.preventDefault()
-                    e.dataTransfer.dropEffect = 'copy'
-                    setIsMonitorDragOver(true)
-                  } : undefined}
-                  onDragLeave={isMonitor ? () => setIsMonitorDragOver(false) : undefined}
-                  onDrop={isMonitor ? (e) => {
-                    e.preventDefault()
-                    setIsMonitorDragOver(false)
-                    let key = ''
-                    let title = '会话'
-                    const raw = e.dataTransfer.getData('application/x-astrorder-session')
-                    if (raw) {
-                      try {
-                        const item = JSON.parse(raw)
-                        key = item.key || `${item.agent_id}::${item.id}`
-                        title = item.title || '会话'
-                      } catch {}
-                    }
-                    if (!key) {
-                      key = e.dataTransfer.getData('text/plain')
-                    }
-                    if (key) {
-                      addSessionToMonitor(key, title)
-                    }
-                  } : undefined}
-                />
+                <Tooltip key={to} label={label} position="bottom" withArrow openDelay={200}>
+                  <NavLink
+                    component={RouterNavLink}
+                    to={to}
+                    leftSection={<Icon size={18} stroke={1.8} />}
+                    onClick={onNavigate}
+                    data-active={isActive ? 'true' : undefined}
+                    aria-label={label}
+                    className={`sidebar-nav-link ${isActive ? 'active' : ''} ${isThisMonitor && isMonitorDragOver ? 'is-drag-over' : ''}`}
+                    onDragOver={isThisMonitor ? (e) => {
+                      e.preventDefault()
+                      e.dataTransfer.dropEffect = 'copy'
+                      setIsMonitorDragOver(true)
+                    } : undefined}
+                    onDragLeave={isThisMonitor ? () => setIsMonitorDragOver(false) : undefined}
+                    onDrop={isThisMonitor ? (e) => {
+                      e.preventDefault()
+                      setIsMonitorDragOver(false)
+                      let key = ''
+                      let title = '会话'
+                      const raw = e.dataTransfer.getData('application/x-astrorder-session')
+                      if (raw) {
+                        try {
+                          const item = JSON.parse(raw)
+                          key = item.key || `${item.agent_id}::${item.id}`
+                          title = item.title || '会话'
+                        } catch {}
+                      }
+                      if (!key) {
+                        key = e.dataTransfer.getData('text/plain')
+                      }
+                      if (key) {
+                        addSessionToMonitor(key, title)
+                      }
+                    } : undefined}
+                  />
+                </Tooltip>
               )
             })}
           </div>

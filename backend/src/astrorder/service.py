@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -39,6 +41,25 @@ COMMAND_STATES = {
 }
 
 
+def _is_placeholder_title(title: str | None) -> bool:
+    if not title:
+        return True
+    t = title.strip().lower()
+    placeholders = {
+        "新会话", "未命名", "未命名会话", "untitled", "untitled session",
+        "new session", "astrorder 远程会话", "none", "null"
+    }
+    if t in placeholders:
+        return True
+    if re.match(r"^[0-9a-f]{8,}$", t, re.I):
+        return True
+    if re.match(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", t, re.I):
+        return True
+    if re.match(r"^d{8}_d{6}_[0-9a-f]+$", t, re.I):
+        return True
+    return False
+
+
 class ProtocolError(ValueError):
     pass
 
@@ -53,6 +74,14 @@ class CommandRejected(RuntimeError):
 NativeCommandHandler = Callable[[dict[str, Any]], Awaitable[tuple[str, str | None]]]
 NativeHistoryHandler = Callable[[str], Awaitable[list[dict[str, Any]]]]
 ModelBindingRestorer = Callable[[str, str, str, str, str | None], Awaitable[None]]
+
+
+def _queued_runtime(handler: NativeCommandHandler | None, operation: str):
+    runtime = getattr(handler, "__self__", None)
+    method = getattr(runtime, operation, None)
+    if not callable(method):
+        raise CommandRejected("当前 Agent 不支持管理服务端排队消息。", 409)
+    return method
 
 
 @dataclass
@@ -99,6 +128,19 @@ class ControlService:
     def clear_native_command_handler(self, agent_id: str) -> None:
         self._native_command_handlers.pop(agent_id, None)
         self._native_command_capabilities.pop(agent_id, None)
+
+    def update_queued_command(self, agent_id: str, session_id: str, command_id: str, text: str) -> dict[str, Any]:
+        return _queued_runtime(self._native_command_handlers.get(agent_id), "update_queued")(session_id, command_id, text)
+
+    def cancel_queued_command(self, agent_id: str, session_id: str, command_id: str) -> dict[str, Any]:
+        return _queued_runtime(self._native_command_handlers.get(agent_id), "remove_queued")(session_id, command_id)
+
+    async def send_queued_command(self, agent_id: str, session_id: str, command_id: str) -> dict[str, Any]:
+        return await asyncio.to_thread(
+            _queued_runtime(self._native_command_handlers.get(agent_id), "send_queued"),
+            session_id,
+            command_id,
+        )
 
     def register_model_binding_restorer(self, kind: str, restorer: ModelBindingRestorer) -> None:
         self._model_binding_restorers[kind] = restorer
@@ -399,6 +441,28 @@ class ControlService:
             raise CommandRejected(capability_error)
 
         if command["action"] == "send":
+            # 若会话标题仍为默认占位符，且本次包含有意义用户输入，即刻更新会话标题，避免长久显示项目名
+            try:
+                s_row = self.store.get_session(command["agent_id"], command["session_id"])
+                if s_row and _is_placeholder_title(s_row.get("title")):
+                    raw_text = (command.get("text") or "").strip()
+                    cleaned = re.sub(r"【[^】]+】", "", raw_text)
+                    cleaned = re.sub(r'@(?:"[^"]+"|[^s@]+)', '', cleaned).strip()
+                    first_l = cleaned.splitlines()[0].strip() if cleaned else raw_text.splitlines()[0].strip()
+                    if first_l and not _is_placeholder_title(first_l):
+                        new_t = first_l[:50]
+                        now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                        up_s = {**s_row, "title": new_t, "updated_at": now_iso}
+                        self.store.upsert_session(up_s)
+                        self._server_event(
+                            "session.upsert",
+                            agent_id=command["agent_id"],
+                            session_id=command["session_id"],
+                            data=up_s,
+                        )
+            except Exception:
+                pass
+
             binding = self.store.get_session_model_binding(command["agent_id"], command["session_id"])
             restorer = self._model_binding_restorers.get(agent["kind"])
             if binding is not None and restorer is not None:

@@ -56,9 +56,18 @@ class AttachmentManager:
                 raise AttachmentError("Attachment is too large", 413)
             destination.write(chunk)
 
-    async def save(self, upload: UploadFile) -> dict[str, str]:
+    async def save(self, upload: UploadFile, source_path: str | None = None) -> dict[str, str]:
         name = self._safe_name(upload.filename)
         media_type = self._media_type(upload.content_type)
+        if source_path is not None:
+            if (
+                not source_path
+                or len(source_path) > 4096
+                or any(ord(character) < 32 for character in source_path)
+                or not Path(source_path).is_absolute()
+                or Path(source_path).name != name
+            ):
+                raise AttachmentError("Attachment source path is invalid")
         attachment_id = str(uuid4())
         storage_name = f"{secrets.token_hex(16)}.blob"
         target = self.root / storage_name
@@ -71,7 +80,7 @@ class AttachmentManager:
                 size = self._write_limited(upload.file, handle, self.settings.max_attachment_size)
             os.replace(temporary, target)
             return self.store.add_attachment(
-                attachment_id, name, media_type, size, storage_name
+                attachment_id, name, media_type, size, storage_name, source_path
             )
         except AttachmentError:
             temporary.unlink(missing_ok=True)

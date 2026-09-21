@@ -1,6 +1,7 @@
 import { MantineProvider } from '@mantine/core'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { ReactNode } from 'react'
 import type { ArtifactRef } from '../../domain/artifact'
 import type { Session } from '../../domain/types'
 import { useSidecarStore } from './sidecarStore'
@@ -9,13 +10,13 @@ const viewerLifecycle = vi.hoisted(() => ({ mounts: new Map<string, number>(), u
 
 vi.mock('./registry', async () => {
   const React = await import('react')
-  function StatefulViewer({ artifact }: { artifact: ArtifactRef }) {
+  function StatefulViewer({ artifact, toolbarAction }: { artifact: ArtifactRef; toolbarAction?: ReactNode }) {
     React.useEffect(() => {
       viewerLifecycle.mounts.set(artifact.id, (viewerLifecycle.mounts.get(artifact.id) || 0) + 1)
       return () => { viewerLifecycle.unmounts.set(artifact.id, (viewerLifecycle.unmounts.get(artifact.id) || 0) + 1) }
     }, [artifact.id])
     const [value, setValue] = React.useState(artifact.name)
-    return <input aria-label={artifact.id} value={value} onChange={(event) => setValue(event.currentTarget.value)} />
+    return <div data-testid={`viewer-${artifact.id}`}>{toolbarAction}<input aria-label={artifact.id} value={value} onChange={(event) => setValue(event.currentTarget.value)} /></div>
   }
   return { artifactViewerRegistry: { findViewer: () => ({ component: StatefulViewer }) } }
 })
@@ -47,6 +48,7 @@ function artifact(id: string, owner: Session = session): ArtifactRef {
     writable: true,
     sessionId: owner.id,
     agentId: owner.agent_id,
+    path: `P:/workspace/${id}.txt`,
   }
 }
 
@@ -107,6 +109,21 @@ describe('SidecarHost tab keep-alive', () => {
     expect(viewerLifecycle.mounts.get(first.id)).toBe(1)
     expect(viewerLifecycle.mounts.get(second.id)).toBe(1)
     expect(viewerLifecycle.unmounts.get(first.id) || 0).toBe(0)
+  })
+
+  it('renders file location inside the active viewer instead of the tab bar', () => {
+    const file = artifact('artifact:located')
+    useSidecarStore.setState({
+      isOpen: true,
+      activeTabId: file.id,
+      activeSessionKey: 'agent-keepalive:session-keepalive',
+      tabs: [{ id: file.id, type: 'artifact', title: 'Located', artifact: file, viewerId: 'test', closable: true }],
+    })
+
+    renderHost()
+    const button = screen.getByRole('button', { name: '在文件树中定位' })
+    expect(button.closest('.sidecar-header-bar')).toBeNull()
+    expect(screen.getByTestId(`viewer-${file.id}`)).toContainElement(button)
   })
 
   it('keeps a viewer mounted while switching away from and back to its session', () => {

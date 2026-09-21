@@ -83,6 +83,21 @@ class NativeObservers:
         env=self.app.state.environments
         return [env.codex,*env.remote.values()]
 
+    def _write_decision(self,client,approval_id,decision):
+        home=client._home.as_posix()
+        if hasattr(client,'remote_json'):
+            source='import json,os,re\nfrom pathlib import Path\n'+inspect.getsource(write_decision)+'\nprint(json.dumps(write_decision('+repr(home)+','+repr(approval_id)+','+repr(decision)+')))'
+            return client.remote_json(source) is True
+        return write_decision(Path(home),approval_id,decision)
+
+    def _resolve_pending(self,aid,sid,tool_call_id=None):
+        with self.lock:
+            keys=[key for key,(_,approval) in self.pending.items() if key[0]==aid and key[1]==sid and (tool_call_id is None or approval.get('data',{}).get('tool_call_id')==tool_call_id)]
+            resolved=[(key,self.pending.pop(key)[1]) for key in keys]
+        for key,approval in resolved:
+            self.ack.setdefault(aid,[]).append(key[2])
+            self.app.state.service._server_event('approval.upsert',agent_id=aid,session_id=sid,data={**approval,'state':'resolved'})
+
     def collect(self, client):
         if not client._home or client.state != 'connected': return
         aid=client.agent_id
@@ -111,6 +126,10 @@ class NativeObservers:
                         client._record_thread(native['thread'])
                 except (RuntimeError, OSError, ValueError):
                     self.states.setdefault(aid,{})['catalog_lookup_ok']=False
+            if data['event'] in {'PreToolUse','PostToolUse'} and data.get('tool_call_id'):
+                self._resolve_pending(aid,data['session_id'],data['tool_call_id'])
+            elif data['event'] in {'Stop','Interrupt'}:
+                self._resolve_pending(aid,data['session_id'])
             # Unknown native IDs remain observations, not invented catalog entries.
             if data['event']=='Stop' and data['notification']:
                 session=self.app.state.store.get_session(aid,data['session_id'])
@@ -118,6 +137,17 @@ class NativeObservers:
                 try: data['preview']=reply_preview(client,data['session_id'],data.get('turn_id'))
                 except (RuntimeError,OSError,ValueError): data['preview']=''
             if data.get('approval_pending'):
+                if self.app.state.store.get_session_approval_mode_binding(aid,data['session_id'])=='full_access':
+                    self._write_decision(client,data['id'],'allow')
+                    self._resolve_pending(aid,data['session_id'],data.get('tool_call_id'))
+                    self.app.state.service._server_event('approval.upsert',agent_id=aid,session_id=data['session_id'],data={'id':f"observer-approval:{aid}:{data['id']}",'agent_id':aid,'session_id':data['session_id'],'target_id':data['id'],'title':'Codex 请求执行授权'+((' · '+data['tool_name']) if data.get('tool_name') else ''),'detail':data.get('detail') or data.get('tool_name') or '原生 Codex 操作等待授权','state':'resolved','data':{'source':'codex-observer','tool_call_id':data.get('tool_call_id')}})
+                    data['approval_pending']=False
+                    data['notification']=False
+                    self.ack[aid].append(data['id'])
+                    present.discard(data['id'])
+                    event=self.app.state.store.append_event(event_id='observer-'+data['id'],event_type='native.observation',agent_id=aid,session_id=data['session_id'],data=data)
+                    self.app.state.service._publish(event)
+                    continue
                 is_stale_approval = (time.time() - data['observed_at'] > 600)
                 if is_stale_approval:
                     self.ack[aid].append(data['id'])
@@ -126,7 +156,7 @@ class NativeObservers:
                 key=(aid,data['session_id'],data['id'])
                 with self.lock:
                     if key not in self.pending:
-                        approval={'id':f"observer-approval:{aid}:{data['id']}",'agent_id':aid,'session_id':data['session_id'],'target_id':data['id'],'title':'Codex 请求执行授权'+((' · '+data['tool_name']) if data.get('tool_name') else ''),'detail':data.get('detail') or data.get('tool_name') or '原生 Codex 操作等待授权','state':'pending','data':{'source':'codex-observer'}}
+                        approval={'id':f"observer-approval:{aid}:{data['id']}",'agent_id':aid,'session_id':data['session_id'],'target_id':data['id'],'title':'Codex 请求执行授权'+((' · '+data['tool_name']) if data.get('tool_name') else ''),'detail':data.get('detail') or data.get('tool_name') or '原生 Codex 操作等待授权','state':'pending','data':{'source':'codex-observer','tool_call_id':data.get('tool_call_id')}}
                         self.pending[key]=(client,approval)
                         if aid not in self.supported:
                             self.supported.add(aid); self.app.state.service._publish_capabilities(aid)
@@ -151,12 +181,8 @@ class NativeObservers:
         with self.lock:
             record=self.pending.get((aid,sid,rid))
             if not record: return 'failed','审批已过期或不属于当前会话。'
-            client,approval=record; home=client._home.as_posix()
-            if hasattr(client,'remote_json'):
-                source='import json,os,re\nfrom pathlib import Path\n'+inspect.getsource(write_decision)+'\nprint(json.dumps(write_decision('+repr(home)+','+repr(rid)+','+repr('allow' if command['action']=='approve' else 'deny')+')))'
-                written=client.remote_json(source) is True
-            else:
-                written=write_decision(Path(home),rid,'allow' if command['action']=='approve' else 'deny')
+            client,approval=record
+            written=self._write_decision(client,rid,'allow' if command['action']=='approve' else 'deny')
             if not written: return 'failed','原生审批已过期；未发送决定。'
             self.pending.pop((aid,sid,rid),None)
             self.app.state.service._server_event('approval.upsert',agent_id=aid,session_id=sid,data={**approval,'state':'approved' if command['action']=='approve' else 'rejected'})
@@ -358,9 +384,9 @@ class NativeObservers:
         content=script.read_text(encoding='utf-8')
         home=client._home.as_posix()
         if hasattr(client,'remote_json'):
-            source=inspect.getsource(observer_plugin)+'\nimport sys\nprint(json.dumps(install_plugin('+repr(home)+',sys.executable,'+repr(content)+','+repr(client._executable())+')))'
+            source=inspect.getsource(observer_plugin)+'\nimport sys\nprint(json.dumps(install_plugin('+repr(home)+',sys.executable,'+repr(content)+','+repr(client._executable())+','+repr(agent_id)+')))'
             result=client.remote_json(source)
         else:
-            result=observer_plugin.install_plugin(home,sys.executable,content,client._executable())
+            result=observer_plugin.install_plugin(home,sys.executable,content,client._executable(),agent_id)
         self.states.setdefault(agent_id,{})['installed']=True
         return result

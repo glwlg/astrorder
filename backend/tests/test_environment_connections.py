@@ -38,6 +38,39 @@ def test_local_codex_environment_exposes_explicit_daemon_ownership_mode(tmp_path
         store.close()
 
 
+def test_remote_codex_stages_attachment_on_remote_workspace():
+    connection = RemoteCodex.__new__(RemoteCodex)
+    connection._threads = {"thread-1": {"cwd": "/srv/repo"}}
+    seen = []
+    attachment_id = "5d9d99ea-53cd-44d8-a59d-3ee480e5c379"
+    connection.remote_json = lambda source, payload: seen.append((source, payload)) or f"/srv/repo/.astrorder/attachments/{attachment_id}/report.pdf"
+    staged = connection._stage_attachment(
+        "thread-1", attachment_id, None, {"name": "report.pdf"}, b"%PDF"
+    )
+    assert staged == f"/srv/repo/.astrorder/attachments/{attachment_id}/report.pdf"
+    assert seen[0][1]["content_base64"] == base64.b64encode(b"%PDF").decode()
+    assert "P:" not in str(seen[0])
+
+
+def test_remote_codex_sends_large_payload_over_ssh_stdin(monkeypatch):
+    connection = RemoteCodex.__new__(RemoteCodex)
+    connection.ssh_argv = lambda: ["ssh", "host"]
+    captured = {}
+
+    def run(argv, **kwargs):
+        captured.update(argv=argv, **kwargs)
+        return SimpleNamespace(returncode=0, stdout='"/srv/repo/report.pdf"\n')
+
+    monkeypatch.setattr("astrorder.environment_connections.subprocess.run", run)
+    result = connection.remote_json(
+        "import json,sys\np=json.loads(sys.stdin.readline())\nprint(json.dumps(p['path']))",
+        {"path": "/srv/repo/report.pdf", "content": "x" * 100_000},
+    )
+    assert result == "/srv/repo/report.pdf"
+    assert len(captured["argv"][-1]) < 1000
+    assert '"content":"' + "x" * 100 in captured["input"]
+
+
 def test_local_hermes_environment_exposes_explicit_daemon_ownership_mode(tmp_path):
     settings = Settings(database_url=f'sqlite:///{tmp_path}/environment-hermes-mode.db', auto_connect_local_hermes=False)
     store = Store(settings)

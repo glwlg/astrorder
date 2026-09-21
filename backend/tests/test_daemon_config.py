@@ -9,6 +9,17 @@ from astrorder.main import create_app
 from astrorder.native_codex import CodexConnection
 
 
+def test_default_runtime_data_stays_out_of_the_project(monkeypatch, tmp_path):
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.delenv("ASTRORDER_DATABASE_URL", raising=False)
+    monkeypatch.delenv("ASTRORDER_ATTACHMENTS_DIR", raising=False)
+
+    settings = Settings.from_env()
+
+    assert settings.database_url == f"sqlite:///{(tmp_path / 'Astrorder/data/astrorder.sqlite3').as_posix()}"
+    assert settings.attachments_dir == tmp_path / "Astrorder/data/attachments"
+
+
 def test_settings_reads_explicit_session_daemon_bridge_configuration(monkeypatch, tmp_path):
     monkeypatch.setenv("ASTRORDER_BROWSER_SECRET", "browser-test")
     monkeypatch.setenv("ASTRORDER_CONNECTOR_SECRET", "connector-test")

@@ -409,7 +409,7 @@ def test_unsupported_attempt_is_preserved(configured):
             assert "unsupported" in commands[0]["error"].lower()
 
 
-def test_attachment_is_bounded_and_command_keeps_attachment(configured):
+def test_attachment_is_bounded_and_command_keeps_attachment(configured, tmp_path):
     app = configured(max_attachment_size=4)
     with TestClient(app) as client:
         login(client)
@@ -433,6 +433,16 @@ def test_attachment_is_bounded_and_command_keeps_attachment(configured):
         assert uploaded.status_code == 201
         attachment = uploaded.json()
         assert attachment["url"].startswith("/api/v1/attachments/")
+        source = tmp_path / "note.txt"
+        source.write_bytes(b"1234")
+        path_upload = client.post(
+            "/api/v1/attachments",
+            files={"file": ("note.txt", b"1234", "text/plain")},
+            data={"source_path": str(source)},
+            headers={"Origin": "http://testserver"},
+        )
+        assert path_upload.status_code == 201
+        assert app.state.store.get_attachment(path_upload.json()["id"])["source_path"] == str(source)
 
         with client.websocket_connect(
             "/ws/v1/connector", headers={"Authorization": "Bearer connector-test-secret"}

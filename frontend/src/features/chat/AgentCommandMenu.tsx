@@ -131,24 +131,32 @@ export function buildCommandMenuItems(
 export function filterAgentMentions(items: AgentMention[], text: string): AgentMention[] {
   const query = text.slice(text.lastIndexOf('@') + 1).toLocaleLowerCase()
 
-  // 内置星序系统命令：@群星 / @stars
+  // 内置星序系统命令
   const swarmItem: AgentMention = {
     name: '群星',
     description: '星序多 Agent 协同：激活主星调度与伴星派生模式 (支持英文 @stars)',
     kind: 'skill',
     path: 'system:swarm',
   }
-  const allItems = [swarmItem, ...items]
+  const browserItem: AgentMention = {
+    name: '浏览器',
+    description: '星序 Jev 浏览器自动执行 (支持英文 @browser)',
+    kind: 'skill',
+    path: 'system:browser',
+  }
+  const allItems = [swarmItem, browserItem, ...items.filter(item => item.name.toLocaleLowerCase() !== 'browser')]
 
   return allItems.filter(item =>
     item.name.toLocaleLowerCase().includes(query)
     || item.description.toLocaleLowerCase().includes(query)
-    || (item.name === '群星' && 'stars'.includes(query)),
+    || (item.name === '群星' && 'stars'.includes(query))
+    || (item.name === '浏览器' && 'browser'.includes(query))
   )
 }
 
 export function formatAgentMention(item: AgentMention): string {
   if (item.path === 'system:swarm') return '@群星 '
+  if (item.path === 'system:browser') return '@浏览器 '
   if (item.kind === 'skill') return item.name.includes(' ') ? `@"${item.name}" ` : `@${item.name} `
   const path = item.name.replaceAll('\\', '/')
   const label = path.split('/').at(-1) || path

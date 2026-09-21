@@ -1,5 +1,5 @@
 import { MantineProvider } from '@mantine/core'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ArtifactRef } from '../../../../domain/artifact'
 import { FileTreeViewer } from './FileTreeViewer'
@@ -16,10 +16,10 @@ const artifact: ArtifactRef = {
   agentId: 'agent-tree',
 }
 
-function renderTree() {
+function renderTree(target = artifact) {
   return render(
     <MantineProvider>
-      <FileTreeViewer artifact={artifact} />
+      <FileTreeViewer artifact={target} />
     </MantineProvider>,
   )
 }
@@ -28,6 +28,7 @@ describe('FileTreeViewer expansion persistence', () => {
   const values = new Map<string, string>()
 
   afterEach(() => {
+    cleanup()
     values.clear()
     vi.unstubAllGlobals()
   })
@@ -53,12 +54,40 @@ describe('FileTreeViewer expansion persistence', () => {
     const folder = await screen.findByText('src')
     await waitFor(() => expect(screen.getByText('index.ts')).not.toBeVisible())
 
-    fireEvent.click(folder.closest('.file-tree-row') as HTMLElement)
+    fireEvent.doubleClick(folder.closest('.file-tree-row') as HTMLElement)
     await waitFor(() => expect(screen.getByText('index.ts')).toBeVisible())
     first.unmount()
 
     renderTree()
     await screen.findByText('src')
     await waitFor(() => expect(screen.getByText('index.ts')).toBeVisible())
+  })
+
+  it('expands and selects a requested file', async () => {
+    const revealPath = 'P:/workspace/example/src/deep/index.ts'
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      root: artifact.path,
+      items: [{
+        name: 'src', path: 'P:/workspace/example/src', is_dir: true, children: [{
+          name: 'deep', path: 'P:/workspace/example/src/deep', is_dir: true, children: [
+            { name: 'index.ts', path: revealPath, is_dir: false },
+          ],
+        }],
+      }],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+    Element.prototype.scrollIntoView = vi.fn()
+    vi.stubGlobal('ResizeObserver', class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    })
+
+    const view = renderTree({ ...artifact, metadata: { revealPath, revealAt: 1 } })
+
+    const file = await screen.findByText('index.ts')
+    await waitFor(() => expect(file).toBeVisible())
+    expect(file.closest('.file-tree-row')).toHaveStyle({ outline: '1px solid var(--astr-blue, #3b82f6)' })
+    expect(fetch).toHaveBeenCalledWith(expect.stringContaining(`reveal_path=${encodeURIComponent(revealPath)}`))
+    view.unmount()
   })
 })

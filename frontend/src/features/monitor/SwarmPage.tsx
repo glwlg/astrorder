@@ -164,6 +164,7 @@ export function SwarmPage() {
         agent_id: selectedAgentId,
         workspace: workspace.trim() || null,
         title: title.trim() || '星系主星协同会话',
+        blackboard_scope: 'swarm',
       })
 
       useAstrorderStore.setState((state) => ({

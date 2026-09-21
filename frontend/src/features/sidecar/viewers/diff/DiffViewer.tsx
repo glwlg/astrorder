@@ -38,7 +38,7 @@ function parseDiff(diffText: string): DiffLine[] {
   return result
 }
 
-export function DiffViewer({ artifact }: ViewerContext) {
+export function DiffViewer({ artifact, toolbarAction }: ViewerContext) {
   const [loading, setLoading] = useState(true)
   const [rawDiff, setRawDiff] = useState('')
   const [copied, setCopied] = useState(false)
@@ -112,6 +112,7 @@ export function DiffViewer({ artifact }: ViewerContext) {
             </Badge>
           </Group>
           <Group gap={6} wrap="nowrap">
+            {toolbarAction}
             <ActionIcon variant="subtle" size="sm" title="刷新" onClick={fetchContent}>
               <IconRefresh size={14} />
             </ActionIcon>

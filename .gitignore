@@ -30,3 +30,6 @@ backend/.venv/
 .stitch/
 data/
 test-results/
+_p_*.py
+stitch-*.html
+stitch-*.png

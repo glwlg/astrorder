@@ -23,6 +23,7 @@ import {
   IconTerminal2,
   IconActivity,
   IconGitPullRequest,
+  IconTrash,
   IconTrophy,
 } from '@tabler/icons-react'
 import { Renderer, JSONUIProvider } from '@json-render/react'
@@ -1272,10 +1273,11 @@ export function autoTransformBlackboardToSpec(key: string, rawVal: unknown): Spe
     }
   }
 
-  // 1. 本身具备 type 与 props 的标准 json-render 契约
-  if (val && typeof val === 'object' && 'type' in val && 'props' in val) {
+  // 1. 显式 json-render 契约；兼容 Agent 常用的 component 别名
+  if (val && typeof val === 'object' && ('type' in val || 'component' in val) && 'props' in val) {
     try {
-      return nestedToFlat(val as any)
+      const { component, ...spec } = val as Record<string, unknown>
+      return nestedToFlat({ ...spec, type: spec.type || component } as any)
     } catch {
       return null
     }
@@ -1574,6 +1576,16 @@ export function autoTransformBlackboardToSpec(key: string, rawVal: unknown): Spe
   return null
 }
 
+export function JsonRenderView({ itemKey, itemValue }: { itemKey: string; itemValue: unknown }) {
+  const spec = useMemo(() => autoTransformBlackboardToSpec(itemKey, itemValue), [itemKey, itemValue])
+  if (!spec) return null
+  return (
+    <JSONUIProvider registry={blackboardComponentRegistry}>
+      <Renderer spec={spec} registry={blackboardComponentRegistry} />
+    </JSONUIProvider>
+  )
+}
+
 /**
  * 独立的黑板卡片渲染容器：支持在 [🎨 UI 视图] 与 [{ } JSON 原始码] 之间自由切换
  */
@@ -1582,11 +1594,13 @@ export function BlackboardItemRenderer({
   itemValue,
   namespace = 'global',
   onUpdated,
+  onDelete,
 }: {
   itemKey: string
   itemValue: unknown
   namespace?: string
   onUpdated?: () => void
+  onDelete?: () => void
 }) {
   const spec = useMemo(() => autoTransformBlackboardToSpec(itemKey, itemValue), [itemKey, itemValue])
   const [viewMode, setViewMode] = useState<'ui' | 'json'>(spec ? 'ui' : 'json')
@@ -1707,6 +1721,13 @@ export function BlackboardItemRenderer({
               </Button>
             )}
           </CopyButton>
+          {onDelete && (
+            <Tooltip label="删除" withArrow>
+              <ActionIcon size="xs" variant="subtle" color="red" onClick={onDelete} aria-label={`删除 ${itemKey}`}>
+                <IconTrash size={13} />
+              </ActionIcon>
+            </Tooltip>
+          )}
         </Group>
       </div>
 

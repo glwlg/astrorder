@@ -67,10 +67,6 @@
       {
         "from": "../frontend/public/favicon.ico",
         "to": "server/frontend/public/favicon.ico"
-      },
-      {
-        "from": "../astrorder.sqlite3",
-        "to": "server/data/astrorder.sqlite3"
       }
     ],
     "win": {

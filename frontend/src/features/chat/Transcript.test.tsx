@@ -47,6 +47,7 @@ describe('transcript follow mode', () => {
   it('groups reasoning and tools into folds and hides empty assistant bubbles', () => {
     render(<MantineProvider><Transcript outbox={[]} messages={[
       { ...message, id: 'thinking', kind: 'thinking', text: '检查数据' },
+      { ...message, id: 'empty-thinking', kind: 'thinking', text: '' },
       { ...message, id: 'tool', kind: 'tool', role: 'tool', text: '工具结果', tool: { name: 'execute_code', arguments: { code: 'print(1)' } } },
       { ...message, id: 'empty', text: '' },
       { ...message, id: 'answer', text: '最终答复' },
@@ -79,6 +80,18 @@ describe('transcript follow mode', () => {
     const updatedSummary = screen.getByRole('region', { name: '思考与工具' }).querySelector('summary')!
     expect(updatedSummary.querySelector('.lazy-details-indicator.is-loading')).toBeNull()
     expect(updatedSummary.querySelector('.lazy-details-indicator svg')).not.toBeNull()
+  })
+
+  it('does not reactivate an earlier activity while waiting for a newer reply', () => {
+    render(<MantineProvider><Transcript outbox={[]} session={runningSession} messages={[
+      { ...message, id: 'old-tool', kind: 'tool', role: 'tool', text: '旧命令', tool: { name: 'exec_command', arguments: { command: 'echo old' }, status: 'running' } },
+      { ...message, id: 'new-user', role: 'user', text: '新问题', created_at: '2026-01-02T00:00:00Z' },
+    ]} /></MantineProvider>)
+
+    const summary = screen.getByRole('region', { name: '思考与工具' }).querySelector('summary')!
+    expect(summary.querySelector('.lazy-details-indicator.is-loading')).toBeNull()
+    expect(summary.querySelector('.activity-badge.is-running')).toBeNull()
+    expect(screen.getByText('正在思考并准备回复…')).toBeInTheDocument()
   })
 
   it('pauses only after a real scroll away from the bottom and resumes manually', async () => {

@@ -32,6 +32,15 @@ DEFAULT_ATTACHMENT_TYPES = (
 )
 
 
+def _data_root() -> Path:
+    local = os.environ.get("LOCALAPPDATA")
+    return (Path(local) / "Astrorder/data") if local else (Path.home() / ".local/share/astrorder")
+
+
+def _default_database_url() -> str:
+    return f"sqlite:///{(_data_root() / 'astrorder.sqlite3').as_posix()}"
+
+
 def _csv(value: str | None, default: Iterable[str]) -> tuple[str, ...]:
     if value is None:
         return tuple(default)
@@ -60,10 +69,10 @@ class Settings:
 
     host: str = "127.0.0.1"
     port: int = 30002
-    database_url: str = "sqlite:///./astrorder.sqlite3"
+    database_url: str = field(default_factory=_default_database_url)
     browser_secret: str | None = None
     connector_secret: str | None = None
-    attachments_dir: Path = field(default_factory=lambda: Path("data/attachments"))
+    attachments_dir: Path = field(default_factory=lambda: _data_root() / "attachments")
     static_dir: Path | None = None
     allowed_origins: tuple[str, ...] = DEFAULT_ORIGINS
     max_attachment_size: int = 10 * 1024 * 1024
@@ -154,49 +163,21 @@ class Settings:
         static_value = env.get("ASTRORDER_STATIC_DIR")
         browser_secret = env.get("ASTRORDER_BROWSER_SECRET") or env.get("ASTRORDER_SECRET")
         if not browser_secret:
-            token_candidates = (
-                Path(".token"),
-                Path(__file__).resolve().parent.parent.parent.parent / ".token",
-                Path(__file__).resolve().parent.parent.parent / ".token",
-            )
-            for c in token_candidates:
-                if c.is_file():
-                    content = c.read_text(encoding="utf-8").strip()
-                    if content:
-                        browser_secret = content
-                        break
-            if not browser_secret:
-                import secrets
-                browser_secret = secrets.token_urlsafe(24)
-                target_file = token_candidates[1] if token_candidates[1].parent.is_dir() else token_candidates[0]
-                target_file.write_text(browser_secret, encoding="utf-8")
+            import secrets
+            browser_secret = secrets.token_urlsafe(24)
 
         connector_secret = env.get("ASTRORDER_CONNECTOR_SECRET")
         if not connector_secret:
-            conn_token_candidates = (
-                Path(".connector_token"),
-                Path(__file__).resolve().parent.parent.parent.parent / ".connector_token",
-                Path(__file__).resolve().parent.parent.parent / ".connector_token",
-            )
-            for c in conn_token_candidates:
-                if c.is_file():
-                    content = c.read_text(encoding="utf-8").strip()
-                    if content:
-                        connector_secret = content
-                        break
-            if not connector_secret:
-                import secrets
-                connector_secret = secrets.token_urlsafe(24)
-                target_file = conn_token_candidates[1] if conn_token_candidates[1].parent.is_dir() else conn_token_candidates[0]
-                target_file.write_text(connector_secret, encoding="utf-8")
+            import secrets
+            connector_secret = secrets.token_urlsafe(24)
 
         return cls(
             host=env.get("ASTRORDER_HOST", "127.0.0.1"),
             port=_int(env.get("ASTRORDER_PORT"), 30002),
-            database_url=env.get("ASTRORDER_DATABASE_URL", "sqlite:///./astrorder.sqlite3"),
+            database_url=env.get("ASTRORDER_DATABASE_URL", _default_database_url()),
             browser_secret=browser_secret,
             connector_secret=connector_secret,
-            attachments_dir=Path(env.get("ASTRORDER_ATTACHMENTS_DIR", "data/attachments")),
+            attachments_dir=Path(env.get("ASTRORDER_ATTACHMENTS_DIR", _data_root() / "attachments")),
             static_dir=Path(static_value) if static_value else None,
             allowed_origins=_csv(env.get("ASTRORDER_ALLOWED_ORIGINS"), DEFAULT_ORIGINS),
             max_attachment_size=_int(

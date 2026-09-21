@@ -34,11 +34,15 @@ def restart() -> int:
 
     log = (ROOT / ".runtime" / "production.log").open("ab", buffering=0)
     python_exe = str(ROOT / "backend/.venv/Scripts/python.exe")
+    import os
+    child_env = dict(os.environ)
+    child_env.pop("ASTRORDER_DESKTOP_PID", None)
     subprocess.Popen(
         [python_exe, "scripts/run_production.py"],
         cwd=str(ROOT),
         stdout=log,
         stderr=log,
+        env=child_env,
         creationflags=INDEPENDENT_PROCESS_FLAGS,
     )
     deadline = time.monotonic() + 30

@@ -6,9 +6,10 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../../api/client'
 import { selectMessages, useAstrorderStore } from '../../state/store'
-import { MobileWorkspace } from './MobileWorkspace'
+import { MobileWorkspace, cleanServerName, displayShortModel } from './MobileWorkspace'
 import type { OutboxEntry } from './mobileOutbox'
 import { scopeKey } from '../../domain/semantics'
+import { draftStorage } from '../chat/draftStorage'
 
 const memory = vi.hoisted(() => ({ rows: [] as OutboxEntry[] }))
 vi.mock('./mobileOutboxStorage', () => ({ mobileOutboxStorage: { load: async () => memory.rows, save: async (rows: OutboxEntry[]) => { memory.rows = rows } } }))
@@ -35,6 +36,9 @@ beforeEach(() => {
   vi.spyOn(api, 'getConnections').mockResolvedValue({ local: { kind: 'hermes', state: 'connected', available: true, version: null, agent_id: 'inert', profile_name: 'fixture', session_id: 'native-test', detail: '' }, ssh: { items: [], state: 'unconfigured', settings: null, detail: '' } })
   const values = new Map<string, string>()
   vi.stubGlobal('localStorage', { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => values.set(key, value), removeItem: (key: string) => values.delete(key) })
+  vi.spyOn(draftStorage, 'load').mockResolvedValue(undefined)
+  vi.spyOn(draftStorage, 'save').mockResolvedValue(undefined)
+  vi.spyOn(draftStorage, 'remove').mockResolvedValue(undefined)
   useAstrorderStore.getState().resetRuntime()
   useAstrorderStore.getState().hydrateBootstrap({ protocol_version: 1, cursor: 0, agents: [{ id: 'inert', kind: 'hermes', name: '协议测试', status: 'ready', capabilities: ['chat', 'stop', 'attachments'], limitation: null }], sessions: [session] })
 })
@@ -62,8 +66,20 @@ describe('independent mobile composer', () => {
   })
   it('reads and displays the native-bound model immediately when opening a session', async () => {
     mount()
-    expect(await screen.findByText('p/bound-model')).toBeVisible()
+    expect(await screen.findByText('bound-model')).toBeVisible()
+    expect(screen.getByRole('button', { name: '选择会话模型' })).toHaveAttribute('title', 'p/bound-model')
     expect(api.getSessionModel).toHaveBeenCalledWith('native-test', 'inert')
+  })
+  it('opens the current session blackboard from the session menu', async () => {
+    const blackboard = vi.spyOn(api, 'getBlackboard').mockResolvedValue({ namespace: 'session:inert::native-test', items: {}, count: 0 })
+    mount()
+    fireEvent.click(screen.getByRole('button', { name: '会话操作' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: '黑板' }))
+    const dialog = await screen.findByRole('dialog', { name: '会话黑板' })
+    expect(dialog).toHaveClass('m-blackboard-dialog')
+    expect(document.querySelector('.mobile-workspace')).toHaveAttribute('data-sheet', 'blackboard')
+    await waitFor(() => expect(blackboard).toHaveBeenCalledWith('session:inert::native-test'))
+    expect(screen.getByText('当前黑板暂无共享参数')).toBeInTheDocument()
   })
   it('keeps the composer to attach, input, voice and send', () => {
     mount()
@@ -138,8 +154,21 @@ describe('independent mobile composer', () => {
     fireEvent.click(screen.getByRole('button', { name: '确认切换模型' }))
     await waitFor(() => expect(change).toHaveBeenCalledWith('native-test', 'inert', 'p', 'm'))
     expect(confirm).not.toHaveBeenCalled()
-    await waitFor(() => expect(screen.getByRole('button', { name: '选择会话模型' })).toHaveTextContent('p/m'))
+    await waitFor(() => {
+      const btn = screen.getByRole('button', { name: '选择会话模型' })
+      expect(btn).toHaveTextContent('m')
+      expect(btn).toHaveAttribute('title', 'p/m')
+    })
     expect(notifications.show).not.toHaveBeenCalled()
+  })
+  it('truncates model names to the last segment and cleans agent suffixes from server names', () => {
+    expect(displayShortModel('opencodex/google-antigravity/gemini-3.8-flash')).toBe('gemini-3.8-flash')
+    expect(displayShortModel('openai/gpt-4o · 下轮生效')).toBe('gpt-4o · 下轮生效')
+    expect(displayShortModel('读取模型…')).toBe('读取模型…')
+
+    expect(cleanServerName({ id: 'local', name: '本机 Codex', kind: 'codex', status: 'ready', capabilities: [], limitation: null })).toBe('本机')
+    expect(cleanServerName({ id: 'remote', name: 'WSL · Codex', connection_id: 'wsl', kind: 'codex', status: 'ready', capabilities: [], limitation: null })).toBe('WSL')
+    expect(cleanServerName({ id: 'remote-hermes', name: 'WSL Hermes', connection_id: 'wsl', kind: 'hermes', status: 'ready', capabilities: [], limitation: null })).toBe('WSL')
   })
   it('confirms mobile thinking effort without a success toast, and toasts only on failure', async () => {
     vi.spyOn(api, 'getSessionModel').mockResolvedValue({ provider: 'p', model: 'bound-model', effort: 'medium' })

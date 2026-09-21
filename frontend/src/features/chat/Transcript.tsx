@@ -8,7 +8,7 @@ import { MarkdownContent } from '../../components/MarkdownContent'
 import { LazyDetails } from '../../components/LazyDetails'
 import { MessageBody } from '../../components/MessageBody'
 import { useOlderMessages } from '../../hooks/useOlderMessages'
-import { describeTool, PackSummary, ShellOutputBlock, ToolLineIcon, unwrapCommand } from './toolPresentation'
+import { describeTool, FileChangeDiffBlock, fileChangeDiffs, PackSummary, ShellOutputBlock, ToolLineIcon, unwrapCommand } from './toolPresentation'
 import { ShinyText } from '../../components/animations/ShinyText'
 import { StarBorder } from '../../components/animations/StarBorder'
 import { AstrorderLoader } from '../../components/AnimatedStatus'
@@ -181,6 +181,7 @@ function MessageItem({
     const isThinking = message.kind === 'thinking'
     const toolArgs = (message.tool?.arguments && typeof message.tool.arguments === 'object') ? (message.tool.arguments as Record<string, unknown>) : {}
     const isCommand = desc.iconKey === 'terminal' || Boolean(toolArgs.command || toolArgs.cmd)
+    const hasFileDiff = fileChangeDiffs(message).length > 0
     const unwrappedCmd = unwrapCommand(String(toolArgs.command || toolArgs.cmd || ''))
     const cmdStatus = desc.isFailed ? 'failed' : desc.isRunning ? 'running' : 'success'
     const foldTitle = isCommand
@@ -200,6 +201,8 @@ function MessageItem({
             message.text && <div className="activity-thinking-content"><MarkdownContent value={message.text} /></div>
           ) : isCommand ? (
             <ShellOutputBlock command={unwrappedCmd || desc.fullTitle} output={message.text} status={cmdStatus} />
+          ) : hasFileDiff ? (
+            <FileChangeDiffBlock message={message} />
           ) : (
             <>
               {message.text && <pre className="tool-output">{message.text}</pre>}
@@ -323,7 +326,11 @@ export function Transcript({
 }) {
   const reducedMotion = useReducedMotion()
   const enter = reducedMotion ? {} : { opacity: 0, y: 10, scale: 0.99 }
-  const visibleMessages = messages.filter((message) => message.kind !== 'message' || message.role !== 'assistant' || message.text.trim() || message.attachments.length || message.tool)
+  const visibleMessages = messages.filter((message) => (
+    message.kind === 'thinking'
+      ? message.text.trim() || message.attachments.length || message.tool
+      : message.kind !== 'message' || message.role !== 'assistant' || message.text.trim() || message.attachments.length || message.tool
+  ))
   const isActivity = (message: Message | null) => Boolean(message && (message.kind !== 'message' || message.role === 'tool' || (message.role === 'assistant' && !message.text.trim())))
   const outboundVersion = outbox.map((item) => item.command.id).join(',')
   const contentVersion = `${messages.map((item) => `${item.id}:${item.text.length}`).join(',')}|${outbox.map((item) => `${item.command.id}:${item.status}`).join(',')}|${approvals.map((item) => item.id).join(',')}|${composerHeight ?? 0}`
@@ -408,10 +415,11 @@ export function Transcript({
               for (let i = idx; i < visibleMessages.length && isActivity(visibleMessages[i]); i++) pack.push(visibleMessages[i])
               const remaining = visibleMessages.slice(idx + pack.length)
               const isLatestActivity = !remaining.some(isActivity)
+              const hasLaterUserMessage = remaining.some(m => m.role === 'user' && m.kind === 'message')
               // 如果该会话仍然在运行，且该活动块之后尚未出现 assistant 的最终文本答复，则保持展开；
               // 一旦会话完成（!busy）或当前轮次已产出了最终文本回复，该活动块自动折叠收起，对齐 Codex
               const hasSubsequentFinalReply = remaining.some(m => m.role === 'assistant' && m.kind === 'message' && m.text.trim())
-              const isPackRunning = Boolean(busy && isLatestActivity)
+              const isPackRunning = Boolean(busy && isLatestActivity && !hasLaterUserMessage)
               const shouldOpen = isPackRunning && !hasSubsequentFinalReply
               return (
                 <motion.section
@@ -427,8 +435,8 @@ export function Transcript({
                   <LazyDetails
                     key={`activity-pack-${message.id}-${shouldOpen}`}
                     defaultOpen={shouldOpen}
-                    loading={isPackRunning}
-                    summary={<PackSummary pack={pack} isRunning={isPackRunning} />}
+                    loading={shouldOpen}
+                    summary={<PackSummary pack={pack} isRunning={shouldOpen} />}
                   >
                     <div className="activity-timeline">
                       {pack.map((item) => (

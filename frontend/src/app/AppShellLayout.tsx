@@ -10,7 +10,6 @@ import { AppHeader } from '../components/AppHeader'
 import { ErrorBoundary } from '../components/ErrorBoundary'
 import { Sidebar } from '../components/Sidebar'
 import { BackgroundTasks } from '../components/BackgroundTasks'
-import { DesktopTitlebar } from '../components/DesktopTitlebar'
 
 function routePart(value: string): string {
   try {
@@ -97,7 +96,6 @@ export function AppShellLayout() {
       navbar={{ width: sidebarWidth, breakpoint: 'md', collapsed: { mobile: true } }}
       padding={0}
     >
-      <DesktopTitlebar />
       <AppShell.Header className="sidebar-header">
         <AppHeader connection={connection} onMenu={openMobile} />
       </AppShell.Header>

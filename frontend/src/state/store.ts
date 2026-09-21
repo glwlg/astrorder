@@ -181,7 +181,7 @@ export const useAstrorderStore = create<AstrorderStore>((set) => ({
         sessions,
         tasks,
         // A delayed or old snapshot may never move the cursor backwards.
-        approvals: payload.cursor >= state.cursor ? { ...state.approvals, ...Object.fromEntries((payload.approvals || []).map(a => [a.id, a])) } : state.approvals,
+        approvals: payload.cursor >= state.cursor ? Object.fromEntries((payload.approvals || []).map(a => [a.id, a])) : state.approvals,
         cursor: Math.max(state.cursor, payload.cursor),
         resyncRequired: false,
       }

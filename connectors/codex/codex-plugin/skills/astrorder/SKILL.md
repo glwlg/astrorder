@@ -22,6 +22,7 @@ Tools:
 - plugins_configure (toggle or configure an Astrorder plugin: plugin_id, optional enabled, optional config)
 - plugins_open (open a specific plugin or artifact viewer in user UI: plugin_id, optional path, url, title, session_key)
 - plugins_close (close a plugin tab or collapse the sidecar panel: optional plugin_id, tab_id, collapse)
+- browser_run (run a bounded browser task through Astrorder: url, goal, optional exact field-label inputs and max_steps)
 - machines_dispatch (dispatch a task or delegate session creation onto a specific target machine/host: machine_id, optional agent_kind, title, workspace, prompt)
 - monitor_sessions_add (add session keys into Astrorder Monitor room dashboard for live visual tracking: key or keys)
 - monitor_sessions_remove (remove a session from Monitor room dashboard: key)

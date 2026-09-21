@@ -50,13 +50,14 @@ async def test_codex_desktop_cdp_selects_exact_task_and_submits_text_and_image(t
         [
             {"type": "text", "text": "来自星序"},
             {"type": "image", "url": "data:image/png;base64,aW1hZ2U="},
+            {"type": "mention", "name": "report.pdf", "path": "P:/repo/.astrorder/report.pdf"},
         ],
         state_path=state,
     )
 
     assert result == {"accepted": True, "transport": "codex-desktop-cdp"}
     assert any(
-        call["method"] == "Input.insertText" and call["params"] == {"text": "来自星序"}
+        call["method"] == "Input.insertText" and call["params"] == {"text": "[report.pdf](<P:/repo/.astrorder/report.pdf>)\n来自星序"}
         for call in calls
     )
     assert [
@@ -171,4 +172,3 @@ def test_codex_desktop_status_removes_stale_endpoint(tmp_path, monkeypatch):
 
     assert codex_desktop.codex_desktop_status(state_path=state)["available"] is False
     assert not state.exists()
-

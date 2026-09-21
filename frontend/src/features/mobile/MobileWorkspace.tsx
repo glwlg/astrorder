@@ -2,12 +2,12 @@ import { type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPoi
 import { Button, Group, Menu, Modal, TextInput, useMantineColorScheme } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { IconSun, IconMoon, IconDeviceDesktop, IconBell, IconRefresh, IconPlayerPlay, IconInfoCircle, IconNotes, IconPlayerStop, IconSend, IconMessageCircle, IconCheck, IconX, IconMicrophone, IconPlus, IconDotsVertical, IconCpu, IconLoader2, IconPlugConnected, IconFilter, IconTransfer, IconEdit, IconCopy, IconTrash } from '@tabler/icons-react'
+import { IconSun, IconMoon, IconDeviceDesktop, IconBell, IconRefresh, IconPlayerPlay, IconInfoCircle, IconNotes, IconPlayerStop, IconSend, IconMessageCircle, IconCheck, IconX, IconMicrophone, IconPlus, IconDotsVertical, IconCpu, IconLoader2, IconPlugConnected, IconFilter, IconTransfer, IconEdit, IconCopy, IconTrash, IconChalkboard } from '@tabler/icons-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useShallow } from 'zustand/react/shallow'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { api } from '../../api/client'
-import type { AgentCommand, AgentMention, Approval, Command, Message, Session, Task } from '../../domain/types'
+import type { Agent, AgentCommand, AgentMention, Approval, Command, Message, Session, Task } from '../../domain/types'
 import { scopeKey } from '../../domain/semantics'
 import { requestNotificationPermission } from '../../domain/notifications'
 import { selectApprovals, selectCommands, selectProjects, selectSessions, selectTasks, useAstrorderStore } from '../../state/store'
@@ -23,6 +23,7 @@ import { confirmationCoordinatesFromEvent, type ConfirmationCoordinates } from '
 import { AgentSessionFilter, matchesAgent } from '../../components/AgentSessionFilter'
 import { adjacentOpenSession, isSessionOpen } from '../../components/sessionVisibility'
 import { clipboardFiles, REASONING_EFFORTS } from '../chat/composerMedia'
+import { usePersistentDraft } from '../chat/draftStorage'
 import { reconcileProjectOrder } from '../../components/projectOrder'
 import { useWorkspacePreferences } from '../../hooks/useWorkspacePreferences'
 import { MobileSessionDrawer } from './MobileSessionDrawer'
@@ -47,11 +48,29 @@ import { BackgroundTasks } from '../../components/BackgroundTasks'
 import { agentKindLabel } from '../../components/AgentBrandIcon'
 import { AgentCommandMenu, AgentMentionMenu, filterAgentCommands, filterAgentMentions, formatAgentMention, useAgentCommands, useAgentMentions, useFileMentions } from '../chat/AgentCommandMenu'
 import { ClickSpark } from '../../components/animations/ClickSpark'
+import { expandSystemMentions } from '../chat/systemMentions'
+import { MobileBlackboardPanel } from './MobileBlackboardPanel'
 import './mobile.css'
 import './mobilePolish.css'
 
 const messageError = (error: unknown) => error instanceof Error ? error.message : '操作未确认，请检查连接。'
 const queueLabels = { queued: '排队待发', submitting: '发送中', received: '等待原生确认', accepted: '已接受，等待本轮结束', running: '执行中', unknown: '结果未确认，未自动重发', failed: '未发送成功，内容已保留', cancelled: '已取消', completed: '已完成' }
+
+export function cleanServerName(agent?: Agent): string {
+  if (!agent) return '本机'
+  if (!agent.connection_id) return '本机'
+  const name = agent.name.trim().replace(/\s*[·\s]\s*(?:Codex|Hermes|Claude|Grok|OpenCode[xr]|Gemini).*$/i, '').trim()
+  return name || agent.connection_id || '远程'
+}
+
+export function displayShortModel(label: string): string {
+  if (!label || label === '读取模型…' || label === '模型暂不可读') return label
+  const [modelPart, ...rest] = label.split(' · ')
+  const suffix = rest.length ? ' · ' + rest.join(' · ') : ''
+  const parts = modelPart.split('/')
+  const realName = parts[parts.length - 1] || modelPart
+  return realName + suffix
+}
 
 /** 把附件 URL 或 markdown 相对路径解析为文件系统绝对路径 */
 function resolveMobileFilePath(raw: string, workspace?: string | null): string {
@@ -101,7 +120,7 @@ export function MobileWorkspace() {
   const route = new URLSearchParams(location.search)
   const routeId = location.pathname.match(/\/chat\/([^/]+)$/)?.[1]
   const selected = navigableSessions.find(s => s.id === (routeId ? decodeURIComponent(routeId) : '') && s.agent_id === route.get('agent_id')) || null
-  const [sheet, setSheet] = useState<'sessions' | 'status' | 'task' | 'models' | 'connections' | null>(null)
+  const [sheet, setSheet] = useState<'sessions' | 'status' | 'task' | 'models' | 'connections' | 'blackboard' | null>(null)
   const [sessionTransition, setSessionTransition] = useState<SessionCardCut>('next-down')
   const [sessionDrag, setSessionDrag] = useState<SessionCardPose | null>(null)
   const edgeTouch = useRef<{ x: number; y: number } | null>(null)
@@ -136,14 +155,13 @@ export function MobileWorkspace() {
   const [voice, setVoice] = useState(false)
   const [image, setImage] = useState<string | null>(null)
   const [artifactPath, setArtifactPath] = useState<string | null>(null)
-  const [drafts, setDrafts] = useState<Record<string, string>>(() => { try { return JSON.parse(localStorage.getItem('astrorder:mobile-drafts') || '{}') } catch { return {} } })
   const key = selected ? scopeKey(selected.agent_id, selected.id) : ''
   useEffect(closeMessageMenu, [key, closeMessageMenu])
-  const text = drafts[key] || ''
-  const setText = (value: string) => setDrafts(prev => { const next = { ...prev, [key]: value }; try { localStorage.setItem('astrorder:mobile-drafts', JSON.stringify(next)) } catch {} return next })
-  const [filesBySession, setFiles] = useState<Record<string, File[]>>({})
-  const files = filesBySession[key] || []
-  const updateFiles = (value: File[]) => setFiles(prev => ({ ...prev, [key]: value }))
+  const { draft, setDraft } = usePersistentDraft(selected?.agent_id || '', selected?.id || '')
+  const text = draft.text
+  const setText = (value: string) => setDraft(current => ({ ...current, text: value }))
+  const files = draft.attachments.map(item => item.file)
+  const updateFiles = (value: File[]) => setDraft(current => ({ ...current, attachments: value.map(file => ({ key: crypto.randomUUID(), file })) }))
   const [quotes, setQuotes] = useState<Record<string, string>>({})
   const quote = quotes[key] || ''
   const setQuote = (value: string) => setQuotes(prev => ({ ...prev, [key]: value }))
@@ -399,7 +417,7 @@ export function MobileWorkspace() {
   const send = async (quickText?: string) => {
     if (!selected || sending.current) return
     hapticFeedback(12)
-    const body = quickText ?? (quote ? quote.split('\n').map(line => `> ${line}`).join('\n') + '\n\n' + text : text)
+    const body = expandSystemMentions(quickText ?? (quote ? quote.split('\n').map(line => `> ${line}`).join('\n') + '\n\n' + text : text))
     const chosenFiles = quickText ? [] : files
     if (!body.trim() && !chosenFiles.length) return
     const commandId = crypto.randomUUID()
@@ -719,7 +737,7 @@ export function MobileWorkspace() {
       || null
   }
 
-  return <div className="mobile-workspace" data-mobile-shell="independent" data-queue-drop={queueLift?.zone || undefined} onContextMenuCapture={(event) => suppressNativeHold(event.nativeEvent)} onTouchStartCapture={handleWorkspaceTouchStart} onTouchMoveCapture={handleWorkspaceTouchMove} onTouchEndCapture={handleWorkspaceTouchEnd} onTouchCancelCapture={() => { edgeTouch.current = null }}>
+  return <div className="mobile-workspace" data-mobile-shell="independent" data-sheet={sheet || undefined} data-queue-drop={queueLift?.zone || undefined} onContextMenuCapture={(event) => suppressNativeHold(event.nativeEvent)} onTouchStartCapture={handleWorkspaceTouchStart} onTouchMoveCapture={handleWorkspaceTouchMove} onTouchEndCapture={handleWorkspaceTouchEnd} onTouchCancelCapture={() => { edgeTouch.current = null }}>
     {createOpened && <NewSessionDialog agents={agents} project={createProject} initialAgentId={agentFilter !== 'all' ? agentFilter : undefined} onClose={() => setCreateOpened(false)} onCreated={session => { setSearch(''); select(session) }} />}
     <header className="m-header"><div className="m-brand"><button className="m-session-nav" aria-label="打开会话列表" onClick={() => { setSheet('sessions'); void openState.refetch() }}><IconMessageCircle size={21} /></button><div className="m-brand-home-btn" onClick={() => navigate('/chat')} role="button" aria-label="返回工作台首页"><BrandMark className="m-brand-mark" size={26} alt="" /><strong>星序</strong></div><span className={`m-dot ${connection === 'connected' ? 'online' : ''}`} aria-label={connection === 'connected' ? '已连接' : '连接中'} /></div><div className="m-header-actions">
       <button aria-label="新建会话" onClick={() => { setCreateProject(resolveCurrentProject()); setCreateOpened(true) }}><IconPlus size={21} /></button>
@@ -736,23 +754,27 @@ export function MobileWorkspace() {
     </div></header>
     <main className="m-main">{selected ? <MobileSessionDeck sessionKey={key} cut={sessionTransition} drag={sessionDrag}>
       <div className="m-card-head">
-        <div>
+        <div className="m-card-head-main">
           <h1>{displaySessionTitle(selected)}</h1>
-          <small><AgentKindBadge agent={agents[selected.agent_id]} /> {agents[selected.agent_id]?.name || selected.agent_id}</small>
-          <button className="m-model-chip" aria-label="选择会话模型" title={sessionModel.label} onClick={() => void openModels()}>
-            <IconCpu size={14} /><span>{sessionModel.label}</span>
-          </button>
-          {handoffPeer && (
-            <button className="m-model-chip" aria-label={handoffPeer.label} title={handoffPeer.session.title} onClick={() => select(handoffPeer.session)}>
-              <IconTransfer size={13} /><span>{handoffPeer.label}</span>
+          <div className="m-card-meta">
+            <AgentKindBadge agent={agents[selected.agent_id]} iconOnly />
+            <span className="m-server-name">{cleanServerName(agents[selected.agent_id])}</span>
+            <button className="m-model-chip" aria-label="选择会话模型" title={sessionModel.label} onClick={() => void openModels()}>
+              <IconCpu size={13} /><span>{displayShortModel(sessionModel.label)}</span>
             </button>
-          )}
+            {handoffPeer && (
+              <button className="m-model-chip" aria-label={handoffPeer.label} title={handoffPeer.session.title} onClick={() => select(handoffPeer.session)}>
+                <IconTransfer size={13} /><span>{handoffPeer.label}</span>
+              </button>
+            )}
+          </div>
         </div>
         <Menu position="bottom-end" width={230} withinPortal>
           <Menu.Target><button aria-label="会话操作"><IconDotsVertical size={20} /></button></Menu.Target>
           <Menu.Dropdown>
             <Menu.Item leftSection={<IconPlayerPlay size={17} />} onClick={() => void send('继续')}>继续</Menu.Item>
             <Menu.Item leftSection={<IconInfoCircle size={17} />} onClick={() => setSheet('status')}>运行状态</Menu.Item>
+            <Menu.Item leftSection={<IconChalkboard size={17} />} onClick={() => setSheet('blackboard')}>黑板</Menu.Item>
             <Menu.Item leftSection={<IconEdit size={17} />} onClick={() => openRename(selected)}>重命名</Menu.Item>
             <Menu.Item leftSection={<IconCopy size={17} />} onClick={() => copySessionId(selected)}>复制 ID</Menu.Item>
             <Menu.Item leftSection={<IconNotes size={17} />} onClick={() => void send('帮我总结当前会话的最新进展与遗留事项')}>总结进展</Menu.Item>
@@ -794,7 +816,7 @@ export function MobileWorkspace() {
       <AgentCommandMenu agent={agents[selected?.agent_id || '']} items={agentCommands} activeIndex={commandIndex} onSelect={selectAgentCommand} />
       <AgentMentionMenu agent={agents[selected?.agent_id || '']} items={agentMentions} activeIndex={commandIndex} onSelect={selectAgentMention} />
       <div className="m-composer">
-        <input hidden ref={fileInput} type="file" multiple accept="image/*,audio/*,.pdf,.txt,.md,.json,.csv,.log" onChange={e => { updateFiles([...files, ...Array.from(e.target.files || [])]); e.target.value = '' }} />
+        <input hidden ref={fileInput} type="file" multiple onChange={e => { updateFiles([...files, ...Array.from(e.target.files || [])]); e.target.value = '' }} />
           <button aria-label="添加附件" onClick={() => fileInput.current?.click()}><IconPlus size={20} /></button>
           <textarea ref={textarea} aria-label="消息内容" placeholder="输入消息…" rows={1} value={text} onPaste={event => { const pasted = clipboardFiles(event); if (pasted.length) { event.preventDefault(); updateFiles([...files, ...pasted]) } }} onKeyDown={handleKeyDown} onChange={e => { setCommandIndex(0); setDismissedMenuText(null); setText(e.target.value); e.target.style.height = '34px'; e.target.style.height = `${Math.min(140, Math.max(34, e.target.scrollHeight))}px` }} />
           <button aria-label="语音消息" onClick={() => setVoice(true)}><IconMicrophone size={19} /></button>
@@ -805,11 +827,12 @@ export function MobileWorkspace() {
       </div>
     </section>
     {messageAction?.sessionKey === key && <MobileMessageMenu anchor={messageAction} onClose={closeMessageMenu} onCopy={() => void copy(messageAction.text)} onQuote={() => { setQuote(messageAction.text); textarea.current?.focus({ preventScroll: true }) }} />}
-    {sheet && <div className={`m-backdrop ${sheet === 'sessions' ? 'm-session-backdrop' : ''}`} onClick={() => setSheet(null)} onTouchStartCapture={handleDrawerTouchStart} onTouchMoveCapture={handleDrawerTouchMove} onTouchEndCapture={handleDrawerTouchEnd} onTouchCancelCapture={handleDrawerTouchCancel}><section ref={node => { drawerSheet.current = node }} style={sheet === 'sessions' && drawerOffset !== null ? { transform: `translate3d(${drawerOffset}px, 0, 0)`, transition: drawerSettling ? 'transform .22s cubic-bezier(.2,.8,.2,1)' : 'none', animation: 'none' } : undefined} className={`m-sheet ${sheet === 'sessions' ? 'm-session-sheet' : ''}`} role="dialog" aria-label={sheet === 'sessions' ? '会话列表' : '详情'} onClick={e => e.stopPropagation()} onTouchStart={handleDrawerTouchStart} onTouchMove={handleDrawerTouchMove} onTouchEnd={handleDrawerTouchEnd} onTouchCancel={handleDrawerTouchCancel}><div className="m-handle" /><header><h2>{({ sessions: '会话', status: '运行状态', task: '任务详情', models: '选择模型', connections: '连接管理' })[sheet]}</h2><div className="m-sheet-header-actions">{sheet === 'sessions' && <><button aria-label="筛选" aria-pressed={filtersOpen} onClick={() => setFiltersOpen(open => !open)}><IconFilter size={18} /></button><button aria-label="新建会话" onClick={() => { setCreateProject(resolveCurrentProject()); setCreateOpened(true) }}><IconPlus size={20} /></button></>}<button aria-label="关闭面板" onClick={() => setSheet(null)}><IconX size={20} /></button></div></header>
+    {sheet && <div className={`m-backdrop ${sheet === 'sessions' ? 'm-session-backdrop' : ''}`} onClick={() => setSheet(null)} onTouchStartCapture={handleDrawerTouchStart} onTouchMoveCapture={handleDrawerTouchMove} onTouchEndCapture={handleDrawerTouchEnd} onTouchCancelCapture={handleDrawerTouchCancel}><section ref={node => { drawerSheet.current = node }} style={sheet === 'sessions' && drawerOffset !== null ? { transform: `translate3d(${drawerOffset}px, 0, 0)`, transition: drawerSettling ? 'transform .22s cubic-bezier(.2,.8,.2,1)' : 'none', animation: 'none' } : undefined} className={`m-sheet ${sheet === 'sessions' ? 'm-session-sheet' : sheet === 'blackboard' ? 'm-blackboard-dialog' : ''}`} role="dialog" aria-label={sheet === 'sessions' ? '会话列表' : sheet === 'blackboard' ? '会话黑板' : '详情'} onClick={e => e.stopPropagation()} onTouchStart={handleDrawerTouchStart} onTouchMove={handleDrawerTouchMove} onTouchEnd={handleDrawerTouchEnd} onTouchCancel={handleDrawerTouchCancel}><div className="m-handle" /><header><h2>{({ sessions: '会话', status: '运行状态', task: '任务详情', models: '选择模型', connections: '连接管理', blackboard: '黑板' })[sheet]}</h2><div className="m-sheet-header-actions">{sheet === 'sessions' && <><button aria-label="筛选" aria-pressed={filtersOpen} onClick={() => setFiltersOpen(open => !open)}><IconFilter size={18} /></button><button aria-label="新建会话" onClick={() => { setCreateProject(resolveCurrentProject()); setCreateOpened(true) }}><IconPlus size={20} /></button></>}<button aria-label="关闭面板" onClick={() => setSheet(null)}><IconX size={20} /></button></div></header>
       {sheet === 'connections' && <div className="m-sheet-body"><EnvironmentConnections embedded /></div>}
       {sheet === 'sessions' && filtersOpen && <><div className="m-drawer-filter-row"><AgentSessionFilter agents={agents} value={agentFilter} onChange={updateAgentFilter} /></div><nav className="m-filters">{[['all','全部'],['unread','未读'],['open','开放中'],['pinned','置顶'],['recent','24小时']].map(([id,label]) => <button className={filter === id ? 'active' : ''} key={id} onClick={() => setFilter(id)}>{label}</button>)}</nav></>}
       {sheet === 'sessions' && <><div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}><input className="m-search" aria-label="搜索会话" placeholder="搜索会话" value={search} onChange={e => setSearch(e.target.value)} />{search && <button aria-label="清空搜索" onClick={() => setSearch('')} style={{ position: 'absolute', right: 8, padding: 4, display: 'inline-flex', alignItems: 'center', color: 'var(--m-muted)' }}><IconX size={16} /></button>}</div><MobileSessionDrawer groups={groups} pins={pins} pinnedProjects={pinnedProjects} onPinProject={project => { void updatePreferences(value => ({ pinned_projects: value.pinned_projects.includes(project.key) ? value.pinned_projects.filter(key => key !== project.key) : [project.key, ...value.pinned_projects] })) }} selectedKey={key} appearance={appearance} onSelect={select} onCreate={project => { setCreateProject(project); setCreateOpened(true) }} onDeleteProject={requestDeleteProject} onDeleteSession={requestDeleteSession} onPin={s => { const sessionKey = scopeKey(s.agent_id, s.id); void updatePreferences(value => ({ session_pins: { [sessionKey]: !value.session_pins[sessionKey] } })) }} agents={agents} onHandoffSession={setHandoffTarget} onRenameSession={openRename} onCopySessionId={copySessionId} onForkSession={handleForkChatBranch} onForkWorktreeSession={setForkWorktreeTarget} isSearching={Boolean(search.trim())} /></>}
-      {sheet === 'status' && selected && <div className="m-sheet-body"><MobileApprovals session={selected} approvals={approvals} /><SessionRuntimeFacts session={selected} agent={agents[selected.agent_id]} /><button onClick={() => void copy(selected.id)}>复制会话 ID</button>{agents[selected.agent_id]?.kind==='codex' && <NativeObservationPanel agentId={selected.agent_id} sessionId={selected.id} />}</div>}
+      {sheet === 'status' && selected && <div className="m-sheet-body"><MobileApprovals session={selected} approvals={approvals} /><SessionRuntimeFacts session={selected} agent={agents[selected.agent_id]} />{agents[selected.agent_id]?.kind==='codex' && <NativeObservationPanel agentId={selected.agent_id} sessionId={selected.id} />}</div>}
+      {sheet === 'blackboard' && selected && <div className="m-sheet-body m-blackboard-sheet"><MobileBlackboardPanel namespace={`session:${selected.agent_id}::${selected.id}`} /></div>}
       {sheet === 'task' && task && <div className="m-sheet-body"><p>{task.title}</p><p>{task.status}</p><pre>{task.command}</pre><button onClick={() => void copy(task.logs.map(log => log.text).join('\n'))}>复制日志</button><button onClick={e => { const pre=e.currentTarget.parentElement?.querySelector('.m-task-log'); if(pre) pre.scrollTop=pre.scrollHeight }}>跳到底部</button><pre className="m-task-log">{task.logs.map(log => log.text).join('\n')}</pre>{['pending', 'running', 'waiting_approval'].includes(task.status) && agents[task.agent_id]?.capabilities.includes('stop') && <button onClick={(event) => requestStopTask(task, event)}>停止任务</button>}</div>}
       {sheet === 'models' && <div className="m-sheet-body m-model-panel">{selected && <ApprovalModeControl session={selected} variant="panel" />}<div className="m-effort-row">{REASONING_EFFORTS.map(item => <button key={item.value} aria-pressed={sessionModel.effort === item.value} aria-label={`思考强度 ${item.label}`} disabled={modelLoading} onClick={() => void sessionModel.changeEffort(item.value).catch(error => notify(messageError(error), 'red'))}>{item.label}</button>)}</div><input className="m-search" aria-label="搜索模型" placeholder="搜索模型或提供商" value={modelSearch} onChange={e => setModelSearch(e.target.value)} />{modelLoading && <p>正在处理原生模型请求…</p>}<div className="m-model-list">{modelChoices.filter(choice => choice.label.toLowerCase().includes(modelSearch.toLowerCase())).map(choice => <button className="m-model-choice" aria-pressed={modelSelection?.provider === choice.provider && modelSelection?.model === choice.model} key={`${choice.provider}/${choice.model}`} disabled={modelLoading} onClick={() => setModelSelection(choice)}><IconCpu size={17} /><span>{choice.label}</span>{modelSelection?.provider === choice.provider && modelSelection?.model === choice.model && <IconCheck size={17} />}</button>)}</div>{!modelLoading && !modelChoices.length && <p>原生运行时未返回可用模型。</p>}{modelSelection && <div className="m-model-confirm"><small>{modelSelection.label}</small><button aria-label="确认切换模型" disabled={modelLoading} onClick={() => void chooseModel(modelSelection.provider, modelSelection.model)}>{modelLoading ? '切换中…' : '确认切换模型'}</button></div>}</div>}
     </section></div>}

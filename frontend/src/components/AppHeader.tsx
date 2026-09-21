@@ -25,10 +25,6 @@ export function AppHeader({
     if (meta) {
       meta.setAttribute('content', themeColor)
     }
-    const desktop = (window as unknown as { astrorderDesktop?: { setTheme?: (t: string) => Promise<void> } }).astrorderDesktop
-    if (desktop?.setTheme) {
-      void desktop.setTheme(computed)
-    }
   }, [computed])
 
   return (

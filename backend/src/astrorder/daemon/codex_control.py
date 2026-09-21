@@ -13,6 +13,7 @@ from ..codex_inputs import command_input
 from ..codex_policy import codex_turn_policy
 from ..connections import ConnectionError
 from .bridge import DaemonBridge, DaemonBridgeError
+from .codex_desktop import desktop_message_input
 from .codex_projection import CodexNativeFrameRouter
 
 logger = logging.getLogger(__name__)
@@ -273,6 +274,14 @@ class DaemonCodexController:
             return "failed", "Codex session identity is invalid."
         action = command.get("action")
         if action == "send":
+            slash = (command.get("text") or "").strip().split(maxsplit=1)
+            if slash and slash[0] == "/compact":
+                if len(slash) > 1:
+                    return "failed", "/compact does not accept parameters."
+                return await self._submit_slash(command, "compact", None)
+            if slash and slash[0] == "/review":
+                arg = slash[1].strip() if len(slash) > 1 else None
+                return await self._submit_slash(command, "review", arg)
             return await self._send(session_id, command)
         if action == "stop":
             return await self._stop(session_id, command)
@@ -285,7 +294,7 @@ class DaemonCodexController:
     async def _send(self, session_id: str, command: dict[str, Any]) -> tuple[str, str | None]:
         text = command.get("text")
         attachments = command.get("attachments") or []
-        if not isinstance(text, str) or not text:
+        if not isinstance(text, str) or not text and not attachments:
             return "failed", "Codex command text is invalid."
         if not isinstance(attachments, list):
             return "failed", "Codex command attachments are invalid."
@@ -355,15 +364,19 @@ class DaemonCodexController:
             logger.warning("daemon Codex send failed for session %s: %s", session_id, detail)
             if "active writer" in str(exc):
                 if self._agent_type() == "codex" and inputs and all(
-                    item.get("type") in {"text", "image", "audio", "skill", "mention", "file"} for item in inputs
+                    item.get("type") in {"text", "image", "mention"} for item in inputs
                 ):
                     try:
+                        desktop_text, desktop_images = desktop_message_input(inputs)
+                        desktop_inputs = [{"type": "text", "text": desktop_text}] + [
+                            {"type": "image", "url": url} for url in desktop_images
+                        ]
                         response = await self.bridge.request_control(
                             "runtime.request",
                             {
                                 "agent_type": "codex",
                                 "method": "desktop/submit",
-                                "request_params": {"threadId": session_id, "input": inputs},
+                                "request_params": {"threadId": session_id, "input": desktop_inputs},
                                 "params": {},
                             },
                         )

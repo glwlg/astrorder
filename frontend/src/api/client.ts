@@ -128,10 +128,21 @@ export const api = {
   uploadAttachment: (file: File) => {
     const form = new FormData()
     form.append('file', file, file.name)
+    const desktop = (window as unknown as { astrorderDesktop?: { getPathForFile?: (file: File) => string } }).astrorderDesktop
+    const sourcePath = desktop?.getPathForFile?.(file)
+    if (sourcePath) form.append('source_path', sourcePath)
     return request<Attachment>('/attachments', { method: 'POST', body: form })
   },
   createCommand: (payload: CommandPayload) => jsonRequest<Command>('/commands', payload),
-  createSession: (payload: { agent_id: string; workspace?: string | null; title?: string | null; project_id?: string | null; project_name?: string | null; parent_session_id?: string | null; ephemeral?: boolean }) =>
+  editQueuedCommand: (commandId: string, agentId: string, sessionId: string, text: string) =>
+    jsonRequest<Command>(`/commands/${encodeURIComponent(commandId)}`, { agent_id: agentId, session_id: sessionId, text }, 'PATCH'),
+  sendQueuedCommand: (commandId: string, agentId: string, sessionId: string) =>
+    jsonRequest<Command>(`/commands/${encodeURIComponent(commandId)}/send`, { agent_id: agentId, session_id: sessionId }),
+  deleteQueuedCommand: (commandId: string, agentId: string, sessionId: string) => {
+    const query = new URLSearchParams({ agent_id: agentId, session_id: sessionId })
+    return request<Command>(`/commands/${encodeURIComponent(commandId)}?${query.toString()}`, { method: 'DELETE' })
+  },
+  createSession: (payload: { agent_id: string; workspace?: string | null; title?: string | null; project_id?: string | null; project_name?: string | null; parent_session_id?: string | null; ephemeral?: boolean; blackboard_scope?: 'session' | 'swarm' | 'group'; blackboard_scope_id?: string | null }) =>
     jsonRequest<Session>('/sessions', payload),
   forkSession: (sessionId: string, payload: { agent_id: string; title?: string | null; worktree?: boolean; branch_name?: string | null; worktree_path?: string | null }) =>
     jsonRequest<Session>(`${sessionPath(sessionId)}/fork`, payload),
@@ -234,6 +245,16 @@ export const api = {
     request<{ public_url: string; allowed_origins: string[]; local_ip: string; port: number; token: string }>('/network/config'),
   updateNetworkConfig: (payload: { public_url?: string; allowed_origins?: string[] }) =>
     jsonRequest<{ public_url: string; allowed_origins: string[]; local_ip: string; port: number; token: string }>('/network/config', payload),
+  getJevConfig: () =>
+    request<{ configured: boolean; masked_key: string }>('/services/jev/config'),
+  updateJevConfig: (payload: { api_key?: string | null }) =>
+    jsonRequest<{ configured: boolean; masked_key: string }>('/services/jev/config', payload),
+  filterWithJev: (payload: { command: string; output: string }) =>
+    jsonRequest<{ ok: boolean; filtered: string; nature: string; noise_pruned: boolean }>('/tools/jev-filter', payload),
+  curateHandoffWithJev: (sessionId: string, agentId: string) =>
+    jsonRequest<{ ok: boolean; summary: string; phase: string; blocker: string }>('/sessions/handoff-curate', { session_id: sessionId, agent_id: agentId }),
+  testJevConnection: (payload: { api_key?: string | null }) =>
+    jsonRequest<{ ok: boolean; details: any }>('/services/jev/test', payload),
   getConnections: () => request<ConnectionsPayload>('/connections'),
   getEnvironments: () => request<{ items: Array<{ id: string; name: string; method: 'local' | 'ssh'; discovered: boolean; os?: string; agents: Array<{ kind: AgentKind; available: boolean; state: string; detail: string; executable?: string; daemon_mode?: boolean }> }> }>('/environments'),
   discoverEnvironment: (id: string) => request(`/environments/${encodeURIComponent(id)}/discover`, { method: 'POST' }),
@@ -268,6 +289,90 @@ export const api = {
     ),
   deleteSshConnection: (connectionId: string) =>
     request<ConnectionsPayload>(`/connections/ssh/${encodeURIComponent(connectionId)}`, { method: 'DELETE' }),
+  getSessionUsage: (sessionId: string, agentId?: string) =>
+    request<{
+      ok: boolean
+      session_id: string
+      model: string
+      context_window: number
+      last_input_tokens: number
+      used_percentage: number
+      total_tokens: number
+      input_tokens: number
+      output_tokens: number
+      cached_tokens: number
+      reasoning_tokens: number
+      cache_hit_rate: number
+    }>(`/sessions/${encodeURIComponent(sessionId)}/usage${agentId ? '?agent_id=' + encodeURIComponent(agentId) : ''}`),
+  getAnalyticsOverview: () =>
+    request<{
+      ok: boolean
+      totals: {
+        total_tokens: number
+        input_tokens: number
+        output_tokens: number
+        cached_tokens: number
+        reasoning_tokens: number
+        session_count: number
+        cache_hit_rate: number
+      }
+      today: {
+        date: string
+        total_tokens: number
+        input_tokens: number
+        output_tokens: number
+        cached_tokens: number
+        cache_hit_rate: number
+      }
+      by_model: Array<{
+        model: string
+        total_tokens: number
+        input_tokens: number
+        output_tokens: number
+        cached_tokens: number
+        session_count: number
+        cache_hit_rate: number
+        share: number
+      }>
+      by_agent: Array<{
+        agent_id: string
+        tokens: number
+        session_count: number
+      }>
+    }>('/analytics/overview'),
+  getAnalyticsCalendar: (days: number = 365) =>
+    request<{
+      ok: boolean
+      days: number
+      max_daily_tokens: number
+      items: Array<{
+        date: string
+        tokens: number
+        input_tokens: number
+        output_tokens: number
+        cached_tokens: number
+        session_count: number
+        cache_hit_rate: number
+      }>
+    }>(`/analytics/calendar?days=${days}`),
+  getAnalyticsTopSessions: (limit: number = 10) =>
+    request<{
+      ok: boolean
+      items: Array<{
+        session_id: string
+        agent_id: string
+        title: string
+        model: string
+        total_tokens: number
+        input_tokens: number
+        output_tokens: number
+        cached_tokens: number
+        cache_hit_rate: number
+        latest_date: string
+      }>
+    }>(`/analytics/top-sessions?limit=${limit}`),
+  syncAnalytics: () =>
+    request<{ ok: boolean; result: Record<string, number> }>('/analytics/sync', { method: 'POST' }),
   searchFiles: (params: { q?: string; sessionId?: string; connectionId?: string; limit?: number }) => {
     const query = new URLSearchParams()
     if (params.q) query.set('q', params.q)

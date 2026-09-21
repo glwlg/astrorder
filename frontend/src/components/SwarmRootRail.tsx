@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  ActionIcon,
+  
   Badge,
   Button,
   Group,
@@ -14,7 +14,7 @@ import {
   IconPlus,
   IconTopologyStarRing,
 } from '@tabler/icons-react'
-import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
+import {  useNavigate, useSearchParams } from 'react-router-dom'
 import type { Agent, Session } from '../domain/types'
 import { scopeKey } from '../domain/semantics'
 import { sessionActivityStatus } from './sessionRailModel'
@@ -82,7 +82,7 @@ export function SwarmRootRail({
     }
     for (const s of sessions) {
       const title = s.title || ''
-      if ((title.includes('主星') || title.includes('群星') || title.includes('星系')) && !parentMap.has(scopeKey(s.agent_id, s.id))) {
+      if ((title.includes('主星') || title.includes('群星') || title.includes('星系') || title.includes('作战指令')) && !parentMap.has(scopeKey(s.agent_id, s.id))) {
         candidateKeys.add(scopeKey(s.agent_id, s.id))
       }
     }
@@ -232,4 +232,3 @@ export function SwarmRootRail({
     </div>
   )
 }
-
