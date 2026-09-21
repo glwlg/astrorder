@@ -1,4 +1,4 @@
-import { IconAdjustments, IconLayoutDashboard, IconMessageCircle, IconPuzzle, IconSettings, IconTopologyStarRing, IconUsers, IconChartBar, IconWorld } from '@tabler/icons-react'
+import { IconAdjustments, IconDeviceDesktop, IconLayoutDashboard, IconMessageCircle, IconPuzzle, IconSettings, IconTopologyStarRing, IconUsers, IconChartBar, IconWorld } from '@tabler/icons-react'
 import { ActionIcon, Modal, NavLink, Stack, Tabs, Text, Tooltip } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useState } from 'react'
@@ -7,6 +7,7 @@ import type { Agent, Project, Session } from '../domain/types'
 import { AgentsPage } from '../features/agents/AgentsPage'
 import { PluginsPage } from '../features/plugins/PluginsPage'
 import { NetworkSettingsPage } from '../features/network/NetworkSettingsPage'
+import { DesktopSettingsPage } from '../features/services/DesktopSettingsPage'
 import { SessionRail } from './SessionRail'
 import { BotGroupRail } from './BotGroupRail'
 import { SwarmRootRail } from './SwarmRootRail'
@@ -175,10 +176,12 @@ export function Sidebar({
           <Tabs.List>
             <Tabs.Tab value="connections" leftSection={<IconAdjustments size={16} />}>连接</Tabs.Tab>
             <Tabs.Tab value="network" leftSection={<IconWorld size={16} />}>网络与移动端</Tabs.Tab>
+            <Tabs.Tab value="desktop" leftSection={<IconDeviceDesktop size={16} />}>桌面客户端</Tabs.Tab>
             <Tabs.Tab value="plugins" leftSection={<IconPuzzle size={16} />}>插件</Tabs.Tab>
           </Tabs.List>
           <Tabs.Panel value="connections" className="settings-tab-panel"><AgentsPage /></Tabs.Panel>
           <Tabs.Panel value="network" className="settings-tab-panel"><NetworkSettingsPage /></Tabs.Panel>
+          <Tabs.Panel value="desktop" className="settings-tab-panel"><DesktopSettingsPage /></Tabs.Panel>
           <Tabs.Panel value="plugins" className="settings-tab-panel"><PluginsPage /></Tabs.Panel>
         </Tabs>
       </Modal>

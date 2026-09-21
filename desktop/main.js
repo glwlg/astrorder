@@ -298,12 +298,30 @@ function rebuildMenu() {
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: '打开星序', click: showApp },
     { label: '复制访问令牌', click: copyAccessToken },
+    {
+      label: '开机启动',
+      type: 'checkbox',
+      enabled: app.isPackaged,
+      checked: app.getLoginItemSettings().openAtLogin,
+      click: item => setStartupEnabled(item.checked),
+    },
     { type: 'separator' },
     serviceMenu('app', '大内核'),
     serviceMenu('daemon', '小内核'),
     { type: 'separator' },
     { label: '退出星序', enabled: !busy, click: quit },
   ]))
+}
+
+function startupSettings() {
+  return { available: app.isPackaged, enabled: app.getLoginItemSettings().openAtLogin }
+}
+
+function setStartupEnabled(enabled) {
+  if (!app.isPackaged) throw new Error('开机启动仅支持已安装的桌面客户端')
+  app.setLoginItemSettings({ openAtLogin: enabled, path: process.execPath })
+  rebuildMenu()
+  return startupSettings()
 }
 
 function copyAccessToken() {
@@ -372,6 +390,11 @@ ipcMain.handle('services:run', async (event, target, action) => {
   }
   await run(target, action)
   return states
+})
+ipcMain.handle('startup:get', () => startupSettings())
+ipcMain.handle('startup:set', (_event, enabled) => {
+  if (typeof enabled !== 'boolean') throw new Error('无效的开机启动设置')
+  return setStartupEnabled(enabled)
 })
 ipcMain.handle('preview:open', (_event, payload) => openPreview(payload))
 ipcMain.handle('preview:resolve', (_event, url) => fetchPreviewImage(url))
@@ -523,7 +546,6 @@ app.whenReady().then(async () => {
     await configureRoot()
     await session.defaultSession.clearCache()
     await session.defaultSession.clearStorageData({ storages: ['serviceworkers'] })
-    if (app.isPackaged) app.setLoginItemSettings({ openAtLogin: true })
     const initialTheme = getStoredTheme()
     const isDark = initialTheme === 'dark'
     window = new BrowserWindow({

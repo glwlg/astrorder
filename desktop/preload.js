@@ -3,6 +3,8 @@ const { contextBridge, ipcRenderer, webUtils } = require('electron')
 contextBridge.exposeInMainWorld('astrorderDesktop', {
   status: () => ipcRenderer.invoke('services:status'),
   run: (target, action) => ipcRenderer.invoke('services:run', target, action),
+  getStartupSettings: () => ipcRenderer.invoke('startup:get'),
+  setStartupEnabled: (enabled) => ipcRenderer.invoke('startup:set', enabled),
   openPreview: (payload) => ipcRenderer.invoke('preview:open', payload),
   minimize: () => ipcRenderer.invoke('window:minimize'),
   maximize: () => ipcRenderer.invoke('window:maximize'),
