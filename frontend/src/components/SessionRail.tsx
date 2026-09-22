@@ -41,17 +41,16 @@ import { HandoffDialog } from './HandoffDialog'
 import { ForkWorktreeDialog } from './ForkWorktreeDialog'
 import { moveProject, reconcileProjectOrder } from './projectOrder'
 import { useWorkspacePreferences } from '../hooks/useWorkspacePreferences'
-import type { Agent, Project, Session } from '../domain/types'
+import type { Agent, Project, Session, SessionStatus, Task } from '../domain/types'
 import { scopeKey } from '../domain/semantics'
 import { StatusDot } from './Status'
 import { ConfirmPopover } from './ConfirmPopover'
 import { confirmationCoordinatesFromEvent, type ConfirmationCoordinates } from './confirmationPosition'
 import { AgentKindBadge } from './SessionRuntimeFacts'
-import { buildProjectGroups, displaySessionTitle, formatRelativeTime, sessionActivityStatus, type ProjectGroup, type RailFilter } from './sessionRailModel'
+import { buildProjectGroups, displaySessionTitle, formatRelativeTime, type ProjectGroup, type RailFilter } from './sessionRailModel'
 import { api } from '../api/client'
 import './sessionPins.css'
 import { useAstrorderStore } from '../state/store'
-import { useShallow } from 'zustand/react/shallow'
 import { AddProjectModal } from './AddProjectModal'
 import {
   ProjectAppearanceModal,
@@ -88,10 +87,8 @@ export function SessionRail({
 }) {
   const [filter, setFilter] = useState('')
   const sessions = useSessionOrder(incomingSessions)
-  const commands = useAstrorderStore(useShallow((state) => state.commands))
-  useAstrorderStore((state) => state.messages)
-  useAstrorderStore((state) => state.tasks)
-  useAstrorderStore((state) => state.liveActivityAt)
+  const tasks = useAstrorderStore((state) => state.tasks)
+  const liveActivityAt = useAstrorderStore((state) => state.liveActivityAt)
   const [statusFilter, setStatusFilter] = useState<RailFilter>('all')
   const [agentFilter, setAgentFilter] = useState(() => {
     try {
@@ -216,6 +213,27 @@ export function SessionRail({
     const unpinned = ordered.filter(p => !pinnedSet.has(p.key))
     return [...pinned, ...unpinned]
   }, [agents, decoratedSessions, filter, projects, statusFilter, stableOrder, agentFilter, pinnedProjects])
+
+  const liveStatuses = useMemo(() => {
+    const result = new Map<string, SessionStatus>()
+    for (const task of Object.values(tasks) as Task[]) {
+      if (task.kind !== 'subagent' || task.progress?.blocking === false) continue
+      const key = scopeKey(task.agent_id, task.session_id)
+      if (task.status === 'waiting_approval') result.set(key, 'waiting_approval')
+      else if (!result.has(key) && (task.status === 'running' || task.status === 'pending')) result.set(key, 'running')
+    }
+    const now = Date.now()
+    for (const [key, at] of Object.entries(liveActivityAt)) {
+      if (!result.has(key) && now - at >= 0 && now - at < 15_000) result.set(key, 'running')
+    }
+    return result
+  }, [tasks, liveActivityAt])
+
+  const activityStatusFor = (session: Session): SessionStatus => (
+    session.status === 'running' || session.status === 'waiting_approval' || session.status === 'error'
+      ? session.status
+      : liveStatuses.get(scopeKey(session.agent_id, session.id)) || session.status
+  )
 
   const toggle = (key: string) => setCollapsed((current) => ({ ...current, [key]: !current[key] }))
 
@@ -662,7 +680,7 @@ export function SessionRail({
           <AnimatePresence initial={false}>
           {groups.flatMap(project => project.sessions).filter(s => pinnedSessions[scopeKey(s.agent_id, s.id)]).map(session => {
             const key = scopeKey(session.agent_id, session.id)
-            const activityStatus = sessionActivityStatus(session, commands)
+            const activityStatus = activityStatusFor(session)
             const isRunning = activityStatus === 'running'
             const parentProject = groups.find(p => p.sessions.some(s => s.id === session.id && s.agent_id === session.agent_id))
             const projectCustom = (parentProject && projectAppearance[parentProject.key]) ||
@@ -860,7 +878,7 @@ export function SessionRail({
                   {visibleSessions.map((session) => {
                     const key = scopeKey(session.agent_id, session.id)
                     const isPinned = pinnedSessions[key] === true
-                    const activityStatus = sessionActivityStatus(session, commands)
+                    const activityStatus = activityStatusFor(session)
                     const isRunning = activityStatus === 'running'
                     return (
                       <motion.div

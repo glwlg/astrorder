@@ -167,6 +167,28 @@ describe('shared runtime store', () => {
     expect(useAstrorderStore.getState().liveActivityAt['agent-1::session-1']).toBeGreaterThan(Date.now() - 1000)
   })
 
+  it('bounds replay bookkeeping and throttles live activity updates', () => {
+    const store = useAstrorderStore.getState()
+    store.applyEvent({
+      id: 'live-first', cursor: 1, type: 'message.upsert', agent_id: session.agent_id, session_id: session.id,
+      data: { ...message('live-first', 'first'), role: 'assistant' },
+    })
+    const firstActivity = useAstrorderStore.getState().liveActivityAt
+    store.applyEvent({
+      id: 'live-second', cursor: 2, type: 'message.upsert', agent_id: session.agent_id, session_id: session.id,
+      data: { ...message('live-second', 'second'), role: 'assistant' },
+    })
+    expect(useAstrorderStore.getState().liveActivityAt).toBe(firstActivity)
+
+    for (let cursor = 3; cursor < 1100; cursor++) {
+      store.applyEvent({
+        id: `event-${cursor}`, cursor, type: 'session.upsert', agent_id: session.agent_id, session_id: session.id,
+        data: session,
+      })
+    }
+    expect(Object.keys(useAstrorderStore.getState().seenEventIds).length).toBeLessThanOrEqual(1024)
+  })
+
   it('does not stamp live activity for non-blocking background events', () => {
     const store = useAstrorderStore.getState()
     store.applyEvent({

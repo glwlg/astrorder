@@ -36,6 +36,7 @@ def reconcile_native_status(current: str | None, desired: str | None) -> str | N
 # to running stays running until it has been absent from active_list for this
 # long, so 1s-poll gaps during streaming can't bounce it.
 RUNNING_CLEAR_GRACE_S = 90.0
+REMOTE_POLL_INTERVAL_S = 60.0
 
 def validate_observation(row):
     if not isinstance(row,dict) or row.get('event') not in LABELS: raise ValueError('Invalid observation')
@@ -76,12 +77,20 @@ class NativeObservers:
         self.ack={}
         self.pending={}
         self.supported=set()
+        self.remote_poll_at={}
         self.lock=threading.RLock()
         self.stopping=asyncio.Event()
 
     def clients(self):
         env=self.app.state.environments
         return [env.codex,*env.remote.values()]
+
+    def _poll_due(self, client, now=None):
+        if not hasattr(client,'remote_json'): return True
+        now=time.monotonic() if now is None else now
+        if now < self.remote_poll_at.get(client.agent_id,0): return False
+        self.remote_poll_at[client.agent_id]=now+REMOTE_POLL_INTERVAL_S
+        return True
 
     def _write_decision(self,client,approval_id,decision):
         home=client._home.as_posix()
@@ -196,6 +205,7 @@ class NativeObservers:
     async def run(self):
         while not self.stopping.is_set():
             async def one(client):
+                if not self._poll_due(client): return
                 try: await asyncio.to_thread(self.collect,client)
                 except Exception:
                     self.states.setdefault(client.agent_id,{})['poll_ok']=False

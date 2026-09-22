@@ -1181,6 +1181,15 @@ class Store:
             ).all()
             return [_command_wire(row) for row in rows]
 
+    def active_tasks(self) -> list[dict[str, Any]]:
+        with self.session() as db:
+            rows = db.scalars(
+                select(TaskRow).where(
+                    TaskRow.status.in_({"pending", "running", "waiting_approval"})
+                )
+            ).all()
+            return [_task_wire(row) for row in rows]
+
     def get_ssh_connection(self, connection_id: str | None = None) -> dict[str, Any] | None:
         with self.session() as db:
             if connection_id is None:

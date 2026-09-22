@@ -38,9 +38,15 @@ export function SidecarHost({
 
   const activeTab = tabs.find((t) => t.id === activeTabId)
   const currentSessionKey = `${session.agent_id}:${session.id}`
-  const liveSessionTabs = activeSessionKey
-    ? { ...mountedTabs, [activeSessionKey]: tabs }
-    : mountedTabs
+  const tabsOwnerKey = activeSessionKey || currentSessionKey
+  const retainedTabs = [
+    ...tabs.map((tab) => [tabsOwnerKey, tab] as const),
+    ...Object.entries(mountedTabs).flatMap(([ownerSessionKey, ownerTabs]) =>
+      ownerSessionKey === tabsOwnerKey
+        ? []
+        : ownerTabs.filter((tab) => dirtyTabs[tab.id]).map((tab) => [ownerSessionKey, tab] as const),
+    ),
+  ]
 
   const handleOpenFileTree = () => {
     useSidecarStore
@@ -207,8 +213,7 @@ export function SidecarHost({
             />
           </div>
         )}
-        {Object.entries(liveSessionTabs).flatMap(([ownerSessionKey, ownerTabs]) =>
-          ownerTabs.filter((tab) => tab.type === 'artifact' && tab.artifact).map((tab) => {
+        {retainedTabs.filter(([, tab]) => tab.type === 'artifact' && tab.artifact).map(([ownerSessionKey, tab]) => {
             const artifact = tab.artifact!
             const viewer = artifactViewerRegistry.findViewer(artifact)
             const isActive = ownerSessionKey === currentSessionKey && tab.id === activeTabId
@@ -260,8 +265,7 @@ export function SidecarHost({
                 })() : <div style={{ padding: 16 }}>暂无支持的查看器</div>}
               </div>
             )
-          }),
-        )}
+          })}
       </div>
     </aside>
   )

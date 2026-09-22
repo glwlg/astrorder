@@ -14,6 +14,27 @@ from .config import CodexConnectorConfig
 from .protocol import CodexAppServerProtocol
 
 
+def _assign_kill_on_close_job(process: subprocess.Popen[str]):
+    if os.name != 'nt':
+        return None
+    import win32job
+
+    job = win32job.CreateJobObject(None, '')
+    try:
+        info = win32job.QueryInformationJobObject(
+            job, win32job.JobObjectExtendedLimitInformation
+        )
+        info['BasicLimitInformation']['LimitFlags'] |= win32job.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        win32job.SetInformationJobObject(
+            job, win32job.JobObjectExtendedLimitInformation, info
+        )
+        win32job.AssignProcessToJobObject(job, process._handle)
+        return job
+    except Exception:
+        job.Close()
+        raise
+
+
 def _safe_error_detail(value: object) -> str:
     detail = str(value or '').replace('\x00', ' ').replace('\r', ' ').replace('\n', ' ').strip()
     detail = re.sub(
@@ -53,6 +74,7 @@ class CodexAppServer:
         self.protocol = protocol or CodexAppServerProtocol()
         self.on_close = on_close
         self.process: subprocess.Popen[str] | None = None
+        self._job = None
         self._reader: threading.Thread | None = None
         self._stderr_reader: threading.Thread | None = None
         self._stderr_tail: deque[str] = deque(maxlen=8)
@@ -81,6 +103,14 @@ class CodexAppServer:
             shell=False,
             env=self.environment,
         )
+        try:
+            self._job = _assign_kill_on_close_job(self.process)
+        except Exception:
+            self.process.kill()
+            self.process.wait(timeout=3)
+            self.process = None
+            raise
+
         self._stderr_reader = threading.Thread(target=self._drain_stderr, name="astrorder-codex-app-server-stderr", daemon=True)
         self._stderr_reader.start()
         if self.bootstrap_stdin is not None:
@@ -90,6 +120,9 @@ class CodexAppServer:
             self.process.stdin.flush()
         self._reader = threading.Thread(target=self._read_loop, name="astrorder-codex-app-server", daemon=True)
         self._reader.start()
+
+    def is_alive(self) -> bool:
+        return self.process is not None and self.process.poll() is None
 
     def _drain_stderr(self) -> None:
         process = self.process
@@ -129,21 +162,26 @@ class CodexAppServer:
         self.process = None
         if process is None:
             return
-        if process.poll() is None:
-            if process.stdin:
-                try:
-                    process.stdin.close()
-                except OSError:
-                    pass
-            try:
-                process.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                process.terminate()
+        try:
+            if process.poll() is None:
+                if process.stdin:
+                    try:
+                        process.stdin.close()
+                    except OSError:
+                        pass
                 try:
                     process.wait(timeout=3)
                 except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait(timeout=3)
+                    process.terminate()
+                    try:
+                        process.wait(timeout=3)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait(timeout=3)
+        finally:
+            if self._job is not None:
+                self._job.Close()
+                self._job = None
         if self._reader and self._reader is not threading.current_thread():
             self._reader.join(timeout=2)
         if self._stderr_reader and self._stderr_reader is not threading.current_thread():

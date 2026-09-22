@@ -57,6 +57,37 @@ function resolveSession(sessions: Session[], sessionId: string | undefined, agen
 }
 
 export function ChatPage() {
+  const { sessionId = '' } = useParams()
+  const [searchParams] = useSearchParams()
+  const routeKey = scopeKey(searchParams.get('agent_id') || '', sessionId)
+  const [bodyKey, setBodyKey] = useState(routeKey)
+
+  useEffect(() => {
+    if (bodyKey === routeKey) return
+    const frame = window.requestAnimationFrame(() => setBodyKey(routeKey))
+    return () => window.cancelAnimationFrame(frame)
+  }, [bodyKey, routeKey])
+
+  if (bodyKey !== routeKey) {
+    return (
+      <div className="route-page chat-page chat-page-switching" aria-live="polite">
+        <div className="chat-layout">
+          <section className="chat-column">
+            <div className="transcript">
+              <div className="transcript-inner">
+                <p className="transcript-status">正在打开会话…</p>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    )
+  }
+
+  return <ChatPageBody key={routeKey} />
+}
+
+function ChatPageBody() {
   const { sessionId } = useParams()
   const [searchParams] = useSearchParams()
   const queryClient = useQueryClient()
@@ -68,7 +99,7 @@ export function ChatPage() {
     [searchParams, sessionId, sessions],
   )
 
-  const sessionUsage = useQuery({ queryKey: ['astrorder', 'session_usage', selected?.id, selected?.agent_id], queryFn: () => selected ? api.getSessionUsage(selected.id, selected.agent_id) : Promise.reject(), enabled: Boolean(selected), retry: false, staleTime: 5000, refetchInterval: selected?.status === 'running' ? 3000 : false })
+  const sessionUsage = useQuery({ queryKey: ['astrorder', 'session_usage', selected?.id, selected?.agent_id], queryFn: () => selected ? api.getSessionUsage(selected.id, selected.agent_id) : Promise.reject(), enabled: Boolean(selected), retry: false, staleTime: 0, refetchOnWindowFocus: false })
 
   const [activeBotGroup, setActiveBotGroup] = useState<import('../../domain/types').BotGroup | null>(null)
   useEffect(() => {

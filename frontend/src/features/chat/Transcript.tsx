@@ -426,7 +426,6 @@ export function Transcript({
                   className="activity-pack"
                   aria-label="思考与工具"
                   key={message.id}
-                  layout="position"
                   initial={enter}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0 }}
@@ -458,7 +457,7 @@ export function Transcript({
             const showDateDivider = Date.parse(message.created_at) > 0 && currentDate !== prevDate
             const hasAssistantReplied = message.role === 'user' && visibleMessages.slice(idx + 1).some(m => m.role !== 'user')
             return (
-              <motion.div className="transcript-message-entry" key={message.id} layout="position" initial={enter} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.28, ease: [0.2, 0.8, 0.2, 1] }}>
+              <motion.div className="transcript-message-entry" key={message.id} initial={enter} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.28, ease: [0.2, 0.8, 0.2, 1] }}>
                 {showDateDivider && (
                   <div style={{ textAlign: 'center', margin: '14px 0 6px', width: '100%' }}>
                     <span style={{ fontSize: '11px', color: 'var(--astr-muted)', background: 'var(--astr-surface-muted)', padding: '2px 10px', borderRadius: '10px' }}>
@@ -482,7 +481,6 @@ export function Transcript({
             <motion.div
               key="waiting-response-indicator"
               className="message-row message-assistant message-waiting-row"
-              layout="position"
               initial={{ opacity: 0, y: 8, scale: 0.98 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}

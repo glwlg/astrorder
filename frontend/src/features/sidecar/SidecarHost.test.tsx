@@ -126,7 +126,7 @@ describe('SidecarHost tab keep-alive', () => {
     expect(screen.getByTestId(`viewer-${file.id}`)).toContainElement(button)
   })
 
-  it('keeps a viewer mounted while switching away from and back to its session', () => {
+  it('keeps a dirty viewer mounted while switching away from and back to its session', () => {
     const first = artifact('artifact:first-session')
     const second = artifact('artifact:other-session', otherSession)
     useSidecarStore.getState().switchSession(`${session.agent_id}:${session.id}`)
@@ -134,6 +134,7 @@ describe('SidecarHost tab keep-alive', () => {
 
     const view = renderHost()
     fireEvent.change(screen.getByLabelText(first.id), { target: { value: 'preserved across sessions' } })
+    act(() => useSidecarStore.getState().setTabDirty(first.id, true))
 
     act(() => {
       useSidecarStore.getState().switchSession(`${otherSession.agent_id}:${otherSession.id}`)
@@ -149,5 +150,21 @@ describe('SidecarHost tab keep-alive', () => {
     expect(screen.getByLabelText(first.id)).toHaveValue('preserved across sessions')
     expect(viewerLifecycle.mounts.get(first.id)).toBe(1)
     expect(viewerLifecycle.unmounts.get(first.id) || 0).toBe(0)
+  })
+
+  it('unmounts clean viewers from inactive sessions', () => {
+    const first = artifact('artifact:clean-session')
+    const second = artifact('artifact:next-session', otherSession)
+    useSidecarStore.getState().switchSession(`${session.agent_id}:${session.id}`)
+    useSidecarStore.getState().openArtifact(first, 'test')
+    const view = renderHost()
+
+    act(() => {
+      useSidecarStore.getState().switchSession(`${otherSession.agent_id}:${otherSession.id}`)
+      useSidecarStore.getState().openArtifact(second, 'test')
+    })
+    view.rerender(host(otherSession))
+
+    expect(viewerLifecycle.unmounts.get(first.id)).toBe(1)
   })
 })

@@ -1,14 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ActionIcon, Button, Group, LoadingOverlay, Paper, Text, Tooltip } from '@mantine/core'
 import { IconDeviceFloppy, IconDownload, IconRefresh } from '@tabler/icons-react'
-import mermaid from 'mermaid'
 import type { ViewerContext } from '../../types'
-
-mermaid.initialize({
-  startOnLoad: false,
-  theme: 'default',
-  securityLevel: 'loose',
-})
+import { renderMermaid } from '../../../../components/renderMermaid'
 
 export function MermaidViewer({ artifact, onSave, onDirtyChange, toolbarAction }: ViewerContext) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -27,8 +21,7 @@ export function MermaidViewer({ artifact, onSave, onDirtyChange, toolbarAction }
     if (!containerRef.current) return
     setError(null)
     try {
-      const id = `mermaid-${Date.now()}`
-      const { svg } = await mermaid.render(id, chartCode)
+      const { svg } = await renderMermaid(chartCode)
       if (containerRef.current) {
         containerRef.current.innerHTML = svg
       }

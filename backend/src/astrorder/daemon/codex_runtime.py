@@ -507,6 +507,16 @@ class CodexDaemonRuntime:
     async def command(self, action: str, request: Mapping[str, Any]) -> Mapping[str, Any]:
         session_id = _session_id(request)
         owned = self._owned(session_id)
+        is_alive = getattr(owned.client, "is_alive", None)
+        if callable(is_alive) and not is_alive():
+            if owned.ephemeral:
+                raise DaemonProtocolError("Codex ephemeral session transport is closed")
+            workspace = owned.client.config.workspace
+            with self._lock:
+                self._sessions.pop(session_id, None)
+            await asyncio.to_thread(owned.client.stop)
+            await self.spawn({"session_id": session_id, "cwd": str(workspace)})
+            owned = self._owned(session_id)
         if action == "session.send":
             return await self._send(session_id, owned, request)
         if action == "session.compact":

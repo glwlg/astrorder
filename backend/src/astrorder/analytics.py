@@ -220,47 +220,46 @@ def get_session_usage(session_id: str, request: Request, agent_id: str | None = 
             q = q.where(TokenMetricRow.agent_id == agent_id)
         rows = db.scalars(q.order_by(TokenMetricRow.updated_at.desc())).all()
 
-    if not rows:
-        pattern = os.path.expanduser(f"~/.codex/sessions/**/rollout-*{session_id}*.jsonl")
-        matches = glob.glob(pattern, recursive=True)
-        if matches:
-            fpath = matches[0]
-            last_u = None
-            cw = 1000000
-            last_in = 0
-            m_name = "default"
-            try:
-                with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
-                    for line in f:
-                        if "total_token_usage" in line:
-                            d = json.loads(line)
-                            info = d.get("payload", {}).get("info", {})
-                            if "total_token_usage" in info:
-                                last_u = info["total_token_usage"]
-                                cw = info.get("model_context_window", cw)
-                                last_in = info.get("last_token_usage", {}).get("input_tokens", last_in)
-                        if "turn_context" in line and "model" in line:
-                            m_name = json.loads(line).get("payload", {}).get("model", m_name)
-            except Exception:
-                pass
-            if last_u:
-                in_tok = last_u.get("input_tokens", 0)
-                cached = last_u.get("cached_input_tokens", 0)
-                return {
-                    "ok": True,
-                    "session_id": session_id,
-                    "model": m_name,
-                    "context_window": cw,
-                    "last_input_tokens": last_in or in_tok,
-                    "used_percentage": round(((last_in or in_tok) / max(cw, 1)) * 100, 2),
-                    "total_tokens": last_u.get("total_tokens", 0),
-                    "input_tokens": in_tok,
-                    "output_tokens": last_u.get("output_tokens", 0),
-                    "cached_tokens": cached,
-                    "reasoning_tokens": last_u.get("reasoning_output_tokens", 0),
-                    "cache_hit_rate": round((cached / max(in_tok, 1)) * 100, 1) if in_tok > 0 else 0,
-                }
+    pattern = os.path.expanduser(f"~/.codex/sessions/**/rollout-*{session_id}*.jsonl")
+    matches = glob.glob(pattern, recursive=True)
+    if matches:
+        last_u = None
+        cw = 1000000
+        last_in = 0
+        m_name = "default"
+        try:
+            with open(matches[0], "r", encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    if "total_token_usage" in line:
+                        d = json.loads(line)
+                        info = d.get("payload", {}).get("info", {})
+                        if "total_token_usage" in info:
+                            last_u = info["total_token_usage"]
+                            cw = info.get("model_context_window", cw)
+                            last_in = info.get("last_token_usage", {}).get("input_tokens", last_in)
+                    if "turn_context" in line and "model" in line:
+                        m_name = json.loads(line).get("payload", {}).get("model", m_name)
+        except Exception:
+            pass
+        if last_u:
+            in_tok = last_u.get("input_tokens", 0)
+            cached = last_u.get("cached_input_tokens", 0)
+            return {
+                "ok": True,
+                "session_id": session_id,
+                "model": m_name,
+                "context_window": cw,
+                "last_input_tokens": last_in or in_tok,
+                "used_percentage": round(((last_in or in_tok) / max(cw, 1)) * 100, 2),
+                "total_tokens": last_u.get("total_tokens", 0),
+                "input_tokens": in_tok,
+                "output_tokens": last_u.get("output_tokens", 0),
+                "cached_tokens": cached,
+                "reasoning_tokens": last_u.get("reasoning_output_tokens", 0),
+                "cache_hit_rate": round((cached / max(in_tok, 1)) * 100, 1) if in_tok > 0 else 0,
+            }
 
+    if not rows:
         return {
             "ok": True,
             "session_id": session_id,
@@ -303,10 +302,6 @@ def get_analytics_overview(request: Request) -> dict[str, Any]:
     store = request.app.state.store
 
     with store.session() as db:
-        total_rows = db.scalar(select(func.count(TokenMetricRow.row_id))) or 0
-        if total_rows == 0:
-            sync_all_agent_token_metrics(store)
-
         today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
         tot_q = select(

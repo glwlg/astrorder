@@ -301,8 +301,9 @@ class DaemonBridge:
                 "idle", "running", "waiting_approval", "error"
             }:
                 raise DaemonBridgeError("daemon session status is invalid")
-        self._retire_missing_sessions(set(sessions))
-        for session in self.store.list_sessions():
+        stored_sessions = self.store.list_sessions()
+        self._retire_missing_sessions(set(sessions), stored_sessions)
+        for session in stored_sessions:
             state = sessions.get(session["id"])
             if (
                 session.get("control_state") == "owned"
@@ -323,35 +324,40 @@ class DaemonBridge:
             handler(sessions)
         return daemon_id, sessions
 
-    def _retire_missing_sessions(self, current_session_ids: set[str]) -> None:
+    def _retire_missing_sessions(
+        self, current_session_ids: set[str], stored_sessions: list[dict[str, Any]]
+    ) -> None:
         reason = "小内核已重启，上一条指令的执行结果无法确认；不会自动重发。"
-        for session in self.store.list_sessions():
-            session_id = session["id"]
-            if session.get("control_state") != "owned" or session_id in current_session_ids:
-                continue
-            agent_id = session["agent_id"]
-            for command in self.store.list_commands(agent_id, session_id):
-                if command["state"] not in {"received", "queued", "accepted", "running"}:
-                    continue
+        missing = {
+            (session["agent_id"], session["id"])
+            for session in stored_sessions
+            if session.get("control_state") == "owned"
+            and session["id"] not in current_session_ids
+        }
+        for command in self.store.active_commands():
+            if (command["agent_id"], command["session_id"]) in missing:
                 updated = self.store.set_command_state(
-                    agent_id, session_id, command["id"], "unknown", reason
+                    command["agent_id"], command["session_id"], command["id"], "unknown", reason
                 )
                 self.service._server_event(
                     "command.upsert",
-                    agent_id=agent_id,
-                    session_id=session_id,
+                    agent_id=command["agent_id"],
+                    session_id=command["session_id"],
                     data=updated,
                 )
-            for task in self.store.list_tasks(agent_id, session_id):
-                if task["status"] not in {"pending", "running", "waiting_approval"}:
-                    continue
+        for task in self.store.active_tasks():
+            if (task["agent_id"], task["session_id"]) in missing:
                 updated_task = self.store.upsert_task({**task, "status": "unknown"})
                 self.service._server_event(
                     "task.upsert",
-                    agent_id=agent_id,
-                    session_id=session_id,
+                    agent_id=task["agent_id"],
+                    session_id=task["session_id"],
                     data=updated_task,
                 )
+        for session in stored_sessions:
+            agent_id, session_id = session["agent_id"], session["id"]
+            if (agent_id, session_id) not in missing:
+                continue
             if session["status"] in {"running", "waiting_approval"}:
                 updated_session = self.store.update_session(
                     agent_id, session_id, {"status": "idle"}

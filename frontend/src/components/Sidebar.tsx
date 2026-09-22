@@ -1,4 +1,4 @@
-import { IconAdjustments, IconDeviceDesktop, IconLayoutDashboard, IconMessageCircle, IconPuzzle, IconSettings, IconTopologyStarRing, IconUsers, IconChartBar, IconWorld } from '@tabler/icons-react'
+import { IconAdjustments, IconDeviceDesktop, IconLayoutDashboard, IconMessageCircle, IconPuzzle, IconSettings, IconTopologyStarRing, IconUsers, IconWorld } from '@tabler/icons-react'
 import { ActionIcon, Modal, NavLink, Stack, Tabs, Text, Tooltip } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useState } from 'react'
@@ -17,7 +17,6 @@ const navItems = [
   { to: '/monitor', label: '监控室', icon: IconLayoutDashboard, id: 'monitor' },
   { to: '/swarm', label: '星图', icon: IconTopologyStarRing, id: 'swarm' },
   { to: '/groups', label: '群聊', icon: IconUsers, id: 'groups' },
-  { to: '/analytics', label: '统计', icon: IconChartBar, id: 'analytics' },
 ]
 
 function addSessionToMonitor(sessionKey: string, title?: string) {
@@ -67,8 +66,7 @@ export function Sidebar({
   const isSwarm = location.pathname.startsWith('/swarm')
   const isGroups = location.pathname.startsWith('/groups') || location.pathname.startsWith('/chat/group-')
   const isMonitorRoute = location.pathname.startsWith('/monitor')
-  const isAnalytics = location.pathname.startsWith('/analytics')
-  const isChat = !isSwarm && !isGroups && !isMonitorRoute && !isAnalytics
+  const isChat = !isSwarm && !isGroups && !isMonitorRoute
 
   return (
     <>
@@ -81,7 +79,6 @@ export function Sidebar({
                 (id === 'swarm' && isSwarm) ||
                 (id === 'groups' && isGroups) ||
                 (id === 'monitor' && isMonitorRoute) ||
-                (id === 'analytics' && isAnalytics) ||
                 (id === 'chat' && isChat)
               return (
                 <Tooltip key={to} label={label} position="bottom" withArrow openDelay={200}>

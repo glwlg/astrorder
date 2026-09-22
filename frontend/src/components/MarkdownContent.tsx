@@ -7,15 +7,12 @@ import { Anchor } from '@mantine/core'
 import { isValidElement, useEffect, useState, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import mermaid from 'mermaid'
 import type { Session } from '../domain/types'
 import { artifactViewerRegistry, isNonPreviewableFile } from '../features/sidecar/registry'
 import { resolveArtifactFromPath } from '../features/sidecar/resolver'
 import { useSidecarStore } from '../features/sidecar/sidecarStore'
 import { useAstrorderStore } from '../state/store'
-
-mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'default' })
-let mermaidDiagramId = 0
+import { renderMermaid } from './renderMermaid'
 
 function MermaidDiagram({ code }: { code: string }) {
   const [svg, setSvg] = useState('')
@@ -23,10 +20,9 @@ function MermaidDiagram({ code }: { code: string }) {
 
   useEffect(() => {
     let active = true
-    const id = `markdown-mermaid-${++mermaidDiagramId}`
     setSvg('')
     setFailed(false)
-    void mermaid.render(id, code).then((result) => {
+    void renderMermaid(code).then((result) => {
       if (active) setSvg(result.svg)
     }).catch(() => {
       if (active) setFailed(true)

@@ -41,6 +41,9 @@ class FakeCodexAppServer:
     def stop(self) -> None:
         self.stopped = True
 
+    def is_alive(self) -> bool:
+        return self.started and not self.stopped
+
     def send(self, message) -> None:
         self.calls.append(("send", dict(message)))
 
@@ -223,6 +226,37 @@ def test_codex_daemon_factory_requires_authenticated_ipc(tmp_path):
         codex_config=config,
     )
     assert "codex" in daemon._runtime_registry
+
+
+@pytest.mark.asyncio
+async def test_codex_runtime_reconnects_a_closed_transport_before_sending(tmp_path):
+    FakeCodexAppServer.instances.clear()
+    runtime = CodexDaemonRuntime(
+        CodexDaemonRuntimeConfig(
+            executable="fixture-codex",
+            workspace=tmp_path,
+            allowed_workspaces=(tmp_path,),
+            agent_id="daemon-codex",
+            agent_name="Daemon Codex",
+        ),
+        emit=lambda *_args, **_kwargs: None,
+        client_factory=FakeCodexAppServer,
+    )
+    await runtime.spawn({"session_id": "native-thread-1"})
+    first = FakeCodexAppServer.instances[0]
+    first.stopped = True
+
+    result = await runtime.command(
+        "session.send",
+        {
+            "session_id": "native-thread-1",
+            "input": [{"type": "text", "text": "after restart"}],
+        },
+    )
+
+    assert result == {"status": "running", "turn_id": "turn-1", "accepted": True}
+    assert len(FakeCodexAppServer.instances) == 2
+    assert ("thread/resume", {"threadId": "native-thread-1", "excludeTurns": True}) in FakeCodexAppServer.instances[1].calls
 
 
 @pytest.mark.asyncio

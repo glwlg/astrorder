@@ -1,5 +1,6 @@
 import { MantineProvider } from '@mantine/core'
 import { render, screen, waitFor } from '@testing-library/react'
+import { StrictMode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
 vi.mock('mermaid', () => ({
@@ -14,9 +15,11 @@ import { MarkdownContent } from './MarkdownContent'
 describe('MarkdownContent Mermaid diagrams', () => {
   it('renders an unlabelled flowchart code block as a diagram', async () => {
     render(
-      <MantineProvider>
-        <MarkdownContent value={'```\nflowchart TB\n  A[监控对象] --> B[数据采集]\n```'} />
-      </MantineProvider>,
+      <StrictMode>
+        <MantineProvider>
+          <MarkdownContent value={'```\nflowchart TB\n  A[监控对象] --> B[数据采集]\n```'} />
+        </MantineProvider>
+      </StrictMode>,
     )
 
     await waitFor(() => expect(screen.getByLabelText('rendered-flowchart')).toBeInTheDocument())

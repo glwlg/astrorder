@@ -64,6 +64,19 @@ markOutboxError: (
 }
 
 const emptyDraft = (): DraftState => ({ text: '', attachments: [], sessionRefs: [] })
+const MAX_SEEN_EVENT_IDS = 1024
+const LIVE_ACTIVITY_REFRESH_MS = 5000
+
+function rememberEvent(seen: Record<string, true>, key: string): Record<string, true> {
+  const keys = Object.keys(seen)
+  if (keys.length < MAX_SEEN_EVENT_IDS) return { ...seen, [key]: true }
+  return Object.fromEntries([...keys.slice(-MAX_SEEN_EVENT_IDS / 2), key].map((id) => [id, true]))
+}
+
+function touchLiveActivity(current: Record<string, number>, key: string): Record<string, number> {
+  const now = Date.now()
+  return now - (current[key] || 0) < LIVE_ACTIVITY_REFRESH_MS ? current : { ...current, [key]: now }
+}
 
 function commandKey(command: Command): string {
   return scopeKey(command.agent_id, command.session_id) + `::${command.id}`
@@ -291,7 +304,7 @@ export const useAstrorderStore = create<AstrorderStore>((set) => ({
     set((state) => {
       const eventKey = JSON.stringify([event.agent_id, event.id])
       if (!eventIsNew(eventKey, state.seenEventIds)) return state
-      const seenEventIds: Record<string, true> = { ...state.seenEventIds, [eventKey]: true }
+      const seenEventIds = rememberEvent(state.seenEventIds, eventKey)
       const base = {
         seenEventIds,
         cursor: Math.max(state.cursor, event.cursor),
@@ -366,7 +379,7 @@ export const useAstrorderStore = create<AstrorderStore>((set) => ({
         return {
           ...base,
           messages: { ...state.messages, [key]: messageMap(merged) },
-          liveActivityAt: message.tool?.background === true ? state.liveActivityAt : { ...state.liveActivityAt, [key]: Date.now() },
+          liveActivityAt: message.tool?.background === true ? state.liveActivityAt : touchLiveActivity(state.liveActivityAt, key),
         }
       }
 
@@ -385,7 +398,7 @@ export const useAstrorderStore = create<AstrorderStore>((set) => ({
         return {
           ...base,
           tasks: { ...state.tasks, [key]: { ...state.tasks[key], ...task } },
-          liveActivityAt: task.progress?.blocking === false ? state.liveActivityAt : { ...state.liveActivityAt, [sessionKey]: Date.now() },
+          liveActivityAt: task.progress?.blocking === false ? state.liveActivityAt : touchLiveActivity(state.liveActivityAt, sessionKey),
         }
       }
 

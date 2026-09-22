@@ -24,6 +24,9 @@ def test_app_server_passes_child_environment_and_writes_bootstrap_before_protoco
         return process
 
     monkeypatch.setattr('astrorder_codex_connector.app_server.subprocess.Popen', popen)
+    monkeypatch.setattr(
+        'astrorder_codex_connector.app_server._assign_kill_on_close_job', lambda _process: None
+    )
     environment = {'SYSTEM_ONLY': 'machine', 'USER_ONLY': 'user', 'PROCESS_ONLY': 'process'}
     bootstrap = {'environment': environment}
     config = CodexConnectorConfig(
@@ -48,6 +51,28 @@ def test_app_server_passes_child_environment_and_writes_bootstrap_before_protoco
     assert captured['kwargs']['env'] == environment
     assert captured['kwargs']['cwd'] is None
     assert json.loads(process.stdin.getvalue()) == bootstrap
+
+
+def test_stop_closes_the_windows_job_that_owns_the_process_tree(monkeypatch, tmp_path):
+    class Job:
+        closed = False
+
+        def Close(self):
+            self.closed = True
+
+    job = Job()
+    process = FakeProcess()
+    monkeypatch.setattr('astrorder_codex_connector.app_server.subprocess.Popen', lambda *_a, **_k: process)
+    monkeypatch.setattr(
+        'astrorder_codex_connector.app_server._assign_kill_on_close_job', lambda _process: job
+    )
+    config = CodexConnectorConfig('', '', 'agent', 'Codex', 'codex', tmp_path, ())
+    server = CodexAppServer(config, lambda _frame: None)
+
+    server.start()
+    server.stop()
+
+    assert job.closed is True
 
 
 def test_rpc_rejection_preserves_native_reason_without_exposing_credential_value():

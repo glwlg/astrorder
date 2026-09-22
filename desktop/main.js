@@ -309,7 +309,7 @@ function rebuildMenu() {
     serviceMenu('app', '大内核'),
     serviceMenu('daemon', '小内核'),
     { type: 'separator' },
-    { label: '退出星序', enabled: !busy, click: quit },
+    { label: '退出客户端（小内核继续运行）', enabled: !busy, click: quit },
   ]))
 }
 

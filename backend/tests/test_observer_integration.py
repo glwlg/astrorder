@@ -69,6 +69,15 @@ def test_local_trust_status_rechecks_native_config_when_catalog_is_stale(tmp_pat
     assert observer.status('local-codex')['needs_review'] is False
     verify.assert_called_once_with(tmp_path,'codex')
 
+def test_remote_observer_poll_is_throttled_without_delaying_local_observer():
+    local=SimpleNamespace(agent_id='local')
+    remote=SimpleNamespace(agent_id='remote',remote_json=Mock())
+    observer=NativeObservers(SimpleNamespace(state=SimpleNamespace(environments=SimpleNamespace(codex=local,remote={}))))
+    assert observer._poll_due(local,100) is True
+    assert observer._poll_due(remote,100) is True
+    assert observer._poll_due(remote,159) is False
+    assert observer._poll_due(remote,160) is True
+
 def test_stale_permission_request_is_discarded_and_acknowledged(tmp_path):
     settings = Settings(
         database_url=f'sqlite:///{tmp_path}/cache.db',
