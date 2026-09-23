@@ -1,7 +1,7 @@
 from __future__ import annotations
 import pytest
 from astrorder.config import Settings
-from astrorder.jev_client import get_jev_key, set_jev_key, evaluate_blackboard_component
+from astrorder.jev.client import get_jev_key, set_jev_key, evaluate_blackboard_component
 
 def test_jev_key_storage(tmp_path):
     from astrorder.store import Store

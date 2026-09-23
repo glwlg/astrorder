@@ -6,8 +6,8 @@ from types import SimpleNamespace
 from test_codex_connection import SID, THREAD, FakeClient
 
 from astrorder.config import Settings
-from astrorder.environment_connections import EnvironmentConnections, RemoteCodex
-from astrorder.events import EventHub
+from astrorder.core.environment_connections import EnvironmentConnections, RemoteCodex
+from astrorder.core.events import EventHub
 from astrorder.service import ControlService
 from astrorder.store import Store
 

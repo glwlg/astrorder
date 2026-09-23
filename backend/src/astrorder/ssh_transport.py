@@ -770,7 +770,7 @@ class SshNativeRuntime:
             if bool(provider) != bool(model):
                 raise ConnectionError("Hermes provider 与 model 必须同时提供。", 422)
             if effort:
-                from .native_controls import REASONING_EFFORTS
+                from .native.controls import REASONING_EFFORTS
 
                 if effort not in REASONING_EFFORTS:
                     raise ConnectionError("思考强度不在原生支持范围内。", 422)
@@ -821,7 +821,7 @@ class SshNativeRuntime:
         return tui_id, stored_id
 
     def discover_native_sessions(self) -> Any:
-        from .native_sessions import discover_native_sessions
+        from .native.sessions import discover_native_sessions
 
         discovery = discover_native_sessions(
             self.rpc,
@@ -834,7 +834,7 @@ class SshNativeRuntime:
         return discovery
 
     def load_native_history(self, durable_session_id: str) -> list[dict[str, Any]]:
-        from .native_sessions import history_messages
+        from .native.sessions import history_messages
 
         native_id = durable_session_id
         return history_messages(
@@ -921,7 +921,7 @@ class SshNativeRuntime:
                 return "failed", "远程 Hermes 未连接；未尝试投递命令。"
             session_id = command.get("session_id")
             if command.get("action") == "stop":
-                from .native_commands import interrupt_session
+                from .native.commands import interrupt_session
                 return interrupt_session(self.rpc, session_id)
             if command.get("action", "send") != "send":
                 return "failed", "该原生操作不能作为消息投递。"
@@ -941,7 +941,7 @@ class SshNativeRuntime:
             text_value = command.get("text")
             if not isinstance(text_value, str):
                 return "failed", "远程 Hermes 命令文本无效。"
-            from .hermes_inputs import rollback, stage, stage_daemon_attachments
+            from .adapters.hermes.inputs import rollback, stage, stage_daemon_attachments
             settings = getattr(self, "app_settings", None)
             store = getattr(self, "store", None)
             try:

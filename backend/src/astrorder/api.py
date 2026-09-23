@@ -15,15 +15,15 @@ from fastapi import APIRouter, File, Form, HTTPException, Query, Request, Upload
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
-from .attachments import AttachmentError
-from .agent_gateway import AgentApiError, AgentContext, CAPABILITIES, invoke
-from .auth import COOKIE_NAME, browser_authenticated, require_agent, require_browser, validate_origin
+from .core.attachments import AttachmentError
+from .agents.gateway import AgentApiError, AgentContext, CAPABILITIES, invoke
+from .core.auth import COOKIE_NAME, browser_authenticated, require_agent, require_browser, validate_origin
 from .connections import ConnectionError, _windows_hide_startupinfo
 from .daemon.bridge import DaemonBridgeError
-from .handoff import HANDOFF_CONTEXT_MESSAGE_ID, SUMMARY_PROMPT, build_handoff_prompt
+from .core.handoff import HANDOFF_CONTEXT_MESSAGE_ID, SUMMARY_PROMPT, build_handoff_prompt
 from .schemas import AuthRequest, CommandSubmission, RuntimeLaunch, SshConnectionSettings
 from .service import CommandRejected
-from .workspace_preferences import router as preferences_router
+from .core.workspace_preferences import router as preferences_router
 from .routers.agents import router as agents_router
 from .routers.auth import router as auth_router
 from .routers.blackboard import router as blackboard_router
@@ -159,7 +159,7 @@ def _local_hermes_database(runtime):
 
 
 def _collect_presence(request: Request) -> dict[str, list]:
-    from .native_user_activity import presence
+    from .native.user_activity import presence
     controller = request.app.state.connections
     store = request.app.state.store
     items: list[dict[str, str]] = []
@@ -200,7 +200,7 @@ def _collect_presence(request: Request) -> dict[str, list]:
 @router.get("/api/v1/bootstrap")
 def bootstrap(request: Request) -> dict[str, object]:
     _private(request)
-    from .agent_registry import current_agents
+    from .agents.registry import current_agents
     store = request.app.state.store
     sessions = store.sessions_for_bootstrap()
     return {
@@ -243,7 +243,7 @@ async def agent_mcp(request: Request) -> Response:
             row = db.get(WorkspacePreferenceRow, f"agent_mcp_enabled:{client_agent_id}")
             if row and row.value is False:
                 raise HTTPException(status_code=403, detail=f"Astrorder MCP has been disabled for agent '{client_agent_id}'.")
-    from .agent_mcp import handle_rpc
+    from .agents.mcp import handle_rpc
 
     try:
         body = await request.json()
@@ -344,8 +344,8 @@ class CreateSessionPayload(BaseModel):
 @router.get("/api/v1/open-sessions")
 async def open_sessions(request: Request) -> dict[str, object]:
     _private(request)
-    from .native_controls import open_native_session_ids, runtime_rpc
-    from .jev_client import get_jev_key, evaluate_session_swipe_worthiness
+    from .native.controls import open_native_session_ids, runtime_rpc
+    from .jev.client import get_jev_key, evaluate_session_swipe_worthiness
     store = request.app.state.store
 
     def read(agent_id):
@@ -732,7 +732,7 @@ async def _handoff_messages(
         raw_items = page.get("items") if isinstance(page, dict) else None
         if not isinstance(raw_items, list):
             raise ConnectionError("源 Agent 返回了无效的分叉消息。", 502)
-        from .native_sessions import project_history_messages
+        from .native.sessions import project_history_messages
 
         items = project_history_messages(
             raw_items,
@@ -810,7 +810,7 @@ async def _summarize_handoff(
         raise ConnectionError("转交已取消。", 409)
 
     # 1. 优先尝试 Jev 快速提炼交接包（秒级响应、节省大模型 Token）
-    from .jev_client import get_jev_key, curate_handoff_summary
+    from .jev.client import get_jev_key, curate_handoff_summary
     if get_jev_key(request.app.state.store):
         try:
             source_msgs = request.app.state.store.list_messages(source["id"], limit=20)
@@ -1235,9 +1235,9 @@ async def messages(
         try:
             page = await asyncio.to_thread(read_page)
             if page is not None:
-                from .attachments import AttachmentManager
-                from .native_attachments import bind_hermes_refs, hermes_roots
-                from .native_sessions import project_history_messages
+                from .core.attachments import AttachmentManager
+                from .native.attachments import bind_hermes_refs, hermes_roots
+                from .native.sessions import project_history_messages
                 items = project_history_messages(page['items'], durable_session_id=session_id, native_session_id=session_id, source_id=session.get('source_id') or agent_id, agent_id=agent_id)
                 manager = AttachmentManager(request.app.state.settings, request.app.state.store)
                 roots = hermes_roots()
@@ -1282,7 +1282,7 @@ class SessionModelSelection(BaseModel):
 @router.get("/api/v1/sessions/{session_id}/models")
 def session_models(session_id: str, request: Request, agent_id: str = Query(..., min_length=1)) -> dict[str, object]:
     _private(request)
-    from .native_controls import model_choices, runtime_rpc
+    from .native.controls import model_choices, runtime_rpc
     if request.app.state.store.get_session(agent_id, session_id) is None:
         raise HTTPException(status_code=404, detail="Session was not found")
     try:
@@ -1332,7 +1332,7 @@ def session_agent_mentions(
 @router.post("/api/v1/sessions/{session_id}/model")
 def session_model(session_id: str, payload: SessionModelSelection, request: Request) -> dict[str, object]:
     _private(request)
-    from .native_controls import runtime_rpc, set_session_model
+    from .native.controls import runtime_rpc, set_session_model
     session = request.app.state.store.get_session(payload.agent_id, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session was not found")
@@ -1360,7 +1360,7 @@ def session_model(session_id: str, payload: SessionModelSelection, request: Requ
 @router.get("/api/v1/sessions/{session_id}/model")
 def read_session_model(session_id: str, request: Request, agent_id: str = Query(..., min_length=1, max_length=256)) -> dict[str, object]:
     _private(request)
-    from .native_controls import current_session_model, runtime_rpc
+    from .native.controls import current_session_model, runtime_rpc
     if request.app.state.store.get_session(agent_id, session_id) is None:
         raise HTTPException(status_code=404, detail="Session was not found")
     try:
@@ -1384,7 +1384,7 @@ def read_session_model(session_id: str, request: Request, agent_id: str = Query(
             raise ConnectionError("会话所属运行时未提供模型状态。", 503)
         rpc = runtime_rpc(request.app.state.connections, agent_id)
         binding = current_session_model(rpc, session_id)
-        from .native_controls import current_session_reasoning
+        from .native.controls import current_session_reasoning
         binding['effort'] = saved_effort or current_session_reasoning(rpc, session_id)
         return binding
     except ConnectionError as exc:
@@ -1404,7 +1404,7 @@ class SessionApprovalModeSelection(BaseModel):
 @router.post("/api/v1/sessions/{session_id}/reasoning")
 def session_reasoning(session_id: str, payload: SessionReasoningSelection, request: Request) -> dict[str, object]:
     _private(request)
-    from .native_controls import runtime_rpc, set_session_reasoning
+    from .native.controls import runtime_rpc, set_session_reasoning
     if request.app.state.store.get_session(payload.agent_id, session_id) is None:
         raise HTTPException(status_code=404, detail="Session was not found")
     try:
@@ -1448,10 +1448,10 @@ def session_approval_mode(session_id: str, request: Request, agent_id: str = Que
             if saved is not None:
                 return {"mode": saved}
             raise ConnectionError("会话所属运行时不支持审批模式读取。", 503)
-        from .native_controls import current_session_approval_mode, runtime_rpc
+        from .native.controls import current_session_approval_mode, runtime_rpc
         mode = current_session_approval_mode(runtime_rpc(request.app.state.connections, agent_id), session_id)
         if saved is not None and mode != saved:
-            from .native_controls import set_session_approval_mode
+            from .native.controls import set_session_approval_mode
             with suppress(Exception):
                 set_session_approval_mode(runtime_rpc(request.app.state.connections, agent_id), session_id, saved)
                 mode = saved
@@ -1476,7 +1476,7 @@ def session_approval_mode_select(session_id: str, payload: SessionApprovalModeSe
             return result
         if getattr(runtime, "daemon_owned", False):
             raise ConnectionError("会话所属运行时不支持审批模式设置。", 503)
-        from .native_controls import runtime_rpc, set_session_approval_mode
+        from .native.controls import runtime_rpc, set_session_approval_mode
         result = set_session_approval_mode(runtime_rpc(request.app.state.connections, payload.agent_id), session_id, payload.mode)
         request.app.state.store.set_session_approval_mode_binding(payload.agent_id, session_id, payload.mode)
         return result
@@ -2141,7 +2141,7 @@ def _llm_config_response(config: dict[str, str]) -> dict[str, Any]:
 @router.get("/api/v1/services/jev/config")
 def get_jev_config(request: Request) -> dict[str, Any]:
     _private(request)
-    from .jev_client import get_jev_key
+    from .jev.client import get_jev_key
     key = get_jev_key(request.app.state.store)
     masked = f"{key[:10]}...{key[-8:]}" if key and len(key) > 20 else ("已配置" if key else "")
     return {
@@ -2153,7 +2153,7 @@ def get_jev_config(request: Request) -> dict[str, Any]:
 @router.post("/api/v1/services/jev/config")
 def update_jev_config(payload: JevConfigPatch, request: Request) -> dict[str, Any]:
     _private(request)
-    from .jev_client import set_jev_key
+    from .jev.client import set_jev_key
     set_jev_key(request.app.state.store, payload.api_key)
     return get_jev_config(request)
 
@@ -2161,7 +2161,7 @@ def update_jev_config(payload: JevConfigPatch, request: Request) -> dict[str, An
 @router.post("/api/v1/services/jev/test")
 def test_jev_connection(payload: JevConfigPatch, request: Request) -> dict[str, Any]:
     _private(request)
-    from .jev_client import evaluate_blackboard_component
+    from .jev.client import evaluate_blackboard_component
     key = (payload.api_key or "").strip() or None
     try:
         res = evaluate_blackboard_component("Ping health check probe: system metrics and status.", store=request.app.state.store, api_key=key)
@@ -2173,14 +2173,14 @@ def test_jev_connection(payload: JevConfigPatch, request: Request) -> dict[str, 
 @router.get("/api/v1/services/llm/config")
 def get_llm_service_config(request: Request) -> dict[str, Any]:
     _private(request)
-    from .llm_config import get_llm_config
+    from .core.llm_config import get_llm_config
     return _llm_config_response(get_llm_config(request.app.state.store))
 
 
 @router.post("/api/v1/services/llm/config")
 def update_llm_service_config(payload: LlmConfigPatch, request: Request) -> dict[str, Any]:
     _private(request)
-    from .llm_config import get_llm_config, set_llm_config
+    from .core.llm_config import get_llm_config, set_llm_config
     current = get_llm_config(request.app.state.store)
     config = payload.model_dump()
     if payload.api_key is None:
@@ -2195,7 +2195,7 @@ def update_llm_service_config(payload: LlmConfigPatch, request: Request) -> dict
 def test_llm_service_connection(payload: LlmConfigPatch, request: Request) -> dict[str, Any]:
     _private(request)
     import httpx
-    from .llm_config import get_llm_config, reasoning_payload
+    from .core.llm_config import get_llm_config, reasoning_payload
     current = get_llm_config(request.app.state.store)
     key = (payload.api_key or current["api_key"]).strip()
     if not key:
@@ -2229,7 +2229,7 @@ class JevFilterPayload(BaseModel):
 @router.post("/api/v1/tools/jev-filter")
 def jev_filter_endpoint(payload: JevFilterPayload, request: Request) -> dict[str, Any]:
     _private(request)
-    from .jev_client import filter_terminal_output
+    from .jev.client import filter_terminal_output
     return filter_terminal_output(payload.command, payload.output, store=request.app.state.store)
 
 
@@ -2241,7 +2241,7 @@ class JevHandoffCuratePayload(BaseModel):
 @router.post("/api/v1/sessions/handoff-curate")
 def jev_handoff_curate_endpoint(payload: JevHandoffCuratePayload, request: Request) -> dict[str, Any]:
     _private(request)
-    from .jev_client import curate_handoff_summary
+    from .jev.client import curate_handoff_summary
     store = request.app.state.store
     session_row = store.get_session(payload.agent_id, payload.session_id)
     if not session_row:

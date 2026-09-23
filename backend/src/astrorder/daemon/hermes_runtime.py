@@ -138,7 +138,7 @@ class HermesDaemonRuntime:
             rpc = getattr(controller, "_rpc", None)
             if not callable(rpc):
                 raise DaemonProtocolError("Hermes native rename is unsupported")
-            from ..native_session_mutation import rename_native_session
+            from ..native.session_mutation import rename_native_session
 
             await asyncio.to_thread(rename_native_session, rpc, session_id, title)
             return {"status": "idle", "title": title}
@@ -146,7 +146,7 @@ class HermesDaemonRuntime:
             rpc = getattr(controller, "_rpc", None)
             if not callable(rpc):
                 raise DaemonProtocolError("Hermes native delete is unsupported")
-            from ..native_session_mutation import delete_native_session
+            from ..native.session_mutation import delete_native_session
 
             await asyncio.to_thread(delete_native_session, rpc, session_id)
             with self._lock:
@@ -211,7 +211,7 @@ class HermesDaemonRuntime:
             rpc = getattr(controller, "rpc", None)
         if not callable(rpc):
             raise DaemonProtocolError("Hermes slash transport is unavailable")
-        from ..native_controls import result
+        from ..native.controls import result
 
         resumed = result(rpc, "session.resume", {"session_id": session_id, "lazy": False})
         handle = resumed.get("session_id")

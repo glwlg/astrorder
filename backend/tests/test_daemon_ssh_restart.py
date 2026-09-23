@@ -9,7 +9,7 @@ from astrorder.daemon.bridge import DaemonBridge
 from astrorder.daemon.session_daemon import SessionDaemon
 from astrorder.daemon.ssh_control import DaemonSshController
 from astrorder.daemon.ssh_runtime import SshDaemonRuntime, SshDaemonRuntimeRegistry
-from astrorder.events import EventHub
+from astrorder.core.events import EventHub
 from astrorder.service import ControlService
 from astrorder.store import Store
 

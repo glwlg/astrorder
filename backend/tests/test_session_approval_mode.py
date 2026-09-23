@@ -5,10 +5,10 @@ from fastapi.testclient import TestClient
 
 from astrorder.config import Settings
 from astrorder.connections import ConnectionError
-from astrorder.events import EventHub
+from astrorder.core.events import EventHub
 from astrorder.main import create_app
-from astrorder.native_codex import CodexConnection
-from astrorder.native_controls import current_session_approval_mode, set_session_approval_mode
+from astrorder.native.codex import CodexConnection
+from astrorder.native.controls import current_session_approval_mode, set_session_approval_mode
 from astrorder.service import ControlService
 from astrorder.store import Store
 

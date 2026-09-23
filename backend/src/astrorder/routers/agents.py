@@ -11,14 +11,14 @@ router = APIRouter()
 
 
 def _private(request: Request) -> None:
-    from ..auth import require_browser
+    from ..core.auth import require_browser
     require_browser(request)
 
 
 @router.get("/api/v1/agents")
 def agents(request: Request) -> dict[str, object]:
     _private(request)
-    from ..agent_registry import current_agents
+    from ..agents.registry import current_agents
     return {"items": [request.app.state.service.effective_agent(a) for a in current_agents(request.app.state.store)]}
 
 
@@ -35,7 +35,7 @@ def observations(agent_id: str, request: Request, session_id: str | None = None)
 def install_observer(agent_id: str, request: Request):
     _private(request)
     try:
-        from ..observer_plugin import ensure_observer_plugin
+        from ..observers.plugin import ensure_observer_plugin
         ensure_observer_plugin(agent_id)
         return {"ok": True}
     except Exception as exc:

@@ -3,7 +3,7 @@ from unittest.mock import Mock
 import base64
 import pytest
 from astrorder.connections import ConnectionError
-from astrorder.hermes_inputs import stage
+from astrorder.adapters.hermes.inputs import stage
 
 PNG = b'\x89PNG\r\n\x1a\nimage'
 

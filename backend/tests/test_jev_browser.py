@@ -1,8 +1,8 @@
 import pytest
 
 from astrorder import jev_browser
-from astrorder.agent_mcp import handle_rpc
-from astrorder.agent_gateway import CAPABILITIES
+from astrorder.agents.mcp import handle_rpc
+from astrorder.agents.gateway import CAPABILITIES
 
 
 def test_browser_capability_is_registered():

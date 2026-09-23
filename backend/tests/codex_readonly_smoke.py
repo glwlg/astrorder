@@ -3,10 +3,10 @@ import json
 import tempfile
 from pathlib import Path
 from astrorder.config import Settings
-from astrorder.events import EventHub
+from astrorder.core.events import EventHub
 from astrorder.store import Store
 from astrorder.service import ControlService
-from astrorder.native_codex import CodexConnection
+from astrorder.native.codex import CodexConnection
 
 with tempfile.TemporaryDirectory(prefix='astrorder-codex-probe-') as directory:
     settings = Settings(database_url=f'sqlite:///{Path(directory) / "cache.db"}', auto_connect_local_hermes=False)

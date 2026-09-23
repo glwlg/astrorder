@@ -11,13 +11,13 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
-from ..staging_files import StageFilesPayload, stage_files_handler
+from ..core.staging_files import StageFilesPayload, stage_files_handler
 
 router = APIRouter()
 
 
 def _private(request: Request) -> None:
-    from ..auth import require_browser
+    from ..core.auth import require_browser
     require_browser(request)
 
 

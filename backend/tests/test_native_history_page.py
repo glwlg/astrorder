@@ -1,6 +1,6 @@
 import sqlite3
 import pytest
-from astrorder.native_history_page import read_native_page
+from astrorder.native.history_page import read_native_page
 
 
 def database(tmp_path):
@@ -34,7 +34,7 @@ def test_native_reader_does_not_create_missing_database(tmp_path):
 
 def test_native_raw_projection_preserves_reasoning_and_tool_arguments():
     import json
-    from astrorder.native_sessions import project_history_messages
+    from astrorder.native.sessions import project_history_messages
     rows = [{'id': 1, 'role': 'assistant', 'content': None, 'timestamp': 1, 'reasoning': 'thought', 'tool_calls': json.dumps([{'id': 'call-1', 'function': {'name': 'terminal', 'arguments': '{"command":"pwd"}'}}])}, {'id': 2, 'role': 'tool', 'tool_name': 'terminal', 'content': 'result', 'timestamp': 2}]
     projected = project_history_messages(rows, durable_session_id='native', native_session_id='native', source_id='source', agent_id='source')
     assert any(row['kind'] == 'thinking' and row['text'] == 'thought' for row in projected)
@@ -113,7 +113,7 @@ def test_api_keeps_native_image_reference_out_of_cached_history_responses(tmp_pa
         ],
         'next_cursor': None,
     }
-    monkeypatch.setattr('astrorder.native_attachments.hermes_roots', lambda: [native_root])
+    monkeypatch.setattr('astrorder.native.attachments.hermes_roots', lambda: [native_root])
     app = create_app(
         Settings(
             database_url=f'sqlite:///{tmp_path}/cache.db',

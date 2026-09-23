@@ -10,7 +10,7 @@ from uuid import UUID
 from sqlalchemy import select
 
 from astrorder.models import EventRow
-from astrorder.observer_io import read_spool, write_decision
+from astrorder.observers.io import read_spool, write_decision
 
 LABELS={'SessionStart':'原生会话已打开','SessionEnd':'原生会话已关闭','UserPromptSubmit':'原生端提交了消息','PreToolUse':'工具开始执行','PostToolUse':'工具执行结束','PermissionRequest':'原生端等待审批','SubagentStart':'子代理已启动','SubagentStop':'子代理已结束','Stop':'原生轮次已结束','Interrupt':'原生轮次已中断'}
 
@@ -294,7 +294,7 @@ class NativeObservers:
         return runtimes
 
     def _sync_hermes_activity(self):
-        from astrorder.native_sessions import active_native_session_status
+        from astrorder.native.sessions import active_native_session_status
 
         service = getattr(self.app.state, "service", None)
         store = getattr(self.app.state, "store", None)
@@ -372,7 +372,7 @@ class NativeObservers:
                 state['trusted']=bool(hooks) and all(h.get('trustStatus') in ('trusted','managed') and h.get('enabled') for h in hooks)
                 state['needs_review']=any(h.get('trustStatus') in ('untrusted','modified') for h in hooks)
                 if state['needs_review'] and not hasattr(client,'remote_json') and client._home:
-                    from astrorder.observer_plugin import verify_plugin
+                    from astrorder.observers.plugin import verify_plugin
                     config=client._home/'config.toml'
                     modified=config.stat().st_mtime_ns if config.exists() else 0
                     cached=self.states.setdefault(agent_id,{})

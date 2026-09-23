@@ -2,7 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from astrorder.config import Settings
-from astrorder.events import EventHub
+from astrorder.core.events import EventHub
 from astrorder.main import create_app
 from astrorder.service import CommandRejected, ControlService
 from astrorder.store import Store

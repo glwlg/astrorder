@@ -1,5 +1,5 @@
 from unittest.mock import Mock
-from astrorder.native_observers import reconcile_native_status, reply_preview
+from astrorder.native.observers import reconcile_native_status, reply_preview
 
 def test_preview_uses_only_matching_turn_and_redacts_secrets():
     client=Mock()

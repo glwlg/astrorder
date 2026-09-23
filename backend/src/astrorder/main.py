@@ -20,17 +20,17 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from .analytics import router as analytics_router
+from .core.analytics import router as analytics_router
 from .api import router
-from .attachments import AttachmentManager
-from .auth import authorize_browser_websocket, authorize_connector_websocket, require_browser
-from .background_tasks import BackgroundTaskRegistry
-from .bot_groups import router as bot_groups_router
+from .core.attachments import AttachmentManager
+from .core.auth import authorize_browser_websocket, authorize_connector_websocket, require_browser
+from .core.background_tasks import BackgroundTaskRegistry
+from .core.bot_groups import router as bot_groups_router
 from .config import Settings
 from .connections import ConnectionController, ConnectionError
-from .environment_connections import EnvironmentConnections
-from .events import EventHub
-from .native_codex import CodexConnection
+from .core.environment_connections import EnvironmentConnections
+from .core.events import EventHub
+from .native.codex import CodexConnection
 from .runtime import ProcessSupervisor
 from .schemas import AgentModel
 from .service import ControlService, ProtocolError
@@ -250,7 +250,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if runtime_settings.daemon_grok_enabled:
             if app.state.daemon_bridge is None or not runtime_settings.grok_executable:
                 raise ValueError("daemon Grok requires its executable and Session Daemon bridge")
-            from .grok_connection import GrokConnection, GrokProjection, local_grok_sessions
+            from connectors.grok.connection import GrokConnection, GrokProjection, local_grok_sessions
 
             app.state.grok_projection = GrokProjection(app.state.daemon_bridge, store, service)
             local_grok = GrokConnection(
@@ -262,7 +262,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
 
             def grok_factory(row, executable):
-                from .environment_connections import RemoteCodex
+                from .core.environment_connections import RemoteCodex
 
                 probe = RemoteCodex(runtime_settings, store, service, row, "")
 
@@ -330,10 +330,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 app, agent_id, session_id, provider, model, effort
             ),
         )
-        from .hermes_approvals import HermesApprovals
+        from .adapters.hermes.approvals import HermesApprovals
         app.state.hermes_approvals = HermesApprovals(app.state.connections, service)
         service.register_approval_handler(app.state.hermes_approvals)
-        from .native_observers import NativeObservers
+        from .native.observers import NativeObservers
         observers = NativeObservers(app)
         app.state.observers = observers
         service.register_approval_handler(observers)
@@ -502,7 +502,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 return
 
         await websocket.accept()
-        from .terminal_service import TerminalSession
+        from .core.terminal_service import TerminalSession
 
         term = TerminalSession(
             workspace=workspace_dir,
@@ -620,7 +620,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 elif frame_type == "ping":
                     await connection.send({"type": "pong"})
                 elif frame_type == "agent_invoke":
-                    from .agent_gateway import AgentApiError, AgentContext, invoke
+                    from .agents.gateway import AgentApiError, AgentContext, invoke
 
                     request_id = frame.get("id")
                     capability = frame.get("capability")

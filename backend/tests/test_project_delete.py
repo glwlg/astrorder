@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import Mock
 from astrorder.config import Settings
-from astrorder.events import EventHub
+from astrorder.core.events import EventHub
 from astrorder.service import ControlService
 from astrorder.store import Store
 
@@ -19,7 +19,7 @@ def test_delete_session_closes_bound_browser_tab(tmp_path: Path, monkeypatch) ->
         "updated_at": "2026-09-09T12:00:00Z",
     })
     closed = []
-    monkeypatch.setattr("astrorder.jev_browser.close_browser_session", closed.append)
+    monkeypatch.setattr("astrorder.jev.browser.close_browser_session", closed.append)
 
     assert ControlService(store, EventHub(), settings).delete_session("agent-1", "sess-1") is True
     assert closed == ["agent-1::sess-1"]
@@ -89,7 +89,7 @@ def test_delete_project_cascades_sessions_and_messages(tmp_path: Path, monkeypat
     queue = hub.subscribe()
     service = ControlService(store, hub, settings)
     closed = []
-    monkeypatch.setattr("astrorder.jev_browser.close_browser_session", closed.append)
+    monkeypatch.setattr("astrorder.jev.browser.close_browser_session", closed.append)
 
     res = service.delete_project(
         project_key="project:local-src\0proj-a",

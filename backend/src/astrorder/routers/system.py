@@ -9,7 +9,7 @@ router = APIRouter()
 
 
 def _private(request: Request) -> None:
-    from ..auth import require_browser
+    from ..core.auth import require_browser
     require_browser(request)
 
 

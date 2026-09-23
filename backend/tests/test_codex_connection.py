@@ -8,8 +8,8 @@ import pytest
 from astrorder_codex_connector.app_server import CodexRpcRejected
 from astrorder.config import Settings
 from astrorder.connections import ConnectionError
-from astrorder.events import EventHub
-from astrorder.native_codex import CodexConnection, rollout_item_timestamps
+from astrorder.core.events import EventHub
+from astrorder.native.codex import CodexConnection, rollout_item_timestamps
 from astrorder.service import ControlService
 from astrorder.store import Store
 
@@ -364,7 +364,7 @@ async def test_failed_turn_preserves_native_failure_reason_for_the_browser(tmp_p
 
 
 def test_codex_launches_child_with_all_system_environment(tmp_path, monkeypatch):
-    from astrorder import native_codex
+    from astrorder.native import codex as native_codex
 
     class EnvironmentRecordingClient(FakeClient):
         environment = None
@@ -563,7 +563,7 @@ def test_current_effort_reads_native_sqlite_without_resume_or_thread_read(tmp_pa
         connection.disconnect()
         store.close()
 def test_codex_command_input_projects_skill_and_file_mentions(monkeypatch):
-    from astrorder.native_codex import CodexConnection
+    from astrorder.native.codex import CodexConnection
 
     connection = CodexConnection.__new__(CodexConnection)
     connection.settings = None
@@ -573,7 +573,7 @@ def test_codex_command_input_projects_skill_and_file_mentions(monkeypatch):
         "name": "openai-docs", "path": "/skills/openai-docs", "kind": "skill"
     }]
     monkeypatch.setattr(
-        "astrorder.codex_inputs.command_input",
+        "astrorder.adapters.codex.inputs.command_input",
         lambda _settings, _store, command, _stage: [{"type": "text", "text": command["text"]}],
     )
 
@@ -588,7 +588,7 @@ def test_codex_command_input_projects_skill_and_file_mentions(monkeypatch):
 
 
 def test_codex_stages_document_inside_session_workspace(tmp_path):
-    from astrorder.native_codex import CodexConnection
+    from astrorder.native.codex import CodexConnection
 
     connection = CodexConnection.__new__(CodexConnection)
     connection._threads = {"thread-1": {"cwd": str(tmp_path)}}
@@ -601,7 +601,7 @@ def test_codex_stages_document_inside_session_workspace(tmp_path):
 
 
 def test_codex_uses_original_attachment_path_when_session_can_read_it(tmp_path):
-    from astrorder.native_codex import CodexConnection
+    from astrorder.native.codex import CodexConnection
 
     workspace = tmp_path / "repo"
     workspace.mkdir()

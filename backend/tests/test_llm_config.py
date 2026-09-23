@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 
 from astrorder.api import router
 from astrorder.config import Settings
-from astrorder.llm_config import get_llm_config, reasoning_payload, set_llm_config
+from astrorder.core.llm_config import get_llm_config, reasoning_payload, set_llm_config
 from astrorder.store import Store
 
 

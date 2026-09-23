@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 from fastapi.testclient import TestClient
 
 from astrorder.config import Settings
-from astrorder.events import EventHub
+from astrorder.core.events import EventHub
 from astrorder.main import create_app
 from astrorder.service import ControlService
 from astrorder.store import Store

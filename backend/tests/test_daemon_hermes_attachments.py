@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from astrorder.connections import ConnectionError
-from astrorder.hermes_inputs import pack_daemon_attachments, stage_daemon_attachments
+from astrorder.adapters.hermes.inputs import pack_daemon_attachments, stage_daemon_attachments
 
 
 def test_pack_daemon_attachments_resolves_only_registered_blob_without_path(tmp_path: Path):

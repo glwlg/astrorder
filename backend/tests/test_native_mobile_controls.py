@@ -1,6 +1,6 @@
 import pytest
 from astrorder.connections import ConnectionError
-from astrorder.native_controls import model_choices, set_session_model, open_native_session_ids, current_session_model
+from astrorder.native.controls import model_choices, set_session_model, open_native_session_ids, current_session_model
 
 
 def test_current_model_comes_from_each_native_session_not_global_catalog():
@@ -152,7 +152,7 @@ def test_session_model_switch_is_session_scoped_and_verified():
 
 
 def test_reasoning_is_session_scoped_and_read_back():
-    from astrorder.native_controls import set_session_reasoning
+    from astrorder.native.controls import set_session_reasoning
     current = 'medium'
     def rpc(method, params):
         nonlocal current

@@ -364,7 +364,7 @@ class DaemonHermesController:
             command_id = command.get("id")
             if not isinstance(command_id, str) or not command_id:
                 return "failed", "daemon Hermes command identity is invalid."
-            from ..hermes_inputs import pack_daemon_attachments
+            from ..adapters.hermes.inputs import pack_daemon_attachments
 
             try:
                 attachments = await asyncio.to_thread(

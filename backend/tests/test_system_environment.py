@@ -1,4 +1,4 @@
-from astrorder.system_environment import merge_system_environment
+from astrorder.core.system_environment import merge_system_environment
 
 
 def test_merge_system_environment_preserves_every_system_user_and_process_variable():

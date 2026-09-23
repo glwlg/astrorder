@@ -1,6 +1,6 @@
-from astrorder.attachments import AttachmentManager
+from astrorder.core.attachments import AttachmentManager
 from astrorder.config import Settings
-from astrorder.native_attachments import bind_codex_item, bind_hermes_refs, import_local_file
+from astrorder.native.attachments import bind_codex_item, bind_hermes_refs, import_local_file
 from astrorder.store import Store
 
 PNG = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde'

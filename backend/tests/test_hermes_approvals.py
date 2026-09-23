@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 from unittest.mock import Mock
-from astrorder.hermes_approvals import HermesApprovals
+from astrorder.adapters.hermes.approvals import HermesApprovals
 
 def setup():
     pending=[{'request_id':'request-1','description':'执行命令','command':'example'}]

@@ -1,6 +1,6 @@
 import pytest
 
-from astrorder.native_session_mutation import (
+from astrorder.native.session_mutation import (
     NativeMutationError,
     delete_native_session,
     rename_native_session,

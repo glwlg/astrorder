@@ -2,9 +2,9 @@ import json, sys, tempfile
 from pathlib import Path
 from astrorder.config import Settings
 from astrorder.store import Store
-from astrorder.events import EventHub
+from astrorder.core.events import EventHub
 from astrorder.service import ControlService
-from astrorder.environment_connections import RemoteCodex, DISCOVERY
+from astrorder.core.environment_connections import RemoteCodex, DISCOVERY
 row = json.load(sys.stdin)
 with tempfile.TemporaryDirectory(prefix='astrorder-remote-codex-') as directory:
     settings = Settings(database_url=f'sqlite:///{Path(directory)/"cache.db"}', auto_connect_local_hermes=False)

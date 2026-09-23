@@ -497,7 +497,7 @@ class LocalHermesController:
         config_path = plugins_dir.parent / "config.yaml"
         token = self.settings.connector_secret or self.settings.browser_secret or ""
         if token:
-            from .agent_mcp import ensure_url_mcp_yaml
+            from .agents.mcp import ensure_url_mcp_yaml
             ensure_url_mcp_yaml(
                 config_path,
                 f"http://127.0.0.1:{self.settings.port}/api/v1/agent/mcp",
@@ -624,7 +624,7 @@ class LocalHermesController:
         self._compaction_callback = callback
 
     def _on_compaction_event(self, params: dict[str, Any]) -> None:
-        from .hermes_compaction import compaction_update
+        from .adapters.hermes.compaction import compaction_update
 
         session_id = self._tui_to_session.get(str(params.get('session_id')))
         if not session_id or not self._agent_id or self._compaction_callback is None:
@@ -647,7 +647,7 @@ class LocalHermesController:
         self._command_completion_callback = callback
 
     def discover_native_sessions(self) -> Any:
-        from .native_sessions import discover_native_sessions
+        from .native.sessions import discover_native_sessions
 
         discovery = discover_native_sessions(
             self._rpc,
@@ -660,7 +660,7 @@ class LocalHermesController:
         return discovery
 
     def load_native_history(self, durable_session_id: str) -> list[dict[str, Any]]:
-        from .native_sessions import history_messages
+        from .native.sessions import history_messages
 
         native_id = durable_session_id
         return history_messages(
@@ -672,7 +672,7 @@ class LocalHermesController:
         )
 
     def load_native_history_page(self, session_id: str, before: str | None, limit: int) -> dict[str, Any]:
-        from .native_history_page import read_native_page
+        from .native.history_page import read_native_page
         if self._profile_plugins_dir is None:
             raise ConnectionError("原生会话数据库位置尚未确认。", 503)
         return read_native_page(self._profile_plugins_dir.parent / 'state.db', session_id, self._source_id, before, limit)
@@ -712,7 +712,7 @@ class LocalHermesController:
             if bool(provider) != bool(model):
                 raise ConnectionError("Hermes provider 与 model 必须同时提供。", 422)
             if model:
-                from .native_controls import model_choices
+                from .native.controls import model_choices
 
                 if not any(
                     row["provider"] == provider and row["model"] == model
@@ -720,7 +720,7 @@ class LocalHermesController:
                 ):
                     raise ConnectionError("所选模型不在原生运行时返回的可用列表中。", 422)
             if effort:
-                from .native_controls import REASONING_EFFORTS
+                from .native.controls import REASONING_EFFORTS
 
                 if effort not in REASONING_EFFORTS:
                     raise ConnectionError("思考强度不在原生支持范围内。", 422)
@@ -867,7 +867,7 @@ class LocalHermesController:
         return self.submit_tui_command(forwarded)
 
     def commands(self, session_id: str) -> list[dict[str, str | None]]:
-        from .native_controls import agent_commands
+        from .native.controls import agent_commands
 
         return agent_commands(self._rpc, session_id)
 
@@ -878,7 +878,7 @@ class LocalHermesController:
                 return "failed", "本机 Hermes 未连接；未尝试投递命令。"
             session_id = command.get("session_id")
             if command.get("action") == "stop":
-                from .native_commands import interrupt_session
+                from .native.commands import interrupt_session
                 return interrupt_session(self._rpc, session_id)
             if command.get("action", "send") not in ("send", "enqueue"):
                 return "failed", "该原生操作不能作为消息投递。"
@@ -900,7 +900,7 @@ class LocalHermesController:
             if not isinstance(text, str):
                 return "failed", "本机 Hermes 命令文本无效。"
             self._tui_to_session[str(tui_id)] = str(session_id)
-            from .hermes_inputs import rollback, stage, stage_daemon_attachments
+            from .adapters.hermes.inputs import rollback, stage, stage_daemon_attachments
             settings = getattr(self, "settings", None)
             store = getattr(self, "store", None)
             try:

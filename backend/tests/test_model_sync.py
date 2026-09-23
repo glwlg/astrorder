@@ -1,7 +1,7 @@
 import json
 import tomllib
 
-from astrorder.model_sync import (
+from astrorder.core.model_sync import (
     normalize_catalog,
     render_codex_catalog,
     render_codex_config,

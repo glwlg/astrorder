@@ -2,9 +2,9 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from astrorder.config import Settings
-from astrorder.llm_config import set_llm_config
+from astrorder.core.llm_config import set_llm_config
 from astrorder.store import Store
-from astrorder.workspace_preferences import router
+from astrorder.core.workspace_preferences import router
 
 
 def test_preferences_persist_across_devices_and_import_never_overwrites(tmp_path):

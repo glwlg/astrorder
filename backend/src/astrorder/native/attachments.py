@@ -8,7 +8,7 @@ import re
 from pathlib import Path, PurePosixPath
 from uuid import uuid4
 
-from astrorder.attachments import AttachmentError, AttachmentManager
+from astrorder.core.attachments import AttachmentError, AttachmentManager
 
 IMAGE_TYPES = {'image/png', 'image/jpeg', 'image/gif', 'image/webp'}
 AUDIO_TYPES = {'audio/mpeg', 'audio/mp4', 'audio/wav', 'audio/x-wav', 'audio/webm', 'audio/ogg', 'audio/aac'}

@@ -33,7 +33,7 @@ from .models import (
     SshConnectionRow,
     TaskRow,
 )
-from .timeutil import isoformat, parse_timestamp, utc_now
+from .core.timeutil import isoformat, parse_timestamp, utc_now
 
 
 class DuplicateCommand(Exception):
@@ -296,7 +296,7 @@ class Store:
         self.connections_repo = ConnectionRepository(self)
         Base.metadata.create_all(self.engine)
         self._migrate_schema()
-        from .native_identity_migration import migrate_native_identity
+        from .native.identity_migration import migrate_native_identity
 
         with self.session() as db:
             migrate_native_identity(db)

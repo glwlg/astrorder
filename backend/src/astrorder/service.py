@@ -12,8 +12,8 @@ from uuid import uuid4
 from fastapi import WebSocket
 
 from .config import Settings
-from .events import EventHub
-from .handoff import HANDOFF_USER_MARKER
+from .core.events import EventHub
+from .core.handoff import HANDOFF_USER_MARKER
 from .schemas import AgentModel, MessageModel, SessionModel, TaskModel
 from .store import DuplicateCommand, ScopeNotFound, Store, UnknownCommand
 
@@ -239,7 +239,7 @@ class ControlService:
     def delete_session(self, agent_id: str, session_id: str) -> bool:
         success = self.store.delete_session(agent_id, session_id)
         if success:
-            from .jev_browser import close_browser_session
+            from .jev.browser import close_browser_session
 
             close_browser_session(f"{agent_id}::{session_id}")
             self._server_event(
@@ -269,7 +269,7 @@ class ControlService:
             delete_sessions=delete_sessions,
         )
         if success:
-            from .jev_browser import close_browser_session
+            from .jev.browser import close_browser_session
 
             self._server_event(
                 "project.delete",

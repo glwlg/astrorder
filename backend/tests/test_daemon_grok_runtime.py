@@ -4,8 +4,8 @@ import pytest
 
 from astrorder.config import Settings
 from astrorder.daemon.grok_runtime import GrokDaemonRuntime, GrokDaemonRuntimeConfig
-from astrorder.events import EventHub
-from astrorder.grok_connection import GrokProjection
+from astrorder.core.events import EventHub
+from connectors.grok.connection import GrokProjection
 from astrorder.service import ControlService
 from astrorder.store import Store
 
@@ -295,7 +295,7 @@ def test_grok_projection_differentiates_turns_and_merges_tools(tmp_path):
 
 
 def test_grok_connection_mutate_session(tmp_path):
-    from astrorder.grok_connection import GrokConnection
+    from connectors.grok.connection import GrokConnection
 
     deleted = []
     conn = GrokConnection(

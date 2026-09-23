@@ -3,8 +3,8 @@ from __future__ import annotations
 from typing import Any
 from fastapi import APIRouter, Query, Request
 
-from ..agent_gateway import AgentContext, invoke
-from ..auth import require_browser
+from ..agents.gateway import AgentContext, invoke
+from ..core.auth import require_browser
 
 router = APIRouter()
 
@@ -14,7 +14,7 @@ def _settings(request: Request):
 
 
 def _agent_context(request: Request) -> AgentContext:
-    from ..agent_gateway import AgentContext
+    from ..agents.gateway import AgentContext
     return AgentContext(
         settings=_settings(request),
         store=request.app.state.store,

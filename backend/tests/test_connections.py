@@ -19,7 +19,7 @@ from astrorder.connections import (
     hermes_command_rejection,
     paginate_native_session_rows,
 )
-from astrorder.events import EventHub
+from astrorder.core.events import EventHub
 from astrorder.main import create_app
 from astrorder.service import ConnectorConnection, ControlService
 from astrorder.ssh_transport import SshNativeRuntime

@@ -19,10 +19,10 @@ from uuid import UUID, uuid4
 from astrorder_codex_connector.app_server import CodexAppServer, CodexRpcRejected
 from astrorder_codex_connector.config import CodexConnectorConfig
 
-from astrorder.codex_policy import codex_turn_policy
-from astrorder.codex_tasks import project_task_history, project_tasks
+from astrorder.adapters.codex.policy import codex_turn_policy
+from astrorder.adapters.codex.tasks import project_task_history, project_tasks
 from astrorder.connections import ConnectionError
-from astrorder.system_environment import load_system_environment
+from astrorder.core.system_environment import load_system_environment
 
 logger = logging.getLogger(__name__)
 
@@ -196,7 +196,7 @@ def stored_effort(home, sid):
 
 
 def item_message(item, session_id, agent_id, created_at='1970-01-01T00:00:00Z'):
-    from astrorder.handoff import visible_handoff_user_text
+    from astrorder.core.handoff import visible_handoff_user_text
 
     if not isinstance(item, dict) or not isinstance(item.get('id'), str):
         raise ConnectionError('Codex 未返回原生消息 ID。', 502)
@@ -519,8 +519,8 @@ class CodexConnection:
                 content=item.get('content') if isinstance(item, dict) else None
                 has_media=isinstance(content,list) and any(isinstance(part,dict) and part.get('type') in {'image','localImage','audio','localAudio','local_image','local_audio'} for part in content)
                 if has_media:
-                    from astrorder.attachments import AttachmentManager
-                    from astrorder.native_attachments import bind_codex_item
+                    from astrorder.core.attachments import AttachmentManager
+                    from astrorder.native.attachments import bind_codex_item
                     remote_root = self._home.as_posix() if self._home and hasattr(self, 'remote_json') else None
                     message['attachments']=bind_codex_item(
                         item,
@@ -530,8 +530,8 @@ class CodexConnection:
                         remote_root=remote_root,
                     )
                 if not message.get('attachments'):
-                    from astrorder.attachments import AttachmentManager
-                    from astrorder.native_attachments import import_local_file
+                    from astrorder.core.attachments import AttachmentManager
+                    from astrorder.native.attachments import import_local_file
                     img_paths = []
                     raw_text = message.get('text') or ''
                     for m in re.finditer(r'##\s*[\w\.-]+\.(?:png|jpe?g|gif|webp|svg):\s*(.+)', raw_text):
@@ -560,8 +560,8 @@ class CodexConnection:
             text = message.get('text', '')
             img_matches = list(re.finditer(r'!\[([^\]]*)\]\(([^)]+)\)', text))
             if img_matches:
-                from astrorder.attachments import AttachmentManager
-                from astrorder.native_attachments import import_local_file
+                from astrorder.core.attachments import AttachmentManager
+                from astrorder.native.attachments import import_local_file
                 manager = AttachmentManager(self.settings, self.store)
                 roots = self._roots(sid)
                 attachments = list(message.get('attachments') or [])
@@ -579,8 +579,8 @@ class CodexConnection:
         elif message['kind'] == 'tool' and message.get('tool', {}).get('name') == 'imageView':
             path = (message.get('tool', {}).get('arguments') or {}).get('path')
             if isinstance(path, str) and path:
-                from astrorder.attachments import AttachmentManager
-                from astrorder.native_attachments import import_local_file
+                from astrorder.core.attachments import AttachmentManager
+                from astrorder.native.attachments import import_local_file
                 manager = AttachmentManager(self.settings, self.store)
                 roots = self._roots(sid)
                 mapped = import_local_file(manager, path, roots)
@@ -704,7 +704,7 @@ class CodexConnection:
         if isinstance(branch, str):
             binding['branch'] = branch
         self._bindings[sid] = binding
-        from astrorder.native_controls import REASONING_EFFORTS
+        from astrorder.native.controls import REASONING_EFFORTS
         effort = response.get('reasoningEffort')
         if effort in REASONING_EFFORTS:
             self._efforts[sid] = effort
@@ -755,7 +755,7 @@ class CodexConnection:
         import ntpath
         import posixpath
 
-        from astrorder.codex_inputs import command_input
+        from astrorder.adapters.codex.inputs import command_input
 
         inputs = command_input(
             self.settings,
@@ -883,7 +883,7 @@ class CodexConnection:
 
     def current_effort(self, sid):
         self._scope(sid)
-        from astrorder.native_controls import REASONING_EFFORTS
+        from astrorder.native.controls import REASONING_EFFORTS
         if sid in self._efforts:
             return self._efforts[sid]
         if self._home:
@@ -895,7 +895,7 @@ class CodexConnection:
     def set_effort(self, sid, effort):
         if self._daemon_controller is not None:
             return self._daemon_controller.set_effort(sid, effort)
-        from astrorder.native_controls import REASONING_EFFORTS
+        from astrorder.native.controls import REASONING_EFFORTS
         if effort not in REASONING_EFFORTS:
             raise ConnectionError('思考强度不在原生支持范围内。', 422)
         self._resume(sid)
@@ -1204,7 +1204,7 @@ class CodexConnection:
             project_tasks(self, method, params, timestamp())
         if method == 'thread/settings/updated':
             settings = params.get('threadSettings') or {}
-            from astrorder.native_controls import REASONING_EFFORTS
+            from astrorder.native.controls import REASONING_EFFORTS
             with self._binding_changed:
                 if isinstance(settings.get('model'), str) and isinstance(settings.get('modelProvider'), str):
                     self._bindings[sid] = {**self._bindings.get(sid, {}), 'model': settings['model'], 'provider': settings['modelProvider']}

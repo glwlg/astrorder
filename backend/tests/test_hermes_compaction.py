@@ -2,7 +2,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from astrorder.hermes_compaction import compaction_update
+from astrorder.adapters.hermes.compaction import compaction_update
 from astrorder.daemon.hermes_compaction_projection import HermesCompactionFrameRouter
 from astrorder.daemon.bridge import DaemonBridgeError
 from astrorder.connections import LocalHermesController

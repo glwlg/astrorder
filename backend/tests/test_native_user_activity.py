@@ -1,6 +1,6 @@
 import sqlite3
 import time
-from astrorder.native_user_activity import presence, read_user_activity
+from astrorder.native.user_activity import presence, read_user_activity
 
 
 def test_reads_last_user_time_not_session_start_or_assistant_time(tmp_path):

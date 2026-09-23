@@ -295,7 +295,7 @@ def history_messages(
 
 
 def project_history_messages(raw_messages, *, durable_session_id, native_session_id, source_id, agent_id):
-    from astrorder.handoff import visible_handoff_user_text
+    from astrorder.core.handoff import visible_handoff_user_text
 
     messages: list[dict[str, Any]] = []
     anchor = "start"

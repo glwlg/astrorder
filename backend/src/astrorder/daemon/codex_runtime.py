@@ -21,7 +21,7 @@ from typing import Any, Protocol
 from astrorder_codex_connector.app_server import CodexAppServer, CodexRpcRejected
 from astrorder_codex_connector.config import CodexConnectorConfig
 
-from ..native_controls import REASONING_EFFORTS
+from ..native.controls import REASONING_EFFORTS
 from .codex_desktop import (
     codex_desktop_status,
     send_codex_desktop_message,

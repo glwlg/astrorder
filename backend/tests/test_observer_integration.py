@@ -8,8 +8,8 @@ from fastapi.testclient import TestClient
 
 from astrorder.config import Settings
 from astrorder.main import create_app
-from astrorder.native_observers import NativeObservers
-from astrorder.observer_io import install_observer, read_spool
+from astrorder.native.observers import NativeObservers
+from astrorder.observers.io import install_observer, read_spool
 
 SID='01992890-4444-7777-8888-000000000001'
 def test_install_is_idempotent_preserves_other_hooks_and_drains_metadata(tmp_path):
@@ -63,7 +63,7 @@ def test_local_trust_status_rechecks_native_config_when_catalog_is_stale(tmp_pat
     hook={'pluginId':'astrorder@astrorder-local','trustStatus':'untrusted','enabled':True}
     native=SimpleNamespace(_home=tmp_path,state='connected',agent_id='local-codex',_request=Mock(return_value={'data':[{'hooks':[hook]}]}),_executable=lambda:'codex')
     verify=Mock(return_value={'trusted':True,'needs_review':False})
-    monkeypatch.setattr('astrorder.observer_plugin.verify_plugin',verify)
+    monkeypatch.setattr('astrorder.observers.plugin.verify_plugin',verify)
     observer=NativeObservers(SimpleNamespace(state=SimpleNamespace(environments=SimpleNamespace(codex=native,remote={}))))
     assert observer.status('local-codex')['trusted'] is True
     assert observer.status('local-codex')['needs_review'] is False

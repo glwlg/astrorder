@@ -1,4 +1,4 @@
-from astrorder.agent_gateway import AgentContext, _resolve_blackboard_ns
+from astrorder.agents.gateway import AgentContext, _resolve_blackboard_ns
 
 
 class Store:

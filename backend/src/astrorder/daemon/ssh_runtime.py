@@ -142,7 +142,7 @@ class SshDaemonRuntime:
             rpc = getattr(controller, "rpc", None)
             if not callable(rpc):
                 raise DaemonProtocolError("SSH native rename is unsupported")
-            from ..native_session_mutation import rename_native_session
+            from ..native.session_mutation import rename_native_session
 
             await asyncio.to_thread(rename_native_session, rpc, session_id, title)
             return {"status": "idle", "title": title}
@@ -150,7 +150,7 @@ class SshDaemonRuntime:
             rpc = getattr(controller, "rpc", None)
             if not callable(rpc):
                 raise DaemonProtocolError("SSH native delete is unsupported")
-            from ..native_session_mutation import delete_native_session
+            from ..native.session_mutation import delete_native_session
 
             await asyncio.to_thread(delete_native_session, rpc, session_id)
             with self._lock:

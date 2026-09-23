@@ -4,7 +4,7 @@ import hmac
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
-from ..auth import COOKIE_NAME, browser_authenticated, validate_origin
+from ..core.auth import COOKIE_NAME, browser_authenticated, validate_origin
 from ..config import Settings
 from ..schemas import AuthRequest
 

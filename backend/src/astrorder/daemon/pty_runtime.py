@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
-from ..terminal_service import TerminalSession
+from ..core.terminal_service import TerminalSession
 from .errors import DaemonProtocolError
 
 

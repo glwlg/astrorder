@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from astrorder.config import Settings
 from astrorder.connections import ConnectionController
-from astrorder.events import EventHub
+from astrorder.core.events import EventHub
 from astrorder.service import ControlService
 from astrorder.store import Store
 

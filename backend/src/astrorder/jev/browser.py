@@ -15,8 +15,8 @@ from urllib.request import urlopen
 from websockets.exceptions import ConnectionClosed
 from websockets.sync.client import connect
 
-from astrorder.jev_client import get_jev_key
-from astrorder.llm_config import get_llm_config, reasoning_payload
+from astrorder.jev.client import get_jev_key
+from astrorder.core.llm_config import get_llm_config, reasoning_payload
 
 _RUN_LOCK = threading.Lock()  # ponytail: one patched upstream Agent at a time.
 _SCREENSHOT_LOCK = threading.Lock()
@@ -77,7 +77,16 @@ def _marker_session_key(marker: str) -> str | None:
 
 
 def _extension_path() -> Path:
-    return Path(__file__).with_name("browser_extension")
+    # 优先使用 tools/browser_extension 或同级/父级 browser_extension
+    candidates = [
+        Path(__file__).parents[4] / "tools" / "browser_extension",
+        Path(__file__).parent / "browser_extension",
+        Path(__file__).parents[1] / "browser_extension",
+    ]
+    for c in candidates:
+        if c.exists():
+            return c
+    return Path(__file__).parents[4] / "tools" / "browser_extension"
 
 
 def _start_browser() -> None:

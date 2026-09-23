@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from astrorder import agent_mcp
+from astrorder.agents import mcp as agent_mcp
 
 
 def test_agent_mcp_generates_concrete_input_schemas():
@@ -23,7 +23,7 @@ def test_agent_mcp_generates_concrete_input_schemas():
 def test_blackboard_ns_resolution_with_polymorphic_session_keys():
     from unittest.mock import MagicMock
 
-    from astrorder.agent_gateway import AgentContext, _resolve_blackboard_ns
+    from astrorder.agents.gateway import AgentContext, _resolve_blackboard_ns
 
     ctx = AgentContext(store=MagicMock(), service=None, runtime_resolver=None)
 
@@ -40,7 +40,7 @@ def test_blackboard_ns_resolution_with_polymorphic_session_keys():
 
 def test_blackboard_set_triggers_group_message_broadcast():
     from unittest.mock import MagicMock
-    from astrorder.agent_gateway import _blackboard_set, AgentContext
+    from astrorder.agents.gateway import _blackboard_set, AgentContext
 
     store = MagicMock()
     service = MagicMock()

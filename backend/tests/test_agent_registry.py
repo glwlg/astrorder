@@ -1,5 +1,5 @@
 from unittest.mock import Mock
-from astrorder.agent_registry import current_agents
+from astrorder.agents.registry import current_agents
 
 def test_retired_empty_agent_is_not_another_disconnected_connection():
     store=Mock();store.list_ssh_connections.return_value=[{'id':'current'}]

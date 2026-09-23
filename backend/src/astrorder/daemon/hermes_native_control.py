@@ -4,7 +4,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from ..native_controls import (
+from ..native.controls import (
     agent_commands,
     current_session_approval_mode,
     current_session_model,

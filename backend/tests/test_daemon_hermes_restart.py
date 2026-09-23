@@ -9,7 +9,7 @@ from astrorder.daemon.bridge import DaemonBridge
 from astrorder.daemon.hermes_control import DaemonHermesController
 from astrorder.daemon.hermes_runtime import HermesDaemonRuntime
 from astrorder.daemon.session_daemon import SessionDaemon
-from astrorder.events import EventHub
+from astrorder.core.events import EventHub
 from astrorder.service import ControlService
 from astrorder.store import Store
 

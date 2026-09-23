@@ -9,8 +9,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from ..codex_inputs import command_input
-from ..codex_policy import codex_turn_policy
+from ..adapters.codex.inputs import command_input
+from ..adapters.codex.policy import codex_turn_policy
 from ..connections import ConnectionError
 from .bridge import DaemonBridge, DaemonBridgeError
 from .codex_desktop import desktop_message_input
@@ -94,7 +94,7 @@ class DaemonCodexController:
         return dict(self.connection._bindings[session_id])
 
     def set_effort(self, session_id: str, effort: str) -> dict[str, Any]:
-        from ..native_controls import REASONING_EFFORTS
+        from ..native.controls import REASONING_EFFORTS
 
         if effort not in REASONING_EFFORTS:
             raise ConnectionError("思考强度不在原生支持范围内。", 422)

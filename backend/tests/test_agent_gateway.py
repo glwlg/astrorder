@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 import json
 import pytest
 
-from astrorder.agent_gateway import AgentApiError, AgentContext, _resolve_browser_session_key, invoke, parse_session_key
+from astrorder.agents.gateway import AgentApiError, AgentContext, _resolve_browser_session_key, invoke, parse_session_key
 from astrorder.config import Settings
 from astrorder.main import create_app
 

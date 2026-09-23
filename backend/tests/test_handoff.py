@@ -1,4 +1,4 @@
-from astrorder.handoff import SUMMARY_PROMPT, build_handoff_prompt, visible_handoff_user_text
+from astrorder.core.handoff import SUMMARY_PROMPT, build_handoff_prompt, visible_handoff_user_text
 
 
 def test_handoff_uses_source_agent_summary():

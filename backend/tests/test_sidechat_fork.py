@@ -1,7 +1,7 @@
 """Protocol contract tests only; no native runtime or user session is used."""
 from unittest.mock import Mock
 
-from astrorder.native_codex import CodexConnection
+from astrorder.native.codex import CodexConnection
 
 
 def make_connection():

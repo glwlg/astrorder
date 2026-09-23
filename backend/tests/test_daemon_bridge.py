@@ -9,7 +9,7 @@ import pytest
 from astrorder.config import Settings
 from astrorder.daemon.bridge import DaemonBridge
 from astrorder.daemon.session_daemon import SessionDaemon
-from astrorder.events import EventHub
+from astrorder.core.events import EventHub
 from astrorder.service import ControlService
 from astrorder.store import Store
 

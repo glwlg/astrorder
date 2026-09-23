@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from astrorder.native_sessions import discover_native_sessions, history_messages
+from astrorder.native.sessions import discover_native_sessions, history_messages
 
 
 def test_discovery_keeps_identical_titles_as_distinct_native_sessions_and_projects() -> None:

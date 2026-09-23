@@ -34,7 +34,7 @@ class BrowserInteractRequest(BaseModel):
 
 
 def _private(request: Request) -> None:
-    from ..auth import require_browser
+    from ..core.auth import require_browser
     require_browser(request)
 
 
@@ -47,7 +47,7 @@ async def browser_screenshot(
     target_id: str | None = Query(None),
 ) -> dict[str, object]:
     _private(request)
-    from ..jev_browser import capture_browser_screenshot, latest_browser_screenshot
+    from ..jev.browser import capture_browser_screenshot, latest_browser_screenshot
 
     if request.app.state.store.get_session(agent_id, session_id) is None:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -72,7 +72,7 @@ async def browser_navigate(payload: BrowserNavigateRequest, request: Request) ->
     _private(request)
     if request.app.state.store.get_session(payload.agent_id, payload.session_id) is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    from ..jev_browser import navigate_browser
+    from ..jev.browser import navigate_browser
 
     session_key = f"{payload.agent_id}::{payload.session_id}"
     try:
@@ -98,7 +98,7 @@ async def browser_interact(payload: BrowserInteractRequest, request: Request) ->
     _private(request)
     if request.app.state.store.get_session(payload.agent_id, payload.session_id) is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    from ..jev_browser import interact_browser
+    from ..jev.browser import interact_browser
 
     session_key = f"{payload.agent_id}::{payload.session_id}"
     try:
@@ -140,7 +140,7 @@ async def browser_page_content(
     _private(request)
     if request.app.state.store.get_session(agent_id, session_id) is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    from ..jev_browser import get_browser_page_content
+    from ..jev.browser import get_browser_page_content
 
     session_key = f"{agent_id}::{session_id}"
     try:
@@ -158,7 +158,7 @@ async def browser_diagnostics(
     _private(request)
     if request.app.state.store.get_session(agent_id, session_id) is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    from ..jev_browser import get_browser_diagnostics
+    from ..jev.browser import get_browser_diagnostics
 
     session_key = f"{agent_id}::{session_id}"
     return await asyncio.to_thread(get_browser_diagnostics, session_key)
@@ -171,7 +171,7 @@ async def browser_tab_select(payload: BrowserTabRequest, request: Request) -> di
         raise HTTPException(status_code=400, detail="target_id is required")
     if request.app.state.store.get_session(payload.agent_id, payload.session_id) is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    from ..jev_browser import select_browser_tab
+    from ..jev.browser import select_browser_tab
 
     session_key = f"{payload.agent_id}::{payload.session_id}"
     try:
@@ -197,7 +197,7 @@ async def browser_tab_new(payload: BrowserTabRequest, request: Request) -> dict[
     _private(request)
     if request.app.state.store.get_session(payload.agent_id, payload.session_id) is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    from ..jev_browser import new_browser_tab
+    from ..jev.browser import new_browser_tab
 
     session_key = f"{payload.agent_id}::{payload.session_id}"
     try:
@@ -225,7 +225,7 @@ async def browser_tab_close(payload: BrowserTabRequest, request: Request) -> dic
         raise HTTPException(status_code=400, detail="target_id is required")
     if request.app.state.store.get_session(payload.agent_id, payload.session_id) is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    from ..jev_browser import close_browser_tab
+    from ..jev.browser import close_browser_tab
 
     session_key = f"{payload.agent_id}::{payload.session_id}"
     try:

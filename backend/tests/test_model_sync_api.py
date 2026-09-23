@@ -3,10 +3,10 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from astrorder import analytics, model_sync_service
+from astrorder.core import analytics, model_sync_service
 from astrorder.config import Settings
 from astrorder.main import create_app
-from astrorder.model_sync import normalize_catalog
+from astrorder.core.model_sync import normalize_catalog
 
 
 def test_model_sync_preview_and_background_job(tmp_path: Path, monkeypatch):

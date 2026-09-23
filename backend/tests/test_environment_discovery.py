@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 from astrorder.config import Settings
-from astrorder.environment_connections import EnvironmentConnections, RemoteCodex
-from astrorder.events import EventHub
+from astrorder.core.environment_connections import EnvironmentConnections, RemoteCodex
+from astrorder.core.events import EventHub
 from astrorder.models import AgentConnectionChoice
 from astrorder.service import ControlService
 from astrorder.store import Store

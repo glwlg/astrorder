@@ -1,6 +1,6 @@
 import pytest
 
-from astrorder.codex_policy import codex_turn_policy
+from astrorder.adapters.codex.policy import codex_turn_policy
 
 
 @pytest.mark.parametrize(

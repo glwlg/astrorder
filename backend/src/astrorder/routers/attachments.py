@@ -4,13 +4,13 @@ from typing import Any
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 
-from ..attachments import AttachmentError
+from ..core.attachments import AttachmentError
 
 router = APIRouter()
 
 
 def _private(request: Request) -> None:
-    from ..auth import require_browser
+    from ..core.auth import require_browser
     require_browser(request)
 
 

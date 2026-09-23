@@ -1,6 +1,6 @@
 from astrorder.config import Settings
-from astrorder.events import EventHub
-from astrorder.native_codex import CodexConnection
+from astrorder.core.events import EventHub
+from astrorder.native.codex import CodexConnection
 from astrorder.service import ControlService
 from astrorder.store import Store
 

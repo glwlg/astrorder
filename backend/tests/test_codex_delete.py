@@ -3,7 +3,7 @@ from unittest.mock import Mock
 import pytest
 
 from astrorder.connections import ConnectionError
-from astrorder.native_codex import CodexConnection
+from astrorder.native.codex import CodexConnection
 
 SID='01992890-4444-7777-8888-000000000001'
 

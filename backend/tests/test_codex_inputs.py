@@ -4,7 +4,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from astrorder.codex_inputs import command_input
+from astrorder.adapters.codex.inputs import command_input
 from astrorder.connections import ConnectionError
 
 

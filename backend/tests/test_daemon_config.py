@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from astrorder.config import Settings
 from astrorder.daemon.bridge import DaemonBridge
 from astrorder.main import create_app
-from astrorder.native_codex import CodexConnection
+from astrorder.native.codex import CodexConnection
 
 
 def test_default_runtime_data_stays_out_of_the_project(monkeypatch, tmp_path):

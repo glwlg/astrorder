@@ -9,7 +9,7 @@ import pytest
 
 from astrorder.config import Settings
 from astrorder.connections import ConnectionError, paginate_native_session_rows
-from astrorder.native_sessions import discover_native_sessions
+from astrorder.native.sessions import discover_native_sessions
 from astrorder.ssh_transport import (
     _REMOTE_BRIDGE,
     _REMOTE_INSTALL,

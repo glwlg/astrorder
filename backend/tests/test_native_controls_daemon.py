@@ -1,7 +1,7 @@
 import pytest
 
 from astrorder.connections import ConnectionError
-from astrorder.native_controls import runtime_rpc
+from astrorder.native.controls import runtime_rpc
 
 
 def test_runtime_rpc_rejects_daemon_proxy_without_explicit_control_interface():
