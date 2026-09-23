@@ -12,7 +12,7 @@ router = APIRouter()
 
 def _private(request: Request) -> None:
     from ..core.auth import require_browser
-    require_browser(request)
+    require_browser(request, request.app.state.settings)
 
 
 @router.get("/api/v1/agents")

@@ -399,7 +399,7 @@ async def open_sessions(request: Request) -> dict[str, object]:
                 except Exception:
                     continue
 
-                msgs = store.list_messages(sid, limit=5)
+                msgs, _ = store.list_messages(aid, sid, before=None, limit=5)
                 eval_res = await asyncio.to_thread(evaluate_session_swipe_worthiness, s, msgs or [], store=store)
                 if eval_res.get("worthy") is True:
                     items[(aid, sid)] = {'agent_id': aid, 'id': sid}

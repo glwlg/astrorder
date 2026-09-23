@@ -53,6 +53,13 @@
         ]
       },
       {
+        "from": "../tools",
+        "to": "server/tools",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
         "from": "../scripts",
         "to": "server/scripts",
         "filter": [

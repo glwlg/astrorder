@@ -13,7 +13,7 @@ router = APIRouter()
 
 def _private(request: Request) -> None:
     from ..core.auth import require_browser
-    require_browser(request)
+    require_browser(request, request.app.state.settings)
 
 
 def _run_git(args: list[str], cwd: str, connection_id: str | None = None, app_state = None) -> tuple[int, str, str]:
