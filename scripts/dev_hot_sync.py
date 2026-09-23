@@ -32,6 +32,9 @@ def hot_sync(*, restart_backend: bool = True) -> None:
     # 1. Update Python .pth in installed environment
     site_packages = INSTALLED_ROOT / "backend/.venv/Lib/site-packages"
     if site_packages.is_dir():
+        (site_packages / "_editable_impl_astrorder_connectors_root.pth").write_text(
+            str(DEV_ROOT), encoding="utf-8"
+        )
         (site_packages / "_editable_impl_astrorder_server.pth").write_text(
             str(DEV_ROOT / "backend/src"), encoding="utf-8"
         )
