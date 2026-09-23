@@ -288,6 +288,12 @@ class Store:
         connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
         self.engine = create_engine(settings.database_url, connect_args=connect_args)
         self.session_factory = sessionmaker(self.engine, expire_on_commit=False, class_=Session)
+        from .repositories.session_repo import SessionRepository
+        from .repositories.message_repo import MessageRepository
+        from .repositories.connection_repo import ConnectionRepository
+        self.sessions_repo = SessionRepository(self)
+        self.messages_repo = MessageRepository(self)
+        self.connections_repo = ConnectionRepository(self)
         Base.metadata.create_all(self.engine)
         self._migrate_schema()
         from .native_identity_migration import migrate_native_identity

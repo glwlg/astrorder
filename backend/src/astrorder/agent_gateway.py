@@ -1299,25 +1299,7 @@ def _blackboard_delete(payload: dict[str, Any], ctx: AgentContext) -> dict[str, 
 
 
 
-BLACKBOARD_COMPONENT_CATALOG: list[dict[str, Any]] = [
-    {"id": "DataTable", "title": "结构化数据表格", "category": "table", "summary": "支持多列自定义表头、徽标与等宽高亮染色的只读数据表格"},
-    {"id": "StepTimeline", "title": "任务阶段与流水线时间线", "category": "workflow", "summary": "呈现 CI/CD 流水线、任务阶段交接与步骤执行进度"},
-    {"id": "MetricGrid", "title": "核心监控与 KPI 指标矩阵", "category": "metrics", "summary": "多列 Bento 呈现 QPS、耗时、内存、准确率等关键数值指标"},
-    {"id": "ApiEndpointsCard", "title": "REST / RPC 接口契约清单", "category": "api", "summary": "呈现带 HTTP 方法染色、URL 路径、状态码与描述的 API 列表"},
-    {"id": "ResourceUsageBar", "title": "系统资源负载与配额", "category": "system", "summary": "呈现 CPU、内存、磁盘的红黄绿阈值健康进度条"},
-    {"id": "TestReport", "title": "自动化测试与压测报告", "category": "testing", "summary": "统计通过/失败/跳过用例数、耗时及大字号通过率百分比"},
-    {"id": "CveSecurityReport", "title": "安全审计与漏洞合规报告", "category": "security", "summary": "按 Critical/High/Medium/Low 统计风险并罗列 CVE 漏洞清单"},
-    {"id": "DiffViewer", "title": "代码补丁与配置差异对比器", "category": "code", "summary": "以等宽排版与增删染色呈现代码 diff / patch"},
-    {"id": "Checklist", "title": "执行清单与交付验收表", "category": "task", "summary": "展示验收检查项，已完成项自动划线变灰并支持负责人"},
-    {"id": "TerminalLog", "title": "控制台终端日志流", "category": "runtime", "summary": "深色控制台终端，带 ERROR、WARN 关键字自动染色输出"},
-    {"id": "ArchitectureFlow", "title": "架构与调用链路流程图", "category": "architecture", "summary": "横向卡片箭头串联展示微服务、网关与 Agent 拓扑"},
-    {"id": "GitCommitLog", "title": "Git 提交与发布变更日志", "category": "vcs", "summary": "展示代码版本提交历史、分支名、短 SHA 与时间戳"},
-    {"id": "StatusCard", "title": "服务与网关状态概览卡片", "category": "status", "summary": "呈现 success、running、ready、warning、error 五态服务卡片"},
-    {"id": "MultiNodeClusterSummary", "title": "多节点集群性能横向对比", "category": "cluster", "summary": "多主机 CPU/内存/磁盘/TOP 进程横向对齐对比看板"},
-    {"id": "HostNodeTelemetryCard", "title": "服务器硬件与负载体检卡", "category": "host", "summary": "呈现单个主机 CPU 负载、内存可用健康条与系统版本"},
-    {"id": "MissionSpecCard", "title": "作战任务契约与指挥规格卡", "category": "swarm", "summary": "呈现协同作战目标、当前推进阶段及目标机器列表"},
-    {"id": "GomokuBoard", "title": "五子棋拟物对弈棋盘彩蛋", "category": "game", "summary": "15x15 原木纹理棋盘、3D 黑白立体落子与绝杀金色光环"},
-]
+from .blackboard_catalog import BLACKBOARD_COMPONENT_CATALOG
 
 BLACKBOARD_SCHEMAS: dict[str, dict[str, Any]] = {
     "DataTable": {
@@ -1626,8 +1608,18 @@ def _blackboard_auto_render(payload: dict[str, Any], ctx: AgentContext) -> dict[
 
     if comp == "StepTimeline":
         steps = []
-        for idx, line in enumerate(lines, 1):
-            status = "completed" if any(w in line.lower() for w in ["ok", "pass", "done", "成功", "完成"]) else ("failed" if any(w in line.lower() for w in ["fail", "error", "err", "失败"]) else ("running" if idx == len(lines) else "pending"))
+        clean_lines = [l for l in lines if not l.endswith("：") and not l.endswith(":") and "路线图" not in l]
+        for idx, line in enumerate(clean_lines, 1):
+            is_done = any(w in line.lower() for w in ["completed", "complete", "ok", "pass", "done", "成功", "完成", "已完成", "已落地", "已建立", "已声明"])
+            is_failed = any(w in line.lower() for w in ["failed", "fail", "error", "err", "失败", "异常"])
+            if is_done:
+                status = "completed"
+            elif is_failed:
+                status = "failed"
+            elif idx == len(clean_lines):
+                status = "running"
+            else:
+                status = "pending"
             steps.append({"title": line, "status": status})
         rendered_value["steps"] = steps or [{"title": content, "status": "completed"}]
     elif comp == "MetricGrid":
@@ -1683,100 +1675,19 @@ def _blackboard_component_schema(payload: dict[str, Any], ctx: AgentContext) -> 
     return {"ok": True, **matched}
 
 def _milestone_declare(payload: dict[str, Any], ctx: AgentContext) -> dict[str, Any]:
-    mid = payload.get("milestone_id")
-    if not isinstance(mid, str) or not mid.strip():
-        raise AgentApiError("invalid_input", "milestone_id is required")
-    mid = mid.strip()
-
-    title = str(payload.get("title") or mid).strip()
-    wake_session_key = payload.get("wake_session_key")
-    wake_prompt = payload.get("wake_prompt")
-    metadata = payload.get("metadata") or {}
-
-    record = {
-        "id": mid,
-        "title": title,
-        "status": "pending",
-        "wake_session_key": str(wake_session_key).strip() if wake_session_key else None,
-        "wake_prompt": str(wake_prompt).strip() if wake_prompt else None,
-        "metadata": metadata if isinstance(metadata, dict) else {},
-        "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        "resolved_at": None,
-        "result": None,
-    }
-
-    from sqlalchemy.dialects.sqlite import insert
-    from .models import WorkspacePreferenceRow
-
-    db_key = f"milestone:{mid}"
-    with ctx.store.session() as db:
-        statement = insert(WorkspacePreferenceRow).values(key=db_key, value=record)
-        statement = statement.on_conflict_do_update(index_elements=["key"], set_={"value": record})
-        db.execute(statement)
-
-    if ctx.service is not None:
-        ctx.service._server_event("swarm.milestone.event", agent_id=None, session_id=None, data={"action": "declare", "milestone": record})
-
-    return {"ok": True, "milestone": record}
+    from .swarm_service import milestone_declare
+    try:
+        return milestone_declare(payload, store=ctx.store, service=ctx.service)
+    except ValueError as e:
+        raise AgentApiError("invalid_input", str(e)) from e
 
 
 def _milestone_resolve(payload: dict[str, Any], ctx: AgentContext) -> dict[str, Any]:
-    mid = payload.get("milestone_id")
-    if not isinstance(mid, str) or not mid.strip():
-        raise AgentApiError("invalid_input", "milestone_id is required")
-    mid = mid.strip()
-    result_data = payload.get("result")
-
-    from sqlalchemy.dialects.sqlite import insert
-    from .models import WorkspacePreferenceRow
-
-    db_key = f"milestone:{mid}"
-    record = None
-    with ctx.store.session() as db:
-        row = db.get(WorkspacePreferenceRow, db_key)
-        if row and isinstance(row.value, dict):
-            record = dict(row.value)
-        else:
-            record = {
-                "id": mid,
-                "title": mid,
-                "status": "pending",
-                "wake_session_key": None,
-                "wake_prompt": None,
-                "metadata": {},
-                "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-            }
-
-        record["status"] = "resolved"
-        record["resolved_at"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-        record["result"] = result_data
-        statement = insert(WorkspacePreferenceRow).values(key=db_key, value=record)
-        statement = statement.on_conflict_do_update(index_elements=["key"], set_={"value": record})
-        db.execute(statement)
-
-        # Optionally sync result to blackboard under milestone result
-        if result_data:
-            bb_key = f"blackboard:global:milestone_{mid}"
-            bb_stmt = insert(WorkspacePreferenceRow).values(key=bb_key, value=result_data)
-            bb_stmt = bb_stmt.on_conflict_do_update(index_elements=["key"], set_={"value": result_data})
-            db.execute(bb_stmt)
-
-    # Trigger automatic wake-up if configured
-    wake_key = record.get("wake_session_key")
-    wake_prompt = record.get("wake_prompt")
-    wake_dispatched = False
-    if wake_key:
-        prompt_to_send = wake_prompt or f"前置里程碑 '{record['title']}' ({mid}) 已达成！请开始执行后续任务。"
-        try:
-            _sessions_send({"key": wake_key, "text": prompt_to_send}, ctx)
-            wake_dispatched = True
-        except Exception:
-            pass
-
-    if ctx.service is not None:
-        ctx.service._server_event("swarm.milestone.event", agent_id=None, session_id=None, data={"action": "resolve", "milestone": record, "wake_dispatched": wake_dispatched})
-
-    return {"ok": True, "milestone": record, "wake_dispatched": wake_dispatched}
+    from .swarm_service import milestone_resolve
+    try:
+        return milestone_resolve(payload, store=ctx.store, service=ctx.service)
+    except ValueError as e:
+        raise AgentApiError("invalid_input", str(e)) from e
 
 
 def _milestone_list(_payload: dict[str, Any], ctx: AgentContext) -> dict[str, Any]:
