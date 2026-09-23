@@ -4,8 +4,6 @@ import importlib.util
 import sys
 from pathlib import Path
 
-import pytest
-
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
@@ -15,13 +13,21 @@ desktop_service = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(desktop_service)
 
 
-def test_desktop_requires_login_startup_task(monkeypatch):
+def test_explicit_daemon_start_does_not_require_login_startup_task(monkeypatch):
     monkeypatch.setattr(desktop_service, "startup_task_state", lambda: "not_installed")
+    statuses = iter(({"state": "stopped"}, {"state": "running", "pid": 123}))
     monkeypatch.setattr(
         desktop_service,
         "daemon_status",
-        lambda _port, _secret: {"state": "stopped"},
+        lambda _port, _secret: next(statuses),
     )
+    started = []
+    monkeypatch.setattr(
+        desktop_service,
+        "start_independent_daemon",
+        lambda **kwargs: started.append(kwargs) or 123,
+    )
+    monkeypatch.setattr(desktop_service, "production_daemon_spec", lambda _environment: (30009, ("--enable-codex",)))
 
-    with pytest.raises(RuntimeError, match="登录启动"):
-        desktop_service.start_daemon({}, 30009, "test-secret")
+    assert desktop_service.start_daemon({}, 30009, "test-secret")["state"] == "running"
+    assert started == [{"port": 30009, "runtime_args": ("--enable-codex",)}]

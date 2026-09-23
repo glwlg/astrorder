@@ -16,6 +16,7 @@ async def test_daemon_owned_ssh_runtime_routes_exact_remote_sessions_without_loc
             self.wait_gateway_calls = 0
             self.stop_calls = 0
             self.commands: list[dict[str, object]] = []
+            self.create_options = None
 
         @property
         def agent_id(self) -> str:
@@ -32,7 +33,8 @@ async def test_daemon_owned_ssh_runtime_routes_exact_remote_sessions_without_loc
         def snapshot(self):
             return {"alive": True, "agent_id": self.agent_id}
 
-        def create_session(self, workspace=None, title=None):
+        def create_session(self, workspace=None, title=None, **options):
+            self.create_options = options
             return {"id": "ssh-created-session", "status": "idle", "workspace": workspace, "title": title}
 
         def submit(self, command):
@@ -69,6 +71,9 @@ async def test_daemon_owned_ssh_runtime_routes_exact_remote_sessions_without_loc
             "agent_type": "ssh",
             "cwd": "/remote/workspace",
             "title": "Daemon remote session",
+            "provider": "ocx",
+            "model": "google-antigravity/gemini-3.8-flash",
+            "effort": "high",
         }
     )
     interrupted = await daemon._dispatch_runtime_action(
@@ -84,6 +89,11 @@ async def test_daemon_owned_ssh_runtime_routes_exact_remote_sessions_without_loc
         "agent_id": "daemon-ssh-hermes",
     }
     assert interrupted["result"] == {"status": "running", "accepted": True}
+    assert ssh.create_options == {
+        "provider": "ocx",
+        "model": "google-antigravity/gemini-3.8-flash",
+        "effort": "high",
+    }
     assert ssh.start_calls == 1
     assert ssh.wait_gateway_calls == 1
     assert ssh.commands == [

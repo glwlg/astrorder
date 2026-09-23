@@ -50,6 +50,9 @@ CONTROL_ACTIONS = frozenset(
         "session.approval.read",
         "session.approval.set",
         "runtime.request",
+        "model_config.plan",
+        "model_config.apply",
+        "model_config.reload",
     }
 )
 NativeFrameHandler = Callable[[str, Mapping[str, Any]], None]
@@ -153,20 +156,23 @@ class DaemonBridge:
             max_size=16_000_000,
         ) as socket:
             await self._handshake(socket)
-            response = await self._request(socket, action, fields)
+            response = await self._request(socket, action, fields, timeout=60 if action.startswith("model_config.") else None)
         self._daemon_id_from(response)
         return response
 
     async def refresh_status(self) -> None:
         """Refresh App-side session state from the daemon authority."""
-        async with websockets.connect(
-            self.endpoint,
-            open_timeout=self.request_timeout,
-            close_timeout=self.request_timeout,
-            max_size=16_000_000,
-        ) as socket:
-            await self._handshake(socket)
-            status = await self._request(socket, "daemon.status", {})
+        try:
+            async with websockets.connect(
+                self.endpoint,
+                open_timeout=self.request_timeout,
+                close_timeout=self.request_timeout,
+                max_size=16_000_000,
+            ) as socket:
+                await self._handshake(socket)
+                status = await self._request(socket, "daemon.status", {})
+        except (OSError, websockets.WebSocketException) as exc:
+            raise DaemonBridgeError(f"Session Daemon is temporarily unreachable: {exc}") from exc
         daemon_id, _ = self._apply_status(status)
         self._daemon_id = daemon_id
 
@@ -385,7 +391,7 @@ class DaemonBridge:
             raw = receive_task.result()
             self._project_live_frame(raw)
 
-    async def _request(self, socket: Any, action: str, fields: Mapping[str, Any]) -> dict[str, Any]:
+    async def _request(self, socket: Any, action: str, fields: Mapping[str, Any], timeout: float | None = None) -> dict[str, Any]:
         if "action" in fields or "request_id" in fields:
             raise ValueError("daemon request fields must not override action or request_id")
         request_id = f"daemon-bridge-{uuid4().hex}"
@@ -396,7 +402,7 @@ class DaemonBridge:
                 separators=(",", ":"),
             )
         )
-        raw = await asyncio.wait_for(socket.recv(), timeout=self.request_timeout)
+        raw = await asyncio.wait_for(socket.recv(), timeout=timeout or self.request_timeout)
         if not isinstance(raw, str):
             raise DaemonBridgeError("daemon response must be UTF-8 JSON text")
         try:

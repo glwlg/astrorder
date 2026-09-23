@@ -10,7 +10,7 @@ import {
   IconRefresh,
 } from '@tabler/icons-react'
 import { useQuery } from '@tanstack/react-query'
-import { api } from '../../api/client'
+import { api, type OcxModelQuotaResponse } from '../../api/client'
 import type { Session } from '../../domain/types'
 import { useSessionModel } from '../../hooks/useSessionModel'
 import { REASONING_EFFORTS } from './composerMedia'
@@ -27,6 +27,51 @@ const EFFORT_MARKS = [
   { value: 3, label: '' },
   { value: 4, label: '' },
 ]
+
+export function summarizeQuota(quota?: OcxModelQuotaResponse | null): { status: 'healthy' | 'tight' | 'exhausted'; label: string; detail: string } | null {
+  if (!quota) return null
+  if (quota.accounts && quota.accounts.length > 0) {
+    const active = quota.accounts.filter((a) => !a.paused)
+    if (active.length === 0) return { status: 'exhausted', label: '不可用', detail: '所有账号已暂停或暂无额度' }
+    const usedList = active.map((a) => a.quota?.weeklyPercent ?? a.quota?.shortPercent ?? 0)
+    const minUsed = Math.min(...usedList)
+    const remaining = Math.max(0, 100 - minUsed)
+    if (remaining <= 5) return { status: 'exhausted', label: '已耗尽', detail: `所有可用账号已用尽 (${minUsed}%)` }
+    if (remaining <= 25) return { status: 'tight', label: `余${Math.round(remaining)}%`, detail: `最佳账号剩余 ${Math.round(remaining)}%` }
+    return { status: 'healthy', label: `余${Math.round(remaining)}%`, detail: `账号配额充裕 (余 ${Math.round(remaining)}%)` }
+  }
+  if (quota.reports && quota.reports.length > 0) {
+    const rep = quota.reports[0]
+    if (!rep?.quota) return null
+    const used = rep.quota.weeklyPercent ?? rep.quota.fiveHourPercent ?? rep.quota.monthlyPercent ?? 0
+    const remaining = Math.max(0, 100 - used)
+    if (remaining <= 5) return { status: 'exhausted', label: '已耗尽', detail: `${rep.label || rep.provider} 配额已耗尽 (${used}%)` }
+    if (remaining <= 25) return { status: 'tight', label: `余${Math.round(remaining)}%`, detail: `${rep.label || rep.provider} 剩余偏紧 (余 ${Math.round(remaining)}%)` }
+    return { status: 'healthy', label: `余${Math.round(remaining)}%`, detail: `${rep.label || rep.provider} 配额充裕 (余 ${Math.round(remaining)}%)` }
+  }
+  return null
+}
+
+export function ModelQuotaBadge({ modelRoute, size = 'sm' }: { modelRoute: string; size?: 'sm' | 'dot' }) {
+  const query = useQuery({
+    queryKey: ['astrorder', 'model-quota', modelRoute],
+    queryFn: () => api.getModelQuota(modelRoute).catch(() => null),
+    enabled: Boolean(modelRoute),
+    retry: false,
+    staleTime: 60000,
+    refetchOnWindowFocus: false,
+  })
+  const summary = summarizeQuota(query.data)
+  if (!summary) return null
+  if (size === 'dot') {
+    return <span className={`codex-model-quota-dot is-${summary.status}`} title={`${summary.label}: ${summary.detail}`} />
+  }
+  return (
+    <span className={`codex-model-quota-badge is-${summary.status}`} title={summary.detail}>
+      {summary.label}
+    </span>
+  )
+}
 
 export function SessionModelControl({ session }: { session: Session }) {
   const model = useSessionModel(session)
@@ -90,6 +135,7 @@ export function SessionModelControl({ session }: { session: Session }) {
   const sliderIndex = draftEffortIndex ?? currentEffortIndex
   const effortLabel = REASONING_EFFORTS[sliderIndex]?.label || '中'
   const displayModelName = model.label
+  const currentModelRoute = model.data?.model ? `${model.data.provider ? `${model.data.provider}/` : ''}${model.data.model}` : ''
 
   return (
     <Popover
@@ -114,8 +160,9 @@ export function SessionModelControl({ session }: { session: Session }) {
             setOpened((v) => !v)
             setView('main')
           }}
-        >
+        > 
           <span className="codex-model-pill-text">{displayModelName}</span>
+          <ModelQuotaBadge modelRoute={currentModelRoute} size="dot" />
           {effortLabel && <span className="codex-model-pill-effort">{effortLabel}</span>}
           <IconChevronDown size={14} className="codex-model-pill-arrow" />
         </button>
@@ -250,6 +297,7 @@ export function SessionModelControl({ session }: { session: Session }) {
                       disabled={changing}
                     >
                       <span className="codex-model-menu-item-text">{item.label}</span>
+                      <ModelQuotaBadge modelRoute={`${item.provider ? `${item.provider}/` : ''}${item.model}`} />
                       {isSelected && <IconCheck size={16} className="codex-model-check-icon" />}
                     </UnstyledButton>
                   )

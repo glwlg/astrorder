@@ -19,7 +19,15 @@ class SshController(Protocol):
 
     def snapshot(self) -> Mapping[str, Any]: ...
 
-    def create_session(self, workspace: str | None = None, title: str | None = None) -> Mapping[str, Any]: ...
+    def create_session(
+        self,
+        workspace: str | None = None,
+        title: str | None = None,
+        *,
+        provider: str | None = None,
+        model: str | None = None,
+        effort: str | None = None,
+    ) -> Mapping[str, Any]: ...
 
     def submit(self, command: dict[str, Any]) -> tuple[str, str | None]: ...
 
@@ -69,7 +77,17 @@ class SshDaemonRuntime:
             raise DaemonProtocolError("SSH workspace is invalid")
         if title is not None and (not isinstance(title, str) or not title or len(title) > 512):
             raise DaemonProtocolError("SSH title is invalid")
-        created = await asyncio.to_thread(controller.create_session, workspace, title)
+        provider, model, effort = request.get("provider"), request.get("model"), request.get("effort")
+        if bool(provider) != bool(model) or any(
+            value is not None and not isinstance(value, str) for value in (provider, model, effort)
+        ):
+            raise DaemonProtocolError("SSH Hermes model selection is invalid")
+        options = {
+            key: value
+            for key, value in {"provider": provider, "model": model, "effort": effort}.items()
+            if value is not None
+        }
+        created = await asyncio.to_thread(controller.create_session, workspace, title, **options)
         session_id = created.get("id") if isinstance(created, Mapping) else None
         if not isinstance(session_id, str) or not session_id:
             raise DaemonProtocolError("SSH runtime did not return a native session ID")

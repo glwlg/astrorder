@@ -8,6 +8,8 @@ import { LazyDetails } from '../../components/LazyDetails'
 import { MessageBody } from '../../components/MessageBody'
 import { sessionSwipeGesture, sessionDragPreview, startsAtSessionDrawerEdge, type SessionSwipeGesture } from './mobileGestures'
 import { describeTool, FileChangeDiffBlock, fileChangeDiffs, PackSummary, ShellOutputBlock, ToolLineIcon, unwrapCommand } from '../chat/toolPresentation'
+import { ToolOutputBlock } from '../chat/ToolOutputBlock'
+import { isCompactionMessage, CompactionDivider } from '../chat/CompactionDivider'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 
 export interface MessageActionAnchor { text: string; x: number; y: number; element: HTMLElement }
@@ -26,8 +28,8 @@ export function MobileTranscript({ messages, approvals = [], onApproval, busy, l
   const hold = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => () => { if (hold.current) clearTimeout(hold.current) }, [])
   const cancelHold = () => { if (hold.current) clearTimeout(hold.current); hold.current = null }
-  const rows = messages.filter(m => m.kind !== 'message' || m.text.trim() || m.attachments.length)
-  const activity = (m: Message) => m.kind === 'thinking' || m.kind === 'tool' || m.role === 'tool'
+  const rows = messages.filter(m => isCompactionMessage(m) || m.kind !== 'message' || m.text.trim() || m.attachments.length)
+  const activity = (m: Message) => !isCompactionMessage(m) && (m.kind === 'thinking' || m.kind === 'tool' || m.role === 'tool')
   return <>
     <div className="m-transcript" role="log" ref={setContainerRef} onScroll={e => { onScroll(); older.onScroll(e) }} onWheel={older.onWheel}
       onTouchStart={e => { older.onTouchStart(e); if (startsAtSessionDrawerEdge(e.touches[0].clientX)) { touch.current = null; onSwipePreview?.(null); return }; touch.current = { x: e.touches[0].clientX, y: e.touches[0].clientY } }}
@@ -36,6 +38,13 @@ export function MobileTranscript({ messages, approvals = [], onApproval, busy, l
       {hasOlder && <button className="m-earlier" disabled={loadingOlder} onClick={() => void older.request()}>{loadingOlder ? '正在加载更早消息…' : '查看更早的消息 ↑'}</button>}
       <AnimatePresence initial={false}>
       {rows.map((m, i) => {
+        if (isCompactionMessage(m)) {
+          return (
+            <motion.div key={`m-compaction-${m.id}`} initial={enter} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.28, ease: [0.2, 0.8, 0.2, 1] }}>
+              <CompactionDivider message={m} />
+            </motion.div>
+          )
+        }
         if (activity(m)) {
           if (i && activity(rows[i - 1])) return null
           const pack: Message[] = []
@@ -66,10 +75,11 @@ export function MobileTranscript({ messages, approvals = [], onApproval, busy, l
                 ) : hasFileDiff ? (
                   <FileChangeDiffBlock message={item} />
                 ) : (
-                  <>
-                    {item.text && <pre className="m-tool-output">{item.text}</pre>}
-                    {item.tool?.arguments != null && Object.keys(item.tool.arguments).length > 0 && <pre className="m-tool-args">{JSON.stringify(item.tool.arguments, null, 2)}</pre>}
-                  </>
+                  <ToolOutputBlock
+                    text={item.text}
+                    payload={item.tool?.arguments != null && Object.keys(item.tool.arguments).length > 0 ? (item.tool.arguments as Record<string, unknown>) : null}
+                    toolName={String(item.tool?.name || '')}
+                  />
                 )}
                 {!!item.attachments?.length && <div className="m-thumbs">{item.attachments.map(a => a.media_type.startsWith('image/') ? <button key={a.id} onClick={() => onImage(a.url)}><img src={a.url} alt={a.name} /></button> : onFile ? <button key={a.id} className="m-file-link" onClick={() => onFile(a.url)}>{a.name}</button> : <a key={a.id} href={a.url} target="_blank" rel="noreferrer">{a.name}</a>)}</div>}
               </LazyDetails>

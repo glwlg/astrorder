@@ -1,5 +1,6 @@
-import { Alert, Badge, Button, Checkbox, Group, Paper, SimpleGrid, Stack, Switch, Text, TextInput, Title } from '@mantine/core'
-import { useEffect, useState } from 'react'
+import { Alert, Badge, Button, Checkbox, Group, Modal, Paper, SimpleGrid, Stack, Switch, Text, TextInput, Title } from '@mantine/core'
+import { IconRefresh, IconTerminal } from '@tabler/icons-react'
+import { useEffect, useRef, useState } from 'react'
 import { useMediaQuery } from '@mantine/hooks'
 import { useShallow } from 'zustand/react/shallow'
 import { AgentStatusBadge } from '../../components/Status'
@@ -12,6 +13,7 @@ import { EnvironmentConnections } from './EnvironmentConnections'
 import { NativeObservationPanel } from '../../components/NativeObservationPanel'
 import { api } from '../../api/client'
 import { notifications } from '@mantine/notifications'
+import { useBackgroundTasks } from '../../state/backgroundTasks'
 
 const allCapabilities: { key: string; label: string }[] = [
   { key: 'chat', label: '对话交互' },
@@ -161,9 +163,167 @@ function AgentCard({ agent }: { agent: Agent }) {
           </Group>
         </div>
         {agent.kind==='codex' && <NativeObservationPanel agentId={agent.id} />}
+        <AgentUpgradeAction agent={agent} />
       </Stack>
     </Paper>
     </SpotlightCard>
+  )
+}
+
+function AgentUpgradeAction({ agent }: { agent: Agent }) {
+  const [upgrading, setUpgrading] = useState(false)
+  const [resultModalOpen, setResultModalOpen] = useState(false)
+  const [logOutput, setLogOutput] = useState('')
+  const [cmdName, setCmdName] = useState('')
+  const [isSuccess, setIsSuccess] = useState(true)
+  const abortCtrlRef = useRef<AbortController | null>(null)
+  const logPreRef = useRef<HTMLPreElement | null>(null)
+
+  const addBackgroundTask = useBackgroundTasks((state) => state.add)
+  const completeBackgroundTask = useBackgroundTasks((state) => state.complete)
+  const failBackgroundTask = useBackgroundTasks((state) => state.fail)
+
+  const handleUpgrade = async () => {
+    setUpgrading(true)
+    setLogOutput('')
+    setCmdName('')
+    setIsSuccess(true)
+    setResultModalOpen(true)
+
+    const abortCtrl = new AbortController()
+    abortCtrlRef.current = abortCtrl
+
+    // 登记到全局统一后台任务
+    const taskId = addBackgroundTask({
+      title: `升级 ${agent.name}`,
+      detail: '正在执行版本升级指令…',
+      actionLabel: '查看日志',
+      action: () => {
+        setResultModalOpen(true)
+      },
+      cancel: () => {
+        if (abortCtrlRef.current) {
+          abortCtrlRef.current.abort()
+        }
+      },
+    })
+
+    try {
+      const res = await api.upgradeAgentStream(
+        agent.id,
+        (chunk) => {
+          setLogOutput((prev) => {
+            const next = prev + chunk
+            if (logPreRef.current) {
+              logPreRef.current.scrollTop = logPreRef.current.scrollHeight
+            }
+            return next
+          })
+        },
+        (command) => {
+          setCmdName(command)
+        },
+        abortCtrl.signal,
+      )
+
+      setIsSuccess(res.ok)
+      if (res.ok) {
+        completeBackgroundTask(taskId, '升级已顺利完成')
+        notifications.show({
+          color: 'teal',
+          title: '升级成功',
+          message: `${agent.name} 升级指令已执行完成。`,
+        })
+      } else {
+        failBackgroundTask(taskId, `升级退出码: ${res.exit_code}`)
+        notifications.show({
+          color: 'red',
+          title: '升级异常',
+          message: `${agent.name} 升级命令返回非零退出码: ${res.exit_code}`,
+        })
+      }
+    } catch (err: any) {
+      if (err.name === 'AbortError') {
+        failBackgroundTask(taskId, '用户已取消任务')
+        notifications.show({
+          color: 'gray',
+          title: '升级已取消',
+          message: `${agent.name} 升级已被手动取消。`,
+        })
+      } else {
+        failBackgroundTask(taskId, err.message || '升级失败')
+        notifications.show({
+          color: 'red',
+          title: '升级失败',
+          message: err.message || '执行升级命令失败',
+        })
+      }
+    } finally {
+      setUpgrading(false)
+      abortCtrlRef.current = null
+    }
+  }
+
+  const isCodex = agent.kind === 'codex'
+  const isHermes = agent.kind === 'hermes'
+  const isGrok = agent.kind === 'grok'
+  const commandHint = isCodex ? 'vp install -g @openai/codex@latest' : isHermes ? 'hermes update' : isGrok ? 'x.ai/cli/install' : '原生升级'
+
+  return (
+    <>
+      <Group justify="space-between" align="center" pt={4} style={{ borderTop: '1px solid var(--astr-border-subtle, rgba(255,255,255,0.06))' }}>
+        <div>
+          <Text size="xs" fw={600} c="dimmed">一键原生版本升级</Text>
+          <Text size="10px" c="dimmed" ff="monospace">{commandHint}</Text>
+        </div>
+        <Button
+          size="xs"
+          variant="light"
+          color="indigo"
+          loading={upgrading}
+          leftSection={<IconRefresh size={13} />}
+          onClick={() => void handleUpgrade()}
+        >
+          检查并升级
+        </Button>
+      </Group>
+
+      <Modal
+        opened={resultModalOpen}
+        onClose={() => setResultModalOpen(false)}
+        title={
+          <Group gap={8}>
+            <IconTerminal size={18} color={isSuccess ? 'var(--astr-teal)' : 'var(--astr-red)'} />
+            <Text fw={600} size="sm">{agent.name} 升级执行日志</Text>
+            {upgrading && <Badge size="xs" color="indigo" variant="light">实时流式输出中…</Badge>}
+          </Group>
+        }
+        size="lg"
+        radius="md"
+      >
+        <Stack gap="sm">
+          <Paper p="xs" withBorder radius="sm" style={{ background: 'var(--astr-surface-muted)' }}>
+            <Text size="xs" c="dimmed">执行指令：</Text>
+            <Text size="xs" ff="monospace" fw={600}>{cmdName || '准备就绪…'}</Text>
+          </Paper>
+          <Paper p="sm" withBorder radius="sm" style={{ background: '#090d16', maxHeight: '380px', overflowY: 'auto' }}>
+            <pre ref={logPreRef} style={{ margin: 0, fontSize: '11px', fontFamily: 'monospace', color: isSuccess ? '#86efac' : '#fca5a5', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+              {logOutput || (upgrading ? '正在建立连接并拉取执行流…' : '升级完成，无额外日志输出。')}
+            </pre>
+          </Paper>
+          <Group justify="space-between" align="center">
+            <Text size="xs" c="dimmed">
+              {upgrading ? '提示：关闭此弹窗将自动放入后台任务继续执行，不会中止升级。' : ''}
+            </Text>
+            <Group gap="xs">
+              <Button size="xs" variant="default" onClick={() => setResultModalOpen(false)}>
+                {upgrading ? '放入后台运行' : '关闭'}
+              </Button>
+            </Group>
+          </Group>
+        </Stack>
+      </Modal>
+    </>
   )
 }
 
@@ -255,7 +415,8 @@ export function SshSettingsCard({ connection, busy, draft, onDraftChange, onSave
         {(!isMobile || phase === 'identity') && <Stack gap="sm">
           <TextInput label="私钥文件引用（不上传私钥）" placeholder="C:\\Users\\you\\.ssh\\id_ed25519" value={form.identity_file} onChange={(event) => update('identity_file', event.currentTarget.value)} disabled={busy} />
           {isMobile && <Alert color="yellow" variant="light">不会读取或上传私钥。连接只使用系统 OpenSSH/agent，并拒绝未知或变化的 host key。</Alert>}
-          {isMobile && <Checkbox checked={hasCurrentHostKeyConfirmation} onChange={(event) => setConfirmedIdentityKey(event.currentTarget.checked ? identityKey : null)} label="我已在系统 known_hosts 中审核主机指纹（不会绕过校验）" disabled={busy} />}
+          {isMobile && <Checkbox checked={hasCurrentHostKeyConfirmation
+} onChange={(event) => setConfirmedIdentityKey(event.currentTarget.checked ? identityKey : null)} label="我已在系统 known_hosts 中审核主机指纹（不会绕过校验）" disabled={busy} />}
         </Stack>}
         {(!isMobile || phase === 'deploy') && <Stack gap="sm">
           <TextInput label="远端 Hermes 路径" placeholder="/opt/hermes/bin/hermes" value={form.hermes_path} onChange={(event) => update('hermes_path', event.currentTarget.value)} disabled={busy} />
@@ -264,17 +425,23 @@ export function SshSettingsCard({ connection, busy, draft, onDraftChange, onSave
         </Stack>}
         {!isMobile && <Group wrap="wrap">
           <Button loading={busy} onClick={() => void onSave(settings)}>保存 SSH 配置</Button>
-          {onTest && <Button variant="default" loading={busy} disabled={busy || !hasSavedConfiguration} onClick={() => void onTest()}>测试 SSH 配置</Button>}
-          <Button variant="default" loading={busy} disabled={busy || !hasSavedConfiguration} onClick={() => void onConnect()}>连接远程 Hermes</Button>
-          <Button variant="subtle" loading={busy} disabled={busy || !hasSavedConfiguration} onClick={() => void onDisconnect()}>断开远程连接</Button>
-          {onDelete && <Button color="red" variant="subtle" loading={busy} disabled={busy || !hasSavedConfiguration} onClick={() => void onDelete()}>删除连接</Button>}
+          {onTest && <Button variant="default" loading={busy} disabled={busy || !hasSavedConfiguration
+} onClick={() => void onTest()}>测试 SSH 配置</Button>}
+          <Button variant="default" loading={busy} disabled={busy || !hasSavedConfiguration
+} onClick={() => void onConnect()}>连接远程 Hermes</Button>
+          <Button variant="subtle" loading={busy} disabled={busy || !hasSavedConfiguration
+} onClick={() => void onDisconnect()}>断开远程连接</Button>
+          {onDelete && <Button color="red" variant="subtle" loading={busy} disabled={busy || !hasSavedConfiguration
+} onClick={() => void onDelete()}>删除连接</Button>}
         </Group>}
         {isMobile && <Group justify="space-between" mt="sm">
           <Button variant="default" onClick={goBack} disabled={phase === 'basic' || busy}>返回</Button>
           {phase !== 'deploy' ? <Button onClick={goNext} disabled={phase === 'identity' && !hasCurrentHostKeyConfirmation || busy}>下一步</Button> : <Group gap="xs">
             <Button loading={busy} onClick={() => void onSave(settings)}>保存配置</Button>
-            {onTest && <Button variant="default" loading={busy} disabled={busy || !hasSavedConfiguration || !hasCurrentHostKeyConfirmation} onClick={handleTest}>测试</Button>}
-            <Button variant="default" loading={busy} disabled={busy || !hasSavedConfiguration || !hasCurrentHostKeyConfirmation} onClick={handleDeploy}>部署并连接</Button>
+            {onTest && <Button variant="default" loading={busy} disabled={busy || !hasSavedConfiguration || !hasCurrentHostKeyConfirmation
+} onClick={handleTest}>测试</Button>}
+            <Button variant="default" loading={busy} disabled={busy || !hasSavedConfiguration || !hasCurrentHostKeyConfirmation
+} onClick={handleDeploy}>部署并连接</Button>
           </Group>}
         </Group>}
       </Stack>

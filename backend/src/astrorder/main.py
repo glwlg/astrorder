@@ -2,10 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import json
 import logging
+import os
+import subprocess
+import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
+from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.exceptions import RequestValidationError
@@ -15,12 +20,12 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from .api import router
-from .bot_groups import router as bot_groups_router
 from .analytics import router as analytics_router
+from .api import router
 from .attachments import AttachmentManager
-from .auth import authorize_browser_websocket, authorize_connector_websocket
+from .auth import authorize_browser_websocket, authorize_connector_websocket, require_browser
 from .background_tasks import BackgroundTaskRegistry
+from .bot_groups import router as bot_groups_router
 from .config import Settings
 from .connections import ConnectionController, ConnectionError
 from .environment_connections import EnvironmentConnections
@@ -32,6 +37,37 @@ from .service import ControlService, ProtocolError
 from .store import Store
 
 logger = logging.getLogger(__name__)
+
+
+async def _restart_daemon(app: FastAPI, operation_id: str) -> None:
+    operation = app.state.daemon_restart_operations[operation_id]
+    operation["status"] = "running"
+    root = Path(__file__).resolve().parents[3]
+    flags = (
+        getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        | getattr(subprocess, "DETACHED_PROCESS", 0)
+        | getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    )
+    try:
+        process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            str(root / "scripts/desktop_service.py"),
+            "daemon",
+            "restart",
+            "--confirm-active",
+            cwd=root,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            creationflags=flags,
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+        )
+        stdout, _ = await process.communicate()
+        result = json.loads(stdout.decode("utf-8", errors="replace").strip().splitlines()[-1])
+        if process.returncode or not result.get("ok"):
+            raise RuntimeError(str(result.get("message") or "小内核重启失败"))
+        operation.update(status="success", state=result.get("state"), pid=result.get("pid"))
+    except Exception as exc:  # noqa: BLE001 - operation status must retain subprocess failures
+        operation.update(status="failed", error=str(exc)[:500])
 
 
 async def restore_hermes_model(
@@ -99,6 +135,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.hub = hub
         app.state.service = service
         app.state.background_tasks = BackgroundTaskRegistry()
+        app.state.daemon_restart_operations = {}
+        app.state.daemon_restart_tasks = set()
         daemon_stopping = asyncio.Event()
         daemon_task: asyncio.Task[None] | None = None
         app.state.daemon_bridge = None
@@ -385,6 +423,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=403, detail="Desktop shutdown is not allowed")
         callback()
         return {"stopping": True}
+
+    @app.post("/api/v1/services/daemon/restart", status_code=202)
+    async def restart_daemon(request: Request, payload: dict[str, object]) -> dict[str, str]:
+        require_browser(request, runtime_settings)
+        if payload.get("confirm_active") is not True:
+            raise HTTPException(status_code=422, detail="必须明确确认中断小内核中的活跃会话")
+        operations = request.app.state.daemon_restart_operations
+        if any(item["status"] in {"queued", "running"} for item in operations.values()):
+            raise HTTPException(status_code=409, detail="小内核重启任务已在运行")
+        operation_id = f"daemon-restart-{uuid4().hex}"
+        operations[operation_id] = {"id": operation_id, "status": "queued"}
+        task = asyncio.create_task(_restart_daemon(request.app, operation_id))
+        request.app.state.daemon_restart_tasks.add(task)
+        task.add_done_callback(request.app.state.daemon_restart_tasks.discard)
+        return {"id": operation_id, "status": "queued"}
+
+    @app.get("/api/v1/services/daemon/restart/{operation_id}")
+    async def daemon_restart_status(operation_id: str, request: Request) -> dict[str, object]:
+        require_browser(request, runtime_settings)
+        operation = request.app.state.daemon_restart_operations.get(operation_id)
+        if operation is None:
+            raise HTTPException(status_code=404, detail="小内核重启任务不存在")
+        return dict(operation)
 
     @app.websocket("/ws/v1/terminal")
     async def terminal_websocket(websocket: WebSocket) -> None:

@@ -28,6 +28,38 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.codex-model-quota-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.codex-model-quota-dot.is-healthy { background: #10b981; box-shadow: 0 0 4px rgba(16, 185, 129, 0.4); }
+.codex-model-quota-dot.is-tight { background: #f59e0b; box-shadow: 0 0 4px rgba(245, 158, 11, 0.4); }
+.codex-model-quota-dot.is-exhausted { background: #ef4444; box-shadow: 0 0 4px rgba(239, 68, 68, 0.4); }
+
+.codex-model-quota-badge {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: ui-monospace, monospace;
+  font-weight: 600;
+  flex-shrink: 0;
+  margin: 0 4px;
+  line-height: 1.2;
+}
+.codex-model-quota-badge.is-healthy {
+  background: rgba(16, 185, 129, 0.12);
+  color: #059669;
+}
+.codex-model-quota-badge.is-tight {
+  background: rgba(245, 158, 11, 0.12);
+  color: #d97706;
+}
+.codex-model-quota-badge.is-exhausted {
+  background: rgba(239, 68, 68, 0.12);
+  color: #dc2626;
+}
 .codex-model-pill-effort {
   color: var(--astr-muted);
   font-weight: 500;

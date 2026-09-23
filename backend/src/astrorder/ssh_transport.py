@@ -166,6 +166,24 @@ def main():
         for name in FILES
     ):
         emit({"ok": False, "code": "plugin_conflict", "detail": "remote Astrorder plugin id conflicts with existing files"}, 2)
+    # 自动在远端 Hermes profile 的 config.yaml 中注入 Astrorder MCP 配置
+    mcp_url = str(payload.get("mcp_url") or "")
+    mcp_token = str(payload.get("mcp_token") or "")
+    if mcp_url and mcp_token:
+        try:
+            cfg_path = home / "config.yaml"
+            cfg_text = cfg_path.read_text(encoding="utf-8", errors="replace") if cfg_path.is_file() else ""
+            if "api/v1/agent/mcp" not in cfg_text:
+                block = f"  astrorder:\n    url: {mcp_url}\n    headers:\n      Authorization: Bearer {mcp_token}\n"
+                if re.search(r"^mcp_servers:\s*$", cfg_text, re.MULTILINE):
+                    cfg_text = re.sub(r"^mcp_servers:\s*$", "mcp_servers:\n" + block.rstrip(), cfg_text, count=1, flags=re.MULTILINE)
+                    if not cfg_text.endswith("\n"):
+                        cfg_text += "\n"
+                else:
+                    cfg_text = cfg_text.rstrip() + "\nmcp_servers:\n" + block
+                cfg_path.write_text(cfg_text, encoding="utf-8")
+        except Exception:
+            pass
     env = dict(os.environ)
     env["HERMES_HOME"] = str(home)
     try:
@@ -501,10 +519,15 @@ class SshNativeRuntime:
         return result
 
     def _install(self) -> SshRuntimeMetadata:
+        token = self.connector_secret or ""
+        # 远端通过反向隧道访问本机的星序 MCP 接口
+        remote_mcp_url = f"http://127.0.0.1:{self._remote_port}/api/v1/agent/mcp"
         payload = {
             "profile_name": self.settings.get("profile_name") or "default",
             "hermes_path": self.settings.get("hermes_path"),
             "plugin_files": self._plugin_files(),
+            "mcp_url": remote_mcp_url,
+            "mcp_token": token,
         }
         argv = [
             *self._base_ssh_argv(),
@@ -640,8 +663,8 @@ class SshNativeRuntime:
         with self._lock:
             if self._process is not None and self._process.poll() is None:
                 return
-            metadata = self._metadata or self._install()
             self._remote_port = 23000 + (int(hashlib.sha256(self.connection_id.encode()).hexdigest()[:6], 16) % 20000)
+            metadata = self._metadata or self._install()
             agent_name = str(self.settings.get("display_name") or "远程")
             if not agent_name.endswith("Hermes"):
                 agent_name += " · Hermes"
@@ -732,15 +755,34 @@ class SshNativeRuntime:
             with self._response_lock:
                 self._responses.pop(request_id, None)
 
-    def create_session(self, workspace: str | None = None, title: str | None = None) -> dict[str, Any]:
+    def create_session(
+        self,
+        workspace: str | None = None,
+        title: str | None = None,
+        *,
+        provider: str | None = None,
+        model: str | None = None,
+        effort: str | None = None,
+    ) -> dict[str, Any]:
         with self._lock:
             if self._process is None or self._process.poll() is not None:
                 raise ConnectionError("远程 Hermes 未连接；无法新建会话。", 503)
+            if bool(provider) != bool(model):
+                raise ConnectionError("Hermes provider 与 model 必须同时提供。", 422)
+            if effort:
+                from .native_controls import REASONING_EFFORTS
+
+                if effort not in REASONING_EFFORTS:
+                    raise ConnectionError("思考强度不在原生支持范围内。", 422)
             params: dict[str, Any] = {
                 "source": "ssh",
                 "cwd": workspace or str(self.settings.get("workspace") or ""),
                 "title": title or "新会话",
             }
+            if model:
+                params.update({"provider": provider, "model": model})
+            if effort:
+                params["reasoning_effort"] = effort
             response = self.rpc("session.create", params)
             result = response.get("result") if isinstance(response, dict) else None
             tui_id = result.get("session_id") if isinstance(result, dict) else None

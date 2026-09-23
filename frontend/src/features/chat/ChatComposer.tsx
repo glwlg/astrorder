@@ -24,6 +24,89 @@ import { useSidecarStore } from '../sidecar/sidecarStore'
 import { expandSystemMentions } from './systemMentions'
 import { usePersistentDraft } from './draftStorage'
 
+
+export interface InterpretedGatewayError {
+  type: 'quota' | 'disconnect' | 'auth' | 'context' | 'generic'
+  title: string
+  description: string
+  isKnownGatewayIssue: boolean
+  recommendedModel?: { provider: string; model: string; label: string }
+}
+
+export function interpretGatewayError(rawError?: string | null): InterpretedGatewayError | null {
+  if (!rawError || typeof rawError !== 'string') return null
+  const lower = rawError.toLowerCase()
+  if (
+    lower.includes('quota') ||
+    lower.includes('rate limit') ||
+    lower.includes('rate_limit') ||
+    lower.includes('429') ||
+    lower.includes('insufficient_quota') ||
+    lower.includes('额度') ||
+    lower.includes('超出限额')
+  ) {
+    return {
+      type: 'quota',
+      title: '网关模型配额已耗尽',
+      description: '当前模型上游配额已耗尽或触发速率限制，建议切换至其他充裕模型继续对话。',
+      isKnownGatewayIssue: true,
+      recommendedModel: { provider: 'google-antigravity', model: 'gemini-3.8-flash', label: 'gemini-3.8-flash' },
+    }
+  }
+  if (
+    lower.includes('server disconnected without sending a response') ||
+    lower.includes('remoteprotocolerror') ||
+    lower.includes('apiconnectionerror') ||
+    lower.includes('connection error') ||
+    lower.includes('econnrefused') ||
+    lower.includes('etimedout') ||
+    lower.includes('502 bad gateway') ||
+    lower.includes('网关连接')
+  ) {
+    return {
+      type: 'disconnect',
+      title: '网关服务断开或连接超时',
+      description: '上游 LLM 服务断开连接或未返回响应，可能是网络抖动或网关暂时脱机。',
+      isKnownGatewayIssue: true,
+    }
+  }
+  if (
+    lower.includes('account is paused') ||
+    lower.includes('account paused') ||
+    lower.includes('suspended') ||
+    lower.includes('deactivated') ||
+    lower.includes('401') ||
+    lower.includes('unauthorized') ||
+    lower.includes('账号已暂停')
+  ) {
+    return {
+      type: 'auth',
+      title: '网关上游账号已暂停或凭据失效',
+      description: '当前模型所绑定的上游服务账号已被暂停或失效，请在网关后台检查账号健康状态。',
+      isKnownGatewayIssue: true,
+    }
+  }
+  if (
+    lower.includes('context_length_exceeded') ||
+    lower.includes('maximum context length') ||
+    lower.includes('context window') ||
+    lower.includes('上下文长度超出')
+  ) {
+    return {
+      type: 'context',
+      title: '上下文超出模型窗口限制',
+      description: '输入及历史消息已达到当前模型的上下文上限，建议发送 /compact 压缩会话或切换至长上下文模型。',
+      isKnownGatewayIssue: true,
+    }
+  }
+  return {
+    type: 'generic',
+    title: '命令执行异常',
+    description: rawError,
+    isKnownGatewayIssue: false,
+  }
+}
+
 const EMPTY_DRAFT: DraftState = { text: '', attachments: [], sessionRefs: [] }
 
 function fileToDataUrl(file: File): Promise<string> {
@@ -49,8 +132,8 @@ function parseSessionDrag(event: DragEvent): SessionRef | null {
   }
 }
 
-function composeOutgoingText(text: string, refs: SessionRef[]): string {
-  const processed = expandSystemMentions(text)
+function composeOutgoingText(text: string, refs: SessionRef[], sessionKey: string): string {
+  const processed = expandSystemMentions(text, sessionKey)
 
   if (!refs.length) return processed
   const lines = refs.map((ref) => `- ${ref.title || '未命名会话'} (${ref.key})`)
@@ -375,7 +458,7 @@ export function ChatComposer({
 
   const submit = async (action: CommandAction, targetId: string | null = null) => {
     const files = draft.attachments.map((item) => item.file)
-    const outgoing = composeOutgoingText(draft.text, sessionRefs)
+    const outgoing = composeOutgoingText(draft.text, sessionRefs, `${session.agent_id}::${session.id}`)
     if (action === 'send') {
       if (!isDraftSendable(draft.text, files, sessionRefs)) return
       if (!canChat) {
@@ -678,7 +761,40 @@ ${draft.text}` : entry.payload.text)
             </Group>
           </Paper>
         ))}
-        {visibleError && <Alert color="red" variant="light" withCloseButton onClose={() => { setError(null); setSubmittedCommandId(null) }} aria-live="assertive">{visibleError}</Alert>}
+        {visibleError && (() => {
+          const parsed = interpretGatewayError(visibleError)
+          return (
+            <Alert
+              color={parsed?.type === 'quota' ? 'orange' : parsed?.type === 'disconnect' ? 'yellow' : 'red'}
+              variant="light"
+              title={parsed?.isKnownGatewayIssue ? parsed.title : undefined}
+              withCloseButton
+              onClose={() => { setError(null); setSubmittedCommandId(null) }}
+              aria-live="assertive"
+            >
+              <div>{parsed?.description || visibleError}</div>
+              {parsed?.type === 'quota' && parsed.recommendedModel && (
+                <Group gap="xs" mt={6}>
+                  <Text size="xs" c="dimmed">推荐切换至高可用模型：</Text>
+                  <Button
+                    size="compact-xs"
+                    variant="outline"
+                    color="orange"
+                    onClick={() => {
+                      const rec = parsed.recommendedModel
+                      if (!rec) return
+                      void api.setSessionModel(session.id, session.agent_id, rec.provider, rec.model)
+                        .then(() => setError(null))
+                        .catch((e) => setError(errorMessage(e)))
+                    }}
+                  >
+                    切换至 {parsed.recommendedModel.label}
+                  </Button>
+                </Group>
+              )}
+            </Alert>
+          )
+        })()}
         {draft.attachments.length > 0 && (
           <div className="draft-attachments" aria-label="待发送附件">
             {draft.attachments.map((item) => (

@@ -42,7 +42,13 @@ def test_daemon_ssh_controller_connects_and_creates_by_exact_connection_identity
     controller = DaemonSshController(bridge, connection_id="remote-a", ssh_settings=settings)
 
     connected = controller.start()
-    created = controller.create_session("/srv/project", "Daemon remote")
+    created = controller.create_session(
+        "/srv/project",
+        "Daemon remote",
+        provider="ocx",
+        model="google-antigravity/gemini-3.8-flash",
+        effort="high",
+    )
     updated_at = created.pop("updated_at")
 
     assert datetime.fromisoformat(updated_at).tzinfo is not None
@@ -80,6 +86,9 @@ def test_daemon_ssh_controller_connects_and_creates_by_exact_connection_identity
                 "agent_type": "ssh",
                 "cwd": "/srv/project",
                 "title": "Daemon remote",
+                "provider": "ocx",
+                "model": "google-antigravity/gemini-3.8-flash",
+                "effort": "high",
                 "params": {"connection_id": "remote-a", "ssh_settings": settings},
             },
         ),

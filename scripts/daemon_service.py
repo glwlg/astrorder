@@ -3,22 +3,77 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import re
 import subprocess
 import time
 from collections.abc import Callable, Sequence
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 from service_lifecycle import (
+    DAEMON_MODULE_MARKER,
     INDEPENDENT_PROCESS_FLAGS,
     command_line_for_pid,
     current_listening_pids,
     select_owned_daemon_pid,
+    terminate_verified_pid,
 )
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_PORT = 30009
 _SECRET_FLAGS = frozenset({"--secret", "--daemon-secret", "--session-daemon-secret"})
+
+
+def _shared_runtime_dir() -> Path:
+    local = os.environ.get("LOCALAPPDATA")
+    return Path(local) / "Astrorder" if local else ROOT / ".runtime"
+
+
+@contextmanager
+def _daemon_start_lock(timeout: float = 35):
+    path = _shared_runtime_dir() / "daemon-start.lock"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle = path.open("a+b")
+    if handle.tell() == 0:
+        handle.write(b"\0")
+        handle.flush()
+    deadline = time.monotonic() + timeout
+    acquired = False
+    try:
+        while True:
+            try:
+                handle.seek(0)
+                if os.name == "nt":
+                    import msvcrt
+
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                acquired = True
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise RuntimeError("timed out waiting for Session Daemon lifecycle lock") from None
+                time.sleep(0.1)
+        yield
+    finally:
+        try:
+            if acquired:
+                handle.seek(0)
+                if os.name == "nt":
+                    import msvcrt
+
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.flock(handle, fcntl.LOCK_UN)
+        finally:
+            handle.close()
 
 
 def daemon_argv(
@@ -88,31 +143,129 @@ def start_daemon(
     runtime_args: Sequence[str] = (),
     metadata_path: Path | None = None,
 ) -> int:
-    existing = existing_verified_daemon(current_listening_pids(port), command_line_for_pid)
-    if existing is not None:
-        return existing
-    python_executable = str(ROOT / "backend/.venv/Scripts/pythonw.exe")
-    argv = daemon_argv(
-        python_executable=python_executable,
-        port=port,
-        runtime_args=runtime_args,
-    )
-    runtime = ROOT / ".runtime"
-    runtime.mkdir(parents=True, exist_ok=True)
-    log = (runtime / "session-daemon.log").open("ab", buffering=0)
-    proc = subprocess.Popen(
-        argv,
-        cwd=str(ROOT / "backend"),
-        stdout=log,
-        stderr=log,
-        creationflags=INDEPENDENT_PROCESS_FLAGS,
-    )
-    path = metadata_path or runtime / "session-daemon.json"
-    path.write_text(
-        json.dumps({"pid": proc.pid, "port": port, "started_at": _timestamp()}),
+    with _daemon_start_lock():
+        existing = existing_verified_daemon(current_listening_pids(port), command_line_for_pid)
+        if existing is not None:
+            cleanup_stale_daemons(port, existing)
+            return existing
+        python_executable = str(ROOT / "backend/.venv/Scripts/pythonw.exe")
+        argv = daemon_argv(
+            python_executable=python_executable,
+            port=port,
+            runtime_args=runtime_args,
+        )
+        runtime = ROOT / ".runtime"
+        runtime.mkdir(parents=True, exist_ok=True)
+        log = (runtime / "session-daemon.log").open("ab", buffering=0)
+        proc = subprocess.Popen(
+            argv,
+            cwd=str(ROOT / "backend"),
+            stdout=log,
+            stderr=log,
+            creationflags=INDEPENDENT_PROCESS_FLAGS,
+        )
+        try:
+            deadline = time.monotonic() + 30
+            while time.monotonic() < deadline:
+                if proc.poll() is not None:
+                    raise RuntimeError("Session Daemon exited during startup; inspect session-daemon.log")
+                listener = existing_verified_daemon(
+                    current_listening_pids(port), command_line_for_pid
+                )
+                if listener is not None:
+                    if listener != proc.pid and _parent_pid(listener) != proc.pid:
+                        _terminate_spawned(proc)
+                    path = metadata_path or runtime / "session-daemon.json"
+                    path.write_text(
+                        json.dumps({"pid": listener, "port": port, "started_at": _timestamp()}),
+                        encoding="utf-8",
+                    )
+                    cleanup_stale_daemons(port, listener)
+                    return listener
+                time.sleep(0.1)
+            raise RuntimeError("Session Daemon did not become ready within 30 seconds")
+        except Exception:
+            _terminate_spawned(proc)
+            raise
+
+
+def _parent_pid(pid: int) -> int | None:
+    if os.name != "nt":
+        return None
+    completed = subprocess.run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-Command",
+            f"(Get-CimInstance Win32_Process -Filter 'ProcessId = {pid}').ParentProcessId",
+        ],
+        capture_output=True,
+        check=False,
+        text=True,
         encoding="utf-8",
+        errors="replace",
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
-    return proc.pid
+    try:
+        return int(completed.stdout.strip()) if completed.returncode == 0 else None
+    except ValueError:
+        return None
+
+
+def _terminate_spawned(process: Any) -> None:
+    if process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=5)
+
+
+def _daemon_processes() -> list[dict[str, Any]]:
+    if os.name != "nt":
+        return []
+    script = (
+        "Get-CimInstance Win32_Process | Where-Object { $_.Name -in @('python.exe','pythonw.exe') } | "
+        "Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress"
+    )
+    completed = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", script],
+        capture_output=True,
+        check=False,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    if completed.returncode or not completed.stdout.strip():
+        return []
+    value = json.loads(completed.stdout)
+    return value if isinstance(value, list) else [value]
+
+
+def cleanup_stale_daemons(port: int, listener_pid: int) -> list[int]:
+    cleaned = []
+    listener_parent = _parent_pid(listener_pid)
+    port_pattern = re.compile(rf"(?:^|\s)--port\s+{port}(?:\s|$)")
+    for row in _daemon_processes():
+        pid = row.get("ProcessId")
+        command = str(row.get("CommandLine") or "").replace("\\", "/").lower()
+        if not isinstance(pid, int) or pid in {listener_pid, listener_parent}:
+            continue
+        if DAEMON_MODULE_MARKER not in command or not port_pattern.search(command):
+            continue
+        current_command = (command_line_for_pid(pid) or "").replace("\\", "/").lower()
+        if (
+            DAEMON_MODULE_MARKER not in current_command
+            or not port_pattern.search(current_command)
+            or pid in current_listening_pids(port)
+        ):
+            continue
+        terminate_verified_pid(pid)
+        cleaned.append(pid)
+    return cleaned
 
 
 def graceful_shutdown(port: int, secret: str, *, confirm_active: bool = False) -> None:

@@ -157,6 +157,9 @@ export function useEventStream(
             }),
           );
         }
+        if (event.type === "browser.mirror.updated") {
+          window.dispatchEvent(new CustomEvent("astrorder:browser-mirror-updated", { detail: event.data }));
+        }
         if (event.type === "sidecar.plugin.control" && event.data) {
           const sidecar = useSidecarStore.getState();
           const payload = event.data as Record<string, unknown>;

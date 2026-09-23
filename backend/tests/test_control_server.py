@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
+from astrorder import main
 from astrorder.config import Settings
 from astrorder.daemon.bridge import DaemonBridge
 from astrorder.main import create_app
@@ -116,6 +118,56 @@ def test_desktop_shutdown_route_precedes_static_mount(configured):
         )
     assert response.json() == {"stopping": True}
     assert calls == [True]
+
+
+def test_daemon_restart_route_requires_confirmation_and_runs_in_background(configured, monkeypatch):
+    async def restart(app, operation_id):
+        app.state.daemon_restart_operations[operation_id].update(
+            status="success", state="running", pid=123,
+        )
+
+    monkeypatch.setattr(main, "_restart_daemon", restart)
+    with TestClient(configured()) as client:
+        login(client)
+        assert client.post("/api/v1/services/daemon/restart", json={}).status_code == 422
+        started = client.post("/api/v1/services/daemon/restart", json={"confirm_active": True})
+        assert started.status_code == 202
+        operation_id = started.json()["id"]
+        for _ in range(20):
+            status = client.get(f"/api/v1/services/daemon/restart/{operation_id}")
+            if status.json()["status"] == "success":
+                break
+        assert status.json() == {
+            "id": operation_id, "status": "success", "state": "running", "pid": 123,
+        }
+
+
+@pytest.mark.asyncio
+async def test_daemon_restart_worker_launches_independent_service_command(monkeypatch):
+    calls = []
+
+    class Process:
+        returncode = 0
+
+        async def communicate(self):
+            return b'{"ok":true,"state":"running","pid":456}\n', None
+
+    async def create_subprocess(*args, **kwargs):
+        calls.append((args, kwargs))
+        return Process()
+
+    monkeypatch.setattr(main.asyncio, "create_subprocess_exec", create_subprocess)
+    app = SimpleNamespace(state=SimpleNamespace(
+        daemon_restart_operations={"restart-1": {"status": "queued"}},
+    ))
+    await main._restart_daemon(app, "restart-1")
+
+    assert calls[0][0][-3:] == ("daemon", "restart", "--confirm-active")
+    assert calls[0][1]["creationflags"]
+    assert calls[0][1]["env"]["PYTHONIOENCODING"] == "utf-8"
+    assert app.state.daemon_restart_operations["restart-1"] == {
+        "status": "success", "state": "running", "pid": 456,
+    }
 
 
 def test_daemon_projection_starts_after_stale_connectors_are_disconnected(configured, monkeypatch):

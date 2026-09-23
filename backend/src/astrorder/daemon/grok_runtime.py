@@ -43,6 +43,7 @@ class _OwnedGrokSession:
     model: str | None = None
     effort: str | None = None
     commands: list[dict[str, Any]] | None = None
+    error: str | None = None
 
 
 class GrokDaemonRuntime:
@@ -120,6 +121,7 @@ class GrokDaemonRuntime:
             if not isinstance(command_id, str) or not command_id:
                 raise DaemonProtocolError("Grok command ID is required")
             owned.status = "running"
+            owned.error = None
             owned.prompt_task = asyncio.create_task(
                 self._prompt(session_id, owned, command_id, prompt_str, attachments=attachments)
             )
@@ -182,6 +184,9 @@ class GrokDaemonRuntime:
             return_exceptions=True,
         )
 
+    async def reload_config(self) -> None:
+        """Grok reads config when opening each session and has no shared catalog client."""
+
     async def _open(self, session_id: str, workspace: Path, *, load: bool) -> dict[str, Any]:
         with self._lock:
             current = self._sessions.get(session_id)
@@ -194,6 +199,16 @@ class GrokDaemonRuntime:
             update = (frame.get("params") or {}).get("update")
             if isinstance(update, Mapping) and update.get("sessionUpdate") == "available_commands_update":
                 commands[:] = self._commands(update)
+            if (
+                isinstance(update, Mapping)
+                and update.get("sessionUpdate") == "retry_state"
+                and update.get("type") == "failed"
+                and isinstance(update.get("message"), str)
+            ):
+                with self._lock:
+                    current = self._sessions.get(session_id)
+                    if current is not None:
+                        current.error = update["message"]
             asyncio.run_coroutine_threadsafe(
                 self.emit(
                     session_id,
@@ -282,7 +297,10 @@ class GrokDaemonRuntime:
         except asyncio.CancelledError:
             status, payload = "idle", {"command_id": command_id, "cancelled": True}
         except Exception as exc:  # noqa: BLE001 - background turn failures must reach the WAL
-            status, payload = "error", {"command_id": command_id, "error": str(exc)[:1000]}
+            status, payload = "error", {
+                "command_id": command_id,
+                "error": (owned.error or str(exc))[:1000],
+            }
         owned.status = status
         await self.emit(
             session_id,
@@ -305,6 +323,7 @@ class GrokDaemonRuntime:
             config,
             notification,
             launch_argv=[self.config.executable, "agent", "stdio"],
+            request_name="Grok",
         )
 
     @staticmethod

@@ -71,6 +71,7 @@ class RemoteGrokDaemonRuntime(GrokDaemonRuntime):
             notification,
             launch_argv=self._ssh_argv() + [build_remote_python_command(source)],
             environment=dict(os.environ),
+            request_name="Grok",
         )
 
     def _ssh_argv(self) -> list[str]:

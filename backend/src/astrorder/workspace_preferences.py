@@ -41,7 +41,7 @@ def read_preferences(db) -> dict:
         if category in ("appearance", "session_pins"):
             if row.value is not None:
                 result[category][key] = row.value
-        else:
+        elif category in ("pinned_projects", "project_order"):
             result[category] = row.value
     return result
 

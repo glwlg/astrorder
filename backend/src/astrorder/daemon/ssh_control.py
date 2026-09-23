@@ -119,7 +119,15 @@ class DaemonSshController:
     def close_for_app_shutdown(self) -> None:
         """Drop only App-side proxy state; the daemon-owned SSH bridge keeps running."""
 
-    def create_session(self, workspace: str | None = None, title: str | None = None) -> dict[str, object]:
+    def create_session(
+        self,
+        workspace: str | None = None,
+        title: str | None = None,
+        *,
+        provider: str | None = None,
+        model: str | None = None,
+        effort: str | None = None,
+    ) -> dict[str, object]:
         with self._lock:
             agent_id = self._agent_id
         if not agent_id:
@@ -128,14 +136,18 @@ class DaemonSshController:
             raise ConnectionError("SSH workspace 无效。", 422)
         if title is not None and (not isinstance(title, str) or not title):
             raise ConnectionError("SSH 标题无效。", 422)
+        create_request = {
+            "agent_type": "ssh",
+            "cwd": workspace,
+            "title": title or "新会话",
+            "provider": provider,
+            "model": model,
+            "effort": effort,
+            "params": self._connection_params(),
+        }
         result = self._control(
             "session.create",
-            {
-                "agent_type": "ssh",
-                "cwd": workspace,
-                "title": title or "新会话",
-                "params": self._connection_params(),
-            },
+            {key: value for key, value in create_request.items() if value is not None},
             "守护进程未确认 SSH Hermes 新会话创建。",
         ).get("result")
         self._assert_identity(result)

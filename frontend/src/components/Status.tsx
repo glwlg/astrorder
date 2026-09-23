@@ -16,7 +16,7 @@ const sessionLabels: Record<SessionStatus, string> = {
   error: '错误',
 }
 
-export function StatusDot({ status }: { status: AgentStatus | SessionStatus | ConnectionStatus }) {
+export function StatusDot({ status }: { status: AgentStatus | SessionStatus | ConnectionStatus | 'unread' }) {
   return <span className={`status-dot status-${status}`} aria-hidden="true" />
 }
 

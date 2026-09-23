@@ -1,8 +1,10 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   ActionIcon,
+  Alert,
   Badge,
   Card,
+  Grid,
   Group,
   Progress,
   SegmentedControl,
@@ -11,25 +13,16 @@ import {
   Stack,
   Table,
   Text,
+  TextInput,
   Title,
   Tooltip,
-  Grid,
 } from '@mantine/core'
-import {
-  IconBolt,
-  IconBrain,
-  IconCalendarStats,
-  IconChartBar,
-  IconClock,
-  IconCpu,
-  IconDatabase,
-  IconFileText,
-  IconRefresh,
-} from '@tabler/icons-react'
+import { IconAlertTriangle, IconBolt, IconCalendarStats, IconChartHistogram, IconCircleCheck, IconClock, IconCoin, IconDatabase } from '@tabler/icons-react'
 import { notifications } from '@mantine/notifications'
-import { api } from '../../api/client'
+import { api, type OcxUsageBreakdown, type OcxUsageResponse } from '../../api/client'
 
 const zhNumber = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2 })
+const usd = new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 })
 
 export function formatTokens(tokens: number = 0): string {
   if (tokens >= 100_000_000) return `${zhNumber.format(tokens / 100_000_000)} 亿`
@@ -37,612 +30,336 @@ export function formatTokens(tokens: number = 0): string {
   return zhNumber.format(tokens)
 }
 
-export function AnalyticsPage() {
-  const [overview, setOverview] = useState<any>(null)
-  const [calendarData, setCalendarData] = useState<any>(null)
-  const [topSessions, setTopSessions] = useState<any[]>([])
-  const [loading, setLoading] = useState(true)
-  const [syncing, setSyncing] = useState(false)
-  const [selectedRange, setSelectedRange] = useState<'30' | '90' | '180' | '365'>('180')
+const percent = (ratio: number = 0) => `${(ratio * 100).toFixed(1)}%`
+const localInput = (date: Date) => {
+  const offset = date.getTimezoneOffset() * 60_000
+  return new Date(date.getTime() - offset).toISOString().slice(0, 16)
+}
 
-  const loadAllData = async () => {
-    setLoading(true)
-    try {
-      const [resOverview, resCalendar, resTop] = await Promise.all([
-        api.getAnalyticsOverview(),
-        api.getAnalyticsCalendar(parseInt(selectedRange, 10)),
-        api.getAnalyticsTopSessions(8),
-      ])
-      setOverview(resOverview)
-      setCalendarData(resCalendar)
-      setTopSessions(resTop.items || [])
-    } catch (e: any) {
-      notifications.show({ color: 'red', message: e.message || '加载统计数据失败' })
-    } finally {
-      setLoading(false)
-    }
-  }
+export function getModelColor(model: string = '', provider: string = ''): string {
+  const m = model.toLowerCase()
+  if (m.includes('gpt-5.6-sol') || m === 'sol') return '#ef4444'
+  if (m.includes('gpt-5.6-luna') || m === 'luna') return '#10b981'
+  if (m.includes('deepseek')) return '#3b82f6'
+  if (m.includes('gemini')) return '#2563eb'
+  if (m.includes('guolian')) return '#8b5cf6'
+  if (m.includes('terra')) return '#38bdf8'
+  if (m.includes('grok')) return '#06b6d4'
+  if (m.includes('claude')) return '#f97316'
+  if (m.includes('astra')) return '#a855f7'
+  if (m === 'unknown') return '#14b8a6'
+  const key = `${provider}/${model}`
+  let hash = 0
+  for (let i = 0; i < key.length; i++) hash = ((hash * 31) + key.charCodeAt(i)) >>> 0
+  return `hsl(${hash % 360} 60% 50%)`
+}
 
-  useEffect(() => {
-    void loadAllData()
-  }, [selectedRange])
+function DayBarsChart({ days, loading }: { days: Array<OcxUsageResponse['days'][0]>; loading?: boolean }) {
+  const sorted = useMemo(() => [...days].sort((a, b) => a.date.localeCompare(b.date)).slice(-7), [days])
+  const maxTokens = Math.max(1, ...sorted.map((d) => d.totalTokens))
 
-  const handleManualSync = async () => {
-    setSyncing(true)
-    try {
-      const res = await api.syncAnalytics()
-      notifications.show({
-        color: 'teal',
-        message: `已同步回溯 ${res.result.total_records || 0} 条历史会话 Token 记录`,
-      })
-      void loadAllData()
-    } catch (e: any) {
-      notifications.show({ color: 'red', message: e.message || '同步失败' })
-    } finally {
-      setSyncing(false)
-    }
-  }
-
-  const totals = overview?.totals || {}
-  const today = overview?.today || {}
-  const models = overview?.by_model || []
-  const rawAgents = overview?.by_agent || []
-
-  // 聚合智能体算力引擎
-  const agentBreakdown = useMemo(() => {
-    const totalTok = totals.total_tokens || 1
-    const engineMap: Record<string, { label: string; desc: string; color: string; tokens: number; sessions: number; inTok: number; cacheTok: number }> = {
-      codex: { label: 'Codex-Pro', desc: '全局架构与主线开发', color: '#4f46e5', tokens: 0, sessions: 0, inTok: 0, cacheTok: 0 },
-      hermes: { label: 'Hermes', desc: '伴随执行与深度对弈', color: '#06b6d4', tokens: 0, sessions: 0, inTok: 0, cacheTok: 0 },
-      grok: { label: 'Grok-3', desc: '实时对弈与验证探索', color: '#f59e0b', tokens: 0, sessions: 0, inTok: 0, cacheTok: 0 },
-      other: { label: '其他辅助代理', desc: 'Reviewer / Sync / CI', color: '#9ca3af', tokens: 0, sessions: 0, inTok: 0, cacheTok: 0 },
-    }
-
-    rawAgents.forEach((a: any) => {
-      const prov = (a.provider || '').toLowerCase()
-      const aid = (a.agent_id || '').toLowerCase()
-      let targetKey = 'other'
-      if (prov === 'codex' || aid.includes('codex')) targetKey = 'codex'
-      else if (prov === 'hermes' || aid.includes('hermes') || prov === 'custom') targetKey = 'hermes'
-      else if (prov === 'grok' || aid.includes('grok')) targetKey = 'grok'
-
-      const e = engineMap[targetKey]
-      e.tokens += a.tokens || 0
-      e.sessions += a.session_count || 0
-      e.inTok += a.input_tokens || 0
-      e.cacheTok += a.cached_tokens || 0
-    })
-
-    return Object.entries(engineMap).map(([k, item]) => {
-      const share = roundNum((item.tokens / totalTok) * 100, 1)
-      const hitRate = item.inTok > 0 ? Math.min(100, Math.round((item.cacheTok / item.inTok) * 100)) : 0
-      return { key: k, ...item, share, hitRate }
-    }).filter(i => i.tokens > 0 || i.key !== 'other')
-  }, [rawAgents, totals.total_tokens])
-
-  const formatRate = (rate: number = 0) => {
-    return Math.min(100, Math.max(0, Math.round(rate)))
-  }
-
-  function roundNum(val: number, precision: number = 1) {
-    const p = Math.pow(10, precision)
-    return Math.round(val * p) / p
-  }
-
-  // 构造真实日历：按周对齐矩阵
-  const { calendarWeeks, monthMarkers, totalActiveDays, avgDailyTokens, peakDay } = useMemo(() => {
-    const rawItems = calendarData?.items || []
-    const map = new Map<string, any>()
-    rawItems.forEach((it: any) => map.set(it.date, it))
-
-    const daysCount = parseInt(selectedRange, 10)
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
-
-    const startDate = new Date(today)
-    startDate.setDate(startDate.getDate() - (daysCount - 1))
-
-    // 对齐到所在周的周日（0 = 周日，1 = 周一）
-    const dayOfWeek = startDate.getDay()
-    startDate.setDate(startDate.getDate() - dayOfWeek)
-
-    const weeks: any[][] = []
-    let currentWeek: any[] = []
-    const cur = new Date(startDate)
-
-    let activeCount = 0
-    let totalTokensInRange = 0
-    let peakTok = 0
-    let peakDate = ''
-
-    const months: { label: string; weekIdx: number }[] = []
-    let lastMonth = -1
-
-    while (cur <= today || currentWeek.length > 0) {
-      const dateStr = cur.toISOString().slice(0, 10)
-      const isFuture = cur > today
-      const it = map.get(dateStr)
-      const tok = isFuture ? 0 : it?.tokens || 0
-
-      if (tok > 0) {
-        activeCount++
-        totalTokensInRange += tok
-        if (tok > peakTok) {
-          peakTok = tok
-          peakDate = dateStr
-        }
-      }
-
-      currentWeek.push({
-        date: dateStr,
-        dayOfMonth: cur.getDate(),
-        month: cur.getMonth() + 1,
-        tokens: tok,
-        cached_tokens: it?.cached_tokens || 0,
-        cache_hit_rate: it?.cache_hit_rate || 0,
-        session_count: it?.session_count || 0,
-        isFuture,
-      })
-
-      if (currentWeek.length === 7) {
-        const m = currentWeek[0].month
-        if (m !== lastMonth) {
-          months.push({ label: `${m}月`, weekIdx: weeks.length })
-          lastMonth = m
-        }
-        weeks.push(currentWeek)
-        currentWeek = []
-        if (cur >= today) break
-      }
-      cur.setDate(cur.getDate() + 1)
-    }
-
-    const avg = activeCount > 0 ? Math.round(totalTokensInRange / activeCount) : 0
-
-    return {
-      calendarWeeks: weeks,
-      monthMarkers: months,
-      totalActiveDays: activeCount,
-      avgDailyTokens: avg,
-      peakDay: { date: peakDate, tokens: peakTok },
-    }
-  }, [calendarData, selectedRange])
-
-  const maxDailyTokens = useMemo(() => {
-    let m = 1
-    calendarWeeks.forEach((week) => {
-      week.forEach((d) => {
-        if (d.tokens > m) m = d.tokens
-      })
-    })
-    return m
-  }, [calendarWeeks])
+  if (loading) return <Skeleton height={180} />
 
   return (
-    <div
-      style={{
-        height: '100%',
-        overflowY: 'auto',
-        padding: '16px 20px 36px',
-        background: 'var(--astr-canvas-bg, #f8f9fb)',
-      }}
-    >
-      {/* 顶部紧凑标题栏 */}
-      <Group justify="space-between" align="center" mb={12}>
-        <Group gap="xs">
-          <Title order={3} style={{ fontSize: 17, fontWeight: 700, letterSpacing: '-0.02em' }}>
-            用量与 Token 统计
-          </Title>
-          <Badge size="xs" variant="light" color="indigo" radius="sm">
-            实时聚合
-          </Badge>
-          <Text size="xs" c="dimmed" style={{ marginLeft: 4 }}>
-            跨会话、跨智能体（Codex / Hermes / Grok）分布式算力及上下文消耗全景
-          </Text>
-        </Group>
-        <Group gap={8}>
-          <SegmentedControl
-            size="xs"
-            value={selectedRange}
-            onChange={(val: any) => setSelectedRange(val)}
-            data={[
-              { label: '近 30 天', value: '30' },
-              { label: '近 90 天', value: '90' },
-              { label: '近半年', value: '180' },
-              { label: '近 1 年', value: '365' },
-            ]}
-          />
-          <Tooltip label="从原生引擎日志回溯同步历史数据" position="bottom" withArrow>
-            <ActionIcon
-              variant="default"
-              size="sm"
-              radius="md"
-              loading={syncing}
-              onClick={handleManualSync}
-              aria-label="同步数据"
-            >
-              <IconRefresh size={14} />
-            </ActionIcon>
-          </Tooltip>
-        </Group>
-      </Group>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 10, alignItems: 'end', height: 210, paddingTop: 8 }}>
+      {sorted.map((day) => {
+        const heightPercent = Math.min(100, Math.round((day.totalTokens / maxTokens) * 100))
+        const weekday = new Intl.DateTimeFormat('zh-CN', { weekday: 'short' }).format(new Date(`${day.date}T12:00:00`))
+        const fullDate = new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' }).format(new Date(`${day.date}T12:00:00`))
+        const models = day.models || []
 
-      {/* 4 项核心数据指标 */}
-      <SimpleGrid cols={{ base: 1, sm: 2, md: 4 }} spacing="sm" mb={12}>
-        <Card p="sm" radius="md" withBorder style={{ background: 'var(--astr-surface, #fff)' }}>
-          <Group justify="space-between" align="center">
-            <Text size="xs" c="dimmed" fw={600}>累计 TOKEN 消耗</Text>
-            <ActionIcon size="sm" radius="md" color="indigo" variant="subtle">
-              <IconBolt size={15} />
-            </ActionIcon>
-          </Group>
-          <Group align="baseline" gap={6} mt={2}>
-            <Text fw={750} style={{ fontFamily: 'ui-monospace, monospace', fontSize: 21, letterSpacing: '-0.02em' }}>
-              {loading ? <Skeleton height={24} width={80} /> : formatTokens(totals.total_tokens)}
-            </Text>
-            <Badge size="xs" color="teal" variant="light" radius="sm">
-              已结算
-            </Badge>
-          </Group>
-          <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--astr-border, #f1f5f9)', fontSize: 11, color: 'var(--astr-muted, #64748b)' }}>
-            输入 <strong style={{ color: 'var(--astr-text, #111827)' }}>{formatTokens(totals.input_tokens)}</strong> · 输出 <strong style={{ color: 'var(--astr-text, #111827)' }}>{formatTokens(totals.output_tokens)}</strong>
-          </div>
-        </Card>
-
-        <Card p="sm" radius="md" withBorder style={{ background: 'var(--astr-surface, #fff)' }}>
-          <Group justify="space-between" align="center">
-            <Text size="xs" c="dimmed" fw={600}>全域缓存命中率</Text>
-            <ActionIcon size="sm" radius="md" color="teal" variant="subtle">
-              <IconDatabase size={15} />
-            </ActionIcon>
-          </Group>
-          <Group align="baseline" gap={6} mt={2}>
-            <Text fw={750} style={{ fontFamily: 'ui-monospace, monospace', fontSize: 21, color: '#10b981', letterSpacing: '-0.02em' }}>
-              {loading ? <Skeleton height={24} width={70} /> : `${formatRate(totals.cache_hit_rate)}%`}
-            </Text>
-            <Badge size="xs" color="teal" variant="outline" radius="sm">
-              极高效复用
-            </Badge>
-          </Group>
-          <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--astr-border, #f1f5f9)', fontSize: 11, color: 'var(--astr-muted, #64748b)' }}>
-            累计复用 <strong style={{ color: 'var(--astr-text, #111827)' }}>{formatTokens(totals.cached_tokens)}</strong> 缓存 Tokens
-          </div>
-        </Card>
-
-        <Card p="sm" radius="md" withBorder style={{ background: 'var(--astr-surface, #fff)' }}>
-          <Group justify="space-between" align="center">
-            <Text size="xs" c="dimmed" fw={600}>今日活跃消耗</Text>
-            <ActionIcon size="sm" radius="md" color="blue" variant="subtle">
-              <IconClock size={15} />
-            </ActionIcon>
-          </Group>
-          <Group align="baseline" gap={6} mt={2}>
-            <Text fw={750} style={{ fontFamily: 'ui-monospace, monospace', fontSize: 21, letterSpacing: '-0.02em' }}>
-              {loading ? <Skeleton height={24} width={80} /> : formatTokens(today.total_tokens)}
-            </Text>
-            <Text size="xs" c="dimmed" style={{ fontSize: 11 }}>
-              缓存率 {formatRate(today.cache_hit_rate)}%
-            </Text>
-          </Group>
-          <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--astr-border, #f1f5f9)', fontSize: 11, color: 'var(--astr-muted, #64748b)' }}>
-            输入 {formatTokens(today.input_tokens)} · 输出 {formatTokens(today.output_tokens)}
-          </div>
-        </Card>
-
-        <Card p="sm" radius="md" withBorder style={{ background: 'var(--astr-surface, #fff)' }}>
-          <Group justify="space-between" align="center">
-            <Text size="xs" c="dimmed" fw={600}>已覆盖会话</Text>
-            <ActionIcon size="sm" radius="md" color="violet" variant="subtle">
-              <IconFileText size={15} />
-            </ActionIcon>
-          </Group>
-          <Group align="baseline" gap={6} mt={2}>
-            <Text fw={750} style={{ fontFamily: 'ui-monospace, monospace', fontSize: 21, letterSpacing: '-0.02em' }}>
-              {loading ? <Skeleton height={24} width={60} /> : `${totals.session_count || 0} 个`}
-            </Text>
-            <Badge size="xs" color="violet" variant="light" radius="sm">
-              跨多智能体
-            </Badge>
-          </Group>
-          <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--astr-border, #f1f5f9)', fontSize: 11, color: 'var(--astr-muted, #64748b)' }}>
-            跨 {agentBreakdown.length || 3} 组环境智能体协同产出
-          </div>
-        </Card>
-      </SimpleGrid>
-
-      {/* 中层：非对称双栏结构 (60% 热力日历 + 40% 算力引擎分布) */}
-      <Grid  mb={12}>
-        {/* 左侧 60%：热力图，空间饱满无大片留白 */}
-        <Grid.Col span={{ base: 12, lg: 7 }}>
-          <Card p="md" radius="md" withBorder style={{ background: 'var(--astr-surface, #fff)', height: '100%' }}>
-            <Group justify="space-between" align="center" mb="xs">
-              <Group gap={6}>
-                <IconCalendarStats size={15} color="var(--astr-indigo, #6366f1)" />
-                <Text fw={650} size="xs" style={{ textTransform: 'uppercase', letterSpacing: '0.02em' }}>
-                  每日 Token 产出热力日历 (Activity Heatmap)
-                </Text>
-                <Badge size="xs" variant="subtle" color="gray">
-                  共 {calendarWeeks.length} 周
-                </Badge>
-              </Group>
-              <Text size="xs" c="dimmed" style={{ fontSize: 11 }}>
-                活跃天数: <strong style={{ color: 'var(--astr-text, #111827)' }}>{totalActiveDays}</strong> 天
-              </Text>
+        const tooltipContent = (
+          <div style={{ padding: '4px 6px', minWidth: 190, maxWidth: 260 }}>
+            <Text fw={700} size="xs" mb={4}>{fullDate}</Text>
+            <Group justify="space-between" mb={6} style={{ fontSize: 11 }}>
+              <Text size="xs" c="dimmed">{zhNumber.format(day.requests)} 请求</Text>
+              <Text size="xs" fw={650}>{formatTokens(day.totalTokens)} Token</Text>
             </Group>
-
-            {loading ? (
-              <Skeleton height={110} radius="sm" />
-            ) : (
-              <div style={{ overflowX: 'auto', paddingBottom: 4 }}>
-                <div style={{ minWidth: 540 }}>
-                  {/* 月份刻度 */}
-                  <div style={{ display: 'flex', fontSize: 10, fontFamily: 'ui-monospace, monospace', color: 'var(--astr-muted, #94a3b8)', marginBottom: 4, paddingLeft: 18 }}>
-                    {monthMarkers.map((m, idx) => (
-                      <div key={idx} style={{ width: `${(100 / Math.max(monthMarkers.length, 1))}%` }}>
-                        {m.label}
-                      </div>
-                    ))}
-                  </div>
-
-                  <div style={{ display: 'flex', gap: 3.5, alignItems: 'flex-start' }}>
-                    {/* 星期标签列 */}
-                    <div style={{ display: 'grid', gridTemplateRows: 'repeat(7, 11px)', gap: 3, paddingRight: 4 }}>
-                      <span style={{ fontSize: 9, color: 'var(--astr-muted, #94a3b8)', lineHeight: '11px' }}>日</span>
-                      <span style={{ fontSize: 9, color: 'transparent', lineHeight: '11px' }}>一</span>
-                      <span style={{ fontSize: 9, color: 'var(--astr-muted, #94a3b8)', lineHeight: '11px' }}>二</span>
-                      <span style={{ fontSize: 9, color: 'transparent', lineHeight: '11px' }}>三</span>
-                      <span style={{ fontSize: 9, color: 'var(--astr-muted, #94a3b8)', lineHeight: '11px' }}>四</span>
-                      <span style={{ fontSize: 9, color: 'transparent', lineHeight: '11px' }}>五</span>
-                      <span style={{ fontSize: 9, color: 'var(--astr-muted, #94a3b8)', lineHeight: '11px' }}>六</span>
-                    </div>
-
-                    {/* 按周排列的矩阵网格 */}
-                    <div style={{ display: 'flex', gap: 3, flex: 1 }}>
-                      {calendarWeeks.map((week, wIdx) => (
-                        <div key={wIdx} style={{ display: 'grid', gridTemplateRows: 'repeat(7, 11px)', gap: 3 }}>
-                          {week.map((day) => {
-                            if (day.isFuture) {
-                              return <div key={day.date} style={{ width: 11, height: 11 }} />
-                            }
-                            const tok = day.tokens
-                            const ratio = tok / maxDailyTokens
-                            let bg = 'color-mix(in srgb, var(--astr-text, #000) 5%, transparent)'
-                            if (tok > 0) {
-                              if (ratio < 0.05) bg = 'rgba(79, 70, 229, 0.25)'
-                              else if (ratio < 0.25) bg = 'rgba(79, 70, 229, 0.5)'
-                              else if (ratio < 0.65) bg = '#6366f1'
-                              else bg = '#4338ca'
-                            }
-                            return (
-                              <Tooltip
-                                key={day.date}
-                                label={
-                                  <div style={{ fontSize: 11, lineHeight: 1.4 }}>
-                                    <div style={{ fontWeight: 700 }}>{day.date}</div>
-                                    <div>消耗: {formatTokens(tok)} tokens</div>
-                                    {tok > 0 && <div>缓存率: {formatRate(day.cache_hit_rate)}%</div>}
-                                    {tok > 0 && <div>涉及会话: {day.session_count} 个</div>}
-                                  </div>
-                                }
-                                position="top"
-                                withArrow
-                              >
-                                <div
-                                  style={{
-                                    width: 11,
-                                    height: 11,
-                                    borderRadius: 2,
-                                    background: bg,
-                                    cursor: 'pointer',
-                                  }}
-                                />
-                              </Tooltip>
-                            )
-                          })}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* 底部指标与图例 */}
-                  <Group justify="space-between" align="center" mt={10} style={{ fontSize: 11, color: 'var(--astr-muted, #94a3b8)' }}>
-                    <div>
-                      活跃日均: <strong style={{ color: 'var(--astr-text, #111827)' }}>{formatTokens(avgDailyTokens)}</strong>
-                      {peakDay.date && (
-                        <span style={{ marginLeft: 12 }}>
-                          峰值日 ({peakDay.date}): <strong style={{ color: 'var(--astr-text, #111827)' }}>{formatTokens(peakDay.tokens)}</strong>
-                        </span>
-                      )}
-                    </div>
-                    <Group gap={4}>
-                      <span>较少</span>
-                      <span style={{ width: 9, height: 9, borderRadius: 2, background: 'color-mix(in srgb, var(--astr-text, #000) 5%, transparent)' }} />
-                      <span style={{ width: 9, height: 9, borderRadius: 2, background: 'rgba(79, 70, 229, 0.25)' }} />
-                      <span style={{ width: 9, height: 9, borderRadius: 2, background: 'rgba(79, 70, 229, 0.5)' }} />
-                      <span style={{ width: 9, height: 9, borderRadius: 2, background: '#6366f1' }} />
-                      <span style={{ width: 9, height: 9, borderRadius: 2, background: '#4338ca' }} />
-                      <span>极多</span>
+            {models.length > 0 && (
+              <div style={{ borderTop: '1px solid var(--astr-border, rgba(0,0,0,0.08))', paddingTop: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {models.slice(0, 8).map((m) => (
+                  <Group key={`${m.provider}:${m.model}`} justify="space-between" gap="xs" style={{ fontSize: 11 }}>
+                    <Group gap={6} wrap="nowrap" style={{ overflow: 'hidden' }}>
+                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: getModelColor(m.model, m.provider), flexShrink: 0 }} />
+                      <Text size="xs" truncate style={{ maxWidth: 130 }}>{m.model}</Text>
                     </Group>
+                    <Text size="xs" fw={600} style={{ fontFamily: 'ui-monospace, monospace' }}>{formatTokens(m.totalTokens)}</Text>
                   </Group>
-                </div>
+                ))}
               </div>
             )}
-          </Card>
-        </Grid.Col>
+          </div>
+        )
 
-        {/* 右侧 40%：智能体引擎与算力分布 */}
-        <Grid.Col span={{ base: 12, lg: 5 }}>
-          <Card p="md" radius="md" withBorder style={{ background: 'var(--astr-surface, #fff)', height: '100%' }}>
-            <Group justify="space-between" align="center" mb="xs">
-              <Group gap={6}>
-                <IconCpu size={15} color="var(--astr-indigo, #6366f1)" />
-                <Text fw={650} size="xs" style={{ textTransform: 'uppercase', letterSpacing: '0.02em' }}>
-                  智能体引擎与算力分布 (Compute Breakdown)
-                </Text>
-              </Group>
-              <Badge size="xs" variant="subtle" color="gray">
-                按引擎聚合
-              </Badge>
-            </Group>
-
-            {/* 堆叠占比条 */}
-            <div style={{ marginTop: 8, marginBottom: 12 }}>
-              <div style={{ height: 10, width: '100%', borderRadius: 5, overflow: 'hidden', display: 'flex', background: 'var(--astr-border, #f1f5f9)' }}>
-                {agentBreakdown.map((e) => (
-                  <div
-                    key={e.key}
-                    style={{
-                      height: '100%',
-                      width: `${e.share}%`,
-                      background: e.color,
-                      transition: 'width 0.3s ease',
-                    }}
-                    title={`${e.label}: ${e.share}%`}
-                  />
-                ))}
-              </div>
-            </div>
-
-            {/* 引擎详情列表 */}
-            <Stack gap={6}>
-              {agentBreakdown.map((e) => (
+        return (
+          <Tooltip key={day.date} label={tooltipContent} withArrow position="top" radius="sm" multiline>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', height: '100%', cursor: 'pointer' }}>
+              <div
+                style={{
+                  flex: 1,
+                  width: '100%',
+                  maxWidth: 52,
+                  background: 'color-mix(in srgb, var(--astr-text, #000) 5%, transparent)',
+                  borderRadius: 6,
+                  display: 'flex',
+                  alignItems: 'flex-end',
+                  overflow: 'hidden',
+                  padding: 0,
+                }}
+              >
                 <div
-                  key={e.key}
                   style={{
+                    width: '100%',
+                    height: `${heightPercent}%`,
+                    minHeight: day.totalTokens > 0 ? 3 : 0,
+                    borderRadius: '6px 6px 0 0',
                     display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '6px 10px',
-                    borderRadius: 6,
-                    background: 'color-mix(in srgb, var(--astr-text, #000) 2.5%, transparent)',
-                    border: '1px solid var(--astr-border, #f1f5f9)',
+                    flexDirection: 'column-reverse',
+                    overflow: 'hidden',
+                    transition: 'height 0.3s ease',
                   }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: e.color, flexShrink: 0 }} />
-                    <div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <Text size="xs" fw={600}>{e.label}</Text>
-                        <span style={{ fontSize: 10, color: 'var(--astr-muted, #94a3b8)' }}>{e.desc}</span>
-                      </div>
-                      <div style={{ fontSize: 11, fontFamily: 'ui-monospace, monospace', color: 'var(--astr-muted, #64748b)', marginTop: 1 }}>
-                        {e.sessions} 会话 · {formatTokens(e.tokens)}
-                      </div>
-                    </div>
-                  </div>
-                  <div style={{ textAlign: 'right' }}>
-                    <Text size="xs" fw={700} style={{ fontFamily: 'ui-monospace, monospace' }}>
-                      {e.share}%
-                    </Text>
-                    <span style={{ fontSize: 10, color: '#10b981', fontFamily: 'ui-monospace, monospace' }}>
-                      缓存率 {e.hitRate}%
-                    </span>
-                  </div>
+                  {models.length > 0 ? (
+                    models.map((m) => {
+                      const share = day.totalTokens > 0 ? (m.totalTokens / day.totalTokens) * 100 : 0
+                      return (
+                        <div
+                          key={`${m.provider}:${m.model}`}
+                          style={{
+                            width: '100%',
+                            height: `${share}%`,
+                            minHeight: m.totalTokens > 0 ? 1 : 0,
+                            background: getModelColor(m.model, m.provider),
+                          }}
+                        />
+                      )
+                    })
+                  ) : (
+                    <div style={{ width: '100%', height: '100%', background: 'var(--astr-indigo, #6366f1)' }} />
+                  )}
                 </div>
-              ))}
-            </Stack>
-          </Card>
-        </Grid.Col>
-      </Grid>
+              </div>
 
-      {/* 底部双列：模型消耗分布 & 会话 Top 榜 */}
-      <Grid >
-        {/* 模型消耗占比 */}
-        <Grid.Col span={{ base: 12, md: 6 }}>
-          <Card p="md" radius="md" withBorder style={{ background: 'var(--astr-surface, #fff)', height: '100%' }}>
-            <Group justify="space-between" align="center" mb="xs">
-              <Group gap={6}>
-                <IconBrain size={15} color="var(--astr-purple, #a855f7)" />
-                <Text fw={650} size="xs" style={{ textTransform: 'uppercase', letterSpacing: '0.02em' }}>
-                  模型消耗占比与缓存效率
-                </Text>
-              </Group>
-              <Text size="xs" c="dimmed">共 {models.length} 个活跃模型</Text>
-            </Group>
-
-            <div style={{ maxHeight: 340, overflowY: 'auto', paddingRight: 4 }}>
-              <Stack gap={8}>
-                {models.slice(0, 8).map((m: any) => (
-                  <div key={m.model} style={{ padding: '2px 0' }}>
-                    <Group justify="space-between" mb={2} style={{ fontSize: 12 }}>
-                      <Group gap={6}>
-                        <Text fw={600} size="xs" style={{ maxWidth: 220 }}  title={m.model}>
-                          {m.model}
-                        </Text>
-                        <Badge size="xs" variant="subtle" color="gray">
-                          {m.session_count} 个
-                        </Badge>
-                      </Group>
-                      <Text fw={700} style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>
-                        {formatTokens(m.total_tokens)} <span style={{ color: 'var(--astr-muted, #94a3b8)', fontWeight: 400 }}>({m.share}%)</span>
-                      </Text>
-                    </Group>
-                    <Progress value={m.share || 0} size={5} color="indigo" radius="xl" />
-                    <Group justify="space-between" mt={2} style={{ fontSize: 10.5, color: 'var(--astr-muted, #94a3b8)' }}>
-                      <span>缓存命中: {formatRate(m.cache_hit_rate)}%</span>
-                      <span>复用量: {formatTokens(m.cached_tokens)}</span>
-                    </Group>
-                  </div>
-                ))}
-              </Stack>
+              <Text fw={700} size="xs" mt={6} style={{ fontFamily: 'ui-monospace, monospace', fontSize: 11.5 }}>
+                {formatTokens(day.totalTokens)}
+              </Text>
+              <Text size="xs" c="dimmed" mt={1} style={{ fontSize: 11 }}>
+                {weekday}
+              </Text>
             </div>
-          </Card>
-        </Grid.Col>
-
-        {/* 会话 Token Top 榜 */}
-        <Grid.Col span={{ base: 12, md: 6 }}>
-          <Card p="md" radius="md" withBorder style={{ background: 'var(--astr-surface, #fff)', height: '100%' }}>
-            <Group justify="space-between" align="center" mb="xs">
-              <Group gap={6}>
-                <IconChartBar size={15} color="var(--astr-indigo, #6366f1)" />
-                <Text fw={650} size="xs" style={{ textTransform: 'uppercase', letterSpacing: '0.02em' }}>
-                  会话 Token 消耗 Top 榜
-                </Text>
-              </Group>
-              <Text size="xs" c="dimmed">按总产出排序</Text>
-            </Group>
-
-            <div style={{ maxHeight: 340, overflowY: 'auto' }}>
-              <Table highlightOnHover verticalSpacing={6} style={{ fontSize: 12 }}>
-                <Table.Thead>
-                  <Table.Tr>
-                    <Table.Th style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600 }}>会话名称与标识</Table.Th>
-                    <Table.Th style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600 }}>主要模型</Table.Th>
-                    <Table.Th style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, textAlign: 'right' }}>总 Token</Table.Th>
-                    <Table.Th style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, textAlign: 'right' }}>缓存率</Table.Th>
-                  </Table.Tr>
-                </Table.Thead>
-                <Table.Tbody>
-                  {topSessions.map((s) => (
-                    <Table.Tr key={`${s.agent_id}:${s.session_id}`}>
-                      <Table.Td style={{ maxWidth: 170 }}>
-                        <Text size="xs" fw={500}  title={s.title}>
-                          {s.title}
-                        </Text>
-                        <div style={{ fontSize: 10, color: 'var(--astr-muted, #94a3b8)', fontFamily: 'ui-monospace, monospace' }}>
-                          {s.agent_id}
-                        </div>
-                      </Table.Td>
-                      <Table.Td style={{ maxWidth: 130 }}>
-                        <Badge size="xs" variant="light" color="indigo" style={{ maxWidth: 125 }}  title={s.model}>
-                          {s.model}
-                        </Badge>
-                      </Table.Td>
-                      <Table.Td style={{ textAlign: 'right', fontFamily: 'ui-monospace, monospace', fontWeight: 600, fontSize: 12 }}>
-                        {formatTokens(s.total_tokens)}
-                      </Table.Td>
-                      <Table.Td style={{ textAlign: 'right', color: '#10b981', fontWeight: 600, fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>
-                        {formatRate(s.cache_hit_rate)}%
-                      </Table.Td>
-                    </Table.Tr>
-                  ))}
-                </Table.Tbody>
-              </Table>
-            </div>
-          </Card>
-        </Grid.Col>
-      </Grid>
+          </Tooltip>
+        )
+      })}
     </div>
   )
 }
 
+function BreakdownTable({ title, rows, showModel }: { title: string; rows: OcxUsageBreakdown[]; showModel?: boolean }) {
+  return (
+    <Card withBorder radius="md" p="md" style={{ background: 'var(--astr-surface, #fff)' }}>
+      <Text fw={650} size="sm" mb="sm">{title}</Text>
+      <Table.ScrollContainer minWidth={850}>
+        <Table striped highlightOnHover verticalSpacing="xs" horizontalSpacing="sm">
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th>{showModel ? '模型' : '提供方'}</Table.Th>
+              {showModel && <Table.Th>提供方</Table.Th>}
+              <Table.Th ta="right">请求</Table.Th>
+              <Table.Th ta="right">Token</Table.Th>
+              <Table.Th ta="right">输入 / 输出</Table.Th>
+              <Table.Th ta="right">缓存读取</Table.Th>
+              <Table.Th ta="right">缓存命中率</Table.Th>
+              <Table.Th ta="right">计价覆盖率</Table.Th>
+              <Table.Th ta="right">占比</Table.Th>
+              <Table.Th ta="right">标价折算</Table.Th>
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
+            {rows.map((row, index) => (
+              <Table.Tr key={`${row.provider}:${row.model || ''}:${index}`}>
+                <Table.Td fw={600}>{showModel ? row.model : row.provider}</Table.Td>
+                {showModel && <Table.Td>{row.provider}</Table.Td>}
+                <Table.Td ta="right">{zhNumber.format(row.requests)}</Table.Td>
+                <Table.Td ta="right">{formatTokens(row.totalTokens)}</Table.Td>
+                <Table.Td ta="right">{formatTokens(row.inputTokens)} / {formatTokens(row.outputTokens)}</Table.Td>
+                <Table.Td ta="right">{formatTokens(row.cacheReadInputTokens)}</Table.Td>
+                <Table.Td ta="right">{row.cacheHitRate == null ? '—' : percent(row.cacheHitRate)}</Table.Td>
+                <Table.Td ta="right">{percent(row.priceCoverageRatio)}</Table.Td>
+                <Table.Td ta="right">{percent(row.shareRatio)}</Table.Td>
+                <Table.Td ta="right">{usd.format(row.estimatedCostUsd || 0)}</Table.Td>
+              </Table.Tr>
+            ))}
+          </Table.Tbody>
+        </Table>
+      </Table.ScrollContainer>
+    </Card>
+  )
+}
+
+export function AnalyticsPage() {
+  const [data, setData] = useState<OcxUsageResponse | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [range, setRange] = useState<'all' | '30d' | '7d' | 'custom'>('7d')
+  const [surface, setSurface] = useState<'all' | 'codex' | 'claude' | 'grok'>('all')
+  const [since, setSince] = useState(() => localInput(new Date(Date.now() - 7 * 86_400_000)))
+  const [until, setUntil] = useState(() => localInput(new Date()))
+
+  useEffect(() => {
+    const sinceMs = range === 'custom' ? new Date(since).getTime() : undefined
+    const untilMs = range === 'custom' ? new Date(until).getTime() : undefined
+    if (range === 'custom' && (!Number.isFinite(sinceMs) || !Number.isFinite(untilMs) || sinceMs! >= untilMs!)) return
+    let active = true
+    setLoading(true)
+    api.getAnalyticsUsage({ range: range === 'custom' ? 'all' : range, surface, since: sinceMs, until: untilMs })
+      .then((result) => { if (active) setData(result) })
+      .catch((error: any) => { if (active) notifications.show({ color: 'red', message: error.message || '加载网关用量失败' }) })
+      .finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
+  }, [range, surface, since, until])
+
+  const summary = data?.summary || {}
+  const days = data?.days || []
+  const maxDayTokens = Math.max(1, ...days.map((day) => day.totalTokens))
+  const activeDays = days.filter((day) => day.requests > 0).length
+  const calendarDays = useMemo(() => [...days].sort((a, b) => a.date.localeCompare(b.date)), [days])
+  const cacheHitRate = summary.cacheObservedInputTokens ? summary.cacheReadInputTokens / summary.cacheObservedInputTokens : 0
+  const metrics = [
+    { label: '请求数', value: zhNumber.format(summary.requests || 0), detail: `共 ${zhNumber.format(summary.attemptCount || 0)} 次尝试`, icon: IconBolt, color: 'indigo' },
+    { label: '已计量', value: zhNumber.format(summary.measuredRequests || 0), detail: `${zhNumber.format(summary.reportedRequests || 0)} 次由提供方上报`, icon: IconCircleCheck, color: 'teal' },
+    { label: 'Token 总数', value: formatTokens(summary.totalTokens || 0), detail: `输入 ${formatTokens(summary.inputTokens || 0)} · 输出 ${formatTokens(summary.outputTokens || 0)}`, icon: IconChartHistogram, color: 'violet' },
+    { label: '缓存命中 Token', value: formatTokens(summary.cacheReadInputTokens || 0), detail: `缓存命中率 ${percent(cacheHitRate)}`, icon: IconDatabase, color: 'cyan' },
+    { label: '覆盖率', value: percent(summary.coverageRatio || 0), detail: `${zhNumber.format(summary.unreportedRequests || 0)} 个请求未上报用量`, icon: IconCircleCheck, color: 'blue' },
+    { label: '活跃天数', value: zhNumber.format(activeDays), detail: `当前范围共 ${days.length} 天`, icon: IconClock, color: 'grape' },
+    { label: 'API 标价折算', value: usd.format(summary.estimatedCostUsd || 0), detail: `${zhNumber.format(summary.pricedRequests || 0)} 个请求已计价`, icon: IconCoin, color: 'yellow' },
+    { label: '无法计费请求', value: zhNumber.format(summary.unpricedRequests || 0), detail: `${zhNumber.format(summary.unmeteredRequests || 0)} 个请求未计量`, icon: IconAlertTriangle, color: 'orange' },
+  ]
+
+  return (
+    <div style={{ height: '100%', overflowY: 'auto', padding: '16px 20px 36px', background: 'var(--astr-canvas-bg, #f8f9fb)' }}>
+      <Stack gap={12}>
+        <Group justify="space-between" align="center" wrap="wrap">
+          <Group gap="xs">
+            <Title order={3} style={{ fontSize: 17, fontWeight: 700, letterSpacing: '-0.02em' }}>用量与 Token 统计</Title>
+            <Badge size="xs" variant="light" color="indigo" radius="sm">网关实时数据</Badge>
+            <Text size="xs" c="dimmed">
+              {data?.generatedAt ? `更新于 ${new Date(data.generatedAt).toLocaleString('zh-CN')}` : '正在读取网关数据'}
+            </Text>
+          </Group>
+          <Group gap={8} wrap="wrap">
+            <SegmentedControl size="xs" value={surface} onChange={(value) => setSurface(value as typeof surface)} data={[
+              { label: '全部', value: 'all' }, { label: 'Codex', value: 'codex' }, { label: 'Claude', value: 'claude' }, { label: 'Grok', value: 'grok' },
+            ]} />
+            <SegmentedControl size="xs" value={range} onChange={(value) => setRange(value as typeof range)} data={[
+              { label: '可用历史', value: 'all' }, { label: '30 天', value: '30d' }, { label: '7 天', value: '7d' }, { label: '自定义', value: 'custom' },
+            ]} />
+          </Group>
+        </Group>
+
+        {range === 'custom' && (
+          <Group grow>
+            <TextInput type="datetime-local" label="开始时间" value={since} onChange={(event) => setSince(event.currentTarget.value)} />
+            <TextInput type="datetime-local" label="结束时间" value={until} onChange={(event) => setUntil(event.currentTarget.value)} />
+          </Group>
+        )}
+
+        {(data?.historyTruncated || data?.entriesTruncated) && (
+          <Alert color="yellow" icon={<IconAlertTriangle size={16} />} title="部分历史数据已截断">
+            已丢弃 {zhNumber.format(data.entriesDropped || 0)} 条记录，截断前缀 {formatTokens(data.truncatedPrefixBytes || 0)} 字节。
+          </Alert>
+        )}
+
+        <SimpleGrid cols={{ base: 1, sm: 2, md: 4 }} spacing="sm">
+          {metrics.map((metric) => {
+            const Icon = metric.icon
+            return <Card key={metric.label} p="sm" radius="md" withBorder style={{ background: 'var(--astr-surface, #fff)' }}>
+              <Group justify="space-between" align="center">
+                <Text size="xs" c="dimmed" fw={600}>{metric.label}</Text>
+                <ActionIcon size="sm" radius="md" color={metric.color} variant="subtle"><Icon size={15} /></ActionIcon>
+              </Group>
+              <Text fw={750} mt={2} style={{ fontFamily: 'ui-monospace, monospace', fontSize: 21, letterSpacing: '-0.02em' }}>
+                {loading ? <Skeleton height={24} width={80} /> : metric.value}
+              </Text>
+              <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--astr-border, #f1f5f9)' }}>
+                <Text size="xs" c="dimmed" style={{ fontSize: 11 }}>{metric.detail}</Text>
+              </div>
+            </Card>
+          })}
+        </SimpleGrid>
+
+        <Grid>
+          <Grid.Col span={{ base: 12, lg: range === '7d' ? 7 : 4 }}>
+            <Card withBorder radius="md" p="md" style={{ background: 'var(--astr-surface, #fff)', height: '100%' }}>
+              <Group justify="space-between" mb="sm">
+                <Group gap={6}><IconCalendarStats size={15} color="var(--astr-indigo, #6366f1)" /><Text fw={650} size="xs">{range === '7d' ? '每日活动' : '每日 Token 活动'}</Text></Group>
+                <Text size="xs" c="dimmed">活跃 {activeDays} 天</Text>
+              </Group>
+              {range === '7d' ? (
+                <DayBarsChart days={days} loading={loading} />
+              ) : loading ? <Skeleton height={112} /> : (
+                <div style={{ overflowX: 'auto', paddingBottom: 4 }}>
+                  <div style={{ display: 'flex', gap: 4, width: 'max-content', minWidth: '100%' }}>
+                    <div style={{ display: 'grid', gridTemplateRows: 'repeat(7, 11px)', gap: 3, paddingRight: 2 }}>
+                      {['日', '', '二', '', '四', '', '六'].map((label, index) => <span key={index} style={{ width: 12, fontSize: 9, lineHeight: '11px', color: label ? 'var(--astr-muted, #94a3b8)' : 'transparent' }}>{label || '·'}</span>)}
+                    </div>
+                    <div style={{ display: 'grid', gridAutoFlow: 'column', gridTemplateRows: 'repeat(7, 11px)', gridAutoColumns: '11px', gap: 3, width: 'max-content' }}>
+                      {calendarDays.map((day) => {
+                        const intensity = day.totalTokens / maxDayTokens
+                        const alpha = day.totalTokens ? 0.22 + intensity * 0.78 : 0.06
+                        return <Tooltip key={day.date} label={`${day.date} · ${formatTokens(day.totalTokens)} Token · ${day.requests} 次请求 · ${usd.format(day.estimatedCostUsd || 0)}`}>
+                          <span style={{ width: 11, height: 11, borderRadius: 2, background: `rgba(79, 70, 229, ${alpha})` }} />
+                        </Tooltip>
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )}
+              {range !== '7d' && (
+                <Group justify="space-between" mt="sm">
+                  <Text size="xs" c="dimmed">共 {days.length} 天 · {zhNumber.format(summary.requests || 0)} 次请求</Text>
+                  <Group gap={4}><Text size="xs" c="dimmed">较少</Text>{[0.08, 0.25, 0.5, 0.75, 1].map(value => <span key={value} style={{ width: 9, height: 9, borderRadius: 2, background: `rgba(79, 70, 229, ${value})` }} />)}<Text size="xs" c="dimmed">较多</Text></Group>
+                </Group>
+              )}
+            </Card>
+          </Grid.Col>
+          <Grid.Col span={{ base: 12, lg: range === '7d' ? 5 : 8 }}>
+            <Card withBorder radius="md" p="md" style={{ background: 'var(--astr-surface, #fff)', height: '100%' }}>
+              <Group justify="space-between" mb={6}><Group gap={6}><IconChartHistogram size={15} color="var(--astr-indigo, #6366f1)" /><Text fw={650} size="xs">计量覆盖与缓存</Text></Group><Badge size="xs" variant="light">{percent(summary.coverageRatio || 0)}</Badge></Group>
+              <Progress value={(summary.coverageRatio || 0) * 100} size={5} color="indigo" mb={6} />
+              <SimpleGrid cols={2} spacing={0}>
+                {[
+                  ['已计量', summary.measuredRequests], ['提供方上报', summary.reportedRequests], ['估算', summary.estimatedRequests], ['未上报', summary.unreportedRequests],
+                  ['发送 / 已结算', `${zhNumber.format(summary.sends || 0)} / ${zhNumber.format(summary.settledSends || 0)}`], ['缓存合成请求', summary.cacheSynthesizedRequests],
+                  ['缓存未知请求', summary.cacheUnknownRequests], ['推理输出 Token', formatTokens(summary.reasoningOutputTokens || 0)],
+                ].map(([label, value]) => <Group key={label as string} justify="space-between" gap="xs" py={6} px={8} style={{ borderBottom: '1px solid var(--astr-border, #f1f5f9)' }}><Text size="xs" c="dimmed">{label}</Text><Text size="xs" fw={650}>{typeof value === 'number' ? zhNumber.format(value) : value}</Text></Group>)}
+              </SimpleGrid>
+            </Card>
+          </Grid.Col>
+        </Grid>
+
+        <BreakdownTable title="模型用量" rows={data?.models || []} showModel />
+        <BreakdownTable title="提供方用量" rows={data?.providers || []} />
+
+        <Card withBorder radius="md" p="md" style={{ background: 'var(--astr-surface, #fff)' }}>
+          <Text fw={650} size="sm" mb="sm">账号用量</Text>
+          <Table.ScrollContainer minWidth={760}>
+            <Table striped highlightOnHover verticalSpacing="xs">
+              <Table.Thead><Table.Tr><Table.Th>账号</Table.Th><Table.Th ta="right">请求</Table.Th><Table.Th ta="right">已计量 / 未计量</Table.Th><Table.Th ta="right">Token</Table.Th><Table.Th ta="right">缓存读取</Table.Th><Table.Th ta="right">用量覆盖率</Table.Th><Table.Th ta="right">计价覆盖率</Table.Th><Table.Th ta="right">标价折算</Table.Th></Table.Tr></Table.Thead>
+              <Table.Tbody>
+                {(data?.accounts || []).map((account) => <Table.Tr key={account.accountLogLabel}>
+                  <Table.Td><Group gap={6}><Text size="sm" fw={600}>{account.accountLogLabel}</Text>{account.ambiguous && <Badge size="xs" color="yellow">不明确</Badge>}</Group></Table.Td>
+                  <Table.Td ta="right">{zhNumber.format(account.requests)}</Table.Td>
+                  <Table.Td ta="right">{zhNumber.format(account.measuredAttempts)} / {zhNumber.format(account.unmeteredAttempts)}</Table.Td>
+                  <Table.Td ta="right">{formatTokens(account.totalTokens)}</Table.Td>
+                  <Table.Td ta="right">{formatTokens(account.cacheReadInputTokens)}</Table.Td>
+                  <Table.Td ta="right">{percent(account.usageCoverageRatio)}</Table.Td>
+                  <Table.Td ta="right">{percent(account.priceCoverageRatio)}</Table.Td>
+                  <Table.Td ta="right">{usd.format(account.estimatedCostUsd || 0)}</Table.Td>
+                </Table.Tr>)}
+              </Table.Tbody>
+            </Table>
+          </Table.ScrollContainer>
+        </Card>
+      </Stack>
+    </div>
+  )
+}

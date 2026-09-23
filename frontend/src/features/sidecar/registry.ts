@@ -14,6 +14,7 @@ import { monacoViewer } from './viewers/monaco'
 import { xtermViewer } from './viewers/terminal'
 import { threeViewer } from './viewers/three'
 import { blackboardViewer } from './viewers/blackboard'
+import { browserMirrorViewer } from './viewers/browser'
 
 const NON_PREVIEWABLE_EXTENSIONS = /\.(?:exe|dll|msi|msix|appx|com|bin|so|dylib|a|o|obj|class|jar|war|wasm|zip|7z|rar|gz|bz2|xz|tar|pdf|docx|xlsx|pptx|woff2?|ttf|otf)$/i
 
@@ -28,6 +29,7 @@ class ArtifactViewerRegistry {
   constructor() {
     // 插件自声明式注册
     this.register(blackboardViewer)
+    this.register(browserMirrorViewer)
     this.register(drawioViewer)
     this.register(mermaidViewer)
     this.register(excalidrawViewer)

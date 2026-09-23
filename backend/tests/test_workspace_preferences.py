@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from astrorder.config import Settings
+from astrorder.llm_config import set_llm_config
 from astrorder.store import Store
 from astrorder.workspace_preferences import router
 
@@ -11,6 +12,7 @@ def test_preferences_persist_across_devices_and_import_never_overwrites(tmp_path
     app = FastAPI()
     app.state.settings = settings
     app.state.store = Store(settings)
+    set_llm_config(app.state.store, {"base_url": "https://model.example/v1", "api_key": "secret", "model": "fast", "reasoning": "low"})
     app.include_router(router)
     path = "/api/v1/preferences"
     with TestClient(app) as desktop, TestClient(app) as phone:
@@ -24,6 +26,7 @@ def test_preferences_persist_across_devices_and_import_never_overwrites(tmp_path
         legacy = {"appearance": {"project:a\u0000b": {"icon": "cloud", "color": "orange"}}, "session_pins": {"a\u0000session": True}, "pinned_projects": ["p"], "project_order": ["p", "q"]}
         assert desktop.post(path + "/import", json=legacy).json() == legacy
         assert phone.get(path).json() == legacy
+        assert "services" not in phone.get(path).json()
         assert phone.patch(path, json={"session_pins": {"other": True}}).json()["session_pins"] == {"a\u0000session": True, "other": True}
         removed = {"appearance": {"project:a\u0000b": None}, "session_pins": {"a\u0000session": False}, "pinned_projects": [], "project_order": ["q", "p"]}
         desktop.patch(path, json=removed)

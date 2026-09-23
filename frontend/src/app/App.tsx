@@ -14,6 +14,7 @@ import { GroupsPage } from '../features/chat/GroupsPage'
 import { MonitorPage } from '../features/monitor/MonitorPage'
 import { SwarmPage } from '../features/monitor/SwarmPage'
 import { PluginsPage } from '../features/plugins/PluginsPage'
+import { AnalyticsPage } from '../features/analytics/AnalyticsPage'
 import { AstrorderLoader } from '../components/AnimatedStatus'
 import { ShinyText } from '../components/animations/ShinyText'
 
@@ -99,6 +100,7 @@ function AuthenticatedApp() {
         <Route path="monitor" element={<MonitorPage />} />
         <Route path="swarm" element={<SwarmPage />} />
         <Route path="plugins" element={<PluginsPage />} />
+        <Route path="analytics" element={<AnalyticsPage />} />
         <Route path="*" element={<Navigate to="/chat" replace />} />
       </Route>
     </Routes>

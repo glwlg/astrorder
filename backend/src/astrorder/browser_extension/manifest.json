@@ -1,0 +1,8 @@
+{
+  "manifest_version": 3,
+  "name": "Astrorder Session Tabs",
+  "version": "1.0.0",
+  "permissions": ["tabs", "tabGroups", "scripting"],
+  "host_permissions": ["http://*/*", "https://*/*"],
+  "background": { "service_worker": "service-worker.js" }
+}

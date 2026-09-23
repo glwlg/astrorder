@@ -708,11 +708,17 @@ export function MonitorPage() {
         seen.add(key)
       }
     }
+    // 对于不在 slotOrder 中的新加入会话，追加在末尾，同时按进入顺序固定
+    const unpinned: Session[] = []
     for (const s of candidateSessions) {
       const k = scopeKey(s.agent_id, s.id)
       if (!seen.has(k)) {
-        result.push(s)
+        unpinned.push(s)
       }
+    }
+    if (unpinned.length > 0) {
+      // 避免按 updated_at 动态重排；一旦出现未排序的新卡片，追加在末尾
+      result.push(...unpinned)
     }
     return result
   }, [candidateSessions, slotOrder])
@@ -721,6 +727,18 @@ export function MonitorPage() {
   const gridVisibleSessions = useMemo(() => {
     return orderedSessions.filter((s) => !s.parent_session_id && !s.parent_session_key)
   }, [orderedSessions])
+
+  // 监听并固化顺序，防止任何会话因为 updated_at 改变而前后乱跳
+  useEffect(() => {
+    if (gridVisibleSessions.length > 0) {
+      const currentKeys = gridVisibleSessions.map(s => scopeKey(s.agent_id, s.id))
+      // 检查当前显示的会话是否有未记录在 slotOrder 中的
+      const missing = currentKeys.filter(k => !slotOrder.includes(k))
+      if (missing.length > 0) {
+        saveNewOrder([...slotOrder, ...missing])
+      }
+    }
+  }, [gridVisibleSessions, slotOrder])
 
   const candidates = useMemo(() => {
     const shown = new Set(gridVisibleSessions.map(session => scopeKey(session.agent_id, session.id)))
@@ -731,11 +749,15 @@ export function MonitorPage() {
   const saveManual = (next: string[]) => {
     setManualKeys(next)
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(next)) } catch {}
+    // 同步固化到 slotOrder，确保无论怎么刷新或触发更新，顺序保持稳定
+    saveNewOrder(Array.from(new Set([...slotOrder, ...next])))
   }
 
   const saveAutomatic = (next: string[]) => {
     setAutoKeys(next)
     try { localStorage.setItem(AUTO_STORAGE_KEY, JSON.stringify(next)) } catch {}
+    // 同步固化到 slotOrder
+    saveNewOrder(Array.from(new Set([...slotOrder, ...next])))
   }
 
   const saveExcluded = (next: string[]) => {

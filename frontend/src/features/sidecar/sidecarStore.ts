@@ -461,7 +461,7 @@ export const useSidecarStore = create<SidecarState>()(persist((set, get) => ({
         type: 'artifact',
         title: '浏览器',
         artifact: browserArtifact,
-        viewerId: 'html-viewer',
+        viewerId: 'browser-mirror-viewer',
         closable: true,
       }
       set({

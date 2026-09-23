@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from collections.abc import Callable
-from typing import Any
 from pathlib import Path
-import re
+from typing import Any
 
 from .agent_cli import invoke_remote
 from .agent_gateway import CAPABILITIES, AgentApiError
@@ -24,12 +24,59 @@ def capability_id(name: str) -> str:
     return name.replace("_", ".")
 
 
+def _infer_schema_property(desc: str) -> dict[str, Any]:
+    text = desc.lower()
+    prop: dict[str, Any] = {"description": desc}
+    # 优先识别显式的 string/text 或者包含 (string, object, array, or number) 的通用 payload
+    if "string, object, array, or number" in text or "data payload" in text:
+        return prop  # 开放类型，允许任意 JSON 数据结构
+    if re.search(r"\b(boolean|bool)\b", text):
+        prop["type"] = "boolean"
+    elif re.search(r"\b(integer|int|percentage)\b", text):
+        prop["type"] = "integer"
+    elif re.search(r"\b(number|float)\b", text):
+        prop["type"] = "number"
+    elif re.search(r"\b(list|array)\b", text):
+        prop["type"] = "array"
+    elif re.search(r"\b(object|dict|key-value)\b", text):
+        prop["type"] = "object"
+    else:
+        prop["type"] = "string"
+    return prop
+
+
+def build_input_schema(raw_input: Any) -> dict[str, Any]:
+    if not isinstance(raw_input, dict) or not raw_input:
+        return {"type": "object", "properties": {}}
+
+    properties: dict[str, Any] = {}
+    required: list[str] = []
+
+    for key, desc in raw_input.items():
+        desc_str = str(desc)
+        properties[key] = _infer_schema_property(desc_str)
+        is_optional = any(
+            opt in desc_str.lower()
+            for opt in ("optional", "or omit", "defaults to", "default:", "default automatically")
+        )
+        if not is_optional:
+            required.append(key)
+
+    schema: dict[str, Any] = {
+        "type": "object",
+        "properties": properties,
+    }
+    if required:
+        schema["required"] = required
+    return schema
+
+
 def tools() -> list[dict[str, Any]]:
     return [
         {
             "name": tool_name(item["id"]),
             "description": item["summary"],
-            "inputSchema": {"type": "object", "additionalProperties": True},
+            "inputSchema": build_input_schema(item.get("input")),
         }
         for item in CAPABILITIES
     ]
@@ -60,10 +107,16 @@ def handle_rpc(message: dict[str, Any], invoker: Invoker) -> dict[str, Any] | No
         arguments = params.get("arguments") if isinstance(params.get("arguments"), dict) else {}
         try:
             data = invoker(capability_id(name), arguments)
+            payload = dict(data)
+            screenshot = payload.pop("screenshot", None)
+            mime_type = payload.pop("mime_type", "image/jpeg")
+            content = [{"type": "text", "text": json.dumps(payload, ensure_ascii=False)}]
+            if isinstance(screenshot, str) and screenshot:
+                content.append({"type": "image", "data": screenshot, "mimeType": mime_type})
             return {
                 "jsonrpc": "2.0",
                 "id": ident,
-                "result": {"content": [{"type": "text", "text": json.dumps(data, ensure_ascii=False)}]},
+                "result": {"content": content},
             }
         except AgentApiError as exc:
             return {"jsonrpc": "2.0", "id": ident, "error": {"code": -32000, "message": exc.message}}
@@ -78,11 +131,11 @@ def ensure_url_mcp_yaml(config_path: Path, url: str, token: str) -> None:
     if not token or not config_path.is_file():
         return
     text = config_path.read_text(encoding="utf-8")
-    if "api/v1/agent/mcp" in text and re.search(r"^  astrorder:", text, re.M):
+    if "api/v1/agent/mcp" in text and re.search(r"^  astrorder:", text, re.MULTILINE):
         return
-    block = f"  astrorder:\n    url: {url}\n    headers:\n      Authorization: Bearer {token}\n"
-    if re.search(r"^mcp_servers:\s*$", text, re.M):
-        text = re.sub(r"^mcp_servers:\s*$", "mcp_servers:\n" + block.rstrip(), text, count=1, flags=re.M)
+    block = f"  astrorder:\n    url: {url}\n    headers:\n      Authorization: Bearer ***"
+    if re.search(r"^mcp_servers:\s*$", text, re.MULTILINE):
+        text = re.sub(r"^mcp_servers:\s*$", "mcp_servers:\n" + block.rstrip(), text, count=1, flags=re.MULTILINE)
         if not text.endswith("\n"):
             text += "\n"
     else:

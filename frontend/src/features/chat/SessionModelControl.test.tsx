@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { api } from '../../api/client'
-import { SessionModelControl } from './SessionModelControl'
+import { SessionModelControl, summarizeQuota } from './SessionModelControl'
 import { REASONING_EFFORTS } from './composerMedia'
 
 const session = {
@@ -29,6 +29,47 @@ it('offers exactly the five enabled thinking levels', () => {
     { value: 'xhigh', label: '超高' },
     { value: 'max', label: '最高' },
   ])
+})
+
+it('summarizes model quota health accurately and defensively', () => {
+  expect(summarizeQuota(null)).toBeNull()
+  expect(summarizeQuota({ model: 'm', providers: [], reports: [], accounts: [] })).toBeNull()
+
+  // Provider report with high remaining
+  expect(summarizeQuota({
+    model: 'gemini-3.8-flash',
+    providers: ['google-antigravity'],
+    reports: [{ provider: 'google-antigravity', label: 'Google', quota: { weeklyPercent: 25 } }],
+    accounts: [],
+  })).toEqual({
+    status: 'healthy',
+    label: '余75%',
+    detail: 'Google 配额充裕 (余 75%)',
+  })
+
+  // Accounts with tight quota
+  expect(summarizeQuota({
+    model: 'gpt-5.6-sol',
+    providers: ['openai'],
+    reports: [],
+    accounts: [{ id: 'acc1', paused: false, quota: { weeklyPercent: 88 } }],
+  })).toEqual({
+    status: 'tight',
+    label: '余12%',
+    detail: '最佳账号剩余 12%',
+  })
+
+  // Accounts all exhausted/paused
+  expect(summarizeQuota({
+    model: 'gpt-5.6-sol',
+    providers: ['openai'],
+    reports: [],
+    accounts: [{ id: 'acc1', paused: true, quota: { weeklyPercent: 50 } }],
+  })).toEqual({
+    status: 'exhausted',
+    label: '不可用',
+    detail: '所有账号已暂停或暂无额度',
+  })
 })
 
 it('desktop shows the bound native model and switches the exact session', async () => {

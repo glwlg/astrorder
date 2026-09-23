@@ -520,9 +520,38 @@ class CodexDaemonRuntime:
         if action == "session.send":
             return await self._send(session_id, owned, request)
         if action == "session.compact":
-            await asyncio.to_thread(
-                owned.client.request, "thread/compact/start", {"threadId": session_id}
-            )
+            model = request.get("model")
+            if isinstance(model, str) and model:
+                try:
+                    await asyncio.to_thread(
+                        owned.client.request, "thread/settings/update", {"threadId": session_id, "model": model}
+                    )
+                except Exception:
+                    pass
+            try:
+                await asyncio.to_thread(
+                    owned.client.request, "thread/compact/start", {"threadId": session_id}
+                )
+            except Exception as exc:
+                # 如果原模型额度耗尽(429/quota)或断开，尝试使用高可用长上下文模型兜底压缩
+                err_str = str(exc).lower()
+                if any(kw in err_str for kw in ("quota", "429", "rate limit", "disconnected", "connection")):
+                    fallback_model = "gemini-3.8-flash"
+                    try:
+                        await asyncio.to_thread(
+                            owned.client.request, "thread/settings/update", {"threadId": session_id, "model": fallback_model}
+                        )
+                        await asyncio.to_thread(
+                            owned.client.request, "thread/compact/start", {"threadId": session_id}
+                        )
+                        if isinstance(model, str) and model:
+                            await asyncio.to_thread(
+                                owned.client.request, "thread/settings/update", {"threadId": session_id, "model": model}
+                            )
+                    except Exception:
+                        raise exc
+                else:
+                    raise exc
             return {"status": "idle", "completed": True}
         if action == "session.review":
             instructions = request.get("instructions")
@@ -570,6 +599,15 @@ class CodexDaemonRuntime:
                 self._catalog_client = None
                 self._catalog_initialized = None
         await asyncio.gather(*(asyncio.to_thread(client.stop) for client in clients))
+
+    async def reload_config(self) -> None:
+        """Drop only the idle catalog client so the next session reads the new config."""
+        with self._lock:
+            client = self._catalog_client
+            self._catalog_client = None
+            self._catalog_initialized = None
+        if client is not None:
+            await asyncio.to_thread(client.stop)
 
     async def _send(
         self,
@@ -886,9 +924,7 @@ def _validate_input(inputs: Any) -> None:
             value = item.get("url")
             if not isinstance(value, str) or not value.startswith("data:"):
                 raise DaemonProtocolError("Codex media input must use an inline data URL")
-        elif kind in {"mention", "skill", "file", "directory", "resource"}:
-            pass
-        elif isinstance(kind, str) and kind:
+        elif kind in {"mention", "skill", "file", "directory", "resource"} or isinstance(kind, str) and kind:
             pass
         else:
             raise DaemonProtocolError("Codex input type is unsupported")

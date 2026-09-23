@@ -298,3 +298,63 @@ def test_handoff_can_be_cancelled(tmp_path):
         assert response.status_code == 200
         assert response.json() == {"cancelled": True}
         assert event.is_set()
+
+
+def test_remote_same_machine_handoff_allowed_and_cross_machine_rejected(tmp_path, monkeypatch):
+    app = create_app(
+        Settings(
+            database_url=f"sqlite:///{tmp_path / 'handoff-remote.sqlite3'}",
+            attachments_dir=tmp_path / "attachments",
+            browser_secret="browser-test",
+            auto_connect_local_hermes=False,
+        )
+    )
+
+    with TestClient(app) as client:
+        store = app.state.store
+        store.upsert_agent({"id": "remote-codex", "name": "Remote Codex", "kind": "codex", "status": "ready", "connection_id": "conn-1"})
+        store.upsert_agent({"id": "remote-hermes", "name": "Remote Hermes", "kind": "hermes", "status": "ready", "connection_id": "conn-1"})
+        store.upsert_agent({"id": "other-hermes", "name": "Other Hermes", "kind": "hermes", "status": "ready", "connection_id": "conn-2"})
+        store.upsert_session({"id": "remote-sess-1", "agent_id": "remote-codex", "title": "Remote Session", "status": "idle", "updated_at": "2026-09-23T10:00:00Z"})
+        # 1. 跨机器转交应拒绝 (422)
+        resp_cross = client.post(
+            "/api/v1/sessions/remote-sess-1/handoff",
+            json={
+                "operation_id": "op-cross",
+                "source_agent_id": "remote-codex",
+                "target_agent_id": "other-hermes",
+            },
+            headers={"Authorization": "Bearer browser-test"},
+        )
+        assert resp_cross.status_code == 422
+        assert "同一台机器" in resp_cross.json()["detail"]
+
+        # 2. 同机器远程转交应允许通过机器校验
+        summarized = []
+        async def fake_summarize(*args, **kwargs):
+            summarized.append(True)
+            return "Remote summary"
+
+        from astrorder import api as api_module
+        monkeypatch.setattr(api_module, "_summarize_handoff", fake_summarize)
+        monkeypatch.setattr(api_module, "create_session", lambda payload, req: {
+            "id": "target-remote-sess",
+            "agent_id": payload.agent_id,
+            "title": payload.title,
+            "status": "idle",
+            "updated_at": "2026-09-23T10:01:00Z",
+        })
+
+        resp_same = client.post(
+            "/api/v1/sessions/remote-sess-1/handoff",
+            json={
+                "operation_id": "op-same",
+                "source_agent_id": "remote-codex",
+                "target_agent_id": "remote-hermes",
+                "provider": "anthropic",
+                "model": "claude-3-5-sonnet",
+            },
+            headers={"Authorization": "Bearer browser-test"},
+        )
+        assert resp_same.status_code == 200
+        assert summarized == [True]

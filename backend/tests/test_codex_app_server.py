@@ -82,6 +82,9 @@ def test_rpc_rejection_preserves_native_reason_without_exposing_credential_value
     })
 
     assert 'Missing environment variable: OPENCODEX_API_AUTH_TOKEN.' in str(error)
+    assert str(CodexRpcRejected({'code': -32603, 'message': 'Internal error'}, 'Grok')) == (
+        'Grok rejected request (-32603; Internal error)'
+    )
 
 
 def test_transport_close_error_keeps_sanitized_remote_stderr(tmp_path):

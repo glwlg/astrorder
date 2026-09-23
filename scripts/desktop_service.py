@@ -159,14 +159,9 @@ def install_startup_task() -> None:
 
 
 def start_daemon(environment: dict[str, str], port: int, secret: str) -> dict[str, Any]:
-    task_state = startup_task_state()
     current = daemon_status(port, secret)
     if current["state"] == "running":
         return current
-    if task_state == "not_installed":
-        raise RuntimeError("小内核登录启动尚未设置")
-    if task_state != "installed":
-        raise RuntimeError("无法读取小内核登录启动任务")
     _, runtime_args = production_daemon_spec(environment)
     start_independent_daemon(port=port, runtime_args=runtime_args)
     deadline = time.monotonic() + 30

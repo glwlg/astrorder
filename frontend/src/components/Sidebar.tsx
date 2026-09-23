@@ -1,4 +1,4 @@
-import { IconAdjustments, IconDeviceDesktop, IconLayoutDashboard, IconMessageCircle, IconPuzzle, IconSettings, IconTopologyStarRing, IconUsers, IconWorld } from '@tabler/icons-react'
+import { IconAdjustments, IconBrain, IconChartHistogram, IconDeviceDesktop, IconLayoutDashboard, IconMessageCircle, IconPuzzle, IconSettings, IconTopologyStarRing, IconUsers, IconWorld } from '@tabler/icons-react'
 import { ActionIcon, Modal, NavLink, Stack, Tabs, Text, Tooltip } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useState } from 'react'
@@ -8,6 +8,7 @@ import { AgentsPage } from '../features/agents/AgentsPage'
 import { PluginsPage } from '../features/plugins/PluginsPage'
 import { NetworkSettingsPage } from '../features/network/NetworkSettingsPage'
 import { DesktopSettingsPage } from '../features/services/DesktopSettingsPage'
+import { ModelGatewaySettingsPage } from '../features/services/ModelGatewaySettingsPage'
 import { SessionRail } from './SessionRail'
 import { BotGroupRail } from './BotGroupRail'
 import { SwarmRootRail } from './SwarmRootRail'
@@ -17,6 +18,7 @@ const navItems = [
   { to: '/monitor', label: '监控室', icon: IconLayoutDashboard, id: 'monitor' },
   { to: '/swarm', label: '星图', icon: IconTopologyStarRing, id: 'swarm' },
   { to: '/groups', label: '群聊', icon: IconUsers, id: 'groups' },
+  { to: '/analytics', label: '统计', icon: IconChartHistogram, id: 'analytics' },
 ]
 
 function addSessionToMonitor(sessionKey: string, title?: string) {
@@ -66,7 +68,8 @@ export function Sidebar({
   const isSwarm = location.pathname.startsWith('/swarm')
   const isGroups = location.pathname.startsWith('/groups') || location.pathname.startsWith('/chat/group-')
   const isMonitorRoute = location.pathname.startsWith('/monitor')
-  const isChat = !isSwarm && !isGroups && !isMonitorRoute
+  const isAnalytics = location.pathname.startsWith('/analytics')
+  const isChat = !isSwarm && !isGroups && !isMonitorRoute && !isAnalytics
 
   return (
     <>
@@ -79,6 +82,7 @@ export function Sidebar({
                 (id === 'swarm' && isSwarm) ||
                 (id === 'groups' && isGroups) ||
                 (id === 'monitor' && isMonitorRoute) ||
+                (id === 'analytics' && isAnalytics) ||
                 (id === 'chat' && isChat)
               return (
                 <Tooltip key={to} label={label} position="bottom" withArrow openDelay={200}>
@@ -172,11 +176,13 @@ export function Sidebar({
         <Tabs defaultValue="connections" keepMounted={true} className="settings-tabs">
           <Tabs.List>
             <Tabs.Tab value="connections" leftSection={<IconAdjustments size={16} />}>连接</Tabs.Tab>
+            <Tabs.Tab value="models" leftSection={<IconBrain size={16} />}>模型与网关</Tabs.Tab>
             <Tabs.Tab value="network" leftSection={<IconWorld size={16} />}>网络与移动端</Tabs.Tab>
             <Tabs.Tab value="desktop" leftSection={<IconDeviceDesktop size={16} />}>桌面客户端</Tabs.Tab>
             <Tabs.Tab value="plugins" leftSection={<IconPuzzle size={16} />}>插件</Tabs.Tab>
           </Tabs.List>
           <Tabs.Panel value="connections" className="settings-tab-panel"><AgentsPage /></Tabs.Panel>
+          <Tabs.Panel value="models" className="settings-tab-panel"><ModelGatewaySettingsPage /></Tabs.Panel>
           <Tabs.Panel value="network" className="settings-tab-panel"><NetworkSettingsPage /></Tabs.Panel>
           <Tabs.Panel value="desktop" className="settings-tab-panel"><DesktopSettingsPage /></Tabs.Panel>
           <Tabs.Panel value="plugins" className="settings-tab-panel"><PluginsPage /></Tabs.Panel>

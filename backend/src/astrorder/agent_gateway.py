@@ -135,13 +135,29 @@ CAPABILITIES: list[dict[str, Any]] = [
     },
     {
         "id": "browser.run",
-        "summary": "Run a bounded browser task in the current visible Edge window using Jev. Later calls continue the same page and login state unless reset is true. Returns the final visible page state and action trace.",
+        "summary": "Run a bounded browser task in this Astrorder session's visible Edge tab using Jev. Later calls continue that tab and login state unless reset is true.",
         "input": {
             "url": "initial http/https page URL",
             "goal": "complete browser goal with a visible completion condition",
             "inputs": "optional object mapping visible field labels to exact values to type",
             "max_steps": "optional action limit (default 30, maximum 60)",
-            "reset": "optional boolean; open a fresh browser window instead of continuing the current page",
+            "reset": "optional boolean; replace this session's browser tab without affecting other sessions",
+            "include_screenshot": "optional boolean; return the final browser screenshot to the agent",
+            "session_key": "calling Astrorder session key (agent_id::session_id); required when more than one session is active",
+        },
+    },
+    {
+        "id": "browser.screenshot",
+        "summary": "Capture this Astrorder session's browser tab and return it as an image.",
+        "input": {"session_key": "calling Astrorder session key (agent_id::session_id)"},
+    },
+    {
+        "id": "browser.cdp",
+        "summary": "Call a Chrome DevTools Protocol method on this Astrorder session's own browser tab.",
+        "input": {
+            "session_key": "calling Astrorder session key (agent_id::session_id)",
+            "method": "CDP method in Runtime, DOM, CSS, Console, Log, Network, Performance, or Page",
+            "params": "optional CDP parameters object",
         },
     },
     {
@@ -183,27 +199,30 @@ CAPABILITIES: list[dict[str, Any]] = [
     },
     {
         "id": "blackboard.get",
-        "summary": "Read shared mission state, specifications or facts from the Astrorder Blackboard.",
+        "summary": "【星序作战黑板-读取】读取共享任务状态、规格事实、共享记忆或工件（Blackboard）。当用户提到“查看黑板”、“读取黑板”、“黑板里有什么”时，直接调用本工具。严禁使用 Python 脚本读写源码或数据库。Read shared mission state, specifications or facts from the Astrorder Blackboard.",
         "input": {
+            "session_key": "专属会话作用域标识（传入上下文提示中的会话 ID，如单聊 'agent_id::session_id'、群聊 'group::group_id' 或星图 'swarm::root_key'）",
             "key": "specific blackboard key, or omit to list all keys",
-            "namespace": "optional namespace scope (default: current session, group or swarm)"
+            "namespace": "optional custom namespace scope override (default: resolved from session_key)",
         },
     },
     {
         "id": "blackboard.set",
-        "summary": "Write or publish shared mission state, specs or artifacts to Astrorder Blackboard. To render rich Generative UI for humans, call blackboard_components_list to discover components, then blackboard_component_schema for exact field schemas and examples.",
+        "summary": "【星序作战黑板-写入/发布】将任务状态、结构化事实、备忘录、分析结论或工件写入星序作战黑板（Blackboard）。当用户指示“写到黑板”、“记入黑板”、“更新黑板”、“同步到黑板”时，必须直接调用本工具。强烈建议在 value 中显式声明 component 属性以呈现精美 Generative UI（如 'StepTimeline' 流水线、'Checklist' 验收清单、'DataTable' 表格、'MetricGrid' 指标卡、'GomokuBoard' 棋盘），未声明时系统将通过 Jev 决策模型自动推断选择最优组件补全。",
         "input": {
+            "session_key": "专属会话作用域标识（传入上下文提示中的会话 ID，如单聊 'agent_id::session_id'、群聊 'group::group_id' 或星图 'swarm::root_key'）",
             "key": "blackboard key",
-            "value": "data payload (string, object, array, or number)",
-            "namespace": "optional namespace scope (default: current session, group or swarm)"
+            "value": "data payload (object, array, string). Recommend specifying {'component': 'StepTimeline'|'Checklist'|'DataTable'|'MetricGrid'|..., ...} for rich UI presentation",
+            "namespace": "optional custom namespace scope override (default: resolved from session_key)",
         },
     },
     {
         "id": "blackboard.delete",
-        "summary": "Delete a key from the Astrorder Blackboard.",
+        "summary": "【星序作战黑板-删除】从作战黑板中删除指定的 key 或清空当前命名空间。Delete a key from the Astrorder Blackboard.",
         "input": {
+            "session_key": "专属会话作用域标识（传入上下文提示中的会话 ID，如单聊 'agent_id::session_id'、群聊 'group::group_id' 或星图 'swarm::root_key'）",
             "key": "blackboard key to delete, or '*' / clean_namespace: true to wipe space",
-            "namespace": "optional namespace scope (default automatically resolved)"
+            "namespace": "optional custom namespace scope override (default: resolved from session_key)",
         },
     },
     {
@@ -1061,16 +1080,33 @@ def _resolve_blackboard_ns(payload: dict[str, Any], ctx: AgentContext) -> str:
     if val and val not in {"global", "default", "session:default"}:
         if not val.startswith("session:"):
             return val
-        session_ref = val[len("session:"):]
-        if "::" in session_ref:
+        session_ref = val[len("session:"):].strip()
+        if not session_ref:
+            # 如果只传了 "session:" 或空后缀，回退到上下文默认会话命名空间
+            pass
+        elif "::" in session_ref:
             aid, sid = session_ref.split("::", 1)
+            return ctx.store.get_session_blackboard_namespace(aid, sid) or f"session:{aid}::{sid}"
         else:
             aid = str(payload.get("caller_agent_id") or payload.get("agent_id") or "")
             found = ctx.store.get_session(aid, session_ref) if aid else ctx.store.find_session_by_id(session_ref)
             if not found:
-                raise AgentApiError("not_found", f"Session '{session_ref}' was not found")
+                # 容错：如果未找到确切会话，直接以 session_ref 作为命名空间 key，避免抛出 500 崩溃
+                return f"session:{session_ref}"
             aid, sid = str(found["agent_id"]), str(found["id"])
-        return ctx.store.get_session_blackboard_namespace(aid, sid) or f"session:{aid}::{sid}"
+            return ctx.store.get_session_blackboard_namespace(aid, sid) or f"session:{aid}::{sid}"
+
+    raw_sk = payload.get("session_key")
+    if isinstance(raw_sk, str) and raw_sk.strip():
+        sk = raw_sk.strip()
+        if sk.startswith("group::"):
+            return f"group:{sk[len('group::'):]}"
+        if sk.startswith("swarm::"):
+            return f"swarm:{sk[len('swarm::'):]}"
+        if "::" in sk:
+            aid, sid = sk.split("::", 1)
+            return ctx.store.get_session_blackboard_namespace(aid, sid) or f"session:{sk}"
+        return f"session:{sk}"
 
     group_id = payload.get("group_id")
     if isinstance(group_id, str) and group_id.strip():
@@ -1145,6 +1181,43 @@ def _blackboard_set(payload: dict[str, Any], ctx: AgentContext) -> dict[str, Any
     key = key.strip()
     ns = _resolve_blackboard_ns(payload, ctx)
     value = payload.get("value")
+
+    # Jev 后置判定与自适应组件补全：如果传入的是纯文本、无 component 标记的 dict，通过 Jev / 智能推断自动补全标准结构
+    if isinstance(value, dict) and "component" not in value and "type" not in value:
+        try:
+            from .jev_client import evaluate_blackboard_component
+            content_repr = json.dumps(value, ensure_ascii=False)
+            eval_res = evaluate_blackboard_component(content_repr, store=ctx.store)
+            recommended_comp = eval_res.get("component")
+            if recommended_comp and recommended_comp != "StatusCard":
+                # 智能注入 component 标记
+                value = {"component": recommended_comp, **value}
+        except Exception:
+            # 优雅降级：纯规则自适应推断
+            if any(k in value for k in ("steps", "pipeline", "stages", "milestones")):
+                value = {"component": "StepTimeline", **value}
+            elif any(k in value for k in ("items", "checklist", "todos", "tasks")):
+                items = value.get("items") or value.get("checklist") or value.get("todos") or value.get("tasks")
+                if isinstance(items, list) and any(isinstance(it, dict) and any(f in it for f in ("status", "done", "completed")) for it in items):
+                    value = {"component": "StepTimeline", **value}
+                else:
+                    value = {"component": "Checklist", **value}
+            elif any(k in value for k in ("metrics", "counters", "stats", "kpi")):
+                value = {"component": "MetricGrid", **value}
+            elif any(k in value for k in ("rows", "records", "data")) and isinstance(value.get("rows") or value.get("records") or value.get("data"), list):
+                value = {"component": "DataTable", **value}
+            elif any(k in value for k in ("endpoints", "apis", "routes")) and isinstance(value.get("endpoints") or value.get("apis") or value.get("routes"), list):
+                value = {"component": "ApiEndpointsCard", **value}
+    elif isinstance(value, str) and len(value.strip()) > 0:
+        # 如果 Agent 直接传了长文本字符串，尝试用 Jev 判定自动结构化渲染为卡片
+        try:
+            from .jev_client import evaluate_blackboard_component
+            eval_res = evaluate_blackboard_component(value.strip(), store=ctx.store)
+            comp = eval_res.get("component") or "StatusCard"
+            value = {"component": comp, "title": key.replace("_", " ").title(), "content": value.strip()}
+        except Exception:
+            pass
+
     from sqlalchemy.dialects.sqlite import insert
     from .models import WorkspacePreferenceRow
 
@@ -1161,6 +1234,34 @@ def _blackboard_set(payload: dict[str, Any], ctx: AgentContext) -> dict[str, Any
             session_id=None,
             data={"action": "set", "namespace": ns, "key": key, "value": value},
         )
+        # 若写入群聊黑板，向群聊历史中追加轻量系统事件，使其他群成员 Agent 在后续轮次即时获知
+        if ns.startswith("group:"):
+            gid = ns[len("group:"):]
+            try:
+                from .models import WorkspacePreferenceRow
+                from sqlalchemy.dialects.sqlite import insert
+                from datetime import datetime, timezone
+                sender = str(payload.get("caller_agent_id") or payload.get("agent_id") or "Agent")
+                notice = {
+                    "id": f"gmsg-bb-{uuid.uuid4().hex[:12]}",
+                    "group_id": gid,
+                    "sender_type": "system",
+                    "sender_id": "astrorder:blackboard",
+                    "sender_name": "作战黑板",
+                    "text": f"📋 【黑板更新】{sender} 更新了黑板条目「{key}」",
+                    "mentions": [],
+                    "hop_count": 0,
+                    "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                }
+                with ctx.store.session() as db:
+                    row = db.get(WorkspacePreferenceRow, f"group_messages:{gid}")
+                    history = list(row.value) if (row and isinstance(row.value, list)) else []
+                    history.append(notice)
+                    stmt = insert(WorkspacePreferenceRow).values(key=f"group_messages:{gid}", value=history)
+                    db.execute(stmt.on_conflict_do_update(index_elements=["key"], set_={"value": history}))
+                ctx.service._server_event("bot_group.message", agent_id=None, session_id=None, data=notice)
+            except Exception:
+                pass
 
     return {"ok": True, "namespace": ns, "key": key, "value": value}
 
@@ -1999,6 +2100,27 @@ def _lock_list(_payload: dict[str, Any], ctx: AgentContext) -> dict[str, Any]:
     return {"items": active_locks, "count": len(active_locks)}
 
 
+def _resolve_browser_session_key(payload: dict[str, Any], ctx: AgentContext) -> str:
+    raw_key = payload.get("session_key")
+    if isinstance(raw_key, str) and "::" in raw_key:
+        agent_id, session_id = raw_key.split("::", 1)
+        if ctx.store.get_session(agent_id, session_id):
+            return f"{agent_id}::{session_id}"
+        raise AgentApiError("not_found", f"Session '{raw_key}' was not found")
+    agent_id = str(payload.get("caller_agent_id") or payload.get("agent_id") or "")
+    session_id = str(payload.get("caller_session_id") or payload.get("session_id") or "")
+    if agent_id and session_id and ctx.store.get_session(agent_id, session_id):
+        return f"{agent_id}::{session_id}"
+    if agent_id:
+        active = [
+            row for row in ctx.store.list_sessions(agent_id)
+            if row.get("status") in {"running", "waiting_approval"}
+        ]
+        if len(active) == 1:
+            return f"{agent_id}::{active[0]['id']}"
+    raise AgentApiError("invalid_input", "browser_run requires session_key because the calling session is ambiguous")
+
+
 def _browser_run(payload: dict[str, Any], ctx: AgentContext) -> dict[str, Any]:
     url = payload.get("url")
     goal = payload.get("goal")
@@ -2007,6 +2129,9 @@ def _browser_run(payload: dict[str, Any], ctx: AgentContext) -> dict[str, Any]:
         raise AgentApiError("invalid_input", "url and goal are required")
     if inputs is not None and not isinstance(inputs, dict):
         raise AgentApiError("invalid_input", "inputs must be an object mapping field labels to values")
+    if "include_screenshot" in payload and not isinstance(payload["include_screenshot"], bool):
+        raise AgentApiError("invalid_input", "include_screenshot must be a boolean")
+    session_key = _resolve_browser_session_key(payload, ctx)
     try:
         max_steps = int(payload.get("max_steps", 30))
         from .jev_browser import run_browser_task
@@ -2018,10 +2143,52 @@ def _browser_run(payload: dict[str, Any], ctx: AgentContext) -> dict[str, Any]:
             store=ctx.store,
             max_steps=max_steps,
             reset=payload.get("reset") is True,
+            include_screenshot=payload.get("include_screenshot") is True,
+            session_key=session_key,
         )
+        if ctx.service and result.get("screenshot_revision"):
+            ctx.service._server_event(
+                "browser.mirror.updated",
+                agent_id=None,
+                session_id=None,
+                data={
+                    "revision": result["screenshot_revision"],
+                    "url": result.get("url", ""),
+                    "title": result.get("title", ""),
+                    "session_key": session_key,
+                },
+            )
         return result
     except (ValueError, RuntimeError) as exc:
         raise AgentApiError("browser_task_failed", str(exc)) from exc
+
+
+def _browser_screenshot(payload: dict[str, Any], ctx: AgentContext) -> dict[str, Any]:
+    try:
+        from .jev_browser import capture_browser_screenshot
+
+        return capture_browser_screenshot(_resolve_browser_session_key(payload, ctx), require_owner=True)
+    except RuntimeError as exc:
+        raise AgentApiError("browser_task_failed", str(exc)) from exc
+
+
+def _browser_cdp(payload: dict[str, Any], ctx: AgentContext) -> dict[str, Any]:
+    method = payload.get("method")
+    params = payload.get("params")
+    if not isinstance(method, str) or not method:
+        raise AgentApiError("invalid_input", "method is required")
+    if params is not None and not isinstance(params, dict):
+        raise AgentApiError("invalid_input", "params must be an object")
+    try:
+        from .jev_browser import call_browser_cdp
+
+        return call_browser_cdp(
+            session_key=_resolve_browser_session_key(payload, ctx),
+            method=method,
+            params=params,
+        )
+    except (RuntimeError, ValueError) as exc:
+        raise AgentApiError("browser_cdp_failed", str(exc)) from exc
 
 
 HANDLERS: dict[str, Callable[[dict[str, Any], AgentContext], dict[str, Any]]] = {
@@ -2042,6 +2209,8 @@ HANDLERS: dict[str, Callable[[dict[str, Any], AgentContext], dict[str, Any]]] = 
     "plugins.open": _plugins_open,
     "plugins.close": _plugins_close,
     "browser.run": _browser_run,
+    "browser.screenshot": _browser_screenshot,
+    "browser.cdp": _browser_cdp,
     "machines.dispatch": _machines_dispatch,
     "monitor.sessions.add": _monitor_sessions_add,
     "monitor.sessions.remove": _monitor_sessions_remove,

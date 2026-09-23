@@ -6,6 +6,14 @@
 .session-runtime-facts dd { margin:0; min-width:0; overflow-wrap:anywhere; }
 .session-runtime-facts small { color:var(--astr-muted); font-size:11px; }
 .session-runtime-facts small.inline-state { display:inline-block; margin-left:8px; }
+.quota-groups { display:grid; gap:10px; }
+.quota-group { display:grid; gap:6px; }
+.quota-group + .quota-group { padding-top:8px; border-top:1px solid var(--astr-border); }
+.quota-group > strong { font-size:11px; font-weight:600; color:var(--astr-text); }
+.quota-progress { display:grid; gap:3px; }
+.quota-progress-head { display:flex; justify-content:space-between; gap:8px; color:var(--astr-muted); font-size:11px; }
+.quota-progress-head b { color:var(--astr-text); font-weight:600; }
+.quota-progress > small { text-align:right; line-height:1.2; }
 .session-runtime-facts .nowrap-id { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%; }
 .session-runtime-facts .clickable-id { font-family:ui-monospace, monospace; text-decoration:underline; text-decoration-style:dashed; text-underline-offset:3px; color:var(--astr-text); }
 .session-runtime-facts .clickable-id:active { color:var(--astr-indigo, #5b5bd6); }

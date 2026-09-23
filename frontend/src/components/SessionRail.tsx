@@ -31,7 +31,7 @@ import {
   UnstyledButton,
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import {  useMemo, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { AnimatePresence, LayoutGroup, motion } from 'motion/react'
 import { VariableProximity } from './animations/VariableProximity'
 import { useSessionOrder } from '../hooks/useSessionOrder'
@@ -50,6 +50,8 @@ import { AgentKindBadge } from './SessionRuntimeFacts'
 import { buildProjectGroups, displaySessionTitle, formatRelativeTime, type ProjectGroup, type RailFilter } from './sessionRailModel'
 import { api } from '../api/client'
 import './sessionPins.css'
+const COLLAPSED_PROJECTS_STORAGE_KEY = 'astrorder:collapsed-projects'
+const SESSIONS_LAST_READ_KEY = 'astrorder:sessions-last-read'
 import { useAstrorderStore } from '../state/store'
 import { AddProjectModal } from './AddProjectModal'
 import {
@@ -110,7 +112,25 @@ export function SessionRail({
   const [createProject, setCreateProject] = useState<ProjectGroup | null>(null)
   const [createOpened, setCreateOpened] = useState(false)
   const [addProjectOpened, setAddProjectOpened] = useState(false)
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => {
+    try {
+      return JSON.parse(localStorage.getItem(COLLAPSED_PROJECTS_STORAGE_KEY) || '{}')
+    } catch {
+      return {}
+    }
+  })
+
+  const updateCollapsed = (updater: (prev: Record<string, boolean>) => Record<string, boolean>) => {
+    setCollapsed((prev) => {
+      const next = updater(prev)
+      try {
+        localStorage.setItem(COLLAPSED_PROJECTS_STORAGE_KEY, JSON.stringify(next))
+      } catch {
+        // ignore
+      }
+      return next
+    })
+  }
 
   const { preferences, updatePreferences, removeProjectPreferences } = useWorkspacePreferences()
   const { pinned_projects: pinnedProjects, appearance: projectAppearance, session_pins: pinnedSessions, project_order: projectOrder } = preferences
@@ -188,13 +208,82 @@ export function SessionRail({
   // 新建会话加载中
   const creatingForProject = createOpened ? createProject?.key : null
 
-  // 增强装饰会话带上 pinned
+  const liveStatuses = useMemo(() => {
+    const result = new Map<string, SessionStatus>()
+    for (const task of Object.values(tasks) as Task[]) {
+      if (task.kind !== 'subagent' || task.progress?.blocking === false) continue
+      const key = scopeKey(task.agent_id, task.session_id)
+      if (task.status === 'waiting_approval') result.set(key, 'waiting_approval')
+      else if (!result.has(key) && (task.status === 'running' || task.status === 'pending')) result.set(key, 'running')
+    }
+    const now = Date.now()
+    for (const [key, at] of Object.entries(liveActivityAt)) {
+      if (!result.has(key) && now - at >= 0 && now - at < 15_000) result.set(key, 'running')
+    }
+    return result
+  }, [tasks, liveActivityAt])
+
+  const activityStatusFor = useCallback((session: Session): SessionStatus => (
+    session.status === 'running' || session.status === 'waiting_approval' || session.status === 'error'
+      ? session.status
+      : liveStatuses.get(scopeKey(session.agent_id, session.id)) || session.status
+  ), [liveStatuses])
+
+  const [lastReadMap, setLastReadMap] = useState<Record<string, number>>(() => {
+    try {
+      return JSON.parse(localStorage.getItem(SESSIONS_LAST_READ_KEY) || '{}')
+    } catch {
+      return {}
+    }
+  })
+
+  const markSessionRead = useCallback((key: string) => {
+    setLastReadMap((prev) => {
+      const now = Date.now()
+      if (prev[key] && now - prev[key] < 1000) return prev
+      const next = { ...prev, [key]: now }
+      try {
+        localStorage.setItem(SESSIONS_LAST_READ_KEY, JSON.stringify(next))
+      } catch {
+        // ignore
+      }
+      return next
+    })
+  }, [])
+
+  useEffect(() => {
+    if (activeSessionKey) {
+      markSessionRead(activeSessionKey)
+    }
+  }, [activeSessionKey, markSessionRead])
+
+  // 增强装饰会话带上 pinned 和 unread
   const decoratedSessions = useMemo(() => {
-    return sessions.map((s) => ({
-      ...s,
-      pinned: pinnedSessions[scopeKey(s.agent_id, s.id)] === true,
-    }))
-  }, [sessions, pinnedSessions])
+    return sessions.map((s) => {
+      const key = scopeKey(s.agent_id, s.id)
+      const isPinned = pinnedSessions[key] === true
+      const actStatus = activityStatusFor(s)
+      const isCurrentActive = key === activeSessionKey
+      const isFinished = actStatus !== 'running' && actStatus !== 'waiting_approval'
+      const updatedAt = Date.parse(s.updated_at)
+      let unread = false
+      if (!isCurrentActive && isFinished && Number.isFinite(updatedAt)) {
+        const lastRead = lastReadMap[key]
+        if (lastRead) {
+          unread = updatedAt > lastRead
+        } else {
+          // 未打开过的会话，仅最近 24 小时内更新过的视为未读
+          const age = Date.now() - updatedAt
+          unread = age >= 0 && age < 86_400_000
+        }
+      }
+      return {
+        ...s,
+        pinned: isPinned,
+        unread,
+      }
+    })
+  }, [sessions, pinnedSessions, activeSessionKey, lastReadMap, activityStatusFor])
 
   const [draggedProject, setDraggedProject] = useState<string | null>(null)
   const allGroups = useMemo(() => buildProjectGroups(decoratedSessions, agents, projects), [decoratedSessions, agents, projects])
@@ -214,28 +303,7 @@ export function SessionRail({
     return [...pinned, ...unpinned]
   }, [agents, decoratedSessions, filter, projects, statusFilter, stableOrder, agentFilter, pinnedProjects])
 
-  const liveStatuses = useMemo(() => {
-    const result = new Map<string, SessionStatus>()
-    for (const task of Object.values(tasks) as Task[]) {
-      if (task.kind !== 'subagent' || task.progress?.blocking === false) continue
-      const key = scopeKey(task.agent_id, task.session_id)
-      if (task.status === 'waiting_approval') result.set(key, 'waiting_approval')
-      else if (!result.has(key) && (task.status === 'running' || task.status === 'pending')) result.set(key, 'running')
-    }
-    const now = Date.now()
-    for (const [key, at] of Object.entries(liveActivityAt)) {
-      if (!result.has(key) && now - at >= 0 && now - at < 15_000) result.set(key, 'running')
-    }
-    return result
-  }, [tasks, liveActivityAt])
-
-  const activityStatusFor = (session: Session): SessionStatus => (
-    session.status === 'running' || session.status === 'waiting_approval' || session.status === 'error'
-      ? session.status
-      : liveStatuses.get(scopeKey(session.agent_id, session.id)) || session.status
-  )
-
-  const toggle = (key: string) => setCollapsed((current) => ({ ...current, [key]: !current[key] }))
+  const toggle = (key: string) => updateCollapsed((current) => ({ ...current, [key]: !current[key] }))
 
   const togglePinProject = (projectKey: string, event?: React.MouseEvent) => {
     event?.stopPropagation()
@@ -576,7 +644,7 @@ export function SessionRail({
           onClose={() => setCreateOpened(false)}
           onCreated={session => {
             onSelect(session)
-            if (createProject) setCollapsed(previous => ({ ...previous, [`project:${createProject.key}`]: false }))
+            if (createProject) updateCollapsed(previous => ({ ...previous, [`project:${createProject.key}`]: false }))
           }}
         />
       )}
@@ -707,8 +775,8 @@ export function SessionRail({
                 )}
                 <SessionActivityBorder status={activityStatus} />
                 <UnstyledButton
-                  className={`session-row is-pinned ${key === activeSessionKey ? 'is-active' : ''} ${isRunning ? 'is-running' : ''}`}
-                  onClick={(e) => batchMode ? toggleSelectSession(key, e) : onSelect(session)}
+                  className={`session-row is-pinned ${key === activeSessionKey ? 'is-active' : ''} ${isRunning ? 'is-running' : ''} ${(session as any).unread ? 'is-unread' : ''}`}
+                  onClick={(e) => { markSessionRead(key); if (batchMode) toggleSelectSession(key, e); else onSelect(session) }}
                   draggable={!batchMode}
                   onDragStart={(event) => {
                     if (batchMode) return
@@ -733,7 +801,7 @@ export function SessionRail({
                     )}
                     {displaySessionTitle(session)}
                   </span>
-                  <div className="session-row-info"><AgentKindBadge agent={agents[session.agent_id]} iconOnly /><span className="session-row-time">{formatRelativeTime(session.updated_at)}</span><StatusDot status={activityStatus} /></div>
+                  <div className="session-row-info"><AgentKindBadge agent={agents[session.agent_id]} iconOnly /><span className="session-row-time">{formatRelativeTime(session.updated_at)}</span>{(session as any).unread ? <StatusDot status="unread" /> : <StatusDot status={activityStatus} />}</div>
                 </UnstyledButton>
                 {!batchMode && <div className="session-row-actions has-pinned"><button className="session-action-btn is-active" aria-label="取消置顶" onClick={e => togglePin(session, e)}><IconPinned size={14} /></button>
                   <Menu position="bottom-end" withinPortal><Menu.Target><button className="session-action-btn" aria-label="更多操作"><IconDotsVertical size={14} /></button></Menu.Target><Menu.Dropdown>
@@ -901,8 +969,8 @@ export function SessionRail({
                         )}
                         <SessionActivityBorder status={activityStatus} />
                         <UnstyledButton
-                          className={`session-row ${key === activeSessionKey ? 'is-active' : ''} ${isPinned ? 'is-pinned' : ''} ${isRunning ? 'is-running' : ''}`}
-                          onClick={(e) => batchMode ? toggleSelectSession(key, e) : onSelect(session)}
+                          className={`session-row ${key === activeSessionKey ? 'is-active' : ''} ${isPinned ? 'is-pinned' : ''} ${isRunning ? 'is-running' : ''} ${(session as any).unread ? 'is-unread' : ''}`}
+                          onClick={(e) => { markSessionRead(key); if (batchMode) toggleSelectSession(key, e); else onSelect(session) }}
                           aria-current={key === activeSessionKey ? 'page' : undefined}
                           draggable={!batchMode}
                           onDragStart={(event) => {
@@ -923,7 +991,7 @@ export function SessionRail({
                           <div className="session-row-info">
                             <AgentKindBadge agent={agents[session.agent_id]} iconOnly />
                             <span className="session-row-time">{formatRelativeTime(session.updated_at)}</span>
-                            <StatusDot status={activityStatus} />
+                            {(session as any).unread ? <StatusDot status="unread" /> : <StatusDot status={activityStatus} />}
                           </div>
                         </UnstyledButton>
                         {!batchMode && <div className={`session-row-actions ${isPinned ? 'has-pinned' : ''}`}>

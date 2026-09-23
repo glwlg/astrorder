@@ -1,8 +1,9 @@
 from fastapi.testclient import TestClient
 
 import json
+import pytest
 
-from astrorder.agent_gateway import AgentApiError, AgentContext, invoke, parse_session_key
+from astrorder.agent_gateway import AgentApiError, AgentContext, _resolve_browser_session_key, invoke, parse_session_key
 from astrorder.config import Settings
 from astrorder.main import create_app
 
@@ -16,6 +17,20 @@ def test_parse_session_key_accepts_key_or_parts():
         assert exc.code == "invalid_input"
     else:
         raise AssertionError("expected invalid_input")
+
+
+def test_browser_session_binding_rejects_ambiguous_calls():
+    class Store:
+        def get_session(self, agent_id, session_id):
+            return {"agent_id": agent_id, "id": session_id} if session_id == "one" else None
+
+        def list_sessions(self, _agent_id):
+            return [{"id": "one", "status": "running"}, {"id": "two", "status": "running"}]
+
+    ctx = AgentContext(store=Store())
+    assert _resolve_browser_session_key({"session_key": "agent::one"}, ctx) == "agent::one"
+    with pytest.raises(AgentApiError, match="session_key"):
+        _resolve_browser_session_key({"caller_agent_id": "agent"}, ctx)
 
 
 def test_agent_gateway_lists_and_reads_sessions(tmp_path):

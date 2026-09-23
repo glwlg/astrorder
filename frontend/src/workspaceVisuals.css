@@ -673,10 +673,13 @@
   flex: 1 1 0;
   min-height: 0;
   flex-direction: column;
-  gap: var(--mantine-spacing-sm);
+  gap: 0;
   overflow-y: auto;
   padding-right: 1px;
   scrollbar-width: thin;
+}
+.session-project-group {
+  margin: 0;
 }
 
 /* Electron uses the native Windows frame; the web app starts below it. */

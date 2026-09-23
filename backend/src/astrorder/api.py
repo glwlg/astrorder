@@ -8,6 +8,7 @@ import os
 import sqlite3
 import subprocess
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
@@ -41,6 +42,32 @@ class QueuedCommandRef(BaseModel):
 
 class QueuedCommandEdit(QueuedCommandRef):
     text: str = Field(min_length=1, max_length=200_000)
+
+
+class BrowserNavigateRequest(BaseModel):
+    agent_id: str = Field(min_length=1, max_length=256)
+    session_id: str = Field(min_length=1, max_length=256)
+    url: str = Field(min_length=1, max_length=8_192)
+
+
+class BrowserTabRequest(BaseModel):
+    agent_id: str = Field(min_length=1, max_length=256)
+    session_id: str = Field(min_length=1, max_length=256)
+    target_id: str | None = Field(default=None, max_length=256)
+    url: str | None = Field(default=None, max_length=8_192)
+
+
+class BrowserInteractRequest(BaseModel):
+    agent_id: str = Field(min_length=1, max_length=256)
+    session_id: str = Field(min_length=1, max_length=256)
+    action: str = Field(pattern="^(click|wheel|text|back|forward)$")
+    target_id: str | None = Field(default=None, max_length=256)
+    x: float | None = None
+    y: float | None = None
+    ratio_x: float | None = None
+    ratio_y: float | None = None
+    delta_y: float | None = None
+    text: str | None = None
 
 
 def _settings(request: Request):
@@ -273,6 +300,215 @@ async def presence(request: Request) -> dict[str, list]:
     return await asyncio.to_thread(_collect_presence, request)
 
 
+@router.get("/api/v1/browser/screenshot")
+async def browser_screenshot(
+    request: Request,
+    agent_id: str = Query(..., min_length=1, max_length=256),
+    session_id: str = Query(..., min_length=1, max_length=256),
+    refresh: bool = False,
+    target_id: str | None = Query(None),
+) -> dict[str, object]:
+    _private(request)
+    from .jev_browser import capture_browser_screenshot, latest_browser_screenshot
+
+    if request.app.state.store.get_session(agent_id, session_id) is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    session_key = f"{agent_id}::{session_id}"
+    try:
+        snapshot = latest_browser_screenshot(session_key, target_id=target_id)
+        if refresh:
+            try:
+                snapshot = await asyncio.to_thread(capture_browser_screenshot, session_key, require_owner=True, target_id=target_id)
+            except RuntimeError:
+                if snapshot is None:
+                    raise
+        if snapshot is None:
+            raise HTTPException(status_code=404, detail="该会话还没有浏览器画面")
+        return snapshot
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+
+
+@router.post("/api/v1/browser/navigate")
+async def browser_navigate(payload: BrowserNavigateRequest, request: Request) -> dict[str, object]:
+    _private(request)
+    if request.app.state.store.get_session(payload.agent_id, payload.session_id) is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    from .jev_browser import navigate_browser
+
+    session_key = f"{payload.agent_id}::{payload.session_id}"
+    try:
+        snapshot = await asyncio.to_thread(navigate_browser, session_key=session_key, url=payload.url)
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    request.app.state.service._server_event(
+        "browser.mirror.updated",
+        agent_id=payload.agent_id,
+        session_id=payload.session_id,
+        data={
+            "revision": snapshot["revision"],
+            "url": snapshot["url"],
+            "title": snapshot["title"],
+            "session_key": session_key,
+        },
+    )
+    return snapshot
+
+
+@router.post("/api/v1/browser/interact")
+async def browser_interact(payload: BrowserInteractRequest, request: Request) -> dict[str, object]:
+    _private(request)
+    if request.app.state.store.get_session(payload.agent_id, payload.session_id) is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    from .jev_browser import interact_browser
+
+    session_key = f"{payload.agent_id}::{payload.session_id}"
+    try:
+        snapshot = await asyncio.to_thread(
+            interact_browser,
+            session_key=session_key,
+            action=payload.action,
+            x=payload.x,
+            y=payload.y,
+            ratio_x=payload.ratio_x,
+            ratio_y=payload.ratio_y,
+            delta_y=payload.delta_y,
+            text=payload.text,
+            target_id=payload.target_id,
+        )
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    request.app.state.service._server_event(
+        "browser.mirror.updated",
+        agent_id=payload.agent_id,
+        session_id=payload.session_id,
+        data={
+            "revision": snapshot["revision"],
+            "url": snapshot["url"],
+            "title": snapshot["title"],
+            "session_key": session_key,
+        },
+    )
+    return snapshot
+
+
+@router.get("/api/v1/browser/page-content")
+async def browser_page_content(
+    request: Request,
+    agent_id: str = Query(..., min_length=1, max_length=256),
+    session_id: str = Query(..., min_length=1, max_length=256),
+    target_id: str | None = Query(None),
+) -> dict[str, object]:
+    _private(request)
+    if request.app.state.store.get_session(agent_id, session_id) is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    from .jev_browser import extract_page_content
+
+    session_key = f"{agent_id}::{session_id}"
+    try:
+        return await asyncio.to_thread(extract_page_content, session_key=session_key, target_id=target_id)
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+
+
+@router.get("/api/v1/browser/diagnostics")
+async def browser_diagnostics(
+    request: Request,
+    agent_id: str = Query(..., min_length=1, max_length=256),
+    session_id: str = Query(..., min_length=1, max_length=256),
+    target_id: str | None = Query(None),
+) -> dict[str, object]:
+    _private(request)
+    if request.app.state.store.get_session(agent_id, session_id) is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    from .jev_browser import get_browser_diagnostics
+
+    session_key = f"{agent_id}::{session_id}"
+    return get_browser_diagnostics(session_key=session_key, target_id=target_id)
+
+
+@router.post("/api/v1/browser/tabs/select")
+async def browser_tab_select(payload: BrowserTabRequest, request: Request) -> dict[str, object]:
+    _private(request)
+    if not payload.target_id:
+        raise HTTPException(status_code=400, detail="target_id is required")
+    if request.app.state.store.get_session(payload.agent_id, payload.session_id) is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    from .jev_browser import select_browser_tab
+
+    session_key = f"{payload.agent_id}::{payload.session_id}"
+    try:
+        snapshot = await asyncio.to_thread(select_browser_tab, session_key=session_key, target_id=payload.target_id)
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    request.app.state.service._server_event(
+        "browser.mirror.updated",
+        agent_id=payload.agent_id,
+        session_id=payload.session_id,
+        data={
+            "revision": snapshot["revision"],
+            "url": snapshot["url"],
+            "title": snapshot["title"],
+            "session_key": session_key,
+        },
+    )
+    return snapshot
+
+
+@router.post("/api/v1/browser/tabs/new")
+async def browser_tab_new(payload: BrowserTabRequest, request: Request) -> dict[str, object]:
+    _private(request)
+    if request.app.state.store.get_session(payload.agent_id, payload.session_id) is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    from .jev_browser import new_browser_tab
+
+    session_key = f"{payload.agent_id}::{payload.session_id}"
+    try:
+        snapshot = await asyncio.to_thread(new_browser_tab, session_key=session_key, url=payload.url)
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    request.app.state.service._server_event(
+        "browser.mirror.updated",
+        agent_id=payload.agent_id,
+        session_id=payload.session_id,
+        data={
+            "revision": snapshot["revision"],
+            "url": snapshot["url"],
+            "title": snapshot["title"],
+            "session_key": session_key,
+        },
+    )
+    return snapshot
+
+
+@router.post("/api/v1/browser/tabs/close")
+async def browser_tab_close(payload: BrowserTabRequest, request: Request) -> dict[str, object]:
+    _private(request)
+    if not payload.target_id:
+        raise HTTPException(status_code=400, detail="target_id is required")
+    if request.app.state.store.get_session(payload.agent_id, payload.session_id) is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    from .jev_browser import close_browser_tab
+
+    session_key = f"{payload.agent_id}::{payload.session_id}"
+    try:
+        snapshot = await asyncio.to_thread(close_browser_tab, session_key=session_key, target_id=payload.target_id)
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    request.app.state.service._server_event(
+        "browser.mirror.updated",
+        agent_id=payload.agent_id,
+        session_id=payload.session_id,
+        data={
+            "revision": snapshot["revision"],
+            "url": snapshot["url"],
+            "title": snapshot["title"],
+            "session_key": session_key,
+        },
+    )
+    return snapshot
+
+
 @router.get("/api/v1/agents")
 def agents(request: Request) -> dict[str, object]:
     _private(request)
@@ -289,7 +525,100 @@ def observations(agent_id: str, request: Request, session_id: str | None = None)
     return {'status':observer.status(agent_id),'items':observer.recent(agent_id,session_id)}
 
 
-@router.post('/api/v1/agents/{agent_id}/observer')
+@router.post("/api/v1/agents/{agent_id}/upgrade")
+def upgrade_agent(agent_id: str, request: Request) -> StreamingResponse:
+    """统一 Agent 一键升级管理（流式输出 + 后台可取消 + 系统终端静默隐藏）。"""
+    _private(request)
+    store = request.app.state.store
+    agent = store.get_agent(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent 不存在")
+
+    kind = str(agent.get("kind") or "").lower()
+    conn_id = agent.get("connection_id")
+
+    from .connections import _windows_hide_flags, _windows_hide_startupinfo
+
+    # 1. 远程 SSH 机器上的升级逻辑
+    if conn_id and conn_id != "local":
+        ssh_conn = store.get_ssh_connection(conn_id)
+        if not ssh_conn:
+            raise HTTPException(status_code=404, detail="关联的 SSH 环境连接不存在")
+        settings = ssh_conn.get("settings") or {}
+        user = settings.get("user") or ssh_conn.get("user") or "root"
+        host = settings.get("host") or ssh_conn.get("host") or "127.0.0.1"
+        port = str(settings.get("port") or ssh_conn.get("port") or 22)
+        identity_file = settings.get("identity_file") or ssh_conn.get("identity_file")
+        ssh_alias = settings.get("ssh_config_alias") or ssh_conn.get("ssh_config_alias")
+
+        if "codex" in kind:
+            cmd = "vp install -g @openai/codex@latest || npm install -g @openai/codex@latest"
+        elif "hermes" in kind:
+            cmd = "hermes update"
+        elif "grok" in kind:
+            cmd = "curl -fsSL https://x.ai/cli/install.sh | bash"
+        else:
+            raise HTTPException(status_code=400, detail=f"暂不支持升级类型为 {kind} 的 Agent")
+
+        remote_cmd = ["ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=ask", "-o", "ConnectTimeout=10"]
+        if identity_file:
+            remote_cmd.extend(["-i", str(identity_file)])
+        if ssh_alias:
+            target = ssh_alias
+        else:
+            remote_cmd.extend(["-p", port])
+            target = f"{user}@{host}"
+        remote_cmd.append(target)
+        remote_cmd.append(f"export PATH=$PATH:$HOME/.vite-plus/bin:$HOME/.local/bin:$HOME/.grok/bin; {cmd}")
+        run_cmd = remote_cmd
+        display_cmd = cmd
+    else:
+        # 2. 本机 Windows / 环境升级逻辑
+        import sys
+        is_win = sys.platform == "win32"
+        if "codex" in kind:
+            run_cmd = ["vp.cmd", "install", "-g", "@openai/codex@latest"] if is_win else ["vp", "install", "-g", "@openai/codex@latest"]
+            display_cmd = "vp install -g @openai/codex@latest"
+        elif "hermes" in kind:
+            run_cmd = ["hermes.cmd", "update"] if is_win else ["hermes", "update"]
+            display_cmd = "hermes update"
+        elif "grok" in kind:
+            if is_win:
+                run_cmd = ["powershell", "-NoProfile", "-Command", "irm https://x.ai/cli/install.ps1 | iex"]
+                display_cmd = "powershell: irm https://x.ai/cli/install.ps1 | iex"
+            else:
+                run_cmd = ["bash", "-c", "curl -fsSL https://x.ai/cli/install.sh | bash"]
+                display_cmd = "curl -fsSL https://x.ai/cli/install.sh | bash"
+        else:
+            raise HTTPException(status_code=400, detail=f"暂不支持升级类型为 {kind} 的 Agent")
+
+    def stream_upgrade():
+        yield json.dumps({"type": "init", "command": display_cmd}, ensure_ascii=False) + "\n"
+        try:
+            proc = subprocess.Popen(
+                run_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                bufsize=1,
+                creationflags=_windows_hide_flags(),
+                startupinfo=_windows_hide_startupinfo(),
+            )
+            if proc.stdout is not None:
+                for line in proc.stdout:
+                    yield json.dumps({"type": "chunk", "data": line}, ensure_ascii=False) + "\n"
+            proc.wait(timeout=300)
+            yield json.dumps({"type": "done", "ok": proc.returncode == 0, "exit_code": proc.returncode}, ensure_ascii=False) + "\n"
+        except Exception as exc:
+            yield json.dumps({"type": "error", "error": str(exc)}, ensure_ascii=False) + "\n"
+
+    from fastapi.responses import StreamingResponse
+    return StreamingResponse(stream_upgrade(), media_type="application/x-ndjson")
+
+
+@router.post("/api/v1/agents/{agent_id}/observer")
 def install_observer(agent_id: str, request: Request):
     _private(request)
     try:
@@ -564,6 +893,8 @@ class ForkSessionPayload(BaseModel):
     worktree: bool = Field(default=False)
     branch_name: str | None = Field(default=None, max_length=256)
     worktree_path: str | None = Field(default=None, max_length=2000)
+    target_message_id: str | None = Field(default=None, max_length=256)
+    turn_index: int | None = Field(default=None)
 
 
 def _create_local_git_worktree(
@@ -713,9 +1044,26 @@ def fork_session(session_id: str, payload: ForkSessionPayload, request: Request)
     default_title = (
         f"{source.get('title') or '新会话'} ({branch_name})"
         if branch_name
-        else (f"{source.get('title') or '新会话'} (分支)")
+        else (f"{source.get('title') or '新会话'} (分叉)")
     )
     title = payload.title.strip() if payload.title and payload.title.strip() else default_title
+
+    # 1. 尝试调用底层运行时的精准截断分叉 (如 Codex thread/fork, Hermes session.branch, Grok 截断)
+    try:
+        runtime = _agent_runtime(request, payload.agent_id)
+        fork_fn = getattr(runtime, "fork_session", None)
+        if callable(fork_fn):
+            forked = fork_fn(
+                session_id=session_id,
+                title=title,
+                workspace=workspace,
+                target_message_id=payload.target_message_id,
+                turn_index=payload.turn_index,
+            )
+            if isinstance(forked, dict) and forked.get("id"):
+                return forked
+    except Exception:
+        pass
 
     create_payload = CreateSessionPayload(
         agent_id=payload.agent_id,
@@ -922,8 +1270,8 @@ async def handoff_session(
         or {source_agent["kind"], target_agent["kind"]} != {"codex", "hermes"}
     ):
         raise HTTPException(status_code=422, detail="转交仅支持 Codex 与 Hermes 之间进行。")
-    if source_agent.get("connection_id") is not None or target_agent.get("connection_id") is not None:
-        raise HTTPException(status_code=422, detail="当前仅支持同一台机器上的本地会话转交。")
+    if source_agent.get("connection_id") != target_agent.get("connection_id"):
+        raise HTTPException(status_code=422, detail="转交仅支持在同一台机器的 Agent 之间进行。")
     if target_agent.get("status") != "ready":
         raise HTTPException(status_code=409, detail="目标 Agent 当前未就绪。")
     if bool(payload.provider) != bool(payload.model):
@@ -1594,7 +1942,7 @@ def download_attachment(attachment_id: str, request: Request) -> FileResponse:
 def get_files_tree(
     request: Request,
     path: str = Query(default=""),
-    depth: int = Query(default=3),
+    depth: int = Query(default=6),
     reveal_path: str = Query(default=""),
     session_id: str = Query(default=""),
     connection_id: str = Query(default=""),
@@ -1639,7 +1987,7 @@ from pathlib import Path
 raw_reveal = {repr(cleaned_reveal_path)}
 reveal = Path(raw_reveal).expanduser().resolve() if raw_reveal else None
 
-def walk(p, depth={max(1, min(depth, 5))}):
+def walk(p, depth={max(1, min(depth, 8))}):
     if depth <= 0 and not (reveal and (p == reveal or p in reveal.parents)): return []
     items = []
     ignored = {{'.git', '.venv', 'node_modules', '__pycache__', '.pytest_cache', '.ruff_cache', 'dist'}}
@@ -2846,6 +3194,24 @@ class JevConfigPatch(BaseModel):
     api_key: str | None = None
 
 
+class LlmConfigPatch(BaseModel):
+    base_url: str = Field(min_length=1, max_length=2048)
+    api_key: str | None = Field(default=None, max_length=4096)
+    model: str = Field(min_length=1, max_length=256)
+    reasoning: str = Field(pattern="^(none|low|medium|high)$")
+
+
+def _llm_config_response(config: dict[str, str]) -> dict[str, Any]:
+    key = config["api_key"]
+    return {
+        "configured": bool(key),
+        "masked_key": f"{key[:6]}...{key[-4:]}" if len(key) > 12 else ("已配置" if key else ""),
+        "base_url": config["base_url"],
+        "model": config["model"],
+        "reasoning": config["reasoning"],
+    }
+
+
 @router.get("/api/v1/services/jev/config")
 def get_jev_config(request: Request) -> dict[str, Any]:
     _private(request)
@@ -2876,6 +3242,57 @@ def test_jev_connection(payload: JevConfigPatch, request: Request) -> dict[str, 
         return {"ok": True, "details": res}
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/api/v1/services/llm/config")
+def get_llm_service_config(request: Request) -> dict[str, Any]:
+    _private(request)
+    from .llm_config import get_llm_config
+    return _llm_config_response(get_llm_config(request.app.state.store))
+
+
+@router.post("/api/v1/services/llm/config")
+def update_llm_service_config(payload: LlmConfigPatch, request: Request) -> dict[str, Any]:
+    _private(request)
+    from .llm_config import get_llm_config, set_llm_config
+    current = get_llm_config(request.app.state.store)
+    config = payload.model_dump()
+    if payload.api_key is None:
+        config["api_key"] = current["api_key"]
+    try:
+        return _llm_config_response(set_llm_config(request.app.state.store, config))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/api/v1/services/llm/test")
+def test_llm_service_connection(payload: LlmConfigPatch, request: Request) -> dict[str, Any]:
+    _private(request)
+    import httpx
+    from .llm_config import get_llm_config, reasoning_payload
+    current = get_llm_config(request.app.state.store)
+    key = (payload.api_key or current["api_key"]).strip()
+    if not key:
+        raise HTTPException(status_code=400, detail="请先填写 API Key")
+    body: dict[str, Any] = {
+        "model": payload.model.strip(),
+        "max_tokens": 16,
+        "messages": [{"role": "user", "content": "Reply with OK only."}],
+    }
+    body.update(reasoning_payload(payload.base_url, payload.reasoning))
+    try:
+        response = httpx.post(
+            payload.base_url.rstrip("/") + "/chat/completions",
+            headers={"Authorization": f"Bearer {key}"},
+            json=body,
+            timeout=20,
+        )
+        response.raise_for_status()
+        data = response.json()
+        text = data["choices"][0]["message"]["content"]
+        return {"ok": True, "model": data.get("model") or payload.model, "reply": text}
+    except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=f"LLM 连接测试失败：{exc}") from exc
 
 
 class JevFilterPayload(BaseModel):

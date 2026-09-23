@@ -83,17 +83,45 @@ export interface ToolDescription {
 }
 
 export function fileChangeDiffs(message: Message): Array<{ file: string; diff: string }> {
-  const args = message.tool?.arguments
-  if (!args || typeof args !== 'object') return []
-  const changes = (args as Record<string, unknown>).changes
-  if (!Array.isArray(changes)) return []
-  return changes.flatMap((change: unknown) => {
-    if (!change || typeof change !== 'object') return []
-    const item = change as { path?: unknown; diff?: unknown }
-    if (typeof item.diff !== 'string' || !item.diff.trim()) return []
-    const path = typeof item.path === 'string' ? item.path : '文件变更'
-    return [{ file: path.split(/[/\\]/).pop() || path, diff: item.diff }]
-  })
+  const tool = message.tool
+  const args = (tool?.arguments && typeof tool.arguments === 'object') ? (tool.arguments as Record<string, unknown>) : {}
+  const name = String(tool?.name || '')
+
+  if (Array.isArray(args.changes)) {
+    const list = args.changes.flatMap((change: unknown) => {
+      if (!change || typeof change !== 'object') return []
+      const item = change as { path?: unknown; diff?: unknown }
+      if (typeof item.diff !== 'string' || !item.diff.trim()) return []
+      const path = typeof item.path === 'string' ? item.path : '文件变更'
+      return [{ file: path.split(/[/\\]/).pop() || path, diff: item.diff }]
+    })
+    if (list.length > 0) return list
+  }
+
+  if (name === 'patch' || name === 'fileChange') {
+    const text = (message.text || '').trim()
+    if (text.startsWith('{') && text.endsWith('}')) {
+      try {
+        const parsed = JSON.parse(text)
+        if (typeof parsed?.diff === 'string' && parsed.diff.trim()) {
+          const filePath = String(args.path || parsed.path || parsed.file || '文件变更')
+          const fileName = filePath.split(/[/\\]/).pop() || filePath
+          return [{ file: fileName, diff: parsed.diff }]
+        }
+      } catch {}
+    }
+  }
+
+  if (typeof args.path === 'string' && typeof args.old_string === 'string' && typeof args.new_string === 'string') {
+    const filePath = args.path
+    const fileName = filePath.split(/[/\\]/).pop() || filePath
+    const oldLines = args.old_string.split('\n').map((l: string) => '-' + l).join('\n')
+    const newLines = args.new_string.split('\n').map((l: string) => '+' + l).join('\n')
+    const diff = '--- a/' + fileName + '\n+++ b/' + fileName + '\n@@\n' + oldLines + '\n' + newLines
+    return [{ file: fileName, diff }]
+  }
+
+  return []
 }
 
 export function FileChangeDiffBlock({ message }: { message: Message }) {
@@ -263,6 +291,27 @@ export function describeTool(message: Message): ToolDescription {
   }
 
   // Fallback
+  // Grok terminal tool names like: Execute `cmd` or [bg] cmd (call-xxx)
+  if (name.startsWith('Execute `') || (name.startsWith('[bg] ') && Boolean(args.command)) || /\(call-[a-z0-9]+\)$/i.test(name)) {
+    const rawCmd = String(args.command || name.replace(/^Execute `|`$/g, '').replace(/^\[bg\]\s*/, '').replace(/\s*\(call-[a-z0-9]+\)$/i, ''))
+    const cmd = unwrapCommand(rawCmd) || rawCmd
+    let action = '运行'
+    if (/^git\s/i.test(cmd)) action = 'Git'
+    else if (/^(?:pytest|python\s+-m\s+pytest|npm\s+test|vitest|cargo\s+test)\b/i.test(cmd)) action = '测试'
+    else if (/^(?:cat|head|tail|sed)\b/i.test(cmd)) action = '查看'
+    else if (/^(?:rg|grep|find)\b/i.test(cmd)) action = '搜索'
+    else if (/^(?:docker|systemctl|service)\b/i.test(cmd)) action = '服务'
+    const target = cmd.length > 70 ? cmd.slice(0, 67) + '...' : cmd
+    return {
+      iconKey: 'terminal',
+      action,
+      target,
+      fullTitle: cmd.length > 75 ? cmd.slice(0, 72) + '...' : cmd,
+      isFailed,
+      isRunning,
+    }
+  }
+
   return {
     iconKey: 'tool',
     action: '工具',

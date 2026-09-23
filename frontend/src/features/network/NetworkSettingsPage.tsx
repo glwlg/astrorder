@@ -28,7 +28,6 @@ import {
 } from '@tabler/icons-react'
 import { notifications } from '@mantine/notifications'
 import { api } from '../../api/client'
-import { JevSettingsCard } from '../services/JevSettingsCard'
 
 export function NetworkSettingsPage() {
   const [loading, setLoading] = useState(true)
@@ -242,7 +241,9 @@ export function NetworkSettingsPage() {
         </Card>
 
         {/* 2.5 Jev 模型服务配置 */}
-        <JevSettingsCard />
+        
+        
+        
 
         {/* 3. 跨域白名单 (Allowed Origins) 卡片 */}
         <Card withBorder radius="md" p="md" style={{ background: 'var(--astr-surface)' }}>

@@ -498,6 +498,37 @@ async def test_websocket_daemon_replays_sync_reports_status_and_streams_live_fra
 
 
 @pytest.mark.asyncio
+async def test_model_config_reload_waits_for_active_agent_sessions():
+    class Runtime:
+        def __init__(self):
+            self.reload_calls = 0
+
+        async def spawn(self, _request):
+            return {"status": "running"}
+
+        async def command(self, _action, _request):
+            return {"status": "idle"}
+
+        async def reload_config(self):
+            self.reload_calls += 1
+
+    daemon = SessionDaemon(secret="test-only-daemon-secret")
+    runtime = Runtime()
+    daemon.register_runtime("codex", runtime)
+    await daemon._spawn_runtime({"session_id": "active", "agent_type": "codex", "params": {}})
+
+    response = await daemon.handle_message(json.dumps({
+        "action": "model_config.reload", "request_id": "reload-1", "agents": ["codex"],
+    }))
+    assert response["result"] == {"reloaded": [], "pending": ["codex"]}
+    assert runtime.reload_calls == 0
+
+    daemon._sessions["active"].status = "idle"
+    assert await daemon._drain_config_reloads() == ["codex"]
+    assert runtime.reload_calls == 1
+
+
+@pytest.mark.asyncio
 async def test_websocket_daemon_waits_for_sync_before_streaming_live_frames():
     daemon = SessionDaemon(capacity=3)
     server = await daemon.serve("127.0.0.1", 0)

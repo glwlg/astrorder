@@ -28,3 +28,6 @@ class BackgroundTaskRegistry:
     def cancel_all(self) -> None:
         for event in self._cancellations.values():
             event.set()
+
+    def is_active(self, operation_id: str) -> bool:
+        return operation_id in self._cancellations

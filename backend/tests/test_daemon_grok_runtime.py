@@ -56,6 +56,24 @@ class FakeClient:
         raise AssertionError(method)
 
 
+class FailedClient(FakeClient):
+    def request(self, method, params, timeout=30):
+        if method == "session/prompt":
+            self.on_notification({
+                "method": "_x.ai/session/update",
+                "params": {
+                    "sessionId": params["sessionId"],
+                    "update": {
+                        "sessionUpdate": "retry_state",
+                        "type": "failed",
+                        "message": "upstream stream ended before a terminal frame",
+                    },
+                },
+            })
+            raise RuntimeError("Grok rejected request (-32603; Internal error)")
+        return super().request(method, params, timeout)
+
+
 @pytest.mark.asyncio
 async def test_grok_runtime_emits_agent_scoped_updates_and_completion(tmp_path):
     executable = tmp_path / "grok.exe"
@@ -87,6 +105,33 @@ async def test_grok_runtime_emits_agent_scoped_updates_and_completion(tmp_path):
     assert (await runtime.command("session.reasoning.set", {
         "session_id": "s1", "effort": "high",
     }))["effort"] == "high"
+    await runtime.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_grok_runtime_reports_native_failure_detail(tmp_path):
+    executable = tmp_path / "grok.exe"
+    executable.touch()
+    events = []
+
+    async def emit(session_id, event, payload, **kwargs):
+        events.append((session_id, event, payload, kwargs))
+
+    runtime = GrokDaemonRuntime(
+        GrokDaemonRuntimeConfig(str(executable), tmp_path, (tmp_path,)),
+        emit=emit,
+        client_factory=FailedClient,
+    )
+    await runtime.spawn({"session_id": "s1", "cwd": str(tmp_path)})
+    await runtime.command(
+        "session.send", {"session_id": "s1", "command_id": "c1", "prompt": "hello"}
+    )
+    for _ in range(100):
+        completed = next((payload for _, event, payload, _ in events if event == "grok.completed"), None)
+        if completed:
+            break
+        await asyncio.sleep(0.01)
+    assert completed["error"] == "upstream stream ended before a terminal frame"
     await runtime.shutdown()
 
 

@@ -830,13 +830,13 @@ class Store:
                     index_elements=[SessionRow.agent_id, SessionRow.id],
                     set_={
                         "title": title,
-                        "workspace": data.get("workspace"),
+                        "workspace": func.coalesce(data.get("workspace"), SessionRow.workspace),
                         "status": data["status"],
                         "source_id": data.get("source_id") or data["agent_id"],
                         "connection_id": data.get("connection_id"),
                         "source_session_id": data.get("source_session_id") or data["id"],
-                        "project_id": data.get("project_id"),
-                        "project_name": data.get("project_name"),
+                        "project_id": func.coalesce(data.get("project_id"), SessionRow.project_id),
+                        "project_name": func.coalesce(data.get("project_name"), SessionRow.project_name),
                         "history_state": data.get("history_state", "local"),
                         "native_kind": data.get("native_kind"),
                         # Native snapshots cannot promote temporary sessions.
@@ -858,13 +858,16 @@ class Store:
                 placeholders = {"", "\u65b0\u4f1a\u8bdd", "\u672a\u547d\u540d", "\u672a\u547d\u540d\u4f1a\u8bdd", "untitled", data["id"]}
                 if title not in placeholders or row.title in placeholders:
                     row.title = title
-                row.workspace = data.get("workspace")
+                if data.get("workspace") is not None:
+                    row.workspace = data["workspace"]
                 row.status = data["status"]
                 row.source_id = data.get("source_id") or row.source_id or data["agent_id"]
                 row.connection_id = data.get("connection_id")
                 row.source_session_id = data.get("source_session_id") or row.source_session_id or data["id"]
-                row.project_id = data.get("project_id")
-                row.project_name = data.get("project_name")
+                if data.get("project_id") is not None:
+                    row.project_id = data["project_id"]
+                if data.get("project_name") is not None:
+                    row.project_name = data["project_name"]
                 row.history_state = data.get("history_state", row.history_state or "local")
                 row.native_kind = data.get("native_kind", row.native_kind)
                 row.ephemeral = row.ephemeral or data.get("ephemeral") is True
@@ -1615,15 +1618,15 @@ class Store:
             placeholders = {"", "\u65b0\u4f1a\u8bdd", "\u672a\u547d\u540d", "\u672a\u547d\u540d\u4f1a\u8bdd", "untitled", data["id"]}
             if title not in placeholders or row.title in placeholders:
                 row.title = title
-            if "workspace" in data and ("project_id" in data or not row.project_id):
+            if data.get("workspace") is not None:
                 row.workspace = data["workspace"]
             row.status = data["status"]
             row.source_id = data.get("source_id") or row.source_id or data["agent_id"]
             row.connection_id = data.get("connection_id")
             row.source_session_id = data.get("source_session_id") or row.source_session_id or data["id"]
-            if "project_id" in data:
+            if data.get("project_id") is not None:
                 row.project_id = data["project_id"]
-            if "project_name" in data:
+            if data.get("project_name") is not None:
                 row.project_name = data["project_name"]
             row.history_state = data.get("history_state", row.history_state or "local")
             row.ephemeral = row.ephemeral or data.get("ephemeral") is True

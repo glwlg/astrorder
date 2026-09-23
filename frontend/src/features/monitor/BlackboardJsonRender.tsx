@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import {
   ActionIcon,
   Badge,
@@ -36,6 +36,19 @@ import { notifications } from '@mantine/notifications'
  */
 function GomokuBoardRenderer({ element }: { element: any }) {
   const { status, winner, winning_move, total_moves, ascii_board, meta } = element.props || {}
+
+  const handleCellClick = (coord: string, isEmpty: boolean) => {
+    if (!isEmpty || status === 'finished' || Boolean(winner)) return
+    const isBlackTurn = (meta?.current_turn || '').toLowerCase().includes('black')
+    const evt = new CustomEvent('blackboard-action', {
+      bubbles: true,
+      detail: {
+        action: 'gomoku_move',
+        payload: { move: coord, isBlack: isBlackTurn }
+      }
+    })
+    window.dispatchEvent(evt)
+  }
 
   const { grid, headers } = useMemo(() => {
     if (!ascii_board || typeof ascii_board !== 'string') {
@@ -156,10 +169,14 @@ function GomokuBoardRenderer({ element }: { element: any }) {
                     (rIdx === 3 && (cIdx === 3 || cIdx === 11)) ||
                     (rIdx === 7 && cIdx === 7) ||
                     (rIdx === 11 && (cIdx === 3 || cIdx === 11))
+                  const isEmpty = !isBlack && !isWhite
+                  const coord = String(headers[cIdx]) + String(rIdx + 1)
 
                   return (
                     <div
                       key={cIdx}
+                      onClick={() => handleCellClick(coord, isEmpty)}
+                      title={isEmpty ? '点击落子: ' + coord : String(cell) + ' (' + coord + ')'}
                       style={{
                         position: 'relative',
                         width: 20,
@@ -167,6 +184,7 @@ function GomokuBoardRenderer({ element }: { element: any }) {
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
+                        cursor: isEmpty && !isFinished ? 'pointer' : 'default',
                       }}
                     >
                       <div style={{ position: 'absolute', left: 0, right: 0, top: '50%', height: 1, background: '#7c4c1f' }} />
@@ -413,10 +431,21 @@ function StepTimelineRenderer({ element }: { element: any }) {
           const isCurrent = step.status === 'in_progress' || step.status === 'running'
           const isFailed = step.status === 'failed' || step.status === 'error'
 
+          const toggleStep = () => {
+            const nextStatus = isDone ? 'in_progress' : isCurrent ? 'completed' : 'in_progress'
+            window.dispatchEvent(new CustomEvent('blackboard-action', {
+              bubbles: true,
+              detail: { action: 'timeline_step_toggle', payload: { stepIndex: idx, status: nextStatus } }
+            }))
+          }
+
           return (
             <div
               key={idx}
+              onClick={toggleStep}
+              title="点击切换步骤状态"
               style={{
+                cursor: 'pointer',
                 display: 'flex',
                 alignItems: 'flex-start',
                 gap: 10,
@@ -1274,10 +1303,18 @@ export function autoTransformBlackboardToSpec(key: string, rawVal: unknown): Spe
   }
 
   // 1. 显式 json-render 契约；兼容 Agent 常用的 component 别名
-  if (val && typeof val === 'object' && ('type' in val || 'component' in val) && 'props' in val) {
+  if (val && typeof val === 'object' && ('type' in val || 'component' in val)) {
     try {
-      const { component, ...spec } = val as Record<string, unknown>
-      return nestedToFlat({ ...spec, type: spec.type || component } as any)
+      const raw = val as Record<string, unknown>
+      const compName = ((raw.type || raw.component) as string)
+      if (compName in blackboardComponentRegistry && !('props' in raw)) {
+        const { component: _c, type: _t, ...restProps } = raw
+        return nestedToFlat({ type: compName, props: restProps } as any)
+      }
+      if ('props' in raw) {
+        const { component, ...spec } = raw
+        return nestedToFlat({ ...spec, type: spec.type || component } as any)
+      }
     } catch {
       return null
     }
@@ -1307,7 +1344,32 @@ export function autoTransformBlackboardToSpec(key: string, rawVal: unknown): Spe
     })
   }
 
-  // 3. 作战任务指挥契约 (mission_spec)
+    // 2. 任务清单/验收检查项 (items / checklist / todos / tasks)
+    if (Array.isArray(obj.items) || Array.isArray(obj.checklist) || Array.isArray(obj.todos) || Array.isArray(obj.tasks)) {
+      const rawItems = obj.items || obj.checklist || obj.todos || obj.tasks
+      // 如果数组元素有 title/status/done 特征，或者属于任务项，自适应转换为 StepTimeline 或 Checklist
+      const isTaskLike = rawItems.some((it: any) => typeof it === 'object' && it && ('status' in it || 'done' in it || 'title' in it || 'task' in it))
+      if (isTaskLike) {
+        const steps = rawItems.map((s: any) => {
+          if (typeof s === 'string') return { title: s, status: 'pending' }
+          const title = s.title || s.name || s.task || s.label || '任务项'
+          let status = s.status || (s.done ? 'completed' : 'pending')
+          if (status === 'finished' || status === 'success' || status === 'done' || status === 'closed') status = 'completed'
+          return {
+            title,
+            status,
+            description: s.description || s.summary || s.desc,
+          }
+        })
+        return nestedToFlat({
+          type: 'StepTimeline',
+          props: {
+            title: obj.title || obj.task_name || obj.name || key,
+            steps,
+          },
+        })
+      }
+    }
   if ('mission' in obj && ('targets' in obj || 'phase' in obj)) {
     return nestedToFlat({
       type: 'MissionSpecCard',
@@ -1608,6 +1670,67 @@ export function BlackboardItemRenderer({
   const [editText, setEditText] = useState('')
   const [editError, setEditError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    const onAction = async (e: any) => {
+      const action = e.detail?.action
+      const payload = e.detail?.payload
+      if (!action || !payload || typeof itemValue !== 'object' || itemValue === null) return
+
+      try {
+        if (action === 'gomoku_move') {
+          const current = { ...(itemValue as any) }
+          const { move, isBlack } = payload
+          const char = isBlack ? 'X' : 'O'
+          const rows = (current.ascii_board || '').trim().split('\n')
+          const match = move.match(/([A-O])(\d+)/i)
+          if (match && rows.length >= 10) {
+            const colIdx = 'ABCDEFGHIJKLMNO'.indexOf(match[1].toUpperCase())
+            const rowIdx = parseInt(match[2], 10)
+            for (let i = 0; i < rows.length; i++) {
+              const m = rows[i].trim().match(/^(\d+)\s+(.*)$/)
+              if (m && parseInt(m[1], 10) === rowIdx) {
+                const cells = m[2].trim().split(/\s+/)
+                if (colIdx >= 0 && colIdx < cells.length) {
+                  cells[colIdx] = char
+                  rows[i] = m[1].padEnd(2, ' ') + ' ' + cells.join(' ')
+                  break
+                }
+              }
+            }
+            current.ascii_board = rows.join('\n')
+          }
+          current.winning_move = move
+          current.total_moves = (current.total_moves || 0) + 1
+          current.status = 'playing'
+          if (!current.meta) current.meta = {}
+          current.meta.last_move = (isBlack ? '黑子 (X)' : '白子 (O)') + ' 落于 ' + move
+          current.meta.current_turn = isBlack ? 'White (O)' : 'Black (X)'
+
+          await api.setBlackboard(itemKey, current, namespace)
+          notifications.show({ color: 'teal', message: '已落子 ' + move + ' 并同步至黑板' })
+          onUpdated?.()
+        } else if (action === 'timeline_step_toggle') {
+          const current = { ...(itemValue as any) }
+          const { stepIndex, status } = payload
+          if (Array.isArray(current.steps) && current.steps[stepIndex]) {
+            current.steps[stepIndex] = { ...current.steps[stepIndex], status }
+            await api.setBlackboard(itemKey, current, namespace)
+            notifications.show({
+              color: 'indigo',
+              message: '步骤「' + (current.steps[stepIndex].title || stepIndex) + '」状态已变更为 ' + status,
+            })
+            onUpdated?.()
+          }
+        }
+      } catch (err: any) {
+        notifications.show({ color: 'red', message: '操作失败: ' + (err.message || '未知错误') })
+      }
+    }
+
+    window.addEventListener('blackboard-action', onAction)
+    return () => window.removeEventListener('blackboard-action', onAction)
+  }, [itemKey, itemValue, namespace, onUpdated])
 
   const jsonString = useMemo(() => {
     if (typeof itemValue === 'string') {

@@ -114,11 +114,22 @@ def test_start_script_passes_explicit_ssh_opt_in_without_secret_argument(monkeyp
 
 def test_daemon_process_breaks_away_from_the_callers_job(monkeypatch, tmp_path):
     monkeypatch.setattr(service, "ROOT", tmp_path)
-    monkeypatch.setattr(service, "current_listening_pids", lambda _port: [])
+    states = iter(([], [222]))
+    monkeypatch.setattr(service, "current_listening_pids", lambda _port: next(states))
+    monkeypatch.setattr(
+        service,
+        "command_line_for_pid",
+        lambda _pid: "python -m astrorder.daemon.session_daemon --port 30009",
+    )
+    monkeypatch.setattr(service, "cleanup_stale_daemons", lambda *_args: [])
+    monkeypatch.setattr(service, "_shared_runtime_dir", lambda: tmp_path)
     calls = []
 
     class Process:
         pid = 222
+
+        def poll(self):
+            return None
 
     monkeypatch.setattr(service.subprocess, "Popen", lambda *args, **kwargs: calls.append((args, kwargs)) or Process())
     (tmp_path / "backend/.venv/Scripts").mkdir(parents=True)
@@ -126,3 +137,125 @@ def test_daemon_process_breaks_away_from_the_callers_job(monkeypatch, tmp_path):
     assert service.start_daemon(metadata_path=tmp_path / "daemon.json") == 222
     assert calls[0][0][0][0].endswith("pythonw.exe")
     assert calls[0][1]["creationflags"] & 0x01000000
+
+
+def test_losing_start_race_terminates_owned_duplicate(monkeypatch, tmp_path):
+    monkeypatch.setattr(service, "ROOT", tmp_path)
+    states = iter(([], [333]))
+    monkeypatch.setattr(service, "current_listening_pids", lambda _port: next(states))
+    monkeypatch.setattr(
+        service,
+        "command_line_for_pid",
+        lambda _pid: "python -m astrorder.daemon.session_daemon --port 30009",
+    )
+    monkeypatch.setattr(service, "cleanup_stale_daemons", lambda *_args: [])
+    monkeypatch.setattr(service, "_parent_pid", lambda _pid: 999)
+    monkeypatch.setattr(service, "_shared_runtime_dir", lambda: tmp_path)
+
+    class Process:
+        pid = 222
+        stopped = False
+
+        def poll(self):
+            return 0 if self.stopped else None
+
+        def terminate(self):
+            self.stopped = True
+
+        def wait(self, timeout):
+            return 0
+
+    process = Process()
+    monkeypatch.setattr(service.subprocess, "Popen", lambda *_args, **_kwargs: process)
+    (tmp_path / "backend/.venv/Scripts").mkdir(parents=True)
+
+    assert service.start_daemon(metadata_path=tmp_path / "daemon.json") == 333
+    assert process.stopped is True
+
+
+def test_venv_launcher_keeps_verified_listener_child(monkeypatch, tmp_path):
+    monkeypatch.setattr(service, "ROOT", tmp_path)
+    states = iter(([], [333]))
+    monkeypatch.setattr(service, "current_listening_pids", lambda _port: next(states))
+    monkeypatch.setattr(
+        service,
+        "command_line_for_pid",
+        lambda _pid: "python -m astrorder.daemon.session_daemon --port 30009",
+    )
+    monkeypatch.setattr(service, "cleanup_stale_daemons", lambda *_args: [])
+    monkeypatch.setattr(service, "_shared_runtime_dir", lambda: tmp_path)
+    monkeypatch.setattr(service, "_parent_pid", lambda _pid: 222)
+
+    class Process:
+        pid = 222
+        stopped = False
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            self.stopped = True
+
+    process = Process()
+    monkeypatch.setattr(service.subprocess, "Popen", lambda *_args, **_kwargs: process)
+    (tmp_path / "backend/.venv/Scripts").mkdir(parents=True)
+
+    assert service.start_daemon(metadata_path=tmp_path / "daemon.json") == 333
+    assert process.stopped is False
+
+
+def test_stale_daemon_cleanup_only_terminates_verified_non_listener(monkeypatch):
+    stale = "pythonw -m astrorder.daemon.session_daemon --port 30009 --enable-codex"
+    monkeypatch.setattr(service, "_daemon_processes", lambda: [
+        {"ProcessId": 222, "CommandLine": stale},
+        {"ProcessId": 333, "CommandLine": stale},
+        {"ProcessId": 444, "CommandLine": "pythonw unrelated.py --port 30009"},
+    ])
+    monkeypatch.setattr(service, "current_listening_pids", lambda _port: [222])
+    monkeypatch.setattr(service, "_parent_pid", lambda _pid: None)
+    monkeypatch.setattr(
+        service,
+        "command_line_for_pid",
+        lambda pid: f'"{stale}"  ' if pid == 333 else None,
+    )
+    terminated = []
+    monkeypatch.setattr(service, "terminate_verified_pid", terminated.append)
+
+    assert service.cleanup_stale_daemons(30009, 222) == [333]
+    assert terminated == [333]
+
+
+def test_stale_cleanup_keeps_venv_launcher_parent(monkeypatch):
+    daemon = "pythonw -m astrorder.daemon.session_daemon --port 30009"
+    monkeypatch.setattr(service, "_daemon_processes", lambda: [
+        {"ProcessId": 222, "CommandLine": daemon},
+        {"ProcessId": 333, "CommandLine": daemon},
+    ])
+    monkeypatch.setattr(service, "_parent_pid", lambda _pid: 222)
+    monkeypatch.setattr(service, "current_listening_pids", lambda _port: [333])
+    monkeypatch.setattr(service, "command_line_for_pid", lambda _pid: daemon)
+    terminated = []
+    monkeypatch.setattr(service, "terminate_verified_pid", terminated.append)
+
+    assert service.cleanup_stale_daemons(30009, 333) == []
+    assert terminated == []
+
+
+def test_stale_daemon_cleanup_rejects_changed_process_identity(monkeypatch):
+    stale = "pythonw -m astrorder.daemon.session_daemon --port 30009"
+    monkeypatch.setattr(
+        service,
+        "_daemon_processes",
+        lambda: [{"ProcessId": 333, "CommandLine": stale}],
+    )
+    monkeypatch.setattr(service, "current_listening_pids", lambda _port: [])
+    monkeypatch.setattr(
+        service,
+        "command_line_for_pid",
+        lambda _pid: "pythonw -m astrorder.daemon.session_daemon --port 30010",
+    )
+    terminated = []
+    monkeypatch.setattr(service, "terminate_verified_pid", terminated.append)
+
+    assert service.cleanup_stale_daemons(30009, 222) == []
+    assert terminated == []

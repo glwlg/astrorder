@@ -1,10 +1,12 @@
 import {
+  IconCheck,
+  IconCopy,
   IconExternalLink,
   IconEye,
   IconFileText,
 } from '@tabler/icons-react'
 import { Anchor } from '@mantine/core'
-import { isValidElement, useEffect, useState, type ReactNode } from 'react'
+import { isValidElement, useEffect, useRef, useState, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { Session } from '../domain/types'
@@ -30,10 +32,56 @@ function MermaidDiagram({ code }: { code: string }) {
     return () => { active = false }
   }, [code])
 
-  if (failed) return <pre className="markdown-code-block"><code>{code}</code></pre>
+  if (failed) return <MarkdownCodeBlock><code>{code}</code></MarkdownCodeBlock>
   return (
     <div className="markdown-mermaid" aria-label="Mermaid 图表">
       {svg ? <div dangerouslySetInnerHTML={{ __html: svg }} /> : <span>正在渲染图表…</span>}
+    </div>
+  )
+}
+
+function MarkdownCodeBlock({ children }: { children?: ReactNode }) {
+  const [copied, setCopied] = useState(false)
+  const codeRef = useRef<HTMLElement>(null)
+
+  let language = ''
+  if (isValidElement<{ className?: string }>(children)) {
+    const match = (children.props.className || '').match(/language-([a-zA-Z0-9_-]+)/)
+    if (match) language = match[1]
+  }
+
+  const handleCopy = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    const text = codeRef.current?.innerText || codeRef.current?.textContent || ''
+    if (!text) return
+    void navigator.clipboard.writeText(text)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1600)
+  }
+
+  return (
+    <div className="markdown-code-wrapper">
+      <div className="markdown-code-header">
+        <span className="markdown-code-lang">{(language || 'code').toUpperCase()}</span>
+        <button
+          type="button"
+          className="markdown-code-copy-btn"
+          onClick={handleCopy}
+          aria-label={copied ? '已复制代码' : '复制代码'}
+        >
+          {copied ? <IconCheck size={12} color="var(--astr-teal, #12b886)" /> : <IconCopy size={12} />}
+          <span>{copied ? '已复制' : '复制'}</span>
+        </button>
+      </div>
+      <pre className="markdown-code-block">
+        {isValidElement<{ children?: ReactNode }>(children) ? (
+          <code {...children.props} ref={codeRef}>
+            {children.props.children}
+          </code>
+        ) : (
+          <code ref={codeRef}>{children}</code>
+        )}
+      </pre>
     </div>
   )
 }
@@ -299,7 +347,7 @@ export function MarkdownContent({
           table: (props) => <div className="markdown-table-wrap"><table>{props.children}</table></div>,
           pre: (props) => {
             const code = mermaidSource(props.children)
-            return code ? <MermaidDiagram code={code} /> : <pre className="markdown-code-block">{props.children}</pre>
+            return code ? <MermaidDiagram code={code} /> : <MarkdownCodeBlock>{props.children}</MarkdownCodeBlock>
           },
         }}
       >

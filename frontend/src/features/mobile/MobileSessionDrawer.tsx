@@ -104,11 +104,12 @@ export function MobileSessionDrawer({ groups, pins, pinnedProjects, selectedKey,
   }
 
   const handoffTargets = (session: Session) => {
-    if (!agents) return []
-    const source = agents[session.agent_id]
-    if (!source || source.connection_id != null) return []
-    return Object.values(agents).filter((agent) =>
-      agent.kind !== source.kind && agent.connection_id == null && agent.status === 'ready',
+    const source = agents?.[session.agent_id]
+    if (!source) return []
+    return Object.values(agents || {}).filter((agent) =>
+      agent.kind !== source.kind &&
+      (agent.connection_id ?? null) === (source.connection_id ?? null) &&
+      agent.status === 'ready',
     )
   }
 

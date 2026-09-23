@@ -32,4 +32,16 @@ describe('safe markdown rendering', () => {
     expect(container.querySelector('.markdown-file-link')).not.toBeNull()
     expect(container.querySelector('.markdown-image-link')).not.toBeNull()
   })
+
+  it('renders markdown code blocks with language header and copy button', () => {
+    const { container } = render(
+      <MantineProvider>
+        <MarkdownContent value={'```bash\necho hello\n```'} />
+      </MantineProvider>,
+    )
+    expect(container.querySelector('.markdown-code-wrapper')).not.toBeNull()
+    expect(screen.getByText('BASH')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '复制代码' })).toBeInTheDocument()
+    expect(screen.getByText('echo hello')).toBeInTheDocument()
+  })
 })

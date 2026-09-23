@@ -419,4 +419,70 @@ describe('SessionRail local handoff', () => {
     expect(forkItem).toBeInTheDocument()
     view.unmount()
   })
+
+  it('remembers collapsed state in localStorage and respects it across renders', () => {
+    const storageKey = 'astrorder:collapsed-projects'
+    const map = new Map<string, string>()
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => map.get(key) || null,
+      setItem: (key: string, val: string) => map.set(key, val),
+      removeItem: (key: string) => map.delete(key),
+    })
+    const view = render(
+      <MantineProvider>
+        <SessionRail sessions={sessions} agents={agents} projects={projects} onSelect={vi.fn()} />
+      </MantineProvider>,
+    )
+    const titleBtn = screen.getAllByRole('button', { name: /空项目.*0 个会话/ })[0]
+    expect(titleBtn).toHaveAttribute('aria-expanded', 'true')
+    fireEvent.click(titleBtn)
+    expect(titleBtn).toHaveAttribute('aria-expanded', 'false')
+    const stored = JSON.parse(map.get(storageKey) || '{}')
+    expect(Object.values(stored).some(v => v === true)).toBe(true)
+    view.unmount()
+
+    const reopened = render(
+      <MantineProvider>
+        <SessionRail sessions={sessions} agents={agents} projects={projects} onSelect={vi.fn()} />
+      </MantineProvider>,
+    )
+    const reopenedBtn = screen.getAllByRole('button', { name: /空项目.*0 个会话/ })[0]
+    expect(reopenedBtn).toHaveAttribute('aria-expanded', 'false')
+    reopened.unmount()
+    vi.unstubAllGlobals()
+  })
+
+  it('displays unread dot for completed unread session and clears it on selection', () => {
+    const map = new Map<string, string>()
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => map.get(key) || null,
+      setItem: (key: string, val: string) => map.set(key, val),
+      removeItem: (key: string) => map.delete(key),
+    })
+
+    const recentSession: Session = {
+      ...sessions[0],
+      id: 'recent-unread',
+      updated_at: new Date().toISOString(),
+    }
+
+    const onSelect = vi.fn()
+    const view = render(
+      <MantineProvider>
+        <SessionRail sessions={[recentSession]} agents={agents} projects={projects} onSelect={onSelect} />
+      </MantineProvider>,
+    )
+
+    const row = view.container.querySelector('.session-row')!
+    expect(row).toHaveClass('is-unread')
+    expect(row.querySelector('.status-unread')).toBeInTheDocument()
+
+    fireEvent.click(row)
+    expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ id: 'recent-unread' }))
+    const readStored = JSON.parse(map.get('astrorder:sessions-last-read') || '{}')
+    expect(readStored[scopeKey('local', 'recent-unread')]).toBeGreaterThan(0)
+
+    view.unmount()
+    vi.unstubAllGlobals()
+  })
 })

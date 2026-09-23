@@ -58,6 +58,19 @@ function pathKey(path: string): string {
   return /^[a-z]:\//i.test(normalized) ? normalized.toLowerCase() : normalized
 }
 
+function getRelativePath(fullPath: string, basePath: string): string {
+  if (!basePath) return fullPath
+  const normFull = fullPath.replace(/\\/g, '/')
+  const normBase = basePath.replace(/\\/g, '/').replace(/\/+$/, '')
+  if (normFull.toLowerCase().startsWith(normBase.toLowerCase() + '/')) {
+    return normFull.slice(normBase.length + 1)
+  }
+  if (normFull.toLowerCase() === normBase.toLowerCase()) {
+    return '.'
+  }
+  return fullPath
+}
+
 function findParentPaths(nodes: TreeNode[], target: string, parents: string[] = []): string[] | null {
   for (const node of nodes) {
     if (pathKey(node.path) === pathKey(target)) return parents
@@ -78,7 +91,7 @@ function FileTreeNodeItem({
   selectedPath,
   onSelectPath,
   onToggleDirectory,
-  onCopyFiles,
+  onContextMenu,
   level = 0,
 }: {
   node: TreeNode
@@ -89,12 +102,11 @@ function FileTreeNodeItem({
   selectedPath: string | null
   onSelectPath: (path: string) => void
   onToggleDirectory: (path: string) => void
-  onCopyFiles: (paths: string[]) => Promise<void>
+  onContextMenu: (node: TreeNode, e: React.MouseEvent) => void
   level?: number
 }) {
   const opened = expandedPaths.has(node.path)
   const isSelected = selectedPath === node.path
-  const [menuOpened, setMenuOpened] = useState(false)
   const openArtifact = useSidecarStore((s) => s.openArtifact)
 
   const openFile = () => {
@@ -121,7 +133,6 @@ function FileTreeNodeItem({
 
   const handleClick = (e: React.MouseEvent) => {
     e.stopPropagation()
-    setMenuOpened(false)
     onSelectPath(node.path)
   }
 
@@ -132,14 +143,17 @@ function FileTreeNodeItem({
 
   return (
     <div>
-      <Menu shadow="md" width={180} opened={menuOpened} onChange={setMenuOpened} trigger="hover" openDelay={9999999} withinPortal>
-        <Menu.Target>
-          <Group
+      <Group
             gap={4}
             wrap="nowrap"
             onClick={handleClick}
             onDoubleClick={handleDoubleClick}
-            onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onSelectPath(node.path); setMenuOpened(true) }}
+            onContextMenu={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+          onSelectPath(node.path)
+          onContextMenu(node, e)
+        }}
             style={{
               padding: '3px 6px',
               paddingLeft: 6 + level * 14,
@@ -183,50 +197,6 @@ function FileTreeNodeItem({
               </Text>
             )}
           </Group>
-        </Menu.Target>
-
-        <Menu.Dropdown>
-          <Menu.Item
-            leftSection={<IconCopy size={14} />}
-            onClick={() => void onCopyFiles([node.path])}
-          >
-            复制文件 (Ctrl+C)
-          </Menu.Item>
-          <Menu.Item
-            leftSection={<IconDownload size={14} />}
-            onClick={() => {
-              const url = `/api/v1/files/raw?path=${encodeURIComponent(node.path)}&download=1&session_id=${encodeURIComponent(sessionId)}&connection_id=${encodeURIComponent(connectionId || '')}`
-              window.open(url, '_blank')
-            }}
-          >
-            下载 / 另存为
-          </Menu.Item>
-          {(!connectionId || connectionId === 'local') && (
-            <Menu.Item
-              leftSection={<IconFolderOpen size={14} />}
-              onClick={async () => {
-                const response = await fetch('/api/v1/system/open-file', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ path: node.path, action: 'reveal' }),
-                })
-                if (!response.ok) notifications.show({ color: 'red', message: '无法在资源管理器中打开' })
-              }}
-            >
-              在资源管理器中打开
-            </Menu.Item>
-          )}
-          <Menu.Divider />
-          <Menu.Item
-            onClick={() => {
-              void navigator.clipboard.writeText(node.path)
-              notifications.show({ message: '路径已复制到剪贴板', color: 'teal', icon: <IconCheck size={14} /> })
-            }}
-          >
-            复制路径
-          </Menu.Item>
-        </Menu.Dropdown>
-      </Menu>
 
       {node.is_dir && node.children && (
         <Collapse expanded={opened}>
@@ -241,7 +211,7 @@ function FileTreeNodeItem({
               selectedPath={selectedPath}
               onSelectPath={onSelectPath}
               onToggleDirectory={onToggleDirectory}
-              onCopyFiles={onCopyFiles}
+              onContextMenu={onContextMenu}
               level={level + 1}
             />
           ))}
@@ -260,6 +230,15 @@ export function FileTreeViewer({ artifact }: ViewerContext) {
   const storageKey = expansionStorageKey(artifact)
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(() => readExpandedPaths(storageKey))
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
+  const [contextMenu, setContextMenu] = useState<{ node: TreeNode; x: number; y: number } | null>(null)
+
+  const handleContextMenu = useCallback((node: TreeNode, e: React.MouseEvent) => {
+    setContextMenu({
+      node,
+      x: e.clientX,
+      y: e.clientY,
+    })
+  }, [])
   const [copying, setCopying] = useState(false)
   const revealPath = typeof artifact.metadata?.revealPath === 'string' ? artifact.metadata.revealPath : null
   const revealAt = artifact.metadata?.revealAt
@@ -280,7 +259,7 @@ export function FileTreeViewer({ artifact }: ViewerContext) {
     try {
       const queryPath = artifact.path || ''
       const res = await fetch(
-        `/api/v1/files/tree?path=${encodeURIComponent(artifact.path || '')}&reveal_path=${encodeURIComponent(revealPath || '')}&session_id=${encodeURIComponent(artifact.sessionId)}&connection_id=${encodeURIComponent(artifact.connectionId || '')}`,
+        `/api/v1/files/tree?depth=6&path=${encodeURIComponent(artifact.path || '')}&reveal_path=${encodeURIComponent(revealPath || '')}&session_id=${encodeURIComponent(artifact.sessionId)}&connection_id=${encodeURIComponent(artifact.connectionId || '')}`,
       )
       if (!res.ok) throw new Error(`获取文件树失败 (${res.status})`)
       const data = await res.json()
@@ -377,8 +356,7 @@ export function FileTreeViewer({ artifact }: ViewerContext) {
     }
   }, [artifact.connectionId, artifact.sessionId])
 
-  useEffect(() => {
-    const onKeyDown = (e: globalThis.KeyboardEvent) => {
+  const handlePaneKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
         const activeTag = (document.activeElement?.tagName || '').toLowerCase()
         if (activeTag === 'input' || activeTag === 'textarea') return
@@ -387,13 +365,11 @@ export function FileTreeViewer({ artifact }: ViewerContext) {
 
         if (selectedPath) {
           e.preventDefault()
+          e.stopPropagation()
           void handleCopyFiles([selectedPath])
         }
       }
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [handleCopyFiles, selectedPath])
+  }
 
   return (
     <div
@@ -402,6 +378,7 @@ export function FileTreeViewer({ artifact }: ViewerContext) {
       style={{ display: 'flex', flexDirection: 'column', height: '100%' }}
       tabIndex={0}
       onClick={() => setSelectedPath(null)}
+      onKeyDown={handlePaneKeyDown}
     >
       <Paper p="xs" withBorder style={{ borderBottom: '1px solid var(--astr-border)', borderRadius: 0 }}>
         <Group justify="space-between" wrap="nowrap">
@@ -459,13 +436,112 @@ export function FileTreeViewer({ artifact }: ViewerContext) {
                 selectedPath={selectedPath}
                 onSelectPath={setSelectedPath}
                 onToggleDirectory={toggleDirectory}
-                onCopyFiles={handleCopyFiles}
+                onContextMenu={handleContextMenu}
                 level={0}
               />
             ))}
           </ScrollArea>
         )}
       </div>
+
+      <Menu
+        shadow="md"
+        width={220}
+        opened={contextMenu !== null}
+        onChange={(opened) => {
+          if (!opened) setContextMenu(null)
+        }}
+        position="bottom-start"
+        withinPortal
+        closeOnClickOutside
+        closeOnItemClick
+      >
+        <Menu.Target>
+          <div
+            style={{
+              position: 'fixed',
+              left: contextMenu?.x ?? 0,
+              top: contextMenu?.y ?? 0,
+              width: 1,
+              height: 1,
+              pointerEvents: 'none',
+              visibility: 'hidden',
+            }}
+          />
+        </Menu.Target>
+
+        {contextMenu && (
+          <Menu.Dropdown style={{ minWidth: 210 }}>
+            <Menu.Item
+              leftSection={<IconCopy size={14} />}
+              style={{ whiteSpace: 'nowrap' }}
+              onClick={() => {
+                const node = contextMenu.node
+                setContextMenu(null)
+                void handleCopyFiles([node.path])
+              }}
+            >
+              复制文件 (Ctrl+C)
+            </Menu.Item>
+            <Menu.Item
+              leftSection={<IconDownload size={14} />}
+              style={{ whiteSpace: 'nowrap' }}
+              onClick={() => {
+                const node = contextMenu.node
+                setContextMenu(null)
+                const url = `/api/v1/files/raw?path=${encodeURIComponent(node.path)}&download=1&session_id=${encodeURIComponent(artifact.sessionId)}&connection_id=${encodeURIComponent(artifact.connectionId || '')}`
+                window.open(url, '_blank')
+              }}
+            >
+              下载 / 另存为
+            </Menu.Item>
+            {(!artifact.connectionId || artifact.connectionId === 'local') && (
+              <Menu.Item
+                leftSection={<IconFolderOpen size={14} />}
+                style={{ whiteSpace: 'nowrap' }}
+                onClick={async () => {
+                  const node = contextMenu.node
+                  setContextMenu(null)
+                  const response = await fetch('/api/v1/system/open-file', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ path: node.path, action: 'reveal' }),
+                  })
+                  if (!response.ok) notifications.show({ color: 'red', message: '无法在资源管理器中打开' })
+                }}
+              >
+                在资源管理器中打开
+              </Menu.Item>
+            )}
+            <Menu.Divider />
+            <Menu.Item
+              leftSection={<IconCopy size={14} />}
+              style={{ whiteSpace: 'nowrap' }}
+              onClick={() => {
+                const node = contextMenu.node
+                setContextMenu(null)
+                void navigator.clipboard.writeText(node.path)
+                notifications.show({ message: '全路径已复制到剪贴板', color: 'teal', icon: <IconCheck size={14} /> })
+              }}
+            >
+              复制全路径
+            </Menu.Item>
+            <Menu.Item
+              leftSection={<IconCopy size={14} />}
+              style={{ whiteSpace: 'nowrap' }}
+              onClick={() => {
+                const node = contextMenu.node
+                setContextMenu(null)
+                const rel = getRelativePath(node.path, rootPath)
+                void navigator.clipboard.writeText(rel)
+                notifications.show({ message: '相对路径已复制到剪贴板', color: 'teal', icon: <IconCheck size={14} /> })
+              }}
+            >
+              复制相对路径
+            </Menu.Item>
+          </Menu.Dropdown>
+        )}
+      </Menu>
     </div>
   )
 }

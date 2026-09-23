@@ -125,6 +125,7 @@ class SessionDaemon:
         self._connector_sockets: dict[str, Any] = {}
         self._runtime_lock = asyncio.Lock()
         self._maintenance = False
+        self._pending_config_reloads: set[str] = set()
         self._shutdown_event = shutdown_event
 
     def register_runtime(self, agent_type: str, runtime: SessionRuntime) -> None:
@@ -252,7 +253,9 @@ class SessionDaemon:
                     stale.append(socket)
             for socket in stale:
                 self._subscribers.discard(socket)
-            return frame
+        if self._pending_config_reloads:
+            asyncio.create_task(self._drain_config_reloads())
+        return frame
 
     async def serve(self, host: str = "127.0.0.1", port: int = 30009):
         """Start the daemon's loopback IPC WebSocket listener."""
@@ -277,6 +280,7 @@ class SessionDaemon:
             self._pending_connector_events.clear()
             self._connector_agents.clear()
             self._connector_sockets.clear()
+            self._pending_config_reloads.clear()
         shutdowns = [getattr(runtime, "shutdown", None) for runtime in runtimes]
         await asyncio.gather(
             *(shutdown() for shutdown in shutdowns if callable(shutdown)),
@@ -464,7 +468,7 @@ class SessionDaemon:
         action = request.get("action")
         if action not in {
             "daemon.shutdown", "daemon.status", "session.create", "session.spawn",
-            "runtime.request", *RUNTIME_ACTIONS,
+            "runtime.request", "model_config.plan", "model_config.apply", "model_config.reload", *RUNTIME_ACTIONS,
         }:
             return self.handle_request(raw)
         request_id = request.get("request_id")
@@ -488,6 +492,15 @@ class SessionDaemon:
                 return await self._spawn_runtime(request)
             if action == "runtime.request":
                 return await self._request_runtime(request)
+            if action in {"model_config.plan", "model_config.apply"}:
+                from .model_config import execute_model_config
+                result = await asyncio.to_thread(execute_model_config, action, request)
+                return {
+                    "action": f"{action}.result", "request_id": request_id,
+                    "daemon_id": self.daemon_id, "result": result,
+                }
+            if action == "model_config.reload":
+                return await self._request_config_reload(request)
             return await self._dispatch_runtime_action(action, request)
         except DaemonProtocolError as exc:
             return {"action": "error", "request_id": request_id, "detail": str(exc)}
@@ -513,6 +526,30 @@ class SessionDaemon:
             "daemon_id": self.daemon_id,
             "result": dict(result),
         }
+
+    async def _request_config_reload(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        agents = request.get("agents")
+        if not isinstance(agents, list) or not agents or any(agent not in {"codex", "grok"} for agent in agents):
+            raise DaemonProtocolError("模型配置重载 Agent 无效")
+        self._pending_config_reloads.update(agents)
+        reloaded = await self._drain_config_reloads()
+        return {
+            "action": "model_config.reload.result", "request_id": request.get("request_id"),
+            "daemon_id": self.daemon_id, "result": {
+                "reloaded": reloaded, "pending": sorted(self._pending_config_reloads),
+            },
+        }
+
+    async def _drain_config_reloads(self) -> list[str]:
+        reloaded: list[str] = []
+        async with self._runtime_lock:
+            for agent_type in tuple(self._pending_config_reloads):
+                reload_config = getattr(self._runtime_registry.get(agent_type), "reload_config", None)
+                if callable(reload_config):
+                    await reload_config()
+                self._pending_config_reloads.discard(agent_type)
+                reloaded.append(agent_type)
+        return reloaded
 
     async def _shutdown_request(self, request: Mapping[str, Any]) -> dict[str, Any]:
         if self._secret is None:
@@ -675,6 +712,8 @@ class SessionDaemon:
                 self._session_runtime_metadata.pop(session_id, None)
                 self._runtime_control_sessions.discard(session_id)
                 self._sessions.pop(session_id, None)
+        if self._pending_config_reloads:
+            await self._drain_config_reloads()
         return {
             "action": f"{action}.result",
             "request_id": request.get("request_id"),

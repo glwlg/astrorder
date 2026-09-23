@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { api } from '../../api/client'
 import type { Agent, Session } from '../../domain/types'
 import { useAstrorderStore } from '../../state/store'
-import { ChatComposer } from './ChatComposer'
+import { ChatComposer, interpretGatewayError } from './ChatComposer'
 import { draftStorage } from './draftStorage'
 
 const queueMemory = vi.hoisted(() => ({ rows: [] as never[] }))
@@ -195,4 +195,19 @@ it('syncs its measured height to parent style as --composer-height and invokes o
   await waitFor(() => expect(column.style.getPropertyValue('--composer-height')).toBeTruthy())
   expect(onHeightChange).toHaveBeenCalled()
   client.clear()
+})
+
+it('interprets quota exceeded errors with recommended model', () => {
+  const parsed = interpretGatewayError('openai.APIConnectionError: 429: quota_exceeded')
+  expect(parsed).not.toBeNull()
+  expect(parsed?.type).toBe('quota')
+  expect(parsed?.title).toBe('网关模型配额已耗尽')
+  expect(parsed?.recommendedModel?.model).toBe('gemini-3.8-flash')
+})
+
+it('interprets server disconnection gracefully', () => {
+  const parsed = interpretGatewayError('httpx.RemoteProtocolError: Server disconnected without sending a response.')
+  expect(parsed).not.toBeNull()
+  expect(parsed?.type).toBe('disconnect')
+  expect(parsed?.title).toBe('网关服务断开或连接超时')
 })

@@ -117,6 +117,17 @@ def main():
     application.state.desktop_shutdown = lambda: setattr(server, "should_exit", True)
 
     stop_when_desktop_exits(server, os.environ.get('ASTRORDER_DESKTOP_PID'))
+    # Windows ProactorEventLoop 优雅退出补丁：修复关闭服务时正在接受握手的 socket 触发 AssertionError
+    import sys
+    if sys.platform == "win32":
+        import asyncio.proactor_events
+        orig_init = asyncio.proactor_events._ProactorSocketTransport.__init__
+        def patched_init(self, loop, sock, protocol, waiter=None, extra=None, server=None):
+            if server is not None and getattr(server, "_sockets", None) is None:
+                server = None
+            orig_init(self, loop, sock, protocol, waiter, extra, server)
+        asyncio.proactor_events._ProactorSocketTransport.__init__ = patched_init
+
     server.run()
 
 

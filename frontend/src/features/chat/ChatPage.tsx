@@ -1,12 +1,14 @@
 import {
   IconFolder,
+  IconGitFork,
   IconInfoCircle,
   IconLayoutSidebarRightExpand,
   IconSparkles,
   IconTransfer,
   IconX,
 } from '@tabler/icons-react'
-import { ActionIcon, Button, Drawer, Group, Title, Tooltip } from '@mantine/core'
+import { ActionIcon, Button, Drawer, Group, Modal, Stack, Switch, Text, TextInput, Title, Tooltip } from '@mantine/core'
+import { notifications } from '@mantine/notifications'
 import { useDisclosure, useMediaQuery } from '@mantine/hooks'
 import { useQueryClient, useQuery } from '@tanstack/react-query'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -15,7 +17,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ApiError, api } from '../../api/client'
 import { newCommandId, scopeKey } from '../../domain/semantics'
-import type { Approval, Command, Session, Task } from '../../domain/types'
+import type { Approval, Command, Message, Session, Task } from '../../domain/types'
 import { EmptyState } from '../../components/EmptyState'
 import { SessionStatusLabel } from '../../components/Status'
 import { WelcomeView } from './WelcomeView'
@@ -115,6 +117,14 @@ function ChatPageBody() {
       setActiveBotGroup(null)
     }
   }, [sessionId])
+  const [forkModalOpen, setForkModalOpen] = useState(false)
+  const [forkTargetMessage, setForkTargetMessage] = useState<{ message: Message; turnIndex: number } | null>(null)
+  const [forkTitle, setForkTitle] = useState('')
+  const [forkWorktree, setForkWorktree] = useState(false)
+  const [forkBranchName, setForkBranchName] = useState('')
+  const [forkLoading, setForkLoading] = useState(false)
+
+  
   const handoffPeer = useMemo(() => {
     if (!selected) return null
     if (selected.handoff_from_agent_id && selected.handoff_from_session_id) {
@@ -397,6 +407,46 @@ function ChatPageBody() {
   const resourceError = resources.messages.error || resources.commands.error || resources.tasks.error
   const showRightPanel = detailsPinned || sidecarOpen
 
+  const handleOpenFork = (message: Message, turnIndex: number) => {
+    if (!selected) return
+    setForkTargetMessage({ message, turnIndex })
+    const baseTitle = selected.title || '新会话'
+    setForkTitle(`${baseTitle} (分叉)`)
+    setForkBranchName(`fork-${Date.now().toString(36)}`)
+    setForkWorktree(false)
+    setForkModalOpen(true)
+  }
+
+  const handleConfirmFork = async () => {
+    if (!selected || !forkTargetMessage) return
+    setForkLoading(true)
+    try {
+      const result = await api.forkSession(selected.id, {
+        agent_id: selected.agent_id,
+        title: forkTitle.trim() || undefined,
+        worktree: forkWorktree,
+        branch_name: forkWorktree && forkBranchName.trim() ? forkBranchName.trim() : undefined,
+        target_message_id: forkTargetMessage.message.id,
+        turn_index: forkTargetMessage.turnIndex,
+      })
+      notifications.show({
+        color: 'teal',
+        title: '会话已分叉',
+        message: `成功从此回复分叉新会话：${result.title || result.id}`,
+      })
+      setForkModalOpen(false)
+      navigate(`/chat/${encodeURIComponent(result.id)}?agent_id=${encodeURIComponent(result.agent_id)}`)
+    } catch (err) {
+      notifications.show({
+        color: 'red',
+        title: '分叉失败',
+        message: err instanceof Error ? err.message : '分叉会话出现未知错误',
+      })
+    } finally {
+      setForkLoading(false)
+    }
+  }
+
   return (
     <div className="route-page chat-page">
       <div
@@ -474,7 +524,8 @@ function ChatPageBody() {
              void resources.messages.refetch()
              void resources.commands.refetch()
            }}
-            onEditLastUserMessage={(text) => {
+           onForkAtMessage={handleOpenFork}
+           onEditLastUserMessage={(text) => {
               useAstrorderStore.getState().setDraft(selected.agent_id, selected.id, { text, attachments: [] })
               const el = document.querySelector<HTMLTextAreaElement>('.composer-input textarea')
               if (el) {
@@ -605,6 +656,59 @@ function ChatPageBody() {
           document.body,
         )}
       {selected && <QuickOpen session={selected} opened={quickOpenOpened} onClose={() => setQuickOpenOpened(false)} />}
+
+      {/* 从任意回复分叉会话弹窗 */}
+      <Modal
+        opened={forkModalOpen}
+        onClose={() => setForkModalOpen(false)}
+        title={
+          <Group gap={8}>
+            <IconGitFork size={18} style={{ color: 'var(--astr-indigo)' }} />
+            <span style={{ fontWeight: 600, fontSize: '14px' }}>从该回复分叉新会话</span>
+          </Group>
+        }
+        centered
+        radius="md"
+      >
+        <Stack gap="md">
+          <Text size="xs" c="dimmed">
+            将在当前回复节点创建全新分支，继承此前的完整对话上下文，后续尝试不会影响原会话。
+          </Text>
+          <TextInput
+            label="新会话标题"
+            placeholder="输入分叉会话标题"
+            value={forkTitle}
+            onChange={(e) => setForkTitle(e.currentTarget.value)}
+          />
+          <Switch
+            label="创建独立 Git Worktree 分支工作区"
+            description="在独立目录签出新 Git 分支，防止两个分支的代码修改互相干扰"
+            checked={forkWorktree}
+            onChange={(e) => setForkWorktree(e.currentTarget.checked)}
+          />
+          {forkWorktree && (
+            <TextInput
+              label="Git 分支名"
+              placeholder="例如：feature-experimental"
+              value={forkBranchName}
+              onChange={(e) => setForkBranchName(e.currentTarget.value)}
+            />
+          )}
+          <Group justify="flex-end" mt="sm">
+            <Button variant="default" onClick={() => setForkModalOpen(false)} disabled={forkLoading}>
+              取消
+            </Button>
+            <Button
+              color="indigo"
+              onClick={() => void handleConfirmFork()}
+              loading={forkLoading}
+              leftSection={<IconGitFork size={15} />}
+            >
+              立即分叉
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
     </div>
   )
 }

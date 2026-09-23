@@ -239,6 +239,9 @@ class ControlService:
     def delete_session(self, agent_id: str, session_id: str) -> bool:
         success = self.store.delete_session(agent_id, session_id)
         if success:
+            from .jev_browser import close_browser_session
+
+            close_browser_session(f"{agent_id}::{session_id}")
             self._server_event(
                 "session.delete",
                 agent_id=agent_id,
@@ -266,6 +269,8 @@ class ControlService:
             delete_sessions=delete_sessions,
         )
         if success:
+            from .jev_browser import close_browser_session
+
             self._server_event(
                 "project.delete",
                 agent_id=None,
@@ -279,6 +284,7 @@ class ControlService:
                 },
             )
             for sess in deleted_sessions:
+                close_browser_session(f"{sess['agent_id']}::{sess['id']}")
                 self._server_event(
                     "session.delete",
                     agent_id=sess["agent_id"],

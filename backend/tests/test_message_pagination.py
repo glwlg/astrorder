@@ -64,3 +64,33 @@ def test_placeholder_title_does_not_replace_meaningful_title(tmp_path):
         assert row['title'] == 'meaningful title'
     finally:
         store.close()
+
+
+def test_native_snapshot_preserves_session_project_metadata(tmp_path):
+    store = Store(Settings(database_url=f'sqlite:///{tmp_path}/metadata.db', auto_connect_local_hermes=False))
+    try:
+        base = dict(id='session', agent_id='hermes', title='Session', status='idle', updated_at='2026-09-22T00:00:00Z')
+        store.upsert_session({
+            **base,
+            'workspace': '/home/luwei/workspace/OpsCore',
+            'project_id': 'p_e4e6c3c1',
+            'project_name': 'OpsCore',
+        })
+        row = store.upsert_session({**base, 'updated_at': '2026-09-22T00:00:01Z'})
+        assert (row['workspace'], row['project_id'], row['project_name']) == (
+            '/home/luwei/workspace/OpsCore', 'p_e4e6c3c1', 'OpsCore'
+        )
+        store.apply_connector_event(
+            event_id='native-snapshot',
+            event_type='session.upsert',
+            agent_id='hermes',
+            session_id='session',
+            data={**base, 'workspace': None, 'project_id': None, 'project_name': None,
+                  'updated_at': '2026-09-22T00:00:02Z'},
+        )
+        row = store.get_session('hermes', 'session')
+        assert (row['workspace'], row['project_id'], row['project_name']) == (
+            '/home/luwei/workspace/OpsCore', 'p_e4e6c3c1', 'OpsCore'
+        )
+    finally:
+        store.close()

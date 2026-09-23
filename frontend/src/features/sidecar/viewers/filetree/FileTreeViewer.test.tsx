@@ -90,4 +90,40 @@ describe('FileTreeViewer expansion persistence', () => {
     expect(fetch).toHaveBeenCalledWith(expect.stringContaining(`reveal_path=${encodeURIComponent(revealPath)}`))
     view.unmount()
   })
+
+  it('opens context menu on right click with full and relative path copy options', async () => {
+    vi.stubGlobal('ResizeObserver', class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    })
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      root: artifact.path,
+      items: [{
+        name: 'src',
+        path: 'P:/workspace/example/src',
+        is_dir: false,
+      }],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal('navigator', {
+      clipboard: { writeText },
+    })
+
+    const view = renderTree()
+    const item = await screen.findByText('src')
+    const row = item.closest('.file-tree-row') as HTMLElement
+
+    fireEvent.contextMenu(row, { clientX: 120, clientY: 240 })
+
+    expect(await screen.findByText('在资源管理器中打开')).toBeInTheDocument()
+    expect(screen.getByText('复制全路径')).toBeInTheDocument()
+    expect(screen.getByText('复制相对路径')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('复制相对路径'))
+    expect(writeText).toHaveBeenCalledWith('src')
+
+    view.unmount()
+  })
 })

@@ -141,9 +141,11 @@ class DaemonCodexController:
     ) -> tuple[str, str | None]:
         session_id = command["session_id"]
         await self._attach(session_id)
+        binding = self.connection._bindings.get(session_id)
+        model = binding.get("model") if isinstance(binding, Mapping) else None
         response = await self.bridge.request_control(
             f"session.{name}",
-            {"session_id": session_id, **({"instructions": argument} if argument else {})},
+            {"session_id": session_id, **({"model": model} if model else {}), **({"instructions": argument} if argument else {})},
         )
         result = response.get("result")
         if not isinstance(result, Mapping):

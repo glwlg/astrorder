@@ -1,6 +1,6 @@
 import { IconArrowDown, IconPaperclip, IconRefresh, IconTool, IconVectorTriangle } from '@tabler/icons-react'
 import { ActionIcon, Anchor, Button, Group, Paper, Stack, Text, Tooltip } from '@mantine/core'
-import { IconCheck, IconChecks, IconCopy, IconEdit, IconShieldCheck } from '@tabler/icons-react'
+import { IconCheck, IconChecks, IconCopy, IconEdit, IconGitFork, IconShieldCheck } from '@tabler/icons-react'
 import { useMemo, useState } from 'react'
 import type { Approval, Attachment, Message, OutboxEntry, Session } from '../../domain/types'
 import { useStickToBottom } from '../../hooks/useStickToBottom'
@@ -9,6 +9,8 @@ import { LazyDetails } from '../../components/LazyDetails'
 import { MessageBody } from '../../components/MessageBody'
 import { useOlderMessages } from '../../hooks/useOlderMessages'
 import { describeTool, FileChangeDiffBlock, fileChangeDiffs, PackSummary, ShellOutputBlock, ToolLineIcon, unwrapCommand } from './toolPresentation'
+import { ToolOutputBlock } from './ToolOutputBlock'
+import { isCompactionMessage, CompactionDivider } from './CompactionDivider'
 import { ShinyText } from '../../components/animations/ShinyText'
 import { StarBorder } from '../../components/animations/StarBorder'
 import { AstrorderLoader } from '../../components/AnimatedStatus'
@@ -152,6 +154,7 @@ function MessageItem({
   session,
   isLatest,
   onEdit,
+  onFork,
   hasAssistantReplied = false,
 }: {
   message: Message
@@ -160,6 +163,7 @@ function MessageItem({
   session?: Session | null
   isLatest?: boolean
   onEdit?: (text: string) => void
+  onFork?: () => void
   hasAssistantReplied?: boolean
 }) {
   const isUser = message.role === 'user'
@@ -204,12 +208,11 @@ function MessageItem({
           ) : hasFileDiff ? (
             <FileChangeDiffBlock message={message} />
           ) : (
-            <>
-              {message.text && <pre className="tool-output">{message.text}</pre>}
-              {message.tool?.arguments != null && Object.keys(message.tool.arguments).length > 0 && (
-                <pre className="tool-payload">{JSON.stringify(message.tool.arguments, null, 2)}</pre>
-              )}
-            </>
+            <ToolOutputBlock
+              text={message.text}
+              payload={message.tool?.arguments != null && Object.keys(message.tool.arguments).length > 0 ? (message.tool.arguments as Record<string, unknown>) : null}
+              toolName={String(message.tool?.name || '')}
+            />
           )}
           <AttachmentList attachments={message.attachments} onImageClick={onImageClick} session={session} />
         </LazyDetails>
@@ -269,6 +272,20 @@ function MessageItem({
               </ActionIcon>
             </Tooltip>
           )}
+          {!isUser && onFork && (
+            <Tooltip label="从此回复分叉新会话" position="top" withArrow>
+              <ActionIcon
+                variant="subtle"
+                size="xs"
+                color="indigo"
+                onClick={onFork}
+                aria-label="分叉会话"
+                className="message-action-btn message-fork-btn"
+              >
+                <IconGitFork size={13} />
+              </ActionIcon>
+            </Tooltip>
+          )}
           {isUser && onEdit && (
             <Tooltip label="编辑消息" position="top" withArrow>
               <ActionIcon
@@ -306,6 +323,7 @@ export function Transcript({
   onGalleryClick,
   session,
   onEditLastUserMessage,
+  onForkAtMessage,
 }: {
   messages: Message[]
   outbox: OutboxEntry[]
@@ -323,15 +341,16 @@ export function Transcript({
   onGalleryClick?: (url: string, allImages: string[]) => void
   session?: Session | null
   onEditLastUserMessage?: (text: string) => void
+  onForkAtMessage?: (message: Message, turnIndex: number) => void
 }) {
   const reducedMotion = useReducedMotion()
   const enter = reducedMotion ? {} : { opacity: 0, y: 10, scale: 0.99 }
   const visibleMessages = messages.filter((message) => (
     message.kind === 'thinking'
       ? message.text.trim() || message.attachments.length || message.tool
-      : message.kind !== 'message' || message.role !== 'assistant' || message.text.trim() || message.attachments.length || message.tool
+      : isCompactionMessage(message) || message.kind !== 'message' || message.role !== 'assistant' || message.text.trim() || message.attachments.length || message.tool
   ))
-  const isActivity = (message: Message | null) => Boolean(message && (message.kind !== 'message' || message.role === 'tool' || (message.role === 'assistant' && !message.text.trim())))
+  const isActivity = (message: Message | null) => Boolean(message && !isCompactionMessage(message) && (message.kind !== 'message' || message.role === 'tool' || (message.role === 'assistant' && !message.text.trim())))
   const outboundVersion = outbox.map((item) => item.command.id).join(',')
   const contentVersion = `${messages.map((item) => `${item.id}:${item.text.length}`).join(',')}|${outbox.map((item) => `${item.command.id}:${item.status}`).join(',')}|${approvals.map((item) => item.id).join(',')}|${composerHeight ?? 0}`
   const {
@@ -406,6 +425,19 @@ export function Transcript({
           )}
           <AnimatePresence initial={false}>
           {visibleMessages.map((message, idx) => {
+            if (isCompactionMessage(message)) {
+              return (
+                <motion.div
+                  key={`compaction-${message.id}`}
+                  initial={enter}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.28, ease: [0.2, 0.8, 0.2, 1] }}
+                >
+                  <CompactionDivider message={message} />
+                </motion.div>
+              )
+            }
             const prevMessage = idx > 0 ? visibleMessages[idx - 1] : null
             // 判断过程块：连续的非普通用户消息（包括思考、工具活动等过程性输出）
             // 当后续出现了最终的 assistant 回复（或会话结束生成完毕），该过程块自动收起为类似 Codex 的“用时 X 分钟 Y 秒”或“过程概要”
@@ -472,6 +504,7 @@ export function Transcript({
                   session={session}
                   isLatest={idx === visibleMessages.length - 1}
                   onEdit={message.id === lastUserMessageId ? onEditLastUserMessage : undefined}
+                  onFork={onForkAtMessage ? () => onForkAtMessage(message, idx) : undefined}
                   hasAssistantReplied={hasAssistantReplied}
                 />
               </motion.div>

@@ -46,11 +46,11 @@ def _safe_error_detail(value: object) -> str:
 
 
 class CodexRpcRejected(RuntimeError):
-    def __init__(self, error):
+    def __init__(self, error, request_name: str = 'Codex'):
         code = error.get('code') if isinstance(error, dict) else None
         detail = _safe_error_detail(error.get('message') if isinstance(error, dict) else None)
         tags = [word for word in ('cwd', 'directory', 'not found', 'model', 'mcp', 'configuration', 'experimental', 'sandbox', 'permission', 'rollout', 'history', 'lease', 'owner', 'another', 'process', 'already', 'running', 'active', 'busy', 'thread', 'fork', 'resume', 'lock', 'attached', 'not supported', 'external', 'read-only') if word in detail.lower()]
-        super().__init__(f'Codex rejected request ({code}; {detail or ", ".join(tags) or "native rejection"})')
+        super().__init__(f'{request_name} rejected request ({code}; {detail or ", ".join(tags) or "native rejection"})')
 
 
 class CodexAppServer:
@@ -65,11 +65,13 @@ class CodexAppServer:
         launch_argv: list[str] | None = None,
         environment: Mapping[str, str] | None = None,
         bootstrap_stdin: dict[str, Any] | None = None,
+        request_name: str = 'Codex',
     ):
         self.config = config
         self.launch_argv = launch_argv
         self.environment = dict(environment) if environment is not None else None
         self.bootstrap_stdin = dict(bootstrap_stdin) if bootstrap_stdin is not None else None
+        self.request_name = request_name
         self.on_notification = on_notification
         self.protocol = protocol or CodexAppServerProtocol()
         self.on_close = on_close
@@ -212,7 +214,7 @@ class CodexAppServer:
             with self._lock:
                 self._responses.pop(request_id, None)
         if "error" in response:
-            raise CodexRpcRejected(response['error'])
+            raise CodexRpcRejected(response['error'], self.request_name)
         result = self.protocol.response_result(response)
         if result is None:
             raise RuntimeError("Codex app-server returned an invalid response")

@@ -42,6 +42,25 @@ export function EnvironmentConnections({ embedded = false }: { embedded?: boolea
       <Group justify="space-between"><div><Title order={3} size="h4">{environment.name}</Title><Text size="xs" c="dimmed">{environment.method === 'local' ? '本机自动发现' : `SSH · ${environment.os || '尚未探测系统'}`}</Text></div><Group gap="xs">
         {environment.method === 'ssh' && <Button variant="subtle" onClick={() => edit(connections.data?.ssh.items.find(row => row.id === environment.id))}>配置 SSH</Button>}
         <Button variant="default" loading={busy === environment.id} disabled={!!busy} onClick={() => void run(environment.id, () => api.discoverEnvironment(environment.id))}>{environment.discovered ? '重新发现' : '验证 SSH 并发现 Agent'}</Button>
+        {environment.method === 'ssh' && environment.agents.some(a => a.state === 'connected') && (
+          <Button
+            variant="light"
+            color="red"
+            size="xs"
+            loading={busy === `disconnect:${environment.id}`}
+            disabled={!!busy}
+            onClick={() => void run(`disconnect:${environment.id}`, async () => {
+              for (const a of environment.agents) {
+                if (a.state === 'connected') {
+                  await api.changeEnvironmentAgent(environment.id, a.kind, false)
+                }
+              }
+              notifications.show({ color: 'teal', message: `已断开 ${environment.name} 的全部连接` })
+            })}
+          >
+            断开环境
+          </Button>
+        )}
       </Group></Group>
       <Stack gap="xs" mt="md">{environment.agents.map(agent => <Group className="environment-agent" key={agent.kind} justify="space-between" wrap="nowrap">
         <div><Group gap="xs"><AgentBrandIcon kind={agent.kind} size={18} /><Text fw={600}>{agentKindLabel(agent.kind)}</Text><Badge color={agent.state === 'connected' ? 'teal' : agent.state === 'error' ? 'red' : 'gray'}>{agent.state === 'connected' ? '已接入' : agent.state === 'error' ? '连接失败' : agent.state === 'authentication_required' ? '需要登录' : agent.available ? '已发现' : environment.discovered ? '未安装' : '待发现'}</Badge>{agent.daemon_mode && <Badge data-testid={`environment-daemon-mode-${environment.id}-${agent.kind}`} color="indigo" variant="light">守护进程托管</Badge>}</Group>{agent.detail && <Text size="xs" c={agent.state === 'error' ? 'red' : 'dimmed'} style={{ overflowWrap: 'anywhere' }}>{agent.detail}</Text>}{agent.executable && <Text size="xs" c="dimmed" style={{ overflowWrap: 'anywhere' }}>{agent.executable}</Text>}</div>

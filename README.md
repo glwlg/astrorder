@@ -84,8 +84,9 @@
 从单兵作战迈向智能体蜂群协作体系：
 - **智能体群组协同（Bot Groups）**：组建由不同机器、不同模型（Codex + Hermes + Grok + 远程节点）构成的协作群组，支持规则驱动或通过 `@智能体` 进行多方接力讨论。
 - **Swarm DAG 拓扑编排**：直观可视化复杂多智能体任务的有向无环图（DAG），精准追踪父子依赖与并发执行链路。
-- **共享黑板系统（Blackboard）**：跨 Agent 共享全局技术上下文与状态投影，确保复杂工程目标协同一致。
-- **Git Worktree 安全分叉（Fork Session）**：支持为特定 Agent 会话一键派生独立的 Git Worktree 分支与物理目录，并行验证前沿方案而不污染主工作区。
+- **智能作战黑板系统（Blackboard）**：跨 Agent 共享全局技术上下文与状态投影。支持基于 TypeSafe AI Jev 决策模型的自适应 Generative UI 渲染（流水线时间线 `StepTimeline`、验收清单 `Checklist`、指标卡 `MetricGrid`、五子棋对弈 `GomokuBoard`），并支持系统级 `@黑板` 交互指令与 Markdown 沉淀导出。
+- **对话任意节点分叉（Fork from Message）**：支持从对话流中任意一段 Assistant 回复一键分叉出独立分支探索，支持一键派生独立的 Git Worktree 物理目录，并行验证前沿方案而不污染主工作区。
+- **Agent 原生版本统一升级管理**：无须手动在多个不同终端环境执行各异的升级命令，在「设置 → Agent 管理」中即可一键触发 Codex (`vp install`)、Hermes (`hermes update`) 与 Grok (`x.ai/cli/install`) 的原生版本升级，支持后台静默执行、全实时流式终端日志滚屏与全局后台任务挂起。
 
 ---
 

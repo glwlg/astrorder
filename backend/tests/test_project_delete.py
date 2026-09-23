@@ -8,6 +8,23 @@ from astrorder.service import ControlService
 from astrorder.store import Store
 
 
+def test_delete_session_closes_bound_browser_tab(tmp_path: Path, monkeypatch) -> None:
+    settings = Settings(database_url=f"sqlite:///{tmp_path / 'session.sqlite3'}")
+    store = Store(settings)
+    store.upsert_session({
+        "id": "sess-1",
+        "agent_id": "agent-1",
+        "title": "Session 1",
+        "status": "idle",
+        "updated_at": "2026-09-09T12:00:00Z",
+    })
+    closed = []
+    monkeypatch.setattr("astrorder.jev_browser.close_browser_session", closed.append)
+
+    assert ControlService(store, EventHub(), settings).delete_session("agent-1", "sess-1") is True
+    assert closed == ["agent-1::sess-1"]
+
+
 def test_delete_empty_project(tmp_path: Path) -> None:
     db_file = tmp_path / "test.sqlite3"
     settings = Settings(database_url=f"sqlite:///{db_file}")
@@ -32,7 +49,7 @@ def test_delete_empty_project(tmp_path: Path) -> None:
     assert len(store.list_projects()) == 0
 
 
-def test_delete_project_cascades_sessions_and_messages(tmp_path: Path) -> None:
+def test_delete_project_cascades_sessions_and_messages(tmp_path: Path, monkeypatch) -> None:
     db_file = tmp_path / "test.sqlite3"
     settings = Settings(database_url=f"sqlite:///{db_file}")
     store = Store(settings)
@@ -71,6 +88,8 @@ def test_delete_project_cascades_sessions_and_messages(tmp_path: Path) -> None:
     hub = EventHub()
     queue = hub.subscribe()
     service = ControlService(store, hub, settings)
+    closed = []
+    monkeypatch.setattr("astrorder.jev_browser.close_browser_session", closed.append)
 
     res = service.delete_project(
         project_key="project:local-src\0proj-a",
@@ -86,6 +105,7 @@ def test_delete_project_cascades_sessions_and_messages(tmp_path: Path) -> None:
     assert len(store.list_projects()) == 0
     assert len(store.list_sessions()) == 0
     assert len(store.list_messages("agent-1", "sess-1", None, 10)[0]) == 0
+    assert closed == ["agent-1::sess-1"]
 
     events = []
     while not queue.empty():
@@ -132,4 +152,3 @@ def test_delete_project_api(tmp_path: Path) -> None:
         assert res.status_code == 200
         assert res.json()["ok"] is True
         assert len(store.list_projects()) == 0
-

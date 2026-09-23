@@ -22,6 +22,53 @@ import type { PreferencePatch, WorkspacePreferences } from '../hooks/useWorkspac
 
 export interface SessionModelBinding { model: string; provider: string | null; deferred?: boolean; branch?: string; effort?: string | null }
 export interface CodexConnectionStatus { kind: 'codex'; state: 'disconnected' | 'connecting' | 'connected' | 'error' | 'authentication_required'; available: boolean; agent_id: string; session_count: number; auth_required: boolean; detail: string; daemon_mode: boolean }
+export interface OcxUsageBreakdown {
+  provider: string
+  model?: string
+  requests: number
+  attemptCount: number
+  measuredRequests: number
+  reportedRequests: number
+  estimatedRequests: number
+  totalTokens: number
+  inputTokens: number
+  outputTokens: number
+  cachedInputTokens: number
+  cacheReadInputTokens: number
+  cacheCreationInputTokens: number
+  cacheHitRate: number | null
+  cacheObservedInputTokens: number
+  priceCoverageRatio: number
+  pricedRequests: number
+  unpricedRequests: number
+  shareRatio: number
+  estimatedCostUsd: number
+}
+export interface OcxUsageResponse {
+  range: string
+  surface: string
+  since: number
+  generatedAt: string
+  summary: Record<string, number>
+  days: Array<{ date: string; requests: number; measuredRequests: number; reportedRequests: number; totalTokens: number; estimatedCostUsd: number; models?: Array<{ model: string; provider: string; requests: number; totalTokens: number; inputTokens?: number; outputTokens?: number }> }>
+  models: OcxUsageBreakdown[]
+  providers: OcxUsageBreakdown[]
+  accounts: Array<{ accountLogLabel: string; ambiguous: boolean; requests: number; attemptCount: number; measuredAttempts: number; reportedAttempts: number; estimatedAttempts: number; unmeteredAttempts: number; inputTokens: number; outputTokens: number; cacheReadInputTokens: number; cacheCreationInputTokens: number; reasoningOutputTokens: number; totalTokens: number; usageCoverageRatio: number; estimatedCostUsd: number; pricedAttempts: number; unpricedAttempts: number; priceCoverageRatio: number }>
+  historyTruncated: boolean
+  truncatedPrefixBytes: number
+  entriesTruncated: boolean
+  entriesDropped: number
+  snapshotWindowStart?: number
+  snapshotWindowEnd?: number
+}
+export interface OcxQuotaWindow { label: string; percent: number; resetAt?: number }
+export interface OcxModelQuotaReport {
+  provider: string
+  label: string
+  quota?: { fiveHourPercent?: number; fiveHourResetAt?: number; weeklyPercent?: number; weeklyResetAt?: number; monthlyPercent?: number; monthlyResetAt?: number; customWindows?: OcxQuotaWindow[] }
+}
+export interface OcxModelQuotaAccount { id: string; email?: string; logLabel?: string; plan?: string; paused?: boolean; quota?: { shortPercent?: number; shortResetAt?: number; weeklyPercent?: number; weeklyResetAt?: number } | null }
+export interface OcxModelQuotaResponse { model: string; providers: string[]; reports: OcxModelQuotaReport[]; accounts: OcxModelQuotaAccount[] }
 
 export class ApiError extends Error {
   readonly status: number
@@ -90,7 +137,68 @@ function sessionPath(sessionId: string): string {
   return `/sessions/${encodeURIComponent(sessionId)}`
 }
 
+export interface BrowserTab {
+  id: string
+  title: string
+  url: string
+  active: boolean
+}
+
+export interface BrowserLog {
+  type: 'error' | 'warn' | 'log' | 'info' | 'network_error'
+  text: string
+  time: number
+}
+
+export interface BrowserSnapshot {
+  url: string
+  title: string
+  screenshot: string
+  mime_type: string
+  revision: number
+  captured_at: number
+  tabs?: BrowserTab[]
+  active_target_id?: string
+  error_count?: number
+}
+
 export const api = {
+  getBrowserScreenshot: (agentId: string, sessionId: string, refresh = false, targetId?: string) => request<BrowserSnapshot>(
+    `/browser/screenshot?agent_id=${encodeURIComponent(agentId)}&session_id=${encodeURIComponent(sessionId)}&refresh=${refresh}${targetId ? '&target_id=' + encodeURIComponent(targetId) : ''}`
+  ),
+  navigateBrowser: (agentId: string, sessionId: string, url: string) => jsonRequest<BrowserSnapshot>('/browser/navigate', { agent_id: agentId, session_id: sessionId, url }),
+  selectBrowserTab: (agentId: string, sessionId: string, targetId: string) => jsonRequest<BrowserSnapshot>('/browser/tabs/select', { agent_id: agentId, session_id: sessionId, target_id: targetId }),
+  newBrowserTab: (agentId: string, sessionId: string, url?: string) => jsonRequest<BrowserSnapshot>('/browser/tabs/new', { agent_id: agentId, session_id: sessionId, url }),
+  closeBrowserTab: (agentId: string, sessionId: string, targetId: string) => jsonRequest<BrowserSnapshot>('/browser/tabs/close', { agent_id: agentId, session_id: sessionId, target_id: targetId }),
+  interactBrowser: (
+    agentId: string,
+    sessionId: string,
+    action: 'click' | 'wheel' | 'text' | 'back' | 'forward',
+    params?: { x?: number; y?: number; ratio_x?: number; ratio_y?: number; delta_y?: number; text?: string; targetId?: string }
+  ) => jsonRequest<BrowserSnapshot>('/browser/interact', {
+    agent_id: agentId,
+    session_id: sessionId,
+    action,
+    target_id: params?.targetId,
+    x: params?.x,
+    y: params?.y,
+    ratio_x: params?.ratio_x,
+    ratio_y: params?.ratio_y,
+    delta_y: params?.delta_y,
+    text: params?.text,
+  }),
+  getBrowserPageContent: (agentId: string, sessionId: string, targetId?: string) => request<{
+    title: string
+    url: string
+    text: string
+    session_key: string
+    target_id: string
+  }>(`/browser/page-content?agent_id=${encodeURIComponent(agentId)}&session_id=${encodeURIComponent(sessionId)}${targetId ? '&target_id=' + encodeURIComponent(targetId) : ''}`),
+  getBrowserDiagnostics: (agentId: string, sessionId: string, targetId?: string) => request<{
+    session_key: string
+    target_id?: string
+    logs: BrowserLog[]
+  }>(`/browser/diagnostics?agent_id=${encodeURIComponent(agentId)}&session_id=${encodeURIComponent(sessionId)}${targetId ? '&target_id=' + encodeURIComponent(targetId) : ''}`),
   getPreferences: () => request<WorkspacePreferences>('/preferences'),
   importPreferences: (values: PreferencePatch) => jsonRequest<WorkspacePreferences>('/preferences/import', values),
   updatePreferences: (values: PreferencePatch) => jsonRequest<WorkspacePreferences>('/preferences', values, 'PATCH'),
@@ -142,9 +250,65 @@ export const api = {
     const query = new URLSearchParams({ agent_id: agentId, session_id: sessionId })
     return request<Command>(`/commands/${encodeURIComponent(commandId)}?${query.toString()}`, { method: 'DELETE' })
   },
+  upgradeAgentStream: async (
+    agentId: string,
+    onChunk: (chunk: string) => void,
+    onInit?: (cmd: string) => void,
+    signal?: AbortSignal,
+  ): Promise<{ ok: boolean; exit_code: number }> => {
+    let localToken: string | null = null
+    try {
+      if (typeof localStorage !== 'undefined' && typeof localStorage.getItem === 'function') {
+        localToken = localStorage.getItem('astrorder:token')
+      }
+    } catch {}
+    const res = await fetch(`${API_PREFIX}/agents/${encodeURIComponent(agentId)}/upgrade`, {
+      method: 'POST',
+      headers: {
+        ...(localToken ? { 'Authorization': `Bearer ${localToken}` } : {}),
+      },
+      signal,
+    })
+    if (!res.ok) {
+      throw new Error(`升级请求失败: ${res.status} ${res.statusText}`)
+    }
+    const reader = res.body?.getReader()
+    if (!reader) throw new Error('流式读取不可用')
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let isOk = false
+    let exitCode = 0
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+      for (const line of lines) {
+        if (!line.trim()) continue
+        try {
+          const item = JSON.parse(line)
+          if (item.type === 'init' && item.command) {
+            onInit?.(item.command)
+          } else if (item.type === 'chunk' && item.data) {
+            onChunk(item.data)
+          } else if (item.type === 'done') {
+            isOk = Boolean(item.ok)
+            exitCode = item.exit_code ?? 0
+          } else if (item.type === 'error') {
+            throw new Error(item.error || '升级遇到错误')
+          }
+        } catch {
+          onChunk(line + '\n')
+        }
+      }
+    }
+    return { ok: isOk, exit_code: exitCode }
+  },
   createSession: (payload: { agent_id: string; workspace?: string | null; title?: string | null; project_id?: string | null; project_name?: string | null; parent_session_id?: string | null; ephemeral?: boolean; blackboard_scope?: 'session' | 'swarm' | 'group'; blackboard_scope_id?: string | null }) =>
     jsonRequest<Session>('/sessions', payload),
-  forkSession: (sessionId: string, payload: { agent_id: string; title?: string | null; worktree?: boolean; branch_name?: string | null; worktree_path?: string | null }) =>
+  forkSession: (sessionId: string, payload: { agent_id: string; title?: string | null; worktree?: boolean; branch_name?: string | null; worktree_path?: string | null; target_message_id?: string | null; turn_index?: number | null }) =>
     jsonRequest<Session>(`${sessionPath(sessionId)}/fork`, payload),
   handoffSession: (sessionId: string, sourceAgentId: string, targetAgentId: string, operationId: string, selection: { provider: string; model: string; effort: string }) =>
     jsonRequest<Session>(`${sessionPath(sessionId)}/handoff`, { operation_id: operationId, source_agent_id: sourceAgentId, target_agent_id: targetAgentId, ...selection }),
@@ -249,6 +413,12 @@ export const api = {
     request<{ configured: boolean; masked_key: string }>('/services/jev/config'),
   updateJevConfig: (payload: { api_key?: string | null }) =>
     jsonRequest<{ configured: boolean; masked_key: string }>('/services/jev/config', payload),
+  getLlmConfig: () =>
+    request<{ configured: boolean; masked_key: string; base_url: string; model: string; reasoning: string }>('/services/llm/config'),
+  updateLlmConfig: (payload: { base_url: string; api_key?: string | null; model: string; reasoning: string }) =>
+    jsonRequest<{ configured: boolean; masked_key: string; base_url: string; model: string; reasoning: string }>('/services/llm/config', payload),
+  testLlmConnection: (payload: { base_url: string; api_key?: string | null; model: string; reasoning: string }) =>
+    jsonRequest<{ ok: boolean; model: string; reply: string }>('/services/llm/test', payload),
   filterWithJev: (payload: { command: string; output: string }) =>
     jsonRequest<{ ok: boolean; filtered: string; nature: string; noise_pruned: boolean }>('/tools/jev-filter', payload),
   curateHandoffWithJev: (sessionId: string, agentId: string) =>
@@ -303,76 +473,33 @@ export const api = {
       cached_tokens: number
       reasoning_tokens: number
       cache_hit_rate: number
+      speed?: number | null
     }>(`/sessions/${encodeURIComponent(sessionId)}/usage${agentId ? '?agent_id=' + encodeURIComponent(agentId) : ''}`),
-  getAnalyticsOverview: () =>
-    request<{
-      ok: boolean
-      totals: {
-        total_tokens: number
-        input_tokens: number
-        output_tokens: number
-        cached_tokens: number
-        reasoning_tokens: number
-        session_count: number
-        cache_hit_rate: number
-      }
-      today: {
-        date: string
-        total_tokens: number
-        input_tokens: number
-        output_tokens: number
-        cached_tokens: number
-        cache_hit_rate: number
-      }
-      by_model: Array<{
-        model: string
-        total_tokens: number
-        input_tokens: number
-        output_tokens: number
-        cached_tokens: number
-        session_count: number
-        cache_hit_rate: number
-        share: number
-      }>
-      by_agent: Array<{
-        agent_id: string
-        tokens: number
-        session_count: number
-      }>
-    }>('/analytics/overview'),
-  getAnalyticsCalendar: (days: number = 365) =>
-    request<{
-      ok: boolean
-      days: number
-      max_daily_tokens: number
-      items: Array<{
-        date: string
-        tokens: number
-        input_tokens: number
-        output_tokens: number
-        cached_tokens: number
-        session_count: number
-        cache_hit_rate: number
-      }>
-    }>(`/analytics/calendar?days=${days}`),
-  getAnalyticsTopSessions: (limit: number = 10) =>
-    request<{
-      ok: boolean
-      items: Array<{
-        session_id: string
-        agent_id: string
-        title: string
-        model: string
-        total_tokens: number
-        input_tokens: number
-        output_tokens: number
-        cached_tokens: number
-        cache_hit_rate: number
-        latest_date: string
-      }>
-    }>(`/analytics/top-sessions?limit=${limit}`),
-  syncAnalytics: () =>
-    request<{ ok: boolean; result: Record<string, number> }>('/analytics/sync', { method: 'POST' }),
+  getAnalyticsConfig: () => request<{ gateway_type: 'opencodex'; management_url: string; inference_url: string; target_overrides: Record<string, string>; masked_key: string }>('/analytics/config'),
+  updateAnalyticsConfig: (payload: { gateway_type: 'opencodex'; management_url: string; inference_url: string; target_overrides: Record<string, string>; api_key?: string }) => jsonRequest<{ gateway_type: 'opencodex'; management_url: string; inference_url: string; target_overrides: Record<string, string>; masked_key: string }>('/analytics/config', payload, 'PUT'),
+  getModelSyncTargets: () => request<{ items: Array<{ id: string; kind: 'local' | 'wsl' | 'ssh'; name: string; state?: string; agents: string[] }> }>('/model-sync/targets'),
+  previewModelSync: (targets: Array<{ target_id: string; agents: string[] }>) => jsonRequest<{
+    catalog_fingerprint: string
+    model_count: number
+    targets: Array<{
+      target_id: string
+      agents: string[]
+      reload_pending: boolean
+      hermes: { dynamic: boolean; status: string }
+      model_diff?: { added: string[]; removed: string[]; kept_count: number }
+      changes: Array<{ file: string; changed: boolean; current_sha256: string; expected_sha256: string; diff: string }>
+    }>
+  }>('/model-sync/preview', { targets }),
+  startModelSync: (targets: Array<{ target_id: string; agents: string[] }>) => jsonRequest<{ id: string; status: string }>('/model-sync/jobs', { targets }),
+  getModelSyncJobs: () => request<{ items: Array<{ id: string; status: 'running' | 'success' | 'failed' | 'cancelled'; error?: string; targets: Array<{ target_id: string; status: string; changed: string[]; reload_pending: boolean }> }> }>('/model-sync/jobs'),
+  cancelModelSync: (id: string) => request<{ cancelled: boolean }>(`/model-sync/jobs/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
+  getAnalyticsUsage: (params: { range: 'all' | '30d' | '7d'; surface: 'all' | 'codex' | 'claude' | 'grok'; since?: number; until?: number }) => {
+    const query = new URLSearchParams({ range: params.range, surface: params.surface })
+    if (params.since !== undefined) query.set('since', String(params.since))
+    if (params.until !== undefined) query.set('until', String(params.until))
+    return request<OcxUsageResponse>(`/analytics/usage?${query.toString()}`)
+  },
+  getModelQuota: (model: string) => request<OcxModelQuotaResponse>(`/analytics/model-quota?model=${encodeURIComponent(model)}`),
   searchFiles: (params: { q?: string; sessionId?: string; connectionId?: string; limit?: number }) => {
     const query = new URLSearchParams()
     if (params.q) query.set('q', params.q)

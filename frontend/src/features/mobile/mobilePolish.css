@@ -572,3 +572,72 @@ body:has(.mobile-workspace) .background-tasks,
   line-height: 1 !important;
   border-radius: 6px !important;
 }
+
+
+/* Gateway error card in mobile composer */
+.m-gateway-alert {
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: color-mix(in srgb, var(--m-surface, #1e1e24) 85%, #e03131 15%);
+  border: 1px solid color-mix(in srgb, #e03131 40%, transparent);
+  color: var(--m-text, #e2e8f0);
+}
+
+.m-gateway-alert.is-quota {
+  background: color-mix(in srgb, var(--m-surface, #1e1e24) 85%, #f59f00 15%);
+  border-color: color-mix(in srgb, #f59f00 45%, transparent);
+}
+
+.m-gateway-alert.is-disconnect {
+  background: color-mix(in srgb, var(--m-surface, #1e1e24) 85%, #fab005 15%);
+  border-color: color-mix(in srgb, #fab005 40%, transparent);
+}
+
+.m-gateway-alert-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 600;
+  font-size: 12.5px;
+}
+
+.m-gateway-alert-head button {
+  background: transparent;
+  border: none;
+  color: var(--m-muted, #94a3b8);
+  padding: 2px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+}
+
+.m-gateway-alert-body {
+  font-size: 11.5px;
+  color: var(--m-text, #cbd5e1);
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.m-gateway-alert-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 11px;
+}
+
+.m-gateway-rec-btn {
+  background: color-mix(in srgb, var(--m-surface) 60%, #f59f00 40%);
+  border: 1px solid #f59f00;
+  color: #fff;
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+}

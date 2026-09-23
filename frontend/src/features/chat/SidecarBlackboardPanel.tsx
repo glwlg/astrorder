@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { ActionIcon, Badge, Button, Group, Modal, Paper, ScrollArea, Stack, Text, TextInput, Textarea, Tooltip } from '@mantine/core'
-import { IconChalkboard, IconPlus, IconRefresh, IconX } from '@tabler/icons-react'
+import { IconChalkboard, IconDownload, IconPlus, IconRefresh, IconX } from '@tabler/icons-react'
 import { notifications } from '@mantine/notifications'
 import { api } from '../../api/client'
 import { BlackboardItemRenderer } from '../monitor/BlackboardJsonRender'
@@ -68,6 +68,33 @@ export function SidecarBlackboardPanel({
     }
   }
 
+  const handleExportMarkdown = () => {
+    const lines = [
+      `# 星序作战黑板导出报告 (${namespace})`,
+      `> 导出时间: ${new Date().toLocaleString()}`,
+      '',
+    ]
+    for (const [k, v] of Object.entries(items)) {
+      lines.push(`## ${k}`)
+      if (typeof v === 'string') {
+        lines.push(v)
+      } else {
+        lines.push('```json', JSON.stringify(v, null, 2), '```')
+      }
+      lines.push('')
+    }
+    const blob = new Blob([lines.join('\n')], { type: 'text/markdown;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `blackboard-${namespace.replace(/[^a-zA-Z0-9_-]/g, '_')}.md`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    notifications.show({ color: 'teal', message: '黑板内容已成功导出为本地 Markdown 文档' })
+  }
+
   const entries = Object.entries(items)
 
   return (
@@ -90,6 +117,11 @@ export function SidecarBlackboardPanel({
           <Badge size="xs" variant="light" color="indigo">{entries.length}</Badge>
         </Group>
         <Group gap={6}>
+          <Tooltip label="导出 Markdown 文档" withArrow>
+            <ActionIcon variant="subtle" color="indigo" size="sm" onClick={handleExportMarkdown} disabled={entries.length === 0}>
+              <IconDownload size={15} />
+            </ActionIcon>
+          </Tooltip>
           <Tooltip label="刷新" withArrow>
             <ActionIcon variant="subtle" color="gray" size="sm" onClick={fetchItems} loading={loading}>
               <IconRefresh size={15} />

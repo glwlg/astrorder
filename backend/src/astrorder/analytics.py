@@ -1,218 +1,112 @@
+import asyncio
 import glob
 import json
-import logging
 import os
-import sqlite3
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime
 from typing import Any
+from uuid import uuid4
 
+import httpx
 from fastapi import APIRouter, HTTPException, Query, Request
-from sqlalchemy import func, select, desc
-from sqlalchemy.dialects.sqlite import insert
+from sqlalchemy import select
 
 from .auth import require_browser
-from .models import TokenMetricRow, SessionRow
-
-logger = logging.getLogger(__name__)
+from .daemon.bridge import DaemonBridgeError
+from .gateway_config import get_gateway_config, public_gateway_config, save_gateway_config
+from .model_sync_service import (
+    build_target_plan,
+    fetch_catalog,
+    list_jobs,
+    list_targets,
+    run_sync,
+    save_job,
+    validate_hermes_catalog,
+    validate_selections,
+)
+from .models import TokenMetricRow
 
 router = APIRouter()
+
+VALID_RANGES = {"all", "30d", "7d"}
+VALID_SURFACES = {"all", "codex", "claude", "grok"}
+
+_quota_snapshot_cache: dict[str, Any] = {"expires_at": 0.0, "payload": None}
+_session_gateway_cache: dict[str, tuple[float, int, float | None]] = {}
 
 
 def _private(request: Request) -> None:
     require_browser(request, request.app.state.settings)
 
 
-def sync_all_agent_token_metrics(store: Any) -> dict[str, int]:
-    scanned_codex = 0
-    scanned_hermes = 0
-    scanned_grok = 0
-    records_to_upsert: list[dict[str, Any]] = []
+def _gateway_endpoint(config: dict[str, Any], resource: str) -> str:
+    return f"{config['management_url']}/api/{resource}"
 
-    codex_pattern = os.path.expanduser("~/.codex/sessions/**/*.jsonl")
-    for fpath in glob.glob(codex_pattern, recursive=True):
-        fname = os.path.basename(fpath)
-        parts = fname.replace(".jsonl", "").split("-")
-        sid = "-".join(parts[-5:]) if len(parts) >= 5 else None
-        if not sid or len(sid) != 36:
-            continue
 
-        model_name = "unknown"
-        provider = "codex"
-        context_window = 0
-        last_input_tokens = 0
-        latest_tot: dict[str, Any] = {}
-        file_date = ""
+def _gateway_headers(config: dict[str, Any]) -> dict[str, str]:
+    return {"Authorization": f"Bearer {config['api_key']}"} if config["api_key"] else {}
 
-        try:
-            with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
-                for line in f:
-                    if not line.strip():
-                        continue
-                    if '"turn_context"' in line:
-                        try:
-                            d = json.loads(line)
-                            m = d.get("payload", {}).get("model")
-                            if m:
-                                model_name = m
-                            ts = d.get("timestamp")
-                            if ts and not file_date:
-                                file_date = ts[:10]
-                        except Exception:
-                            pass
-                    if '"total_token_usage"' in line:
-                        try:
-                            d = json.loads(line)
-                            info = d.get("payload", {}).get("info", {})
-                            if "total_token_usage" in info:
-                                latest_tot = info["total_token_usage"]
-                                context_window = info.get("model_context_window", context_window)
-                                last_u = info.get("last_token_usage", {})
-                                if "input_tokens" in last_u:
-                                    last_input_tokens = last_u["input_tokens"]
-                            ts = d.get("timestamp")
-                            if ts:
-                                file_date = ts[:10]
-                        except Exception:
-                            pass
-        except Exception:
-            continue
+async def _fetch_session_gateway_stats(config: dict[str, Any], session_id: str) -> tuple[int | None, float | None]:
+    import time
+    now = time.monotonic()
+    cached = _session_gateway_cache.get(session_id)
+    if cached and now < cached[0]:
+        return cached[1], cached[2]
+    if not config.get("management_url"):
+        return None, None
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=5.0) as client:
+            url = _gateway_endpoint(config, "logs")
+            response = await client.get(url, params={"conversationId": session_id, "limit": 2000}, headers=_gateway_headers(config))
+            if response.status_code != 200:
+                return None, None
+            payload = response.json()
+            logs = payload.get("logs", [])
+            if not logs:
+                return None, None
+            total_tokens = sum(int(item.get("totalTokens") or 0) for item in logs)
+            speed = None
+            latest = logs[0]
+            metric_val = latest.get("displayMetrics", {}).get("tokPerSecond", {}).get("value")
+            if isinstance(metric_val, (int, float)) and metric_val > 0:
+                speed = round(float(metric_val), 1)
+            _session_gateway_cache[session_id] = (now + 15.0, total_tokens, speed)
+            return total_tokens, speed
+    except Exception:
+        return None, None
 
-        if latest_tot:
-            scanned_codex += 1
-            if not file_date:
-                mtime = os.path.getmtime(fpath)
-                file_date = datetime.fromtimestamp(mtime, tz=timezone.utc).strftime("%Y-%m-%d")
 
-            records_to_upsert.append({
-                "agent_id": "local-codex",
-                "session_id": sid,
-                "model": model_name,
-                "provider": provider,
-                "date": file_date,
-                "input_tokens": latest_tot.get("input_tokens", 0),
-                "output_tokens": latest_tot.get("output_tokens", 0),
-                "cached_tokens": latest_tot.get("cached_input_tokens", 0),
-                "reasoning_tokens": latest_tot.get("reasoning_output_tokens", 0),
-                "total_tokens": latest_tot.get("total_tokens", 0),
-                "context_window": context_window or 1000000,
-                "last_input_tokens": last_input_tokens or latest_tot.get("input_tokens", 0),
-            })
-
-    hermes_db = os.path.expanduser("~/AppData/Local/hermes/state.db")
-    if os.path.exists(hermes_db):
-        try:
-            conn = sqlite3.connect(hermes_db)
-            c = conn.cursor()
-            c.execute("""
-                SELECT session_id, model, billing_provider, input_tokens, output_tokens,
-                       cache_read_tokens, reasoning_tokens, first_seen, last_seen
-                FROM session_model_usage
-            """)
-            rows = c.fetchall()
-            for r in rows:
-                sid, model, prov, in_tok, out_tok, cache_tok, r_tok, f_seen, l_seen = r
-                actual_in = max(in_tok or 0, cache_tok or 0)
-                date_str = datetime.fromtimestamp(l_seen or f_seen or 0, tz=timezone.utc).strftime("%Y-%m-%d")
-                scanned_hermes += 1
-                cw = 256000 if "kimi" in (model or "").lower() else 128000
-                records_to_upsert.append({
-                    "agent_id": "local-hermes-default",
-                    "session_id": sid,
-                    "model": model or "unknown",
-                    "provider": prov or "hermes",
-                    "date": date_str,
-                    "input_tokens": actual_in,
-                    "output_tokens": out_tok or 0,
-                    "cached_tokens": cache_tok or 0,
-                    "reasoning_tokens": r_tok or 0,
-                    "total_tokens": actual_in + (out_tok or 0),
-                    "context_window": cw,
-                    "last_input_tokens": actual_in,
-                })
-            conn.close()
-        except Exception:
-            pass
-
-    grok_pattern = os.path.expanduser("~/.grok/sessions/**/updates.jsonl")
-    for fpath in glob.glob(grok_pattern, recursive=True):
-        try:
-            with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
-                for line in f:
-                    if "turn_completed" in line and "usage" in line:
-                        d = json.loads(line)
-                        p = d.get("params", {})
-                        sid = p.get("sessionId")
-                        upd = p.get("update", {})
-                        usage = upd.get("usage", {})
-                        if not sid or not usage:
-                            continue
-                        scanned_grok += 1
-                        ts = d.get("timestamp", 0)
-                        date_str = datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d") if ts else datetime.now(timezone.utc).strftime("%Y-%m-%d")
-                        model_usage = usage.get("modelUsage", {})
-                        m_name = next(iter(model_usage.keys())) if model_usage else "grok"
-                        records_to_upsert.append({
-                            "agent_id": "local-grok",
-                            "session_id": sid,
-                            "model": m_name,
-                            "provider": "grok",
-                            "date": date_str,
-                            "input_tokens": usage.get("inputTokens", 0),
-                            "output_tokens": usage.get("outputTokens", 0),
-                            "cached_tokens": usage.get("cachedReadTokens", 0),
-                            "reasoning_tokens": usage.get("reasoningTokens", 0),
-                            "total_tokens": usage.get("totalTokens", 0),
-                            "context_window": 131072,
-                            "last_input_tokens": usage.get("inputTokens", 0),
-                        })
-        except Exception:
-            continue
-
-    now = datetime.now(timezone.utc)
-    with store.session() as db:
-        for r in records_to_upsert:
-            stmt = insert(TokenMetricRow).values(
-                agent_id=r["agent_id"],
-                session_id=r["session_id"],
-                model=r["model"],
-                provider=r["provider"],
-                date=r["date"],
-                input_tokens=r["input_tokens"],
-                output_tokens=r["output_tokens"],
-                cached_tokens=r["cached_tokens"],
-                reasoning_tokens=r["reasoning_tokens"],
-                total_tokens=r["total_tokens"],
-                context_window=r["context_window"],
-                last_input_tokens=r["last_input_tokens"],
-                updated_at=now,
-            )
-            stmt = stmt.on_conflict_do_update(
-                index_elements=["agent_id", "session_id", "model", "date"],
-                set_={
-                    "input_tokens": func.max(TokenMetricRow.input_tokens, r["input_tokens"]),
-                    "output_tokens": func.max(TokenMetricRow.output_tokens, r["output_tokens"]),
-                    "cached_tokens": func.max(TokenMetricRow.cached_tokens, r["cached_tokens"]),
-                    "reasoning_tokens": func.max(TokenMetricRow.reasoning_tokens, r["reasoning_tokens"]),
-                    "total_tokens": func.max(TokenMetricRow.total_tokens, r["total_tokens"]),
-                    "context_window": r["context_window"],
-                    "last_input_tokens": r["last_input_tokens"],
-                    "updated_at": now,
-                },
-            )
-            db.execute(stmt)
-
+def _model_quota(
+    model_route: str,
+    models: list[dict[str, Any]],
+    combos: list[dict[str, Any]],
+    reports: list[dict[str, Any]],
+    accounts: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    route = model_route.strip()
+    candidate = route.split("/", 1)[1] if "/" in route else route
+    exact = [row for row in models if not row.get("disabled") and row.get("namespaced") in {route, candidate}]
+    matches = exact or [row for row in models if not row.get("disabled") and row.get("id") == candidate]
+    providers = {str(row.get("provider")) for row in matches if row.get("provider")}
+    combo = next((row for row in combos if row.get("model") in {route, candidate}), None)
+    if combo:
+        providers = {str(row.get("provider")) for row in combo.get("targets", []) if row.get("provider")}
+    selected_reports = [row for row in reports if row.get("provider") in providers]
+    if accounts is not None and "openai" in providers:
+        selected_reports = [row for row in selected_reports if row.get("provider") != "openai"]
     return {
-        "codex": scanned_codex,
-        "hermes": scanned_hermes,
-        "grok": scanned_grok,
-        "total_records": len(records_to_upsert),
+        "model": candidate,
+        "providers": sorted(providers),
+        "reports": selected_reports,
+        "accounts": accounts if "openai" in providers else [],
     }
 
 
 @router.get("/api/v1/sessions/{session_id}/usage")
-def get_session_usage(session_id: str, request: Request, agent_id: str | None = None) -> dict[str, Any]:
+async def get_session_usage(session_id: str, request: Request, agent_id: str | None = None) -> dict[str, Any]:
     _private(request)
     store = request.app.state.store
+    config = get_gateway_config(store)
+    gw_total_tokens, gw_speed = await _fetch_session_gateway_stats(config, session_id)
 
     with store.session() as db:
         q = select(TokenMetricRow).where(TokenMetricRow.session_id == session_id)
@@ -239,8 +133,8 @@ def get_session_usage(session_id: str, request: Request, agent_id: str | None = 
                             last_in = info.get("last_token_usage", {}).get("input_tokens", last_in)
                     if "turn_context" in line and "model" in line:
                         m_name = json.loads(line).get("payload", {}).get("model", m_name)
-        except Exception:
-            pass
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            last_u = None
         if last_u:
             in_tok = last_u.get("input_tokens", 0)
             cached = last_u.get("cached_input_tokens", 0)
@@ -251,12 +145,13 @@ def get_session_usage(session_id: str, request: Request, agent_id: str | None = 
                 "context_window": cw,
                 "last_input_tokens": last_in or in_tok,
                 "used_percentage": round(((last_in or in_tok) / max(cw, 1)) * 100, 2),
-                "total_tokens": last_u.get("total_tokens", 0),
+                "total_tokens": gw_total_tokens if gw_total_tokens is not None else last_u.get("total_tokens", 0),
                 "input_tokens": in_tok,
                 "output_tokens": last_u.get("output_tokens", 0),
                 "cached_tokens": cached,
                 "reasoning_tokens": last_u.get("reasoning_output_tokens", 0),
                 "cache_hit_rate": round((cached / max(in_tok, 1)) * 100, 1) if in_tok > 0 else 0,
+                "speed": gw_speed,
             }
 
     if not rows:
@@ -267,12 +162,13 @@ def get_session_usage(session_id: str, request: Request, agent_id: str | None = 
             "context_window": 1000000,
             "last_input_tokens": 0,
             "used_percentage": 0,
-            "total_tokens": 0,
+            "total_tokens": gw_total_tokens or 0,
             "input_tokens": 0,
             "output_tokens": 0,
             "cached_tokens": 0,
             "reasoning_tokens": 0,
             "cache_hit_rate": 0,
+            "speed": gw_speed,
         }
 
     latest = rows[0]
@@ -287,233 +183,173 @@ def get_session_usage(session_id: str, request: Request, agent_id: str | None = 
         "context_window": cw,
         "last_input_tokens": last_in,
         "used_percentage": round((last_in / max(cw, 1)) * 100, 2),
-        "total_tokens": latest.total_tokens,
+        "total_tokens": gw_total_tokens if gw_total_tokens is not None else latest.total_tokens,
         "input_tokens": in_tok,
         "output_tokens": latest.output_tokens,
         "cached_tokens": cached,
         "reasoning_tokens": latest.reasoning_tokens,
         "cache_hit_rate": round((cached / max(in_tok, 1)) * 100, 1) if in_tok > 0 else 0,
+        "speed": gw_speed,
     }
 
 
-@router.get("/api/v1/analytics/overview")
-def get_analytics_overview(request: Request) -> dict[str, Any]:
+@router.get("/api/v1/analytics/config")
+def get_analytics_config(request: Request) -> dict[str, Any]:
+    _private(request)
+    return public_gateway_config(get_gateway_config(request.app.state.store))
+
+
+@router.put("/api/v1/analytics/config")
+def update_analytics_config(request: Request, payload: dict[str, Any]) -> dict[str, Any]:
+    _private(request)
+    current = get_gateway_config(request.app.state.store)
+    try:
+        updates = dict(payload)
+        if "management_url" not in updates and updates.get("base_url"):
+            updates["management_url"] = updates.pop("base_url")
+        config = save_gateway_config(request.app.state.store, {
+            **current, **updates,
+            "api_key": current["api_key"] if "api_key" not in payload else payload.get("api_key"),
+        })
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return public_gateway_config(config)
+
+
+@router.get("/api/v1/analytics/usage")
+async def get_analytics_usage(
+    request: Request,
+    range: str = Query(default="30d"),
+    surface: str = Query(default="all"),
+    since: int | None = Query(default=None, ge=0),
+    until: int | None = Query(default=None, ge=0),
+) -> Any:
+    _private(request)
+    if range not in VALID_RANGES:
+        raise HTTPException(status_code=422, detail="统计范围无效")
+    if surface not in VALID_SURFACES:
+        raise HTTPException(status_code=422, detail="Agent 类型无效")
+    if (since is None) != (until is None) or (since is not None and since >= until):
+        raise HTTPException(status_code=422, detail="自定义时间范围无效")
+
+    params: dict[str, str | int] = {"range": range, "surface": surface}
+    if since is not None and until is not None:
+        params.update(since=since, until=until)
+    config = get_gateway_config(request.app.state.store)
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=15.0) as client:
+            response = await client.get(_gateway_endpoint(config, "usage"), params=params, headers=_gateway_headers(config))
+            response.raise_for_status()
+            return response.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail=f"LLM 网关用量请求失败：{exc}") from exc
+
+
+@router.get("/api/v1/analytics/model-quota")
+async def get_model_quota(request: Request, model: str = Query(min_length=1)) -> dict[str, Any]:
     _private(request)
     store = request.app.state.store
-
-    with store.session() as db:
-        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-
-        tot_q = select(
-            func.sum(TokenMetricRow.total_tokens),
-            func.sum(TokenMetricRow.input_tokens),
-            func.sum(TokenMetricRow.output_tokens),
-            func.sum(TokenMetricRow.cached_tokens),
-            func.sum(TokenMetricRow.reasoning_tokens),
-            func.count(func.distinct(TokenMetricRow.session_id)),
-        )
-        total_res = db.execute(tot_q).first()
-        t_tokens = total_res[0] or 0
-        t_input = total_res[1] or 0
-        t_output = total_res[2] or 0
-        t_cached = total_res[3] or 0
-        t_reasoning = total_res[4] or 0
-        session_count = total_res[5] or 0
-
-        today_q = select(
-            func.sum(TokenMetricRow.total_tokens),
-            func.sum(TokenMetricRow.input_tokens),
-            func.sum(TokenMetricRow.output_tokens),
-            func.sum(TokenMetricRow.cached_tokens),
-        ).where(TokenMetricRow.date == today_str)
-        today_res = db.execute(today_q).first()
-        today_tokens = today_res[0] or 0
-        today_input = today_res[1] or 0
-        today_output = today_res[2] or 0
-        today_cached = today_res[3] or 0
-
-        model_q = select(
-            TokenMetricRow.model,
-            func.sum(TokenMetricRow.total_tokens).label("tokens"),
-            func.sum(TokenMetricRow.input_tokens).label("in_tok"),
-            func.sum(TokenMetricRow.output_tokens).label("out_tok"),
-            func.sum(TokenMetricRow.cached_tokens).label("cache_tok"),
-            func.count(func.distinct(TokenMetricRow.session_id)).label("sess_cnt"),
-        ).group_by(TokenMetricRow.model).order_by(desc("tokens"))
-        models = []
-        for r in db.execute(model_q).all():
-            m_in = r.in_tok or 0
-            m_cache = r.cache_tok or 0
-            models.append({
-                "model": r.model,
-                "total_tokens": r.tokens or 0,
-                "input_tokens": m_in,
-                "output_tokens": r.out_tok or 0,
-                "cached_tokens": m_cache,
-                "session_count": r.sess_cnt or 0,
-                "cache_hit_rate": min(100.0, round((m_cache / max(m_in, 1)) * 100, 1)) if m_in > 0 else 0,
-                "share": round(((r.tokens or 0) / max(t_tokens, 1)) * 100, 1),
-            })
-
-        agent_q = select(
-            TokenMetricRow.agent_id,
-            TokenMetricRow.provider,
-            func.sum(TokenMetricRow.total_tokens).label("tokens"),
-            func.sum(TokenMetricRow.input_tokens).label("in_tok"),
-            func.sum(TokenMetricRow.output_tokens).label("out_tok"),
-            func.sum(TokenMetricRow.cached_tokens).label("cache_tok"),
-            func.count(func.distinct(TokenMetricRow.session_id)).label("sess_cnt"),
-        ).group_by(TokenMetricRow.agent_id, TokenMetricRow.provider).order_by(desc("tokens"))
-        agents_data = [
-            {
-                "agent_id": r.agent_id,
-                "provider": r.provider or "codex",
-                "tokens": r.tokens or 0,
-                "input_tokens": r.in_tok or 0,
-                "output_tokens": r.out_tok or 0,
-                "cached_tokens": r.cache_tok or 0,
-                "session_count": r.sess_cnt or 0,
-                "cache_hit_rate": min(100.0, round(((r.cache_tok or 0) / max(r.in_tok or 0, 1)) * 100, 1)) if (r.in_tok or 0) > 0 else 0,
-                "share": round(((r.tokens or 0) / max(t_tokens, 1)) * 100, 1),
-            }
-            for r in db.execute(agent_q).all()
-        ]
-
-    cache_hit_rate = min(100.0, round((t_cached / max(t_input, 1)) * 100, 1)) if t_input > 0 else 0
-    today_cache_hit_rate = min(100.0, round((today_cached / max(today_input, 1)) * 100, 1)) if today_input > 0 else 0
-
-    return {
-        "ok": True,
-        "totals": {
-            "total_tokens": t_tokens,
-            "input_tokens": t_input,
-            "output_tokens": t_output,
-            "cached_tokens": t_cached,
-            "reasoning_tokens": t_reasoning,
-            "session_count": session_count,
-            "cache_hit_rate": cache_hit_rate,
-        },
-        "today": {
-            "date": today_str,
-            "total_tokens": today_tokens,
-            "input_tokens": today_input,
-            "output_tokens": today_output,
-            "cached_tokens": today_cached,
-            "cache_hit_rate": today_cache_hit_rate,
-        },
-        "by_model": models,
-        "by_agent": agents_data,
-    }
-
-
-@router.get("/api/v1/analytics/calendar")
-def get_analytics_calendar(request: Request, days: int = Query(default=365, ge=30, le=730)) -> dict[str, Any]:
-    _private(request)
-    store = request.app.state.store
-
-    start_d = date.today() - timedelta(days=days - 1)
-    start_date_str = start_d.strftime("%Y-%m-%d")
-
-    with store.session() as db:
-        q = select(
-            TokenMetricRow.date,
-            func.sum(TokenMetricRow.total_tokens).label("tokens"),
-            func.sum(TokenMetricRow.input_tokens).label("in_tok"),
-            func.sum(TokenMetricRow.output_tokens).label("out_tok"),
-            func.sum(TokenMetricRow.cached_tokens).label("cache_tok"),
-            func.count(func.distinct(TokenMetricRow.session_id)).label("sessions"),
-        ).where(TokenMetricRow.date >= start_date_str).group_by(TokenMetricRow.date).order_by(TokenMetricRow.date.asc())
-
-        rows = db.execute(q).all()
-
-    data_map = {}
-    max_tokens = 0
-    for r in rows:
-        tok = r.tokens or 0
-        if tok > max_tokens:
-            max_tokens = tok
-        m_in = r.in_tok or 0
-        m_cache = r.cache_tok or 0
-        data_map[r.date] = {
-            "date": r.date,
-            "tokens": tok,
-            "input_tokens": m_in,
-            "output_tokens": r.out_tok or 0,
-            "cached_tokens": m_cache,
-            "session_count": r.sessions or 0,
-            "cache_hit_rate": round((m_cache / max(m_in, 1)) * 100, 1) if m_in > 0 else 0,
-        }
-
-    items = []
-    for i in range(days):
-        cur_d = (start_d + timedelta(days=i)).strftime("%Y-%m-%d")
-        if cur_d in data_map:
-            items.append(data_map[cur_d])
+    config = get_gateway_config(store)
+    headers = _gateway_headers(config)
+    loop = asyncio.get_event_loop()
+    now = loop.time()
+    try:
+        cached = _quota_snapshot_cache.get("payload")
+        if cached and now < _quota_snapshot_cache.get("expires_at", 0):
+            models, combos, reports, accounts = cached
         else:
-            items.append({
-                "date": cur_d,
-                "tokens": 0,
-                "input_tokens": 0,
-                "output_tokens": 0,
-                "cached_tokens": 0,
-                "session_count": 0,
-                "cache_hit_rate": 0,
-            })
+            async with httpx.AsyncClient(follow_redirects=True, timeout=15.0) as client:
+                responses = await asyncio.gather(*(
+                    client.get(_gateway_endpoint(config, resource), headers=headers)
+                    for resource in ("models", "combos", "provider-quotas")
+                ))
+                for response in responses:
+                    response.raise_for_status()
+                models, combos_payload, quotas_payload = (response.json() for response in responses)
+                accounts_response = await client.get(_gateway_endpoint(config, "codex-auth/accounts"), headers=headers)
+                accounts = [
+                    account for account in accounts_response.json().get("accounts", [])
+                    if not account.get("paused")
+                ] if accounts_response.status_code == 200 else []
+                combos = combos_payload.get("combos", [])
+                reports = quotas_payload.get("reports", [])
+                _quota_snapshot_cache["expires_at"] = now + 60.0
+                _quota_snapshot_cache["payload"] = (models, combos, reports, accounts)
+        resolved = _model_quota(model, models, combos, reports, accounts)
+        return resolved
+    except (httpx.HTTPError, ValueError, TypeError, AttributeError) as exc:
+        raise HTTPException(status_code=502, detail=f"LLM 网关模型额度请求失败：{exc}") from exc
 
-    return {
-        "ok": True,
-        "days": len(items),
-        "max_daily_tokens": max_tokens,
-        "items": items,
-    }
 
-
-@router.get("/api/v1/analytics/top-sessions")
-def get_top_sessions(request: Request, limit: int = Query(default=10, ge=1, le=50)) -> dict[str, Any]:
+@router.get("/api/v1/model-sync/targets")
+def get_model_sync_targets(request: Request) -> dict[str, Any]:
     _private(request)
-    store = request.app.state.store
-
-    with store.session() as db:
-        q = select(
-            TokenMetricRow.session_id,
-            TokenMetricRow.agent_id,
-            TokenMetricRow.model,
-            func.sum(TokenMetricRow.total_tokens).label("tokens"),
-            func.sum(TokenMetricRow.input_tokens).label("in_tok"),
-            func.sum(TokenMetricRow.output_tokens).label("out_tok"),
-            func.sum(TokenMetricRow.cached_tokens).label("cache_tok"),
-            func.max(TokenMetricRow.date).label("latest_date"),
-        ).group_by(TokenMetricRow.session_id, TokenMetricRow.agent_id, TokenMetricRow.model).order_by(desc("tokens")).limit(limit)
-
-        rows = db.execute(q).all()
-
-        results = []
-        for r in rows:
-            sess_row = db.execute(
-                select(SessionRow).where(SessionRow.agent_id == r.agent_id, SessionRow.id == r.session_id)
-            ).scalar_one_or_none()
-            title = sess_row.title if sess_row else r.session_id
-            m_in = r.in_tok or 0
-            m_cache = r.cache_tok or 0
-            results.append({
-                "session_id": r.session_id,
-                "agent_id": r.agent_id,
-                "title": title,
-                "model": r.model,
-                "total_tokens": r.tokens or 0,
-                "input_tokens": m_in,
-                "output_tokens": r.out_tok or 0,
-                "cached_tokens": m_cache,
-                "cache_hit_rate": round((m_cache / max(m_in, 1)) * 100, 1) if m_in > 0 else 0,
-                "latest_date": r.latest_date,
-            })
-
-    return {"ok": True, "items": results}
+    return {"items": list_targets(request.app.state.store)}
 
 
-@router.post("/api/v1/analytics/sync")
-def trigger_analytics_sync(request: Request) -> dict[str, Any]:
+@router.post("/api/v1/model-sync/preview")
+async def preview_model_sync(request: Request, payload: dict[str, Any]) -> dict[str, Any]:
     _private(request)
-    store = request.app.state.store
-    res = sync_all_agent_token_metrics(store)
-    return {"ok": True, "result": res}
+    try:
+        selections = validate_selections(request.app.state.store, payload.get("targets"))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    bridge = getattr(request.app.state, "daemon_bridge", None)
+    if bridge is None:
+        raise HTTPException(status_code=503, detail="小内核未启用")
+    try:
+        config = get_gateway_config(request.app.state.store)
+        catalog = await fetch_catalog(config)
+        plans = await asyncio.gather(*(
+            build_target_plan(
+                request.app.state.store, bridge, catalog,
+                str(item.get("target_id") or ""), list(item.get("agents") or []), config,
+            )
+            for item in selections
+        ))
+        for plan in plans:
+            if "hermes" in plan["agents"]:
+                plan["hermes"] = await validate_hermes_catalog(request.app, plan["target_id"], catalog)
+        return {
+            "catalog_fingerprint": catalog["fingerprint"], "model_count": len(catalog["models"]),
+            "targets": [{key: value for key, value in plan.items() if key not in {"files", "target"}} for plan in plans],
+        }
+    except (ValueError, httpx.HTTPError, KeyError, TypeError, DaemonBridgeError) as exc:
+        raise HTTPException(status_code=502, detail=f"模型同步预览失败：{exc}") from exc
+
+
+@router.post("/api/v1/model-sync/jobs")
+async def start_model_sync(request: Request, payload: dict[str, Any]) -> dict[str, Any]:
+    _private(request)
+    try:
+        selections = validate_selections(request.app.state.store, payload.get("targets"))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if getattr(request.app.state, "daemon_bridge", None) is None:
+        raise HTTPException(status_code=503, detail="小内核未启用")
+    operation_id = f"model-sync-{uuid4().hex}"
+    cancel_event = request.app.state.background_tasks.start(operation_id)
+    task = asyncio.create_task(run_sync(request.app, operation_id, selections, cancel_event))
+    tasks = getattr(request.app.state, "model_sync_tasks", None)
+    if tasks is None:
+        tasks = request.app.state.model_sync_tasks = set()
+    tasks.add(task)
+    task.add_done_callback(tasks.discard)
+    return {"id": operation_id, "status": "running"}
+
+
+@router.get("/api/v1/model-sync/jobs")
+def get_model_sync_jobs(request: Request) -> dict[str, Any]:
+    _private(request)
+    jobs = list_jobs(request.app.state.store)
+    for job in jobs:
+        if job.get("status") == "running" and not request.app.state.background_tasks.is_active(job["id"]):
+            job.update(status="failed", updated_at=datetime.now().astimezone().isoformat(), error="大内核重启，同步任务已中断")
+            save_job(request.app.state.store, job)
+    return {"items": jobs}
+
+
+@router.post("/api/v1/model-sync/jobs/{operation_id}/cancel")
+def cancel_model_sync(operation_id: str, request: Request) -> dict[str, bool]:
+    _private(request)
+    return {"cancelled": request.app.state.background_tasks.cancel(operation_id)}
