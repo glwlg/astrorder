@@ -1077,7 +1077,7 @@ def _monitor_layout_set(payload: dict[str, Any], ctx: AgentContext) -> dict[str,
 def _resolve_blackboard_ns(payload: dict[str, Any], ctx: AgentContext) -> str:
     raw_ns = payload.get("namespace")
     val = raw_ns.strip() if isinstance(raw_ns, str) else ""
-    if val and val not in {"global", "default", "session:default"}:
+    if val and val not in {"session:default"}:
         if not val.startswith("session:"):
             return val
         session_ref = val[len("session:"):].strip()

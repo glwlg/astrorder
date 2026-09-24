@@ -48,6 +48,7 @@ def hot_sync(*, restart_backend: bool = True) -> None:
 
     # 2. Sync runtime scripts, connectors & .hermes
     shutil.copytree(DEV_ROOT / "scripts", INSTALLED_ROOT / "scripts", dirs_exist_ok=True)
+    shutil.copytree(DEV_ROOT / "backend/src", INSTALLED_ROOT / "backend/src", dirs_exist_ok=True)
     shutil.copytree(DEV_ROOT / "connectors", INSTALLED_ROOT / "connectors", dirs_exist_ok=True)
     shutil.copytree(DEV_ROOT / ".hermes", INSTALLED_ROOT / ".hermes", dirs_exist_ok=True)
     print("  [OK] Synced live scripts, plugins & connectors metadata")
