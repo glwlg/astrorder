@@ -3,7 +3,7 @@ import asyncio
 import pytest
 
 from astrorder.config import Settings
-from astrorder.daemon.grok_runtime import GrokDaemonRuntime, GrokDaemonRuntimeConfig
+from astrorder.daemon.runtimes.grok.runtime import GrokDaemonRuntime, GrokDaemonRuntimeConfig
 from astrorder.core.events import EventHub
 from connectors.grok.connection import GrokProjection
 from astrorder.service import ControlService

@@ -6,7 +6,7 @@ from typing import ClassVar
 
 import pytest
 
-from astrorder.daemon.pty_runtime import PtyDaemonRuntime, PtyDaemonRuntimeConfig
+from astrorder.daemon.runtimes.pty.runtime import PtyDaemonRuntime, PtyDaemonRuntimeConfig
 from astrorder.daemon.session_daemon import SessionDaemon, create_session_daemon
 
 

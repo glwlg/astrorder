@@ -7,8 +7,8 @@ from typing import ClassVar
 import pytest
 from astrorder_codex_connector.app_server import CodexRpcRejected
 
-from astrorder.daemon.remote_codex_runtime import RemoteCodexDaemonRuntime
-from astrorder.daemon.ssh_runtime import SshDaemonRuntimeRegistry
+from astrorder.daemon.runtimes.codex.remote import RemoteCodexDaemonRuntime
+from astrorder.daemon.runtimes.ssh.runtime import SshDaemonRuntimeRegistry
 
 
 class FakeCodexAppServer:

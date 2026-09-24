@@ -2,7 +2,7 @@ import base64
 
 import pytest
 
-from astrorder.daemon.hermes_runtime import HermesDaemonRuntime
+from astrorder.daemon.runtimes.hermes.runtime import HermesDaemonRuntime
 from astrorder.daemon.session_daemon import SessionDaemon
 
 

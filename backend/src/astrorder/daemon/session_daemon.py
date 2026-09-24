@@ -858,11 +858,11 @@ def create_session_daemon(
         shutdown_event=shutdown_event,
     )
     if codex_config is not None:
-        from .codex_runtime import CodexDaemonRuntime
+        from .runtimes.codex.runtime import CodexDaemonRuntime
 
         daemon.register_runtime("codex", CodexDaemonRuntime(codex_config, emit=daemon.publish))
     if pty_config is not None:
-        from .pty_runtime import PtyDaemonRuntime
+        from .runtimes.pty.runtime import PtyDaemonRuntime
 
         daemon.register_runtime("pty", PtyDaemonRuntime(pty_config, emit=daemon.publish))
     for agent_type, runtime in (
@@ -912,7 +912,7 @@ async def _run_forever(
     )
     codex_observer_task = None
     if codex_config is not None:
-        from .codex_runtime import forward_codex_desktop_stops
+        from .runtimes.codex.runtime import forward_codex_desktop_stops
 
         codex_observer_task = asyncio.create_task(
             forward_codex_desktop_stops(codex_config, daemon.publish, stopping)
@@ -957,7 +957,7 @@ def main(argv: list[str] | None = None) -> None:
             parser.error("ASTRORDER_SESSION_DAEMON_SECRET is required with --enable-codex")
         if not args.codex_executable or not args.codex_workspace:
             parser.error("--codex-executable and --codex-workspace are required with --enable-codex")
-        from .codex_runtime import CodexDaemonRuntimeConfig
+        from .runtimes.codex.runtime import CodexDaemonRuntimeConfig
 
         allowed_workspaces = args.codex_allowed_workspace or [args.codex_workspace]
         codex_config = CodexDaemonRuntimeConfig(
@@ -973,7 +973,7 @@ def main(argv: list[str] | None = None) -> None:
             parser.error("ASTRORDER_SESSION_DAEMON_SECRET is required with --enable-pty")
         if not args.pty_allowed_workspace:
             parser.error("--pty-allowed-workspace is required with --enable-pty")
-        from .pty_runtime import PtyDaemonRuntimeConfig
+        from .runtimes.pty.runtime import PtyDaemonRuntimeConfig
 
         pty_config = PtyDaemonRuntimeConfig(
             allowed_workspaces=tuple(args.pty_allowed_workspace),
@@ -984,7 +984,7 @@ def main(argv: list[str] | None = None) -> None:
             parser.error("ASTRORDER_SESSION_DAEMON_SECRET is required with --enable-grok")
         if not args.grok_executable or not args.grok_workspace:
             parser.error("--grok-executable and --grok-workspace are required with --enable-grok")
-        from .grok_runtime import GrokDaemonRuntime, GrokDaemonRuntimeConfig
+        from .runtimes.grok.runtime import GrokDaemonRuntime, GrokDaemonRuntimeConfig
 
         grok_runtime = GrokDaemonRuntime(
             GrokDaemonRuntimeConfig(
@@ -1004,7 +1004,7 @@ def main(argv: list[str] | None = None) -> None:
             parser.error("ASTRORDER_CONNECTOR_SECRET is required with --enable-hermes")
         from ..config import Settings
         from ..connections import LocalHermesController
-        from .hermes_runtime import HermesDaemonRuntime
+        from .runtimes.hermes.runtime import HermesDaemonRuntime
 
         hermes_settings = Settings(
             host="127.0.0.1",
@@ -1027,7 +1027,7 @@ def main(argv: list[str] | None = None) -> None:
         from ..config import Settings
         from ..connections import validate_ssh_settings
         from ..ssh_transport import SshNativeRuntime
-        from .ssh_runtime import SshDaemonRuntime, SshDaemonRuntimeRegistry
+        from .runtimes.ssh.runtime import SshDaemonRuntime, SshDaemonRuntimeRegistry
 
         project_root = Path(__file__).resolve().parents[4]
         ssh_attachment_settings = Settings(
@@ -1058,7 +1058,7 @@ def main(argv: list[str] | None = None) -> None:
 
         ssh_runtime = SshDaemonRuntimeRegistry(ssh_factory)
         if args.enable_codex:
-            from .remote_codex_runtime import RemoteCodexDaemonRuntime
+            from .runtimes.codex.remote import RemoteCodexDaemonRuntime
 
             def remote_codex_factory(
                 connection_id: str, raw_settings: Mapping[str, Any]
@@ -1071,7 +1071,7 @@ def main(argv: list[str] | None = None) -> None:
 
             remote_codex_runtime = SshDaemonRuntimeRegistry(remote_codex_factory)
         if args.enable_grok:
-            from .remote_grok_runtime import RemoteGrokDaemonRuntime
+            from .runtimes.grok.remote import RemoteGrokDaemonRuntime
 
             def remote_grok_factory(
                 connection_id: str, raw_settings: Mapping[str, Any]

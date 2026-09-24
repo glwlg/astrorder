@@ -1,4 +1,4 @@
-from astrorder.daemon.ssh_control import DaemonSshController
+from astrorder.daemon.runtimes.ssh.control import DaemonSshController
 
 
 def test_daemon_ssh_controller_reads_remote_history_page_through_exact_connection_binding():

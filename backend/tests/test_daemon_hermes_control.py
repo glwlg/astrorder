@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from astrorder.daemon.hermes_control import DaemonHermesController, hermes_runtime_control_id
+from astrorder.daemon.runtimes.hermes.control import DaemonHermesController, hermes_runtime_control_id
 
 
 def test_daemon_hermes_controller_connects_and_creates_from_daemon_confirmed_identity():

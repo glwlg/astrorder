@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 import websockets
 
-from astrorder.daemon.codex_runtime import CodexDaemonRuntime, CodexDaemonRuntimeConfig
+from astrorder.daemon.runtimes.codex.runtime import CodexDaemonRuntime, CodexDaemonRuntimeConfig
 from astrorder.daemon.session_daemon import SessionDaemon
 
 

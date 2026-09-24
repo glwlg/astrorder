@@ -10,7 +10,7 @@ import pytest
 import websockets
 from astrorder_codex_connector.app_server import CodexRpcRejected
 
-from astrorder.daemon.codex_runtime import (
+from astrorder.daemon.runtimes.codex.runtime import (
     CodexDaemonRuntime,
     CodexDaemonRuntimeConfig,
     forward_codex_desktop_stops,

@@ -5,7 +5,7 @@ from datetime import datetime
 
 import pytest
 
-from astrorder.daemon.ssh_control import DaemonSshController, ssh_runtime_control_id
+from astrorder.daemon.runtimes.ssh.control import DaemonSshController, ssh_runtime_control_id
 
 
 def test_daemon_ssh_controller_connects_and_creates_by_exact_connection_identity():

@@ -6,8 +6,8 @@ import pytest
 
 from astrorder.config import Settings
 from astrorder.daemon.bridge import DaemonBridge
-from astrorder.daemon.hermes_control import DaemonHermesController
-from astrorder.daemon.hermes_runtime import HermesDaemonRuntime
+from astrorder.daemon.runtimes.hermes.control import DaemonHermesController
+from astrorder.daemon.runtimes.hermes.runtime import HermesDaemonRuntime
 from astrorder.daemon.session_daemon import SessionDaemon
 from astrorder.core.events import EventHub
 from astrorder.service import ControlService

@@ -1,6 +1,6 @@
 import pytest
 
-from astrorder.daemon.hermes_native_control import execute_native_session_control
+from astrorder.daemon.runtimes.hermes.native_control import execute_native_session_control
 from astrorder.daemon.session_daemon import DaemonProtocolError
 
 

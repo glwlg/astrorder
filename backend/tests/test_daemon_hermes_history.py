@@ -1,4 +1,4 @@
-from astrorder.daemon.hermes_control import DaemonHermesController
+from astrorder.daemon.runtimes.hermes.control import DaemonHermesController
 
 
 def test_daemon_hermes_controller_reads_native_history_page_through_exact_session_binding():

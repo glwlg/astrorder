@@ -5,7 +5,7 @@ import asyncio
 import pytest
 
 from astrorder.daemon.session_daemon import SessionDaemon
-from astrorder.daemon.ssh_runtime import SshDaemonRuntime, SshDaemonRuntimeRegistry
+from astrorder.daemon.runtimes.ssh.runtime import SshDaemonRuntime, SshDaemonRuntimeRegistry
 
 
 @pytest.mark.asyncio

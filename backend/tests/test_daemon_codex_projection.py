@@ -7,8 +7,8 @@ import pytest
 
 from astrorder.config import Settings
 from astrorder.daemon.bridge import DaemonBridge, DaemonBridgeError
-from astrorder.daemon.codex_projection import CodexNativeFrameRouter
-from astrorder.daemon.codex_runtime import CodexDaemonRuntime, CodexDaemonRuntimeConfig
+from astrorder.daemon.bridge.codex_projection import CodexNativeFrameRouter
+from astrorder.daemon.runtimes.codex.runtime import CodexDaemonRuntime, CodexDaemonRuntimeConfig
 from astrorder.daemon.session_daemon import SessionDaemon
 from astrorder.core.events import EventHub
 from astrorder.service import ControlService

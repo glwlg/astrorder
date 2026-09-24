@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from astrorder.daemon.bridge import DaemonBridgeError
-from astrorder.daemon.hermes_projection import HermesCommandFrameRouter
+from astrorder.daemon.bridge.hermes_projection import HermesCommandFrameRouter
 
 
 def test_hermes_completion_router_completes_exact_command_and_rejects_unknown_identity():
