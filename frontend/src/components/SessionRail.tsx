@@ -69,8 +69,9 @@ type PendingConfirmation =
 
 function sessionRunningStyle(session: Session, accent?: string): CSSProperties {
   const resolvedAccent = (accent && (PROJECT_APPEARANCE_COLORS[accent] || accent)) || undefined
+  const agentId = session?.agent_id || ''
   return {
-    '--session-running-color': resolvedAccent || (session.agent_id.includes('codex') ? 'var(--astr-teal, #12b886)' : 'var(--astr-indigo, #5b6cff)'),
+    '--session-running-color': resolvedAccent || (agentId.includes('codex') ? 'var(--astr-teal, #12b886)' : 'var(--astr-indigo, #5b6cff)'),
   } as CSSProperties
 }
 
@@ -136,12 +137,20 @@ export function SessionRail({
   const { pinned_projects: pinnedProjects, appearance: projectAppearance, session_pins: pinnedSessions, project_order: projectOrder } = preferences
   const [appearanceTarget, setAppearanceTarget] = useState<ProjectGroup | null>(null)
 
-  // 项目下会话默认只显示4个，展开更多状态
-  const [expandedSessionsMap, setExpandedSessionsMap] = useState<Record<string, boolean>>({})
+  // 项目下会话默认只显示4个，展开更多状态（记录展开显示的数量）
+  const [expandedCountMap, setExpandedCountMap] = useState<Record<string, number>>({})
 
-  const updateExpandedSessions = (key: string, expanded: boolean) => {
-    setExpandedSessionsMap((prev) => {
-      const next = { ...prev, [key]: expanded }
+  const handleExpandMore = (key: string, totalCount: number) => {
+    setExpandedCountMap((prev) => {
+      const current = prev[key] ?? 4
+      return { ...prev, [key]: Math.min(current + 4, totalCount) }
+    })
+  }
+
+  const handleCollapseSessions = (key: string) => {
+    setExpandedCountMap((prev) => {
+      const next = { ...prev }
+      delete next[key]
       return next
     })
   }
@@ -822,10 +831,12 @@ export function SessionRail({
           const projectCollapsed = collapsed[projectCollapseKey] === true
           const isProjectPinned = pinnedProjects.includes(project.key)
           const projectCustom = projectAppearance[project.key]
-          const isSessionsExpanded = expandedSessionsMap[project.key] === true
+          const visibleCount = expandedCountMap[project.key] ?? 4
           const regularSessions = project.sessions.filter(s => !pinnedSessions[scopeKey(s.agent_id, s.id)])
-          const visibleSessions = isSessionsExpanded ? regularSessions : regularSessions.slice(0, 4)
-          const hasMoreSessions = regularSessions.length > 4
+          const visibleSessions = regularSessions.slice(0, visibleCount)
+          const remainingSessionsCount = Math.max(0, regularSessions.length - visibleCount)
+          const hasMoreSessions = remainingSessionsCount > 0
+          const canCollapse = visibleCount > 4
 
           return (
             <section
@@ -1046,26 +1057,34 @@ export function SessionRail({
                     )
                   })}
                   </AnimatePresence>
-                  {hasMoreSessions && (
-                    <UnstyledButton
-                      className="session-expand-more-btn"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        updateExpandedSessions(project.key, !isSessionsExpanded)
-                      }}
-                    >
-                      {isSessionsExpanded ? (
-                        <>
+                  {(hasMoreSessions || canCollapse) && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      {hasMoreSessions && (
+                        <UnstyledButton
+                          className="session-expand-more-btn"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleExpandMore(project.key, regularSessions.length)
+                          }}
+                        >
+                          <IconChevronDown size={12} />
+                          <span>展开更多（还有 {remainingSessionsCount} 个会话）</span>
+                        </UnstyledButton>
+                      )}
+                      {canCollapse && (
+                        <UnstyledButton
+                          className="session-expand-more-btn"
+                          style={hasMoreSessions ? { width: 'auto', flexShrink: 0, padding: '4px 10px' } : undefined}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleCollapseSessions(project.key)
+                          }}
+                        >
                           <IconChevronUp size={12} />
                           <span>收起</span>
-                        </>
-                      ) : (
-                        <>
-                          <IconChevronDown size={12} />
-                          <span>展开更多（还有 {regularSessions.length - 4} 个会话）</span>
-                        </>
+                        </UnstyledButton>
                       )}
-                    </UnstyledButton>
+                    </div>
                   )}
                 </Stack>
               </Collapse>

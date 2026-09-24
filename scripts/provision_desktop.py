@@ -27,14 +27,14 @@ def provision() -> None:
     # 2. 配置 Python 模块查找路径
     python = ROOT / "backend/.venv/Lib/site-packages"
     if python.is_dir():
-        (python / "_editable_impl_astrorder_server.pth").write_text(
-            str(ROOT / "backend/src"), encoding="utf-8"
-        )
-        (python / "_editable_impl_astrorder_codex_connector.pth").write_text(
-            str(ROOT / "connectors/codex"), encoding="utf-8"
-        )
-        (python / "_editable_impl_astrorder_hermes_connector.pth").write_text(
-            str(ROOT / "connectors/hermes"), encoding="utf-8"
+        (python / "_astrorder.pth").write_text(
+            f"import sys, _virtualenv; from pathlib import Path; "
+            f"_p = Path(_virtualenv.__file__).resolve().parents[4]; "
+            f"(str(_p) not in sys.path) and sys.path.insert(0, str(_p)); "
+            f"_src = _p / 'backend' / 'src'; (str(_src) not in sys.path) and sys.path.insert(0, str(_src)); "
+            f"_codex = _p / 'connectors' / 'codex'; (str(_codex) not in sys.path) and sys.path.insert(0, str(_codex)); "
+            f"_hermes = _p / 'connectors' / 'hermes'; (str(_hermes) not in sys.path) and sys.path.insert(0, str(_hermes))\n",
+            encoding="utf-8",
         )
 
     # 3. 凭据只保存在用户正式数据目录
