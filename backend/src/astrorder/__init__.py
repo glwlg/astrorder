@@ -1,6 +1,13 @@
 """Astrorder server package."""
 import importlib
+import sys
+from pathlib import Path
 from typing import Any
+
+# 确保 connectors 能被平滑导入
+for _p in [Path(__file__).resolve().parents[3], Path(__file__).resolve().parents[2]]:
+    if (_p / "connectors").is_dir() and str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
 
 # 动态属性解析：保持顶级包极简，仅在外部显式访问旧符号时按需透明解析到子包
 _SUBMODULE_MAP = {
