@@ -188,7 +188,7 @@ print(json.dumps(res))
             ' for key,value in forwarded.items():\n'
             '  if not isinstance(key, str) or not key or "=" in key or "\\x00" in key:\n'
             '   continue\n'
-            '  if key.casefold() == "path":\n'
+            '  if key.casefold() in ("path", "home", "temp", "tmp", "tmpdir", "userprofile", "appdata", "localappdata"):\n'
             '   continue\n'
             '  if not os.environ.get(key):\n'
             '   os.environ[key]=str(value)\n'

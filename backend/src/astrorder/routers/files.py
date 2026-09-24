@@ -33,15 +33,25 @@ def get_files_tree(
     _private(request)
     import json
     cleaned_path = urllib.parse.unquote(path).strip().strip('<>').strip('"\'')
-    cleaned_reveal_path = urllib.parse.unquote(reveal_path).strip().strip('<>').strip('"\'')
+    if cleaned_path.startswith("file:///"):
+        cleaned_path = cleaned_path[8:]
+    elif cleaned_path.startswith("file://"):
+        cleaned_path = cleaned_path[7:]
 
-    # 优先根据 session_id 或 connection_id 判断是否为 SSH 远程项目
+    cleaned_reveal_path = urllib.parse.unquote(reveal_path).strip().strip('<>').strip('"\'')
+    if cleaned_reveal_path.startswith("file:///"):
+        cleaned_reveal_path = cleaned_reveal_path[8:]
+    elif cleaned_reveal_path.startswith("file://"):
+        cleaned_reveal_path = cleaned_reveal_path[7:]
+
+    # 优先根据 session_id 或 connection_id 判断是否为 SSH 远程项目，并补全工作区
     resolved_cid = connection_id
-    if not resolved_cid and session_id:
+    if session_id:
         try:
             sess = request.app.state.store.find_session_by_id(session_id)
-            if sess and sess.get("connection_id") and sess["connection_id"] != "local":
-                resolved_cid = sess["connection_id"]
+            if sess:
+                if not resolved_cid and sess.get("connection_id") and sess["connection_id"] != "local":
+                    resolved_cid = sess["connection_id"]
                 if not cleaned_path and sess.get("workspace"):
                     cleaned_path = sess["workspace"]
         except Exception:
@@ -127,7 +137,32 @@ print(json.dumps({{
         root = Path(cleaned_path).expanduser().resolve()
 
     if not root.exists() or not root.is_dir():
-        raise HTTPException(status_code=404, detail="Path does not exist")
+        if root.exists() and root.is_file():
+            if not cleaned_reveal_path:
+                cleaned_reveal_path = str(root)
+            root = root.parent
+        else:
+            fallback_root = None
+            if session_id:
+                try:
+                    s = request.app.state.store.find_session_by_id(session_id)
+                    if s and s.get("workspace"):
+                        ws = Path(s["workspace"]).expanduser().resolve()
+                        if ws.exists() and ws.is_dir():
+                            fallback_root = ws
+                except Exception:
+                    pass
+            if not fallback_root:
+                settings = request.app.state.settings
+                for w in (getattr(settings, "allowed_workspaces", None) or []):
+                    wp = Path(w).resolve()
+                    if wp.exists() and wp.is_dir():
+                        fallback_root = wp
+                        break
+            if fallback_root:
+                root = fallback_root
+            elif not root.exists() or not root.is_dir():
+                raise HTTPException(status_code=404, detail="Path does not exist")
 
     reveal = Path(cleaned_reveal_path).expanduser().resolve() if cleaned_reveal_path else None
     ignored = {".git", ".venv", "node_modules", "__pycache__", ".pytest_cache", ".ruff_cache", "dist"}

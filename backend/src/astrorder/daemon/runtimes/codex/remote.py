@@ -17,7 +17,7 @@ from astrorder.connections import (
     _windows_hide_startupinfo,
     validate_ssh_settings,
 )
-from ..ssh_transport import SshNativeRuntime, build_remote_python_command
+from astrorder.ssh_transport import SshNativeRuntime, build_remote_python_command
 from .runtime import CodexDaemonRuntime
 from astrorder.daemon.errors import DaemonProtocolError
 

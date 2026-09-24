@@ -11,7 +11,7 @@ from astrorder_codex_connector.app_server import CodexAppServer
 from astrorder_codex_connector.config import CodexConnectorConfig
 
 from astrorder.connections import validate_ssh_settings
-from ..ssh_transport import SshNativeRuntime, build_remote_python_command
+from astrorder.ssh_transport import SshNativeRuntime, build_remote_python_command
 from astrorder.daemon.errors import DaemonProtocolError
 from .runtime import GrokDaemonRuntime
 

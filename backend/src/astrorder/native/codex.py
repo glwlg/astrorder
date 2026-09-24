@@ -371,8 +371,13 @@ class CodexConnection:
                 self._home = Path(initialized['codexHome']) if initialized.get('codexHome') else None
                 if self.client is not None:
                     self.client.send({'method': 'initialized', 'params': {}})
-                account = self._request('account/read', {'refreshToken': False})
-                self.auth_required = bool(account.get('requiresOpenaiAuth') and not account.get('account'))
+                account = {}
+                try:
+                    account = self._request('account/read', {'refreshToken': False})
+                    self.auth_required = bool(account.get('requiresOpenaiAuth') and not account.get('account'))
+                except Exception as exc:
+                    logger.warning("Codex account/read query failed (%s); proceeding with active sessions", exc)
+                    self.auth_required = False
                 rows = list(self._pages('thread/list', {'limit': 100, 'sortKey': 'updated_at', 'sortDirection': 'desc', 'archived': False, 'modelProviders': [], 'sourceKinds': ['cli', 'vscode', 'exec', 'appServer', 'subAgent', 'subAgentReview', 'subAgentCompact', 'subAgentThreadSpawn', 'subAgentOther', 'unknown'], 'useStateDbOnly': True}))
                 self._agent('error' if self.auth_required else 'ready')
                 self._threads = {}
