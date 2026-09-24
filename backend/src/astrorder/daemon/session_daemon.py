@@ -504,9 +504,9 @@ class SessionDaemon:
             return await self._dispatch_runtime_action(action, request)
         except DaemonProtocolError as exc:
             return {"action": "error", "request_id": request_id, "detail": str(exc)}
-        except Exception:
+        except Exception as exc:
             logger.exception("daemon runtime action failed: %s", action)
-            return {"action": "error", "request_id": request_id, "detail": "runtime action failed"}
+            return {"action": "error", "request_id": request_id, "detail": f"runtime action failed: {exc}"}
 
     async def _request_runtime(self, request: Mapping[str, Any]) -> dict[str, Any]:
         agent_type = request.get("agent_type")

@@ -155,7 +155,43 @@ export function UsageGatewaySettingsCard() {
             </Stack>)}</Stack>
           </Accordion.Panel></Accordion.Item>
         </Accordion>
-        {jobs.length > 0 && <Group gap="xs"><Text size="xs" c="dimmed">最近同步</Text><Badge size="xs" color={jobs[0].status === 'success' ? 'teal' : jobs[0].status === 'running' ? 'blue' : 'red'}>{jobs[0].status === 'success' ? '成功' : jobs[0].status === 'running' ? '进行中' : jobs[0].status === 'cancelled' ? '已取消' : '失败'}</Badge><Text size="xs" c="dimmed">{jobs[0].targets.length} 个目标{jobs[0].error ? ` · ${jobs[0].error}` : ''}</Text></Group>}
+        {jobs.length > 0 && (
+          <Stack gap={6}>
+            <Group gap="xs">
+              <Text size="xs" c="dimmed">最近同步</Text>
+              <Badge size="xs" color={jobs[0].status === 'success' ? 'teal' : jobs[0].status === 'running' ? 'blue' : 'red'}>
+                {jobs[0].status === 'success' ? '成功' : jobs[0].status === 'running' ? '进行中' : jobs[0].status === 'cancelled' ? '已取消' : '失败'}
+              </Badge>
+              <Text size="xs" c="dimmed">{jobs[0].targets.length} 个目标{jobs[0].error ? ` · ${jobs[0].error}` : ''}</Text>
+            </Group>
+            {jobs[0].targets.length > 0 && (
+              <Stack gap={4} p="xs" style={{ background: 'var(--astr-surface-muted, #f8fafc)', borderRadius: 6, border: '1px solid var(--mantine-color-default-border)' }}>
+                {jobs[0].targets.map((tgt) => {
+                  const targetName = targets.find((item) => item.id === tgt.target_id)?.name || tgt.target_id
+                  const isSuccess = tgt.status === 'success'
+                  return (
+                    <Group key={tgt.target_id} justify="space-between" align="center">
+                      <Group gap={6}>
+                        <Badge size="xs" color={isSuccess ? 'teal' : 'red'} variant="dot" p={0} />
+                        <Text size="xs" fw={500}>{targetName}</Text>
+                        {tgt.changed && tgt.changed.length > 0 && (
+                          <Text size="xs" c="dimmed">（更新: {tgt.changed.join(', ')}）</Text>
+                        )}
+                      </Group>
+                      {tgt.error ? (
+                        <Text size="xs" c="red" fw={500} title={tgt.error}>{tgt.error}</Text>
+                      ) : (
+                        <Badge size="xs" color={isSuccess ? 'teal' : 'gray'} variant="light">
+                          {isSuccess ? '已同步' : tgt.status}
+                        </Badge>
+                      )}
+                    </Group>
+                  )
+                })}
+              </Stack>
+            )}
+          </Stack>
+        )}
         <Group justify="space-between">
           <Button variant="subtle" color="red" size="xs" disabled={!maskedKey} onClick={() => void save(true)}>清除 Key</Button>
           <Group>

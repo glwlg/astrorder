@@ -159,6 +159,7 @@ def _replace_top_keys(text: str, values: dict[str, str]) -> str:
 
 
 def render_codex_config(existing: str, inference_url: str, catalog_path: str, *, env_key: str = "OPENCODEX_API_AUTH_TOKEN") -> str:
+    existing = existing.lstrip("\ufeff")
     text = _replace_sections(existing, {"model_providers.opencodex"}, "")
     text = _replace_top_keys(text, {
         "model_provider": "opencodex", "model_catalog_json": catalog_path,
@@ -174,6 +175,7 @@ def render_codex_config(existing: str, inference_url: str, catalog_path: str, *,
 
 
 def render_grok_config(existing: str, catalog: dict[str, Any], inference_url: str, api_key: str) -> str:
+    existing = existing.lstrip("\ufeff")
     blocks = []
     for model in catalog["models"]:
         if model["slug"] in NATIVE_GROK_MODELS:

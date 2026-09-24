@@ -491,7 +491,7 @@ export const api = {
     }>
   }>('/model-sync/preview', { targets }),
   startModelSync: (targets: Array<{ target_id: string; agents: string[] }>) => jsonRequest<{ id: string; status: string }>('/model-sync/jobs', { targets }),
-  getModelSyncJobs: () => request<{ items: Array<{ id: string; status: 'running' | 'success' | 'failed' | 'cancelled'; error?: string; targets: Array<{ target_id: string; status: string; changed: string[]; reload_pending: boolean }> }> }>('/model-sync/jobs'),
+  getModelSyncJobs: () => request<{ items: Array<{ id: string; status: 'running' | 'success' | 'failed' | 'cancelled'; error?: string; targets: Array<{ target_id: string; status: string; changed?: string[]; reload_pending?: boolean; error?: string }> }> }>('/model-sync/jobs'),
   cancelModelSync: (id: string) => request<{ cancelled: boolean }>(`/model-sync/jobs/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
   getAnalyticsUsage: (params: { range: 'all' | '30d' | '7d'; surface: 'all' | 'codex' | 'claude' | 'grok'; since?: number; until?: number }) => {
     const query = new URLSearchParams({ range: params.range, surface: params.surface })

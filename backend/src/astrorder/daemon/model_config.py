@@ -25,8 +25,8 @@ from pathlib import Path
 FILES={"codex_config":".codex/config.toml","codex_catalog":".codex/opencodex-catalog.json","grok_config":".grok/config.toml"}
 def digest(data): return hashlib.sha256(data).hexdigest()
 def validate(name,data):
-    if name=="codex_catalog": json.loads(data.decode("utf-8"))
-    else: tomllib.loads(data.decode("utf-8"))
+    if name=="codex_catalog": json.loads(data.decode("utf-8-sig"))
+    else: tomllib.loads(data.decode("utf-8-sig"))
 def inspect():
     out={"_home":str(Path.home())}
     for name,rel in FILES.items():
@@ -93,7 +93,7 @@ def _digest(data: bytes) -> str:
 
 
 def _validate(name: str, data: bytes) -> None:
-    text = data.decode("utf-8")
+    text = data.decode("utf-8-sig")
     json.loads(text) if name == "codex_catalog" else tomllib.loads(text)
 
 
