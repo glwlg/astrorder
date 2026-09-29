@@ -1,5 +1,6 @@
 import { Stack } from '@mantine/core'
 import { UsageGatewaySettingsCard } from './UsageGatewaySettingsCard'
+import { OpenVikingSettingsCard } from './OpenVikingSettingsCard'
 import { LlmSettingsCard } from './LlmSettingsCard'
 import { JevSettingsCard } from './JevSettingsCard'
 
@@ -8,9 +9,11 @@ export function ModelGatewaySettingsPage() {
     <div style={{ maxWidth: 840, margin: '0 auto', padding: '4px 0 24px' }}>
       <Stack gap="md">
         <UsageGatewaySettingsCard />
+        <OpenVikingSettingsCard />
         <LlmSettingsCard />
         <JevSettingsCard />
       </Stack>
     </div>
   )
 }
+

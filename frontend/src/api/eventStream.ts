@@ -11,7 +11,14 @@ export interface EventStreamOptions {
 
 export function buildEventStreamUrl(after: number): string {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${protocol}//${window.location.host}/ws/v1/events?after=${encodeURIComponent(String(after))}`
+  let localToken: string | null = null
+  try {
+    if (typeof localStorage !== 'undefined' && typeof localStorage.getItem === 'function') {
+      localToken = localStorage.getItem('astrorder:token')
+    }
+  } catch {}
+  const tokenParam = localToken ? `&token=${encodeURIComponent(localToken)}` : ''
+  return `${protocol}//${window.location.host}/ws/v1/events?after=${encodeURIComponent(String(after))}${tokenParam}`
 }
 
 function isEventEnvelope(value: unknown): value is EventEnvelope {

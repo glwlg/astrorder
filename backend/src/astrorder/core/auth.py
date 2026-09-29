@@ -65,7 +65,7 @@ def is_allowed_origin(origin: str | None, settings: Settings, host: str | None =
             return True
         if parsed.hostname:
             ip = ipaddress.ip_address(parsed.hostname)
-            if (ip.is_private or ip.is_loopback) and (parsed.port == settings.port or parsed.port is None):
+            if (ip.is_private or ip.is_loopback) and (parsed.port == settings.port or parsed.port in (30001, 30002) or parsed.port is None):
                 return True
     except (ValueError, TypeError):
         pass
@@ -127,9 +127,15 @@ def authorize_browser_websocket(websocket: WebSocket, settings: Settings) -> boo
     if not settings.browser_secret:
         return False
     if not validate_websocket_origin(websocket.headers.get("origin"), settings, websocket.headers.get("host"), getattr(websocket.app.state, "store", None)):
+        import logging
+        logging.getLogger("uvicorn.error").warning("WS origin rejected: origin=%s host=%s", websocket.headers.get("origin"), websocket.headers.get("host"))
         return False
-    token = websocket.cookies.get(COOKIE_NAME) or _bearer(websocket.headers)
-    return _matches(token, settings.browser_secret)
+    token = websocket.cookies.get(COOKIE_NAME) or _bearer(websocket.headers) or websocket.query_params.get("token")
+    ok = _matches(token, settings.browser_secret)
+    if not ok:
+        import logging
+        logging.getLogger("uvicorn.error").warning("WS token rejected: client=%s has_cookie=%s has_token=%s", websocket.client, bool(websocket.cookies.get(COOKIE_NAME)), bool(websocket.query_params.get("token")))
+    return ok
 
 
 def authorize_connector_websocket(websocket: WebSocket, settings: Settings) -> bool:

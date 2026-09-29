@@ -217,7 +217,7 @@ def test_remote_codex_effort_resumes_existing_rollout_path_when_thread_id_lookup
         store.close()
 
 
-def test_remote_codex_forwards_all_system_environment_via_stdin_without_command_line_values(tmp_path, monkeypatch):
+def test_remote_codex_forwards_only_gateway_environment_via_stdin(tmp_path, monkeypatch):
     captured = {}
 
     class CapturingAppServer:
@@ -231,11 +231,20 @@ def test_remote_codex_forwards_all_system_environment_via_stdin_without_command_
     service = ControlService(store, EventHub(), settings)
     row = {'id': 'ssh-test', 'display_name': 'WSL', 'settings': {'host': 'fixture', 'port': 22}}
     connection = RemoteCodex(settings, store, service, row, '/usr/bin/codex')
-    environment = {'MACHINE_ONLY': 'machine', 'USER_ONLY': 'user', 'PROCESS_ONLY': 'process'}
+    for key in ('STARSHIP_SESSION_KEY', 'GROK45_API_KEY', 'EMBED__API_KEY'):
+        monkeypatch.delenv(key, raising=False)
+    environment = {
+        'TEMP': r'C:\Users\luwei\AppData\Local\Temp',
+        'UV_CACHE_DIR': r'P:\workspace\env\uv\cache',
+        'HERMES_HOME': r'C:\Users\luwei\AppData\Local\hermes',
+        'OPENCODEX_API_AUTH_TOKEN': 'gateway-secret',
+    }
     try:
         connection._client(object(), lambda _frame: None, environment=environment)
         assert captured['kwargs']['environment'] == environment
-        assert captured['kwargs']['bootstrap_stdin'] == {'environment': environment}
+        assert captured['kwargs']['bootstrap_stdin'] == {
+            'environment': {'OPENCODEX_API_AUTH_TOKEN': 'gateway-secret'}
+        }
         command = ' '.join(captured['kwargs']['launch_argv'])
         assert all(value not in command for value in environment.values())
     finally:

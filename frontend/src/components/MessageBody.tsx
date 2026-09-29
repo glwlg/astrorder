@@ -11,6 +11,8 @@ export function MessageBody({
   onGalleryClick,
   attachmentNames = [],
   renderMarkdown,
+  sessionId,
+  connectionId,
 }: {
   value: string
   user?: boolean
@@ -18,6 +20,8 @@ export function MessageBody({
   onGalleryClick?: (url: string, allImages: string[]) => void
   attachmentNames?: string[]
   renderMarkdown: (value: string) => ReactNode
+  sessionId?: string
+  connectionId?: string
 }) {
   const nativeSummary = value.startsWith('[CONTEXT COMPACTION — REFERENCE ONLY]')
   const modelNotice = value.startsWith('[System: The active model for this chat has changed to ')
@@ -31,24 +35,73 @@ export function MessageBody({
     <span><IconPlayerPause size={16} />本轮已中断</span>
     <LazyDetails summary="查看原始记录"><code>{value}</code></LazyDetails>
   </div>
-  if (!user) {
-    const { comments, cleanText } = extractCodeComments(value)
-    if (comments.length > 0) {
-      return (
-        <>
-          {cleanText && renderMarkdown(cleanText)}
-          <CodeCommentsBlock comments={comments} />
-        </>
-      )
-    }
-    return renderMarkdown(value)
-  }
-
   let text = value
   const extractedImages: Array<{ name: string; path: string }> = []
   const hasAttachedImage = (name: string) => attachmentNames.some(
     (attachmentName) => attachmentName.toLowerCase() === name.toLowerCase(),
   )
+
+  if (!user) {
+    const { comments, cleanText } = extractCodeComments(value)
+    let processedText = comments.length ? cleanText : value
+
+    // 识别 Hermes/Codex 在 assistant 回复中发出的 MEDIA: 媒体标记并提取为缩略图卡片
+    const mediaLines: string[] = []
+    const remainingLines: string[] = []
+    let isFenced = false
+    for (const line of processedText.split('\n')) {
+      if (/^\s*(```|~~~)/.test(line)) isFenced = !isFenced
+      const mediaMatch = !isFenced && line.trim().match(/^MEDIA:\s*(.+)$/i)
+      if (mediaMatch) {
+        mediaLines.push(mediaMatch[1].trim())
+      } else {
+        remainingLines.push(line)
+      }
+    }
+
+    for (const rawMedia of mediaLines) {
+      const cleanPath = rawMedia.replace(/^[<`"']|[>`"']$/g, '').trim()
+      const name = cleanPath.split(/[/\\]/).pop() || 'media.png'
+      if (!hasAttachedImage(name) && !extractedImages.some((img) => img.path === cleanPath)) {
+        extractedImages.push({ name, path: cleanPath })
+      }
+    }
+    processedText = remainingLines.join('\n')
+
+    return (
+      <>
+        {extractedImages.length > 0 && (
+          <div className="message-attachments message-extracted-images">
+            {extractedImages.map((img, idx) => {
+              const query = new URLSearchParams({ path: img.path })
+              if (sessionId) query.set('session_id', sessionId)
+              if (connectionId) query.set('connection_id', connectionId)
+              const rawUrl = `/api/v1/files/raw?${query.toString()}`
+              const allUrls = extractedImages.map((i) => {
+                const q = new URLSearchParams({ path: i.path })
+                if (sessionId) q.set('session_id', sessionId)
+                if (connectionId) q.set('connection_id', connectionId)
+                return `/api/v1/files/raw?${q.toString()}`
+              })
+              return (
+                <button
+                  type="button"
+                  className="attachment-image-link"
+                  key={`${idx}:${img.path}`}
+                  onClick={() => onGalleryClick ? onGalleryClick(rawUrl, allUrls) : onImageClick?.(rawUrl)}
+                  aria-label={`查看图片：${img.name}`}
+                >
+                  <img className="attachment-image" src={rawUrl} alt={img.name} loading="lazy" />
+                </button>
+              )
+            })}
+          </div>
+        )}
+        {processedText.trim() && renderMarkdown(processedText)}
+        {comments.length > 0 && <CodeCommentsBlock comments={comments} />}
+      </>
+    )
+  }
 
   // Parse Codex-style mentioned files wrapper
   if (text.includes('# Files mentioned by the user:')) {
@@ -91,13 +144,22 @@ export function MessageBody({
     }
   }
 
+  const { comments: userComments, cleanText: userText } = extractCodeComments(lines.join('\n'))
   return (
     <>
       {extractedImages.length > 0 && (
         <div className="message-attachments message-extracted-images">
           {extractedImages.map((img, idx) => {
-            const rawUrl = `/api/v1/files/raw?path=${encodeURIComponent(img.path)}`
-            const allUrls = extractedImages.map(i => `/api/v1/files/raw?path=${encodeURIComponent(i.path)}`)
+            const query = new URLSearchParams({ path: img.path })
+            if (sessionId) query.set('session_id', sessionId)
+            if (connectionId) query.set('connection_id', connectionId)
+            const rawUrl = `/api/v1/files/raw?${query.toString()}`
+            const allUrls = extractedImages.map((i) => {
+              const q = new URLSearchParams({ path: i.path })
+              if (sessionId) q.set('session_id', sessionId)
+              if (connectionId) q.set('connection_id', connectionId)
+              return `/api/v1/files/raw?${q.toString()}`
+            })
             return (
               <button
                 type="button"
@@ -112,7 +174,8 @@ export function MessageBody({
           })}
         </div>
       )}
-      {lines.join('\n').trim() && renderMarkdown(lines.join('\n'))}
+      {(userComments.length ? userText : lines.join('\n')).trim() && renderMarkdown(userComments.length ? userText : lines.join('\n'))}
+      {userComments.length > 0 && <CodeCommentsBlock comments={userComments} />}
     </>
   )
 }

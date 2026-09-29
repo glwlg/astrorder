@@ -29,6 +29,7 @@ export function GitStatusBar({ session }: GitStatusBarProps) {
   const [insertions, setInsertions] = useState(0)
   const [deletions, setDeletions] = useState(0)
   const [changedFiles, setChangedFiles] = useState(0)
+  const [statusUnavailable, setStatusUnavailable] = useState(false)
   const [createModalOpened, setCreateModalOpened] = useState(false)
   const [newBranchName, setNewBranchName] = useState('')
   const [switching, setSwitching] = useState(false)
@@ -36,6 +37,10 @@ export function GitStatusBar({ session }: GitStatusBarProps) {
   const openGitDiff = useSidecarStore((s) => s.openGitDiff)
 
   const fetchStatus = async () => {
+    if (!session.workspace) {
+      setStatusUnavailable(true)
+      return
+    }
     try {
       let localToken: string | null = null
       try {
@@ -60,18 +65,66 @@ export function GitStatusBar({ session }: GitStatusBarProps) {
         setInsertions(data.insertions || 0)
         setDeletions(data.deletions || 0)
         setChangedFiles(data.changed_files || 0)
+        setStatusUnavailable(false)
+      } else {
+        setStatusUnavailable(true)
       }
     } catch {
-      // 静默降级
+      setStatusUnavailable(true)
     }
   }
 
   useEffect(() => {
-    void fetchStatus()
+    const controller = new AbortController()
+    const fetchStatusWithSignal = async () => {
+      if (!session.workspace) {
+        setStatusUnavailable(true)
+        return
+      }
+      try {
+        let localToken: string | null = null
+        try {
+          if (typeof localStorage !== 'undefined') {
+            localToken = localStorage.getItem('astrorder:token')
+          }
+        } catch {}
+        const headers: Record<string, string> = {}
+        if (localToken) {
+          headers['Authorization'] = `Bearer ${localToken}`
+        }
+        const params = new URLSearchParams()
+        if (session.workspace) params.set('workspace', session.workspace)
+        if (session.id) params.set('session_id', session.id)
+        if (session.connection_id) params.set('connection_id', session.connection_id)
+
+        const resp = await fetch(`/api/v1/git/status?${params.toString()}`, {
+          headers,
+          signal: controller.signal,
+        })
+        if (resp.ok) {
+          const data = await resp.json()
+          setBranch(data.branch || 'master')
+          setBranches(data.branches || ['master'])
+          setInsertions(data.insertions || 0)
+          setDeletions(data.deletions || 0)
+          setChangedFiles(data.changed_files || 0)
+          setStatusUnavailable(false)
+        } else {
+          setStatusUnavailable(true)
+        }
+      } catch {
+        if (!controller.signal.aborted) setStatusUnavailable(true)
+      }
+    }
+
+    void fetchStatusWithSignal()
     const timer = setInterval(() => {
-      void fetchStatus()
+      void fetchStatusWithSignal()
     }, 15000)
-    return () => clearInterval(timer)
+    return () => {
+      controller.abort()
+      clearInterval(timer)
+    }
   }, [session.id, session.workspace, session.connection_id])
 
   const handleSwitchBranch = async (targetBranch: string) => {
@@ -168,7 +221,8 @@ export function GitStatusBar({ session }: GitStatusBarProps) {
   }
 
   const handleOpenDiffTree = () => {
-    openGitDiff(session.id, session.agent_id, session.workspace || undefined, session.connection_id || undefined)
+    if (!session.workspace || statusUnavailable) return
+    openGitDiff(session.id, session.agent_id, session.workspace, session.connection_id || undefined)
   }
 
   return (
@@ -267,31 +321,35 @@ export function GitStatusBar({ session }: GitStatusBarProps) {
               },
             }}
           >
-            {changedFiles > 0 ? (
+            {statusUnavailable ? (
+              <span style={{ fontSize: '11px', color: 'var(--astr-muted)' }}>工作区状态不可用</span>
+            ) : changedFiles > 0 ? (
               <>
                 <span style={{ fontSize: '11px', color: 'var(--astr-muted)' }}>
                   <CountUp to={changedFiles} duration={0.5} /> 个文件变更
                 </span>
-                <span
-                  style={{
-                    color: 'var(--astr-green, #10b981)',
-                    fontWeight: 700,
-                    fontFamily: 'monospace',
-                    fontSize: '12px',
-                  }}
-                >
-                  +<CountUp to={insertions} duration={0.6} />
-                </span>
-                <span
-                  style={{
-                    color: 'var(--astr-red, #ef4444)',
-                    fontWeight: 700,
-                    fontFamily: 'monospace',
-                    fontSize: '12px',
-                  }}
-                >
-                  -<CountUp to={deletions} duration={0.6} />
-                </span>
+                {(insertions > 0 || deletions > 0) && <>
+                  <span
+                    style={{
+                      color: 'var(--astr-green, #10b981)',
+                      fontWeight: 700,
+                      fontFamily: 'monospace',
+                      fontSize: '12px',
+                    }}
+                  >
+                    +<CountUp to={insertions} duration={0.6} />
+                  </span>
+                  <span
+                    style={{
+                      color: 'var(--astr-red, #ef4444)',
+                      fontWeight: 700,
+                      fontFamily: 'monospace',
+                      fontSize: '12px',
+                    }}
+                  >
+                    -<CountUp to={deletions} duration={0.6} />
+                  </span>
+                </>}
               </>
             ) : (
               <span style={{ fontSize: '11px', color: 'var(--astr-muted)' }}>工作区无修改</span>

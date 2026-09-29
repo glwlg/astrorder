@@ -168,6 +168,31 @@ describe('MonitorPage', () => {
     await waitFor(() => expect(input).toHaveValue(''))
   })
 
+  it('renders code comments in monitor messages and copies their descriptions', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.assign(navigator, { clipboard: { writeText } })
+    useAstrorderStore.getState().mergeMessages('agent-1', 'session-1', [{
+      id: 'review-message',
+      agent_id: 'agent-1',
+      session_id: 'session-1',
+      role: 'assistant',
+      kind: 'message',
+      text: '发现需要修复的问题。\n\n::code-comment{title=\"[P1] 缺少失败回报\" body=\"用户无法看到失败原因。\" file=\"/repo/src/review.py\" start=12 end=14 priority=1}',
+      attachments: [],
+      created_at: '2026-09-07T10:00:01Z',
+      command_id: null,
+      tool: null,
+    }])
+    renderPage()
+
+    expect(await screen.findByText('缺少失败回报')).toBeInTheDocument()
+    expect(screen.queryByText(/::code-comment/)).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '复制注释' }))
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(
+      '### [P1] 缺少失败回报\n\n位置：`/repo/src/review.py:12-14`\n\n问题描述：用户无法看到失败原因。',
+    ))
+  })
+
   it('accepts pasted images and arbitrary files and uploads them with the message', async () => {
     const upload = vi.spyOn(api, 'uploadAttachment').mockImplementation(async file => ({ id: `attachment-${file.name}`, name: file.name, media_type: file.type, url: `/files/${file.name}` }))
     const create = vi.spyOn(api, 'createCommand').mockImplementation(async input => ({ ...input, state: 'accepted', attachments: [], created_at: activeSession.updated_at, error: null }))

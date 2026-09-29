@@ -31,6 +31,7 @@ import { MobileSessionDeck, type SessionCardCut } from './MobileSessionDeck'
 import { VoiceInputSheet } from '../chat/VoiceInputSheet'
 import { MobileTranscript, type MessageActionAnchor } from './MobileTranscript'
 import { MobileArtifactSheet } from './MobileArtifactSheet'
+import { resolveMobileFilePath } from './mobileFilePath'
 import { MobileMessageMenu } from './MobileMessageMenu'
 import { EnvironmentConnections } from '../agents/EnvironmentConnections'
 import { MobileApprovals } from './MobileApprovals'
@@ -74,20 +75,6 @@ export function displayShortModel(label: string): string {
   return realName + suffix
 }
 
-/** 把附件 URL 或 markdown 相对路径解析为文件系统绝对路径 */
-function resolveMobileFilePath(raw: string, workspace?: string | null): string {
-  const decoded = decodeURIComponent(raw.trim().replace(/^<|>$/g, ''))
-  // 附件 URL（/api/v1/attachments/...）直接用 name
-  if (decoded.startsWith('/api/v1/')) return decoded
-  // 已是绝对路径
-  if (/^[a-zA-Z]:[/\\]/.test(decoded) || decoded.startsWith('/')) return decoded
-  // 相对路径拼 workspace
-  if (workspace) {
-    const sep = workspace.includes('\\') ? '\\' : '/'
-    return `${workspace.replace(/[/\\]+$/, '')}${sep}${decoded}`
-  }
-  return decoded
-}
 type MobileConfirmation =
   | { kind: 'delete-session'; session: Session; coords: ConfirmationCoordinates }
   | { kind: 'delete-project'; project: ProjectGroup; coords: ConfirmationCoordinates }
@@ -807,7 +794,7 @@ export function MobileWorkspace() {
           </Menu.Dropdown>
         </Menu>
       </div>
-      <MobileTranscript messages={messages} approvals={approvals} onApproval={(approval, action) => void handleApproval(approval, action)} busy={busy} loadOlder={() => resources.messages.fetchNextPage()} hasOlder={!!resources.messages.hasNextPage} loadingOlder={resources.messages.isFetchingNextPage} onMessageAction={anchor => setMessageAction({ ...anchor, sessionKey: key })} onImage={setImage} onFile={(path) => setArtifactPath(resolveMobileFilePath(path, selected?.workspace))} onSwipe={switchSession} onSwipePreview={setSessionDrag} />
+      <MobileTranscript messages={messages} approvals={approvals} onApproval={(approval, action) => void handleApproval(approval, action)} busy={busy} loadOlder={() => resources.messages.fetchNextPage()} hasOlder={!!resources.messages.hasNextPage} loadingOlder={resources.messages.isFetchingNextPage} onMessageAction={anchor => setMessageAction({ ...anchor, sessionKey: key })} onImage={setImage} onFile={(path) => setArtifactPath(resolveMobileFilePath(path, selected?.workspace))} workspace={selected?.workspace} connectionId={selected?.connection_id} onSwipe={switchSession} onSwipePreview={setSessionDrag} />
     </MobileSessionDeck> : <div className="m-empty">从左上角选择会话，或新建会话</div>}</main>
     <section className="m-composer-float">
       {visibleError && (

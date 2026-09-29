@@ -15,5 +15,6 @@ class ResizeObserverMock {
   disconnect() {}
 }
 vi.stubGlobal('ResizeObserver', ResizeObserverMock)
+Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', { configurable: true, value: () => null })
 // JSDOM lacks FontFaceSet; Mantine autosizing observes browser font loading.
 Object.defineProperty(document, 'fonts', { configurable: true, value: new EventTarget() })

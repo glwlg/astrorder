@@ -53,9 +53,35 @@ function writeExpandedPaths(key: string, paths: Set<string>): void {
   }
 }
 
+function cleanPath(p: string): string {
+  let cleaned = p.trim().replace(/^<|>$/g, '').replace(/^['"]|['"]$/g, '')
+  if (cleaned.startsWith('file:///')) {
+    cleaned = cleaned.slice(8)
+  } else if (cleaned.startsWith('file://')) {
+    cleaned = cleaned.slice(7)
+  }
+  try {
+    cleaned = decodeURIComponent(cleaned)
+  } catch {
+    // ignore
+  }
+  return cleaned.replace(/\\/g, '/').replace(/\/+$/, '')
+}
+
 function pathKey(path: string): string {
-  const normalized = path.replace(/\\/g, '/').replace(/\/$/, '')
+  const normalized = cleanPath(path)
   return /^[a-z]:\//i.test(normalized) ? normalized.toLowerCase() : normalized
+}
+
+function isSamePath(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (!a || !b) return false
+  const keyA = pathKey(a)
+  const keyB = pathKey(b)
+  if (keyA === keyB) return true
+  if (keyA.endsWith('/' + keyB) || keyB.endsWith('/' + keyA)) {
+    return true
+  }
+  return false
 }
 
 function getRelativePath(fullPath: string, basePath: string): string {
@@ -71,15 +97,25 @@ function getRelativePath(fullPath: string, basePath: string): string {
   return fullPath
 }
 
-function findParentPaths(nodes: TreeNode[], target: string, parents: string[] = []): string[] | null {
+function findNodeAndParents(
+  nodes: TreeNode[],
+  target: string,
+  parents: string[] = [],
+  exactOnly = true,
+): { node: TreeNode; parents: string[] } | null {
   for (const node of nodes) {
-    if (pathKey(node.path) === pathKey(target)) return parents
+    const matched = exactOnly ? pathKey(node.path) === pathKey(target) : isSamePath(node.path, target)
+    if (matched) return { node, parents }
     if (node.children) {
-      const found = findParentPaths(node.children, target, [...parents, node.path])
+      const found = findNodeAndParents(node.children, target, [...parents, node.path], exactOnly)
       if (found) return found
     }
   }
   return null
+}
+
+function resolveTargetInTree(nodes: TreeNode[], target: string) {
+  return findNodeAndParents(nodes, target, [], true) || findNodeAndParents(nodes, target, [], false)
 }
 
 function FileTreeNodeItem({
@@ -89,6 +125,8 @@ function FileTreeNodeItem({
   connectionId,
   expandedPaths,
   selectedPath,
+  revealedPath,
+  revealPulseKey,
   onSelectPath,
   onToggleDirectory,
   onContextMenu,
@@ -100,13 +138,16 @@ function FileTreeNodeItem({
   connectionId?: string
   expandedPaths: Set<string>
   selectedPath: string | null
+  revealedPath?: string | null
+  revealPulseKey?: number
   onSelectPath: (path: string) => void
   onToggleDirectory: (path: string) => void
   onContextMenu: (node: TreeNode, e: React.MouseEvent) => void
   level?: number
 }) {
-  const opened = expandedPaths.has(node.path)
-  const isSelected = selectedPath === node.path
+  const opened = expandedPaths.has(node.path) || [...expandedPaths].some((p) => isSamePath(p, node.path))
+  const isSelected = Boolean(selectedPath && isSamePath(selectedPath, node.path))
+  const isRevealed = Boolean(revealedPath && isSamePath(revealedPath, node.path))
   const openArtifact = useSidecarStore((s) => s.openArtifact)
 
   const openFile = () => {
@@ -144,59 +185,69 @@ function FileTreeNodeItem({
   return (
     <div>
       <Group
-            gap={4}
-            wrap="nowrap"
-            onClick={handleClick}
-            onDoubleClick={handleDoubleClick}
-            onContextMenu={(e) => {
+        key={`${node.path}:${isRevealed ? revealPulseKey : 'idle'}`}
+        gap={4}
+        wrap="nowrap"
+        onClick={handleClick}
+        onDoubleClick={handleDoubleClick}
+        onContextMenu={(e) => {
           e.preventDefault()
           e.stopPropagation()
           onSelectPath(node.path)
           onContextMenu(node, e)
         }}
-            style={{
-              padding: '3px 6px',
-              paddingLeft: 6 + level * 14,
-              borderRadius: 4,
-              cursor: 'pointer',
-              userSelect: 'none',
-              fontSize: 12,
-              backgroundColor: isSelected ? 'var(--astr-hover, rgba(59, 130, 246, 0.15))' : undefined,
-              outline: isSelected ? '1px solid var(--astr-blue, #3b82f6)' : 'none',
-            }}
-            className="file-tree-row"
-            data-file-path={node.path}
-          >
-            {node.is_dir ? (
-              <>
-                <span
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    onToggleDirectory(node.path)
-                  }}
-                  style={{ display: 'inline-flex', alignItems: 'center' }}
-                >
-                  {opened ? <IconChevronDown size={13} color="gray" /> : <IconChevronRight size={13} color="gray" />}
-                </span>
-                {opened ? <IconFolderOpen size={14} color="#f59e0b" /> : <IconFolder size={14} color="#f59e0b" />}
-              </>
-            ) : (
-              <>
-                <span style={{ width: 13 }} />
-                <IconFile size={14} color="var(--astr-muted)" />
-              </>
-            )}
+        style={{
+          padding: '3px 6px',
+          paddingLeft: 6 + level * 14,
+          borderRadius: 4,
+          cursor: 'pointer',
+          userSelect: 'none',
+          fontSize: 12,
+          backgroundColor: isSelected ? 'var(--astr-hover, rgba(59, 130, 246, 0.16))' : undefined,
+          outline: isSelected ? '1px solid var(--astr-blue, #3b82f6)' : 'none',
+          boxShadow: isSelected ? 'inset 3px 0 0 var(--astr-blue, #2563eb)' : 'none',
+        }}
+        className={`file-tree-row${isSelected ? ' is-selected' : ''}${isRevealed ? ' is-revealed' : ''}`}
+        data-file-path={node.path}
+      >
+        {node.is_dir ? (
+          <>
+            <span
+              onClick={(e) => {
+                e.stopPropagation()
+                onToggleDirectory(node.path)
+              }}
+              style={{ display: 'inline-flex', alignItems: 'center' }}
+            >
+              {opened ? <IconChevronDown size={13} color="gray" /> : <IconChevronRight size={13} color="gray" />}
+            </span>
+            {opened ? <IconFolderOpen size={14} color="#f59e0b" /> : <IconFolder size={14} color="#f59e0b" />}
+          </>
+        ) : (
+          <>
+            <span style={{ width: 13 }} />
+            <IconFile size={14} color="var(--astr-muted)" />
+          </>
+        )}
 
-            <Text size="xs" truncate style={{ flex: 1, fontWeight: isSelected ? 600 : 400 }}>
-              {node.name}
-            </Text>
+        <Text
+          size="xs"
+          truncate
+          style={{
+            flex: 1,
+            fontWeight: isSelected ? 600 : 400,
+            color: isSelected ? 'var(--astr-blue, #2563eb)' : undefined,
+          }}
+        >
+          {node.name}
+        </Text>
 
-            {!node.is_dir && node.size !== undefined && node.size > 0 && (
-              <Text size="10px" c="dimmed">
-                {node.size > 1024 ? `${(node.size / 1024).toFixed(1)}KB` : `${node.size}B`}
-              </Text>
-            )}
-          </Group>
+        {!node.is_dir && node.size !== undefined && node.size > 0 && (
+          <Text size="10px" c="dimmed">
+            {node.size > 1024 ? `${(node.size / 1024).toFixed(1)}KB` : `${node.size}B`}
+          </Text>
+        )}
+      </Group>
 
       {node.is_dir && node.children && (
         <Collapse expanded={opened}>
@@ -209,6 +260,8 @@ function FileTreeNodeItem({
               connectionId={connectionId}
               expandedPaths={expandedPaths}
               selectedPath={selectedPath}
+              revealedPath={revealedPath}
+              revealPulseKey={revealPulseKey}
               onSelectPath={onSelectPath}
               onToggleDirectory={onToggleDirectory}
               onContextMenu={onContextMenu}
@@ -221,7 +274,7 @@ function FileTreeNodeItem({
   )
 }
 
-export function FileTreeViewer({ artifact }: ViewerContext) {
+export function FileTreeViewer({ artifact, isActive = true }: ViewerContext) {
   const paneRef = useRef<HTMLDivElement>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -230,6 +283,8 @@ export function FileTreeViewer({ artifact }: ViewerContext) {
   const storageKey = expansionStorageKey(artifact)
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(() => readExpandedPaths(storageKey))
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
+  const [revealedPath, setRevealedPath] = useState<string | null>(null)
+  const [revealPulseKey, setRevealPulseKey] = useState<number>(0)
   const [contextMenu, setContextMenu] = useState<{ node: TreeNode; x: number; y: number } | null>(null)
 
   const handleContextMenu = useCallback((node: TreeNode, e: React.MouseEvent) => {
@@ -252,6 +307,11 @@ export function FileTreeViewer({ artifact }: ViewerContext) {
       return next
     })
   }, [storageKey])
+
+  const handleSelectPath = useCallback((path: string) => {
+    setSelectedPath(path)
+    setRevealedPath(null)
+  }, [])
 
   const fetchTree = useCallback(async () => {
     setLoading(true)
@@ -278,20 +338,53 @@ export function FileTreeViewer({ artifact }: ViewerContext) {
 
   useEffect(() => {
     if (!revealPath || !treeData.length) return
-    const parents = findParentPaths(treeData, revealPath)
-    if (!parents) return
-    setSelectedPath(revealPath)
+    const match = resolveTargetInTree(treeData, revealPath)
+    if (!match) return
+    const { node: targetNode, parents } = match
+
+    setSelectedPath(targetNode.path)
+    setRevealedPath(targetNode.path)
+    setRevealPulseKey(Date.now())
+
     setExpandedPaths((current) => {
       const next = new Set([...current, ...parents])
       writeExpandedPaths(storageKey, next)
       return next
     })
-    requestAnimationFrame(() => {
-      const row = [...(paneRef.current?.querySelectorAll<HTMLElement>('[data-file-path]') || [])]
-        .find((element) => pathKey(element.dataset.filePath || '') === pathKey(revealPath))
-      row?.scrollIntoView({ block: 'center' })
-    })
-  }, [revealAt, revealPath, storageKey, treeData])
+
+    if (!isActive) return
+
+    let attempts = 0
+    const maxAttempts = 15
+    let cancelled = false
+
+    const tryScroll = () => {
+      if (cancelled) return
+      const pane = paneRef.current
+      if (!pane) return
+      const rows = pane.querySelectorAll<HTMLElement>('[data-file-path]')
+      const row = [...rows].find((element) => isSamePath(element.dataset.filePath, targetNode.path))
+      if (row) {
+        row.scrollIntoView({ block: 'center', behavior: 'smooth' })
+        setTimeout(() => {
+          if (!cancelled) {
+            row.scrollIntoView({ block: 'center', behavior: 'auto' })
+          }
+        }, 260)
+        return
+      }
+      attempts += 1
+      if (attempts < maxAttempts) {
+        setTimeout(tryScroll, 50)
+      }
+    }
+
+    requestAnimationFrame(tryScroll)
+
+    return () => {
+      cancelled = true
+    }
+  }, [isActive, revealAt, revealPath, storageKey, treeData])
 
   const handleCopyFiles = useCallback(async (paths: string[]) => {
     if (!paths.length) return
@@ -377,7 +470,10 @@ export function FileTreeViewer({ artifact }: ViewerContext) {
       ref={paneRef}
       style={{ display: 'flex', flexDirection: 'column', height: '100%' }}
       tabIndex={0}
-      onClick={() => setSelectedPath(null)}
+      onClick={() => {
+        setSelectedPath(null)
+        setRevealedPath(null)
+      }}
       onKeyDown={handlePaneKeyDown}
     >
       <Paper p="xs" withBorder style={{ borderBottom: '1px solid var(--astr-border)', borderRadius: 0 }}>
@@ -434,7 +530,9 @@ export function FileTreeViewer({ artifact }: ViewerContext) {
                 connectionId={artifact.connectionId}
                 expandedPaths={expandedPaths}
                 selectedPath={selectedPath}
-                onSelectPath={setSelectedPath}
+                revealedPath={revealedPath}
+                revealPulseKey={revealPulseKey}
+                onSelectPath={handleSelectPath}
                 onToggleDirectory={toggleDirectory}
                 onContextMenu={handleContextMenu}
                 level={0}

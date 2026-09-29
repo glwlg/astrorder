@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import threading
 from collections.abc import Mapping
 from datetime import UTC, datetime
@@ -11,6 +12,8 @@ from uuid import uuid4
 
 from astrorder.connections import ConnectionError
 from astrorder.daemon.bridge import DaemonBridge, DaemonBridgeError
+
+logger = logging.getLogger(__name__)
 
 
 def hermes_runtime_control_id(connection_scope: str) -> str:
@@ -84,9 +87,63 @@ class DaemonHermesController:
             }
 
     def set_discovery_callback(self, callback: Any) -> None:
-        # Native discovery belongs to a later daemon projection adapter. Keep the
-        # existing ConnectionController call shape without pretending it ran.
         self._discovery_callback = callback
+        if callback is not None:
+            self.refresh_sessions()
+
+    def discover_native_sessions_with_archived(self) -> tuple[Any, list[str]]:
+        from astrorder.native.sessions import discover_native_sessions_from_db
+
+        with self._lock:
+            agent_id = self._agent_id or "local-hermes-default"
+            source_id = self._source_id or f"hermes-local-{self._profile_name or 'default'}"
+            profile_name = self._profile_name or "default"
+        default_workspace = (
+            str(self.app_settings.project_root)
+            if self.app_settings and hasattr(self.app_settings, "project_root")
+            else None
+        )
+        return discover_native_sessions_from_db(
+            source_id=source_id,
+            agent_id=agent_id,
+            connection_id=None,
+            profile_name=profile_name,
+            default_workspace=default_workspace,
+        )
+
+    def discover_native_sessions(self) -> Any:
+        discovery, _ = self.discover_native_sessions_with_archived()
+        return discovery
+
+    def refresh_sessions(self) -> None:
+        """Scan Hermes state.db and project sessions/projects into store and event stream."""
+        try:
+            discovery, archived_ids = self.discover_native_sessions_with_archived()
+            with self._lock:
+                agent_id = self._agent_id or "local-hermes-default"
+            if self.service is not None:
+                if discovery.projects:
+                    self.service.record_native_projects(discovery.projects)
+                if discovery.sessions:
+                    self.service.record_native_sessions(discovery.sessions)
+                for aid in archived_ids:
+                    if self.store and self.store.get_session(agent_id, aid) is not None:
+                        self.service.delete_session(agent_id, aid)
+            elif self._discovery_callback is not None:
+                self._discovery_callback(discovery)
+        except Exception as exc:
+            logger.debug("Failed refreshing native Hermes sessions: %s", exc)
+
+    def reset_after_daemon_restart(self) -> str | None:
+        with self._lock:
+            previous_agent_id = self._agent_id
+            self._state = "offline"
+            self._detail = "小内核已重启，正在重新连接本机 Hermes。"
+            self._agent_id = None
+            self._source_id = None
+            self._profile_name = None
+            self._runtime_id = None
+            return previous_agent_id
 
     def sync_connection(self, connected: bool) -> None:
         with self._lock:
@@ -98,10 +155,12 @@ class DaemonHermesController:
             elif self._state in {"connecting", "connected"}:
                 self._state = "connecting"
                 self._detail = "守护进程仍托管本机 Hermes，等待原生插件重新连接。"
+        if connected:
+            self.refresh_sessions()
 
     def connect(self) -> dict[str, object]:
         with self._lock:
-            if self._state in {"connecting", "connected"} and self._agent_id:
+            if self._state == "connected" and self._agent_id:
                 return self.snapshot()
         response = self._control(
             "session.spawn",
@@ -234,22 +293,36 @@ class DaemonHermesController:
             raise ValueError("invalid native history cursor")
         if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 200:
             raise ValueError("invalid native history limit")
-        spawned = self._control(
-            "session.spawn",
-            {"session_id": session_id, "agent_type": "hermes", "params": {}},
-            "守护进程未确认 Hermes history session binding。",
-        )
-        self._apply_identity(spawned.get("result"))
-        result = self._control(
-            "session.history_page",
-            {"session_id": session_id, "before": before, "limit": limit},
-            "守护进程未返回 Hermes 原生消息分页。",
-        ).get("result")
-        items = result.get("items") if isinstance(result, Mapping) else None
-        next_cursor = result.get("next_cursor") if isinstance(result, Mapping) else None
-        if not isinstance(items, list) or next_cursor is not None and not isinstance(next_cursor, str):
-            raise ConnectionError("守护进程返回了无效的 Hermes 原生消息分页。", 502)
-        return {"items": items, "next_cursor": next_cursor}
+        try:
+            spawned = self._control(
+                "session.spawn",
+                {"session_id": session_id, "agent_type": "hermes", "params": {}},
+                "守护进程未确认 Hermes history session binding。",
+            )
+            self._apply_identity(spawned.get("result"))
+            result = self._control(
+                "session.history_page",
+                {"session_id": session_id, "before": before, "limit": limit},
+                "守护进程未返回 Hermes 原生消息分页。",
+            ).get("result")
+            items = result.get("items") if isinstance(result, Mapping) else None
+            next_cursor = result.get("next_cursor") if isinstance(result, Mapping) else None
+            if isinstance(items, list) and (next_cursor is None or isinstance(next_cursor, str)):
+                return {"items": items, "next_cursor": next_cursor}
+        except Exception as exc:
+            logger.debug("Daemon session.history_page failed (%s); falling back to direct state.db read", exc)
+
+        from astrorder.core.session_usage import _find_local_hermes_state_dbs
+        from astrorder.native.history_page import read_native_page
+
+        with self._lock:
+            profile_name = self._profile_name or "default"
+            source_id = self._source_id or f"hermes-local-{profile_name}"
+        dbs = _find_local_hermes_state_dbs(profile_name)
+        target_db = next((p for p in dbs if p.is_file()), None)
+        if target_db is not None:
+            return read_native_page(target_db, session_id, source_id, before, limit)
+        raise ConnectionError("守护进程返回了无效的 Hermes 原生消息分页，且未找到本地 state.db。", 502)
 
     def mutate_session(self, session_id: str, updates: dict[str, Any] | None) -> None:
         if updates is not None:

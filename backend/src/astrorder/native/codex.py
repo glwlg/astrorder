@@ -383,6 +383,7 @@ class CodexConnection:
                 self._threads = {}
                 for row in rows:
                     self._record_thread(row)
+                self._reconcile_local_state_threads()
                 self._purge_archived_sessions()
                 if self.auth_required:
                     self.state, self.detail = 'authentication_required', 'Codex 需要登录；请在本机 Codex 完成登录后重连。'
@@ -403,6 +404,39 @@ class CodexConnection:
                 if self.store.get_agent(self.agent_id):
                     self._agent('error')
                 raise ConnectionError(self.detail, 502) from None
+
+    def _reconcile_local_state_threads(self):
+        """Recover native threads omitted by an incomplete app-server thread/list."""
+        if getattr(self, 'connection_id', None) or self._home is None:
+            return
+        databases = sorted(self._home.glob('state_*.sqlite'))
+        if not databases and (self._home / 'state.db').is_file():
+            databases = [self._home / 'state.db']
+        for database in databases:
+            try:
+                with sqlite3.connect(database.resolve().as_uri() + '?mode=ro', uri=True) as db:
+                    db.row_factory = sqlite3.Row
+                    columns = {col[1] for col in db.execute('PRAGMA table_info(threads)')}
+                    if not {'id', 'cwd', 'archived', 'updated_at'}.issubset(columns):
+                        continue
+                    wanted = ['id', 'cwd', 'archived', 'updated_at']
+                    wanted += [name for name in ('name', 'title', 'preview', 'source', 'project_id') if name in columns]
+                    for record in db.execute(f"SELECT {', '.join(wanted)} FROM threads WHERE archived = 0"):
+                        row = dict(record)
+                        sid = row['id']
+                        if not isinstance(sid, str) or not sid or sid in self._threads:
+                            continue
+                        source = row.get('source') or ''
+                        if isinstance(source, str) and 'subagent' in source.lower():
+                            continue
+                        self._record_thread({
+                            'id': sid, 'name': row.get('name') or row.get('title') or row.get('preview') or sid,
+                            'cwd': row['cwd'], 'updatedAt': row['updated_at'],
+                            'status': {'type': 'notLoaded'}, 'source': source,
+                            'projectId': row.get('project_id'),
+                        })
+            except (OSError, sqlite3.Error) as exc:
+                logger.warning('Codex native state catalog could not be reconciled: %s', exc)
 
     def _archived_ids_from_db(self):
         home = self._home or (Path.home() / '.codex')
@@ -1362,15 +1396,22 @@ class CodexConnection:
             except ConnectionError:
                 logger.warning('Codex task reconciliation failed for %s; task state remains unknown', sid)
 
-    def disconnect(self):
+    def disconnect(self, *, stop_runtime=True):
         with self._lifecycle:
+            if stop_runtime and self._daemon_controller_factory is not None:
+                controller = self._daemon_controller or self._daemon_controller_factory(self)
+                try:
+                    controller.disconnect_runtime()
+                finally:
+                    if controller is not self._daemon_controller:
+                        controller.close()
             self._close_daemon_controller()
             self.service.clear_native_command_handler(self.agent_id)
             client, self.client = self.client, None
             if client:
                 client.stop()
             self._retire_inflight()
-            self.state, self.detail = 'disconnected', 'Codex 已断开；未停止其他 Codex 进程。'
+            self.state, self.detail = 'disconnected', 'Codex 已断开；星序托管的 Codex 进程已停止。' if stop_runtime else 'Codex 已断开。'
             self._active.clear()
             self._pending.clear()
             self._commands.clear()

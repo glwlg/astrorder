@@ -26,6 +26,7 @@ export function notificationForEvent(event: EventEnvelope): EventNotification | 
     const observed = event.data.observed_at
     if (event.data.approval_pending === true || event.data.notification !== true || typeof observed !== 'number' || Math.abs(Date.now() / 1000 - observed) > 60) return null
     if (!['Interrupt', 'PermissionRequest', 'Stop'].includes(String(name))) return null
+    if (name === 'Stop') return null
     if (name === 'Stop') {
       const sessionTitle = safeLabel(textValue(event.data.session_title, '会话'))
       const preview = safeLabel(textValue(event.data.preview, ''))

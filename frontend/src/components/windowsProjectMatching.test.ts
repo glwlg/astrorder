@@ -16,3 +16,13 @@ it('does not treat Linux backslash filenames or different case as equivalent dir
   const groups = buildProjectGroups([session('a', '/home/luwei/Ariadne', 'linux'), session('b', '/home/luwei/ariadne', 'linux'), session('c', '/home/luwei\\Ariadne', 'linux')], {})
   expect(groups).toHaveLength(3)
 })
+it('keeps native Codex sessions alongside Hermes in astrorder using the real extended Windows path', () => {
+  const native = '\\\\?\\P:\\workspace\\glwlg\\ai\\astrorder'
+  const groups = buildProjectGroups([
+    { ...session('codex-1', native), title: '修复会话列表' },
+    { ...session('codex-2', native), title: '项目同步' },
+    { ...session('hermes', 'P:/workspace/glwlg/ai/astrorder', source), title: '会话标题' },
+  ], {}, [{ ...project, project_id: 'astrorder-id', project_name: 'astrorder', workspace: 'P:/workspace/glwlg/ai/astrorder' }])
+  expect(groups).toHaveLength(1)
+  expect(groups[0].sessions.map(row => row.title)).toEqual(['修复会话列表', '项目同步', '会话标题'])
+})

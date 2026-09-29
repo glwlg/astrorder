@@ -280,6 +280,42 @@ async def test_created_session_reattach_retains_daemon_confirmed_runtime_metadat
 
 
 @pytest.mark.asyncio
+async def test_runtime_metadata_requests_preserve_pending_approval_status():
+    class Runtime:
+        async def spawn(self, request):
+            return {"status": "idle"}
+
+        async def command(self, action, request):
+            return {"status": "idle"}
+
+    daemon = SessionDaemon(secret="test-only-daemon-secret")
+    daemon.register_runtime("hermes", Runtime())
+    await daemon._spawn_runtime({
+        "session_id": "hermes-session",
+        "agent_type": "hermes",
+        "params": {},
+    })
+    observed = await daemon.handle_message(json.dumps({
+        "action": "session.observe_status",
+        "session_id": "hermes-session",
+        "status": "waiting_approval",
+    }))
+    assert observed["result"] == {"status": "waiting_approval"}
+
+    for action in (
+        "session.history_page",
+        "session.models",
+        "session.commands",
+        "session.model.read",
+        "session.approval.read",
+        "session.rename",
+        "session.model.set",
+    ):
+        await daemon._dispatch_runtime_action(action, {"session_id": "hermes-session"})
+        assert daemon.status()["hermes-session"]["status"] == "waiting_approval"
+
+
+@pytest.mark.asyncio
 async def test_native_delete_releases_only_the_exact_created_session_binding():
     class FixtureRuntime:
         async def spawn(self, request):
@@ -310,6 +346,33 @@ async def test_native_delete_releases_only_the_exact_created_session_binding():
     assert "native-delete-target" not in daemon._session_runtimes
     assert "native-delete-target" not in daemon._session_runtime_metadata
     assert "native-delete-target" not in daemon.status()
+
+
+@pytest.mark.asyncio
+async def test_existing_control_binding_rechecks_runtime_health():
+    class Runtime:
+        calls = 0
+
+        async def spawn(self, request):
+            self.calls += 1
+            return {"status": "idle", "agent_id": "local-hermes-default"}
+
+        async def command(self, action, request):
+            return {"status": "idle"}
+
+    runtime = Runtime()
+    daemon = SessionDaemon(secret="test-only-daemon-secret")
+    daemon.register_runtime("hermes", runtime)
+    request = {
+        "action": "session.spawn",
+        "session_id": "hermes-control",
+        "agent_type": "hermes",
+        "params": {"runtime_control": True},
+    }
+    await daemon._spawn_runtime(request)
+    attached = await daemon._spawn_runtime(request)
+    assert runtime.calls == 2
+    assert attached["result"]["attached"] is True
 
 
 @pytest.mark.asyncio
@@ -410,6 +473,84 @@ async def test_runtime_disconnect_uses_registry_reported_session_scope_when_avai
     assert "connection-a-control" not in daemon._session_runtimes
     assert "connection-a-native" not in daemon._session_runtimes
     assert daemon._session_runtimes["connection-b-native"] is runtime
+
+
+@pytest.mark.asyncio
+async def test_codex_runtime_disconnect_stops_only_requested_connection_and_refuses_active_work():
+    class Registry:
+        def __init__(self):
+            self.owners = {"a": "one", "b": "one", "c": "two"}
+            self.stopped = []
+
+        async def spawn(self, _request):
+            return {"status": "idle"}
+
+        async def command(self, _action, _request):
+            return {"status": "idle"}
+
+        async def sessions_for_connection(self, connection_id):
+            return tuple(sid for sid, owner in self.owners.items() if owner == connection_id)
+
+        async def disconnect_connection(self, connection_id):
+            self.stopped.append(connection_id)
+            released = await self.sessions_for_connection(connection_id)
+            for sid in released:
+                del self.owners[sid]
+            return released
+
+    daemon = SessionDaemon(secret="test-secret")
+    registry = Registry()
+    daemon.register_runtime("codex-ssh", registry)
+    for sid, cid in (("a", "one"), ("b", "one"), ("c", "two")):
+        daemon.record(sid, "attached", {}, status="idle")
+        daemon._session_runtimes[sid] = registry
+        daemon._session_agent_types[sid] = "codex-ssh"
+    daemon._sessions["b"].status = "waiting_approval"
+    request = json.dumps({
+        "action": "runtime.disconnect", "agent_type": "codex-ssh",
+        "connection_id": "one", "request_id": "stop-one",
+    })
+
+    refused = await daemon.handle_message(request)
+    assert refused["action"] == "error"
+    assert "waiting-approval" in refused["detail"]
+    assert registry.stopped == []
+    daemon._sessions["b"].status = "idle"
+
+    stopped = await daemon.handle_message(request)
+    assert stopped["result"] == {"disconnected": True, "released_sessions": ["a", "b"]}
+    assert registry.stopped == ["one"]
+    assert set(daemon._session_runtimes) == {"c"}
+
+
+@pytest.mark.asyncio
+async def test_local_codex_disconnect_stops_owned_runtime_only():
+    class Runtime:
+        def __init__(self):
+            self.stopped = False
+
+        async def spawn(self, _request):
+            return {"status": "idle"}
+
+        async def command(self, _action, _request):
+            return {"status": "idle"}
+
+        async def shutdown(self):
+            self.stopped = True
+
+    daemon = SessionDaemon(secret="test-secret")
+    codex, other = Runtime(), Runtime()
+    daemon.register_runtime("codex", codex)
+    daemon.register_runtime("other", other)
+    await daemon._spawn_runtime({"session_id": "codex-thread", "agent_type": "codex"})
+    await daemon._spawn_runtime({"session_id": "other-thread", "agent_type": "other"})
+
+    result = await daemon.handle_message('{"action":"runtime.disconnect","agent_type":"codex"}')
+
+    assert result["result"]["released_sessions"] == ["codex-thread"]
+    assert codex.stopped is True
+    assert other.stopped is False
+    assert set(daemon._session_runtimes) == {"other-thread"}
 
 
 @pytest.mark.asyncio
@@ -582,6 +723,20 @@ async def test_connector_agent_update_refreshes_daemon_status_snapshot():
     )
 
     assert daemon._connector_agents["hermes-1"]["status"] == "ready"
+
+
+@pytest.mark.asyncio
+async def test_hermes_connector_completion_clears_daemon_activity():
+    daemon = SessionDaemon()
+    daemon._connector_agents["hermes-1"] = {"id": "hermes-1", "kind": "hermes"}
+    for status in ("running", "idle"):
+        await daemon._record_connector_event("hermes-1", {
+            "type": "session.upsert",
+            "agent_id": "hermes-1",
+            "session_id": "native-1",
+            "data": {"id": "native-1", "status": status},
+        })
+        assert daemon.status()["native-1"]["status"] == status
 
 
 @pytest.mark.asyncio

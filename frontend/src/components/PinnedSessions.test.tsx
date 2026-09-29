@@ -1,9 +1,13 @@
 import { MantineProvider } from '@mantine/core'
 import { fireEvent, render, screen, within } from '@testing-library/react'
-import { expect, it, vi } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import { SessionRail } from './SessionRail'
 import { scopeKey } from '../domain/semantics'
 import type { Session } from '../domain/types'
+
+afterEach(() => {
+ vi.unstubAllGlobals()
+})
 
 it('places pinned sessions above every project without duplication and keeps the 24-hour tab', () => {
  const pinned: Session = { id: 'pinned', agent_id: 'a', title: 'Pinned session', workspace: '/repo', project_name: 'Project', status: 'idle', updated_at: new Date().toISOString() }

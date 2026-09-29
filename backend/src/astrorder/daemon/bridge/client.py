@@ -49,7 +49,9 @@ CONTROL_ACTIONS = frozenset(
         "session.reasoning.set",
         "session.approval.read",
         "session.approval.set",
+        "session.observe_status",
         "runtime.request",
+        "runtime.disconnect",
         "model_config.plan",
         "model_config.apply",
         "model_config.reload",
@@ -111,6 +113,7 @@ class DaemonBridge:
         self._native_frame_handlers: dict[str, NativeFrameHandler] = {}
         self._native_frame_handlers_lock = threading.RLock()
         self._status_handlers: list[StatusHandler] = []
+        self._restart_handlers: list[Callable[[], None]] = []
         self._runtime_status: dict[str, Any] = {}
 
     @property
@@ -156,7 +159,7 @@ class DaemonBridge:
             max_size=16_000_000,
         ) as socket:
             await self._handshake(socket)
-            response = await self._request(socket, action, fields, timeout=60 if action.startswith("model_config.") else None)
+            response = await self._request(socket, action, fields, timeout=60 if action.startswith("model_config.") or action == "runtime.disconnect" else None)
         self._daemon_id_from(response)
         return response
 
@@ -184,6 +187,14 @@ class DaemonBridge:
         def unregister() -> None:
             if handler in self._status_handlers:
                 self._status_handlers.remove(handler)
+
+        return unregister
+
+    def register_restart_handler(self, handler: Callable[[], None]) -> Callable[[], None]:
+        self._restart_handlers.append(handler)
+
+        def unregister() -> None:
+            self._restart_handlers.remove(handler)
 
         return unregister
 
@@ -248,6 +259,12 @@ class DaemonBridge:
         connectors = status.get("connectors")
         if not isinstance(connectors, list):
             raise DaemonBridgeError("daemon status connectors must be an array")
+        if identity_changed:
+            for handler in tuple(self._restart_handlers):
+                try:
+                    handler()
+                except Exception:
+                    logger.exception("Session daemon restart handler failed")
         for agent in connectors:
             self._project_connector_hello(agent)
 

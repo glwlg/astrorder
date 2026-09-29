@@ -1,12 +1,39 @@
 import time
 from pathlib import Path
 
+import httpx
+import pytest
 from fastapi.testclient import TestClient
 
-from astrorder.core import analytics, model_sync_service
 from astrorder.config import Settings
+from astrorder.core import analytics, model_sync_service
+from astrorder.core.model_sync import normalize_catalog, render_codex_catalog
 from astrorder.main import create_app
-from astrorder.core.model_sync import normalize_catalog
+
+
+@pytest.mark.asyncio
+async def test_fetch_catalog_excludes_models_of_disabled_providers(monkeypatch):
+    def gateway(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/models":
+            return httpx.Response(200, json=[
+                {"provider": "google-ani", "id": "gemini-3.8-flash", "namespaced": "google-ani/gemini-3.8-flash", "disabled": False},
+                {"provider": "xai", "id": "grok-4.7", "namespaced": "xai/grok-4.7", "disabled": False},
+                {"provider": "combo", "id": "mix", "namespaced": "combo/mix", "disabled": False},
+            ])
+        if request.url.path == "/api/providers":
+            return httpx.Response(200, json=[
+                {"name": "google-ani", "disabled": True},
+                {"name": "xai", "disabled": False},
+            ])
+        raise AssertionError(request.url.path)
+
+    client = httpx.AsyncClient
+    monkeypatch.setattr(model_sync_service.httpx, "AsyncClient", lambda **kw: client(transport=httpx.MockTransport(gateway), **kw))
+    catalog = await model_sync_service.fetch_catalog({"management_url": "https://gateway.example", "api_key": ""})
+    assert [model["slug"] for model in catalog["models"]] == ["combo/mix", "xai/grok-4.7"]
+    old = {"models": [{"slug": "google-ani/gemini-3.8-flash", "context_window": 0}]}
+    rendered = render_codex_catalog(catalog, old)
+    assert "google-ani/gemini-3.8-flash" not in rendered
 
 
 def test_model_sync_preview_and_background_job(tmp_path: Path, monkeypatch):

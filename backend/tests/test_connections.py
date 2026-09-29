@@ -16,6 +16,7 @@ from astrorder.connections import (
     HermesRuntime,
     LocalHermesController,
     build_ssh_validation_argv,
+    discover_hermes_runtime,
     hermes_command_rejection,
     paginate_native_session_rows,
 )
@@ -47,6 +48,23 @@ class FakeProcess:
         self.terminated = True
 
 
+def test_hermes_discovery_prefers_install_launcher(tmp_path: Path, monkeypatch):
+    launcher = tmp_path / "hermes" / "bin" / "hermes.exe"
+    launcher.parent.mkdir(parents=True)
+    launcher.touch()
+    legacy = tmp_path / "hermes" / "hermes-agent" / "venv" / "Scripts" / "hermes.exe"
+    legacy.parent.mkdir(parents=True)
+    legacy.touch()
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setattr("astrorder.connections.shutil.which", lambda _name: str(legacy))
+    monkeypatch.setattr(
+        "astrorder.connections.subprocess.run",
+        lambda argv, **_kwargs: subprocess.CompletedProcess(argv, 0, "Hermes Agent v-test", ""),
+    )
+
+    assert discover_hermes_runtime(Settings()).executable == launcher
+
+
 def test_local_hermes_connect_is_owned_and_does_not_return_connector_secret(tmp_path: Path):
     plugin_root = tmp_path / ".hermes" / "plugins" / "astrorder-hermes"
     plugin_root.mkdir(parents=True)
@@ -54,7 +72,6 @@ def test_local_hermes_connect_is_owned_and_does_not_return_connector_secret(tmp_
     (plugin_root / "__init__.py").write_text("# test plugin\n", encoding="utf-8")
     runtime = HermesRuntime(
         executable=tmp_path / "hermes.exe",
-        python=tmp_path / "venv" / "Scripts" / "python.exe",
         version="Hermes Agent v-test",
     )
     launched: list[tuple[list[str], dict[str, object]]] = []
@@ -85,7 +102,7 @@ def test_local_hermes_connect_is_owned_and_does_not_return_connector_secret(tmp_
 
     assert snapshot["state"] == "connecting"
     assert snapshot["agent_id"]
-    assert launched[0][0] == [str(runtime.python), "-u", "-m", "tui_gateway.entry"]
+    assert launched[0][0] == [str(runtime.executable), "--run-module", "tui_gateway.entry"]
     environment = launched[0][1]["env"]
     assert environment["ASTRORDER_CONNECTOR_ENDPOINT"] == "ws://127.0.0.1:30002/ws/v1/connector"
     assert environment["ASTRORDER_HERMES_AGENT_ID"] == snapshot["agent_id"]

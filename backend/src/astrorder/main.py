@@ -45,7 +45,6 @@ async def _restart_daemon(app: FastAPI, operation_id: str) -> None:
     root = Path(__file__).resolve().parents[3]
     flags = (
         getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-        | getattr(subprocess, "DETACHED_PROCESS", 0)
         | getattr(subprocess, "CREATE_NO_WINDOW", 0)
     )
     try:
@@ -137,6 +136,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.background_tasks = BackgroundTaskRegistry()
         app.state.daemon_restart_operations = {}
         app.state.daemon_restart_tasks = set()
+        restore_tasks: list[asyncio.Task[None]] = []
         daemon_stopping = asyncio.Event()
         daemon_task: asyncio.Task[None] | None = None
         app.state.daemon_bridge = None
@@ -225,6 +225,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             local_controller=local_hermes_controller,
             daemon_ssh_factory=daemon_ssh_factory,
         )
+        unregister_hermes_restart = None
+        if local_hermes_controller is not None and app.state.daemon_bridge is not None:
+            def reconnect_hermes_after_daemon_restart() -> None:
+                previous_agent_id = local_hermes_controller.reset_after_daemon_restart()
+                if previous_agent_id:
+                    service.clear_native_command_handler(previous_agent_id)
+                    service.clear_native_history_handler(previous_agent_id)
+                    updated = store.set_agent_status(previous_agent_id, "disconnected")
+                    if updated is not None:
+                        service._server_event(
+                            "agent.upsert", agent_id=previous_agent_id, session_id=None, data=updated
+                        )
+
+                async def reconnect() -> None:
+                    try:
+                        await asyncio.to_thread(app.state.connections.connect_local, service)
+                    except ConnectionError as exc:
+                        logger.warning("daemon Hermes rebind failed: %s", exc)
+
+                restore_tasks.append(asyncio.create_task(reconnect()))
+
+            unregister_hermes_restart = app.state.daemon_bridge.register_restart_handler(
+                reconnect_hermes_after_daemon_restart
+            )
         app.state.codex = CodexConnection(runtime_settings, store, service)
         app.state.codex_native_frame_router = None
         daemon_codex_controller_factory = None
@@ -338,7 +362,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.observers = observers
         service.register_approval_handler(observers)
         observer_task = asyncio.create_task(observers.run())
-        restore_tasks: list[asyncio.Task[None]] = []
         if runtime_settings.daemon_codex_enabled:
             async def restore_daemon_codex() -> None:
                 try:
@@ -362,6 +385,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             yield
         finally:
+            if unregister_hermes_restart is not None:
+                unregister_hermes_restart()
             app.state.background_tasks.cancel_all()
             if app.state.hermes_command_frame_router is not None:
                 app.state.hermes_command_frame_router.close()
@@ -380,7 +405,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             await observer_task
             for restore_task in restore_tasks:
                 await restore_task
-            await asyncio.to_thread(app.state.codex.disconnect)
+            await asyncio.to_thread(app.state.codex.disconnect, stop_runtime=False)
             if app.state.codex_native_frame_router is not None:
                 app.state.codex_native_frame_router.close()
             await asyncio.to_thread(app.state.environments.shutdown)

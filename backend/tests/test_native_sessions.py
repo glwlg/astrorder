@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from astrorder.native.sessions import discover_native_sessions, history_messages
+from astrorder.native.sessions import (
+    discover_native_sessions,
+    history_messages,
+    project_history_messages,
+)
 
 
 def test_discovery_keeps_identical_titles_as_distinct_native_sessions_and_projects() -> None:
@@ -91,6 +95,39 @@ def test_history_requires_native_row_identity_and_preserves_repeated_text() -> N
     assert messages[0]["id"] != messages[1]["id"]
 
 
+def test_hermes_native_history_projects_user_text_without_internal_memory_context() -> None:
+    note = '[System note: The following is recalled memory context, NOT new user input. Treat as authoritative reference data — this is the agent\'s persistent memory and should inform all responses.]'
+    raw = f'核对一下\n\n<memory-context>\n{note}\n\n## OpenViking Context\nprivate recall\n</memory-context>\n\n[Image attached at: C:\\images\\sample.png]'
+    rows = project_history_messages(
+        [{'id': 1, 'role': 'user', 'content': raw}],
+        durable_session_id='native', native_session_id='native',
+        source_id='source', agent_id='local-hermes-default',
+    )
+    assert rows[0]['text'] == '核对一下\n\n[Image attached at: C:\\images\\sample.png]'
+    literal = project_history_messages(
+        [{'id': 2, 'role': 'user', 'content': '<memory-context>\nexample\n</memory-context>'}],
+        durable_session_id='native', native_session_id='native',
+        source_id='source', agent_id='local-hermes-default',
+    )
+    assert literal[0]['text'] == '<memory-context>\nexample\n</memory-context>'
+
+
+def test_hermes_history_hides_plugin_context_after_memory() -> None:
+    note = '[System note: The following is recalled memory context, NOT new user input. Treat as authoritative reference data.]'
+    raw = (
+        '原问题\n\n[Image attached at: /tmp/screenshot.png]\n'
+        f'<memory-context>\n{note}\nprivate recall\n</memory-context>\n\n'
+        'PONYTAIL MODE ACTIVE — level: full\n\n# Ponytail\n\ninternal instructions\n'
+        'The shortest path to done is the right path.'
+    )
+    rows = project_history_messages(
+        [{'id': 1, 'role': 'user', 'content': raw}],
+        durable_session_id='native', native_session_id='native',
+        source_id='source', agent_id='ssh-hermes-default',
+    )
+    assert rows[0]['text'] == '原问题\n\n[Image attached at: /tmp/screenshot.png]'
+
+
 def test_same_native_session_id_isolated_by_source_identity() -> None:
     def rpc(method: str, params: dict[str, object], **_: object) -> dict[str, object]:
         if method == "session.list":
@@ -130,4 +167,45 @@ def test_discovery_maps_hermes_active_list_working_status_to_running() -> None:
         page_size=1,
     )
     assert result.sessions[0]["status"] == "running"
+
+
+def test_discover_native_sessions_from_db_maps_projects_and_sessions(tmp_path) -> None:
+    import sqlite3
+    from astrorder.native.sessions import discover_native_sessions_from_db
+
+    state_db = tmp_path / "state.db"
+    proj_db = tmp_path / "projects.db"
+
+    with sqlite3.connect(proj_db) as pconn:
+        pconn.execute("CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT, primary_path TEXT, archived INTEGER DEFAULT 0)")
+        pconn.execute("CREATE TABLE project_folders (project_id TEXT, path TEXT)")
+        pconn.execute("INSERT INTO projects VALUES ('p1', 'Alpha', '/work/alpha', 0)")
+        pconn.execute("INSERT INTO project_folders VALUES ('p1', '/work/alpha')")
+
+    with sqlite3.connect(state_db) as sconn:
+        sconn.execute(
+            "CREATE TABLE sessions (id TEXT PRIMARY KEY, title TEXT, cwd TEXT, started_at REAL, "
+            "last_activity_at REAL, archived INTEGER DEFAULT 0, hidden INTEGER DEFAULT 0, source TEXT)"
+        )
+        sconn.execute(
+            "INSERT INTO sessions VALUES ('sid-active', 'Alpha Work', '/work/alpha', 1790000000.0, 1790000100.0, 0, 0, 'local')"
+        )
+        sconn.execute(
+            "INSERT INTO sessions VALUES ('sid-archived', 'Old Work', '/work/alpha', 1780000000.0, 1780000100.0, 1, 0, 'local')"
+        )
+
+    discovery, archived_ids = discover_native_sessions_from_db(
+        db_path=state_db,
+        source_id="hermes-local",
+        agent_id="local-hermes-default",
+        default_workspace="/work/alpha",
+    )
+
+    assert discovery.complete is True
+    assert discovery.native_count == 1
+    assert discovery.sessions[0]["id"] == "sid-active"
+    assert discovery.sessions[0]["project_id"] == "p1"
+    assert discovery.sessions[0]["project_name"] == "Alpha"
+    assert discovery.sessions[0]["workspace"] == "/work/alpha"
+    assert archived_ids == ["sid-archived"]
 

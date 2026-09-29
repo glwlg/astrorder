@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import threading
 from collections.abc import Mapping
 from datetime import UTC, datetime
@@ -13,8 +14,9 @@ from astrorder.adapters.codex.inputs import command_input
 from astrorder.adapters.codex.policy import codex_turn_policy
 from astrorder.connections import ConnectionError
 from astrorder.daemon.bridge import DaemonBridge, DaemonBridgeError
-from .desktop import desktop_message_input
 from astrorder.daemon.bridge.codex_projection import CodexNativeFrameRouter
+
+from .desktop import desktop_message_input
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +52,23 @@ class DaemonCodexController:
             unregister()
         if unregister_status is not None:
             unregister_status()
+
+    def disconnect_runtime(self) -> None:
+        fields: dict[str, Any] = {"agent_type": self._agent_type()}
+        if fields["agent_type"] == "codex-ssh":
+            fields["connection_id"] = self.connection.connection_id
+        try:
+            response = asyncio.run(self.bridge.request_control("runtime.disconnect", fields))
+        except DaemonBridgeError as exc:
+            active = "running or waiting-approval" in str(exc)
+            raise ConnectionError(
+                "仍有运行中或待审批的 Codex 会话，请先停止后再断开。"
+                if active else f"小内核未确认 Codex 进程退出：{exc}",
+                409 if active else 503,
+            ) from exc
+        result = response.get("result")
+        if not isinstance(result, Mapping) or result.get("disconnected") is not True:
+            raise ConnectionError("小内核未确认 Codex 进程退出。", 502)
 
     def request_native(self, method: str, params: Mapping[str, Any]) -> dict[str, Any]:
         try:
@@ -169,12 +188,15 @@ class DaemonCodexController:
         with self.connection._lock:
             if session_id in self.connection._active:
                 raise ConnectionError("会话正在运行，未执行永久删除。", 409)
+
+        async def remove() -> dict[str, Any]:
+            await self._attach(session_id)
+            return await self.bridge.request_control("session.delete", {"session_id": session_id})
+
         try:
-            response = asyncio.run(
-                self.bridge.request_control("session.delete", {"session_id": session_id})
-            )
+            response = asyncio.run(remove())
         except DaemonBridgeError as exc:
-            raise ConnectionError(self._daemon_error(exc, "删除"), 503) from exc
+            raise ConnectionError(self._daemon_error(exc, "删除") + f" 原因：{exc}", 503) from exc
         result = response.get("result")
         if not isinstance(result, Mapping) or result.get("deleted") != session_id:
             raise ConnectionError("守护进程未确认 Codex 会话删除。", 502)
@@ -470,6 +492,8 @@ class DaemonCodexController:
         thread = threads.get(session_id) if isinstance(threads, Mapping) else None
         cwd = thread.get("cwd") if isinstance(thread, Mapping) else None
         if isinstance(cwd, str) and cwd:
+            if cwd.startswith("\\\\?\\") and re.match(r"^[A-Za-z]:[\\/]", cwd[4:]):
+                cwd = cwd[4:]
             fields["cwd"] = cwd
         await self.bridge.request_control("session.spawn", fields)
 

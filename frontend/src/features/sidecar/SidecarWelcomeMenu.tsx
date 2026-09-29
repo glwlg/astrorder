@@ -18,6 +18,7 @@ interface SidecarWelcomeMenuProps {
   onOpenSideChat: () => void
   onOpenAgentGraph: () => void
   onOpenBlackboard?: () => void
+  onOpenMemory?: () => void
 }
 
 export function SidecarWelcomeMenu({
@@ -28,6 +29,7 @@ export function SidecarWelcomeMenu({
   onOpenSideChat,
   onOpenAgentGraph,
   onOpenBlackboard,
+  onOpenMemory,
 }: SidecarWelcomeMenuProps) {
   const menuItems = [
     {
@@ -35,6 +37,12 @@ export function SidecarWelcomeMenu({
       label: "黑板",
       shortcut: "Ctrl+Alt+B",
       onClick: onOpenBlackboard || onOpenFileTree,
+    },
+    {
+      icon: <IconBrain size={18} color="var(--astr-purple, #8b5cf6)" />,
+      label: "知识记忆",
+      shortcut: "Ctrl+Alt+M",
+      onClick: onOpenMemory || onOpenFileTree,
     },
     {
       icon: <IconFolder size={18} color="var(--astr-blue, #3b82f6)" />,

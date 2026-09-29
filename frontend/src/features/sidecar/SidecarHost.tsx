@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { notifications } from '@mantine/notifications'
 import { ActionIcon, Tooltip } from '@mantine/core'
 import { IconFolderSearch, IconLayoutSidebarRightCollapse, IconPlus } from '@tabler/icons-react'
@@ -38,6 +39,13 @@ export function SidecarHost({
 
   const activeTab = tabs.find((t) => t.id === activeTabId)
   const currentSessionKey = `${session.agent_id}:${session.id}`
+  useEffect(() => {
+    if (activeSessionKey === currentSessionKey && session.workspace) {
+      useSidecarStore.getState().syncFileTreeWorkspace(
+        session.id, session.workspace, session.project_name || session.title,
+      )
+    }
+  }, [activeSessionKey, currentSessionKey, session.id, session.workspace, session.project_name, session.title])
   const tabsOwnerKey = activeSessionKey || currentSessionKey
   const retainedTabs = [
     ...tabs.map((tab) => [tabsOwnerKey, tab] as const),
@@ -49,6 +57,10 @@ export function SidecarHost({
   ]
 
   const handleOpenFileTree = () => {
+    if (!session.workspace) {
+      notifications.show({ color: 'yellow', message: '该会话没有可确认的工作区目录。' })
+      return
+    }
     useSidecarStore
       .getState()
       .openFileTree(
@@ -85,6 +97,10 @@ export function SidecarHost({
 
   const handleOpenBlackboard = () => {
     useSidecarStore.getState().openBlackboard(session.id, session.agent_id, session.connection_id || undefined)
+  }
+
+  const handleOpenMemory = () => {
+    useSidecarStore.getState().openMemory(session.id)
   }
 
   const handleOpenAgentGraph = () => {
@@ -199,6 +215,7 @@ export function SidecarHost({
             onOpenSideChat={handleOpenSideChat}
             onOpenAgentGraph={handleOpenAgentGraph}
             onOpenBlackboard={handleOpenBlackboard}
+            onOpenMemory={handleOpenMemory}
           />
         )}
         {activeTab?.type === 'details' && (

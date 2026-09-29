@@ -92,6 +92,41 @@ def test_daemon_hermes_controller_connects_and_creates_from_daemon_confirmed_ide
     ]
 
 
+def test_daemon_hermes_controller_retries_stale_connecting_state():
+    class FakeBridge:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def request_control(self, action, fields):
+            assert action == "session.spawn"
+            self.calls += 1
+            return {"result": {"agent_id": "local-hermes-default"}}
+
+    bridge = FakeBridge()
+    controller = DaemonHermesController(bridge)
+    controller.connect()
+    controller.sync_connection(False)
+    controller.connect()
+    assert bridge.calls == 2
+
+
+def test_daemon_hermes_controller_rebinds_after_daemon_restart():
+    class FakeBridge:
+        def __init__(self) -> None:
+            self.agent_id = "local-hermes-old"
+
+        async def request_control(self, action, fields):
+            assert action == "session.spawn"
+            return {"result": {"agent_id": self.agent_id}}
+
+    bridge = FakeBridge()
+    controller = DaemonHermesController(bridge)
+    controller.connect()
+    assert controller.reset_after_daemon_restart() == "local-hermes-old"
+    bridge.agent_id = "local-hermes-default"
+    assert controller.connect()["agent_id"] == "local-hermes-default"
+
+
 @pytest.mark.asyncio
 async def test_daemon_hermes_controller_submits_only_after_exact_session_binding():
     class FakeBridge:
@@ -294,3 +329,59 @@ def test_daemon_hermes_controller_branches_through_daemon_create():
             "title": "转交摘要",
         },
     )
+
+
+def test_daemon_hermes_controller_refresh_sessions_projects_sessions(tmp_path, monkeypatch) -> None:
+    import sqlite3
+    from astrorder.daemon.runtimes.hermes.control import DaemonHermesController
+
+    state_db = tmp_path / "state.db"
+    proj_db = tmp_path / "projects.db"
+
+    with sqlite3.connect(proj_db) as pconn:
+        pconn.execute("CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT, primary_path TEXT, archived INTEGER DEFAULT 0)")
+        pconn.execute("CREATE TABLE project_folders (project_id TEXT, path TEXT)")
+        pconn.execute("INSERT INTO projects VALUES ('p-astr', 'astrorder', '/work/astrorder', 0)")
+        pconn.execute("INSERT INTO project_folders VALUES ('p-astr', '/work/astrorder')")
+
+    with sqlite3.connect(state_db) as sconn:
+        sconn.execute(
+            "CREATE TABLE sessions (id TEXT PRIMARY KEY, title TEXT, cwd TEXT, started_at REAL, "
+            "last_activity_at REAL, archived INTEGER DEFAULT 0, hidden INTEGER DEFAULT 0, source TEXT)"
+        )
+        sconn.execute(
+            "INSERT INTO sessions VALUES ('sid-1', 'Fix tree', '/work/astrorder', 1790000000.0, 1790000100.0, 0, 0, 'local')"
+        )
+
+    monkeypatch.setattr(
+        "astrorder.core.session_usage._find_local_hermes_state_dbs",
+        lambda profile_name=None: [state_db],
+    )
+
+    class FakeService:
+        def __init__(self):
+            self.sessions = []
+            self.projects = []
+
+        def record_native_projects(self, projects):
+            self.projects.extend(projects)
+
+        def record_native_sessions(self, sessions):
+            self.sessions.extend(sessions)
+
+        def delete_session(self, aid, sid):
+            pass
+
+    class FakeBridge:
+        async def request_control(self, action, fields):
+            return {"result": {}}
+
+    controller = DaemonHermesController(FakeBridge())
+    controller.service = FakeService()
+    controller.refresh_sessions()
+
+    assert len(controller.service.sessions) == 1
+    assert controller.service.sessions[0]["id"] == "sid-1"
+    assert controller.service.sessions[0]["project_name"] == "astrorder"
+    assert controller.service.sessions[0]["project_id"] == "p-astr"
+

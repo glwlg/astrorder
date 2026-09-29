@@ -647,6 +647,20 @@ class ControlService:
             if model.agent_id != agent_id or model.id != session_id:
                 raise ProtocolError("Session event identity does not match envelope")
             canonical_data = model.model_dump()
+            agent = self.store.get_agent(agent_id)
+            if (
+                agent_id.startswith("local-hermes-")
+                and agent is not None
+                and agent.get("kind") == "hermes"
+                and not agent.get("connection_id")
+            ):
+                from .native.sessions import native_session_workspace
+
+                # Live plugin events may carry the installed server directory as
+                # a fallback. Only the native session row owns its real cwd.
+                canonical_data["workspace"] = native_session_workspace(
+                    session_id, agent.get("profile_name")
+                )
         elif event_type == "message.upsert":
             model = MessageModel.model_validate(data)
             if model.agent_id != agent_id or model.session_id != session_id:
@@ -660,6 +674,10 @@ class ControlService:
                 raise ProtocolError("Message references an unknown attachment") from None
             canonical_data = model.model_dump()
             canonical_data["attachments"] = canonical_attachments
+            if model.role == "user" and agent_id.startswith(("local-hermes-", "ssh-hermes-")):
+                from .native.sessions import visible_hermes_user_text
+
+                canonical_data["text"] = visible_hermes_user_text(model.text)
         elif event_type == "task.upsert":
             model = TaskModel.model_validate(data)
             if model.agent_id != agent_id or model.session_id != session_id:

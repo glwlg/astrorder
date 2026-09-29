@@ -1,0 +1,324 @@
+/* Astrorder Agent Capability Hub - High-Density IDE & Control Plane Theme */
+:root {
+  --cap-bg: #0b0f17;
+  --cap-surface: #111827;
+  --cap-surface-elevated: #161f30;
+  --cap-card-bg: #0f1422;
+  --cap-card-hover: #172033;
+  --cap-border: #1e293b;
+  --cap-border-focus: #334155;
+  --cap-accent: #6366f1;
+  --cap-accent-glow: rgba(99, 102, 241, 0.25);
+  --cap-cyan: #38bdf8;
+  --cap-teal: #10b981;
+  --cap-purple: #8b5cf6;
+  --cap-amber: #f59e0b;
+  --cap-text-primary: #f8fafc;
+  --cap-text-secondary: #94a3b8;
+  --cap-text-muted: #64748b;
+}
+
+[data-mantine-color-scheme="light"] {
+  --cap-bg: #f8fafc;
+  --cap-surface: #ffffff;
+  --cap-surface-elevated: #f1f5f9;
+  --cap-card-bg: #ffffff;
+  --cap-card-hover: #f8fafc;
+  --cap-border: #e2e8f0;
+  --cap-border-focus: #cbd5e1;
+  --cap-accent: #4f46e5;
+  --cap-accent-glow: rgba(79, 70, 229, 0.15);
+  --cap-cyan: #0284c7;
+  --cap-teal: #059669;
+  --cap-purple: #7c3aed;
+  --cap-amber: #d97706;
+  --cap-text-primary: #0f172a;
+  --cap-text-secondary: #475569;
+  --cap-text-muted: #94a3b8;
+}
+
+.capabilities-hub-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  flex: 1 1 0;
+  background: var(--cap-bg);
+  color: var(--cap-text-primary);
+  overflow: hidden;
+  font-family: inherit;
+}
+
+/* 顶部控制台 Topbar */
+.capabilities-topbar {
+  display: flex;
+  flex-direction: column;
+  background: var(--cap-surface);
+  border-bottom: 1px solid var(--cap-border);
+  padding: 12px 20px 10px 20px;
+  flex-shrink: 0;
+}
+
+/* 顶部顶行：品牌 + 架构标签 + 全局搜索 + 环境状态 + 快捷操作 */
+.capabilities-topbar-row1 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: nowrap;
+}
+
+.engine-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  background: rgba(99, 102, 241, 0.12);
+  color: var(--cap-accent);
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  font-family: var(--mantine-font-family-monospace, monospace);
+}
+
+.cluster-nodes-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  border-radius: 6px;
+  font-size: 11px;
+  background: var(--cap-surface-elevated);
+  border: 1px solid var(--cap-border);
+  color: var(--cap-text-secondary);
+}
+
+.node-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--cap-teal);
+  box-shadow: 0 0 6px var(--cap-teal);
+}
+
+/* 顶部分类 Tabs */
+.capabilities-nav-tabs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.capabilities-nav-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  background: transparent;
+  color: var(--cap-text-secondary);
+  border: 1px solid transparent;
+  transition: all 0.15s ease;
+}
+
+.capabilities-nav-btn:hover {
+  background: var(--cap-surface-elevated);
+  color: var(--cap-text-primary);
+}
+
+.capabilities-nav-btn.active {
+  background: var(--cap-surface-elevated);
+  color: var(--cap-text-primary);
+  border-color: var(--cap-border);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+}
+
+.capabilities-nav-btn.active.tab-skills {
+  border-bottom: 2px solid var(--cap-accent);
+}
+.capabilities-nav-btn.active.tab-mcp {
+  border-bottom: 2px solid var(--cap-teal);
+}
+.capabilities-nav-btn.active.tab-plugins {
+  border-bottom: 2px solid var(--cap-amber);
+}
+.capabilities-nav-btn.active.tab-market {
+  border-bottom: 2px solid var(--cap-cyan);
+}
+
+/* 三栏工作台主体 */
+.capabilities-workbench {
+  display: flex;
+  flex: 1 1 0;
+  overflow: hidden;
+}
+
+/* 侧边栏 Filter Rail */
+.capabilities-filter-rail {
+  width: 250px;
+  flex-shrink: 0;
+  background: var(--cap-surface);
+  border-right: 1px solid var(--cap-border);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 16px 12px;
+}
+
+.filter-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--cap-text-muted);
+  margin-bottom: 8px;
+  padding-left: 6px;
+}
+
+.filter-item-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--cap-text-secondary);
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+  margin-bottom: 2px;
+  transition: all 0.15s ease;
+  text-align: left;
+}
+
+.filter-item-btn:hover {
+  background: var(--cap-surface-elevated);
+  color: var(--cap-text-primary);
+}
+
+.filter-item-btn.active {
+  background: var(--cap-surface-elevated);
+  border-color: var(--cap-border);
+  color: var(--cap-text-primary);
+  font-weight: 600;
+}
+
+/* 中间能力卡片列表 */
+.capabilities-list-pane {
+  width: 38%;
+  flex-shrink: 0;
+  border-right: 1px solid var(--cap-border);
+  display: flex;
+  flex-direction: column;
+  background: var(--cap-bg);
+  overflow: hidden;
+}
+
+.capability-card {
+  padding: 14px 16px;
+  margin: 6px 10px;
+  border-radius: 8px;
+  background: var(--cap-card-bg);
+  border: 1px solid var(--cap-border);
+  cursor: pointer;
+  transition: all 0.18s ease;
+  position: relative;
+}
+
+.capability-card:hover {
+  background: var(--cap-card-hover);
+  border-color: var(--cap-border-focus);
+}
+
+.capability-card.selected {
+  background: var(--cap-surface-elevated);
+  border-color: var(--cap-accent);
+  box-shadow: 0 0 0 1px var(--cap-accent), 0 4px 12px var(--cap-accent-glow);
+}
+
+.capability-card.selected::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--cap-cyan);
+}
+
+/* 右侧深度检查器 Inspector */
+.capabilities-inspector-pane {
+  flex: 1 1 0;
+  background: var(--cap-surface);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.inspector-top-meta {
+  padding: 18px 24px;
+  border-bottom: 1px solid var(--cap-border);
+  background: var(--cap-card-bg);
+}
+
+.inspector-tabs-header {
+  display: flex;
+  gap: 12px;
+  padding: 0 24px;
+  background: var(--cap-surface);
+  border-bottom: 1px solid var(--cap-border);
+}
+
+.inspector-tab-item {
+  padding: 12px 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--cap-text-secondary);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.15s ease;
+}
+
+.inspector-tab-item:hover {
+  color: var(--cap-text-primary);
+}
+
+.inspector-tab-item.active {
+  color: var(--cap-accent);
+  border-bottom-color: var(--cap-accent);
+}
+
+/* Markdown 与代码块预览 */
+.code-preview-block {
+  background: #07090e;
+  border: 1px solid var(--cap-border);
+  border-radius: 8px;
+  padding: 16px;
+  font-family: var(--mantine-font-family-monospace, "JetBrains Mono", monospace);
+  font-size: 12px;
+  line-height: 1.6;
+  color: #d1d5db;
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow-x: auto;
+}
+
+/* 底部状态条 Footer Bar */
+.capabilities-footer-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 20px;
+  font-size: 11px;
+  background: var(--cap-surface);
+  border-top: 1px solid var(--cap-border);
+  color: var(--cap-text-muted);
+  flex-shrink: 0;
+}

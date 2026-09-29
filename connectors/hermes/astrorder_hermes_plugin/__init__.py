@@ -108,15 +108,34 @@ class HermesBridge:
             if session_id == self._session_id:
                 self._session_id = None
 
+    def _resolve_session_workspace(self, session_id: str) -> str | None:
+        try:
+            from astrorder.core.session_usage import _find_local_hermes_state_dbs
+            dbs = _find_local_hermes_state_dbs(self.config.profile_name)
+            for db_file in dbs:
+                if not db_file.is_file():
+                    continue
+                import sqlite3
+                with sqlite3.connect(db_file.as_uri() + "?mode=ro", uri=True) as conn:
+                    cur = conn.cursor()
+                    cur.execute("SELECT cwd FROM sessions WHERE id = ?", (session_id,))
+                    row = cur.fetchone()
+                    if row and row[0]:
+                        return str(row[0])
+        except Exception:
+            pass
+        return self.config.workspace
+
     def _send_session(self, status: str) -> None:
         session_id = self._session_id
         if not session_id:
             return
+        ws = self._resolve_session_workspace(session_id)
         data = {
             "id": session_id,
             "agent_id": self.config.agent_id,
             "title": session_id,
-            "workspace": self.config.workspace,
+            "workspace": ws,
             "status": status,
             "source_id": self.config.source_id or self.config.agent_id,
             "connection_id": self.config.connection_id,
@@ -227,7 +246,9 @@ class HermesBridge:
             session_id=session_id,
             role="assistant",
             text=final_text or stream.get("text", ""),
-            created_at=stream["created_at"],
+            # Stream start precedes reasoning and tools; the completed reply belongs
+            # after those activities, not at the stream-start timestamp.
+            created_at=_timestamp(),
         )
 
     def _emit_task(

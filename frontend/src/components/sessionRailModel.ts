@@ -115,7 +115,7 @@ function remoteLabel(
 function connectionScope(source: string, connectionId: string | null | undefined, agent: Agent | undefined): string {
   const connection = connectionId || agent?.connection_id
   if (connection) return `connection:${connection}`
-  if (agent) return 'connection:local'
+  if (agent || source === 'local' || source === 'local-codex' || source.startsWith('local-hermes-') || source.startsWith('hermes-local-')) return 'connection:local'
   return `source:${source}`
 }
 
@@ -142,9 +142,11 @@ export function isPlaceholderTitle(title: string | null | undefined): boolean {
   return HEX_ID.test(value) || UUID.test(value) || HERMES_STAMP.test(value)
 }
 
-export function displaySessionTitle(session: Pick<Session, 'title' | 'workspace'>): string {
+export function displaySessionTitle(session: Pick<Session, 'title' | 'workspace'> & Partial<Pick<Session, 'agent_id'>>): string {
   const title = (session.title || '').trim()
   if (!isPlaceholderTitle(title)) return title
+  // A Hermes placeholder is not a project title; do not show the folder name as if it were the session name.
+  if (session.agent_id?.includes('hermes')) return '未命名'
   return workspaceBasename(session.workspace) || '未命名'
 }
 
@@ -229,16 +231,16 @@ export function buildProjectGroups(
     const nativeKey = `project:${source}\u0000${pid}`
     if (pid && pid !== '__no_project__' && (groups.has(nativeKey) || projectAliases.has(nativeKey))) {
       key = projectAliases.get(nativeKey) || nativeKey
-    } else if (pname && nameToProject.has(`${source}\u0000${pname}`)) {
-      key = nameToProject.get(`${source}\u0000${pname}`)!
-} else if (ws) {
-      // Paths only identify projects within their native connection/source.
+    } else if (ws) {
+      // A real path takes precedence over a display name, which is not a unique identity.
       if (workspaceToProject.has(`${location}\u0000${ws}`)) {
         key = workspaceToProject.get(`${location}\u0000${ws}`)!
       } else {
         key = `workspace:${location}\u0000${ws}`
       }
-        } else if (pid === '__no_project__' || pname === 'home') {
+    } else if (pname && nameToProject.has(`${source}\u0000${pname}`)) {
+      key = nameToProject.get(`${source}\u0000${pname}`)!
+    } else if (pid === '__no_project__' || pname === 'home') {
       const homeKey = `project:${source}\u0000__no_project__`
       if (groups.has(homeKey)) key = homeKey
     }

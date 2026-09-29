@@ -56,3 +56,25 @@ def test_file_tree_reveal_reads_only_the_deep_target_branch(tmp_path):
         return any(node['path'] == str(target) or contains(node.get('children', [])) for node in nodes)
 
     assert contains(response.json()['items'])
+
+
+def test_file_exists_checks_exact_relative_paths_with_spaces(tmp_path):
+    root = tmp_path / 'workspace'
+    output = root / 'output'
+    output.mkdir(parents=True)
+    (output / '季度 周报.html').write_text('ok', encoding='utf-8')
+    app = create_app(Settings(
+        database_url=f'sqlite:///{tmp_path / "exists.sqlite3"}',
+        browser_secret='test-secret',
+        attachments_dir=tmp_path / 'attachments',
+        static_dir=tmp_path / 'static',
+    ))
+
+    with TestClient(app) as client:
+        response = client.post('/api/v1/files/exists?token=test-secret', json={
+            'workspace': str(root),
+            'paths': ['将 output/季度 周报.html', 'output/季度 周报.html', 'output/不存在.html'],
+        })
+
+    assert response.status_code == 200
+    assert response.json() == {'existing': ['output/季度 周报.html']}

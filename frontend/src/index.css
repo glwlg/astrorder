@@ -1714,16 +1714,31 @@ a { color: inherit; }
 .agent-kind-filters button.is-active { color: var(--astr-text); background: var(--astr-surface-muted); box-shadow: inset 0 0 0 1px var(--astr-border); }
 .settings-modal .route-page { height: auto; min-height: 0; max-width: none !important; margin: 0 !important; padding: 0 !important; }
 .settings-modal .mantine-Modal-content {
-  height: min(84vh, 800px) !important;
+  width: 90vw !important;
+  max-width: 1720px !important;
+  height: 88vh !important;
+  max-height: 1100px !important;
   display: flex !important;
   flex-direction: column !important;
+  border-radius: 12px !important;
+  overflow: hidden !important;
+}
+.settings-modal .mantine-Modal-header {
+  padding: 16px 24px 12px !important;
+  border-bottom: 1px solid var(--astr-border) !important;
+  margin-bottom: 0 !important;
+}
+.settings-modal .mantine-Modal-title {
+  font-size: 16px !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.01em !important;
 }
 .settings-modal .mantine-Modal-body {
   flex: 1 1 0 !important;
   min-height: 0 !important;
   display: flex !important;
   flex-direction: column !important;
-  padding: 0 24px 20px !important;
+  padding: 0 !important;
   overflow: hidden !important;
 }
 .settings-tabs {
@@ -1732,11 +1747,18 @@ a { color: inherit; }
   flex: 1 1 0 !important;
   min-height: 0 !important;
 }
+.settings-tabs .mantine-Tabs-list {
+  padding: 0 20px !important;
+  border-bottom: 1px solid var(--astr-border) !important;
+}
 .settings-tab-panel {
   flex: 1 1 0 !important;
   min-height: 0 !important;
   overflow-y: auto !important;
-  padding: 16px 2px !important;
+  padding: 20px 24px !important;
+}
+.settings-tab-panel[data-tab-panel-skills] {
+  padding: 0 !important;
 }
 
 /* 普通弹窗与抽屉移除暗色遮罩层，保持背景通透且点击外部仍可关闭，消除顶部原生窗口按钮露白割裂感 */

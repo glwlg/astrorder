@@ -91,14 +91,47 @@ def upgrade_agent(agent_id: str, request: Request) -> StreamingResponse:
         display_cmd = cmd
     else:
         # 2. 本机 Windows / 环境升级逻辑
+        import shutil
         import sys
         is_win = sys.platform == "win32"
+
+        def _resolve_local_bin(name: str) -> str:
+            found = shutil.which(name)
+            if found:
+                return found
+            if is_win:
+                for ext in [".exe", ".cmd", ".bat"]:
+                    found = shutil.which(name + ext)
+                    if found:
+                        return found
+            extra_dirs = [
+                os.path.expanduser("~/.vite-plus/bin"),
+                os.path.expanduser("~/AppData/Local/hermes/bin"),
+                os.path.expanduser("~/.grok/bin"),
+                os.path.expanduser("~/.local/bin"),
+            ]
+            path_env = os.pathsep.join(extra_dirs + [os.environ.get("PATH", "")])
+            found = shutil.which(name, path=path_env)
+            if found:
+                return found
+            if is_win:
+                for ext in [".exe", ".cmd", ".bat"]:
+                    found = shutil.which(name + ext, path=path_env)
+                    if found:
+                        return found
+            return name
+
         if "codex" in kind:
-            run_cmd = ["vp.cmd", "install", "-g", "@openai/codex@latest"] if is_win else ["vp", "install", "-g", "@openai/codex@latest"]
-            display_cmd = "vp install -g @openai/codex@latest"
+            pkg_mgr = _resolve_local_bin("vp")
+            if pkg_mgr == "vp" and is_win:
+                # 尝试 npm 兜底
+                pkg_mgr = _resolve_local_bin("npm")
+            run_cmd = [pkg_mgr, "install", "-g", "@openai/codex@latest"]
+            display_cmd = f"{os.path.basename(pkg_mgr)} install -g @openai/codex@latest"
         elif "hermes" in kind:
-            run_cmd = ["hermes.cmd", "update"] if is_win else ["hermes", "update"]
-            display_cmd = "hermes update"
+            hermes_bin = _resolve_local_bin("hermes")
+            run_cmd = [hermes_bin, "update", "--yes"]
+            display_cmd = "hermes update --yes"
         elif "grok" in kind:
             if is_win:
                 run_cmd = ["powershell", "-NoProfile", "-Command", "irm https://x.ai/cli/install.ps1 | iex"]

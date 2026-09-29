@@ -662,6 +662,53 @@
   background: var(--astr-surface, #1c2028) !important;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
 }
+.sidebar-usage-preview {
+  font-size: 12px;
+  color: var(--astr-text);
+}
+.sidebar-usage-heading,
+.sidebar-usage-summary,
+.sidebar-usage-model {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.sidebar-usage-heading span,
+.sidebar-usage-state {
+  color: var(--astr-muted);
+  font-size: 11px;
+}
+.sidebar-usage-summary {
+  margin: 8px 0;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--astr-border);
+}
+.sidebar-usage-models {
+  max-height: 260px;
+  overflow-y: auto;
+}
+.sidebar-usage-model {
+  padding: 3px 0;
+  font-size: 11px;
+}
+.sidebar-usage-model-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.sidebar-usage-model-name i {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+}
+.sidebar-usage-model-name span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .session-rail-controls {
   display: flex;
   flex: 0 0 auto;
@@ -683,6 +730,12 @@
 }
 
 /* Electron uses the native Windows frame; the web app starts below it. */
+html.is-desktop-app,
+html.is-desktop-app body,
+html.is-desktop-app #root {
+  height: 100%;
+  overflow: hidden;
+}
 .is-desktop-app .mantine-Notifications-root {
   top: 12px !important;
   pointer-events: none;
@@ -937,4 +990,43 @@
   border-radius: 5px;
   border: 1px solid color-mix(in srgb, var(--astr-border) 90%, transparent);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+@keyframes filetree-reveal-pulse {
+  0% {
+    background-color: rgba(59, 130, 246, 0.45);
+    box-shadow: inset 3px 0 0 #2563eb, 0 0 0 2px rgba(59, 130, 246, 0.6);
+  }
+  30% {
+    background-color: rgba(59, 130, 246, 0.35);
+    box-shadow: inset 3px 0 0 #2563eb, 0 0 0 3px rgba(59, 130, 246, 0.35);
+  }
+  70% {
+    background-color: rgba(59, 130, 246, 0.25);
+    box-shadow: inset 3px 0 0 #2563eb;
+  }
+  100% {
+    background-color: rgba(59, 130, 246, 0.16);
+    box-shadow: inset 3px 0 0 #2563eb;
+  }
+}
+
+.file-tree-row {
+  transition: background-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.file-tree-row.is-selected {
+  background-color: rgba(59, 130, 246, 0.16) !important;
+  box-shadow: inset 3px 0 0 #2563eb !important;
+  outline: 1px solid var(--astr-blue, #3b82f6) !important;
+}
+
+:root[data-mantine-color-scheme='dark'] .file-tree-row.is-selected {
+  background-color: rgba(59, 130, 246, 0.25) !important;
+  box-shadow: inset 3px 0 0 #60a5fa !important;
+  outline: 1px solid var(--astr-blue, #60a5fa) !important;
+}
+
+.file-tree-row.is-revealed {
+  animation: filetree-reveal-pulse 2s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
 }

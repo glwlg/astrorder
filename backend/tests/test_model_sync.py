@@ -108,3 +108,44 @@ def test_catalog_and_agent_renderers_preserve_unmanaged_config():
     assert parsed_grok["ui"]["theme"] == "dark"
     assert [row["value"] for row in parsed_grok["model"]["gpt-5.6-sol"]["reasoning_efforts"]] == ["low", "high"]
     assert [row["value"] for row in parsed_grok["model"]["xai-grok-4.7"]["reasoning_efforts"]] == ["high", "medium", "low"]
+
+
+def test_codex_catalog_derives_missing_compaction_limit_from_context_window():
+    catalog = normalize_catalog([
+        {"provider": "xai", "id": "grok-4.7", "namespaced": "xai/grok-4.7", "contextWindow": 500000},
+    ])
+    existing = {"models": [{"slug": "xai/grok-4.7", "auto_compact_token_limit": 115200}]}
+    model = json.loads(render_codex_catalog(catalog, existing))["models"][0]
+    assert model["context_window"] == 500000
+    assert model["auto_compact_token_limit"] == 400000
+
+
+def test_codex_catalog_uses_authoritative_compaction_limit_when_provided():
+    catalog = normalize_catalog([
+        {"provider": "openai", "id": "gpt", "namespaced": "gpt", "contextWindow": 272000, "autoCompactTokenLimit": 244800},
+    ])
+    model = json.loads(render_codex_catalog(catalog))["models"][0]
+    assert model["auto_compact_token_limit"] == 244800
+
+
+def test_codex_catalog_does_not_write_zero_compaction_limit_without_context_window():
+    model = json.loads(render_codex_catalog(_catalog()))["models"][1]
+    assert "auto_compact_token_limit" not in model
+
+
+def test_codex_catalog_derives_limit_from_existing_window_when_gateway_omits_both():
+    catalog = normalize_catalog([
+        {"provider": "xai", "id": "grok-4.7", "namespaced": "xai/grok-4.7"},
+    ])
+    previous = {"models": [{"slug": "xai/grok-4.7", "context_window": 500000, "auto_compact_token_limit": 115200}]}
+    model = json.loads(render_codex_catalog(catalog, previous))["models"][0]
+    assert model["auto_compact_token_limit"] == 400000
+
+
+def test_codex_catalog_can_use_existing_max_context_window():
+    catalog = normalize_catalog([
+        {"provider": "xai", "id": "grok-4.7", "namespaced": "xai/grok-4.7"},
+    ])
+    previous = {"models": [{"slug": "xai/grok-4.7", "max_context_window": 500000, "auto_compact_token_limit": 0}]}
+    model = json.loads(render_codex_catalog(catalog, previous))["models"][0]
+    assert model["auto_compact_token_limit"] == 400000

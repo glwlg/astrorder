@@ -342,19 +342,32 @@ class SshDaemonRuntimeRegistry:
     async def disconnect_session(self, session_id: str) -> tuple[str, ...]:
         async with self._lock:
             connection_id = self._sessions.get(session_id)
-            child = self._children.get(connection_id) if connection_id else None
-            if child is None:
+            if connection_id is None:
                 raise DaemonProtocolError("SSH session is not daemon-owned")
+        return await self.disconnect_connection(connection_id)
+
+    async def sessions_for_connection(self, connection_id: str) -> tuple[str, ...]:
+        async with self._lock:
+            return tuple(
+                session_id for session_id, owner in self._sessions.items()
+                if owner == connection_id
+            )
+
+    async def disconnect_connection(self, connection_id: str) -> tuple[str, ...]:
+        async with self._lock:
+            child = self._children.get(connection_id)
+            if child is None:
+                return ()
             released = tuple(
                 owned_session_id
                 for owned_session_id, owned_connection_id in self._sessions.items()
                 if owned_connection_id == connection_id
             )
+            _config, runtime = child
+            await runtime.disconnect()
             for released_session_id in released:
                 self._sessions.pop(released_session_id, None)
             self._children.pop(connection_id, None)
-        _config, runtime = child
-        await runtime.disconnect()
         return released
 
     async def shutdown(self) -> None:

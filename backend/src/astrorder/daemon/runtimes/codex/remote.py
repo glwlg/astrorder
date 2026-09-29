@@ -17,6 +17,7 @@ from astrorder.connections import (
     _windows_hide_startupinfo,
     validate_ssh_settings,
 )
+from astrorder.core.system_environment import remote_codex_environment
 from astrorder.ssh_transport import SshNativeRuntime, build_remote_python_command
 from .runtime import CodexDaemonRuntime
 from astrorder.daemon.errors import DaemonProtocolError
@@ -102,7 +103,7 @@ class RemoteCodexDaemonRuntime(CodexDaemonRuntime):
             **kwargs,
             launch_argv=self._ssh_argv() + [build_remote_python_command(source)],
             environment=child_environment,
-            bootstrap_stdin={"environment": child_environment},
+            bootstrap_stdin={"environment": remote_codex_environment(child_environment)},
         )
 
     def _ssh_argv(self) -> list[str]:

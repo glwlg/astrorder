@@ -20,6 +20,22 @@ import type {
 const API_PREFIX = '/api/v1'
 import type { PreferencePatch, WorkspacePreferences } from '../hooks/useWorkspacePreferences'
 
+export interface ReviewRelayBinding { review_agent_id: string; review_session_id: string; workspace: string; enabled: boolean }
+export interface ReviewRelaySnapshot { workspace: string; repo_root: string; branch: string; head: string; change_fingerprint: string }
+export interface ReviewRelayRun {
+  id: string
+  source_agent_id: string
+  source_session_id: string
+  review_agent_id: string
+  review_session_id: string
+  command_id: string
+  baseline_ids: string[]
+  status: 'validating' | 'reviewing' | 'forwarding' | 'draft_ready' | 'empty' | 'failed'
+  comment_text: string | null
+  error: string | null
+  created_at: string
+  updated_at: string
+}
 export interface SessionModelBinding { model: string; provider: string | null; deferred?: boolean; branch?: string; effort?: string | null }
 export interface CodexConnectionStatus { kind: 'codex'; state: 'disconnected' | 'connecting' | 'connected' | 'error' | 'authentication_required'; available: boolean; agent_id: string; session_count: number; auth_required: boolean; detail: string; daemon_mode: boolean }
 export interface OcxUsageBreakdown {
@@ -199,6 +215,28 @@ export const api = {
     target_id?: string
     logs: BrowserLog[]
   }>(`/browser/diagnostics?agent_id=${encodeURIComponent(agentId)}&session_id=${encodeURIComponent(sessionId)}${targetId ? '&target_id=' + encodeURIComponent(targetId) : ''}`),
+  getReviewRelayBinding: (sourceAgentId: string, sourceSessionId: string) =>
+    request<ReviewRelayBinding | null>(`/review-relay/bindings/${encodeURIComponent(sourceAgentId)}/${encodeURIComponent(sourceSessionId)}`),
+  saveReviewRelayBinding: (sourceAgentId: string, sourceSessionId: string, binding: ReviewRelayBinding) =>
+    jsonRequest<ReviewRelayBinding>(`/review-relay/bindings/${encodeURIComponent(sourceAgentId)}/${encodeURIComponent(sourceSessionId)}`, binding, 'PUT'),
+  deleteReviewRelayBinding: (sourceAgentId: string, sourceSessionId: string) =>
+    request<void>(`/review-relay/bindings/${encodeURIComponent(sourceAgentId)}/${encodeURIComponent(sourceSessionId)}`, { method: 'DELETE' }),
+  validateReviewRelayWorkspaces: (source: Session, review: Session) =>
+    jsonRequest<{ valid: true; source: ReviewRelaySnapshot; review: ReviewRelaySnapshot }>('/review-relay/validate', {
+      source_workspace: source.workspace,
+      review_workspace: review.workspace,
+      source_agent_id: source.agent_id,
+      source_session_id: source.id,
+      review_agent_id: review.agent_id,
+      review_session_id: review.id,
+    }),
+  createReviewRelayRun: (payload: Omit<ReviewRelayRun, 'id' | 'comment_text' | 'error' | 'created_at' | 'updated_at'>) =>
+    jsonRequest<ReviewRelayRun>('/review-relay/runs', payload),
+  getReviewRelayRuns: (sourceAgentId: string, sourceSessionId: string, activeOnly = false) =>
+    request<{ items: ReviewRelayRun[] }>(`/review-relay/runs?source_agent_id=${encodeURIComponent(sourceAgentId)}&source_session_id=${encodeURIComponent(sourceSessionId)}&active_only=${activeOnly}`),
+  getReviewRelayRun: (runId: string) => request<ReviewRelayRun>(`/review-relay/runs/${encodeURIComponent(runId)}`),
+  updateReviewRelayRun: (runId: string, payload: Pick<ReviewRelayRun, 'status'> & Partial<Pick<ReviewRelayRun, 'comment_text' | 'error'>>) =>
+    jsonRequest<ReviewRelayRun>(`/review-relay/runs/${encodeURIComponent(runId)}`, payload, 'PATCH'),
   getPreferences: () => request<WorkspacePreferences>('/preferences'),
   importPreferences: (values: PreferencePatch) => jsonRequest<WorkspacePreferences>('/preferences/import', values),
   updatePreferences: (values: PreferencePatch) => jsonRequest<WorkspacePreferences>('/preferences', values, 'PATCH'),
@@ -493,6 +531,86 @@ export const api = {
   startModelSync: (targets: Array<{ target_id: string; agents: string[] }>) => jsonRequest<{ id: string; status: string }>('/model-sync/jobs', { targets }),
   getModelSyncJobs: () => request<{ items: Array<{ id: string; status: 'running' | 'success' | 'failed' | 'cancelled'; error?: string; targets: Array<{ target_id: string; status: string; changed?: string[]; reload_pending?: boolean; error?: string }> }> }>('/model-sync/jobs'),
   cancelModelSync: (id: string) => request<{ cancelled: boolean }>(`/model-sync/jobs/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
+
+  // OpenViking 记忆与知识库相关接口
+  getMemoryConfig: () => request<{ url: string; masked_key: string }>('/memory/config'),
+  updateMemoryConfig: (payload: { url: string; api_key?: string }) => jsonRequest<{ url: string; masked_key: string }>('/memory/config', payload, 'POST'),
+  getMemoryHealth: () => request<{ healthy: boolean; status: string; version?: string }>('/memory/health'),
+  getMemoryTree: (uri = 'viking://') => request<{ uri: string; items: Array<{ uri: string; size: number; isDir: boolean; modTime: string; rel_path?: string; abstract?: string }> }>(`/memory/tree?uri=${encodeURIComponent(uri)}`),
+  getMemoryLs: (uri = 'viking://') => request<{ uri: string; items: Array<{ uri: string; size: number; isDir: boolean; modTime: string; rel_path?: string; abstract?: string }> }>(`/memory/ls?uri=${encodeURIComponent(uri)}`),
+  getMemoryContent: (uri: string) => request<{ uri: string; content: string }>(`/memory/content?uri=${encodeURIComponent(uri)}`),
+  searchMemory: (payload: { query: string; scope?: string; limit?: number }) => jsonRequest<{ items: Array<{ uri: string; score: number; abstract?: string; level?: number; context_type?: string }> }>('/memory/search', payload, 'POST'),
+  getMemoryTargets: () => request<{ items: Array<{ id: string; kind: 'local' | 'wsl' | 'ssh'; name: string; state?: string; agents: string[] }> }>('/memory/targets'),
+  getMemoryTargetStatus: (targetId: string) => request<{ target_id: string; ovcli_status: string; hooks_enabled: boolean; plugin_installed?: boolean; target_url: string; hermes_status?: string; hermes_endpoint?: string; raw_output?: string }>(`/memory/targets/${encodeURIComponent(targetId)}/status`),
+  applyMemoryConfig: (targetIds: string[]) => jsonRequest<{ items: Array<{ target_id: string; success: boolean; detail: string }> }>('/memory/apply', { target_ids: targetIds }, 'POST'),
+
+  // Skills 管理相关
+  getSkillsTargets: () => request<{ targets: Array<{ id: string; kind: 'local' | 'wsl' | 'ssh'; name: string; skills_count: number; skills: Array<{ name: string; path?: string; scope?: string; agents?: string[]; source?: string; sourceUrl?: string }> }> }>('/skills/targets'),
+  searchCommunitySkills: (q: string) => request<{ query: string; items: Array<{ pkg: string; name: string; repo: string; installs: string; url: string }> }>(`/skills/search?q=${encodeURIComponent(q)}`),
+  installSkill: (payload: { target_ids: string[]; package_source: string; skill_name?: string }) => jsonRequest<{ results: Array<{ target_id: string; success: boolean; package: string; skill?: string; output?: string; error?: string }> }>('/skills/install', payload, 'POST'),
+  removeSkill: (payload: { target_id: string; skill_name: string }) => jsonRequest<{ target_id: string; success: boolean; skill: string; output?: string }>('/skills/remove', payload, 'POST'),
+
+  // 能力中心 (Capabilities: Skills, MCP, Plugins, Marketplaces)
+  getCapabilitiesTargets: () => request<Array<{ id: string; kind: string; name: string }>>('/capabilities/targets'),
+  getCapabilitiesSummary: (targetId: string, agent?: string) => {
+    const query = new URLSearchParams({ target_id: targetId })
+    if (agent && agent !== 'all') query.set('agent', agent)
+    return request<{
+      target_id: string
+      target_name: string
+      kind: string
+      counts: { skills: number; mcp: number; plugins: number; marketplaces: number }
+      skills: Array<{ name: string; path?: string; scope?: string; agents?: string[]; source?: string; sourceUrl?: string; description?: string; agent?: string }>
+      mcp_servers: Array<{
+        name: string
+        agent: string
+        enabled: boolean
+        transport: string
+        url?: string
+        command?: string
+        args?: string[]
+        headers?: Record<string, string>
+        env?: Record<string, string>
+        tools?: string[]
+        source?: string
+      }>
+      plugins: Array<{ id: string; name: string; full_name?: string; agent: string; marketplace?: string; enabled: boolean; source?: string; config?: Record<string, any> }>
+      marketplaces: Array<{ id: string; name: string; agent?: string; source_type: string; source: string; last_updated?: string; description?: string }>
+    }>(`/capabilities/summary?${query.toString()}`)
+  },
+  searchMarketCapabilities: (q: string) => request<{ query: string; items: Array<{ pkg: string; name: string; repo: string; installs: string; url: string }> }>(`/skills/search?q=${encodeURIComponent(q)}`),
+  
+  // MCP 完整生命周期
+  updateMcpServer: (payload: { target_id: string; agent: string; action: 'save' | 'delete'; server: Record<string, any> }) =>
+    jsonRequest<{ ok: boolean; action: string; agent: string; server: string }>('/capabilities/mcp/update', payload, 'POST'),
+  pingMcpServer: (payload: { target_id: string; server: Record<string, any> }) =>
+    jsonRequest<{ ok: boolean; status_code?: number; latency_ms: number; message: string }>('/capabilities/mcp/ping', payload, 'POST'),
+
+  // 插件生命周期
+  updatePluginState: (payload: { target_id: string; agent: string; action: 'toggle' | 'uninstall'; plugin_name: string; enabled?: boolean }) =>
+    jsonRequest<{ ok: boolean; action: string; agent: string; plugin: string }>('/capabilities/plugins/update', payload, 'POST'),
+
+  // 市场源生命周期
+  updateMarketplace: (payload: { target_id: string; agent: string; action: 'add' | 'pull' | 'delete'; market: Record<string, any> }) =>
+    jsonRequest<{ ok: boolean; action: string; agent: string; marketplace: string }>('/capabilities/marketplaces/update', payload, 'POST'),
+
+  // 真实跨端/跨 Agent 动态分发
+  dispatchCapability: (payload: {
+    capability_type: 'skill' | 'mcp' | 'plugin'
+    source_target_id: string
+    source_agent: string
+    item_id: string
+    target_matrix: Array<{ target_id: string; agent: string }>
+    item_data?: Record<string, any>
+  }) => jsonRequest<{
+    ok: boolean
+    capability_type: string
+    item_id: string
+    total_targets: number
+    success_count: number
+    reports: Array<{ target_id: string; target_name?: string; agent: string; ok: boolean; installed_path?: string; message: string }>
+  }>('/capabilities/dispatch', payload, 'POST'),
+
   getAnalyticsUsage: (params: { range: 'all' | '30d' | '7d'; surface: 'all' | 'codex' | 'claude' | 'grok'; since?: number; until?: number }) => {
     const query = new URLSearchParams({ range: params.range, surface: params.surface })
     if (params.since !== undefined) query.set('since', String(params.since))
@@ -508,6 +626,13 @@ export const api = {
     if (params.limit) query.set('limit', String(params.limit))
     return request<{ root: string; items: Array<{ path: string; name: string; size: number }> }>(`/files/search?${query.toString()}`)
   },
+  getWorkspaceRootFiles: (sessionId: string, workspace: string, connectionId?: string | null) => {
+    const query = new URLSearchParams({ session_id: sessionId, path: workspace, depth: '1' })
+    if (connectionId) query.set('connection_id', connectionId)
+    return request<{ root: string; items: Array<{ name: string; is_dir: boolean }> }>(`/files/tree?${query.toString()}`)
+  },
+  checkWorkspaceFiles: (workspace: string, paths: string[], connectionId?: string | null) =>
+    jsonRequest<{ existing: string[] }>('/files/exists', { workspace, paths, connection_id: connectionId }),
 }
 
 export type ApiClient = typeof api

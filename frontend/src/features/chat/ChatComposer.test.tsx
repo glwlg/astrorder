@@ -53,6 +53,21 @@ it('embeds the model picker and follows the native session status for stop', asy
   expect(screen.getByRole('button', { name: '发送' })).toBeInTheDocument()
   client.clear()
 })
+it('uses the same uncommitted-review request as the review relay', async () => {
+  const codexSession = { ...session, agent_id: 'codex', workspace: '/repo' }
+  const codexAgent = { ...agent, id: 'codex', kind: 'codex' as const }
+  vi.spyOn(api, 'getSessionModel').mockResolvedValue({ model: 'native-model', provider: 'provider' })
+  vi.spyOn(api, 'getAgentCommands').mockResolvedValue({ items: [] })
+  const create = vi.spyOn(api, 'createCommand').mockImplementation(async input => ({ ...input, state: 'accepted', attachments: [], created_at: session.updated_at, error: null, target_id: input.target_id ?? null }))
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(<MantineProvider><QueryClientProvider client={client}><ChatComposer session={codexSession} agent={codexAgent} /></QueryClientProvider></MantineProvider>)
+  fireEvent.change(screen.getByLabelText('消息内容'), { target: { value: '/review' } })
+  fireEvent.click(await screen.findByText('审查未提交的更改'))
+  await waitFor(() => expect(create).toHaveBeenCalledOnce())
+  expect(create.mock.calls[0][0]).toMatchObject({ action: 'send', text: '请检查我未提交的更改', agent_id: 'codex', session_id: session.id })
+  client.clear()
+})
+
 it('pastes clipboard images into the draft instead of ignoring them', async () => {
   useAstrorderStore.getState().resetRuntime()
   vi.spyOn(api, 'getSessionModel').mockResolvedValue({ model: 'native-model', provider: 'provider' })

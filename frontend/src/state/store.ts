@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { eventIsNew, isEphemeralSession, mergeMessagesById, scopeKey } from '../domain/semantics'
+import { visibleHermesMessage } from './hermesMemoryContext'
 import type {
   Agent,
   Approval,
@@ -87,7 +88,7 @@ function taskKey(task: Task): string {
 }
 
 function messageMap(items: Message[]): Record<string, Message> {
-  return Object.fromEntries(items.map((item) => [item.id, item]))
+  return Object.fromEntries(items.map((item) => [item.id, visibleHermesMessage(item)]))
 }
 
 function mergeCommandIntoState(

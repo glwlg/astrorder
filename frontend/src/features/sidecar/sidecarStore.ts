@@ -32,18 +32,24 @@ export interface SidecarState {
   openArtifact: (artifact: ArtifactRef, viewerId: string) => void
   openDetails: () => void
   closeTab: (tabId: string) => void
+  closeOtherTabs: (keepTabId: string) => void
+  closeTabsToRight: (referenceTabId: string) => void
+  closeTabsToLeft: (referenceTabId: string) => void
+  closeAllTabs: () => void
   setActiveTabId: (tabId: string) => void
   setIsOpen: (open: boolean) => void
   setTabDirty: (tabId: string, dirty: boolean) => void
   setSidecarWidth: (width: number) => void
   openTerminal: (sessionId: string, agentId: string, workspaceName?: string, connectionId?: string) => void
   openFileTree: (sessionId: string, agentId: string, workspacePath?: string, workspaceName?: string, connectionId?: string) => void
+  syncFileTreeWorkspace: (sessionId: string, workspacePath: string, workspaceName?: string) => void
   revealFileInTree: (sessionId: string, agentId: string, filePath: string, workspacePath?: string, workspaceName?: string, connectionId?: string) => void
   openSideChat: (sessionId: string, agentId: string, workspaceName?: string, connectionId?: string) => void
   openAgentGraph: (sessionId: string, agentId: string, workspaceName?: string, connectionId?: string) => void
   openGitDiff: (sessionId: string, agentId: string, workspacePath?: string, connectionId?: string, baseBranch?: string) => void
   openBrowser: (sessionId: string, agentId: string, initialUrl?: string, connectionId?: string) => void
   openBlackboard: (sessionId?: string, agentId?: string, connectionId?: string) => void
+  openMemory: (sessionId?: string) => void
   switchSession: (sessionKey: string) => void
   resetSessionSidecar: () => void
   registerTabCloseHandler: (agentId: string, tabId: string, handler: () => void) => () => void
@@ -136,7 +142,21 @@ export const useSidecarStore = create<SidecarState>()(persist((set, get) => ({
     const { tabs, activeSessionKey, sessionMemories } = get()
     const existingIndex = tabs.findIndex((t) => t.id === tabId)
     if (existingIndex >= 0) {
+      const existing = tabs[existingIndex]
+      const nextTabs = workspacePath && existing.artifact?.path !== workspacePath
+        ? tabs.map((tab, index) => index === existingIndex ? {
+            ...tab,
+            title: workspaceName ? `文件 (${workspaceName})` : '工作区文件',
+            artifact: {
+              ...tab.artifact!,
+              name: workspaceName ? `文件 (${workspaceName})` : '工作区文件',
+              path: workspacePath,
+              connectionId,
+            },
+          } : tab)
+        : tabs
       set({
+        tabs: nextTabs,
         isOpen: true,
         activeTabId: tabId,
       })
@@ -176,6 +196,26 @@ export const useSidecarStore = create<SidecarState>()(persist((set, get) => ({
         },
       })
     }
+  },
+
+  syncFileTreeWorkspace: (sessionId, workspacePath, workspaceName) => {
+    if (!workspacePath) return
+    const { tabs, activeSessionKey, sessionMemories } = get()
+    const tabId = `filetree:${sessionId}`
+    if (!tabs.some((tab) => tab.id === tabId && tab.artifact?.path !== workspacePath)) return
+    const title = workspaceName ? `文件 (${workspaceName})` : '工作区文件'
+    const nextTabs = tabs.map((tab) => tab.id === tabId && tab.artifact
+      ? { ...tab, title, artifact: { ...tab.artifact, name: title, path: workspacePath } }
+      : tab)
+    set({
+      tabs: nextTabs,
+      sessionMemories: activeSessionKey && sessionMemories[activeSessionKey]
+        ? {
+            ...sessionMemories,
+            [activeSessionKey]: { ...sessionMemories[activeSessionKey], tabs: nextTabs },
+          }
+        : sessionMemories,
+    })
   },
 
   revealFileInTree: (sessionId, agentId, filePath, workspacePath, workspaceName, connectionId) => {
@@ -384,6 +424,51 @@ export const useSidecarStore = create<SidecarState>()(persist((set, get) => ({
     }
   },
 
+  openMemory: (sessionId?: string) => {
+    const tabId = 'memory:viking'
+    const { tabs, activeSessionKey, sessionMemories } = get()
+    const existingIndex = tabs.findIndex((t) => t.id === tabId)
+    if (existingIndex >= 0) {
+      set({
+        isOpen: true,
+        activeTabId: tabId,
+      })
+    } else {
+      const memArtifact: ArtifactRef = {
+        id: tabId,
+        name: '知识记忆',
+        kind: 'workspace_file',
+        mediaType: 'application/x-openviking-memory',
+        readUrl: '',
+        writable: false,
+        sessionId: sessionId || 'global',
+        agentId: '',
+      }
+      const newTab: SidecarTab = {
+        id: tabId,
+        type: 'artifact',
+        title: '知识记忆',
+        artifact: memArtifact,
+        viewerId: 'memory-viewer',
+        closable: true,
+      }
+      set({
+        isOpen: true,
+        activeTabId: tabId,
+        tabs: [...tabs, newTab],
+      })
+    }
+    if (activeSessionKey) {
+      const curr = get()
+      set({
+        sessionMemories: {
+          ...sessionMemories,
+          [activeSessionKey]: { tabs: curr.tabs, activeTabId: curr.activeTabId, isOpen: true },
+        },
+      })
+    }
+  },
+
   openSideChat: (sessionId: string, agentId: string, _workspaceName?: string, connectionId?: string) => {
     const tabId = `sidechat:${sessionId}`
     const { tabs, activeSessionKey, sessionMemories } = get()
@@ -461,7 +546,7 @@ export const useSidecarStore = create<SidecarState>()(persist((set, get) => ({
         type: 'artifact',
         title: '浏览器',
         artifact: browserArtifact,
-        viewerId: 'browser-mirror-viewer',
+        viewerId: 'html-viewer',
         closable: true,
       }
       set({
@@ -600,6 +685,32 @@ export const useSidecarStore = create<SidecarState>()(persist((set, get) => ({
         },
       })
     }
+  },
+
+  closeOtherTabs: (keepTabId: string) => {
+    const { tabs } = get()
+    tabs.filter((t) => t.id !== keepTabId && t.closable).forEach((t) => get().closeTab(t.id))
+  },
+
+  closeTabsToRight: (referenceTabId: string) => {
+    const { tabs } = get()
+    const refIndex = tabs.findIndex((t) => t.id === referenceTabId)
+    if (refIndex >= 0) {
+      tabs.slice(refIndex + 1).filter((t) => t.closable).forEach((t) => get().closeTab(t.id))
+    }
+  },
+
+  closeTabsToLeft: (referenceTabId: string) => {
+    const { tabs } = get()
+    const refIndex = tabs.findIndex((t) => t.id === referenceTabId)
+    if (refIndex > 0) {
+      tabs.slice(0, refIndex).filter((t) => t.closable).forEach((t) => get().closeTab(t.id))
+    }
+  },
+
+  closeAllTabs: () => {
+    const { tabs } = get()
+    tabs.filter((t) => t.closable).forEach((t) => get().closeTab(t.id))
   },
 
   setActiveTabId: (tabId: string) => {

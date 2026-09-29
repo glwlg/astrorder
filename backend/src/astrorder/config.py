@@ -68,7 +68,7 @@ class Settings:
     """
 
     host: str = "127.0.0.1"
-    port: int = 30002
+    port: int = 30001
     database_url: str = field(default_factory=_default_database_url)
     browser_secret: str | None = None
     connector_secret: str | None = None

@@ -212,6 +212,18 @@ def test_browser_auth_origin_and_safe_error(configured):
         assert response.json()["agents"] == []
 
 
+def test_auth_session_restores_cookie_from_bearer_for_image_requests(configured):
+    app = configured()
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/v1/auth/session",
+            headers={"Authorization": "Bearer browser-test-secret"},
+        )
+        assert response.json() == {"authenticated": True}
+        assert "astrorder_session=" in response.headers["set-cookie"]
+        assert client.get("/api/v1/bootstrap").status_code == 200
+
+
 def test_bootstrap_does_not_scan_presence(configured, monkeypatch):
     import astrorder.api as api_mod
 

@@ -1,5 +1,5 @@
 import { MantineProvider } from '@mantine/core'
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { api } from '../api/client'
 import { useAstrorderStore } from '../state/store'
 import { useBackgroundTasks } from '../state/backgroundTasks'
@@ -172,6 +172,26 @@ describe('SessionRail project-first grouping', () => {
     expect(screen.queryByText('本机 Hermes')).not.toBeInTheDocument()
     expect(document.querySelector('.session-project-drag')).not.toBeInTheDocument()
     expect(remoteProject).toHaveAttribute('draggable', 'true')
+  })
+
+  it('opens the corresponding project and session action menus on right click without selecting', async () => {
+    const onSelect = vi.fn()
+    const view = render(
+      <MantineProvider>
+        <SessionRail sessions={sessions} agents={agents} projects={projects} onSelect={onSelect} />
+      </MantineProvider>,
+    )
+    const project = within(view.container).getByRole('button', { name: /空项目.*0 个会话/ })
+    fireEvent.contextMenu(project)
+    expect(project.closest('.session-project-group')?.querySelector('button[aria-label="项目操作"]')).toHaveAttribute('aria-expanded', 'true')
+    expect(onSelect).not.toHaveBeenCalled()
+
+    fireEvent.contextMenu(within(view.container).getByText('本机会话').closest('.session-row')!)
+    expect(await screen.findByRole('menuitem', { name: '重命名' })).toBeInTheDocument()
+    expect(within(view.container).getAllByRole('button', { name: '更多操作' }).some(button => button.getAttribute('aria-expanded') === 'true')).toBe(true)
+    expect(screen.queryByRole('menuitem', { name: '外观设置' })).not.toBeInTheDocument()
+    expect(onSelect).not.toHaveBeenCalled()
+    view.unmount()
   })
 
   it('renders relative time and status dots on the right side of session rows', () => {

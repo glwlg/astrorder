@@ -154,11 +154,14 @@ async def test_daemon_bridge_retires_missing_owned_sessions_after_daemon_restart
     )
     bridge = DaemonBridge(store, ControlService(store, EventHub(), settings), "ws://127.0.0.1:1")
     bridge._daemon_id = "daemon-old"
+    restarts: list[str] = []
+    bridge.register_restart_handler(lambda: restarts.append("rebind"))
     store.list_commands = lambda *_args: (_ for _ in ()).throw(AssertionError("per-session scan"))
     store.list_tasks = lambda *_args: (_ for _ in ()).throw(AssertionError("per-session scan"))
     try:
         await bridge._synchronize(RestartedDaemonSocket())
 
+        assert restarts == ["rebind"]
         assert store.get_session("daemon-codex", "session-1")["status"] == "idle"
         command = store.get_command("daemon-codex", "session-1", "command-1")
         assert command["state"] == "unknown"

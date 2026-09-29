@@ -57,6 +57,36 @@ class FakeClient:
         raise AssertionError(method)
 
 
+def test_local_codex_imports_unarchived_native_state_threads_missing_from_app_server_catalog(tmp_path):
+    codex_home = tmp_path / 'codex'
+    codex_home.mkdir()
+    with sqlite3.connect(codex_home / 'state_5.sqlite') as db:
+        db.execute('CREATE TABLE threads (id TEXT, cwd TEXT, title TEXT, name TEXT, preview TEXT, updated_at INTEGER, archived INTEGER, source TEXT, project_id TEXT)')
+        db.execute('INSERT INTO threads VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                   ('missing-native', 'P:/workspace/astrorder', '修复会话列表', '', '', 1790000000, 0, 'vscode', None))
+        db.execute('INSERT INTO threads VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                   ('archived-native', 'P:/workspace/astrorder', '已归档', '', '', 1790000000, 1, 'vscode', None))
+    settings = Settings(database_url=f'sqlite:///{tmp_path}/cache.db', auto_connect_local_hermes=False, codex_executable=sys.executable)
+    store = Store(settings)
+    service = ControlService(store, EventHub(), settings)
+    class IncompleteCatalog(FakeClient):
+        def request(self, method, params, timeout=30):
+            if method == 'initialize':
+                return {'codexHome': str(codex_home)}
+            return super().request(method, params, timeout)
+    connection = CodexConnection(settings, store, service, client_factory=IncompleteCatalog)
+    try:
+        connection.connect()
+        missing = store.get_session('local-codex', 'missing-native')
+        assert missing is not None
+        assert missing['title'] == '修复会话列表'
+        assert missing['workspace'] == 'P:/workspace/astrorder'
+        assert store.get_session('local-codex', 'archived-native') is None
+    finally:
+        connection.disconnect()
+        store.close()
+
+
 def test_connected_means_initialized_catalog_and_scoped_native_handler(tmp_path):
     settings = Settings(database_url=f'sqlite:///{tmp_path}/cache.db', auto_connect_local_hermes=False, codex_executable=sys.executable)
     store = Store(settings)
@@ -118,6 +148,7 @@ async def test_codex_can_explicitly_delegate_commands_to_a_daemon_controller(tmp
     class Controller:
         activated = False
         closed = False
+        runtime_stopped = False
         calls: list[dict[str, object]] = []
         model_calls: list[tuple[str, str, str]] = []
         effort_calls: list[tuple[str, str]] = []
@@ -128,6 +159,9 @@ async def test_codex_can_explicitly_delegate_commands_to_a_daemon_controller(tmp
 
         def close(self):
             self.closed = True
+
+        def disconnect_runtime(self):
+            self.runtime_stopped = True
 
         async def submit(self, command):
             self.calls.append(dict(command))
@@ -187,6 +221,10 @@ async def test_codex_can_explicitly_delegate_commands_to_a_daemon_controller(tmp
         assert controller.create_calls == [('C:/daemon-workspace', 'Daemon-created', True, None)]
         connection.disconnect()
         assert controller.closed is True
+        assert controller.runtime_stopped is True
+        controller.runtime_stopped = False
+        connection.disconnect(stop_runtime=False)
+        assert controller.runtime_stopped is False
     finally:
         connection.disconnect()
         store.close()

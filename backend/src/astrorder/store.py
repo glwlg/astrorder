@@ -29,6 +29,8 @@ from .models import (
     EventRow,
     MessageRow,
     ProjectRow,
+    ReviewRelayBindingRow,
+    ReviewRelayRunRow,
     SessionRow,
     SshConnectionRow,
     TaskRow,
@@ -57,7 +59,7 @@ if Engine:
         if dbapi_connection.__class__.__module__.startswith("sqlite3"):
             cursor = dbapi_connection.cursor()
             cursor.execute("PRAGMA foreign_keys=ON")
-            cursor.execute("PRAGMA busy_timeout=5000")
+            cursor.execute("PRAGMA busy_timeout=30000")
             cursor.execute("PRAGMA journal_mode=WAL")
             cursor.close()
 
@@ -382,6 +384,114 @@ class Store:
                     text("UPDATE ssh_connections SET id = :new_id WHERE id = 'default'"),
                     {"new_id": migrated_id},
                 )
+
+    def get_review_relay_binding(self, source_agent_id: str, source_session_id: str) -> dict[str, Any] | None:
+        with self.session() as db:
+            row = db.get(ReviewRelayBindingRow, (source_agent_id, source_session_id))
+            if row is None:
+                return None
+            return {
+                "source_agent_id": row.source_agent_id,
+                "source_session_id": row.source_session_id,
+                "review_agent_id": row.review_agent_id,
+                "review_session_id": row.review_session_id,
+                "workspace": row.workspace,
+                "enabled": row.enabled,
+                "updated_at": isoformat(row.updated_at),
+            }
+
+    def upsert_review_relay_binding(self, payload: dict[str, Any]) -> dict[str, Any]:
+        now = utc_now()
+        with self.session() as db:
+            row = db.get(ReviewRelayBindingRow, (payload["source_agent_id"], payload["source_session_id"]))
+            if row is None:
+                row = ReviewRelayBindingRow(
+                    source_agent_id=payload["source_agent_id"],
+                    source_session_id=payload["source_session_id"],
+                    review_agent_id=payload["review_agent_id"],
+                    review_session_id=payload["review_session_id"],
+                    workspace=payload["workspace"],
+                    enabled=payload.get("enabled", True),
+                    updated_at=now,
+                )
+                db.add(row)
+            else:
+                for key in ("review_agent_id", "review_session_id", "workspace", "enabled"):
+                    if key in payload:
+                        setattr(row, key, payload[key])
+                row.updated_at = now
+            db.commit()
+            return self.get_review_relay_binding(row.source_agent_id, row.source_session_id) or {}
+
+    def delete_review_relay_binding(self, source_agent_id: str, source_session_id: str) -> None:
+        with self.session() as db:
+            db.execute(delete(ReviewRelayBindingRow).where(
+                ReviewRelayBindingRow.source_agent_id == source_agent_id,
+                ReviewRelayBindingRow.source_session_id == source_session_id,
+            ))
+            db.commit()
+
+    @staticmethod
+    def _review_relay_run_wire(row: ReviewRelayRunRow) -> dict[str, Any]:
+        return {
+            "id": row.id,
+            "source_agent_id": row.source_agent_id,
+            "source_session_id": row.source_session_id,
+            "review_agent_id": row.review_agent_id,
+            "review_session_id": row.review_session_id,
+            "command_id": row.command_id,
+            "baseline_ids": list(row.baseline_ids or []),
+            "status": row.status,
+            "comment_text": row.comment_text,
+            "error": row.error,
+            "created_at": isoformat(row.created_at),
+            "updated_at": isoformat(row.updated_at),
+        }
+
+    def create_review_relay_run(self, payload: dict[str, Any]) -> dict[str, Any]:
+        now = utc_now()
+        row = ReviewRelayRunRow(id=str(payload.get("id") or uuid4()), created_at=now, updated_at=now, **{
+            key: payload[key]
+            for key in (
+                "source_agent_id", "source_session_id", "review_agent_id", "review_session_id",
+                "command_id", "baseline_ids", "status",
+            )
+        })
+        with self.session() as db:
+            db.add(row)
+            db.commit()
+            db.refresh(row)
+            return self._review_relay_run_wire(row)
+
+    def get_review_relay_run(self, run_id: str) -> dict[str, Any] | None:
+        with self.session() as db:
+            row = db.get(ReviewRelayRunRow, run_id)
+            return self._review_relay_run_wire(row) if row else None
+
+    def list_review_relay_runs(
+        self, source_agent_id: str, source_session_id: str, *, active_only: bool = False
+    ) -> list[dict[str, Any]]:
+        with self.session() as db:
+            query = select(ReviewRelayRunRow).where(
+                ReviewRelayRunRow.source_agent_id == source_agent_id,
+                ReviewRelayRunRow.source_session_id == source_session_id,
+            ).order_by(ReviewRelayRunRow.created_at.desc())
+            if active_only:
+                query = query.where(ReviewRelayRunRow.status.in_(("validating", "reviewing", "forwarding")))
+            return [self._review_relay_run_wire(row) for row in db.scalars(query).all()]
+
+    def update_review_relay_run(self, run_id: str, payload: dict[str, Any]) -> dict[str, Any] | None:
+        with self.session() as db:
+            row = db.get(ReviewRelayRunRow, run_id)
+            if row is None:
+                return None
+            for key in ("status", "comment_text", "error"):
+                if key in payload:
+                    setattr(row, key, payload[key])
+            row.updated_at = utc_now()
+            db.commit()
+            db.refresh(row)
+            return self._review_relay_run_wire(row)
 
     @contextmanager
     def session(self) -> Iterator[Session]:

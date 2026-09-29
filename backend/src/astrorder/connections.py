@@ -64,7 +64,6 @@ def hermes_command_rejection(response: object, *, remote: bool = False) -> str:
 @dataclass(frozen=True)
 class HermesRuntime:
     executable: Path
-    python: Path
     version: str
 
 
@@ -173,6 +172,24 @@ def _windows_hide_startupinfo() -> subprocess.STARTUPINFO | None:
     return startupinfo
 
 
+def run_subprocess_hidden(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[Any]:
+    if os.name == "nt":
+        kwargs.setdefault("creationflags", _windows_hide_flags())
+        kwargs.setdefault("startupinfo", _windows_hide_startupinfo())
+    if "stdin" not in kwargs and "input" not in kwargs:
+        kwargs["stdin"] = subprocess.DEVNULL
+    return subprocess.run(argv, **kwargs)
+
+
+def popen_subprocess_hidden(argv: list[str], **kwargs: Any) -> subprocess.Popen[Any]:
+    if os.name == "nt":
+        kwargs.setdefault("creationflags", _windows_hide_flags())
+        kwargs.setdefault("startupinfo", _windows_hide_startupinfo())
+    if "stdin" not in kwargs:
+        kwargs["stdin"] = subprocess.DEVNULL
+    return subprocess.Popen(argv, **kwargs)
+
+
 def _safe_text(value: object, *, maximum: int) -> str | None:
     if value is None:
         return None
@@ -264,29 +281,15 @@ def build_ssh_validation_argv(
     return argv
 
 
-def _candidate_runtime_python(executable: Path) -> Path | None:
-    suffix = ".exe" if os.name == "nt" else ""
-    candidates = (
-        executable.parent / f"python{suffix}",
-        executable.parent.parent / "Scripts" / f"python{suffix}",
-        executable.parent.parent / "bin" / "python",
-        executable.parent.parent / "hermes-agent" / "venv" / "Scripts" / "python.exe",
-    )
-    return next((candidate for candidate in candidates if candidate.is_file()), None)
-
-
 def discover_hermes_runtime(settings: Settings) -> HermesRuntime | None:
     candidates: list[Path] = []
     if settings.hermes_executable:
         candidates.append(Path(settings.hermes_executable))
-    if resolved := shutil.which("hermes"):
-        candidates.append(Path(resolved))
     local_app_data = os.environ.get("LOCALAPPDATA")
     if local_app_data:
-        candidates.append(
-            Path(local_app_data) / "hermes" / "hermes-agent" / "venv" / "Scripts" / "hermes.exe"
-        )
-
+        candidates.append(Path(local_app_data) / "hermes" / "bin" / "hermes.exe")
+    if resolved := shutil.which("hermes"):
+        candidates.append(Path(resolved))
     seen: set[Path] = set()
     for candidate in candidates:
         try:
@@ -296,9 +299,6 @@ def discover_hermes_runtime(settings: Settings) -> HermesRuntime | None:
         if resolved in seen or not resolved.is_file():
             continue
         seen.add(resolved)
-        runtime_python = _candidate_runtime_python(resolved)
-        if runtime_python is None:
-            continue
         # If --version times out (e.g. git network check), skip probing and accept the runtime directly
         version = "Hermes Agent"
         try:
@@ -320,7 +320,7 @@ def discover_hermes_runtime(settings: Settings) -> HermesRuntime | None:
                     version = f"Hermes Agent v{match.group(1)}"
         except (OSError, subprocess.TimeoutExpired):
             pass
-        return HermesRuntime(executable=resolved, python=runtime_python, version=version)
+        return HermesRuntime(executable=resolved, version=version)
     return None
 
 
@@ -334,8 +334,8 @@ class LocalHermesController:
         project_root: Path | None = None,
         profile_plugins_dir: Path | None = None,
         runtime_finder: Callable[[], HermesRuntime | None] | None = None,
-        command_runner: Callable[..., subprocess.CompletedProcess] = subprocess.run,
-        popen_factory: Callable[..., subprocess.Popen] = subprocess.Popen,
+        command_runner: Callable[..., subprocess.CompletedProcess] = run_subprocess_hidden,
+        popen_factory: Callable[..., subprocess.Popen] = popen_subprocess_hidden,
     ) -> None:
         self.settings = settings
         self.project_root = (project_root or Path(__file__).resolve().parents[3]).resolve()
@@ -359,6 +359,7 @@ class LocalHermesController:
         self._has_attempted_connection = False
         self._detail = "尚未加载本机 Hermes 运行时。"
         self._gateway_ready = threading.Event()
+        self._gateway_stderr = ""
         self._responses: dict[str, queue.Queue[dict[str, Any]]] = {}
         self._response_lock = threading.Lock()
         self._discovery_callback: Callable[[Any], None] | None = None
@@ -552,8 +553,9 @@ class LocalHermesController:
             stream = getattr(process, "stderr", None)
             if stream is None:
                 return
-            for _line in stream:
-                pass
+            for line in stream:
+                if line.strip():
+                    self._gateway_stderr = line.strip()[-300:]
 
         threading.Thread(target=read_stdout, name="astrorder-hermes-rpc", daemon=True).start()
         threading.Thread(target=drain_stderr, name="astrorder-hermes-stderr", daemon=True).start()
@@ -647,7 +649,21 @@ class LocalHermesController:
         self._command_completion_callback = callback
 
     def discover_native_sessions(self) -> Any:
-        from .native.sessions import discover_native_sessions
+        from .native.sessions import discover_native_sessions, discover_native_sessions_from_db
+        from astrorder.core.session_usage import _find_local_hermes_state_dbs
+
+        dbs = _find_local_hermes_state_dbs(self._profile_name)
+        target_db = next((p for p in dbs if p.is_file()), None)
+        if target_db is not None:
+            discovery, _ = discover_native_sessions_from_db(
+                db_path=target_db,
+                source_id=self._source_id,
+                agent_id=self._agent_id or f"local-hermes-{self._profile_name or 'default'}",
+                connection_id=None,
+                profile_name=self._profile_name or "default",
+                default_workspace=str(self.project_root),
+            )
+            return discovery
 
         discovery = discover_native_sessions(
             self._rpc,
@@ -673,16 +689,24 @@ class LocalHermesController:
 
     def load_native_history_page(self, session_id: str, before: str | None, limit: int) -> dict[str, Any]:
         from .native.history_page import read_native_page
-        if self._profile_plugins_dir is None:
+        db_path = None
+        if self._profile_plugins_dir is not None:
+            db_path = self._profile_plugins_dir.parent / "state.db"
+        if db_path is None or not db_path.is_file():
+            from astrorder.core.session_usage import _find_local_hermes_state_dbs
+            dbs = _find_local_hermes_state_dbs(self._profile_name)
+            db_path = next((p for p in dbs if p.is_file()), None)
+        if db_path is None or not db_path.is_file():
             raise ConnectionError("原生会话数据库位置尚未确认。", 503)
-        return read_native_page(self._profile_plugins_dir.parent / 'state.db', session_id, self._source_id, before, limit)
+        return read_native_page(db_path, session_id, self._source_id, before, limit)
 
     def _initialize_owned_session(self) -> None:
         if not self._gateway_ready.wait(timeout=20):
             with self._lock:
-                if self._process is not None and self._process.poll() is None:
-                    self._state = "error"
-                    self._detail = "本机 Hermes 未在限定时间内就绪。"
+                exit_code = self._process.poll() if self._process is not None else None
+                self._state = "error"
+                self._detail = "本机 Hermes 未在限定时间内就绪。"
+                logger.warning("Hermes TUI gateway not ready: exit_code=%s stderr=%s", exit_code, self._gateway_stderr)
             return
         with self._lock:
             self._state = "connected"
@@ -814,7 +838,7 @@ class LocalHermesController:
             self._enable_project_plugin(runtime, environment)
             try:
                 process = self._popen_factory(
-                    [str(runtime.python), "-u", "-m", "tui_gateway.entry"],
+                    [str(runtime.executable), "--run-module", "tui_gateway.entry"],
                     cwd=str(self.project_root),
                     env=environment,
                     stdin=subprocess.PIPE,
@@ -839,6 +863,7 @@ class LocalHermesController:
             self._state = "connecting"
             self._detail = "正在通过 Hermes 原生 TUI gateway 加载 Astrorder 插件。"
             self._gateway_ready.clear()
+            self._gateway_stderr = ""
             self._start_readers(process)
             threading.Thread(
                 target=self._initialize_owned_session,
@@ -1263,6 +1288,9 @@ class ConnectionController:
         self.local.service = service
         self.local.set_discovery_callback(lambda discovery: self._record_native_discovery(service, discovery))
         self.local.connect()
+        refresh = getattr(self.local, "refresh_sessions", None)
+        if callable(refresh):
+            refresh()
         self._register_local_command_handler(service)
         agent_id = self.local.snapshot().get("agent_id")
         if isinstance(agent_id, str) and getattr(self.local, "supports_native_history", True):

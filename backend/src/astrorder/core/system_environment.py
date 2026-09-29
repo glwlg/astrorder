@@ -8,6 +8,12 @@ from collections.abc import Mapping
 _WINDOWS_MACHINE_ENVIRONMENT = r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment"
 _WINDOWS_USER_ENVIRONMENT = r"Environment"
 _PERCENT_VARIABLE = re.compile(r"%([^%]+)%")
+REMOTE_CODEX_ENV_KEYS = (
+    "OPENCODEX_API_AUTH_TOKEN",
+    "STARSHIP_SESSION_KEY",
+    "GROK45_API_KEY",
+    "EMBED__API_KEY",
+)
 
 
 def _valid_entry(name: object, value: object) -> bool:
@@ -93,3 +99,16 @@ def load_system_environment() -> dict[str, str]:
         user_environment=_windows_registry_environment(winreg.HKEY_CURRENT_USER, _WINDOWS_USER_ENVIRONMENT),
     )
     return _expand_windows_variables(environment)
+
+
+def remote_codex_environment(environment: Mapping[str, str]) -> dict[str, str]:
+    """Forward only explicit gateway credentials, never host paths or caches."""
+    allowed = {name.casefold(): name for name in REMOTE_CODEX_ENV_KEYS}
+    return {
+        allowed[name.casefold()]: value
+        for name, value in environment.items()
+        if isinstance(name, str)
+        and name.casefold() in allowed
+        and isinstance(value, str)
+        and value
+    }

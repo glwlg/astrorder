@@ -9,6 +9,10 @@ const TEXT_PREFIX = 'astrorder:draft:'
 const EMPTY_DRAFT: DraftState = { text: '', attachments: [], sessionRefs: [] }
 const writes = new Map<string, Promise<void>>()
 
+function hasIndexedDb(): boolean {
+  return typeof indexedDB !== 'undefined'
+}
+
 function open(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DATABASE, 1)
@@ -45,7 +49,7 @@ function queueWrite(key: string, write: () => Promise<unknown>): Promise<void> {
 export const draftStorage = {
   async load(key: string) {
     await writes.get(key)?.catch(() => undefined)
-    const stored = await transact<DraftState | undefined>('readonly', store => store.get(key))
+    const stored = hasIndexedDb() ? await transact<DraftState | undefined>('readonly', store => store.get(key)) : undefined
     let text: string | null = null
     try { text = localStorage.getItem(TEXT_PREFIX + key) } catch { /* IndexedDB remains authoritative. */ }
     if (!text) return stored
@@ -58,11 +62,11 @@ export const draftStorage = {
   },
   save(key: string, draft: DraftState) {
     try { localStorage.setItem(TEXT_PREFIX + key, JSON.stringify({ text: draft.text, sessionRefs: draft.sessionRefs || [] })) } catch { /* IndexedDB still stores the complete draft. */ }
-    return queueWrite(key, () => transact<IDBValidKey>('readwrite', store => store.put(draft, key)))
+    return hasIndexedDb() ? queueWrite(key, () => transact<IDBValidKey>('readwrite', store => store.put(draft, key))) : Promise.resolve()
   },
   remove(key: string) {
     try { localStorage.removeItem(TEXT_PREFIX + key) } catch { /* IndexedDB removal still proceeds. */ }
-    return queueWrite(key, () => transact<undefined>('readwrite', store => store.delete(key)))
+    return hasIndexedDb() ? queueWrite(key, () => transact<undefined>('readwrite', store => store.delete(key))) : Promise.resolve()
   },
 }
 

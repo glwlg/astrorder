@@ -6,6 +6,7 @@ import { AgentBrandIcon } from '../../components/AgentBrandIcon'
 import { describeTool, PackSummary, ToolLineIcon } from '../chat/toolPresentation'
 import { ShinyText } from '../../components/animations/ShinyText'
 import { MarkdownContent } from '../../components/MarkdownContent'
+import { MessageBody } from '../../components/MessageBody'
 import { LazyDetails } from '../../components/LazyDetails'
 import { ClickSpark } from '../../components/animations/ClickSpark'
 import { SessionModelControl } from '../chat/SessionModelControl'
@@ -371,9 +372,17 @@ export function MonitorCard({
                     )
                   }
                   return (
-                    <div key={message.id} className={'monitor-message-row message-' + message.role}>
+                    <div key={`${message.agent_id || ''}:${message.session_id || ''}:${message.id}`} className={'monitor-message-row message-' + message.role}>
                       <div className="monitor-message-bubble">
-                        <MarkdownContent value={message.text || ''} onImageClick={handlePreviewImage} />
+                        <MessageBody
+                          value={message.text || ''}
+                          user={message.role === 'user'}
+                          onImageClick={handlePreviewImage}
+                          attachmentNames={message.attachments.filter(att => att.media_type.startsWith('image/')).map(att => att.name)}
+                          renderMarkdown={value => <MarkdownContent value={value} onImageClick={handlePreviewImage} session={session} />}
+                          sessionId={session.id}
+                          connectionId={session.connection_id || undefined}
+                        />
                         {message.attachments && message.attachments.length > 0 && (
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
                             {message.attachments.map((att) => {

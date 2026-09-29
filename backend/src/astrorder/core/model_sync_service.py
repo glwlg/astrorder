@@ -12,6 +12,8 @@ from typing import Any
 import httpx
 from sqlalchemy.dialects.sqlite import insert
 
+from astrorder.models import WorkspacePreferenceRow
+
 from .gateway_config import get_gateway_config
 from .model_sync import (
     normalize_catalog,
@@ -20,7 +22,6 @@ from .model_sync import (
     render_grok_config,
     sha256_text,
 )
-from astrorder.models import WorkspacePreferenceRow
 
 STATUS_KEY = "model_sync:jobs"
 
@@ -94,9 +95,18 @@ def validate_selections(store: Any, value: Any) -> list[dict[str, Any]]:
 async def fetch_catalog(config: dict[str, Any]) -> dict[str, Any]:
     headers = {"Authorization": f"Bearer {config['api_key']}"} if config["api_key"] else {}
     async with httpx.AsyncClient(follow_redirects=True, timeout=20) as client:
-        response = await client.get(f"{config['management_url']}/api/models", headers=headers)
-        response.raise_for_status()
-    return normalize_catalog(response.json())
+        models_response = await client.get(f"{config['management_url']}/api/models", headers=headers)
+        models_response.raise_for_status()
+        providers_response = await client.get(f"{config['management_url']}/api/providers", headers=headers)
+        providers_response.raise_for_status()
+    providers = providers_response.json()
+    if not isinstance(providers, list):
+        raise TypeError("OpenCodeX 提供方目录格式无效")
+    disabled = {row.get("name") for row in providers if isinstance(row, dict) and row.get("disabled") is True}
+    models = models_response.json()
+    if not isinstance(models, list):
+        raise TypeError("OpenCodeX 模型目录格式无效")
+    return normalize_catalog([row for row in models if not isinstance(row, dict) or row.get("provider") not in disabled])
 
 
 def _diff(before: str, after: str, name: str) -> str:

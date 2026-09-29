@@ -788,6 +788,10 @@ class CodexDaemonRuntime:
             return self.config.workspace
         if not isinstance(raw_workspace, str) or not raw_workspace or "\x00" in raw_workspace:
             raise DaemonProtocolError("Codex workspace is invalid")
+        if raw_workspace.startswith("\\\\?\\"):
+            raw_workspace = raw_workspace[4:]
+            if not re.match(r"^[A-Za-z]:[\\/]", raw_workspace):
+                raise DaemonProtocolError("Codex workspace is invalid")
         candidate = Path(raw_workspace).expanduser().resolve()
         if not candidate.is_dir() or not any(
             _inside(candidate, root) for root in self.config.allowed_workspaces

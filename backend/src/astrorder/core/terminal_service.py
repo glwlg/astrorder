@@ -7,6 +7,8 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+from ..connections import _windows_hide_flags, _windows_hide_startupinfo
+
 logger = logging.getLogger("astrorder.terminal")
 
 
@@ -98,7 +100,8 @@ class TerminalSession:
                 stderr=subprocess.STDOUT,
                 bufsize=0,
                 env=environment,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                creationflags=_windows_hide_flags(),
+                startupinfo=_windows_hide_startupinfo(),
             )
             # 如果指定了远端工作区，进入后自动 cd 过去
             if self.remote_workspace and self.proc.stdin:

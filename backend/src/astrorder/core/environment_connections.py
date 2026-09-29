@@ -20,6 +20,7 @@ from astrorder.connections import (
 )
 from astrorder.models import AgentConnectionChoice
 from astrorder.native.codex import CodexConnection, rollout_item_timestamps, stored_model
+from astrorder.core.system_environment import REMOTE_CODEX_ENV_KEYS, remote_codex_environment
 from astrorder.ssh_transport import (
     SshNativeRuntime,
     build_bootstrap_stdin,
@@ -166,7 +167,7 @@ print(json.dumps(res))
     def _client(self, config, on_notification, environment=None, **kwargs):
         import os
         child_environment = dict(environment or {})
-        for k in ("OPENCODEX_API_AUTH_TOKEN", "STARSHIP_SESSION_KEY", "GROK45_API_KEY", "EMBED__API_KEY"):
+        for k in REMOTE_CODEX_ENV_KEYS:
             v = os.environ.get(k)
             if v and k not in child_environment:
                 child_environment[k] = v
@@ -202,7 +203,7 @@ print(json.dumps(res))
             **kwargs,
             launch_argv=self.ssh_argv() + [build_remote_python_command(source)],
             environment=child_environment,
-            bootstrap_stdin={'environment': child_environment},
+            bootstrap_stdin={'environment': remote_codex_environment(child_environment)},
         )
 
     def open_ids(self):
@@ -495,7 +496,7 @@ class EnvironmentConnections:
 
     def shutdown(self):
         for connection in self.remote.values():
-            connection.disconnect()
+            connection.disconnect(stop_runtime=False)
         for connection in self.remote_grok.values():
             connection.disconnect()
         if self.grok is not None:

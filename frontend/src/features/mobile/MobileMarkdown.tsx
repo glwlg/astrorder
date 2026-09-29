@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { isMobileLocalFilePath, mobileFileUrl, resolveMobileFilePath } from './mobileFilePath'
 
 function CodeBlock({ children }: { children?: ReactNode }) {
   const element = useRef<HTMLPreElement>(null)
@@ -31,28 +32,35 @@ function CodeBlock({ children }: { children?: ReactNode }) {
   )
 }
 
-const LOCAL_FILE_RE = /^(?:[a-zA-Z]:[/\\]|\/|\.{1,2}\/|(?!\w+:\/\/)[^\s]+\.[a-zA-Z0-9]{1,8}$)/
-
-export function MobileMarkdown({ value, onFileClick, onImageClick }: {
+export function MobileMarkdown({ value, onFileClick, onImageClick, workspace, sessionId, connectionId }: {
   value: string
   onFileClick?: (path: string) => void
   onImageClick?: (url: string) => void
+  workspace?: string | null
+  sessionId?: string
+  connectionId?: string | null
 }) {
-  return <div className="markdown-content"><ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml components={{
+  return <div className="markdown-content"><ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml urlTransform={url => url} components={{
     pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
     a: ({ href, children }) => {
       const url = href || ''
-      const isLocal = LOCAL_FILE_RE.test(url) && !/^https?:\/\//i.test(url)
+      const isLocal = isMobileLocalFilePath(url)
       if (isLocal && onFileClick) {
-        return <a href={url} onClick={(e) => { e.preventDefault(); onFileClick(url) }}>{children}</a>
+        return <a href={mobileFileUrl(url, workspace, sessionId, connectionId)} onClick={(e) => { e.preventDefault(); onFileClick(resolveMobileFilePath(url, workspace)) }}>{children}</a>
       }
-      return <a href={url} target="_blank" rel="noopener noreferrer">{children}</a>
+      return /^(?:https?:\/\/|mailto:|\/api\/v1\/)/i.test(url)
+        ? <a href={url} target="_blank" rel="noopener noreferrer">{children}</a>
+        : <>{children}</>
     },
     img: ({ src, alt }) => {
-      if (onImageClick && src) {
-        return <button type="button" style={{ border: 'none', background: 'none', padding: 0, display: 'block' }} onClick={() => onImageClick(src)}><img src={src} alt={alt || ''} loading="lazy" style={{ maxWidth: '100%', borderRadius: 8, marginTop: 8, marginBottom: 8, display: 'block' }} /></button>
+      const url = src && isMobileLocalFilePath(src)
+        ? mobileFileUrl(src, workspace, sessionId, connectionId)
+        : src
+      if (!url || !/^(?:https?:\/\/|\/api\/v1\/)/i.test(url)) return null
+      if (onImageClick) {
+        return <button type="button" style={{ border: 'none', background: 'none', padding: 0, display: 'block' }} onClick={() => onImageClick(url)}><img src={url} alt={alt || ''} loading="lazy" style={{ maxWidth: '100%', borderRadius: 8, marginTop: 8, marginBottom: 8, display: 'block' }} /></button>
       }
-      return <img src={src} alt={alt || ''} loading="lazy" style={{ maxWidth: '100%', borderRadius: 8, marginTop: 8, marginBottom: 8, display: 'block' }} />
+      return <img src={url} alt={alt || ''} loading="lazy" style={{ maxWidth: '100%', borderRadius: 8, marginTop: 8, marginBottom: 8, display: 'block' }} />
     },
     table: ({ children }) => <div className="m-table-wrap"><table>{children}</table></div>,
   }}>{value}</ReactMarkdown></div>

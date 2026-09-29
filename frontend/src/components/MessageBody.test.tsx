@@ -1,3 +1,4 @@
+import { MantineProvider } from '@mantine/core'
 import { render, screen, cleanup, fireEvent } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { MessageBody } from './MessageBody'
@@ -34,9 +35,52 @@ it('localizes only exact native interruption notices, preserving raw evidence', 
  fireEvent.click(screen.getByText('查看原始记录'))
  expect(screen.getByText('Operation interrupted.')).toBeInTheDocument()
 })
-it('does not reinterpret quoted assistant text or code fences as attachment references', () => {
- const value = '```\n@image:C:\\private\\upload.png\n```'
- render(<MessageBody value={value} user renderMarkdown={text => <pre>{text}</pre>} />)
- expect(screen.queryByText('本地图片 · 尚无可用预览')).toBeNull()
- expect(screen.getByText(/@image:/)).toBeInTheDocument()
+it('extracts and previews MEDIA: lines from assistant message text', () => {
+ const text = '生成完成！\nMEDIA:P:\\AI\\Image\\outputs\\demo.png\n请查收。'
+ const onImage = vi.fn()
+ render(
+   <MessageBody
+     value={text}
+     user={false}
+     onImageClick={onImage}
+     renderMarkdown={(v) => <p>{v}</p>}
+   />,
+ )
+ const btn = screen.getByRole('button', { name: /demo\.png/ })
+ expect(btn).toBeInTheDocument()
+ expect(screen.queryByText(/MEDIA:/)).toBeNull()
+})
+it('renders sent user code comments as a review card while preserving surrounding text', () => {
+ const first = String.raw`::code-comment{title="[P1] 离线依赖不兼容" body="修复基础镜像。" file="/repo/Dockerfile" start=25 priority=1}`
+ const second = String.raw`::code-comment{title="[P2] 地址被覆盖" body="保留配置地址。" file="/repo/service.py" start=70 priority=2}`
+ const renderMarkdown = vi.fn((value: string) => <p>{value}</p>)
+ render(<MantineProvider><MessageBody value={`请处理以下问题：\n\n${first}\n\n${second}`} user renderMarkdown={renderMarkdown} /></MantineProvider>)
+ expect(screen.getByText('2 comments')).toBeInTheDocument()
+ expect(screen.getByText('离线依赖不兼容')).toBeInTheDocument()
+ expect(screen.getByText('地址被覆盖')).toBeInTheDocument()
+ expect(renderMarkdown).toHaveBeenCalledWith('请处理以下问题：')
+ expect(screen.queryByText(/::code-comment/)).not.toBeInTheDocument()
+})
+
+it('renders a standalone code comment without repeating its raw directive', () => {
+ const raw = String.raw`::code-comment{title="[P1] 缺少依据" body="模型返回 {\"status\":\"FIXED\"} 时不能直接关闭。" file="/repo/review.py" start=105 priority=1}`
+ render(<MantineProvider><MessageBody value={raw} renderMarkdown={value => <p>{value}</p>} /></MantineProvider>)
+ expect(screen.getByText('缺少依据')).toBeInTheDocument()
+ expect(screen.queryByText(/::code-comment/)).not.toBeInTheDocument()
+})
+it('passes sessionId and connectionId to file raw url for @image references', () => {
+ const text = '请查看\n@image:/home/luwei/.hermes/images/upload.png'
+ render(
+   <MessageBody
+     value={text}
+     user
+     sessionId="session-123"
+     connectionId="ssh-456"
+     renderMarkdown={(val) => <p>{val}</p>}
+   />,
+ )
+ const img = screen.getByAltText('upload.png') as HTMLImageElement
+ expect(img.src).toContain('session_id=session-123')
+ expect(img.src).toContain('connection_id=ssh-456')
+ expect(img.src).toContain('path=%2Fhome%2Fluwei%2F.hermes%2Fimages%2Fupload.png')
 })

@@ -29,6 +29,14 @@ interface GitFileEntry {
   path: string
 }
 
+function gitStatusMark(status: string | undefined) {
+  if (status === 'untracked' || status === '??') return { mark: '?', label: '未跟踪', color: 'var(--astr-green, #10b981)' }
+  if (status === 'staged') return { mark: 'S', label: '已暂存', color: 'var(--astr-green, #10b981)' }
+  if (status === 'deleted' || status?.includes('D')) return { mark: 'D', label: '已删除', color: 'var(--astr-red, #ef4444)' }
+  if (status === 'added' || status?.includes('A')) return { mark: 'A', label: '已新增', color: 'var(--astr-green, #10b981)' }
+  return { mark: 'M', label: '已修改', color: 'var(--astr-blue, #3b82f6)' }
+}
+
 interface GitTreeNode {
   name: string
   path: string
@@ -147,13 +155,7 @@ function GitTreeNodeItem({
     )
   }
 
-  const isAdded = node.status?.includes('A') || node.status?.includes('?')
-  const isDeleted = node.status?.includes('D')
-  const statusColor = isAdded
-    ? 'var(--astr-green, #10b981)'
-    : isDeleted
-    ? 'var(--astr-red, #ef4444)'
-    : 'var(--astr-blue, #3b82f6)'
+  const badge = gitStatusMark(node.status)
 
   return (
     <UnstyledButton
@@ -177,16 +179,19 @@ function GitTreeNodeItem({
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: 1 }}>
         <span
+          className="git-diff-status"
+          title={badge.label}
+          aria-label={badge.label}
           style={{
             fontSize: '11px',
             fontWeight: 700,
             fontFamily: 'monospace',
-            color: statusColor,
-            width: '16px',
+            color: badge.color,
+            flex: '0 0 16px',
             textAlign: 'center',
           }}
         >
-          {node.status}
+          {badge.mark}
         </span>
         <IconFileCode size={14} color="var(--astr-muted)" style={{ flexShrink: 0 }} />
         <Text size="xs" fw={500} truncate style={{ color: 'var(--astr-text)' }}>
@@ -295,6 +300,7 @@ export function GitDiffTreeViewer({ artifact }: ViewerContext) {
   }
 
   const treeNodes = useMemo(() => buildGitTree(files), [files])
+  const untrackedCount = files.filter((file) => file.status === 'untracked' || file.status === '??').length
 
   return (
     <div className="git-diff-tree-viewer" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -303,14 +309,15 @@ export function GitDiffTreeViewer({ artifact }: ViewerContext) {
           <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
             <IconFileDiff size={16} color="var(--astr-blue, #3b82f6)" />
             <Text size="xs" fw={600} truncate>
-              {baseBranch ? `对照 ${baseBranch} (${files.length})` : `未暂存 (${files.length})`}
+              {baseBranch ? `对照 ${baseBranch} (${files.length})` : `工作区变更 (${files.length})`}
             </Text>
-            <Badge size="xs" color="teal" variant="light">
-              +{insertions}
-            </Badge>
-            <Badge size="xs" color="red" variant="light">
-              -{deletions}
-            </Badge>
+            {(insertions > 0 || deletions > 0) && (
+              <>
+                <Badge size="xs" color="teal" variant="light">+{insertions}</Badge>
+                <Badge size="xs" color="red" variant="light">-{deletions}</Badge>
+              </>
+            )}
+            {untrackedCount > 0 && <Badge size="xs" color="gray" variant="light">未跟踪 {untrackedCount}</Badge>}
           </Group>
           <Group gap={6} wrap="nowrap">
             {/* 切换树形/列表视图模式 */}
@@ -389,15 +396,7 @@ export function GitDiffTreeViewer({ artifact }: ViewerContext) {
           /* 列表平铺视图 */
           <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
             {files.map((file) => {
-              const isAdded = file.status.includes('A') || file.status.includes('?')
-              const isDeleted = file.status.includes('D')
-
-              const statusColor = isAdded
-                ? 'var(--astr-green, #10b981)'
-                : isDeleted
-                ? 'var(--astr-red, #ef4444)'
-                : 'var(--astr-blue, #3b82f6)'
-
+              const badge = gitStatusMark(file.status)
               const fileName = file.path.split('/').pop() || file.path
               const dirPath = file.path.includes('/') ? file.path.substring(0, file.path.lastIndexOf('/')) : ''
 
@@ -424,16 +423,19 @@ export function GitDiffTreeViewer({ artifact }: ViewerContext) {
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flex: 1 }}>
                     <span
+                      className="git-diff-status"
+                      title={badge.label}
+                      aria-label={badge.label}
                       style={{
                         fontSize: '11px',
                         fontWeight: 700,
                         fontFamily: 'monospace',
-                        color: statusColor,
-                        width: '18px',
+                        color: badge.color,
+                        flex: '0 0 18px',
                         textAlign: 'center',
                       }}
                     >
-                      {file.status}
+                      {badge.mark}
                     </span>
                     <IconFileCode size={15} color="var(--astr-muted)" style={{ flexShrink: 0 }} />
                     <div style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

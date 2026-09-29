@@ -37,6 +37,25 @@
   color: var(--astr-text);
 }
 
+.code-comments-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--astr-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.code-comments-copy:hover,
+.code-comments-copy:focus-visible {
+  background: var(--astr-surface);
+  color: var(--astr-text);
+}
+
 .code-comments-list {
   display: flex;
   flex-direction: column;

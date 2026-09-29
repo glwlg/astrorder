@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 from .core.attachments import AttachmentError
 from .agents.gateway import AgentApiError, AgentContext, CAPABILITIES, invoke
 from .core.auth import COOKIE_NAME, browser_authenticated, require_agent, require_browser, validate_origin
-from .connections import ConnectionError, _windows_hide_startupinfo
+from .connections import ConnectionError, _windows_hide_startupinfo, run_subprocess_hidden
 from .daemon.bridge import DaemonBridgeError
 from .core.handoff import HANDOFF_CONTEXT_MESSAGE_ID, SUMMARY_PROMPT, build_handoff_prompt
 from .schemas import AuthRequest, CommandSubmission, RuntimeLaunch, SshConnectionSettings
@@ -33,6 +33,10 @@ from .routers.attachments import router as attachments_router
 from .routers.commands import router as commands_router
 from .routers.files import router as files_router
 from .routers.git import router as git_router
+from .routers.memory import router as memory_router
+from .routers.skills_manager import router as skills_router
+from .routers.capabilities_manager import router as capabilities_router
+from .routers.review_relay import router as review_relay_router
 
 router = APIRouter()
 router.include_router(preferences_router)
@@ -45,6 +49,10 @@ router.include_router(attachments_router)
 router.include_router(commands_router)
 router.include_router(files_router)
 router.include_router(git_router)
+router.include_router(memory_router)
+router.include_router(skills_router)
+router.include_router(capabilities_router)
+router.include_router(review_relay_router)
 logger = logging.getLogger(__name__)
 
 
@@ -285,6 +293,15 @@ async def user_activity(request: Request):
 @router.get("/api/v1/sessions")
 def sessions(request: Request, agent_id: str | None = None) -> dict[str, object]:
     _private(request)
+    local_hermes = getattr(request.app.state, "daemon_hermes_controller", None)
+    if local_hermes is None:
+        connections = getattr(request.app.state, "connections", None)
+        if connections is not None:
+            local_hermes = getattr(connections, "local", None)
+    if local_hermes is not None and (agent_id is None or "hermes" in agent_id):
+        refresh = getattr(local_hermes, "refresh_sessions", None)
+        if callable(refresh):
+            refresh()
     return {"items": request.app.state.store.list_sessions(agent_id)}
 
 
@@ -534,7 +551,7 @@ def _create_local_git_worktree(
     if not ws_path.is_dir():
         raise HTTPException(status_code=400, detail="工作区目录不存在，无法创建工作树分支。")
     try:
-        proc = subprocess.run(
+        proc = run_subprocess_hidden(
             ["git", "-C", str(ws_path), "rev-parse", "--show-toplevel"],
             capture_output=True,
             text=True,
@@ -558,7 +575,7 @@ def _create_local_git_worktree(
 
     target_path.parent.mkdir(parents=True, exist_ok=True)
 
-    add_proc = subprocess.run(
+    add_proc = run_subprocess_hidden(
         ["git", "-C", str(repo_root), "worktree", "add", "-b", branch, str(target_path)],
         capture_output=True,
         text=True,
@@ -568,7 +585,7 @@ def _create_local_git_worktree(
     if add_proc.returncode != 0:
         err = add_proc.stderr.strip() or add_proc.stdout.strip()
         if "already exists" in err.lower():
-            retry_proc = subprocess.run(
+            retry_proc = run_subprocess_hidden(
                 ["git", "-C", str(repo_root), "worktree", "add", str(target_path), branch],
                 capture_output=True,
                 text=True,
@@ -636,7 +653,7 @@ except Exception as e:
 """
     cmd = build_remote_python_command(remote_script)
     full_argv = argv + [cmd]
-    res = subprocess.run(full_argv, capture_output=True, text=True, timeout=15)
+    res = run_subprocess_hidden(full_argv, capture_output=True, text=True, timeout=15)
     out = res.stdout.strip()
     if res.returncode != 0 or not out.startswith("SUCCESS:"):
         err = out.replace("ERROR:", "").strip() or res.stderr.strip()
@@ -1765,14 +1782,13 @@ tmp_file.replace(target)
         cmd = build_remote_python_command(remote_script)
         try:
             content_bytes = str(content).encode("utf-8")
-            res = subprocess.run(
+            res = run_subprocess_hidden(
                 argv + [cmd],
                 input=content_bytes,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 timeout=15,
                 check=False,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
             if res.returncode != 0:
                 raise HTTPException(status_code=500, detail="远程写入文件失败")
@@ -1862,7 +1878,10 @@ async def connect_codex(request: Request):
 @router.post('/api/v1/connections/codex/disconnect')
 async def disconnect_codex(request: Request):
     _private(request)
-    return await asyncio.to_thread(request.app.state.codex.disconnect)
+    try:
+        return await asyncio.to_thread(request.app.state.codex.disconnect)
+    except ConnectionError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
 
 
 @router.get("/api/v1/connections/{connection_id}/history")

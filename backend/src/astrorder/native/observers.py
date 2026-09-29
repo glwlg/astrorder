@@ -16,26 +16,26 @@ LABELS={'SessionStart':'原生会话已打开','SessionEnd':'原生会话已关�
 
 
 def reconcile_native_status(current: str | None, desired: str | None) -> str | None:
-    """Promote to running from Hermes active_list, but never demote on a single
-    poll. Hermes session.active_list drops a session during stream token gaps
-    and tool-call handoffs, so clearing on an empty poll makes the rail flicker
-    running/idle at ~1Hz. Demotion is handled by the frontend's 15s live-window
-    and 120s stale-window, which decay naturally; here we only ever move toward
-    running, never away from it on a transient empty poll.
-    """
+    """Use active_list for positive activity; connector turn-end events clear it."""
     status = current or "idle"
     if status == "error":
         return None
     if desired:
         return None if desired == status else desired
-    # desired empty/None: leave status untouched (see docstring).
+    # Missing from active_list is inconclusive during thinking and tool handoffs.
     return None
 
 
-# Hysteresis for clearing a backend-promoted running state. A session promoted
-# to running stays running until it has been absent from active_list for this
-# long, so 1s-poll gaps during streaming can't bounce it.
-RUNNING_CLEAR_GRACE_S = 90.0
+async def report_hermes_status(bridge, session_id, agent_type, params, status):
+    await bridge.request_control(
+        "session.spawn",
+        {"session_id": session_id, "agent_type": agent_type, "params": params},
+    )
+    await bridge.request_control(
+        "session.observe_status", {"session_id": session_id, "status": status}
+    )
+
+
 REMOTE_POLL_INTERVAL_S = 60.0
 
 def validate_observation(row):
@@ -300,12 +300,6 @@ class NativeObservers:
         store = getattr(self.app.state, "store", None)
         if not service or not store:
             return
-        # Track when each session was last seen running so a transient empty
-        # active_list poll can't clear it. Keyed by (agent_id, session_id).
-        promoted_at = getattr(self, "_hermes_running_since", None)
-        if promoted_at is None:
-            promoted_at = self._hermes_running_since = {}
-        now = time.time()
         for runtime in self._hermes_runtimes():
             rpc = getattr(runtime, "_rpc", None) or getattr(runtime, "rpc", None)
             agent_id = getattr(runtime, "_agent_id", None) or getattr(runtime, "agent_id", None)
@@ -335,21 +329,20 @@ class NativeObservers:
                     continue
                 source_sid = session.get("source_session_id") or sid
                 desired = active.get(sid) or active.get(source_sid)
-                key = (agent_id, sid)
-                if desired == "running":
-                    promoted_at[key] = now
-                elif session.get("status") == "running":
-                    # Only clear a backend-promoted running after it has been
-                    # continuously absent from active_list past the grace window.
-                    last_seen = promoted_at.get(key)
-                    if last_seen is not None and (now - last_seen) < RUNNING_CLEAR_GRACE_S:
-                        continue
-                    # Past grace (or never promoted by us): clear it.
-                    promoted_at.pop(key, None)
-                    desired = "idle"
                 next_status = reconcile_native_status(session.get("status"), desired)
                 if not next_status:
                     continue
+                if session.get("control_state") == "owned":
+                    bridge = getattr(self.app.state, "daemon_bridge", None)
+                    if bridge is not None:
+                        try:
+                            remote = bool(session.get("connection_id"))
+                            params = runtime._connection_params() if remote else {}
+                            asyncio.run(report_hermes_status(
+                                bridge, sid, "ssh" if remote else "hermes", params, next_status
+                            ))
+                        except Exception:
+                            continue
                 updated = {**session, "status": next_status}
                 canonical = store.upsert_session(updated)
                 service._server_event("session.upsert", agent_id=agent_id, session_id=sid, data=canonical)

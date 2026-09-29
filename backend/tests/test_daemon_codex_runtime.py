@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import time
 from typing import ClassVar
 
@@ -15,6 +16,7 @@ from astrorder.daemon.runtimes.codex.runtime import (
     CodexDaemonRuntimeConfig,
     forward_codex_desktop_stops,
 )
+from astrorder.daemon.runtimes.codex.remote import RemoteCodexDaemonRuntime
 from astrorder.daemon.session_daemon import (
     DaemonProtocolError,
     SessionDaemon,
@@ -90,6 +92,30 @@ async def wait_for_status(daemon: SessionDaemon, session_id: str, status: str) -
         if asyncio.get_running_loop().time() >= deadline:
             raise AssertionError(f"{session_id} did not reach {status}")
         await asyncio.sleep(0.01)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows extended paths")
+def test_codex_workspace_accepts_extended_path_only_inside_allowlist(tmp_path):
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    runtime = CodexDaemonRuntime(
+        CodexDaemonRuntimeConfig(
+            executable="fixture-codex",
+            workspace=allowed,
+            allowed_workspaces=(allowed,),
+            agent_id="daemon-codex",
+            agent_name="Daemon Codex",
+        ),
+        emit=lambda *_args, **_kwargs: None,
+    )
+
+    assert runtime._workspace("\\\\?\\" + str(allowed)) == allowed.resolve()
+    with pytest.raises(DaemonProtocolError, match="outside daemon allowlist"):
+        runtime._workspace("\\\\?\\" + str(outside))
+    with pytest.raises(DaemonProtocolError, match="workspace is invalid"):
+        runtime._workspace("\\\\?\\GLOBALROOT\\Device\\HarddiskVolume1")
 
 
 @pytest.mark.asyncio
@@ -561,3 +587,21 @@ async def test_ephemeral_codex_fork_omits_incompatible_goal_continuation_flag(tm
         },
     ) in FakeCodexAppServer.instances[0].calls
     await runtime.shutdown()
+
+
+def test_remote_codex_daemon_keeps_windows_environment_local(monkeypatch):
+    captured = {}
+    runtime = RemoteCodexDaemonRuntime.__new__(RemoteCodexDaemonRuntime)
+    runtime.remote_executable = "/usr/bin/codex"
+    runtime._ssh_argv = lambda: ["ssh", "remote"]
+    runtime._native_client_factory = lambda _config, _notify, **kwargs: captured.update(kwargs)
+    monkeypatch.setenv("TEMP", r"C:\Users\luwei\AppData\Local\Temp")
+    monkeypatch.setenv("UV_CACHE_DIR", r"P:\workspace\env\uv\cache")
+    monkeypatch.setenv("HERMES_HOME", r"C:\Users\luwei\AppData\Local\hermes")
+    monkeypatch.setenv("OPENCODEX_API_AUTH_TOKEN", "gateway-secret")
+
+    runtime._client(object(), lambda _frame: None)
+
+    assert captured["environment"]["TEMP"] == r"C:\Users\luwei\AppData\Local\Temp"
+    assert captured["bootstrap_stdin"]["environment"]["OPENCODEX_API_AUTH_TOKEN"] == "gateway-secret"
+    assert not {"TEMP", "UV_CACHE_DIR", "HERMES_HOME"} & captured["bootstrap_stdin"]["environment"].keys()

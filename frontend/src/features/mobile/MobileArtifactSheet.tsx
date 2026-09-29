@@ -30,6 +30,7 @@ export function MobileArtifactSheet({ path, connectionId, onClose }: {
   const ext = extOf(name)
   const isImage = IMAGE_EXTS.has(ext)
   const isText = TEXT_EXTS.has(ext)
+  const isHtml = ext === 'html'
   const isMarkdown = MARKDOWN_EXTS.has(ext)
 
   const params = new URLSearchParams({ path })
@@ -37,7 +38,7 @@ export function MobileArtifactSheet({ path, connectionId, onClose }: {
   const rawUrl = `/api/v1/files/raw?${params.toString()}`
 
   useEffect(() => {
-    if (isImage || !isText) {
+    if (isImage || isHtml || !isText) {
       setLoading(false)
       return
     }
@@ -57,7 +58,7 @@ export function MobileArtifactSheet({ path, connectionId, onClose }: {
       .catch((err) => { if (!cancelled) setError(String(err)) })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [rawUrl, isImage, isText])
+  }, [rawUrl, isImage, isHtml, isText])
 
   return (
     <div className="m-artifact-overlay" onClick={onClose}>
@@ -66,13 +67,16 @@ export function MobileArtifactSheet({ path, connectionId, onClose }: {
           <span className="m-artifact-name" title={path}>{name}</span>
           <button aria-label="关闭" onClick={onClose}><IconX size={20} /></button>
         </header>
-        <div className="m-artifact-body">
+        <div className={`m-artifact-body${isHtml ? ' m-artifact-html' : ''}`}>
           {loading && <div className="m-artifact-loading"><IconLoader2 size={24} className="spin" /> 加载中…</div>}
           {error && <div className="m-artifact-error">{error}</div>}
           {!loading && !error && isImage && (
             <img className="m-artifact-image" src={rawUrl} alt={name} />
           )}
-          {!loading && !error && isText && content !== null && (
+          {!loading && !error && isHtml && (
+            <iframe src={rawUrl} title={name} sandbox="allow-scripts" />
+          )}
+          {!loading && !error && isText && !isHtml && content !== null && (
             isMarkdown
               ? <div className="m-artifact-markdown"><MobileMarkdown value={content} /></div>
               : <pre className="m-artifact-code">{content}</pre>

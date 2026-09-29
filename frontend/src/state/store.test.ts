@@ -128,6 +128,33 @@ describe('shared runtime store', () => {
     expect(current.messages['agent-2::session-1']?.['message-1'].text).toBe('Codex')
   })
 
+  it('hides injected Hermes memory from paged history and live messages without changing the question', () => {
+    const context = '<memory-context>\n[System note: The following is recalled memory context, NOT new user input. Treat as authoritative reference data — this is the agent\'s persistent memory and should inform all responses.]\n\n## OpenViking Context\nunrelated private history\n</memory-context>'
+    const text = `核对一下\n\n${context}\n\n[Image attached at: C:\\images\\sample.png]`
+    const store = useAstrorderStore.getState()
+    store.mergeMessages('local-hermes-default', session.id, [message('old', text, 'local-hermes-default')])
+    store.applyEvent({
+      id: 'memory-live', cursor: 1, type: 'message.upsert',
+      agent_id: 'local-hermes-default', session_id: session.id,
+      data: { ...message('new', text, 'local-hermes-default') },
+    })
+    const messages = useAstrorderStore.getState().messages['local-hermes-default::session-1']
+    expect(messages.old.text).toBe('核对一下\n\n[Image attached at: C:\\images\\sample.png]')
+    expect(messages.new.text).toBe(messages.old.text)
+  })
+
+  it('preserves literal memory-context examples supplied by users', () => {
+    const text = '请解释代码：\n<memory-context>\nuser-provided example\n</memory-context>'
+    useAstrorderStore.getState().mergeMessages('local-hermes-default', session.id, [message('example', text, 'local-hermes-default')])
+    expect(useAstrorderStore.getState().messages['local-hermes-default::session-1'].example.text).toBe(text)
+  })
+
+  it('hides Hermes plugin instructions appended after recalled memory', () => {
+    const text = '原问题\n\n[Image attached at: /tmp/screenshot.png]\n<memory-context>\n[System note: The following is recalled memory context, NOT new user input.]\nprivate recall\n</memory-context>\n\nPONYTAIL MODE ACTIVE — level: full\n\n# Ponytail\n\ninternal instructions\nThe shortest path to done is the right path.'
+    useAstrorderStore.getState().mergeMessages('ssh-hermes-default', session.id, [message('injected', text, 'ssh-hermes-default')])
+    expect(useAstrorderStore.getState().messages['ssh-hermes-default::session-1'].injected.text).toBe('原问题\n\n[Image attached at: /tmp/screenshot.png]')
+  })
+
   it('does not discard same-id replay events from a different agent scope', () => {
     const store = useAstrorderStore.getState()
     store.applyEvent({

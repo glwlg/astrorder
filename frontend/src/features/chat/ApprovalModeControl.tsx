@@ -85,7 +85,7 @@ export function ApprovalModeControl({
     queryFn: async () => {
       try {
         const res = await api.getSessionApprovalMode(session.id, session.agent_id)
-        return res.mode
+        return res.mode || localMode || 'auto'
       } catch {
         return localMode
       }

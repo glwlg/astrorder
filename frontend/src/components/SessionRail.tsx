@@ -32,7 +32,7 @@ import {
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react'
-import { AnimatePresence, LayoutGroup, motion } from 'motion/react'
+import { LayoutGroup, motion } from 'motion/react'
 import { VariableProximity } from './animations/VariableProximity'
 import { useSessionOrder } from '../hooks/useSessionOrder'
 import { AgentSessionFilter, matchesAgent } from './AgentSessionFilter'
@@ -136,6 +136,15 @@ export function SessionRail({
   const { preferences, updatePreferences, removeProjectPreferences } = useWorkspacePreferences()
   const { pinned_projects: pinnedProjects, appearance: projectAppearance, session_pins: pinnedSessions, project_order: projectOrder } = preferences
   const [appearanceTarget, setAppearanceTarget] = useState<ProjectGroup | null>(null)
+  const [railMenu, setRailMenu] = useState<{ kind: 'project' | 'session'; key: string } | null>(null)
+  const openRailMenu = (event: React.MouseEvent, kind: 'project' | 'session', key: string) => {
+    event.preventDefault()
+    event.stopPropagation()
+    setRailMenu({ kind, key })
+  }
+  const updateRailMenu = (opened: boolean, kind: 'project' | 'session', key: string) => {
+    setRailMenu((current) => opened ? { kind, key } : current?.kind === kind && current.key === key ? null : current)
+  }
 
   // 项目下会话默认只显示4个，展开更多状态（记录展开显示的数量）
   const [expandedCountMap, setExpandedCountMap] = useState<Record<string, number>>({})
@@ -754,7 +763,7 @@ export function SessionRail({
         <>
         {groups.some(project => project.sessions.some(s => pinnedSessions[scopeKey(s.agent_id, s.id)])) && <section className="session-pinned-section" aria-label="置顶会话">
           <div className="session-pinned-heading"><IconPinned size={15} />置顶会话</div>
-          <AnimatePresence initial={false}>
+          <>
           {groups.flatMap(project => project.sessions).filter(s => pinnedSessions[scopeKey(s.agent_id, s.id)]).map(session => {
             const key = scopeKey(session.agent_id, session.id)
             const activityStatus = activityStatusFor(session)
@@ -765,13 +774,14 @@ export function SessionRail({
             const projectColor = projectCustom?.color
             return (
               <motion.div
-                initial={{ opacity: 0, y: -4 }}
+                initial={false}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.95 }}
                 transition={{ type: 'spring', stiffness: 450, damping: 35 }}
                 className={`session-row-wrapper ${isRunning ? 'is-running' : ''}`}
                 key={key}
                 style={sessionRunningStyle(session, projectColor)}
+                onContextMenu={(event) => { if (!batchMode) openRailMenu(event, 'session', key) }}
               >
                 {batchMode && (
                   <Checkbox
@@ -813,7 +823,7 @@ export function SessionRail({
                   <div className="session-row-info"><AgentKindBadge agent={agents[session.agent_id]} iconOnly /><span className="session-row-time">{formatRelativeTime(session.updated_at)}</span>{(session as any).unread ? <StatusDot status="unread" /> : <StatusDot status={activityStatus} />}</div>
                 </UnstyledButton>
                 {!batchMode && <div className="session-row-actions has-pinned"><button className="session-action-btn is-active" aria-label="取消置顶" onClick={e => togglePin(session, e)}><IconPinned size={14} /></button>
-                  <Menu position="bottom-end" withinPortal><Menu.Target><button className="session-action-btn" aria-label="更多操作"><IconDotsVertical size={14} /></button></Menu.Target><Menu.Dropdown>
+                  <Menu position="bottom-end" withinPortal opened={railMenu?.kind === 'session' && railMenu.key === key} onChange={(opened) => updateRailMenu(opened, 'session', key)}><Menu.Target><button className="session-action-btn" aria-label="更多操作"><IconDotsVertical size={14} /></button></Menu.Target><Menu.Dropdown>
                     <Menu.Item leftSection={<IconEdit size={14} />} onClick={() => openRenameModal(session)}>重命名</Menu.Item>
                     <Menu.Item leftSection={<IconCopy size={14} />} onClick={() => copySessionId(session)}>复制 ID</Menu.Item>
                     {forkMenuItems(session)}
@@ -824,7 +834,7 @@ export function SessionRail({
               </motion.div>
             )
           })}
-          </AnimatePresence>
+          </>
         </section>}
         {groups.map((project) => {
           const projectCollapseKey = `project:${project.key}`
@@ -845,6 +855,7 @@ export function SessionRail({
               aria-label={`${project.label}${project.remoteLabel ? ` ${project.remoteLabel}` : ''}`}
             >
               <div className="session-project-header"
+                onContextMenu={(event) => openRailMenu(event, 'project', project.key)}
                 onDragOver={(event) => { if (draggedProject) { event.preventDefault(); event.dataTransfer.dropEffect = 'move' } }}
                 onDrop={(event) => {
                   event.preventDefault()
@@ -871,7 +882,7 @@ export function SessionRail({
                     if (target) reorderProject(project.key, target.key)
                   }}
                   aria-expanded={!projectCollapsed}
-                  aria-label={`${project.label}${project.remoteLabel ? ` ${project.remoteLabel}` : ''}，${project.sessionCount} 个会话`}
+                  aria-label={`${project.label}${project.remoteLabel ? ` ${project.remoteLabel}` : ''}，${project.sessionCount} 个会话；调整 ${project.label} 顺序`}
                   data-project-key={project.key}
                 >
                   <ProjectGlyph
@@ -887,6 +898,19 @@ export function SessionRail({
                   )}
                   <span className="session-count">{project.sessionCount}</span>
                 </UnstyledButton>
+                <button
+                  type="button"
+                  className="session-project-order-handle"
+                  aria-label={`调整 ${project.label} 顺序`}
+                  draggable
+                  style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clipPath: 'inset(50%)', whiteSpace: 'nowrap' }}
+                  onDragStart={(event) => {
+                    setDraggedProject(project.key)
+                    event.dataTransfer.setData('text/plain', project.key)
+                    event.dataTransfer.effectAllowed = 'move'
+                  }}
+                  onDragEnd={() => setDraggedProject(null)}
+                />
                 <div className={`session-project-actions ${isProjectPinned ? 'has-pinned' : ''}`}>
                   <Tooltip label={isProjectPinned ? '取消置顶项目' : '置顶项目'} withArrow position="top">
                     <button
@@ -909,7 +933,7 @@ export function SessionRail({
                       {creatingForProject === project.key ? <Loader size={12} /> : <IconPlus size={14} />}
                     </button>
                   </Tooltip>
-                  <Menu position="bottom-end" shadow="md" width={140} withinPortal>
+                  <Menu position="bottom-end" shadow="md" width={140} withinPortal opened={railMenu?.kind === 'project' && railMenu.key === project.key} onChange={(opened) => updateRailMenu(opened, 'project', project.key)}>
                     <Menu.Target>
                       <button
                         type="button"
@@ -953,7 +977,7 @@ export function SessionRail({
               </div>
               <Collapse expanded={!projectCollapsed}>
                 <Stack className="session-project-sessions" gap={4} mt={8}>
-                  <AnimatePresence initial={false}>
+                  <>
                   {visibleSessions.map((session) => {
                     const key = scopeKey(session.agent_id, session.id)
                     const isPinned = pinnedSessions[key] === true
@@ -968,6 +992,7 @@ export function SessionRail({
                         className={`session-row-wrapper ${isRunning ? 'is-running' : ''}`}
                         key={key}
                         style={sessionRunningStyle(session, projectCustom?.color)}
+                        onContextMenu={(event) => { if (!batchMode) openRailMenu(event, 'session', key) }}
                       >
                         {batchMode && (
                           <Checkbox
@@ -1016,7 +1041,7 @@ export function SessionRail({
                               {isPinned ? <IconPinned size={14} /> : <IconPin size={14} />}
                             </button>
                           </Tooltip>
-                          <Menu position="bottom-end" shadow="md" width={130} withinPortal>
+                          <Menu position="bottom-end" shadow="md" width={130} withinPortal opened={railMenu?.kind === 'session' && railMenu.key === key} onChange={(opened) => updateRailMenu(opened, 'session', key)}>
                             <Menu.Target>
                               <button
                                 type="button"
@@ -1056,7 +1081,7 @@ export function SessionRail({
                       </motion.div>
                     )
                   })}
-                  </AnimatePresence>
+                  </> 
                   {(hasMoreSessions || canCollapse) && (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       {hasMoreSessions && (

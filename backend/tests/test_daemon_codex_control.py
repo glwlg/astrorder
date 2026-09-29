@@ -51,6 +51,8 @@ class FakeBridge:
                     "provider": "fixture-provider",
                 }
             }
+        if action == "runtime.disconnect":
+            return {"result": {"disconnected": True, "released_sessions": []}}
         raise AssertionError(action)
 
 
@@ -488,8 +490,39 @@ def test_daemon_codex_controller_deletes_through_the_owning_daemon():
 
     controller.delete("thread-1")
 
-    assert bridge.calls == [("session.delete", {"session_id": "thread-1"})]
+    assert bridge.calls == [
+        ("session.spawn", {"session_id": "thread-1", "agent_type": "codex", "params": {}, "cwd": "C:/allowed"}),
+        ("session.delete", {"session_id": "thread-1"}),
+    ]
     assert "thread-1" not in connection._threads
+
+
+def test_daemon_codex_controller_normalizes_extended_workspace_for_delete():
+    bridge = FakeBridge()
+    connection = FakeCodexConnection()
+    connection._threads["thread-1"]["cwd"] = r"\\?\C:\Users\luwei\project"
+
+    DaemonCodexController(bridge, FakeRouter(), connection).delete("thread-1")
+
+    assert bridge.calls[0] == (
+        "session.spawn",
+        {"session_id": "thread-1", "agent_type": "codex", "params": {}, "cwd": r"C:\Users\luwei\project"},
+    )
+
+
+def test_daemon_codex_controller_reports_native_delete_rejection():
+    class RejectedDeleteBridge(FakeBridge):
+        async def request_control(self, action, fields):
+            if action == "session.delete":
+                raise DaemonBridgeError("Codex session is active")
+            return await super().request_control(action, fields)
+
+    connection = FakeCodexConnection()
+    controller = DaemonCodexController(RejectedDeleteBridge(), FakeRouter(), connection)
+
+    with pytest.raises(ConnectionError, match="Codex session is active"):
+        controller.delete("thread-1")
+    assert "thread-1" in connection._threads
 
 
 def test_daemon_codex_controller_creates_a_session_from_daemon_native_identity():
@@ -564,3 +597,8 @@ def test_daemon_codex_controller_routes_remote_connection_through_exact_ssh_runt
             },
         )
     ]
+
+    controller.disconnect_runtime()
+    assert bridge.calls[-1] == (
+        "runtime.disconnect", {"agent_type": "codex-ssh", "connection_id": "ssh-debian"}
+    )

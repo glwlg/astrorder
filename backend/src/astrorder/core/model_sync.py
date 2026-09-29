@@ -99,14 +99,17 @@ def render_codex_catalog(catalog: dict[str, Any], existing: Any = None, gateway_
         default_effort = model["default_reasoning_effort"] or previous.get("default_reasoning_level", "")
         if default_effort not in effort_names:
             default_effort = str(efforts[0]["effort"])
+        context_window = model["context_window"] or previous.get("context_window") or previous.get("max_context_window", 0)
+        compact_limit = model["auto_compact_token_limit"] or (context_window * 4 // 5 if context_window > 0 else None)
         facts = {
-            "context_window": model["context_window"] or previous.get("context_window", 0),
+            "context_window": context_window,
             "max_context_window": model["context_window"] or previous.get("max_context_window", 0),
-            "auto_compact_token_limit": model["auto_compact_token_limit"] or previous.get("auto_compact_token_limit", 0),
             "input_modalities": model["input_modalities"],
             "supported_reasoning_levels": efforts,
             "default_reasoning_level": default_effort,
         }
+        if compact_limit is not None:
+            facts["auto_compact_token_limit"] = compact_limit
         row = {
             **DEFAULT_CODEX_MODEL_PROTOTYPE,
             "slug": model["slug"], "display_name": model["slug"],
@@ -114,6 +117,8 @@ def render_codex_catalog(catalog: dict[str, Any], existing: Any = None, gateway_
         }
         row.update(previous)
         row.update(facts)
+        if compact_limit is None:
+            row.pop("auto_compact_token_limit", None)
         output.append(row)
     return json.dumps({"models": output}, ensure_ascii=False, indent=2) + "\n"
 

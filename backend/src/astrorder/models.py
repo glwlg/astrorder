@@ -187,6 +187,35 @@ class ConnectionHistoryRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 
+class ReviewRelayBindingRow(Base):
+    __tablename__ = "review_relay_bindings"
+
+    source_agent_id: Mapped[str] = mapped_column(String(256), primary_key=True)
+    source_session_id: Mapped[str] = mapped_column(String(256), primary_key=True)
+    review_agent_id: Mapped[str] = mapped_column(String(256), nullable=False)
+    review_session_id: Mapped[str] = mapped_column(String(256), nullable=False)
+    workspace: Mapped[str] = mapped_column(Text, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class ReviewRelayRunRow(Base):
+    __tablename__ = "review_relay_runs"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    source_agent_id: Mapped[str] = mapped_column(String(256), nullable=False, index=True)
+    source_session_id: Mapped[str] = mapped_column(String(256), nullable=False, index=True)
+    review_agent_id: Mapped[str] = mapped_column(String(256), nullable=False)
+    review_session_id: Mapped[str] = mapped_column(String(256), nullable=False)
+    command_id: Mapped[str] = mapped_column(String(256), nullable=False)
+    baseline_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    comment_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
 class EventRow(Base):
     __tablename__ = "events"
     __table_args__ = (UniqueConstraint("agent_id", "event_id", name="uq_events_source_id"),)

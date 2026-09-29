@@ -1,4 +1,7 @@
 import {
+  IconBrain,
+  IconChecklist,
+  IconChalkboard,
   IconFolder,
   IconGitFork,
   IconInfoCircle,
@@ -7,7 +10,7 @@ import {
   IconTransfer,
   IconX,
 } from '@tabler/icons-react'
-import { ActionIcon, Button, Drawer, Group, Modal, Stack, Switch, Text, TextInput, Title, Tooltip } from '@mantine/core'
+import { ActionIcon, Button, Drawer, Group, Modal, Select, Stack, Switch, Text, TextInput, Title, Tooltip } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useDisclosure, useMediaQuery } from '@mantine/hooks'
 import { useQueryClient, useQuery } from '@tanstack/react-query'
@@ -27,6 +30,9 @@ import { selectApprovals, selectCommands, selectOutbox, selectSessions, selectTa
 import { useSessionResources } from '../../hooks/useAstrorderData'
 import { ChatComposer } from './ChatComposer'
 import { QuickOpen } from './QuickOpen'
+import { appendReviewOnce, buildUncommittedReviewCommand, extractNativeReviewComments, isRecoverableReviewRun, REVIEW_TIMEOUT_ERROR, reviewOutputPending, reviewRunTimedOut } from './reviewRelay'
+import { REASONING_EFFORTS } from './composerMedia'
+
 
 import { SessionDetails } from './SessionDetails'
 import { SessionRuntimeBar } from './SessionRuntimeBar'
@@ -123,8 +129,195 @@ function ChatPageBody() {
   const [forkWorktree, setForkWorktree] = useState(false)
   const [forkBranchName, setForkBranchName] = useState('')
   const [forkLoading, setForkLoading] = useState(false)
+  const [reviewModalOpen, setReviewModalOpen] = useState(false)
+  const [reviewPeerKey, setReviewPeerKey] = useState<string | null>(null)
+  const [reviewCreateNew, setReviewCreateNew] = useState(false)
+  const [reviewAgentId, setReviewAgentId] = useState<string | null>(null)
+  const [reviewModelKey, setReviewModelKey] = useState<string | null>(null)
+  const [reviewEffort, setReviewEffort] = useState<string | null>(null)
+  const [reviewBusy, setReviewBusy] = useState(false)
+  const reviewAgents = useMemo(() => Object.values(agents).filter((candidate) => (
+    candidate.kind === 'codex' && candidate.status === 'ready'
+    && (candidate.connection_id || 'local') === (selected?.connection_id || agents[selected?.agent_id || '']?.connection_id || 'local')
+  )), [agents, selected])
+  const reviewProbe = sessions.find((candidate) => candidate.agent_id === reviewAgentId)
+  const reviewModels = useQuery({
+    queryKey: ['astrorder', 'review-models', reviewAgentId, reviewProbe?.id],
+    queryFn: () => api.getSessionModels(reviewProbe!.id, reviewAgentId!),
+    enabled: reviewModalOpen && reviewCreateNew && Boolean(reviewProbe),
+    retry: false,
+  })
+  const [reviewRun, setReviewRun] = useState<{ runId: string; commandId: string; peer: Session; baselineIds: Set<string>; startedAt: number; completedWithoutCommentsAt?: number; status: 'reviewing' | 'draft_ready' | 'empty' | 'failed'; error?: string } | null>(null)
+  const reviewPeers = useMemo(() => sessions.filter((candidate) => (
+    candidate.id !== selected?.id
+    && candidate.workspace
+    && candidate.workspace === selected?.workspace
+    && (candidate.connection_id || agents[candidate.agent_id]?.connection_id || 'local') === (selected?.connection_id || agents[selected?.agent_id || '']?.connection_id || 'local')
+    && agents[candidate.agent_id]?.kind === 'codex'
+  )), [agents, selected, sessions])
 
-  
+  useEffect(() => {
+    if (!selected || reviewRun) return
+    let cancelled = false
+    void api.getReviewRelayRuns(selected.agent_id, selected.id).then(({ items }) => {
+      if (cancelled || !items.length) return
+      const persisted = items[0]
+      if (!isRecoverableReviewRun(persisted)) return
+      const peer = reviewPeers.find((candidate) => (
+        candidate.agent_id === persisted.review_agent_id && candidate.id === persisted.review_session_id
+      ))
+      if (!peer || persisted.status === 'validating') return
+      setReviewRun({
+        runId: persisted.id,
+        commandId: persisted.command_id,
+        peer,
+        baselineIds: new Set(persisted.baseline_ids),
+        startedAt: Date.parse(persisted.created_at) || Date.now(),
+        status: 'reviewing',
+      })
+    }).catch(() => undefined)
+    return () => { cancelled = true }
+  }, [reviewPeers, reviewRun, selected])
+
+  useEffect(() => {
+    if (!reviewRun || reviewRun.status !== 'reviewing') return
+    let stopped = false
+    let polling = false
+    const poll = async () => {
+      if (polling) return
+      polling = true
+      try {
+        const [commandsResult, messagesResult] = await Promise.all([
+          api.getCommands(reviewRun.peer.id, reviewRun.peer.agent_id),
+          api.getMessages(reviewRun.peer.id, reviewRun.peer.agent_id, undefined, 100),
+        ])
+        if (stopped) return
+        const command = commandsResult.items.find((item) => item.id === reviewRun.commandId)
+        const freshText = messagesResult.items
+          .filter((message) => !reviewRun.baselineIds.has(message.id))
+          .map((message) => message.text)
+          .join('\\n')
+        const extracted = extractNativeReviewComments(freshText)
+        const terminal = command?.state === 'completed' || command?.state === 'failed' || command?.state === 'cancelled'
+        if (!terminal) {
+          if (reviewRunTimedOut(command?.state, reviewRun.startedAt, Date.now())) {
+            if (reviewRun.runId) void api.updateReviewRelayRun(reviewRun.runId, { status: 'failed', error: REVIEW_TIMEOUT_ERROR })
+            setReviewRun((current) => current ? { ...current, status: 'failed', error: REVIEW_TIMEOUT_ERROR } : current)
+          }
+          return
+        }
+        if (command.state !== 'completed') {
+          if (reviewRun.runId) void api.updateReviewRelayRun(reviewRun.runId, { status: 'failed', error: command.error || 'Codex 审查未完成。' })
+          setReviewRun((current) => current ? { ...current, status: 'failed', error: command.error || 'Codex 审查未完成。' } : current)
+          return
+        }
+        if (!extracted.rawText) {
+          if (!reviewRun.completedWithoutCommentsAt) {
+            setReviewRun((current) => current?.runId === reviewRun.runId ? { ...current, completedWithoutCommentsAt: Date.now() } : current)
+            return
+          }
+          if (reviewOutputPending(reviewRun.completedWithoutCommentsAt, Date.now())) return
+          if (reviewRun.runId) void api.updateReviewRelayRun(reviewRun.runId, { status: 'empty' })
+          setReviewRun((current) => current?.runId === reviewRun.runId ? { ...current, status: 'empty' } : current)
+          return
+        }
+        const latest = await api.getReviewRelayRuns(selected!.agent_id, selected!.id)
+        if (stopped || latest.items[0]?.id !== reviewRun.runId) return
+        const currentDraft = useAstrorderStore.getState().drafts[scopeKey(selected?.agent_id || '', selected?.id || '')] || { text: '', attachments: [], sessionRefs: [] }
+        if (selected && currentDraft) {
+          useAstrorderStore.getState().setDraft(selected.agent_id, selected.id, appendReviewOnce(currentDraft, extracted.rawText))
+        }
+        if (reviewRun.runId) void api.updateReviewRelayRun(reviewRun.runId, { status: 'draft_ready', comment_text: extracted.rawText })
+        setReviewRun((current) => current ? { ...current, status: 'draft_ready' } : current)
+      } catch (error) {
+        if (!stopped) {
+          if (reviewRun.runId) void api.updateReviewRelayRun(reviewRun.runId, { status: 'failed', error: errorText(error) })
+          setReviewRun((current) => current ? { ...current, status: 'failed', error: errorText(error) } : current)
+        }
+      } finally {
+        polling = false
+      }
+    }
+    void poll()
+    const timer = window.setInterval(() => void poll(), 2000)
+    return () => { stopped = true; window.clearInterval(timer) }
+  }, [reviewRun, selected])
+
+  const startReview = async (peerOverride: Session | string | null = reviewPeerKey) => {
+    if (!selected || !peerOverride) return
+    const peer = typeof peerOverride === 'string'
+      ? reviewPeers.find((candidate) => scopeKey(candidate.agent_id, candidate.id) === peerOverride)
+      : peerOverride
+    if (!peer || peer.workspace !== selected.workspace) {
+      notifications.show({ color: 'red', message: '开发会话与审查会话不在同一个工作区。' })
+      return
+    }
+    try {
+      await api.validateReviewRelayWorkspaces(selected, peer)
+      await api.saveReviewRelayBinding(selected.agent_id, selected.id, {
+        review_agent_id: peer.agent_id,
+        review_session_id: peer.id,
+        workspace: selected.workspace || '',
+        enabled: true,
+      })
+      if (selected.last_user_at) localStorage.setItem(`astrorder:review-triggered:${scopeKey(selected.agent_id, selected.id)}`, selected.last_user_at)
+      const baseline = await api.getMessages(peer.id, peer.agent_id, undefined, 100)
+      const command = buildUncommittedReviewCommand({ id: newCommandId(), agent_id: peer.agent_id, session_id: peer.id })
+      const run = await api.createReviewRelayRun({
+        source_agent_id: selected.agent_id,
+        source_session_id: selected.id,
+        review_agent_id: peer.agent_id,
+        review_session_id: peer.id,
+        command_id: command.id,
+        baseline_ids: baseline.items.map((message) => message.id),
+        status: 'validating',
+      })
+      try {
+        await api.createCommand(command)
+        await api.updateReviewRelayRun(run.id, { status: 'reviewing' })
+      } catch (error) {
+        await api.updateReviewRelayRun(run.id, { status: 'failed', error: errorText(error) }).catch(() => undefined)
+        throw error
+      }
+      setReviewRun({ runId: run.id, commandId: command.id, peer, baselineIds: new Set(baseline.items.map((message) => message.id)), startedAt: Date.now(), status: 'reviewing' })
+      setReviewModalOpen(false)
+      notifications.show({ color: 'blue', message: '已按审查会话中的「审查未提交的更改」发送请求。' })
+    } catch (error) {
+      notifications.show({ color: 'red', message: `启动审查失败：${errorText(error)}` })
+    }
+  }
+  const createReviewPeer = async () => {
+    if (!selected?.workspace || !reviewAgentId || !reviewModelKey || !reviewEffort || reviewBusy) return
+    setReviewBusy(true)
+    try {
+      const [provider, model] = JSON.parse(reviewModelKey) as [string, string]
+      const peer = await api.createSession({ agent_id: reviewAgentId, workspace: selected.workspace, title: `Codex 审查 · ${selected.title || '开发会话'}` })
+      useAstrorderStore.setState((state) => ({ sessions: { ...state.sessions, [scopeKey(peer.agent_id, peer.id)]: peer } }))
+      await api.setSessionModel(peer.id, peer.agent_id, provider, model)
+      await api.setSessionReasoning(peer.id, peer.agent_id, reviewEffort)
+      setReviewPeerKey(scopeKey(peer.agent_id, peer.id))
+      await startReview(peer)
+    } catch (error) {
+      notifications.show({ color: 'red', message: `创建审查会话失败：${errorText(error)}` })
+    } finally {
+      setReviewBusy(false)
+    }
+  }
+  useEffect(() => {
+    if (!selected || selected.status !== 'idle' || reviewRun || !selected.last_user_at) return
+    let cancelled = false
+    const revision = selected.last_user_at
+    const markerKey = `astrorder:review-triggered:${scopeKey(selected.agent_id, selected.id)}`
+    void api.getReviewRelayBinding(selected.agent_id, selected.id).then((binding) => {
+      if (cancelled || !binding?.enabled) return
+      const bindingKey = scopeKey(binding.review_agent_id, binding.review_session_id)
+      if (localStorage.getItem(markerKey) === revision) return
+      if (!reviewPeers.some((peer) => scopeKey(peer.agent_id, peer.id) === bindingKey)) return
+      localStorage.setItem(markerKey, revision)
+      void startReview(bindingKey)
+    }).catch(() => undefined)
+    return () => { cancelled = true }
+  }, [reviewPeers, reviewRun, selected])
   const handoffPeer = useMemo(() => {
     if (!selected) return null
     if (selected.handoff_from_agent_id && selected.handoff_from_session_id) {
@@ -216,6 +409,14 @@ function ChatPageBody() {
             selected.title || undefined,
             selected.connection_id || undefined,
           )
+        return
+      }
+
+      // 知识记忆快捷键：Ctrl + Alt + M
+      if (isCtrlOrMeta && e.altKey && (e.key === 'm' || e.key === 'M')) {
+        e.preventDefault()
+        e.stopPropagation()
+        useSidecarStore.getState().openMemory(selected.id)
         return
       }
 
@@ -478,7 +679,52 @@ function ChatPageBody() {
               <Group gap="xs" wrap="nowrap" className="chat-heading-actions">
                 <AgentKindBadge agent={agent} />
                 <SessionStatusLabel status={sessionActivityStatus(selected, commands)} />
+                <Tooltip label={reviewRun?.status === 'reviewing' ? 'Codex 审查中…' : '请求 Codex 审查'} position="bottom">
+                  <ActionIcon
+                    size="sm"
+                    variant="subtle"
+                    color="teal"
+                    aria-label="请求 Codex 审查"
+                    loading={reviewRun?.status === 'reviewing'}
+                    disabled={!reviewAgents.length}
+                    onClick={() => {
+                      void api.getReviewRelayBinding(selected.agent_id, selected.id).then((binding) => {
+                        setReviewPeerKey(binding?.enabled ? scopeKey(binding.review_agent_id, binding.review_session_id) : null)
+                      }).catch(() => setReviewPeerKey(null))
+                      setReviewCreateNew(false)
+                      setReviewModalOpen(true)
+                    }}
+                  >
+                    <IconChecklist size={16} />
+                  </ActionIcon>
+                </Tooltip>
+                {reviewRun?.status === 'draft_ready' && <Text size="xs" c="teal">审查结果已回填</Text>}
+                {reviewRun?.status === 'empty' && <Text size="xs" c="dimmed">本轮没有 code-comment</Text>}
+                {reviewRun?.status === 'failed' && <Text size="xs" c="red">审查失败</Text>}
+
                 {!!approvals.length && <Button size="compact-sm" color="yellow" variant="light" onClick={openDetails}>等待授权 · {approvals.length}</Button>}
+                <Tooltip label="知识记忆看板 (Ctrl+Alt+M)" position="bottom">
+                  <ActionIcon
+                    variant="subtle"
+                    size="sm"
+                    color="indigo"
+                    onClick={() => useSidecarStore.getState().openMemory(selected.id)}
+                    aria-label="知识记忆看板"
+                  >
+                    <IconBrain size={16} />
+                  </ActionIcon>
+                </Tooltip>
+                <Tooltip label="作战黑板 (Ctrl+Alt+B)" position="bottom">
+                  <ActionIcon
+                    variant="subtle"
+                    size="sm"
+                    color="violet"
+                    onClick={() => useSidecarStore.getState().openBlackboard(selected.id, selected.agent_id, selected.connection_id || undefined)}
+                    aria-label="作战黑板"
+                  >
+                    <IconChalkboard size={16} />
+                  </ActionIcon>
+                </Tooltip>
                 <Tooltip label="会话详情" position="bottom">
                   <ActionIcon className="chat-details-button" variant="subtle" size="sm" onClick={openDetails} aria-label="打开会话详情">
                     <IconInfoCircle size={16} />
@@ -706,6 +952,34 @@ function ChatPageBody() {
             >
               立即分叉
             </Button>
+          </Group>
+        </Stack>
+      </Modal>
+      <Modal opened={reviewModalOpen} onClose={() => setReviewModalOpen(false)} title="请求 Codex 原生审查" centered>
+        <Stack gap="md">
+          <Text size="sm">选择同一工作区的独立 Codex 审查会话。星序只会向它发送原生 <code>/review</code>，不会注入当前会话内容。</Text>
+          <Group gap="xs">
+            <Button size="compact-sm" variant={reviewCreateNew ? 'subtle' : 'light'} onClick={() => setReviewCreateNew(false)}>选择现有</Button>
+            <Button size="compact-sm" variant={reviewCreateNew ? 'light' : 'subtle'} onClick={() => { setReviewCreateNew(true); setReviewAgentId(reviewAgents.length === 1 ? reviewAgents[0].id : null) }}>新建审查会话</Button>
+          </Group>
+          {reviewCreateNew ? <>
+            <Select label="Codex Agent" placeholder="选择同环境的 Codex" data={reviewAgents.map((item) => ({ value: item.id, label: item.name || item.id }))} value={reviewAgentId} onChange={(value) => { setReviewAgentId(value); setReviewModelKey(null) }} />
+            <Select label="模型" placeholder={reviewModels.isLoading ? '正在读取模型…' : '选择模型'} data={(reviewModels.data?.items || []).map((item) => ({ value: JSON.stringify([item.provider, item.model]), label: item.label }))} value={reviewModelKey} onChange={setReviewModelKey} disabled={!reviewProbe || reviewModels.isLoading} searchable />
+            {!reviewProbe && reviewAgentId && <Text size="xs" c="dimmed">该 Codex Agent 尚无会话，无法读取可用模型。</Text>}
+            {reviewModels.isError && <Text size="xs" c="red">模型列表读取失败：{errorText(reviewModels.error)}</Text>}
+            <Select label="思考程度" placeholder="选择思考程度" data={[...REASONING_EFFORTS]} value={reviewEffort} onChange={setReviewEffort} />
+          </> : <Select
+            label="审查会话"
+            placeholder={reviewPeers.length ? '选择审查会话' : '没有找到同工作区的 Codex 会话'}
+            data={reviewPeers.map((peer) => ({ value: scopeKey(peer.agent_id, peer.id), label: peer.title || peer.id }))}
+            value={reviewPeerKey}
+            onChange={setReviewPeerKey}
+            searchable
+            nothingFoundMessage="没有匹配的审查会话"
+          />}
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => setReviewModalOpen(false)} disabled={reviewBusy}>取消</Button>
+            <Button color="teal" loading={reviewBusy} disabled={reviewCreateNew ? !reviewAgentId || !reviewModelKey || !reviewEffort : !reviewPeerKey} onClick={() => void (reviewCreateNew ? createReviewPeer() : startReview())}>{reviewCreateNew ? '创建并发送 /review' : '发送 /review'}</Button>
           </Group>
         </Stack>
       </Modal>

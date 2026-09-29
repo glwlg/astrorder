@@ -10,6 +10,7 @@ import { isValidElement, useEffect, useRef, useState, type ReactNode } from 'rea
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { Session } from '../domain/types'
+import { api } from '../api/client'
 import { artifactViewerRegistry, isNonPreviewableFile } from '../features/sidecar/registry'
 import { resolveArtifactFromPath } from '../features/sidecar/resolver'
 import { useSidecarStore } from '../features/sidecar/sidecarStore'
@@ -138,7 +139,11 @@ function safeUrl(value: string | undefined): string | undefined {
 /**
  * 自动感知纯文本中属于已注册插件的工件文件名，并转译为 Markdown 链接
  */
-function autoLinkArtifacts(text: string): string {
+function artifactSuffixes(match: string): string[] {
+  return [match, ...Array.from(match.matchAll(/ +/g), (space) => match.slice(space.index! + space[0].length))]
+}
+
+function autoLinkArtifacts(text: string, rootFiles: Set<string> | null, checkedPaths: Set<string> | null): string {
   const extRegex = artifactViewerRegistry.getExtensionPattern()
   const lines = text.split('\n')
   let inCodeBlock = false
@@ -150,7 +155,18 @@ function autoLinkArtifacts(text: string): string {
     }
     if (inCodeBlock) return line
 
-    return line.replace(extRegex, (match, fileName, offset, fullStr) => {
+    // 1. 先将行内反引号包裹的有效工件路径（如 `P:\...\test.png` 或 `docs/design.md`）转换为 Markdown 链接
+    let step = line.replace(/`([^`\r\n]+)`/g, (match, raw) => {
+      const trimmed = String(raw).trim()
+      if ((artifactViewerRegistry.isSupportedExtension(trimmed) || isNonPreviewableFile(trimmed)) &&
+          (/[\\/]/.test(trimmed) || rootFiles?.has(trimmed))) {
+        return `[${trimmed}](<${trimmed}>)`
+      }
+      return match
+    })
+
+    // 2. 将非代码块中的裸工件名/路径转为 Markdown 链接
+    return step.replace(extRegex, (match, fileName, offset, fullStr) => {
       const before = fullStr.slice(Math.max(0, offset - 2), offset)
       const after = fullStr.slice(offset + match.length, offset + match.length + 2)
       if (
@@ -168,13 +184,19 @@ function autoLinkArtifacts(text: string): string {
       const charBefore = offset > 0 ? fullStr[offset - 1] : ''
       const charAfter = offset + match.length < fullStr.length ? fullStr[offset + match.length] : ''
       if (charBefore === '`' || charAfter === '`') return match
+      const target = artifactSuffixes(fileName).find((candidate) =>
+        /[\\/]/.test(candidate) ? checkedPaths?.has(candidate) : rootFiles?.has(candidate))
+      if (!target) return match
 
-      return `[${fileName}](${fileName})`
+      return `${fileName.slice(0, fileName.length - target.length)}[${target}](<${target}>)`
     })
   })
 
   return processed.join('\n')
 }
+
+const rootFileCache = new Map<string, { expires: number; promise: Promise<Set<string>> }>()
+const pathCheckCache = new Map<string, { expires: number; promise: Promise<Set<string>> }>()
 
 export function MarkdownContent({
   value,
@@ -188,7 +210,64 @@ export function MarkdownContent({
   const defaultSession = useAstrorderStore((state) => Object.values(state.sessions)[0] as Session | undefined)
   const currentSession = session || defaultSession
   const openArtifact = useSidecarStore((state) => state.openArtifact)
-  const normalizedValue = autoLinkArtifacts(value)
+  const rootKey = session?.workspace ? JSON.stringify([session.id, session.workspace, session.connection_id]) : ''
+  const [rootFiles, setRootFiles] = useState<{ key: string; names: Set<string> } | null>(null)
+  const [checkedPaths, setCheckedPaths] = useState<{ key: string; names: Set<string> } | null>(null)
+  const extRegex = artifactViewerRegistry.getExtensionPattern()
+  const pathKey = JSON.stringify([...new Set(
+    Array.from(value.matchAll(new RegExp(extRegex.source, 'gi')))
+      .flatMap((match) => artifactSuffixes(match[1]).filter((candidate) => /[\\/]/.test(candidate))),
+  )].slice(0, 100))
+  const checkKey = `${rootKey}:${pathKey}`
+
+  useEffect(() => {
+    if (!rootKey || !session?.workspace) return
+    let active = true
+    let cached = rootFileCache.get(rootKey)
+    if (!cached || cached.expires < Date.now()) {
+      const promise = api.getWorkspaceRootFiles(session.id, session.workspace, session.connection_id)
+        .then(({ root, items }) => {
+          const normalize = (path: string) => {
+            const normalized = path.replace(/\\/g, '/').replace(/\/+$/, '')
+            return /^[a-z]:\//i.test(normalized) ? normalized.toLowerCase() : normalized
+          }
+          if (normalize(root) !== normalize(session.workspace!)) return new Set<string>()
+          return new Set(items.filter((item) => !item.is_dir).map((item) => item.name))
+        })
+        .catch(() => {
+          rootFileCache.delete(rootKey)
+          return new Set<string>()
+        })
+      cached = { expires: Date.now() + 60_000, promise }
+      rootFileCache.set(rootKey, cached)
+    }
+    void cached.promise.then((names) => { if (active) setRootFiles({ key: rootKey, names }) })
+    return () => { active = false }
+  }, [rootKey, session?.id, session?.workspace, session?.connection_id])
+
+  useEffect(() => {
+    if (!rootKey || !session?.workspace || pathKey === '[]') return
+    let active = true
+    let cached = pathCheckCache.get(checkKey)
+    if (!cached || cached.expires < Date.now()) {
+      const promise = api.checkWorkspaceFiles(session.workspace, JSON.parse(pathKey) as string[], session.connection_id)
+        .then(({ existing }) => new Set(existing))
+        .catch(() => {
+          pathCheckCache.delete(checkKey)
+          return new Set<string>()
+        })
+      cached = { expires: Date.now() + 60_000, promise }
+      pathCheckCache.set(checkKey, cached)
+    }
+    void cached.promise.then((names) => { if (active) setCheckedPaths({ key: checkKey, names }) })
+    return () => { active = false }
+  }, [checkKey, pathKey, rootKey, session?.workspace, session?.connection_id])
+
+  const normalizedValue = autoLinkArtifacts(
+    value,
+    rootFiles?.key === rootKey && rootKey ? rootFiles.names : null,
+    checkedPaths?.key === checkKey && rootKey ? checkedPaths.names : null,
+  )
 
   const resolvePathWithWorkspace = (raw: string): string => {
     const unquoted = decodeURIComponent(raw.trim().replace(/^<|>$/g, ''))
@@ -241,9 +320,12 @@ export function MarkdownContent({
             const cleaned = cleanHref(href)
 
             if (isLocalPath(cleaned)) {
+              const fullPath = resolvePathWithWorkspace(cleaned)
               if (isImagePath(cleaned)) {
-                const fullPath = resolvePathWithWorkspace(cleaned)
-                const rawUrl = `/api/v1/files/raw?path=${encodeURIComponent(fullPath)}`
+                const query = new URLSearchParams({ path: fullPath })
+                if (currentSession?.id) query.set('session_id', currentSession.id)
+                if (currentSession?.connection_id) query.set('connection_id', currentSession.connection_id)
+                const rawUrl = `/api/v1/files/raw?${query.toString()}`
                 return (
                   <button
                     type="button"
@@ -261,7 +343,7 @@ export function MarkdownContent({
               }
 
               // 委托注册表：动态获取匹配的 Viewer 及其自声明图标与标签
-              const dummyArtifact = currentSession ? resolveArtifactFromPath(cleaned, currentSession) : null
+              const dummyArtifact = currentSession ? resolveArtifactFromPath(fullPath, currentSession) : null
               const matchedViewer = dummyArtifact ? artifactViewerRegistry.findViewer(dummyArtifact) : null
 
               const Icon = matchedViewer ? matchedViewer.icon : IconFileText
@@ -275,7 +357,7 @@ export function MarkdownContent({
                 <button
                   type="button"
                   className={linkClass}
-                  onClick={() => void handleOpenLocalFile(cleaned)}
+                  onClick={() => void handleOpenLocalFile(fullPath)}
                   title={actionTitle}
                 >
                   <Icon size={13} aria-hidden="true" />

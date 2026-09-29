@@ -2,13 +2,39 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
+import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from astrorder.connections import paginate_native_session_rows
+
+logger = logging.getLogger(__name__)
+
+_INJECTED_HERMES_MEMORY = re.compile(
+    r'(?:\r?\n)*<memory-context>\r?\n'
+    r'\[System note: The following is recalled memory context, NOT new user input\.[^\r\n]*\]\r?\n'
+    r'[\s\S]*?^</memory-context>(?:\r?\n)*',
+    re.MULTILINE,
+)
+_INJECTED_PONYTAIL = re.compile(
+    r'(?:\r?\n)*PONYTAIL MODE ACTIVE — level: (?:lite|full|ultra)\r?\n\r?\n# Ponytail\r?\n'
+    r'[\s\S]*?\r?\nThe shortest path to done is the right path\.\s*\Z'
+)
+
+
+def visible_hermes_user_text(text: str) -> str:
+    """Remove known model-only additions from Hermes' persisted user row."""
+    text = _INJECTED_PONYTAIL.sub('', text)
+    if '<memory-context>' in text:
+        text = _INJECTED_HERMES_MEMORY.sub(
+            lambda match: '\n\n' if text[:match.start()] and text[match.end():] else '', text
+        )
+    return text
 
 
 @dataclass(frozen=True)
@@ -258,6 +284,202 @@ def discover_native_sessions(
     )
 
 
+def native_session_workspace(session_id: str, profile_name: str | None = None) -> str | None:
+    """Resolve a local Hermes session's authoritative cwd without resuming it."""
+    from astrorder.core.session_usage import _find_local_hermes_state_dbs
+
+    for db_file in _find_local_hermes_state_dbs(profile_name):
+        if not db_file.is_file():
+            continue
+        try:
+            with sqlite3.connect(db_file.as_uri() + "?mode=ro", uri=True) as conn:
+                row = conn.execute("SELECT cwd FROM sessions WHERE id = ?", (session_id,)).fetchone()
+            if row and isinstance(row[0], str) and row[0].strip():
+                return row[0]
+        except (sqlite3.Error, OSError) as exc:
+            logger.debug("Could not read native Hermes workspace from %s: %s", db_file, exc)
+    return None
+
+
+def discover_native_sessions_from_db(
+    *,
+    db_path: Path | str | None = None,
+    source_id: str,
+    agent_id: str,
+    connection_id: str | None = None,
+    profile_name: str | None = None,
+    default_workspace: str | None = None,
+) -> tuple[NativeDiscovery, list[str]]:
+    target_db: Path | None = None
+    if db_path is not None:
+        p = Path(db_path)
+        if p.is_file():
+            target_db = p
+    if target_db is None:
+        from astrorder.core.session_usage import _find_local_hermes_state_dbs
+
+        dbs = _find_local_hermes_state_dbs(profile_name)
+        target_db = next((p for p in dbs if p.is_file()), None)
+
+    if target_db is None:
+        return (
+            NativeDiscovery(
+                sessions=[],
+                complete=False,
+                native_count=0,
+                project_count=0,
+                project_complete=False,
+            ),
+            [],
+        )
+
+    proj_db = target_db.parent / "projects.db"
+    project_folders: dict[str, str] = {}
+    project_catalog: dict[str, dict[str, Any]] = {}
+    if proj_db.is_file():
+        try:
+            with sqlite3.connect(proj_db.as_uri() + "?mode=ro", uri=True) as p_conn:
+                p_cur = p_conn.cursor()
+                for r in p_cur.execute("SELECT id, name, primary_path FROM projects WHERE archived=0").fetchall():
+                    pid = str(r[0])
+                    pname = str(r[1]) if r[1] else pid
+                    ppath = str(r[2]) if r[2] else default_workspace
+                    project_catalog[pid] = {
+                        "project_id": pid,
+                        "project_name": pname,
+                        "workspace": ppath,
+                        "source_id": source_id,
+                        "connection_id": connection_id,
+                        "agent_id": agent_id,
+                        "profile_name": profile_name or "default",
+                        "session_count": 0,
+                    }
+                for r in p_cur.execute("SELECT project_id, path FROM project_folders").fetchall():
+                    pid, fpath = str(r[0]), str(r[1])
+                    clean = fpath.replace("/", "\\").lower().rstrip("\\")
+                    project_folders[clean] = pid
+        except Exception as exc:
+            logger.debug("Failed reading Hermes projects.db at %s: %s", proj_db, exc)
+
+    sessions: list[dict[str, Any]] = []
+    archived_ids: list[str] = []
+    try:
+        with sqlite3.connect(target_db.as_uri() + "?mode=ro", uri=True) as s_conn:
+            s_conn.row_factory = sqlite3.Row
+            s_cur = s_conn.cursor()
+            cols = {row[1] for row in s_cur.execute("PRAGMA table_info(sessions)").fetchall()}
+            if not {"id", "title", "cwd", "started_at"}.issubset(cols):
+                return (
+                    NativeDiscovery(
+                        sessions=[],
+                        complete=False,
+                        native_count=0,
+                        project_count=0,
+                        project_complete=False,
+                    ),
+                    [],
+                )
+
+            if "archived" in cols:
+                for r in s_cur.execute("SELECT id FROM sessions WHERE archived = 1").fetchall():
+                    archived_ids.append(str(r["id"]))
+
+            query = "SELECT * FROM sessions"
+            if "archived" in cols:
+                query += " WHERE archived = 0"
+            query += " ORDER BY started_at DESC"
+
+            for row in s_cur.execute(query).fetchall():
+                native_id = row["id"]
+                if not isinstance(native_id, str) or not native_id:
+                    continue
+                cwd = row["cwd"]
+                workspace = cwd or default_workspace
+                project_id = None
+                project_name = None
+                if cwd:
+                    clean_cwd = cwd.replace("/", "\\").lower().rstrip("\\")
+                    project_id = project_folders.get(clean_cwd)
+                    if not project_id:
+                        for fpath, pid in project_folders.items():
+                            if clean_cwd == fpath or clean_cwd.startswith(fpath + "\\"):
+                                project_id = pid
+                                break
+                    if project_id and project_id in project_catalog:
+                        project_name = project_catalog[project_id]["project_name"]
+                        project_catalog[project_id]["session_count"] += 1
+
+                title = row["title"] or f"Hermes session {native_id[:12]}"
+                raw_ts = (
+                    row["last_activity_at"]
+                    if "last_activity_at" in cols and row["last_activity_at"]
+                    else row["started_at"]
+                )
+                updated_at = None
+                if isinstance(raw_ts, (int, float)) and raw_ts > 0:
+                    try:
+                        updated_at = (
+                            datetime.fromtimestamp(raw_ts, UTC)
+                            .isoformat(timespec="milliseconds")
+                            .replace("+00:00", "Z")
+                        )
+                    except Exception:
+                        pass
+                if not updated_at:
+                    m = re.match(r"^(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})", native_id)
+                    if m:
+                        y, mo, d, h, mi, s = m.groups()
+                        updated_at = f"{y}-{mo}-{d}T{h}:{mi}:{s}.000Z"
+                    else:
+                        updated_at = (
+                            datetime.now(UTC)
+                            .isoformat(timespec="milliseconds")
+                            .replace("+00:00", "Z")
+                        )
+
+                sessions.append(
+                    {
+                        "id": native_id,
+                        "agent_id": agent_id,
+                        "title": str(title),
+                        "workspace": str(workspace) if workspace else None,
+                        "status": "idle",
+                        "updated_at": updated_at,
+                        "source_id": source_id,
+                        "connection_id": connection_id,
+                        "source_session_id": native_id,
+                        "project_id": project_id,
+                        "project_name": project_name,
+                        "history_state": "available",
+                        "control_state": "owned",
+                    }
+                )
+    except Exception as exc:
+        logger.debug("Failed reading Hermes state.db at %s: %s", target_db, exc)
+        return (
+            NativeDiscovery(
+                sessions=[],
+                complete=False,
+                native_count=0,
+                project_count=0,
+                project_complete=False,
+            ),
+            [],
+        )
+
+    return (
+        NativeDiscovery(
+            sessions=sessions,
+            complete=True,
+            native_count=len(sessions),
+            project_count=len(project_catalog),
+            project_complete=True,
+            projects=list(project_catalog.values()),
+        ),
+        archived_ids,
+    )
+
+
 def _message_text(value: Any) -> str:
     if isinstance(value, str):
         return value
@@ -339,6 +561,8 @@ def project_history_messages(raw_messages, *, durable_session_id, native_session
         )
         if role == "user":
             message_text = visible_handoff_user_text(message_text)
+            if agent_id.startswith(('local-hermes-', 'ssh-hermes-')):
+                message_text = visible_hermes_user_text(message_text)
         messages.append(
             {
                 "id": f"history-message-{message_key}",

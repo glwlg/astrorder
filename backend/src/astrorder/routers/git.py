@@ -51,16 +51,14 @@ def _run_git(args: list[str], cwd: str, connection_id: str | None = None, app_st
                 runtime._target(),
                 inner_cmd,
             ]
-            from ..connections import _windows_hide_flags, _windows_hide_startupinfo
+            from ..connections import run_subprocess_hidden
             try:
-                proc = subprocess.run(
+                proc = run_subprocess_hidden(
                     argv,
                     capture_output=True,
                     text=True,
                     encoding="utf-8",
                     errors="replace",
-                    creationflags=_windows_hide_flags(),
-                    startupinfo=_windows_hide_startupinfo(),
                     timeout=30,
                 )
                 return proc.returncode, proc.stdout, proc.stderr
@@ -69,16 +67,14 @@ def _run_git(args: list[str], cwd: str, connection_id: str | None = None, app_st
 
     # 本地执行
     git_bin = shutil.which("git") or "git"
-    from ..connections import _windows_hide_flags, _windows_hide_startupinfo
-    proc = subprocess.run(
+    from ..connections import run_subprocess_hidden
+    proc = run_subprocess_hidden(
         [git_bin] + args,
         cwd=cwd,
         capture_output=True,
         text=True,
         encoding="utf-8",
         errors="replace",
-        creationflags=_windows_hide_flags(),
-        startupinfo=_windows_hide_startupinfo(),
     )
     return proc.returncode, proc.stdout, proc.stderr
 
@@ -120,7 +116,9 @@ def get_git_status(request: Request, workspace: str | None = None, session_id: s
     branches = list(dict.fromkeys(branches))
 
     # 2. 检查工作区是否有修改 / 未暂存 / 未跟踪变更
-    rc_status, stdout_status, _ = _run_git(["status", "--porcelain=v1"], cwd=cwd, connection_id=cid, app_state=request.app.state)
+    rc_status, stdout_status, _ = _run_git(["status", "--porcelain=v1", "-uall"], cwd=cwd, connection_id=cid, app_state=request.app.state)
+    if rc_status != 0:
+        raise HTTPException(status_code=422, detail="无法读取该工作区的 Git 状态；请确认会话工作区目录。")
     staged_count = 0
     unstaged_count = 0
     untracked_count = 0
@@ -153,6 +151,19 @@ def get_git_status(request: Request, workspace: str | None = None, session_id: s
                 "staged": x in ("M", "A", "D", "R", "C"),
             })
 
+    # Count tracked working-tree and staged changes; binary files have '-' numstat entries.
+    insertions = 0
+    deletions = 0
+    for args in (["diff", "--numstat"], ["diff", "--cached", "--numstat"]):
+        rc_diff, numstat, _ = _run_git(args, cwd=cwd, connection_id=cid, app_state=request.app.state)
+        if rc_diff != 0:
+            continue
+        for line in numstat.splitlines():
+            columns = line.split("\t", 2)
+            if len(columns) == 3 and columns[0].isdigit() and columns[1].isdigit():
+                insertions += int(columns[0])
+                deletions += int(columns[1])
+
     # 3. 统计超前与落后 commit 数 (ahead / behind)
     ahead = 0
     behind = 0
@@ -174,10 +185,15 @@ def get_git_status(request: Request, workspace: str | None = None, session_id: s
 
     return {
         "status": "ok",
+        "workspace": cwd,
         "current_branch": current_branch,
+        "branch": current_branch,
         "branches": branches,
         "ahead": ahead,
         "behind": behind,
+        "changed_files": len(changed_files),
+        "insertions": insertions,
+        "deletions": deletions,
         "staged_count": staged_count,
         "unstaged_count": unstaged_count,
         "untracked_count": untracked_count,

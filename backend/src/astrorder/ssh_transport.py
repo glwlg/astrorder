@@ -19,7 +19,14 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from .connections import ConnectionError, _windows_hide_flags, _windows_hide_startupinfo, hermes_command_rejection
+from .connections import (
+    ConnectionError,
+    _windows_hide_flags,
+    _windows_hide_startupinfo,
+    hermes_command_rejection,
+    popen_subprocess_hidden,
+    run_subprocess_hidden,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -372,8 +379,8 @@ class SshNativeRuntime:
         *,
         connector_secret: str | None,
         ssh_executable: str | None = None,
-        popen_factory: Callable[..., subprocess.Popen] = subprocess.Popen,
-        command_runner: Callable[..., subprocess.CompletedProcess] = subprocess.run,
+        popen_factory: Callable[..., subprocess.Popen] = popen_subprocess_hidden,
+        command_runner: Callable[..., subprocess.CompletedProcess] = run_subprocess_hidden,
     ) -> None:
         self.settings = settings
         self.connection_id = connection_id
@@ -690,7 +697,7 @@ class SshNativeRuntime:
             argv = [
                 *self._base_ssh_argv(),
                 "-R",
-                f"{self._remote_port}:127.0.0.1:{self.local_port}",
+                f"127.0.0.1:{self._remote_port}:127.0.0.1:{self.local_port}",
                 self._target(),
                 build_remote_stdin_bootstrap_command(
                     interpreter=metadata.python_path,

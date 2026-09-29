@@ -114,54 +114,37 @@ async def get_session_usage(session_id: str, request: Request, agent_id: str | N
             q = q.where(TokenMetricRow.agent_id == agent_id)
         rows = db.scalars(q.order_by(TokenMetricRow.updated_at.desc())).all()
 
-    pattern = os.path.expanduser(f"~/.codex/sessions/**/rollout-*{session_id}*.jsonl")
-    matches = glob.glob(pattern, recursive=True)
-    if matches:
-        last_u = None
-        cw = 1000000
-        last_in = 0
-        m_name = "default"
-        try:
-            with open(matches[0], "r", encoding="utf-8", errors="ignore") as f:
-                for line in f:
-                    if "total_token_usage" in line:
-                        d = json.loads(line)
-                        info = d.get("payload", {}).get("info", {})
-                        if "total_token_usage" in info:
-                            last_u = info["total_token_usage"]
-                            cw = info.get("model_context_window", cw)
-                            last_in = info.get("last_token_usage", {}).get("input_tokens", last_in)
-                    if "turn_context" in line and "model" in line:
-                        m_name = json.loads(line).get("payload", {}).get("model", m_name)
-        except (OSError, json.JSONDecodeError, TypeError, ValueError):
-            last_u = None
-        if last_u:
-            in_tok = last_u.get("input_tokens", 0)
-            cached = last_u.get("cached_input_tokens", 0)
-            return {
-                "ok": True,
-                "session_id": session_id,
-                "model": m_name,
-                "context_window": cw,
-                "last_input_tokens": last_in or in_tok,
-                "used_percentage": round(((last_in or in_tok) / max(cw, 1)) * 100, 2),
-                "total_tokens": gw_total_tokens if gw_total_tokens is not None else last_u.get("total_tokens", 0),
-                "input_tokens": in_tok,
-                "output_tokens": last_u.get("output_tokens", 0),
-                "cached_tokens": cached,
-                "reasoning_tokens": last_u.get("reasoning_output_tokens", 0),
-                "cache_hit_rate": round((cached / max(in_tok, 1)) * 100, 1) if in_tok > 0 else 0,
-                "speed": gw_speed,
-            }
+    from .session_usage import resolve_session_usage
+
+    resolved = resolve_session_usage(session_id, store, agent_id)
+    if resolved:
+        total = gw_total_tokens if gw_total_tokens is not None else resolved.get("total_tokens", 0)
+        cw = resolved.get("context_window")
+        used_pct = round((resolved.get("last_input_tokens", 0) / cw) * 100, 2) if (cw and cw > 0) else None
+        return {
+            "ok": True,
+            "session_id": session_id,
+            "model": resolved.get("model", "default"),
+            "context_window": cw,
+            "last_input_tokens": resolved.get("last_input_tokens", 0),
+            "used_percentage": used_pct,
+            "total_tokens": total,
+            "input_tokens": resolved.get("input_tokens", 0),
+            "output_tokens": resolved.get("output_tokens", 0),
+            "cached_tokens": resolved.get("cached_tokens", 0),
+            "reasoning_tokens": resolved.get("reasoning_tokens", 0),
+            "cache_hit_rate": resolved.get("cache_hit_rate", 0.0),
+            "speed": gw_speed,
+        }
 
     if not rows:
         return {
             "ok": True,
             "session_id": session_id,
             "model": "default",
-            "context_window": 1000000,
+            "context_window": None,
             "last_input_tokens": 0,
-            "used_percentage": 0,
+            "used_percentage": None,
             "total_tokens": gw_total_tokens or 0,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -174,15 +157,16 @@ async def get_session_usage(session_id: str, request: Request, agent_id: str | N
     latest = rows[0]
     in_tok = latest.input_tokens
     cached = latest.cached_tokens
-    cw = latest.context_window or 1000000
+    cw = latest.context_window
     last_in = latest.last_input_tokens or in_tok
+    used_pct = round((last_in / cw) * 100, 2) if (cw and cw > 0) else None
     return {
         "ok": True,
         "session_id": session_id,
         "model": latest.model,
         "context_window": cw,
         "last_input_tokens": last_in,
-        "used_percentage": round((last_in / max(cw, 1)) * 100, 2),
+        "used_percentage": used_pct,
         "total_tokens": gw_total_tokens if gw_total_tokens is not None else latest.total_tokens,
         "input_tokens": in_tok,
         "output_tokens": latest.output_tokens,

@@ -2,11 +2,13 @@
   "name": "astrorder-desktop",
   "private": true,
   "version": "0.1.0",
+  "description": "Astrorder desktop workspace",
+  "author": "Astrorder",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "check": "node --check main.js && node --check preload.js && node --check service-status.js",
-    "dist": "electron-builder --win nsis --config.directories.output=release"
+    "dist": "..\\backend\\.venv\\Scripts\\python.exe -c \"from astrorder.main import create_app\" && electron-builder --win nsis --config.directories.output=release"
   },
   "devDependencies": {
     "electron": "^44.3.0",

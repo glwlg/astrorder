@@ -1,5 +1,6 @@
+import { useState } from 'react'
 import { HoverCard, Text } from '@mantine/core'
-import { IconMessage } from '@tabler/icons-react'
+import { IconCheck, IconCopy, IconMessage } from '@tabler/icons-react'
 import './CodeCommentsBlock.css'
 
 export interface CodeCommentItem {
@@ -30,7 +31,27 @@ function displayFilePath(cleanPath: string, start?: number, end?: number): strin
 }
 
 export function CodeCommentsBlock({ comments }: { comments: CodeCommentItem[] }) {
+  const [copied, setCopied] = useState(false)
   if (!comments.length) return null
+
+  const copyComments = async () => {
+    const text = comments.map((comment) => {
+      const priority = comment.priority !== undefined ? `P${comment.priority}` : 'P2'
+      const title = comment.title.replace(/^\[P\d+\]\s*/i, '')
+      const file = cleanFilePath(comment.file)
+      const range = comment.start
+        ? `:${comment.start}${comment.end && comment.end !== comment.start ? `-${comment.end}` : ''}`
+        : ''
+      return `### [${priority}] ${title}\n\n位置：\`${file}${range}\`\n\n问题描述：${comment.body}`
+    }).join('\n\n')
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1600)
+    } catch {
+      setCopied(false)
+    }
+  }
 
   return (
     <div className="code-comments-container">
@@ -41,6 +62,10 @@ export function CodeCommentsBlock({ comments }: { comments: CodeCommentItem[] })
         <span className="code-comments-header-title">
           {comments.length} {comments.length === 1 ? 'comment' : 'comments'}
         </span>
+        <button type="button" className="code-comments-copy" onClick={() => void copyComments()} aria-label={copied ? '已复制注释' : '复制注释'}>
+          {copied ? <IconCheck size={14} /> : <IconCopy size={14} />}
+          {copied ? '已复制' : '复制'}
+        </button>
       </div>
       <div className="code-comments-list">
         {comments.map((comment, idx) => {
@@ -101,22 +126,16 @@ export function extractCodeComments(rawText: string): {
   cleanText: string
 } {
   const comments: CodeCommentItem[] = []
-  const regex = /::code-comment\{([\s\S]*?)\}/g
+  const regex = /::code-comment\{((?:[^}"']|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')*)\}/g
 
   const cleanText = rawText.replace(regex, (_, argsStr: string) => {
-    const getAttr = (name: string): string => {
-      const m = argsStr.match(new RegExp(`${name}=["']([^"']*)["']`, 'i'))
-      if (m) return m[1]
-      const unquoted = argsStr.match(new RegExp(`${name}=([^\\s}]+)`, 'i'))
-      return unquoted ? unquoted[1] : ''
+    const attrs: Record<string, string> = {}
+    const attrRegex = /(?:^|\s)(title|body|file|start|end|priority)\s*=\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|([^\s}]+))/gi
+    for (const match of argsStr.matchAll(attrRegex)) {
+      attrs[match[1].toLowerCase()] = (match[2] ?? match[3] ?? match[4]).replace(/\\(["'\\])/g, '$1')
     }
 
-    const title = getAttr('title')
-    const body = getAttr('body')
-    const file = getAttr('file')
-    const startStr = getAttr('start')
-    const endStr = getAttr('end')
-    const priorityStr = getAttr('priority')
+    const { title, body, file, start: startStr, end: endStr, priority: priorityStr } = attrs
 
     if (title || body || file) {
       comments.push({

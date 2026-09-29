@@ -14,6 +14,7 @@ import { monacoViewer } from './viewers/monaco'
 import { xtermViewer } from './viewers/terminal'
 import { threeViewer } from './viewers/three'
 import { blackboardViewer } from './viewers/blackboard'
+import { memoryViewer } from './viewers/memory'
 import { browserMirrorViewer } from './viewers/browser'
 
 const NON_PREVIEWABLE_EXTENSIONS = /\.(?:exe|dll|msi|msix|appx|com|bin|so|dylib|a|o|obj|class|jar|war|wasm|zip|7z|rar|gz|bz2|xz|tar|pdf|docx|xlsx|pptx|woff2?|ttf|otf)$/i
@@ -29,6 +30,7 @@ class ArtifactViewerRegistry {
   constructor() {
     // 插件自声明式注册
     this.register(blackboardViewer)
+    this.register(memoryViewer)
     this.register(browserMirrorViewer)
     this.register(drawioViewer)
     this.register(mermaidViewer)
@@ -58,7 +60,7 @@ class ArtifactViewerRegistry {
    */
   getAllRegisteredExtensions(): Set<string> {
     const exts = new Set<string>([
-      '.png', '.jpg', '.jpeg', '.webp', '.svg', '.gif', '.bmp', '.ico',
+      '.png', '.jpg', '.jpeg', '.webp', '.svg', '.gif', '.bmp', '.ico', '.exe',
     ])
     for (const v of this.viewers) {
       if (v.extensions) {
@@ -83,7 +85,7 @@ class ArtifactViewerRegistry {
     if (exts.length === 0) {
       this.cachedExtensionRegex = /$.^/ // 永远不匹配
     } else {
-      const pattern = `([\\w\\u4e00-\\u9fa5\\-_./\\\\]+\\.(?:${exts.join('|')}))(?=[\\s,，。！!？?\\)）\\]】"\'<>]|\\b|$)`
+      const pattern = `([\\w\\u4e00-\\u9fa5\\-_./\\\\](?:[\\w\\u4e00-\\u9fa5\\-_./\\\\ ]*?[\\w\\u4e00-\\u9fa5\\-_./\\\\])?\\.(?:${exts.join('|')}))(?=[\\s,，。！!？?\\)）\\]】"'<>]|\\b|$)`
       this.cachedExtensionRegex = new RegExp(pattern, 'gi')
     }
 
@@ -95,6 +97,11 @@ class ArtifactViewerRegistry {
    */
   isSupportedExtension(fileNameOrPath: string): boolean {
     const lower = fileNameOrPath.toLowerCase().split(/[?#]/)[0]
+    for (const ext of this.getAllRegisteredExtensions()) {
+      if (lower.endsWith(ext.toLowerCase())) {
+        return true
+      }
+    }
     for (const v of this.viewers) {
       if (v.extensions?.some((ext) => lower.endsWith(ext.toLowerCase()))) {
         return true
@@ -136,11 +143,11 @@ class ArtifactViewerRegistry {
     }
 
     // 如果没有特定专用查看器匹配，且该文件为非图片非音频的代码/文本，默认回退到 Monaco 代码编辑器
-    if (!bestViewer && isEnabled('monaco-viewer') && !isNonPreviewableFile(lowerName)) {
-      const isImgOrAudio = /.(png|jpe?g|webp|gif|bmp|ico|tiff?|mp3|wav|ogg|aac|flac)$/i.test(lowerName)
-      if (!isImgOrAudio) {
-        return this.getViewerById('monaco-viewer')
-      }
+    const monaco = this.getViewerById('monaco-viewer')
+    const hasKnownTextExtension = Boolean(monaco?.extensions?.some((ext) => lowerName.endsWith(ext.toLowerCase())))
+    const hasExplicitTextMime = mime.startsWith('text/') && mime !== 'text/plain'
+    if (!bestViewer && monaco && isEnabled('monaco-viewer') && !isNonPreviewableFile(lowerName) && (hasKnownTextExtension || hasExplicitTextMime)) {
+      return monaco
     }
 
     return bestViewer

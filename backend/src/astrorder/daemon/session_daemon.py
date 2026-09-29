@@ -51,6 +51,18 @@ RUNTIME_ACTIONS = frozenset(
         "session.approval.set",
     }
 )
+STATUS_CHANGING_ACTIONS = frozenset(
+    {
+        "session.send",
+        "session.compact",
+        "session.review",
+        "session.steer",
+        "session.interrupt",
+        "session.approve",
+        "session.close",
+        "session.delete",
+    }
+)
 
 
 
@@ -409,7 +421,19 @@ class SessionDaemon:
             if current is not None:
                 self._connector_agents[agent_id] = {**current, **dict(agent)}
         if session_id is not None:
-            await self.publish(session_id, "connector.event", payload)
+            data = event.get("data")
+            status = (
+                data.get("status")
+                if event_type == "session.upsert"
+                and self._connector_agents.get(agent_id, {}).get("kind") == "hermes"
+                and isinstance(data, Mapping)
+                and data.get("id") == session_id
+                else None
+            )
+            await self.publish(
+                session_id, "connector.event", payload,
+                status=status if isinstance(status, str) and status in SESSION_STATUSES else None,
+            )
             return
         control_session_id = self._agent_control_sessions.get(agent_id)
         if control_session_id is not None:
@@ -468,7 +492,7 @@ class SessionDaemon:
         action = request.get("action")
         if action not in {
             "daemon.shutdown", "daemon.status", "session.create", "session.spawn",
-            "runtime.request", "model_config.plan", "model_config.apply", "model_config.reload", *RUNTIME_ACTIONS,
+            "runtime.request", "runtime.disconnect", "session.observe_status", "model_config.plan", "model_config.apply", "model_config.reload", *RUNTIME_ACTIONS,
         }:
             return self.handle_request(raw)
         request_id = request.get("request_id")
@@ -490,8 +514,12 @@ class SessionDaemon:
                 return await self._create_runtime(request)
             if action == "session.spawn":
                 return await self._spawn_runtime(request)
+            if action == "session.observe_status":
+                return await self._observe_runtime_status(request)
             if action == "runtime.request":
                 return await self._request_runtime(request)
+            if action == "runtime.disconnect":
+                return await self._disconnect_codex_runtime(request)
             if action in {"model_config.plan", "model_config.apply"}:
                 from .model_config import execute_model_config
                 result = await asyncio.to_thread(execute_model_config, action, request)
@@ -525,6 +553,24 @@ class SessionDaemon:
             "request_id": request.get("request_id"),
             "daemon_id": self.daemon_id,
             "result": dict(result),
+        }
+
+    async def _observe_runtime_status(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        session_id = request.get("session_id")
+        self._validate_session_id(session_id)
+        status = request.get("status")
+        if not isinstance(status, str) or status not in {"idle", "running", "waiting_approval"}:
+            raise DaemonProtocolError("observed Hermes status is invalid")
+        async with self._runtime_lock:
+            if self._session_agent_types.get(session_id) not in {"hermes", "ssh"}:
+                raise DaemonProtocolError("session is not daemon-owned Hermes")
+            self._sessions[session_id].status = status
+        return {
+            "action": "session.observe_status.result",
+            "request_id": request.get("request_id"),
+            "daemon_id": self.daemon_id,
+            "session_id": session_id,
+            "result": {"status": status},
         }
 
     async def _request_config_reload(self, request: Mapping[str, Any]) -> dict[str, Any]:
@@ -640,6 +686,9 @@ class SessionDaemon:
                     raise DaemonProtocolError("session is owned by a different agent type")
                 wal = self._sessions[session_id]
                 result_data = dict(self._session_runtime_metadata.get(session_id, {}))
+                if runtime_control and session_id in self._runtime_control_sessions:
+                    result_data = dict(await runtime.spawn(dict(request)))
+                    self._session_runtime_metadata[session_id] = result_data
                 result_data.update({"status": wal.status, "attached": True})
                 if runtime_control:
                     await self._bind_agent_control_session(session_id, result_data)
@@ -698,7 +747,8 @@ class SessionDaemon:
             if status is not None:
                 if status not in SESSION_STATUSES:
                     raise DaemonProtocolError("runtime command status is invalid")
-                self._sessions[session_id].status = status
+                if action in STATUS_CHANGING_ACTIONS:
+                    self._sessions[session_id].status = status
             try:
                 json.dumps(result_data)
             except (TypeError, ValueError) as exc:
@@ -769,6 +819,58 @@ class SessionDaemon:
             "daemon_id": self.daemon_id,
             "session_id": session_id,
             "result": {"status": "idle", "disconnected": True},
+        }
+
+    async def _disconnect_codex_runtime(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        agent_type = request.get("agent_type")
+        if agent_type not in {"codex", "codex-ssh"}:
+            raise DaemonProtocolError("unsupported Codex runtime type")
+        connection_id = request.get("connection_id")
+        if agent_type == "codex-ssh":
+            if not isinstance(connection_id, str) or not connection_id or len(connection_id) > 128:
+                raise DaemonProtocolError("Codex SSH connection_id is invalid")
+        elif connection_id is not None:
+            raise DaemonProtocolError("local Codex does not accept connection_id")
+        async with self._runtime_lock:
+            if self._maintenance:
+                raise DaemonProtocolError("daemon is stopping")
+            runtime = self._runtime_registry.get(agent_type)
+            if runtime is None:
+                raise DaemonProtocolError("Codex runtime is not registered")
+            if agent_type == "codex-ssh":
+                session_ids = tuple(
+                    sid for sid in await runtime.sessions_for_connection(connection_id)
+                    if self._session_runtimes.get(sid) is runtime
+                )
+            else:
+                session_ids = tuple(
+                    sid for sid, owner in self._session_runtimes.items() if owner is runtime
+                )
+            active = [
+                sid for sid in session_ids
+                if self._sessions.get(sid) is not None
+                and self._sessions[sid].status in {"running", "waiting_approval"}
+            ]
+            if active:
+                raise DaemonProtocolError(
+                    f"Codex has {len(active)} running or waiting-approval session(s); stop them before disconnecting"
+                )
+            if agent_type == "codex-ssh":
+                await runtime.disconnect_connection(connection_id)
+            else:
+                await runtime.shutdown()
+            for sid in session_ids:
+                self._session_runtimes.pop(sid, None)
+                self._session_agent_types.pop(sid, None)
+                self._session_runtime_metadata.pop(sid, None)
+                self._runtime_control_sessions.discard(sid)
+                if sid in self._sessions:
+                    self._sessions[sid].status = "idle"
+        return {
+            "action": "runtime.disconnect.result",
+            "request_id": request.get("request_id"),
+            "daemon_id": self.daemon_id,
+            "result": {"disconnected": True, "released_sessions": list(session_ids)},
         }
 
     async def _bind_agent_control_session(

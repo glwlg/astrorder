@@ -70,6 +70,25 @@ def test_background_skill_tool_is_visible_without_marking_session_running():
     assert [e['data']['status'] for e in transport.events if e['type'] == 'session.upsert'] == ['idle']
 
 
+def test_stream_final_reply_follows_tool_activity_in_live_transcript(monkeypatch):
+    import importlib
+    from itertools import count
+
+    plugin = importlib.import_module('connectors.hermes.astrorder_hermes_plugin')
+    ticks = count()
+    monkeypatch.setattr(plugin, '_timestamp', lambda: f'2026-09-28T07:49:{next(ticks):02d}.000Z')
+    transport = FakeTransport()
+    bridge = HermesBridge(FakeContext(), HermesConnectorConfig(
+        endpoint='ws://127.0.0.1:30002/ws/v1/connector', secret='test-only',
+        agent_id='hermes-test', agent_name='Hermes test'), transport=transport)
+    bridge._on_stream_start('session', turn_id='turn')
+    bridge._on_pre_tool_call(session_id='session', tool_name='execute_code', tool_call_id='call')
+    bridge._on_stream_end('session', turn_id='turn', final_text='完成')
+    rows = [e['data'] for e in transport.events if e['type'] == 'message.upsert']
+    assert [row['kind'] for row in rows] == ['tool', 'message']
+    assert rows[0]['created_at'] < rows[1]['created_at']
+
+
 def test_stream_reasoning_and_tool_callbacks_emit_transcript_activity():
     transport = FakeTransport()
     bridge = HermesBridge(FakeContext(), HermesConnectorConfig(

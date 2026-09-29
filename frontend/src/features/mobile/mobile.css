@@ -138,6 +138,8 @@ html, body {
 .m-artifact-name { font-size:13px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; }
 .m-artifact-head button { display:flex; align-items:center; justify-content:center; width:32px; height:32px; border:none; background:none; color:var(--m-text); cursor:pointer; }
 .m-artifact-body { flex:1; overflow:auto; padding:12px 14px; }
+.m-artifact-body.m-artifact-html { padding:0; overflow:hidden; }
+.m-artifact-html iframe { display:block; width:100%; height:100%; border:0; background:#fff; }
 .m-artifact-loading { display:flex; align-items:center; justify-content:center; gap:8px; padding:40px 0; color:var(--m-dim); font-size:13px; }
 .m-artifact-loading .spin { animation:spin 1s linear infinite; }
 @keyframes spin { from { transform:rotate(0deg) } to { transform:rotate(360deg) } }

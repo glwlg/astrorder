@@ -86,8 +86,45 @@ describe('FileTreeViewer expansion persistence', () => {
 
     const file = await screen.findByText('index.ts')
     await waitFor(() => expect(file).toBeVisible())
-    expect(file.closest('.file-tree-row')).toHaveStyle({ outline: '1px solid var(--astr-blue, #3b82f6)' })
+    const row = file.closest('.file-tree-row') as HTMLElement
+    expect(row).toHaveStyle({ outline: '1px solid var(--astr-blue, #3b82f6)' })
+    expect(row).toHaveClass('is-selected')
+    expect(row).toHaveClass('is-revealed')
     expect(fetch).toHaveBeenCalledWith(expect.stringContaining(`reveal_path=${encodeURIComponent(revealPath)}`))
+    view.unmount()
+  })
+
+  it('selects and reveals requested file even when paths differ in slashes (Windows vs POSIX)', async () => {
+    // revealPath 为 POSIX 正斜杠，后端返回的节点为 Windows 反斜杠
+    const revealPath = 'P:/workspace/example/local-prod/ELK/logstash-pipelines/logstash-zhiyuan-portal.conf'
+    const windowsNodePath = 'P:\\workspace\\example\\local-prod\\ELK\\logstash-pipelines\\logstash-zhiyuan-portal.conf'
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      root: artifact.path,
+      items: [{
+        name: 'local-prod', path: 'P:\\workspace\\example\\local-prod', is_dir: true, children: [{
+          name: 'ELK', path: 'P:\\workspace\\example\\local-prod\\ELK', is_dir: true, children: [{
+            name: 'logstash-pipelines', path: 'P:\\workspace\\example\\local-prod\\ELK\\logstash-pipelines', is_dir: true, children: [
+              { name: 'logstash-zhiyuan-portal.conf', path: windowsNodePath, is_dir: false },
+            ],
+          }],
+        }],
+      }],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+    Element.prototype.scrollIntoView = vi.fn()
+    vi.stubGlobal('ResizeObserver', class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    })
+
+    const view = renderTree({ ...artifact, metadata: { revealPath, revealAt: 1 } })
+
+    const file = await screen.findByText('logstash-zhiyuan-portal.conf')
+    await waitFor(() => expect(file).toBeVisible())
+    const row = file.closest('.file-tree-row') as HTMLElement
+    expect(row).toHaveClass('is-selected')
+    expect(row).toHaveClass('is-revealed')
+    expect(row).toHaveStyle({ outline: '1px solid var(--astr-blue, #3b82f6)' })
     view.unmount()
   })
 

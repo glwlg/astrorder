@@ -42,7 +42,14 @@ export function XtermViewer({ artifact, isActive = true }: ViewerContext) {
 
     // 连接真实后端 WebSocket 终端路由
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const wsUrl = `${protocol}//${window.location.host}/ws/v1/terminal?session_id=${encodeURIComponent(artifact.sessionId)}`
+    let localToken: string | null = null
+    try {
+      if (typeof localStorage !== 'undefined' && typeof localStorage.getItem === 'function') {
+        localToken = localStorage.getItem('astrorder:token')
+      }
+    } catch {}
+    const tokenParam = localToken ? `&token=${encodeURIComponent(localToken)}` : ''
+    const wsUrl = `${protocol}//${window.location.host}/ws/v1/terminal?session_id=${encodeURIComponent(artifact.sessionId)}${tokenParam}`
     
     let ws: WebSocket
     try {

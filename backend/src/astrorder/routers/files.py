@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
+from ..connections import run_subprocess_hidden
 from ..core.staging_files import StageFilesPayload, stage_files_handler
 
 router = APIRouter()
@@ -111,7 +112,7 @@ print(json.dumps({{
 """
         cmd = build_remote_python_command(remote_script)
         try:
-            res = subprocess.run(
+            res = run_subprocess_hidden(
                 argv + [cmd],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -283,7 +284,7 @@ print(json.dumps({{'items': results, 'root': str(root)}}))
 """
         cmd = build_remote_python_command(remote_script)
         try:
-            res = subprocess.run(
+            res = run_subprocess_hidden(
                 argv + [cmd],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -344,6 +345,59 @@ def stage_files_endpoint(payload: StageFilesPayload, request: Request) -> dict[s
     return stage_files_handler(payload, request)
 
 
+class FileExistsPayload(BaseModel):
+    workspace: str
+    paths: list[str] = Field(max_length=100)
+    connection_id: str | None = None
+
+
+@router.post("/api/v1/files/exists")
+def check_files_exist(payload: FileExistsPayload, request: Request) -> dict[str, list[str]]:
+    _private(request)
+    if not payload.workspace or "\0" in payload.workspace or any(
+        not path or len(path) > 1024 or "\0" in path for path in payload.paths
+    ):
+        raise HTTPException(status_code=400, detail="Invalid file path")
+
+    if payload.connection_id and payload.connection_id != "local":
+        import json
+        ssh_conn = request.app.state.store.get_ssh_connection(payload.connection_id)
+        if not ssh_conn:
+            raise HTTPException(status_code=404, detail="SSH 连接不存在")
+        from ..ssh_transport import SshNativeRuntime, build_remote_python_command
+        runtime = SshNativeRuntime(ssh_conn["settings"], ssh_conn["id"], 0, None, None, connector_secret=None)
+        argv = [arg for arg in runtime._base_ssh_argv() if arg != "-T"] + [
+            "-o", "BatchMode=yes", runtime._target(),
+        ]
+        script = f"""
+import json
+from pathlib import Path
+root = Path({payload.workspace!r}).expanduser()
+paths = {payload.paths!r}
+print(json.dumps([p for p in paths if (Path(p).expanduser() if Path(p).expanduser().is_absolute() else root / p).is_file()]))
+"""
+        try:
+            result = run_subprocess_hidden(
+                argv + [build_remote_python_command(script)],
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                timeout=10, check=False,
+            )
+        except subprocess.TimeoutExpired:
+            raise HTTPException(status_code=504, detail="检查远程文件超时")
+        if result.returncode != 0:
+            raise HTTPException(status_code=502, detail="检查远程文件失败")
+        return {"existing": json.loads(result.stdout)}
+
+    root = Path(payload.workspace).expanduser()
+    return {
+        "existing": [
+            path for path in payload.paths
+            for candidate in [Path(path).expanduser()]
+            if (candidate if candidate.is_absolute() else root / candidate).is_file()
+        ],
+    }
+
+
 @router.get("/api/v1/files/raw")
 def get_raw_file(
     request: Request,
@@ -389,7 +443,7 @@ sys.stdout.buffer.write(target.read_bytes())
 """
         cmd = build_remote_python_command(remote_script)
         try:
-            res = subprocess.run(
+            res = run_subprocess_hidden(
                 argv + [cmd],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,

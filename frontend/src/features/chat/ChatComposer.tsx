@@ -23,6 +23,7 @@ import { AgentCommandMenu, AgentMentionMenu, buildCommandMenuItems, type Command
 import { useSidecarStore } from '../sidecar/sidecarStore'
 import { expandSystemMentions } from './systemMentions'
 import { usePersistentDraft } from './draftStorage'
+import { UNCOMMITTED_REVIEW_MESSAGE } from './reviewRelay'
 
 
 export interface InterpretedGatewayError {
@@ -426,7 +427,7 @@ export function ChatComposer({
         useSidecarStore.getState().openGitDiff(session.id, session.agent_id, session.workspace || undefined, session.connection_id || undefined)
         updateDraft(EMPTY_DRAFT)
         setDismissedMenuText(null)
-        void submitDirectMessage('请检查我未提交的更改')
+        void submitDirectMessage(UNCOMMITTED_REVIEW_MESSAGE)
         return
       }
       if (item.kind === 'review_branch') {
@@ -873,7 +874,9 @@ ${draft.text}` : entry.payload.text)
               leftSection={<IconBrain size={13} />}
               title="当前上下文用量"
             >
-              {(usage.last_input_tokens / 1000).toFixed(1)}k / {(usage.context_window / 1000).toFixed(0)}k
+              {usage.context_window && usage.context_window > 0
+                ? `${(usage.last_input_tokens / 1000).toFixed(1)}k / ${(usage.context_window / 1000).toFixed(0)}k`
+                : `${(usage.last_input_tokens / 1000).toFixed(1)}k`}
             </Badge>
           )}
           <SessionModelControl key={`model:${draftKey}`} session={session} />

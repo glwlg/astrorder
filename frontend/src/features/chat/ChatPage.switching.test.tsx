@@ -52,3 +52,53 @@ it('replaces the transcript on in-app navigation, including the same native ID i
   expect(errors.mock.calls.some(args => args.join(' ').includes('same key'))).toBe(false)
   client.clear()
 })
+
+it.each([
+  ['failed', 'Codex 审查超过 10 分钟未完成。'],
+  ['empty', null],
+] as const)('recovers a completed %s review into the developer draft after returning to the page', async (status, error) => {
+  useAstrorderStore.getState().resetRuntime()
+  const agent_id = 'codex'
+  const source_session_id = 'dev'
+  useAstrorderStore.getState().setDraft(agent_id, source_session_id, { text: '', attachments: [], sessionRefs: [] })
+  const review_session_id = 'review'
+  const date = '2026-09-29T03:32:28Z'
+  const comment = '::code-comment{title="[P1] 修复问题" body="补充校验。" file="src/a.ts" start=12 priority=1}'
+  useAstrorderStore.getState().hydrateBootstrap({
+    protocol_version: 1,
+    cursor: 0,
+    agents: [{ id: agent_id, name: 'Codex', kind: 'codex', status: 'ready', capabilities: ['chat'], limitation: null }],
+    sessions: [source_session_id, review_session_id].map(id => ({ id, agent_id, title: id, workspace: '/repo', status: 'idle', updated_at: date })),
+  })
+  const getRuns = vi.spyOn(api, 'getReviewRelayRuns').mockResolvedValue({ items: [{
+    id: 'run-1', source_agent_id: agent_id, source_session_id, review_agent_id: agent_id,
+    review_session_id, command_id: 'command-1', baseline_ids: ['old-message'],
+    status, comment_text: null, error, created_at: date, updated_at: date,
+  }] })
+  let reviewReads = 0
+  vi.spyOn(api, 'getMessages').mockImplementation(async id => ({
+    items: id === review_session_id && (++reviewReads > (status === 'empty' ? 1 : 0)) ? [{
+      id: 'new-message', session_id: review_session_id, agent_id, role: 'assistant', kind: 'message',
+      text: comment, created_at: date, attachments: [], command_id: 'command-1', tool: null,
+    }] : [], next_cursor: null,
+  }))
+  vi.spyOn(api, 'getCommands').mockImplementation(async id => ({ items: id === review_session_id ? [{
+    id: 'command-1', session_id: review_session_id, agent_id, action: 'send', state: 'completed',
+    text: '请检查我未提交的更改', attachments: [], created_at: date, error: null, target_id: null,
+  }] : [] }))
+  vi.spyOn(api, 'getTasks').mockResolvedValue({ items: [] })
+  vi.spyOn(api, 'getSessionModel').mockResolvedValue({ model: 'model', provider: 'provider' })
+  vi.spyOn(api, 'getConnections').mockResolvedValue({ local: { kind: 'hermes', state: 'offline', available: true, version: null, agent_id: null, session_id: null, detail: '' }, ssh: { items: [], state: 'unconfigured', settings: null, detail: '' } })
+  const update = vi.spyOn(api, 'updateReviewRelayRun').mockImplementation(async (_, payload) => ({
+    id: 'run-1', source_agent_id: agent_id, source_session_id, review_agent_id: agent_id,
+    review_session_id, command_id: 'command-1', baseline_ids: ['old-message'],
+    status: payload.status, comment_text: payload.comment_text || null, error: null, created_at: date, updated_at: date,
+  }))
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(<MantineProvider><QueryClientProvider client={client}><MemoryRouter initialEntries={['/chat/dev?agent_id=codex']}><Routes><Route path="/chat/:sessionId" element={<ChatPage />} /></Routes></MemoryRouter></QueryClientProvider></MantineProvider>)
+  await waitFor(() => expect(useAstrorderStore.getState().drafts['codex::dev']?.text).toBe(comment), { timeout: 5000 })
+  expect(getRuns).toHaveBeenCalledWith(agent_id, source_session_id)
+  expect(update).toHaveBeenCalledWith('run-1', { status: 'draft_ready', comment_text: comment })
+  expect(update).not.toHaveBeenCalledWith('run-1', { status: 'empty' })
+  client.clear()
+})

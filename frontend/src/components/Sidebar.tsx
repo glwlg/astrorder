@@ -1,14 +1,18 @@
-import { IconAdjustments, IconBrain, IconChartHistogram, IconDeviceDesktop, IconLayoutDashboard, IconMessageCircle, IconPuzzle, IconSettings, IconTopologyStarRing, IconUsers, IconWorld } from '@tabler/icons-react'
-import { ActionIcon, Modal, NavLink, Stack, Tabs, Text, Tooltip } from '@mantine/core'
+import { IconAdjustments, IconBolt, IconBrain, IconChartHistogram, IconDeviceDesktop, IconLayoutDashboard, IconMessageCircle, IconPuzzle, IconSettings, IconTopologyStarRing, IconUsers, IconWorld } from '@tabler/icons-react'
+import { ActionIcon, HoverCard, Modal, NavLink, Stack, Tabs, Text, Tooltip } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
+import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { NavLink as RouterNavLink, useLocation } from 'react-router-dom'
+import { api, type OcxUsageResponse } from '../api/client'
 import type { Agent, Project, Session } from '../domain/types'
 import { AgentsPage } from '../features/agents/AgentsPage'
+import { formatTokens, getModelColor } from '../features/analytics/AnalyticsPage'
 import { PluginsPage } from '../features/plugins/PluginsPage'
 import { NetworkSettingsPage } from '../features/network/NetworkSettingsPage'
 import { DesktopSettingsPage } from '../features/services/DesktopSettingsPage'
 import { ModelGatewaySettingsPage } from '../features/services/ModelGatewaySettingsPage'
+import { CapabilitiesSettingsCard } from '../features/services/CapabilitiesSettingsCard'
 import { SessionRail } from './SessionRail'
 import { BotGroupRail } from './BotGroupRail'
 import { SwarmRootRail } from './SwarmRootRail'
@@ -20,6 +24,47 @@ const navItems = [
   { to: '/groups', label: '群聊', icon: IconUsers, id: 'groups' },
   { to: '/analytics', label: '统计', icon: IconChartHistogram, id: 'analytics' },
 ]
+
+function TodayUsagePreview({ data, pending, error, updatedAt }: {
+  data?: OcxUsageResponse
+  pending: boolean
+  error: boolean
+  updatedAt: number
+}) {
+  const now = new Date()
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+  const day = data?.days.find(row => row.date === today)
+  const models = day?.models?.filter(row => Number.isFinite(row.totalTokens))
+    .sort((a, b) => b.totalTokens - a.totalTokens) || []
+  return (
+    <div className="sidebar-usage-preview">
+      <div className="sidebar-usage-heading">
+        <strong>今日模型用量</strong>
+        {updatedAt > 0 && <span>更新于 {new Date(updatedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</span>}
+      </div>
+      {day ? (
+        <>
+          <div className="sidebar-usage-summary">
+            <span>{day.requests.toLocaleString('zh-CN')} 次请求</span>
+            <strong>{formatTokens(day.totalTokens)} Token</strong>
+          </div>
+          <div className="sidebar-usage-models">
+            {models.length ? models.map(row => (
+              <div className="sidebar-usage-model" key={`${row.provider}:${row.model}`}>
+                <span className="sidebar-usage-model-name" title={`${row.provider}/${row.model}`}>
+                  <i style={{ background: getModelColor(row.model, row.provider) }} />
+                  <span>{row.model}</span>
+                </span>
+                <strong>{formatTokens(row.totalTokens)}</strong>
+              </div>
+            )) : <span className="sidebar-usage-state">暂无模型用量</span>}
+          </div>
+          {error && <span className="sidebar-usage-state">更新失败，显示上次数据</span>}
+        </>
+      ) : <span className="sidebar-usage-state">{pending ? '正在读取今日用量…' : error ? '今日用量暂不可用' : '今天暂无用量'}</span>}
+    </div>
+  )
+}
 
 function addSessionToMonitor(sessionKey: string, title?: string) {
   try {
@@ -64,6 +109,15 @@ export function Sidebar({
   const location = useLocation()
   const [settingsOpened, setSettingsOpened] = useState(false)
   const [isMonitorDragOver, setIsMonitorDragOver] = useState(false)
+  const todayUsage = useQuery({
+    queryKey: ['astrorder', 'analytics', 'today-models'],
+    queryFn: () => api.getAnalyticsUsage({ range: '7d', surface: 'all' }),
+    enabled: !onNavigate,
+    staleTime: 60_000,
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: false,
+    retry: false,
+  })
 
   const isSwarm = location.pathname.startsWith('/swarm')
   const isGroups = location.pathname.startsWith('/groups') || location.pathname.startsWith('/chat/group-')
@@ -84,9 +138,8 @@ export function Sidebar({
                 (id === 'monitor' && isMonitorRoute) ||
                 (id === 'analytics' && isAnalytics) ||
                 (id === 'chat' && isChat)
-              return (
-                <Tooltip key={to} label={label} position="bottom" withArrow openDelay={200}>
-                  <NavLink
+              const link = (
+                <NavLink
                     component={RouterNavLink}
                     to={to}
                     leftSection={<Icon size={18} stroke={1.8} />}
@@ -120,8 +173,17 @@ export function Sidebar({
                         addSessionToMonitor(key, title)
                       }
                     } : undefined}
-                  />
-                </Tooltip>
+                />
+              )
+              return id === 'analytics' ? (
+                <HoverCard key={to} width={280} position="right-start" withArrow openDelay={150} closeDelay={150}>
+                  <HoverCard.Target>{link}</HoverCard.Target>
+                  <HoverCard.Dropdown>
+                    <TodayUsagePreview data={todayUsage.data} pending={todayUsage.isPending} error={todayUsage.isError} updatedAt={todayUsage.dataUpdatedAt} />
+                  </HoverCard.Dropdown>
+                </HoverCard>
+              ) : (
+                <Tooltip key={to} label={label} position="bottom" withArrow openDelay={200}>{link}</Tooltip>
               )
             })}
           </div>
@@ -170,19 +232,24 @@ export function Sidebar({
         centered
         size="80%"
         styles={{
-          content: { width: '80%', maxWidth: '1440px', minWidth: 'min(92vw, 760px)' },
+          content: { width: '80vw', maxWidth: '1600px', height: '80vh', maxHeight: '1000px', display: 'flex', flexDirection: 'column' },
+          body: { flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', padding: '0 16px 16px' },
         }}
       >
-        <Tabs defaultValue="connections" keepMounted={true} className="settings-tabs">
+        <Tabs defaultValue="connections" keepMounted={true} className="settings-tabs" style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
           <Tabs.List>
             <Tabs.Tab value="connections" leftSection={<IconAdjustments size={16} />}>连接</Tabs.Tab>
             <Tabs.Tab value="models" leftSection={<IconBrain size={16} />}>模型与网关</Tabs.Tab>
+            <Tabs.Tab value="skills" leftSection={<IconBolt size={16} />}>能力中心 (Capabilities)</Tabs.Tab>
             <Tabs.Tab value="network" leftSection={<IconWorld size={16} />}>网络与移动端</Tabs.Tab>
             <Tabs.Tab value="desktop" leftSection={<IconDeviceDesktop size={16} />}>桌面客户端</Tabs.Tab>
             <Tabs.Tab value="plugins" leftSection={<IconPuzzle size={16} />}>插件</Tabs.Tab>
           </Tabs.List>
           <Tabs.Panel value="connections" className="settings-tab-panel"><AgentsPage /></Tabs.Panel>
           <Tabs.Panel value="models" className="settings-tab-panel"><ModelGatewaySettingsPage /></Tabs.Panel>
+          <Tabs.Panel value="skills" className="settings-tab-panel" data-tab-panel-skills="true" style={{ overflow: 'hidden' }}>
+            <CapabilitiesSettingsCard />
+          </Tabs.Panel>
           <Tabs.Panel value="network" className="settings-tab-panel"><NetworkSettingsPage /></Tabs.Panel>
           <Tabs.Panel value="desktop" className="settings-tab-panel"><DesktopSettingsPage /></Tabs.Panel>
           <Tabs.Panel value="plugins" className="settings-tab-panel"><PluginsPage /></Tabs.Panel>

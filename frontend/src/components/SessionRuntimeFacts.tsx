@@ -84,6 +84,10 @@ export function SessionRuntimeFacts({ session, agent }: { session: Session; agen
     <dt>事件流</dt><dd>{events === 'connected' ? '实时同步' : '连接恢复中'}</dd>
     <dt>原生 ID</dt><dd onClick={() => copyText(session.id, '原生 ID')} style={{ cursor: 'pointer' }} title="点击复制原生 ID"><span className="clickable-id">{session.id}</span></dd>
     <dt>星序 ID</dt><dd onClick={() => copyText(astrorderId, '星序 ID')} style={{ cursor: 'pointer' }} title="点击复制星序 ID"><span className="clickable-id nowrap-id">{astrorderId}</span></dd>
-    <dt>上下文</dt><dd>{usage.data ? `${(usage.data.last_input_tokens / 1000).toFixed(1)}k / ${(usage.data.context_window / 1000).toFixed(0)}k (${usage.data.used_percentage}%)` : '统计中…'} {usage.data && <small>缓存命中率 {usage.data.cache_hit_rate}% · 累计产生 {formatTokens(usage.data.total_tokens)} Token{usage.data.speed ? ` · 速度 ${usage.data.speed} tok/s` : ''}</small>}</dd>
+    <dt>上下文</dt><dd>{usage.data ? (
+      usage.data.context_window && usage.data.context_window > 0
+        ? `${(usage.data.last_input_tokens / 1000).toFixed(1)}k / ${(usage.data.context_window / 1000).toFixed(0)}k (${usage.data.used_percentage}%)`
+        : `${(usage.data.last_input_tokens / 1000).toFixed(1)}k`
+    ) : '统计中…'} {usage.data && <small>缓存命中率 {usage.data.cache_hit_rate}% · 累计产生 {formatTokens(usage.data.total_tokens)} Token{usage.data.speed ? ` · 速度 ${usage.data.speed} tok/s` : ''}</small>}</dd>
   </dl>
 }

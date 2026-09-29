@@ -228,6 +228,20 @@ describe('sessionActivityStatus live stream', () => {
   })
 })
 
+describe('project identity', () => {
+  it('does not merge two local folders solely because their display names match', () => {
+    const projects = [
+      { id: 'one', project_id: 'one', project_name: 'astrorder', source_id: 'local-codex', agent_id: 'local-codex', workspace: 'P:/workspace/astrorder', session_count: 0, updated_at: '' },
+      { id: 'two', project_id: 'two', project_name: 'astrorder', source_id: 'hermes-local-1', agent_id: 'local-hermes-default', workspace: 'P:/DevApp/astrorder', session_count: 0, updated_at: '' },
+    ]
+    const groups = buildProjectGroups([
+      { id: 'wrong-folder', agent_id: 'local-hermes-default', source_id: 'hermes-local-1', title: '另一个项目', project_name: 'astrorder', workspace: 'P:/DevApp/astrorder', status: 'idle', updated_at: '2026-09-28T00:00:00Z' },
+    ], {}, projects.slice(0, 1))
+    expect(groups).toHaveLength(2)
+    expect(groups.find(group => group.sessions.length)?.workspace).toBe('P:/DevApp/astrorder')
+  })
+})
+
 function railSession(partial: Partial<Session> & Pick<Session, 'id' | 'title'>): Session {
   return {
     agent_id: 'local-codex',
@@ -278,5 +292,6 @@ describe('session rail hygiene', () => {
     expect(displaySessionTitle(railSession({ id: 'hermes', title: '20260911_143914_a75faf' }))).toBe('OpsCore')
     expect(displaySessionTitle(railSession({ id: 'no-ws', title: 'Untitled session', workspace: null }))).toBe('未命名')
     expect(displaySessionTitle(railSession({ id: 'real', title: '排查 Codex 思考强度' }))).toBe('排查 Codex 思考强度')
+    expect(displaySessionTitle(railSession({ id: 'hermes-unnamed', agent_id: 'local-hermes-default', title: '新会话', workspace: 'P:/workspace/glwlg/ai/astrorder' }))).toBe('未命名')
   })
 })
