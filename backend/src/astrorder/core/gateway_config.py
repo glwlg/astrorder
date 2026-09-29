@@ -10,6 +10,9 @@ from astrorder.models import WorkspacePreferenceRow
 
 PREFERENCE_KEY = "analytics:llm_gateway"
 LEGACY_USAGE_KEY = "analytics:ocx_usage_url"
+
+SUPPORTED_GATEWAY_TYPES = {"opencodex", "magpie"}
+
 DEFAULT_CONFIG = {
     "gateway_type": "opencodex",
     "management_url": "https://ocx.651971564.xyz",
@@ -28,13 +31,14 @@ def _url(value: Any, label: str) -> str:
 
 
 def validate_gateway_config(value: dict[str, Any]) -> dict[str, Any]:
-    if str(value.get("gateway_type") or "") != "opencodex":
+    gw_type = str(value.get("gateway_type") or "").strip().lower()
+    if gw_type not in SUPPORTED_GATEWAY_TYPES:
         raise ValueError("暂不支持此 LLM 网关类型")
     overrides = value.get("target_overrides") or {}
     if not isinstance(overrides, dict) or any(not isinstance(key, str) or not key for key in overrides):
         raise ValueError("目标地址覆盖格式无效")
     return {
-        "gateway_type": "opencodex",
+        "gateway_type": gw_type,
         "management_url": _url(value.get("management_url"), "管理地址"),
         "inference_url": _url(value.get("inference_url"), "推理 Base URL"),
         "api_key": str(value.get("api_key") or "").strip(),

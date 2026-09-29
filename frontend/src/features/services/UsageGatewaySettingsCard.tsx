@@ -11,6 +11,7 @@ type Preview = Awaited<ReturnType<typeof api.previewModelSync>>
 type SyncJob = Awaited<ReturnType<typeof api.getModelSyncJobs>>['items'][number]
 
 export function UsageGatewaySettingsCard() {
+  const [gatewayType, setGatewayType] = useState<'opencodex' | 'magpie'>('opencodex')
   const [managementUrl, setManagementUrl] = useState('')
   const [inferenceUrl, setInferenceUrl] = useState('')
   const [apiKey, setApiKey] = useState('')
@@ -33,6 +34,7 @@ export function UsageGatewaySettingsCard() {
     setBusy('load')
     try {
       const [config, targetResult, jobResult] = await Promise.all([api.getAnalyticsConfig(), api.getModelSyncTargets(), api.getModelSyncJobs()])
+      setGatewayType(config.gateway_type || 'opencodex')
       setManagementUrl(config.management_url)
       setInferenceUrl(config.inference_url)
       setOverrides(config.target_overrides)
@@ -51,7 +53,7 @@ export function UsageGatewaySettingsCard() {
     setBusy('save')
     try {
       const result = await api.updateAnalyticsConfig({
-        gateway_type: 'opencodex', management_url: managementUrl.trim(), inference_url: inferenceUrl.trim(),
+        gateway_type: gatewayType, management_url: managementUrl.trim(), inference_url: inferenceUrl.trim(),
         target_overrides: Object.fromEntries(Object.entries(overrides).filter(([, value]) => value.trim()).map(([key, value]) => [key, value.trim()])),
         ...(clearKey ? { api_key: '' } : apiKey.trim() ? { api_key: apiKey.trim() } : {}),
       })
@@ -129,10 +131,10 @@ export function UsageGatewaySettingsCard() {
           <Text fw={600} size="sm">LLM 网关与模型同步</Text>
           <Text size="xs" c="dimmed">用量实时读取；Codex 与 Grok 配置按目标同步</Text>
         </div></Group>
-        <Badge size="xs" variant="light" color="teal">OpenCodeX{maskedKey ? ` · ${maskedKey}` : ''}</Badge>
+        <Badge size="xs" variant="light" color={gatewayType === 'magpie' ? 'indigo' : 'teal'}>{gatewayType === 'magpie' ? 'Magpie' : 'OpenCodeX'}{maskedKey ? ` · ${maskedKey}` : ''}</Badge>
       </Group>
       <Stack gap="sm">
-        <Select label="网关类型" value="opencodex" data={[{ value: 'opencodex', label: 'OpenCodeX' }]} allowDeselect={false} />
+        <Select label="网关类型" value={gatewayType} onChange={(v) => setGatewayType((v as any) || 'opencodex')} data={[{ value: 'opencodex', label: 'OpenCodeX' }, { value: 'magpie', label: 'Magpie' }]} allowDeselect={false} />
         <TextInput label="管理地址" placeholder="https://ocx.example.com" value={managementUrl} onChange={(event) => setManagementUrl(event.currentTarget.value)} disabled={busy === 'load'} />
         <TextInput label="推理 Base URL" placeholder="https://llm.example.com/v1" value={inferenceUrl} onChange={(event) => setInferenceUrl(event.currentTarget.value)} disabled={busy === 'load'} />
         <PasswordInput label="API Key" placeholder={maskedKey ? '留空则保留当前 Key' : '可选'} value={apiKey} onChange={(event) => setApiKey(event.currentTarget.value)} />

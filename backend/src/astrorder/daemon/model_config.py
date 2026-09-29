@@ -16,16 +16,17 @@ from .errors import DaemonProtocolError
 FILES = {
     "codex_config": ".codex/config.toml",
     "codex_catalog": ".codex/opencodex-catalog.json",
+    "codex_magpie_catalog": ".codex/magpie-catalog.json",
     "grok_config": ".grok/config.toml",
 }
 
 _REMOTE = r'''
 import hashlib,json,os,sys,tomllib
 from pathlib import Path
-FILES={"codex_config":".codex/config.toml","codex_catalog":".codex/opencodex-catalog.json","grok_config":".grok/config.toml"}
+FILES={"codex_config":".codex/config.toml","codex_catalog":".codex/opencodex-catalog.json","codex_magpie_catalog":".codex/magpie-catalog.json","grok_config":".grok/config.toml"}
 def digest(data): return hashlib.sha256(data).hexdigest()
 def validate(name,data):
-    if name=="codex_catalog": json.loads(data.decode("utf-8-sig"))
+    if name in ("codex_catalog", "codex_magpie_catalog"): json.loads(data.decode("utf-8-sig"))
     else: tomllib.loads(data.decode("utf-8-sig"))
 def inspect():
     out={"_home":str(Path.home())}
@@ -94,7 +95,7 @@ def _digest(data: bytes) -> str:
 
 def _validate(name: str, data: bytes) -> None:
     text = data.decode("utf-8-sig")
-    json.loads(text) if name == "codex_catalog" else tomllib.loads(text)
+    json.loads(text) if name in ("codex_catalog", "codex_magpie_catalog") else tomllib.loads(text)
 
 
 def _environment_data(api_key: str) -> bytes:

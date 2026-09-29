@@ -91,13 +91,18 @@ def _model_quota(
     if combo:
         providers = {str(row.get("provider")) for row in combo.get("targets", []) if row.get("provider")}
     selected_reports = [row for row in reports if row.get("provider") in providers]
-    if accounts is not None and "openai" in providers:
-        selected_reports = [row for row in selected_reports if row.get("provider") != "openai"]
+    selected_accounts: list[dict[str, Any]] = []
+    if accounts is not None:
+        if "openai" in providers:
+            selected_reports = [row for row in selected_reports if row.get("provider") != "openai"]
+            selected_accounts = [acc for acc in accounts if acc.get("provider", "openai") in providers or not acc.get("provider")]
+        elif any(p in {"codex", "antigravity"} for p in providers):
+            selected_accounts = [acc for acc in accounts if acc.get("provider") in providers]
     return {
         "model": candidate,
         "providers": sorted(providers),
         "reports": selected_reports,
-        "accounts": accounts if "openai" in providers else [],
+        "accounts": selected_accounts,
     }
 
 
@@ -238,9 +243,63 @@ async def get_model_quota(request: Request, model: str = Query(min_length=1)) ->
     loop = asyncio.get_event_loop()
     now = loop.time()
     try:
+        gw_type = str(config.get("gateway_type") or "opencodex").strip().lower()
         cached = _quota_snapshot_cache.get("payload")
         if cached and now < _quota_snapshot_cache.get("expires_at", 0):
             models, combos, reports, accounts = cached
+        elif gw_type == "magpie":
+            async with httpx.AsyncClient(follow_redirects=True, timeout=15.0) as client:
+                models_url = f"{config['inference_url']}/models" if not config['inference_url'].endswith("/models") else config['inference_url']
+                models_resp = await client.get(models_url, headers=headers)
+                models_resp.raise_for_status()
+                raw_models = models_resp.json().get("data", [])
+                models = [
+                    {"id": m.get("id"), "namespaced": m.get("id"), "provider": m.get("owned_by") or (m.get("id", "").split("/")[0] if "/" in m.get("id", "") else "magpie"), "disabled": False}
+                    for m in raw_models if isinstance(m, dict) and m.get("id")
+                ]
+                combos = []
+                reports = []
+                accounts = []
+                quotas_url = "http://127.0.0.1:3425/v1/magpie/quotas"
+                try:
+                    q_resp = await client.get(quotas_url, headers=headers, timeout=5.0)
+                    if q_resp.status_code == 200:
+                        q_data = q_resp.json().get("data", [])
+                        for item in q_data:
+                            prov = str(item.get("provider") or "").strip().lower()
+                            pname = str(item.get("name") or prov)
+                            user = str(item.get("user") or "")
+                            wins = item.get("windows") or []
+                            five_h = next((w for w in wins if "5" in str(w.get("name", ""))), None)
+                            weekly = next((w for w in wins if "7" in str(w.get("name", "")) or "week" in str(w.get("name", "")).lower()), None)
+                            if not weekly and wins:
+                                weekly = wins[0]
+                            rep_quota = {}
+                            if five_h:
+                                rep_quota["fiveHourPercent"] = round(float(five_h.get("used") or 0), 1)
+                            if weekly:
+                                rep_quota["weeklyPercent"] = round(float(weekly.get("used") or 0), 1)
+                            accounts.append({
+                                "id": user or pname,
+                                "email": user,
+                                "provider": prov,
+                                "logLabel": f"{pname} ({user})" if user else pname,
+                                "plan": item.get("plan", ""),
+                                "paused": False,
+                                "quota": {
+                                    "shortPercent": rep_quota.get("fiveHourPercent"),
+                                    "weeklyPercent": rep_quota.get("weeklyPercent"),
+                                }
+                            })
+                            reports.append({
+                                "provider": prov,
+                                "label": f"{pname} - {user}" if user else pname,
+                                "quota": rep_quota,
+                            })
+                except Exception:
+                    pass
+                _quota_snapshot_cache["expires_at"] = now + 60.0
+                _quota_snapshot_cache["payload"] = (models, combos, reports, accounts)
         else:
             async with httpx.AsyncClient(follow_redirects=True, timeout=15.0) as client:
                 responses = await asyncio.gather(*(

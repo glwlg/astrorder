@@ -105,3 +105,30 @@ def test_model_sync_preview_and_background_job(tmp_path: Path, monkeypatch):
 
         duplicate = client.post("/api/v1/model-sync/preview", json={"targets": payload["targets"] * 2}, headers=headers)
         assert duplicate.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_fetch_catalog_magpie(monkeypatch):
+    def gateway(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/v1/models":
+            return httpx.Response(200, json={
+                "data": [
+                    {
+                        "id": "codex/gpt-6-astra", "owned_by": "codex",
+                        "context_window": 272000, "max_input_tokens": 272000,
+                        "supported_reasoning_levels": [{"effort": "low"}, {"effort": "medium"}],
+                    }
+                ]
+            })
+        raise AssertionError(request.url.path)
+
+    client = httpx.AsyncClient
+    monkeypatch.setattr(model_sync_service.httpx, "AsyncClient", lambda **kw: client(transport=httpx.MockTransport(gateway), **kw))
+    catalog = await model_sync_service.fetch_catalog({
+        "gateway_type": "magpie",
+        "inference_url": "http://127.0.0.1:3425/v1",
+        "api_key": "sk-magpie-test",
+    })
+    assert len(catalog["models"]) == 1
+    assert catalog["models"][0]["slug"] == "codex/gpt-6-astra"
+    assert catalog["models"][0]["provider"] == "codex"

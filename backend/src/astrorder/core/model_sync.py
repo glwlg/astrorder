@@ -32,6 +32,41 @@ DEFAULT_CODEX_MODEL_PROTOTYPE = {
     "node_repl_disabled": False,
     "multi_agent_version": "v1",
 }
+def normalize_magpie_catalog(payload: Any) -> dict[str, Any]:
+    if isinstance(payload, dict) and "data" in payload:
+        payload = payload["data"]
+    if not isinstance(payload, list):
+        raise TypeError("Magpie 模型目录格式无效")
+    models: list[dict[str, Any]] = []
+    for row in payload:
+        if not isinstance(row, dict):
+            continue
+        mid = str(row.get("id") or "").strip()
+        if not mid:
+            continue
+        provider = str(row.get("owned_by") or (mid.split("/")[0] if "/" in mid else "magpie")).strip()
+        levels = row.get("supported_reasoning_levels") or []
+        efforts = [str(item.get("effort")) for item in levels if isinstance(item, dict) and item.get("effort")]
+        context_window = int(row.get("context_window") or row.get("context_length") or 0)
+        max_input_tokens = int(row.get("max_input_tokens") or 0)
+        model = {
+            "slug": mid,
+            "provider": provider,
+            "id": mid,
+            "context_window": context_window,
+            "max_input_tokens": max_input_tokens,
+            "auto_compact_token_limit": int(context_window * 0.8) if context_window > 0 else 0,
+            "input_modalities": ["text", "image"],
+            "reasoning_efforts": efforts,
+            "default_reasoning_effort": efforts[1] if len(efforts) > 1 else (efforts[0] if efforts else ""),
+            "native": False,
+        }
+        models.append(model)
+    models.sort(key=lambda item: item["slug"])
+    encoded = json.dumps(models, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    return {"models": models, "fingerprint": hashlib.sha256(encoded).hexdigest()}
+
+
 def normalize_catalog(payload: Any) -> dict[str, Any]:
     if not isinstance(payload, list):
         raise TypeError("OpenCodeX 模型目录格式无效")
@@ -163,21 +198,20 @@ def _replace_top_keys(text: str, values: dict[str, str]) -> str:
     return "\n".join(output).strip() + "\n"
 
 
-def render_codex_config(existing: str, inference_url: str, catalog_path: str, *, env_key: str = "OPENCODEX_API_AUTH_TOKEN") -> str:
+def render_codex_config(existing: str, inference_url: str, catalog_path: str, *, provider_key: str = "opencodex", provider_name: str = "OpenCodeX Proxy", env_key: str = "OPENCODEX_API_AUTH_TOKEN") -> str:
     existing = existing.lstrip("\ufeff")
-    text = _replace_sections(existing, {"model_providers.opencodex"}, "")
+    text = _replace_sections(existing, {"model_providers.opencodex", "model_providers.magpie", f"model_providers.{provider_key}"}, "")
     text = _replace_top_keys(text, {
-        "model_provider": "opencodex", "model_catalog_json": catalog_path,
+        "model_provider": provider_key, "model_catalog_json": catalog_path,
     })
     section = (
-        "[model_providers.opencodex]\n"
-        'name = "OpenCodeX Proxy"\n'
+        f"[model_providers.{provider_key}]\n"
+        f"name = {_toml_string(provider_name)}\n"
         f"base_url = {_toml_string(inference_url)}\n"
         'wire_api = "responses"\nrequires_openai_auth = true\n'
         f"env_key = {_toml_string(env_key)}"
     )
     return text.rstrip() + "\n\n" + section + "\n"
-
 
 def render_grok_config(existing: str, catalog: dict[str, Any], inference_url: str, api_key: str) -> str:
     existing = existing.lstrip("\ufeff")

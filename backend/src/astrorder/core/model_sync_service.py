@@ -17,6 +17,7 @@ from astrorder.models import WorkspacePreferenceRow
 from .gateway_config import get_gateway_config
 from .model_sync import (
     normalize_catalog,
+    normalize_magpie_catalog,
     render_codex_catalog,
     render_codex_config,
     render_grok_config,
@@ -93,7 +94,16 @@ def validate_selections(store: Any, value: Any) -> list[dict[str, Any]]:
 
 
 async def fetch_catalog(config: dict[str, Any]) -> dict[str, Any]:
-    headers = {"Authorization": f"Bearer {config['api_key']}"} if config["api_key"] else {}
+    gw_type = str(config.get("gateway_type") or "opencodex").strip().lower()
+    headers = {"Authorization": f"Bearer {config['api_key']}"} if config.get("api_key") else {}
+    if gw_type == "magpie":
+        models_url = f"{config['inference_url']}/models" if not config['inference_url'].endswith("/models") else config['inference_url']
+        async with httpx.AsyncClient(follow_redirects=True, timeout=20) as client:
+            resp = await client.get(models_url, headers=headers)
+            resp.raise_for_status()
+            data = resp.json()
+        return normalize_magpie_catalog(data)
+
     async with httpx.AsyncClient(follow_redirects=True, timeout=20) as client:
         models_response = await client.get(f"{config['management_url']}/api/models", headers=headers)
         models_response.raise_for_status()
@@ -187,8 +197,17 @@ async def build_target_plan(store: Any, bridge: Any, catalog: dict[str, Any], ta
                 old_catalog = parsed
         except json.JSONDecodeError:
             old_catalog = []
-        files["codex_catalog"] = render_codex_catalog(catalog, old_catalog)
-        files["codex_config"] = render_codex_config(current["codex_config"]["content"], inference_url, f"{home}/.codex/opencodex-catalog.json")
+        gw_type = str(config.get("gateway_type") or "opencodex").strip().lower()
+        gw_name = "Magpie" if gw_type == "magpie" else "OpenCodeX"
+        provider_key = "magpie" if gw_type == "magpie" else "opencodex"
+        provider_name = "Magpie Proxy" if gw_type == "magpie" else "OpenCodeX Proxy"
+        catalog_path = f"{home}/.codex/magpie-catalog.json" if gw_type == "magpie" else f"{home}/.codex/opencodex-catalog.json"
+        file_catalog_key = "codex_magpie_catalog" if gw_type == "magpie" else "codex_catalog"
+        files[file_catalog_key] = render_codex_catalog(catalog, old_catalog, gateway_name=gw_name)
+        files["codex_config"] = render_codex_config(
+            current["codex_config"]["content"], inference_url, catalog_path,
+            provider_key=provider_key, provider_name=provider_name
+        )
     if "grok" in agents:
         files["grok_config"] = render_grok_config(current["grok_config"]["content"], catalog, inference_url, config["api_key"])
 
