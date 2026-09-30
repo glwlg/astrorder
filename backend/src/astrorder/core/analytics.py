@@ -196,9 +196,20 @@ def update_analytics_config(request: Request, payload: dict[str, Any]) -> dict[s
         updates = dict(payload)
         if "management_url" not in updates and updates.get("base_url"):
             updates["management_url"] = updates.pop("base_url")
+
+        target_gw = str(updates.get("gateway_type") or current.get("gateway_type") or "opencodex").strip().lower()
+        if "api_key" in payload:
+            resolved_key = str(payload.get("api_key") or "").strip()
+        elif target_gw == current.get("gateway_type"):
+            resolved_key = current.get("api_key", "")
+        else:
+            # Switched gateway type: retrieve target gateway's saved key from profiles
+            saved_prof = current.get("gateway_profiles", {}).get(target_gw, {})
+            resolved_key = saved_prof.get("api_key", "")
+
         config = save_gateway_config(request.app.state.store, {
             **current, **updates,
-            "api_key": current["api_key"] if "api_key" not in payload else payload.get("api_key"),
+            "api_key": resolved_key,
         })
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

@@ -136,8 +136,8 @@ export function UsageGatewaySettingsCard() {
     })
   }
 
-  const save = async (clearKey = false) => {
-    setBusy('save')
+  const save = async (clearKey = false, silent = false) => {
+    if (!silent) setBusy('save')
     try {
       const currentProfilePayload = {
         gateway_type: gatewayType,
@@ -178,15 +178,24 @@ export function UsageGatewaySettingsCard() {
           overrides: result.target_overrides,
         },
       }))
-      notifications.show({ color: 'teal', message: 'LLM 网关配置已保存', icon: <IconCheck size={16} /> })
+      if (!silent) {
+        notifications.show({ color: 'teal', message: 'LLM 网关配置已保存', icon: <IconCheck size={16} /> })
+      }
+      return result
     } catch (error: any) {
       notifications.show({ color: 'red', message: error.message || '保存 LLM 网关配置失败' })
-    } finally { setBusy(null) }
+      throw error
+    } finally {
+      if (!silent) setBusy(null)
+    }
   }
 
   const showPreview = async () => {
     setBusy('preview')
-    try { setPreview(await api.previewModelSync(selected)) }
+    try {
+      await save(false, true)
+      setPreview(await api.previewModelSync(selected))
+    }
     catch (error: any) { notifications.show({ color: 'red', message: error.message || '生成同步预览失败' }) }
     finally { setBusy(null) }
   }
@@ -220,6 +229,7 @@ export function UsageGatewaySettingsCard() {
     const allPayload = targets.map((t) => ({ target_id: t.id, agents: t.agents }))
     if (!allPayload.length) return
     try {
+      await save(false, true)
       const operation = await api.startModelSync(allPayload)
       const taskId = addTask({ title: '全量同步 Agent 模型配置', detail: '正在同步全部 ' + targets.length + ' 个目标', cancel: async () => { await api.cancelModelSync(operation.id) } })
       const timer = window.setInterval(async () => {
