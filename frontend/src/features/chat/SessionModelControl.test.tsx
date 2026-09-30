@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { api } from '../../api/client'
-import { SessionModelControl, summarizeQuota } from './SessionModelControl'
+import { SessionModelControl, formatDisplayModel, summarizeQuota } from './SessionModelControl'
 import { REASONING_EFFORTS } from './composerMedia'
 
 const session = {
@@ -88,11 +88,11 @@ it('desktop shows the bound native model and switches the exact session', async 
     </MantineProvider>,
   )
 
-  await waitFor(() => expect(screen.getByRole('button', { name: '选择会话模型' })).toHaveTextContent('p/bound'))
+  await waitFor(() => expect(screen.getByRole('button', { name: '选择会话模型' })).toHaveTextContent('bound'))
   fireEvent.click(screen.getByRole('button', { name: '选择会话模型' }))
   
   const switchBtn = await screen.findByRole('button', { name: '切换到选择模型' })
-  expect(switchBtn).toHaveTextContent('p/bound')
+  expect(switchBtn).toHaveTextContent('bound')
   expect(switchBtn.querySelector('.codex-model-effort-highlight')).toBeInTheDocument()
   fireEvent.click(switchBtn.querySelector('.codex-model-name-label')!)
   
@@ -100,7 +100,7 @@ it('desktop shows the bound native model and switches the exact session', async 
   fireEvent.click(targetItem)
   
   await waitFor(() => expect(change).toHaveBeenCalledWith('native', 'source', 'p', 'next'))
-  await waitFor(() => expect(screen.getByRole('button', { name: '选择会话模型' })).toHaveTextContent('p/next'))
+  await waitFor(() => expect(screen.getByRole('button', { name: '选择会话模型' })).toHaveTextContent('next'))
   expect(notifications.show).not.toHaveBeenCalled()
 })
 
@@ -137,7 +137,7 @@ it.each(['#93c5fd', '#60a5fa', '#3b82f6', '#0066cc', '#1e40af'].map((color, inde
     })
     vi.spyOn(api, 'getSessionModels').mockResolvedValue({ items: [] })
     renderControl()
-    await waitFor(() => expect(screen.getByRole('button', { name: '选择会话模型' })).toHaveTextContent('p/bound'))
+    await waitFor(() => expect(screen.getByRole('button', { name: '选择会话模型' })).toHaveTextContent('bound'))
     const slider = await openEffortSlider()
     expect(slider).toHaveAttribute('aria-valuenow', String(index))
     const root = document.querySelector<HTMLElement>('.mantine-Slider-root')!
@@ -216,3 +216,11 @@ it('toasts only when model switch confirmation fails', async () => {
   expect(shown.mock.calls.some((call) => String(call[0]?.message || '').includes('已确认'))).toBe(false)
 })
 
+
+it('strips the first prefix before slash and keeps full model label in formatDisplayModel', () => {
+  expect(formatDisplayModel('openai/antigravity/gemini-3.8-flash')).toBe('antigravity/gemini-3.8-flash')
+  expect(formatDisplayModel('opencodex/google-antigravity/gemini-3.8-flash')).toBe('google-antigravity/gemini-3.8-flash')
+  expect(formatDisplayModel('openai/gpt-4o · 下轮生效')).toBe('gpt-4o · 下轮生效')
+  expect(formatDisplayModel('gpt-5.6-sol')).toBe('gpt-5.6-sol')
+  expect(formatDisplayModel('')).toBe('')
+})

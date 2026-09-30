@@ -204,9 +204,37 @@ async def build_target_plan(store: Any, bridge: Any, catalog: dict[str, Any], ta
         catalog_path = f"{home}/.codex/opencodex-catalog.json"
         files["codex_catalog"] = render_codex_catalog(catalog, old_catalog, gateway_name=gw_name)
         codex_cfg_content = (current.get("codex_config") or {}).get("content", "")
+        all_configured_providers = []
+        raw_profiles = config.get("gateway_profiles") or {}
+        for gt, prof in raw_profiles.items():
+            gt_url = prof.get("target_overrides", {}).get(target_id) or prof.get("inference_url")
+            if gt_url:
+                all_configured_providers.append({
+                    "key": gt,
+                    "name": "Magpie Proxy" if gt == "magpie" else "OpenCodeX Proxy",
+                    "base_url": gt_url,
+                    "env_key": "OPENCODEX_API_AUTH_TOKEN",
+                })
+        # Ensure standard profiles exist if not explicitly present in raw_profiles
+        if not any(p["key"] == "opencodex" for p in all_configured_providers):
+            all_configured_providers.append({
+                "key": "opencodex",
+                "name": "OpenCodeX Proxy",
+                "base_url": "https://llm.651971564.xyz/v1",
+                "env_key": "OPENCODEX_API_AUTH_TOKEN",
+            })
+        if not any(p["key"] == "magpie" for p in all_configured_providers):
+            all_configured_providers.append({
+                "key": "magpie",
+                "name": "Magpie Proxy",
+                "base_url": "http://192.168.1.11:3425/v1",
+                "env_key": "OPENCODEX_API_AUTH_TOKEN",
+            })
+
         files["codex_config"] = render_codex_config(
             codex_cfg_content, inference_url, catalog_path,
-            provider_key=provider_key, provider_name=provider_name
+            provider_key=provider_key, provider_name=provider_name,
+            all_providers=all_configured_providers,
         )
     if "grok" in agents:
         grok_cfg_content = (current.get("grok_config") or {}).get("content", "")

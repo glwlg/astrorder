@@ -17,7 +17,7 @@
   transition: background 140ms ease, color 140ms ease;
   user-select: none;
   white-space: nowrap;
-  max-width: 240px;
+  max-width: 320px;
 }
 .codex-model-pill:hover {
   background: color-mix(in srgb, var(--astr-text) 7%, transparent);
@@ -82,7 +82,7 @@
 
 /* Main Effort & Model Card */
 .codex-model-card {
-  width: 230px;
+  width: 280px;
   padding: 12px 14px 16px;
   display: flex;
   flex-direction: column;
@@ -185,7 +185,7 @@
 
 /* Model List Sub-panel */
 .codex-model-list-panel {
-  width: 240px;
+  width: 280px;
   padding: 10px 10px 8px;
   display: flex;
   flex-direction: column;

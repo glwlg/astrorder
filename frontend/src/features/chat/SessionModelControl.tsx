@@ -28,6 +28,15 @@ const EFFORT_MARKS = [
   { value: 4, label: '' },
 ]
 
+export function formatDisplayModel(label: string): string {
+  if (!label) return ''
+  const [modelPart, ...rest] = label.split(' · ')
+  const suffix = rest.length ? ' · ' + rest.join(' · ') : ''
+  const slashIdx = modelPart.indexOf('/')
+  const trimmed = slashIdx >= 0 ? modelPart.slice(slashIdx + 1) : modelPart
+  return trimmed + suffix
+}
+
 export function summarizeQuota(quota?: OcxModelQuotaResponse | null): { status: 'healthy' | 'tight' | 'exhausted'; label: string; detail: string } | null {
   if (!quota) return null
   if (quota.accounts && quota.accounts.length > 0) {
@@ -134,7 +143,7 @@ export function SessionModelControl({ session }: { session: Session }) {
     : REASONING_EFFORTS.findIndex((item) => item.value === 'medium')
   const sliderIndex = draftEffortIndex ?? currentEffortIndex
   const effortLabel = REASONING_EFFORTS[sliderIndex]?.label || '中'
-  const displayModelName = model.label
+  const displayModelName = formatDisplayModel(model.label)
   const currentModelRoute = model.data?.model ? `${model.data.provider ? `${model.data.provider}/` : ''}${model.data.model}` : ''
 
   return (
@@ -196,7 +205,7 @@ export function SessionModelControl({ session }: { session: Session }) {
                   </AnimatePresence>
                   <IconChevronRight size={15} />
                 </span>
-                <span className="codex-model-name-label">{displayModelName}</span>
+                <span className="codex-model-name-label" title={model.label}>{displayModelName}</span>
               </button>
               <ActionIcon
                 variant="subtle"
@@ -296,7 +305,7 @@ export function SessionModelControl({ session }: { session: Session }) {
                       onClick={() => void applyChoice(item)}
                       disabled={changing}
                     >
-                      <span className="codex-model-menu-item-text">{item.label}</span>
+                      <span className="codex-model-menu-item-text" title={item.label}>{item.label}</span>
                       <ModelQuotaBadge modelRoute={`${item.provider ? `${item.provider}/` : ''}${item.model}`} />
                       {isSelected && <IconCheck size={16} className="codex-model-check-icon" />}
                     </UnstyledButton>

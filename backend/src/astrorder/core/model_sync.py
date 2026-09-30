@@ -198,20 +198,55 @@ def _replace_top_keys(text: str, values: dict[str, str]) -> str:
     return "\n".join(output).strip() + "\n"
 
 
-def render_codex_config(existing: str, inference_url: str, catalog_path: str, *, provider_key: str = "opencodex", provider_name: str = "OpenCodeX Proxy", env_key: str = "OPENCODEX_API_AUTH_TOKEN") -> str:
+def render_codex_config(
+    existing: str,
+    inference_url: str,
+    catalog_path: str,
+    *,
+    provider_key: str = "opencodex",
+    provider_name: str = "OpenCodeX Proxy",
+    env_key: str = "OPENCODEX_API_AUTH_TOKEN",
+    all_providers: list[dict[str, str]] | None = None,
+) -> str:
     existing = existing.lstrip("\ufeff")
-    text = _replace_sections(existing, {"model_providers.opencodex", "model_providers.magpie", f"model_providers.{provider_key}"}, "")
+    # Retain all configured gateway providers in config.toml so historical sessions remain valid
+    providers_to_render = dict()
+    if all_providers:
+        for p in all_providers:
+            k = p.get("key")
+            if k:
+                providers_to_render[k] = p
+    providers_to_render[provider_key] = {
+        "key": provider_key,
+        "name": provider_name,
+        "base_url": inference_url,
+        "env_key": env_key,
+    }
+
+    # Replace old entries of these known providers
+    text = _replace_sections(existing, {f"model_providers.{k}" for k in providers_to_render} | {"model_providers.opencodex", "model_providers.magpie"}, "")
     text = _replace_top_keys(text, {
         "model_provider": provider_key, "model_catalog_json": catalog_path,
     })
-    section = (
-        f"[model_providers.{provider_key}]\n"
-        f"name = {_toml_string(provider_name)}\n"
-        f"base_url = {_toml_string(inference_url)}\n"
-        'wire_api = "responses"\nrequires_openai_auth = true\n'
-        f"env_key = {_toml_string(env_key)}"
-    )
-    return text.rstrip() + "\n\n" + section + "\n"
+
+    sections = []
+    # Render active provider first, then secondary providers
+    ordered_keys = [provider_key] + [k for k in providers_to_render if k != provider_key]
+    for k in ordered_keys:
+        p = providers_to_render[k]
+        p_name = p.get("name") or ("Magpie Proxy" if k == "magpie" else "OpenCodeX Proxy")
+        p_url = p.get("base_url") or inference_url
+        p_env = p.get("env_key") or env_key
+        sec = (
+            f"[model_providers.{k}]\n"
+            f"name = {_toml_string(p_name)}\n"
+            f"base_url = {_toml_string(p_url)}\n"
+            'wire_api = "responses"\nrequires_openai_auth = true\n'
+            f"env_key = {_toml_string(p_env)}"
+        )
+        sections.append(sec)
+
+    return text.rstrip() + "\n\n" + "\n\n".join(sections) + "\n"
 
 def render_grok_config(existing: str, catalog: dict[str, Any], inference_url: str, api_key: str) -> str:
     existing = existing.lstrip("\ufeff")
