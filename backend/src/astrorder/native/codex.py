@@ -913,7 +913,21 @@ class CodexConnection:
         if not any(row['provider'] == provider and row['model'] == model for row in self.models(sid)):
             raise ConnectionError('所选模型不在当前 Codex 原生目录中。', 422)
         self._resume(sid)
-        self._request('thread/settings/update', {'threadId': sid, 'model': model})
+        req_params = {'threadId': sid, 'model': model}
+        if provider:
+            req_params['modelProvider'] = provider
+        self._request('thread/settings/update', req_params)
+        try:
+            if self._home:
+                import sqlite3
+                files = [(int(m.group(1)), f) for f in self._home.glob('state_*.sqlite') if (m := re.fullmatch(r'state_(\d+)\.sqlite', f.name))]
+                if files:
+                    db_path = max(files, key=lambda pair: pair[0])[1]
+                    with sqlite3.connect(db_path, timeout=5) as conn:
+                        conn.execute("UPDATE threads SET model = ?, model_provider = ? WHERE id = ?", (model, provider, sid))
+                        conn.commit()
+        except Exception:
+            pass
         with self._binding_changed:
             confirmed = self._binding_changed.wait_for(lambda: self._bindings.get(sid, {}).get('model') == model and self._bindings.get(sid, {}).get('provider') == provider, timeout=3)
             if not confirmed:
