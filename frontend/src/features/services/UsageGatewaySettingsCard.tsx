@@ -144,7 +144,7 @@ export function UsageGatewaySettingsCard() {
         management_url: managementUrl.trim(),
         inference_url: inferenceUrl.trim(),
         target_overrides: Object.fromEntries(Object.entries(overrides).filter(([, value]) => value.trim()).map(([key, value]) => [key, value.trim()])),
-        ...(clearKey ? { api_key: '' } : apiKey.trim() ? { api_key: apiKey.trim() } : {}),
+        ...(clearKey ? { clear_key: true, api_key: '' } : apiKey.trim() ? { api_key: apiKey.trim() } : {}),
       }
 
       const allProfilesPayload: Record<string, any> = {}
@@ -168,16 +168,23 @@ export function UsageGatewaySettingsCard() {
       })
       setMaskedKey(result.masked_key)
       setApiKey('')
-      setProfiles((prev) => ({
-        ...prev,
-        [gatewayType]: {
-          managementUrl: result.management_url,
-          inferenceUrl: result.inference_url,
-          apiKey: '',
-          maskedKey: result.masked_key,
-          overrides: result.target_overrides,
-        },
-      }))
+      if (result.gateway_profiles) {
+        setProfiles((prev) => {
+          const next = { ...prev }
+          for (const [gt, p] of Object.entries(result.gateway_profiles || {})) {
+            if (next[gt as 'opencodex' | 'magpie']) {
+              next[gt as 'opencodex' | 'magpie'] = {
+                ...next[gt as 'opencodex' | 'magpie'],
+                managementUrl: p.management_url,
+                inferenceUrl: p.inference_url,
+                maskedKey: p.masked_key,
+                overrides: p.target_overrides || {},
+              }
+            }
+          }
+          return next
+        })
+      }
       if (!silent) {
         notifications.show({ color: 'teal', message: 'LLM 网关配置已保存', icon: <IconCheck size={16} /> })
       }

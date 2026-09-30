@@ -201,15 +201,16 @@ async def build_target_plan(store: Any, bridge: Any, catalog: dict[str, Any], ta
         gw_name = "Magpie" if gw_type == "magpie" else "OpenCodeX"
         provider_key = "magpie" if gw_type == "magpie" else "opencodex"
         provider_name = "Magpie Proxy" if gw_type == "magpie" else "OpenCodeX Proxy"
-        catalog_path = f"{home}/.codex/magpie-catalog.json" if gw_type == "magpie" else f"{home}/.codex/opencodex-catalog.json"
-        file_catalog_key = "codex_magpie_catalog" if gw_type == "magpie" else "codex_catalog"
-        files[file_catalog_key] = render_codex_catalog(catalog, old_catalog, gateway_name=gw_name)
+        catalog_path = f"{home}/.codex/opencodex-catalog.json"
+        files["codex_catalog"] = render_codex_catalog(catalog, old_catalog, gateway_name=gw_name)
+        codex_cfg_content = (current.get("codex_config") or {}).get("content", "")
         files["codex_config"] = render_codex_config(
-            current["codex_config"]["content"], inference_url, catalog_path,
+            codex_cfg_content, inference_url, catalog_path,
             provider_key=provider_key, provider_name=provider_name
         )
     if "grok" in agents:
-        files["grok_config"] = render_grok_config(current["grok_config"]["content"], catalog, inference_url, config["api_key"])
+        grok_cfg_content = (current.get("grok_config") or {}).get("content", "")
+        files["grok_config"] = render_grok_config(grok_cfg_content, catalog, inference_url, config["api_key"])
 
     new_slugs = {m["slug"] for m in catalog.get("models", [])}
     old_slugs = {str(m.get("slug")) for m in (old_catalog if isinstance(old_catalog, list) else []) if isinstance(m, dict) and m.get("slug")}
@@ -219,7 +220,13 @@ async def build_target_plan(store: Any, bridge: Any, catalog: dict[str, Any], ta
         "kept_count": len(new_slugs & old_slugs),
     }
     changes = [
-        {"file": name, "changed": sha256_text(text) != current[name]["sha256"], "current_sha256": current[name]["sha256"], "expected_sha256": sha256_text(text), "diff": _diff(current[name]["content"], text, name)}
+        {
+            "file": name,
+            "changed": sha256_text(text) != (current.get(name) or {}).get("sha256", ""),
+            "current_sha256": (current.get(name) or {}).get("sha256", ""),
+            "expected_sha256": sha256_text(text),
+            "diff": _diff((current.get(name) or {}).get("content", ""), text, name),
+        }
         for name, text in files.items()
     ]
     return {
