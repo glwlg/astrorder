@@ -31,6 +31,7 @@ from .connections import ConnectionController, ConnectionError
 from .core.environment_connections import EnvironmentConnections
 from .core.events import EventHub
 from .native.codex import CodexConnection
+from .plugins.r2t2 import LocalR2T2Plugin
 from .runtime import ProcessSupervisor
 from .schemas import AgentModel
 from .service import ControlService, ProtocolError
@@ -134,6 +135,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.hub = hub
         app.state.service = service
         app.state.background_tasks = BackgroundTaskRegistry()
+        app.state.local_voice = LocalR2T2Plugin(store)
+        app.state.local_voice.restore()
         app.state.daemon_restart_operations = {}
         app.state.daemon_restart_tasks = set()
         restore_tasks: list[asyncio.Task[None]] = []
@@ -414,6 +417,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             app.state.connections.shutdown(service)
             await service.shutdown()
             await app.state.supervisor.shutdown()
+            await asyncio.to_thread(app.state.local_voice.shutdown)
             store.close()
 
     app = FastAPI(title="星序 · Astrorder", version="0.1.0", lifespan=lifespan)

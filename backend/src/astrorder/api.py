@@ -37,6 +37,8 @@ from .routers.memory import router as memory_router
 from .routers.skills_manager import router as skills_router
 from .routers.capabilities_manager import router as capabilities_router
 from .routers.review_relay import router as review_relay_router
+from .routers.audio import router as audio_router
+from .routers.rtk import router as rtk_router
 
 router = APIRouter()
 router.include_router(preferences_router)
@@ -53,6 +55,8 @@ router.include_router(memory_router)
 router.include_router(skills_router)
 router.include_router(capabilities_router)
 router.include_router(review_relay_router)
+router.include_router(audio_router)
+router.include_router(rtk_router)
 logger = logging.getLogger(__name__)
 
 
@@ -1852,9 +1856,11 @@ async def discover_environment(connection_id: str, request: Request):
 @router.post('/api/v1/environments/{connection_id}/agents/{kind}/{action}')
 async def environment_agent(connection_id: str, kind: str, action: str, request: Request):
     _private(request)
-    if action not in {'connect', 'disconnect'}:
+    if action not in {'connect', 'disconnect', 'restart'}:
         raise HTTPException(status_code=422, detail='不支持的连接操作。')
     try:
+        if action == 'restart':
+            return await asyncio.to_thread(request.app.state.environments.restart, connection_id, kind)
         return await asyncio.to_thread(request.app.state.environments.change, connection_id, kind, action == 'connect')
     except ConnectionError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None

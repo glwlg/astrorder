@@ -260,7 +260,7 @@ export function UsageGatewaySettingsCard() {
   }))
 
   return <>
-    <Card withBorder radius="md" p="md" style={{ background: 'var(--astr-surface)' }}>
+    <Card className="gateway-settings-card" withBorder radius="md" p="lg" style={{ background: 'var(--astr-surface)' }}>
       <Group justify="space-between" mb="md">
         <Group gap="xs"><IconCloudDataConnection size={18} color="#2563EB" /><div>
           <Text fw={600} size="sm">LLM 网关与模型同步</Text>
@@ -268,12 +268,12 @@ export function UsageGatewaySettingsCard() {
         </div></Group>
         <Badge size="xs" variant="light" color={gatewayType === 'magpie' ? 'indigo' : 'teal'}>{gatewayType === 'magpie' ? 'Magpie' : 'OpenCodeX'}{maskedKey ? ` · ${maskedKey}` : ''}</Badge>
       </Group>
-      <Stack gap="sm">
+      <div className="gateway-settings-layout"><Stack gap="sm" className="gateway-settings-fields">
         <Select label="网关类型" value={gatewayType} onChange={(v) => handleGatewayTypeChange((v as any) || 'opencodex')} data={[{ value: 'opencodex', label: 'OpenCodeX' }, { value: 'magpie', label: 'Magpie' }]} allowDeselect={false} />
         <TextInput label="管理地址" placeholder={gatewayType === 'magpie' ? 'http://192.168.1.11:3425/v1' : 'https://ocx.example.com'} value={managementUrl} onChange={(event) => setManagementUrl(event.currentTarget.value)} disabled={busy === 'load'} />
         <TextInput label="推理 Base URL" placeholder={gatewayType === 'magpie' ? 'http://192.168.1.11:3425/v1' : 'https://llm.example.com/v1'} value={inferenceUrl} onChange={(event) => setInferenceUrl(event.currentTarget.value)} disabled={busy === 'load'} />
         <PasswordInput label="API Key" placeholder={maskedKey ? '留空则保留当前 Key' : '可选'} value={apiKey} onChange={(event) => setApiKey(event.currentTarget.value)} />
-        <Accordion variant="contained">
+      </Stack><Stack gap="sm" className="gateway-settings-targets"><Accordion variant="contained" defaultValue="targets">
           <Accordion.Item value="targets">
             <Accordion.Control>
               <Group justify="space-between" pr="md" style={{ width: '100%' }}>
@@ -337,7 +337,7 @@ export function UsageGatewaySettingsCard() {
             <Button size="xs" disabled={!managementUrl.trim() || !inferenceUrl.trim()} loading={busy === 'save'} onClick={() => void save()}>保存配置</Button>
           </Group>
         </Group>
-      </Stack>
+      </Stack></div>
     </Card>
     <Modal opened={Boolean(preview)} onClose={() => setPreview(null)} title="模型同步预览" size="lg">
       {preview && <Stack gap="md">

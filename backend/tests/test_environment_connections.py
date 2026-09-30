@@ -310,6 +310,12 @@ def test_remote_codex_environment_uses_daemon_controller_factory_when_enabled(tm
         def close(self):
             return None
 
+        def request_native(self, method, params):
+            if method == 'initialize': return {'userAgent': 'fixture'}
+            if method == 'account/read': return {'requiresOpenaiAuth': False, 'account': None}
+            if method == 'thread/list': return {'data': [THREAD], 'nextCursor': None}
+            return {}
+
     hermes = SimpleNamespace(
         snapshot=lambda _service: {
             "local": {"available": False, "state": "offline", "agent_id": None, "detail": "fixture"},

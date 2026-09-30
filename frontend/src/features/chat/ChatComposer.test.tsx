@@ -53,6 +53,35 @@ it('embeds the model picker and follows the native session status for stop', asy
   expect(screen.getByRole('button', { name: '发送' })).toBeInTheDocument()
   client.clear()
 })
+it('records directly from the microphone and appends transcription without a dialog or sending', async () => {
+  const track = { stop: vi.fn() }
+  vi.stubGlobal('navigator', Object.create(navigator, { mediaDevices: { value: { getUserMedia: vi.fn().mockResolvedValue({ getTracks: () => [track] }) } } }))
+  class Recorder {
+    state = 'inactive'
+    mimeType = 'audio/webm'
+    ondataavailable: ((e: { data: Blob }) => void) | null = null
+    onstop: (() => void) | null = null
+    start() { this.state = 'recording' }
+    stop() { this.state = 'inactive'; this.ondataavailable?.({ data: new Blob(['audio']) }); this.onstop?.() }
+  }
+  vi.stubGlobal('MediaRecorder', Recorder)
+  vi.spyOn(api, 'getSessionModel').mockResolvedValue({ model: 'native-model', provider: 'provider' })
+  const transcribe = vi.spyOn(api, 'transcribeAudio').mockResolvedValue({ text: '语音输入的内容' })
+  const send = vi.spyOn(api, 'createCommand')
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(<MantineProvider><QueryClientProvider client={client}><ChatComposer session={session} agent={agent} /></QueryClientProvider></MantineProvider>)
+  fireEvent.change(screen.getByLabelText('消息内容'), { target: { value: '原有草稿' } })
+  fireEvent.click(screen.getByRole('button', { name: '语音输入' }))
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  fireEvent.click(await screen.findByRole('button', { name: '停止录音' }))
+  await waitFor(() => expect(screen.getByLabelText('消息内容')).toHaveValue('原有草稿\n语音输入的内容'))
+  expect(transcribe).toHaveBeenCalledOnce()
+  expect(send).not.toHaveBeenCalled()
+  expect(track.stop).toHaveBeenCalled()
+  vi.unstubAllGlobals()
+  client.clear()
+})
+
 it('uses the same uncommitted-review request as the review relay', async () => {
   const codexSession = { ...session, agent_id: 'codex', workspace: '/repo' }
   const codexAgent = { ...agent, id: 'codex', kind: 'codex' as const }

@@ -8,7 +8,7 @@ import { isDraftSendable, newCommandId, scopeKey } from '../../domain/semantics'
 import type { Agent, Command, CommandAction, DraftAttachment, DraftState, Message, Session, SessionRef, Task } from '../../domain/types'
 import { selectCommands, useAstrorderStore } from '../../state/store'
 import { submitBrowserCommand } from './commandActions'
-import { VoiceInputSheet } from './VoiceInputSheet'
+import { applyVoiceTranscript, useVoiceInput } from './useVoiceInput'
 import { SessionModelControl } from './SessionModelControl'
 import { Magnet } from '../../components/animations/Magnet'
 import { ClickSpark } from '../../components/animations/ClickSpark'
@@ -187,7 +187,10 @@ export function ChatComposer({
   const { draft, setDraft: updateDraft } = usePersistentDraft(session.agent_id, session.id)
   const commands = useAstrorderStore(useShallow((state) => selectCommands(state, session.agent_id, session.id)))
   const [submitting, setSubmitting] = useState(false)
-  const [voiceOpened, setVoiceOpened] = useState(false)
+  const voice = useVoiceInput(draftKey, (transcript, event) => updateDraft(current => ({
+    ...current,
+    text: applyVoiceTranscript(current.text, transcript, event),
+  })))
   const submittingRef = useRef(false)
   const [error, setError] = useState<string | null>(null)
   const [submittedCommandId, setSubmittedCommandId] = useState<string | null>(null)
@@ -661,14 +664,6 @@ ${draft.text}` : entry.payload.text)
     }
   }
 
-  const commitVoice = (file: File, transcript: string) => {
-    attachmentKeyRef.current += 1
-    const nextText = transcript ? `${draft.text.trim()}${draft.text.trim() ? '\n' : ''}${transcript}` : draft.text
-    updateDraft({
-      text: nextText,
-      attachments: [...draft.attachments, { key: `draft-attachment-${attachmentKeyRef.current}`, file }],
-    })
-  }
 
   return (
     <>
@@ -884,11 +879,12 @@ ${draft.text}` : entry.payload.text)
             className="attachment-button"
             variant="subtle"
             color="gray"
-            disabled={!canChat || submitting}
-            aria-label="语音输入"
-            onClick={() => setVoiceOpened(true)}
+            disabled={voice.status === 'transcribing' || (voice.status === 'idle' && (!canChat || submitting))}
+            aria-label={voice.status === 'recording' || voice.status === 'requesting' ? '停止录音' : voice.status === 'transcribing' ? '正在转写' : '语音输入'}
+            loading={voice.status === 'transcribing'}
+            onClick={voice.toggle}
           >
-            <IconMicrophone size={19} />
+            {voice.status === 'recording' || voice.status === 'requesting' ? <IconPlayerStop size={19} color="var(--mantine-color-red-6)" /> : <IconMicrophone size={19} />}
           </Button>
 
           <Magnet padding={20} magnetStrength={3.5} disabled={submitting}>
@@ -910,7 +906,8 @@ ${draft.text}` : entry.payload.text)
 
         </Stack>
       </Paper>
-      <VoiceInputSheet opened={voiceOpened} onClose={() => setVoiceOpened(false)} onCommit={commitVoice} />
+      {voice.error && <div role="alert">{voice.error}</div>}
+      {voice.status === 'transcribing' && <div role="status">正在转写…</div>}
     </>
   )
 }

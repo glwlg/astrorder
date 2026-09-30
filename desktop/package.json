@@ -34,6 +34,10 @@
           "**/*",
           "!tests/**",
           "!.pytest_cache/**",
+          "!.pytest_temp/**",
+          "!.ruff_cache/**",
+          "!.token",
+          "!*.sqlite3*",
           "!**/__pycache__/**"
         ]
       },

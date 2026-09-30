@@ -58,6 +58,20 @@ function renderPage() {
 afterEach(() => { cleanup(); vi.clearAllMocks(); useAstrorderStore.getState().resetRuntime() })
 
 describe('Agent settings connection controls', () => {
+  it('selects a host without connecting or changing its agents', async () => {
+    vi.mocked(api.getEnvironments).mockResolvedValueOnce({ items: [
+      { id: 'local', name: '本机', method: 'local', discovered: true, agents: [{ kind: 'codex', available: true, state: 'discovered', detail: '本机详情' }] },
+      { id: 'ssh:fixture', name: '远端测试环境', method: 'ssh', discovered: true, agents: [{ kind: 'hermes', available: true, state: 'discovered', detail: '远端详情' }] },
+    ] })
+    renderPage()
+    expect(await screen.findByText('本机详情')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /远端测试环境/ }))
+    expect(screen.getByText('远端详情')).toBeInTheDocument()
+    expect(screen.queryByText('本机详情')).not.toBeInTheDocument()
+    expect(api.changeEnvironmentAgent).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: '接入' }))
+    await waitFor(() => expect(api.changeEnvironmentAgent).toHaveBeenCalledWith('ssh:fixture', 'hermes', true))
+  })
   it('discovers both local Agents and requires explicit choice before connection', async () => {
     renderPage()
     expect(await screen.findByText('Hermes', { exact: true })).toBeInTheDocument()

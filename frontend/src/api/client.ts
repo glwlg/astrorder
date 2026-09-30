@@ -187,7 +187,40 @@ export interface BrowserSnapshot {
   error_count?: number
 }
 
+export interface RtkStatus {
+  installed: boolean
+  version: string | null
+  executable: string | null
+  detail?: string
+  agents: Array<{ kind: string; name: string; enabled: boolean; supported: boolean; detail?: string }>
+  daily: Array<{ date: string; commands: number; input_tokens: number; output_tokens: number; saved_tokens: number }>
+  summary: { total_commands: number; total_input: number; total_output: number; total_saved: number; avg_savings_pct: number }
+}
+
+export interface LocalVoicePluginStatus {
+  id: string
+  name: string
+  enabled: boolean
+  state: 'disabled' | 'installing' | 'starting' | 'running' | 'stopping' | 'error'
+  available: boolean
+  progress: number | null
+  error: string | null
+  pid: number | null
+  device: string
+  model: string
+}
+
 export const api = {
+  transcribeAudio: (file: File, signal?: AbortSignal) => {
+    const body = new FormData()
+    body.append('file', file)
+    return request<{ text: string }>('/audio/transcriptions', { method: 'POST', body, signal })
+  },
+  getLocalVoicePlugin: () => request<LocalVoicePluginStatus>('/audio/local-plugin'),
+  setLocalVoicePlugin: (enabled: boolean) => jsonRequest<LocalVoicePluginStatus>('/audio/local-plugin', { enabled }, 'PUT'),
+  getRtk: (id: string, days: string) => request<RtkStatus>(`/rtk/${encodeURIComponent(id)}?days=${encodeURIComponent(days)}`),
+  installRtk: (id: string) => request<RtkStatus>(`/rtk/${encodeURIComponent(id)}/install`, { method: 'POST' }),
+  setRtkAgent: (id: string, kind: string, enabled: boolean) => request<RtkStatus>(`/rtk/${encodeURIComponent(id)}/agents/${encodeURIComponent(kind)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }) }),
   getBrowserScreenshot: (agentId: string, sessionId: string, refresh = false, targetId?: string) => request<BrowserSnapshot>(
     `/browser/screenshot?agent_id=${encodeURIComponent(agentId)}&session_id=${encodeURIComponent(sessionId)}&refresh=${refresh}${targetId ? '&target_id=' + encodeURIComponent(targetId) : ''}`
   ),
@@ -476,6 +509,7 @@ export const api = {
   getEnvironments: () => request<{ items: Array<{ id: string; name: string; method: 'local' | 'ssh'; discovered: boolean; os?: string; agents: Array<{ kind: AgentKind; available: boolean; state: string; detail: string; executable?: string; daemon_mode?: boolean }> }> }>('/environments'),
   discoverEnvironment: (id: string) => request(`/environments/${encodeURIComponent(id)}/discover`, { method: 'POST' }),
   changeEnvironmentAgent: (id: string, kind: string, connect: boolean) => request(`/environments/${encodeURIComponent(id)}/agents/${kind}/${connect ? 'connect' : 'disconnect'}`, { method: 'POST' }),
+  restartEnvironmentAgent: (id: string, kind: string) => request(`/environments/${encodeURIComponent(id)}/agents/${kind}/restart`, { method: 'POST' }),
   getCodexConnection: () => request<CodexConnectionStatus>('/connections/codex'),
   connectCodex: () => request<CodexConnectionStatus>('/connections/codex/connect', { method: 'POST' }),
   disconnectCodex: () => request<CodexConnectionStatus>('/connections/codex/disconnect', { method: 'POST' }),
@@ -588,7 +622,7 @@ export const api = {
     }>(`/capabilities/summary?${query.toString()}`)
   },
   searchMarketCapabilities: (q: string) => request<{ query: string; items: Array<{ pkg: string; name: string; repo: string; installs: string; url: string }> }>(`/skills/search?q=${encodeURIComponent(q)}`),
-  
+
   // MCP 完整生命周期
   updateMcpServer: (payload: { target_id: string; agent: string; action: 'save' | 'delete'; server: Record<string, any> }) =>
     jsonRequest<{ ok: boolean; action: string; agent: string; server: string }>('/capabilities/mcp/update', payload, 'POST'),

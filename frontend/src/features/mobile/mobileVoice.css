@@ -1,0 +1,21 @@
+.mobile-voice-hold { display: contents; }
+.mobile-voice-hold textarea { touch-action: none; -webkit-touch-callout: none; }
+.mobile-voice-overlay { position: fixed; inset: 0; z-index: 10000; background: rgb(20 22 20 / 76%); color: white; pointer-events: none; user-select: none; -webkit-user-select: none; }
+.mobile-voice-center { position: absolute; left: 50%; top: 48%; transform: translate(-50%, -50%); width: 85%; display: flex; align-items: center; flex-direction: column; gap: 18px; }
+.mobile-voice-bubble { display: flex; align-items: center; gap: 18px; justify-content: center; width: 176px; height: 112px; border-radius: 34px; background: #99ed62; color: #172414; transition: background .15s; box-shadow: 0 8px 40px #0002; }
+.is-cancel .mobile-voice-bubble { background: #ff777d; }
+.mobile-voice-bubble.has-transcript { width: min(100%, 420px); height: auto; min-height: 112px; padding: 22px 26px; box-sizing: border-box; }
+.mobile-voice-transcript { width: 100%; max-height: 32vh; overflow: auto; font-size: 20px; line-height: 1.6; overflow-wrap: anywhere; white-space: pre-wrap; }
+.mobile-voice-center strong { font-size: 17px; font-weight: 500; }
+.mobile-voice-center small { color: #fff9; font-size: 13px; }
+.mobile-voice-bars { display: flex; align-items: center; gap: 3px; height: 35px; }
+.mobile-voice-bars i { display: block; width: 3px; height: 9px; background: currentColor; border-radius: 2px; animation: mobile-voice-pulse .65s ease-in-out infinite alternate; }
+@keyframes mobile-voice-pulse { to { height: 30px; } }
+.mobile-voice-zones { position: absolute; bottom: calc(100px + env(safe-area-inset-bottom)); left: -3%; width: 106%; display: flex; justify-content: space-between; gap: 38px; }
+.mobile-voice-zones > div { width: 44%; height: 92px; border-radius: 60px; background: #ffffff1a; display: flex; align-items: center; justify-content: center; gap: 12px; font-size: 18px; transform: rotate(-12deg); transition: background .15s, scale .15s; }
+.mobile-voice-zones > div:last-child { transform: rotate(12deg); }
+.mobile-voice-zones > div.selected { background: #ffffff50; scale: 1.08; }
+.mobile-voice-arc { position: absolute; left: -15%; bottom: -110px; width: 130%; height: calc(210px + env(safe-area-inset-bottom)); border-radius: 50% 50% 0 0; background: linear-gradient(#c4c6c4, #f0f1f0); }
+.mobile-voice-status { padding: 4px 12px; font-size: 12px; color: var(--mantine-color-dimmed); }
+.mobile-voice-status[role=alert] { color: var(--mantine-color-red-6); }
+@media (prefers-reduced-motion: reduce) { .mobile-voice-bars i { animation: none; height: 20px; } }

@@ -115,7 +115,7 @@ print(json.dumps(str(target)))'''
             for part in self.transport._base_ssh_argv()
         ] + [self.transport._target()]
 
-    def remote_json(self, source, payload=None):
+    def remote_json(self, source, payload=None, timeout: int = 30):
         try:
             result = subprocess.run(
                 self.ssh_argv() + [build_remote_stdin_bootstrap_command()],
@@ -124,7 +124,7 @@ print(json.dumps(str(target)))'''
                 stderr=subprocess.DEVNULL,
                 text=True,
                 encoding='utf-8',
-                timeout=30,
+                timeout=timeout,
                 check=False,
                 creationflags=_windows_hide_flags(),
                 startupinfo=_windows_hide_startupinfo(),
@@ -439,6 +439,61 @@ class EnvironmentConnections:
                 else:
                     choice.enabled = int(connect)
             return self.snapshot()
+
+    def _kill_agent_processes(self, cid: str, kind: str) -> None:
+        import os, subprocess
+        if cid == 'local':
+            if os.name != 'nt':
+                patterns = {'codex': ['codex'], 'hermes': ['hermes'], 'grok': ['grok']}.get(kind, [])
+                for pat in patterns:
+                    subprocess.run(['pkill', '-9', '-f', pat], capture_output=True, check=False)
+            else:
+                targets = []
+                if kind == 'codex':
+                    targets = ['codex.exe', 'vp.exe']
+                elif kind == 'hermes':
+                    targets = ['hermes.exe']
+                elif kind == 'grok':
+                    targets = ['grok.exe']
+                for im in targets:
+                    subprocess.run(
+                        ['taskkill.exe', '/F', '/IM', im, '/T'],
+                        capture_output=True,
+                        check=False,
+                        creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
+                )
+        else:
+            row = self.store.get_ssh_connection(cid)
+            if not row:
+                return
+            patterns = {'codex': ['codex'], 'hermes': ['hermes_cli', 'hermes'], 'grok': ['grok']}.get(kind, [])
+            if not patterns:
+                return
+            pkill_cmds = '; '.join(f'pkill -9 -f {pat}' for pat in patterns)
+            remote_script = f'sh -c "{pkill_cmds}; true"'
+            probe = RemoteCodex(self.settings, self.store, None, row, '')
+            try:
+                subprocess.run(
+                    probe.ssh_argv() + [remote_script],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=10,
+                    check=False,
+                    creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
+            )
+            except Exception as exc:
+                logger.warning('Failed to kill remote %s processes on %s: %s', kind, cid, exc)
+
+    def restart(self, cid: str, kind: str) -> dict[str, Any]:
+        if kind not in {'hermes', 'codex', 'grok'}:
+            raise ConnectionError('不支持的 Agent 类型。', 422)
+        with self.lock:
+            try:
+                self.change(cid, kind, False)
+            except Exception as exc:
+                logger.warning('Disconnect before restart %s:%s produced: %s', cid, kind, exc)
+            self._kill_agent_processes(cid, kind)
+            return self.change(cid, kind, True)
 
     def restore(self):
         pairs = [('local', 'codex'), ('local', 'hermes')]

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ActionIcon, Badge, Button, Card, Code, Group, PasswordInput, Stack, Table, Text, TextInput } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { IconBrain, IconRefresh } from '@tabler/icons-react'
+import { IconBrain, IconCheck, IconRefresh } from '@tabler/icons-react'
 import { api } from '../../api/client'
 
 type Target = { id: string; kind: 'local' | 'wsl' | 'ssh'; name: string; state?: string }
@@ -100,12 +100,12 @@ export function OpenVikingSettingsCard() {
   }
 
   return (
-    <Card withBorder radius="md" p="md" mt="md">
+    <Card className="openviking-settings-card" withBorder radius="md" p="lg">
       <Group justify="space-between" mb="xs">
         <Group gap="xs">
           <IconBrain size={20} color="var(--astr-indigo, #5b6cff)" />
           <Text fw={600} size="md">OpenViking 记忆与知识库网关</Text>
-          {healthy === true && <Badge color="teal" variant="light">在线 v{serverVersion || '0.4.x'}</Badge>}
+          {healthy === true && <Text size="xs" c="dimmed">在线{serverVersion ? ` · v${serverVersion}` : ''}</Text>}
           {healthy === false && <Badge color="red" variant="light">离线 / 不可达</Badge>}
         </Group>
         <ActionIcon variant="subtle" color="gray" onClick={load} loading={loading} title="刷新状态">
@@ -144,7 +144,7 @@ export function OpenVikingSettingsCard() {
         </Button>
       </Group>
 
-      <Table striped highlightOnHover withTableBorder withColumnBorders>
+      <div className="settings-table-scroll"><Table highlightOnHover>
         <Table.Thead>
           <Table.Tr>
             <Table.Th>目标环境</Table.Th>
@@ -174,7 +174,7 @@ export function OpenVikingSettingsCard() {
                 </Table.Td>
                 <Table.Td>
                   {st?.plugin_installed ? (
-                    <Badge color="teal" size="xs" variant="light">已安装</Badge>
+                    <IconCheck size={16} aria-label="已安装" className="settings-status-check" />
                   ) : st ? (
                     <Badge color="gray" size="xs" variant="light">未安装</Badge>
                   ) : (
@@ -183,7 +183,7 @@ export function OpenVikingSettingsCard() {
                 </Table.Td>
                 <Table.Td>
                   {st?.hooks_enabled ? (
-                    <Badge color="teal" size="xs" variant="light">已启用</Badge>
+                    <IconCheck size={16} aria-label="已启用" className="settings-status-check" />
                   ) : st ? (
                     <Badge color="orange" size="xs" variant="light">未启用</Badge>
                   ) : (
@@ -208,7 +208,7 @@ export function OpenVikingSettingsCard() {
             )
           })}
         </Table.Tbody>
-      </Table>
+      </Table></div>
     </Card>
   )
 }

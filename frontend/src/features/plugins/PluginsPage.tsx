@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   ActionIcon,
   Badge,
@@ -9,6 +9,7 @@ import {
   Group,
   Modal,
   Paper,
+  Progress,
   Select,
   SimpleGrid,
   Stack,
@@ -23,11 +24,87 @@ import {
   IconChevronDown,
   IconChevronUp,
   IconInfoCircle,
+  IconMicrophone,
   IconPuzzle,
 } from '@tabler/icons-react'
+import { api, type LocalVoicePluginStatus } from '../../api/client'
 import { artifactViewerRegistry } from '../sidecar/registry'
 import type { ArtifactViewer, ViewerConfigOption } from '../sidecar/types'
 import { usePluginSettingsStore } from './pluginSettingsStore'
+
+function LocalVoicePluginCard() {
+  const [status, setStatus] = useState<LocalVoicePluginStatus | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let active = true
+    const refresh = async () => {
+      try {
+        const next = await api.getLocalVoicePlugin()
+        if (!active) return
+        setStatus(next)
+        setLoading(false)
+
+      } catch {
+        if (active) setLoading(false)
+      }
+    }
+    void refresh()
+    const timer = window.setInterval(() => { void refresh() }, 1500)
+    return () => { active = false; window.clearInterval(timer) }
+  }, [])
+
+  const toggle = async () => {
+    if (!status || loading) return
+    setLoading(true)
+    try {
+      const next = await api.setLocalVoicePlugin(!status.enabled)
+      setStatus(next)
+      setLoading(false)
+    } catch {
+      setLoading(false)
+    }
+  }
+
+  const running = status?.state === 'running'
+  const stateLabel = status?.state === 'installing' ? '正在下载模型'
+    : status?.state === 'starting' ? '正在加载模型'
+      : status?.state === 'stopping' ? '正在卸载模型'
+        : status?.state === 'running' ? '流式听写已启用'
+          : status?.state === 'error' ? '启动失败'
+            : '已停用 · 使用停止后转写'
+
+  return (
+    <Card withBorder radius="md" p="md" style={{ background: 'var(--astr-surface)' }}>
+      <Group justify="space-between" align="flex-start" wrap="nowrap">
+        <Group gap="sm" wrap="nowrap" align="flex-start">
+          <div style={{ padding: 8, borderRadius: 8, background: running ? 'rgba(34, 197, 94, 0.12)' : 'var(--astr-surface-muted)', color: running ? '#16a34a' : 'var(--astr-muted)', display: 'flex' }}>
+            <IconMicrophone size={24} />
+          </div>
+          <div>
+            <Group gap="xs">
+              <Text fw={600} size="sm">R2T2 本地流式听写</Text>
+              <Badge size="xs" variant="light" color="green">本地模型</Badge>
+            </Group>
+            <Text size="xs" c="dimmed" mt={4}>
+              启用后在本机显卡上加载 Confucius4-R2T2，录音时逐段回填；停用后释放显存并使用普通转写。
+            </Text>
+            <Text size="xs" c={status?.state === 'error' ? 'red' : 'dimmed'} mt={8}>
+              {status?.error || stateLabel}
+            </Text>
+            {status?.state === 'installing' && <Progress value={(status.progress || 0) * 100} size="xs" mt={8} />}
+          </div>
+        </Group>
+        <Switch
+          aria-label="启用 R2T2 本地流式听写"
+          checked={Boolean(status?.enabled)}
+          disabled={!status || loading}
+          onChange={() => { void toggle() }}
+        />
+      </Group>
+    </Card>
+  )
+}
 
 function PluginCard({ viewer }: { viewer: ArtifactViewer }) {
   const isEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(viewer.id))
@@ -368,10 +445,10 @@ export function PluginsPage() {
             </div>
             <div>
               <Title order={2} size="h3">
-                插件与工件查看器管理
+                插件管理
               </Title>
               <Text size="xs" c="dimmed" mt={2}>
-                管理星序会话右侧工作台支持的富媒介渲染器与编辑插件，支持按需启用、停用及个性化参数配置。
+                管理本地运行时能力、富媒介渲染器与编辑插件。
               </Text>
             </div>
           </Group>
@@ -383,6 +460,10 @@ export function PluginsPage() {
           </Group>
         </Group>
       </Paper>
+
+      <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md" mb="md">
+        <LocalVoicePluginCard />
+      </SimpleGrid>
 
       <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
         {viewers.map((viewer) => (

@@ -1,0 +1,14 @@
+.rtk-settings { padding: 16px 4px; }
+.rtk-path { overflow-wrap: anywhere; }
+.rtk-chart { margin-top: 18px; }
+.rtk-chart-bars { height: 180px; display: flex; align-items: end; gap: 3px; border-bottom: 1px solid var(--mantine-color-default-border); }
+.rtk-day { flex: 1; min-width: 1px; height: 100%; display: flex; align-items: end; justify-content: center; }
+.rtk-bar { display: flex; flex-direction: column; width: 100%; max-width: 48px; min-height: 1px; overflow: hidden; border-radius: 3px 3px 0 0; }
+.rtk-saved { background: #5948ed; }
+.rtk-output { background: #c1baff; }
+.rtk-chart-dates { display: flex; justify-content: space-between; font-size: 11px; color: var(--mantine-color-dimmed); margin-top: 6px; }
+.rtk-dot { display: inline-block; width: 8px; height: 8px; margin-right: 5px; border-radius: 2px; }
+.rtk-agents { overflow: hidden; }
+.rtk-agent { padding: 14px 16px; }
+.rtk-agent + .rtk-agent { border-top: 1px solid var(--mantine-color-default-border); }
+@media (max-width: 767px) { .rtk-settings { padding: 12px; } .rtk-chart-bars { height: 140px; } }

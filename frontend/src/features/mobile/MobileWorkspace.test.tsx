@@ -10,6 +10,7 @@ import { MobileWorkspace, cleanServerName, displayShortModel } from './MobileWor
 import type { OutboxEntry } from './mobileOutbox'
 import { scopeKey } from '../../domain/semantics'
 import { draftStorage } from '../chat/draftStorage'
+import * as localVoiceStream from '../chat/localVoiceStream'
 
 const memory = vi.hoisted(() => ({ rows: [] as OutboxEntry[] }))
 vi.mock('./mobileOutboxStorage', () => ({ mobileOutboxStorage: { load: async () => memory.rows, save: async (rows: OutboxEntry[]) => { memory.rows = rows } } }))
@@ -43,6 +44,29 @@ beforeEach(() => {
   useAstrorderStore.getState().hydrateBootstrap({ protocol_version: 1, cursor: 0, agents: [{ id: 'inert', kind: 'hermes', name: '协议测试', status: 'ready', capabilities: ['chat', 'stop', 'attachments'], limitation: null }], sessions: [session] })
 })
 describe('independent mobile composer', () => {
+  it('sends the final held transcript once after release and preserves the typed draft', async () => {
+    useAstrorderStore.getState().setConnection('connected')
+    vi.stubGlobal('navigator', Object.create(navigator, { mediaDevices: { value: { getUserMedia: vi.fn().mockResolvedValue({ getTracks: () => [{ stop: vi.fn() }] }) } } }))
+    vi.spyOn(api, 'getLocalVoicePlugin').mockResolvedValue({ id: 'r2t2-local-voice', name: 'R2T2', enabled: true, state: 'running', available: true, progress: null, error: null, pid: 1, device: 'Vulkan0', model: 'test' })
+    let callbacks!: localVoiceStream.LocalVoiceStreamCallbacks
+    const controller = { stop: vi.fn(), cancel: vi.fn() }
+    vi.spyOn(localVoiceStream, 'startLocalVoiceStream').mockImplementation(async (_media, next) => { callbacks = next; return controller })
+    const create = vi.spyOn(api, 'createCommand').mockImplementation(async input => ({ ...input, state: 'accepted', attachments: [], created_at: session.updated_at, error: null }))
+    mount()
+    const input = screen.getByLabelText('消息内容')
+    fireEvent.change(input, { target: { value: '保留草稿' } })
+    fireEvent.pointerDown(input, { pointerId: 1, pointerType: 'touch', clientX: 180, clientY: 600 })
+    await waitFor(() => expect(callbacks).toBeDefined())
+    act(() => callbacks.onTranscript('还没说完'))
+    expect(create).not.toHaveBeenCalled()
+    fireEvent.pointerUp(input, { pointerId: 1 })
+    expect(controller.stop).toHaveBeenCalledOnce()
+    expect(create).not.toHaveBeenCalled()
+    act(() => callbacks.onDone('最终语音消息'))
+    act(() => callbacks.onDone('重复结束'))
+    await waitFor(() => expect(create).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ text: '最终语音消息', action: 'send', session_id: session.id })))
+    expect(input).toHaveValue('保留草稿')
+  })
   it('shows native connection, agent, model and branch in runtime status', async () => {
     mount()
     fireEvent.click(screen.getByRole('button', { name: '会话操作' }))
@@ -80,6 +104,29 @@ describe('independent mobile composer', () => {
     expect(document.querySelector('.mobile-workspace')).toHaveAttribute('data-sheet', 'blackboard')
     await waitFor(() => expect(blackboard).toHaveBeenCalledWith('session:inert::native-test'))
     expect(screen.getByText('当前黑板暂无共享参数')).toBeInTheDocument()
+  })
+  it('dictates from the microphone straight into the mobile input without opening a sheet', async () => {
+    const track = { stop: vi.fn() }
+    vi.stubGlobal('navigator', Object.create(navigator, { mediaDevices: { value: { getUserMedia: vi.fn().mockResolvedValue({ getTracks: () => [track] }) } } }))
+    class Recorder {
+      state = 'inactive'; mimeType = 'audio/webm'
+      ondataavailable: ((e: { data: Blob }) => void) | null = null
+      onstop: (() => void) | null = null
+      start() { this.state = 'recording' }
+      stop() { this.state = 'inactive'; this.ondataavailable?.({ data: new Blob(['audio']) }); this.onstop?.() }
+    }
+    vi.stubGlobal('MediaRecorder', Recorder)
+    vi.spyOn(api, 'transcribeAudio').mockResolvedValue({ text: '手机听写' })
+    const send = vi.spyOn(api, 'createCommand')
+    mount()
+    const input = screen.getByLabelText('消息内容') as HTMLTextAreaElement
+    Object.defineProperty(input, 'scrollHeight', { configurable: true, get: () => input.value ? 108 : 34 })
+    fireEvent.click(screen.getByRole('button', { name: '语音消息' }))
+    fireEvent.click(await screen.findByRole('button', { name: '停止录音' }))
+    await waitFor(() => expect(screen.getByLabelText('消息内容')).toHaveValue('手机听写'))
+    expect(input.style.height).toBe('108px')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(send).not.toHaveBeenCalled()
   })
   it('keeps the composer to attach, input, voice and send', () => {
     mount()

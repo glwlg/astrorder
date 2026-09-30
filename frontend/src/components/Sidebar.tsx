@@ -6,6 +6,8 @@ import { useState } from 'react'
 import { NavLink as RouterNavLink, useLocation } from 'react-router-dom'
 import { api, type OcxUsageResponse } from '../api/client'
 import type { Agent, Project, Session } from '../domain/types'
+import { RtkSettingsPage } from '../features/rtk/RtkSettingsPage'
+import './settings.css'
 import { AgentsPage } from '../features/agents/AgentsPage'
 import { formatTokens, getModelColor } from '../features/analytics/AnalyticsPage'
 import { PluginsPage } from '../features/plugins/PluginsPage'
@@ -236,11 +238,12 @@ export function Sidebar({
           body: { flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', padding: '0 16px 16px' },
         }}
       >
-        <Tabs defaultValue="connections" keepMounted={true} className="settings-tabs" style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+        <Tabs defaultValue="connections" orientation="vertical" keepMounted={true} className="settings-tabs">
           <Tabs.List>
             <Tabs.Tab value="connections" leftSection={<IconAdjustments size={16} />}>连接</Tabs.Tab>
             <Tabs.Tab value="models" leftSection={<IconBrain size={16} />}>模型与网关</Tabs.Tab>
-            <Tabs.Tab value="skills" leftSection={<IconBolt size={16} />}>能力中心 (Capabilities)</Tabs.Tab>
+            <Tabs.Tab value="skills" leftSection={<IconBolt size={16} />}>能力中心</Tabs.Tab>
+            <Tabs.Tab value="rtk" leftSection={<IconChartHistogram size={16} />}>RTK</Tabs.Tab>
             <Tabs.Tab value="network" leftSection={<IconWorld size={16} />}>网络与移动端</Tabs.Tab>
             <Tabs.Tab value="desktop" leftSection={<IconDeviceDesktop size={16} />}>桌面客户端</Tabs.Tab>
             <Tabs.Tab value="plugins" leftSection={<IconPuzzle size={16} />}>插件</Tabs.Tab>
@@ -250,6 +253,7 @@ export function Sidebar({
           <Tabs.Panel value="skills" className="settings-tab-panel" data-tab-panel-skills="true" style={{ overflow: 'hidden' }}>
             <CapabilitiesSettingsCard />
           </Tabs.Panel>
+          <Tabs.Panel value="rtk" className="settings-tab-panel" keepMounted={false}><RtkSettingsPage /></Tabs.Panel>
           <Tabs.Panel value="network" className="settings-tab-panel"><NetworkSettingsPage /></Tabs.Panel>
           <Tabs.Panel value="desktop" className="settings-tab-panel"><DesktopSettingsPage /></Tabs.Panel>
           <Tabs.Panel value="plugins" className="settings-tab-panel"><PluginsPage /></Tabs.Panel>
