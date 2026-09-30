@@ -514,7 +514,7 @@ export const api = {
       speed?: number | null
     }>(`/sessions/${encodeURIComponent(sessionId)}/usage${agentId ? '?agent_id=' + encodeURIComponent(agentId) : ''}`),
   getAnalyticsConfig: () => request<{ gateway_type: 'opencodex' | 'magpie' | 'magpie'; management_url: string; inference_url: string; target_overrides: Record<string, string>; masked_key: string }>('/analytics/config'),
-  updateAnalyticsConfig: (payload: { gateway_type: 'opencodex'; management_url: string; inference_url: string; target_overrides: Record<string, string>; api_key?: string }) => jsonRequest<{ gateway_type: 'opencodex'; management_url: string; inference_url: string; target_overrides: Record<string, string>; masked_key: string }>('/analytics/config', payload, 'PUT'),
+  updateAnalyticsConfig: (payload: { gateway_type: 'opencodex' | 'magpie'; management_url: string; inference_url: string; target_overrides: Record<string, string>; api_key?: string }) => jsonRequest<{ gateway_type: 'opencodex' | 'magpie'; management_url: string; inference_url: string; target_overrides: Record<string, string>; masked_key: string }>('/analytics/config', payload, 'PUT'),
   getModelSyncTargets: () => request<{ items: Array<{ id: string; kind: 'local' | 'wsl' | 'ssh'; name: string; state?: string; agents: string[] }> }>('/model-sync/targets'),
   previewModelSync: (targets: Array<{ target_id: string; agents: string[] }>) => jsonRequest<{
     catalog_fingerprint: string
