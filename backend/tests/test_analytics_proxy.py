@@ -88,3 +88,27 @@ def test_model_quota_uses_active_openai_accounts_instead_of_aggregate_report() -
 
     assert result["reports"] == []
     assert result["accounts"] == accounts
+
+
+def test_magpie_usage_reads_local_jsonl(tmp_path: Path, monkeypatch) -> None:
+    app = create_app(Settings(
+        database_url=f"sqlite:///{(tmp_path / 'state.sqlite3').as_posix()}",
+        browser_secret="test-secret",
+        connector_secret="connector-secret",
+        attachments_dir=tmp_path / "attachments",
+        auto_connect_local_hermes=False,
+    ))
+    headers = {"Authorization": "Bearer test-secret"}
+    with TestClient(app) as client:
+        saved = client.put("/api/v1/analytics/config", json={
+            "gateway_type": "magpie", "management_url": "http://127.0.0.1:3425/v1",
+            "inference_url": "http://127.0.0.1:3425/v1", "api_key": "sk-magpie-test",
+        }, headers=headers)
+        assert saved.status_code == 200
+
+        resp = client.get("/api/v1/analytics/usage?range=all&surface=all", headers=headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "summary" in data
+        assert "models" in data
+        assert "days" in data

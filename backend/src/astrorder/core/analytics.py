@@ -2,7 +2,7 @@ import asyncio
 import glob
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
@@ -205,6 +205,145 @@ def update_analytics_config(request: Request, payload: dict[str, Any]) -> dict[s
     return public_gateway_config(config)
 
 
+def _summarize_magpie_usage(range_str: str, surface: str, since: int | None, until: int | None) -> dict[str, Any]:
+    path = os.path.expanduser("~/.config/magpie/usage.jsonl")
+    if not os.path.isfile(path):
+        return {"range": range_str, "surface": surface, "since": 0, "generatedAt": datetime.now().isoformat(), "summary": {"requests": 0, "totalTokens": 0, "inputTokens": 0, "outputTokens": 0}, "days": [], "models": [], "providers": [], "accounts": []}
+
+    now_dt = datetime.now().astimezone()
+    since_dt = None
+    until_dt = None
+    if since is not None and until is not None:
+        since_dt = datetime.fromtimestamp(since / 1000.0, tz=now_dt.tzinfo)
+        until_dt = datetime.fromtimestamp(until / 1000.0, tz=now_dt.tzinfo)
+    elif range_str == "7d":
+        since_dt = now_dt - timedelta(days=7)
+    elif range_str == "30d":
+        since_dt = now_dt - timedelta(days=30)
+
+    records = []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                    t_str = rec.get("t")
+                    if not t_str:
+                        continue
+                    dt = datetime.fromisoformat(t_str)
+                    if since_dt and dt < since_dt:
+                        continue
+                    if until_dt and dt > until_dt:
+                        continue
+                    agent = str(rec.get("agent") or "").lower()
+                    if surface != "all":
+                        if surface == "codex" and "codex" not in agent:
+                            continue
+                        elif surface == "grok" and "grok" not in agent:
+                            continue
+                        elif surface == "claude" and "claude" not in agent:
+                            continue
+                    records.append((dt, rec))
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    total_requests = len(records)
+    total_tokens = sum(int(r.get("in") or 0) + int(r.get("out") or 0) for _, r in records)
+    input_tokens = sum(int(r.get("in") or 0) for _, r in records)
+    output_tokens = sum(int(r.get("out") or 0) for _, r in records)
+    cache_read = sum(int(r.get("cache_read") or 0) for _, r in records)
+    reasoning_tokens = sum(int(r.get("reasoning") or 0) for _, r in records)
+
+    days_map: dict[str, dict[str, Any]] = {}
+    models_map: dict[str, dict[str, Any]] = {}
+    providers_map: dict[str, dict[str, Any]] = {}
+
+    for dt, r in records:
+        day_str = dt.strftime("%Y-%m-%d")
+        if day_str not in days_map:
+            days_map[day_str] = {"date": day_str, "requests": 0, "measuredRequests": 0, "reportedRequests": 0, "totalTokens": 0, "estimatedCostUsd": 0.0, "models": {}}
+        day_entry = days_map[day_str]
+        day_entry["requests"] += 1
+        toks = int(r.get("in") or 0) + int(r.get("out") or 0)
+        day_entry["totalTokens"] += toks
+
+        m_name = str(r.get("served") or r.get("model") or "unknown")
+        p_name = str(r.get("provider") or "magpie")
+        if m_name not in day_entry["models"]:
+            day_entry["models"][m_name] = {"model": m_name, "provider": p_name, "requests": 0, "totalTokens": 0, "inputTokens": 0, "outputTokens": 0}
+        dm = day_entry["models"][m_name]
+        dm["requests"] += 1
+        dm["totalTokens"] += toks
+        dm["inputTokens"] += int(r.get("in") or 0)
+        dm["outputTokens"] += int(r.get("out") or 0)
+
+        # models breakdown
+        if m_name not in models_map:
+            models_map[m_name] = {"name": m_name, "model": m_name, "provider": p_name, "requests": 0, "totalTokens": 0, "inputTokens": 0, "outputTokens": 0, "cacheReadInputTokens": 0, "reasoningOutputTokens": 0, "estimatedCostUsd": 0.0, "shareRatio": 0.0}
+        mb = models_map[m_name]
+        mb["requests"] += 1
+        mb["totalTokens"] += toks
+        mb["inputTokens"] += int(r.get("in") or 0)
+        mb["outputTokens"] += int(r.get("out") or 0)
+        mb["cacheReadInputTokens"] += int(r.get("cache_read") or 0)
+        mb["reasoningOutputTokens"] += int(r.get("reasoning") or 0)
+
+        # providers breakdown
+        if p_name not in providers_map:
+            providers_map[p_name] = {"name": p_name, "model": p_name, "provider": p_name, "requests": 0, "totalTokens": 0, "inputTokens": 0, "outputTokens": 0, "cacheReadInputTokens": 0, "reasoningOutputTokens": 0, "estimatedCostUsd": 0.0, "shareRatio": 0.0}
+        pb = providers_map[p_name]
+        pb["requests"] += 1
+        pb["totalTokens"] += toks
+        pb["inputTokens"] += int(r.get("in") or 0)
+        pb["outputTokens"] += int(r.get("out") or 0)
+        pb["cacheReadInputTokens"] += int(r.get("cache_read") or 0)
+        pb["reasoningOutputTokens"] += int(r.get("reasoning") or 0)
+
+    # calc share ratios
+    for mb in models_map.values():
+        mb["shareRatio"] = round(mb["totalTokens"] / max(total_tokens, 1), 4)
+    for pb in providers_map.values():
+        pb["shareRatio"] = round(pb["totalTokens"] / max(total_tokens, 1), 4)
+
+    days_list = []
+    for day_str in sorted(days_map.keys()):
+        d = days_map[day_str]
+        days_list.append({
+            "date": d["date"],
+            "requests": d["requests"],
+            "measuredRequests": d["requests"],
+            "reportedRequests": d["requests"],
+            "totalTokens": d["totalTokens"],
+            "estimatedCostUsd": 0.0,
+            "models": list(d["models"].values()),
+        })
+
+    return {
+        "range": range_str,
+        "surface": surface,
+        "since": int(since_dt.timestamp() * 1000) if since_dt else 0,
+        "generatedAt": now_dt.isoformat(),
+        "summary": {
+            "requests": total_requests,
+            "totalTokens": total_tokens,
+            "inputTokens": input_tokens,
+            "outputTokens": output_tokens,
+            "cacheReadInputTokens": cache_read,
+            "reasoningOutputTokens": reasoning_tokens,
+            "estimatedCostUsd": 0.0,
+        },
+        "days": days_list,
+        "models": sorted(models_map.values(), key=lambda x: x["totalTokens"], reverse=True),
+        "providers": sorted(providers_map.values(), key=lambda x: x["totalTokens"], reverse=True),
+        "accounts": [],
+    }
+
+
 @router.get("/api/v1/analytics/usage")
 async def get_analytics_usage(
     request: Request,
@@ -227,8 +366,7 @@ async def get_analytics_usage(
     config = get_gateway_config(request.app.state.store)
     gw_type = str(config.get("gateway_type") or "opencodex").strip().lower()
     if gw_type == "magpie":
-        # Magpie does not provide historical aggregated usage / log endpoints; return empty summary structure
-        return {"summary": {"requests": 0, "totalTokens": 0, "inputTokens": 0, "outputTokens": 0}, "days": [], "models": [], "providers": [], "accounts": []}
+        return _summarize_magpie_usage(range, surface, since, until)
 
     try:
         async with httpx.AsyncClient(follow_redirects=True, timeout=15.0) as client:
