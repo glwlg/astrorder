@@ -225,6 +225,11 @@ async def get_analytics_usage(
     if since is not None and until is not None:
         params.update(since=since, until=until)
     config = get_gateway_config(request.app.state.store)
+    gw_type = str(config.get("gateway_type") or "opencodex").strip().lower()
+    if gw_type == "magpie":
+        # Magpie does not provide historical aggregated usage / log endpoints; return empty summary structure
+        return {"summary": {"requests": 0, "totalTokens": 0, "inputTokens": 0, "outputTokens": 0}, "days": [], "models": [], "providers": [], "accounts": []}
+
     try:
         async with httpx.AsyncClient(follow_redirects=True, timeout=15.0) as client:
             response = await client.get(_gateway_endpoint(config, "usage"), params=params, headers=_gateway_headers(config))
