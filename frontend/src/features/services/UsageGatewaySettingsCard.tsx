@@ -10,14 +10,40 @@ type Selection = Record<string, string[]>
 type Preview = Awaited<ReturnType<typeof api.previewModelSync>>
 type SyncJob = Awaited<ReturnType<typeof api.getModelSyncJobs>>['items'][number]
 
+interface GatewayFormState {
+  managementUrl: string
+  inferenceUrl: string
+  apiKey: string
+  maskedKey: string
+  overrides: Record<string, string>
+}
+
+const DEFAULT_PROFILES: Record<'opencodex' | 'magpie', GatewayFormState> = {
+  opencodex: {
+    managementUrl: 'https://ocx.651971564.xyz',
+    inferenceUrl: 'https://llm.651971564.xyz/v1',
+    apiKey: '',
+    maskedKey: '',
+    overrides: {},
+  },
+  magpie: {
+    managementUrl: 'http://192.168.1.11:3425/v1',
+    inferenceUrl: 'http://192.168.1.11:3425/v1',
+    apiKey: '',
+    maskedKey: '',
+    overrides: {},
+  },
+}
+
 export function UsageGatewaySettingsCard() {
   const [gatewayType, setGatewayType] = useState<'opencodex' | 'magpie'>('opencodex')
-  const [managementUrl, setManagementUrl] = useState('')
-  const [inferenceUrl, setInferenceUrl] = useState('')
+  const [profiles, setProfiles] = useState<Record<'opencodex' | 'magpie', GatewayFormState>>(DEFAULT_PROFILES)
+  const [managementUrl, setManagementUrl] = useState(DEFAULT_PROFILES.opencodex.managementUrl)
+  const [inferenceUrl, setInferenceUrl] = useState(DEFAULT_PROFILES.opencodex.inferenceUrl)
   const [apiKey, setApiKey] = useState('')
   const [maskedKey, setMaskedKey] = useState('')
-  const [targets, setTargets] = useState<Target[]>([])
   const [overrides, setOverrides] = useState<Record<string, string>>({})
+  const [targets, setTargets] = useState<Target[]>([])
   const [selection, setSelection] = useState<Selection>({})
   const [preview, setPreview] = useState<Preview | null>(null)
   const [jobs, setJobs] = useState<SyncJob[]>([])
@@ -34,11 +60,48 @@ export function UsageGatewaySettingsCard() {
     setBusy('load')
     try {
       const [config, targetResult, jobResult] = await Promise.all([api.getAnalyticsConfig(), api.getModelSyncTargets(), api.getModelSyncJobs()])
-      setGatewayType(config.gateway_type || 'opencodex')
-      setManagementUrl(config.management_url)
-      setInferenceUrl(config.inference_url)
-      setOverrides(config.target_overrides)
-      setMaskedKey(config.masked_key)
+      const currentType = (config.gateway_type as 'opencodex' | 'magpie') || 'opencodex'
+      const nextProfiles: Record<'opencodex' | 'magpie', GatewayFormState> = {
+        opencodex: { ...DEFAULT_PROFILES.opencodex },
+        magpie: { ...DEFAULT_PROFILES.magpie },
+      }
+
+      if (config.gateway_profiles?.opencodex) {
+        const p = config.gateway_profiles.opencodex
+        nextProfiles.opencodex = {
+          managementUrl: p.management_url || DEFAULT_PROFILES.opencodex.managementUrl,
+          inferenceUrl: p.inference_url || DEFAULT_PROFILES.opencodex.inferenceUrl,
+          overrides: p.target_overrides || {},
+          maskedKey: p.masked_key || '',
+          apiKey: '',
+        }
+      }
+      if (config.gateway_profiles?.magpie) {
+        const p = config.gateway_profiles.magpie
+        nextProfiles.magpie = {
+          managementUrl: p.management_url || DEFAULT_PROFILES.magpie.managementUrl,
+          inferenceUrl: p.inference_url || DEFAULT_PROFILES.magpie.inferenceUrl,
+          overrides: p.target_overrides || {},
+          maskedKey: p.masked_key || '',
+          apiKey: '',
+        }
+      }
+
+      nextProfiles[currentType] = {
+        managementUrl: config.management_url || nextProfiles[currentType].managementUrl,
+        inferenceUrl: config.inference_url || nextProfiles[currentType].inferenceUrl,
+        overrides: config.target_overrides || {},
+        maskedKey: config.masked_key || '',
+        apiKey: '',
+      }
+
+      setProfiles(nextProfiles)
+      setGatewayType(currentType)
+      setManagementUrl(nextProfiles[currentType].managementUrl)
+      setInferenceUrl(nextProfiles[currentType].inferenceUrl)
+      setOverrides(nextProfiles[currentType].overrides)
+      setMaskedKey(nextProfiles[currentType].maskedKey)
+      setApiKey('')
       setTargets(targetResult.items)
       setJobs(jobResult.items)
       setSelection({})
@@ -49,16 +112,72 @@ export function UsageGatewaySettingsCard() {
 
   useEffect(() => { void load() }, [])
 
+  const handleGatewayTypeChange = (nextType: 'opencodex' | 'magpie') => {
+    if (nextType === gatewayType) return
+    setProfiles((prev) => {
+      const updated: Record<'opencodex' | 'magpie', GatewayFormState> = {
+        ...prev,
+        [gatewayType]: {
+          managementUrl,
+          inferenceUrl,
+          apiKey,
+          maskedKey,
+          overrides,
+        },
+      }
+      const targetState = updated[nextType] || DEFAULT_PROFILES[nextType]
+      setGatewayType(nextType)
+      setManagementUrl(targetState.managementUrl)
+      setInferenceUrl(targetState.inferenceUrl)
+      setApiKey(targetState.apiKey)
+      setMaskedKey(targetState.maskedKey)
+      setOverrides(targetState.overrides)
+      return updated
+    })
+  }
+
   const save = async (clearKey = false) => {
     setBusy('save')
     try {
-      const result = await api.updateAnalyticsConfig({
-        gateway_type: gatewayType, management_url: managementUrl.trim(), inference_url: inferenceUrl.trim(),
+      const currentProfilePayload = {
+        gateway_type: gatewayType,
+        management_url: managementUrl.trim(),
+        inference_url: inferenceUrl.trim(),
         target_overrides: Object.fromEntries(Object.entries(overrides).filter(([, value]) => value.trim()).map(([key, value]) => [key, value.trim()])),
         ...(clearKey ? { api_key: '' } : apiKey.trim() ? { api_key: apiKey.trim() } : {}),
+      }
+
+      const allProfilesPayload: Record<string, any> = {}
+      for (const [t, p] of Object.entries(profiles)) {
+        if (t === gatewayType) {
+          allProfilesPayload[t] = currentProfilePayload
+        } else {
+          allProfilesPayload[t] = {
+            gateway_type: t,
+            management_url: p.managementUrl.trim(),
+            inference_url: p.inferenceUrl.trim(),
+            target_overrides: p.overrides,
+            ...(p.apiKey.trim() ? { api_key: p.apiKey.trim() } : {}),
+          }
+        }
+      }
+
+      const result = await api.updateAnalyticsConfig({
+        ...currentProfilePayload,
+        gateway_profiles: allProfilesPayload,
       })
       setMaskedKey(result.masked_key)
       setApiKey('')
+      setProfiles((prev) => ({
+        ...prev,
+        [gatewayType]: {
+          managementUrl: result.management_url,
+          inferenceUrl: result.inference_url,
+          apiKey: '',
+          maskedKey: result.masked_key,
+          overrides: result.target_overrides,
+        },
+      }))
       notifications.show({ color: 'teal', message: 'LLM 网关配置已保存', icon: <IconCheck size={16} /> })
     } catch (error: any) {
       notifications.show({ color: 'red', message: error.message || '保存 LLM 网关配置失败' })
@@ -90,7 +209,6 @@ export function UsageGatewaySettingsCard() {
     } catch (error: any) { notifications.show({ color: 'red', message: error.message || '启动模型同步失败' }) }
   }
 
-  
   const selectAll = () => {
     const all: Selection = {}
     targets.forEach((t) => { all[t.id] = [...t.agents] })
@@ -134,9 +252,9 @@ export function UsageGatewaySettingsCard() {
         <Badge size="xs" variant="light" color={gatewayType === 'magpie' ? 'indigo' : 'teal'}>{gatewayType === 'magpie' ? 'Magpie' : 'OpenCodeX'}{maskedKey ? ` · ${maskedKey}` : ''}</Badge>
       </Group>
       <Stack gap="sm">
-        <Select label="网关类型" value={gatewayType} onChange={(v) => setGatewayType((v as any) || 'opencodex')} data={[{ value: 'opencodex', label: 'OpenCodeX' }, { value: 'magpie', label: 'Magpie' }]} allowDeselect={false} />
-        <TextInput label="管理地址" placeholder="https://ocx.example.com" value={managementUrl} onChange={(event) => setManagementUrl(event.currentTarget.value)} disabled={busy === 'load'} />
-        <TextInput label="推理 Base URL" placeholder="https://llm.example.com/v1" value={inferenceUrl} onChange={(event) => setInferenceUrl(event.currentTarget.value)} disabled={busy === 'load'} />
+        <Select label="网关类型" value={gatewayType} onChange={(v) => handleGatewayTypeChange((v as any) || 'opencodex')} data={[{ value: 'opencodex', label: 'OpenCodeX' }, { value: 'magpie', label: 'Magpie' }]} allowDeselect={false} />
+        <TextInput label="管理地址" placeholder={gatewayType === 'magpie' ? 'http://192.168.1.11:3425/v1' : 'https://ocx.example.com'} value={managementUrl} onChange={(event) => setManagementUrl(event.currentTarget.value)} disabled={busy === 'load'} />
+        <TextInput label="推理 Base URL" placeholder={gatewayType === 'magpie' ? 'http://192.168.1.11:3425/v1' : 'https://llm.example.com/v1'} value={inferenceUrl} onChange={(event) => setInferenceUrl(event.currentTarget.value)} disabled={busy === 'load'} />
         <PasswordInput label="API Key" placeholder={maskedKey ? '留空则保留当前 Key' : '可选'} value={apiKey} onChange={(event) => setApiKey(event.currentTarget.value)} />
         <Accordion variant="contained">
           <Accordion.Item value="targets">

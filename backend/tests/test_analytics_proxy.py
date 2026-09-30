@@ -43,10 +43,12 @@ def test_ocx_usage_config_and_live_proxy(tmp_path: Path, monkeypatch) -> None:
             "inference_url": "https://llm.example/v1", "api_key": "secret-key",
         }, headers=headers)
         assert saved.status_code == 200
-        assert saved.json() == {
-            "gateway_type": "opencodex", "management_url": "https://usage.example",
-            "inference_url": "https://llm.example/v1", "target_overrides": {}, "masked_key": "已配置",
-        }
+        data = saved.json()
+        assert data["gateway_type"] == "opencodex"
+        assert data["management_url"] == "https://usage.example"
+        assert data["inference_url"] == "https://llm.example/v1"
+        assert data["target_overrides"] == {}
+        assert data["masked_key"] == "已配置"
 
         response = client.get("/api/v1/analytics/usage?range=all&surface=grok&since=100&until=200", headers=headers)
         assert response.status_code == 200
