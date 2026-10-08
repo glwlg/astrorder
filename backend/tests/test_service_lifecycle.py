@@ -69,7 +69,7 @@ def test_select_owned_app_pid_requires_exact_production_entrypoint():
 def test_select_owned_daemon_pid_never_accepts_app_server_marker():
     assert service_lifecycle.select_owned_daemon_pid(
         [222],
-        command_line=lambda _pid: "python -m astrorder.daemon.session_daemon --port 30009",
+        command_line=lambda _pid: "C:/Astrorder/astrorder-sessiond.exe",
     ) == 222
     assert service_lifecycle.select_owned_daemon_pid(
         [222], command_line=lambda _pid: "python scripts/run_production.py"

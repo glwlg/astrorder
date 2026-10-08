@@ -15,7 +15,7 @@ from astrorder.config import Settings
 from astrorder.core.events import EventHub
 from astrorder.daemon.bridge import DaemonBridge
 from astrorder.daemon.bridge.codex_projection import CodexNativeFrameRouter
-from astrorder.daemon.runtimes.codex.control import DaemonCodexController
+from astrorder.daemon.clients.codex.control import DaemonCodexController
 from astrorder.native.codex import CodexConnection
 from astrorder.service import ControlService
 from astrorder.store import Store

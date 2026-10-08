@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-平滑切流脚本：将当前运行的 Python 小内核切换至高性能 Go 小内核。
+Go 小内核版本切换脚本：校验替换配置后停止旧 Go 进程并启动新版本。
 符合 AGENTS.md 约束：
 1. 切流前严格校验权威状态（通过 daemon.status 检查 active/busy/waiting_approval）。
 2. 若存在运行中或待审批会话，严禁直接重启/切流。

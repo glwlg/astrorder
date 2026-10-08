@@ -99,7 +99,7 @@ def main():
     if _enabled(environment.get('ASTRORDER_SESSION_DAEMON_ENABLED')):
         from production_daemon import ensure_production_daemon
 
-        ensure_production_daemon(environment, root=ROOT)
+        ensure_production_daemon(environment)
     os.chdir(ROOT)
     settings = Settings.from_env()
     from astrorder.main import create_app

@@ -1,7 +1,7 @@
 import pytest
 from starlette.websockets import WebSocketDisconnect
 
-from astrorder.daemon.runtimes.pty.relay import (
+from astrorder.daemon.clients.pty.relay import (
     DaemonTerminalRelay,
     daemon_pty_target,
     terminal_runtime_id,

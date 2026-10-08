@@ -27,7 +27,7 @@ def test_explicit_daemon_start_does_not_require_login_startup_task(monkeypatch):
         "start_independent_daemon",
         lambda **kwargs: started.append(kwargs) or 123,
     )
-    monkeypatch.setattr(desktop_service, "production_daemon_spec", lambda _environment: (30009, ("--enable-codex",)))
+    monkeypatch.setattr(desktop_service, "production_daemon_spec", lambda _environment: 30009)
 
     assert desktop_service.start_daemon({}, 30009, "test-secret")["state"] == "running"
-    assert started == [{"port": 30009, "runtime_args": ("--enable-codex",)}]
+    assert started == [{"port": 30009}]

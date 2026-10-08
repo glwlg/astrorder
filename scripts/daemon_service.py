@@ -4,26 +4,22 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import re
 import subprocess
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 from service_lifecycle import (
-    DAEMON_MODULE_MARKER,
     INDEPENDENT_PROCESS_FLAGS,
     command_line_for_pid,
     current_listening_pids,
     select_owned_daemon_pid,
-    terminate_verified_pid,
 )
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_PORT = 30009
-_SECRET_FLAGS = frozenset({"--secret", "--daemon-secret", "--session-daemon-secret"})
 
 
 def _shared_runtime_dir() -> Path:
@@ -76,30 +72,6 @@ def _daemon_start_lock(timeout: float = 35):
             handle.close()
 
 
-def daemon_argv(
-    *,
-    python_executable: str,
-    port: int = DEFAULT_PORT,
-    runtime_args: Sequence[str] = (),
-) -> list[str]:
-    if not isinstance(python_executable, str) or not python_executable:
-        raise ValueError("python_executable is required")
-    if not isinstance(port, int) or not 1 <= port <= 65535:
-        raise ValueError("port must be between 1 and 65535")
-    if any(not isinstance(arg, str) or not arg for arg in runtime_args):
-        raise ValueError("runtime args must be non-empty strings")
-    if any(arg.casefold() in _SECRET_FLAGS for arg in runtime_args):
-        raise ValueError("daemon secrets must be supplied only through the environment")
-    return [
-        python_executable,
-        "-m",
-        "astrorder.daemon.session_daemon",
-        "--port",
-        str(port),
-        *runtime_args,
-    ]
-
-
 def existing_verified_daemon(
     pids: list[int], command_line: Callable[[int], str | None]
 ) -> int | None:
@@ -137,44 +109,39 @@ def status_payload(
     return payload
 
 
-def daemon_launch(*, port: int, runtime_args: Sequence[str]) -> tuple[list[str], dict[str, str]]:
+def daemon_launch(*, port: int) -> tuple[list[str], dict[str, str]]:
     environment = os.environ.copy()
     executable = environment.get("ASTRORDER_SESSION_DAEMON_EXECUTABLE")
-    if executable:
-        if not environment.get("ASTRORDER_SESSION_DAEMON_SECRET"):
-            raise RuntimeError("ASTRORDER_SESSION_DAEMON_SECRET is required")
-        binary = Path(executable)
-        if not binary.is_absolute() or not binary.is_file():
-            raise RuntimeError("Go daemon executable must be an existing absolute path")
-        config = environment.get("ASTRORDER_SESSION_DAEMON_CONFIG", "")
-        database = environment.get("ASTRORDER_SESSION_DAEMON_DB", "")
-        if not config or not Path(config).is_file() or not Path(config).is_absolute():
-            raise RuntimeError("Go daemon configuration is missing")
-        if not database or not Path(database).is_absolute():
-            raise RuntimeError("Go daemon database must be an absolute path")
-        if not 1 <= port <= 65535:
-            raise ValueError("invalid daemon port")
-        environment["ASTRORDER_SESSION_DAEMON_PORT"] = str(port)
-        environment["ASTRORDER_SESSION_DAEMON_CONNECTOR_SECRET"] = environment.get("ASTRORDER_CONNECTOR_SECRET", "")
-        return [str(binary)], environment
-    return daemon_argv(
-        python_executable=str(ROOT / "backend/.venv/Scripts/pythonw.exe"),
-        port=port, runtime_args=runtime_args,
-    ), environment
+    if not executable:
+        raise RuntimeError("ASTRORDER_SESSION_DAEMON_EXECUTABLE is required; only Go Session Daemon is supported")
+    if not environment.get("ASTRORDER_SESSION_DAEMON_SECRET"):
+        raise RuntimeError("ASTRORDER_SESSION_DAEMON_SECRET is required")
+    binary = Path(executable)
+    if not binary.is_absolute() or not binary.is_file():
+        raise RuntimeError("Go daemon executable must be an existing absolute path")
+    config = environment.get("ASTRORDER_SESSION_DAEMON_CONFIG", "")
+    database = environment.get("ASTRORDER_SESSION_DAEMON_DB", "")
+    if not config or not Path(config).is_file() or not Path(config).is_absolute():
+        raise RuntimeError("Go daemon configuration is missing")
+    if not database or not Path(database).is_absolute():
+        raise RuntimeError("Go daemon database must be an absolute path")
+    if type(port) is not int or not 1 <= port <= 65535:
+        raise ValueError("invalid daemon port")
+    environment["ASTRORDER_SESSION_DAEMON_PORT"] = str(port)
+    environment["ASTRORDER_SESSION_DAEMON_CONNECTOR_SECRET"] = environment.get("ASTRORDER_CONNECTOR_SECRET", "")
+    return [str(binary)], environment
 
 
 def start_daemon(
     *,
     port: int = DEFAULT_PORT,
-    runtime_args: Sequence[str] = (),
     metadata_path: Path | None = None,
 ) -> int:
     with _daemon_start_lock():
         existing = existing_verified_daemon(current_listening_pids(port), command_line_for_pid)
         if existing is not None:
-            cleanup_stale_daemons(port, existing)
             return existing
-        argv, environment = daemon_launch(port=port, runtime_args=runtime_args)
+        argv, environment = daemon_launch(port=port)
         runtime = ROOT / ".runtime"
         runtime.mkdir(parents=True, exist_ok=True)
         log = (runtime / "session-daemon.log").open("ab", buffering=0)
@@ -202,7 +169,6 @@ def start_daemon(
                         json.dumps({"pid": listener, "port": port, "started_at": _timestamp()}),
                         encoding="utf-8",
                     )
-                    cleanup_stale_daemons(port, listener)
                     return listener
                 time.sleep(0.1)
             raise RuntimeError("Session Daemon did not become ready within 30 seconds")
@@ -243,51 +209,6 @@ def _terminate_spawned(process: Any) -> None:
     except subprocess.TimeoutExpired:
         process.kill()
         process.wait(timeout=5)
-
-
-def _daemon_processes() -> list[dict[str, Any]]:
-    if os.name != "nt":
-        return []
-    script = (
-        "Get-CimInstance Win32_Process | Where-Object { $_.Name -in @('python.exe','pythonw.exe') } | "
-        "Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress"
-    )
-    completed = subprocess.run(
-        ["powershell", "-NoProfile", "-Command", script],
-        capture_output=True,
-        check=False,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-    )
-    if completed.returncode or not completed.stdout.strip():
-        return []
-    value = json.loads(completed.stdout)
-    return value if isinstance(value, list) else [value]
-
-
-def cleanup_stale_daemons(port: int, listener_pid: int) -> list[int]:
-    cleaned = []
-    listener_parent = _parent_pid(listener_pid)
-    port_pattern = re.compile(rf"(?:^|\s)--port\s+{port}(?:\s|$)")
-    for row in _daemon_processes():
-        pid = row.get("ProcessId")
-        command = str(row.get("CommandLine") or "").replace("\\", "/").lower()
-        if not isinstance(pid, int) or pid in {listener_pid, listener_parent}:
-            continue
-        if DAEMON_MODULE_MARKER not in command or not port_pattern.search(command):
-            continue
-        current_command = (command_line_for_pid(pid) or "").replace("\\", "/").lower()
-        if (
-            DAEMON_MODULE_MARKER not in current_command
-            or not port_pattern.search(current_command)
-            or pid in current_listening_pids(port)
-        ):
-            continue
-        terminate_verified_pid(pid)
-        cleaned.append(pid)
-    return cleaned
 
 
 def graceful_shutdown(port: int, secret: str, *, confirm_active: bool = False) -> None:

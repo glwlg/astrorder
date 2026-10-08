@@ -162,8 +162,8 @@ def start_daemon(environment: dict[str, str], port: int, secret: str) -> dict[st
     current = daemon_status(port, secret)
     if current["state"] == "running":
         return current
-    _, runtime_args = production_daemon_spec(environment)
-    start_independent_daemon(port=port, runtime_args=runtime_args)
+    production_daemon_spec(environment)
+    start_independent_daemon(port=port)
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         status = daemon_status(port, secret)
@@ -242,7 +242,7 @@ def stop_app(port: int, browser_secret: str) -> dict[str, Any]:
 def execute(target: str, action: str, *, confirm_active: bool = False) -> dict[str, Any]:
     environment = load_production_environment()
     app_port = int(environment.get("ASTRORDER_PORT", "30001"))
-    daemon_port, _ = production_daemon_spec(environment)
+    daemon_port = production_daemon_spec(environment)
     daemon_secret = os.environ["ASTRORDER_SESSION_DAEMON_SECRET"]
     browser_secret = os.environ["ASTRORDER_BROWSER_SECRET"]
     if target == "app":

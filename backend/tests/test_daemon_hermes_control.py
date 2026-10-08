@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from astrorder.daemon.runtimes.hermes.control import DaemonHermesController, hermes_runtime_control_id
+from astrorder.daemon.clients.hermes.control import DaemonHermesController, hermes_runtime_control_id
 
 
 def test_daemon_hermes_controller_connects_and_creates_from_daemon_confirmed_identity():
@@ -333,7 +333,7 @@ def test_daemon_hermes_controller_branches_through_daemon_create():
 
 def test_daemon_hermes_controller_refresh_sessions_projects_sessions(tmp_path, monkeypatch) -> None:
     import sqlite3
-    from astrorder.daemon.runtimes.hermes.control import DaemonHermesController
+    from astrorder.daemon.clients.hermes.control import DaemonHermesController
 
     state_db = tmp_path / "state.db"
     proj_db = tmp_path / "projects.db"

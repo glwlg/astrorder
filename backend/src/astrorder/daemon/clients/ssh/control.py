@@ -11,7 +11,7 @@ from typing import Any
 
 from astrorder.connections import ConnectionError
 from astrorder.daemon.bridge import DaemonBridge, DaemonBridgeError
-from astrorder.daemon.runtimes.hermes.control import native_ownership_rejection
+from astrorder.daemon.clients.hermes.control import native_ownership_rejection
 
 
 def ssh_runtime_control_id(connection_id: str) -> str:
@@ -405,7 +405,7 @@ class DaemonSshController:
             return "unknown", "daemon SSH delivery was not confirmed; command will not retry."
         result = response.get("result")
         if isinstance(result, Mapping) and result.get("completed") is True:
-            from astrorder.daemon.runtimes.hermes.control import record_completed_slash
+            from astrorder.daemon.clients.hermes.control import record_completed_slash
 
             record_completed_slash(self, command, str(result.get("output") or "命令已执行"))
             return "accepted", None

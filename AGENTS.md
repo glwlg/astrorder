@@ -1,5 +1,11 @@
 # 项目操作约束
 
+## 小内核实现边界
+
+- Session Daemon 唯一实现位于 `session-daemon-go/`。会话进程托管、WAL、原生控制和模型配置执行器均在 Go 中维护。
+- `backend/src/astrorder/daemon/` 仅保留 App 侧 IPC bridge、事件投影、`clients/` 控制客户端和终端转发；不得恢复 Python 小内核或 Python 启动回退。
+- Go 可执行文件或配置缺失时必须明确报错。旧 Python 实现可追溯到检查点 `603835a`，不在工作树中保留副本。
+
 ## 小内核重启
 
 - Session Daemon（小内核）默认不得随 App Server（大内核）的发布或重启一起停止、重启或替换。

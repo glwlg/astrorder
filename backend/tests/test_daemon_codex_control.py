@@ -8,7 +8,7 @@ import pytest
 
 from astrorder.connections import ConnectionError
 from astrorder.daemon.bridge import DaemonBridgeError
-from astrorder.daemon.runtimes.codex.control import DaemonCodexController
+from astrorder.daemon.clients.codex.control import DaemonCodexController
 
 
 class FakeBridge:

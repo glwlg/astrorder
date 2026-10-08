@@ -1,17 +1,60 @@
 """App Server reconnect/replay tests for the Session Daemon bridge."""
 from __future__ import annotations
 
-import asyncio
 import json
 
 import pytest
 
 from astrorder.config import Settings
 from astrorder.daemon.bridge import DaemonBridge
-from astrorder.daemon.session_daemon import SessionDaemon
 from astrorder.core.events import EventHub
 from astrorder.service import ControlService
 from astrorder.store import Store
+
+
+@pytest.mark.asyncio
+async def test_overflow_blocks_live_projection_and_preserves_checkpoint(tmp_path):
+    """The App must not acknowledge a tail whose replay prefix was lost."""
+    settings = Settings(database_url=f"sqlite:///{tmp_path}/overflow.db", auto_connect_local_hermes=False)
+    store = Store(settings)
+
+    class Bridge(DaemonBridge):
+        async def _request(self, socket, action, fields, **kwargs):
+            if action == "daemon.status":
+                return {"daemon_id": "overflow", "sessions": {"s": {"status": "idle"}}, "connectors": []}
+            return {"daemon_id": "overflow", "sessions": {"s": {"overflow": True, "frames": []}}}
+
+    bridge = Bridge(store, ControlService(store, EventHub(), settings), "ws://127.0.0.1:1")
+    delivered = []
+    bridge.register_native_frame_handler("native.test", lambda *args: delivered.append(args))
+    try:
+        report = await bridge._synchronize(None)
+        assert report.overflowed_sessions == ("s",)
+        bridge._project_live_frame(json.dumps({"session_id": "s", "seq_id": 3, "timestamp": 1.0,
+                                               "event": "native.test", "payload": {}}))
+        assert delivered == []
+        assert store.get_daemon_checkpoint("overflow", "s") == 0
+    finally:
+        store.close()
+
+
+@pytest.mark.asyncio
+async def test_connected_agent_is_restored_from_go_status_without_replaying_hello(tmp_path):
+    settings = Settings(database_url=f"sqlite:///{tmp_path}/connector.db", auto_connect_local_hermes=False)
+    store = Store(settings)
+    connected = {**agent(), "kind": "hermes"}
+    store.upsert_agent({**connected, "status": "disconnected"})
+
+    class Bridge(DaemonBridge):
+        async def _request(self, socket, action, fields, **kwargs):
+            return {"daemon_id": "connected", "sessions": {}, "connectors": [connected]}
+
+    bridge = Bridge(store, ControlService(store, EventHub(), settings), "ws://127.0.0.1:1")
+    try:
+        await bridge._synchronize(None)
+        assert store.get_agent(connected["id"])["status"] == "ready"
+    finally:
+        store.close()
 
 
 def agent() -> dict[str, object]:
@@ -68,14 +111,6 @@ def message_event() -> dict[str, object]:
             "tool": None,
         },
     }
-
-
-async def wait_for_checkpoint(store, daemon_id: str, session_id: str, seq_id: int) -> None:
-    deadline = asyncio.get_running_loop().time() + 1
-    while store.get_daemon_checkpoint(daemon_id, session_id) != seq_id:
-        if asyncio.get_running_loop().time() >= deadline:
-            raise AssertionError(f"checkpoint did not advance to {seq_id}")
-        await asyncio.sleep(0.01)
 
 
 def test_daemon_checkpoint_is_persistent_and_scoped_to_daemon_instance(tmp_path):
@@ -169,367 +204,6 @@ async def test_daemon_bridge_retires_missing_owned_sessions_after_daemon_restart
         assert store.get_task("daemon-codex", "session-1", "task-1")["status"] == "unknown"
     finally:
         store.close()
-
-
-@pytest.mark.asyncio
-async def test_daemon_bridge_replays_only_unacknowledged_frames_after_app_restart(tmp_path):
-    from astrorder.daemon.bridge import DaemonBridge
-
-    settings = Settings(
-        database_url=f"sqlite:///{tmp_path}/state.sqlite3",
-        auto_connect_local_hermes=False,
-    )
-    daemon = SessionDaemon(capacity=8, daemon_id="daemon-test")
-    daemon.record("session-1", "connector.event", session_event())
-    server = await daemon.serve("127.0.0.1", 0)
-    endpoint = f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}"
-
-    first_store = Store(settings)
-    first_store.upsert_agent(agent())
-    first_service = ControlService(first_store, EventHub(), settings)
-    try:
-        await DaemonBridge(first_store, first_service, endpoint).synchronize_once()
-        assert first_store.get_session("daemon-codex", "session-1")["status"] == "running"
-        assert first_store.get_daemon_checkpoint("daemon-test", "session-1") == 1
-    finally:
-        first_store.close()
-
-    daemon.record("session-1", "connector.event", message_event())
-    restarted_store = Store(settings)
-    restarted_service = ControlService(restarted_store, EventHub(), settings)
-    try:
-        await DaemonBridge(restarted_store, restarted_service, endpoint).synchronize_once()
-        assert restarted_store.list_messages("daemon-codex", "session-1", None, 10)[0][0]["text"] == (
-            "daemon replay survived the app restart"
-        )
-        assert restarted_store.get_daemon_checkpoint("daemon-test", "session-1") == 2
-    finally:
-        restarted_store.close()
-        server.close()
-        await server.wait_closed()
-
-
-@pytest.mark.asyncio
-async def test_daemon_bridge_projects_session_null_agent_event_from_runtime_control_wal(tmp_path):
-    from astrorder.daemon.bridge import DaemonBridge
-
-    settings = Settings(
-        database_url=f"sqlite:///{tmp_path}/agent-control-wal.sqlite3",
-        auto_connect_local_hermes=False,
-    )
-    daemon = SessionDaemon(capacity=8, daemon_id="daemon-agent-control")
-    daemon.record(
-        "daemon-hermes-control",
-        "connector.event",
-        {
-            "id": "agent-event-from-control-wal",
-            "type": "agent.upsert",
-            "agent_id": "daemon-codex",
-            "session_id": None,
-            "data": agent(),
-        },
-    )
-    server = await daemon.serve("127.0.0.1", 0)
-    endpoint = f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}"
-    store = Store(settings)
-    try:
-        await DaemonBridge(store, ControlService(store, EventHub(), settings), endpoint).synchronize_once()
-        assert store.get_agent("daemon-codex")["status"] == "ready"
-        assert store.get_daemon_checkpoint("daemon-agent-control", "daemon-hermes-control") == 1
-    finally:
-        store.close()
-        server.close()
-        await server.wait_closed()
-
-
-@pytest.mark.asyncio
-async def test_daemon_bridge_projects_connector_hello_from_runtime_control_wal(tmp_path):
-    from astrorder.daemon.bridge import DaemonBridge
-
-    settings = Settings(
-        database_url=f"sqlite:///{tmp_path}/connector-hello.sqlite3",
-        auto_connect_local_hermes=False,
-    )
-    daemon = SessionDaemon(capacity=8, daemon_id="daemon-connector-hello")
-    daemon.record("daemon-hermes-control", "connector.hello", {
-        **agent(), "id": "daemon-hermes", "kind": "hermes", "name": "Daemon Hermes"
-    })
-    server = await daemon.serve("127.0.0.1", 0)
-    endpoint = f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}"
-    store = Store(settings)
-    try:
-        await DaemonBridge(store, ControlService(store, EventHub(), settings), endpoint).synchronize_once()
-        assert store.get_agent("daemon-hermes")["status"] == "ready"
-    finally:
-        store.close()
-        server.close()
-        await server.wait_closed()
-
-
-@pytest.mark.asyncio
-async def test_daemon_bridge_restores_connector_that_remained_attached_across_app_restart(tmp_path):
-    settings = Settings(
-        database_url=f"sqlite:///{tmp_path}/connector-restart.sqlite3",
-        auto_connect_local_hermes=False,
-    )
-    daemon = SessionDaemon(capacity=8, daemon_id="daemon-connector-restart")
-    connected = {**agent(), "id": "daemon-hermes", "kind": "hermes", "name": "Daemon Hermes"}
-    daemon._connector_agents["daemon-hermes"] = connected
-    server = await daemon.serve("127.0.0.1", 0)
-    endpoint = f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}"
-    store = Store(settings)
-    store.upsert_agent({**connected, "status": "disconnected"})
-    try:
-        await DaemonBridge(store, ControlService(store, EventHub(), settings), endpoint).synchronize_once()
-        assert store.get_agent("daemon-hermes")["status"] == "ready"
-    finally:
-        store.close()
-        server.close()
-        await server.wait_closed()
-
-
-@pytest.mark.asyncio
-async def test_daemon_bridge_leaves_checkpoint_at_zero_when_wal_overflowed(tmp_path):
-    from astrorder.daemon.bridge import DaemonBridge
-
-    settings = Settings(
-        database_url=f"sqlite:///{tmp_path}/overflow.sqlite3",
-        auto_connect_local_hermes=False,
-    )
-    daemon = SessionDaemon(capacity=1, daemon_id="daemon-overflow")
-    daemon.record("session-1", "connector.event", session_event())
-    daemon.record("session-1", "connector.event", message_event())
-    server = await daemon.serve("127.0.0.1", 0)
-    endpoint = f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}"
-    store = Store(settings)
-    store.upsert_agent(agent())
-    try:
-        report = await DaemonBridge(store, ControlService(store, EventHub(), settings), endpoint).synchronize_once()
-        assert report.overflowed_sessions == ("session-1",)
-        assert store.get_daemon_checkpoint("daemon-overflow", "session-1") == 0
-        assert store.get_session("daemon-codex", "session-1") is None
-    finally:
-        store.close()
-        server.close()
-        await server.wait_closed()
-
-
-@pytest.mark.asyncio
-async def test_daemon_bridge_does_not_project_live_tail_after_an_overflow(tmp_path):
-    from astrorder.daemon.bridge import DaemonBridge
-
-    settings = Settings(
-        database_url=f"sqlite:///{tmp_path}/overflow-live.sqlite3",
-        auto_connect_local_hermes=False,
-    )
-    daemon = SessionDaemon(capacity=1, daemon_id="daemon-overflow-live")
-    daemon.record("session-1", "connector.event", session_event())
-    daemon.record("session-1", "connector.event", message_event())
-    server = await daemon.serve("127.0.0.1", 0)
-    endpoint = f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}"
-    store = Store(settings)
-    store.upsert_agent(agent())
-    bridge = DaemonBridge(store, ControlService(store, EventHub(), settings), endpoint)
-    try:
-        report = await bridge.synchronize_once()
-        frame = daemon.record("session-1", "connector.event", message_event())
-
-        assert report.overflowed_sessions == ("session-1",)
-        bridge._project_live_frame(json.dumps(frame))
-        assert store.get_daemon_checkpoint("daemon-overflow-live", "session-1") == 0
-        assert store.get_session("daemon-codex", "session-1") is None
-    finally:
-        store.close()
-        server.close()
-        await server.wait_closed()
-
-
-@pytest.mark.asyncio
-async def test_daemon_bridge_projects_live_frames_after_its_initial_sync(tmp_path):
-    from astrorder.daemon.bridge import DaemonBridge
-
-    settings = Settings(
-        database_url=f"sqlite:///{tmp_path}/live.sqlite3",
-        auto_connect_local_hermes=False,
-    )
-    daemon = SessionDaemon(capacity=8, daemon_id="daemon-live")
-    daemon.record("session-1", "connector.event", session_event())
-    server = await daemon.serve("127.0.0.1", 0)
-    endpoint = f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}"
-    store = Store(settings)
-    store.upsert_agent(agent())
-    stopping = asyncio.Event()
-    bridge = DaemonBridge(store, ControlService(store, EventHub(), settings), endpoint)
-    task = asyncio.create_task(bridge.run(stopping))
-    try:
-        await wait_for_checkpoint(store, "daemon-live", "session-1", 1)
-        await daemon.publish("session-1", "connector.event", message_event())
-        await wait_for_checkpoint(store, "daemon-live", "session-1", 2)
-        assert store.list_messages("daemon-codex", "session-1", None, 10)[0][0]["id"] == "message-1"
-    finally:
-        stopping.set()
-        await asyncio.wait_for(task, timeout=1)
-        store.close()
-        server.close()
-        await server.wait_closed()
-
-
-@pytest.mark.asyncio
-async def test_daemon_bridge_forwards_explicit_runtime_control_requests(tmp_path):
-    from astrorder.daemon.bridge import DaemonBridge
-
-    class FixtureRuntime:
-        async def spawn(self, request):
-            assert request["session_id"] == "control-session"
-            return {"status": "idle", "handle": "opaque-handle"}
-
-        async def command(self, action, request):
-            assert action in {"session.approve", "session.steer"}
-            if action == "session.approve":
-                assert request["request_id"] != "approval-request"
-                assert request["decision"] == "accept"
-            else:
-                assert request["turn_id"] == "turn-1"
-            return {"status": "running", "accepted": True}
-
-    settings = Settings(
-        database_url=f"sqlite:///{tmp_path}/control.sqlite3",
-        auto_connect_local_hermes=False,
-    )
-    daemon = SessionDaemon(
-        capacity=8,
-        daemon_id="daemon-control",
-        secret="test-only-daemon-secret",
-    )
-    daemon.register_runtime("fixture", FixtureRuntime())
-    server = await daemon.serve("127.0.0.1", 0)
-    endpoint = f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}"
-    store = Store(settings)
-    bridge = DaemonBridge(
-        store,
-        ControlService(store, EventHub(), settings),
-        endpoint,
-        secret="test-only-daemon-secret",
-    )
-    try:
-        spawned = await bridge.request_control(
-            "session.spawn",
-            {
-                "session_id": "control-session",
-                "agent_type": "fixture",
-                "params": {},
-            },
-        )
-        approved = await bridge.request_control(
-            "session.approve",
-            {
-                "session_id": "control-session",
-                "approval_id": "approval-request",
-                "decision": "accept",
-            },
-        )
-        steered = await bridge.request_control(
-            "session.steer",
-            {"session_id": "control-session", "turn_id": "turn-1", "input": [{"type": "text", "text": "补充"}]},
-        )
-
-        assert spawned["daemon_id"] == "daemon-control"
-        assert spawned["result"] == {"status": "idle", "handle": "opaque-handle"}
-        assert approved["result"] == {"status": "running", "accepted": True}
-        assert steered["result"] == {"status": "running", "accepted": True}
-        assert daemon.status()["control-session"]["status"] == "running"
-    finally:
-        store.close()
-        server.close()
-        await server.wait_closed()
-
-
-@pytest.mark.asyncio
-async def test_daemon_bridge_acknowledges_native_frame_only_after_handler_projects_it(tmp_path):
-    from astrorder.daemon.bridge import DaemonBridge, DaemonBridgeError
-
-    settings = Settings(
-        database_url=f"sqlite:///{tmp_path}/native-frame.sqlite3",
-        auto_connect_local_hermes=False,
-    )
-    daemon = SessionDaemon(capacity=8, daemon_id="daemon-native-frame")
-    daemon.record(
-        "native-thread-1",
-        "codex.notification",
-        {
-            "agent_id": "daemon-codex",
-            "frame": {"method": "turn/completed", "params": {"threadId": "native-thread-1"}},
-        },
-    )
-    server = await daemon.serve("127.0.0.1", 0)
-    endpoint = f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}"
-    store = Store(settings)
-    bridge = DaemonBridge(store, ControlService(store, EventHub(), settings), endpoint)
-    received: list[tuple[str, dict[str, object]]] = []
-    try:
-        with pytest.raises(DaemonBridgeError, match="native frame handler"):
-            await bridge.synchronize_once()
-        assert store.get_daemon_checkpoint("daemon-native-frame", "native-thread-1") == 0
-
-        unregister = bridge.register_native_frame_handler(
-            "codex.notification",
-            lambda session_id, payload: received.append((session_id, dict(payload))),
-        )
-        report = await bridge.synchronize_once()
-        unregister()
-
-        assert report.replayed_frames == 1
-        assert received == [
-            (
-                "native-thread-1",
-                {
-                    "agent_id": "daemon-codex",
-                    "frame": {
-                        "method": "turn/completed",
-                        "params": {"threadId": "native-thread-1"},
-                    },
-                },
-            )
-        ]
-        assert store.get_daemon_checkpoint("daemon-native-frame", "native-thread-1") == 1
-    finally:
-        store.close()
-        server.close()
-        await server.wait_closed()
-
-
-@pytest.mark.asyncio
-async def test_daemon_bridge_handshakes_before_replaying_a_secret_protected_daemon(tmp_path):
-    from astrorder.daemon.bridge import DaemonBridge
-
-    settings = Settings(
-        database_url=f"sqlite:///{tmp_path}/handshake.sqlite3",
-        auto_connect_local_hermes=False,
-    )
-    daemon = SessionDaemon(
-        capacity=8,
-        daemon_id="daemon-handshake",
-        secret="test-only-daemon-secret",
-    )
-    daemon.record("session-1", "connector.event", session_event())
-    server = await daemon.serve("127.0.0.1", 0)
-    endpoint = f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}"
-    store = Store(settings)
-    store.upsert_agent(agent())
-    try:
-        report = await DaemonBridge(
-            store,
-            ControlService(store, EventHub(), settings),
-            endpoint,
-            secret="test-only-daemon-secret",
-        ).synchronize_once()
-
-        assert report.daemon_id == "daemon-handshake"
-        assert store.get_daemon_checkpoint("daemon-handshake", "session-1") == 1
-    finally:
-        store.close()
-        server.close()
-        await server.wait_closed()
 
 
 def test_bridge_projects_lost_ownership_without_resending(tmp_path):

@@ -3,8 +3,8 @@ from __future__ import annotations
 import pytest
 
 from astrorder.daemon.bridge import DaemonBridgeError
-from astrorder.daemon.runtimes.hermes.control import DaemonHermesController
-from astrorder.daemon.runtimes.ssh.control import DaemonSshController
+from astrorder.daemon.clients.hermes.control import DaemonHermesController
+from astrorder.daemon.clients.ssh.control import DaemonSshController
 
 
 @pytest.mark.asyncio

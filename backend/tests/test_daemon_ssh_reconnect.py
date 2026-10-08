@@ -2,7 +2,7 @@ import pytest
 
 from astrorder.connections import ConnectionError
 from astrorder.daemon.bridge import DaemonBridgeError
-from astrorder.daemon.runtimes.ssh.control import DaemonSshController
+from astrorder.daemon.clients.ssh.control import DaemonSshController
 
 
 @pytest.mark.parametrize("blocked", [False, True])

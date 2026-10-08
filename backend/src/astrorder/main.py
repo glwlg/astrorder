@@ -158,7 +158,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if runtime_settings.daemon_pty_enabled:
             if app.state.daemon_bridge is None:
                 raise ValueError("daemon PTY requires the Session Daemon bridge")
-            from .daemon.runtimes.pty.relay import DaemonTerminalRelay
+            from .daemon.clients.pty.relay import DaemonTerminalRelay
 
             app.state.daemon_terminal_relay = DaemonTerminalRelay(
                 app.state.daemon_bridge,
@@ -199,7 +199,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if runtime_settings.daemon_hermes_enabled:
             if app.state.daemon_bridge is None:
                 raise ValueError("daemon Hermes requires the Session Daemon bridge")
-            from .daemon.runtimes.hermes.control import DaemonHermesController
+            from .daemon.clients.hermes.control import DaemonHermesController
 
             local_hermes_controller = DaemonHermesController(app.state.daemon_bridge)
             app.state.daemon_hermes_controller = local_hermes_controller
@@ -208,7 +208,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if runtime_settings.daemon_ssh_enabled:
             if app.state.daemon_bridge is None:
                 raise ValueError("daemon SSH requires the Session Daemon bridge")
-            from .daemon.runtimes.ssh.control import DaemonSshController
+            from .daemon.clients.ssh.control import DaemonSshController
 
             def daemon_ssh_factory(row):
                 connection_id = row.get("id") if isinstance(row, dict) else None
@@ -258,7 +258,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if runtime_settings.daemon_codex_enabled:
             if app.state.daemon_bridge is None:
                 raise ValueError("daemon Codex requires the Session Daemon bridge")
-            from .daemon.runtimes.codex.control import DaemonCodexController
+            from .daemon.clients.codex.control import DaemonCodexController
             from .daemon.bridge.codex_projection import CodexNativeFrameRouter
 
             codex_native_frame_router = CodexNativeFrameRouter(app.state.daemon_bridge)
@@ -517,7 +517,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         relay = websocket.app.state.daemon_terminal_relay
         if relay is not None and isinstance(session_obj, dict):
-            from .daemon.runtimes.pty.relay import daemon_pty_target
+            from .daemon.clients.pty.relay import daemon_pty_target
 
             target = daemon_pty_target(session_obj)
             if target is not None:

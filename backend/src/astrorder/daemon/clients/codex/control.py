@@ -16,7 +16,7 @@ from astrorder.connections import ConnectionError
 from astrorder.daemon.bridge import DaemonBridge, DaemonBridgeError
 from astrorder.daemon.bridge.codex_projection import CodexNativeFrameRouter
 
-from .desktop import desktop_message_input
+from .desktop_input import desktop_message_input
 
 logger = logging.getLogger(__name__)
 
