@@ -1,12 +1,12 @@
-import { Alert, Badge, Button, Checkbox, Group, Modal, Paper, SimpleGrid, Stack, Switch, Text, TextInput, Title } from '@mantine/core'
+import { Alert, Badge, Button, Checkbox, Group, Modal, Paper, SimpleGrid, Stack, Switch, Tabs, Text, TextInput, Title } from '@mantine/core'
 import { IconRefresh, IconTerminal } from '@tabler/icons-react'
 import { useEffect, useRef, useState } from 'react'
 import { useMediaQuery } from '@mantine/hooks'
 import { useShallow } from 'zustand/react/shallow'
-import { AgentStatusBadge } from '../../components/Status'
+
 import { AgentBrandIcon, agentKindLabel } from '../../components/AgentBrandIcon'
 import type { Agent, SshConnection, SshConnectionSettings } from '../../domain/types'
-import { SpotlightCard } from '../../components/animations/SpotlightCard'
+
 import { useAstrorderStore } from '../../state/store'
 import './agentsLayout.css'
 import { EnvironmentConnections } from './EnvironmentConnections'
@@ -116,14 +116,15 @@ function AgentCard({ agent }: { agent: Agent }) {
   }
 
   return (
-    <SpotlightCard spotlightColor={agent.kind === 'codex' ? 'rgba(16, 185, 129, 0.22)' : 'rgba(59, 130, 246, 0.22)'} radius="var(--mantine-radius-lg, 16px)">
-      <Paper className="agent-card" withBorder={false} p="lg" style={{ background: 'transparent' }}>
+      <div className="agent-configuration">
       <Stack gap="md">
         <Group justify="space-between" align="flex-start">
           <Group gap="sm" wrap="nowrap"><span className={`agent-card-mark agent-kind-${agent.kind}`} aria-hidden="true"><AgentBrandIcon kind={agent.kind} size={24} /></span><div><Title order={3} size="h4">{name}</Title><Text size="xs" c="dimmed">{brand} · {agent.id}</Text></div></Group>
-          <AgentStatusBadge status={agent.status} />
+          <Text size="xs" c="dimmed">{agent.status === 'ready' ? '就绪' : agent.status === 'error' ? '异常' : agent.status === 'connecting' ? '连接中' : '已断开'}</Text>
         </Group>
-        <Paper withBorder radius="md" p="xs" style={{ background: 'var(--astr-surface-muted)' }}>
+        <Tabs defaultValue="access" keepMounted={false} className="agent-configuration-tabs">
+          <Tabs.List><Tabs.Tab value="access">授权</Tabs.Tab><Tabs.Tab value="capabilities">能力</Tabs.Tab><Tabs.Tab value="maintenance">维护</Tabs.Tab></Tabs.List>
+          <Tabs.Panel value="access" pt="lg">
           <Group justify="space-between" align="center">
             <div>
               <Text size="xs" fw={700}>
@@ -142,31 +143,34 @@ function AgentCard({ agent }: { agent: Agent }) {
               aria-label="切换星序 MCP 权限"
             />
           </Group>
-        </Paper>
-        <div>
+          </Tabs.Panel>
+          <Tabs.Panel value="capabilities" pt="lg">
           <Text size="xs" fw={600} c="dimmed" mb={8} style={{ letterSpacing: '0.02em' }}>
             支持能力与通道规格
           </Text>
-          <Group gap={6} wrap="wrap">
+          <div className="agent-capability-list">
             {allCapabilities.map(({ key, label }) => {
               const supported = agent.capabilities.includes(key)
               return (
                 <span
                   key={key}
-                  className={`capability-tag ${supported ? 'is-supported' : 'is-unsupported'}`}
+                  className="agent-capability-row"
                   title={supported ? `当前 Agent 支持 ${label}` : `当前环境暂未开放 ${label}`}
                 >
                   <span>{label}</span>
+                  <span aria-label={supported ? '支持' : '不支持'}>{supported ? '✓' : '—'}</span>
                 </span>
               )
             })}
-          </Group>
-        </div>
+          </div>
+          </Tabs.Panel>
+          <Tabs.Panel value="maintenance" pt="lg"><Stack gap="lg">
         {agent.kind==='codex' && <NativeObservationPanel agentId={agent.id} />}
         <AgentUpgradeAction agent={agent} />
+          </Stack></Tabs.Panel>
+        </Tabs>
       </Stack>
-    </Paper>
-    </SpotlightCard>
+    </div>
   )
 }
 
@@ -451,5 +455,8 @@ export function SshSettingsCard({ connection, busy, draft, onDraftChange, onSave
 
 export function AgentsPage() {
   const agents = useAstrorderStore(useShallow((state) => Object.values(state.agents)))
-  return <div className="route-page agents-page"><EnvironmentConnections /><section className="agent-section"><Title order={3} size="h4" mt="xl" mb="sm">Agent 状态</Title><Stack gap="sm">{agents.map(agent => <AgentCard key={agent.id} agent={agent} />)}</Stack></section></div>
+  return <div className="route-page agents-page connections-settings-page"><EnvironmentConnections renderAgentConfiguration={(environmentId, kind) => {
+    const agent = agents.find(item => item.kind === kind && (environmentId === 'local' ? !item.connection_id || item.connection_id === 'local' : item.connection_id === environmentId))
+    return agent ? <AgentCard key={agent.id} agent={agent} /> : <Text c="dimmed" size="sm">接入此 Agent 后可管理星序授权、运行时能力与版本。</Text>
+  }} /></div>
 }

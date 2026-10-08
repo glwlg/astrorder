@@ -18,16 +18,17 @@ import {
 import { notifications } from '@mantine/notifications'
 import {
   IconArrowUp,
-  
   IconFolder,
   IconFolderPlus,
+  IconPlus,
   IconRefresh,
   IconServer,
+  IconX,
 } from '@tabler/icons-react'
 import { useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
-import type { Agent } from '../domain/types'
+import type { Agent, SshConnection } from '../domain/types'
 // useAstrorderStore
 
 interface DirectoryItem {
@@ -83,6 +84,11 @@ export function AddProjectModal({
   const [selectedAgentId, setSelectedAgentId] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
+  // 新建文件夹状态
+  const [creatingDir, setCreatingDir] = useState(false)
+  const [newDirName, setNewDirName] = useState('')
+  const [submittingDir, setSubmittingDir] = useState(false)
+
   // 1. 获取服务器列表 (本机 + 所有已连接或保存的 SSH 服务器)
   useEffect(() => {
     if (!opened) return
@@ -91,14 +97,28 @@ export function AddProjectModal({
     void api.getConnections().then((res) => {
       if (!mounted) return
       const list: Array<{ value: string; label: string }> = [{ value: 'local', label: '本机 (Local)' }]
-      const sshList = res.ssh || []
-      for (const conn of Object.values(sshList || {})) {
+      const sshItems: SshConnection[] = Array.isArray(res.ssh?.items)
+        ? res.ssh.items
+        : Array.isArray(res.ssh)
+          ? (res.ssh as unknown as SshConnection[])
+          : []
+      for (const conn of sshItems) {
         if (conn && conn.id) {
-          const name = conn.display_name || conn.host || conn.id
+          const name = conn.display_name || conn.settings?.host || conn.id
+          const user = conn.settings?.user || 'root'
+          const host = conn.settings?.host || 'remote'
           list.push({
             value: conn.id,
-            label: `${name} (${conn.user || 'root'}@${conn.host || 'remote'})`,
+            label: `${name} (${user}@${host})`,
           })
+        }
+      }
+      // 补充通过 agents 发现但未在 sshItems 里的远程 connection_id
+      const seen = new Set(list.map((item) => item.value))
+      for (const a of Object.values(agents)) {
+        if (a.connection_id && a.connection_id !== 'local' && !seen.has(a.connection_id)) {
+          seen.add(a.connection_id)
+          list.push({ value: a.connection_id, label: `SSH: ${a.name || a.connection_id}` })
         }
       }
       setServerList(list)
@@ -212,6 +232,38 @@ export function AddProjectModal({
     }
   }
 
+  // 新建子文件夹
+  const handleCreateDirectory = async () => {
+    const trimmed = newDirName.trim()
+    if (!trimmed || submittingDir || !currentPath) return
+    setSubmittingDir(true)
+    try {
+      const res = await api.createDirectory(
+        currentPath,
+        trimmed,
+        connectionId === 'local' ? null : connectionId
+      )
+      notifications.show({
+        color: 'teal',
+        message: `文件夹「${trimmed}」创建成功`,
+      })
+      setNewDirName('')
+      setCreatingDir(false)
+      // 刷新当前目录并直接选中新创建的文件夹作为项目路径
+      await fetchDirectory(currentPath)
+      if (res.path) {
+        handleSelectFolder(res.path)
+      }
+    } catch (err: unknown) {
+      notifications.show({
+        color: 'red',
+        message: err instanceof Error ? err.message : '创建文件夹失败',
+      })
+    } finally {
+      setSubmittingDir(false)
+    }
+  }
+
   // 3. 提交新建项目
   const handleSubmit = async () => {
     if (!selectedPath.trim() || submitting) return
@@ -288,10 +340,69 @@ export function AddProjectModal({
 
         {/* Step 2: 选择文件夹 (复用文件树组件/浏览) */}
         <div>
-          <Text size="sm" fw={500} mb={4}>2. 选择项目文件夹</Text>
-          <Text size="xs" c="dimmed" mb={8}>在下方浏览并选择该服务器上的代码根目录</Text>
+          <Group justify="space-between" align="flex-end" mb={4}>
+            <div>
+              <Text size="sm" fw={500}>2. 选择项目文件夹</Text>
+              <Text size="xs" c="dimmed">在下方浏览并选择该服务器上的代码根目录</Text>
+            </div>
+            <Button
+              size="compact-xs"
+              variant="light"
+              leftSection={<IconPlus size={13} />}
+              onClick={() => {
+                setCreatingDir((v) => !v)
+                setNewDirName('')
+              }}
+              disabled={loadingTree || submitting || !currentPath}
+            >
+              新建文件夹
+            </Button>
+          </Group>
           
           <Paper withBorder radius="md" p="xs" style={{ background: 'var(--astr-surface-muted, #f8fafc)' }}>
+            {/* 新建文件夹输入栏 */}
+            {creatingDir && (
+              <Group gap={6} mb="xs" wrap="nowrap" p="xs" style={{ background: 'var(--astr-surface, #ffffff)', borderRadius: 6, border: '1px dashed var(--mantine-color-blue-4)' }}>
+                <IconFolderPlus size={16} color="var(--mantine-color-blue-6)" style={{ flexShrink: 0 }} />
+                <TextInput
+                  size="xs"
+                  placeholder="输入新文件夹名称"
+                  value={newDirName}
+                  onChange={(e) => setNewDirName(e.currentTarget.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      void handleCreateDirectory()
+                    } else if (e.key === 'Escape') {
+                      setCreatingDir(false)
+                    }
+                  }}
+                  autoFocus
+                  style={{ flex: 1 }}
+                  disabled={submittingDir}
+                />
+                <Button
+                  size="compact-xs"
+                  variant="filled"
+                  color="blue"
+                  onClick={() => void handleCreateDirectory()}
+                  loading={submittingDir}
+                  disabled={!newDirName.trim()}
+                >
+                  创建
+                </Button>
+                <ActionIcon
+                  size="sm"
+                  variant="subtle"
+                  color="gray"
+                  onClick={() => setCreatingDir(false)}
+                  disabled={submittingDir}
+                >
+                  <IconX size={14} />
+                </ActionIcon>
+              </Group>
+            )}
+
             {/* 路径导航条与上一级按钮 */}
             <Group justify="space-between" mb="xs" wrap="wrap" gap="xs">
               <Group gap={6} wrap="nowrap" style={{ minWidth: 0, flex: 1 }}>

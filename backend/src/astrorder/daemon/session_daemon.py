@@ -590,6 +590,13 @@ class SessionDaemon:
         reloaded: list[str] = []
         async with self._runtime_lock:
             for agent_type in tuple(self._pending_config_reloads):
+                # Only confirmed idle allows configuration reload. An errored or
+                # transitional session can still own native work.
+                if any(
+                    self._session_agent_types.get(session_id) == agent_type and wal.status != "idle"
+                    for session_id, wal in self._sessions.items()
+                ):
+                    continue
                 reload_config = getattr(self._runtime_registry.get(agent_type), "reload_config", None)
                 if callable(reload_config):
                     await reload_config()

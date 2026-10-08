@@ -34,9 +34,15 @@ def test_provision_creates_real_local_configuration(monkeypatch, tmp_path):
         "/local/Astrorder/data/astrorder.sqlite3"
     )
     assert all(credentials.values())
-    assert (site_packages / "_editable_impl_astrorder_server.pth").read_text() == str(
-        tmp_path / "backend/src"
-    )
+    # Exercise the relocatable .pth file with a private virtualenv module.
+    import types
+    virtualenv = types.ModuleType("_virtualenv")
+    virtualenv.__file__ = str(site_packages / "_virtualenv.py")
+    monkeypatch.setitem(sys.modules, "_virtualenv", virtualenv)
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    exec((site_packages / "_astrorder.pth").read_text(), {})
+    for relative in ("backend/src", "connectors/codex", "connectors/hermes", "."):
+        assert str(tmp_path / relative) in sys.path
 
     saved = (durable / "production.credentials.dpapi").read_bytes()
     database = durable / "data/astrorder.sqlite3"

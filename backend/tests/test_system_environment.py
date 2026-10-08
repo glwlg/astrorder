@@ -20,4 +20,6 @@ def test_remote_codex_environment_excludes_windows_paths_and_cache_settings():
         'UV_CACHE_DIR': r'P:\workspace\env\uv\cache',
         'HERMES_HOME': r'C:\Users\luwei\AppData\Local\hermes',
         'opencodex_api_auth_token': 'gateway-secret',
-    }) == {'OPENCODEX_API_AUTH_TOKEN': 'gateway-secret'}
+        'MAGPIE_API_KEY': 'magpie-secret',
+        'OTHER_API_KEY': 'ignored',
+    }) == {'OPENCODEX_API_AUTH_TOKEN': 'gateway-secret', 'MAGPIE_API_KEY': 'magpie-secret'}

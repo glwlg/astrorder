@@ -57,12 +57,26 @@ CONTROL_ACTIONS = frozenset(
         "model_config.reload",
     }
 )
+OPERATION_ACTIONS = frozenset({
+    "session.create", "session.send", "session.steer", "session.review",
+    "session.compact", "session.approve", "session.interrupt", "session.delete",
+    "session.rename", "session.settings",
+})
 NativeFrameHandler = Callable[[str, Mapping[str, Any]], None]
 StatusHandler = Callable[[Mapping[str, Any]], None]
 
 
 class DaemonBridgeError(RuntimeError):
     """The local daemon returned a response outside the IPC contract."""
+
+
+class DaemonOperationUncertain(DaemonBridgeError):
+    """Keep the identity available for reconciliation without redispatch."""
+
+    def __init__(self, operation_id: str, detail: str) -> None:
+        self.operation_id = operation_id
+        self.operation_state = "uncertain"
+        super().__init__(f"{detail} (operation_id={operation_id})")
 
 
 class DaemonReplayOverflow(DaemonBridgeError):
@@ -115,6 +129,10 @@ class DaemonBridge:
         self._status_handlers: list[StatusHandler] = []
         self._restart_handlers: list[Callable[[], None]] = []
         self._runtime_status: dict[str, Any] = {}
+        self.register_native_frame_handler(
+            "runtime.ownership_lost", self._project_ownership_lost
+        )
+        self.register_native_frame_handler("runtime.owner", self._project_runtime_owner)
 
     @property
     def runtime_status(self) -> Mapping[str, Any]:
@@ -152,16 +170,50 @@ class DaemonBridge:
             raise ValueError("daemon control action is unsupported")
         if not isinstance(fields, Mapping):
             raise TypeError("daemon control fields must be an object")
-        async with websockets.connect(
-            self.endpoint,
-            open_timeout=self.request_timeout,
-            close_timeout=self.request_timeout,
-            max_size=16_000_000,
-        ) as socket:
-            await self._handshake(socket)
-            response = await self._request(socket, action, fields, timeout=60 if action.startswith("model_config.") or action == "runtime.disconnect" else None)
+        operation_id = None
+        prepared = dict(fields)
+        try:
+            async with websockets.connect(
+                self.endpoint,
+                open_timeout=self.request_timeout,
+                close_timeout=self.request_timeout,
+                max_size=16_000_000,
+            ) as socket:
+                capabilities = await self._handshake(socket)
+                if action in OPERATION_ACTIONS and capabilities.get("version") == 1:
+                    operation_id = prepared.get("operation_id", prepared.get("command_id"))
+                    if operation_id is None:
+                        operation_id = f"app-operation-{uuid4().hex}"
+                        prepared["operation_id"] = operation_id
+                response = await self._request(socket, action, prepared, timeout=60 if action.startswith("model_config.") or action == "runtime.disconnect" else None)
+        except (ConnectionClosed, OSError, TimeoutError):
+            if operation_id is None:
+                raise
+            response = await self._recover_operation(action, prepared, operation_id)
         self._daemon_id_from(response)
         return response
+
+    async def _recover_operation(self, action: str, fields: Mapping[str, Any], operation_id: str) -> dict[str, Any]:
+        """Read a durable receipt after a lost response; never resend native work."""
+        query = {key: fields[key] for key in ("agent_type", "connection_id", "session_id") if key in fields}
+        query.update(operation_id=operation_id, operation_action=action)
+        try:
+            async with websockets.connect(
+                self.endpoint, open_timeout=self.request_timeout,
+                close_timeout=self.request_timeout, max_size=16_000_000,
+            ) as socket:
+                capabilities = await self._handshake(socket)
+                if capabilities.get("version") != 1 or capabilities.get("lookup") is not True:
+                    raise DaemonBridgeError("operation lookup is unavailable")
+                receipt = await self._request(socket, "operation.read", query)
+            response = receipt.get("response")
+            if receipt.get("operation_state") == "completed" and isinstance(response, dict):
+                if response.get("action") != f"{action}.result":
+                    raise DaemonBridgeError("stored operation action does not match")
+                return response
+        except (ConnectionClosed, OSError, TimeoutError, DaemonBridgeError) as exc:
+            raise DaemonOperationUncertain(operation_id, "Operation result could not be reconciled") from exc
+        raise DaemonOperationUncertain(operation_id, "Operation is pending or its native outcome is unknown")
 
     async def refresh_status(self) -> None:
         """Refresh App-side session state from the daemon authority."""
@@ -251,7 +303,7 @@ class DaemonBridge:
                     continue
 
     async def _synchronize(self, socket: Any) -> DaemonSyncReport:
-        status = await self._request(socket, "daemon.status", {})
+        status = await self._request(socket, "daemon.status", {"prepare_replay": True})
         daemon_id, status_sessions = self._apply_status(status)
         identity_changed = self._daemon_id is not None and self._daemon_id != daemon_id
         if identity_changed:
@@ -274,31 +326,63 @@ class DaemonBridge:
             self._validate_session_id(session_id)
             requested.setdefault(session_id, 0)
 
-        replay = await self._request(socket, "session.sync", {"sessions": requested})
-        if self._daemon_id_from(replay) != daemon_id:
-            raise DaemonBridgeError("daemon identity changed during sync")
-        responses = replay.get("sessions")
-        if not isinstance(responses, Mapping):
-            raise DaemonBridgeError("daemon sync sessions must be an object")
-
         replayed_frames = 0
         overflowed: list[str] = []
-        for session_id, response in responses.items():
-            self._validate_session_id(session_id)
-            if not isinstance(response, Mapping):
-                raise DaemonBridgeError("daemon sync session result must be an object")
-            if response.get("overflow") is True:
-                self._overflowed_sessions.add((daemon_id, session_id))
-                overflowed.append(session_id)
-                continue
-            self._overflowed_sessions.discard((daemon_id, session_id))
-            replayed_frames += self._project_frames(
-                daemon_id,
-                session_id,
-                checkpoints.get(session_id, 0),
-                response.get("frames"),
-            )
+        replay_capabilities = status.get("replay", {})
+        if not isinstance(replay_capabilities, Mapping):
+            raise DaemonBridgeError("daemon replay capabilities must be an object")
+        explicit_handoff = replay_capabilities.get("explicit_handoff") is True
+        batch_limit = replay_capabilities.get("batch_limit", 128)
+        if explicit_handoff and (type(batch_limit) is not int or not 1 <= batch_limit <= 128):
+            raise DaemonBridgeError("invalid daemon replay batch limit")
+        items = list(requested.items())
+        batches = ([dict(items[index:index + batch_limit]) for index in range(0, len(items), batch_limit)]
+                   if explicit_handoff else [requested])
+        pending = batches.pop(0) if batches else {}
+        boundaries: dict[str, int] = {}
+        first_page = True
+        while first_page or pending or batches:
+            first_page = False
+            if not pending and batches:
+                pending = batches.pop(0)
+                boundaries = {}
+            fields = {"sessions": pending, **({"through": boundaries} if boundaries else {})}
+            if explicit_handoff:
+                fields["defer_live"] = True
+            replay = await self._request(socket, "session.sync", fields)
+            if self._daemon_id_from(replay) != daemon_id:
+                raise DaemonBridgeError("daemon identity changed during sync")
+            responses = replay.get("sessions")
+            if not isinstance(responses, Mapping):
+                raise DaemonBridgeError("daemon sync sessions must be an object")
+            required_sessions = set(pending) & (set(status_sessions) | set(boundaries))
+            if not required_sessions.issubset(responses):
+                raise DaemonBridgeError("daemon sync omitted a requested session")
+            following: dict[str, int] = {}
+            for session_id, response in responses.items():
+                self._validate_session_id(session_id)
+                if session_id not in pending or not isinstance(response, Mapping):
+                    raise DaemonBridgeError("unexpected daemon sync session result")
+                if response.get("overflow") is True:
+                    self._overflowed_sessions.add((daemon_id, session_id))
+                    overflowed.append(session_id)
+                    continue
+                if "has_more" not in response and (explicit_handoff or session_id in boundaries):
+                    raise DaemonBridgeError("daemon replay continuation metadata is missing")
+                if "has_more" in response:
+                    self._validate_replay_page(response, pending[session_id], boundaries.get(session_id))
+                self._overflowed_sessions.discard((daemon_id, session_id))
+                replayed_frames += self._project_frames(daemon_id, session_id, pending[session_id], response.get("frames"))
+                if response.get("has_more") is True:
+                    boundaries[session_id] = response["max_seq_id"]
+                    following[session_id] = response["next_seq_id"]
+            pending = following
+            boundaries = {session_id: boundaries[session_id] for session_id in following}
 
+        if explicit_handoff:
+            handoff = await self._request(socket, "session.sync", {"sessions": {}, "defer_live": False})
+            if self._daemon_id_from(handoff) != daemon_id or handoff.get("sessions") != {}:
+                raise DaemonBridgeError("invalid daemon live handoff acknowledgement")
         self._daemon_id = daemon_id
         return DaemonSyncReport(
             daemon_id=daemon_id,
@@ -346,6 +430,58 @@ class DaemonBridge:
         for handler in tuple(self._status_handlers):
             handler(sessions)
         return daemon_id, sessions
+
+    def _project_runtime_owner(self, session_id: str, payload: Mapping[str, Any]) -> None:
+        pid = payload.get("owner_pid")
+        if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0:
+            raise DaemonBridgeError("runtime owner pid is invalid")
+        if payload.get("session_id") not in {None, session_id}:
+            raise DaemonBridgeError("runtime owner session identity does not match")
+
+    def _project_ownership_lost(self, session_id: str, payload: Mapping[str, Any]) -> None:
+        if payload.get("adopted") is not False:
+            raise DaemonBridgeError("daemon claimed a process handle it cannot own")
+        if payload.get("previous_status") not in {"running", "waiting_approval"}:
+            raise DaemonBridgeError("ownership loss previous status is invalid")
+        reason = "小内核已重启，上一条指令的执行结果无法确认；不会自动重发。"
+        owned = [
+            session
+            for session in self.store.list_sessions()
+            if session.get("id") == session_id and session.get("control_state") == "owned"
+        ]
+        for command in self.store.active_commands():
+            if command["session_id"] != session_id:
+                continue
+            if not any(session["agent_id"] == command["agent_id"] for session in owned):
+                continue
+            updated = self.store.set_command_state(
+                command["agent_id"], command["session_id"], command["id"], "unknown", reason
+            )
+            self.service._server_event(
+                "command.upsert",
+                agent_id=command["agent_id"],
+                session_id=command["session_id"],
+                data=updated,
+            )
+        for session in owned:
+            updates: dict[str, Any] = {"status": "error"}
+            if "orphan_alive" in payload:
+                if not isinstance(payload.get("orphan_alive"), bool):
+                    raise DaemonBridgeError("orphan liveness must be boolean")
+                updates["runtime_owner"] = {
+                    "orphan_alive": payload["orphan_alive"],
+                    "adopted": False,
+                }
+            updated_session = self.store.update_session(
+                session["agent_id"], session_id, updates
+            )
+            if updated_session is not None:
+                self.service._server_event(
+                    "session.upsert",
+                    agent_id=session["agent_id"],
+                    session_id=session_id,
+                    data=updated_session,
+                )
 
     def _retire_missing_sessions(
         self, current_session_ids: set[str], stored_sessions: list[dict[str, Any]]
@@ -432,16 +568,40 @@ class DaemonBridge:
             raise DaemonBridgeError("daemon response request ID does not match")
         if response.get("action") == "error":
             detail = response.get("detail")
+            if response.get("operation_state") == "uncertain" and isinstance(response.get("operation_id"), str):
+                raise DaemonOperationUncertain(response["operation_id"], detail if isinstance(detail, str) else "Native operation outcome is unknown")
             raise DaemonBridgeError(detail if isinstance(detail, str) else "daemon rejected request")
         if response.get("action") != f"{action}.result":
             raise DaemonBridgeError("daemon response action does not match request")
         return response
 
-    async def _handshake(self, socket: Any) -> None:
+    async def _handshake(self, socket: Any) -> Mapping[str, Any]:
         if self._secret is None:
-            return
+            return {}
         response = await self._request(socket, "daemon.handshake", {"secret": self._secret})
         self._daemon_id_from(response)
+        capabilities = response.get("operations", {})
+        if not isinstance(capabilities, Mapping):
+            raise DaemonBridgeError("daemon operation capabilities must be an object")
+        return capabilities
+
+    @staticmethod
+    def _validate_replay_page(response: Mapping[str, Any], after: int, through: int | None) -> None:
+        frames = response.get("frames")
+        cursor = response.get("next_seq_id")
+        boundary = response.get("max_seq_id")
+        more = response.get("has_more")
+        if (not isinstance(frames, list) or type(more) is not bool
+                or type(cursor) is not int or type(boundary) is not int
+                or cursor != after + len(frames) or cursor > boundary
+                or (through is not None and boundary != through)
+                or (more and (not frames or cursor >= boundary))
+                or (not more and cursor != boundary)):
+            raise DaemonBridgeError("invalid daemon replay page bounds")
+        for expected, frame in enumerate(frames, after + 1):
+            if (not isinstance(frame, Mapping) or type(frame.get("seq_id")) is not int
+                    or frame["seq_id"] != expected):
+                raise DaemonBridgeError("daemon replay page sequence is not contiguous")
 
     def _project_frames(
         self,

@@ -72,6 +72,13 @@ async def test_daemon_connector_proxy_buffers_agent_event_then_wals_exact_native
                     "session_id": "daemon-hermes-control",
                     "seq_id": 1,
                     "timestamp": pytest.approx(agent_frames[0]["timestamp"]),
+                    "event": "connector.hello",
+                    "payload": agent,
+                },
+                {
+                    "session_id": "daemon-hermes-control",
+                    "seq_id": 2,
+                    "timestamp": pytest.approx(agent_frames[1]["timestamp"]),
                     "event": "connector.event",
                     "payload": {
                         "id": "agent-event-before-binding",

@@ -298,6 +298,7 @@ async def test_daemon_codex_controller_routes_exact_command_and_projection_ident
                 "session.send",
                 {
                     "session_id": "thread-1",
+                    "command_id": "send-1",
                     "input": [{"type": "text", "text": "same text is not an identity"}],
                     "params": {
                         "approvalPolicy": "on-request",
@@ -383,6 +384,7 @@ async def test_daemon_codex_controller_stages_attachment_inputs_before_ipc(monke
             "session.send",
             {
                 "session_id": "thread-1",
+                "command_id": "send-image",
                 "input": [
                     {"type": "text", "text": "inspect image"},
                     {"type": "image", "url": "data:image/png;base64,aGVsbG8="},

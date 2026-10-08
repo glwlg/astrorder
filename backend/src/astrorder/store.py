@@ -165,6 +165,7 @@ def _session_wire(row: SessionRow) -> dict[str, Any]:
         "native_kind": row.native_kind,
         "ephemeral": row.ephemeral,
         "control_state": row.control_state,
+        "runtime_owner": row.runtime_owner,
         "handoff_from_agent_id": row.handoff_from_agent_id,
         "handoff_from_session_id": row.handoff_from_session_id,
         "parent_session_id": row.handoff_from_session_id,
@@ -323,6 +324,7 @@ class Store:
                 "native_kind": "VARCHAR(32)",
                 "ephemeral": "BOOLEAN NOT NULL DEFAULT 0",
                 "control_state": "VARCHAR(32) NOT NULL DEFAULT 'unknown'",
+                "runtime_owner": "JSON",
                 "selected_model_provider": "VARCHAR(160)",
                 "selected_model": "VARCHAR(160)",
                 "selected_reasoning_effort": "VARCHAR(32)",
@@ -666,6 +668,8 @@ class Store:
                 row.title = updates["title"].strip()
             if "status" in updates and isinstance(updates["status"], str):
                 row.status = updates["status"]
+            if "runtime_owner" in updates and isinstance(updates["runtime_owner"], dict):
+                row.runtime_owner = updates["runtime_owner"]
             if "workspace" in updates:
                 row.workspace = updates["workspace"]
             row.updated_at = utc_now()

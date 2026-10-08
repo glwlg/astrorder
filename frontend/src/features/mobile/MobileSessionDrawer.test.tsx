@@ -97,12 +97,38 @@ describe('MobileSessionDrawer', () => {
     expect(row).toHaveClass('m-hold')
   })
 
-  it('renders the shared animated border for a running session', () => {
+  it('uses the same star border as the desktop for a running session', () => {
     const runningGroups = [{ ...groups[0], sessions: [{ ...groups[0].sessions[0], status: 'running' as const }] }]
     mount({ groups: runningGroups })
     const row = screen.getByRole('button', { name: '会话 1' }).closest('.m-session-row')
     expect(row).toHaveClass('is-running')
-    expect(row?.querySelector('.session-running-arc[data-status="running"] rect')).not.toBeNull()
+    expect(row?.querySelector('.session-star-border')).toHaveAttribute('aria-hidden', 'true')
+    expect(row?.querySelectorAll('.session-star-glint')).toHaveLength(2)
+    expect(row?.querySelector('svg[data-status="running"]')).toBeNull()
+  })
+
+  it('keeps idle rows undecorated and preserves approval and error indicators', () => {
+    const statusGroups = [{ ...groups[0], sessions: [
+      session({ id: 'idle', title: 'Idle fixture' }),
+      session({ id: 'approval', title: 'Approval fixture', status: 'waiting_approval' }),
+      session({ id: 'error', title: 'Error fixture', status: 'error' }),
+    ] }]
+    mount({ groups: statusGroups, selectedKey: scopeKey('local', 'idle') })
+    for (const title of ['Idle fixture', 'Approval fixture', 'Error fixture']) {
+      expect(screen.getByRole('button', { name: title }).closest('.m-session-row')?.querySelector('.session-star-border')).toBeNull()
+    }
+    expect(screen.getByRole('button', { name: 'Approval fixture' }).closest('.m-session-row')?.querySelector('svg[data-status="waiting_approval"] rect')).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'Error fixture' }).closest('.m-session-row')?.querySelector('svg[data-status="error"] rect')).not.toBeNull()
+  })
+
+  it('removes the star border when a session finishes without remounting the drawer', () => {
+    const running = { ...groups[0], sessions: [{ ...groups[0].sessions[0], status: 'running' as const }] }
+    const view = mount({ groups: [running] })
+    const row = screen.getByRole('button', { name: '会话 1' }).closest('.m-session-row')
+    expect(row?.querySelector('.session-star-border')).not.toBeNull()
+    view.rerender(<MobileSessionDrawer groups={[{ ...running, sessions: [{ ...running.sessions[0], status: 'idle' }] }]} pins={{}} pinnedProjects={[]} selectedKey={scopeKey('local', 'sess-m-1')} appearance={{}} onSelect={vi.fn()} onPin={vi.fn()} onPinProject={vi.fn()} />)
+    expect(row).not.toHaveClass('is-running')
+    expect(row?.querySelector('.session-star-border')).toBeNull()
   })
 
   it('opens session actions from the visible menu without selecting or swallowing the next tap', () => {

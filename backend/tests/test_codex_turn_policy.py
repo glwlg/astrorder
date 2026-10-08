@@ -14,7 +14,7 @@ from astrorder.adapters.codex.policy import codex_turn_policy
                 "approvalsReviewer": "auto_review",
             },
         ),
-        ("manual", {"approvalPolicy": "untrusted"}),
+        ("manual", {"approvalPolicy": "untrusted", "approvalsReviewer": "user"}),
         (
             "full_access",
             {

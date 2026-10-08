@@ -231,7 +231,8 @@ def test_remote_codex_forwards_only_gateway_environment_via_stdin(tmp_path, monk
     service = ControlService(store, EventHub(), settings)
     row = {'id': 'ssh-test', 'display_name': 'WSL', 'settings': {'host': 'fixture', 'port': 22}}
     connection = RemoteCodex(settings, store, service, row, '/usr/bin/codex')
-    for key in ('STARSHIP_SESSION_KEY', 'GROK45_API_KEY', 'EMBED__API_KEY'):
+    from astrorder.core.system_environment import REMOTE_CODEX_ENV_KEYS
+    for key in REMOTE_CODEX_ENV_KEYS:
         monkeypatch.delenv(key, raising=False)
     environment = {
         'TEMP': r'C:\Users\luwei\AppData\Local\Temp',

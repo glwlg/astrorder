@@ -19,8 +19,8 @@ it('preserves a subsequent identical message not yet covered by the native page'
   const later = m('optimistic-next', 'user', 22, 'next')
   expect(visibleTranscript([reply, user, later], [user, reply], new Set()).map(x => x.id)).toEqual(['history-user', 'history-reply', 'optimistic-next'])
 })
-it('collapses native aliases correlated to the same command', () => {
-  const history = m('history-alias', 'user', 10, 'command')
-  const live = m('native-live', 'user', 12, 'command')
-  expect(mergeMessagesById([history, live], []).map(x => x.id)).toEqual(['native-live'])
+it('collapses an optimistic message when a history message with matching role and text arrives at or after it', () => {
+  const optimistic = m('optimistic-cmd123', 'user', 10, 'cmd123')
+  const history = m('history-message-sha', 'user', 10, null)
+  expect(visibleTranscript([optimistic, history], [history], new Set()).map(x => x.id)).toEqual(['history-message-sha'])
 })

@@ -18,6 +18,7 @@ type BackgroundTaskStore = {
   fail: (id: string, detail: string) => void
   cancel: (id: string) => void
   dismiss: (id: string) => void
+  clearFinished: () => void
 }
 
 let nextTaskId = 0
@@ -50,6 +51,15 @@ export const useBackgroundTasks = create<BackgroundTaskStore>((set) => ({
   dismiss: (id) => set((state) => {
     const tasks = { ...state.tasks }
     delete tasks[id]
+    return { tasks }
+  }),
+  clearFinished: () => set((state) => {
+    const tasks: Record<string, BackgroundTask> = {}
+    for (const [id, t] of Object.entries(state.tasks)) {
+      if (t.status === 'running') {
+        tasks[id] = t
+      }
+    }
     return { tasks }
   }),
 }))

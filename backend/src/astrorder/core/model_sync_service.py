@@ -16,10 +16,14 @@ from astrorder.models import WorkspacePreferenceRow
 
 from .gateway_config import get_gateway_config
 from .model_sync import (
+    GATEWAY_ENV_KEYS,
+    gateway_env_values,
+    hermes_bindings,
     normalize_catalog,
     normalize_magpie_catalog,
     render_codex_catalog,
     render_codex_config,
+    render_hermes_config,
     render_grok_config,
     sha256_text,
 )
@@ -124,7 +128,7 @@ def _diff(before: str, after: str, name: str) -> str:
         return ""
     lines = difflib.unified_diff(before.splitlines(), after.splitlines(), f"当前/{name}", f"同步后/{name}", lineterm="", n=2)
     value = "\n".join(list(lines)[:400])
-    return re.sub(r'(?mi)^(\s*[+-]?\s*api_key\s*=\s*).+$', r'\1"[已配置]"', value)
+    return re.sub(r'(?mi)^(\s*[+-]?\s*api_key\s*[=:]\s*).+$', r'\1"[已配置]"', value)
 
 
 def _active_for_target(store: Any, target_id: str, agents: list[str]) -> bool:
@@ -188,6 +192,7 @@ async def build_target_plan(store: Any, bridge: Any, catalog: dict[str, Any], ta
     inference_url = config["target_overrides"].get(target_id, config["inference_url"])
     files: dict[str, str] = {}
     old_catalog: list[Any] = []
+    hermes_state = {"dynamic": True, "status": "待验证" if "hermes" in agents else "未选择"}
     if "codex" in agents:
         try:
             parsed = json.loads(current["codex_catalog"]["content"] or "[]")
@@ -213,32 +218,40 @@ async def build_target_plan(store: Any, bridge: Any, catalog: dict[str, Any], ta
                     "key": gt,
                     "name": "Magpie Proxy" if gt == "magpie" else "OpenCodeX Proxy",
                     "base_url": gt_url,
-                    "env_key": "OPENCODEX_API_AUTH_TOKEN",
+                    "env_key": GATEWAY_ENV_KEYS[gt],
                 })
-        # Ensure standard profiles exist if not explicitly present in raw_profiles
         if not any(p["key"] == "opencodex" for p in all_configured_providers):
             all_configured_providers.append({
                 "key": "opencodex",
                 "name": "OpenCodeX Proxy",
                 "base_url": "https://llm.651971564.xyz/v1",
-                "env_key": "OPENCODEX_API_AUTH_TOKEN",
+                "env_key": GATEWAY_ENV_KEYS["opencodex"],
             })
         if not any(p["key"] == "magpie" for p in all_configured_providers):
             all_configured_providers.append({
                 "key": "magpie",
                 "name": "Magpie Proxy",
                 "base_url": "http://192.168.1.11:3425/v1",
-                "env_key": "OPENCODEX_API_AUTH_TOKEN",
+                "env_key": GATEWAY_ENV_KEYS["magpie"],
             })
 
         files["codex_config"] = render_codex_config(
             codex_cfg_content, inference_url, catalog_path,
             provider_key=provider_key, provider_name=provider_name,
+            env_key=GATEWAY_ENV_KEYS[provider_key],
             all_providers=all_configured_providers,
         )
     if "grok" in agents:
         grok_cfg_content = (current.get("grok_config") or {}).get("content", "")
         files["grok_config"] = render_grok_config(grok_cfg_content, catalog, inference_url, config["api_key"])
+    if "hermes" in agents:
+        current_hermes = str((current.get("hermes_config") or {}).get("content") or "")
+        if not current_hermes.strip():
+            hermes_state = {"dynamic": True, "status": "未找到配置"}
+        else:
+            rendered = render_hermes_config(current_hermes, hermes_bindings(config, target_id, current_hermes))
+            if rendered:
+                files["hermes_config"] = rendered
 
     new_slugs = {m["slug"] for m in catalog.get("models", [])}
     old_slugs = {str(m.get("slug")) for m in (old_catalog if isinstance(old_catalog, list) else []) if isinstance(m, dict) and m.get("slug")}
@@ -261,7 +274,7 @@ async def build_target_plan(store: Any, bridge: Any, catalog: dict[str, Any], ta
         "target_id": target_id, "agents": agents, "target": target, "files": files, "model_diff": model_diff,
         "changes": changes, "catalog_fingerprint": catalog["fingerprint"],
         "reload_pending": _active_for_target(store, target_id, agents),
-        "hermes": {"dynamic": True, "status": "待验证" if "hermes" in agents else "未选择"},
+        "hermes": hermes_state,
     }
 
 
@@ -303,8 +316,11 @@ async def run_sync(app: Any, operation_id: str, selections: list[dict[str, Any]]
                     return {"target_id": plan["target_id"], "status": "cancelled"}
                 changed: list[str] = []
                 if plan["files"]:
+                    env_values = gateway_env_values(config)
                     response = await bridge.request_control("model_config.apply", {
-                        "target": plan["target"], "files": plan["files"], "api_key": config["api_key"],
+                        "target": plan["target"], "files": plan["files"],
+                        "api_key": env_values.get("OPENCODEX_API_AUTH_TOKEN", ""),
+                        "api_keys": env_values,
                     })
                     changed = response["result"].get("changed", [])
                 reload_state = {"pending": [], "reloaded": []}
@@ -313,7 +329,7 @@ async def run_sync(app: Any, operation_id: str, selections: list[dict[str, Any]]
                     reload_response = await bridge.request_control("model_config.reload", {"agents": reload_agents})
                     reload_state = reload_response["result"]
                 hermes = plan["hermes"]
-                if "hermes" in plan["agents"]:
+                if "hermes" in plan["agents"] and hermes.get("status") != "未找到配置":
                     hermes = await validate_hermes_catalog(app, plan["target_id"], catalog)
                 return {
                     "target_id": plan["target_id"], "status": "success",

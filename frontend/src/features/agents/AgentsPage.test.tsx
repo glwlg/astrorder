@@ -1,9 +1,10 @@
-import { MantineProvider } from '@mantine/core'
+import { MantineProvider, Modal, Tabs } from '@mantine/core'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { api } from '../../api/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentsPage } from './AgentsPage'
+import { SettingsDrawerScope } from '../../components/SettingsDrawer'
 import { useAstrorderStore } from '../../state/store'
 
 vi.mock('../../hooks/useAstrorderData', () => ({
@@ -41,23 +42,84 @@ vi.mock('../../api/client', () => ({
     connectSshConnection: vi.fn(),
     disconnectSshConnection: vi.fn(),
     launchRuntime: vi.fn(),
+    getAgentMcpStatus: vi.fn(async () => ({ enabled: true })),
   },
 }))
 
-function renderPage() {
+function renderPage(inSettingsModal = false) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(
+  const closeSettings = vi.fn()
+  const result = render(
     <MantineProvider>
       <QueryClientProvider client={queryClient}>
-        <AgentsPage />
+        {inSettingsModal ? <SettingsDrawerScope>{hasOpenDrawer => <Modal className="settings-modal" opened onClose={closeSettings} title="设置" closeOnEscape={!hasOpenDrawer}>
+          <Tabs defaultValue="connections" className="settings-tabs" orientation="vertical">
+            <Tabs.List><Tabs.Tab value="connections">连接</Tabs.Tab></Tabs.List>
+            <Tabs.Panel value="connections" className="settings-tab-panel"><AgentsPage /></Tabs.Panel>
+          </Tabs>
+        </Modal>}</SettingsDrawerScope> : <AgentsPage />}
       </QueryClientProvider>
     </MantineProvider>,
   )
+  return { ...result, closeSettings }
 }
 
 afterEach(() => { cleanup(); vi.clearAllMocks(); useAstrorderStore.getState().resetRuntime() })
 
 describe('Agent settings connection controls', () => {
+  it('closes only the nested drawer on Escape and returns focus to its trigger', async () => {
+    const { closeSettings } = renderPage(true)
+    const trigger = await screen.findByRole('button', { name: '配置 Hermes' })
+    trigger.focus()
+    fireEvent.click(trigger)
+    const drawer = await screen.findByRole('dialog', { name: 'Hermes · 运行配置' })
+    const close = within(drawer).getByRole('button', { name: '关闭运行配置' })
+    fireEvent.keyDown(close, { key: 'Escape' })
+    expect(closeSettings).not.toHaveBeenCalled()
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Hermes · 运行配置' })).not.toBeInTheDocument())
+    await waitFor(() => expect(trigger).toHaveFocus())
+    expect(screen.getByRole('dialog', { name: '设置' })).toBeInTheDocument()
+  })
+  it('contains the configuration drawer and its dismissible mask inside the settings modal', async () => {
+    renderPage(true)
+    const settings = await screen.findByRole('dialog', { name: '设置' })
+    fireEvent.click(await screen.findByRole('button', { name: '配置 Hermes' }))
+    const drawer = await screen.findByRole('dialog', { name: 'Hermes · 运行配置' })
+    expect(settings).toContainElement(drawer)
+    const mask = settings.querySelector('.settings-contained-drawer .mantine-Drawer-overlay')
+    expect(mask).not.toBeNull()
+    fireEvent.click(mask!)
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Hermes · 运行配置' })).not.toBeInTheDocument())
+    expect(screen.getByRole('dialog', { name: '设置' })).toBeInTheDocument()
+  })
+  it('shows only the selected configuration group instead of stacking all settings', async () => {
+    useAstrorderStore.setState({ agents: { local: { id: 'local', name: '本机 Hermes', kind: 'hermes', status: 'ready', connection_id: 'local', capabilities: ['chat'], limitation: null } } })
+    renderPage()
+    fireEvent.click(await screen.findByRole('button', { name: '配置 Hermes' }))
+    const drawer = await screen.findByRole('dialog', { name: 'Hermes · 运行配置' })
+    expect(within(drawer).getByText('星序 MCP 调度授权')).toBeInTheDocument()
+    expect(within(drawer).queryByText('支持能力与通道规格')).not.toBeInTheDocument()
+    fireEvent.click(within(drawer).getByRole('tab', { name: '能力' }))
+    expect(within(drawer).getByText('支持能力与通道规格')).toBeInTheDocument()
+    expect(within(drawer).queryByText('星序 MCP 调度授权')).not.toBeInTheDocument()
+    fireEvent.click(within(drawer).getByRole('tab', { name: '维护' }))
+    expect(within(drawer).getByRole('button', { name: '检查并升级' })).toBeInTheDocument()
+    expect(within(drawer).queryByText('支持能力与通道规格')).not.toBeInTheDocument()
+  })
+  it('keeps configuration in the selected agent drawer and connection actions in its menu', async () => {
+    renderPage()
+    await screen.findByText('Hermes', { exact: true })
+    expect(screen.queryByText('Agent 状态')).not.toBeInTheDocument()
+    expect(screen.queryByText('支持能力与通道规格')).not.toBeInTheDocument()
+    expect(screen.queryByText('强制重启')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '配置 Hermes' }))
+    const drawer = await screen.findByRole('dialog', { name: 'Hermes · 运行配置' })
+    expect(within(drawer).getByText('接入此 Agent 后可管理星序授权、运行时能力与版本。')).toBeInTheDocument()
+    fireEvent.click(within(drawer).getByRole('button', { name: '关闭运行配置' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Codex 更多操作' }))
+    expect(await screen.findByRole('menuitem', { name: '强制重启' })).toBeInTheDocument()
+    expect(api.changeEnvironmentAgent).not.toHaveBeenCalled()
+  })
   it('selects a host without connecting or changing its agents', async () => {
     vi.mocked(api.getEnvironments).mockResolvedValueOnce({ items: [
       { id: 'local', name: '本机', method: 'local', discovered: true, agents: [{ kind: 'codex', available: true, state: 'discovered', detail: '本机详情' }] },

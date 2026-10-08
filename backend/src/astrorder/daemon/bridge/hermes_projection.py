@@ -33,6 +33,15 @@ class HermesCommandFrameRouter:
             raise DaemonBridgeError("Hermes completion agent identity is invalid")
         if not isinstance(session_id, str) or not session_id or session_id != frame_session_id:
             raise DaemonBridgeError("Hermes completion session identity does not match")
+        if (
+            "command_id" not in payload
+            and payload.get("status") == "complete"
+            and isinstance(payload.get("persisted_turn"), Mapping)
+        ):
+            # Native message.complete is not an App command receipt. Its text
+            # remains in native history; do not guess a command or apply an old
+            # completion's idle state over a newer turn during replay.
+            return
         if not isinstance(command_id, str) or not command_id:
             raise DaemonBridgeError("Hermes completion command identity is invalid")
         command = self.store.get_command(agent_id, session_id, command_id)

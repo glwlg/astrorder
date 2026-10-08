@@ -7,6 +7,7 @@ from collections.abc import Callable
 APP_MARKER = "scripts/run_production.py"
 DAEMON_MODULE_MARKER = "astrorder.daemon.session_daemon"
 DAEMON_FILE_MARKER = "astrorder/daemon/session_daemon.py"
+DAEMON_GO_MARKER = "astrorder-sessiond"
 # 0x08000000: CREATE_NO_WINDOW, 0x01000000: CREATE_BREAKAWAY_FROM_JOB, 0x00000200: CREATE_NEW_PROCESS_GROUP
 # 微软官方文档：严禁包含 DETACHED_PROCESS (0x00000008)，否则 Windows 会静默忽略 CREATE_NO_WINDOW 并弹窗
 INDEPENDENT_PROCESS_FLAGS = 0x08000000 | 0x01000000 | 0x00000200
@@ -48,7 +49,7 @@ def select_owned_daemon_pid(pids: list[int], command_line: Callable[[int], str |
     if len(pids) != 1:
         return None
     command = _normalized(command_line(pids[0]))
-    if DAEMON_MODULE_MARKER in command or DAEMON_FILE_MARKER in command:
+    if DAEMON_MODULE_MARKER in command or DAEMON_FILE_MARKER in command or DAEMON_GO_MARKER in command:
         return pids[0]
     return None
 

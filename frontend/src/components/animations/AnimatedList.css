@@ -1,0 +1,27 @@
+/* Lightweight React Bits Animated List adaptation for dense composer menus.
+   https://reactbits.dev/components/animated-list — MIT + Commons Clause.
+   Full notice: /react-bits-NOTICE.txt. Keep selection/keyboard handling in the composer.
+   Enter only: no exit nodes, scroll observers, or global keyboard listeners. */
+.astr-animated-list {
+  overscroll-behavior: contain;
+}
+.astr-animated-list-item {
+  transform-origin: left center;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .astr-animated-list-item {
+    animation: astr-list-enter 160ms cubic-bezier(0.16, 1, 0.3, 1);
+    transition: background-color 120ms ease;
+  }
+}
+@keyframes astr-list-enter {
+  from { opacity: 0.5; transform: scale(0.985); }
+  to { opacity: 1; transform: scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .astr-animated-list-item {
+    animation: none;
+    transition: none;
+    transform: none;
+  }
+}

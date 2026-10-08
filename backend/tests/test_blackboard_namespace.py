@@ -29,13 +29,19 @@ def test_session_default_resolves_to_callers_active_session():
     assert namespace == "session:remote-codex::current"
 
 
-def test_global_default_and_short_session_id_use_marked_session_scope():
+def test_explicit_global_and_short_session_id_resolve_independently():
     store = Store()
     store.scopes = {"remote-codex::current": "group:ops"}
     ctx = AgentContext(store=store)
 
     assert _resolve_blackboard_ns(
         {"namespace": "global", "caller_agent_id": "remote-codex"}, ctx
+    ) == "global"
+    assert _resolve_blackboard_ns(
+        {"namespace": "default", "caller_agent_id": "remote-codex"}, ctx
+    ) == "default"
+    assert _resolve_blackboard_ns(
+        {"namespace": "session:default", "caller_agent_id": "remote-codex"}, ctx
     ) == "group:ops"
     assert _resolve_blackboard_ns(
         {"namespace": "session:current"}, ctx

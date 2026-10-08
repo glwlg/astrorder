@@ -63,28 +63,40 @@ def clean(value, maximum=600):
     return value[:maximum]
 
 def launcher_python(path):
+    # 优先解析 hermes --print-runtime-command
     try:
-        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        res = subprocess.run([str(path), "--print-runtime-command"], capture_output=True, text=True, timeout=5)
+        if res.returncode == 0 and res.stdout.strip().startswith("["):
+            cmd = json.loads(res.stdout.strip())
+            if isinstance(cmd, list) and cmd and Path(cmd[0]).is_file():
+                return Path(cmd[0])
+    except Exception:
+        pass
+    try:
+        cur = path
+        for _ in range(3):
+            lines = cur.read_text(encoding="utf-8", errors="replace").splitlines()
+            found_py = None
+            for line in lines[:20]:
+                m = re.search(r"exec\s+([^\s]+\bpython[0-9.]*)\b", line)
+                if m:
+                    cand = Path(m.group(1)).expanduser()
+                    if cand.is_file():
+                        found_py = cand
+                        break
+                parts = line.strip().split()
+                if len(parts) >= 2 and parts[0] == "exec":
+                    cand = Path(parts[1]).expanduser()
+                    if cand.is_file():
+                        if "python" in cand.name.lower():
+                            found_py = cand
+                            break
+                        cur = cand
+            if found_py:
+                return found_py
     except OSError:
         return None
-    for line in lines[:20]:
-        try:
-            parts = shlex.split(line.strip())
-        except ValueError:
-            continue
-        if len(parts) > 1 and parts[0] == "exec" and "python" in Path(parts[1]).name.lower():
-            candidate = Path(parts[1]).expanduser()
-            if candidate.is_file():
-                return candidate
-    if not lines or not lines[0].startswith("#!"):
-        return None
-    parts = shlex.split(lines[0][2:].strip())
-    if not parts:
-        return None
-    if Path(parts[0]).name == "env":
-        parts = [part for part in parts[1:] if not part.startswith("-")]
-    candidate = shutil.which(parts[0]) if parts and not Path(parts[0]).is_absolute() else (Path(parts[0]) if parts else None)
-    return candidate if candidate and candidate.is_file() else None
+    return None
 
 def owned_plugin(plugin_dir):
     if plugin_dir.is_symlink() or not plugin_dir.is_dir():
@@ -220,6 +232,7 @@ def main():
         emit({"ok": False, "code": "project_activation_required", "detail": "Astrorder plugin is not already enabled in the configured Hermes profile; no global enable was attempted"}, 2)
     candidates = [
         launcher_python(hermes_path),
+        Path.home() / ".hermes" / "tools" / "python-3.14.7+20260901-linux-x64" / "bin" / "python3",
         hermes_path.parent / ("python.exe" if os.name == "nt" else "python"),
         hermes_path.parent.parent / "Scripts" / "python.exe",
         hermes_path.parent.parent / "bin" / "python",
@@ -275,6 +288,8 @@ def main():
             emit({"ok": False, "code": "invalid_workspace", "detail": "remote workspace is not an existing directory"}, 2)
         os.chdir(cwd)
     entry = (
+        "import sys; sys.path.insert(0, str(__import__('pathlib').Path.home() / '.hermes' / 'hermes-agent'));"
+        "import hermes_bootstrap;"
         "from hermes_cli.plugins import get_plugin_manager;"
         "get_plugin_manager().discover_and_load();"
         "from tui_gateway.entry import main;main()"

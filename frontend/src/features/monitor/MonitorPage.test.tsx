@@ -56,6 +56,21 @@ describe('MonitorPage', () => {
     )
   }
 
+  it.each(['touch', 'reduce', 'drag'])('does not track decorative spotlight motion during %s', mode => {
+    const media = window.matchMedia('')
+    vi.spyOn(window, 'matchMedia').mockImplementation(query => ({
+      ...media,
+      media: query,
+      matches: query === '(prefers-reduced-motion: reduce)' ? mode === 'reduce'
+        : query === '(hover: hover) and (pointer: fine)' && mode !== 'touch',
+    }))
+    renderPage()
+    const card = screen.getByTestId('monitor-card-agent-1-session-1')
+    fireEvent.mouseMove(card, { clientX: 120, clientY: 100, buttons: mode === 'drag' ? 1 : 0 })
+    expect(card.style.getPropertyValue('--spotlight-x')).toBe('')
+    expect(card.style.getPropertyValue('--spotlight-y')).toBe('')
+  })
+
   it('defaults to active sessions and persists manually added idle sessions', async () => {
     renderPage()
 
@@ -71,6 +86,24 @@ describe('MonitorPage', () => {
     expect(await screen.findByTestId('monitor-card-agent-1-session-2')).toBeInTheDocument()
     expect(screen.getByText('2 个会话')).toBeInTheDocument()
     expect(JSON.parse(localStorage.getItem('astrorder:monitor-sessions') || '[]')).toEqual(['agent-1::session-2'])
+  })
+
+  it('tracks the pointer for the card spotlight without blocking its controls', () => {
+    const media = window.matchMedia('')
+    vi.spyOn(window, 'matchMedia').mockImplementation(query => ({
+      ...media,
+      media: query,
+      matches: query === '(hover: hover) and (pointer: fine)',
+    }))
+    renderPage()
+    const card = screen.getByTestId('monitor-card-agent-1-session-1')
+    expect(card).toHaveClass('astr-spotlight-enabled')
+    vi.spyOn(card, 'getBoundingClientRect').mockReturnValue({ left: 20, top: 30 } as DOMRect)
+    fireEvent.mouseMove(card, { clientX: 120, clientY: 100 })
+    expect(card.style.getPropertyValue('--spotlight-x')).toBe('100px')
+    expect(card.style.getPropertyValue('--spotlight-y')).toBe('70px')
+    fireEvent.click(within(card).getByRole('button', { name: '移出监控室' }))
+    expect(screen.queryByTestId('monitor-card-agent-1-session-1')).not.toBeInTheDocument()
   })
 
   it('keeps an automatically added session after completion until it is removed', async () => {

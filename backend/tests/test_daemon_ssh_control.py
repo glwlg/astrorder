@@ -170,3 +170,23 @@ def test_daemon_ssh_controller_routes_native_rpc_through_daemon():
     assert controller.rpc("approval.pending", {"session_id": "native-1"}) == {
         "result": {"approvals": []}
     }
+
+
+def test_models_uses_control_connection_without_resuming_unpersisted_draft():
+    class FakeBridge:
+        async def request_control(self, action, fields):
+            assert fields["session_id"] == ssh_runtime_control_id("remote-a")
+            if action == "session.spawn":
+                assert fields["params"]["runtime_control"] is True
+                return {"result": {"status": "idle", "agent_id": "ssh-hermes-remote-a",
+                                   "connection_id": "remote-a"}}
+            assert action == "session.models"
+            return {"result": {"items": [{"provider": "test", "model": "native-model"}]}}
+
+    controller = DaemonSshController(
+        FakeBridge(), connection_id="remote-a", ssh_settings={"host": "remote.example"}
+    )
+    for _ in range(2):
+        assert controller.models("unpersisted-draft") == [
+            {"provider": "test", "model": "native-model"}
+        ]

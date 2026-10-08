@@ -6,6 +6,7 @@ export interface EventStreamOptions {
   after: number
   onEvent: (event: EventEnvelope) => void
   onStatus: (status: EventStreamStatus) => void
+  onResume?: () => void
   reconnectMs?: number
 }
 
@@ -32,12 +33,14 @@ export function connectEventStream({
   after,
   onEvent,
   onStatus,
+  onResume,
   reconnectMs = 1200,
 }: EventStreamOptions): () => void {
   let stopped = false
   let socket: WebSocket | null = null
   let reconnectTimer: number | undefined
   let cursor = after
+  let connectedBefore = false
 
   const connect = () => {
     if (stopped) return
@@ -49,7 +52,11 @@ export function connectEventStream({
       reconnectTimer = window.setTimeout(connect, reconnectMs)
       return
     }
-    socket.onopen = () => onStatus('connected')
+    socket.onopen = () => {
+      onStatus('connected')
+      if (connectedBefore) onResume?.()
+      connectedBefore = true
+    }
     socket.onmessage = (message) => {
       let parsed: unknown
       try {
@@ -79,7 +86,9 @@ export function connectEventStream({
       socket?.close()
       socket = null
       connect()
+      return
     }
+    onResume?.()
   }
   const onVisibilityChange = () => {
     if (document.visibilityState === 'visible') onWake()

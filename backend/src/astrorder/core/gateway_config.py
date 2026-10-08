@@ -19,13 +19,15 @@ DEFAULT_CONFIGS: dict[str, dict[str, Any]] = {
         "management_url": "https://ocx.651971564.xyz",
         "inference_url": "https://llm.651971564.xyz/v1",
         "api_key": "",
+        "management_key": "",
         "target_overrides": {},
     },
     "magpie": {
         "gateway_type": "magpie",
-        "management_url": "http://192.168.1.11:3425/v1",
+        "management_url": "http://192.168.1.11:3430",
         "inference_url": "http://192.168.1.11:3425/v1",
         "api_key": "",
+        "management_key": "",
         "target_overrides": {},
     },
 }
@@ -63,6 +65,10 @@ def _clean_profiles(raw: Any, existing_profiles: dict[str, dict[str, Any]] | Non
                         p_copy["api_key"] = ""
                     elif "api_key" in prof and str(prof.get("api_key") or "").strip():
                         p_copy["api_key"] = str(prof["api_key"]).strip()
+                    if prof.get("clear_management_key") is True:
+                        p_copy["management_key"] = ""
+                    elif "management_key" in prof and str(prof.get("management_key") or "").strip():
+                        p_copy["management_key"] = str(prof["management_key"]).strip()
                     overrides = prof.get("target_overrides")
                     if isinstance(overrides, dict):
                         p_copy["target_overrides"] = {k: _url(v, "目标推理地址") for k, v in overrides.items() if isinstance(k, str) and k}
@@ -91,11 +97,19 @@ def validate_gateway_config(value: dict[str, Any], existing_profiles: dict[str, 
     else:
         resolved_key = profiles.get(gw_type, {}).get("api_key", "")
 
+    if value.get("clear_management_key") is True:
+        resolved_management_key = ""
+    elif "management_key" in value:
+        resolved_management_key = str(value.get("management_key") or "").strip()
+    else:
+        resolved_management_key = str(profiles.get(gw_type, {}).get("management_key") or "")
+
     validated = {
         "gateway_type": gw_type,
         "management_url": _url(value.get("management_url"), "管理地址"),
         "inference_url": _url(value.get("inference_url"), "推理 Base URL"),
         "api_key": resolved_key,
+        "management_key": resolved_management_key,
         "target_overrides": {key: _url(url, "目标推理地址") for key, url in overrides.items()},
     }
     profiles[gw_type] = dict(validated)
@@ -155,10 +169,12 @@ def public_gateway_config(config: dict[str, Any]) -> dict[str, Any]:
             "inference_url": prof.get("inference_url", ""),
             "target_overrides": prof.get("target_overrides", {}),
             "masked_key": _mask(k),
+            "masked_management_key": _mask(str(prof.get("management_key") or "")),
         }
 
     return {
         **{name: config[name] for name in ("gateway_type", "management_url", "inference_url", "target_overrides")},
         "masked_key": _mask(key),
+        "masked_management_key": _mask(str(config.get("management_key") or "")),
         "gateway_profiles": profiles_public,
     }

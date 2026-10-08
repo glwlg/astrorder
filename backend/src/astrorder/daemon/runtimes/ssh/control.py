@@ -11,6 +11,7 @@ from typing import Any
 
 from astrorder.connections import ConnectionError
 from astrorder.daemon.bridge import DaemonBridge, DaemonBridgeError
+from astrorder.daemon.runtimes.hermes.control import native_ownership_rejection
 
 
 def ssh_runtime_control_id(connection_id: str) -> str:
@@ -84,15 +85,30 @@ class DaemonSshController:
         with self._lock:
             if self._alive and self._agent_id:
                 return self.snapshot()
-        response = self._control(
-            "session.spawn",
-            {
-                "session_id": self._control_session_id,
-                "agent_type": "ssh",
-                "params": self._connection_params(runtime_control=True),
-            },
-            "守护进程未确认 SSH Hermes bridge 启动。",
-        )
+        fields = {
+            "session_id": self._control_session_id,
+            "agent_type": "ssh",
+            "params": self._connection_params(runtime_control=True),
+        }
+        try:
+            response = self._control(
+                "session.spawn", fields, "守护进程未确认 SSH Hermes bridge 启动。"
+            )
+        except ConnectionError as exc:
+            if not isinstance(exc.__cause__, DaemonBridgeError) or str(exc.__cause__) != "hermes adapter is closed":
+                raise
+            # The daemon checks every session in this connection before releasing
+            # the stale transport. Never bypass its active/uncertain-state guard.
+            released = self._control(
+                "runtime.disconnect",
+                {"agent_type": "ssh", "connection_id": self.connection_id},
+                "守护进程未确认 SSH Hermes 连接可安全重建。",
+            ).get("result")
+            if not isinstance(released, Mapping) or released.get("disconnected") is not True:
+                raise ConnectionError("守护进程未确认 SSH Hermes 连接已释放。", 503)
+            response = self._control(
+                "session.spawn", fields, "守护进程未确认 SSH Hermes bridge 重新启动。"
+            )
         self._apply_identity(response.get("result"))
         with self._lock:
             self._alive = True
@@ -280,7 +296,15 @@ class DaemonSshController:
         return dict(result)
 
     def models(self, session_id: str) -> list[dict[str, str]]:
-        result = self._native_control(session_id, "session.models")
+        # The catalog belongs to the connection, including for unsaved drafts.
+        self.start()
+        result = self._control(
+            "session.models",
+            {"session_id": self._control_session_id},
+            "守护进程未确认 SSH Hermes 模型目录。",
+        ).get("result")
+        if not isinstance(result, Mapping):
+            raise ConnectionError("守护进程返回了无效的 SSH Hermes 模型目录。", 502)
         items = result.get("items")
         if not isinstance(items, list):
             raise ConnectionError("守护进程返回了无效的 SSH Hermes 模型目录。", 502)
@@ -375,7 +399,9 @@ class DaemonSshController:
             )
             self._apply_identity(spawned.get("result"))
             response = await self._bridge.request_control(daemon_action, fields)
-        except DaemonBridgeError:
+        except DaemonBridgeError as exc:
+            if rejection := native_ownership_rejection(exc, remote=True):
+                return "failed", rejection
             return "unknown", "daemon SSH delivery was not confirmed; command will not retry."
         result = response.get("result")
         if isinstance(result, Mapping) and result.get("completed") is True:

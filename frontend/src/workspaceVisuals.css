@@ -348,7 +348,7 @@
   padding-bottom: 8px;
 }
 
-.session-running-arc {
+.session-state-border {
   pointer-events: none;
   position: absolute;
   inset: 0;
@@ -363,7 +363,7 @@
   opacity: 1 !important;
   padding: 0 !important;
 }
-.session-running-arc::before {
+.session-state-border::before {
   display: none !important;
 }
 
@@ -372,7 +372,7 @@
   position: relative;
 }
 
-/* Subtle tint on the running row so state reads even before the arc paints. */
+/* Subtle running-row tint complements the shared star border. */
 .session-row.is-running,
 .m-session-row.is-running {
   background: color-mix(in srgb, var(--session-running-color, var(--astr-indigo, #5b6cff)) 7%, transparent);

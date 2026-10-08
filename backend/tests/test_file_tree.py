@@ -78,3 +78,25 @@ def test_file_exists_checks_exact_relative_paths_with_spaces(tmp_path):
 
     assert response.status_code == 200
     assert response.json() == {'existing': ['output/季度 周报.html']}
+
+
+def test_create_directory_local(tmp_path):
+    root = tmp_path / 'workspace'
+    root.mkdir(parents=True)
+    app = create_app(Settings(
+        database_url=f'sqlite:///{tmp_path / "mkdir.sqlite3"}',
+        browser_secret='test-secret',
+        attachments_dir=tmp_path / 'attachments',
+        static_dir=tmp_path / 'static',
+    ))
+
+    with TestClient(app) as client:
+        response = client.post('/api/v1/files/mkdir?token=test-secret', json={
+            'parent_path': str(root),
+            'name': 'xiuxian',
+            'connection_id': 'local',
+        })
+
+    assert response.status_code == 200
+    assert response.json()['ok'] is True
+    assert (root / 'xiuxian').is_dir()

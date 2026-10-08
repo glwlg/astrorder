@@ -15,6 +15,8 @@ interface GatewayFormState {
   inferenceUrl: string
   apiKey: string
   maskedKey: string
+  managementKey: string
+  maskedManagementKey: string
   overrides: Record<string, string>
 }
 
@@ -24,13 +26,17 @@ const DEFAULT_PROFILES: Record<'opencodex' | 'magpie', GatewayFormState> = {
     inferenceUrl: 'https://llm.651971564.xyz/v1',
     apiKey: '',
     maskedKey: '',
+    managementKey: '',
+    maskedManagementKey: '',
     overrides: {},
   },
   magpie: {
-    managementUrl: 'http://192.168.1.11:3425/v1',
+    managementUrl: 'http://192.168.1.11:3430',
     inferenceUrl: 'http://192.168.1.11:3425/v1',
     apiKey: '',
     maskedKey: '',
+    managementKey: '',
+    maskedManagementKey: '',
     overrides: {},
   },
 }
@@ -42,6 +48,8 @@ export function UsageGatewaySettingsCard() {
   const [inferenceUrl, setInferenceUrl] = useState(DEFAULT_PROFILES.opencodex.inferenceUrl)
   const [apiKey, setApiKey] = useState('')
   const [maskedKey, setMaskedKey] = useState('')
+  const [managementKey, setManagementKey] = useState('')
+  const [maskedManagementKey, setMaskedManagementKey] = useState('')
   const [overrides, setOverrides] = useState<Record<string, string>>({})
   const [targets, setTargets] = useState<Target[]>([])
   const [selection, setSelection] = useState<Selection>({})
@@ -73,7 +81,9 @@ export function UsageGatewaySettingsCard() {
           inferenceUrl: p.inference_url || DEFAULT_PROFILES.opencodex.inferenceUrl,
           overrides: p.target_overrides || {},
           maskedKey: p.masked_key || '',
+          maskedManagementKey: p.masked_management_key || '',
           apiKey: '',
+          managementKey: '',
         }
       }
       if (config.gateway_profiles?.magpie) {
@@ -83,7 +93,9 @@ export function UsageGatewaySettingsCard() {
           inferenceUrl: p.inference_url || DEFAULT_PROFILES.magpie.inferenceUrl,
           overrides: p.target_overrides || {},
           maskedKey: p.masked_key || '',
+          maskedManagementKey: p.masked_management_key || '',
           apiKey: '',
+          managementKey: '',
         }
       }
 
@@ -92,7 +104,9 @@ export function UsageGatewaySettingsCard() {
         inferenceUrl: config.inference_url || nextProfiles[currentType].inferenceUrl,
         overrides: config.target_overrides || {},
         maskedKey: config.masked_key || '',
+        maskedManagementKey: config.masked_management_key || '',
         apiKey: '',
+        managementKey: '',
       }
 
       setProfiles(nextProfiles)
@@ -101,7 +115,9 @@ export function UsageGatewaySettingsCard() {
       setInferenceUrl(nextProfiles[currentType].inferenceUrl)
       setOverrides(nextProfiles[currentType].overrides)
       setMaskedKey(nextProfiles[currentType].maskedKey)
+      setMaskedManagementKey(nextProfiles[currentType].maskedManagementKey)
       setApiKey('')
+      setManagementKey('')
       setTargets(targetResult.items)
       setJobs(jobResult.items)
       setSelection({})
@@ -122,6 +138,8 @@ export function UsageGatewaySettingsCard() {
           inferenceUrl,
           apiKey,
           maskedKey,
+          managementKey,
+          maskedManagementKey,
           overrides,
         },
       }
@@ -131,6 +149,8 @@ export function UsageGatewaySettingsCard() {
       setInferenceUrl(targetState.inferenceUrl)
       setApiKey(targetState.apiKey)
       setMaskedKey(targetState.maskedKey)
+      setManagementKey(targetState.managementKey)
+      setMaskedManagementKey(targetState.maskedManagementKey)
       setOverrides(targetState.overrides)
       return updated
     })
@@ -145,6 +165,7 @@ export function UsageGatewaySettingsCard() {
         inference_url: inferenceUrl.trim(),
         target_overrides: Object.fromEntries(Object.entries(overrides).filter(([, value]) => value.trim()).map(([key, value]) => [key, value.trim()])),
         ...(clearKey ? { clear_key: true, api_key: '' } : apiKey.trim() ? { api_key: apiKey.trim() } : {}),
+        ...(gatewayType === 'magpie' && managementKey.trim() ? { management_key: managementKey.trim() } : {}),
       }
 
       const allProfilesPayload: Record<string, any> = {}
@@ -158,6 +179,7 @@ export function UsageGatewaySettingsCard() {
             inference_url: p.inferenceUrl.trim(),
             target_overrides: p.overrides,
             ...(p.apiKey.trim() ? { api_key: p.apiKey.trim() } : {}),
+            ...(t === 'magpie' && p.managementKey.trim() ? { management_key: p.managementKey.trim() } : {}),
           }
         }
       }
@@ -167,7 +189,9 @@ export function UsageGatewaySettingsCard() {
         gateway_profiles: allProfilesPayload,
       })
       setMaskedKey(result.masked_key)
+      setMaskedManagementKey(result.masked_management_key || '')
       setApiKey('')
+      setManagementKey('')
       if (result.gateway_profiles) {
         setProfiles((prev) => {
           const next = { ...prev }
@@ -178,6 +202,8 @@ export function UsageGatewaySettingsCard() {
                 managementUrl: p.management_url,
                 inferenceUrl: p.inference_url,
                 maskedKey: p.masked_key,
+                maskedManagementKey: p.masked_management_key || '',
+                managementKey: '',
                 overrides: p.target_overrides || {},
               }
             }
@@ -270,9 +296,10 @@ export function UsageGatewaySettingsCard() {
       </Group>
       <div className="gateway-settings-layout"><Stack gap="sm" className="gateway-settings-fields">
         <Select label="网关类型" value={gatewayType} onChange={(v) => handleGatewayTypeChange((v as any) || 'opencodex')} data={[{ value: 'opencodex', label: 'OpenCodeX' }, { value: 'magpie', label: 'Magpie' }]} allowDeselect={false} />
-        <TextInput label="管理地址" placeholder={gatewayType === 'magpie' ? 'http://192.168.1.11:3425/v1' : 'https://ocx.example.com'} value={managementUrl} onChange={(event) => setManagementUrl(event.currentTarget.value)} disabled={busy === 'load'} />
+        <TextInput label="管理地址" placeholder={gatewayType === 'magpie' ? 'https://magpie.example.com' : 'https://ocx.example.com'} value={managementUrl} onChange={(event) => setManagementUrl(event.currentTarget.value)} disabled={busy === 'load'} />
         <TextInput label="推理 Base URL" placeholder={gatewayType === 'magpie' ? 'http://192.168.1.11:3425/v1' : 'https://llm.example.com/v1'} value={inferenceUrl} onChange={(event) => setInferenceUrl(event.currentTarget.value)} disabled={busy === 'load'} />
         <PasswordInput label="API Key" placeholder={maskedKey ? '留空则保留当前 Key' : '可选'} value={apiKey} onChange={(event) => setApiKey(event.currentTarget.value)} />
+        {gatewayType === 'magpie' && <PasswordInput label="管理端访问参数" placeholder={maskedManagementKey ? '留空则保留当前参数' : '管理页链接中的 k'} value={managementKey} onChange={(event) => setManagementKey(event.currentTarget.value)} />}
       </Stack><Stack gap="sm" className="gateway-settings-targets"><Accordion variant="contained" defaultValue="targets">
           <Accordion.Item value="targets">
             <Accordion.Control>
@@ -287,7 +314,7 @@ export function UsageGatewaySettingsCard() {
             <Accordion.Panel>
             <Stack gap="md">{targets.map((target) => <Stack key={target.id} gap={6}>
               <Group justify="space-between"><Text size="sm" fw={600}>{target.name}</Text><Badge size="xs" variant="light">{target.kind.toUpperCase()}</Badge></Group>
-              <Group gap="md">{['codex', 'grok', 'hermes'].map((agent) => <Checkbox key={agent} size="xs" label={agent === 'codex' ? 'Codex' : agent === 'grok' ? 'Grok' : 'Hermes（动态）'} checked={selection[target.id]?.includes(agent) || false} onChange={() => toggleAgent(target.id, agent)} />)}</Group>
+              <Group gap="md">{['codex', 'grok', 'hermes'].map((agent) => <Checkbox key={agent} size="xs" label={agent === 'codex' ? 'Codex' : agent === 'grok' ? 'Grok' : 'Hermes'} checked={selection[target.id]?.includes(agent) || false} onChange={() => toggleAgent(target.id, agent)} />)}</Group>
               <TextInput size="xs" label="推理地址覆盖" placeholder={inferenceUrl || '使用默认推理地址'} value={overrides[target.id] || ''} onChange={(event) => setOverrides((current) => ({ ...current, [target.id]: event.currentTarget.value }))} />
             </Stack>)}</Stack>
           </Accordion.Panel></Accordion.Item>

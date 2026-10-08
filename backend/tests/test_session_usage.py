@@ -15,6 +15,18 @@ from astrorder.core.session_usage import (
 )
 
 
+@pytest.fixture(autouse=True)
+def isolated_model_metadata(monkeypatch):
+    # These values belong to this fixture, not the user's changing native config.
+    module = "astrorder.core.session_usage"
+    for reader in ("_read_hermes_context_window", "_read_codex_context_window", "_read_grok_context_window"):
+        monkeypatch.setattr(f"{module}.{reader}", lambda *args, **kwargs: None)
+    monkeypatch.setattr(f"{module}._get_gateway_models_context_windows", lambda *args: {
+        "google-antigravity/gemini-3.8-flash": 350_000,
+        "kimi-code/k3": 262_144,
+    })
+
+
 def test_resolve_model_context_window():
     assert resolve_model_context_window("google-antigravity/gemini-3.8-flash") == 350_000
     assert resolve_model_context_window("gemini-3.8-flash") == 350_000

@@ -468,7 +468,7 @@ body:has(.mobile-workspace) .background-tasks,
   border-radius: 8px !important;
   transition: background 0.15s ease !important;
 }
-.m-session-row > svg.session-running-arc {
+.m-session-row > svg.session-state-border {
   display: block !important;
   position: absolute !important;
   inset: 0 !important;
@@ -484,7 +484,7 @@ body:has(.mobile-workspace) .background-tasks,
   padding: 0 !important;
   opacity: 1 !important;
 }
-.m-session-row > svg.session-running-arc::before {
+.m-session-row > svg.session-state-border::before {
   display: none !important;
 }
 .m-session-row.selected {

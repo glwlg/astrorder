@@ -1,7 +1,8 @@
 import { IconChevronDown, IconChevronUp, IconListCheck, IconPlayerPlay, IconUsersGroup } from '@tabler/icons-react'
 import { Badge, Button, Group, Paper, SimpleGrid, Stack, Text } from '@mantine/core'
 import { useState } from 'react'
-import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
+import { useReducedMotion } from '@mantine/hooks'
+import { AnimatePresence, motion } from 'motion/react'
 import type { Command, Task } from '../../domain/types'
 
 const taskStatusLabels: Record<Task['status'], string> = {
@@ -21,7 +22,7 @@ function SummaryItem({ icon, label, value, onClick }: { icon: React.ReactNode; l
 }
 
 export function SessionRuntimeBar({ commands, tasks = [], onTaskOpen }: { commands: Command[]; tasks?: Task[]; onTaskOpen?: (task: Task) => void }) {
-  const reducedMotion = useReducedMotion()
+  const reducedMotion = useReducedMotion(undefined, { getInitialValueInEffect: false })
   const backgroundTasks = tasks.filter((task) => task.kind === 'background' && task.status === 'running')
   const todos = tasks.filter((task) => task.kind === 'todo' && task.status !== 'cancelled')
   const subagents = tasks.filter((task) => task.kind === 'subagent')

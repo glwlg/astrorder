@@ -16,7 +16,7 @@ def codex_turn_policy(mode: str) -> dict[str, Any]:
             "approvalsReviewer": "auto_review",
         }
     if mode == "manual":
-        return {"approvalPolicy": "untrusted"}
+        return {"approvalPolicy": "untrusted", "approvalsReviewer": "user"}
     if mode == "full_access":
         return {
             "approvalPolicy": "never",

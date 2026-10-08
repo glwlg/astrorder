@@ -137,6 +137,32 @@ def status_payload(
     return payload
 
 
+def daemon_launch(*, port: int, runtime_args: Sequence[str]) -> tuple[list[str], dict[str, str]]:
+    environment = os.environ.copy()
+    executable = environment.get("ASTRORDER_SESSION_DAEMON_EXECUTABLE")
+    if executable:
+        if not environment.get("ASTRORDER_SESSION_DAEMON_SECRET"):
+            raise RuntimeError("ASTRORDER_SESSION_DAEMON_SECRET is required")
+        binary = Path(executable)
+        if not binary.is_absolute() or not binary.is_file():
+            raise RuntimeError("Go daemon executable must be an existing absolute path")
+        config = environment.get("ASTRORDER_SESSION_DAEMON_CONFIG", "")
+        database = environment.get("ASTRORDER_SESSION_DAEMON_DB", "")
+        if not config or not Path(config).is_file() or not Path(config).is_absolute():
+            raise RuntimeError("Go daemon configuration is missing")
+        if not database or not Path(database).is_absolute():
+            raise RuntimeError("Go daemon database must be an absolute path")
+        if not 1 <= port <= 65535:
+            raise ValueError("invalid daemon port")
+        environment["ASTRORDER_SESSION_DAEMON_PORT"] = str(port)
+        environment["ASTRORDER_SESSION_DAEMON_CONNECTOR_SECRET"] = environment.get("ASTRORDER_CONNECTOR_SECRET", "")
+        return [str(binary)], environment
+    return daemon_argv(
+        python_executable=str(ROOT / "backend/.venv/Scripts/pythonw.exe"),
+        port=port, runtime_args=runtime_args,
+    ), environment
+
+
 def start_daemon(
     *,
     port: int = DEFAULT_PORT,
@@ -148,18 +174,14 @@ def start_daemon(
         if existing is not None:
             cleanup_stale_daemons(port, existing)
             return existing
-        python_executable = str(ROOT / "backend/.venv/Scripts/pythonw.exe")
-        argv = daemon_argv(
-            python_executable=python_executable,
-            port=port,
-            runtime_args=runtime_args,
-        )
+        argv, environment = daemon_launch(port=port, runtime_args=runtime_args)
         runtime = ROOT / ".runtime"
         runtime.mkdir(parents=True, exist_ok=True)
         log = (runtime / "session-daemon.log").open("ab", buffering=0)
         proc = subprocess.Popen(
             argv,
             cwd=str(ROOT / "backend"),
+            env=environment,
             stdout=log,
             stderr=log,
             creationflags=INDEPENDENT_PROCESS_FLAGS,

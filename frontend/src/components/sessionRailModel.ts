@@ -1,10 +1,10 @@
 import type { Agent, Command, Project, Session, SessionStatus, Task } from '../domain/types'
 import { isEphemeralSession, scopeKey } from '../domain/semantics'
-import { useAstrorderStore } from '../state/store'
+import { LIVE_ACTIVITY_MS, useAstrorderStore } from '../state/store'
 
 export type RailFilter = 'all' | 'running' | 'unread' | 'pinned' | 'recent'
 
-export const LIVE_ACTIVITY_MS = 15_000
+export { LIVE_ACTIVITY_MS }
 
 export function sessionActivityStatus(
   session: Partial<Pick<Session, 'id' | 'agent_id' | 'status' | 'live'>>,

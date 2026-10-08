@@ -67,6 +67,30 @@ markOutboxError: (
 const emptyDraft = (): DraftState => ({ text: '', attachments: [], sessionRefs: [] })
 const MAX_SEEN_EVENT_IDS = 1024
 const LIVE_ACTIVITY_REFRESH_MS = 5000
+export const LIVE_ACTIVITY_MS = 15_000
+let activityExpiryTimer: ReturnType<typeof setTimeout> | undefined
+
+function scheduleActivityExpiry(activity: Record<string, number>): void {
+  clearTimeout(activityExpiryTimer)
+  activityExpiryTimer = undefined
+  const timestamps = Object.values(activity)
+  if (!timestamps.length) return
+  const delay = Math.max(0, Math.min(...timestamps) + LIVE_ACTIVITY_MS - Date.now())
+  activityExpiryTimer = setTimeout(() => {
+    const current = useAstrorderStore.getState().liveActivityAt
+    const remaining = Object.fromEntries(Object.entries(current).filter(([, at]) => Date.now() - at < LIVE_ACTIVITY_MS))
+    useAstrorderStore.setState({ liveActivityAt: remaining })
+    scheduleActivityExpiry(remaining)
+  }, delay)
+}
+
+function clearLiveActivity(current: Record<string, number>, key: string): Record<string, number> {
+  if (!(key in current)) return current
+  const next = { ...current }
+  delete next[key]
+  scheduleActivityExpiry(next)
+  return next
+}
 
 function rememberEvent(seen: Record<string, true>, key: string): Record<string, true> {
   const keys = Object.keys(seen)
@@ -76,7 +100,10 @@ function rememberEvent(seen: Record<string, true>, key: string): Record<string, 
 
 function touchLiveActivity(current: Record<string, number>, key: string): Record<string, number> {
   const now = Date.now()
-  return now - (current[key] || 0) < LIVE_ACTIVITY_REFRESH_MS ? current : { ...current, [key]: now }
+  if (key in current && now - current[key] < LIVE_ACTIVITY_REFRESH_MS) return current
+  const next = { ...current, [key]: now }
+  scheduleActivityExpiry(next)
+  return next
 }
 
 function commandKey(command: Command): string {
@@ -357,7 +384,12 @@ export const useAstrorderStore = create<AstrorderStore>((set) => ({
         const session = event.data as unknown as Session
         if (!session.id || !session.agent_id) return base
         const key = scopeKey(session.agent_id, session.id)
-        return { ...base, sessions: { ...state.sessions, [key]: session } }
+        return {
+          ...base,
+          sessions: { ...state.sessions, [key]: session },
+          liveActivityAt: session.status === 'idle' || session.status === 'error'
+            ? clearLiveActivity(state.liveActivityAt, key) : state.liveActivityAt,
+        }
       }
 
       if (event.type === 'session.delete') {
@@ -399,7 +431,8 @@ export const useAstrorderStore = create<AstrorderStore>((set) => ({
         return {
           ...base,
           tasks: { ...state.tasks, [key]: { ...state.tasks[key], ...task } },
-          liveActivityAt: task.progress?.blocking === false ? state.liveActivityAt : touchLiveActivity(state.liveActivityAt, sessionKey),
+          liveActivityAt: task.progress?.blocking === false || !['running', 'waiting_approval'].includes(task.status)
+            ? state.liveActivityAt : touchLiveActivity(state.liveActivityAt, sessionKey),
         }
       }
 
@@ -429,7 +462,8 @@ export const useAstrorderStore = create<AstrorderStore>((set) => ({
       return { sessions: { ...state.sessions, [key]: { ...current, ...patch } } }
     }),
 
-  resetRuntime: () =>
+  resetRuntime: () => {
+    scheduleActivityExpiry({})
     set({
       agents: {},
       projects: {},
@@ -446,7 +480,8 @@ export const useAstrorderStore = create<AstrorderStore>((set) => ({
       seenEventIds: {},
       connection: 'disconnected',
       resyncRequired: false,
-    }),
+    })
+  },
 }))
 
 export function selectSessions(state: AstrorderStore): Session[] {

@@ -17,6 +17,7 @@ class CodexNativeFrameRouter:
         self._handlers: dict[str, CodexNotificationHandler] = {}
         self._lock = threading.RLock()
         self._closed = False
+        self._bridge = bridge
         self._unregister = bridge.register_native_frame_handler(
             "codex.notification", self._handle_frame
         )
@@ -64,4 +65,8 @@ class CodexNativeFrameRouter:
             handler = self._handlers.get(agent_id)
         if handler is None:
             raise DaemonBridgeError("Codex native frame agent is not registered")
-        handler(dict(frame))
+        projected = dict(frame)
+        command_id = payload.get("command_id")
+        if isinstance(command_id, str) and command_id:
+            projected["astrorder_command_id"] = command_id
+        handler(projected)

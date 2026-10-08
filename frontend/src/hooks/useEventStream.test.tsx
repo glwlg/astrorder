@@ -68,6 +68,19 @@ describe('event stream notifications', () => {
     view.unmount()
   })
 
+  it('reconciles history, receipts and tasks on connection resume', () => {
+    let options: { onResume: () => void } | undefined
+    mocks.connectEventStream.mockImplementation(next => { options = next; return vi.fn() })
+    const client = new QueryClient()
+    const invalidate = vi.spyOn(client, 'invalidateQueries').mockResolvedValue()
+    const view = render(<StreamHarness client={client} />)
+    act(() => options?.onResume())
+    for (const resource of ['bootstrap', 'messages', 'commands', 'tasks']) {
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ['astrorder', resource] })
+    }
+    view.unmount()
+  })
+
   it('refreshes the transcript when a command completes', () => {
     let options: { onEvent: (event: EventEnvelope) => void } | undefined
     mocks.connectEventStream.mockImplementation((next) => { options = next; return vi.fn() })

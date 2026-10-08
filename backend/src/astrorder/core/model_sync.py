@@ -7,6 +7,15 @@ from typing import Any
 
 NATIVE_GROK_MODELS = {"grok-4.5", "grok-build", "grok-4.20", "grok-code"}
 GROK_EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
+GATEWAY_ENV_KEYS = {
+    "opencodex": "OPENCODEX_API_AUTH_TOKEN",
+    "magpie": "MAGPIE_API_KEY",
+}
+HERMES_PROVIDER_ALIASES = {
+    "magpie": ("magpie",),
+    "opencodex": ("ocx", "opencodex"),
+}
+_YAML_KEY = re.compile(r"^(\s*)([A-Za-z0-9_-]+):(.*)$")
 
 DEFAULT_CODEX_MODEL_PROTOTYPE = {
     "visibility": "list",
@@ -247,6 +256,197 @@ def render_codex_config(
         sections.append(sec)
 
     return text.rstrip() + "\n\n" + "\n\n".join(sections) + "\n"
+
+
+def gateway_env_values(config: dict[str, Any]) -> dict[str, str]:
+    profiles = config.get("gateway_profiles") or {}
+    active = str(config.get("gateway_type") or "opencodex")
+    values: dict[str, str] = {}
+    for gateway, env_name in GATEWAY_ENV_KEYS.items():
+        profile = profiles.get(gateway) if isinstance(profiles.get(gateway), dict) else {}
+        key = str(profile.get("api_key") or "")
+        if not key and gateway == active:
+            key = str(config.get("api_key") or "")
+        if key:
+            values[env_name] = key
+    return values
+
+
+def hermes_bindings(config: dict[str, Any], target_id: str, existing: str) -> dict[str, dict[str, str]]:
+    profiles = config.get("gateway_profiles") or {}
+    active = str(config.get("gateway_type") or "opencodex")
+    bindings: dict[str, dict[str, str]] = {}
+    for gateway, aliases in HERMES_PROVIDER_ALIASES.items():
+        profile = profiles.get(gateway) if isinstance(profiles.get(gateway), dict) else {}
+        if gateway == active:
+            overrides = config.get("target_overrides") or {}
+            url = overrides.get(target_id) or config.get("inference_url") or ""
+            key = str(config.get("api_key") or profile.get("api_key") or "")
+        else:
+            overrides = profile.get("target_overrides") or {}
+            url = overrides.get(target_id) or profile.get("inference_url") or ""
+            key = str(profile.get("api_key") or "")
+        url = str(url or "").strip().rstrip("/")
+        if not url:
+            continue
+        item = {"base_url": url}
+        if key:
+            item["api_key"] = key
+        bindings[_matching_provider(existing, aliases)] = item
+    return bindings
+
+
+def render_hermes_config(existing: str, bindings: dict[str, dict[str, str]]) -> str:
+    existing = existing.lstrip("\ufeff")
+    if not existing.strip() or not bindings:
+        return ""
+    lines = existing.splitlines()
+    provider = _model_provider(lines)
+    for name, fields in bindings.items():
+        _ensure_provider(lines, name, fields)
+    if provider in bindings and bindings[provider].get("base_url"):
+        _set_mapping_value(lines, ("model",), "base_url", bindings[provider]["base_url"])
+    return "\n".join(lines).rstrip("\n") + "\n"
+
+
+def _yaml_entries(lines: list[str]) -> list[tuple[int, int, str, str]]:
+    entries = []
+    for index, line in enumerate(lines):
+        stripped = line.lstrip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        match = _YAML_KEY.match(line)
+        if match:
+            entries.append((index, len(match.group(1)), match.group(2), match.group(3)))
+    return entries
+
+
+def _block_end(entries: list[tuple[int, int, str, str]], entry_index: int, line_count: int) -> int:
+    indent = entries[entry_index][1]
+    for line_index, later_indent, _key, _rest in entries[entry_index + 1:]:
+        if later_indent <= indent:
+            return line_index
+    return line_count
+
+
+def _find_block(lines: list[str], path: tuple[str, ...]) -> tuple[int, int] | None:
+    entries = _yaml_entries(lines)
+    parent_end = len(lines)
+    parent_indent = -1
+    start = 0
+    header = None
+    for name in path:
+        found = None
+        for index in range(start, len(entries)):
+            line_index, indent, key, _rest = entries[index]
+            if line_index >= parent_end or (parent_indent >= 0 and indent <= parent_indent):
+                break
+            if key != name:
+                continue
+            if parent_indent < 0 and indent == 0 or parent_indent >= 0 and indent > parent_indent:
+                found = index
+                break
+        if found is None:
+            return None
+        header = entries[found][0]
+        parent_end = _block_end(entries, found, len(lines))
+        parent_indent = entries[found][1]
+        start = found + 1
+    return None if header is None else (header, parent_end)
+
+
+def _scalar(raw: str) -> str:
+    text = raw.split("#", 1)[0].strip()
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in {'"', "'"}:
+        return text[1:-1]
+    return text
+
+
+def _model_provider(lines: list[str]) -> str:
+    block = _find_block(lines, ("model",))
+    if block is None:
+        return ""
+    header, end = block
+    parent_indent = len(lines[header]) - len(lines[header].lstrip(" "))
+    child_indent = _direct_indent(lines, header, end, parent_indent)
+    if child_indent is None:
+        return ""
+    for line_index, indent, key, rest in _yaml_entries(lines):
+        if header < line_index < end and key == "provider" and indent == child_indent:
+            return _scalar(rest)
+    return ""
+
+
+def _matching_provider(existing: str, aliases: tuple[str, ...]) -> str:
+    lines = existing.splitlines()
+    providers = _find_block(lines, ("providers",))
+    if providers is None:
+        return aliases[-1]
+    header, end = providers
+    parent_indent = len(lines[header]) - len(lines[header].lstrip(" "))
+    child_indent = _direct_indent(lines, header, end, parent_indent)
+    present = set()
+    if child_indent is not None:
+        present = {
+            key for line_index, indent, key, _rest in _yaml_entries(lines)
+            if header < line_index < end and indent == child_indent and key in aliases
+        }
+    return next((alias for alias in aliases if alias in present), aliases[-1])
+
+
+def _direct_indent(lines: list[str], header: int, end: int, parent_indent: int) -> int | None:
+    child_indent = None
+    for line_index, indent, _key, _rest in _yaml_entries(lines):
+        if header < line_index < end and indent > parent_indent and (child_indent is None or indent < child_indent):
+            child_indent = indent
+    return child_indent
+
+
+def _set_mapping_value(lines: list[str], path: tuple[str, ...], key: str, value: str) -> None:
+    block = _find_block(lines, path)
+    if block is None:
+        return
+    header, end = block
+    parent_indent = len(lines[header]) - len(lines[header].lstrip(" "))
+    quoted = json.dumps(value, ensure_ascii=False)
+    child_indent = _direct_indent(lines, header, end, parent_indent)
+    if child_indent is not None:
+        for line_index, indent, child, _rest in _yaml_entries(lines):
+            if header < line_index < end and child == key and indent == child_indent:
+                lines[line_index] = f"{' ' * indent}{key}: {quoted}"
+                return
+        insert_indent = child_indent
+    else:
+        insert_indent = parent_indent + 2
+    lines.insert(end, f"{' ' * insert_indent}{key}: {quoted}")
+
+
+def _ensure_provider(lines: list[str], name: str, fields: dict[str, str]) -> None:
+    if _find_block(lines, ("providers", name)) is None:
+        providers = _find_block(lines, ("providers",))
+        if providers is None:
+            child_indent = 2
+            insert_at = None
+        else:
+            parent_indent = len(lines[providers[0]]) - len(lines[providers[0]].lstrip(" "))
+            child_indent = _direct_indent(lines, providers[0], providers[1], parent_indent) or parent_indent + 2
+            insert_at = providers[1]
+        chunk = [f"{' ' * child_indent}{name}:", f"{' ' * (child_indent + 2)}name: {json.dumps(name, ensure_ascii=False)}"]
+        for field in ("base_url", "api_key"):
+            if fields.get(field):
+                chunk.append(f"{' ' * (child_indent + 2)}{field}: {json.dumps(fields[field], ensure_ascii=False)}")
+        if insert_at is None:
+            if lines and lines[-1].strip():
+                chunk = ["", "providers:", *chunk]
+            else:
+                chunk = ["providers:", *chunk]
+            lines.extend(chunk)
+        else:
+            lines[insert_at:insert_at] = chunk
+    for field in ("base_url", "api_key"):
+        if fields.get(field):
+            _set_mapping_value(lines, ("providers", name), field, fields[field])
+
 
 def render_grok_config(existing: str, catalog: dict[str, Any], inference_url: str, api_key: str) -> str:
     existing = existing.lstrip("\ufeff")

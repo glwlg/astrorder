@@ -8,6 +8,7 @@ import { api, type OcxUsageResponse } from '../api/client'
 import type { Agent, Project, Session } from '../domain/types'
 import { RtkSettingsPage } from '../features/rtk/RtkSettingsPage'
 import './settings.css'
+import { SettingsDrawerScope } from './SettingsDrawer'
 import { AgentsPage } from '../features/agents/AgentsPage'
 import { formatTokens, getModelColor } from '../features/analytics/AnalyticsPage'
 import { PluginsPage } from '../features/plugins/PluginsPage'
@@ -226,9 +227,10 @@ export function Sidebar({
           </>
         )}
       </Stack>
-      <Modal
+      <SettingsDrawerScope>{hasOpenDrawer => <Modal
         className="settings-modal"
         opened={settingsOpened}
+        closeOnEscape={!hasOpenDrawer}
         onClose={() => setSettingsOpened(false)}
         title="设置"
         centered
@@ -258,7 +260,7 @@ export function Sidebar({
           <Tabs.Panel value="desktop" className="settings-tab-panel"><DesktopSettingsPage /></Tabs.Panel>
           <Tabs.Panel value="plugins" className="settings-tab-panel"><PluginsPage /></Tabs.Panel>
         </Tabs>
-      </Modal>
+      </Modal>}</SettingsDrawerScope>
     </>
   )
 }

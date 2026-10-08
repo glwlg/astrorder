@@ -21,3 +21,27 @@
 .astr-spotlight-card:focus-within::before {
   opacity: 1;
 }
+
+/* Opt-in surface for monitor cards. Existing empty-state cards stay unchanged.
+   React Bits Spotlight Card: MIT + Commons Clause; /react-bits-NOTICE.txt. */
+.astr-spotlight-enabled::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  z-index: 2;
+  pointer-events: none;
+  background: radial-gradient(280px circle at var(--spotlight-x, 50%) var(--spotlight-y, 50%), var(--spotlight-color, rgba(91, 108, 255, 0.12)), transparent 80%);
+  opacity: 0;
+  transition: opacity 180ms ease;
+}
+@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
+  .astr-spotlight-enabled:hover::before {
+    opacity: 1;
+  }
+}
+@media (hover: none), (pointer: coarse), (prefers-reduced-motion: reduce) {
+  .astr-spotlight-enabled::before {
+    display: none;
+  }
+}

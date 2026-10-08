@@ -530,3 +530,178 @@ async def test_daemon_bridge_handshakes_before_replaying_a_secret_protected_daem
         store.close()
         server.close()
         await server.wait_closed()
+
+
+def test_bridge_projects_lost_ownership_without_resending(tmp_path):
+    settings = Settings(
+        database_url=f"sqlite:///{tmp_path}/ownership.sqlite3",
+        auto_connect_local_hermes=False,
+    )
+    store = Store(settings)
+    store.upsert_agent(agent())
+    store.upsert_session(session_event()["data"])
+    store.create_command(
+        command={
+            "id": "command-1",
+            "agent_id": "daemon-codex",
+            "session_id": "session-1",
+            "action": "send",
+            "text": "继续",
+            "attachment_ids": [],
+            "target_id": None,
+        },
+        attachments=[],
+        initial_state="running",
+    )
+    bridge = DaemonBridge(store, ControlService(store, EventHub(), settings), "ws://127.0.0.1:1")
+    bridge._daemon_id = "daemon-test"
+    try:
+        bridge._project_frame(
+            "daemon-test",
+            "session-1",
+            1,
+            {
+                "session_id": "session-1",
+                "seq_id": 1,
+                "event": "runtime.ownership_lost",
+                "status": "error",
+                "payload": {
+                    "adopted": False,
+                    "previous_status": "waiting_approval",
+                    "reason": "native process handle does not survive daemon restart",
+                },
+            },
+        )
+        session = store.get_session("daemon-codex", "session-1")
+        command = store.get_command("daemon-codex", "session-1", "command-1")
+        assert session["status"] == "error"
+        assert command["state"] == "unknown"
+        assert "不会自动重发" in command["error"]
+        assert store.list_messages("daemon-codex", "session-1", None, 10)[0] == []
+        assert store.get_daemon_checkpoint("daemon-test", "session-1") == 1
+    finally:
+        store.close()
+
+
+def test_bridge_records_orphan_liveness_without_resending(tmp_path):
+    settings = Settings(
+        database_url=f"sqlite:///{tmp_path}/orphan.sqlite3",
+        auto_connect_local_hermes=False,
+    )
+    store = Store(settings)
+    store.upsert_agent(agent())
+    store.upsert_session(session_event()["data"])
+    store.create_command(
+        command={
+            "id": "command-1",
+            "agent_id": "daemon-codex",
+            "session_id": "session-1",
+            "action": "send",
+            "text": "继续",
+            "attachment_ids": [],
+            "target_id": None,
+        },
+        attachments=[],
+        initial_state="running",
+    )
+    bridge = DaemonBridge(store, ControlService(store, EventHub(), settings), "ws://127.0.0.1:1")
+    bridge._daemon_id = "daemon-test"
+    try:
+        bridge._project_frame(
+            "daemon-test",
+            "session-1",
+            1,
+            {
+                "session_id": "session-1",
+                "seq_id": 1,
+                "event": "runtime.ownership_lost",
+                "status": "error",
+                "payload": {
+                    "adopted": False,
+                    "previous_status": "running",
+                    "orphan_alive": True,
+                    "reason": "native process handle does not survive daemon restart",
+                },
+            },
+        )
+        session = store.get_session("daemon-codex", "session-1")
+        command = store.get_command("daemon-codex", "session-1", "command-1")
+        assert session["status"] == "error"
+        assert session["runtime_owner"] == {"orphan_alive": True, "adopted": False}
+        assert command["state"] == "unknown"
+        assert "不会自动重发" in command["error"]
+        assert store.list_messages("daemon-codex", "session-1", None, 10)[0] == []
+    finally:
+        store.close()
+
+
+def test_bridge_records_runtime_owner_without_changing_activity(tmp_path):
+    settings = Settings(
+        database_url=f"sqlite:///{tmp_path}/owner.sqlite3",
+        auto_connect_local_hermes=False,
+    )
+    store = Store(settings)
+    store.upsert_agent(agent())
+    store.upsert_session(session_event()["data"])
+    bridge = DaemonBridge(store, ControlService(store, EventHub(), settings), "ws://127.0.0.1:1")
+    bridge._daemon_id = "daemon-test"
+    try:
+        bridge._project_frame(
+            "daemon-test",
+            "session-1",
+            1,
+            {
+                "session_id": "session-1",
+                "seq_id": 1,
+                "event": "runtime.owner",
+                "status": "running",
+                "payload": {"owner_pid": 4242},
+            },
+        )
+        assert store.get_session("daemon-codex", "session-1")["status"] == "running"
+        assert store.list_messages("daemon-codex", "session-1", None, 10)[0] == []
+        assert store.get_daemon_checkpoint("daemon-test", "session-1") == 1
+    finally:
+        store.close()
+
+
+def test_bridge_replays_attachment_without_storing_a_copy(tmp_path):
+    settings = Settings(
+        database_url=f"sqlite:///{tmp_path}/attachment.sqlite3",
+        auto_connect_local_hermes=False,
+    )
+    store = Store(settings)
+    store.upsert_agent(agent())
+    store.upsert_session(session_event()["data"])
+    bridge = DaemonBridge(store, ControlService(store, EventHub(), settings), "ws://127.0.0.1:1")
+    bridge._daemon_id = "daemon-test"
+    delivered = []
+    bridge.register_native_frame_handler(
+        "attachment.accepted",
+        lambda session_id, payload: delivered.append((session_id, payload)),
+    )
+    try:
+        bridge._project_frame(
+            "daemon-test",
+            "session-1",
+            1,
+            {
+                "session_id": "session-1",
+                "seq_id": 1,
+                "event": "attachment.accepted",
+                "status": "idle",
+                "payload": {
+                    "name": "notes.txt",
+                    "media_type": "text/plain",
+                    "content_base64": "bm90ZXM=",
+                },
+            },
+        )
+        assert delivered == [
+            ("session-1", {"name": "notes.txt", "media_type": "text/plain", "content_base64": "bm90ZXM="})
+        ]
+        assert store.list_messages("daemon-codex", "session-1", None, 10)[0] == []
+        assert store.get_session("daemon-codex", "session-1")["status"] == "running"
+        assert store.get_daemon_checkpoint("daemon-test", "session-1") == 1
+    finally:
+        store.close()

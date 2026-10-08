@@ -1,5 +1,4 @@
 import asyncio
-from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
@@ -139,10 +138,8 @@ def test_local_codex_session_handoffs_to_hermes_through_temporary_summary_fork(t
             }
         )
         source = SourceCodex()
-        app.state.environments = SimpleNamespace(
-            for_agent=lambda agent_id: source if agent_id == "local-codex" else None,
-            shutdown=lambda: None,
-        )
+        app.state.environments.for_agent = lambda agent_id: source if agent_id == "local-codex" else None
+        app.state.environments.runtime_for_agent = app.state.environments.for_agent
         app.state.connections.get_runtime_by_agent_id = (
             lambda agent_id: TargetRuntime() if agent_id == "local-hermes" else None
         )
@@ -164,6 +161,7 @@ def test_local_codex_session_handoffs_to_hermes_through_temporary_summary_fork(t
             headers={"Authorization": "Bearer browser-test"},
         )
 
+        assert response.status_code == 200, response.text
         assert len(submitted) == 1
         user_response = client.post(
             "/api/v1/commands",
@@ -253,7 +251,7 @@ def test_failed_handoff_deletes_the_created_target_session(tmp_path, monkeypatch
                 "updated_at": "2026-09-15T00:00:00Z",
             }
         )
-        app.state.environments = SimpleNamespace(for_agent=lambda _agent_id: None, shutdown=lambda: None)
+        app.state.environments.for_agent = lambda _agent_id: None
         app.state.connections.mutate_session_for_agent = (
             lambda agent_id, session_id, updates: deleted.append((agent_id, session_id, updates))
         )

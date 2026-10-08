@@ -496,10 +496,13 @@ class EnvironmentConnections:
             return self.change(cid, kind, True)
 
     def restore(self):
+        from concurrent.futures import ThreadPoolExecutor
+
         pairs = [('local', 'codex'), ('local', 'hermes')]
         if self.grok is not None:
             pairs.append(('local', 'grok'))
-        for cid, kind in pairs:
+
+        def _restore_pair(cid: str, kind: str) -> None:
             with self.store.session() as db:
                 choice = db.get(AgentConnectionChoice, cid + ':' + kind)
                 legacy_id = ('local-hermes-default' if kind == 'hermes' else f'local-{kind}') if cid == 'local' else f'ssh-{kind}-{cid}'
@@ -510,23 +513,27 @@ class EnvironmentConnections:
                 except Exception as exc:
                     logger.warning("Failed to restore %s:%s connection: %s", cid, kind, exc)
 
-        for row in self.store.list_ssh_connections():
+        with ThreadPoolExecutor(max_workers=min(4, len(pairs) or 1), thread_name_prefix="restore-local") as pool:
+            list(pool.map(lambda p: _restore_pair(*p), pairs))
+
+        ssh_rows = self.store.list_ssh_connections()
+        if not ssh_rows:
+            return
+
+        def _discover_ssh(row: dict) -> None:
             try:
                 self.discover(row['id'])
             except ConnectionError:
-                continue
+                pass
+
+        with ThreadPoolExecutor(max_workers=min(4, len(ssh_rows) or 1), thread_name_prefix="discover-ssh") as pool:
+            list(pool.map(_discover_ssh, ssh_rows))
+
         kinds = ('hermes', 'codex', 'grok') if self.grok_factory is not None else ('hermes', 'codex')
-        ssh_pairs = [(row['id'], kind) for row in self.store.list_ssh_connections() for kind in kinds]
-        for cid, kind in ssh_pairs:
-            with self.store.session() as db:
-                choice = db.get(AgentConnectionChoice, cid + ':' + kind)
-                legacy_id = f'ssh-{kind}-{cid}'
-                enabled = bool(choice.enabled) if choice is not None else self.store.get_agent(legacy_id) is not None
-            if enabled:
-                try:
-                    self.change(cid, kind, True)
-                except ConnectionError:
-                    continue
+        ssh_pairs = [(row['id'], kind) for row in ssh_rows for kind in kinds]
+
+        with ThreadPoolExecutor(max_workers=min(6, len(ssh_pairs) or 1), thread_name_prefix="restore-ssh") as pool:
+            list(pool.map(lambda p: _restore_pair(*p), ssh_pairs))
 
     def _codex_for_agent(self, agent_id):
         return next((c for c in [self.codex, *self.remote.values()] if c.agent_id == agent_id), None)

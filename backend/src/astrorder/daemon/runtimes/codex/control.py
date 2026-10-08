@@ -365,6 +365,7 @@ class DaemonCodexController:
                 "session.send",
                 {
                     "session_id": session_id,
+                    "command_id": command["id"],
                     "input": inputs,
                     "params": policy,
                 },
@@ -572,6 +573,15 @@ class DaemonCodexController:
         return agent_id
 
     def _on_notification(self, frame: dict[str, Any]) -> None:
+        command_id = frame.get("astrorder_command_id")
+        params = frame.get("params") or {}
+        session_id = params.get("threadId")
+        turn_id = params.get("turnId") or (params.get("turn") or {}).get("id")
+        if isinstance(command_id, str) and isinstance(session_id, str) and isinstance(turn_id, str):
+            command = self.connection.store.get_command(self._agent_id(), session_id, command_id)
+            if command:
+                with self.connection._lock:
+                    self.connection._commands[(session_id, turn_id)] = command
         self.connection._notification(frame)
 
     def _on_status(self, sessions: Mapping[str, Any]) -> None:

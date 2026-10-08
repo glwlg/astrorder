@@ -58,6 +58,11 @@ export function useEventStream(
     const stop = connectEventStream({
       after: useAstrorderStore.getState().cursor,
       onStatus: storeStatus,
+      onResume: () => {
+        for (const resource of ["bootstrap", "messages", "commands", "tasks"]) {
+          void queryClient.invalidateQueries({ queryKey: ["astrorder", resource] });
+        }
+      },
       onEvent: (event) => {
         const store = useAstrorderStore.getState();
         const notification =

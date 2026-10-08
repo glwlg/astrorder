@@ -13,12 +13,14 @@ import { ToolOutputBlock } from './ToolOutputBlock'
 import { isCompactionMessage, CompactionDivider } from './CompactionDivider'
 import { ShinyText } from '../../components/animations/ShinyText'
 import { StarBorder } from '../../components/animations/StarBorder'
+import { GlareHover } from '../../components/animations/GlareHover'
 import { AstrorderLoader } from '../../components/AnimatedStatus'
 import { artifactViewerRegistry } from '../sidecar/registry'
 import { resolveArtifactFromPath } from '../sidecar/resolver'
 import { useSidecarStore } from '../sidecar/sidecarStore'
 import { useAstrorderStore } from '../../state/store'
-import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
+import { useReducedMotion } from '@mantine/hooks'
+import { AnimatePresence, motion } from 'motion/react'
 
 function attachmentHref(attachment: Attachment): string | undefined {
   try {
@@ -59,15 +61,16 @@ export function AttachmentList({
 
         if (isImage) {
           return (
+            <GlareHover key={attachment.id} borderRadius={9} glareOpacity={0.15}>
             <button
               type="button"
               className="attachment-image-link"
-              key={attachment.id}
               onClick={() => onGalleryClick ? onGalleryClick(href, allImageUrls) : onImageClick?.(href)}
               aria-label={`查看图片：${attachment.name}`}
             >
               <img className="attachment-image" src={href} alt={attachment.name} loading="lazy" />
             </button>
+            </GlareHover>
           )
         }
 
@@ -156,6 +159,7 @@ function MessageItem({
   onEdit,
   onFork,
   hasAssistantReplied = false,
+  isAgentAccepted = false,
 }: {
   message: Message
   onImageClick?: (url: string) => void
@@ -165,6 +169,7 @@ function MessageItem({
   onEdit?: (text: string) => void
   onFork?: () => void
   hasAssistantReplied?: boolean
+  isAgentAccepted?: boolean
 }) {
   const isUser = message.role === 'user'
   const isActivity = message.kind !== 'message' || message.role === 'tool'
@@ -250,15 +255,18 @@ function MessageItem({
           </span>
         )}
         {Date.parse(message.created_at) > 0 && <time dateTime={message.created_at}>{new Date(message.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</time>}
-        {isUser && (
-          <span
-            className="message-status-ticks"
-            title={hasAssistantReplied ? 'Agent 已响应' : '已发送'}
-            style={{ display: 'inline-flex', alignItems: 'center', color: hasAssistantReplied ? 'var(--astr-indigo, #5b6cff)' : 'var(--astr-muted)' }}
-          >
-            {hasAssistantReplied ? <IconChecks size={14} /> : <IconCheck size={14} />}
-          </span>
-        )}
+        {isUser && (() => {
+          const isDoubleTick = hasAssistantReplied || isAgentAccepted
+          return (
+            <span
+              className="message-status-ticks"
+              title={hasAssistantReplied ? 'Agent 已响应' : isAgentAccepted ? 'Agent 已接收' : '已发送'}
+              style={{ display: 'inline-flex', alignItems: 'center', color: isDoubleTick ? 'var(--astr-indigo, #5b6cff)' : 'var(--astr-muted)' }}
+            >
+              {isDoubleTick ? <IconChecks size={14} /> : <IconCheck size={14} />}
+            </span>
+          )
+        })()}
         <div className="message-actions-bar">
           {message.text && (
             <Tooltip label={copied ? '已复制' : '复制内容'} position="top" withArrow>
@@ -324,6 +332,7 @@ export function Transcript({
   onImageClick,
   onGalleryClick,
   session,
+  commands = [],
   onEditLastUserMessage,
   onForkAtMessage,
 }: {
@@ -342,10 +351,11 @@ export function Transcript({
   onImageClick?: (url: string) => void
   onGalleryClick?: (url: string, allImages: string[]) => void
   session?: Session | null
+  commands?: import('../../domain/types').Command[]
   onEditLastUserMessage?: (text: string) => void
   onForkAtMessage?: (message: Message, turnIndex: number) => void
 }) {
-  const reducedMotion = useReducedMotion()
+  const reducedMotion = useReducedMotion(undefined, { getInitialValueInEffect: false })
   const enter = reducedMotion ? {} : { opacity: 0, y: 10, scale: 0.99 }
   const visibleMessages = messages.filter((message) => (
     message.kind === 'thinking'
@@ -490,6 +500,10 @@ export function Transcript({
             const prevDate = prevMessage ? new Date(prevMessage.created_at).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' }) : null
             const showDateDivider = Date.parse(message.created_at) > 0 && currentDate !== prevDate
             const hasAssistantReplied = message.role === 'user' && visibleMessages.slice(idx + 1).some(m => m.role !== 'user')
+            const matchedCmd = message.command_id
+              ? commands.find(c => c.id === message.command_id)
+              : commands.filter(c => c.text.trim() === message.text.trim()).sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))[0]
+            const isAgentAccepted = Boolean(hasAssistantReplied || (matchedCmd && (matchedCmd.state === 'accepted' || matchedCmd.state === 'running' || matchedCmd.state === 'completed')))
             return (
               <motion.div className="transcript-message-entry" key={message.id} initial={enter} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.28, ease: [0.2, 0.8, 0.2, 1] }}>
                 {showDateDivider && (
@@ -508,6 +522,7 @@ export function Transcript({
                   onEdit={message.id === lastUserMessageId ? onEditLastUserMessage : undefined}
                   onFork={onForkAtMessage ? () => onForkAtMessage(message, idx) : undefined}
                   hasAssistantReplied={hasAssistantReplied}
+                  isAgentAccepted={isAgentAccepted}
                 />
               </motion.div>
             )

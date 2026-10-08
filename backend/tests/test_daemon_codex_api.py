@@ -1,5 +1,3 @@
-from types import SimpleNamespace
-
 from fastapi.testclient import TestClient
 
 from astrorder.config import Settings
@@ -76,10 +74,7 @@ def test_authenticated_session_create_persists_daemon_codex_native_identity(tmp_
         )
         assert login.status_code == 200
         codex = DaemonCodexProjection()
-        app.state.environments = SimpleNamespace(
-            for_agent=lambda agent_id: codex if agent_id == "daemon-codex" else None,
-            shutdown=lambda: None,
-        )
+        app.state.environments.for_agent = lambda agent_id: codex if agent_id == "daemon-codex" else None
         response = client.post(
             "/api/v1/sessions",
             json={
@@ -136,10 +131,7 @@ def test_delete_succeeds_when_native_notification_wins_the_store_delete_race(tmp
             "updated_at": "2026-09-14T00:00:00Z",
         })
         codex = DaemonCodexProjection()
-        app.state.environments = SimpleNamespace(
-            for_agent=lambda agent_id: codex if agent_id == "daemon-codex" else None,
-            shutdown=lambda: None,
-        )
+        app.state.environments.for_agent = lambda agent_id: codex if agent_id == "daemon-codex" else None
         response = client.delete(
             "/api/v1/sessions/native-thread-1?agent_id=daemon-codex",
             headers={"Authorization": "Bearer browser-test", "Origin": "http://testserver"},

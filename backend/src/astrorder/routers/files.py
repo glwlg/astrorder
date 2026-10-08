@@ -351,6 +351,83 @@ class FileExistsPayload(BaseModel):
     connection_id: str | None = None
 
 
+class CreateDirectoryPayload(BaseModel):
+    parent_path: str
+    name: str
+    connection_id: str | None = None
+
+
+@router.post("/api/v1/files/mkdir")
+def create_directory(payload: CreateDirectoryPayload, request: Request) -> dict[str, object]:
+    _private(request)
+    parent_clean = urllib.parse.unquote(payload.parent_path).strip().strip('<>').strip('"\'')
+    if parent_clean.startswith("file:///"):
+        parent_clean = parent_clean[8:]
+    elif parent_clean.startswith("file://"):
+        parent_clean = parent_clean[7:]
+
+    name = payload.name.strip()
+    if not name or "/" in name or "\\" in name or "\0" in name or name in {".", ".."}:
+        raise HTTPException(status_code=400, detail="文件夹名称不合法。")
+
+    if not parent_clean or "\0" in parent_clean:
+        raise HTTPException(status_code=400, detail="父级路径不合法。")
+
+    if payload.connection_id and payload.connection_id != "local":
+        import json
+        ssh_conn = request.app.state.store.get_ssh_connection(payload.connection_id)
+        if not ssh_conn:
+            raise HTTPException(status_code=404, detail="SSH 连接不存在。")
+        from ..ssh_transport import SshNativeRuntime, build_remote_python_command
+        runtime = SshNativeRuntime(ssh_conn["settings"], ssh_conn["id"], 0, None, None, connector_secret=None)
+        argv = [arg for arg in runtime._base_ssh_argv() if arg != "-T"] + [
+            "-o", "BatchMode=yes", runtime._target(),
+        ]
+        script = f"""
+import json, os
+from pathlib import Path
+try:
+    parent = Path({parent_clean!r}).expanduser().resolve()
+    target = parent / {name!r}
+    target.mkdir(parents=True, exist_ok=True)
+    print(json.dumps({{"ok": True, "path": str(target)}}))
+except Exception as e:
+    print(json.dumps({{"ok": False, "error": str(e)}}))
+"""
+        try:
+            result = run_subprocess_hidden(
+                argv + [build_remote_python_command(script)],
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                timeout=15, check=False,
+            )
+        except subprocess.TimeoutExpired:
+            raise HTTPException(status_code=504, detail="创建远端文件夹超时。")
+        if result.returncode != 0:
+            raise HTTPException(status_code=502, detail=f"创建远端文件夹失败: {result.stderr or result.stdout}")
+        data = None
+        for line in reversed((result.stdout or "").splitlines()):
+            line = line.strip()
+            if line.startswith("{") and line.endswith("}"):
+                try:
+                    data = json.loads(line)
+                    break
+                except json.JSONDecodeError:
+                    continue
+        if not data:
+            raise HTTPException(status_code=500, detail=f"解析远端响应失败: {result.stdout}")
+        if not data.get("ok"):
+            raise HTTPException(status_code=400, detail=data.get("error", "创建远端文件夹失败。"))
+        return data
+
+    try:
+        parent = Path(parent_clean).expanduser().resolve()
+        target = parent / name
+        target.mkdir(parents=True, exist_ok=True)
+        return {"ok": True, "path": str(target)}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"创建文件夹失败: {e}")
+
+
 @router.post("/api/v1/files/exists")
 def check_files_exist(payload: FileExistsPayload, request: Request) -> dict[str, list[str]]:
     _private(request)

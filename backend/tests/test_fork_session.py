@@ -69,7 +69,7 @@ def test_fork_session_chat_branch(tmp_path):
         assert resp.status_code == 200, resp.text
         data = resp.json()
         assert data["id"] == "new-child-id"
-        assert data["title"] == "测试主会话 (分支)"
+        assert data["title"] == "测试主会话 (分叉)"
         assert len(created_calls) == 1
         assert created_calls[0]["parent_session_id"] == "parent-1"
         assert created_calls[0]["workspace"] == str(repo_dir)

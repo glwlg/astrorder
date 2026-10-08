@@ -1,0 +1,88 @@
+/* React Bits Star Border adaptation: https://reactbits.dev/animations/star-border
+   Copyright (c) 2026 David Haz — MIT + Commons Clause.
+   Full notice is distributed in /react-bits-NOTICE.txt. */
+
+.session-star-border {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  color: var(--session-running-color, #5b6cff);
+  z-index: 5;
+}
+
+.session-star-outline,
+.session-star-rim {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.session-star-outline {
+  border: 1px solid currentColor;
+  box-shadow: inset 0 0 6px color-mix(in srgb, currentColor 18%, transparent);
+  opacity: 0.35;
+  animation: session-star-breathe 3.6s ease-in-out infinite;
+}
+
+.session-star-rim {
+  overflow: hidden;
+  padding: 3px;
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+}
+
+.session-star-glint {
+  position: absolute;
+  width: 300%;
+  height: 160%;
+  border-radius: 50%;
+  background: radial-gradient(circle, currentColor 0%, currentColor 4%, transparent 18%);
+  opacity: 1;
+}
+
+.session-star-top {
+  top: -70%;
+  left: -150%;
+  animation: session-star-top 5.2s ease-in-out infinite alternate;
+}
+
+.session-star-bottom {
+  bottom: -70%;
+  right: -150%;
+  animation: session-star-bottom 5.2s ease-in-out infinite alternate;
+  animation-delay: -2.6s;
+}
+
+@keyframes session-star-top {
+  from { transform: translateX(-35%); }
+  to { transform: translateX(35%); }
+}
+
+@keyframes session-star-bottom {
+  from { transform: translateX(35%); }
+  to { transform: translateX(-35%); }
+}
+
+@keyframes session-star-breathe {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 0.55; }
+}
+
+/* Reduced motion removes travel; retain only the requested small luminance cue. */
+@media (prefers-reduced-motion: reduce) {
+  .session-star-rim {
+    display: none;
+  }
+  .session-star-glint {
+    animation: none;
+  }
+  .session-star-border > .session-star-outline {
+    /* Override index.css's one .001ms iteration only for this status cue. */
+    animation-duration: 4.8s !important;
+    animation-iteration-count: infinite !important;
+  }
+}

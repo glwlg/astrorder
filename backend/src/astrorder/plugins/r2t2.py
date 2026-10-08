@@ -146,11 +146,32 @@ class LocalR2T2Plugin:
             self._port = None
             self._state = 'disabled'
 
+    def _cleanup_orphaned_servers(self) -> None:
+        """检查并清理系统中残留的历史 llama-server 孤立进程，避免重复拉起导致显存/内存堆积。"""
+        if os.name != 'nt':
+            return
+        try:
+            # 查找所有正在运行的 llama-server.exe
+            cmd = ['powershell', '-NoProfile', '-Command', "Get-CimInstance Win32_Process -Filter \"Name = 'llama-server.exe'\" | Select-Object -ExpandProperty ProcessId"]
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            if res.returncode == 0:
+                pids = [int(p.strip()) for p in res.stdout.splitlines() if p.strip().isdigit()]
+                current_pid = self._process.pid if self._process is not None else None
+                for pid in pids:
+                    if pid != current_pid:
+                        try:
+                            subprocess.run(['taskkill', '/F', '/PID', str(pid)], capture_output=True, timeout=3)
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
     def _start_worker(self) -> None:
         try:
             self._ensure_resources()
             if self._cancel.is_set() or not self._enabled:
                 return
+            self._cleanup_orphaned_servers()
             port = self._find_free_port()
             self.resource_dir.mkdir(parents=True, exist_ok=True)
             self._log_handle = (self.resource_dir / 'llama-server.log').open('ab')

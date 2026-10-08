@@ -19,6 +19,7 @@ import {
 } from '@mantine/core'
 import { IconAlertTriangle, IconBolt, IconCalendarStats, IconChartHistogram, IconCircleCheck, IconClock, IconCoin, IconDatabase } from '@tabler/icons-react'
 import { notifications } from '@mantine/notifications'
+import { CountUp } from '../../components/animations/CountUp'
 import { api, type OcxUsageBreakdown, type OcxUsageResponse } from '../../api/client'
 
 const zhNumber = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2 })
@@ -224,14 +225,14 @@ export function AnalyticsPage() {
   const calendarDays = useMemo(() => [...days].sort((a, b) => a.date.localeCompare(b.date)), [days])
   const cacheHitRate = summary.cacheObservedInputTokens ? summary.cacheReadInputTokens / summary.cacheObservedInputTokens : 0
   const metrics = [
-    { label: '请求数', value: zhNumber.format(summary.requests || 0), detail: `共 ${zhNumber.format(summary.attemptCount || 0)} 次尝试`, icon: IconBolt, color: 'indigo' },
-    { label: '已计量', value: zhNumber.format(summary.measuredRequests || 0), detail: `${zhNumber.format(summary.reportedRequests || 0)} 次由提供方上报`, icon: IconCircleCheck, color: 'teal' },
+    { label: '请求数', rawValue: summary.requests || 0, isNumber: true, value: zhNumber.format(summary.requests || 0), detail: `共 ${zhNumber.format(summary.attemptCount || 0)} 次尝试`, icon: IconBolt, color: 'indigo' },
+    { label: '已计量', rawValue: summary.measuredRequests || 0, isNumber: true, value: zhNumber.format(summary.measuredRequests || 0), detail: `${zhNumber.format(summary.reportedRequests || 0)} 次由提供方上报`, icon: IconCircleCheck, color: 'teal' },
     { label: 'Token 总数', value: formatTokens(summary.totalTokens || 0), detail: `输入 ${formatTokens(summary.inputTokens || 0)} · 输出 ${formatTokens(summary.outputTokens || 0)}`, icon: IconChartHistogram, color: 'violet' },
     { label: '缓存命中 Token', value: formatTokens(summary.cacheReadInputTokens || 0), detail: `缓存命中率 ${percent(cacheHitRate)}`, icon: IconDatabase, color: 'cyan' },
     { label: '覆盖率', value: percent(summary.coverageRatio || 0), detail: `${zhNumber.format(summary.unreportedRequests || 0)} 个请求未上报用量`, icon: IconCircleCheck, color: 'blue' },
-    { label: '活跃天数', value: zhNumber.format(activeDays), detail: `当前范围共 ${days.length} 天`, icon: IconClock, color: 'grape' },
+    { label: '活跃天数', rawValue: activeDays, isNumber: true, value: zhNumber.format(activeDays), detail: `当前范围共 ${days.length} 天`, icon: IconClock, color: 'grape' },
     { label: 'API 标价折算', value: usd.format(summary.estimatedCostUsd || 0), detail: `${zhNumber.format(summary.pricedRequests || 0)} 个请求已计价`, icon: IconCoin, color: 'yellow' },
-    { label: '无法计费请求', value: zhNumber.format(summary.unpricedRequests || 0), detail: `${zhNumber.format(summary.unmeteredRequests || 0)} 个请求未计量`, icon: IconAlertTriangle, color: 'orange' },
+    { label: '无法计费请求', rawValue: summary.unpricedRequests || 0, isNumber: true, value: zhNumber.format(summary.unpricedRequests || 0), detail: `${zhNumber.format(summary.unmeteredRequests || 0)} 个请求未计量`, icon: IconAlertTriangle, color: 'orange' },
   ]
 
   return (
@@ -277,7 +278,13 @@ export function AnalyticsPage() {
                 <ActionIcon size="sm" radius="md" color={metric.color} variant="subtle"><Icon size={15} /></ActionIcon>
               </Group>
               <Text fw={750} mt={2} style={{ fontFamily: 'ui-monospace, monospace', fontSize: 21, letterSpacing: '-0.02em' }}>
-                {loading ? <Skeleton height={24} width={80} /> : metric.value}
+                {loading ? (
+                  <Skeleton height={24} width={80} />
+                ) : (metric as any).isNumber ? (
+                  <CountUp to={(metric as any).rawValue} duration={0.8} separator="," />
+                ) : (
+                  metric.value
+                )}
               </Text>
               <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--astr-border, #f1f5f9)' }}>
                 <Text size="xs" c="dimmed" style={{ fontSize: 11 }}>{metric.detail}</Text>

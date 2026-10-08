@@ -45,6 +45,13 @@ beforeEach(() => {
 })
 
 describe('shared runtime store', () => {
+  it('does not revive completed activity from terminal task updates', () => {
+    useAstrorderStore.getState().applyEvent({
+      id: 'finished-task', cursor: 1, type: 'task.upsert', agent_id: session.agent_id, session_id: session.id,
+      data: { id: 'task', agent_id: session.agent_id, session_id: session.id, kind: 'tool', title: '已结束工具', status: 'completed', progress: null, command: null, logs: [], target_id: null, created_at: session.updated_at, updated_at: session.updated_at },
+    })
+    expect(useAstrorderStore.getState().liveActivityAt['agent-1::session-1']).toBeUndefined()
+  })
   it('excludes temporary side chats from catalogs but retains scoped data for the composer', () => {
     const child = { ...session, id: 'child', title: '自动生成标题', ephemeral: true }
     const legacy = { ...session, id: 'legacy', title: '[侧边聊天]' }

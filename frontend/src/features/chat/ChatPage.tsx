@@ -770,6 +770,7 @@ function ChatPageBody() {
              void resources.messages.refetch()
              void resources.commands.refetch()
            }}
+           commands={commands}
            onForkAtMessage={handleOpenFork}
            onEditLastUserMessage={(text) => {
               useAstrorderStore.getState().setDraft(selected.agent_id, selected.id, { text, attachments: [] })

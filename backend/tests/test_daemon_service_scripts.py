@@ -31,6 +31,29 @@ def test_daemon_argv_uses_module_and_never_accepts_a_secret_argument(tmp_path):
     assert "[REDACTED]" not in argv
 
 
+def test_go_launch_uses_configured_binary_and_private_environment(monkeypatch, tmp_path):
+    binary = tmp_path / "astrorder-sessiond.exe"
+    binary.write_bytes(b"fixture")
+    config = tmp_path / "runtimes.json"
+    config.write_text('{"runtimes": []}')
+    monkeypatch.setenv("ASTRORDER_SESSION_DAEMON_EXECUTABLE", str(binary))
+    monkeypatch.setenv("ASTRORDER_SESSION_DAEMON_CONFIG", str(config))
+    monkeypatch.setenv("ASTRORDER_SESSION_DAEMON_DB", str(tmp_path / "daemon.db"))
+    monkeypatch.setenv("ASTRORDER_CONNECTOR_SECRET", "fixture-connector")
+    monkeypatch.delenv("ASTRORDER_SESSION_DAEMON_SECRET", raising=False)
+    with pytest.raises(RuntimeError, match="SESSION_DAEMON_SECRET"):
+        service.daemon_launch(port=30109, runtime_args=[])
+    monkeypatch.setenv("ASTRORDER_SESSION_DAEMON_SECRET", "fixture-daemon")
+    argv, environment = service.daemon_launch(port=30109, runtime_args=["--enable-codex"])
+    assert argv == [str(binary)]
+    assert environment["ASTRORDER_SESSION_DAEMON_PORT"] == "30109"
+    assert environment["ASTRORDER_SESSION_DAEMON_CONNECTOR_SECRET"] == "fixture-connector"
+    assert "fixture-connector" not in str(argv)
+    binary.unlink()
+    with pytest.raises(RuntimeError, match="executable"):
+        service.daemon_launch(port=30109, runtime_args=[])
+
+
 def test_existing_daemon_must_be_verified_before_start_is_reused():
     assert service.existing_verified_daemon(
         [222], lambda _pid: "python -m astrorder.daemon.session_daemon --port 30009"

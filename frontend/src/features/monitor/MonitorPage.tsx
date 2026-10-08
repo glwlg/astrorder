@@ -9,6 +9,7 @@ import { MarkdownContent } from '../../components/MarkdownContent'
 import { MessageBody } from '../../components/MessageBody'
 import { LazyDetails } from '../../components/LazyDetails'
 import { ClickSpark } from '../../components/animations/ClickSpark'
+import { useSpotlightSurface } from '../../components/animations/useSpotlightSurface'
 import { SessionModelControl } from '../chat/SessionModelControl'
 import { ApprovalModeControl } from '../chat/ApprovalModeControl'
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent } from 'react'
@@ -145,6 +146,7 @@ export function MonitorCard({
   const [error, setError] = useState('')
   const scrollRef = useRef<HTMLDivElement>(null)
   const wrapperRef = useRef<HTMLDivElement>(null)
+  const spotlight = useSpotlightSurface()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const previousStatusRef = useRef(status)
   const previousActiveCommandRef = useRef<string | null>(null)
@@ -256,7 +258,8 @@ export function MonitorCard({
       }}
     >
         <Paper
-          className={'monitor-card monitor-' + status + (completionFlash ? ' is-completion-flash' : '') + (isFloating ? ' is-solid-lifted' : '')}
+          {...spotlight}
+          className={'monitor-card astr-spotlight-enabled monitor-' + status + (completionFlash ? ' is-completion-flash' : '') + (isFloating ? ' is-solid-lifted' : '')}
           data-testid={'monitor-card-' + session.agent_id + '-' + session.id}
           withBorder={false}
           style={{ height: '100%', minHeight: 0 }}

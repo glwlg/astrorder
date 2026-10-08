@@ -44,6 +44,7 @@ export interface GatewayProfile {
   inference_url: string
   target_overrides: Record<string, string>
   masked_key: string
+  masked_management_key?: string
   api_key?: string
 }
 
@@ -386,6 +387,19 @@ export const api = {
     }
     return { ok: isOk, exit_code: exitCode }
   },
+  getUpgradeTargets: () =>
+    request<{
+      items: Array<{
+        id: string
+        name: string
+        kind: AgentKind
+        status: string
+        connection_id: string
+        current_version: string
+        latest_version: string
+        has_update: boolean
+      }>
+    }>('/agents/upgrade/targets'),
   createSession: (payload: { agent_id: string; workspace?: string | null; title?: string | null; project_id?: string | null; project_name?: string | null; parent_session_id?: string | null; ephemeral?: boolean; blackboard_scope?: 'session' | 'swarm' | 'group'; blackboard_scope_id?: string | null }) =>
     jsonRequest<Session>('/sessions', payload),
   forkSession: (sessionId: string, payload: { agent_id: string; title?: string | null; worktree?: boolean; branch_name?: string | null; worktree_path?: string | null; target_message_id?: string | null; turn_index?: number | null }) =>
@@ -556,8 +570,8 @@ export const api = {
       cache_hit_rate: number
       speed?: number | null
     }>(`/sessions/${encodeURIComponent(sessionId)}/usage${agentId ? '?agent_id=' + encodeURIComponent(agentId) : ''}`),
-  getAnalyticsConfig: () => request<{ gateway_type: 'opencodex' | 'magpie'; management_url: string; inference_url: string; target_overrides: Record<string, string>; masked_key: string; gateway_profiles?: Record<string, GatewayProfile> }>('/analytics/config'),
-  updateAnalyticsConfig: (payload: { gateway_type: 'opencodex' | 'magpie'; management_url: string; inference_url: string; target_overrides: Record<string, string>; api_key?: string; gateway_profiles?: Record<string, any> }) => jsonRequest<{ gateway_type: 'opencodex' | 'magpie'; management_url: string; inference_url: string; target_overrides: Record<string, string>; masked_key: string; gateway_profiles?: Record<string, GatewayProfile> }>('/analytics/config', payload, 'PUT'),
+  getAnalyticsConfig: () => request<{ gateway_type: 'opencodex' | 'magpie'; management_url: string; inference_url: string; target_overrides: Record<string, string>; masked_key: string; masked_management_key?: string; gateway_profiles?: Record<string, GatewayProfile> }>('/analytics/config'),
+  updateAnalyticsConfig: (payload: { gateway_type: 'opencodex' | 'magpie'; management_url: string; inference_url: string; target_overrides: Record<string, string>; api_key?: string; management_key?: string; clear_management_key?: boolean; gateway_profiles?: Record<string, any> }) => jsonRequest<{ gateway_type: 'opencodex' | 'magpie'; management_url: string; inference_url: string; target_overrides: Record<string, string>; masked_key: string; masked_management_key?: string; gateway_profiles?: Record<string, GatewayProfile> }>('/analytics/config', payload, 'PUT'),
   getModelSyncTargets: () => request<{ items: Array<{ id: string; kind: 'local' | 'wsl' | 'ssh'; name: string; state?: string; agents: string[] }> }>('/model-sync/targets'),
   previewModelSync: (targets: Array<{ target_id: string; agents: string[] }>) => jsonRequest<{
     catalog_fingerprint: string
@@ -676,6 +690,8 @@ export const api = {
   },
   checkWorkspaceFiles: (workspace: string, paths: string[], connectionId?: string | null) =>
     jsonRequest<{ existing: string[] }>('/files/exists', { workspace, paths, connection_id: connectionId }),
+  createDirectory: (parentPath: string, name: string, connectionId?: string | null) =>
+    jsonRequest<{ ok: boolean; path: string }>('/files/mkdir', { parent_path: parentPath, name, connection_id: connectionId }),
 }
 
 export type ApiClient = typeof api

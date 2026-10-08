@@ -77,6 +77,7 @@ async def test_codex_approval_mode_defaults_to_auto_and_injects_policies(tmp_pat
         await connection.submit({'id': 'cmd-2', 'agent_id': connection.agent_id, 'session_id': SID, 'action': 'send', 'text': 'test', 'attachment_ids': [], 'target_id': None})
         last_turn_params = connection.client.calls[-1][1]
         assert last_turn_params.get('approvalPolicy') == 'untrusted'
+        assert last_turn_params.get('approvalsReviewer') == 'user'
 
         # 切换到 full_access
         connection.set_approval_mode(SID, 'full_access')

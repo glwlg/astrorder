@@ -15,6 +15,8 @@ class FakeSocket {
     FakeSocket.instances.push(this)
   }
 
+  static readonly OPEN = 1
+
   close() {
     this.readyState = 3
     this.onclose?.()
@@ -65,6 +67,30 @@ describe('event stream', () => {
     vi.advanceTimersByTime(50)
 
     expect(FakeSocket.instances[1].url).toContain('after=11')
+    stop()
+  })
+
+  it('resyncs resources after a lost connection opens again', () => {
+    vi.useFakeTimers()
+    const onResume = vi.fn()
+    const stop = connectEventStream({ after: 10, onEvent: vi.fn(), onStatus: vi.fn(), onResume, reconnectMs: 50 })
+    FakeSocket.instances[0].open()
+    expect(onResume).not.toHaveBeenCalled()
+    FakeSocket.instances[0].close()
+    vi.advanceTimersByTime(50)
+    FakeSocket.instances[1].open()
+    expect(onResume).toHaveBeenCalledOnce()
+    stop()
+  })
+
+  it('reloads the visible transcript when the page returns without closing the socket', () => {
+    const onResume = vi.fn()
+    const stop = connectEventStream({ after: 10, onEvent: vi.fn(), onStatus: vi.fn(), onResume })
+    FakeSocket.instances[0].open()
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' })
+    document.dispatchEvent(new Event('visibilitychange'))
+    expect(onResume).toHaveBeenCalledOnce()
+    expect(FakeSocket.instances).toHaveLength(1)
     stop()
   })
 })

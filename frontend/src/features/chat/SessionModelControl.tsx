@@ -291,12 +291,11 @@ export function SessionModelControl({ session }: { session: Session }) {
                   item.label.toLowerCase().includes(search.toLowerCase()),
                 )
                 .map((item) => {
-                  const isSelected =
-                    (choice?.provider === item.provider && choice?.model === item.model) ||
-                    (!choice &&
-                      model.data?.provider === item.provider &&
-                      model.data?.model === item.model) ||
-                    model.label.includes(item.model)
+                  const isSelected = choice
+                    ? choice.provider === item.provider && choice.model === item.model
+                    : model.data
+                      ? (model.data.provider ?? '') === (item.provider ?? '') && model.data.model === item.model
+                      : model.label === item.model || model.label === `${item.provider ? `${item.provider}/` : ''}${item.model}`
 
                   return (
                     <UnstyledButton

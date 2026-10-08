@@ -104,6 +104,30 @@ it('desktop shows the bound native model and switches the exact session', async 
   expect(notifications.show).not.toHaveBeenCalled()
 })
 
+it('only selects the exact matching model when model names share a common prefix/substring', async () => {
+  vi.spyOn(api, 'getSessionModel').mockResolvedValue({
+    model: 'antigravity/gemini-3.8-flash-tiered',
+    provider: 'magpie',
+  })
+  vi.spyOn(api, 'getSessionModels').mockResolvedValue({
+    items: [
+      { provider: 'magpie', model: 'antigravity/gemini-3.8-flash', label: 'magpie · antigravity/gemini-3.8-flash' },
+      { provider: 'magpie', model: 'antigravity/gemini-3.8-flash-tiered', label: 'magpie · antigravity/gemini-3.8-flash-tiered' },
+    ],
+  })
+  renderControl()
+
+  fireEvent.click(await screen.findByRole('button', { name: '选择会话模型' }))
+  const switchBtn = await screen.findByRole('button', { name: '切换到选择模型' })
+  fireEvent.click(switchBtn.querySelector('.codex-model-name-label')!)
+
+  const flashItem = await screen.findByText('magpie · antigravity/gemini-3.8-flash')
+  const tieredItem = await screen.findByText('magpie · antigravity/gemini-3.8-flash-tiered')
+
+  expect(flashItem.closest('.codex-model-menu-item')).not.toHaveClass('is-selected')
+  expect(tieredItem.closest('.codex-model-menu-item')).toHaveClass('is-selected')
+})
+
 it('shows the native default medium effort when the runtime has not reported one', async () => {
   vi.spyOn(api, 'getSessionModel').mockResolvedValue({ model: 'bound', provider: 'p', effort: null })
   vi.spyOn(api, 'getSessionModels').mockResolvedValue({ items: [] })

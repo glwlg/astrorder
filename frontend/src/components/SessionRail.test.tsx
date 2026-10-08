@@ -215,7 +215,7 @@ describe('SessionRail project-first grouping', () => {
     expect(badge?.querySelector('svg, img')).not.toBeNull()
   })
 
-  it('renders running arc border for sessions that are currently running', () => {
+  it('renders the shared star border for sessions that are currently running', () => {
     const runningSessions: Session[] = [
       { ...sessions[0], id: 'run-1', status: 'running' },
       { ...sessions[1], id: 'idle-1', status: 'idle' },
@@ -227,9 +227,10 @@ describe('SessionRail project-first grouping', () => {
     )
     const runningRows = document.querySelectorAll('.session-row.is-running')
     expect(runningRows.length).toBeGreaterThanOrEqual(1)
-    const runningArcs = document.querySelectorAll('.session-row-wrapper.is-running > .session-running-arc')
-    expect(runningArcs.length).toBeGreaterThanOrEqual(1)
-    expect(runningArcs[0].querySelector('rect')).not.toBeNull()
+    const borders = document.querySelectorAll('.session-row-wrapper.is-running > .session-star-border')
+    expect(borders.length).toBeGreaterThanOrEqual(1)
+    expect(borders[0].querySelectorAll('.session-star-glint')).toHaveLength(2)
+    expect(borders[0].querySelector('svg')).toBeNull()
   })
 
   it('allows deleting a project and cascades its sessions upon user confirmation', async () => {

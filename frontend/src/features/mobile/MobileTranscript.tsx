@@ -10,17 +10,18 @@ import { sessionSwipeGesture, sessionDragPreview, startsAtSessionDrawerEdge, typ
 import { describeTool, FileChangeDiffBlock, fileChangeDiffs, PackSummary, ShellOutputBlock, ToolLineIcon, unwrapCommand } from '../chat/toolPresentation'
 import { ToolOutputBlock } from '../chat/ToolOutputBlock'
 import { isCompactionMessage, CompactionDivider } from '../chat/CompactionDivider'
-import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
+import { useReducedMotion } from '@mantine/hooks'
+import { AnimatePresence, motion } from 'motion/react'
 
 export interface MessageActionAnchor { text: string; x: number; y: number; element: HTMLElement }
 
-export function MobileTranscript({ messages, approvals = [], onApproval, busy, loadOlder, hasOlder, loadingOlder, onMessageAction, onImage, onFile, workspace, connectionId, onSwipe, onSwipePreview }: {
-  messages: Message[]; approvals?: Approval[]; onApproval?: (approval: Approval, action: 'approve' | 'cancel') => void
+export function MobileTranscript({ messages, commands = [], approvals = [], onApproval, busy, loadOlder, hasOlder, loadingOlder, onMessageAction, onImage, onFile, workspace, connectionId, onSwipe, onSwipePreview }: {
+  messages: Message[]; commands?: import('../../domain/types').Command[]; approvals?: Approval[]; onApproval?: (approval: Approval, action: 'approve' | 'cancel') => void
   busy: boolean; loadOlder: () => unknown; hasOlder: boolean; loadingOlder: boolean
   onMessageAction: (anchor: MessageActionAnchor) => void; onImage: (url: string) => void; onFile?: (path: string) => void; workspace?: string | null; connectionId?: string | null; onSwipe: (gesture: SessionSwipeGesture) => void
   onSwipePreview?: (pose: import('./mobileGestures').SessionCardPose | null) => void
 }) {
-  const reducedMotion = useReducedMotion()
+  const reducedMotion = useReducedMotion(undefined, { getInitialValueInEffect: false })
   const enter = reducedMotion ? {} : { opacity: 0, y: 10, scale: 0.99 }
   const { setContainerRef, following, onScroll, scrollToBottom, capturePrependAnchor } = useStickToBottom<HTMLDivElement>({ contentVersion: `${messages.map(m => m.id + ':' + m.text.length).join('|')}|${approvals.map(a => a.id).join('|')}` })
   const older = useOlderMessages({ hasMore: hasOlder, loading: loadingOlder, load: loadOlder, capture: capturePrependAnchor })
@@ -92,15 +93,22 @@ export function MobileTranscript({ messages, approvals = [], onApproval, busy, l
           onTouchStart={e => { cancelHold(); const element = e.currentTarget; const point = e.touches[0]; hold.current = setTimeout(() => { onMessageAction({ text: m.text, x: point.clientX, y: point.clientY, element }); navigator.vibrate?.(20) }, 500) }}>
           {m.text.trim() && <div className="m-bubble"><MessageBody value={m.text} user={m.role === 'user'} onImageClick={onImage} attachmentNames={m.attachments.filter((attachment) => attachment.media_type.startsWith('image/')).map((attachment) => attachment.name)} renderMarkdown={value => <MarkdownContent value={value} onFileClick={onFile} onImageClick={onImage} workspace={workspace} sessionId={m.session_id} connectionId={connectionId} />} sessionId={m.session_id} connectionId={connectionId || undefined} /></div>}
           {!!m.attachments.length && <div className="m-thumbs">{m.attachments.map(a => a.media_type.startsWith('image/') ? <button key={a.id} onClick={() => onImage(a.url)}><img src={a.url} alt={a.name} /></button> : <a key={a.id} className="m-file-link" href={a.url} target="_blank" rel="noreferrer">{a.name}</a>)}</div>}
-          {m.role === 'user' && (
-            <small className="m-delivered" style={{ color: rows.slice(i + 1).some(r => r.role !== 'user') ? 'var(--m-primary, #4c6ef5)' : 'var(--m-muted, #868e96)' }}>
-              {rows.slice(i + 1).some(r => r.role !== 'user') ? (
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}><IconChecks size={13} /> 已响应</span>
-              ) : (
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}><IconCheck size={13} /> 已发送</span>
-              )}
-            </small>
-          )}
+          {m.role === 'user' && (() => {
+            const hasAssistantReplied = rows.slice(i + 1).some(r => r.role !== 'user')
+            const matchedCmd = m.command_id
+              ? commands.find(c => c.id === m.command_id)
+              : commands.filter(c => c.text.trim() === m.text.trim()).sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))[0]
+            const isAgentAccepted = hasAssistantReplied || Boolean(matchedCmd && (matchedCmd.state === 'accepted' || matchedCmd.state === 'running' || matchedCmd.state === 'completed'))
+            return (
+              <small className="m-delivered" style={{ color: isAgentAccepted ? 'var(--m-primary, #4c6ef5)' : 'var(--m-muted, #868e96)' }}>
+                {isAgentAccepted ? (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}><IconChecks size={13} /> {hasAssistantReplied ? '已响应' : '已接收'}</span>
+                ) : (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}><IconCheck size={13} /> 已发送</span>
+                )}
+              </small>
+            )
+          })()}
         </motion.article>
       })}
       </AnimatePresence>

@@ -1137,8 +1137,6 @@ class ConnectionController:
     def mutate_session_for_agent(self, agent_id: str, session_id: str, updates: dict[str, Any] | None) -> None:
         runtime = self.get_runtime_by_agent_id(agent_id)
         if runtime is None:
-            if updates is None:
-                return
             raise ConnectionError("会话所属运行时未连接。", 503)
         if getattr(runtime, "daemon_owned", False):
             mutate = getattr(runtime, "mutate_session", None)

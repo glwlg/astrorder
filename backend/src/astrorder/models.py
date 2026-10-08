@@ -60,6 +60,7 @@ class SessionRow(Base):
     native_kind: Mapped[str | None] = mapped_column(String(32), nullable=True)
     ephemeral: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
     control_state: Mapped[str] = mapped_column(String(32), nullable=False, default="unknown")
+    runtime_owner: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     selected_model_provider: Mapped[str | None] = mapped_column(String(160), nullable=True)
     selected_model: Mapped[str | None] = mapped_column(String(160), nullable=True)
     selected_reasoning_effort: Mapped[str | None] = mapped_column(String(32), nullable=True)

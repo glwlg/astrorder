@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
-from astrorder.connections import ConnectionError
+from astrorder.connections import ConnectionError, hermes_command_rejection
 from astrorder.daemon.bridge import DaemonBridge, DaemonBridgeError
 
 logger = logging.getLogger(__name__)
@@ -22,6 +22,23 @@ def hermes_runtime_control_id(connection_scope: str) -> str:
         raise ValueError("connection scope must be a non-empty string up to 256 characters")
     digest = hashlib.sha256(f"astrorder-hermes-runtime\0{connection_scope}".encode()).hexdigest()
     return f"daemon-hermes-{digest[:48]}"
+
+
+def native_ownership_rejection(error: DaemonBridgeError, *, remote: bool) -> str | None:
+    # Only classify an explicit pre-admission refusal; lost replies stay unknown.
+    message = str(error)
+    lowered = message.lower()
+    if "prompt.submit failed: RPC error 4090:" not in message:
+        return None
+    if not any(marker in lowered for marker in (
+        "session_not_owned", "already has a live owner",
+        "this chat is open in another hermes window/terminal",
+    )):
+        return None
+    return hermes_command_rejection(
+        {"error": {"message": message, "data": {"reason": "SESSION_NOT_OWNED"}}},
+        remote=remote,
+    )
 
 
 def record_completed_slash(controller: Any, command: Mapping[str, Any], output: str) -> None:
@@ -467,7 +484,9 @@ class DaemonHermesController:
             )
             self._apply_identity(spawned.get("result"))
             response = await self._bridge.request_control(daemon_action, fields)
-        except DaemonBridgeError:
+        except DaemonBridgeError as exc:
+            if rejection := native_ownership_rejection(exc, remote=False):
+                return "failed", rejection
             return "unknown", "daemon Hermes delivery was not confirmed; command will not retry."
         result = response.get("result")
         if isinstance(result, Mapping) and result.get("completed") is True:

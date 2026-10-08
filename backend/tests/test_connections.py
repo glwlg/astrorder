@@ -449,7 +449,20 @@ def test_local_tui_owned_session_steers_when_live_owner_rejects(tmp_path: Path):
     assert calls[2] == ("session.steer", {"session_id": "live-tui-session-id", "text": "方向修正：请改用异步实现"})
 
 
-def test_local_tui_owned_session_takes_over_when_idle(tmp_path: Path):
+def test_local_tui_owned_session_takes_over_when_idle(tmp_path: Path, monkeypatch):
+    # Keep the legacy lease-store dependency entirely inside this test.
+    import sys
+    import types
+    from contextlib import nullcontext
+    entries = [{"session_id": "durable-session-key"}, {"session_id": "other-session"}]
+    writes = []
+    module = types.ModuleType("hermes_cli.active_sessions")
+    module._lease_paths = lambda: (tmp_path / "leases.json", tmp_path / "leases.lock")
+    module._FileLock = lambda _path: nullcontext()
+    module._read_entries = lambda _path: list(entries)
+    module._write_entries = lambda _path, rows: writes.append(rows)
+    monkeypatch.setitem(sys.modules, "hermes_cli.active_sessions", module)
+    monkeypatch.setattr(sys, "path", list(sys.path))
     controller = LocalHermesController(
         Settings(
             browser_secret="browser-test-secret",
@@ -505,6 +518,7 @@ def test_local_tui_owned_session_takes_over_when_idle(tmp_path: Path):
     assert calls[0][0] == "prompt.submit"
     assert calls[1][0] == "session.active_list"
     assert calls[2][0] == "prompt.submit"
+    assert writes == [[{"session_id": "other-session"}]]
 
 
 def test_service_startup_marks_persisted_connectors_disconnected(tmp_path: Path):
