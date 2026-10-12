@@ -568,6 +568,8 @@ export const api = {
       model: string
       context_window: number
       last_input_tokens: number
+	  context_available?: boolean
+	  source?: string
       used_percentage: number
       total_tokens: number
       input_tokens: number

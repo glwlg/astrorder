@@ -59,7 +59,7 @@ export function useEventStream(
       after: useAstrorderStore.getState().cursor,
       onStatus: storeStatus,
       onResume: () => {
-        for (const resource of ["bootstrap", "messages", "commands", "tasks"]) {
+        for (const resource of ["bootstrap", "messages", "commands", "tasks", "session_usage"]) {
           void queryClient.invalidateQueries({ queryKey: ["astrorder", resource] });
         }
       },
@@ -108,6 +108,11 @@ export function useEventStream(
           deliverBrowserNotification(notification);
         }
         store.applyEvent(event);
+        if (event.type === "token.usage") {
+          void queryClient.invalidateQueries({
+            queryKey: ["astrorder", "session_usage", event.session_id, event.agent_id],
+          });
+        }
         if (
           event.type === "command.upsert" &&
           ["completed", "failed", "cancelled"].includes(

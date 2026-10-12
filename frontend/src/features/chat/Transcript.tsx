@@ -504,6 +504,11 @@ export function Transcript({
               ? commands.find(c => c.id === message.command_id)
               : commands.filter(c => c.text.trim() === message.text.trim()).sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))[0]
             const isAgentAccepted = Boolean(hasAssistantReplied || (matchedCmd && (matchedCmd.state === 'accepted' || matchedCmd.state === 'running' || matchedCmd.state === 'completed')))
+            const nextUserOffset = visibleMessages.slice(idx + 1).findIndex(item => item.role === 'user')
+            const turnRemainder = visibleMessages.slice(idx + 1, nextUserOffset < 0 ? undefined : idx + 1 + nextUserOffset)
+            const canForkTurn = message.role === 'assistant' && !isActivity(message)
+              && !turnRemainder.some(item => item.role === 'assistant' && !isActivity(item))
+              && !(busy && nextUserOffset < 0)
             return (
               <motion.div className="transcript-message-entry" key={message.id} initial={enter} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.28, ease: [0.2, 0.8, 0.2, 1] }}>
                 {showDateDivider && (
@@ -520,7 +525,7 @@ export function Transcript({
                   session={session}
                   isLatest={idx === visibleMessages.length - 1}
                   onEdit={message.id === lastUserMessageId ? onEditLastUserMessage : undefined}
-                  onFork={onForkAtMessage ? () => onForkAtMessage(message, idx) : undefined}
+                  onFork={onForkAtMessage && canForkTurn ? () => onForkAtMessage(message, idx) : undefined}
                   hasAssistantReplied={hasAssistantReplied}
                   isAgentAccepted={isAgentAccepted}
                 />

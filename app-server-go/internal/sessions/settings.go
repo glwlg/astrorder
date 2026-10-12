@@ -3,7 +3,6 @@ package sessions
 import (
 	"context"
 	"net/http"
-	"strings"
 
 	sessiondv1 "astrorder.dev/contracts/gen/go/astrorder/sessiond/v1"
 )
@@ -307,9 +306,7 @@ func (h *Handler) handleSetSessionModel(w http.ResponseWriter, r *http.Request, 
 	if readback.Model != nil {
 		readModel = *readback.Model
 	}
-	modelMatches := (readModel == payload.Model || strings.HasSuffix(readModel, "/"+payload.Model) || strings.HasSuffix(payload.Model, "/"+readModel))
-	providerMatches := (payload.Provider == "" || readProvider == "" || payload.Provider == readProvider)
-	if !modelMatches || !providerMatches {
+	if !modelBindingMatches(payload.Provider, payload.Model, readProvider, readModel) {
 		writeJSONError(w, http.StatusBadGateway, "Model switch was not confirmed by native readback")
 		return
 	}

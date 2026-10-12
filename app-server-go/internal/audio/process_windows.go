@@ -27,6 +27,10 @@ func sanitizedEnv() []string {
 		// Strip sensitive credentials, tokens, secrets, and auth headers
 		upper := strings.ToUpper(entry)
 		key, _, _ := strings.Cut(upper, "=")
+		// An empty visibility mask hides all Vulkan devices in llama.cpp.
+		if key == "GGML_VK_VISIBLE_DEVICES" && strings.HasSuffix(entry, "=") {
+			continue
+		}
 		if strings.Contains(key, "SECRET") ||
 			strings.Contains(key, "CREDENTIAL") ||
 			strings.Contains(key, "TOKEN") ||

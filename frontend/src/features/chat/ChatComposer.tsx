@@ -178,7 +178,7 @@ export function ChatComposer({
   session: Session
   agent?: Agent
   tasks?: Task[]
-  usage?: { last_input_tokens: number; context_window: number }
+  usage?: { last_input_tokens: number; context_window: number; context_available?: boolean; source?: string }
   onHeightChange?: (height: number) => void
   onPreviewImage?: (images: string[], index: number) => void
 }) {
@@ -867,9 +867,9 @@ ${draft.text}` : entry.payload.text)
               color="gray"
               size="sm"
               leftSection={<IconBrain size={13} />}
-              title="当前上下文用量"
+              title={usage.source === 'native_last_request' ? '原生记录的上次请求输入用量' : '当前上下文用量'}
             >
-              {usage.context_window && usage.context_window > 0
+              {usage.context_available === false ? '上下文未取得' : usage.context_window && usage.context_window > 0
                 ? `${(usage.last_input_tokens / 1000).toFixed(1)}k / ${(usage.context_window / 1000).toFixed(0)}k`
                 : `${(usage.last_input_tokens / 1000).toFixed(1)}k`}
             </Badge>

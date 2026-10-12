@@ -355,7 +355,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // handleListAgents lists agents from the persistent store.
 func (h *Handler) handleListAgents(w http.ResponseWriter, r *http.Request) {
-	agents, err := h.store.ListAgents(r.Context())
+	agents, err := h.store.ListCurrentAgents(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "store_error", err.Error())
 		return

@@ -2,6 +2,32 @@ package hermes
 
 import "testing"
 
+func TestNativeToolLifecyclePreservesIdentity(t *testing.T) {
+	var events []map[string]any
+	a := New(Config{AgentID: "a", Emit: func(sid, kind string, data map[string]any, status string) error {
+		if kind != "hermes.notification" {
+			t.Fatalf("unexpected event %s", kind)
+		}
+		events = append(events, data)
+		return nil
+	}})
+	a.sessions["s"] = &SessionState{SessionID: "s", CommandID: "exact", Status: "running"}
+	for _, kind := range []string{"tool.start", "tool.complete"} {
+		a.handleGatewayEvent(map[string]any{"type": kind, "session_id": "s", "payload": map[string]any{"tool_id": "call-1", "name": "terminal", "args": map[string]any{"command": "test"}}})
+	}
+	if len(events) != 2 {
+		t.Fatalf("tool lifecycle lost: %d events", len(events))
+	}
+	for _, event := range events {
+		if event["command_id"] != "exact" || event["session_id"] != "s" {
+			t.Fatalf("lost binding: %+v", event)
+		}
+	}
+	if a.sessions["s"].Status != "running" {
+		t.Fatal("tool completion ended the turn")
+	}
+}
+
 func TestNativeMessageDeltaCarriesSubmittedCommand(t *testing.T) {
 	var event string
 	var payload map[string]any

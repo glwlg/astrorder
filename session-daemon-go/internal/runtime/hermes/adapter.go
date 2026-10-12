@@ -1170,6 +1170,11 @@ func (a *Adapter) handleHistoryPage(ctx context.Context, session *SessionState, 
 	if err != nil {
 		return core.Result{}, err
 	}
+	if before == "" {
+		if usage, usageErr := a.rpc(ctx, "session.usage", map[string]any{"session_id": handle}); usageErr == nil {
+			a.handleGatewayEvent(map[string]any{"type": "session.usage", "session_id": handle, "payload": map[string]any{"usage": usage}})
+		}
+	}
 	return core.Result{
 		SessionID: session.SessionID,
 		Status:    "idle",

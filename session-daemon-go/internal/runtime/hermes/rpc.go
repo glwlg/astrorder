@@ -224,7 +224,8 @@ func (a *Adapter) waitProcess(cmd *exec.Cmd) {
 }
 
 func (a *Adapter) readStdout(r io.Reader) {
-	defer a.failTransport(fmt.Errorf("native Hermes stdout closed"))
+	transportErr := fmt.Errorf("native Hermes stdout closed")
+	defer func() { a.failTransport(transportErr) }()
 	a.eventOnce.Do(func() { go a.dispatchEvents() })
 	scanner := bufio.NewScanner(r)
 	buf := make([]byte, 64*1024)
@@ -273,6 +274,9 @@ func (a *Adapter) readStdout(r io.Reader) {
 			}
 			continue
 		}
+	}
+	if err := scanner.Err(); err != nil {
+		transportErr = fmt.Errorf("native Hermes stdout read failed: %w", err)
 	}
 }
 
@@ -326,6 +330,25 @@ func (a *Adapter) handleGatewayEvent(params map[string]any) {
 	}
 
 	switch eventType {
+	case "tool.start", "tool.complete", "session.usage":
+		sid, _ := params["session_id"].(string)
+		a.mu.RLock()
+		id := a.handleToSession[sid]
+		if id == "" {
+			id = sid
+		}
+		session := a.sessions[id]
+		if session == nil {
+			a.mu.RUnlock()
+			return
+		}
+		commandID, status := session.CommandID, session.Status
+		a.mu.RUnlock()
+		if a.config.Emit != nil {
+			if err := a.config.Emit(id, "hermes.notification", map[string]any{"agent_id": a.config.AgentID, "session_id": id, "command_id": commandID, "frame": params}, status); err != nil {
+				a.failCloseSession(id, err)
+			}
+		}
 	case "message.delta":
 		sid, _ := params["session_id"].(string)
 		a.mu.RLock()
@@ -391,6 +414,12 @@ func (a *Adapter) handleGatewayEvent(params map[string]any) {
 				}
 			}
 			payload["agent_id"], payload["session_id"] = agentID, durableID
+			if payload["usage"] != nil {
+				if err := emit(durableID, "hermes.notification", map[string]any{"agent_id": agentID, "session_id": durableID, "frame": map[string]any{"type": "session.usage", "payload": payload}}, "idle"); err != nil {
+					a.failCloseSession(durableID, err)
+					return
+				}
+			}
 			delete(payload, "command_id")
 			if commandID != "" {
 				payload["command_id"] = commandID

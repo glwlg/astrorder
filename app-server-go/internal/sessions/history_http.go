@@ -221,6 +221,11 @@ func projectHistoryItem(item map[string]any, aid, sid, nativeID, source, agentKi
 	if identity == nil {
 		identity = item["id"]
 	}
+	if identity == nil && agentKind == "hermes" && role == "tool" {
+		if callID := stringValue(item, "tool_call_id"); callID != "" {
+			identity = "tool-call:" + callID
+		}
+	}
 	if identity == nil {
 		return nil
 	}
@@ -276,7 +281,11 @@ func projectHistoryItem(item map[string]any, aid, sid, nativeID, source, agentKi
 		}
 	}
 	if kind == "tool" && row["tool"] == nil {
-		row["tool"] = map[string]any{"name": item["name"], "arguments": item["args"]}
+		name := item["name"]
+		if agentKind == "hermes" && name == nil {
+			name = item["tool_name"]
+		}
+		row["tool"] = map[string]any{"name": name, "arguments": item["args"]}
 	}
 	return []map[string]any{row}
 }

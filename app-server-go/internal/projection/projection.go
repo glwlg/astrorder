@@ -993,6 +993,41 @@ func projectHermesStreamTx(ctx context.Context, tx *sql.Tx, streamID string, pay
 		frame = payload
 	}
 
+	if frame["type"] == "session.usage" {
+		data, _ := frame["payload"].(map[string]any)
+		usage, _ := data["usage"].(map[string]any)
+		// A lazy gateway has no context measurement; its zero totals must not
+		// replace a real measurement from the running native Agent.
+		if usage["context_used"] == nil {
+			return nil, nil
+		}
+		return projectTokenMetricsTx(ctx, tx, sid, agentID, map[string]any{
+			"agent_id": agentID, "session_id": sid, "model": usage["model"],
+			"input_tokens": usage["input"], "output_tokens": usage["output"], "cached_tokens": usage["cache_read"],
+			"reasoning_tokens": usage["reasoning"], "total_tokens": usage["total"],
+			"context_window": usage["context_max"], "last_input_tokens": usage["context_used"],
+		})
+	}
+
+	if phase, _ := frame["type"].(string); phase == "tool.start" || phase == "tool.complete" {
+		data, _ := frame["payload"].(map[string]any)
+		toolID, _ := data["tool_id"].(string)
+		if toolID == "" {
+			return nil, fmt.Errorf("native Hermes tool missing tool_id")
+		}
+		state := "running"
+		text := ""
+		if phase == "tool.complete" {
+			state = "completed"
+			text, _ = data["result_text"].(string)
+			if text == "" {
+				text, _ = data["summary"].(string)
+			}
+		}
+		message := map[string]any{"id": "hermes-tool-" + toolID, "session_id": sid, "role": "tool", "kind": "tool", "text": text, "attachments": []any{}, "command_id": payload["command_id"], "tool": map[string]any{"name": data["name"], "arguments": data["args"], "status": state}}
+		return projectConnectorEventTx(ctx, tx, streamID, agentID, map[string]any{"type": "message.upsert", "data": message})
+	}
+
 	var events []store.Event
 	delta, _ := frame["delta"].(string)
 	if delta == "" {
@@ -1482,6 +1517,16 @@ func projectCodexNotificationTx(ctx context.Context, tx *sql.Tx, streamID, agent
 	var events []store.Event
 
 	switch method {
+	case "thread/tokenUsage/updated":
+		usage, _ := params["tokenUsage"].(map[string]any)
+		last, _ := usage["last"].(map[string]any)
+		total, _ := usage["total"].(map[string]any)
+		return projectTokenMetricsTx(ctx, tx, explicitSession, explicitAgent, map[string]any{
+			"agent_id": explicitAgent, "session_id": explicitSession, "model": "native",
+			"input_tokens": total["inputTokens"], "output_tokens": total["outputTokens"],
+			"cached_tokens": total["cachedInputTokens"], "reasoning_tokens": total["reasoningOutputTokens"],
+			"total_tokens": total["totalTokens"], "last_input_tokens": last["inputTokens"], "context_window": usage["modelContextWindow"],
+		})
 	case "turn/started":
 		if explicitAgent != "" && explicitSession != "" {
 			_, err := tx.ExecContext(ctx, `UPDATE sessions SET status='running',updated_at=datetime('now') WHERE agent_id=? AND id=?`, explicitAgent, explicitSession)

@@ -9,7 +9,7 @@ import (
 
 func (h *Handler) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	agents, err := h.store.ListAgents(ctx)
+	agents, err := h.store.ListCurrentAgents(ctx)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "Failed to list agents: "+err.Error())
 		return

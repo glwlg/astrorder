@@ -330,7 +330,7 @@ func (h *Handler) restoreModel(ctx context.Context, ref *pb.SessionRef) error {
 		return commandFailure(502, "Saved model readback unavailable; message was not sent")
 	}
 	provider, model := stringValue(binding, "provider"), stringValue(binding, "model")
-	if current.GetModel() == model && (provider == "" || current.GetProvider() == "" || current.GetProvider() == provider) {
+	if modelBindingMatches(provider, model, current.GetProvider(), current.GetModel()) {
 		return h.restoreReasoning(ctx, ref, binding, current)
 	}
 	receipt, err := h.client.Runtime.SetModel(ctx, &pb.SetModelRequest{Meta: newCommandMeta("", ""), Session: ref, Provider: provider, Model: model})
@@ -341,11 +341,8 @@ func (h *Handler) restoreModel(ctx context.Context, ref *pb.SessionRef) error {
 		return err
 	}
 	current, err = h.client.Runtime.ReadModel(ctx, &pb.ReadModelRequest{Session: ref})
-	if err != nil || current.GetModel() != model {
+	if err != nil || !modelBindingMatches(provider, model, current.GetProvider(), current.GetModel()) {
 		return errors.New("Saved model was not confirmed; message was not sent")
-	}
-	if provider != "" && current.GetProvider() != "" && current.GetProvider() != provider {
-		return errors.New("Saved model provider was not confirmed; message was not sent")
 	}
 	return h.restoreReasoning(ctx, ref, binding, current)
 }

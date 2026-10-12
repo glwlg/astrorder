@@ -1,0 +1,21 @@
+.session-composer-gate {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 12px auto 20px;
+  padding: 18px 20px;
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: 22px;
+  background: var(--mantine-color-body);
+  color: var(--mantine-color-text);
+  box-shadow: 0 2px 6px rgb(0 0 0 / 3%);
+}
+.session-composer-gate > svg { flex-shrink: 0; }
+.session-composer-gate-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 4px; font-size: 13px; }
+.session-composer-gate-copy > span { color: var(--mantine-color-dimmed); }
+.session-composer-gate-copy [role="alert"] { color: var(--mantine-color-red-text); overflow-wrap: anywhere; }
+.session-composer-gate-actions { display: flex; gap: 12px; padding-left: 14px; border-left: 1px solid var(--mantine-color-default-border); }
+@media (max-width: 600px) {
+  .session-composer-gate { margin: 8px auto 12px; padding: 16px; flex-wrap: wrap; }
+  .session-composer-gate-actions { margin-left: 32px; padding-left: 0; border-left: 0; }
+}

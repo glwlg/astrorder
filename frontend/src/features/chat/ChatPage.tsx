@@ -29,6 +29,7 @@ import { AgentKindBadge } from '../../components/SessionRuntimeFacts'
 import { selectApprovals, selectCommands, selectOutbox, selectSessions, selectTasks, useAstrorderStore } from '../../state/store'
 import { useSessionResources } from '../../hooks/useAstrorderData'
 import { ChatComposer } from './ChatComposer'
+import { SessionComposerGate } from './SessionComposerGate'
 import { QuickOpen } from './QuickOpen'
 import { appendReviewOnce, buildUncommittedReviewCommand, extractNativeReviewComments, isRecoverableReviewRun, REVIEW_TIMEOUT_ERROR, reviewOutputPending, reviewRunTimedOut } from './reviewRelay'
 import { REASONING_EFFORTS } from './composerMedia'
@@ -781,6 +782,14 @@ function ChatPageBody() {
               }
             }}
          />
+          <SessionComposerGate
+            key={`gate:${scopeKey(selected.agent_id, selected.id)}`}
+            session={selected}
+            onFork={messages.some(message => message.role === 'assistant' && message.kind !== 'tool') ? () => {
+              const index = messages.findLastIndex(message => message.role === 'assistant' && message.kind !== 'tool')
+              handleOpenFork(messages[index], index)
+            } : undefined}
+          >
           <ChatComposer
             key={`composer:${scopeKey(selected.agent_id, selected.id)}`}
             session={selected}
@@ -790,6 +799,7 @@ function ChatPageBody() {
             onHeightChange={setComposerHeight}
             onPreviewImage={openGallery}
           />
+          </SessionComposerGate>
         </section>
         <aside
           className="desktop-details"

@@ -336,8 +336,34 @@ func (h *Handler) handleGetSessionUsage(w http.ResponseWriter, r *http.Request) 
 	}
 	sessionID := parts[3]
 
+	metrics, err := h.store.ListTokenMetrics(r.Context(), r.URL.Query().Get("agent_id"), sessionID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "store_error", "Session usage unavailable")
+		return
+	}
+
+	if len(metrics) > 0 {
+		result := metrics[0]
+		result["ok"] = true
+		if _, exists := result["context_available"]; !exists {
+			result["context_available"] = result["last_input_tokens"] != nil
+		}
+		number := func(key string) float64 { value, _ := strconv.ParseFloat(fmt.Sprint(result[key]), 64); return value }
+		result["used_percentage"] = nil
+		if window := number("context_window"); window > 0 {
+			result["used_percentage"] = number("last_input_tokens") * 100 / window
+		}
+		result["cache_hit_rate"] = 0
+		if input := number("input_tokens"); input > 0 {
+			result["cache_hit_rate"] = number("cached_tokens") * 100 / input
+		}
+		result["speed"] = nil
+		writeJSON(w, http.StatusOK, result)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":                true,
+		"context_available": false,
 		"session_id":        sessionID,
 		"model":             "default",
 		"context_window":    nil,

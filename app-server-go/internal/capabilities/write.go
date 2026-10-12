@@ -5,7 +5,7 @@ import (
 	"net/url"
 	"strings"
 
-	"gopkg.in/yaml.v3"
+	"github.com/goccy/go-yaml/ast"
 )
 
 // mcpInput is what the browser sends for one MCP server. Env and Headers are
@@ -204,12 +204,12 @@ func applyMCPYAML(data []byte, in mcpInput) ([]byte, error) {
 		return nil, err
 	}
 	servers := ensureMap(root, "mcp_servers")
-	entry := mapGet(servers, in.Name)
-	if entry == nil || entry.Kind != yaml.MappingNode {
+	entry, _ := mapGet(servers, in.Name).(*ast.MappingNode)
+	if entry == nil {
 		if err := mapSet(servers, in.Name, map[string]any{}); err != nil {
 			return nil, err
 		}
-		entry = mapGet(servers, in.Name)
+		entry, _ = mapGet(servers, in.Name).(*ast.MappingNode)
 	}
 	set := func(key string, present bool, value any) error {
 		if !present {

@@ -4,111 +4,136 @@ import (
 	"bytes"
 	"fmt"
 
-	"gopkg.in/yaml.v3"
+	"github.com/goccy/go-yaml"
+	"github.com/goccy/go-yaml/ast"
+	"github.com/goccy/go-yaml/parser"
 )
 
-// Hermes keeps its settings in config.yaml, which the user also edits by hand.
-// Editing the node tree keeps comments and key order; only the touched keys
-// change.
-
-func yamlParse(data []byte) (*yaml.Node, *yaml.Node, error) {
+// Hermes settings are user-editable. Modify the syntax tree so comments,
+// untouched values, anchors and key order survive configuration updates.
+func yamlParse(data []byte) (*ast.File, *ast.MappingNode, error) {
 	if len(bytes.TrimSpace(data)) == 0 {
-		root := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
-		return &yaml.Node{Kind: yaml.DocumentNode, Content: []*yaml.Node{root}}, root, nil
+		data = []byte("{}\n")
 	}
-	var doc yaml.Node
-	if err := yaml.Unmarshal(data, &doc); err != nil {
+	doc, err := parser.ParseBytes(data, parser.ParseComments)
+	if err != nil {
 		return nil, nil, err
 	}
-	if doc.Kind != yaml.DocumentNode || len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
+	if len(doc.Docs) != 1 {
+		return nil, nil, fmt.Errorf("config.yaml 必须只包含一个文档")
+	}
+	root, ok := doc.Docs[0].Body.(*ast.MappingNode)
+	if !ok {
 		return nil, nil, fmt.Errorf("config.yaml 顶层不是映射")
 	}
-	return &doc, doc.Content[0], nil
+	return doc, root, nil
 }
 
-func yamlDump(doc *yaml.Node) ([]byte, error) {
-	var buffer bytes.Buffer
-	encoder := yaml.NewEncoder(&buffer)
-	encoder.SetIndent(2)
-	if err := encoder.Encode(doc); err != nil {
+func yamlDump(doc *ast.File) ([]byte, error) {
+	data := []byte(doc.String())
+	// Validate the edited tree before the caller writes it to disk.
+	if _, err := parseYAMLMap(data); err != nil {
 		return nil, err
 	}
-	if err := encoder.Close(); err != nil {
-		return nil, err
-	}
-	return buffer.Bytes(), nil
+	return data, nil
 }
 
-func mapIndex(m *yaml.Node, key string) int {
-	for i := 0; i+1 < len(m.Content); i += 2 {
-		if m.Content[i].Value == key {
+func mapIndex(m *ast.MappingNode, key string) int {
+	for i, entry := range m.Values {
+		if scalarText(entry.Key) == key {
 			return i
 		}
 	}
 	return -1
 }
 
-func mapGet(m *yaml.Node, key string) *yaml.Node {
-	if m == nil || m.Kind != yaml.MappingNode {
+func mapGet(m *ast.MappingNode, key string) ast.Node {
+	if m == nil {
 		return nil
 	}
 	if i := mapIndex(m, key); i >= 0 {
-		return m.Content[i+1]
+		return m.Values[i].Value
 	}
 	return nil
 }
 
-func mapSet(m *yaml.Node, key string, value any) error {
-	var node yaml.Node
-	if err := node.Encode(value); err != nil {
+func mapSet(m *ast.MappingNode, key string, value any) error {
+	data, err := yaml.MarshalWithOptions(yaml.MapSlice{{Key: key, Value: value}}, yaml.Indent(2), yaml.IndentSequence(true))
+	if err != nil {
 		return err
 	}
-	if i := mapIndex(m, key); i >= 0 {
-		node.HeadComment, node.LineComment, node.FootComment = m.Content[i+1].HeadComment, m.Content[i+1].LineComment, m.Content[i+1].FootComment
-		m.Content[i+1] = &node
-		return nil
+	_, generated, err := yamlParse(data)
+	if err != nil {
+		return err
 	}
-	m.Content = append(m.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key}, &node)
+	entry := generated.Values[0]
+	entry.SetIsFlowStyle(m.IsFlowStyle)
+	column := m.GetToken().Position.Column
+	if len(m.Values) > 0 {
+		column = m.Values[0].Key.GetToken().Position.Column
+	}
+	entry.AddColumn(column - entry.Key.GetToken().Position.Column)
+	if i := mapIndex(m, key); i >= 0 {
+		old := m.Values[i]
+		entry.Key = old.Key
+		entry.Comment, entry.FootComment = old.Comment, old.FootComment
+		if err := entry.Value.SetComment(old.Value.GetComment()); err != nil {
+			return err
+		}
+		m.Values[i] = entry
+	} else {
+		m.Values = append(m.Values, entry)
+	}
 	return nil
 }
 
-func mapDel(m *yaml.Node, key string) {
-	if m == nil {
+func mapDel(node ast.Node, key string) {
+	m, ok := node.(*ast.MappingNode)
+	if !ok || m == nil {
 		return
 	}
 	if i := mapIndex(m, key); i >= 0 {
-		m.Content = append(m.Content[:i], m.Content[i+2:]...)
+		m.Values = append(m.Values[:i], m.Values[i+1:]...)
 	}
 }
 
-// ensureMap returns the mapping stored at key, creating (or replacing a null
-// placeholder with) an empty one.
-func ensureMap(m *yaml.Node, key string) *yaml.Node {
-	if existing := mapGet(m, key); existing != nil && existing.Kind == yaml.MappingNode {
+// ensureMap creates a missing mapping or replaces a null placeholder.
+func ensureMap(m *ast.MappingNode, key string) *ast.MappingNode {
+	if existing, ok := mapGet(m, key).(*ast.MappingNode); ok {
 		return existing
 	}
 	_ = mapSet(m, key, map[string]any{})
-	return mapGet(m, key)
+	created, _ := mapGet(m, key).(*ast.MappingNode)
+	return created
 }
 
-func nodeStrings(n *yaml.Node) []string {
-	if n == nil || n.Kind != yaml.SequenceNode {
+func scalarText(node ast.Node) string {
+	if scalar, ok := node.(ast.ScalarNode); ok {
+		return asString(scalar.GetValue())
+	}
+	return ""
+}
+
+func nodeStrings(node ast.Node) []string {
+	n, ok := node.(*ast.SequenceNode)
+	if !ok {
 		return nil
 	}
-	out := make([]string, 0, len(n.Content))
-	for _, item := range n.Content {
-		out = append(out, item.Value)
+	out := make([]string, 0, len(n.Values))
+	for _, item := range n.Values {
+		out = append(out, scalarText(item))
 	}
 	return out
 }
 
-func nodeStringMap(n *yaml.Node) map[string]string {
+func nodeStringMap(node ast.Node) map[string]string {
 	out := map[string]string{}
-	if n == nil || n.Kind != yaml.MappingNode {
+	n, ok := node.(*ast.MappingNode)
+	if !ok {
 		return out
 	}
-	for i := 0; i+1 < len(n.Content); i += 2 {
-		out[n.Content[i].Value] = n.Content[i+1].Value
+	for _, entry := range n.Values {
+		out[scalarText(entry.Key)] = scalarText(entry.Value)
 	}
 	return out
 }

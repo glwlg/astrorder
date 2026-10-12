@@ -3,7 +3,7 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $ExpectedBufVersion = '1.66.1'
-$ExpectedGoVersion = 'go1.26.4'
+$ExpectedGoVersion = 'go1.27.0'
 $ExpectedProtocGenGoVersion = 'v1.36.12'
 $ExpectedProtocGenGoGrpcVersion = '1.6.2'
 $ExpectedGrpcToolsVersion = '1.84.0'

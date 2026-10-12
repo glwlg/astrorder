@@ -44,6 +44,14 @@ const outbound: OutboxEntry = {
 }
 
 describe('transcript follow mode', () => {
+  it('offers a fork only at the end of an assistant turn', () => {
+    render(<MantineProvider><Transcript outbox={[]} onForkAtMessage={vi.fn()} messages={[
+      { ...message, id: 'intro', text: '先检查' },
+      { ...message, id: 'tool', role: 'tool', kind: 'tool', text: 'done', tool: { name: 'terminal' } },
+      { ...message, id: 'final', text: '完成' },
+    ]} /></MantineProvider>)
+    expect(screen.getAllByRole('button', { name: '分叉会话' })).toHaveLength(1)
+  })
   it('groups reasoning and tools into folds and hides empty assistant bubbles', () => {
     render(<MantineProvider><Transcript outbox={[]} messages={[
       { ...message, id: 'thinking', kind: 'thinking', text: '检查数据' },

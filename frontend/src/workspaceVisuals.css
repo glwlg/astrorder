@@ -133,7 +133,8 @@
 .runtime-summary-item { display: flex; align-items: center; gap: 6px; padding: 0; border: 0; background: transparent; color: var(--astr-text); }
 .runtime-summary-item > .mantine-Text-root { margin-top: 0; font-size: 12px; font-weight: 500; max-width: 180px; }
 .runtime-summary-item-button { cursor: pointer; }.runtime-summary-item-button:hover { color: var(--astr-indigo); }
-.chat-column > .composer-card { position: absolute; left: 50%; bottom: var(--composer-bottom, 18px); transform: translateX(-50%); width: min(calc(100% - 32px), var(--astr-reading-width)); z-index: 10; margin-inline: 0; background: #ffffff; border: 1px solid rgba(0, 0, 0, 0.08); border-radius: 20px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06), 0 1px 4px rgba(0, 0, 0, 0.04); }
+.chat-column > .composer-card, .chat-column > .session-composer-gate { width: min(calc(100% - 32px), var(--astr-reading-width)); }
+.chat-column > .composer-card { position: absolute; left: 50%; bottom: var(--composer-bottom, 18px); transform: translateX(-50%); z-index: 10; margin-inline: 0; background: #ffffff; border: 1px solid rgba(0, 0, 0, 0.08); border-radius: 20px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06), 0 1px 4px rgba(0, 0, 0, 0.04); }
 :root[data-mantine-color-scheme='dark'] .chat-column > .composer-card { background: #1c2028; border: 1px solid var(--astr-border); box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3); }
 .composer-card { width: min(100%, var(--astr-reading-width)); margin-inline: auto; border-radius: 16px; box-shadow: var(--astr-shadow); }
 .composer-card:focus-within {

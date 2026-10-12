@@ -9,6 +9,7 @@ import (
 
 	"astrorder.dev/app-server/internal/auth"
 	"astrorder.dev/app-server/internal/daemonclient"
+
 	"astrorder.dev/app-server/internal/store"
 )
 
@@ -51,6 +52,7 @@ func NewHandler(opts Options) (http.Handler, error) {
 		httpClient = defaultHTTPClient()
 	}
 	h := &Handler{
+
 		store:      opts.Store,
 		client:     opts.Client,
 		authorizer: opts.Authorizer,
