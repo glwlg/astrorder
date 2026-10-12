@@ -132,6 +132,10 @@ func (daemon *Daemon) recordConnectorHello(agentID string, agent map[string]any)
 }
 
 func (daemon *Daemon) recordConnectorEvent(agentID string, event map[string]any) error {
+	if err := daemon.beginControl(); err != nil {
+		return err
+	}
+	defer daemon.endControl()
 	eventAgentID, _ := event["agent_id"].(string)
 	if eventAgentID != agentID {
 		return newProtocolError("connector event agent identity does not match hello")

@@ -1,0 +1,103 @@
+from __future__ import annotations
+
+import asyncio
+import json
+import queue
+import re
+import sys
+import threading
+from collections.abc import Callable
+from typing import Any
+
+
+class HermesTransport:
+    """One-shot bidirectional connector transport; it never resends commands after a disconnect."""
+
+    def __init__(
+        self,
+        endpoint: str,
+        secret: str,
+        on_command: Callable[[dict[str, Any]], None],
+        on_connected: Callable[[], None] | None = None,
+    ):
+        self.endpoint = endpoint
+        self.secret = secret
+        self.on_command = on_command
+        self.on_connected = on_connected
+        self._outgoing: queue.Queue[dict[str, Any] | None] = queue.Queue()
+        self._thread: threading.Thread | None = None
+        self._stop = threading.Event()
+        self._agent: dict[str, Any] | None = None
+
+    def start(self, agent: dict[str, Any]) -> None:
+        if self._thread is not None:
+            return
+        self._agent = dict(agent)
+        self._thread = threading.Thread(target=self._run, name="astrorder-hermes-connector", daemon=True)
+        self._thread.start()
+
+    def send_event(self, event: dict[str, Any]) -> None:
+        if self._thread is not None and not self._stop.is_set():
+            self._outgoing.put({"type": "event", "event": dict(event)})
+
+    def stop(self) -> None:
+        self._stop.set()
+        self._outgoing.put(None)
+        if self._thread is not None and self._thread is not threading.current_thread():
+            self._thread.join(timeout=2)
+        self._thread = None
+
+    def _run(self) -> None:
+        try:
+            asyncio.run(self._session())
+        except Exception as exc:  # noqa: BLE001 - transport thread must fail closed on connection errors
+            detail = re.sub(r"(?i)(bearer\s+)[^\s,;]+", r"\1[REDACTED]", str(exc))[:400]
+            print(
+                f"[astrorder-hermes] connector failed: {type(exc).__name__}: {detail}",
+                file=sys.stderr,
+                flush=True,
+            )
+
+    async def _connect(self):
+        import websockets
+
+        headers = {"Authorization": f"Bearer {self.secret}"}
+        try:
+            return await websockets.connect(self.endpoint, additional_headers=headers)
+        except TypeError:
+            return await websockets.connect(self.endpoint, extra_headers=headers)
+
+    async def _session(self) -> None:
+        if self._agent is None:
+            return
+        async with await self._connect() as socket:
+            await socket.send(
+                json.dumps(
+                    {
+                        "type": "hello",
+                        "protocol_version": 1,
+                        "agent": self._agent,
+                    },
+                    ensure_ascii=False,
+                )
+            )
+            if self.on_connected is not None:
+                self.on_connected()
+            sender = asyncio.create_task(self._send_outgoing(socket))
+            try:
+                async for value in socket:
+                    frame = json.loads(value)
+                    if frame.get("type") == "command" and isinstance(frame.get("command"), dict):
+                        self.on_command(frame["command"])
+            finally:
+                self._outgoing.put(None)
+                await asyncio.gather(sender, return_exceptions=True)
+
+    async def _send_outgoing(self, socket) -> None:
+        while True:
+            value = await asyncio.to_thread(self._outgoing.get)
+            if value is None:
+                await socket.close()
+                return
+            if not self._stop.is_set():
+                await socket.send(json.dumps(value, ensure_ascii=False))

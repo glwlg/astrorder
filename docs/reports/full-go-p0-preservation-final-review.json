@@ -1,0 +1,116 @@
+{
+  "review": "FGP0-PRESERVATION-001 bounded rereview",
+  "status": "PASS",
+  "passed": true,
+  "scope": [
+    "scripts/migration/full_go_inventory.py: verify and daemon_dispatch_locations",
+    "backend/tests/test_full_go_inventory.py: reproducibility normalization",
+    "backend/tests/test_full_go_inventory_dispatch.py"
+  ],
+  "source_revision": "ff32f947024b1840b939ebfb8e58e45886d34b47",
+  "baseline": {
+    "path": "docs/reports/full-go-baseline.json",
+    "raw_sha256": "c19a3dda9689fa886a17ba21fc29a0a9f46ee82fc8180235f8b719d6106d4ff0",
+    "canonical_content_sha256": "d8670db3fbf19d4c00505696897f065bf13bb53ea1cabae627e03253cd671acc",
+    "stored_content_sha256": "d8670db3fbf19d4c00505696897f065bf13bb53ea1cabae627e03253cd671acc",
+    "unchanged_from_prior_fail_review": true
+  },
+  "prior_fail_report": {
+    "json_path": "C:/Users/luwei/AppData/Local/hermes/cache/scratch/full-go-p0-preservation-review.json",
+    "json_sha256": "f48f8e9cfaf4caebb11c410090e58cafe7864c7382b36f0007c1ff99b36577b6",
+    "md_path": "C:/Users/luwei/AppData/Local/hermes/cache/scratch/full-go-p0-preservation-review.md",
+    "md_sha256": "8adbd3e43f62fd2941e3ebf9e0189e41217569a82dac1f6ec7a5e676baa819e8",
+    "overwritten": false
+  },
+  "findings": [],
+  "resolved_findings": [
+    {
+      "id": "FGP0-PRESERVATION-001",
+      "severity": "high",
+      "status": "RESOLVED",
+      "passed": true,
+      "location": [
+        "scripts/migration/full_go_inventory.py:705",
+        "scripts/migration/full_go_inventory.py:743",
+        "scripts/migration/full_go_inventory.py:1843",
+        "backend/tests/test_full_go_inventory.py:141",
+        "backend/tests/test_full_go_inventory_dispatch.py:48",
+        "backend/tests/test_full_go_inventory_dispatch.py:75"
+      ],
+      "summary": "Verification now compares the set difference of frozen and current repository-relative dispatch source paths for each daemon action, so one runtime branch cannot disappear merely because another runtime still keeps the action globally SUPPORTED.",
+      "implementation_evidence": [
+        "daemon_dispatch_locations retains every accepted non-test, non-parity, non-grpcapi Go dispatch location.",
+        "Each daemon action records all locations in dispatch_sources.",
+        "verify computes frozen dispatch path identities minus current dispatch path identities per action and returns 1 for every missing path.",
+        "Reproducibility normalization replaces dispatch_sources with sorted unique path strings, preserving source identity while ignoring only line and sha256 citation drift. The primary source path is also retained as a path-only object."
+      ],
+      "repro": {
+        "fixture_root": "C:/Users/luwei/AppData/Local/hermes/cache/scratch/full-go-p0-partial-loss-rereview-fixtures",
+        "stable_source_positive": {
+          "exit": 0,
+          "result": "verified source inventory against frozen baseline d8670db3fbf19d4c00505696897f065bf13bb53ea1cabae627e03253cd671acc"
+        },
+        "frozen_dispatch_paths": [
+          "session-daemon-go/internal/runtime/grok/runtime.go",
+          "session-daemon-go/internal/runtime/hermes/adapter.go"
+        ],
+        "mutation": "Copied actual scoped source into a scratch Git-backed checkout, verified it unchanged, removed only the session.reasoning.set case from session-daemon-go/internal/runtime/hermes/adapter.go, and retained the Grok case.",
+        "mutated_dispatch_paths": [
+          "session-daemon-go/internal/runtime/grok/runtime.go"
+        ],
+        "mutated_verify_exit": 1,
+        "mutated_verify_stderr": "frozen daemon dispatch missing: session.reasoning.set session-daemon-go/internal/runtime/hermes/adapter.go",
+        "citation_changes_only": "The parametrized regression changes line by +100 and sha256 to 64 zeroes for both dispatch citations without removing a path; verify returns 0. This case passed in the final full scoped pytest run."
+      }
+    }
+  ],
+  "exact_commands": [
+    {
+      "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_full_go_inventory.py backend/tests/test_full_go_inventory_dispatch.py -q --tb=short --basetemp C:/Users/luwei/AppData/Local/hermes/cache/scratch/full-go-p0-partial-loss-rereview-fixtures",
+      "exit": 1,
+      "result": "19 passed, 1 failed, 2 warnings in 97.94s",
+      "accepted_as_final_evidence": false,
+      "note": "Superseded concurrent snapshot: the real-copy regression lacked Git history and verification returned 1 early for unrelated missing frozen script/build entries. The scoped test file then changed to add a local shared Git clone and an unchanged-source precheck."
+    },
+    {
+      "command": "git init . && git fetch --no-tags 'P:/workspace/glwlg/ai/astrorder' ff32f947024b1840b939ebfb8e58e45886d34b47 && PYTHONPATH='<fixture>/backend/src' 'P:/workspace/glwlg/ai/astrorder/backend/.venv/Scripts/python.exe' 'P:/workspace/glwlg/ai/astrorder/scripts/migration/full_go_inventory.py' verify --root '<fixture>' --baseline 'P:/workspace/glwlg/ai/astrorder/docs/reports/full-go-baseline.json'",
+      "exit": 1,
+      "result": "Exploratory run stopped on unmapped decorator entrypoints due to the wrong import context.",
+      "accepted_as_final_evidence": false
+    },
+    {
+      "command": "PYTHONPATH='P:/workspace/glwlg/ai/astrorder/backend/src' 'P:/workspace/glwlg/ai/astrorder/backend/.venv/Scripts/python.exe' 'P:/workspace/glwlg/ai/astrorder/scripts/migration/full_go_inventory.py' verify --root 'C:/Users/luwei/AppData/Local/hermes/cache/scratch/full-go-p0-partial-loss-rereview-fixtures/test_source_verify_rejects_rem0/checkout' --baseline 'P:/workspace/glwlg/ai/astrorder/docs/reports/full-go-baseline.json'",
+      "exit": 1,
+      "result": "frozen daemon dispatch missing: session.reasoning.set session-daemon-go/internal/runtime/hermes/adapter.go",
+      "accepted_as_final_evidence": true
+    },
+    {
+      "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_full_go_inventory.py backend/tests/test_full_go_inventory_dispatch.py -q --tb=short --basetemp C:/Users/luwei/AppData/Local/hermes/cache/scratch/full-go-p0-partial-loss-rereview-fixtures",
+      "exit": 0,
+      "result": "20 passed, 2 warnings in 112.88s",
+      "accepted_as_final_evidence": true,
+      "note": "Final stable scoped snapshot. Warnings were FastAPI/Starlette dependency deprecations."
+    },
+    {
+      "command": "backend/.venv/Scripts/python.exe -m ruff check scripts/migration/full_go_inventory.py backend/tests/test_full_go_inventory.py backend/tests/test_full_go_inventory_dispatch.py",
+      "exit": 0,
+      "result": "All checks passed!",
+      "accepted_as_final_evidence": true
+    },
+    {
+      "command": "PYTHONPATH='P:/workspace/glwlg/ai/astrorder/backend/src' backend/.venv/Scripts/python.exe scripts/migration/full_go_inventory.py verify --root 'P:/workspace/glwlg/ai/astrorder' --baseline 'P:/workspace/glwlg/ai/astrorder/docs/reports/full-go-baseline.json'",
+      "exit": 0,
+      "result": "verified source inventory against frozen baseline d8670db3fbf19d4c00505696897f065bf13bb53ea1cabae627e03253cd671acc",
+      "accepted_as_final_evidence": true
+    }
+  ],
+  "scope_sha256": {
+    "scripts/migration/full_go_inventory.py": "aae33a665459d129ac53ff43e280b42195837b478de55792c1993f5388404519",
+    "backend/tests/test_full_go_inventory.py": "112ce455b1b5642cb8c61f1bc2db164e56225641bc543ac7ae41b022cb0515d2",
+    "backend/tests/test_full_go_inventory_dispatch.py": "b94bbaeff5e60b865d98970fb936ab6b01de08d4643c79093ba56e777e3a2384",
+    "docs/reports/full-go-baseline.json": "c19a3dda9689fa886a17ba21fc29a0a9f46ee82fc8180235f8b719d6106d4ff0"
+  },
+  "source_stability": "The final hashes above were identical immediately before and after the final passing scoped pytest, Ruff, and source verification. Earlier concurrent test-file snapshots were not accepted as final evidence.",
+  "repository_and_external_effects": "The reviewer made no repository edits and did not commit, push, stash, contact production/services/databases/chat/credentials, or run real inference. Writes were limited to the authorized private scratch fixture tree and these final scratch reports.",
+  "completion_claim": "This PASS resolves only the bounded FGP0-PRESERVATION-001 rereview. It does not mark P0 or the full Go migration goal complete."
+}

@@ -13,7 +13,7 @@ export function visibleTranscript(stored: Message[], loaded: Message[], baseline
     // If this is an optimistic user message and a real persisted history message with matching text has arrived (e.g. from Hermes native history), hide the optimistic copy
     if (m.id.startsWith('optimistic-') && m.role === 'user') {
       const optimisticTime = Date.parse(m.created_at)
-      if (loadedUserMessages.some(loadedMsg => loadedMsg.text.trim() === m.text.trim() && Math.abs(Date.parse(loadedMsg.created_at) - optimisticTime) <= 2_000)) {
+      if (loadedUserMessages.some(loadedMsg => loadedMsg.text.trim() === m.text.trim() && Date.parse(loadedMsg.created_at) >= optimisticTime - 5_000)) {
         return false
       }
     }

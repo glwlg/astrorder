@@ -1,0 +1,58 @@
+{
+  "models": [
+    {
+      "visibility": "list",
+      "priority": 5,
+      "base_instructions": "You are a coding agent powered by the model. You and the user share one workspace, and your job is to collaborate with them until their intended goal is completely handled.",
+      "supported_in_api": true,
+      "supports_parallel_tool_calls": true,
+      "supports_reasoning_summaries": true,
+      "shell_type": "unified_exec",
+      "support_verbosity": true,
+      "default_verbosity": "low",
+      "apply_patch_tool_type": "freeform",
+      "web_search_tool_type": "text_and_image",
+      "truncation_policy": {
+        "mode": "tokens",
+        "limit": 10000
+      },
+      "supports_image_detail_original": true,
+      "comp_hash": "3000",
+      "effective_context_window_percent": 95,
+      "experimental_supported_tools": [
+        "send_user_message_async",
+        "clock"
+      ],
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "supports_search_tool": true,
+      "supports_experimental_context": true,
+      "node_repl_auto_review_required": true,
+      "node_repl_disabled": false,
+      "multi_agent_version": "v1",
+      "slug": "antigravity/gemini-3.8-flash",
+      "display_name": "antigravity/gemini-3.8-flash",
+      "description": "由 Magpie 提供",
+      "context_window": 500000,
+      "max_context_window": 500000,
+      "supported_reasoning_levels": [
+        {
+          "effort": "low",
+          "description": "low"
+        },
+        {
+          "effort": "medium",
+          "description": "medium"
+        },
+        {
+          "effort": "high",
+          "description": "high"
+        }
+      ],
+      "default_reasoning_level": "medium",
+      "auto_compact_token_limit": 400000
+    }
+  ]
+}

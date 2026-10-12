@@ -53,6 +53,37 @@ function writeExpandedPaths(key: string, paths: Set<string>): void {
   }
 }
 
+/** Turns a failed tree response into a message that says why, not just the status. */
+async function describeTreeFailure(res: Response): Promise<string> {
+  let detail = ''
+  try {
+    const body: unknown = await res.json()
+    if (body && typeof body === 'object' && 'detail' in body && typeof body.detail === 'string') detail = body.detail
+  } catch {
+    // The body is optional; the status alone still identifies the failure.
+  }
+  return detail ? `获取文件树失败 (${res.status})：${detail}` : `获取文件树失败 (${res.status})`
+}
+
+function findNodeByPath(nodes: TreeNode[], path: string): TreeNode | null {
+  for (const node of nodes) {
+    if (node.path === path) return node
+    if (node.children && path.startsWith(node.path)) {
+      const found = findNodeByPath(node.children, path)
+      if (found) return found
+    }
+  }
+  return null
+}
+
+function attachChildren(nodes: TreeNode[], path: string, children: TreeNode[]): TreeNode[] {
+  return nodes.map((node) => {
+    if (node.path === path) return { ...node, children }
+    if (node.children && path.startsWith(node.path)) return { ...node, children: attachChildren(node.children, path, children) }
+    return node
+  })
+}
+
 function cleanPath(p: string): string {
   let cleaned = p.trim().replace(/^<|>$/g, '').replace(/^['"]|['"]$/g, '')
   if (cleaned.startsWith('file:///')) {
@@ -295,6 +326,7 @@ export function FileTreeViewer({ artifact, isActive = true }: ViewerContext) {
     })
   }, [])
   const [copying, setCopying] = useState(false)
+  const loadedRef = useRef<Set<string>>(new Set())
   const revealPath = typeof artifact.metadata?.revealPath === 'string' ? artifact.metadata.revealPath : null
   const revealAt = artifact.metadata?.revealAt
 
@@ -316,12 +348,13 @@ export function FileTreeViewer({ artifact, isActive = true }: ViewerContext) {
   const fetchTree = useCallback(async () => {
     setLoading(true)
     setError(null)
+    loadedRef.current = new Set()
     try {
       const queryPath = artifact.path || ''
       const res = await fetch(
         `/api/v1/files/tree?depth=6&path=${encodeURIComponent(artifact.path || '')}&reveal_path=${encodeURIComponent(revealPath || '')}&session_id=${encodeURIComponent(artifact.sessionId)}&connection_id=${encodeURIComponent(artifact.connectionId || '')}`,
       )
-      if (!res.ok) throw new Error(`获取文件树失败 (${res.status})`)
+      if (!res.ok) throw new Error(await describeTreeFailure(res))
       const data = await res.json()
       setTreeData(data.items || [])
       setRootPath(data.root || queryPath)
@@ -332,9 +365,33 @@ export function FileTreeViewer({ artifact, isActive = true }: ViewerContext) {
     }
   }, [artifact.connectionId, artifact.path, artifact.sessionId, revealPath])
 
+  // The server bounds one listing; directories it left unexpanded are loaded when opened.
+  const loadChildren = useCallback(async (path: string) => {
+    if (loadedRef.current.has(path)) return
+    loadedRef.current.add(path)
+    try {
+      const res = await fetch(
+        `/api/v1/files/tree?depth=2&path=${encodeURIComponent(path)}&session_id=${encodeURIComponent(artifact.sessionId)}&connection_id=${encodeURIComponent(artifact.connectionId || '')}`,
+      )
+      if (!res.ok) throw new Error(await describeTreeFailure(res))
+      const data = await res.json()
+      setTreeData((current) => attachChildren(current, path, data.items || []))
+    } catch (err: unknown) {
+      loadedRef.current.delete(path)
+      notifications.show({ color: 'red', message: err instanceof Error ? err.message : '加载目录失败' })
+    }
+  }, [artifact.connectionId, artifact.sessionId])
+
   useEffect(() => {
     void fetchTree()
   }, [fetchTree])
+
+  useEffect(() => {
+    for (const path of expandedPaths) {
+      const node = findNodeByPath(treeData, path)
+      if (node && node.is_dir && node.children === undefined) void loadChildren(path)
+    }
+  }, [expandedPaths, treeData, loadChildren])
 
   useEffect(() => {
     if (!revealPath || !treeData.length) return

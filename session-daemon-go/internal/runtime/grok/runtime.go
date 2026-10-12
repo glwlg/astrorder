@@ -226,6 +226,7 @@ func (c *client) close() error {
 type ownedSession struct {
 	failed           bool
 	closed           bool
+	control          bool
 	sessionID        string
 	workspace        string
 	client           *client
@@ -251,6 +252,7 @@ type Adapter struct {
 	sessions   map[string]*ownedSession
 	sshStarter SSHStarter
 	closed     bool
+	opening    map[string]bool
 }
 
 func New(config Config) *Adapter {
@@ -264,6 +266,7 @@ func New(config Config) *Adapter {
 		config:   config,
 		sessions: make(map[string]*ownedSession),
 		clients:  make(map[*client]bool),
+		opening:  make(map[string]bool),
 	}
 }
 
@@ -328,6 +331,7 @@ func (a *Adapter) Create(ctx context.Context, req core.Request) (core.Result, er
 		Payload: map[string]any{
 			"session_id": sessionID,
 			"status":     "idle",
+			"agent_id":   a.config.AgentID,
 			"model":      owned.model,
 			"effort":     owned.effort,
 		},
@@ -355,6 +359,10 @@ func (a *Adapter) Spawn(ctx context.Context, req core.Request) (core.Result, err
 			rawCwd = w
 		}
 	}
+	if runtimeControlParams(req) {
+		return a.controlSpawn(ctx, req)
+	}
+
 	workspace, err := a.workspace(rawCwd)
 	if err != nil {
 		return core.Result{}, err
@@ -366,12 +374,16 @@ func (a *Adapter) Spawn(ctx context.Context, req core.Request) (core.Result, err
 	if existing != nil {
 		existing.mu.Lock()
 		defer existing.mu.Unlock()
+		if existing.control {
+			return core.Result{}, fmt.Errorf("grok control session is not a native chat session")
+		}
 		return core.Result{
 			SessionID: sessionID,
 			Status:    existing.status,
 			Payload: map[string]any{
 				"session_id": sessionID,
 				"status":     existing.status,
+				"agent_id":   a.config.AgentID,
 				"model":      existing.model,
 				"effort":     existing.effort,
 			},
@@ -390,6 +402,7 @@ func (a *Adapter) Spawn(ctx context.Context, req core.Request) (core.Result, err
 		Payload: map[string]any{
 			"session_id": sessionID,
 			"status":     "idle",
+			"agent_id":   a.config.AgentID,
 			"model":      owned.model,
 			"effort":     owned.effort,
 		},
@@ -427,6 +440,13 @@ func (a *Adapter) Command(ctx context.Context, req core.Request) (core.Result, e
 		if act, ok := req.Fields["action"].(string); ok {
 			action = act
 		}
+	}
+
+	if owned.control {
+		// Control bindings own no native conversation: only the read-only
+		// model catalog is served; every native-session action is rejected
+		// with zero native requests.
+		return a.controlCommand(ctx, owned, sessionID, action)
 	}
 
 	switch action {
@@ -819,10 +839,19 @@ func (a *Adapter) handleApprove(owned *ownedSession, sessionID string, req core.
 }
 
 func (a *Adapter) openSession(ctx context.Context, sessionID, workspace string, load bool) (*ownedSession, error) {
+	return a.openSessionMode(ctx, sessionID, workspace, load, false)
+}
+
+// openSessionMode is the shared transport opener. control marks a control-only
+// binding: it owns a real initialized ACP transport but never creates, loads,
+// or prompts a native conversation, and it is registered only after the
+// initialize handshake has been confirmed.
+func (a *Adapter) openSessionMode(ctx context.Context, sessionID, workspace string, load, control bool) (*ownedSession, error) {
 	owned := &ownedSession{
 		sessionID:        sessionID,
 		workspace:        workspace,
 		status:           "idle",
+		control:          control,
 		pendingApprovals: make(map[string]any),
 		approvalKinds:    make(map[string]string),
 	}
@@ -990,7 +1019,12 @@ func (a *Adapter) startClient(ctx context.Context, workspace string, onNotificat
 		}
 		go c.readLoop(sess.Stdout())
 		go func() {
-			_, waitErr := sess.Wait()
+			exitStatus, waitErr := sess.Wait()
+			if waitErr == nil && !exitStatus.ConfirmedRemoteExit {
+				// A transport that reports no error must still confirm the
+				// remote exit; otherwise cleanup stays explicitly unconfirmed.
+				waitErr = fmt.Errorf("grok remote process exit was not confirmed")
+			}
 			c.mu.Lock()
 			c.cleanupErr = waitErr
 			closed := c.closed
@@ -1092,27 +1126,38 @@ func (a *Adapter) Snapshot() map[string]core.Result {
 	res := make(map[string]core.Result, len(a.sessions))
 	for sid, s := range a.sessions {
 		s.mu.Lock()
-		res[sid] = core.Result{
-			SessionID: sid,
-			Status:    s.status,
-			Payload: map[string]any{
-				"session_id": sid,
-				"status":     s.status,
-				"model":      s.model,
-				"effort":     s.effort,
-				"workspace":  s.workspace,
-			},
+		payload := map[string]any{
+			"session_id": sid,
+			"status":     s.status,
+			"model":      s.model,
+			"effort":     s.effort,
+			"workspace":  s.workspace,
+			"agent_id":   a.config.AgentID,
 		}
+		if s.control {
+			// Control bindings stay identifiable and re-bindable after an
+			// App restart: the snapshot carries the same metadata as spawn.
+			payload["runtime_control"] = true
+			payload["control_state"] = "owned"
+			if a.config.AgentID != "" {
+				payload["agent_id"] = a.config.AgentID
+			}
+		}
+		res[sid] = core.Result{SessionID: sid, Status: s.status, Payload: payload}
 		s.mu.Unlock()
 	}
 	return res
 }
 
 func (a *Adapter) workspace(raw string) (string, error) {
-	if raw == "" {
-		raw = a.config.Workspace
-	}
 	if a.sshStarter != nil {
+		if raw == "" || !strings.HasPrefix(raw, "/") {
+			if strings.HasPrefix(a.config.Workspace, "/") {
+				raw = a.config.Workspace
+			} else {
+				raw = "/"
+			}
+		}
 		if raw == "" || strings.ContainsRune(raw, 0) || !strings.HasPrefix(raw, "/") {
 			return "", fmt.Errorf("remote grok workspace must be an absolute POSIX path")
 		}
@@ -1121,6 +1166,9 @@ func (a *Adapter) workspace(raw string) (string, error) {
 			return "", fmt.Errorf("grok workspace is not allowlisted")
 		}
 		return clean, nil
+	}
+	if raw == "" {
+		raw = a.config.Workspace
 	}
 	if raw == "" {
 		raw = "."

@@ -142,7 +142,9 @@ export function SessionModelControl({ session }: { session: Session }) {
     ? resolvedEffortIndex
     : REASONING_EFFORTS.findIndex((item) => item.value === 'medium')
   const sliderIndex = draftEffortIndex ?? currentEffortIndex
-  const effortLabel = REASONING_EFFORTS[sliderIndex]?.label || '中'
+  const effortLabel = draftEffortIndex !== null || resolvedEffortIndex >= 0
+    ? REASONING_EFFORTS[sliderIndex]?.label
+    : model.effort || '未确认'
   const displayModelName = formatDisplayModel(model.label)
   const currentModelRoute = model.data?.model ? `${model.data.provider ? `${model.data.provider}/` : ''}${model.data.model}` : ''
 
@@ -178,6 +180,7 @@ export function SessionModelControl({ session }: { session: Session }) {
       </Popover.Target>
 
       <Popover.Dropdown className="codex-model-popover-dropdown">
+        {model.data?.read_only && <Text size="xs" c="dimmed" p="xs">会话被其他客户端占用，当前只能读取模型信息。释放后点击刷新即可重新检查。</Text>}
         {view === 'main' ? (
           <div className="codex-model-card" style={{ '--effort-color': EFFORT_COLORS[sliderIndex] } as React.CSSProperties}>
             <div className="codex-model-header-row">
@@ -212,8 +215,8 @@ export function SessionModelControl({ session }: { session: Session }) {
                 color="gray"
                 size="sm"
                 aria-label="刷新模型"
-                onClick={() => void options.refetch()}
-                loading={options.isFetching}
+                onClick={() => { void model.refetch(); void options.refetch() }}
+                loading={options.isFetching || model.isFetching}
               >
                 <IconRefresh size={16} />
               </ActionIcon>
@@ -221,6 +224,7 @@ export function SessionModelControl({ session }: { session: Session }) {
 
             <div className="codex-model-slider-wrap">
               <Slider
+                disabled={changing || model.data?.read_only}
                 size={18}
                 thumbSize={22}
                 color={EFFORT_COLORS[sliderIndex]}
@@ -302,7 +306,7 @@ export function SessionModelControl({ session }: { session: Session }) {
                       key={JSON.stringify([item.provider, item.model])}
                       className={"codex-model-menu-item" + (isSelected ? " is-selected" : "")}
                       onClick={() => void applyChoice(item)}
-                      disabled={changing}
+                      disabled={changing || model.data?.read_only}
                     >
                       <span className="codex-model-menu-item-text" title={item.label}>{item.label}</span>
                       <ModelQuotaBadge modelRoute={`${item.provider ? `${item.provider}/` : ''}${item.model}`} />

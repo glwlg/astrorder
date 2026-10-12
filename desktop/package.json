@@ -7,18 +7,24 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "check": "node --check main.js && node --check preload.js && node --check service-status.js",
-    "dist": "..\\backend\\.venv\\Scripts\\python.exe -c \"from astrorder.main import create_app\" && electron-builder --win nsis --config.directories.output=release"
+    "start:go-dev": "electron dev-main.js",
+    "check": "node --check main.js && node --check preload.js && node --check service-status.js && node --check service-startup.js",
+    "test": "node --test *.test.js",
+    "stage:go": "node stage-go-artifacts.js",
+    "dist": "npm --prefix ../frontend run build && npm run stage:go && electron-builder --win nsis --config.directories.output=release"
   },
   "devDependencies": {
+    "@electron/asar": "^3.4.1",
     "electron": "^44.3.0",
     "electron-builder": "^26.0.12"
   },
   "build": {
     "appId": "com.astrorder.desktop",
     "productName": "Astrorder",
+    "afterPack": "./verify-desktop-archive.js",
     "files": [
       "main.js",
+      "service-startup.js",
       "preload.js",
       "preview-preload.js",
       "image-preview.html",
@@ -28,50 +34,29 @@
     ],
     "extraFiles": [
       {
-        "from": "../backend",
-        "to": "server/backend",
+        "from": ".runtime/go-stage",
+        "to": "server/bin",
         "filter": [
-          "**/*",
-          "!tests/**",
-          "!.pytest_cache/**",
-          "!.pytest_temp/**",
-          "!.ruff_cache/**",
-          "!.token",
-          "!*.sqlite3*",
-          "!**/__pycache__/**"
+          "*.exe",
+          "astrorder*",
+          "helpers/**/*",
+          "SHA256SUMS",
+          "build-manifest.json"
         ]
       },
       {
-        "from": "../connectors",
-        "to": "server/connectors",
-        "filter": [
-          "**/*",
-          "!**/__pycache__/**",
-          "!.pytest_cache/**"
-        ]
+        "from": "../connectors/codex/codex-plugin",
+        "to": "server/connectors/codex/codex-plugin"
       },
       {
-        "from": "../.hermes",
-        "to": "server/.hermes",
-        "filter": [
-          "**/*",
-          "!**/__pycache__/**"
-        ]
+        "from": "../.hermes/plugins/astrorder-hermes",
+        "to": "server/.hermes/plugins/astrorder-hermes",
+        "filter": ["*.py", "*.yaml"]
       },
       {
-        "from": "../tools",
-        "to": "server/tools",
-        "filter": [
-          "**/*"
-        ]
-      },
-      {
-        "from": "../scripts",
-        "to": "server/scripts",
-        "filter": [
-          "**/*.py",
-          "!**/__pycache__/**"
-        ]
+        "from": "../connectors/hermes/astrorder_hermes_plugin",
+        "to": "server/connectors/hermes/astrorder_hermes_plugin",
+        "filter": ["*.py", "py.typed"]
       },
       {
         "from": "../frontend/dist",

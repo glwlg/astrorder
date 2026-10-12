@@ -8,7 +8,10 @@ import (
 // DisconnectRuntime handles "runtime.disconnect" for a registered agent type and optional connectionID.
 // It verifies that no active sessions (running, waiting_approval) exist for the target scope before disconnecting.
 func (r *Registry) DisconnectRuntime(ctx context.Context, agentType, connectionID string) ([]string, error) {
-	if agentType != "codex" && agentType != "codex-ssh" && agentType != "ssh" && agentType != "grok" && agentType != "grok-ssh" {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if agentType != "codex" && agentType != "codex-ssh" && agentType != "ssh" && agentType != "hermes" && agentType != "grok" && agentType != "grok-ssh" {
 		return nil, fmt.Errorf("unsupported runtime type: %s", agentType)
 	}
 
@@ -19,28 +22,17 @@ func (r *Registry) DisconnectRuntime(ctx context.Context, agentType, connectionI
 		return nil, fmt.Errorf("runtime %q is not registered", agentType)
 	}
 
-	var targetSessions []string
-	if multi, ok := adapter.(ConnectionDisconnector); ok {
+	if _, ok := adapter.(ConnectionDisconnector); ok {
 		if connectionID == "" || len(connectionID) > 128 {
 			return nil, fmt.Errorf("connection_id is invalid")
 		}
-		targetSessions = multi.SessionsForConnection(connectionID)
-	} else {
-		if connectionID != "" {
-			return nil, fmt.Errorf("runtime %q does not accept connection_id", agentType)
-		}
-		r.mu.RLock()
-		for sid, owner := range r.owners {
-			if owner == agentType {
-				targetSessions = append(targetSessions, sid)
-			}
-		}
-		r.mu.RUnlock()
+	} else if connectionID != "" {
+		return nil, fmt.Errorf("runtime %q does not accept connection_id", agentType)
 	}
 
 	// Lock runtime first to prevent new requests from being scheduled or starting
 	r.mu.Lock()
-	if r.operations[agentType] > 0 || r.reloading[agentType] {
+	if r.draining || r.operations[agentType] > 0 || r.reloading[agentType] {
 		r.mu.Unlock()
 		return nil, ErrRuntimeBusy
 	}
@@ -53,6 +45,21 @@ func (r *Registry) DisconnectRuntime(ctx context.Context, agentType, connectionI
 		r.inflight--
 		r.mu.Unlock()
 	}()
+
+	// Enumerate only after maintenance admission is closed. Otherwise a new
+	// session can bind after this snapshot and escape the active-state check.
+	var targetSessions []string
+	if multi, ok := adapter.(ConnectionDisconnector); ok {
+		targetSessions = multi.SessionsForConnection(connectionID)
+	} else {
+		r.mu.RLock()
+		for sid, owner := range r.owners {
+			if owner == agentType {
+				targetSessions = append(targetSessions, sid)
+			}
+		}
+		r.mu.RUnlock()
+	}
 
 	// Active check: reject if any target session is running or waiting_approval or non-idle
 	states := r.Sessions()
@@ -93,7 +100,9 @@ func (r *Registry) DisconnectRuntime(ctx context.Context, agentType, connectionI
 	r.mu.Lock()
 	for _, sid := range released {
 		delete(r.owners, sid)
+		delete(r.identities, sid)
 		delete(r.states, sid)
+		delete(r.generations, sid)
 	}
 	r.mu.Unlock()
 

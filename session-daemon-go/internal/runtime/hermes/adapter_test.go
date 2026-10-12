@@ -377,7 +377,7 @@ func TestHermesEmitFailureFailcloseOwnOnly(t *testing.T) {
 			mu.Lock()
 			target := failFor
 			mu.Unlock()
-			if sessionID == target {
+			if sessionID == target && event != "session.active" {
 				return fmt.Errorf("simulated emit failure")
 			}
 			return nil
@@ -521,6 +521,14 @@ func fakeHermesHelper() {
 					"model":    "test-model",
 					"provider": "test-provider",
 				},
+			}
+			if configured, ok := configValues["model"].(string); ok {
+				parts := strings.Split(configured, " --provider ")
+				if len(parts) == 2 {
+					info := result.(map[string]any)["info"].(map[string]any)
+					info["model"] = parts[0]
+					info["provider"] = strings.TrimSuffix(parts[1], " --session")
+				}
 			}
 
 		case "prompt.submit":

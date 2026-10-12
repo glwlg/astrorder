@@ -1,0 +1,178 @@
+{
+  "schema_version": 1,
+  "review_id": "full-go-p2-control-review",
+  "review_date": "2026-10-09",
+  "repository": "P:/workspace/glwlg/ai/astrorder",
+  "branch": "master",
+  "commit": "ff32f947024b1840b939ebfb8e58e45886d34b47",
+  "working_tree_reviewed": true,
+  "passed": true,
+  "outcome": "PASS_SCOPED",
+  "scope_completion_claim": false,
+  "summary": "No substantiated high- or medium-severity logic defect remains in the final hashed P2 DaemonControl/EventStream implementation. This is a scoped review, not a claim that all P2 services or stage exit criteria are complete.",
+  "severity_counts": {
+    "high": 0,
+    "medium": 0,
+    "low": 0
+  },
+  "findings": [],
+  "reviewed_properties": [
+    {
+      "property": "bounded stream send and shutdown completion",
+      "result": "pass",
+      "evidence": [
+        "session-daemon-go/internal/grpcapi/events.go:301 starts one transport Send per subscription and returns on send completion, stream cancellation, or a server timer; the RPC return cancels the gRPC stream context.",
+        "session-daemon-go/internal/grpcapi/slow_reader_test.go exercises an actual TCP/HTTP2 client that never receives and checks that the subscription and sender leave after the server deadline without stopping daemon control.",
+        "session-daemon-go/internal/grpcapi/server.go:72 signals shutdown only from server stats.End after an accepted response; transport failure cancels the provisional shutdown gate.",
+        "session-daemon-go/cmd/astrorder-sessiond/shutdown.go:12 bounds GracefulStop and falls back to Stop; main.go waits for shutdownDone before process return."
+      ]
+    },
+    {
+      "property": "snapshot/replay/live barrier and epoch binding",
+      "result": "pass",
+      "evidence": [
+        "session-daemon-go/internal/events/subscription.go:21 takes commitGate exclusively, registers the subscriber, and reads durable session high-water marks in the same barrier.",
+        "session-daemon-go/internal/grpcapi/events.go:88 binds expected_daemon_id, replays only through each captured MaxSeqID, emits LiveReady watermarks, then drains queued post-barrier events.",
+        "Existing tests cover more than 128 sessions, paged replay, events and new sessions created during replay, expired/ahead cursors, epoch changes, and subscription overflow."
+      ]
+    },
+    {
+      "property": "authority and runtime ownership safety",
+      "result": "pass",
+      "evidence": [
+        "session-daemon-go/internal/protocol/facade.go:69 fails closed when durable event or operation authority cannot be read.",
+        "session-daemon-go/internal/protocol/facade.go:134 establishes daemon and runtime admission gates before checking pending operations and authoritative sessions.",
+        "session-daemon-go/internal/protocol/admission.go and internal/runtime/shutdown.go reject new control/runtime work after provisional shutdown acceptance and release the gate on failed transport completion.",
+        "Expected daemon identity is checked before shutdown and replay; registered runtime busy state and non-idle/error-ambiguous sessions prevent unconfirmed shutdown."
+      ]
+    },
+    {
+      "property": "lossless native/unknown event payload preservation",
+      "result": "pass",
+      "evidence": [
+        "contracts/proto/astrorder/sessiond/v1/sessiond.proto:835 defines native_payload alongside the typed oneof.",
+        "session-daemon-go/internal/grpcapi/events.go:229 marshals the complete stored payload into native_payload for every event, including typed runtime.owner, runtime.ownership_lost, and pty.output branches.",
+        "session-daemon-go/internal/protocol/facade.go:232 decodes incoming native JSON with json.Decoder.UseNumber.",
+        "session-daemon-go/internal/grpcapi/native_payload_test.go covers typed and unknown events, unknown nested fields, and integers beyond JavaScript's exact range."
+      ]
+    },
+    {
+      "property": "authentication and registered surface",
+      "result": "pass",
+      "evidence": [
+        "session-daemon-go/internal/grpcapi/server.go:138 applies the same bearer verification to unary and streaming RPCs using subtle.ConstantTimeCompare.",
+        "NewServer registers only DaemonControl and EventStream, and GetCapabilities advertises exactly those two implemented services."
+      ]
+    }
+  ],
+  "resolved_during_review": [
+    {
+      "issue": "The initial send timeout measured elapsed time only after a synchronous Send returned, so a permanently blocked Send was not bounded.",
+      "final_state": "resolved in the final hash set",
+      "codepaths": [
+        "session-daemon-go/internal/grpcapi/events.go:301",
+        "session-daemon-go/internal/grpcapi/blocked_send_test.go:36",
+        "session-daemon-go/internal/grpcapi/slow_reader_test.go:21"
+      ],
+      "minimal_fix": "Run at most one Send in flight, select on its result, stream context, and a server timer, then let handler return cancel the transport context.",
+      "executable_test": "go test ./internal/grpcapi -run 'TestBlockedStreamSendReturnsAtServerDeadline|TestTCPSlowReaderReleasesBlockedSendWithoutClientCancellation' -count=1"
+    },
+    {
+      "issue": "Typed event branches initially discarded native fields not modeled by protobuf.",
+      "final_state": "resolved in the final hash set",
+      "codepaths": [
+        "contracts/proto/astrorder/sessiond/v1/sessiond.proto:835",
+        "session-daemon-go/internal/grpcapi/events.go:229",
+        "session-daemon-go/internal/grpcapi/native_payload_test.go:13"
+      ],
+      "minimal_fix": "Carry the complete losslessly decoded payload in EventEnvelope.native_payload in addition to the typed projection.",
+      "executable_test": "go test ./internal/grpcapi -run TestTypedEventsKeepAllNativeFieldsAndExactNumbers -count=1"
+    },
+    {
+      "issue": "Shutdown authorization was initially a point-in-time check and allowed new runtime dispatch before process shutdown began.",
+      "final_state": "resolved in the final hash set",
+      "codepaths": [
+        "session-daemon-go/internal/protocol/facade.go:134",
+        "session-daemon-go/internal/protocol/admission.go:5",
+        "session-daemon-go/internal/runtime/shutdown.go:5",
+        "session-daemon-go/internal/protocol/shutdown_admission_test.go:9"
+      ],
+      "minimal_fix": "Close daemon and registry admission atomically before authority checks; roll the provisional gate back if authorization or response transport fails.",
+      "executable_test": "go test ./internal/protocol ./internal/runtime -run 'TestAcceptedShutdownPreventsNewRuntimeDispatch|TestShutdownAdmissionRejectsNewWorkAndCanBeReleased' -count=1"
+    },
+    {
+      "issue": "A failed legacy WebSocket shutdown-response write could initially leave the daemon alive but permanently draining.",
+      "final_state": "resolved in the final hash set",
+      "codepaths": [
+        "session-daemon-go/internal/protocol/live.go:118",
+        "session-daemon-go/internal/protocol/admission.go:21",
+        "session-daemon-go/internal/grpcapi/server.go:72"
+      ],
+      "minimal_fix": "Cancel the provisional admission gate whenever an accepted shutdown response fails transport completion; keep it closed only after shutdown is signaled.",
+      "executable_test": "Add a deterministic failing WebSocket writer test that accepts shutdown, forces response-write failure, and verifies a later control is admitted."
+    }
+  ],
+  "verification": {
+    "status": "partial_due_to_concurrent_uncommitted_activity",
+    "results": [
+      {
+        "command": "go test ./internal/runtime ./internal/protocol ./internal/grpcapi -count=1 -timeout=120s",
+        "result": "runtime and grpcapi passed; protocol exposed the shutdown-admission race, which was then fixed in the final hash set"
+      },
+      {
+        "command": "go test ./internal/runtime -run TestShutdownAdmissionRejectsNewWorkAndCanBeReleased -count=1 -timeout=30s",
+        "result": "passed"
+      },
+      {
+        "command": "go test ./cmd/astrorder-sessiond ./internal/grpcapi ./internal/protocol -count=1 -timeout=120s",
+        "result": "cmd/astrorder-sessiond and protocol passed; grpcapi build was blocked by a concurrently added out-of-scope operation_test.go referring to RegisterOperationQuery before its implementation landed"
+      },
+      {
+        "command": "go vet ./internal/runtime ./internal/protocol ./internal/grpcapi",
+        "result": "not cleanly repeatable against the final hash set because concurrent operation-query work was incomplete; no broad race run was duplicated"
+      }
+    ],
+    "coordinator_claims_counted_as_evidence": false,
+    "production_or_service_interaction": false,
+    "repository_modified_by_reviewer": false
+  },
+  "suggestions": [
+    "After the concurrent OperationQuery files settle, rerun go test and go vet for ./cmd/astrorder-sessiond, ./internal/grpcapi, and ./internal/protocol against the exact final hashes.",
+    "Add a deterministic legacy WebSocket shutdown response-write failure test to lock in admission rollback symmetry with the gRPC stats.End error path.",
+    "Keep the real slow TCP reader test; the fake blocked stream test alone does not prove transport-context cancellation after handler return."
+  ],
+  "source_identity": {
+    "note": "The scoped implementation is uncommitted/new, so commit identity alone is insufficient. These SHA-256 values identify the final reviewed files.",
+    "sha256": {
+      "contracts/proto/astrorder/sessiond/v1/sessiond.proto": "c484afa2eebd3343d1aea602a66295154c3501bef5efdfeef340d546a1064fb0",
+      "contracts/gen/go/astrorder/sessiond/v1/sessiond.pb.go": "04bea259d89b78774a46b81b03fe938d41e8d7f2127f0c3866f28ebbbf0b0acc",
+      "session-daemon-go/internal/grpcapi/server.go": "0d2032aa7abc1268fcf8a07a09b95649e60ec8bc5daacb6c7a85168ef91226dc",
+      "session-daemon-go/internal/grpcapi/control.go": "0041314eac6233c658fd088ffe4c14f962a7157f582cac48d94629fedf2a39af",
+      "session-daemon-go/internal/grpcapi/events.go": "58a198dd3c78adfb8f6bb3d63fe87362ec5fded2995013a5bd2fb3a39f64b700",
+      "session-daemon-go/internal/grpcapi/blocked_send_test.go": "5a4f3c39b2509dc7001249de124a91f6181bbfa5ef8ed4051294d6ad4afd4806",
+      "session-daemon-go/internal/grpcapi/slow_reader_test.go": "f2fea3200f4b6ec52527e7433e856aa980a18f86bbad54100b81cede6ff6e094",
+      "session-daemon-go/internal/grpcapi/native_payload_test.go": "51c42524b4eec2fd1ae877e4bc3652643db75ecdd3327301203d819c46367b6f",
+      "session-daemon-go/internal/grpcapi/shutdown_completion_test.go": "1b528613c512cdf5802acada5164e2ee02d121ddd525a9e855a8cb85383e7288",
+      "session-daemon-go/internal/grpcapi/shutdown_order_test.go": "8a90bdfce067456908120ae4ad061b2e579f7296f57513df530a2411a61214ff",
+      "session-daemon-go/internal/protocol/facade.go": "ab765ad72e5060ff4c3ed794769f837c227bb33c60a47fd5db6b30932a6ef78e",
+      "session-daemon-go/internal/protocol/admission.go": "836a30e5e128a64b432b37e5887c82287950a61c542d719ac8ab8cd3f342dc1e",
+      "session-daemon-go/internal/protocol/daemon.go": "4542da8bb5ff714869f73fecaf2a57e517f44f5b7973b7acb1023820bd7ea5dd",
+      "session-daemon-go/internal/protocol/live.go": "9dc6c7dee4b2b91569793c6c55a4d7261e6ca12434d5762f54a2d249a6774ebb",
+      "session-daemon-go/internal/events/subscription.go": "06f06404232923732b5c79d25280206dcb4b060a55ca6e596ed113b5867dca0a",
+      "session-daemon-go/internal/events/commit.go": "da9770f27ac8a8db0de77418e3428ffd9f31c0065f38860ee4f6077d2d54e134",
+      "session-daemon-go/internal/events/journal.go": "166641fa3f0da5fda26cc77bfc9e14f495ed73c49112d66ceec44cacb8b630ec",
+      "session-daemon-go/internal/runtime/registry.go": "ffa890ef89df5f69f7c7eba886dc79cb0aff05c137aeb497472ea27240f68970",
+      "session-daemon-go/internal/runtime/control.go": "28a0c0fadd1c5bb57a6023dc8089d81342f6e5836bd0f30b36e2d256fc6106af",
+      "session-daemon-go/internal/runtime/reload.go": "837d9c4ad65bcab483ce1a89fc65cca9acec245e85dcf694aa05544f5fea10d1",
+      "session-daemon-go/internal/runtime/shutdown.go": "dfc2cd42bbe1898ec870c285d98a407ac80f841259eaaab4678cf459ecbf32aa",
+      "session-daemon-go/cmd/astrorder-sessiond/main.go": "be1a2bb98dde87eb8ce991b8521b30e201781253afdda5d4c70d0a6e09ed32b1",
+      "session-daemon-go/cmd/astrorder-sessiond/shutdown.go": "8a7e7c046073e827ec5f60c256a50cb3e4379149e04fcab40cc5d9d466a10753"
+    }
+  },
+  "limitations": [
+    "This review covers the current DaemonControl/EventStream adapter, shared authority, replay barrier, event payload preservation, and shutdown paths. It does not assert full P2 service completion.",
+    "The working tree changed during review. Findings and pass status apply only to the final listed hashes.",
+    "A clean final package-wide grpcapi test/vet rerun was blocked by unrelated concurrent OperationQuery work that was incomplete at review close.",
+    "No WSL race suite was run because a separate coordinator job was already running it."
+  ]
+}

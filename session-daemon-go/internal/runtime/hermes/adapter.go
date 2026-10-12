@@ -32,6 +32,8 @@ type Config struct {
 
 type SessionState struct {
 	SessionID    string
+	CommandID    string
+	sending      bool
 	Handle       string
 	Status       string
 	Title        string
@@ -332,6 +334,18 @@ func (a *Adapter) Command(ctx context.Context, req core.Request) (result core.Re
 	}
 
 	switch req.Action {
+	case "session.observe_status":
+		activity, _ := req.Fields["status"].(string)
+		if activity != "running" && activity != "waiting_approval" {
+			return core.Result{}, fmt.Errorf("invalid positive activity observation")
+		}
+		a.mu.Lock()
+		if session.Status != "waiting_approval" {
+			session.Status = activity
+		}
+		current := session.Status
+		a.mu.Unlock()
+		return core.Result{SessionID: session.SessionID, Status: current, Payload: map[string]any{"status": current}}, nil
 	case "session.send":
 		return a.handleSend(ctx, session, req)
 	case "session.interrupt":
@@ -366,6 +380,19 @@ func (a *Adapter) Command(ctx context.Context, req core.Request) (result core.Re
 }
 
 func (a *Adapter) handleSend(ctx context.Context, session *SessionState, req core.Request) (core.Result, error) {
+	a.mu.Lock()
+	if session.sending || session.Status == "waiting_approval" {
+		a.mu.Unlock()
+		return core.Result{}, fmt.Errorf("Hermes session already has an active command")
+	}
+	steering := session.Status == "running" && session.CommandID != "" && session.Handle != ""
+	if session.Status == "running" && !steering {
+		a.mu.Unlock()
+		return core.Result{}, fmt.Errorf("Hermes active command ownership is unconfirmed")
+	}
+	session.sending = true
+	a.mu.Unlock()
+	defer func() { a.mu.Lock(); session.sending = false; a.mu.Unlock() }()
 	text, _ := req.Fields["text"].(string)
 	attachments, _ := req.Fields["attachments"].([]any)
 	if attachments == nil {
@@ -378,6 +405,34 @@ func (a *Adapter) handleSend(ctx context.Context, session *SessionState, req cor
 
 	if text == "" && len(attachments) == 0 {
 		return core.Result{}, fmt.Errorf("hermes command text or attachments are required")
+	}
+	if err := validateAttachments(attachments); err != nil {
+		return core.Result{}, err
+	}
+	if steering {
+		if len(attachments) != 0 {
+			return core.Result{}, fmt.Errorf("attachments must be queued for the next Hermes turn")
+		}
+		a.mu.RLock()
+		handle := session.Handle
+		a.mu.RUnlock()
+		response, err := a.rpc(ctx, "session.steer", map[string]any{"session_id": handle, "text": text})
+		if err != nil {
+			return core.Result{}, err
+		}
+		if response["status"] != "queued" {
+			return core.Result{}, fmt.Errorf("Hermes did not accept the follow-up")
+		}
+		a.mu.RLock()
+		current := session.Status
+		a.mu.RUnlock()
+		commandID, _ := req.Fields["command_id"].(string)
+		if a.config.Emit != nil && commandID != "" {
+			if err := a.config.Emit(session.SessionID, "hermes.command_complete", map[string]any{"agent_id": a.config.AgentID, "session_id": session.SessionID, "command_id": commandID}, current); err != nil {
+				return core.Result{}, err
+			}
+		}
+		return core.Result{SessionID: session.SessionID, Status: current, Payload: map[string]any{"accepted": true, "completed": true}}, nil
 	}
 
 	handle, err := a.ensureHandle(ctx, session)
@@ -392,6 +447,12 @@ func (a *Adapter) handleSend(ctx context.Context, session *SessionState, req cor
 			return core.Result{}, err
 		}
 		if completed, _ := slashRes["completed"].(bool); completed {
+			commandID, _ := req.Fields["command_id"].(string)
+			if a.config.Emit != nil && commandID != "" {
+				if err := a.config.Emit(session.SessionID, "hermes.command_complete", map[string]any{"agent_id": a.config.AgentID, "session_id": session.SessionID, "command_id": commandID, "output": slashRes["output"]}, "idle"); err != nil {
+					return core.Result{}, err
+				}
+			}
 			return core.Result{
 				SessionID: session.SessionID,
 				Status:    "idle",
@@ -407,37 +468,9 @@ func (a *Adapter) handleSend(ctx context.Context, session *SessionState, req cor
 		}
 	}
 
-	for _, attAny := range attachments {
-		att, ok := attAny.(map[string]any)
-		if !ok {
-			continue
-		}
-		name, _ := att["name"].(string)
-		mediaType, _ := att["media_type"].(string)
-		b64, _ := att["content_base64"].(string)
-		if b64 == "" {
-			continue
-		}
-
-		if strings.HasPrefix(mediaType, "image/") {
-			_, _ = a.rpc(ctx, "image.attach_bytes", map[string]any{
-				"session_id":     handle,
-				"filename":       name,
-				"content_base64": b64,
-			})
-		} else {
-			dataURL := fmt.Sprintf("data:%s;base64,%s", mediaType, b64)
-			attRes, err := a.rpc(ctx, "file.attach", map[string]any{
-				"session_id": handle,
-				"data_url":   dataURL,
-				"name":       name,
-			})
-			if err == nil {
-				if refText, ok := attRes["ref_text"].(string); ok && refText != "" {
-					text = refText + "\n" + text
-				}
-			}
-		}
+	text, err = a.attachInputs(ctx, handle, text, attachments)
+	if err != nil {
+		return core.Result{}, err
 	}
 
 	submitParams := map[string]any{
@@ -446,52 +479,28 @@ func (a *Adapter) handleSend(ctx context.Context, session *SessionState, req cor
 		"surface":    "hud",
 	}
 	a.mu.Lock()
+	session.CommandID, _ = req.Fields["command_id"].(string)
 	session.Status = "running"
 	a.mu.Unlock()
+	if a.config.Emit != nil {
+		if err := a.config.Emit(session.SessionID, "session.active", map[string]any{"agent_id": a.config.AgentID, "session_id": session.SessionID}, "running"); err != nil {
+			a.failCloseSession(session.SessionID, err)
+			return core.Result{}, err
+		}
+	}
 	_, err = a.rpc(ctx, "prompt.submit", submitParams)
 	if err != nil {
-		errStr := err.Error()
-		if strings.Contains(strings.ToLower(errStr), "already has a live owner") || strings.Contains(errStr, "SESSION_NOT_OWNED") {
-			activeRes, activeErr := a.rpc(ctx, "session.active_list", map[string]any{})
-			isRunning := false
-			if activeErr == nil {
-				if rows, ok := activeRes["sessions"].([]any); ok {
-					for _, rowAny := range rows {
-						if row, ok := rowAny.(map[string]any); ok {
-							if row["session_key"] == session.SessionID || row["id"] == handle {
-								st, _ := row["status"].(string)
-								if st == "working" || st == "running" || st == "waiting" {
-									isRunning = true
-								}
-								break
-							}
-						}
-					}
-				}
-			}
-			if isRunning {
-				_, steerErr := a.rpc(ctx, "session.steer", map[string]any{
-					"session_id": handle,
-					"text":       text,
-				})
-				if steerErr == nil {
-					a.mu.Lock()
-					session.Status = "running"
-					a.mu.Unlock()
-					return core.Result{
-						SessionID: session.SessionID,
-						Status:    "running",
-						Payload:   map[string]any{"accepted": true},
-					}, nil
-				}
-			}
-		}
 		a.mu.Lock()
 		if !a.failed && !a.closed {
 			session.Status = "error"
 			session.Metadata["last_error"] = err.Error()
 		}
 		a.mu.Unlock()
+		if a.config.Emit != nil {
+			if emitErr := a.config.Emit(session.SessionID, "session.error", map[string]any{"agent_id": a.config.AgentID, "session_id": session.SessionID}, "error"); emitErr != nil {
+				return core.Result{}, fmt.Errorf("prompt.submit failed: %w; status publish failed: %v", err, emitErr)
+			}
+		}
 		return core.Result{}, fmt.Errorf("prompt.submit failed: %w", err)
 	}
 
@@ -830,6 +839,15 @@ func (a *Adapter) handleModelRead(ctx context.Context, session *SessionState) (c
 	model, _ := info["model"].(string)
 	provider, _ := info["provider"].(string)
 
+	a.mu.Lock()
+	if model == "" && session.Model != "" {
+		model = session.Model
+	}
+	if provider == "" && session.Provider != "" {
+		provider = session.Provider
+	}
+	a.mu.Unlock()
+
 	reasoningRes, _ := a.rpc(ctx, "config.get", map[string]any{
 		"session_id": handle,
 		"key":        "reasoning",
@@ -868,6 +886,17 @@ func (a *Adapter) handleModelSet(ctx context.Context, session *SessionState, req
 		return core.Result{}, fmt.Errorf("config.set model failed: %w", err)
 	}
 
+	confirmed, err := a.handleModelRead(ctx, session)
+	if err == nil && confirmed.Payload != nil {
+		readModel, _ := confirmed.Payload["model"].(string)
+		readProvider, _ := confirmed.Payload["provider"].(string)
+		if readModel != "" && readModel != model && !strings.Contains(readModel, model) && !strings.Contains(model, readModel) {
+			return core.Result{}, fmt.Errorf("native model readback did not confirm requested binding")
+		}
+		if provider != "" && readProvider != "" && readProvider != provider && !strings.Contains(readProvider, provider) && !strings.Contains(provider, readProvider) {
+			return core.Result{}, fmt.Errorf("native model readback did not confirm requested binding")
+		}
+	}
 	a.mu.Lock()
 	session.Model = model
 	session.Provider = provider
@@ -902,6 +931,13 @@ func (a *Adapter) handleReasoningSet(ctx context.Context, session *SessionState,
 		return core.Result{}, fmt.Errorf("config.set reasoning failed: %w", err)
 	}
 
+	readback, err := a.rpc(ctx, "config.get", map[string]any{"session_id": handle, "key": "reasoning"})
+	if err != nil {
+		return core.Result{}, err
+	}
+	if readback["value"] != effort {
+		return core.Result{}, fmt.Errorf("native reasoning readback did not confirm requested effort")
+	}
 	a.mu.Lock()
 	session.Effort = effort
 	a.mu.Unlock()
@@ -942,7 +978,7 @@ func (a *Adapter) handleApprovalRead(ctx context.Context, session *SessionState)
 	val, _ := res["value"].(string)
 	mode := hermesApprovalReverse[val]
 	if mode == "" {
-		mode = "auto"
+		return core.Result{SessionID: session.SessionID, Status: "idle", Payload: map[string]any{"mode": "", "raw_unknown": val}}, nil
 	}
 
 	return core.Result{
@@ -1047,12 +1083,31 @@ func (a *Adapter) handleApprove(ctx context.Context, session *SessionState, req 
 
 	a.mu.Lock()
 	delete(a.pendingApprovals, approvalID)
-	session.Status = "running"
+	if session.Status == "waiting_approval" {
+		session.Status = "running"
+		for _, pending := range a.pendingApprovals {
+			if pending.SessionID == session.SessionID {
+				session.Status = "waiting_approval"
+				break
+			}
+		}
+	}
+	currentStatus := session.Status
 	a.mu.Unlock()
+	if a.config.Emit != nil {
+		state := "approved"
+		if choice == "deny" {
+			state = "rejected"
+		}
+		commandID, _ := req.Fields["command_id"].(string)
+		if err := a.config.Emit(session.SessionID, "hermes.approval_resolved", map[string]any{"agent_id": a.config.AgentID, "session_id": session.SessionID, "approval_id": approvalID, "native_id": nativeID, "command_id": commandID, "state": state}, currentStatus); err != nil {
+			return core.Result{}, err
+		}
+	}
 
 	return core.Result{
 		SessionID: session.SessionID,
-		Status:    "running",
+		Status:    currentStatus,
 		Payload:   map[string]any{"accepted": true},
 	}, nil
 }
@@ -1089,7 +1144,7 @@ func (a *Adapter) handleHistoryPage(ctx context.Context, session *SessionState, 
 		}
 	}
 
-	if dbPath != "" {
+	if dbPath != "" && !strings.HasPrefix(before, "hermes-rpc:") {
 		page, err := readNativePage(ctx, dbPath, session.SessionID, "hermes-local", before, limit)
 		if err == nil {
 			return core.Result{
@@ -1111,14 +1166,14 @@ func (a *Adapter) handleHistoryPage(ctx context.Context, session *SessionState, 
 		return core.Result{}, fmt.Errorf("session.history failed: %w", err)
 	}
 
-	messages, _ := histRes["messages"].([]any)
+	page, err := gatewayHistoryPage(session.SessionID, histRes, before, limit)
+	if err != nil {
+		return core.Result{}, err
+	}
 	return core.Result{
 		SessionID: session.SessionID,
 		Status:    "idle",
-		Payload: map[string]any{
-			"items":       messages,
-			"next_cursor": nil,
-		},
+		Payload:   page,
 	}, nil
 }
 

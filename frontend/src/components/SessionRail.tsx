@@ -9,6 +9,7 @@ import {
   IconPin,
   IconPinned,
   IconPlus,
+  IconRefresh,
   IconTrash,
   IconTransfer,
   IconGitFork,
@@ -611,11 +612,48 @@ export function SessionRail({
     void navigator.clipboard.writeText(session.id)
   }
 
+  // 手动刷新：一次批量读取各 Agent 的原生最后活动时间，结果经 session.upsert 事件回到列表。
+  const [refreshingActivity, setRefreshingActivity] = useState(false)
+  const refreshActivity = async () => {
+    if (refreshingActivity) return
+    setRefreshingActivity(true)
+    try {
+      const result = await api.refreshSessionActivity()
+      const failed = result.agents.filter(agent => agent.error)
+      if (failed.length > 0) {
+        notifications.show({
+          color: 'orange',
+          message: `已更新 ${result.updated} 个会话；${failed.map(agent => `${agent.agent_id}: ${agent.error}`).join('；')}`,
+        })
+      } else {
+        notifications.show({ color: 'teal', message: result.updated > 0 ? `已更新 ${result.updated} 个会话的最后活动时间` : '最后活动时间已是最新' })
+      }
+    } catch (err) {
+      notifications.show({ color: 'red', message: err instanceof Error ? err.message : '刷新最后活动时间失败，请重试' })
+    } finally {
+      setRefreshingActivity(false)
+    }
+  }
+
   return (
     <Stack className="session-rail" gap="sm">
       <div className="session-rail-controls">
       <Group gap="xs" wrap="nowrap">
         <AgentSessionFilter agents={agents} value={agentFilter} onChange={updateAgentFilter} />
+        <Tooltip label="刷新最后活动时间" withArrow position="bottom">
+          <Button
+            size="xs"
+            variant="subtle"
+            color="gray"
+            px={0}
+            w={36}
+            loading={refreshingActivity}
+            onClick={() => void refreshActivity()}
+            aria-label="刷新最后活动时间"
+          >
+            <IconRefresh size={17} />
+          </Button>
+        </Tooltip>
         <Tooltip label={batchMode ? '退出批量管理' : '批量管理会话'} withArrow position="bottom">
           <Button
             size="xs"

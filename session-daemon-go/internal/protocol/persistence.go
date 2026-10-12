@@ -24,6 +24,7 @@ func Open(secret, path string) (*Daemon, error) {
 		journal:           journal,
 		registry:          core.NewRegistry(),
 		connectors:        map[string]map[string]any{},
+		connectorTokens:   map[string]any{},
 		agentControls:     map[string]string{},
 		pendingEvents:     map[string][]map[string]any{},
 	}

@@ -1,22 +1,23 @@
 package main
 
 import (
+	"fmt"
 	"log"
-	"net/http"
+	"net"
 	"os"
+	"strconv"
+	"time"
 
 	"astrorder.dev/session-daemon/internal/configuration"
+	"astrorder.dev/session-daemon/internal/grpcapi"
 	"astrorder.dev/session-daemon/internal/protocol"
+	"google.golang.org/grpc"
 )
 
 func main() {
 	secret := os.Getenv("ASTRORDER_SESSION_DAEMON_SECRET")
 	if secret == "" {
 		log.Fatal("ASTRORDER_SESSION_DAEMON_SECRET is required")
-	}
-	address := "127.0.0.1:30009"
-	if port := os.Getenv("ASTRORDER_SESSION_DAEMON_PORT"); port != "" {
-		address = "127.0.0.1:" + port
 	}
 	path := os.Getenv("ASTRORDER_SESSION_DAEMON_DB")
 	if path == "" {
@@ -41,20 +42,73 @@ func main() {
 			return
 		}
 	}
-	server := &http.Server{Addr: address, Handler: daemon.Handler()}
+
+	grpcTarget := os.Getenv("ASTRORDER_SESSION_DAEMON_GRPC_TARGET")
+	grpcCredential := os.Getenv("ASTRORDER_SESSION_DAEMON_GRPC_CREDENTIAL")
+	if err := validateGRPCConfig(grpcTarget, grpcCredential); err != nil {
+		log.Print(err)
+		return
+	}
+
+	var grpcServer *grpc.Server
+	var grpcListener net.Listener
+	if grpcTarget != "" {
+		grpcServer, err = grpcapi.NewServer(grpcapi.Config{Credential: grpcCredential}, daemon)
+		if err != nil {
+			log.Print(err)
+			return
+		}
+		grpcListener, err = net.Listen("tcp", grpcTarget)
+		if err != nil {
+			log.Print(err)
+			return
+		}
+		defer grpcServer.Stop()
+		defer grpcListener.Close()
+		go func() {
+			if serveErr := grpcServer.Serve(grpcListener); serveErr != nil {
+				log.Print(serveErr)
+			}
+		}()
+	}
+
 	finished := make(chan struct{})
 	defer close(finished)
+	shutdownDone := make(chan struct{})
 	go func() {
 		select {
 		case <-daemon.ShutdownRequested():
+			if grpcServer != nil {
+				drainGRPC(grpcServer, 3*time.Second)
+			}
+			if grpcListener != nil {
+				_ = grpcListener.Close()
+			}
 			if err := daemon.Close(); err != nil {
 				log.Print(err)
 			}
-			_ = server.Close()
+			close(shutdownDone)
 		case <-finished:
 		}
 	}()
-	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Print(err)
+	<-shutdownDone
+}
+
+func validateGRPCConfig(target, credential string) error {
+	if target == "" || credential == "" {
+		return fmt.Errorf("gRPC target and credential must be configured together")
 	}
+	host, portText, err := net.SplitHostPort(target)
+	if err != nil {
+		return fmt.Errorf("invalid gRPC target: %w", err)
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || !ip.IsLoopback() {
+		return fmt.Errorf("gRPC target must use an explicit loopback IP")
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil || port < 1 || port > 65535 {
+		return fmt.Errorf("gRPC target must use an explicit non-zero port")
+	}
+	return nil
 }

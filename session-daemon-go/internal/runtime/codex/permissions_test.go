@@ -28,7 +28,7 @@ func TestPermissionApprovalRequiresExplicitGrant(t *testing.T) {
 	frames := make(chan map[string]any, 2)
 	r.stdin = captureWriter{frames}
 	r.handleNotification("item/permissions/requestApproval", map[string]any{"id": "permission-1", "params": map[string]any{"threadId": "thread"}})
-	cmd := Command{Action: "session.approve", SessionID: "thread", ApprovalID: "codex:permission-1", Decision: "accept"}
+	cmd := Command{Action: "session.approve", SessionID: "thread", ApprovalID: "codex:" + nativeRequestID("permission-1"), Decision: "accept"}
 	if _, err := r.Command(context.Background(), cmd); err == nil {
 		t.Fatal("implicit permission grant accepted")
 	}

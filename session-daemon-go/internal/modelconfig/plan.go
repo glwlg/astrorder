@@ -10,7 +10,12 @@ func (s *Service) plan(ctx context.Context, request map[string]any) (map[string]
 	if target, ok := request["target"].(map[string]any); ok && target != nil {
 		if kind, _ := target["kind"].(string); kind != "" && kind != "local" {
 			payload := map[string]any{"action": "plan"}
-			return executeRemoteRequest(ctx, target, payload)
+			for _, key := range []string{"files", "expected_digests"} {
+				if value, exists := request[key]; exists {
+					payload[key] = value
+				}
+			}
+			return s.executeRemoteRequest(ctx, target, payload)
 		}
 	}
 

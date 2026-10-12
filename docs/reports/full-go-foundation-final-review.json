@@ -1,0 +1,271 @@
+{
+  "artifact": "full-go-foundation-final-review",
+  "generated_at": "2026-10-08T23:31:06+08:00",
+  "repository": "P:/workspace/glwlg/ai/astrorder",
+  "branch": "master",
+  "head": "ff32f947024b1840b939ebfb8e58e45886d34b47",
+  "origin_master": "ff32f947024b1840b939ebfb8e58e45886d34b47",
+  "review_kind": "independent read-only bounded foundation rereview",
+  "passed": true,
+  "decision": "PASS_REVIEWED_FOUNDATION_TRANCHE_ONLY",
+  "decision_scope": "The six P9 CLI lifecycle findings, the post-fix Store/event foundation including attachment transaction ownership, and the isolated P4 native-route/private-proxy source contract passed this bounded review. This is not P9 DONE, not full migration completion, and not release, installation, deployment, or production evidence.",
+  "issues": [],
+  "reviewed_contracts": [
+    {
+      "id": "P9-CLI-001",
+      "status": "PASS",
+      "proof": [
+        "app-server-go/internal/lifecycle/provision.go:236 resolves installation, executable, static, state, data, attachments, and state-file destinations before provisioning mutation and checks final-path confinement.",
+        "app-server-go/internal/lifecycle/provision_windows_test.go:18 exercises junction escapes before side effects.",
+        "Focused native Windows lifecycle tests exited 0."
+      ]
+    },
+    {
+      "id": "P9-CLI-002",
+      "status": "PASS",
+      "proof": [
+        "app-server-go/internal/lifecycle/app.go:400 rejects non-200 or malformed/trailing shutdown JSON.",
+        "app-server-go/internal/lifecycle/app.go:411 uses a bounded client with redirects refused and Proxy nil.",
+        "app-server-go/internal/lifecycle/lifecycle_test.go:231 exercises health and bearer-bearing shutdown redirect refusal."
+      ]
+    },
+    {
+      "id": "P9-CLI-003",
+      "status": "PASS",
+      "proof": [
+        "Provision rejects non-canonical mixed-case protected/public ASTRORDER keys before writes, and Windows child environment construction normalizes and deduplicates case-insensitively.",
+        "app-server-go/internal/lifecycle/provision_test.go:198 covers mixed-case public-secret rejection; focused lifecycle and real-process tests exited 0."
+      ]
+    },
+    {
+      "id": "P9-CLI-004",
+      "status": "PASS",
+      "proof": [
+        "app-server-go/internal/lifecycle/private_dir_windows.go:21 and :39 apply protected current-user plus LocalSystem ACLs to private directories/files.",
+        "app-server-go/internal/lifecycle/provision_windows_test.go:196 proves repeated provisioning repairs state-file ACLs without changing bytes."
+      ]
+    },
+    {
+      "id": "P9-CLI-005",
+      "status": "PASS",
+      "proof": [
+        "Canonical final state-directory identity is used for the Windows lifecycle mutex.",
+        "app-server-go/internal/lifecycle/app.go:228 holds one lifecycle lock over restart stop/start.",
+        "app-server-go/internal/lifecycle/provision_windows_test.go:169 exercises alias identity convergence; focused lifecycle tests exited 0."
+      ]
+    },
+    {
+      "id": "P9-CLI-006",
+      "status": "PASS",
+      "proof": [
+        "app-server-go/cmd/astrorderctl/lifecycle_process_test.go:139 reads credentials and registers restoration at :147 before corruption at :152.",
+        "The opt-in supplied-candidate lifecycle test exited 0 and covered provision/start/duplicate-start/status/restart/stop, listener release, and survival of an independent sentinel with no lifecycle requests."
+      ]
+    },
+    {
+      "id": "STORE-POST-FIX",
+      "status": "PASS",
+      "proof": [
+        "Python-compatible canonical hashes for Unicode, HTML characters, U+2028/U+2029, large integer lexemes, and 1 versus 1.0 matched independent Python probes.",
+        "The during-review literal \\u2028/\\u2029 correction was repinned and verified against three independent Python constants.",
+        "Code-point limits, exact current-version structural validation, transactional canonical rebuild, and OS-visible cross-process migration ownership passed focused tests.",
+        "app-server-go/internal/store/store.go:181 retains an opaque typed Projector and closure; app-server-go/internal/store/preferences_events.go:170 keeps projection, event insertion, and checkpoint movement in one transaction and returns output only after commit.",
+        "app-server-go/internal/store/attachments.go:49 now performs insert, readback, and wire conversion inside WithTx; attachment_transaction_test.go:9 proves wire-conversion failure rolls back the row.",
+        "app-server-go/internal/attachments/attachments.go:240 removes a renamed blob when metadata persistence fails, but marks row ownership at :266-268 so publication failure preserves the committed row/blob pair."
+      ]
+    },
+    {
+      "id": "P4-SOURCE-CONTRACT",
+      "status": "PASS",
+      "proof": [
+        "The supplied candidate SHA-256 7462c532b2b7b49731ecbd92615ee70d900aee1abd13882aeec4a9a9ca965b8e passed a fresh explicit-Node harness run.",
+        "Real Python source routes exercised bootstrap auth/cancellation, attachment write/read/limit, durable replay/live events, and compiled headless frontend bootstrap.",
+        "Private fixture routes separately exercised streaming, upstream-header sanitization, client-cancel propagation, and deterministic fixture shutdown.",
+        "App-only shutdown released the App listener/WebSocket while the source remained healthy; final cleanup recorded every owned process exiting code 0 and released listeners.",
+        "scripts/migration/p4_contract_upstream.py:1 and result scope explicitly state no production lifespan, daemon, Agent, automatic connection, or inference."
+      ]
+    }
+  ],
+  "verified_commands": [
+    {
+      "command": "C:/Users/luwei/.codex/tools/go1.26.4.windows-amd64/go/bin/go.exe test ./internal/lifecycle ./cmd/astrorderctl ./internal/credentials -count=1 -timeout=300s",
+      "cwd": "app-server-go",
+      "exit_code": 0,
+      "result": "PASS"
+    },
+    {
+      "command": "ASTRORDER_TEST_APP=<private supplied candidate> plus hostile inherited ASTRORDER_* fixtures C:/Users/luwei/.codex/tools/go1.26.4.windows-amd64/go/bin/go.exe test ./cmd/astrorderctl -run '^TestAppCLIRealProcessLifecycle$' -count=1 -v -timeout=90s",
+      "cwd": "app-server-go",
+      "exit_code": 0,
+      "result": "PASS; actual product candidate process exercised; temporary test fixtures cleaned by testing.T"
+    },
+    {
+      "command": "C:/Users/luwei/.codex/tools/go1.26.4.windows-amd64/go/bin/go.exe test ./internal/lifecycle -run 'Test(ProvisionRejectsDirectoryJunctionEscapesBeforeSideEffects|IsolatedHTTPClientRefusesHealthAndShutdownRedirects|LifecycleHTTPRejectsTrailingJSON|LifecycleLockCanonicalizesStateDirectoryAliases|ProvisionRepairsExistingStateFileACLsWithoutChangingBytes|ProvisionRejectsMixedCasePublicSecretBeforeWrites)$' -count=1 -v -timeout=180s",
+      "cwd": "app-server-go",
+      "exit_code": 0,
+      "result": "PASS"
+    },
+    {
+      "command": "C:/Users/luwei/.codex/tools/go1.26.4.windows-amd64/go/bin/go.exe test ./internal/store -count=1 -timeout=180s",
+      "cwd": "app-server-go",
+      "exit_code": 0,
+      "result": "PASS before source-change detection: ok astrorder.dev/app-server/internal/store 2.417s"
+    },
+    {
+      "command": "C:/Users/luwei/.codex/tools/go1.26.4.windows-amd64/go/bin/go.exe test ./internal/store -count=1 -timeout=180s",
+      "cwd": "app-server-go",
+      "exit_code": 0,
+      "result": "PASS after repinning changed codec.go: ok astrorder.dev/app-server/internal/store 2.679s"
+    },
+    {
+      "command": "C:/Users/luwei/.codex/tools/go1.26.4.windows-amd64/go/bin/go.exe test ./internal/store -run 'Test(PayloadHashMatchesPythonCanonicalJSON|JSONCodecPreservesUnknownIntegersAndFloatSemantics|ExistingPythonQueuedCommandRetryUsesExactLedgerHash|NativeIdentityMigrationRehashesWithPythonContractAndKeepsLedgerIdentity|UnicodeLimitsPreserveCodepointsAndValidUTF8OnEveryTitlePath|ValidateSchemaRejectsStructuralDrift|SchemaMigrationOwnershipIsCrossProcess|AttachmentReadbackFailureRollsBackInsert|ProjectorRegistrationRetainsClosureAndRejectsUnregisteredHandle)$' -count=1 -v -timeout=180s",
+      "cwd": "app-server-go",
+      "exit_code": 0,
+      "result": "PASS after source-change repin; all named tests passed"
+    },
+    {
+      "command": "C:/Users/luwei/.codex/tools/go1.26.4.windows-amd64/go/bin/go.exe test ./internal/store -run 'Test(ApplyFrameIsRegisteredAtomicContiguousAndReopenSafe|ProjectorRegistrationRetainsClosureAndRejectsUnregisteredHandle|AttachmentReadbackFailureRollsBackInsert)$' -count=1 -v -timeout=180s",
+      "cwd": "app-server-go",
+      "exit_code": 0,
+      "result": "PASS: ok astrorder.dev/app-server/internal/store 0.561s"
+    },
+    {
+      "command": "C:/Users/luwei/.codex/tools/go1.26.4.windows-amd64/go/bin/go.exe vet ./internal/store ./internal/lifecycle ./cmd/astrorderctl ./internal/credentials",
+      "cwd": "app-server-go",
+      "exit_code": 0,
+      "result": "PASS"
+    },
+    {
+      "command": "C:/Users/luwei/.codex/tools/go1.26.4.windows-amd64/go/bin/go.exe vet ./internal/store",
+      "cwd": "app-server-go",
+      "exit_code": 0,
+      "result": "PASS after codec.go repin"
+    },
+    {
+      "command": "backend/.venv/Scripts/python.exe -c <hard-coded canonical JSON SHA-256 probes>",
+      "cwd": "repository root",
+      "exit_code": 0,
+      "result": [
+        "a97d9db6a153e46238230fbb74ea06f00224ae8397009e68ae4bd01f37a3b0f5",
+        "6132587c59a30dfa0845dfb74e888b845c202d26470dba4dddbb85de3ad06746",
+        "e646ca468a11f27bb0ff4fbc9a6af1b7e380ec07dc190b12c4e26da2739e7516",
+        "289630a9f66c568fc81c709ff755ef16a440c38050d9472c78aa33773fbe1460",
+        "1ac59d8fe020be53131f488bab3ec70d3d405bbf4e2fe2795e830c41dcfaa0f8"
+      ]
+    },
+    {
+      "command": "C:/Users/luwei/AppData/Local/hermes/tools/node-26.7.0-win32-x64/node.exe scripts/migration/p4_contract_verify.mjs P:/workspace/glwlg/ai/astrorder C:/Users/luwei/AppData/Local/hermes/cache/scratch/ C:/Users/luwei/AppData/Local/hermes/cache/scratch/astrorder-app-p4-real-source.exe P:/workspace/glwlg/ai/astrorder/backend/.venv/Scripts/python.exe",
+      "cwd": "repository root",
+      "exit_code": 0,
+      "result": {
+        "realBootstrapAuthAndCancellation": true,
+        "realAttachmentWriteReadLimit": true,
+        "realDurableReplayAndLive": true,
+        "compiledFrontendRealBootstrap": true,
+        "authenticatedAppOnlyExitPortAndWS": true,
+        "fixtureStreamingHeaderSanitizationAndCancellation": true,
+        "allOwnedProcessesExited": true,
+        "listenersReleased": true
+      }
+    },
+    {
+      "command": "remove fresh transient harness state after result/audit extraction and verify absence",
+      "exit_code": 0,
+      "result": "C:/Users/luwei/AppData/Local/hermes/cache/scratch/p4-source-contract-cRMwx9 removed"
+    }
+  ],
+  "source_change_during_review": {
+    "detected": true,
+    "path": "app-server-go/internal/store/codec.go",
+    "earlier_sha256": "a549fb3e5c03d8bc7b876f6caf4f3d1490fb0c5bd37eb32962d568195577ea78",
+    "final_sha256": "f295a2d0a66424918582e59316eede1b4c436fc95a5fc50d74c724f886aff3d1",
+    "related_new_test": {
+      "path": "app-server-go/internal/store/json_escape_test.go",
+      "sha256": "4df796f5690ce4b373321338bb5f3492d12f8ec9f6074319f198bbae4ecc2efd"
+    },
+    "review_action": "Repinned current content and reran the affected full Store package, focused compatibility/transaction/projector tests, Store vet, and independent Python literal-escape probes. All exited 0."
+  },
+  "hashes": {
+    "review_inputs": {
+      "AGENTS.md": "d5a76147bc9b924e0f367209db8045076a242a43db0d5876484a9fa57d02ae03",
+      "docs/design/astrorder-full-go-migration.md": "ff42fd0bcbd8807d16f2bbaa57468ba9af440421369d6055cc4ac2cdccf1b0ca",
+      "full-go-store-fix-result.json": "a7a18243624d81e7d3db1cf0a898c07a1976e273fc2434b7a7960a769b8b938e",
+      "private/full-go-ctl-review.json": "a2b15c34631b0f942cde2146c0261d553532a878d4cbcfa992ae0f90b064b68f",
+      "private/full-go-lifecycle-fix-result.json": "21681eaff8ce5344c0e340c0e4fedb0edc61f27e034ee3cfe77d5ddb05058deb",
+      "private/full-go-store-events-review.json": "11015793cf64d27b70a5b816b8ad3e908c4d379806fb40cca476333d64feb399",
+      "private/p4-source-contract-fU97bn/result.json": "ab1818401a61ff8a804e01a7ffe74b7097e4af9b45d4939f2dbbfdc8ae175f70"
+    },
+    "fixtures_and_tools": {
+      "private/astrorder-app-p4-real-source.exe": "7462c532b2b7b49731ecbd92615ee70d900aee1abd13882aeec4a9a9ca965b8e",
+      "node.exe": "e921fe5307e29bf6fd00000dd594356affd3a7b044e52720c7f10decbdc305b9",
+      "backend/.venv/Scripts/python.exe": "e850bfe7e4ca64d4b1a10a34fd8ab4f74108c75a559c200700655df9eaad905f",
+      "fresh_transient_result.json_before_cleanup": "523dcd81caac177b93f765e6181273dd3e39b3086c930c754f3c0557f6cc1d61",
+      "fresh_transient_audit.jsonl_before_cleanup": "1df2cdbde44fa9c7aa61fe83f9c0b0a9aec0303d96d9bdef950cdc24f24cafd8"
+    },
+    "lifecycle": {
+      "app-server-go/cmd/astrorderctl/lifecycle.go": "a9f1d0d0c3d4630006ae67e389117bfec9aadc403d1d10f0197a4dd3cfffc884",
+      "app-server-go/cmd/astrorderctl/lifecycle_process_test.go": "d97f9850f7a10cbb14757f54f3c50a30a4fa42152b08643a6bb4eef84fca9987",
+      "app-server-go/cmd/astrorderctl/lifecycle_test.go": "678eddfc3eed2fb9effd56c2a57d9eafcfeda7300b605051309cd3e8e13ff5eb",
+      "app-server-go/internal/lifecycle/app.go": "131e8b896abf08ec6e63b930d8c1041484480747f74d92b190fd56430d8411e6",
+      "app-server-go/internal/lifecycle/provision.go": "77deca7147afa5b4c31860f7705cff1eee777f2d600db3279240e4fa4fa1d906",
+      "app-server-go/internal/lifecycle/private_dir_windows.go": "60b9f62148ac0e0035eff771111324896c11890eac35118f6c2294e10b3d5755",
+      "app-server-go/internal/lifecycle/process_windows.go": "62f04846df40535e99a5b5516ee92691a31a03adba9a040fb434fe3bf3b0e2bd",
+      "app-server-go/internal/lifecycle/canonical_path_windows.go": "ef5bb800ba32396466b17ddfcac0fa49548d4bd75c5d13d5e5d039b51ac7eaeb",
+      "app-server-go/internal/lifecycle/lifecycle_test.go": "e0d57bb3d983cca046ef33b3cf5ef23176e8dd32c9e88cbbc71239c7dbba2ea2",
+      "app-server-go/internal/lifecycle/provision_test.go": "8083b32668da3ad718502205b1adf01e54723b060abbd30f7bb88144502f30b1",
+      "app-server-go/internal/lifecycle/provision_windows_test.go": "f6f709afb836a4109861f16ecec03d3c59ffa0ce4a679662dc02fae54c12a89e"
+    },
+    "store_and_attachments": {
+      "app-server-go/internal/store/store.go": "786cfe59c323c738cf7358e91a390fc8818607d4b1af0270b9f413510b32d7ff",
+      "app-server-go/internal/store/schema.go": "1bb7a772c4059b04add442e69acf6213c9962e2e2c2887873d3474724ab8b599",
+      "app-server-go/internal/store/codec.go": "f295a2d0a66424918582e59316eede1b4c436fc95a5fc50d74c724f886aff3d1",
+      "app-server-go/internal/store/wire.go": "438d4eb089ab79bdc8eb9915b29be7cf9ee51d6bc5dbb5917383904790471a9f",
+      "app-server-go/internal/store/preferences_events.go": "7af258ab32dff11b5dde002170dc5400d30f74e4b108f44af62f6c2472fe8c27",
+      "app-server-go/internal/store/attachments.go": "492b48a1da9c342fac3e0be0d77e98c07feb69db847b1844ba12ee80162c86a2",
+      "app-server-go/internal/store/attachment_transaction_test.go": "6bee79ef4182804a3e4123189ad3106b4204f9d25d0021d852a456bfa4652ec4",
+      "app-server-go/internal/store/compatibility_test.go": "118a2f51b9da10808be3b984ea6a9567f3dd0fcab70b320f9c554d872b51813d",
+      "app-server-go/internal/store/json_escape_test.go": "4df796f5690ce4b373321338bb5f3492d12f8ec9f6074319f198bbae4ecc2efd",
+      "app-server-go/internal/store/schema_reliability_test.go": "7d15cd9705b56ab657dbb1d0dfdb809de2e425729bade92a2d1833a85b57de11",
+      "app-server-go/internal/store/projector_test.go": "6f44598b150cbcd242abc89ac86d7fe1c786df7ac32e49855ce2244925bb36d3",
+      "app-server-go/internal/store/migration_lock_windows.go": "6a9732c8960297672b814ed92f17522f663de7c7c737ce9b60a05cb4ef7aea85",
+      "app-server-go/internal/store/migration_lock_unix.go": "e2378e806a1c11f3067709ef85aa5a65f059fb01661eca2bcf737f80bb8485e5",
+      "app-server-go/internal/attachments/attachments.go": "28e5a32a7838f0d55a473f542f954f73db6cda7cfc9cd29e44d5ecfa2c52dd14",
+      "app-server-go/internal/attachments/attachments_test.go": "e477c8c57813e5656f91f14b15983807965afd2f671de391c517c1be9cb37222",
+      "app-server-go/internal/attachments/publication_test.go": "d34901c04b08c1c6f3f32d8e41c6894af79f381331d25be4e829f00d5f9070b7"
+    },
+    "p4": {
+      "scripts/migration/p4_contract_verify.mjs": "dfceff3e8e4dfa174916a7e7ef17c44dc016de85d41e030d4135fe559398b931",
+      "scripts/migration/p4_contract_upstream.py": "6aa6ab73faf7f18f9f192420aa71842f34350ecc52fe482d2bbe6a9faf27e6ee"
+    }
+  },
+  "workspace_observation": {
+    "tracked_head_matches_origin_master": true,
+    "reviewed_foundation_is_untracked_worktree_content": true,
+    "content_hashes_are_the_authoritative_review_snapshot": true,
+    "assistant_source_edits": false,
+    "assistant_outputs": [
+      "scratch/full-go-foundation-final-review.json",
+      "scratch/full-go-foundation-final-review.md"
+    ]
+  },
+  "remaining-stage-gaps": [
+    "P8 remains a prerequisite; this review does not declare P9 or any migration stage complete.",
+    "The production Go App does not yet prove integrated Store opening, real projector registration, daemon gRPC projection, and event publication through the final production composition root.",
+    "The P4 run is an isolated source-contract comparison with lifespan disabled and no daemon, Agent, automatic connection, chat, or inference; fixture-only routes are not evidence of Agent behavior.",
+    "No production database, credentials, chat system, daemon, user data, installation, service deployment, or cutover was exercised.",
+    "The retained five-binary Go-only build predates the latest attachment/codec fixes and is not current release evidence; rebuild/package verification remains required for a later release tranche.",
+    "Current all-package Go tests/vet and contracts/build results supplied by the coordinator were not reclassified as release evidence by this bounded pass.",
+    "The reviewed implementation is still untracked worktree content rather than a committed/released artifact; the hashes in this report pin the exact accepted snapshot."
+  ],
+  "safety": {
+    "source_edits": false,
+    "production_operations": false,
+    "daemon_contact_or_restart": false,
+    "real_database_or_chat": false,
+    "real_credentials": false,
+    "commit_push_or_stash": false,
+    "other_profiles": false,
+    "third_party_ai_agents": false,
+    "test_data": "private synthetic fixtures and temporary databases/processes only"
+  }
+}

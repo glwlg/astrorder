@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "passed": true,
+  "fixture": "synthetic local Hermes JSON-RPC gateway; actual Go Isolated Hermes adapter, private daemon and generated Python client",
+  "daemon_sha256": "a79f6beb17dc3d1020196cebf4bd48403820474f4a190f6231b1e6669a5f1a87",
+  "assertions": [
+    "actual legacy WS creates private synthetic native session on same daemon authority",
+    "generated Python client authenticates and reads actual Hermes adapter models/commands/model state",
+    "native gateway history returns three bounded pages, exact large integer and explicit null terminal cursor",
+    "foreign Agent identity rejected before native dispatch",
+    "gRPC reconnect reuses original native session; no prompt submitted and model resumes omit messages",
+    "session reads leave journal watermark and operation counts unchanged",
+    "private idle shutdown confirms owned daemon exit, child stdin EOF and both listener ports released"
+  ],
+  "cleanup": {
+    "daemon_exit_code": 0,
+    "forced_cleanup": false
+  },
+  "production_changed": false,
+  "full_migration_complete": false,
+  "limits": [
+    "No real inference, production or profile data",
+    "Native upstream gateway still returns full history; scanner large-frame limitation untested",
+    "Dirty source working tree; binary hash alone does not certify current-source freshness"
+  ]
+}

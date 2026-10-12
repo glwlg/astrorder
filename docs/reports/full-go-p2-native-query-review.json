@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "passed": true,
+  "verdict": "PASS",
+  "scope": [
+    "session-daemon-go/internal/grpcapi/native_query.go",
+    "session-daemon-go/internal/grpcapi/native_query_translate.go",
+    "session-daemon-go/internal/grpcapi/native_query_test.go",
+    "session-daemon-go/internal/grpcapi/native_query_translate_test.go",
+    "session-daemon-go/internal/grpcapi/native_query_boundary_test.go",
+    "session-daemon-go/internal/grpcapi/native_query_routes_test.go",
+    "session-daemon-go/internal/grpcapi/server.go",
+    "session-daemon-go/internal/grpcapi/control.go",
+    "session-daemon-go/internal/grpcapi/grpcapi_test.go",
+    "session-daemon-go/internal/protocol/query_facade.go",
+    "session-daemon-go/internal/protocol/control.go"
+  ],
+  "source_hashes": {
+    "session-daemon-go/internal/grpcapi/native_query.go": "027b5d27c0406850a99e9f4ee5f2060e855f29cc060dd684b7108433b9cc273b",
+    "session-daemon-go/internal/grpcapi/native_query_translate.go": "175331278a5cd206845fddf0f06fbe28a793d2294f4ddb42ec75a53163a65997",
+    "session-daemon-go/internal/grpcapi/native_query_test.go": "15f6b0206446c73bb9f94728514905c081230aef06bcf44df48d046cc9ac8da7",
+    "session-daemon-go/internal/grpcapi/native_query_translate_test.go": "7ee80a5df7f901528bc2fe925fa2a2a32758fcae83204e2133516f8d65be26dd",
+    "session-daemon-go/internal/grpcapi/native_query_boundary_test.go": "20a6fb3b241efeac514df4e733a27d4374631a58d5552f9d8b609070c509f93c",
+    "session-daemon-go/internal/grpcapi/native_query_routes_test.go": "326cd62e547282399111b1fd2015a5194006a7408af62ca1997f7273263f4ccb",
+    "session-daemon-go/internal/grpcapi/server.go": "74fc9fe4b5b4f2cf735d398a9de4843cbd8929bca6709d73a3370c2a9ff9ddc6",
+    "session-daemon-go/internal/grpcapi/control.go": "7d46dd37d1a0fd602d885b95982fe7c60467a05b169e5d619cf3faae2915c825",
+    "session-daemon-go/internal/grpcapi/grpcapi_test.go": "bf3770cf1800a32381f690919b498a6cb7b0d7c3b003047f1862f1a13e877f7b",
+    "session-daemon-go/internal/protocol/query_facade.go": "6f9f3e34aad2e6916c659d648ac2fb93560ed2f70bc904ad40a76da9c831f037",
+    "session-daemon-go/internal/protocol/control.go": "3983d1e52ecf435253077685976060a05dd64f0dc6f7efa0c97f93d4d187b5aa"
+  },
+  "findings": [],
+  "checks": [
+    {
+      "command": "C:/Users/luwei/.codex/tools/go1.26.4.windows-amd64/go/bin/go.exe test ./internal/grpcapi ./internal/protocol -run 'TestQueryNative|TestNativeQueryTranslation|TestRuntimeQueryUsesReadOnlyNativeRoute|TestAuthenticationCapabilitiesAndRegisteredSurface|TestDefaultServerRegisters' -count=1 -timeout=60s",
+      "exit_code": 0
+    },
+    {
+      "command": "C:/Users/luwei/.codex/tools/go1.26.4.windows-amd64/go/bin/go.exe vet ./internal/grpcapi ./internal/protocol",
+      "exit_code": 0
+    }
+  ],
+  "limits": {
+    "wire_max_bytes": 33554432,
+    "business_max_bytes": 16000000,
+    "admission_timeout": "30s",
+    "synthetic_routing_fixtures": true,
+    "no_live_inference": true,
+    "ssh_alias_options_executable_unimplemented": true,
+    "runtime_query_remaining_methods_unimplemented": true,
+    "partial_scope_no_p2_completion": true
+  },
+  "full_migration_complete": false,
+  "production_changed": false
+}

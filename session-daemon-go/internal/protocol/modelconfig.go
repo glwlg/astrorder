@@ -44,7 +44,7 @@ func (d *Daemon) modelConfigControl(parent context.Context, request map[string]a
 			return errorResponse(request["request_id"], "model configuration target is invalid")
 		}
 		kind, _ := target["kind"].(string)
-		if kind != "local" {
+		if kind != "local" && kind != "wsl" && kind != "ssh" {
 			return errorResponse(request["request_id"], "model configuration target is not configured")
 		}
 	}

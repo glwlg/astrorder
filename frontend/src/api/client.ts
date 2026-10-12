@@ -36,7 +36,7 @@ export interface ReviewRelayRun {
   created_at: string
   updated_at: string
 }
-export interface SessionModelBinding { model: string; provider: string | null; deferred?: boolean; branch?: string; effort?: string | null }
+export interface SessionModelBinding { model: string; provider: string | null; deferred?: boolean; branch?: string; effort?: string | null; read_only?: boolean; detail?: string }
 export interface CodexConnectionStatus { kind: 'codex'; state: 'disconnected' | 'connecting' | 'connected' | 'error' | 'authentication_required'; available: boolean; agent_id: string; session_count: number; auth_required: boolean; detail: string; daemon_mode: boolean }
 export interface GatewayProfile {
   gateway_type: 'opencodex' | 'magpie'
@@ -284,7 +284,7 @@ export const api = {
   importPreferences: (values: PreferencePatch) => jsonRequest<WorkspacePreferences>('/preferences/import', values),
   updatePreferences: (values: PreferencePatch) => jsonRequest<WorkspacePreferences>('/preferences', values, 'PATCH'),
   getObservations: (agentId: string, sessionId?: string) => request<{ status: { installed?: boolean; trusted?: boolean; needs_review?: boolean; last_event_at?: number }; items: { id: string; event: string; label: string; observed_at: number; tool_name?: string }[] }>(`/agents/${encodeURIComponent(agentId)}/observations${sessionId ? '?session_id='+encodeURIComponent(sessionId) : ''}`),
-  installObserver: (agentId: string) => jsonRequest(`/agents/${encodeURIComponent(agentId)}/observer`, {}),
+  installObserver: (agentId: string) => jsonRequest<{ ok: boolean; installed?: boolean; trusted?: boolean; needs_review?: boolean; error?: string; trust_error?: string; rewrite?: { files: number; handlers: number } }>(`/agents/${encodeURIComponent(agentId)}/observer`, {}),
   getAuthSession: () => request<AuthSession>('/auth/session'),
   login: (token: string) => jsonRequest<AuthSession>('/auth/session', { token }),
   logout: () => request<void>('/auth/session', { method: 'DELETE' }),
@@ -299,6 +299,13 @@ export const api = {
   },
   syncSession: (sessionId: string, agentId: string) =>
     request<Session>(`${sessionPath(sessionId)}/sync?agent_id=${encodeURIComponent(agentId)}`, { method: 'POST' }),
+  refreshSessionActivity: (agentId?: string) => {
+    const query = agentId ? `?agent_id=${encodeURIComponent(agentId)}` : ''
+    return request<{ updated: number; agents: { agent_id: string; kind: string; updated?: number; error?: string }[] }>(
+      `/sessions/refresh-activity${query}`,
+      { method: 'POST' },
+    )
+  },
   getMessages: (sessionId: string, agentId: string, before?: string, limit = 50) => {
     const query = new URLSearchParams({ agent_id: agentId, limit: String(limit) })
     if (before) query.set('before', before)
@@ -581,12 +588,12 @@ export const api = {
       agents: string[]
       reload_pending: boolean
       hermes: { dynamic: boolean; status: string }
-      model_diff?: { added: string[]; removed: string[]; kept_count: number }
-      changes: Array<{ file: string; changed: boolean; current_sha256: string; expected_sha256: string; diff: string }>
+      model_diff?: { added?: string[] | null; removed?: string[] | null; kept_count?: number | null }
+      changes?: Array<{ file: string; changed: boolean; current_sha256: string; expected_sha256: string; diff?: string }> | null
     }>
   }>('/model-sync/preview', { targets }),
   startModelSync: (targets: Array<{ target_id: string; agents: string[] }>) => jsonRequest<{ id: string; status: string }>('/model-sync/jobs', { targets }),
-  getModelSyncJobs: () => request<{ items: Array<{ id: string; status: 'running' | 'success' | 'failed' | 'cancelled'; error?: string; targets: Array<{ target_id: string; status: string; changed?: string[]; reload_pending?: boolean; error?: string }> }> }>('/model-sync/jobs'),
+  getModelSyncJobs: () => request<{ items: Array<{ id: string; status: 'running' | 'success' | 'failed' | 'cancelled'; error?: string; targets: Array<{ target_id: string; status: string; changed?: string[]; reload_pending?: boolean; error?: string }> | null }> }>('/model-sync/jobs'),
   cancelModelSync: (id: string) => request<{ cancelled: boolean }>(`/model-sync/jobs/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
 
   // OpenViking 记忆与知识库相关接口

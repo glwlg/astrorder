@@ -151,7 +151,7 @@ func TestModelConfigRoutesLocalApplyAndReadback(t *testing.T) {
 	}
 	result := planned["result"].(map[string]any)
 	file := result["codex_config"].(map[string]any)
-	if file["content"] != text || file["exists"] != true || result["_home"] != home {
+	if file["content"] != text || file["exists"] != true || result["_home"] != filepath.Clean(home) {
 		t.Fatal(planned)
 	}
 	if len(d.journal.Statuses()) != 0 {

@@ -13,7 +13,7 @@ type ConfigReloader interface{ ReloadConfig(context.Context) error }
 // reserveLocked gates starts/commands against per-runtime maintenance. Metadata
 // locks are never held while the native reload callback performs IO.
 func (r *Registry) reserveLocked(kind string) error {
-	if r.reloading[kind] {
+	if r.draining || r.reloading[kind] {
 		return ErrRuntimeBusy
 	}
 	r.inflight++
@@ -59,7 +59,7 @@ func (r *Registry) ReloadConfig(ctx context.Context, kind string) error {
 		r.mu.Unlock()
 		return fmt.Errorf("runtime %q has no native config reloader", kind)
 	}
-	if r.operations[kind] > 0 || r.reloading[kind] {
+	if r.draining || r.operations[kind] > 0 || r.reloading[kind] {
 		r.mu.Unlock()
 		return ErrRuntimeBusy
 	}

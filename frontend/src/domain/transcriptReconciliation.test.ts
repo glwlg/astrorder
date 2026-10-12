@@ -24,3 +24,17 @@ it('collapses an optimistic message when a history message with matching role an
   const history = m('history-message-sha', 'user', 10, null)
   expect(visibleTranscript([optimistic, history], [history], new Set()).map(x => x.id)).toEqual(['history-message-sha'])
 })
+
+it('replaces a live Hermes assistant message with its final native row using the exact command', () => {
+  const live = m('hermes-stream-first', 'assistant', 10, 'first')
+  const other = m('hermes-stream-second', 'assistant', 12, 'second')
+  const final = m('history-message-final', 'assistant', 14, 'first')
+  expect(mergeMessagesById([live, other], [final]).map(x => x.id)).toEqual(['history-message-final', 'hermes-stream-second'])
+  expect(mergeMessagesById([final], [live]).map(x => x.id)).toEqual(['history-message-final'])
+})
+
+it('replaces an optimistic user message with an incoming server user message matching text without command_id', () => {
+  const optimistic = m('optimistic-cmd999', 'user', 10, 'cmd999')
+  const incomingServerUser = m('item-codex-user-1', 'user', 15, null)
+  expect(mergeMessagesById([optimistic], [incomingServerUser]).map(x => x.id)).toEqual(['item-codex-user-1'])
+})

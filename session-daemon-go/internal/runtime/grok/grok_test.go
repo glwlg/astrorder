@@ -83,6 +83,9 @@ func TestFakeACP_CreateAndSpawn(t *testing.T) {
 	if spawned.SessionID != "s-fake-1" {
 		t.Fatalf("unexpected spawn result: %+v", spawned)
 	}
+	if spawned.Payload["agent_id"] != "local-grok" {
+		t.Fatalf("expected agent_id local-grok, got: %v", spawned.Payload["agent_id"])
+	}
 }
 
 func runFakeACPBasic() {

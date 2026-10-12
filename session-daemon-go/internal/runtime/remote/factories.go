@@ -7,6 +7,7 @@ import (
 
 	"astrorder.dev/session-daemon/internal/process"
 	core "astrorder.dev/session-daemon/internal/runtime"
+	"astrorder.dev/session-daemon/internal/runtime/activity"
 	codexrt "astrorder.dev/session-daemon/internal/runtime/codex"
 	grokrt "astrorder.dev/session-daemon/internal/runtime/grok"
 	sshtrans "astrorder.dev/session-daemon/internal/transport/ssh"
@@ -40,6 +41,13 @@ func ParseSSHConfig(settings map[string]any) (sshtrans.Config, error) {
 
 // NewRemoteCodexFactory returns a ChildFactory that spawns remote Codex app-server instances over SSH.
 func NewRemoteCodexFactory(emit func(string, string, map[string]any, string) error) core.ChildFactory {
+	return NewRemoteCodexFactoryWithActivity(emit, nil)
+}
+
+// NewRemoteCodexFactoryWithActivity also streams the host's hook events, so a
+// remote Codex reports last-activity the same way the local one does. known
+// reports whether the daemon already tracks a session; nil disables the stream.
+func NewRemoteCodexFactoryWithActivity(emit func(string, string, map[string]any, string) error, known func(string) bool) core.ChildFactory {
 	return func(connID string, settings map[string]any) (core.Adapter, error) {
 		executable, _ := settings["codex_executable"].(string)
 		if executable == "" || strings.ContainsRune(executable, 0) || !strings.HasPrefix(executable, "/") {
@@ -85,7 +93,20 @@ func NewRemoteCodexFactory(emit func(string, string, map[string]any, string) err
 			AgentID:    fmt.Sprintf("ssh-codex-%s", connID),
 		}
 
-		return codexrt.NewSSHAdapter(codexConfig, emit, starter), nil
+		adapter := codexrt.NewSSHAdapter(codexConfig, emit, starter)
+		if known != nil {
+			tailCtx, cancel := context.WithCancel(context.Background())
+			adapter.OnClose(cancel)
+			go SuperviseTail(tailCtx, func(ctx context.Context, spec sshtrans.CommandSpec) (TailSession, error) {
+				return transport.Start(ctx, spec)
+			}, activity.Options{
+				AgentID: codexConfig.AgentID,
+				Emit:    activity.Emit(emit),
+				Known:   known,
+				OnStop:  codexrt.StopNotifier(codexConfig.AgentID, emit),
+			}, nil)
+		}
+		return adapter, nil
 	}
 }
 

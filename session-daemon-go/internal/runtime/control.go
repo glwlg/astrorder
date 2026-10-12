@@ -17,7 +17,7 @@ type Snapshotter interface{ Snapshot() map[string]Result }
 func validStatus(s string) bool {
 	return s == "idle" || s == "running" || s == "waiting_approval" || s == "error"
 }
-func (r *Registry) bind(kind string, result Result) (Result, error) {
+func (r *Registry) bind(request Request, result Result) (Result, error) {
 	if result.SessionID == "" || len(result.SessionID) > 256 || !validStatus(result.Status) {
 		return Result{}, fmt.Errorf("invalid runtime result")
 	}
@@ -26,8 +26,11 @@ func (r *Registry) bind(kind string, result Result) (Result, error) {
 	if _, exists := r.owners[result.SessionID]; exists {
 		return Result{}, fmt.Errorf("runtime returned duplicate session identity")
 	}
-	r.owners[result.SessionID] = kind
+	r.owners[result.SessionID] = request.AgentType
+	r.identities[result.SessionID] = bindingIdentity(request, result)
 	r.states[result.SessionID] = result
+	r.nextGeneration++
+	r.generations[result.SessionID] = r.nextGeneration
 	return result, nil
 }
 func (r *Registry) Spawn(ctx context.Context, request Request) (Result, error) {
@@ -99,9 +102,23 @@ func (r *Registry) Spawn(ctx context.Context, request Request) (Result, error) {
 			return Result{}, fmt.Errorf("session ownership changed during recovery")
 		}
 		r.states[request.SessionID] = result
+		identity := bindingIdentity(request, result)
+		previous := r.identities[request.SessionID]
+		if identity.AgentID == nil {
+			identity.AgentID = previous.AgentID
+		}
+		if identity.ConnectionID == nil {
+			identity.ConnectionID = previous.ConnectionID
+		}
+		r.identities[request.SessionID] = identity
+		// A recovery respawn starts a new binding generation even when the
+		// identity values are preserved: authority snapshots captured before
+		// this point must not pair their adapter read with this binding.
+		r.nextGeneration++
+		r.generations[request.SessionID] = r.nextGeneration
 		return result, nil
 	}
-	return r.bind(request.AgentType, result)
+	return r.bind(request, result)
 }
 func (r *Registry) Command(ctx context.Context, request Request) (Result, error) {
 	r.mu.Lock()
@@ -135,7 +152,9 @@ func (r *Registry) Command(ctx context.Context, request Request) (Result, error)
 	}
 	if result.Payload["deleted"] == request.SessionID || result.Payload["closed"] == true {
 		delete(r.owners, request.SessionID)
+		delete(r.identities, request.SessionID)
 		delete(r.states, request.SessionID)
+		delete(r.generations, request.SessionID)
 	}
 	r.mu.Unlock()
 	return result, nil
@@ -145,7 +164,7 @@ func (r *Registry) Statuses() map[string]map[string]any {
 	defer r.mu.RUnlock()
 	out := map[string]map[string]any{}
 	for kind := range r.adapters {
-		out[kind] = map[string]any{"registered": true, "sessions": 0}
+		out[kind] = map[string]any{"registered": true, "sessions": 0, "busy": r.operations[kind] > 0 || r.reloading[kind]}
 	}
 	for _, kind := range r.owners {
 		out[kind]["sessions"] = out[kind]["sessions"].(int) + 1

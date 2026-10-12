@@ -116,10 +116,13 @@ func (d *Daemon) serveStream(parent context.Context, socket *websocket.Conn) {
 				}
 			}
 			if err := write(response); err != nil || !ok && !authenticated {
+				if response["action"] == "daemon.shutdown.result" {
+					d.CancelShutdown()
+				}
 				return
 			}
 			if response["action"] == "daemon.shutdown.result" {
-				d.shutdownOnce.Do(func() { close(d.shutdownRequested) })
+				d.SignalShutdown()
 				return
 			}
 			if syncing && response["action"] == "session.sync.result" {

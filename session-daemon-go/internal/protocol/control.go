@@ -21,7 +21,7 @@ func validateSessionControl(request map[string]any) string {
 	if (action == "session.create" || action == "session.spawn") && kind == "" {
 		return "agent_type is required"
 	}
-	if action != "session.create" && (id == "" || len(id) > 256) {
+	if action != "session.create" && action != "runtime.disconnect" && !strings.HasPrefix(action, "model_config.") && (id == "" || len(id) > 256) {
 		return "session_id is invalid"
 	}
 	return ""
@@ -52,10 +52,7 @@ func (d *Daemon) controlOnce(parent context.Context, request map[string]any) map
 				return errorResponse(request["request_id"], "params must be an object")
 			}
 		}
-		ctx, cancel := context.WithTimeout(parent, 30*time.Second)
-		defer cancel()
-		defer d.wakeModelReloads()
-		result, err := d.registry.Query(ctx, core.Request{AgentType: kind, Action: action, Fields: request})
+		result, err := d.queryNativeAdmitted(parent, core.Request{AgentType: kind, Action: action, Fields: request})
 		if err != nil {
 			return errorResponse(request["request_id"], err.Error())
 		}
@@ -103,6 +100,14 @@ func (d *Daemon) controlOnce(parent context.Context, request map[string]any) map
 	var result core.Result
 	var err error
 	switch action {
+	case "session.disconnect":
+		// Detach the App control transport, retaining daemon ownership and work.
+		// Explicit runtime termination uses close/disconnect-runtime instead.
+		current, exists := d.registry.Sessions()[id]
+		if !exists {
+			return errorResponse(request["request_id"], "session is not daemon-owned")
+		}
+		result = core.Result{SessionID: id, Status: current.Status, Payload: map[string]any{"disconnected": id, "keep_runtime": true}}
 	case "session.create":
 		result, err = d.registry.Create(ctx, r)
 	case "session.spawn":
@@ -115,7 +120,7 @@ func (d *Daemon) controlOnce(parent context.Context, request map[string]any) map
 					// A restarted App has already consumed the original hello.
 					// Reannounce a confirmed live Hermes control transport.
 					if previouslyOwned && result.Payload["runtime_control"] == true && result.Status == "idle" && (kind == "hermes" || kind == "ssh") {
-						agent := map[string]any{"id": result.Payload["agent_id"], "kind": "hermes", "name": "Hermes", "status": "ready", "capabilities": []string{"chat", "events"}, "control_state": "owned"}
+						agent := map[string]any{"id": result.Payload["agent_id"], "kind": "hermes", "name": "Hermes", "status": "ready", "capabilities": []string{"chat", "events", "attachments"}, "control_state": "owned"}
 						for _, key := range []string{"name", "runtime_id", "source_id", "profile_name", "connection_id"} {
 							if value, ok := result.Payload[key]; ok {
 								agent[key] = value

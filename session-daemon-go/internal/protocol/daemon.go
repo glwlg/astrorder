@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"sync"
-	"time"
 
 	"astrorder.dev/session-daemon/internal/events"
 	"astrorder.dev/session-daemon/internal/modelconfig"
@@ -35,9 +34,13 @@ type Daemon struct {
 	daemonID          string
 	journal           *events.Journal
 	connectors        map[string]map[string]any
+	connectorTokens   map[string]any
 	agentControls     map[string]string           // agentID -> controlSessionID
 	pendingEvents     map[string][]map[string]any // agentID -> buffered events
 	mu                sync.Mutex
+	admissionMu       sync.Mutex
+	activeControls    int
+	shutdownPending   bool
 }
 
 func New(secret string) *Daemon {
@@ -50,6 +53,7 @@ func New(secret string) *Daemon {
 		journal:           events.New(2000),
 		registry:          core.NewRegistry(),
 		connectors:        map[string]map[string]any{},
+		connectorTokens:   map[string]any{},
 		agentControls:     map[string]string{},
 		pendingEvents:     map[string][]map[string]any{},
 	}
@@ -199,18 +203,16 @@ func (daemon *Daemon) recordEvent(request map[string]any) map[string]any {
 	event, _ := request["event"].(string)
 	status, _ := request["status"].(string)
 	payload, _ := request["payload"].(map[string]any)
-	if sessionID == "" || event == "" || status == "" {
-		return errorResponse(request["request_id"], "session event is invalid")
-	}
-	timestamp := float64(time.Now().UnixMicro()) / 1e6
+	var timestampMicros *int64
 	if raw, exists := request["timestamp"]; exists {
-		var ok bool
-		timestamp, ok = raw.(float64)
+		timestamp, ok := raw.(float64)
 		if !ok {
 			return errorResponse(request["request_id"], "timestamp must be numeric")
 		}
+		value := int64(timestamp * 1e6)
+		timestampMicros = &value
 	}
-	frame, err := daemon.journal.CommitAt(sessionID, event, payload, status, timestamp)
+	frame, err := daemon.AppendEvent(EventInput{SessionID: sessionID, Event: event, Status: status, Payload: payload, TimestampMicros: timestampMicros})
 	if err != nil {
 		return errorResponse(request["request_id"], "event persistence failed: "+err.Error())
 	}
@@ -224,19 +226,11 @@ func (daemon *Daemon) recordEvent(request map[string]any) map[string]any {
 
 func (daemon *Daemon) shutdown(request map[string]any) map[string]any {
 	confirm, _ := request["confirm_active"].(bool)
-	if pending, err := daemon.journal.PendingOperations(); !confirm && (err != nil || pending > 0) {
-		return errorResponse(request["request_id"], "daemon has pending or uncertain durable operations; explicit confirmation is required")
+	decision, err := daemon.AuthorizeShutdown(nil, confirm)
+	if err != nil {
+		return errorResponse(request["request_id"], err.Error())
 	}
-	if daemon.registry.Busy() && !confirm {
-		return errorResponse(request["request_id"], "daemon has active runtime operations; explicit confirmation is required")
-	}
-	for _, state := range daemon.journal.Statuses() {
-		status, _ := state["status"].(string)
-		if status != "idle" && !confirm {
-			return errorResponse(request["request_id"], "daemon has active sessions; explicit confirmation is required")
-		}
-	}
-	return map[string]any{"action": "daemon.shutdown.result", "request_id": request["request_id"], "daemon_id": daemon.daemonID, "result": map[string]any{"stopping": true}}
+	return map[string]any{"action": "daemon.shutdown.result", "request_id": request["request_id"], "daemon_id": decision.DaemonID, "result": map[string]any{"stopping": decision.Accepted}}
 }
 
 func errorResponse(requestID any, detail string) map[string]any {
@@ -249,4 +243,10 @@ func errorResponse(requestID any, detail string) map[string]any {
 
 func SecureEqual(left, right string) bool {
 	return hmac.Equal([]byte(left), []byte(right))
+}
+
+// HasSession reports whether the journal already tracks the session.
+func (daemon *Daemon) HasSession(id string) bool {
+	_, exists := daemon.journal.Statuses()[id]
+	return exists
 }

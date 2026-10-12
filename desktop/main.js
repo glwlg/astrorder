@@ -3,11 +3,11 @@ const { execFile } = require('node:child_process')
 const { existsSync, readFileSync, writeFileSync } = require('node:fs')
 const path = require('node:path')
 const { pathToFileURL } = require('node:url')
+const { startServices } = require('./service-startup')
 
 let root
-let python
-let serviceScript
-let tokenScript
+let ctlExecutable
+let stateDir
 let appUrl
 const statusFile = path.join(__dirname, 'service-status.html')
 const statusUrl = pathToFileURL(statusFile).href
@@ -170,24 +170,52 @@ function getStoredTheme() {
 async function configureRoot() {
   const developmentRoot = path.resolve(__dirname, '..')
   const candidate = app.isPackaged ? path.join(path.dirname(process.execPath), 'server') : developmentRoot
-  const valid = value => typeof value === 'string'
-    && existsSync(path.join(value, 'scripts', 'desktop_service.py'))
-    && existsSync(path.join(value, 'backend', '.venv', 'Scripts', 'python.exe'))
-  if (!valid(candidate)) {
-    throw new Error('安装目录中的服务端文件不完整，请重新安装星序')
+
+  // Find astrorderctl
+  const ctlCandidates = [
+    path.join(candidate, 'bin', 'astrorderctl.exe'),
+    path.join(candidate, 'bin', 'astrorderctl'),
+    path.join(candidate, 'app-server-go', '.runtime', 'astrorderctl.exe'),
+    path.join(candidate, 'app-server-go', 'cmd', 'astrorderctl', 'astrorderctl.exe'),
+  ]
+  const ctl = ctlCandidates.find(p => typeof p === 'string' && existsSync(p))
+  if (!ctl) {
+    throw new Error('未找到星序原生控制工具 astrorderctl，请重新构建或安装星序')
   }
+  ctlExecutable = ctl
   root = candidate
-  python = path.join(root, 'backend', '.venv', 'Scripts', 'python.exe')
-  serviceScript = path.join(root, 'scripts', 'desktop_service.py')
-  tokenScript = path.join(root, 'scripts', 'print_browser_token.py')
-  if (app.isPackaged) {
+  stateDir = process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Astrorder') : path.join(root, '.runtime')
+
+  const appExecCandidates = [
+    path.join(candidate, 'bin', 'astrorder-app.exe'),
+    path.join(candidate, 'bin', 'astrorder-app'),
+    path.join(candidate, 'app-server-go', '.runtime', 'astrorder-app.exe'),
+  ]
+  const appExec = appExecCandidates.find(p => typeof p === 'string' && existsSync(p)) || path.join(candidate, 'bin', 'astrorder-app.exe')
+
+  // Run provision if packaged or if production.json does not exist
+  const prodJson = path.join(stateDir, 'production.json')
+  if (app.isPackaged || !existsSync(prodJson)) {
+    const dataDir = path.join(stateDir, 'data')
     await new Promise((resolve, reject) => {
-      execFile(python, [path.join(root, 'scripts', 'provision_desktop.py')], {
-        cwd: root, windowsHide: true,
-      }, error => error ? reject(new Error('初始化服务端配置失败')) : resolve())
+      const args = [
+        'provision',
+        '--root', root,
+        '--state-dir', stateDir,
+        '--data-dir', dataDir,
+        '--app-executable', appExec,
+      ]
+      execFile(ctlExecutable, args, { cwd: root, windowsHide: true }, (error, stdout) => {
+        if (error) {
+          reject(new Error('初始化服务端配置失败: ' + (error.message || stdout)))
+        } else {
+          resolve()
+        }
+      })
     })
   }
-  const production = JSON.parse(readFileSync(path.join(process.env.LOCALAPPDATA, 'Astrorder', 'production.json'), 'utf8'))
+
+  const production = JSON.parse(readFileSync(prodJson, 'utf8'))
   const port = Number(production.environment?.ASTRORDER_PORT || 30001)
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('生产端口配置无效')
   appUrl = `http://127.0.0.1:${port}`
@@ -195,9 +223,9 @@ async function configureRoot() {
 
 function service(target, action, confirmActive = false) {
   return new Promise((resolve, reject) => {
-    const args = [serviceScript, target, action]
+    const args = ['service', target, action, '--root', root, '--state-dir', stateDir]
     if (confirmActive) args.push('--confirm-active')
-    execFile(python, args, {
+    execFile(ctlExecutable, args, {
       cwd: root,
       windowsHide: true,
       timeout: 45000,
@@ -207,7 +235,7 @@ function service(target, action, confirmActive = false) {
       try {
         result = JSON.parse(stdout.trim())
       } catch {
-        reject(new Error('服务管理返回了无效结果'))
+        reject(new Error('服务管理返回了无效结果: ' + stdout))
         return
       }
       if (error || !result.ok) reject(new Error(result.message || '服务操作失败'))
@@ -325,7 +353,7 @@ function setStartupEnabled(enabled) {
 }
 
 function copyAccessToken() {
-  execFile(python, [tokenScript], { cwd: root, windowsHide: true, timeout: 5000 }, async (error, stdout) => {
+  execFile(ctlExecutable, ['login', '--state-dir', stateDir], { cwd: root, windowsHide: true, timeout: 5000 }, async (error, stdout) => {
     const token = stdout.trim()
     if (error || !token) {
       await dialog.showMessageBox(window, { type: 'error', message: '读取访问令牌失败', buttons: ['确定'] })
@@ -595,16 +623,13 @@ app.whenReady().then(async () => {
     tray.on('balloon-click', showApp)
     rebuildMenu()
     await refresh()
-    if (states.daemon.startup_task !== 'not_installed') {
-      try {
-        states.daemon = await service('daemon', 'start')
-        states.app = await service('app', 'start')
-      } catch (error) {
-        await dialog.showMessageBox(window, {
-          type: 'error', title: '星序启动失败', message: error.message,
-          detail: '可在托盘菜单中查看状态或日志。', buttons: ['确定'],
-        })
-      }
+    try {
+      states = await startServices(service)
+    } catch (error) {
+      await dialog.showMessageBox(window, {
+        type: 'error', title: '星序启动失败', message: error.message,
+        detail: '可在托盘菜单中查看状态或日志。', buttons: ['确定'],
+      })
     }
     await refresh()
     await showApp()

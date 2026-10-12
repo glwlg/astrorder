@@ -287,7 +287,7 @@ func (runtime *Runtime) start(ctx context.Context, workspace string, environment
 		go runtime.readLoop(stdout)
 	}
 	initialized, err := runtime.request(ctx, "initialize", map[string]any{
-		"clientInfo":   map[string]any{"name": "astrorder-daemon", "title": "Astrorder Session Daemon", "version": "0.1.0"},
+		"clientInfo":   clientInfo(),
 		"capabilities": map[string]any{"experimentalApi": true},
 	})
 	if err != nil {
@@ -413,10 +413,14 @@ func (runtime *Runtime) approve(command Command) (Result, error) {
 }
 
 func (runtime *Runtime) workspace(raw string) (string, error) {
-	if raw == "" {
-		raw = runtime.config.Workspace
-	}
 	if runtime.sshStarter != nil {
+		if raw == "" || !strings.HasPrefix(raw, "/") {
+			if strings.HasPrefix(runtime.config.Workspace, "/") {
+				raw = runtime.config.Workspace
+			} else {
+				raw = "/"
+			}
+		}
 		if raw == "" || strings.ContainsRune(raw, 0) || !strings.HasPrefix(raw, "/") {
 			return "", fmt.Errorf("remote codex workspace must be an absolute POSIX path")
 		}
@@ -425,6 +429,9 @@ func (runtime *Runtime) workspace(raw string) (string, error) {
 			return "", fmt.Errorf("codex workspace is outside the allowlist: %s not in %v", clean, runtime.config.Allowed)
 		}
 		return clean, nil
+	}
+	if raw == "" {
+		raw = runtime.config.Workspace
 	}
 	workspace, err := filepath.Abs(raw)
 	if err != nil {
@@ -696,6 +703,10 @@ func (runtime *Runtime) handleNotification(method string, frame map[string]any) 
 }
 
 func nativeRequestID(value any) string {
+	if text, ok := value.(string); ok {
+		encoded, _ := json.Marshal(text)
+		return string(encoded)
+	}
 	if number, ok := value.(float64); ok && number == float64(int64(number)) {
 		return fmt.Sprintf("%d", int64(number))
 	}

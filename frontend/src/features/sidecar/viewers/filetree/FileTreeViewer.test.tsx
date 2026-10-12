@@ -1,6 +1,6 @@
 import { MantineProvider } from '@mantine/core'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ArtifactRef } from '../../../../domain/artifact'
 import { FileTreeViewer } from './FileTreeViewer'
 
@@ -17,6 +17,11 @@ const artifact: ArtifactRef = {
 }
 
 function renderTree(target = artifact) {
+  vi.stubGlobal('ResizeObserver', class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  })
   return render(
     <MantineProvider>
       <FileTreeViewer artifact={target} />
@@ -26,6 +31,11 @@ function renderTree(target = artifact) {
 
 describe('FileTreeViewer expansion persistence', () => {
   const values = new Map<string, string>()
+
+  beforeEach(() => {
+    // Expansion state is persisted; a previous run must not pre-expand folders.
+    localStorage.clear()
+  })
 
   afterEach(() => {
     cleanup()
@@ -125,6 +135,40 @@ describe('FileTreeViewer expansion persistence', () => {
     expect(row).toHaveClass('is-selected')
     expect(row).toHaveClass('is-revealed')
     expect(row).toHaveStyle({ outline: '1px solid var(--astr-blue, #3b82f6)' })
+    view.unmount()
+  })
+
+  it('shows the server reason next to the status when the tree cannot be loaded', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ detail: 'Failed to inspect directory entry' }), { status: 500, headers: { 'Content-Type': 'application/json' } })))
+    const view = renderTree()
+    expect(await screen.findByText('获取文件树失败 (500)：Failed to inspect directory entry')).toBeInTheDocument()
+    view.unmount()
+  })
+
+  it('still reports the status when the error body is not JSON', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('bad gateway', { status: 502 })))
+    const view = renderTree()
+    expect(await screen.findByText('获取文件树失败 (502)')).toBeInTheDocument()
+    view.unmount()
+  })
+
+  it('loads a directory the server left unexpanded when it is opened', async () => {
+    const calls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      calls.push(url)
+      const body = url.includes('depth=2')
+        ? { root: 'P:/workspace/example/big', items: [{ name: 'late.ts', path: 'P:/workspace/example/big/late.ts', is_dir: false }] }
+        : { root: artifact.path, truncated: true, items: [{ name: 'big', path: 'P:/workspace/example/big', is_dir: true }] }
+      return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }))
+    const view = renderTree()
+    const folder = await screen.findByText('big')
+    expect(calls).toHaveLength(1)
+
+    fireEvent.doubleClick(folder.closest('.file-tree-row') as HTMLElement)
+    expect(await screen.findByText('late.ts')).toBeInTheDocument()
+    expect(calls[1]).toContain(`path=${encodeURIComponent('P:/workspace/example/big')}`)
+    expect(calls).toHaveLength(2)
     view.unmount()
   })
 

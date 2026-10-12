@@ -1,0 +1,2609 @@
+{
+  "schema_version": 1,
+  "source_revision": "ff32f947024b1840b939ebfb8e58e45886d34b47",
+  "inventory_sha256": "d8670db3fbf19d4c00505696897f065bf13bb53ea1cabae627e03253cd671acc",
+  "allowed_statuses": [
+    "NOT_STARTED",
+    "IMPLEMENTED",
+    "ISOLATED_VERIFIED",
+    "REVIEWED",
+    "PRODUCTION_VERIFIED",
+    "DONE",
+    "BLOCKED"
+  ],
+  "migration_items": [
+    {
+      "id": "migration:f01",
+      "feature_id": "F01",
+      "title": "App bootstrap, auth, health and static delivery",
+      "source": [
+        "backend/src/astrorder/main.py",
+        "backend/src/astrorder/config.py",
+        "backend/src/astrorder/routers/auth.py",
+        "backend/src/astrorder/core/auth.py"
+      ],
+      "entrypoints": [
+        "config:astrorder-allowed-origins:7d408f83ba",
+        "config:astrorder-browser-secret:df3a83d4b6",
+        "config:astrorder-connector-secret:a1d4ce346f",
+        "config:astrorder-database-url:105fcca231",
+        "config:astrorder-enable-launch:2de28a8571",
+        "config:astrorder-event-retention:3203cdfa08",
+        "config:astrorder-host:292fc00e65",
+        "config:astrorder-port:c226e28fae",
+        "config:astrorder-secret:7d8cae36f3",
+        "config:astrorder-static-dir:fe7bd9c05c",
+        "http:delete-api-v1-auth-session:b930612ce7",
+        "http:get-api-v1-auth-session:be1a421176",
+        "http:get-api-v1-codex-desktop-status:cab344c3ea",
+        "http:get-api-v1-services-daemon-restart-operation-id:be800a92d5",
+        "http:get-head-docs-oauth2-redirect:fde18ca042",
+        "http:get-head-docs:4650c93229",
+        "http:get-head-openapi-json:4f40e60364",
+        "http:get-head-redoc:40ed614465",
+        "http:get-health:74fac65f35",
+        "http:post-api-v1-auth-session:89fe2dc88b",
+        "http:post-api-v1-commands:d4cb9ea772",
+        "http:post-api-v1-services-daemon-restart:63535cc9a9",
+        "http:post-desktop-shutdown:2912ac14fe",
+        "task:backend-src-astrorder-main-py-194-asyncio-task-lifespan-app-state-daemon:6373325747",
+        "task:backend-src-astrorder-main-py-250-asyncio-task-reconnect-hermes-after-da:cac4b8dd78",
+        "task:backend-src-astrorder-main-py-367-asyncio-task-lifespan-observers-run:62923e0284",
+        "task:backend-src-astrorder-main-py-375-asyncio-task-lifespan-restore-daemon-c:4e6832c141",
+        "task:backend-src-astrorder-main-py-383-asyncio-task-lifespan-restore-daemon-g:322612e66c",
+        "task:backend-src-astrorder-main-py-386-asyncio-task-lifespan-asyncio-to-threa:e3538af4af",
+        "task:backend-src-astrorder-main-py-466-asyncio-task-restart-daemon-restart-da:15ae758e01",
+        "task:backend-src-astrorder-main-py-561-asyncio-task-terminal-websocket-read-p:2baa80ba86"
+      ],
+      "contract": "Preserve health/bootstrap, browser cookie and bearer auth, Origin/LAN checks, static cache/SPA behavior, desktop shutdown and service status.",
+      "target_paths": [
+        "app-server-go/internal/httpapi/",
+        "app-server-go/internal/auth/",
+        "app-server-go/internal/config/"
+      ],
+      "current_owner": {
+        "data": "Python App Server",
+        "background": "Python App lifespan"
+      },
+      "tests": [
+        {
+          "path": "backend/tests/test_bootstrap.py",
+          "name": "test_health_is_public_and_versioned",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_bootstrap.py -q"
+        },
+        {
+          "path": "backend/tests/test_bootstrap.py",
+          "name": "test_private_bootstrap_is_not_open_by_default",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_bootstrap.py -q"
+        },
+        {
+          "path": "backend/tests/test_control_server.py",
+          "name": "test_attachment_is_bounded_and_command_keeps_attachment",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_control_server.py -q"
+        },
+        {
+          "path": "backend/tests/test_control_server.py",
+          "name": "test_auth_session_restores_cookie_from_bearer_for_image_requests",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_control_server.py -q"
+        },
+        {
+          "path": "backend/tests/test_control_server.py",
+          "name": "test_bootstrap_does_not_scan_presence",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_control_server.py -q"
+        },
+        {
+          "path": "backend/tests/test_control_server.py",
+          "name": "test_browser_auth_origin_and_safe_error",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_control_server.py -q"
+        },
+        {
+          "path": "backend/tests/test_control_server.py",
+          "name": "test_connector_role_is_separate_and_origin_checked",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_control_server.py -q"
+        },
+        {
+          "path": "backend/tests/test_control_server.py",
+          "name": "test_connector_write_failure_returns_the_persisted_unknown_command",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_control_server.py -q"
+        },
+        {
+          "path": "backend/tests/test_control_server.py",
+          "name": "test_daemon_projection_starts_after_stale_connectors_are_disconnected",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_control_server.py -q"
+        },
+        {
+          "path": "backend/tests/test_control_server.py",
+          "name": "test_daemon_restart_route_requires_confirmation_and_runs_in_background",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_control_server.py -q"
+        },
+        {
+          "path": "backend/tests/test_control_server.py",
+          "name": "test_daemon_restart_worker_launches_independent_service_command",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_control_server.py -q"
+        },
+        {
+          "path": "backend/tests/test_control_server.py",
+          "name": "test_desktop_shutdown_route_precedes_static_mount",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_control_server.py -q"
+        },
+        {
+          "path": "backend/tests/test_control_server.py",
+          "name": "test_disconnect_marks_sent_command_unknown_without_retry",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_control_server.py -q"
+        },
+        {
+          "path": "backend/tests/test_control_server.py",
+          "name": "test_duplicate_id_payload_mismatch_and_canonical_outbox",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_control_server.py -q"
+        },
+        {
+          "path": "backend/tests/test_control_server.py",
+          "name": "test_enqueue_is_durable_queue_acceptance_not_submission",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_control_server.py -q"
+        },
+        {
+          "path": "backend/tests/test_control_server.py",
+          "name": "test_history_cursor_is_opaque_and_pages_chronologically",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_control_server.py -q"
+        },
+        {
+          "path": "backend/tests/test_control_server.py",
+          "name": "test_multiple_browser_clients_receive_one_durable_event",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_control_server.py -q"
+        },
+        {
+          "path": "backend/tests/test_control_server.py",
+          "name": "test_old_cursor_requires_snapshot_and_multiple_clients_receive_live_event",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_control_server.py -q"
+        },
+        {
+          "path": "backend/tests/test_control_server.py",
+          "name": "test_private_state_fails_closed_without_configured_secret",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_control_server.py -q"
+        },
+        {
+          "path": "backend/tests/test_control_server.py",
+          "name": "test_restart_persists_transcript_and_outbox",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_control_server.py -q"
+        },
+        {
+          "path": "backend/tests/test_control_server.py",
+          "name": "test_runtime_does_not_advertise_a_detached_codex_process_as_launchable",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_control_server.py -q"
+        },
+        {
+          "path": "backend/tests/test_control_server.py",
+          "name": "test_same_message_text_and_attachments_keep_distinct_ids",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_control_server.py -q"
+        },
+        {
+          "path": "backend/tests/test_control_server.py",
+          "name": "test_same_payload_text_does_not_merge_distinct_commands",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_control_server.py -q"
+        },
+        {
+          "path": "backend/tests/test_control_server.py",
+          "name": "test_shutdown_marks_accepted_submission_unknown",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_control_server.py -q"
+        },
+        {
+          "path": "backend/tests/test_control_server.py",
+          "name": "test_static_spa_serves_client_routes_without_shadowing_api",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_control_server.py -q"
+        },
+        {
+          "path": "backend/tests/test_control_server.py",
+          "name": "test_unknown_late_command_ack_is_rejected_without_creating_outbox",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_control_server.py -q"
+        },
+        {
+          "path": "backend/tests/test_control_server.py",
+          "name": "test_unsupported_attempt_is_preserved",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_control_server.py -q"
+        },
+        {
+          "path": "backend/tests/test_daemon_config.py",
+          "name": "test_daemon_codex_opt_in_wires_router_without_enabling_it_by_default",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_daemon_config.py -q"
+        },
+        {
+          "path": "backend/tests/test_daemon_config.py",
+          "name": "test_daemon_codex_requires_an_enabled_authenticated_session_daemon",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_daemon_config.py -q"
+        },
+        {
+          "path": "backend/tests/test_daemon_config.py",
+          "name": "test_daemon_hermes_opt_in_wires_daemon_owned_local_proxy",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_daemon_config.py -q"
+        },
+        {
+          "path": "backend/tests/test_daemon_config.py",
+          "name": "test_daemon_hermes_requires_an_enabled_authenticated_session_daemon",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_daemon_config.py -q"
+        },
+        {
+          "path": "backend/tests/test_daemon_config.py",
+          "name": "test_daemon_pty_opt_in_wires_terminal_relay",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_daemon_config.py -q"
+        },
+        {
+          "path": "backend/tests/test_daemon_config.py",
+          "name": "test_daemon_pty_requires_an_enabled_authenticated_session_daemon",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_daemon_config.py -q"
+        },
+        {
+          "path": "backend/tests/test_daemon_config.py",
+          "name": "test_daemon_request_timeout_defaults_to_cold_native_startup_budget",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_daemon_config.py -q"
+        },
+        {
+          "path": "backend/tests/test_daemon_config.py",
+          "name": "test_daemon_ssh_opt_in_wires_connection_factory",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_daemon_config.py -q"
+        },
+        {
+          "path": "backend/tests/test_daemon_config.py",
+          "name": "test_daemon_ssh_requires_an_enabled_authenticated_session_daemon",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_daemon_config.py -q"
+        },
+        {
+          "path": "backend/tests/test_daemon_config.py",
+          "name": "test_default_runtime_data_stays_out_of_the_project",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_daemon_config.py -q"
+        },
+        {
+          "path": "backend/tests/test_daemon_config.py",
+          "name": "test_enabled_daemon_bridge_runs_for_the_app_lifespan",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_daemon_config.py -q"
+        },
+        {
+          "path": "backend/tests/test_daemon_config.py",
+          "name": "test_settings_reads_explicit_session_daemon_bridge_configuration",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_daemon_config.py -q"
+        }
+      ],
+      "acceptance_ids": [
+        "T01",
+        "T10",
+        "T15"
+      ],
+      "status": "NOT_STARTED",
+      "evidence": []
+    },
+    {
+      "id": "migration:f02",
+      "feature_id": "F02",
+      "title": "App data store and workspace preferences",
+      "source": [
+        "backend/src/astrorder/models.py",
+        "backend/src/astrorder/store.py",
+        "backend/src/astrorder/repositories/",
+        "backend/src/astrorder/core/workspace_preferences.py"
+      ],
+      "entrypoints": [
+        "db:migration-356-update-agents-set-source-id-id-where-source-id-is-null-or-:1459c08328",
+        "db:migration-361-update-sessions-set-ephemeral-1-where-title-and-ephemeral-:8d2e8586fe",
+        "db:migration-365-update-agents-set-runtime-id-id-where-runtime-id-is-null-o:4558cc20bd",
+        "db:migration-368-update-sessions-set-source-id-select-source-id-from-agents:6ec1a09e31",
+        "db:migration-372-update-sessions-set-source-session-id-id-where-source-sess:4b2df70edf",
+        "db:migration-375-update-sessions-set-title-substr-title-1-512-where-length-:e909a85e00",
+        "db:migration-378-update-ssh-connections-set-profile-name-default-where-prof:9ccd38d585",
+        "db:migration-385-update-ssh-connections-set-id-new-id-where-id-default:9080b2e2d7",
+        "db:migration-alter-table-agents-add-column-connection-id-varchar-64:b7a93496b6",
+        "db:migration-alter-table-agents-add-column-control-state-varchar-32-not-nul:ba8e0c9de4",
+        "db:migration-alter-table-agents-add-column-profile-name-varchar-128:5436e1b1f6",
+        "db:migration-alter-table-agents-add-column-runtime-id-varchar-256:6eaf3e4e65",
+        "db:migration-alter-table-agents-add-column-source-id-varchar-256:917840ee63",
+        "db:migration-alter-table-attachments-add-column-source-path-text:58469dafe5",
+        "db:migration-alter-table-sessions-add-column-connection-id-varchar-64:21e5e1128f",
+        "db:migration-alter-table-sessions-add-column-control-state-varchar-32-not-n:a8a00deab5",
+        "db:migration-alter-table-sessions-add-column-ephemeral-boolean-not-null-def:74874b22df",
+        "db:migration-alter-table-sessions-add-column-handoff-context-consumed-boole:5481a2b885",
+        "db:migration-alter-table-sessions-add-column-handoff-context-text:c683ccff5f",
+        "db:migration-alter-table-sessions-add-column-handoff-from-agent-id-varchar-:491f9fff4e",
+        "db:migration-alter-table-sessions-add-column-handoff-from-session-id-varcha:06e43e9742",
+        "db:migration-alter-table-sessions-add-column-history-state-varchar-32-not-n:40491f3174",
+        "db:migration-alter-table-sessions-add-column-native-kind-varchar-32:2323fb775a",
+        "db:migration-alter-table-sessions-add-column-project-id-varchar-256:f84a6dd747",
+        "db:migration-alter-table-sessions-add-column-project-name-varchar-512:0b8a68cef9",
+        "db:migration-alter-table-sessions-add-column-runtime-owner-json:963e5691e3",
+        "db:migration-alter-table-sessions-add-column-selected-approval-mode-varchar:5343a79b9f",
+        "db:migration-alter-table-sessions-add-column-selected-model-provider-varcha:52156a8a2a",
+        "db:migration-alter-table-sessions-add-column-selected-model-varchar-160:343ee06ac5",
+        "db:migration-alter-table-sessions-add-column-selected-reasoning-effort-varc:556eefba3c",
+        "db:migration-alter-table-sessions-add-column-source-id-varchar-256:3c0960bc41",
+        "db:migration-alter-table-sessions-add-column-source-session-id-varchar-256:a5a4427009",
+        "db:migration-alter-table-ssh-connections-add-column-agent-id-varchar-256:ddc5cbdb71",
+        "db:migration-alter-table-ssh-connections-add-column-display-name-varchar-25:b57a925210",
+        "db:migration-alter-table-ssh-connections-add-column-profile-name-varchar-12:ff9dd6fbeb",
+        "db:migration-alter-table-ssh-connections-add-column-remote-os-varchar-64:01f0bea98d",
+        "db:migration-alter-table-ssh-connections-add-column-runtime-id-varchar-256:e02cb52f61",
+        "db:native-identity-migrate-native-identity:630f62a430",
+        "db:table-agent-connection-choices:3452d2a290",
+        "db:table-agents:69bd8430e3",
+        "db:table-attachments:36f5817579",
+        "db:table-commands:99275006ee",
+        "db:table-connection-history:b3a14907a7",
+        "db:table-daemon-checkpoints:0329c53bff",
+        "db:table-events:40e7a0fb1d",
+        "db:table-messages:e7c572431e",
+        "db:table-projects:05b4ed9798",
+        "db:table-review-relay-bindings:50727eb642",
+        "db:table-review-relay-runs:5444905eb3",
+        "db:table-sessions:9f188b2b2a",
+        "db:table-ssh-connections:f37308b191",
+        "db:table-tasks:b075efd31e",
+        "db:table-token-metrics:1309d801b6",
+        "db:table-workspace-preferences:27eb3518a3",
+        "http:get-api-v1-preferences:ce9b12936a",
+        "http:patch-api-v1-preferences:cdc100eef4",
+        "http:post-api-v1-preferences-import:affd3cc219",
+        "pref:exact-analytics-llm-gateway:26a72ede06",
+        "pref:exact-analytics-ocx-usage-url:9ae0f1dec9",
+        "pref:exact-group-session:fe01e9b039",
+        "pref:exact-model-sync-jobs:3df1c57457",
+        "pref:exact-pinned-projects:3430d6d32c",
+        "pref:exact-plugin-r2t2-enabled:2112aa52d4",
+        "pref:exact-plugins-settings:fc6b9fd5d9",
+        "pref:exact-project-order:b65b64b663",
+        "pref:exact-services-jev-api-key:013ffb775c",
+        "pref:exact-services-llm:0bc6e1789a",
+        "pref:prefix-appearance:ab06864033",
+        "pref:prefix-blackboard-scope:0170de379c",
+        "pref:prefix-blackboard-session:65f193f980",
+        "pref:prefix-blackboard-swarm:b4ac042811",
+        "pref:prefix-blackboard:31f5b1905b",
+        "pref:prefix-group-messages:fc10166351",
+        "pref:prefix-lock:4b2341e09b",
+        "pref:prefix-milestone:649ea96a56",
+        "pref:prefix-session-pins:f9910a5d2d",
+        "pref:prefix-sos:03a7cf0195",
+        "pref:prefix-telemetry:e6aae95ff8"
+      ],
+      "contract": "Preserve every table, index, constraint, dynamic migration, transaction, ordering, cursor and preference namespace with one migrator and writer.",
+      "target_paths": [
+        "app-server-go/internal/store/",
+        "app-server-go/internal/preferences/"
+      ],
+      "current_owner": {
+        "data": "Python Store/SQLAlchemy",
+        "background": "Python App schema initialization"
+      },
+      "tests": [
+        {
+          "path": "backend/tests/test_workspace_preferences.py",
+          "name": "test_preferences_persist_across_devices_and_import_never_overwrites",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_workspace_preferences.py -q"
+        },
+        {
+          "path": "backend/tests/test_message_pagination.py",
+          "name": "test_codex_history_aliases_do_not_duplicate_or_reorder_live_messages",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_message_pagination.py -q"
+        },
+        {
+          "path": "backend/tests/test_message_pagination.py",
+          "name": "test_latest_tail_and_older_pages_share_timestamp_and_identity_order",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_message_pagination.py -q"
+        },
+        {
+          "path": "backend/tests/test_message_pagination.py",
+          "name": "test_native_snapshot_preserves_session_project_metadata",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_message_pagination.py -q"
+        },
+        {
+          "path": "backend/tests/test_message_pagination.py",
+          "name": "test_placeholder_title_does_not_replace_meaningful_title",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_message_pagination.py -q"
+        },
+        {
+          "path": "backend/tests/test_message_pagination.py",
+          "name": "test_user_echoes_with_the_same_command_are_reconciled",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_message_pagination.py -q"
+        },
+        {
+          "path": "backend/tests/test_connection_history_api.py",
+          "name": "test_connection_history_api_returns_page_and_cursor",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_connection_history_api.py -q"
+        }
+      ],
+      "acceptance_ids": [
+        "T03",
+        "T09"
+      ],
+      "status": "NOT_STARTED",
+      "evidence": []
+    },
+    {
+      "id": "migration:f03",
+      "feature_id": "F03",
+      "title": "Daemon bridge, projection and event replay",
+      "source": [
+        "backend/src/astrorder/daemon/bridge/",
+        "backend/src/astrorder/daemon/clients/",
+        "backend/src/astrorder/core/events.py"
+      ],
+      "entrypoints": [
+        "config:astrorder-daemon-codex-enabled:f4d0fabb05",
+        "config:astrorder-daemon-grok-enabled:e1a003f5ab",
+        "config:astrorder-daemon-hermes-enabled:926fbf0224",
+        "config:astrorder-daemon-pty-enabled:634bee73f9",
+        "config:astrorder-daemon-ssh-enabled:d90a094fcb",
+        "config:astrorder-session-daemon-enabled:fe83f7d534",
+        "config:astrorder-session-daemon-endpoint:8f6dddb016",
+        "config:astrorder-session-daemon-request-timeout:372d4b6a16",
+        "config:astrorder-session-daemon-secret:c8183eaefa",
+        "daemon:daemon-handshake:67f102f60f",
+        "daemon:daemon-shutdown:3dc190061e",
+        "daemon:daemon-status:2a28cda0f2",
+        "daemon:model-config-apply:ece45fc69a",
+        "daemon:model-config-plan:74b7b2fdef",
+        "daemon:model-config-reload:b568b3790a",
+        "daemon:operation-read:27db2c67d4",
+        "daemon:runtime-disconnect:46865eb6b2",
+        "daemon:runtime-request:baf2d026ce",
+        "daemon:session-approval-read:b3d616eeb7",
+        "daemon:session-approval-respond:00146d63fc",
+        "daemon:session-approval-set:cd5cf3aa16",
+        "daemon:session-approve:61a7a24a27",
+        "daemon:session-close:aa057fec8c",
+        "daemon:session-commands:331a9c4e2f",
+        "daemon:session-compact:7ed771d653",
+        "daemon:session-create:6de7eb1557",
+        "daemon:session-delete:1f4d9e0d05",
+        "daemon:session-disconnect:a94b041aea",
+        "daemon:session-event:f10ecd7f33",
+        "daemon:session-history-page:e322643415",
+        "daemon:session-interrupt:af430162b8",
+        "daemon:session-model-read:fb007d06db",
+        "daemon:session-model-set:4bde54441b",
+        "daemon:session-models:f4511cdc03",
+        "daemon:session-observe-status:6170423adf",
+        "daemon:session-reasoning-set:5adf4ca667",
+        "daemon:session-rename:337d3860b2",
+        "daemon:session-resize:513ea5a1cb",
+        "daemon:session-review:9191f97439",
+        "daemon:session-send:0c585bc31b",
+        "daemon:session-settings:45995dae5e",
+        "daemon:session-spawn:a2ce4a8bec",
+        "daemon:session-steer:e01e9afeed",
+        "daemon:session-sync:49e6238fa0"
+      ],
+      "contract": "Preserve daemon projection, completion/compaction/approval events, durable checkpointing, replay, idempotency and live/history equivalence.",
+      "target_paths": [
+        "app-server-go/internal/daemonclient/",
+        "app-server-go/internal/projection/",
+        "app-server-go/internal/events/",
+        "session-daemon-go/internal/grpcapi/",
+        "session-daemon-go/internal/protocol/operation_facade.go",
+        "session-daemon-go/internal/protocol/query_facade.go",
+        "session-daemon-go/internal/protocol/admission.go"
+      ],
+      "current_owner": {
+        "data": "Python App projection; Go Session Daemon WAL",
+        "background": "Python DaemonBridge consumer"
+      },
+      "tests": [
+        {
+          "path": "backend/tests/test_daemon_bridge.py",
+          "name": "test_bridge_projects_lost_ownership_without_resending",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_daemon_bridge.py -q"
+        },
+        {
+          "path": "backend/tests/test_daemon_bridge.py",
+          "name": "test_bridge_records_orphan_liveness_without_resending",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_daemon_bridge.py -q"
+        },
+        {
+          "path": "backend/tests/test_daemon_bridge.py",
+          "name": "test_bridge_records_runtime_owner_without_changing_activity",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_daemon_bridge.py -q"
+        },
+        {
+          "path": "backend/tests/test_daemon_bridge.py",
+          "name": "test_bridge_replays_attachment_without_storing_a_copy",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_daemon_bridge.py -q"
+        },
+        {
+          "path": "backend/tests/test_daemon_bridge.py",
+          "name": "test_connected_agent_is_restored_from_go_status_without_replaying_hello",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_daemon_bridge.py -q"
+        },
+        {
+          "path": "backend/tests/test_daemon_bridge.py",
+          "name": "test_daemon_bridge_retires_missing_owned_sessions_after_daemon_restart",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_daemon_bridge.py -q"
+        },
+        {
+          "path": "backend/tests/test_daemon_bridge.py",
+          "name": "test_daemon_checkpoint_is_persistent_and_scoped_to_daemon_instance",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_daemon_bridge.py -q"
+        },
+        {
+          "path": "backend/tests/test_daemon_bridge.py",
+          "name": "test_overflow_blocks_live_projection_and_preserves_checkpoint",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_daemon_bridge.py -q"
+        },
+        {
+          "path": "backend/tests/test_daemon_bridge_pagination.py",
+          "name": "test_bridge_batches_sessions_and_defers_live_until_all_batches_finish",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_daemon_bridge_pagination.py -q"
+        },
+        {
+          "path": "backend/tests/test_daemon_bridge_pagination.py",
+          "name": "test_bridge_reads_all_pages_at_fixed_boundary",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_daemon_bridge_pagination.py -q"
+        },
+        {
+          "path": "backend/tests/test_go_daemon_bridge_integration.py",
+          "name": "test_go_replay_batches_pages_live_and_restart",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_go_daemon_bridge_integration.py -q"
+        },
+        {
+          "path": "session-daemon-go/internal/grpcapi/operation_test.go",
+          "name": "TestGetOperationReadsLegacyWSLedgerOverAuthenticatedTCPAndAfterReopen",
+          "command_id": "go-daemon-package-test",
+          "command": "cd session-daemon-go && go test ./internal/grpcapi -count=1"
+        },
+        {
+          "path": "session-daemon-go/internal/grpcapi/operation_test.go",
+          "name": "TestGetOperationPreservesUntypedAndMalformedCompletedBytes",
+          "command_id": "go-daemon-package-test",
+          "command": "cd session-daemon-go && go test ./internal/grpcapi -count=1"
+        },
+        {
+          "path": "session-daemon-go/internal/grpcapi/slow_reader_test.go",
+          "name": "TestTCPSlowReaderReleasesBlockedSendWithoutClientCancellation",
+          "command_id": "go-daemon-package-test",
+          "command": "cd session-daemon-go && go test ./internal/grpcapi -count=1"
+        },
+        {
+          "path": "session-daemon-go/internal/protocol/shutdown_write_failure_test.go",
+          "name": "TestLegacyShutdownWriteFailureReleasesAdmission",
+          "command_id": "go-daemon-package-test",
+          "command": "cd session-daemon-go && go test ./internal/protocol -count=1"
+        },
+        {
+          "path": "session-daemon-go/internal/grpcapi/native_query_test.go",
+          "name": "TestQueryNativeSharesLegacyRuntimeOverAuthenticatedTCP",
+          "command_id": "go-daemon-package-test",
+          "command": "cd session-daemon-go && go test ./internal/grpcapi -count=1"
+        },
+        {
+          "path": "session-daemon-go/internal/grpcapi/native_query_boundary_test.go",
+          "name": "TestQueryNativeCancellationReleasesNativeAdmission",
+          "command_id": "go-daemon-package-test",
+          "command": "cd session-daemon-go && go test ./internal/grpcapi -count=1"
+        }
+      ],
+      "acceptance_ids": [
+        "T02",
+        "T03",
+        "T04",
+        "T05",
+        "T08"
+      ],
+      "status": "IMPLEMENTED",
+      "evidence": [],
+      "blockers": [
+        "P2 SessionControl, TerminalStream, ModelConfig and ConnectorIngress remain unimplemented; RuntimeQuery implements only QueryNative, with remaining methods and SSH transport options/aliases/custom SSH executable still unsupported.",
+        "Python App cross-kernel calls and Go App consumer/projection ownership have not migrated; no App OperationQuery consumer exists.",
+        "Complete T01-T08 and production verification remain outstanding; partial daemon evidence is not full F03 completion."
+      ],
+      "partial_implementations": [
+        {
+          "id": "p2-operation-query",
+          "stage": "P2",
+          "status": "ISOLATED_VERIFIED",
+          "entrypoints": ["daemon:operation-read:27db2c67d4"],
+          "rpc": "astrorder.sessiond.v1.OperationQuery/GetOperation",
+          "target_paths": [
+            "session-daemon-go/internal/grpcapi/operation.go",
+            "session-daemon-go/internal/protocol/operation_facade.go"
+          ],
+          "data_owner": "Go Session Daemon existing operation ledger; read-only adapter",
+          "background_owner": "none; query does not dispatch native work",
+          "acceptance_ids": ["T01", "T05", "T08"],
+          "review": {
+            "status": "PASS_SCOPED_PREVIOUS_HASHES",
+            "path": "docs/reports/full-go-p2-operation-final-review.json",
+            "sha256": "6ed10ff0d56300b2e02c6559df3350dc342adad6cc1dcc384313733e754be457",
+            "limits": "Historical OperationQuery PASS; later server.go/control.go registration changes are reviewed separately by full-go-p2-native-query-review.json. Other 15 historical scoped files remain hash-identical.",
+            "prior_fail_path": "docs/reports/full-go-p2-operation-review-fail.md",
+            "source_identity": "per-file SHA256 in review; uncommitted working tree"
+          },
+          "evidence_path": "docs/reports/full-go-p2-incremental.md",
+          "evidence_sha256": "f5c5fc294278c3467b2cf26c1e3ca15ea18a39ae59a40cedf3ffa5a59f9f25ef",
+          "execution": {
+            "environment": "Windows isolated TCP/private SQLite",
+            "candidate_revision": "ff32f947024b1840b939ebfb8e58e45886d34b47",
+            "source_freshness_limited": true,
+            "candidate_binary_sha256": "39ec833a217f7bcf588c67d192f2417ce1cbd8f58e4ba2eca90d304f0cc12c7d",
+            "process_result": "docs/reports/full-go-p2-operation-process-result.json",
+            "process_result_sha256": "14cf665d21201663b988feb2fe5ed091aeab8f8ff1235069845147f6d8615c7e",
+            "fixture_limits": "Synthetic native runtime and completed receipt; actual WS uncertain reservation; no real Agent inference."
+          },
+          "legacy_removed": false,
+          "remaining": ["App-side consumer", "legacy WS removal after full transport migration"]
+        },
+        {
+          "id": "p2-control-event-foundation",
+          "stage": "P2",
+          "status": "ISOLATED_VERIFIED",
+          "entrypoints": [
+            "daemon:daemon-handshake:67f102f60f",
+            "daemon:daemon-status:2a28cda0f2",
+            "daemon:daemon-shutdown:3dc190061e",
+            "daemon:session-event:f10ecd7f33",
+            "daemon:session-sync:49e6238fa0"
+          ],
+          "services": ["astrorder.sessiond.v1.DaemonControl", "astrorder.sessiond.v1.EventStream"],
+          "data_owner": "Go Session Daemon existing journal/runtime authority",
+          "acceptance_ids": ["T01", "T02", "T04", "T08"],
+          "evidence_path": "docs/reports/full-go-p2-incremental.md",
+          "evidence_sha256": "f5c5fc294278c3467b2cf26c1e3ca15ea18a39ae59a40cedf3ffa5a59f9f25ef",
+          "review": {
+            "status": "PASS_SCOPED_PREVIOUS_HASHES",
+            "path": "docs/reports/full-go-p2-control-review.json",
+            "sha256": "79da275e484d8b64065219c18bb285afc05017857905b877e7a725b990401844",
+            "limits": "Original two-service hashed scope; later OperationQuery registration has a separate review."
+          },
+          "legacy_removed": false,
+          "remaining": ["Go App event consumer/checkpoint integration", "full T01-T08 acceptance"]
+        },
+        {
+          "id": "p2-native-query",
+          "stage": "P2",
+          "status": "REVIEWED",
+          "entrypoints": ["daemon:runtime-request:baf2d026ce"],
+          "rpc": "astrorder.sessiond.v1.RuntimeQuery/QueryNative",
+          "target_paths": [
+            "session-daemon-go/internal/grpcapi/native_query.go",
+            "session-daemon-go/internal/grpcapi/native_query_translate.go",
+            "session-daemon-go/internal/protocol/query_facade.go"
+          ],
+          "data_owner": "Go Session Daemon existing runtime Registry.Query; no session or operation rows",
+          "background_owner": "existing runtime-owned catalog transport; query context only bounds request wait",
+          "acceptance_ids": ["T01", "T02", "T04", "T08"],
+          "review": {
+            "status": "PASS",
+            "path": "docs/reports/full-go-p2-native-query-review.json",
+            "sha256": "062f6dee30b7a4e74fafad43cfe1177b3d1903575a69bad0d305a12079cc295b",
+            "source_identity": "11 per-file SHA256 match current uncommitted source; synthetic routing and isolated runtime evidence only"
+          },
+          "evidence_path": "docs/reports/full-go-p2-native-query-isolated.md",
+          "evidence_sha256": "63bc757324fdcda60bc15ad71ec847b2626f48ef24bc540d59fbc665ca1d0707",
+          "legacy_removed": false,
+          "remaining": [
+            "Python/Go App consumers",
+            "RuntimeQuery remaining RPCs and SSH transport options/aliases/custom SSH executable",
+            "Complete native runtime and T01-T08 acceptance",
+            "Legacy WS removal and production verification"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "migration:f04",
+      "feature_id": "F04",
+      "title": "Sessions, commands, tasks and native controls",
+      "source": [
+        "backend/src/astrorder/api.py",
+        "backend/src/astrorder/native/",
+        "backend/src/astrorder/service.py",
+        "backend/src/astrorder/adapters/"
+      ],
+      "entrypoints": [
+        "http:delete-api-v1-commands-command-id:ee408438e3",
+        "http:delete-api-v1-connections-ssh-connection-id:7eb7f25d98",
+        "http:delete-api-v1-projects:98bf7b1efa",
+        "http:delete-api-v1-sessions-session-id:c6eca894e0",
+        "http:get-api-v1-agent-catalog:cc4d630853",
+        "http:get-api-v1-agents-agent-id-mcp:969fd35f64",
+        "http:get-api-v1-bootstrap:2129527f92",
+        "http:get-api-v1-browser-proxy:e74f932513",
+        "http:get-api-v1-connections-codex:4467b18543",
+        "http:get-api-v1-connections-connection-id-history:5449a55272",
+        "http:get-api-v1-connections:a93ff9a82c",
+        "http:get-api-v1-environments:d770faec98",
+        "http:get-api-v1-network-config:2f1ff46aa8",
+        "http:get-api-v1-open-sessions:5ab30b2356",
+        "http:get-api-v1-presence:bceae67193",
+        "http:get-api-v1-runtime:f260eb9c4d",
+        "http:get-api-v1-services-jev-config:e845ca2d05",
+        "http:get-api-v1-services-llm-config:d221fde5b9",
+        "http:get-api-v1-sessions-session-id-agent-commands:8a213abf5a",
+        "http:get-api-v1-sessions-session-id-agent-mentions:83704d718b",
+        "http:get-api-v1-sessions-session-id-approval-mode:fae5690811",
+        "http:get-api-v1-sessions-session-id-commands:3015a183e6",
+        "http:get-api-v1-sessions-session-id-messages:2317c5c3f4",
+        "http:get-api-v1-sessions-session-id-model:6ea385ddb6",
+        "http:get-api-v1-sessions-session-id-models:143395e6f1",
+        "http:get-api-v1-sessions-session-id-tasks:848521a116",
+        "http:get-api-v1-sessions:1079bd1aab",
+        "http:get-api-v1-user-activity:0363af85d4",
+        "http:patch-api-v1-commands-command-id:8a4847b9ec",
+        "http:patch-api-v1-sessions-session-id:b58d206c37",
+        "http:post-api-v1-agent-invoke:fc6f9b1b39",
+        "http:post-api-v1-agent-mcp:3cbfff24e6",
+        "http:post-api-v1-agents-agent-id-mcp:8885a83f01",
+        "http:post-api-v1-background-tasks-operation-id-cancel:25346d8983",
+        "http:post-api-v1-browser-proxy:3dc43f529f",
+        "http:post-api-v1-commands-command-id-send:6fef100f51",
+        "http:post-api-v1-connections-codex-connect:d6bc99fa40",
+        "http:post-api-v1-connections-codex-disconnect:564eb4da8d",
+        "http:post-api-v1-connections-local-connect:3d2853198f",
+        "http:post-api-v1-connections-local-disconnect:d3ce53e6ec",
+        "http:post-api-v1-connections-ssh-connect:089597f69d",
+        "http:post-api-v1-connections-ssh-connection-id-connect:f65e23b2f3",
+        "http:post-api-v1-connections-ssh-connection-id-disconnect:cd929df7fe",
+        "http:post-api-v1-connections-ssh-connection-id-test:f7eb9d0836",
+        "http:post-api-v1-connections-ssh-disconnect:fb1bc8b29c",
+        "http:post-api-v1-connections-ssh-test:20ba3f3120",
+        "http:post-api-v1-environments-connection-id-agents-kind-action:d0629f788a",
+        "http:post-api-v1-environments-connection-id-discover:b8b8a2a9d6",
+        "http:post-api-v1-handoffs-operation-id-cancel:052cfc5d09",
+        "http:post-api-v1-network-config:3a158b3740",
+        "http:post-api-v1-projects-delete:2d8e47ce49",
+        "http:post-api-v1-projects:4e963902d1",
+        "http:post-api-v1-runtime-launch:8f45ba2dea",
+        "http:post-api-v1-services-jev-config:7f64bcdaf9",
+        "http:post-api-v1-services-jev-test:50effbc389",
+        "http:post-api-v1-services-llm-config:c4bb320941",
+        "http:post-api-v1-services-llm-test:c9bfe6553a",
+        "http:post-api-v1-sessions-batch-delete:b765577c31",
+        "http:post-api-v1-sessions-handoff-curate:7a6ce78c5d",
+        "http:post-api-v1-sessions-session-id-approval-mode:33ca91fb32",
+        "http:post-api-v1-sessions-session-id-fork:4d70fcad75",
+        "http:post-api-v1-sessions-session-id-handoff:363d14ae31",
+        "http:post-api-v1-sessions-session-id-model:992a7ef2a8",
+        "http:post-api-v1-sessions-session-id-reasoning:5eab3b8a61",
+        "http:post-api-v1-sessions-session-id-sync:6b1eabb16c",
+        "http:post-api-v1-sessions:4da2cfa2aa",
+        "http:post-api-v1-system-open-browser:77c1816fde",
+        "http:post-api-v1-system-open-file:dfee44826f",
+        "http:post-api-v1-system-write-file:cb21753ac5",
+        "http:post-api-v1-tools-jev-filter:d1ab89eb7c",
+        "http:put-api-v1-connections-ssh-connection-id:bcbbdef14d",
+        "http:put-api-v1-connections-ssh:5c4bc72280",
+        "pref:exact-network-allowed-origins:0c269598ad",
+        "pref:exact-network-public-url:fb96a36221",
+        "pref:prefix-agent-mcp-enabled:ab6a167501"
+      ],
+      "contract": "Preserve create/send/steer/review/compact/interrupt/approve, queue edits, rename/delete/fork/handoff, tasks and model bindings.",
+      "target_paths": [
+        "app-server-go/internal/sessions/",
+        "app-server-go/internal/commands/",
+        "app-server-go/internal/tasks/"
+      ],
+      "current_owner": {
+        "data": "Python App Store and native adapters",
+        "background": "Python command dispatcher"
+      },
+      "tests": [
+        {
+          "path": "backend/tests/test_native_controls_daemon.py",
+          "name": "test_runtime_rpc_rejects_daemon_proxy_without_explicit_control_interface",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_native_controls_daemon.py -q"
+        },
+        {
+          "path": "backend/tests/test_fork_session.py",
+          "name": "test_fork_session_chat_branch",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_fork_session.py -q"
+        },
+        {
+          "path": "backend/tests/test_fork_session.py",
+          "name": "test_fork_session_worktree_not_git",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_fork_session.py -q"
+        },
+        {
+          "path": "backend/tests/test_fork_session.py",
+          "name": "test_fork_session_worktree_success",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_fork_session.py -q"
+        },
+        {
+          "path": "backend/tests/test_handoff.py",
+          "name": "test_handoff_context_is_hidden_from_projected_user_message",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_handoff.py -q"
+        },
+        {
+          "path": "backend/tests/test_handoff.py",
+          "name": "test_handoff_uses_source_agent_summary",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_handoff.py -q"
+        },
+        {
+          "path": "backend/tests/test_project_delete.py",
+          "name": "test_delete_empty_project",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_project_delete.py -q"
+        },
+        {
+          "path": "backend/tests/test_project_delete.py",
+          "name": "test_delete_project_api",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_project_delete.py -q"
+        },
+        {
+          "path": "backend/tests/test_project_delete.py",
+          "name": "test_delete_project_cascades_sessions_and_messages",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_project_delete.py -q"
+        },
+        {
+          "path": "backend/tests/test_project_delete.py",
+          "name": "test_delete_session_closes_bound_browser_tab",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_project_delete.py -q"
+        }
+      ],
+      "acceptance_ids": [
+        "T05",
+        "T06",
+        "T07",
+        "T10",
+        "T12"
+      ],
+      "status": "NOT_STARTED",
+      "evidence": []
+    },
+    {
+      "id": "migration:f05",
+      "feature_id": "F05",
+      "title": "Environment and Agent connections",
+      "source": [
+        "backend/src/astrorder/connections.py",
+        "backend/src/astrorder/core/environment_connections.py",
+        "backend/src/astrorder/core/system_environment.py",
+        "backend/src/astrorder/ssh_transport.py",
+        "backend/src/astrorder/routers/agents.py"
+      ],
+      "entrypoints": [
+        "config:astrorder-auto-connect-local-hermes:c7aec87247",
+        "config:astrorder-codex-executable:59867cb088",
+        "config:astrorder-grok-executable:232207038b",
+        "config:astrorder-hermes-executable:ba217415d1",
+        "config:astrorder-max-ssh-connections:994001434d",
+        "http:get-api-v1-agents-agent-id-observations:e1419fd3eb",
+        "http:get-api-v1-agents-upgrade-targets:d70817f665",
+        "http:get-api-v1-agents:5de91a1660",
+        "http:post-api-v1-agents-agent-id-observer:be4ba6f15a",
+        "http:post-api-v1-agents-agent-id-upgrade:b879381c2d"
+      ],
+      "contract": "Preserve local/WSL/SSH discovery, connection lifecycle, restore, config, upgrade preflight and external session catalogs.",
+      "target_paths": [
+        "app-server-go/internal/connections/",
+        "app-server-go/internal/environment/"
+      ],
+      "current_owner": {
+        "data": "Python connection controllers",
+        "background": "Python restore and reader threads"
+      },
+      "tests": [
+        {
+          "path": "backend/tests/test_connections.py",
+          "name": "test_connection_api_persists_safe_ssh_settings_and_rejects_shell_shaped_host",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_connections.py -q"
+        },
+        {
+          "path": "backend/tests/test_connections.py",
+          "name": "test_hermes_command_rejection_names_desktop_owner_instead_of_generic_failure",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_connections.py -q"
+        },
+        {
+          "path": "backend/tests/test_connections.py",
+          "name": "test_hermes_discovery_prefers_install_launcher",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_connections.py -q"
+        },
+        {
+          "path": "backend/tests/test_connections.py",
+          "name": "test_legacy_ssh_row_migrates_to_stable_id_and_multiple_rows_are_isolated",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_connections.py -q"
+        },
+        {
+          "path": "backend/tests/test_connections.py",
+          "name": "test_local_hermes_connect_is_owned_and_does_not_return_connector_secret",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_connections.py -q"
+        },
+        {
+          "path": "backend/tests/test_connections.py",
+          "name": "test_local_source_identity_is_stable_across_runtime_incarnations",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_connections.py -q"
+        },
+        {
+          "path": "backend/tests/test_connections.py",
+          "name": "test_local_tui_command_maps_durable_session_identity_to_live_gateway_id",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_connections.py -q"
+        },
+        {
+          "path": "backend/tests/test_connections.py",
+          "name": "test_local_tui_image_is_attached_as_bytes_before_submit",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_connections.py -q"
+        },
+        {
+          "path": "backend/tests/test_connections.py",
+          "name": "test_local_tui_owned_session_keeps_native_rejection_reason",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_connections.py -q"
+        },
+        {
+          "path": "backend/tests/test_connections.py",
+          "name": "test_local_tui_owned_session_steers_when_live_owner_rejects",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_connections.py -q"
+        },
+        {
+          "path": "backend/tests/test_connections.py",
+          "name": "test_local_tui_owned_session_takes_over_when_idle",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_connections.py -q"
+        },
+        {
+          "path": "backend/tests/test_connections.py",
+          "name": "test_native_session_enumeration_uses_opaque_ids_and_paginates",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_connections.py -q"
+        },
+        {
+          "path": "backend/tests/test_connections.py",
+          "name": "test_owned_tui_command_uses_native_handler_with_exact_command_identity",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_connections.py -q"
+        },
+        {
+          "path": "backend/tests/test_connections.py",
+          "name": "test_remote_deploy_is_idempotent_and_does_not_put_secret_in_ssh_argv",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_connections.py -q"
+        },
+        {
+          "path": "backend/tests/test_connections.py",
+          "name": "test_remote_deploy_reports_host_key_failure_without_accepting_key",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_connections.py -q"
+        },
+        {
+          "path": "backend/tests/test_connections.py",
+          "name": "test_service_startup_marks_persisted_connectors_disconnected",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_connections.py -q"
+        },
+        {
+          "path": "backend/tests/test_connections.py",
+          "name": "test_ssh_probe_uses_fixed_openssh_argv_without_shell_interpolation",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_connections.py -q"
+        },
+        {
+          "path": "backend/tests/test_connections.py",
+          "name": "test_two_ssh_connection_states_do_not_share_disconnect_or_alias_updates",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_connections.py -q"
+        },
+        {
+          "path": "backend/tests/test_environment_connections.py",
+          "name": "test_local_codex_environment_exposes_explicit_daemon_ownership_mode",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_environment_connections.py -q"
+        },
+        {
+          "path": "backend/tests/test_environment_connections.py",
+          "name": "test_local_hermes_environment_exposes_explicit_daemon_ownership_mode",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_environment_connections.py -q"
+        },
+        {
+          "path": "backend/tests/test_environment_connections.py",
+          "name": "test_remote_codex_bootstrap_leaves_json_rpc_bytes_after_environment_payload",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_environment_connections.py -q"
+        },
+        {
+          "path": "backend/tests/test_environment_connections.py",
+          "name": "test_remote_codex_effort_resumes_existing_rollout_path_when_thread_id_lookup_fails",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_environment_connections.py -q"
+        },
+        {
+          "path": "backend/tests/test_environment_connections.py",
+          "name": "test_remote_codex_environment_uses_daemon_controller_factory_when_enabled",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_environment_connections.py -q"
+        },
+        {
+          "path": "backend/tests/test_environment_connections.py",
+          "name": "test_remote_codex_forwards_only_gateway_environment_via_stdin",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_environment_connections.py -q"
+        },
+        {
+          "path": "backend/tests/test_environment_connections.py",
+          "name": "test_remote_codex_keeps_connection_native_identity_and_never_reads_local_model",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_environment_connections.py -q"
+        },
+        {
+          "path": "backend/tests/test_environment_connections.py",
+          "name": "test_remote_codex_sends_large_payload_over_ssh_stdin",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_environment_connections.py -q"
+        },
+        {
+          "path": "backend/tests/test_environment_connections.py",
+          "name": "test_remote_codex_stages_attachment_on_remote_workspace",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_environment_connections.py -q"
+        },
+        {
+          "path": "backend/tests/test_environment_connections.py",
+          "name": "test_remote_hermes_environment_exposes_explicit_daemon_ownership_mode",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_environment_connections.py -q"
+        },
+        {
+          "path": "backend/tests/test_daemon_ssh_control.py",
+          "name": "test_daemon_ssh_controller_connects_and_creates_by_exact_connection_identity",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_daemon_ssh_control.py -q"
+        },
+        {
+          "path": "backend/tests/test_daemon_ssh_control.py",
+          "name": "test_daemon_ssh_controller_routes_native_rpc_through_daemon",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_daemon_ssh_control.py -q"
+        },
+        {
+          "path": "backend/tests/test_daemon_ssh_control.py",
+          "name": "test_daemon_ssh_controller_submits_after_exact_connection_session_binding",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_daemon_ssh_control.py -q"
+        },
+        {
+          "path": "backend/tests/test_daemon_ssh_control.py",
+          "name": "test_models_uses_control_connection_without_resuming_unpersisted_draft",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_daemon_ssh_control.py -q"
+        }
+      ],
+      "acceptance_ids": [
+        "T06",
+        "T08",
+        "T11"
+      ],
+      "status": "NOT_STARTED",
+      "evidence": []
+    },
+    {
+      "id": "migration:f06",
+      "feature_id": "F06",
+      "title": "Browser WebSockets, Connector and terminal relay",
+      "source": [
+        "backend/src/astrorder/main.py",
+        "backend/src/astrorder/core/terminal_service.py",
+        "backend/src/astrorder/runtime.py"
+      ],
+      "entrypoints": [
+        "ws:ws-v1-connector:ee2d5b7ba3",
+        "ws:ws-v1-events:bea728234d",
+        "ws:ws-v1-terminal:5ef5baaef1"
+      ],
+      "contract": "Preserve Connector identity/events, event replay, PTY input/output/resize/close and independent daemon ownership.",
+      "target_paths": [
+        "app-server-go/internal/websocket/",
+        "app-server-go/internal/connector/",
+        "app-server-go/internal/terminal/"
+      ],
+      "current_owner": {
+        "data": "Python App event and Connector services",
+        "background": "Python websocket handlers; Go daemon PTY when enabled"
+      },
+      "tests": [
+        {
+          "path": "backend/tests/test_connector_artifacts.py",
+          "name": "test_background_skill_tool_is_visible_without_marking_session_running",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_connector_artifacts.py -q"
+        },
+        {
+          "path": "backend/tests/test_connector_artifacts.py",
+          "name": "test_codex_companion_maps_app_server_stream_and_cancel",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_connector_artifacts.py -q"
+        },
+        {
+          "path": "backend/tests/test_connector_artifacts.py",
+          "name": "test_codex_protocol_uses_documented_app_server_methods",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_connector_artifacts.py -q"
+        },
+        {
+          "path": "backend/tests/test_connector_artifacts.py",
+          "name": "test_connector_sources_are_isolated_from_server_and_require_explicit_secret",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_connector_artifacts.py -q"
+        },
+        {
+          "path": "backend/tests/test_connector_artifacts.py",
+          "name": "test_hermes_does_not_claim_attachment_or_command_id_support",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_connector_artifacts.py -q"
+        },
+        {
+          "path": "backend/tests/test_connector_artifacts.py",
+          "name": "test_hermes_emits_public_tool_and_subagent_task_events_without_scraping_output",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_connector_artifacts.py -q"
+        },
+        {
+          "path": "backend/tests/test_connector_artifacts.py",
+          "name": "test_hermes_public_hook_registration_and_text_command",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_connector_artifacts.py -q"
+        },
+        {
+          "path": "backend/tests/test_connector_artifacts.py",
+          "name": "test_hermes_registers_a_connecting_agent_before_any_session_starts",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_connector_artifacts.py -q"
+        },
+        {
+          "path": "backend/tests/test_connector_artifacts.py",
+          "name": "test_hermes_stream_coalesces_only_by_reliable_turn_id",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_connector_artifacts.py -q"
+        },
+        {
+          "path": "backend/tests/test_connector_artifacts.py",
+          "name": "test_post_llm_does_not_reemit_user_input_after_reply",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_connector_artifacts.py -q"
+        },
+        {
+          "path": "backend/tests/test_connector_artifacts.py",
+          "name": "test_stream_final_reply_follows_tool_activity_in_live_transcript",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_connector_artifacts.py -q"
+        },
+        {
+          "path": "backend/tests/test_connector_artifacts.py",
+          "name": "test_stream_reasoning_and_tool_callbacks_emit_transcript_activity",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_connector_artifacts.py -q"
+        },
+        {
+          "path": "backend/tests/test_terminal_service.py",
+          "name": "test_windows_terminal_overrides_inherited_dumb_terminal",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_terminal_service.py -q"
+        },
+        {
+          "path": "backend/tests/test_daemon_terminal_relay.py",
+          "name": "test_daemon_pty_target_requires_exact_local_identity_and_never_accepts_ssh",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_daemon_terminal_relay.py -q"
+        },
+        {
+          "path": "backend/tests/test_daemon_terminal_relay.py",
+          "name": "test_terminal_relay_closes_daemon_pty_only_for_explicit_browser_close",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_daemon_terminal_relay.py -q"
+        },
+        {
+          "path": "backend/tests/test_daemon_terminal_relay.py",
+          "name": "test_terminal_relay_disconnect_detaches_without_closing_daemon_pty",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_daemon_terminal_relay.py -q"
+        },
+        {
+          "path": "backend/tests/test_daemon_terminal_relay.py",
+          "name": "test_terminal_relay_forwards_only_exact_terminal_controls_and_output",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_daemon_terminal_relay.py -q"
+        },
+        {
+          "path": "backend/tests/test_daemon_terminal_relay.py",
+          "name": "test_terminal_runtime_identity_is_stable_opaque_and_scoped_to_exact_agent_session",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_daemon_terminal_relay.py -q"
+        }
+      ],
+      "acceptance_ids": [
+        "T02",
+        "T04",
+        "T06",
+        "T12"
+      ],
+      "status": "NOT_STARTED",
+      "evidence": []
+    },
+    {
+      "id": "migration:f07",
+      "feature_id": "F07",
+      "title": "Files, Git and attachments",
+      "source": [
+        "backend/src/astrorder/routers/files.py",
+        "backend/src/astrorder/routers/git.py",
+        "backend/src/astrorder/routers/attachments.py",
+        "backend/src/astrorder/core/attachments.py",
+        "backend/src/astrorder/core/staging_files.py",
+        "backend/src/astrorder/api.py"
+      ],
+      "entrypoints": [
+        "config:astrorder-allowed-attachment-types:8af760e4be",
+        "config:astrorder-allowed-workspaces:b59e50a2c8",
+        "config:astrorder-attachments-dir:d6548641e9",
+        "config:astrorder-max-attachment-size:424417ec22",
+        "http:get-api-v1-attachments-attachment-id:77f96cf37d",
+        "http:get-api-v1-files-raw:ee5b7fd81c",
+        "http:get-api-v1-files-search:7424bb333b",
+        "http:get-api-v1-files-tree:c71b7703e3",
+        "http:get-api-v1-git-diff-raw:85765e025c",
+        "http:get-api-v1-git-status:abc84c89c5",
+        "http:post-api-v1-attachments:41b41d3a2f",
+        "http:post-api-v1-files-exists:50e640422c",
+        "http:post-api-v1-files-mkdir:8b7a9a0c83",
+        "http:post-api-v1-files-stage:37fca3394e",
+        "http:post-api-v1-git-branch:dd5f067b90"
+      ],
+      "contract": "Preserve local/remote file tree/search/mkdir/stage/raw/open/write/upload/download and Git status/diff/branch with path authorization.",
+      "target_paths": [
+        "app-server-go/internal/files/",
+        "app-server-go/internal/git/",
+        "app-server-go/internal/attachments/"
+      ],
+      "current_owner": {
+        "data": "Python App Store and filesystem",
+        "background": "Python subprocess/SSH operations"
+      },
+      "tests": [
+        {
+          "path": "backend/tests/test_file_tree.py",
+          "name": "test_create_directory_local",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_file_tree.py -q"
+        },
+        {
+          "path": "backend/tests/test_file_tree.py",
+          "name": "test_file_exists_checks_exact_relative_paths_with_spaces",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_file_tree.py -q"
+        },
+        {
+          "path": "backend/tests/test_file_tree.py",
+          "name": "test_file_tree_reveal_reads_only_the_deep_target_branch",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_file_tree.py -q"
+        },
+        {
+          "path": "backend/tests/test_file_tree.py",
+          "name": "test_reveal_file_uses_windows_explorer_selection",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_file_tree.py -q"
+        },
+        {
+          "path": "backend/tests/test_git_status_api.py",
+          "name": "test_git_status_does_not_report_clean_when_workspace_is_not_a_repository",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_git_status_api.py -q"
+        },
+        {
+          "path": "backend/tests/test_git_status_api.py",
+          "name": "test_git_status_exposes_file_and_line_counts_for_composer_and_diff",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_git_status_api.py -q"
+        },
+        {
+          "path": "backend/tests/test_native_attachments.py",
+          "name": "test_codex_local_image_and_data_url_map_without_keeping_host_paths",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_native_attachments.py -q"
+        },
+        {
+          "path": "backend/tests/test_native_attachments.py",
+          "name": "test_hermes_image_refs_become_previews_only_inside_native_roots",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_native_attachments.py -q"
+        },
+        {
+          "path": "backend/tests/test_native_attachments.py",
+          "name": "test_native_directory_images_are_copied_and_foreign_paths_are_ignored",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_native_attachments.py -q"
+        }
+      ],
+      "acceptance_ids": [
+        "T07",
+        "T10",
+        "T13"
+      ],
+      "status": "NOT_STARTED",
+      "evidence": []
+    },
+    {
+      "id": "migration:f08",
+      "feature_id": "F08",
+      "title": "Model sync, provider config and analytics",
+      "source": [
+        "backend/src/astrorder/core/model_sync_service.py",
+        "backend/src/astrorder/core/gateway_config.py",
+        "backend/src/astrorder/core/llm_config.py",
+        "backend/src/astrorder/core/analytics.py",
+        "backend/src/astrorder/core/session_usage.py"
+      ],
+      "entrypoints": [
+        "http:get-api-v1-analytics-config:e560471f3f",
+        "http:get-api-v1-analytics-model-quota:129e2dd953",
+        "http:get-api-v1-analytics-usage:d84f41ead6",
+        "http:get-api-v1-model-sync-jobs:e667a1d27a",
+        "http:get-api-v1-model-sync-targets:ac8648ee67",
+        "http:get-api-v1-sessions-session-id-usage:2906d4ca87",
+        "http:post-api-v1-model-sync-jobs-operation-id-cancel:ba0a47a0c1",
+        "http:post-api-v1-model-sync-jobs:aff1a6514a",
+        "http:post-api-v1-model-sync-preview:5c8508c182",
+        "http:put-api-v1-analytics-config:9c591e1b27",
+        "task:backend-src-astrorder-core-analytics-py-744-asyncio-task-start-model-syn:c1bc3626ba"
+      ],
+      "contract": "Preserve gateway/provider config, catalogs, plan/preview/apply/reload jobs, cancellation, readback and usage/quota while daemon remains executor.",
+      "target_paths": [
+        "app-server-go/internal/modelconfig/",
+        "app-server-go/internal/analytics/"
+      ],
+      "current_owner": {
+        "data": "Python App preferences/jobs",
+        "background": "Python model sync tasks; Go daemon execution"
+      },
+      "tests": [
+        {
+          "path": "backend/tests/test_model_sync.py",
+          "name": "test_catalog_and_agent_renderers_preserve_unmanaged_config",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_model_sync.py -q"
+        },
+        {
+          "path": "backend/tests/test_model_sync.py",
+          "name": "test_codex_catalog_can_use_existing_max_context_window",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_model_sync.py -q"
+        },
+        {
+          "path": "backend/tests/test_model_sync.py",
+          "name": "test_codex_catalog_derives_limit_from_existing_window_when_gateway_omits_both",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_model_sync.py -q"
+        },
+        {
+          "path": "backend/tests/test_model_sync.py",
+          "name": "test_codex_catalog_derives_missing_compaction_limit_from_context_window",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_model_sync.py -q"
+        },
+        {
+          "path": "backend/tests/test_model_sync.py",
+          "name": "test_codex_catalog_does_not_write_zero_compaction_limit_without_context_window",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_model_sync.py -q"
+        },
+        {
+          "path": "backend/tests/test_model_sync.py",
+          "name": "test_codex_catalog_fills_missing_reasoning_levels",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_model_sync.py -q"
+        },
+        {
+          "path": "backend/tests/test_model_sync.py",
+          "name": "test_codex_catalog_preserves_previous_reasoning_levels_when_gateway_omits_them",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_model_sync.py -q"
+        },
+        {
+          "path": "backend/tests/test_model_sync.py",
+          "name": "test_codex_catalog_uses_authoritative_compaction_limit_when_provided",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_model_sync.py -q"
+        },
+        {
+          "path": "backend/tests/test_model_sync.py",
+          "name": "test_config_diff_redacts_yaml_api_keys",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_model_sync.py -q"
+        },
+        {
+          "path": "backend/tests/test_model_sync.py",
+          "name": "test_gateway_env_values_do_not_cross_fill",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_model_sync.py -q"
+        },
+        {
+          "path": "backend/tests/test_model_sync.py",
+          "name": "test_hermes_render_updates_address_and_keeps_the_rest",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_model_sync.py -q"
+        },
+        {
+          "path": "backend/tests/test_model_sync.py",
+          "name": "test_provider_env_keys_stay_separate",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_model_sync.py -q"
+        },
+        {
+          "path": "backend/tests/test_llm_config.py",
+          "name": "test_llm_config_api_masks_and_preserves_key",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_llm_config.py -q"
+        },
+        {
+          "path": "backend/tests/test_llm_config.py",
+          "name": "test_llm_config_persists_and_validates",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_llm_config.py -q"
+        },
+        {
+          "path": "backend/tests/test_analytics_proxy.py",
+          "name": "test_magpie_management_key_is_masked_and_kept",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_analytics_proxy.py -q"
+        },
+        {
+          "path": "backend/tests/test_analytics_proxy.py",
+          "name": "test_magpie_usage_and_quota_follow_management_api",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_analytics_proxy.py -q"
+        },
+        {
+          "path": "backend/tests/test_analytics_proxy.py",
+          "name": "test_magpie_usage_requires_management_key",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_analytics_proxy.py -q"
+        },
+        {
+          "path": "backend/tests/test_analytics_proxy.py",
+          "name": "test_model_quota_matches_agent_prefixed_model_and_combo_targets",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_analytics_proxy.py -q"
+        },
+        {
+          "path": "backend/tests/test_analytics_proxy.py",
+          "name": "test_model_quota_uses_active_openai_accounts_instead_of_aggregate_report",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_analytics_proxy.py -q"
+        },
+        {
+          "path": "backend/tests/test_analytics_proxy.py",
+          "name": "test_ocx_usage_config_and_live_proxy",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_analytics_proxy.py -q"
+        }
+      ],
+      "acceptance_ids": [
+        "T05",
+        "T09",
+        "T13"
+      ],
+      "status": "NOT_STARTED",
+      "evidence": []
+    },
+    {
+      "id": "migration:f09",
+      "feature_id": "F09",
+      "title": "Agent API, MCP, CLI and collaboration registry",
+      "source": [
+        "backend/src/astrorder/agents/gateway.py",
+        "backend/src/astrorder/agents/mcp.py",
+        "backend/src/astrorder/agents/cli.py",
+        "backend/src/astrorder/agents/registry.py",
+        "backend/src/astrorder/core/swarm_service.py",
+        "backend/src/astrorder/routers/blackboard.py"
+      ],
+      "entrypoints": [
+        "cli:agents:8c70b25cbb",
+        "cli:catalog:652f550162",
+        "cli:invoke:e77f5b9f69",
+        "cli:machines:5709ff28b6",
+        "cli:projects:2577c0f557",
+        "cli:sessions-list:4126147f53",
+        "cli:sessions-read:52f12aec3e",
+        "cli:sessions-search:92cb896112",
+        "cli:sessions:1225ae6c1a",
+        "http:get-api-v1-blackboard:300b491058",
+        "mcp:agents-list:a64dfb847c",
+        "mcp:blackboard-auto-render:6ea993a04f",
+        "mcp:blackboard-component-schema:2cafd28169",
+        "mcp:blackboard-components-list:d92abd3a84",
+        "mcp:blackboard-delete:16d0921565",
+        "mcp:blackboard-get:f54e57e18f",
+        "mcp:blackboard-set:7002aa22b1",
+        "mcp:browser-cdp:d51ab9aa68",
+        "mcp:browser-run:56f897d6e3",
+        "mcp:browser-screenshot:a4f838c3cb",
+        "mcp:catalog-list:23d687f9a0",
+        "mcp:machines-dispatch:a2b7a32f65",
+        "mcp:machines-list:c43f151287",
+        "mcp:monitor-layout-set:ee410cd7a0",
+        "mcp:monitor-sessions-add:a15773f50d",
+        "mcp:monitor-sessions-remove:a1b40514d9",
+        "mcp:plugins-close:453074886d",
+        "mcp:plugins-configure:9ca0c57753",
+        "mcp:plugins-list:73c194a77f",
+        "mcp:plugins-open:b769a89ff0",
+        "mcp:projects-list:9598f5b695",
+        "mcp:sessions-create:d6d3c75dab",
+        "mcp:sessions-delete:9f3d1e1acc",
+        "mcp:sessions-list:4063688957",
+        "mcp:sessions-read:304d97a743",
+        "mcp:sessions-search:6bba6a900b",
+        "mcp:sessions-send:8dacefd0cd",
+        "mcp:sessions-stop:37355b59c5",
+        "mcp:sessions-tree:cb54e896ea",
+        "mcp:swarm-lock-acquire:8a0320f8e5",
+        "mcp:swarm-lock-list:1838a0748a",
+        "mcp:swarm-lock-release:2137ded8f9",
+        "mcp:swarm-milestone-declare:c0784f20dc",
+        "mcp:swarm-milestone-list:92ce0d6807",
+        "mcp:swarm-milestone-resolve:e7a98d8d0d",
+        "mcp:swarm-sos-escalate:187961aa7e",
+        "mcp:swarm-sos-list:f008d3fdf8",
+        "mcp:swarm-sos-resolve:85cc913d3e",
+        "mcp:swarm-telemetry-get:a543502d9e",
+        "mcp:swarm-telemetry-report:57ffc2712b"
+      ],
+      "contract": "Preserve capability IDs, HTTP/stdio MCP schemas, CLI grammar, dispatch, blackboard, monitor, plugins, locks, milestones, SOS and telemetry.",
+      "target_paths": [
+        "app-server-go/internal/agentapi/",
+        "app-server-go/internal/mcp/",
+        "app-server-go/cmd/astrorder-agent/"
+      ],
+      "current_owner": {
+        "data": "Python AgentContext and workspace_preferences",
+        "background": "Python HTTP/stdio request handlers"
+      },
+      "tests": [
+        {
+          "path": "backend/tests/test_agent_gateway.py",
+          "name": "test_agent_gateway_lists_and_reads_sessions",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_agent_gateway.py -q"
+        },
+        {
+          "path": "backend/tests/test_agent_gateway.py",
+          "name": "test_browser_session_binding_rejects_ambiguous_calls",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_agent_gateway.py -q"
+        },
+        {
+          "path": "backend/tests/test_agent_gateway.py",
+          "name": "test_invoke_unknown_capability",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_agent_gateway.py -q"
+        },
+        {
+          "path": "backend/tests/test_agent_gateway.py",
+          "name": "test_parse_session_key_accepts_key_or_parts",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_agent_gateway.py -q"
+        },
+        {
+          "path": "backend/tests/test_agent_mcp.py",
+          "name": "test_agent_mcp_blackboard_descriptions_include_chinese_trigger_keywords",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_agent_mcp.py -q"
+        },
+        {
+          "path": "backend/tests/test_agent_mcp.py",
+          "name": "test_agent_mcp_generates_concrete_input_schemas",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_agent_mcp.py -q"
+        },
+        {
+          "path": "backend/tests/test_agent_mcp.py",
+          "name": "test_blackboard_ns_resolution_with_polymorphic_session_keys",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_agent_mcp.py -q"
+        },
+        {
+          "path": "backend/tests/test_agent_mcp.py",
+          "name": "test_blackboard_set_triggers_group_message_broadcast",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_agent_mcp.py -q"
+        },
+        {
+          "path": "backend/tests/test_blackboard_namespace.py",
+          "name": "test_explicit_global_and_short_session_id_resolve_independently",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_blackboard_namespace.py -q"
+        },
+        {
+          "path": "backend/tests/test_blackboard_namespace.py",
+          "name": "test_session_default_resolves_to_callers_active_session",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_blackboard_namespace.py -q"
+        }
+      ],
+      "acceptance_ids": [
+        "T01",
+        "T10",
+        "T13"
+      ],
+      "status": "NOT_STARTED",
+      "evidence": []
+    },
+    {
+      "id": "migration:f10",
+      "feature_id": "F10",
+      "title": "Bot groups, review relay and handoff tasks",
+      "source": [
+        "backend/src/astrorder/core/bot_groups.py",
+        "backend/src/astrorder/core/review_relay.py",
+        "backend/src/astrorder/routers/review_relay.py",
+        "backend/src/astrorder/core/handoff.py",
+        "backend/src/astrorder/core/background_tasks.py"
+      ],
+      "entrypoints": [
+        "http:delete-api-v1-bot-groups-group-id:9802027a13",
+        "http:delete-api-v1-review-relay-bindings-source-agent-id-source-session-id:cd32b97d55",
+        "http:get-api-v1-bot-groups-group-id-messages:ced2cf98db",
+        "http:get-api-v1-bot-groups-group-id:95e313123f",
+        "http:get-api-v1-bot-groups:a658eaec82",
+        "http:get-api-v1-review-relay-bindings-source-agent-id-source-session-id:11b15a48c8",
+        "http:get-api-v1-review-relay-runs-run-id:60e0a09da4",
+        "http:get-api-v1-review-relay-runs:b1cab34a5a",
+        "http:patch-api-v1-bot-groups-group-id:3e8dd0a79a",
+        "http:patch-api-v1-review-relay-runs-run-id:2479bcb528",
+        "http:post-api-v1-bot-groups-group-id-messages:94e9e6d397",
+        "http:post-api-v1-bot-groups-group-id-stop:7ebde6bac4",
+        "http:post-api-v1-bot-groups:0889878a5f",
+        "http:post-api-v1-review-relay-runs:8f09337628",
+        "http:post-api-v1-review-relay-validate:f84ea49e6f",
+        "http:put-api-v1-review-relay-bindings-source-agent-id-source-session-id:135497d601",
+        "pref:prefix-blackboard-group:3e207364c5",
+        "pref:prefix-bot-group-msgs:e7740223dc",
+        "pref:prefix-bot-group:64eeec74d8",
+        "pref:prefix-group-session:414796cc60",
+        "task:backend-src-astrorder-connections-py-560-thread-start-readers-read-stdou:a33a197ef0",
+        "task:backend-src-astrorder-connections-py-561-thread-start-readers-drain-stde:5649011526",
+        "task:backend-src-astrorder-connections-py-868-thread-connect-self-initialize-:64121d5a29",
+        "task:backend-src-astrorder-core-bot-groups-py-560-asyncio-task-poll-and-relay:1690e4d567",
+        "task:backend-src-astrorder-core-bot-groups-py-608-asyncio-task-dispatch-group:46dd9a4112",
+        "task:backend-src-astrorder-core-bot-groups-py-824-asyncio-task-send-group-mes:4893595cbc",
+        "task:backend-src-astrorder-daemon-bridge-client-py-534-asyncio-task-receive-l:1203afcfcf",
+        "task:backend-src-astrorder-daemon-bridge-client-py-535-asyncio-task-receive-l:6911df14e8",
+        "task:backend-src-astrorder-daemon-clients-pty-relay-py-103-asyncio-task-serve:df68471937",
+        "task:backend-src-astrorder-native-codex-py-1313-thread-notification-self-subm:20d0300f33",
+        "task:backend-src-astrorder-observers-plugin-py-20-thread-verify-plugin-read:d017662354",
+        "task:backend-src-astrorder-plugins-r2t2-py-99-thread-enable-self-start-worker:e476c1c175",
+        "task:backend-src-astrorder-ssh-transport-py-645-thread-start-readers-read-std:144dfcca60",
+        "task:backend-src-astrorder-ssh-transport-py-646-thread-start-readers-drain-st:f1bf298625"
+      ],
+      "contract": "Preserve group lifecycle/messages/stop, review bindings/runs, handoff progress, cancellation and visible failure.",
+      "target_paths": [
+        "app-server-go/internal/botgroups/",
+        "app-server-go/internal/reviewrelay/",
+        "app-server-go/internal/background/"
+      ],
+      "current_owner": {
+        "data": "Python App Store/workspace_preferences",
+        "background": "Python asyncio tasks"
+      },
+      "tests": [
+        {
+          "path": "backend/tests/test_bot_groups.py",
+          "name": "test_bot_groups_crud_and_messages",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_bot_groups.py -q"
+        },
+        {
+          "path": "backend/tests/test_review_relay.py",
+          "name": "test_remote_snapshot_preserves_posix_path",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_review_relay.py -q"
+        },
+        {
+          "path": "backend/tests/test_review_relay.py",
+          "name": "test_review_relay_binding_is_persisted",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_review_relay.py -q"
+        },
+        {
+          "path": "backend/tests/test_review_relay.py",
+          "name": "test_review_relay_run_is_persisted",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_review_relay.py -q"
+        },
+        {
+          "path": "backend/tests/test_review_relay.py",
+          "name": "test_review_relay_validation_rejects_different_git_snapshots",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_review_relay.py -q"
+        },
+        {
+          "path": "backend/tests/test_review_relay.py",
+          "name": "test_review_snapshot_detects_changed_content_without_status_change",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_review_relay.py -q"
+        },
+        {
+          "path": "backend/tests/test_review_relay.py",
+          "name": "test_validate_remote_sessions_never_resolves_wsl_path_locally",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_review_relay.py -q"
+        },
+        {
+          "path": "backend/tests/test_handoff.py",
+          "name": "test_handoff_context_is_hidden_from_projected_user_message",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_handoff.py -q"
+        },
+        {
+          "path": "backend/tests/test_handoff.py",
+          "name": "test_handoff_uses_source_agent_summary",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_handoff.py -q"
+        }
+      ],
+      "acceptance_ids": [
+        "T03",
+        "T12",
+        "T13"
+      ],
+      "status": "NOT_STARTED",
+      "evidence": []
+    },
+    {
+      "id": "migration:f11",
+      "feature_id": "F11",
+      "title": "OpenViking memory integration",
+      "source": [
+        "backend/src/astrorder/routers/memory.py",
+        "backend/src/astrorder/core/openviking_client.py",
+        "backend/src/astrorder/core/ov_sync.py"
+      ],
+      "entrypoints": [
+        "http:get-api-v1-memory-config:0dad64a221",
+        "http:get-api-v1-memory-content:340dc95daa",
+        "http:get-api-v1-memory-health:25dd2c7d5b",
+        "http:get-api-v1-memory-ls:6f25633c0d",
+        "http:get-api-v1-memory-targets-target-id-status:3ce4cd87ff",
+        "http:get-api-v1-memory-targets:68d361a976",
+        "http:get-api-v1-memory-tree:f21dd59a24",
+        "http:post-api-v1-memory-apply:47a3dfcbb7",
+        "http:post-api-v1-memory-config:f4167417a0",
+        "http:post-api-v1-memory-search:13f6a5daf4",
+        "pref:exact-memory-openviking-config:4a099d482c"
+      ],
+      "contract": "Preserve config, health/list/tree/read/search, target status and direct Agent configuration without changing model routing.",
+      "target_paths": [
+        "app-server-go/internal/memory/"
+      ],
+      "current_owner": {
+        "data": "Python workspace_preferences",
+        "background": "Python HTTP/SSH config sync"
+      },
+      "tests": [
+        {
+          "path": "app-server-go/internal/memory/client_test.go",
+          "name": "TestNewOpenVikingClientRejectsInvalidBaseURL",
+          "command_id": "go-package-test",
+          "command": "cd app-server-go && go test ./internal/memory -count=1"
+        },
+        {
+          "path": "app-server-go/internal/memory/client_test.go",
+          "name": "TestOpenVikingClientErrorsTimeoutAndCancellationAreSanitized",
+          "command_id": "go-package-test",
+          "command": "cd app-server-go && go test ./internal/memory -count=1"
+        },
+        {
+          "path": "app-server-go/internal/memory/client_test.go",
+          "name": "TestOpenVikingClientWireContractAndUseNumber",
+          "command_id": "go-package-test",
+          "command": "cd app-server-go && go test ./internal/memory -count=1"
+        },
+        {
+          "path": "app-server-go/internal/memory/config_test.go",
+          "name": "TestConfigNullRetainsAndMaskedOutputNeverLeaksSecret",
+          "command_id": "go-package-test",
+          "command": "cd app-server-go && go test ./internal/memory -count=1"
+        },
+        {
+          "path": "app-server-go/internal/memory/config_test.go",
+          "name": "TestConfigPydanticCompatibleUnicodeLengths",
+          "command_id": "go-package-test",
+          "command": "cd app-server-go && go test ./internal/memory -count=1"
+        },
+        {
+          "path": "app-server-go/internal/memory/config_test.go",
+          "name": "TestConfigReadsLegacyStringModernMapAndPrivateFallback",
+          "command_id": "go-package-test",
+          "command": "cd app-server-go && go test ./internal/memory -count=1"
+        },
+        {
+          "path": "app-server-go/internal/memory/config_test.go",
+          "name": "TestConfigUpdatePresenceAndLegacyStorageShape",
+          "command_id": "go-package-test",
+          "command": "cd app-server-go && go test ./internal/memory -count=1"
+        },
+        {
+          "path": "app-server-go/internal/memory/config_test.go",
+          "name": "TestConfigValidation",
+          "command_id": "go-package-test",
+          "command": "cd app-server-go && go test ./internal/memory -count=1"
+        },
+        {
+          "path": "app-server-go/internal/memory/service_test.go",
+          "name": "TestServiceAuthValidationEnvelopesAndUpstreamWire",
+          "command_id": "go-package-test",
+          "command": "cd app-server-go && go test ./internal/memory -count=1"
+        },
+        {
+          "path": "app-server-go/internal/memory/service_test.go",
+          "name": "TestServiceEmptyApplyIsNoOp",
+          "command_id": "go-package-test",
+          "command": "cd app-server-go && go test ./internal/memory -count=1"
+        },
+        {
+          "path": "app-server-go/internal/memory/service_test.go",
+          "name": "TestServiceHealthUnavailableRetainsNullVersion",
+          "command_id": "go-package-test",
+          "command": "cd app-server-go && go test ./internal/memory -count=1"
+        },
+        {
+          "path": "app-server-go/internal/memory/service_test.go",
+          "name": "TestServicePreservesInjectedAuthStatus",
+          "command_id": "go-package-test",
+          "command": "cd app-server-go && go test ./internal/memory -count=1"
+        },
+        {
+          "path": "app-server-go/internal/memory/service_test.go",
+          "name": "TestServicePropagatesCancellationToUpstream",
+          "command_id": "go-package-test",
+          "command": "cd app-server-go && go test ./internal/memory -count=1"
+        },
+        {
+          "path": "app-server-go/internal/memory/service_test.go",
+          "name": "TestServiceRegistrationAndMuxShareAllTenRoutes",
+          "command_id": "go-package-test",
+          "command": "cd app-server-go && go test ./internal/memory -count=1"
+        },
+        {
+          "path": "app-server-go/internal/memory/service_test.go",
+          "name": "TestServiceUpstreamErrorDoesNotLeakAPIKey",
+          "command_id": "go-package-test",
+          "command": "cd app-server-go && go test ./internal/memory -count=1"
+        },
+        {
+          "path": "app-server-go/internal/memory/targets_test.go",
+          "name": "TestCodexConfigUsesAdvertisedHookFieldAndPreservesUnknownTOML",
+          "command_id": "go-package-test",
+          "command": "cd app-server-go && go test ./internal/memory -count=1"
+        },
+        {
+          "path": "app-server-go/internal/memory/targets_test.go",
+          "name": "TestCompareSemver",
+          "command_id": "go-package-test",
+          "command": "cd app-server-go && go test ./internal/memory -count=1"
+        },
+        {
+          "path": "app-server-go/internal/memory/targets_test.go",
+          "name": "TestHermesInspectionUsesDocumentedPluginStatusJSON",
+          "command_id": "go-package-test",
+          "command": "cd app-server-go && go test ./internal/memory -count=1"
+        },
+        {
+          "path": "app-server-go/internal/memory/targets_test.go",
+          "name": "TestLocalTargetFSAtomicReadWriteOnPrivateHome",
+          "command_id": "go-package-test",
+          "command": "cd app-server-go && go test ./internal/memory -count=1"
+        },
+        {
+          "path": "app-server-go/internal/memory/targets_test.go",
+          "name": "TestTargetInspectionAggregatesMachineAgents",
+          "command_id": "go-package-test",
+          "command": "cd app-server-go && go test ./internal/memory -count=1"
+        },
+        {
+          "path": "app-server-go/internal/memory/targets_test.go",
+          "name": "TestTargetSyncCodexPreservesUnknownConfigAndInspectsEffectiveState",
+          "command_id": "go-package-test",
+          "command": "cd app-server-go && go test ./internal/memory -count=1"
+        },
+        {
+          "path": "app-server-go/internal/memory/targets_test.go",
+          "name": "TestTargetSyncHermesUsesNativeCLIWithExactProfileAndSecretArg",
+          "command_id": "go-package-test",
+          "command": "cd app-server-go && go test ./internal/memory -count=1"
+        },
+        {
+          "path": "app-server-go/internal/memory/targets_test.go",
+          "name": "TestTargetSyncRollbackAndPartialFailureAreVisibleAndSanitized",
+          "command_id": "go-package-test",
+          "command": "cd app-server-go && go test ./internal/memory -count=1"
+        },
+        {
+          "path": "app-server-go/internal/memory/targets_test.go",
+          "name": "TestTargetSyncUnknownTargetKindFailsExplicitly",
+          "command_id": "go-package-test",
+          "command": "cd app-server-go && go test ./internal/memory -count=1"
+        }
+      ],
+      "acceptance_ids": [
+        "T09",
+        "T13"
+      ],
+      "status": "NOT_STARTED",
+      "evidence": []
+    },
+    {
+      "id": "migration:f12",
+      "feature_id": "F12",
+      "title": "Skills, capabilities and RTK management",
+      "source": [
+        "backend/src/astrorder/routers/skills_manager.py",
+        "backend/src/astrorder/routers/capabilities_manager.py",
+        "backend/src/astrorder/routers/rtk.py",
+        "backend/src/astrorder/core/skills_sync.py",
+        "backend/src/astrorder/core/capabilities_sync.py",
+        "backend/src/astrorder/core/capabilities_dispatch.py",
+        "backend/src/astrorder/core/rtk_service.py"
+      ],
+      "entrypoints": [
+        "http:get-api-v1-capabilities-summary:cf5397a75a",
+        "http:get-api-v1-capabilities-targets:721f0fbcc5",
+        "http:get-api-v1-rtk-connection-id:1c799286d1",
+        "http:get-api-v1-skills-search:5f43cfc3ca",
+        "http:get-api-v1-skills-target-target-id:5e0442b023",
+        "http:get-api-v1-skills-targets:77692e7ec8",
+        "http:post-api-v1-capabilities-dispatch:c14a4c7d75",
+        "http:post-api-v1-capabilities-marketplaces-update:c6feafa982",
+        "http:post-api-v1-capabilities-mcp-ping:dc5886f28c",
+        "http:post-api-v1-capabilities-mcp-update:7e2432641f",
+        "http:post-api-v1-capabilities-plugins-update:9c82562bf5",
+        "http:post-api-v1-rtk-connection-id-install:4c90ae9f5d",
+        "http:post-api-v1-skills-install:749b2c0a52",
+        "http:post-api-v1-skills-remove:0772379561",
+        "http:put-api-v1-rtk-connection-id-agents-kind:41dc66f5cc"
+      ],
+      "contract": "Preserve local/remote skills, MCP/plugin/marketplace distribution, effective capabilities and RTK lifecycle with side-effect readback.",
+      "target_paths": [
+        "app-server-go/internal/capabilities/",
+        "app-server-go/internal/rtk/"
+      ],
+      "current_owner": {
+        "data": "Python filesystem/config services",
+        "background": "Python subprocess/SSH dispatch"
+      },
+      "tests": [
+        {
+          "path": "backend/tests/test_effective_capabilities.py",
+          "name": "test_effective_capabilities_for_codex_hermes_grok",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_effective_capabilities.py -q"
+        },
+        {
+          "path": "backend/tests/test_effective_capabilities.py",
+          "name": "test_effective_capabilities_include_live_native_channels_without_mutating_plugin",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_effective_capabilities.py -q"
+        },
+        {
+          "path": "backend/tests/test_rtk.py",
+          "name": "test_aggregate_rtk_gain_filters_and_aligns",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_rtk.py -q"
+        },
+        {
+          "path": "backend/tests/test_rtk.py",
+          "name": "test_check_agent_status_local_with_isolated_env",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_rtk.py -q"
+        },
+        {
+          "path": "backend/tests/test_rtk.py",
+          "name": "test_get_agent_command_cli_mapping",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_rtk.py -q"
+        },
+        {
+          "path": "backend/tests/test_rtk.py",
+          "name": "test_rtk_api_endpoints_local_and_ssh",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_rtk.py -q"
+        }
+      ],
+      "acceptance_ids": [
+        "T09",
+        "T13"
+      ],
+      "status": "NOT_STARTED",
+      "evidence": []
+    },
+    {
+      "id": "migration:f13",
+      "feature_id": "F13",
+      "title": "Browser and Jev automation",
+      "source": [
+        "backend/src/astrorder/routers/browser.py",
+        "backend/src/astrorder/jev/browser.py",
+        "backend/src/astrorder/jev/client.py",
+        "backend/src/astrorder/api.py",
+        "tools/browser_extension/"
+      ],
+      "entrypoints": [
+        "http:get-api-v1-browser-diagnostics:0433f55085",
+        "http:get-api-v1-browser-page-content:e67106ab59",
+        "http:get-api-v1-browser-screenshot:59bcfa9d26",
+        "http:post-api-v1-browser-interact:b6b14846cf",
+        "http:post-api-v1-browser-navigate:8146763c26",
+        "http:post-api-v1-browser-tabs-close:156b29fd8f",
+        "http:post-api-v1-browser-tabs-new:ad86111bcf",
+        "http:post-api-v1-browser-tabs-select:317209f6e1"
+      ],
+      "contract": "Preserve per-session tabs, recovery, screenshot/navigation/input/CDP/content and bounded multi-step Jev automation.",
+      "target_paths": [
+        "app-server-go/internal/browser/",
+        "app-server-go/internal/jev/"
+      ],
+      "current_owner": {
+        "data": "Python browser session registry",
+        "background": "Python Jev/browser subprocesses"
+      },
+      "tests": [
+        {
+          "path": "backend/tests/test_jev_browser.py",
+          "name": "test_address_bar_navigation_binds_the_browser_to_session",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_jev_browser.py -q"
+        },
+        {
+          "path": "backend/tests/test_jev_browser.py",
+          "name": "test_agent_cdp_is_bound_to_session_and_blocks_browser_domain",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_jev_browser.py -q"
+        },
+        {
+          "path": "backend/tests/test_jev_browser.py",
+          "name": "test_browser_capability_is_registered",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_jev_browser.py -q"
+        },
+        {
+          "path": "backend/tests/test_jev_browser.py",
+          "name": "test_browser_task_delegates_loop_to_upstream_agent",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_jev_browser.py -q"
+        },
+        {
+          "path": "backend/tests/test_jev_browser.py",
+          "name": "test_browser_task_rejects_non_web_urls_before_launch",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_jev_browser.py -q"
+        },
+        {
+          "path": "backend/tests/test_jev_browser.py",
+          "name": "test_closing_session_removes_target_and_screenshot",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_jev_browser.py -q"
+        },
+        {
+          "path": "backend/tests/test_jev_browser.py",
+          "name": "test_console_errors_are_collected",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_jev_browser.py -q"
+        },
+        {
+          "path": "backend/tests/test_jev_browser.py",
+          "name": "test_current_browser_screenshot_is_returned",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_jev_browser.py -q"
+        },
+        {
+          "path": "backend/tests/test_jev_browser.py",
+          "name": "test_field_values_come_from_declared_inputs",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_jev_browser.py -q"
+        },
+        {
+          "path": "backend/tests/test_jev_browser.py",
+          "name": "test_interact_and_diagnostics",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_jev_browser.py -q"
+        },
+        {
+          "path": "backend/tests/test_jev_browser.py",
+          "name": "test_mcp_returns_screenshot_as_image_content",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_jev_browser.py -q"
+        },
+        {
+          "path": "backend/tests/test_jev_browser.py",
+          "name": "test_multi_tab_management",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_jev_browser.py -q"
+        },
+        {
+          "path": "backend/tests/test_jev_browser.py",
+          "name": "test_session_pages_are_isolated",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_jev_browser.py -q"
+        },
+        {
+          "path": "backend/tests/test_jev_browser.py",
+          "name": "test_visible_edge_uses_the_real_window_viewport",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_jev_browser.py -q"
+        },
+        {
+          "path": "backend/tests/test_jev_client.py",
+          "name": "test_jev_key_storage",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_jev_client.py -q"
+        }
+      ],
+      "acceptance_ids": [
+        "T10",
+        "T13"
+      ],
+      "status": "NOT_STARTED",
+      "evidence": []
+    },
+    {
+      "id": "migration:f14",
+      "feature_id": "F14",
+      "title": "Audio transcription and local R2T2",
+      "source": [
+        "backend/src/astrorder/routers/audio.py",
+        "backend/src/astrorder/plugins/r2t2.py"
+      ],
+      "entrypoints": [
+        "http:get-api-v1-audio-local-plugin:8bab0b9e7a",
+        "http:post-api-v1-audio-transcriptions:fbb76f3b6f",
+        "http:put-api-v1-audio-local-plugin:de3e97a31c",
+        "task:backend-src-astrorder-routers-audio-py-126-asyncio-task-local-stream-gua:5501a7413d",
+        "ws:api-v1-audio-local-stream:cf1ae8ba3c"
+      ],
+      "contract": "Preserve gateway transcription, limits, R2T2 download/start/stop/progress/recovery, PCM streaming, cancellation and cleanup.",
+      "target_paths": [
+        "app-server-go/internal/audio/",
+        "app-server-go/internal/r2t2/"
+      ],
+      "current_owner": {
+        "data": "Python workspace_preferences and local assets",
+        "background": "Python llama.cpp manager"
+      },
+      "tests": [
+        {
+          "path": "backend/tests/test_audio_transcriptions.py",
+          "name": "test_missing_key_is_configuration_error",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_audio_transcriptions.py -q"
+        },
+        {
+          "path": "backend/tests/test_audio_transcriptions.py",
+          "name": "test_rejects_invalid_uploads",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_audio_transcriptions.py -q"
+        },
+        {
+          "path": "backend/tests/test_audio_transcriptions.py",
+          "name": "test_transcription_route_requires_browser_auth",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_audio_transcriptions.py -q"
+        },
+        {
+          "path": "backend/tests/test_audio_transcriptions.py",
+          "name": "test_transcription_uses_configured_gateway_and_returns_only_text",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_audio_transcriptions.py -q"
+        },
+        {
+          "path": "backend/tests/test_audio_transcriptions.py",
+          "name": "test_upstream_errors_do_not_leak_secrets",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_audio_transcriptions.py -q"
+        },
+        {
+          "path": "backend/tests/test_audio_transcriptions.py",
+          "name": "test_uses_opencodex_profile_and_environment_key",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_audio_transcriptions.py -q"
+        },
+        {
+          "path": "backend/tests/test_r2t2_plugin.py",
+          "name": "test_plugin_api_toggles_runtime_and_reports_status",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_r2t2_plugin.py -q"
+        },
+        {
+          "path": "backend/tests/test_r2t2_plugin.py",
+          "name": "test_plugin_enable_starts_server_and_disable_unloads_model",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_r2t2_plugin.py -q"
+        },
+        {
+          "path": "backend/tests/test_r2t2_plugin.py",
+          "name": "test_plugin_transcribes_pcm_through_persistent_server",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_r2t2_plugin.py -q"
+        },
+        {
+          "path": "backend/tests/test_r2t2_plugin.py",
+          "name": "test_stream_websocket_requires_running_plugin",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_r2t2_plugin.py -q"
+        },
+        {
+          "path": "backend/tests/test_r2t2_plugin.py",
+          "name": "test_stream_websocket_returns_incremental_transcripts",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_r2t2_plugin.py -q"
+        }
+      ],
+      "acceptance_ids": [
+        "T06",
+        "T13"
+      ],
+      "status": "NOT_STARTED",
+      "evidence": []
+    },
+    {
+      "id": "migration:f15",
+      "feature_id": "F15",
+      "title": "Observers and Connector assets",
+      "source": [
+        "backend/src/astrorder/observers/",
+        "backend/src/astrorder/native/observers.py",
+        "backend/src/astrorder/connectors/"
+      ],
+      "entrypoints": [
+        "remote-python:backend-src-astrorder-api-py-1767-from-ssh-transport-import-sshnativerun:fb630ed1a6",
+        "remote-python:backend-src-astrorder-api-py-1786-cmd-build-remote-python-command-remote:bb5c8569db",
+        "remote-python:backend-src-astrorder-api-py-614-from-ssh-transport-import-sshnativerunt:1ae758129a",
+        "remote-python:backend-src-astrorder-api-py-658-cmd-build-remote-python-command-remote-:a2f88fa04e",
+        "remote-python:backend-src-astrorder-core-capabilities-dispatch-py-149-f-python3-c:5841c02d1d",
+        "remote-python:backend-src-astrorder-core-capabilities-sync-py-109-cmd-f-python3-c-remo:8c2fea5a51",
+        "remote-python:backend-src-astrorder-core-capabilities-sync-py-523-code-out-run-cmd-in-:360e2f5e1a",
+        "remote-python:backend-src-astrorder-core-environment-connections-py-204-launch-argv-se:16d7c37d0e",
+        "remote-python:backend-src-astrorder-core-environment-connections-py-27-build-remote-py:5ad804abad",
+        "remote-python:backend-src-astrorder-core-environment-connections-py-28-build-remote-st:31f4bdc057",
+        "remote-python:backend-src-astrorder-core-ov-sync-py-45-bash-c-cmd-if-os-name-nt-else-p:1d368b5fca",
+        "remote-python:backend-src-astrorder-core-review-relay-py-67-from-astrorder-ssh-transpo:4bfe67e17a",
+        "remote-python:backend-src-astrorder-core-review-relay-py-79-argv-build-remote-python-c:0130e75257",
+        "remote-python:backend-src-astrorder-core-session-usage-py-16-from-ssh-transport-import:d0b856c21a",
+        "remote-python:backend-src-astrorder-core-session-usage-py-326-cmd-build-remote-python-:507b11d1f3",
+        "remote-python:backend-src-astrorder-core-session-usage-py-422-cmd-build-remote-python-:324f845ef1",
+        "remote-python:backend-src-astrorder-core-session-usage-py-658-cmd-build-remote-python-:82f6fd1fa1",
+        "remote-python:backend-src-astrorder-core-staging-files-py-120-from-astrorder-ssh-trans:4d006e8e37",
+        "remote-python:backend-src-astrorder-core-staging-files-py-150-cmd-build-remote-python-:f7e7649c75",
+        "remote-python:backend-src-astrorder-main-py-53-sys-executable:4ef4ec14e5",
+        "remote-python:backend-src-astrorder-native-observers-py-389-if-hasattr-client-remote-j:e6a3379506",
+        "remote-python:backend-src-astrorder-native-observers-py-390-source-inspect-getsource-o:0312ee509e",
+        "remote-python:backend-src-astrorder-native-observers-py-391-result-client-remote-json-:12c605f58e",
+        "remote-python:backend-src-astrorder-observers-io-py-24-argv-str-python-str-script:7fb47bba77",
+        "remote-python:backend-src-astrorder-routers-files-py-113-cmd-build-remote-python-comma:62e1dd41b6",
+        "remote-python:backend-src-astrorder-routers-files-py-249-from-ssh-transport-import-ssh:6ca685b4a8",
+        "remote-python:backend-src-astrorder-routers-files-py-285-cmd-build-remote-python-comma:cb929cf10c",
+        "remote-python:backend-src-astrorder-routers-files-py-381-from-ssh-transport-import-ssh:e287897b6d",
+        "remote-python:backend-src-astrorder-routers-files-py-399-argv-build-remote-python-comm:30d80fa342",
+        "remote-python:backend-src-astrorder-routers-files-py-444-from-ssh-transport-import-ssh:2589f9a62a",
+        "remote-python:backend-src-astrorder-routers-files-py-458-argv-build-remote-python-comm:0ed7819711",
+        "remote-python:backend-src-astrorder-routers-files-py-503-from-ssh-transport-import-ssh:cfb13661ec",
+        "remote-python:backend-src-astrorder-routers-files-py-521-cmd-build-remote-python-comma:b2311508e1",
+        "remote-python:backend-src-astrorder-routers-files-py-66-from-ssh-transport-import-sshn:5dd09a5aae",
+        "remote-python:backend-src-astrorder-ssh-transport-py-268-python-command-payload-get-py:5cedeaa877",
+        "remote-python:backend-src-astrorder-ssh-transport-py-307-def-build-remote-python-comma:fa967cc5c0",
+        "remote-python:backend-src-astrorder-ssh-transport-py-308-source-str-interpreter-str-py:eb64fa8b51",
+        "remote-python:backend-src-astrorder-ssh-transport-py-313-python-c-source-therefore-onl:fbe1dfceb6",
+        "remote-python:backend-src-astrorder-ssh-transport-py-337-def-build-remote-stdin-bootst:7be715efab",
+        "remote-python:backend-src-astrorder-ssh-transport-py-338-interpreter-str-python3-fallb:3f40ce30fb",
+        "remote-python:backend-src-astrorder-ssh-transport-py-595-if-not-python-command:89bc7a8a93",
+        "remote-python:backend-src-astrorder-ssh-transport-py-596-python-command-python-path:765fce68ec",
+        "remote-python:backend-src-astrorder-ssh-transport-py-717-build-remote-stdin-bootstrap-:38b837f691",
+        "remote-python:backend-src-astrorder-ssh-transport-py-718-interpreter-metadata-python-p:43d3c36c29",
+        "remote-python:backend-src-astrorder-ssh-transport-py-875-command-build-remote-stdin-bo:543b885058",
+        "remote-python:backend-src-astrorder-ssh-transport-py-892-command-build-remote-stdin-bo:fc1da0a4d7",
+        "remote-python:backend-src-astrorder-ssh-transport-py-915-command-build-remote-stdin-bo:d6232217f9"
+      ],
+      "contract": "Preserve plugin installation, external session observation, activity, attachments/completion events and host identity/config while removing App Python runtime dependence.",
+      "target_paths": [
+        "app-server-go/internal/observers/",
+        "app-server-go/internal/connectors/",
+        "app-server-go/cmd/astrorder-observer/"
+      ],
+      "current_owner": {
+        "data": "Python observers and native stores",
+        "background": "Python observer subprocesses"
+      },
+      "tests": [
+        {
+          "path": "backend/tests/test_observer_plugin.py",
+          "name": "test_failed_plugin_verification_preserves_legacy",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_observer_plugin.py -q"
+        },
+        {
+          "path": "backend/tests/test_observer_plugin.py",
+          "name": "test_migrate_only_owned_hooks_after_native_plugin_verification",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_observer_plugin.py -q"
+        },
+        {
+          "path": "backend/tests/test_connector_artifacts.py",
+          "name": "test_background_skill_tool_is_visible_without_marking_session_running",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_connector_artifacts.py -q"
+        },
+        {
+          "path": "backend/tests/test_connector_artifacts.py",
+          "name": "test_codex_companion_maps_app_server_stream_and_cancel",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_connector_artifacts.py -q"
+        },
+        {
+          "path": "backend/tests/test_connector_artifacts.py",
+          "name": "test_codex_protocol_uses_documented_app_server_methods",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_connector_artifacts.py -q"
+        },
+        {
+          "path": "backend/tests/test_connector_artifacts.py",
+          "name": "test_connector_sources_are_isolated_from_server_and_require_explicit_secret",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_connector_artifacts.py -q"
+        },
+        {
+          "path": "backend/tests/test_connector_artifacts.py",
+          "name": "test_hermes_does_not_claim_attachment_or_command_id_support",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_connector_artifacts.py -q"
+        },
+        {
+          "path": "backend/tests/test_connector_artifacts.py",
+          "name": "test_hermes_emits_public_tool_and_subagent_task_events_without_scraping_output",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_connector_artifacts.py -q"
+        },
+        {
+          "path": "backend/tests/test_connector_artifacts.py",
+          "name": "test_hermes_public_hook_registration_and_text_command",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_connector_artifacts.py -q"
+        },
+        {
+          "path": "backend/tests/test_connector_artifacts.py",
+          "name": "test_hermes_registers_a_connecting_agent_before_any_session_starts",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_connector_artifacts.py -q"
+        },
+        {
+          "path": "backend/tests/test_connector_artifacts.py",
+          "name": "test_hermes_stream_coalesces_only_by_reliable_turn_id",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_connector_artifacts.py -q"
+        },
+        {
+          "path": "backend/tests/test_connector_artifacts.py",
+          "name": "test_post_llm_does_not_reemit_user_input_after_reply",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_connector_artifacts.py -q"
+        },
+        {
+          "path": "backend/tests/test_connector_artifacts.py",
+          "name": "test_stream_final_reply_follows_tool_activity_in_live_transcript",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_connector_artifacts.py -q"
+        },
+        {
+          "path": "backend/tests/test_connector_artifacts.py",
+          "name": "test_stream_reasoning_and_tool_callbacks_emit_transcript_activity",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_connector_artifacts.py -q"
+        }
+      ],
+      "acceptance_ids": [
+        "T02",
+        "T11",
+        "T12",
+        "T14"
+      ],
+      "status": "NOT_STARTED",
+      "evidence": []
+    },
+    {
+      "id": "migration:f16",
+      "feature_id": "F16",
+      "title": "Scripts, desktop lifecycle, build and packaging",
+      "source": [
+        "scripts/",
+        "desktop/main.js",
+        "desktop/package.json",
+        "frontend/package.json"
+      ],
+      "entrypoints": [
+        "build:desktop-package-json-check:ed04ce8737",
+        "build:desktop-package-json-dist:4ba8a44ec9",
+        "build:desktop-package-json-start:665c2b04e5",
+        "build:frontend-package-json-build-sync:b7e2a8b581",
+        "build:frontend-package-json-build:48c4996fc3",
+        "build:frontend-package-json-dev:eeceb50622",
+        "build:frontend-package-json-lint:37e354b072",
+        "build:frontend-package-json-preview:0d6ff9d6ee",
+        "build:frontend-package-json-sync:8cb7ffce1e",
+        "build:frontend-package-json-test-e2e:eea5cc88ac",
+        "build:frontend-package-json-test-watch:701d194adb",
+        "build:frontend-package-json-test:1b854297ed",
+        "build:scripts-build-brand-icons-py:afd7021afa",
+        "desktop:desktop-service-py-174:1231e04a75",
+        "desktop:desktop-service-py-181:01f7eb7453",
+        "desktop:print-browser-token-py-182:76345b1902",
+        "desktop:provision-desktop-py-185:7b4658ef52",
+        "script:scripts-desktop-service-py:da1d322bf2",
+        "script:scripts-dev-hot-sync-py:9339e9aaec",
+        "script:scripts-inert-connector-py:71ee295ce2",
+        "script:scripts-orchestrate-py:6e42fece5c",
+        "script:scripts-provision-desktop-py:09a884d1dc",
+        "script:scripts-restart-service-py:510850a868",
+        "script:scripts-run-production-py:3da662d4d6",
+        "script:scripts-set-clip-ps1:7756bbbcc5",
+        "script:scripts-setup-shortcuts-py:5b2888f0ee",
+        "script:scripts-start-daemon-py:4c59d96b64",
+        "script:scripts-start-desktop-daemon-py:1492ae1b94",
+        "script:scripts-start-silent-py:f517a389c6",
+        "script:scripts-status-daemon-py:1418c6d529",
+        "script:scripts-stop-daemon-py:dfa9996a87",
+        "script:scripts-switch-to-go-daemon-py:d427f6a19f",
+        "script:scripts-test-orchestrate-py:5e3a2de76b",
+        "script:scripts-verify-isolated-security-py:6b0d039f62",
+        "script:scripts-verify-native-hermes-local-py:5e1fd7f863"
+      ],
+      "contract": "Preserve config initialization, DPAPI, status/start/stop/restart, startup registration, browser login, hidden launch, install/upgrade/sync and App-only restart.",
+      "target_paths": [
+        "app-server-go/cmd/astrorder-service/",
+        "scripts/build-go.ps1",
+        "scripts/build-go.sh",
+        "desktop/main.js",
+        "desktop/package.json",
+        "frontend/package.json"
+      ],
+      "current_owner": {
+        "data": "Python desktop service scripts and Electron",
+        "background": "Electron launches Python App and independent Go daemon"
+      },
+      "tests": [
+        {
+          "path": "backend/tests/test_desktop_service.py",
+          "name": "test_explicit_daemon_start_does_not_require_login_startup_task",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_desktop_service.py -q"
+        },
+        {
+          "path": "backend/tests/test_production_daemon.py",
+          "name": "test_desktop_parent_pid_must_be_valid",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_production_daemon.py -q"
+        },
+        {
+          "path": "backend/tests/test_production_daemon.py",
+          "name": "test_ensure_production_daemon_requires_environment_secret_and_passes_no_secret",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_production_daemon.py -q"
+        },
+        {
+          "path": "backend/tests/test_production_daemon.py",
+          "name": "test_production_credentials_require_daemon_secret_only_when_enabled",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_production_daemon.py -q"
+        },
+        {
+          "path": "backend/tests/test_service_lifecycle.py",
+          "name": "test_listening_pids_matches_exact_port_and_ignores_daemon_and_connections",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_service_lifecycle.py -q"
+        },
+        {
+          "path": "backend/tests/test_service_lifecycle.py",
+          "name": "test_restart_refuses_to_kill_an_unverified_listener",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_service_lifecycle.py -q"
+        },
+        {
+          "path": "backend/tests/test_service_lifecycle.py",
+          "name": "test_restart_terminates_only_verified_app_listener_and_never_queries_daemon",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_service_lifecycle.py -q"
+        },
+        {
+          "path": "backend/tests/test_service_lifecycle.py",
+          "name": "test_select_owned_app_pid_requires_exact_production_entrypoint",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_service_lifecycle.py -q"
+        },
+        {
+          "path": "backend/tests/test_service_lifecycle.py",
+          "name": "test_select_owned_daemon_pid_never_accepts_app_server_marker",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_service_lifecycle.py -q"
+        },
+        {
+          "path": "backend/tests/test_service_lifecycle.py",
+          "name": "test_status_commands_do_not_create_windows_console",
+          "command_id": "python-app-baseline-test",
+          "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_service_lifecycle.py -q"
+        }
+      ],
+      "acceptance_ids": [
+        "T09",
+        "T10",
+        "T14",
+        "T15"
+      ],
+      "status": "NOT_STARTED",
+      "evidence": []
+    }
+  ]
+}

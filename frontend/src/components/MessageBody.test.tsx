@@ -3,6 +3,13 @@ import { render, screen, cleanup, fireEvent } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { MessageBody } from './MessageBody'
 afterEach(cleanup)
+it('renders native Hermes bracketed image markers with session routing', () => {
+ const text = '请查看\n[Image attached at: C:\\private\\upload.png] [screenshot]'
+ const markdown = vi.fn((value: string) => <p>{value}</p>)
+ render(<MessageBody value={text} user sessionId="s" renderMarkdown={markdown} />)
+ expect(screen.getByAltText('upload.png')).toHaveAttribute('src', '/api/v1/files/raw?path=C%3A%5Cprivate%5Cupload.png&session_id=s')
+ expect(markdown).toHaveBeenCalledWith('请查看')
+})
 it('folds native compaction summaries and model notices without losing their text', () => {
  const text = '[CONTEXT COMPACTION — REFERENCE ONLY] Earlier turns were compacted into a summary.'
  render(<MessageBody value={text} user renderMarkdown={value => <p>{value}</p>} />)

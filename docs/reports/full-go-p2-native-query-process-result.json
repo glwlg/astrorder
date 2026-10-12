@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "passed": true,
+  "fixture": "synthetic local Codex JSON-RPC process; actual Go runtime, private daemon and generated Python gRPC client",
+  "daemon_sha256": "fe900a6ac664de87f7681503ad3b67903001d365966ccbd3207481b2c6f25033",
+  "assertions": [
+    "generated Python client authenticates real TCP RuntimeQuery",
+    "actual Go Codex adapter and stdio preserve native params, false, null and exact integers",
+    "typed-owned option collision rejected before native dispatch",
+    "gRPC client disconnect/reconnect preserves existing native catalog process",
+    "queries create no conversation, mutations, extra initialize or journal operation",
+    "idle authority shutdown confirms exact daemon exit, native stdin EOF and released TCP port"
+  ],
+  "cleanup": {
+    "daemon_exit_code": 0,
+    "forced_cleanup": false
+  },
+  "production_changed": false,
+  "full_migration_complete": false,
+  "limits": [
+    "No real Agent inference, credentials, production service or data",
+    "Synthetic native process is not full runtime parity",
+    "Source revision is a dirty working tree; executable hash alone does not certify source freshness"
+  ]
+}

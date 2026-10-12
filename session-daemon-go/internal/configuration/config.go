@@ -41,7 +41,8 @@ type Config struct {
 	ModelConfig *ModelConfig   `json:"model_config,omitempty"`
 }
 type ModelConfig struct {
-	Home string `json:"home"`
+	Home            string `json:"home"`
+	HelperAssetsDir string `json:"helper_assets_dir,omitempty"`
 }
 
 func Parse(reader io.Reader) (Config, error) {
@@ -85,11 +86,18 @@ func canonicalDirectory(path string) (string, error) {
 }
 func (c Config) Register(d *protocol.Daemon) error {
 	var modelHome string
+	var helperAssets string
 	if c.ModelConfig != nil {
 		var err error
 		modelHome, err = canonicalDirectory(c.ModelConfig.Home)
 		if err != nil {
 			return fmt.Errorf("model configuration home: %w", err)
+		}
+		if c.ModelConfig.HelperAssetsDir != "" {
+			helperAssets, err = canonicalDirectory(c.ModelConfig.HelperAssetsDir)
+			if err != nil {
+				return fmt.Errorf("model helper assets: %w", err)
+			}
 		}
 	}
 	validated := make([]Runtime, 0, len(c.Runtimes))
@@ -154,7 +162,7 @@ func (c Config) Register(d *protocol.Daemon) error {
 			cfg := codex.Config{Executable: r.Executable, Arguments: r.Arguments, Workspace: r.Workspace, Allowed: r.Allowed, AgentID: r.AgentID}
 			adapter = codex.NewAdapter(cfg, d.Emit)
 			obsCtx, obsCancel := context.WithCancel(context.Background())
-			go codex.StartDesktopStopObserver(obsCtx, cfg, d.Emit, 500*time.Millisecond)
+			go codex.StartDesktopObserver(obsCtx, cfg, d.Emit, d.HasSession, 500*time.Millisecond)
 			d.AddCloser(func() error {
 				obsCancel()
 				return nil
@@ -163,6 +171,12 @@ func (c Config) Register(d *protocol.Daemon) error {
 			adapter = grok.New(grok.Config{Executable: r.Executable, Arguments: r.Arguments, Workspace: r.Workspace, Allowed: r.Allowed, AgentID: r.AgentID, Emit: d.Emit})
 		case "hermes":
 			adapter = hermes.NewIsolated(hermes.Config{Executable: r.Executable, Arguments: r.Arguments, Workspace: r.Workspace, Allowed: r.Allowed, AgentID: r.AgentID, Emit: d.Emit})
+			hermesCtx, hermesCancel := context.WithCancel(context.Background())
+			go hermes.StartActivityObserver(hermesCtx, r.AgentID, d.Emit, d.HasSession, 500*time.Millisecond)
+			d.AddCloser(func() error {
+				hermesCancel()
+				return nil
+			})
 		case "pty":
 			instance, err := pty.New(pty.Config{Allowed: r.Allowed, Shell: r.Shell, Emit: d.Emit})
 			if err != nil {
@@ -177,7 +191,7 @@ func (c Config) Register(d *protocol.Daemon) error {
 	}
 
 	// Always provide multiplexed SSH child registries for remote agents
-	codexSSH := core.NewMultiplexRegistry(remote.NewRemoteCodexFactory(d.Emit))
+	codexSSH := core.NewMultiplexRegistry(remote.NewRemoteCodexFactoryWithActivity(d.Emit, d.HasSession))
 	d.RegisterRuntime("codex-ssh", codexSSH)
 
 	grokSSH := core.NewMultiplexRegistry(remote.NewRemoteGrokFactory(d.Emit))
@@ -187,7 +201,7 @@ func (c Config) Register(d *protocol.Daemon) error {
 	d.RegisterRuntime("ssh", sshHermes)
 
 	if modelHome != "" {
-		if err := d.ConfigureModelConfig(modelconfig.Config{AllowedRoots: []string{modelHome}, Credentials: modelconfig.NativeCredentialStore()}); err != nil {
+		if err := d.ConfigureModelConfig(modelconfig.Config{AllowedRoots: []string{modelHome}, Credentials: modelconfig.NativeCredentialStore(), HelperAssetsDir: helperAssets}); err != nil {
 			return err
 		}
 	}

@@ -62,7 +62,10 @@ func (s *Service) apply(ctx context.Context, request map[string]any) (map[string
 			if raw, exists := request["api_keys"]; exists {
 				payload["api_keys"] = raw
 			}
-			return executeRemoteRequest(ctx, target, payload)
+			if raw, exists := request["expected_digests"]; exists {
+				payload["expected_digests"] = raw
+			}
+			return s.executeRemoteRequest(ctx, target, payload)
 		}
 	}
 

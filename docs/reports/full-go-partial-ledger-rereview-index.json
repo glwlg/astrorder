@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "document_kind": "coordinator_extracted_index_of_independent_markdown_review",
+  "passed": true,
+  "verdict": "PASS_SCOPED_PARTIAL_001_004",
+  "reviewer_model": "antigravity/gemini-3.8-flash",
+  "reviewer_session": "20261009_094622_17e273",
+  "source_report": {
+    "path": "docs/reports/full-go-partial-ledger-rereview.md",
+    "sha256": "88a954b9eed65965a979a984343d3637f0903fd577a83e3f848b3b7d67df5023",
+    "origin": "Copied byte-exact from independently written scratch Markdown. This JSON is a coordinator index, not a reviewer-authored JSON verdict."
+  },
+  "resolved_findings": ["PARTIAL-001", "PARTIAL-002", "PARTIAL-003", "PARTIAL-004"],
+  "reviewer_execution": [
+    {
+      "command": "go test ./internal/parity ./cmd/astrorderctl -count=1 -timeout=60s",
+      "cwd": "app-server-go",
+      "exit_code": 0,
+      "observed": "parity 0.647s; astrorderctl 0.503s",
+      "source": "Independent report section 2 and reviewer terminal tool output."
+    },
+    {
+      "command": "go vet ./internal/parity ./cmd/astrorderctl",
+      "cwd": "app-server-go",
+      "exit_code": 0,
+      "observed": "No diagnostics",
+      "source": "Independent report section 2; successful chained terminal command."
+    }
+  ],
+  "coordinator_execution_inspected_by_reviewer": {
+    "private_cli_mutations": 27,
+    "rejected_mutations": 27,
+    "unchanged_control_exit_code": 0,
+    "executed_by_reviewer": false
+  },
+  "source_hashes": {
+    "app-server-go/internal/parity/baseline.go": "08aa1d4274a543c8b559460973ed06dc8c14c790d82427a4b94e6342752d16d7",
+    "app-server-go/internal/parity/manifest.go": "dcb19f45d2ad55f26d5ccb8f1d31cf6aef3b1992aaeeb62d88e68b3f0d956d1d",
+    "app-server-go/internal/parity/partial.go": "39ef10d73f3eb30eaf412ffc4e493f93093e6053bb40844750434571476b9a69",
+    "app-server-go/internal/parity/partial_test.go": "62452520e98d6207b7cc8d05f6ed3ee51feaacefcdd4c6600328f36269e4796f",
+    "app-server-go/internal/parity/jsondecode.go": "9358e3c1ef99daefaa546949a6a59583fec30938f69939b16010e746b2a80cca",
+    "app-server-go/internal/parity/strict_test.go": "93dc8280bb485071f1b7e123d02ad6f73d8595dfef370f903e00d5e6a42142c1",
+    "app-server-go/internal/parity/partial_identity_test.go": "11ec9b7aac1d73afcafbe75abe94ddf9af0b91d0cbf3b5895c1dcb8604dfff3e",
+    "app-server-go/internal/parity/process_result_test.go": "17b78438ce553713fbcc82342cb15d147817017489e1b84af491ec8da2089731",
+    "docs/reports/full-go-migration-matrix.json": "c1c78d416f74818d4598c18e3e28a295aaf2fbd98fb9888a75dfe83dee67ddb2",
+    "docs/reports/full-go-p2-operation-process-result.json": "14cf665d21201663b988feb2fe5ed091aeab8f8ff1235069845147f6d8615c7e"
+  },
+  "completion_claims": {
+    "partial_ledger_defects_reviewed": true,
+    "f03_complete": false,
+    "p0_complete": false,
+    "p2_complete": false,
+    "full_migration_complete": false,
+    "production_changed": false
+  },
+  "limits": [
+    "Independent PASS is limited to PARTIAL-001 through PARTIAL-004.",
+    "Historical hashes preserve integrity and do not prove inference or current-source execution.",
+    "The coordinator CLI mutation results were inspected, not independently re-executed.",
+    "Original FAIL reports and all historical result bytes remain retained."
+  ]
+}

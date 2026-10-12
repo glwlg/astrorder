@@ -22,6 +22,10 @@ type linuxTerminal struct {
 }
 
 func defaultPlatformTerminal(shell string, cwd string, env []string, cols, rows int) (Terminal, error) {
+	return defaultCommandTerminal(shell, nil, cwd, env, cols, rows)
+}
+
+func defaultCommandTerminal(shell string, args []string, cwd string, env []string, cols, rows int) (Terminal, error) {
 	if cols <= 0 {
 		cols = 80
 	}
@@ -58,7 +62,7 @@ func defaultPlatformTerminal(shell string, cwd string, env []string, cols, rows 
 		Row: uint16(rows),
 	})
 
-	cmd := exec.Command(shell)
+	cmd := exec.Command(shell, args...)
 	cmd.Dir = cwd
 	cmd.Env = env
 	cmd.Stdin = pts

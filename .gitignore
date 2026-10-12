@@ -33,3 +33,12 @@ test-results/
 _p_*.py
 stitch-*.html
 stitch-*.png
+
+# Local Go build outputs and migration probes
+/app-server-go/*.exe
+/app-server-go/bin/
+/app-server-go/tmp/
+/session-daemon-go/bin/
+/backend/.pytest_temp/
+/scratch/
+/scratch-fg-*/

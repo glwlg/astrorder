@@ -39,14 +39,20 @@ func (d *Daemon) readOperation(request map[string]any) map[string]any {
 }
 
 func (d *Daemon) control(parent context.Context, request map[string]any) map[string]any {
+	if err := d.beginControl(); err != nil {
+		return errorResponse(request["request_id"], err.Error())
+	}
+	defer d.endControl()
 	action, _ := request["action"].(string)
 	switch action {
-	case "session.create", "session.send", "session.steer", "session.review", "session.compact", "session.approve", "session.interrupt", "session.delete", "session.rename", "session.settings":
+	case "session.create", "session.send", "session.steer", "session.review", "session.compact", "session.approve", "session.interrupt", "session.delete", "session.rename", "session.settings", "model_config.apply", "model_config.reload":
 	default:
 		return d.controlOnce(parent, request)
 	}
-	if message := validateSessionControl(request); message != "" {
-		return errorResponse(request["request_id"], message)
+	if action != "model_config.apply" && action != "model_config.reload" {
+		if message := validateSessionControl(request); message != "" {
+			return errorResponse(request["request_id"], message)
+		}
 	}
 	raw, exists := request["operation_id"]
 	if !exists {
@@ -96,7 +102,28 @@ func (d *Daemon) control(parent context.Context, request map[string]any) map[str
 		response["operation_id"], response["operation_state"] = id, "uncertain"
 		return response
 	}
-	encoded, err = json.Marshal(response)
+	toPersist := response
+	if action == "model_config.apply" {
+		// Security: sanitize durable completion envelope so file contents and secrets
+		// are not retained in WAL / operation storage.
+		cleanRes := map[string]any{}
+		if resMap, ok := response["result"].(map[string]any); ok {
+			cleanRes["changed"] = resMap["changed"]
+			if r, ok := resMap["receipt"].(map[string]any); ok {
+				cleanRes["receipt"] = map[string]any{
+					"status":  r["status"],
+					"digests": r["digests"],
+				}
+			}
+		}
+		toPersist = map[string]any{
+			"action":     response["action"],
+			"request_id": response["request_id"],
+			"daemon_id":  response["daemon_id"],
+			"result":     cleanRes,
+		}
+	}
+	encoded, err = json.Marshal(toPersist)
 	if err == nil {
 		err = d.journal.CompleteOperation(scope, id, encoded)
 	}

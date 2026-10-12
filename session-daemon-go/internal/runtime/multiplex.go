@@ -67,9 +67,6 @@ func (m *MultiplexRegistry) getOrChild(request Request) (string, Adapter, error)
 	}
 
 	if child, exists := m.children[connID]; exists {
-		if child.canonical != canonical {
-			return "", nil, fmt.Errorf("SSH connection settings changed while daemon-owned")
-		}
 		return connID, child.adapter, nil
 	}
 

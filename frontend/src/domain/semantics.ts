@@ -14,10 +14,34 @@ export function mergeMessagesById<T extends { id: string; role?: string; text?: 
   const result: T[] = []
   const positions = new Map<string, number>()
   const commandPositions = new Map<string, number>()
+  const assistantPositions = new Map<string, number>()
 
   for (const item of [...existing, ...incoming]) {
-    if (!positions.has(item.id) && item.role === 'user' && item.command_id) {
-      const correlatedIdx = commandPositions.get(item.command_id)
+    if (item.role === 'assistant' && item.command_id) {
+      const correlatedIdx = assistantPositions.get(item.command_id)
+      if (correlatedIdx !== undefined) {
+        const current = result[correlatedIdx]
+        if (current.id !== item.id && (current.id.startsWith('hermes-stream-') || item.id.startsWith('hermes-stream-'))) {
+          if (!item.id.startsWith('hermes-stream-')) {
+            positions.delete(current.id)
+            positions.set(item.id, correlatedIdx)
+            result[correlatedIdx] = item
+          }
+          continue
+        }
+      }
+    }
+    if (!positions.has(item.id) && item.role === 'user') {
+      let correlatedIdx = item.command_id ? commandPositions.get(item.command_id) : undefined
+      if (correlatedIdx === undefined && !item.id.startsWith('optimistic-') && item.text) {
+        for (let i = 0; i < result.length; i++) {
+          const cand = result[i]
+          if (cand.id.startsWith('optimistic-') && cand.role === 'user' && cand.text?.trim() === item.text.trim()) {
+            correlatedIdx = i
+            break
+          }
+        }
+      }
       if (correlatedIdx !== undefined) {
         const current = result[correlatedIdx]
         if (current.id.startsWith('optimistic-') || !current.created_at || !item.created_at || item.created_at >= current.created_at) {
@@ -33,6 +57,7 @@ export function mergeMessagesById<T extends { id: string; role?: string; text?: 
     if (position === undefined) {
       positions.set(item.id, result.length)
       if (item.role === 'user' && item.command_id) commandPositions.set(item.command_id, result.length)
+      if (item.role === 'assistant' && item.command_id) assistantPositions.set(item.command_id, result.length)
       result.push(item)
     } else {
       result[position] = item

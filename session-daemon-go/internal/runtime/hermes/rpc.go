@@ -326,6 +326,30 @@ func (a *Adapter) handleGatewayEvent(params map[string]any) {
 	}
 
 	switch eventType {
+	case "message.delta":
+		sid, _ := params["session_id"].(string)
+		a.mu.RLock()
+		durableID := a.handleToSession[sid]
+		if durableID == "" {
+			durableID = sid
+		}
+		session := a.sessions[durableID]
+		if session == nil {
+			a.mu.RUnlock()
+			return
+		}
+		commandID, currentStatus := session.CommandID, session.Status
+		a.mu.RUnlock()
+		data, _ := params["payload"].(map[string]any)
+		delta, _ := data["text"].(string)
+		if delta == "" || commandID == "" {
+			return
+		}
+		if a.config.Emit != nil {
+			if err := a.config.Emit(durableID, "hermes.stream", map[string]any{"agent_id": a.config.AgentID, "session_id": durableID, "command_id": commandID, "delta": delta}, currentStatus); err != nil {
+				a.failCloseSession(durableID, err)
+			}
+		}
 	case "gateway.ready":
 		a.mu.Lock()
 		select {
@@ -350,6 +374,8 @@ func (a *Adapter) handleGatewayEvent(params map[string]any) {
 		if session != nil {
 			session.Status = "idle"
 		}
+		commandID := session.CommandID
+		session.CommandID = ""
 		emit := a.config.Emit
 		agentID := a.config.AgentID
 		a.mu.Unlock()
@@ -363,6 +389,11 @@ func (a *Adapter) handleGatewayEvent(params map[string]any) {
 				for k, v := range p {
 					payload[k] = v
 				}
+			}
+			payload["agent_id"], payload["session_id"] = agentID, durableID
+			delete(payload, "command_id")
+			if commandID != "" {
+				payload["command_id"] = commandID
 			}
 			if err := emit(durableID, "hermes.command_complete", payload, "idle"); err != nil {
 				a.failCloseSession(durableID, err)

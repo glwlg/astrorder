@@ -1,0 +1,2745 @@
+{
+  "schema_version": 1,
+  "source_revision": "ff32f947024b1840b939ebfb8e58e45886d34b47",
+  "inventory_sha256": "d8670db3fbf19d4c00505696897f065bf13bb53ea1cabae627e03253cd671acc",
+  "classification": {
+    "SUPPORTED_UNVERIFIED": "Source-supported and covered only by typed/fake protocol fixtures.",
+    "BASELINE_UNSUPPORTED": "The current source explicitly lacks or rejects the native capability.",
+    "BLOCKED": "A required product path or external environment is unavailable for verification."
+  },
+  "verification": {
+    "environment_checks_performed": false,
+    "true_agent_inference_performed": false,
+    "evidence_scope": "Static source and typed protocol fixtures only; no live environment values, credentials, chats, or native inference.",
+    "external_native_t11": {
+      "status": "BLOCKED",
+      "reason": "The product gRPC App-to-Session-Daemon path required for external native T11 verification is not implemented yet."
+    }
+  },
+  "capabilities": [
+    {
+      "id": "native:local:codex:create",
+      "environment": "local",
+      "agent": "codex",
+      "capability": "create",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/codex/adapter.go",
+          "symbol": "(*Adapter).Create"
+        },
+        {
+          "path": "session-daemon-go/internal/configuration/config.go",
+          "symbol": "Config.Register local runtimes"
+        }
+      ]
+    },
+    {
+      "id": "native:local:codex:send",
+      "environment": "local",
+      "agent": "codex",
+      "capability": "send",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/codex/adapter.go",
+          "symbol": "session.send"
+        },
+        {
+          "path": "session-daemon-go/internal/configuration/config.go",
+          "symbol": "Config.Register local runtimes"
+        }
+      ]
+    },
+    {
+      "id": "native:local:codex:tools",
+      "environment": "local",
+      "agent": "codex",
+      "capability": "tools",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "backend/src/astrorder/native/codex.py",
+          "symbol": "CodexConnection.commands"
+        },
+        {
+          "path": "session-daemon-go/internal/configuration/config.go",
+          "symbol": "Config.Register local runtimes"
+        }
+      ]
+    },
+    {
+      "id": "native:local:codex:interrupt",
+      "environment": "local",
+      "agent": "codex",
+      "capability": "interrupt",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/codex/adapter.go",
+          "symbol": "session.interrupt"
+        },
+        {
+          "path": "session-daemon-go/internal/configuration/config.go",
+          "symbol": "Config.Register local runtimes"
+        }
+      ]
+    },
+    {
+      "id": "native:local:codex:resume",
+      "environment": "local",
+      "agent": "codex",
+      "capability": "resume",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/codex/adapter.go",
+          "symbol": "(*Adapter).Spawn"
+        },
+        {
+          "path": "session-daemon-go/internal/configuration/config.go",
+          "symbol": "Config.Register local runtimes"
+        }
+      ]
+    },
+    {
+      "id": "native:local:codex:history",
+      "environment": "local",
+      "agent": "codex",
+      "capability": "history",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/codex/adapter.go",
+          "symbol": "session.history_page"
+        },
+        {
+          "path": "session-daemon-go/internal/configuration/config.go",
+          "symbol": "Config.Register local runtimes"
+        }
+      ]
+    },
+    {
+      "id": "native:local:codex:models",
+      "environment": "local",
+      "agent": "codex",
+      "capability": "models",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/codex/adapter.go",
+          "symbol": "session.models"
+        },
+        {
+          "path": "session-daemon-go/internal/configuration/config.go",
+          "symbol": "Config.Register local runtimes"
+        }
+      ]
+    },
+    {
+      "id": "native:local:codex:model_read",
+      "environment": "local",
+      "agent": "codex",
+      "capability": "model_read",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "backend/src/astrorder/native/codex.py",
+          "symbol": "CodexConnection.model"
+        },
+        {
+          "path": "session-daemon-go/internal/configuration/config.go",
+          "symbol": "Config.Register local runtimes"
+        }
+      ]
+    },
+    {
+      "id": "native:local:codex:model_set",
+      "environment": "local",
+      "agent": "codex",
+      "capability": "model_set",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "backend/src/astrorder/daemon/clients/codex/control.py",
+          "symbol": "set_model"
+        },
+        {
+          "path": "session-daemon-go/internal/configuration/config.go",
+          "symbol": "Config.Register local runtimes"
+        }
+      ]
+    },
+    {
+      "id": "native:local:codex:effort_set",
+      "environment": "local",
+      "agent": "codex",
+      "capability": "effort_set",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "backend/src/astrorder/daemon/clients/codex/control.py",
+          "symbol": "set_effort"
+        },
+        {
+          "path": "session-daemon-go/internal/configuration/config.go",
+          "symbol": "Config.Register local runtimes"
+        }
+      ]
+    },
+    {
+      "id": "native:local:codex:approval_read",
+      "environment": "local",
+      "agent": "codex",
+      "capability": "approval_read",
+      "status": "BASELINE_UNSUPPORTED",
+      "reason": "The current adapter has no native command/query path for this capability.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "backend/src/astrorder/native/codex.py",
+          "symbol": "CodexConnection.get_approval_mode (App binding only)"
+        },
+        {
+          "path": "session-daemon-go/internal/configuration/config.go",
+          "symbol": "Config.Register local runtimes"
+        }
+      ]
+    },
+    {
+      "id": "native:local:codex:approval_set",
+      "environment": "local",
+      "agent": "codex",
+      "capability": "approval_set",
+      "status": "BASELINE_UNSUPPORTED",
+      "reason": "The current adapter has no native command/query path for this capability.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "backend/src/astrorder/native/codex.py",
+          "symbol": "CodexConnection.set_approval_mode (App binding only)"
+        },
+        {
+          "path": "session-daemon-go/internal/configuration/config.go",
+          "symbol": "Config.Register local runtimes"
+        }
+      ]
+    },
+    {
+      "id": "native:local:codex:approval_respond",
+      "environment": "local",
+      "agent": "codex",
+      "capability": "approval_respond",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/codex/adapter.go",
+          "symbol": "session.approve"
+        },
+        {
+          "path": "session-daemon-go/internal/configuration/config.go",
+          "symbol": "Config.Register local runtimes"
+        }
+      ]
+    },
+    {
+      "id": "native:local:codex:delete",
+      "environment": "local",
+      "agent": "codex",
+      "capability": "delete",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/codex/adapter.go",
+          "symbol": "session.delete"
+        },
+        {
+          "path": "session-daemon-go/internal/configuration/config.go",
+          "symbol": "Config.Register local runtimes"
+        }
+      ]
+    },
+    {
+      "id": "native:local:codex:attachments",
+      "environment": "local",
+      "agent": "codex",
+      "capability": "attachments",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/codex/adapter.go",
+          "symbol": "adapterInput"
+        },
+        {
+          "path": "session-daemon-go/internal/configuration/config.go",
+          "symbol": "Config.Register local runtimes"
+        }
+      ]
+    },
+    {
+      "id": "native:local:hermes:create",
+      "environment": "local",
+      "agent": "hermes",
+      "capability": "create",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/hermes/adapter.go",
+          "symbol": "(*Adapter).Create"
+        },
+        {
+          "path": "session-daemon-go/internal/configuration/config.go",
+          "symbol": "Config.Register local runtimes"
+        }
+      ]
+    },
+    {
+      "id": "native:local:hermes:send",
+      "environment": "local",
+      "agent": "hermes",
+      "capability": "send",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/hermes/adapter.go",
+          "symbol": "handleSend"
+        },
+        {
+          "path": "session-daemon-go/internal/configuration/config.go",
+          "symbol": "Config.Register local runtimes"
+        }
+      ]
+    },
+    {
+      "id": "native:local:hermes:tools",
+      "environment": "local",
+      "agent": "hermes",
+      "capability": "tools",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/hermes/adapter.go",
+          "symbol": "handleCommands"
+        },
+        {
+          "path": "session-daemon-go/internal/configuration/config.go",
+          "symbol": "Config.Register local runtimes"
+        }
+      ]
+    },
+    {
+      "id": "native:local:hermes:interrupt",
+      "environment": "local",
+      "agent": "hermes",
+      "capability": "interrupt",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/hermes/adapter.go",
+          "symbol": "handleInterrupt"
+        },
+        {
+          "path": "session-daemon-go/internal/configuration/config.go",
+          "symbol": "Config.Register local runtimes"
+        }
+      ]
+    },
+    {
+      "id": "native:local:hermes:resume",
+      "environment": "local",
+      "agent": "hermes",
+      "capability": "resume",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/hermes/adapter.go",
+          "symbol": "(*Adapter).Spawn"
+        },
+        {
+          "path": "session-daemon-go/internal/configuration/config.go",
+          "symbol": "Config.Register local runtimes"
+        }
+      ]
+    },
+    {
+      "id": "native:local:hermes:history",
+      "environment": "local",
+      "agent": "hermes",
+      "capability": "history",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/hermes/adapter.go",
+          "symbol": "handleHistoryPage"
+        },
+        {
+          "path": "session-daemon-go/internal/configuration/config.go",
+          "symbol": "Config.Register local runtimes"
+        }
+      ]
+    },
+    {
+      "id": "native:local:hermes:models",
+      "environment": "local",
+      "agent": "hermes",
+      "capability": "models",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/hermes/adapter.go",
+          "symbol": "handleModels"
+        },
+        {
+          "path": "session-daemon-go/internal/configuration/config.go",
+          "symbol": "Config.Register local runtimes"
+        }
+      ]
+    },
+    {
+      "id": "native:local:hermes:model_read",
+      "environment": "local",
+      "agent": "hermes",
+      "capability": "model_read",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/hermes/adapter.go",
+          "symbol": "handleModelRead"
+        },
+        {
+          "path": "session-daemon-go/internal/configuration/config.go",
+          "symbol": "Config.Register local runtimes"
+        }
+      ]
+    },
+    {
+      "id": "native:local:hermes:model_set",
+      "environment": "local",
+      "agent": "hermes",
+      "capability": "model_set",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/hermes/adapter.go",
+          "symbol": "handleModelSet"
+        },
+        {
+          "path": "session-daemon-go/internal/configuration/config.go",
+          "symbol": "Config.Register local runtimes"
+        }
+      ]
+    },
+    {
+      "id": "native:local:hermes:effort_set",
+      "environment": "local",
+      "agent": "hermes",
+      "capability": "effort_set",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/hermes/adapter.go",
+          "symbol": "handleReasoningSet"
+        },
+        {
+          "path": "session-daemon-go/internal/configuration/config.go",
+          "symbol": "Config.Register local runtimes"
+        }
+      ]
+    },
+    {
+      "id": "native:local:hermes:approval_read",
+      "environment": "local",
+      "agent": "hermes",
+      "capability": "approval_read",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/hermes/adapter.go",
+          "symbol": "handleApprovalRead"
+        },
+        {
+          "path": "session-daemon-go/internal/configuration/config.go",
+          "symbol": "Config.Register local runtimes"
+        }
+      ]
+    },
+    {
+      "id": "native:local:hermes:approval_set",
+      "environment": "local",
+      "agent": "hermes",
+      "capability": "approval_set",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/hermes/adapter.go",
+          "symbol": "handleApprovalSet"
+        },
+        {
+          "path": "session-daemon-go/internal/configuration/config.go",
+          "symbol": "Config.Register local runtimes"
+        }
+      ]
+    },
+    {
+      "id": "native:local:hermes:approval_respond",
+      "environment": "local",
+      "agent": "hermes",
+      "capability": "approval_respond",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/hermes/adapter.go",
+          "symbol": "handleApprove"
+        },
+        {
+          "path": "session-daemon-go/internal/configuration/config.go",
+          "symbol": "Config.Register local runtimes"
+        }
+      ]
+    },
+    {
+      "id": "native:local:hermes:delete",
+      "environment": "local",
+      "agent": "hermes",
+      "capability": "delete",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/hermes/adapter.go",
+          "symbol": "handleDelete"
+        },
+        {
+          "path": "session-daemon-go/internal/configuration/config.go",
+          "symbol": "Config.Register local runtimes"
+        }
+      ]
+    },
+    {
+      "id": "native:local:hermes:attachments",
+      "environment": "local",
+      "agent": "hermes",
+      "capability": "attachments",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/hermes/adapter.go",
+          "symbol": "handleSend"
+        },
+        {
+          "path": "session-daemon-go/internal/configuration/config.go",
+          "symbol": "Config.Register local runtimes"
+        }
+      ]
+    },
+    {
+      "id": "native:local:grok:create",
+      "environment": "local",
+      "agent": "grok",
+      "capability": "create",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/grok/runtime.go",
+          "symbol": "(*Adapter).Create"
+        },
+        {
+          "path": "session-daemon-go/internal/configuration/config.go",
+          "symbol": "Config.Register local runtimes"
+        }
+      ]
+    },
+    {
+      "id": "native:local:grok:send",
+      "environment": "local",
+      "agent": "grok",
+      "capability": "send",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/grok/runtime.go",
+          "symbol": "handleSend"
+        },
+        {
+          "path": "session-daemon-go/internal/configuration/config.go",
+          "symbol": "Config.Register local runtimes"
+        }
+      ]
+    },
+    {
+      "id": "native:local:grok:tools",
+      "environment": "local",
+      "agent": "grok",
+      "capability": "tools",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/grok/runtime.go",
+          "symbol": "session.commands"
+        },
+        {
+          "path": "session-daemon-go/internal/configuration/config.go",
+          "symbol": "Config.Register local runtimes"
+        }
+      ]
+    },
+    {
+      "id": "native:local:grok:interrupt",
+      "environment": "local",
+      "agent": "grok",
+      "capability": "interrupt",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/grok/runtime.go",
+          "symbol": "handleInterrupt"
+        },
+        {
+          "path": "session-daemon-go/internal/configuration/config.go",
+          "symbol": "Config.Register local runtimes"
+        }
+      ]
+    },
+    {
+      "id": "native:local:grok:resume",
+      "environment": "local",
+      "agent": "grok",
+      "capability": "resume",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/grok/runtime.go",
+          "symbol": "(*Adapter).Spawn"
+        },
+        {
+          "path": "session-daemon-go/internal/configuration/config.go",
+          "symbol": "Config.Register local runtimes"
+        }
+      ]
+    },
+    {
+      "id": "native:local:grok:history",
+      "environment": "local",
+      "agent": "grok",
+      "capability": "history",
+      "status": "BASELINE_UNSUPPORTED",
+      "reason": "The current adapter has no native command/query path for this capability.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "connectors/grok/connection.py",
+          "symbol": "GrokConnection.load_native_history_page"
+        },
+        {
+          "path": "session-daemon-go/internal/configuration/config.go",
+          "symbol": "Config.Register local runtimes"
+        }
+      ]
+    },
+    {
+      "id": "native:local:grok:models",
+      "environment": "local",
+      "agent": "grok",
+      "capability": "models",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/grok/runtime.go",
+          "symbol": "session.models"
+        },
+        {
+          "path": "session-daemon-go/internal/configuration/config.go",
+          "symbol": "Config.Register local runtimes"
+        }
+      ]
+    },
+    {
+      "id": "native:local:grok:model_read",
+      "environment": "local",
+      "agent": "grok",
+      "capability": "model_read",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/grok/runtime.go",
+          "symbol": "session.model.read"
+        },
+        {
+          "path": "session-daemon-go/internal/configuration/config.go",
+          "symbol": "Config.Register local runtimes"
+        }
+      ]
+    },
+    {
+      "id": "native:local:grok:model_set",
+      "environment": "local",
+      "agent": "grok",
+      "capability": "model_set",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/grok/runtime.go",
+          "symbol": "handleModelSet"
+        },
+        {
+          "path": "session-daemon-go/internal/configuration/config.go",
+          "symbol": "Config.Register local runtimes"
+        }
+      ]
+    },
+    {
+      "id": "native:local:grok:effort_set",
+      "environment": "local",
+      "agent": "grok",
+      "capability": "effort_set",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/grok/runtime.go",
+          "symbol": "handleReasoningSet"
+        },
+        {
+          "path": "session-daemon-go/internal/configuration/config.go",
+          "symbol": "Config.Register local runtimes"
+        }
+      ]
+    },
+    {
+      "id": "native:local:grok:approval_read",
+      "environment": "local",
+      "agent": "grok",
+      "capability": "approval_read",
+      "status": "BASELINE_UNSUPPORTED",
+      "reason": "The current adapter has no native command/query path for this capability.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "connectors/grok/connection.py",
+          "symbol": "GrokConnection.get_approval_mode (App binding only)"
+        },
+        {
+          "path": "session-daemon-go/internal/configuration/config.go",
+          "symbol": "Config.Register local runtimes"
+        }
+      ]
+    },
+    {
+      "id": "native:local:grok:approval_set",
+      "environment": "local",
+      "agent": "grok",
+      "capability": "approval_set",
+      "status": "BASELINE_UNSUPPORTED",
+      "reason": "The current adapter has no native command/query path for this capability.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "connectors/grok/connection.py",
+          "symbol": "GrokConnection.set_approval_mode (App binding only)"
+        },
+        {
+          "path": "session-daemon-go/internal/configuration/config.go",
+          "symbol": "Config.Register local runtimes"
+        }
+      ]
+    },
+    {
+      "id": "native:local:grok:approval_respond",
+      "environment": "local",
+      "agent": "grok",
+      "capability": "approval_respond",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/grok/runtime.go",
+          "symbol": "handleApprove"
+        },
+        {
+          "path": "session-daemon-go/internal/configuration/config.go",
+          "symbol": "Config.Register local runtimes"
+        }
+      ]
+    },
+    {
+      "id": "native:local:grok:delete",
+      "environment": "local",
+      "agent": "grok",
+      "capability": "delete",
+      "status": "BASELINE_UNSUPPORTED",
+      "reason": "The current adapter has no native command/query path for this capability.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/grok/runtime.go",
+          "symbol": "unsupported session.delete"
+        },
+        {
+          "path": "session-daemon-go/internal/configuration/config.go",
+          "symbol": "Config.Register local runtimes"
+        }
+      ]
+    },
+    {
+      "id": "native:local:grok:attachments",
+      "environment": "local",
+      "agent": "grok",
+      "capability": "attachments",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/grok/runtime.go",
+          "symbol": "executePrompt"
+        },
+        {
+          "path": "session-daemon-go/internal/configuration/config.go",
+          "symbol": "Config.Register local runtimes"
+        }
+      ]
+    },
+    {
+      "id": "native:wsl:codex:create",
+      "environment": "wsl",
+      "agent": "codex",
+      "capability": "create",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/codex/adapter.go",
+          "symbol": "(*Adapter).Create"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteCodexFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:wsl:codex:send",
+      "environment": "wsl",
+      "agent": "codex",
+      "capability": "send",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/codex/adapter.go",
+          "symbol": "session.send"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteCodexFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:wsl:codex:tools",
+      "environment": "wsl",
+      "agent": "codex",
+      "capability": "tools",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "backend/src/astrorder/native/codex.py",
+          "symbol": "CodexConnection.commands"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteCodexFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:wsl:codex:interrupt",
+      "environment": "wsl",
+      "agent": "codex",
+      "capability": "interrupt",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/codex/adapter.go",
+          "symbol": "session.interrupt"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteCodexFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:wsl:codex:resume",
+      "environment": "wsl",
+      "agent": "codex",
+      "capability": "resume",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/codex/adapter.go",
+          "symbol": "(*Adapter).Spawn"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteCodexFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:wsl:codex:history",
+      "environment": "wsl",
+      "agent": "codex",
+      "capability": "history",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/codex/adapter.go",
+          "symbol": "session.history_page"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteCodexFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:wsl:codex:models",
+      "environment": "wsl",
+      "agent": "codex",
+      "capability": "models",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/codex/adapter.go",
+          "symbol": "session.models"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteCodexFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:wsl:codex:model_read",
+      "environment": "wsl",
+      "agent": "codex",
+      "capability": "model_read",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "backend/src/astrorder/native/codex.py",
+          "symbol": "CodexConnection.model"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteCodexFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:wsl:codex:model_set",
+      "environment": "wsl",
+      "agent": "codex",
+      "capability": "model_set",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "backend/src/astrorder/daemon/clients/codex/control.py",
+          "symbol": "set_model"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteCodexFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:wsl:codex:effort_set",
+      "environment": "wsl",
+      "agent": "codex",
+      "capability": "effort_set",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "backend/src/astrorder/daemon/clients/codex/control.py",
+          "symbol": "set_effort"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteCodexFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:wsl:codex:approval_read",
+      "environment": "wsl",
+      "agent": "codex",
+      "capability": "approval_read",
+      "status": "BASELINE_UNSUPPORTED",
+      "reason": "The current adapter has no native command/query path for this capability.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "backend/src/astrorder/native/codex.py",
+          "symbol": "CodexConnection.get_approval_mode (App binding only)"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteCodexFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:wsl:codex:approval_set",
+      "environment": "wsl",
+      "agent": "codex",
+      "capability": "approval_set",
+      "status": "BASELINE_UNSUPPORTED",
+      "reason": "The current adapter has no native command/query path for this capability.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "backend/src/astrorder/native/codex.py",
+          "symbol": "CodexConnection.set_approval_mode (App binding only)"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteCodexFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:wsl:codex:approval_respond",
+      "environment": "wsl",
+      "agent": "codex",
+      "capability": "approval_respond",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/codex/adapter.go",
+          "symbol": "session.approve"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteCodexFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:wsl:codex:delete",
+      "environment": "wsl",
+      "agent": "codex",
+      "capability": "delete",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/codex/adapter.go",
+          "symbol": "session.delete"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteCodexFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:wsl:codex:attachments",
+      "environment": "wsl",
+      "agent": "codex",
+      "capability": "attachments",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/codex/adapter.go",
+          "symbol": "adapterInput"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteCodexFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:wsl:hermes:create",
+      "environment": "wsl",
+      "agent": "hermes",
+      "capability": "create",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/hermes/adapter.go",
+          "symbol": "(*Adapter).Create"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/hermes.go",
+          "symbol": "NewRemoteHermesFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:wsl:hermes:send",
+      "environment": "wsl",
+      "agent": "hermes",
+      "capability": "send",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/hermes/adapter.go",
+          "symbol": "handleSend"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/hermes.go",
+          "symbol": "NewRemoteHermesFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:wsl:hermes:tools",
+      "environment": "wsl",
+      "agent": "hermes",
+      "capability": "tools",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/hermes/adapter.go",
+          "symbol": "handleCommands"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/hermes.go",
+          "symbol": "NewRemoteHermesFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:wsl:hermes:interrupt",
+      "environment": "wsl",
+      "agent": "hermes",
+      "capability": "interrupt",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/hermes/adapter.go",
+          "symbol": "handleInterrupt"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/hermes.go",
+          "symbol": "NewRemoteHermesFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:wsl:hermes:resume",
+      "environment": "wsl",
+      "agent": "hermes",
+      "capability": "resume",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/hermes/adapter.go",
+          "symbol": "(*Adapter).Spawn"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/hermes.go",
+          "symbol": "NewRemoteHermesFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:wsl:hermes:history",
+      "environment": "wsl",
+      "agent": "hermes",
+      "capability": "history",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/hermes/adapter.go",
+          "symbol": "handleHistoryPage"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/hermes.go",
+          "symbol": "NewRemoteHermesFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:wsl:hermes:models",
+      "environment": "wsl",
+      "agent": "hermes",
+      "capability": "models",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/hermes/adapter.go",
+          "symbol": "handleModels"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/hermes.go",
+          "symbol": "NewRemoteHermesFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:wsl:hermes:model_read",
+      "environment": "wsl",
+      "agent": "hermes",
+      "capability": "model_read",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/hermes/adapter.go",
+          "symbol": "handleModelRead"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/hermes.go",
+          "symbol": "NewRemoteHermesFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:wsl:hermes:model_set",
+      "environment": "wsl",
+      "agent": "hermes",
+      "capability": "model_set",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/hermes/adapter.go",
+          "symbol": "handleModelSet"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/hermes.go",
+          "symbol": "NewRemoteHermesFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:wsl:hermes:effort_set",
+      "environment": "wsl",
+      "agent": "hermes",
+      "capability": "effort_set",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/hermes/adapter.go",
+          "symbol": "handleReasoningSet"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/hermes.go",
+          "symbol": "NewRemoteHermesFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:wsl:hermes:approval_read",
+      "environment": "wsl",
+      "agent": "hermes",
+      "capability": "approval_read",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/hermes/adapter.go",
+          "symbol": "handleApprovalRead"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/hermes.go",
+          "symbol": "NewRemoteHermesFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:wsl:hermes:approval_set",
+      "environment": "wsl",
+      "agent": "hermes",
+      "capability": "approval_set",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/hermes/adapter.go",
+          "symbol": "handleApprovalSet"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/hermes.go",
+          "symbol": "NewRemoteHermesFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:wsl:hermes:approval_respond",
+      "environment": "wsl",
+      "agent": "hermes",
+      "capability": "approval_respond",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/hermes/adapter.go",
+          "symbol": "handleApprove"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/hermes.go",
+          "symbol": "NewRemoteHermesFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:wsl:hermes:delete",
+      "environment": "wsl",
+      "agent": "hermes",
+      "capability": "delete",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/hermes/adapter.go",
+          "symbol": "handleDelete"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/hermes.go",
+          "symbol": "NewRemoteHermesFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:wsl:hermes:attachments",
+      "environment": "wsl",
+      "agent": "hermes",
+      "capability": "attachments",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/hermes/adapter.go",
+          "symbol": "handleSend"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/hermes.go",
+          "symbol": "NewRemoteHermesFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:wsl:grok:create",
+      "environment": "wsl",
+      "agent": "grok",
+      "capability": "create",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/grok/runtime.go",
+          "symbol": "(*Adapter).Create"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteGrokFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:wsl:grok:send",
+      "environment": "wsl",
+      "agent": "grok",
+      "capability": "send",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/grok/runtime.go",
+          "symbol": "handleSend"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteGrokFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:wsl:grok:tools",
+      "environment": "wsl",
+      "agent": "grok",
+      "capability": "tools",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/grok/runtime.go",
+          "symbol": "session.commands"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteGrokFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:wsl:grok:interrupt",
+      "environment": "wsl",
+      "agent": "grok",
+      "capability": "interrupt",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/grok/runtime.go",
+          "symbol": "handleInterrupt"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteGrokFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:wsl:grok:resume",
+      "environment": "wsl",
+      "agent": "grok",
+      "capability": "resume",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/grok/runtime.go",
+          "symbol": "(*Adapter).Spawn"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteGrokFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:wsl:grok:history",
+      "environment": "wsl",
+      "agent": "grok",
+      "capability": "history",
+      "status": "BASELINE_UNSUPPORTED",
+      "reason": "The current adapter has no native command/query path for this capability.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "connectors/grok/connection.py",
+          "symbol": "GrokConnection.load_native_history_page"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteGrokFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:wsl:grok:models",
+      "environment": "wsl",
+      "agent": "grok",
+      "capability": "models",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/grok/runtime.go",
+          "symbol": "session.models"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteGrokFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:wsl:grok:model_read",
+      "environment": "wsl",
+      "agent": "grok",
+      "capability": "model_read",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/grok/runtime.go",
+          "symbol": "session.model.read"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteGrokFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:wsl:grok:model_set",
+      "environment": "wsl",
+      "agent": "grok",
+      "capability": "model_set",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/grok/runtime.go",
+          "symbol": "handleModelSet"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteGrokFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:wsl:grok:effort_set",
+      "environment": "wsl",
+      "agent": "grok",
+      "capability": "effort_set",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/grok/runtime.go",
+          "symbol": "handleReasoningSet"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteGrokFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:wsl:grok:approval_read",
+      "environment": "wsl",
+      "agent": "grok",
+      "capability": "approval_read",
+      "status": "BASELINE_UNSUPPORTED",
+      "reason": "The current adapter has no native command/query path for this capability.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "connectors/grok/connection.py",
+          "symbol": "GrokConnection.get_approval_mode (App binding only)"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteGrokFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:wsl:grok:approval_set",
+      "environment": "wsl",
+      "agent": "grok",
+      "capability": "approval_set",
+      "status": "BASELINE_UNSUPPORTED",
+      "reason": "The current adapter has no native command/query path for this capability.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "connectors/grok/connection.py",
+          "symbol": "GrokConnection.set_approval_mode (App binding only)"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteGrokFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:wsl:grok:approval_respond",
+      "environment": "wsl",
+      "agent": "grok",
+      "capability": "approval_respond",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/grok/runtime.go",
+          "symbol": "handleApprove"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteGrokFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:wsl:grok:delete",
+      "environment": "wsl",
+      "agent": "grok",
+      "capability": "delete",
+      "status": "BASELINE_UNSUPPORTED",
+      "reason": "The current adapter has no native command/query path for this capability.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/grok/runtime.go",
+          "symbol": "unsupported session.delete"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteGrokFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:wsl:grok:attachments",
+      "environment": "wsl",
+      "agent": "grok",
+      "capability": "attachments",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/grok/runtime.go",
+          "symbol": "executePrompt"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteGrokFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:debian_ssh:codex:create",
+      "environment": "debian_ssh",
+      "agent": "codex",
+      "capability": "create",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/codex/adapter.go",
+          "symbol": "(*Adapter).Create"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteCodexFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:debian_ssh:codex:send",
+      "environment": "debian_ssh",
+      "agent": "codex",
+      "capability": "send",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/codex/adapter.go",
+          "symbol": "session.send"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteCodexFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:debian_ssh:codex:tools",
+      "environment": "debian_ssh",
+      "agent": "codex",
+      "capability": "tools",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "backend/src/astrorder/native/codex.py",
+          "symbol": "CodexConnection.commands"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteCodexFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:debian_ssh:codex:interrupt",
+      "environment": "debian_ssh",
+      "agent": "codex",
+      "capability": "interrupt",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/codex/adapter.go",
+          "symbol": "session.interrupt"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteCodexFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:debian_ssh:codex:resume",
+      "environment": "debian_ssh",
+      "agent": "codex",
+      "capability": "resume",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/codex/adapter.go",
+          "symbol": "(*Adapter).Spawn"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteCodexFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:debian_ssh:codex:history",
+      "environment": "debian_ssh",
+      "agent": "codex",
+      "capability": "history",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/codex/adapter.go",
+          "symbol": "session.history_page"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteCodexFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:debian_ssh:codex:models",
+      "environment": "debian_ssh",
+      "agent": "codex",
+      "capability": "models",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/codex/adapter.go",
+          "symbol": "session.models"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteCodexFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:debian_ssh:codex:model_read",
+      "environment": "debian_ssh",
+      "agent": "codex",
+      "capability": "model_read",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "backend/src/astrorder/native/codex.py",
+          "symbol": "CodexConnection.model"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteCodexFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:debian_ssh:codex:model_set",
+      "environment": "debian_ssh",
+      "agent": "codex",
+      "capability": "model_set",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "backend/src/astrorder/daemon/clients/codex/control.py",
+          "symbol": "set_model"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteCodexFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:debian_ssh:codex:effort_set",
+      "environment": "debian_ssh",
+      "agent": "codex",
+      "capability": "effort_set",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "backend/src/astrorder/daemon/clients/codex/control.py",
+          "symbol": "set_effort"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteCodexFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:debian_ssh:codex:approval_read",
+      "environment": "debian_ssh",
+      "agent": "codex",
+      "capability": "approval_read",
+      "status": "BASELINE_UNSUPPORTED",
+      "reason": "The current adapter has no native command/query path for this capability.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "backend/src/astrorder/native/codex.py",
+          "symbol": "CodexConnection.get_approval_mode (App binding only)"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteCodexFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:debian_ssh:codex:approval_set",
+      "environment": "debian_ssh",
+      "agent": "codex",
+      "capability": "approval_set",
+      "status": "BASELINE_UNSUPPORTED",
+      "reason": "The current adapter has no native command/query path for this capability.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "backend/src/astrorder/native/codex.py",
+          "symbol": "CodexConnection.set_approval_mode (App binding only)"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteCodexFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:debian_ssh:codex:approval_respond",
+      "environment": "debian_ssh",
+      "agent": "codex",
+      "capability": "approval_respond",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/codex/adapter.go",
+          "symbol": "session.approve"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteCodexFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:debian_ssh:codex:delete",
+      "environment": "debian_ssh",
+      "agent": "codex",
+      "capability": "delete",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/codex/adapter.go",
+          "symbol": "session.delete"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteCodexFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:debian_ssh:codex:attachments",
+      "environment": "debian_ssh",
+      "agent": "codex",
+      "capability": "attachments",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/codex/adapter.go",
+          "symbol": "adapterInput"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteCodexFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:debian_ssh:hermes:create",
+      "environment": "debian_ssh",
+      "agent": "hermes",
+      "capability": "create",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/hermes/adapter.go",
+          "symbol": "(*Adapter).Create"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/hermes.go",
+          "symbol": "NewRemoteHermesFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:debian_ssh:hermes:send",
+      "environment": "debian_ssh",
+      "agent": "hermes",
+      "capability": "send",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/hermes/adapter.go",
+          "symbol": "handleSend"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/hermes.go",
+          "symbol": "NewRemoteHermesFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:debian_ssh:hermes:tools",
+      "environment": "debian_ssh",
+      "agent": "hermes",
+      "capability": "tools",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/hermes/adapter.go",
+          "symbol": "handleCommands"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/hermes.go",
+          "symbol": "NewRemoteHermesFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:debian_ssh:hermes:interrupt",
+      "environment": "debian_ssh",
+      "agent": "hermes",
+      "capability": "interrupt",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/hermes/adapter.go",
+          "symbol": "handleInterrupt"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/hermes.go",
+          "symbol": "NewRemoteHermesFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:debian_ssh:hermes:resume",
+      "environment": "debian_ssh",
+      "agent": "hermes",
+      "capability": "resume",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/hermes/adapter.go",
+          "symbol": "(*Adapter).Spawn"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/hermes.go",
+          "symbol": "NewRemoteHermesFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:debian_ssh:hermes:history",
+      "environment": "debian_ssh",
+      "agent": "hermes",
+      "capability": "history",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/hermes/adapter.go",
+          "symbol": "handleHistoryPage"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/hermes.go",
+          "symbol": "NewRemoteHermesFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:debian_ssh:hermes:models",
+      "environment": "debian_ssh",
+      "agent": "hermes",
+      "capability": "models",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/hermes/adapter.go",
+          "symbol": "handleModels"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/hermes.go",
+          "symbol": "NewRemoteHermesFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:debian_ssh:hermes:model_read",
+      "environment": "debian_ssh",
+      "agent": "hermes",
+      "capability": "model_read",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/hermes/adapter.go",
+          "symbol": "handleModelRead"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/hermes.go",
+          "symbol": "NewRemoteHermesFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:debian_ssh:hermes:model_set",
+      "environment": "debian_ssh",
+      "agent": "hermes",
+      "capability": "model_set",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/hermes/adapter.go",
+          "symbol": "handleModelSet"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/hermes.go",
+          "symbol": "NewRemoteHermesFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:debian_ssh:hermes:effort_set",
+      "environment": "debian_ssh",
+      "agent": "hermes",
+      "capability": "effort_set",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/hermes/adapter.go",
+          "symbol": "handleReasoningSet"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/hermes.go",
+          "symbol": "NewRemoteHermesFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:debian_ssh:hermes:approval_read",
+      "environment": "debian_ssh",
+      "agent": "hermes",
+      "capability": "approval_read",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/hermes/adapter.go",
+          "symbol": "handleApprovalRead"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/hermes.go",
+          "symbol": "NewRemoteHermesFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:debian_ssh:hermes:approval_set",
+      "environment": "debian_ssh",
+      "agent": "hermes",
+      "capability": "approval_set",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/hermes/adapter.go",
+          "symbol": "handleApprovalSet"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/hermes.go",
+          "symbol": "NewRemoteHermesFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:debian_ssh:hermes:approval_respond",
+      "environment": "debian_ssh",
+      "agent": "hermes",
+      "capability": "approval_respond",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/hermes/adapter.go",
+          "symbol": "handleApprove"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/hermes.go",
+          "symbol": "NewRemoteHermesFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:debian_ssh:hermes:delete",
+      "environment": "debian_ssh",
+      "agent": "hermes",
+      "capability": "delete",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/hermes/adapter.go",
+          "symbol": "handleDelete"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/hermes.go",
+          "symbol": "NewRemoteHermesFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:debian_ssh:hermes:attachments",
+      "environment": "debian_ssh",
+      "agent": "hermes",
+      "capability": "attachments",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/hermes/adapter.go",
+          "symbol": "handleSend"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/hermes.go",
+          "symbol": "NewRemoteHermesFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:debian_ssh:grok:create",
+      "environment": "debian_ssh",
+      "agent": "grok",
+      "capability": "create",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/grok/runtime.go",
+          "symbol": "(*Adapter).Create"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteGrokFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:debian_ssh:grok:send",
+      "environment": "debian_ssh",
+      "agent": "grok",
+      "capability": "send",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/grok/runtime.go",
+          "symbol": "handleSend"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteGrokFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:debian_ssh:grok:tools",
+      "environment": "debian_ssh",
+      "agent": "grok",
+      "capability": "tools",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/grok/runtime.go",
+          "symbol": "session.commands"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteGrokFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:debian_ssh:grok:interrupt",
+      "environment": "debian_ssh",
+      "agent": "grok",
+      "capability": "interrupt",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/grok/runtime.go",
+          "symbol": "handleInterrupt"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteGrokFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:debian_ssh:grok:resume",
+      "environment": "debian_ssh",
+      "agent": "grok",
+      "capability": "resume",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/grok/runtime.go",
+          "symbol": "(*Adapter).Spawn"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteGrokFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:debian_ssh:grok:history",
+      "environment": "debian_ssh",
+      "agent": "grok",
+      "capability": "history",
+      "status": "BASELINE_UNSUPPORTED",
+      "reason": "The current adapter has no native command/query path for this capability.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "connectors/grok/connection.py",
+          "symbol": "GrokConnection.load_native_history_page"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteGrokFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:debian_ssh:grok:models",
+      "environment": "debian_ssh",
+      "agent": "grok",
+      "capability": "models",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/grok/runtime.go",
+          "symbol": "session.models"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteGrokFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:debian_ssh:grok:model_read",
+      "environment": "debian_ssh",
+      "agent": "grok",
+      "capability": "model_read",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/grok/runtime.go",
+          "symbol": "session.model.read"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteGrokFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:debian_ssh:grok:model_set",
+      "environment": "debian_ssh",
+      "agent": "grok",
+      "capability": "model_set",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/grok/runtime.go",
+          "symbol": "handleModelSet"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteGrokFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:debian_ssh:grok:effort_set",
+      "environment": "debian_ssh",
+      "agent": "grok",
+      "capability": "effort_set",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/grok/runtime.go",
+          "symbol": "handleReasoningSet"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteGrokFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:debian_ssh:grok:approval_read",
+      "environment": "debian_ssh",
+      "agent": "grok",
+      "capability": "approval_read",
+      "status": "BASELINE_UNSUPPORTED",
+      "reason": "The current adapter has no native command/query path for this capability.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "connectors/grok/connection.py",
+          "symbol": "GrokConnection.get_approval_mode (App binding only)"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteGrokFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:debian_ssh:grok:approval_set",
+      "environment": "debian_ssh",
+      "agent": "grok",
+      "capability": "approval_set",
+      "status": "BASELINE_UNSUPPORTED",
+      "reason": "The current adapter has no native command/query path for this capability.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "connectors/grok/connection.py",
+          "symbol": "GrokConnection.set_approval_mode (App binding only)"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteGrokFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:debian_ssh:grok:approval_respond",
+      "environment": "debian_ssh",
+      "agent": "grok",
+      "capability": "approval_respond",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/grok/runtime.go",
+          "symbol": "handleApprove"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteGrokFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:debian_ssh:grok:delete",
+      "environment": "debian_ssh",
+      "agent": "grok",
+      "capability": "delete",
+      "status": "BASELINE_UNSUPPORTED",
+      "reason": "The current adapter has no native command/query path for this capability.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/grok/runtime.go",
+          "symbol": "unsupported session.delete"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteGrokFactory"
+        }
+      ]
+    },
+    {
+      "id": "native:debian_ssh:grok:attachments",
+      "environment": "debian_ssh",
+      "agent": "grok",
+      "capability": "attachments",
+      "status": "SUPPORTED_UNVERIFIED",
+      "reason": "Source and typed fixture coverage exists; no true Agent/environment verification was performed in this tranche.",
+      "auth": "daemon.handshake shared-secret authenticated control channel",
+      "query_binding": "Exact environment connection, agent_type, agent_id, and native session_id are retained; no title/text inference.",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/grok/runtime.go",
+          "symbol": "executePrompt"
+        },
+        {
+          "path": "session-daemon-go/internal/runtime/remote/factories.go",
+          "symbol": "NewRemoteGrokFactory"
+        }
+      ]
+    }
+  ],
+  "transport_capabilities": [
+    {
+      "id": "native:transport:pty",
+      "name": "pty",
+      "status": "SUPPORTED_UNVERIFIED",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/runtime/pty/runtime.go",
+          "symbol": "(*Runtime).Spawn/Command"
+        }
+      ]
+    },
+    {
+      "id": "native:transport:connector",
+      "name": "connector",
+      "status": "SUPPORTED_UNVERIFIED",
+      "source_proof": [
+        {
+          "path": "session-daemon-go/internal/protocol/connector.go",
+          "symbol": "(*Daemon).serveConnector"
+        }
+      ]
+    }
+  ]
+}

@@ -3,6 +3,7 @@ package modelconfig
 import (
 	"context"
 	"fmt"
+	"os/exec"
 	"runtime"
 	"sync"
 )
@@ -50,11 +51,13 @@ func init() {
 
 // Config specifies the runtime configuration for the model_config service.
 type Config struct {
-	Credentials  CredentialStore
-	AllowedRoots []string
-	Busy         func() bool
-	BusyFor      func(string) bool
-	Reload       func(ctx context.Context, agentType string) error
+	Credentials         CredentialStore
+	AllowedRoots        []string
+	Busy                func() bool
+	BusyFor             func(string) bool
+	Reload              func(ctx context.Context, agentType string) error
+	RemoteCommandRunner func(ctx context.Context, name string, args ...string) *exec.Cmd
+	HelperAssetsDir     string
 }
 
 // Set must return a restoration callback even after a partial failed write.

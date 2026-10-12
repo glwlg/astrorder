@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"github.com/coder/websocket"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -54,7 +55,7 @@ func TestConfiguredModelHomeRoutesOverAuthenticatedWebSocket(t *testing.T) {
 		t.Fatal(result)
 	}
 	result := call(map[string]any{"action": "model_config.plan", "request_id": "plan", "target": map[string]any{"kind": "local"}})
-	if result["action"] != "model_config.plan.result" || result["result"].(map[string]any)["_home"] != home {
+	if result["action"] != "model_config.plan.result" || result["result"].(map[string]any)["_home"] != filepath.Clean(home) {
 		t.Fatal("configured home not routed", result)
 	}
 }

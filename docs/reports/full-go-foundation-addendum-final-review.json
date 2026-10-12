@@ -1,0 +1,151 @@
+{
+  "artifact": "full-go-foundation-addendum-final-review",
+  "generated_at": "2026-10-09T07:57:12+08:00",
+  "repository": "P:/workspace/glwlg/ai/astrorder",
+  "branch": "master",
+  "head": "ff32f947024b1840b939ebfb8e58e45886d34b47",
+  "origin_master": "ff32f947024b1840b939ebfb8e58e45886d34b47",
+  "review_kind": "third independent bounded read-only completion review",
+  "review_method": "requesting-code-review checklist applied directly by the independent reviewer; no additional agent, auto-fix, commit, or repository edit",
+  "scope": [
+    "app-server-go/internal/preferences/preferences.go PREF-TX-002 complete-document readback fix",
+    "app-server-go/internal/preferences/trailing_json_test.go regression coverage",
+    "focused native-Windows preferences test and vet",
+    "focused WSL Linux preferences race test using .runtime/full-go-linux/go/bin/go with explicit GOMODCACHE, GOCACHE, and GOTMPDIR"
+  ],
+  "excluded_scope": [
+    "P2 same-workspace gRPC ledger/query worker NEW files",
+    "accepted shutdown stats End completion and bounded GracefulStop work",
+    "native payload and blocked-send work",
+    "acceptance portability and PREF-READ-001, already reviewed in the preceding bounded rereview",
+    "App composition, architecture, route mounting, ownership transfer, full migration, release, installation, and production behavior"
+  ],
+  "passed": true,
+  "decision": "PASS_BOUNDED_PREF_TX_002_FIX",
+  "decision_reason": "PREF-TX-002 is resolved in the pinned snapshot. Stored preference values are decoded with UseNumber and then subjected to a second decode that must return io.EOF, so valid-prefix/trailing-content documents fail readback. The new actual-SQLite regression covers '{} {}', '{} trailing', and 'null false'; both Apply and Import attempt three writes and assert that the count remains zero after readback failure. Native Windows tests/vet and the bounded WSL race run all completed with exit code 0. No security or logic blocker was found in this two-file delta.",
+  "issues": [],
+  "resolved_findings": [
+    {
+      "id": "PREF-TX-002",
+      "severity": "medium",
+      "status": "RESOLVED",
+      "paths": [
+        "app-server-go/internal/preferences/preferences.go:60",
+        "app-server-go/internal/preferences/trailing_json_test.go:11"
+      ],
+      "proof": [
+        "readPreferences retains json.Decoder.UseNumber, preserving the previously reviewed large-integer behavior.",
+        "After the first successful Decode, preferences.go:66-69 performs a second Decode and accepts only io.EOF. A second JSON value, trailing non-whitespace text, or another token returns an error.",
+        "The error is returned from readPreferences through the Store.WithTx callback; Store.WithTx rolls back whenever its callback returns an error.",
+        "TestMalformedStoredJSONRollsBackWholePreferenceWrite opens a real temporary SQLite Store and inserts malformed text into an unrelated shared-table row.",
+        "For each of '{} {}', '{} trailing', and 'null false', the regression exercises Apply and Import with session_pins:one, session_pins:two, and pinned_projects, requires an error, and asserts that the count of all three candidate rows is zero.",
+        "The focused regression passed independently on native Windows and under WSL with the race detector."
+      ]
+    }
+  ],
+  "red_green_evidence": {
+    "historical_red": {
+      "source": "coordinator completion request in C:/Users/luwei/AppData/Local/hermes/cache/scratch/full-go-foundation-addendum-final-review-task.md",
+      "result": "Before the second-decode fix, the three candidate writes committed for Apply and Import against the trailing-document fixtures.",
+      "independent_reproduction": false,
+      "note": "The reviewer did not edit or revert repository code to recreate the historical RED; this pass independently inspected and executed only the completed snapshot."
+    },
+    "current_green": {
+      "independently_verified": true,
+      "result": "All package and focused rollback checks passed on Windows and Linux race builds with actual exit code 0."
+    }
+  },
+  "quality_review": {
+    "security_concerns": [],
+    "logic_errors": [],
+    "non_blocking_suggestions": [],
+    "checks": [
+      "No hardcoded secret or credential was introduced by the scoped delta.",
+      "No shell execution, unsafe deserialization, dynamic SQL construction, path handling, debug output, or commented-out code was introduced.",
+      "The production change is limited to complete-document validation and preserves existing legacy-value decoding semantics.",
+      "The regression uses parameter binding for the malformed SQLite value and verifies transaction effects directly in the database."
+    ]
+  },
+  "verified_commands": [
+    {
+      "command": "C:/Users/luwei/.codex/tools/go1.26.4.windows-amd64/go/bin/go.exe test ./internal/preferences -count=1 -timeout=60s",
+      "cwd": "P:/workspace/glwlg/ai/astrorder/app-server-go",
+      "exit_code": 0,
+      "result": "ok astrorder.dev/app-server/internal/preferences 0.948s"
+    },
+    {
+      "command": "C:/Users/luwei/.codex/tools/go1.26.4.windows-amd64/go/bin/go.exe vet ./internal/preferences",
+      "cwd": "P:/workspace/glwlg/ai/astrorder/app-server-go",
+      "exit_code": 0,
+      "result": "PASS; no diagnostics"
+    },
+    {
+      "command": "wsl.exe -e bash -lc 'cd /mnt/p/workspace/glwlg/ai/astrorder/app-server-go && GOMODCACHE=/mnt/p/workspace/glwlg/ai/astrorder/.runtime/full-go-linux/modcache GOCACHE=/mnt/p/workspace/glwlg/ai/astrorder/.runtime/full-go-linux/race-cache GOTMPDIR=/mnt/p/workspace/glwlg/ai/astrorder/.runtime/full-go-linux/race-tmp ../.runtime/full-go-linux/go/bin/go test -race ./internal/preferences -count=1 -timeout=60s'",
+      "cwd": "P:/workspace/glwlg/ai/astrorder",
+      "outer_timeout_seconds": 180,
+      "exit_code": 0,
+      "result": "ok astrorder.dev/app-server/internal/preferences 9.700s; the process completed normally, with no outer timeout 124 ambiguity"
+    },
+    {
+      "command": "C:/Users/luwei/.codex/tools/go1.26.4.windows-amd64/go/bin/go.exe test ./internal/preferences -run '^TestMalformedStoredJSONRollsBackWholePreferenceWrite$' -count=1 -v -timeout=60s",
+      "cwd": "P:/workspace/glwlg/ai/astrorder/app-server-go",
+      "exit_code": 0,
+      "result": "PASS; '{} {}', '{} trailing', and 'null false' subtests passed; package 0.652s"
+    },
+    {
+      "command": "wsl.exe -e bash -lc 'cd /mnt/p/workspace/glwlg/ai/astrorder/app-server-go && GOMODCACHE=/mnt/p/workspace/glwlg/ai/astrorder/.runtime/full-go-linux/modcache GOCACHE=/mnt/p/workspace/glwlg/ai/astrorder/.runtime/full-go-linux/race-cache GOTMPDIR=/mnt/p/workspace/glwlg/ai/astrorder/.runtime/full-go-linux/race-tmp ../.runtime/full-go-linux/go/bin/go test -race ./internal/preferences -run \"^TestMalformedStoredJSONRollsBackWholePreferenceWrite$\" -count=1 -v -timeout=60s'",
+      "cwd": "P:/workspace/glwlg/ai/astrorder",
+      "outer_timeout_seconds": 180,
+      "exit_code": 0,
+      "result": "PASS; all three malformed-document subtests passed under race; package 3.112s"
+    },
+    {
+      "command": "git identity/status and initial/final SHA-256 pins",
+      "cwd": "P:/workspace/glwlg/ai/astrorder",
+      "exit_code": 0,
+      "result": "branch master; HEAD and origin/master both ff32f947024b1840b939ebfb8e58e45886d34b47; scoped source hashes remained stable; preference files remain untracked worktree content"
+    }
+  ],
+  "hashes": {
+    "scoped_fix": {
+      "app-server-go/internal/preferences/preferences.go": "dbeb333dbb171de66bf08de0051e7c49aa6774d28f79219f5590694ed07f3539",
+      "app-server-go/internal/preferences/trailing_json_test.go": "87c09dace5c49bba3bb669c40795cde98d80669ba477046ae34958d66f6b32cc"
+    },
+    "unchanged_preference_context": {
+      "app-server-go/internal/preferences/http.go": "063d54df18bd6944c108e4fbbeb5265d8a5bf1752483dbc74fab90fa2dbbd0b3",
+      "app-server-go/internal/preferences/http_test.go": "e662bfdb8152ec9402bc89220643889209e2f74278d28d71cf645bd99e16a13a",
+      "app-server-go/internal/preferences/legacy_read_test.go": "739db096a13e5f66d73dc4ede70a85fca32dbc220822716dfeba4d2f83c52d77",
+      "app-server-go/internal/preferences/preferences_test.go": "1d30bb5883805c7769e91c5a788d6372bfa16772eb2480dfa1c978450e25d170"
+    },
+    "preserved_prior_reviews": {
+      "C:/Users/luwei/AppData/Local/hermes/cache/scratch/full-go-foundation-addendum-review.json": "342decff96af209b254a33a2a99ecb99f1c1371d39af5425ddb2cbbc60abdbc8",
+      "C:/Users/luwei/AppData/Local/hermes/cache/scratch/full-go-foundation-addendum-review.md": "ec9b2f4e8d1333cd0a49074878ee112d99ab7a968b50e42a6833b876e3d81ac0",
+      "C:/Users/luwei/AppData/Local/hermes/cache/scratch/full-go-foundation-addendum-rereview.json": "cb4a5cfca62629fef5c5ada2946cb286cbf01c1f20c9f856bfeda89e675516b0",
+      "C:/Users/luwei/AppData/Local/hermes/cache/scratch/full-go-foundation-addendum-rereview.md": "702e3e9968334a1e7e1ae9d4b2c2aa22fddf86ba43aae172b9be8291fa7a98ea"
+    },
+    "retained_foundation_report": {
+      "docs/reports/full-go-foundation-final-review.json": "847b336d1f96134bbbc5ff452805f85e7ae711cd7fcc1e136387dc92e1a36888",
+      "docs/reports/full-go-foundation-final-review.md": "c52f33f493ad87754cf5615b3047203877505a61c8d868e34044689715c8b3e5"
+    }
+  },
+  "source_changed_during_review": false,
+  "remaining_stage_boundaries": [
+    "This PASS closes only PREF-TX-002 in the bounded preferences domain snapshot.",
+    "The preferences handler remains unmounted and its key/route ownership remains with the Python stage; those known boundaries were not reopened or cleared here.",
+    "No claim is made about the concurrently active P2 gRPC ledger/query files, shutdown changes, native payload work, blocked-send work, full migration, release, installation, deployment, or production readiness."
+  ],
+  "safety": {
+    "repository_edits": false,
+    "commits_pushes_or_stashes": false,
+    "production_or_kernel_contact": false,
+    "daemon_or_service_contact_or_restart": false,
+    "real_credentials": false,
+    "real_database_or_chat": false,
+    "profile_operations": false,
+    "additional_agents": false,
+    "writes": [
+      "C:/Users/luwei/AppData/Local/hermes/cache/scratch/full-go-foundation-addendum-final-review.json",
+      "C:/Users/luwei/AppData/Local/hermes/cache/scratch/full-go-foundation-addendum-final-review.md"
+    ]
+  }
+}

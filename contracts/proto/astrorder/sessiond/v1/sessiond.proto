@@ -1,0 +1,1285 @@
+syntax = "proto3";
+
+package astrorder.sessiond.v1;
+
+option go_package = "astrorder.dev/contracts/gen/go/astrorder/sessiond/v1;sessiondv1";
+
+// ContractLimit fixes compatibility and transport boundaries for every client.
+enum ContractLimit {
+  CONTRACT_LIMIT_UNSPECIFIED = 0;
+  CONTRACT_LIMIT_MAX_COMPAT_BUSINESS_BYTES = 16000000;
+  CONTRACT_LIMIT_MAX_GRPC_WIRE_BYTES = 33554432;
+  CONTRACT_LIMIT_MAX_TERMINAL_INPUT_BYTES = 65536;
+  CONTRACT_LIMIT_MAX_TERMINAL_CHUNK_BYTES = 262144;
+}
+
+enum CanonicalizationVersion {
+  CANONICALIZATION_VERSION_UNSPECIFIED = 0;
+  CANONICALIZATION_VERSION_LEGACY_JSON_V1 = 1;
+  CANONICALIZATION_VERSION_ASTRORDER_OPERATION_V1 = 2;
+}
+
+enum EventStreamVersion {
+  EVENT_STREAM_VERSION_UNSPECIFIED = 0;
+  EVENT_STREAM_VERSION_V1 = 1;
+}
+
+enum NullValue {
+  NULL_VALUE_UNSPECIFIED = 0;
+  NULL_VALUE_NULL = 1;
+}
+
+enum RuntimeKind {
+  RUNTIME_KIND_UNSPECIFIED = 0;
+  RUNTIME_KIND_CODEX = 1;
+  RUNTIME_KIND_PTY = 2;
+  RUNTIME_KIND_HERMES = 3;
+  RUNTIME_KIND_SSH_HERMES = 4;
+  RUNTIME_KIND_CODEX_SSH = 5;
+  RUNTIME_KIND_GROK = 6;
+  RUNTIME_KIND_GROK_SSH = 7;
+}
+
+enum SessionStatus {
+  SESSION_STATUS_UNSPECIFIED = 0;
+  SESSION_STATUS_IDLE = 1;
+  SESSION_STATUS_RUNNING = 2;
+  SESSION_STATUS_WAITING_APPROVAL = 3;
+  SESSION_STATUS_ERROR = 4;
+}
+
+enum ObservedActiveStatus {
+  OBSERVED_ACTIVE_STATUS_UNSPECIFIED = 0;
+  OBSERVED_ACTIVE_STATUS_RUNNING = 1;
+  OBSERVED_ACTIVE_STATUS_WAITING_APPROVAL = 2;
+}
+
+enum OperationState {
+  OPERATION_STATE_UNSPECIFIED = 0;
+  OPERATION_STATE_MISSING = 1;
+  OPERATION_STATE_PENDING = 2;
+  OPERATION_STATE_UNCERTAIN = 3;
+  OPERATION_STATE_COMPLETED = 4;
+}
+
+enum ErrorKind {
+  ERROR_KIND_UNSPECIFIED = 0;
+  ERROR_KIND_INVALID_ARGUMENT = 1;
+  ERROR_KIND_UNAUTHENTICATED = 2;
+  ERROR_KIND_PERMISSION_DENIED = 3;
+  ERROR_KIND_NOT_FOUND = 4;
+  ERROR_KIND_FAILED_PRECONDITION = 5;
+  ERROR_KIND_RESOURCE_EXHAUSTED = 6;
+  ERROR_KIND_UNAVAILABLE = 7;
+  ERROR_KIND_DEADLINE = 8;
+  ERROR_KIND_INTERNAL = 9;
+  ERROR_KIND_CONFLICT = 10;
+  ERROR_KIND_UNSUPPORTED = 11;
+}
+
+enum ApprovalDecision {
+  APPROVAL_DECISION_UNSPECIFIED = 0;
+  APPROVAL_DECISION_ACCEPT = 1;
+  APPROVAL_DECISION_DECLINE = 2;
+  APPROVAL_DECISION_CANCEL = 3;
+  APPROVAL_DECISION_ACCEPT_FOR_SESSION = 4;
+}
+
+enum ReviewDelivery {
+  REVIEW_DELIVERY_UNSPECIFIED = 0;
+  REVIEW_DELIVERY_INLINE = 1;
+  REVIEW_DELIVERY_DETACHED = 2;
+}
+
+enum ResyncReason {
+  RESYNC_REASON_UNSPECIFIED = 0;
+  RESYNC_REASON_CURSOR_EXPIRED = 1;
+  RESYNC_REASON_DAEMON_EPOCH_CHANGED = 2;
+  RESYNC_REASON_UNKNOWN_SESSION = 3;
+}
+
+enum TerminalExitCause {
+  TERMINAL_EXIT_CAUSE_UNSPECIFIED = 0;
+  TERMINAL_EXIT_CAUSE_NATIVE_EXIT = 1;
+  TERMINAL_EXIT_CAUSE_EXPLICIT_CLOSE = 2;
+  TERMINAL_EXIT_CAUSE_TRANSPORT_FAILURE = 3;
+}
+
+enum ModelConfigTargetSupport {
+  MODEL_CONFIG_TARGET_SUPPORT_UNSPECIFIED = 0;
+  MODEL_CONFIG_TARGET_SUPPORT_IMPLEMENTED = 1;
+  MODEL_CONFIG_TARGET_SUPPORT_UNSUPPORTED_UNTIL_GO_EXECUTOR = 2;
+}
+
+enum ManagedFile {
+  MANAGED_FILE_UNSPECIFIED = 0;
+  MANAGED_FILE_CODEX_CONFIG = 1;
+  MANAGED_FILE_CODEX_CATALOG = 2;
+  MANAGED_FILE_CODEX_MAGPIE_CATALOG = 3;
+  MANAGED_FILE_GROK_CONFIG = 4;
+  MANAGED_FILE_HERMES_CONFIG = 5;
+}
+
+enum ReloadAgent {
+  RELOAD_AGENT_UNSPECIFIED = 0;
+  RELOAD_AGENT_CODEX = 1;
+  RELOAD_AGENT_GROK = 2;
+  RELOAD_AGENT_HERMES = 3;
+}
+
+enum ConnectorAckState {
+  CONNECTOR_ACK_STATE_UNSPECIFIED = 0;
+  CONNECTOR_ACK_STATE_REGISTERED = 1;
+  CONNECTOR_ACK_STATE_ACCEPTED = 2;
+  CONNECTOR_ACK_STATE_REJECTED = 3;
+  CONNECTOR_ACK_STATE_OVERFLOW = 4;
+  CONNECTOR_ACK_STATE_DISCONNECTED = 5;
+  CONNECTOR_ACK_STATE_HEARTBEAT = 6;
+}
+
+enum SshLogLevel {
+  SSH_LOG_LEVEL_UNSPECIFIED = 0;
+  SSH_LOG_LEVEL_QUIET = 1;
+  SSH_LOG_LEVEL_FATAL = 2;
+  SSH_LOG_LEVEL_ERROR = 3;
+  SSH_LOG_LEVEL_INFO = 4;
+  SSH_LOG_LEVEL_VERBOSE = 5;
+  SSH_LOG_LEVEL_DEBUG = 6;
+  SSH_LOG_LEVEL_DEBUG_1 = 7;
+  SSH_LOG_LEVEL_DEBUG_2 = 8;
+  SSH_LOG_LEVEL_DEBUG_3 = 9;
+}
+
+// NativeJson is exactly one UTF-8 JSON value. Consumers must validate it with
+// json.Decoder.UseNumber (or an equivalent lossless decoder) before use.
+message NativeJson {
+  string schema = 1;
+  bytes utf8_json = 2;
+  optional string hash = 3;
+  optional string sha256 = 4;
+}
+
+message NullableString {
+  oneof state {
+    string value = 1;
+    NullValue null = 2;
+  }
+}
+
+message PresenceFixture {
+  optional string optional_text = 1;
+  optional uint32 optional_count = 2;
+  optional bool enabled = 3;
+  NullableString nullable_text = 4;
+}
+
+// InteropFixture exists only to verify the transitional Go/Python wire boundary.
+// It is not part of a service request or response.
+message InteropFixture {
+  PresenceFixture present = 1;
+  PresenceFixture absent = 2;
+  int64 signed_above_javascript = 3;
+  uint64 unsigned_value = 4;
+  NativeJson native = 5;
+  TerminalOutput terminal = 6;
+}
+
+message ExactIdentifier {
+  oneof value {
+    string text = 1;
+    sint64 signed = 2;
+    uint64 unsigned = 3;
+    string decimal = 4;
+    bytes native_json = 5;
+  }
+}
+
+message SshOptions {
+  optional bool batch_mode = 1;
+  optional uint32 connect_timeout_secs = 2;
+  optional uint32 server_alive_interval_secs = 3;
+  optional uint32 server_alive_count_max = 4;
+  optional bool tcp_keep_alive = 5;
+  optional bool compression = 6;
+  optional SshLogLevel log_level = 7;
+}
+
+// SshConnectConfig carries validated connection settings and file references.
+// It never carries key material or other secret contents.
+message SshConnectConfig {
+  string host = 1;
+  uint32 port = 2;
+  optional string user = 3;
+  optional string ssh_config_alias = 4;
+  optional string identity_file = 5;
+  optional string workspace = 6;
+  optional string hermes_executable = 7;
+  optional string codex_executable = 8;
+  optional string grok_executable = 9;
+  SshOptions options = 10;
+  optional string profile_name = 12;
+  optional string display_name = 13;
+  optional string hermes_path = 14;
+  optional string ssh_executable = 15;
+}
+
+message RuntimeTarget {
+  RuntimeKind runtime = 1;
+  optional string agent_id = 2;
+  optional string connection_id = 3;
+  optional SshConnectConfig ssh = 4;
+}
+
+message SessionRef {
+  string session_id = 1;
+  optional string agent_id = 2;
+  optional string connection_id = 3;
+}
+
+message CommandMeta {
+  string operation_id = 1;
+  optional string command_id = 2;
+  optional string trace_id = 3;
+  CanonicalizationVersion canonicalization = 4;
+}
+
+message BusinessError {
+  ErrorKind kind = 1;
+  string message = 2;
+  optional string native_code = 3;
+  bool retryable = 4;
+  optional NativeJson details = 5;
+}
+
+message NullableSessionStatus {
+  oneof state {
+    SessionStatus value = 1;
+    NullValue null = 2;
+  }
+}
+
+message NullableBusinessError {
+  oneof state {
+    BusinessError value = 1;
+    NullValue null = 2;
+  }
+}
+
+message CommandResult {
+  bool accepted = 1;
+  bool termination_confirmed = 2;
+  optional string turn_id = 3;
+  optional string title = 4;
+  optional string model = 5;
+  optional string provider = 6;
+  optional string effort = 7;
+  optional NativeJson native = 8;
+}
+
+message CommandReceipt {
+  string daemon_id = 1;
+  string operation_id = 2;
+  OperationState operation_state = 3;
+  SessionRef session = 4;
+  SessionStatus status = 5;
+  bool accepted = 6;
+  optional string turn_id = 7;
+  oneof outcome {
+    CommandResult completed = 8;
+    BusinessError uncertain = 9;
+    BusinessError rejected = 10;
+  }
+}
+
+message SessionReceipt {
+  string daemon_id = 1;
+  SessionRef session = 2;
+  SessionStatus status = 3;
+  bool attached = 4;
+  optional NativeJson native = 5;
+}
+
+message GetCapabilitiesRequest {}
+
+message GetCapabilitiesResponse {
+  uint32 protocol_major = 1;
+  uint32 protocol_minor = 2;
+  string daemon_id = 3;
+  repeated string services = 4;
+  repeated CanonicalizationVersion canonicalization_versions = 5;
+  ContractLimit max_business_bytes = 6;
+  ContractLimit max_wire_bytes = 7;
+  EventStreamVersion event_stream_version = 8;
+  bool operation_lookup = 9;
+}
+
+message GetStatusRequest {}
+
+message RuntimeStatus {
+  RuntimeKind runtime = 1;
+  bool registered = 2;
+  uint32 owned_sessions = 3;
+  bool busy = 4;
+  optional BusinessError health_error = 5;
+}
+
+message SessionSnapshot {
+  SessionRef session = 1;
+  SessionStatus status = 2;
+  int64 min_seq_id = 3;
+  int64 replay_through_seq_id = 4;
+  optional NativeJson native = 5;
+  // runtime_owned is the authoritative live-ownership verdict for this
+  // session: true means the session is currently bound to a live runtime in
+  // this daemon's registry (with the runtime kind and SessionRef identity
+  // below). Journal-only rows (a durable session whose native owner was
+  // released) report false or omit the field. Older daemons that do not set
+  // this field leave ownership unknown; clients must not treat absence as a
+  // live attachment.
+  optional bool runtime_owned = 6;
+  // runtime is the owning runtime kind for a live-owned session. It is only
+  // set when runtime_owned is true; a journal-only row never borrows another
+  // session's or another connection's kind.
+  optional RuntimeKind runtime = 7;
+}
+
+message GetStatusResponse {
+  string daemon_id = 1;
+  repeated RuntimeStatus runtimes = 2;
+  repeated SessionSnapshot sessions = 3;
+  repeated string connector_ids = 4;
+  optional uint64 pending_operations = 5;
+  optional BusinessError storage_error = 6;
+  optional BusinessError model_config_error = 7;
+}
+
+message ShutdownRequest {
+  bool confirm_active = 1;
+  optional string expected_daemon_id = 2;
+}
+
+message ShutdownResponse {
+  string daemon_id = 1;
+  bool accepted = 2;
+  bool graceful_drain_started = 3;
+}
+
+message CodexCreateOptions {
+  string cwd = 1;
+  optional string parent_session_id = 2;
+  optional string model = 3;
+  optional string provider = 4;
+  optional string effort = 5;
+  optional NativeJson native_options = 6;
+}
+
+message HermesCreateOptions {
+  optional string parent_session_id = 1;
+  optional string model = 2;
+  optional string provider = 3;
+  optional string effort = 4;
+  optional NativeJson native_options = 5;
+}
+
+message GrokCreateOptions {
+  string cwd = 1;
+  optional string model = 2;
+  optional string effort = 3;
+  optional NativeJson native_options = 4;
+}
+
+message CreateSessionRequest {
+  CommandMeta meta = 1;
+  RuntimeTarget target = 2;
+  oneof options {
+    CodexCreateOptions codex = 10;
+    HermesCreateOptions hermes = 11;
+    GrokCreateOptions grok = 12;
+  }
+}
+
+message AttachSessionRequest {
+  SessionRef session = 1;
+  RuntimeTarget target = 2;
+  optional string cwd = 3;
+  bool runtime_control = 4;
+  optional NativeJson native_options = 5;
+}
+
+message TextInput {
+  string text = 1;
+}
+
+message ImageUrlInput {
+  string url = 1;
+}
+
+message LocalImageInput {
+  string path = 1;
+}
+
+message SkillRefInput {
+  string name = 1;
+  string path = 2;
+}
+
+message MentionRefInput {
+  string name = 1;
+  string path = 2;
+}
+
+message AttachmentInput {
+  string name = 1;
+  string media_type = 2;
+  bytes content = 3;
+  optional string source_id = 4;
+}
+
+message InputPart {
+  oneof part {
+    TextInput text = 1;
+    ImageUrlInput image_url = 2;
+    LocalImageInput local_image = 3;
+    SkillRefInput skill = 4;
+    MentionRefInput mention = 5;
+    AttachmentInput attachment = 6;
+  }
+}
+
+message SendPolicy {
+  optional string model = 1;
+  optional string approval_policy = 2;
+  optional string sandbox_policy = 3;
+  optional string approvals_reviewer = 4;
+  optional NativeJson native_options = 5;
+}
+
+message SendRequest {
+  CommandMeta meta = 1;
+  SessionRef session = 2;
+  repeated InputPart input = 3;
+  SendPolicy policy = 4;
+}
+
+message SteerRequest {
+  CommandMeta meta = 1;
+  SessionRef session = 2;
+  string turn_id = 3;
+  repeated InputPart input = 4;
+}
+
+message ReviewTarget {
+  oneof target {
+    string branch = 1;
+    string commit = 2;
+    string uncommitted = 3;
+    NativeJson native = 4;
+  }
+}
+
+message StartReviewRequest {
+  CommandMeta meta = 1;
+  SessionRef session = 2;
+  ReviewTarget target = 3;
+  ReviewDelivery delivery = 4;
+  optional string instructions = 5;
+  optional string model = 6;
+}
+
+message CompactRequest {
+  CommandMeta meta = 1;
+  SessionRef session = 2;
+  optional string instructions = 3;
+  optional string model = 4;
+}
+
+message InterruptRequest {
+  CommandMeta meta = 1;
+  SessionRef session = 2;
+  optional string turn_id = 3;
+}
+
+message PermissionGrant {
+  string name = 1;
+  optional string scope = 2;
+  optional NativeJson native = 3;
+}
+
+message RespondApprovalRequest {
+  CommandMeta meta = 1;
+  SessionRef session = 2;
+  ExactIdentifier approval_id = 3;
+  ApprovalDecision decision = 4;
+  repeated PermissionGrant permissions = 5;
+}
+
+message UpdateSettingsRequest {
+  CommandMeta meta = 1;
+  SessionRef session = 2;
+  optional string model = 3;
+  optional string provider = 4;
+  optional string effort = 5;
+}
+
+message RenameSessionRequest {
+  CommandMeta meta = 1;
+  SessionRef session = 2;
+  string title = 3;
+}
+
+message DeleteSessionRequest {
+  CommandMeta meta = 1;
+  SessionRef session = 2;
+}
+
+message CloseSessionRequest {
+  CommandMeta meta = 1;
+  SessionRef session = 2;
+}
+
+message DetachSessionRequest {
+  CommandMeta meta = 1;
+  SessionRef session = 2;
+  bool keep_runtime = 3;
+}
+
+// ReportObservedStatus accepts only a positive owned-session observation.
+// Absence from a native active list is never represented as an idle report.
+message ReportObservedStatusRequest {
+  SessionRef session = 1;
+  ObservedActiveStatus observed_active_status = 2;
+  string observer = 3;
+  int64 observed_at_unix_micros = 4;
+}
+
+message DesktopTextInput {
+  string text = 1;
+}
+
+message DesktopImageInput {
+  string url = 1;
+}
+
+message DesktopInputPart {
+  oneof part {
+    DesktopTextInput text = 1;
+    DesktopImageInput image = 2;
+  }
+}
+
+message SubmitDesktopRequest {
+  CommandMeta meta = 1;
+  SessionRef session = 2;
+  repeated DesktopInputPart input = 3;
+}
+
+message UpdateDesktopSettingsRequest {
+  CommandMeta meta = 1;
+  SessionRef session = 2;
+  optional string model = 3;
+  optional string model_label = 4;
+  optional string effort = 5;
+  optional uint32 effort_index = 6;
+}
+
+message EmptyNativeQuery {
+  optional NativeJson options = 1;
+}
+
+message CodexInitializeQuery {
+  optional NativeJson options = 1;
+}
+
+message CodexAccountReadQuery {
+  optional NativeJson options = 1;
+}
+
+message CodexHooksListQuery {
+  optional NativeJson options = 1;
+}
+
+message CodexModelListQuery {
+  optional uint32 limit = 1;
+  optional NullableString cursor = 2;
+  optional bool include_hidden = 3;
+  optional NativeJson options = 4;
+}
+
+message CodexSkillsListQuery {
+  repeated string cwds = 1;
+  optional NativeJson options = 2;
+}
+
+message CodexThreadItemsListQuery {
+  string thread_id = 1;
+  uint32 limit = 2;
+  optional NullableString cursor = 3;
+  optional string sort_direction = 4;
+  optional NativeJson options = 5;
+}
+
+message CodexThreadListQuery {
+  optional uint32 limit = 1;
+  optional NullableString cursor = 2;
+  repeated string cwd = 3;
+  optional bool archived = 4;
+  optional NativeJson options = 5;
+}
+
+message CodexThreadLoadedListQuery {
+  optional NativeJson options = 1;
+}
+
+message CodexThreadReadQuery {
+  string thread_id = 1;
+  optional bool include_turns = 2;
+  optional NativeJson options = 3;
+}
+
+message HermesSessionListQuery {
+  optional uint32 offset = 1;
+  optional uint32 limit = 2;
+  optional string source_id = 3;
+  optional NativeJson options = 4;
+}
+
+message HermesActiveListQuery {
+  optional NativeJson options = 1;
+}
+
+message HermesProjectsTreeQuery {
+  optional NativeJson options = 1;
+}
+
+message HermesProjectSessionsQuery {
+  string project_id = 1;
+  optional uint32 session_limit = 2;
+  optional NativeJson options = 3;
+}
+
+message HermesSessionHistoryQuery {
+  string session_id = 1;
+  optional NullableString before = 2;
+  optional uint32 limit = 3;
+  optional NativeJson options = 4;
+}
+
+message HermesModelsListQuery {
+  optional NativeJson options = 1;
+}
+
+message HermesCommandsListQuery {
+  optional NativeJson options = 1;
+}
+
+message GrokInitializeQuery {
+  optional NativeJson options = 1;
+}
+
+message NativeQueryRequest {
+  RuntimeTarget target = 1;
+  // Preserves native payload/hash/sha256 fields that exist outside request params.
+  optional NativeJson top_level_payload = 2;
+  optional string top_level_hash = 3;
+  optional string top_level_sha256 = 4;
+  oneof query {
+    CodexInitializeQuery codex_initialize = 10;
+    CodexAccountReadQuery codex_account_read = 11;
+    CodexHooksListQuery codex_hooks_list = 12;
+    CodexModelListQuery codex_model_list = 13;
+    CodexSkillsListQuery codex_skills_list = 14;
+    CodexThreadItemsListQuery codex_thread_items_list = 15;
+    CodexThreadListQuery codex_thread_list = 16;
+    CodexThreadLoadedListQuery codex_thread_loaded_list = 17;
+    CodexThreadReadQuery codex_thread_read = 18;
+    HermesSessionListQuery hermes_session_list = 30;
+    HermesActiveListQuery hermes_active_list = 31;
+    HermesProjectsTreeQuery hermes_projects_tree = 32;
+    HermesProjectSessionsQuery hermes_project_sessions = 33;
+    HermesSessionHistoryQuery hermes_session_history = 34;
+    HermesModelsListQuery hermes_models_list = 35;
+    HermesCommandsListQuery hermes_commands_list = 36;
+    GrokInitializeQuery grok_initialize = 50;
+  }
+}
+
+message NativeQueryResponse {
+  RuntimeTarget target = 1;
+  NativeJson result = 2;
+}
+
+message HistoryPageRequest {
+  SessionRef session = 1;
+  optional NullableString before = 2;
+  uint32 limit = 3;
+}
+
+message HistoryPageResponse {
+  SessionRef session = 1;
+  repeated NativeJson items = 2;
+  optional NullableString next_cursor = 3;
+  optional bool has_more = 4;
+  optional NativeJson native = 5;
+}
+
+message ListModelsRequest {
+  SessionRef session = 1;
+}
+
+message ModelOption {
+  string provider = 1;
+  string model = 2;
+  optional string label = 3;
+  repeated string supported_efforts = 4;
+  optional NativeJson native = 5;
+}
+
+message ListModelsResponse {
+  repeated ModelOption items = 1;
+}
+
+message ListCommandsRequest {
+  SessionRef session = 1;
+}
+
+message CommandOption {
+  string name = 1;
+  optional string description = 2;
+  optional string input_hint = 3;
+  optional NativeJson native = 4;
+}
+
+message ListCommandsResponse {
+  repeated CommandOption items = 1;
+}
+
+message ReadModelRequest {
+  SessionRef session = 1;
+}
+
+message ModelState {
+  SessionRef session = 1;
+  optional string provider = 2;
+  optional string model = 3;
+  optional string branch = 4;
+  optional string effort = 5;
+  optional NativeJson native = 6;
+}
+
+message SetModelRequest {
+  CommandMeta meta = 1;
+  SessionRef session = 2;
+  string provider = 3;
+  string model = 4;
+}
+
+message SetReasoningRequest {
+  CommandMeta meta = 1;
+  SessionRef session = 2;
+  string effort = 3;
+}
+
+message ReadApprovalModeRequest {
+  SessionRef session = 1;
+}
+
+message ApprovalModeState {
+  SessionRef session = 1;
+  string mode = 2;
+  optional string raw_unknown = 3;
+}
+
+message SetApprovalModeRequest {
+  CommandMeta meta = 1;
+  SessionRef session = 2;
+  string mode = 3;
+}
+
+message DisconnectRuntimeRequest {
+  CommandMeta meta = 1;
+  RuntimeTarget target = 2;
+  bool confirm_active = 3;
+}
+
+message DisconnectRuntimeResponse {
+  string daemon_id = 1;
+  bool disconnected = 2;
+  repeated string released_session_ids = 3;
+  OperationState operation_state = 4;
+  optional BusinessError error = 5;
+}
+
+message SessionCursor {
+  SessionRef session = 1;
+  int64 after_seq_id = 2;
+}
+
+message SubscribeRequest {
+  optional string expected_daemon_id = 1;
+  repeated SessionCursor cursors = 2;
+  uint32 replay_page_size = 3;
+  bool include_snapshot = 4;
+}
+
+message RuntimeOwnerEvent {
+  optional int64 owner_pid = 1;
+  optional string runtime_id = 2;
+}
+
+message OwnershipLostEvent {
+  bool adopted = 1;
+  SessionStatus previous_status = 2;
+  bool orphan_alive = 3;
+  string reason = 4;
+}
+
+message PtyOutputEvent {
+  bytes data = 1;
+  int64 chunk_seq = 2;
+}
+
+message ConnectorEventPayload {
+  string agent_id = 1;
+  string event_type = 2;
+  optional NativeJson data = 3;
+}
+
+message EventEnvelope {
+  string daemon_id = 1;
+  SessionRef session = 2;
+  int64 seq_id = 3;
+  int64 timestamp_unix_micros = 4;
+  string event_type = 5;
+  SessionStatus status = 6;
+  // Complete persisted payload, including unknown fields and exact integers.
+  // Coexists with the typed projection; neither projection may erase it.
+  optional NativeJson native_payload = 7;
+  oneof payload {
+    RuntimeOwnerEvent runtime_owner = 10;
+    OwnershipLostEvent ownership_lost = 11;
+    PtyOutputEvent pty_output = 12;
+    ConnectorEventPayload connector = 13;
+    NativeJson native = 30;
+  }
+}
+
+message StateSnapshot {
+  string daemon_id = 1;
+  repeated SessionSnapshot sessions = 2;
+}
+
+message SessionWatermark {
+  SessionRef session = 1;
+  int64 replay_through_seq_id = 2;
+}
+
+message LiveReady {
+  string daemon_id = 1;
+  repeated SessionWatermark watermarks = 2;
+}
+
+message ResyncRequired {
+  SessionRef session = 1;
+  int64 requested_after_seq_id = 2;
+  int64 min_retained_seq_id = 3;
+  int64 committed_through_seq_id = 4;
+  ResyncReason reason = 5;
+  optional string current_daemon_id = 6;
+}
+
+message StreamOverflow {
+  repeated SessionCursor last_emitted = 1;
+  uint32 queue_capacity = 2;
+  string reason = 3;
+}
+
+message EventStreamFrame {
+  oneof frame {
+    StateSnapshot snapshot = 1;
+    EventEnvelope replay = 2;
+    LiveReady live_ready = 3;
+    EventEnvelope live = 4;
+    ResyncRequired resync_required = 5;
+    StreamOverflow overflow = 6;
+  }
+}
+
+message AppendEventRequest {
+  SessionRef session = 1;
+  string event_type = 2;
+  SessionStatus status = 3;
+  NativeJson payload = 4;
+  optional int64 timestamp_unix_micros = 5;
+  optional string payload_hash = 6;
+}
+
+message AppendEventResponse {
+  string daemon_id = 1;
+  SessionRef session = 2;
+  int64 seq_id = 3;
+}
+
+message OpenTerminal {
+  RuntimeTarget target = 1;
+  SessionRef session = 2;
+  string cwd = 3;
+  optional string executable = 4;
+  repeated string args = 5;
+  uint32 cols = 6;
+  uint32 rows = 7;
+}
+
+message TerminalInput {
+  bytes data = 1;
+}
+
+message TerminalResize {
+  uint32 cols = 1;
+  uint32 rows = 2;
+}
+
+message TerminalInterrupt {}
+
+message TerminalClose {
+  string reason = 1;
+}
+
+message TerminalClientFrame {
+  string terminal_stream_id = 1;
+  int64 reconnect_after_chunk_seq = 2;
+  oneof frame {
+    OpenTerminal open = 10;
+    TerminalInput input = 11;
+    TerminalResize resize = 12;
+    TerminalInterrupt interrupt = 13;
+    TerminalClose close = 14;
+  }
+}
+
+message TerminalOpened {
+  SessionRef session = 1;
+  int64 replay_through_chunk_seq = 2;
+}
+
+message TerminalOutput {
+  bytes data = 1;
+  int64 chunk_seq = 2;
+  bool replay = 3;
+}
+
+message TerminalExit {
+  optional int32 exit_code = 1;
+  TerminalExitCause cause = 2;
+  bool remote_exit_confirmed = 3;
+}
+
+message TerminalOverflow {
+  int64 last_emitted_chunk_seq = 1;
+  uint32 queue_capacity = 2;
+}
+
+message TerminalServerFrame {
+  string terminal_stream_id = 1;
+  oneof frame {
+    TerminalOpened opened = 2;
+    TerminalOutput output = 3;
+    TerminalExit exit = 4;
+    TerminalOverflow overflow = 5;
+    BusinessError error = 6;
+  }
+}
+
+message OperationKey {
+  string operation_id = 1;
+  string legacy_action = 2;
+  NullableString agent_type_compat = 3;
+  NullableString connection_id = 4;
+  NullableString session_id = 5;
+  CanonicalizationVersion canonicalization = 6;
+}
+
+message GetOperationRequest {
+  OperationKey key = 1;
+}
+
+message OperationReceipt {
+  string daemon_id = 1;
+  OperationKey key = 2;
+  OperationState state = 3;
+  optional bytes request_sha256 = 4;
+  optional CommandReceipt typed_response = 5;
+  optional bytes legacy_response_json = 6;
+  NullableBusinessError error = 7;
+  NullableSessionStatus status = 8;
+}
+
+message LocalTarget {}
+
+message WslTarget {
+  string distro = 1;
+}
+
+message SshTarget {
+  string connection_id = 1;
+  SshConnectConfig config = 2;
+}
+
+message ModelConfigTarget {
+  oneof target {
+    LocalTarget local = 1;
+    WslTarget wsl = 2;
+    SshTarget ssh = 3;
+  }
+}
+
+message ModelConfigFileInput {
+  ManagedFile file = 1;
+  bytes content = 2;
+  optional string expected_sha256 = 3;
+}
+
+message SensitiveEnvironmentValue {
+  string name = 1;
+  bytes value = 2;
+}
+
+message ModelConfigPlanRequest {
+  ModelConfigTarget target = 1;
+  repeated ModelConfigFileInput proposed_files = 2;
+  repeated string expected_agents = 3;
+}
+
+message ModelConfigFileState {
+  ManagedFile file = 1;
+  bool exists = 2;
+  string sha256 = 3;
+  bytes content = 4;
+  string status = 5;
+  bool valid = 6;
+}
+
+message ModelConfigChange {
+  ManagedFile file = 1;
+  bool changed = 2;
+  string current_sha256 = 3;
+  string expected_sha256 = 4;
+  optional string status = 5;
+}
+
+message ModelConfigPlanResponse {
+  ModelConfigTarget target = 1;
+  ModelConfigTargetSupport target_support = 2;
+  repeated ModelConfigFileState current_files = 3;
+  repeated ModelConfigChange changes = 4;
+  optional string home = 5;
+  optional BusinessError error = 6;
+}
+
+message ModelConfigApplyRequest {
+  CommandMeta meta = 1;
+  ModelConfigTarget target = 2;
+  repeated ModelConfigFileInput files = 3;
+  repeated SensitiveEnvironmentValue environment_values = 4;
+}
+
+message FileDigest {
+  ManagedFile file = 1;
+  string sha256 = 2;
+}
+
+message ModelConfigApplyResponse {
+  string daemon_id = 1;
+  string operation_id = 2;
+  OperationState operation_state = 3;
+  ModelConfigTargetSupport target_support = 4;
+  repeated ManagedFile changed = 5;
+  repeated FileDigest digests = 6;
+  optional BusinessError error = 7;
+}
+
+message ModelConfigReloadRequest {
+  CommandMeta meta = 1;
+  repeated ReloadAgent agents = 2;
+}
+
+message ModelConfigReloadResponse {
+  string daemon_id = 1;
+  string operation_id = 2;
+  OperationState operation_state = 3;
+  repeated ReloadAgent reloaded = 4;
+  repeated ReloadAgent pending = 5;
+  bool deferred = 6;
+  string status = 7;
+  optional BusinessError error = 8;
+}
+
+message ConnectorAgent {
+  string id = 1;
+  string kind = 2;
+  string name = 3;
+  string status = 4;
+  repeated string capabilities = 5;
+  optional string source_id = 6;
+  optional string runtime_id = 7;
+  optional string connection_id = 8;
+  optional NativeJson native = 9;
+}
+
+message ConnectorHello {
+  uint32 protocol_version = 1;
+  ConnectorAgent agent = 2;
+}
+
+message ConnectorHeartbeat {
+  int64 sent_at_unix_micros = 1;
+}
+
+message ConnectorEvent {
+  string event_id = 1;
+  string event_type = 2;
+  string agent_id = 3;
+  optional string session_id = 4;
+  optional SessionStatus status = 5;
+  NativeJson data = 6;
+  optional string payload_hash = 7;
+}
+
+message ConnectorDisconnect {
+  string reason = 1;
+}
+
+message ConnectorIngressFrame {
+  oneof frame {
+    ConnectorHello hello = 1;
+    ConnectorHeartbeat heartbeat = 2;
+    ConnectorEvent event = 3;
+    ConnectorDisconnect disconnect = 4;
+  }
+}
+
+message ConnectorRegistered {
+  string agent_id = 1;
+}
+
+message ConnectorEventAccepted {
+  string event_id = 1;
+  optional string committed_session_id = 2;
+  optional int64 committed_seq_id = 3;
+}
+
+message ConnectorRejected {
+  optional string event_id = 1;
+  BusinessError error = 2;
+}
+
+message ConnectorOverflow {
+  uint32 queue_capacity = 1;
+  optional string last_accepted_event_id = 2;
+}
+
+message ConnectorDisconnected {
+  string agent_id = 1;
+  string reason = 2;
+}
+
+message ConnectorHeartbeatAck {
+  int64 received_at_unix_micros = 1;
+}
+
+message ConnectorIngressAck {
+  ConnectorAckState state = 1;
+  oneof ack {
+    ConnectorRegistered registered = 2;
+    ConnectorEventAccepted event_accepted = 3;
+    ConnectorRejected rejected = 4;
+    ConnectorOverflow overflow = 5;
+    ConnectorDisconnected disconnected = 6;
+    ConnectorHeartbeatAck heartbeat = 7;
+  }
+}
+
+message BindControlSessionRequest {
+  string agent_id = 1;
+  SessionRef control_session = 2;
+}
+
+message BindControlSessionResponse {
+  bool bound = 1;
+  uint32 flushed_events = 2;
+}
+
+message DisconnectConnectorRequest {
+  CommandMeta meta = 1;
+  string agent_id = 2;
+  bool confirm_active = 3;
+}
+
+message DisconnectConnectorResponse {
+  string daemon_id = 1;
+  bool disconnected = 2;
+  OperationState operation_state = 3;
+  optional BusinessError error = 4;
+}
+
+service DaemonControl {
+  rpc GetCapabilities(GetCapabilitiesRequest) returns (GetCapabilitiesResponse);
+  rpc GetStatus(GetStatusRequest) returns (GetStatusResponse);
+  rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
+}
+
+service SessionControl {
+  rpc CreateSession(CreateSessionRequest) returns (CommandReceipt);
+  rpc AttachSession(AttachSessionRequest) returns (SessionReceipt);
+  rpc Send(SendRequest) returns (CommandReceipt);
+  rpc Steer(SteerRequest) returns (CommandReceipt);
+  rpc StartReview(StartReviewRequest) returns (CommandReceipt);
+  rpc Compact(CompactRequest) returns (CommandReceipt);
+  rpc Interrupt(InterruptRequest) returns (CommandReceipt);
+  rpc RespondApproval(RespondApprovalRequest) returns (CommandReceipt);
+  rpc UpdateSettings(UpdateSettingsRequest) returns (CommandReceipt);
+  rpc RenameSession(RenameSessionRequest) returns (CommandReceipt);
+  rpc DeleteSession(DeleteSessionRequest) returns (CommandReceipt);
+  rpc CloseSession(CloseSessionRequest) returns (CommandReceipt);
+  rpc DetachSession(DetachSessionRequest) returns (CommandReceipt);
+  rpc ReportObservedStatus(ReportObservedStatusRequest) returns (SessionReceipt);
+  rpc SubmitDesktop(SubmitDesktopRequest) returns (CommandReceipt);
+  rpc UpdateDesktopSettings(UpdateDesktopSettingsRequest) returns (CommandReceipt);
+}
+
+service RuntimeQuery {
+  rpc QueryNative(NativeQueryRequest) returns (NativeQueryResponse);
+  rpc GetHistoryPage(HistoryPageRequest) returns (HistoryPageResponse);
+  rpc ListModels(ListModelsRequest) returns (ListModelsResponse);
+  rpc ListCommands(ListCommandsRequest) returns (ListCommandsResponse);
+  rpc ReadModel(ReadModelRequest) returns (ModelState);
+  rpc SetModel(SetModelRequest) returns (CommandReceipt);
+  rpc SetReasoning(SetReasoningRequest) returns (CommandReceipt);
+  rpc ReadApprovalMode(ReadApprovalModeRequest) returns (ApprovalModeState);
+  rpc SetApprovalMode(SetApprovalModeRequest) returns (CommandReceipt);
+  rpc DisconnectRuntime(DisconnectRuntimeRequest) returns (DisconnectRuntimeResponse);
+}
+
+service EventStream {
+  rpc Subscribe(SubscribeRequest) returns (stream EventStreamFrame);
+  rpc AppendEvent(AppendEventRequest) returns (AppendEventResponse);
+}
+
+service TerminalStream {
+  rpc Open(stream TerminalClientFrame) returns (stream TerminalServerFrame);
+}
+
+service OperationQuery {
+  rpc GetOperation(GetOperationRequest) returns (OperationReceipt);
+}
+
+service ModelConfig {
+  rpc Plan(ModelConfigPlanRequest) returns (ModelConfigPlanResponse);
+  rpc Apply(ModelConfigApplyRequest) returns (ModelConfigApplyResponse);
+  rpc Reload(ModelConfigReloadRequest) returns (ModelConfigReloadResponse);
+}
+
+service ConnectorIngress {
+  rpc Connect(stream ConnectorIngressFrame) returns (stream ConnectorIngressAck);
+  rpc BindControlSession(BindControlSessionRequest) returns (BindControlSessionResponse);
+  rpc DisconnectConnector(DisconnectConnectorRequest) returns (DisconnectConnectorResponse);
+}

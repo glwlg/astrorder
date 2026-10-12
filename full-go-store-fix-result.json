@@ -1,0 +1,227 @@
+{
+  "artifact": "full-go-store-fix-result",
+  "generated_at": "2026-10-08T22:58:50+08:00",
+  "repository": "P:/workspace/glwlg/ai/astrorder",
+  "branch": "master",
+  "head": "ff32f947024b1840b939ebfb8e58e45886d34b47",
+  "scope": {
+    "source_writes": "app-server-go/internal/store/ only",
+    "result_artifacts": [
+      "full-go-store-fix-result.json",
+      "full-go-store-fix-result.md"
+    ],
+    "production_data_read": false,
+    "production_config_read": false,
+    "secrets_or_credentials_read": false,
+    "chat_or_mcp_access": false,
+    "daemon_restart": false,
+    "service_deployment": false,
+    "commit_or_stash": false
+  },
+  "independent_review": {
+    "source_json": "C:/Users/luwei/AppData/Local/hermes/cache/scratch/full-go-store-events-review.json",
+    "source_markdown": "C:/Users/luwei/AppData/Local/hermes/cache/scratch/full-go-store-events-review.md",
+    "source_json_sha256": "11015793cf64d27b70a5b816b8ad3e908c4d379806fb40cca476333d64feb399",
+    "source_markdown_sha256": "61a3973e56a82b174b7cae3ef469791b9058a089b13a966b972fd58b6b2dea1a",
+    "reviewed_source_manifest_sha256": "d5d5642ed3977f83b9b6ef3e1e7e48ac2223f3453b4c6ce1de5d67d39c9ced1b",
+    "pre_fix_decision": "FAIL",
+    "post_fix_rereview": "NOT_RUN",
+    "findings": [
+      {
+        "id": "STORE-HASH-001",
+        "severity": "high",
+        "status": "FIXED_AND_FOCUSED_VERIFIED",
+        "fix": "Python-compatible canonical JSON hashing with unescaped UTF-8/HTML/U+2028/U+2029 and exact json.Number lexemes; shared by create, backfill, and native-identity rehash paths."
+      },
+      {
+        "id": "STORE-UTF8-001",
+        "severity": "high",
+        "status": "FIXED_AND_FOCUSED_VERIFIED",
+        "fix": "Unicode-code-point truncation for session upsert/update, task insert/update, and redacted/history text slices."
+      },
+      {
+        "id": "STORE-SCHEMA-001",
+        "severity": "high",
+        "status": "FIXED_AND_FOCUSED_VERIFIED",
+        "fix": "Validate exact table column shape, table unique identities, and named index shape; transactionally rebuild old-version tables to the canonical schema after data backfills and native-identity migration."
+      },
+      {
+        "id": "STORE-MIGRATION-001",
+        "severity": "medium",
+        "status": "FIXED_AND_FOCUSED_VERIFIED",
+        "fix": "Nonblocking OS-visible database migration lock using LockFileEx on Windows and flock on Linux, with a two-process test."
+      }
+    ],
+    "passed_areas_preserved": [
+      "Opaque typed Projector registration and closure retention",
+      "ApplyFrame atomic projection/event/checkpoint semantics",
+      "Explicit native-identity migration without text inference",
+      "Preference tombstone and omitted-field semantics"
+    ]
+  },
+  "compatibility_contract": {
+    "legacy_python_source": "backend/src/astrorder/store.py:_hash_payload",
+    "canonical_json": "json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(\",\", \":\"))",
+    "command_business_fields": [
+      "id",
+      "agent_id",
+      "session_id",
+      "action",
+      "text",
+      "attachment_ids",
+      "target_id"
+    ],
+    "excluded_non_business_fields": [
+      "state",
+      "created_at",
+      "updated_at",
+      "error",
+      "full attachment metadata"
+    ],
+    "hash_version_added": false,
+    "ledger_cleared": false,
+    "fixture_hashes": [
+      {
+        "name": "unicode_html_line_separators_command",
+        "sha256": "a97d9db6a153e46238230fbb74ea06f00224ae8397009e68ae4bd01f37a3b0f5"
+      },
+      {
+        "name": "unknown_large_integer_float_integer_canonical_json",
+        "sha256": "6132587c59a30dfa0845dfb74e888b845c202d26470dba4dddbb85de3ad06746"
+      },
+      {
+        "name": "legacy_hash_backfill_command",
+        "sha256": "58146bd8766d6bbcb44710ccd6f8cb8029eab80cb6f2d9333f59c2fba1241b92"
+      },
+      {
+        "name": "native_identity_old_scope_command",
+        "sha256": "ee3fc382a0bde5f6f5cccd2e8608a83d6f2d022fb9b7411f30216199eb9ec4aa"
+      },
+      {
+        "name": "native_identity_new_scope_command",
+        "sha256": "45f238f4a11bc8e222352fcc2920d736062acaf628d15cbefffec3ebc0bac45f"
+      }
+    ],
+    "retry_assertions": [
+      "same Python-hashed queued command returns created=false",
+      "different payload returns DuplicateCommandError",
+      "row_id/state/created_at/payload_hash remain exact",
+      "native-identity rehash preserves row_id and queued state",
+      "unrelated daemon checkpoint remains exact"
+    ]
+  },
+  "data_provenance": {
+    "kind": "synthetic_non_production_fixtures_only",
+    "databases": "testing.T TempDir private SQLite databases",
+    "fixture_database_read": "app-server-go/internal/parity/testdata/store/store-compat-fixture.sqlite3",
+    "python_hash_generation": "One-time local Python json.dumps/hashlib probes over hard-coded synthetic payloads; constants stored in Go tests.",
+    "review_data": "Source code, test output, and scratch review reports only."
+  },
+  "red_green": {
+    "red_command": "C:/Users/luwei/.codex/tools/go1.26.4.windows-amd64/go/bin/go.exe test ./internal/store -run 'Test(PayloadHashMatchesPythonCanonicalJSON|JSONCodecPreservesUnknownIntegersAndFloatSemantics|ExistingPythonQueuedCommandRetryUsesExactLedgerHash|NativeIdentityMigrationRehashesWithPythonContractAndKeepsLedgerIdentity|UnicodeLimitsPreserveCodepointsAndValidUTF8OnEveryTitlePath)$' -count=1",
+    "red_result": "FAIL",
+    "red_failures": [
+      "Python canonical hash mismatch for Unicode/HTML/U+2028/U+2029",
+      "unknown integer decoded as float64",
+      "existing Python queued retry rejected as different payload",
+      "native-identity migration produced incompatible hash",
+      "multibyte title truncated to invalid UTF-8"
+    ],
+    "green_command": "C:/Users/luwei/.codex/tools/go1.26.4.windows-amd64/go/bin/go.exe test ./internal/store -run 'Test(PayloadHashMatchesPythonCanonicalJSON|JSONCodecPreservesUnknownIntegersAndFloatSemantics|ExistingPythonQueuedCommandRetryUsesExactLedgerHash|NativeIdentityMigrationRehashesWithPythonContractAndKeepsLedgerIdentity|UnicodeLimitsPreserveCodepointsAndValidUTF8OnEveryTitlePath)$' -count=1",
+    "green_result": "PASS: ok astrorder.dev/app-server/internal/store 0.586s",
+    "review_followup_red_command": "C:/Users/luwei/.codex/tools/go1.26.4.windows-amd64/go/bin/go.exe test ./internal/store -run 'Test(ValidateSchemaRejectsStructuralDrift|SchemaMigrationOwnershipIsCrossProcess)$' -count=1",
+    "review_followup_red_result": "FAIL: acquireSchemaMigrationLock and rebuildCanonicalTables were absent before implementation",
+    "review_followup_green_result": "PASS: ok astrorder.dev/app-server/internal/store 1.176s"
+  },
+  "verification": [
+    {
+      "platform": "Windows 11 amd64",
+      "toolchain": "go1.26.4 windows/amd64",
+      "command": "C:/Users/luwei/.codex/tools/go1.26.4.windows-amd64/go/bin/go.exe test ./internal/store -count=1 -timeout=180s",
+      "exit_code": 0,
+      "result": "ok astrorder.dev/app-server/internal/store 2.240s"
+    },
+    {
+      "platform": "Windows 11 amd64",
+      "toolchain": "go1.26.4 windows/amd64",
+      "command": "C:/Users/luwei/.codex/tools/go1.26.4.windows-amd64/go/bin/go.exe test ./internal/preferences -count=1 -timeout=120s",
+      "exit_code": 0,
+      "result": "ok astrorder.dev/app-server/internal/preferences 0.403s"
+    },
+    {
+      "platform": "Windows 11 amd64",
+      "toolchain": "go1.26.4 windows/amd64",
+      "command": "C:/Users/luwei/.codex/tools/go1.26.4.windows-amd64/go/bin/go.exe vet ./internal/store",
+      "exit_code": 0,
+      "result": "PASS"
+    },
+    {
+      "platform": "Windows 11 amd64",
+      "toolchain": "go1.26.4 windows/amd64",
+      "command": "C:/Users/luwei/.codex/tools/go1.26.4.windows-amd64/go/bin/go.exe vet ./internal/preferences",
+      "exit_code": 0,
+      "result": "PASS"
+    },
+    {
+      "platform": "Linux WSL amd64",
+      "toolchain": "go1.26.4 linux/amd64",
+      "environment": "GOCACHE=/mnt/p/workspace/glwlg/ai/astrorder/.runtime/full-go-linux/race-cache GOMODCACHE=/mnt/p/workspace/glwlg/ai/astrorder/.runtime/full-go-linux/modcache GOTMPDIR=/mnt/p/workspace/glwlg/ai/astrorder/.runtime/full-go-linux/race-tmp",
+      "command": "../.runtime/full-go-linux/go/bin/go test -race ./internal/store -count=1 -timeout=240s",
+      "exit_code": 0,
+      "result": "ok astrorder.dev/app-server/internal/store 20.899s"
+    },
+    {
+      "platform": "Linux WSL amd64",
+      "toolchain": "go1.26.4 linux/amd64",
+      "environment": "GOCACHE=/mnt/p/workspace/glwlg/ai/astrorder/.runtime/full-go-linux/race-cache GOMODCACHE=/mnt/p/workspace/glwlg/ai/astrorder/.runtime/full-go-linux/modcache GOTMPDIR=/mnt/p/workspace/glwlg/ai/astrorder/.runtime/full-go-linux/race-tmp",
+      "command": "../.runtime/full-go-linux/go/bin/go test -race ./internal/preferences -count=1 -timeout=180s",
+      "exit_code": 0,
+      "result": "ok astrorder.dev/app-server/internal/preferences 2.393s"
+    },
+    {
+      "platform": "Linux WSL amd64",
+      "toolchain": "go1.26.4 linux/amd64",
+      "environment": "GOCACHE=/mnt/p/workspace/glwlg/ai/astrorder/.runtime/full-go-linux/race-cache GOMODCACHE=/mnt/p/workspace/glwlg/ai/astrorder/.runtime/full-go-linux/modcache GOTMPDIR=/mnt/p/workspace/glwlg/ai/astrorder/.runtime/full-go-linux/race-tmp",
+      "command": "../.runtime/full-go-linux/go/bin/go vet ./internal/store ./internal/preferences",
+      "exit_code": 0,
+      "result": "PASS"
+    },
+    {
+      "platform": "Windows Git Bash",
+      "command": "git diff --check -- app-server-go/internal/store",
+      "exit_code": 0,
+      "result": "PASS"
+    }
+  ],
+  "changed_source_files": [
+    {"path": "app-server-go/internal/store/agents_sessions.go", "sha256": "91f515ce3bcc1186b268d6ca9ed2c355b0ae331c65e39db6e8663e12498eed1b"},
+    {"path": "app-server-go/internal/store/codec.go", "sha256": "a549fb3e5c03d8bc7b876f6caf4f3d1490fb0c5bd37eb32962d568195577ea78"},
+    {"path": "app-server-go/internal/store/commands_tasks.go", "sha256": "de70b9125434846c0d088ab3a887f5e38f4242f50ed424ce77622c9eb80b6257"},
+    {"path": "app-server-go/internal/store/connections_reviews_metrics.go", "sha256": "9dc14b385c9f4d95f3f81369228b240ecd7a1b1f2d6a04d0a02d67acf1836e4b"},
+    {"path": "app-server-go/internal/store/migration_lock_unix.go", "sha256": "e2378e806a1c11f3067709ef85aa5a65f059fb01661eca2bcf737f80bb8485e5"},
+    {"path": "app-server-go/internal/store/migration_lock_windows.go", "sha256": "6a9732c8960297672b814ed92f17522f663de7c7c737ce9b60a05cb4ef7aea85"},
+    {"path": "app-server-go/internal/store/schema.go", "sha256": "1bb7a772c4059b04add442e69acf6213c9962e2e2c2887873d3474724ab8b599"},
+    {"path": "app-server-go/internal/store/store.go", "sha256": "786cfe59c323c738cf7358e91a390fc8818607d4b1af0270b9f413510b32d7ff"},
+    {"path": "app-server-go/internal/store/store_test.go", "sha256": "2cbb43dca94ef2bad1ebe24a3bed18937cc9c2818b74652bfb978aa2c2ccb27d"},
+    {"path": "app-server-go/internal/store/compatibility_test.go", "sha256": "118a2f51b9da10808be3b984ea6a9567f3dd0fcab70b320f9c554d872b51813d"},
+    {"path": "app-server-go/internal/store/schema_reliability_test.go", "sha256": "7d15cd9705b56ab657dbb1d0dfdb809de2e425729bade92a2d1833a85b57de11"}
+  ],
+  "out_of_scope_preserved": {
+    "projector_api_changed": false,
+    "parity_fixture_changed": false,
+    "other_packages_or_modules_changed": false,
+    "review_worker_source_changed": false,
+    "bounded_unrelated_store_defects_changed": false
+  },
+  "status": {
+    "store_findings": "IMPLEMENTED_AND_FOCUSED_VERIFIED",
+    "p5": "NOT_DECLARED_DONE",
+    "full_go_migration": "NOT_DONE",
+    "remaining": [
+      "Independent post-fix re-review has not run.",
+      "Production App projector is not registered/exercised; T03 integration remains blocked.",
+      "Genuine gRPC transport/projection and later migration stages remain pending.",
+      "No production cutover, App deployment, daemon restart, or real user-data validation was performed."
+    ]
+  }
+}

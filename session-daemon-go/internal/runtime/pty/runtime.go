@@ -2,6 +2,7 @@ package pty
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -182,8 +183,59 @@ func (r *Runtime) Spawn(ctx context.Context, req core.Request) (core.Result, err
 	if shell == "" {
 		shell = findDefaultShell()
 	}
-
-	term, err := r.terminalFactory(shell, target, terminalEnvironment(), 80, 24)
+	cols, rows := 80, 24
+	if value, exists := req.Fields["cols"]; exists {
+		var ok bool
+		cols, ok = toInt(value)
+		if !ok || cols < 20 || cols > 400 {
+			return core.Result{}, errors.New("pty dimensions are invalid")
+		}
+	}
+	if value, exists := req.Fields["rows"]; exists {
+		var ok bool
+		rows, ok = toInt(value)
+		if !ok || rows < 10 || rows > 200 {
+			return core.Result{}, errors.New("pty dimensions are invalid")
+		}
+	}
+	if executable, exists := req.Fields["executable"]; exists {
+		value, ok := executable.(string)
+		if !ok || value == "" || strings.ContainsRune(value, 0) {
+			return core.Result{}, errors.New("pty executable is invalid")
+		}
+		shell = value
+	}
+	var args []string
+	if raw, exists := req.Fields["args"]; exists {
+		switch values := raw.(type) {
+		case []string:
+			args = append(args, values...)
+		case []any:
+			for _, value := range values {
+				arg, ok := value.(string)
+				if !ok {
+					return core.Result{}, errors.New("pty argument is invalid")
+				}
+				args = append(args, arg)
+			}
+		default:
+			return core.Result{}, errors.New("pty arguments are invalid")
+		}
+	}
+	for _, arg := range args {
+		if strings.ContainsRune(arg, 0) {
+			return core.Result{}, errors.New("pty argument is invalid")
+		}
+	}
+	var term Terminal
+	if r.config.TerminalFactory == nil {
+		term, err = defaultCommandTerminal(shell, args, target, terminalEnvironment(), cols, rows)
+	} else {
+		if len(args) > 0 {
+			return core.Result{}, errors.New("configured terminal factory does not support arguments")
+		}
+		term, err = r.terminalFactory(shell, target, terminalEnvironment(), cols, rows)
+	}
 	if err != nil {
 		return core.Result{}, fmt.Errorf("spawn terminal: %w", err)
 	}
@@ -427,10 +479,15 @@ func (r *Runtime) readLoop(s *session) {
 			prefix = len(data)
 		}
 		chunk := strings.ToValidUTF8(string(data[:prefix]), "\ufffd")
+		rawChunk := data[:prefix]
 		pending = append([]byte(nil), data[prefix:]...)
-		if chunk != "" {
+		if len(rawChunk) > 0 {
 			if r.config.Emit != nil {
-				if emitErr := r.config.Emit(s.sessionID, "pty.output", map[string]any{"data": chunk}, "running"); emitErr != nil {
+				payload := map[string]any{
+					"data":        chunk,
+					"data_base64": base64.StdEncoding.EncodeToString(rawChunk),
+				}
+				if emitErr := r.config.Emit(s.sessionID, "pty.output", payload, "running"); emitErr != nil {
 					s.statusMu.Lock()
 					s.status = "error"
 					s.statusMu.Unlock()

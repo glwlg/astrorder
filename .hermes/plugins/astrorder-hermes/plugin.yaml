@@ -1,15 +1,20 @@
 name: astrorder-hermes
 version: "0.1.0"
-description: Astrorder's local Hermes lifecycle connector
-managed_by: astrorder
-requires_env:
+description: Astrorder's Hermes lifecycle connector (connector mode, or local activity spool when launched outside Astrorder)
+optional_env:  # absent for user-launched Hermes: the plugin then spools activity locally
   - ASTRORDER_CONNECTOR_SECRET
   - ASTRORDER_HERMES_AGENT_ID
+managed_by: astrorder
 provides_hooks:
   - on_session_start
   - on_session_end
   - on_session_finalize
+  - pre_llm_call
   - post_llm_call
   - on_stream_start
   - on_stream_delta
   - on_stream_end
+  - pre_tool_call
+  - post_tool_call
+  - subagent_start
+  - subagent_stop

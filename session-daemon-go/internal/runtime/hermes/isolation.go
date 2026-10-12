@@ -11,14 +11,15 @@ import (
 // Isolated keeps one native gateway per durable session. No subprocess I/O is
 // performed while holding the pool metadata lock.
 type Isolated struct {
-	mu        sync.Mutex
-	config    Config
-	workers   map[string]*Adapter
-	starting  map[*Adapter]bool
-	attaching map[string]bool
-	closed    bool
-	inflight  map[string]int
-	deleting  map[string]bool
+	mu            sync.Mutex
+	config        Config
+	workers       map[string]*Adapter
+	starting      map[*Adapter]bool
+	attaching     map[string]bool
+	closed        bool
+	disconnecting bool
+	inflight      map[string]int
+	deleting      map[string]bool
 }
 
 func NewIsolated(config Config) *Isolated {
@@ -35,7 +36,7 @@ func (p *Isolated) open(ctx context.Context, r core.Request, resume bool) (core.
 		return core.Result{}, err
 	}
 	p.mu.Lock()
-	if p.closed {
+	if p.closed || p.disconnecting {
 		p.mu.Unlock()
 		return core.Result{}, fmt.Errorf("Hermes pool is closed")
 	}
@@ -89,7 +90,7 @@ func (p *Isolated) open(ctx context.Context, r core.Request, resume bool) (core.
 func (p *Isolated) Command(ctx context.Context, r core.Request) (core.Result, error) {
 	p.mu.Lock()
 	worker := p.workers[r.SessionID]
-	closed := p.closed
+	closed := p.closed || p.disconnecting
 	deleting := r.Action == "session.delete"
 	if p.deleting[r.SessionID] || (deleting && p.inflight[r.SessionID] > 0) {
 		p.mu.Unlock()

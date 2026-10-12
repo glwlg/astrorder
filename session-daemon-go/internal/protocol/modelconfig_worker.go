@@ -25,9 +25,13 @@ func (d *Daemon) runModelReloads(ctx context.Context, service *modelconfig.Servi
 		case <-ctx.Done():
 			return
 		case <-wake:
+			if err := d.beginControl(); err != nil {
+				continue
+			}
 			attempt, cancel := context.WithTimeout(ctx, 45*time.Second)
 			_, err := service.Drain(attempt)
 			cancel()
+			d.endControl()
 			d.mu.Lock()
 			d.modelReloadError = ""
 			if err != nil && ctx.Err() == nil {

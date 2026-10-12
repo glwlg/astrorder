@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "status": "REVIEWED_SCOPED_PARTIAL_001_004",
+  "scope": "PARTIAL-001 through PARTIAL-004; supplemental migration ledger only",
+  "full_migration_complete": false,
+  "production_changed": false,
+  "prior_worker": {
+    "process": "proc_c28e8e4d2f68",
+    "model": "antigravity/gemini-3.8-flash",
+    "exit_code": 1,
+    "result": "Investigation/reproduction only; no scoped source edits or structured fix result. Not accepted as a repair."
+  },
+  "fixes": [
+    {"id": "PARTIAL-001", "change": "Decode a single strict typed matrix/direct manifest, including nested partial metadata and TestRef objects; preserve opaque contract JSON."},
+    {"id": "PARTIAL-002", "change": "Remove redundant unbound command/exit/assertion claims from PartialExecution and F03 ledger. Validate the complete original hash-bound process-result schema, types, stage, fixture scope, cleanup and explicit isolation claims."},
+    {"id": "PARTIAL-003", "change": "Reject missing/duplicate parent group IDs and duplicate feature IDs before entry expansion; reject duplicate partial IDs and overlapping partial entry claims within the uniquely owned feature."},
+    {"id": "PARTIAL-004", "change": "Reject noncanonical slash-relative artifact paths before existing root, symlink and regular-file checks."}
+  ],
+  "verification": [
+    {"command": "go test ./internal/parity -run '^TestPartialProcessResultRejectsInvalidHistoricalClaims$' -count=1 -v", "red_exit_code": 1, "green_exit_code": 0, "observed": "Invalid rehashed result fields accepted before fix; all strict historical-result subtests passed after fix."},
+    {"command": "go test ./internal/parity -run '^(TestPartialEntriesCannotOverlapAcrossSlices|TestArtifactPathsMustUseCanonicalSlashIdentity)$' -count=1 -v", "red_exit_code": 1, "green_exit_code": 0, "observed": "Overlapping entry and four path aliases accepted before fix; focused regressions passed after fix."},
+    {"command": "go test ./internal/parity ./cmd/astrorderctl -count=1 -timeout=60s", "exit_code": 0},
+    {"command": "go vet ./internal/parity ./cmd/astrorderctl", "exit_code": 0},
+    {"command": "go test ./... -count=1 -timeout=120s", "cwd": "app-server-go", "exit_code": 0, "limits": "Packages reporting no test files are not behavior evidence."},
+    {"command": "go vet ./...", "cwd": "app-server-go", "exit_code": 0},
+    {"command": "go test -race ./internal/parity ./cmd/astrorderctl -count=1 -timeout=120s", "environment": "WSL Linux", "exit_code": 0, "observed": "parity 7.449s; astrorderctl 1.290s"},
+    {"command": "private CLI ledger mutations via full-go-partial-ledger-rereview-verify.py", "exit_code": 0, "observed": "Unchanged private copy passes; all 27 mutations rejected.", "result_path": "full-go-partial-ledger-rereview-after/result.json"},
+    {"command": "astrorderctl migration verify --structural", "exit_code": 0, "observed": "472 items/472 entries, no issues."},
+    {"command": "astrorderctl migration verify", "exit_code": 1, "observed": "Expected failure; no invalid_partial issues; 458 unregistered entrypoints and remaining final gates unchanged."}
+  ],
+  "historical_process_result": {
+    "path": "docs/reports/full-go-p2-operation-process-result.json",
+    "sha256": "14cf665d21201663b988feb2fe5ed091aeab8f8ff1235069845147f6d8615c7e",
+    "unchanged": true
+  },
+  "cli_candidate": {
+    "path": "C:/Users/luwei/AppData/Local/hermes/cache/scratch/astrorderctl-partial-repaired.exe",
+    "sha256": "8a7c85e3758c3b8584009c9ff2c2d9d7853fb555f78e86fc4ac684fb8e63441c"
+  },
+  "review": {"status": "PASS", "path": "docs/reports/full-go-partial-ledger-rereview.json", "scope": "PARTIAL-001 through PARTIAL-004 only"},
+  "remaining": ["Full migration product/runtime/packaging/production gates"]
+}

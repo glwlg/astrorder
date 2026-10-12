@@ -8,6 +8,7 @@ import (
 func TestNativeEnvironmentDoesNotExposeDaemonIPCSecret(t *testing.T) {
 	t.Setenv("ASTRORDER_SESSION_DAEMON_SECRET", "test-only-ipc-secret")
 	t.Setenv("ASTRORDER_SESSION_DAEMON_CONNECTOR_SECRET", "test-connector-secret")
+	t.Setenv("ASTRORDER_SESSION_DAEMON_GRPC_CREDENTIAL", "test-only-grpc-credential")
 	t.Setenv("ASTRORDER_BROWSER_SECRET", "test-browser-secret")
 	t.Setenv("NATIVE_ENV_TEST_KEEP", "preserved")
 	env := NativeEnvironment([]string{"ASTRORDER_SESSION_DAEMON_SECRET=override-test-secret", "NATIVE_ENV_TEST_EXTRA=extra"})
@@ -19,6 +20,9 @@ func TestNativeEnvironmentDoesNotExposeDaemonIPCSecret(t *testing.T) {
 		}
 		if strings.EqualFold(parts[0], "ASTRORDER_SESSION_DAEMON_SECRET") || strings.EqualFold(parts[0], "ASTRORDER_SESSION_DAEMON_CONNECTOR_SECRET") || strings.EqualFold(parts[0], "ASTRORDER_BROWSER_SECRET") {
 			t.Fatal("daemon credential inherited by native child")
+		}
+		if strings.EqualFold(parts[0], "ASTRORDER_SESSION_DAEMON_GRPC_CREDENTIAL") {
+			t.Fatal("gRPC daemon credential inherited by native child")
 		}
 		if entry == "NATIVE_ENV_TEST_KEEP=preserved" {
 			keep = true

@@ -1,0 +1,89 @@
+{
+  "schema_version": 1,
+  "review_id": "full-go-partial-ledger-rereview",
+  "review_mode": "read-only independent bounded rereview",
+  "repository": "P:/workspace/glwlg/ai/astrorder",
+  "passed": true,
+  "verdict": "PASS",
+  "scope": [
+    "PARTIAL-001",
+    "PARTIAL-002",
+    "PARTIAL-003",
+    "PARTIAL-004",
+    "app-server-go/internal/parity/baseline.go",
+    "app-server-go/internal/parity/manifest.go",
+    "app-server-go/internal/parity/partial.go",
+    "app-server-go/internal/parity/partial_test.go",
+    "app-server-go/internal/parity/jsondecode.go",
+    "app-server-go/internal/parity/strict_test.go",
+    "app-server-go/internal/parity/partial_identity_test.go",
+    "app-server-go/internal/parity/process_result_test.go",
+    "docs/reports/full-go-migration-matrix.json F03 partial_implementations",
+    "docs/reports/full-go-p2-operation-process-result.json"
+  ],
+  "resolved_findings": [
+    "PARTIAL-001",
+    "PARTIAL-002",
+    "PARTIAL-003",
+    "PARTIAL-004"
+  ],
+  "findings": [],
+  "source_hashes": {
+    "app-server-go/internal/parity/baseline.go": "08aa1d4274a543c8b559460973ed06dc8c14c790d82427a4b94e6342752d16d7",
+    "app-server-go/internal/parity/manifest.go": "dcb19f45d2ad55f26d5ccb8f1d31cf6aef3b1992aaeeb62d88e68b3f0d956d1d",
+    "app-server-go/internal/parity/partial.go": "39ef10d73f3eb30eaf412ffc4e493f93093e6053bb40844750434571476b9a69",
+    "app-server-go/internal/parity/partial_test.go": "62452520e98d6207b7cc8d05f6ed3ee51feaacefcdd4c6600328f36269e4796f",
+    "app-server-go/internal/parity/jsondecode.go": "9358e3c1ef99daefaa546949a6a59583fec30938f69939b16010e746b2a80cca",
+    "app-server-go/internal/parity/strict_test.go": "93dc8280bb485071f1b7e123d02ad6f73d8595dfef370f903e00d5e6a42142c1",
+    "app-server-go/internal/parity/partial_identity_test.go": "11ec9b7aac1d73afcafbe75abe94ddf9af0b91d0cbf3b5895c1dcb8604dfff3e",
+    "app-server-go/internal/parity/process_result_test.go": "17b78438ce553713fbcc82342cb15d147817017489e1b84af491ec8da2089731",
+    "docs/reports/full-go-migration-matrix.json": "c1c78d416f74818d4598c18e3e28a295aaf2fbd98fb9888a75dfe83dee67ddb2",
+    "docs/reports/full-go-p2-operation-process-result.json": "14cf665d21201663b988feb2fe5ed091aeab8f8ff1235069845147f6d8615c7e"
+  },
+  "commands": [
+    {
+      "cwd": "P:/workspace/glwlg/ai/astrorder/app-server-go",
+      "command": "C:/Users/luwei/.codex/tools/go1.26.4.windows-amd64/go/bin/go.exe test ./internal/parity ./cmd/astrorderctl -count=1 -timeout=60s",
+      "exit_code": 0,
+      "observed": "ok astrorder.dev/app-server/internal/parity 0.647s; ok astrorder.dev/app-server/cmd/astrorderctl 0.503s"
+    },
+    {
+      "cwd": "P:/workspace/glwlg/ai/astrorder/app-server-go",
+      "command": "C:/Users/luwei/.codex/tools/go1.26.4.windows-amd64/go/bin/go.exe vet ./internal/parity ./cmd/astrorderctl",
+      "exit_code": 0,
+      "observed": "clean; exit 0"
+    }
+  ],
+  "status_gate_assessment": {
+    "parent_feature": "migration:f03",
+    "parent_status": "IMPLEMENTED",
+    "parent_entry_count": 44,
+    "parent_evidence_count": 0,
+    "parent_blockers_count": 3,
+    "structural_verification": {
+      "ok": true,
+      "final": false,
+      "item_count": 472,
+      "entry_count": 472,
+      "issue_count": 0
+    },
+    "final_verification": {
+      "ok": false,
+      "final": true,
+      "issue_count": 3632
+    }
+  },
+  "coordinator_inspected_evidence": {
+    "fixture_suite": "C:/Users/luwei/AppData/Local/hermes/cache/scratch/full-go-partial-ledger-rereview-after/result.json",
+    "total_mutations": 27,
+    "rejected_mutation_count": 27,
+    "unchanged_passed": true,
+    "note": "Coordinator-run suite inspected by rereviewer; not directly re-executed in this session."
+  },
+  "limitations": [
+    "Read-only review; no working tree modifications outside scratch directory.",
+    "PASS applies exclusively to PARTIAL-001 through PARTIAL-004.",
+    "Does not certify completion of P0, P2, F03, or full Go migration.",
+    "Archived process result hash does not prove current working tree execution."
+  ]
+}

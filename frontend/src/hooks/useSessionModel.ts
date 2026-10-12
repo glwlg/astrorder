@@ -19,6 +19,7 @@ export function useSessionModel(session: Session | null) {
     : query.isFetching ? '读取模型…' : '模型暂不可读'
   const change = async (provider: string, model: string) => {
     if (!session) throw new Error('尚未选择会话')
+    if (binding?.read_only) throw new Error(binding.detail || '会话被其他客户端占用，当前只能读取模型信息')
     await client.cancelQueries({ queryKey, exact: true })
     const result = await api.setSessionModel(session.id, session.agent_id, provider, model)
     await client.cancelQueries({ queryKey, exact: true })
@@ -27,6 +28,7 @@ export function useSessionModel(session: Session | null) {
   }
   const changeEffort = async (effort: string) => {
     if (!session) throw new Error('尚未选择会话')
+    if (binding?.read_only) throw new Error(binding.detail || '会话被其他客户端占用，当前只能读取模型信息')
     const result = await api.setSessionReasoning(session.id, session.agent_id, effort)
     client.setQueryData<SessionModelBinding>(queryKey, previous => previous ? { ...previous, effort: result.effort } : previous)
     return result

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import os
 import re
 import threading
+from contextlib import closing
 from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
@@ -110,16 +112,13 @@ class HermesBridge:
 
     def _resolve_session_workspace(self, session_id: str) -> str | None:
         try:
-            from astrorder.core.session_usage import _find_local_hermes_state_dbs
-            dbs = _find_local_hermes_state_dbs(self.config.profile_name)
-            for db_file in dbs:
-                if not db_file.is_file():
-                    continue
-                import sqlite3
-                with sqlite3.connect(db_file.as_uri() + "?mode=ro", uri=True) as conn:
-                    cur = conn.cursor()
-                    cur.execute("SELECT cwd FROM sessions WHERE id = ?", (session_id,))
-                    row = cur.fetchone()
+            import sqlite3
+            from hermes_constants import get_hermes_home
+
+            db_file = get_hermes_home() / "state.db"
+            if db_file.is_file():
+                with closing(sqlite3.connect(db_file.as_uri() + "?mode=ro", uri=True)) as conn:
+                    row = conn.execute("SELECT cwd FROM sessions WHERE id = ?", (session_id,)).fetchone()
                     if row and row[0]:
                         return str(row[0])
         except Exception:
@@ -440,5 +439,15 @@ class HermesBridge:
             self._send_command_update(command, "failed", "Hermes rejected message injection")
 
 
-def register(ctx: Any) -> HermesBridge:
-    return HermesBridge(ctx, HermesConnectorConfig.from_env()).register()
+def register(ctx: Any) -> Any:
+    """Connector mode when Astrorder launched Hermes; spool mode otherwise.
+
+    Astrorder-launched Hermes gets ``ASTRORDER_CONNECTOR_SECRET`` and talks to the
+    App over the connector socket. A Hermes started by the user has no secret and
+    must still report activity, so it writes the local spool instead.
+    """
+    if os.environ.get("ASTRORDER_CONNECTOR_SECRET"):
+        return HermesBridge(ctx, HermesConnectorConfig.from_env()).register()
+    from .spool import SpoolBridge
+
+    return SpoolBridge(ctx).register()

@@ -1,0 +1,111 @@
+{
+  "review": "read-only bounded P2 OperationQuery final rereview",
+  "generated_at": "2026-10-09T08:43:17+08:00",
+  "verdict": "PASS",
+  "passed": true,
+  "scope": "Session Daemon OperationQuery fix and its protocol/events/journal read chain, default registration/capabilities, and retained scoped regressions",
+  "completion_claims": {
+    "operation_query_fix_verified": true,
+    "p2_complete": false,
+    "full_go_migration_complete": false,
+    "services_or_app_integration_verified": false,
+    "production_verified_or_changed": false
+  },
+  "findings": [],
+  "resolved_finding": {
+    "previous_severity": "MEDIUM",
+    "title": "Malformed completed receipts lost preserved native bytes when typed projection failed",
+    "status": "RESOLVED",
+    "evidence": [
+      "session-daemon-go/internal/grpcapi/operation.go:34-36 maps only ReadStoredOperation failures to gRPC Unavailable.",
+      "session-daemon-go/internal/grpcapi/operation.go:38-43 initializes error and status as explicit protobuf null wrappers.",
+      "session-daemon-go/internal/grpcapi/operation.go:54-63 marks the known row completed, copies exact legacy bytes, and returns that receipt when typed projection cannot decode the envelope.",
+      "session-daemon-go/internal/grpcapi/operation_test.go:336-362 exercises valid untyped and malformed completed rows over authenticated TCP.",
+      "session-daemon-go/internal/grpcapi/operation_test.go:399-405 separately proves a closed durable store is gRPC Unavailable with no receipt.",
+      "A private scratch-only authenticated TCP regression additionally passed for object-plus-trailing-data, array, string, and JSON-null top-level receipts; every case preserved exact bytes, remained COMPLETED, left typed_response unset, and returned explicit null error/status."
+    ]
+  },
+  "verified_behaviors": [
+    "Malformed completed receipt bytes are returned unchanged and do not become a transport error.",
+    "Trailing-data and non-object completed receipt bytes are returned unchanged without a synthetic typed receipt.",
+    "Typed/status projection remains optional; unprojectable rows leave typed_response unset and status/error explicitly null.",
+    "A real durable storage read failure remains gRPC Unavailable.",
+    "Unknown protobuf identity fields are rejected at request, key, and nullable scope-wrapper levels.",
+    "Absent and explicit-null legacy scope values retain null semantics; explicit empty string remains distinct.",
+    "Missing, uncertain, and completed rows retain their separate states.",
+    "Operation lookup is read-only and does not dispatch or redispatch native runtime work, including after reopen.",
+    "The default server registers and advertises exactly DaemonControl, EventStream, and OperationQuery, with operation_lookup=true.",
+    "OperationQuery requires bearer authentication over the actual TCP gRPC server."
+  ],
+  "verification": [
+    {
+      "cwd": "P:/workspace/glwlg/ai/astrorder/session-daemon-go",
+      "command": "env -u ASTRORDER_SSH_REAL_TEST -u ASTRORDER_TEST_REAL_SSH -u ASTRORDER_REAL_HERMES_PYTHON -u ASTRORDER_REAL_HERMES_SOURCE -u ASTRORDER_LATENCY_OUTPUT go test ./internal/grpcapi -count=1 -timeout=120s -run 'Test(GetOperationPreservesUntypedAndMalformedCompletedBytes|GetOperationReadsLegacyWSLedgerOverAuthenticatedTCPAndAfterReopen|GetOperationPreservesUncertainAndExactScopeWithoutRedispatch|GetOperationRejectsInvalidPresenceCanonicalizationAndUnavailableStorage|OperationNullFieldsNeverBecomeSyntheticTypedValues|OperationLookupRejectsUnknownIdentityFields|DefaultServerRegistersAndAdvertisesOperationQuery)$' -v",
+      "exit_code": 0,
+      "result": "PASS",
+      "observed": "All selected top-level tests and their subtests passed; package result ok."
+    },
+    {
+      "cwd": "P:/workspace/glwlg/ai/astrorder/session-daemon-go",
+      "command": "env -u ASTRORDER_SSH_REAL_TEST -u ASTRORDER_TEST_REAL_SSH -u ASTRORDER_REAL_HERMES_PYTHON -u ASTRORDER_REAL_HERMES_SOURCE -u ASTRORDER_LATENCY_OUTPUT go test ./internal/protocol ./internal/journal -count=1 -timeout=120s -run 'Test(ReadStoredOperationUsesExactLegacyScopeAndNeverDispatches|ReadStoredOperationReportsUncertainAndValidatesWithoutMutation|OperationCapabilityAndReadOnlyLookup|FailedNativeOperationRetainsUncertaintyOnRetry|DurableOperationRetryDoesNotCreateTwice|OperationReservationSurvivesRestartAndConcurrentRetries)$' -v",
+      "exit_code": 0,
+      "result": "PASS",
+      "observed": "All selected protocol and journal tests passed; both package results ok."
+    },
+    {
+      "cwd": "P:/workspace/glwlg/ai/astrorder/session-daemon-go",
+      "command": "env -u ASTRORDER_SSH_REAL_TEST -u ASTRORDER_TEST_REAL_SSH -u ASTRORDER_REAL_HERMES_PYTHON -u ASTRORDER_REAL_HERMES_SOURCE -u ASTRORDER_LATENCY_OUTPUT go vet ./internal/grpcapi ./internal/protocol ./internal/events ./internal/journal",
+      "exit_code": 0,
+      "result": "PASS",
+      "observed": "No vet diagnostics."
+    },
+    {
+      "cwd": "C:/Users/luwei/AppData/Local/hermes/cache/scratch/p2-operation-final-review.pyGd5Q/session-daemon-go",
+      "command": "env -u ASTRORDER_SSH_REAL_TEST -u ASTRORDER_TEST_REAL_SSH -u ASTRORDER_REAL_HERMES_PYTHON -u ASTRORDER_REAL_HERMES_SOURCE -u ASTRORDER_LATENCY_OUTPUT go test ./internal/grpcapi -count=1 -timeout=120s -run '^TestPrivateUnprojectableCompletedReceiptsPreserveExactBytes$' -v",
+      "exit_code": 0,
+      "result": "PASS",
+      "observed": "Authenticated TCP subtests trailing, array, string, and json-null all passed against a scratch copy of the final hashed source."
+    }
+  ],
+  "not_run": [
+    "No repeated full-module or repository-wide gates; this rereview was intentionally bounded and prior broad gates were not treated as proof.",
+    "No production, service, real inference, SSH, chat, secrets, or non-fixture database access.",
+    "No App integration test because no OperationQuery/GetOperation consumer was found in app-server-go."
+  ],
+  "remaining_work_and_limits": [
+    "Wire an app-server-go OperationQuery consumer and add App/service integration coverage before claiming this capability is consumed end to end.",
+    "Complete and independently verify the remaining P2 services and T01-T08 gates; this report does not mark P2 complete.",
+    "The wider full-Go migration, later App migration stages, real-agent validation, packaging, and production cutover remain outside this review."
+  ],
+  "provenance": {
+    "branch": "master",
+    "head": "ff32f947024b1840b939ebfb8e58e45886d34b47",
+    "tree": "dirty working tree; reviewed files include untracked artifacts, so per-file SHA-256 values are authoritative",
+    "source_stability": "Scoped hashes matched before testing and at final pin.",
+    "preserved_fail_report": {
+      "path": "C:/Users/luwei/AppData/Local/hermes/cache/scratch/full-go-p2-operation-review-final-extracted.md",
+      "sha256": "d75c9b78f50b2c1c7f7054ba988faf3f892cf783bc5e1f1900cf848347bdb408",
+      "modified": false
+    }
+  },
+  "sha256": {
+    "AGENTS.md": "d5a76147bc9b924e0f367209db8045076a242a43db0d5876484a9fa57d02ae03",
+    "docs/design/astrorder-full-go-migration.md": "ff42fd0bcbd8807d16f2bbaa57468ba9af440421369d6055cc4ac2cdccf1b0ca",
+    "contracts/proto/astrorder/sessiond/v1/sessiond.proto": "c484afa2eebd3343d1aea602a66295154c3501bef5efdfeef340d546a1064fb0",
+    "session-daemon-go/internal/grpcapi/operation.go": "b736dde6e322fb68cb960c1e09bab59f90afcbfae4166e5fbfa27a0ca8237661",
+    "session-daemon-go/internal/grpcapi/operation_test.go": "94d8cd66a04b5c1ec476126f8759312939efcd29c0084c70621a1d7bb1cfb96a",
+    "session-daemon-go/internal/grpcapi/operation_presence_test.go": "6a9f5d9480d0c89e44fa03409b003c878047557bad848d7db086649adbb26999",
+    "session-daemon-go/internal/grpcapi/operation_unknown_test.go": "70542a7c80356da73b2d5dfaa0a5f941bcb49ee275b74b8a4e3f8a32ef85063b",
+    "session-daemon-go/internal/grpcapi/server.go": "9e955ed616faa8bf296d47b12c6a26b91d5a38924f2de0a67937866f4b95c03a",
+    "session-daemon-go/internal/grpcapi/control.go": "8528ecafbcb07e40308fbaec5a9bf92cb9439f475e0433a56ad412484a88aa64",
+    "session-daemon-go/internal/grpcapi/registration_test.go": "1c734bd774e97034db28808f65f02cd46d2a09656690e08d4eb40d024fbf9a8f",
+    "session-daemon-go/internal/protocol/operation_facade.go": "7e6b8953bd9d2f0566977c46208c0548eb8a4cd581d7f4317f504fbc69fa0eda",
+    "session-daemon-go/internal/protocol/operation_facade_test.go": "cd1d70c872069182a7c8eaaf2a357ce8f473f56939afc15bf20aabeb3afc20c9",
+    "session-daemon-go/internal/protocol/operations.go": "e719d101d995ec72f63ecb51f94407ec88d0b757f393ab96c92a4a73093aa957",
+    "session-daemon-go/internal/protocol/operation_test.go": "4423004afedcb5fa04d3b87208297be7529bcfde8d3d146f9712984e7dad61ed",
+    "session-daemon-go/internal/events/operations.go": "0871212d86683c5d810a11e8244b1db323d4678e6ccf7cf304c02cc8efdbe6c2",
+    "session-daemon-go/internal/journal/operations.go": "8c243051668342ed366d4c50aae6c83ef171b97b25bc114e6c3ee3d36e05a534",
+    "session-daemon-go/internal/journal/operations_test.go": "3379e70ccf623f6c347b8154d2454679990ddd1bf4aad21eca2fe8f829166ce6"
+  },
+  "repository_changes_by_reviewer": []
+}

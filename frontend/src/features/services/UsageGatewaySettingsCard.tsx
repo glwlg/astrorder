@@ -243,7 +243,7 @@ export function UsageGatewaySettingsCard() {
           const job = (await api.getModelSyncJobs()).items.find((item) => item.id === operation.id)
           if (!job || job.status === 'running') return
           window.clearInterval(timer)
-          if (job.status === 'success') completeTask(taskId, `已完成 ${job.targets.length} 个目标`)
+          if (job.status === 'success') completeTask(taskId, `已完成 ${(job.targets || []).length} 个目标`)
           else failTask(taskId, job.error || (job.status === 'cancelled' ? '同步已取消' : '模型同步失败'))
           void load()
         } catch { /* persisted job remains authoritative */ }
@@ -270,7 +270,7 @@ export function UsageGatewaySettingsCard() {
           const job = (await api.getModelSyncJobs()).items.find((item) => item.id === operation.id)
           if (!job || job.status === 'running') return
           window.clearInterval(timer)
-          if (job.status === 'success') completeTask(taskId, '已成功下发至 ' + job.targets.length + ' 个目标')
+          if (job.status === 'success') completeTask(taskId, '已成功下发至 ' + (job.targets || []).length + ' 个目标')
           else failTask(taskId, job.error || '全量同步失败')
           void load()
         } catch { /* authoritative */ }
@@ -326,11 +326,11 @@ export function UsageGatewaySettingsCard() {
               <Badge size="xs" color={jobs[0].status === 'success' ? 'teal' : jobs[0].status === 'running' ? 'blue' : 'red'}>
                 {jobs[0].status === 'success' ? '成功' : jobs[0].status === 'running' ? '进行中' : jobs[0].status === 'cancelled' ? '已取消' : '失败'}
               </Badge>
-              <Text size="xs" c="dimmed">{jobs[0].targets.length} 个目标{jobs[0].error ? ` · ${jobs[0].error}` : ''}</Text>
+              <Text size="xs" c="dimmed">{(jobs[0].targets || []).length} 个目标{jobs[0].error ? ` · ${jobs[0].error}` : ''}</Text>
             </Group>
-            {jobs[0].targets.length > 0 && (
+            {(jobs[0].targets || []).length > 0 && (
               <Stack gap={4} p="xs" style={{ background: 'var(--astr-surface-muted, #f8fafc)', borderRadius: 6, border: '1px solid var(--mantine-color-default-border)' }}>
-                {jobs[0].targets.map((tgt) => {
+                {(jobs[0].targets || []).map((tgt) => {
                   const targetName = targets.find((item) => item.id === tgt.target_id)?.name || tgt.target_id
                   const isSuccess = tgt.status === 'success'
                   return (
@@ -379,7 +379,12 @@ export function UsageGatewaySettingsCard() {
         <Stack gap="sm">
           {preview.targets.map((target) => {
             const targetName = targets.find((item) => item.id === target.target_id)?.name || target.target_id
-            const diff = target.model_diff || { added: [], removed: [], kept_count: 0 }
+            const diff = {
+              added: target.model_diff?.added || [],
+              removed: target.model_diff?.removed || [],
+              kept_count: target.model_diff?.kept_count || 0,
+            }
+            const targetChanges = target.changes || []
             const hasModelChanges = diff.added.length > 0 || diff.removed.length > 0
 
             return (
@@ -424,15 +429,15 @@ export function UsageGatewaySettingsCard() {
                     </Text>
                   )}
 
-                  {target.changes.some((c) => c.changed) && (
+                  {targetChanges.some((c) => c.changed) && (
                     <Accordion variant="subtle" mt={4}>
                       <Accordion.Item value="diff">
                         <Accordion.Control p={0}>
-                          <Text size="xs" c="dimmed">查看底层配置文件 Diff 详情（{target.changes.filter(c => c.changed).length} 项文件变动）</Text>
+                          <Text size="xs" c="dimmed">查看底层配置文件 Diff 详情（{targetChanges.filter(c => c.changed).length} 项文件变动）</Text>
                         </Accordion.Control>
                         <Accordion.Panel p={0} pt={4}>
                           <Stack gap="xs">
-                            {target.changes.filter(c => c.changed).map((change) => (
+                            {targetChanges.filter(c => c.changed).map((change) => (
                               <div key={change.file}>
                                 <Text size="xs" fw={600}>{change.file}</Text>
                                 {change.diff && <Code block style={{ maxHeight: 180, overflow: 'auto', whiteSpace: 'pre', fontSize: 11 }}>{change.diff}</Code>}

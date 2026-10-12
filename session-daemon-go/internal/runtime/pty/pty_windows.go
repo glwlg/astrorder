@@ -30,6 +30,10 @@ type windowsTerminal struct {
 }
 
 func defaultPlatformTerminal(shell string, cwd string, env []string, cols, rows int) (Terminal, error) {
+	return defaultCommandTerminal(shell, nil, cwd, env, cols, rows)
+}
+
+func defaultCommandTerminal(shell string, args []string, cwd string, env []string, cols, rows int) (Terminal, error) {
 	resolved, err := exec.LookPath(shell)
 	if err != nil {
 		return nil, err
@@ -102,7 +106,11 @@ func defaultPlatformTerminal(shell string, cwd string, env []string, cols, rows 
 	si.Flags = windows.STARTF_USESTDHANDLES
 	si.ProcThreadAttributeList = attrList.List()
 
-	cmdLine, err := windows.UTF16PtrFromString(syscall.EscapeArg(shell))
+	commandLine := syscall.EscapeArg(shell)
+	for _, arg := range args {
+		commandLine += " " + syscall.EscapeArg(arg)
+	}
+	cmdLine, err := windows.UTF16PtrFromString(commandLine)
 	if err != nil {
 		windows.ClosePseudoConsole(hPC)
 		windows.CloseHandle(inRead)

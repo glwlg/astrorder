@@ -1,0 +1,178 @@
+{
+  "schema_version": 1,
+  "review_id": "full-go-daemon-evidence-review",
+  "generated_at": "2026-10-09T08:56:41+08:00",
+  "repository": "P:/workspace/glwlg/ai/astrorder",
+  "branch": "master",
+  "head": "ff32f947024b1840b939ebfb8e58e45886d34b47",
+  "review_mode": "bounded read-only",
+  "passed": true,
+  "verdict": "PASS_WITH_LOW_FINDING",
+  "scope": [
+    "app-server-go/internal/parity/commands.go",
+    "app-server-go/internal/parity/daemon_command_test.go",
+    "docs/reports/full-go-migration-matrix.json F03 tests and partial_implementations"
+  ],
+  "completion_claims": {
+    "daemon_command_shape_approved": true,
+    "command_execution_proven_by_shape": false,
+    "f03_final_evidence_present": false,
+    "f03_complete": false,
+    "p2_complete": false,
+    "full_go_migration_complete": false,
+    "production_verified_or_changed": false
+  },
+  "severity_counts": {
+    "high": 0,
+    "medium": 0,
+    "low": 1
+  },
+  "findings": [
+    {
+      "severity": "LOW",
+      "title": "Supplemental partial_implementations claims are not parsed or verifier-enforced",
+      "paths": [
+        "app-server-go/internal/parity/baseline.go:106",
+        "app-server-go/internal/parity/baseline.go:143",
+        "docs/reports/full-go-migration-matrix.json:636"
+      ],
+      "evidence": "featureItem has no partial_implementations field, and decodeManifest converts only the parent fields through line 168. JSON decoding therefore ignores the nested status, review, execution, source_freshness_limited and legacy_removed values.",
+      "impact": "A future typo or stale assertion in this supplemental block would not be rejected by astrorderctl migration verification. The current F03 values were checked manually and do not create a false pass because the verifier-visible parent remains IMPLEMENTED with blockers and no final evidence.",
+      "minimal_fix": "Either document partial_implementations as explicitly non-verifier metadata, or add a typed supplemental schema plus consistency validation for allowed statuses, parent-contained entrypoint IDs, report paths/hashes, legacy_removed and source-freshness limits. Do not promote nested execution summaries into final Evidence without the existing artifact and review gates."
+    }
+  ],
+  "code_review": {
+    "fixed_module_mapping": {
+      "result": "PASS",
+      "evidence": [
+        "commands.go:60-64 selects session-daemon-go only for go-daemon-package-test.",
+        "commands.go:65-82 requires that module prefix, a _test.go path, a Test* symbol, internal/ or cmd/ package location, an exact display template, and returns argv as separate arguments.",
+        "daemon_command_test.go:8-35 proves the expected module/argv/final-eligible mapping and rejects cross-module, traversal, shell suffix, package-template and symbol injection mutations."
+      ]
+    },
+    "injection_and_cross_module_risk": {
+      "result": "PASS",
+      "evidence": [
+        "commands.go:104-108 rejects empty, absolute, colon/backslash-bearing, non-allowlisted and non-clean paths.",
+        "The command display is compared as data and no reviewed call site evaluates it through a shell.",
+        "The final verifier uses the code-owned CommandSpec and exact identity binding; it does not execute test.Command metadata."
+      ]
+    },
+    "test_names_and_entrypoint_ids": {
+      "result": "PASS",
+      "evidence": [
+        "All 15 F03 test references matched exactly one function definition; all four go-daemon-package-test symbols exist.",
+        "All 44 F03 entrypoint IDs are unique within F03 and present in the frozen baseline; all nested partial entrypoints are members of the parent F03 set."
+      ]
+    },
+    "evidence_binding": {
+      "result": "PASS_BOUNDED",
+      "evidence": [
+        "manifest.go:197-238 re-resolves mapped tests, binds evidence by command ID/path/name/exact display, rejects non-final-eligible commands and validates the execution artifact.",
+        "evidence.go:17-20 explicitly states that metadata and hashes prove byte integrity, not that a command ran; trusted runner and independent review remain separate gates.",
+        "F03 has status IMPLEMENTED, evidence [], three explicit blockers and no DONE/final claim."
+      ]
+    }
+  },
+  "ledger_review": {
+    "parent_f03": {
+      "status": "IMPLEMENTED",
+      "evidence_count": 0,
+      "blocker_count": 3,
+      "broad_stage_unfinished": true,
+      "legacy_removed": false,
+      "result": "PASS"
+    },
+    "p2_operation_query": {
+      "status": "REVIEWED",
+      "bound_independent_report": "docs/reports/full-go-p2-operation-final-review.json",
+      "report_sha256": "6ed10ff0d56300b2e02c6559df3350dc342adad6cc1dcc384313733e754be457",
+      "source_freshness_limited": true,
+      "legacy_removed": false,
+      "process_result": "C:/Users/luwei/AppData/Local/hermes/cache/scratch/full-go-p2-python-malformed-verified/result.json",
+      "process_result_sha256_declared_and_observed": "14cf665d21201663b988feb2fe5ed091aeab8f8ff1235069845147f6d8615c7e",
+      "candidate_binary_sha256_declared_and_result_embedded": "39ec833a217f7bcf588c67d192f2417ce1cbd8f58e4ba2eca90d304f0cc12c7d",
+      "candidate_binary_bytes_rehashed_in_this_review": false,
+      "result": "PASS_WITH_DIRTY_SOURCE_FRESHNESS_LIMIT"
+    },
+    "p2_control_event_foundation": {
+      "status": "ISOLATED_VERIFIED",
+      "bound_prior_hash_report": "docs/reports/full-go-p2-control-review.json",
+      "report_sha256": "79da275e484d8b64065219c18bb285afc05017857905b877e7a725b990401844",
+      "review_status": "PASS_SCOPED_PREVIOUS_HASHES",
+      "legacy_removed": false,
+      "current_source_claim": false,
+      "result": "PASS_WITH_PRIOR_HASH_LIMIT"
+    }
+  },
+  "commands": [
+    {
+      "cwd": "P:/workspace/glwlg/ai/astrorder/app-server-go",
+      "command": "go test ./internal/parity -count=1 && go vet ./internal/parity",
+      "exit_code": 0,
+      "observed": "parity package passed; vet emitted no diagnostics"
+    },
+    {
+      "cwd": "P:/workspace/glwlg/ai/astrorder/app-server-go",
+      "command": "go test ./internal/parity -run '^TestDaemonTestEvidenceUsesFixedModuleCommand$' -count=1 -v",
+      "exit_code": 0,
+      "observed": "focused daemon command resolver test passed"
+    },
+    {
+      "cwd": "P:/workspace/glwlg/ai/astrorder/app-server-go",
+      "command": "go vet ./internal/parity",
+      "exit_code": 0,
+      "observed": "no diagnostics on final scoped source"
+    },
+    {
+      "cwd": "P:/workspace/glwlg/ai/astrorder",
+      "command": "python read-only F03 frozen-ID and duplicate check",
+      "exit_code": 0,
+      "observed": "44 F03 IDs, zero missing, zero duplicates"
+    },
+    {
+      "cwd": "P:/workspace/glwlg/ai/astrorder",
+      "command": "python read-only F03 test-definition binding check",
+      "exit_code": 0,
+      "observed": "15 references, zero absent or duplicate definitions; four daemon references"
+    },
+    {
+      "cwd": "P:/workspace/glwlg/ai/astrorder",
+      "command": "python initial supplemental-ledger inspection using incorrect top-level key items",
+      "exit_code": 1,
+      "observed": "reviewer script KeyError only; corrected to migration_items in the succeeding check, not a product failure"
+    }
+  ],
+  "source_hashes": {
+    "app-server-go/internal/parity/commands.go": "6bda7a30c8720860b2ba68079f68fe151ddac186378f849b6b5fe070a4dc18b3",
+    "app-server-go/internal/parity/daemon_command_test.go": "3b5156c64e1dae9e3f8851fd9d114732b5d07714ccff001971abb7f5887e7cb7",
+    "docs/reports/full-go-migration-matrix.json": "7bc5d50813daa14925ba79a4b832d7b7f144910fcd72a9ff70740a779f73f8df",
+    "app-server-go/internal/parity/baseline.go": "f2852c26f901ac2153a01f86875c822d76f9b13a53944f1b41247836ba5584ae",
+    "app-server-go/internal/parity/manifest.go": "ed2d4f98472c5c43a1918ef07d50e5b721f98fed814626cc8c442b902533d1a5",
+    "app-server-go/internal/parity/evidence.go": "85de6900efe270ce5786b89b04f55b622e0265a2f92453764e2702bcf54ca36f",
+    "docs/reports/full-go-p2-operation-final-review.json": "6ed10ff0d56300b2e02c6559df3350dc342adad6cc1dcc384313733e754be457",
+    "docs/reports/full-go-p2-control-review.json": "79da275e484d8b64065219c18bb285afc05017857905b877e7a725b990401844",
+    "docs/reports/full-go-p2-incremental.md": "f5c5fc294278c3467b2cf26c1e3ca15ea18a39ae59a40cedf3ffa5a59f9f25ef",
+    "session-daemon-go/internal/grpcapi/operation.go": "b736dde6e322fb68cb960c1e09bab59f90afcbfae4166e5fbfa27a0ca8237661",
+    "session-daemon-go/internal/protocol/operation_facade.go": "7e6b8953bd9d2f0566977c46208c0548eb8a4cd581d7f4317f504fbc69fa0eda",
+    "session-daemon-go/internal/grpcapi/operation_test.go": "94d8cd66a04b5c1ec476126f8759312939efcd29c0084c70621a1d7bb1cfb96a",
+    "session-daemon-go/internal/grpcapi/slow_reader_test.go": "f2fea3200f4b6ec52527e7433e856aa980a18f86bbad54100b81cede6ff6e094",
+    "session-daemon-go/internal/protocol/shutdown_write_failure_test.go": "1d9cf9bb152d1d04c5744c4335dd330294471c0c836daff382941801e871e6da"
+  },
+  "workspace_state": {
+    "scoped_files_untracked": [
+      "app-server-go/internal/parity/commands.go",
+      "app-server-go/internal/parity/daemon_command_test.go",
+      "docs/reports/full-go-migration-matrix.json"
+    ],
+    "source_identity_note": "HEAD alone does not identify the scoped source; the recorded per-file SHA-256 values are authoritative.",
+    "repository_modified_by_reviewer": false,
+    "services_or_production_touched": false
+  },
+  "limitations": [
+    "No daemon package, broad repository, race, service, production, database, secret, chat or real-inference execution was performed.",
+    "The OperationQuery candidate binary path is not present in the supplemental execution object, so this review verified the declared/result hash agreement and result artifact hash, not the candidate binary bytes.",
+    "The control/event review applies to its recorded prior hash set; current server/control sources differ after later OperationQuery work, exactly as the ledger limit states.",
+    "Approval of go-daemon-package-test command shape is not proof that any referenced daemon test command was executed."
+  ]
+}

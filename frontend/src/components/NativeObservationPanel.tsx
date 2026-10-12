@@ -7,11 +7,18 @@ import { api } from '../api/client'
 export function NativeObservationPanel({ agentId, sessionId }: { agentId: string; sessionId?: string }) {
   const query=useQuery({ queryKey:['astrorder','observations',agentId,sessionId],queryFn:()=>api.getObservations(agentId,sessionId),refetchInterval:10000,retry:false })
   const [busy,setBusy]=useState(false)
+  const [outcome,setOutcome]=useState<{trusted:boolean;needsReview:boolean}|null>(null)
   const state=query.data?.status
   const install=async()=>{
     setBusy(true)
-    try { await api.installObserver(agentId); await query.refetch(); notifications.show({message:'观察钩子已安装。请在对应 Codex 的 /hooks 中审核信任；不会绕过原生安全检查。'}) }
-    catch { notifications.show({color:'red',message:'观察钩子安装未确认，已有配置保持保留。请检查连接。'}) }
+    try {
+      const result=await api.installObserver(agentId)
+      setOutcome({trusted:!!result.trusted,needsReview:!!result.needs_review})
+      await query.refetch()
+      if (result.trusted) notifications.show({message:'观察钩子已配置并由 Codex 信任，无需手动确认。'})
+      else notifications.show({color:'yellow',message:`观察钩子已配置，但信任未完成：${result.trust_error||'请在对应 Codex 的 /hooks 中确认'}`})
+    }
+    catch (error) { notifications.show({color:'red',message:`观察钩子配置失败：${error instanceof Error?error.message:'请检查连接'}`}) }
     finally {setBusy(false)}
   }
   return (
@@ -25,16 +32,16 @@ export function NativeObservationPanel({ agentId, sessionId }: { agentId: string
           </Text>
         </Group>
         <Group gap="xs" align="center">
-          <span className={`observation-status-pill ${state?.trusted ? 'is-trusted' : ''}`}>
+          <span className={`observation-status-pill ${(outcome?.trusted ?? state?.trusted) ? 'is-trusted' : ''}`}>
             <span className="status-indicator-dot" />
-            <span>{state?.trusted ? '已信任' : state?.needs_review ? '待审核' : state?.installed ? '已就绪' : '未配置'}</span>
+            <span>{(outcome?.trusted ?? state?.trusted) ? '已信任' : (outcome?.needsReview ?? state?.needs_review) ? '待审核' : state?.installed ? '已就绪' : '未配置'}</span>
           </span>
           <Button size="compact-xs" variant="subtle" color="gray" loading={busy} onClick={() => void install()}>
             {state?.installed ? '更新' : '配置'}
           </Button>
         </Group>
       </Group>
-      {state?.needs_review && (
+      {(outcome?.needsReview ?? state?.needs_review) && (
         <Text size="xs" c="yellow" mt={6}>
           请在宿主 Codex 输入 <code>/hooks</code> 确认授权。
         </Text>

@@ -130,7 +130,10 @@ export function MessageBody({
   const lines: string[] = []
   for (const line of text.split('\n')) {
     if (/^\s*(```|~~~)/.test(line)) fenced = !fenced
-    if (!fenced && /^@image:(?:[A-Za-z]:[\\/]|\/|\\\\)\S.*$/.test(line.trim())) {
+    const nativeImage = /^\[Image attached at: ((?:[A-Za-z]:[\\/]|\/|\\\\).+?)\](?:\s*\[screenshot\])?$/.exec(line.trim())
+    if (!fenced && nativeImage) {
+      references.push('@image:' + nativeImage[1])
+    } else if (!fenced && /^@image:(?:[A-Za-z]:[\\/]|\/|\\\\)\S.*$/.test(line.trim())) {
       references.push(line.trim())
     } else {
       lines.push(line)

@@ -75,3 +75,76 @@ func TestDesktopStopObserverForwardsStops(t *testing.T) {
 		t.Fatalf("unexpected emitted call: %s", calls[0])
 	}
 }
+
+func writeSpoolEvent(t *testing.T, dir string, n int, event, session string) {
+	t.Helper()
+	id := fmt.Sprintf("%032x", n)
+	data, _ := json.Marshal(map[string]any{
+		"id": id, "event": event, "session_id": session,
+		"observed_at": float64(time.Now().Unix()),
+	})
+	if err := os.WriteFile(filepath.Join(dir, id+".json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDesktopObserverForwardsActivityWithoutOverridingStatus(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+	dir := filepath.Join(home, "astrorder-observer", "events")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	var calls []string
+	emit := func(sid, ev string, _ map[string]any, status string) error {
+		mu.Lock()
+		defer mu.Unlock()
+		calls = append(calls, fmt.Sprintf("%s|%s|%s", sid, ev, status))
+		return nil
+	}
+	known := func(id string) bool { return id == "tracked" }
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go codex.StartDesktopObserver(ctx, codex.Config{AgentID: "codex-test"}, emit, known, 10*time.Millisecond)
+	time.Sleep(40 * time.Millisecond)
+
+	writeSpoolEvent(t, dir, 1, "UserPromptSubmit", "tracked")
+	writeSpoolEvent(t, dir, 2, "UserPromptSubmit", "stranger")
+	// Tool hooks for the same session inside the throttle window collapse to one.
+	writeSpoolEvent(t, dir, 3, "PreToolUse", "tracked")
+	writeSpoolEvent(t, dir, 4, "PostToolUse", "tracked")
+	writeSpoolEvent(t, dir, 5, "Stop", "tracked")
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		n := len(calls)
+		mu.Unlock()
+		if n >= 4 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	time.Sleep(80 * time.Millisecond)
+	mu.Lock()
+	defer mu.Unlock()
+	want := map[string]int{
+		"tracked|native.activity|":        1, // empty status: never overrides running/waiting
+		"stranger|native.activity|idle":   1, // untracked session registers as idle
+		"tracked|codex.notification|idle": 1, // Stop keeps its old behaviour
+	}
+	got := map[string]int{}
+	for _, c := range calls {
+		got[c]++
+	}
+	// The prompt arrives first and starts the throttle window; tool hooks are dropped.
+	for key, count := range want {
+		if got[key] != count {
+			t.Fatalf("calls = %v, want %q x%d", calls, key, count)
+		}
+	}
+	if len(calls) != 3 {
+		t.Fatalf("calls = %v, want exactly 3", calls)
+	}
+}

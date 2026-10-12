@@ -15,7 +15,7 @@
 
 它**不做平庸的包装壳**，也不建立割裂的第二套对话体系：
 - **真原生直连**：会话 ID、线程上下文、模型调用、审批状态与原生 Agent 运行时（Codex app-server、Hermes CLI 等）完全同源一致。
-- **大小内核分离架构**：Go 守护小内核（`session-daemon-go/`）托管 Agent、PTY 终端与任务流；Python 大内核负责 API、控制客户端和事件投影，支持独立重载。Python 小内核实现及启动回退已移除，开发入口见 [小内核维护说明](docs/session-daemon.md)。
+- **大小内核分离架构**：Go 小内核（`session-daemon-go/`）托管 Agent、PTY 终端与任务流；Go 大内核（`app-server-go/`）负责 API、控制客户端和事件投影，通过 gRPC 通信并支持独立重启。
 - **全方位可视化 Sidecar**：代码、终端、浏览器、流程图、3D 模型、Diff 对比同屏协同，真正让 Agent 产物触手可及。
 - **跨端无缝体验**：桌面端宽屏多栏工件台与移动端原生手势抽屉卡片随心切换。
 
@@ -99,15 +99,15 @@ flowchart TD
     UI["📱 💻 客户端 UI<br/>(Web 浏览器 / 桌面端 Electron / 移动端触屏工作台)"]
 
     subgraph BigKernel ["大内核：App Server (业务功能核 · 支持高频热更与随时重启)"]
-        AS["🚀 <b>FastAPI / Uvicorn 服务</b> (Port 30001 / 30002)<br/>• 业务 REST API & 静态前端资源托管<br/>• Sidecar 多栏工件处理引擎 (Monaco / xterm / Diff / 白板 / 3D)<br/>• 数据持久化落地 (SQLite) & 状态统一投影"]
+        AS["🚀 <b>Go HTTP 服务</b> (Port 30001 / 30002)<br/>• 业务 REST API & 静态前端资源托管<br/>• Sidecar 多栏工件处理引擎 (Monaco / xterm / Diff / 白板 / 3D)<br/>• 数据持久化落地 (SQLite) & 状态统一投影"]
     end
 
     subgraph SmallKernel ["小内核：Session Daemon (常驻守护核 · 稳定驻留 · 绝不杀进程)"]
-        SD["🛡️ <b>Asyncio 守护核心</b> (Port 30009)<br/>• 真实 Agent 宿主 (Codex app-server / Hermes / Grok / SSH / PTY 子进程树)<br/>• 内存 WAL 环形缓冲池 (Ring Buffer，保证大内核断线无损)<br/>• 审批拦截转发与指令中断控制 (turn/interrupt, approval response)"]
+        SD["🛡️ <b>Go 守护核心</b> (Port 30009)<br/>• 真实 Agent 宿主 (Codex app-server / Hermes / Grok / SSH / PTY 子进程树)<br/>• 内存 WAL 环形缓冲池 (Ring Buffer，保证大内核断线无损)<br/>• 审批拦截转发与指令中断控制 (turn/interrupt, approval response)"]
     end
 
     UI <==>|"WebSocket 双工流 / HTTP API"| AS
-    AS <==>|"本地轻量 IPC (Loopback WebSocket / JSON-RPC)"| SD
+    AS <==>|"本地 gRPC / Protobuf"| SD
 
     classDef default fill:#1e293b,stroke:#475569,stroke-width:1.5px,color:#f8fafc;
     classDef clientNode fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc;
@@ -129,63 +129,43 @@ flowchart TD
 | 模块 | 技术选型 |
 |---|---|
 | **前端界面** | React 18 · TypeScript · Vite · Mantine UI · Zustand · Monaco Editor · xterm.js · Lucide Icons |
-| **后端服务** | Python 3.11+ · FastAPI · Pydantic · SQLAlchemy · SQLite · Uvicorn · Asyncio |
+| **后端服务** | Go · gRPC / Protobuf · SQLite |
 | **桌面客户端**| Electron · 本地独立安装包 |
 | **Agent 连接器** | Codex app-server JSON-RPC 协议 · Hermes 插件与 TUI Gateway · 原生 SSH PTY 协议 |
-| **质量与测试** | Vitest · Playwright · pytest · Ruff |
+| **质量与测试** | Go test / vet · Vitest · Playwright · Node test |
 
 ---
 
 ## 🚀 快速开始
 
 ### 依赖要求
-- Python 3.11 或更高版本，推荐安装 `uv`
-- Node.js 18+ 与 npm
 
-### 1. 安装依赖
+- Go（版本以两个 Go 模块的 `go.mod` 为准）、Node.js 与 npm。
+- 构建协议需要 Buf、protoc-gen-go 和 protoc-gen-go-grpc；可通过 `ASTRORDER_BUF`、`ASTRORDER_PROTOC_GEN_GO`、`ASTRORDER_PROTOC_GEN_GO_GRPC` 指定工具路径。
+- 原生 Agent 按需独立安装。Hermes 使用自己的 Python 环境。
 
-```bash
-# 后端依赖
-cd backend && uv sync --extra dev
+### 构建桌面安装包
 
-# 前端依赖
-cd ../frontend && npm ci
-```
-
-### 2. 开发运行
-
-推荐在两个独立终端分别启动：
+在仓库根目录运行：
 
 ```bash
-# 终端 1：启动后端大内核
-cd backend
-ASTRORDER_HOST=127.0.0.1 \
-ASTRORDER_PORT=30002 \
-ASTRORDER_BROWSER_SECRET='<browser-secret>' \
-ASTRORDER_CONNECTOR_SECRET='<connector-secret>' \
-ASTRORDER_ALLOWED_ORIGINS='http://127.0.0.1:30001,http://localhost:30001' \
-uv run astrorder-server
-
-# 终端 2：启动前端开发服务器
-cd frontend
-npm run dev
+npm --prefix frontend ci
+npm --prefix desktop ci
+npm --prefix desktop run dist
 ```
 
-打开浏览器访问 `http://127.0.0.1:30001`。
+Windows 安装包输出到 `desktop/release/`。构建会编译前端、Go 大小内核和辅助程序，再生成 NSIS 安装包。
 
-### 3. 单进程托管部署
+### 验证与运维
 
 ```bash
-cd frontend && npm run build
-cd ../backend
-ASTRORDER_HOST=127.0.0.1 \
-ASTRORDER_PORT=30002 \
-ASTRORDER_BROWSER_SECRET='<browser-secret>' \
-ASTRORDER_CONNECTOR_SECRET='<connector-secret>' \
-ASTRORDER_ALLOWED_ORIGINS='http://127.0.0.1:30002' \
-ASTRORDER_STATIC_DIR='../frontend/dist' \
-uv run astrorder-server
+go -C app-server-go test ./...
+go -C session-daemon-go test ./...
+npm --prefix desktop test
+node scripts/migration/isolated-http-verify.mjs <仓库绝对路径> <临时目录绝对路径>
 ```
+
+安装后的服务由 `server/bin/astrorderctl.exe` 管理，使用显式 `--root` 和 `--state-dir`。大内核可独立执行 `app start|stop|restart|status`。小内核重启前必须读取权威状态；存在运行或待审批会话时必须先取得用户明确同意。
 
 ---
 

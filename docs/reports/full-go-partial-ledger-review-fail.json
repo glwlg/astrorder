@@ -1,0 +1,279 @@
+{
+  "schema_version": 1,
+  "review_id": "full-go-partial-ledger-final-review",
+  "review_mode": "read-only independent bounded review",
+  "repository": "P:/workspace/glwlg/ai/astrorder",
+  "branch": "master",
+  "head": "ff32f947024b1840b939ebfb8e58e45886d34b47",
+  "passed": false,
+  "verdict": "FAIL",
+  "scope": [
+    "app-server-go/internal/parity/baseline.go",
+    "app-server-go/internal/parity/manifest.go",
+    "app-server-go/internal/parity/partial.go",
+    "app-server-go/internal/parity/partial_test.go",
+    "docs/reports/full-go-migration-matrix.json F03 partial_implementations",
+    "docs/reports/full-go-p2-operation-process-result.json"
+  ],
+  "severity_counts": {
+    "high": 0,
+    "medium": 2,
+    "low": 2
+  },
+  "findings": [
+    {
+      "id": "PARTIAL-001",
+      "severity": "MEDIUM",
+      "title": "Unknown JSON keys fail open and can erase the partial ledger or its execution binding",
+      "path": "app-server-go/internal/parity/baseline.go",
+      "line": 130,
+      "related_locations": [
+        "app-server-go/internal/parity/baseline.go:130",
+        "app-server-go/internal/parity/baseline.go:140",
+        "app-server-go/internal/parity/baseline.go:146",
+        "app-server-go/internal/parity/partial.go:116"
+      ],
+      "detail": "decodeManifest uses json.Unmarshal without DisallowUnknownFields. A typo from partial_implementations to partial_implementation silently removes every typed partial group, and a typo from execution to executon silently removes the historical execution object. Both mutated matrices returned structural ok=true with zero issues. This defeats the stated purpose of making claim-bearing supplemental fields verifier-enforced, even though it still cannot satisfy final Evidence or runtime registration.",
+      "repro": {
+        "fixtures": [
+          "C:/Users/luwei/AppData/Local/hermes/cache/scratch/full-go-partial-ledger-review-fixtures/misspelled-partials-key/docs/reports/full-go-migration-matrix.json",
+          "C:/Users/luwei/AppData/Local/hermes/cache/scratch/full-go-partial-ledger-review-fixtures/misspelled-execution-key/docs/reports/full-go-migration-matrix.json"
+        ],
+        "command": "astrorderctl migration verify --root <private-fixture-root> --baseline docs/reports/full-go-baseline.json --matrix <case>/docs/reports/full-go-migration-matrix.json --structural",
+        "observed": "Both cases exited 0 and returned {ok:true, final:false, item_count:472, entry_count:472, issues:[]}.",
+        "expected": "Reject unknown claim-bearing fields, including misspellings that drop partial_implementations or execution."
+      },
+      "minimal_fix": "Decode the feature matrix and nested partial schemas with a single-object json.Decoder using DisallowUnknownFields, or explicitly preserve and reject unknown keys at every claim-bearing level. Add regressions for misspelled partial_implementations and execution."
+    },
+    {
+      "id": "PARTIAL-002",
+      "severity": "MEDIUM",
+      "title": "Historical command and assertion claims are not bound to the hashed process result",
+      "path": "app-server-go/internal/parity/partial.go",
+      "line": 125,
+      "related_locations": [
+        "app-server-go/internal/parity/partial.go:125",
+        "app-server-go/internal/parity/partial.go:130",
+        "app-server-go/internal/parity/partial.go:145",
+        "app-server-go/internal/parity/partial.go:149"
+      ],
+      "detail": "The validator checks only that ledger commands and exit_codes have matching nonzero length and zero exits. It parses only passed, daemon_sha256, full_migration_complete and production_changed from the hashed result. The commands, assertions, schema_version, stage, fixture receipt and cleanup in that result are ignored. Therefore arbitrary successful command/assertion claims can be substituted while retaining the same hashed process result and candidate hash. Incorrect JSON types in the ignored result fields also pass. In the current records, the ledger declares three commands/three exits/four assertions, while the archived result contains one differently worded command, no exit_codes field and eight assertions.",
+      "repro": {
+        "fixtures": [
+          "C:/Users/luwei/AppData/Local/hermes/cache/scratch/full-go-partial-ledger-review-fixtures/unbound-execution-claims/docs/reports/full-go-migration-matrix.json",
+          "C:/Users/luwei/AppData/Local/hermes/cache/scratch/full-go-partial-ledger-review-fixtures/ignored-process-result-types/docs/reports/full-go-migration-matrix.json"
+        ],
+        "command": "astrorderctl migration verify --root <private-fixture-root> --baseline docs/reports/full-go-baseline.json --matrix <case>/docs/reports/full-go-migration-matrix.json --structural",
+        "observed": "Both cases exited 0 with zero issues. One changed the ledger to a claimed production deployment/full completion; the other bound a correctly hashed result whose schema_version, stage, commands and assertions had incorrect JSON types.",
+        "expected": "The hash-bound result must use a strict typed schema and must bind every command/exit/assertion claim relied on by the partial record, or the ledger must stop carrying those unbound claims. Commands remain documentary and must never be executed by verification."
+      },
+      "minimal_fix": "Define and strictly decode the complete bounded process-result schema, including schema_version, stage, commands, assertions, cleanup and fixture limits. Put per-command exit codes in the archived result or bind ledger commands/exits to a separately hashed execution summary. Reject unknown/wrongly typed fields and unsupported schema versions. Keep production_changed=false and full_migration_complete=false mandatory."
+    },
+    {
+      "id": "PARTIAL-003",
+      "severity": "LOW",
+      "title": "Feature-group identity and partial ID/entry uniqueness are only checked locally",
+      "path": "app-server-go/internal/parity/partial.go",
+      "line": 58,
+      "related_locations": [
+        "app-server-go/internal/parity/baseline.go:145",
+        "app-server-go/internal/parity/baseline.go:147",
+        "app-server-go/internal/parity/manifest.go:141",
+        "app-server-go/internal/parity/partial.go:58",
+        "app-server-go/internal/parity/partial.go:82"
+      ],
+      "detail": "ParentID is not validated for presence or uniqueness. Partial IDs are deduplicated only inside one PartialGroup, and seenEntries is reset for each partial. A feature can therefore be split into duplicate migration groups, reuse the same partial ID across groups, or have two partials claim the same parent entrypoint without an issue. The expanded item IDs remain unique when parent entrypoints are partitioned, so the existing per-entry duplicate check does not catch this.",
+      "repro": {
+        "fixtures": [
+          "C:/Users/luwei/AppData/Local/hermes/cache/scratch/full-go-partial-ledger-review-fixtures/missing-parent-id/docs/reports/full-go-migration-matrix.json",
+          "C:/Users/luwei/AppData/Local/hermes/cache/scratch/full-go-partial-ledger-review-fixtures/duplicate-group-and-cross-group-partial-id/docs/reports/full-go-migration-matrix.json",
+          "C:/Users/luwei/AppData/Local/hermes/cache/scratch/full-go-partial-ledger-review-fixtures/overlapping-partial-entry/docs/reports/full-go-migration-matrix.json"
+        ],
+        "command": "astrorderctl migration verify --root <private-fixture-root> --baseline docs/reports/full-go-baseline.json --matrix <case>/docs/reports/full-go-migration-matrix.json --structural",
+        "observed": "All three cases exited 0 with zero issues.",
+        "expected": "Require a nonempty unique parent feature-group ID, define partial-ID scope explicitly and reject duplicate entry claims across partial records in that scope."
+      },
+      "minimal_fix": "Validate unique/nonempty feature IDs before expansion. Maintain feature/global partial-ID and claimed-entry sets outside validatePartialGroup's per-partial loop, and add split-group and overlapping-entry regressions."
+    },
+    {
+      "id": "PARTIAL-004",
+      "severity": "LOW",
+      "title": "Artifact binding accepts non-clean repository-relative aliases",
+      "path": "app-server-go/internal/parity/manifest.go",
+      "line": 293,
+      "related_locations": [
+        "app-server-go/internal/parity/manifest.go:293",
+        "app-server-go/internal/parity/manifest.go:302",
+        "app-server-go/internal/parity/partial.go:99",
+        "app-server-go/internal/parity/partial.go:112",
+        "app-server-go/internal/parity/partial.go:145"
+      ],
+      "detail": "regularInside correctly rejects absolute, colon-bearing, escaping and outside-root symlink targets, but it normalizes internal .. segments rather than requiring a clean canonical path. Review, evidence and process-result paths such as docs/reports/../reports/file.json pass. Hash integrity is retained, so this is not a demonstrated root escape, but it weakens unambiguous report identity and does not meet the requested clean-path gate.",
+      "repro": {
+        "fixture": "C:/Users/luwei/AppData/Local/hermes/cache/scratch/full-go-partial-ledger-review-fixtures/non-clean-internal-paths/docs/reports/full-go-migration-matrix.json",
+        "command": "astrorderctl migration verify --root <private-fixture-root> --baseline docs/reports/full-go-baseline.json --matrix non-clean-internal-paths/docs/reports/full-go-migration-matrix.json --structural",
+        "observed": "Exited 0 with zero issues for non-clean review, evidence and process-result paths.",
+        "expected": "Require canonical clean slash-relative paths in addition to root and symlink containment."
+      },
+      "minimal_fix": "Reject a path unless its normalized slash form equals filepath.Clean/from-slash round-trip, then retain the existing EvalSymlinks and regular-file containment checks."
+    }
+  ],
+  "verified_properties": [
+    "Typed partial records are captured from each original feature object before per-entry expansion and Verify invokes partial validation in structural mode.",
+    "The current F03 partial entrypoints are members of the 44-entry parent set and have no duplicate entries within each individual record.",
+    "Missing/duplicate IDs within one group, invalid stage/status, empty/duplicate entries within one record, missing owner, invalid acceptance IDs and absent explicit legacy disposition are rejected by the labelled unit fixtures.",
+    "Review paths and hashes are checked under the root; REVIEWED requires review.status=PASS and the JSON report must contain passed=true. PASS_SCOPED_PREVIOUS_HASHES cannot certify REVIEWED.",
+    "DONE and PRODUCTION_VERIFIED are rejected for bounded partials. The production-status mutation exited 1 with invalid_partial.",
+    "Partial records are not copied into Item.Evidence, do not alter parent status and do not satisfy productregistry registrations.",
+    "The repository process result is byte-identical to C:/Users/luwei/AppData/Local/hermes/cache/scratch/full-go-p2-python-malformed-verified/result.json and both hash to 14cf665d21201663b988feb2fe5ed091aeab8f8ff1235069845147f6d8615c7e.",
+    "The historical result reports passed=true, production_changed=false and full_migration_complete=false; its daemon_sha256 matches the ledger candidate_binary_sha256. Candidate binary bytes were not available or rehashed in this review.",
+    "Current F03 remains IMPLEMENTED with zero final evidence and three blockers. Live structural verification passes, while live final verification fails and therefore does not certify F03, P0, P2 or the full migration."
+  ],
+  "status_gate_review": {
+    "production_verified_allowed": false,
+    "assessment": "Correct for this isolation-only schema. PRODUCTION_VERIFIED must remain forbidden because the record explicitly carries source_freshness_limited=true, synthetic/private fixtures, no production change and no current-source or production proof.",
+    "current_parent": {
+      "id": "migration:f03",
+      "status": "IMPLEMENTED",
+      "entry_count": 44,
+      "evidence_count": 0,
+      "blocker_count": 3
+    },
+    "live_structural": {
+      "exit_code": 0,
+      "ok": true,
+      "final": false,
+      "item_count": 472,
+      "entry_count": 472,
+      "issue_count": 0
+    },
+    "live_final": {
+      "exit_code": 1,
+      "ok": false,
+      "final": true,
+      "item_count": 472,
+      "entry_count": 472,
+      "issue_count": 3632,
+      "issue_codes": {
+        "blocked_item": 44,
+        "invalid_candidate_revision": 1,
+        "legacy_retained": 472,
+        "missing_evidence": 472,
+        "missing_review": 472,
+        "missing_target": 1241,
+        "unfinished_item": 472,
+        "unregistered_entrypoint": 458
+      }
+    }
+  },
+  "commands": [
+    {
+      "cwd": "P:/workspace/glwlg/ai/astrorder/app-server-go",
+      "command": "C:/Users/luwei/.codex/tools/go1.26.4.windows-amd64/go/bin/go.exe test ./internal/parity ./cmd/astrorderctl -count=1 -timeout=60s",
+      "exit_code": 0,
+      "observed": "Both requested packages passed."
+    },
+    {
+      "cwd": "P:/workspace/glwlg/ai/astrorder/app-server-go",
+      "command": "C:/Users/luwei/.codex/tools/go1.26.4.windows-amd64/go/bin/go.exe vet ./internal/parity ./cmd/astrorderctl",
+      "exit_code": 0,
+      "observed": "No diagnostics."
+    },
+    {
+      "cwd": "P:/workspace/glwlg/ai/astrorder/app-server-go",
+      "command": "C:/Users/luwei/.codex/tools/go1.26.4.windows-amd64/go/bin/go.exe test ./internal/parity -run '^TestVerify(RejectsPartialEntrypointOutsideParent|RejectsInvalidPartialMetadata|BindsPartialReportsWithoutPromotingParent|BindsPartialExecutionSummary)$' -count=1 -timeout=60s -v",
+      "exit_code": 0,
+      "observed": "All labelled unit-fixture tests and subtests passed; fixtures explicitly say they are not real execution/review evidence."
+    },
+    {
+      "cwd": "P:/workspace/glwlg/ai/astrorder/app-server-go",
+      "command": "go run ./cmd/astrorderctl migration verify --root .. --structural",
+      "exit_code": 0,
+      "observed": "ok=true, final=false, 472 items, 472 entries, zero issues."
+    },
+    {
+      "cwd": "P:/workspace/glwlg/ai/astrorder/app-server-go",
+      "command": "go run ./cmd/astrorderctl migration verify --root ..",
+      "exit_code": 1,
+      "observed": "Expected gate failure: ok=false, final=true, 3632 issues including 458 unregistered entrypoints and 472 unfinished items."
+    },
+    {
+      "cwd": "P:/workspace/glwlg/ai/astrorder/app-server-go",
+      "command": "private scratch mutation matrix through a reviewer-built astrorderctl; structural mode only",
+      "exit_code": 0,
+      "case_exits": {
+        "control": 0,
+        "misspelled-partials-key": 0,
+        "misspelled-execution-key": 0,
+        "missing-parent-id": 0,
+        "duplicate-group-and-cross-group-partial-id": 0,
+        "overlapping-partial-entry": 0,
+        "unbound-execution-claims": 0,
+        "production-status": 1,
+        "non-clean-internal-paths": 0,
+        "ignored-process-result-types": 0
+      },
+      "observed": "Commands embedded in ledger data were never executed."
+    },
+    {
+      "cwd": "P:/workspace/glwlg/ai/astrorder",
+      "command": "sha256sum scoped reports and cmp repository process result against archived scratch result",
+      "exit_code": 0,
+      "observed": "Repository and scratch process results were byte-identical at SHA-256 14cf665d21201663b988feb2fe5ed091aeab8f8ff1235069845147f6d8615c7e."
+    },
+    {
+      "cwd": "P:/workspace/glwlg/ai/astrorder/app-server-go",
+      "command": "initial live verification pipelines using jq",
+      "exit_code": 1,
+      "observed": "Reviewer harness failure only: jq was not installed. Results were discarded and rerun successfully using raw JSON plus Node parsing; no install was performed."
+    },
+    {
+      "cwd": "P:/workspace/glwlg/ai/astrorder",
+      "command": "node --version && jq --version",
+      "exit_code": 127,
+      "observed": "Node v26.7.0 present; jq absent. This is not a product failure."
+    },
+    {
+      "cwd": "P:/workspace/glwlg/ai/astrorder",
+      "command": "final sha256sum of all scoped source/report files",
+      "exit_code": 0,
+      "observed": "All hashes matched the initial capture."
+    }
+  ],
+  "source_hashes": {
+    "app-server-go/internal/parity/baseline.go": "e3c4ce6a140f7f748d0ca751559c76cbb6728ba21b8882d6174d736bc44a8663",
+    "app-server-go/internal/parity/manifest.go": "a84be03f51fac4e5ee5f7b40e201c50f7d3f632ef339be5173f86d437d887920",
+    "app-server-go/internal/parity/partial.go": "66ed09fec6157c26a32ce8dc1437930e72a70462b7c56b9ec885923c16452944",
+    "app-server-go/internal/parity/partial_test.go": "1e1e460218c12d6579e8f388bb27f7532945f7e4eaad556ed23df9716fe9b36c",
+    "docs/reports/full-go-daemon-evidence-review.json": "a629edddc2d2713759f49f815d3c1aaa4f4a7f9b18f255a43943f61990bab5f9",
+    "docs/reports/full-go-migration-matrix.json": "02dfe6f1f485a1f28d24aaa1ea81c0139c9c4000f3bc637d78f051be4b2a000c",
+    "docs/reports/full-go-p2-operation-process-result.json": "14cf665d21201663b988feb2fe5ed091aeab8f8ff1235069845147f6d8615c7e"
+  },
+  "supporting_artifact_hashes": {
+    "docs/reports/full-go-p2-operation-final-review.json": "6ed10ff0d56300b2e02c6559df3350dc342adad6cc1dcc384313733e754be457",
+    "docs/reports/full-go-p2-control-review.json": "79da275e484d8b64065219c18bb285afc05017857905b877e7a725b990401844",
+    "docs/reports/full-go-p2-incremental.md": "f5c5fc294278c3467b2cf26c1e3ca15ea18a39ae59a40cedf3ffa5a59f9f25ef",
+    "C:/Users/luwei/AppData/Local/hermes/cache/scratch/full-go-p2-python-malformed-verified/result.json": "14cf665d21201663b988feb2fe5ed091aeab8f8ff1235069845147f6d8615c7e"
+  },
+  "source_hash_stability": {
+    "stable": true,
+    "initial_and_final_equal": true
+  },
+  "limitations": [
+    "This is a read-only verifier and ledger review. No source/report file in the repository was edited, and no commit, push, stash, service, production action, production database/chat/secret access, real inference, install or other Hermes profile change was performed.",
+    "Private scratch fixtures mutate copies only. They test schema rejection behavior and are not real execution, review, production or migration evidence.",
+    "The current GREEN unit tests were executed. The earlier RED state was not reconstructed; the RED-to-GREEN history is therefore not independently certified by this review.",
+    "The archived process JSON was verified byte-for-byte against the scratch copy. The candidate binary bytes were not present in scope, so only the ledger/result binary-hash agreement was checked.",
+    "The verifier intentionally does not execute commands supplied by migration records. This review did not execute any such command and does not certify that the historical commands ran.",
+    "A review FAIL here concerns supplemental partial-ledger claim integrity. It neither reverses the bounded runtime findings in prior reports nor establishes any P0, P2, F03, production or full-migration completion claim."
+  ],
+  "completion_claims": {
+    "low_finding_fix_accepted": false,
+    "f03_complete": false,
+    "p0_complete": false,
+    "p2_complete": false,
+    "full_go_migration_complete": false,
+    "production_verified_or_changed": false
+  },
+  "repository_modified_by_reviewer": false
+}

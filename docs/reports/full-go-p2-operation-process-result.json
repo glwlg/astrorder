@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "passed": true,
+  "stage": "P2-partial",
+  "fixture_receipt": "synthetic completed; real legacy WS uncertain",
+  "daemon_sha256": "39ec833a217f7bcf588c67d192f2417ce1cbd8f58e4ba2eca90d304f0cc12c7d",
+  "commands": [
+    "isolated daemon start: explicit loopback WS and gRPC, private DB"
+  ],
+  "assertions": [
+    "default capabilities and operation query reachable from generated Python client",
+    "missing metadata authentication refused",
+    "legacy WS-created uncertain reservation read via Python gRPC without retry",
+    "private DB reopen preserved completed exact bytes, big integer, and uncertain reservation",
+    "persisted journal identity survives reopen; a mismatched fixture identity produces no synthetic typed receipt",
+    "malformed completed bytes remain available with no fabricated typed receipt",
+    "lookups added no operation rows",
+    "both exact owned processes exited and all WS/gRPC listener ports released"
+  ],
+  "cleanup": "owned processes exited; ports released",
+  "production_changed": false,
+  "full_migration_complete": false
+}

@@ -17,7 +17,59 @@ type adapterSession struct {
 	runtime  *Runtime
 	mu       sync.Mutex
 	mutating bool
+	// control marks a transport-only control binding: the runtime owns a live
+	// app-server transport but no native thread was created or resumed.
+	control  bool
+	model    string
+	provider string
+	effort   string
+	// approval is the daemon-held Astrorder approval mode (manual/auto/
+	// full_access). Codex applies approval policy per turn, so it is mapped
+	// onto turn/start options on every send.
+	approval string
 }
+
+// approvalTurnOptions maps an Astrorder approval mode to Codex turn/start
+// overrides (approvalPolicy / approvalsReviewer / sandboxPolicy).
+func approvalTurnOptions(mode string) (map[string]any, bool) {
+	switch mode {
+	case "manual":
+		return map[string]any{"approvalPolicy": "untrusted", "approvalsReviewer": "user", "sandboxPolicy": map[string]any{"type": "workspaceWrite"}}, true
+	case "auto":
+		return map[string]any{"approvalPolicy": "on-request", "approvalsReviewer": "auto_review", "sandboxPolicy": map[string]any{"type": "workspaceWrite"}}, true
+	case "full_access":
+		return map[string]any{"approvalPolicy": "never", "approvalsReviewer": "user", "sandboxPolicy": map[string]any{"type": "dangerFullAccess"}}, true
+	}
+	return nil, false
+}
+
+// approvalModeFromThread derives the Astrorder mode from a native thread
+// payload (thread/read or thread/resume response). Empty when unrecognised.
+func approvalModeFromThread(resp map[string]any) string {
+	policy, _ := resp["approvalPolicy"].(string)
+	reviewer, _ := resp["approvalsReviewer"].(string)
+	if thread, ok := resp["thread"].(map[string]any); ok {
+		if policy == "" {
+			policy, _ = thread["approvalPolicy"].(string)
+		}
+		if reviewer == "" {
+			reviewer, _ = thread["approvalsReviewer"].(string)
+		}
+	}
+	switch policy {
+	case "never":
+		return "full_access"
+	case "untrusted":
+		return "manual"
+	case "on-request":
+		if reviewer == "auto_review" || reviewer == "guardian_subagent" {
+			return "auto"
+		}
+		return "manual"
+	}
+	return ""
+}
+
 type Adapter struct {
 	config    Config
 	emit      Emitter
@@ -28,6 +80,7 @@ type Adapter struct {
 	catalogMu sync.Mutex
 	catalog   *Runtime
 	closed    bool
+	onClose   []func()
 }
 
 func NewAdapter(config Config, emit Emitter) *Adapter {
@@ -41,6 +94,9 @@ func (a *Adapter) Create(ctx context.Context, r core.Request) (core.Result, erro
 	return a.open(ctx, r, false)
 }
 func (a *Adapter) Spawn(ctx context.Context, r core.Request) (core.Result, error) {
+	if runtimeControlParams(r) {
+		return a.controlSpawn(ctx, r)
+	}
 	return a.open(ctx, r, true)
 }
 func (a *Adapter) open(ctx context.Context, r core.Request, resume bool) (core.Result, error) {
@@ -159,7 +215,31 @@ func (a *Adapter) open(ctx context.Context, r core.Request, resume bool) (core.R
 		rt.Close()
 		return core.Result{}, fmt.Errorf("codex ownership changed during startup")
 	}
-	a.sessions[native.SessionID] = &adapterSession{runtime: rt}
+	var model, provider, effort string
+	if m, ok := params["model"].(string); ok {
+		model = m
+	}
+	if p, ok := params["modelProvider"].(string); ok {
+		provider = p
+	}
+	if thread, ok := native.Native["thread"].(map[string]any); ok {
+		if m, ok := thread["model"].(string); ok && m != "" {
+			model = m
+		}
+		if p, ok := thread["modelProvider"].(string); ok && p != "" {
+			provider = p
+		}
+		if e, ok := thread["reasoningEffort"].(string); ok && e != "" {
+			effort = e
+		}
+	}
+	if m, ok := native.Native["model"].(string); ok && m != "" {
+		model = m
+	}
+	if p, ok := native.Native["modelProvider"].(string); ok && p != "" {
+		provider = p
+	}
+	a.sessions[native.SessionID] = &adapterSession{runtime: rt, model: model, provider: provider, effort: effort}
 	a.mu.Unlock()
 	if err := nativeprocess.ReportOwner(a.emit, native.SessionID, native.Status, rt.LocalPID()); err != nil {
 		a.mu.Lock()
@@ -172,11 +252,14 @@ func (a *Adapter) open(ctx context.Context, r core.Request, resume bool) (core.R
 	if thread, exists := native.Native["thread"]; exists {
 		payload["thread"] = thread
 	}
-	if model, ok := native.Native["model"].(string); ok && model != "" {
+	if model != "" {
 		payload["model"] = model
 	}
-	if provider, ok := native.Native["modelProvider"].(string); ok && provider != "" {
+	if provider != "" {
 		payload["provider"] = provider
+	}
+	if effort != "" {
+		payload["effort"] = effort
 	}
 	return core.Result{SessionID: native.SessionID, Status: native.Status, Payload: payload}, nil
 }
@@ -197,6 +280,11 @@ func (a *Adapter) Command(ctx context.Context, r core.Request) (core.Result, err
 	if err != nil {
 		return core.Result{}, err
 	}
+	if s.control {
+		// Control bindings own no native thread: only the closed read-only
+		// catalog set is served; native-session actions are rejected.
+		return a.controlCommand(ctx, s, r)
+	}
 	rt := s.runtime
 	if err = rt.requireSession(r.SessionID); err != nil {
 		return core.Result{}, err
@@ -214,6 +302,14 @@ func (a *Adapter) Command(ctx context.Context, r core.Request) (core.Result, err
 			return core.Result{}, err
 		}
 		command.Options = map[string]any{}
+		s.mu.Lock()
+		approval := s.approval
+		s.mu.Unlock()
+		if defaults, ok := approvalTurnOptions(approval); ok {
+			for key, value := range defaults {
+				command.Options[key] = value
+			}
+		}
 		for _, field := range []string{"params", "options"} {
 			options, exists := fields[field]
 			if !exists {
@@ -297,11 +393,109 @@ func (a *Adapter) Command(ctx context.Context, r core.Request) (core.Result, err
 		params["name"] = title
 		payload["title"] = title
 	case "session.history_page":
-		method = "thread/read"
-		params["includeTurns"] = true
+		return a.historyPage(ctx, rt, r)
 	case "session.models":
 		method = "model/list"
 		params = map[string]any{"limit": 100}
+	case "session.model.read":
+		if err := ctx.Err(); err != nil {
+			return core.Result{}, err
+		}
+		s.mu.Lock()
+		model := s.model
+		provider := s.provider
+		effort := s.effort
+		s.mu.Unlock()
+		if resp, err := rt.request(ctx, "thread/read", map[string]any{"threadId": r.SessionID, "includeTurns": false}); err == nil {
+			s.mu.Lock()
+			if thread, ok := resp["thread"].(map[string]any); ok {
+				if m, ok := thread["model"].(string); ok && m != "" {
+					s.model = m
+				}
+				if p, ok := thread["modelProvider"].(string); ok && p != "" {
+					s.provider = p
+				}
+				if e, ok := thread["reasoningEffort"].(string); ok && e != "" {
+					s.effort = e
+				}
+			}
+			if m, ok := resp["model"].(string); ok && m != "" {
+				s.model = m
+			}
+			if p, ok := resp["modelProvider"].(string); ok && p != "" {
+				s.provider = p
+			}
+			model = s.model
+			provider = s.provider
+			effort = s.effort
+			s.mu.Unlock()
+		}
+		return core.Result{
+			SessionID: r.SessionID,
+			Status:    rt.Status(),
+			Payload: map[string]any{
+				"model":    model,
+				"provider": provider,
+				"effort":   effort,
+			},
+		}, nil
+	case "session.model.set":
+		model, _ := fields["model"].(string)
+		if model == "" || !validToken(model, 160) {
+			return core.Result{}, fmt.Errorf("codex model is invalid")
+		}
+		provider, _ := fields["provider"].(string)
+		if provider != "" && !validToken(provider, 160) {
+			return core.Result{}, fmt.Errorf("codex provider is invalid")
+		}
+		method = "thread/settings/update"
+		params["model"] = model
+		payload["model"] = model
+		payload["provider"] = provider
+		if provider != "" {
+			params["modelProvider"] = provider
+		}
+		if effort, ok := fields["effort"].(string); ok && effort != "" {
+			if !validEffort(effort) {
+				return core.Result{}, fmt.Errorf("codex reasoning effort is invalid")
+			}
+			params["effort"] = effort
+			payload["effort"] = effort
+		}
+	case "session.approval.set":
+		mode, _ := fields["mode"].(string)
+		if _, ok := approvalTurnOptions(mode); !ok {
+			return core.Result{}, fmt.Errorf("codex approval mode is invalid")
+		}
+		s.mu.Lock()
+		s.approval = mode
+		s.mu.Unlock()
+		return core.Result{SessionID: r.SessionID, Status: rt.Status(), Payload: map[string]any{"mode": mode, "accepted": true}}, nil
+	case "session.approval.read":
+		if err := ctx.Err(); err != nil {
+			return core.Result{}, err
+		}
+		s.mu.Lock()
+		mode := s.approval
+		s.mu.Unlock()
+		if mode == "" {
+			if resp, err := rt.request(ctx, "thread/read", map[string]any{"threadId": r.SessionID, "includeTurns": false}); err == nil {
+				mode = approvalModeFromThread(resp)
+			}
+		}
+		if mode == "" {
+			// Codex default for an untouched thread is on-request with user review.
+			mode = "manual"
+		}
+		return core.Result{SessionID: r.SessionID, Status: rt.Status(), Payload: map[string]any{"mode": mode}}, nil
+	case "session.reasoning.set":
+		effort, _ := fields["effort"].(string)
+		if !validEffort(effort) {
+			return core.Result{}, fmt.Errorf("codex reasoning effort is invalid")
+		}
+		method = "thread/settings/update"
+		params["effort"] = effort
+		payload["effort"] = effort
 	case "session.delete":
 		s.mu.Lock()
 		if s.mutating {
@@ -358,6 +552,33 @@ func (a *Adapter) Command(ctx context.Context, r core.Request) (core.Result, err
 	} else if r.Action == "session.review" {
 		payload = response
 		payload["accepted"] = true
+	} else if r.Action == "session.model.set" {
+		s.mu.Lock()
+		if m, ok := payload["model"].(string); ok && m != "" {
+			s.model = m
+		}
+		if p, ok := payload["provider"].(string); ok {
+			s.provider = p
+		}
+		if e, ok := payload["effort"].(string); ok && e != "" {
+			s.effort = e
+		}
+		s.mu.Unlock()
+	} else if r.Action == "session.reasoning.set" {
+		s.mu.Lock()
+		if e, ok := payload["effort"].(string); ok && e != "" {
+			s.effort = e
+		}
+		s.mu.Unlock()
+	} else if r.Action == "session.settings" {
+		s.mu.Lock()
+		if m, ok := payload["model"].(string); ok && m != "" {
+			s.model = m
+		}
+		if e, ok := payload["effort"].(string); ok && e != "" {
+			s.effort = e
+		}
+		s.mu.Unlock()
 	}
 	return core.Result{SessionID: r.SessionID, Status: rt.Status(), Payload: payload}, nil
 }
@@ -444,10 +665,33 @@ func (a *Adapter) Snapshot() map[string]core.Result {
 	a.mu.Unlock()
 	out := map[string]core.Result{}
 	for id, s := range sessions {
-		out[id] = core.Result{SessionID: id, Status: s.runtime.Status(), Payload: map[string]any{}}
+		payload := map[string]any{}
+		if s.control {
+			// Control bindings stay identifiable and re-bindable after an
+			// App restart: the snapshot carries the same metadata as spawn.
+			payload["runtime_control"] = true
+			payload["control_state"] = "owned"
+			if a.config.AgentID != "" {
+				payload["agent_id"] = a.config.AgentID
+			}
+		}
+		out[id] = core.Result{SessionID: id, Status: s.runtime.Status(), Payload: payload}
 	}
 	return out
 }
+
+// OnClose registers fn to run once when the adapter closes. It lets a remote
+// connection tie auxiliary work (the hook-event stream) to the adapter lifetime.
+func (a *Adapter) OnClose(fn func()) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.closed {
+		go fn()
+		return
+	}
+	a.onClose = append(a.onClose, fn)
+}
+
 func (a *Adapter) Close() error {
 	a.mu.Lock()
 	if a.closed {
@@ -455,11 +699,16 @@ func (a *Adapter) Close() error {
 		return nil
 	}
 	a.closed = true
+	callbacks := a.onClose
+	a.onClose = nil
 	sessions := a.sessions
 	catalog := a.catalog
 	a.catalog = nil
 	a.sessions = map[string]*adapterSession{}
 	a.mu.Unlock()
+	for _, callback := range callbacks {
+		callback()
+	}
 	if catalog != nil {
 		catalog.Close()
 	}

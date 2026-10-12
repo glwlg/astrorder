@@ -128,12 +128,12 @@ it('only selects the exact matching model when model names share a common prefix
   expect(tieredItem.closest('.codex-model-menu-item')).toHaveClass('is-selected')
 })
 
-it('shows the native default medium effort when the runtime has not reported one', async () => {
+it('does not invent medium effort when the runtime has not reported one', async () => {
   vi.spyOn(api, 'getSessionModel').mockResolvedValue({ model: 'bound', provider: 'p', effort: null })
   vi.spyOn(api, 'getSessionModels').mockResolvedValue({ items: [] })
   renderControl()
 
-  await waitFor(() => expect(screen.getByRole('button', { name: '选择会话模型' })).toHaveTextContent('中'))
+  await waitFor(() => expect(screen.getByRole('button', { name: '选择会话模型' })).toHaveTextContent('未确认'))
   const slider = await openEffortSlider()
   expect(slider).toHaveAttribute('aria-valuenow', '1')
 })
