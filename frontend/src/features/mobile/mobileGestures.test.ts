@@ -50,6 +50,25 @@ describe('mobile gesture arbitration', () => {
     expect(allowed.defaultPrevented).toBe(false)
   })
 
+  it('allows native holds on explicitly selected message text', () => {
+    const message = document.createElement('article')
+    message.className = 'm-msg m-hold'
+    const bubble = document.createElement('div')
+    bubble.className = 'm-bubble m-select-text'
+    message.append(bubble)
+    document.body.append(message)
+    try {
+      bubble.addEventListener('contextmenu', suppressNativeHold)
+      const selected = new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+      bubble.dispatchEvent(selected)
+      expect(selected.defaultPrevented).toBe(false)
+      bubble.classList.remove('m-select-text')
+      const ordinary = new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+      bubble.dispatchEvent(ordinary)
+      expect(ordinary.defaultPrevented).toBe(true)
+    } finally { message.remove() }
+  })
+
   it('global blocker only cancels touch-triggered long-press, not desktop right-click', () => {
     const target = document.createElement('div')
     document.body.append(target)

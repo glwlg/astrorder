@@ -77,6 +77,7 @@ func (h *Handler) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.repairSessionTitles(ctx, sessionsList)
 	cursor, err := h.store.LatestCursor(ctx)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "Failed to read event cursor")
@@ -89,7 +90,13 @@ func (h *Handler) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	commands, err := h.store.QueueCommands(ctx)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "Failed to read queued commands")
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
+		"commands":         commands,
 		"protocol_version": 1,
 		"agents":           effectiveAgents,
 		"projects":         projects,

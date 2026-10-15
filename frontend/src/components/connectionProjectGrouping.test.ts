@@ -28,7 +28,7 @@ it('labels remote projects by connection, not the catalog Agent kind', () => {
   expect(groups).toHaveLength(1)
   expect(groups[0].remoteLabel).toBe('WSL')
 })
-it('filters native subagents, never ordinary conversations by their title', () => {
+it('shows native subagents and ordinary conversations', () => {
   const groups = buildProjectGroups([row, { ...row, id: 'internal', native_kind: 'subagent' }], {})
-  expect(groups.flatMap(g => g.sessions).map(s => s.id)).toEqual(['native'])
+  expect(groups.flatMap(g => g.sessions).map(s => s.id)).toEqual(['native', 'internal'])
 })

@@ -4,79 +4,120 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
+	"time"
 
 	sessiondv1 "astrorder.dev/contracts/gen/go/astrorder/sessiond/v1"
 )
 
-// AutoConnect restores agent connections asynchronously without blocking server startup.
+// AutoConnect keeps desired connections reconciled while the App is alive,
+// including when only the daemon restarts. It never restarts a runtime.
 func (h *Handler) AutoConnect(ctx context.Context) {
-	go func() {
-		if err := h.Restore(ctx); err != nil {
-			slog.Default().Warn("connections auto-connect finished with error", "error", err)
-		}
-	}()
+	h.autoOnce.Do(func() {
+		go func() {
+			ticker := time.NewTicker(3 * time.Second)
+			defer ticker.Stop()
+			for {
+				if err := h.Restore(ctx); err != nil && ctx.Err() == nil {
+					slog.Default().Debug("connections auto-connect waiting", "error", err)
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+				}
+			}
+		}()
+	})
 }
 
-// Restore synchronously restores active local and remote agent connections.
+// Restore attaches missing control channels, using live daemon ownership rather
+// than durable journal rows or stored UI state to decide what is connected.
 func (h *Handler) Restore(ctx context.Context) error {
+	h.restoreMu.Lock()
+	defer h.restoreMu.Unlock()
 	if h.client == nil || h.store == nil {
 		return nil
 	}
-
-	// 1. 本机 Codex 与 Hermes 自动连接
-	for _, localKind := range []string{"codex", "hermes"} {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		enabled, present, err := h.store.GetAgentConnectionChoice(ctx, "local:"+localKind)
-		if err != nil {
-			continue
-		}
-		if !present || enabled {
-			if err := h.attachEnvironmentAgent(ctx, "local", localKind, nil); err != nil {
-				slog.Default().Debug("auto-connect local runtime not ready", "kind", localKind, "error", err)
-			}
-		}
+	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	snapshot, err := h.client.Daemon.GetStatus(probeCtx, &sessiondv1.GetStatusRequest{})
+	cancel()
+	if err != nil {
+		return fmt.Errorf("read daemon ownership: %w", err)
 	}
-
-	// 2. 远端已启用环境恢复
+	if snapshot == nil || snapshot.GetDaemonId() != h.client.DaemonID() || snapshot.StorageError != nil {
+		return fmt.Errorf("daemon ownership snapshot is unconfirmed")
+	}
 	rows, err := h.store.ListSSHConnections(ctx)
 	if err != nil {
 		return fmt.Errorf("list ssh connections: %w", err)
 	}
-
+	type target struct {
+		id  string
+		row map[string]any
+	}
+	targets := []target{{id: "local"}}
 	for _, row := range rows {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		connID, _ := row["id"].(string)
-		if connID == "" {
-			continue
-		}
-		for _, kind := range environmentKinds {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			choiceKey := connID + ":" + kind
-			enabled, present, err := h.store.GetAgentConnectionChoice(ctx, choiceKey)
-			if err != nil {
-				continue
-			}
-			shouldRestore := false
-			if present && enabled {
-				shouldRestore = true
-			} else if !present && kind == "hermes" && row["state"] == "connected" {
-				shouldRestore = true
-			}
-			if shouldRestore {
-				if err := h.attachEnvironmentAgent(ctx, connID, kind, row); err != nil {
-					slog.Default().Warn("failed to restore remote agent connection", "connection_id", connID, "kind", kind, "error", err)
-				}
-			}
+		if id, _ := row["id"].(string); id != "" {
+			targets = append(targets, target{id: id, row: row})
 		}
 	}
-
-	return nil
+	var workers sync.WaitGroup
+	limit := make(chan struct{}, 6)
+	for _, node := range targets {
+		for _, kind := range environmentKinds {
+			if ctx.Err() != nil {
+				workers.Wait()
+				return ctx.Err()
+			}
+			enabled, present, err := h.store.GetAgentConnectionChoice(ctx, node.id+":"+kind)
+			if err != nil {
+				workers.Wait()
+				return err
+			}
+			if present && !enabled {
+				continue
+			}
+			var connectionID *string
+			if node.id != "local" {
+				connectionID = &node.id
+			}
+			expectedConnection := ""
+			if node.id != "local" {
+				expectedConnection = node.id
+			}
+			runtimeKind := runtimeTarget(kind, connectionID, node.row).GetRuntime()
+			owned := false
+			for _, session := range snapshot.Sessions {
+				if session.GetSession().GetSessionId() == "probe-"+kind+"-"+node.id &&
+					session.GetSession().GetConnectionId() == expectedConnection &&
+					session.GetRuntime() == runtimeKind && session.GetRuntimeOwned() {
+					owned = true
+					break
+				}
+			}
+			if owned {
+				continue
+			}
+			workers.Add(1)
+			go func() {
+				defer workers.Done()
+				select {
+				case limit <- struct{}{}:
+					defer func() { <-limit }()
+				case <-ctx.Done():
+					return
+				}
+				attachCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+				defer cancel()
+				if err := h.attachEnvironmentAgent(attachCtx, node.id, kind, node.row); err != nil {
+					slog.Default().Debug("auto-connect runtime not ready", "connection_id", node.id, "kind", kind, "error", err)
+				}
+			}()
+		}
+	}
+	workers.Wait()
+	return ctx.Err()
 }
 
 func (h *Handler) attachEnvironmentAgent(ctx context.Context, connID, kind string, sshConn map[string]any) error {

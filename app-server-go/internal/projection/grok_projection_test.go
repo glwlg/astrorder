@@ -93,7 +93,7 @@ func TestProjectGrokNotification_AgentMessageChunk(t *testing.T) {
 
 	foundUpsert := false
 	for _, ev := range events1 {
-		if ev.Type == "message.upsert" {
+		if ev.Type == "message.delta" {
 			foundUpsert = true
 			data := ev.Data
 			if data["text"] != "Hello " {
@@ -108,7 +108,7 @@ func TestProjectGrokNotification_AgentMessageChunk(t *testing.T) {
 		}
 	}
 	if !foundUpsert {
-		t.Fatalf("expected message.upsert event in chunk 1")
+		t.Fatalf("expected message.delta event in chunk 1")
 	}
 
 	// 2. 发送第二段 chunk 追加
@@ -139,25 +139,25 @@ func TestProjectGrokNotification_AgentMessageChunk(t *testing.T) {
 
 	foundUpsert2 := false
 	for _, ev := range events2 {
-		if ev.Type == "message.upsert" {
+		if ev.Type == "message.delta" {
 			foundUpsert2 = true
 			data := ev.Data
-			if data["text"] != "Hello world!" {
-				t.Fatalf("expected 'Hello world!', got %v", data["text"])
+			if data["text"] != "world!" {
+				t.Fatalf("expected delta 'world!', got %v", data["text"])
 			}
 		}
 	}
 	if !foundUpsert2 {
-		t.Fatalf("expected message.upsert event in chunk 2")
+		t.Fatalf("expected message.delta event in chunk 2")
 	}
 
-	// 3. 验证数据库中最终记录
-	var fullText string
-	err = db.QueryRow("SELECT text FROM messages WHERE agent_id='grok-1' AND session_id='s-1' AND command_id='cmd-100'").Scan(&fullText)
+	// Streaming must not create App transcript records.
+	var count int
+	err = db.QueryRow("SELECT COUNT(*) FROM messages").Scan(&count)
 	if err != nil {
 		t.Fatalf("query db: %v", err)
 	}
-	if fullText != "Hello world!" {
-		t.Fatalf("expected in db 'Hello world!', got %s", fullText)
+	if count != 0 {
+		t.Fatalf("transcript persisted: %d", count)
 	}
 }

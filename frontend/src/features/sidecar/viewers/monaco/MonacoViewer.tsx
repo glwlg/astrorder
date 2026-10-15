@@ -5,6 +5,7 @@ import { BlackboardItemRenderer } from '../../../monitor/BlackboardJsonRender'
 import { MarkdownContent } from '../../../../components/MarkdownContent'
 import Editor from '@monaco-editor/react'
 import type { ViewerContext } from '../../types'
+import { authenticatedApiFetch } from '../../../../api/client'
 
 const EXT_TO_LANG: Record<string, string> = {
   ts: 'typescript',
@@ -43,7 +44,7 @@ function detectLanguage(fileName: string): string {
   return EXT_TO_LANG[ext] || 'plaintext'
 }
 
-export function MonacoViewer({ artifact, onSave, onDirtyChange, toolbarAction }: ViewerContext) {
+export function MonacoViewer({ artifact, onSave, onDirtyChange, toolbarAction, isActive = true }: ViewerContext) {
   const onDirtyChangeRef = useRef(onDirtyChange)
   onDirtyChangeRef.current = onDirtyChange
 
@@ -67,7 +68,7 @@ export function MonacoViewer({ artifact, onSave, onDirtyChange, toolbarAction }:
     if (!content.trim() || visualizing) return
     setVisualizing(true)
     try {
-      const res = await fetch('/api/v1/agent/invoke', {
+      const res = await authenticatedApiFetch('/api/v1/agent/invoke', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -96,12 +97,7 @@ export function MonacoViewer({ artifact, onSave, onDirtyChange, toolbarAction }:
     setLoading(true)
     setError(null)
     try {
-      const headers: Record<string, string> = {}
-      try {
-        const token = localStorage.getItem('astrorder:token')
-        if (token) headers['Authorization'] = `Bearer ${token}`
-      } catch {}
-      const res = await fetch(artifact.readUrl, { headers })
+      const res = await authenticatedApiFetch(artifact.readUrl)
       if (!res.ok) throw new Error(`读取失败 (${res.status})`)
       const text = await res.text()
       setContent(text)
@@ -159,6 +155,7 @@ export function MonacoViewer({ artifact, onSave, onDirtyChange, toolbarAction }:
 
   // 监听键盘快捷键 (Ctrl+S / Cmd+S)
   useEffect(() => {
+    if (!isActive) return
     const onKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
         e.preventDefault()
@@ -172,7 +169,7 @@ export function MonacoViewer({ artifact, onSave, onDirtyChange, toolbarAction }:
     return () => {
       window.removeEventListener('keydown', onKeyDown, { capture: true })
     }
-  }, [dirty, saving, handleSave])
+  }, [dirty, saving, handleSave, isActive])
 
   return (
     <div className="monaco-viewer-pane" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>

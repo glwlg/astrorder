@@ -17,7 +17,7 @@ const unboundCursorPrefix = "items:"
 // thread to the daemon. Binding needs thread/resume, which Codex refuses while
 // another client (for example Codex Desktop) is the active writer or the thread
 // is archived. Reading history needs neither, so it must not depend on binding.
-// Nothing is written to the local store: the thread stays the only copy.
+// The transcript remains native; missing child metadata is restored separately.
 func (h *Handler) readCodexHistoryUnbound(ctx context.Context, row map[string]any, nativeID, before string, limit int) (items []map[string]any, next any, err error) {
 	aid, sid := stringValue(row, "agent_id"), stringValue(row, "id")
 	agent, err := h.store.GetAgent(ctx, aid)
@@ -59,6 +59,11 @@ func (h *Handler) readCodexHistoryUnbound(ctx context.Context, row map[string]an
 		source = aid
 	}
 	// Codex returns newest first; the transcript reads oldest first.
+	for _, item := range page.Data {
+		if err := h.restoreNativeTaskItem(ctx, aid, sid, item); err != nil {
+			return nil, nil, err
+		}
+	}
 	for i := len(page.Data) - 1; i >= 0; i-- {
 		items = append(items, projectHistoryItem(page.Data[i], aid, sid, nativeID, source, "codex")...)
 	}

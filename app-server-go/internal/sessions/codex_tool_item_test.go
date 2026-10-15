@@ -2,6 +2,18 @@ package sessions
 
 import "testing"
 
+func TestCodexHistoryMessageKinds(t *testing.T) {
+	for _, tc := range []struct{ native, kind, role string }{
+		{"agentMessage", "message", "assistant"}, {"userMessage", "message", "user"},
+		{"reasoning", "thinking", "assistant"}, {"plan", "message", "assistant"},
+	} {
+		rows := projectHistoryItem(map[string]any{"id": "item", "type": tc.native, "role": tc.role, "text": "progress"}, "a", "s", "s", "a", "codex")
+		if len(rows) != 1 || rows[0]["kind"] != tc.kind || rows[0]["role"] != tc.role {
+			t.Errorf("%s: %+v", tc.native, rows)
+		}
+	}
+}
+
 func TestProjectHistoryItemCodexToolsCarryNameAndArguments(t *testing.T) {
 	command := projectHistoryItem(map[string]any{
 		"id": "cmd-1", "type": "commandExecution", "command": "git status", "cwd": "/work",

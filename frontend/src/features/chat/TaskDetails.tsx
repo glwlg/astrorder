@@ -30,17 +30,28 @@ export function TaskDetails({
   onStop,
   onJumpToLatest,
   onClose,
+  onOpenSession,
 }: {
   task: Task
   canStop: boolean
   onStop?: (task: Task) => void
   onJumpToLatest: () => void
   onClose: () => void
+  onOpenSession?: (sessionId: string, agentId: string) => void
 }) {
   const [copied, setCopied] = useState(false)
   const [logFilter, setLogFilter] = useState('')
   const [stopConfirmation, setStopConfirmation] = useState<ConfirmationCoordinates | undefined>(undefined)
   const logs = task.logs.filter((log) => !logFilter.trim() || log.text.toLowerCase().includes(logFilter.trim().toLowerCase()))
+  const progress = task.progress ?? {}
+  const childSessionId = typeof progress.child_session_id === 'string' ? progress.child_session_id : task.kind === 'subagent' ? task.target_id : null
+  const facts = [
+    ['原生状态', progress.native_status], ['模型', progress.model], ['推理强度', progress.reasoning_effort],
+    ['工具调用', progress.tool_count], ['输入 tokens', progress.input_tokens], ['输出 tokens', progress.output_tokens],
+    ['推理 tokens', progress.reasoning_tokens], ['API 调用', progress.api_calls], ['耗时（秒）', progress.duration_seconds],
+    ['退出码', progress.exit_code],
+  ].filter(([, value]) => typeof value === 'string' || typeof value === 'number')
+  const output = progress.summary ?? progress.output ?? progress.result ?? progress.error
 
   const copyCommand = async () => {
     if (!task.command || !navigator.clipboard?.writeText) return
@@ -54,9 +65,9 @@ export function TaskDetails({
   }
 
   const confirmStop = () => {
+    setStopConfirmation(undefined)
     if (!onStop || !canStop || !task.target_id) return
     onStop(task)
-    setStopConfirmation(undefined)
   }
 
   return (
@@ -73,6 +84,11 @@ export function TaskDetails({
         <Badge variant="light">{task.kind}</Badge>
         <Text size="sm">进度：{progressLabel(task.progress)}</Text>
       </Group>
+
+      {childSessionId && <Group gap="xs"><Text size="sm">子会话 {childSessionId}</Text>{onOpenSession && <Button size="compact-sm" variant="light" onClick={() => onOpenSession(childSessionId, task.agent_id)}>打开子会话</Button>}</Group>}
+      {facts.length > 0 && <Stack gap={4}>{facts.map(([label, value]) => <Text size="sm" key={String(label)}>{String(label)}：{String(value)}</Text>)}</Stack>}
+      {output != null && <Stack gap={4}><Text size="sm" fw={600}>执行结果</Text><Code block>{typeof output === 'string' ? output : JSON.stringify(output, null, 2)}</Code></Stack>}
+      {Object.entries({ files_read: '读取文件', files_written: '写入文件', output_tail: '最近输出', changes: '文件改动' }).map(([key, label]) => progress[key] != null && <Stack gap={4} key={key}><Text size="sm" fw={600}>{label}</Text><Code block>{JSON.stringify(progress[key], null, 2)}</Code></Stack>)}
 
       <Stack gap={6}>
         <Group justify="space-between">

@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MantineProvider } from '@mantine/core'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { userEvent } from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
@@ -98,7 +99,7 @@ describe('isolated browser API fixture scope — not production Agent data', () 
     expect(screen.queryByText('来自 A')).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '会话 B', level: 2 })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '会话 B', level: 2 }).closest('.chat-heading')).toHaveTextContent('Codex')
-    await screen.getAllByRole('link', { name: /监控室/ })[0].click()
+    await userEvent.click(screen.getAllByRole('link', { name: /监控室/ })[0])
     expect(await screen.findByRole('heading', { name: '监控室' })).toBeInTheDocument()
     expect(screen.getByTestId('monitor-card-agent-b-shared')).toHaveTextContent('会话 B')
   })

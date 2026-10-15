@@ -22,6 +22,7 @@ type SessionManager struct {
 	noAutoExec   bool
 
 	sessionMu      sync.RWMutex
+	targetMu       sync.Mutex             // protects ownership maps across different sessions
 	sessionLocks   map[string]*sync.Mutex // lock per sessionKey
 	sessionTargets map[string][]string    // sessionKey -> list of targetIDs
 	sessionActive  map[string]string      // sessionKey -> active targetID
@@ -104,6 +105,8 @@ func (m *SessionManager) EnsureBrowser(ctx context.Context) error {
 
 // RecoverSessionTargets inspects existing pages via /json/list and recovers window.name tags.
 func (m *SessionManager) recoverSessionTargets(ctx context.Context, pages []PageTarget) {
+	m.targetMu.Lock()
+	defer m.targetMu.Unlock()
 	pageIDs := make(map[string]bool)
 	for _, p := range pages {
 		pageIDs[p.ID] = true
@@ -203,6 +206,15 @@ func (m *SessionManager) newPage(ctx context.Context) (*PageTarget, error) {
 	}
 	defer browserConn.Close()
 
+	// Fixture-backed managers must never alter a real browser profile.
+	if !m.noAutoExec {
+		if err := ensureSessionExtension(ctx, browserConn, func(ctx context.Context) error {
+			return m.enableExtensionDeveloperMode(ctx, browserConn)
+		}); err != nil {
+			return nil, err
+		}
+	}
+
 	res, err := browserConn.Call(ctx, "Target.createTarget", map[string]any{"url": "about:blank"})
 	if err != nil {
 		return nil, fmt.Errorf("Target.createTarget: %w", err)
@@ -244,7 +256,7 @@ func (m *SessionManager) tagPage(ctx context.Context, page *PageTarget, sessionK
 	marker := SessionMarker(sessionKey)
 	b, _ := json.Marshal(marker)
 	_, err = client.Call(ctx, "Runtime.evaluate", map[string]any{
-		"expression":    fmt.Sprintf("window.name=%s", string(b)),
+		"expression":    fmt.Sprintf("window.name=%s;window.dispatchEvent(new Event('astrorder:session-bound'));", string(b)),
 		"returnByValue": true,
 	})
 	return err
@@ -255,7 +267,12 @@ func (m *SessionManager) SessionPage(ctx context.Context, sessionKey string, res
 	pages, _ := m.endpoints.ListPages(ctx)
 	m.recoverSessionTargets(ctx, pages)
 
+	m.targetMu.Lock()
+	defer m.targetMu.Unlock()
 	targets := m.sessionTargets[sessionKey]
+	if targetID != "" && !ownsTarget(targets, targetID) {
+		return nil, false, errors.New("指定的标签页不属于当前会话")
+	}
 	resolvedID := targetID
 	if resolvedID == "" {
 		resolvedID = m.sessionActive[sessionKey]
@@ -298,7 +315,10 @@ func (m *SessionManager) SessionPage(ctx context.Context, sessionKey string, res
 		return nil, false, err
 	}
 
-	_ = m.tagPage(ctx, page, sessionKey)
+	if err := m.tagPage(ctx, page, sessionKey); err != nil {
+		_ = m.endpoints.ClosePage(ctx, page.ID)
+		return nil, false, fmt.Errorf("bind browser session: %w", err)
+	}
 	targets = m.sessionTargets[sessionKey]
 	already := false
 	for _, tid := range targets {
@@ -446,6 +466,8 @@ func (m *SessionManager) ListTabs(ctx context.Context, sessionKey string) TabsIn
 	pages, _ := m.endpoints.ListPages(ctx)
 	m.recoverSessionTargets(ctx, pages)
 
+	m.targetMu.Lock()
+	defer m.targetMu.Unlock()
 	targets := m.sessionTargets[sessionKey]
 	activeID := m.sessionActive[sessionKey]
 	pageMap := make(map[string]PageTarget)
@@ -554,9 +576,11 @@ func (m *SessionManager) CloseSession(ctx context.Context, sessionKey string) {
 	pages, _ := m.endpoints.ListPages(ctx)
 	m.recoverSessionTargets(ctx, pages)
 
+	m.targetMu.Lock()
 	targets := m.sessionTargets[sessionKey]
 	delete(m.sessionTargets, sessionKey)
 	delete(m.sessionActive, sessionKey)
+	m.targetMu.Unlock()
 
 	m.screenMu.Lock()
 	delete(m.screenshots, sessionKey)
@@ -579,6 +603,7 @@ func (m *SessionManager) SelectTab(ctx context.Context, sessionKey string, targe
 	pages, _ := m.endpoints.ListPages(ctx)
 	m.recoverSessionTargets(ctx, pages)
 
+	m.targetMu.Lock()
 	targets := m.sessionTargets[sessionKey]
 	found := false
 	for _, tid := range targets {
@@ -588,10 +613,12 @@ func (m *SessionManager) SelectTab(ctx context.Context, sessionKey string, targe
 		}
 	}
 	if !found {
+		m.targetMu.Unlock()
 		return nil, errors.New("指定的标签页不属于当前会话")
 	}
 
 	m.sessionActive[sessionKey] = targetID
+	m.targetMu.Unlock()
 
 	ver, _ := m.endpoints.GetVersion(ctx)
 	if ver != nil && ver.WebSocketDebuggerURL != "" {
@@ -608,16 +635,21 @@ func (m *SessionManager) SelectTab(ctx context.Context, sessionKey string, targe
 func (m *SessionManager) NewTab(ctx context.Context, sessionKey string, urlStr string) (*Snapshot, error) {
 	lock := m.getLock(sessionKey)
 	lock.Lock()
-	defer lock.Unlock()
 
 	pages, _ := m.endpoints.ListPages(ctx)
 	m.recoverSessionTargets(ctx, pages)
 
 	page, err := m.newPage(ctx)
 	if err != nil {
+		lock.Unlock()
 		return nil, err
 	}
-	_ = m.tagPage(ctx, page, sessionKey)
+	if err := m.tagPage(ctx, page, sessionKey); err != nil {
+		_ = m.endpoints.ClosePage(ctx, page.ID)
+		lock.Unlock()
+		return nil, fmt.Errorf("bind browser session: %w", err)
+	}
+	m.targetMu.Lock()
 
 	targets := m.sessionTargets[sessionKey]
 	already := false
@@ -634,8 +666,12 @@ func (m *SessionManager) NewTab(ctx context.Context, sessionKey string, urlStr s
 	m.sessionActive[sessionKey] = page.ID
 
 	if urlStr != "" && urlStr != "about:blank" {
+		m.targetMu.Unlock()
+		lock.Unlock()
 		return m.Navigate(ctx, sessionKey, urlStr, page.ID)
 	}
+	m.targetMu.Unlock()
+	lock.Unlock()
 	return m.CaptureScreenshot(ctx, sessionKey, false, page.ID)
 }
 
@@ -648,7 +684,12 @@ func (m *SessionManager) CloseTab(ctx context.Context, sessionKey string, target
 	pages, _ := m.endpoints.ListPages(ctx)
 	m.recoverSessionTargets(ctx, pages)
 
+	m.targetMu.Lock()
 	targets := m.sessionTargets[sessionKey]
+	if !ownsTarget(targets, targetID) {
+		m.targetMu.Unlock()
+		return nil, errors.New("指定的标签页不属于当前会话")
+	}
 	var remaining []string
 	for _, tid := range targets {
 		if tid != targetID {
@@ -665,6 +706,7 @@ func (m *SessionManager) CloseTab(ctx context.Context, sessionKey string, target
 		}
 	}
 	nextActive := m.sessionActive[sessionKey]
+	m.targetMu.Unlock()
 
 	m.screenMu.Lock()
 	delete(m.screenshots, sessionKey+"::"+targetID)
@@ -816,7 +858,7 @@ func (m *SessionManager) Navigate(ctx context.Context, sessionKey string, urlStr
 	marker := SessionMarker(sessionKey)
 	b, _ := json.Marshal(marker)
 	_, _ = client.Call(ctx, "Runtime.evaluate", map[string]any{
-		"expression": fmt.Sprintf("window.name=%s", string(b)),
+		"expression": fmt.Sprintf("window.name=%s;window.dispatchEvent(new Event('astrorder:session-bound'));", string(b)),
 	})
 
 	shotRes, err := client.Call(ctx, "Page.captureScreenshot", map[string]any{
@@ -1016,9 +1058,15 @@ func (m *SessionManager) ExtractPageContent(ctx context.Context, sessionKey stri
 // Diagnostics returns diagnostics logs for a session tab.
 func (m *SessionManager) Diagnostics(ctx context.Context, sessionKey string, targetID string) (*Diagnostics, error) {
 	tid := targetID
+	m.targetMu.Lock()
 	if tid == "" {
 		tid = m.sessionActive[sessionKey]
 	}
+	if tid != "" && !ownsTarget(m.sessionTargets[sessionKey], tid) {
+		m.targetMu.Unlock()
+		return nil, errors.New("指定的标签页不属于当前会话")
+	}
+	m.targetMu.Unlock()
 
 	m.logsMu.RLock()
 	logs := m.sessionLogs[sessionKey+"::"+tid]

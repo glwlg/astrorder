@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -399,6 +400,45 @@ func TestProvisionRejectsNullCredentialStoreWithoutChangingIt(t *testing.T) {
 	after, readErr := os.ReadFile(credentialPath)
 	if readErr != nil || !bytes.Equal(after, encrypted) {
 		t.Fatal("invalid credential store changed")
+	}
+}
+
+func TestProvisionDesktopOriginIsOptInAndIdempotent(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("provision requires current-user Windows DPAPI")
+	}
+	base := t.TempDir()
+	root := filepath.Join(base, "install")
+	mustMkdir(t, filepath.Join(root, "frontend", "dist"))
+	mustWrite(t, filepath.Join(root, "frontend", "dist", "index.html"), []byte("fixture"))
+	exe := filepath.Join(root, "astrorder-app.exe")
+	mustWrite(t, exe, []byte("fixture executable"))
+	state := filepath.Join(base, "state")
+	options := Options{RootDir: root, StateDir: state, DataDir: filepath.Join(state, "data"), AppExecutable: exe}
+	result, err := Provision(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, env, _, err := readPublicEnvelope(result.ConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := env["ASTRORDER_ALLOWED_ORIGINS"]
+	if strings.Contains(original, "wails.localhost") {
+		t.Fatal("desktop origin enabled without opt-in")
+	}
+	options.DesktopOrigin = true
+	for range 2 {
+		if _, err := Provision(options); err != nil {
+			t.Fatal(err)
+		}
+		_, env, _, err = readPublicEnvelope(result.ConfigPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if env["ASTRORDER_ALLOWED_ORIGINS"] != original+",http://wails.localhost" {
+			t.Fatal("origin list was replaced or duplicated")
+		}
 	}
 }
 

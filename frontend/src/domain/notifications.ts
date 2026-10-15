@@ -56,6 +56,10 @@ export function notificationForEvent(event: EventEnvelope): EventNotification | 
     const taskId = typeof event.data.id === 'string' ? event.data.id : ''
     if (event.data.kind === 'tool' || taskId.startsWith('codex:background:')) return null
     const status = typeof event.data.status === 'string' ? event.data.status : ''
+    const progress = event.data.progress
+    // Clearing a native goal is a state update, including old empty-goal
+    // tombstones replayed by an earlier App Server, rather than a task failure.
+    if (status === 'cancelled' && progress && typeof progress === 'object' && 'type' in progress && progress.type === 'goal') return null
     if (!taskId || !['failed', 'cancelled'].includes(status)) return null
     const title = safeLabel(textValue(event.data.title, '后台任务'))
     const failed = status !== 'completed'
@@ -76,7 +80,7 @@ export function notificationForEvent(event: EventEnvelope): EventNotification | 
     return {
       key: `${identity.agentId}::${identity.sessionId}::approval::${approvalId}::pending`,
       kind: 'approval_pending',
-      title: '操作等待审批',
+      title: event.data.method === 'item/tool/requestUserInput' ? 'Codex 等待你的回答' : '操作等待审批',
       message: safeLabel(textValue(event.data.title, '有一个操作等待授权确认')),
       agent_id: identity.agentId,
       session_id: identity.sessionId,

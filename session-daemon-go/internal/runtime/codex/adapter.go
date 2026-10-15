@@ -14,9 +14,12 @@ import (
 
 type Emitter func(string, string, map[string]any, string) error
 type adapterSession struct {
-	runtime  *Runtime
-	mu       sync.Mutex
-	mutating bool
+	runtime             *Runtime
+	mu                  sync.Mutex
+	mutating            bool
+	mutationDone        chan struct{}
+	inputUnconfirmed    bool
+	unconfirmedRevision uint64
 	// control marks a transport-only control binding: the runtime owns a live
 	// app-server transport but no native thread was created or resumed.
 	control  bool
@@ -319,7 +322,7 @@ func (a *Adapter) Command(ctx context.Context, r core.Request) (core.Result, err
 			if !ok {
 				return core.Result{}, fmt.Errorf("codex options must be an object")
 			}
-			for _, key := range []string{"model", "effort", "summary", "approvalPolicy", "approvalsReviewer", "sandboxPolicy", "outputSchema"} {
+			for _, key := range []string{"model", "effort", "summary", "approvalPolicy", "approvalsReviewer", "sandboxPolicy", "outputSchema", "idle_only"} {
 				if v, ok := object[key]; ok {
 					command.Options[key] = v
 				}
@@ -329,6 +332,7 @@ func (a *Adapter) Command(ctx context.Context, r core.Request) (core.Result, err
 		command.ApprovalID, _ = fields["approval_id"].(string)
 		command.Decision, _ = fields["decision"].(string)
 		command.Permissions, _ = fields["permissions"].(map[string]any)
+		command.Options, _ = fields["user_input"].(map[string]any)
 	case "session.interrupt", "session.steer":
 		turn, _ := fields["turn_id"].(string)
 		rt.mu.Lock()
@@ -341,9 +345,8 @@ func (a *Adapter) Command(ctx context.Context, r core.Request) (core.Result, err
 			method = "turn/interrupt"
 			params["turnId"] = turn
 		} else {
-			method = "turn/steer"
-			params["expectedTurnId"] = turn
-			params["input"], err = adapterInput(rt, fields)
+			command.TurnID = turn
+			command.Input, err = adapterInput(rt, fields)
 			if err != nil {
 				return core.Result{}, err
 			}
@@ -392,11 +395,15 @@ func (a *Adapter) Command(ctx context.Context, r core.Request) (core.Result, err
 		method = "thread/name/set"
 		params["name"] = title
 		payload["title"] = title
+	case "session.processes":
+		return a.backgroundProcesses(ctx, rt, r)
 	case "session.history_page":
 		return a.historyPage(ctx, rt, r)
 	case "session.models":
 		method = "model/list"
 		params = map[string]any{"limit": 100}
+	case "session.goal.set", "session.goal.clear":
+		return a.handleGoal(ctx, s, r)
 	case "session.model.read":
 		if err := ctx.Err(); err != nil {
 			return core.Result{}, err
@@ -519,23 +526,75 @@ func (a *Adapter) Command(ctx context.Context, r core.Request) (core.Result, err
 	default:
 		return core.Result{}, fmt.Errorf("codex action is unsupported")
 	}
-	mutation := r.Action == "session.send" || r.Action == "session.compact" || r.Action == "session.review"
+	mutation := r.Action == "session.send" || r.Action == "session.steer" || r.Action == "session.compact" || r.Action == "session.review"
+	var inputRevision uint64
 	if mutation {
-		s.mu.Lock()
-		if s.mutating || rt.Status() == "running" || rt.Status() == "waiting_approval" {
+		for {
+			if err := ctx.Err(); err != nil {
+				return core.Result{}, err
+			}
+			s.mu.Lock()
+			if s.mutating && (r.Action == "session.send" || r.Action == "session.steer") && s.mutationDone != nil {
+				done := s.mutationDone
+				s.mu.Unlock()
+				select {
+				case <-done:
+					continue
+				case <-ctx.Done():
+					return core.Result{}, ctx.Err()
+				}
+			}
+			rt.mu.Lock()
+			active, activeTurn := rt.status == "running" || rt.status == "waiting_approval", rt.activeTurnID
+			inputRevision = rt.turnRevision
+			rt.mu.Unlock()
+			options, _ := fields["params"].(map[string]any)
+			if options["idle_only"] == true && (active || activeTurn != "" || s.mutating) {
+				s.mu.Unlock()
+				return core.Result{}, fmt.Errorf("queued send requires an idle session")
+			}
+			canSteer := (r.Action == "session.send" || r.Action == "session.steer") && activeTurn != ""
+			if (r.Action == "session.send" || r.Action == "session.steer") && s.inputUnconfirmed && activeTurn == "" && inputRevision <= s.unconfirmedRevision {
+				s.mu.Unlock()
+				return core.Result{}, fmt.Errorf("codex previous input is unconfirmed; reconcile before sending another turn")
+			}
+			if s.mutating || (active && !canSteer) {
+				s.mu.Unlock()
+				return core.Result{}, fmt.Errorf("codex session is active")
+			}
+			s.mutating = true
+			s.mutationDone = make(chan struct{})
 			s.mu.Unlock()
-			return core.Result{}, fmt.Errorf("codex session is active")
+			break
 		}
-		s.mutating = true
-		s.mu.Unlock()
-		defer func() { s.mu.Lock(); s.mutating = false; s.mu.Unlock() }()
+		defer func() {
+			s.mu.Lock()
+			s.mutating = false
+			close(s.mutationDone)
+			s.mutationDone = nil
+			s.mu.Unlock()
+		}()
 	}
 	if method == "" {
 		native, err := rt.Command(ctx, command)
+		if r.Action == "session.send" || r.Action == "session.steer" {
+			s.mu.Lock()
+			s.inputUnconfirmed = err != nil
+			s.unconfirmedRevision = inputRevision
+			s.mu.Unlock()
+		}
 		if err != nil {
 			return core.Result{}, err
 		}
 		payload["accepted"] = native.Accepted
+		if native.Completed {
+			payload["completed"] = true
+			if a.emit != nil && command.CommandID != "" {
+				if err := a.emit(r.SessionID, "codex.command_complete", map[string]any{"agent_id": a.config.AgentID, "session_id": r.SessionID, "command_id": command.CommandID}, rt.Status()); err != nil {
+					return core.Result{}, fmt.Errorf("guidance accepted but durable delivery event failed: %w", err)
+				}
+			}
+		}
 		if native.TurnID != "" {
 			payload["turn_id"] = native.TurnID
 		}

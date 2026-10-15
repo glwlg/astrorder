@@ -14,6 +14,12 @@ func codexToolFromItem(item map[string]any) (map[string]any, string) {
 	itemType := stringValue(item, "type")
 	status := codexToolStatus(stringValue(item, "status"))
 	switch itemType {
+	case "collabAgentToolCall", "subAgentActivity":
+		name := stringValue(item, "tool")
+		if name == "" {
+			name = itemType
+		}
+		return map[string]any{"name": name, "arguments": item, "status": status}, codexJSONText(item["agentsStates"])
 	case "commandExecution":
 		args := map[string]any{"command": stringValue(item, "command")}
 		if cwd := stringValue(item, "cwd"); cwd != "" {

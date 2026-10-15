@@ -23,7 +23,7 @@ func TestCommittedEventsPublishInDurableCursorOrder(t *testing.T) {
 	hub := NewEventHub(st)
 	ch, unsubscribe := hub.subscribe()
 	defer unsubscribe()
-	first, err := st.AppendEvent(context.Background(), store.Event{ID: "first", Type: "message.upsert", AgentID: "agent", SessionID: "session"})
+	first, err := st.AppendEvent(context.Background(), store.Event{ID: "first", Type: "session.upsert", AgentID: "agent", SessionID: "session"})
 	if err != nil {
 		t.Fatal(err)
 	}

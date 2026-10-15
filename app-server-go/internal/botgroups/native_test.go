@@ -16,8 +16,11 @@ import (
 
 type nativeGroupServer struct {
 	pb.UnimplementedSessionControlServer
+	pb.UnimplementedRuntimeQueryServer
 	store     *store.Store
 	uncertain bool
+	replied   bool
+	paged     bool
 }
 
 func (s *nativeGroupServer) CreateSession(_ context.Context, r *pb.CreateSessionRequest) (*pb.CommandReceipt, error) {
@@ -36,13 +39,22 @@ func (s *nativeGroupServer) Send(ctx context.Context, r *pb.SendRequest) (*pb.Co
 	if r.Meta.CommandId == nil || r.Meta.OperationId != *r.Meta.CommandId {
 		return nil, errors.New("incorrect native command identity")
 	}
-	if _, err := s.store.UpsertMessage(ctx, map[string]any{"id": "answer", "agent_id": "a", "session_id": "native-session", "role": "assistant", "kind": "message", "text": "原生结果", "created_at": now(), "command_id": r.Meta.OperationId}); err != nil {
-		return nil, err
-	}
+	s.replied = true
 	if _, err := s.store.SetCommandState(ctx, "a", "native-session", r.Meta.OperationId, "completed", nil, false); err != nil {
 		return nil, err
 	}
 	return &pb.CommandReceipt{OperationState: pb.OperationState_OPERATION_STATE_COMPLETED, Outcome: &pb.CommandReceipt_Completed{Completed: &pb.CommandResult{Accepted: true}}}, nil
+}
+func (s *nativeGroupServer) GetHistoryPage(_ context.Context, r *pb.HistoryPageRequest) (*pb.HistoryPageResponse, error) {
+	if s.paged && r.Before.GetValue() == "" {
+		more := true
+		return &pb.HistoryPageResponse{Session: r.Session, Items: []*pb.NativeJson{native(map[string]any{"id": "newer", "type": "agentMessage", "text": "newer turn"})}, HasMore: &more, NextCursor: &pb.NullableString{State: &pb.NullableString_Value{Value: "older"}}}, nil
+	}
+	items := []*pb.NativeJson{native(map[string]any{"id": "previous", "type": "agentMessage", "text": "earlier result"})}
+	if s.replied {
+		items = append(items, native(map[string]any{"id": "answer", "type": "agentMessage", "text": "原生结果"}))
+	}
+	return &pb.HistoryPageResponse{Session: r.Session, Items: items}, nil
 }
 func TestNativeLateSendReceiptPreservesAlreadyCompletedCommand(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "app.db"))
@@ -63,7 +75,9 @@ func TestNativeLateSendReceiptPreservesAlreadyCompletedCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	server := grpc.NewServer()
-	pb.RegisterSessionControlServer(server, &nativeGroupServer{store: st})
+	peer := &nativeGroupServer{store: st}
+	pb.RegisterSessionControlServer(server, peer)
+	pb.RegisterRuntimeQueryServer(server, peer)
 	go server.Serve(listener)
 	defer server.Stop()
 	connection, err := grpc.NewClient(listener.Addr().String(), grpc.WithInsecure())
@@ -71,7 +85,7 @@ func TestNativeLateSendReceiptPreservesAlreadyCompletedCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer connection.Close()
-	controller := &NativeController{Store: st, Client: &daemonclient.Client{Session: pb.NewSessionControlClient(connection)}, Publisher: &publisher{}}
+	controller := &NativeController{Store: st, Client: &daemonclient.Client{Session: pb.NewSessionControlClient(connection), Runtime: pb.NewRuntimeQueryClient(connection)}, Publisher: &publisher{}}
 	turn := Turn{GroupID: "g", Member: Member{AgentID: "a", MachineID: "local"}, CommandID: "command", Prompt: "任务"}
 	reply, err := controller.Run(ctx, turn, func(session string) error {
 		if session != "native-session" {
@@ -82,8 +96,16 @@ func TestNativeLateSendReceiptPreservesAlreadyCompletedCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reply != "原生结果" {
+	if reply.Text != "原生结果" || len(reply.NativeIDs) != 1 || reply.NativeIDs[0] != "answer" {
 		t.Fatal(reply)
+	}
+	peer.paged = true
+	resolved, err := controller.ReadReply(ctx, "a", "native-session", reply.NativeIDs)
+	if err != nil || resolved != reply.Text {
+		t.Fatal("older native reply not restored", resolved, err)
+	}
+	if _, err := controller.ReadReply(ctx, "a", "native-session", []string{"missing"}); err == nil {
+		t.Fatal("missing native reply accepted")
 	}
 	command, err := st.GetCommand(ctx, "a", "native-session", "command")
 	if err != nil || command["state"] != "completed" {

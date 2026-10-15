@@ -32,6 +32,8 @@
     "backend/tests/test_observer_preview.py"
   ],
   "request_actions": [
+    {"legacy_action":"session.goal.set","post_baseline":true,"rpc":"astrorder.sessiond.v1.RuntimeQuery/SetGoal","disposition":"typed-mutation-native-readback","runtime_support":["codex","codex-ssh","hermes","ssh"],"mutation":true,"operation_policy":"durable-compat-v1","canonical_version":"astrorder-operation-v1"},
+    {"legacy_action":"session.goal.clear","post_baseline":true,"rpc":"astrorder.sessiond.v1.RuntimeQuery/ClearGoal","disposition":"typed-mutation-native-readback","runtime_support":["codex","codex-ssh","hermes","ssh"],"mutation":true,"operation_policy":"durable-compat-v1","canonical_version":"astrorder-operation-v1"},
     {"legacy_action":"daemon.handshake","rpc":"astrorder.sessiond.v1.DaemonControl/GetCapabilities","disposition":"replaced-by-metadata-auth-and-capabilities","mutation":false,"operation_policy":"none"},
     {"legacy_action":"daemon.shutdown","rpc":"astrorder.sessiond.v1.DaemonControl/Shutdown","disposition":"guarded-control","mutation":true,"operation_policy":"guarded-existing-no-ledger"},
     {"legacy_action":"daemon.status","rpc":"astrorder.sessiond.v1.DaemonControl/GetStatus","disposition":"typed-read","mutation":false,"operation_policy":"none"},

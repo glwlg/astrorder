@@ -16,7 +16,7 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      disable: process.env.VITEST === 'true',
+      disable: process.env.VITEST === 'true' || process.env.ASTRORDER_WAILS === '1',
       registerType: 'autoUpdate',
       injectRegister: false,
       manifest: false,

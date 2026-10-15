@@ -93,7 +93,7 @@ func (d *Daemon) controlOnce(parent context.Context, request map[string]any) map
 	if message := validateSessionControl(request); message != "" {
 		return errorResponse(request["request_id"], message)
 	}
-	ctx, cancel := context.WithTimeout(parent, 30*time.Second)
+	ctx, cancel := context.WithTimeout(parent, d.sessionControlTimeout(request))
 	defer d.wakeModelReloads()
 	defer cancel()
 	r := core.Request{AgentType: kind, SessionID: id, Action: action, Fields: request}

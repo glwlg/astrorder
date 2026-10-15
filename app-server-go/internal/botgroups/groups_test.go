@@ -22,16 +22,16 @@ type controlledAgents struct {
 	release     chan struct{}
 }
 
-func (c *controlledAgents) Run(ctx context.Context, turn Turn, bound func(string) error) (string, error) {
+func (c *controlledAgents) Run(ctx context.Context, turn Turn, bound func(string) error) (Reply, error) {
 	if err := bound("group-native-session"); err != nil {
-		return "", err
+		return Reply{}, err
 	}
 	c.started <- turn
 	select {
 	case <-ctx.Done():
-		return "", ctx.Err()
+		return Reply{}, ctx.Err()
 	case <-c.release:
-		return "完成", nil
+		return Reply{Text: "完成", NativeIDs: []string{"reply"}}, nil
 	}
 }
 func (c *controlledAgents) Interrupt(_ context.Context, turn Turn) error {

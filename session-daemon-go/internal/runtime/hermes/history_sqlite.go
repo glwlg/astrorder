@@ -96,41 +96,73 @@ func readNativePage(ctx context.Context, dbPath string, sessionID string, source
 		}
 	}
 
+	lineage, err := historyLineage(ctx, db, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(lineage)), ",")
+	args := make([]any, 0, len(lineage)+2)
+	for _, id := range lineage {
+		args = append(args, id)
+	}
 	selectCols := []string{"id", "session_id", "role", "content"}
-	for _, opt := range []string{"timestamp", "tool_call_id", "tool_calls", "tool_name", "reasoning", "reasoning_content", "reasoning_details", "codex_reasoning_items", "display_kind"} {
+	for _, opt := range []string{"timestamp", "tool_call_id", "tool_calls", "tool_name", "reasoning", "reasoning_content", "reasoning_details", "codex_reasoning_items", "display_kind", "display_metadata"} {
 		if columns[opt] {
 			selectCols = append(selectCols, opt)
 		}
 	}
 
-	query := "SELECT " + strings.Join(selectCols, ", ") + " FROM messages WHERE session_id = ?"
-	args := []any{sessionID}
-
+	where := "session_id IN (" + placeholders + ")"
+	if columns["active"] {
+		if columns["compacted"] {
+			where += " AND (active=1 OR compacted=1)"
+		} else {
+			where += " AND active=1"
+		}
+	}
+	if columns["display_kind"] {
+		where += " AND COALESCE(display_kind, '') != 'hidden'"
+	}
+	if columns["display_metadata"] {
+		where += " AND COALESCE(json_extract(CASE WHEN json_valid(display_metadata) THEN display_metadata ELSE '{}' END, '$.model_only'), 0)=0"
+	}
+	// A compaction can clone the protected tail into a newer generation. Page
+	// logical display rows, ordered at their first occurrence, before LIMIT.
+	identity := "id"
+	if columns["timestamp"] {
+		keys := []string{"role", "content", "timestamp"}
+		for _, name := range []string{"tool_call_id", "tool_calls", "tool_name"} {
+			if columns[name] {
+				keys = append(keys, name)
+			} else {
+				keys = append(keys, "NULL")
+			}
+		}
+		identity = "CASE WHEN timestamp IS NULL THEN 'row:'||id ELSE 'message:'||json_array(" + strings.Join(keys, ",") + ") END"
+		if columns["display_identity"] {
+			identity = "CASE WHEN display_identity IS NOT NULL THEN 'native:'||hex(display_identity) ELSE " + identity + " END"
+		}
+	}
+	priority := "id DESC"
+	if columns["active"] {
+		priority = "active DESC, " + priority
+	}
+	query := "WITH visible AS (SELECT *, " + identity + " AS logical_identity FROM messages WHERE " + where + "), ranked AS (SELECT *, MIN(id) OVER (PARTITION BY logical_identity) AS history_order, ROW_NUMBER() OVER (PARTITION BY logical_identity ORDER BY " + priority + ") AS representative FROM visible) SELECT " + strings.Join(selectCols, ", ") + ", history_order FROM ranked WHERE representative=1"
 	if boundary > 0 {
 		var checkID int64
-		err = db.QueryRowContext(ctx, "SELECT id FROM messages WHERE session_id = ? AND id = ?", sessionID, boundary).Scan(&checkID)
+		anchorArgs := append(append([]any{}, args...), boundary)
+		err = db.QueryRowContext(ctx, "SELECT id FROM messages WHERE session_id IN ("+placeholders+") AND id=?", anchorArgs...).Scan(&checkID)
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("native cursor anchor is outside this session")
 		} else if err != nil {
 			return nil, err
 		}
-		query += " AND id < ?"
+		query += " AND history_order < ?"
 		args = append(args, boundary)
 	}
-
-	if columns["active"] {
-		if columns["compacted"] {
-			query += " AND (active=1 OR compacted=1)"
-		} else {
-			query += " AND active=1"
-		}
-	}
-	if columns["display_kind"] {
-		query += " AND COALESCE(display_kind, '') != 'hidden'"
-	}
-
-	query += " ORDER BY id DESC LIMIT ?"
+	query += " ORDER BY history_order DESC LIMIT ?"
 	args = append(args, limit+1)
+	selectCols = append(selectCols, "history_order")
 
 	msgRows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -146,7 +178,7 @@ func readNativePage(ctx context.Context, dbPath string, sessionID string, source
 			ptrs[i] = &vals[i]
 		}
 		if err := msgRows.Scan(ptrs...); err != nil {
-			continue
+			return nil, fmt.Errorf("native history row failed: %w", err)
 		}
 		item := map[string]any{}
 		for i, col := range selectCols {
@@ -158,6 +190,9 @@ func readNativePage(ctx context.Context, dbPath string, sessionID string, source
 			}
 		}
 		items = append(items, item)
+	}
+	if err := msgRows.Err(); err != nil {
+		return nil, fmt.Errorf("native history read failed: %w", err)
 	}
 	msgRows.Close()
 
@@ -172,7 +207,7 @@ func readNativePage(ctx context.Context, dbPath string, sessionID string, source
 
 	var nextCursor *string
 	if hasMore && len(items) > 0 {
-		firstID, _ := items[0]["id"].(int64)
+		firstID, _ := items[0]["history_order"].(int64)
 		cur := Cursor{
 			Session: sessionID,
 			Source:  sourceID,

@@ -24,8 +24,8 @@ interface GitStatusBarProps {
 }
 
 export function GitStatusBar({ session }: GitStatusBarProps) {
-  const [branch, setBranch] = useState('master')
-  const [branches, setBranches] = useState<string[]>(['master'])
+  const [branch, setBranch] = useState<string | null>(null)
+  const [branches, setBranches] = useState<string[]>([])
   const [insertions, setInsertions] = useState(0)
   const [deletions, setDeletions] = useState(0)
   const [changedFiles, setChangedFiles] = useState(0)
@@ -60,8 +60,8 @@ export function GitStatusBar({ session }: GitStatusBarProps) {
       const resp = await fetch(`/api/v1/git/status?${params.toString()}`, { headers })
       if (resp.ok) {
         const data = await resp.json()
-        setBranch(data.branch || 'master')
-        setBranches(data.branches || ['master'])
+        setBranch(data.branch || null)
+        setBranches(Array.isArray(data.branches) ? [...new Set<string>(data.branches)] : [])
         setInsertions(data.insertions || 0)
         setDeletions(data.deletions || 0)
         setChangedFiles(data.changed_files || 0)
@@ -103,8 +103,8 @@ export function GitStatusBar({ session }: GitStatusBarProps) {
         })
         if (resp.ok) {
           const data = await resp.json()
-          setBranch(data.branch || 'master')
-          setBranches(data.branches || ['master'])
+          setBranch(data.branch || null)
+          setBranches(Array.isArray(data.branches) ? [...new Set<string>(data.branches)] : [])
           setInsertions(data.insertions || 0)
           setDeletions(data.deletions || 0)
           setChangedFiles(data.changed_files || 0)
@@ -261,10 +261,12 @@ export function GitStatusBar({ session }: GitStatusBarProps) {
                 },
               }}
               title="点击切换或创建分支"
+              aria-label="切换或创建 Git 分支"
+              disabled={statusUnavailable || !branch || switching}
             >
               <IconGitBranch size={15} color="var(--astr-green, #10b981)" />
               <Text size="xs" fw={600} c="dimmed" style={{ color: 'var(--astr-text)' }}>
-                {branch}
+                {branch || (statusUnavailable ? '分支未知' : '读取分支…')}
               </Text>
             </UnstyledButton>
           </Menu.Target>
@@ -304,6 +306,7 @@ export function GitStatusBar({ session }: GitStatusBarProps) {
         <Tooltip label="点击在侧边栏查看所有修改的文件列表与 Diff">
           <UnstyledButton
             onClick={handleOpenDiffTree}
+            aria-label="查看工作区 Git Diff"
             style={{
               display: 'inline-flex',
               alignItems: 'center',

@@ -131,6 +131,8 @@ func fakePendingApproval() {
 				"method": "item/commandExecution/requestApproval",
 				"params": map[string]any{"threadId": "approval-thread"},
 			})
+		case "thread/goal/get":
+			_ = encoder.Encode(map[string]any{"id": request["id"], "error": map[string]any{"code": -32601, "message": "unsupported method"}})
 		default:
 			if request["id"] != nil {
 				os.Exit(7)

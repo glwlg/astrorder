@@ -44,6 +44,59 @@ const outbound: OutboxEntry = {
 }
 
 describe('transcript follow mode', () => {
+  it('hides empty user echoes without hiding pending text or attachment-only sends', () => {
+    const input: Message = { ...message, id: 'optimistic-send', role: 'user', text: '这个要怎么弄？', command_id: 'send' }
+    const empty: Message = { ...input, id: 'native-user', text: '' }
+    const attachment: Message = { ...input, id: 'attachment-user', text: '', command_id: 'image', attachments: [{ id: 'image', name: 'image.png', media_type: 'image/png', url: '/image.png' }] }
+    const view = render(<MantineProvider><Transcript outbox={[]} session={runningSession} onEditLastUserMessage={vi.fn()} messages={[input, empty, { ...empty, id: 'whitespace-user', text: ' \n ' }, attachment]} /></MantineProvider>)
+    expect(screen.queryByTestId('message-native-user')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('message-whitespace-user')).not.toBeInTheDocument()
+    expect(screen.getByTestId('message-optimistic-send')).toHaveTextContent('这个要怎么弄？')
+    expect(screen.getByAltText('image.png')).toBeInTheDocument()
+    view.rerender(<MantineProvider><Transcript outbox={[]} messages={[{ ...empty, text: '这个要怎么弄？' }]} /></MantineProvider>)
+    expect(screen.getByTestId('message-native-user')).toHaveTextContent('这个要怎么弄？')
+  })
+
+  it('keeps each tool pack between its surrounding commentary', () => {
+    const tool: Message = { ...message, role: 'tool', kind: 'tool', tool: { name: 'commandExecution', status: 'completed', arguments: { command: 'git status' } } }
+    const view = render(<MantineProvider><Transcript outbox={[]} messages={[
+      { ...message, id: 'intro', text: '第一段说明' },
+      { ...tool, id: 'read', created_at: '2026-01-01T00:01:00Z' },
+      { ...message, id: 'update', text: '第二段说明' },
+      { ...tool, id: 'edit', created_at: '2026-01-01T00:02:00Z' },
+      { ...message, id: 'answer', text: '最终答复' },
+    ]} /></MantineProvider>)
+    const children = Array.from(view.container.querySelector('.transcript-inner')!.children)
+      .filter(node => node.classList.contains('transcript-message-entry') || node.classList.contains('activity-pack'))
+    expect(children.map(node => node.classList.contains('activity-pack') ? 'tool-pack' : node.querySelector('[data-testid]')?.getAttribute('data-testid')))
+      .toEqual(['message-intro', 'tool-pack', 'message-update', 'tool-pack', 'message-answer'])
+    for (const pack of screen.getAllByRole('region', { name: '思考与工具' })) fireEvent.click(pack.querySelector('summary')!)
+    expect(screen.getByTestId('message-read')).toBeInTheDocument()
+    expect(screen.getByTestId('message-edit')).toBeInTheDocument()
+  })
+
+  it.each(['codex', 'hermes'])('puts %s commentary metadata at the text end and keeps final reply metadata below', (agentId) => {
+    const view = render(<MantineProvider><Transcript outbox={[]} session={{ ...runningSession, status: 'idle' }} messages={[
+      { ...message, agent_id: agentId, id: 'intro', text: '第一段说明。', created_at: agentId === 'codex' ? '1970-01-01T00:00:00Z' : message.created_at },
+      { ...message, agent_id: agentId, id: 'tool', role: 'tool', kind: 'tool', tool: { name: 'terminal' } },
+      { ...message, agent_id: agentId, id: 'final', text: '最终回复。' },
+    ]} /></MantineProvider>)
+    const intro = screen.getByTestId('message-intro')
+    expect(intro.querySelector('.message-bubble > .message-meta-inline')).toContainElement(intro.querySelector('button[aria-label="复制消息"]'))
+    expect(intro.querySelectorAll('time')).toHaveLength(agentId === 'hermes' ? 1 : 0)
+    const final = screen.getByTestId('message-final')
+    expect(final.querySelector(':scope > .message-meta')).toContainElement(final.querySelector('button[aria-label="复制消息"]'))
+    expect(final.querySelector('.message-bubble .message-meta')).toBeNull()
+    expect(view.container.querySelectorAll('button[aria-label="复制消息"]')).toHaveLength(2)
+  })
+
+  it('keeps the running commentary metadata inline until the turn finishes', () => {
+    const view = render(<MantineProvider><Transcript outbox={[]} session={runningSession} messages={[message]} /></MantineProvider>)
+    expect(screen.getByTestId('message-message-1').querySelector('.message-bubble > .message-meta-inline')).not.toBeNull()
+    view.rerender(<MantineProvider><Transcript outbox={[]} session={{ ...runningSession, status: 'idle' }} messages={[message]} /></MantineProvider>)
+    expect(screen.getByTestId('message-message-1').querySelector(':scope > .message-meta')).not.toBeNull()
+  })
+
   it('offers a fork only at the end of an assistant turn', () => {
     render(<MantineProvider><Transcript outbox={[]} onForkAtMessage={vi.fn()} messages={[
       { ...message, id: 'intro', text: '先检查' },
@@ -70,6 +123,52 @@ describe('transcript follow mode', () => {
     expect(screen.getByText(/execute_code/)).toBeInTheDocument()
     expect(screen.queryByTestId('message-empty')).not.toBeInTheDocument()
     expect(screen.getByText('最终答复')).toBeInTheDocument()
+  })
+
+  it('does not leave empty native system messages between tool calls', () => {
+    const tool = { ...message, role: 'tool' as const, kind: 'tool' as const, text: '', tool: { name: 'commandExecution', arguments: { command: 'git status' }, status: 'completed' } }
+    render(<MantineProvider><Transcript outbox={[]} messages={[
+      { ...tool, id: 'tool-before' },
+      { ...message, id: 'empty-system', role: 'system', text: '' },
+      { ...message, id: 'whitespace-system', role: 'system', text: '  \n ' },
+      { ...message, id: 'empty-reasoning', kind: 'thinking', text: '' },
+      { ...tool, id: 'tool-after' },
+      { ...message, id: 'system-notice', role: 'system', text: '有效的系统提示' },
+      { ...message, id: 'final-answer', text: '完整的最终答复' },
+    ]} /></MantineProvider>)
+    expect(screen.queryByTestId('message-empty-system')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('message-whitespace-system')).not.toBeInTheDocument()
+    const packs = screen.getAllByRole('region', { name: '思考与工具' })
+    expect(packs).toHaveLength(1)
+    expect(packs[0]).toHaveTextContent('运行了 2 个命令')
+    expect(screen.getByText('有效的系统提示')).toBeInTheDocument()
+    expect(screen.getByText('完整的最终答复')).toBeInTheDocument()
+    fireEvent.click(packs[0].querySelector('summary')!)
+    expect(screen.getByTestId('message-tool-before')).toBeInTheDocument()
+    expect(screen.getByTestId('message-tool-after')).toBeInTheDocument()
+  })
+
+  it('renders native Codex commentary as messages and drops empty native placeholders', () => {
+    const native = (kind: string) => kind as Message['kind']
+    render(<MantineProvider><Transcript outbox={[]} messages={[
+      { ...message, id: 'commentary', kind: native('agentMessage'), text: '我会只提交本次改动。' },
+      { ...message, id: 'empty-native', kind: native('agentMessage'), text: '' },
+      { ...message, id: 'reasoning', kind: native('reasoning'), text: '核对提交范围' },
+      { ...message, id: 'empty-reasoning-native', kind: native('reasoning'), text: '' },
+      { ...message, id: 'plan-native', kind: native('plan'), text: '执行定向发布' },
+      { ...message, id: 'silent-command', role: 'tool', kind: 'tool', text: '', tool: { name: 'commandExecution', arguments: { command: 'git add selected.go' }, status: 'completed' } },
+    ]} /></MantineProvider>)
+    expect(screen.getByTestId('message-commentary')).toHaveClass('message-row')
+    expect(screen.getByTestId('message-plan-native')).toHaveClass('message-row')
+    expect(screen.queryByTestId('message-empty-native')).not.toBeInTheDocument()
+    const packs = screen.getAllByRole('region', { name: '思考与工具' })
+    expect(packs).toHaveLength(2)
+    for (const pack of packs) fireEvent.click(pack.querySelector('summary')!)
+    fireEvent.click(screen.getByTestId('message-reasoning').querySelector('summary')!)
+    expect(screen.getByTestId('message-reasoning').querySelector('.activity-thinking-content')).toHaveTextContent('核对提交范围')
+    expect(screen.queryByTestId('message-empty-reasoning-native')).not.toBeInTheDocument()
+    expect(screen.getByTestId('message-silent-command')).toHaveTextContent('git add selected.go')
+    expect(screen.queryByText(/^tool$/)).not.toBeInTheDocument()
   })
 
   it('uses an animated loader for the latest folded activity while the session is running', () => {
@@ -118,7 +217,7 @@ describe('transcript follow mode', () => {
       transcript.scrollTop = top
     })
     Object.defineProperty(transcript, 'scrollTo', { configurable: true, value: scrollTo })
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
 
     transcript.scrollTop = 100
     fireEvent.scroll(transcript)
@@ -146,7 +245,8 @@ describe('transcript follow mode', () => {
       configurable: true,
       value: vi.fn(({ top }: { top: number }) => { transcript.scrollTop = top }),
     })
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+    transcript.scrollTop = 100
     fireEvent.scroll(transcript)
     await waitFor(() => expect(screen.getByTestId('return-bottom').querySelector('.return-bottom-wave')).not.toBeNull())
 

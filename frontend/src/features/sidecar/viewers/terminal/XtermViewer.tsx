@@ -6,6 +6,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import type { ViewerContext } from '../../types'
 import { useSidecarStore } from '../../sidecarStore'
+import { getBackendWsHost, getWsProtocol } from '../../../../desktop/adapter'
 
 export function XtermViewer({ artifact, isActive = true }: ViewerContext) {
   const terminalRef = useRef<HTMLDivElement>(null)
@@ -13,9 +14,40 @@ export function XtermViewer({ artifact, isActive = true }: ViewerContext) {
   const fitAddon = useRef<FitAddon | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const [connected, setConnected] = useState(false)
+  const activeRef = useRef(isActive)
+  activeRef.current = isActive
+
+  const resizeTerminal = () => {
+    if (!activeRef.current) return
+    fitAddon.current?.fit()
+    const term = termInstance.current
+    const socket = wsRef.current
+    if (socket?.readyState === WebSocket.OPEN && term?.cols && term.rows) {
+      socket.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }))
+    }
+  }
+  const detachTerminal = () => {
+    const socket = wsRef.current
+    wsRef.current = null
+    if (socket) {
+      socket.onopen = null
+      socket.onmessage = null
+      socket.onerror = null
+      socket.onclose = null
+      socket.close()
+    }
+    termInstance.current?.dispose()
+    termInstance.current = null
+    fitAddon.current = null
+  }
+  const focusTerminal = () => {
+    if (activeRef.current && !window.matchMedia('(pointer: coarse)').matches) termInstance.current?.focus()
+  }
 
   const initTerminal = () => {
     if (!terminalRef.current) return
+    detachTerminal()
+    setConnected(false)
     terminalRef.current.innerHTML = ''
 
     const term = new Terminal({
@@ -31,7 +63,7 @@ export function XtermViewer({ artifact, isActive = true }: ViewerContext) {
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.open(terminalRef.current)
-    fit.fit()
+    if (activeRef.current) fit.fit()
 
     termInstance.current = term
     fitAddon.current = fit
@@ -41,7 +73,7 @@ export function XtermViewer({ artifact, isActive = true }: ViewerContext) {
     term.writeln('')
 
     // 连接真实后端 WebSocket 终端路由
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const protocol = getWsProtocol()
     let localToken: string | null = null
     try {
       if (typeof localStorage !== 'undefined' && typeof localStorage.getItem === 'function') {
@@ -49,33 +81,34 @@ export function XtermViewer({ artifact, isActive = true }: ViewerContext) {
       }
     } catch {}
     const tokenParam = localToken ? `&token=${encodeURIComponent(localToken)}` : ''
-    const wsUrl = `${protocol}//${window.location.host}/ws/v1/terminal?session_id=${encodeURIComponent(artifact.sessionId)}${tokenParam}`
+    const wsUrl = `${protocol}//${getBackendWsHost()}/ws/v1/terminal?session_id=${encodeURIComponent(artifact.sessionId)}&agent_id=${encodeURIComponent(artifact.agentId)}${tokenParam}`
     
     let ws: WebSocket
     try {
       ws = new WebSocket(wsUrl)
+      ws.binaryType = 'arraybuffer'
       wsRef.current = ws
 
       ws.onopen = () => {
+        if (wsRef.current !== ws) return
         setConnected(true)
-        // 挂载后立即发送视口大小
-        if (term.cols && term.rows) {
-          ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }))
-        }
-        // 自动聚焦
-        term.focus()
+        resizeTerminal()
+        focusTerminal()
       }
 
       ws.onmessage = (event) => {
-        term.write(event.data)
+        if (wsRef.current !== ws) return
+        term.write(typeof event.data === 'string' ? event.data : new Uint8Array(event.data))
       }
 
       ws.onerror = () => {
+        if (wsRef.current !== ws) return
         setConnected(false)
         term.writeln('\r\n\x1b[33m[提示: 终端服务待连接]\x1b[0m\r\n$ ')
       }
 
       ws.onclose = () => {
+        if (wsRef.current !== ws) return
         setConnected(false)
       }
 
@@ -93,26 +126,17 @@ export function XtermViewer({ artifact, isActive = true }: ViewerContext) {
   useEffect(() => {
     initTerminal()
 
-    const handleResize = () => {
-      fitAddon.current?.fit()
-      if (wsRef.current?.readyState === WebSocket.OPEN && termInstance.current) {
-        wsRef.current.send(
-          JSON.stringify({
-            type: 'resize',
-            cols: termInstance.current.cols,
-            rows: termInstance.current.rows,
-          }),
-        )
-      }
-    }
+    const handleResize = () => resizeTerminal()
+    const observer = new ResizeObserver(handleResize)
+    if (terminalRef.current) observer.observe(terminalRef.current)
     window.addEventListener('resize', handleResize)
 
     return () => {
+      observer.disconnect()
       window.removeEventListener('resize', handleResize)
-      wsRef.current?.close()
-      termInstance.current?.dispose()
+      detachTerminal()
     }
-  }, [artifact.id])
+  }, [artifact.id, artifact.agentId, artifact.sessionId])
 
   useEffect(() => useSidecarStore.getState().registerTabCloseHandler(
     artifact.agentId,
@@ -126,8 +150,8 @@ export function XtermViewer({ artifact, isActive = true }: ViewerContext) {
 
   useEffect(() => {
     if (!isActive) return
-    fitAddon.current?.fit()
-    termInstance.current?.focus()
+    resizeTerminal()
+    focusTerminal()
   }, [isActive])
 
   const handleClear = () => {

@@ -42,13 +42,13 @@ export class MobileOutbox {
       await this.commit(rows.map(row => row.state === 'submitting' ? { ...row, state: 'unknown' } : row))
     })
   }
-  enqueue(payload: CommandPayload, files: File[]) {
-    return this.run(() => this.commit([...this.entries, { payload, files, attachments: [], state: 'queued' }]))
+  enqueue(payload: CommandPayload, files: File[], attachments: Attachment[] = []) {
+    return this.run(() => this.commit([...this.entries, { payload, files, attachments, state: 'queued' }]))
   }
   flush(agentId: string, sessionId: string, commandId?: string) {
     return this.run(async () => {
       const scoped = this.entries.filter(row => row.payload.agent_id === agentId && row.payload.session_id === sessionId)
-      if (scoped.some(inFlight)) return
+      if (commandId ? scoped.some(row => ['submitting', 'received', 'unknown'].includes(row.state)) : scoped.some(inFlight)) return
       const queued = commandId ? scoped.find(row => row.payload.id === commandId) : scoped[0]
       if (!queued || queued.state !== 'queued') return
       let entry = queued
@@ -72,6 +72,7 @@ export class MobileOutbox {
         if (result.id !== entry.payload.id || result.agent_id !== agentId || result.session_id !== sessionId || result.action !== 'send') throw new Error('命令回执身份不匹配')
         if (result.state === 'completed') await this.commit(this.entries.filter(row => !(row.payload.id === entry.payload.id && row.payload.agent_id === agentId && row.payload.session_id === sessionId)))
         else await update({ ...entry, state: result.state, error: result.error || undefined })
+        return { command: result, attachments: entry.attachments }
       } catch (error) {
         await update({ ...entry, state: 'unknown', error: error instanceof Error ? error.message : '提交结果未确认' })
       }
@@ -86,9 +87,15 @@ export class MobileOutbox {
       : row)))
   }
   retry(agentId: string, sessionId: string, id: string) {
-    return this.run(() => this.commit(this.entries.map(row => row.payload.id === id && row.payload.agent_id === agentId && row.payload.session_id === sessionId && row.state === 'failed'
-      ? { ...row, payload: { ...row.payload, id: crypto.randomUUID() }, state: 'queued', error: undefined, sawRunning: false }
-      : row)))
+    return this.run(async () => {
+      const entry = this.entries.find(row => row.payload.id === id && row.payload.agent_id === agentId && row.payload.session_id === sessionId && row.state === 'failed')
+      if (!entry) return null
+      const commandId = crypto.randomUUID()
+      await this.commit(this.entries.map(row => row === entry
+        ? { ...row, payload: { ...row.payload, id: commandId }, state: 'queued', error: undefined, sawRunning: false }
+        : row))
+      return commandId
+    })
   }
   reconcile(commands: Command[], sessions: Session[]) {
     return this.run(async () => {

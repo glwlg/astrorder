@@ -63,10 +63,10 @@ func NewRemoteHermesFactory(emit func(string, string, map[string]any, string) er
 		}
 		digest := sha256.Sum256([]byte(connID + "|" + profile))
 		starter := func(ctx context.Context, spec sshtrans.CommandSpec) (hermesrt.SSHSession, error) {
-			if spec.Executable == "hermes" && !custom {
-				// Non-interactive SSH shells do not load the user's CLI PATH.
+			if !custom {
+				launcher := spec.Executable
 				spec.Executable = "/bin/sh"
-				spec.Args = append([]string{"-c", `p=$(command -v hermes) || p=""; if [ -z "$p" ]; then for candidate in "$HOME/.local/bin/hermes" "$HOME/.hermes/bin/hermes"; do if [ -x "$candidate" ]; then p="$candidate"; break; fi; done; fi; if [ -z "$p" ]; then printf 'Hermes launcher not found\n' >&2; exit 127; fi; exec "$p" "$@"`, "astrorder-hermes"}, spec.Args...)
+				spec.Args = []string{"-c", `p="$1"; if [ "$p" = hermes ]; then p=$(command -v hermes) || p=""; if [ -z "$p" ]; then for candidate in "$HOME/.local/bin/hermes" "$HOME/.hermes/bin/hermes"; do if [ -x "$candidate" ]; then p="$candidate"; break; fi; done; fi; fi; if [ -z "$p" ]; then printf 'Hermes launcher not found\n' >&2; exit 127; fi; shift; exec python3 -c "$1" "$p" "$2" "$3"`, "astrorder-hermes", launcher, hermesRelayBootstrap, profile, hermesOwnerRelay}
 			}
 			return transport.Start(ctx, spec)
 		}
@@ -92,6 +92,9 @@ func NewRemoteHermesFactory(emit func(string, string, map[string]any, string) er
 			Emit:         emit,
 		}
 
+		if !custom {
+			return hermesrt.NewWithCanonicalSSHStarter(cfg, starter), nil
+		}
 		return hermesrt.NewWithSSHStarter(cfg, starter), nil
 	}
 }

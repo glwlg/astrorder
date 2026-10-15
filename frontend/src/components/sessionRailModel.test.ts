@@ -274,13 +274,13 @@ describe('session rail hygiene', () => {
     ])).toEqual(['keep'])
   })
 
-  it('hides approval-assessment and review-subagent titles, but keeps ordinary history titles', () => {
+  it('keeps approval-assessment and review-subagent sessions discoverable', () => {
     expect(railIds([
       railSession({ id: 'ordinary', title: 'The following is the Codex agent history' }),
       railSession({ id: 'assess', title: 'The following is the Codex agent history whose request action you are assessing.' }),
       railSession({ id: 'review', title: '你是独立复审 subagent' }),
       railSession({ id: 'kind', title: '用户会话', native_kind: 'subagent' }),
-    ])).toEqual(['ordinary'])
+    ])).toEqual(['ordinary', 'assess', 'review', 'kind'])
   })
 
   it('renders placeholder titles as 未命名 or the workspace name', () => {

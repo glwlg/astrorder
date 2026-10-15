@@ -527,6 +527,10 @@ func (a *Adapter) Command(ctx context.Context, req core.Request) (core.Result, e
 func (a *Adapter) handleSend(owned *ownedSession, sessionID string, req core.Request) (core.Result, error) {
 	owned.mu.Lock()
 	defer owned.mu.Unlock()
+	params, _ := req.Fields["params"].(map[string]any)
+	if params["idle_only"] == true && (owned.status != "idle" || owned.promptRunning) {
+		return core.Result{}, fmt.Errorf("queued send requires an idle session")
+	}
 
 	var promptStr string
 	var hasPrompt bool

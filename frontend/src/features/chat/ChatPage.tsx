@@ -12,6 +12,7 @@ import {
 } from '@tabler/icons-react'
 import { ActionIcon, Button, Drawer, Group, Modal, Select, Stack, Switch, Text, TextInput, Title, Tooltip } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
+import { isUserInput } from '../../components/UserInputCard'
 import { useDisclosure, useMediaQuery } from '@mantine/hooks'
 import { useQueryClient, useQuery } from '@tanstack/react-query'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -19,13 +20,14 @@ import { createPortal } from 'react-dom'
 import { useShallow } from 'zustand/react/shallow'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ApiError, api } from '../../api/client'
-import { newCommandId, scopeKey } from '../../domain/semantics'
+import { findSessionHandoff, newCommandId, scopeKey } from '../../domain/semantics'
 import type { Approval, Command, Message, Session, Task } from '../../domain/types'
 import { EmptyState } from '../../components/EmptyState'
 import { SessionStatusLabel } from '../../components/Status'
 import { WelcomeView } from './WelcomeView'
-import { sessionActivityStatus } from '../../components/sessionRailModel'
+import { displaySessionTitle, sessionActivityStatus } from '../../components/sessionRailModel'
 import { AgentKindBadge } from '../../components/SessionRuntimeFacts'
+import { agentKindLabel } from '../../components/AgentBrandIcon'
 import { selectApprovals, selectCommands, selectOutbox, selectSessions, selectTasks, useAstrorderStore } from '../../state/store'
 import { useSessionResources } from '../../hooks/useAstrorderData'
 import { ChatComposer } from './ChatComposer'
@@ -36,6 +38,7 @@ import { REASONING_EFFORTS } from './composerMedia'
 
 
 import { SessionDetails } from './SessionDetails'
+import { useBackgroundProcesses } from './useBackgroundProcesses'
 import { SessionRuntimeBar } from './SessionRuntimeBar'
 import { TaskDetails } from './TaskDetails'
 import { Transcript } from './Transcript'
@@ -44,6 +47,7 @@ import { useSidecarStore } from '../sidecar/sidecarStore'
 import { BlurText } from '../../components/animations/BlurText'
 import { ErrorBoundary } from '../../components/ErrorBoundary'
 import { BotGroupChatPage } from './BotGroupChatPage'
+import { useShortcutHandlers } from '../shortcuts/shortcuts'
 
 
 const NO_COMMANDS: Command[] = []
@@ -319,21 +323,7 @@ function ChatPageBody() {
     }).catch(() => undefined)
     return () => { cancelled = true }
   }, [reviewPeers, reviewRun, selected])
-  const handoffPeer = useMemo(() => {
-    if (!selected) return null
-    if (selected.handoff_from_agent_id && selected.handoff_from_session_id) {
-      const source = sessions.find((session) =>
-        session.agent_id === selected.handoff_from_agent_id
-        && session.id === selected.handoff_from_session_id,
-      )
-      return source ? { session: source, label: `来自 ${agents[source.agent_id]?.kind === 'codex' ? 'Codex' : 'Hermes'}` } : null
-    }
-    const target = sessions.find((session) =>
-      session.handoff_from_agent_id === selected.agent_id
-      && session.handoff_from_session_id === selected.id,
-    )
-    return target ? { session: target, label: `已转交至 ${agents[target.agent_id]?.kind === 'codex' ? 'Codex' : 'Hermes'}` } : null
-  }, [agents, selected, sessions])
+  const handoffPeer = useMemo(() => findSessionHandoff(selected, sessions), [selected, sessions])
   const [detailsOpened, { open: openDetails, close: closeDetails }] = useDisclosure(false)
   const [detailsPinned, setDetailsPinned] = useState(false)
   const layoutRef = useRef<HTMLDivElement>(null)
@@ -376,125 +366,17 @@ function ChatPageBody() {
     }
   }, [isResizing, setSidecarWidth])
 
-  // 全局快捷键监听（对齐 Codex：Ctrl+P 打开文件树, Ctrl+Alt+S 侧边聊天, Ctrl+T 浏览器, Ctrl+` 终端）
-  // 必须在 capture 阶段或尽早拦截并 preventDefault，屏蔽浏览器默认行为（如 Ctrl+P 打印, Ctrl+T 新标签页）
-  useEffect(() => {
-    const handleGlobalKeyDown = (e: KeyboardEvent) => {
-      if (!selected) return
-      const isCtrlOrMeta = e.ctrlKey || e.metaKey
-
-      // 1. 侧边聊天快捷键：Ctrl + Alt + S
-      if (isCtrlOrMeta && e.altKey && (e.key === 's' || e.key === 'S')) {
-        e.preventDefault()
-        e.stopPropagation()
-        useSidecarStore
-          .getState()
-          .openSideChat(
-            selected.id,
-            selected.agent_id,
-            selected.title || undefined,
-            selected.connection_id || undefined,
-          )
-        return
-      }
-
-      // 决策状态机快捷键：Ctrl + Alt + G
-      if (isCtrlOrMeta && e.altKey && (e.key === 'g' || e.key === 'G')) {
-        e.preventDefault()
-        e.stopPropagation()
-        useSidecarStore
-          .getState()
-          .openAgentGraph(
-            selected.id,
-            selected.agent_id,
-            selected.title || undefined,
-            selected.connection_id || undefined,
-          )
-        return
-      }
-
-      // 知识记忆快捷键：Ctrl + Alt + M
-      if (isCtrlOrMeta && e.altKey && (e.key === 'm' || e.key === 'M')) {
-        e.preventDefault()
-        e.stopPropagation()
-        useSidecarStore.getState().openMemory(selected.id)
-        return
-      }
-
-      // 黑板快捷键：Ctrl + Alt + B
-      if (isCtrlOrMeta && e.altKey && (e.key === 'b' || e.key === 'B')) {
-        e.preventDefault()
-        e.stopPropagation()
-        useSidecarStore
-          .getState()
-          .openBlackboard(
-            selected.id,
-            selected.agent_id,
-            selected.connection_id || undefined,
-          )
-        return
-      }
-
-      // 2. Quick Open 快捷键：Ctrl + P (屏蔽浏览器原生打印，模糊搜文件)
-      if (isCtrlOrMeta && !e.altKey && !e.shiftKey && (e.key === 'p' || e.key === 'P')) {
-        e.preventDefault()
-        e.stopPropagation()
-        setQuickOpenOpened(true)
-        return
-      }
-
-      // 文件树快捷键：Ctrl + Shift + E
-      if (isCtrlOrMeta && !e.altKey && e.shiftKey && (e.key === 'e' || e.key === 'E')) {
-        e.preventDefault()
-        e.stopPropagation()
-        useSidecarStore
-          .getState()
-          .openFileTree(
-            selected.id,
-            selected.agent_id,
-            selected.workspace || undefined,
-            selected.project_name || selected.title,
-            selected.connection_id || undefined,
-          )
-        return
-      }
-
-      // 3. 内置浏览器快捷键：Ctrl + T (屏蔽浏览器打开新标签页)
-      if (isCtrlOrMeta && !e.altKey && !e.shiftKey && (e.key === 't' || e.key === 'T')) {
-        e.preventDefault()
-        e.stopPropagation()
-        useSidecarStore
-          .getState()
-          .openBrowser(
-            selected.id,
-            selected.agent_id,
-            undefined,
-            selected.connection_id || undefined,
-          )
-        return
-      }
-
-      // 4. 内置终端快捷键：Ctrl + `
-      if (isCtrlOrMeta && !e.altKey && !e.shiftKey && (e.key === '`' || e.key === '~')) {
-        e.preventDefault()
-        e.stopPropagation()
-        useSidecarStore
-          .getState()
-          .openTerminal(
-            selected.id,
-            selected.agent_id,
-            selected.project_name || selected.title,
-            selected.connection_id || undefined,
-          )
-        return
-      }
-    }
-
-    window.addEventListener('keydown', handleGlobalKeyDown, { capture: true })
-    return () => {
-      window.removeEventListener('keydown', handleGlobalKeyDown, { capture: true })
-    }
-  }, [selected])
+  useShortcutHandlers(selected ? {
+    sideChat: () => useSidecarStore.getState().openSideChat(selected.id, selected.agent_id, selected.title || undefined, selected.connection_id || undefined),
+    agentGraph: () => useSidecarStore.getState().openAgentGraph(selected.id, selected.agent_id, selected.title || undefined, selected.connection_id || undefined),
+    memory: () => useSidecarStore.getState().openMemory(selected.id),
+    blackboard: () => useSidecarStore.getState().openBlackboard(selected.id, selected.agent_id, selected.connection_id || undefined),
+    quickOpen: () => setQuickOpenOpened(true),
+    fileTree: () => useSidecarStore.getState().openFileTree(selected.id, selected.agent_id, selected.workspace || undefined, selected.project_name || selected.title, selected.connection_id || undefined),
+    browser: () => useSidecarStore.getState().openBrowser(selected.id, selected.agent_id, undefined, selected.connection_id || undefined),
+    terminal: () => useSidecarStore.getState().openTerminal(selected.id, selected.agent_id, selected.project_name || selected.title, selected.connection_id || undefined),
+    sidecar: () => useSidecarStore.getState().setIsOpen(!useSidecarStore.getState().isOpen),
+  } : {})
   const [taskDetailsOpened, { open: openTaskDetails, close: closeTaskDetails }] = useDisclosure(false)
   const [taskSelection, setTaskSelection] = useState<Pick<Task, 'id' | 'agent_id' | 'session_id'> | null>(null)
   const [gallery, setGallery] = useState<{ images: string[]; index: number } | null>(null)
@@ -504,7 +386,9 @@ function ChatPageBody() {
       const abs = images.map((src) => {
         try { return new URL(src, window.location.origin).href } catch { return src }
       })
-      void desktop.openPreview({ images: abs, index })
+      void desktop.openPreview({ images: abs, index }).catch(error => {
+        notifications.show({ color: 'red', message: `图片预览失败：${errorText(error)}` })
+      })
       return
     }
     setGallery({ images, index })
@@ -531,6 +415,8 @@ function ChatPageBody() {
     return undefined
   }, [agents, selected])
 
+  const background = useBackgroundProcesses(selected, Boolean(agent && ['hermes', 'codex'].includes(agent.kind)))
+  const runtimeTasks = [...tasks.filter(task => task.kind !== 'background'), ...background.items]
   const handleApproval = async (approval: Approval, action: 'approve' | 'cancel') => {
     if (!selected || !agent?.capabilities.includes('approvals')) return
     const id = newCommandId()
@@ -573,16 +459,18 @@ function ChatPageBody() {
 
   const handleStopTask = async (task: Task) => {
     if (!selected || !agent?.capabilities.includes('stop') || !task.target_id) return
+    const target = sessions.find(session => session.agent_id === task.agent_id && session.id === task.target_id)
+    if (!target) return
     const id = newCommandId()
-    const command: Command = { id, session_id: selected.id, agent_id: selected.agent_id, action: 'stop', state: 'received', text: '', attachments: [], created_at: new Date().toISOString(), error: null, target_id: task.target_id }
+    const command: Command = { id, session_id: target.id, agent_id: target.agent_id, action: 'stop', state: 'received', text: '', attachments: [], created_at: new Date().toISOString(), error: null, target_id: target.id }
     const store = useAstrorderStore.getState()
     store.addOutbox(command, 'submitting')
     try {
-      const result = await api.createCommand({ id, agent_id: selected.agent_id, session_id: selected.id, action: 'stop', text: '', attachment_ids: [], target_id: task.target_id })
+      const result = await api.createCommand({ id, agent_id: target.agent_id, session_id: target.id, action: 'stop', text: '', attachment_ids: [], target_id: target.id })
       store.mergeCommands([result])
-      await queryClient.invalidateQueries({ queryKey: ['astrorder', 'commands', selected.agent_id, selected.id] })
+      await queryClient.invalidateQueries({ queryKey: ['astrorder', 'commands', target.agent_id, target.id] })
     } catch (error) {
-      store.markOutboxError(selected.agent_id, selected.id, id, errorText(error), error instanceof ApiError && error.status < 500 ? 'failed' : 'unknown')
+      store.markOutboxError(target.agent_id, target.id, id, errorText(error), error instanceof ApiError && error.status < 500 ? 'failed' : 'unknown')
     }
   }
 
@@ -665,7 +553,7 @@ function ChatPageBody() {
                 <Group gap={8} wrap="nowrap" align="center">
                   <IconFolder size={17} className="chat-title-icon" />
                   <Title order={2} size="h4" className="chat-title-text">
-                    <BlurText text={selected.title || '未命名会话'} />
+                    <BlurText text={displaySessionTitle(selected)} />
                   </Title>
                 </Group>
                 {handoffPeer && <Button
@@ -674,7 +562,7 @@ function ChatPageBody() {
                   leftSection={<IconTransfer size={13} />}
                   onClick={() => navigate(`/chat/${encodeURIComponent(handoffPeer.session.id)}?agent_id=${encodeURIComponent(handoffPeer.session.agent_id)}`)}
                 >
-                  {handoffPeer.label}
+                  {handoffPeer.direction === 'from' ? '转交自' : '已转交至'} {agentKindLabel(agents[handoffPeer.session.agent_id]?.kind)}
                 </Button>}
               </div>
               <Group gap="xs" wrap="nowrap" className="chat-heading-actions">
@@ -703,7 +591,7 @@ function ChatPageBody() {
                 {reviewRun?.status === 'empty' && <Text size="xs" c="dimmed">本轮没有 code-comment</Text>}
                 {reviewRun?.status === 'failed' && <Text size="xs" c="red">审查失败</Text>}
 
-                {!!approvals.length && <Button size="compact-sm" color="yellow" variant="light" onClick={openDetails}>等待授权 · {approvals.length}</Button>}
+                {!!approvals.length && <Button size="compact-sm" color="yellow" variant="light" onClick={openDetails}>{approvals.some(isUserInput) ? '等待回答' : '等待授权'} · {approvals.length}</Button>}
                 <Tooltip label="知识记忆看板 (Ctrl+Alt+M)" position="bottom">
                   <ActionIcon
                     variant="subtle"
@@ -747,7 +635,7 @@ function ChatPageBody() {
               </Group>
             </Group>
           </div>
-          <SessionRuntimeBar key={scopeKey(selected.agent_id, selected.id)} commands={commands} tasks={tasks} onTaskOpen={(task) => { setTaskSelection({ id: task.id, agent_id: task.agent_id, session_id: task.session_id }); openTaskDetails() }} />
+          <SessionRuntimeBar key={scopeKey(selected.agent_id, selected.id)} commands={commands} tasks={runtimeTasks} backgroundError={background.error} onTaskOpen={(task) => { setTaskSelection({ id: task.id, agent_id: task.agent_id, session_id: task.session_id }); openTaskDetails() }} />
           <Transcript
             key={`transcript:${scopeKey(selected.agent_id, selected.id)}`}
             session={selected}
@@ -853,7 +741,7 @@ function ChatPageBody() {
       </div>
       <DrawerDetails opened={detailsOpened} onClose={closeDetails} onPin={() => { setDetailsPinned(true); closeDetails() }} session={selected} agent={agent} commands={commands} messages={messages} approvals={approvals} onApproval={(approval, action) => void handleApproval(approval, action)} />
       <Drawer opened={taskDetailsOpened && selectedTask !== null} onClose={() => { closeTaskDetails(); setTaskSelection(null) }} title="任务详情" position={mobileTaskSheet ? 'bottom' : 'right'} size={mobileTaskSheet ? 'min(88vh, 620px)' : 'min(92vw, 520px)'}>
-        {selectedTask && <TaskDetails task={selectedTask} canStop={Boolean(agent?.capabilities.includes('stop') && selectedTask.target_id && ['pending', 'running', 'waiting_approval'].includes(selectedTask.status))} onStop={(task) => void handleStopTask(task)} onJumpToLatest={() => window.scrollTo({ top: document.body.scrollHeight, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })} onClose={() => { closeTaskDetails(); setTaskSelection(null) }} />}
+        {selectedTask && <TaskDetails task={selectedTask} canStop={Boolean(agent?.capabilities.includes('stop') && sessions.some(session => session.agent_id === selectedTask.agent_id && session.id === selectedTask.target_id) && ['pending', 'running', 'waiting_approval'].includes(selectedTask.status))} onStop={(task) => void handleStopTask(task)} onOpenSession={(sid, aid) => { closeTaskDetails(); setTaskSelection(null); navigate(`/chat/${encodeURIComponent(sid)}?agent_id=${encodeURIComponent(aid)}`) }} onJumpToLatest={() => window.scrollTo({ top: document.body.scrollHeight, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })} onClose={() => { closeTaskDetails(); setTaskSelection(null) }} />}
       </Drawer>
       {gallery && gallery.images.length > 0 &&
         typeof document !== 'undefined' &&

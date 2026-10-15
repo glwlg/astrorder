@@ -60,6 +60,7 @@ export interface Session {
   control_state?: string;
   handoff_from_agent_id?: string | null;
   handoff_from_session_id?: string | null;
+  handoff_context?: string | null;
   parent_session_id?: string | null;
   parent_agent_id?: string | null;
   parent_session_key?: string | null;
@@ -95,6 +96,7 @@ export interface Message {
   attachments: Attachment[];
   created_at: string;
   command_id: string | null;
+  turn_id?: string | null;
   tool: Record<string, unknown> | null;
 }
 
@@ -176,6 +178,7 @@ export interface EventEnvelope {
 }
 
 export interface BootstrapPayload {
+  commands?: Command[];
   approvals?: Approval[];
   protocol_version: number;
   agents: Agent[];

@@ -3,8 +3,9 @@ import { ActionIcon, Button, Group, LoadingOverlay, Paper, Text, Tooltip } from 
 import { IconDeviceFloppy, IconDownload, IconRefresh } from '@tabler/icons-react'
 import type { ViewerContext } from '../../types'
 import { renderMermaid } from '../../../../components/renderMermaid'
+import { authenticatedApiFetch } from '../../../../api/client'
 
-export function MermaidViewer({ artifact, onSave, onDirtyChange, toolbarAction }: ViewerContext) {
+export function MermaidViewer({ artifact, onSave, onDirtyChange, toolbarAction, isActive = true }: ViewerContext) {
   const containerRef = useRef<HTMLDivElement>(null)
   const onDirtyChangeRef = useRef(onDirtyChange)
   onDirtyChangeRef.current = onDirtyChange
@@ -35,7 +36,7 @@ export function MermaidViewer({ artifact, onSave, onDirtyChange, toolbarAction }
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(artifact.readUrl)
+      const res = await authenticatedApiFetch(artifact.readUrl)
       if (!res.ok) throw new Error(`读取失败 (${res.status})`)
       const text = await res.text()
       setCode(text)
@@ -80,6 +81,7 @@ export function MermaidViewer({ artifact, onSave, onDirtyChange, toolbarAction }
 
   // 监听 Ctrl+S 快捷键保存
   useEffect(() => {
+    if (!isActive) return
     const onKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
         e.preventDefault()
@@ -93,7 +95,7 @@ export function MermaidViewer({ artifact, onSave, onDirtyChange, toolbarAction }
     return () => {
       window.removeEventListener('keydown', onKeyDown, { capture: true })
     }
-  }, [dirty, saving, handleSave])
+  }, [dirty, saving, handleSave, isActive])
 
   return (
     <div className="mermaid-viewer-pane" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>

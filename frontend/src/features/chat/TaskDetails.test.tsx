@@ -22,6 +22,16 @@ const task: Task = {
 }
 
 describe('TaskDetails', () => {
+  it('shows child observability and opens its exact session', () => {
+    const open = vi.fn()
+    const child: Task = { ...task, kind: 'subagent', target_id: 'child', progress: { child_session_id: 'child', model: 'native-model', tool_count: 3, input_tokens: 123, summary: '验证通过' } }
+    render(<MantineProvider><TaskDetails task={child} canStop={false} onOpenSession={open} onJumpToLatest={vi.fn()} onClose={vi.fn()} /></MantineProvider>)
+    expect(screen.getByText('模型：native-model')).toBeInTheDocument()
+    expect(screen.getByText('输入 tokens：123')).toBeInTheDocument()
+    expect(screen.getByText('验证通过')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '打开子会话' }))
+    expect(open).toHaveBeenCalledWith('child', 'agent-1')
+  })
   beforeEach(() => {
     vi.stubGlobal('confirm', vi.fn(() => true))
     Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } })

@@ -8,6 +8,10 @@ import { useAstrorderStore } from '../../state/store'
 import { ChatComposer, interpretGatewayError } from './ChatComposer'
 import { draftStorage } from './draftStorage'
 
+vi.mock('../mobile/serverOutbox', async importOriginal => {
+  const actual = await importOriginal<typeof import('../mobile/serverOutbox')>()
+  return { ...actual, sharedServerOutbox: (storage: import('../mobile/mobileOutbox').OutboxStorage) => new actual.ServerOutbox(storage) }
+})
 const queueMemory = vi.hoisted(() => ({ rows: [] as never[] }))
 vi.mock('../mobile/mobileOutboxStorage', () => ({
   mobileOutboxStorage: {
@@ -20,6 +24,14 @@ const session: Session = { id: 'native-one', agent_id: 'hermes', title: 'one', w
 const agent: Agent = { id: 'hermes', name: 'Hermes', kind: 'hermes', status: 'ready', capabilities: ['chat', 'stop', 'attachments'], limitation: null }
 const savedDrafts = new Map<string, any>()
 beforeEach(() => {
+  vi.spyOn(api, 'sendQueuedCommand').mockImplementation(async (id, aid, sid) => {
+    const command = Object.values(useAstrorderStore.getState().commands).find(c => c.id === id && c.agent_id === aid && c.session_id === sid)!
+    return { ...command, state: 'accepted' }
+  })
+  vi.spyOn(api, 'deleteQueuedCommand').mockImplementation(async (id, aid, sid) => {
+    const command = Object.values(useAstrorderStore.getState().commands).find(c => c.id === id && c.agent_id === aid && c.session_id === sid)!
+    return { ...command, state: 'cancelled' }
+  })
   savedDrafts.clear()
   vi.spyOn(draftStorage, 'load').mockImplementation(async key => savedDrafts.get(key))
   vi.spyOn(draftStorage, 'save').mockImplementation(async (key, draft) => { savedDrafts.set(key, draft) })
@@ -97,6 +109,25 @@ it('uses the same uncommitted-review request as the review relay', async () => {
   client.clear()
 })
 
+it('keeps goal creation in the native Agent command menu without a persistent goal button', async () => {
+  vi.spyOn(api, 'getSessionModel').mockResolvedValue({ model: 'native-model', provider: 'provider' })
+  vi.spyOn(api, 'getAgentCommands').mockResolvedValue({ items: [{ name: 'goal', description: '设置原生目标', input_hint: '目标内容' }] })
+  const create = vi.spyOn(api, 'createCommand').mockImplementation(async input => ({ ...input, state: 'accepted', attachments: [], created_at: session.updated_at, error: null, target_id: input.target_id ?? null }))
+  const setGoal = vi.spyOn(api, 'setSessionGoal')
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(<MantineProvider><QueryClientProvider client={client}><ChatComposer session={session} agent={agent} /></QueryClientProvider></MantineProvider>)
+  await screen.findByRole('button', { name: '选择会话模型' })
+  expect(screen.queryByRole('button', { name: '设置目标' })).not.toBeInTheDocument()
+  fireEvent.change(screen.getByLabelText('消息内容'), { target: { value: '/go' } })
+  fireEvent.click(await screen.findByRole('option', { name: /\/goal/ }))
+  expect(screen.getByLabelText('消息内容')).toHaveValue('/goal ')
+  fireEvent.change(screen.getByLabelText('消息内容'), { target: { value: '/goal 完成迁移' } })
+  fireEvent.click(screen.getByRole('button', { name: '发送' }))
+  await waitFor(() => expect(create).toHaveBeenCalledWith(expect.objectContaining({ action: 'send', text: '/goal 完成迁移', agent_id: session.agent_id, session_id: session.id })))
+  expect(setGoal).not.toHaveBeenCalled()
+  client.clear()
+})
+
 it('pastes clipboard images into the draft instead of ignoring them', async () => {
   useAstrorderStore.getState().resetRuntime()
   vi.spyOn(api, 'getSessionModel').mockResolvedValue({ model: 'native-model', provider: 'provider' })
@@ -158,20 +189,62 @@ it('shows the native failure detail returned by a failed command', async () => {
 })
 
 it('queues while a session is running and steers only after explicit confirmation', async () => {
+  useAstrorderStore.getState().setConnection('connected')
   vi.spyOn(api, 'getSessionModel').mockResolvedValue({ model: 'native-model', provider: 'provider' })
-  const create = vi.spyOn(api, 'createCommand').mockImplementation(async input => ({ ...input, state: 'accepted', attachments: [], created_at: session.updated_at, error: null, target_id: input.target_id ?? null }))
+  const create = vi.spyOn(api, 'createCommand').mockImplementation(async input => ({ ...input, state: 'queued', attachments: [], created_at: session.updated_at, error: null, target_id: input.target_id ?? null }))
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   render(<MantineProvider><QueryClientProvider client={client}><ChatComposer session={{ ...session, status: 'running' }} agent={agent} /></QueryClientProvider></MantineProvider>)
 
   fireEvent.change(screen.getByLabelText('消息内容'), { target: { value: '先排队' } })
   fireEvent.click(screen.getByRole('button', { name: '加入队列' }))
   expect(await screen.findByText('先排队')).toBeInTheDocument()
-  expect(create).not.toHaveBeenCalled()
+  expect(create).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ action: 'enqueue', text: '先排队' }))
+  expect(api.sendQueuedCommand).not.toHaveBeenCalled()
 
   fireEvent.click(screen.getByRole('button', { name: '立即引导' }))
-  await waitFor(() => expect(create).toHaveBeenCalledOnce())
-  expect(create.mock.calls[0][0]).toMatchObject({ action: 'send', text: '先排队' })
+  await waitFor(() => expect(api.sendQueuedCommand).toHaveBeenCalledOnce())
+  expect(create).toHaveBeenCalledOnce()
   await waitFor(() => expect(screen.queryByText('先排队')).not.toBeInTheDocument())
+  client.clear()
+})
+
+it('retries a confirmed failed queued message with a new command ID', async () => {
+  useAstrorderStore.getState().setConnection('connected')
+  vi.spyOn(api, 'getSessionModel').mockResolvedValue({ model: 'native-model', provider: 'provider' })
+  const create = vi.spyOn(api, 'createCommand').mockImplementation(async input => ({ ...input, state: 'queued', attachments: [], created_at: session.updated_at, error: null }))
+  vi.mocked(api.sendQueuedCommand).mockImplementation(async (id, aid, sid) => ({ ...Object.values(useAstrorderStore.getState().commands).find(c => c.id === id && c.agent_id === aid && c.session_id === sid)!, state: vi.mocked(api.sendQueuedCommand).mock.calls.length === 1 ? 'failed' : 'completed', error: vi.mocked(api.sendQueuedCommand).mock.calls.length === 1 ? '原生确认未发送' : null }))
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(<MantineProvider><QueryClientProvider client={client}><ChatComposer session={{ ...session, status: 'running' }} agent={agent} /></QueryClientProvider></MantineProvider>)
+  fireEvent.change(screen.getByLabelText('消息内容'), { target: { value: '引导失败后重试' } })
+  fireEvent.click(screen.getByRole('button', { name: '加入队列' }))
+  await waitFor(() => expect(screen.getByRole('button', { name: '立即引导' })).toBeEnabled())
+  fireEvent.click(screen.getByRole('button', { name: '立即引导' }))
+  fireEvent.click(await screen.findByRole('button', { name: '重试' }))
+  await waitFor(() => expect(create).toHaveBeenCalledTimes(2))
+  expect(create.mock.calls[1][0].id).not.toBe(create.mock.calls[0][0].id)
+  expect(create.mock.calls[1][0]).toMatchObject({ agent_id: session.agent_id, session_id: session.id, text: '引导失败后重试' })
+  await waitFor(() => expect(screen.queryByLabelText('排队消息')).not.toBeInTheDocument())
+  client.clear()
+})
+
+it('checks an uncertain queued result without resubmitting or assigning a new ID', async () => {
+  useAstrorderStore.getState().setConnection('connected')
+  vi.spyOn(api, 'getSessionModel').mockResolvedValue({ model: 'native-model', provider: 'provider' })
+  const create = vi.spyOn(api, 'createCommand').mockImplementation(async input => ({ ...input, state: 'queued', attachments: [], created_at: session.updated_at, error: null }))
+  vi.mocked(api.sendQueuedCommand).mockImplementation(async (id, aid, sid) => ({ ...Object.values(useAstrorderStore.getState().commands).find(c => c.id === id && c.agent_id === aid && c.session_id === sid)!, state: 'unknown', error: '回执丢失' }))
+  const lookup = vi.spyOn(api, 'getCommands').mockResolvedValue({ items: [] })
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(<MantineProvider><QueryClientProvider client={client}><ChatComposer session={{ ...session, status: 'running' }} agent={agent} /></QueryClientProvider></MantineProvider>)
+  fireEvent.change(screen.getByLabelText('消息内容'), { target: { value: '只核对这条引导' } })
+  fireEvent.click(screen.getByRole('button', { name: '加入队列' }))
+  await waitFor(() => expect(screen.getByRole('button', { name: '立即引导' })).toBeEnabled())
+  fireEvent.click(screen.getByRole('button', { name: '立即引导' }))
+  expect(await screen.findByText('回执丢失')).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: '核对结果' }))
+  await waitFor(() => expect(lookup).toHaveBeenCalledWith(session.id, session.agent_id))
+  expect(create).toHaveBeenCalledOnce()
+  expect(screen.getByLabelText('排队消息')).toHaveTextContent('只核对这条引导')
   client.clear()
 })
 
@@ -238,6 +311,23 @@ it('syncs its measured height to parent style as --composer-height and invokes o
   expect(column).not.toBeNull()
   await waitFor(() => expect(column.style.getPropertyValue('--composer-height')).toBeTruthy())
   expect(onHeightChange).toHaveBeenCalled()
+  client.clear()
+})
+
+it('shows native goals from any agent through progress.type, including Hermes turn progress', async () => {
+  useAstrorderStore.getState().resetRuntime()
+  vi.spyOn(api, 'getSessionModel').mockResolvedValue({ model: 'native-model', provider: 'provider' })
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const goal = {
+    id: 'hermes:goal:current', session_id: session.id, agent_id: session.agent_id, kind: 'todo' as const, title: '目标: 完成迁移',
+    status: 'running' as const, progress: { type: 'goal', source: 'hermes', native_status: 'active', turns_used: 0, max_turns: 20 },
+    command: null, logs: [], target_id: null, created_at: session.updated_at, updated_at: session.updated_at,
+  }
+  const wrap = (tasks: typeof goal[]) => <MantineProvider><QueryClientProvider client={client}><ChatComposer session={session} agent={agent} tasks={tasks} /></QueryClientProvider></MantineProvider>
+  const view = render(wrap([goal]))
+  expect(screen.getByRole('status', { name: '目标进行中 · 第 0/20 轮：完成迁移' })).toBeInTheDocument()
+  view.rerender(wrap([{ ...goal, status: 'cancelled' as never }]))
+  expect(screen.queryByText('完成迁移')).not.toBeInTheDocument()
   client.clear()
 })
 

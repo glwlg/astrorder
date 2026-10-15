@@ -45,6 +45,29 @@ beforeEach(() => {
 })
 
 describe('shared runtime store', () => {
+  it('replaces pending commands from a current bootstrap after a missed cancellation', () => {
+    const queued = { ...command('queued', 'shared', 'enqueue'), state: 'queued' as const }
+    useAstrorderStore.getState().hydrateBootstrap({ protocol_version: 1, agents: [], sessions: [], commands: [queued], cursor: 1 })
+    expect(Object.values(useAstrorderStore.getState().commands)).toEqual([queued])
+    useAstrorderStore.getState().hydrateBootstrap({ protocol_version: 1, agents: [], sessions: [], commands: [], cursor: 2 })
+    expect(Object.values(useAstrorderStore.getState().commands)).toEqual([])
+  })
+  it('accumulates cursorless live deltas once and replaces them with a native snapshot', () => {
+    const store = useAstrorderStore.getState()
+    useAstrorderStore.setState({ cursor: 42 })
+    const first = { id: 'delta-1', cursor: 0, type: 'message.delta', agent_id: session.agent_id, session_id: session.id, data: { ...message('reply', 'Hello '), role: 'assistant' } }
+    store.applyEvent(first)
+    store.applyEvent(first)
+    store.applyEvent({ ...first, id: 'delta-2', data: { ...first.data, text: 'world' } })
+    expect(useAstrorderStore.getState().messages['agent-1::session-1'].reply.text).toBe('Hello world')
+    expect(useAstrorderStore.getState().cursor).toBe(42)
+    store.applyEvent({ ...first, id: 'final', type: 'message.upsert', data: { ...first.data, text: 'Hello world!' } })
+    store.mergeMessages(session.agent_id, session.id, [{ ...message('reply', 'Hello world!'), role: 'assistant' }])
+    expect(Object.values(useAstrorderStore.getState().messages['agent-1::session-1'])).toEqual([expect.objectContaining({ id: 'reply', text: 'Hello world!' })])
+    store.applyEvent({ ...first, id: 'other-agent', agent_id: 'other', data: { ...first.data, agent_id: 'other', text: 'isolated' } })
+    expect(useAstrorderStore.getState().messages['other::session-1'].reply.text).toBe('isolated')
+  })
+
   it('does not revive completed activity from terminal task updates', () => {
     useAstrorderStore.getState().applyEvent({
       id: 'finished-task', cursor: 1, type: 'task.upsert', agent_id: session.agent_id, session_id: session.id,

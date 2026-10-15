@@ -348,6 +348,7 @@ var Capabilities = []Capability{
 
 // KnownPlugins lists the 13 built-in plugins for plugins.list and plugins.configure.
 var KnownPlugins = []map[string]any{
+	{"id": "browser", "title": "会话浏览器", "description": "按会话隔离的浏览器标签与页面操作", "category": "web", "extensions": []any{}},
 	{"id": "blackboard", "title": "黑板", "description": "多 Agent 任务协同共享记忆、规格参数与产出物实时看板", "category": "collaboration", "extensions": []any{".json", ".yaml", ".yml", ".md"}},
 	{"id": "drawio", "title": "Draw.io 架构图", "description": "交互式查看、编辑和绘制 .drawio 架构设计与流程图", "category": "design", "extensions": []any{".drawio", ".drawio.xml"}},
 	{"id": "mermaid", "title": "Mermaid 图表", "description": "实时渲染 Mermaid 流程图、时序图、类图与状态机", "category": "diagram", "extensions": []any{".mmd", ".mermaid"}},

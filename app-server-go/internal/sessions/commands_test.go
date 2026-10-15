@@ -12,6 +12,9 @@ import (
 var commandSendCalls int
 
 func (m *mockDaemonServer) Send(ctx context.Context, r *pb.SendRequest) (*pb.CommandReceipt, error) {
+	if m.sendCb != nil {
+		return m.sendCb(r)
+	}
 	commandSendCalls++
 	if r.Meta == nil || r.Meta.GetCommandId() == "" || r.Meta.OperationId != r.Meta.GetCommandId() || r.Meta.Canonicalization != pb.CanonicalizationVersion_CANONICALIZATION_VERSION_LEGACY_JSON_V1 {
 		panic("invalid durable metadata")
@@ -56,9 +59,8 @@ func postSend(t *testing.T, h http.Handler, id, agentID, text string) {
 	}
 }
 
-// Grok ACP never echoes the user prompt, so the accepted prompt must be stored.
-// Codex and Hermes echo natively and must not get a duplicate local row.
-func TestAcceptedSendPersistsUserMessageOnlyForGrok(t *testing.T) {
+// Submitted input stays in the command ledger, never in the transcript projection.
+func TestAcceptedSendDoesNotPersistUserMessages(t *testing.T) {
 	h, st, _, cleanup := setupTestServer(t, &mockDaemonServer{})
 	defer cleanup()
 	ctx := context.Background()
@@ -71,12 +73,14 @@ func TestAcceptedSendPersistsUserMessageOnlyForGrok(t *testing.T) {
 		}
 		postSend(t, h, "cmd-"+kind, kind, "hello "+kind)
 	}
-	row, err := st.GetMessage(ctx, "grok", "s-grok", "user-cmd-grok")
-	if err != nil || row == nil || row["role"] != "user" || row["text"] != "hello grok" || row["command_id"] != "cmd-grok" {
-		t.Fatalf("grok user message = %+v err=%v", row, err)
+	var count int
+	if err := st.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM messages").Scan(&count); err != nil || count != 0 {
+		t.Fatalf("user messages persisted: %d %v", count, err)
 	}
-	row, err = st.GetMessage(ctx, "codex", "s-codex", "user-cmd-codex")
-	if err != nil || row != nil {
-		t.Fatalf("codex must not get a local user row: %+v err=%v", row, err)
+	for _, kind := range []string{"grok", "codex"} {
+		command, err := st.GetCommand(ctx, kind, "s-"+kind, "cmd-"+kind)
+		if err != nil || command["state"] != "accepted" {
+			t.Fatalf("send receipt lost: %+v %v", command, err)
+		}
 	}
 }

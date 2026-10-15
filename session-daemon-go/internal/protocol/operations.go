@@ -45,7 +45,7 @@ func (d *Daemon) control(parent context.Context, request map[string]any) map[str
 	defer d.endControl()
 	action, _ := request["action"].(string)
 	switch action {
-	case "session.create", "session.send", "session.steer", "session.review", "session.compact", "session.approve", "session.interrupt", "session.delete", "session.rename", "session.settings", "model_config.apply", "model_config.reload":
+	case "session.create", "session.send", "session.steer", "session.review", "session.compact", "session.approve", "session.interrupt", "session.delete", "session.rename", "session.settings", "session.goal.set", "session.goal.clear", "model_config.apply", "model_config.reload":
 	default:
 		return d.controlOnce(parent, request)
 	}
@@ -94,6 +94,12 @@ func (d *Daemon) control(parent context.Context, request map[string]any) map[str
 		}
 		response["request_id"] = request["request_id"]
 		return response
+	}
+	if d.sessionControlTimeout(request) > defaultSessionControlTimeout {
+		// A reserved compression belongs to the daemon. Disconnecting the
+		// caller only stops its wait; native completion still reaches the ledger.
+		// controlOnce supplies the bounded compression execution deadline.
+		parent = context.WithoutCancel(parent)
 	}
 	response := d.controlOnce(parent, request)
 	if response["action"] == "error" {

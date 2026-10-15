@@ -50,8 +50,8 @@ func TestRefreshSessionStatusWritesOnlyGuardedStatus(t *testing.T) {
 	if err != nil || stored["status"] != "idle" || stored["title"] != "keep" || stored["workspace"] != "C:/keep" {
 		t.Fatalf("stored = %+v err=%v", stored, err)
 	}
-	if stored["updated_at"] == "2026-10-09T00:00:00.000Z" {
-		t.Fatalf("applied refresh did not advance updated_at: %+v", stored)
+	if stored["updated_at"] != "2026-10-09T00:00:00.000Z" {
+		t.Fatalf("status reconciliation changed activity: %+v", stored)
 	}
 
 	// Re-applying the same status must stay a read-only no-op.

@@ -23,7 +23,7 @@ var defaultOrigins = []string{
 const DefaultMaxAttachmentSize int64 = 10 * 1024 * 1024
 
 func DefaultAttachmentTypes() []string {
-	return []string{"application/json", "application/octet-stream", "application/pdf", "audio/aac", "audio/mp4", "audio/mpeg", "audio/ogg", "audio/wav", "audio/webm", "audio/x-wav", "image/gif", "image/jpeg", "image/png", "image/webp", "text/csv", "text/plain", "text/markdown"}
+	return []string{"application/json", "application/msword", "application/octet-stream", "application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "audio/aac", "audio/mp4", "audio/mpeg", "audio/ogg", "audio/wav", "audio/webm", "audio/x-wav", "image/gif", "image/jpeg", "image/png", "image/webp", "text/csv", "text/plain", "text/markdown"}
 }
 
 // Config contains only settings owned by the P4 HTTP foundation. Dynamic

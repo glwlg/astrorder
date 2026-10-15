@@ -96,6 +96,22 @@ func TestRestoreConnectsLocalCodexAndHermes(t *testing.T) {
 	}
 }
 
+func TestRestoreConnectsLocalGrok(t *testing.T) {
+	daemon := &fakeDaemonService{}
+	h, _ := setupRestoreFixture(t, daemon, nil)
+	if err := h.Restore(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	daemon.attachRequestsMu.Lock()
+	defer daemon.attachRequestsMu.Unlock()
+	for _, req := range daemon.attachRequests {
+		if req.Session.GetSessionId() == "probe-grok-local" && req.Target.GetRuntime() == pb.RuntimeKind_RUNTIME_KIND_GROK {
+			return
+		}
+	}
+	t.Fatal("startup did not attach local Grok")
+}
+
 func TestRestoreSkipsDisabledLocalCodex(t *testing.T) {
 	daemon := &fakeDaemonService{}
 	h, st := setupRestoreFixture(t, daemon, nil)
@@ -217,6 +233,41 @@ func TestRestoreRestoresConnectedHermesWhenChoiceNotSet(t *testing.T) {
 	if !found {
 		t.Errorf("Restore did not attach remote Hermes saved with state=connected")
 	}
+}
+
+func TestAutoConnectRestoresReleasedRuntimeWithoutAppRestart(t *testing.T) {
+	daemon := &fakeDaemonService{}
+	owned := true
+	daemon.statusResponse.Store(&pb.GetStatusResponse{DaemonId: "daemon-test-123", Sessions: []*pb.SessionSnapshot{{
+		Session: &pb.SessionRef{SessionId: "probe-codex-local"}, Runtime: pb.RuntimeKind_RUNTIME_KIND_CODEX.Enum(),
+		RuntimeOwned: &owned, Status: pb.SessionStatus_SESSION_STATUS_IDLE,
+	}}})
+	h, st := setupRestoreFixture(t, daemon, nil)
+	for _, kind := range []string{"hermes", "grok"} {
+		if err := st.SetAgentConnectionChoice(context.Background(), "local:"+kind, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	h.AutoConnect(ctx)
+	time.Sleep(100 * time.Millisecond)
+	if got := daemon.attachHit.Load(); got != 0 {
+		t.Fatalf("reattached already owned runtime: %d", got)
+	}
+	released := false
+	daemon.statusResponse.Store(&pb.GetStatusResponse{DaemonId: "daemon-test-123", Sessions: []*pb.SessionSnapshot{{
+		Session: &pb.SessionRef{SessionId: "probe-codex-local"}, Runtime: pb.RuntimeKind_RUNTIME_KIND_CODEX.Enum(),
+		RuntimeOwned: &released, Status: pb.SessionStatus_SESSION_STATUS_ERROR,
+	}}})
+	deadline := time.Now().Add(7 * time.Second)
+	for time.Now().Before(deadline) {
+		if daemon.attachHit.Load() > 0 {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("released runtime was not reconnected while App stayed running")
 }
 
 func TestAutoConnectRunsAsynchronously(t *testing.T) {

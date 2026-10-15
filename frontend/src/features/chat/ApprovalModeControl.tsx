@@ -46,10 +46,12 @@ export function ApprovalModeControl({
   session,
   compact = false,
   variant = 'capsule',
+  disabled = false,
 }: {
   session: Session
   compact?: boolean
   variant?: 'capsule' | 'panel'
+  disabled?: boolean
 }) {
   const queryClient = useQueryClient()
   const [opened, setOpened] = useState(false)
@@ -146,7 +148,8 @@ export function ApprovalModeControl({
             <UnstyledButton
               key={item.key}
               className={`approval-mode-option ${isSelected ? 'is-selected' : ''} ${itemIsFull ? 'is-full-option' : ''}`}
-              onClick={() => mutation.mutate(item.key)}
+              onClick={() => { if (!disabled && !mutation.isPending) mutation.mutate(item.key) }}
+              disabled={disabled || mutation.isPending}
               role="button"
               aria-pressed={isSelected}
             >
@@ -205,6 +208,7 @@ export function ApprovalModeControl({
           type="button"
           className={`approval-mode-capsule ${isFull ? 'is-full-access' : ''} ${compact ? 'is-compact' : ''}`}
           onClick={() => setOpened((v) => !v)}
+          disabled={disabled || mutation.isPending}
           aria-label={`当前审批模式：${activeItem.label}`}
           title={`审批模式：${activeItem.label}（点击切换）`}
         >

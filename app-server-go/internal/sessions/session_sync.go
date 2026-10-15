@@ -81,7 +81,7 @@ func (h *Handler) handleSyncSession(w http.ResponseWriter, r *http.Request, sess
 	// The status write is guarded by the composite binding observed above and
 	// re-checked inside the store transaction: a row deleted or rebound while
 	// GetStatus was in flight is never resurrected or overwritten, and only
-	// status/updated_at change, so concurrent metadata edits survive.
+	// status changes while activity time and concurrent metadata edits survive.
 	expect := store.RefreshSessionStatusExpectation{
 		NativeID:     nativeID,
 		ConnectionID: stringValue(row, "connection_id"),

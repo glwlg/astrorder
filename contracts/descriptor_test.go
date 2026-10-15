@@ -33,6 +33,7 @@ type baselineEntry struct {
 }
 
 type actionEntry struct {
+	PostBaseline     bool     `json:"post_baseline,omitempty"`
 	LegacyAction     string   `json:"legacy_action"`
 	RPC              string   `json:"rpc"`
 	Disposition      string   `json:"disposition"`
@@ -86,7 +87,7 @@ func TestFullServiceDescriptor(t *testing.T) {
 	want := map[protoreflect.FullName][]protoreflect.Name{
 		"astrorder.sessiond.v1.DaemonControl":    {"GetCapabilities", "GetStatus", "Shutdown"},
 		"astrorder.sessiond.v1.SessionControl":   {"CreateSession", "AttachSession", "Send", "Steer", "StartReview", "Compact", "Interrupt", "RespondApproval", "UpdateSettings", "RenameSession", "DeleteSession", "CloseSession", "DetachSession", "ReportObservedStatus", "SubmitDesktop", "UpdateDesktopSettings"},
-		"astrorder.sessiond.v1.RuntimeQuery":     {"QueryNative", "GetHistoryPage", "ListModels", "ListCommands", "ReadModel", "SetModel", "SetReasoning", "ReadApprovalMode", "SetApprovalMode", "DisconnectRuntime"},
+		"astrorder.sessiond.v1.RuntimeQuery":     {"QueryNative", "GetHistoryPage", "ListBackgroundProcesses", "ListModels", "ListCommands", "ReadModel", "SetModel", "SetReasoning", "SetGoal", "ClearGoal", "ReadApprovalMode", "SetApprovalMode", "DisconnectRuntime"},
 		"astrorder.sessiond.v1.EventStream":      {"Subscribe", "AppendEvent"},
 		"astrorder.sessiond.v1.TerminalStream":   {"Open"},
 		"astrorder.sessiond.v1.OperationQuery":   {"GetOperation"},

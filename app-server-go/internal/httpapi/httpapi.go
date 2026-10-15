@@ -104,6 +104,7 @@ func Registrations() []Registration {
 }
 
 type Options struct {
+	Context         context.Context
 	Config          config.Config
 	Store           *store.Store
 	DaemonClient    *daemonclient.Client
@@ -301,6 +302,9 @@ func NewHandlerChecked(options Options) (http.Handler, error) {
 				RegisterNativeSession(agentID, nativeID string)
 			}); ok && options.NativeSessions != nil {
 				options.NativeSessions.SetNativeSessionRegistrar(registrar.RegisterNativeSession)
+			}
+			if runner, ok := sessionHandler.(interface{ RunQueue(context.Context) }); ok && options.Context != nil && options.DaemonClient != nil {
+				go runner.RunQueue(options.Context)
 			}
 			if refresher, ok := sessionHandler.(activityRefresher); ok && options.DaemonClient != nil {
 				go reconcileActivityOnStart(refresher, options.Logger)

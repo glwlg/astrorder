@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { ActionIcon, Button, Group, LoadingOverlay, Paper, Text, Tooltip } from '@mantine/core'
 import { IconDeviceFloppy, IconDownload, IconRefresh } from '@tabler/icons-react'
 import type { ViewerContext } from '../../types'
+import { authenticatedApiFetch } from '../../../../api/client'
 
 const DRAWIO_EMBED_ORIGIN = 'https://embed.diagrams.net'
 const DRAWIO_EMBED_URL = `${DRAWIO_EMBED_ORIGIN}/?embed=1&proto=json&configure=1&spin=1&libraries=1`
@@ -23,7 +24,7 @@ export function DrawioViewer({ artifact, onSave, onDirtyChange, onClose: _onClos
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(artifact.readUrl)
+      const res = await authenticatedApiFetch(artifact.readUrl)
       if (!res.ok) throw new Error(`读取失败 (${res.status})`)
       const text = await res.text()
       setXmlContent(text)

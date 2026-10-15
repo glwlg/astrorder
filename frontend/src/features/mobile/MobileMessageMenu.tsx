@@ -28,12 +28,25 @@ export function MobileMessageMenu({ anchor, onClose, onCopy, onQuote }: { anchor
   useEffect(() => {
     const outside = (event: PointerEvent) => { if (!menu.current?.contains(event.target as Node)) onClose() }
     const scroll = () => onClose()
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      event.stopPropagation()
+      onClose()
+      anchor.element.focus({ preventScroll: true })
+    }
     document.addEventListener('pointerdown', outside, true)
     document.addEventListener('scroll', scroll, true)
+    document.addEventListener('keydown', escape, true)
     menu.current?.querySelector<HTMLButtonElement>('button')?.focus({ preventScroll: true })
-    return () => { document.removeEventListener('pointerdown', outside, true); document.removeEventListener('scroll', scroll, true) }
-  }, [onClose])
+    return () => {
+      document.removeEventListener('pointerdown', outside, true)
+      document.removeEventListener('scroll', scroll, true)
+      document.removeEventListener('keydown', escape, true)
+    }
+  }, [anchor.element, onClose])
   const select = () => {
+    if (anchor.selectText) { anchor.selectText(); onClose(); return }
     const bubble = anchor.element.querySelector('.m-bubble')
     if (bubble) { const range = document.createRange(); range.selectNodeContents(bubble); const selection = window.getSelection(); selection?.removeAllRanges(); selection?.addRange(range) }
     onClose()

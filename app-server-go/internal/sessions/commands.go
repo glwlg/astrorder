@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"sort"
 	"strings"
-	"time"
 )
 
 type commandError struct {
@@ -124,6 +123,9 @@ func (h *Handler) Submit(ctx context.Context, payload map[string]any) (map[strin
 	if err = h.publisher.Publish(ctx, "command.upsert", stored); err != nil {
 		return nil, err
 	}
+	if action == "send" || action == "enqueue" {
+		h.ensureSessionTitle(ctx, session, stringValue(stored, "text"))
+	}
 	if action == "enqueue" {
 		return stored, nil
 	}
@@ -171,7 +173,20 @@ func (h *Handler) submitStored(ctx context.Context, command map[string]any) (map
 			}
 			return nil, commandFailure(502, "Native session binding unavailable: "+err.Error())
 		}
-		if err = h.restoreModel(ctx, ref); err != nil {
+		guidance, guidanceErr := h.runningGuidance(ctx, ref)
+		if guidanceErr != nil {
+			_, _ = setState("failed", guidanceErr)
+			return nil, guidanceErr
+		}
+		if guidance && command["idle_only"] == true {
+			failure := commandFailure(409, "Queued send requires an idle session")
+			_, _ = setState("failed", failure)
+			return nil, failure
+		}
+		if !guidance {
+			err = h.restoreModel(ctx, ref)
+		}
+		if err != nil {
 			_, storageErr := setState("failed", err)
 			if storageErr != nil {
 				return nil, storageErr
@@ -199,7 +214,13 @@ func (h *Handler) submitStored(ctx context.Context, command map[string]any) (map
 		} else if agent["kind"] == "codex" && name == "/review" {
 			receipt, err = h.client.Session.StartReview(ctx, &pb.StartReviewRequest{Meta: meta, Session: ref, Delivery: pb.ReviewDelivery_REVIEW_DELIVERY_INLINE, Target: &pb.ReviewTarget{Target: &pb.ReviewTarget_Uncommitted{Uncommitted: "uncommitted"}}, Instructions: optString(strings.TrimSpace(strings.TrimPrefix(text, "/review")))})
 		} else {
-			receipt, err = h.client.Session.Send(ctx, &pb.SendRequest{Meta: meta, Session: ref, Input: input})
+			request := &pb.SendRequest{Meta: meta, Session: ref, Input: input}
+			if command["idle_only"] == true {
+				request.Policy = &pb.SendPolicy{NativeOptions: &pb.NativeJson{Schema: "astrorder." + stringValue(agent, "kind") + ".send.options.v1", Utf8Json: []byte(`{"idle_only":true}`)}}
+			} else if guidance && agent["kind"] == "hermes" {
+				request.Policy = &pb.SendPolicy{NativeOptions: &pb.NativeJson{Schema: "astrorder.hermes.send.options.v1", Utf8Json: []byte(`{"guidance_only":true}`)}}
+			}
+			receipt, err = h.client.Session.Send(ctx, request)
 		}
 	case "stop":
 		turn, readErr := h.store.ActiveTurn(ctx, aid, sid)
@@ -224,6 +245,9 @@ func (h *Handler) submitStored(ctx context.Context, command map[string]any) (map
 		}
 		if !found {
 			return nil, commandFailure(409, "Approval does not belong to this pending session")
+		}
+		if pending["method"] == "item/tool/requestUserInput" {
+			return nil, commandFailure(422, "Use the question response endpoint")
 		}
 		decision := pb.ApprovalDecision_APPROVAL_DECISION_ACCEPT
 		if action == "cancel" {
@@ -272,54 +296,40 @@ func (h *Handler) submitStored(ctx context.Context, command map[string]any) (map
 	if (action == "send" || action == "enqueue") && !receipt.Accepted {
 		return nil, commandFailure(502, "Native send was not accepted")
 	}
+	if action == "send" || action == "enqueue" {
+		if completed := receipt.GetCompleted(); completed != nil && completed.Native != nil {
+			var native map[string]any
+			if parseNativeJSON(completed.Native, &native) == nil && native["completed"] == true {
+				// A guidance receipt delivers input to an existing turn. It must
+				// not restore that turn after a concurrent completion event.
+				return setState("completed", nil)
+			}
+		}
+	}
 	if receipt.TurnId != nil {
 		if err = h.store.RecordAcceptedTurn(ctx, aid, sid, cid, *receipt.TurnId); err != nil {
 			return nil, err
 		}
 	}
-	if action == "send" || action == "enqueue" {
-		if err = h.persistUserMessage(ctx, command, aid, sid, cid, text); err != nil {
-			return nil, err
-		}
-	}
 	return setState("accepted", nil)
 }
-
-// persistUserMessage stores the accepted user prompt for runtimes whose native
-// stream never echoes it back (Grok ACP). Without this row the optimistic
-// bubble is dropped once the command is accepted and the prompt disappears.
-// The row is keyed by command ID so a later native echo reconciles into it.
-func (h *Handler) persistUserMessage(ctx context.Context, command map[string]any, aid, sid, cid, text string) error {
-	agent, err := h.store.GetAgent(ctx, aid)
-	if err != nil {
-		return err
+func (h *Handler) runningGuidance(ctx context.Context, ref *pb.SessionRef) (bool, error) {
+	// Guidance belongs to the current execution and its frozen model policy.
+	// Use exact live ownership, since the App status projection can lag events.
+	if live, statusErr := h.client.Daemon.GetStatus(ctx, &pb.GetStatusRequest{}); statusErr == nil && live != nil && live.GetDaemonId() == h.client.DaemonID() && live.GetStorageError() == nil {
+		agent, agentErr := h.store.GetAgent(ctx, ref.GetAgentId())
+		if agentErr != nil {
+			return false, agentErr
+		}
+		for _, snapshot := range live.Sessions {
+			if snapshotMatchesOwnedSession(snapshot, agent, ref.GetAgentId(), ref.SessionId, ref.GetConnectionId()) && snapshot.Status == pb.SessionStatus_SESSION_STATUS_RUNNING {
+				return true, nil
+			}
+		}
 	}
-	if stringValue(agent, "kind") != "grok" {
-		return nil
-	}
-	attachments, _ := command["attachments"].([]any)
-	if text == "" && len(attachments) == 0 {
-		return nil
-	}
-	if attachments == nil {
-		attachments = []any{}
-	}
-	row, err := h.store.UpsertMessage(ctx, map[string]any{
-		"id":          "user-" + cid,
-		"agent_id":    aid,
-		"session_id":  sid,
-		"role":        "user",
-		"kind":        "message",
-		"text":        text,
-		"attachments": attachments,
-		"created_at":  time.Now().UTC().Format(time.RFC3339Nano),
-		"command_id":  cid,
-	})
-	if err != nil {
-		return err
-	}
-	return h.publisher.Publish(ctx, "message.upsert", row)
+	return false, nil
 }
+
 func (h *Handler) restoreModel(ctx context.Context, ref *pb.SessionRef) error {
 	binding, err := h.store.GetSessionModelBinding(ctx, ref.GetAgentId(), ref.SessionId)
 	if err != nil || binding == nil {

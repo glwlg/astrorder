@@ -123,23 +123,28 @@ async function parseResponse(response: Response): Promise<unknown> {
   }
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+export async function authenticatedApiFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(init.headers)
   headers.set('Accept', 'application/json')
+  const sameOrigin = typeof window !== 'undefined' && new URL(path, window.location.href).origin === window.location.origin
   let localToken: string | null = null
   try {
-    if (typeof localStorage !== 'undefined' && typeof localStorage.getItem === 'function') {
+    if (sameOrigin && typeof localStorage !== 'undefined' && typeof localStorage.getItem === 'function') {
       localToken = localStorage.getItem('astrorder:token')
     }
   } catch {}
   if (localToken && !headers.has('Authorization')) {
     headers.set('Authorization', `Bearer ${localToken}`)
   }
-  const response = await fetch(`${API_PREFIX}${path}`, {
+  return fetch(path, {
     ...init,
-    credentials: 'include',
+    credentials: sameOrigin ? 'include' : 'omit',
     headers,
   })
+}
+
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const response = await authenticatedApiFetch(`${API_PREFIX}${path}`, init)
   const payload = await parseResponse(response)
   if (!response.ok) {
     const detail =
@@ -212,6 +217,9 @@ export interface LocalVoicePluginStatus {
 }
 
 export const api = {
+  setSessionGoalStatus: (sessionId: string, agentId: string, status: 'paused' | 'active') => jsonRequest<{ goal: Record<string, unknown>; source: string }>(`/sessions/${encodeURIComponent(sessionId)}/goal?agent_id=${encodeURIComponent(agentId)}`, { status }, 'PUT'),
+  setSessionGoal: (sessionId: string, agentId: string, objective: string) => jsonRequest<{ goal: Record<string, unknown>; source: string }>(`/sessions/${encodeURIComponent(sessionId)}/goal?agent_id=${encodeURIComponent(agentId)}`, { objective }, 'PUT'),
+  clearSessionGoal: (sessionId: string, agentId: string) => request<{ goal: null; source: string }>(`/sessions/${encodeURIComponent(sessionId)}/goal?agent_id=${encodeURIComponent(agentId)}`, { method: 'DELETE' }),
   transcribeAudio: (file: File, signal?: AbortSignal) => {
     const body = new FormData()
     body.append('file', file)
@@ -317,15 +325,24 @@ export const api = {
     request<{ items: Command[] }>(
       `${sessionPath(sessionId)}/commands?agent_id=${encodeURIComponent(agentId)}`,
     ),
+  getBackgroundProcesses: (sessionId: string, agentId: string) =>
+    request<{ items: Task[] }>(
+      `${sessionPath(sessionId)}/background-processes?agent_id=${encodeURIComponent(agentId)}`,
+    ),
   getTasks: (sessionId: string, agentId: string) =>
     request<{ items: Task[] }>(
       `${sessionPath(sessionId)}/tasks?agent_id=${encodeURIComponent(agentId)}`,
     ),
-  uploadAttachment: (file: File) => {
+  uploadAttachment: async (file: File) => {
     const form = new FormData()
-    form.append('file', file, file.name)
-    const desktop = (window as unknown as { astrorderDesktop?: { getPathForFile?: (file: File) => string } }).astrorderDesktop
-    const sourcePath = desktop?.getPathForFile?.(file)
+    // WebView2's intercepted multipart stream can omit disk-backed File bytes.
+    // Materialize them before fetch while resolving the path from the original.
+    const upload = window.location.hostname === 'wails.localhost'
+      ? new Blob([await file.arrayBuffer()], { type: file.type })
+      : file
+    form.append('file', upload, file.name)
+    const desktop = (window as unknown as { astrorderDesktop?: { getPathForFile?: (file: File) => string | Promise<string> } }).astrorderDesktop
+    const sourcePath = await desktop?.getPathForFile?.(file)
     if (sourcePath) form.append('source_path', sourcePath)
     return request<Attachment>('/attachments', { method: 'POST', body: form })
   },
@@ -358,41 +375,46 @@ export const api = {
       signal,
     })
     if (!res.ok) {
-      throw new Error(`升级请求失败: ${res.status} ${res.statusText}`)
+      const body = await res.json().catch(() => null)
+      throw new Error(body?.detail || body?.error?.message || `升级请求失败: ${res.status} ${res.statusText}`)
+    }
+    if (!res.headers.get('Content-Type')?.includes('application/x-ndjson')) {
+      throw new Error('升级接口未返回执行结果，请更新大内核后重试')
     }
     const reader = res.body?.getReader()
     if (!reader) throw new Error('流式读取不可用')
     const decoder = new TextDecoder()
     let buffer = ''
-    let isOk = false
-    let exitCode = 0
-
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split('\n')
-      buffer = lines.pop() || ''
-      for (const line of lines) {
-        if (!line.trim()) continue
-        try {
-          const item = JSON.parse(line)
-          if (item.type === 'init' && item.command) {
-            onInit?.(item.command)
-          } else if (item.type === 'chunk' && item.data) {
-            onChunk(item.data)
-          } else if (item.type === 'done') {
-            isOk = Boolean(item.ok)
-            exitCode = item.exit_code ?? 0
-          } else if (item.type === 'error') {
-            throw new Error(item.error || '升级遇到错误')
-          }
-        } catch {
-          onChunk(line + '\n')
-        }
+    let result: { ok: boolean; exit_code: number } | null = null
+    const consume = (line: string) => {
+      if (!line.trim()) return
+      let item
+      try { item = JSON.parse(line) }
+      catch { throw new Error('升级流包含无效结果') }
+      if (item.type === 'init' && item.command) onInit?.(item.command)
+      else if (item.type === 'chunk' && item.data) onChunk(item.data)
+      else if (item.type === 'error') throw new Error(item.error || '升级遇到错误')
+      else if (item.type === 'done') {
+        if (!Number.isInteger(item.exit_code) || typeof item.ok !== 'boolean') throw new Error('升级完成结果无效')
+        result = { ok: item.ok && item.exit_code === 0, exit_code: item.exit_code }
       }
     }
-    return { ok: isOk, exit_code: exitCode }
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+        for (const line of lines) consume(line)
+      }
+      consume(buffer + decoder.decode())
+      if (!result) throw new Error('升级流已结束，但未收到完成结果，请确认目标状态后重试')
+      return result
+    } finally {
+      await reader.cancel().catch(() => {})
+      reader.releaseLock()
+    }
   },
   getUpgradeTargets: () =>
     request<{
@@ -500,6 +522,7 @@ export const api = {
   getAgentMentions: (sessionId: string, agentId: string) => request<{ items: AgentMention[] }>(`${sessionPath(sessionId)}/agent-mentions?agent_id=${encodeURIComponent(agentId)}`),
   setSessionModel: (sessionId: string, agentId: string, provider: string, model: string) => jsonRequest<{ provider: string; model: string; deferred?: boolean }>(`${sessionPath(sessionId)}/model`, { agent_id: agentId, provider, model }),
   setSessionReasoning: (sessionId: string, agentId: string, effort: string) => jsonRequest<{ effort: string }>(`${sessionPath(sessionId)}/reasoning`, { agent_id: agentId, effort }),
+  respondUserInput: (sessionId: string, payload: { id: string; agent_id: string; request_id: string; answers: Record<string, { answers: string[] }> }) => jsonRequest<{ accepted: boolean; request_id: string }>(`${sessionPath(sessionId)}/user-input`, payload),
   getSessionApprovalMode: (sessionId: string, agentId: string) => request<{ mode: import('../domain/types').ApprovalMode }>(`${sessionPath(sessionId)}/approval-mode?agent_id=${encodeURIComponent(agentId)}`),
   setSessionApprovalMode: (sessionId: string, agentId: string, mode: import('../domain/types').ApprovalMode) => jsonRequest<{ mode: import('../domain/types').ApprovalMode }>(`${sessionPath(sessionId)}/approval-mode`, { agent_id: agentId, mode }),
   getRuntime: () => request<RuntimePayload>('/runtime'),
@@ -684,6 +707,8 @@ export const api = {
     return request<OcxUsageResponse>(`/analytics/usage?${query.toString()}`)
   },
   getModelQuota: (model: string) => request<OcxModelQuotaResponse>(`/analytics/model-quota?model=${encodeURIComponent(model)}`),
+  writeFile: (payload: { path: string; content: string; session_id: string; connection_id?: string | null }) =>
+    jsonRequest<{ status: string; path: string }>('/system/write-file', payload),
   searchFiles: (params: { q?: string; sessionId?: string; connectionId?: string; limit?: number }) => {
     const query = new URLSearchParams()
     if (params.q) query.set('q', params.q)

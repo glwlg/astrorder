@@ -24,6 +24,7 @@ func runProvision(args []string, output io.Writer) int {
 	state := flags.String("state-dir", "", "absolute durable state directory")
 	data := flags.String("data-dir", "", "absolute durable data directory below state")
 	executable := flags.String("app-executable", "", "absolute App executable under installation root")
+	desktop := flags.Bool("desktop-origin", false, "allow the built-in Wails desktop origin")
 	target := flags.String("grpc-target", "", "explicit loopback daemon gRPC target")
 	if err := flags.Parse(args); err != nil {
 		return cliFailure(output, err)
@@ -34,7 +35,7 @@ func runProvision(args []string, output io.Writer) int {
 	if *root == "" || *state == "" || *data == "" || *executable == "" {
 		return cliFailure(output, errors.New("provision requires --root, --state-dir, --data-dir and --app-executable"))
 	}
-	result, err := lifecycle.Provision(lifecycle.Options{RootDir: *root, StateDir: *state, DataDir: *data, AppExecutable: *executable, GRPCTarget: *target})
+	result, err := lifecycle.Provision(lifecycle.Options{RootDir: *root, StateDir: *state, DataDir: *data, AppExecutable: *executable, GRPCTarget: *target, DesktopOrigin: *desktop})
 	if err != nil {
 		return cliFailure(output, err)
 	}

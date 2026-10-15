@@ -287,6 +287,7 @@ func runServer(ctx context.Context, cfg config.Config, ready io.Writer, logger *
 		nativeSessions = eventProjection
 	}
 	handler, err := httpapi.NewHandlerChecked(httpapi.Options{
+		Context:         serverContext,
 		NativeSessions:  nativeSessions,
 		Config:          cfg,
 		Store:           st,

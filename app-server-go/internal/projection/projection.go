@@ -476,6 +476,11 @@ func (p *Projection) processEnvelope(
 
 // projectEnvelopeTx parses and projects one daemon event inside the store.ApplyFrame transaction.
 func (p *Projection) projectEnvelopeTx(ctx context.Context, tx *sql.Tx, env *sessiondv1.EventEnvelope) ([]store.Event, error) {
+	var activityTime time.Time
+	if env.GetTimestampUnixMicros() > 0 {
+		activityTime = time.UnixMicro(env.GetTimestampUnixMicros()).UTC()
+	}
+	ctx = context.WithValue(ctx, activityTimeKey{}, activityTime)
 	eventType := env.GetEventType()
 	if eventType == "" {
 		return nil, fmt.Errorf("%w: empty event_type", ErrCorruptedFrame)
@@ -513,6 +518,9 @@ func (p *Projection) projectEnvelopeTx(ctx context.Context, tx *sql.Tx, env *ses
 
 	case "codex.notification":
 		return projectCodexNotificationTx(ctx, tx, streamID, agentID, payloadMap)
+
+	case "codex.command_complete":
+		return projectCodexCommandCompleteTx(ctx, tx, streamID, payloadMap)
 
 	case "hermes.command_complete":
 		return projectHermesCommandCompleteTx(ctx, tx, streamID, payloadMap, env.GetStatus())
@@ -760,8 +768,7 @@ func preserveEmptyPayload(payload map[string]any, key string, fallback any) any 
 }
 
 func isPlaceholderTitle(title, id string) bool {
-	t := strings.TrimSpace(strings.ToLower(title))
-	return t == "" || t == id || t == "新会话" || t == "未命名" || t == "未命名会话" || t == "untitled" || t == "untitled session" || t == "none" || t == "null"
+	return store.IsPlaceholderSessionTitle(title, id)
 }
 
 func truncateCodepoints(s string, max int) string {
@@ -830,7 +837,7 @@ func projectSimpleSessionStatusTx(
 		return nil, nil
 	}
 
-	_, err = tx.ExecContext(ctx, `UPDATE sessions SET status=?,updated_at=datetime('now') WHERE agent_id=? AND id=?`, newStatus, ident.AgentID, ident.SessionID)
+	err = updateSessionStatusTx(ctx, tx, ident.AgentID, ident.SessionID, newStatus)
 	if err != nil {
 		return nil, fmt.Errorf("update session status %s: %w", newStatus, err)
 	}
@@ -877,7 +884,7 @@ func projectHermesApprovalRequestTx(ctx context.Context, tx *sql.Tx, streamID st
 
 	var events []store.Event
 	if agentID != "" && sid != "" {
-		_, err := tx.ExecContext(ctx, `UPDATE sessions SET status='waiting_approval',updated_at=datetime('now') WHERE agent_id=? AND id=?`, agentID, sid)
+		err := updateSessionStatusTx(ctx, tx, agentID, sid, "waiting_approval")
 		if err != nil {
 			return nil, fmt.Errorf("update hermes waiting approval: %w", err)
 		}
@@ -947,7 +954,7 @@ func projectHermesApprovalResolvedTx(ctx context.Context, tx *sql.Tx, streamID s
 	default:
 		return nil, fmt.Errorf("%w: hermes approval resolution missing authoritative status", ErrCorruptedFrame)
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE sessions SET status=?,updated_at=datetime('now') WHERE agent_id=? AND id=?`, currentStatus, agentID, sid); err != nil {
+	if err := updateSessionStatusTx(ctx, tx, agentID, sid, currentStatus); err != nil {
 		return nil, err
 	}
 	rows, err := queryRows(ctx, tx, "SELECT * FROM sessions WHERE agent_id=? AND id=?", agentID, sid)
@@ -993,6 +1000,31 @@ func projectHermesStreamTx(ctx context.Context, tx *sql.Tx, streamID string, pay
 		frame = payload
 	}
 
+	if phase, _ := frame["type"].(string); strings.HasPrefix(phase, "subagent.") {
+		data, _ := frame["payload"].(map[string]any)
+		return projectHermesSubagentTx(ctx, tx, sid, agentID, phase, data)
+	}
+	if frame["type"] == "todo.updated" {
+		data, _ := frame["payload"].(map[string]any)
+		return projectNativePlanTx(ctx, tx, sid, agentID, "hermes", data)
+	}
+	if frame["type"] == "session.control.update" {
+		data, _ := frame["payload"].(map[string]any)
+		control, ok := data["control"].(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("%w: Hermes control missing object", ErrCorruptedFrame)
+		}
+		raw, present := control["goal"]
+		if !present {
+			return nil, fmt.Errorf("%w: Hermes control missing goal", ErrCorruptedFrame)
+		}
+		goal, ok := raw.(map[string]any)
+		if raw != nil && !ok {
+			return nil, fmt.Errorf("%w: invalid Hermes goal", ErrCorruptedFrame)
+		}
+		return projectNativeGoalTx(ctx, tx, sid, agentID, "hermes", goal)
+	}
+
 	if frame["type"] == "session.usage" {
 		data, _ := frame["payload"].(map[string]any)
 		usage, _ := data["usage"].(map[string]any)
@@ -1025,7 +1057,12 @@ func projectHermesStreamTx(ctx context.Context, tx *sql.Tx, streamID string, pay
 			}
 		}
 		message := map[string]any{"id": "hermes-tool-" + toolID, "session_id": sid, "role": "tool", "kind": "tool", "text": text, "attachments": []any{}, "command_id": payload["command_id"], "tool": map[string]any{"name": data["name"], "arguments": data["args"], "status": state}}
-		return projectConnectorEventTx(ctx, tx, streamID, agentID, map[string]any{"type": "message.upsert", "data": message})
+		messageEvents, err := projectConnectorEventTx(ctx, tx, streamID, agentID, map[string]any{"type": "message.upsert", "data": message})
+		if err != nil {
+			return nil, err
+		}
+		taskEvents, err := projectTaskUpsertTx(ctx, tx, sid, agentID, map[string]any{"id": "hermes:tool:" + toolID, "kind": "tool", "title": data["name"], "status": state, "progress": map[string]any{"source": "hermes", "arguments": data["args"], "output": text}, "logs": []any{}})
+		return append(messageEvents, taskEvents...), err
 	}
 
 	var events []store.Event
@@ -1043,27 +1080,7 @@ func projectHermesStreamTx(ctx context.Context, tx *sql.Tx, streamID string, pay
 	}
 
 	if msgID != "" && delta != "" && agentID != "" && sid != "" {
-		now := time.Now().UTC().Format(time.RFC3339)
-		_, err := tx.ExecContext(ctx, `INSERT INTO messages(id,session_id,agent_id,role,kind,text,attachments,created_at,command_id)
-VALUES(?,?,?,'assistant','message',?,'[]',?,?)
-ON CONFLICT(agent_id,session_id,id) DO UPDATE SET text=messages.text || excluded.text`,
-			msgID, sid, agentID, delta, now, commandID)
-		if err != nil {
-			return nil, fmt.Errorf("append hermes delta message: %w", err)
-		}
-		msgRows, err := queryRows(ctx, tx, "SELECT * FROM messages WHERE agent_id=? AND session_id=? AND id=?", agentID, sid, msgID)
-		if err != nil {
-			return nil, fmt.Errorf("query hermes delta message: %w", err)
-		}
-		if len(msgRows) > 0 {
-			events = append(events, store.Event{
-				ID:        fmt.Sprintf("msg-delta-%s-%d", msgID, time.Now().UnixNano()),
-				Type:      "message.upsert",
-				AgentID:   agentID,
-				SessionID: sid,
-				Data:      msgRows[0],
-			})
-		}
+		events = append(events, liveMessageEvent(agentID, sid, msgID, "assistant", "message", delta, commandID, true))
 	}
 
 	events = append(events, store.Event{
@@ -1195,38 +1212,20 @@ func projectConnectorEventTx(ctx context.Context, tx *sql.Tx, streamID, agentID 
 	case "message.upsert":
 		msgID, _ := data["id"].(string)
 		if msgID != "" && evAgentID != "" && sid != "" {
-			role, _ := data["role"].(string)
-			kind, _ := data["kind"].(string)
-			text, _ := data["text"].(string)
-			createdAt := data["created_at"]
-			if createdAt == nil {
-				createdAt = time.Now().UTC().Format(time.RFC3339)
+			data["agent_id"] = evAgentID
+			data["session_id"] = sid
+			if data["created_at"] == nil {
+				data["created_at"] = time.Now().UTC().Format(time.RFC3339Nano)
 			}
-			attJSON, _ := json.Marshal(data["attachments"])
-			if len(attJSON) == 0 {
-				attJSON = []byte("[]")
-			}
-			toolJSON, _ := json.Marshal(data["tool"])
-			var commandID any = data["command_id"]
-
-			_, err := tx.ExecContext(ctx, `INSERT INTO messages(id,session_id,agent_id,role,kind,text,attachments,created_at,command_id,tool)
-VALUES(?,?,?,?,?,?,?,?,?,?)
-ON CONFLICT(agent_id,session_id,id) DO UPDATE SET role=excluded.role,kind=excluded.kind,text=excluded.text,
-attachments=excluded.attachments,created_at=excluded.created_at,command_id=excluded.command_id,tool=excluded.tool`,
-				msgID, sid, evAgentID, role, kind, text, string(attJSON), fmt.Sprint(createdAt), commandID, string(toolJSON))
-			if err != nil {
-				return nil, fmt.Errorf("upsert message tx: %w", err)
-			}
-			msgRows, err := queryRows(ctx, tx, "SELECT * FROM messages WHERE agent_id=? AND session_id=? AND id=?", evAgentID, sid, msgID)
-			if err != nil || len(msgRows) == 0 {
-				return nil, fmt.Errorf("query upserted message: %w", err)
+			if data["attachments"] == nil {
+				data["attachments"] = []any{}
 			}
 			events = append(events, store.Event{
 				ID:        fmt.Sprintf("msg-%s-%d", msgID, time.Now().UnixNano()),
 				Type:      "message.upsert",
 				AgentID:   evAgentID,
 				SessionID: sid,
-				Data:      msgRows[0],
+				Data:      data,
 			})
 		}
 
@@ -1391,7 +1390,7 @@ func projectRuntimeOwnerTx(
 	}
 
 	ownerJSON, _ := json.Marshal(map[string]any{"owner_pid": pid, "session_id": ident.SessionID})
-	_, err = tx.ExecContext(ctx, `UPDATE sessions SET runtime_owner=?,updated_at=datetime('now') WHERE agent_id=? AND id=?`,
+	_, err = tx.ExecContext(ctx, `UPDATE sessions SET runtime_owner=? WHERE agent_id=? AND id=?`,
 		string(ownerJSON), ident.AgentID, ident.SessionID)
 	if err != nil {
 		return nil, fmt.Errorf("update session runtime_owner: %w", err)
@@ -1404,7 +1403,7 @@ func projectRuntimeOwnerTx(
 		SessionID: ident.SessionID,
 		Data:      payload,
 	}}
-	// updated_at moved above, so browsers need the session row as well.
+	// Publish the owner change without treating process registration as activity.
 	sessRows, err := queryRows(ctx, tx, "SELECT * FROM sessions WHERE agent_id=? AND id=?", ident.AgentID, ident.SessionID)
 	if err != nil {
 		return nil, fmt.Errorf("query session: %w", err)
@@ -1457,7 +1456,7 @@ func projectOwnershipLostTx(
 		agent := fmt.Sprint(row["agent_id"])
 		sess := fmt.Sprint(row["id"])
 
-		_, err = tx.ExecContext(ctx, `UPDATE sessions SET status='error',runtime_owner=?,updated_at=datetime('now') WHERE agent_id=? AND id=?`,
+		_, err = tx.ExecContext(ctx, `UPDATE sessions SET status='error',runtime_owner=? WHERE agent_id=? AND id=?`,
 			string(runtimeOwnerJSON), agent, sess)
 		if err != nil {
 			return nil, fmt.Errorf("update session ownership lost: %w", err)
@@ -1517,6 +1516,16 @@ func projectCodexNotificationTx(ctx context.Context, tx *sql.Tx, streamID, agent
 	var events []store.Event
 
 	switch method {
+	case "turn/plan/updated":
+		return projectNativePlanTx(ctx, tx, explicitSession, explicitAgent, "codex", params)
+	case "thread/goal/updated":
+		goal, ok := params["goal"].(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("%w: codex goal missing object", ErrCorruptedFrame)
+		}
+		return projectNativeGoalTx(ctx, tx, explicitSession, explicitAgent, "codex", goal)
+	case "thread/goal/cleared":
+		return projectNativeGoalTx(ctx, tx, explicitSession, explicitAgent, "codex", nil)
 	case "thread/tokenUsage/updated":
 		usage, _ := params["tokenUsage"].(map[string]any)
 		last, _ := usage["last"].(map[string]any)
@@ -1529,7 +1538,7 @@ func projectCodexNotificationTx(ctx context.Context, tx *sql.Tx, streamID, agent
 		})
 	case "turn/started":
 		if explicitAgent != "" && explicitSession != "" {
-			_, err := tx.ExecContext(ctx, `UPDATE sessions SET status='running',updated_at=datetime('now') WHERE agent_id=? AND id=?`, explicitAgent, explicitSession)
+			err := updateSessionStatusTx(ctx, tx, explicitAgent, explicitSession, "running")
 			if err != nil {
 				return nil, fmt.Errorf("update codex session running: %w", err)
 			}
@@ -1602,7 +1611,7 @@ func projectCodexNotificationTx(ctx context.Context, tx *sql.Tx, streamID, agent
 				}
 			}
 
-			_, err := tx.ExecContext(ctx, `UPDATE sessions SET status=?,updated_at=datetime('now') WHERE agent_id=? AND id=?`, newSessStatus, explicitAgent, explicitSession)
+			err := updateSessionStatusTx(ctx, tx, explicitAgent, explicitSession, newSessStatus)
 			if err != nil {
 				return nil, fmt.Errorf("update codex session completed: %w", err)
 			}
@@ -1629,9 +1638,9 @@ func projectCodexNotificationTx(ctx context.Context, tx *sql.Tx, streamID, agent
 			}
 		}
 
-	case "item/commandExecution/requestApproval", "item/fileChange/requestApproval", "item/permissions/requestApproval":
+	case "item/commandExecution/requestApproval", "item/fileChange/requestApproval", "item/permissions/requestApproval", "item/tool/requestUserInput":
 		if explicitAgent != "" && explicitSession != "" {
-			_, err := tx.ExecContext(ctx, `UPDATE sessions SET status='waiting_approval',updated_at=datetime('now') WHERE agent_id=? AND id=?`, explicitAgent, explicitSession)
+			err := updateSessionStatusTx(ctx, tx, explicitAgent, explicitSession, "waiting_approval")
 			if err != nil {
 				return nil, fmt.Errorf("update codex waiting approval: %w", err)
 			}
@@ -1656,6 +1665,18 @@ func projectCodexNotificationTx(ctx context.Context, tx *sql.Tx, streamID, agent
 			}
 			if rawID, ok := frame["id"]; ok && rawID != nil {
 				appData["native_id"] = rawID
+			}
+			if method == "item/tool/requestUserInput" {
+				questions, ok := params["questions"].([]any)
+				if !ok || len(questions) == 0 {
+					return nil, fmt.Errorf("%w: missing user input questions", ErrCorruptedFrame)
+				}
+				appData["title"] = "Codex 等待你的回答"
+				appData["detail"] = "请选择选项或填写回答。"
+				appData["questions"] = questions
+				appData["item_id"] = params["itemId"]
+				appData["turn_id"] = params["turnId"]
+				appData["is_blocking"] = params["isBlocking"]
 			}
 			if method == "item/permissions/requestApproval" {
 				permissions, ok := params["permissions"].(map[string]any)
@@ -1734,55 +1755,45 @@ func projectCodexNotificationTx(ctx context.Context, tx *sql.Tx, streamID, agent
 		if item, ok := params["item"].(map[string]any); ok && explicitAgent != "" && explicitSession != "" {
 			itemID, _ := item["id"].(string)
 			itemType, _ := item["type"].(string)
+			if itemType == "collabAgentToolCall" || itemType == "subAgentActivity" {
+				return projectCodexSubagentsTx(ctx, tx, explicitSession, explicitAgent, item)
+			}
 			if itemID != "" {
 				if itemType == "agentMessage" || itemType == "userMessage" || itemType == "reasoning" || itemType == "plan" {
 					text, _ := item["text"].(string)
+					if itemType == "userMessage" && text == "" {
+						text = codexUserContentText(item["content"])
+					}
 					role := "assistant"
+					kind := "message"
+					if itemType == "reasoning" {
+						kind = "thinking"
+					}
 					if itemType == "userMessage" {
 						role = "user"
 					}
 					var activeCmdID sql.NullString
-					_ = tx.QueryRowContext(ctx, `SELECT id FROM commands WHERE agent_id=? AND session_id=? AND state='running' ORDER BY created_at DESC LIMIT 1`, explicitAgent, explicitSession).Scan(&activeCmdID)
+					commandID, _ := payload["command_id"].(string)
+					if commandID == "" {
+						_ = tx.QueryRowContext(ctx, `SELECT id FROM commands WHERE agent_id=? AND session_id=? AND state='running' ORDER BY created_at DESC LIMIT 1`, explicitAgent, explicitSession).Scan(&activeCmdID)
+						commandID = activeCmdID.String
+					}
 					var cmdIDParam any
-					if activeCmdID.Valid && activeCmdID.String != "" {
-						cmdIDParam = activeCmdID.String
+					if commandID != "" {
+						cmdIDParam = commandID
 					}
-					now := time.Now().UTC().Format(time.RFC3339)
-					_, err := tx.ExecContext(ctx, `INSERT INTO messages(id,session_id,agent_id,role,kind,text,attachments,created_at,command_id)
-				VALUES(?,?,?,?,?,?,'[]',?,?)
-				ON CONFLICT(agent_id,session_id,id) DO UPDATE SET text=excluded.text, kind=excluded.kind, command_id=COALESCE(excluded.command_id, messages.command_id)`,
-						itemID, explicitSession, explicitAgent, role, itemType, text, now, cmdIDParam)
-					if err != nil {
-						return nil, fmt.Errorf("upsert codex item message: %w", err)
+					event := liveMessageEvent(explicitAgent, explicitSession, itemID, role, kind, text, cmdIDParam, false)
+					event.Data["turn_id"] = params["turnId"]
+					if itemType == "userMessage" {
+						event.Data["attachments"] = CodexUserAttachments(item["content"], explicitSession, itemID)
 					}
-					msgRows, err := queryRows(ctx, tx, "SELECT * FROM messages WHERE agent_id=? AND session_id=? AND id=?", explicitAgent, explicitSession, itemID)
-					if err != nil {
-						return nil, fmt.Errorf("query codex item message: %w", err)
-					}
-					if len(msgRows) > 0 {
-						events = append(events, store.Event{ID: fmt.Sprintf("msg-%s-%d", itemID, time.Now().UnixNano()), Type: "message.upsert", AgentID: explicitAgent, SessionID: explicitSession, Data: msgRows[0]})
-					}
+					events = append(events, event)
 				} else {
-					taskStatus := "running"
-					if method == "item/completed" {
-						taskStatus = "completed"
-					}
-					title := itemType
-					now := time.Now().UTC().Format(time.RFC3339)
-					_, err := tx.ExecContext(ctx, `INSERT INTO tasks(id,session_id,agent_id,kind,title,status,logs,created_at,updated_at)
-VALUES(?,?,?,'tool',?,?,'[]',?,?)
-ON CONFLICT(agent_id,session_id,id) DO UPDATE SET status=excluded.status, updated_at=excluded.updated_at`,
-						itemID, explicitSession, explicitAgent, title, taskStatus, now, now)
+					taskEvents, err := projectCodexToolTx(ctx, tx, explicitSession, explicitAgent, method, item)
 					if err != nil {
-						return nil, fmt.Errorf("upsert codex tool task: %w", err)
+						return nil, err
 					}
-					taskRows, err := queryRows(ctx, tx, "SELECT * FROM tasks WHERE agent_id=? AND session_id=? AND id=?", explicitAgent, explicitSession, itemID)
-					if err != nil {
-						return nil, fmt.Errorf("query codex tool task: %w", err)
-					}
-					if len(taskRows) > 0 {
-						events = append(events, store.Event{ID: fmt.Sprintf("task-%s-%d", itemID, time.Now().UnixNano()), Type: "task.upsert", AgentID: explicitAgent, SessionID: explicitSession, Data: taskRows[0]})
-					}
+					events = append(events, taskEvents...)
 				}
 			}
 		}
@@ -1803,21 +1814,13 @@ ON CONFLICT(agent_id,session_id,id) DO UPDATE SET status=excluded.status, update
 			if activeCmdID.Valid && activeCmdID.String != "" {
 				cmdIDParam = activeCmdID.String
 			}
-			now := time.Now().UTC().Format(time.RFC3339)
-			_, err := tx.ExecContext(ctx, `INSERT INTO messages(id,session_id,agent_id,role,kind,text,attachments,created_at,command_id)
-VALUES(?,?,?,'assistant','message',?,'[]',?,?)
-ON CONFLICT(agent_id,session_id,id) DO UPDATE SET text=messages.text || excluded.text, command_id=COALESCE(excluded.command_id, messages.command_id)`,
-				itemID, explicitSession, explicitAgent, delta, now, cmdIDParam)
-			if err != nil {
-				return nil, fmt.Errorf("append codex delta message: %w", err)
+			kind := "message"
+			if method == "item/reasoning/delta" {
+				kind = "thinking"
 			}
-			msgRows, err := queryRows(ctx, tx, "SELECT * FROM messages WHERE agent_id=? AND session_id=? AND id=?", explicitAgent, explicitSession, itemID)
-			if err != nil {
-				return nil, fmt.Errorf("query codex delta message: %w", err)
-			}
-			if len(msgRows) > 0 {
-				events = append(events, store.Event{ID: fmt.Sprintf("msg-delta-%s-%d", itemID, time.Now().UnixNano()), Type: "message.upsert", AgentID: explicitAgent, SessionID: explicitSession, Data: msgRows[0]})
-			}
+			event := liveMessageEvent(explicitAgent, explicitSession, itemID, "assistant", kind, delta, cmdIDParam, true)
+			event.Data["turn_id"] = params["turnId"]
+			events = append(events, event)
 		}
 	}
 
@@ -1890,7 +1893,7 @@ WHERE agent_id=? AND session_id=? AND id=? AND state NOT IN ('completed','failed
 				targetStatus = "error"
 			}
 
-			_, execErr := tx.ExecContext(ctx, `UPDATE sessions SET status=?,updated_at=datetime('now') WHERE agent_id=? AND id=?`, targetStatus, agentID, sid)
+			execErr := updateSessionStatusTx(ctx, tx, agentID, sid, targetStatus)
 			if execErr != nil {
 				return nil, fmt.Errorf("update hermes session status: %w", execErr)
 			}
@@ -1947,23 +1950,9 @@ func projectHermesCompactionTx(ctx context.Context, tx *sql.Tx, streamID string,
 
 	var events []store.Event
 	if compactionID != "" && agentID != "" && sid != "" {
-		_, err := tx.ExecContext(ctx, `INSERT INTO messages(id,session_id,agent_id,role,kind,text,attachments,created_at)
-VALUES(?,?,?,'system','message',?,'[]',?)
-ON CONFLICT(agent_id,session_id,id) DO UPDATE SET text=excluded.text`,
-			compactionID, sid, agentID, text, createdAt)
-		if err != nil {
-			return nil, fmt.Errorf("upsert compaction message: %w", err)
-		}
-		msgRows, _ := queryRows(ctx, tx, "SELECT * FROM messages WHERE agent_id=? AND session_id=? AND id=?", agentID, sid, compactionID)
-		if len(msgRows) > 0 {
-			events = append(events, store.Event{
-				ID:        fmt.Sprintf("msg-%s-%d", compactionID, time.Now().UnixNano()),
-				Type:      "message.upsert",
-				AgentID:   agentID,
-				SessionID: sid,
-				Data:      msgRows[0],
-			})
-		}
+		event := liveMessageEvent(agentID, sid, compactionID, "system", "message", text, nil, false)
+		event.Data["created_at"] = createdAt
+		events = append(events, event)
 	}
 
 	events = append(events, store.Event{
@@ -2028,7 +2017,7 @@ func projectGrokNotificationTx(ctx context.Context, tx *sql.Tx, streamID string,
 	if update != nil && agentID != "" && sid != "" {
 		kind, _ := update["sessionUpdate"].(string)
 		if kind == "turn_completed" {
-			_, err := tx.ExecContext(ctx, `UPDATE sessions SET status='idle',updated_at=datetime('now') WHERE agent_id=? AND id=?`, agentID, sid)
+			err := updateSessionStatusTx(ctx, tx, agentID, sid, "idle")
 			if err != nil {
 				return nil, fmt.Errorf("update grok session idle: %w", err)
 			}
@@ -2094,28 +2083,7 @@ func projectGrokNotificationTx(ctx context.Context, tx *sql.Tx, streamID string,
 					cmdIDParam = activeCmdID.String
 				}
 
-				now := time.Now().UTC().Format(time.RFC3339)
-				_, err := tx.ExecContext(ctx, `INSERT INTO messages(id,session_id,agent_id,role,kind,text,attachments,created_at,command_id)
-VALUES(?,?,?,?,?,?,'[]',?,?)
-ON CONFLICT(agent_id,session_id,id) DO UPDATE SET text=messages.text || excluded.text, command_id=COALESCE(excluded.command_id, messages.command_id)`,
-					msgID, sid, agentID, role, itemType, text, now, cmdIDParam)
-				if err != nil {
-					return nil, fmt.Errorf("append grok chunk message: %w", err)
-				}
-
-				msgRows, err := queryRows(ctx, tx, "SELECT * FROM messages WHERE agent_id=? AND session_id=? AND id=?", agentID, sid, msgID)
-				if err != nil {
-					return nil, fmt.Errorf("query grok chunk message: %w", err)
-				}
-				if len(msgRows) > 0 {
-					events = append(events, store.Event{
-						ID:        fmt.Sprintf("msg-grok-%s-%d", msgID, time.Now().UnixNano()),
-						Type:      "message.upsert",
-						AgentID:   agentID,
-						SessionID: sid,
-						Data:      msgRows[0],
-					})
-				}
+				events = append(events, liveMessageEvent(agentID, sid, msgID, role, itemType, text, cmdIDParam, true))
 			}
 		}
 	}
@@ -2179,7 +2147,7 @@ WHERE agent_id=? AND session_id=? AND id=?`, state, errVal, agentID, sid, comman
 		sessStatus = "error"
 	}
 	if agentID != "" && sid != "" {
-		_, err := tx.ExecContext(ctx, `UPDATE sessions SET status=?,updated_at=datetime('now') WHERE agent_id=? AND id=?`, sessStatus, agentID, sid)
+		err := updateSessionStatusTx(ctx, tx, agentID, sid, sessStatus)
 		if err != nil {
 			return nil, fmt.Errorf("update grok session: %w", err)
 		}
@@ -2298,8 +2266,24 @@ func projectTaskUpsertTx(ctx context.Context, tx *sql.Tx, streamID, agentID stri
 	title, _ := payload["title"].(string)
 	status, _ := payload["status"].(string)
 
-	progressJSON, _ := json.Marshal(payload["progress"])
-	logsJSON, _ := json.Marshal(payload["logs"])
+	persisted := payload
+	if kind == "tool" || kind == "subagent" {
+		// Keep tool status metadata; arguments and output belong to native history.
+		persisted = make(map[string]any, len(payload))
+		for key, value := range payload {
+			persisted[key] = value
+		}
+		progress, _ := payload["progress"].(map[string]any)
+		metadata := map[string]any{}
+		for _, key := range []string{"source", "native_status", "exit_code", "blocking", "child_session_id", "subagent_id", "delegation_id", "task_index", "tool", "model", "reasoning_effort", "agent_path", "tool_count"} {
+			if value, ok := progress[key]; ok {
+				metadata[key] = value
+			}
+		}
+		persisted["progress"], persisted["command"], persisted["logs"] = metadata, nil, []any{}
+	}
+	progressJSON, _ := json.Marshal(persisted["progress"])
+	logsJSON, _ := json.Marshal(persisted["logs"])
 	if len(logsJSON) == 0 {
 		logsJSON = []byte("[]")
 	}
@@ -2309,7 +2293,7 @@ func projectTaskUpsertTx(ctx context.Context, tx *sql.Tx, streamID, agentID stri
 VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(agent_id,session_id,id) DO UPDATE SET kind=excluded.kind,title=excluded.title,status=excluded.status,
 progress=excluded.progress,command=excluded.command,logs=excluded.logs,target_id=excluded.target_id,updated_at=excluded.updated_at`,
-		taskID, sid, aid, kind, title, status, string(progressJSON), payload["command"], string(logsJSON), payload["target_id"], now, now)
+		taskID, sid, aid, kind, title, status, string(progressJSON), persisted["command"], string(logsJSON), payload["target_id"], now, now)
 	if err != nil {
 		return nil, fmt.Errorf("upsert task: %w", err)
 	}
@@ -2320,11 +2304,20 @@ progress=excluded.progress,command=excluded.command,logs=excluded.logs,target_id
 		data = taskRows[0]
 	}
 
-	return []store.Event{{
+	events := []store.Event{{
 		ID:        fmt.Sprintf("task-%s-%d", taskID, time.Now().UnixNano()),
 		Type:      "task.upsert",
 		AgentID:   aid,
 		SessionID: sid,
 		Data:      data,
-	}}, nil
+	}}
+	if kind == "tool" || kind == "subagent" {
+		live := make(map[string]any, len(data))
+		for key, value := range data {
+			live[key] = value
+		}
+		live["progress"], live["command"], live["logs"] = payload["progress"], payload["command"], payload["logs"]
+		events = append(events, store.Event{ID: fmt.Sprintf("tool-live-%s-%d", taskID, time.Now().UnixNano()), Type: "task.live", AgentID: aid, SessionID: sid, Data: live})
+	}
+	return events, nil
 }

@@ -431,7 +431,7 @@ func TestNativeVersionExecutorUsesStoredSSHInt64Port(t *testing.T) {
 		t.Fatal(err)
 	}
 	joined := strings.Join(argv, " ")
-	for _, want := range []string{"-p 2222", "-l tester", "example.invalid codex --version", "BatchMode=yes"} {
+	for _, want := range []string{"-p 2222", "-l tester", "example.invalid k=codex;", `exec "$p" --version`, "BatchMode=yes"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("ssh probe argv missing %q: %v", want, argv)
 		}

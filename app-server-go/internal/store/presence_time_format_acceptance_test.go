@@ -55,7 +55,7 @@ func TestAcceptanceMessageReupsertPreservesCanonicalCreatedAt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("presence failed on re-projected messages: %v", err)
 	}
-	if len(activity) != 1 || activity[0]["last_user_at"] == nil {
+	if len(activity) != 0 {
 		t.Fatalf("presence rows = %+v", activity)
 	}
 }

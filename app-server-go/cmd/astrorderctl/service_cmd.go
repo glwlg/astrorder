@@ -15,7 +15,7 @@ import (
 
 func runService(args []string, output io.Writer) int {
 	if len(args) < 2 {
-		return cliFailure(output, errors.New("usage: astrorderctl service <app|daemon> <status|start|stop|restart|install> [--confirm-active] --root PATH --state-dir PATH"))
+		return cliFailure(output, errors.New("usage: astrorderctl service <app|daemon> <status|start|stop|restart|update-check|update|install> [--confirm-active] --root PATH --state-dir PATH"))
 	}
 	target := args[0]
 	action := args[1]

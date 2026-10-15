@@ -79,6 +79,8 @@
   background: rgba(255, 255, 255, 0.14);
 }
 .m-bubble { -webkit-touch-callout:none; -webkit-user-select:none; user-select:none; }
+.mobile-workspace .m-bubble.m-select-text,
+.mobile-workspace .m-bubble.m-select-text * { -webkit-touch-callout:default; -webkit-user-select:text; user-select:text; }
 .m-drawer-menu { box-sizing:border-box; flex-direction:column; left:clamp(12px, var(--menu-x), calc(100vw - 240px)); max-height:calc(100dvh - 24px); overflow:auto; }
 .m-drawer-menu button { flex:none; justify-content:flex-start; padding:10px 12px; gap:9px; }
 .m-drawer-menu::after { display:none; }

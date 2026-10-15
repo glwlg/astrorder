@@ -46,4 +46,9 @@ func TestOwnedRunningFollowupUsesSteerAndPreservesOriginal(t *testing.T) {
 	if _, err := a.handleSend(ctx, s, core.Request{Fields: map[string]any{"text": "foreign"}}); err == nil {
 		t.Fatal("unowned work accepted followup")
 	}
+	writer.Close()
+	s.Status = "idle"
+	if _, err := a.handleSend(ctx, s, core.Request{Fields: map[string]any{"text": "late guidance", "params": map[string]any{"guidance_only": true}}}); err == nil || err.Error() != "Hermes guidance requires an owned running command" {
+		t.Fatalf("late guidance attempted a new turn: %v", err)
+	}
 }

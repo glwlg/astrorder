@@ -230,7 +230,7 @@ func typedLegacyCommandReceipt(raw []byte, key *sessiondv1.OperationKey, daemonI
 
 func typedLegacyAction(action string) bool {
 	switch action {
-	case "session.create", "session.send", "session.steer", "session.review", "session.compact", "session.approve", "session.interrupt", "session.delete", "session.rename", "session.settings":
+	case "session.create", "session.send", "session.steer", "session.review", "session.compact", "session.approve", "session.interrupt", "session.delete", "session.rename", "session.settings", "session.goal.set", "session.goal.clear":
 		return true
 	default:
 		return false

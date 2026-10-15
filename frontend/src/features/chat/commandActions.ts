@@ -5,6 +5,7 @@ export interface SubmitBrowserCommandInput {
   session: Session
   text: string
   files: File[]
+  uploadedAttachments?: import('../../domain/types').Attachment[]
   action: CommandPayload['action']
   targetId?: string | null
   uploadAttachment: (file: File) => Promise<import('../../domain/types').Attachment>
@@ -27,12 +28,13 @@ export async function submitBrowserCommand({
   session,
   text,
   files,
+  uploadedAttachments = [],
   action,
   targetId = null,
   uploadAttachment,
   createCommand,
 }: SubmitBrowserCommandInput): Promise<SubmittedBrowserCommand> {
-  const attachments = []
+  const attachments = [...uploadedAttachments]
   for (const file of files) {
     attachments.push(await uploadAttachment(file))
   }

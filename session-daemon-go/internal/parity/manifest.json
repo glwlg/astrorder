@@ -35,7 +35,9 @@
     "session.model.set",
     "session.reasoning.set",
     "session.approval.read",
-    "session.approval.set"
+    "session.approval.set",
+    "session.goal.set",
+    "session.goal.clear"
   ],
   "runtime_types": [
     "codex",

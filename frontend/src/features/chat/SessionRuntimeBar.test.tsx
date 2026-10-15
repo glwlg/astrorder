@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Command, Task } from '../../domain/types'
 import { SessionRuntimeBar } from './SessionRuntimeBar'
+vi.mock('./BackgroundTaskTerminal', () => ({ BackgroundTaskTerminal: ({ task }: { task: Task }) => <section aria-label={`后台任务终端：${task.title}`}>{String(task.progress?.output || '')}</section> }))
 afterEach(cleanup)
 
 const baseCommand: Command = {
@@ -53,8 +54,12 @@ describe('SessionRuntimeBar', () => {
     expect(screen.getByText('2 个运行中')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '查看后台任务：2 个运行中' }))
     fireEvent.click(screen.getByRole('button', { name: '构建项目' }))
-    expect(onTaskOpen).toHaveBeenLastCalledWith(tasks[7])
-    for (const text of [...inactiveTasks.map((task) => task.title), '普通工具']) {
+    expect(onTaskOpen).not.toHaveBeenCalled()
+    expect(screen.getByLabelText('后台任务终端：构建项目')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '构建项目' }))
+    expect(screen.queryByLabelText('后台任务终端：构建项目')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '普通工具' })).not.toBeInTheDocument()
+    for (const text of inactiveTasks.map((task) => task.title)) {
       expect(screen.queryByText(text)).not.toBeInTheDocument()
     }
     rerender(<MantineProvider><SessionRuntimeBar commands={[]} tasks={tasks.map((task) => ({ ...task, status: 'completed' }))} /></MantineProvider>)
@@ -79,5 +84,15 @@ describe('SessionRuntimeBar', () => {
       expect(onTaskOpen).toHaveBeenLastCalledWith(task)
     }
     expect(screen.queryByText('已移除步骤')).not.toBeInTheDocument()
+  })
+
+  it('keeps native goals out of the todo count; the composer goal pill owns them', () => {
+    const tasks: Task[] = [
+      { ...baseTask, id: 'todo1', title: '分析', kind: 'todo', status: 'completed' },
+      { ...baseTask, id: 'hermes:goal:current', title: '目标: 长期目标', kind: 'todo', progress: { type: 'goal', source: 'hermes' } },
+    ]
+    render(<MantineProvider><SessionRuntimeBar commands={[]} tasks={tasks} /></MantineProvider>)
+    expect(screen.getByText('1 / 1')).toBeInTheDocument()
+    expect(screen.queryByText('目标: 长期目标')).not.toBeInTheDocument()
   })
 })

@@ -31,6 +31,7 @@ export function EnvironmentConnections({ embedded = false, renderAgentConfigurat
   const [batchMode, setBatchMode] = useState<'node' | 'all'>('all')
   const [batchProgress, setBatchProgress] = useState<{ current: number; total: number; currentName: string }>({ current: 0, total: 0, currentName: '' })
   const [batchLogs, setBatchLogs] = useState<string>('')
+  const [batchOutcome, setBatchOutcome] = useState('')
   const [selectedAgentIds, setSelectedAgentIds] = useState<Record<string, boolean>>({})
   const [targetsLoading, setTargetsLoading] = useState(false)
   const [upgradeTargets, setUpgradeTargets] = useState<Array<{
@@ -110,6 +111,7 @@ export function EnvironmentConnections({ embedded = false, renderAgentConfigurat
     batchAbortRef.current = abortCtrl
     setBatchUpgrading(true)
     setBatchLogs('')
+    setBatchOutcome('')
     setBatchProgress({ current: 0, total: targets.length, currentName: targets[0].name })
 
     const title = batchMode === 'node'
@@ -177,12 +179,15 @@ export function EnvironmentConnections({ embedded = false, renderAgentConfigurat
       }
 
       if (abortCtrl.signal.aborted) {
+        setBatchOutcome(`升级已取消：成功 ${successCount}，失败 ${failureCount}`)
         failBackgroundTask(taskId, '批量升级被用户取消')
         notifications.show({ color: 'gray', title: '批量升级已取消', message: '已停止后续 Agent 的升级。' })
       } else if (failureCount === 0) {
+        setBatchOutcome(`升级结束：成功 ${successCount}，失败 0`)
         completeBackgroundTask(taskId, `全部 ${successCount} 个 Agent 已顺利完成升级`)
         notifications.show({ color: 'teal', title: '批量升级完成', message: `共 ${successCount} 个 Agent 已成功升级至最新版本！` })
       } else {
+        setBatchOutcome(`升级结束：成功 ${successCount}，失败 ${failureCount}`)
         failBackgroundTask(taskId, `完成 ${successCount} 个，失败 ${failureCount} 个`)
         notifications.show({ color: 'yellow', title: '批量升级部分完成', message: `成功: ${successCount}，失败: ${failureCount}。详情请查看日志。` })
       }
@@ -446,7 +451,7 @@ export function EnvironmentConnections({ embedded = false, renderAgentConfigurat
                   总进度：{batchProgress.current} / {batchProgress.total}
                 </Text>
                 <Text size="xs" c="dimmed">
-                  {batchUpgrading ? `当前处理: ${batchProgress.currentName}` : '升级任务已执行完毕'}
+                  {batchUpgrading ? `正在升级: ${batchProgress.currentName}` : batchOutcome}
                 </Text>
               </Group>
               <Progress
@@ -491,6 +496,7 @@ export function EnvironmentConnections({ embedded = false, renderAgentConfigurat
                     onClick={() => {
                       setBatchLogs('')
                       void openBatchUpgradeDialog(batchMode)
+                      setBatchOutcome('')
                     }}
                   >
                     返回列表

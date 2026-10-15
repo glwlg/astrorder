@@ -17,11 +17,11 @@ import (
 
 func runDaemon(args []string, output io.Writer) int {
 	if len(args) == 0 {
-		return cliFailure(output, errors.New("usage: astrorderctl daemon status|start|stop|restart|install|uninstall --root PATH --state-dir PATH [--confirm-active]"))
+		return cliFailure(output, errors.New("usage: astrorderctl daemon status|start|stop|restart|update-check|update|install|uninstall --root PATH --state-dir PATH [--confirm-active]"))
 	}
 	operation := args[0]
 	switch operation {
-	case "status", "start", "stop", "restart", "install", "uninstall":
+	case "status", "start", "stop", "restart", "update-check", "update", "install", "uninstall":
 	default:
 		return cliFailure(output, errors.New("unknown daemon operation"))
 	}
@@ -39,6 +39,27 @@ func runDaemon(args []string, output io.Writer) int {
 	}
 	if *root == "" || *state == "" || !filepath.IsAbs(*root) || !filepath.IsAbs(*state) {
 		return cliFailure(output, errors.New("daemon controls require absolute --root and --state-dir"))
+	}
+
+	if operation == "update-check" || operation == "update" {
+		public, readErr := publicEnvironment(filepath.Join(*state, "production.json"))
+		if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
+			return cliFailure(output, readErr)
+		}
+		executable := resolveDaemonExecutable(*root, public)
+		if executable == "" {
+			executable = filepath.Join(*root, "bin", "astrorder-sessiond.exe")
+		}
+		update, checkErr := lifecycle.CheckDaemonUpdate(executable)
+		if checkErr != nil {
+			return cliFailure(output, checkErr)
+		}
+		if update.UpdateAvailable && !withinRoot(*root, update.CandidatePath) {
+			return cliFailure(output, errors.New("daemon update executable must be inside --root"))
+		}
+		if operation == "update-check" || !update.UpdateAvailable {
+			return cliSuccess(output, map[string]any{"ok": true, "daemon": update})
+		}
 	}
 
 	values, err := lifecycle.OpenEnvironment(*state)
@@ -98,8 +119,23 @@ func runDaemon(args []string, output io.Writer) int {
 		StartupTimeout: 30 * time.Second,
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	operationTimeout := 60 * time.Second
+	if operation == "update" || operation == "restart" || operation == "stop" {
+		operationTimeout = 2 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), operationTimeout)
 	defer cancel()
+
+	if operation == "update" {
+		if !withinRoot(*root, daemonExec) {
+			return cliFailure(output, errors.New("daemon update executable must be inside --root"))
+		}
+		update, updateErr := lifecycle.UpdateDaemonWithLifecycle(ctx, options, *confirmActive)
+		if updateErr != nil {
+			return cliFailure(output, updateErr)
+		}
+		return cliSuccess(output, map[string]any{"ok": true, "daemon": update})
+	}
 
 	var result lifecycle.DaemonStatusResult
 	switch operation {

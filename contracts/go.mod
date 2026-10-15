@@ -1,6 +1,6 @@
 module astrorder.dev/contracts
 
-go 1.27.0
+go 1.27.2
 
 require (
 	google.golang.org/grpc v1.84.0

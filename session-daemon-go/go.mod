@@ -1,6 +1,6 @@
 module astrorder.dev/session-daemon
 
-go 1.27.0
+go 1.27.2
 
 require (
 	astrorder.dev/contracts v0.0.0

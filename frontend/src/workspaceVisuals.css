@@ -115,6 +115,13 @@
 .message-row { width: 100%; gap: 7px; flex-shrink: 0; }
 .message-user { width: fit-content; max-width: 85%; }
 .message-meta { font-size: 12px; padding: 0; }
+.message-bubble-inline { font-size: 14px; line-height: 1.75; }
+.message-bubble-inline > .markdown-content:has(> p:last-child) { display: contents; }
+.message-bubble-inline > .markdown-content > p:last-child { display: inline; margin: 0; }
+.message-bubble-inline > .message-meta-inline { display: inline-flex; vertical-align: baseline; align-items: center; gap: 6px; margin-inline-start: 8px; white-space: nowrap; line-height: 1; }
+.message-meta-inline .message-action-btn { vertical-align: middle; }
+.message-row:focus-within .message-actions-bar { opacity: 1; }
+.message-review-mode-tag { font-size: 11px; user-select: none; }
 .message-bubble { box-shadow: none; }
 .message-assistant .message-bubble, .message-system .message-bubble { padding: 0; background: transparent; border: 0; border-radius: 0; }
 .message-bubble-user { padding: 10px 14px; border: 0; border-radius: 14px; color: #232936; background: #F3F3F3; }

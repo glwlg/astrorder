@@ -142,6 +142,15 @@ func (s *Store) ActiveCommands(ctx context.Context) ([]map[string]any, error) {
 	return wireRows(rows, commandWire)
 }
 
+// QueueCommands includes unresolved and failed queue receipts for cross-device recovery.
+func (s *Store) QueueCommands(ctx context.Context) ([]map[string]any, error) {
+	rows, err := s.QueryRows(ctx, "SELECT * FROM commands WHERE state IN ('received','queued','accepted','running') OR (action='enqueue' AND state IN ('failed','unknown')) ORDER BY row_id")
+	if err != nil {
+		return nil, err
+	}
+	return wireRows(rows, commandWire)
+}
+
 // GetTask returns an exact task composite identity.
 func (s *Store) GetTask(ctx context.Context, agentID, sessionID, taskID string) (map[string]any, error) {
 	row, err := s.QueryRow(ctx, "SELECT * FROM tasks WHERE agent_id=? AND session_id=? AND id=?", agentID, sessionID, taskID)

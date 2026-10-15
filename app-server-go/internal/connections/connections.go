@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"astrorder.dev/app-server/internal/auth"
@@ -55,7 +56,7 @@ func (e *NativeVersionExecutor) GetVersion(ctx context.Context, kind, connID str
 		if sshBin == "" {
 			sshBin = "ssh"
 		}
-		args := append(append([]string(nil), baseArgs...), targetHost, binName, "--version")
+		args := append(append([]string(nil), baseArgs...), targetHost, remoteAgentSetup(binName)+`exec "$p"`, "--version")
 
 		cmdCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
@@ -71,7 +72,11 @@ func (e *NativeVersionExecutor) GetVersion(ctx context.Context, kind, connID str
 	// Local
 	cmdCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(cmdCtx, binName, "--version")
+	binary, err := localAgentExecutable(ctx, binName)
+	if err != nil {
+		return "", false, err
+	}
+	cmd := exec.CommandContext(cmdCtx, binary, "--version")
 	configureChildProcess(cmd)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -110,6 +115,7 @@ type Options struct {
 	Authorizer      *auth.Authenticator
 	Publisher       Publisher
 	VersionExecutor VersionExecutor
+	UpgradeExecutor UpgradeExecutor
 	OSProber        OSProber
 	SSHBinary       string
 	// RemoteExecutable resolves remote codex/grok CLI paths before attach.
@@ -125,11 +131,14 @@ type Handler struct {
 	authorizer  *auth.Authenticator
 	publisher   Publisher
 	versioner   VersionExecutor
+	upgrader    UpgradeExecutor
 	osProber    OSProber
 	sshBinary   string
 	executables RemoteExecutableResolver
 	hooks       HookInstaller
 	discovery   *discoveryCache
+	restoreMu   sync.Mutex
+	autoOnce    sync.Once
 }
 
 // NewHandler creates a new connections HTTP handler.
@@ -140,6 +149,10 @@ func NewHandler(opts Options) (*Handler, error) {
 	versioner := opts.VersionExecutor
 	if versioner == nil {
 		versioner = &NativeVersionExecutor{SSHBinary: opts.SSHBinary}
+	}
+	upgrader := opts.UpgradeExecutor
+	if upgrader == nil {
+		upgrader = &NativeUpgradeExecutor{SSHBinary: opts.SSHBinary}
 	}
 	osProber := opts.OSProber
 	if osProber == nil {
@@ -155,6 +168,7 @@ func NewHandler(opts Options) (*Handler, error) {
 		authorizer:  opts.Authorizer,
 		publisher:   opts.Publisher,
 		versioner:   versioner,
+		upgrader:    upgrader,
 		osProber:    osProber,
 		sshBinary:   opts.SSHBinary,
 		executables: executables,
@@ -285,6 +299,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	path := strings.TrimRight(r.URL.Path, "/")
+	// Serialize user connection changes with automatic reconciliation so a
+	// confirmed disconnect cannot be overtaken by an already queued attach.
+	if r.Method != http.MethodGet && (strings.HasPrefix(path, "/api/v1/connections/") ||
+		strings.HasPrefix(path, "/api/v1/environments/") && strings.Contains(path, "/agents/")) {
+		h.restoreMu.Lock()
+		defer h.restoreMu.Unlock()
+	}
 	switch {
 	// Agents
 	case r.Method == http.MethodGet && path == "/api/v1/agents":
@@ -365,7 +386,7 @@ func (h *Handler) handleListAgents(w http.ResponseWriter, r *http.Request) {
 
 // handleAgentUpgradeTargets returns actual inspected upgrade targets with versions.
 func (h *Handler) handleAgentUpgradeTargets(w http.ResponseWriter, r *http.Request) {
-	agents, err := h.store.ListAgents(r.Context())
+	agents, err := h.store.ListCurrentAgents(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "store_error", err.Error())
 		return
@@ -383,7 +404,16 @@ func (h *Handler) handleAgentUpgradeTargets(w http.ResponseWriter, r *http.Reque
 
 		var sshConn map[string]any
 		if connID != "local" {
-			sshConn, _ = h.store.GetSSHConnection(r.Context(), connID)
+			sshConn, err = h.store.GetSSHConnection(r.Context(), connID)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "store_error", err.Error())
+				return
+			}
+			// Historical registrations retain their sessions, but a removed
+			// machine has no installation that can be inspected or upgraded.
+			if sshConn == nil {
+				continue
+			}
 		}
 
 		curVer, isUpToDate, verErr := h.versioner.GetVersion(r.Context(), kind, connID, sshConn)
@@ -490,18 +520,17 @@ func (h *Handler) handleAgentUpgrade(w http.ResponseWriter, r *http.Request) {
 	connID, _ := agent["connection_id"].(string)
 	var sshConn map[string]any
 	if connID != "" && connID != "local" {
-		sshConn, _ = h.store.GetSSHConnection(r.Context(), connID)
+		sshConn, err = h.store.GetSSHConnection(r.Context(), connID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "store_error", err.Error())
+			return
+		}
+		if sshConn == nil {
+			writeError(w, http.StatusConflict, "connection_removed", "Agent 所属环境已移除，无法升级")
+			return
+		}
 	}
-	ver, isUpToDate, err := h.versioner.GetVersion(r.Context(), kind, connID, sshConn)
-	if err != nil {
-		writeError(w, http.StatusBadGateway, "upgrade_probe_failed", err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"status":     "verified",
-		"version":    ver,
-		"up_to_date": isUpToDate,
-	})
+	h.streamAgentUpgrade(w, r, kind, connID, sshConn)
 }
 
 // handleListEnvironments returns the environments page snapshot contract.
@@ -785,6 +814,10 @@ func (h *Handler) handleConnectCodex(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "attach_unconfirmed", err.Error())
 		return
 	}
+	if err := h.store.SetAgentConnectionChoice(r.Context(), "local:codex", true); err != nil {
+		writeError(w, http.StatusInternalServerError, "store_error", err.Error())
+		return
+	}
 	h.handleCodexConnection(w, r)
 }
 
@@ -800,6 +833,10 @@ func (h *Handler) handleDisconnectCodex(w http.ResponseWriter, r *http.Request) 
 	})
 	if err := h.disconnectReceipt(resp, err); err != nil {
 		writeError(w, http.StatusConflict, "disconnect_refused", err.Error())
+		return
+	}
+	if err := h.store.SetAgentConnectionChoice(r.Context(), "local:codex", false); err != nil {
+		writeError(w, http.StatusInternalServerError, "store_error", err.Error())
 		return
 	}
 	h.handleCodexConnection(w, r)
@@ -824,6 +861,10 @@ func (h *Handler) handleConnectLocal(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "attach_unconfirmed", err.Error())
 		return
 	}
+	if err := h.store.SetAgentConnectionChoice(r.Context(), "local:hermes", true); err != nil {
+		writeError(w, http.StatusInternalServerError, "store_error", err.Error())
+		return
+	}
 	h.handleConnectionsSnapshot(w, r)
 }
 
@@ -839,6 +880,10 @@ func (h *Handler) handleDisconnectLocal(w http.ResponseWriter, r *http.Request) 
 	})
 	if err := h.disconnectReceipt(resp, err); err != nil {
 		writeError(w, http.StatusConflict, "disconnect_refused", err.Error())
+		return
+	}
+	if err := h.store.SetAgentConnectionChoice(r.Context(), "local:hermes", false); err != nil {
+		writeError(w, http.StatusInternalServerError, "store_error", err.Error())
 		return
 	}
 	h.handleConnectionsSnapshot(w, r)
@@ -1044,6 +1089,10 @@ func (h *Handler) handleConnectSSHConnection(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	if err := h.store.SetAgentConnectionChoice(r.Context(), actualID+":hermes", true); err != nil {
+		writeError(w, http.StatusInternalServerError, "store_error", err.Error())
+		return
+	}
 	updated, err := h.store.UpdateSSHConnectionState(r.Context(), actualID, "connected", "Connected successfully", nil)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "store_error", err.Error())
@@ -1082,6 +1131,10 @@ func (h *Handler) handleDisconnectSSHConnection(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	if err := h.store.SetAgentConnectionChoice(r.Context(), actualID+":hermes", false); err != nil {
+		writeError(w, http.StatusInternalServerError, "store_error", err.Error())
+		return
+	}
 	updated, err := h.store.UpdateSSHConnectionState(r.Context(), actualID, "disconnected", "Disconnected explicitly", nil)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "store_error", err.Error())

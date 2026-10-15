@@ -42,7 +42,9 @@ var allRoutes = []Registration{
 	{Method: http.MethodPost, Path: "/api/v1/sessions/{session_id}/reasoning"},
 	{Method: http.MethodGet, Path: "/api/v1/sessions/{session_id}/approval-mode"},
 	{Method: http.MethodPost, Path: "/api/v1/sessions/{session_id}/approval-mode"},
+	{Method: http.MethodPost, Path: "/api/v1/sessions/{session_id}/user-input"},
 	{Method: http.MethodGet, Path: "/api/v1/sessions/{session_id}/commands"},
+	{Method: http.MethodGet, Path: "/api/v1/sessions/{session_id}/background-processes"},
 	{Method: http.MethodGet, Path: "/api/v1/sessions/{session_id}/tasks"},
 	{Method: http.MethodPost, Path: "/api/v1/commands"},
 	{Method: http.MethodPatch, Path: "/api/v1/commands/{command_id}"},
@@ -145,6 +147,10 @@ func parseRoute(method, path string) (string, parsedParams) {
 			params.SessionID = parts[0]
 			action := parts[1]
 			switch action {
+			case "user-input":
+				if method == http.MethodPost {
+					return "respond_user_input", params
+				}
 			case "sync":
 				if method == http.MethodPost {
 					return "sync_session", params
@@ -184,6 +190,10 @@ func parseRoute(method, path string) (string, parsedParams) {
 				if method == http.MethodPost {
 					return "set_session_reasoning", params
 				}
+			case "goal":
+				if method == http.MethodPut || method == http.MethodDelete {
+					return "manage_session_goal", params
+				}
 			case "approval-mode":
 				if method == http.MethodGet {
 					return "get_session_approval_mode", params
@@ -194,6 +204,10 @@ func parseRoute(method, path string) (string, parsedParams) {
 			case "commands":
 				if method == http.MethodGet {
 					return "list_commands", params
+				}
+			case "background-processes":
+				if method == http.MethodGet {
+					return "list_background_processes", params
 				}
 			case "tasks":
 				if method == http.MethodGet {

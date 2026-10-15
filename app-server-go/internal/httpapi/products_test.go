@@ -18,8 +18,8 @@ import (
 
 type groupAgents struct{}
 
-func (groupAgents) Run(context.Context, botgroups.Turn, func(string) error) (string, error) {
-	return "", nil
+func (groupAgents) Run(context.Context, botgroups.Turn, func(string) error) (botgroups.Reply, error) {
+	return botgroups.Reply{}, nil
 }
 func (groupAgents) Interrupt(context.Context, botgroups.Turn) error { return nil }
 func TestFormalRouterMountsGroupProduct(t *testing.T) {

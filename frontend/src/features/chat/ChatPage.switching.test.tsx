@@ -1,6 +1,6 @@
 import { MantineProvider } from '@mantine/core'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom'
 import { afterEach, expect, it, vi } from 'vitest'
 import { api } from '../../api/client'
@@ -12,6 +12,97 @@ function Switcher() {
   return <>{[['codex', 'one'], ['codex', 'two'], ['hermes', 'one']].map(([agent, id]) => <button key={`${agent}/${id}`} onClick={() => navigate(`/chat/${id}?agent_id=${agent}`)}>{agent}/{id}</button>)}</>
 }
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
+it.each([
+  ['parent', 'codex', 'subagent'],
+  ['child', 'codex', 'subagent'],
+  ['parent', 'hermes', 'hermes'],
+  ['child', 'hermes', 'hermes'],
+])('does not label a %s conversation as handed off after scheduling a %s %s session', async (selectedId, childAgentId, nativeKind) => {
+  useAstrorderStore.getState().resetRuntime()
+  const date = '2026-10-14T00:00:00Z'
+  useAstrorderStore.getState().hydrateBootstrap({ protocol_version: 1, cursor: 0,
+    agents: ['codex', 'hermes'].map(id => ({ id, name: id, kind: id, status: 'ready', capabilities: ['chat'], limitation: null })),
+    sessions: [
+      { id: 'parent', agent_id: 'codex', title: '主星调度', workspace: null, status: 'running', updated_at: date },
+      { id: 'child', agent_id: childAgentId, title: '伴星执行', workspace: null, status: 'running', updated_at: date,
+        native_kind: nativeKind, parent_agent_id: 'codex', parent_session_id: 'parent',
+        handoff_from_agent_id: 'codex', handoff_from_session_id: 'parent', handoff_context: null },
+    ],
+  })
+  vi.spyOn(api, 'getMessages').mockResolvedValue({ items: [], next_cursor: null })
+  vi.spyOn(api, 'getCommands').mockResolvedValue({ items: [] })
+  vi.spyOn(api, 'getTasks').mockResolvedValue({ items: [] })
+  vi.spyOn(api, 'getSessionModel').mockResolvedValue({ model: 'model', provider: 'provider' })
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const selectedAgentId = selectedId === 'parent' ? 'codex' : childAgentId
+  render(<MantineProvider><QueryClientProvider client={client}><MemoryRouter initialEntries={[`/chat/${selectedId}?agent_id=${selectedAgentId}`]}><Routes><Route path="/chat/:sessionId" element={<ChatPage />} /></Routes></MemoryRouter></QueryClientProvider></MantineProvider>)
+  expect(await screen.findByRole('heading', { level: 2, name: selectedId === 'parent' ? '主星调度' : '伴星执行' })).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: /已转交至|转交自|^来自 / })).not.toBeInTheDocument()
+  client.clear()
+})
+
+it('uses the same placeholder display title as the session rail and updates after generated naming', async () => {
+  useAstrorderStore.getState().resetRuntime()
+  const session = { id: 'title', agent_id: 'codex', title: 'New Session', workspace: '/workspace/OpsCore', status: 'idle' as const, updated_at: '2026-10-14T00:00:00Z' }
+  useAstrorderStore.getState().hydrateBootstrap({ protocol_version: 1, cursor: 0, agents: [], sessions: [session] })
+  vi.spyOn(api, 'syncSession').mockResolvedValue(session)
+  vi.spyOn(api, 'getMessages').mockResolvedValue({ items: [], next_cursor: null })
+  vi.spyOn(api, 'getCommands').mockResolvedValue({ items: [] })
+  vi.spyOn(api, 'getTasks').mockResolvedValue({ items: [] })
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(<MantineProvider><QueryClientProvider client={client}><MemoryRouter initialEntries={['/chat/title?agent_id=codex']}><Routes><Route path="/chat/:sessionId" element={<ChatPage />} /></Routes></MemoryRouter></QueryClientProvider></MantineProvider>)
+  expect(await screen.findByRole('heading', { level: 2, name: 'OpsCore' })).toBeInTheDocument()
+  await act(async () => { await client.ensureQueryData({ queryKey: ['astrorder', 'session-sync', 'codex', 'title'], queryFn: () => api.syncSession('title', 'codex') }) })
+  act(() => useAstrorderStore.getState().applyEvent({ id: 'title-ready', cursor: 1, type: 'session.upsert', agent_id: 'codex', session_id: 'title', data: { ...session, title: '同步部署提示优化' } }))
+  expect(await screen.findByRole('heading', { level: 2, name: '同步部署提示优化' })).toBeInTheDocument()
+  client.clear()
+})
+
+it('keeps a genuine handoff link separate from scheduled children and opens the exact conversation', async () => {
+  useAstrorderStore.getState().resetRuntime()
+  const date = '2026-10-14T00:00:00Z'
+  const source = { id: 'source', agent_id: 'codex', title: '交接来源', workspace: null, status: 'idle' as const, updated_at: date }
+  const scheduled = { ...source, id: 'child', title: '协作伴星', handoff_from_agent_id: source.agent_id, handoff_from_session_id: source.id }
+  const transferred = { ...scheduled, agent_id: 'hermes', id: 'transferred', title: '交接目标', handoff_context: '交接摘要' }
+  useAstrorderStore.getState().hydrateBootstrap({ protocol_version: 1, cursor: 0,
+    agents: ['codex', 'hermes'].map(id => ({ id, name: id, kind: id, status: 'ready', capabilities: ['chat'], limitation: null })),
+    sessions: [source, scheduled, transferred],
+  })
+  vi.spyOn(api, 'getMessages').mockResolvedValue({ items: [], next_cursor: null })
+  vi.spyOn(api, 'getCommands').mockResolvedValue({ items: [] })
+  vi.spyOn(api, 'getTasks').mockResolvedValue({ items: [] })
+  vi.spyOn(api, 'getSessionModel').mockResolvedValue({ model: 'model', provider: 'provider' })
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(<MantineProvider><QueryClientProvider client={client}><MemoryRouter initialEntries={['/chat/source?agent_id=codex']}><Routes><Route path="/chat/:sessionId" element={<ChatPage />} /></Routes></MemoryRouter></QueryClientProvider></MantineProvider>)
+  fireEvent.click(await screen.findByRole('button', { name: '已转交至 Hermes' }))
+  expect(await screen.findByRole('heading', { level: 2, name: '交接目标' })).toBeInTheDocument()
+  fireEvent.click(await screen.findByRole('button', { name: '转交自 Codex' }))
+  expect(await screen.findByRole('heading', { level: 2, name: '交接来源' })).toBeInTheDocument()
+  client.clear()
+})
+
+it('stops a child from parent task details using the exact child command scope', async () => {
+  useAstrorderStore.getState().resetRuntime()
+  const date = '2026-10-13T00:00:00Z'
+  useAstrorderStore.getState().hydrateBootstrap({ protocol_version: 1, cursor: 0,
+    agents: [{ id: 'codex', name: 'Codex', kind: 'codex', status: 'ready', capabilities: ['chat', 'stop'], limitation: null }],
+    sessions: ['parent', 'child'].map(id => ({ id, agent_id: 'codex', title: id, workspace: null, status: 'running', updated_at: date })),
+  })
+  vi.spyOn(api, 'getMessages').mockResolvedValue({ items: [], next_cursor: null })
+  vi.spyOn(api, 'getCommands').mockResolvedValue({ items: [] })
+  vi.spyOn(api, 'getTasks').mockResolvedValue({ items: [{ id: 'sub', session_id: 'parent', agent_id: 'codex', kind: 'subagent', title: 'verify child', status: 'running', target_id: 'child', command: null, progress: { child_session_id: 'child' }, logs: [], created_at: date, updated_at: date }] })
+  vi.spyOn(api, 'getSessionModel').mockResolvedValue({ model: 'model', provider: 'provider' })
+  const stop = vi.spyOn(api, 'createCommand').mockImplementation(async request => ({ ...request, state: 'accepted', attachments: [], created_at: date, error: null }))
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(<MantineProvider><QueryClientProvider client={client}><MemoryRouter initialEntries={['/chat/parent?agent_id=codex']}><Routes><Route path="/chat/:sessionId" element={<ChatPage />} /></Routes></MemoryRouter></QueryClientProvider></MantineProvider>)
+  fireEvent.click(await screen.findByRole('button', { name: /查看子代理/ }))
+  fireEvent.click(await screen.findByText('verify child'))
+  fireEvent.click(await screen.findByRole('button', { name: '停止任务' }))
+  fireEvent.click(within(await screen.findByRole('dialog', { name: '停止任务？' })).getByRole('button', { name: '停止任务' }))
+  await waitFor(() => expect(stop).toHaveBeenCalledWith(expect.objectContaining({ session_id: 'child', agent_id: 'codex', action: 'stop', target_id: 'child' })))
+  client.clear()
+})
+
 it('replaces the transcript on in-app navigation, including the same native ID in another source', async () => {
   const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
   useAstrorderStore.getState().resetRuntime()

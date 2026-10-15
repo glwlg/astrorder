@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { api } from '../../api/client'
 import { notifications } from '@mantine/notifications'
 import { ActionIcon, Tooltip } from '@mantine/core'
 import { IconFolderSearch, IconLayoutSidebarRightCollapse, IconPlus } from '@tabler/icons-react'
@@ -17,6 +18,8 @@ interface SidecarHostProps {
   approvals: Approval[]
   onApproval: (approval: Approval, action: 'approve' | 'cancel') => void
   onCloseSidecar: () => void
+  surface?: 'desktop' | 'mobile'
+  isVisible?: boolean
 }
 
 export function SidecarHost({
@@ -27,6 +30,8 @@ export function SidecarHost({
   approvals,
   onApproval,
   onCloseSidecar,
+  surface = 'desktop',
+  isVisible = true,
 }: SidecarHostProps) {
   const tabs = useSidecarStore((state) => state.tabs)
   const mountedTabs = useSidecarStore((state) => state.mountedTabs)
@@ -112,30 +117,17 @@ export function SidecarHost({
   const handleSaveContent = async (
     path: string | undefined,
     content: string,
-    sessionId?: string,
+    sessionId: string,
     connectionId?: string,
   ): Promise<boolean> => {
     if (!path) return false
     try {
-      const resp = await fetch('/api/v1/system/write-file', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          path,
-          content,
-          session_id: sessionId || session.id,
-          connection_id: connectionId || session.connection_id,
-        }),
+      await api.writeFile({
+        path,
+        content,
+        session_id: sessionId,
+        connection_id: connectionId,
       })
-      if (!resp.ok) {
-        const data = await resp.json().catch(() => ({}))
-        const detail = data?.detail || `保存失败: HTTP ${resp.status}`
-        notifications.show({
-          color: 'red',
-          message: detail,
-        })
-        return false
-      }
       return true
     } catch (err: unknown) {
       notifications.show({
@@ -148,7 +140,7 @@ export function SidecarHost({
 
   return (
     <aside
-      className="desktop-sidecar"
+      className={surface === 'mobile' ? 'mobile-sidecar' : 'desktop-sidecar'}
       style={{
         display: 'flex',
         flexDirection: 'column',
@@ -195,13 +187,13 @@ export function SidecarHost({
           </Tooltip>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+        {surface === 'desktop' && <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <Tooltip label="收起工作台">
             <ActionIcon variant="subtle" size="sm" color="gray" onClick={onCloseSidecar} aria-label="收起工作台">
               <IconLayoutSidebarRightCollapse size={16} />
             </ActionIcon>
           </Tooltip>
-        </div>
+        </div>}
       </div>
 
       <div style={{ flex: 1, minHeight: 0, overflow: 'auto', position: 'relative' }}>
@@ -233,7 +225,7 @@ export function SidecarHost({
         {retainedTabs.filter(([, tab]) => tab.type === 'artifact' && tab.artifact).map(([ownerSessionKey, tab]) => {
             const artifact = tab.artifact!
             const viewer = artifactViewerRegistry.findViewer(artifact)
-            const isActive = ownerSessionKey === currentSessionKey && tab.id === activeTabId
+            const isActive = isVisible && ownerSessionKey === currentSessionKey && tab.id === activeTabId
             return (
               <div
                 key={`${ownerSessionKey}:${tab.id}`}

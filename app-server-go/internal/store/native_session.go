@@ -52,13 +52,13 @@ func (s *Store) InsertSessionIfAbsent(ctx context.Context, payload map[string]an
 		}
 		result, execErr := tx.ExecContext(ctx, `INSERT INTO sessions
 (id,agent_id,title,workspace,status,source_id,connection_id,source_session_id,project_id,project_name,
-history_state,native_kind,ephemeral,control_state,updated_at)
-VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+history_state,native_kind,ephemeral,control_state,handoff_from_agent_id,handoff_from_session_id,updated_at)
+VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(agent_id,id) DO NOTHING`,
 			id, agentID, title, nullablePayload(payload, "workspace"), status, sourceID,
 			nullablePayload(payload, "connection_id"), sourceSessionID, nullablePayload(payload, "project_id"),
 			nullablePayload(payload, "project_name"), historyState, nullablePayload(payload, "native_kind"),
-			false, controlState, updatedAt)
+			false, controlState, nullablePayload(payload, "handoff_from_agent_id"), nullablePayload(payload, "handoff_from_session_id"), updatedAt)
 		if execErr != nil {
 			return execErr
 		}

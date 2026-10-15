@@ -18,13 +18,18 @@ const EMPTY_STORED_MESSAGES: Message[] = []
 export function mergeHistoryPages(
   agentId: string,
   sessionId: string,
-  pages: Array<{ items: Message[] }>,
+  pages: Array<{ items: Message[]; liveRevisionAtRequest?: number }>,
 ): void {
   const store = useAstrorderStore.getState()
+  const revisions = store.messageEventRevisions[scopeKey(agentId, sessionId)] || {}
+  // A response cannot overwrite message events received after its request began.
+  const safeItems = (page: typeof pages[number]) => page.items.filter(item =>
+    page.liveRevisionAtRequest === undefined || (revisions[item.id] || 0) <= page.liveRevisionAtRequest,
+  )
   const [latest, ...older] = pages
-  if (latest) store.mergeMessages(agentId, sessionId, latest.items)
+  if (latest) store.mergeMessages(agentId, sessionId, safeItems(latest))
   for (const page of older) {
-    store.mergeMessagesPrepend(agentId, sessionId, page.items)
+    store.mergeMessagesPrepend(agentId, sessionId, safeItems(page))
   }
 }
 
@@ -86,12 +91,16 @@ export function useSessionResources(session: Session | null, authenticated: bool
 
   const messages = useInfiniteQuery({
     queryKey: ['astrorder', 'messages', session?.agent_id, session?.id],
-    queryFn: ({ pageParam }) => api.getMessages(
-      session!.id,
-      session!.agent_id,
-      pageParam,
-      pageParam ? OLDER_HISTORY_LIMIT : INITIAL_HISTORY_LIMIT,
-    ),
+    queryFn: async ({ pageParam }) => {
+      const liveRevisionAtRequest = useAstrorderStore.getState().messageRevision
+      const page = await api.getMessages(
+        session!.id,
+        session!.agent_id,
+        pageParam,
+        pageParam ? OLDER_HISTORY_LIMIT : INITIAL_HISTORY_LIMIT,
+      )
+      return { ...page, liveRevisionAtRequest }
+    },
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage) => lastPage.next_cursor || undefined,
     enabled: ready,
@@ -133,10 +142,10 @@ export function useSessionResources(session: Session | null, authenticated: bool
     gcTime: 1000 * 60 * 60 * 24,
   })
   useEffect(() => {
-    if (session && messages.data) {
-      mergeHistoryPages(session.agent_id, session.id, messages.data.pages)
+    if (agentId && sessionId && messages.data) {
+      mergeHistoryPages(agentId, sessionId, messages.data.pages)
     }
-  }, [messages.data, session])
+  }, [messages.data, agentId, sessionId])
   useEffect(() => {
     if (commands.data) useAstrorderStore.getState().mergeCommands(commands.data.items)
   }, [commands.data])
@@ -147,7 +156,7 @@ export function useSessionResources(session: Session | null, authenticated: bool
   const visibleMessages = useMemo(() => {
     if (!session) return []
     if (messages.data && messages.data.pages.length > 0) {
-      const loadedItems = messages.data.pages.flatMap(page => page.items)
+      const loadedItems = [...messages.data.pages].reverse().flatMap(page => page.items)
       return visibleTranscript(stored, loadedItems, new Set())
     }
     return stored

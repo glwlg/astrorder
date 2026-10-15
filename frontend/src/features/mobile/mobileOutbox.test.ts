@@ -6,6 +6,42 @@ const payload = (id: string): CommandPayload => ({ id, agent_id: 'agent', sessio
 const receipt = (p: CommandPayload, state: Command['state']): Command => ({ ...p, state, attachments: [], created_at: '2026-09-08T00:00:00Z', error: null })
 
 describe('durable mobile outbox (inert transport)', () => {
+  it('allows an explicit guidance message after confirmed acceptance while automatic drain waits', async () => {
+    const send = vi.fn(async (p: CommandPayload) => receipt(p, p.id === 'active' ? 'accepted' : 'completed'))
+    const outbox = new MobileOutbox({ load: async () => [], save: async () => {} }, { send, upload: vi.fn() })
+    await outbox.enqueue(payload('active'), [])
+    await outbox.flush('agent', 'native')
+    await outbox.enqueue(payload('guidance'), [])
+    await outbox.flush('agent', 'native')
+    expect(send.mock.calls.map(([p]) => p.id)).toEqual(['active'])
+    await outbox.flush('agent', 'native', 'guidance')
+    expect(send.mock.calls.map(([p]) => p.id)).toEqual(['active', 'guidance'])
+    expect(outbox.entries.map(row => row.payload.id)).toEqual(['active'])
+  })
+
+  it.each(['submitting', 'received', 'unknown'] as const)('blocks explicit guidance behind an uncertain %s boundary', async state => {
+    const blocker = { payload: payload('boundary'), files: [], attachments: [], state }
+    const send = vi.fn(async (p: CommandPayload) => receipt(p, 'completed'))
+    const outbox = new MobileOutbox({ load: async () => [blocker], save: async () => {} }, { send, upload: vi.fn() })
+    await outbox.load()
+    await outbox.enqueue(payload('guidance'), [])
+    await outbox.flush('agent', 'native', 'guidance')
+    expect(send).not.toHaveBeenCalled()
+    expect(outbox.entries[1].state).toBe('queued')
+  })
+
+  it('keeps explicit guidance usable after reload with a running receipt and unrelated agent entries', async () => {
+    const original = { payload: payload('active'), files: [], attachments: [], state: 'running' as const }
+    const foreign = { payload: { ...payload('foreign'), agent_id: 'another-agent' }, files: [], attachments: [], state: 'unknown' as const }
+    const send = vi.fn(async (p: CommandPayload) => receipt(p, 'completed'))
+    const outbox = new MobileOutbox({ load: async () => [original, foreign], save: async () => {} }, { send, upload: vi.fn() })
+    await outbox.load()
+    await outbox.enqueue(payload('guidance'), [])
+    await outbox.flush('agent', 'native', 'guidance')
+    expect(send).toHaveBeenCalledExactlyOnceWith(payload('guidance'))
+    expect(outbox.entries).toEqual([original, foreign])
+  })
+
   it('halts behind a rejected entry instead of silently skipping to a later turn', async () => {
     const send = vi.fn(async (p: CommandPayload) => receipt(p, 'failed'))
     const outbox = new MobileOutbox({ load: async () => [], save: async () => {} }, { send, upload: vi.fn() })

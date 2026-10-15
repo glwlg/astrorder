@@ -151,14 +151,12 @@ export function displaySessionTitle(session: Pick<Session, 'title' | 'workspace'
 }
 
 export function isHiddenRailSession(session: Session): boolean {
-  if (session.native_kind === 'subagent' || session.native_kind === 'smoke') return true
+  if (session.native_kind === 'smoke') return true
   if (isEphemeralSession(session)) return true
   if ((session as Session & { archived?: boolean }).archived === true) return true
   if (isScheduledSession(session)) return true
   const title = session.title || ''
   if (/native connector smoke/i.test(title) || title.includes('冒烟测试')) return true
-  if (/whose request action you are assessing/i.test(title)) return true
-  if (title.includes('独立复审') || /\bsubagent\b/i.test(title)) return true
   return false
 }
 

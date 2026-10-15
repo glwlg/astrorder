@@ -20,7 +20,7 @@ func TestManifestDeclaresTheCompletePythonDaemonContract(t *testing.T) {
 	}
 	required := map[string][]string{
 		"control": {"daemon.handshake", "daemon.status", "daemon.shutdown", "session.sync", "session.create", "session.spawn", "session.observe_status", "runtime.request", "runtime.disconnect", "model_config.plan", "model_config.apply", "model_config.reload"},
-		"session": {"session.send", "session.compact", "session.review", "session.steer", "session.interrupt", "session.approve", "session.settings", "session.resize", "session.disconnect", "session.history_page", "session.delete", "session.rename", "session.close", "session.models", "session.commands", "session.model.read", "session.model.set", "session.reasoning.set", "session.approval.read", "session.approval.set"},
+		"session": {"session.send", "session.compact", "session.review", "session.steer", "session.interrupt", "session.approve", "session.settings", "session.resize", "session.disconnect", "session.history_page", "session.delete", "session.rename", "session.close", "session.models", "session.commands", "session.model.read", "session.model.set", "session.reasoning.set", "session.approval.read", "session.approval.set", "session.goal.set", "session.goal.clear"},
 		"runtime": {"codex", "pty", "hermes", "ssh", "codex-ssh", "grok", "grok-ssh"},
 		"status":  {"running", "waiting_approval", "idle", "error"},
 	}

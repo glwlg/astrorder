@@ -61,6 +61,13 @@ func TestRecordedBaselineRawHashAndActionSetMatchActualFile(t *testing.T) {
 	}
 	mapped := make(map[string]bool, len(mapping.RequestActions)+len(mapping.LegacyAliases))
 	for _, action := range mapping.RequestActions {
+		if action.PostBaseline {
+			// Additions must not rewrite the frozen migration inventory.
+			if action.LegacyAction != "session.goal.set" && action.LegacyAction != "session.goal.clear" {
+				t.Fatalf("unreviewed post-baseline action: %s", action.LegacyAction)
+			}
+			continue
+		}
 		mapped[action.LegacyAction] = true
 	}
 	for _, alias := range mapping.LegacyAliases {

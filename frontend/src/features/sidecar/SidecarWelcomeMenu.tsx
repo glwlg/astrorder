@@ -9,6 +9,7 @@ import {
   IconWorld,
 } from '@tabler/icons-react'
 import type { Session } from '../../domain/types'
+import { useShortcutStore } from '../shortcuts/shortcuts'
 
 interface SidecarWelcomeMenuProps {
   session: Session
@@ -31,47 +32,48 @@ export function SidecarWelcomeMenu({
   onOpenBlackboard,
   onOpenMemory,
 }: SidecarWelcomeMenuProps) {
+  const bindings = useShortcutStore(state => state.bindings)
   const menuItems = [
     {
       icon: <IconChalkboard size={18} color="var(--astr-indigo, #6366f1)" />,
       label: "黑板",
-      shortcut: "Ctrl+Alt+B",
+      shortcut: bindings.blackboard || '未设置',
       onClick: onOpenBlackboard || onOpenFileTree,
     },
     {
       icon: <IconBrain size={18} color="var(--astr-purple, #8b5cf6)" />,
       label: "知识记忆",
-      shortcut: "Ctrl+Alt+M",
+      shortcut: bindings.memory || '未设置',
       onClick: onOpenMemory || onOpenFileTree,
     },
     {
       icon: <IconFolder size={18} color="var(--astr-blue, #3b82f6)" />,
       label: '文件',
-      shortcut: 'Ctrl+Shift+E',
+      shortcut: bindings.fileTree || '未设置',
       onClick: onOpenFileTree,
     },
     {
       icon: <IconMessages size={18} color="var(--astr-indigo, #6366f1)" />,
       label: '侧边聊天',
-      shortcut: 'Ctrl+Alt+S',
+      shortcut: bindings.sideChat || '未设置',
       onClick: onOpenSideChat,
     },
     {
       icon: <IconBrain size={18} color="var(--astr-purple, #a855f7)" />,
       label: '决策状态机',
-      shortcut: 'Ctrl+Alt+G',
+      shortcut: bindings.agentGraph || '未设置',
       onClick: onOpenAgentGraph,
     },
     {
       icon: <IconWorld size={18} color="var(--astr-cyan, #06b6d4)" />,
       label: '浏览器',
-      shortcut: 'Ctrl+T',
+      shortcut: bindings.browser || '未设置',
       onClick: onOpenBrowser,
     },
     {
       icon: <IconTerminal2 size={18} color="var(--astr-green, #10b981)" />,
       label: '终端',
-      shortcut: 'Ctrl+`',
+      shortcut: bindings.terminal || '未设置',
       onClick: onOpenTerminal,
     },
   ]

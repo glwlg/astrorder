@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"astrorder.dev/app-server/internal/store"
 	sessiondv1 "astrorder.dev/contracts/gen/go/astrorder/sessiond/v1"
 )
 
@@ -27,13 +28,14 @@ var nativeRegisterSlots = make(chan struct{}, 2)
 // nativeThread is the part of a Codex thread that Astrorder keeps. Messages are
 // never copied: they stay in Codex and are read through on demand.
 type nativeThread struct {
-	ID        string      `json:"id"`
-	Name      *string     `json:"name"`
-	Preview   string      `json:"preview"`
-	Cwd       string      `json:"cwd"`
-	Source    any         `json:"source"`
-	UpdatedAt json.Number `json:"updatedAt"`
-	Ephemeral bool        `json:"ephemeral"`
+	ID             string      `json:"id"`
+	Name           *string     `json:"name"`
+	Preview        string      `json:"preview"`
+	Cwd            string      `json:"cwd"`
+	Source         any         `json:"source"`
+	UpdatedAt      json.Number `json:"updatedAt"`
+	Ephemeral      bool        `json:"ephemeral"`
+	ParentThreadID string      `json:"parentThreadId"`
 }
 
 func (t nativeThread) title() string {
@@ -56,21 +58,26 @@ func (t nativeThread) title() string {
 	return text
 }
 
-// kind returns the native source ("vscode", "cli", "exec"), or "" for a
-// sub-agent thread, whose source is an object rather than a string.
+// kind preserves subagent identity from Codex's structured source.
 func (t nativeThread) kind() string {
+	if t.ParentThreadID != "" {
+		return "subagent"
+	}
+	if source, ok := t.Source.(map[string]any); ok {
+		if source["subAgent"] != nil || source["subagent"] != nil {
+			return "subagent"
+		}
+	}
 	source, _ := t.Source.(string)
 	return source
 }
 
-// registrable reports whether the thread is a conversation the user starts and
-// resumes. Sub-agent threads, ephemeral threads and the auto-review guardian
-// helper are Codex internals and stay out of the session list.
+// Persisted subagent threads are discoverable like their parent conversation.
 func (t nativeThread) registrable() bool {
 	if t.ID == "" || t.Ephemeral || t.kind() == "" {
 		return false
 	}
-	return !strings.Contains(strings.ToLower(t.title()), "whose request action you are assessing")
+	return true
 }
 
 func (t nativeThread) updatedTime() time.Time {
@@ -104,6 +111,20 @@ func (t nativeThread) sessionRow(agent map[string]any) map[string]any {
 	if name := workspaceBase(t.Cwd); name != "" {
 		row["project_name"] = name
 	}
+	parent := t.ParentThreadID
+	if parent == "" {
+		if source, ok := t.Source.(map[string]any); ok {
+			sub, _ := source["subAgent"].(map[string]any)
+			if sub == nil {
+				sub, _ = source["subagent"].(map[string]any)
+			}
+			spawn, _ := sub["thread_spawn"].(map[string]any)
+			parent, _ = spawn["parent_thread_id"].(string)
+		}
+	}
+	if parent != "" {
+		row["handoff_from_agent_id"], row["handoff_from_session_id"] = agentID, parent
+	}
 	return row
 }
 
@@ -135,7 +156,17 @@ func (h *Handler) ensureNativeSession(ctx context.Context, agent map[string]any,
 		return false, err
 	}
 	if inserted {
+		if thread.Name == nil || store.IsPlaceholderSessionTitle(strings.TrimSpace(*thread.Name), thread.ID) {
+			if text := strings.TrimSpace(thread.Preview); text != "" {
+				if named, titleErr := h.store.CompareSessionTitle(ctx, agentID, thread.ID, stringValue(row, "title"), firstSentenceTitle(text), "fallback"); titleErr == nil && named != nil {
+					row = named
+				}
+			}
+		}
 		h.publishEvent(ctx, "session.upsert", row)
+		if thread.Name == nil || store.IsPlaceholderSessionTitle(strings.TrimSpace(*thread.Name), thread.ID) {
+			h.scheduleSessionTitle(row, thread.Preview)
+		}
 		return true, nil
 	}
 	existing, err := h.store.GetSession(ctx, agentID, thread.ID)
@@ -143,14 +174,16 @@ func (h *Handler) ensureNativeSession(ctx context.Context, agent map[string]any,
 		return false, err
 	}
 	current := stringValue(existing, "title")
-	if (current == nativePlaceholderTitle || current == thread.ID) && thread.title() != thread.ID {
-		updated, err := h.store.UpdateSession(ctx, agentID, thread.ID, map[string]any{"title": thread.title()})
+	if h.canUpgradeSessionTitle(ctx, existing) && thread.Name != nil && !store.IsPlaceholderSessionTitle(strings.TrimSpace(*thread.Name), thread.ID) {
+		updated, err := h.store.CompareSessionTitle(ctx, agentID, thread.ID, current, strings.TrimSpace(*thread.Name), "native")
 		if err != nil {
 			return false, err
 		}
 		if updated != nil {
 			h.publishEvent(ctx, "session.upsert", updated)
 		}
+	} else if store.IsPlaceholderSessionTitle(current, thread.ID) {
+		h.ensureSessionTitle(ctx, existing, thread.Preview)
 	}
 	return false, nil
 }

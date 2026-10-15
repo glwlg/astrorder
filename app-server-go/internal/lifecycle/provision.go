@@ -38,6 +38,7 @@ type Options struct {
 	AppExecutable     string
 	GRPCTarget        string
 	PublicEnvironment map[string]string
+	DesktopOrigin     bool
 }
 
 // ProvisionResult identifies the files created or merged by Provision.
@@ -145,6 +146,21 @@ func provisionLocked(options Options, paths provisionPaths) (ProvisionResult, er
 		configChanged = true
 	}
 
+	if options.DesktopOrigin {
+		origins := strings.Split(environment["ASTRORDER_ALLOWED_ORIGINS"], ",")
+		found := false
+		for _, origin := range origins {
+			if strings.TrimSpace(origin) == "http://wails.localhost" {
+				found = true
+			}
+		}
+		if !found {
+			origins = append(origins, "http://wails.localhost")
+			environment["ASTRORDER_ALLOWED_ORIGINS"] = strings.Join(origins, ",")
+			rawEnvironment["ASTRORDER_ALLOWED_ORIGINS"] = environment["ASTRORDER_ALLOWED_ORIGINS"]
+			configChanged = true
+		}
+	}
 	if _, err := EnsureDaemonConfig(paths.stateDir, paths.rootDir); err != nil {
 		return ProvisionResult{}, fmt.Errorf("ensure session-daemon.json: %w", err)
 	}

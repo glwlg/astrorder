@@ -113,6 +113,9 @@ func TestRuntimeOwnerPublishesSessionUpsertInWireFormat(t *testing.T) {
 		types = append(types, event.Type)
 		if event.Type == "session.upsert" {
 			stamp, _ := event.Data["updated_at"].(string)
+			if stamp != "2026-10-10T00:00:00.000Z" {
+				t.Fatalf("owner registration changed activity: %q", stamp)
+			}
 			if !strings.HasSuffix(stamp, "Z") || !strings.Contains(stamp, "T") {
 				t.Fatalf("session.upsert updated_at is not RFC3339: %q", stamp)
 			}

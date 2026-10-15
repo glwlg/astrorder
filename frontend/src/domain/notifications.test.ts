@@ -41,6 +41,14 @@ describe('event notifications', () => {
     expect(notificationForEvent(taskEvent('failed', 'codex:background:command-2'))).toBeNull()
   })
 
+  it('notifies once when a native question needs an answer', () => {
+    const event: EventEnvelope = { id: 'question', cursor: 3, type: 'approval.upsert', agent_id: 'a', session_id: 's', data: { id: 'codex:91', state: 'pending', method: 'item/tool/requestUserInput', title: 'Codex 等待你的回答' } }
+    const notification = notificationForEvent(event)!
+    expect(notification.title).toBe('Codex 等待你的回答')
+    expect(useAstrorderStore.getState().addNotification(notification)).toBe(true)
+    expect(useAstrorderStore.getState().addNotification(notification)).toBe(false)
+  })
+
   it('only notifies for failed terminal tasks and pending approvals', () => {
     const failed = notificationForEvent(taskEvent('failed'))
     const approval = notificationForEvent({
@@ -56,6 +64,22 @@ describe('event notifications', () => {
     expect(failed?.key).toBe('agent-1::session-1::task::task-1::failed')
     expect(approval?.key).toBe('agent-1::session-1::approval::approval-1::pending')
     expect(notificationForEvent(taskEvent('running'))).toBeNull()
+  })
+
+  it.each(['codex', 'hermes'])('does not turn a cleared %s goal into a task failure', source => {
+    const event = taskEvent('cancelled', `${source}:goal:current`)
+    event.data.kind = 'todo'
+    event.data.title = '目标'
+    event.data.progress = { type: 'goal', source, blocking: false }
+    expect(notificationForEvent(event)).toBeNull()
+  })
+
+  it('keeps real failures visible, including a blocked native goal', () => {
+    const event = taskEvent('failed', 'hermes:goal:current')
+    event.data.kind = 'todo'
+    event.data.progress = { type: 'goal', source: 'hermes', native_status: 'blocked' }
+    expect(notificationForEvent(event)?.kind).toBe('task_failed')
+    expect(notificationForEvent(taskEvent('cancelled'))?.kind).toBe('task_failed')
   })
 
   it('lets the actionable approval event own observer approval notifications', () => {

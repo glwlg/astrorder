@@ -82,6 +82,10 @@ func ExtensionPath() string {
 		"../../tools/browser_extension",
 		"../../../tools/browser_extension",
 	}
+	if executable, err := os.Executable(); err == nil {
+		base := filepath.Dir(executable)
+		candidates = append([]string{filepath.Join(base, "..", "tools", "browser_extension"), filepath.Join(base, "server", "tools", "browser_extension")}, candidates...)
+	}
 	for _, c := range candidates {
 		abs, err := filepath.Abs(c)
 		if err == nil {
@@ -109,6 +113,9 @@ func LaunchBrowserProcess(port int) error {
 	_ = os.MkdirAll(profile, 0700)
 
 	extPath := ExtensionPath()
+	if _, err := os.Stat(filepath.Join(extPath, "manifest.json")); err != nil {
+		return fmt.Errorf("browser session grouping extension is missing: %w", err)
+	}
 
 	args := []string{
 		fmt.Sprintf("--remote-debugging-port=%d", port),

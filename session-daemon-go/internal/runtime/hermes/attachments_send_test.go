@@ -11,6 +11,22 @@ import (
 	"time"
 )
 
+func TestValidateWordAttachments(t *testing.T) {
+	for _, test := range []struct{ name, media string }{
+		{"说明.doc", "application/msword"},
+		{"说明.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if err := validateAttachments([]any{map[string]any{"name": test.name, "media_type": test.media, "content_base64": "eA=="}}); err != nil {
+				t.Fatalf("Word attachment rejected: %v", err)
+			}
+		})
+	}
+	if err := validateAttachments([]any{map[string]any{"name": "program.exe", "media_type": "application/x-msdownload", "content_base64": "eA=="}}); err == nil {
+		t.Fatal("unsupported attachment media type accepted")
+	}
+}
+
 func TestSendAttachmentFailurePreventsPromptAndRollsBack(t *testing.T) {
 	for _, test := range []struct {
 		name        string

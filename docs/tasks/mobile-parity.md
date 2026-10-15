@@ -46,3 +46,25 @@ Status starts **pending**; implemented does not mean exercised.
 - Complete visual alignment of all sheets, pinned breakout, model metadata and selection states.
 
 No 1:1 completion claim is permitted until every operation has an evidence entry or an explicitly accepted limitation.
+
+## PC 操作功能对齐补充验收（2026-10-14）
+
+输入锁、目标完整生命周期、子代理详情／跳转／精确停止、待办／计划／工具记录、用量／模型／审批、队列完整操作，以及文件编辑保存／Git／终端已补齐移动入口。最后队列触摸取消、长队列滚动、减少动态效果、同源鉴权和跨会话保存归属修正已复验。
+
+最新前端测试 473/473 通过，TypeScript 与生产构建退出码 0，当前构建配合独立 HTTP/WebSocket 夹具的手机浏览器场景 13/13 通过。功能映射、证据路径和限制见 [移动端与 PC 操作功能对齐验收](../reports/mobile-pc-feature-parity.md)。上述结果不改变本文先前列出的真机麦克风、软键盘、iOS PWA/Web Push 和真实 Agent 执行链验收边界；开发验收完成后，已按用户授权部署网页资源与重新编译的桌面客户端，大小内核进程均保持运行，现场核验见链接报告的部署段落。
+
+本次续验增加即时发送先持久化、在线／离线存储失败恢复、带图引用离线刷新重连、丢失回执按原 command ID 核对、队列自动发送后刷新聊天、重叠唤醒与旧连接回调保护。浏览器还实际执行了长按复制／原消息文字选择／引用、Escape／外部点击关闭、斜滑切会话、边缘打开／滑动关闭抽屉，并确认跨会话草稿和引用保留、零误发。文字选择和触摸后 Escape 问题均先复现失败再修复。
+
+## 目标入口与无目标误报修复（2026-10-14，尚未部署）
+
+按用户最新要求，目标由 Agent 原有命令创建，PC 和移动端无目标时不提供常驻创建／管理入口。修正空原生目标被投影为取消任务并触发失败通知的问题：未有目标及重复空快照不产生取消任务，已有目标清除保持正常事件同步，取消目标不弹失败通知，真实失败仍提示。
+
+本次前端全量 481/481、隔离桌面／手机浏览器 15/15、TypeScript／网页构建、App projection/sessions 测试与 App vet/build 均通过。App 全模块测试另有 12 项安装／进程夹具失败，未计全部通过。详情、证据和未部署状态见 [无目标会话修复验收](../reports/native-goal-empty-state.md)。
+
+## Codex 活动回合引导发送修复（2026-10-14，尚未部署）
+
+修正星序已持有的活动 Codex 会话仍因 `codex session is active` 无法引导的问题。小内核以真实活动回合选择原生 steer，核对同一 turn，保留原任务命令身份，并以独立持久事件确认引导投递。共享队列允许显式引导越过已确认的活动回执；PC 确认失败可重试，未知结果仅核对。
+
+最终前端 502/502、隔离桌面／手机浏览器 17/17、相关 Go 包、大小内核 vet/build、Codex/gRPC/protocol Linux race 和实际 Codex 进程＋本机 Responses 夹具验收通过。Windows 小内核独立进程测试仍失败，不计全模块通过。详见 [活动回合引导验收](../reports/codex-active-guidance.md)。未部署或重启线上进程。
+
+本文前面的 pending 清单保留初始验收快照；当前已执行证据及未执行设备／原生项目以链接报告为准，不能从旧 pending 状态推断最新代码未实现，也不能由隔离场景通过推断全部现场验收完成。

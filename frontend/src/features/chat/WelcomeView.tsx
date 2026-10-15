@@ -11,6 +11,7 @@ import { BrandMark } from '../../components/BrandMark'
 import { AgentBrandIcon } from '../../components/AgentBrandIcon'
 import { ShinyText } from '../../components/animations/ShinyText'
 import type { Agent, Session } from '../../domain/types'
+import { useShortcutStore } from '../shortcuts/shortcuts'
 
 interface WelcomeViewProps {
   sessions: Session[]
@@ -27,11 +28,12 @@ export function WelcomeView({ sessions, agents, onNewSession }: WelcomeViewProps
       .slice(0, 4)
   }, [sessions])
 
+  const bindings = useShortcutStore(state => state.bindings)
   const shortcuts = [
-    { key: 'Ctrl + P', desc: '快速打开文件树' },
-    { key: 'Ctrl + Alt + S', desc: '开启侧边副会话' },
-    { key: 'Ctrl + `', desc: '打开或切换内置终端' },
-    { key: 'Ctrl + T', desc: '唤起原生内置浏览器' },
+    { id: 'quickOpen', key: bindings.quickOpen || '未设置', desc: '快速搜索工作区文件' },
+    { id: 'sideChat', key: bindings.sideChat || '未设置', desc: '开启侧边副会话' },
+    { id: 'terminal', key: bindings.terminal || '未设置', desc: '打开内置终端' },
+    { id: 'browser', key: bindings.browser || '未设置', desc: '打开内置浏览器' },
   ]
 
   return (
@@ -116,7 +118,7 @@ export function WelcomeView({ sessions, agents, onNewSession }: WelcomeViewProps
           </Text>
           <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm">
             {shortcuts.map((item) => (
-              <Paper key={item.key} className="welcome-card welcome-shortcut-card" withBorder={false}>
+              <Paper key={item.id} className="welcome-card welcome-shortcut-card" withBorder={false}>
                 <Group justify="space-between" align="center">
                   <Text size="xs" c="dimmed">{item.desc}</Text>
                   <kbd className="welcome-kbd">{item.key}</kbd>

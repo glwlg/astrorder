@@ -115,6 +115,16 @@ func (s *sessionControlService) RespondApproval(ctx context.Context, r *pb.Respo
 	default:
 		return nil, status.Error(codes.InvalidArgument, "approval decision is invalid")
 	}
+	if r.UserInput != nil {
+		if len(r.Permissions) != 0 || r.Decision != pb.ApprovalDecision_APPROVAL_DECISION_ACCEPT {
+			return nil, status.Error(codes.InvalidArgument, "user input must be an explicit answer without permission grants")
+		}
+		value, err := decodeQueryJSON(r.UserInput)
+		if err != nil {
+			return nil, err
+		}
+		fields["user_input"] = value
+	}
 	if len(r.Permissions) > 0 {
 		permissions := map[string]any{}
 		for _, grant := range r.Permissions {

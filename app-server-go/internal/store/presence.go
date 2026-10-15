@@ -5,14 +5,14 @@ import (
 	"fmt"
 )
 
-// PresenceActivityRows returns the last user-message timestamp per exact
+// PresenceActivityRows returns the last submitted-input timestamp per exact
 // (agent_id, session_id) composite. It joins the projected sessions table so
 // orphaned, deleted, or different-agent rows are excluded, and it never reads
 // message text or bodies.
 func (s *Store) PresenceActivityRows(ctx context.Context) ([]map[string]any, error) {
 	rows, err := s.QueryRows(ctx, `SELECT m.agent_id AS agent_id, m.session_id AS session_id, MAX(m.created_at) AS last_user_at
-FROM messages m JOIN sessions s ON s.agent_id = m.agent_id AND s.id = m.session_id
-WHERE m.role = 'user'
+FROM commands m JOIN sessions s ON s.agent_id = m.agent_id AND s.id = m.session_id
+WHERE m.action IN ('send','enqueue')
 GROUP BY m.agent_id, m.session_id
 ORDER BY m.agent_id, m.session_id`)
 	if err != nil {

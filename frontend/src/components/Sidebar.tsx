@@ -1,4 +1,4 @@
-import { IconAdjustments, IconBolt, IconBrain, IconChartHistogram, IconDeviceDesktop, IconLayoutDashboard, IconMessageCircle, IconPuzzle, IconSettings, IconTopologyStarRing, IconUsers, IconWorld } from '@tabler/icons-react'
+import { IconAdjustments, IconBolt, IconBrain, IconChartHistogram, IconDeviceDesktop, IconKeyboard, IconLayoutDashboard, IconMessageCircle, IconPuzzle, IconSettings, IconTopologyStarRing, IconUsers, IconWorld } from '@tabler/icons-react'
 import { ActionIcon, HoverCard, Modal, NavLink, Stack, Tabs, Text, Tooltip } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useQuery } from '@tanstack/react-query'
@@ -9,6 +9,8 @@ import type { Agent, Project, Session } from '../domain/types'
 import { RtkSettingsPage } from '../features/rtk/RtkSettingsPage'
 import './settings.css'
 import { SettingsDrawerScope } from './SettingsDrawer'
+import { ShortcutSettingsPage } from '../features/shortcuts/ShortcutSettingsPage'
+import { useShortcutHandlers } from '../features/shortcuts/shortcuts'
 import { AgentsPage } from '../features/agents/AgentsPage'
 import { formatTokens, getModelColor } from '../features/analytics/AnalyticsPage'
 import { PluginsPage } from '../features/plugins/PluginsPage'
@@ -111,6 +113,7 @@ export function Sidebar({
 }) {
   const location = useLocation()
   const [settingsOpened, setSettingsOpened] = useState(false)
+  useShortcutHandlers(onNavigate ? {} : { settings: () => setSettingsOpened(true) }, true)
   const [isMonitorDragOver, setIsMonitorDragOver] = useState(false)
   const todayUsage = useQuery({
     queryKey: ['astrorder', 'analytics', 'today-models'],
@@ -247,6 +250,7 @@ export function Sidebar({
             <Tabs.Tab value="skills" leftSection={<IconBolt size={16} />}>能力中心</Tabs.Tab>
             <Tabs.Tab value="rtk" leftSection={<IconChartHistogram size={16} />}>RTK</Tabs.Tab>
             <Tabs.Tab value="network" leftSection={<IconWorld size={16} />}>网络与移动端</Tabs.Tab>
+            <Tabs.Tab value="shortcuts" leftSection={<IconKeyboard size={16} />}>快捷键</Tabs.Tab>
             <Tabs.Tab value="desktop" leftSection={<IconDeviceDesktop size={16} />}>桌面客户端</Tabs.Tab>
             <Tabs.Tab value="plugins" leftSection={<IconPuzzle size={16} />}>插件</Tabs.Tab>
           </Tabs.List>
@@ -257,6 +261,7 @@ export function Sidebar({
           </Tabs.Panel>
           <Tabs.Panel value="rtk" className="settings-tab-panel" keepMounted={false}><RtkSettingsPage /></Tabs.Panel>
           <Tabs.Panel value="network" className="settings-tab-panel"><NetworkSettingsPage /></Tabs.Panel>
+          <Tabs.Panel value="shortcuts" className="settings-tab-panel" keepMounted={false}><ShortcutSettingsPage /></Tabs.Panel>
           <Tabs.Panel value="desktop" className="settings-tab-panel"><DesktopSettingsPage /></Tabs.Panel>
           <Tabs.Panel value="plugins" className="settings-tab-panel"><PluginsPage /></Tabs.Panel>
         </Tabs>

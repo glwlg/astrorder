@@ -58,6 +58,11 @@ func (a *Adapter) startProcess(ctx context.Context) error {
 		a.mu.Unlock()
 		return fmt.Errorf("hermes adapter is closed")
 	}
+	if a.canonicalSocket != nil {
+		ready, done := a.readyCh, a.processDone
+		a.mu.Unlock()
+		return waitGatewayReady(ctx, ready, done)
+	}
 	if a.cmd != nil && a.cmd.Process != nil {
 		ready, done := a.readyCh, a.processDone
 		a.mu.Unlock()
@@ -107,6 +112,36 @@ func (a *Adapter) startProcess(ctx context.Context) error {
 	if a.config.Executable == "" {
 		a.mu.Unlock()
 		return fmt.Errorf("hermes executable is not configured")
+	}
+
+	if arguments, ok := canonicalDiscoveryArguments(a.config.Arguments); ok {
+		transport, err := a.discoverCanonical(ctx, arguments)
+		if err != nil {
+			a.mu.Unlock()
+			return err
+		}
+		a.canonical = true
+		a.canonicalSocket = transport
+		a.stdin, a.stdout = transport, transport
+		a.readyCh, a.processDone = make(chan struct{}), make(chan struct{})
+		a.mu.Unlock()
+		go func() {
+			a.readStdout(transport)
+			_ = transport.Close()
+			close(a.processDone)
+		}()
+		if _, err := a.rpc(ctx, "ping", map[string]any{}); err != nil {
+			_ = transport.Close()
+			return fmt.Errorf("Hermes owner readiness failed: %w", err)
+		}
+		a.mu.Lock()
+		select {
+		case <-a.readyCh:
+		default:
+			close(a.readyCh)
+		}
+		a.mu.Unlock()
+		return waitGatewayReady(ctx, a.readyCh, a.processDone)
 	}
 
 	cmd := exec.Command(a.config.Executable, a.config.Arguments...)
@@ -282,6 +317,7 @@ func (a *Adapter) readStdout(r io.Reader) {
 
 func (a *Adapter) handleGatewayEvent(params map[string]any) {
 	a.mu.RLock()
+	canonical := a.canonical
 	unavailable := a.closed || a.failed
 	a.mu.RUnlock()
 	if unavailable {
@@ -298,6 +334,26 @@ func (a *Adapter) handleGatewayEvent(params map[string]any) {
 		owned := a.sessions[id] != nil
 		a.mu.RUnlock()
 		if !owned {
+			return
+		}
+	}
+	if canonical {
+		if eventType == "approval.request" {
+			payload, _ := params["payload"].(map[string]any)
+			data := make(map[string]any, len(payload)+2)
+			for key, value := range payload {
+				data[key] = value
+			}
+			data["session_id"] = params["session_id"]
+			data["request_id"] = payload["prompt_id"]
+			a.handleServerRequest(&rpcMessage{Method: "approval.request", ID: payload["prompt_id"], Params: data})
+			return
+		}
+		if eventType == "approval.settled" {
+			payload, _ := params["payload"].(map[string]any)
+			a.mu.Lock()
+			delete(a.pendingApprovals, fmt.Sprint(payload["prompt_id"]))
+			a.mu.Unlock()
 			return
 		}
 	}
@@ -330,7 +386,8 @@ func (a *Adapter) handleGatewayEvent(params map[string]any) {
 	}
 
 	switch eventType {
-	case "tool.start", "tool.complete", "session.usage":
+	case "tool.start", "tool.complete", "session.usage", "session.control.update", "todo.updated",
+		"subagent.spawn_requested", "subagent.start", "subagent.progress", "subagent.thinking", "subagent.tool", "subagent.complete":
 		sid, _ := params["session_id"].(string)
 		a.mu.RLock()
 		id := a.handleToSession[sid]
@@ -462,7 +519,7 @@ func (a *Adapter) handleServerRequest(msg *rpcMessage) {
 	params := msg.Params
 	nativeID := msg.ID
 
-	if method == "approval" {
+	if method == "approval" || method == "approval.request" {
 		sid, _ := params["session_id"].(string)
 		a.mu.Lock()
 		durableID := a.handleToSession[sid]
@@ -548,6 +605,17 @@ func (a *Adapter) sendRaw(frame map[string]any) error {
 var nextReqID atomic.Int64
 
 func (a *Adapter) rpc(ctx context.Context, method string, params map[string]any) (map[string]any, error) {
+	originalMethod := method
+	a.mu.RLock()
+	canonical := a.canonical
+	a.mu.RUnlock()
+	if canonical {
+		var err error
+		method, params, err = a.canonicalRequest(ctx, method, params)
+		if err != nil {
+			return nil, err
+		}
+	}
 	idNum := nextReqID.Add(1)
 	idStr := fmt.Sprintf("req-%d", idNum)
 
@@ -583,6 +651,9 @@ func (a *Adapter) rpc(ctx context.Context, method string, params map[string]any)
 			return nil, resp.Error
 		}
 		if resMap, ok := resp.Result.(map[string]any); ok {
+			if canonical {
+				return canonicalResult(originalMethod, resMap), nil
+			}
 			return resMap, nil
 		}
 		return map[string]any{"result": resp.Result}, nil

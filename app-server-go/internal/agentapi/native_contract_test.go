@@ -25,15 +25,15 @@ func (p *testPublisher) Publish(ctx context.Context, eventType string, data map[
 
 type mockSessionControlServer struct {
 	sessiondv1.UnimplementedSessionControlServer
-	createResp   *sessiondv1.CommandReceipt
-	createErr    error
-	sendResp     *sessiondv1.CommandReceipt
-	sendErr      error
-	sendCalls    int
-	lastSendReq  *sessiondv1.SendRequest
-	deleteResp   *sessiondv1.CommandReceipt
-	deleteErr    error
-	deleteCalls  int
+	createResp    *sessiondv1.CommandReceipt
+	createErr     error
+	sendResp      *sessiondv1.CommandReceipt
+	sendErr       error
+	sendCalls     int
+	lastSendReq   *sessiondv1.SendRequest
+	deleteResp    *sessiondv1.CommandReceipt
+	deleteErr     error
+	deleteCalls   int
 	interruptResp *sessiondv1.CommandReceipt
 	interruptErr  error
 }
@@ -76,6 +76,7 @@ func setupMockGRPC(t *testing.T, srv *mockSessionControlServer) (*daemonclient.C
 	}
 	s := grpc.NewServer()
 	sessiondv1.RegisterSessionControlServer(s, srv)
+	sessiondv1.RegisterRuntimeQueryServer(s, nativeHistoryFixture{})
 	go s.Serve(l)
 
 	conn, err := grpc.NewClient(l.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -87,6 +88,7 @@ func setupMockGRPC(t *testing.T, srv *mockSessionControlServer) (*daemonclient.C
 
 	cli := &daemonclient.Client{
 		Session: sessiondv1.NewSessionControlClient(conn),
+		Runtime: sessiondv1.NewRuntimeQueryClient(conn),
 	}
 
 	cleanup := func() {

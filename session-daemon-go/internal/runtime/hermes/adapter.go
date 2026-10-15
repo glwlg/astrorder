@@ -2,11 +2,10 @@ package hermes
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -54,6 +53,8 @@ type Adapter struct {
 	owner            *nativeprocess.CommandOwner
 	cleanupErr       error
 	stdin            io.WriteCloser
+	canonical        bool
+	canonicalSocket  *canonicalTransport
 	stdout           io.ReadCloser
 	stderr           io.ReadCloser
 	readyCh          chan struct{}
@@ -152,6 +153,10 @@ func (a *Adapter) ensureHandle(ctx context.Context, session *SessionState) (stri
 	session.Workspace = workspace
 	a.handleToSession[h] = session.SessionID
 	a.mu.Unlock()
+	if todos, ok := res["todo_state"].(map[string]any); ok {
+		a.handleGatewayEvent(map[string]any{"type": "todo.updated", "session_id": h, "payload": todos})
+	}
+	a.refreshGoal(ctx, h)
 	return h, nil
 }
 
@@ -183,6 +188,9 @@ func (a *Adapter) Create(ctx context.Context, req core.Request) (core.Result, er
 			"session_id": parentID,
 			"name":       title,
 		}
+		if target, exists := req.Fields["target_message_id"]; exists {
+			params["target_message_id"] = target
+		}
 	} else {
 		method = "session.create"
 		params = map[string]any{
@@ -213,6 +221,31 @@ func (a *Adapter) Create(ctx context.Context, req core.Request) (core.Result, er
 	}
 	if durableID == "" {
 		return core.Result{}, fmt.Errorf("hermes did not return a session identity")
+	}
+	if a.canonical && method == "session.branch" {
+		// Mutation returns the child identity; resume subscribes this viewer to it.
+		resp, err = a.rpc(ctx, "session.resume", map[string]any{"session_id": durableID, "omit_messages": true})
+		if err != nil {
+			return core.Result{}, fmt.Errorf("created Hermes branch %s but attachment is unconfirmed: %w", durableID, err)
+		}
+	}
+	// A display title must never select an existing canonical conversation.
+	// Leave untitled drafts available for native auto-naming on the first turn.
+	if a.canonical && method == "session.create" {
+		if requested, _ := req.Fields["title"].(string); requested != "" && requested != "新会话" {
+			label := []rune(requested)
+			if len(label) > 89 {
+				label = label[:89]
+			}
+			suffix := durableID
+			if len(suffix) > 8 {
+				suffix = suffix[len(suffix)-8:]
+			}
+			title = string(label) + " · " + suffix
+			if _, err := a.rpc(ctx, "session.title", map[string]any{"session_id": durableID, "title": title}); err != nil {
+				return core.Result{}, fmt.Errorf("created Hermes session %s but title is unconfirmed: %w", durableID, err)
+			}
+		}
 	}
 
 	handle, _ := resp["session_id"].(string)
@@ -348,6 +381,17 @@ func (a *Adapter) Command(ctx context.Context, req core.Request) (result core.Re
 		return core.Result{SessionID: session.SessionID, Status: current, Payload: map[string]any{"status": current}}, nil
 	case "session.send":
 		return a.handleSend(ctx, session, req)
+	case "session.compact":
+		fields := make(map[string]any, len(req.Fields)+1)
+		for key, value := range req.Fields {
+			fields[key] = value
+		}
+		fields["text"] = "/compress"
+		if instructions, _ := req.Fields["instructions"].(string); strings.TrimSpace(instructions) != "" {
+			fields["text"] = "/compress " + strings.TrimSpace(instructions)
+		}
+		req.Fields = fields
+		return a.handleSend(ctx, session, req)
 	case "session.interrupt":
 		return a.handleInterrupt(ctx, session)
 	case "session.rename":
@@ -362,6 +406,8 @@ func (a *Adapter) Command(ctx context.Context, req core.Request) (result core.Re
 		return a.handleCommands(ctx, session)
 	case "session.model.read":
 		return a.handleModelRead(ctx, session)
+	case "session.goal.set", "session.goal.clear":
+		return a.handleGoal(ctx, session, req)
 	case "session.model.set":
 		return a.handleModelSet(ctx, session, req)
 	case "session.reasoning.set":
@@ -372,6 +418,9 @@ func (a *Adapter) Command(ctx context.Context, req core.Request) (result core.Re
 		return a.handleApprovalSet(ctx, session, req)
 	case "session.approve", "session.approval.respond":
 		return a.handleApprove(ctx, session, req)
+	case "session.processes":
+		result, err := a.rpc(ctx, "process.list", map[string]any{"session_id": session.Handle})
+		return core.Result{SessionID: session.SessionID, Payload: result}, err
 	case "session.history_page":
 		return a.handleHistoryPage(ctx, session, req)
 	default:
@@ -381,11 +430,20 @@ func (a *Adapter) Command(ctx context.Context, req core.Request) (result core.Re
 
 func (a *Adapter) handleSend(ctx context.Context, session *SessionState, req core.Request) (core.Result, error) {
 	a.mu.Lock()
+	params, _ := req.Fields["params"].(map[string]any)
+	if params["idle_only"] == true && (session.Status != "idle" || session.sending) {
+		a.mu.Unlock()
+		return core.Result{}, fmt.Errorf("queued send requires an idle session")
+	}
 	if session.sending || session.Status == "waiting_approval" {
 		a.mu.Unlock()
 		return core.Result{}, fmt.Errorf("Hermes session already has an active command")
 	}
 	steering := session.Status == "running" && session.CommandID != "" && session.Handle != ""
+	if params["guidance_only"] == true && !steering {
+		a.mu.Unlock()
+		return core.Result{}, fmt.Errorf("Hermes guidance requires an owned running command")
+	}
 	if session.Status == "running" && !steering {
 		a.mu.Unlock()
 		return core.Result{}, fmt.Errorf("Hermes active command ownership is unconfirmed")
@@ -543,7 +601,10 @@ func (a *Adapter) resolveSlash(ctx context.Context, handle, command string, visi
 		"name":       name,
 		"arg":        arg,
 	})
-	if err != nil || dispatched == nil {
+	// Only explicit routing refusals prove dispatch never executed the command.
+	// A timeout or native execution error must not start the same work again.
+	var dispatchError *rpcErrorObject
+	if errors.As(err, &dispatchError) && (dispatchError.Code == -32601 || dispatchError.Code == 4018) {
 		dispatched, err = a.rpc(ctx, "slash.exec", map[string]any{
 			"session_id": handle,
 			"command":    command,
@@ -1133,20 +1194,19 @@ func (a *Adapter) handleHistoryPage(ctx context.Context, session *SessionState, 
 		return core.Result{}, fmt.Errorf("invalid history cursor")
 	}
 
-	dbPath := a.config.StateDBPath
-	if dbPath == "" {
-		home, _ := os.UserHomeDir()
-		if home != "" {
-			cand := filepath.Join(home, ".hermes", "state.db")
-			if _, err := os.Stat(cand); err == nil {
-				dbPath = cand
-			}
-		}
-	}
+	dbPath := a.historyDBPath()
 
 	if dbPath != "" && !strings.HasPrefix(before, "hermes-rpc:") {
 		page, err := readNativePage(ctx, dbPath, session.SessionID, "hermes-local", before, limit)
 		if err == nil {
+			if before == "" {
+				a.mu.RLock()
+				handle := session.Handle
+				a.mu.RUnlock()
+				if handle != "" {
+					a.refreshGoal(ctx, handle)
+				}
+			}
 			return core.Result{
 				SessionID: session.SessionID,
 				Status:    "idle",
@@ -1171,6 +1231,7 @@ func (a *Adapter) handleHistoryPage(ctx context.Context, session *SessionState, 
 		return core.Result{}, err
 	}
 	if before == "" {
+		a.refreshGoal(ctx, handle)
 		if usage, usageErr := a.rpc(ctx, "session.usage", map[string]any{"session_id": handle}); usageErr == nil {
 			a.handleGatewayEvent(map[string]any{"type": "session.usage", "session_id": handle, "payload": map[string]any{"usage": usage}})
 		}

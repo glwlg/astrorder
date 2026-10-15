@@ -13,7 +13,7 @@ func validateAttachments(values []any) error {
 	if len(values) > 32 {
 		return fmt.Errorf("too many native attachments")
 	}
-	allowed := map[string]bool{"application/json": true, "application/octet-stream": true, "application/pdf": true, "audio/aac": true, "audio/mp4": true, "audio/mpeg": true, "audio/ogg": true, "audio/wav": true, "audio/webm": true, "audio/x-wav": true, "image/gif": true, "image/jpeg": true, "image/png": true, "image/webp": true, "text/csv": true, "text/plain": true, "text/markdown": true}
+	allowed := map[string]bool{"application/json": true, "application/msword": true, "application/octet-stream": true, "application/pdf": true, "application/vnd.openxmlformats-officedocument.wordprocessingml.document": true, "audio/aac": true, "audio/mp4": true, "audio/mpeg": true, "audio/ogg": true, "audio/wav": true, "audio/webm": true, "audio/x-wav": true, "image/gif": true, "image/jpeg": true, "image/png": true, "image/webp": true, "text/csv": true, "text/plain": true, "text/markdown": true}
 	total := 0
 	for _, value := range values {
 		attachment, ok := value.(map[string]any)

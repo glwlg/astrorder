@@ -76,13 +76,27 @@ func (s *Store) ClaimQueuedCommand(ctx context.Context, aid, sid, cid string) (m
 
 // CancelQueuedCommand competes atomically with claim; dispatched work is retained.
 func (s *Store) CancelQueuedCommand(ctx context.Context, aid, sid, cid string) (map[string]any, bool, error) {
- var result map[string]any
- cancelled:=false
- err:=s.WithTx(ctx,func(tx *sql.Tx)error{
-  mutation,err:=tx.ExecContext(ctx,`UPDATE commands SET state='cancelled',updated_at=? WHERE agent_id=? AND session_id=? AND id=? AND state='queued'`,nowDatabaseTime(),aid,sid,cid);if err!=nil{return err}
-  affected,err:=mutation.RowsAffected();if err!=nil{return err};cancelled=affected==1
-  rows,err:=queryRows(ctx,tx,`SELECT * FROM commands WHERE agent_id=? AND session_id=? AND id=?`,aid,sid,cid);if err!=nil{return err};if len(rows)==0{return errNotFound}
-  result,err=commandWire(rows[0]);return err
- })
- return result,cancelled,err
+	var result map[string]any
+	cancelled := false
+	err := s.WithTx(ctx, func(tx *sql.Tx) error {
+		mutation, err := tx.ExecContext(ctx, `UPDATE commands SET state='cancelled',updated_at=? WHERE agent_id=? AND session_id=? AND id=? AND (state='queued' OR (action='enqueue' AND state='failed'))`, nowDatabaseTime(), aid, sid, cid)
+		if err != nil {
+			return err
+		}
+		affected, err := mutation.RowsAffected()
+		if err != nil {
+			return err
+		}
+		cancelled = affected == 1
+		rows, err := queryRows(ctx, tx, `SELECT * FROM commands WHERE agent_id=? AND session_id=? AND id=?`, aid, sid, cid)
+		if err != nil {
+			return err
+		}
+		if len(rows) == 0 {
+			return errNotFound
+		}
+		result, err = commandWire(rows[0])
+		return err
+	})
+	return result, cancelled, err
 }

@@ -46,6 +46,7 @@ func inferSchemaProperty(desc string) map[string]any {
 		prop["type"] = "number"
 	} else if reArray.MatchString(text) {
 		prop["type"] = "array"
+		prop["items"] = map[string]any{"type": "string"}
 	} else if reObject.MatchString(text) {
 		prop["type"] = "object"
 	} else {
@@ -107,10 +108,21 @@ func Tools() []Tool {
 		result[i] = Tool{
 			Name:        ToolName(item.ID),
 			Description: item.Summary,
-			InputSchema: BuildInputSchema(item.Input),
+			InputSchema: capabilitySchema(item),
 		}
 	}
 	return result
+}
+
+func capabilitySchema(item Capability) map[string]any {
+	schema := BuildInputSchema(item.Input)
+	props := schema["properties"].(map[string]any)
+	for _, key := range []string{"limit", "offset", "max_steps", "ttl_seconds", "columns", "progress"} {
+		if prop, ok := props[key].(map[string]any); ok {
+			prop["type"] = "integer"
+		}
+	}
+	return schema
 }
 
 // InvokerFunc is called to execute a capability during MCP tools/call.

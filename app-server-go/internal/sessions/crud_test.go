@@ -22,12 +22,14 @@ type mockDaemonServer struct {
 	sessiondv1.UnimplementedDaemonControlServer
 	sessiondv1.UnimplementedSessionControlServer
 	sessiondv1.UnimplementedRuntimeQueryServer
+	backgroundCb func(*sessiondv1.ListBackgroundProcessesRequest) (*sessiondv1.ListBackgroundProcessesResponse, error)
 	createCb    func(*sessiondv1.CreateSessionRequest) (*sessiondv1.CommandReceipt, error)
 	renameCb    func(*sessiondv1.RenameSessionRequest) (*sessiondv1.CommandReceipt, error)
 	deleteCb    func(*sessiondv1.DeleteSessionRequest) (*sessiondv1.CommandReceipt, error)
 	readModelCb func(*sessiondv1.ReadModelRequest) (*sessiondv1.ModelState, error)
 	attachCb    func(*sessiondv1.AttachSessionRequest) (*sessiondv1.SessionReceipt, error)
 	getHistoryPageCb func(*sessiondv1.HistoryPageRequest) (*sessiondv1.HistoryPageResponse, error)
+	sendCb func(*sessiondv1.SendRequest) (*sessiondv1.CommandReceipt, error)
 }
 
 func (m *mockDaemonServer) ReadModel(ctx context.Context, req *sessiondv1.ReadModelRequest) (*sessiondv1.ModelState, error) {

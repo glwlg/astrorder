@@ -7,6 +7,10 @@ import { useAstrorderStore } from '../../state/store'
 import { MonitorPage } from './MonitorPage'
 import { draftStorage } from '../chat/draftStorage'
 
+vi.mock('../mobile/serverOutbox', async importOriginal => {
+  const actual = await importOriginal<typeof import('../mobile/serverOutbox')>()
+  return { ...actual, sharedServerOutbox: (storage: import('../mobile/mobileOutbox').OutboxStorage) => new actual.ServerOutbox(storage) }
+})
 const queueMemory = vi.hoisted(() => ({ rows: [] as any[] }))
 vi.mock('../mobile/mobileOutboxStorage', () => ({
   mobileOutboxStorage: {
@@ -80,7 +84,7 @@ describe('MonitorPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '添加会话' }))
     const dialog = await screen.findByRole('dialog')
-    expect(within(dialog).queryByText(reviewSession.title)).not.toBeInTheDocument()
+    expect(within(dialog).getByText(reviewSession.title)).toBeInTheDocument()
     fireEvent.click(within(dialog).getByRole('button', { name: /闲置会话/ }))
 
     expect(await screen.findByTestId('monitor-card-agent-1-session-2')).toBeInTheDocument()
@@ -158,7 +162,9 @@ describe('MonitorPage', () => {
       payload: { id: 'queued-1', agent_id: 'agent-1', session_id: 'session-1', action: 'send', text: '旧内容', attachment_ids: [], target_id: null },
       files: [], attachments: [], state: 'queued',
     }]
-    const create = vi.spyOn(api, 'createCommand').mockImplementation(async payload => ({ ...payload, state: 'accepted', attachments: [], created_at: activeSession.updated_at, error: null }))
+    useAstrorderStore.getState().setConnection('connected')
+    const create = vi.spyOn(api, 'createCommand').mockImplementation(async payload => ({ ...payload, state: 'queued', attachments: [], created_at: activeSession.updated_at, error: null }))
+    const send = vi.spyOn(api,'sendQueuedCommand').mockImplementation(async (id, aid, sid) => ({...Object.values(useAstrorderStore.getState().commands).find(c => c.id === id && c.agent_id === aid && c.session_id === sid)!, state:'accepted'}))
     renderPage()
 
     expect(await screen.findByText('旧内容')).toBeInTheDocument()
@@ -171,6 +177,7 @@ describe('MonitorPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '发送' }))
     await waitFor(() => expect(create).toHaveBeenCalledWith(expect.objectContaining({ id: 'queued-1', text: '新内容' })))
+    await waitFor(() => expect(send).toHaveBeenCalledExactlyOnceWith('queued-1','agent-1','session-1'))
     await waitFor(() => expect(document.querySelector('.monitor-queue')).toBeNull())
   })
 
@@ -186,6 +193,20 @@ describe('MonitorPage', () => {
     fireEvent.click(within(queuedItem).getByRole('button', { name: '删除' }))
     await waitFor(() => expect(screen.queryByText('待删除')).not.toBeInTheDocument())
     expect(queueMemory.rows).toHaveLength(0)
+  })
+
+  it('renders queued messages inside the matching session card rather than in a separate top banner', async () => {
+    queueMemory.rows = [{
+      payload: { id: 'queued-card-1', agent_id: 'agent-1', session_id: 'session-1', action: 'send', text: '会话专属待机消息', attachment_ids: [], target_id: null },
+      files: [], attachments: [], state: 'queued',
+    }]
+    renderPage()
+
+    expect(await screen.findByText('会话专属待机消息')).toBeInTheDocument()
+    const card = screen.getByTestId('monitor-card-agent-1-session-1')
+    expect(within(card).getByText('会话专属待机消息')).toBeInTheDocument()
+    expect(within(card).getByRole('button', { name: '发送' })).toBeInTheDocument()
+    expect(document.querySelector('.monitor-unassigned-queue')).toBeNull()
   })
 
   it('sends a message from a monitor card and clears the input after acceptance', async () => {

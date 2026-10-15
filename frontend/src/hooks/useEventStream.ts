@@ -9,6 +9,7 @@ import {
 import { useAstrorderStore } from "../state/store";
 import { api } from "../api/client";
 import { nativeActivityEvent } from "./useSessionOrder";
+import { scopeKey } from "../domain/semantics";
 
 function storeStatus(status: EventStreamStatus) {
   const connection =
@@ -55,6 +56,40 @@ export function useEventStream(
       return undefined;
     }
 
+    let disposed = false;
+    const hookRefreshes = new Map<string, {
+      agent: string; session: string; dirty: boolean; running: boolean;
+      timer?: ReturnType<typeof setTimeout>;
+    }>();
+    const scheduleHookRefresh = (agent: string, session: string) => {
+      const key = scopeKey(agent, session);
+      let refresh = hookRefreshes.get(key);
+      if (!refresh) {
+        refresh = { agent, session, dirty: false, running: false };
+        hookRefreshes.set(key, refresh);
+      }
+      refresh.dirty = true;
+      if (refresh.running || refresh.timer) return;
+      const current = refresh;
+      current.timer = setTimeout(async () => {
+        current.timer = undefined;
+        current.dirty = false;
+        current.running = true;
+        try {
+          // Let an existing native read finish instead of restarting it on
+          // every tool hook. Activity during that read schedules one follow-up.
+          await queryClient.invalidateQueries({
+            queryKey: ["astrorder", "messages", current.agent, current.session],
+          }, { cancelRefetch: false });
+        } catch {
+          // A later hook or reconnect can retry an unavailable native source.
+        } finally {
+          current.running = false;
+          if (!disposed && current.dirty) scheduleHookRefresh(current.agent, current.session);
+          else hookRefreshes.delete(key);
+        }
+      }, 250);
+    };
     const stop = connectEventStream({
       after: useAstrorderStore.getState().cursor,
       onStatus: storeStatus,
@@ -107,7 +142,23 @@ export function useEventStream(
           });
           deliverBrowserNotification(notification);
         }
+        const previousSessionStatus = event.agent_id && event.session_id
+          ? store.sessions[scopeKey(event.agent_id, event.session_id)]?.status
+          : undefined;
         store.applyEvent(event);
+        const nativeFrame = event.data.frame as { method?: string } | undefined;
+        if (
+          (event.type === "codex.notification" && nativeFrame?.method === "turn/completed") ||
+          (event.type === "session.upsert" && previousSessionStatus === "running" &&
+            ["idle", "error"].includes(String(event.data.status)))
+        ) {
+          void queryClient.invalidateQueries({
+            queryKey: ["astrorder", "messages", event.agent_id, event.session_id],
+          });
+        }
+        if (event.type === "transcript.invalidate" && event.agent_id && event.session_id) {
+          scheduleHookRefresh(event.agent_id, event.session_id);
+        }
         if (event.type === "token.usage") {
           void queryClient.invalidateQueries({
             queryKey: ["astrorder", "session_usage", event.session_id, event.agent_id],
@@ -306,7 +357,12 @@ export function useEventStream(
         }
       },
     });
-    return stop;
+    return () => {
+      disposed = true;
+      for (const refresh of hookRefreshes.values()) clearTimeout(refresh.timer);
+      hookRefreshes.clear();
+      stop();
+    };
   }, [authenticated, queryClient]);
 }
 import { useSidecarStore } from "../features/sidecar/sidecarStore";

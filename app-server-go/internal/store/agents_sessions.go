@@ -267,7 +267,17 @@ func (s *Store) UpdateSession(ctx context.Context, agentID, sessionID string, up
 	}
 	sets = append(sets, "updated_at=?")
 	args = append(args, nowDatabaseTime(), agentID, sessionID)
-	result, err := s.db.ExecContext(ctx, "UPDATE sessions SET "+strings.Join(sets, ",")+" WHERE agent_id=? AND id=?", args...)
+	var result sql.Result
+	err := s.WithTx(ctx, func(tx *sql.Tx) error {
+		if _, renamed := updates["title"]; renamed {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM workspace_preferences WHERE "key"=?`, SessionTitleKey(agentID, sessionID)); err != nil {
+				return err
+			}
+		}
+		var err error
+		result, err = tx.ExecContext(ctx, "UPDATE sessions SET "+strings.Join(sets, ",")+" WHERE agent_id=? AND id=?", args...)
+		return err
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -297,10 +307,10 @@ func DeleteSessionTx(ctx context.Context, tx *sql.Tx, agentID, sessionID string)
 	}
 	prefix := agentID + "::" + sessionID
 	if _, err := tx.ExecContext(ctx, `DELETE FROM workspace_preferences
-WHERE instr(key, ?)=1 OR instr(key, ?)=1 OR key=? OR key=?
+WHERE instr(key, ?)=1 OR instr(key, ?)=1 OR key=? OR key=? OR key=?
 OR (instr(key, 'approval:')=1 AND json_extract(value, '$.agent_id')=? AND json_extract(value, '$.session_id')=?)`,
 		"blackboard:session:"+prefix+":", "blackboard:swarm:"+prefix+":", "blackboard_scope:"+prefix,
-		nativeTurnKey(agentID, sessionID), agentID, sessionID); err != nil {
+		nativeTurnKey(agentID, sessionID), SessionTitleKey(agentID, sessionID), agentID, sessionID); err != nil {
 		return false, err
 	}
 	result, err := tx.ExecContext(ctx, "DELETE FROM sessions WHERE agent_id=? AND id=?", agentID, sessionID)
@@ -440,10 +450,5 @@ func preserveEmptyPayload(payload map[string]any, key string, existing any) any 
 }
 
 func isPlaceholderTitle(title, id string) bool {
-	switch strings.ToLower(title) {
-	case "", "新会话", "未命名", "未命名会话", "untitled", strings.ToLower(id):
-		return true
-	default:
-		return false
-	}
+	return IsPlaceholderSessionTitle(title, id)
 }

@@ -43,6 +43,17 @@ describe('FileTreeViewer expansion persistence', () => {
     vi.unstubAllGlobals()
   })
 
+  it('authenticates mobile tree reads with the stored browser credential', async () => {
+    localStorage.setItem('astrorder:token', 'fixture-mobile-tree')
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ root: artifact.path, items: [] }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    renderTree()
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled())
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
+    expect(init?.credentials).toBe('include')
+    expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer fixture-mobile-tree')
+  })
+
   it('starts collapsed and permanently restores expanded folders', async () => {
     vi.stubGlobal('localStorage', {
       getItem: (key: string) => values.get(key) ?? null,
@@ -100,7 +111,7 @@ describe('FileTreeViewer expansion persistence', () => {
     expect(row).toHaveStyle({ outline: '1px solid var(--astr-blue, #3b82f6)' })
     expect(row).toHaveClass('is-selected')
     expect(row).toHaveClass('is-revealed')
-    expect(fetch).toHaveBeenCalledWith(expect.stringContaining(`reveal_path=${encodeURIComponent(revealPath)}`))
+    expect(fetch).toHaveBeenCalledWith(expect.stringContaining(`reveal_path=${encodeURIComponent(revealPath)}`), expect.objectContaining({ credentials: 'include' }))
     view.unmount()
   })
 

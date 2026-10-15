@@ -12,6 +12,7 @@ import {
   IconFolderOpen,
   IconRefresh,
 } from '@tabler/icons-react'
+import { authenticatedApiFetch } from '../../../../api/client'
 import { resolveArtifactFromPath } from '../../resolver'
 import { useSidecarStore } from '../../sidecarStore'
 import type { ViewerContext } from '../../types'
@@ -351,7 +352,7 @@ export function FileTreeViewer({ artifact, isActive = true }: ViewerContext) {
     loadedRef.current = new Set()
     try {
       const queryPath = artifact.path || ''
-      const res = await fetch(
+      const res = await authenticatedApiFetch(
         `/api/v1/files/tree?depth=6&path=${encodeURIComponent(artifact.path || '')}&reveal_path=${encodeURIComponent(revealPath || '')}&session_id=${encodeURIComponent(artifact.sessionId)}&connection_id=${encodeURIComponent(artifact.connectionId || '')}`,
       )
       if (!res.ok) throw new Error(await describeTreeFailure(res))
@@ -370,7 +371,7 @@ export function FileTreeViewer({ artifact, isActive = true }: ViewerContext) {
     if (loadedRef.current.has(path)) return
     loadedRef.current.add(path)
     try {
-      const res = await fetch(
+      const res = await authenticatedApiFetch(
         `/api/v1/files/tree?depth=2&path=${encodeURIComponent(path)}&session_id=${encodeURIComponent(artifact.sessionId)}&connection_id=${encodeURIComponent(artifact.connectionId || '')}`,
       )
       if (!res.ok) throw new Error(await describeTreeFailure(res))
@@ -454,7 +455,7 @@ export function FileTreeViewer({ artifact, isActive = true }: ViewerContext) {
     })
 
     try {
-      const res = await fetch('/api/v1/files/stage', {
+      const res = await authenticatedApiFetch('/api/v1/files/stage', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -657,7 +658,7 @@ export function FileTreeViewer({ artifact, isActive = true }: ViewerContext) {
                 onClick={async () => {
                   const node = contextMenu.node
                   setContextMenu(null)
-                  const response = await fetch('/api/v1/system/open-file', {
+                  const response = await authenticatedApiFetch('/api/v1/system/open-file', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ path: node.path, action: 'reveal' }),

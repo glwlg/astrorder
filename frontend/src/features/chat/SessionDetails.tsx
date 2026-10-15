@@ -1,3 +1,4 @@
+import { UserInputCard, isUserInput } from '../../components/UserInputCard'
 import { IconAlertTriangle, IconBolt, IconCircleCheck, IconClock, IconShieldCheck } from '@tabler/icons-react'
 import { Badge, Divider, Group, Paper, Stack, Text, Title } from '@mantine/core'
 import type { Agent, Approval, Command, Message, Session } from '../../domain/types'
@@ -73,7 +74,7 @@ export function SessionDetails({
         <section className="approval-section" aria-label="待处理审批">
           <Group gap={6} mb="xs"><IconShieldCheck size={16} /><Text size="xs" fw={700}>待处理审批</Text></Group>
           <Stack gap="xs">
-            {approvals.map((approval) => (
+            {approvals.map((approval) => isUserInput(approval) ? <UserInputCard key={approval.id} approval={approval} /> : (
               <Paper className="approval-card" withBorder p="sm" radius="md" key={approval.id}>
                 <Text size="sm" fw={600}>{approval.title}</Text>
                 {approval.detail && <Text size="xs" c="dimmed" mt={4}><MarkdownContent value={approval.detail} /></Text>}

@@ -124,6 +124,7 @@ const NATIVE_HOLD_FIELDS = 'textarea, input, select, [contenteditable="true"], .
 
 export function allowsNativeTextHold(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false
+  if (target.closest('.m-select-text')) return true
   if (target.closest('.m-msg, .m-bubble, .m-hold')) return false
   return Boolean(target.closest(NATIVE_HOLD_FIELDS))
 }

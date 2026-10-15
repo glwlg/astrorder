@@ -26,6 +26,24 @@ func (s *Store) PendingApprovals(ctx context.Context) ([]map[string]any, error) 
 	return result, nil
 }
 
+// Approval returns the exact durable request, including resolved requests so a
+// lost HTTP receipt can retry the same daemon operation without redispatch.
+func (s *Store) Approval(ctx context.Context, agentID, sessionID, id string) (map[string]any, error) {
+	scope, err := encodeJSON([]string{agentID, sessionID, id})
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.QueryRows(ctx, `SELECT value FROM workspace_preferences WHERE "key"=?`, "approval:"+scope)
+	if err != nil || len(rows) == 0 {
+		return nil, err
+	}
+	value, ok := rows[0]["value"].(map[string]any)
+	if !ok {
+		return nil, errors.New("persisted approval must be an object")
+	}
+	return value, nil
+}
+
 func persistApprovalTx(ctx context.Context, tx *sql.Tx, event Event) error {
 	if event.Type != "approval.upsert" {
 		return nil

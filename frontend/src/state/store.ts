@@ -24,6 +24,8 @@ export interface AstrorderStore {
   projects: Record<string, Project>
   sessions: Record<string, Session>
   messages: Record<string, Record<string, Message>>
+  messageRevision: number
+  messageEventRevisions: Record<string, Record<string, number>>
   commands: Record<string, Command>
   tasks: Record<string, Task>
   approvals: Record<string, Approval>
@@ -190,6 +192,8 @@ export const useAstrorderStore = create<AstrorderStore>((set) => ({
   projects: {},
   sessions: {},
   messages: {},
+  messageRevision: 0,
+  messageEventRevisions: {},
   commands: {},
   tasks: {},
   approvals: {},
@@ -221,6 +225,10 @@ export const useAstrorderStore = create<AstrorderStore>((set) => ({
         projects,
         sessions,
         tasks,
+        commands: payload.cursor >= state.cursor && payload.commands ? {
+          ...Object.fromEntries(Object.entries(state.commands).filter(([, command]) => command.action !== 'enqueue' || !['queued', 'received', 'accepted', 'running', 'unknown', 'failed'].includes(command.state))),
+          ...Object.fromEntries(payload.commands.map(command => [commandKey(command), command])),
+        } : state.commands,
         // A delayed or old snapshot may never move the cursor backwards.
         approvals: payload.cursor >= state.cursor ? Object.fromEntries((payload.approvals || []).map(a => [a.id, a])) : state.approvals,
         cursor: Math.max(state.cursor, payload.cursor),
@@ -403,15 +411,21 @@ export const useAstrorderStore = create<AstrorderStore>((set) => ({
         return { ...base, sessions: nextSessions }
       }
 
-      if (event.type === 'message.upsert') {
-        const message = event.data as unknown as Message
+      if (event.type === 'message.upsert' || event.type === 'message.delta') {
+        let message = event.data as unknown as Message
         if (!message.id || !message.session_id || !message.agent_id) return base
         const key = scopeKey(message.agent_id, message.session_id)
+        if (event.type === 'message.delta') {
+          const previous = state.messages[key]?.[message.id]
+          if (previous) message = { ...previous, ...message, text: previous.text + message.text, created_at: previous.created_at, command_id: message.command_id || previous.command_id }
+        }
         const current = Object.values(state.messages[key] || {})
         const merged = mergeMessagesById(current, [message])
         return {
           ...base,
           messages: { ...state.messages, [key]: messageMap(merged) },
+          messageRevision: state.messageRevision + 1,
+          messageEventRevisions: { ...state.messageEventRevisions, [key]: { ...state.messageEventRevisions[key], [message.id]: state.messageRevision + 1 } },
           liveActivityAt: message.tool?.background === true ? state.liveActivityAt : touchLiveActivity(state.liveActivityAt, key),
         }
       }
@@ -423,7 +437,7 @@ export const useAstrorderStore = create<AstrorderStore>((set) => ({
         return { ...base, ...next }
       }
 
-      if (event.type === 'task.upsert') {
+      if (event.type === 'task.upsert' || event.type === 'task.live') {
         const task = event.data as unknown as Task
         if (!task.id || !task.session_id || !task.agent_id) return base
         const key = taskKey(task)
@@ -469,6 +483,8 @@ export const useAstrorderStore = create<AstrorderStore>((set) => ({
       projects: {},
       sessions: {},
       messages: {},
+      messageRevision: 0,
+      messageEventRevisions: {},
       commands: {},
       tasks: {},
       approvals: {},

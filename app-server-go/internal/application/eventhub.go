@@ -95,6 +95,12 @@ func (h *EventHub) Publish(ctx context.Context, eventType string, data map[strin
 // Read the durable cursor interval so an earlier event cannot be skipped by
 // a browser that has already observed the later cursor.
 func (h *EventHub) broadcastCommitted(events []store.Event) {
+	transient := make([]store.Event, 0)
+	for _, event := range events {
+		if store.IsTransientEvent(event.Type) {
+			transient = append(transient, event)
+		}
+	}
 	if h.store != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -105,6 +111,9 @@ func (h *EventHub) broadcastCommitted(events []store.Event) {
 				h.publishedThrough = latest
 			}
 			h.broadcast(&store.Event{Cursor: latest, Type: "resync_required", Data: map[string]any{"reason": "event_cursor_gap"}})
+			for i := range transient {
+				h.broadcast(&transient[i])
+			}
 			return
 		}
 		events = durable
@@ -131,6 +140,11 @@ func (h *EventHub) broadcastCommitted(events []store.Event) {
 		h.broadcast(&events[i])
 		if events[i].Cursor > h.publishedThrough {
 			h.publishedThrough = events[i].Cursor
+		}
+	}
+	if h.store != nil {
+		for i := range transient {
+			h.broadcast(&transient[i])
 		}
 	}
 }
@@ -293,7 +307,7 @@ func (h *EventHub) ServeWebSocket(response http.ResponseWriter, request *http.Re
 			if !ok {
 				return
 			}
-			if ev.Cursor <= lastCursor && ev.Type != "resync_required" {
+			if ev.Cursor <= lastCursor && ev.Type != "resync_required" && !store.IsTransientEvent(ev.Type) {
 				continue
 			}
 			raw, err := json.Marshal(eventWire(*ev))

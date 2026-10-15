@@ -18,17 +18,18 @@ const daemonMetadataName = "daemon-process.json"
 
 // DaemonOptions contains explicit configuration for managing the Session Daemon lifecycle.
 type DaemonOptions struct {
-	ExecutablePath string
-	ConfigPath     string
-	DatabasePath   string
-	WorkingDir     string
-	StateDir       string
-	Port           int
-	GRPCTarget     string
-	Secret         string
-	GRPCCredential string
-	LogPath        string
-	StartupTimeout time.Duration
+	ExecutablePath  string
+	ConfigPath      string
+	DatabasePath    string
+	WorkingDir      string
+	StateDir        string
+	Port            int
+	GRPCTarget      string
+	Secret          string
+	GRPCCredential  string
+	LogPath         string
+	StartupTimeout  time.Duration
+	ShutdownTimeout time.Duration
 }
 
 // DaemonStatusResult matches the JSON contract expected by the Desktop client.
@@ -133,25 +134,41 @@ func stopDaemonLocked(ctx context.Context, validated validatedDaemonOptions, con
 		}
 	}
 
-	deadline := time.Now().Add(10 * time.Second)
+	// Runtime teardown is sequential and can outlive RPC listener shutdown.
+	// A closed listener alone must never permit replacement of a live image.
+	waitCtx, cancelWait := context.WithTimeout(ctx, validated.ShutdownTimeout)
+	defer cancelWait()
 	owned := status.Process
+	var inspectFailure error
 	for {
-		pids, _ := ListeningPIDs(validated.Port)
-		processExited := true
+		pids, listenerErr := ListeningPIDs(validated.Port)
+		if listenerErr != nil {
+			return DaemonStatusResult{}, fmt.Errorf("verify daemon listener release: %w", listenerErr)
+		}
+		processExited := owned.PID == 0
 		if owned.PID > 0 {
 			cur, inspectErr := InspectProcess(owned.PID)
-			if inspectErr == nil && cur == owned {
-				processExited = false
+			switch {
+			case errors.Is(inspectErr, os.ErrNotExist):
+				processExited = true
+			case inspectErr != nil:
+				// Windows can briefly deny process inspection during exit.
+				// Keep the process unconfirmed and retry within the same bound.
+				inspectFailure = inspectErr
+			default:
+				inspectFailure = nil
+				processExited = cur != owned
 			}
 		}
 		if processExited && len(pids) == 0 {
 			removeDaemonProcessMetadata(validated.StateDir, owned)
 			return DaemonStatusResult{State: StateStopped, Port: validated.Port, StartupTask: status.StartupTask}, nil
 		}
-		if time.Now().After(deadline) {
-			return DaemonStatusResult{}, errors.New("daemon did not exit before deadline")
+		select {
+		case <-waitCtx.Done():
+			return DaemonStatusResult{}, fmt.Errorf("daemon shutdown is not yet confirmed (pid %d, process_exited=%t, listener_released=%t): %w", owned.PID, processExited, len(pids) == 0, errors.Join(waitCtx.Err(), inspectFailure))
+		case <-time.After(100 * time.Millisecond):
 		}
-		time.Sleep(100 * time.Millisecond)
 	}
 }
 
@@ -379,6 +396,9 @@ func validateDaemonOptions(opts DaemonOptions) (validatedDaemonOptions, error) {
 		return validatedDaemonOptions{}, errors.New("daemon gRPC credential is required")
 	}
 
+	if opts.ShutdownTimeout <= 0 {
+		opts.ShutdownTimeout = 60 * time.Second
+	}
 	if opts.StartupTimeout <= 0 {
 		opts.StartupTimeout = 30 * time.Second
 	}

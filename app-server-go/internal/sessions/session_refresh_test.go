@@ -160,12 +160,18 @@ func seedRefreshSession(t *testing.T, st *store.Store, agentID, sessionID string
 
 func seedRefreshMessage(t *testing.T, st *store.Store, agentID, sessionID, role, createdAt string) {
 	t.Helper()
-	if _, err := st.UpsertMessage(context.Background(), map[string]any{
+	if role != "user" {
+		return
+	}
+	if _, _, err := st.CreateCommand(context.Background(), map[string]any{
 		"id":       "m-" + agentID + "-" + sessionID + "-" + role + "-" + createdAt,
-		"agent_id": agentID, "session_id": sessionID, "role": role, "kind": "message",
+		"agent_id": agentID, "session_id": sessionID, "action": "send",
 		"text": "fixture", "attachments": []any{}, "created_at": createdAt,
-	}); err != nil {
-		t.Fatalf("seed message: %v", err)
+	}, "completed"); err != nil {
+		t.Fatalf("seed command: %v", err)
+	}
+	if _, err := st.DB().ExecContext(context.Background(), "UPDATE commands SET created_at=? WHERE agent_id=? AND session_id=? AND id=?", createdAt, agentID, sessionID, "m-"+agentID+"-"+sessionID+"-"+role+"-"+createdAt); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -200,7 +206,7 @@ func refreshRefKeys(refs []refreshRef) []string {
 	return keys
 }
 
-func TestPresenceAndUserActivityProjectMessageMetadata(t *testing.T) {
+func TestPresenceAndUserActivityProjectCommandMetadata(t *testing.T) {
 	srv := &refreshDaemonServer{}
 	h, st, _, cleanup := setupRefreshServer(t, srv)
 	defer cleanup()

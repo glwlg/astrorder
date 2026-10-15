@@ -1,4 +1,4 @@
-import { IconBrain, IconMicrophone, IconPaperclip, IconPlus, IconPlayerStop, IconArrowUp, IconX, IconCheck } from '@tabler/icons-react'
+import { IconBrain, IconMicrophone, IconPaperclip, IconPlus, IconPlayerStop, IconArrowUp, IconX } from '@tabler/icons-react'
 import { Alert, Badge, Button, Group, Paper, Stack, Text, Textarea } from '@mantine/core'
 import { useQueryClient } from '@tanstack/react-query'
 import { type ChangeEvent, type ClipboardEvent, type DragEvent, type KeyboardEvent, useEffect, useRef, useState, useSyncExternalStore } from 'react'
@@ -13,11 +13,13 @@ import { SessionModelControl } from './SessionModelControl'
 import { Magnet } from '../../components/animations/Magnet'
 import { ClickSpark } from '../../components/animations/ClickSpark'
 import { GitStatusBar } from './GitStatusBar'
+import { GoalManager } from './GoalManager'
 import { clipboardFiles } from './composerMedia'
 import { notifySessionSubmitted } from '../../hooks/useSessionOrder'
 import '../agents/agentsLayout.css'
 import { ApprovalModeControl } from './ApprovalModeControl'
-import { MobileOutbox, type OutboxEntry } from '../mobile/mobileOutbox'
+import { sharedServerOutbox } from '../mobile/serverOutbox'
+import type { OutboxEntry } from '../mobile/mobileOutbox'
 import { mobileOutboxStorage } from '../mobile/mobileOutboxStorage'
 import { AgentCommandMenu, AgentMentionMenu, buildCommandMenuItems, type CommandMenuItem, filterAgentMentions, formatAgentMention, useAgentCommands, useAgentMentions, useFileMentions, useGitBranches } from './AgentCommandMenu'
 import { useSidecarStore } from '../sidecar/sidecarStore'
@@ -199,14 +201,7 @@ export function ChatComposer({
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [sessionDragOver, setSessionDragOver] = useState(false)
   const [fileDragOver, setFileDragOver] = useState(false)
-  const [outbox] = useState(() => new MobileOutbox(mobileOutboxStorage, {
-    upload: api.uploadAttachment,
-    send: async payload => {
-      const result = await api.createCommand(payload)
-      useAstrorderStore.getState().mergeCommands([result])
-      return result
-    },
-  }))
+  const [outbox] = useState(() => sharedServerOutbox(mobileOutboxStorage))
   const queue = useSyncExternalStore(outbox.subscribe, outbox.snapshot)
   const [outboxReady, setOutboxReady] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -367,8 +362,8 @@ export function ChatComposer({
         return
       }
       const desktop = (window as unknown as { astrorderDesktop?: { openPreview?: (payload: { images: string[]; index: number }) => Promise<void> } }).astrorderDesktop
-      if (desktop?.openPreview) void desktop.openPreview({ images: urls, index })
-    })
+      if (desktop?.openPreview) return desktop.openPreview({ images: urls, index })
+    }).catch(nextError => setError(errorMessage(nextError)))
   }
 
   const submitDirectMessage = async (customText: string) => {
@@ -461,10 +456,11 @@ export function ChatComposer({
   }
 
   const submit = async (action: CommandAction, targetId: string | null = null) => {
-    const files = draft.attachments.map((item) => item.file)
+    const files = draft.attachments.filter(item => !item.attachment).map((item) => item.file)
+    const uploadedAttachments = draft.attachments.flatMap(item => item.attachment ? [item.attachment] : [])
     const outgoing = composeOutgoingText(draft.text, sessionRefs, `${session.agent_id}::${session.id}`)
     if (action === 'send') {
-      if (!isDraftSendable(draft.text, files, sessionRefs)) return
+      if (!isDraftSendable(draft.text, draft.attachments, sessionRefs)) return
       if (!canChat) {
         setError('当前 Agent 不支持聊天发送。')
         return
@@ -486,7 +482,7 @@ export function ChatComposer({
           text: outgoing,
           attachment_ids: [],
           target_id: null,
-        }, files)
+        }, files, uploadedAttachments)
         updateDraft(EMPTY_DRAFT)
         notifySessionSubmitted(session)
       } catch (nextError) {
@@ -535,6 +531,7 @@ export function ChatComposer({
         session,
         text: command.text,
         files: action === 'send' ? files : [],
+        uploadedAttachments: action === 'send' ? uploadedAttachments : [],
         action,
         targetId,
         uploadAttachment: api.uploadAttachment,
@@ -555,20 +552,7 @@ export function ChatComposer({
       const status = nextError instanceof ApiError && nextError.status >= 400 && nextError.status < 500 ? 'failed' : 'unknown'
       store.markOutboxError(session.agent_id, session.id, commandId, errorMessage(nextError), status)
       setError(errorMessage(nextError))
-      try {
-        if (!outboxReady) await outbox.load()
-        await outbox.enqueue({
-          id: commandId,
-          agent_id: session.agent_id,
-          session_id: session.id,
-          action: 'send',
-          text: command.text,
-          attachment_ids: [],
-          target_id: null,
-        }, files)
-      } catch {
-        // Fall back to keeping in store
-      }
+      // An ambiguous direct send must never become a new queued command.
       // Draft and File objects intentionally remain in Zustand after a failed send.
     } finally {
       submittingRef.current = false
@@ -582,8 +566,18 @@ export function ChatComposer({
     setSubmitting(true)
     setError(null)
     try {
-      await outbox.flush(session.agent_id, session.id, commandId)
-      const failed = outbox.snapshot().find(row => row.payload.id === commandId && (row.state === 'failed' || row.state === 'unknown'))
+      const entry = outbox.snapshot().find(row => row.payload.id === commandId && row.payload.agent_id === session.agent_id && row.payload.session_id === session.id)
+      if (!entry) return
+      if (entry.state === 'unknown') {
+        const result = await api.getCommands(session.id, session.agent_id)
+        useAstrorderStore.getState().mergeCommands(result.items)
+        await outbox.reconcile(result.items, [session])
+      } else {
+        const nextId = entry.state === 'failed' ? await outbox.retry(session.agent_id, session.id, commandId) : commandId
+        if (!nextId) return
+        await outbox.flush(session.agent_id, session.id, nextId)
+      }
+      const failed = outbox.snapshot().find(row => row.payload.agent_id === session.agent_id && row.payload.session_id === session.id && (row.state === 'failed' || row.state === 'unknown'))
       if (failed?.error) setError(failed.error)
       await queryClient.invalidateQueries({ queryKey: ['astrorder', 'commands', session.agent_id, session.id] })
       await queryClient.invalidateQueries({ queryKey: ['astrorder', 'messages', session.agent_id, session.id] })
@@ -612,10 +606,13 @@ export function ChatComposer({
         ? (draft.text ? `${entry.payload.text}
 ${draft.text}` : entry.payload.text)
         : draft.text
-      const restoredAttachments: DraftAttachment[] = (entry.files || []).map((file) => {
-        attachmentKeyRef.current += 1
-        return { key: `draft-attachment-${attachmentKeyRef.current}`, file }
-      })
+      const restoredAttachments: DraftAttachment[] = [
+        ...entry.attachments.map(attachment => ({ key: crypto.randomUUID(), file: new File([], attachment.name, { type: attachment.media_type }), attachment })),
+        ...(entry.files || []).map((file) => {
+          attachmentKeyRef.current += 1
+          return { key: `draft-attachment-${attachmentKeyRef.current}`, file }
+        }),
+      ]
       updateDraft({
         text: nextText,
         attachments: [...restoredAttachments, ...draft.attachments],
@@ -682,30 +679,7 @@ ${draft.text}` : entry.payload.text)
         }}
         onDrop={handleSessionDrop}
       >
-        {(() => {
-          const currentGoal = tasks.find(t => t.id === 'codex:goal:current' && t.status !== 'cancelled')
-          if (!currentGoal) return null
-          const isRunning = currentGoal.status === 'running' || currentGoal.status === 'pending'
-          const isCompleted = currentGoal.status === 'completed'
-          const rawTitle = currentGoal.title.replace(/^目标:\s*/, '')
-          return (
-            <div className={`composer-goal-pill ${isRunning ? 'is-running' : isCompleted ? 'is-completed' : 'is-failed'}`}>
-              <span className="goal-pill-status">
-                {isRunning ? (
-                  <span className="goal-status-dot is-running" aria-hidden="true" />
-                ) : isCompleted ? (
-                  <IconCheck size={13} color="var(--astr-teal, #12b886)" />
-                ) : (
-                  <IconX size={13} color="var(--astr-red, #ef4444)" />
-                )}
-                <span className="goal-status-text">
-                  {isRunning ? '进行中的目标' : isCompleted ? '已完成目标' : '目标受阻'}
-                </span>
-              </span>
-              <span className="goal-pill-title" title={rawTitle}>{rawTitle}</span>
-            </div>
-          )
-        })()}
+        <GoalManager key={`${session.agent_id}::${session.id}`} session={session} agent={agent} tasks={tasks} />
         <GitStatusBar session={session} />
         <Stack gap="xs">
         {pending.map(entry => (
@@ -738,11 +712,11 @@ ${draft.text}` : entry.payload.text)
                 {entry.state !== 'queued' && (
                   <>
                     <Text size="xs" c={entry.state === 'failed' || entry.state === 'unknown' ? 'red' : 'dimmed'}>
-                      {entry.state === 'submitting' ? '发送中…' : entry.state === 'failed' || entry.state === 'unknown' ? '未确认/失败' : '已提交'}
+                      {entry.state === 'submitting' ? '发送中…' : entry.state === 'failed' ? '发送失败' : entry.state === 'unknown' ? '结果待核对' : '已提交'}
                     </Text>
                     {(entry.state === 'failed' || entry.state === 'unknown') && (
                       <Button size="compact-xs" variant="light" color="yellow" onClick={() => void steerQueued(entry.payload.id)}>
-                        重试
+                        {entry.state === 'unknown' ? '核对结果' : '重试'}
                       </Button>
                     )}
                     <Button size="compact-xs" variant="subtle" color="blue" onClick={() => void editQueued(entry)}>

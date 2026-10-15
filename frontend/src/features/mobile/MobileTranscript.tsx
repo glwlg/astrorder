@@ -1,6 +1,9 @@
-import { useEffect, useRef } from 'react'
+import { UserInputCard, isUserInput } from '../../components/UserInputCard'
+import { useEffect, useRef, useState } from 'react'
 import { IconCheck, IconChecks, IconChevronDown } from '@tabler/icons-react'
 import type { Approval, Message } from '../../domain/types'
+import { attachmentHref } from '../../domain/attachmentHref'
+import { hasMessageContent, isMessageActivity, normalizeMessagePresentation } from '../../domain/messagePresentation'
 import { MobileMarkdown as MarkdownContent } from './MobileMarkdown'
 import { useStickToBottom } from '../../hooks/useStickToBottom'
 import { useOlderMessages } from '../../hooks/useOlderMessages'
@@ -13,7 +16,7 @@ import { isCompactionMessage, CompactionDivider } from '../chat/CompactionDivide
 import { useReducedMotion } from '@mantine/hooks'
 import { AnimatePresence, motion } from 'motion/react'
 
-export interface MessageActionAnchor { text: string; x: number; y: number; element: HTMLElement }
+export interface MessageActionAnchor { text: string; x: number; y: number; element: HTMLElement; selectText?: () => void }
 
 export function MobileTranscript({ messages, commands = [], approvals = [], onApproval, busy, loadOlder, hasOlder, loadingOlder, onMessageAction, onImage, onFile, workspace, connectionId, onSwipe, onSwipePreview }: {
   messages: Message[]; commands?: import('../../domain/types').Command[]; approvals?: Approval[]; onApproval?: (approval: Approval, action: 'approve' | 'cancel') => void
@@ -27,13 +30,33 @@ export function MobileTranscript({ messages, commands = [], approvals = [], onAp
   const older = useOlderMessages({ hasMore: hasOlder, loading: loadingOlder, load: loadOlder, capture: capturePrependAnchor })
   const touch = useRef<{ x: number; y: number } | null>(null)
   const hold = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [selectedText, setSelectedText] = useState<HTMLElement | null>(null)
   useEffect(() => () => { if (hold.current) clearTimeout(hold.current) }, [])
+  useEffect(() => {
+    if (!selectedText) return
+    const bubble = selectedText.querySelector<HTMLElement>('.m-bubble')
+    if (!bubble) return
+    bubble.classList.add('m-select-text')
+    const range = document.createRange()
+    range.selectNodeContents(bubble)
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+    const clearOutside = (event: Event) => { if (!selectedText.contains(event.target as Node)) setSelectedText(null) }
+    document.addEventListener('pointerdown', clearOutside, true)
+    return () => {
+      document.removeEventListener('pointerdown', clearOutside, true)
+      bubble.classList.remove('m-select-text')
+      if (selection?.anchorNode && bubble.contains(selection.anchorNode)) selection.removeAllRanges()
+    }
+  }, [selectedText])
   const cancelHold = () => { if (hold.current) clearTimeout(hold.current); hold.current = null }
-  const rows = messages.filter(m => isCompactionMessage(m) || m.kind !== 'message' || m.text.trim() || m.attachments.length)
-  const activity = (m: Message) => !isCompactionMessage(m) && (m.kind === 'thinking' || m.kind === 'tool' || m.role === 'tool')
+  const action = (message: Message, element: HTMLElement, x: number, y: number) => onMessageAction({ text: message.text, x, y, element, selectText: () => setSelectedText(element) })
+  const rows = messages.map(normalizeMessagePresentation).filter(m => isCompactionMessage(m) || hasMessageContent(m))
+  const activity = (m: Message) => !isCompactionMessage(m) && isMessageActivity(m)
   return <>
     <div className="m-transcript" role="log" ref={setContainerRef} onScroll={e => { onScroll(); older.onScroll(e) }} onWheel={older.onWheel}
-      onTouchStart={e => { older.onTouchStart(e); if (startsAtSessionDrawerEdge(e.touches[0].clientX)) { touch.current = null; onSwipePreview?.(null); return }; touch.current = { x: e.touches[0].clientX, y: e.touches[0].clientY } }}
+      onTouchStart={e => { older.onTouchStart(e); if ((e.target as Element).closest('.m-select-text') || startsAtSessionDrawerEdge(e.touches[0].clientX)) { touch.current = null; onSwipePreview?.(null); return }; touch.current = { x: e.touches[0].clientX, y: e.touches[0].clientY } }}
       onTouchEnd={e => { cancelHold(); onSwipePreview?.(null); if (!touch.current) return; const start = touch.current; const end = e.changedTouches[0]; touch.current = null; const gesture = sessionSwipeGesture(start.x, start.y, end.clientX, end.clientY); if (gesture) onSwipe(gesture) }}
       onTouchMove={e => { cancelHold(); older.onTouchMove(e); if (!touch.current || !onSwipePreview) return; onSwipePreview(sessionDragPreview(e.touches[0].clientX - touch.current.x, e.touches[0].clientY - touch.current.y)) }} onTouchCancel={cancelHold}>
       {hasOlder && <button className="m-earlier" disabled={loadingOlder} onClick={() => void older.request()}>{loadingOlder ? '正在加载更早消息…' : '查看更早的消息 ↑'}</button>}
@@ -82,17 +105,25 @@ export function MobileTranscript({ messages, commands = [], approvals = [], onAp
                     toolName={String(item.tool?.name || '')}
                   />
                 )}
-                {!!item.attachments?.length && <div className="m-thumbs">{item.attachments.map(a => a.media_type.startsWith('image/') ? <button key={a.id} onClick={() => onImage(a.url)}><img src={a.url} alt={a.name} /></button> : <a key={a.id} className="m-file-link" href={a.url} target="_blank" rel="noreferrer">{a.name}</a>)}</div>}
+                {!!item.attachments?.length && <div className="m-thumbs">{item.attachments.map(a => {
+                  const href = attachmentHref(a)
+                  if (!href) return <span key={a.id} className="m-file-link">{a.name}（链接不可用）</span>
+                  return a.media_type.startsWith('image/') ? <button key={a.id} onClick={() => onImage(href)}><img src={href} alt={a.name} /></button> : <a key={a.id} className="m-file-link" href={href} target="_blank" rel="noreferrer">{a.name}</a>
+                })}</div>}
               </LazyDetails>
             })}</div>
           </LazyDetails>
         }
         return <motion.article key={m.id} layout="position" initial={enter} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.28, ease: [0.2, 0.8, 0.2, 1] }} className={`m-msg m-hold ${m.role === 'user' ? 'm-user' : 'm-assistant'}`} data-message-id={m.id}
           tabIndex={0}
-          onContextMenu={e => { e.preventDefault(); e.stopPropagation(); cancelHold(); const rect = e.currentTarget.getBoundingClientRect(); onMessageAction({ text: m.text, x: e.clientX || rect.left + rect.width / 2, y: e.clientY || rect.top + 20, element: e.currentTarget }) }}
-          onTouchStart={e => { cancelHold(); const element = e.currentTarget; const point = e.touches[0]; hold.current = setTimeout(() => { onMessageAction({ text: m.text, x: point.clientX, y: point.clientY, element }); navigator.vibrate?.(20) }, 500) }}>
+          onContextMenu={e => { if ((e.target as Element).closest('.m-select-text')) return; e.preventDefault(); e.stopPropagation(); cancelHold(); const rect = e.currentTarget.getBoundingClientRect(); action(m, e.currentTarget, e.clientX || rect.left + rect.width / 2, e.clientY || rect.top + 20) }}
+          onTouchStart={e => { cancelHold(); if ((e.target as Element).closest('.m-select-text')) return; const element = e.currentTarget; const point = e.touches[0]; hold.current = setTimeout(() => { action(m, element, point.clientX, point.clientY); navigator.vibrate?.(20) }, 500) }}>
           {m.text.trim() && <div className="m-bubble"><MessageBody value={m.text} user={m.role === 'user'} onImageClick={onImage} attachmentNames={m.attachments.filter((attachment) => attachment.media_type.startsWith('image/')).map((attachment) => attachment.name)} renderMarkdown={value => <MarkdownContent value={value} onFileClick={onFile} onImageClick={onImage} workspace={workspace} sessionId={m.session_id} connectionId={connectionId} />} sessionId={m.session_id} connectionId={connectionId || undefined} /></div>}
-          {!!m.attachments.length && <div className="m-thumbs">{m.attachments.map(a => a.media_type.startsWith('image/') ? <button key={a.id} onClick={() => onImage(a.url)}><img src={a.url} alt={a.name} /></button> : <a key={a.id} className="m-file-link" href={a.url} target="_blank" rel="noreferrer">{a.name}</a>)}</div>}
+          {!!m.attachments.length && <div className="m-thumbs">{m.attachments.map(a => {
+            const href = attachmentHref(a)
+            if (!href) return <span key={a.id} className="m-file-link">{a.name}（链接不可用）</span>
+            return a.media_type.startsWith('image/') ? <button key={a.id} onClick={() => onImage(href)}><img src={href} alt={a.name} /></button> : <a key={a.id} className="m-file-link" href={href} target="_blank" rel="noreferrer">{a.name}</a>
+          })}</div>}
           {m.role === 'user' && (() => {
             const hasAssistantReplied = rows.slice(i + 1).some(r => r.role !== 'user')
             const matchedCmd = m.command_id
@@ -115,7 +146,7 @@ export function MobileTranscript({ messages, commands = [], approvals = [], onAp
       {busy && (!rows.length || rows[rows.length - 1].role === 'user') && <div className="m-thinking-placeholder">··· 正在思考与响应中…</div>}
       {approvals.length > 0 && (
         <section className="m-native-approvals" aria-label="对话待处理审批">
-          {approvals.map(approval => (
+          {approvals.map(approval => isUserInput(approval) ? <UserInputCard key={approval.id} approval={approval} /> : (
             <div key={approval.id} className="approval-card" style={{ padding: '10px 12px', borderRadius: 10, margin: '8px 0' }}>
               <h4 style={{ margin: '0 0 6px', fontSize: 13, fontWeight: 600 }}>{approval.title}</h4>
               {approval.detail && <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 160, overflow: 'auto', margin: '0 0 8px', fontSize: 12 }}>{approval.detail}</pre>}

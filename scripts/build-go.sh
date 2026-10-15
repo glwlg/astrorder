@@ -2,7 +2,7 @@
 set -euo pipefail
 
 readonly expected_buf_version="1.66.1"
-readonly expected_go_version="go1.26.4"
+readonly expected_go_version="go1.27.2"
 readonly expected_protoc_gen_go_version="v1.36.12"
 readonly expected_protoc_gen_go_grpc_version="1.6.2"
 readonly expected_grpcio_tools_version="1.84.0"

@@ -92,6 +92,7 @@ type Handler struct {
 	attachmentsDir    string
 	maxAttachmentSize int64
 	resolver          *targetfs.Resolver
+	titleBusy         sync.Map
 	nativeGuard
 }
 
@@ -160,6 +161,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleSetSessionModel(w, r, params.SessionID)
 	case "set_session_reasoning":
 		h.handleSetSessionReasoning(w, r, params.SessionID)
+	case "manage_session_goal":
+		h.handleSessionGoal(w, r, params.SessionID)
 	case "get_session_approval_mode":
 		h.handleGetSessionApprovalMode(w, r, params.SessionID)
 	case "set_session_approval_mode":
@@ -168,6 +171,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Session CRUD
 	case "list_sessions":
 		h.handleListSessions(w, r)
+	case "fork_session":
+		h.handleForkSession(w, r, params.SessionID)
 	case "create_session":
 		h.handleCreateSession(w, r)
 	case "update_session":
@@ -182,10 +187,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleDeleteProject(w, r)
 
 	// Command & Task & Queue
+	case "respond_user_input":
+		h.handleUserInput(w, r, params.SessionID)
 	case "create_command":
 		h.handleCreateCommand(w, r)
 	case "list_commands":
 		h.handleListCommands(w, r, params.SessionID)
+	case "list_background_processes":
+		h.handleBackgroundProcesses(w, r, params.SessionID)
 	case "list_tasks":
 		h.handleListTasks(w, r, params.SessionID)
 	case "edit_queued_command":

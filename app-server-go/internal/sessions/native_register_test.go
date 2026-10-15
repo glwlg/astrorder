@@ -152,14 +152,14 @@ func TestRefreshListsCodexThreadsStartedOutsideAstrorder(t *testing.T) {
 	for _, row := range rows {
 		got[stringValue(row, "id")] = stringValue(row, "title")
 	}
-	if len(got) != 2 || got["t-desktop"] != "Fix the build" || got["t-preview-only"] != "first line of the prompt" {
-		t.Fatalf("registered %v, want only the two top-level conversations", got)
+	if len(got) != 4 || got["t-desktop"] != "Fix the build" || got["t-preview-only"] != "first line" || got["t-sub"] != "helper" || got["t-guardian"] == "" {
+		t.Fatalf("registered %v, want all persistent conversations including children", got)
 	}
 	row, _ := st.GetSession(ctx, "codex-1", "t-desktop")
 	if row["status"] != "idle" || row["native_kind"] != "vscode" || row["control_state"] != "owned" || row["history_state"] != "available" || row["project_name"] != "proj" {
 		t.Fatalf("row shape: %v", row)
 	}
-	if len(pub.events) != 2 {
+	if len(pub.events) != 4 {
 		t.Fatalf("published %d events, want one session.upsert per new session", len(pub.events))
 	}
 	if len(srv.lists) == 0 || srv.lists[0] != `{"modelProviders":[]}` {
@@ -272,12 +272,12 @@ func TestHookDoesNotListAThreadThatHasNoContentYet(t *testing.T) {
 	h.RegisterNativeSession("codex-1", "opening") // UserPromptSubmit
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		if row, _ := st.GetSession(ctx, "codex-1", "opening"); row != nil {
+		if row, _ := st.GetSession(ctx, "codex-1", "opening"); row != nil && row["title"] == "the first " {
 			break
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if row, _ := st.GetSession(ctx, "codex-1", "opening"); row == nil || row["title"] != "the first prompt" {
+	if row, _ := st.GetSession(ctx, "codex-1", "opening"); row == nil || row["title"] != "the first " {
 		t.Fatalf("session not listed with its prompt as title: %v", row)
 	}
 }
@@ -291,7 +291,7 @@ func TestRefreshRenamesASessionListedUnderItsId(t *testing.T) {
 	if _, err := h.refreshAgentActivity(ctx, agent, "codex"); err != nil {
 		t.Fatal(err)
 	}
-	if row, _ := st.GetSession(ctx, "codex-1", "by-id"); row["title"] != "now it has a prompt" {
+	if row, _ := st.GetSession(ctx, "codex-1", "by-id"); row["title"] != "now it has" {
 		t.Fatalf("title not repaired: %v", row)
 	}
 }
@@ -305,7 +305,7 @@ func TestRefreshMergesBothThreadListQueries(t *testing.T) {
 	if _, err := h.refreshAgentActivity(ctx, agent, "codex"); err != nil {
 		t.Fatal(err)
 	}
-	for id, title := range map[string]string{"plain": "Plain", "from-exec": "ran codex exec"} {
+	for id, title := range map[string]string{"plain": "Plain", "from-exec": "ran codex "} {
 		if row, _ := st.GetSession(ctx, "codex-1", id); row == nil || row["title"] != title {
 			t.Fatalf("%s not listed with title %q: %v", id, title, row)
 		}
@@ -376,7 +376,7 @@ func TestHistoryIsReadableWhenTheThreadCannotBeBound(t *testing.T) {
 	if strings.Join(older, "|") != "first question|first answer" || cursor != "" {
 		t.Fatalf("older page wrong: %v cursor=%q", older, cursor)
 	}
-	if rows, _, _ := st.ListMessages(ctx, "codex-1", "t-busy", "", 10); len(rows) != 0 {
+	if rows, _ := st.QueryRows(ctx, "SELECT * FROM messages WHERE agent_id='codex-1' AND session_id='t-busy'"); len(rows) != 0 {
 		t.Fatalf("read-only history was copied into the local store: %d rows", len(rows))
 	}
 }

@@ -42,3 +42,10 @@ stitch-*.png
 /backend/.pytest_temp/
 /scratch/
 /scratch-fg-*/
+/.tools/
+/desktop-wails/bin/
+/desktop-wails/assets/app/
+/desktop-wails/build-package/
+/desktop-wails/rsrc_windows_*.syso
+/bin/
+/release/

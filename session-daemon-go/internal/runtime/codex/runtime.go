@@ -21,6 +21,7 @@ var approvalMethods = map[string]struct{}{
 	"item/commandExecution/requestApproval": {},
 	"item/fileChange/requestApproval":       {},
 	"item/permissions/requestApproval":      {},
+	"item/tool/requestUserInput":            {},
 }
 
 type Notification struct {
@@ -70,6 +71,7 @@ type Result struct {
 	TurnID    string
 	Status    string
 	Accepted  bool
+	Completed bool
 }
 
 type pendingRequest struct {
@@ -91,12 +93,14 @@ type Runtime struct {
 	pending          map[int]pendingRequest
 	pendingHooks     map[string]bool
 	pendingApprovals map[string]any
+	inputQuestions   map[string]map[string]bool
 	approvalKinds    map[string]string
 	notifications    chan Notification
 	done             chan struct{}
 	nextID           int
 	sessionID        string
 	activeTurnID     string
+	turnRevision     uint64
 	completedTurns   map[string]string
 	starting         bool
 	status           string
@@ -112,7 +116,8 @@ func New(config Config) *Runtime {
 		completedTurns:   map[string]string{},
 		turnCommands:     map[string]string{},
 		pendingApprovals: map[string]any{}, nextID: 1, status: "idle",
-		approvalKinds: map[string]string{}, notifications: make(chan Notification, 256), done: make(chan struct{}),
+		inputQuestions: map[string]map[string]bool{},
+		approvalKinds:  map[string]string{}, notifications: make(chan Notification, 256), done: make(chan struct{}),
 	}
 	go r.dispatchNotifications()
 	return r
@@ -216,6 +221,7 @@ func (runtime *Runtime) Resume(ctx context.Context, request Request) (Result, er
 		return Result{}, fmt.Errorf("codex did not confirm the resumed thread id")
 	}
 	runtime.setSession(request.SessionID, "idle")
+	runtime.refreshGoal(ctx, request.SessionID)
 	return Result{SessionID: request.SessionID, Status: "idle", Native: response}, nil
 }
 
@@ -235,9 +241,17 @@ func (runtime *Runtime) start(ctx context.Context, workspace string, environment
 		runtime.starting = false
 		runtime.mu.Unlock()
 	}()
-	arguments := runtime.config.Arguments
+	arguments := append([]string(nil), runtime.config.Arguments...)
 	if len(arguments) == 0 {
 		arguments = []string{"app-server", "--listen", "stdio://"}
+	}
+	for _, argument := range arguments {
+		if argument == "app-server" {
+			// Astrorder can answer native questions in ordinary chat as well as
+			// Plan mode. Experimental API negotiation alone does not enable this.
+			arguments = append(arguments, "--enable", "default_mode_request_user_input")
+			break
+		}
 	}
 
 	if runtime.sshStarter != nil {
@@ -317,9 +331,24 @@ func (runtime *Runtime) Command(ctx context.Context, command Command) (Result, e
 		if len(inputs) == 0 {
 			inputs = []map[string]any{{"type": "text", "text": command.Text}}
 		}
+		runtime.mu.Lock()
+		activeTurn := runtime.activeTurnID
+		idleOnly := command.Options["idle_only"] == true
+		if idleOnly && (runtime.status != "idle" || activeTurn != "") {
+			runtime.mu.Unlock()
+			return Result{}, fmt.Errorf("queued send requires an idle session")
+		}
+		runtime.mu.Unlock()
+		if activeTurn != "" {
+			command.Input = inputs
+			command.TurnID = activeTurn
+			return runtime.steer(ctx, command)
+		}
 		params := map[string]any{"threadId": command.SessionID, "input": inputs}
 		for key, value := range command.Options {
-			params[key] = value
+			if key != "idle_only" {
+				params[key] = value
+			}
 		}
 		runtime.mu.Lock()
 		runtime.pendingCommandID = command.CommandID
@@ -349,6 +378,8 @@ func (runtime *Runtime) Command(ctx context.Context, command Command) (Result, e
 		runtime.status = status
 		runtime.mu.Unlock()
 		return Result{SessionID: command.SessionID, TurnID: turnID, Status: status, Accepted: true}, nil
+	case "session.steer":
+		return runtime.steer(ctx, command)
 	case "session.interrupt":
 		if command.TurnID == "" {
 			return Result{}, fmt.Errorf("codex interrupt requires a turn id")
@@ -386,11 +417,46 @@ func (runtime *Runtime) approve(command Command) (Result, error) {
 	runtime.mu.Lock()
 	nativeID, ok := runtime.pendingApprovals[command.ApprovalID]
 	kind := runtime.approvalKinds[command.ApprovalID]
+	questionIDs := runtime.inputQuestions[command.ApprovalID]
 	runtime.mu.Unlock()
 	if !ok {
 		return Result{}, fmt.Errorf("codex approval is not pending for this session")
 	}
 	result := map[string]any{"decision": command.Decision}
+	if kind == "item/tool/requestUserInput" {
+		if command.Decision == "decline" {
+			result = map[string]any{"answers": map[string]any{}}
+		} else {
+			answers, ok := command.Options["answers"].(map[string]any)
+			if !ok {
+				return Result{}, fmt.Errorf("user input requires explicit answers")
+			}
+			if len(answers) != 0 && len(answers) != len(questionIDs) {
+				return Result{}, fmt.Errorf("answer every native question or skip")
+			}
+			for id, value := range answers {
+				if !questionIDs[id] {
+					return Result{}, fmt.Errorf("unknown native question identity")
+				}
+				answer, ok := value.(map[string]any)
+				if id == "" || !ok {
+					return Result{}, fmt.Errorf("invalid user input answer")
+				}
+				values, ok := answer["answers"].([]any)
+				if !ok {
+					return Result{}, fmt.Errorf("invalid user input answers")
+				}
+				for _, value := range values {
+					if _, ok := value.(string); !ok {
+						return Result{}, fmt.Errorf("invalid user input text")
+					}
+				}
+			}
+			result = map[string]any{"answers": answers}
+		}
+	} else if command.Options != nil {
+		return Result{}, fmt.Errorf("user input cannot answer an execution approval")
+	}
 	if kind == "item/permissions/requestApproval" {
 		permissions := map[string]any{}
 		if command.Decision == "accept" {
@@ -407,6 +473,7 @@ func (runtime *Runtime) approve(command Command) (Result, error) {
 	runtime.mu.Lock()
 	delete(runtime.pendingApprovals, command.ApprovalID)
 	delete(runtime.approvalKinds, command.ApprovalID)
+	delete(runtime.inputQuestions, command.ApprovalID)
 	runtime.mu.Unlock()
 	// Native serverRequest/resolved confirms the state transition.
 	return Result{SessionID: command.SessionID, Status: "waiting_approval", Accepted: true}, nil
@@ -627,6 +694,18 @@ func (runtime *Runtime) handleNotification(method string, frame map[string]any) 
 			approvalID = "codex:" + nativeRequestID(nativeID)
 			runtime.pendingApprovals[approvalID] = nativeID
 			runtime.approvalKinds[approvalID] = method
+			if method == "item/tool/requestUserInput" {
+				params, _ := frame["params"].(map[string]any)
+				questions, _ := params["questions"].([]any)
+				ids := map[string]bool{}
+				for _, raw := range questions {
+					q, _ := raw.(map[string]any)
+					if id, _ := q["id"].(string); id != "" {
+						ids[id] = true
+					}
+				}
+				runtime.inputQuestions[approvalID] = ids
+			}
 			runtime.status = "waiting_approval"
 		}
 	}
@@ -641,8 +720,14 @@ func (runtime *Runtime) handleNotification(method string, frame map[string]any) 
 		commandID = runtime.pendingCommandID
 		runtime.turnCommands[turnID] = commandID
 	}
+	if item, ok := params["item"].(map[string]any); ok && item["type"] == "userMessage" {
+		if clientID, _ := item["clientId"].(string); clientID != "" {
+			commandID = clientID
+		}
+	}
 	switch method {
 	case "turn/started":
+		runtime.turnRevision++
 		runtime.activeTurnID, runtime.status = turnID, "running"
 	case "hook/started", "hook/completed":
 		run, _ := params["run"].(map[string]any)
@@ -663,6 +748,7 @@ func (runtime *Runtime) handleNotification(method string, frame map[string]any) 
 			}
 		}
 	case "turn/completed":
+		runtime.turnRevision++
 		runtime.pendingHooks = nil
 		runtime.activeTurnID, runtime.status = "", "idle"
 		if turn["status"] == "failed" {
@@ -677,6 +763,7 @@ func (runtime *Runtime) handleNotification(method string, frame map[string]any) 
 		if id, ok := params["requestId"]; ok {
 			delete(runtime.pendingApprovals, "codex:"+nativeRequestID(id))
 			delete(runtime.approvalKinds, "codex:"+nativeRequestID(id))
+			delete(runtime.inputQuestions, "codex:"+nativeRequestID(id))
 		}
 		if len(runtime.pendingApprovals) == 0 && len(runtime.pendingHooks) == 0 {
 			runtime.status = "idle"

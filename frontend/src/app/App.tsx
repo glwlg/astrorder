@@ -8,6 +8,7 @@ import { ApiError } from '../api/client'
 import { AuthPage } from '../components/AuthPage'
 import { AppShellLayout } from './AppShellLayout'
 import { useAuthSession, useBootstrap } from '../hooks/useAstrorderData'
+import { useServerOutboxSync } from '../hooks/useServerOutboxSync'
 import { useEventStream } from '../hooks/useEventStream'
 import { ChatPage } from '../features/chat/ChatPage'
 import { GroupsPage } from '../features/chat/GroupsPage'
@@ -17,6 +18,7 @@ import { PluginsPage } from '../features/plugins/PluginsPage'
 import { AnalyticsPage } from '../features/analytics/AnalyticsPage'
 import { AstrorderLoader } from '../components/AnimatedStatus'
 import { ShinyText } from '../components/animations/ShinyText'
+import { useShortcutHandlers } from '../features/shortcuts/shortcuts'
 
 function LoadingPage({ label = '正在启动星序工作台…' }: { label?: string }) {
   return (
@@ -71,7 +73,13 @@ function AuthenticatedApp() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const bootstrap = useBootstrap(true)
+  useShortcutHandlers({
+    chat: () => navigate('/chat'),
+    monitor: () => navigate('/monitor'),
+    swarm: () => navigate('/swarm'),
+  })
   useEventStream(Boolean(bootstrap.data), queryClient, navigate)
+  useServerOutboxSync(Boolean(bootstrap.data))
 
   if (bootstrap.isLoading) return <LoadingPage label="正在读取已认证工作台…" />
   if (bootstrap.error) return <BootstrapError error={bootstrap.error} retry={() => void bootstrap.refetch()} />
@@ -110,6 +118,7 @@ function AuthenticatedApp() {
 export default function App() {
   const queryClient = useQueryClient()
   const auth = useAuthSession()
+  useShortcutHandlers({ refresh: () => window.location.reload() }, true)
   if (auth.isLoading) return <LoadingPage label="正在检查登录状态…" />
   if (auth.data?.authenticated) return <AuthenticatedApp />
 

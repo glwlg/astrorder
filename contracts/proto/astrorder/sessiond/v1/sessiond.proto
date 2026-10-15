@@ -511,6 +511,8 @@ message RespondApprovalRequest {
   ExactIdentifier approval_id = 3;
   ApprovalDecision decision = 4;
   repeated PermissionGrant permissions = 5;
+  // Explicit response to a native request_user_input, never an approval grant.
+  optional NativeJson user_input = 6;
 }
 
 message UpdateSettingsRequest {
@@ -722,6 +724,14 @@ message HistoryPageResponse {
   optional NativeJson native = 5;
 }
 
+message ListBackgroundProcessesRequest {
+  SessionRef session = 1;
+}
+
+message ListBackgroundProcessesResponse {
+  repeated NativeJson processes = 1;
+}
+
 message ListModelsRequest {
   SessionRef session = 1;
 }
@@ -781,6 +791,19 @@ message SetReasoningRequest {
 
 message ReadApprovalModeRequest {
   SessionRef session = 1;
+}
+
+message SetGoalRequest {
+  CommandMeta meta = 1;
+  SessionRef session = 2;
+  string objective = 3;
+  // Empty edits the objective; paused/active changes only native lifecycle state.
+  string status = 4;
+}
+
+message ClearGoalRequest {
+  CommandMeta meta = 1;
+  SessionRef session = 2;
 }
 
 message ApprovalModeState {
@@ -1249,11 +1272,14 @@ service SessionControl {
 service RuntimeQuery {
   rpc QueryNative(NativeQueryRequest) returns (NativeQueryResponse);
   rpc GetHistoryPage(HistoryPageRequest) returns (HistoryPageResponse);
+  rpc ListBackgroundProcesses(ListBackgroundProcessesRequest) returns (ListBackgroundProcessesResponse);
   rpc ListModels(ListModelsRequest) returns (ListModelsResponse);
   rpc ListCommands(ListCommandsRequest) returns (ListCommandsResponse);
   rpc ReadModel(ReadModelRequest) returns (ModelState);
   rpc SetModel(SetModelRequest) returns (CommandReceipt);
   rpc SetReasoning(SetReasoningRequest) returns (CommandReceipt);
+  rpc SetGoal(SetGoalRequest) returns (CommandReceipt);
+  rpc ClearGoal(ClearGoalRequest) returns (CommandReceipt);
   rpc ReadApprovalMode(ReadApprovalModeRequest) returns (ApprovalModeState);
   rpc SetApprovalMode(SetApprovalModeRequest) returns (CommandReceipt);
   rpc DisconnectRuntime(DisconnectRuntimeRequest) returns (DisconnectRuntimeResponse);

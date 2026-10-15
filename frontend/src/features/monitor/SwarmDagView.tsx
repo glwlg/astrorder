@@ -476,6 +476,8 @@ export function SwarmDagView({
   }
 
   const handleWheel = (e: WheelEvent<HTMLDivElement>) => {
+    // Portal 弹框仍沿 React 树冒泡；只缩放实际位于画布内的滚轮事件。
+    if (!e.currentTarget.contains(e.target as Node)) return
     e.preventDefault()
     const zoomDelta = e.deltaY < 0 ? 0.08 : -0.08
     setZoom((z) => Math.min(Math.max(z + zoomDelta, 0.4), 1.8))

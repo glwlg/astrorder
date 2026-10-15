@@ -36,7 +36,7 @@ func TestNativeHistoryPreservesCursorAndHidesInjectedContext(t *testing.T) {
 	}
 }
 
-func TestNativeHistoryFallsBackToStoreWhenNativeReadFails(t *testing.T) {
+func TestNativeHistoryFailureNeverReturnsLegacyAppMessages(t *testing.T) {
 	srv := &mockDaemonServer{
 		getHistoryPageCb: func(r *pb.HistoryPageRequest) (*pb.HistoryPageResponse, error) {
 			return nil, fmt.Errorf("session not owned by live daemon")
@@ -57,16 +57,7 @@ func TestNativeHistoryFallsBackToStoreWhenNativeReadFails(t *testing.T) {
 	}
 
 	// Seed projected messages into store
-	msg := map[string]any{
-		"id":         "msg-1",
-		"session_id": sid,
-		"agent_id":   aid,
-		"role":       "user",
-		"kind":       "message",
-		"text":       "Hello from historical session projection",
-		"created_at": "2026-10-09T00:00:00Z",
-	}
-	if _, err := st.UpsertMessages(ctx, []map[string]any{msg}); err != nil {
+	if _, err := st.DB().ExecContext(ctx, `INSERT INTO messages(id,session_id,agent_id,role,kind,text,attachments,created_at) VALUES('msg-1',?,?,'user','message','Hello from historical session projection','[]','2026-10-09T00:00:00Z')`, sid, aid); err != nil {
 		t.Fatal(err)
 	}
 
@@ -75,11 +66,11 @@ func TestNativeHistoryFallsBackToStoreWhenNativeReadFails(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
 
-	if w.Code != 200 {
-		t.Fatalf("expected 200 fallback to store messages, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected explicit native error, got %d: %s", w.Code, w.Body.String())
 	}
 	body := w.Body.String()
-	if !strings.Contains(body, "Hello from historical session projection") {
-		t.Fatalf("expected store message in response body, got: %s", body)
+	if strings.Contains(body, "Hello from historical session projection") {
+		t.Fatalf("legacy App history leaked: %s", body)
 	}
 }

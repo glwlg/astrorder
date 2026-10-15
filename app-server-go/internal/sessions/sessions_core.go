@@ -18,6 +18,7 @@ func (h *Handler) handleListSessions(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusInternalServerError, "Failed to list sessions: "+err.Error())
 		return
 	}
+	h.repairSessionTitles(ctx, items)
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }
 

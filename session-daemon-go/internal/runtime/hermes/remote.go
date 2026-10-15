@@ -19,6 +19,14 @@ type SSHSession interface {
 // SSHStarter launches a remote command over SSH
 type SSHStarter func(ctx context.Context, spec ssh.CommandSpec) (SSHSession, error)
 
+// NewWithCanonicalSSHStarter connects a remote stdio relay to the shared
+// canonical owner while reusing the same request/notification translation.
+func NewWithCanonicalSSHStarter(config Config, starter SSHStarter) *Adapter {
+	a := NewWithSSHStarter(config, starter)
+	a.canonical = true
+	return a
+}
+
 // NewWithSSHStarter creates a Hermes adapter that connects via an SSH starter
 func NewWithSSHStarter(config Config, starter SSHStarter) *Adapter {
 	a := New(config)

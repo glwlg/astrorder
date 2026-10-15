@@ -10,10 +10,51 @@ export function scopeKey(agentId: string, sessionId: string): string {
   return `${agentId}::${sessionId}`
 }
 
-export function mergeMessagesById<T extends { id: string; role?: string; text?: string; command_id?: string | null; created_at?: string }>(existing: T[], incoming: T[]): T[] {
+export function findSessionHandoff(selected: Session | null, sessions: Session[]): { session: Session; direction: 'from' | 'to' } | null {
+  if (!selected) return null
+  // These IDs also encode scheduling/parentage. Only a saved handoff context
+  // establishes that another session actually took over the conversation.
+  const isHandoff = (session: Session) => Boolean(
+    session.handoff_from_agent_id && session.handoff_from_session_id && session.handoff_context?.trim(),
+  )
+  if (isHandoff(selected)) {
+    const source = sessions.find(session =>
+      session.agent_id === selected.handoff_from_agent_id && session.id === selected.handoff_from_session_id,
+    )
+    if (source) return { session: source, direction: 'from' }
+  }
+  const target = sessions.find(session => isHandoff(session)
+    && session.handoff_from_agent_id === selected.agent_id && session.handoff_from_session_id === selected.id,
+  )
+  return target ? { session: target, direction: 'to' } : null
+}
+
+type ReconciledMessage = {
+  id: string
+  role?: string
+  text?: string
+  command_id?: string | null
+  created_at?: string
+  attachments?: { id: string; name: string; media_type: string }[]
+}
+
+/** SQLite native timestamps are UTC even when their wire format omits the zone. */
+function messageTime(value = ''): number {
+  return Date.parse(/^\d{4}-\d{2}-\d{2} \d{2}:/.test(value) ? value.replace(' ', 'T') + 'Z' : value)
+}
+
+/** Local input expires once populated native user history covers its send time. */
+export function confirmsOptimisticUser(optimistic: ReconciledMessage, native: ReconciledMessage): boolean {
+  if (!optimistic.id.startsWith('optimistic-') || optimistic.role !== 'user' || native.role !== 'user' || native.id.startsWith('optimistic-')) return false
+  if (!native.text?.trim() && !native.attachments?.length) return false
+  const submittedAt = messageTime(optimistic.created_at)
+  const persistedAt = messageTime(native.created_at)
+  return Number.isFinite(submittedAt) && Number.isFinite(persistedAt) && persistedAt >= submittedAt
+}
+
+export function mergeMessagesById<T extends ReconciledMessage>(existing: T[], incoming: T[]): T[] {
   const result: T[] = []
   const positions = new Map<string, number>()
-  const commandPositions = new Map<string, number>()
   const assistantPositions = new Map<string, number>()
 
   for (const item of [...existing, ...incoming]) {
@@ -31,32 +72,9 @@ export function mergeMessagesById<T extends { id: string; role?: string; text?: 
         }
       }
     }
-    if (!positions.has(item.id) && item.role === 'user') {
-      let correlatedIdx = item.command_id ? commandPositions.get(item.command_id) : undefined
-      if (correlatedIdx === undefined && !item.id.startsWith('optimistic-') && item.text) {
-        for (let i = 0; i < result.length; i++) {
-          const cand = result[i]
-          if (cand.id.startsWith('optimistic-') && cand.role === 'user' && cand.text?.trim() === item.text.trim()) {
-            correlatedIdx = i
-            break
-          }
-        }
-      }
-      if (correlatedIdx !== undefined) {
-        const current = result[correlatedIdx]
-        if (current.id.startsWith('optimistic-') || !current.created_at || !item.created_at || item.created_at >= current.created_at) {
-          positions.delete(current.id)
-          positions.set(item.id, correlatedIdx)
-          result[correlatedIdx] = item
-        }
-        continue
-      }
-    }
-
     const position = positions.get(item.id)
     if (position === undefined) {
       positions.set(item.id, result.length)
-      if (item.role === 'user' && item.command_id) commandPositions.set(item.command_id, result.length)
       if (item.role === 'assistant' && item.command_id) assistantPositions.set(item.command_id, result.length)
       result.push(item)
     } else {
@@ -64,7 +82,10 @@ export function mergeMessagesById<T extends { id: string; role?: string; text?: 
     }
   }
 
-  return result
+  // A row may first arrive empty and later update under the same ID.
+  // Reconcile after all updates so the completed row replaces its placeholder too.
+  const nativeUsers = result.filter(item => item.role === 'user' && !item.id.startsWith('optimistic-'))
+  return result.filter(item => !item.id.startsWith('optimistic-') || !nativeUsers.some(native => confirmsOptimisticUser(item, native)))
 }
 
 export function mergeMessages(existing: Message[], incoming: Message[]): Message[] {

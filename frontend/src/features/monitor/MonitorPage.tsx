@@ -22,7 +22,8 @@ import { isHiddenRailSession } from '../../components/sessionRailModel'
 import { useSessionResources } from '../../hooks/useAstrorderData'
 import { selectApprovals, selectCommands, selectMessages, selectSessions, useAstrorderStore } from '../../state/store'
 import { newCommandId, scopeKey } from '../../domain/semantics'
-import { MobileOutbox, type OutboxEntry } from '../mobile/mobileOutbox'
+import { sharedServerOutbox } from '../mobile/serverOutbox'
+import type { OutboxEntry } from '../mobile/mobileOutbox'
 import { mobileOutboxStorage } from '../mobile/mobileOutboxStorage'
 import { clipboardFiles } from '../chat/composerMedia'
 import { submitBrowserCommand } from '../chat/commandActions'
@@ -113,6 +114,11 @@ interface MonitorCardProps {
   isFloating?: boolean
   isDropTarget?: boolean
   isFocused?: boolean
+  queuedItems?: MonitorQueueItem[]
+  queueBusyId?: string | null
+  onSendQueued?: (item: MonitorQueueItem) => void
+  onEditQueued?: (item: MonitorQueueItem) => void
+  onDeleteQueued?: (item: MonitorQueueItem) => void
   onToggleFocus?: () => void
   onOpen: () => void
   onRemove?: () => void
@@ -129,6 +135,11 @@ export function MonitorCard({
   isFloating = false,
   isDropTarget = false,
   isFocused = false,
+  queuedItems = [],
+  queueBusyId = null,
+  onSendQueued,
+  onEditQueued,
+  onDeleteQueued,
   onToggleFocus,
   onOpen,
   onRemove,
@@ -232,9 +243,9 @@ export function MonitorCard({
     if (desktop?.openPreview) {
       try {
         const abs = new URL(url, window.location.origin).href
-        void desktop.openPreview({ images: [abs], index: 0 })
+        void desktop.openPreview({ images: [abs], index: 0 }).catch(reason => setError(reason instanceof Error ? reason.message : '图片预览失败。'))
       } catch {
-        void desktop.openPreview({ images: [url], index: 0 })
+        void desktop.openPreview({ images: [url], index: 0 }).catch(reason => setError(reason instanceof Error ? reason.message : '图片预览失败。'))
       }
     } else {
       window.open(url, '_blank')
@@ -421,6 +432,58 @@ export function MonitorCard({
 
           {/* Full-Fidelity Miniature Composer Footer */}
           <div className="monitor-card-footer">
+            {queuedItems.length > 0 && (
+              <div className="monitor-card-queue monitor-queue" aria-label="待机队列">
+                <Stack gap={6} mb={6}>
+                  {queuedItems.map((item) => (
+                    <Paper
+                      key={`${item.agentId}::${item.id}`}
+                      className="monitor-queue-item"
+                      withBorder
+                      radius="md"
+                    >
+                      <Group justify="space-between" gap="xs" wrap="nowrap" style={{ width: '100%' }}>
+                        <Group gap={6} wrap="nowrap" style={{ minWidth: 0, flex: 1 }}>
+                          <Badge size="xs" color="yellow" variant="light" style={{ flexShrink: 0 }}>
+                            待机
+                          </Badge>
+                          <Text size="xs" lineClamp={1} style={{ wordBreak: 'break-all' }} title={item.text || '附件消息'}>
+                            {item.text || '附件消息'}
+                          </Text>
+                        </Group>
+                        <Group gap={4} wrap="nowrap" style={{ flexShrink: 0 }}>
+                          <Button
+                            size="compact-xs"
+                            variant="light"
+                            color="indigo"
+                            loading={queueBusyId === item.id}
+                            onClick={() => void onSendQueued?.(item)}
+                          >
+                            发送
+                          </Button>
+                          <Button
+                            size="compact-xs"
+                            variant="subtle"
+                            onClick={() => onEditQueued?.(item)}
+                          >
+                            编辑
+                          </Button>
+                          <Button
+                            size="compact-xs"
+                            variant="subtle"
+                            color="red"
+                            disabled={queueBusyId === item.id}
+                            onClick={() => void onDeleteQueued?.(item)}
+                          >
+                            删除
+                          </Button>
+                        </Group>
+                      </Group>
+                    </Paper>
+                  ))}
+                </Stack>
+              </div>
+            )}
             <div className="monitor-composer-inner">
               {draft.attachments.length > 0 && (
                 <div className="draft-attachments" aria-label="待发送附件">
@@ -504,11 +567,21 @@ function MonitorListRow({
   agent,
   onOpen,
   onRemove,
+  queuedItems = [],
+  queueBusyId = null,
+  onSendQueued,
+  onEditQueued,
+  onDeleteQueued,
 }: {
   session: Session
   agent?: Agent
   onOpen: () => void
   onRemove?: () => void
+  queuedItems?: MonitorQueueItem[]
+  queueBusyId?: string | null
+  onSendQueued?: (item: MonitorQueueItem) => void
+  onEditQueued?: (item: MonitorQueueItem) => void
+  onDeleteQueued?: (item: MonitorQueueItem) => void
 }) {
   useSessionResources(session, true)
   const commands = useAstrorderStore(useShallow((state) => selectCommands(state, session.agent_id, session.id)))
@@ -575,6 +648,13 @@ function MonitorListRow({
               </Badge>
             </Tooltip>
           )}
+          {queuedItems.length > 0 && (
+            <Tooltip label={queuedItems.length + ' 条待机消息'} withArrow>
+              <Badge size='xs' color='yellow' variant='light'>
+                {queuedItems.length} 待机
+              </Badge>
+            </Tooltip>
+          )}
         </Group>
 
         {/* Right: Time + Quick Jump & Close */}
@@ -596,6 +676,58 @@ function MonitorListRow({
           )}
         </Group>
       </Group>
+      {queuedItems.length > 0 && (
+        <div className="monitor-list-queue monitor-queue" aria-label="待机队列">
+          <Stack gap={6} mt="xs">
+            {queuedItems.map((item) => (
+              <Paper
+                key={`${item.agentId}::${item.id}`}
+                className="monitor-queue-item"
+                withBorder
+                radius="md"
+              >
+                <Group justify="space-between" gap="xs" wrap="nowrap" style={{ width: '100%' }}>
+                  <Group gap={6} wrap="nowrap" style={{ minWidth: 0, flex: 1 }}>
+                    <Badge size="xs" color="yellow" variant="light" style={{ flexShrink: 0 }}>
+                      待机
+                    </Badge>
+                    <Text size="xs" lineClamp={1} style={{ wordBreak: 'break-all' }} title={item.text || '附件消息'}>
+                      {item.text || '附件消息'}
+                    </Text>
+                  </Group>
+                  <Group gap={4} wrap="nowrap" style={{ flexShrink: 0 }}>
+                    <Button
+                      size="compact-xs"
+                      variant="light"
+                      color="indigo"
+                      loading={queueBusyId === item.id}
+                      onClick={() => void onSendQueued?.(item)}
+                    >
+                      发送
+                    </Button>
+                    <Button
+                      size="compact-xs"
+                      variant="subtle"
+                      onClick={() => onEditQueued?.(item)}
+                    >
+                      编辑
+                    </Button>
+                    <Button
+                      size="compact-xs"
+                      variant="subtle"
+                      color="red"
+                      disabled={queueBusyId === item.id}
+                      onClick={() => void onDeleteQueued?.(item)}
+                    >
+                      删除
+                    </Button>
+                  </Group>
+                </Group>
+              </Paper>
+            ))}
+          </Stack>
+        </div>
+      )}
     </Paper>
   )
 }
@@ -612,14 +744,7 @@ export function MonitorPage() {
   const [editingQueued, setEditingQueued] = useState<MonitorQueueItem | null>(null)
   const [queuedText, setQueuedText] = useState('')
   const [queueBusyId, setQueueBusyId] = useState<string | null>(null)
-  const [queueOutbox] = useState(() => new MobileOutbox(mobileOutboxStorage, {
-    upload: api.uploadAttachment,
-    send: async payload => {
-      const command = await api.createCommand(payload)
-      useAstrorderStore.getState().mergeCommands([command])
-      return command
-    },
-  }))
+  const [queueOutbox] = useState(() => sharedServerOutbox(mobileOutboxStorage))
   const queue = useSyncExternalStore(queueOutbox.subscribe, queueOutbox.snapshot)
   const [slotSizes, setSlotSizes] = useState<Record<number, SlotSize>>(savedSlotSizes)
   const [slotOrder, setSlotOrder] = useState<string[]>(savedOrder)
@@ -681,6 +806,62 @@ export function MonitorPage() {
   const agents = useAstrorderStore((state) => state.agents)
   const commands = useAstrorderStore(useShallow((state) => Object.values(state.commands)))
   const messagesBySession = useAstrorderStore((state) => state.messages)
+
+  const queuedCommands = useMemo<MonitorQueueItem[]>(() => {
+    const local = queue.filter(entry => entry.state === 'queued').map(entry => ({ source: 'local' as const, entry, id: entry.payload.id, agentId: entry.payload.agent_id, sessionId: entry.payload.session_id, text: entry.payload.text || '' }))
+    const localIds = new Set(local.map(item => `${item.agentId}::${item.sessionId}::${item.id}`))
+    const server = commands.filter(command => command.state === 'queued' && !localIds.has(`${command.agent_id}::${command.session_id}::${command.id}`)).map(command => ({ source: 'server' as const, command, id: command.id, agentId: command.agent_id, sessionId: command.session_id, text: command.text || '' }))
+    return [...local, ...server]
+  }, [commands, queue])
+
+  const queuedCommandsBySession = useMemo(() => {
+    const map = new Map<string, MonitorQueueItem[]>()
+    for (const item of queuedCommands) {
+      const key = scopeKey(item.agentId, item.sessionId)
+      const list = map.get(key) || []
+      list.push(item)
+      map.set(key, list)
+    }
+    return map
+  }, [queuedCommands])
+
+  const queuedSessionKeys = useMemo(() => new Set(queuedCommands.map(item => scopeKey(item.agentId, item.sessionId))), [queuedCommands])
+
+  const sendQueued = async (item: MonitorQueueItem) => {
+    setQueueBusyId(item.id)
+    try {
+      if (item.source === 'local') await queueOutbox.flush(item.agentId, item.sessionId, item.id)
+      else useAstrorderStore.getState().mergeCommands([await api.sendQueuedCommand(item.id, item.agentId, item.sessionId)])
+      const failed = item.source === 'local' ? queueOutbox.snapshot().find(entry => entry.payload.id === item.id && ['failed', 'unknown'].includes(entry.state)) : null
+      notifications.show(failed ? { color: 'red', message: failed.error || '消息发送未确认' } : { color: 'teal', message: '排队消息已发送' })
+    } catch (error) {
+      notifications.show({ color: 'red', message: error instanceof Error ? error.message : '排队消息发送失败' })
+    } finally {
+      setQueueBusyId(null)
+    }
+  }
+  const deleteQueued = async (item: MonitorQueueItem) => {
+    setQueueBusyId(item.id)
+    try {
+      if (item.source === 'local') await queueOutbox.remove(item.agentId, item.sessionId, item.id)
+      else useAstrorderStore.getState().mergeCommands([await api.deleteQueuedCommand(item.id, item.agentId, item.sessionId)])
+    } catch (error) {
+      notifications.show({ color: 'red', message: error instanceof Error ? error.message : '排队消息删除失败' })
+    } finally {
+      setQueueBusyId(null)
+    }
+  }
+  const saveQueuedEdit = async () => {
+    if (!editingQueued) return
+    try {
+      if (editingQueued.source === 'local') await queueOutbox.updateText(editingQueued.agentId, editingQueued.sessionId, editingQueued.id, queuedText.trim())
+      else useAstrorderStore.getState().mergeCommands([await api.editQueuedCommand(editingQueued.id, editingQueued.agentId, editingQueued.sessionId, queuedText.trim())])
+      setEditingQueued(null)
+    } catch (error) {
+      notifications.show({ color: 'red', message: error instanceof Error ? error.message : '排队消息保存失败' })
+    }
+  }
+
   const manual = useMemo(() => new Set(manualKeys), [manualKeys])
   const automatic = useMemo(() => new Set(autoKeys), [autoKeys])
   const excluded = useMemo(() => new Set(excludedKeys), [excludedKeys])
@@ -689,13 +870,13 @@ export function MonitorPage() {
     const next = new Set(autoKeys)
     for (const session of sessions) {
       const key = scopeKey(session.agent_id, session.id)
-      if (active(session) && !manual.has(key) && !excluded.has(key)) next.add(key)
+      if ((active(session) || queuedSessionKeys.has(key)) && !manual.has(key) && !excluded.has(key)) next.add(key)
     }
     if (next.size === autoKeys.length && autoKeys.every(key => next.has(key))) return
     const values = [...next]
     setAutoKeys(values)
     try { localStorage.setItem(AUTO_STORAGE_KEY, JSON.stringify(values)) } catch {}
-  }, [autoKeys, excluded, manual, sessions])
+  }, [autoKeys, excluded, manual, queuedSessionKeys, sessions])
 
   const candidateSessions = useMemo(() => {
     return sessions.filter(session => {
@@ -793,7 +974,7 @@ export function MonitorPage() {
     const now = Date.now()
     const stale = new Set(sessions.filter(session => {
       const key = scopeKey(session.agent_id, session.id)
-      if (!automatic.has(key) || active(session)) return false
+      if (!automatic.has(key) || active(session) || queuedSessionKeys.has(key)) return false
       const messageTimes = Object.values(messagesBySession[key] || {}).map(message => Date.parse(message.created_at)).filter(Number.isFinite)
       const lastMessageAt = messageTimes.length ? Math.max(...messageTimes) : Date.parse(session.updated_at)
       return Number.isFinite(lastMessageAt) && now - lastMessageAt >= STALE_AFTER_MS
@@ -972,49 +1153,11 @@ export function MonitorPage() {
     window.addEventListener('mouseup', onMouseUp)
   }
 
-  const queuedCommands = useMemo<MonitorQueueItem[]>(() => {
-    const local = queue.filter(entry => entry.state === 'queued').map(entry => ({ source: 'local' as const, entry, id: entry.payload.id, agentId: entry.payload.agent_id, sessionId: entry.payload.session_id, text: entry.payload.text || '' }))
-    const localIds = new Set(local.map(item => `${item.agentId}::${item.sessionId}::${item.id}`))
-    const server = commands.filter(command => command.state === 'queued' && !localIds.has(`${command.agent_id}::${command.session_id}::${command.id}`)).map(command => ({ source: 'server' as const, command, id: command.id, agentId: command.agent_id, sessionId: command.session_id, text: command.text || '' }))
-    return [...local, ...server]
-  }, [commands, queue])
-  const sendQueued = async (item: MonitorQueueItem) => {
-    setQueueBusyId(item.id)
-    try {
-      if (item.source === 'local') await queueOutbox.flush(item.agentId, item.sessionId, item.id)
-      else useAstrorderStore.getState().mergeCommands([await api.sendQueuedCommand(item.id, item.agentId, item.sessionId)])
-      const failed = item.source === 'local' ? queueOutbox.snapshot().find(entry => entry.payload.id === item.id && ['failed', 'unknown'].includes(entry.state)) : null
-      notifications.show(failed ? { color: 'red', message: failed.error || '消息发送未确认' } : { color: 'teal', message: '排队消息已发送' })
-    } catch (error) {
-      notifications.show({ color: 'red', message: error instanceof Error ? error.message : '排队消息发送失败' })
-    } finally {
-      setQueueBusyId(null)
-    }
-  }
-  const deleteQueued = async (item: MonitorQueueItem) => {
-    setQueueBusyId(item.id)
-    try {
-      if (item.source === 'local') await queueOutbox.remove(item.agentId, item.sessionId, item.id)
-      else useAstrorderStore.getState().mergeCommands([await api.deleteQueuedCommand(item.id, item.agentId, item.sessionId)])
-    } catch (error) {
-      notifications.show({ color: 'red', message: error instanceof Error ? error.message : '排队消息删除失败' })
-    } finally {
-      setQueueBusyId(null)
-    }
-  }
-  const saveQueuedEdit = async () => {
-    if (!editingQueued) return
-    try {
-      if (editingQueued.source === 'local') await queueOutbox.updateText(editingQueued.agentId, editingQueued.sessionId, editingQueued.id, queuedText.trim())
-      else useAstrorderStore.getState().mergeCommands([await api.editQueuedCommand(editingQueued.id, editingQueued.agentId, editingQueued.sessionId, queuedText.trim())])
-      setEditingQueued(null)
-    } catch (error) {
-      notifications.show({ color: 'red', message: error instanceof Error ? error.message : '排队消息保存失败' })
-    }
-  }
   const counts = useMemo(() => ({ running: orderedSessions.filter(active).length, waiting: orderedSessions.filter(session => session.status === 'waiting_approval').length }), [orderedSessions])
 
   const liftedSession = liftedDrag !== null ? orderedSessions[liftedDrag.sourceIndex] : null
+  const visibleKeys = useMemo(() => new Set(gridVisibleSessions.map(s => scopeKey(s.agent_id, s.id))), [gridVisibleSessions])
+  const unassignedQueued = useMemo(() => queuedCommands.filter(item => !visibleKeys.has(scopeKey(item.agentId, item.sessionId))), [queuedCommands, visibleKeys])
 
   return (
     <div
@@ -1088,6 +1231,8 @@ export function MonitorPage() {
             slotIndex={liftedDrag.sourceIndex}
             slotSize={{ width: liftedDrag.width, height: liftedDrag.height }}
             isFloating={true}
+            queuedItems={queuedCommandsBySession.get(scopeKey(liftedSession.agent_id, liftedSession.id)) || []}
+            queueBusyId={queueBusyId}
             onOpen={() => {}}
           />
         </div>
@@ -1174,11 +1319,11 @@ export function MonitorPage() {
         />
         </Group>
       </Group>
-      {queuedCommands.length > 0 && (
-        <Paper className="monitor-queue" withBorder radius="lg" p="md" mb="md" aria-label="待机队列">
-          <Group justify="space-between" mb="sm"><div><Title order={3} size="h4">待机队列</Title><Text size="sm" c="dimmed">等待发送的会话消息。</Text></div><Badge color="yellow" variant="light">{queuedCommands.length} 项</Badge></Group>
+      {unassignedQueued.length > 0 && (
+        <Paper className="monitor-queue monitor-unassigned-queue" withBorder radius="lg" p="md" mb="md" aria-label="待机队列">
+          <Group justify="space-between" mb="sm"><div><Title order={3} size="h4">待机队列</Title><Text size="sm" c="dimmed">等待发送的未展示会话消息。</Text></div><Badge color="yellow" variant="light">{unassignedQueued.length} 项</Badge></Group>
           <Stack gap="xs">
-            {queuedCommands.map(item => {
+            {unassignedQueued.map(item => {
               const session = sessions.find(session => scopeKey(session.agent_id, session.id) === scopeKey(item.agentId, item.sessionId))
               return (
                 <Paper key={`${item.agentId}::${item.id}`} className="monitor-queue-item" withBorder p="xs" radius="md">
@@ -1210,6 +1355,11 @@ export function MonitorPage() {
                     key={key}
                     session={session}
                     agent={agents[session.agent_id]}
+                    queuedItems={queuedCommandsBySession.get(key) || []}
+                    queueBusyId={queueBusyId}
+                    onSendQueued={sendQueued}
+                    onEditQueued={(item) => { setEditingQueued(item); setQueuedText(item.text) }}
+                    onDeleteQueued={deleteQueued}
                     onOpen={() => navigate('/chat/' + encodeURIComponent(session.id) + '?agent_id=' + encodeURIComponent(session.agent_id))}
                     onRemove={() => removeFromMonitor(key)}
                   />
@@ -1257,6 +1407,11 @@ export function MonitorPage() {
                   gridColumns={gridColumns}
                   isDropTarget={isOverTarget}
                   isFocused={false}
+                  queuedItems={queuedCommandsBySession.get(key) || []}
+                  queueBusyId={queueBusyId}
+                  onSendQueued={sendQueued}
+                  onEditQueued={(item) => { setEditingQueued(item); setQueuedText(item.text) }}
+                  onDeleteQueued={deleteQueued}
                   onToggleFocus={() => setFocusedKey(key)}
                   onOpen={() => navigate('/chat/' + encodeURIComponent(session.id) + '?agent_id=' + encodeURIComponent(session.agent_id))}
                   onRemove={() => removeFromMonitor(key)}
@@ -1284,6 +1439,11 @@ export function MonitorPage() {
               slotIndex={-1}
               slotSize={{ height: 820 }}
               isFocused={true}
+              queuedItems={queuedCommandsBySession.get(scopeKey(focusedSession.agent_id, focusedSession.id)) || []}
+              queueBusyId={queueBusyId}
+              onSendQueued={sendQueued}
+              onEditQueued={(item) => { setEditingQueued(item); setQueuedText(item.text) }}
+              onDeleteQueued={deleteQueued}
               onToggleFocus={() => setFocusedKey(null)}
               onOpen={() => navigate('/chat/' + encodeURIComponent(focusedSession.id) + '?agent_id=' + encodeURIComponent(focusedSession.agent_id))}
             />

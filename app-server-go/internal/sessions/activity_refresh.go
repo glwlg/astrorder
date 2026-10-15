@@ -132,6 +132,7 @@ func (h *Handler) refreshAgentActivity(ctx context.Context, agent map[string]any
 var codexThreadQueries = []string{
 	`{"modelProviders":[]}`,
 	`{"modelProviders":[],"sourceKinds":["cli","vscode","exec"]}`,
+	`{"modelProviders":[],"sourceKinds":["appServer","subAgent","subAgentReview","subAgentCompact","subAgentThreadSpawn","subAgentOther","unknown"]}`,
 }
 
 // codexThreads reads every thread/list page of every query and merges them by id.

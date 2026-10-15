@@ -3,7 +3,7 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $ExpectedBufVersion = '1.66.1'
-$ExpectedGoVersion = 'go1.27.0'
+$ExpectedGoVersion = 'go1.27.2'
 $ExpectedProtocGenGoVersion = 'v1.36.12'
 $ExpectedProtocGenGoGrpcVersion = '1.6.2'
 $ExpectedGrpcToolsVersion = '1.84.0'
@@ -154,7 +154,7 @@ try {
     Invoke-Native 'Contract vet' $contractsDir $go @('vet', './...')
     Invoke-Native 'Session Daemon tests' $daemonDir $go @('test', './...', '-count=1')
     Invoke-Native 'Session Daemon vet' $daemonDir $go @('vet', './...')
-    Invoke-Native 'App Server tests' $appDir $go @('test', './...', '-count=1')
+    Invoke-Native 'App Server tests' $appDir $go @('test', '-p', '1', './...', '-count=1')
     Invoke-Native 'App Server vet' $appDir $go @('vet', './...')
 
     Invoke-Native 'Build astrorder-sessiond.exe' $daemonDir $go @('build', '-trimpath', '-o', (Join-Path $partialDir 'astrorder-sessiond.exe'), './cmd/astrorder-sessiond')

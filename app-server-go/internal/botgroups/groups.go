@@ -64,6 +64,12 @@ type Message struct {
 	Mentions   []string `json:"mentions"`
 	HopCount   int      `json:"hop_count"`
 	CreatedAt  string   `json:"created_at"`
+	SessionID  string   `json:"session_id,omitempty"`
+	NativeIDs  []string `json:"native_ids,omitempty"`
+}
+type Reply struct {
+	Text      string
+	NativeIDs []string
 }
 type Turn struct {
 	GroupID   string
@@ -77,8 +83,12 @@ type Turn struct {
 // Controller binds one exact session and returns a completed native reply.
 // Interrupt is called only by an explicit group stop or deletion.
 type Controller interface {
-	Run(context.Context, Turn, func(string) error) (string, error)
+	Run(context.Context, Turn, func(string) error) (Reply, error)
 	Interrupt(context.Context, Turn) error
+}
+
+type replyReader interface {
+	ReadReply(context.Context, string, string, []string) (string, error)
 }
 type Publisher interface{ PublishCommitted([]store.Event) }
 type Options struct {
@@ -323,7 +333,25 @@ func (s *Service) messages(ctx context.Context, id string) ([]Message, error) {
 			return nil, err
 		}
 	}
-	return messages, nil
+	resolved := make([]Message, 0, len(messages))
+	for _, message := range messages {
+		if message.SenderType == "agent" {
+			// Legacy copied replies are no longer a history source.
+			if message.SessionID == "" || len(message.NativeIDs) == 0 {
+				continue
+			}
+			reader, ok := s.options.Controller.(replyReader)
+			if !ok {
+				return nil, errors.New("native group history is unavailable")
+			}
+			message.Text, err = reader.ReadReply(ctx, message.SenderID, message.SessionID, message.NativeIDs)
+			if err != nil {
+				return nil, err
+			}
+		}
+		resolved = append(resolved, message)
+	}
+	return resolved, nil
 }
 func readGroupTx(ctx context.Context, tx *sql.Tx, id string) (Group, error) {
 	var raw string
@@ -360,6 +388,9 @@ func appendEventTx(ctx context.Context, tx *sql.Tx, kind string, value any) (sto
 	id, err := randomID("group-event-")
 	if err != nil {
 		return store.Event{}, err
+	}
+	if store.IsTransientEvent(kind) {
+		return store.Event{ID: id, Type: kind, Data: data}, nil
 	}
 	result, err := tx.ExecContext(ctx, `INSERT INTO events(event_id,type,agent_id,session_id,data,created_at)VALUES(?,?,NULL,NULL,?,?)`, id, kind, string(body), now())
 	if err != nil {
@@ -585,7 +616,11 @@ func (s *Service) appendMessage(ctx context.Context, message Message) error {
 				return err
 			}
 		}
-		messages = append(messages, message)
+		persisted := message
+		if persisted.SenderType == "agent" {
+			persisted.Text = ""
+		}
+		messages = append(messages, persisted)
 		if err = putTx(ctx, tx, "bot_group_msgs:"+message.GroupID, messages); err != nil {
 			return err
 		}
@@ -737,7 +772,7 @@ func (s *Service) dispatch(id string, member Member, text string, hop int) {
 				turn.Prompt = strings.Join(lines, "\n")
 			}
 		}
-		var reply string
+		var reply Reply
 		if err == nil {
 			reply, err = s.options.Controller.Run(ctx, turn, func(session string) error {
 				s.mu.Lock()
@@ -775,7 +810,7 @@ func (s *Service) dispatch(id string, member Member, text string, hop int) {
 		if err != nil {
 			state.Status = "failed"
 			state.LastError = err.Error()
-			reply = "执行失败：" + err.Error()
+			reply.Text = "执行失败：" + err.Error()
 		}
 		messageID, idErr := randomID("gmsg-")
 		if idErr == nil {
@@ -783,7 +818,10 @@ func (s *Service) dispatch(id string, member Member, text string, hop int) {
 			if member.Name != nil {
 				name = *member.Name
 			}
-			message := Message{ID: messageID, GroupID: id, SenderType: "agent", SenderID: member.AgentID, SenderName: name, Text: reply, Mentions: Mentions(reply, g.Members), HopCount: hop, CreatedAt: now()}
+			message := Message{ID: messageID, GroupID: id, SenderType: "agent", SenderID: member.AgentID, SenderName: name, Text: reply.Text, Mentions: Mentions(reply.Text, g.Members), HopCount: hop, CreatedAt: now(), SessionID: sessionID, NativeIDs: reply.NativeIDs}
+			if err != nil {
+				message.SenderType = "system"
+			}
 			if message.Text != "" {
 				if appendErr := s.appendMessage(s.ctx, message); appendErr != nil {
 					state.Status = "failed"
@@ -816,11 +854,11 @@ func (s *Service) dispatch(id string, member Member, text string, hop int) {
 		if updateErr != nil || err != nil || hop >= g.MaxHops {
 			return
 		}
-		for _, target := range Mentions(reply, g.Members) {
+		for _, target := range Mentions(reply.Text, g.Members) {
 			if target != member.AgentID {
 				for _, m := range g.Members {
 					if m.AgentID == target {
-						s.dispatch(id, m, reply, hop+1)
+						s.dispatch(id, m, reply.Text, hop+1)
 					}
 				}
 			}

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"astrorder.dev/app-server/internal/blackboard"
+	"astrorder.dev/app-server/internal/sessions"
 	sessiondv1 "astrorder.dev/contracts/gen/go/astrorder/sessiond/v1"
 )
 
@@ -486,8 +487,23 @@ func (h *Handler) invokeSessionsRead(ctx context.Context, payload map[string]any
 		beforeStr = &trimmed
 	}
 
-	var items []map[string]any
+	items := []map[string]any{}
 	var nextCursor any
+	nativeRead := false
+	nativeID, _ := sess["source_session_id"].(string)
+	if nativeID == "" {
+		nativeID = sessionID
+	}
+	connectionID, _ := sess["connection_id"].(string)
+	source, _ := sess["source_id"].(string)
+	if source == "" {
+		source = agentID
+	}
+	agent, err := h.options.Store.GetAgent(ctx, agentID)
+	if err != nil {
+		return nil, err
+	}
+	kind, _ := agent["kind"].(string)
 
 	// Try reading via gRPC Runtime.GetHistoryPage if Client is present
 	if h.options.Client != nil && h.options.Client.Runtime != nil {
@@ -495,20 +511,27 @@ func (h *Handler) invokeSessionsRead(ctx context.Context, payload map[string]any
 		if beforeStr != nil {
 			reqBefore = &sessiondv1.NullableString{State: &sessiondv1.NullableString_Value{Value: *beforeStr}}
 		}
+		ref := buildSessionRef(agentID, nativeID, connectionID)
 		resp, rErr := h.options.Client.Runtime.GetHistoryPage(ctx, &sessiondv1.HistoryPageRequest{
-			Session: &sessiondv1.SessionRef{
-				SessionId: sessionID,
-				AgentId:   &agentID,
-			},
-			Limit:  uint32(limit),
-			Before: reqBefore,
+			Session: ref,
+			Limit:   uint32(limit),
+			Before:  reqBefore,
 		})
 		if rErr == nil && resp != nil {
+			if resp.Session == nil || resp.Session.SessionId != ref.SessionId || resp.Session.GetAgentId() != ref.GetAgentId() || resp.Session.GetConnectionId() != ref.GetConnectionId() {
+				return nil, NewAgentApiError("runtime_error", "Native history identity mismatch")
+			}
+			nativeRead = true
 			for _, it := range resp.Items {
 				if it != nil && it.Utf8Json != nil {
 					var itemMap map[string]any
-					if json.Unmarshal(it.Utf8Json, &itemMap) == nil {
-						items = append(items, publicMessage(itemMap))
+					decoder := json.NewDecoder(strings.NewReader(string(it.Utf8Json)))
+					decoder.UseNumber()
+					if err := decoder.Decode(&itemMap); err != nil {
+						return nil, NewAgentApiError("runtime_error", "Invalid native history item")
+					}
+					for _, projected := range sessions.ProjectNativeHistoryItem(itemMap, agentID, sessionID, nativeID, source, kind) {
+						items = append(items, publicMessage(projected))
 					}
 				}
 			}
@@ -518,21 +541,8 @@ func (h *Handler) invokeSessionsRead(ctx context.Context, payload map[string]any
 		}
 	}
 
-	// Fallback to store.ListMessages
-	if len(items) == 0 {
-		b := ""
-		if beforeStr != nil {
-			b = *beforeStr
-		}
-		stored, cursor, lErr := h.options.Store.ListMessages(ctx, agentID, sessionID, b, limit)
-		if lErr == nil {
-			for _, m := range stored {
-				items = append(items, publicMessage(m))
-			}
-			if cursor != "" {
-				nextCursor = cursor
-			}
-		}
+	if !nativeRead {
+		return nil, NewAgentApiError("runtime_error", "Native history is unavailable")
 	}
 
 	return map[string]any{
@@ -701,7 +711,7 @@ func (h *Handler) invokeSessionsCreate(ctx context.Context, payload map[string]a
 		if cErr != nil {
 			return nil, NewAgentApiError("command_rejected", cErr.Error())
 		}
-		if receipt == nil || !receipt.Accepted || receipt.Session == nil || receipt.Session.SessionId == "" {
+		if receipt == nil || receipt.OperationState != sessiondv1.OperationState_OPERATION_STATE_COMPLETED || receipt.GetCompleted() == nil || receipt.Session == nil || receipt.Session.SessionId == "" {
 			return nil, NewAgentApiError("command_rejected", "daemon rejected session creation")
 		}
 		if receipt.Session.AgentId != nil && *receipt.Session.AgentId != "" && *receipt.Session.AgentId != agentID {

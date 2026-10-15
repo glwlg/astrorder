@@ -41,9 +41,9 @@ type RefreshSessionStatusExpectation struct {
 // composite session. The row is re-read and its binding re-checked inside the
 // write transaction, so a deletion or rebinding that raced the caller's
 // authority read is rejected instead of overwritten: a deleted row is never
-// resurrected, a rebound row is never touched, and only status and updated_at
-// are written, so concurrent metadata edits (title, workspace, project,
-// source) survive by construction. The UPDATE always targets the exact
+// resurrected, a rebound row is never touched, and only status is written.
+// Reconciliation preserves activity time and concurrent metadata edits
+// (title, workspace, project, source). The UPDATE always targets the exact
 // (agent_id, id) composite key, never a source identity.
 func (s *Store) RefreshSessionStatus(ctx context.Context, agentID, sessionID string, expect RefreshSessionStatusExpectation, status string) (map[string]any, RefreshSessionStatusOutcome, error) {
 	if strings.TrimSpace(agentID) == "" || strings.TrimSpace(sessionID) == "" {
@@ -77,8 +77,8 @@ func (s *Store) RefreshSessionStatus(ctx context.Context, agentID, sessionID str
 			row, err = sessionWire(rows[0])
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, "UPDATE sessions SET status=?,updated_at=? WHERE agent_id=? AND id=?",
-			status, nowDatabaseTime(), agentID, sessionID); err != nil {
+		if _, err := tx.ExecContext(ctx, "UPDATE sessions SET status=? WHERE agent_id=? AND id=?",
+			status, agentID, sessionID); err != nil {
 			return err
 		}
 		rows, err = queryRows(ctx, tx, "SELECT * FROM sessions WHERE agent_id=? AND id=?", agentID, sessionID)

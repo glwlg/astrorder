@@ -1,8 +1,12 @@
 package sessions
 
 import (
+	"astrorder.dev/app-server/internal/projection"
+	"astrorder.dev/app-server/internal/store"
 	pb "astrorder.dev/contracts/gen/go/astrorder/sessiond/v1"
+	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -28,6 +32,7 @@ func (h *Handler) handleListMessages(w http.ResponseWriter, r *http.Request, sid
 		writeJSONError(w, 404, "Session was not found")
 		return
 	}
+	defer h.repairSessionTitles(ctx, []map[string]any{row})
 	limit := 50
 	if value := r.URL.Query().Get("limit"); value != "" {
 		limit, err = strconv.Atoi(value)
@@ -41,37 +46,7 @@ func (h *Handler) handleListMessages(w http.ResponseWriter, r *http.Request, sid
 		writeJSONError(w, 422, "Invalid history cursor")
 		return
 	}
-	if row["history_state"] == "local" && row["control_state"] == "unknown" {
-		items, next, err := h.store.ListMessages(ctx, aid, sid, before, limit)
-		if err != nil {
-			writeJSONError(w, 400, "Invalid history cursor")
-			return
-		}
-		var cursor any
-		if next != "" {
-			cursor = next
-		}
-		writeJSON(w, 200, map[string]any{"items": items, "next_cursor": cursor})
-		return
-	}
-
-	fallbackToStore := func() bool {
-		items, next, storeErr := h.store.ListMessages(ctx, aid, sid, before, limit)
-		if storeErr == nil {
-			var cursor any
-			if next != "" {
-				cursor = next
-			}
-			writeJSON(w, 200, map[string]any{"items": items, "next_cursor": cursor})
-			return true
-		}
-		return false
-	}
-
-	if h.client == nil {
-		if fallbackToStore() {
-			return
-		}
+	if h.client == nil || h.client.Runtime == nil {
 		writeJSONError(w, 503, "Native history is unavailable")
 		return
 	}
@@ -98,9 +73,6 @@ func (h *Handler) handleListMessages(w http.ResponseWriter, r *http.Request, sid
 		} else {
 			logUnboundHistory(row, err, readErr)
 		}
-		if fallbackToStore() {
-			return
-		}
 		writeJSONError(w, 503, "Native session binding unavailable: "+err.Error())
 		return
 	}
@@ -116,16 +88,10 @@ func (h *Handler) handleListMessages(w http.ResponseWriter, r *http.Request, sid
 		} else {
 			logUnboundHistory(row, err, readErr)
 		}
-		if fallbackToStore() {
-			return
-		}
 		writeJSONError(w, 503, "Native history read failed")
 		return
 	}
 	if page == nil || page.Session == nil || page.Session.SessionId != nativeID || page.Session.GetAgentId() != aid || page.Session.GetConnectionId() != request.Session.GetConnectionId() {
-		if fallbackToStore() {
-			return
-		}
 		writeJSONError(w, 502, "Native history identity mismatch")
 		return
 	}
@@ -139,6 +105,20 @@ func (h *Handler) handleListMessages(w http.ResponseWriter, r *http.Request, sid
 		return
 	}
 	kind := stringValue(agent, "kind")
+	if kind == "codex" {
+		// History is chronological; restore newest child snapshots first.
+		for i := len(page.Items) - 1; i >= 0; i-- {
+			var item map[string]any
+			if err := parseNativeJSON(page.Items[i], &item); err != nil {
+				writeJSONError(w, 502, "Invalid native history item")
+				return
+			}
+			if err := h.restoreNativeTaskItem(ctx, aid, sid, item); err != nil {
+				writeJSONError(w, 500, "Native task projection failed")
+				return
+			}
+		}
+	}
 	items := []map[string]any{}
 	for _, native := range page.Items {
 		var item map[string]any
@@ -149,19 +129,10 @@ func (h *Handler) handleListMessages(w http.ResponseWriter, r *http.Request, sid
 		items = append(items, projectHistoryItem(item, aid, sid, nativeID, source, kind)...)
 	}
 	for _, item := range items {
-		previous, err := h.store.GetMessage(ctx, aid, sid, stringValue(item, "id"))
-		if err != nil {
-			writeJSONError(w, 500, "History projection read failed")
-			return
+		if item["role"] == "user" {
+			h.ensureSessionTitle(ctx, row, stringValue(item, "text"))
+			break
 		}
-		if previous != nil {
-			item["attachments"] = previous["attachments"]
-			item["command_id"] = previous["command_id"]
-		}
-	}
-	if _, err = h.store.UpsertMessages(ctx, items); err != nil {
-		writeJSONError(w, 500, "History projection failed")
-		return
 	}
 	var next any
 	if page.NextCursor != nil {
@@ -193,25 +164,28 @@ func historyText(value any) string {
 	return string(raw)
 }
 func projectHistoryItem(item map[string]any, aid, sid, nativeID, source, agentKind string) []map[string]any {
+	turnID := stringValue(item, "turnId")
 	if nested, ok := item["item"].(map[string]any); ok {
 		item = nested
 	}
 	role := stringValue(item, "role")
 	kind := "message"
-	if role == "" {
+	if agentKind == "codex" || role == "" {
 		switch stringValue(item, "type") {
 		case "userMessage":
 			role = "user"
 		case "reasoning":
 			role = "assistant"
 			kind = "thinking"
-		case "agentMessage":
+		case "agentMessage", "plan":
 			role = "assistant"
-		case "commandExecution", "fileChange", "mcpToolCall", "webSearch":
+		case "commandExecution", "fileChange", "mcpToolCall", "webSearch", "dynamicToolCall", "collabAgentToolCall", "subAgentActivity":
 			role = "tool"
 			kind = "tool"
 		default:
-			role = "system"
+			if role == "" {
+				role = "system"
+			}
 		}
 	}
 	identity := item["row_id"]
@@ -272,6 +246,12 @@ func projectHistoryItem(item map[string]any, aid, sid, nativeID, source, agentKi
 		}
 	}
 	row := map[string]any{"id": key, "agent_id": aid, "session_id": sid, "role": role, "kind": kind, "text": text, "attachments": []any{}, "created_at": created, "command_id": nil, "tool": item["tool"]}
+	if turnID != "" && (agentKind == "codex" || agentKind == "codex-ssh") {
+		row["turn_id"] = turnID
+	}
+	if (agentKind == "codex" || agentKind == "codex-ssh") && role == "user" {
+		row["attachments"] = projection.CodexUserAttachments(item["content"], sid, key)
+	}
 	if kind == "tool" {
 		if tool, output := codexToolFromItem(item); tool != nil {
 			row["tool"] = tool
@@ -288,4 +268,20 @@ func projectHistoryItem(item map[string]any, aid, sid, nativeID, source, agentKi
 		row["tool"] = map[string]any{"name": name, "arguments": item["args"]}
 	}
 	return []map[string]any{row}
+}
+
+func (h *Handler) restoreNativeTaskItem(ctx context.Context, aid, sid string, item map[string]any) error {
+	var events []store.Event
+	err := h.store.WithTx(ctx, func(tx *sql.Tx) error {
+		var err error
+		events, err = projection.RestoreNativeTaskItemTx(ctx, tx, sid, aid, item)
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	for _, event := range events {
+		h.publishEvent(ctx, event.Type, event.Data)
+	}
+	return nil
 }

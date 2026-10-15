@@ -77,5 +77,8 @@ func (a *Adapter) historyPage(ctx context.Context, rt *Runtime, r core.Request) 
 		}
 		next = token
 	}
+	if before == "" {
+		rt.refreshGoal(ctx, r.SessionID)
+	}
 	return core.Result{SessionID: r.SessionID, Status: rt.Status(), Payload: map[string]any{"items": items, "next_cursor": next, "has_more": next != nil, "native": response}}, nil
 }

@@ -2,10 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { ActionIcon, Button, Group, LoadingOverlay, Paper, Text, Tooltip } from '@mantine/core'
 import { IconDeviceFloppy, IconDownload, IconRefresh } from '@tabler/icons-react'
 import type { ViewerContext } from '../../types'
+import { authenticatedApiFetch } from '../../../../api/client'
 
 const EXCALIDRAW_ORIGIN = 'https://excalidraw.com'
 
-export function ExcalidrawViewer({ artifact, onSave, onDirtyChange, toolbarAction }: ViewerContext) {
+export function ExcalidrawViewer({ artifact, onSave, onDirtyChange, toolbarAction, isActive = true }: ViewerContext) {
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const onDirtyChangeRef = useRef(onDirtyChange)
   onDirtyChangeRef.current = onDirtyChange
@@ -19,7 +20,7 @@ export function ExcalidrawViewer({ artifact, onSave, onDirtyChange, toolbarActio
   const fetchContent = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await fetch(artifact.readUrl)
+      const res = await authenticatedApiFetch(artifact.readUrl)
       if (res.ok) {
         const text = await res.text()
         setFileData(text)
@@ -54,6 +55,7 @@ export function ExcalidrawViewer({ artifact, onSave, onDirtyChange, toolbarActio
 
   // 监听 Ctrl+S 快捷键保存
   useEffect(() => {
+    if (!isActive) return
     const onKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
         e.preventDefault()
@@ -67,7 +69,7 @@ export function ExcalidrawViewer({ artifact, onSave, onDirtyChange, toolbarActio
     return () => {
       window.removeEventListener('keydown', onKeyDown, { capture: true })
     }
-  }, [dirty, saving, handleSave])
+  }, [dirty, saving, handleSave, isActive])
 
   return (
     <div className="excalidraw-viewer-pane" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>

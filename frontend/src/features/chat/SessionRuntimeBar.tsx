@@ -4,6 +4,8 @@ import { useState } from 'react'
 import { useReducedMotion } from '@mantine/hooks'
 import { AnimatePresence, motion } from 'motion/react'
 import type { Command, Task } from '../../domain/types'
+import { BackgroundTaskTerminal } from './BackgroundTaskTerminal'
+import { isGoalTask } from './goalStatus'
 
 const taskStatusLabels: Record<Task['status'], string> = {
   pending: '等待中', running: '运行中', waiting_approval: '待审批',
@@ -21,28 +23,31 @@ function SummaryItem({ icon, label, value, onClick }: { icon: React.ReactNode; l
   )
 }
 
-export function SessionRuntimeBar({ commands, tasks = [], onTaskOpen }: { commands: Command[]; tasks?: Task[]; onTaskOpen?: (task: Task) => void }) {
+export function SessionRuntimeBar({ commands, tasks = [], onTaskOpen, backgroundError }: { commands: Command[]; tasks?: Task[]; onTaskOpen?: (task: Task) => void; backgroundError?: string | null }) {
   const reducedMotion = useReducedMotion(undefined, { getInitialValueInEffect: false })
   const backgroundTasks = tasks.filter((task) => task.kind === 'background' && task.status === 'running')
-  const todos = tasks.filter((task) => task.kind === 'todo' && task.status !== 'cancelled')
+  const todos = tasks.filter((task) => task.kind === 'todo' && task.status !== 'cancelled' && !isGoalTask(task))
   const subagents = tasks.filter((task) => task.kind === 'subagent')
   const details = [...backgroundTasks, ...todos, ...subagents]
-  const otherDetails = [...backgroundTasks, ...todos]
+  const otherDetails = todos
   const summary = {
     backgroundTasks: backgroundTasks.length ? `${backgroundTasks.length} 个运行中` : null,
     todo: todos.length ? `${todos.filter((task) => task.status === 'completed').length} / ${todos.length}` : null,
     subagents: subagents.length ? `${subagents.filter((task) => ['running', 'pending', 'waiting_approval'].includes(task.status)).length} 个活动 / ${subagents.length} 个` : null,
+
   }
   const queued = commands.filter((command) => command.state === 'queued').length
   const [expanded, setExpanded] = useState(false)
-  if (!summary.backgroundTasks && !summary.todo && !summary.subagents && queued === 0) return null
+  const [openTaskId, setOpenTaskId] = useState<string | null>(null)
+  if (details.length === 0 && queued === 0 && !backgroundError) return null
   return (
     <Paper className="runtime-summary-bar" withBorder radius="lg" p="sm" aria-label="运行摘要">
       <Group justify="space-between" align="flex-start" gap="sm" wrap="wrap">
         <SimpleGrid className="runtime-summary-grid" cols={{ base: 2, sm: 3 }} spacing="sm">
-          <SummaryItem icon={<IconPlayerPlay size={15} />} label="后台任务" value={summary.backgroundTasks} onClick={() => setExpanded(true)} />
+          <SummaryItem icon={<IconPlayerPlay size={15} />} label="后台任务" value={summary.backgroundTasks} onClick={() => { setExpanded(value => !value); if (backgroundTasks.length === 1) setOpenTaskId(backgroundTasks[0].id) }} />
           <SummaryItem icon={<IconListCheck size={15} />} label="待办" value={summary.todo} onClick={() => setExpanded(true)} />
           <SummaryItem icon={<IconUsersGroup size={15} />} label="子代理" value={summary.subagents} onClick={() => setExpanded(true)} />
+
         </SimpleGrid>
         <Group gap="xs" wrap="nowrap">
           {queued > 0 && <Badge color="yellow" variant="light">{queued} 个排队</Badge>}
@@ -58,6 +63,7 @@ export function SessionRuntimeBar({ commands, tasks = [], onTaskOpen }: { comman
           </Button>}
         </Group>
       </Group>
+      {backgroundError && <Text size="xs" c="red" role="alert">后台任务状态暂不可用：{backgroundError}</Text>}
       <AnimatePresence initial={false}>
         {expanded && details.length > 0 && <motion.div
           id="runtime-summary-details"
@@ -69,6 +75,13 @@ export function SessionRuntimeBar({ commands, tasks = [], onTaskOpen }: { comman
           transition={{ duration: 0.3, ease: [0.2, 0.8, 0.2, 1] }}
         >
           <Stack gap="xs" mt="sm">
+            {backgroundTasks.map(task => <div key={task.id} className="background-task-entry">
+              <button type="button" className="background-task-row" aria-expanded={openTaskId === task.id} aria-label={task.title || task.target_id || '后台任务'} onClick={() => setOpenTaskId(current => current === task.id ? null : task.id)}>
+                {openTaskId === task.id ? <IconChevronUp size={15} /> : <IconChevronDown size={15} />}
+                <span>{task.title || task.target_id}</span><Badge color="green" variant="light">运行中</Badge>
+              </button>
+              {openTaskId === task.id && <BackgroundTaskTerminal task={task} />}
+            </div>)}
             {otherDetails.map((task) => (
               <Group key={task.id} className="runtime-summary-detail" justify="space-between" gap="sm" wrap="wrap">
                 <Badge variant="outline" color="blue">{taskStatusLabels[task.status]}</Badge>

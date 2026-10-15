@@ -114,6 +114,11 @@ func (s *Store) ReplayEvents(ctx context.Context, after int64) (bool, []Event, e
 		if err != nil {
 			return false, nil, err
 		}
+		if IsTransientEvent(event.Type) {
+			// Advance across legacy rows without replaying their transcript copies.
+			event.Type = "event.cursor"
+			event.Data = map[string]any{}
+		}
 		result = append(result, event)
 	}
 	return false, result, nil
@@ -223,6 +228,10 @@ VALUES(?,?,?,?) ON CONFLICT(daemon_id,session_id) DO UPDATE SET seq_id=excluded.
 func insertEventTx(ctx context.Context, tx *sql.Tx, event Event, retention int64) (*Event, error) {
 	if event.ID == "" || event.Type == "" {
 		return nil, errors.New("event ID and type are required")
+	}
+	if IsTransientEvent(event.Type) {
+		event.Cursor = 0
+		return &event, nil
 	}
 	var count int
 	var err error

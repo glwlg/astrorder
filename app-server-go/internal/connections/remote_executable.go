@@ -37,6 +37,7 @@ const (
 const remoteExecutableProbeBody = `p=$(command -v "$k" 2>/dev/null); ` +
 	`if [ -z "$p" ]; then for c in "$HOME/.local/bin/$k" "$HOME/bin/$k" "$HOME/.vite-plus/bin/$k"; do if [ -x "$c" ]; then p="$c"; break; fi; done; fi; ` +
 	`if [ -z "$p" ] && [ "$k" = codex ]; then for c in "$HOME"/.nvm/versions/node/*/bin/codex; do if [ -x "$c" ]; then p="$c"; fi; done; fi; ` +
+	`if [ -z "$p" ] && [ "$k" = hermes ] && [ -x "$HOME/.hermes/hermes-agent/venv/bin/hermes" ]; then p="$HOME/.hermes/hermes-agent/venv/bin/hermes"; fi; ` +
 	`if [ -z "$p" ] && [ "$k" = grok ] && [ -x "$HOME/.grok/bin/grok" ]; then p="$HOME/.grok/bin/grok"; fi; ` +
 	`if [ -n "$p" ] && [ -x "$p" ]; then case "$p" in /*) printf '%s\n' "$p";; esac; fi`
 

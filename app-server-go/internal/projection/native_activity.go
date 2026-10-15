@@ -76,6 +76,16 @@ func projectNativeActivity(ctx context.Context, tx *sql.Tx, streamID, agentID st
 	}
 	var events []store.Event
 	for _, row := range rows {
+		// Hook activity announces changed native history independently of the
+		// session timestamp. A native tick may already have advanced that clock.
+		if hook, _ := payload["hook_event"].(string); hook != "" {
+			id := fmt.Sprint(row["id"])
+			events = append(events, store.Event{
+				ID:   fmt.Sprintf("hook-transcript-%s-%d", id, time.Now().UnixNano()),
+				Type: "transcript.invalidate", AgentID: agentID, SessionID: id,
+				Data: map[string]any{"hook_event": hook},
+			})
+		}
 		current, err := store.ParseTime(row["updated_at"])
 		if err == nil && !observed.After(current) {
 			continue

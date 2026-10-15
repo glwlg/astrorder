@@ -21,7 +21,7 @@ type service struct {
 func (service *service) GetCapabilities(context.Context, *sessiondv1.GetCapabilitiesRequest) (*sessiondv1.GetCapabilitiesResponse, error) {
 	return &sessiondv1.GetCapabilitiesResponse{
 		ProtocolMajor: 1,
-		ProtocolMinor: 0,
+		ProtocolMinor: 1, // idle_only send admission is enforced by native adapters.
 		DaemonId:      service.daemon.DaemonID(),
 		Services: []string{
 			"astrorder.sessiond.v1.ConnectorIngress",

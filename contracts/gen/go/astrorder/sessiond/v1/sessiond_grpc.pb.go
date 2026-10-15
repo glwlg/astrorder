@@ -869,16 +869,19 @@ var SessionControl_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	RuntimeQuery_QueryNative_FullMethodName       = "/astrorder.sessiond.v1.RuntimeQuery/QueryNative"
-	RuntimeQuery_GetHistoryPage_FullMethodName    = "/astrorder.sessiond.v1.RuntimeQuery/GetHistoryPage"
-	RuntimeQuery_ListModels_FullMethodName        = "/astrorder.sessiond.v1.RuntimeQuery/ListModels"
-	RuntimeQuery_ListCommands_FullMethodName      = "/astrorder.sessiond.v1.RuntimeQuery/ListCommands"
-	RuntimeQuery_ReadModel_FullMethodName         = "/astrorder.sessiond.v1.RuntimeQuery/ReadModel"
-	RuntimeQuery_SetModel_FullMethodName          = "/astrorder.sessiond.v1.RuntimeQuery/SetModel"
-	RuntimeQuery_SetReasoning_FullMethodName      = "/astrorder.sessiond.v1.RuntimeQuery/SetReasoning"
-	RuntimeQuery_ReadApprovalMode_FullMethodName  = "/astrorder.sessiond.v1.RuntimeQuery/ReadApprovalMode"
-	RuntimeQuery_SetApprovalMode_FullMethodName   = "/astrorder.sessiond.v1.RuntimeQuery/SetApprovalMode"
-	RuntimeQuery_DisconnectRuntime_FullMethodName = "/astrorder.sessiond.v1.RuntimeQuery/DisconnectRuntime"
+	RuntimeQuery_QueryNative_FullMethodName             = "/astrorder.sessiond.v1.RuntimeQuery/QueryNative"
+	RuntimeQuery_GetHistoryPage_FullMethodName          = "/astrorder.sessiond.v1.RuntimeQuery/GetHistoryPage"
+	RuntimeQuery_ListBackgroundProcesses_FullMethodName = "/astrorder.sessiond.v1.RuntimeQuery/ListBackgroundProcesses"
+	RuntimeQuery_ListModels_FullMethodName              = "/astrorder.sessiond.v1.RuntimeQuery/ListModels"
+	RuntimeQuery_ListCommands_FullMethodName            = "/astrorder.sessiond.v1.RuntimeQuery/ListCommands"
+	RuntimeQuery_ReadModel_FullMethodName               = "/astrorder.sessiond.v1.RuntimeQuery/ReadModel"
+	RuntimeQuery_SetModel_FullMethodName                = "/astrorder.sessiond.v1.RuntimeQuery/SetModel"
+	RuntimeQuery_SetReasoning_FullMethodName            = "/astrorder.sessiond.v1.RuntimeQuery/SetReasoning"
+	RuntimeQuery_SetGoal_FullMethodName                 = "/astrorder.sessiond.v1.RuntimeQuery/SetGoal"
+	RuntimeQuery_ClearGoal_FullMethodName               = "/astrorder.sessiond.v1.RuntimeQuery/ClearGoal"
+	RuntimeQuery_ReadApprovalMode_FullMethodName        = "/astrorder.sessiond.v1.RuntimeQuery/ReadApprovalMode"
+	RuntimeQuery_SetApprovalMode_FullMethodName         = "/astrorder.sessiond.v1.RuntimeQuery/SetApprovalMode"
+	RuntimeQuery_DisconnectRuntime_FullMethodName       = "/astrorder.sessiond.v1.RuntimeQuery/DisconnectRuntime"
 )
 
 // RuntimeQueryClient is the client API for RuntimeQuery service.
@@ -887,11 +890,14 @@ const (
 type RuntimeQueryClient interface {
 	QueryNative(ctx context.Context, in *NativeQueryRequest, opts ...grpc.CallOption) (*NativeQueryResponse, error)
 	GetHistoryPage(ctx context.Context, in *HistoryPageRequest, opts ...grpc.CallOption) (*HistoryPageResponse, error)
+	ListBackgroundProcesses(ctx context.Context, in *ListBackgroundProcessesRequest, opts ...grpc.CallOption) (*ListBackgroundProcessesResponse, error)
 	ListModels(ctx context.Context, in *ListModelsRequest, opts ...grpc.CallOption) (*ListModelsResponse, error)
 	ListCommands(ctx context.Context, in *ListCommandsRequest, opts ...grpc.CallOption) (*ListCommandsResponse, error)
 	ReadModel(ctx context.Context, in *ReadModelRequest, opts ...grpc.CallOption) (*ModelState, error)
 	SetModel(ctx context.Context, in *SetModelRequest, opts ...grpc.CallOption) (*CommandReceipt, error)
 	SetReasoning(ctx context.Context, in *SetReasoningRequest, opts ...grpc.CallOption) (*CommandReceipt, error)
+	SetGoal(ctx context.Context, in *SetGoalRequest, opts ...grpc.CallOption) (*CommandReceipt, error)
+	ClearGoal(ctx context.Context, in *ClearGoalRequest, opts ...grpc.CallOption) (*CommandReceipt, error)
 	ReadApprovalMode(ctx context.Context, in *ReadApprovalModeRequest, opts ...grpc.CallOption) (*ApprovalModeState, error)
 	SetApprovalMode(ctx context.Context, in *SetApprovalModeRequest, opts ...grpc.CallOption) (*CommandReceipt, error)
 	DisconnectRuntime(ctx context.Context, in *DisconnectRuntimeRequest, opts ...grpc.CallOption) (*DisconnectRuntimeResponse, error)
@@ -919,6 +925,16 @@ func (c *runtimeQueryClient) GetHistoryPage(ctx context.Context, in *HistoryPage
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(HistoryPageResponse)
 	err := c.cc.Invoke(ctx, RuntimeQuery_GetHistoryPage_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *runtimeQueryClient) ListBackgroundProcesses(ctx context.Context, in *ListBackgroundProcessesRequest, opts ...grpc.CallOption) (*ListBackgroundProcessesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListBackgroundProcessesResponse)
+	err := c.cc.Invoke(ctx, RuntimeQuery_ListBackgroundProcesses_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -975,6 +991,26 @@ func (c *runtimeQueryClient) SetReasoning(ctx context.Context, in *SetReasoningR
 	return out, nil
 }
 
+func (c *runtimeQueryClient) SetGoal(ctx context.Context, in *SetGoalRequest, opts ...grpc.CallOption) (*CommandReceipt, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CommandReceipt)
+	err := c.cc.Invoke(ctx, RuntimeQuery_SetGoal_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *runtimeQueryClient) ClearGoal(ctx context.Context, in *ClearGoalRequest, opts ...grpc.CallOption) (*CommandReceipt, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CommandReceipt)
+	err := c.cc.Invoke(ctx, RuntimeQuery_ClearGoal_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *runtimeQueryClient) ReadApprovalMode(ctx context.Context, in *ReadApprovalModeRequest, opts ...grpc.CallOption) (*ApprovalModeState, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ApprovalModeState)
@@ -1011,11 +1047,14 @@ func (c *runtimeQueryClient) DisconnectRuntime(ctx context.Context, in *Disconne
 type RuntimeQueryServer interface {
 	QueryNative(context.Context, *NativeQueryRequest) (*NativeQueryResponse, error)
 	GetHistoryPage(context.Context, *HistoryPageRequest) (*HistoryPageResponse, error)
+	ListBackgroundProcesses(context.Context, *ListBackgroundProcessesRequest) (*ListBackgroundProcessesResponse, error)
 	ListModels(context.Context, *ListModelsRequest) (*ListModelsResponse, error)
 	ListCommands(context.Context, *ListCommandsRequest) (*ListCommandsResponse, error)
 	ReadModel(context.Context, *ReadModelRequest) (*ModelState, error)
 	SetModel(context.Context, *SetModelRequest) (*CommandReceipt, error)
 	SetReasoning(context.Context, *SetReasoningRequest) (*CommandReceipt, error)
+	SetGoal(context.Context, *SetGoalRequest) (*CommandReceipt, error)
+	ClearGoal(context.Context, *ClearGoalRequest) (*CommandReceipt, error)
 	ReadApprovalMode(context.Context, *ReadApprovalModeRequest) (*ApprovalModeState, error)
 	SetApprovalMode(context.Context, *SetApprovalModeRequest) (*CommandReceipt, error)
 	DisconnectRuntime(context.Context, *DisconnectRuntimeRequest) (*DisconnectRuntimeResponse, error)
@@ -1035,6 +1074,9 @@ func (UnimplementedRuntimeQueryServer) QueryNative(context.Context, *NativeQuery
 func (UnimplementedRuntimeQueryServer) GetHistoryPage(context.Context, *HistoryPageRequest) (*HistoryPageResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetHistoryPage not implemented")
 }
+func (UnimplementedRuntimeQueryServer) ListBackgroundProcesses(context.Context, *ListBackgroundProcessesRequest) (*ListBackgroundProcessesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListBackgroundProcesses not implemented")
+}
 func (UnimplementedRuntimeQueryServer) ListModels(context.Context, *ListModelsRequest) (*ListModelsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListModels not implemented")
 }
@@ -1049,6 +1091,12 @@ func (UnimplementedRuntimeQueryServer) SetModel(context.Context, *SetModelReques
 }
 func (UnimplementedRuntimeQueryServer) SetReasoning(context.Context, *SetReasoningRequest) (*CommandReceipt, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetReasoning not implemented")
+}
+func (UnimplementedRuntimeQueryServer) SetGoal(context.Context, *SetGoalRequest) (*CommandReceipt, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetGoal not implemented")
+}
+func (UnimplementedRuntimeQueryServer) ClearGoal(context.Context, *ClearGoalRequest) (*CommandReceipt, error) {
+	return nil, status.Error(codes.Unimplemented, "method ClearGoal not implemented")
 }
 func (UnimplementedRuntimeQueryServer) ReadApprovalMode(context.Context, *ReadApprovalModeRequest) (*ApprovalModeState, error) {
 	return nil, status.Error(codes.Unimplemented, "method ReadApprovalMode not implemented")
@@ -1112,6 +1160,24 @@ func _RuntimeQuery_GetHistoryPage_Handler(srv interface{}, ctx context.Context, 
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(RuntimeQueryServer).GetHistoryPage(ctx, req.(*HistoryPageRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RuntimeQuery_ListBackgroundProcesses_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListBackgroundProcessesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RuntimeQueryServer).ListBackgroundProcesses(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RuntimeQuery_ListBackgroundProcesses_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RuntimeQueryServer).ListBackgroundProcesses(ctx, req.(*ListBackgroundProcessesRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1206,6 +1272,42 @@ func _RuntimeQuery_SetReasoning_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RuntimeQuery_SetGoal_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetGoalRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RuntimeQueryServer).SetGoal(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RuntimeQuery_SetGoal_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RuntimeQueryServer).SetGoal(ctx, req.(*SetGoalRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RuntimeQuery_ClearGoal_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ClearGoalRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RuntimeQueryServer).ClearGoal(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RuntimeQuery_ClearGoal_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RuntimeQueryServer).ClearGoal(ctx, req.(*ClearGoalRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _RuntimeQuery_ReadApprovalMode_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ReadApprovalModeRequest)
 	if err := dec(in); err != nil {
@@ -1276,6 +1378,10 @@ var RuntimeQuery_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _RuntimeQuery_GetHistoryPage_Handler,
 		},
 		{
+			MethodName: "ListBackgroundProcesses",
+			Handler:    _RuntimeQuery_ListBackgroundProcesses_Handler,
+		},
+		{
 			MethodName: "ListModels",
 			Handler:    _RuntimeQuery_ListModels_Handler,
 		},
@@ -1294,6 +1400,14 @@ var RuntimeQuery_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SetReasoning",
 			Handler:    _RuntimeQuery_SetReasoning_Handler,
+		},
+		{
+			MethodName: "SetGoal",
+			Handler:    _RuntimeQuery_SetGoal_Handler,
+		},
+		{
+			MethodName: "ClearGoal",
+			Handler:    _RuntimeQuery_ClearGoal_Handler,
 		},
 		{
 			MethodName: "ReadApprovalMode",

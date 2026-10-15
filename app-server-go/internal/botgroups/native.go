@@ -12,12 +12,13 @@ import (
 	"time"
 
 	"astrorder.dev/app-server/internal/daemonclient"
+	"astrorder.dev/app-server/internal/sessions"
 	"astrorder.dev/app-server/internal/store"
 	pb "astrorder.dev/contracts/gen/go/astrorder/sessiond/v1"
 )
 
 // NativeController issues typed commands through the daemon and waits for
-// correlated completion in the App's durable event projection. App cancellation
+// correlated completion in the command ledger and results in native history. App cancellation
 // only releases the wait; it does not kill or replay the accepted native command.
 type NativeController struct {
 	Store            *store.Store
@@ -219,31 +220,30 @@ func (c *NativeController) session(ctx context.Context, turn Turn) (*pb.SessionR
 	}
 	return ref, nil
 }
-func (c *NativeController) Run(ctx context.Context, turn Turn, bound func(string) error) (string, error) {
+func (c *NativeController) Run(ctx context.Context, turn Turn, bound func(string) error) (Reply, error) {
 	ref, err := c.session(ctx, turn)
 	if err != nil {
-		return "", err
+		return Reply{}, err
 	}
 	if err = bound(ref.SessionId); err != nil {
-		return "", err
+		return Reply{}, err
 	}
-	// Use a stable row boundary in this dedicated group-member session. No
-	// timestamps or text heuristics are used to associate native messages.
-	row, err := c.Store.QueryRow(ctx, `SELECT COALESCE(MAX(row_id),0) AS cursor FROM messages WHERE agent_id=? AND session_id=?`, turn.Member.AgentID, ref.SessionId)
+	// Capture native IDs before dispatch in this dedicated member session.
+	baseline, err := c.history(ctx, ref)
 	if err != nil {
-		return "", err
+		return Reply{}, err
 	}
-	cursor, err := strconv.ParseInt(fmt.Sprint(row["cursor"]), 10, 64)
-	if err != nil {
-		return "", err
+	seen := make(map[string]bool)
+	for _, message := range baseline {
+		seen[fmt.Sprint(message["id"])] = true
 	}
 	payload := map[string]any{"id": turn.CommandID, "agent_id": turn.Member.AgentID, "session_id": ref.SessionId, "action": "send", "text": turn.Prompt, "attachments": []any{}}
 	_, created, err := c.Store.CreateCommand(ctx, payload, "received")
 	if err != nil {
-		return "", err
+		return Reply{}, err
 	}
 	if !created {
-		return "", errors.New("group command was already submitted; reconciliation required")
+		return Reply{}, errors.New("group command was already submitted; reconciliation required")
 	}
 	receipt, err := c.Client.Session.Send(ctx, &pb.SendRequest{Meta: meta(turn.CommandID), Session: ref, Input: []*pb.InputPart{{Part: &pb.InputPart_Text{Text: &pb.TextInput{Text: turn.Prompt}}}}, Policy: &pb.SendPolicy{Model: turn.Member.ModelName, ApprovalPolicy: turn.Member.ApprovalPolicy}})
 	if err == nil {
@@ -257,13 +257,13 @@ func (c *NativeController) Run(ctx context.Context, turn Turn, bound func(string
 	}
 	command, updateErr := c.Store.SetCommandState(ctx, turn.Member.AgentID, ref.SessionId, turn.CommandID, state, detail, true)
 	if updateErr != nil {
-		return "", updateErr
+		return Reply{}, updateErr
 	}
 	if publishErr := c.publishCommand(ctx, command); publishErr != nil {
-		return "", publishErr
+		return Reply{}, publishErr
 	}
 	if err != nil {
-		return "", err
+		return Reply{}, err
 	}
 	interval := c.PollInterval
 	if interval <= 0 {
@@ -274,36 +274,129 @@ func (c *NativeController) Run(ctx context.Context, turn Turn, bound func(string
 	for {
 		command, err = c.Store.GetCommand(ctx, turn.Member.AgentID, ref.SessionId, turn.CommandID)
 		if err != nil {
-			return "", err
+			return Reply{}, err
 		}
 		if command == nil {
-			return "", errors.New("group command disappeared")
+			return Reply{}, errors.New("group command disappeared")
 		}
 		switch command["state"] {
 		case "failed", "cancelled", "unknown":
-			return "", errors.New("native group command did not complete: " + fmt.Sprint(command["state"]))
+			return Reply{}, errors.New("native group command did not complete: " + fmt.Sprint(command["state"]))
 		case "completed":
-			messages, err := c.Store.QueryRows(ctx, `SELECT role,text,command_id FROM messages WHERE agent_id=? AND session_id=? AND row_id>? ORDER BY row_id LIMIT 200`, turn.Member.AgentID, ref.SessionId, cursor)
+			messages, err := c.history(ctx, ref)
 			if err != nil {
-				return "", err
+				return Reply{}, err
 			}
 			parts := []string{}
+			ids := []string{}
 			for _, message := range messages {
-				if message["role"] == "assistant" && (message["command_id"] == nil || message["command_id"] == turn.CommandID) {
+				if !seen[fmt.Sprint(message["id"])] && message["role"] == "assistant" && message["kind"] == "message" {
 					if text, ok := message["text"].(string); ok && strings.TrimSpace(text) != "" {
 						parts = append(parts, text)
+						ids = append(ids, fmt.Sprint(message["id"]))
 					}
 				}
 			}
 			if len(parts) > 0 {
-				return strings.Join(parts, "\n\n"), nil
+				return Reply{Text: strings.Join(parts, "\n\n"), NativeIDs: ids}, nil
 			}
 		}
 		select {
 		case <-ctx.Done():
-			return "", ctx.Err()
+			return Reply{}, ctx.Err()
 		case <-ticker.C:
 		}
+	}
+}
+func (c *NativeController) history(ctx context.Context, ref *pb.SessionRef) ([]map[string]any, error) {
+	return c.historyPages(ctx, ref, nil)
+}
+
+// ReadReply resolves persisted message references from native history, including older pages.
+func (c *NativeController) ReadReply(ctx context.Context, agentID, sessionID string, ids []string) (string, error) {
+	agent, err := c.Store.GetAgent(ctx, agentID)
+	if err != nil {
+		return "", err
+	}
+	if agent == nil {
+		return "", errors.New("group Agent not found")
+	}
+	ref := &pb.SessionRef{AgentId: &agentID, SessionId: sessionID}
+	if connection, ok := agent["connection_id"].(string); ok && connection != "" {
+		ref.ConnectionId = &connection
+	}
+	wanted := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		wanted[id] = true
+	}
+	messages, err := c.historyPages(ctx, ref, wanted)
+	if err != nil {
+		return "", err
+	}
+	text := map[string]string{}
+	for _, message := range messages {
+		if message["role"] == "assistant" && message["kind"] == "message" {
+			text[fmt.Sprint(message["id"])], _ = message["text"].(string)
+		}
+	}
+	parts := make([]string, 0, len(ids))
+	for _, id := range ids {
+		value, ok := text[id]
+		if !ok {
+			return "", errors.New("native group reply is unavailable")
+		}
+		parts = append(parts, value)
+	}
+	return strings.Join(parts, "\n\n"), nil
+}
+
+func (c *NativeController) historyPages(ctx context.Context, ref *pb.SessionRef, wanted map[string]bool) ([]map[string]any, error) {
+	if c.Client.Runtime == nil {
+		return nil, errors.New("native group history is unavailable")
+	}
+	agent, err := c.Store.GetAgent(ctx, ref.GetAgentId())
+	if err != nil {
+		return nil, err
+	}
+	kind, _ := agent["kind"].(string)
+	request := &pb.HistoryPageRequest{Session: ref, Limit: 200}
+	items := []map[string]any{}
+	seenCursors := map[string]bool{}
+	for {
+		page, err := c.Client.Runtime.GetHistoryPage(ctx, request)
+		if err != nil {
+			return nil, err
+		}
+		if page == nil || page.Session == nil || page.Session.SessionId != ref.SessionId || page.Session.GetAgentId() != ref.GetAgentId() || page.Session.GetConnectionId() != ref.GetConnectionId() {
+			return nil, errors.New("native group history identity mismatch")
+		}
+		for _, raw := range page.Items {
+			if raw == nil {
+				return nil, errors.New("invalid native group history item")
+			}
+			var item map[string]any
+			decoder := json.NewDecoder(bytes.NewReader(raw.Utf8Json))
+			decoder.UseNumber()
+			if err := decoder.Decode(&item); err != nil {
+				return nil, err
+			}
+			items = append(items, sessions.ProjectNativeHistoryItem(item, ref.GetAgentId(), ref.SessionId, ref.SessionId, ref.GetAgentId(), kind)...)
+		}
+		if wanted == nil {
+			return items, nil
+		}
+		for _, item := range items {
+			delete(wanted, fmt.Sprint(item["id"]))
+		}
+		if len(wanted) == 0 || !page.GetHasMore() {
+			return items, nil
+		}
+		cursor := page.GetNextCursor().GetValue()
+		if cursor == "" || seenCursors[cursor] {
+			return nil, errors.New("invalid native group history cursor")
+		}
+		seenCursors[cursor] = true
+		request.Before = &pb.NullableString{State: &pb.NullableString_Value{Value: cursor}}
 	}
 }
 func (c *NativeController) publishCommand(ctx context.Context, command map[string]any) error {

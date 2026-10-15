@@ -1,3 +1,5 @@
+import { getBackendWsHost, getWsProtocol } from '../../desktop/adapter'
+
 export interface LocalVoiceStreamController {
   stop: () => void
   cancel: () => void
@@ -10,11 +12,11 @@ export interface LocalVoiceStreamCallbacks {
 }
 
 export function buildLocalVoiceStreamUrl(): string {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const protocol = getWsProtocol()
   let token: string | null = null
   try { token = localStorage.getItem('astrorder:token') } catch {}
   const query = token ? `?token=${encodeURIComponent(token)}` : ''
-  return `${protocol}//${window.location.host}/api/v1/audio/local-stream${query}`
+  return `${protocol}//${getBackendWsHost()}/api/v1/audio/local-stream${query}`
 }
 
 export function downsampleToPcm16(input: Float32Array, inputRate: number): Int16Array {

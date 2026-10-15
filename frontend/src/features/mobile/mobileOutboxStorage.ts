@@ -11,16 +11,17 @@ function open(): Promise<IDBDatabase> {
   })
 }
 
-export const mobileOutboxStorage: OutboxStorage = {
+export function createOutboxStorage(key: string): OutboxStorage { return {
   async load() {
     const db = await open()
     try {
       const rows = await new Promise<OutboxEntry[] | undefined>((resolve, reject) => {
-        const request = db.transaction(STORE, 'readonly').objectStore(STORE).get('entries')
+        const request = db.transaction(STORE, 'readonly').objectStore(STORE).get(key)
         request.onsuccess = () => resolve(request.result)
         request.onerror = () => reject(request.error)
       })
       if (rows) return rows
+      if (key !== 'entries') return []
       const legacy = JSON.parse(localStorage.getItem(LEGACY_KEY) || '[]')
       if (!Array.isArray(legacy)) throw new Error('旧消息队列格式异常；原数据未删除')
       return legacy.map(row => {
@@ -35,12 +36,15 @@ export const mobileOutboxStorage: OutboxStorage = {
     try {
       await new Promise<void>((resolve, reject) => {
         const transaction = db.transaction(STORE, 'readwrite')
-        transaction.objectStore(STORE).put(rows, 'entries')
+        transaction.objectStore(STORE).put(rows, key)
         transaction.oncomplete = () => resolve()
         transaction.onerror = () => reject(new Error('本地队列未保存成功，输入内容已保留'))
         transaction.onabort = () => reject(new Error('本地队列保存被中断，输入内容已保留'))
       })
-      try { localStorage.removeItem(LEGACY_KEY) } catch { /* Durable IndexedDB copy already committed. */ }
+      try { if (key === 'entries') localStorage.removeItem(LEGACY_KEY) } catch { /* Durable IndexedDB copy already committed. */ }
     } finally { db.close() }
   },
-}
+} }
+
+export const mobileOutboxStorage = createOutboxStorage('entries')
+export const directOutboxStorage = createOutboxStorage('direct-receipts')

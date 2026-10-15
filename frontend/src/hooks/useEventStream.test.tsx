@@ -68,6 +68,21 @@ describe('event stream notifications', () => {
     view.unmount()
   })
 
+  it('applies an empty-goal tombstone without a toast or saved failure notification', () => {
+    let options: { onEvent: (event: EventEnvelope) => void } | undefined
+    mocks.connectEventStream.mockImplementation(next => { options = next; return vi.fn() })
+    const view = render(<StreamHarness />)
+    act(() => {
+      const cleared = taskEvent('empty-goal', 'cancelled')
+      cleared.data = { ...cleared.data, id: 'codex:goal:current', kind: 'todo', title: '目标', progress: { type: 'goal', source: 'codex', blocking: false } }
+      options?.onEvent(cleared)
+    })
+    expect(Object.values(useAstrorderStore.getState().tasks)).toEqual([expect.objectContaining({ id: 'codex:goal:current', status: 'cancelled' })])
+    expect(mocks.show).not.toHaveBeenCalled()
+    expect(Object.keys(useAstrorderStore.getState().notifications)).toHaveLength(0)
+    view.unmount()
+  })
+
   it('reconciles history, receipts and tasks on connection resume', () => {
     let options: { onResume: () => void } | undefined
     mocks.connectEventStream.mockImplementation(next => { options = next; return vi.fn() })
@@ -102,6 +117,61 @@ describe('event stream notifications', () => {
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: ['astrorder', 'messages', 'agent-1', 'session-1'],
     })
+  })
+
+  it('refreshes native history when a Codex turn completes without a command receipt', () => {
+    let options: { onEvent: (event: EventEnvelope) => void } | undefined
+    mocks.connectEventStream.mockImplementation(next => { options = next; return vi.fn() })
+    const client = new QueryClient()
+    const invalidate = vi.spyOn(client, 'invalidateQueries').mockResolvedValue()
+    const view = render(<StreamHarness client={client} />)
+    act(() => options?.onEvent({ id: 'native-end', cursor: 0, type: 'codex.notification', agent_id: 'agent-1', session_id: 'session-1', data: { frame: { method: 'turn/completed', params: { threadId: 'session-1', turn: { id: 'turn', status: 'completed' } } } } }))
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['astrorder', 'messages', 'agent-1', 'session-1'] })
+    view.unmount()
+  })
+
+  it('coalesces hook refreshes and follows activity received during a pending history read', async () => {
+    vi.useFakeTimers()
+    let options: { onEvent: (event: EventEnvelope) => void } | undefined
+    mocks.connectEventStream.mockImplementation(next => { options = next; return vi.fn() })
+    const client = new QueryClient()
+    let release!: () => void
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+      .mockImplementationOnce(() => new Promise<void>(resolve => { release = resolve }))
+      .mockResolvedValue()
+    const view = render(<StreamHarness client={client} />)
+    const hook = () => options?.onEvent({ id: 'hook', cursor: 0, type: 'transcript.invalidate', agent_id: 'agent-1', session_id: 'session-1', data: { hook_event: 'PostToolUse' } })
+    try {
+      act(() => { hook(); hook(); hook() })
+      await act(async () => { await vi.advanceTimersByTimeAsync(250) })
+      expect(invalidate).toHaveBeenCalledTimes(1)
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ['astrorder', 'messages', 'agent-1', 'session-1'] }, { cancelRefetch: false })
+      act(() => { hook(); hook() })
+      await act(async () => { await vi.advanceTimersByTimeAsync(250); release() })
+      await act(async () => { await vi.advanceTimersByTimeAsync(250) })
+      expect(invalidate).toHaveBeenCalledTimes(2)
+      act(() => hook())
+      view.unmount()
+      await vi.advanceTimersByTimeAsync(250)
+      expect(invalidate).toHaveBeenCalledTimes(2)
+    } finally {
+      view.unmount()
+      vi.useRealTimers()
+    }
+  })
+
+  it('refreshes native history on a running-to-idle session transition', () => {
+    let options: { onEvent: (event: EventEnvelope) => void } | undefined
+    mocks.connectEventStream.mockImplementation(next => { options = next; return vi.fn() })
+    const client = new QueryClient()
+    const invalidate = vi.spyOn(client, 'invalidateQueries').mockResolvedValue()
+    const view = render(<StreamHarness client={client} />)
+    act(() => {
+      options?.onEvent({ id: 'running', cursor: 1, type: 'session.upsert', agent_id: 'agent-1', session_id: 'session-1', data: { id: 'session-1', agent_id: 'agent-1', status: 'running' } })
+      options?.onEvent({ id: 'idle', cursor: 2, type: 'session.upsert', agent_id: 'agent-1', session_id: 'session-1', data: { id: 'session-1', agent_id: 'agent-1', status: 'idle' } })
+    })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['astrorder', 'messages', 'agent-1', 'session-1'] })
+    view.unmount()
   })
 
   it('shows one notification for repeated failures and none for normal completion', () => {

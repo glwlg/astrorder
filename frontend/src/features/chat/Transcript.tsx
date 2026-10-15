@@ -1,8 +1,11 @@
+import { UserInputCard, isUserInput } from '../../components/UserInputCard'
 import { IconArrowDown, IconPaperclip, IconRefresh, IconTool, IconVectorTriangle } from '@tabler/icons-react'
 import { ActionIcon, Anchor, Button, Group, Paper, Stack, Text, Tooltip } from '@mantine/core'
 import { IconCheck, IconChecks, IconCopy, IconEdit, IconGitFork, IconShieldCheck } from '@tabler/icons-react'
 import { useMemo, useState } from 'react'
 import type { Approval, Attachment, Message, OutboxEntry, Session } from '../../domain/types'
+import { attachmentHref } from '../../domain/attachmentHref'
+import { hasMessageContent, isMessageActivity, normalizeMessagePresentation } from '../../domain/messagePresentation'
 import { useStickToBottom } from '../../hooks/useStickToBottom'
 import { MarkdownContent } from '../../components/MarkdownContent'
 import { LazyDetails } from '../../components/LazyDetails'
@@ -21,16 +24,6 @@ import { useSidecarStore } from '../sidecar/sidecarStore'
 import { useAstrorderStore } from '../../state/store'
 import { useReducedMotion } from '@mantine/hooks'
 import { AnimatePresence, motion } from 'motion/react'
-
-function attachmentHref(attachment: Attachment): string | undefined {
-  try {
-    const parsed = new URL(attachment.url, window.location.origin)
-    if (parsed.origin !== window.location.origin) return undefined
-    return `${parsed.pathname}${parsed.search}${parsed.hash}`
-  } catch {
-    return undefined
-  }
-}
 
 export function AttachmentList({
   attachments,
@@ -156,6 +149,7 @@ function MessageItem({
   onGalleryClick,
   session,
   isLatest,
+  inlineMeta = false,
   onEdit,
   onFork,
   hasAssistantReplied = false,
@@ -166,13 +160,14 @@ function MessageItem({
   onGalleryClick?: (url: string, allImages: string[]) => void
   session?: Session | null
   isLatest?: boolean
+  inlineMeta?: boolean
   onEdit?: (text: string) => void
   onFork?: () => void
   hasAssistantReplied?: boolean
   isAgentAccepted?: boolean
 }) {
   const isUser = message.role === 'user'
-  const isActivity = message.kind !== 'message' || message.role === 'tool'
+  const isActivity = isMessageActivity(message)
   const isReviewMode = isUser && (
     message.text.includes('检查我未提交的更改') ||
     message.text.includes('审查我的更改') ||
@@ -224,13 +219,35 @@ function MessageItem({
       </article>
     )
   }
+  const metadata = (
+    <span className={`message-meta ${inlineMeta ? 'message-meta-inline' : ''}`}>
+      {isReviewMode && <span className="message-review-mode-tag">审查模式</span>}
+      {Date.parse(message.created_at) > 0 && <time dateTime={message.created_at}>{new Date(message.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</time>}
+      {isUser && <span className="message-status-ticks" title={hasAssistantReplied ? 'Agent 已响应' : isAgentAccepted ? 'Agent 已接收' : '已发送'} style={{ display: 'inline-flex', alignItems: 'center', color: hasAssistantReplied || isAgentAccepted ? 'var(--astr-indigo, #5b6cff)' : 'var(--astr-muted)' }}>
+        {hasAssistantReplied || isAgentAccepted ? <IconChecks size={14} /> : <IconCheck size={14} />}
+      </span>}
+      <span className="message-actions-bar">
+        {message.text && <Tooltip label={copied ? '已复制' : '复制内容'} position="top" withArrow>
+          <ActionIcon variant="subtle" size="xs" color="gray" onClick={handleCopy} aria-label="复制消息" className="message-action-btn">
+            {copied ? <IconCheck size={13} color="var(--astr-teal, #12b886)" /> : <IconCopy size={13} />}
+          </ActionIcon>
+        </Tooltip>}
+        {!isUser && onFork && <Tooltip label="从此回复分叉新会话" position="top" withArrow>
+          <ActionIcon variant="subtle" size="xs" color="indigo" onClick={onFork} aria-label="分叉会话" className="message-action-btn message-fork-btn"><IconGitFork size={13} /></ActionIcon>
+        </Tooltip>}
+        {isUser && onEdit && <Tooltip label="编辑消息" position="top" withArrow>
+          <ActionIcon variant="subtle" size="xs" color="gray" onClick={() => onEdit(message.text)} aria-label="编辑消息" className="message-action-btn"><IconEdit size={13} /></ActionIcon>
+        </Tooltip>}
+      </span>
+    </span>
+  )
   return (
     <article
       className={`message-row message-${message.role} message-kind-${message.kind} ${isLatest ? 'is-latest-message' : ''}`}
       data-testid={`message-${message.id}`}
       aria-label={`${messageLabel(message)}消息`}
     >
-      <Paper className={`message-bubble ${isUser ? 'message-bubble-user' : isActivity ? 'message-bubble-activity' : ''}`} withBorder={!isActivity} radius="lg" p="sm">
+      <Paper className={`message-bubble ${inlineMeta ? 'message-bubble-inline' : ''} ${isUser ? 'message-bubble-user' : isActivity ? 'message-bubble-activity' : ''}`} withBorder={!isActivity} radius="lg" p="sm">
         {message.text && (
           <MessageBody
             value={message.text}
@@ -247,71 +264,9 @@ function MessageItem({
           <pre className="tool-payload">{JSON.stringify(message.tool, null, 2)}</pre>
         )}
         <AttachmentList attachments={message.attachments} onImageClick={onImageClick} onGalleryClick={onGalleryClick} session={session} />
+        {inlineMeta && metadata}
       </Paper>
-      <div className="message-meta">
-        {isReviewMode && (
-          <span className="message-review-mode-tag" style={{ fontSize: '11px', color: 'var(--astr-muted)', userSelect: 'none' }}>
-            审查模式
-          </span>
-        )}
-        {Date.parse(message.created_at) > 0 && <time dateTime={message.created_at}>{new Date(message.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</time>}
-        {isUser && (() => {
-          const isDoubleTick = hasAssistantReplied || isAgentAccepted
-          return (
-            <span
-              className="message-status-ticks"
-              title={hasAssistantReplied ? 'Agent 已响应' : isAgentAccepted ? 'Agent 已接收' : '已发送'}
-              style={{ display: 'inline-flex', alignItems: 'center', color: isDoubleTick ? 'var(--astr-indigo, #5b6cff)' : 'var(--astr-muted)' }}
-            >
-              {isDoubleTick ? <IconChecks size={14} /> : <IconCheck size={14} />}
-            </span>
-          )
-        })()}
-        <div className="message-actions-bar">
-          {message.text && (
-            <Tooltip label={copied ? '已复制' : '复制内容'} position="top" withArrow>
-              <ActionIcon
-                variant="subtle"
-                size="xs"
-                color="gray"
-                onClick={handleCopy}
-                aria-label="复制消息"
-                className="message-action-btn"
-              >
-                {copied ? <IconCheck size={13} color="var(--astr-teal, #12b886)" /> : <IconCopy size={13} />}
-              </ActionIcon>
-            </Tooltip>
-          )}
-          {!isUser && onFork && (
-            <Tooltip label="从此回复分叉新会话" position="top" withArrow>
-              <ActionIcon
-                variant="subtle"
-                size="xs"
-                color="indigo"
-                onClick={onFork}
-                aria-label="分叉会话"
-                className="message-action-btn message-fork-btn"
-              >
-                <IconGitFork size={13} />
-              </ActionIcon>
-            </Tooltip>
-          )}
-          {isUser && onEdit && (
-            <Tooltip label="编辑消息" position="top" withArrow>
-              <ActionIcon
-                variant="subtle"
-                size="xs"
-                color="gray"
-                onClick={() => onEdit(message.text)}
-                aria-label="编辑消息"
-                className="message-action-btn"
-              >
-                <IconEdit size={13} />
-              </ActionIcon>
-            </Tooltip>
-          )}
-        </div>
-      </div>
+      {!inlineMeta && metadata}
     </article>
   )
 }
@@ -357,12 +312,8 @@ export function Transcript({
 }) {
   const reducedMotion = useReducedMotion(undefined, { getInitialValueInEffect: false })
   const enter = reducedMotion ? {} : { opacity: 0, y: 10, scale: 0.99 }
-  const visibleMessages = messages.filter((message) => (
-    message.kind === 'thinking'
-      ? message.text.trim() || message.attachments.length || message.tool
-      : isCompactionMessage(message) || message.kind !== 'message' || message.role !== 'assistant' || message.text.trim() || message.attachments.length || message.tool
-  ))
-  const isActivity = (message: Message | null) => Boolean(message && !isCompactionMessage(message) && (message.kind !== 'message' || message.role === 'tool' || (message.role === 'assistant' && !message.text.trim())))
+  const visibleMessages = messages.map(normalizeMessagePresentation).filter((message) => isCompactionMessage(message) || hasMessageContent(message))
+  const isActivity = (message: Message | null) => Boolean(message && !isCompactionMessage(message) && isMessageActivity(message))
   const outboundVersion = outbox.map((item) => item.command.id).join(',')
   const contentVersion = `${messages.map((item) => `${item.id}:${item.text.length}`).join(',')}|${outbox.map((item) => `${item.command.id}:${item.status}`).join(',')}|${approvals.map((item) => item.id).join(',')}|${composerHeight ?? 0}`
   const {
@@ -506,9 +457,10 @@ export function Transcript({
             const isAgentAccepted = Boolean(hasAssistantReplied || (matchedCmd && (matchedCmd.state === 'accepted' || matchedCmd.state === 'running' || matchedCmd.state === 'completed')))
             const nextUserOffset = visibleMessages.slice(idx + 1).findIndex(item => item.role === 'user')
             const turnRemainder = visibleMessages.slice(idx + 1, nextUserOffset < 0 ? undefined : idx + 1 + nextUserOffset)
-            const canForkTurn = message.role === 'assistant' && !isActivity(message)
+            const isFinalReply = message.role === 'assistant' && !isActivity(message)
               && !turnRemainder.some(item => item.role === 'assistant' && !isActivity(item))
               && !(busy && nextUserOffset < 0)
+            const canForkTurn = isFinalReply
             return (
               <motion.div className="transcript-message-entry" key={message.id} initial={enter} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.28, ease: [0.2, 0.8, 0.2, 1] }}>
                 {showDateDivider && (
@@ -524,6 +476,7 @@ export function Transcript({
                   onGalleryClick={onGalleryClick}
                   session={session}
                   isLatest={idx === visibleMessages.length - 1}
+                  inlineMeta={message.role === 'assistant' && !isFinalReply}
                   onEdit={message.id === lastUserMessageId ? onEditLastUserMessage : undefined}
                   onFork={onForkAtMessage && canForkTurn ? () => onForkAtMessage(message, idx) : undefined}
                   hasAssistantReplied={hasAssistantReplied}
@@ -556,7 +509,7 @@ export function Transcript({
           {approvals.length > 0 && (
             <section className="transcript-approvals" aria-label="对话待处理审批">
               <Stack gap="xs" mt="xs">
-                {approvals.map((approval) => (
+                {approvals.map((approval) => isUserInput(approval) ? <UserInputCard key={approval.id} approval={approval} /> : (
                   <StarBorder color="#eab308" speed="3.5s" borderRadius="var(--mantine-radius-md, 8px)" key={approval.id}>
                     <Paper className="approval-card transcript-approval-card" withBorder p="sm" radius="md" style={{ background: 'transparent' }}>
                     <Group gap={6} mb={4}>
