@@ -12,6 +12,9 @@ it('keeps a completed live body when an earlier history request returns', () => 
   useAstrorderStore.getState().applyEvent({ id: 'final', cursor: 0, type: 'message.upsert', agent_id: 'a', session_id: 's', data: { ...old, text: 'complete final body' } })
   mergeHistoryPages('a', 's', [{ items: [old], liveRevisionAtRequest: before }])
   expect(selectMessages(useAstrorderStore.getState(), 'a', 's')[0].text).toBe('complete final body')
+  const timed = { ...old, created_at: '2026-10-16T02:09:24.173Z', timestamp_source: 'native' as const }
+  mergeHistoryPages('a', 's', [{ items: [timed], liveRevisionAtRequest: before }])
+  expect(selectMessages(useAstrorderStore.getState(), 'a', 's')[0]).toMatchObject({ text: 'complete final body', created_at: timed.created_at, timestamp_source: 'native' })
   mergeHistoryPages('a', 's', [{ items: [{ ...old, text: 'native final' }], liveRevisionAtRequest: 12 }])
   expect(selectMessages(useAstrorderStore.getState(), 'a', 's')[0].text).toBe('native final')
 })

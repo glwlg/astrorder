@@ -416,14 +416,25 @@ func (h *Handler) handleAgentUpgradeTargets(w http.ResponseWriter, r *http.Reque
 			}
 		}
 
-		curVer, isUpToDate, verErr := h.versioner.GetVersion(r.Context(), kind, connID, sshConn)
-		if verErr != nil {
-			curVer = "未知"
-			isUpToDate = false
+		check := VersionCheck{}
+		if inspector, ok := h.versioner.(UpgradeVersionInspector); ok {
+			check = inspector.CheckUpgrade(r.Context(), kind, connID, sshConn)
+		} else {
+			current, upToDate, err := h.versioner.GetVersion(r.Context(), kind, connID, sshConn)
+			check.Current = current
+			if err != nil {
+				check.Error = err.Error()
+			} else if upToDate {
+				check.Latest = current
+			} else {
+				check.Error = "原生版本输出未确认更新状态"
+			}
 		}
-		latestVer := curVer
-		if !isUpToDate && curVer != "未知" {
-			latestVer = "latest"
+		if check.Current == "" {
+			check.Current = "未知"
+		}
+		if check.Latest == "" {
+			check.Latest = "未知"
 		}
 
 		items = append(items, map[string]any{
@@ -432,9 +443,10 @@ func (h *Handler) handleAgentUpgradeTargets(w http.ResponseWriter, r *http.Reque
 			"kind":            kind,
 			"status":          a["status"],
 			"connection_id":   connID,
-			"current_version": curVer,
-			"latest_version":  latestVer,
-			"has_update":      !isUpToDate && curVer != "未知",
+			"current_version": check.Current,
+			"latest_version":  check.Latest,
+			"has_update":      check.Error == "" && check.HasUpdate,
+			"version_error":   check.Error,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})

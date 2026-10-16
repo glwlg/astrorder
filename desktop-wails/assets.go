@@ -36,6 +36,7 @@ window.astrorderDesktop = Object.freeze({
   run: (target, action) => svc.Run(String(target), String(action)),
   getStartupSettings: () => svc.GetStartupSettings(),
   setStartupEnabled: (enabled) => svc.SetStartupEnabled(Boolean(enabled)),
+  saveDownload: (url, filename) => svc.SaveDownload(String(url), String(filename)),
   setClipboardFiles: (paths) => svc.SetClipboardFiles(Array.isArray(paths) ? paths.map(String) : []),
   notify: (opts) => svc.Notify(String(opts?.title ?? ''), String(opts?.body ?? '')),
   minimize: () => svc.Minimize(),
@@ -45,6 +46,8 @@ window.astrorderDesktop = Object.freeze({
   openDirectoryDialog: (defaultPath) => svc.OpenDirectoryDialog(String(defaultPath ?? '')),
   openFileDialog: (defaultPath) => svc.OpenFileDialog(String(defaultPath ?? '')),
   openExternal: (url) => svc.OpenExternal(String(url)),
+  showStatistics: (url, bounds, refresh) => svc.ShowStatistics(String(url), { ...bounds, scale: window.devicePixelRatio }, Boolean(refresh)),
+  hideStatistics: () => svc.HideStatistics(),
 });
 document.documentElement.classList.add('is-desktop-app');
 // No-op unless the shell was started with --smoke-report.

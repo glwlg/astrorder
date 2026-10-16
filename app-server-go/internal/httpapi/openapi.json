@@ -446,6 +446,15 @@
         }
       }
     },
+    "/api/v1/analytics/quotas": {
+      "get": {
+        "operationId": "get_analytics_quotas_get",
+        "responses": {
+          "200": { "description": "Current gateway quota accounts, windows and balances" },
+          "502": { "description": "Upstream quota request failed" }
+        }
+      }
+    },
     "/api/v1/analytics/usage": {
       "get": {
         "operationId": "get_analytics_usage_get",

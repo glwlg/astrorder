@@ -105,6 +105,36 @@ it('keeps native page order across live completion, older pages and refetch with
   client.clear()
 })
 
+it('does not append a cached old Codex reply after navigating back to a newer native window', async () => {
+  const session: Session = { id: 'windowed', agent_id: 'codex', title: 'Windowed', status: 'running', workspace: null, updated_at: '2026-10-15T13:00:00Z' }
+  const row = (id: string, role: Message['role'], turn_id: string): Message => ({ id, turn_id, agent_id: session.agent_id, session_id: session.id, role, kind: 'message', text: id, attachments: [], tool: null, command_id: null, created_at: '1970-01-01T00:00:00Z' })
+  const old = [row('old-user', 'user', 'previous'), row('old-answer', 'assistant', 'previous')]
+  const latest = [row('new-user', 'user', 'current'), row('new-progress', 'assistant', 'current')]
+  useAstrorderStore.getState().resetRuntime()
+  vi.spyOn(api, 'syncSession').mockResolvedValue(session)
+  const get = vi.spyOn(api, 'getMessages').mockResolvedValue({ items: old, next_cursor: null })
+  vi.spyOn(api, 'getCommands').mockResolvedValue({ items: [] })
+  vi.spyOn(api, 'getTasks').mockResolvedValue({ items: [] })
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  const hook = renderHook(({ selected }) => useSessionResources(selected, true), { wrapper, initialProps: { selected: session as Session | null } })
+  await waitFor(() => expect(hook.result.current.visibleMessages.map(m => m.id)).toEqual(old.map(m => m.id)))
+  hook.rerender({ selected: null })
+  // Native invalidation while this query is inactive. Its old rows remain in
+  // the shared store, exactly as they do when another chat is open.
+  get.mockResolvedValue({ items: latest, next_cursor: null })
+  await act(async () => { await client.invalidateQueries({ queryKey: ['astrorder', 'messages', session.agent_id, session.id] }) })
+  hook.rerender({ selected: session })
+  await waitFor(() => expect(hook.result.current.visibleMessages.map(m => m.id)).toEqual(latest.map(m => m.id)))
+  const live = row('current-live', 'assistant', 'current')
+  act(() => useAstrorderStore.getState().applyEvent({ id: 'live', cursor: 0, type: 'message.upsert', agent_id: session.agent_id, session_id: session.id, data: { ...live } }))
+  expect(hook.result.current.visibleMessages.map(m => m.id)).toEqual([...latest, live].map(m => m.id))
+  hook.rerender({ selected: null })
+  hook.rerender({ selected: session })
+  expect(hook.result.current.visibleMessages.map(m => m.id)).toEqual([...latest, live].map(m => m.id))
+  client.clear()
+})
+
 it('loads messages without waiting for session sync', async () => {
   const session: Session = { id: 'native', agent_id: 'agent', title: 'Native', status: 'idle', workspace: null, updated_at: '2026-01-01T00:00:00Z' }
   const rows: Message[] = [{

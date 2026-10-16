@@ -1,4 +1,5 @@
 import { UserInputCard, isUserInput } from '../../components/UserInputCard'
+import { AsyncUserInputCard, isAsyncQuestion, hasLaterNativeInput } from '../../components/AsyncUserInputCard'
 import { IconArrowDown, IconPaperclip, IconRefresh, IconTool, IconVectorTriangle } from '@tabler/icons-react'
 import { ActionIcon, Anchor, Button, Group, Paper, Stack, Text, Tooltip } from '@mantine/core'
 import { IconCheck, IconChecks, IconCopy, IconEdit, IconGitFork, IconShieldCheck } from '@tabler/icons-react'
@@ -154,6 +155,7 @@ function MessageItem({
   onFork,
   hasAssistantReplied = false,
   isAgentAccepted = false,
+  asyncInput,
 }: {
   message: Message
   onImageClick?: (url: string) => void
@@ -165,6 +167,7 @@ function MessageItem({
   onFork?: () => void
   hasAssistantReplied?: boolean
   isAgentAccepted?: boolean
+  asyncInput?: { commands: import('../../domain/types').Command[]; continued: boolean; readOnly: boolean }
 }) {
   const isUser = message.role === 'user'
   const isActivity = isMessageActivity(message)
@@ -248,7 +251,7 @@ function MessageItem({
       aria-label={`${messageLabel(message)}消息`}
     >
       <Paper className={`message-bubble ${inlineMeta ? 'message-bubble-inline' : ''} ${isUser ? 'message-bubble-user' : isActivity ? 'message-bubble-activity' : ''}`} withBorder={!isActivity} radius="lg" p="sm">
-        {message.text && (
+        {asyncInput ? <AsyncUserInputCard message={message} {...asyncInput} /> : message.text && (
           <MessageBody
             value={message.text}
             user={isUser}
@@ -481,6 +484,7 @@ export function Transcript({
                   onFork={onForkAtMessage && canForkTurn ? () => onForkAtMessage(message, idx) : undefined}
                   hasAssistantReplied={hasAssistantReplied}
                   isAgentAccepted={isAgentAccepted}
+                  asyncInput={isAsyncQuestion(message) ? { commands, continued: hasLaterNativeInput(visibleMessages, idx), readOnly: session?.control_state === 'readonly' } : undefined}
                 />
               </motion.div>
             )

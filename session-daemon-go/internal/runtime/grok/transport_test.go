@@ -48,7 +48,7 @@ func TestACPResponseReaderIsIndependentOfBlockedProjection(t *testing.T) {
 }
 
 func TestACPFailureCannotBeUndoneByLateApproval(t *testing.T) {
-	owned := &ownedSession{sessionID: "owned", failed: true, status: "error", pendingApprovals: map[string]any{}, approvalKinds: map[string]string{}}
+	owned := &ownedSession{sessionID: "owned", failed: true, status: "error", pendingApprovals: map[string]*pendingApproval{}, approvalKinds: map[string]string{}}
 	a := New(Config{})
 	a.handleFrameNotification(owned, "owned", map[string]any{"method": "session/request_permission", "id": "late", "params": map[string]any{"sessionId": "owned"}})
 	if owned.status != "error" || len(owned.pendingApprovals) > 0 {
@@ -70,7 +70,7 @@ func TestACPNotificationUsesAppBridgeEventContract(t *testing.T) {
 }
 
 func TestACPForeignApprovalCannotChangeOwnedState(t *testing.T) {
-	owned := &ownedSession{sessionID: "owned", status: "idle", pendingApprovals: map[string]any{}, approvalKinds: map[string]string{}}
+	owned := &ownedSession{sessionID: "owned", status: "idle", pendingApprovals: map[string]*pendingApproval{}, approvalKinds: map[string]string{}}
 	a := New(Config{})
 	a.handleFrameNotification(owned, "owned", map[string]any{"method": "session/request_permission", "id": "foreign-request", "params": map[string]any{"sessionId": "foreign"}})
 	if owned.status != "idle" || len(owned.pendingApprovals) != 0 {
@@ -86,7 +86,7 @@ func TestACPInterruptDoesNotInventNativeIdle(t *testing.T) {
 	c := newClient(nil, writer, nil)
 	defer c.close()
 	a := New(Config{})
-	owned := &ownedSession{client: c, status: "running", promptRunning: true, pendingApprovals: map[string]any{}}
+	owned := &ownedSession{client: c, status: "running", promptRunning: true, pendingApprovals: map[string]*pendingApproval{}}
 	a.sessions["owned"] = owned
 	result, err := a.Command(context.Background(), core.Request{SessionID: "owned", Action: "session.interrupt"})
 	if err != nil {

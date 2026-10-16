@@ -678,6 +678,11 @@ message GrokInitializeQuery {
   optional NativeJson options = 1;
 }
 
+message GrokSessionListQuery {
+  optional string cwd = 1;
+  optional string cursor = 2;
+}
+
 message NativeQueryRequest {
   RuntimeTarget target = 1;
   // Preserves native payload/hash/sha256 fields that exist outside request params.
@@ -702,6 +707,7 @@ message NativeQueryRequest {
     HermesModelsListQuery hermes_models_list = 35;
     HermesCommandsListQuery hermes_commands_list = 36;
     GrokInitializeQuery grok_initialize = 50;
+    GrokSessionListQuery grok_session_list = 51;
   }
 }
 

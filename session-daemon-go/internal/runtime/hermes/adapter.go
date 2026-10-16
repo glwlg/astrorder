@@ -469,7 +469,7 @@ func (a *Adapter) handleSend(ctx context.Context, session *SessionState, req cor
 	}
 	if steering {
 		if len(attachments) != 0 {
-			return core.Result{}, fmt.Errorf("attachments must be queued for the next Hermes turn")
+			return core.Result{}, core.RejectBeforeDispatch("attachments must be queued for the next Hermes turn")
 		}
 		a.mu.RLock()
 		handle := session.Handle

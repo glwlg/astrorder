@@ -449,10 +449,15 @@ func (h *Handler) handleSetSessionApprovalMode(w http.ResponseWriter, r *http.Re
 	connID, _ := session["connection_id"].(string)
 	ref := buildSessionRef(payload.AgentID, sessionID, connID)
 	meta := newCommandMeta("", "")
-	if err := h.ensureNativeBinding(ctx, session); err != nil {
+	// An explicit new choice supersedes the saved choice; do not briefly
+	// restore the previous access mode before applying it.
+	if err := h.bindNativeSession(ctx, session); err != nil {
 		writeJSONError(w, http.StatusBadGateway, "Native session binding unavailable: "+err.Error())
 		return
 	}
+	lock := h.approvalSelectionLock(payload.AgentID, sessionID)
+	lock.Lock()
+	defer lock.Unlock()
 	receipt, err := h.client.Runtime.SetApprovalMode(ctx, &sessiondv1.SetApprovalModeRequest{
 		Meta:    meta,
 		Session: ref,

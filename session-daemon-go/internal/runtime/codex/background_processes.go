@@ -9,6 +9,9 @@ import (
 func (a *Adapter) backgroundProcesses(ctx context.Context, rt *Runtime, r core.Request) (core.Result, error) {
 	response, err := rt.request(ctx, "thread/read", map[string]any{"threadId": r.SessionID, "includeTurns": true})
 	if err != nil {
+		if emptyHistoryUnsupported(err) && rt.freshThreadEmpty(ctx, r.SessionID) {
+			return core.Result{SessionID: r.SessionID, Payload: map[string]any{"processes": []any{}}}, nil
+		}
 		return core.Result{}, err
 	}
 	thread, ok := response["thread"].(map[string]any)

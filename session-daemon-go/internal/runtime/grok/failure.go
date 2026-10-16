@@ -24,6 +24,6 @@ func (a *Adapter) failSession(owned *ownedSession, err error) {
 	owned.failed = true
 	owned.status = "error"
 	owned.lastError = err.Error()
-	owned.pendingApprovals = map[string]any{}
+	owned.pendingApprovals = map[string]*pendingApproval{}
 	owned.approvalKinds = map[string]string{}
 }

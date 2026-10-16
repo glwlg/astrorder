@@ -227,6 +227,49 @@ it('retries a confirmed failed queued message with a new command ID', async () =
   client.clear()
 })
 
+it('retries a rejected attachment guidance as a new message after the turn completes', async () => {
+  useAstrorderStore.getState().setConnection('connected')
+  vi.spyOn(api, 'getSessionModel').mockResolvedValue({ model: 'native-model', provider: 'provider' })
+  const attachments = Array.from({length: 4}, (_, i) => ({id: `blob-${i}`, name: `photo-${i}.png`, media_type: 'image/png', url: `/blob-${i}`}))
+  useAstrorderStore.getState().mergeCommands([{ id: 'failed-guidance', agent_id: session.agent_id, session_id: session.id, action: 'enqueue', state: 'failed', text: '重新发送附件', attachments, created_at: session.updated_at, target_id: null, error: 'attachments must be queued for the next Hermes turn' }])
+  const create = vi.spyOn(api, 'createCommand').mockImplementation(async input => ({ ...input, state: 'queued', attachments, created_at: session.updated_at, error: null }))
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(<MantineProvider><QueryClientProvider client={client}><ChatComposer session={session} agent={agent} /></QueryClientProvider></MantineProvider>)
+  fireEvent.click(await screen.findByRole('button', { name: '重试' }))
+  await waitFor(() => expect(api.sendQueuedCommand).toHaveBeenCalledOnce())
+  expect(create).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ action: 'enqueue', text: '重新发送附件', attachment_ids: attachments.map(a => a.id) }))
+  expect(create.mock.calls[0][0].id).not.toBe('failed-guidance')
+  expect(api.deleteQueuedCommand).toHaveBeenCalledWith('failed-guidance', session.agent_id, session.id)
+  await waitFor(() => expect(screen.queryByLabelText('排队消息')).not.toBeInTheDocument())
+  client.clear()
+})
+
+it.each(['编辑', '删除'])('shows queue operation failure for %s and retains the message', async label => {
+  vi.spyOn(api, 'getSessionModel').mockResolvedValue({ model: 'native-model', provider: 'provider' })
+  vi.mocked(api.deleteQueuedCommand).mockRejectedValue(new Error('Command is no longer queued'))
+  useAstrorderStore.getState().mergeCommands([{ id: 'uncertain', agent_id: session.agent_id, session_id: session.id, action: 'enqueue', state: 'unknown', text: '保留这条消息', attachments: [], created_at: session.updated_at, target_id: null, error: null }])
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(<MantineProvider><QueryClientProvider client={client}><ChatComposer session={session} agent={agent} /></QueryClientProvider></MantineProvider>)
+  fireEvent.click(await screen.findByRole('button', { name: label }))
+  expect(await screen.findByText('Command is no longer queued')).toBeInTheDocument()
+  expect(screen.getByLabelText('排队消息')).toHaveTextContent('保留这条消息')
+  client.clear()
+})
+
+it('restores all uploaded attachments when editing a rejected guidance after completion', async () => {
+  vi.spyOn(api, 'getSessionModel').mockResolvedValue({ model: 'native-model', provider: 'provider' })
+  const attachments = Array.from({length: 4}, (_, i) => ({id: `blob-${i}`, name: `photo-${i}.png`, media_type: 'image/png', url: `/blob-${i}`}))
+  useAstrorderStore.getState().mergeCommands([{ id: 'rejected', agent_id: session.agent_id, session_id: session.id, action: 'enqueue', state: 'failed', text: '带附件重新发送', attachments, created_at: session.updated_at, target_id: null, error: 'attachments must be queued for the next Hermes turn' }])
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(<MantineProvider><QueryClientProvider client={client}><ChatComposer session={session} agent={agent} /></QueryClientProvider></MantineProvider>)
+  await waitFor(() => expect(draftStorage.load).toHaveBeenCalled())
+  fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
+  await waitFor(() => expect(screen.queryByLabelText('排队消息')).not.toBeInTheDocument())
+  expect(screen.getByLabelText('消息内容')).toHaveValue('带附件重新发送')
+  attachments.forEach(item => expect(screen.getByText(item.name)).toBeInTheDocument())
+  client.clear()
+})
+
 it('checks an uncertain queued result without resubmitting or assigning a new ID', async () => {
   useAstrorderStore.getState().setConnection('connected')
   vi.spyOn(api, 'getSessionModel').mockResolvedValue({ model: 'native-model', provider: 'provider' })
@@ -344,4 +387,52 @@ it('interprets server disconnection gracefully', () => {
   expect(parsed).not.toBeNull()
   expect(parsed?.type).toBe('disconnect')
   expect(parsed?.title).toBe('网关服务断开或连接超时')
+})
+
+
+it('calibrates Grok capabilities: hides image paste hint, rejects image attachments, and allows text files', async () => {
+  const grokAgent: Agent = {
+    id: 'grok-1',
+    kind: 'grok',
+    name: 'Grok',
+    status: 'ready',
+    capabilities: ['history', 'queue', 'approvals', 'task_events', 'attachments'],
+    limitation: null,
+  }
+  const grokSession: Session = {
+    ...session,
+    agent_id: 'grok-1',
+  }
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(
+    <MantineProvider>
+      <QueryClientProvider client={client}>
+        <ChatComposer session={grokSession} agent={grokAgent} />
+      </QueryClientProvider>
+    </MantineProvider>
+  )
+
+  const textarea = screen.getByLabelText('消息内容')
+  expect(textarea).toHaveAttribute('placeholder', '随心输入')
+
+  const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
+  expect(fileInput).toHaveAttribute('accept')
+
+  const imageFile = new File(['fake-png-content'], 'test.png', { type: 'image/png' })
+  fireEvent.change(fileInput, { target: { files: [imageFile] } })
+
+  await waitFor(() => {
+    expect(screen.getByRole('alert')).toHaveTextContent('当前智能体不支持图片附件')
+  })
+  expect(screen.queryByLabelText('待发送附件')).not.toBeInTheDocument()
+
+  const textFile = new File(['hello text'], 'test.txt', { type: 'text/plain' })
+  fireEvent.change(fileInput, { target: { files: [textFile] } })
+
+  await waitFor(() => {
+    expect(screen.getByLabelText('待发送附件')).toBeInTheDocument()
+    expect(screen.getByText('test.txt')).toBeInTheDocument()
+  })
+
+  client.clear()
 })

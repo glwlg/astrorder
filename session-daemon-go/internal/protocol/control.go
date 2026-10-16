@@ -3,6 +3,7 @@ package protocol
 import (
 	core "astrorder.dev/session-daemon/internal/runtime"
 	"context"
+	"errors"
 	"strings"
 	"time"
 )
@@ -117,6 +118,15 @@ func (d *Daemon) controlOnce(parent context.Context, request map[string]any) map
 			if params, ok := request["params"].(map[string]any); ok {
 				if rc, ok := params["runtime_control"].(bool); ok && rc {
 					d.BindAgentControlSession(result.SessionID, result.Payload)
+					if (kind == "grok" || kind == "grok-ssh") && result.Payload["runtime_control"] == true && result.Status == "idle" {
+						agent := map[string]any{"id": result.Payload["agent_id"], "kind": "grok", "name": "Grok Build", "status": "ready", "control_state": "owned", "capabilities": []string{"chat", "events", "history", "launch", "delete", "queue", "approvals", "task_events", "attachments"}}
+						for _, key := range []string{"name", "runtime_id", "source_id", "connection_id"} {
+							if value, ok := result.Payload[key]; ok {
+								agent[key] = value
+							}
+						}
+						err = d.Emit(result.SessionID, "connector.hello", agent, "")
+					}
 					// A restarted App has already consumed the original hello.
 					// Reannounce a confirmed live Hermes control transport.
 					if previouslyOwned && result.Payload["runtime_control"] == true && result.Status == "idle" && (kind == "hermes" || kind == "ssh") {
@@ -135,7 +145,12 @@ func (d *Daemon) controlOnce(parent context.Context, request map[string]any) map
 		result, err = d.registry.Command(ctx, r)
 	}
 	if err != nil {
-		return errorResponse(request["request_id"], err.Error())
+		response := errorResponse(request["request_id"], err.Error())
+		var rejected *core.RejectedBeforeDispatch
+		if errors.As(err, &rejected) {
+			response["rejected_before_dispatch"] = true
+		}
+		return response
 	}
 	if result.Payload["deleted"] == result.SessionID || result.Payload["closed"] == true {
 		err = d.journal.ForgetSession(result.SessionID)

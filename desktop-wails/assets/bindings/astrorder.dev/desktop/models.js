@@ -14,6 +14,16 @@
  * @property {boolean} enabled
  */
 
+/**
+ * StatisticsBounds uses CSS pixels within the main window's client area.
+ * @typedef {Object} StatisticsBounds
+ * @property {number} x
+ * @property {number} y
+ * @property {number} width
+ * @property {number} height
+ * @property {number} scale
+ */
+
 // In interface mode, this file is likely to contain just comments.
 // We add a dummy export statement to ensure it is recognised as an ES module.
 export {};

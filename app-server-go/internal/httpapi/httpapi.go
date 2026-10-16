@@ -226,6 +226,7 @@ func NewHandlerChecked(options Options) (http.Handler, error) {
 			Store:            options.Store,
 			DefaultWorkspace: defaultWS,
 			HelperAssetsDir:  bundledHelperAssets(),
+			LocalStageRoots:  []string{options.Config.StagingDir},
 		})
 	}
 
@@ -247,6 +248,7 @@ func NewHandlerChecked(options Options) (http.Handler, error) {
 		Resolver:    resolver,
 		Publisher:   eventHub,
 		Opener:      files.NativeOpener{},
+		Clipboard:   files.NativeClipboard{},
 		StagingRoot: options.Config.StagingDir,
 	})
 

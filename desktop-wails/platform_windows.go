@@ -80,6 +80,10 @@ func setClipboardFilesWindows(paths []string) (bool, error) {
 		if strings.ContainsAny(trimmed, "\r\n\x00") || !filepath.IsAbs(trimmed) {
 			return false, fmt.Errorf("invalid clipboard file path")
 		}
+		trimmed = filepath.Clean(trimmed)
+		if _, err := os.Stat(trimmed); err != nil {
+			return false, err
+		}
 		valid = append(valid, trimmed)
 	}
 	if len(valid) == 0 {
@@ -88,6 +92,7 @@ func setClipboardFilesWindows(paths []string) (bool, error) {
 
 	// Newline-separated: Windows paths may contain ';' but never a newline.
 	psScript := `
+$ErrorActionPreference = 'Stop'
 $paths = $env:ASTRORDER_CLIP_FILES -split "` + "`" + `n" | Where-Object { $_.Trim() -ne "" }
 Add-Type -AssemblyName System.Windows.Forms
 $strCol = New-Object System.Collections.Specialized.StringCollection

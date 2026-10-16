@@ -39,6 +39,7 @@ export interface ReviewRelayRun {
 export interface SessionModelBinding { model: string; provider: string | null; deferred?: boolean; branch?: string; effort?: string | null; read_only?: boolean; detail?: string }
 export interface CodexConnectionStatus { kind: 'codex'; state: 'disconnected' | 'connecting' | 'connected' | 'error' | 'authentication_required'; available: boolean; agent_id: string; session_count: number; auth_required: boolean; detail: string; daemon_mode: boolean }
 export interface GatewayProfile {
+  statistics_url?: string
   gateway_type: 'opencodex' | 'magpie'
   management_url: string
   inference_url: string
@@ -70,7 +71,11 @@ export interface OcxUsageBreakdown {
   shareRatio: number
   estimatedCostUsd: number
 }
+export interface MagpieQuotaWindow { name: string; used: number; remaining: number; resetsAt?: string; unlimited?: boolean; display?: string }
+export interface MagpieQuota { provider: string; name: string; kind: string; user?: string; plan?: string; alias?: string; from?: string; balance?: string; error?: string; asOf?: string; readAt?: string; readDeferred?: boolean; windows: MagpieQuotaWindow[] }
 export interface OcxUsageResponse {
+  gatewayType?: 'magpie' | 'opencodex'
+  bucket?: 'hour' | 'day' | 'week'
   range: string
   surface: string
   since: number
@@ -93,7 +98,7 @@ export interface OcxModelQuotaReport {
   label: string
   quota?: { fiveHourPercent?: number; fiveHourResetAt?: number; weeklyPercent?: number; weeklyResetAt?: number; monthlyPercent?: number; monthlyResetAt?: number; customWindows?: OcxQuotaWindow[] }
 }
-export interface OcxModelQuotaAccount { id: string; email?: string; logLabel?: string; plan?: string; paused?: boolean; quota?: { shortPercent?: number; shortResetAt?: number; weeklyPercent?: number; weeklyResetAt?: number } | null }
+export interface OcxModelQuotaAccount { id: string; email?: string; logLabel?: string; plan?: string; paused?: boolean; error?: string; quota?: { customWindows?: OcxQuotaWindow[]; shortPercent?: number; shortResetAt?: number; weeklyPercent?: number; weeklyResetAt?: number } | null }
 export interface OcxModelQuotaResponse { model: string; providers: string[]; reports: OcxModelQuotaReport[]; accounts: OcxModelQuotaAccount[] }
 
 export class ApiError extends Error {
@@ -427,6 +432,7 @@ export const api = {
         current_version: string
         latest_version: string
         has_update: boolean
+        version_error?: string
       }>
     }>('/agents/upgrade/targets'),
   createSession: (payload: { agent_id: string; workspace?: string | null; title?: string | null; project_id?: string | null; project_name?: string | null; parent_session_id?: string | null; ephemeral?: boolean; blackboard_scope?: 'session' | 'swarm' | 'group'; blackboard_scope_id?: string | null }) =>
@@ -602,8 +608,8 @@ export const api = {
       cache_hit_rate: number
       speed?: number | null
     }>(`/sessions/${encodeURIComponent(sessionId)}/usage${agentId ? '?agent_id=' + encodeURIComponent(agentId) : ''}`),
-  getAnalyticsConfig: () => request<{ gateway_type: 'opencodex' | 'magpie'; management_url: string; inference_url: string; target_overrides: Record<string, string>; masked_key: string; masked_management_key?: string; gateway_profiles?: Record<string, GatewayProfile> }>('/analytics/config'),
-  updateAnalyticsConfig: (payload: { gateway_type: 'opencodex' | 'magpie'; management_url: string; inference_url: string; target_overrides: Record<string, string>; api_key?: string; management_key?: string; clear_management_key?: boolean; gateway_profiles?: Record<string, any> }) => jsonRequest<{ gateway_type: 'opencodex' | 'magpie'; management_url: string; inference_url: string; target_overrides: Record<string, string>; masked_key: string; masked_management_key?: string; gateway_profiles?: Record<string, GatewayProfile> }>('/analytics/config', payload, 'PUT'),
+  getAnalyticsConfig: () => request<{ statistics_url?: string; gateway_type: 'opencodex' | 'magpie'; management_url: string; inference_url: string; target_overrides: Record<string, string>; masked_key: string; masked_management_key?: string; gateway_profiles?: Record<string, GatewayProfile> }>('/analytics/config'),
+  updateAnalyticsConfig: (payload: { statistics_url?: string; gateway_type: 'opencodex' | 'magpie'; management_url: string; inference_url: string; target_overrides: Record<string, string>; api_key?: string; management_key?: string; clear_management_key?: boolean; gateway_profiles?: Record<string, any> }) => jsonRequest<{ statistics_url?: string; gateway_type: 'opencodex' | 'magpie'; management_url: string; inference_url: string; target_overrides: Record<string, string>; masked_key: string; masked_management_key?: string; gateway_profiles?: Record<string, GatewayProfile> }>('/analytics/config', payload, 'PUT'),
   getModelSyncTargets: () => request<{ items: Array<{ id: string; kind: 'local' | 'wsl' | 'ssh'; name: string; state?: string; agents: string[] }> }>('/model-sync/targets'),
   previewModelSync: (targets: Array<{ target_id: string; agents: string[] }>) => jsonRequest<{
     catalog_fingerprint: string
@@ -700,7 +706,8 @@ export const api = {
     reports: Array<{ target_id: string; target_name?: string; agent: string; ok: boolean; installed_path?: string; message: string }>
   }>('/capabilities/dispatch', payload, 'POST'),
 
-  getAnalyticsUsage: (params: { range: 'all' | '30d' | '7d'; surface: 'all' | 'codex' | 'claude' | 'grok'; since?: number; until?: number }) => {
+  getAnalyticsQuotas: () => request<{ gatewayType: string; data: MagpieQuota[] }>('/analytics/quotas'),
+  getAnalyticsUsage: (params: { range: 'today' | 'all' | '30d' | '7d'; surface: 'all' | 'codex' | 'hermes' | 'grok'; since?: number; until?: number }) => {
     const query = new URLSearchParams({ range: params.range, surface: params.surface })
     if (params.since !== undefined) query.set('since', String(params.since))
     if (params.until !== undefined) query.set('until', String(params.until))

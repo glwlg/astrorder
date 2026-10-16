@@ -42,7 +42,10 @@ export function summarizeQuota(quota?: OcxModelQuotaResponse | null): { status: 
   if (quota.accounts && quota.accounts.length > 0) {
     const active = quota.accounts.filter((a) => !a.paused)
     if (active.length === 0) return { status: 'exhausted', label: '不可用', detail: '所有账号已暂停或暂无额度' }
-    const usedList = active.map((a) => a.quota?.weeklyPercent ?? a.quota?.shortPercent ?? 0)
+    const known = active.filter((a) => a.quota && !a.error)
+    const usedList = known.map((a) => Math.max(...[a.quota?.weeklyPercent, a.quota?.shortPercent, ...(a.quota?.customWindows?.map((w) => w.percent) || [])].filter((v): v is number => v != null && Number.isFinite(v))))
+      .filter(Number.isFinite)
+    if (usedList.length === 0) return null
     const minUsed = Math.min(...usedList)
     const remaining = Math.max(0, 100 - minUsed)
     if (remaining <= 5) return { status: 'exhausted', label: '已耗尽', detail: `所有可用账号已用尽 (${minUsed}%)` }

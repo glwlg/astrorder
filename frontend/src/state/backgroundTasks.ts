@@ -6,6 +6,7 @@ export type BackgroundTask = {
   detail: string
   status: 'running' | 'completed' | 'failed' | 'cancelled'
   createdAt: number
+  log?: string
   actionLabel?: string
   action?: () => void
   cancel: () => void | Promise<void>
@@ -14,6 +15,7 @@ export type BackgroundTask = {
 type BackgroundTaskStore = {
   tasks: Record<string, BackgroundTask>
   add: (task: Omit<BackgroundTask, 'id' | 'status' | 'createdAt'>) => string
+  appendLog: (id: string, chunk: string) => void
   complete: (id: string, detail: string, action?: Pick<BackgroundTask, 'actionLabel' | 'action'>) => void
   fail: (id: string, detail: string) => void
   cancel: (id: string) => void
@@ -32,6 +34,9 @@ export const useBackgroundTasks = create<BackgroundTaskStore>((set) => ({
     }))
     return id
   },
+  appendLog: (id, chunk) => set((state) => state.tasks[id] ? ({
+    tasks: { ...state.tasks, [id]: { ...state.tasks[id], log: (state.tasks[id].log || '') + chunk } },
+  }) : state),
   complete: (id, detail, action) => set((state) => state.tasks[id]?.status === 'running' ? ({
     tasks: { ...state.tasks, [id]: { ...state.tasks[id], ...action, detail, status: 'completed' } },
   }) : state),

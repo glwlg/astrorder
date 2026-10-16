@@ -23,9 +23,15 @@ export function mergeHistoryPages(
   const store = useAstrorderStore.getState()
   const revisions = store.messageEventRevisions[scopeKey(agentId, sessionId)] || {}
   // A response cannot overwrite message events received after its request began.
-  const safeItems = (page: typeof pages[number]) => page.items.filter(item =>
-    page.liveRevisionAtRequest === undefined || (revisions[item.id] || 0) <= page.liveRevisionAtRequest,
-  )
+  const current = store.messages[scopeKey(agentId, sessionId)] || {}
+  const safeItems = (page: typeof pages[number]) => page.items.flatMap(item => {
+    if (page.liveRevisionAtRequest === undefined || (revisions[item.id] || 0) <= page.liveRevisionAtRequest) return [item]
+    const live = current[item.id]
+    // Native start time remains authoritative even when the body snapshot is stale.
+    return live && item.timestamp_source === 'native'
+      ? [{ ...live, created_at: item.created_at, timestamp_source: item.timestamp_source, completed_at: item.completed_at, turn_id: item.turn_id || live.turn_id }]
+      : []
+  })
   const [latest, ...older] = pages
   if (latest) store.mergeMessages(agentId, sessionId, safeItems(latest))
   for (const page of older) {
@@ -157,7 +163,15 @@ export function useSessionResources(session: Session | null, authenticated: bool
     if (!session) return []
     if (messages.data && messages.data.pages.length > 0) {
       const loadedItems = [...messages.data.pages].reverse().flatMap(page => page.items)
-      return visibleTranscript(stored, loadedItems, new Set())
+      const revisionAtRequest = messages.data.pages[0].liveRevisionAtRequest
+      const revisions = useAstrorderStore.getState().messageEventRevisions[scopeKey(session.agent_id, session.id)] || {}
+      // Cached history is not a live extension of the current native window.
+      // Codex often has no item timestamps (the wire uses the Unix epoch), so
+      // time comparisons cannot distinguish an old cached answer from new output.
+      const baseline = new Set(stored.filter(message =>
+        (revisions[message.id] || 0) <= revisionAtRequest,
+      ).map(message => message.id))
+      return visibleTranscript(stored, loadedItems, baseline)
     }
     return stored
   }, [session, messages.data, stored])

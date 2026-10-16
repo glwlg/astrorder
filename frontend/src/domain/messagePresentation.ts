@@ -14,5 +14,5 @@ export function isMessageActivity(message: Message | null): boolean {
 }
 
 export function hasMessageContent(message: Message): boolean {
-  return Boolean(message.text.trim() || message.attachments.length || message.tool)
+  return Boolean(message.text.trim() || message.attachments.length || message.tool || message.delivery === 'async' && message.questions?.length)
 }

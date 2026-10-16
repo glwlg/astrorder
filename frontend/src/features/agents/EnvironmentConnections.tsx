@@ -43,6 +43,7 @@ export function EnvironmentConnections({ embedded = false, renderAgentConfigurat
     current_version: string
     latest_version: string
     has_update: boolean
+    version_error?: string
   }>>([])
   const batchAbortRef = useRef<AbortController | null>(null)
   const batchLogPreRef = useRef<HTMLPreElement | null>(null)
@@ -121,15 +122,12 @@ export function EnvironmentConnections({ embedded = false, renderAgentConfigurat
       title,
       detail: '正在批量执行版本更新…',
       actionLabel: '查看日志',
-      action: () => setBatchModalOpen(true),
-      cancel: () => {
-        if (batchAbortRef.current) {
-          batchAbortRef.current.abort()
-        }
-      },
+      log: '',
+      cancel: () => abortCtrl.abort(),
     })
 
     const appendLog = (line: string) => {
+      useBackgroundTasks.getState().appendLog(taskId, line)
       setBatchLogs((prev) => {
         const next = prev + line
         if (batchLogPreRef.current) {
@@ -399,7 +397,9 @@ export function EnvironmentConnections({ embedded = false, renderAgentConfigurat
                         </Text>
                       </Table.Td>
                       <Table.Td style={{ textAlign: 'right' }}>
-                        {target.has_update ? (
+                        {target.version_error ? (
+                          <Text size="xs" c="orange" title={target.version_error}>检查失败</Text>
+                        ) : target.has_update ? (
                           <Badge size="xs" color="teal" variant="light">可升级</Badge>
                         ) : target.current_version === '未知' ? (
                           <Badge size="xs" color="gray" variant="outline">版本未知</Badge>

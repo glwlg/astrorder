@@ -165,11 +165,21 @@ func historyText(value any) string {
 }
 func projectHistoryItem(item map[string]any, aid, sid, nativeID, source, agentKind string) []map[string]any {
 	turnID := stringValue(item, "turnId")
+	var startedAt, completedAt string
+	if agentKind == "codex" || agentKind == "codex-ssh" {
+		startedAt = codexMilliseconds(item["startedAtMs"])
+		completedAt = codexMilliseconds(item["completedAtMs"])
+	}
 	if nested, ok := item["item"].(map[string]any); ok {
 		item = nested
 	}
 	role := stringValue(item, "role")
 	kind := "message"
+	if agentKind == "grok" || agentKind == "grok-ssh" {
+		if nativeKind := stringValue(item, "kind"); nativeKind != "" {
+			kind = nativeKind
+		}
+	}
 	if agentKind == "codex" || role == "" {
 		switch stringValue(item, "type") {
 		case "userMessage":
@@ -245,7 +255,22 @@ func projectHistoryItem(item map[string]any, aid, sid, nativeID, source, agentKi
 			created = time.UnixMicro(int64(seconds * 1e6)).UTC().Format(time.RFC3339Nano)
 		}
 	}
+	if startedAt != "" {
+		created = startedAt
+	} else if completedAt != "" {
+		created = completedAt
+	}
 	row := map[string]any{"id": key, "agent_id": aid, "session_id": sid, "role": role, "kind": kind, "text": text, "attachments": []any{}, "created_at": created, "command_id": nil, "tool": item["tool"]}
+	if (agentKind == "codex" || agentKind == "codex-ssh") && role == "assistant" {
+		row["delivery"] = item["delivery"]
+		row["questions"] = item["questions"]
+	}
+	if startedAt != "" || completedAt != "" {
+		row["timestamp_source"] = "native"
+	}
+	if completedAt != "" {
+		row["completed_at"] = completedAt
+	}
 	if turnID != "" && (agentKind == "codex" || agentKind == "codex-ssh") {
 		row["turn_id"] = turnID
 	}

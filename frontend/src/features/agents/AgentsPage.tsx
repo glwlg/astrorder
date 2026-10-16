@@ -202,20 +202,15 @@ function AgentUpgradeAction({ agent }: { agent: Agent }) {
       title: `升级 ${agent.name}`,
       detail: '正在执行版本升级指令…',
       actionLabel: '查看日志',
-      action: () => {
-        setResultModalOpen(true)
-      },
-      cancel: () => {
-        if (abortCtrlRef.current) {
-          abortCtrlRef.current.abort()
-        }
-      },
+      log: '',
+      cancel: () => abortCtrl.abort(),
     })
 
     try {
       const res = await api.upgradeAgentStream(
         agent.id,
         (chunk) => {
+          useBackgroundTasks.getState().appendLog(taskId, chunk)
           setLogOutput((prev) => {
             const next = prev + chunk
             if (logPreRef.current) {
@@ -225,6 +220,7 @@ function AgentUpgradeAction({ agent }: { agent: Agent }) {
           })
         },
         (command) => {
+          useBackgroundTasks.getState().appendLog(taskId, `[EXEC] ${command}\n`)
           setCmdName(command)
         },
         abortCtrl.signal,

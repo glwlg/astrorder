@@ -209,6 +209,17 @@ func (h *Handler) submitStored(ctx context.Context, command map[string]any) (map
 		if readErr != nil {
 			return nil, readErr
 		}
+		if guidance && agent["kind"] == "hermes" {
+			for _, item := range input {
+				if item.GetAttachment() != nil {
+					failure := commandFailure(409, hermesAttachmentGuidanceRejection)
+					if _, storageErr := setState("failed", failure); storageErr != nil {
+						return nil, storageErr
+					}
+					return nil, failure
+				}
+			}
+		}
 		if agent["kind"] == "codex" && name == "/compact" {
 			receipt, err = h.client.Session.Compact(ctx, &pb.CompactRequest{Meta: meta, Session: ref, Instructions: optString(strings.TrimSpace(strings.TrimPrefix(text, "/compact")))})
 		} else if agent["kind"] == "codex" && name == "/review" {
@@ -252,6 +263,9 @@ func (h *Handler) submitStored(ctx context.Context, command map[string]any) (map
 		decision := pb.ApprovalDecision_APPROVAL_DECISION_ACCEPT
 		if action == "cancel" {
 			decision = pb.ApprovalDecision_APPROVAL_DECISION_DECLINE
+			if pending["method"] == "session/request_permission" {
+				decision = pb.ApprovalDecision_APPROVAL_DECISION_CANCEL
+			}
 		}
 		request := &pb.RespondApprovalRequest{Meta: meta, Session: ref, ApprovalId: &pb.ExactIdentifier{Value: &pb.ExactIdentifier_Text{Text: target}}, Decision: decision}
 		if action == "approve" && pending["method"] == "item/permissions/requestApproval" {
@@ -288,7 +302,11 @@ func (h *Handler) submitStored(ctx context.Context, command map[string]any) (map
 		return nil, commandFailure(502, "Native command outcome is "+state+"; submission will not retry")
 	}
 	if err = confirmedReceipt(receipt); err != nil {
-		if _, storageErr := setState("unknown", err); storageErr != nil {
+		state := "unknown"
+		if receipt != nil && receipt.OperationState == pb.OperationState_OPERATION_STATE_COMPLETED && receipt.GetRejected() != nil {
+			state = "failed"
+		}
+		if _, storageErr := setState(state, err); storageErr != nil {
 			return nil, storageErr
 		}
 		return nil, commandFailure(502, err.Error())

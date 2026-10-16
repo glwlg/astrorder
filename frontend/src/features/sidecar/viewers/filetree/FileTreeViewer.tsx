@@ -13,6 +13,7 @@ import {
   IconRefresh,
 } from '@tabler/icons-react'
 import { authenticatedApiFetch } from '../../../../api/client'
+import { downloadFile, fileDesktop } from '../../fileTransfer'
 import { resolveArtifactFromPath } from '../../resolver'
 import { useSidecarStore } from '../../sidecarStore'
 import type { ViewerContext } from '../../types'
@@ -459,6 +460,7 @@ export function FileTreeViewer({ artifact, isActive = true }: ViewerContext) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          copy_to_clipboard: !fileDesktop()?.setClipboardFiles,
           paths,
           session_id: artifact.sessionId,
           connection_id: artifact.connectionId || null,
@@ -477,11 +479,10 @@ export function FileTreeViewer({ artifact, isActive = true }: ViewerContext) {
       }
 
       if (!data.clipboard_set) {
-        const desktopApi = (window as unknown as { astrorderDesktop?: { setClipboardFiles?: (paths: string[]) => Promise<boolean> } }).astrorderDesktop
-        if (desktopApi?.setClipboardFiles) {
-          const ok = await desktopApi.setClipboardFiles(localPaths)
-          if (!ok) throw new Error('写入 Windows 剪贴板失败')
-        }
+        const desktopApi = fileDesktop()
+        if (!desktopApi?.setClipboardFiles) throw new Error('当前环境无法写入文件剪贴板')
+        const ok = await desktopApi.setClipboardFiles(localPaths)
+        if (!ok) throw new Error('写入 Windows 剪贴板失败')
       }
 
       notifications.update({
@@ -642,11 +643,12 @@ export function FileTreeViewer({ artifact, isActive = true }: ViewerContext) {
             <Menu.Item
               leftSection={<IconDownload size={14} />}
               style={{ whiteSpace: 'nowrap' }}
+              disabled={contextMenu.node.is_dir}
               onClick={() => {
                 const node = contextMenu.node
                 setContextMenu(null)
                 const url = `/api/v1/files/raw?path=${encodeURIComponent(node.path)}&download=1&session_id=${encodeURIComponent(artifact.sessionId)}&connection_id=${encodeURIComponent(artifact.connectionId || '')}`
-                window.open(url, '_blank')
+                void downloadFile(url, node.name)
               }}
             >
               下载 / 另存为

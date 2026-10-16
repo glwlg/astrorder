@@ -160,6 +160,20 @@ describe('event stream notifications', () => {
     }
   })
 
+  it('refreshes native history to position an unanchored Codex turn', async () => {
+    vi.useFakeTimers()
+    let options: { onEvent: (event: EventEnvelope) => void } | undefined
+    mocks.connectEventStream.mockImplementation(next => { options = next; return vi.fn() })
+    const client = new QueryClient()
+    const invalidate = vi.spyOn(client, 'invalidateQueries').mockResolvedValue()
+    const view = render(<StreamHarness client={client} />)
+    try {
+      act(() => options?.onEvent({ id: 'unanchored', cursor: 0, type: 'message.upsert', agent_id: 'agent-1', session_id: 'session-1', data: { id: 'reply', agent_id: 'agent-1', session_id: 'session-1', role: 'assistant', kind: 'message', text: 'progress', turn_id: 'unknown-turn', created_at: '2026-10-16T02:00:00Z', attachments: [], tool: null, command_id: null } }))
+      await act(async () => { await vi.advanceTimersByTimeAsync(250) })
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ['astrorder', 'messages', 'agent-1', 'session-1'] }, { cancelRefetch: false })
+    } finally { view.unmount(); vi.useRealTimers() }
+  })
+
   it('refreshes native history on a running-to-idle session transition', () => {
     let options: { onEvent: (event: EventEnvelope) => void } | undefined
     mocks.connectEventStream.mockImplementation(next => { options = next; return vi.fn() })

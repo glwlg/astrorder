@@ -43,6 +43,10 @@ func (h *Handler) handleListCommands(w http.ResponseWriter, r *http.Request, ses
 		writeJSONError(w, http.StatusNotFound, "Session was not found")
 		return
 	}
+	if err := h.reconcileHermesAttachmentRejections(ctx); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	items, err := h.store.ListCommands(ctx, agentID, sessionID)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, err.Error())

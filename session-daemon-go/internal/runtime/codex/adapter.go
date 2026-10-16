@@ -160,20 +160,41 @@ func (a *Adapter) open(ctx context.Context, r core.Request, resume bool) (core.R
 		a.mu.Unlock()
 		return core.Result{}, fmt.Errorf("codex adapter is closed")
 	}
+	var retired *adapterSession
 	if resume {
 		if r.SessionID == "" || len(r.SessionID) > 256 {
 			a.mu.Unlock()
 			return core.Result{}, fmt.Errorf("codex session id is invalid")
 		}
-		if a.sessions[r.SessionID] != nil || a.opening[r.SessionID] {
+		if a.opening[r.SessionID] {
 			a.mu.Unlock()
 			return core.Result{}, fmt.Errorf("codex session already attached")
+		}
+		if existing := a.sessions[r.SessionID]; existing != nil {
+			if !existing.runtime.recoverable() {
+				a.mu.Unlock()
+				return core.Result{}, fmt.Errorf("codex session already attached; native exit or projection completion is unconfirmed")
+			}
+			retired = existing
+			delete(a.sessions, r.SessionID)
 		}
 		a.opening[r.SessionID] = true
 	}
 	a.mu.Unlock()
+	if retired != nil {
+		retired.runtime.Close()
+	}
 	if resume {
-		defer func() { a.mu.Lock(); delete(a.opening, r.SessionID); a.mu.Unlock() }()
+		defer func() {
+			a.mu.Lock()
+			delete(a.opening, r.SessionID)
+			// Failed native resume (including another writer) must retain the
+			// retired error snapshot instead of exposing the registry's old run.
+			if retired != nil && !a.closed && a.sessions[r.SessionID] == nil {
+				a.sessions[r.SessionID] = retired
+			}
+			a.mu.Unlock()
+		}()
 	}
 	config := a.config
 	var rt *Runtime
@@ -189,7 +210,12 @@ func (a *Adapter) open(ctx context.Context, r core.Request, resume bool) (core.R
 			payload["approval_id"] = n.ApprovalID
 		}
 		if a.emit != nil {
-			if err := a.emit(n.SessionID, "codex.notification", payload, n.Status); err != nil {
+			event, status := "codex.notification", n.Status
+			if n.Method == "runtime/closed" {
+				event, status = "session.error", "error"
+				payload["session_id"] = n.SessionID
+			}
+			if err := a.emit(n.SessionID, event, payload, status); err != nil {
 				rt.setStatus("error")
 				rt.Close()
 			}
@@ -289,6 +315,13 @@ func (a *Adapter) Command(ctx context.Context, r core.Request) (core.Result, err
 		return a.controlCommand(ctx, s, r)
 	}
 	rt := s.runtime
+	if r.Action == "session.model.read" && rt.recoverable() {
+		// Let the App's exact-identity attach path restore this persisted thread.
+		return core.Result{}, core.ErrSessionNotOwned
+	}
+	if err := rt.transportError(); err != nil {
+		return core.Result{}, err
+	}
 	if err = rt.requireSession(r.SessionID); err != nil {
 		return core.Result{}, err
 	}

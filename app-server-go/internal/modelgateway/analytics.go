@@ -48,12 +48,12 @@ func (h *Handler) handleGetAnalyticsUsage(w http.ResponseWriter, r *http.Request
 		surface = "all"
 	}
 
-	validRanges := map[string]bool{"all": true, "30d": true, "7d": true}
+	validRanges := map[string]bool{"today": true, "all": true, "30d": true, "7d": true}
 	if !validRanges[rangeVal] {
 		writeError(w, http.StatusUnprocessableEntity, "invalid_range", "统计范围无效")
 		return
 	}
-	validSurfaces := map[string]bool{"all": true, "codex": true, "claude": true, "grok": true}
+	validSurfaces := map[string]bool{"all": true, "codex": true, "hermes": true, "claude": true, "grok": true}
 	if !validSurfaces[surface] {
 		writeError(w, http.StatusUnprocessableEntity, "invalid_surface", "Agent 类型无效")
 		return
@@ -93,6 +93,12 @@ func (h *Handler) handleGetAnalyticsUsage(w http.ResponseWriter, r *http.Request
 		return
 	}
 	req.URL.RawQuery = r.URL.RawQuery
+	if rangeVal == "today" {
+		// OpenCodeX exposes per-day model rows in its seven-day response.
+		query := req.URL.Query()
+		query.Set("range", "7d")
+		req.URL.RawQuery = query.Encode()
+	}
 	if cfg.APIKey != "" {
 		req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
 	}
@@ -116,37 +122,7 @@ func (h *Handler) handleGetAnalyticsUsage(w http.ResponseWriter, r *http.Request
 }
 
 func (h *Handler) fetchMagpieUsage(w http.ResponseWriter, r *http.Request, cfg GatewayConfig, rangeVal, surface, sinceStr, untilStr string) {
-	if cfg.ManagementKey == "" {
-		writeError(w, http.StatusUnprocessableEntity, "missing_key", "未配置 Magpie 管理端访问参数")
-		return
-	}
-
-	mgmtURL := strings.TrimRight(cfg.ManagementURL, "/") + "/api/usage/requests"
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, mgmtURL, nil)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "request_error", err.Error())
-		return
-	}
-	q := req.URL.Query()
-	q.Set("period", rangeVal)
-	q.Set("limit", "1")
-	if surface != "all" {
-		q.Set("agent", surface)
-	}
-	q.Set("k", cfg.ManagementKey)
-	req.URL.RawQuery = q.Encode()
-
-	resp, err := h.httpClient.Do(req)
-	if err != nil {
-		writeError(w, http.StatusBadGateway, "upstream_error", fmt.Sprintf("Magpie 用量请求失败：%v", err))
-		return
-	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 10_000_000))
-	var data any
-	_ = json.Unmarshal(body, &data)
-	writeJSON(w, http.StatusOK, data)
+	h.serveMagpieUsage(w, r, cfg, rangeVal, surface, sinceStr, untilStr)
 }
 
 func (h *Handler) handleGetModelQuota(w http.ResponseWriter, r *http.Request) {
@@ -162,59 +138,17 @@ func (h *Handler) handleGetModelQuota(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if cfg.GatewayType == "magpie" {
+		h.serveMagpieModelQuota(w, r, cfg, model)
+		return
+	}
+
 	var models []map[string]any
 	var combos []map[string]any
 	var reports []map[string]any
 	accounts := []map[string]any{}
 
-	if cfg.GatewayType == "magpie" {
-		inferenceURL := strings.TrimRight(cfg.InferenceURL, "/")
-		modelsURL := inferenceURL + "/models"
-		if strings.HasSuffix(inferenceURL, "/models") {
-			modelsURL = inferenceURL
-		}
-		req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, modelsURL, nil)
-		if err == nil {
-			if cfg.APIKey != "" {
-				req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
-			}
-			resp, err := h.httpClient.Do(req)
-			if err == nil && resp.StatusCode == http.StatusOK {
-				body, _ := io.ReadAll(io.LimitReader(resp.Body, 10_000_000))
-				resp.Body.Close()
-				var raw any
-				if err := json.Unmarshal(body, &raw); err == nil {
-					var rawList []any
-					if m, ok := raw.(map[string]any); ok {
-						if d, ok := m["data"].([]any); ok {
-							rawList = d
-						}
-					} else if l, ok := raw.([]any); ok {
-						rawList = l
-					}
-					for _, item := range rawList {
-						if rm, ok := item.(map[string]any); ok {
-							mid, _ := rm["id"].(string)
-							provider, _ := rm["owned_by"].(string)
-							if provider == "" {
-								if strings.Contains(mid, "/") {
-									provider = strings.Split(mid, "/")[0]
-								} else {
-									provider = "magpie"
-								}
-							}
-							models = append(models, map[string]any{
-								"id":         mid,
-								"namespaced": mid,
-								"provider":   provider,
-								"disabled":   false,
-							})
-						}
-					}
-				}
-			}
-		}
-	} else {
+	{
 		// OpenCodeX
 		mgmtURL := strings.TrimRight(cfg.ManagementURL, "/")
 		req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, mgmtURL+"/api/models", nil)

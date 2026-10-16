@@ -42,6 +42,7 @@ var nativeQuerySpecs = map[protoreflect.Name]nativeQuerySpec{
 	"hermes_models_list":       {family: "hermes", method: "models.list"},
 	"hermes_commands_list":     {family: "hermes", method: "commands.list"},
 	"grok_initialize":          {family: "grok", method: "initialize"},
+	"grok_session_list":        {family: "grok", method: "session/list", fields: map[protoreflect.Name]string{"cwd": "cwd", "cursor": "cursor"}},
 }
 
 func translateNativeQuery(request *sessiondv1.NativeQueryRequest) (core.Request, error) {

@@ -33,7 +33,7 @@ func TestQueryNativeRoutesClosedSelectorsAndRemoteConnections(t *testing.T) {
 		kind           sessiondv1.RuntimeKind
 	}{
 		{"codex_initialize", "initialize", 1}, {"codex_account_read", "account/read", 1}, {"codex_hooks_list", "hooks/list", 1}, {"codex_model_list", "model/list", 1}, {"codex_skills_list", "skills/list", 1}, {"codex_thread_items_list", "thread/items/list", 1}, {"codex_thread_list", "thread/list", 1}, {"codex_thread_loaded_list", "thread/loaded/list", 1}, {"codex_thread_read", "thread/read", 1},
-		{"hermes_session_list", "session.list", 3}, {"hermes_active_list", "session.active_list", 3}, {"hermes_projects_tree", "projects.tree", 3}, {"hermes_project_sessions", "projects.project_sessions", 3}, {"hermes_session_history", "session.history", 3}, {"hermes_models_list", "models.list", 3}, {"hermes_commands_list", "commands.list", 3}, {"grok_initialize", "initialize", 6},
+		{"hermes_session_list", "session.list", 3}, {"hermes_active_list", "session.active_list", 3}, {"hermes_projects_tree", "projects.tree", 3}, {"hermes_project_sessions", "projects.project_sessions", 3}, {"hermes_session_history", "session.history", 3}, {"hermes_models_list", "models.list", 3}, {"hermes_commands_list", "commands.list", 3}, {"grok_initialize", "initialize", 6}, {"grok_session_list", "session/list", 6},
 	}
 	for _, test := range cases {
 		t.Run(test.branch, func(t *testing.T) {

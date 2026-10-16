@@ -181,6 +181,27 @@ func TestGrokRuntimeControlAttachOverOfficialGRPC(t *testing.T) {
 		}
 	}
 
+	assertHello := func(want int) {
+		t.Helper()
+		page, err := f.daemon.ReplayPage("probe-grok-local", 0, 0, 64)
+		if err != nil {
+			t.Fatal(err)
+		}
+		count := 0
+		for _, frame := range page.Frames {
+			if frame.Event == "connector.hello" {
+				count++
+				if frame.Payload["id"] != "probe-grok-local" || frame.Payload["kind"] != "grok" || frame.Payload["status"] != "ready" {
+					t.Fatalf("invalid Grok readiness: %+v", frame.Payload)
+				}
+			}
+		}
+		if count != want {
+			t.Fatalf("Grok readiness events = %d, want %d", count, want)
+		}
+	}
+	assertHello(1)
+
 	// The authoritative daemon status must list the control session as idle.
 	status, err := pb.NewDaemonControlClient(f.conn).GetStatus(f.ctx, &pb.GetStatusRequest{})
 	if err != nil {
@@ -201,6 +222,7 @@ func TestGrokRuntimeControlAttachOverOfficialGRPC(t *testing.T) {
 	if repeated := attach(); repeated.Session.GetSessionId() != "probe-grok-local" {
 		t.Fatalf("repeat control attach: %+v", repeated)
 	}
+	assertHello(2)
 	if fixture.count("initialize") != 1 {
 		t.Fatalf("repeat control attach started another transport: %v", fixture.snapshot())
 	}

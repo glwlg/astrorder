@@ -59,7 +59,7 @@ describe('Sidebar project catalog wiring', () => {
   it('preloads today’s model usage and shows it when the statistics tab is hovered', async () => {
     renderSidebar()
     await waitFor(() => expect(api.getAnalyticsUsage).toHaveBeenCalledOnce())
-    expect(api.getAnalyticsUsage).toHaveBeenCalledWith({ range: '7d', surface: 'all' })
+    expect(api.getAnalyticsUsage).toHaveBeenCalledWith({ range: 'today', surface: 'all' })
 
     await userEvent.hover(screen.getByRole('link', { name: '统计' }))
     expect(await screen.findByText('今日模型用量')).toBeInTheDocument()
@@ -68,6 +68,37 @@ describe('Sidebar project catalog wiring', () => {
     expect(screen.getByText('gpt-5.6-sol')).toBeInTheDocument()
     expect(screen.getByText('grok-4.7')).toBeInTheDocument()
     expect(screen.queryByText('older-model')).not.toBeInTheDocument()
+    expect(api.getAnalyticsUsage).toHaveBeenCalledOnce()
+  })
+
+  it('shows today summary models even when hourly series have no models', async () => {
+    vi.mocked(api.getAnalyticsUsage).mockResolvedValue({ range: 'today', summary: { requests: 12, totalTokens: 303_000_000 }, models: [{ provider: 'openai', model: 'gpt-6.1-sol', totalTokens: 303_000_000 }], days: [] } as unknown as OcxUsageResponse)
+    renderSidebar()
+    await userEvent.hover(screen.getByRole('link', { name: '统计' }))
+    expect(await screen.findByText('3.03 亿 Token')).toBeInTheDocument()
+    expect(screen.getByText('gpt-6.1-sol')).toBeInTheDocument()
+    expect(screen.queryByText('暂无模型用量')).not.toBeInTheDocument()
+  })
+
+  it('combines equal model names across providers and sorts by combined tokens', async () => {
+    vi.mocked(api.getAnalyticsUsage).mockResolvedValue({
+      range: 'today', summary: { requests: 12, totalTokens: 800_000 }, days: [],
+      models: [
+        { provider: 'first', model: 'gemini-3.8-flash', totalTokens: 200_000 },
+        { provider: 'first', model: 'gemini-3.8-flash-tiered', totalTokens: 300_000 },
+        { provider: 'second', model: 'gemini-3.8-flash', totalTokens: 250_000 },
+        { provider: 'second', model: 'other-model', totalTokens: 50_000 },
+      ],
+    } as unknown as OcxUsageResponse)
+    renderSidebar()
+    await userEvent.hover(screen.getByRole('link', { name: '统计' }))
+    expect(await screen.findByText('80 万 Token')).toBeInTheDocument()
+    expect(screen.getAllByText('gemini-3.8-flash')).toHaveLength(1)
+    const rows = [...document.querySelectorAll('.sidebar-usage-model')]
+    expect(rows.map(row => row.textContent)).toEqual([
+      'gemini-3.8-flash45 万', 'gemini-3.8-flash-tiered30 万', 'other-model5 万',
+    ])
+    expect(screen.getByText('12 次请求')).toBeInTheDocument()
     expect(api.getAnalyticsUsage).toHaveBeenCalledOnce()
   })
 

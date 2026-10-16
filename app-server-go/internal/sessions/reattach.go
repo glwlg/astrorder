@@ -16,6 +16,9 @@ var nativeAttachLocks sync.Map
 // from its exact persisted session without resubmitting the previous command.
 func (h *Handler) ensureNativeBinding(ctx context.Context, session map[string]any) error {
 	err := h.bindNativeSession(ctx, session)
+	if err == nil {
+		err = h.restoreCodexApproval(ctx, session)
+	}
 	if err != nil {
 		// The HTTP layer reports only a status code; keep the cause findable.
 		slog.Warn("native session binding failed", "agent_id", stringValue(session, "agent_id"), "session_id", stringValue(session, "id"), "error", err)

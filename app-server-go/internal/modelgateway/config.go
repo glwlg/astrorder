@@ -10,12 +10,13 @@ import (
 )
 
 const (
-	PreferenceKey = "analytics:llm_gateway"
+	PreferenceKey  = "analytics:llm_gateway"
 	legacyUsageKey = "analytics:ocx_usage_url"
 )
 
 // GatewayProfile represents settings for a specific gateway type.
 type GatewayProfile struct {
+	StatisticsURL   string            `json:"statistics_url"`
 	GatewayType     string            `json:"gateway_type"`
 	ManagementURL   string            `json:"management_url"`
 	InferenceURL    string            `json:"inference_url"`
@@ -26,6 +27,7 @@ type GatewayProfile struct {
 
 // GatewayConfig represents the full internal LLM gateway configuration.
 type GatewayConfig struct {
+	StatisticsURL   string                    `json:"statistics_url"`
 	GatewayType     string                    `json:"gateway_type"`
 	ManagementURL   string                    `json:"management_url"`
 	InferenceURL    string                    `json:"inference_url"`
@@ -37,6 +39,7 @@ type GatewayConfig struct {
 
 // PublicProfile is the masked view of a gateway profile.
 type PublicProfile struct {
+	StatisticsURL       string            `json:"statistics_url"`
 	GatewayType         string            `json:"gateway_type"`
 	ManagementURL       string            `json:"management_url"`
 	InferenceURL        string            `json:"inference_url"`
@@ -47,6 +50,7 @@ type PublicProfile struct {
 
 // PublicGatewayConfig is the public response without raw secrets.
 type PublicGatewayConfig struct {
+	StatisticsURL       string                   `json:"statistics_url"`
 	GatewayType         string                   `json:"gateway_type"`
 	ManagementURL       string                   `json:"management_url"`
 	InferenceURL        string                   `json:"inference_url"`
@@ -103,6 +107,17 @@ func validateURL(raw, label string) (string, error) {
 	return val, nil
 }
 
+func validateStatisticsURL(raw string) (string, error) {
+	val := strings.TrimSpace(raw)
+	if val != "" {
+		u, err := url.Parse(val)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
+			return "", errors.New("统计页地址必须是完整的 http 或 https 地址，且不能包含用户名或密码")
+		}
+	}
+	return val, nil
+}
+
 func maskSecret(s string) string {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -119,6 +134,7 @@ func (c GatewayConfig) ToPublic() PublicGatewayConfig {
 	pubProfiles := make(map[string]PublicProfile, len(c.GatewayProfiles))
 	for k, p := range c.GatewayProfiles {
 		pubProfiles[k] = PublicProfile{
+			StatisticsURL:       p.StatisticsURL,
 			GatewayType:         p.GatewayType,
 			ManagementURL:       p.ManagementURL,
 			InferenceURL:        p.InferenceURL,
@@ -128,6 +144,7 @@ func (c GatewayConfig) ToPublic() PublicGatewayConfig {
 		}
 	}
 	return PublicGatewayConfig{
+		StatisticsURL:       c.StatisticsURL,
 		GatewayType:         c.GatewayType,
 		ManagementURL:       c.ManagementURL,
 		InferenceURL:        c.InferenceURL,
@@ -181,9 +198,19 @@ func parseAndMergeGatewayConfig(m map[string]any, current GatewayConfig) (Gatewa
 		return current, errors.New("暂不支持此 LLM 网关类型")
 	}
 
-	profiles := current.GatewayProfiles
-	if profiles == nil {
+	profiles := make(map[string]GatewayProfile, len(current.GatewayProfiles))
+	for key, profile := range current.GatewayProfiles {
+		profiles[key] = profile
+	}
+	if current.GatewayProfiles == nil {
 		profiles = defaultGatewayProfiles()
+	}
+
+	// Migrate the old top-level address only to the gateway that owned it.
+	previousProfile := profiles[current.GatewayType]
+	if previousProfile.StatisticsURL == "" && current.StatisticsURL != "" {
+		previousProfile.StatisticsURL = current.StatisticsURL
+		profiles[current.GatewayType] = previousProfile
 	}
 
 	// Read existing profiles from map if present
@@ -198,6 +225,13 @@ func parseAndMergeGatewayConfig(m map[string]any, current GatewayConfig) (Gatewa
 				continue
 			}
 			prof := profiles[pType]
+			if raw, ok := pMap["statistics_url"].(string); ok {
+				clean, err := validateStatisticsURL(raw)
+				if err != nil {
+					return current, err
+				}
+				prof.StatisticsURL = clean
+			}
 			if mURL, ok := pMap["management_url"].(string); ok && mURL != "" {
 				if clean, err := validateURL(mURL, "管理地址"); err == nil {
 					prof.ManagementURL = clean
@@ -294,6 +328,15 @@ func parseAndMergeGatewayConfig(m map[string]any, current GatewayConfig) (Gatewa
 		}
 	}
 
+	statisticsURL := activeProfile.StatisticsURL
+	if raw, ok := m["statistics_url"].(string); ok {
+		var err error
+		statisticsURL, err = validateStatisticsURL(raw)
+		if err != nil {
+			return current, err
+		}
+	}
+	activeProfile.StatisticsURL = statisticsURL
 	activeProfile.GatewayType = gwType
 	activeProfile.ManagementURL = managementURL
 	activeProfile.InferenceURL = inferenceURL
@@ -301,8 +344,8 @@ func parseAndMergeGatewayConfig(m map[string]any, current GatewayConfig) (Gatewa
 	activeProfile.ManagementKey = activeManagementKey
 	activeProfile.TargetOverrides = targetOverrides
 	profiles[gwType] = activeProfile
-
 	res := GatewayConfig{
+		StatisticsURL:   statisticsURL,
 		GatewayType:     gwType,
 		ManagementURL:   managementURL,
 		InferenceURL:    inferenceURL,

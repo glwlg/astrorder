@@ -41,6 +41,10 @@ func (h *Handler) handleBackgroundProcesses(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if err != nil {
+		if h.nativeCodexThreadEmpty(ctx, session, ref.SessionId) {
+			writeJSON(w, 200, map[string]any{"items": []any{}})
+			return
+		}
 		writeJSONError(w, http.StatusBadGateway, "后台任务读取失败："+err.Error())
 		return
 	}

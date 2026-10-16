@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { ActionIcon, Button, Group, LoadingOverlay, Paper, Text } from '@mantine/core'
 import { IconDownload, IconRefresh } from '@tabler/icons-react'
 import * as THREE from 'three'
+import { downloadFile } from '../../fileTransfer'
 import type { ViewerContext } from '../../types'
 
 export function ThreeViewer({ artifact, toolbarAction }: ViewerContext) {
@@ -137,7 +138,7 @@ export function ThreeViewer({ artifact, toolbarAction }: ViewerContext) {
               variant="subtle"
               size="sm"
               title="下载源文件"
-              onClick={() => window.open(`${artifact.readUrl}&download=1`, '_blank')}
+              onClick={() => void downloadFile(`${artifact.readUrl}&download=1`, artifact.name)}
             >
               <IconDownload size={14} />
             </ActionIcon>

@@ -145,6 +145,12 @@ export function useEventStream(
         const previousSessionStatus = event.agent_id && event.session_id
           ? store.sessions[scopeKey(event.agent_id, event.session_id)]?.status
           : undefined;
+        if ((event.type === "message.upsert" || event.type === "message.delta") && event.agent_id && event.session_id && event.data.turn_id) {
+          const rows = Object.values(store.messages[scopeKey(event.agent_id, event.session_id)] || {});
+          if (!rows.some(row => row.turn_id === event.data.turn_id)) {
+            scheduleHookRefresh(event.agent_id, event.session_id);
+          }
+        }
         store.applyEvent(event);
         const nativeFrame = event.data.frame as { method?: string } | undefined;
         if (

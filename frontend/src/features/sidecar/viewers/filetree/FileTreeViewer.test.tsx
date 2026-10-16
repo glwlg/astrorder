@@ -29,6 +29,40 @@ function renderTree(target = artifact) {
   )
 }
 
+describe('FileTreeViewer file actions', () => {
+  afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); delete (window as unknown as { astrorderDesktop?: unknown }).astrorderDesktop })
+
+  it.each(['local', 'ssh-fixture'])('copies %s files through the native clipboard after staging', async connectionId => {
+    const setClipboardFiles = vi.fn().mockResolvedValue(true)
+    ;(window as unknown as { astrorderDesktop: unknown }).astrorderDesktop = { setClipboardFiles }
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes('/stage')) {
+        const body = JSON.parse(String(init?.body))
+        if (body.copy_to_clipboard !== false) return new Response(JSON.stringify({ detail: 'File clipboard is unavailable' }), { status: 503 })
+        return new Response(JSON.stringify({ local_paths: ['C:/staged/file.txt'], clipboard_set: false }))
+      }
+      return new Response(JSON.stringify({ root: artifact.path, items: [{ name: 'file.txt', path: `${artifact.path}/file.txt`, is_dir: false }] }))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderTree({ ...artifact, connectionId })
+    fireEvent.contextMenu(await screen.findByText('file.txt'))
+    fireEvent.click(await screen.findByText('复制文件 (Ctrl+C)'))
+    await waitFor(() => expect(setClipboardFiles).toHaveBeenCalledWith(['C:/staged/file.txt']))
+  })
+
+  it('downloads authenticated bytes without opening a popup', async () => {
+    const saveDownload = vi.fn().mockResolvedValue(true)
+    ;(window as unknown as { astrorderDesktop: unknown }).astrorderDesktop = { saveDownload }
+    const popup = vi.spyOn(window, 'open').mockReturnValue(null)
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ root: artifact.path, items: [{ name: 'file.txt', path: `${artifact.path}/file.txt`, is_dir: false }] }))))
+    renderTree()
+    fireEvent.contextMenu(await screen.findByText('file.txt'))
+    fireEvent.click(await screen.findByText('下载 / 另存为'))
+    await waitFor(() => expect(saveDownload).toHaveBeenCalledWith(expect.stringContaining('/api/v1/files/raw?'), 'file.txt'))
+    expect(popup).not.toHaveBeenCalled()
+  })
+})
+
 describe('FileTreeViewer expansion persistence', () => {
   const values = new Map<string, string>()
 

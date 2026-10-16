@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatTokens, getModelColor } from './AnalyticsPage'
+import { formatTokens, getModelColor } from './usageFormat'
 
 describe('formatTokens', () => {
   it('uses Chinese magnitude units', () => {

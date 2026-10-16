@@ -16,6 +16,10 @@ func (a *Adapter) canonicalRequest(ctx context.Context, method string, params ma
 	}
 	sid, _ := p["session_id"].(string)
 	switch method {
+	case "session.history":
+		// The shared authority exposes transcript rows in resume snapshots;
+		// the legacy stdio-only history verb is not registered there.
+		return "session.resume", p, nil
 	case "session.resume":
 		delete(p, "lazy")
 	case "session.create":

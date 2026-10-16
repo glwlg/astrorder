@@ -4,6 +4,7 @@ import (
 	nativeprocess "astrorder.dev/session-daemon/internal/process"
 	"astrorder.dev/session-daemon/internal/transport/ssh"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,9 +14,11 @@ import (
 	"path"
 	"path/filepath"
 	platform "runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	core "astrorder.dev/session-daemon/internal/runtime"
 )
@@ -223,6 +226,19 @@ func (c *client) close() error {
 	return c.closeErr
 }
 
+type pendingApproval struct {
+	nativeID   any
+	method     string
+	params     map[string]any
+	approvalID string
+}
+
+type promptCaps struct {
+	image           bool
+	audio           bool
+	embeddedContext bool
+}
+
 type ownedSession struct {
 	failed           bool
 	closed           bool
@@ -239,8 +255,10 @@ type ownedSession struct {
 	effort           string
 	commands         []map[string]any
 	lastError        string
-	pendingApprovals map[string]any
+	pendingApprovals map[string]*pendingApproval
 	approvalKinds    map[string]string
+	approvalMode     string
+	promptCaps       promptCaps
 }
 
 type Adapter struct {
@@ -426,6 +444,13 @@ func (a *Adapter) Command(ctx context.Context, req core.Request) (core.Result, e
 	owned := a.sessions[sessionID]
 	a.mu.RUnlock()
 	if owned == nil {
+		act := req.Action
+		if act == "" && req.Fields != nil {
+			act, _ = req.Fields["action"].(string)
+		}
+		if act == "session.delete" {
+			return a.handleDelete(ctx, nil, sessionID)
+		}
 		return core.Result{}, fmt.Errorf("grok session is not daemon-owned")
 	}
 	owned.mu.Lock()
@@ -495,6 +520,47 @@ func (a *Adapter) Command(ctx context.Context, req core.Request) (core.Result, e
 		return a.handleReasoningSet(ctx, owned, sessionID, req)
 	case "session.approve":
 		return a.handleApprove(owned, sessionID, req)
+	case "session.approval.read":
+		owned.mu.Lock()
+		status := owned.status
+		mode := owned.approvalMode
+		if mode == "" {
+			mode = "manual"
+		}
+		pendingList := make([]map[string]any, 0, len(owned.pendingApprovals))
+		for id, p := range owned.pendingApprovals {
+			pendingList = append(pendingList, map[string]any{
+				"approval_id": id,
+				"method":      p.method,
+				"params":      p.params,
+			})
+		}
+		owned.mu.Unlock()
+		sort.Slice(pendingList, func(i, j int) bool {
+			return fmt.Sprint(pendingList[i]["approval_id"]) < fmt.Sprint(pendingList[j]["approval_id"])
+		})
+		payload := map[string]any{
+			"mode":    mode,
+			"pending": pendingList,
+		}
+		if len(pendingList) > 0 {
+			payload["params"] = pendingList[0]["params"]
+		}
+		return core.Result{SessionID: sessionID, Status: status, Payload: payload}, nil
+	case "session.approval.set":
+		mode, _ := req.Fields["mode"].(string)
+		if mode != "manual" && mode != "auto" && mode != "full_access" {
+			return core.Result{}, fmt.Errorf("grok approval mode is invalid")
+		}
+		owned.mu.Lock()
+		owned.approvalMode = mode
+		status := owned.status
+		owned.mu.Unlock()
+		return core.Result{SessionID: sessionID, Status: status, Payload: map[string]any{"mode": mode}}, nil
+	case "session.delete":
+		return a.handleDelete(ctx, owned, sessionID)
+	case "session.history_page":
+		return a.handleHistoryPage(ctx, owned, sessionID, req)
 	case "session.close":
 		owned.mu.Lock()
 		owned.closed = true
@@ -551,6 +617,11 @@ func (a *Adapter) handleSend(owned *ownedSession, sessionID string, req core.Req
 		return core.Result{}, fmt.Errorf("grok prompt must be non-empty")
 	}
 
+	promptBlocks, err := buildPromptBlocks(promptStr, rawAttachments, owned.promptCaps)
+	if err != nil {
+		return core.Result{}, err
+	}
+
 	if owned.promptRunning {
 		return core.Result{}, fmt.Errorf("grok session already has an active turn")
 	}
@@ -572,7 +643,7 @@ func (a *Adapter) handleSend(owned *ownedSession, sessionID string, req core.Req
 	promptCtx, cancel := context.WithCancel(context.Background())
 	owned.promptCancel = cancel
 
-	go a.executePrompt(promptCtx, owned, sessionID, commandID, promptStr, rawAttachments)
+	go a.executePrompt(promptCtx, owned, sessionID, commandID, promptBlocks)
 
 	return core.Result{
 		SessionID: sessionID,
@@ -581,40 +652,7 @@ func (a *Adapter) handleSend(owned *ownedSession, sessionID string, req core.Req
 	}, nil
 }
 
-func (a *Adapter) executePrompt(ctx context.Context, owned *ownedSession, sessionID, commandID, prompt string, rawAttachments []any) {
-	promptBlocks := make([]map[string]any, 0)
-	if prompt != "" {
-		promptBlocks = append(promptBlocks, map[string]any{"type": "text", "text": prompt})
-	}
-	for _, attVal := range rawAttachments {
-		att, ok := attVal.(map[string]any)
-		if !ok {
-			continue
-		}
-		mediaType, _ := att["media_type"].(string)
-		contentBase64, _ := att["content_base64"].(string)
-		if strings.HasPrefix(mediaType, "image/") && contentBase64 != "" {
-			promptBlocks = append(promptBlocks, map[string]any{
-				"type":     "image",
-				"data":     contentBase64,
-				"mimeType": mediaType,
-			})
-		} else {
-			name, _ := att["name"].(string)
-			if name == "" {
-				name = "attachment"
-			}
-			text, _ := att["text"].(string)
-			promptBlocks = append(promptBlocks, map[string]any{
-				"type": "text",
-				"text": strings.TrimSpace(fmt.Sprintf("\n\n[Attachment: %s]\n%s", name, text)),
-			})
-		}
-	}
-	if len(promptBlocks) == 0 {
-		promptBlocks = append(promptBlocks, map[string]any{"type": "text", "text": ""})
-	}
-
+func (a *Adapter) executePrompt(ctx context.Context, owned *ownedSession, sessionID, commandID string, promptBlocks []map[string]any) {
 	result, err := owned.client.request(ctx, "session/prompt", map[string]any{
 		"sessionId": sessionID,
 		"prompt":    promptBlocks,
@@ -786,10 +824,14 @@ func (a *Adapter) handleReasoningSet(ctx context.Context, owned *ownedSession, s
 func (a *Adapter) handleApprove(owned *ownedSession, sessionID string, req core.Request) (core.Result, error) {
 	var approvalID, decision string
 	var permissions map[string]any
+	cancelled := false
 	if req.Fields != nil {
 		approvalID, _ = req.Fields["approval_id"].(string)
 		decision, _ = req.Fields["decision"].(string)
 		permissions, _ = req.Fields["permissions"].(map[string]any)
+		if c, ok := req.Fields["cancelled"].(bool); ok {
+			cancelled = c
+		}
 	}
 
 	if approvalID == "" || (decision != "accept" && decision != "decline") {
@@ -797,15 +839,53 @@ func (a *Adapter) handleApprove(owned *ownedSession, sessionID string, req core.
 	}
 
 	owned.mu.Lock()
-	nativeID, ok := owned.pendingApprovals[approvalID]
-	kind := owned.approvalKinds[approvalID]
+	record, ok := owned.pendingApprovals[approvalID]
 	if !ok {
 		owned.mu.Unlock()
 		return core.Result{}, fmt.Errorf("grok approval is not pending for this session")
 	}
+	kind := record.method
+	nativeID := record.nativeID
+	nativeParams := record.params
 
 	var result map[string]any
-	if kind == "item/permissions/requestApproval" || kind == "session/request_permission" {
+	if kind == "session/request_permission" {
+		if cancelled {
+			result = map[string]any{
+				"outcome": map[string]any{
+					"outcome": "cancelled",
+				},
+			}
+		} else if decision == "accept" {
+			optID := findOptionID(nativeParams, "allow_once", "allow")
+			if optID == "" {
+				owned.mu.Unlock()
+				return core.Result{}, fmt.Errorf("grok permission approval has no matching allow option")
+			}
+			result = map[string]any{
+				"outcome": map[string]any{
+					"outcome":  "selected",
+					"optionId": optID,
+				},
+			}
+		} else { // decline
+			optID := findOptionID(nativeParams, "reject_once", "reject")
+			if optID != "" {
+				result = map[string]any{
+					"outcome": map[string]any{
+						"outcome":  "selected",
+						"optionId": optID,
+					},
+				}
+			} else {
+				result = map[string]any{
+					"outcome": map[string]any{
+						"outcome": "cancelled",
+					},
+				}
+			}
+		}
+	} else if kind == "item/permissions/requestApproval" {
 		perms := map[string]any{}
 		if decision == "accept" {
 			if permissions == nil {
@@ -819,6 +899,10 @@ func (a *Adapter) handleApprove(owned *ownedSession, sessionID string, req core.
 		result = map[string]any{"decision": decision}
 	}
 
+	if err := owned.client.send(map[string]any{"id": nativeID, "result": result}); err != nil {
+		owned.mu.Unlock()
+		return core.Result{}, err
+	}
 	delete(owned.pendingApprovals, approvalID)
 	delete(owned.approvalKinds, approvalID)
 	if len(owned.pendingApprovals) == 0 {
@@ -831,8 +915,12 @@ func (a *Adapter) handleApprove(owned *ownedSession, sessionID string, req core.
 	status := owned.status
 	owned.mu.Unlock()
 
-	if err := owned.client.send(map[string]any{"id": nativeID, "result": result}); err != nil {
-		return core.Result{}, err
+	if a.config.Emit != nil {
+		_ = a.config.Emit(sessionID, "grok.approval_resolved", map[string]any{
+			"agent_id":    a.config.AgentID,
+			"approval_id": approvalID,
+			"decision":    decision,
+		}, status)
 	}
 
 	return core.Result{
@@ -840,6 +928,22 @@ func (a *Adapter) handleApprove(owned *ownedSession, sessionID string, req core.
 		Status:    status,
 		Payload:   map[string]any{"status": status, "accepted": true},
 	}, nil
+}
+
+func findOptionID(params map[string]any, preferredKind, _ string) string {
+	rawOpts, _ := params["options"].([]any)
+	for _, optVal := range rawOpts {
+		opt, ok := optVal.(map[string]any)
+		if !ok {
+			continue
+		}
+		optID, _ := opt["optionId"].(string)
+		kind, _ := opt["kind"].(string)
+		if kind == preferredKind && optID != "" {
+			return optID
+		}
+	}
+	return ""
 }
 
 func (a *Adapter) openSession(ctx context.Context, sessionID, workspace string, load bool) (*ownedSession, error) {
@@ -856,7 +960,7 @@ func (a *Adapter) openSessionMode(ctx context.Context, sessionID, workspace stri
 		workspace:        workspace,
 		status:           "idle",
 		control:          control,
-		pendingApprovals: make(map[string]any),
+		pendingApprovals: make(map[string]*pendingApproval),
 		approvalKinds:    make(map[string]string),
 	}
 
@@ -893,9 +997,11 @@ func (a *Adapter) openSessionMode(ctx context.Context, sessionID, workspace stri
 		}
 	}
 
+	promptCaps := parsePromptCaps(initResp)
 	models := parseModels(initResp)
 	defaultMod := currentModel(initResp)
 	model, effort := parseLoadedSettings(loadedResp, defaultMod)
+	initialCommands := parseCommandsFromSetup(initResp, loadedResp)
 
 	// Resolve model by matching model ID or label
 	for _, m := range models {
@@ -908,9 +1014,13 @@ func (a *Adapter) openSessionMode(ctx context.Context, sessionID, workspace stri
 	}
 
 	owned.mu.Lock()
+	owned.promptCaps = promptCaps
 	owned.models = models
 	owned.model = model
 	owned.effort = effort
+	if len(initialCommands) > 0 {
+		owned.commands = initialCommands
+	}
 	owned.mu.Unlock()
 
 	a.mu.Lock()
@@ -936,6 +1046,7 @@ func clientPID(c *client) int {
 }
 
 func (a *Adapter) handleFrameNotification(owned *ownedSession, sessionID string, frame map[string]any) {
+	annotateGrokIdentity(sessionID, frame)
 	method, _ := frame["method"].(string)
 	params, _ := frame["params"].(map[string]any)
 	if sid, _ := params["sessionId"].(string); sid != "" && sid != sessionID {
@@ -954,18 +1065,46 @@ func (a *Adapter) handleFrameNotification(owned *ownedSession, sessionID string,
 	status := ""
 	if hasID && isApproval {
 		approvalID := "grok:" + nativeRequestID(nativeID)
-		owned.pendingApprovals[approvalID] = nativeID
+		owned.pendingApprovals[approvalID] = &pendingApproval{
+			nativeID:   nativeID,
+			method:     method,
+			params:     params,
+			approvalID: approvalID,
+		}
 		owned.approvalKinds[approvalID] = method
 		owned.status = "waiting_approval"
 		status = owned.status
 	}
 	update, _ := params["update"].(map[string]any)
-	if update["sessionUpdate"] == "available_commands_update" {
-		owned.commands = parseCommands(update)
-	}
-	if update["sessionUpdate"] == "retry_state" && update["type"] == "failed" {
-		if msg, ok := update["message"].(string); ok {
-			owned.lastError = msg
+	if update != nil {
+		switch update["sessionUpdate"] {
+		case "available_commands_update":
+			owned.commands = parseCommands(update)
+		case "config_option_update":
+			if optID, ok := update["configId"].(string); ok {
+				if optID == "model" {
+					if v, ok := update["value"].(string); ok && v != "" {
+						owned.model = v
+					}
+				} else if optID == "reasoning_effort" {
+					if v, ok := update["value"].(string); ok && v != "" {
+						owned.effort = v
+					}
+				}
+			}
+		case "current_mode_update", "model_changed":
+			if m, ok := update["model_id"].(string); ok && m != "" {
+				owned.model = m
+			}
+			if e, ok := update["reasoning_effort"].(string); ok && e != "" {
+				owned.effort = e
+			}
+		case "retry_state":
+			if update["type"] == "failed" {
+				if msg, ok := update["message"].(string); ok {
+					owned.lastError = msg
+				}
+			}
 		}
 	}
 	owned.mu.Unlock()
@@ -1382,4 +1521,396 @@ func nativeRequestID(value any) string {
 		return fmt.Sprintf("%d", int64(number))
 	}
 	return fmt.Sprint(value)
+}
+
+func buildPromptBlocks(prompt string, rawAttachments []any, caps promptCaps) ([]map[string]any, error) {
+	promptBlocks := make([]map[string]any, 0)
+	if prompt != "" {
+		promptBlocks = append(promptBlocks, map[string]any{"type": "text", "text": prompt})
+	}
+	for _, attVal := range rawAttachments {
+		att, ok := attVal.(map[string]any)
+		if !ok {
+			continue
+		}
+		name, _ := att["name"].(string)
+		if name == "" {
+			name = "attachment"
+		}
+		mediaType, _ := att["media_type"].(string)
+		contentBase64, _ := att["content_base64"].(string)
+
+		if strings.HasPrefix(mediaType, "image/") {
+			if !caps.image {
+				return nil, fmt.Errorf("grok runtime does not support image prompt capabilities")
+			}
+			if contentBase64 != "" {
+				promptBlocks = append(promptBlocks, map[string]any{
+					"type":     "image",
+					"data":     contentBase64,
+					"mimeType": mediaType,
+				})
+			}
+			continue
+		}
+
+		var textContent string
+		if t, ok := att["text"].(string); ok && t != "" {
+			textContent = t
+		} else if contentBase64 != "" {
+			decoded, err := base64.StdEncoding.DecodeString(contentBase64)
+			if err != nil {
+				return nil, fmt.Errorf("invalid base64 in attachment %s: %w", name, err)
+			}
+			if utf8.Valid(decoded) {
+				textContent = string(decoded)
+			} else {
+				return nil, fmt.Errorf("grok runtime does not support binary non-text attachment %s (%s)", name, mediaType)
+			}
+		}
+
+		if textContent != "" {
+			promptBlocks = append(promptBlocks, map[string]any{
+				"type": "text",
+				"text": strings.TrimSpace(fmt.Sprintf("\n\n[Attachment: %s]\n%s", name, textContent)),
+			})
+		}
+	}
+	if len(promptBlocks) == 0 {
+		promptBlocks = append(promptBlocks, map[string]any{"type": "text", "text": ""})
+	}
+	return promptBlocks, nil
+}
+
+func (a *Adapter) handleDelete(ctx context.Context, owned *ownedSession, sessionID string) (core.Result, error) {
+	if err := ctx.Err(); err != nil {
+		return core.Result{}, err
+	}
+	if strings.HasPrefix(sessionID, "-") || strings.ContainsRune(sessionID, 0) {
+		return core.Result{}, fmt.Errorf("invalid Grok session ID for deletion")
+	}
+	if owned != nil {
+		owned.mu.Lock()
+		busy := owned.status == "running" || owned.status == "waiting_approval"
+		owned.mu.Unlock()
+		if busy {
+			return core.Result{}, fmt.Errorf("Grok session is active")
+		}
+	}
+
+	executable := a.config.Executable
+	if executable == "" {
+		executable = "grok"
+	}
+	args := []string{"sessions", "delete", sessionID}
+
+	if a.sshStarter != nil {
+		spec := ssh.CommandSpec{
+			Executable: executable,
+			Args:       args,
+			Dir:        a.config.Workspace,
+		}
+		sess, err := a.sshStarter(ctx, spec)
+		if err != nil {
+			return core.Result{}, fmt.Errorf("remote grok session delete failed: %w", err)
+		}
+		exitStatus, waitErr := sess.Wait()
+		cleanupErr := sess.Close()
+		if waitErr != nil || cleanupErr != nil || !exitStatus.ConfirmedRemoteExit || exitStatus.ExitCode != 0 {
+			return core.Result{}, fmt.Errorf("remote Grok deletion unconfirmed (exit %d, confirmed %t): %v", exitStatus.ExitCode, exitStatus.ConfirmedRemoteExit, errors.Join(waitErr, cleanupErr))
+		}
+	} else {
+		cmd := exec.CommandContext(ctx, executable, args...)
+		cmd.Dir = a.config.Workspace
+		cmd.Env = nativeprocess.NativeEnvironment()
+		cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
+		owner, err := nativeprocess.StartOwnedCommand(cmd)
+		if err != nil {
+			return core.Result{}, fmt.Errorf("start Grok native deletion: %w", err)
+		}
+		waitErr := cmd.Wait()
+		cleanupErr := owner.Close()
+		if err := errors.Join(waitErr, cleanupErr); err != nil {
+			return core.Result{}, fmt.Errorf("Grok native deletion failed: %w", err)
+		}
+	}
+	if owned != nil {
+		owned.mu.Lock()
+		c := owned.client
+		owned.mu.Unlock()
+		if c != nil {
+			if err := c.close(); err != nil {
+				return core.Result{}, fmt.Errorf("native Grok deleted but binding cleanup failed: %w", err)
+			}
+		}
+		owned.mu.Lock()
+		owned.closed = true
+		owned.mu.Unlock()
+		a.mu.Lock()
+		delete(a.sessions, sessionID)
+		a.mu.Unlock()
+	}
+
+	return core.Result{
+		SessionID: sessionID,
+		Status:    "idle",
+		Payload: map[string]any{
+			"deleted": sessionID,
+			"status":  "idle",
+		},
+	}, nil
+}
+
+func (a *Adapter) handleHistoryPage(ctx context.Context, owned *ownedSession, sessionID string, req core.Request) (core.Result, error) {
+	limit := 0
+	switch value := req.Fields["limit"].(type) {
+	case int:
+		limit = value
+	case float64:
+		if value == float64(int(value)) {
+			limit = int(value)
+		}
+	}
+	if limit < 1 || limit > 200 {
+		return core.Result{}, fmt.Errorf("history limit must be between 1 and 200")
+	}
+
+	before, ok := req.Fields["before"].(string)
+	if val, present := req.Fields["before"]; present && val != nil && !ok {
+		return core.Result{}, fmt.Errorf("invalid history cursor")
+	}
+	if len(before) > 512 {
+		return core.Result{}, fmt.Errorf("invalid history cursor")
+	}
+
+	workspace := a.config.Workspace
+	if owned != nil {
+		owned.mu.Lock()
+		if owned.workspace != "" {
+			workspace = owned.workspace
+		}
+		owned.mu.Unlock()
+	}
+	ws, err := a.workspace(workspace)
+	if err != nil {
+		return core.Result{}, err
+	}
+
+	var mu sync.Mutex
+	replayedItems := make([]map[string]any, 0)
+	onNotification := func(frame map[string]any) {
+		params, _ := frame["params"].(map[string]any)
+		if params == nil {
+			return
+		}
+		if sid, _ := params["sessionId"].(string); sid != "" && sid != sessionID {
+			return
+		}
+		if item := grokReplayItem(sessionID, frame); item != nil {
+			mu.Lock()
+			merged := false
+			for _, existing := range replayedItems {
+				if existing["id"] == item["id"] {
+					mergeGrokReplayItem(existing, item)
+					merged = true
+					break
+				}
+			}
+			if !merged {
+				replayedItems = append(replayedItems, item)
+			}
+			mu.Unlock()
+		}
+	}
+
+	tempClient, err := a.startClient(ctx, ws, onNotification)
+	if err != nil {
+		return core.Result{}, err
+	}
+	defer tempClient.close()
+
+	_, err = tempClient.request(ctx, "initialize", initializeParams())
+	if err != nil {
+		return core.Result{}, err
+	}
+
+	loadResp, err := tempClient.request(ctx, "session/load", map[string]any{
+		"sessionId":  sessionID,
+		"cwd":        ws,
+		"mcpServers": []any{},
+	})
+	if err != nil {
+		return core.Result{}, err
+	}
+
+	if err := tempClient.drainEvents(ctx); err != nil {
+		return core.Result{}, err
+	}
+	mu.Lock()
+	if rawItems, ok := loadResp["items"].([]any); ok && len(rawItems) > 0 {
+		replayedItems = nil
+		for i, rVal := range rawItems {
+			if rMap, ok := rVal.(map[string]any); ok {
+				replayedItems = append(replayedItems, normalizeHistoryItem(rMap, i))
+			}
+		}
+	} else if rawMessages, ok := loadResp["messages"].([]any); ok && len(rawMessages) > 0 {
+		replayedItems = nil
+		for i, rVal := range rawMessages {
+			if rMap, ok := rVal.(map[string]any); ok {
+				replayedItems = append(replayedItems, normalizeHistoryItem(rMap, i))
+			}
+		}
+	}
+	all := make([]map[string]any, len(replayedItems))
+	copy(all, replayedItems)
+	mu.Unlock()
+
+	startIndex := len(all)
+	if before != "" {
+		if strings.HasPrefix(before, "grok:") {
+			rawToken := strings.TrimPrefix(before, "grok:")
+			decodedBytes, dErr := base64.RawURLEncoding.DecodeString(rawToken)
+			if dErr == nil {
+				var cur struct {
+					Session string `json:"session"`
+					Index   int    `json:"index"`
+					ItemID  string `json:"item_id"`
+				}
+				if json.Unmarshal(decodedBytes, &cur) == nil && cur.Session == sessionID {
+					if cur.Index >= 0 && cur.Index <= len(all) {
+						startIndex = cur.Index
+					} else {
+						for i, it := range all {
+							if fmt.Sprint(it["id"]) == cur.ItemID {
+								startIndex = i
+								break
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	from := startIndex - limit
+	if from < 0 {
+		from = 0
+	}
+	paged := all[from:startIndex]
+	var nextCursor any
+	hasMore := from > 0
+	if hasMore {
+		curObj := map[string]any{
+			"session": sessionID,
+			"index":   from,
+			"item_id": fmt.Sprint(all[from]["id"]),
+		}
+		rawCur, _ := json.Marshal(curObj)
+		nextCursor = "grok:" + base64.RawURLEncoding.EncodeToString(rawCur)
+	}
+
+	items := make([]any, len(paged))
+	for i := range paged {
+		items[i] = paged[i]
+	}
+
+	return core.Result{
+		SessionID: sessionID,
+		Status:    "idle",
+		Payload: map[string]any{
+			"items":       items,
+			"next_cursor": nextCursor,
+			"has_more":    hasMore,
+		},
+	}, nil
+}
+
+func normalizeHistoryItem(raw map[string]any, seq int) map[string]any {
+	item := make(map[string]any, len(raw)+2)
+	for k, v := range raw {
+		item[k] = v
+	}
+	meta, _ := item["_meta"].(map[string]any)
+	if meta == nil {
+		meta = make(map[string]any)
+	} else {
+		newMeta := make(map[string]any, len(meta)+1)
+		for k, v := range meta {
+			newMeta[k] = v
+		}
+		meta = newMeta
+	}
+	item["_meta"] = meta
+
+	var idStr string
+	if itemID, ok := meta["astrorderItemId"].(string); ok && itemID != "" {
+		idStr = itemID
+	} else if evID, ok := meta["eventId"].(string); ok && evID != "" {
+		idStr = evID
+		meta["astrorderItemId"] = idStr
+	} else if rawID, hasID := item["id"]; hasID && rawID != nil && fmt.Sprint(rawID) != "" {
+		idStr = fmt.Sprint(rawID)
+		meta["astrorderItemId"] = idStr
+	} else {
+		idStr = fmt.Sprintf("grok-item-%d", seq+1)
+		meta["astrorderItemId"] = idStr
+	}
+	item["id"] = idStr
+
+	if _, hasRole := item["role"]; !hasRole {
+		if t, ok := item["type"].(string); ok && t != "" {
+			item["role"] = t
+		} else {
+			item["role"] = "assistant"
+		}
+	}
+	return item
+}
+
+func parsePromptCaps(initResp map[string]any) promptCaps {
+	res, ok := initResp["result"].(map[string]any)
+	if !ok {
+		res = initResp
+	}
+	agentCaps, _ := res["agentCapabilities"].(map[string]any)
+	if agentCaps == nil {
+		return promptCaps{}
+	}
+	pCaps, _ := agentCaps["promptCapabilities"].(map[string]any)
+	if pCaps == nil {
+		return promptCaps{}
+	}
+	img, _ := pCaps["image"].(bool)
+	aud, _ := pCaps["audio"].(bool)
+	ctx, _ := pCaps["embeddedContext"].(bool)
+	return promptCaps{image: img, audio: aud, embeddedContext: ctx}
+}
+
+func parseCommandsFromSetup(initResp, loadedResp map[string]any) []map[string]any {
+	if loadedResp != nil {
+		if cmds := parseCommands(loadedResp); len(cmds) > 0 {
+			return cmds
+		}
+		if meta, _ := loadedResp["_meta"].(map[string]any); meta != nil {
+			if cmds := parseCommands(meta); len(cmds) > 0 {
+				return cmds
+			}
+		}
+	}
+	if initResp != nil {
+		res, ok := initResp["result"].(map[string]any)
+		if !ok {
+			res = initResp
+		}
+		if cmds := parseCommands(res); len(cmds) > 0 {
+			return cmds
+		}
+		if meta, _ := res["_meta"].(map[string]any); meta != nil {
+			if cmds := parseCommands(meta); len(cmds) > 0 {
+				return cmds
+			}
+		}
+	}
+	return nil
 }

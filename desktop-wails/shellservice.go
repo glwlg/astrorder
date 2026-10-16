@@ -51,6 +51,7 @@ type ShellService struct {
 	smokeReport string
 	quit        func()
 	preview     *PreviewService
+	statistics  *StatisticsView
 	opMu        sync.Mutex
 	isPackaged  bool
 	refreshTray func()

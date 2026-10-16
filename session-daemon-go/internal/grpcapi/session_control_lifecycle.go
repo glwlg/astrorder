@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"strings"
+	"unicode/utf8"
 
 	pb "astrorder.dev/contracts/gen/go/astrorder/sessiond/v1"
 	"google.golang.org/grpc/codes"
@@ -227,6 +228,9 @@ func inputFields(parts []*pb.InputPart) (map[string]any, error) {
 				return nil, status.Error(codes.InvalidArgument, "attachment is invalid")
 			}
 			item := map[string]any{"name": a.Name, "media_type": a.MediaType, "content_base64": base64.StdEncoding.EncodeToString(a.Content)}
+			if utf8.Valid(a.Content) {
+				item["text"] = string(a.Content)
+			}
 			if a.SourceId != nil {
 				item["source_id"] = *a.SourceId
 			}

@@ -109,6 +109,7 @@ func (s *sessionControlService) RespondApproval(ctx context.Context, r *pb.Respo
 	case pb.ApprovalDecision_APPROVAL_DECISION_CANCEL:
 		fields["decision"] = "decline"
 		fields["choice"] = "deny"
+		fields["cancelled"] = true
 	case pb.ApprovalDecision_APPROVAL_DECISION_ACCEPT_FOR_SESSION:
 		fields["decision"] = "accept"
 		fields["choice"] = "session"

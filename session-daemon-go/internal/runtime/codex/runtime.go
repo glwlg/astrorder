@@ -97,10 +97,15 @@ type Runtime struct {
 	approvalKinds    map[string]string
 	notifications    chan Notification
 	done             chan struct{}
+	eventDone        chan struct{}
+	processDone      chan struct{}
+	exitConfirmed    bool
 	nextID           int
 	sessionID        string
 	activeTurnID     string
 	turnRevision     uint64
+	freshEmpty       bool // native thread/start proved empty, before any history mutation
+	emptyRevision    uint64
 	completedTurns   map[string]string
 	starting         bool
 	status           string
@@ -117,7 +122,7 @@ func New(config Config) *Runtime {
 		turnCommands:     map[string]string{},
 		pendingApprovals: map[string]any{}, nextID: 1, status: "idle",
 		inputQuestions: map[string]map[string]bool{},
-		approvalKinds:  map[string]string{}, notifications: make(chan Notification, 256), done: make(chan struct{}),
+		approvalKinds:  map[string]string{}, notifications: make(chan Notification, 256), done: make(chan struct{}), eventDone: make(chan struct{}),
 	}
 	go r.dispatchNotifications()
 	return r
@@ -133,11 +138,15 @@ func (runtime *Runtime) LocalPID() int {
 }
 
 func (runtime *Runtime) dispatchNotifications() {
+	defer close(runtime.eventDone)
 	for {
 		select {
 		case notification := <-runtime.notifications:
 			if runtime.config.OnNotification != nil {
 				runtime.config.OnNotification(notification)
+			}
+			if notification.Method == "runtime/closed" {
+				return
 			}
 		case <-runtime.done:
 			return
@@ -182,6 +191,14 @@ func (runtime *Runtime) Create(ctx context.Context, request Request) (Result, er
 		return Result{}, fmt.Errorf("codex did not return a thread id")
 	}
 	runtime.setSession(sessionID, "idle")
+	if method == "thread/start" {
+		thread, _ := response["thread"].(map[string]any)
+		turns, ok := thread["turns"].([]any)
+		runtime.mu.Lock()
+		runtime.freshEmpty = thread["id"] == sessionID && ok && len(turns) == 0
+		runtime.emptyRevision++
+		runtime.mu.Unlock()
+	}
 	if request.Title != "" && !ephemeral {
 		if _, err := runtime.request(ctx, "thread/name/set", map[string]any{"threadId": sessionID, "name": request.Title}); err != nil {
 			runtime.Close()
@@ -272,8 +289,13 @@ func (runtime *Runtime) start(ctx context.Context, workspace string, environment
 			return fmt.Errorf("codex runtime closed during startup")
 		}
 		runtime.sshSession, runtime.stdin, runtime.closed = sess, sess.Stdin(), false
+		runtime.processDone = make(chan struct{})
 		runtime.mu.Unlock()
 		go runtime.readLoop(sess.Stdout())
+		go func() {
+			exit, _ := sess.Wait()
+			runtime.finishProcess(exit.ConfirmedRemoteExit && !exit.LocalKilled)
+		}()
 	} else {
 		command := exec.Command(runtime.config.Executable, arguments...)
 		command.Dir = workspace
@@ -297,8 +319,13 @@ func (runtime *Runtime) start(ctx context.Context, workspace string, environment
 			return fmt.Errorf("codex runtime closed during startup")
 		}
 		runtime.command, runtime.stdin, runtime.closed = command, stdin, false
+		runtime.processDone = make(chan struct{})
 		runtime.mu.Unlock()
-		go runtime.readLoop(stdout)
+		go func() {
+			runtime.readLoop(stdout)
+			_ = command.Wait()
+			runtime.finishProcess(true)
+		}()
 	}
 	initialized, err := runtime.request(ctx, "initialize", map[string]any{
 		"clientInfo":   clientInfo(),
@@ -561,11 +588,17 @@ func (runtime *Runtime) setSession(sessionID, status string) {
 func (runtime *Runtime) Status() string {
 	runtime.mu.Lock()
 	defer runtime.mu.Unlock()
+	if runtime.closed || runtime.transportFailed {
+		return "error"
+	}
 	return runtime.status
 }
 
 func (runtime *Runtime) setStatus(status string) {
 	runtime.mu.Lock()
+	if runtime.closed || runtime.transportFailed {
+		status = "error"
+	}
 	runtime.status = status
 	runtime.mu.Unlock()
 }
@@ -597,6 +630,12 @@ func (runtime *Runtime) request(ctx context.Context, method string, params map[s
 	if runtime.closed || runtime.transportFailed || runtime.stdin == nil {
 		runtime.mu.Unlock()
 		return nil, fmt.Errorf("codex runtime is closed")
+	}
+	switch method {
+	case "turn/start", "turn/steer", "review/start", "thread/compact/start", "thread/rollback", "thread/goal/set":
+		// Retire before sending: a missing reply may still mean native committed.
+		runtime.freshEmpty = false
+		runtime.emptyRevision++
 	}
 	id := runtime.nextID
 	runtime.nextID++
@@ -631,13 +670,7 @@ func (runtime *Runtime) readLoop(stdout io.Reader) {
 	for {
 		var frame map[string]any
 		if err := decoder.Decode(&frame); err != nil {
-			runtime.mu.Lock()
-			runtime.transportFailed = true
-			if !runtime.closed {
-				runtime.status = "error"
-			}
-			runtime.mu.Unlock()
-			runtime.failPending(err)
+			runtime.failTransport(err)
 			return
 		}
 		if method, ok := frame["method"].(string); ok {
@@ -661,7 +694,7 @@ func (runtime *Runtime) readLoop(stdout io.Reader) {
 			continue
 		}
 		if rpcError, ok := frame["error"]; ok {
-			waiter.err <- fmt.Errorf("codex RPC error: %v", rpcError)
+			waiter.err <- newNativeRPCError(rpcError)
 			continue
 		}
 		if raw, exists := frame["result"]; exists {
@@ -687,6 +720,11 @@ func (runtime *Runtime) handleNotification(method string, frame map[string]any) 
 			}
 			sessionID = candidate
 		}
+	}
+	switch method {
+	case "turn/started", "turn/completed", "item/started", "item/completed":
+		runtime.freshEmpty = false
+		runtime.emptyRevision++
 	}
 	approvalID := ""
 	if _, needsApproval := approvalMethods[method]; needsApproval {
@@ -779,12 +817,11 @@ func (runtime *Runtime) handleNotification(method string, frame map[string]any) 
 	}
 	if callback != nil {
 		notification := Notification{CommandID: commandID, SessionID: sessionID, Method: method, ApprovalID: approvalID, Status: status, Frame: frame}
+		// Apply backpressure to native stdout instead of terminating a healthy
+		// turn when a burst temporarily outruns durable event delivery.
 		select {
 		case runtime.notifications <- notification:
 		case <-runtime.done:
-		default:
-			runtime.failPending(fmt.Errorf("codex notification overflow; resync required"))
-			go runtime.Close()
 		}
 	}
 }
@@ -845,8 +882,9 @@ func (runtime *Runtime) Close() {
 		return
 	}
 	runtime.closed = true
+	runtime.status = "error"
 	close(runtime.done)
-	command, sshSess, stdin := runtime.command, runtime.sshSession, runtime.stdin
+	command, sshSess, stdin, processDone := runtime.command, runtime.sshSession, runtime.stdin, runtime.processDone
 	runtime.command, runtime.sshSession, runtime.stdin = nil, nil, nil
 	runtime.mu.Unlock()
 	runtime.failPending(fmt.Errorf("codex runtime is closed"))
@@ -856,14 +894,12 @@ func (runtime *Runtime) Close() {
 	if sshSess != nil {
 		_ = sshSess.Close()
 	}
-	if command != nil && command.Process != nil {
-		exited := make(chan struct{})
-		go func() { _ = command.Wait(); close(exited) }()
+	if command != nil && command.Process != nil && processDone != nil {
 		select {
-		case <-exited:
+		case <-processDone:
 		case <-time.After(time.Second):
 			_ = command.Process.Kill()
-			<-exited
+			<-processDone
 		}
 	}
 }

@@ -237,6 +237,7 @@ export function ChatComposer({
 
   const canChat = hasCapability(agent, 'chat')
   const canAttach = hasCapability(agent, 'attachments')
+  const supportsImages = agent?.kind !== 'grok'
   const nativeBusy = session.status === 'running' || session.status === 'waiting_approval'
   const busy = submitting || nativeBusy
   const pending = queue.filter(row => row.payload.agent_id === session.agent_id && row.payload.session_id === session.id && !['accepted', 'running', 'completed'].includes(row.state))
@@ -335,6 +336,14 @@ export function ChatComposer({
 
   const addDroppedFiles = (files: File[]) => {
     if (!files.length || !canAttach) return
+    if (!supportsImages) {
+      const rejected = files.filter((file) => file.type.startsWith('image/'))
+      if (rejected.length > 0) {
+        setError('当前智能体不支持图片附件')
+        files = files.filter((file) => !file.type.startsWith('image/'))
+      }
+      if (!files.length) return
+    }
     const additions: DraftAttachment[] = files.map((file) => {
       attachmentKeyRef.current += 1
       return { key: `draft-attachment-${attachmentKeyRef.current}`, file }
@@ -594,7 +603,7 @@ export function ChatComposer({
       await outbox.remove(session.agent_id, session.id, commandId)
       useAstrorderStore.getState().removeOutbox(session.agent_id, session.id, commandId)
     } catch (err) {
-      console.error('移除排队消息失败', err)
+      setError(errorMessage(err))
     }
   }
 
@@ -621,7 +630,7 @@ ${draft.text}` : entry.payload.text)
         textareaRef.current?.focus()
       }, 50)
     } catch (err) {
-      console.error('编辑排队消息失败', err)
+      setError(errorMessage(err))
     }
   }
 
@@ -699,8 +708,8 @@ ${draft.text}` : entry.payload.text)
                 {entry.state === 'queued' && (
                   <>
                     <Button size="compact-xs" variant="light" color="indigo" onClick={() => void steerQueued(entry.payload.id)}>
-                      立即引导
-                    </Button>
+                      {nativeBusy ? '立即引导' : '发送'}
+                                          </Button>
                     <Button size="compact-xs" variant="subtle" color="blue" onClick={() => void editQueued(entry)}>
                       编辑
                     </Button>
@@ -819,7 +828,7 @@ ${draft.text}` : entry.payload.text)
         <div style={{ position: 'relative' }}>
           <AgentCommandMenu agent={agent} items={agentCommands} activeIndex={commandIndex} onSelect={selectAgentCommand} />
           <AgentMentionMenu agent={agent} items={agentMentions} activeIndex={commandIndex} onSelect={selectAgentMention} />
-          <Textarea ref={textareaRef} className="composer-input" aria-label="消息内容" placeholder="随心输入，可粘贴图片" variant="unstyled" autosize minRows={2} maxRows={8} value={draft.text} onChange={(event) => { setCommandIndex(0); setDismissedMenuText(null); setText(event.currentTarget.value) }} onPaste={handlePaste} onKeyDown={handleKeyDown} disabled={!canChat || submitting} />
+          <Textarea ref={textareaRef} className="composer-input" aria-label="消息内容" placeholder={supportsImages ? '随心输入，可粘贴图片' : '随心输入'} variant="unstyled" autosize minRows={2} maxRows={8} value={draft.text} onChange={(event) => { setCommandIndex(0); setDismissedMenuText(null); setText(event.currentTarget.value) }} onPaste={handlePaste} onKeyDown={handleKeyDown} disabled={!canChat || submitting} />
         </div>
         <Group className="composer-row" align="center" gap="xs" wrap="nowrap">
           <Button
@@ -831,7 +840,7 @@ ${draft.text}` : entry.payload.text)
             aria-label={canAttach ? '添加附件' : '附件能力未提供'}
           >
             <IconPlus size={20} />
-            <input ref={fileInputRef} hidden type="file" multiple onChange={addFiles} />
+            <input ref={fileInputRef} hidden type="file" multiple accept={supportsImages ? undefined : 'text/*,.txt,.md,.json,.csv,.py,.go,.ts,.tsx,.js,.jsx,.html,.css,.yaml,.yml,.toml,.xml,.log,.sh,.bat,.ps1'} onChange={addFiles} />
           </Button>
           <ApprovalModeControl session={session} />
           <span className="composer-toolbar-spacer" />

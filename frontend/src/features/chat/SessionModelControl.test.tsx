@@ -72,6 +72,11 @@ it('summarizes model quota health accurately and defensively', () => {
   })
 })
 
+it('uses the most constrained Magpie quota window and keeps unknown quota unknown', () => {
+  expect(summarizeQuota({ model: 'm', providers: ['codex'], reports: [], accounts: [{ id: 'a', quota: { shortPercent: 95, weeklyPercent: 20 } }] })?.label).toBe('已耗尽')
+  expect(summarizeQuota({ model: 'm', providers: ['codex'], reports: [], accounts: [{ id: 'a', quota: null }] })).toBeNull()
+})
+
 it('desktop shows the bound native model and switches the exact session', async () => {
   vi.spyOn(api, 'getSessionModel').mockResolvedValue({ model: 'bound', provider: 'p' })
   vi.spyOn(api, 'getSessionModels').mockResolvedValue({

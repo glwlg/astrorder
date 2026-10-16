@@ -73,6 +73,9 @@ func TestACPExplicitCloseReleasesOnlyAfterConfirmedCleanup(t *testing.T) {
 
 func TestACPDeleteCannotPretendToDeleteNativeHistory(t *testing.T) {
 	a := failureAdapter(t)
+	// The ACP test executable accepts arbitrary argv; use an unavailable CLI
+	// to exercise a real deletion failure instead of a false exit-zero fixture.
+	a.config.Executable = t.TempDir() + "/missing-grok.exe"
 	if _, err := a.Command(context.Background(), core.Request{SessionID: "owned", Action: "session.delete"}); err == nil {
 		t.Fatal("closing transport was falsely reported as native history deletion")
 	}

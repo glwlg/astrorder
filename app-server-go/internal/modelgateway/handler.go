@@ -69,7 +69,7 @@ func Matches(method, path string) bool {
 	switch clean {
 	case "/api/v1/analytics/config":
 		return method == http.MethodGet || method == http.MethodPut
-	case "/api/v1/analytics/usage", "/api/v1/analytics/model-quota":
+	case "/api/v1/analytics/usage", "/api/v1/analytics/model-quota", "/api/v1/analytics/quotas":
 		return method == http.MethodGet
 	case "/api/v1/model-sync/targets":
 		return method == http.MethodGet
@@ -112,6 +112,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleUpdateAnalyticsConfig(w, r)
 	case r.Method == http.MethodGet && clean == "/api/v1/analytics/usage":
 		h.handleGetAnalyticsUsage(w, r)
+	case r.Method == http.MethodGet && clean == "/api/v1/analytics/quotas":
+		h.handleGetMagpieQuotas(w, r)
 	case r.Method == http.MethodGet && clean == "/api/v1/analytics/model-quota":
 		h.handleGetModelQuota(w, r)
 	case r.Method == http.MethodGet && strings.HasPrefix(clean, "/api/v1/sessions/") && strings.HasSuffix(clean, "/usage"):

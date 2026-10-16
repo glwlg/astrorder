@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ActionIcon, Button, Group, LoadingOverlay, Paper, Text, Tooltip } from '@mantine/core'
 import { IconDeviceFloppy, IconDownload, IconRefresh } from '@tabler/icons-react'
+import { downloadFile } from '../../fileTransfer'
 import type { ViewerContext } from '../../types'
 import { authenticatedApiFetch } from '../../../../api/client'
 
@@ -114,7 +115,7 @@ export function ExcalidrawViewer({ artifact, onSave, onDirtyChange, toolbarActio
               variant="subtle"
               size="sm"
               title="下载文件"
-              onClick={() => window.open(`${artifact.readUrl}&download=1`, '_blank')}
+              onClick={() => void downloadFile(`${artifact.readUrl}&download=1`, artifact.name)}
             >
               <IconDownload size={14} />
             </ActionIcon>

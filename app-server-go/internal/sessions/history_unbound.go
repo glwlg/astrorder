@@ -45,6 +45,9 @@ func (h *Handler) readCodexHistoryUnbound(ctx context.Context, row map[string]an
 		Query:  &sessiondv1.NativeQueryRequest_CodexThreadItemsList{CodexThreadItemsList: query},
 	})
 	if err != nil {
+		if before == "" && h.nativeCodexThreadEmpty(ctx, row, nativeID) {
+			return []map[string]any{}, nil, nil
+		}
 		return nil, nil, err
 	}
 	var page struct {

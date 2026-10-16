@@ -12,6 +12,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"unicode/utf8"
 )
 
 // commandInputs opens registered blobs under the injected storage root. Remote
@@ -84,6 +85,14 @@ func (h *Handler) commandInputs(ctx context.Context, command, session map[string
 			return nil, commandFailure(413, "Total attachment size exceeds limit")
 		}
 		if kind != "codex" && kind != "codex-ssh" {
+			if kind == "grok" {
+				if strings.HasPrefix(media, "image/") {
+					return nil, commandFailure(422, "Image attachments are not supported by Grok")
+				}
+				if !utf8.Valid(data) {
+					return nil, commandFailure(422, "Binary attachments are not supported by Grok")
+				}
+			}
 			id := stringValue(record, "id")
 			input = append(input, &pb.InputPart{Part: &pb.InputPart_Attachment{Attachment: &pb.AttachmentInput{Name: name, MediaType: media, Content: data, SourceId: &id}}})
 			continue

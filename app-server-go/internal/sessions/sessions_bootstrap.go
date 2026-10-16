@@ -90,6 +90,10 @@ func (h *Handler) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := h.reconcileHermesAttachmentRejections(ctx); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "Failed to reconcile queued commands: "+err.Error())
+		return
+	}
 	commands, err := h.store.QueueCommands(ctx)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "Failed to read queued commands")

@@ -102,7 +102,7 @@ func (d *Daemon) control(parent context.Context, request map[string]any) map[str
 		parent = context.WithoutCancel(parent)
 	}
 	response := d.controlOnce(parent, request)
-	if response["action"] == "error" {
+	if response["action"] == "error" && response["rejected_before_dispatch"] != true {
 		// Native RPC failure does not prove that the side effect did not happen.
 		// Retain the reservation and prohibit automatic redispatch.
 		response["operation_id"], response["operation_state"] = id, "uncertain"

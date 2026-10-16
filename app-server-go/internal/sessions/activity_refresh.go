@@ -35,7 +35,7 @@ func (h *Handler) handleRefreshActivity(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, result)
 }
 
-// RefreshActivity refreshes one Agent, or every Codex/Hermes Agent when agentID
+// RefreshActivity refreshes one Agent, or every Codex/Hermes/Grok Agent when agentID
 // is empty. A failing Agent is reported in the result and does not stop the others.
 func (h *Handler) RefreshActivity(ctx context.Context, agentID string) (map[string]any, error) {
 	agents, err := h.store.ListAgents(ctx)
@@ -47,7 +47,7 @@ func (h *Handler) RefreshActivity(ctx context.Context, agentID string) (map[stri
 	for _, agent := range agents {
 		id, _ := agent["id"].(string)
 		kind, _ := agent["kind"].(string)
-		if id == "" || (agentID != "" && id != agentID) || (kind != "codex" && kind != "hermes") {
+		if id == "" || (agentID != "" && id != agentID) || (kind != "codex" && kind != "hermes" && kind != "grok") {
 			continue
 		}
 		entry := map[string]any{"agent_id": id, "kind": kind}
@@ -67,6 +67,9 @@ func (h *Handler) refreshAgentActivity(ctx context.Context, agent map[string]any
 	target, err := h.resolveRuntimeTarget(ctx, agent)
 	if err != nil {
 		return 0, err
+	}
+	if kind == "grok" {
+		return h.refreshGrokActivity(ctx, agent, target)
 	}
 	var native map[string]time.Time
 	var threads []nativeThread

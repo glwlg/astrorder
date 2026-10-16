@@ -12,7 +12,7 @@ import { SettingsDrawerScope } from './SettingsDrawer'
 import { ShortcutSettingsPage } from '../features/shortcuts/ShortcutSettingsPage'
 import { useShortcutHandlers } from '../features/shortcuts/shortcuts'
 import { AgentsPage } from '../features/agents/AgentsPage'
-import { formatTokens, getModelColor } from '../features/analytics/AnalyticsPage'
+import { formatTokens, getModelColor } from '../features/analytics/usageFormat'
 import { PluginsPage } from '../features/plugins/PluginsPage'
 import { NetworkSettingsPage } from '../features/network/NetworkSettingsPage'
 import { DesktopSettingsPage } from '../features/services/DesktopSettingsPage'
@@ -38,9 +38,17 @@ function TodayUsagePreview({ data, pending, error, updatedAt }: {
 }) {
   const now = new Date()
   const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
-  const day = data?.days.find(row => row.date === today)
-  const models = day?.models?.filter(row => Number.isFinite(row.totalTokens))
-    .sort((a, b) => b.totalTokens - a.totalTokens) || []
+  const day = data?.range === 'today' ? { requests: Number(data.summary.requests || 0), totalTokens: Number(data.summary.totalTokens || 0), models: data.models } : data?.days.find(row => row.date === today)
+  const byModel = new Map<string, { model: string; totalTokens: number; providers: Set<string> }>()
+  for (const row of day?.models || []) {
+    if (!Number.isFinite(row.totalTokens)) continue
+    const model = row.model || 'unknown'
+    const entry = byModel.get(model) || { model, totalTokens: 0, providers: new Set<string>() }
+    entry.totalTokens += row.totalTokens
+    if (row.provider) entry.providers.add(row.provider)
+    byModel.set(model, entry)
+  }
+  const models = [...byModel.values()].sort((a, b) => b.totalTokens - a.totalTokens)
   return (
     <div className="sidebar-usage-preview">
       <div className="sidebar-usage-heading">
@@ -55,9 +63,9 @@ function TodayUsagePreview({ data, pending, error, updatedAt }: {
           </div>
           <div className="sidebar-usage-models">
             {models.length ? models.map(row => (
-              <div className="sidebar-usage-model" key={`${row.provider}:${row.model}`}>
-                <span className="sidebar-usage-model-name" title={`${row.provider}/${row.model}`}>
-                  <i style={{ background: getModelColor(row.model, row.provider) }} />
+              <div className="sidebar-usage-model" key={row.model}>
+                <span className="sidebar-usage-model-name" title={`${row.model} · ${[...row.providers].join('、')}`}>
+                  <i style={{ background: getModelColor(row.model) }} />
                   <span>{row.model}</span>
                 </span>
                 <strong>{formatTokens(row.totalTokens)}</strong>
@@ -117,7 +125,7 @@ export function Sidebar({
   const [isMonitorDragOver, setIsMonitorDragOver] = useState(false)
   const todayUsage = useQuery({
     queryKey: ['astrorder', 'analytics', 'today-models'],
-    queryFn: () => api.getAnalyticsUsage({ range: '7d', surface: 'all' }),
+    queryFn: () => api.getAnalyticsUsage({ range: 'today', surface: 'all' }),
     enabled: !onNavigate,
     staleTime: 60_000,
     refetchInterval: 60_000,
@@ -182,7 +190,7 @@ export function Sidebar({
                 />
               )
               return id === 'analytics' ? (
-                <HoverCard key={to} width={280} position="right-start" withArrow openDelay={150} closeDelay={150}>
+                <HoverCard key={to} width={280} position="bottom-end" role="tooltip" withArrow openDelay={150} closeDelay={150}>
                   <HoverCard.Target>{link}</HoverCard.Target>
                   <HoverCard.Dropdown>
                     <TodayUsagePreview data={todayUsage.data} pending={todayUsage.isPending} error={todayUsage.isError} updatedAt={todayUsage.dataUpdatedAt} />

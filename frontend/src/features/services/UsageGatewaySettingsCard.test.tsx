@@ -48,6 +48,49 @@ async function openPreview() {
   return screen.findByText(/个网关模型/)
 }
 
+it('keeps statistics page addresses per gateway across switching and saving', async () => {
+  vi.mocked(api.getAnalyticsConfig).mockResolvedValue({
+    ...gatewayConfig,
+    statistics_url: 'https://magpie.example/#usage',
+    gateway_profiles: {
+      opencodex: { ...gatewayConfig, gateway_type: 'opencodex', statistics_url: 'https://ocx.example/#usage' },
+      magpie: { ...gatewayConfig, statistics_url: 'https://magpie.example/#usage' },
+    },
+  } as never)
+  mount()
+  await screen.findByLabelText('Codex')
+  const input = screen.getByLabelText('统计页地址')
+  expect(input).toHaveValue('https://magpie.example/#usage')
+  const switchTo = (name: string) => {
+    fireEvent.click(screen.getByRole('combobox', { name: '网关类型' }))
+    fireEvent.click(screen.getByRole('option', { name, hidden: true }))
+  }
+  switchTo('OpenCodeX')
+  expect(input).toHaveValue('https://ocx.example/#usage')
+  fireEvent.change(input, { target: { value: 'https://ocx.example/new#usage' } })
+  switchTo('Magpie')
+  expect(input).toHaveValue('https://magpie.example/#usage')
+  fireEvent.click(screen.getByRole('button', { name: '保存配置' }))
+  expect(api.updateAnalyticsConfig).toHaveBeenCalledWith(expect.objectContaining({
+    gateway_type: 'magpie', statistics_url: 'https://magpie.example/#usage',
+    gateway_profiles: expect.objectContaining({
+      magpie: expect.objectContaining({ statistics_url: 'https://magpie.example/#usage' }),
+      opencodex: expect.objectContaining({ statistics_url: 'https://ocx.example/new#usage' }),
+    }),
+  }))
+})
+
+it('loads and saves the statistics page address', async () => {
+  vi.mocked(api.getAnalyticsConfig).mockResolvedValue({ ...gatewayConfig, statistics_url: 'https://gateway.example/#usage' } as never)
+  mount()
+  const input = await screen.findByLabelText('统计页地址')
+  await screen.findByLabelText('Codex')
+  expect(input).toHaveValue('https://gateway.example/#usage')
+  fireEvent.change(input, { target: { value: 'https://other.example/stats' } })
+  fireEvent.click(screen.getByRole('button', { name: '保存配置' }))
+  expect(api.updateAnalyticsConfig).toHaveBeenCalledWith(expect.objectContaining({ statistics_url: 'https://other.example/stats' }))
+})
+
 it('renders a preview whose model_diff arrays are null without crashing (Go null-slice regression)', async () => {
   vi.mocked(api.previewModelSync).mockResolvedValue({
     catalog_fingerprint: 'fp',

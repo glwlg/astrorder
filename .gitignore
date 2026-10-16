@@ -39,6 +39,7 @@ stitch-*.png
 /app-server-go/bin/
 /app-server-go/tmp/
 /session-daemon-go/bin/
+/session-daemon-go/*.exe
 /backend/.pytest_temp/
 /scratch/
 /scratch-fg-*/

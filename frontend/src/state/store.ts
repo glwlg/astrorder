@@ -415,9 +415,12 @@ export const useAstrorderStore = create<AstrorderStore>((set) => ({
         let message = event.data as unknown as Message
         if (!message.id || !message.session_id || !message.agent_id) return base
         const key = scopeKey(message.agent_id, message.session_id)
-        if (event.type === 'message.delta') {
-          const previous = state.messages[key]?.[message.id]
-          if (previous) message = { ...previous, ...message, text: previous.text + message.text, created_at: previous.created_at, command_id: message.command_id || previous.command_id }
+        const previous = state.messages[key]?.[message.id]
+        if (event.type === 'message.delta' && previous) {
+          message = { ...previous, ...message, text: previous.text + message.text, created_at: previous.created_at, command_id: message.command_id || previous.command_id }
+        }
+        if (previous && message.timestamp_source !== 'native') {
+          message = { ...message, created_at: previous.created_at, timestamp_source: previous.timestamp_source, completed_at: previous.completed_at, turn_id: message.turn_id || previous.turn_id }
         }
         const current = Object.values(state.messages[key] || {})
         const merged = mergeMessagesById(current, [message])

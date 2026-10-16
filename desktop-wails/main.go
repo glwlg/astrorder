@@ -77,6 +77,7 @@ func main() {
 	}
 
 	service.preview = &PreviewService{shell: service}
+	service.statistics = &StatisticsView{shell: service}
 	var quitting atomic.Bool
 	windowsOptions, err := desktopWindowsOptions(filepath.Join(cfg.StateDir, "webview2"))
 	if err != nil {

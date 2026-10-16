@@ -18,3 +18,8 @@ import * as $models from "./models.js";
 /**
  * @typedef {$models.StartupSettings} StartupSettings
  */
+
+/**
+ * StatisticsBounds uses CSS pixels within the main window's client area.
+ * @typedef {$models.StatisticsBounds} StatisticsBounds
+ */

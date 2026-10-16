@@ -54,6 +54,9 @@ func (a *Adapter) historyPage(ctx context.Context, rt *Runtime, r core.Request) 
 	}
 	response, err := rt.request(ctx, "thread/items/list", map[string]any{"threadId": r.SessionID, "cursor": cursor, "limit": limit, "sortDirection": "desc"})
 	if err != nil {
+		if before == "" && emptyHistoryUnsupported(err) && rt.freshThreadEmpty(ctx, r.SessionID) {
+			return core.Result{SessionID: r.SessionID, Status: rt.Status(), Payload: map[string]any{"items": []any{}, "next_cursor": nil, "has_more": false}}, nil
+		}
 		return core.Result{}, err
 	}
 	rows, ok := response["data"].([]any)

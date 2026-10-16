@@ -31,6 +31,13 @@ export function GetStartupSettings() {
 }
 
 /**
+ * @returns {$CancellablePromise<void>}
+ */
+export function HideStatistics() {
+    return $Call.ByName("main.DesktopService.HideStatistics");
+}
+
+/**
  * @returns {$CancellablePromise<boolean>}
  */
 export function IsMaximized() {
@@ -109,6 +116,15 @@ export function Run(target, action) {
 }
 
 /**
+ * @param {string} address
+ * @param {string} filename
+ * @returns {$CancellablePromise<boolean>}
+ */
+export function SaveDownload(address, filename) {
+    return $Call.ByName("main.DesktopService.SaveDownload", address, filename);
+}
+
+/**
  * @param {string[] | null} paths
  * @returns {$CancellablePromise<boolean>}
  */
@@ -122,6 +138,16 @@ export function SetClipboardFiles(paths) {
  */
 export function SetStartupEnabled(enabled) {
     return $Call.ByName("main.DesktopService.SetStartupEnabled", enabled);
+}
+
+/**
+ * @param {string} address
+ * @param {$models.StatisticsBounds} bounds
+ * @param {boolean} refresh
+ * @returns {$CancellablePromise<void>}
+ */
+export function ShowStatistics(address, bounds, refresh) {
+    return $Call.ByName("main.DesktopService.ShowStatistics", address, bounds, refresh);
 }
 
 /**

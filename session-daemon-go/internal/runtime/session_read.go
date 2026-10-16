@@ -45,10 +45,8 @@ func sessionReadSupported(kind, action string) bool {
 		return kind == "codex" || kind == "codex-ssh" || kind == "hermes" || kind == "ssh" || kind == "grok" || kind == "grok-ssh"
 	case "session.processes":
 		return kind == "hermes" || kind == "ssh" || kind == "codex" || kind == "codex-ssh"
-	case "session.history_page":
-		return kind == "codex" || kind == "codex-ssh" || kind == "hermes" || kind == "ssh"
-	case "session.approval.read":
-		return kind == "codex" || kind == "codex-ssh" || kind == "hermes" || kind == "ssh"
+	case "session.history_page", "session.approval.read":
+		return kind == "codex" || kind == "codex-ssh" || kind == "hermes" || kind == "ssh" || kind == "grok" || kind == "grok-ssh"
 	}
 	return false
 }

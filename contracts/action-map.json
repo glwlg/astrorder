@@ -131,6 +131,7 @@
     {"runtime":"codex","method":"thread/loaded/list","oneof_branch":"codex_thread_loaded_list","disposition":"typed-read"},
     {"runtime":"codex","method":"thread/read","oneof_branch":"codex_thread_read","disposition":"typed-read"},
     {"runtime":"grok","method":"initialize","oneof_branch":"grok_initialize","disposition":"typed-read"},
+    {"runtime":"grok","method":"session/list","oneof_branch":"grok_session_list","disposition":"typed-read"},
     {"runtime":"hermes","method":"commands.list","oneof_branch":"hermes_commands_list","disposition":"typed-read"},
     {"runtime":"hermes","method":"models.list","oneof_branch":"hermes_models_list","disposition":"typed-read"},
     {"runtime":"hermes","method":"projects.project_sessions","oneof_branch":"hermes_project_sessions","disposition":"typed-read"},

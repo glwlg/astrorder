@@ -197,24 +197,32 @@ func (h *Handler) handleUpdateSession(w http.ResponseWriter, r *http.Request, se
 	}
 	updates := make(map[string]any)
 	if newTitle := stringValue(payload, "title"); newTitle != "" {
-		if h.client == nil || h.client.Session == nil {
-			writeJSONError(w, 503, "Daemon client is not configured")
+		agent, agentErr := h.store.GetAgent(ctx, agentID)
+		if agentErr != nil {
+			writeJSONError(w, 500, "Agent storage is unavailable")
 			return
 		}
-		if h.client != nil {
-			connID, _ := existing["connection_id"].(string)
-			ref := buildSessionRef(agentID, sessionID, connID)
-			renameReq := &sessiondv1.RenameSessionRequest{
-				Meta:    newCommandMeta("", ""),
-				Session: ref,
-				Title:   newTitle,
+		// Grok ACP exposes no title mutation. Astrorder titles are local metadata.
+		if stringValue(agent, "kind") != "grok" {
+			if h.client == nil || h.client.Session == nil {
+				writeJSONError(w, 503, "Daemon client is not configured")
+				return
 			}
-			if receipt, err := h.client.Session.RenameSession(ctx, renameReq); err != nil {
-				writeJSONError(w, http.StatusBadGateway, "Rename failed: "+err.Error())
-				return
-			} else if err := confirmedReceipt(receipt); err != nil {
-				writeJSONError(w, http.StatusBadGateway, err.Error())
-				return
+			if h.client != nil {
+				connID, _ := existing["connection_id"].(string)
+				ref := buildSessionRef(agentID, sessionID, connID)
+				renameReq := &sessiondv1.RenameSessionRequest{
+					Meta:    newCommandMeta("", ""),
+					Session: ref,
+					Title:   newTitle,
+				}
+				if receipt, err := h.client.Session.RenameSession(ctx, renameReq); err != nil {
+					writeJSONError(w, http.StatusBadGateway, "Rename failed: "+err.Error())
+					return
+				} else if err := confirmedReceipt(receipt); err != nil {
+					writeJSONError(w, http.StatusBadGateway, err.Error())
+					return
+				}
 			}
 		}
 		updates["title"] = newTitle
@@ -252,6 +260,17 @@ func (h *Handler) handleDeleteSession(w http.ResponseWriter, r *http.Request, se
 		return
 	}
 	if h.client != nil {
+		agent, agentErr := h.store.GetAgent(ctx, agentID)
+		if agentErr != nil {
+			writeJSONError(w, http.StatusInternalServerError, "Agent storage is unavailable")
+			return
+		}
+		if kind := stringValue(agent, "kind"); kind == "codex" || kind == "grok" {
+			if err := h.ensureNativeBinding(ctx, existing); err != nil {
+				writeJSONError(w, http.StatusBadGateway, "Native session binding unavailable: "+err.Error())
+				return
+			}
+		}
 		connID, _ := existing["connection_id"].(string)
 		ref := buildSessionRef(agentID, sessionID, connID)
 		delReq := &sessiondv1.DeleteSessionRequest{
@@ -259,12 +278,12 @@ func (h *Handler) handleDeleteSession(w http.ResponseWriter, r *http.Request, se
 			Session: ref,
 		}
 		if receipt, err := h.client.Session.DeleteSession(ctx, delReq); err != nil {
-			if status.Code(err) != codes.NotFound && !strings.Contains(err.Error(), "session is not daemon-owned") {
+			if stringValue(agent, "kind") == "grok" || status.Code(err) != codes.NotFound && !strings.Contains(err.Error(), "session is not daemon-owned") {
 				writeJSONError(w, http.StatusBadGateway, "Delete failed: "+err.Error())
 				return
 			}
 		} else if err := confirmedReceipt(receipt); err != nil {
-			if !strings.Contains(err.Error(), "session is not daemon-owned") {
+			if stringValue(agent, "kind") == "grok" || !strings.Contains(err.Error(), "session is not daemon-owned") {
 				writeJSONError(w, http.StatusBadGateway, err.Error())
 				return
 			}

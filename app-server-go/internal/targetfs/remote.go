@@ -245,12 +245,33 @@ func (r *remoteFileSystem) Stage(ctx context.Context, request StageRequest) (Sta
 	if err != nil {
 		return StageResult{}, err
 	}
+	batch, err := os.MkdirTemp(stageRoot, "copy-*")
+	if err != nil {
+		return StageResult{}, errorf(500, "stage_failed", "Failed to prepare staging batch", err)
+	}
+	completed := false
+	defer func() {
+		if !completed {
+			_ = os.RemoveAll(batch)
+		}
+	}()
 	_, reader, err := r.start(ctx, Request{Version: ProtocolVersion, Action: "export", Data: data})
 	if err != nil {
 		return StageResult{}, err
 	}
 	defer reader.Close()
-	return extractExport(ctx, reader, stageRoot)
+	result, err := extractExport(ctx, reader, batch)
+	if err != nil {
+		return StageResult{}, err
+	}
+	if _, err := io.Copy(io.Discard, reader); err != nil {
+		return StageResult{}, err
+	}
+	if err := reader.Close(); err != nil {
+		return StageResult{}, err
+	}
+	completed = true
+	return result, nil
 }
 
 func (r *remoteFileSystem) ExecGit(ctx context.Context, request GitRequest) (GitResult, error) {

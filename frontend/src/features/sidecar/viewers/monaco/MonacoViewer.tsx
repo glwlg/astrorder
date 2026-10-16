@@ -4,6 +4,7 @@ import { IconBook2, IconDeviceFloppy, IconDownload, IconRefresh, IconSparkles, I
 import { BlackboardItemRenderer } from '../../../monitor/BlackboardJsonRender'
 import { MarkdownContent } from '../../../../components/MarkdownContent'
 import Editor from '@monaco-editor/react'
+import { downloadFile } from '../../fileTransfer'
 import type { ViewerContext } from '../../types'
 import { authenticatedApiFetch } from '../../../../api/client'
 
@@ -256,7 +257,7 @@ export function MonacoViewer({ artifact, onSave, onDirtyChange, toolbarAction, i
               variant="subtle"
               size="sm"
               title="下载文件"
-              onClick={() => window.open(`${artifact.readUrl}&download=1`, '_blank')}
+              onClick={() => void downloadFile(`${artifact.readUrl}&download=1`, artifact.name)}
             >
               <IconDownload size={14} />
             </ActionIcon>

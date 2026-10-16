@@ -539,6 +539,9 @@ func (p *Projection) projectEnvelopeTx(ctx context.Context, tx *sql.Tx, env *ses
 	case "grok.notification":
 		return projectGrokNotificationTx(ctx, tx, streamID, payloadMap)
 
+	case "grok.approval_resolved":
+		return projectGrokApprovalResolvedTx(ctx, tx, streamID, payloadMap, env.GetStatus())
+
 	case "grok.completed":
 		return projectGrokCompletedTx(ctx, tx, streamID, payloadMap)
 
@@ -1784,6 +1787,10 @@ func projectCodexNotificationTx(ctx context.Context, tx *sql.Tx, streamID, agent
 					}
 					event := liveMessageEvent(explicitAgent, explicitSession, itemID, role, kind, text, cmdIDParam, false)
 					event.Data["turn_id"] = params["turnId"]
+					if itemType == "agentMessage" {
+						event.Data["delivery"] = item["delivery"]
+						event.Data["questions"] = item["questions"]
+					}
 					if itemType == "userMessage" {
 						event.Data["attachments"] = CodexUserAttachments(item["content"], explicitSession, itemID)
 					}
@@ -1992,6 +1999,10 @@ func extractGrokText(value any) string {
 }
 
 func projectGrokNotificationTx(ctx context.Context, tx *sql.Tx, streamID string, payload map[string]any) ([]store.Event, error) {
+	return handleGrokNotificationTx(ctx, tx, streamID, payload)
+}
+
+func legacyGrokNotificationTx(ctx context.Context, tx *sql.Tx, streamID string, payload map[string]any) ([]store.Event, error) {
 	agentID, _ := payload["agent_id"].(string)
 	sid, _ := payload["session_id"].(string)
 	if sid == "" {
@@ -2124,6 +2135,24 @@ func projectGrokCompletedTx(ctx context.Context, tx *sql.Tx, streamID string, pa
 	}
 
 	var events []store.Event
+	if result, ok := payload["result"].(map[string]any); ok {
+		if meta, ok := result["_meta"].(map[string]any); ok {
+			if usage, ok := meta["usage"].(map[string]any); ok {
+				model := payload["model"]
+				if models, ok := usage["modelUsage"].(map[string]any); ok && len(models) == 1 {
+					for name := range models {
+						model = name
+					}
+				}
+				events = append(events, projectGrokUsageMetricsTx(ctx, tx, sid, agentID, usage, model)...)
+			}
+		}
+	}
+	cleanup, err := cleanupPendingApprovalsTx(ctx, tx, agentID, sid, "rejected")
+	if err != nil {
+		return nil, err
+	}
+	events = append(events, cleanup...)
 	if commandID != "" && agentID != "" && sid != "" {
 		_, err := tx.ExecContext(ctx, `UPDATE commands SET state=?,error=?,updated_at=datetime('now')
 WHERE agent_id=? AND session_id=? AND id=?`, state, errVal, agentID, sid, commandID)

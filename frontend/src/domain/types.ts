@@ -95,9 +95,13 @@ export interface Message {
   text: string;
   attachments: Attachment[];
   created_at: string;
+  completed_at?: string | null;
+  timestamp_source?: 'native' | 'received';
   command_id: string | null;
   turn_id?: string | null;
   tool: Record<string, unknown> | null;
+  delivery?: string | null;
+  questions?: { title: string; options?: string[] | null }[] | null;
 }
 
 export interface Command {
