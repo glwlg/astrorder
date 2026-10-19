@@ -39,6 +39,7 @@ import { useSessionOrder } from '../hooks/useSessionOrder'
 import { AgentSessionFilter, matchesAgent } from './AgentSessionFilter'
 import { NewSessionDialog } from './NewSessionDialog'
 import { HandoffDialog } from './HandoffDialog'
+import { sessionHandoffTargets } from '../domain/handoff'
 import { ForkWorktreeDialog } from './ForkWorktreeDialog'
 import { moveProject, reconcileProjectOrder } from './projectOrder'
 import { useWorkspacePreferences } from '../hooks/useWorkspacePreferences'
@@ -198,7 +199,11 @@ export function SessionRail({
     }
   }
 
-  const forkMenuItems = (session: Session) => (
+  const forkMenuItems = (session: Session) => agents[session.agent_id]?.kind === 'antigravity' ? (
+    <Menu.Item leftSection={<IconGitFork size={14} />} onClick={() => void handleForkChatBranch(session)}>
+      创建聊天分支
+    </Menu.Item>
+  ) : (
     <Menu.Sub>
       <Menu.Sub.Target>
         <Menu.Sub.Item leftSection={<IconGitFork size={14} />}>
@@ -212,12 +217,12 @@ export function SessionRail({
         >
           创建聊天分支
         </Menu.Item>
-        <Menu.Item
+        {agents[session.agent_id]?.kind !== 'antigravity' && <Menu.Item
           leftSection={<IconGitBranch size={14} />}
           onClick={() => setForkWorktreeTarget(session)}
         >
           在新工作树中创建聊天分支
-        </Menu.Item>
+        </Menu.Item>}
       </Menu.Sub.Dropdown>
     </Menu.Sub>
   )
@@ -388,13 +393,7 @@ export function SessionRail({
     }
   }
 
-  const handoffTargets = (session: Session) => {
-    const source = agents[session.agent_id]
-    if (!source || source.connection_id != null) return []
-    return Object.values(agents).filter((agent) =>
-      agent.kind !== source.kind && agent.connection_id == null && agent.status === 'ready',
-    )
-  }
+  const handoffTargets = (session: Session) => sessionHandoffTargets(session, agents)
 
   const handoffItems = (session: Session) => {
     if (!handoffTargets(session).length) return null
@@ -638,8 +637,9 @@ export function SessionRail({
   return (
     <Stack className="session-rail" gap="sm">
       <div className="session-rail-controls">
-      <Group gap="xs" wrap="nowrap">
-        <AgentSessionFilter agents={agents} value={agentFilter} onChange={updateAgentFilter} />
+      <AgentSessionFilter agents={agents} sessions={sessions} value={agentFilter} onChange={updateAgentFilter} />
+      <Group gap={4} wrap="nowrap" className="session-rail-tools">
+        <input className="session-search" aria-label="搜索会话" placeholder="搜索项目或会话" value={filter} onChange={event => setFilter(event.currentTarget.value)} />
         <Tooltip label="刷新最后活动时间" withArrow position="bottom">
           <Button
             size="xs"
@@ -704,13 +704,6 @@ export function SessionRail({
           }}
         />
       )}
-      <input
-        className="session-search"
-        aria-label="搜索会话"
-        placeholder="搜索项目或会话"
-        value={filter}
-        onChange={(event) => setFilter(event.currentTarget.value)}
-      />
       <div className="session-rail-filters" role="tablist" aria-label="会话筛选">
         <LayoutGroup id="session-rail-filters-group">
           {([

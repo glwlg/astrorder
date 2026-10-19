@@ -38,6 +38,7 @@ enum RuntimeKind {
   RUNTIME_KIND_CODEX_SSH = 5;
   RUNTIME_KIND_GROK = 6;
   RUNTIME_KIND_GROK_SSH = 7;
+  RUNTIME_KIND_ANTIGRAVITY = 8;
 }
 
 enum SessionStatus {
@@ -118,6 +119,7 @@ enum ManagedFile {
   MANAGED_FILE_CODEX_MAGPIE_CATALOG = 3;
   MANAGED_FILE_GROK_CONFIG = 4;
   MANAGED_FILE_HERMES_CONFIG = 5;
+  MANAGED_FILE_ANTIGRAVITY_CONFIG = 6;
 }
 
 enum ReloadAgent {
@@ -388,6 +390,14 @@ message GrokCreateOptions {
   optional NativeJson native_options = 4;
 }
 
+message AntigravityCreateOptions {
+  string cwd = 1;
+  optional string model = 2;
+  optional string effort = 3;
+  optional string parent_session_id = 4;
+  optional string target_message_id = 5;
+}
+
 message CreateSessionRequest {
   CommandMeta meta = 1;
   RuntimeTarget target = 2;
@@ -395,6 +405,7 @@ message CreateSessionRequest {
     CodexCreateOptions codex = 10;
     HermesCreateOptions hermes = 11;
     GrokCreateOptions grok = 12;
+    AntigravityCreateOptions antigravity = 13;
   }
 }
 
@@ -683,6 +694,9 @@ message GrokSessionListQuery {
   optional string cursor = 2;
 }
 
+message AntigravitySessionListQuery {}
+message AntigravityModelsListQuery {}
+
 message NativeQueryRequest {
   RuntimeTarget target = 1;
   // Preserves native payload/hash/sha256 fields that exist outside request params.
@@ -708,6 +722,8 @@ message NativeQueryRequest {
     HermesCommandsListQuery hermes_commands_list = 36;
     GrokInitializeQuery grok_initialize = 50;
     GrokSessionListQuery grok_session_list = 51;
+    AntigravitySessionListQuery antigravity_session_list = 60;
+    AntigravityModelsListQuery antigravity_models_list = 61;
   }
 }
 

@@ -126,6 +126,23 @@ func TestRealCanonicalOwnerLifecycle(t *testing.T) {
 	if err = fixtureDB.QueryRow("SELECT COUNT(*) FROM messages WHERE session_id=?", child.SessionID).Scan(&copied); err != nil || copied != 1 {
 		t.Fatalf("branch boundary copied %d: %v", copied, err)
 	}
+	if _, err = a.Command(ctx, core.Request{SessionID: child.SessionID, Action: "session.close"}); err != nil {
+		t.Fatal("close branch", err)
+	}
+	reader := New(a.config)
+	defer reader.Close()
+	if _, err = reader.Spawn(ctx, core.Request{SessionID: child.SessionID, Fields: map[string]any{"cwd": workspace}}); err != nil {
+		t.Fatal("fresh viewer resume after close", err)
+	}
+	if _, err = reader.Command(ctx, core.Request{SessionID: child.SessionID, Action: "session.history_page", Fields: map[string]any{"limit": 200}}); err != nil {
+		t.Fatal("history after close", err)
+	}
+	if _, err = reader.Command(ctx, core.Request{SessionID: child.SessionID, Action: "session.close"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = a.Spawn(ctx, core.Request{SessionID: child.SessionID, Fields: map[string]any{"cwd": workspace}}); err != nil {
+		t.Fatal(err)
+	}
 	if _, err = a.Command(ctx, core.Request{SessionID: child.SessionID, Action: "session.delete"}); err != nil {
 		t.Fatal(err)
 	}

@@ -180,6 +180,7 @@ func TestActionMapSeparatesNamespacesAndCoversFrozenRequests(t *testing.T) {
 func TestRuntimeQueryInventoryIsClosedAndDesktopIsMutation(t *testing.T) {
 	got := loadMap(t)
 	want := []string{
+		"antigravity:models.list", "antigravity:session.list",
 		"codex:account/read", "codex:hooks/list", "codex:initialize", "codex:model/list", "codex:skills/list", "codex:thread/items/list", "codex:thread/list", "codex:thread/loaded/list", "codex:thread/read",
 		"grok:initialize", "grok:session/list",
 		"hermes:commands.list", "hermes:models.list", "hermes:projects.project_sessions", "hermes:projects.tree", "hermes:session.active_list", "hermes:session.history", "hermes:session.list",

@@ -29,6 +29,20 @@ type daemonModelConfigJSON struct {
 	HelperAssetsDir string `json:"helper_assets_dir,omitempty"`
 }
 
+func discoverAntigravity() string {
+	if p, err := exec.LookPath("agy"); err == nil {
+		absolute, _ := filepath.Abs(p)
+		return absolute
+	}
+	if base := os.Getenv("LOCALAPPDATA"); base != "" {
+		p := filepath.Join(base, "agy", "bin", "agy.exe")
+		if info, err := os.Stat(p); err == nil && !info.IsDir() {
+			return p
+		}
+	}
+	return ""
+}
+
 // EnsureDaemonConfig writes session-daemon.json with discovered native runtimes if not present.
 func EnsureDaemonConfig(stateDir, rootDir string) (string, error) {
 	cfgPath := filepath.Join(stateDir, "session-daemon.json")
@@ -92,6 +106,11 @@ func EnsureDaemonConfig(stateDir, rootDir string) (string, error) {
 				AgentID:    "local-grok",
 			})
 		}
+	}
+
+	// Discover the native Antigravity CLI without changing its settings.
+	if agyPath := discoverAntigravity(); agyPath != "" {
+		runtimes = append(runtimes, daemonRuntimeJSON{Type: "antigravity", Executable: agyPath, Workspace: rootDir, Allowed: allowed, AgentID: "local-antigravity"})
 	}
 
 	// PTY runtime is always enabled

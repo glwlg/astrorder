@@ -484,6 +484,7 @@ describe('independent mobile composer', () => {
     expect(approval).not.toHaveBeenCalled()
   })
   it('confirms model selection inside the mobile sheet, without a native browser confirm', async () => {
+    vi.spyOn(api, 'getSessionApprovalMode').mockResolvedValue({ mode: 'manual' })
     vi.spyOn(api, 'getSessionModels').mockResolvedValue({ items: [{ provider: 'p', model: 'm', label: 'Provider · m' }] })
     const change = vi.spyOn(api, 'setSessionModel').mockResolvedValue({ provider: 'p', model: 'm' })
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
@@ -546,7 +547,7 @@ describe('independent mobile composer', () => {
     fireEvent.click(screen.getByRole('button', { name: '筛选' }))
     expect(screen.getByRole('button', { name: '未读' })).toBeInTheDocument()
     expect(screen.getByLabelText('按连接筛选')).toBeInTheDocument()
-    expect(screen.getByRole('group', { name: '按 Agent 类型筛选' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '按 Agent 类型筛选' })).toBeInTheDocument()
   })
   it('opens the session drawer from a left-edge right swipe', async () => {
     const view = mount()

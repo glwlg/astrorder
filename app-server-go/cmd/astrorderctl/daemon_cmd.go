@@ -16,6 +16,10 @@ import (
 )
 
 func runDaemon(args []string, output io.Writer) int {
+	return runDaemonContext(context.Background(), args, output)
+}
+
+func runDaemonContext(parent context.Context, args []string, output io.Writer) int {
 	if len(args) == 0 {
 		return cliFailure(output, errors.New("usage: astrorderctl daemon status|start|stop|restart|update-check|update|install|uninstall --root PATH --state-dir PATH [--confirm-active]"))
 	}
@@ -123,7 +127,7 @@ func runDaemon(args []string, output io.Writer) int {
 	if operation == "update" || operation == "restart" || operation == "stop" {
 		operationTimeout = 2 * time.Minute
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), operationTimeout)
+	ctx, cancel := context.WithTimeout(parent, operationTimeout)
 	defer cancel()
 
 	if operation == "update" {

@@ -24,6 +24,18 @@ import (
 
 var projectionCounter atomic.Int64
 
+// A live gap may be repaired by a fresh subscription using only durable
+// checkpoints. Replay gaps remain fatal because the authoritative replay itself
+// must be contiguous.
+type liveGapError struct {
+	err      error
+	streamID string
+	expected int64
+}
+
+func (e *liveGapError) Error() string { return e.err.Error() }
+func (e *liveGapError) Unwrap() error { return e.err }
+
 // Publisher broadcasts committed store events without re-inserting them.
 type Publisher interface {
 	PublishCommitted(events []store.Event)
@@ -153,6 +165,7 @@ func (p *Projection) RunReady(ctx context.Context, ready chan<- struct{}) error 
 	}
 
 	backoff := p.minBackoff
+	liveGapAttempts := make(map[string]int64)
 	for {
 		select {
 		case <-ctx.Done():
@@ -161,6 +174,15 @@ func (p *Projection) RunReady(ctx context.Context, ready chan<- struct{}) error 
 		}
 
 		err := p.runSubscription(ctx, signalReady)
+		var gap *liveGapError
+		if errors.As(err, &gap) {
+			if liveGapAttempts[gap.streamID] == gap.expected {
+				return gap.err
+			}
+			liveGapAttempts[gap.streamID] = gap.expected
+			slog.WarnContext(ctx, "live event gap; requesting durable replay", "stream_id", gap.streamID, "expected_seq", gap.expected)
+			continue
+		}
 		if errors.Is(err, errRetiredStream) {
 			// Only the confirmed unknown stream is omitted on the next read-only
 			// subscription. Persisted history and all other cursors are retained.
@@ -376,6 +398,10 @@ func (p *Projection) runSubscription(ctx context.Context, signalReady func()) er
 				return fmt.Errorf("%w: live event arrived before live ready barrier", ErrCorruptedFrame)
 			}
 			if err := p.processEnvelope(ctx, epoch, f.Live, expectedSeq); err != nil {
+				if errors.Is(err, ErrNonContiguous) {
+					sid := f.Live.GetSession().GetSessionId()
+					return &liveGapError{err: err, streamID: sid, expected: expectedSeq[sid]}
+				}
 				return err
 			}
 
@@ -936,7 +962,7 @@ func projectHermesApprovalResolvedTx(ctx context.Context, tx *sql.Tx, streamID s
 	agentID, sid = ident.AgentID, ident.SessionID
 	approvalID, _ := payload["approval_id"].(string)
 	state, _ := payload["state"].(string)
-	if approvalID == "" || state != "approved" && state != "rejected" {
+	if approvalID == "" || state != "approved" && state != "rejected" && state != "resolved" {
 		return nil, fmt.Errorf("%w: invalid hermes approval resolution", ErrCorruptedFrame)
 	}
 	data := map[string]any{"id": approvalID, "agent_id": agentID, "session_id": sid, "state": state}
@@ -1110,6 +1136,9 @@ func parseNativePayload(env *sessiondv1.EventEnvelope) (map[string]any, error) {
 }
 
 func projectConnectorHelloTx(ctx context.Context, tx *sql.Tx, payload map[string]any) ([]store.Event, error) {
+	if err := store.NormalizeGrokRegistrationTx(ctx, tx, payload); err != nil {
+		return nil, fmt.Errorf("normalize Grok registration: %w", err)
+	}
 	agentID, ok := payload["id"].(string)
 	if !ok || agentID == "" {
 		return nil, fmt.Errorf("%w: connector.hello missing id", ErrCorruptedFrame)
@@ -1172,7 +1201,10 @@ func projectConnectorEventTx(ctx context.Context, tx *sql.Tx, streamID, agentID 
 
 	sid, _ := data["session_id"].(string)
 	if sid == "" {
-		sid = data["id"].(string)
+		sid, _ = payload["session_id"].(string)
+	}
+	if sid == "" && (evType == "session.upsert" || evType == "session.delete") {
+		sid, _ = data["id"].(string)
 	}
 	if sid == "" {
 		sid = streamID
@@ -1378,6 +1410,19 @@ func projectRuntimeOwnerTx(
 	}
 
 	if pid <= 0 {
+		// Early agy builds emitted terminal status under runtime.owner without
+		// a PID. Replay that exact legacy shape as status, never as ownership.
+		agentID, _ := payload["agent_id"].(string)
+		status, _ := payload["status"].(string)
+		if payload["owner_pid"] == nil && payload["runtime_owned"] == true && agentID != "" && (status == "idle" || status == "error") {
+			var kind string
+			if err := tx.QueryRowContext(ctx, "SELECT kind FROM agents WHERE id=?", agentID).Scan(&kind); err != nil {
+				return nil, err
+			}
+			if kind == "antigravity" {
+				return projectSimpleSessionStatusTx(ctx, tx, streamID, agentID, status, "session.status", payload)
+			}
+		}
 		return nil, fmt.Errorf("%w: invalid runtime owner pid", ErrCorruptedFrame)
 	}
 

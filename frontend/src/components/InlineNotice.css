@@ -1,0 +1,14 @@
+.inline-notice.session-composer-gate { margin: 12px auto 20px; }
+.m-composer-float > .inline-notice { margin-bottom: 8px; }
+.inline-notice { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--astr-border); border-radius: 12px; background: var(--astr-surface); color: var(--astr-text); font-size: 13px; line-height: 1.5; }
+.inline-notice-icon { display: flex; flex-shrink: 0; color: var(--astr-muted); }
+.inline-notice-copy { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.inline-notice-copy > strong { display: block; margin-bottom: 2px; font-size: 13px; font-weight: 600; }
+.inline-notice-copy > div { color: var(--astr-muted); }
+.inline-notice-actions { display: flex; align-items: center; flex-shrink: 0; gap: 6px; }
+.inline-notice-actions .mantine-Button-root { font-size: 12px; }
+.inline-notice-close { display: grid; place-items: center; flex-shrink: 0; width: 28px; height: 28px; padding: 0; background: transparent; border: 0; border-radius: 6px; color: var(--astr-muted); cursor: pointer; }
+.inline-notice-close:hover { background: var(--astr-surface-muted); }
+.inline-notice-copy details { margin-top: 6px; font-size: 12px; }
+.inline-notice-copy summary { cursor: pointer; }
+@media (max-width: 600px) { .inline-notice { flex-wrap: wrap; gap: 10px; padding: 12px; } .inline-notice-actions { flex-wrap: wrap; } .session-composer-gate .inline-notice-copy { flex-basis: calc(100% - 30px); } .session-composer-gate .inline-notice-actions { margin-left: 28px; } .inline-notice-actions .mantine-Button-root { min-height: 36px; } .inline-notice-close { position: absolute; right: 10px; top: 10px; } .inline-notice:has(.inline-notice-close) { position: relative; padding-right: 40px; } }

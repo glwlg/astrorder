@@ -109,6 +109,26 @@ func (h *Handler) handleGetSessionModel(w http.ResponseWriter, r *http.Request, 
 	if resp.Effort != nil {
 		result["effort"] = *resp.Effort
 	}
+	agent, agentErr := h.store.GetAgent(ctx, agentID)
+	if agentErr != nil {
+		writeJSONError(w, 500, "Agent storage unavailable")
+		return
+	}
+	if stringValue(agent, "kind") == "antigravity" {
+		var native map[string]any
+		if resp.Native != nil {
+			_ = parseNativeJSON(resp.Native, &native)
+		}
+		result["model_read_only"] = native["model_switch_supported"] != true
+		result["reasoning_read_only"] = true
+		if native["read_only"] == true {
+			result["read_only"] = true
+			result["detail"] = native["detail"]
+		}
+		if result["model_read_only"] == true && result["read_only"] != true {
+			result["detail"] = "当前小内核尚不支持 Antigravity 模型切换，请更新小内核。"
+		}
+	}
 	if saved != nil {
 		if _, ok := saved["effort"]; ok && result["effort"] == nil {
 			result["effort"] = saved["effort"]

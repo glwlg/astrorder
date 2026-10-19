@@ -13,6 +13,7 @@ import (
 	"astrorder.dev/session-daemon/internal/modelconfig"
 	"astrorder.dev/session-daemon/internal/protocol"
 	core "astrorder.dev/session-daemon/internal/runtime"
+	"astrorder.dev/session-daemon/internal/runtime/antigravity"
 	"astrorder.dev/session-daemon/internal/runtime/codex"
 	"astrorder.dev/session-daemon/internal/runtime/grok"
 	"astrorder.dev/session-daemon/internal/runtime/hermes"
@@ -107,7 +108,7 @@ func (c Config) Register(d *protocol.Daemon) error {
 			return fmt.Errorf("duplicate runtime configuration: %s", r.Type)
 		}
 		seen[r.Type] = true
-		if r.Type != "codex" && r.Type != "grok" && r.Type != "pty" && r.Type != "hermes" {
+		if r.Type != "codex" && r.Type != "grok" && r.Type != "antigravity" && r.Type != "pty" && r.Type != "hermes" {
 			return fmt.Errorf("runtime is not implemented: %s", r.Type)
 		}
 		if len(r.Allowed) == 0 {
@@ -167,6 +168,12 @@ func (c Config) Register(d *protocol.Daemon) error {
 				obsCancel()
 				return nil
 			})
+		case "antigravity":
+			instance := antigravity.New(antigravity.Config{Executable: r.Executable, Arguments: r.Arguments, Workspace: r.Workspace, Allowed: r.Allowed, AgentID: r.AgentID, Emit: d.Emit})
+			adapter = instance
+			observeCtx, observeCancel := context.WithCancel(context.Background())
+			go instance.Observe(observeCtx)
+			d.AddCloser(func() error { observeCancel(); return nil })
 		case "grok":
 			adapter = grok.New(grok.Config{Executable: r.Executable, Arguments: r.Arguments, Workspace: r.Workspace, Allowed: r.Allowed, AgentID: r.AgentID, Emit: d.Emit})
 		case "hermes":

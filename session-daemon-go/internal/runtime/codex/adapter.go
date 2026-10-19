@@ -556,6 +556,44 @@ func (a *Adapter) Command(ctx context.Context, r core.Request) (core.Result, err
 		return core.Result{SessionID: r.SessionID, Status: native.Status, Payload: map[string]any{"deleted": r.SessionID}}, nil
 	case "session.disconnect":
 		return core.Result{SessionID: r.SessionID, Status: rt.Status(), Payload: map[string]any{"disconnected": r.SessionID}}, nil
+	case "session.close":
+		s.mu.Lock()
+		if s.mutating || s.inputUnconfirmed || rt.Status() != "idle" {
+			s.mu.Unlock()
+			return core.Result{}, core.ErrRuntimeBusy
+		}
+		s.mutating = true
+		s.mu.Unlock()
+		defer func() { s.mu.Lock(); s.mutating = false; s.mu.Unlock() }()
+		rt.Close()
+		rt.mu.Lock()
+		done, confirmed := rt.processDone, rt.exitConfirmed
+		rt.mu.Unlock()
+		if done == nil {
+			return core.Result{}, fmt.Errorf("Codex native exit was not confirmed")
+		}
+		select {
+		case <-done:
+		case <-ctx.Done():
+			return core.Result{}, ctx.Err()
+		}
+		rt.mu.Lock()
+		confirmed = rt.exitConfirmed
+		rt.mu.Unlock()
+		if !confirmed {
+			return core.Result{}, fmt.Errorf("Codex remote exit was not confirmed")
+		}
+		select {
+		case <-rt.eventDone:
+		case <-ctx.Done():
+			return core.Result{}, ctx.Err()
+		}
+		a.mu.Lock()
+		if a.sessions[r.SessionID] == s {
+			delete(a.sessions, r.SessionID)
+		}
+		a.mu.Unlock()
+		return core.Result{SessionID: r.SessionID, Status: "idle", Payload: map[string]any{"closed": true}}, nil
 	default:
 		return core.Result{}, fmt.Errorf("codex action is unsupported")
 	}

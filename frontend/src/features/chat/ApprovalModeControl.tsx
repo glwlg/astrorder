@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { Group, Popover, Stack, Text, UnstyledButton } from '@mantine/core'
 import { IconAlertTriangle, IconCheck, IconClockCheck, IconHandStop } from '@tabler/icons-react'
 import { notifications } from '@mantine/notifications'
@@ -42,78 +42,56 @@ export const APPROVAL_MODES: ApprovalModeItem[] = [
   },
 ]
 
+const ANTIGRAVITY_APPROVAL_MODES: ApprovalModeItem[] = [
+  { ...APPROVAL_MODES[0], label: '按原生规则', capsuleLabel: '按原生规则', description: '遵循 Antigravity 权限规则；需要批准的操作会被拒绝，无法逐次确认' },
+  APPROVAL_MODES[2],
+]
+
 export function ApprovalModeControl({
   session,
+  agentKind,
   compact = false,
   variant = 'capsule',
   disabled = false,
+  supported = true,
 }: {
   session: Session
+  agentKind?: string
   compact?: boolean
   variant?: 'capsule' | 'panel'
   disabled?: boolean
+  supported?: boolean
 }) {
+  const modes = agentKind === 'antigravity' ? ANTIGRAVITY_APPROVAL_MODES : APPROVAL_MODES
   const queryClient = useQueryClient()
   const [opened, setOpened] = useState(false)
-  const storageKey = `astrorder_approval_mode:${session.agent_id}:${session.id}`
-
-  const [localMode, setLocalMode] = useState<ApprovalMode>(() => {
-    try {
-      const cached = localStorage.getItem(storageKey)
-      if (cached === 'manual' || cached === 'auto' || cached === 'full_access') {
-        return cached
-      }
-    } catch {
-      // ignore localStorage errors
-    }
-    return 'auto'
-  })
-
-  useEffect(() => {
-    try {
-      const cached = localStorage.getItem(storageKey)
-      if (cached === 'manual' || cached === 'auto' || cached === 'full_access') {
-        setLocalMode(cached)
-        return
-      }
-    } catch {
-      // ignore
-    }
-    setLocalMode('auto')
-  }, [storageKey])
-
-  const { data } = useQuery({
+  const { data, isError } = useQuery({
     queryKey: ['astrorder', 'approval-mode', session.agent_id, session.id],
     queryFn: async () => {
-      try {
-        const res = await api.getSessionApprovalMode(session.id, session.agent_id)
-        return res.mode || localMode || 'auto'
-      } catch {
-        return localMode
-      }
+      const res = await api.getSessionApprovalMode(session.id, session.agent_id)
+      if (!modes.some(item => item.key === res.mode)) throw new Error('原生审批模式未确认')
+      return res.mode
     },
+    enabled: supported,
+    retry: false,
     staleTime: 60000,
   })
 
-  const currentMode: ApprovalMode = data || localMode
-  const activeItem = APPROVAL_MODES.find((item) => item.key === currentMode) || APPROVAL_MODES[1]
+  const currentMode = data
+  const activeItem = modes.find((item) => item.key === currentMode) || modes[0]
   const isFull = currentMode === 'full_access'
 
   const mutation = useMutation({
     mutationFn: async (mode: ApprovalMode) => {
-      setLocalMode(mode)
-      try {
-        localStorage.setItem(storageKey, mode)
-      } catch {
-        // ignore
-      }
-      return api.setSessionApprovalMode(session.id, session.agent_id, mode)
+      const res = await api.setSessionApprovalMode(session.id, session.agent_id, mode)
+      if (res.mode !== mode) throw new Error('原生审批模式未确认')
+      return res
     },
     onSuccess: (res) => {
       queryClient.setQueryData(['astrorder', 'approval-mode', session.agent_id, session.id], res.mode)
       setOpened(false)
       notifications.show({
-        message: `已切换为“${APPROVAL_MODES.find((item) => item.key === res.mode)?.label}”模式`,
+        message: `已切换为“${modes.find((item) => item.key === res.mode)?.label}”模式`,
         color: res.mode === 'full_access' ? 'orange' : 'teal',
       })
     },
@@ -124,6 +102,12 @@ export function ApprovalModeControl({
       })
     },
   })
+
+  if (!supported) return null
+  if (!currentMode || isError) {
+    const label = isError ? '审批模式读取失败' : '正在读取审批模式'
+    return <button type="button" className="approval-mode-capsule" disabled aria-label={label}>{label}</button>
+  }
 
   const ActiveIcon = activeItem.icon
 
@@ -139,7 +123,7 @@ export function ApprovalModeControl({
       </div>
 
       <Stack gap={4} className="approval-mode-options">
-        {APPROVAL_MODES.map((item) => {
+        {modes.map((item) => {
           const isSelected = item.key === currentMode
           const ItemIcon = item.icon
           const itemIsFull = item.key === 'full_access'

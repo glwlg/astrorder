@@ -361,7 +361,7 @@ This skill dynamically loads into agent context without restarting the session d
             私有知识: <b style={{ color: '#8b5cf6' }}>viking://agent/skills/</b> 原生记忆互通
           </Text>
           <Text size="xs" c="dimmed">
-            集群总生效: <b style={{ color: '#10b981' }}>{totalActiveSkillsCount} 处活跃挂载</b>
+            集群总生效: <b style={{ color: 'var(--astr-text)' }}>{totalActiveSkillsCount} 处活跃挂载</b>
           </Text>
         </Group>
         <Badge size="xs" variant="dot" color="teal">
@@ -388,7 +388,7 @@ This skill dynamically loads into agent context without restarting the session d
                       width: 8,
                       height: 8,
                       borderRadius: '50%',
-                      background: t.skills_count > 0 ? '#10b981' : '#94a3b8',
+                      background: t.skills_count > 0 ? 'var(--astr-text)' : 'var(--astr-muted)',
                     }}
                   />
                   <Text size="xs" fw={500}>{t.name} ({t.kind})</Text>

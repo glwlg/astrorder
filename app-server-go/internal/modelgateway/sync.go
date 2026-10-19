@@ -34,7 +34,7 @@ type targetInfo struct {
 
 func (h *Handler) listTargets(ctx context.Context) ([]targetInfo, error) {
 	targets := []targetInfo{
-		{ID: "local", Kind: "local", Name: "本机", Agents: []string{"codex", "grok", "hermes"}},
+		{ID: "local", Kind: "local", Name: "本机", Agents: []string{"codex", "grok", "hermes", "antigravity"}},
 	}
 
 	sshConnections, err := h.store.ListSSHConnections(ctx)
@@ -206,13 +206,13 @@ func (h *Handler) validateSelections(ctx context.Context, raw any) ([]syncTarget
 		agentSet := make(map[string]bool)
 		for _, a := range rawAgents {
 			as, ok := a.(string)
-			if !ok || (as != "codex" && as != "grok" && as != "hermes") {
+			if !ok || (as != "codex" && as != "grok" && as != "hermes" && as != "antigravity") {
 				return nil, errors.New("Agent 选择无效")
 			}
 			agentSet[as] = true
 		}
 		agents := []string{}
-		for _, order := range []string{"codex", "grok", "hermes"} {
+		for _, order := range []string{"codex", "grok", "hermes", "antigravity"} {
 			if agentSet[order] {
 				agents = append(agents, order)
 			}
@@ -220,6 +220,9 @@ func (h *Handler) validateSelections(ctx context.Context, raw any) ([]syncTarget
 
 		if _, err := h.resolveTargetProto(ctx, tid); err != nil {
 			return nil, err
+		}
+		if agentSet["antigravity"] && tid != "local" {
+			return nil, errors.New("Antigravity 网关下发目前仅支持本机")
 		}
 
 		seen[tid] = true
@@ -295,6 +298,8 @@ func (h *Handler) buildTargetPlan(ctx context.Context, catalog *Catalog, sel syn
 			currentFileMap["grok_config"] = f
 		case sessiondv1.ManagedFile_MANAGED_FILE_HERMES_CONFIG:
 			currentFileMap["hermes_config"] = f
+		case sessiondv1.ManagedFile_MANAGED_FILE_ANTIGRAVITY_CONFIG:
+			currentFileMap["antigravity_config"] = f
 		}
 	}
 
@@ -357,6 +362,29 @@ func (h *Handler) buildTargetPlan(ctx context.Context, catalog *Catalog, sel syn
 			files["codex_config"] = RenderCodexConfig(
 				existingCodexCfg, inferenceURL, catalogPath, providerKey, providerName, gatewayEnvKeys[providerKey], allProviders,
 			)
+
+		case "antigravity":
+			cur, supported := currentFileMap["antigravity_config"]
+			if !supported {
+				return nil, errors.New("小内核尚不支持 Antigravity 网关配置，请先更新小内核")
+			}
+			var previous struct {
+				Models struct {
+					List []map[string]any `json:"list"`
+				} `json:"models"`
+			}
+			if json.Unmarshal(cur.Content, &previous) == nil {
+				for _, model := range previous.Models.List {
+					if id, ok := model["modelId"].(string); ok {
+						oldCatalogModels = append(oldCatalogModels, map[string]any{"slug": id})
+					}
+				}
+			}
+			rendered, err := RenderAntigravityConfig(string(cur.Content), catalog, inferenceURL, config.APIKey)
+			if err != nil {
+				return nil, err
+			}
+			files["antigravity_config"] = rendered
 
 		case "grok":
 			var existingGrokCfg string
@@ -680,6 +708,8 @@ func (h *Handler) runSyncJob(ctx context.Context, opID string, selections []sync
 					mf = sessiondv1.ManagedFile_MANAGED_FILE_GROK_CONFIG
 				case "hermes_config":
 					mf = sessiondv1.ManagedFile_MANAGED_FILE_HERMES_CONFIG
+				case "antigravity_config":
+					mf = sessiondv1.ManagedFile_MANAGED_FILE_ANTIGRAVITY_CONFIG
 				}
 
 				var expSha *string
@@ -715,14 +745,20 @@ func (h *Handler) runSyncJob(ctx context.Context, opID string, selections []sync
 			}
 
 			var envValues []*sessiondv1.SensitiveEnvironmentValue
-			if config.APIKey != "" {
+			environmentNeeded := false
+			for _, agent := range plan.Agents {
+				if agent != "antigravity" {
+					environmentNeeded = true
+				}
+			}
+			if environmentNeeded && config.APIKey != "" {
 				envValues = append(envValues, &sessiondv1.SensitiveEnvironmentValue{
 					Name:  "OPENCODEX_API_AUTH_TOKEN",
 					Value: []byte(config.APIKey),
 				})
 			}
 			for gt, prof := range config.GatewayProfiles {
-				if prof.APIKey != "" {
+				if environmentNeeded && prof.APIKey != "" {
 					if envK, ok := gatewayEnvKeys[gt]; ok {
 						envValues = append(envValues, &sessiondv1.SensitiveEnvironmentValue{
 							Name:  envK,
@@ -774,6 +810,24 @@ func (h *Handler) runSyncJob(ctx context.Context, opID string, selections []sync
 				})
 				mu.Unlock()
 				return
+			}
+
+			if expected, ok := plan.Files["antigravity_config"]; ok {
+				readback, readErr := h.client.Model.Plan(ctx, &sessiondv1.ModelConfigPlanRequest{Target: plan.TargetProto})
+				confirmed := false
+				if readErr == nil {
+					for _, file := range readback.CurrentFiles {
+						if file.File == sessiondv1.ManagedFile_MANAGED_FILE_ANTIGRAVITY_CONFIG && file.Exists && file.Sha256 == sha256Text(expected) && string(file.Content) == expected {
+							confirmed = true
+						}
+					}
+				}
+				if !confirmed {
+					mu.Lock()
+					results = append(results, map[string]any{"target_id": plan.TargetID, "status": "failed", "error": "Antigravity 配置写入后读回未确认，请检查目标后再重试"})
+					mu.Unlock()
+					return
+				}
 			}
 
 			changed := []string{}

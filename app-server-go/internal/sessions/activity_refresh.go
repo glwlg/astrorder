@@ -47,7 +47,7 @@ func (h *Handler) RefreshActivity(ctx context.Context, agentID string) (map[stri
 	for _, agent := range agents {
 		id, _ := agent["id"].(string)
 		kind, _ := agent["kind"].(string)
-		if id == "" || (agentID != "" && id != agentID) || (kind != "codex" && kind != "hermes" && kind != "grok") {
+		if id == "" || (agentID != "" && id != agentID) || (kind != "codex" && kind != "hermes" && kind != "grok" && kind != "antigravity") {
 			continue
 		}
 		entry := map[string]any{"agent_id": id, "kind": kind}
@@ -67,6 +67,9 @@ func (h *Handler) refreshAgentActivity(ctx context.Context, agent map[string]any
 	target, err := h.resolveRuntimeTarget(ctx, agent)
 	if err != nil {
 		return 0, err
+	}
+	if kind == "antigravity" {
+		return h.refreshAntigravityActivity(ctx, agent, target)
 	}
 	if kind == "grok" {
 		return h.refreshGrokActivity(ctx, agent, target)

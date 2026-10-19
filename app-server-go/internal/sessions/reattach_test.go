@@ -11,12 +11,20 @@ import (
 )
 
 func TestHistoryReattachesMissingHermesOwnerAfterDaemonRestart(t *testing.T) {
+	testHistoryReattach(t, codes.NotFound)
+}
+
+func TestHistoryReattachesUnavailableHermesViewer(t *testing.T) {
+	testHistoryReattach(t, codes.Unavailable)
+}
+
+func testHistoryReattach(t *testing.T, code codes.Code) {
 	attached := false
 	calls := 0
 	srv := &mockDaemonServer{
 		readModelCb: func(r *pb.ReadModelRequest) (*pb.ModelState, error) {
 			if !attached {
-				return nil, status.Error(codes.NotFound, "owner lost")
+				return nil, status.Error(code, "owner lost")
 			}
 			return &pb.ModelState{}, nil
 		},

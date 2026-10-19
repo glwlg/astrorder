@@ -1,6 +1,7 @@
 package modelgateway
 
 import (
+	"encoding/json"
 	"regexp"
 	"strconv"
 	"strings"
@@ -14,7 +15,7 @@ const diffMaxLines = 400
 // the retired Python implementation).
 const diffContext = 2
 
-var diffSecretPattern = regexp.MustCompile(`(?mi)^(\s*[+-]?\s*api_key\s*[=:]\s*).+$`)
+var diffSecretPattern = regexp.MustCompile(`(?mi)^(\s*[+-]?\s*"?api_?key"?\s*[=:]\s*).+$`)
 
 type diffOp struct {
 	kind byte // ' ', '-', '+'
@@ -29,6 +30,10 @@ func unifiedDiffText(before, after, name string) string {
 	if before == after {
 		return ""
 	}
+	if name == "antigravity_config" {
+		before = redactAntigravityDiff(before)
+		after = redactAntigravityDiff(after)
+	}
 	ops := diffOps(splitDiffLines(before), splitDiffLines(after))
 	lines := []string{"--- 当前/" + name, "+++ 同步后/" + name}
 	lines = append(lines, formatDiffHunks(ops, diffContext)...)
@@ -37,6 +42,37 @@ func unifiedDiffText(before, after, name string) string {
 	}
 	text := strings.Join(lines, "\n")
 	return diffSecretPattern.ReplaceAllString(text, `${1}"[已配置]"`)
+}
+
+func redactAntigravityDiff(text string) string {
+	if strings.TrimSpace(text) == "" {
+		return ""
+	}
+	var doc any
+	if json.Unmarshal([]byte(text), &doc) != nil {
+		return "[配置无法解析，内容已隐藏]"
+	}
+	var redact func(any)
+	redact = func(value any) {
+		switch item := value.(type) {
+		case map[string]any:
+			for key, child := range item {
+				lower := strings.ToLower(key)
+				if strings.Contains(lower, "key") || strings.Contains(lower, "token") || strings.Contains(lower, "authorization") || strings.Contains(lower, "secret") || lower == "headers" {
+					item[key] = "[已配置]"
+				} else {
+					redact(child)
+				}
+			}
+		case []any:
+			for _, child := range item {
+				redact(child)
+			}
+		}
+	}
+	redact(doc)
+	raw, _ := json.MarshalIndent(doc, "", "  ")
+	return string(raw) + "\n"
 }
 
 func splitDiffLines(s string) []string {

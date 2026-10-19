@@ -19,6 +19,9 @@ func (h *Handler) ensureNativeBinding(ctx context.Context, session map[string]an
 	if err == nil {
 		err = h.restoreCodexApproval(ctx, session)
 	}
+	if err == nil {
+		err = h.refreshHermesApprovals(ctx, session)
+	}
 	if err != nil {
 		// The HTTP layer reports only a status code; keep the cause findable.
 		slog.Warn("native session binding failed", "agent_id", stringValue(session, "agent_id"), "session_id", stringValue(session, "id"), "error", err)
@@ -33,11 +36,14 @@ func (h *Handler) bindNativeSession(ctx context.Context, session map[string]any)
 		return err
 	}
 	kind := stringValue(agent, "kind")
-	if kind != "hermes" && kind != "codex" && kind != "grok" {
+	if kind != "hermes" && kind != "codex" && kind != "grok" && kind != "antigravity" {
 		return nil
 	}
 	if h.client == nil || h.client.Runtime == nil {
 		return fmt.Errorf("daemon runtime is unavailable")
+	}
+	if err := h.requireAgentConnection(ctx, agent); err != nil {
+		return err
 	}
 	nativeID := stringValue(session, "source_session_id")
 	if nativeID == "" {
@@ -45,7 +51,10 @@ func (h *Handler) bindNativeSession(ctx context.Context, session map[string]any)
 	}
 	ref := buildSessionRef(aid, nativeID, stringValue(session, "connection_id"))
 	_, err = h.client.Runtime.ReadModel(ctx, &pb.ReadModelRequest{Session: ref})
-	if status.Code(err) != codes.NotFound {
+	recoverable := func(err error) bool {
+		return status.Code(err) == codes.NotFound || kind == "hermes" && status.Code(err) == codes.Unavailable
+	}
+	if !recoverable(err) {
 		return err
 	}
 	key := h.client.DaemonID() + "\x00" + aid + "\x00" + nativeID
@@ -54,7 +63,7 @@ func (h *Handler) bindNativeSession(ctx context.Context, session map[string]any)
 	lock.Lock()
 	defer lock.Unlock()
 	_, err = h.client.Runtime.ReadModel(ctx, &pb.ReadModelRequest{Session: ref})
-	if status.Code(err) != codes.NotFound {
+	if !recoverable(err) {
 		return err
 	}
 	target, err := h.resolveRuntimeTarget(ctx, agent)
@@ -69,6 +78,9 @@ func (h *Handler) bindNativeSession(ctx context.Context, session map[string]any)
 	if receipt == nil || !receipt.Attached || receipt.Session == nil || receipt.Session.SessionId != nativeID || receipt.Session.GetAgentId() != aid || receipt.Session.GetConnectionId() != ref.GetConnectionId() {
 		return fmt.Errorf("native reattachment identity was not confirmed")
 	}
-	_, _ = h.client.Runtime.ReadModel(ctx, &pb.ReadModelRequest{Session: ref})
-	return nil
+	if receipt.Status != pb.SessionStatus_SESSION_STATUS_IDLE && receipt.Status != pb.SessionStatus_SESSION_STATUS_RUNNING && receipt.Status != pb.SessionStatus_SESSION_STATUS_WAITING_APPROVAL {
+		return fmt.Errorf("native reattachment status was not confirmed")
+	}
+	_, err = h.client.Runtime.ReadModel(ctx, &pb.ReadModelRequest{Session: ref})
+	return err
 }

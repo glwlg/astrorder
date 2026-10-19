@@ -111,7 +111,7 @@ export function NotificationPermissionControl() {
         </Tooltip>
       </Menu.Target>
       <Menu.Dropdown>
-        <Menu.Item leftSection={<IconCheck size={14} color="var(--mantine-color-teal-6)" />} onClick={sendTest}>
+        <Menu.Item leftSection={<IconCheck size={14} color="var(--astr-muted)" />} onClick={sendTest}>
           测试系统通知
         </Menu.Item>
         <Menu.Item leftSection={<IconBellOff size={14} />} color="red" onClick={disable}>

@@ -15,7 +15,7 @@ import (
 )
 
 // environmentKinds is the fixed Agent catalog rendered by the environments page.
-var environmentKinds = []string{"hermes", "codex", "grok"}
+var environmentKinds = []string{"hermes", "codex", "grok", "antigravity"}
 
 // OSProber resolves the operating system of a remote environment through a real probe.
 type OSProber interface {
@@ -383,6 +383,10 @@ func (h *Handler) remoteEnvironmentAgents(ctx context.Context, connID string, ro
 	}
 	agents := make([]map[string]any, 0, len(environmentKinds))
 	for _, kind := range environmentKinds {
+		if kind == "antigravity" {
+			agents = append(agents, map[string]any{"kind": kind, "available": false, "state": "unsupported", "detail": "Antigravity 暂不支持 SSH 接入。", "daemon_mode": true})
+			continue
+		}
 		choiceEnabled, choicePresent, err := h.store.GetAgentConnectionChoice(ctx, connID+":"+kind)
 		if err != nil {
 			return nil, err
@@ -459,7 +463,7 @@ func (h *Handler) localEnvironmentItem(ctx context.Context) (map[string]any, err
 		if cached.Executables != nil && cached.Executables[kind] != "" {
 			executable = cached.Executables[kind]
 		} else if available {
-			if execPath, err := exec.LookPath(kind); err == nil && execPath != "" {
+			if execPath, err := localAgentExecutable(ctx, kind); err == nil && execPath != "" {
 				if abs, err := filepath.Abs(execPath); err == nil {
 					executable = abs
 				} else {
@@ -519,7 +523,7 @@ func (h *Handler) probeLocal(ctx context.Context) discoveryResult {
 		}
 		result.Available[kind] = true
 		result.Versions[kind] = version
-		if execPath, err := exec.LookPath(kind); err == nil && execPath != "" {
+		if execPath, err := localAgentExecutable(ctx, kind); err == nil && execPath != "" {
 			if abs, err := filepath.Abs(execPath); err == nil {
 				result.Executables[kind] = abs
 			} else {
@@ -537,6 +541,9 @@ func (h *Handler) probeRemote(ctx context.Context, connID string, conn map[strin
 	result := discoveryResult{Versions: map[string]string{}, Available: map[string]bool{}, Executables: map[string]string{}}
 	answered := false
 	for _, kind := range environmentKinds {
+		if kind == "antigravity" {
+			continue
+		}
 		version, _, err := h.versioner.GetVersion(ctx, kind, connID, conn)
 		if err != nil {
 			result.Available[kind] = false

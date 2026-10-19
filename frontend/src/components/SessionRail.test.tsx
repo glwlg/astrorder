@@ -371,6 +371,18 @@ describe('SessionRail project-first grouping', () => {
 })
 
 describe('SessionRail local handoff', () => {
+	 it('offers remote handoff only within the same SSH environment', async () => {
+	   const remoteCodex: Agent = { ...agents.codex, id: 'remote-codex', connection_id: 'ssh-wsl' }
+	   const otherHost: Agent = { ...agents.codex, id: 'other-host', connection_id: 'ssh-other' }
+	   const view = render(<MantineProvider><SessionRail sessions={[{ ...sessions[1], status: 'idle' }]} agents={{ ...agents, 'remote-codex': remoteCodex, 'other-host': otherHost }} onSelect={vi.fn()} /></MantineProvider>)
+	   const row = view.container.querySelector('.session-row-wrapper')!
+	   fireEvent.click(row.querySelector('button[aria-label="更多操作"]')!)
+	   fireEvent.click(await screen.findByRole('menuitem', { name: '转交' }))
+	   const options = within(screen.getByLabelText('目标 Agent')).getAllByRole('option')
+	   expect(options.map(option => (option as HTMLOptionElement).value)).toEqual(['', 'remote-codex'])
+	   view.unmount()
+	 })
+
   it('chooses the target agent, model, and effort before handoff', async () => {
     const target: Session = {
       ...sessions[0],
@@ -422,6 +434,15 @@ describe('SessionRail local handoff', () => {
     view.unmount()
     useBackgroundTasks.getState().dismiss(task.id)
     useAstrorderStore.getState().resetRuntime()
+  })
+
+  it('offers Antigravity native fork without a worktree option', async () => {
+    const agyAgents = { ...agents, [sessions[0].agent_id]: { ...agents[sessions[0].agent_id], kind: 'antigravity' as const } }
+    const view = render(<MantineProvider><SessionRail sessions={[sessions[0]]} agents={agyAgents} onSelect={vi.fn()} /></MantineProvider>)
+    fireEvent.click(view.container.querySelector('button[aria-label="更多操作"]')!)
+    expect(await screen.findByRole('menuitem', { name: '创建聊天分支' })).toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: '在新工作树中创建聊天分支' })).not.toBeInTheDocument()
+    view.unmount()
   })
 
   it('displays fork submenu in session menu', async () => {

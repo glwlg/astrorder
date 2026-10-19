@@ -101,15 +101,15 @@ function GomokuBoardRenderer({ element }: { element: any }) {
           alignItems: 'center',
           justifyContent: 'space-between',
           padding: '8px 12px',
-          background: isFinished ? '#ECFDF5' : '#F0F9FF',
-          border: `1px solid ${isFinished ? '#A7F3D0' : '#BAE6FD'}`,
+          background: 'var(--astr-surface-muted)',
+          border: '1px solid var(--astr-border)',
           borderRadius: 8,
           gap: 8,
         }}
       >
         <Group gap="xs">
-          <IconTrophy size={18} color={isFinished ? '#059669' : '#0284C7'} />
-          <Text size="sm" fw={700} c={isFinished ? '#065F46' : '#0369A1'}>
+          <IconTrophy size={18} color="var(--astr-muted)" />
+          <Text size="sm" fw={700} c="var(--astr-text)">
             {winner ? `胜者: ${winner}` : isFinished ? '对局已完结' : '对局进行中'}
           </Text>
           {status && (
@@ -280,12 +280,12 @@ function GomokuBoardRenderer({ element }: { element: any }) {
 function StatusCardRenderer({ element }: { element: any }) {
   const { title, status = 'info', summary, badge, timestamp, details } = element.props || {}
   const statusColorMap: Record<string, { bg: string; border: string; text: string; dot: string }> = {
-    success: { bg: '#ECFDF5', border: '#A7F3D0', text: '#065F46', dot: '#10B981' },
-    running: { bg: '#F0FDF4', border: '#86EFAC', text: '#15803D', dot: '#22C55E' },
-    ready: { bg: '#F0F9FF', border: '#BAE6FD', text: '#0369A1', dot: '#0284C7' },
-    warning: { bg: '#FFFBEB', border: '#FDE68A', text: '#92400E', dot: '#F59E0B' },
-    error: { bg: '#FEF2F2', border: '#FECACA', text: '#991B1B', dot: '#EF4444' },
-    info: { bg: '#F8FAFC', border: '#E2E8F0', text: '#334155', dot: '#64748B' },
+    success: { bg: 'var(--astr-surface-muted)', border: 'var(--astr-border)', text: 'var(--astr-text)', dot: 'var(--astr-muted)' },
+    running: { bg: 'var(--astr-surface-muted)', border: 'var(--astr-border)', text: 'var(--astr-text)', dot: 'var(--astr-text)' },
+    ready: { bg: 'var(--astr-surface-muted)', border: 'var(--astr-border)', text: 'var(--astr-text)', dot: 'var(--astr-muted)' },
+    warning: { bg: 'var(--astr-surface-muted)', border: 'var(--astr-border)', text: 'var(--astr-text)', dot: 'var(--astr-yellow)' },
+    error: { bg: 'var(--astr-surface-muted)', border: 'var(--astr-border)', text: 'var(--astr-text)', dot: 'var(--astr-red)' },
+    info: { bg: 'var(--astr-surface-muted)', border: 'var(--astr-border)', text: 'var(--astr-text)', dot: 'var(--astr-muted)' },
   }
   const theme = statusColorMap[status.toLowerCase()] || statusColorMap.info
 
@@ -457,16 +457,16 @@ function StepTimelineRenderer({ element }: { element: any }) {
             >
               <div style={{ marginTop: 2 }}>
                 {isDone ? (
-                  <div style={{ width: 18, height: 18, borderRadius: '50%', background: '#10B981', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <IconCheck size={12} color="#ffffff" />
+                  <div style={{ width: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <IconCheck size={12} color="var(--astr-muted)" />
                   </div>
                 ) : isCurrent ? (
-                  <div style={{ width: 18, height: 18, borderRadius: '50%', background: '#5B5BD6', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <IconActivity size={12} color="#ffffff" />
+                  <div style={{ width: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <IconActivity size={12} color="var(--astr-text)" />
                   </div>
                 ) : isFailed ? (
-                  <div style={{ width: 18, height: 18, borderRadius: '50%', background: '#EF4444', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <IconX size={12} color="#ffffff" />
+                  <div style={{ width: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <IconX size={12} color="var(--astr-red)" />
                   </div>
                 ) : (
                   <div style={{ width: 18, height: 18, borderRadius: '50%', border: '1.5px solid #CBD5E1', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, color: '#94A3B8' }}>
@@ -635,16 +635,16 @@ function ChecklistRenderer({ element }: { element: any }) {
                   width: 14,
                   height: 14,
                   borderRadius: 4,
-                  border: item.done ? 'none' : '1px solid #CBD5E1',
-                  background: item.done ? '#10B981' : '#ffffff',
+                  border: item.done ? 'none' : '1px solid var(--astr-border)',
+                  background: 'transparent',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                 }}
               >
-                {item.done && <IconCheck size={10} color="#ffffff" />}
+                {item.done && <IconCheck size={10} color="var(--astr-muted)" />}
               </div>
-              <span style={{ textDecoration: item.done ? 'line-through' : 'none', color: item.done ? '#94A3B8' : '#1E293B' }}>
+              <span style={{ textDecoration: item.done ? 'line-through' : 'none', color: item.done ? 'var(--astr-muted)' : 'var(--astr-text)' }}>
                 {item.label || item.text}
               </span>
             </div>
@@ -688,13 +688,7 @@ function TerminalLogRenderer({ element }: { element: any }) {
  */
 function ApiEndpointsCardRenderer({ element }: { element: any }) {
   const { title = 'API 接口契约清单', endpoints = [], baseUrl } = element.props || {}
-  const methodColor: Record<string, { bg: string; text: string }> = {
-    GET: { bg: '#ECFDF5', text: '#059669' },
-    POST: { bg: '#EFF6FF', text: '#2563EB' },
-    PUT: { bg: '#FFFBEB', text: '#D97706' },
-    DELETE: { bg: '#FEF2F2', text: '#DC2626' },
-    PATCH: { bg: '#FAF5FF', text: '#9333EA' },
-  }
+
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -707,7 +701,7 @@ function ApiEndpointsCardRenderer({ element }: { element: any }) {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
         {endpoints.map((ep: any, idx: number) => {
           const method = (ep.method || 'GET').toUpperCase()
-          const style = methodColor[method] || { bg: '#F1F5F9', text: '#475569' }
+
           return (
             <div
               key={idx}
@@ -723,7 +717,7 @@ function ApiEndpointsCardRenderer({ element }: { element: any }) {
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                <span style={{ padding: '1px 5px', borderRadius: 4, fontSize: 9.5, fontWeight: 800, fontFamily: 'monospace', background: style.bg, color: style.text }}>
+                <span style={{ padding: '1px 5px', fontSize: 9.5, fontWeight: 600, fontFamily: 'monospace', color: 'var(--astr-muted)' }}>
                   {method}
                 </span>
                 <span style={{ fontFamily: 'monospace', fontWeight: 600, color: 'var(--astr-text, #1E293B)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -732,7 +726,7 @@ function ApiEndpointsCardRenderer({ element }: { element: any }) {
                 {ep.desc && <span style={{ color: '#94A3B8', fontSize: 10.5 }}>- {ep.desc}</span>}
               </div>
               {ep.status && (
-                <span style={{ fontSize: 10, fontFamily: 'monospace', color: ep.status < 300 ? '#10B981' : '#EF4444' }}>
+                <span style={{ fontSize: 10, fontFamily: 'monospace', color: ep.status < 300 ? 'var(--astr-muted)' : 'var(--astr-red)' }}>
                   {ep.status}
                 </span>
               )}
@@ -801,17 +795,17 @@ function TestReportRenderer({ element }: { element: any }) {
         {duration && <Badge size="xs" variant="light" color="gray">耗时 {duration}</Badge>}
       </div>
       <div style={{ display: 'flex', gap: 8 }}>
-        <div style={{ flex: 1, padding: '6px 10px', background: '#ECFDF5', border: '1px solid #A7F3D0', borderRadius: 6, textAlign: 'center' }}>
-          <div style={{ fontSize: 10, color: '#047857' }}>通过 (Passed)</div>
-          <div style={{ fontSize: 16, fontWeight: 700, color: '#065F46', fontFamily: 'monospace' }}>{passed}</div>
+        <div style={{ flex: 1, padding: '6px 10px', background: 'var(--astr-surface-muted)', border: '1px solid var(--astr-border)', borderRadius: 6, textAlign: 'center' }}>
+          <div style={{ fontSize: 10, color: 'var(--astr-muted)' }}>通过 (Passed)</div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--astr-text)', fontFamily: 'monospace' }}>{passed}</div>
         </div>
-        <div style={{ flex: 1, padding: '6px 10px', background: failed > 0 ? '#FEF2F2' : '#F8FAFC', border: `1px solid ${failed > 0 ? '#FECACA' : '#E5E7EB'}`, borderRadius: 6, textAlign: 'center' }}>
+        <div style={{ flex: 1, padding: '6px 10px', background: 'var(--astr-surface-muted)', border: '1px solid var(--astr-border)', borderRadius: 6, textAlign: 'center' }}>
           <div style={{ fontSize: 10, color: failed > 0 ? '#DC2626' : '#64748B' }}>失败 (Failed)</div>
           <div style={{ fontSize: 16, fontWeight: 700, color: failed > 0 ? '#B91C1C' : '#94A3B8', fontFamily: 'monospace' }}>{failed}</div>
         </div>
-        <div style={{ flex: 1, padding: '6px 10px', background: '#F8FAFC', border: '1px solid #E5E7EB', borderRadius: 6, textAlign: 'center' }}>
-          <div style={{ fontSize: 10, color: '#64748B' }}>通过率</div>
-          <div style={{ fontSize: 16, fontWeight: 700, color: passRate === 100 ? '#10B981' : '#5B5BD6', fontFamily: 'monospace' }}>{passRate}%</div>
+        <div style={{ flex: 1, padding: '6px 10px', background: 'var(--astr-surface-muted)', border: '1px solid var(--astr-border)', borderRadius: 6, textAlign: 'center' }}>
+          <div style={{ fontSize: 10, color: 'var(--astr-muted)' }}>通过率</div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--astr-text)', fontFamily: 'monospace' }}>{passRate}%</div>
         </div>
       </div>
       {cases.length > 0 && (
@@ -819,10 +813,10 @@ function TestReportRenderer({ element }: { element: any }) {
           {cases.slice(0, 12).map((c: any, idx: number) => {
             const isPass = c.status === 'passed' || c.pass
             return (
-              <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 8px', borderRadius: 4, background: isPass ? 'transparent' : '#FEF2F2', fontSize: 10.5 }}>
+              <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 8px', borderRadius: 4, background: 'transparent', fontSize: 10.5 }}>
                 <Group gap={6}>
-                  {isPass ? <IconCheck size={11} color="#10B981" /> : <IconX size={11} color="#EF4444" />}
-                  <span style={{ color: isPass ? '#334155' : '#B91C1C', fontFamily: 'monospace' }}>{c.name || c.title}</span>
+                  {isPass ? <IconCheck size={11} color="var(--astr-muted)" /> : <IconX size={11} color="var(--astr-red)" />}
+                  <span style={{ color: isPass ? 'var(--astr-text)' : 'var(--astr-red)', fontFamily: 'monospace' }}>{c.name || c.title}</span>
                 </Group>
                 {c.duration && <span style={{ color: '#94A3B8', fontSize: 10, fontFamily: 'monospace' }}>{c.duration}</span>}
               </div>

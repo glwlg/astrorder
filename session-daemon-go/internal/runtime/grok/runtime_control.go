@@ -82,7 +82,7 @@ func (a *Adapter) controlSpawn(ctx context.Context, r core.Request) (core.Result
 			// Live control transport: reuse it without a new native process.
 			agentID := a.config.AgentID
 			a.mu.Unlock()
-			return controlResult(sessionID, agentID, status), nil
+			return a.controlResult(sessionID, agentID, status), nil
 		}
 		// The previous control transport failed; retire it before replacing.
 		// The binding stays registered until its native cleanup is confirmed.
@@ -140,7 +140,7 @@ func (a *Adapter) controlSpawn(ctx context.Context, r core.Request) (core.Result
 		}
 		return core.Result{}, fmt.Errorf("grok control transport is not idle after initialization")
 	}
-	return controlResult(sessionID, a.config.AgentID, status), nil
+	return a.controlResult(sessionID, a.config.AgentID, status), nil
 }
 
 // controlCommand serves a control-only binding. The official read-only model
@@ -160,7 +160,7 @@ func (a *Adapter) controlCommand(ctx context.Context, owned *ownedSession, sessi
 	copy(items, owned.models)
 	status := owned.status
 	owned.mu.Unlock()
-	payload := controlPayload(sessionID, a.config.AgentID, status)
+	payload := a.controlPayload(sessionID, a.config.AgentID, status)
 	payload["items"] = items
 	return core.Result{SessionID: sessionID, Status: status, Payload: payload}, nil
 }
@@ -168,8 +168,16 @@ func (a *Adapter) controlCommand(ctx context.Context, owned *ownedSession, sessi
 // controlPayload is the exact metadata a bound control session reports. The
 // registry binds agent control metadata from this payload, and repeated
 // spawns over the live transport return the same identity.
-func controlPayload(sessionID, agentID, status string) map[string]any {
+func (a *Adapter) controlPayload(sessionID, agentID, status string) map[string]any {
+	name := a.config.AgentName
+	if name == "" {
+		name = "Grok Build"
+	}
 	return map[string]any{
+		"name":            name,
+		"connection_id":   a.config.ConnectionID,
+		"runtime_id":      agentID,
+		"source_id":       agentID,
 		"session_id":      sessionID,
 		"status":          status,
 		"agent_id":        agentID,
@@ -178,8 +186,8 @@ func controlPayload(sessionID, agentID, status string) map[string]any {
 	}
 }
 
-func controlResult(sessionID, agentID, status string) core.Result {
-	return core.Result{SessionID: sessionID, Status: status, Payload: controlPayload(sessionID, agentID, status)}
+func (a *Adapter) controlResult(sessionID, agentID, status string) core.Result {
+	return core.Result{SessionID: sessionID, Status: status, Payload: a.controlPayload(sessionID, agentID, status)}
 }
 
 // Shutdown gracefully releases this adapter's confirmed idle transports

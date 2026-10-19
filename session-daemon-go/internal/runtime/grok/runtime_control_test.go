@@ -124,6 +124,11 @@ func TestFakeACP_RuntimeControlInitializeOnly(t *testing.T) {
 	if repeated.Payload["runtime_control"] != true || repeated.Payload["agent_id"] != controlSessionID {
 		t.Fatalf("repeated control attach lost identity: %+v", repeated.Payload)
 	}
+	for _, result := range []core.Result{spawned, entry, models, repeated} {
+		if result.Payload["name"] != "Grok Build" {
+			t.Fatalf("control metadata lost configured name: %+v", result.Payload)
+		}
+	}
 	if countCalls(readCalls(t, logPath), "initialize") != 1 {
 		t.Fatalf("repeated control attach started another transport: %v", readCalls(t, logPath))
 	}

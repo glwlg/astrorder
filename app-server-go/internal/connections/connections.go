@@ -39,6 +39,10 @@ func (e *NativeVersionExecutor) GetVersion(ctx context.Context, kind, connID str
 	binName := strings.ToLower(kind)
 	switch binName {
 	case "codex", "hermes", "grok":
+	case "antigravity":
+		if connID != "" && connID != "local" {
+			return "", false, fmt.Errorf("Antigravity SSH runtime is not supported yet")
+		}
 	default:
 		return "", false, fmt.Errorf("unsupported agent kind %q", kind)
 	}
@@ -264,6 +268,10 @@ func runtimeTarget(agentType string, connID *string, sshConn map[string]any) *se
 			kind = sessiondv1.RuntimeKind_RUNTIME_KIND_SSH_HERMES
 		} else {
 			kind = sessiondv1.RuntimeKind_RUNTIME_KIND_HERMES
+		}
+	case "antigravity":
+		if connID == nil || *connID == "" {
+			kind = sessiondv1.RuntimeKind_RUNTIME_KIND_ANTIGRAVITY
 		}
 	case "grok":
 		if connID != nil && *connID != "" {
@@ -614,11 +622,15 @@ func (h *Handler) handleEnvironmentAgentAction(w http.ResponseWriter, r *http.Re
 	connID := parts[3]
 	kind := parts[5]
 	action := parts[6]
-	if kind != "hermes" && kind != "codex" && kind != "grok" {
+	if kind != "hermes" && kind != "codex" && kind != "grok" && kind != "antigravity" {
 		writeError(w, http.StatusUnprocessableEntity, "invalid_kind", "Unsupported agent kind")
 		return
 	}
 
+	if kind == "antigravity" && connID != "local" {
+		writeError(w, http.StatusUnprocessableEntity, "unsupported_runtime", "Antigravity SSH runtime is not supported yet")
+		return
+	}
 	if action != "connect" && action != "disconnect" && action != "restart" {
 		writeError(w, http.StatusUnprocessableEntity, "invalid_action", "不支持的连接操作。")
 		return

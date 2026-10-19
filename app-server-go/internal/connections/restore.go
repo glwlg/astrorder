@@ -52,6 +52,10 @@ func (h *Handler) Restore(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("list ssh connections: %w", err)
 	}
+	agents, err := h.store.ListCurrentAgents(ctx)
+	if err != nil {
+		return fmt.Errorf("list previously connected agents: %w", err)
+	}
 	type target struct {
 		id  string
 		row map[string]any
@@ -66,6 +70,9 @@ func (h *Handler) Restore(ctx context.Context) error {
 	limit := make(chan struct{}, 6)
 	for _, node := range targets {
 		for _, kind := range environmentKinds {
+			if kind == "antigravity" && node.id != "local" {
+				continue
+			}
 			if ctx.Err() != nil {
 				workers.Wait()
 				return ctx.Err()
@@ -87,6 +94,43 @@ func (h *Handler) Restore(ctx context.Context) error {
 				expectedConnection = node.id
 			}
 			runtimeKind := runtimeTarget(kind, connectionID, node.row).GetRuntime()
+			if !present {
+				// Preserve confirmed connections from before choices were recorded,
+				// but never opt into every installed runtime or saved host.
+				previouslyConnected := kind == "hermes" && node.row != nil && node.row["state"] == "connected"
+				for _, agent := range agents {
+					connection, _ := agent["connection_id"].(string)
+					if connection == "" {
+						connection = "local"
+					}
+					if connection == node.id && agent["kind"] == kind && agent["status"] == "ready" {
+						previouslyConnected = true
+					}
+				}
+				for _, session := range snapshot.Sessions {
+					if session.GetSession().GetSessionId() == "probe-"+kind+"-"+node.id && session.GetSession().GetConnectionId() == expectedConnection && session.GetRuntime() == runtimeKind && session.GetRuntimeOwned() {
+						previouslyConnected = true
+					}
+				}
+				if !previouslyConnected {
+					continue
+				}
+				if err := h.store.SetAgentConnectionChoice(ctx, node.id+":"+kind, true); err != nil {
+					workers.Wait()
+					return err
+				}
+			}
+			if kind == "antigravity" {
+				registered := false
+				for _, runtime := range snapshot.Runtimes {
+					if runtime.GetRuntime() == runtimeKind && runtime.GetRegistered() {
+						registered = true
+					}
+				}
+				if !registered {
+					continue
+				}
+			}
 			owned := false
 			for _, session := range snapshot.Sessions {
 				if session.GetSession().GetSessionId() == "probe-"+kind+"-"+node.id &&
@@ -121,6 +165,9 @@ func (h *Handler) Restore(ctx context.Context) error {
 }
 
 func (h *Handler) attachEnvironmentAgent(ctx context.Context, connID, kind string, sshConn map[string]any) error {
+	if kind == "antigravity" && connID != "local" {
+		return fmt.Errorf("Antigravity SSH runtime is not supported yet")
+	}
 	if h.client == nil {
 		return fmt.Errorf("daemon client unavailable")
 	}

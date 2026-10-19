@@ -3,7 +3,8 @@ import { AsyncUserInputCard, isAsyncQuestion, hasLaterNativeInput } from '../../
 import { IconArrowDown, IconPaperclip, IconRefresh, IconTool, IconVectorTriangle } from '@tabler/icons-react'
 import { ActionIcon, Anchor, Button, Group, Paper, Stack, Text, Tooltip } from '@mantine/core'
 import { IconCheck, IconChecks, IconCopy, IconEdit, IconGitFork, IconShieldCheck } from '@tabler/icons-react'
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
+import { InlineNotice } from '../../components/InlineNotice'
 import type { Approval, Attachment, Message, OutboxEntry, Session } from '../../domain/types'
 import { attachmentHref } from '../../domain/attachmentHref'
 import { hasMessageContent, isMessageActivity, normalizeMessagePresentation } from '../../domain/messagePresentation'
@@ -283,6 +284,7 @@ export function Transcript({
   composerHeight,
   loading,
   error,
+  notice,
   onRetry,
   hasMoreHistory = false,
   loadingOlder = false,
@@ -302,6 +304,7 @@ export function Transcript({
   composerHeight?: number
   loading?: boolean
   error?: string
+  notice?: ReactNode
   onRetry?: () => void
   hasMoreHistory?: boolean
   loadingOlder?: boolean
@@ -374,14 +377,7 @@ export function Transcript({
             </Button>
           )}
           {loading && messages.length === 0 && <Text className="transcript-status" c="dimmed">正在读取会话记录…</Text>}
-          {error && (
-            <Paper className="transcript-error" withBorder p="sm" radius="md">
-              <Group justify="space-between" gap="xs">
-                <Text size="sm" c="red">{error}</Text>
-                {onRetry && <Button size="compact-xs" variant="subtle" onClick={onRetry} leftSection={<IconRefresh size={14} />}>重试</Button>}
-              </Group>
-            </Paper>
-          )}
+          {notice || (error && <InlineNotice className="transcript-error" title="暂时无法读取会话" alert actions={onRetry && <Button size="compact-xs" variant="default" onClick={onRetry} leftSection={<IconRefresh size={14} />}>重试</Button>}>{error}</InlineNotice>)}
           {!loading && !error && messages.length === 0 && outbox.length === 0 && (
             <Stack className="transcript-empty" align="center" gap="xs">
               <IconTool size={25} stroke={1.4} aria-hidden="true" />

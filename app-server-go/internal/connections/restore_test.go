@@ -67,7 +67,12 @@ func setupRestoreFixture(t *testing.T, daemon *fakeDaemonService, resolver conne
 
 func TestRestoreConnectsLocalCodexAndHermes(t *testing.T) {
 	daemon := &fakeDaemonService{}
-	h, _ := setupRestoreFixture(t, daemon, nil)
+	h, st := setupRestoreFixture(t, daemon, nil)
+	for _, kind := range []string{"codex", "hermes"} {
+		if err := st.SetAgentConnectionChoice(context.Background(), "local:"+kind, true); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	if err := h.Restore(context.Background()); err != nil {
 		t.Fatalf("Restore failed: %v", err)
@@ -98,7 +103,10 @@ func TestRestoreConnectsLocalCodexAndHermes(t *testing.T) {
 
 func TestRestoreConnectsLocalGrok(t *testing.T) {
 	daemon := &fakeDaemonService{}
-	h, _ := setupRestoreFixture(t, daemon, nil)
+	h, st := setupRestoreFixture(t, daemon, nil)
+	if err := st.SetAgentConnectionChoice(context.Background(), "local:grok", true); err != nil {
+		t.Fatal(err)
+	}
 	if err := h.Restore(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -272,7 +280,12 @@ func TestAutoConnectRestoresReleasedRuntimeWithoutAppRestart(t *testing.T) {
 
 func TestAutoConnectRunsAsynchronously(t *testing.T) {
 	daemon := &fakeDaemonService{}
-	h, _ := setupRestoreFixture(t, daemon, nil)
+	h, st := setupRestoreFixture(t, daemon, nil)
+	for _, kind := range []string{"codex", "hermes"} {
+		if err := st.SetAgentConnectionChoice(context.Background(), "local:"+kind, true); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

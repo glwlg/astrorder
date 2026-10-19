@@ -1,9 +1,11 @@
 package settingsapi
 
 import (
+	"astrorder.dev/app-server/internal/kernelcontrol"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"net/http"
 	"strings"
 	"sync"
@@ -17,6 +19,49 @@ type restartOperations struct {
 }
 
 func (h *handler) restart(w http.ResponseWriter, r *http.Request) {
+	if h.Kernels != nil {
+		if r.Method == http.MethodGet {
+			id := strings.TrimPrefix(r.URL.Path, "/api/v1/services/daemon/restart/")
+			r.URL.Path = kernelsPrefix + "operations/" + id
+			h.kernels(w, r)
+			return
+		}
+		// Preserve the old explicit confirmation contract while dispatching independently.
+		if h.Authorizer == nil {
+			fail(w, 503, "内核管理认证不可用")
+			return
+		}
+		if r.URL.Query().Has("token") {
+			fail(w, 401, "请先登录星序")
+			return
+		}
+		if r.Header.Get("Origin") == "" {
+			fail(w, 403, "必须提供请求来源")
+			return
+		}
+		if failure := h.Authorizer.AuthorizeBrowser(r); failure != nil {
+			fail(w, failure.Status, failure.Detail)
+			return
+		}
+		var body struct {
+			ConfirmActive bool `json:"confirm_active"`
+		}
+		if decode(r, &body) != nil || !body.ConfirmActive {
+			fail(w, 422, "必须明确确认中断小内核中的活跃会话")
+			return
+		}
+		op, err := h.Kernels.Start("daemon", "restart", true)
+		if err != nil {
+			code := 503
+			if errors.Is(err, kernelcontrol.ErrBusy) {
+				code = 409
+			}
+			fail(w, code, err.Error())
+			return
+		}
+		writeJSON(w, 202, op)
+		return
+	}
 	const prefix = "/api/v1/services/daemon/restart"
 	if r.Method == http.MethodGet {
 		id := strings.TrimPrefix(r.URL.Path, prefix+"/")

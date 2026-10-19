@@ -62,6 +62,8 @@ func managedFileToName(f sessiondv1.ManagedFile) (string, error) {
 		return modelconfig.FileGrokConfig, nil
 	case sessiondv1.ManagedFile_MANAGED_FILE_HERMES_CONFIG:
 		return modelconfig.FileHermesConfig, nil
+	case sessiondv1.ManagedFile_MANAGED_FILE_ANTIGRAVITY_CONFIG:
+		return modelconfig.FileAntigravityConfig, nil
 	default:
 		return "", status.Error(codes.InvalidArgument, "unrecognized managed file")
 	}
@@ -79,6 +81,8 @@ func nameToManagedFile(name string) sessiondv1.ManagedFile {
 		return sessiondv1.ManagedFile_MANAGED_FILE_GROK_CONFIG
 	case modelconfig.FileHermesConfig:
 		return sessiondv1.ManagedFile_MANAGED_FILE_HERMES_CONFIG
+	case modelconfig.FileAntigravityConfig:
+		return sessiondv1.ManagedFile_MANAGED_FILE_ANTIGRAVITY_CONFIG
 	default:
 		return sessiondv1.ManagedFile_MANAGED_FILE_UNSPECIFIED
 	}

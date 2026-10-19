@@ -1,0 +1,39 @@
+/* Mobile connections reserve the viewport for agents, with one list scroll. */
+.m-sheet.m-connections-sheet { height: 96dvh; max-height: 96dvh; overflow: hidden; padding: 8px 0 max(env(safe-area-inset-bottom), 8px); }
+.m-connections-sheet > header { padding: 0 16px 8px !important; border-bottom: 1px solid var(--m-border); }
+.m-connections-sheet .m-sheet-header-actions button { width: 44px !important; height: 44px !important; }
+.m-sheet-body.m-connections-body { flex: 1; min-height: 0; overflow: hidden; padding: 0; }
+.m-connections-body .environment-connections { height: 100%; min-height: 0; display: flex; flex-direction: column; }
+.mobile-connection-toolbar { flex: none; display: grid; grid-template-columns: minmax(0, 1fr) 44px; align-items: center; gap: 10px; padding: 14px 16px 12px; border-bottom: 1px solid var(--m-border); background: var(--m-surface); }
+.mobile-connection-select { display: grid; gap: 4px; min-width: 0; }
+.mobile-connection-select > span { font-size: 11px; color: var(--m-muted); }
+.mobile-connection-select select { width: 100%; min-height: 44px; padding: 8px 10px; border: 1px solid var(--m-border); border-radius: 8px; font: inherit; font-size: 15px; color: var(--m-text); background: var(--m-low); }
+.mobile-connection-host-info { grid-column: 1 / -1; min-width: 0; font-size: 12px; color: var(--m-muted); }
+.mobile-connection-host-info summary { display: flex; justify-content: space-between; gap: 8px; cursor: pointer; padding: 6px 0; list-style: none; }
+.mobile-connection-host-info summary span { text-decoration: underline; text-underline-offset: 3px; }
+.mobile-connection-host-info p { margin: 8px 0 0; overflow-wrap: anywhere; }
+.m-connections-body .connection-hosts-layout { display: flex; flex-direction: column; flex: 1; height: auto; min-height: 0; overflow: hidden; }
+.m-connections-body .connection-host-detail { flex: 1; min-height: 0; background: var(--m-surface); }
+.m-connections-body .connection-agent-list { flex: 1 1 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 16px; }
+.m-connections-body .connection-agent-card { grid-template-columns: 36px minmax(0, 1fr) auto; gap: 8px 12px; padding: 14px; margin-bottom: 10px; border-color: var(--m-border); background: var(--m-surface); }
+.m-connections-body .connection-agent-icon { grid-column: 1; grid-row: 1 / 3; align-self: start; background: var(--m-low); border-color: var(--m-border); }
+.m-connections-body .connection-agent-description { grid-column: 2; grid-row: 1; }
+.m-connections-body .connection-agent-description > .mantine-Group-root { gap: 3px; flex-direction: column; align-items: flex-start; }
+.m-connections-body .connection-agent-state { grid-column: 2; grid-row: 2; }
+.m-connections-body .connection-agent-card > .mantine-Group-root { grid-column: 3; grid-row: 1 / 3; flex-direction: column; }
+.m-connections-body .connection-agent-card .mantine-Button-root, .m-connections-body .connection-agent-card .mantine-ActionIcon-root { min-width: 44px; min-height: 44px; }
+.mobile-connection-agent-info { margin-top: 6px; font-size: 12px; color: var(--m-muted); }
+.mobile-connection-agent-info summary { cursor: pointer; padding: 4px 0; }
+.m-connections-body .connection-agent-error { overflow-wrap: anywhere; margin-top: 6px; }
+.m-connections-body .connection-agent-path { font-size: 11px; }
+.mobile-connection-toolbar > .mantine-Button-root { grid-column: 1 / -1; }
+@media (orientation: landscape) and (max-height: 500px) {
+  .m-sheet.m-connections-sheet { height: 100dvh; max-height: 100dvh; border-radius: 0; padding-top: max(env(safe-area-inset-top), 4px); }
+  .m-connections-sheet > .m-handle { display: none; }
+  .m-connections-sheet > header { padding-bottom: 0 !important; }
+  .mobile-connection-toolbar { grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) 44px; padding-block: 6px; }
+  .mobile-connection-select { position: relative; }
+  .mobile-connection-select > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .mobile-connection-host-info { grid-column: 2; grid-row: 1; }
+  .mobile-connection-toolbar > .mantine-ActionIcon-root { grid-column: 3; grid-row: 1; }
+}

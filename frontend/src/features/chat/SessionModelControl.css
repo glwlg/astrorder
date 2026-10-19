@@ -34,7 +34,7 @@
   border-radius: 50%;
   flex-shrink: 0;
 }
-.codex-model-quota-dot.is-healthy { background: #10b981; box-shadow: 0 0 4px rgba(16, 185, 129, 0.4); }
+.codex-model-quota-dot.is-healthy { background: var(--astr-muted); }
 .codex-model-quota-dot.is-tight { background: #f59e0b; box-shadow: 0 0 4px rgba(245, 158, 11, 0.4); }
 .codex-model-quota-dot.is-exhausted { background: #ef4444; box-shadow: 0 0 4px rgba(239, 68, 68, 0.4); }
 
@@ -49,16 +49,16 @@
   line-height: 1.2;
 }
 .codex-model-quota-badge.is-healthy {
-  background: rgba(16, 185, 129, 0.12);
-  color: #059669;
+  background: transparent;
+  color: var(--astr-muted);
 }
 .codex-model-quota-badge.is-tight {
-  background: rgba(245, 158, 11, 0.12);
-  color: #d97706;
+  background: transparent;
+  color: var(--astr-yellow);
 }
 .codex-model-quota-badge.is-exhausted {
-  background: rgba(239, 68, 68, 0.12);
-  color: #dc2626;
+  background: transparent;
+  color: var(--astr-red);
 }
 .codex-model-pill-effort {
   color: var(--astr-muted);

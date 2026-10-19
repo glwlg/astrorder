@@ -218,8 +218,25 @@ export function EnvironmentConnections({ embedded = false, renderAgentConfigurat
     return id === 'local' ? '本机自动发现' : settings?.host ? `${settings.user ? `${settings.user}@` : ''}${settings.host}:${settings.port || 22}` : settings?.ssh_config_alias || 'SSH'
   }
   return <section className={`environment-connections${embedded ? ' is-embedded' : ''}`}>
+    {embedded && <div className="mobile-connection-toolbar">
+      <label className="mobile-connection-select"><span>运行环境</span><select aria-label="运行环境" value={selected?.id ?? ''} onChange={event => setSelectedId(event.currentTarget.value)} disabled={!items.length}>
+        {!items.length && <option value="">{query.isLoading ? '正在读取环境…' : '暂无运行环境'}</option>}
+        {items.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+      </select></label>
+      <Menu position="bottom-end" withinPortal><Menu.Target><ActionIcon variant="default" size={44} aria-label="环境操作"><IconDotsVertical size={20} /></ActionIcon></Menu.Target><Menu.Dropdown>
+        <Menu.Item disabled={!selected || !!busy} onClick={() => selected && void run(selected.id, () => api.discoverEnvironment(selected.id))}>重新发现 Agent</Menu.Item>
+        <Menu.Item onClick={() => edit()}>添加 SSH 连接</Menu.Item>
+        {selected?.method === 'ssh' && <Menu.Item onClick={() => edit(connections.data?.ssh.items.find(row => row.id === selected.id))}>配置 SSH</Menu.Item>}
+        <Menu.Divider />
+        <Menu.Item disabled={!selected || batchUpgrading} onClick={() => void openBatchUpgradeDialog('node')}>升级本节点 Agent</Menu.Item>
+        <Menu.Item disabled={batchUpgrading} onClick={() => void openBatchUpgradeDialog('all')}>全节点升级</Menu.Item>
+        {selected?.method === 'ssh' && <Menu.Item disabled={!!busy || !selected.agents.some(agent => agent.state === 'connected')} onClick={() => void run(`disconnect:${selected.id}`, async () => { for (const agent of selected.agents) { if (agent.state === 'connected') await api.changeEnvironmentAgent(selected.id, agent.kind, false) } })}>断开环境</Menu.Item>}
+      </Menu.Dropdown></Menu>
+      {selected && <details className="mobile-connection-host-info"><summary>{selected.method === 'local' ? '本机' : 'SSH'} · {selected.agents.filter(agent => agent.state === 'connected').length} / {selected.agents.length} 个 Agent 已接入<span>环境详情</span></summary><p>{hostAddress(selected.id)}{selected.os ? ` · ${selected.os}` : ''}</p></details>}
+      {query.isError && <Button variant="default" onClick={() => void query.refetch()}>重新读取连接环境</Button>}
+    </div>}
     <div className="connection-hosts-layout">
-      <nav className="connection-hosts" aria-label="运行环境">
+      {!embedded && <nav className="connection-hosts" aria-label="运行环境">
         <div className="connection-hosts-heading"><Text fw={600} size="xs">主机节点 ({items.length})</Text><Text size="xs" c="dimmed">选择环境</Text></div>
         {query.isLoading && <Text size="xs" role="status">正在发现本机 Agent…</Text>}
         {query.isError && <Button variant="subtle" onClick={() => void query.refetch()}>重新读取连接环境</Button>}
@@ -242,10 +259,10 @@ export function EnvironmentConnections({ embedded = false, renderAgentConfigurat
             全节点升级
           </Button>
         </Stack>
-      </nav>
+      </nav>}
       <div className="connection-host-detail">
         {selected ? <>
-          <header className="connection-detail-header"><div><Group gap="sm"><Title order={3} size="h4">{selected.name}</Title><Text className="connection-address" size="xs">{hostAddress(selected.id)}</Text></Group><Text size="xs" c="dimmed" mt={6}>{selected.method === 'local' ? '本机' : 'SSH'} · {selected.agents.filter(agent => agent.state === 'connected').length} 个 Agent 已接入</Text></div><Group gap="xs">
+          {!embedded && <header className="connection-detail-header"><div><Group gap="sm"><Title order={3} size="h4">{selected.name}</Title><Text className="connection-address" size="xs">{hostAddress(selected.id)}</Text></Group><Text size="xs" c="dimmed" mt={6}>{selected.method === 'local' ? '本机' : 'SSH'} · {selected.agents.filter(agent => agent.state === 'connected').length} 个 Agent 已接入</Text></div><Group gap="xs">
             <Button
               size="xs"
               variant="light"
@@ -259,15 +276,16 @@ export function EnvironmentConnections({ embedded = false, renderAgentConfigurat
             </Button>
             <Button size="xs" variant="default" loading={busy === selected.id} disabled={!!busy} onClick={() => void run(selected.id, () => api.discoverEnvironment(selected.id))}>{selected.discovered ? '重新发现' : '验证 SSH 并发现 Agent'}</Button>
             {selected.method === 'ssh' && <Button size="xs" variant="default" onClick={() => edit(connections.data?.ssh.items.find(row => row.id === selected.id))}>配置 SSH</Button>}
-          </Group></header>
-          <div className="connection-agent-list"><Group justify="space-between" mb="sm"><Text size="xs" fw={600}>托管 Agent 实例与执行通道</Text><Text size="xs" c="dimmed">运行配置与状态</Text></Group>
+          </Group></header>}
+          <div className="connection-agent-list"><Group justify="space-between" mb="sm"><Text size="xs" fw={600}>{embedded ? 'Agent 连接' : '托管 Agent 实例与执行通道'}</Text><Text size="xs" c="dimmed">{embedded ? `${selected.agents.length} 个 Agent` : '运行配置与状态'}</Text></Group>
             {selected.agents.map(agent => <article className="connection-agent-card" key={agent.kind}>
               <span className="connection-agent-icon"><AgentBrandIcon kind={agent.kind} size={22} /></span>
               <div className="connection-agent-description"><Group gap="xs"><Text fw={600} size="sm">{agentKindLabel(agent.kind)}</Text>{agent.daemon_mode && <Text size="xs" c="dimmed" data-testid={`environment-daemon-mode-${selected.id}-${agent.kind}`}>守护进程托管</Text>}</Group>
-                <Text size="xs" c={agent.state === 'error' ? 'red' : 'dimmed'} className="connection-agent-path">{agent.executable || agent.detail || '尚未发现执行路径'}</Text>
-                {agent.executable && agent.state === 'error' && <Text size="xs" c="red">{agent.detail}</Text>}
+                {embedded && <details className="mobile-connection-agent-info"><summary>执行路径</summary><Text size="xs" c="dimmed" className="connection-agent-path">{agent.executable || agent.detail || '尚未发现执行路径'}</Text></details>}
+                {!embedded && <Text size="xs" c={agent.state === 'error' ? 'red' : 'dimmed'} className="connection-agent-path">{agent.executable || agent.detail || '尚未发现执行路径'}</Text>}
+                {agent.state === 'error' && (embedded || agent.executable) && <Text size="xs" c="red" className="connection-agent-error">{agent.detail}</Text>}
               </div>
-              <Text size="xs" className="connection-agent-state" c={agent.state === 'error' ? 'red' : 'dimmed'}>{agent.state === 'connected' ? '已接入' : agent.state === 'error' ? '连接失败' : agent.state === 'authentication_required' ? '需要登录' : agent.available ? '已发现' : selected.discovered ? '未安装' : '待发现'}</Text>
+              <Text size="xs" className="connection-agent-state" c={agent.state === 'error' ? 'red' : 'dimmed'}>{agent.state === 'connected' ? '已接入' : agent.state === 'error' ? '连接失败' : agent.state === 'authentication_required' ? '需要登录' : agent.state === 'unsupported' ? '暂不支持' : agent.available ? '已发现' : selected.discovered ? '未安装' : '待发现'}</Text>
               <Group gap="xs" wrap="nowrap">
                 {renderAgentConfiguration && <Button size="compact-xs" variant="default" onClick={() => { setConfiguration({ environmentId: selected.id, kind: agent.kind }); setConfigurationOpened(true) }} aria-label={`配置 ${agentKindLabel(agent.kind)}`}>配置</Button>}
                 {agent.state !== 'connected' && <Button size="compact-xs" disabled={!!busy || !agent.available} loading={busy === `${selected.id}:${agent.kind}`} onClick={() => void run(`${selected.id}:${agent.kind}`, () => api.changeEnvironmentAgent(selected.id, agent.kind, true))}>接入</Button>}
@@ -279,8 +297,8 @@ export function EnvironmentConnections({ embedded = false, renderAgentConfigurat
             </article>)}
             {!selected.agents.length && <Text size="sm" c="dimmed" py="lg">尚未发现 Agent，请先验证环境。</Text>}
           </div>
-          <footer className="connection-detail-footer"><Text size="xs" c="dimmed">{hostAddress(selected.id)}</Text>{selected.method === 'ssh' && <Button size="compact-xs" variant="subtle" disabled={!!busy || !selected.agents.some(agent => agent.state === 'connected')} onClick={() => void run(`disconnect:${selected.id}`, async () => { for (const agent of selected.agents) { if (agent.state === 'connected') await api.changeEnvironmentAgent(selected.id, agent.kind, false) } })}>断开环境</Button>}</footer>
-        </> : <Text c="dimmed" p="lg">{!embedded && '连接管理 · '}选择或添加一个运行环境</Text>}
+          {!embedded && <footer className="connection-detail-footer"><Text size="xs" c="dimmed">{hostAddress(selected.id)}</Text>{selected.method === 'ssh' && <Button size="compact-xs" variant="subtle" disabled={!!busy || !selected.agents.some(agent => agent.state === 'connected')} onClick={() => void run(`disconnect:${selected.id}`, async () => { for (const agent of selected.agents) { if (agent.state === 'connected') await api.changeEnvironmentAgent(selected.id, agent.kind, false) } })}>断开环境</Button>}</footer>}
+        </> : <Text c="dimmed" p="lg">{query.isLoading ? '正在读取运行环境…' : `${!embedded ? '连接管理 · ' : ''}选择或添加一个运行环境`}</Text>}
       </div>
     </div>
     <SettingsDrawer closeButtonProps={{ 'aria-label': '关闭运行配置' }} opened={configurationOpened} onClose={() => setConfigurationOpened(false)} onExitTransitionEnd={() => setConfiguration(null)} title={configuration ? `${agentKindLabel(configuration.kind)} · 运行配置` : '运行配置'}>{configuration && renderAgentConfiguration?.(configuration.environmentId, configuration.kind)}</SettingsDrawer>

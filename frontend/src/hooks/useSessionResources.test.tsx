@@ -9,7 +9,7 @@ import { useSessionResources } from './useAstrorderData'
 
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
 
-it.each(['codex', 'hermes', 'grok'])('preserves %s input through reply-first history refresh and session switching', async agent_id => {
+it.each(['codex', 'hermes', 'grok', 'antigravity'])('preserves %s input through reply-first history refresh and session switching', async agent_id => {
   const session: Session = { id: 'reply-first', agent_id, title: 'Reply first', status: 'running', workspace: null, updated_at: '2026-01-01T00:00:00Z' }
   const input: Message = { id: 'optimistic-command', agent_id, session_id: session.id, role: 'user', kind: 'message', text: '请继续核对', attachments: [], tool: null, command_id: 'command', created_at: '2026-01-01T00:00:10Z' }
   const reply: Message = { ...input, id: 'reply', role: 'assistant', text: '正在核对', created_at: '2026-01-01T00:00:20Z' }

@@ -22,6 +22,8 @@ func controlTarget(target *pb.RuntimeTarget) (string, map[string]any, error) {
 		kind = "codex"
 	case pb.RuntimeKind_RUNTIME_KIND_HERMES:
 		kind = "hermes"
+	case pb.RuntimeKind_RUNTIME_KIND_ANTIGRAVITY:
+		kind = "antigravity"
 	case pb.RuntimeKind_RUNTIME_KIND_GROK:
 		kind = "grok"
 	case pb.RuntimeKind_RUNTIME_KIND_CODEX_SSH:
@@ -97,6 +99,24 @@ func (s *sessionControlService) CreateSession(ctx context.Context, r *pb.CreateS
 		}
 		if o.Provider != nil {
 			fields["provider"] = *o.Provider
+		}
+		if o.Effort != nil {
+			fields["effort"] = *o.Effort
+		}
+	case *pb.CreateSessionRequest_Antigravity:
+		if kind != "antigravity" || options.Antigravity == nil {
+			return nil, status.Error(codes.InvalidArgument, "create options do not match runtime")
+		}
+		o := options.Antigravity
+		fields["cwd"] = o.Cwd
+		if o.ParentSessionId != nil {
+			fields["parent_session_id"] = *o.ParentSessionId
+		}
+		if o.TargetMessageId != nil {
+			fields["target_message_id"] = *o.TargetMessageId
+		}
+		if o.Model != nil {
+			fields["model"] = *o.Model
 		}
 		if o.Effort != nil {
 			fields["effort"] = *o.Effort
@@ -267,7 +287,7 @@ func (s *sessionControlService) Send(ctx context.Context, r *pb.SendRequest) (*p
 			return nil, status.Error(codes.InvalidArgument, "Codex attachments must be staged into input references")
 		}
 		delete(fields, "attachments")
-	} else {
+	} else if kind != "antigravity" {
 		delete(fields, "input")
 	}
 	if r.Policy != nil {

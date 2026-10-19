@@ -6,6 +6,32 @@ import (
 	"testing"
 )
 
+func TestCurrentAgentsProjectsExplicitDisconnectWithoutDeletingHistory(t *testing.T) {
+	ctx := context.Background()
+	st, err := Open(filepath.Join(t.TempDir(), "app.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if _, err = st.UpsertAgent(ctx, map[string]any{"id": "a", "kind": "hermes", "name": "Hermes", "status": "ready"}); err != nil {
+		t.Fatal(err)
+	}
+	if err = st.SetAgentConnectionChoice(ctx, "local:hermes", false); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := st.ListCurrentAgents(ctx)
+	if err != nil || len(rows) != 1 || rows[0]["status"] != "disconnected" {
+		t.Fatalf("disabled Agent kept a stale ready status: %v %v", rows, err)
+	}
+	if err = st.SetAgentConnectionChoice(ctx, "local:hermes", true); err != nil {
+		t.Fatal(err)
+	}
+	rows, err = st.ListCurrentAgents(ctx)
+	if err != nil || rows[0]["status"] != "ready" {
+		t.Fatalf("reconnected Agent stayed hidden: %v %v", rows, err)
+	}
+}
+
 func TestCurrentAgentsHidesOnlyUnusedDisconnectedOrphan(t *testing.T) {
 	ctx := context.Background()
 	st, err := Open(filepath.Join(t.TempDir(), "app.db"))

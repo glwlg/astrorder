@@ -19,6 +19,22 @@ it('requires explicit Agent selection and uses the returned native ID', async ()
  expect(onCreated).toHaveBeenCalledWith(created)
 })
 
+it('offers exactly the Grok from the project environment', () => {
+ const all = Object.fromEntries(['local', 'wsl', 'debian'].map(environment => {
+  const id = environment + '-grok'
+  return [id, { id, kind: 'grok', name: 'Grok Build', status: 'ready', capabilities: ['chat'], limitation: null, connection_id: environment === 'local' ? null : environment }]
+ })) as Record<string, Agent>
+ for (const environment of ['local', 'wsl', 'debian']) {
+  const owner = environment + '-grok'
+  const project = { key: environment, agentId: owner, label: environment, workspace: '/work', sessions: [], sessionCount: 0, latestUpdatedAt: '' }
+  const view = render(<MantineProvider><NewSessionDialog agents={all} project={project} onClose={() => {}} onCreated={() => {}} /></MantineProvider>)
+  const choices = screen.getAllByRole('option').filter(option => (option as HTMLOptionElement).value)
+  expect(choices).toHaveLength(1)
+  expect(choices[0]).toHaveValue(owner)
+  view.unmount()
+ }
+})
+
 it('uses generic labels and treats Agents without a connection as local', () => {
  const agent: Agent = { id: 'claude', kind: 'claude-code', name: 'Claude', status: 'ready', capabilities: ['chat'], limitation: null }
  expect(agentLabel(agent)).toBe('Claude Code · Claude · 本机')

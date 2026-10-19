@@ -974,7 +974,7 @@ safety_level: "strict_zero_ram_injection"
                             </div>
 
                             <Group gap="xs" mt="md" mb="xs">
-                              <IconFolder size={18} color="#10b981" />
+                              <IconFolder size={18} color="var(--astr-muted)" />
                               <Text size="sm" fw={600}>scripts/ (自动化执行脚本)</Text>
                             </Group>
                             <div style={{ paddingLeft: 24, fontSize: 13, color: 'var(--cap-text-secondary)' }}>
@@ -1066,7 +1066,7 @@ safety_level: "strict_zero_ram_injection"
                   <Group justify="space-between" align="flex-start" wrap="nowrap">
                     <div>
                       <Group gap="xs">
-                        <IconLayersLinked size={18} color="#10b981" />
+                        <IconLayersLinked size={18} color="var(--astr-muted)" />
                         <Text fw={700} size="sm" style={{ color: 'var(--cap-text-primary)' }}>
                           {srv.name}
                         </Text>
@@ -1591,7 +1591,7 @@ safety_level: "strict_zero_ram_injection"
                 {dispatchReports.map((r, idx) => (
                   <Group key={idx} justify="space-between" style={{ fontSize: 12 }}>
                     <Group gap="xs">
-                      {r.ok ? <IconCheck size={14} color="#10b981" /> : <IconX size={14} color="#ef4444" />}
+                      {r.ok ? <IconCheck size={14} color="var(--astr-muted)" /> : <IconX size={14} color="var(--astr-red)" />}
                       <span style={{ fontWeight: 600 }}>{r.target_name || r.target_id} · {r.agent}</span>
                     </Group>
                     <span style={{ color: r.ok ? 'var(--cap-text-secondary)' : '#ef4444' }}>

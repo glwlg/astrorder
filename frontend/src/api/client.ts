@@ -36,7 +36,7 @@ export interface ReviewRelayRun {
   created_at: string
   updated_at: string
 }
-export interface SessionModelBinding { model: string; provider: string | null; deferred?: boolean; branch?: string; effort?: string | null; read_only?: boolean; detail?: string }
+export interface SessionModelBinding { model: string; provider: string | null; deferred?: boolean; branch?: string; effort?: string | null; read_only?: boolean; model_read_only?: boolean; reasoning_read_only?: boolean; detail?: string }
 export interface CodexConnectionStatus { kind: 'codex'; state: 'disconnected' | 'connecting' | 'connected' | 'error' | 'authentication_required'; available: boolean; agent_id: string; session_count: number; auth_required: boolean; detail: string; daemon_mode: boolean }
 export interface GatewayProfile {
   statistics_url?: string
@@ -101,6 +101,82 @@ export interface OcxModelQuotaReport {
 export interface OcxModelQuotaAccount { id: string; email?: string; logLabel?: string; plan?: string; paused?: boolean; error?: string; quota?: { customWindows?: OcxQuotaWindow[]; shortPercent?: number; shortResetAt?: number; weeklyPercent?: number; weeklyResetAt?: number } | null }
 export interface OcxModelQuotaResponse { model: string; providers: string[]; reports: OcxModelQuotaReport[]; accounts: OcxModelQuotaAccount[] }
 
+export interface QrCreateResponse {
+  id: string
+  scan_secret: string
+  expires_at: string
+  confirmation_code: string
+}
+
+export interface QrPollResponse {
+  status: 'pending' | 'approved' | 'rejected' | 'expired'
+  authenticated?: boolean
+}
+
+export interface QrInspectResponse {
+  status: 'pending' | 'approved' | 'rejected' | 'expired'
+  expires_at: string
+  confirmation_code: string
+  device?: string
+}
+
+export interface QrApproveResponse {
+  status: 'approved' | 'rejected' | 'expired'
+}
+
+export interface KernelProcessInfo {
+  pid?: number
+  creation_time?: number | string
+}
+
+export interface KernelAppStatus {
+  state: string
+  healthy: boolean
+  process?: KernelProcessInfo
+}
+
+export interface KernelDaemonStatus {
+  state: string
+  active_sessions?: Record<string, unknown>
+  process?: KernelProcessInfo
+}
+
+export interface KernelUpdateStatus {
+  update_available: boolean
+  [key: string]: unknown
+}
+
+export interface KernelStatusResponse {
+  app: KernelAppStatus
+  daemon: KernelDaemonStatus
+  update: KernelUpdateStatus
+}
+
+export type KernelTarget = 'app' | 'daemon'
+export type KernelAction = 'restart' | 'update'
+export type KernelOperationStatus = 'queued' | 'running' | 'success' | 'failed'
+
+export interface KernelOperationPayload {
+  target: KernelTarget
+  action: KernelAction
+  confirm_active: true
+}
+
+export interface KernelOperationCreatedResponse {
+  id: string
+  status: 'queued'
+  target: KernelTarget
+  action: KernelAction
+}
+
+export interface KernelOperationResponse {
+  id: string
+  status: KernelOperationStatus
+  target: KernelTarget
+  action: KernelAction
+  error?: string
+  detail?: string
+}
 export class ApiError extends Error {
   readonly status: number
   readonly detail: string
@@ -301,6 +377,15 @@ export const api = {
   getAuthSession: () => request<AuthSession>('/auth/session'),
   login: (token: string) => jsonRequest<AuthSession>('/auth/session', { token }),
   logout: () => request<void>('/auth/session', { method: 'DELETE' }),
+  createQrSession: () => jsonRequest<QrCreateResponse>('/auth/qr/create', {}),
+  pollQrSession: (id: string) => jsonRequest<QrPollResponse>('/auth/qr/poll', { id }),
+  inspectQrSession: (id: string, scan_secret: string) => jsonRequest<QrInspectResponse>('/auth/qr/inspect', { id, scan_secret }),
+  approveQrSession: (id: string, scan_secret: string, decision: 'approve' | 'reject') => jsonRequest<QrApproveResponse>('/auth/qr/approve', { id, scan_secret, decision }),
+  getKernelStatus: () => request<KernelStatusResponse>('/services/kernels/status'),
+  createKernelOperation: (payload: KernelOperationPayload) =>
+    jsonRequest<KernelOperationCreatedResponse>('/services/kernels/operations', payload),
+  getKernelOperation: (id: string) =>
+    request<KernelOperationResponse>(`/services/kernels/operations/${encodeURIComponent(id)}`),
   getBootstrap: () => request<BootstrapPayload>('/bootstrap'),
   getPresence: () => request<{ items: Array<{ agent_id: string; id: string; last_user_at: string }>; open?: Array<{ agent_id: string; id: string }>; live?: Array<{ agent_id: string; id: string }> }>('/presence'),
   getAgents: () => request<{ items: Agent[] }>('/agents'),
@@ -437,8 +522,8 @@ export const api = {
     }>('/agents/upgrade/targets'),
   createSession: (payload: { agent_id: string; workspace?: string | null; title?: string | null; project_id?: string | null; project_name?: string | null; parent_session_id?: string | null; ephemeral?: boolean; blackboard_scope?: 'session' | 'swarm' | 'group'; blackboard_scope_id?: string | null }) =>
     jsonRequest<Session>('/sessions', payload),
-  forkSession: (sessionId: string, payload: { agent_id: string; title?: string | null; worktree?: boolean; branch_name?: string | null; worktree_path?: string | null; target_message_id?: string | null; turn_index?: number | null }) =>
-    jsonRequest<Session>(`${sessionPath(sessionId)}/fork`, payload),
+  forkSession: (sessionId: string, { worktree, branch_name, ...payload }: { agent_id: string; title?: string | null; worktree?: boolean; branch_name?: string | null; worktree_path?: string | null; target_message_id?: string | null; turn_index?: number | null }) =>
+    jsonRequest<Session>(`${sessionPath(sessionId)}/fork`, { ...payload, create_worktree: worktree, worktree_branch: branch_name }),
   handoffSession: (sessionId: string, sourceAgentId: string, targetAgentId: string, operationId: string, selection: { provider: string; model: string; effort: string }) =>
     jsonRequest<Session>(`${sessionPath(sessionId)}/handoff`, { operation_id: operationId, source_agent_id: sourceAgentId, target_agent_id: targetAgentId, ...selection }),
   cancelHandoff: async (operationId: string) => {

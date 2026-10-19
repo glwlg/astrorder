@@ -1,8 +1,9 @@
 import { IconKey, IconLock, IconRefresh } from '@tabler/icons-react'
-import { Alert, Button, Group, PasswordInput, Paper, Stack, Text, Title } from '@mantine/core'
+import { Alert, Button, Group, PasswordInput, Paper, SegmentedControl, Stack, Text, Title } from '@mantine/core'
 import { type FormEvent, useState } from 'react'
 import { ApiError, api } from '../api/client'
 import { BrandMark } from './BrandMark'
+import { QrCodeLogin } from '../features/auth/QrCodeLogin'
 
 function errorDetail(error: unknown): string {
   if (error instanceof ApiError) return error.detail
@@ -17,6 +18,7 @@ export function AuthPage({
   initialError?: unknown
   onAuthenticated: () => void
 }) {
+  const [authMethod, setAuthMethod] = useState<'qr' | 'token'>('qr')
   const [token, setToken] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<unknown>(initialError)
@@ -58,29 +60,49 @@ export function AuthPage({
               会话凭证只提交到当前 Astrorder 服务端，不会写入 URL 或浏览器存储。
             </Text>
           </div>
+
+          <SegmentedControl
+            fullWidth
+            value={authMethod}
+            onChange={(val) => {
+              setAuthMethod(val as 'qr' | 'token')
+              setError(undefined)
+            }}
+            data={[
+              { label: '扫码登录', value: 'qr' },
+              { label: '访问令牌', value: 'token' },
+            ]}
+          />
+
           {Boolean(error) && (
             <Alert color={error instanceof ApiError && error.status === 401 ? 'red' : 'yellow'} icon={<IconLock size={18} />}>
               {errorDetail(error)}
             </Alert>
           )}
-          <form onSubmit={submit}>
-            <Stack gap="md">
-              <PasswordInput
-                label="访问令牌"
-                description="由本地服务配置提供"
-                placeholder="输入令牌"
-                value={token}
-                onChange={(event) => setToken(event.currentTarget.value)}
-                leftSection={<IconKey size={17} />}
-                autoComplete="off"
-                aria-label="访问令牌"
-                required
-              />
-              <Button type="submit" loading={submitting} disabled={!token.trim()} leftSection={<IconRefresh size={17} />}>
-                建立会话
-              </Button>
-            </Stack>
-          </form>
+
+          {authMethod === 'qr' ? (
+            <QrCodeLogin onAuthenticated={onAuthenticated} />
+          ) : (
+            <form onSubmit={submit}>
+              <Stack gap="md">
+                <PasswordInput
+                  label="访问令牌"
+                  description="由本地服务配置提供"
+                  placeholder="输入令牌"
+                  value={token}
+                  onChange={(event) => setToken(event.currentTarget.value)}
+                  leftSection={<IconKey size={17} />}
+                  autoComplete="off"
+                  aria-label="访问令牌"
+                  required
+                />
+                <Button type="submit" loading={submitting} disabled={!token.trim()} leftSection={<IconRefresh size={17} />}>
+                  建立会话
+                </Button>
+              </Stack>
+            </form>
+          )}
+
           <Text size="xs" c="dimmed">
             未连接或未配置认证时，星序不会展示模拟 Agent、会话或消息。
           </Text>

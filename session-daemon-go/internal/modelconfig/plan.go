@@ -38,7 +38,7 @@ func (s *Service) plan(ctx context.Context, request map[string]any) (map[string]
 
 		info := s.inspectFile(fullPath, key)
 		out[key] = info
-		if key == FileHermesConfig && info["exists"] != true {
+		if (key == FileHermesConfig || key == FileAntigravityConfig) && info["exists"] != true {
 			continue
 		}
 		if info["status"] != "validated" {

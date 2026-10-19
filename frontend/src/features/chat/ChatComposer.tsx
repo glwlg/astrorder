@@ -1,5 +1,6 @@
 import { IconBrain, IconMicrophone, IconPaperclip, IconPlus, IconPlayerStop, IconArrowUp, IconX } from '@tabler/icons-react'
-import { Alert, Badge, Button, Group, Paper, Stack, Text, Textarea } from '@mantine/core'
+import { Badge, Button, Group, Paper, Stack, Text, Textarea } from '@mantine/core'
+import { InlineNotice } from '../../components/InlineNotice'
 import { useQueryClient } from '@tanstack/react-query'
 import { type ChangeEvent, type ClipboardEvent, type DragEvent, type KeyboardEvent, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useShallow } from 'zustand/react/shallow'
@@ -237,7 +238,7 @@ export function ChatComposer({
 
   const canChat = hasCapability(agent, 'chat')
   const canAttach = hasCapability(agent, 'attachments')
-  const supportsImages = agent?.kind !== 'grok'
+  const supportsImages = agent?.kind !== 'grok' && agent?.kind !== 'antigravity'
   const nativeBusy = session.status === 'running' || session.status === 'waiting_approval'
   const busy = submitting || nativeBusy
   const pending = queue.filter(row => row.payload.agent_id === session.agent_id && row.payload.session_id === session.id && !['accepted', 'running', 'completed'].includes(row.state))
@@ -707,7 +708,7 @@ ${draft.text}` : entry.payload.text)
               <Group gap={6} wrap="nowrap" style={{ flexShrink: 0 }}>
                 {entry.state === 'queued' && (
                   <>
-                    <Button size="compact-xs" variant="light" color="indigo" onClick={() => void steerQueued(entry.payload.id)}>
+                    <Button size="compact-xs" variant="light" color="indigo" disabled={nativeBusy && agent?.kind === 'antigravity'} onClick={() => void steerQueued(entry.payload.id)}>
                       {nativeBusy ? '立即引导' : '发送'}
                                           </Button>
                     <Button size="compact-xs" variant="subtle" color="blue" onClick={() => void editQueued(entry)}>
@@ -743,13 +744,10 @@ ${draft.text}` : entry.payload.text)
         {visibleError && (() => {
           const parsed = interpretGatewayError(visibleError)
           return (
-            <Alert
-              color={parsed?.type === 'quota' ? 'orange' : parsed?.type === 'disconnect' ? 'yellow' : 'red'}
-              variant="light"
-              title={parsed?.isKnownGatewayIssue ? parsed.title : undefined}
-              withCloseButton
+            <InlineNotice
+              alert
+              title={parsed?.isKnownGatewayIssue ? parsed.title : '请求未完成'}
               onClose={() => { setError(null); setSubmittedCommandId(null) }}
-              aria-live="assertive"
             >
               <div>{parsed?.description || visibleError}</div>
               {parsed?.type === 'quota' && parsed.recommendedModel && (
@@ -757,8 +755,7 @@ ${draft.text}` : entry.payload.text)
                   <Text size="xs" c="dimmed">推荐切换至高可用模型：</Text>
                   <Button
                     size="compact-xs"
-                    variant="outline"
-                    color="orange"
+                    variant="default"
                     onClick={() => {
                       const rec = parsed.recommendedModel
                       if (!rec) return
@@ -771,7 +768,7 @@ ${draft.text}` : entry.payload.text)
                   </Button>
                 </Group>
               )}
-            </Alert>
+            </InlineNotice>
           )
         })()}
         {draft.attachments.length > 0 && (
@@ -842,7 +839,7 @@ ${draft.text}` : entry.payload.text)
             <IconPlus size={20} />
             <input ref={fileInputRef} hidden type="file" multiple accept={supportsImages ? undefined : 'text/*,.txt,.md,.json,.csv,.py,.go,.ts,.tsx,.js,.jsx,.html,.css,.yaml,.yml,.toml,.xml,.log,.sh,.bat,.ps1'} onChange={addFiles} />
           </Button>
-          <ApprovalModeControl session={session} />
+          <ApprovalModeControl session={session} agentKind={agent?.kind} />
           <span className="composer-toolbar-spacer" />
           {usage && (
             <Badge

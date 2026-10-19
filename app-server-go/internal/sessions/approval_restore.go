@@ -22,7 +22,7 @@ func (h *Handler) restoreCodexApproval(ctx context.Context, session map[string]a
 	if err != nil {
 		return err
 	}
-	if stringValue(agent, "kind") != "codex" {
+	if kind := stringValue(agent, "kind"); kind != "codex" && kind != "antigravity" {
 		return nil
 	}
 	lock := h.approvalSelectionLock(aid, sid)
@@ -39,8 +39,8 @@ func (h *Handler) restoreCodexApproval(ctx context.Context, session map[string]a
 	if mode == "" {
 		return nil
 	}
-	if mode != "manual" && mode != "auto" && mode != "full_access" {
-		return fmt.Errorf("saved Codex approval mode is invalid")
+	if mode != "manual" && mode != "auto" && mode != "full_access" || stringValue(agent, "kind") == "antigravity" && mode == "auto" {
+		return fmt.Errorf("saved approval mode is invalid")
 	}
 	nativeID := stringValue(current, "source_session_id")
 	if nativeID == "" {
@@ -49,24 +49,24 @@ func (h *Handler) restoreCodexApproval(ctx context.Context, session map[string]a
 	ref := buildSessionRef(aid, nativeID, stringValue(current, "connection_id"))
 	state, err := h.client.Runtime.ReadApprovalMode(ctx, &pb.ReadApprovalModeRequest{Session: ref})
 	if err != nil {
-		return fmt.Errorf("read Codex approval before restore: %w", err)
+		return fmt.Errorf("read native approval before restore: %w", err)
 	}
 	if state != nil && state.Mode == mode {
 		return nil
 	}
 	receipt, err := h.client.Runtime.SetApprovalMode(ctx, &pb.SetApprovalModeRequest{Meta: newCommandMeta("", ""), Session: ref, Mode: mode})
 	if err != nil {
-		return fmt.Errorf("restore Codex approval: %w", err)
+		return fmt.Errorf("restore native approval: %w", err)
 	}
 	if err := confirmedReceipt(receipt); err != nil {
-		return fmt.Errorf("Codex approval restore unconfirmed: %w", err)
+		return fmt.Errorf("native approval restore unconfirmed: %w", err)
 	}
 	state, err = h.client.Runtime.ReadApprovalMode(ctx, &pb.ReadApprovalModeRequest{Session: ref})
 	if err != nil {
-		return fmt.Errorf("verify Codex approval restore: %w", err)
+		return fmt.Errorf("verify native approval restore: %w", err)
 	}
 	if state == nil || state.Mode != mode {
-		return fmt.Errorf("Codex approval restore was not confirmed by readback")
+		return fmt.Errorf("native approval restore was not confirmed by readback")
 	}
 	return nil
 }

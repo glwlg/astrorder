@@ -62,6 +62,13 @@ func TestRuntimeControlConnectDoesNotResumeConversation(t *testing.T) {
 			if !ready {
 				t.Fatal("native readiness was not projected")
 			}
+			approvalCap := false
+			for _, capability := range hello["capabilities"].([]string) {
+				approvalCap = approvalCap || capability == "approvals"
+			}
+			if !approvalCap {
+				t.Fatal("Hermes approval response capability missing")
+			}
 			if hello["name"] != cfg.AgentName || r.Payload["name"] != cfg.AgentName {
 				t.Fatalf("connection name lost: hello=%v result=%v", hello["name"], r.Payload["name"])
 			}

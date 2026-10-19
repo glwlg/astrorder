@@ -32,7 +32,8 @@ describe('isolated browser API fixture scope — not production Agent data', () 
     renderApp()
 
     expect(await screen.findByRole('heading', { name: '登录本地工作台' })).toBeInTheDocument()
-    expect(screen.getByLabelText('访问令牌')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('radio', { name: '访问令牌' }))
+    expect(screen.getByLabelText('访问令牌', { selector: 'input[type="password"]' })).toBeInTheDocument()
     expect(screen.queryByText('尚无会话')).not.toBeInTheDocument()
   })
 

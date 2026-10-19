@@ -120,6 +120,8 @@ func runtimeKind(kind string) (sessiondv1.RuntimeKind, bool) {
 		return sessiondv1.RuntimeKind_RUNTIME_KIND_SSH_HERMES, true
 	case "codex-ssh":
 		return sessiondv1.RuntimeKind_RUNTIME_KIND_CODEX_SSH, true
+	case "antigravity":
+		return sessiondv1.RuntimeKind_RUNTIME_KIND_ANTIGRAVITY, true
 	case "grok":
 		return sessiondv1.RuntimeKind_RUNTIME_KIND_GROK, true
 	case "grok-ssh":

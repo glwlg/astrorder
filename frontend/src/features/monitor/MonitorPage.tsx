@@ -527,7 +527,7 @@ export function MonitorCard({
                   <IconPaperclip size={15} />
                 </ActionIcon>
                 <input ref={fileInputRef} hidden type="file" multiple onChange={event => { addFiles(Array.from(event.currentTarget.files || [])); event.currentTarget.value = '' }} />
-                <ApprovalModeControl session={session} compact />
+                <ApprovalModeControl session={session} compact agentKind={agent?.kind} />
                 <SessionModelControl session={session} />
                 <span style={{ flex: 1 }} />
                 <ClickSpark sparkColor={isStopAction ? '#ef4444' : '#3b82f6'} sparkSize={10} sparkRadius={26}>

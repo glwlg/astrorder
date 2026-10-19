@@ -38,6 +38,9 @@ func bindingIdentity(request Request, result Result) SessionReadIdentity {
 }
 
 func sessionReadSupported(kind, action string) bool {
+	if kind == "antigravity" {
+		return action == "session.models" || action == "session.model.read" || action == "session.history_page" || action == "session.approval.read"
+	}
 	switch action {
 	case "session.models":
 		return kind == "codex" || kind == "codex-ssh" || kind == "hermes" || kind == "ssh" || kind == "grok" || kind == "grok-ssh"

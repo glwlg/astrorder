@@ -143,6 +143,20 @@ it('does not invent medium effort when the runtime has not reported one', async 
   expect(slider).toHaveAttribute('aria-valuenow', '1')
 })
 
+it('opens model choices directly when native reasoning is unsupported and the current model is unknown', async () => {
+  vi.spyOn(api, 'getSessionModel').mockResolvedValue({ provider: 'antigravity', model: '', model_read_only: false, reasoning_read_only: true })
+  vi.spyOn(api, 'getSessionModels').mockResolvedValue({ items: [{ provider: 'antigravity', model: 'next', label: 'Gemini next' }] })
+  const change = vi.spyOn(api, 'setSessionModel').mockResolvedValue({ provider: 'antigravity', model: 'next' })
+  renderControl()
+  await waitFor(() => expect(screen.getByRole('button', { name: '选择会话模型' })).toHaveTextContent('选择模型'))
+  expect(screen.getByRole('button', { name: '选择会话模型' })).not.toHaveTextContent('未确认')
+  fireEvent.click(screen.getByRole('button', { name: '选择会话模型' }))
+  fireEvent.click(await screen.findByText('Gemini next'))
+  expect(screen.queryByRole('slider', { name: '思考强度' })).not.toBeInTheDocument()
+  await waitFor(() => expect(change).toHaveBeenCalledWith('native', 'source', 'antigravity', 'next'))
+  await waitFor(() => expect(screen.getByRole('button', { name: '选择会话模型' })).toHaveTextContent('next'))
+})
+
 function renderControl() {
   return render(
     <MantineProvider>

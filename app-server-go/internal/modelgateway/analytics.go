@@ -280,7 +280,7 @@ func (h *Handler) handleGetSessionUsage(w http.ResponseWriter, r *http.Request) 
 		result := metrics[0]
 		result["ok"] = true
 		if _, exists := result["context_available"]; !exists {
-			result["context_available"] = result["last_input_tokens"] != nil
+			result["context_available"] = result["provider"] != "antigravity" && result["last_input_tokens"] != nil
 		}
 		number := func(key string) float64 { value, _ := strconv.ParseFloat(fmt.Sprint(result[key]), 64); return value }
 		result["used_percentage"] = nil

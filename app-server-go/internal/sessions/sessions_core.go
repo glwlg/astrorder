@@ -107,6 +107,12 @@ func (h *Handler) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 				Effort:          optString(payload.Effort),
 			},
 		}
+	case "antigravity":
+		if payload.Provider != "" && payload.Provider != "antigravity" {
+			writeJSONError(w, 422, "Antigravity requires its native provider")
+			return
+		}
+		req.Options = &sessiondv1.CreateSessionRequest_Antigravity{Antigravity: &sessiondv1.AntigravityCreateOptions{Cwd: workspace, Model: optString(payload.Model), Effort: optString(payload.Effort), ParentSessionId: optString(payload.ParentSessionID)}}
 	case "grok":
 		req.Options = &sessiondv1.CreateSessionRequest_Grok{
 			Grok: &sessiondv1.GrokCreateOptions{
@@ -203,7 +209,7 @@ func (h *Handler) handleUpdateSession(w http.ResponseWriter, r *http.Request, se
 			return
 		}
 		// Grok ACP exposes no title mutation. Astrorder titles are local metadata.
-		if stringValue(agent, "kind") != "grok" {
+		if stringValue(agent, "kind") != "grok" && stringValue(agent, "kind") != "antigravity" {
 			if h.client == nil || h.client.Session == nil {
 				writeJSONError(w, 503, "Daemon client is not configured")
 				return
@@ -265,7 +271,7 @@ func (h *Handler) handleDeleteSession(w http.ResponseWriter, r *http.Request, se
 			writeJSONError(w, http.StatusInternalServerError, "Agent storage is unavailable")
 			return
 		}
-		if kind := stringValue(agent, "kind"); kind == "codex" || kind == "grok" {
+		if kind := stringValue(agent, "kind"); kind == "codex" || kind == "grok" || kind == "antigravity" {
 			if err := h.ensureNativeBinding(ctx, existing); err != nil {
 				writeJSONError(w, http.StatusBadGateway, "Native session binding unavailable: "+err.Error())
 				return
@@ -278,12 +284,12 @@ func (h *Handler) handleDeleteSession(w http.ResponseWriter, r *http.Request, se
 			Session: ref,
 		}
 		if receipt, err := h.client.Session.DeleteSession(ctx, delReq); err != nil {
-			if stringValue(agent, "kind") == "grok" || status.Code(err) != codes.NotFound && !strings.Contains(err.Error(), "session is not daemon-owned") {
+			if stringValue(agent, "kind") == "grok" || stringValue(agent, "kind") == "antigravity" || status.Code(err) != codes.NotFound && !strings.Contains(err.Error(), "session is not daemon-owned") {
 				writeJSONError(w, http.StatusBadGateway, "Delete failed: "+err.Error())
 				return
 			}
 		} else if err := confirmedReceipt(receipt); err != nil {
-			if stringValue(agent, "kind") == "grok" || !strings.Contains(err.Error(), "session is not daemon-owned") {
+			if stringValue(agent, "kind") == "grok" || stringValue(agent, "kind") == "antigravity" || !strings.Contains(err.Error(), "session is not daemon-owned") {
 				writeJSONError(w, http.StatusBadGateway, err.Error())
 				return
 			}

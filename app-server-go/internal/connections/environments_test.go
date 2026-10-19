@@ -49,7 +49,7 @@ func TestEnvironmentSnapshotIncludesAgentStatesAndConnectionMethod(t *testing.T)
 	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if w.Code != http.StatusOK || len(body.Items) != 2 || body.Items[0].Method != "local" || body.Items[1].Method != "ssh" || len(body.Items[0].Agents) != 3 || len(body.Items[1].Agents) != 3 {
+	if w.Code != http.StatusOK || len(body.Items) != 2 || body.Items[0].Method != "local" || body.Items[1].Method != "ssh" || len(body.Items[0].Agents) != 4 || len(body.Items[1].Agents) != 4 {
 		t.Fatalf("environment page cannot render snapshot: %d %s", w.Code, w.Body.String())
 	}
 	local := body.Items[0].Agents

@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"astrorder.dev/app-server/internal/auth"
+	"astrorder.dev/app-server/internal/kernelcontrol"
 	"astrorder.dev/app-server/internal/store"
 )
 
@@ -43,6 +44,7 @@ type Options struct {
 	HTTPClient    *http.Client
 	// CodexDesktop reports Codex Desktop control availability.
 	RestartDaemon func(context.Context, bool) error
+	Kernels       *kernelcontrol.Service
 	CodexDesktop  func(context.Context) (map[string]any, error)
 }
 
@@ -65,6 +67,9 @@ var paths = map[string][]string{
 
 // Matches reports whether this package owns the route.
 func Matches(method, path string) bool {
+	if strings.HasPrefix(path, "/api/v1/services/kernels/") {
+		return matchesKernels(method, path)
+	}
 	if path == "/api/v1/services/daemon/restart" {
 		return method == http.MethodPost
 	}
@@ -88,6 +93,10 @@ func NewHandler(options Options) http.Handler {
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if strings.HasPrefix(r.URL.Path, "/api/v1/services/kernels/") {
+		h.kernels(w, r)
+		return
+	}
 	if h.Authorizer != nil {
 		if failure := h.Authorizer.AuthorizeBrowser(r); failure != nil {
 			writeJSON(w, failure.Status, map[string]string{"detail": failure.Detail})

@@ -632,9 +632,9 @@ body:has(.mobile-workspace) .background-tasks,
 }
 
 .m-gateway-rec-btn {
-  background: color-mix(in srgb, var(--m-surface) 60%, #f59f00 40%);
-  border: 1px solid #f59f00;
-  color: #fff;
+  background: var(--m-surface, var(--astr-surface));
+  border: 1px solid var(--m-border, var(--astr-border));
+  color: var(--m-text, var(--astr-text));
   border-radius: 4px;
   padding: 2px 8px;
   font-size: 11px;

@@ -13,5 +13,24 @@ func (s *Store) ListCurrentAgents(ctx context.Context) ([]map[string]any, error)
 	if err != nil {
 		return nil, err
 	}
-	return wireRows(rows, agentWire)
+	items, err := wireRows(rows, agentWire)
+	if err != nil {
+		return nil, err
+	}
+	for _, item := range items {
+		connection, _ := item["connection_id"].(string)
+		if connection == "" {
+			connection = "local"
+		}
+		kind, _ := item["kind"].(string)
+		enabled, present, err := s.GetAgentConnectionChoice(ctx, connection+":"+kind)
+		if err != nil {
+			return nil, err
+		}
+		if present && !enabled {
+			item["status"] = "disconnected"
+			item["limitation"] = "已主动断联，请在连接管理中重新接入"
+		}
+	}
+	return items, nil
 }

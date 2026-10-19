@@ -72,6 +72,11 @@ func (h *Handler) resolveRuntimeTarget(ctx context.Context, agent map[string]any
 		} else {
 			target.Runtime = sessiondv1.RuntimeKind_RUNTIME_KIND_HERMES
 		}
+	case "antigravity":
+		if isSSH {
+			return nil, fmt.Errorf("Antigravity SSH runtime is not supported yet")
+		}
+		target.Runtime = sessiondv1.RuntimeKind_RUNTIME_KIND_ANTIGRAVITY
 	case "grok":
 		if isSSH {
 			target.Runtime = sessiondv1.RuntimeKind_RUNTIME_KIND_GROK_SSH
@@ -699,6 +704,8 @@ func (h *Handler) invokeSessionsCreate(ctx context.Context, payload map[string]a
 					ParentSessionId: pSidPtr,
 				},
 			}
+		case "antigravity":
+			createReq.Options = &sessiondv1.CreateSessionRequest_Antigravity{Antigravity: &sessiondv1.AntigravityCreateOptions{Cwd: workspace, ParentSessionId: pSidPtr}}
 		case "grok":
 			createReq.Options = &sessiondv1.CreateSessionRequest_Grok{
 				Grok: &sessiondv1.GrokCreateOptions{

@@ -42,10 +42,28 @@ func buildSessionRef(agentID, sessionID, connectionID string) *sessiondv1.Sessio
 	return ref
 }
 
+func (h *Handler) requireAgentConnection(ctx context.Context, agent map[string]any) error {
+	connID := stringValue(agent, "connection_id")
+	if connID == "" {
+		connID = "local"
+	}
+	enabled, present, err := h.store.GetAgentConnectionChoice(ctx, connID+":"+stringValue(agent, "kind"))
+	if err != nil {
+		return err
+	}
+	if present && !enabled {
+		return fmt.Errorf("Agent 已主动断联，请在连接管理中重新接入")
+	}
+	return nil
+}
+
 func (h *Handler) resolveRuntimeTarget(ctx context.Context, agent map[string]any) (*sessiondv1.RuntimeTarget, error) {
 	aid, _ := agent["id"].(string)
 	kind, _ := agent["kind"].(string)
 	connID, _ := agent["connection_id"].(string)
+	if err := h.requireAgentConnection(ctx, agent); err != nil {
+		return nil, err
+	}
 
 	target := &sessiondv1.RuntimeTarget{
 		AgentId: &aid,
@@ -68,6 +86,11 @@ func (h *Handler) resolveRuntimeTarget(ctx context.Context, agent map[string]any
 		} else {
 			target.Runtime = sessiondv1.RuntimeKind_RUNTIME_KIND_HERMES
 		}
+	case "antigravity":
+		if isSSH {
+			return nil, fmt.Errorf("Antigravity SSH runtime is not supported yet")
+		}
+		target.Runtime = sessiondv1.RuntimeKind_RUNTIME_KIND_ANTIGRAVITY
 	case "grok":
 		if isSSH {
 			target.Runtime = sessiondv1.RuntimeKind_RUNTIME_KIND_GROK_SSH

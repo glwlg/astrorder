@@ -91,7 +91,7 @@ func (p *Isolated) Command(ctx context.Context, r core.Request) (core.Result, er
 	p.mu.Lock()
 	worker := p.workers[r.SessionID]
 	closed := p.closed || p.disconnecting
-	deleting := r.Action == "session.delete"
+	deleting := r.Action == "session.delete" || r.Action == "session.close"
 	if p.deleting[r.SessionID] || (deleting && p.inflight[r.SessionID] > 0) {
 		p.mu.Unlock()
 		return core.Result{}, fmt.Errorf("Hermes session has an in-flight operation")
@@ -118,9 +118,14 @@ func (p *Isolated) Command(ctx context.Context, r core.Request) (core.Result, er
 	if err != nil {
 		return core.Result{}, err
 	}
-	if result.Payload["deleted"] == r.SessionID {
+	if result.Payload["deleted"] == r.SessionID || result.Payload["closed"] == true {
 		if err := worker.Close(); err != nil {
 			return core.Result{}, err
+		}
+		select {
+		case <-worker.eventDone:
+		case <-ctx.Done():
+			return core.Result{}, fmt.Errorf("Hermes projection exit was not confirmed: %w", ctx.Err())
 		}
 		p.mu.Lock()
 		if p.workers[r.SessionID] == worker {

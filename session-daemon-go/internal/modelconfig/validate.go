@@ -38,6 +38,8 @@ func validateManagedContent(name string, data []byte) error {
 			return newProtocolErrorf("invalid Hermes config")
 		}
 		return nil
+	case FileAntigravityConfig:
+		return validateAntigravityConfig(data)
 	default:
 		return newProtocolErrorf("unrecognized managed file: %s", name)
 	}

@@ -10,7 +10,7 @@
   --cap-accent: #6366f1;
   --cap-accent-glow: rgba(99, 102, 241, 0.25);
   --cap-cyan: #38bdf8;
-  --cap-teal: #10b981;
+  --cap-teal: var(--astr-text);
   --cap-purple: #8b5cf6;
   --cap-amber: #f59e0b;
   --cap-text-primary: #f8fafc;
@@ -29,7 +29,7 @@
   --cap-accent: #4f46e5;
   --cap-accent-glow: rgba(79, 70, 229, 0.15);
   --cap-cyan: #0284c7;
-  --cap-teal: #059669;
+  --cap-teal: var(--astr-text);
   --cap-purple: #7c3aed;
   --cap-amber: #d97706;
   --cap-text-primary: #0f172a;
@@ -76,9 +76,9 @@
   border-radius: 6px;
   font-size: 11px;
   font-weight: 600;
-  background: rgba(99, 102, 241, 0.12);
-  color: var(--cap-accent);
-  border: 1px solid rgba(99, 102, 241, 0.25);
+  background: transparent;
+  color: var(--astr-muted);
+  border: 1px solid transparent;
   font-family: var(--mantine-font-family-monospace, monospace);
 }
 
@@ -99,7 +99,7 @@
   height: 6px;
   border-radius: 50%;
   background: var(--cap-teal);
-  box-shadow: 0 0 6px var(--cap-teal);
+  box-shadow: none;
 }
 
 /* 顶部分类 Tabs */

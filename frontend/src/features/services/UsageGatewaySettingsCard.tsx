@@ -329,7 +329,8 @@ export function UsageGatewaySettingsCard() {
             <Accordion.Panel>
             <Stack gap="md">{targets.map((target) => <Stack key={target.id} gap={6}>
               <Group justify="space-between"><Text size="sm" fw={600}>{target.name}</Text><Badge size="xs" variant="light">{target.kind.toUpperCase()}</Badge></Group>
-              <Group gap="md">{['codex', 'grok', 'hermes'].map((agent) => <Checkbox key={agent} size="xs" label={agent === 'codex' ? 'Codex' : agent === 'grok' ? 'Grok' : 'Hermes'} checked={selection[target.id]?.includes(agent) || false} onChange={() => toggleAgent(target.id, agent)} />)}</Group>
+              <Group gap="md">{target.agents.map((agent) => <Checkbox key={agent} size="xs" label={agent === 'codex' ? 'Codex' : agent === 'grok' ? 'Grok' : agent === 'antigravity' ? 'Antigravity (agy)' : 'Hermes'} checked={selection[target.id]?.includes(agent) || false} onChange={() => toggleAgent(target.id, agent)} />)}</Group>
+              {selection[target.id]?.includes('antigravity') && <Text size="xs" c="dimmed">agy 在新建会话或切换模型后采用网关配置。</Text>}
               <TextInput size="xs" label="推理地址覆盖" placeholder={inferenceUrl || '使用默认推理地址'} value={overrides[target.id] || ''} onChange={(event) => setOverrides((current) => ({ ...current, [target.id]: event.currentTarget.value }))} />
             </Stack>)}</Stack>
           </Accordion.Panel></Accordion.Item>

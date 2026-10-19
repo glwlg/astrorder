@@ -6,11 +6,16 @@ import (
 	"testing"
 )
 
-func TestRestoreDiscoversAllSavedNodeKindsAndHonorsDisconnects(t *testing.T) {
+func TestRestoreSelectedNodeKindsAndHonorsDisconnects(t *testing.T) {
 	daemon := &fakeDaemonService{}
 	h, st := setupRestoreFixture(t, daemon, &recordingResolver{results: map[string]string{"codex": "/opt/codex", "grok": "/opt/grok"}})
 	if _, err := st.SaveSSHConnection(context.Background(), map[string]any{"id": "saved", "host": "fixture.invalid", "state": "disconnected"}); err != nil {
 		t.Fatal(err)
+	}
+	for _, key := range []string{"local:hermes", "local:codex", "local:grok", "saved:hermes", "saved:codex"} {
+		if err := st.SetAgentConnectionChoice(context.Background(), key, true); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := st.SetAgentConnectionChoice(context.Background(), "saved:grok", false); err != nil {
 		t.Fatal(err)

@@ -1,4 +1,4 @@
-import { IconAlertTriangle, IconLoader2 } from '@tabler/icons-react'
+﻿import { IconAlertTriangle, IconLoader2 } from '@tabler/icons-react'
 import { Alert, Button, Center, Paper, Stack, Text, Title } from '@mantine/core'
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { useMediaQuery } from '@mantine/hooks'
@@ -19,6 +19,8 @@ import { AnalyticsPage } from '../features/analytics/AnalyticsPage'
 import { AstrorderLoader } from '../components/AnimatedStatus'
 import { ShinyText } from '../components/animations/ShinyText'
 import { useShortcutHandlers } from '../features/shortcuts/shortcuts'
+import { QrAuthorizePage } from '../features/auth/QrAuthorizePage'
+import { QrScanPage } from '../features/auth/QrScanPage'
 
 function LoadingPage({ label = '正在启动星序工作台…' }: { label?: string }) {
   return (
@@ -118,8 +120,40 @@ function AuthenticatedApp() {
 export default function App() {
   const queryClient = useQueryClient()
   const auth = useAuthSession()
+  const location = useLocation()
+  const navigate = useNavigate()
   useShortcutHandlers({ refresh: () => window.location.reload() }, true)
+
   if (auth.isLoading) return <LoadingPage label="正在检查登录状态…" />
+
+  // Handle /auth/qr and /auth/qr/scan routes after auth check, before bootstrap
+  if (location.pathname === '/auth/qr') {
+    return (
+      <QrAuthorizePage
+        key={location.key}
+        authenticated={Boolean(auth.data?.authenticated)}
+        onAuthenticated={() => {
+          void queryClient.invalidateQueries({ queryKey: ['astrorder', 'auth-session'] })
+        }}
+        onDone={() => navigate('/chat')}
+      />
+    )
+  }
+
+  if (location.pathname === '/auth/qr/scan') {
+    if (!auth.data?.authenticated) {
+      return (
+        <AuthPage
+          initialError={auth.error}
+          onAuthenticated={() => {
+            void queryClient.invalidateQueries({ queryKey: ['astrorder', 'auth-session'] })
+          }}
+        />
+      )
+    }
+    return <QrScanPage onDone={() => navigate('/chat')} />
+  }
+
   if (auth.data?.authenticated) return <AuthenticatedApp />
 
   return (

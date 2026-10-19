@@ -49,6 +49,12 @@ func (s *Store) AppendBatch(frames []Frame) ([]Frame, error) {
 			if _, err = tx.Exec(`INSERT INTO catalog(daemon_id,session_id,status) VALUES (?,?,?) ON CONFLICT(daemon_id,session_id) DO UPDATE SET status=excluded.status`, f.DaemonID, f.SessionID, f.Status); err != nil {
 				return nil, err
 			}
+		} else {
+			// Stateless connector events still belong to replay. Register the
+			// stream atomically without changing an existing authoritative status.
+			if _, err = tx.Exec(`INSERT OR IGNORE INTO catalog(daemon_id,session_id,status) VALUES (?,?,'idle')`, f.DaemonID, f.SessionID); err != nil {
+				return nil, err
+			}
 		}
 		f.Payload = snapshots[i]
 		result[i] = f

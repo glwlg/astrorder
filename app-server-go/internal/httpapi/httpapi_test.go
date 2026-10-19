@@ -379,6 +379,14 @@ func TestRegistrationsAreTheConstructedDispatchTable(t *testing.T) {
 		"DELETE /api/v1/auth/session": {Kind: KindHTTP, Method: http.MethodDelete, Path: "/api/v1/auth/session", Auth: AuthPublic, Ownership: OwnershipGo},
 		"POST /_desktop/shutdown":     {Kind: KindHTTP, Method: http.MethodPost, Path: "/_desktop/shutdown", Auth: AuthDesktopBearer, Ownership: OwnershipGo},
 	}
+	for _, action := range []string{"create", "poll", "inspect", "approve"} {
+		policy := AuthPublic
+		if action == "inspect" || action == "approve" {
+			policy = AuthBrowser
+		}
+		p := "/api/v1/auth/qr/" + action
+		want["POST "+p] = Registration{Kind: KindHTTP, Method: http.MethodPost, Path: p, Auth: policy, Ownership: OwnershipGo}
+	}
 	for _, path := range []string{"/openapi.json", "/docs", "/redoc", "/docs/oauth2-redirect"} {
 		for _, method := range []string{http.MethodGet, http.MethodHead} {
 			want[method+" "+path] = Registration{Kind: KindHTTP, Method: method, Path: path, Auth: AuthPublic, Ownership: OwnershipGo}

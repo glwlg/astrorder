@@ -136,11 +136,13 @@ func NewRemoteGrokFactory(emit func(string, string, map[string]any, string) erro
 		}
 
 		grokConfig := grokrt.Config{
-			Executable: executable,
-			Workspace:  workspace,
-			Allowed:    []string{"/"},
-			AgentID:    fmt.Sprintf("ssh-grok-%s", connID),
-			Emit:       emit,
+			Executable:   executable,
+			Workspace:    workspace,
+			Allowed:      []string{"/"},
+			AgentID:      fmt.Sprintf("ssh-grok-%s", connID),
+			AgentName:    "Grok · " + connID,
+			ConnectionID: connID,
+			Emit:         emit,
 		}
 
 		return grokrt.NewWithSSHStarter(grokConfig, starter), nil

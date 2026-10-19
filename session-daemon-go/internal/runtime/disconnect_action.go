@@ -11,7 +11,7 @@ func (r *Registry) DisconnectRuntime(ctx context.Context, agentType, connectionI
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if agentType != "codex" && agentType != "codex-ssh" && agentType != "ssh" && agentType != "hermes" && agentType != "grok" && agentType != "grok-ssh" {
+	if agentType != "codex" && agentType != "codex-ssh" && agentType != "ssh" && agentType != "hermes" && agentType != "grok" && agentType != "grok-ssh" && agentType != "antigravity" {
 		return nil, fmt.Errorf("unsupported runtime type: %s", agentType)
 	}
 

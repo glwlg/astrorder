@@ -152,8 +152,8 @@ func TestDiscoverEnvironmentProbesRealAvailabilityAndCachesForListing(t *testing
 		t.Fatalf("discover did not probe each kind exactly once: %v", calls)
 	}
 	agents := environmentAgents(t, item)
-	if len(agents) != 3 {
-		t.Fatalf("expected three agent entries, got %#v", agents)
+	if len(agents) != 4 {
+		t.Fatalf("expected four agent entries, got %#v", agents)
 	}
 	if agents[0]["kind"] != "hermes" || agents[0]["available"] != true || agents[0]["state"] != "connected" {
 		t.Fatalf("hermes probe success lost: %#v", agents[0])
@@ -238,10 +238,10 @@ func TestDiscoverLocalReturnsSameEnvironmentItemStructure(t *testing.T) {
 		t.Fatalf("local discover lost the environment item contract: %#v", item)
 	}
 	agents := environmentAgents(t, item)
-	if len(agents) != 3 || agents[0]["kind"] != "hermes" || agents[1]["kind"] != "codex" || agents[2]["kind"] != "grok" {
+	if len(agents) != 4 || agents[0]["kind"] != "hermes" || agents[1]["kind"] != "codex" || agents[2]["kind"] != "grok" {
 		t.Fatalf("local discover did not return the Agent catalog: %#v", agents)
 	}
-	want := []string{"hermes|local", "codex|local", "grok|local"}
+	want := []string{"hermes|local", "codex|local", "grok|local", "antigravity|local"}
 	if calls := recorder.callList(); strings.Join(calls, ",") != strings.Join(want, ",") {
 		t.Fatalf("local discover did not probe each local CLI exactly once: %v", calls)
 	}
@@ -468,6 +468,12 @@ func TestDiscoverUsesInjectedSSHBinaryForVersionAndOSProbes(t *testing.T) {
 		t.Fatalf("OS probe did not run through the injected ssh binary: %#v", item["os"])
 	}
 	for _, agent := range environmentAgents(t, item) {
+		if agent["kind"] == "antigravity" {
+			if agent["state"] != "unsupported" || agent["available"] != false {
+				t.Fatalf("unexpected remote Antigravity availability: %#v", agent)
+			}
+			continue
+		}
 		if agent["available"] != true {
 			t.Fatalf("version probe did not run through the injected ssh binary: %#v", agent)
 		}

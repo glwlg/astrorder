@@ -7,7 +7,7 @@
 .background-task { display:grid; grid-template-columns:28px minmax(0,1fr) auto; align-items:center; gap:8px; padding:12px 14px; border-bottom:1px solid var(--astr-border,#e9ecef); }
 .background-task:last-child { border-bottom:0; }
 .background-task-icon { display:grid; place-items:center; color:var(--astr-indigo,#5b6cff); }
-.background-task[data-status='completed'] .background-task-icon { color:var(--mantine-color-teal-6); }
+.background-task[data-status='completed'] .background-task-icon { color:var(--astr-muted); }
 .background-task[data-status='failed'] .background-task-icon { color:var(--mantine-color-red-6); }
 .background-task-copy { min-width:0; }
 .background-task-copy .mantine-Text-root { overflow-wrap:anywhere; }

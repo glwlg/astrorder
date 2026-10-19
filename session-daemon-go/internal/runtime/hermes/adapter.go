@@ -151,6 +151,17 @@ func (a *Adapter) ensureHandle(ctx context.Context, session *SessionState) (stri
 	}
 	session.Handle = h
 	session.Workspace = workspace
+	if a.canonical {
+		if running, ok := res["running"].(bool); ok {
+			session.Status = "idle"
+			if running {
+				session.Status = "running"
+			}
+			if prompts, ok := res["prompts"].([]any); ok && len(prompts) > 0 {
+				session.Status = "waiting_approval"
+			}
+		}
+	}
 	a.handleToSession[h] = session.SessionID
 	a.mu.Unlock()
 	if todos, ok := res["todo_state"].(map[string]any); ok {
@@ -323,7 +334,10 @@ func (a *Adapter) Spawn(ctx context.Context, req core.Request) (core.Result, err
 		return core.Result{}, err
 	}
 
-	if err := a.publishLocalOwner(req.SessionID, "idle"); err != nil {
+	a.mu.RLock()
+	currentStatus := state.Status
+	a.mu.RUnlock()
+	if err := a.publishLocalOwner(req.SessionID, currentStatus); err != nil {
 		a.mu.Lock()
 		if a.sessions[req.SessionID] == state {
 			delete(a.sessions, req.SessionID)
@@ -334,10 +348,10 @@ func (a *Adapter) Spawn(ctx context.Context, req core.Request) (core.Result, err
 
 	return core.Result{
 		SessionID: req.SessionID,
-		Status:    "idle",
+		Status:    currentStatus,
 		Payload: map[string]any{
 			"agent_id": a.config.AgentID,
-			"status":   "idle",
+			"status":   currentStatus,
 		},
 	}, nil
 }
@@ -356,6 +370,9 @@ func (a *Adapter) Command(ctx context.Context, req core.Request) (result core.Re
 	unavailable := a.closed || a.failed
 	a.mu.RUnlock()
 	if unavailable {
+		if a.exitedForReattach() {
+			return core.Result{}, core.ErrSessionNotOwned
+		}
 		return core.Result{}, fmt.Errorf("Hermes native transport is unavailable")
 	}
 	if req.SessionID == "" {
@@ -398,6 +415,32 @@ func (a *Adapter) Command(ctx context.Context, req core.Request) (result core.Re
 		return a.handleRename(ctx, session, req)
 	case "session.delete":
 		return a.handleDelete(ctx, session)
+	case "session.close":
+		a.mu.Lock()
+		if session.Status != "idle" || session.sending || len(a.pending) != 0 || len(a.pendingApprovals) != 0 {
+			a.mu.Unlock()
+			return core.Result{}, core.ErrRuntimeBusy
+		}
+		session.sending = true
+		handle, canonical := session.Handle, a.canonical
+		a.mu.Unlock()
+		defer func() { a.mu.Lock(); session.sending = false; a.mu.Unlock() }()
+		// A canonical handle is a viewer subscription; closing its socket must
+		// never mutate or terminate the shared authority's conversation.
+		if !canonical && handle != "" {
+			closed, err := a.rpc(ctx, "session.close", map[string]any{"session_id": handle})
+			if err != nil {
+				return core.Result{}, err
+			}
+			if closed["closed"] != true {
+				return core.Result{}, fmt.Errorf("Hermes native close was not confirmed")
+			}
+		}
+		a.mu.Lock()
+		delete(a.sessions, session.SessionID)
+		delete(a.handleToSession, handle)
+		a.mu.Unlock()
+		return core.Result{SessionID: session.SessionID, Status: "idle", Payload: map[string]any{"closed": true}}, nil
 	case "session.models":
 		result, err := a.handleModels(ctx)
 		result.SessionID = session.SessionID

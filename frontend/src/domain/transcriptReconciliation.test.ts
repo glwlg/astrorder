@@ -25,7 +25,7 @@ it('collapses an optimistic message when a history message with matching role an
   expect(visibleTranscript([optimistic, history], [history], new Set()).map(x => x.id)).toEqual(['history-message-sha'])
 })
 
-it.each(['codex', 'hermes', 'grok'])('keeps %s user input when only its reply has reached native history', agent_id => {
+it.each(['codex', 'hermes', 'grok', 'antigravity'])('keeps %s user input when only its reply has reached native history', agent_id => {
   const optimistic = { ...m('optimistic-send', 'user', 10, 'send'), agent_id }
   const reply = { ...m('reply', 'assistant', 20, 'send'), agent_id }
   expect(visibleTranscript([optimistic, reply], [reply], new Set([optimistic.id])).map(x => x.id)).toEqual([optimistic.id, reply.id])

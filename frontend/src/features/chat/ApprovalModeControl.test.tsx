@@ -41,11 +41,51 @@ describe('ApprovalModeControl', () => {
     localStorage.clear()
   })
 
+  it('offers Antigravity native rules and full access without unsupported auto review', async () => {
+    vi.spyOn(api, 'getSessionApprovalMode').mockResolvedValue({ mode: 'manual' })
+    const setSpy = vi.spyOn(api, 'setSessionApprovalMode').mockResolvedValue({ mode: 'full_access' })
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<MantineProvider><QueryClientProvider client={queryClient}><ApprovalModeControl session={testSession} agentKind="antigravity" /></QueryClientProvider></MantineProvider>)
+    fireEvent.click(await screen.findByRole('button', { name: /当前审批模式：按原生规则/ }))
+    expect(await screen.findByText(/需要批准的操作会被拒绝/)).toBeInTheDocument()
+    expect(screen.queryByText('帮我批准')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByText('完全访问权限'))
+    await waitFor(() => expect(setSpy).toHaveBeenCalledWith(testSession.id, testSession.agent_id, 'full_access'))
+    expect(await screen.findByRole('button', { name: /当前审批模式：完全访问权限/ })).toBeInTheDocument()
+  })
+
+  it('does not query or offer unsupported approval modes', () => {
+    const getSpy = vi.spyOn(api, 'getSessionApprovalMode')
+    const queryClient = new QueryClient()
+    render(<MantineProvider><QueryClientProvider client={queryClient}><ApprovalModeControl session={testSession} supported={false} /></QueryClientProvider></MantineProvider>)
+    expect(screen.queryByRole('button')).not.toBeInTheDocument()
+    expect(getSpy).not.toHaveBeenCalled()
+  })
+
+  it('does not present a cached mode as confirmed when the native read fails', async () => {
+    localStorage.setItem(`astrorder_approval_mode:${testSession.agent_id}:${testSession.id}`, 'full_access')
+    vi.spyOn(api, 'getSessionApprovalMode').mockRejectedValue(new Error('native unavailable'))
+    renderControl()
+    expect(await screen.findByRole('button', { name: '审批模式读取失败' })).toBeDisabled()
+    expect(screen.queryByText('完全访问')).not.toBeInTheDocument()
+  })
+
+  it('keeps the confirmed mode when a change fails', async () => {
+    vi.spyOn(api, 'getSessionApprovalMode').mockResolvedValue({ mode: 'manual' })
+    vi.spyOn(api, 'setSessionApprovalMode').mockRejectedValue(new Error('native rejected'))
+    renderControl()
+    fireEvent.click(await screen.findByRole('button', { name: /当前审批模式：请求批准/ }))
+    fireEvent.click(await screen.findByText('完全访问权限'))
+    await waitFor(() => expect(api.setSessionApprovalMode).toHaveBeenCalled())
+    expect(screen.getByRole('button', { name: /当前审批模式：请求批准/ })).not.toHaveClass('is-full-access')
+    expect(localStorage.getItem(`astrorder_approval_mode:${testSession.agent_id}:${testSession.id}`)).not.toBe('full_access')
+  })
+
   it('renders default auto approval mode capsule button', async () => {
     vi.spyOn(api, 'getSessionApprovalMode').mockResolvedValue({ mode: 'auto' })
     renderControl()
 
-    const trigger = screen.getByRole('button', { name: /当前审批模式：帮我批准/ })
+    const trigger = await screen.findByRole('button', { name: /当前审批模式：帮我批准/ })
     expect(trigger).toBeInTheDocument()
     expect(trigger).toHaveTextContent('帮我批准')
     expect(trigger).not.toHaveClass('is-full-access')
@@ -55,7 +95,7 @@ describe('ApprovalModeControl', () => {
     vi.spyOn(api, 'getSessionApprovalMode').mockResolvedValue({ mode: 'auto' })
     renderControl()
 
-    const trigger = screen.getByRole('button', { name: /当前审批模式：帮我批准/ })
+    const trigger = await screen.findByRole('button', { name: /当前审批模式：帮我批准/ })
     fireEvent.click(trigger)
 
     expect(await screen.findByText('应如何批准操作？')).toBeInTheDocument()
@@ -79,7 +119,7 @@ describe('ApprovalModeControl', () => {
     const setSpy = vi.spyOn(api, 'setSessionApprovalMode').mockResolvedValue({ mode: 'full_access' })
 
     renderControl()
-    const trigger = screen.getByRole('button', { name: /当前审批模式：帮我批准/ })
+    const trigger = await screen.findByRole('button', { name: /当前审批模式：帮我批准/ })
     fireEvent.click(trigger)
 
     const fullOption = await screen.findByText('完全访问权限')
@@ -100,7 +140,7 @@ describe('ApprovalModeControl', () => {
     const setSpy = vi.spyOn(api, 'setSessionApprovalMode').mockResolvedValue({ mode: 'manual' })
 
     renderControl()
-    const trigger = screen.getByRole('button', { name: /当前审批模式：帮我批准/ })
+    const trigger = await screen.findByRole('button', { name: /当前审批模式：帮我批准/ })
     fireEvent.click(trigger)
 
     const manualOption = await screen.findByText('请求批准')

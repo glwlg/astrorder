@@ -351,9 +351,30 @@ func (a *Adapter) handleGatewayEvent(params map[string]any) {
 		}
 		if eventType == "approval.settled" {
 			payload, _ := params["payload"].(map[string]any)
+			key := fmt.Sprint(payload["prompt_id"])
 			a.mu.Lock()
-			delete(a.pendingApprovals, fmt.Sprint(payload["prompt_id"]))
+			record := a.pendingApprovals[key]
+			if record == nil || record.SessionID != params["session_id"] {
+				a.mu.Unlock()
+				return
+			}
+			delete(a.pendingApprovals, key)
+			session := a.sessions[record.SessionID]
+			if session.Status == "waiting_approval" {
+				session.Status = "running"
+				for _, pending := range a.pendingApprovals {
+					if pending.SessionID == record.SessionID {
+						session.Status = "waiting_approval"
+					}
+				}
+			}
+			current := session.Status
 			a.mu.Unlock()
+			if a.config.Emit != nil {
+				if err := a.config.Emit(record.SessionID, "hermes.approval_resolved", map[string]any{"agent_id": a.config.AgentID, "session_id": record.SessionID, "approval_id": key, "native_id": record.NativeID, "state": "resolved"}, current); err != nil {
+					a.failCloseSession(record.SessionID, err)
+				}
+			}
 			return
 		}
 	}

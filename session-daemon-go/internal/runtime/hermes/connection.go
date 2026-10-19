@@ -46,7 +46,7 @@ func (a *Adapter) connectControl(ctx context.Context, r core.Request) (core.Resu
 		return core.Result{}, err
 	}
 	if a.config.Emit != nil {
-		agent := map[string]any{"id": a.config.AgentID, "kind": "hermes", "name": "Hermes", "status": "ready", "capabilities": []string{"chat", "events", "attachments"}, "control_state": "owned"}
+		agent := map[string]any{"id": a.config.AgentID, "kind": "hermes", "name": "Hermes", "status": "ready", "capabilities": []string{"chat", "events", "attachments", "approvals"}, "control_state": "owned"}
 		for k, v := range metadata {
 			if k != "agent_id" && k != "runtime_control" {
 				agent[k] = v

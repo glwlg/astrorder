@@ -32,6 +32,7 @@ import { selectApprovals, selectCommands, selectOutbox, selectSessions, selectTa
 import { useSessionResources } from '../../hooks/useAstrorderData'
 import { ChatComposer } from './ChatComposer'
 import { SessionComposerGate } from './SessionComposerGate'
+import { SessionConnectionNotice } from './SessionConnectionNotice'
 import { QuickOpen } from './QuickOpen'
 import { appendReviewOnce, buildUncommittedReviewCommand, extractNativeReviewComments, isRecoverableReviewRun, REVIEW_TIMEOUT_ERROR, reviewOutputPending, reviewRunTimedOut } from './reviewRelay'
 import { REASONING_EFFORTS } from './composerMedia'
@@ -517,7 +518,7 @@ function ChatPageBody() {
         worktree: forkWorktree,
         branch_name: forkWorktree && forkBranchName.trim() ? forkBranchName.trim() : undefined,
         target_message_id: forkTargetMessage.message.id,
-        turn_index: forkTargetMessage.turnIndex,
+        turn_index: undefined,
       })
       notifications.show({
         color: 'teal',
@@ -655,6 +656,7 @@ function ChatPageBody() {
               openGallery(allImages, idx >= 0 ? idx : 0)
             }}
             error={resourceError ? errorText(resourceError) : undefined}
+            notice={<SessionConnectionNotice key={scopeKey(selected.agent_id, selected.id)} session={selected} error={resourceError ? errorText(resourceError) : undefined} onRetry={() => Promise.all([resources.messages.refetch(), resources.commands.refetch(), resources.tasks.refetch()])} />}
            onRetry={() => {
              void resources.messages.refetch()
              void resources.commands.refetch()
@@ -825,12 +827,12 @@ function ChatPageBody() {
             value={forkTitle}
             onChange={(e) => setForkTitle(e.currentTarget.value)}
           />
-          <Switch
+          {agent?.kind !== 'antigravity' && <Switch
             label="创建独立 Git Worktree 分支工作区"
             description="在独立目录签出新 Git 分支，防止两个分支的代码修改互相干扰"
             checked={forkWorktree}
             onChange={(e) => setForkWorktree(e.currentTarget.checked)}
-          />
+          />}
           {forkWorktree && (
             <TextInput
               label="Git 分支名"

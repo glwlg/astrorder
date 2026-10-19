@@ -6,6 +6,18 @@ afterEach(() => {
 })
 
 describe('contract HTTP client', () => {
+  it('maps chat fork options to the strict App request contract', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}', { status: 200 }))
+    await api.forkSession('parent', { agent_id: 'a', worktree: false, target_message_id: 'antigravity:parent:1' })
+    expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string)).toEqual({
+      agent_id: 'a', create_worktree: false, target_message_id: 'antigravity:parent:1',
+    })
+    await api.forkSession('parent', { agent_id: 'a', worktree: true, branch_name: 'child' })
+    expect(JSON.parse(fetchMock.mock.calls[1][1]?.body as string)).toEqual({
+      agent_id: 'a', create_worktree: true, worktree_branch: 'child',
+    })
+  })
+
   it('sends auth tokens only in the POST body and uses cookies for later requests', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify({ authenticated: true }), { status: 200 }),
@@ -92,5 +104,43 @@ describe('contract HTTP client', () => {
     )
 
     await expect(api.getAgents()).rejects.toMatchObject({ status: 401, detail: '认证失败' })
+  })
+
+  it('calls kernel management status and operation endpoints according to API contract', async () => {
+    const statusPayload = {
+      app: { state: 'running', healthy: true, process: { pid: 1001, creation_time: '2026-10-17T08:00:00Z' } },
+      daemon: { state: 'running', active_sessions: { 'sess-1': {} }, process: { pid: 1002, creation_time: '2026-10-17T08:00:01Z' } },
+      update: { update_available: true },
+    }
+    const createdPayload = {
+      id: 'op-42',
+      status: 'queued',
+      target: 'daemon',
+      action: 'update',
+    }
+    const operationPayload = {
+      id: 'op-42',
+      status: 'running',
+      target: 'daemon',
+      action: 'update',
+    }
+
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify(statusPayload), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(createdPayload), { status: 202 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(operationPayload), { status: 200 }))
+
+    const status = await (api as any).getKernelStatus()
+    expect(status).toEqual(statusPayload)
+    expect(String(fetchMock.mock.calls[0][0])).toBe('/api/v1/services/kernels/status')
+
+    const op = await (api as any).createKernelOperation({ target: 'daemon', action: 'update', confirm_active: true })
+    expect(op).toEqual(createdPayload)
+    expect(String(fetchMock.mock.calls[1][0])).toBe('/api/v1/services/kernels/operations')
+    expect(JSON.parse(fetchMock.mock.calls[1][1]?.body as string)).toEqual({ target: 'daemon', action: 'update', confirm_active: true })
+
+    const detail = await (api as any).getKernelOperation('op-42')
+    expect(detail).toEqual(operationPayload)
+    expect(String(fetchMock.mock.calls[2][0])).toBe('/api/v1/services/kernels/operations/op-42')
   })
 })

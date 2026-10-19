@@ -37,7 +37,7 @@ func (h *Handler) handleForkSession(w http.ResponseWriter, r *http.Request, sid 
 		return
 	}
 	kind := stringValue(agent, "kind")
-	if kind != "hermes" && kind != "codex" {
+	if kind != "hermes" && kind != "codex" && kind != "antigravity" {
 		writeJSONError(w, 422, "This Agent does not support native session forks")
 		return
 	}
@@ -72,26 +72,42 @@ func (h *Handler) handleForkSession(w http.ResponseWriter, r *http.Request, sid 
 	}
 	fields := map[string]any{"title": title, "cwd": stringValue(parent, "workspace")}
 	if body.TargetMessageID != nil && *body.TargetMessageID != "" {
-		if kind != "hermes" {
-			writeJSONError(w, 422, "This Agent does not support forks at a message boundary")
-			return
+		if kind == "antigravity" {
+			prefix := "antigravity:" + nativeID + ":"
+			if !strings.HasPrefix(*body.TargetMessageID, prefix) {
+				writeJSONError(w, 422, "Fork message belongs to another session")
+				return
+			}
+			index, e := strconv.ParseInt(strings.TrimPrefix(*body.TargetMessageID, prefix), 10, 32)
+			if e != nil || index < 0 {
+				writeJSONError(w, 422, "Invalid native fork message identity")
+				return
+			}
+			fields["target_message_id"] = *body.TargetMessageID
+		} else {
+			if kind != "hermes" {
+				writeJSONError(w, 422, "This Agent does not support forks at a message boundary")
+				return
+			}
+			prefix := "native:" + sid + ":"
+			if !strings.HasPrefix(*body.TargetMessageID, prefix) {
+				writeJSONError(w, 422, "Fork message belongs to another session")
+				return
+			}
+			rowID, parseErr := strconv.ParseInt(strings.TrimPrefix(*body.TargetMessageID, prefix), 10, 64)
+			if parseErr != nil || rowID <= 0 {
+				writeJSONError(w, 422, "Invalid native fork message identity")
+				return
+			}
+			fields["target_message_id"] = rowID
 		}
-		prefix := "native:" + sid + ":"
-		if !strings.HasPrefix(*body.TargetMessageID, prefix) {
-			writeJSONError(w, 422, "Fork message belongs to another session")
-			return
-		}
-		rowID, parseErr := strconv.ParseInt(strings.TrimPrefix(*body.TargetMessageID, prefix), 10, 64)
-		if parseErr != nil || rowID <= 0 {
-			writeJSONError(w, 422, "Invalid native fork message identity")
-			return
-		}
-		fields["target_message_id"] = rowID
 	}
 	req := &pb.CreateSessionRequest{Meta: newCommandMeta("", ""), Target: target}
 	if kind == "hermes" {
 		native, _ := encodeNativeJSON("hermes.create.v1", fields)
 		req.Options = &pb.CreateSessionRequest_Hermes{Hermes: &pb.HermesCreateOptions{ParentSessionId: &nativeID, NativeOptions: native}}
+	} else if kind == "antigravity" {
+		req.Options = &pb.CreateSessionRequest_Antigravity{Antigravity: &pb.AntigravityCreateOptions{Cwd: stringValue(parent, "workspace"), ParentSessionId: &nativeID, TargetMessageId: body.TargetMessageID}}
 	} else {
 		req.Options = &pb.CreateSessionRequest_Codex{Codex: &pb.CodexCreateOptions{ParentSessionId: &nativeID}}
 	}

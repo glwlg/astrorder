@@ -175,7 +175,7 @@ func projectHistoryItem(item map[string]any, aid, sid, nativeID, source, agentKi
 	}
 	role := stringValue(item, "role")
 	kind := "message"
-	if agentKind == "grok" || agentKind == "grok-ssh" {
+	if agentKind == "grok" || agentKind == "grok-ssh" || agentKind == "antigravity" {
 		if nativeKind := stringValue(item, "kind"); nativeKind != "" {
 			kind = nativeKind
 		}
@@ -291,6 +291,18 @@ func projectHistoryItem(item map[string]any, aid, sid, nativeID, source, agentKi
 			name = item["tool_name"]
 		}
 		row["tool"] = map[string]any{"name": name, "arguments": item["args"]}
+	}
+	if agentKind == "antigravity" && role == "assistant" && kind == "message" {
+		if thinking := stringValue(item, "thinking"); thinking != "" {
+			thought := map[string]any{}
+			for key, value := range row {
+				thought[key] = value
+			}
+			thought["id"] = key + "-thinking"
+			thought["kind"] = "thinking"
+			thought["text"] = thinking
+			return []map[string]any{thought, row}
+		}
 	}
 	return []map[string]any{row}
 }

@@ -749,7 +749,7 @@ export function SwarmDagView({
                     : hasSos
                     ? '1.5px solid #EF4444'
                     : isRunning
-                    ? '1.5px solid #10B981'
+                    ? '1.5px solid var(--astr-text)'
                     : '1px solid var(--astr-border, #E5E7EB)',
                   boxShadow: isSelected
                     ? '0 4px 16px rgba(91, 91, 214, 0.16)'
@@ -814,7 +814,7 @@ export function SwarmDagView({
                           width: 7,
                           height: 7,
                           borderRadius: '50%',
-                          background: hasSos ? '#EF4444' : isRunning ? '#10B981' : isWaiting ? '#F59E0B' : '#94A3B8',
+                          background: hasSos ? 'var(--astr-red)' : isRunning ? 'var(--astr-text)' : isWaiting ? 'var(--astr-yellow)' : 'var(--astr-muted)',
                         }}
                       />
                       <Tooltip label="展开星系与伴星" withArrow>
@@ -918,9 +918,9 @@ export function SwarmDagView({
                         style={{
                           fontSize: 11,
                           fontWeight: 600,
-                          color: '#B91C1C',
-                          background: '#FEF2F2',
-                          border: '1px solid #FECACA',
+                          color: 'var(--astr-red)',
+                          background: 'transparent',
+                          border: '1px solid transparent',
                           padding: '1px 7px',
                           borderRadius: 99,
                           display: 'inline-flex',
@@ -936,9 +936,9 @@ export function SwarmDagView({
                         style={{
                           fontSize: 11,
                           fontWeight: 600,
-                          color: '#B45309',
-                          background: '#FFFBEB',
-                          border: '1px solid #FDE68A',
+                          color: 'var(--astr-yellow)',
+                          background: 'transparent',
+                          border: '1px solid transparent',
                           padding: '1px 7px',
                           borderRadius: 99,
                           display: 'inline-flex',
@@ -954,9 +954,9 @@ export function SwarmDagView({
                         style={{
                           fontSize: 11,
                           fontWeight: 600,
-                          color: '#047857',
-                          background: '#ECFDF5',
-                          border: '1px solid #A7F3D0',
+                          color: 'var(--astr-muted)',
+                          background: 'transparent',
+                          border: '1px solid transparent',
                           padding: '1px 7px',
                           borderRadius: 99,
                           display: 'inline-flex',
@@ -966,7 +966,7 @@ export function SwarmDagView({
                       >
                         <span
                           className="pulsing-emerald-dot"
-                          style={{ width: 6, height: 6, borderRadius: '50%', background: '#10B981' }}
+                          style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--astr-muted)' }}
                         />
                         运行中
                       </span>
@@ -1384,7 +1384,7 @@ export function SwarmDagView({
         onWheel={(e) => e.stopPropagation()}
       >
         <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-          <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#10B981' }} />
+          <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--astr-text)' }} />
           运行中 ({runningCount})
         </span>
         <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>

@@ -27,12 +27,23 @@ type NativeUpgradeExecutor struct{ SSHBinary string }
 
 // Resolve known CLI locations without assuming Windows launchers are .cmd files.
 func localAgentExecutable(ctx context.Context, name string) (string, error) {
+	if name == "antigravity" {
+		name = "agy"
+	}
 	env, err := (&envtarget.Resolver{}).Open(ctx, "local")
 	if err != nil {
 		return "", err
 	}
 	if path, ok := env.Which(ctx, name); ok {
 		return path, nil
+	}
+	if name == "agy" {
+		if base := os.Getenv("LOCALAPPDATA"); base != "" {
+			p := filepath.Join(base, "agy", "bin", "agy.exe")
+			if info, err := os.Stat(p); err == nil && !info.IsDir() {
+				return p, nil
+			}
+		}
 	}
 	if name == "hermes" {
 		if base := os.Getenv("LOCALAPPDATA"); base != "" {
@@ -57,7 +68,7 @@ func (e *NativeUpgradeExecutor) Upgrade(ctx context.Context, kind, connID string
 	switch kind {
 	case "hermes":
 		args = []string{"update", "--yes", "--no-gateway-restart"}
-	case "grok":
+	case "grok", "antigravity":
 		args = []string{"update"}
 	case "codex":
 	default:

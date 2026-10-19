@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type 
 import { createPortal } from 'react-dom'
 import { IconChevronDown, IconChevronRight, IconCopy, IconDotsVertical, IconEdit, IconPin, IconPinned, IconPlus, IconTrash, IconTransfer, IconDeviceDesktop, IconGitBranch } from '@tabler/icons-react'
 import type { Agent, Session } from '../../domain/types'
+import { sessionHandoffTargets } from '../../domain/handoff'
 import { scopeKey } from '../../domain/semantics'
 import { displaySessionTitle, formatRelativeTime, sessionActivityStatus, type ProjectGroup } from '../../components/sessionRailModel'
 import { ProjectGlyph, PROJECT_APPEARANCE_COLORS, type ProjectAppearanceMap } from '../../components/projectAppearance'
@@ -103,15 +104,7 @@ export function MobileSessionDrawer({ groups, pins, pinnedProjects, selectedKey,
     hapticFeedback(20)
   }
 
-  const handoffTargets = (session: Session) => {
-    const source = agents?.[session.agent_id]
-    if (!source) return []
-    return Object.values(agents || {}).filter((agent) =>
-      agent.kind !== source.kind &&
-      (agent.connection_id ?? null) === (source.connection_id ?? null) &&
-      agent.status === 'ready',
-    )
-  }
+  const handoffTargets = (session: Session) => sessionHandoffTargets(session, agents || {})
 
   const row = (session: Session) => {
     const key = scopeKey(session.agent_id, session.id)
@@ -256,7 +249,7 @@ export function MobileSessionDrawer({ groups, pins, pinnedProjects, selectedKey,
             <IconDeviceDesktop size={17} />创建聊天分支
           </button>
         )}
-        {onForkWorktreeSession && (
+        {onForkWorktreeSession && agents?.[sessionMenu.session.agent_id]?.kind !== 'antigravity' && (
           <button role="menuitem" onClick={() => { onForkWorktreeSession(sessionMenu.session); setSessionMenu(null) }}>
             <IconGitBranch size={17} />在新工作树中创建分支
           </button>

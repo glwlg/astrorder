@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 )
 
 type commandError struct {
@@ -164,9 +165,16 @@ func (h *Handler) submitStored(ctx context.Context, command map[string]any) (map
 	ref := buildSessionRef(aid, sid, stringValue(session, "connection_id"))
 	meta := newCommandMeta(cid, cid)
 	var receipt *pb.CommandReceipt
+	dispatched := false
 	action, text := stringValue(command, "action"), stringValue(command, "text")
 	switch action {
 	case "send", "enqueue":
+		// Keep the one-shot handoff claim serialized with native dispatch. Unknown
+		// outcomes retain the claim; only definitive rejection makes it pending.
+		lockValue, _ := nativeAttachLocks.LoadOrStore("handoff-send\x00"+aid+"\x00"+sid, &sync.Mutex{})
+		lock := lockValue.(*sync.Mutex)
+		lock.Lock()
+		defer lock.Unlock()
 		if err = h.ensureNativeBinding(ctx, session); err != nil {
 			if _, storageErr := setState("failed", err); storageErr != nil {
 				return nil, storageErr
@@ -200,6 +208,58 @@ func (h *Handler) submitStored(ctx context.Context, command map[string]any) (map
 			}
 			return nil, inputErr
 		}
+		current, readErr := h.store.GetSession(ctx, aid, sid)
+		if readErr != nil {
+			return nil, readErr
+		}
+		pending := stringValue(current, "handoff_context")
+		deliveryKey := handoffOperationKey("delivery\x00" + aid + "\x00" + sid)
+		if pending != "" && current["handoff_context_consumed"] == true {
+			delivery, deliveryErr := h.store.GetPreference(ctx, deliveryKey)
+			if deliveryErr != nil {
+				return nil, deliveryErr
+			}
+			state, _ := delivery.Value.(map[string]any)
+			if (delivery.Exists || strings.HasPrefix(pending, handoffRefPrefix)) && state["state"] != "delivered" && state["state"] != "rejected" {
+				failure := commandFailure(409, "First handoff delivery is unconfirmed; reconcile its native outcome before sending again")
+				_, _ = setState("failed", failure)
+				return nil, failure
+			}
+		}
+		if pending != "" && current["handoff_context_consumed"] != true {
+			contextText, contextErr := h.resolveHandoffContext(ctx, pending, current)
+			if contextErr != nil {
+				_, _ = setState("failed", contextErr)
+				return nil, contextErr
+			}
+			claimed, claimErr := h.store.ClaimSessionHandoffContext(ctx, aid, sid)
+			if claimErr != nil {
+				return nil, claimErr
+			}
+			if claimed != "" {
+				if journalErr := h.store.SetPreference(ctx, deliveryKey, map[string]any{"state": "dispatching", "command_id": cid}, true); journalErr != nil {
+					_ = h.store.RestoreSessionHandoffContext(context.WithoutCancel(ctx), aid, sid, claimed)
+					return nil, journalErr
+				}
+				// Restore only on a known pre-dispatch/native rejection below.
+				defer func() {
+					deliveryState := "unknown"
+					if !dispatched || err != nil && (status.Code(err) == codes.InvalidArgument || status.Code(err) == codes.NotFound || status.Code(err) == codes.FailedPrecondition || status.Code(err) == codes.PermissionDenied || status.Code(err) == codes.Unauthenticated || receipt != nil && receipt.GetRejected() != nil) {
+						_ = h.store.RestoreSessionHandoffContext(context.WithoutCancel(ctx), aid, sid, claimed)
+						deliveryState = "rejected"
+					} else if err == nil && confirmedReceipt(receipt) == nil && receipt.GetAccepted() {
+						deliveryState = "delivered"
+					}
+					_ = h.store.SetPreference(context.WithoutCancel(ctx), deliveryKey, map[string]any{"state": deliveryState, "command_id": cid}, true)
+				}()
+				text = contextText + "\n\n<用户的新消息>\n" + text
+				if len(input) > 0 && input[0].GetText() != nil {
+					input[0].GetText().Text = contextText + "\n\n<用户的新消息>\n" + input[0].GetText().Text
+				} else {
+					input = append([]*pb.InputPart{{Part: &pb.InputPart_Text{Text: &pb.TextInput{Text: text}}}}, input...)
+				}
+			}
+		}
 		slash := strings.Fields(text)
 		name := ""
 		if len(slash) > 0 {
@@ -221,8 +281,10 @@ func (h *Handler) submitStored(ctx context.Context, command map[string]any) (map
 			}
 		}
 		if agent["kind"] == "codex" && name == "/compact" {
+			dispatched = true
 			receipt, err = h.client.Session.Compact(ctx, &pb.CompactRequest{Meta: meta, Session: ref, Instructions: optString(strings.TrimSpace(strings.TrimPrefix(text, "/compact")))})
 		} else if agent["kind"] == "codex" && name == "/review" {
+			dispatched = true
 			receipt, err = h.client.Session.StartReview(ctx, &pb.StartReviewRequest{Meta: meta, Session: ref, Delivery: pb.ReviewDelivery_REVIEW_DELIVERY_INLINE, Target: &pb.ReviewTarget{Target: &pb.ReviewTarget_Uncommitted{Uncommitted: "uncommitted"}}, Instructions: optString(strings.TrimSpace(strings.TrimPrefix(text, "/review")))})
 		} else {
 			request := &pb.SendRequest{Meta: meta, Session: ref, Input: input}
@@ -231,6 +293,7 @@ func (h *Handler) submitStored(ctx context.Context, command map[string]any) (map
 			} else if guidance && agent["kind"] == "hermes" {
 				request.Policy = &pb.SendPolicy{NativeOptions: &pb.NativeJson{Schema: "astrorder.hermes.send.options.v1", Utf8Json: []byte(`{"guidance_only":true}`)}}
 			}
+			dispatched = true
 			receipt, err = h.client.Session.Send(ctx, request)
 		}
 	case "stop":

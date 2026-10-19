@@ -2,7 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import '@mantine/core/styles.css'
 import '@mantine/notifications/styles.css'
-import { MantineProvider, createTheme } from '@mantine/core'
+import { MantineProvider } from '@mantine/core'
 import { Notifications } from '@mantine/notifications'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter } from 'react-router-dom'
@@ -10,6 +10,7 @@ import App from './app/App.tsx'
 import { installGlobalNativeHoldBlocker } from './features/mobile/mobileGestures'
 import './index.css'
 import './workspaceVisuals.css'
+import { theme } from './theme'
 import { registerSW } from 'virtual:pwa-register'
 
 installGlobalNativeHoldBlocker()
@@ -37,7 +38,7 @@ const queryClient = new QueryClient({
     },
   },
 })
-const theme = createTheme({ primaryColor: 'indigo', defaultRadius: 'md' })
+
 
 const rootEl = document.getElementById('root')!
 const staticSplash = document.getElementById('app-splash-root')

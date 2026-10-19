@@ -29,6 +29,7 @@ import (
 	"astrorder.dev/app-server/internal/daemonclient"
 	"astrorder.dev/app-server/internal/envtarget"
 	"astrorder.dev/app-server/internal/httpapi"
+	"astrorder.dev/app-server/internal/kernelcontrol"
 	"astrorder.dev/app-server/internal/memory"
 	"astrorder.dev/app-server/internal/modelgateway"
 	"astrorder.dev/app-server/internal/projection"
@@ -108,6 +109,10 @@ func runServer(ctx context.Context, cfg config.Config, ready io.Writer, logger *
 			return fmt.Errorf("open store: %w", err)
 		}
 		st = opened
+		if err := st.RepairGrokRegistrations(ctx); err != nil {
+			_ = st.Close()
+			return fmt.Errorf("repair Grok registrations: %w", err)
+		}
 		defer func() {
 			if closeErr := st.Close(); closeErr != nil {
 				logger.Warn("failed to close store", "error", closeErr)
@@ -266,10 +271,14 @@ func runServer(ctx context.Context, cfg config.Config, ready io.Writer, logger *
 		}()
 		_, listenPort, _ := net.SplitHostPort(cfg.Listen)
 		portNumber, _ := strconv.Atoi(listenPort)
+		executable, err := os.Executable()
+		if err != nil {
+			return fmt.Errorf("resolve kernel controller: %w", err)
+		}
 		settingsHandler = settingsapi.NewHandler(settingsapi.Options{
 			Store: st, Authorizer: authorizer, Port: portNumber, Origins: cfg.AllowedOrigins,
 			PublicURL: os.Getenv("ASTRORDER_PUBLIC_URL"), BrowserSecret: cfg.BrowserSecret,
-			RestartDaemon: daemonRestart(cfg.SourcePath),
+			Kernels: kernelcontrol.New(cfg.SourcePath, executable),
 		})
 		hookResolver := targetfs.NewResolver(targetfs.ResolverOptions{Store: st, HelperAssetsDir: bundledHelperAssetsDir()})
 		capabilitiesHandler = capabilities.NewHandler(capabilities.New(&envtarget.Resolver{Store: st, Remote: hookResolver}), authorizer)

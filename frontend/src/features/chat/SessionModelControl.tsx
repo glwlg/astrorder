@@ -108,6 +108,7 @@ export function SessionModelControl({ session }: { session: Session }) {
     try {
       await model.change(target.provider, target.model)
       setView('main')
+      if (model.data?.reasoning_read_only) setOpened(false)
     } catch (error) {
       notifications.show({
         message: error instanceof Error ? error.message : '模型切换未确认',
@@ -148,7 +149,8 @@ export function SessionModelControl({ session }: { session: Session }) {
   const effortLabel = draftEffortIndex !== null || resolvedEffortIndex >= 0
     ? REASONING_EFFORTS[sliderIndex]?.label
     : model.effort || '未确认'
-  const displayModelName = formatDisplayModel(model.label)
+  const modelOnly = model.data?.reasoning_read_only === true
+  const displayModelName = modelOnly && !model.data?.model ? '选择模型' : formatDisplayModel(model.label)
   const currentModelRoute = model.data?.model ? `${model.data.provider ? `${model.data.provider}/` : ''}${model.data.model}` : ''
 
   return (
@@ -169,7 +171,7 @@ export function SessionModelControl({ session }: { session: Session }) {
           type="button"
           className="codex-model-pill"
           aria-label="选择会话模型"
-          title={model.label}
+          title={displayModelName}
           onClick={() => {
             setOpened((v) => !v)
             setView('main')
@@ -177,14 +179,14 @@ export function SessionModelControl({ session }: { session: Session }) {
         > 
           <span className="codex-model-pill-text">{displayModelName}</span>
           <ModelQuotaBadge modelRoute={currentModelRoute} size="dot" />
-          {effortLabel && <span className="codex-model-pill-effort">{effortLabel}</span>}
+          {!modelOnly && effortLabel && <span className="codex-model-pill-effort">{effortLabel}</span>}
           <IconChevronDown size={14} className="codex-model-pill-arrow" />
         </button>
       </Popover.Target>
 
       <Popover.Dropdown className="codex-model-popover-dropdown">
-        {model.data?.read_only && <Text size="xs" c="dimmed" p="xs">会话被其他客户端占用，当前只能读取模型信息。释放后点击刷新即可重新检查。</Text>}
-        {view === 'main' ? (
+        {(model.data?.read_only || model.data?.model_read_only) && <Text size="xs" c="dimmed" p="xs">{model.data.detail || '会话被其他客户端占用，当前只能读取模型信息。释放后点击刷新即可重新检查。'}</Text>}
+        {view === 'main' && !modelOnly ? (
           <div className="codex-model-card" style={{ '--effort-color': EFFORT_COLORS[sliderIndex] } as React.CSSProperties}>
             <div className="codex-model-header-row">
               <span className="codex-model-icon-bolt" title="思维与推理">
@@ -227,7 +229,7 @@ export function SessionModelControl({ session }: { session: Session }) {
 
             <div className="codex-model-slider-wrap">
               <Slider
-                disabled={changing || model.data?.read_only}
+                disabled={changing || model.data?.reasoning_read_only || (model.data?.read_only || model.data?.model_read_only)}
                 size={18}
                 thumbSize={22}
                 color={EFFORT_COLORS[sliderIndex]}
@@ -277,6 +279,7 @@ export function SessionModelControl({ session }: { session: Session }) {
               <Text size="xs" c="dimmed" fw={600}>
                 选择模型
               </Text>
+              {modelOnly && !model.data?.model && <Text size="xs" c="dimmed">原生未报告当前模型，请选择要使用的模型。</Text>}
               <TextInput
                 size="xs"
                 placeholder="搜索模型…"
@@ -309,7 +312,7 @@ export function SessionModelControl({ session }: { session: Session }) {
                       key={JSON.stringify([item.provider, item.model])}
                       className={"codex-model-menu-item" + (isSelected ? " is-selected" : "")}
                       onClick={() => void applyChoice(item)}
-                      disabled={changing || model.data?.read_only}
+                      disabled={changing || (model.data?.read_only || model.data?.model_read_only)}
                     >
                       <span className="codex-model-menu-item-text" title={item.label}>{item.label}</span>
                       <ModelQuotaBadge modelRoute={`${item.provider ? `${item.provider}/` : ''}${item.model}`} />

@@ -33,13 +33,14 @@ var approvalMethods = map[string]struct{}{
 type EmitFunc func(sessionID, event string, payload map[string]any, status string) error
 
 type Config struct {
-	Executable string
-	Arguments  []string
-	Workspace  string
-	Allowed    []string
-	AgentID    string
-	AgentName  string
-	Emit       func(sessionID, event string, payload map[string]any, status string) error
+	Executable   string
+	Arguments    []string
+	Workspace    string
+	Allowed      []string
+	AgentID      string
+	AgentName    string
+	ConnectionID string
+	Emit         func(sessionID, event string, payload map[string]any, status string) error
 }
 
 type pendingRequest struct {
@@ -1280,10 +1281,8 @@ func (a *Adapter) Snapshot() map[string]core.Result {
 		if s.control {
 			// Control bindings stay identifiable and re-bindable after an
 			// App restart: the snapshot carries the same metadata as spawn.
-			payload["runtime_control"] = true
-			payload["control_state"] = "owned"
-			if a.config.AgentID != "" {
-				payload["agent_id"] = a.config.AgentID
+			for key, value := range a.controlPayload(sid, a.config.AgentID, s.status) {
+				payload[key] = value
 			}
 		}
 		res[sid] = core.Result{SessionID: sid, Status: s.status, Payload: payload}

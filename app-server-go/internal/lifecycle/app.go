@@ -204,9 +204,11 @@ func stopAppLocked(ctx context.Context, validated validatedAppOptions) (AppStatu
 		current, inspectErr := InspectProcess(owned.PID)
 		if errors.Is(inspectErr, os.ErrNotExist) || (inspectErr == nil && current != owned) {
 			processExited = true
-		} else if inspectErr != nil {
+		} else if inspectErr != nil && !errors.Is(inspectErr, os.ErrPermission) {
 			return AppStatusResult{}, fmt.Errorf("verify App process exit: %w", inspectErr)
 		}
+		// Windows can temporarily deny inspection while a process exits.
+		// Continue waiting; success still requires proven exit and listener release.
 		pids, listenerErr := ListeningPIDs(validated.port)
 		if listenerErr != nil {
 			return AppStatusResult{}, fmt.Errorf("verify App listener release: %w", listenerErr)

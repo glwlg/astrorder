@@ -229,6 +229,7 @@ const (
 	RuntimeKind_RUNTIME_KIND_CODEX_SSH   RuntimeKind = 5
 	RuntimeKind_RUNTIME_KIND_GROK        RuntimeKind = 6
 	RuntimeKind_RUNTIME_KIND_GROK_SSH    RuntimeKind = 7
+	RuntimeKind_RUNTIME_KIND_ANTIGRAVITY RuntimeKind = 8
 )
 
 // Enum value maps for RuntimeKind.
@@ -242,6 +243,7 @@ var (
 		5: "RUNTIME_KIND_CODEX_SSH",
 		6: "RUNTIME_KIND_GROK",
 		7: "RUNTIME_KIND_GROK_SSH",
+		8: "RUNTIME_KIND_ANTIGRAVITY",
 	}
 	RuntimeKind_value = map[string]int32{
 		"RUNTIME_KIND_UNSPECIFIED": 0,
@@ -252,6 +254,7 @@ var (
 		"RUNTIME_KIND_CODEX_SSH":   5,
 		"RUNTIME_KIND_GROK":        6,
 		"RUNTIME_KIND_GROK_SSH":    7,
+		"RUNTIME_KIND_ANTIGRAVITY": 8,
 	}
 )
 
@@ -783,6 +786,7 @@ const (
 	ManagedFile_MANAGED_FILE_CODEX_MAGPIE_CATALOG ManagedFile = 3
 	ManagedFile_MANAGED_FILE_GROK_CONFIG          ManagedFile = 4
 	ManagedFile_MANAGED_FILE_HERMES_CONFIG        ManagedFile = 5
+	ManagedFile_MANAGED_FILE_ANTIGRAVITY_CONFIG   ManagedFile = 6
 )
 
 // Enum value maps for ManagedFile.
@@ -794,6 +798,7 @@ var (
 		3: "MANAGED_FILE_CODEX_MAGPIE_CATALOG",
 		4: "MANAGED_FILE_GROK_CONFIG",
 		5: "MANAGED_FILE_HERMES_CONFIG",
+		6: "MANAGED_FILE_ANTIGRAVITY_CONFIG",
 	}
 	ManagedFile_value = map[string]int32{
 		"MANAGED_FILE_UNSPECIFIED":          0,
@@ -802,6 +807,7 @@ var (
 		"MANAGED_FILE_CODEX_MAGPIE_CATALOG": 3,
 		"MANAGED_FILE_GROK_CONFIG":          4,
 		"MANAGED_FILE_HERMES_CONFIG":        5,
+		"MANAGED_FILE_ANTIGRAVITY_CONFIG":   6,
 	}
 )
 
@@ -3249,6 +3255,82 @@ func (x *GrokCreateOptions) GetNativeOptions() *NativeJson {
 	return nil
 }
 
+type AntigravityCreateOptions struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Cwd             string                 `protobuf:"bytes,1,opt,name=cwd,proto3" json:"cwd,omitempty"`
+	Model           *string                `protobuf:"bytes,2,opt,name=model,proto3,oneof" json:"model,omitempty"`
+	Effort          *string                `protobuf:"bytes,3,opt,name=effort,proto3,oneof" json:"effort,omitempty"`
+	ParentSessionId *string                `protobuf:"bytes,4,opt,name=parent_session_id,json=parentSessionId,proto3,oneof" json:"parent_session_id,omitempty"`
+	TargetMessageId *string                `protobuf:"bytes,5,opt,name=target_message_id,json=targetMessageId,proto3,oneof" json:"target_message_id,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *AntigravityCreateOptions) Reset() {
+	*x = AntigravityCreateOptions{}
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AntigravityCreateOptions) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AntigravityCreateOptions) ProtoMessage() {}
+
+func (x *AntigravityCreateOptions) ProtoReflect() protoreflect.Message {
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AntigravityCreateOptions.ProtoReflect.Descriptor instead.
+func (*AntigravityCreateOptions) Descriptor() ([]byte, []int) {
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *AntigravityCreateOptions) GetCwd() string {
+	if x != nil {
+		return x.Cwd
+	}
+	return ""
+}
+
+func (x *AntigravityCreateOptions) GetModel() string {
+	if x != nil && x.Model != nil {
+		return *x.Model
+	}
+	return ""
+}
+
+func (x *AntigravityCreateOptions) GetEffort() string {
+	if x != nil && x.Effort != nil {
+		return *x.Effort
+	}
+	return ""
+}
+
+func (x *AntigravityCreateOptions) GetParentSessionId() string {
+	if x != nil && x.ParentSessionId != nil {
+		return *x.ParentSessionId
+	}
+	return ""
+}
+
+func (x *AntigravityCreateOptions) GetTargetMessageId() string {
+	if x != nil && x.TargetMessageId != nil {
+		return *x.TargetMessageId
+	}
+	return ""
+}
+
 type CreateSessionRequest struct {
 	state  protoimpl.MessageState `protogen:"open.v1"`
 	Meta   *CommandMeta           `protobuf:"bytes,1,opt,name=meta,proto3" json:"meta,omitempty"`
@@ -3258,6 +3340,7 @@ type CreateSessionRequest struct {
 	//	*CreateSessionRequest_Codex
 	//	*CreateSessionRequest_Hermes
 	//	*CreateSessionRequest_Grok
+	//	*CreateSessionRequest_Antigravity
 	Options       isCreateSessionRequest_Options `protobuf_oneof:"options"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -3265,7 +3348,7 @@ type CreateSessionRequest struct {
 
 func (x *CreateSessionRequest) Reset() {
 	*x = CreateSessionRequest{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[27]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3277,7 +3360,7 @@ func (x *CreateSessionRequest) String() string {
 func (*CreateSessionRequest) ProtoMessage() {}
 
 func (x *CreateSessionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[27]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3290,7 +3373,7 @@ func (x *CreateSessionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateSessionRequest.ProtoReflect.Descriptor instead.
 func (*CreateSessionRequest) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{27}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *CreateSessionRequest) GetMeta() *CommandMeta {
@@ -3341,6 +3424,15 @@ func (x *CreateSessionRequest) GetGrok() *GrokCreateOptions {
 	return nil
 }
 
+func (x *CreateSessionRequest) GetAntigravity() *AntigravityCreateOptions {
+	if x != nil {
+		if x, ok := x.Options.(*CreateSessionRequest_Antigravity); ok {
+			return x.Antigravity
+		}
+	}
+	return nil
+}
+
 type isCreateSessionRequest_Options interface {
 	isCreateSessionRequest_Options()
 }
@@ -3357,11 +3449,17 @@ type CreateSessionRequest_Grok struct {
 	Grok *GrokCreateOptions `protobuf:"bytes,12,opt,name=grok,proto3,oneof"`
 }
 
+type CreateSessionRequest_Antigravity struct {
+	Antigravity *AntigravityCreateOptions `protobuf:"bytes,13,opt,name=antigravity,proto3,oneof"`
+}
+
 func (*CreateSessionRequest_Codex) isCreateSessionRequest_Options() {}
 
 func (*CreateSessionRequest_Hermes) isCreateSessionRequest_Options() {}
 
 func (*CreateSessionRequest_Grok) isCreateSessionRequest_Options() {}
+
+func (*CreateSessionRequest_Antigravity) isCreateSessionRequest_Options() {}
 
 type AttachSessionRequest struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
@@ -3376,7 +3474,7 @@ type AttachSessionRequest struct {
 
 func (x *AttachSessionRequest) Reset() {
 	*x = AttachSessionRequest{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[28]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3388,7 +3486,7 @@ func (x *AttachSessionRequest) String() string {
 func (*AttachSessionRequest) ProtoMessage() {}
 
 func (x *AttachSessionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[28]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3401,7 +3499,7 @@ func (x *AttachSessionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AttachSessionRequest.ProtoReflect.Descriptor instead.
 func (*AttachSessionRequest) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{28}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *AttachSessionRequest) GetSession() *SessionRef {
@@ -3448,7 +3546,7 @@ type TextInput struct {
 
 func (x *TextInput) Reset() {
 	*x = TextInput{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[29]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3460,7 +3558,7 @@ func (x *TextInput) String() string {
 func (*TextInput) ProtoMessage() {}
 
 func (x *TextInput) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[29]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3473,7 +3571,7 @@ func (x *TextInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TextInput.ProtoReflect.Descriptor instead.
 func (*TextInput) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{29}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *TextInput) GetText() string {
@@ -3492,7 +3590,7 @@ type ImageUrlInput struct {
 
 func (x *ImageUrlInput) Reset() {
 	*x = ImageUrlInput{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[30]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3504,7 +3602,7 @@ func (x *ImageUrlInput) String() string {
 func (*ImageUrlInput) ProtoMessage() {}
 
 func (x *ImageUrlInput) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[30]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3517,7 +3615,7 @@ func (x *ImageUrlInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ImageUrlInput.ProtoReflect.Descriptor instead.
 func (*ImageUrlInput) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{30}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *ImageUrlInput) GetUrl() string {
@@ -3536,7 +3634,7 @@ type LocalImageInput struct {
 
 func (x *LocalImageInput) Reset() {
 	*x = LocalImageInput{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[31]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3548,7 +3646,7 @@ func (x *LocalImageInput) String() string {
 func (*LocalImageInput) ProtoMessage() {}
 
 func (x *LocalImageInput) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[31]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3561,7 +3659,7 @@ func (x *LocalImageInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LocalImageInput.ProtoReflect.Descriptor instead.
 func (*LocalImageInput) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{31}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *LocalImageInput) GetPath() string {
@@ -3581,7 +3679,7 @@ type SkillRefInput struct {
 
 func (x *SkillRefInput) Reset() {
 	*x = SkillRefInput{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[32]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3593,7 +3691,7 @@ func (x *SkillRefInput) String() string {
 func (*SkillRefInput) ProtoMessage() {}
 
 func (x *SkillRefInput) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[32]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3606,7 +3704,7 @@ func (x *SkillRefInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SkillRefInput.ProtoReflect.Descriptor instead.
 func (*SkillRefInput) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{32}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *SkillRefInput) GetName() string {
@@ -3633,7 +3731,7 @@ type MentionRefInput struct {
 
 func (x *MentionRefInput) Reset() {
 	*x = MentionRefInput{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[33]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3645,7 +3743,7 @@ func (x *MentionRefInput) String() string {
 func (*MentionRefInput) ProtoMessage() {}
 
 func (x *MentionRefInput) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[33]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3658,7 +3756,7 @@ func (x *MentionRefInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MentionRefInput.ProtoReflect.Descriptor instead.
 func (*MentionRefInput) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{33}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *MentionRefInput) GetName() string {
@@ -3687,7 +3785,7 @@ type AttachmentInput struct {
 
 func (x *AttachmentInput) Reset() {
 	*x = AttachmentInput{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[34]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3699,7 +3797,7 @@ func (x *AttachmentInput) String() string {
 func (*AttachmentInput) ProtoMessage() {}
 
 func (x *AttachmentInput) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[34]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3712,7 +3810,7 @@ func (x *AttachmentInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AttachmentInput.ProtoReflect.Descriptor instead.
 func (*AttachmentInput) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{34}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *AttachmentInput) GetName() string {
@@ -3760,7 +3858,7 @@ type InputPart struct {
 
 func (x *InputPart) Reset() {
 	*x = InputPart{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[35]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3772,7 +3870,7 @@ func (x *InputPart) String() string {
 func (*InputPart) ProtoMessage() {}
 
 func (x *InputPart) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[35]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3785,7 +3883,7 @@ func (x *InputPart) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InputPart.ProtoReflect.Descriptor instead.
 func (*InputPart) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{35}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *InputPart) GetPart() isInputPart_Part {
@@ -3902,7 +4000,7 @@ type SendPolicy struct {
 
 func (x *SendPolicy) Reset() {
 	*x = SendPolicy{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[36]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3914,7 +4012,7 @@ func (x *SendPolicy) String() string {
 func (*SendPolicy) ProtoMessage() {}
 
 func (x *SendPolicy) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[36]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3927,7 +4025,7 @@ func (x *SendPolicy) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SendPolicy.ProtoReflect.Descriptor instead.
 func (*SendPolicy) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{36}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *SendPolicy) GetModel() string {
@@ -3977,7 +4075,7 @@ type SendRequest struct {
 
 func (x *SendRequest) Reset() {
 	*x = SendRequest{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[37]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3989,7 +4087,7 @@ func (x *SendRequest) String() string {
 func (*SendRequest) ProtoMessage() {}
 
 func (x *SendRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[37]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4002,7 +4100,7 @@ func (x *SendRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SendRequest.ProtoReflect.Descriptor instead.
 func (*SendRequest) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{37}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *SendRequest) GetMeta() *CommandMeta {
@@ -4045,7 +4143,7 @@ type SteerRequest struct {
 
 func (x *SteerRequest) Reset() {
 	*x = SteerRequest{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[38]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4057,7 +4155,7 @@ func (x *SteerRequest) String() string {
 func (*SteerRequest) ProtoMessage() {}
 
 func (x *SteerRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[38]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4070,7 +4168,7 @@ func (x *SteerRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SteerRequest.ProtoReflect.Descriptor instead.
 func (*SteerRequest) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{38}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *SteerRequest) GetMeta() *CommandMeta {
@@ -4116,7 +4214,7 @@ type ReviewTarget struct {
 
 func (x *ReviewTarget) Reset() {
 	*x = ReviewTarget{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[39]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4128,7 +4226,7 @@ func (x *ReviewTarget) String() string {
 func (*ReviewTarget) ProtoMessage() {}
 
 func (x *ReviewTarget) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[39]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4141,7 +4239,7 @@ func (x *ReviewTarget) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReviewTarget.ProtoReflect.Descriptor instead.
 func (*ReviewTarget) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{39}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *ReviewTarget) GetTarget() isReviewTarget_Target {
@@ -4229,7 +4327,7 @@ type StartReviewRequest struct {
 
 func (x *StartReviewRequest) Reset() {
 	*x = StartReviewRequest{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[40]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4241,7 +4339,7 @@ func (x *StartReviewRequest) String() string {
 func (*StartReviewRequest) ProtoMessage() {}
 
 func (x *StartReviewRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[40]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4254,7 +4352,7 @@ func (x *StartReviewRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartReviewRequest.ProtoReflect.Descriptor instead.
 func (*StartReviewRequest) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{40}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *StartReviewRequest) GetMeta() *CommandMeta {
@@ -4311,7 +4409,7 @@ type CompactRequest struct {
 
 func (x *CompactRequest) Reset() {
 	*x = CompactRequest{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[41]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4323,7 +4421,7 @@ func (x *CompactRequest) String() string {
 func (*CompactRequest) ProtoMessage() {}
 
 func (x *CompactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[41]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4336,7 +4434,7 @@ func (x *CompactRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CompactRequest.ProtoReflect.Descriptor instead.
 func (*CompactRequest) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{41}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *CompactRequest) GetMeta() *CommandMeta {
@@ -4378,7 +4476,7 @@ type InterruptRequest struct {
 
 func (x *InterruptRequest) Reset() {
 	*x = InterruptRequest{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[42]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4390,7 +4488,7 @@ func (x *InterruptRequest) String() string {
 func (*InterruptRequest) ProtoMessage() {}
 
 func (x *InterruptRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[42]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4403,7 +4501,7 @@ func (x *InterruptRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InterruptRequest.ProtoReflect.Descriptor instead.
 func (*InterruptRequest) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{42}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *InterruptRequest) GetMeta() *CommandMeta {
@@ -4438,7 +4536,7 @@ type PermissionGrant struct {
 
 func (x *PermissionGrant) Reset() {
 	*x = PermissionGrant{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[43]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4450,7 +4548,7 @@ func (x *PermissionGrant) String() string {
 func (*PermissionGrant) ProtoMessage() {}
 
 func (x *PermissionGrant) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[43]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4463,7 +4561,7 @@ func (x *PermissionGrant) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PermissionGrant.ProtoReflect.Descriptor instead.
 func (*PermissionGrant) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{43}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *PermissionGrant) GetName() string {
@@ -4502,7 +4600,7 @@ type RespondApprovalRequest struct {
 
 func (x *RespondApprovalRequest) Reset() {
 	*x = RespondApprovalRequest{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[44]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4514,7 +4612,7 @@ func (x *RespondApprovalRequest) String() string {
 func (*RespondApprovalRequest) ProtoMessage() {}
 
 func (x *RespondApprovalRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[44]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4527,7 +4625,7 @@ func (x *RespondApprovalRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RespondApprovalRequest.ProtoReflect.Descriptor instead.
 func (*RespondApprovalRequest) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{44}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *RespondApprovalRequest) GetMeta() *CommandMeta {
@@ -4585,7 +4683,7 @@ type UpdateSettingsRequest struct {
 
 func (x *UpdateSettingsRequest) Reset() {
 	*x = UpdateSettingsRequest{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[45]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4597,7 +4695,7 @@ func (x *UpdateSettingsRequest) String() string {
 func (*UpdateSettingsRequest) ProtoMessage() {}
 
 func (x *UpdateSettingsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[45]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4610,7 +4708,7 @@ func (x *UpdateSettingsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateSettingsRequest.ProtoReflect.Descriptor instead.
 func (*UpdateSettingsRequest) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{45}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *UpdateSettingsRequest) GetMeta() *CommandMeta {
@@ -4659,7 +4757,7 @@ type RenameSessionRequest struct {
 
 func (x *RenameSessionRequest) Reset() {
 	*x = RenameSessionRequest{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[46]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4671,7 +4769,7 @@ func (x *RenameSessionRequest) String() string {
 func (*RenameSessionRequest) ProtoMessage() {}
 
 func (x *RenameSessionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[46]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4684,7 +4782,7 @@ func (x *RenameSessionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RenameSessionRequest.ProtoReflect.Descriptor instead.
 func (*RenameSessionRequest) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{46}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *RenameSessionRequest) GetMeta() *CommandMeta {
@@ -4718,7 +4816,7 @@ type DeleteSessionRequest struct {
 
 func (x *DeleteSessionRequest) Reset() {
 	*x = DeleteSessionRequest{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[47]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4730,7 +4828,7 @@ func (x *DeleteSessionRequest) String() string {
 func (*DeleteSessionRequest) ProtoMessage() {}
 
 func (x *DeleteSessionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[47]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4743,7 +4841,7 @@ func (x *DeleteSessionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteSessionRequest.ProtoReflect.Descriptor instead.
 func (*DeleteSessionRequest) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{47}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *DeleteSessionRequest) GetMeta() *CommandMeta {
@@ -4770,7 +4868,7 @@ type CloseSessionRequest struct {
 
 func (x *CloseSessionRequest) Reset() {
 	*x = CloseSessionRequest{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[48]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4782,7 +4880,7 @@ func (x *CloseSessionRequest) String() string {
 func (*CloseSessionRequest) ProtoMessage() {}
 
 func (x *CloseSessionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[48]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4795,7 +4893,7 @@ func (x *CloseSessionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CloseSessionRequest.ProtoReflect.Descriptor instead.
 func (*CloseSessionRequest) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{48}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *CloseSessionRequest) GetMeta() *CommandMeta {
@@ -4823,7 +4921,7 @@ type DetachSessionRequest struct {
 
 func (x *DetachSessionRequest) Reset() {
 	*x = DetachSessionRequest{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[49]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4835,7 +4933,7 @@ func (x *DetachSessionRequest) String() string {
 func (*DetachSessionRequest) ProtoMessage() {}
 
 func (x *DetachSessionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[49]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4848,7 +4946,7 @@ func (x *DetachSessionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachSessionRequest.ProtoReflect.Descriptor instead.
 func (*DetachSessionRequest) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{49}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *DetachSessionRequest) GetMeta() *CommandMeta {
@@ -4886,7 +4984,7 @@ type ReportObservedStatusRequest struct {
 
 func (x *ReportObservedStatusRequest) Reset() {
 	*x = ReportObservedStatusRequest{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[50]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[51]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4898,7 +4996,7 @@ func (x *ReportObservedStatusRequest) String() string {
 func (*ReportObservedStatusRequest) ProtoMessage() {}
 
 func (x *ReportObservedStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[50]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[51]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4911,7 +5009,7 @@ func (x *ReportObservedStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportObservedStatusRequest.ProtoReflect.Descriptor instead.
 func (*ReportObservedStatusRequest) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{50}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{51}
 }
 
 func (x *ReportObservedStatusRequest) GetSession() *SessionRef {
@@ -4951,7 +5049,7 @@ type DesktopTextInput struct {
 
 func (x *DesktopTextInput) Reset() {
 	*x = DesktopTextInput{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[51]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[52]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4963,7 +5061,7 @@ func (x *DesktopTextInput) String() string {
 func (*DesktopTextInput) ProtoMessage() {}
 
 func (x *DesktopTextInput) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[51]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[52]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4976,7 +5074,7 @@ func (x *DesktopTextInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopTextInput.ProtoReflect.Descriptor instead.
 func (*DesktopTextInput) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{51}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{52}
 }
 
 func (x *DesktopTextInput) GetText() string {
@@ -4995,7 +5093,7 @@ type DesktopImageInput struct {
 
 func (x *DesktopImageInput) Reset() {
 	*x = DesktopImageInput{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[52]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[53]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5007,7 +5105,7 @@ func (x *DesktopImageInput) String() string {
 func (*DesktopImageInput) ProtoMessage() {}
 
 func (x *DesktopImageInput) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[52]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[53]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5020,7 +5118,7 @@ func (x *DesktopImageInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopImageInput.ProtoReflect.Descriptor instead.
 func (*DesktopImageInput) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{52}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{53}
 }
 
 func (x *DesktopImageInput) GetUrl() string {
@@ -5043,7 +5141,7 @@ type DesktopInputPart struct {
 
 func (x *DesktopInputPart) Reset() {
 	*x = DesktopInputPart{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[53]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[54]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5055,7 +5153,7 @@ func (x *DesktopInputPart) String() string {
 func (*DesktopInputPart) ProtoMessage() {}
 
 func (x *DesktopInputPart) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[53]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[54]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5068,7 +5166,7 @@ func (x *DesktopInputPart) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopInputPart.ProtoReflect.Descriptor instead.
 func (*DesktopInputPart) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{53}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{54}
 }
 
 func (x *DesktopInputPart) GetPart() isDesktopInputPart_Part {
@@ -5123,7 +5221,7 @@ type SubmitDesktopRequest struct {
 
 func (x *SubmitDesktopRequest) Reset() {
 	*x = SubmitDesktopRequest{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[54]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[55]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5135,7 +5233,7 @@ func (x *SubmitDesktopRequest) String() string {
 func (*SubmitDesktopRequest) ProtoMessage() {}
 
 func (x *SubmitDesktopRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[54]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[55]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5148,7 +5246,7 @@ func (x *SubmitDesktopRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitDesktopRequest.ProtoReflect.Descriptor instead.
 func (*SubmitDesktopRequest) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{54}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{55}
 }
 
 func (x *SubmitDesktopRequest) GetMeta() *CommandMeta {
@@ -5186,7 +5284,7 @@ type UpdateDesktopSettingsRequest struct {
 
 func (x *UpdateDesktopSettingsRequest) Reset() {
 	*x = UpdateDesktopSettingsRequest{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[55]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[56]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5198,7 +5296,7 @@ func (x *UpdateDesktopSettingsRequest) String() string {
 func (*UpdateDesktopSettingsRequest) ProtoMessage() {}
 
 func (x *UpdateDesktopSettingsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[55]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[56]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5211,7 +5309,7 @@ func (x *UpdateDesktopSettingsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateDesktopSettingsRequest.ProtoReflect.Descriptor instead.
 func (*UpdateDesktopSettingsRequest) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{55}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{56}
 }
 
 func (x *UpdateDesktopSettingsRequest) GetMeta() *CommandMeta {
@@ -5265,7 +5363,7 @@ type EmptyNativeQuery struct {
 
 func (x *EmptyNativeQuery) Reset() {
 	*x = EmptyNativeQuery{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[56]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[57]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5277,7 +5375,7 @@ func (x *EmptyNativeQuery) String() string {
 func (*EmptyNativeQuery) ProtoMessage() {}
 
 func (x *EmptyNativeQuery) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[56]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[57]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5290,7 +5388,7 @@ func (x *EmptyNativeQuery) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EmptyNativeQuery.ProtoReflect.Descriptor instead.
 func (*EmptyNativeQuery) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{56}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{57}
 }
 
 func (x *EmptyNativeQuery) GetOptions() *NativeJson {
@@ -5309,7 +5407,7 @@ type CodexInitializeQuery struct {
 
 func (x *CodexInitializeQuery) Reset() {
 	*x = CodexInitializeQuery{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[57]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[58]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5321,7 +5419,7 @@ func (x *CodexInitializeQuery) String() string {
 func (*CodexInitializeQuery) ProtoMessage() {}
 
 func (x *CodexInitializeQuery) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[57]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[58]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5334,7 +5432,7 @@ func (x *CodexInitializeQuery) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CodexInitializeQuery.ProtoReflect.Descriptor instead.
 func (*CodexInitializeQuery) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{57}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{58}
 }
 
 func (x *CodexInitializeQuery) GetOptions() *NativeJson {
@@ -5353,7 +5451,7 @@ type CodexAccountReadQuery struct {
 
 func (x *CodexAccountReadQuery) Reset() {
 	*x = CodexAccountReadQuery{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[58]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[59]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5365,7 +5463,7 @@ func (x *CodexAccountReadQuery) String() string {
 func (*CodexAccountReadQuery) ProtoMessage() {}
 
 func (x *CodexAccountReadQuery) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[58]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[59]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5378,7 +5476,7 @@ func (x *CodexAccountReadQuery) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CodexAccountReadQuery.ProtoReflect.Descriptor instead.
 func (*CodexAccountReadQuery) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{58}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{59}
 }
 
 func (x *CodexAccountReadQuery) GetOptions() *NativeJson {
@@ -5397,7 +5495,7 @@ type CodexHooksListQuery struct {
 
 func (x *CodexHooksListQuery) Reset() {
 	*x = CodexHooksListQuery{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[59]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[60]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5409,7 +5507,7 @@ func (x *CodexHooksListQuery) String() string {
 func (*CodexHooksListQuery) ProtoMessage() {}
 
 func (x *CodexHooksListQuery) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[59]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[60]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5422,7 +5520,7 @@ func (x *CodexHooksListQuery) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CodexHooksListQuery.ProtoReflect.Descriptor instead.
 func (*CodexHooksListQuery) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{59}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{60}
 }
 
 func (x *CodexHooksListQuery) GetOptions() *NativeJson {
@@ -5444,7 +5542,7 @@ type CodexModelListQuery struct {
 
 func (x *CodexModelListQuery) Reset() {
 	*x = CodexModelListQuery{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[60]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[61]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5456,7 +5554,7 @@ func (x *CodexModelListQuery) String() string {
 func (*CodexModelListQuery) ProtoMessage() {}
 
 func (x *CodexModelListQuery) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[60]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[61]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5469,7 +5567,7 @@ func (x *CodexModelListQuery) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CodexModelListQuery.ProtoReflect.Descriptor instead.
 func (*CodexModelListQuery) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{60}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{61}
 }
 
 func (x *CodexModelListQuery) GetLimit() uint32 {
@@ -5510,7 +5608,7 @@ type CodexSkillsListQuery struct {
 
 func (x *CodexSkillsListQuery) Reset() {
 	*x = CodexSkillsListQuery{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[61]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[62]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5522,7 +5620,7 @@ func (x *CodexSkillsListQuery) String() string {
 func (*CodexSkillsListQuery) ProtoMessage() {}
 
 func (x *CodexSkillsListQuery) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[61]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[62]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5535,7 +5633,7 @@ func (x *CodexSkillsListQuery) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CodexSkillsListQuery.ProtoReflect.Descriptor instead.
 func (*CodexSkillsListQuery) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{61}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{62}
 }
 
 func (x *CodexSkillsListQuery) GetCwds() []string {
@@ -5565,7 +5663,7 @@ type CodexThreadItemsListQuery struct {
 
 func (x *CodexThreadItemsListQuery) Reset() {
 	*x = CodexThreadItemsListQuery{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[62]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[63]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5577,7 +5675,7 @@ func (x *CodexThreadItemsListQuery) String() string {
 func (*CodexThreadItemsListQuery) ProtoMessage() {}
 
 func (x *CodexThreadItemsListQuery) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[62]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[63]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5590,7 +5688,7 @@ func (x *CodexThreadItemsListQuery) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CodexThreadItemsListQuery.ProtoReflect.Descriptor instead.
 func (*CodexThreadItemsListQuery) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{62}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{63}
 }
 
 func (x *CodexThreadItemsListQuery) GetThreadId() string {
@@ -5641,7 +5739,7 @@ type CodexThreadListQuery struct {
 
 func (x *CodexThreadListQuery) Reset() {
 	*x = CodexThreadListQuery{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[63]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[64]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5653,7 +5751,7 @@ func (x *CodexThreadListQuery) String() string {
 func (*CodexThreadListQuery) ProtoMessage() {}
 
 func (x *CodexThreadListQuery) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[63]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[64]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5666,7 +5764,7 @@ func (x *CodexThreadListQuery) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CodexThreadListQuery.ProtoReflect.Descriptor instead.
 func (*CodexThreadListQuery) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{63}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{64}
 }
 
 func (x *CodexThreadListQuery) GetLimit() uint32 {
@@ -5713,7 +5811,7 @@ type CodexThreadLoadedListQuery struct {
 
 func (x *CodexThreadLoadedListQuery) Reset() {
 	*x = CodexThreadLoadedListQuery{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[64]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[65]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5725,7 +5823,7 @@ func (x *CodexThreadLoadedListQuery) String() string {
 func (*CodexThreadLoadedListQuery) ProtoMessage() {}
 
 func (x *CodexThreadLoadedListQuery) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[64]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[65]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5738,7 +5836,7 @@ func (x *CodexThreadLoadedListQuery) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CodexThreadLoadedListQuery.ProtoReflect.Descriptor instead.
 func (*CodexThreadLoadedListQuery) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{64}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{65}
 }
 
 func (x *CodexThreadLoadedListQuery) GetOptions() *NativeJson {
@@ -5759,7 +5857,7 @@ type CodexThreadReadQuery struct {
 
 func (x *CodexThreadReadQuery) Reset() {
 	*x = CodexThreadReadQuery{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[65]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[66]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5771,7 +5869,7 @@ func (x *CodexThreadReadQuery) String() string {
 func (*CodexThreadReadQuery) ProtoMessage() {}
 
 func (x *CodexThreadReadQuery) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[65]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[66]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5784,7 +5882,7 @@ func (x *CodexThreadReadQuery) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CodexThreadReadQuery.ProtoReflect.Descriptor instead.
 func (*CodexThreadReadQuery) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{65}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{66}
 }
 
 func (x *CodexThreadReadQuery) GetThreadId() string {
@@ -5820,7 +5918,7 @@ type HermesSessionListQuery struct {
 
 func (x *HermesSessionListQuery) Reset() {
 	*x = HermesSessionListQuery{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[66]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[67]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5832,7 +5930,7 @@ func (x *HermesSessionListQuery) String() string {
 func (*HermesSessionListQuery) ProtoMessage() {}
 
 func (x *HermesSessionListQuery) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[66]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[67]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5845,7 +5943,7 @@ func (x *HermesSessionListQuery) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HermesSessionListQuery.ProtoReflect.Descriptor instead.
 func (*HermesSessionListQuery) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{66}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{67}
 }
 
 func (x *HermesSessionListQuery) GetOffset() uint32 {
@@ -5885,7 +5983,7 @@ type HermesActiveListQuery struct {
 
 func (x *HermesActiveListQuery) Reset() {
 	*x = HermesActiveListQuery{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[67]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[68]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5897,7 +5995,7 @@ func (x *HermesActiveListQuery) String() string {
 func (*HermesActiveListQuery) ProtoMessage() {}
 
 func (x *HermesActiveListQuery) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[67]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[68]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5910,7 +6008,7 @@ func (x *HermesActiveListQuery) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HermesActiveListQuery.ProtoReflect.Descriptor instead.
 func (*HermesActiveListQuery) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{67}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{68}
 }
 
 func (x *HermesActiveListQuery) GetOptions() *NativeJson {
@@ -5929,7 +6027,7 @@ type HermesProjectsTreeQuery struct {
 
 func (x *HermesProjectsTreeQuery) Reset() {
 	*x = HermesProjectsTreeQuery{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[68]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[69]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5941,7 +6039,7 @@ func (x *HermesProjectsTreeQuery) String() string {
 func (*HermesProjectsTreeQuery) ProtoMessage() {}
 
 func (x *HermesProjectsTreeQuery) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[68]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[69]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5954,7 +6052,7 @@ func (x *HermesProjectsTreeQuery) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HermesProjectsTreeQuery.ProtoReflect.Descriptor instead.
 func (*HermesProjectsTreeQuery) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{68}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{69}
 }
 
 func (x *HermesProjectsTreeQuery) GetOptions() *NativeJson {
@@ -5975,7 +6073,7 @@ type HermesProjectSessionsQuery struct {
 
 func (x *HermesProjectSessionsQuery) Reset() {
 	*x = HermesProjectSessionsQuery{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[69]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[70]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5987,7 +6085,7 @@ func (x *HermesProjectSessionsQuery) String() string {
 func (*HermesProjectSessionsQuery) ProtoMessage() {}
 
 func (x *HermesProjectSessionsQuery) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[69]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[70]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6000,7 +6098,7 @@ func (x *HermesProjectSessionsQuery) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HermesProjectSessionsQuery.ProtoReflect.Descriptor instead.
 func (*HermesProjectSessionsQuery) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{69}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{70}
 }
 
 func (x *HermesProjectSessionsQuery) GetProjectId() string {
@@ -6036,7 +6134,7 @@ type HermesSessionHistoryQuery struct {
 
 func (x *HermesSessionHistoryQuery) Reset() {
 	*x = HermesSessionHistoryQuery{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[70]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[71]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6048,7 +6146,7 @@ func (x *HermesSessionHistoryQuery) String() string {
 func (*HermesSessionHistoryQuery) ProtoMessage() {}
 
 func (x *HermesSessionHistoryQuery) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[70]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[71]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6061,7 +6159,7 @@ func (x *HermesSessionHistoryQuery) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HermesSessionHistoryQuery.ProtoReflect.Descriptor instead.
 func (*HermesSessionHistoryQuery) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{70}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{71}
 }
 
 func (x *HermesSessionHistoryQuery) GetSessionId() string {
@@ -6101,7 +6199,7 @@ type HermesModelsListQuery struct {
 
 func (x *HermesModelsListQuery) Reset() {
 	*x = HermesModelsListQuery{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[71]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[72]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6113,7 +6211,7 @@ func (x *HermesModelsListQuery) String() string {
 func (*HermesModelsListQuery) ProtoMessage() {}
 
 func (x *HermesModelsListQuery) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[71]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[72]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6126,7 +6224,7 @@ func (x *HermesModelsListQuery) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HermesModelsListQuery.ProtoReflect.Descriptor instead.
 func (*HermesModelsListQuery) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{71}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{72}
 }
 
 func (x *HermesModelsListQuery) GetOptions() *NativeJson {
@@ -6145,7 +6243,7 @@ type HermesCommandsListQuery struct {
 
 func (x *HermesCommandsListQuery) Reset() {
 	*x = HermesCommandsListQuery{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[72]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[73]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6157,7 +6255,7 @@ func (x *HermesCommandsListQuery) String() string {
 func (*HermesCommandsListQuery) ProtoMessage() {}
 
 func (x *HermesCommandsListQuery) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[72]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[73]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6170,7 +6268,7 @@ func (x *HermesCommandsListQuery) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HermesCommandsListQuery.ProtoReflect.Descriptor instead.
 func (*HermesCommandsListQuery) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{72}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{73}
 }
 
 func (x *HermesCommandsListQuery) GetOptions() *NativeJson {
@@ -6189,7 +6287,7 @@ type GrokInitializeQuery struct {
 
 func (x *GrokInitializeQuery) Reset() {
 	*x = GrokInitializeQuery{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[73]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[74]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6201,7 +6299,7 @@ func (x *GrokInitializeQuery) String() string {
 func (*GrokInitializeQuery) ProtoMessage() {}
 
 func (x *GrokInitializeQuery) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[73]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[74]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6214,7 +6312,7 @@ func (x *GrokInitializeQuery) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GrokInitializeQuery.ProtoReflect.Descriptor instead.
 func (*GrokInitializeQuery) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{73}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{74}
 }
 
 func (x *GrokInitializeQuery) GetOptions() *NativeJson {
@@ -6234,7 +6332,7 @@ type GrokSessionListQuery struct {
 
 func (x *GrokSessionListQuery) Reset() {
 	*x = GrokSessionListQuery{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[74]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[75]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6246,7 +6344,7 @@ func (x *GrokSessionListQuery) String() string {
 func (*GrokSessionListQuery) ProtoMessage() {}
 
 func (x *GrokSessionListQuery) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[74]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[75]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6259,7 +6357,7 @@ func (x *GrokSessionListQuery) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GrokSessionListQuery.ProtoReflect.Descriptor instead.
 func (*GrokSessionListQuery) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{74}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{75}
 }
 
 func (x *GrokSessionListQuery) GetCwd() string {
@@ -6274,6 +6372,78 @@ func (x *GrokSessionListQuery) GetCursor() string {
 		return *x.Cursor
 	}
 	return ""
+}
+
+type AntigravitySessionListQuery struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AntigravitySessionListQuery) Reset() {
+	*x = AntigravitySessionListQuery{}
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[76]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AntigravitySessionListQuery) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AntigravitySessionListQuery) ProtoMessage() {}
+
+func (x *AntigravitySessionListQuery) ProtoReflect() protoreflect.Message {
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[76]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AntigravitySessionListQuery.ProtoReflect.Descriptor instead.
+func (*AntigravitySessionListQuery) Descriptor() ([]byte, []int) {
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{76}
+}
+
+type AntigravityModelsListQuery struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AntigravityModelsListQuery) Reset() {
+	*x = AntigravityModelsListQuery{}
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[77]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AntigravityModelsListQuery) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AntigravityModelsListQuery) ProtoMessage() {}
+
+func (x *AntigravityModelsListQuery) ProtoReflect() protoreflect.Message {
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[77]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AntigravityModelsListQuery.ProtoReflect.Descriptor instead.
+func (*AntigravityModelsListQuery) Descriptor() ([]byte, []int) {
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{77}
 }
 
 type NativeQueryRequest struct {
@@ -6303,6 +6473,8 @@ type NativeQueryRequest struct {
 	//	*NativeQueryRequest_HermesCommandsList
 	//	*NativeQueryRequest_GrokInitialize
 	//	*NativeQueryRequest_GrokSessionList
+	//	*NativeQueryRequest_AntigravitySessionList
+	//	*NativeQueryRequest_AntigravityModelsList
 	Query         isNativeQueryRequest_Query `protobuf_oneof:"query"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -6310,7 +6482,7 @@ type NativeQueryRequest struct {
 
 func (x *NativeQueryRequest) Reset() {
 	*x = NativeQueryRequest{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[75]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[78]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6322,7 +6494,7 @@ func (x *NativeQueryRequest) String() string {
 func (*NativeQueryRequest) ProtoMessage() {}
 
 func (x *NativeQueryRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[75]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[78]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6335,7 +6507,7 @@ func (x *NativeQueryRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NativeQueryRequest.ProtoReflect.Descriptor instead.
 func (*NativeQueryRequest) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{75}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{78}
 }
 
 func (x *NativeQueryRequest) GetTarget() *RuntimeTarget {
@@ -6535,6 +6707,24 @@ func (x *NativeQueryRequest) GetGrokSessionList() *GrokSessionListQuery {
 	return nil
 }
 
+func (x *NativeQueryRequest) GetAntigravitySessionList() *AntigravitySessionListQuery {
+	if x != nil {
+		if x, ok := x.Query.(*NativeQueryRequest_AntigravitySessionList); ok {
+			return x.AntigravitySessionList
+		}
+	}
+	return nil
+}
+
+func (x *NativeQueryRequest) GetAntigravityModelsList() *AntigravityModelsListQuery {
+	if x != nil {
+		if x, ok := x.Query.(*NativeQueryRequest_AntigravityModelsList); ok {
+			return x.AntigravityModelsList
+		}
+	}
+	return nil
+}
+
 type isNativeQueryRequest_Query interface {
 	isNativeQueryRequest_Query()
 }
@@ -6611,6 +6801,14 @@ type NativeQueryRequest_GrokSessionList struct {
 	GrokSessionList *GrokSessionListQuery `protobuf:"bytes,51,opt,name=grok_session_list,json=grokSessionList,proto3,oneof"`
 }
 
+type NativeQueryRequest_AntigravitySessionList struct {
+	AntigravitySessionList *AntigravitySessionListQuery `protobuf:"bytes,60,opt,name=antigravity_session_list,json=antigravitySessionList,proto3,oneof"`
+}
+
+type NativeQueryRequest_AntigravityModelsList struct {
+	AntigravityModelsList *AntigravityModelsListQuery `protobuf:"bytes,61,opt,name=antigravity_models_list,json=antigravityModelsList,proto3,oneof"`
+}
+
 func (*NativeQueryRequest_CodexInitialize) isNativeQueryRequest_Query() {}
 
 func (*NativeQueryRequest_CodexAccountRead) isNativeQueryRequest_Query() {}
@@ -6647,6 +6845,10 @@ func (*NativeQueryRequest_GrokInitialize) isNativeQueryRequest_Query() {}
 
 func (*NativeQueryRequest_GrokSessionList) isNativeQueryRequest_Query() {}
 
+func (*NativeQueryRequest_AntigravitySessionList) isNativeQueryRequest_Query() {}
+
+func (*NativeQueryRequest_AntigravityModelsList) isNativeQueryRequest_Query() {}
+
 type NativeQueryResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Target        *RuntimeTarget         `protobuf:"bytes,1,opt,name=target,proto3" json:"target,omitempty"`
@@ -6657,7 +6859,7 @@ type NativeQueryResponse struct {
 
 func (x *NativeQueryResponse) Reset() {
 	*x = NativeQueryResponse{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[76]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[79]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6669,7 +6871,7 @@ func (x *NativeQueryResponse) String() string {
 func (*NativeQueryResponse) ProtoMessage() {}
 
 func (x *NativeQueryResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[76]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[79]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6682,7 +6884,7 @@ func (x *NativeQueryResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NativeQueryResponse.ProtoReflect.Descriptor instead.
 func (*NativeQueryResponse) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{76}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{79}
 }
 
 func (x *NativeQueryResponse) GetTarget() *RuntimeTarget {
@@ -6710,7 +6912,7 @@ type HistoryPageRequest struct {
 
 func (x *HistoryPageRequest) Reset() {
 	*x = HistoryPageRequest{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[77]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[80]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6722,7 +6924,7 @@ func (x *HistoryPageRequest) String() string {
 func (*HistoryPageRequest) ProtoMessage() {}
 
 func (x *HistoryPageRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[77]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[80]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6735,7 +6937,7 @@ func (x *HistoryPageRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HistoryPageRequest.ProtoReflect.Descriptor instead.
 func (*HistoryPageRequest) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{77}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{80}
 }
 
 func (x *HistoryPageRequest) GetSession() *SessionRef {
@@ -6772,7 +6974,7 @@ type HistoryPageResponse struct {
 
 func (x *HistoryPageResponse) Reset() {
 	*x = HistoryPageResponse{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[78]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[81]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6784,7 +6986,7 @@ func (x *HistoryPageResponse) String() string {
 func (*HistoryPageResponse) ProtoMessage() {}
 
 func (x *HistoryPageResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[78]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[81]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6797,7 +6999,7 @@ func (x *HistoryPageResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HistoryPageResponse.ProtoReflect.Descriptor instead.
 func (*HistoryPageResponse) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{78}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{81}
 }
 
 func (x *HistoryPageResponse) GetSession() *SessionRef {
@@ -6844,7 +7046,7 @@ type ListBackgroundProcessesRequest struct {
 
 func (x *ListBackgroundProcessesRequest) Reset() {
 	*x = ListBackgroundProcessesRequest{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[79]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[82]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6856,7 +7058,7 @@ func (x *ListBackgroundProcessesRequest) String() string {
 func (*ListBackgroundProcessesRequest) ProtoMessage() {}
 
 func (x *ListBackgroundProcessesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[79]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[82]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6869,7 +7071,7 @@ func (x *ListBackgroundProcessesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListBackgroundProcessesRequest.ProtoReflect.Descriptor instead.
 func (*ListBackgroundProcessesRequest) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{79}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{82}
 }
 
 func (x *ListBackgroundProcessesRequest) GetSession() *SessionRef {
@@ -6888,7 +7090,7 @@ type ListBackgroundProcessesResponse struct {
 
 func (x *ListBackgroundProcessesResponse) Reset() {
 	*x = ListBackgroundProcessesResponse{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[80]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[83]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6900,7 +7102,7 @@ func (x *ListBackgroundProcessesResponse) String() string {
 func (*ListBackgroundProcessesResponse) ProtoMessage() {}
 
 func (x *ListBackgroundProcessesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[80]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[83]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6913,7 +7115,7 @@ func (x *ListBackgroundProcessesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListBackgroundProcessesResponse.ProtoReflect.Descriptor instead.
 func (*ListBackgroundProcessesResponse) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{80}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{83}
 }
 
 func (x *ListBackgroundProcessesResponse) GetProcesses() []*NativeJson {
@@ -6932,7 +7134,7 @@ type ListModelsRequest struct {
 
 func (x *ListModelsRequest) Reset() {
 	*x = ListModelsRequest{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[81]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[84]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6944,7 +7146,7 @@ func (x *ListModelsRequest) String() string {
 func (*ListModelsRequest) ProtoMessage() {}
 
 func (x *ListModelsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[81]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[84]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6957,7 +7159,7 @@ func (x *ListModelsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListModelsRequest.ProtoReflect.Descriptor instead.
 func (*ListModelsRequest) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{81}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{84}
 }
 
 func (x *ListModelsRequest) GetSession() *SessionRef {
@@ -6980,7 +7182,7 @@ type ModelOption struct {
 
 func (x *ModelOption) Reset() {
 	*x = ModelOption{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[82]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[85]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6992,7 +7194,7 @@ func (x *ModelOption) String() string {
 func (*ModelOption) ProtoMessage() {}
 
 func (x *ModelOption) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[82]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[85]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7005,7 +7207,7 @@ func (x *ModelOption) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelOption.ProtoReflect.Descriptor instead.
 func (*ModelOption) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{82}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{85}
 }
 
 func (x *ModelOption) GetProvider() string {
@@ -7052,7 +7254,7 @@ type ListModelsResponse struct {
 
 func (x *ListModelsResponse) Reset() {
 	*x = ListModelsResponse{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[83]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[86]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7064,7 +7266,7 @@ func (x *ListModelsResponse) String() string {
 func (*ListModelsResponse) ProtoMessage() {}
 
 func (x *ListModelsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[83]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[86]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7077,7 +7279,7 @@ func (x *ListModelsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListModelsResponse.ProtoReflect.Descriptor instead.
 func (*ListModelsResponse) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{83}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{86}
 }
 
 func (x *ListModelsResponse) GetItems() []*ModelOption {
@@ -7096,7 +7298,7 @@ type ListCommandsRequest struct {
 
 func (x *ListCommandsRequest) Reset() {
 	*x = ListCommandsRequest{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[84]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[87]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7108,7 +7310,7 @@ func (x *ListCommandsRequest) String() string {
 func (*ListCommandsRequest) ProtoMessage() {}
 
 func (x *ListCommandsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[84]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[87]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7121,7 +7323,7 @@ func (x *ListCommandsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListCommandsRequest.ProtoReflect.Descriptor instead.
 func (*ListCommandsRequest) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{84}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{87}
 }
 
 func (x *ListCommandsRequest) GetSession() *SessionRef {
@@ -7143,7 +7345,7 @@ type CommandOption struct {
 
 func (x *CommandOption) Reset() {
 	*x = CommandOption{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[85]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[88]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7155,7 +7357,7 @@ func (x *CommandOption) String() string {
 func (*CommandOption) ProtoMessage() {}
 
 func (x *CommandOption) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[85]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[88]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7168,7 +7370,7 @@ func (x *CommandOption) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommandOption.ProtoReflect.Descriptor instead.
 func (*CommandOption) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{85}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{88}
 }
 
 func (x *CommandOption) GetName() string {
@@ -7208,7 +7410,7 @@ type ListCommandsResponse struct {
 
 func (x *ListCommandsResponse) Reset() {
 	*x = ListCommandsResponse{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[86]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[89]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7220,7 +7422,7 @@ func (x *ListCommandsResponse) String() string {
 func (*ListCommandsResponse) ProtoMessage() {}
 
 func (x *ListCommandsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[86]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[89]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7233,7 +7435,7 @@ func (x *ListCommandsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListCommandsResponse.ProtoReflect.Descriptor instead.
 func (*ListCommandsResponse) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{86}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{89}
 }
 
 func (x *ListCommandsResponse) GetItems() []*CommandOption {
@@ -7252,7 +7454,7 @@ type ReadModelRequest struct {
 
 func (x *ReadModelRequest) Reset() {
 	*x = ReadModelRequest{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[87]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[90]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7264,7 +7466,7 @@ func (x *ReadModelRequest) String() string {
 func (*ReadModelRequest) ProtoMessage() {}
 
 func (x *ReadModelRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[87]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[90]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7277,7 +7479,7 @@ func (x *ReadModelRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReadModelRequest.ProtoReflect.Descriptor instead.
 func (*ReadModelRequest) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{87}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{90}
 }
 
 func (x *ReadModelRequest) GetSession() *SessionRef {
@@ -7301,7 +7503,7 @@ type ModelState struct {
 
 func (x *ModelState) Reset() {
 	*x = ModelState{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[88]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[91]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7313,7 +7515,7 @@ func (x *ModelState) String() string {
 func (*ModelState) ProtoMessage() {}
 
 func (x *ModelState) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[88]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[91]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7326,7 +7528,7 @@ func (x *ModelState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelState.ProtoReflect.Descriptor instead.
 func (*ModelState) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{88}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{91}
 }
 
 func (x *ModelState) GetSession() *SessionRef {
@@ -7383,7 +7585,7 @@ type SetModelRequest struct {
 
 func (x *SetModelRequest) Reset() {
 	*x = SetModelRequest{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[89]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[92]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7395,7 +7597,7 @@ func (x *SetModelRequest) String() string {
 func (*SetModelRequest) ProtoMessage() {}
 
 func (x *SetModelRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[89]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[92]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7408,7 +7610,7 @@ func (x *SetModelRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetModelRequest.ProtoReflect.Descriptor instead.
 func (*SetModelRequest) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{89}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{92}
 }
 
 func (x *SetModelRequest) GetMeta() *CommandMeta {
@@ -7450,7 +7652,7 @@ type SetReasoningRequest struct {
 
 func (x *SetReasoningRequest) Reset() {
 	*x = SetReasoningRequest{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[90]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[93]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7462,7 +7664,7 @@ func (x *SetReasoningRequest) String() string {
 func (*SetReasoningRequest) ProtoMessage() {}
 
 func (x *SetReasoningRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[90]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[93]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7475,7 +7677,7 @@ func (x *SetReasoningRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetReasoningRequest.ProtoReflect.Descriptor instead.
 func (*SetReasoningRequest) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{90}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{93}
 }
 
 func (x *SetReasoningRequest) GetMeta() *CommandMeta {
@@ -7508,7 +7710,7 @@ type ReadApprovalModeRequest struct {
 
 func (x *ReadApprovalModeRequest) Reset() {
 	*x = ReadApprovalModeRequest{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[91]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[94]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7520,7 +7722,7 @@ func (x *ReadApprovalModeRequest) String() string {
 func (*ReadApprovalModeRequest) ProtoMessage() {}
 
 func (x *ReadApprovalModeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[91]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[94]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7533,7 +7735,7 @@ func (x *ReadApprovalModeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReadApprovalModeRequest.ProtoReflect.Descriptor instead.
 func (*ReadApprovalModeRequest) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{91}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{94}
 }
 
 func (x *ReadApprovalModeRequest) GetSession() *SessionRef {
@@ -7556,7 +7758,7 @@ type SetGoalRequest struct {
 
 func (x *SetGoalRequest) Reset() {
 	*x = SetGoalRequest{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[92]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[95]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7568,7 +7770,7 @@ func (x *SetGoalRequest) String() string {
 func (*SetGoalRequest) ProtoMessage() {}
 
 func (x *SetGoalRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[92]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[95]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7581,7 +7783,7 @@ func (x *SetGoalRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetGoalRequest.ProtoReflect.Descriptor instead.
 func (*SetGoalRequest) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{92}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{95}
 }
 
 func (x *SetGoalRequest) GetMeta() *CommandMeta {
@@ -7622,7 +7824,7 @@ type ClearGoalRequest struct {
 
 func (x *ClearGoalRequest) Reset() {
 	*x = ClearGoalRequest{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[93]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[96]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7634,7 +7836,7 @@ func (x *ClearGoalRequest) String() string {
 func (*ClearGoalRequest) ProtoMessage() {}
 
 func (x *ClearGoalRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[93]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[96]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7647,7 +7849,7 @@ func (x *ClearGoalRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClearGoalRequest.ProtoReflect.Descriptor instead.
 func (*ClearGoalRequest) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{93}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{96}
 }
 
 func (x *ClearGoalRequest) GetMeta() *CommandMeta {
@@ -7675,7 +7877,7 @@ type ApprovalModeState struct {
 
 func (x *ApprovalModeState) Reset() {
 	*x = ApprovalModeState{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[94]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[97]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7687,7 +7889,7 @@ func (x *ApprovalModeState) String() string {
 func (*ApprovalModeState) ProtoMessage() {}
 
 func (x *ApprovalModeState) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[94]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[97]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7700,7 +7902,7 @@ func (x *ApprovalModeState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApprovalModeState.ProtoReflect.Descriptor instead.
 func (*ApprovalModeState) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{94}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{97}
 }
 
 func (x *ApprovalModeState) GetSession() *SessionRef {
@@ -7735,7 +7937,7 @@ type SetApprovalModeRequest struct {
 
 func (x *SetApprovalModeRequest) Reset() {
 	*x = SetApprovalModeRequest{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[95]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[98]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7747,7 +7949,7 @@ func (x *SetApprovalModeRequest) String() string {
 func (*SetApprovalModeRequest) ProtoMessage() {}
 
 func (x *SetApprovalModeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[95]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[98]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7760,7 +7962,7 @@ func (x *SetApprovalModeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetApprovalModeRequest.ProtoReflect.Descriptor instead.
 func (*SetApprovalModeRequest) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{95}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{98}
 }
 
 func (x *SetApprovalModeRequest) GetMeta() *CommandMeta {
@@ -7795,7 +7997,7 @@ type DisconnectRuntimeRequest struct {
 
 func (x *DisconnectRuntimeRequest) Reset() {
 	*x = DisconnectRuntimeRequest{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[96]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[99]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7807,7 +8009,7 @@ func (x *DisconnectRuntimeRequest) String() string {
 func (*DisconnectRuntimeRequest) ProtoMessage() {}
 
 func (x *DisconnectRuntimeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[96]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[99]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7820,7 +8022,7 @@ func (x *DisconnectRuntimeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DisconnectRuntimeRequest.ProtoReflect.Descriptor instead.
 func (*DisconnectRuntimeRequest) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{96}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{99}
 }
 
 func (x *DisconnectRuntimeRequest) GetMeta() *CommandMeta {
@@ -7857,7 +8059,7 @@ type DisconnectRuntimeResponse struct {
 
 func (x *DisconnectRuntimeResponse) Reset() {
 	*x = DisconnectRuntimeResponse{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[97]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[100]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7869,7 +8071,7 @@ func (x *DisconnectRuntimeResponse) String() string {
 func (*DisconnectRuntimeResponse) ProtoMessage() {}
 
 func (x *DisconnectRuntimeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[97]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[100]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7882,7 +8084,7 @@ func (x *DisconnectRuntimeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DisconnectRuntimeResponse.ProtoReflect.Descriptor instead.
 func (*DisconnectRuntimeResponse) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{97}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{100}
 }
 
 func (x *DisconnectRuntimeResponse) GetDaemonId() string {
@@ -7930,7 +8132,7 @@ type SessionCursor struct {
 
 func (x *SessionCursor) Reset() {
 	*x = SessionCursor{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[98]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[101]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7942,7 +8144,7 @@ func (x *SessionCursor) String() string {
 func (*SessionCursor) ProtoMessage() {}
 
 func (x *SessionCursor) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[98]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[101]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7955,7 +8157,7 @@ func (x *SessionCursor) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionCursor.ProtoReflect.Descriptor instead.
 func (*SessionCursor) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{98}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{101}
 }
 
 func (x *SessionCursor) GetSession() *SessionRef {
@@ -7984,7 +8186,7 @@ type SubscribeRequest struct {
 
 func (x *SubscribeRequest) Reset() {
 	*x = SubscribeRequest{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[99]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[102]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7996,7 +8198,7 @@ func (x *SubscribeRequest) String() string {
 func (*SubscribeRequest) ProtoMessage() {}
 
 func (x *SubscribeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[99]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[102]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8009,7 +8211,7 @@ func (x *SubscribeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubscribeRequest.ProtoReflect.Descriptor instead.
 func (*SubscribeRequest) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{99}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{102}
 }
 
 func (x *SubscribeRequest) GetExpectedDaemonId() string {
@@ -8050,7 +8252,7 @@ type RuntimeOwnerEvent struct {
 
 func (x *RuntimeOwnerEvent) Reset() {
 	*x = RuntimeOwnerEvent{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[100]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[103]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8062,7 +8264,7 @@ func (x *RuntimeOwnerEvent) String() string {
 func (*RuntimeOwnerEvent) ProtoMessage() {}
 
 func (x *RuntimeOwnerEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[100]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[103]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8075,7 +8277,7 @@ func (x *RuntimeOwnerEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RuntimeOwnerEvent.ProtoReflect.Descriptor instead.
 func (*RuntimeOwnerEvent) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{100}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{103}
 }
 
 func (x *RuntimeOwnerEvent) GetOwnerPid() int64 {
@@ -8104,7 +8306,7 @@ type OwnershipLostEvent struct {
 
 func (x *OwnershipLostEvent) Reset() {
 	*x = OwnershipLostEvent{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[101]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[104]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8116,7 +8318,7 @@ func (x *OwnershipLostEvent) String() string {
 func (*OwnershipLostEvent) ProtoMessage() {}
 
 func (x *OwnershipLostEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[101]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[104]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8129,7 +8331,7 @@ func (x *OwnershipLostEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OwnershipLostEvent.ProtoReflect.Descriptor instead.
 func (*OwnershipLostEvent) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{101}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{104}
 }
 
 func (x *OwnershipLostEvent) GetAdopted() bool {
@@ -8170,7 +8372,7 @@ type PtyOutputEvent struct {
 
 func (x *PtyOutputEvent) Reset() {
 	*x = PtyOutputEvent{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[102]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[105]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8182,7 +8384,7 @@ func (x *PtyOutputEvent) String() string {
 func (*PtyOutputEvent) ProtoMessage() {}
 
 func (x *PtyOutputEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[102]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[105]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8195,7 +8397,7 @@ func (x *PtyOutputEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PtyOutputEvent.ProtoReflect.Descriptor instead.
 func (*PtyOutputEvent) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{102}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{105}
 }
 
 func (x *PtyOutputEvent) GetData() []byte {
@@ -8223,7 +8425,7 @@ type ConnectorEventPayload struct {
 
 func (x *ConnectorEventPayload) Reset() {
 	*x = ConnectorEventPayload{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[103]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[106]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8235,7 +8437,7 @@ func (x *ConnectorEventPayload) String() string {
 func (*ConnectorEventPayload) ProtoMessage() {}
 
 func (x *ConnectorEventPayload) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[103]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[106]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8248,7 +8450,7 @@ func (x *ConnectorEventPayload) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConnectorEventPayload.ProtoReflect.Descriptor instead.
 func (*ConnectorEventPayload) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{103}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{106}
 }
 
 func (x *ConnectorEventPayload) GetAgentId() string {
@@ -8297,7 +8499,7 @@ type EventEnvelope struct {
 
 func (x *EventEnvelope) Reset() {
 	*x = EventEnvelope{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[104]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[107]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8309,7 +8511,7 @@ func (x *EventEnvelope) String() string {
 func (*EventEnvelope) ProtoMessage() {}
 
 func (x *EventEnvelope) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[104]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[107]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8322,7 +8524,7 @@ func (x *EventEnvelope) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EventEnvelope.ProtoReflect.Descriptor instead.
 func (*EventEnvelope) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{104}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{107}
 }
 
 func (x *EventEnvelope) GetDaemonId() string {
@@ -8470,7 +8672,7 @@ type StateSnapshot struct {
 
 func (x *StateSnapshot) Reset() {
 	*x = StateSnapshot{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[105]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[108]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8482,7 +8684,7 @@ func (x *StateSnapshot) String() string {
 func (*StateSnapshot) ProtoMessage() {}
 
 func (x *StateSnapshot) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[105]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[108]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8495,7 +8697,7 @@ func (x *StateSnapshot) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StateSnapshot.ProtoReflect.Descriptor instead.
 func (*StateSnapshot) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{105}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{108}
 }
 
 func (x *StateSnapshot) GetDaemonId() string {
@@ -8522,7 +8724,7 @@ type SessionWatermark struct {
 
 func (x *SessionWatermark) Reset() {
 	*x = SessionWatermark{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[106]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[109]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8534,7 +8736,7 @@ func (x *SessionWatermark) String() string {
 func (*SessionWatermark) ProtoMessage() {}
 
 func (x *SessionWatermark) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[106]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[109]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8547,7 +8749,7 @@ func (x *SessionWatermark) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionWatermark.ProtoReflect.Descriptor instead.
 func (*SessionWatermark) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{106}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{109}
 }
 
 func (x *SessionWatermark) GetSession() *SessionRef {
@@ -8574,7 +8776,7 @@ type LiveReady struct {
 
 func (x *LiveReady) Reset() {
 	*x = LiveReady{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[107]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[110]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8586,7 +8788,7 @@ func (x *LiveReady) String() string {
 func (*LiveReady) ProtoMessage() {}
 
 func (x *LiveReady) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[107]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[110]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8599,7 +8801,7 @@ func (x *LiveReady) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LiveReady.ProtoReflect.Descriptor instead.
 func (*LiveReady) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{107}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{110}
 }
 
 func (x *LiveReady) GetDaemonId() string {
@@ -8630,7 +8832,7 @@ type ResyncRequired struct {
 
 func (x *ResyncRequired) Reset() {
 	*x = ResyncRequired{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[108]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[111]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8642,7 +8844,7 @@ func (x *ResyncRequired) String() string {
 func (*ResyncRequired) ProtoMessage() {}
 
 func (x *ResyncRequired) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[108]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[111]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8655,7 +8857,7 @@ func (x *ResyncRequired) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResyncRequired.ProtoReflect.Descriptor instead.
 func (*ResyncRequired) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{108}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{111}
 }
 
 func (x *ResyncRequired) GetSession() *SessionRef {
@@ -8711,7 +8913,7 @@ type StreamOverflow struct {
 
 func (x *StreamOverflow) Reset() {
 	*x = StreamOverflow{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[109]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[112]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8723,7 +8925,7 @@ func (x *StreamOverflow) String() string {
 func (*StreamOverflow) ProtoMessage() {}
 
 func (x *StreamOverflow) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[109]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[112]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8736,7 +8938,7 @@ func (x *StreamOverflow) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamOverflow.ProtoReflect.Descriptor instead.
 func (*StreamOverflow) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{109}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{112}
 }
 
 func (x *StreamOverflow) GetLastEmitted() []*SessionCursor {
@@ -8777,7 +8979,7 @@ type EventStreamFrame struct {
 
 func (x *EventStreamFrame) Reset() {
 	*x = EventStreamFrame{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[110]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[113]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8789,7 +8991,7 @@ func (x *EventStreamFrame) String() string {
 func (*EventStreamFrame) ProtoMessage() {}
 
 func (x *EventStreamFrame) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[110]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[113]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8802,7 +9004,7 @@ func (x *EventStreamFrame) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EventStreamFrame.ProtoReflect.Descriptor instead.
 func (*EventStreamFrame) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{110}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{113}
 }
 
 func (x *EventStreamFrame) GetFrame() isEventStreamFrame_Frame {
@@ -8920,7 +9122,7 @@ type AppendEventRequest struct {
 
 func (x *AppendEventRequest) Reset() {
 	*x = AppendEventRequest{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[111]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[114]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8932,7 +9134,7 @@ func (x *AppendEventRequest) String() string {
 func (*AppendEventRequest) ProtoMessage() {}
 
 func (x *AppendEventRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[111]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[114]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8945,7 +9147,7 @@ func (x *AppendEventRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AppendEventRequest.ProtoReflect.Descriptor instead.
 func (*AppendEventRequest) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{111}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{114}
 }
 
 func (x *AppendEventRequest) GetSession() *SessionRef {
@@ -9001,7 +9203,7 @@ type AppendEventResponse struct {
 
 func (x *AppendEventResponse) Reset() {
 	*x = AppendEventResponse{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[112]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[115]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9013,7 +9215,7 @@ func (x *AppendEventResponse) String() string {
 func (*AppendEventResponse) ProtoMessage() {}
 
 func (x *AppendEventResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[112]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[115]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9026,7 +9228,7 @@ func (x *AppendEventResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AppendEventResponse.ProtoReflect.Descriptor instead.
 func (*AppendEventResponse) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{112}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{115}
 }
 
 func (x *AppendEventResponse) GetDaemonId() string {
@@ -9065,7 +9267,7 @@ type OpenTerminal struct {
 
 func (x *OpenTerminal) Reset() {
 	*x = OpenTerminal{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[113]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[116]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9077,7 +9279,7 @@ func (x *OpenTerminal) String() string {
 func (*OpenTerminal) ProtoMessage() {}
 
 func (x *OpenTerminal) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[113]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[116]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9090,7 +9292,7 @@ func (x *OpenTerminal) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenTerminal.ProtoReflect.Descriptor instead.
 func (*OpenTerminal) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{113}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{116}
 }
 
 func (x *OpenTerminal) GetTarget() *RuntimeTarget {
@@ -9151,7 +9353,7 @@ type TerminalInput struct {
 
 func (x *TerminalInput) Reset() {
 	*x = TerminalInput{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[114]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[117]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9163,7 +9365,7 @@ func (x *TerminalInput) String() string {
 func (*TerminalInput) ProtoMessage() {}
 
 func (x *TerminalInput) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[114]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[117]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9176,7 +9378,7 @@ func (x *TerminalInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TerminalInput.ProtoReflect.Descriptor instead.
 func (*TerminalInput) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{114}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{117}
 }
 
 func (x *TerminalInput) GetData() []byte {
@@ -9196,7 +9398,7 @@ type TerminalResize struct {
 
 func (x *TerminalResize) Reset() {
 	*x = TerminalResize{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[115]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[118]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9208,7 +9410,7 @@ func (x *TerminalResize) String() string {
 func (*TerminalResize) ProtoMessage() {}
 
 func (x *TerminalResize) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[115]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[118]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9221,7 +9423,7 @@ func (x *TerminalResize) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TerminalResize.ProtoReflect.Descriptor instead.
 func (*TerminalResize) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{115}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{118}
 }
 
 func (x *TerminalResize) GetCols() uint32 {
@@ -9246,7 +9448,7 @@ type TerminalInterrupt struct {
 
 func (x *TerminalInterrupt) Reset() {
 	*x = TerminalInterrupt{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[116]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[119]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9258,7 +9460,7 @@ func (x *TerminalInterrupt) String() string {
 func (*TerminalInterrupt) ProtoMessage() {}
 
 func (x *TerminalInterrupt) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[116]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[119]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9271,7 +9473,7 @@ func (x *TerminalInterrupt) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TerminalInterrupt.ProtoReflect.Descriptor instead.
 func (*TerminalInterrupt) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{116}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{119}
 }
 
 type TerminalClose struct {
@@ -9283,7 +9485,7 @@ type TerminalClose struct {
 
 func (x *TerminalClose) Reset() {
 	*x = TerminalClose{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[117]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[120]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9295,7 +9497,7 @@ func (x *TerminalClose) String() string {
 func (*TerminalClose) ProtoMessage() {}
 
 func (x *TerminalClose) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[117]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[120]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9308,7 +9510,7 @@ func (x *TerminalClose) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TerminalClose.ProtoReflect.Descriptor instead.
 func (*TerminalClose) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{117}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{120}
 }
 
 func (x *TerminalClose) GetReason() string {
@@ -9336,7 +9538,7 @@ type TerminalClientFrame struct {
 
 func (x *TerminalClientFrame) Reset() {
 	*x = TerminalClientFrame{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[118]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[121]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9348,7 +9550,7 @@ func (x *TerminalClientFrame) String() string {
 func (*TerminalClientFrame) ProtoMessage() {}
 
 func (x *TerminalClientFrame) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[118]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[121]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9361,7 +9563,7 @@ func (x *TerminalClientFrame) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TerminalClientFrame.ProtoReflect.Descriptor instead.
 func (*TerminalClientFrame) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{118}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{121}
 }
 
 func (x *TerminalClientFrame) GetTerminalStreamId() string {
@@ -9474,7 +9676,7 @@ type TerminalOpened struct {
 
 func (x *TerminalOpened) Reset() {
 	*x = TerminalOpened{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[119]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[122]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9486,7 +9688,7 @@ func (x *TerminalOpened) String() string {
 func (*TerminalOpened) ProtoMessage() {}
 
 func (x *TerminalOpened) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[119]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[122]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9499,7 +9701,7 @@ func (x *TerminalOpened) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TerminalOpened.ProtoReflect.Descriptor instead.
 func (*TerminalOpened) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{119}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{122}
 }
 
 func (x *TerminalOpened) GetSession() *SessionRef {
@@ -9527,7 +9729,7 @@ type TerminalOutput struct {
 
 func (x *TerminalOutput) Reset() {
 	*x = TerminalOutput{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[120]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[123]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9539,7 +9741,7 @@ func (x *TerminalOutput) String() string {
 func (*TerminalOutput) ProtoMessage() {}
 
 func (x *TerminalOutput) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[120]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[123]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9552,7 +9754,7 @@ func (x *TerminalOutput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TerminalOutput.ProtoReflect.Descriptor instead.
 func (*TerminalOutput) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{120}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{123}
 }
 
 func (x *TerminalOutput) GetData() []byte {
@@ -9587,7 +9789,7 @@ type TerminalExit struct {
 
 func (x *TerminalExit) Reset() {
 	*x = TerminalExit{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[121]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[124]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9599,7 +9801,7 @@ func (x *TerminalExit) String() string {
 func (*TerminalExit) ProtoMessage() {}
 
 func (x *TerminalExit) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[121]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[124]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9612,7 +9814,7 @@ func (x *TerminalExit) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TerminalExit.ProtoReflect.Descriptor instead.
 func (*TerminalExit) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{121}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{124}
 }
 
 func (x *TerminalExit) GetExitCode() int32 {
@@ -9646,7 +9848,7 @@ type TerminalOverflow struct {
 
 func (x *TerminalOverflow) Reset() {
 	*x = TerminalOverflow{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[122]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[125]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9658,7 +9860,7 @@ func (x *TerminalOverflow) String() string {
 func (*TerminalOverflow) ProtoMessage() {}
 
 func (x *TerminalOverflow) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[122]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[125]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9671,7 +9873,7 @@ func (x *TerminalOverflow) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TerminalOverflow.ProtoReflect.Descriptor instead.
 func (*TerminalOverflow) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{122}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{125}
 }
 
 func (x *TerminalOverflow) GetLastEmittedChunkSeq() int64 {
@@ -9705,7 +9907,7 @@ type TerminalServerFrame struct {
 
 func (x *TerminalServerFrame) Reset() {
 	*x = TerminalServerFrame{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[123]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[126]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9717,7 +9919,7 @@ func (x *TerminalServerFrame) String() string {
 func (*TerminalServerFrame) ProtoMessage() {}
 
 func (x *TerminalServerFrame) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[123]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[126]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9730,7 +9932,7 @@ func (x *TerminalServerFrame) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TerminalServerFrame.ProtoReflect.Descriptor instead.
 func (*TerminalServerFrame) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{123}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{126}
 }
 
 func (x *TerminalServerFrame) GetTerminalStreamId() string {
@@ -9840,7 +10042,7 @@ type OperationKey struct {
 
 func (x *OperationKey) Reset() {
 	*x = OperationKey{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[124]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[127]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9852,7 +10054,7 @@ func (x *OperationKey) String() string {
 func (*OperationKey) ProtoMessage() {}
 
 func (x *OperationKey) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[124]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[127]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9865,7 +10067,7 @@ func (x *OperationKey) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OperationKey.ProtoReflect.Descriptor instead.
 func (*OperationKey) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{124}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{127}
 }
 
 func (x *OperationKey) GetOperationId() string {
@@ -9919,7 +10121,7 @@ type GetOperationRequest struct {
 
 func (x *GetOperationRequest) Reset() {
 	*x = GetOperationRequest{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[125]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[128]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9931,7 +10133,7 @@ func (x *GetOperationRequest) String() string {
 func (*GetOperationRequest) ProtoMessage() {}
 
 func (x *GetOperationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[125]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[128]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9944,7 +10146,7 @@ func (x *GetOperationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetOperationRequest.ProtoReflect.Descriptor instead.
 func (*GetOperationRequest) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{125}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{128}
 }
 
 func (x *GetOperationRequest) GetKey() *OperationKey {
@@ -9970,7 +10172,7 @@ type OperationReceipt struct {
 
 func (x *OperationReceipt) Reset() {
 	*x = OperationReceipt{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[126]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[129]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9982,7 +10184,7 @@ func (x *OperationReceipt) String() string {
 func (*OperationReceipt) ProtoMessage() {}
 
 func (x *OperationReceipt) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[126]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[129]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9995,7 +10197,7 @@ func (x *OperationReceipt) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OperationReceipt.ProtoReflect.Descriptor instead.
 func (*OperationReceipt) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{126}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{129}
 }
 
 func (x *OperationReceipt) GetDaemonId() string {
@@ -10062,7 +10264,7 @@ type LocalTarget struct {
 
 func (x *LocalTarget) Reset() {
 	*x = LocalTarget{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[127]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[130]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10074,7 +10276,7 @@ func (x *LocalTarget) String() string {
 func (*LocalTarget) ProtoMessage() {}
 
 func (x *LocalTarget) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[127]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[130]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10087,7 +10289,7 @@ func (x *LocalTarget) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LocalTarget.ProtoReflect.Descriptor instead.
 func (*LocalTarget) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{127}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{130}
 }
 
 type WslTarget struct {
@@ -10099,7 +10301,7 @@ type WslTarget struct {
 
 func (x *WslTarget) Reset() {
 	*x = WslTarget{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[128]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[131]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10111,7 +10313,7 @@ func (x *WslTarget) String() string {
 func (*WslTarget) ProtoMessage() {}
 
 func (x *WslTarget) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[128]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[131]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10124,7 +10326,7 @@ func (x *WslTarget) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WslTarget.ProtoReflect.Descriptor instead.
 func (*WslTarget) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{128}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{131}
 }
 
 func (x *WslTarget) GetDistro() string {
@@ -10144,7 +10346,7 @@ type SshTarget struct {
 
 func (x *SshTarget) Reset() {
 	*x = SshTarget{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[129]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[132]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10156,7 +10358,7 @@ func (x *SshTarget) String() string {
 func (*SshTarget) ProtoMessage() {}
 
 func (x *SshTarget) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[129]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[132]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10169,7 +10371,7 @@ func (x *SshTarget) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SshTarget.ProtoReflect.Descriptor instead.
 func (*SshTarget) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{129}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{132}
 }
 
 func (x *SshTarget) GetConnectionId() string {
@@ -10200,7 +10402,7 @@ type ModelConfigTarget struct {
 
 func (x *ModelConfigTarget) Reset() {
 	*x = ModelConfigTarget{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[130]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[133]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10212,7 +10414,7 @@ func (x *ModelConfigTarget) String() string {
 func (*ModelConfigTarget) ProtoMessage() {}
 
 func (x *ModelConfigTarget) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[130]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[133]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10225,7 +10427,7 @@ func (x *ModelConfigTarget) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelConfigTarget.ProtoReflect.Descriptor instead.
 func (*ModelConfigTarget) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{130}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{133}
 }
 
 func (x *ModelConfigTarget) GetTarget() isModelConfigTarget_Target {
@@ -10295,7 +10497,7 @@ type ModelConfigFileInput struct {
 
 func (x *ModelConfigFileInput) Reset() {
 	*x = ModelConfigFileInput{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[131]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[134]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10307,7 +10509,7 @@ func (x *ModelConfigFileInput) String() string {
 func (*ModelConfigFileInput) ProtoMessage() {}
 
 func (x *ModelConfigFileInput) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[131]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[134]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10320,7 +10522,7 @@ func (x *ModelConfigFileInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelConfigFileInput.ProtoReflect.Descriptor instead.
 func (*ModelConfigFileInput) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{131}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{134}
 }
 
 func (x *ModelConfigFileInput) GetFile() ManagedFile {
@@ -10354,7 +10556,7 @@ type SensitiveEnvironmentValue struct {
 
 func (x *SensitiveEnvironmentValue) Reset() {
 	*x = SensitiveEnvironmentValue{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[132]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[135]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10366,7 +10568,7 @@ func (x *SensitiveEnvironmentValue) String() string {
 func (*SensitiveEnvironmentValue) ProtoMessage() {}
 
 func (x *SensitiveEnvironmentValue) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[132]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[135]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10379,7 +10581,7 @@ func (x *SensitiveEnvironmentValue) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SensitiveEnvironmentValue.ProtoReflect.Descriptor instead.
 func (*SensitiveEnvironmentValue) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{132}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{135}
 }
 
 func (x *SensitiveEnvironmentValue) GetName() string {
@@ -10407,7 +10609,7 @@ type ModelConfigPlanRequest struct {
 
 func (x *ModelConfigPlanRequest) Reset() {
 	*x = ModelConfigPlanRequest{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[133]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[136]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10419,7 +10621,7 @@ func (x *ModelConfigPlanRequest) String() string {
 func (*ModelConfigPlanRequest) ProtoMessage() {}
 
 func (x *ModelConfigPlanRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[133]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[136]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10432,7 +10634,7 @@ func (x *ModelConfigPlanRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelConfigPlanRequest.ProtoReflect.Descriptor instead.
 func (*ModelConfigPlanRequest) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{133}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{136}
 }
 
 func (x *ModelConfigPlanRequest) GetTarget() *ModelConfigTarget {
@@ -10470,7 +10672,7 @@ type ModelConfigFileState struct {
 
 func (x *ModelConfigFileState) Reset() {
 	*x = ModelConfigFileState{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[134]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[137]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10482,7 +10684,7 @@ func (x *ModelConfigFileState) String() string {
 func (*ModelConfigFileState) ProtoMessage() {}
 
 func (x *ModelConfigFileState) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[134]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[137]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10495,7 +10697,7 @@ func (x *ModelConfigFileState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelConfigFileState.ProtoReflect.Descriptor instead.
 func (*ModelConfigFileState) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{134}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{137}
 }
 
 func (x *ModelConfigFileState) GetFile() ManagedFile {
@@ -10553,7 +10755,7 @@ type ModelConfigChange struct {
 
 func (x *ModelConfigChange) Reset() {
 	*x = ModelConfigChange{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[135]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[138]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10565,7 +10767,7 @@ func (x *ModelConfigChange) String() string {
 func (*ModelConfigChange) ProtoMessage() {}
 
 func (x *ModelConfigChange) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[135]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[138]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10578,7 +10780,7 @@ func (x *ModelConfigChange) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelConfigChange.ProtoReflect.Descriptor instead.
 func (*ModelConfigChange) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{135}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{138}
 }
 
 func (x *ModelConfigChange) GetFile() ManagedFile {
@@ -10630,7 +10832,7 @@ type ModelConfigPlanResponse struct {
 
 func (x *ModelConfigPlanResponse) Reset() {
 	*x = ModelConfigPlanResponse{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[136]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[139]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10642,7 +10844,7 @@ func (x *ModelConfigPlanResponse) String() string {
 func (*ModelConfigPlanResponse) ProtoMessage() {}
 
 func (x *ModelConfigPlanResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[136]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[139]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10655,7 +10857,7 @@ func (x *ModelConfigPlanResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelConfigPlanResponse.ProtoReflect.Descriptor instead.
 func (*ModelConfigPlanResponse) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{136}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{139}
 }
 
 func (x *ModelConfigPlanResponse) GetTarget() *ModelConfigTarget {
@@ -10712,7 +10914,7 @@ type ModelConfigApplyRequest struct {
 
 func (x *ModelConfigApplyRequest) Reset() {
 	*x = ModelConfigApplyRequest{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[137]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[140]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10724,7 +10926,7 @@ func (x *ModelConfigApplyRequest) String() string {
 func (*ModelConfigApplyRequest) ProtoMessage() {}
 
 func (x *ModelConfigApplyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[137]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[140]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10737,7 +10939,7 @@ func (x *ModelConfigApplyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelConfigApplyRequest.ProtoReflect.Descriptor instead.
 func (*ModelConfigApplyRequest) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{137}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{140}
 }
 
 func (x *ModelConfigApplyRequest) GetMeta() *CommandMeta {
@@ -10778,7 +10980,7 @@ type FileDigest struct {
 
 func (x *FileDigest) Reset() {
 	*x = FileDigest{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[138]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[141]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10790,7 +10992,7 @@ func (x *FileDigest) String() string {
 func (*FileDigest) ProtoMessage() {}
 
 func (x *FileDigest) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[138]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[141]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10803,7 +11005,7 @@ func (x *FileDigest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FileDigest.ProtoReflect.Descriptor instead.
 func (*FileDigest) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{138}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{141}
 }
 
 func (x *FileDigest) GetFile() ManagedFile {
@@ -10835,7 +11037,7 @@ type ModelConfigApplyResponse struct {
 
 func (x *ModelConfigApplyResponse) Reset() {
 	*x = ModelConfigApplyResponse{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[139]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[142]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10847,7 +11049,7 @@ func (x *ModelConfigApplyResponse) String() string {
 func (*ModelConfigApplyResponse) ProtoMessage() {}
 
 func (x *ModelConfigApplyResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[139]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[142]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10860,7 +11062,7 @@ func (x *ModelConfigApplyResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelConfigApplyResponse.ProtoReflect.Descriptor instead.
 func (*ModelConfigApplyResponse) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{139}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{142}
 }
 
 func (x *ModelConfigApplyResponse) GetDaemonId() string {
@@ -10922,7 +11124,7 @@ type ModelConfigReloadRequest struct {
 
 func (x *ModelConfigReloadRequest) Reset() {
 	*x = ModelConfigReloadRequest{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[140]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[143]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10934,7 +11136,7 @@ func (x *ModelConfigReloadRequest) String() string {
 func (*ModelConfigReloadRequest) ProtoMessage() {}
 
 func (x *ModelConfigReloadRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[140]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[143]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10947,7 +11149,7 @@ func (x *ModelConfigReloadRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelConfigReloadRequest.ProtoReflect.Descriptor instead.
 func (*ModelConfigReloadRequest) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{140}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{143}
 }
 
 func (x *ModelConfigReloadRequest) GetMeta() *CommandMeta {
@@ -10980,7 +11182,7 @@ type ModelConfigReloadResponse struct {
 
 func (x *ModelConfigReloadResponse) Reset() {
 	*x = ModelConfigReloadResponse{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[141]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[144]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10992,7 +11194,7 @@ func (x *ModelConfigReloadResponse) String() string {
 func (*ModelConfigReloadResponse) ProtoMessage() {}
 
 func (x *ModelConfigReloadResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[141]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[144]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11005,7 +11207,7 @@ func (x *ModelConfigReloadResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelConfigReloadResponse.ProtoReflect.Descriptor instead.
 func (*ModelConfigReloadResponse) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{141}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{144}
 }
 
 func (x *ModelConfigReloadResponse) GetDaemonId() string {
@@ -11081,7 +11283,7 @@ type ConnectorAgent struct {
 
 func (x *ConnectorAgent) Reset() {
 	*x = ConnectorAgent{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[142]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[145]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11093,7 +11295,7 @@ func (x *ConnectorAgent) String() string {
 func (*ConnectorAgent) ProtoMessage() {}
 
 func (x *ConnectorAgent) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[142]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[145]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11106,7 +11308,7 @@ func (x *ConnectorAgent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConnectorAgent.ProtoReflect.Descriptor instead.
 func (*ConnectorAgent) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{142}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{145}
 }
 
 func (x *ConnectorAgent) GetId() string {
@@ -11182,7 +11384,7 @@ type ConnectorHello struct {
 
 func (x *ConnectorHello) Reset() {
 	*x = ConnectorHello{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[143]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[146]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11194,7 +11396,7 @@ func (x *ConnectorHello) String() string {
 func (*ConnectorHello) ProtoMessage() {}
 
 func (x *ConnectorHello) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[143]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[146]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11207,7 +11409,7 @@ func (x *ConnectorHello) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConnectorHello.ProtoReflect.Descriptor instead.
 func (*ConnectorHello) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{143}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{146}
 }
 
 func (x *ConnectorHello) GetProtocolVersion() uint32 {
@@ -11233,7 +11435,7 @@ type ConnectorHeartbeat struct {
 
 func (x *ConnectorHeartbeat) Reset() {
 	*x = ConnectorHeartbeat{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[144]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[147]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11245,7 +11447,7 @@ func (x *ConnectorHeartbeat) String() string {
 func (*ConnectorHeartbeat) ProtoMessage() {}
 
 func (x *ConnectorHeartbeat) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[144]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[147]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11258,7 +11460,7 @@ func (x *ConnectorHeartbeat) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConnectorHeartbeat.ProtoReflect.Descriptor instead.
 func (*ConnectorHeartbeat) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{144}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{147}
 }
 
 func (x *ConnectorHeartbeat) GetSentAtUnixMicros() int64 {
@@ -11283,7 +11485,7 @@ type ConnectorEvent struct {
 
 func (x *ConnectorEvent) Reset() {
 	*x = ConnectorEvent{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[145]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[148]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11295,7 +11497,7 @@ func (x *ConnectorEvent) String() string {
 func (*ConnectorEvent) ProtoMessage() {}
 
 func (x *ConnectorEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[145]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[148]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11308,7 +11510,7 @@ func (x *ConnectorEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConnectorEvent.ProtoReflect.Descriptor instead.
 func (*ConnectorEvent) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{145}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{148}
 }
 
 func (x *ConnectorEvent) GetEventId() string {
@@ -11369,7 +11571,7 @@ type ConnectorDisconnect struct {
 
 func (x *ConnectorDisconnect) Reset() {
 	*x = ConnectorDisconnect{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[146]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[149]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11381,7 +11583,7 @@ func (x *ConnectorDisconnect) String() string {
 func (*ConnectorDisconnect) ProtoMessage() {}
 
 func (x *ConnectorDisconnect) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[146]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[149]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11394,7 +11596,7 @@ func (x *ConnectorDisconnect) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConnectorDisconnect.ProtoReflect.Descriptor instead.
 func (*ConnectorDisconnect) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{146}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{149}
 }
 
 func (x *ConnectorDisconnect) GetReason() string {
@@ -11419,7 +11621,7 @@ type ConnectorIngressFrame struct {
 
 func (x *ConnectorIngressFrame) Reset() {
 	*x = ConnectorIngressFrame{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[147]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[150]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11431,7 +11633,7 @@ func (x *ConnectorIngressFrame) String() string {
 func (*ConnectorIngressFrame) ProtoMessage() {}
 
 func (x *ConnectorIngressFrame) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[147]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[150]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11444,7 +11646,7 @@ func (x *ConnectorIngressFrame) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConnectorIngressFrame.ProtoReflect.Descriptor instead.
 func (*ConnectorIngressFrame) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{147}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{150}
 }
 
 func (x *ConnectorIngressFrame) GetFrame() isConnectorIngressFrame_Frame {
@@ -11527,7 +11729,7 @@ type ConnectorRegistered struct {
 
 func (x *ConnectorRegistered) Reset() {
 	*x = ConnectorRegistered{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[148]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[151]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11539,7 +11741,7 @@ func (x *ConnectorRegistered) String() string {
 func (*ConnectorRegistered) ProtoMessage() {}
 
 func (x *ConnectorRegistered) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[148]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[151]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11552,7 +11754,7 @@ func (x *ConnectorRegistered) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConnectorRegistered.ProtoReflect.Descriptor instead.
 func (*ConnectorRegistered) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{148}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{151}
 }
 
 func (x *ConnectorRegistered) GetAgentId() string {
@@ -11573,7 +11775,7 @@ type ConnectorEventAccepted struct {
 
 func (x *ConnectorEventAccepted) Reset() {
 	*x = ConnectorEventAccepted{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[149]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[152]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11585,7 +11787,7 @@ func (x *ConnectorEventAccepted) String() string {
 func (*ConnectorEventAccepted) ProtoMessage() {}
 
 func (x *ConnectorEventAccepted) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[149]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[152]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11598,7 +11800,7 @@ func (x *ConnectorEventAccepted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConnectorEventAccepted.ProtoReflect.Descriptor instead.
 func (*ConnectorEventAccepted) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{149}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{152}
 }
 
 func (x *ConnectorEventAccepted) GetEventId() string {
@@ -11632,7 +11834,7 @@ type ConnectorRejected struct {
 
 func (x *ConnectorRejected) Reset() {
 	*x = ConnectorRejected{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[150]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[153]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11644,7 +11846,7 @@ func (x *ConnectorRejected) String() string {
 func (*ConnectorRejected) ProtoMessage() {}
 
 func (x *ConnectorRejected) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[150]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[153]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11657,7 +11859,7 @@ func (x *ConnectorRejected) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConnectorRejected.ProtoReflect.Descriptor instead.
 func (*ConnectorRejected) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{150}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{153}
 }
 
 func (x *ConnectorRejected) GetEventId() string {
@@ -11684,7 +11886,7 @@ type ConnectorOverflow struct {
 
 func (x *ConnectorOverflow) Reset() {
 	*x = ConnectorOverflow{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[151]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[154]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11696,7 +11898,7 @@ func (x *ConnectorOverflow) String() string {
 func (*ConnectorOverflow) ProtoMessage() {}
 
 func (x *ConnectorOverflow) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[151]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[154]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11709,7 +11911,7 @@ func (x *ConnectorOverflow) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConnectorOverflow.ProtoReflect.Descriptor instead.
 func (*ConnectorOverflow) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{151}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{154}
 }
 
 func (x *ConnectorOverflow) GetQueueCapacity() uint32 {
@@ -11736,7 +11938,7 @@ type ConnectorDisconnected struct {
 
 func (x *ConnectorDisconnected) Reset() {
 	*x = ConnectorDisconnected{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[152]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[155]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11748,7 +11950,7 @@ func (x *ConnectorDisconnected) String() string {
 func (*ConnectorDisconnected) ProtoMessage() {}
 
 func (x *ConnectorDisconnected) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[152]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[155]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11761,7 +11963,7 @@ func (x *ConnectorDisconnected) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConnectorDisconnected.ProtoReflect.Descriptor instead.
 func (*ConnectorDisconnected) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{152}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{155}
 }
 
 func (x *ConnectorDisconnected) GetAgentId() string {
@@ -11787,7 +11989,7 @@ type ConnectorHeartbeatAck struct {
 
 func (x *ConnectorHeartbeatAck) Reset() {
 	*x = ConnectorHeartbeatAck{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[153]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[156]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11799,7 +12001,7 @@ func (x *ConnectorHeartbeatAck) String() string {
 func (*ConnectorHeartbeatAck) ProtoMessage() {}
 
 func (x *ConnectorHeartbeatAck) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[153]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[156]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11812,7 +12014,7 @@ func (x *ConnectorHeartbeatAck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConnectorHeartbeatAck.ProtoReflect.Descriptor instead.
 func (*ConnectorHeartbeatAck) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{153}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{156}
 }
 
 func (x *ConnectorHeartbeatAck) GetReceivedAtUnixMicros() int64 {
@@ -11840,7 +12042,7 @@ type ConnectorIngressAck struct {
 
 func (x *ConnectorIngressAck) Reset() {
 	*x = ConnectorIngressAck{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[154]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[157]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11852,7 +12054,7 @@ func (x *ConnectorIngressAck) String() string {
 func (*ConnectorIngressAck) ProtoMessage() {}
 
 func (x *ConnectorIngressAck) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[154]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[157]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11865,7 +12067,7 @@ func (x *ConnectorIngressAck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConnectorIngressAck.ProtoReflect.Descriptor instead.
 func (*ConnectorIngressAck) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{154}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{157}
 }
 
 func (x *ConnectorIngressAck) GetState() ConnectorAckState {
@@ -11986,7 +12188,7 @@ type BindControlSessionRequest struct {
 
 func (x *BindControlSessionRequest) Reset() {
 	*x = BindControlSessionRequest{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[155]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[158]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11998,7 +12200,7 @@ func (x *BindControlSessionRequest) String() string {
 func (*BindControlSessionRequest) ProtoMessage() {}
 
 func (x *BindControlSessionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[155]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[158]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12011,7 +12213,7 @@ func (x *BindControlSessionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BindControlSessionRequest.ProtoReflect.Descriptor instead.
 func (*BindControlSessionRequest) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{155}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{158}
 }
 
 func (x *BindControlSessionRequest) GetAgentId() string {
@@ -12038,7 +12240,7 @@ type BindControlSessionResponse struct {
 
 func (x *BindControlSessionResponse) Reset() {
 	*x = BindControlSessionResponse{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[156]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[159]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12050,7 +12252,7 @@ func (x *BindControlSessionResponse) String() string {
 func (*BindControlSessionResponse) ProtoMessage() {}
 
 func (x *BindControlSessionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[156]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[159]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12063,7 +12265,7 @@ func (x *BindControlSessionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BindControlSessionResponse.ProtoReflect.Descriptor instead.
 func (*BindControlSessionResponse) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{156}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{159}
 }
 
 func (x *BindControlSessionResponse) GetBound() bool {
@@ -12091,7 +12293,7 @@ type DisconnectConnectorRequest struct {
 
 func (x *DisconnectConnectorRequest) Reset() {
 	*x = DisconnectConnectorRequest{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[157]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[160]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12103,7 +12305,7 @@ func (x *DisconnectConnectorRequest) String() string {
 func (*DisconnectConnectorRequest) ProtoMessage() {}
 
 func (x *DisconnectConnectorRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[157]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[160]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12116,7 +12318,7 @@ func (x *DisconnectConnectorRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DisconnectConnectorRequest.ProtoReflect.Descriptor instead.
 func (*DisconnectConnectorRequest) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{157}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{160}
 }
 
 func (x *DisconnectConnectorRequest) GetMeta() *CommandMeta {
@@ -12152,7 +12354,7 @@ type DisconnectConnectorResponse struct {
 
 func (x *DisconnectConnectorResponse) Reset() {
 	*x = DisconnectConnectorResponse{}
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[158]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[161]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12164,7 +12366,7 @@ func (x *DisconnectConnectorResponse) String() string {
 func (*DisconnectConnectorResponse) ProtoMessage() {}
 
 func (x *DisconnectConnectorResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[158]
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[161]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12177,7 +12379,7 @@ func (x *DisconnectConnectorResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DisconnectConnectorResponse.ProtoReflect.Descriptor instead.
 func (*DisconnectConnectorResponse) Descriptor() ([]byte, []int) {
-	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{158}
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{161}
 }
 
 func (x *DisconnectConnectorResponse) GetDaemonId() string {
@@ -12460,14 +12662,25 @@ const file_astrorder_sessiond_v1_sessiond_proto_rawDesc = "" +
 	"\x0enative_options\x18\x04 \x01(\v2!.astrorder.sessiond.v1.NativeJsonH\x02R\rnativeOptions\x88\x01\x01B\b\n" +
 	"\x06_modelB\t\n" +
 	"\a_effortB\x11\n" +
-	"\x0f_native_options\"\xe0\x02\n" +
+	"\x0f_native_options\"\x87\x02\n" +
+	"\x18AntigravityCreateOptions\x12\x10\n" +
+	"\x03cwd\x18\x01 \x01(\tR\x03cwd\x12\x19\n" +
+	"\x05model\x18\x02 \x01(\tH\x00R\x05model\x88\x01\x01\x12\x1b\n" +
+	"\x06effort\x18\x03 \x01(\tH\x01R\x06effort\x88\x01\x01\x12/\n" +
+	"\x11parent_session_id\x18\x04 \x01(\tH\x02R\x0fparentSessionId\x88\x01\x01\x12/\n" +
+	"\x11target_message_id\x18\x05 \x01(\tH\x03R\x0ftargetMessageId\x88\x01\x01B\b\n" +
+	"\x06_modelB\t\n" +
+	"\a_effortB\x14\n" +
+	"\x12_parent_session_idB\x14\n" +
+	"\x12_target_message_id\"\xb5\x03\n" +
 	"\x14CreateSessionRequest\x126\n" +
 	"\x04meta\x18\x01 \x01(\v2\".astrorder.sessiond.v1.CommandMetaR\x04meta\x12<\n" +
 	"\x06target\x18\x02 \x01(\v2$.astrorder.sessiond.v1.RuntimeTargetR\x06target\x12A\n" +
 	"\x05codex\x18\n" +
 	" \x01(\v2).astrorder.sessiond.v1.CodexCreateOptionsH\x00R\x05codex\x12D\n" +
 	"\x06hermes\x18\v \x01(\v2*.astrorder.sessiond.v1.HermesCreateOptionsH\x00R\x06hermes\x12>\n" +
-	"\x04grok\x18\f \x01(\v2(.astrorder.sessiond.v1.GrokCreateOptionsH\x00R\x04grokB\t\n" +
+	"\x04grok\x18\f \x01(\v2(.astrorder.sessiond.v1.GrokCreateOptionsH\x00R\x04grok\x12S\n" +
+	"\vantigravity\x18\r \x01(\v2/.astrorder.sessiond.v1.AntigravityCreateOptionsH\x00R\vantigravityB\t\n" +
 	"\aoptions\"\xbb\x02\n" +
 	"\x14AttachSessionRequest\x12;\n" +
 	"\asession\x18\x01 \x01(\v2!.astrorder.sessiond.v1.SessionRefR\asession\x12<\n" +
@@ -12742,7 +12955,9 @@ const file_astrorder_sessiond_v1_sessiond_proto_rawDesc = "" +
 	"\x03cwd\x18\x01 \x01(\tH\x00R\x03cwd\x88\x01\x01\x12\x1b\n" +
 	"\x06cursor\x18\x02 \x01(\tH\x01R\x06cursor\x88\x01\x01B\x06\n" +
 	"\x04_cwdB\t\n" +
-	"\a_cursor\"\x87\x10\n" +
+	"\a_cursor\"\x1d\n" +
+	"\x1bAntigravitySessionListQuery\"\x1c\n" +
+	"\x1aAntigravityModelsListQuery\"\xe4\x11\n" +
 	"\x12NativeQueryRequest\x12<\n" +
 	"\x06target\x18\x01 \x01(\v2$.astrorder.sessiond.v1.RuntimeTargetR\x06target\x12R\n" +
 	"\x11top_level_payload\x18\x02 \x01(\v2!.astrorder.sessiond.v1.NativeJsonH\x01R\x0ftopLevelPayload\x88\x01\x01\x12)\n" +
@@ -12766,7 +12981,9 @@ const file_astrorder_sessiond_v1_sessiond_proto_rawDesc = "" +
 	"\x12hermes_models_list\x18# \x01(\v2,.astrorder.sessiond.v1.HermesModelsListQueryH\x00R\x10hermesModelsList\x12b\n" +
 	"\x14hermes_commands_list\x18$ \x01(\v2..astrorder.sessiond.v1.HermesCommandsListQueryH\x00R\x12hermesCommandsList\x12U\n" +
 	"\x0fgrok_initialize\x182 \x01(\v2*.astrorder.sessiond.v1.GrokInitializeQueryH\x00R\x0egrokInitialize\x12Y\n" +
-	"\x11grok_session_list\x183 \x01(\v2+.astrorder.sessiond.v1.GrokSessionListQueryH\x00R\x0fgrokSessionListB\a\n" +
+	"\x11grok_session_list\x183 \x01(\v2+.astrorder.sessiond.v1.GrokSessionListQueryH\x00R\x0fgrokSessionList\x12n\n" +
+	"\x18antigravity_session_list\x18< \x01(\v22.astrorder.sessiond.v1.AntigravitySessionListQueryH\x00R\x16antigravitySessionList\x12k\n" +
+	"\x17antigravity_models_list\x18= \x01(\v21.astrorder.sessiond.v1.AntigravityModelsListQueryH\x00R\x15antigravityModelsListB\a\n" +
 	"\x05queryB\x14\n" +
 	"\x12_top_level_payloadB\x11\n" +
 	"\x0f_top_level_hashB\x13\n" +
@@ -13227,7 +13444,7 @@ const file_astrorder_sessiond_v1_sessiond_proto_rawDesc = "" +
 	"\x17EVENT_STREAM_VERSION_V1\x10\x01*<\n" +
 	"\tNullValue\x12\x1a\n" +
 	"\x16NULL_VALUE_UNSPECIFIED\x10\x00\x12\x13\n" +
-	"\x0fNULL_VALUE_NULL\x10\x01*\xdd\x01\n" +
+	"\x0fNULL_VALUE_NULL\x10\x01*\xfb\x01\n" +
 	"\vRuntimeKind\x12\x1c\n" +
 	"\x18RUNTIME_KIND_UNSPECIFIED\x10\x00\x12\x16\n" +
 	"\x12RUNTIME_KIND_CODEX\x10\x01\x12\x14\n" +
@@ -13236,7 +13453,8 @@ const file_astrorder_sessiond_v1_sessiond_proto_rawDesc = "" +
 	"\x17RUNTIME_KIND_SSH_HERMES\x10\x04\x12\x1a\n" +
 	"\x16RUNTIME_KIND_CODEX_SSH\x10\x05\x12\x15\n" +
 	"\x11RUNTIME_KIND_GROK\x10\x06\x12\x19\n" +
-	"\x15RUNTIME_KIND_GROK_SSH\x10\a*\xa3\x01\n" +
+	"\x15RUNTIME_KIND_GROK_SSH\x10\a\x12\x1c\n" +
+	"\x18RUNTIME_KIND_ANTIGRAVITY\x10\b*\xa3\x01\n" +
 	"\rSessionStatus\x12\x1e\n" +
 	"\x1aSESSION_STATUS_UNSPECIFIED\x10\x00\x12\x17\n" +
 	"\x13SESSION_STATUS_IDLE\x10\x01\x12\x1a\n" +
@@ -13290,14 +13508,15 @@ const file_astrorder_sessiond_v1_sessiond_proto_rawDesc = "" +
 	"\x18ModelConfigTargetSupport\x12+\n" +
 	"'MODEL_CONFIG_TARGET_SUPPORT_UNSPECIFIED\x10\x00\x12+\n" +
 	"'MODEL_CONFIG_TARGET_SUPPORT_IMPLEMENTED\x10\x01\x12=\n" +
-	"9MODEL_CONFIG_TARGET_SUPPORT_UNSUPPORTED_UNTIL_GO_EXECUTOR\x10\x02*\xcf\x01\n" +
+	"9MODEL_CONFIG_TARGET_SUPPORT_UNSUPPORTED_UNTIL_GO_EXECUTOR\x10\x02*\xf4\x01\n" +
 	"\vManagedFile\x12\x1c\n" +
 	"\x18MANAGED_FILE_UNSPECIFIED\x10\x00\x12\x1d\n" +
 	"\x19MANAGED_FILE_CODEX_CONFIG\x10\x01\x12\x1e\n" +
 	"\x1aMANAGED_FILE_CODEX_CATALOG\x10\x02\x12%\n" +
 	"!MANAGED_FILE_CODEX_MAGPIE_CATALOG\x10\x03\x12\x1c\n" +
 	"\x18MANAGED_FILE_GROK_CONFIG\x10\x04\x12\x1e\n" +
-	"\x1aMANAGED_FILE_HERMES_CONFIG\x10\x05*s\n" +
+	"\x1aMANAGED_FILE_HERMES_CONFIG\x10\x05\x12#\n" +
+	"\x1fMANAGED_FILE_ANTIGRAVITY_CONFIG\x10\x06*s\n" +
 	"\vReloadAgent\x12\x1c\n" +
 	"\x18RELOAD_AGENT_UNSPECIFIED\x10\x00\x12\x16\n" +
 	"\x12RELOAD_AGENT_CODEX\x10\x01\x12\x15\n" +
@@ -13388,7 +13607,7 @@ func file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP() []byte {
 }
 
 var file_astrorder_sessiond_v1_sessiond_proto_enumTypes = make([]protoimpl.EnumInfo, 18)
-var file_astrorder_sessiond_v1_sessiond_proto_msgTypes = make([]protoimpl.MessageInfo, 159)
+var file_astrorder_sessiond_v1_sessiond_proto_msgTypes = make([]protoimpl.MessageInfo, 162)
 var file_astrorder_sessiond_v1_sessiond_proto_goTypes = []any{
 	(ContractLimit)(0),                      // 0: astrorder.sessiond.v1.ContractLimit
 	(CanonicalizationVersion)(0),            // 1: astrorder.sessiond.v1.CanonicalizationVersion
@@ -13435,138 +13654,141 @@ var file_astrorder_sessiond_v1_sessiond_proto_goTypes = []any{
 	(*CodexCreateOptions)(nil),              // 42: astrorder.sessiond.v1.CodexCreateOptions
 	(*HermesCreateOptions)(nil),             // 43: astrorder.sessiond.v1.HermesCreateOptions
 	(*GrokCreateOptions)(nil),               // 44: astrorder.sessiond.v1.GrokCreateOptions
-	(*CreateSessionRequest)(nil),            // 45: astrorder.sessiond.v1.CreateSessionRequest
-	(*AttachSessionRequest)(nil),            // 46: astrorder.sessiond.v1.AttachSessionRequest
-	(*TextInput)(nil),                       // 47: astrorder.sessiond.v1.TextInput
-	(*ImageUrlInput)(nil),                   // 48: astrorder.sessiond.v1.ImageUrlInput
-	(*LocalImageInput)(nil),                 // 49: astrorder.sessiond.v1.LocalImageInput
-	(*SkillRefInput)(nil),                   // 50: astrorder.sessiond.v1.SkillRefInput
-	(*MentionRefInput)(nil),                 // 51: astrorder.sessiond.v1.MentionRefInput
-	(*AttachmentInput)(nil),                 // 52: astrorder.sessiond.v1.AttachmentInput
-	(*InputPart)(nil),                       // 53: astrorder.sessiond.v1.InputPart
-	(*SendPolicy)(nil),                      // 54: astrorder.sessiond.v1.SendPolicy
-	(*SendRequest)(nil),                     // 55: astrorder.sessiond.v1.SendRequest
-	(*SteerRequest)(nil),                    // 56: astrorder.sessiond.v1.SteerRequest
-	(*ReviewTarget)(nil),                    // 57: astrorder.sessiond.v1.ReviewTarget
-	(*StartReviewRequest)(nil),              // 58: astrorder.sessiond.v1.StartReviewRequest
-	(*CompactRequest)(nil),                  // 59: astrorder.sessiond.v1.CompactRequest
-	(*InterruptRequest)(nil),                // 60: astrorder.sessiond.v1.InterruptRequest
-	(*PermissionGrant)(nil),                 // 61: astrorder.sessiond.v1.PermissionGrant
-	(*RespondApprovalRequest)(nil),          // 62: astrorder.sessiond.v1.RespondApprovalRequest
-	(*UpdateSettingsRequest)(nil),           // 63: astrorder.sessiond.v1.UpdateSettingsRequest
-	(*RenameSessionRequest)(nil),            // 64: astrorder.sessiond.v1.RenameSessionRequest
-	(*DeleteSessionRequest)(nil),            // 65: astrorder.sessiond.v1.DeleteSessionRequest
-	(*CloseSessionRequest)(nil),             // 66: astrorder.sessiond.v1.CloseSessionRequest
-	(*DetachSessionRequest)(nil),            // 67: astrorder.sessiond.v1.DetachSessionRequest
-	(*ReportObservedStatusRequest)(nil),     // 68: astrorder.sessiond.v1.ReportObservedStatusRequest
-	(*DesktopTextInput)(nil),                // 69: astrorder.sessiond.v1.DesktopTextInput
-	(*DesktopImageInput)(nil),               // 70: astrorder.sessiond.v1.DesktopImageInput
-	(*DesktopInputPart)(nil),                // 71: astrorder.sessiond.v1.DesktopInputPart
-	(*SubmitDesktopRequest)(nil),            // 72: astrorder.sessiond.v1.SubmitDesktopRequest
-	(*UpdateDesktopSettingsRequest)(nil),    // 73: astrorder.sessiond.v1.UpdateDesktopSettingsRequest
-	(*EmptyNativeQuery)(nil),                // 74: astrorder.sessiond.v1.EmptyNativeQuery
-	(*CodexInitializeQuery)(nil),            // 75: astrorder.sessiond.v1.CodexInitializeQuery
-	(*CodexAccountReadQuery)(nil),           // 76: astrorder.sessiond.v1.CodexAccountReadQuery
-	(*CodexHooksListQuery)(nil),             // 77: astrorder.sessiond.v1.CodexHooksListQuery
-	(*CodexModelListQuery)(nil),             // 78: astrorder.sessiond.v1.CodexModelListQuery
-	(*CodexSkillsListQuery)(nil),            // 79: astrorder.sessiond.v1.CodexSkillsListQuery
-	(*CodexThreadItemsListQuery)(nil),       // 80: astrorder.sessiond.v1.CodexThreadItemsListQuery
-	(*CodexThreadListQuery)(nil),            // 81: astrorder.sessiond.v1.CodexThreadListQuery
-	(*CodexThreadLoadedListQuery)(nil),      // 82: astrorder.sessiond.v1.CodexThreadLoadedListQuery
-	(*CodexThreadReadQuery)(nil),            // 83: astrorder.sessiond.v1.CodexThreadReadQuery
-	(*HermesSessionListQuery)(nil),          // 84: astrorder.sessiond.v1.HermesSessionListQuery
-	(*HermesActiveListQuery)(nil),           // 85: astrorder.sessiond.v1.HermesActiveListQuery
-	(*HermesProjectsTreeQuery)(nil),         // 86: astrorder.sessiond.v1.HermesProjectsTreeQuery
-	(*HermesProjectSessionsQuery)(nil),      // 87: astrorder.sessiond.v1.HermesProjectSessionsQuery
-	(*HermesSessionHistoryQuery)(nil),       // 88: astrorder.sessiond.v1.HermesSessionHistoryQuery
-	(*HermesModelsListQuery)(nil),           // 89: astrorder.sessiond.v1.HermesModelsListQuery
-	(*HermesCommandsListQuery)(nil),         // 90: astrorder.sessiond.v1.HermesCommandsListQuery
-	(*GrokInitializeQuery)(nil),             // 91: astrorder.sessiond.v1.GrokInitializeQuery
-	(*GrokSessionListQuery)(nil),            // 92: astrorder.sessiond.v1.GrokSessionListQuery
-	(*NativeQueryRequest)(nil),              // 93: astrorder.sessiond.v1.NativeQueryRequest
-	(*NativeQueryResponse)(nil),             // 94: astrorder.sessiond.v1.NativeQueryResponse
-	(*HistoryPageRequest)(nil),              // 95: astrorder.sessiond.v1.HistoryPageRequest
-	(*HistoryPageResponse)(nil),             // 96: astrorder.sessiond.v1.HistoryPageResponse
-	(*ListBackgroundProcessesRequest)(nil),  // 97: astrorder.sessiond.v1.ListBackgroundProcessesRequest
-	(*ListBackgroundProcessesResponse)(nil), // 98: astrorder.sessiond.v1.ListBackgroundProcessesResponse
-	(*ListModelsRequest)(nil),               // 99: astrorder.sessiond.v1.ListModelsRequest
-	(*ModelOption)(nil),                     // 100: astrorder.sessiond.v1.ModelOption
-	(*ListModelsResponse)(nil),              // 101: astrorder.sessiond.v1.ListModelsResponse
-	(*ListCommandsRequest)(nil),             // 102: astrorder.sessiond.v1.ListCommandsRequest
-	(*CommandOption)(nil),                   // 103: astrorder.sessiond.v1.CommandOption
-	(*ListCommandsResponse)(nil),            // 104: astrorder.sessiond.v1.ListCommandsResponse
-	(*ReadModelRequest)(nil),                // 105: astrorder.sessiond.v1.ReadModelRequest
-	(*ModelState)(nil),                      // 106: astrorder.sessiond.v1.ModelState
-	(*SetModelRequest)(nil),                 // 107: astrorder.sessiond.v1.SetModelRequest
-	(*SetReasoningRequest)(nil),             // 108: astrorder.sessiond.v1.SetReasoningRequest
-	(*ReadApprovalModeRequest)(nil),         // 109: astrorder.sessiond.v1.ReadApprovalModeRequest
-	(*SetGoalRequest)(nil),                  // 110: astrorder.sessiond.v1.SetGoalRequest
-	(*ClearGoalRequest)(nil),                // 111: astrorder.sessiond.v1.ClearGoalRequest
-	(*ApprovalModeState)(nil),               // 112: astrorder.sessiond.v1.ApprovalModeState
-	(*SetApprovalModeRequest)(nil),          // 113: astrorder.sessiond.v1.SetApprovalModeRequest
-	(*DisconnectRuntimeRequest)(nil),        // 114: astrorder.sessiond.v1.DisconnectRuntimeRequest
-	(*DisconnectRuntimeResponse)(nil),       // 115: astrorder.sessiond.v1.DisconnectRuntimeResponse
-	(*SessionCursor)(nil),                   // 116: astrorder.sessiond.v1.SessionCursor
-	(*SubscribeRequest)(nil),                // 117: astrorder.sessiond.v1.SubscribeRequest
-	(*RuntimeOwnerEvent)(nil),               // 118: astrorder.sessiond.v1.RuntimeOwnerEvent
-	(*OwnershipLostEvent)(nil),              // 119: astrorder.sessiond.v1.OwnershipLostEvent
-	(*PtyOutputEvent)(nil),                  // 120: astrorder.sessiond.v1.PtyOutputEvent
-	(*ConnectorEventPayload)(nil),           // 121: astrorder.sessiond.v1.ConnectorEventPayload
-	(*EventEnvelope)(nil),                   // 122: astrorder.sessiond.v1.EventEnvelope
-	(*StateSnapshot)(nil),                   // 123: astrorder.sessiond.v1.StateSnapshot
-	(*SessionWatermark)(nil),                // 124: astrorder.sessiond.v1.SessionWatermark
-	(*LiveReady)(nil),                       // 125: astrorder.sessiond.v1.LiveReady
-	(*ResyncRequired)(nil),                  // 126: astrorder.sessiond.v1.ResyncRequired
-	(*StreamOverflow)(nil),                  // 127: astrorder.sessiond.v1.StreamOverflow
-	(*EventStreamFrame)(nil),                // 128: astrorder.sessiond.v1.EventStreamFrame
-	(*AppendEventRequest)(nil),              // 129: astrorder.sessiond.v1.AppendEventRequest
-	(*AppendEventResponse)(nil),             // 130: astrorder.sessiond.v1.AppendEventResponse
-	(*OpenTerminal)(nil),                    // 131: astrorder.sessiond.v1.OpenTerminal
-	(*TerminalInput)(nil),                   // 132: astrorder.sessiond.v1.TerminalInput
-	(*TerminalResize)(nil),                  // 133: astrorder.sessiond.v1.TerminalResize
-	(*TerminalInterrupt)(nil),               // 134: astrorder.sessiond.v1.TerminalInterrupt
-	(*TerminalClose)(nil),                   // 135: astrorder.sessiond.v1.TerminalClose
-	(*TerminalClientFrame)(nil),             // 136: astrorder.sessiond.v1.TerminalClientFrame
-	(*TerminalOpened)(nil),                  // 137: astrorder.sessiond.v1.TerminalOpened
-	(*TerminalOutput)(nil),                  // 138: astrorder.sessiond.v1.TerminalOutput
-	(*TerminalExit)(nil),                    // 139: astrorder.sessiond.v1.TerminalExit
-	(*TerminalOverflow)(nil),                // 140: astrorder.sessiond.v1.TerminalOverflow
-	(*TerminalServerFrame)(nil),             // 141: astrorder.sessiond.v1.TerminalServerFrame
-	(*OperationKey)(nil),                    // 142: astrorder.sessiond.v1.OperationKey
-	(*GetOperationRequest)(nil),             // 143: astrorder.sessiond.v1.GetOperationRequest
-	(*OperationReceipt)(nil),                // 144: astrorder.sessiond.v1.OperationReceipt
-	(*LocalTarget)(nil),                     // 145: astrorder.sessiond.v1.LocalTarget
-	(*WslTarget)(nil),                       // 146: astrorder.sessiond.v1.WslTarget
-	(*SshTarget)(nil),                       // 147: astrorder.sessiond.v1.SshTarget
-	(*ModelConfigTarget)(nil),               // 148: astrorder.sessiond.v1.ModelConfigTarget
-	(*ModelConfigFileInput)(nil),            // 149: astrorder.sessiond.v1.ModelConfigFileInput
-	(*SensitiveEnvironmentValue)(nil),       // 150: astrorder.sessiond.v1.SensitiveEnvironmentValue
-	(*ModelConfigPlanRequest)(nil),          // 151: astrorder.sessiond.v1.ModelConfigPlanRequest
-	(*ModelConfigFileState)(nil),            // 152: astrorder.sessiond.v1.ModelConfigFileState
-	(*ModelConfigChange)(nil),               // 153: astrorder.sessiond.v1.ModelConfigChange
-	(*ModelConfigPlanResponse)(nil),         // 154: astrorder.sessiond.v1.ModelConfigPlanResponse
-	(*ModelConfigApplyRequest)(nil),         // 155: astrorder.sessiond.v1.ModelConfigApplyRequest
-	(*FileDigest)(nil),                      // 156: astrorder.sessiond.v1.FileDigest
-	(*ModelConfigApplyResponse)(nil),        // 157: astrorder.sessiond.v1.ModelConfigApplyResponse
-	(*ModelConfigReloadRequest)(nil),        // 158: astrorder.sessiond.v1.ModelConfigReloadRequest
-	(*ModelConfigReloadResponse)(nil),       // 159: astrorder.sessiond.v1.ModelConfigReloadResponse
-	(*ConnectorAgent)(nil),                  // 160: astrorder.sessiond.v1.ConnectorAgent
-	(*ConnectorHello)(nil),                  // 161: astrorder.sessiond.v1.ConnectorHello
-	(*ConnectorHeartbeat)(nil),              // 162: astrorder.sessiond.v1.ConnectorHeartbeat
-	(*ConnectorEvent)(nil),                  // 163: astrorder.sessiond.v1.ConnectorEvent
-	(*ConnectorDisconnect)(nil),             // 164: astrorder.sessiond.v1.ConnectorDisconnect
-	(*ConnectorIngressFrame)(nil),           // 165: astrorder.sessiond.v1.ConnectorIngressFrame
-	(*ConnectorRegistered)(nil),             // 166: astrorder.sessiond.v1.ConnectorRegistered
-	(*ConnectorEventAccepted)(nil),          // 167: astrorder.sessiond.v1.ConnectorEventAccepted
-	(*ConnectorRejected)(nil),               // 168: astrorder.sessiond.v1.ConnectorRejected
-	(*ConnectorOverflow)(nil),               // 169: astrorder.sessiond.v1.ConnectorOverflow
-	(*ConnectorDisconnected)(nil),           // 170: astrorder.sessiond.v1.ConnectorDisconnected
-	(*ConnectorHeartbeatAck)(nil),           // 171: astrorder.sessiond.v1.ConnectorHeartbeatAck
-	(*ConnectorIngressAck)(nil),             // 172: astrorder.sessiond.v1.ConnectorIngressAck
-	(*BindControlSessionRequest)(nil),       // 173: astrorder.sessiond.v1.BindControlSessionRequest
-	(*BindControlSessionResponse)(nil),      // 174: astrorder.sessiond.v1.BindControlSessionResponse
-	(*DisconnectConnectorRequest)(nil),      // 175: astrorder.sessiond.v1.DisconnectConnectorRequest
-	(*DisconnectConnectorResponse)(nil),     // 176: astrorder.sessiond.v1.DisconnectConnectorResponse
+	(*AntigravityCreateOptions)(nil),        // 45: astrorder.sessiond.v1.AntigravityCreateOptions
+	(*CreateSessionRequest)(nil),            // 46: astrorder.sessiond.v1.CreateSessionRequest
+	(*AttachSessionRequest)(nil),            // 47: astrorder.sessiond.v1.AttachSessionRequest
+	(*TextInput)(nil),                       // 48: astrorder.sessiond.v1.TextInput
+	(*ImageUrlInput)(nil),                   // 49: astrorder.sessiond.v1.ImageUrlInput
+	(*LocalImageInput)(nil),                 // 50: astrorder.sessiond.v1.LocalImageInput
+	(*SkillRefInput)(nil),                   // 51: astrorder.sessiond.v1.SkillRefInput
+	(*MentionRefInput)(nil),                 // 52: astrorder.sessiond.v1.MentionRefInput
+	(*AttachmentInput)(nil),                 // 53: astrorder.sessiond.v1.AttachmentInput
+	(*InputPart)(nil),                       // 54: astrorder.sessiond.v1.InputPart
+	(*SendPolicy)(nil),                      // 55: astrorder.sessiond.v1.SendPolicy
+	(*SendRequest)(nil),                     // 56: astrorder.sessiond.v1.SendRequest
+	(*SteerRequest)(nil),                    // 57: astrorder.sessiond.v1.SteerRequest
+	(*ReviewTarget)(nil),                    // 58: astrorder.sessiond.v1.ReviewTarget
+	(*StartReviewRequest)(nil),              // 59: astrorder.sessiond.v1.StartReviewRequest
+	(*CompactRequest)(nil),                  // 60: astrorder.sessiond.v1.CompactRequest
+	(*InterruptRequest)(nil),                // 61: astrorder.sessiond.v1.InterruptRequest
+	(*PermissionGrant)(nil),                 // 62: astrorder.sessiond.v1.PermissionGrant
+	(*RespondApprovalRequest)(nil),          // 63: astrorder.sessiond.v1.RespondApprovalRequest
+	(*UpdateSettingsRequest)(nil),           // 64: astrorder.sessiond.v1.UpdateSettingsRequest
+	(*RenameSessionRequest)(nil),            // 65: astrorder.sessiond.v1.RenameSessionRequest
+	(*DeleteSessionRequest)(nil),            // 66: astrorder.sessiond.v1.DeleteSessionRequest
+	(*CloseSessionRequest)(nil),             // 67: astrorder.sessiond.v1.CloseSessionRequest
+	(*DetachSessionRequest)(nil),            // 68: astrorder.sessiond.v1.DetachSessionRequest
+	(*ReportObservedStatusRequest)(nil),     // 69: astrorder.sessiond.v1.ReportObservedStatusRequest
+	(*DesktopTextInput)(nil),                // 70: astrorder.sessiond.v1.DesktopTextInput
+	(*DesktopImageInput)(nil),               // 71: astrorder.sessiond.v1.DesktopImageInput
+	(*DesktopInputPart)(nil),                // 72: astrorder.sessiond.v1.DesktopInputPart
+	(*SubmitDesktopRequest)(nil),            // 73: astrorder.sessiond.v1.SubmitDesktopRequest
+	(*UpdateDesktopSettingsRequest)(nil),    // 74: astrorder.sessiond.v1.UpdateDesktopSettingsRequest
+	(*EmptyNativeQuery)(nil),                // 75: astrorder.sessiond.v1.EmptyNativeQuery
+	(*CodexInitializeQuery)(nil),            // 76: astrorder.sessiond.v1.CodexInitializeQuery
+	(*CodexAccountReadQuery)(nil),           // 77: astrorder.sessiond.v1.CodexAccountReadQuery
+	(*CodexHooksListQuery)(nil),             // 78: astrorder.sessiond.v1.CodexHooksListQuery
+	(*CodexModelListQuery)(nil),             // 79: astrorder.sessiond.v1.CodexModelListQuery
+	(*CodexSkillsListQuery)(nil),            // 80: astrorder.sessiond.v1.CodexSkillsListQuery
+	(*CodexThreadItemsListQuery)(nil),       // 81: astrorder.sessiond.v1.CodexThreadItemsListQuery
+	(*CodexThreadListQuery)(nil),            // 82: astrorder.sessiond.v1.CodexThreadListQuery
+	(*CodexThreadLoadedListQuery)(nil),      // 83: astrorder.sessiond.v1.CodexThreadLoadedListQuery
+	(*CodexThreadReadQuery)(nil),            // 84: astrorder.sessiond.v1.CodexThreadReadQuery
+	(*HermesSessionListQuery)(nil),          // 85: astrorder.sessiond.v1.HermesSessionListQuery
+	(*HermesActiveListQuery)(nil),           // 86: astrorder.sessiond.v1.HermesActiveListQuery
+	(*HermesProjectsTreeQuery)(nil),         // 87: astrorder.sessiond.v1.HermesProjectsTreeQuery
+	(*HermesProjectSessionsQuery)(nil),      // 88: astrorder.sessiond.v1.HermesProjectSessionsQuery
+	(*HermesSessionHistoryQuery)(nil),       // 89: astrorder.sessiond.v1.HermesSessionHistoryQuery
+	(*HermesModelsListQuery)(nil),           // 90: astrorder.sessiond.v1.HermesModelsListQuery
+	(*HermesCommandsListQuery)(nil),         // 91: astrorder.sessiond.v1.HermesCommandsListQuery
+	(*GrokInitializeQuery)(nil),             // 92: astrorder.sessiond.v1.GrokInitializeQuery
+	(*GrokSessionListQuery)(nil),            // 93: astrorder.sessiond.v1.GrokSessionListQuery
+	(*AntigravitySessionListQuery)(nil),     // 94: astrorder.sessiond.v1.AntigravitySessionListQuery
+	(*AntigravityModelsListQuery)(nil),      // 95: astrorder.sessiond.v1.AntigravityModelsListQuery
+	(*NativeQueryRequest)(nil),              // 96: astrorder.sessiond.v1.NativeQueryRequest
+	(*NativeQueryResponse)(nil),             // 97: astrorder.sessiond.v1.NativeQueryResponse
+	(*HistoryPageRequest)(nil),              // 98: astrorder.sessiond.v1.HistoryPageRequest
+	(*HistoryPageResponse)(nil),             // 99: astrorder.sessiond.v1.HistoryPageResponse
+	(*ListBackgroundProcessesRequest)(nil),  // 100: astrorder.sessiond.v1.ListBackgroundProcessesRequest
+	(*ListBackgroundProcessesResponse)(nil), // 101: astrorder.sessiond.v1.ListBackgroundProcessesResponse
+	(*ListModelsRequest)(nil),               // 102: astrorder.sessiond.v1.ListModelsRequest
+	(*ModelOption)(nil),                     // 103: astrorder.sessiond.v1.ModelOption
+	(*ListModelsResponse)(nil),              // 104: astrorder.sessiond.v1.ListModelsResponse
+	(*ListCommandsRequest)(nil),             // 105: astrorder.sessiond.v1.ListCommandsRequest
+	(*CommandOption)(nil),                   // 106: astrorder.sessiond.v1.CommandOption
+	(*ListCommandsResponse)(nil),            // 107: astrorder.sessiond.v1.ListCommandsResponse
+	(*ReadModelRequest)(nil),                // 108: astrorder.sessiond.v1.ReadModelRequest
+	(*ModelState)(nil),                      // 109: astrorder.sessiond.v1.ModelState
+	(*SetModelRequest)(nil),                 // 110: astrorder.sessiond.v1.SetModelRequest
+	(*SetReasoningRequest)(nil),             // 111: astrorder.sessiond.v1.SetReasoningRequest
+	(*ReadApprovalModeRequest)(nil),         // 112: astrorder.sessiond.v1.ReadApprovalModeRequest
+	(*SetGoalRequest)(nil),                  // 113: astrorder.sessiond.v1.SetGoalRequest
+	(*ClearGoalRequest)(nil),                // 114: astrorder.sessiond.v1.ClearGoalRequest
+	(*ApprovalModeState)(nil),               // 115: astrorder.sessiond.v1.ApprovalModeState
+	(*SetApprovalModeRequest)(nil),          // 116: astrorder.sessiond.v1.SetApprovalModeRequest
+	(*DisconnectRuntimeRequest)(nil),        // 117: astrorder.sessiond.v1.DisconnectRuntimeRequest
+	(*DisconnectRuntimeResponse)(nil),       // 118: astrorder.sessiond.v1.DisconnectRuntimeResponse
+	(*SessionCursor)(nil),                   // 119: astrorder.sessiond.v1.SessionCursor
+	(*SubscribeRequest)(nil),                // 120: astrorder.sessiond.v1.SubscribeRequest
+	(*RuntimeOwnerEvent)(nil),               // 121: astrorder.sessiond.v1.RuntimeOwnerEvent
+	(*OwnershipLostEvent)(nil),              // 122: astrorder.sessiond.v1.OwnershipLostEvent
+	(*PtyOutputEvent)(nil),                  // 123: astrorder.sessiond.v1.PtyOutputEvent
+	(*ConnectorEventPayload)(nil),           // 124: astrorder.sessiond.v1.ConnectorEventPayload
+	(*EventEnvelope)(nil),                   // 125: astrorder.sessiond.v1.EventEnvelope
+	(*StateSnapshot)(nil),                   // 126: astrorder.sessiond.v1.StateSnapshot
+	(*SessionWatermark)(nil),                // 127: astrorder.sessiond.v1.SessionWatermark
+	(*LiveReady)(nil),                       // 128: astrorder.sessiond.v1.LiveReady
+	(*ResyncRequired)(nil),                  // 129: astrorder.sessiond.v1.ResyncRequired
+	(*StreamOverflow)(nil),                  // 130: astrorder.sessiond.v1.StreamOverflow
+	(*EventStreamFrame)(nil),                // 131: astrorder.sessiond.v1.EventStreamFrame
+	(*AppendEventRequest)(nil),              // 132: astrorder.sessiond.v1.AppendEventRequest
+	(*AppendEventResponse)(nil),             // 133: astrorder.sessiond.v1.AppendEventResponse
+	(*OpenTerminal)(nil),                    // 134: astrorder.sessiond.v1.OpenTerminal
+	(*TerminalInput)(nil),                   // 135: astrorder.sessiond.v1.TerminalInput
+	(*TerminalResize)(nil),                  // 136: astrorder.sessiond.v1.TerminalResize
+	(*TerminalInterrupt)(nil),               // 137: astrorder.sessiond.v1.TerminalInterrupt
+	(*TerminalClose)(nil),                   // 138: astrorder.sessiond.v1.TerminalClose
+	(*TerminalClientFrame)(nil),             // 139: astrorder.sessiond.v1.TerminalClientFrame
+	(*TerminalOpened)(nil),                  // 140: astrorder.sessiond.v1.TerminalOpened
+	(*TerminalOutput)(nil),                  // 141: astrorder.sessiond.v1.TerminalOutput
+	(*TerminalExit)(nil),                    // 142: astrorder.sessiond.v1.TerminalExit
+	(*TerminalOverflow)(nil),                // 143: astrorder.sessiond.v1.TerminalOverflow
+	(*TerminalServerFrame)(nil),             // 144: astrorder.sessiond.v1.TerminalServerFrame
+	(*OperationKey)(nil),                    // 145: astrorder.sessiond.v1.OperationKey
+	(*GetOperationRequest)(nil),             // 146: astrorder.sessiond.v1.GetOperationRequest
+	(*OperationReceipt)(nil),                // 147: astrorder.sessiond.v1.OperationReceipt
+	(*LocalTarget)(nil),                     // 148: astrorder.sessiond.v1.LocalTarget
+	(*WslTarget)(nil),                       // 149: astrorder.sessiond.v1.WslTarget
+	(*SshTarget)(nil),                       // 150: astrorder.sessiond.v1.SshTarget
+	(*ModelConfigTarget)(nil),               // 151: astrorder.sessiond.v1.ModelConfigTarget
+	(*ModelConfigFileInput)(nil),            // 152: astrorder.sessiond.v1.ModelConfigFileInput
+	(*SensitiveEnvironmentValue)(nil),       // 153: astrorder.sessiond.v1.SensitiveEnvironmentValue
+	(*ModelConfigPlanRequest)(nil),          // 154: astrorder.sessiond.v1.ModelConfigPlanRequest
+	(*ModelConfigFileState)(nil),            // 155: astrorder.sessiond.v1.ModelConfigFileState
+	(*ModelConfigChange)(nil),               // 156: astrorder.sessiond.v1.ModelConfigChange
+	(*ModelConfigPlanResponse)(nil),         // 157: astrorder.sessiond.v1.ModelConfigPlanResponse
+	(*ModelConfigApplyRequest)(nil),         // 158: astrorder.sessiond.v1.ModelConfigApplyRequest
+	(*FileDigest)(nil),                      // 159: astrorder.sessiond.v1.FileDigest
+	(*ModelConfigApplyResponse)(nil),        // 160: astrorder.sessiond.v1.ModelConfigApplyResponse
+	(*ModelConfigReloadRequest)(nil),        // 161: astrorder.sessiond.v1.ModelConfigReloadRequest
+	(*ModelConfigReloadResponse)(nil),       // 162: astrorder.sessiond.v1.ModelConfigReloadResponse
+	(*ConnectorAgent)(nil),                  // 163: astrorder.sessiond.v1.ConnectorAgent
+	(*ConnectorHello)(nil),                  // 164: astrorder.sessiond.v1.ConnectorHello
+	(*ConnectorHeartbeat)(nil),              // 165: astrorder.sessiond.v1.ConnectorHeartbeat
+	(*ConnectorEvent)(nil),                  // 166: astrorder.sessiond.v1.ConnectorEvent
+	(*ConnectorDisconnect)(nil),             // 167: astrorder.sessiond.v1.ConnectorDisconnect
+	(*ConnectorIngressFrame)(nil),           // 168: astrorder.sessiond.v1.ConnectorIngressFrame
+	(*ConnectorRegistered)(nil),             // 169: astrorder.sessiond.v1.ConnectorRegistered
+	(*ConnectorEventAccepted)(nil),          // 170: astrorder.sessiond.v1.ConnectorEventAccepted
+	(*ConnectorRejected)(nil),               // 171: astrorder.sessiond.v1.ConnectorRejected
+	(*ConnectorOverflow)(nil),               // 172: astrorder.sessiond.v1.ConnectorOverflow
+	(*ConnectorDisconnected)(nil),           // 173: astrorder.sessiond.v1.ConnectorDisconnected
+	(*ConnectorHeartbeatAck)(nil),           // 174: astrorder.sessiond.v1.ConnectorHeartbeatAck
+	(*ConnectorIngressAck)(nil),             // 175: astrorder.sessiond.v1.ConnectorIngressAck
+	(*BindControlSessionRequest)(nil),       // 176: astrorder.sessiond.v1.BindControlSessionRequest
+	(*BindControlSessionResponse)(nil),      // 177: astrorder.sessiond.v1.BindControlSessionResponse
+	(*DisconnectConnectorRequest)(nil),      // 178: astrorder.sessiond.v1.DisconnectConnectorRequest
+	(*DisconnectConnectorResponse)(nil),     // 179: astrorder.sessiond.v1.DisconnectConnectorResponse
 }
 var file_astrorder_sessiond_v1_sessiond_proto_depIdxs = []int32{
 	3,   // 0: astrorder.sessiond.v1.NullableString.null:type_name -> astrorder.sessiond.v1.NullValue
@@ -13574,7 +13796,7 @@ var file_astrorder_sessiond_v1_sessiond_proto_depIdxs = []int32{
 	20,  // 2: astrorder.sessiond.v1.InteropFixture.present:type_name -> astrorder.sessiond.v1.PresenceFixture
 	20,  // 3: astrorder.sessiond.v1.InteropFixture.absent:type_name -> astrorder.sessiond.v1.PresenceFixture
 	18,  // 4: astrorder.sessiond.v1.InteropFixture.native:type_name -> astrorder.sessiond.v1.NativeJson
-	138, // 5: astrorder.sessiond.v1.InteropFixture.terminal:type_name -> astrorder.sessiond.v1.TerminalOutput
+	141, // 5: astrorder.sessiond.v1.InteropFixture.terminal:type_name -> astrorder.sessiond.v1.TerminalOutput
 	17,  // 6: astrorder.sessiond.v1.SshOptions.log_level:type_name -> astrorder.sessiond.v1.SshLogLevel
 	23,  // 7: astrorder.sessiond.v1.SshConnectConfig.options:type_name -> astrorder.sessiond.v1.SshOptions
 	4,   // 8: astrorder.sessiond.v1.RuntimeTarget.runtime:type_name -> astrorder.sessiond.v1.RuntimeKind
@@ -13618,326 +13840,329 @@ var file_astrorder_sessiond_v1_sessiond_proto_depIdxs = []int32{
 	42,  // 46: astrorder.sessiond.v1.CreateSessionRequest.codex:type_name -> astrorder.sessiond.v1.CodexCreateOptions
 	43,  // 47: astrorder.sessiond.v1.CreateSessionRequest.hermes:type_name -> astrorder.sessiond.v1.HermesCreateOptions
 	44,  // 48: astrorder.sessiond.v1.CreateSessionRequest.grok:type_name -> astrorder.sessiond.v1.GrokCreateOptions
-	26,  // 49: astrorder.sessiond.v1.AttachSessionRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
-	25,  // 50: astrorder.sessiond.v1.AttachSessionRequest.target:type_name -> astrorder.sessiond.v1.RuntimeTarget
-	18,  // 51: astrorder.sessiond.v1.AttachSessionRequest.native_options:type_name -> astrorder.sessiond.v1.NativeJson
-	47,  // 52: astrorder.sessiond.v1.InputPart.text:type_name -> astrorder.sessiond.v1.TextInput
-	48,  // 53: astrorder.sessiond.v1.InputPart.image_url:type_name -> astrorder.sessiond.v1.ImageUrlInput
-	49,  // 54: astrorder.sessiond.v1.InputPart.local_image:type_name -> astrorder.sessiond.v1.LocalImageInput
-	50,  // 55: astrorder.sessiond.v1.InputPart.skill:type_name -> astrorder.sessiond.v1.SkillRefInput
-	51,  // 56: astrorder.sessiond.v1.InputPart.mention:type_name -> astrorder.sessiond.v1.MentionRefInput
-	52,  // 57: astrorder.sessiond.v1.InputPart.attachment:type_name -> astrorder.sessiond.v1.AttachmentInput
-	18,  // 58: astrorder.sessiond.v1.SendPolicy.native_options:type_name -> astrorder.sessiond.v1.NativeJson
-	27,  // 59: astrorder.sessiond.v1.SendRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
-	26,  // 60: astrorder.sessiond.v1.SendRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
-	53,  // 61: astrorder.sessiond.v1.SendRequest.input:type_name -> astrorder.sessiond.v1.InputPart
-	54,  // 62: astrorder.sessiond.v1.SendRequest.policy:type_name -> astrorder.sessiond.v1.SendPolicy
-	27,  // 63: astrorder.sessiond.v1.SteerRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
-	26,  // 64: astrorder.sessiond.v1.SteerRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
-	53,  // 65: astrorder.sessiond.v1.SteerRequest.input:type_name -> astrorder.sessiond.v1.InputPart
-	18,  // 66: astrorder.sessiond.v1.ReviewTarget.native:type_name -> astrorder.sessiond.v1.NativeJson
-	27,  // 67: astrorder.sessiond.v1.StartReviewRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
-	26,  // 68: astrorder.sessiond.v1.StartReviewRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
-	57,  // 69: astrorder.sessiond.v1.StartReviewRequest.target:type_name -> astrorder.sessiond.v1.ReviewTarget
-	10,  // 70: astrorder.sessiond.v1.StartReviewRequest.delivery:type_name -> astrorder.sessiond.v1.ReviewDelivery
-	27,  // 71: astrorder.sessiond.v1.CompactRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
-	26,  // 72: astrorder.sessiond.v1.CompactRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
-	27,  // 73: astrorder.sessiond.v1.InterruptRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
-	26,  // 74: astrorder.sessiond.v1.InterruptRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
-	18,  // 75: astrorder.sessiond.v1.PermissionGrant.native:type_name -> astrorder.sessiond.v1.NativeJson
-	27,  // 76: astrorder.sessiond.v1.RespondApprovalRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
-	26,  // 77: astrorder.sessiond.v1.RespondApprovalRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
-	22,  // 78: astrorder.sessiond.v1.RespondApprovalRequest.approval_id:type_name -> astrorder.sessiond.v1.ExactIdentifier
-	9,   // 79: astrorder.sessiond.v1.RespondApprovalRequest.decision:type_name -> astrorder.sessiond.v1.ApprovalDecision
-	61,  // 80: astrorder.sessiond.v1.RespondApprovalRequest.permissions:type_name -> astrorder.sessiond.v1.PermissionGrant
-	18,  // 81: astrorder.sessiond.v1.RespondApprovalRequest.user_input:type_name -> astrorder.sessiond.v1.NativeJson
-	27,  // 82: astrorder.sessiond.v1.UpdateSettingsRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
-	26,  // 83: astrorder.sessiond.v1.UpdateSettingsRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
-	27,  // 84: astrorder.sessiond.v1.RenameSessionRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
-	26,  // 85: astrorder.sessiond.v1.RenameSessionRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
-	27,  // 86: astrorder.sessiond.v1.DeleteSessionRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
-	26,  // 87: astrorder.sessiond.v1.DeleteSessionRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
-	27,  // 88: astrorder.sessiond.v1.CloseSessionRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
-	26,  // 89: astrorder.sessiond.v1.CloseSessionRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
-	27,  // 90: astrorder.sessiond.v1.DetachSessionRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
-	26,  // 91: astrorder.sessiond.v1.DetachSessionRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
-	26,  // 92: astrorder.sessiond.v1.ReportObservedStatusRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
-	6,   // 93: astrorder.sessiond.v1.ReportObservedStatusRequest.observed_active_status:type_name -> astrorder.sessiond.v1.ObservedActiveStatus
-	69,  // 94: astrorder.sessiond.v1.DesktopInputPart.text:type_name -> astrorder.sessiond.v1.DesktopTextInput
-	70,  // 95: astrorder.sessiond.v1.DesktopInputPart.image:type_name -> astrorder.sessiond.v1.DesktopImageInput
-	27,  // 96: astrorder.sessiond.v1.SubmitDesktopRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
-	26,  // 97: astrorder.sessiond.v1.SubmitDesktopRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
-	71,  // 98: astrorder.sessiond.v1.SubmitDesktopRequest.input:type_name -> astrorder.sessiond.v1.DesktopInputPart
-	27,  // 99: astrorder.sessiond.v1.UpdateDesktopSettingsRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
-	26,  // 100: astrorder.sessiond.v1.UpdateDesktopSettingsRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
-	18,  // 101: astrorder.sessiond.v1.EmptyNativeQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
-	18,  // 102: astrorder.sessiond.v1.CodexInitializeQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
-	18,  // 103: astrorder.sessiond.v1.CodexAccountReadQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
-	18,  // 104: astrorder.sessiond.v1.CodexHooksListQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
-	19,  // 105: astrorder.sessiond.v1.CodexModelListQuery.cursor:type_name -> astrorder.sessiond.v1.NullableString
-	18,  // 106: astrorder.sessiond.v1.CodexModelListQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
-	18,  // 107: astrorder.sessiond.v1.CodexSkillsListQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
-	19,  // 108: astrorder.sessiond.v1.CodexThreadItemsListQuery.cursor:type_name -> astrorder.sessiond.v1.NullableString
-	18,  // 109: astrorder.sessiond.v1.CodexThreadItemsListQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
-	19,  // 110: astrorder.sessiond.v1.CodexThreadListQuery.cursor:type_name -> astrorder.sessiond.v1.NullableString
-	18,  // 111: astrorder.sessiond.v1.CodexThreadListQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
-	18,  // 112: astrorder.sessiond.v1.CodexThreadLoadedListQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
-	18,  // 113: astrorder.sessiond.v1.CodexThreadReadQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
-	18,  // 114: astrorder.sessiond.v1.HermesSessionListQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
-	18,  // 115: astrorder.sessiond.v1.HermesActiveListQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
-	18,  // 116: astrorder.sessiond.v1.HermesProjectsTreeQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
-	18,  // 117: astrorder.sessiond.v1.HermesProjectSessionsQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
-	19,  // 118: astrorder.sessiond.v1.HermesSessionHistoryQuery.before:type_name -> astrorder.sessiond.v1.NullableString
-	18,  // 119: astrorder.sessiond.v1.HermesSessionHistoryQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
-	18,  // 120: astrorder.sessiond.v1.HermesModelsListQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
-	18,  // 121: astrorder.sessiond.v1.HermesCommandsListQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
-	18,  // 122: astrorder.sessiond.v1.GrokInitializeQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
-	25,  // 123: astrorder.sessiond.v1.NativeQueryRequest.target:type_name -> astrorder.sessiond.v1.RuntimeTarget
-	18,  // 124: astrorder.sessiond.v1.NativeQueryRequest.top_level_payload:type_name -> astrorder.sessiond.v1.NativeJson
-	75,  // 125: astrorder.sessiond.v1.NativeQueryRequest.codex_initialize:type_name -> astrorder.sessiond.v1.CodexInitializeQuery
-	76,  // 126: astrorder.sessiond.v1.NativeQueryRequest.codex_account_read:type_name -> astrorder.sessiond.v1.CodexAccountReadQuery
-	77,  // 127: astrorder.sessiond.v1.NativeQueryRequest.codex_hooks_list:type_name -> astrorder.sessiond.v1.CodexHooksListQuery
-	78,  // 128: astrorder.sessiond.v1.NativeQueryRequest.codex_model_list:type_name -> astrorder.sessiond.v1.CodexModelListQuery
-	79,  // 129: astrorder.sessiond.v1.NativeQueryRequest.codex_skills_list:type_name -> astrorder.sessiond.v1.CodexSkillsListQuery
-	80,  // 130: astrorder.sessiond.v1.NativeQueryRequest.codex_thread_items_list:type_name -> astrorder.sessiond.v1.CodexThreadItemsListQuery
-	81,  // 131: astrorder.sessiond.v1.NativeQueryRequest.codex_thread_list:type_name -> astrorder.sessiond.v1.CodexThreadListQuery
-	82,  // 132: astrorder.sessiond.v1.NativeQueryRequest.codex_thread_loaded_list:type_name -> astrorder.sessiond.v1.CodexThreadLoadedListQuery
-	83,  // 133: astrorder.sessiond.v1.NativeQueryRequest.codex_thread_read:type_name -> astrorder.sessiond.v1.CodexThreadReadQuery
-	84,  // 134: astrorder.sessiond.v1.NativeQueryRequest.hermes_session_list:type_name -> astrorder.sessiond.v1.HermesSessionListQuery
-	85,  // 135: astrorder.sessiond.v1.NativeQueryRequest.hermes_active_list:type_name -> astrorder.sessiond.v1.HermesActiveListQuery
-	86,  // 136: astrorder.sessiond.v1.NativeQueryRequest.hermes_projects_tree:type_name -> astrorder.sessiond.v1.HermesProjectsTreeQuery
-	87,  // 137: astrorder.sessiond.v1.NativeQueryRequest.hermes_project_sessions:type_name -> astrorder.sessiond.v1.HermesProjectSessionsQuery
-	88,  // 138: astrorder.sessiond.v1.NativeQueryRequest.hermes_session_history:type_name -> astrorder.sessiond.v1.HermesSessionHistoryQuery
-	89,  // 139: astrorder.sessiond.v1.NativeQueryRequest.hermes_models_list:type_name -> astrorder.sessiond.v1.HermesModelsListQuery
-	90,  // 140: astrorder.sessiond.v1.NativeQueryRequest.hermes_commands_list:type_name -> astrorder.sessiond.v1.HermesCommandsListQuery
-	91,  // 141: astrorder.sessiond.v1.NativeQueryRequest.grok_initialize:type_name -> astrorder.sessiond.v1.GrokInitializeQuery
-	92,  // 142: astrorder.sessiond.v1.NativeQueryRequest.grok_session_list:type_name -> astrorder.sessiond.v1.GrokSessionListQuery
-	25,  // 143: astrorder.sessiond.v1.NativeQueryResponse.target:type_name -> astrorder.sessiond.v1.RuntimeTarget
-	18,  // 144: astrorder.sessiond.v1.NativeQueryResponse.result:type_name -> astrorder.sessiond.v1.NativeJson
-	26,  // 145: astrorder.sessiond.v1.HistoryPageRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
-	19,  // 146: astrorder.sessiond.v1.HistoryPageRequest.before:type_name -> astrorder.sessiond.v1.NullableString
-	26,  // 147: astrorder.sessiond.v1.HistoryPageResponse.session:type_name -> astrorder.sessiond.v1.SessionRef
-	18,  // 148: astrorder.sessiond.v1.HistoryPageResponse.items:type_name -> astrorder.sessiond.v1.NativeJson
-	19,  // 149: astrorder.sessiond.v1.HistoryPageResponse.next_cursor:type_name -> astrorder.sessiond.v1.NullableString
-	18,  // 150: astrorder.sessiond.v1.HistoryPageResponse.native:type_name -> astrorder.sessiond.v1.NativeJson
-	26,  // 151: astrorder.sessiond.v1.ListBackgroundProcessesRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
-	18,  // 152: astrorder.sessiond.v1.ListBackgroundProcessesResponse.processes:type_name -> astrorder.sessiond.v1.NativeJson
-	26,  // 153: astrorder.sessiond.v1.ListModelsRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
-	18,  // 154: astrorder.sessiond.v1.ModelOption.native:type_name -> astrorder.sessiond.v1.NativeJson
-	100, // 155: astrorder.sessiond.v1.ListModelsResponse.items:type_name -> astrorder.sessiond.v1.ModelOption
-	26,  // 156: astrorder.sessiond.v1.ListCommandsRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
-	18,  // 157: astrorder.sessiond.v1.CommandOption.native:type_name -> astrorder.sessiond.v1.NativeJson
-	103, // 158: astrorder.sessiond.v1.ListCommandsResponse.items:type_name -> astrorder.sessiond.v1.CommandOption
-	26,  // 159: astrorder.sessiond.v1.ReadModelRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
-	26,  // 160: astrorder.sessiond.v1.ModelState.session:type_name -> astrorder.sessiond.v1.SessionRef
-	18,  // 161: astrorder.sessiond.v1.ModelState.native:type_name -> astrorder.sessiond.v1.NativeJson
-	27,  // 162: astrorder.sessiond.v1.SetModelRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
-	26,  // 163: astrorder.sessiond.v1.SetModelRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
-	27,  // 164: astrorder.sessiond.v1.SetReasoningRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
-	26,  // 165: astrorder.sessiond.v1.SetReasoningRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
-	26,  // 166: astrorder.sessiond.v1.ReadApprovalModeRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
-	27,  // 167: astrorder.sessiond.v1.SetGoalRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
-	26,  // 168: astrorder.sessiond.v1.SetGoalRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
-	27,  // 169: astrorder.sessiond.v1.ClearGoalRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
-	26,  // 170: astrorder.sessiond.v1.ClearGoalRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
-	26,  // 171: astrorder.sessiond.v1.ApprovalModeState.session:type_name -> astrorder.sessiond.v1.SessionRef
-	27,  // 172: astrorder.sessiond.v1.SetApprovalModeRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
-	26,  // 173: astrorder.sessiond.v1.SetApprovalModeRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
-	27,  // 174: astrorder.sessiond.v1.DisconnectRuntimeRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
-	25,  // 175: astrorder.sessiond.v1.DisconnectRuntimeRequest.target:type_name -> astrorder.sessiond.v1.RuntimeTarget
-	7,   // 176: astrorder.sessiond.v1.DisconnectRuntimeResponse.operation_state:type_name -> astrorder.sessiond.v1.OperationState
-	28,  // 177: astrorder.sessiond.v1.DisconnectRuntimeResponse.error:type_name -> astrorder.sessiond.v1.BusinessError
-	26,  // 178: astrorder.sessiond.v1.SessionCursor.session:type_name -> astrorder.sessiond.v1.SessionRef
-	116, // 179: astrorder.sessiond.v1.SubscribeRequest.cursors:type_name -> astrorder.sessiond.v1.SessionCursor
-	5,   // 180: astrorder.sessiond.v1.OwnershipLostEvent.previous_status:type_name -> astrorder.sessiond.v1.SessionStatus
-	18,  // 181: astrorder.sessiond.v1.ConnectorEventPayload.data:type_name -> astrorder.sessiond.v1.NativeJson
-	26,  // 182: astrorder.sessiond.v1.EventEnvelope.session:type_name -> astrorder.sessiond.v1.SessionRef
-	5,   // 183: astrorder.sessiond.v1.EventEnvelope.status:type_name -> astrorder.sessiond.v1.SessionStatus
-	18,  // 184: astrorder.sessiond.v1.EventEnvelope.native_payload:type_name -> astrorder.sessiond.v1.NativeJson
-	118, // 185: astrorder.sessiond.v1.EventEnvelope.runtime_owner:type_name -> astrorder.sessiond.v1.RuntimeOwnerEvent
-	119, // 186: astrorder.sessiond.v1.EventEnvelope.ownership_lost:type_name -> astrorder.sessiond.v1.OwnershipLostEvent
-	120, // 187: astrorder.sessiond.v1.EventEnvelope.pty_output:type_name -> astrorder.sessiond.v1.PtyOutputEvent
-	121, // 188: astrorder.sessiond.v1.EventEnvelope.connector:type_name -> astrorder.sessiond.v1.ConnectorEventPayload
-	18,  // 189: astrorder.sessiond.v1.EventEnvelope.native:type_name -> astrorder.sessiond.v1.NativeJson
-	38,  // 190: astrorder.sessiond.v1.StateSnapshot.sessions:type_name -> astrorder.sessiond.v1.SessionSnapshot
-	26,  // 191: astrorder.sessiond.v1.SessionWatermark.session:type_name -> astrorder.sessiond.v1.SessionRef
-	124, // 192: astrorder.sessiond.v1.LiveReady.watermarks:type_name -> astrorder.sessiond.v1.SessionWatermark
-	26,  // 193: astrorder.sessiond.v1.ResyncRequired.session:type_name -> astrorder.sessiond.v1.SessionRef
-	11,  // 194: astrorder.sessiond.v1.ResyncRequired.reason:type_name -> astrorder.sessiond.v1.ResyncReason
-	116, // 195: astrorder.sessiond.v1.StreamOverflow.last_emitted:type_name -> astrorder.sessiond.v1.SessionCursor
-	123, // 196: astrorder.sessiond.v1.EventStreamFrame.snapshot:type_name -> astrorder.sessiond.v1.StateSnapshot
-	122, // 197: astrorder.sessiond.v1.EventStreamFrame.replay:type_name -> astrorder.sessiond.v1.EventEnvelope
-	125, // 198: astrorder.sessiond.v1.EventStreamFrame.live_ready:type_name -> astrorder.sessiond.v1.LiveReady
-	122, // 199: astrorder.sessiond.v1.EventStreamFrame.live:type_name -> astrorder.sessiond.v1.EventEnvelope
-	126, // 200: astrorder.sessiond.v1.EventStreamFrame.resync_required:type_name -> astrorder.sessiond.v1.ResyncRequired
-	127, // 201: astrorder.sessiond.v1.EventStreamFrame.overflow:type_name -> astrorder.sessiond.v1.StreamOverflow
-	26,  // 202: astrorder.sessiond.v1.AppendEventRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
-	5,   // 203: astrorder.sessiond.v1.AppendEventRequest.status:type_name -> astrorder.sessiond.v1.SessionStatus
-	18,  // 204: astrorder.sessiond.v1.AppendEventRequest.payload:type_name -> astrorder.sessiond.v1.NativeJson
-	26,  // 205: astrorder.sessiond.v1.AppendEventResponse.session:type_name -> astrorder.sessiond.v1.SessionRef
-	25,  // 206: astrorder.sessiond.v1.OpenTerminal.target:type_name -> astrorder.sessiond.v1.RuntimeTarget
-	26,  // 207: astrorder.sessiond.v1.OpenTerminal.session:type_name -> astrorder.sessiond.v1.SessionRef
-	131, // 208: astrorder.sessiond.v1.TerminalClientFrame.open:type_name -> astrorder.sessiond.v1.OpenTerminal
-	132, // 209: astrorder.sessiond.v1.TerminalClientFrame.input:type_name -> astrorder.sessiond.v1.TerminalInput
-	133, // 210: astrorder.sessiond.v1.TerminalClientFrame.resize:type_name -> astrorder.sessiond.v1.TerminalResize
-	134, // 211: astrorder.sessiond.v1.TerminalClientFrame.interrupt:type_name -> astrorder.sessiond.v1.TerminalInterrupt
-	135, // 212: astrorder.sessiond.v1.TerminalClientFrame.close:type_name -> astrorder.sessiond.v1.TerminalClose
-	26,  // 213: astrorder.sessiond.v1.TerminalOpened.session:type_name -> astrorder.sessiond.v1.SessionRef
-	12,  // 214: astrorder.sessiond.v1.TerminalExit.cause:type_name -> astrorder.sessiond.v1.TerminalExitCause
-	137, // 215: astrorder.sessiond.v1.TerminalServerFrame.opened:type_name -> astrorder.sessiond.v1.TerminalOpened
-	138, // 216: astrorder.sessiond.v1.TerminalServerFrame.output:type_name -> astrorder.sessiond.v1.TerminalOutput
-	139, // 217: astrorder.sessiond.v1.TerminalServerFrame.exit:type_name -> astrorder.sessiond.v1.TerminalExit
-	140, // 218: astrorder.sessiond.v1.TerminalServerFrame.overflow:type_name -> astrorder.sessiond.v1.TerminalOverflow
-	28,  // 219: astrorder.sessiond.v1.TerminalServerFrame.error:type_name -> astrorder.sessiond.v1.BusinessError
-	19,  // 220: astrorder.sessiond.v1.OperationKey.agent_type_compat:type_name -> astrorder.sessiond.v1.NullableString
-	19,  // 221: astrorder.sessiond.v1.OperationKey.connection_id:type_name -> astrorder.sessiond.v1.NullableString
-	19,  // 222: astrorder.sessiond.v1.OperationKey.session_id:type_name -> astrorder.sessiond.v1.NullableString
-	1,   // 223: astrorder.sessiond.v1.OperationKey.canonicalization:type_name -> astrorder.sessiond.v1.CanonicalizationVersion
-	142, // 224: astrorder.sessiond.v1.GetOperationRequest.key:type_name -> astrorder.sessiond.v1.OperationKey
-	142, // 225: astrorder.sessiond.v1.OperationReceipt.key:type_name -> astrorder.sessiond.v1.OperationKey
-	7,   // 226: astrorder.sessiond.v1.OperationReceipt.state:type_name -> astrorder.sessiond.v1.OperationState
-	32,  // 227: astrorder.sessiond.v1.OperationReceipt.typed_response:type_name -> astrorder.sessiond.v1.CommandReceipt
-	30,  // 228: astrorder.sessiond.v1.OperationReceipt.error:type_name -> astrorder.sessiond.v1.NullableBusinessError
-	29,  // 229: astrorder.sessiond.v1.OperationReceipt.status:type_name -> astrorder.sessiond.v1.NullableSessionStatus
-	24,  // 230: astrorder.sessiond.v1.SshTarget.config:type_name -> astrorder.sessiond.v1.SshConnectConfig
-	145, // 231: astrorder.sessiond.v1.ModelConfigTarget.local:type_name -> astrorder.sessiond.v1.LocalTarget
-	146, // 232: astrorder.sessiond.v1.ModelConfigTarget.wsl:type_name -> astrorder.sessiond.v1.WslTarget
-	147, // 233: astrorder.sessiond.v1.ModelConfigTarget.ssh:type_name -> astrorder.sessiond.v1.SshTarget
-	14,  // 234: astrorder.sessiond.v1.ModelConfigFileInput.file:type_name -> astrorder.sessiond.v1.ManagedFile
-	148, // 235: astrorder.sessiond.v1.ModelConfigPlanRequest.target:type_name -> astrorder.sessiond.v1.ModelConfigTarget
-	149, // 236: astrorder.sessiond.v1.ModelConfigPlanRequest.proposed_files:type_name -> astrorder.sessiond.v1.ModelConfigFileInput
-	14,  // 237: astrorder.sessiond.v1.ModelConfigFileState.file:type_name -> astrorder.sessiond.v1.ManagedFile
-	14,  // 238: astrorder.sessiond.v1.ModelConfigChange.file:type_name -> astrorder.sessiond.v1.ManagedFile
-	148, // 239: astrorder.sessiond.v1.ModelConfigPlanResponse.target:type_name -> astrorder.sessiond.v1.ModelConfigTarget
-	13,  // 240: astrorder.sessiond.v1.ModelConfigPlanResponse.target_support:type_name -> astrorder.sessiond.v1.ModelConfigTargetSupport
-	152, // 241: astrorder.sessiond.v1.ModelConfigPlanResponse.current_files:type_name -> astrorder.sessiond.v1.ModelConfigFileState
-	153, // 242: astrorder.sessiond.v1.ModelConfigPlanResponse.changes:type_name -> astrorder.sessiond.v1.ModelConfigChange
-	28,  // 243: astrorder.sessiond.v1.ModelConfigPlanResponse.error:type_name -> astrorder.sessiond.v1.BusinessError
-	27,  // 244: astrorder.sessiond.v1.ModelConfigApplyRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
-	148, // 245: astrorder.sessiond.v1.ModelConfigApplyRequest.target:type_name -> astrorder.sessiond.v1.ModelConfigTarget
-	149, // 246: astrorder.sessiond.v1.ModelConfigApplyRequest.files:type_name -> astrorder.sessiond.v1.ModelConfigFileInput
-	150, // 247: astrorder.sessiond.v1.ModelConfigApplyRequest.environment_values:type_name -> astrorder.sessiond.v1.SensitiveEnvironmentValue
-	14,  // 248: astrorder.sessiond.v1.FileDigest.file:type_name -> astrorder.sessiond.v1.ManagedFile
-	7,   // 249: astrorder.sessiond.v1.ModelConfigApplyResponse.operation_state:type_name -> astrorder.sessiond.v1.OperationState
-	13,  // 250: astrorder.sessiond.v1.ModelConfigApplyResponse.target_support:type_name -> astrorder.sessiond.v1.ModelConfigTargetSupport
-	14,  // 251: astrorder.sessiond.v1.ModelConfigApplyResponse.changed:type_name -> astrorder.sessiond.v1.ManagedFile
-	156, // 252: astrorder.sessiond.v1.ModelConfigApplyResponse.digests:type_name -> astrorder.sessiond.v1.FileDigest
-	28,  // 253: astrorder.sessiond.v1.ModelConfigApplyResponse.error:type_name -> astrorder.sessiond.v1.BusinessError
-	27,  // 254: astrorder.sessiond.v1.ModelConfigReloadRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
-	15,  // 255: astrorder.sessiond.v1.ModelConfigReloadRequest.agents:type_name -> astrorder.sessiond.v1.ReloadAgent
-	7,   // 256: astrorder.sessiond.v1.ModelConfigReloadResponse.operation_state:type_name -> astrorder.sessiond.v1.OperationState
-	15,  // 257: astrorder.sessiond.v1.ModelConfigReloadResponse.reloaded:type_name -> astrorder.sessiond.v1.ReloadAgent
-	15,  // 258: astrorder.sessiond.v1.ModelConfigReloadResponse.pending:type_name -> astrorder.sessiond.v1.ReloadAgent
-	28,  // 259: astrorder.sessiond.v1.ModelConfigReloadResponse.error:type_name -> astrorder.sessiond.v1.BusinessError
-	18,  // 260: astrorder.sessiond.v1.ConnectorAgent.native:type_name -> astrorder.sessiond.v1.NativeJson
-	160, // 261: astrorder.sessiond.v1.ConnectorHello.agent:type_name -> astrorder.sessiond.v1.ConnectorAgent
-	5,   // 262: astrorder.sessiond.v1.ConnectorEvent.status:type_name -> astrorder.sessiond.v1.SessionStatus
-	18,  // 263: astrorder.sessiond.v1.ConnectorEvent.data:type_name -> astrorder.sessiond.v1.NativeJson
-	161, // 264: astrorder.sessiond.v1.ConnectorIngressFrame.hello:type_name -> astrorder.sessiond.v1.ConnectorHello
-	162, // 265: astrorder.sessiond.v1.ConnectorIngressFrame.heartbeat:type_name -> astrorder.sessiond.v1.ConnectorHeartbeat
-	163, // 266: astrorder.sessiond.v1.ConnectorIngressFrame.event:type_name -> astrorder.sessiond.v1.ConnectorEvent
-	164, // 267: astrorder.sessiond.v1.ConnectorIngressFrame.disconnect:type_name -> astrorder.sessiond.v1.ConnectorDisconnect
-	28,  // 268: astrorder.sessiond.v1.ConnectorRejected.error:type_name -> astrorder.sessiond.v1.BusinessError
-	16,  // 269: astrorder.sessiond.v1.ConnectorIngressAck.state:type_name -> astrorder.sessiond.v1.ConnectorAckState
-	166, // 270: astrorder.sessiond.v1.ConnectorIngressAck.registered:type_name -> astrorder.sessiond.v1.ConnectorRegistered
-	167, // 271: astrorder.sessiond.v1.ConnectorIngressAck.event_accepted:type_name -> astrorder.sessiond.v1.ConnectorEventAccepted
-	168, // 272: astrorder.sessiond.v1.ConnectorIngressAck.rejected:type_name -> astrorder.sessiond.v1.ConnectorRejected
-	169, // 273: astrorder.sessiond.v1.ConnectorIngressAck.overflow:type_name -> astrorder.sessiond.v1.ConnectorOverflow
-	170, // 274: astrorder.sessiond.v1.ConnectorIngressAck.disconnected:type_name -> astrorder.sessiond.v1.ConnectorDisconnected
-	171, // 275: astrorder.sessiond.v1.ConnectorIngressAck.heartbeat:type_name -> astrorder.sessiond.v1.ConnectorHeartbeatAck
-	26,  // 276: astrorder.sessiond.v1.BindControlSessionRequest.control_session:type_name -> astrorder.sessiond.v1.SessionRef
-	27,  // 277: astrorder.sessiond.v1.DisconnectConnectorRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
-	7,   // 278: astrorder.sessiond.v1.DisconnectConnectorResponse.operation_state:type_name -> astrorder.sessiond.v1.OperationState
-	28,  // 279: astrorder.sessiond.v1.DisconnectConnectorResponse.error:type_name -> astrorder.sessiond.v1.BusinessError
-	34,  // 280: astrorder.sessiond.v1.DaemonControl.GetCapabilities:input_type -> astrorder.sessiond.v1.GetCapabilitiesRequest
-	36,  // 281: astrorder.sessiond.v1.DaemonControl.GetStatus:input_type -> astrorder.sessiond.v1.GetStatusRequest
-	40,  // 282: astrorder.sessiond.v1.DaemonControl.Shutdown:input_type -> astrorder.sessiond.v1.ShutdownRequest
-	45,  // 283: astrorder.sessiond.v1.SessionControl.CreateSession:input_type -> astrorder.sessiond.v1.CreateSessionRequest
-	46,  // 284: astrorder.sessiond.v1.SessionControl.AttachSession:input_type -> astrorder.sessiond.v1.AttachSessionRequest
-	55,  // 285: astrorder.sessiond.v1.SessionControl.Send:input_type -> astrorder.sessiond.v1.SendRequest
-	56,  // 286: astrorder.sessiond.v1.SessionControl.Steer:input_type -> astrorder.sessiond.v1.SteerRequest
-	58,  // 287: astrorder.sessiond.v1.SessionControl.StartReview:input_type -> astrorder.sessiond.v1.StartReviewRequest
-	59,  // 288: astrorder.sessiond.v1.SessionControl.Compact:input_type -> astrorder.sessiond.v1.CompactRequest
-	60,  // 289: astrorder.sessiond.v1.SessionControl.Interrupt:input_type -> astrorder.sessiond.v1.InterruptRequest
-	62,  // 290: astrorder.sessiond.v1.SessionControl.RespondApproval:input_type -> astrorder.sessiond.v1.RespondApprovalRequest
-	63,  // 291: astrorder.sessiond.v1.SessionControl.UpdateSettings:input_type -> astrorder.sessiond.v1.UpdateSettingsRequest
-	64,  // 292: astrorder.sessiond.v1.SessionControl.RenameSession:input_type -> astrorder.sessiond.v1.RenameSessionRequest
-	65,  // 293: astrorder.sessiond.v1.SessionControl.DeleteSession:input_type -> astrorder.sessiond.v1.DeleteSessionRequest
-	66,  // 294: astrorder.sessiond.v1.SessionControl.CloseSession:input_type -> astrorder.sessiond.v1.CloseSessionRequest
-	67,  // 295: astrorder.sessiond.v1.SessionControl.DetachSession:input_type -> astrorder.sessiond.v1.DetachSessionRequest
-	68,  // 296: astrorder.sessiond.v1.SessionControl.ReportObservedStatus:input_type -> astrorder.sessiond.v1.ReportObservedStatusRequest
-	72,  // 297: astrorder.sessiond.v1.SessionControl.SubmitDesktop:input_type -> astrorder.sessiond.v1.SubmitDesktopRequest
-	73,  // 298: astrorder.sessiond.v1.SessionControl.UpdateDesktopSettings:input_type -> astrorder.sessiond.v1.UpdateDesktopSettingsRequest
-	93,  // 299: astrorder.sessiond.v1.RuntimeQuery.QueryNative:input_type -> astrorder.sessiond.v1.NativeQueryRequest
-	95,  // 300: astrorder.sessiond.v1.RuntimeQuery.GetHistoryPage:input_type -> astrorder.sessiond.v1.HistoryPageRequest
-	97,  // 301: astrorder.sessiond.v1.RuntimeQuery.ListBackgroundProcesses:input_type -> astrorder.sessiond.v1.ListBackgroundProcessesRequest
-	99,  // 302: astrorder.sessiond.v1.RuntimeQuery.ListModels:input_type -> astrorder.sessiond.v1.ListModelsRequest
-	102, // 303: astrorder.sessiond.v1.RuntimeQuery.ListCommands:input_type -> astrorder.sessiond.v1.ListCommandsRequest
-	105, // 304: astrorder.sessiond.v1.RuntimeQuery.ReadModel:input_type -> astrorder.sessiond.v1.ReadModelRequest
-	107, // 305: astrorder.sessiond.v1.RuntimeQuery.SetModel:input_type -> astrorder.sessiond.v1.SetModelRequest
-	108, // 306: astrorder.sessiond.v1.RuntimeQuery.SetReasoning:input_type -> astrorder.sessiond.v1.SetReasoningRequest
-	110, // 307: astrorder.sessiond.v1.RuntimeQuery.SetGoal:input_type -> astrorder.sessiond.v1.SetGoalRequest
-	111, // 308: astrorder.sessiond.v1.RuntimeQuery.ClearGoal:input_type -> astrorder.sessiond.v1.ClearGoalRequest
-	109, // 309: astrorder.sessiond.v1.RuntimeQuery.ReadApprovalMode:input_type -> astrorder.sessiond.v1.ReadApprovalModeRequest
-	113, // 310: astrorder.sessiond.v1.RuntimeQuery.SetApprovalMode:input_type -> astrorder.sessiond.v1.SetApprovalModeRequest
-	114, // 311: astrorder.sessiond.v1.RuntimeQuery.DisconnectRuntime:input_type -> astrorder.sessiond.v1.DisconnectRuntimeRequest
-	117, // 312: astrorder.sessiond.v1.EventStream.Subscribe:input_type -> astrorder.sessiond.v1.SubscribeRequest
-	129, // 313: astrorder.sessiond.v1.EventStream.AppendEvent:input_type -> astrorder.sessiond.v1.AppendEventRequest
-	136, // 314: astrorder.sessiond.v1.TerminalStream.Open:input_type -> astrorder.sessiond.v1.TerminalClientFrame
-	143, // 315: astrorder.sessiond.v1.OperationQuery.GetOperation:input_type -> astrorder.sessiond.v1.GetOperationRequest
-	151, // 316: astrorder.sessiond.v1.ModelConfig.Plan:input_type -> astrorder.sessiond.v1.ModelConfigPlanRequest
-	155, // 317: astrorder.sessiond.v1.ModelConfig.Apply:input_type -> astrorder.sessiond.v1.ModelConfigApplyRequest
-	158, // 318: astrorder.sessiond.v1.ModelConfig.Reload:input_type -> astrorder.sessiond.v1.ModelConfigReloadRequest
-	165, // 319: astrorder.sessiond.v1.ConnectorIngress.Connect:input_type -> astrorder.sessiond.v1.ConnectorIngressFrame
-	173, // 320: astrorder.sessiond.v1.ConnectorIngress.BindControlSession:input_type -> astrorder.sessiond.v1.BindControlSessionRequest
-	175, // 321: astrorder.sessiond.v1.ConnectorIngress.DisconnectConnector:input_type -> astrorder.sessiond.v1.DisconnectConnectorRequest
-	35,  // 322: astrorder.sessiond.v1.DaemonControl.GetCapabilities:output_type -> astrorder.sessiond.v1.GetCapabilitiesResponse
-	39,  // 323: astrorder.sessiond.v1.DaemonControl.GetStatus:output_type -> astrorder.sessiond.v1.GetStatusResponse
-	41,  // 324: astrorder.sessiond.v1.DaemonControl.Shutdown:output_type -> astrorder.sessiond.v1.ShutdownResponse
-	32,  // 325: astrorder.sessiond.v1.SessionControl.CreateSession:output_type -> astrorder.sessiond.v1.CommandReceipt
-	33,  // 326: astrorder.sessiond.v1.SessionControl.AttachSession:output_type -> astrorder.sessiond.v1.SessionReceipt
-	32,  // 327: astrorder.sessiond.v1.SessionControl.Send:output_type -> astrorder.sessiond.v1.CommandReceipt
-	32,  // 328: astrorder.sessiond.v1.SessionControl.Steer:output_type -> astrorder.sessiond.v1.CommandReceipt
-	32,  // 329: astrorder.sessiond.v1.SessionControl.StartReview:output_type -> astrorder.sessiond.v1.CommandReceipt
-	32,  // 330: astrorder.sessiond.v1.SessionControl.Compact:output_type -> astrorder.sessiond.v1.CommandReceipt
-	32,  // 331: astrorder.sessiond.v1.SessionControl.Interrupt:output_type -> astrorder.sessiond.v1.CommandReceipt
-	32,  // 332: astrorder.sessiond.v1.SessionControl.RespondApproval:output_type -> astrorder.sessiond.v1.CommandReceipt
-	32,  // 333: astrorder.sessiond.v1.SessionControl.UpdateSettings:output_type -> astrorder.sessiond.v1.CommandReceipt
-	32,  // 334: astrorder.sessiond.v1.SessionControl.RenameSession:output_type -> astrorder.sessiond.v1.CommandReceipt
-	32,  // 335: astrorder.sessiond.v1.SessionControl.DeleteSession:output_type -> astrorder.sessiond.v1.CommandReceipt
-	32,  // 336: astrorder.sessiond.v1.SessionControl.CloseSession:output_type -> astrorder.sessiond.v1.CommandReceipt
-	32,  // 337: astrorder.sessiond.v1.SessionControl.DetachSession:output_type -> astrorder.sessiond.v1.CommandReceipt
-	33,  // 338: astrorder.sessiond.v1.SessionControl.ReportObservedStatus:output_type -> astrorder.sessiond.v1.SessionReceipt
-	32,  // 339: astrorder.sessiond.v1.SessionControl.SubmitDesktop:output_type -> astrorder.sessiond.v1.CommandReceipt
-	32,  // 340: astrorder.sessiond.v1.SessionControl.UpdateDesktopSettings:output_type -> astrorder.sessiond.v1.CommandReceipt
-	94,  // 341: astrorder.sessiond.v1.RuntimeQuery.QueryNative:output_type -> astrorder.sessiond.v1.NativeQueryResponse
-	96,  // 342: astrorder.sessiond.v1.RuntimeQuery.GetHistoryPage:output_type -> astrorder.sessiond.v1.HistoryPageResponse
-	98,  // 343: astrorder.sessiond.v1.RuntimeQuery.ListBackgroundProcesses:output_type -> astrorder.sessiond.v1.ListBackgroundProcessesResponse
-	101, // 344: astrorder.sessiond.v1.RuntimeQuery.ListModels:output_type -> astrorder.sessiond.v1.ListModelsResponse
-	104, // 345: astrorder.sessiond.v1.RuntimeQuery.ListCommands:output_type -> astrorder.sessiond.v1.ListCommandsResponse
-	106, // 346: astrorder.sessiond.v1.RuntimeQuery.ReadModel:output_type -> astrorder.sessiond.v1.ModelState
-	32,  // 347: astrorder.sessiond.v1.RuntimeQuery.SetModel:output_type -> astrorder.sessiond.v1.CommandReceipt
-	32,  // 348: astrorder.sessiond.v1.RuntimeQuery.SetReasoning:output_type -> astrorder.sessiond.v1.CommandReceipt
-	32,  // 349: astrorder.sessiond.v1.RuntimeQuery.SetGoal:output_type -> astrorder.sessiond.v1.CommandReceipt
-	32,  // 350: astrorder.sessiond.v1.RuntimeQuery.ClearGoal:output_type -> astrorder.sessiond.v1.CommandReceipt
-	112, // 351: astrorder.sessiond.v1.RuntimeQuery.ReadApprovalMode:output_type -> astrorder.sessiond.v1.ApprovalModeState
-	32,  // 352: astrorder.sessiond.v1.RuntimeQuery.SetApprovalMode:output_type -> astrorder.sessiond.v1.CommandReceipt
-	115, // 353: astrorder.sessiond.v1.RuntimeQuery.DisconnectRuntime:output_type -> astrorder.sessiond.v1.DisconnectRuntimeResponse
-	128, // 354: astrorder.sessiond.v1.EventStream.Subscribe:output_type -> astrorder.sessiond.v1.EventStreamFrame
-	130, // 355: astrorder.sessiond.v1.EventStream.AppendEvent:output_type -> astrorder.sessiond.v1.AppendEventResponse
-	141, // 356: astrorder.sessiond.v1.TerminalStream.Open:output_type -> astrorder.sessiond.v1.TerminalServerFrame
-	144, // 357: astrorder.sessiond.v1.OperationQuery.GetOperation:output_type -> astrorder.sessiond.v1.OperationReceipt
-	154, // 358: astrorder.sessiond.v1.ModelConfig.Plan:output_type -> astrorder.sessiond.v1.ModelConfigPlanResponse
-	157, // 359: astrorder.sessiond.v1.ModelConfig.Apply:output_type -> astrorder.sessiond.v1.ModelConfigApplyResponse
-	159, // 360: astrorder.sessiond.v1.ModelConfig.Reload:output_type -> astrorder.sessiond.v1.ModelConfigReloadResponse
-	172, // 361: astrorder.sessiond.v1.ConnectorIngress.Connect:output_type -> astrorder.sessiond.v1.ConnectorIngressAck
-	174, // 362: astrorder.sessiond.v1.ConnectorIngress.BindControlSession:output_type -> astrorder.sessiond.v1.BindControlSessionResponse
-	176, // 363: astrorder.sessiond.v1.ConnectorIngress.DisconnectConnector:output_type -> astrorder.sessiond.v1.DisconnectConnectorResponse
-	322, // [322:364] is the sub-list for method output_type
-	280, // [280:322] is the sub-list for method input_type
-	280, // [280:280] is the sub-list for extension type_name
-	280, // [280:280] is the sub-list for extension extendee
-	0,   // [0:280] is the sub-list for field type_name
+	45,  // 49: astrorder.sessiond.v1.CreateSessionRequest.antigravity:type_name -> astrorder.sessiond.v1.AntigravityCreateOptions
+	26,  // 50: astrorder.sessiond.v1.AttachSessionRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	25,  // 51: astrorder.sessiond.v1.AttachSessionRequest.target:type_name -> astrorder.sessiond.v1.RuntimeTarget
+	18,  // 52: astrorder.sessiond.v1.AttachSessionRequest.native_options:type_name -> astrorder.sessiond.v1.NativeJson
+	48,  // 53: astrorder.sessiond.v1.InputPart.text:type_name -> astrorder.sessiond.v1.TextInput
+	49,  // 54: astrorder.sessiond.v1.InputPart.image_url:type_name -> astrorder.sessiond.v1.ImageUrlInput
+	50,  // 55: astrorder.sessiond.v1.InputPart.local_image:type_name -> astrorder.sessiond.v1.LocalImageInput
+	51,  // 56: astrorder.sessiond.v1.InputPart.skill:type_name -> astrorder.sessiond.v1.SkillRefInput
+	52,  // 57: astrorder.sessiond.v1.InputPart.mention:type_name -> astrorder.sessiond.v1.MentionRefInput
+	53,  // 58: astrorder.sessiond.v1.InputPart.attachment:type_name -> astrorder.sessiond.v1.AttachmentInput
+	18,  // 59: astrorder.sessiond.v1.SendPolicy.native_options:type_name -> astrorder.sessiond.v1.NativeJson
+	27,  // 60: astrorder.sessiond.v1.SendRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
+	26,  // 61: astrorder.sessiond.v1.SendRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	54,  // 62: astrorder.sessiond.v1.SendRequest.input:type_name -> astrorder.sessiond.v1.InputPart
+	55,  // 63: astrorder.sessiond.v1.SendRequest.policy:type_name -> astrorder.sessiond.v1.SendPolicy
+	27,  // 64: astrorder.sessiond.v1.SteerRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
+	26,  // 65: astrorder.sessiond.v1.SteerRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	54,  // 66: astrorder.sessiond.v1.SteerRequest.input:type_name -> astrorder.sessiond.v1.InputPart
+	18,  // 67: astrorder.sessiond.v1.ReviewTarget.native:type_name -> astrorder.sessiond.v1.NativeJson
+	27,  // 68: astrorder.sessiond.v1.StartReviewRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
+	26,  // 69: astrorder.sessiond.v1.StartReviewRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	58,  // 70: astrorder.sessiond.v1.StartReviewRequest.target:type_name -> astrorder.sessiond.v1.ReviewTarget
+	10,  // 71: astrorder.sessiond.v1.StartReviewRequest.delivery:type_name -> astrorder.sessiond.v1.ReviewDelivery
+	27,  // 72: astrorder.sessiond.v1.CompactRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
+	26,  // 73: astrorder.sessiond.v1.CompactRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	27,  // 74: astrorder.sessiond.v1.InterruptRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
+	26,  // 75: astrorder.sessiond.v1.InterruptRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	18,  // 76: astrorder.sessiond.v1.PermissionGrant.native:type_name -> astrorder.sessiond.v1.NativeJson
+	27,  // 77: astrorder.sessiond.v1.RespondApprovalRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
+	26,  // 78: astrorder.sessiond.v1.RespondApprovalRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	22,  // 79: astrorder.sessiond.v1.RespondApprovalRequest.approval_id:type_name -> astrorder.sessiond.v1.ExactIdentifier
+	9,   // 80: astrorder.sessiond.v1.RespondApprovalRequest.decision:type_name -> astrorder.sessiond.v1.ApprovalDecision
+	62,  // 81: astrorder.sessiond.v1.RespondApprovalRequest.permissions:type_name -> astrorder.sessiond.v1.PermissionGrant
+	18,  // 82: astrorder.sessiond.v1.RespondApprovalRequest.user_input:type_name -> astrorder.sessiond.v1.NativeJson
+	27,  // 83: astrorder.sessiond.v1.UpdateSettingsRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
+	26,  // 84: astrorder.sessiond.v1.UpdateSettingsRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	27,  // 85: astrorder.sessiond.v1.RenameSessionRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
+	26,  // 86: astrorder.sessiond.v1.RenameSessionRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	27,  // 87: astrorder.sessiond.v1.DeleteSessionRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
+	26,  // 88: astrorder.sessiond.v1.DeleteSessionRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	27,  // 89: astrorder.sessiond.v1.CloseSessionRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
+	26,  // 90: astrorder.sessiond.v1.CloseSessionRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	27,  // 91: astrorder.sessiond.v1.DetachSessionRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
+	26,  // 92: astrorder.sessiond.v1.DetachSessionRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	26,  // 93: astrorder.sessiond.v1.ReportObservedStatusRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	6,   // 94: astrorder.sessiond.v1.ReportObservedStatusRequest.observed_active_status:type_name -> astrorder.sessiond.v1.ObservedActiveStatus
+	70,  // 95: astrorder.sessiond.v1.DesktopInputPart.text:type_name -> astrorder.sessiond.v1.DesktopTextInput
+	71,  // 96: astrorder.sessiond.v1.DesktopInputPart.image:type_name -> astrorder.sessiond.v1.DesktopImageInput
+	27,  // 97: astrorder.sessiond.v1.SubmitDesktopRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
+	26,  // 98: astrorder.sessiond.v1.SubmitDesktopRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	72,  // 99: astrorder.sessiond.v1.SubmitDesktopRequest.input:type_name -> astrorder.sessiond.v1.DesktopInputPart
+	27,  // 100: astrorder.sessiond.v1.UpdateDesktopSettingsRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
+	26,  // 101: astrorder.sessiond.v1.UpdateDesktopSettingsRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	18,  // 102: astrorder.sessiond.v1.EmptyNativeQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
+	18,  // 103: astrorder.sessiond.v1.CodexInitializeQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
+	18,  // 104: astrorder.sessiond.v1.CodexAccountReadQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
+	18,  // 105: astrorder.sessiond.v1.CodexHooksListQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
+	19,  // 106: astrorder.sessiond.v1.CodexModelListQuery.cursor:type_name -> astrorder.sessiond.v1.NullableString
+	18,  // 107: astrorder.sessiond.v1.CodexModelListQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
+	18,  // 108: astrorder.sessiond.v1.CodexSkillsListQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
+	19,  // 109: astrorder.sessiond.v1.CodexThreadItemsListQuery.cursor:type_name -> astrorder.sessiond.v1.NullableString
+	18,  // 110: astrorder.sessiond.v1.CodexThreadItemsListQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
+	19,  // 111: astrorder.sessiond.v1.CodexThreadListQuery.cursor:type_name -> astrorder.sessiond.v1.NullableString
+	18,  // 112: astrorder.sessiond.v1.CodexThreadListQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
+	18,  // 113: astrorder.sessiond.v1.CodexThreadLoadedListQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
+	18,  // 114: astrorder.sessiond.v1.CodexThreadReadQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
+	18,  // 115: astrorder.sessiond.v1.HermesSessionListQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
+	18,  // 116: astrorder.sessiond.v1.HermesActiveListQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
+	18,  // 117: astrorder.sessiond.v1.HermesProjectsTreeQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
+	18,  // 118: astrorder.sessiond.v1.HermesProjectSessionsQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
+	19,  // 119: astrorder.sessiond.v1.HermesSessionHistoryQuery.before:type_name -> astrorder.sessiond.v1.NullableString
+	18,  // 120: astrorder.sessiond.v1.HermesSessionHistoryQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
+	18,  // 121: astrorder.sessiond.v1.HermesModelsListQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
+	18,  // 122: astrorder.sessiond.v1.HermesCommandsListQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
+	18,  // 123: astrorder.sessiond.v1.GrokInitializeQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
+	25,  // 124: astrorder.sessiond.v1.NativeQueryRequest.target:type_name -> astrorder.sessiond.v1.RuntimeTarget
+	18,  // 125: astrorder.sessiond.v1.NativeQueryRequest.top_level_payload:type_name -> astrorder.sessiond.v1.NativeJson
+	76,  // 126: astrorder.sessiond.v1.NativeQueryRequest.codex_initialize:type_name -> astrorder.sessiond.v1.CodexInitializeQuery
+	77,  // 127: astrorder.sessiond.v1.NativeQueryRequest.codex_account_read:type_name -> astrorder.sessiond.v1.CodexAccountReadQuery
+	78,  // 128: astrorder.sessiond.v1.NativeQueryRequest.codex_hooks_list:type_name -> astrorder.sessiond.v1.CodexHooksListQuery
+	79,  // 129: astrorder.sessiond.v1.NativeQueryRequest.codex_model_list:type_name -> astrorder.sessiond.v1.CodexModelListQuery
+	80,  // 130: astrorder.sessiond.v1.NativeQueryRequest.codex_skills_list:type_name -> astrorder.sessiond.v1.CodexSkillsListQuery
+	81,  // 131: astrorder.sessiond.v1.NativeQueryRequest.codex_thread_items_list:type_name -> astrorder.sessiond.v1.CodexThreadItemsListQuery
+	82,  // 132: astrorder.sessiond.v1.NativeQueryRequest.codex_thread_list:type_name -> astrorder.sessiond.v1.CodexThreadListQuery
+	83,  // 133: astrorder.sessiond.v1.NativeQueryRequest.codex_thread_loaded_list:type_name -> astrorder.sessiond.v1.CodexThreadLoadedListQuery
+	84,  // 134: astrorder.sessiond.v1.NativeQueryRequest.codex_thread_read:type_name -> astrorder.sessiond.v1.CodexThreadReadQuery
+	85,  // 135: astrorder.sessiond.v1.NativeQueryRequest.hermes_session_list:type_name -> astrorder.sessiond.v1.HermesSessionListQuery
+	86,  // 136: astrorder.sessiond.v1.NativeQueryRequest.hermes_active_list:type_name -> astrorder.sessiond.v1.HermesActiveListQuery
+	87,  // 137: astrorder.sessiond.v1.NativeQueryRequest.hermes_projects_tree:type_name -> astrorder.sessiond.v1.HermesProjectsTreeQuery
+	88,  // 138: astrorder.sessiond.v1.NativeQueryRequest.hermes_project_sessions:type_name -> astrorder.sessiond.v1.HermesProjectSessionsQuery
+	89,  // 139: astrorder.sessiond.v1.NativeQueryRequest.hermes_session_history:type_name -> astrorder.sessiond.v1.HermesSessionHistoryQuery
+	90,  // 140: astrorder.sessiond.v1.NativeQueryRequest.hermes_models_list:type_name -> astrorder.sessiond.v1.HermesModelsListQuery
+	91,  // 141: astrorder.sessiond.v1.NativeQueryRequest.hermes_commands_list:type_name -> astrorder.sessiond.v1.HermesCommandsListQuery
+	92,  // 142: astrorder.sessiond.v1.NativeQueryRequest.grok_initialize:type_name -> astrorder.sessiond.v1.GrokInitializeQuery
+	93,  // 143: astrorder.sessiond.v1.NativeQueryRequest.grok_session_list:type_name -> astrorder.sessiond.v1.GrokSessionListQuery
+	94,  // 144: astrorder.sessiond.v1.NativeQueryRequest.antigravity_session_list:type_name -> astrorder.sessiond.v1.AntigravitySessionListQuery
+	95,  // 145: astrorder.sessiond.v1.NativeQueryRequest.antigravity_models_list:type_name -> astrorder.sessiond.v1.AntigravityModelsListQuery
+	25,  // 146: astrorder.sessiond.v1.NativeQueryResponse.target:type_name -> astrorder.sessiond.v1.RuntimeTarget
+	18,  // 147: astrorder.sessiond.v1.NativeQueryResponse.result:type_name -> astrorder.sessiond.v1.NativeJson
+	26,  // 148: astrorder.sessiond.v1.HistoryPageRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	19,  // 149: astrorder.sessiond.v1.HistoryPageRequest.before:type_name -> astrorder.sessiond.v1.NullableString
+	26,  // 150: astrorder.sessiond.v1.HistoryPageResponse.session:type_name -> astrorder.sessiond.v1.SessionRef
+	18,  // 151: astrorder.sessiond.v1.HistoryPageResponse.items:type_name -> astrorder.sessiond.v1.NativeJson
+	19,  // 152: astrorder.sessiond.v1.HistoryPageResponse.next_cursor:type_name -> astrorder.sessiond.v1.NullableString
+	18,  // 153: astrorder.sessiond.v1.HistoryPageResponse.native:type_name -> astrorder.sessiond.v1.NativeJson
+	26,  // 154: astrorder.sessiond.v1.ListBackgroundProcessesRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	18,  // 155: astrorder.sessiond.v1.ListBackgroundProcessesResponse.processes:type_name -> astrorder.sessiond.v1.NativeJson
+	26,  // 156: astrorder.sessiond.v1.ListModelsRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	18,  // 157: astrorder.sessiond.v1.ModelOption.native:type_name -> astrorder.sessiond.v1.NativeJson
+	103, // 158: astrorder.sessiond.v1.ListModelsResponse.items:type_name -> astrorder.sessiond.v1.ModelOption
+	26,  // 159: astrorder.sessiond.v1.ListCommandsRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	18,  // 160: astrorder.sessiond.v1.CommandOption.native:type_name -> astrorder.sessiond.v1.NativeJson
+	106, // 161: astrorder.sessiond.v1.ListCommandsResponse.items:type_name -> astrorder.sessiond.v1.CommandOption
+	26,  // 162: astrorder.sessiond.v1.ReadModelRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	26,  // 163: astrorder.sessiond.v1.ModelState.session:type_name -> astrorder.sessiond.v1.SessionRef
+	18,  // 164: astrorder.sessiond.v1.ModelState.native:type_name -> astrorder.sessiond.v1.NativeJson
+	27,  // 165: astrorder.sessiond.v1.SetModelRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
+	26,  // 166: astrorder.sessiond.v1.SetModelRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	27,  // 167: astrorder.sessiond.v1.SetReasoningRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
+	26,  // 168: astrorder.sessiond.v1.SetReasoningRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	26,  // 169: astrorder.sessiond.v1.ReadApprovalModeRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	27,  // 170: astrorder.sessiond.v1.SetGoalRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
+	26,  // 171: astrorder.sessiond.v1.SetGoalRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	27,  // 172: astrorder.sessiond.v1.ClearGoalRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
+	26,  // 173: astrorder.sessiond.v1.ClearGoalRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	26,  // 174: astrorder.sessiond.v1.ApprovalModeState.session:type_name -> astrorder.sessiond.v1.SessionRef
+	27,  // 175: astrorder.sessiond.v1.SetApprovalModeRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
+	26,  // 176: astrorder.sessiond.v1.SetApprovalModeRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	27,  // 177: astrorder.sessiond.v1.DisconnectRuntimeRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
+	25,  // 178: astrorder.sessiond.v1.DisconnectRuntimeRequest.target:type_name -> astrorder.sessiond.v1.RuntimeTarget
+	7,   // 179: astrorder.sessiond.v1.DisconnectRuntimeResponse.operation_state:type_name -> astrorder.sessiond.v1.OperationState
+	28,  // 180: astrorder.sessiond.v1.DisconnectRuntimeResponse.error:type_name -> astrorder.sessiond.v1.BusinessError
+	26,  // 181: astrorder.sessiond.v1.SessionCursor.session:type_name -> astrorder.sessiond.v1.SessionRef
+	119, // 182: astrorder.sessiond.v1.SubscribeRequest.cursors:type_name -> astrorder.sessiond.v1.SessionCursor
+	5,   // 183: astrorder.sessiond.v1.OwnershipLostEvent.previous_status:type_name -> astrorder.sessiond.v1.SessionStatus
+	18,  // 184: astrorder.sessiond.v1.ConnectorEventPayload.data:type_name -> astrorder.sessiond.v1.NativeJson
+	26,  // 185: astrorder.sessiond.v1.EventEnvelope.session:type_name -> astrorder.sessiond.v1.SessionRef
+	5,   // 186: astrorder.sessiond.v1.EventEnvelope.status:type_name -> astrorder.sessiond.v1.SessionStatus
+	18,  // 187: astrorder.sessiond.v1.EventEnvelope.native_payload:type_name -> astrorder.sessiond.v1.NativeJson
+	121, // 188: astrorder.sessiond.v1.EventEnvelope.runtime_owner:type_name -> astrorder.sessiond.v1.RuntimeOwnerEvent
+	122, // 189: astrorder.sessiond.v1.EventEnvelope.ownership_lost:type_name -> astrorder.sessiond.v1.OwnershipLostEvent
+	123, // 190: astrorder.sessiond.v1.EventEnvelope.pty_output:type_name -> astrorder.sessiond.v1.PtyOutputEvent
+	124, // 191: astrorder.sessiond.v1.EventEnvelope.connector:type_name -> astrorder.sessiond.v1.ConnectorEventPayload
+	18,  // 192: astrorder.sessiond.v1.EventEnvelope.native:type_name -> astrorder.sessiond.v1.NativeJson
+	38,  // 193: astrorder.sessiond.v1.StateSnapshot.sessions:type_name -> astrorder.sessiond.v1.SessionSnapshot
+	26,  // 194: astrorder.sessiond.v1.SessionWatermark.session:type_name -> astrorder.sessiond.v1.SessionRef
+	127, // 195: astrorder.sessiond.v1.LiveReady.watermarks:type_name -> astrorder.sessiond.v1.SessionWatermark
+	26,  // 196: astrorder.sessiond.v1.ResyncRequired.session:type_name -> astrorder.sessiond.v1.SessionRef
+	11,  // 197: astrorder.sessiond.v1.ResyncRequired.reason:type_name -> astrorder.sessiond.v1.ResyncReason
+	119, // 198: astrorder.sessiond.v1.StreamOverflow.last_emitted:type_name -> astrorder.sessiond.v1.SessionCursor
+	126, // 199: astrorder.sessiond.v1.EventStreamFrame.snapshot:type_name -> astrorder.sessiond.v1.StateSnapshot
+	125, // 200: astrorder.sessiond.v1.EventStreamFrame.replay:type_name -> astrorder.sessiond.v1.EventEnvelope
+	128, // 201: astrorder.sessiond.v1.EventStreamFrame.live_ready:type_name -> astrorder.sessiond.v1.LiveReady
+	125, // 202: astrorder.sessiond.v1.EventStreamFrame.live:type_name -> astrorder.sessiond.v1.EventEnvelope
+	129, // 203: astrorder.sessiond.v1.EventStreamFrame.resync_required:type_name -> astrorder.sessiond.v1.ResyncRequired
+	130, // 204: astrorder.sessiond.v1.EventStreamFrame.overflow:type_name -> astrorder.sessiond.v1.StreamOverflow
+	26,  // 205: astrorder.sessiond.v1.AppendEventRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	5,   // 206: astrorder.sessiond.v1.AppendEventRequest.status:type_name -> astrorder.sessiond.v1.SessionStatus
+	18,  // 207: astrorder.sessiond.v1.AppendEventRequest.payload:type_name -> astrorder.sessiond.v1.NativeJson
+	26,  // 208: astrorder.sessiond.v1.AppendEventResponse.session:type_name -> astrorder.sessiond.v1.SessionRef
+	25,  // 209: astrorder.sessiond.v1.OpenTerminal.target:type_name -> astrorder.sessiond.v1.RuntimeTarget
+	26,  // 210: astrorder.sessiond.v1.OpenTerminal.session:type_name -> astrorder.sessiond.v1.SessionRef
+	134, // 211: astrorder.sessiond.v1.TerminalClientFrame.open:type_name -> astrorder.sessiond.v1.OpenTerminal
+	135, // 212: astrorder.sessiond.v1.TerminalClientFrame.input:type_name -> astrorder.sessiond.v1.TerminalInput
+	136, // 213: astrorder.sessiond.v1.TerminalClientFrame.resize:type_name -> astrorder.sessiond.v1.TerminalResize
+	137, // 214: astrorder.sessiond.v1.TerminalClientFrame.interrupt:type_name -> astrorder.sessiond.v1.TerminalInterrupt
+	138, // 215: astrorder.sessiond.v1.TerminalClientFrame.close:type_name -> astrorder.sessiond.v1.TerminalClose
+	26,  // 216: astrorder.sessiond.v1.TerminalOpened.session:type_name -> astrorder.sessiond.v1.SessionRef
+	12,  // 217: astrorder.sessiond.v1.TerminalExit.cause:type_name -> astrorder.sessiond.v1.TerminalExitCause
+	140, // 218: astrorder.sessiond.v1.TerminalServerFrame.opened:type_name -> astrorder.sessiond.v1.TerminalOpened
+	141, // 219: astrorder.sessiond.v1.TerminalServerFrame.output:type_name -> astrorder.sessiond.v1.TerminalOutput
+	142, // 220: astrorder.sessiond.v1.TerminalServerFrame.exit:type_name -> astrorder.sessiond.v1.TerminalExit
+	143, // 221: astrorder.sessiond.v1.TerminalServerFrame.overflow:type_name -> astrorder.sessiond.v1.TerminalOverflow
+	28,  // 222: astrorder.sessiond.v1.TerminalServerFrame.error:type_name -> astrorder.sessiond.v1.BusinessError
+	19,  // 223: astrorder.sessiond.v1.OperationKey.agent_type_compat:type_name -> astrorder.sessiond.v1.NullableString
+	19,  // 224: astrorder.sessiond.v1.OperationKey.connection_id:type_name -> astrorder.sessiond.v1.NullableString
+	19,  // 225: astrorder.sessiond.v1.OperationKey.session_id:type_name -> astrorder.sessiond.v1.NullableString
+	1,   // 226: astrorder.sessiond.v1.OperationKey.canonicalization:type_name -> astrorder.sessiond.v1.CanonicalizationVersion
+	145, // 227: astrorder.sessiond.v1.GetOperationRequest.key:type_name -> astrorder.sessiond.v1.OperationKey
+	145, // 228: astrorder.sessiond.v1.OperationReceipt.key:type_name -> astrorder.sessiond.v1.OperationKey
+	7,   // 229: astrorder.sessiond.v1.OperationReceipt.state:type_name -> astrorder.sessiond.v1.OperationState
+	32,  // 230: astrorder.sessiond.v1.OperationReceipt.typed_response:type_name -> astrorder.sessiond.v1.CommandReceipt
+	30,  // 231: astrorder.sessiond.v1.OperationReceipt.error:type_name -> astrorder.sessiond.v1.NullableBusinessError
+	29,  // 232: astrorder.sessiond.v1.OperationReceipt.status:type_name -> astrorder.sessiond.v1.NullableSessionStatus
+	24,  // 233: astrorder.sessiond.v1.SshTarget.config:type_name -> astrorder.sessiond.v1.SshConnectConfig
+	148, // 234: astrorder.sessiond.v1.ModelConfigTarget.local:type_name -> astrorder.sessiond.v1.LocalTarget
+	149, // 235: astrorder.sessiond.v1.ModelConfigTarget.wsl:type_name -> astrorder.sessiond.v1.WslTarget
+	150, // 236: astrorder.sessiond.v1.ModelConfigTarget.ssh:type_name -> astrorder.sessiond.v1.SshTarget
+	14,  // 237: astrorder.sessiond.v1.ModelConfigFileInput.file:type_name -> astrorder.sessiond.v1.ManagedFile
+	151, // 238: astrorder.sessiond.v1.ModelConfigPlanRequest.target:type_name -> astrorder.sessiond.v1.ModelConfigTarget
+	152, // 239: astrorder.sessiond.v1.ModelConfigPlanRequest.proposed_files:type_name -> astrorder.sessiond.v1.ModelConfigFileInput
+	14,  // 240: astrorder.sessiond.v1.ModelConfigFileState.file:type_name -> astrorder.sessiond.v1.ManagedFile
+	14,  // 241: astrorder.sessiond.v1.ModelConfigChange.file:type_name -> astrorder.sessiond.v1.ManagedFile
+	151, // 242: astrorder.sessiond.v1.ModelConfigPlanResponse.target:type_name -> astrorder.sessiond.v1.ModelConfigTarget
+	13,  // 243: astrorder.sessiond.v1.ModelConfigPlanResponse.target_support:type_name -> astrorder.sessiond.v1.ModelConfigTargetSupport
+	155, // 244: astrorder.sessiond.v1.ModelConfigPlanResponse.current_files:type_name -> astrorder.sessiond.v1.ModelConfigFileState
+	156, // 245: astrorder.sessiond.v1.ModelConfigPlanResponse.changes:type_name -> astrorder.sessiond.v1.ModelConfigChange
+	28,  // 246: astrorder.sessiond.v1.ModelConfigPlanResponse.error:type_name -> astrorder.sessiond.v1.BusinessError
+	27,  // 247: astrorder.sessiond.v1.ModelConfigApplyRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
+	151, // 248: astrorder.sessiond.v1.ModelConfigApplyRequest.target:type_name -> astrorder.sessiond.v1.ModelConfigTarget
+	152, // 249: astrorder.sessiond.v1.ModelConfigApplyRequest.files:type_name -> astrorder.sessiond.v1.ModelConfigFileInput
+	153, // 250: astrorder.sessiond.v1.ModelConfigApplyRequest.environment_values:type_name -> astrorder.sessiond.v1.SensitiveEnvironmentValue
+	14,  // 251: astrorder.sessiond.v1.FileDigest.file:type_name -> astrorder.sessiond.v1.ManagedFile
+	7,   // 252: astrorder.sessiond.v1.ModelConfigApplyResponse.operation_state:type_name -> astrorder.sessiond.v1.OperationState
+	13,  // 253: astrorder.sessiond.v1.ModelConfigApplyResponse.target_support:type_name -> astrorder.sessiond.v1.ModelConfigTargetSupport
+	14,  // 254: astrorder.sessiond.v1.ModelConfigApplyResponse.changed:type_name -> astrorder.sessiond.v1.ManagedFile
+	159, // 255: astrorder.sessiond.v1.ModelConfigApplyResponse.digests:type_name -> astrorder.sessiond.v1.FileDigest
+	28,  // 256: astrorder.sessiond.v1.ModelConfigApplyResponse.error:type_name -> astrorder.sessiond.v1.BusinessError
+	27,  // 257: astrorder.sessiond.v1.ModelConfigReloadRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
+	15,  // 258: astrorder.sessiond.v1.ModelConfigReloadRequest.agents:type_name -> astrorder.sessiond.v1.ReloadAgent
+	7,   // 259: astrorder.sessiond.v1.ModelConfigReloadResponse.operation_state:type_name -> astrorder.sessiond.v1.OperationState
+	15,  // 260: astrorder.sessiond.v1.ModelConfigReloadResponse.reloaded:type_name -> astrorder.sessiond.v1.ReloadAgent
+	15,  // 261: astrorder.sessiond.v1.ModelConfigReloadResponse.pending:type_name -> astrorder.sessiond.v1.ReloadAgent
+	28,  // 262: astrorder.sessiond.v1.ModelConfigReloadResponse.error:type_name -> astrorder.sessiond.v1.BusinessError
+	18,  // 263: astrorder.sessiond.v1.ConnectorAgent.native:type_name -> astrorder.sessiond.v1.NativeJson
+	163, // 264: astrorder.sessiond.v1.ConnectorHello.agent:type_name -> astrorder.sessiond.v1.ConnectorAgent
+	5,   // 265: astrorder.sessiond.v1.ConnectorEvent.status:type_name -> astrorder.sessiond.v1.SessionStatus
+	18,  // 266: astrorder.sessiond.v1.ConnectorEvent.data:type_name -> astrorder.sessiond.v1.NativeJson
+	164, // 267: astrorder.sessiond.v1.ConnectorIngressFrame.hello:type_name -> astrorder.sessiond.v1.ConnectorHello
+	165, // 268: astrorder.sessiond.v1.ConnectorIngressFrame.heartbeat:type_name -> astrorder.sessiond.v1.ConnectorHeartbeat
+	166, // 269: astrorder.sessiond.v1.ConnectorIngressFrame.event:type_name -> astrorder.sessiond.v1.ConnectorEvent
+	167, // 270: astrorder.sessiond.v1.ConnectorIngressFrame.disconnect:type_name -> astrorder.sessiond.v1.ConnectorDisconnect
+	28,  // 271: astrorder.sessiond.v1.ConnectorRejected.error:type_name -> astrorder.sessiond.v1.BusinessError
+	16,  // 272: astrorder.sessiond.v1.ConnectorIngressAck.state:type_name -> astrorder.sessiond.v1.ConnectorAckState
+	169, // 273: astrorder.sessiond.v1.ConnectorIngressAck.registered:type_name -> astrorder.sessiond.v1.ConnectorRegistered
+	170, // 274: astrorder.sessiond.v1.ConnectorIngressAck.event_accepted:type_name -> astrorder.sessiond.v1.ConnectorEventAccepted
+	171, // 275: astrorder.sessiond.v1.ConnectorIngressAck.rejected:type_name -> astrorder.sessiond.v1.ConnectorRejected
+	172, // 276: astrorder.sessiond.v1.ConnectorIngressAck.overflow:type_name -> astrorder.sessiond.v1.ConnectorOverflow
+	173, // 277: astrorder.sessiond.v1.ConnectorIngressAck.disconnected:type_name -> astrorder.sessiond.v1.ConnectorDisconnected
+	174, // 278: astrorder.sessiond.v1.ConnectorIngressAck.heartbeat:type_name -> astrorder.sessiond.v1.ConnectorHeartbeatAck
+	26,  // 279: astrorder.sessiond.v1.BindControlSessionRequest.control_session:type_name -> astrorder.sessiond.v1.SessionRef
+	27,  // 280: astrorder.sessiond.v1.DisconnectConnectorRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
+	7,   // 281: astrorder.sessiond.v1.DisconnectConnectorResponse.operation_state:type_name -> astrorder.sessiond.v1.OperationState
+	28,  // 282: astrorder.sessiond.v1.DisconnectConnectorResponse.error:type_name -> astrorder.sessiond.v1.BusinessError
+	34,  // 283: astrorder.sessiond.v1.DaemonControl.GetCapabilities:input_type -> astrorder.sessiond.v1.GetCapabilitiesRequest
+	36,  // 284: astrorder.sessiond.v1.DaemonControl.GetStatus:input_type -> astrorder.sessiond.v1.GetStatusRequest
+	40,  // 285: astrorder.sessiond.v1.DaemonControl.Shutdown:input_type -> astrorder.sessiond.v1.ShutdownRequest
+	46,  // 286: astrorder.sessiond.v1.SessionControl.CreateSession:input_type -> astrorder.sessiond.v1.CreateSessionRequest
+	47,  // 287: astrorder.sessiond.v1.SessionControl.AttachSession:input_type -> astrorder.sessiond.v1.AttachSessionRequest
+	56,  // 288: astrorder.sessiond.v1.SessionControl.Send:input_type -> astrorder.sessiond.v1.SendRequest
+	57,  // 289: astrorder.sessiond.v1.SessionControl.Steer:input_type -> astrorder.sessiond.v1.SteerRequest
+	59,  // 290: astrorder.sessiond.v1.SessionControl.StartReview:input_type -> astrorder.sessiond.v1.StartReviewRequest
+	60,  // 291: astrorder.sessiond.v1.SessionControl.Compact:input_type -> astrorder.sessiond.v1.CompactRequest
+	61,  // 292: astrorder.sessiond.v1.SessionControl.Interrupt:input_type -> astrorder.sessiond.v1.InterruptRequest
+	63,  // 293: astrorder.sessiond.v1.SessionControl.RespondApproval:input_type -> astrorder.sessiond.v1.RespondApprovalRequest
+	64,  // 294: astrorder.sessiond.v1.SessionControl.UpdateSettings:input_type -> astrorder.sessiond.v1.UpdateSettingsRequest
+	65,  // 295: astrorder.sessiond.v1.SessionControl.RenameSession:input_type -> astrorder.sessiond.v1.RenameSessionRequest
+	66,  // 296: astrorder.sessiond.v1.SessionControl.DeleteSession:input_type -> astrorder.sessiond.v1.DeleteSessionRequest
+	67,  // 297: astrorder.sessiond.v1.SessionControl.CloseSession:input_type -> astrorder.sessiond.v1.CloseSessionRequest
+	68,  // 298: astrorder.sessiond.v1.SessionControl.DetachSession:input_type -> astrorder.sessiond.v1.DetachSessionRequest
+	69,  // 299: astrorder.sessiond.v1.SessionControl.ReportObservedStatus:input_type -> astrorder.sessiond.v1.ReportObservedStatusRequest
+	73,  // 300: astrorder.sessiond.v1.SessionControl.SubmitDesktop:input_type -> astrorder.sessiond.v1.SubmitDesktopRequest
+	74,  // 301: astrorder.sessiond.v1.SessionControl.UpdateDesktopSettings:input_type -> astrorder.sessiond.v1.UpdateDesktopSettingsRequest
+	96,  // 302: astrorder.sessiond.v1.RuntimeQuery.QueryNative:input_type -> astrorder.sessiond.v1.NativeQueryRequest
+	98,  // 303: astrorder.sessiond.v1.RuntimeQuery.GetHistoryPage:input_type -> astrorder.sessiond.v1.HistoryPageRequest
+	100, // 304: astrorder.sessiond.v1.RuntimeQuery.ListBackgroundProcesses:input_type -> astrorder.sessiond.v1.ListBackgroundProcessesRequest
+	102, // 305: astrorder.sessiond.v1.RuntimeQuery.ListModels:input_type -> astrorder.sessiond.v1.ListModelsRequest
+	105, // 306: astrorder.sessiond.v1.RuntimeQuery.ListCommands:input_type -> astrorder.sessiond.v1.ListCommandsRequest
+	108, // 307: astrorder.sessiond.v1.RuntimeQuery.ReadModel:input_type -> astrorder.sessiond.v1.ReadModelRequest
+	110, // 308: astrorder.sessiond.v1.RuntimeQuery.SetModel:input_type -> astrorder.sessiond.v1.SetModelRequest
+	111, // 309: astrorder.sessiond.v1.RuntimeQuery.SetReasoning:input_type -> astrorder.sessiond.v1.SetReasoningRequest
+	113, // 310: astrorder.sessiond.v1.RuntimeQuery.SetGoal:input_type -> astrorder.sessiond.v1.SetGoalRequest
+	114, // 311: astrorder.sessiond.v1.RuntimeQuery.ClearGoal:input_type -> astrorder.sessiond.v1.ClearGoalRequest
+	112, // 312: astrorder.sessiond.v1.RuntimeQuery.ReadApprovalMode:input_type -> astrorder.sessiond.v1.ReadApprovalModeRequest
+	116, // 313: astrorder.sessiond.v1.RuntimeQuery.SetApprovalMode:input_type -> astrorder.sessiond.v1.SetApprovalModeRequest
+	117, // 314: astrorder.sessiond.v1.RuntimeQuery.DisconnectRuntime:input_type -> astrorder.sessiond.v1.DisconnectRuntimeRequest
+	120, // 315: astrorder.sessiond.v1.EventStream.Subscribe:input_type -> astrorder.sessiond.v1.SubscribeRequest
+	132, // 316: astrorder.sessiond.v1.EventStream.AppendEvent:input_type -> astrorder.sessiond.v1.AppendEventRequest
+	139, // 317: astrorder.sessiond.v1.TerminalStream.Open:input_type -> astrorder.sessiond.v1.TerminalClientFrame
+	146, // 318: astrorder.sessiond.v1.OperationQuery.GetOperation:input_type -> astrorder.sessiond.v1.GetOperationRequest
+	154, // 319: astrorder.sessiond.v1.ModelConfig.Plan:input_type -> astrorder.sessiond.v1.ModelConfigPlanRequest
+	158, // 320: astrorder.sessiond.v1.ModelConfig.Apply:input_type -> astrorder.sessiond.v1.ModelConfigApplyRequest
+	161, // 321: astrorder.sessiond.v1.ModelConfig.Reload:input_type -> astrorder.sessiond.v1.ModelConfigReloadRequest
+	168, // 322: astrorder.sessiond.v1.ConnectorIngress.Connect:input_type -> astrorder.sessiond.v1.ConnectorIngressFrame
+	176, // 323: astrorder.sessiond.v1.ConnectorIngress.BindControlSession:input_type -> astrorder.sessiond.v1.BindControlSessionRequest
+	178, // 324: astrorder.sessiond.v1.ConnectorIngress.DisconnectConnector:input_type -> astrorder.sessiond.v1.DisconnectConnectorRequest
+	35,  // 325: astrorder.sessiond.v1.DaemonControl.GetCapabilities:output_type -> astrorder.sessiond.v1.GetCapabilitiesResponse
+	39,  // 326: astrorder.sessiond.v1.DaemonControl.GetStatus:output_type -> astrorder.sessiond.v1.GetStatusResponse
+	41,  // 327: astrorder.sessiond.v1.DaemonControl.Shutdown:output_type -> astrorder.sessiond.v1.ShutdownResponse
+	32,  // 328: astrorder.sessiond.v1.SessionControl.CreateSession:output_type -> astrorder.sessiond.v1.CommandReceipt
+	33,  // 329: astrorder.sessiond.v1.SessionControl.AttachSession:output_type -> astrorder.sessiond.v1.SessionReceipt
+	32,  // 330: astrorder.sessiond.v1.SessionControl.Send:output_type -> astrorder.sessiond.v1.CommandReceipt
+	32,  // 331: astrorder.sessiond.v1.SessionControl.Steer:output_type -> astrorder.sessiond.v1.CommandReceipt
+	32,  // 332: astrorder.sessiond.v1.SessionControl.StartReview:output_type -> astrorder.sessiond.v1.CommandReceipt
+	32,  // 333: astrorder.sessiond.v1.SessionControl.Compact:output_type -> astrorder.sessiond.v1.CommandReceipt
+	32,  // 334: astrorder.sessiond.v1.SessionControl.Interrupt:output_type -> astrorder.sessiond.v1.CommandReceipt
+	32,  // 335: astrorder.sessiond.v1.SessionControl.RespondApproval:output_type -> astrorder.sessiond.v1.CommandReceipt
+	32,  // 336: astrorder.sessiond.v1.SessionControl.UpdateSettings:output_type -> astrorder.sessiond.v1.CommandReceipt
+	32,  // 337: astrorder.sessiond.v1.SessionControl.RenameSession:output_type -> astrorder.sessiond.v1.CommandReceipt
+	32,  // 338: astrorder.sessiond.v1.SessionControl.DeleteSession:output_type -> astrorder.sessiond.v1.CommandReceipt
+	32,  // 339: astrorder.sessiond.v1.SessionControl.CloseSession:output_type -> astrorder.sessiond.v1.CommandReceipt
+	32,  // 340: astrorder.sessiond.v1.SessionControl.DetachSession:output_type -> astrorder.sessiond.v1.CommandReceipt
+	33,  // 341: astrorder.sessiond.v1.SessionControl.ReportObservedStatus:output_type -> astrorder.sessiond.v1.SessionReceipt
+	32,  // 342: astrorder.sessiond.v1.SessionControl.SubmitDesktop:output_type -> astrorder.sessiond.v1.CommandReceipt
+	32,  // 343: astrorder.sessiond.v1.SessionControl.UpdateDesktopSettings:output_type -> astrorder.sessiond.v1.CommandReceipt
+	97,  // 344: astrorder.sessiond.v1.RuntimeQuery.QueryNative:output_type -> astrorder.sessiond.v1.NativeQueryResponse
+	99,  // 345: astrorder.sessiond.v1.RuntimeQuery.GetHistoryPage:output_type -> astrorder.sessiond.v1.HistoryPageResponse
+	101, // 346: astrorder.sessiond.v1.RuntimeQuery.ListBackgroundProcesses:output_type -> astrorder.sessiond.v1.ListBackgroundProcessesResponse
+	104, // 347: astrorder.sessiond.v1.RuntimeQuery.ListModels:output_type -> astrorder.sessiond.v1.ListModelsResponse
+	107, // 348: astrorder.sessiond.v1.RuntimeQuery.ListCommands:output_type -> astrorder.sessiond.v1.ListCommandsResponse
+	109, // 349: astrorder.sessiond.v1.RuntimeQuery.ReadModel:output_type -> astrorder.sessiond.v1.ModelState
+	32,  // 350: astrorder.sessiond.v1.RuntimeQuery.SetModel:output_type -> astrorder.sessiond.v1.CommandReceipt
+	32,  // 351: astrorder.sessiond.v1.RuntimeQuery.SetReasoning:output_type -> astrorder.sessiond.v1.CommandReceipt
+	32,  // 352: astrorder.sessiond.v1.RuntimeQuery.SetGoal:output_type -> astrorder.sessiond.v1.CommandReceipt
+	32,  // 353: astrorder.sessiond.v1.RuntimeQuery.ClearGoal:output_type -> astrorder.sessiond.v1.CommandReceipt
+	115, // 354: astrorder.sessiond.v1.RuntimeQuery.ReadApprovalMode:output_type -> astrorder.sessiond.v1.ApprovalModeState
+	32,  // 355: astrorder.sessiond.v1.RuntimeQuery.SetApprovalMode:output_type -> astrorder.sessiond.v1.CommandReceipt
+	118, // 356: astrorder.sessiond.v1.RuntimeQuery.DisconnectRuntime:output_type -> astrorder.sessiond.v1.DisconnectRuntimeResponse
+	131, // 357: astrorder.sessiond.v1.EventStream.Subscribe:output_type -> astrorder.sessiond.v1.EventStreamFrame
+	133, // 358: astrorder.sessiond.v1.EventStream.AppendEvent:output_type -> astrorder.sessiond.v1.AppendEventResponse
+	144, // 359: astrorder.sessiond.v1.TerminalStream.Open:output_type -> astrorder.sessiond.v1.TerminalServerFrame
+	147, // 360: astrorder.sessiond.v1.OperationQuery.GetOperation:output_type -> astrorder.sessiond.v1.OperationReceipt
+	157, // 361: astrorder.sessiond.v1.ModelConfig.Plan:output_type -> astrorder.sessiond.v1.ModelConfigPlanResponse
+	160, // 362: astrorder.sessiond.v1.ModelConfig.Apply:output_type -> astrorder.sessiond.v1.ModelConfigApplyResponse
+	162, // 363: astrorder.sessiond.v1.ModelConfig.Reload:output_type -> astrorder.sessiond.v1.ModelConfigReloadResponse
+	175, // 364: astrorder.sessiond.v1.ConnectorIngress.Connect:output_type -> astrorder.sessiond.v1.ConnectorIngressAck
+	177, // 365: astrorder.sessiond.v1.ConnectorIngress.BindControlSession:output_type -> astrorder.sessiond.v1.BindControlSessionResponse
+	179, // 366: astrorder.sessiond.v1.ConnectorIngress.DisconnectConnector:output_type -> astrorder.sessiond.v1.DisconnectConnectorResponse
+	325, // [325:367] is the sub-list for method output_type
+	283, // [283:325] is the sub-list for method input_type
+	283, // [283:283] is the sub-list for extension type_name
+	283, // [283:283] is the sub-list for extension extendee
+	0,   // [0:283] is the sub-list for field type_name
 }
 
 func init() { file_astrorder_sessiond_v1_sessiond_proto_init() }
@@ -13986,14 +14211,16 @@ func file_astrorder_sessiond_v1_sessiond_proto_init() {
 	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[24].OneofWrappers = []any{}
 	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[25].OneofWrappers = []any{}
 	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[26].OneofWrappers = []any{}
-	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[27].OneofWrappers = []any{
+	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[27].OneofWrappers = []any{}
+	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[28].OneofWrappers = []any{
 		(*CreateSessionRequest_Codex)(nil),
 		(*CreateSessionRequest_Hermes)(nil),
 		(*CreateSessionRequest_Grok)(nil),
+		(*CreateSessionRequest_Antigravity)(nil),
 	}
-	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[28].OneofWrappers = []any{}
-	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[34].OneofWrappers = []any{}
-	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[35].OneofWrappers = []any{
+	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[29].OneofWrappers = []any{}
+	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[35].OneofWrappers = []any{}
+	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[36].OneofWrappers = []any{
 		(*InputPart_Text)(nil),
 		(*InputPart_ImageUrl)(nil),
 		(*InputPart_LocalImage)(nil),
@@ -14001,24 +14228,23 @@ func file_astrorder_sessiond_v1_sessiond_proto_init() {
 		(*InputPart_Mention)(nil),
 		(*InputPart_Attachment)(nil),
 	}
-	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[36].OneofWrappers = []any{}
-	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[39].OneofWrappers = []any{
+	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[37].OneofWrappers = []any{}
+	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[40].OneofWrappers = []any{
 		(*ReviewTarget_Branch)(nil),
 		(*ReviewTarget_Commit)(nil),
 		(*ReviewTarget_Uncommitted)(nil),
 		(*ReviewTarget_Native)(nil),
 	}
-	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[40].OneofWrappers = []any{}
 	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[41].OneofWrappers = []any{}
 	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[42].OneofWrappers = []any{}
 	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[43].OneofWrappers = []any{}
 	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[44].OneofWrappers = []any{}
 	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[45].OneofWrappers = []any{}
-	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[53].OneofWrappers = []any{
+	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[46].OneofWrappers = []any{}
+	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[54].OneofWrappers = []any{
 		(*DesktopInputPart_Text)(nil),
 		(*DesktopInputPart_Image)(nil),
 	}
-	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[55].OneofWrappers = []any{}
 	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[56].OneofWrappers = []any{}
 	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[57].OneofWrappers = []any{}
 	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[58].OneofWrappers = []any{}
@@ -14038,7 +14264,8 @@ func file_astrorder_sessiond_v1_sessiond_proto_init() {
 	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[72].OneofWrappers = []any{}
 	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[73].OneofWrappers = []any{}
 	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[74].OneofWrappers = []any{}
-	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[75].OneofWrappers = []any{
+	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[75].OneofWrappers = []any{}
+	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[78].OneofWrappers = []any{
 		(*NativeQueryRequest_CodexInitialize)(nil),
 		(*NativeQueryRequest_CodexAccountRead)(nil),
 		(*NativeQueryRequest_CodexHooksList)(nil),
@@ -14057,26 +14284,28 @@ func file_astrorder_sessiond_v1_sessiond_proto_init() {
 		(*NativeQueryRequest_HermesCommandsList)(nil),
 		(*NativeQueryRequest_GrokInitialize)(nil),
 		(*NativeQueryRequest_GrokSessionList)(nil),
+		(*NativeQueryRequest_AntigravitySessionList)(nil),
+		(*NativeQueryRequest_AntigravityModelsList)(nil),
 	}
-	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[77].OneofWrappers = []any{}
-	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[78].OneofWrappers = []any{}
-	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[82].OneofWrappers = []any{}
+	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[80].OneofWrappers = []any{}
+	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[81].OneofWrappers = []any{}
 	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[85].OneofWrappers = []any{}
 	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[88].OneofWrappers = []any{}
-	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[94].OneofWrappers = []any{}
+	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[91].OneofWrappers = []any{}
 	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[97].OneofWrappers = []any{}
-	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[99].OneofWrappers = []any{}
 	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[100].OneofWrappers = []any{}
+	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[102].OneofWrappers = []any{}
 	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[103].OneofWrappers = []any{}
-	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[104].OneofWrappers = []any{
+	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[106].OneofWrappers = []any{}
+	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[107].OneofWrappers = []any{
 		(*EventEnvelope_RuntimeOwner)(nil),
 		(*EventEnvelope_OwnershipLost)(nil),
 		(*EventEnvelope_PtyOutput)(nil),
 		(*EventEnvelope_Connector)(nil),
 		(*EventEnvelope_Native)(nil),
 	}
-	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[108].OneofWrappers = []any{}
-	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[110].OneofWrappers = []any{
+	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[111].OneofWrappers = []any{}
+	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[113].OneofWrappers = []any{
 		(*EventStreamFrame_Snapshot)(nil),
 		(*EventStreamFrame_Replay)(nil),
 		(*EventStreamFrame_LiveReady)(nil),
@@ -14084,46 +14313,46 @@ func file_astrorder_sessiond_v1_sessiond_proto_init() {
 		(*EventStreamFrame_ResyncRequired)(nil),
 		(*EventStreamFrame_Overflow)(nil),
 	}
-	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[111].OneofWrappers = []any{}
-	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[113].OneofWrappers = []any{}
-	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[118].OneofWrappers = []any{
+	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[114].OneofWrappers = []any{}
+	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[116].OneofWrappers = []any{}
+	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[121].OneofWrappers = []any{
 		(*TerminalClientFrame_Open)(nil),
 		(*TerminalClientFrame_Input)(nil),
 		(*TerminalClientFrame_Resize)(nil),
 		(*TerminalClientFrame_Interrupt)(nil),
 		(*TerminalClientFrame_Close)(nil),
 	}
-	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[121].OneofWrappers = []any{}
-	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[123].OneofWrappers = []any{
+	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[124].OneofWrappers = []any{}
+	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[126].OneofWrappers = []any{
 		(*TerminalServerFrame_Opened)(nil),
 		(*TerminalServerFrame_Output)(nil),
 		(*TerminalServerFrame_Exit)(nil),
 		(*TerminalServerFrame_Overflow)(nil),
 		(*TerminalServerFrame_Error)(nil),
 	}
-	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[126].OneofWrappers = []any{}
-	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[130].OneofWrappers = []any{
+	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[129].OneofWrappers = []any{}
+	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[133].OneofWrappers = []any{
 		(*ModelConfigTarget_Local)(nil),
 		(*ModelConfigTarget_Wsl)(nil),
 		(*ModelConfigTarget_Ssh)(nil),
 	}
-	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[131].OneofWrappers = []any{}
-	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[135].OneofWrappers = []any{}
-	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[136].OneofWrappers = []any{}
+	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[134].OneofWrappers = []any{}
+	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[138].OneofWrappers = []any{}
 	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[139].OneofWrappers = []any{}
-	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[141].OneofWrappers = []any{}
 	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[142].OneofWrappers = []any{}
+	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[144].OneofWrappers = []any{}
 	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[145].OneofWrappers = []any{}
-	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[147].OneofWrappers = []any{
+	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[148].OneofWrappers = []any{}
+	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[150].OneofWrappers = []any{
 		(*ConnectorIngressFrame_Hello)(nil),
 		(*ConnectorIngressFrame_Heartbeat)(nil),
 		(*ConnectorIngressFrame_Event)(nil),
 		(*ConnectorIngressFrame_Disconnect)(nil),
 	}
-	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[149].OneofWrappers = []any{}
-	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[150].OneofWrappers = []any{}
-	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[151].OneofWrappers = []any{}
-	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[154].OneofWrappers = []any{
+	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[152].OneofWrappers = []any{}
+	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[153].OneofWrappers = []any{}
+	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[154].OneofWrappers = []any{}
+	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[157].OneofWrappers = []any{
 		(*ConnectorIngressAck_Registered)(nil),
 		(*ConnectorIngressAck_EventAccepted)(nil),
 		(*ConnectorIngressAck_Rejected)(nil),
@@ -14131,14 +14360,14 @@ func file_astrorder_sessiond_v1_sessiond_proto_init() {
 		(*ConnectorIngressAck_Disconnected)(nil),
 		(*ConnectorIngressAck_Heartbeat)(nil),
 	}
-	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[158].OneofWrappers = []any{}
+	file_astrorder_sessiond_v1_sessiond_proto_msgTypes[161].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_astrorder_sessiond_v1_sessiond_proto_rawDesc), len(file_astrorder_sessiond_v1_sessiond_proto_rawDesc)),
 			NumEnums:      18,
-			NumMessages:   159,
+			NumMessages:   162,
 			NumExtensions: 0,
 			NumServices:   8,
 		},

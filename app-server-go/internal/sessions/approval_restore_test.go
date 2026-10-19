@@ -96,7 +96,7 @@ func TestCodexApprovalRestoreBeforeSend(t *testing.T) {
 			}
 			peer.attachCb = func(r *pb.AttachSessionRequest) (*pb.SessionReceipt, error) {
 				attached = true
-				return &pb.SessionReceipt{Session: r.Session, Attached: true}, nil
+				return &pb.SessionReceipt{Session: r.Session, Attached: true, Status: pb.SessionStatus_SESSION_STATUS_IDLE}, nil
 			}
 			sends := 0
 			peer.sendCb = func(r *pb.SendRequest) (*pb.CommandReceipt, error) {

@@ -90,5 +90,13 @@ func (h *Handler) localConnection(ctx context.Context, kind string) (map[string]
 			}
 		}
 	}
+	enabled, present, err := h.store.GetAgentConnectionChoice(ctx, "local:"+kind)
+	if err != nil {
+		return nil, err
+	}
+	if present && !enabled {
+		result["state"] = "disconnected"
+		result["detail"] = "已主动断联，请重新接入。"
+	}
 	return result, nil
 }

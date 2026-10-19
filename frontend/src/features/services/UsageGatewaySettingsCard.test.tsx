@@ -91,6 +91,21 @@ it('loads and saves the statistics page address', async () => {
   expect(api.updateAnalyticsConfig).toHaveBeenCalledWith(expect.objectContaining({ statistics_url: 'https://other.example/stats' }))
 })
 
+it('offers Antigravity only on supported targets and previews its selection', async () => {
+  vi.mocked(api.getModelSyncTargets).mockResolvedValue({ items: [
+    { id: 'local', kind: 'local', name: '本机', agents: ['codex', 'antigravity'] },
+    { id: 'ssh:test', kind: 'ssh', name: '远程', agents: ['codex'] },
+  ] } as never)
+  vi.mocked(api.previewModelSync).mockResolvedValue({ catalog_fingerprint: 'fixture', model_count: 1, targets: [] } as never)
+  mount()
+  const agy = await screen.findByLabelText('Antigravity (agy)')
+  expect(screen.getAllByLabelText('Antigravity (agy)')).toHaveLength(1)
+  fireEvent.click(agy)
+  fireEvent.click(screen.getByRole('button', { name: '预览选中' }))
+  await screen.findByText(/个网关模型/)
+  expect(api.previewModelSync).toHaveBeenCalledWith([{ target_id: 'local', agents: ['antigravity'] }])
+})
+
 it('renders a preview whose model_diff arrays are null without crashing (Go null-slice regression)', async () => {
   vi.mocked(api.previewModelSync).mockResolvedValue({
     catalog_fingerprint: 'fp',

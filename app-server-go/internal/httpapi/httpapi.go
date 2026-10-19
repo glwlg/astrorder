@@ -66,6 +66,7 @@ const (
 	KindHTTP          Kind       = "http"
 	KindWebSocket     Kind       = "websocket"
 	AuthPublic        AuthPolicy = "public"
+	AuthBrowser       AuthPolicy = "browser"
 	AuthDesktopBearer AuthPolicy = "desktop_bearer"
 	OwnershipGo       Ownership  = "go"
 )
@@ -92,6 +93,10 @@ var registeredRoutes = []registeredRoute{
 	{Registration: Registration{Kind: KindHTTP, Method: http.MethodPost, Path: "/api/v1/auth/session", Auth: AuthPublic, Ownership: OwnershipGo}, serve: serveAuthSession},
 	{Registration: Registration{Kind: KindHTTP, Method: http.MethodGet, Path: "/api/v1/auth/session", Auth: AuthPublic, Ownership: OwnershipGo}, serve: serveAuthSession},
 	{Registration: Registration{Kind: KindHTTP, Method: http.MethodDelete, Path: "/api/v1/auth/session", Auth: AuthPublic, Ownership: OwnershipGo}, serve: serveAuthSession},
+	{Registration: Registration{Kind: KindHTTP, Method: http.MethodPost, Path: "/api/v1/auth/qr/create", Auth: AuthPublic, Ownership: OwnershipGo}, serve: serveQRLogin},
+	{Registration: Registration{Kind: KindHTTP, Method: http.MethodPost, Path: "/api/v1/auth/qr/poll", Auth: AuthPublic, Ownership: OwnershipGo}, serve: serveQRLogin},
+	{Registration: Registration{Kind: KindHTTP, Method: http.MethodPost, Path: "/api/v1/auth/qr/inspect", Auth: AuthBrowser, Ownership: OwnershipGo}, serve: serveQRLogin},
+	{Registration: Registration{Kind: KindHTTP, Method: http.MethodPost, Path: "/api/v1/auth/qr/approve", Auth: AuthBrowser, Ownership: OwnershipGo}, serve: serveQRLogin},
 	{Registration: Registration{Kind: KindHTTP, Method: http.MethodPost, Path: "/_desktop/shutdown", Auth: AuthDesktopBearer, Ownership: OwnershipGo}, serve: serveDesktopShutdown},
 }
 
@@ -131,6 +136,7 @@ type Options struct {
 }
 
 type api struct {
+	qr              *qrLogins
 	config          config.Config
 	auth            *auth.Authenticator
 	desktopShutdown func()
@@ -343,6 +349,7 @@ func NewHandlerChecked(options Options) (http.Handler, error) {
 	}
 
 	app := &api{
+		qr:              newQRLogins(),
 		config:          options.Config,
 		auth:            authenticator,
 		desktopShutdown: options.DesktopShutdown,

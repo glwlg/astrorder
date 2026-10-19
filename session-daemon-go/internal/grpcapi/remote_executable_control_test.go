@@ -299,10 +299,12 @@ func (f *remoteExecFactoryRecorder) grokControlChildFactory(t *testing.T) core.C
 			workspace = "/"
 		}
 		config := grok.Config{
-			Executable: executable,
-			Workspace:  workspace,
-			Allowed:    []string{"/"},
-			AgentID:    "ssh-grok-" + connID,
+			Executable:   executable,
+			Workspace:    workspace,
+			Allowed:      []string{"/"},
+			AgentID:      "ssh-grok-" + connID,
+			AgentName:    "Grok · " + connID,
+			ConnectionID: connID,
 		}
 		return grok.NewWithSSHStarter(config, func(ctx context.Context, spec ssh.CommandSpec) (grok.SSHSession, error) {
 			transport, err := f.recorder.starter()(ctx, spec)

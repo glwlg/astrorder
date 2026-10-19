@@ -2,6 +2,7 @@ package sessions
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -22,14 +23,54 @@ type mockDaemonServer struct {
 	sessiondv1.UnimplementedDaemonControlServer
 	sessiondv1.UnimplementedSessionControlServer
 	sessiondv1.UnimplementedRuntimeQueryServer
-	backgroundCb func(*sessiondv1.ListBackgroundProcessesRequest) (*sessiondv1.ListBackgroundProcessesResponse, error)
-	createCb    func(*sessiondv1.CreateSessionRequest) (*sessiondv1.CommandReceipt, error)
-	renameCb    func(*sessiondv1.RenameSessionRequest) (*sessiondv1.CommandReceipt, error)
-	deleteCb    func(*sessiondv1.DeleteSessionRequest) (*sessiondv1.CommandReceipt, error)
-	readModelCb func(*sessiondv1.ReadModelRequest) (*sessiondv1.ModelState, error)
-	attachCb    func(*sessiondv1.AttachSessionRequest) (*sessiondv1.SessionReceipt, error)
+	sessiondv1.UnimplementedEventStreamServer
+	eventsCb         func(*sessiondv1.SubscribeRequest, grpc.ServerStreamingServer[sessiondv1.EventStreamFrame]) error
+	backgroundCb     func(*sessiondv1.ListBackgroundProcessesRequest) (*sessiondv1.ListBackgroundProcessesResponse, error)
+	createCb         func(*sessiondv1.CreateSessionRequest) (*sessiondv1.CommandReceipt, error)
+	renameCb         func(*sessiondv1.RenameSessionRequest) (*sessiondv1.CommandReceipt, error)
+	deleteCb         func(*sessiondv1.DeleteSessionRequest) (*sessiondv1.CommandReceipt, error)
+	readModelCb      func(*sessiondv1.ReadModelRequest) (*sessiondv1.ModelState, error)
+	attachCb         func(*sessiondv1.AttachSessionRequest) (*sessiondv1.SessionReceipt, error)
 	getHistoryPageCb func(*sessiondv1.HistoryPageRequest) (*sessiondv1.HistoryPageResponse, error)
-	sendCb func(*sessiondv1.SendRequest) (*sessiondv1.CommandReceipt, error)
+	sendCb           func(*sessiondv1.SendRequest) (*sessiondv1.CommandReceipt, error)
+	statusCb         func() (*sessiondv1.GetStatusResponse, error)
+	closeCb          func(*sessiondv1.CloseSessionRequest) (*sessiondv1.CommandReceipt, error)
+	interruptCb      func(*sessiondv1.InterruptRequest) (*sessiondv1.CommandReceipt, error)
+	queryCb          func(*sessiondv1.NativeQueryRequest) (*sessiondv1.NativeQueryResponse, error)
+}
+
+func (m *mockDaemonServer) QueryNative(_ context.Context, r *sessiondv1.NativeQueryRequest) (*sessiondv1.NativeQueryResponse, error) {
+	if m.queryCb != nil {
+		return m.queryCb(r)
+	}
+	return nil, fmt.Errorf("native query fixture is not configured")
+}
+
+func (m *mockDaemonServer) CloseSession(ctx context.Context, r *sessiondv1.CloseSessionRequest) (*sessiondv1.CommandReceipt, error) {
+	if m.closeCb != nil {
+		return m.closeCb(r)
+	}
+	return nil, fmt.Errorf("close fixture is not configured")
+}
+func (m *mockDaemonServer) Interrupt(ctx context.Context, r *sessiondv1.InterruptRequest) (*sessiondv1.CommandReceipt, error) {
+	if m.interruptCb != nil {
+		return m.interruptCb(r)
+	}
+	return nil, fmt.Errorf("interrupt fixture is not configured")
+}
+
+func (m *mockDaemonServer) GetStatus(context.Context, *sessiondv1.GetStatusRequest) (*sessiondv1.GetStatusResponse, error) {
+	if m.statusCb != nil {
+		return m.statusCb()
+	}
+	return nil, fmt.Errorf("status fixture is not configured")
+}
+
+func (m *mockDaemonServer) Subscribe(r *sessiondv1.SubscribeRequest, stream grpc.ServerStreamingServer[sessiondv1.EventStreamFrame]) error {
+	if m.eventsCb != nil {
+		return m.eventsCb(r, stream)
+	}
+	return fmt.Errorf("event fixture is not configured")
 }
 
 func (m *mockDaemonServer) ReadModel(ctx context.Context, req *sessiondv1.ReadModelRequest) (*sessiondv1.ModelState, error) {
@@ -107,6 +148,7 @@ func setupTestServer(t *testing.T, srv *mockDaemonServer) (*Handler, *store.Stor
 	sessiondv1.RegisterDaemonControlServer(grpcSrv, srv)
 	sessiondv1.RegisterSessionControlServer(grpcSrv, srv)
 	sessiondv1.RegisterRuntimeQueryServer(grpcSrv, srv)
+	sessiondv1.RegisterEventStreamServer(grpcSrv, srv)
 	go func() { _ = grpcSrv.Serve(lis) }()
 
 	ctx := context.Background()

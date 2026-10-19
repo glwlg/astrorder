@@ -15,6 +15,7 @@ const (
 	FileCodexMagpieCatalog = "codex_magpie_catalog"
 	FileGrokConfig         = "grok_config"
 	FileHermesConfig       = "hermes_config"
+	FileAntigravityConfig  = "antigravity_config"
 
 	RelCodexConfig        = ".codex/config.toml"
 	RelCodexCatalog       = ".codex/opencodex-catalog.json"
@@ -34,6 +35,7 @@ var ManagedFiles = map[string]string{
 	FileCodexCatalog:       RelCodexCatalog,
 	FileCodexMagpieCatalog: RelCodexMagpieCatalog,
 	FileGrokConfig:         RelGrokConfig,
+	FileAntigravityConfig:  ".antigravity/settings.json",
 }
 
 var CredentialFiles = map[string]string{

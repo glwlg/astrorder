@@ -118,6 +118,15 @@ func (d *Daemon) controlOnce(parent context.Context, request map[string]any) map
 			if params, ok := request["params"].(map[string]any); ok {
 				if rc, ok := params["runtime_control"].(bool); ok && rc {
 					d.BindAgentControlSession(result.SessionID, result.Payload)
+					if kind == "antigravity" && result.Payload["runtime_control"] == true && result.Status == "idle" {
+						agent := map[string]any{"id": result.Payload["agent_id"], "kind": "antigravity", "name": "Antigravity", "status": "ready", "control_state": "owned", "capabilities": []string{"chat", "events", "history", "launch", "stop", "fork", "delete"}, "limitation": "agy 本机支持原生停止、分叉、删除和空闲模型/权限切换；附件、运行中引导、SSH 与转交尚未接通，上下文占用未取得，headless 不支持逐次审批。"}
+						for _, key := range []string{"runtime_id", "source_id", "connection_id"} {
+							if v, ok := result.Payload[key]; ok {
+								agent[key] = v
+							}
+						}
+						err = d.Emit(result.SessionID, "connector.hello", agent, "")
+					}
 					if (kind == "grok" || kind == "grok-ssh") && result.Payload["runtime_control"] == true && result.Status == "idle" {
 						agent := map[string]any{"id": result.Payload["agent_id"], "kind": "grok", "name": "Grok Build", "status": "ready", "control_state": "owned", "capabilities": []string{"chat", "events", "history", "launch", "delete", "queue", "approvals", "task_events", "attachments"}}
 						for _, key := range []string{"name", "runtime_id", "source_id", "connection_id"} {
@@ -130,7 +139,7 @@ func (d *Daemon) controlOnce(parent context.Context, request map[string]any) map
 					// A restarted App has already consumed the original hello.
 					// Reannounce a confirmed live Hermes control transport.
 					if previouslyOwned && result.Payload["runtime_control"] == true && result.Status == "idle" && (kind == "hermes" || kind == "ssh") {
-						agent := map[string]any{"id": result.Payload["agent_id"], "kind": "hermes", "name": "Hermes", "status": "ready", "capabilities": []string{"chat", "events", "attachments"}, "control_state": "owned"}
+						agent := map[string]any{"id": result.Payload["agent_id"], "kind": "hermes", "name": "Hermes", "status": "ready", "capabilities": []string{"chat", "events", "attachments", "approvals"}, "control_state": "owned"}
 						for _, key := range []string{"name", "runtime_id", "source_id", "profile_name", "connection_id"} {
 							if value, ok := result.Payload[key]; ok {
 								agent[key] = value

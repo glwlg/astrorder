@@ -121,6 +121,8 @@
     {"legacy_name":"session.approval.respond","rpc":"astrorder.sessiond.v1.SessionControl/RespondApproval","namespace":"daemon-request-action","alias_of":"session.approve","disposition":"daemon-hermes-alias-no-duplicate-rpc"}
   ],
   "runtime_methods": [
+    {"runtime":"antigravity","method":"models.list","oneof_branch":"antigravity_models_list","disposition":"typed-read"},
+    {"runtime":"antigravity","method":"session.list","oneof_branch":"antigravity_session_list","disposition":"typed-read"},
     {"runtime":"codex","method":"account/read","oneof_branch":"codex_account_read","disposition":"typed-read"},
     {"runtime":"codex","method":"hooks/list","oneof_branch":"codex_hooks_list","disposition":"typed-read"},
     {"runtime":"codex","method":"initialize","oneof_branch":"codex_initialize","disposition":"typed-read"},

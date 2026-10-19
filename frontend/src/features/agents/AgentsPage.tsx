@@ -267,7 +267,7 @@ function AgentUpgradeAction({ agent }: { agent: Agent }) {
   const isCodex = agent.kind === 'codex'
   const isHermes = agent.kind === 'hermes'
   const isGrok = agent.kind === 'grok'
-  const commandHint = isCodex ? 'vp install -g @openai/codex@latest' : isHermes ? 'hermes update' : isGrok ? 'x.ai/cli/install' : '原生升级'
+  const commandHint = isCodex ? 'vp install -g @openai/codex@latest' : isHermes ? 'hermes update' : isGrok ? 'x.ai/cli/install' : agent.kind === 'antigravity' ? 'agy update' : '原生升级'
 
   return (
     <>

@@ -702,6 +702,57 @@
         }
       }
     },
+    "/api/v1/auth/qr/create": {
+      "post": {
+        "operationId": "create_qr_login",
+        "summary": "Create a three-minute PC-bound QR login request",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "additionalProperties": false}}}},
+        "responses": {
+          "200": {"description": "Challenge and HttpOnly PC binding cookie", "content": {"application/json": {"schema": {"type": "object", "required": ["id", "scan_secret", "expires_at", "confirmation_code"], "properties": {"id": {"type": "string"}, "scan_secret": {"type": "string"}, "expires_at": {"type": "string", "format": "date-time"}, "confirmation_code": {"type": "string"}}}}}},
+          "403": {"description": "Explicit allowed Origin required"},
+          "429": {"description": "Too many outstanding challenges"}
+        }
+      }
+    },
+    "/api/v1/auth/qr/poll": {
+      "post": {
+        "operationId": "poll_qr_login",
+        "summary": "Poll and atomically redeem an approved login in the initiating PC browser",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "additionalProperties": false, "required": ["id"], "properties": {"id": {"type": "string"}}}}}},
+        "responses": {
+          "200": {"description": "pending, approved, rejected or expired; approved sets the browser session cookie once"},
+          "403": {"description": "Missing or incorrect PC binding cookie"},
+          "410": {"description": "Challenge expired, replaced or already redeemed"}
+        }
+      }
+    },
+    "/api/v1/auth/qr/inspect": {
+      "post": {
+        "operationId": "inspect_qr_login",
+        "summary": "Inspect QR login on an already authenticated phone without approving it",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "additionalProperties": false, "required": ["id", "scan_secret"], "properties": {"id": {"type": "string"}, "scan_secret": {"type": "string"}}}}}},
+        "responses": {
+          "200": {"description": "status, expires_at, confirmation_code and device"},
+          "401": {"description": "Phone must be logged in"},
+          "403": {"description": "Invalid origin or scan secret"},
+          "410": {"description": "Challenge no longer exists"}
+        }
+      }
+    },
+    "/api/v1/auth/qr/approve": {
+      "post": {
+        "operationId": "approve_qr_login",
+        "summary": "Explicitly approve or reject PC login using the phone session",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "additionalProperties": false, "required": ["id", "scan_secret", "decision"], "properties": {"id": {"type": "string"}, "scan_secret": {"type": "string"}, "decision": {"type": "string", "enum": ["approve", "reject"]}}}}}},
+        "responses": {
+          "200": {"description": "approved, rejected or expired"},
+          "401": {"description": "Phone must be logged in"},
+          "403": {"description": "Invalid origin or scan secret"},
+          "409": {"description": "Challenge has already been approved or rejected"},
+          "410": {"description": "Challenge no longer exists"}
+        }
+      }
+    },
     "/api/v1/auth/session": {
       "delete": {
         "operationId": "delete_auth_session_delete",

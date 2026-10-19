@@ -1,5 +1,6 @@
-import { IconSparkles } from '@tabler/icons-react'
-import { LayoutGroup, motion } from 'motion/react'
+import { useEffect } from 'react'
+import { Menu } from '@mantine/core'
+import { IconChevronDown, IconSparkles } from '@tabler/icons-react'
 import { AgentBrandIcon, agentKindLabel } from './AgentBrandIcon'
 import type { Agent, AgentKind, Session } from '../domain/types'
 
@@ -28,60 +29,44 @@ export function matchesAgent(session: Session, agents: Record<string, Agent>, fi
     && (selected.kind === 'all' || agent?.kind === selected.kind)
 }
 
-export function AgentSessionFilter({ agents, value, onChange }: { agents: Record<string, Agent>; value: string; onChange: (value: string) => void }) {
+export function AgentSessionFilter({ agents, value, onChange }: { agents: Record<string, Agent>; sessions?: Session[]; value: string; onChange: (value: string) => void }) {
   const selected = parseFilter(value)
+  const visibleAgents = Object.values(agents).filter(agent => agent.status !== 'disconnected')
   const connections = new Map<string, string>()
-  Object.values(agents).forEach(agent => {
+  visibleAgents.forEach(agent => {
     const id = agent.connection_id || 'local'
     if (!connections.has(id)) connections.set(id, connectionName(agent))
   })
-  const kinds: Array<[AgentKind | 'all', string]> = [
-    ['all', '全部 Agent'],
-    ...[...new Set(Object.values(agents).map(agent => agent.kind))]
-      .sort()
-      .map(kind => [kind, agentKindLabel(kind)] as [AgentKind, string]),
-  ]
+  const requestedConnection = selected.connection.startsWith('agent:') ? 'all' : selected.connection
+  const connection = requestedConnection === 'all' || connections.has(requestedConnection) ? requestedConnection : 'all'
+  const kindsFor = (id: string) => [...new Set(visibleAgents.filter(agent => id === 'all' || (agent.connection_id || 'local') === id).map(agent => agent.kind))].sort()
+  const kinds = kindsFor(connection)
+  const kind = selected.kind === 'all' || kinds.includes(selected.kind) ? selected.kind : 'all'
+  const normalizedValue = filterValue(connection, kind)
+  const stale = Object.keys(agents).length > 0 && !selected.connection.startsWith('agent:') && (connection !== selected.connection || kind !== selected.kind)
+  useEffect(() => {
+    if (stale) onChange(normalizedValue)
+  }, [stale, normalizedValue, onChange])
+  const label = kind === 'all' ? '全部 Agent' : agentKindLabel(kind)
   return <div className="agent-session-filter">
-    <select aria-label="按连接筛选" value={selected.connection.startsWith('agent:') ? 'all' : selected.connection} onChange={event => onChange(filterValue(event.currentTarget.value, selected.kind))}>
+    <select className="agent-connection-select" aria-label="按连接筛选" value={connection} onChange={event => {
+      const next = event.currentTarget.value
+      onChange(filterValue(next, kindsFor(next).includes(kind) ? kind : 'all'))
+    }}>
       <option value="all">全部连接</option>
       {[...connections].map(([id, name]) => <option key={id} value={id}>{name}</option>)}
     </select>
-    <div className="agent-kind-filters" role="group" aria-label="按 Agent 类型筛选">
-      <LayoutGroup id="agent-kind-filters-group">
-        {kinds.map(([kind, label]) => {
-          const isActive = selected.kind === kind
-          return (
-            <button
-              key={kind}
-              type="button"
-              className={isActive ? 'is-active' : ''}
-              aria-label={label}
-              aria-pressed={isActive}
-              title={label}
-              onClick={() => onChange(filterValue(selected.connection.startsWith('agent:') ? 'all' : selected.connection, kind))}
-              style={{ position: 'relative' }}
-            >
-              {isActive && (
-                <motion.span
-                  layoutId="agent-kind-active-pill"
-                  style={{
-                    position: 'absolute',
-                    inset: 0,
-                    borderRadius: '6px',
-                    background: 'var(--astr-surface-muted)',
-                    boxShadow: 'inset 0 0 0 1px var(--astr-border)',
-                    zIndex: 0,
-                  }}
-                  transition={{ type: 'spring', stiffness: 500, damping: 30 }}
-                />
-              )}
-              <span style={{ position: 'relative', zIndex: 1, display: 'grid', placeItems: 'center' }}>
-                {kind === 'all' ? <IconSparkles size={16} /> : <AgentBrandIcon kind={kind} size={16} />}
-              </span>
-            </button>
-          )
-        })}
-      </LayoutGroup>
-    </div>
+    <Menu position="bottom-end" width={200} withinPortal>
+      <Menu.Target>
+        <button type="button" className="agent-kind-select" aria-label="按 Agent 类型筛选" title={label}>
+          {kind === 'all' ? <IconSparkles size={18} /> : <AgentBrandIcon kind={kind} size={18} />}
+          <IconChevronDown size={12} />
+        </button>
+      </Menu.Target>
+      <Menu.Dropdown className="agent-kind-dropdown">
+        <Menu.Item leftSection={<IconSparkles size={18} />} aria-current={kind === 'all' ? 'true' : undefined} onClick={() => onChange(filterValue(connection, 'all'))}>全部 Agent</Menu.Item>
+        {kinds.map(item => <Menu.Item key={item} leftSection={<AgentBrandIcon kind={item} size={18} />} aria-current={kind === item ? 'true' : undefined} onClick={() => onChange(filterValue(connection, item))}>{agentKindLabel(item)}</Menu.Item>)}
+      </Menu.Dropdown>
+    </Menu>
   </div>
 }
