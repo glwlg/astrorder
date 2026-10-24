@@ -15,6 +15,8 @@ import (
 	"astrorder.dev/app-server/internal/blackboard"
 	"astrorder.dev/app-server/internal/sessions"
 	sessiondv1 "astrorder.dev/contracts/gen/go/astrorder/sessiond/v1"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 func newCommandMeta(operationID, commandID string) *sessiondv1.CommandMeta {
@@ -207,21 +209,31 @@ func publicSession(session map[string]any) map[string]any {
 		parentKey = aid + "::" + parentSid
 	}
 
+	var delegationParentKey any
+	delParentAid, _ := session["delegation_parent_agent_id"].(string)
+	delParentSid, _ := session["delegation_parent_session_id"].(string)
+	if delParentAid != "" && delParentSid != "" {
+		delegationParentKey = delParentAid + "::" + delParentSid
+	}
+
 	title, _ := session["title"].(string)
 	ephemeral, _ := session["ephemeral"].(bool)
 
 	return map[string]any{
-		"key":                sessionKey(session),
-		"id":                 session["id"],
-		"agent_id":           session["agent_id"],
-		"title":              title,
-		"status":             session["status"],
-		"updated_at":         session["updated_at"],
-		"project_name":       session["project_name"],
-		"parent_session_key": parentKey,
-		"parent_session_id":  session["parent_session_id"],
-		"parent_agent_id":    session["parent_agent_id"],
-		"ephemeral":          ephemeral,
+		"key":                           sessionKey(session),
+		"id":                            session["id"],
+		"agent_id":                      session["agent_id"],
+		"title":                         title,
+		"status":                        session["status"],
+		"updated_at":                    session["updated_at"],
+		"project_name":                  session["project_name"],
+		"parent_session_key":            parentKey,
+		"parent_session_id":             session["parent_session_id"],
+		"parent_agent_id":               session["parent_agent_id"],
+		"delegation_parent_agent_id":    session["delegation_parent_agent_id"],
+		"delegation_parent_session_id":  session["delegation_parent_session_id"],
+		"delegation_parent_session_key": delegationParentKey,
+		"ephemeral":                     ephemeral,
 	}
 }
 
@@ -304,7 +316,7 @@ func (h *Handler) currentAgents(ctx context.Context) ([]map[string]any, error) {
 // ---------------- Handlers for 40 capabilities ---------------- //
 
 func (h *Handler) invokeCatalogList(ctx context.Context, payload map[string]any) (any, error) {
-	return map[string]any{"items": Capabilities}, nil
+	return map[string]any{"items": AllCapabilities}, nil
 }
 
 func (h *Handler) invokeSessionsList(ctx context.Context, payload map[string]any) (any, error) {
@@ -510,8 +522,45 @@ func (h *Handler) invokeSessionsRead(ctx context.Context, payload map[string]any
 	}
 	kind, _ := agent["kind"].(string)
 
+	controlState, _ := sess["control_state"].(string)
+
+	// For external Hermes sessions, strictly use read-only QueryNative history without AttachSession
+	if controlState == "external" && kind == "hermes" {
+		b := ""
+		if beforeStr != nil {
+			b = *beforeStr
+		}
+		unboundItems, next, err := h.readHermesHistoryUnbound(ctx, sess, agent, nativeID, b, limit)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{
+			"session":     publicSession(sess),
+			"items":       unboundItems,
+			"next_cursor": next,
+			"has_more":    next != nil && next != "",
+			"count":       len(unboundItems),
+		}, nil
+	}
+
+	// Reading from unbound cursor (e.g. Codex thread/items/list path)
+	if beforeStr != nil && strings.HasPrefix(*beforeStr, unboundCursorPrefix) {
+		unboundItems, next, err := h.readCodexHistoryUnbound(ctx, sess, agent, nativeID, *beforeStr, limit)
+		if err != nil {
+			return nil, NewAgentApiError("runtime_error", "Native history read failed: "+err.Error())
+		}
+		return map[string]any{
+			"session":     publicSession(sess),
+			"items":       unboundItems,
+			"next_cursor": next,
+			"has_more":    next != nil && next != "",
+			"count":       len(unboundItems),
+		}, nil
+	}
+
 	// Try reading via gRPC Runtime.GetHistoryPage if Client is present
 	if h.options.Client != nil && h.options.Client.Runtime != nil {
+
 		var reqBefore *sessiondv1.NullableString
 		if beforeStr != nil {
 			reqBefore = &sessiondv1.NullableString{State: &sessiondv1.NullableString_Value{Value: *beforeStr}}
@@ -542,6 +591,22 @@ func (h *Handler) invokeSessionsRead(ctx context.Context, payload map[string]any
 			}
 			if resp.NextCursor != nil && resp.NextCursor.GetValue() != "" {
 				nextCursor = resp.NextCursor.GetValue()
+			}
+		} else {
+			// Do NOT swallow identity mismatch errors
+			if status.Code(rErr) == codes.FailedPrecondition && strings.Contains(rErr.Error(), "identity") {
+				return nil, NewAgentApiError("runtime_error", "Native history identity mismatch: "+rErr.Error())
+			}
+			if kind == "codex" {
+				b := ""
+				if beforeStr != nil {
+					b = *beforeStr
+				}
+				if unboundItems, next, readErr := h.readCodexHistoryUnbound(ctx, sess, agent, nativeID, b, limit); readErr == nil {
+					items = unboundItems
+					nextCursor = next
+					nativeRead = true
+				}
 			}
 		}
 	}
@@ -920,8 +985,8 @@ func (h *Handler) invokeSessionsTree(ctx context.Context, payload map[string]any
 	}
 
 	for _, s := range sessions {
-		if pkey, ok := s["parent_session_key"].(string); ok && pkey != "" {
-			childrenMap[pkey] = append(childrenMap[pkey], s)
+		if delPkey, ok := s["delegation_parent_session_key"].(string); ok && delPkey != "" {
+			childrenMap[delPkey] = append(childrenMap[delPkey], s)
 		}
 	}
 
@@ -964,8 +1029,8 @@ func (h *Handler) invokeSessionsTree(ctx context.Context, payload map[string]any
 
 	var roots []map[string]any
 	for _, s := range sessions {
-		pkey, _ := s["parent_session_key"].(string)
-		if pkey == "" || byKey[pkey] == nil {
+		delPkey, _ := s["delegation_parent_session_key"].(string)
+		if delPkey == "" || byKey[delPkey] == nil {
 			roots = append(roots, s)
 		}
 	}
@@ -1014,7 +1079,15 @@ func (h *Handler) invokeSessionsSend(ctx context.Context, payload map[string]any
 
 	commandID := ""
 	if cid, ok := payload["command_id"].(string); ok && cid != "" {
+		if strings.TrimSpace(cid) != cid {
+			return nil, NewAgentApiError("invalid_input", "command_id must not contain leading or trailing whitespace")
+		}
 		commandID = cid
+	} else if opid, ok := payload["operation_id"].(string); ok && opid != "" {
+		if strings.TrimSpace(opid) != opid {
+			return nil, NewAgentApiError("invalid_input", "operation_id must not contain leading or trailing whitespace")
+		}
+		commandID = opid
 	} else {
 		b := make([]byte, 16)
 		_, _ = rand.Read(b)
@@ -1024,6 +1097,8 @@ func (h *Handler) invokeSessionsSend(ctx context.Context, payload map[string]any
 	operationID := ""
 	if opid, ok := payload["operation_id"].(string); ok && opid != "" {
 		operationID = opid
+	} else {
+		operationID = commandID
 	}
 
 	// If shared CommandSubmit callback is provided by parent, use it
@@ -1399,6 +1474,33 @@ func (h *Handler) invokePluginsConfigure(ctx context.Context, payload map[string
 	return map[string]any{"plugin": pluginRes, "ok": true}, nil
 }
 
+// pluginScopeFromPayload resolves the plugin event scope using the same
+// precedence as plugins.open: explicit session_key, explicit session_id, then
+// the verified caller identity. It keeps close events attached to the caller's
+// session without requiring the UI to infer scope.
+func pluginScopeFromPayload(payload map[string]any) (any, any) {
+	if sessionKey, _ := payload["session_key"].(string); strings.Contains(sessionKey, "::") {
+		parts := strings.SplitN(sessionKey, "::", 2)
+		return parts[0], parts[1]
+	}
+	if payload["session_id"] != nil {
+		agentID := payload["agent_id"]
+		if agentID == nil {
+			agentID = payload["caller_agent_id"]
+		}
+		return agentID, payload["session_id"]
+	}
+	callerAgent, _ := payload["caller_agent_id"].(string)
+	callerSession, _ := payload["caller_session_id"].(string)
+	if callerAgent != "" && callerSession != "" {
+		return callerAgent, callerSession
+	}
+	if aid := payload["agent_id"]; aid != nil {
+		return aid, nil
+	}
+	return nil, nil
+}
+
 func (h *Handler) invokePluginsOpen(ctx context.Context, payload map[string]any) (any, error) {
 	rawPid, _ := payload["plugin_id"].(string)
 	pluginID := strings.TrimSpace(rawPid)
@@ -1456,11 +1558,14 @@ func (h *Handler) invokePluginsOpen(ctx context.Context, payload map[string]any)
 
 func (h *Handler) invokePluginsClose(ctx context.Context, payload map[string]any) (any, error) {
 	collapse, _ := payload["collapse"].(bool)
+	agentID, sessionID := pluginScopeFromPayload(payload)
 	eventData := map[string]any{
-		"action":    "close",
-		"plugin_id": payload["plugin_id"],
-		"tab_id":    payload["tab_id"],
-		"collapse":  collapse,
+		"action":     "close",
+		"plugin_id":  payload["plugin_id"],
+		"tab_id":     payload["tab_id"],
+		"agent_id":   agentID,
+		"session_id": sessionID,
+		"collapse":   collapse,
 	}
 
 	if h.options.Publisher != nil {

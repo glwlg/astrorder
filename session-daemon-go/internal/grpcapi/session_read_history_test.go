@@ -1,10 +1,26 @@
 package grpcapi_test
 
 import (
+	"strings"
 	"testing"
 
 	sessiondv1 "astrorder.dev/contracts/gen/go/astrorder/sessiond/v1"
 )
+
+func TestHistoryLargeSingleItemDoesNotDuplicateWirePayload(t *testing.T) {
+	f := startFixture(t)
+	text := strings.Repeat("x", 9_000_000)
+	a := &sessionReadFixture{replies: map[string]map[string]any{"session.history_page": {"items": []any{map[string]any{"id": "large", "content": text}}, "next_cursor": nil, "has_more": false}}}
+	f.daemon.RegisterRuntime("hermes", a)
+	legacyWSOperation(t, f.daemon, map[string]any{"action": "session.create", "agent_type": "hermes"})
+	r, err := sessiondv1.NewRuntimeQueryClient(f.conn).GetHistoryPage(f.ctx, &sessiondv1.HistoryPageRequest{Session: &sessiondv1.SessionRef{SessionId: "read-owned"}, Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Items) != 1 || !strings.Contains(string(r.Items[0].Utf8Json), text) {
+		t.Fatal("large item lost")
+	}
+}
 
 func TestSessionReadHistoryPreservesCursorPresenceAndItems(t *testing.T) {
 	f := startFixture(t)

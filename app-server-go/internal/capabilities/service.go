@@ -20,6 +20,11 @@ type Opener interface {
 type Service struct {
 	Targets Opener
 	HTTP    *http.Client
+	Agents  interface {
+		GetAgent(context.Context, string) (map[string]any, error)
+	}
+	CLIBinary    func(context.Context, envtarget.Env) (string, []byte, error)
+	CLITransport func(context.Context, envtarget.Env) ([]byte, error)
 
 	locks sync.Map
 }

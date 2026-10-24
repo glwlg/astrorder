@@ -165,7 +165,8 @@ func TestSummaryRedactsSecretsAndFilters(t *testing.T) {
 			t.Errorf("filter leaked %s", server.Agent)
 		}
 	}
-	if len(hermes.Skills) != 1 || hermes.Skills[0].Name != "beta" {
+	installed := filterBy(hermes.Skills, func(skill Skill) bool { return skill.Scope != "builtin" })
+	if len(installed) != 1 || installed[0].Name != "beta" {
 		t.Errorf("hermes skills = %+v", hermes.Skills)
 	}
 }

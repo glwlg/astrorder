@@ -59,8 +59,9 @@ func (a *Adapter) rollbackImages(ctx context.Context, handle string, paths []str
 	return nil
 }
 
-func (a *Adapter) attachInputs(ctx context.Context, handle, text string, values []any) (string, error) {
+func (a *Adapter) attachInputs(ctx context.Context, handle, text string, values []any) (string, []any, error) {
 	images := []string{}
+	staged := []any{}
 	refs := []string{}
 	for _, value := range values {
 		attachment := value.(map[string]any)
@@ -75,11 +76,23 @@ func (a *Adapter) attachInputs(ctx context.Context, handle, text string, values 
 		if err == nil && result["attached"] != true {
 			err = fmt.Errorf("native attachment was not confirmed")
 		}
-		if err != nil {
-			if rollbackErr := a.rollbackImages(ctx, handle, images); rollbackErr != nil {
-				return "", fmt.Errorf("attachment failed: %w; %v", err, rollbackErr)
+		if err == nil && a.canonical && strings.HasPrefix(media, "image/") {
+			path, _ := result["path"].(string)
+			mime, _ := result["mime"].(string)
+			if path == "" || (mime != "image/png" && mime != "image/jpeg" && mime != "image/gif" && mime != "image/webp") {
+				err = fmt.Errorf("native image staging omitted path or mime")
+			} else {
+				staged = append(staged, map[string]any{"path": path, "mime": mime})
 			}
-			return "", fmt.Errorf("native attachment failed before prompt submission: %w", err)
+		}
+		if err != nil {
+			// Canonical uploads are staging-only; no queued images exist to detach.
+			if !a.canonical {
+				if rollbackErr := a.rollbackImages(ctx, handle, images); rollbackErr != nil {
+					return "", nil, fmt.Errorf("attachment failed: %w; %v", err, rollbackErr)
+				}
+			}
+			return "", nil, fmt.Errorf("native attachment failed before prompt submission: %w", err)
 		}
 		if strings.HasPrefix(media, "image/") {
 			if path, ok := result["path"].(string); ok && path != "" {
@@ -92,5 +105,5 @@ func (a *Adapter) attachInputs(ctx context.Context, handle, text string, values 
 	if len(refs) > 0 {
 		text = strings.Join(append(refs, text), "\n")
 	}
-	return text, nil
+	return text, staged, nil
 }

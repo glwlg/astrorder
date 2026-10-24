@@ -1,4 +1,6 @@
 import type { Attachment, Command, CommandPayload, Session } from '../../domain/types'
+import { isUnsentError, sendErrorMessage } from '../chat/sendFailure'
+import { newCommandId } from '../../domain/semantics'
 
 export type OutboxEntry = {
   payload: CommandPayload
@@ -8,6 +10,7 @@ export type OutboxEntry = {
   sawRunning?: boolean
   acceptedAt?: number
   error?: string
+  unsent?: boolean
 }
 export interface OutboxStorage {
   load: () => Promise<OutboxEntry[]>
@@ -62,7 +65,7 @@ export class MobileOutbox {
           await update(entry)
         }
       } catch (error) {
-        await update({ ...entry, state: 'failed', error: error instanceof Error ? error.message : '附件上传未完成' })
+        await update({ ...entry, state: 'failed', unsent: true, error: sendErrorMessage(error) })
         return
       }
       // received is not acceptance. Persist an uncertain boundary before the HTTP write.
@@ -74,7 +77,8 @@ export class MobileOutbox {
         else await update({ ...entry, state: result.state, error: result.error || undefined })
         return { command: result, attachments: entry.attachments }
       } catch (error) {
-        await update({ ...entry, state: 'unknown', error: error instanceof Error ? error.message : '提交结果未确认' })
+        const unsent = isUnsentError(error)
+        await update({ ...entry, state: unsent ? 'failed' : 'unknown', unsent, error: sendErrorMessage(error) })
       }
     })
   }
@@ -90,7 +94,7 @@ export class MobileOutbox {
     return this.run(async () => {
       const entry = this.entries.find(row => row.payload.id === id && row.payload.agent_id === agentId && row.payload.session_id === sessionId && row.state === 'failed')
       if (!entry) return null
-      const commandId = crypto.randomUUID()
+      const commandId = newCommandId()
       await this.commit(this.entries.map(row => row === entry
         ? { ...row, payload: { ...row.payload, id: commandId }, state: 'queued', error: undefined, sawRunning: false }
         : row))

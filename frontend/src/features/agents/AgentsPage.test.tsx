@@ -42,7 +42,9 @@ vi.mock('../../api/client', () => ({
     connectSshConnection: vi.fn(),
     disconnectSshConnection: vi.fn(),
     launchRuntime: vi.fn(),
-    getAgentMcpStatus: vi.fn(async () => ({ enabled: true })),
+    getAgentSessionCLI: vi.fn(async () => ({ ready: false, message: '尚未配置星序会话 CLI', home: '/home/test/.hermes' })),
+    configureAgentSessionCLI: vi.fn(async () => ({ ready: true, message: '已配置并核验', home: '/home/test/.hermes' })),
+
   },
 }))
 
@@ -67,6 +69,17 @@ function renderPage(inSettingsModal = false) {
 afterEach(() => { cleanup(); vi.clearAllMocks(); useAstrorderStore.getState().resetRuntime() })
 
 describe('Agent settings connection controls', () => {
+  it('configures the selected Agent CLI binding from the access tab', async () => {
+    useAstrorderStore.setState({ agents: { local: { id: 'local', name: '本机 Hermes', kind: 'hermes', status: 'ready', connection_id: 'local', capabilities: ['chat'], limitation: null } } })
+    renderPage()
+    fireEvent.click(await screen.findByRole('button', { name: '配置 Hermes' }))
+    const drawer = await screen.findByRole('dialog', { name: 'Hermes · 运行配置' })
+    expect(await within(drawer).findByText('尚未配置星序会话 CLI')).toBeInTheDocument()
+    fireEvent.click(within(drawer).getByRole('button', { name: '配置会话 CLI' }))
+    await waitFor(() => expect(api.configureAgentSessionCLI).toHaveBeenCalledWith('local'))
+    expect(await within(drawer).findByText('已配置并核验')).toBeInTheDocument()
+    expect(within(drawer).getByRole('button', { name: '重新配置' })).toBeInTheDocument()
+  })
   it('closes only the nested drawer on Escape and returns focus to its trigger', async () => {
     const { closeSettings } = renderPage(true)
     const trigger = await screen.findByRole('button', { name: '配置 Hermes' })
@@ -97,11 +110,11 @@ describe('Agent settings connection controls', () => {
     renderPage()
     fireEvent.click(await screen.findByRole('button', { name: '配置 Hermes' }))
     const drawer = await screen.findByRole('dialog', { name: 'Hermes · 运行配置' })
-    expect(within(drawer).getByText('星序 MCP 调度授权')).toBeInTheDocument()
+    expect(within(drawer).getByText('星序 CLI 与技能')).toBeInTheDocument()
     expect(within(drawer).queryByText('支持能力与通道规格')).not.toBeInTheDocument()
     fireEvent.click(within(drawer).getByRole('tab', { name: '能力' }))
     expect(within(drawer).getByText('支持能力与通道规格')).toBeInTheDocument()
-    expect(within(drawer).queryByText('星序 MCP 调度授权')).not.toBeInTheDocument()
+    expect(within(drawer).queryByText('星序 CLI 与技能')).not.toBeInTheDocument()
     fireEvent.click(within(drawer).getByRole('tab', { name: '维护' }))
     expect(within(drawer).getByRole('button', { name: '检查并升级' })).toBeInTheDocument()
     expect(within(drawer).queryByText('支持能力与通道规格')).not.toBeInTheDocument()

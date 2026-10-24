@@ -665,8 +665,7 @@ func (runtime *Runtime) removePending(id int) {
 }
 
 func (runtime *Runtime) readLoop(stdout io.Reader) {
-	decoder := json.NewDecoder(stdout)
-	decoder.UseNumber()
+	decoder := newFrameDecoder(stdout)
 	for {
 		var frame map[string]any
 		if err := decoder.Decode(&frame); err != nil {

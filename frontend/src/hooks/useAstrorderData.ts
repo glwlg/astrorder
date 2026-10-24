@@ -12,6 +12,7 @@ import {
 import type { Message, Session } from '../domain/types'
 import { selectMessages, useAstrorderStore } from '../state/store'
 import { visibleTranscript } from '../domain/visibleTranscript'
+import { loadActivityHistory, visibleHistoryItems } from '../domain/loadActivityHistory'
 
 const EMPTY_STORED_MESSAGES: Message[] = []
 
@@ -70,7 +71,23 @@ export function useBootstrap(authenticated: boolean) {
   return query
 }
 
-export function useSessionResources(session: Session | null, authenticated: boolean) {
+export function useSessionResources(session: Session | null, authenticated: boolean, viewing = true) {
+  useEffect(() => {
+    if (!authenticated || !session || !viewing) return
+    const renew = () => {
+      if (document.visibilityState === 'visible') {
+        void api.renewSessionView(session.id, session.agent_id).catch(() => {})
+      }
+    }
+    renew()
+    const timer = window.setInterval(renew, 30_000)
+    document.addEventListener('visibilitychange', renew)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', renew)
+    }
+  }, [authenticated, session?.agent_id, session?.id, viewing])
+
   const agentId = session?.agent_id
   const sessionId = session?.id
   const stored = useAstrorderStore(useShallow((state) =>
@@ -99,9 +116,8 @@ export function useSessionResources(session: Session | null, authenticated: bool
     queryKey: ['astrorder', 'messages', session?.agent_id, session?.id],
     queryFn: async ({ pageParam }) => {
       const liveRevisionAtRequest = useAstrorderStore.getState().messageRevision
-      const page = await api.getMessages(
-        session!.id,
-        session!.agent_id,
+      const page = await loadActivityHistory(
+        (before, limit) => api.getMessages(session!.id, session!.agent_id, before, limit),
         pageParam,
         pageParam ? OLDER_HISTORY_LIMIT : INITIAL_HISTORY_LIMIT,
       )
@@ -126,6 +142,7 @@ export function useSessionResources(session: Session | null, authenticated: bool
     const sKey = `${session.agent_id}::${session.id}`
     const fetchedCount = autoFetchedRef.current[sKey] || 0
     const allLoaded = pages.flatMap((page) => page.items)
+    if (pages.some(page => page.completeActivityGroup)) return
     if (!needsUserTurnBackfill({ items: allLoaded, hasNextPage, autoFetchedPages: fetchedCount })) return
     autoFetchedRef.current[sKey] = fetchedCount + 1
     void fetchNextPageRef.current()
@@ -176,7 +193,11 @@ export function useSessionResources(session: Session | null, authenticated: bool
     return stored
   }, [session, messages.data, stored])
 
-  return { messages, commands, tasks, visibleMessages }
+  const activityBreaks = useMemo(() => (messages.data?.pages || []).flatMap(page => {
+    const first = visibleHistoryItems(page.items)[0]
+    return first ? [first.id] : []
+  }), [messages.data])
+  return { messages, commands, tasks, visibleMessages, activityBreaks }
 }
 
 export function useRuntime(authenticated: boolean) {

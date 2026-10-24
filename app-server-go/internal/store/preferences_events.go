@@ -233,6 +233,9 @@ func insertEventTx(ctx context.Context, tx *sql.Tx, event Event, retention int64
 		event.Cursor = 0
 		return &event, nil
 	}
+	if err := resolveSessionUpsertIdentity(&event); err != nil {
+		return nil, err
+	}
 	var count int
 	var err error
 	if event.AgentID == "" {
@@ -245,6 +248,32 @@ func insertEventTx(ctx context.Context, tx *sql.Tx, event Event, retention int64
 	}
 	if count > 0 {
 		return nil, nil
+	}
+	if event.Type == "session.upsert" {
+		dataCopy := make(map[string]any, len(event.Data)+2)
+		for k, v := range event.Data {
+			dataCopy[k] = v
+		}
+		var parentAid, parentSid sql.NullString
+		rowErr := tx.QueryRowContext(ctx, "SELECT parent_agent_id, parent_session_id FROM delegation_edges WHERE child_agent_id=? AND child_session_id=?", event.AgentID, event.SessionID).Scan(&parentAid, &parentSid)
+		if rowErr == nil {
+			if parentAid.Valid {
+				dataCopy["delegation_parent_agent_id"] = parentAid.String
+			} else {
+				dataCopy["delegation_parent_agent_id"] = nil
+			}
+			if parentSid.Valid {
+				dataCopy["delegation_parent_session_id"] = parentSid.String
+			} else {
+				dataCopy["delegation_parent_session_id"] = nil
+			}
+		} else if errors.Is(rowErr, sql.ErrNoRows) {
+			dataCopy["delegation_parent_agent_id"] = nil
+			dataCopy["delegation_parent_session_id"] = nil
+		} else {
+			return nil, rowErr
+		}
+		event.Data = dataCopy
 	}
 	if err := persistApprovalTx(ctx, tx, event); err != nil {
 		return nil, err
@@ -308,4 +337,63 @@ func stringOrEmpty(value any) string {
 		return ""
 	}
 	return fmt.Sprint(value)
+}
+
+func resolveSessionUpsertIdentity(event *Event) error {
+	if event.Type != "session.upsert" {
+		return nil
+	}
+	agentID := event.AgentID
+	if event.Data != nil {
+		if v, ok := event.Data["agent_id"]; ok && v != nil {
+			s, valid := v.(string)
+			if !valid {
+				return errors.New("session.upsert agent_id must be a string")
+			}
+			if s != "" {
+				if agentID != "" && agentID != s {
+					return fmt.Errorf("session.upsert agent ID conflict: event=%q data=%q", agentID, s)
+				}
+				agentID = s
+			}
+		}
+	}
+	if agentID == "" {
+		return errors.New("session.upsert requires agent ID")
+	}
+
+	sessionID := event.SessionID
+	if event.Data != nil {
+		if v, ok := event.Data["id"]; ok && v != nil {
+			s, valid := v.(string)
+			if !valid {
+				return errors.New("session.upsert id must be a string")
+			}
+			if s != "" {
+				if sessionID != "" && sessionID != s {
+					return fmt.Errorf("session.upsert session ID conflict: event=%q data id=%q", sessionID, s)
+				}
+				sessionID = s
+			}
+		}
+		if v, ok := event.Data["session_id"]; ok && v != nil {
+			s, valid := v.(string)
+			if !valid {
+				return errors.New("session.upsert session_id must be a string")
+			}
+			if s != "" {
+				if sessionID != "" && sessionID != s {
+					return fmt.Errorf("session.upsert session ID conflict: event=%q data session_id=%q", sessionID, s)
+				}
+				sessionID = s
+			}
+		}
+	}
+	if sessionID == "" {
+		return errors.New("session.upsert requires session ID")
+	}
+
+	event.AgentID = agentID
+	event.SessionID = sessionID
+	return nil
 }

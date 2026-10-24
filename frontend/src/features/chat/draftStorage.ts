@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { scopeKey } from '../../domain/semantics'
 import type { DraftState } from '../../domain/types'
 import { useAstrorderStore } from '../../state/store'
+import { ApiError, authenticatedApiFetch, request } from '../../api/client'
 
 const DATABASE = 'astrorder:drafts'
 const STORE = 'drafts'
@@ -67,6 +68,100 @@ export const draftStorage = {
   remove(key: string) {
     try { localStorage.removeItem(TEXT_PREFIX + key) } catch { /* IndexedDB removal still proceeds. */ }
     return hasIndexedDb() ? queueWrite(key, () => transact<undefined>('readwrite', store => store.delete(key))) : Promise.resolve()
+  },
+}
+
+export interface StashedDraft {
+  id: string
+  savedAt: string
+  draft: DraftState
+}
+
+// Kept separately from the active draft, so sending or clearing the composer
+// never removes explicitly stashed text and File bytes.
+const legacyDraftShelfStorage = {
+  async load(key: string): Promise<StashedDraft[]> {
+    if (!hasIndexedDb()) return []
+    const storageKey = `shelf:${key}`
+    await writes.get(storageKey)?.catch(() => undefined)
+    return await transact<StashedDraft[] | undefined>('readonly', store => store.get(storageKey)) || []
+  },
+  save(key: string, entries: StashedDraft[]): Promise<void> {
+    if (!hasIndexedDb()) return Promise.reject(new Error('无法暂存草稿：本地存储不可用，输入内容已保留。'))
+    const storageKey = `shelf:${key}`
+    return queueWrite(storageKey, async () => {
+      // Materialize disk-backed Files before storing; WebView File handles may
+      // otherwise stop being readable after a reload or source-file change.
+      const snapshots = await Promise.all(entries.map(async entry => ({
+        ...entry,
+        draft: {
+          ...entry.draft,
+          attachments: await Promise.all(entry.draft.attachments.map(async item => ({
+            ...item,
+            file: item.attachment ? item.file : new File([await item.file.arrayBuffer()], item.file.name, { type: item.file.type, lastModified: item.file.lastModified }),
+          }))),
+        },
+      })))
+      await transact<IDBValidKey>('readwrite', store => store.put(snapshots, storageKey))
+    })
+  },
+}
+
+type StoredFile = { name: string; type: string; lastModified: number; data: string }
+type StoredEntry = Omit<StashedDraft, 'draft'> & { draft: Omit<DraftState, 'attachments'> & { attachments: Array<Omit<DraftState['attachments'][number], 'file'> & { file: StoredFile }> } }
+type ShelfResponse = { revision: number; entries: StoredEntry[] }
+const revisions = new Map<string, number>()
+const shelfPath = (key: string) => `/draft-shelf?scope=${encodeURIComponent(key)}`
+
+async function encodeEntries(entries: StashedDraft[]): Promise<StoredEntry[]> {
+  return Promise.all(entries.map(async row => ({ ...row, draft: { ...row.draft, attachments: await Promise.all(row.draft.attachments.map(async item => {
+    let bytes: Uint8Array
+    if (item.attachment) {
+      const response = await authenticatedApiFetch(item.attachment.url)
+      if (!response.ok) throw new Error('无法保存草稿附件，输入内容已保留。')
+      bytes = new Uint8Array(await response.arrayBuffer())
+    } else bytes = new Uint8Array(await item.file.arrayBuffer())
+    let binary = ''
+    for (let offset = 0; offset < bytes.length; offset += 32768) binary += String.fromCharCode(...bytes.subarray(offset, offset + 32768))
+    return { ...item, file: { name: item.file.name, type: item.file.type, lastModified: item.file.lastModified, data: btoa(binary) } }
+  })) } })))
+}
+
+function decodeEntries(entries: StoredEntry[]): StashedDraft[] {
+  return entries.map(row => ({ ...row, draft: { ...row.draft, attachments: row.draft.attachments.map(item => {
+    const bytes = Uint8Array.from(atob(item.file.data), char => char.charCodeAt(0))
+    return { ...item, file: new File([bytes], item.file.name, { type: item.file.type, lastModified: item.file.lastModified }) }
+  }) } }))
+}
+
+export const draftShelfStorage = {
+  async load(key: string): Promise<StashedDraft[]> {
+    await writes.get(`remote-shelf:${key}`)?.catch(() => undefined)
+    let result = await request<ShelfResponse>(shelfPath(key))
+    const legacy = await legacyDraftShelfStorage.load(key)
+    const imported = legacy.filter(row => !result.entries.some(saved => saved.id === row.id))
+    if (imported.length) {
+      try {
+        result = await request<ShelfResponse>(shelfPath(key), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ revision: result.revision, entries: [...await encodeEntries(imported), ...result.entries] }) })
+      } catch (error) {
+        // A second tab may have imported first; retain local bytes and let a
+        // later load retry if any entries are still missing.
+        if (!(error instanceof ApiError) || error.status !== 409) throw error
+        result = await request<ShelfResponse>(shelfPath(key))
+        if (imported.some(row => !result.entries.some(saved => saved.id === row.id))) throw error
+      }
+    }
+    if (legacy.length) await legacyDraftShelfStorage.save(key, [])
+    revisions.set(key, result.revision)
+    return decodeEntries(result.entries)
+  },
+  save(key: string, entries: StashedDraft[]): Promise<void> {
+    const revision = revisions.get(key)
+    if (revision === undefined) return Promise.reject(new Error('草稿箱尚未载入，输入内容已保留。'))
+    return queueWrite(`remote-shelf:${key}`, async () => {
+      const result = await request<ShelfResponse>(shelfPath(key), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ revision, entries: await encodeEntries(entries) }) })
+      revisions.set(key, result.revision)
+    })
   },
 }
 

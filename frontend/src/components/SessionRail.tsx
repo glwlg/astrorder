@@ -396,12 +396,15 @@ export function SessionRail({
   const handoffTargets = (session: Session) => sessionHandoffTargets(session, agents)
 
   const handoffItems = (session: Session) => {
-    if (!handoffTargets(session).length) return null
+    const source = agents[session.agent_id]
+    if (!source || !['codex', 'hermes'].includes(source.kind)) return null
+    const available = handoffTargets(session).length > 0
     return <>
       <Menu.Divider />
       <Menu.Item
         leftSection={<IconTransfer size={14} />}
-        disabled={session.status !== 'idle'}
+        disabled={session.status !== 'idle' || !available}
+        title={!available ? '同一环境暂无可用的目标 Agent' : session.status !== 'idle' ? '会话空闲后可转交' : undefined}
         onClick={() => setHandoffTarget(session)}
       >
         转交
@@ -851,7 +854,7 @@ export function SessionRail({
                     )}
                     {displaySessionTitle(session)}
                   </span>
-                  <div className="session-row-info"><AgentKindBadge agent={agents[session.agent_id]} iconOnly /><span className="session-row-time">{formatRelativeTime(session.updated_at)}</span>{(session as any).unread ? <StatusDot status="unread" /> : <StatusDot status={activityStatus} />}</div>
+                  <div className="session-row-info"><AgentKindBadge agent={agents[session.agent_id]} iconOnly /><span className="session-row-time">{formatRelativeTime(session.updated_at)}</span>{(session as any).unread && activityStatus === 'idle' ? <StatusDot status="unread" /> : <StatusDot status={activityStatus} />}</div>
                 </UnstyledButton>
                 {!batchMode && <div className="session-row-actions has-pinned"><button className="session-action-btn is-active" aria-label="取消置顶" onClick={e => togglePin(session, e)}><IconPinned size={14} /></button>
                   <Menu position="bottom-end" withinPortal opened={railMenu?.kind === 'session' && railMenu.key === key} onChange={(opened) => updateRailMenu(opened, 'session', key)}><Menu.Target><button className="session-action-btn" aria-label="更多操作"><IconDotsVertical size={14} /></button></Menu.Target><Menu.Dropdown>
@@ -1058,7 +1061,7 @@ export function SessionRail({
                           <div className="session-row-info">
                             <AgentKindBadge agent={agents[session.agent_id]} iconOnly />
                             <span className="session-row-time">{formatRelativeTime(session.updated_at)}</span>
-                            {(session as any).unread ? <StatusDot status="unread" /> : <StatusDot status={activityStatus} />}
+                            {(session as any).unread && activityStatus === 'idle' ? <StatusDot status="unread" /> : <StatusDot status={activityStatus} />}
                           </div>
                         </UnstyledButton>
                         {!batchMode && <div className={`session-row-actions ${isPinned ? 'has-pinned' : ''}`}>

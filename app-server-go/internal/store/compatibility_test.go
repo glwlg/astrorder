@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
+
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -179,7 +179,7 @@ VALUES(73,'migrated-command','history-old','agent','send','queued','keep <&> 世
 	if _, err := st.SetCheckpoint(ctx, "fixture-epoch", "history-old", 11); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.DB().Exec(fmt.Sprintf("PRAGMA user_version = %d", CurrentSchemaVersion-1)); err != nil {
+	if _, err := st.DB().Exec("PRAGMA user_version = 3"); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.Close(); err != nil {

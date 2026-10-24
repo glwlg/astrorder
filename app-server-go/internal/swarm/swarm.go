@@ -168,23 +168,22 @@ func (s *Service) MilestoneList(ctx context.Context) (map[string]any, error) {
 
 // TelemetryReport records structured progress telemetry.
 func (s *Service) TelemetryReport(ctx context.Context, payload map[string]any) (map[string]any, error) {
-	key, _ := payload["key"].(string)
-	var agentID, sessionID string
-	if key != "" && strings.Contains(key, "::") {
-		parts := strings.SplitN(key, "::", 2)
-		agentID, sessionID = parts[0], parts[1]
-	} else if payload["session_id"] != nil && payload["agent_id"] != nil {
-		agentID = fmt.Sprintf("%v", payload["agent_id"])
-		sessionID = fmt.Sprintf("%v", payload["session_id"])
-	} else {
-		if key == "" {
-			key = "anonymous_worker"
-		}
+	agentID, sessionID, err := extractWorkerIdentity(payload)
+	if err != nil {
+		return nil, err
 	}
 
-	canonicalKey := key
-	if agentID != "" && sessionID != "" {
-		canonicalKey = agentID + "::" + sessionID
+	canonicalKey := agentID + "::" + sessionID
+
+	delegationRootKey := canonicalKey
+	if s.store != nil {
+		root, rErr := s.store.ResolveDelegationRoot(ctx, agentID, sessionID)
+		if rErr != nil {
+			return nil, fmt.Errorf("resolve delegation root for telemetry: %w", rErr)
+		}
+		if root.AgentID != "" && root.SessionID != "" {
+			delegationRootKey = root.AgentID + "::" + root.SessionID
+		}
 	}
 
 	progress := coerceInt(payload["progress"], 0)
@@ -220,15 +219,16 @@ func (s *Service) TelemetryReport(ctx context.Context, payload map[string]any) (
 	}
 
 	report := map[string]any{
-		"key":        canonicalKey,
-		"agent_id":   nullableString(agentID),
-		"session_id": nullableString(sessionID),
-		"progress":   progress,
-		"phase":      phase,
-		"status":     status,
-		"summary":    summary,
-		"artifacts":  artifactList,
-		"updated_at": time.Now().UTC().Format(time.RFC3339Nano),
+		"key":                 canonicalKey,
+		"agent_id":            agentID,
+		"session_id":          sessionID,
+		"delegation_root_key": delegationRootKey,
+		"progress":            progress,
+		"phase":               phase,
+		"status":              status,
+		"summary":             summary,
+		"artifacts":           artifactList,
+		"updated_at":          time.Now().UTC().Format(time.RFC3339Nano),
 	}
 
 	dbKey := "telemetry:" + canonicalKey
@@ -243,11 +243,225 @@ func (s *Service) TelemetryReport(ctx context.Context, payload map[string]any) (
 	return map[string]any{"ok": true, "report": report}, nil
 }
 
-// TelemetryGet retrieves telemetry reports.
+func validateIdentifier(name, val string) error {
+	if val == "" {
+		return fmt.Errorf("%s cannot be empty", name)
+	}
+	if strings.ContainsAny(val, " 	\r\n") {
+		return fmt.Errorf("%s contains illegal whitespace", name)
+	}
+	return nil
+}
+
+func extractWorkerIdentity(payload map[string]any) (string, string, error) {
+	var keyAid, keySid string
+	hasKey := false
+	if rawKey, exists := payload["key"]; exists {
+		if rawKey == nil {
+			return "", "", errors.New("key cannot be null")
+		}
+		key, ok := rawKey.(string)
+		if !ok {
+			return "", "", errors.New("key must be a string")
+		}
+		if key == "" {
+			return "", "", errors.New("key cannot be empty")
+		}
+		if strings.ContainsAny(key, " 	\r\n") {
+			return "", "", errors.New("key contains illegal whitespace")
+		}
+		if strings.Count(key, "::") != 1 {
+			return "", "", errors.New("key must be exactly 'agent_id::session_id'")
+		}
+		parts := strings.Split(key, "::")
+		if parts[0] == "" || parts[1] == "" {
+			return "", "", errors.New("key 'agent_id::session_id' has empty component")
+		}
+		keyAid, keySid = parts[0], parts[1]
+		hasKey = true
+	}
+
+	var callerAid, callerSid string
+	hasCaller := false
+	if rawCaller, exists := payload["caller"]; exists {
+		if rawCaller == nil {
+			return "", "", errors.New("caller cannot be null")
+		}
+		callerMap, isMap := rawCaller.(map[string]any)
+		if !isMap {
+			return "", "", errors.New("caller must be a JSON object")
+		}
+		if len(callerMap) == 0 {
+			return "", "", errors.New("caller object cannot be empty")
+		}
+
+		aidVal, hasAid := callerMap["aid"]
+		agentIdVal, hasAgentId := callerMap["agent_id"]
+		if hasAid && hasAgentId && aidVal != agentIdVal {
+			return "", "", errors.New("conflicting aid and agent_id in caller object")
+		}
+		if hasAid {
+			s, ok := aidVal.(string)
+			if !ok {
+				return "", "", errors.New("caller aid must be a string")
+			}
+			callerAid = s
+		} else if hasAgentId {
+			s, ok := agentIdVal.(string)
+			if !ok {
+				return "", "", errors.New("caller agent_id must be a string")
+			}
+			callerAid = s
+		}
+
+		sidVal, hasSid := callerMap["sid"]
+		sessionIdVal, hasSessionId := callerMap["session_id"]
+		if hasSid && hasSessionId && sidVal != sessionIdVal {
+			return "", "", errors.New("conflicting sid and session_id in caller object")
+		}
+		if hasSid {
+			s, ok := sidVal.(string)
+			if !ok {
+				return "", "", errors.New("caller sid must be a string")
+			}
+			callerSid = s
+		} else if hasSessionId {
+			s, ok := sessionIdVal.(string)
+			if !ok {
+				return "", "", errors.New("caller session_id must be a string")
+			}
+			callerSid = s
+		}
+
+		if (callerAid != "" && callerSid == "") || (callerAid == "" && callerSid != "") {
+			return "", "", errors.New("caller object must specify both agent_id and session_id")
+		}
+		hasCaller = true
+	}
+
+	var topAid string
+	topAid1, hasTopAid1 := payload["caller_agent_id"]
+	topAid2, hasTopAid2 := payload["agent_id"]
+	if hasTopAid1 && topAid1 == nil {
+		return "", "", errors.New("caller_agent_id cannot be null")
+	}
+	if hasTopAid2 && topAid2 == nil {
+		return "", "", errors.New("agent_id cannot be null")
+	}
+	var sTopAid1, sTopAid2 string
+	if hasTopAid1 {
+		s, ok := topAid1.(string)
+		if !ok {
+			return "", "", errors.New("caller_agent_id must be a string")
+		}
+		sTopAid1 = s
+	}
+	if hasTopAid2 {
+		s, ok := topAid2.(string)
+		if !ok {
+			return "", "", errors.New("agent_id must be a string")
+		}
+		sTopAid2 = s
+	}
+	if hasTopAid1 && hasTopAid2 && sTopAid1 != "" && sTopAid2 != "" && sTopAid1 != sTopAid2 {
+		return "", "", errors.New("conflicting caller_agent_id and agent_id in payload")
+	}
+	if sTopAid1 != "" {
+		topAid = sTopAid1
+	} else {
+		topAid = sTopAid2
+	}
+
+	var topSid string
+	topSid1, hasTopSid1 := payload["caller_session_id"]
+	topSid2, hasTopSid2 := payload["session_id"]
+	if hasTopSid1 && topSid1 == nil {
+		return "", "", errors.New("caller_session_id cannot be null")
+	}
+	if hasTopSid2 && topSid2 == nil {
+		return "", "", errors.New("session_id cannot be null")
+	}
+	var sTopSid1, sTopSid2 string
+	if hasTopSid1 {
+		s, ok := topSid1.(string)
+		if !ok {
+			return "", "", errors.New("caller_session_id must be a string")
+		}
+		sTopSid1 = s
+	}
+	if hasTopSid2 {
+		s, ok := topSid2.(string)
+		if !ok {
+			return "", "", errors.New("session_id must be a string")
+		}
+		sTopSid2 = s
+	}
+	if hasTopSid1 && hasTopSid2 && sTopSid1 != "" && sTopSid2 != "" && sTopSid1 != sTopSid2 {
+		return "", "", errors.New("conflicting caller_session_id and session_id in payload")
+	}
+	if sTopSid1 != "" {
+		topSid = sTopSid1
+	} else {
+		topSid = sTopSid2
+	}
+
+	hasTop := hasTopAid1 || hasTopAid2 || hasTopSid1 || hasTopSid2
+	if (topAid != "" && topSid == "") || (topAid == "" && topSid != "") {
+		return "", "", errors.New("top-level worker identity must specify both agent_id and session_id")
+	}
+
+	// Verify conflicts across provided sources
+	aids := []string{keyAid, callerAid, topAid}
+	var resolvedAid string
+	for _, a := range aids {
+		if a != "" {
+			if resolvedAid == "" {
+				resolvedAid = a
+			} else if resolvedAid != a {
+				return "", "", errors.New("conflicting agent_id in telemetry report")
+			}
+		}
+	}
+
+	sids := []string{keySid, callerSid, topSid}
+	var resolvedSid string
+	for _, s := range sids {
+		if s != "" {
+			if resolvedSid == "" {
+				resolvedSid = s
+			} else if resolvedSid != s {
+				return "", "", errors.New("conflicting session_id in telemetry report")
+			}
+		}
+	}
+
+	if (!hasKey && !hasCaller && !hasTop) || resolvedAid == "" || resolvedSid == "" {
+		return "", "", errors.New("worker identity is required for telemetry report; anonymous_worker is forbidden")
+	}
+
+	if err := validateIdentifier("agent_id", resolvedAid); err != nil {
+		return "", "", err
+	}
+	if err := validateIdentifier("session_id", resolvedSid); err != nil {
+		return "", "", err
+	}
+
+	return resolvedAid, resolvedSid, nil
+}
+
+// TelemetryGet retrieves telemetry reports with optional key or delegation root filter.
 func (s *Service) TelemetryGet(ctx context.Context, payload map[string]any) (map[string]any, error) {
-	rawKey, _ := payload["key"].(string)
-	key := strings.TrimSpace(rawKey)
-	if key != "" {
+	if rawKey, exists := payload["key"]; exists && rawKey != nil {
+		key, ok := rawKey.(string)
+		if !ok {
+			return nil, errors.New("key must be a string")
+		}
+		if key == "" {
+			return nil, errors.New("key cannot be empty")
+		}
+		if strings.ContainsAny(key, " 	\r\n") {
+			return nil, errors.New("key contains illegal whitespace")
+		}
 		dbKey := "telemetry:" + key
 		pref, err := s.store.GetPreference(ctx, dbKey)
 		if err != nil {
@@ -260,6 +474,33 @@ func (s *Service) TelemetryGet(ctx context.Context, payload map[string]any) (map
 		}, nil
 	}
 
+	var rootFilter string
+	if rawRoot, exists := payload["root_key"]; exists && rawRoot != nil {
+		s, ok := rawRoot.(string)
+		if !ok {
+			return nil, errors.New("root_key must be a string")
+		}
+		if s == "" {
+			return nil, errors.New("root_key cannot be empty")
+		}
+		if strings.ContainsAny(s, " 	\r\n") {
+			return nil, errors.New("root_key contains illegal whitespace")
+		}
+		rootFilter = s
+	} else if rawRoot, exists := payload["delegation_root_key"]; exists && rawRoot != nil {
+		s, ok := rawRoot.(string)
+		if !ok {
+			return nil, errors.New("delegation_root_key must be a string")
+		}
+		if s == "" {
+			return nil, errors.New("delegation_root_key cannot be empty")
+		}
+		if strings.ContainsAny(s, " 	\r\n") {
+			return nil, errors.New("delegation_root_key contains illegal whitespace")
+		}
+		rootFilter = s
+	}
+
 	prefix := "telemetry:"
 	query := `SELECT "key", value FROM workspace_preferences WHERE "key" LIKE 'telemetry:%' ORDER BY "key"`
 	rows, err := s.store.QueryRows(ctx, query)
@@ -269,9 +510,33 @@ func (s *Service) TelemetryGet(ctx context.Context, payload map[string]any) (map
 	items := make(map[string]any, len(rows))
 	for _, row := range rows {
 		k, _ := row["key"].(string)
-		items[strings.TrimPrefix(k, prefix)] = row["value"]
+		val := row["value"]
+		if rootFilter != "" {
+			if m, ok := val.(map[string]any); ok {
+				if rk, _ := m["delegation_root_key"].(string); rk != rootFilter {
+					continue
+				}
+			} else {
+				continue
+			}
+		}
+		items[strings.TrimPrefix(k, prefix)] = val
 	}
 	return map[string]any{"items": items, "count": len(items)}, nil
+}
+
+// callerKeyFromPayload derives the caller's agent::session key from verified
+// caller fields injected by the Agent API. It returns empty when the payload
+// carries no complete caller identity.
+func callerKeyFromPayload(payload map[string]any) string {
+	agentID, _ := payload["caller_agent_id"].(string)
+	sessionID, _ := payload["caller_session_id"].(string)
+	agentID = strings.TrimSpace(agentID)
+	sessionID = strings.TrimSpace(sessionID)
+	if agentID == "" || sessionID == "" {
+		return ""
+	}
+	return agentID + "::" + sessionID
 }
 
 // SOSEscalate escalates an emergency blocker.
@@ -283,23 +548,25 @@ func (s *Service) SOSEscalate(ctx context.Context, payload map[string]any) (map[
 	}
 
 	key, _ := payload["key"].(string)
+	key = strings.TrimSpace(key)
+	if key == "" {
+		key = callerKeyFromPayload(payload)
+	}
+	if key == "" {
+		return nil, errors.New("key is required; caller identity is missing")
+	}
 	contextDetail, _ := payload["context"].(string)
 	targetKey, _ := payload["target_session_key"].(string)
 
 	if targetKey == "" && key != "" && strings.Contains(key, "::") && s.store != nil {
 		parts := strings.SplitN(key, "::", 2)
-		sess, _ := s.store.GetSession(ctx, parts[0], parts[1])
-		if sess != nil {
-			pAid, _ := sess["parent_agent_id"].(string)
-			if pAid == "" {
-				pAid, _ = sess["handoff_from_agent_id"].(string)
-			}
-			pSid, _ := sess["parent_session_id"].(string)
-			if pSid == "" {
-				pSid, _ = sess["handoff_from_session_id"].(string)
-			}
-			if pAid != "" && pSid != "" {
-				targetKey = pAid + "::" + pSid
+		pEdge, hasParent, _ := s.store.GetDelegationParent(ctx, parts[0], parts[1])
+		if hasParent && pEdge.ParentAgentID != "" && pEdge.ParentSessionID != "" {
+			targetKey = pEdge.ParentAgentID + "::" + pEdge.ParentSessionID
+		} else {
+			root, rErr := s.store.ResolveDelegationRoot(ctx, parts[0], parts[1])
+			if rErr == nil && (root.AgentID != parts[0] || root.SessionID != parts[1]) {
+				targetKey = root.AgentID + "::" + root.SessionID
 			}
 		}
 	}
@@ -307,9 +574,6 @@ func (s *Service) SOSEscalate(ctx context.Context, payload map[string]any) (map[
 	randomHex := randomID(6)
 	sosID := "sos_" + randomHex
 	workerKey := key
-	if workerKey == "" {
-		workerKey = "anonymous_worker"
-	}
 
 	record := map[string]any{
 		"id":          sosID,
@@ -420,9 +684,15 @@ func (s *Service) LockAcquire(ctx context.Context, payload map[string]any) (map[
 		return nil, errors.New("resource identifier is required")
 	}
 
-	owner := "anonymous_worker"
-	if o, ok := payload["owner_key"].(string); ok && strings.TrimSpace(o) != "" {
+	owner := ""
+	if o, ok := payload["owner_key"].(string); ok {
 		owner = strings.TrimSpace(o)
+	}
+	if owner == "" {
+		owner = callerKeyFromPayload(payload)
+	}
+	if owner == "" {
+		return nil, errors.New("owner_key is required; caller identity is missing")
 	}
 
 	ttl := coerceInt(payload["ttl_seconds"], 300)
@@ -513,6 +783,12 @@ func (s *Service) LockRelease(ctx context.Context, payload map[string]any) (map[
 	if o, ok := payload["owner_key"].(string); ok {
 		owner = strings.TrimSpace(o)
 	}
+	if owner == "" {
+		owner = callerKeyFromPayload(payload)
+	}
+	if owner == "" {
+		return nil, errors.New("owner_key is required to release a lock; caller identity is missing")
+	}
 
 	dbKey := "lock:" + resource
 	var result map[string]any
@@ -531,15 +807,23 @@ func (s *Service) LockRelease(ctx context.Context, payload map[string]any) (map[
 		}
 
 		var m map[string]any
-		if jsonErr := json.Unmarshal([]byte(storedVal), &m); jsonErr == nil {
-			lockOwner, _ := m["owner_key"].(string)
-			if owner != "" && lockOwner != owner {
-				result = map[string]any{
-					"released": false,
-					"message":  fmt.Sprintf("Cannot release lock owned by %s", lockOwner),
-				}
-				return nil
+		if jsonErr := json.Unmarshal([]byte(storedVal), &m); jsonErr != nil {
+			return fmt.Errorf("lock record for '%s' is malformed: %w", resource, jsonErr)
+		}
+		lockOwner, _ := m["owner_key"].(string)
+		if lockOwner == "" {
+			result = map[string]any{
+				"released": false,
+				"message":  "Cannot release lock without an owner",
 			}
+			return nil
+		}
+		if lockOwner != owner {
+			result = map[string]any{
+				"released": false,
+				"message":  fmt.Sprintf("Cannot release lock owned by %s", lockOwner),
+			}
+			return nil
 		}
 
 		_, delErr := tx.ExecContext(ctx, `DELETE FROM workspace_preferences WHERE "key"=?`, dbKey)
@@ -629,6 +913,13 @@ func coerceInt(val any, defaultVal int) int {
 	case string:
 		if i, err := strconv.Atoi(v); err == nil {
 			return i
+		}
+	case json.Number:
+		if i, err := v.Int64(); err == nil {
+			return int(i)
+		}
+		if f, err := v.Float64(); err == nil {
+			return int(f)
 		}
 	}
 	return defaultVal

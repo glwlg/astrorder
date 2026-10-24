@@ -85,10 +85,10 @@ func (r *Resolver) Resolve(ctx context.Context, request ResolveRequest) (Resolve
 			connectionID = mapString(session, "connection_id")
 		}
 	}
-	if workspace == "" {
+	if workspace == "" && (connectionID == "" || connectionID == LocalConnectionID) {
 		workspace = cleanInputPath(r.options.DefaultWorkspace)
 	}
-	if workspace == "" {
+	if workspace == "" && (connectionID == "" || connectionID == LocalConnectionID) {
 		return Resolved{}, errorf(422, "workspace_required", "Workspace is required", nil)
 	}
 	if connectionID == "" || connectionID == LocalConnectionID {
@@ -99,6 +99,9 @@ func (r *Resolver) Resolve(ctx context.Context, request ResolveRequest) (Resolve
 		return Resolved{FileSystem: filesystem, Workspace: workspace, ConnectionID: LocalConnectionID, Kind: "local"}, nil
 	}
 	if strings.HasPrefix(connectionID, "wsl:") {
+		if workspace == "" {
+			workspace = "/"
+		}
 		distro := strings.TrimPrefix(connectionID, "wsl:")
 		wslConfig := WSLConfig{Binary: r.options.WSLBinary, Distro: distro, HelperPath: r.options.WSLHelperPath}
 		if wslConfig.HelperPath == "" {
@@ -128,7 +131,13 @@ func (r *Resolver) Resolve(ctx context.Context, request ResolveRequest) (Resolve
 	if !ok {
 		settings = connection
 	}
-	connectionWorkspace := mapString(settings, "workspace")
+	connectionWorkspace := cleanInputPath(mapString(settings, "workspace"))
+	if workspace == "" {
+		workspace = connectionWorkspace
+		if workspace == "" {
+			workspace = "/"
+		}
+	}
 	if connectionWorkspace == "" {
 		connectionWorkspace = workspace
 	}

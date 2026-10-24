@@ -22,6 +22,12 @@ type tableDefinition struct {
 }
 
 var tables = []tableDefinition{
+	{Name: "draft_shelves", Create: `CREATE TABLE draft_shelves (
+scope TEXT NOT NULL,
+revision INTEGER NOT NULL,
+entries JSON NOT NULL,
+PRIMARY KEY (scope)
+)`},
 	{Name: "workspace_preferences", Create: `CREATE TABLE workspace_preferences (
 	"key" VARCHAR(1100) NOT NULL,
 	value JSON,
@@ -274,6 +280,30 @@ var tables = []tableDefinition{
 	PRIMARY KEY (row_id),
 	CONSTRAINT uq_token_metrics_daily UNIQUE (agent_id, session_id, model, date)
 )`},
+	{Name: "delegation_edges", Create: `CREATE TABLE delegation_edges (
+	child_agent_id VARCHAR(256) NOT NULL,
+	child_session_id VARCHAR(256) NOT NULL,
+	parent_agent_id VARCHAR(256) NOT NULL,
+	parent_session_id VARCHAR(256) NOT NULL,
+	created_at DATETIME NOT NULL,
+	PRIMARY KEY (child_agent_id, child_session_id)
+)`},
+	{Name: "delegation_operations", Create: `CREATE TABLE delegation_operations (
+	operation_id VARCHAR(128) NOT NULL,
+	operation_type VARCHAR(64) NOT NULL,
+	caller_agent_id VARCHAR(256) NOT NULL,
+	caller_session_id VARCHAR(256) NOT NULL,
+	target_agent_id VARCHAR(256) NOT NULL,
+	target_session_id VARCHAR(256),
+	request_hash VARCHAR(128) NOT NULL,
+	stage VARCHAR(32) NOT NULL,
+	request_payload JSON NOT NULL,
+	result_payload JSON,
+	error_message TEXT,
+	created_at DATETIME NOT NULL,
+	updated_at DATETIME NOT NULL,
+	PRIMARY KEY (operation_id)
+)`},
 }
 
 var indices = []string{
@@ -282,6 +312,8 @@ var indices = []string{
 	"CREATE INDEX IF NOT EXISTS ix_commands_agent_id ON commands (agent_id)",
 	"CREATE INDEX IF NOT EXISTS ix_commands_session_id ON commands (session_id)",
 	"CREATE INDEX IF NOT EXISTS ix_connection_history_connection_id ON connection_history (connection_id)",
+	"CREATE INDEX IF NOT EXISTS ix_delegation_edges_parent ON delegation_edges (parent_agent_id, parent_session_id)",
+	"CREATE INDEX IF NOT EXISTS ix_delegation_operations_caller ON delegation_operations (caller_agent_id, caller_session_id)",
 	"CREATE INDEX IF NOT EXISTS ix_events_agent_id ON events (agent_id)",
 	"CREATE INDEX IF NOT EXISTS ix_events_session_id ON events (session_id)",
 	"CREATE INDEX IF NOT EXISTS ix_messages_agent_id ON messages (agent_id)",
@@ -342,7 +374,7 @@ func migrateSchema(ctx context.Context, db *sql.DB) error {
 	if err := applyBackfills(ctx, tx); err != nil {
 		return err
 	}
-	if version < CurrentSchemaVersion {
+	if version < 4 {
 		if err := migrateNativeIdentity(ctx, tx); err != nil {
 			return err
 		}

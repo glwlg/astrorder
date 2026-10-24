@@ -16,6 +16,7 @@ import { resolveArtifactFromPath } from '../features/sidecar/resolver'
 import { useSidecarStore } from '../features/sidecar/sidecarStore'
 import { useAstrorderStore } from '../state/store'
 import { renderMermaid } from './renderMermaid'
+import { CodexVisualization, extractVisualizations } from './CodexVisualization'
 
 function MermaidDiagram({ code }: { code: string }) {
   const [svg, setSvg] = useState('')
@@ -263,8 +264,9 @@ export function MarkdownContent({
     return () => { active = false }
   }, [checkKey, pathKey, rootKey, session?.workspace, session?.connection_id])
 
+  const visualizations = extractVisualizations(value)
   const normalizedValue = autoLinkArtifacts(
-    value,
+    visualizations.text,
     rootFiles?.key === rootKey && rootKey ? rootFiles.names : null,
     checkedPaths?.key === checkKey && rootKey ? checkedPaths.names : null,
   )
@@ -407,10 +409,16 @@ export function MarkdownContent({
           },
           img: (props) => {
             const cleaned = cleanHref(props.src)
+            const isFile = /^[a-zA-Z]:[/\\]/.test(cleaned) || (
+              !/^(?:[a-z][a-z\d+.-]*:|\/\/|\/api\/|#)/i.test(cleaned) && isLocalPath(cleaned)
+            )
             let src = safeUrl(cleaned)
-            if (!src && isLocalPath(cleaned)) {
+            if (isFile) {
               const fullPath = resolvePathWithWorkspace(cleaned)
-              src = `/api/v1/files/raw?path=${encodeURIComponent(fullPath)}`
+              const query = new URLSearchParams({ path: fullPath })
+              if (currentSession?.id) query.set('session_id', currentSession.id)
+              if (currentSession?.connection_id) query.set('connection_id', currentSession.connection_id)
+              src = `/api/v1/files/raw?${query.toString()}`
             }
             if (!src) return null
             return onImageClick ? (
@@ -435,6 +443,7 @@ export function MarkdownContent({
       >
         {normalizedValue}
       </ReactMarkdown>
+      {visualizations.paths.map(path => <CodexVisualization key={path} path={path} session={currentSession} />)}
     </div>
   )
 }

@@ -66,6 +66,29 @@ func TestRefreshSessionStatusWritesOnlyGuardedStatus(t *testing.T) {
 	}
 }
 
+func TestRefreshSessionStatusPreservesDelegationInResponse(t *testing.T) {
+	ctx := context.Background()
+	st := openStatusRefreshStore(t)
+	defer st.Close()
+	seedStatusRefreshSession(t, st)
+	seedSession(t, st, "parent-agent", "parent")
+	// The same native ID under a different agent must not supply this edge.
+	seedSession(t, st, "other-agent", "s")
+	if _, err := st.db.ExecContext(ctx, `INSERT INTO delegation_edges(child_agent_id, child_session_id, parent_agent_id, parent_session_id, created_at)
+VALUES(?,?,?,?,?)`, "a", "s", "parent-agent", "parent", "2026-10-20T00:00:00Z"); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []RefreshSessionStatusOutcome{RefreshSessionStatusApplied, RefreshSessionStatusCurrent} {
+		row, outcome, err := st.RefreshSessionStatus(ctx, "a", "s", RefreshSessionStatusExpectation{NativeID: "s", ControlState: "owned"}, "idle")
+		if err != nil || outcome != want {
+			t.Fatalf("outcome=%v want=%v err=%v", outcome, want, err)
+		}
+		if row["delegation_parent_agent_id"] != "parent-agent" || row["delegation_parent_session_id"] != "parent" {
+			t.Fatalf("sync response lost delegation: %+v", row)
+		}
+	}
+}
+
 func TestRefreshSessionStatusNeverResurrectsDeletedSession(t *testing.T) {
 	ctx := context.Background()
 	st := openStatusRefreshStore(t)

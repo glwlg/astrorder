@@ -64,6 +64,8 @@ export interface Session {
   parent_session_id?: string | null;
   parent_agent_id?: string | null;
   parent_session_key?: string | null;
+  delegation_parent_agent_id?: string | null;
+  delegation_parent_session_id?: string | null;
 }
 
 export interface Project {

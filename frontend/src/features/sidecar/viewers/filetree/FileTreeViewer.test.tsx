@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ArtifactRef } from '../../../../domain/artifact'
 import { FileTreeViewer } from './FileTreeViewer'
+import { useSidecarStore } from '../../sidecarStore'
 
 const artifact: ArtifactRef = {
   id: 'filetree:session-tree',
@@ -31,6 +32,29 @@ function renderTree(target = artifact) {
 
 describe('FileTreeViewer file actions', () => {
   afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); delete (window as unknown as { astrorderDesktop?: unknown }).astrorderDesktop })
+
+  it.each([
+    ['creatures.png', 'image-viewer'],
+    ['favicon.svg', 'image-viewer'],
+    ['go.mod', 'monaco-viewer'],
+    ['LICENSE', 'monaco-viewer'],
+    ['settings.custom', 'monaco-viewer'],
+  ])('double-click opens %s with the correct viewer and remote context', async (name, viewerId) => {
+    const openArtifact = vi.fn()
+    const original = useSidecarStore.getState().openArtifact
+    useSidecarStore.setState({ openArtifact })
+    try {
+      const path = `/srv/project/${name}`
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ root: '/srv/project', items: [{ name, path, is_dir: false }] }))))
+      renderTree({ ...artifact, path: '/srv/project', connectionId: 'ssh-tree' })
+      fireEvent.doubleClick((await screen.findByText(name)).closest('.file-tree-row') as HTMLElement)
+      expect(openArtifact).toHaveBeenCalledWith(expect.objectContaining({ path, sessionId: artifact.sessionId, connectionId: 'ssh-tree' }), viewerId)
+      const opened = openArtifact.mock.calls[0][0] as ArtifactRef
+      expect(new URL(opened.readUrl, 'http://localhost').searchParams.get('connection_id')).toBe('ssh-tree')
+    } finally {
+      useSidecarStore.setState({ openArtifact: original })
+    }
+  })
 
   it.each(['local', 'ssh-fixture'])('copies %s files through the native clipboard after staging', async connectionId => {
     const setClipboardFiles = vi.fn().mockResolvedValue(true)

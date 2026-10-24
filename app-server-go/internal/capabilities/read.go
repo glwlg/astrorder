@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"astrorder.dev/app-server/internal/capabilities/officialskills"
 	"astrorder.dev/app-server/internal/envtarget"
 )
 
@@ -49,17 +50,22 @@ type Marketplace struct {
 }
 
 type Skill struct {
-	Name        string   `json:"name"`
-	Path        string   `json:"path"`
-	Scope       string   `json:"scope"`
-	Agents      []string `json:"agents"`
-	Agent       string   `json:"agent"`
-	Source      string   `json:"source"`
-	SourceURL   string   `json:"sourceUrl,omitempty"`
-	Description string   `json:"description"`
+	InstalledAgents []string `json:"installed_agents,omitempty"`
+	Category        string   `json:"category,omitempty"`
+	Content         string   `json:"content,omitempty"`
+	DisplayName     string   `json:"display_name,omitempty"`
+	Name            string   `json:"name"`
+	Path            string   `json:"path"`
+	Scope           string   `json:"scope"`
+	Agents          []string `json:"agents"`
+	Agent           string   `json:"agent"`
+	Source          string   `json:"source"`
+	SourceURL       string   `json:"sourceUrl,omitempty"`
+	Description     string   `json:"description"`
 }
 
 type Summary struct {
+	SkillAgents  []SkillAgent   `json:"skill_agents"`
 	TargetID     string         `json:"target_id"`
 	TargetName   string         `json:"target_name"`
 	Kind         string         `json:"kind"`
@@ -324,6 +330,7 @@ func (sn *snapshot) discoverSkills(ctx context.Context) ([]Skill, error) {
 	}
 	locked := asMap(sn.lock["skills"])
 	byName := map[string]*Skill{}
+
 	var order []string
 	for _, hit := range found {
 		var root *skillRoot
@@ -337,6 +344,17 @@ func (sn *snapshot) discoverSkills(ctx context.Context) ([]Skill, error) {
 		}
 		dir := path.Dir(hit.Path)
 		name, description := parseFrontMatter(hit.Head, path.Base(dir))
+		managedOfficial := false
+		if _, official := officialskills.GetOfficialSkill(name); official {
+			if raw, err := sn.env.Read(ctx, path.Join(dir, officialManifestFile)); err == nil {
+				var manifest officialManifest
+				managedOfficial = json.Unmarshal(raw, &manifest) == nil && manifest.Owner == "astrorder-capabilities" && manifest.Version == 1 && manifest.Skill == name && manifest.Agent == root.agent && manifest.Files["SKILL.md"] != ""
+			}
+		}
+		identity := name
+		if managedOfficial {
+			identity = "official::" + name
+		}
 		agent, source, sourceURL := root.agent, root.agent+"-native", ""
 		agentList := []string{agent}
 		if root.agent == "" {
@@ -345,7 +363,7 @@ func (sn *snapshot) discoverSkills(ctx context.Context) ([]Skill, error) {
 				source, sourceURL = firstNonEmpty(asString(entry["source"]), source), asString(entry["sourceUrl"])
 			}
 		}
-		if existing, ok := byName[name]; ok {
+		if existing, ok := byName[identity]; ok {
 			for _, a := range agentList {
 				if !contains(existing.Agents, a) {
 					existing.Agents = append(existing.Agents, a)
@@ -356,13 +374,17 @@ func (sn *snapshot) discoverSkills(ctx context.Context) ([]Skill, error) {
 			}
 			continue
 		}
-		byName[name] = &Skill{Name: name, Path: hit.Path, Scope: "global", Agents: agentList, Agent: agent, Source: source, SourceURL: sourceURL, Description: description}
-		order = append(order, name)
+		byName[identity] = &Skill{Name: name, Path: hit.Path, Scope: "global", Agents: agentList, Agent: agent, Source: source, SourceURL: sourceURL, Description: description}
+		if managedOfficial {
+			byName[identity].Source = "astrorder-installed"
+		}
+		order = append(order, identity)
 	}
 	sort.Strings(order)
 	out := make([]Skill, 0, len(order))
 	for _, name := range order {
 		sort.Strings(byName[name].Agents)
+
 		out = append(out, *byName[name])
 	}
 	return out, nil
@@ -418,9 +440,23 @@ func (s *Service) Summary(ctx context.Context, targetID, agentFilter string) (*S
 		plugins = filterBy(plugins, func(p Plugin) bool { return p.Agent == agentFilter })
 		markets = filterBy(markets, func(m Marketplace) bool { return m.Agent == agentFilter || m.Agent == "all" })
 	}
+	for _, builtin := range officialskills.ListOfficialSkills() {
+		installed := []string{}
+		kept := skills[:0]
+		for _, skill := range skills {
+			if skill.Name == builtin.Name && skill.Source == "astrorder-installed" {
+				installed = append(installed, skill.Agents...)
+				continue
+			}
+			kept = append(kept, skill)
+		}
+		skills = kept
+		skills = append(skills, Skill{Name: builtin.Name, Scope: builtin.Scope, Source: builtin.Source, Category: builtin.Category, Agent: builtin.Agent, Agents: []string{}, InstalledAgents: installed, Content: builtin.Content, Description: builtin.Description, DisplayName: builtin.DisplayName})
+	}
 	target := env.Target()
 	return &Summary{
-		TargetID: targetID, TargetName: target.Name, Kind: target.Kind,
+		SkillAgents: registeredSkillAgents(),
+		TargetID:    targetID, TargetName: target.Name, Kind: target.Kind,
 		Counts: map[string]int{"skills": len(skills), "mcp": len(servers), "plugins": len(plugins), "marketplaces": len(markets)},
 		Skills: nonNil(skills), MCPServers: nonNil(servers), Plugins: nonNil(plugins), Marketplaces: nonNil(markets), Warnings: sn.warns,
 	}, nil

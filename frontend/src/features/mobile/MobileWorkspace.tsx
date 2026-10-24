@@ -1,5 +1,6 @@
 import { type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type TouchEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { Button, Group, Menu, Modal, TextInput, useMantineColorScheme } from '@mantine/core'
+import { MobileTaskNotices } from './MobileTaskNotices'
 import { notifications } from '@mantine/notifications'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { IconSun, IconMoon, IconDeviceDesktop, IconBell, IconRefresh, IconPlayerPlay, IconInfoCircle, IconNotes, IconPlayerStop, IconSend, IconMessageCircle, IconCheck, IconX, IconMicrophone, IconPlus, IconDotsVertical, IconCpu, IconLoader2, IconPlugConnected, IconCloudDataConnection, IconFilter, IconTransfer, IconEdit, IconCopy, IconTrash, IconChalkboard, IconWorld } from '@tabler/icons-react'
@@ -10,7 +11,7 @@ import { AnimatePresence, motion } from 'motion/react'
 import { api } from '../../api/client'
 import { sessionHandoffTargets } from '../../domain/handoff'
 import type { Agent, AgentCommand, AgentMention, Approval, Command, Message, Session, Task } from '../../domain/types'
-import { findSessionHandoff, scopeKey } from '../../domain/semantics'
+import { findSessionHandoff, newCommandId, scopeKey } from '../../domain/semantics'
 import { requestNotificationPermission } from '../../domain/notifications'
 import { selectApprovals, selectCommands, selectMessages, selectProjects, selectSessions, selectTasks, useAstrorderStore } from '../../state/store'
 import { useSessionResources } from '../../hooks/useAstrorderData'
@@ -27,6 +28,9 @@ import { AgentSessionFilter, matchesAgent } from '../../components/AgentSessionF
 import { adjacentOpenSession, isSessionOpen } from '../../components/sessionVisibility'
 import { clipboardFiles, REASONING_EFFORTS } from '../chat/composerMedia'
 import { usePersistentDraft } from '../chat/draftStorage'
+import { removeUnsentMessage, restoreUnsentDraft, sendErrorMessage } from '../chat/sendFailure'
+import { DraftShelfControl } from '../chat/DraftShelfControl'
+import { queueBlockReason } from '../chat/queueBlockReason'
 import { reconcileProjectOrder } from '../../components/projectOrder'
 import { useWorkspacePreferences } from '../../hooks/useWorkspacePreferences'
 import { MobileSessionDrawer } from './MobileSessionDrawer'
@@ -76,7 +80,7 @@ import './mobilePolish.css'
 import './mobileParity.css'
 import './mobileConnections.css'
 
-const messageError = (error: unknown) => error instanceof Error ? error.message : '操作未确认，请检查连接。'
+const messageError = sendErrorMessage
 const queueLabels = { queued: '排队待发', submitting: '发送中', received: '等待原生确认', accepted: '已接受，等待本轮结束', running: '执行中', unknown: '结果未确认，未自动重发', failed: '未发送成功，内容已保留', cancelled: '已取消', completed: '已完成' }
 
 export function cleanServerName(agent?: Agent): string {
@@ -199,7 +203,7 @@ export function MobileWorkspace() {
   })
   const setText = (value: string) => setDraft(current => ({ ...current, text: value }))
   const files = draft.attachments.map(item => item.file)
-  const updateFiles = (value: File[]) => setDraft(current => ({ ...current, attachments: value.map(file => current.attachments.find(item => item.file === file) || { key: crypto.randomUUID(), file }) }))
+  const updateFiles = (value: File[]) => setDraft(current => ({ ...current, attachments: value.map(file => current.attachments.find(item => item.file === file) || { key: newCommandId(), file }) }))
   const [quotes, setQuotes] = useState<Record<string, string>>({})
   const quote = quotes[key] || ''
   const setQuote = (value: string) => setQuotes(prev => ({ ...prev, [key]: value }))
@@ -214,6 +218,7 @@ export function MobileWorkspace() {
   const [outboxReady, setOutboxReady] = useState(false)
   useEffect(() => { let mounted = true; void Promise.all([outbox.load(), directOutbox.load()]).then(() => { if (mounted) setOutboxReady(true) }).catch(error => notifications.show({ message: messageError(error), color: 'red' })); return () => { mounted = false } }, [outbox, directOutbox])
   const pending = queue.filter(row => row.payload.agent_id === selected?.agent_id && row.payload.session_id === selected?.id && !['accepted', 'running', 'completed'].includes(row.state))
+  const queuePause = selected && !nativeBusy && pending.some(row => row.state === 'queued') ? queueBlockReason(commands, selected.agent_id, selected.id) : null
   const busy = nativeBusy || pending.some(row => ['submitting', 'accepted', 'running'].includes(row.state))
   const canSubmit = !readOnly && !sessionModel.isPending && connection === 'connected' && agents[selected?.agent_id || '']?.status === 'ready' && resources.commands.isSuccess
   const canDispatch = canSubmit && !nativeBusy
@@ -438,7 +443,7 @@ export function MobileWorkspace() {
     if (!selected || !approval.target_id) return
     try {
       const result = await api.createCommand({
-        id: crypto.randomUUID(),
+        id: newCommandId(),
         agent_id: selected.agent_id,
         session_id: selected.id,
         action,
@@ -476,7 +481,7 @@ export function MobileWorkspace() {
     const chosenAttachments = quickText ? [] : draft.attachments.flatMap(item => item.attachment ? [item.attachment] : [])
     const chosenFiles = quickText ? [] : draft.attachments.filter(item => !item.attachment).map(item => item.file)
     if (!body.trim() && !chosenFiles.length && !chosenAttachments.length) return
-    const commandId = crypto.randomUUID()
+    const commandId = newCommandId()
     setSubmittedCommandId(commandId)
     setSessionError(null)
     const direct = canDispatch && pending.length === 0
@@ -510,6 +515,13 @@ export function MobileWorkspace() {
         const currentMessage = selectMessages(useAstrorderStore.getState(), selected.agent_id, selected.id).find(message => message.role === 'user' && message.command_id === commandId)
         if (currentMessage) store.mergeMessages(selected.agent_id, selected.id, [{ ...currentMessage, attachments }])
         if (entry?.state === 'failed' || entry?.state === 'unknown') {
+          if (entry.unsent && !quickText) {
+            const detail = await restoreUnsentDraft(selected.agent_id, selected.id, { ...draft, text: quote ? `${quote.split('\n').map(line => `> ${line}`).join('\n')}\n\n${draft.text}` : draft.text })
+            await directOutbox.remove(selected.agent_id, selected.id, commandId)
+            removeUnsentMessage(selected.agent_id, selected.id, commandId)
+            setSessionError(`${entry.error || '消息未发送。'} ${detail}`)
+            return
+          }
           store.markOutboxError(selected.agent_id, selected.id, commandId, entry.error || '原生命令执行未确认', entry.state)
           setSessionError(entry.error || '原生命令执行未确认')
           notify(entry.error || '原生命令执行未确认', 'red')
@@ -563,8 +575,8 @@ export function MobileWorkspace() {
       setDraft(current => ({ ...current,
         text: entry.payload.text ? (current.text ? `${entry.payload.text}\n${current.text}` : entry.payload.text) : current.text,
         attachments: [
-          ...entry.attachments.map(attachment => ({ key: crypto.randomUUID(), file: new File([], attachment.name, { type: attachment.media_type }), attachment })),
-          ...entry.files.map(file => ({ key: crypto.randomUUID(), file })),
+          ...entry.attachments.map(attachment => ({ key: newCommandId(), file: new File([], attachment.name, { type: attachment.media_type }), attachment })),
+          ...entry.files.map(file => ({ key: newCommandId(), file })),
           ...current.attachments,
         ],
       }))
@@ -644,7 +656,7 @@ export function MobileWorkspace() {
   const executeStop = async (session: Session) => {
     const targetId = session.id
     try {
-      const result = await api.createCommand({ id: crypto.randomUUID(), agent_id: session.agent_id, session_id: session.id, action: 'stop', text: '', attachment_ids: [], target_id: targetId })
+      const result = await api.createCommand({ id: newCommandId(), agent_id: session.agent_id, session_id: session.id, action: 'stop', text: '', attachment_ids: [], target_id: targetId })
       useAstrorderStore.getState().mergeCommands([result])
       if (result.state === 'failed' || result.state === 'unknown') throw new Error(result.error || '停止操作未确认')
     } catch (error) {
@@ -931,7 +943,7 @@ export function MobileWorkspace() {
       </div>
       {goal && <button className={`m-goal-summary is-${goal.tone}`} aria-label="目标管理" title={goalSupported ? '管理原生目标' : '查看原生目标'} onClick={() => setSheet('goal')}><IconNotes size={15} /><span>{`${goal.label} · ${goal.title}`}</span></button>}
       {!!visibleTasks.length && <button className="m-task-summary" aria-label="任务与子代理" onClick={() => setSheet('tasks')}>任务与子代理 · {activeTasks.length} 项活动 / {visibleTasks.length} 项记录</button>}
-      <MobileTranscript readOnly={readOnly} messages={messages} commands={commands} approvals={approvals} onApproval={(approval, action) => void handleApproval(approval, action)} busy={busy} loadOlder={() => resources.messages.fetchNextPage()} hasOlder={!!resources.messages.hasNextPage} loadingOlder={resources.messages.isFetchingNextPage} onMessageAction={anchor => setMessageAction({ ...anchor, sessionKey: key })} onImage={setImage} onFile={openFile} workspace={selected?.workspace} connectionId={selected?.connection_id} onSwipe={switchSession} onSwipePreview={setSessionDrag} />
+      <MobileTranscript activityBreaks={resources.activityBreaks} readOnly={readOnly} messages={messages} commands={commands} approvals={approvals} onApproval={(approval, action) => void handleApproval(approval, action)} busy={busy} loadOlder={() => resources.messages.fetchNextPage()} hasOlder={!!resources.messages.hasNextPage} loadingOlder={resources.messages.isFetchingNextPage} onMessageAction={anchor => setMessageAction({ ...anchor, sessionKey: key })} onImage={setImage} onFile={openFile} workspace={selected?.workspace} connectionId={selected?.connection_id} onSwipe={switchSession} onSwipePreview={setSessionDrag} />
     </MobileSessionDeck> : <div className="m-empty">从左上角选择会话，或新建会话</div>}</main>
     <section ref={composer} className="m-composer-float">
       {selected && <SessionConnectionNotice key={`connection:${key}`} session={selected} error={(resources.messages.error || resources.commands.error || resources.tasks.error) ? messageError(resources.messages.error || resources.commands.error || resources.tasks.error) : undefined} onRetry={() => Promise.all([resources.messages.refetch(), resources.commands.refetch(), resources.tasks.refetch()])} />}
@@ -966,6 +978,7 @@ export function MobileWorkspace() {
 
       {selected && <SessionComposerGate key={`gate:${key}`} session={selected} onFork={() => void handleForkChatBranch(selected)}>
       {!!pending.length && <div className="m-queue-list" role="region" aria-label="待发队列">
+      {queuePause && <small role="status">{queuePause}</small>}
       <AnimatePresence initial={false}>
         {pending.map(entry => (
           <motion.article className={queueLift?.id === entry.payload.id ? 'm-queue-item is-lifted' : 'm-queue-item'} key={entry.payload.id} data-command-id={entry.payload.id} aria-label="排队消息" layout={!reducedMotion} initial={reducedMotion ? false : { opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, x: reducedMotion ? 0 : 24 }} transition={{ duration: reducedMotion ? 0 : 0.2 }} onPointerDown={event => onQueuePointerDown(entry, event)} onPointerMove={onQueuePointerMove} onPointerUp={onQueuePointerUp} onPointerCancel={onQueuePointerCancel} onTouchStart={event => event.stopPropagation()}>
@@ -982,10 +995,19 @@ export function MobileWorkspace() {
         ))}
       </AnimatePresence>
       </div>}
-      {!!activeTasks.length && <div className="m-active-tasks">{activeTasks.map(item => <button key={item.id} onClick={() => item.kind === 'background' ? setSheet('tasks') : openTask(item)}><span className="m-dot online" />{item.title}</button>)}</div>}
+      <MobileTaskNotices key={`task-notices:${key}`} scope={key} tasks={activeTasks} onOpen={item => item.kind === 'background' ? setSheet('tasks') : openTask(item)} />
       {!!approvals.length && <button className="m-queue-banner" onClick={() => setSheet('status')}>{approvals.some(isUserInput) ? '等待回答' : '等待授权'} · {approvals.length} 项</button>}
       {quote && <div className="m-quote"><span>{quote}</span><button aria-label="取消引用" onClick={() => setQuote('')}><IconX size={16} /></button></div>}
       {!!files.length && <div className="m-attachments">{files.map((file, i) => <MobileAttachmentPreview key={`${file.name}-${i}`} file={file} onOpen={setImage} onRemove={() => updateFiles(files.filter((_, n) => n !== i))} />)}</div>}
+      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <DraftShelfControl key={`shelf:${key}`} scope={key} draft={draft} disabled={submitting || voice.status !== 'idle'} onError={setSessionError} onReplace={(expected, replacement) => {
+          const current = useAstrorderStore.getState().drafts[key]
+          if (current ? current !== expected : Boolean(expected.text || expected.attachments.length || expected.sessionRefs?.length)) return false
+          setDraft(replacement)
+          textarea.current?.focus({ preventScroll: true })
+          return true
+        }} />
+      </div>
       <div style={{ position: 'relative' }}>
       <AgentCommandMenu agent={agents[selected?.agent_id || '']} items={agentCommands} activeIndex={commandIndex} onSelect={selectAgentCommand} />
       <AgentMentionMenu agent={agents[selected?.agent_id || '']} items={agentMentions} activeIndex={commandIndex} onSelect={selectAgentMention} />

@@ -131,46 +131,14 @@ func TestClientInvokePreservesBigIntegers(t *testing.T) {
 	}
 }
 
-func TestRunStdioMCPProtocol(t *testing.T) {
-	inputLines := strings.Join([]string{
-		`{"jsonrpc":"2.0","id":1,"method":"initialize"}`,
-		`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`,
-		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"catalog_list","arguments":{}}}`,
-		`{"jsonrpc":`,
-		`["not an object"]`,
-		`{"jsonrpc":"2.0","id":4,"method":"ping"} trailing`,
-		`{"jsonrpc":"2.0","method":"tools/call","params":{"name":"catalog_list","arguments":{}}}`,
-		`{"jsonrpc":"2.0","method":"custom/notify"}`,
-	}, "\n") + "\n"
-
-	in := strings.NewReader(inputLines)
+func TestRunStdioIsRetired(t *testing.T) {
 	var out bytes.Buffer
-
-	err := RunStdio(context.Background(), in, &out, nil)
-	if err != nil {
-		t.Fatalf("run stdio: %v", err)
+	err := RunStdio(context.Background(), strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`), &out, nil)
+	if !errors.Is(err, ErrMCPRetired) {
+		t.Fatalf("expected ErrMCPRetired, got %v", err)
 	}
-
-	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	if len(lines) != 6 {
-		t.Fatalf("expected 6 responses (notifications produce 0 responses), got: %d (%s)", len(lines), out.String())
-	}
-
-	var initResp map[string]any
-	_ = json.Unmarshal([]byte(lines[0]), &initResp)
-	if initResp["id"].(float64) != 1 {
-		t.Fatalf("mcp init id mismatch: %v", initResp)
-	}
-
-	// Line 3: tools/call error with nil client
-	var callResp map[string]any
-	_ = json.Unmarshal([]byte(lines[2]), &callResp)
-	if callResp["id"].(float64) != 3 || callResp["error"] == nil {
-		t.Fatalf("expected structured error on tools/call without client: %s", lines[2])
-	}
-	errObj := callResp["error"].(map[string]any)
-	if !strings.Contains(errObj["message"].(string), "remote agent client is not configured") {
-		t.Fatalf("unexpected error message: %v", errObj)
+	if out.Len() != 0 {
+		t.Fatalf("retired stdio must not write protocol output, got %q", out.String())
 	}
 }
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Badge,
   Button,
@@ -22,10 +22,10 @@ import {
   IconCode,
   IconDeviceDesktop,
   IconDownload,
-  IconFolder,
+
   IconLayersLinked,
   IconNetwork,
-  IconPlayerPlay,
+
   IconPlug,
   IconPlus,
   IconRefresh,
@@ -41,12 +41,44 @@ import {
 import { api } from '../../api/client'
 import './SkillsHub.css'
 
+export interface SkillItem {
+  name: string
+  path?: string
+  scope?: string
+  agents?: string[]
+  installed_agents?: string[]
+  source?: string
+  sourceUrl?: string
+  description?: string
+  agent?: string
+  category?: string
+  content?: string
+}
+
+export const OFFICIAL_SKILL_TITLES: Record<string, string> = {
+  'astrorder-sessions': '会话管理',
+  'astrorder-browser': '浏览器控制',
+}
+
+export const isOfficialSkill = (s?: SkillItem | null) => {
+  if (!s) return false
+  return s.source === 'astrorder' && s.category === 'astrorder' && s.scope === 'builtin'
+}
+
+export const isUninstalledOfficialSkill = (s?: SkillItem | null) => {
+  if (!s || !isOfficialSkill(s)) return false
+  return s.scope === 'builtin' && (!s.agents || s.agents.length === 0)
+}
+
+export const getSkillKey = (s: SkillItem) => `${s.scope || 'installed'}:${s.name}:${s.path || ''}`
+
 interface CapabilityTargetSummary {
   target_id: string
   target_name: string
   kind: string
   counts: { skills: number; mcp: number; plugins: number; marketplaces: number }
-  skills: Array<{ name: string; path?: string; scope?: string; agents?: string[]; source?: string; sourceUrl?: string; description?: string; agent?: string }>
+  skill_agents?: Array<{ id: string; label: string }>
+  skills: SkillItem[]
   mcp_servers: Array<{
     name: string
     agent: string
@@ -71,13 +103,13 @@ export function CapabilitiesSettingsCard() {
   const [loading, setLoading] = useState(false)
   const [activeTab, setActiveTab] = useState<'skills' | 'mcp' | 'plugins' | 'marketplaces'>('skills')
 
-  // Agent 顶层架构视点选择器：'all' | 'codex' | 'hermes' | 'grok'
-  const [selectedAgent, setSelectedAgent] = useState<'all' | 'codex' | 'hermes' | 'grok'>('all')
+  // Agent 顶层架构视点选择器：'all' | 'codex' | 'hermes' | 'grok' | 动态注册项
+  const [selectedAgent, setSelectedAgent] = useState<string>('all')
 
   // 技能分类过滤
-  const [skillCategory, setSkillCategory] = useState<'all' | 'proprietary' | 'community' | 'memory'>('all')
+  const [skillCategory, setSkillCategory] = useState<'all' | 'astrorder' | 'proprietary' | 'community' | 'memory'>('all')
   const [skillSearch, setSkillSearch] = useState('')
-  const [selectedSkill, setSelectedSkill] = useState<any | null>(null)
+  const [selectedSkill, setSelectedSkill] = useState<SkillItem | null>(null)
 
   // 检查器右侧 Tab
   const [inspectorTab, setInspectorTab] = useState<'spec' | 'assets' | 'grants' | 'live'>('spec')
@@ -122,6 +154,8 @@ export function CapabilitiesSettingsCard() {
   const [dispatching, setDispatching] = useState(false)
   const [dispatchReports, setDispatchReports] = useState<Array<{ target_id: string; target_name?: string; agent: string; ok: boolean; installed_path?: string; message: string }> | null>(null)
 
+  const reqIdRef = useRef(0)
+
   // 加载所有目标环境
   const loadTargets = async () => {
     try {
@@ -135,21 +169,22 @@ export function CapabilitiesSettingsCard() {
     }
   }
 
-  // 加载选中目标的能力概要 (根据 selectedAgent 过滤)
-  const loadTargetCapabilities = async (targetId: string, agentFilter: string = selectedAgent) => {
+  // 加载选中目标的能力概要 (不向服务端传递 agentFilter，避免官方内置条目因 agents=[] 遭服务端提前过滤)
+  const loadTargetCapabilities = async (targetId: string) => {
+    const curReqId = ++reqIdRef.current
     setLoading(true)
+    if (summary?.target_id !== targetId) setSummary(null)
     try {
-      const data = await api.getCapabilitiesSummary(targetId, agentFilter)
+      const data = await api.getCapabilitiesSummary(targetId)
+      if (curReqId !== reqIdRef.current) return
       setSummary(data)
-      if (data.skills && data.skills.length > 0) {
-        setSelectedSkill(data.skills[0])
-      } else {
-        setSelectedSkill(null)
-      }
     } catch (err: any) {
+      if (curReqId !== reqIdRef.current) return
       notifications.show({ title: '加载能力中心数据失败', message: err?.message || '请检查后端响应', color: 'red' })
     } finally {
-      setLoading(false)
+      if (curReqId === reqIdRef.current) {
+        setLoading(false)
+      }
     }
   }
 
@@ -159,9 +194,9 @@ export function CapabilitiesSettingsCard() {
 
   useEffect(() => {
     if (selectedTargetId) {
-      loadTargetCapabilities(selectedTargetId, selectedAgent)
+      loadTargetCapabilities(selectedTargetId)
     }
-  }, [selectedTargetId, selectedAgent])
+  }, [selectedTargetId])
 
   // 当切换到市场 Tab 时，如果结果为空且没在搜索，自动触发一次精选推荐拉取
   useEffect(() => {
@@ -199,7 +234,7 @@ export function CapabilitiesSettingsCard() {
     setMcpFormAgent(selectedAgent !== 'all' ? selectedAgent : 'codex')
     setMcpFormName('')
     setMcpFormTransport('sse/http')
-    setMcpFormUrl('http://127.0.0.1:30001/api/v1/agent/mcp')
+    setMcpFormUrl('')
     setMcpFormCommand('')
     setMcpFormArgs('')
     setMcpFormEnv('{}')
@@ -403,14 +438,7 @@ export function CapabilitiesSettingsCard() {
     setDispatchType(type)
     setDispatchItem(item)
     setDispatchReports(null)
-    const initialMatrix: Array<{ target_id: string; agent: string }> = []
-    targets.forEach((t) => {
-      if (t.id !== selectedTargetId) {
-        initialMatrix.push({ target_id: t.id, agent: 'hermes' })
-        initialMatrix.push({ target_id: t.id, agent: 'codex' })
-      }
-    })
-    setDispatchMatrix(initialMatrix)
+    setDispatchMatrix([])
     setDispatchModalOpen(true)
   }
 
@@ -421,25 +449,27 @@ export function CapabilitiesSettingsCard() {
     }
     setDispatching(true)
     try {
+      const isOfficial = isOfficialSkill(dispatchItem)
       const res = await api.dispatchCapability({
         capability_type: dispatchType,
         source_target_id: selectedTargetId,
-        source_agent: dispatchItem.agent || 'all',
+        source_agent: isOfficial ? 'astrorder' : (dispatchItem.agent || 'all'),
         item_id: dispatchItem.name || dispatchItem.id,
         target_matrix: dispatchMatrix,
         item_data: dispatchItem,
       })
       setDispatchReports(res.reports)
-      if (res.ok) {
+      if (res.success_count > 0) void loadTargetCapabilities(selectedTargetId)
+      if (res.success_count === res.total_targets) {
         notifications.show({
           title: '分发完成',
-          message: `已成功注入并核验 ${res.success_count}/${res.total_targets} 个目标 Agent！`,
+          message: `已分发并回读核验 ${res.success_count}/${res.total_targets} 个目标 Agent`,
           color: 'green',
         })
       } else {
         notifications.show({
-          title: '分发部分未就绪',
-          message: '部分目标环境注入失败，请查看下方核验报告',
+          title: res.success_count > 0 ? '部分分发成功' : '分发未完成',
+          message: `已完成 ${res.success_count}/${res.total_targets} 个目标，请查看逐项结果`,
           color: 'red',
         })
       }
@@ -496,39 +526,56 @@ export function CapabilitiesSettingsCard() {
     }
   }
 
-  // 计算技能分类统计
+  // 目标 Agent 运行时注册表（来自真实 Summary，未提供时不硬编码伪造）
+  const availableSkillAgents = summary?.skill_agents || []
+
+  // 技能列表消费真实 API 数据
   const allSkills = summary?.skills || []
+
+  const astrorderSkills = allSkills.filter(isOfficialSkill)
   const proprietarySkills = allSkills.filter(
     (s) =>
-      s.source?.includes('native') ||
-      s.name.includes('liuruyan') ||
-      s.name.includes('photo') ||
-      s.name.includes('image') ||
-      s.name.includes('damo') ||
-      s.name.includes('temu')
+      !isOfficialSkill(s) &&
+      (s.source?.includes('native') ||
+        s.name.includes('liuruyan') ||
+        s.name.includes('photo') ||
+        s.name.includes('image') ||
+        s.name.includes('damo') ||
+        s.name.includes('temu'))
   )
-  const memorySkills = allSkills.filter((s) => s.path?.includes('openviking') || s.name.includes('context') || s.name.includes('viking'))
-  const communitySkills = allSkills.filter((s) => !proprietarySkills.includes(s) && !memorySkills.includes(s))
+  const memorySkills = allSkills.filter(
+    (s) => !isOfficialSkill(s) && (s.path?.includes('openviking') || s.name.includes('context') || s.name.includes('viking'))
+  )
+  const communitySkills = allSkills.filter(
+    (s) => !isOfficialSkill(s) && !proprietarySkills.includes(s) && !memorySkills.includes(s)
+  )
 
   // 根据分类与搜索过滤
   const filteredSkills = allSkills.filter((sk) => {
+    if (skillCategory === 'astrorder' && !isOfficialSkill(sk)) return false
     if (skillCategory === 'proprietary' && !proprietarySkills.includes(sk)) return false
     if (skillCategory === 'community' && !communitySkills.includes(sk)) return false
     if (skillCategory === 'memory' && !memorySkills.includes(sk)) return false
 
-    if (selectedAgent === 'codex' && !sk.agents?.some((a) => a.toLowerCase().includes('codex'))) return false
-    if (selectedAgent === 'hermes' && !sk.agents?.some((a) => a.toLowerCase().includes('hermes'))) return false
-    if (selectedAgent === 'grok' && !sk.agents?.some((a) => a.toLowerCase().includes('grok'))) return false
+    // 官方源无需已安装也始终可发现，不被当前 Agent 已安装过滤隐藏
+    if (selectedAgent !== 'all' && !isOfficialSkill(sk)) {
+      if (!sk.agents?.some((a) => a.toLowerCase() === selectedAgent.toLowerCase())) return false
+    }
 
     if (skillSearch) {
       const q = skillSearch.toLowerCase()
+      const title = isOfficialSkill(sk) ? OFFICIAL_SKILL_TITLES[sk.name] : undefined
+      const matchTitle = title && title.toLowerCase().includes(q)
       const matchName = sk.name.toLowerCase().includes(q)
       const matchDesc = sk.description && sk.description.toLowerCase().includes(q)
-      if (!matchName && !matchDesc) return false
+      if (!matchTitle && !matchName && !matchDesc) return false
     }
     return true
   })
 
+  // 修正选中条目不在筛选结果仍显示旧详情问题
+  const selectedSkillKey = selectedSkill ? getSkillKey(selectedSkill) : null
+  const activeSkill = filteredSkills.find(sk => getSkillKey(sk) === selectedSkillKey) || filteredSkills[0] || null
   return (
     <div className="capabilities-hub-container">
       {/* 顶部控制台 Topbar */}
@@ -539,10 +586,9 @@ export function CapabilitiesSettingsCard() {
             <span style={{ fontSize: 16, fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--cap-text-primary)' }}>
               Astrorder Agent Hub
             </span>
-            <div className="engine-status-badge">Codex & Hermes Dual-Engine Ready</div>
+            <div className="engine-status-badge">Agent 能力管理与分发</div>
             <div className="cluster-nodes-pill">
-              <span className="node-dot" />
-              <span>3 节点全联通 (Local Win11 / WSL2 / Remote Debian)</span>
+              <span>{targets.length} 个托管节点</span>
             </div>
           </Group>
 
@@ -614,7 +660,7 @@ export function CapabilitiesSettingsCard() {
         </div>
 
         {/* 顶部分类 Tabs 与 Agent 架构视点选择器 */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 16px', background: 'var(--cap-header-bg)', borderBottom: '1px solid var(--cap-border)' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', padding: '0 16px', background: 'var(--cap-header-bg)', borderBottom: '1px solid var(--cap-border)' }}>
           <div className="capabilities-nav-tabs" style={{ borderBottom: 'none', padding: 0 }}>
             <button
               className={`capabilities-nav-btn tab-skills ${activeTab === 'skills' ? 'active' : ''}`}
@@ -666,17 +712,12 @@ export function CapabilitiesSettingsCard() {
             <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--cap-text-muted)', textTransform: 'uppercase' }}>
               架构视点:
             </span>
-            {[
-              { id: 'all', label: '全部 Agent' },
-              { id: 'codex', label: 'OpenAI Codex' },
-              { id: 'hermes', label: 'Hermes Agent' },
-              { id: 'grok', label: 'xAI Grok' },
-            ].map((ag) => {
+            {[{ id: 'all', label: '全部 Agent' }, ...availableSkillAgents].map((ag) => {
               const active = selectedAgent === ag.id
               return (
                 <button
                   key={ag.id}
-                  onClick={() => setSelectedAgent(ag.id as any)}
+                  onClick={() => setSelectedAgent(ag.id)}
                   style={{
                     padding: '3px 10px',
                     borderRadius: 20,
@@ -711,6 +752,13 @@ export function CapabilitiesSettingsCard() {
               >
                 <span>全部技能总览</span>
                 <Badge size="xs" variant="light">{allSkills.length}</Badge>
+              </button>
+              <button
+                className={`filter-item-btn ${skillCategory === 'astrorder' ? 'active' : ''}`}
+                onClick={() => setSkillCategory('astrorder')}
+              >
+                <Group gap={6}><IconCode size={14} /><span>星序技能</span></Group>
+                <Badge size="xs" variant="light">{astrorderSkills.length}</Badge>
               </button>
               <button
                 className={`filter-item-btn ${skillCategory === 'proprietary' ? 'active' : ''}`}
@@ -749,31 +797,11 @@ export function CapabilitiesSettingsCard() {
               >
                 <span>全部 Agent</span>
               </button>
-              <button
-                className={`filter-item-btn ${selectedAgent === 'codex' ? 'active' : ''}`}
-                onClick={() => setSelectedAgent('codex')}
-              >
-                <span>OpenAI Codex 架构</span>
-              </button>
-              <button
-                className={`filter-item-btn ${selectedAgent === 'hermes' ? 'active' : ''}`}
-                onClick={() => setSelectedAgent('hermes')}
-              >
-                <span>Hermes Agent 架构</span>
-              </button>
-              <button
-                className={`filter-item-btn ${selectedAgent === 'grok' ? 'active' : ''}`}
-                onClick={() => setSelectedAgent('grok')}
-              >
-                <span>xAI Grok 架构</span>
-              </button>
-
-              <div style={{ marginTop: 'auto', paddingTop: 16, borderTop: '1px solid var(--cap-border)' }}>
-                <Text size="xs" c="dimmed" fw={600}>DAEMON 守护进程</Text>
-                <Text size="xs" c="dimmed" mt={4}>
-                  PID: 15276 · eBPF 零开销隔离 · 严格模式
-                </Text>
-              </div>
+              {availableSkillAgents.map(agent => (
+                <button key={agent.id} className={`filter-item-btn ${selectedAgent === agent.id ? 'active' : ''}`} onClick={() => setSelectedAgent(agent.id)}>
+                  <span>{agent.label} 架构</span>
+                </button>
+              ))}
             </div>
 
             {/* 中间栏：高密度能力列表 (Skills Matrix) */}
@@ -791,7 +819,7 @@ export function CapabilitiesSettingsCard() {
               <ScrollArea style={{ flex: 1 }}>
                 <div style={{ padding: '6px 0' }}>
                   {filteredSkills.map((sk) => {
-                    const isSelected = selectedSkill?.name === sk.name
+                    const isSelected = activeSkill && getSkillKey(activeSkill) === getSkillKey(sk)
                     const isProprietary =
                       sk.source?.includes('native') ||
                       sk.name.includes('liuruyan') ||
@@ -799,7 +827,7 @@ export function CapabilitiesSettingsCard() {
                       sk.name.includes('image')
                     return (
                       <div
-                        key={sk.name}
+                        key={getSkillKey(sk)}
                         onClick={() => setSelectedSkill(sk)}
                         className={`capability-card ${isSelected ? 'selected' : ''}`}
                       >
@@ -807,16 +835,16 @@ export function CapabilitiesSettingsCard() {
                           <div style={{ overflow: 'hidden', flex: 1 }}>
                             <Group gap={6} wrap="nowrap">
                               <Text size="sm" fw={700} truncate style={{ color: 'var(--cap-text-primary)' }}>
-                                {sk.name}
+                                {isOfficialSkill(sk) ? (OFFICIAL_SKILL_TITLES[sk.name] || sk.name) : sk.name}
                               </Text>
-                              {isProprietary && (
+                              {isProprietary && !isOfficialSkill(sk) && (
                                 <Badge size="xs" color="yellow" variant="filled">
                                   ★ 原生私有独家
                                 </Badge>
                               )}
                             </Group>
                             <Text size="xs" c="dimmed" lineClamp={2} mt={4} style={{ lineHeight: 1.5 }}>
-                              {sk.description || '原生业务指令 SOP，响应 Agent 运行上下文调度。'}
+                              {sk.description || '未提供描述'}
                             </Text>
                           </div>
                         </Group>
@@ -824,14 +852,15 @@ export function CapabilitiesSettingsCard() {
                         {/* 底部元数据徽章 */}
                         <Group justify="space-between" mt={10} pt={8} style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
                           <Group gap={6}>
-                            {(sk.agents || ['Codex', 'Hermes']).map((ag: string) => (
+                            {isOfficialSkill(sk) && <Text size="xs" c="dimmed">{sk.name}</Text>}
+                            {(sk.installed_agents || sk.agents || []).map((ag: string) => (
                               <Badge key={ag} size="xs" variant="outline" color="gray">
                                 {ag}
                               </Badge>
                             ))}
                           </Group>
-                          <Text size="xs" c="teal" fw={600}>
-                            ✓ 跨端热载就绪
+                          <Text size="xs" c="dimmed">
+                            {isOfficialSkill(sk) ? '官方技能源' : '已发现安装目录'}
                           </Text>
                         </Group>
                       </div>
@@ -848,7 +877,7 @@ export function CapabilitiesSettingsCard() {
 
             {/* 右侧栏：深度规范检查器 (Inspector Workbench) */}
             <div className="capabilities-inspector-pane">
-              {selectedSkill ? (
+              {activeSkill ? (
                 <>
                   {/* 头部元数据与操作条 */}
                   <div className="inspector-top-meta">
@@ -856,17 +885,14 @@ export function CapabilitiesSettingsCard() {
                       <div>
                         <Group gap="xs">
                           <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: 'var(--cap-text-primary)' }}>
-                            {selectedSkill.name}
+                            {activeSkill.name}
                           </h2>
-                          <Badge color={selectedSkill.source?.includes('native') ? 'teal' : 'indigo'}>
-                            {selectedSkill.source || 'global-skill'}
-                          </Badge>
-                          <Badge color="cyan" variant="outline">
-                            v2.4.0 活跃
+                          <Badge color="gray" variant="outline">
+                            {isOfficialSkill(activeSkill) ? '星序官方源' : activeSkill.source || '本机技能源'}
                           </Badge>
                         </Group>
                         <Text size="xs" c="dimmed" mt={6} style={{ fontFamily: 'monospace' }}>
-                          路径: {selectedSkill.path || 'Global Scope (npx skills)'}
+                          {isOfficialSkill(activeSkill) ? '官方目录 · 按模块分发到目标 Agent' : `路径: ${activeSkill.path || '未提供路径'}`}
                         </Text>
                       </div>
 
@@ -875,22 +901,15 @@ export function CapabilitiesSettingsCard() {
                           size="xs"
                           variant="light"
                           color="indigo"
-                          leftSection={<IconRefresh size={14} />}
-                          onClick={() => {
-                            notifications.show({ title: '跨端同步触发', message: `已向 WSL/Debian 节点发送 [${selectedSkill.name}] 同步指令`, color: 'teal' })
-                          }}
+                          leftSection={<IconSend size={14} />}
+                          disabled={loading || availableSkillAgents.length === 0}
+                          onClick={() => handleOpenDispatchModal('skill', activeSkill)}
                         >
-                          ⚡ 跨端即时分发
+                          分发到 Agent
                         </Button>
-                        <Button
-                          size="xs"
-                          color="red"
-                          variant="subtle"
-                          leftSection={<IconTrash size={14} />}
-                          onClick={() => handleRemoveSkill(selectedSkill.name)}
-                        >
-                          卸载
-                        </Button>
+                        {!isOfficialSkill(activeSkill) && (
+                          <Button size="xs" color="red" variant="subtle" leftSection={<IconTrash size={14} />} onClick={() => handleRemoveSkill(activeSkill.name)}>卸载</Button>
+                        )}
                       </Group>
                     </Group>
                   </div>
@@ -931,27 +950,19 @@ export function CapabilitiesSettingsCard() {
                         <Stack gap="md">
                           <Card withBorder radius="md" p="md" style={{ background: 'var(--cap-card-bg)' }}>
                             <Text size="xs" fw={700} c="dimmed" mb={6}>
-                              SKILL FRONTMATTER METADATA (YAML)
+                              SKILL.md 原文
                             </Text>
                             <div className="code-preview-block">
-{`---
-name: "${selectedSkill.name}"
-description: "${selectedSkill.description || 'Agent Native Operational Skill'}"
-version: "2.4.0"
-engine_targets: [${(selectedSkill.agents || ['codex', 'hermes']).map((a: string) => `"${a.toLowerCase()}"`).join(', ')}]
-viking_memory_hooks: ["viking://agent/skills/${selectedSkill.name}"]
-allowed_tools: ["browser_navigate", "terminal", "patch", "read_file", "write_file"]
-safety_level: "strict_zero_ram_injection"
----`}
+                              {activeSkill.content || '当前来源未提供 SKILL.md 原文。'}
                             </div>
                           </Card>
 
                           <Card withBorder radius="md" p="md" style={{ background: 'var(--cap-card-bg)' }}>
                             <Text size="xs" fw={700} c="dimmed" mb={6}>
-                              PROMPT 规范与上下文注入逻辑
+                              技能描述
                             </Text>
                             <Text size="sm" style={{ lineHeight: 1.7, color: 'var(--cap-text-primary)' }}>
-                              {selectedSkill.description || '当任务命中该业务能力关键词时，小内核与模型上下文路由器将以动态轻量的方式注入上述 SOP 约束，免重启即刻生效。'}
+                              {activeSkill.description || '未提供描述'}
                             </Text>
                           </Card>
                         </Stack>
@@ -960,78 +971,21 @@ safety_level: "strict_zero_ram_injection"
                       {/* Tab 2: 关联资源与脚本树 */}
                       {inspectorTab === 'assets' && (
                         <Stack gap="md">
-                          <Text size="xs" c="dimmed">
-                            该技能在本地或远程环境中附带的参考文档、代码脚本与提示词模板：
-                          </Text>
-                          <Paper withBorder p="md" radius="md" style={{ background: 'var(--cap-card-bg)' }}>
-                            <Group gap="xs" mb="xs">
-                              <IconFolder size={18} color="#38bdf8" />
-                              <Text size="sm" fw={600}>references/ (参考知识库与规则表)</Text>
-                            </Group>
-                            <div style={{ paddingLeft: 24, fontSize: 13, color: 'var(--cap-text-secondary)' }}>
-                              <div>• api_specs.md (接口协议规范)</div>
-                              <div>• guidelines.md (业务执行边界与安全红线)</div>
-                            </div>
-
-                            <Group gap="xs" mt="md" mb="xs">
-                              <IconFolder size={18} color="var(--astr-muted)" />
-                              <Text size="sm" fw={600}>scripts/ (自动化执行脚本)</Text>
-                            </Group>
-                            <div style={{ paddingLeft: 24, fontSize: 13, color: 'var(--cap-text-secondary)' }}>
-                              <div>• run_pipeline.py (主流程编排调用脚本)</div>
-                              <div>• validator.sh (结果格式校验器)</div>
-                            </div>
-                          </Paper>
+                          <Text size="sm" c="dimmed">当前接口未提供资源目录清单，请以 SKILL.md 中的实际资源说明为准。</Text>
                         </Stack>
                       )}
 
                       {/* Tab 3: MCP 与工具授权 */}
                       {inspectorTab === 'grants' && (
                         <Stack gap="md">
-                          <Text size="xs" c="dimmed">
-                            该技能获批调用的标准 MCP 工具集与授权模式：
-                          </Text>
-                          <SimpleGrid cols={2} spacing="md">
-                            <Card withBorder p="md" radius="md" style={{ background: 'var(--cap-card-bg)' }}>
-                              <Group justify="space-between">
-                                <Text size="sm" fw={600}>Astrorder Agent MCP</Text>
-                                <Badge size="xs" color="teal">Auto-Approve</Badge>
-                              </Group>
-                              <Text size="xs" c="dimmed" mt={4}>提供跨端会话、黑板共享与子代理编排能力</Text>
-                            </Card>
-                            <Card withBorder p="md" radius="md" style={{ background: 'var(--cap-card-bg)' }}>
-                              <Group justify="space-between">
-                                <Text size="sm" fw={600}>Google Stitch MCP</Text>
-                                <Badge size="xs" color="blue">Auto-Approve</Badge>
-                              </Group>
-                              <Text size="xs" c="dimmed" mt={4}>UI 屏幕生成、设计系统与前端工程转化工具</Text>
-                            </Card>
-                          </SimpleGrid>
+                          <Text size="sm" c="dimmed">技能分发不会自动授予工具权限。请在目标 Agent 配置所需 MCP 或 CLI，授权状态以目标 Agent 为准。</Text>
                         </Stack>
                       )}
 
                       {/* Tab 4: 沙箱在线试运行 */}
                       {inspectorTab === 'live' && (
                         <Stack gap="md">
-                          <Card withBorder p="md" radius="md" style={{ background: 'var(--cap-card-bg)' }}>
-                            <Text size="sm" fw={600} mb="xs">沙箱调试运行终端</Text>
-                            <TextInput
-                              label="输入测试指令 / 参数"
-                              placeholder={`例如: 执行 ${selectedSkill.name} 的自检工作流`}
-                              size="xs"
-                              mb="md"
-                            />
-                            <Button
-                              size="xs"
-                              color="indigo"
-                              leftSection={<IconPlayerPlay size={14} />}
-                              onClick={() => {
-                                notifications.show({ title: '沙箱调用开始', message: `正在 [${summary?.target_name}] 沙箱中预热执行...`, color: 'blue' })
-                              }}
-                            >
-                              启动沙箱单次测试
-                            </Button>
-                          </Card>
+                          <Text size="sm" c="dimmed">当前未接入技能试运行。分发后，请在目标 Agent 按技能说明验证实际调用。</Text>
                         </Stack>
                       )}
                     </div>
@@ -1055,7 +1009,7 @@ safety_level: "strict_zero_ram_injection"
                   Model Context Protocol (MCP) 服务器管理
                 </h3>
                 <Text size="xs" c="dimmed" mt={4}>
-                  在 [{summary?.target_name || selectedTargetId}] 上注册的标准化协议服务器，向 Codex 与 Hermes 双内核暴露工具与上下文能力。
+                  在 [{summary?.target_name || selectedTargetId}] 上注册的协议服务器，供已配置的 Agent 使用。
                 </Text>
               </div>
             </Group>
@@ -1344,7 +1298,7 @@ safety_level: "strict_zero_ram_injection"
                           variant="light"
                           color="indigo"
                           leftSection={<IconDownload size={14} />}
-                          onClick={() => handleOpenDispatchModal('skill', { name: item.pkg })}
+                          onClick={() => { setCustomPackage(item.pkg); setInstallTargets([selectedTargetId]); setInstallModalOpen(true) }}
                         >
                           跨端分发安装
                         </Button>
@@ -1365,8 +1319,8 @@ safety_level: "strict_zero_ram_injection"
 
       {/* 底部状态条 Footer Bar */}
       <div className="capabilities-footer-bar">
-        <span>Codex · Hermes · Grok 全域配置实时双向同步 · 延迟 8ms · 真实 SSH 动态分发就绪</span>
-        <span>Astrorder Capability Engine v3.0.0 (Production)</span>
+        <span>{summary?.target_name || '能力中心'} · 分发结果以目标文件回读为准</span>
+        <span>{availableSkillAgents.map(agent => agent.label).join(' · ')}</span>
       </div>
 
       {/* =======================================================
@@ -1402,7 +1356,7 @@ safety_level: "strict_zero_ram_injection"
 
           <TextInput
             label="MCP 服务标识名称"
-            placeholder="例如: astrorder, devspace, custom-mcp"
+            placeholder="例如: devspace, custom-mcp"
             value={mcpFormName}
             onChange={(e) => setMcpFormName(e.target.value)}
             required
@@ -1422,7 +1376,7 @@ safety_level: "strict_zero_ram_injection"
           {mcpFormTransport === 'sse/http' ? (
             <TextInput
               label="服务端点 URL"
-              placeholder="http://127.0.0.1:30001/api/v1/agent/mcp"
+              placeholder="https://example.com/mcp"
               value={mcpFormUrl}
               onChange={(e) => setMcpFormUrl(e.target.value)}
               required
@@ -1551,7 +1505,7 @@ safety_level: "strict_zero_ram_injection"
                 <Card key={tgt.id} withBorder radius="sm" p="xs" style={{ background: 'var(--cap-header-bg)' }}>
                   <Text fw={700} size="xs" mb={6}>{tgt.name} ({tgt.kind})</Text>
                   <Stack gap={4}>
-                    {['codex', 'hermes', 'grok'].map((agentName) => {
+                    {availableSkillAgents.map(({ id: agentName, label }) => {
                       const isChecked = dispatchMatrix.some(
                         (m) => m.target_id === tgt.id && m.agent === agentName
                       )
@@ -1559,7 +1513,7 @@ safety_level: "strict_zero_ram_injection"
                         <Checkbox
                           key={`${tgt.id}::${agentName}`}
                           size="xs"
-                          label={`${agentName.toUpperCase()} 运行时`}
+                          label={label}
                           checked={isChecked}
                           onChange={(e) => {
                             if (e.currentTarget.checked) {
@@ -1613,7 +1567,7 @@ safety_level: "strict_zero_ram_injection"
               leftSection={<IconSend size={14} />}
               onClick={handleExecuteDispatch}
             >
-              立即打包并执行跨端注入
+              开始分发
             </Button>
           </Group>
         </Stack>
@@ -1673,10 +1627,10 @@ safety_level: "strict_zero_ram_injection"
               color="indigo"
               loading={installing}
               onClick={() => {
-                if (customPackage) handleOpenDispatchModal('skill', { name: customPackage })
+                void handleInstall()
               }}
             >
-              进入分发矩阵
+              安装到所选节点
             </Button>
           </Group>
         </Stack>

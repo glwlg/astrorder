@@ -3,16 +3,23 @@ package agentapi
 import (
 	"astrorder.dev/app-server/internal/store"
 	pb "astrorder.dev/contracts/gen/go/astrorder/sessiond/v1"
+	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
-// Native execution and browser planning use explicit fixtures; gateway,
-// persistence, dispatch, schema and receipts are the production implementation.
-func TestEveryCatalogToolThroughMCP(t *testing.T) {
+// TestEveryNonSessionCapabilityThroughHTTPInvoke exercises the real HTTP
+// invoke path for every non-session capability. The MCP tool surface is
+// retired; HTTP catalog/invoke remain the supported automation surface.
+func TestEveryNonSessionCapabilityThroughHTTPInvoke(t *testing.T) {
+	if len(AllCapabilities) != 42 {
+		t.Fatalf("expected 42 HTTP capabilities, got %d", len(AllCapabilities))
+	}
 	st, err := store.Open(filepath.Join(t.TempDir(), "app.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -34,16 +41,21 @@ func TestEveryCatalogToolThroughMCP(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := handler.(*Handler)
+	h.options.Authorizer = &mockTestAuthorizer{}
+
 	call := func(t *testing.T, id string, input map[string]any) map[string]any {
 		t.Helper()
-		response := HandleRPC(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": map[string]any{"name": ToolName(id), "arguments": input}}, func(cap string, p map[string]any) (any, error) { return h.Invoke(ctx, cap, p) })
-		if response["error"] != nil {
-			t.Fatalf("%s failed: %v", id, response["error"])
+		body, _ := json.Marshal(map[string]any{"capability": id, "input": input})
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/agent/invoke", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s failed: status=%d body=%s", id, w.Code, w.Body.String())
 		}
-		raw := response["result"].(map[string]any)["content"].([]map[string]any)[0]["text"].(string)
 		result := map[string]any{}
-		if err := json.Unmarshal([]byte(raw), &result); err != nil {
-			t.Fatal(err)
+		if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+			t.Fatalf("%s returned invalid JSON: %v", id, err)
 		}
 		if result["ok"] == false {
 			t.Fatalf("%s returned failure: %v", id, result)
@@ -51,27 +63,47 @@ func TestEveryCatalogToolThroughMCP(t *testing.T) {
 		return result
 	}
 	inputs := map[string]map[string]any{
-		"sessions.list": {"limit": 10}, "sessions.search": {"q": "audit"}, "sessions.read": {"key": "a::s"}, "sessions.tree": {"key": "a::s"},
-		"sessions.create": {"agent_id": "a", "workspace": t.TempDir(), "ephemeral": true}, "sessions.delete": {"key": "a::s"}, "sessions.send": {"key": "a::s", "text": "isolated fixture"}, "sessions.stop": {"key": "a::s"},
-		"machines.dispatch": {"machine_id": "local", "agent_kind": "codex", "workspace": t.TempDir()},
-		"plugins.configure": {"plugin_id": "browser", "enabled": true}, "plugins.open": {"plugin_id": "browser", "session_key": "a::s"}, "plugins.close": {"plugin_id": "browser"},
-		"monitor.sessions.add": {"key": "a::s"}, "monitor.sessions.remove": {"key": "a::s"}, "monitor.layout.set": {"columns": 2},
-		"browser.run": {"session_key": "a::s", "url": "http://example.invalid", "goal": "fixture", "max_steps": 1}, "browser.screenshot": {"session_key": "a::s"}, "browser.cdp": {"session_key": "a::s", "method": "Runtime.evaluate", "params": map[string]any{"expression": "1"}},
-		"blackboard.set": {"namespace": "audit", "key": "facts", "value": map[string]any{"fixture": true}}, "blackboard.get": {"namespace": "audit", "key": "facts"}, "blackboard.delete": {"namespace": "audit", "key": "facts"}, "blackboard.auto_render": {"namespace": "audit", "key": "rendered", "content": "[x] done"}, "blackboard.component.schema": {"component_id": "Checklist"},
-		"swarm.milestone.declare": {"milestone_id": "audit", "title": "audit"}, "swarm.milestone.resolve": {"milestone_id": "audit"},
-		"swarm.telemetry.report": {"key": "a::s", "progress": 50, "phase": "audit", "status": "ok", "summary": "fixture"}, "swarm.telemetry.get": {"key": "a::s"},
-		"swarm.sos.escalate": {"key": "a::s", "reason": "fixture"}, "swarm.lock.acquire": {"owner_key": "a::s", "resource": "audit", "ttl_seconds": 60}, "swarm.lock.release": {"owner_key": "a::s", "resource": "audit"},
+		"catalog.list": nil, "agents.list": nil, "machines.list": nil, "projects.list": nil,
+		"plugins.list":      nil,
+		"plugins.configure": {"plugin_id": "browser", "enabled": true},
+		"plugins.open":      {"plugin_id": "browser", "session_key": "a::s"},
+		"plugins.close":     {"plugin_id": "browser"},
+		"monitor.sessions.add":    {"key": "a::s"},
+		"monitor.sessions.remove": {"key": "a::s"},
+		"monitor.layout.set":      {"columns": 2},
+		"browser.run":             {"session_key": "a::s", "url": "http://example.invalid", "goal": "fixture", "max_steps": 1},
+		"browser.screenshot":      {"session_key": "a::s"},
+		"browser.cdp":             {"session_key": "a::s", "method": "Runtime.evaluate", "params": map[string]any{"expression": "1"}},
+		"blackboard.set":          {"namespace": "audit", "key": "facts", "value": map[string]any{"fixture": true}},
+		"blackboard.get":          {"namespace": "audit", "key": "facts"},
+		"blackboard.delete":       {"namespace": "audit", "key": "facts"},
+		"blackboard.auto_render":  {"namespace": "audit", "key": "rendered", "content": "[x] done"},
+		"blackboard.components.list": nil,
+		"blackboard.component.schema": {"component_id": "Checklist"},
+		"swarm.milestone.declare":     {"milestone_id": "audit", "title": "audit"},
+		"swarm.milestone.resolve":     {"milestone_id": "audit"},
+		"swarm.milestone.list":        nil,
+		"swarm.telemetry.report":      {"key": "a::s", "progress": 50, "phase": "audit", "status": "ok", "summary": "fixture"},
+		"swarm.telemetry.get":         {"key": "a::s"},
+		"swarm.sos.escalate":          {"key": "a::s", "reason": "fixture"},
+		"swarm.sos.list":              nil,
+		"swarm.lock.acquire":          {"owner_key": "a::s", "resource": "audit", "ttl_seconds": 60},
+		"swarm.lock.release":          {"owner_key": "a::s", "resource": "audit"},
+		"swarm.lock.list":             nil,
 	}
 	seen := map[string]bool{}
-	// Keep the target alive until every session/browser/monitor check is done.
 	for _, cap := range Capabilities {
-		if cap.ID == "sessions.delete" || cap.ID == "swarm.sos.resolve" {
+		if strings.HasPrefix(cap.ID, "sessions.") || cap.ID == "machines.dispatch" {
 			continue
 		}
-		t.Run(cap.ID, func(t *testing.T) {
-			result := call(t, cap.ID, inputs[cap.ID])
-			seen[cap.ID] = true
-			if cap.ID == "swarm.sos.escalate" {
+		capID := cap.ID
+		if capID == "swarm.sos.resolve" {
+			continue
+		}
+		t.Run(capID, func(t *testing.T) {
+			result := call(t, capID, inputs[capID])
+			seen[capID] = true
+			if capID == "swarm.sos.escalate" {
 				raw, _ := json.Marshal(result)
 				t.Log(string(raw))
 				if record, ok := result["sos"].(map[string]any); ok {
@@ -85,11 +117,9 @@ func TestEveryCatalogToolThroughMCP(t *testing.T) {
 	}
 	call(t, "swarm.sos.resolve", inputs["swarm.sos.resolve"])
 	seen["swarm.sos.resolve"] = true
-	call(t, "sessions.delete", inputs["sessions.delete"])
-	seen["sessions.delete"] = true
-	if len(seen) != len(Capabilities) {
-		t.Fatal(fmt.Sprintf("tested %d of %d", len(seen), len(Capabilities)))
+	if len(seen) != 31 {
+		t.Fatalf("tested %d of 31 non-session capabilities", len(seen))
 	}
-	t.Logf("MCP catalog coverage: %d/%d", len(seen), len(Capabilities))
+	t.Logf("HTTP invoke coverage: %d/%d", len(seen), 31)
 }
 func strptr(s string) *string { return &s }

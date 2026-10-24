@@ -494,6 +494,19 @@ describe('SessionRail local handoff', () => {
     vi.unstubAllGlobals()
   })
 
+  it('uses the green running state instead of the completed unread indicator', () => {
+    const view = render(
+      <MantineProvider>
+        <SessionRail sessions={[{ ...sessions[0], status: 'running', updated_at: new Date().toISOString() }]} agents={agents} projects={projects} onSelect={vi.fn()} />
+      </MantineProvider>,
+    )
+    const row = view.container.querySelector('.session-row')!
+    expect(row).toHaveClass('is-running')
+    expect(row.querySelector('.status-running')).toBeInTheDocument()
+    expect(row.querySelector('.status-unread')).toBeNull()
+    expect(row.closest('.session-row-wrapper')).toHaveStyle({ '--session-running-color': 'var(--astr-indigo, #5b6cff)' })
+  })
+
   it('displays unread dot for completed unread session and clears it on selection', () => {
     const map = new Map<string, string>()
     vi.stubGlobal('localStorage', {

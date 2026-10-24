@@ -100,11 +100,19 @@ func (journal *Journal) publishCommitted(frame Frame) {
 	if journal.minimum[sessionID] == 0 {
 		journal.minimum[sessionID] = frame.SeqID
 	}
-	retained := append(journal.retained[sessionID], frame)
-	if len(retained) > journal.capacity {
-		retained = retained[len(retained)-journal.capacity:]
+	if journal.store != nil {
+		// Durable replay reads the journal on disk. Keep only metadata here;
+		// retaining full native payloads duplicates history indefinitely per session.
+		journal.retained[sessionID] = []Frame{{SessionID: sessionID, SeqID: frame.SeqID, Status: status, Event: event, Timestamp: frame.Timestamp}}
+	} else {
+		retained := append(journal.retained[sessionID], frame)
+		if len(retained) > journal.capacity {
+			drop := len(retained) - journal.capacity
+			clear(retained[:drop])
+			retained = retained[drop:]
+		}
+		journal.retained[sessionID] = retained
 	}
-	journal.retained[sessionID] = retained
 	subscribers := make([]*Subscription, 0, len(journal.subscribers))
 	for subscriber := range journal.subscribers {
 		subscribers = append(subscribers, subscriber)

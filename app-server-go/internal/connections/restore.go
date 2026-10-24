@@ -83,6 +83,7 @@ func (h *Handler) Restore(ctx context.Context) error {
 				return err
 			}
 			if present && !enabled {
+				h.forgetSessionRecovery(node.id, kind)
 				continue
 			}
 			var connectionID *string
@@ -141,6 +142,7 @@ func (h *Handler) Restore(ctx context.Context) error {
 				}
 			}
 			if owned {
+				h.scheduleSessionRecovery(node.id, kind, false)
 				continue
 			}
 			workers.Add(1)
@@ -156,6 +158,8 @@ func (h *Handler) Restore(ctx context.Context) error {
 				defer cancel()
 				if err := h.attachEnvironmentAgent(attachCtx, node.id, kind, node.row); err != nil {
 					slog.Default().Debug("auto-connect runtime not ready", "connection_id", node.id, "kind", kind, "error", err)
+				} else {
+					h.scheduleSessionRecovery(node.id, kind, true)
 				}
 			}()
 		}

@@ -73,8 +73,7 @@ function MonitorStatusIcon({ status }: { status: Session['status'] }) {
       return (
         <Tooltip label="正在运行" withArrow>
           <span className="monitor-state-pill is-running" aria-label="正在运行">
-            <span className="monitor-pulse-ring" />
-            <IconBolt size={13} />
+            <IconBolt size={15} />
           </span>
         </Tooltip>
       )
@@ -147,7 +146,7 @@ export function MonitorCard({
   onResizeCornerStart,
 }: MonitorCardProps) {
   const status = session.status === 'idle' && session.live ? 'running' : session.status
-  const resources = useSessionResources(session, true)
+  const resources = useSessionResources(session, true, false)
   const commands = useAstrorderStore(useShallow((state) => selectCommands(state, session.agent_id, session.id)))
   const messages = useAstrorderStore(useShallow((state) => selectMessages(state, session.agent_id, session.id)))
   const isInitialLoading = Boolean((resources?.messages?.isLoading || resources?.messages?.isPending) && messages.length === 0)
@@ -583,7 +582,7 @@ function MonitorListRow({
   onEditQueued?: (item: MonitorQueueItem) => void
   onDeleteQueued?: (item: MonitorQueueItem) => void
 }) {
-  useSessionResources(session, true)
+  useSessionResources(session, true, false)
   const commands = useAstrorderStore(useShallow((state) => selectCommands(state, session.agent_id, session.id)))
   const messages = useAstrorderStore(useShallow((state) => selectMessages(state, session.agent_id, session.id)))
   const approvals = useAstrorderStore(useShallow((state) => selectApprovals(state, session.agent_id, session.id)))

@@ -114,7 +114,10 @@ func (s *Store) GetAgentConnectionChoice(ctx context.Context, id string) (bool, 
 
 // GetSession resolves only the exact (agentID, sessionID) composite identity.
 func (s *Store) GetSession(ctx context.Context, agentID, sessionID string) (map[string]any, error) {
-	row, err := s.QueryRow(ctx, "SELECT * FROM sessions WHERE agent_id=? AND id=?", agentID, sessionID)
+	row, err := s.QueryRow(ctx, `SELECT s.*, e.parent_agent_id AS delegation_parent_agent_id, e.parent_session_id AS delegation_parent_session_id
+FROM sessions s
+LEFT JOIN delegation_edges e ON s.agent_id=e.child_agent_id AND s.id=e.child_session_id
+WHERE s.agent_id=? AND s.id=?`, agentID, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -124,7 +127,10 @@ func (s *Store) GetSession(ctx context.Context, agentID, sessionID string) (map[
 // FindSessionByID provides the legacy ambiguous lookup, choosing newest row_id.
 // Callers that know an agent must use GetSession instead.
 func (s *Store) FindSessionByID(ctx context.Context, sessionID string) (map[string]any, error) {
-	row, err := s.QueryRow(ctx, "SELECT * FROM sessions WHERE id=? ORDER BY row_id DESC LIMIT 1", sessionID)
+	row, err := s.QueryRow(ctx, `SELECT s.*, e.parent_agent_id AS delegation_parent_agent_id, e.parent_session_id AS delegation_parent_session_id
+FROM sessions s
+LEFT JOIN delegation_edges e ON s.agent_id=e.child_agent_id AND s.id=e.child_session_id
+WHERE s.id=? ORDER BY s.row_id DESC LIMIT 1`, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -133,13 +139,15 @@ func (s *Store) FindSessionByID(ctx context.Context, sessionID string) (map[stri
 
 // ListSessions returns sessions newest-first; an empty agentID lists all agents.
 func (s *Store) ListSessions(ctx context.Context, agentID string) ([]map[string]any, error) {
-	query := "SELECT * FROM sessions"
+	query := `SELECT s.*, e.parent_agent_id AS delegation_parent_agent_id, e.parent_session_id AS delegation_parent_session_id
+FROM sessions s
+LEFT JOIN delegation_edges e ON s.agent_id=e.child_agent_id AND s.id=e.child_session_id`
 	args := []any{}
 	if agentID != "" {
-		query += " WHERE agent_id=?"
+		query += " WHERE s.agent_id=?"
 		args = append(args, agentID)
 	}
-	query += " ORDER BY updated_at DESC,row_id DESC"
+	query += " ORDER BY s.updated_at DESC,s.row_id DESC"
 	rows, err := s.QueryRows(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -227,7 +235,10 @@ WHERE agent_id=? AND id=?`, title, workspace, status, sourceID, nullablePayload(
 				return execErr
 			}
 		}
-		rows, queryErr := queryRows(ctx, tx, "SELECT * FROM sessions WHERE agent_id=? AND id=?", agentID, id)
+		rows, queryErr := queryRows(ctx, tx, `SELECT s.*, e.parent_agent_id AS delegation_parent_agent_id, e.parent_session_id AS delegation_parent_session_id
+FROM sessions s
+LEFT JOIN delegation_edges e ON s.agent_id=e.child_agent_id AND s.id=e.child_session_id
+WHERE s.agent_id=? AND s.id=?`, agentID, id)
 		if queryErr != nil {
 			return queryErr
 		}
@@ -319,6 +330,9 @@ OR (instr(key, 'approval:')=1 AND json_extract(value, '$.agent_id')=? AND json_e
 	}
 	affected, err := result.RowsAffected()
 	if err != nil || affected == 0 {
+		return false, err
+	}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM delegation_edges WHERE (child_agent_id=? AND child_session_id=?) OR (parent_agent_id=? AND parent_session_id=?)", agentID, sessionID, agentID, sessionID); err != nil {
 		return false, err
 	}
 	// A session removed here may still exist in its native store. Remember that

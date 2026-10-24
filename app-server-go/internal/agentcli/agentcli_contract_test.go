@@ -37,6 +37,14 @@ func TestCompatibleCommandGrammar(t *testing.T) {
 	}))
 	defer server.Close()
 
+	expectedCaller := map[string]any{
+		"agent_id":      "hermes",
+		"connection_id": "local",
+		"profile_name":  "default",
+		"runtime":       "hermes",
+		"session_id":    "session-1",
+	}
+
 	tests := []struct {
 		name       string
 		args       []string
@@ -44,17 +52,25 @@ func TestCompatibleCommandGrammar(t *testing.T) {
 		input      map[string]any
 	}{
 		{"catalog", []string{"catalog"}, "catalog.list", map[string]any{}},
-		{"invoke", []string{"invoke", "swarm.lock.acquire", "--input", `{"ttl":9007199254740993,"文字":"值"}`}, "swarm.lock.acquire", map[string]any{"ttl": json.Number("9007199254740993"), "文字": "值"}},
-		{"sessions list", []string{"sessions", "list"}, "sessions.list", map[string]any{}},
-		{"sessions search", []string{"sessions", "search", "K8s 集群"}, "sessions.search", map[string]any{"q": "K8s 集群"}},
-		{"sessions read default", []string{"sessions", "read"}, "sessions.read", map[string]any{"limit": json.Number("80")}},
-		{"sessions read options", []string{"sessions", "read", "--key", "codex::s1", "--agent-id", "codex", "--session-id", "s1", "--limit", "17"}, "sessions.read", map[string]any{"key": "codex::s1", "agent_id": "codex", "session_id": "s1", "limit": json.Number("17")}},
+		{"invoke", []string{"invoke", "swarm.lock.list", "--input", `{"ttl":9007199254740993,"文字":"值"}`}, "swarm.lock.list", map[string]any{"ttl": json.Number("9007199254740993"), "文字": "值"}},
+		{"sessions list", []string{"sessions", "list"}, "sessions.list", map[string]any{"caller": expectedCaller}},
+		{"sessions search", []string{"sessions", "search", "K8s 集群"}, "sessions.search", map[string]any{"q": "K8s 集群", "caller": expectedCaller}},
+		{"sessions read default", []string{"sessions", "read"}, "sessions.read", map[string]any{"limit": json.Number("80"), "caller": expectedCaller}},
+		{"sessions read options", []string{"sessions", "read", "--key", "codex::s1", "--agent-id", "codex", "--session-id", "s1", "--limit", "17"}, "sessions.read", map[string]any{"key": "codex::s1", "agent_id": "codex", "session_id": "s1", "limit": json.Number("17"), "caller": expectedCaller}},
 		{"agents", []string{"agents"}, "agents.list", map[string]any{}},
 		{"machines", []string{"machines"}, "machines.list", map[string]any{}},
 		{"projects", []string{"projects"}, "projects.list", map[string]any{}},
 	}
 
-	lookup := mapLookup(map[string]string{"ASTRORDER_AGENT_TOKEN": "secret", "ASTRORDER_AGENT_URL": server.URL + "/"})
+	lookup := mapLookup(map[string]string{
+		"ASTRORDER_AGENT_TOKEN":          "secret",
+		"ASTRORDER_AGENT_URL":            server.URL + "/",
+		"ASTRORDER_CALLER_AGENT_ID":      "hermes",
+		"ASTRORDER_CALLER_CONNECTION_ID": "local",
+		"ASTRORDER_CALLER_PROFILE_NAME":  "default",
+		"ASTRORDER_CALLER_RUNTIME":       "hermes",
+		"ASTRORDER_CALLER_SESSION_ID":    "session-1",
+	})
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
@@ -220,7 +236,14 @@ func TestHelpUsageAndRegistrationsShareGrammar(t *testing.T) {
 		}
 		commands = append(commands, registration.Command)
 	}
-	wantCommands := []string{"catalog", "invoke", "sessions", "sessions list", "sessions search", "sessions read", "agents", "machines", "projects"}
+	wantCommands := []string{
+		"catalog", "invoke", "sessions",
+		"sessions list", "sessions search", "sessions read",
+		"sessions spawn", "sessions delegate", "sessions operation",
+		"sessions send", "sessions stop", "sessions delete", "sessions tree",
+		"browser", "browser eval", "browser screenshot",
+		"agents", "machines", "projects", "bind",
+	}
 	if !reflect.DeepEqual(commands, wantCommands) {
 		t.Fatalf("commands = %#v", commands)
 	}
@@ -253,7 +276,7 @@ func TestHelpUsageAndRegistrationsShareGrammar(t *testing.T) {
 		t.Fatalf("root help exit = %d, stderr = %q", code, stderr.String())
 	}
 	normalizedHelp := strings.Join(strings.Fields(stdout.String()), " ")
-	for _, text := range []string{"usage: astrorder-agent [-h] {catalog,invoke,sessions,agents,machines,projects} ...", "Call Astrorder agent APIs", "catalog", "List capabilities", "invoke", "Call a capability by id"} {
+	for _, text := range []string{"usage: astrorder-agent [-h] {catalog,invoke,sessions,browser,agents,machines,projects,bind} ...", "Call Astrorder agent APIs", "catalog", "List capabilities", "invoke", "Call a capability by id"} {
 		if !strings.Contains(normalizedHelp, text) {
 			t.Fatalf("root help missing %q:\n%s", text, stdout.String())
 		}
@@ -261,7 +284,7 @@ func TestHelpUsageAndRegistrationsShareGrammar(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	if code := Run(context.Background(), []string{"invoke", "--help"}, strings.NewReader(""), &stdout, &stderr, nil); code != 0 || stderr.Len() != 0 || !strings.Contains(stdout.String(), "usage: astrorder-agent invoke [-h] [--input INPUT] capability") {
+	if code := Run(context.Background(), []string{"invoke", "--help"}, strings.NewReader(""), &stdout, &stderr, nil); code != 0 || stderr.Len() != 0 || !strings.Contains(strings.Join(strings.Fields(stdout.String()), " "), "usage: astrorder-agent invoke [-h] [--input INPUT] [--input-file INPUT_FILE] capability") {
 		t.Fatalf("invoke help exit = %d, stdout = %q, stderr = %q", code, stdout.String(), stderr.String())
 	}
 

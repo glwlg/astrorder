@@ -5,6 +5,7 @@ import { IconCheck, IconChecks, IconChevronDown } from '@tabler/icons-react'
 import type { Approval, Message } from '../../domain/types'
 import { attachmentHref } from '../../domain/attachmentHref'
 import { hasMessageContent, isMessageActivity, normalizeMessagePresentation } from '../../domain/messagePresentation'
+import { activityPacks } from '../../domain/activityPacks'
 import { MobileMarkdown as MarkdownContent } from './MobileMarkdown'
 import { useStickToBottom } from '../../hooks/useStickToBottom'
 import { useOlderMessages } from '../../hooks/useOlderMessages'
@@ -19,11 +20,12 @@ import { AnimatePresence, motion } from 'motion/react'
 
 export interface MessageActionAnchor { text: string; x: number; y: number; element: HTMLElement; selectText?: () => void }
 
-export function MobileTranscript({ messages, commands = [], approvals = [], onApproval, busy, loadOlder, hasOlder, loadingOlder, onMessageAction, onImage, onFile, workspace, connectionId, readOnly = false, onSwipe, onSwipePreview }: {
+export function MobileTranscript({ messages, activityBreaks, commands = [], approvals = [], onApproval, busy, loadOlder, hasOlder, loadingOlder, onMessageAction, onImage, onFile, workspace, connectionId, readOnly = false, onSwipe, onSwipePreview }: {
   messages: Message[]; commands?: import('../../domain/types').Command[]; approvals?: Approval[]; onApproval?: (approval: Approval, action: 'approve' | 'cancel') => void
   busy: boolean; loadOlder: () => unknown; hasOlder: boolean; loadingOlder: boolean
   onMessageAction: (anchor: MessageActionAnchor) => void; onImage: (url: string) => void; onFile?: (path: string) => void; workspace?: string | null; connectionId?: string | null; onSwipe: (gesture: SessionSwipeGesture) => void
   readOnly?: boolean
+  activityBreaks?: readonly string[]
   onSwipePreview?: (pose: import('./mobileGestures').SessionCardPose | null) => void
 }) {
   const reducedMotion = useReducedMotion(undefined, { getInitialValueInEffect: false })
@@ -56,6 +58,7 @@ export function MobileTranscript({ messages, commands = [], approvals = [], onAp
   const action = (message: Message, element: HTMLElement, x: number, y: number) => onMessageAction({ text: message.text, x, y, element, selectText: () => setSelectedText(element) })
   const rows = messages.map(normalizeMessagePresentation).filter(m => isCompactionMessage(m) || hasMessageContent(m))
   const activity = (m: Message) => !isCompactionMessage(m) && isMessageActivity(m)
+  const packs = activityPacks(rows, activityBreaks)
   return <>
     <div className="m-transcript" role="log" ref={setContainerRef} onScroll={e => { onScroll(); older.onScroll(e) }} onWheel={older.onWheel}
       onTouchStart={e => { older.onTouchStart(e); if ((e.target as Element).closest('.m-select-text') || startsAtSessionDrawerEdge(e.touches[0].clientX)) { touch.current = null; onSwipePreview?.(null); return }; touch.current = { x: e.touches[0].clientX, y: e.touches[0].clientY } }}
@@ -72,11 +75,10 @@ export function MobileTranscript({ messages, commands = [], approvals = [], onAp
           )
         }
         if (activity(m)) {
-          if (i && activity(rows[i - 1])) return null
-          const pack: Message[] = []
-          for (let n = i; n < rows.length && activity(rows[n]); n++) pack.push(rows[n])
-          const isLatestActivity = !rows.slice(i + pack.length).some(activity)
-          const isPackRunning = Boolean(busy && isLatestActivity)
+          const pack = packs.get(i)
+          if (!pack) return null
+          const remaining = rows.slice(i + pack.length)
+          const isPackRunning = Boolean(busy && !remaining.some(activity) && !remaining.some(item => item.role === 'user' || item.role === 'assistant' && item.kind === 'message'))
           return <LazyDetails className="m-think-pack" key={m.id} loading={isPackRunning} summary={<PackSummary pack={pack} isRunning={isPackRunning} />}>
             <div className="m-think-rail">{pack.map(item => {
               const desc = describeTool(item)

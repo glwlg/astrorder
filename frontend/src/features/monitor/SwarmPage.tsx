@@ -21,6 +21,7 @@ import { useAstrorderStore } from '../../state/store'
 import { isEphemeralSession, newCommandId, scopeKey } from '../../domain/semantics'
 import { api } from '../../api/client'
 import type { Agent } from '../../domain/types'
+import { buildSwarmTopology } from '../../domain/swarmTopology'
 import { SwarmDagView } from './SwarmDagView'
 
 const STANDARD_MODELS: Record<string, Array<{ provider: string; model: string; label: string }>> = {
@@ -123,24 +124,12 @@ export function SwarmPage() {
     ]
   }, [agents, selectedAgentId])
 
-  // 统计主星与伴星数量
-  const { rootCount, workerCount } = useMemo(() => {
-    let roots = 0
-    let workers = 0
-    for (const s of sessions) {
-      if (s.parent_session_id || s.parent_session_key) {
-        workers++
-      } else {
-        const isParent = sessions.some(
-          (c) =>
-            c.parent_session_id === s.id ||
-            c.parent_session_key === scopeKey(s.agent_id, s.id)
-        )
-        if (isParent) roots++
-      }
-    }
-    return { rootCount: roots, workerCount: workers }
+  // 统计主星与伴星数量（采用纯拓扑 helper）
+  const topology = useMemo(() => {
+    return buildSwarmTopology(sessions)
   }, [sessions])
+  const rootCount = topology.totalRootCount
+  const workerCount = topology.totalWorkerCount
 
   const handleOpenCreate = () => {
     const firstAgent = availableAgents[0]
@@ -152,7 +141,7 @@ export function SwarmPage() {
     setTitle('')
     setModelKey('')
     setEffort('')
-    setInitialPrompt('用 @群星 指令发起协同：')
+    setInitialPrompt('')
     setCreateOpened(true)
   }
 
@@ -163,8 +152,7 @@ export function SwarmPage() {
       const created = await api.createSession({
         agent_id: selectedAgentId,
         workspace: workspace.trim() || null,
-        title: title.trim() || '星系主星协同会话',
-        blackboard_scope: 'swarm',
+        title: title.trim() || '协作主星会话',
       })
 
       useAstrorderStore.setState((state) => ({
@@ -202,15 +190,18 @@ export function SwarmPage() {
         })
       }
 
+      const createdKey = scopeKey(created.agent_id, created.id)
+      navigate(`/swarm?root=${encodeURIComponent(createdKey)}`)
+
       notifications.show({
         color: 'teal',
-        message: `🌟 主星会话「${title.trim() || '新星系'}」已成功点亮启动`,
+        message: `🌟 会话「${title.trim() || created.title || '新会话'}」已启动，Agent 后续自主委派子会话将自动在星图显式展开`,
       })
       setCreateOpened(false)
     } catch (e: any) {
       notifications.show({
         color: 'red',
-        message: e.message || '启动主星会话失败',
+        message: e.message || '启动会话失败',
       })
     } finally {
       setBusy(false)
@@ -290,7 +281,7 @@ export function SwarmPage() {
           <Group gap="xs">
             <IconTopologyStarRing size={20} color="#5B5BD6" />
             <Text fw={700} size="md">
-              启动群星 · 新建主星协同任务
+              启动协同 · 新建主星会话
             </Text>
           </Group>
         }
@@ -300,7 +291,7 @@ export function SwarmPage() {
       >
         <Stack gap="sm">
           <Text size="xs" c="dimmed">
-            主星（Alpha）负责作为任务调度中枢，派生并统筹其他服务器上的伴星 Agent 协同作战。
+            创建会话后，Agent 自主通过委派（Delegation）发起子会话将自动在星图形成多层星系拓扑，无需提前设定先决门槛或特定群星标记。
           </Text>
 
           {/* 1. 服务器 / 主机环境 */}
@@ -385,7 +376,7 @@ export function SwarmPage() {
           {/* 6. 初始协同指令 */}
           <Textarea
             label="初始作战任务描述 / 指令"
-            placeholder="例如：用 @群星 功能采集各个集群节点的负载并生成体检报告"
+            placeholder="例如：分析当前系统状态，并按需委派子会话并发处理各子任务"
             minRows={3}
             value={initialPrompt}
             onChange={(e) => setInitialPrompt(e.currentTarget.value)}
@@ -402,7 +393,7 @@ export function SwarmPage() {
               loading={busy}
               disabled={!selectedAgentId}
             >
-              启动主星并进入星图
+              创建主星并进入星图
             </Button>
           </Group>
         </Stack>

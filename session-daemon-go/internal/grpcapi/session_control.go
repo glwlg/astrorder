@@ -174,6 +174,39 @@ func commandReceipt(daemonID string, session *pb.SessionRef, meta *pb.CommandMet
 	if !valid {
 		return nil, status.Error(codes.Unavailable, "native command status is invalid")
 	}
+	var accepted bool
+	if rawAccepted, exists := payload["accepted"]; exists {
+		if rawAccepted == nil {
+			return nil, status.Error(codes.Unavailable, "native command accepted is malformed")
+		}
+		boolVal, isBool := rawAccepted.(bool)
+		if !isBool {
+			return nil, status.Error(codes.Unavailable, "native command accepted is malformed")
+		}
+		accepted = boolVal
+	} else {
+		action, _ := envelope["action"].(string)
+		if action == "session.create.result" {
+			envSID, _ := envelope["session_id"].(string)
+			if envSID != "" && (session == nil || session.SessionId == "" || session.SessionId == envSID) {
+				payloadSIDValid := true
+				if psidRaw, hasPSID := payload["session_id"]; hasPSID {
+					psid, ok := psidRaw.(string)
+					if !ok || psid != envSID {
+						payloadSIDValid = false
+					}
+				}
+				if payloadSIDValid {
+					if receipt.Status == pb.SessionStatus_SESSION_STATUS_IDLE ||
+						receipt.Status == pb.SessionStatus_SESSION_STATUS_RUNNING ||
+						receipt.Status == pb.SessionStatus_SESSION_STATUS_WAITING_APPROVAL {
+						accepted = true
+						payload["accepted"] = true
+					}
+				}
+			}
+		}
+	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return nil, status.Error(codes.Internal, "native command receipt is invalid")
@@ -182,7 +215,7 @@ func commandReceipt(daemonID string, session *pb.SessionRef, meta *pb.CommandMet
 		return nil, status.Error(codes.ResourceExhausted, "command receipt exceeds business limit; query stored operation")
 	}
 	completed := &pb.CommandResult{Native: &pb.NativeJson{Schema: "astrorder.session.command-result.v1", Utf8Json: raw}}
-	completed.Accepted, _ = payload["accepted"].(bool)
+	completed.Accepted = accepted
 	completed.TerminationConfirmed, _ = payload["termination_confirmed"].(bool)
 	for name, destination := range map[string]**string{"turn_id": &completed.TurnId, "title": &completed.Title, "model": &completed.Model, "provider": &completed.Provider, "effort": &completed.Effort} {
 		if v, ok := payload[name].(string); ok {

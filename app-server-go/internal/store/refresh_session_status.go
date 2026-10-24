@@ -35,6 +35,8 @@ type RefreshSessionStatusExpectation struct {
 	ConnectionID string
 	ControlState string
 	NativeKind   string
+	// Status optionally guards recovery against a newer live transition.
+	Status string
 }
 
 // RefreshSessionStatus applies one daemon-confirmed status to the exact
@@ -60,7 +62,11 @@ func (s *Store) RefreshSessionStatus(ctx context.Context, agentID, sessionID str
 		outcome = RefreshSessionStatusUnspecified
 	)
 	err := s.WithTx(ctx, func(tx *sql.Tx) error {
-		rows, err := queryRows(ctx, tx, "SELECT * FROM sessions WHERE agent_id=? AND id=?", agentID, sessionID)
+		const sessionQuery = `SELECT s.*, e.parent_agent_id AS delegation_parent_agent_id, e.parent_session_id AS delegation_parent_session_id
+FROM sessions s
+LEFT JOIN delegation_edges e ON s.agent_id=e.child_agent_id AND s.id=e.child_session_id
+WHERE s.agent_id=? AND s.id=?`
+		rows, err := queryRows(ctx, tx, sessionQuery, agentID, sessionID)
 		if err != nil {
 			return err
 		}
@@ -68,7 +74,7 @@ func (s *Store) RefreshSessionStatus(ctx context.Context, agentID, sessionID str
 			outcome = RefreshSessionStatusGone
 			return nil
 		}
-		if !sessionBindingMatchesExpectation(rows[0], sessionID, expect) {
+		if !sessionBindingMatchesExpectation(rows[0], sessionID, expect) || expect.Status != "" && refreshRowText(rows[0], "status") != expect.Status {
 			outcome = RefreshSessionStatusRebound
 			return nil
 		}
@@ -81,7 +87,7 @@ func (s *Store) RefreshSessionStatus(ctx context.Context, agentID, sessionID str
 			status, agentID, sessionID); err != nil {
 			return err
 		}
-		rows, err = queryRows(ctx, tx, "SELECT * FROM sessions WHERE agent_id=? AND id=?", agentID, sessionID)
+		rows, err = queryRows(ctx, tx, sessionQuery, agentID, sessionID)
 		if err != nil {
 			return err
 		}

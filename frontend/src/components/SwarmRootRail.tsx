@@ -16,9 +16,9 @@ import {
 } from '@tabler/icons-react'
 import {  useNavigate, useSearchParams } from 'react-router-dom'
 import type { Agent, Session } from '../domain/types'
-import { scopeKey } from '../domain/semantics'
 import { sessionActivityStatus } from './sessionRailModel'
 import { AgentBrandIcon } from './AgentBrandIcon'
+import { buildSwarmTopology } from '../domain/swarmTopology'
 
 export function SwarmRootRail({
   sessions = [],
@@ -33,95 +33,20 @@ export function SwarmRootRail({
   const [searchParams] = useSearchParams()
   const activeRootKey = searchParams.get('root')
 
-  // 全量扫描识别所有星系主星与其伴星数量
+  // 基于统一纯拓扑 helper 识别协作星系主星与其伴星数量
+  const topology = useMemo(() => {
+    return buildSwarmTopology(sessions)
+  }, [sessions])
+
   const rootStars = useMemo(() => {
-    const sessionMap = new Map<string, Session>()
-    const childrenMap = new Map<string, string[]>()
-    const parentMap = new Map<string, string>()
-
-    for (const s of sessions) {
-      const k = scopeKey(s.agent_id, s.id)
-      sessionMap.set(k, s)
-      childrenMap.set(k, [])
-    }
-
-    for (const s of sessions) {
-      const childKey = scopeKey(s.agent_id, s.id)
-      let parentKey: string | null = null
-
-      if (s.parent_session_key && sessionMap.has(s.parent_session_key)) {
-        parentKey = s.parent_session_key
-      } else if (s.parent_session_id) {
-        const candidateKey = scopeKey(s.parent_agent_id || s.agent_id, s.parent_session_id)
-        if (sessionMap.has(candidateKey)) {
-          parentKey = candidateKey
-        } else {
-          for (const [k, p] of sessionMap.entries()) {
-            if (p.id === s.parent_session_id) {
-              parentKey = k
-              break
-            }
-          }
-        }
-      }
-
-      if (parentKey && parentKey !== childKey) {
-        parentMap.set(childKey, parentKey)
-        const list = childrenMap.get(parentKey) || []
-        list.push(childKey)
-        childrenMap.set(parentKey, list)
-      }
-    }
-
-    // 筛选所有主星：拥有子会话且自身没有父会话，或者标题明确为群星/主星协同
-    const candidateKeys = new Set<string>()
-    for (const [pKey, cList] of childrenMap.entries()) {
-      if (cList.length > 0 && !parentMap.has(pKey)) {
-        candidateKeys.add(pKey)
-      }
-    }
-    for (const s of sessions) {
-      const title = s.title || ''
-      if ((title.includes('主星') || title.includes('群星') || title.includes('星系') || title.includes('作战指令')) && !parentMap.has(scopeKey(s.agent_id, s.id))) {
-        candidateKeys.add(scopeKey(s.agent_id, s.id))
-      }
-    }
-
-    // 计算每个主星家族的全部伴星数
-    const list = Array.from(candidateKeys).map((k) => {
-      const s = sessionMap.get(k)!
-      // 深度统计伴星总数
-      let workerCount = 0
-      const queue = [...(childrenMap.get(k) || [])]
-      const visited = new Set<string>()
-      while (queue.length > 0) {
-        const child = queue.shift()!
-        if (visited.has(child)) continue
-        visited.add(child)
-        workerCount += 1
-        const grandchildren = childrenMap.get(child) || []
-        for (const gc of grandchildren) queue.push(gc)
-      }
-
-      return {
-        key: k,
-        session: s,
-        agent: agents[s.agent_id],
-        workerCount,
-        status: sessionActivityStatus(s),
-      }
-    })
-
-    // 按活跃状态与更新时间排序
-    list.sort((a, b) => {
-      const aActive = a.status === 'running' || a.status === 'waiting_approval' ? 1 : 0
-      const bActive = b.status === 'running' || b.status === 'waiting_approval' ? 1 : 0
-      if (aActive !== bActive) return bActive - aActive
-      return b.session.updated_at.localeCompare(a.session.updated_at)
-    })
-
-    return list
-  }, [sessions, agents])
+    return topology.roots.map((root) => ({
+      key: root.key,
+      session: root.session,
+      agent: agents[root.session.agent_id],
+      workerCount: root.workerCount,
+      status: sessionActivityStatus(root.session),
+    }))
+  }, [topology, agents])
 
   const handleSelectStar = (starKey: string) => {
     navigate(`/swarm?root=${encodeURIComponent(starKey)}`)

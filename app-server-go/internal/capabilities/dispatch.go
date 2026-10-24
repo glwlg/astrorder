@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"astrorder.dev/app-server/internal/capabilities/officialskills"
 	"astrorder.dev/app-server/internal/envtarget"
 )
 
@@ -96,6 +97,12 @@ func (s *Service) skillDelivery(ctx context.Context, source envtarget.Env, sourc
 	if !skillNameRE.MatchString(name) {
 		return nil, envtarget.Errorf(422, "技能名称无效")
 	}
+	if sourceAgent == "astrorder" {
+		return s.officialSkillDelivery(name)
+	}
+	if _, official := officialskills.GetOfficialSkill(name); official {
+		return nil, envtarget.Errorf(422, "请从星序技能目录分发官方模块，以使用目标 Agent 的运行配置")
+	}
 	sn, err := s.snapshot(ctx, source)
 	if err != nil {
 		return nil, err
@@ -114,6 +121,12 @@ func (s *Service) skillDelivery(ctx context.Context, source envtarget.Env, sourc
 		return nil, envtarget.Errorf(404, "源端没有找到技能 %s", name)
 	}
 	dir := path.Dir(chosen.path)
+	if _, err := source.Read(ctx, dir+"/astrorder-manifest.json"); err == nil {
+		return nil, envtarget.Errorf(422, "此技能包含目标 Agent 的运行配置，请从星序技能目录分发独立模块")
+	}
+	if name == "astrorder" {
+		return nil, envtarget.Errorf(422, "请从星序技能目录分发会话管理或浏览器控制模块")
+	}
 	archive, err := source.PackDir(ctx, dir)
 	if err != nil {
 		return nil, envtarget.Errorf(502, "打包技能 %s 失败：%v", name, err)
@@ -126,6 +139,11 @@ func (s *Service) skillDelivery(ctx context.Context, source envtarget.Env, sourc
 		}
 		root := map[string]string{"codex": paths.Codex, "hermes": paths.Hermes, "grok": paths.Grok}[agent] + "/skills"
 		defer s.lock(dest.Target().ID + "|skills-dispatch|" + root)()
+		for _, manifest := range []string{officialManifestFile, "astrorder-manifest.json"} {
+			if _, err := dest.Read(ctx, root+"/"+folder+"/"+manifest); err == nil {
+				return "", "", envtarget.Errorf(409, "目标为星序托管技能，请通过星序技能目录更新")
+			}
+		}
 		if err := dest.UnpackDir(ctx, root, folder, archive); err != nil {
 			return "", "", err
 		}

@@ -403,6 +403,40 @@ func TestRetiredStreamIdentityReuseInLiveFrameIsFatal(t *testing.T) {
 	}
 }
 
+func TestRetiredStreamExplicitResumePreservesSequence(t *testing.T) {
+	epoch := "epoch-resume"
+	h := startRetiredHarness(t, epoch, map[string]int64{"retired-control": 29, "current-control": 7})
+	fake := &fakeEventsServer{daemonID: epoch}
+	fake.subscribe = func(req *pb.SubscribeRequest, stream grpc.ServerStreamingServer[pb.EventStreamFrame]) error {
+		if h.attempts.Add(1) == 1 {
+			return stream.Send(resyncFrame("retired-control", 29, 0, 0, pb.ResyncReason_RESYNC_REASON_UNKNOWN_SESSION, nil))
+		}
+		for _, frame := range successFrames(epoch, "current-control", 7) {
+			if err := stream.Send(frame); err != nil {
+				return err
+			}
+		}
+		if err := stream.Send(&pb.EventStreamFrame{Frame: &pb.EventStreamFrame_Live{Live: &pb.EventEnvelope{DaemonId: epoch, Session: &pb.SessionRef{SessionId: "retired-control"}, SeqId: 30, EventType: "session.resumed", NativePayload: makeNativePayload(map[string]any{})}}}); err != nil {
+			return err
+		}
+		<-stream.Context().Done()
+		return stream.Context().Err()
+	}
+	h.run(t, fake)
+	h.waitSettled(t, true)
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		cp, err := h.store.GetCheckpoint(context.Background(), epoch, "retired-control")
+		if err == nil && cp == 30 {
+			h.cancel()
+			<-h.done
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("resume marker did not advance exact next sequence")
+}
+
 func TestProjectionStreamOverflowStaysFatal(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

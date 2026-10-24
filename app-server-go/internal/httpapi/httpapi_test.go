@@ -373,6 +373,8 @@ func TestGzipMatchesStarletteStreamingSSEAndQZeroBehavior(t *testing.T) {
 func TestRegistrationsAreTheConstructedDispatchTable(t *testing.T) {
 	registrations := Registrations()
 	want := map[string]Registration{
+		"GET /api/v1/draft-shelf":     {Kind: KindHTTP, Method: http.MethodGet, Path: "/api/v1/draft-shelf", Auth: AuthBrowser, Ownership: OwnershipGo},
+		"PUT /api/v1/draft-shelf":     {Kind: KindHTTP, Method: http.MethodPut, Path: "/api/v1/draft-shelf", Auth: AuthBrowser, Ownership: OwnershipGo},
 		"GET /health":                 {Kind: KindHTTP, Method: http.MethodGet, Path: "/health", Auth: AuthPublic, Ownership: OwnershipGo},
 		"POST /api/v1/auth/session":   {Kind: KindHTTP, Method: http.MethodPost, Path: "/api/v1/auth/session", Auth: AuthPublic, Ownership: OwnershipGo},
 		"GET /api/v1/auth/session":    {Kind: KindHTTP, Method: http.MethodGet, Path: "/api/v1/auth/session", Auth: AuthPublic, Ownership: OwnershipGo},

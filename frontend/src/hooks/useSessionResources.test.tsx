@@ -9,6 +9,36 @@ import { useSessionResources } from './useAstrorderData'
 
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
 
+it('publishes a whole 100-item activity group atomically and loads the next group on demand', async () => {
+  const session: Session = { id: 'grouped', agent_id: 'agent', title: 'Grouped', status: 'running', workspace: null, updated_at: '2026-01-01T00:00:00Z' }
+  const rows: Message[] = Array.from({ length: 430 }, (_, i) => ({ id: `t-${i}`, session_id: session.id, agent_id: session.agent_id, role: 'tool', kind: 'tool', text: '', tool: { name: 'commandExecution', status: 'completed' }, attachments: [], command_id: null, created_at: '1970-01-01T00:00:00Z' }))
+  useAstrorderStore.getState().resetRuntime()
+  vi.spyOn(api, 'syncSession').mockResolvedValue(session)
+  let release!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve })
+  const get = vi.spyOn(api, 'getMessages').mockImplementation(async (_sid, _aid, before, limit = 50) => {
+    if (before === '380') await gate
+    const end = before ? Number(before) : rows.length
+    const start = Math.max(0, end - limit)
+    return { items: rows.slice(start, end), next_cursor: start ? String(start) : null }
+  })
+  vi.spyOn(api, 'getCommands').mockResolvedValue({ items: [] })
+  vi.spyOn(api, 'getTasks').mockResolvedValue({ items: [] })
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  const hook = renderHook(() => useSessionResources(session, true), { wrapper })
+  await waitFor(() => expect(get).toHaveBeenCalledWith(session.id, session.agent_id, '380', 50))
+  expect(hook.result.current.visibleMessages).toHaveLength(0)
+  await act(async () => { release(); await gate })
+  await waitFor(() => expect(hook.result.current.visibleMessages.map(row => row.id)).toEqual(rows.slice(330).map(row => row.id)))
+  expect(get).toHaveBeenCalledTimes(2)
+  await act(async () => { await hook.result.current.messages.fetchNextPage() })
+  await waitFor(() => expect(hook.result.current.visibleMessages.map(row => row.id)).toEqual(rows.slice(230).map(row => row.id)))
+  expect(hook.result.current.activityBreaks).toEqual(['t-330', 't-230'])
+  expect(get).toHaveBeenLastCalledWith(session.id, session.agent_id, '330', 100)
+  client.clear()
+})
+
 it.each(['codex', 'hermes', 'grok', 'antigravity'])('preserves %s input through reply-first history refresh and session switching', async agent_id => {
   const session: Session = { id: 'reply-first', agent_id, title: 'Reply first', status: 'running', workspace: null, updated_at: '2026-01-01T00:00:00Z' }
   const input: Message = { id: 'optimistic-command', agent_id, session_id: session.id, role: 'user', kind: 'message', text: '请继续核对', attachments: [], tool: null, command_id: 'command', created_at: '2026-01-01T00:00:10Z' }

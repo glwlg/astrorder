@@ -143,6 +143,7 @@ type Handler struct {
 	discovery   *discoveryCache
 	restoreMu   sync.Mutex
 	autoOnce    sync.Once
+	recovery    sessionRecovery
 }
 
 // NewHandler creates a new connections HTTP handler.
@@ -777,6 +778,11 @@ func (h *Handler) handleEnvironmentAgentAction(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusInternalServerError, "store_error", err.Error())
 		return
 	}
+	if action == "disconnect" {
+		h.forgetSessionRecovery(connID, kind)
+	} else {
+		h.scheduleSessionRecovery(connID, kind, true)
+	}
 
 	items, err := h.environmentSnapshot(r.Context())
 	if err != nil {
@@ -842,6 +848,7 @@ func (h *Handler) handleConnectCodex(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "store_error", err.Error())
 		return
 	}
+	h.scheduleSessionRecovery("local", "codex", true)
 	h.handleCodexConnection(w, r)
 }
 
@@ -863,6 +870,7 @@ func (h *Handler) handleDisconnectCodex(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "store_error", err.Error())
 		return
 	}
+	h.forgetSessionRecovery("local", "codex")
 	h.handleCodexConnection(w, r)
 }
 
@@ -889,6 +897,7 @@ func (h *Handler) handleConnectLocal(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "store_error", err.Error())
 		return
 	}
+	h.scheduleSessionRecovery("local", "hermes", true)
 	h.handleConnectionsSnapshot(w, r)
 }
 
@@ -910,6 +919,7 @@ func (h *Handler) handleDisconnectLocal(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "store_error", err.Error())
 		return
 	}
+	h.forgetSessionRecovery("local", "hermes")
 	h.handleConnectionsSnapshot(w, r)
 }
 
@@ -1117,6 +1127,7 @@ func (h *Handler) handleConnectSSHConnection(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, "store_error", err.Error())
 		return
 	}
+	h.scheduleSessionRecovery(actualID, "hermes", true)
 	updated, err := h.store.UpdateSSHConnectionState(r.Context(), actualID, "connected", "Connected successfully", nil)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "store_error", err.Error())
@@ -1159,6 +1170,7 @@ func (h *Handler) handleDisconnectSSHConnection(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusInternalServerError, "store_error", err.Error())
 		return
 	}
+	h.forgetSessionRecovery(actualID, "hermes")
 	updated, err := h.store.UpdateSSHConnectionState(r.Context(), actualID, "disconnected", "Disconnected explicitly", nil)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "store_error", err.Error())

@@ -151,6 +151,10 @@ func parseRoute(method, path string) (string, parsedParams) {
 				if method == http.MethodPost {
 					return "respond_user_input", params
 				}
+			case "view-lease":
+				if method == http.MethodPost {
+					return "view_lease", params
+				}
 			case "sync":
 				if method == http.MethodPost {
 					return "sync_session", params

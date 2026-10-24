@@ -446,9 +446,17 @@ func (p *Projection) processEnvelope(
 	}
 	streamID := sessionRef.GetSessionId()
 	if p.retiredStreams[streamID] {
-		// The identity was confirmed to have no daemon history; any envelope for
-		// it means the ID was reused and the old checkpoint must not be applied.
-		return fmt.Errorf("%w: retired stream identity was reused: %s", ErrInvalidWatermark, streamID)
+		cp, err := p.store.GetCheckpoint(ctx, epoch, streamID)
+		if err != nil {
+			return err
+		}
+		// A legacy suspended stream may return with its original durable
+		// sequence. Accept only the exact next frame, never a reset or gap.
+		if cp <= 0 || env.GetSeqId() != cp+1 || env.GetEventType() != "session.resumed" {
+			return fmt.Errorf("%w: retired stream identity was reused: %s", ErrInvalidWatermark, streamID)
+		}
+		delete(p.retiredStreams, streamID)
+		expectedSeq[streamID] = cp + 1
 	}
 	seqID := env.GetSeqId()
 	if seqID <= 0 {
@@ -582,6 +590,9 @@ func (p *Projection) projectEnvelopeTx(ctx context.Context, tx *sql.Tx, env *ses
 
 	case "session.idle":
 		return projectSimpleSessionStatusTx(ctx, tx, streamID, agentID, "idle", "session.idle", payloadMap)
+
+	case "session.resumed":
+		return nil, nil // journal lifecycle marker; native attachment follows
 
 	case "session.started":
 		return []store.Event{{
@@ -1224,6 +1235,9 @@ func projectConnectorEventTx(ctx context.Context, tx *sql.Tx, streamID, agentID 
 		if err != nil {
 			return nil, fmt.Errorf("upsert session tx: %w", err)
 		}
+		if updatedSess == nil {
+			return nil, nil
+		}
 		events = append(events, sessionUpsertEvent(evAgentID, sid, updatedSess))
 
 	case "session.delete":
@@ -1312,6 +1326,10 @@ func upsertSessionTx(ctx context.Context, tx *sql.Tx, payload map[string]any) (m
 	}
 	agentID, err := stringValue(payload, "agent_id", true)
 	if err != nil {
+		return nil, err
+	}
+	removed, err := store.NativeSessionRemovedTx(ctx, tx, agentID, id)
+	if err != nil || removed {
 		return nil, err
 	}
 	status, err := stringValue(payload, "status", true)
@@ -1803,6 +1821,12 @@ func projectCodexNotificationTx(ctx context.Context, tx *sql.Tx, streamID, agent
 		if item, ok := params["item"].(map[string]any); ok && explicitAgent != "" && explicitSession != "" {
 			itemID, _ := item["id"].(string)
 			itemType, _ := item["type"].(string)
+			if images := CodexGeneratedImages(item, explicitSession, itemID); itemID != "" && len(images) > 0 {
+				event := liveMessageEvent(explicitAgent, explicitSession, itemID, "assistant", "message", "", nil, false)
+				event.Data["attachments"] = images
+				event.Data["turn_id"] = params["turnId"]
+				return []store.Event{event}, nil
+			}
 			if itemType == "collabAgentToolCall" || itemType == "subAgentActivity" {
 				return projectCodexSubagentsTx(ctx, tx, explicitSession, explicitAgent, item)
 			}

@@ -45,6 +45,13 @@ function detectLanguage(fileName: string): string {
   return EXT_TO_LANG[ext] || 'plaintext'
 }
 
+function decodeText(bytes: Uint8Array): { text: string; readOnly: boolean } {
+  const utf16 = bytes[0] === 255 && bytes[1] === 254 ? 'utf-16le' : bytes[0] === 254 && bytes[1] === 255 ? 'utf-16be' : null
+  const text = new TextDecoder(utf16 || 'utf-8', { fatal: true }).decode(bytes)
+  if (/[\x00-\x08\x0e-\x1f]/.test(text)) throw new Error('此文件包含二进制内容，无法作为文本打开')
+  return { text, readOnly: Boolean(utf16) }
+}
+
 export function MonacoViewer({ artifact, onSave, onDirtyChange, toolbarAction, isActive = true }: ViewerContext) {
   const onDirtyChangeRef = useRef(onDirtyChange)
   onDirtyChangeRef.current = onDirtyChange
@@ -57,6 +64,7 @@ export function MonacoViewer({ artifact, onSave, onDirtyChange, toolbarAction, i
   const [isReadingMode, setIsReadingMode] = useState(isMarkdown)
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [encodingReadOnly, setEncodingReadOnly] = useState(false)
   const [visualRendered, setVisualRendered] = useState<any>(null)
   const [visualizing, setVisualizing] = useState(false)
   const [isVisualMode, setIsVisualMode] = useState(false)
@@ -100,7 +108,15 @@ export function MonacoViewer({ artifact, onSave, onDirtyChange, toolbarAction, i
     try {
       const res = await authenticatedApiFetch(artifact.readUrl)
       if (!res.ok) throw new Error(`读取失败 (${res.status})`)
-      const text = await res.text()
+      let decoded: ReturnType<typeof decodeText>
+      try {
+        decoded = decodeText(new Uint8Array(await res.arrayBuffer()))
+      } catch (reason) {
+        if (reason instanceof TypeError) throw new Error('文件编码不受支持，无法作为文本打开')
+        throw reason
+      }
+      const { text, readOnly } = decoded
+      setEncodingReadOnly(readOnly)
       setContent(text)
       initialContentRef.current = text
       setDirty(false)
@@ -140,7 +156,7 @@ export function MonacoViewer({ artifact, onSave, onDirtyChange, toolbarAction, i
   }
 
   const handleSave = useCallback(async () => {
-    if (!onSave || !artifact.writable) return
+    if (!onSave || !artifact.writable || encodingReadOnly || loading || error) return
     setSaving(true)
     try {
       const ok = await onSave(content)
@@ -152,7 +168,7 @@ export function MonacoViewer({ artifact, onSave, onDirtyChange, toolbarAction, i
     } finally {
       setSaving(false)
     }
-  }, [artifact.writable, content, onSave])
+  }, [artifact.writable, content, onSave, encodingReadOnly, loading, error])
 
   // 监听键盘快捷键 (Ctrl+S / Cmd+S)
   useEffect(() => {
@@ -219,7 +235,8 @@ export function MonacoViewer({ artifact, onSave, onDirtyChange, toolbarAction, i
                 </ActionIcon>
               </Tooltip>
             )}
-            {artifact.writable && onSave && (
+            {encodingReadOnly && <Text size="xs" c="dimmed">UTF-16 只读</Text>}
+            {artifact.writable && !encodingReadOnly && onSave && (
               <Tooltip label="保存修改 (Ctrl+S)">
                 <Button
                   size="compact-xs"
@@ -292,6 +309,7 @@ export function MonacoViewer({ artifact, onSave, onDirtyChange, toolbarAction, i
             onChange={handleEditorChange}
             options={{
               minimap: { enabled: true },
+              readOnly: !artifact.writable || encodingReadOnly,
               fontSize: 13,
               scrollBeyondLastLine: false,
               wordWrap: 'on',

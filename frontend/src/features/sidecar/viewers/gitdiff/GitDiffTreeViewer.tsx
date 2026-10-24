@@ -313,7 +313,7 @@ export function GitDiffTreeViewer({ artifact }: ViewerContext) {
             </Text>
             {(insertions > 0 || deletions > 0) && (
               <>
-                <Badge size="xs" color="teal" variant="light">+{insertions}</Badge>
+                <Badge size="xs" variant="transparent" style={{ color: 'var(--astr-green)' }}>+{insertions}</Badge>
                 <Badge size="xs" color="red" variant="light">-{deletions}</Badge>
               </>
             )}

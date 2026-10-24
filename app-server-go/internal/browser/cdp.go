@@ -54,6 +54,9 @@ func DialCDP(ctx context.Context, wsURL string) (*CDPClient, error) {
 		return nil, fmt.Errorf("dial cdp ws %s: %w", wsURL, err)
 	}
 
+	// Screenshots carry base64 image data, well above the WebSocket default
+	// read limit. Keep a bounded limit large enough for real page captures.
+	conn.SetReadLimit(32 << 20)
 	client := &CDPClient{
 		ws:   conn,
 		done: make(chan struct{}),

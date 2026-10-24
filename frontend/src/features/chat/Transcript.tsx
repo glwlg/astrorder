@@ -8,6 +8,7 @@ import { InlineNotice } from '../../components/InlineNotice'
 import type { Approval, Attachment, Message, OutboxEntry, Session } from '../../domain/types'
 import { attachmentHref } from '../../domain/attachmentHref'
 import { hasMessageContent, isMessageActivity, normalizeMessagePresentation } from '../../domain/messagePresentation'
+import { activityPacks } from '../../domain/activityPacks'
 import { useStickToBottom } from '../../hooks/useStickToBottom'
 import { MarkdownContent } from '../../components/MarkdownContent'
 import { LazyDetails } from '../../components/LazyDetails'
@@ -277,6 +278,7 @@ function MessageItem({
 
 export function Transcript({
   messages,
+  activityBreaks,
   outbox,
   approvals = [],
   canApprove = true,
@@ -297,6 +299,7 @@ export function Transcript({
   onForkAtMessage,
 }: {
   messages: Message[]
+  activityBreaks?: readonly string[]
   outbox: OutboxEntry[]
   approvals?: Approval[]
   canApprove?: boolean
@@ -320,6 +323,7 @@ export function Transcript({
   const enter = reducedMotion ? {} : { opacity: 0, y: 10, scale: 0.99 }
   const visibleMessages = messages.map(normalizeMessagePresentation).filter((message) => isCompactionMessage(message) || hasMessageContent(message))
   const isActivity = (message: Message | null) => Boolean(message && !isCompactionMessage(message) && isMessageActivity(message))
+  const packs = activityPacks(visibleMessages, activityBreaks)
   const outboundVersion = outbox.map((item) => item.command.id).join(',')
   const contentVersion = `${messages.map((item) => `${item.id}:${item.text.length}`).join(',')}|${outbox.map((item) => `${item.command.id}:${item.status}`).join(',')}|${approvals.map((item) => item.id).join(',')}|${composerHeight ?? 0}`
   const {
@@ -404,9 +408,8 @@ export function Transcript({
             // 判断过程块：连续的非普通用户消息（包括思考、工具活动等过程性输出）
             // 当后续出现了最终的 assistant 回复（或会话结束生成完毕），该过程块自动收起为类似 Codex 的“用时 X 分钟 Y 秒”或“过程概要”
             if (isActivity(message)) {
-              if (isActivity(prevMessage)) return null
-              const pack: Message[] = []
-              for (let i = idx; i < visibleMessages.length && isActivity(visibleMessages[i]); i++) pack.push(visibleMessages[i])
+              const pack = packs.get(idx)
+              if (!pack) return null
               const remaining = visibleMessages.slice(idx + pack.length)
               const isLatestActivity = !remaining.some(isActivity)
               const hasLaterUserMessage = remaining.some(m => m.role === 'user' && m.kind === 'message')

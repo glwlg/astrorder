@@ -4,6 +4,20 @@ import { MobileTranscript } from './MobileTranscript'
 import type { Approval, Message } from '../../domain/types'
 
 afterEach(cleanup)
+it('splits 430 mobile activities into complete independent packs of at most 100', () => {
+  const messages: Message[] = Array.from({ length: 430 }, (_, i) => ({ ...row, id: `tool-${i}`, role: 'tool', kind: 'tool', text: '', tool: { name: 'commandExecution', status: 'completed', arguments: { command: `echo ${i}` } } }))
+  const props = { busy: true, hasOlder: false, loadingOlder: false, loadOlder: vi.fn(), onMessageAction: vi.fn(), onImage: vi.fn(), onSwipe: vi.fn() }
+  const view = render(<MobileTranscript {...props} messages={messages} />)
+  const packs = view.container.querySelectorAll('.m-think-pack')
+  expect(packs).toHaveLength(5)
+  expect(Array.from(packs).map(pack => pack.classList.contains('is-loading-active'))).toEqual([false, false, false, false, true])
+  fireEvent.click(packs[0].querySelector('summary')!)
+  expect(packs[0].querySelectorAll('.m-fold')).toHaveLength(100)
+  expect(packs[1].querySelectorAll('.m-fold')).toHaveLength(0)
+  view.rerender(<MobileTranscript {...props} messages={[...messages, { ...messages[0], id: 'tool-430' }]} />)
+  expect(view.container.querySelector('.m-think-pack')).toHaveAttribute('open')
+  expect(view.container.querySelectorAll('.m-think-pack')).toHaveLength(5)
+})
 const row: Message = { id: 'm', agent_id: 'a', session_id: 's', role: 'assistant', kind: 'thinking', text: 'large hidden reasoning', attachments: [], command_id: null, tool: null, created_at: '2026-01-01T00:00:00Z' }
 const pendingApproval: Approval = {
   id: 'approval-m1',

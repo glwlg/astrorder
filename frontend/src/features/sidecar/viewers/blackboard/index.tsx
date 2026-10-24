@@ -31,8 +31,8 @@ export const blackboardViewer: ArtifactViewer = {
         content: '星序默认按当前主星链条将数据自动隔离至 swarm:<root_session_key> 命名空间。同星系内的伴星无缝共享，不同星系之间天然物理隔离不串台。亦支持 session:<id> 私有暂存与 global 全局广播。',
       },
       {
-        title: 'Agent 原生 MCP 接口协议规范',
-        content: '1. mcp__astrorder__blackboard_set: 写入或更新变量（key, value, 可选 namespace）\n2. mcp__astrorder__blackboard_get: 按键或全量列出黑板变量（key, 可选 namespace）\n3. mcp__astrorder__blackboard_delete: 删除单项或一键彻底清空整个星系空间（key: "*" 或 clean_namespace: true）',
+        title: 'Agent CLI 调用规范',
+        content: '加载 astrorder-blackboard 技能，使用技能目录内的 astrorder-agent CLI。\n1. invoke blackboard.set --input-file 请求.json：写入或更新 key、value。\n2. invoke blackboard.get --input-file 请求.json：按 key 或全量读取。\n3. invoke blackboard.delete --input-file 请求.json：删除指定 key；清空使用 key: "*"。\nCLI 自动携带当前会话身份；群聊或星图作用域在请求中显式指定 session_key。',
       },
       {
         title: '双模态呈现与即时切换',

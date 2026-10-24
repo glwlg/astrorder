@@ -143,7 +143,14 @@ func (h *Handler) tree(response http.ResponseWriter, request *http.Request) erro
 		}
 		depth = value
 	}
-	resolved, err := h.resolve(request.Context(), query.Get("path"), query.Get("session_id"), query.Get("connection_id"))
+	workspace := query.Get("path")
+	connectionID := strings.TrimSpace(query.Get("connection_id"))
+	// A project picker navigates within the connection's scope, rather than
+	// making each visited directory a new scope that hides its parent.
+	if query.Get("session_id") == "" && connectionID != "" && connectionID != targetfs.LocalConnectionID {
+		workspace = ""
+	}
+	resolved, err := h.resolve(request.Context(), workspace, query.Get("session_id"), connectionID)
 	if err != nil {
 		return err
 	}
@@ -481,29 +488,38 @@ func copyHTTP(ctx context.Context, destination io.Writer, source io.Reader) (int
 type NativeOpener struct{}
 
 func (NativeOpener) Open(ctx context.Context, path, action string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// The system window outlives this HTTP request. CommandContext would kill
+	// the launcher as soon as ServeHTTP returns and cancels the request.
 	var command *exec.Cmd
 	switch runtime.GOOS {
 	case "windows":
 		if action == "reveal" && !isDirectory(path) {
-			command = exec.CommandContext(ctx, "explorer.exe", "/select,", path)
+			command = exec.Command("explorer.exe", "/select,", path)
 		} else {
-			command = exec.CommandContext(ctx, "explorer.exe", path)
+			command = exec.Command("explorer.exe", path)
 		}
 	case "darwin":
 		if action == "reveal" && !isDirectory(path) {
-			command = exec.CommandContext(ctx, "open", "-R", path)
+			command = exec.Command("open", "-R", path)
 		} else {
-			command = exec.CommandContext(ctx, "open", path)
+			command = exec.Command("open", path)
 		}
 	default:
 		target := path
 		if action == "reveal" && !isDirectory(path) {
 			target = filepath.Dir(path)
 		}
-		command = exec.CommandContext(ctx, "xdg-open", target)
+		command = exec.Command("xdg-open", target)
 	}
 	configureProcess(command)
-	return command.Start()
+	if err := command.Start(); err != nil {
+		return err
+	}
+	go func() { _ = command.Wait() }()
+	return nil
 }
 
 func isDirectory(path string) bool {

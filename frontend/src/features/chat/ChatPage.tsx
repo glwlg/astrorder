@@ -638,6 +638,7 @@ function ChatPageBody() {
           </div>
           <SessionRuntimeBar key={scopeKey(selected.agent_id, selected.id)} commands={commands} tasks={runtimeTasks} backgroundError={background.error} onTaskOpen={(task) => { setTaskSelection({ id: task.id, agent_id: task.agent_id, session_id: task.session_id }); openTaskDetails() }} />
           <Transcript
+            activityBreaks={resources.activityBreaks}
             key={`transcript:${scopeKey(selected.agent_id, selected.id)}`}
             session={selected}
             messages={messages}

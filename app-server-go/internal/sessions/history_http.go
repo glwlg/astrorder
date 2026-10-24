@@ -277,6 +277,12 @@ func projectHistoryItem(item map[string]any, aid, sid, nativeID, source, agentKi
 	if (agentKind == "codex" || agentKind == "codex-ssh") && role == "user" {
 		row["attachments"] = projection.CodexUserAttachments(item["content"], sid, key)
 	}
+	if agentKind == "codex" || agentKind == "codex-ssh" {
+		if images := projection.CodexGeneratedImages(item, sid, key); len(images) > 0 {
+			row["role"], row["kind"], row["attachments"] = "assistant", "message", images
+			return []map[string]any{row}
+		}
+	}
 	if kind == "tool" {
 		if tool, output := codexToolFromItem(item); tool != nil {
 			row["tool"] = tool

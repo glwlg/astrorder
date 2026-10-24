@@ -113,6 +113,11 @@ func (d *Daemon) controlOnce(parent context.Context, request map[string]any) map
 		result, err = d.registry.Create(ctx, r)
 	case "session.spawn":
 		_, previouslyOwned := d.registry.Sessions()[id]
+		// Explicit attachment resumes the same persisted identity. Admit its
+		// startup events before native IO, preserving the existing sequence.
+		if err = d.journal.PrepareResume(id); err != nil {
+			return errorResponse(request["request_id"], err.Error())
+		}
 		result, err = d.registry.Spawn(ctx, r)
 		if err == nil {
 			if params, ok := request["params"].(map[string]any); ok {
@@ -151,6 +156,9 @@ func (d *Daemon) controlOnce(parent context.Context, request map[string]any) map
 			}
 		}
 	default:
+		if action == "session.close" {
+			kind, _ = d.registry.ResolveSessionOwner(id, core.SessionReadIdentity{})
+		}
 		result, err = d.registry.Command(ctx, r)
 	}
 	if err != nil {
@@ -161,7 +169,10 @@ func (d *Daemon) controlOnce(parent context.Context, request map[string]any) map
 		}
 		return response
 	}
-	if result.Payload["deleted"] == result.SessionID || result.Payload["closed"] == true {
+	// Closing releases the native binding, but its persisted thread can wake.
+	// Retiring its journal rejects startup events before TrackSession runs and
+	// makes the adapter close the newly resumed transport. Only deletion retires.
+	if result.Payload["deleted"] == result.SessionID || result.Payload["closed"] == true && kind == "pty" {
 		err = d.journal.ForgetSession(result.SessionID)
 	} else {
 		if current, exists := d.registry.Sessions()[result.SessionID]; exists {

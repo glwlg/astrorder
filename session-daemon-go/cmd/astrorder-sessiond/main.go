@@ -74,6 +74,7 @@ func main() {
 
 	finished := make(chan struct{})
 	defer close(finished)
+	go monitorMemory(path, finished)
 	shutdownDone := make(chan struct{})
 	go func() {
 		select {

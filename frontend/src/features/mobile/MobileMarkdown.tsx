@@ -1,6 +1,6 @@
-import { useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import ReactMarkdown from 'react-markdown'
+import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { isMobileLocalFilePath, mobileFileUrl, resolveMobileFilePath } from './mobileFilePath'
 
@@ -40,13 +40,15 @@ export function MobileMarkdown({ value, onFileClick, onImageClick, workspace, se
   sessionId?: string
   connectionId?: string | null
 }) {
-  return <div className="markdown-content"><ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml urlTransform={url => url} components={{
+  const callbacks = useRef({ onFileClick, onImageClick })
+  callbacks.current = { onFileClick, onImageClick }
+  const components = useMemo<Components>(() => ({
     pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
     a: ({ href, children }) => {
       const url = href || ''
       const isLocal = isMobileLocalFilePath(url)
       if (isLocal && onFileClick) {
-        return <a href={mobileFileUrl(url, workspace, sessionId, connectionId)} onClick={(e) => { e.preventDefault(); onFileClick(resolveMobileFilePath(url, workspace)) }}>{children}</a>
+        return <a href={mobileFileUrl(url, workspace, sessionId, connectionId)} onClick={(e) => { e.preventDefault(); callbacks.current.onFileClick?.(resolveMobileFilePath(url, workspace)) }}>{children}</a>
       }
       return /^(?:https?:\/\/|mailto:|\/api\/v1\/)/i.test(url)
         ? <a href={url} target="_blank" rel="noopener noreferrer">{children}</a>
@@ -58,10 +60,11 @@ export function MobileMarkdown({ value, onFileClick, onImageClick, workspace, se
         : src
       if (!url || !/^(?:https?:\/\/|\/api\/v1\/)/i.test(url)) return null
       if (onImageClick) {
-        return <button type="button" style={{ border: 'none', background: 'none', padding: 0, display: 'block' }} onClick={() => onImageClick(url)}><img src={url} alt={alt || ''} loading="lazy" style={{ maxWidth: '100%', borderRadius: 8, marginTop: 8, marginBottom: 8, display: 'block' }} /></button>
+        return <button type="button" style={{ border: 'none', background: 'none', padding: 0, display: 'block' }} onClick={() => callbacks.current.onImageClick?.(url)}><img src={url} alt={alt || ''} loading="lazy" style={{ maxWidth: '100%', borderRadius: 8, marginTop: 8, marginBottom: 8, display: 'block' }} /></button>
       }
       return <img src={url} alt={alt || ''} loading="lazy" style={{ maxWidth: '100%', borderRadius: 8, marginTop: 8, marginBottom: 8, display: 'block' }} />
     },
     table: ({ children }) => <div className="m-table-wrap"><table>{children}</table></div>,
-  }}>{value}</ReactMarkdown></div>
+  }), [workspace, sessionId, connectionId, Boolean(onFileClick), Boolean(onImageClick)])
+  return <div className="markdown-content"><ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml urlTransform={url => url} components={components}>{value}</ReactMarkdown></div>
 }

@@ -7,7 +7,7 @@ type Capability struct {
 	Input   map[string]any `json:"input"`
 }
 
-// Capabilities is the authoritative static list of all 40 Astrorder agent capabilities.
+// Capabilities is the authoritative static list of all 40 Astrorder agent capabilities (a subset is exported via MCP).
 var Capabilities = []Capability{
 	{
 		ID:      "catalog.list",
@@ -345,6 +345,36 @@ var Capabilities = []Capability{
 		Input:   map[string]any{},
 	},
 }
+
+// ExtendedCapabilities contains capabilities exposed via HTTP API but isolated from legacy MCP.
+var ExtendedCapabilities = []Capability{
+	{
+		ID:      "sessions.delegate",
+		Summary: "Delegate a sub-task by creating an independent native child session and dispatching the prompt instruction.",
+		Input: map[string]any{
+			"operation_id": "required unique client operation id for idempotency",
+			"agent_id":     "target agent id to delegate to",
+			"title":        "optional child session title",
+			"workspace":    "optional child session workspace path",
+			"model":        "optional model name override",
+			"provider":     "optional provider override",
+			"effort":       "optional reasoning effort override",
+			"prompt":       "instruction text to send to the child session",
+			"caller":       "required caller identity {agent_id, connection_id, profile_name, runtime, session_id}",
+		},
+	},
+	{
+		ID:      "sessions.operation",
+		Summary: "Query status and result of a delegation operation.",
+		Input: map[string]any{
+			"operation_id": "required operation id",
+			"caller":       "required caller identity {agent_id, connection_id, profile_name, runtime, session_id}",
+		},
+	},
+}
+
+// AllCapabilities contains all 42 agent capabilities (MCP, standard HTTP, and extended HTTP capabilities).
+var AllCapabilities = append(append([]Capability{}, Capabilities...), ExtendedCapabilities...)
 
 // KnownPlugins lists the 13 built-in plugins for plugins.list and plugins.configure.
 var KnownPlugins = []map[string]any{

@@ -34,6 +34,7 @@ type mockDaemonServer struct {
 	getHistoryPageCb func(*sessiondv1.HistoryPageRequest) (*sessiondv1.HistoryPageResponse, error)
 	sendCb           func(*sessiondv1.SendRequest) (*sessiondv1.CommandReceipt, error)
 	statusCb         func() (*sessiondv1.GetStatusResponse, error)
+	protocolMinor    uint32
 	closeCb          func(*sessiondv1.CloseSessionRequest) (*sessiondv1.CommandReceipt, error)
 	interruptCb      func(*sessiondv1.InterruptRequest) (*sessiondv1.CommandReceipt, error)
 	queryCb          func(*sessiondv1.NativeQueryRequest) (*sessiondv1.NativeQueryResponse, error)
@@ -90,7 +91,7 @@ func (m *mockDaemonServer) AttachSession(ctx context.Context, req *sessiondv1.At
 func (m *mockDaemonServer) GetCapabilities(ctx context.Context, req *sessiondv1.GetCapabilitiesRequest) (*sessiondv1.GetCapabilitiesResponse, error) {
 	return &sessiondv1.GetCapabilitiesResponse{
 		ProtocolMajor:            1,
-		ProtocolMinor:            0,
+		ProtocolMinor:            m.protocolMinor,
 		DaemonId:                 "test-daemon",
 		Services:                 []string{"astrorder.sessiond.v1.DaemonControl", "astrorder.sessiond.v1.SessionControl", "astrorder.sessiond.v1.RuntimeQuery", "astrorder.sessiond.v1.OperationQuery", "astrorder.sessiond.v1.ModelConfig", "astrorder.sessiond.v1.EventStream", "astrorder.sessiond.v1.TerminalStream", "astrorder.sessiond.v1.ConnectorIngress"},
 		CanonicalizationVersions: []sessiondv1.CanonicalizationVersion{sessiondv1.CanonicalizationVersion_CANONICALIZATION_VERSION_LEGACY_JSON_V1},

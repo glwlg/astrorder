@@ -67,15 +67,15 @@ func (h *Handler) DispatchQueue(ctx context.Context) error {
 	}
 	seen := map[string]bool{}
 	for _, command := range commands {
+		if command["state"] != "queued" || command["action"] != "enqueue" {
+			continue
+		}
 		aid, sid := stringValue(command, "agent_id"), stringValue(command, "session_id")
 		key := aid + "\x00" + sid
 		if seen[key] {
 			continue
 		}
 		seen[key] = true
-		if command["state"] != "queued" || command["action"] != "enqueue" {
-			continue
-		}
 		// Unknown outcomes also block the session, even though ActiveCommands omits them.
 		rows, err := h.store.ListCommands(ctx, aid, sid)
 		if err != nil {
@@ -84,7 +84,15 @@ func (h *Handler) DispatchQueue(ctx context.Context) error {
 		blocked := false
 		for _, row := range rows {
 			switch row["state"] {
-			case "received", "accepted", "running", "unknown":
+			case "received":
+				// A claimed request may still be crossing the dispatch boundary.
+				blocked = true
+			case "accepted":
+				// Control receipts acknowledge an operation, not a chat turn.
+				if row["action"] == "send" || row["action"] == "enqueue" {
+					blocked = true
+				}
+			case "running", "unknown":
 				blocked = true
 			}
 		}

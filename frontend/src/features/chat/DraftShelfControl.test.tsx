@@ -1,0 +1,127 @@
+import { MantineProvider } from '@mantine/core'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, expect, it, vi } from 'vitest'
+import { DraftShelfControl } from './DraftShelfControl'
+import { draftShelfStorage, draftStorage } from './draftStorage'
+import type { DraftState } from '../../domain/types'
+
+afterEach(() => { cleanup(); vi.restoreAllMocks() })
+it('keeps the shelf open after deletion and clears only after confirmation', async () => {
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ x: 10, y: 300, width: 32, height: 32, top: 300, left: 10, right: 42, bottom: 332, toJSON: () => ({}) })
+  const rows = ['第一份', '第二份'].map((text, i) => ({ id: String(i), savedAt: new Date().toISOString(), draft: { text, attachments: [] } }))
+  vi.spyOn(draftShelfStorage, 'load').mockResolvedValue(rows)
+  const save = vi.spyOn(draftShelfStorage, 'save').mockResolvedValue(undefined)
+  const replace = vi.fn(() => true)
+  render(<MantineProvider><DraftShelfControl scope="test" draft={{ text: '正在编辑', attachments: [] }} disabled={false} onReplace={replace} onError={vi.fn()} /></MantineProvider>)
+  const button = screen.getByRole('button', { name: '草稿箱' })
+  await waitFor(() => expect(button).toBeEnabled())
+  fireEvent.contextMenu(button)
+  fireEvent.click((await screen.findAllByRole('button', { name: '删除暂存草稿' }))[0])
+  fireEvent.click(screen.getByRole('button', { name: '确认删除', hidden: true }))
+  await waitFor(() => expect(save).toHaveBeenCalledWith('test', [rows[1]]))
+  expect(button).toHaveAttribute('aria-expanded', 'true')
+  fireEvent.click(screen.getByRole('button', { name: '清空草稿箱', hidden: true }))
+  expect(save).toHaveBeenCalledTimes(1)
+  fireEvent.click(screen.getByRole('button', { name: '取消清空', hidden: true }))
+  expect(save).toHaveBeenCalledTimes(1)
+  fireEvent.click(screen.getByRole('button', { name: '清空草稿箱', hidden: true }))
+  fireEvent.click(screen.getByRole('button', { name: '确认清空', hidden: true }))
+  await waitFor(() => expect(save).toHaveBeenLastCalledWith('test', []))
+  await waitFor(() => expect(button).toBeEnabled())
+  expect(button).toHaveAttribute('aria-expanded', 'true')
+  expect(screen.getByText('草稿箱为空')).toBeInTheDocument()
+  expect(button.querySelector('.tabler-icon-archive')).not.toBeNull()
+  expect(screen.queryByRole('button', { name: '清空草稿箱', hidden: true })).not.toBeInTheDocument()
+  expect(replace).not.toHaveBeenCalled()
+})
+it('moves a restored draft out of the shelf while saving occupied input', async () => {
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ x: 10, y: 300, width: 32, height: 32, top: 300, left: 10, right: 42, bottom: 332, toJSON: () => ({}) })
+  const original = { id: 'saved', savedAt: new Date().toISOString(), draft: { text: '要恢复的草稿', attachments: [] } }
+  vi.spyOn(draftShelfStorage, 'load').mockResolvedValue([original])
+  const save = vi.spyOn(draftShelfStorage, 'save').mockResolvedValue(undefined)
+  const replace = vi.fn(() => true)
+  const occupied = { text: '正在编辑', attachments: [] }
+  render(<MantineProvider><DraftShelfControl scope="test" draft={occupied} disabled={false} onReplace={replace} onError={vi.fn()} /></MantineProvider>)
+  const button = screen.getByRole('button', { name: '草稿箱' })
+  await waitFor(() => expect(button).toBeEnabled())
+  fireEvent.contextMenu(button)
+  fireEvent.doubleClick(await screen.findByText('要恢复的草稿'))
+  await waitFor(() => expect(replace).toHaveBeenCalledWith(occupied, original.draft))
+  await waitFor(() => expect(save).toHaveBeenLastCalledWith('test', [expect.objectContaining({ draft: occupied })]))
+  await waitFor(() => expect(button).toBeEnabled())
+  fireEvent.contextMenu(button)
+  expect(screen.queryByText('要恢复的草稿')).not.toBeInTheDocument()
+  expect(screen.getByText('正在编辑')).toBeInTheDocument()
+})
+it('uses one icon: left click stashes content, empty click opens, right click opens without stashing', async () => {
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ x: 10, y: 300, width: 32, height: 32, top: 300, left: 10, right: 42, bottom: 332, toJSON: () => ({}) })
+  vi.spyOn(draftShelfStorage, 'load').mockResolvedValue([])
+  const save = vi.spyOn(draftShelfStorage, 'save').mockResolvedValue(undefined)
+  const replace = vi.fn(() => true)
+  const empty: DraftState = { text: '', attachments: [], sessionRefs: [] }
+  const occupied = { ...empty, text: '保存这段' }
+  const wrap = (draft: DraftState) => <MantineProvider><DraftShelfControl scope="test" draft={draft} disabled={false} onReplace={replace} onError={vi.fn()} /></MantineProvider>
+  const view = render(wrap(empty))
+  const button = await screen.findByRole('button', { name: '草稿箱' })
+  await waitFor(() => expect(button).toBeEnabled())
+  expect(screen.getAllByRole('button')).toHaveLength(1)
+  expect(button.textContent).toBe('')
+  expect(button.querySelector('.tabler-icon-archive')).not.toBeNull()
+  fireEvent.click(button)
+  expect(button).toHaveAttribute('aria-expanded', 'true')
+  fireEvent.keyDown(document, { key: 'Escape' })
+  view.rerender(wrap(occupied))
+  fireEvent.contextMenu(button)
+  expect(button).toHaveAttribute('aria-expanded', 'true')
+  expect(save).not.toHaveBeenCalled()
+  fireEvent.keyDown(document, { key: 'Escape' })
+  fireEvent.click(button)
+  await waitFor(() => expect(save).toHaveBeenCalledOnce())
+  expect(replace).toHaveBeenCalledWith(occupied, empty)
+  expect(button.querySelector('.tabler-icon-archive-filled')).not.toBeNull()
+  expect(button.textContent).toBe('')
+  view.rerender(wrap(empty))
+  fireEvent.click(button)
+  expect(button).toHaveAttribute('aria-expanded', 'true')
+  expect(save).toHaveBeenCalledOnce()
+})
+
+it.each(['button', 'double click'])('removes the source after %s restore into empty input and persists the active draft first', async gesture => {
+  const row = { id: 'source', savedAt: new Date().toISOString(), draft: { text: '恢复内容', attachments: [] } }
+  vi.spyOn(draftShelfStorage, 'load').mockResolvedValue([row])
+  let persisted = false
+  vi.spyOn(draftStorage, 'save').mockImplementation(async () => { persisted = true })
+  const save = vi.spyOn(draftShelfStorage, 'save').mockImplementation(async (_, rows) => {
+    if (!rows.length) expect(persisted).toBe(true)
+  })
+  render(<MantineProvider><DraftShelfControl scope="empty" draft={{ text: '', attachments: [] }} disabled={false} onReplace={() => true} onError={vi.fn()} /></MantineProvider>)
+  const button = screen.getByRole('button', { name: '草稿箱' })
+  await waitFor(() => expect(button).toBeEnabled())
+  fireEvent.click(button)
+  if (gesture === 'button') fireEvent.click(await screen.findByRole('button', { name: '恢复草稿' }))
+  else fireEvent.doubleClick(await screen.findByText('恢复内容'))
+  await waitFor(() => expect(save).toHaveBeenLastCalledWith('empty', []))
+  await waitFor(() => expect(button).toBeEnabled())
+  fireEvent.click(button)
+  expect(screen.getByText('草稿箱为空')).toBeInTheDocument()
+})
+
+it.each(['shelf', 'active', 'changed', 'remove'])('retains the source when restore cannot finish: %s', async failure => {
+  const row = { id: 'source', savedAt: new Date().toISOString(), draft: { text: '保留内容', attachments: [] } }
+  vi.spyOn(draftShelfStorage, 'load').mockResolvedValue([row])
+  const save = vi.spyOn(draftShelfStorage, 'save').mockImplementation(async (_, rows) => {
+    if (failure === 'shelf' || failure === 'remove' && !rows.length) throw new Error('数据库不可用')
+  })
+  vi.spyOn(draftStorage, 'save').mockImplementation(async () => { if (failure === 'active') throw new Error('本地保存失败') })
+  const replace = vi.fn(() => failure !== 'changed')
+  const onError = vi.fn()
+  render(<MantineProvider><DraftShelfControl scope="failure" draft={{ text: '', attachments: [] }} disabled={false} onReplace={replace} onError={onError} /></MantineProvider>)
+  const button = screen.getByRole('button', { name: '草稿箱' })
+  await waitFor(() => expect(button).toBeEnabled())
+  fireEvent.click(button)
+  fireEvent.click(await screen.findByRole('button', { name: '恢复草稿' }))
+  await waitFor(() => expect(onError).toHaveBeenCalled())
+  expect(screen.getByText('保留内容')).toBeInTheDocument()
+  if (failure === 'shelf') expect(replace).not.toHaveBeenCalled()
+  if (failure === 'changed' || failure === 'active') expect(save).toHaveBeenCalledTimes(1)
+})

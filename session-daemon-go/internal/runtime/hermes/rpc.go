@@ -338,6 +338,27 @@ func (a *Adapter) handleGatewayEvent(params map[string]any) {
 		}
 	}
 	if canonical {
+		if eventType == "message.start" {
+			sid, _ := params["session_id"].(string)
+			a.mu.Lock()
+			id := a.handleToSession[sid]
+			if id == "" {
+				id = sid
+			}
+			s := a.sessions[id]
+			if s == nil {
+				a.mu.Unlock()
+				return
+			}
+			s.Status = "running"
+			a.mu.Unlock()
+			if a.config.Emit != nil {
+				if err := a.config.Emit(id, "session.active", map[string]any{"agent_id": a.config.AgentID, "session_id": id}, "running"); err != nil {
+					a.failCloseSession(id, err)
+				}
+			}
+			return
+		}
 		if eventType == "approval.request" {
 			payload, _ := params["payload"].(map[string]any)
 			data := make(map[string]any, len(payload)+2)
@@ -472,11 +493,28 @@ func (a *Adapter) handleGatewayEvent(params map[string]any) {
 			a.mu.Unlock()
 			return
 		}
-		if session != nil {
-			session.Status = "idle"
+		matches := true
+		if a.canonical && session.CommandID != "" {
+			payload, _ := params["payload"].(map[string]any)
+			turn, _ := payload["persisted_turn"].(map[string]any)
+			submission, _ := turn["submission_id"].(string)
+			admission, _ := payload["admission_id"].(string)
+			matches = session.SubmissionID != "" && submission == session.SubmissionID || session.AdmissionID != "" && admission == session.AdmissionID
+			if !matches && admission != "" && session.completions != nil && len(session.completions) < 16 {
+				// A terminal error can have no persisted rows. Hold its exact
+				// admission until prompt.submit returns the matching receipt.
+				session.completions[admission] = params
+			}
 		}
-		commandID := session.CommandID
-		session.CommandID = ""
+		commandID := ""
+		if matches {
+			session.Status = "idle"
+			commandID = session.CommandID
+			session.CommandID = ""
+			session.SubmissionID = ""
+			session.AdmissionID = ""
+		}
+		currentStatus := session.Status
 		emit := a.config.Emit
 		agentID := a.config.AgentID
 		a.mu.Unlock()
@@ -493,7 +531,7 @@ func (a *Adapter) handleGatewayEvent(params map[string]any) {
 			}
 			payload["agent_id"], payload["session_id"] = agentID, durableID
 			if payload["usage"] != nil {
-				if err := emit(durableID, "hermes.notification", map[string]any{"agent_id": agentID, "session_id": durableID, "frame": map[string]any{"type": "session.usage", "payload": payload}}, "idle"); err != nil {
+				if err := emit(durableID, "hermes.notification", map[string]any{"agent_id": agentID, "session_id": durableID, "frame": map[string]any{"type": "session.usage", "payload": payload}}, currentStatus); err != nil {
 					a.failCloseSession(durableID, err)
 					return
 				}
@@ -502,7 +540,7 @@ func (a *Adapter) handleGatewayEvent(params map[string]any) {
 			if commandID != "" {
 				payload["command_id"] = commandID
 			}
-			if err := emit(durableID, "hermes.command_complete", payload, "idle"); err != nil {
+			if err := emit(durableID, "hermes.command_complete", payload, currentStatus); err != nil {
 				a.failCloseSession(durableID, err)
 			}
 		}

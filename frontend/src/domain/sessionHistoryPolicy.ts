@@ -1,5 +1,5 @@
 export const INITIAL_HISTORY_LIMIT = 50
-export const OLDER_HISTORY_LIMIT = 30
+export const OLDER_HISTORY_LIMIT = 100
 export const MAX_AUTO_BACKFILL_PAGES = 4
 export const MAX_AUTO_BACKFILL_ITEMS = 200
 

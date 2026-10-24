@@ -161,7 +161,7 @@ try {
     Invoke-Native 'Build astrorder-app.exe' $appDir $go @('build', '-trimpath', '-o', (Join-Path $partialDir 'astrorder-app.exe'), './cmd/astrorder-app')
     Invoke-Native 'Build astrorderctl.exe' $appDir $go @('build', '-trimpath', '-o', (Join-Path $partialDir 'astrorderctl.exe'), './cmd/astrorderctl')
     Invoke-Native 'Build astrorder-agent.exe' $appDir $go @('build', '-trimpath', '-o', (Join-Path $partialDir 'astrorder-agent.exe'), './cmd/astrorder-agent')
-    Invoke-Native 'Build astrorder-mcp.exe' $appDir $go @('build', '-trimpath', '-o', (Join-Path $partialDir 'astrorder-mcp.exe'), './cmd/astrorder-mcp')
+
     Invoke-Native 'Build astrorder-helper.exe' $appDir $go @('build', '-trimpath', '-o', (Join-Path $partialDir 'astrorder-helper.exe'), './cmd/astrorder-helper')
     Invoke-Native 'Build astrorder-model-helper.exe' $daemonDir $go @('build', '-trimpath', '-o', (Join-Path $partialDir 'astrorder-model-helper.exe'), './cmd/astrorder-model-helper')
     Invoke-Native 'Build astrorder-memory-helper.exe' $appDir $go @('build', '-trimpath', '-o', (Join-Path $partialDir 'astrorder-memory-helper.exe'), './cmd/astrorder-memory-helper')
@@ -184,6 +184,7 @@ try {
         $env:CGO_ENABLED = '0'
         try {
             Invoke-Native "Build target helper for $helperPlatform" $appDir $go @('build', '-trimpath', '-o', (Join-Path $helperDir 'astrorder-helper'), './cmd/astrorder-helper')
+            Invoke-Native "Build session CLI for $helperPlatform" $appDir $go @('build', '-trimpath', '-o', (Join-Path $helperDir 'astrorder-agent'), './cmd/astrorder-agent')
         }
         finally {
             Remove-Item Env:GOOS, Env:GOARCH, Env:CGO_ENABLED -ErrorAction SilentlyContinue
@@ -197,14 +198,16 @@ try {
         'astrorder-app.exe',
         'astrorderctl.exe',
         'astrorder-agent.exe',
-        'astrorder-mcp.exe',
+
         'astrorder-helper.exe',
         'astrorder-model-helper.exe',
         'astrorder-memory-helper.exe',
         'helpers/linux-amd64/astrorder-model-helper',
         'helpers/linux-arm64/astrorder-model-helper',
         'helpers/linux-amd64/astrorder-helper',
-        'helpers/linux-arm64/astrorder-helper'
+        'helpers/linux-arm64/astrorder-helper',
+        'helpers/linux-amd64/astrorder-agent',
+        'helpers/linux-arm64/astrorder-agent'
     )
     $manifestLines = foreach ($name in $artifactNames) {
         $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $partialDir $name)).Hash.ToLowerInvariant()

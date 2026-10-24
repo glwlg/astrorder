@@ -75,6 +75,14 @@ describe('MonitorPage', () => {
     expect(card.style.getPropertyValue('--spotlight-y')).toBe('')
   })
 
+  it('shows only a lightning bolt for a running session', () => {
+    renderPage()
+    const card = screen.getByTestId('monitor-card-agent-1-session-1')
+    const indicator = within(card).getByLabelText('正在运行')
+    expect(indicator.querySelector('.tabler-icon-bolt')).toBeInTheDocument()
+    expect(indicator.querySelector('.monitor-pulse-ring')).toBeNull()
+  })
+
   it('defaults to active sessions and persists manually added idle sessions', async () => {
     renderPage()
 

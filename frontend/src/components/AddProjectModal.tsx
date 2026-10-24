@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActionIcon,
   Badge,
@@ -27,9 +27,9 @@ import {
 } from '@tabler/icons-react'
 import { useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
-import { api } from '../api/client'
+import { api, authenticatedApiFetch } from '../api/client'
 import type { Agent, SshConnection } from '../domain/types'
-// useAstrorderStore
+const emptyAgents: Record<string, Agent> = {}
 
 interface DirectoryItem {
   name: string
@@ -48,7 +48,7 @@ interface TreeResponse {
 export function AddProjectModal({
   opened,
   onClose,
-  agents = {},
+  agents = emptyAgents,
 }: {
   opened: boolean
   onClose: () => void
@@ -78,6 +78,8 @@ export function AddProjectModal({
   const [dirItems, setDirItems] = useState<DirectoryItem[]>([])
   const [loadingTree, setLoadingTree] = useState(false)
   const [treeError, setTreeError] = useState<string | null>(null)
+  const treeRequest = useRef(0)
+  const treeAbort = useRef<AbortController | null>(null)
 
   // 项目属性
   const [projectName, setProjectName] = useState('')
@@ -158,32 +160,31 @@ export function AddProjectModal({
 
   // 2. 加载选定服务器下的目录树
   const fetchDirectory = useCallback(async (pathQuery: string) => {
+    const requestId = ++treeRequest.current
+    treeAbort.current?.abort()
+    const controller = new AbortController()
+    treeAbort.current = controller
     setLoadingTree(true)
     setTreeError(null)
     try {
-      let localToken: string | null = null
-      try {
-        if (typeof localStorage !== 'undefined') {
-          localToken = localStorage.getItem('astrorder:token')
-        }
-      } catch {}
-      const headers: Record<string, string> = {}
-      if (localToken) headers['Authorization'] = `Bearer ${localToken}`
-
       const params = new URLSearchParams()
       if (pathQuery) params.set('path', pathQuery)
       if (connectionId && connectionId !== 'local') params.set('connection_id', connectionId)
       params.set('depth', '1')
 
-      const res = await fetch(`/api/v1/files/tree?${params.toString()}`, { headers })
-      if (!res.ok) throw new Error(`加载目录树失败 (${res.status})`)
+      const res = await authenticatedApiFetch(`/api/v1/files/tree?${params.toString()}`, { signal: controller.signal })
+      if (!res.ok) {
+        const body = await res.json().catch(() => null) as { detail?: string } | null
+        throw new Error(`加载目录树失败 (${res.status})${body?.detail ? `：${body.detail}` : ''}`)
+      }
       const data: TreeResponse = await res.json()
+      if (requestId !== treeRequest.current || controller.signal.aborted) return
       const dirs = (data.items || []).filter((item) => item.is_dir)
       setDirItems(dirs)
       setCurrentPath(data.root)
       setPathInput(data.root)
       setParentPath(data.parent || null)
-      if (data.drives && data.drives.length > 0) setDrives(data.drives)
+      setDrives(data.drives || [])
       setSelectedPath((prev) => {
         const next = (!prev || pathQuery === data.root) ? data.root : prev
         const norm = next.replace(/\\/g, '/').replace(/\/+$/, '')
@@ -192,9 +193,10 @@ export function AddProjectModal({
         return next
       })
     } catch (err: unknown) {
+      if (requestId !== treeRequest.current || controller.signal.aborted) return
       setTreeError(err instanceof Error ? err.message : '加载目录树失败')
     } finally {
-      setLoadingTree(false)
+      if (requestId === treeRequest.current) setLoadingTree(false)
     }
   }, [connectionId])
 
@@ -205,8 +207,16 @@ export function AddProjectModal({
     setPathInput('')
     setSelectedPath('')
     setParentPath(null)
+    setDrives([])
     setDirItems([])
+    setProjectName('')
+    setCreatingDir(false)
+    setNewDirName('')
     void fetchDirectory('')
+    return () => {
+      ++treeRequest.current
+      treeAbort.current?.abort()
+    }
   }, [connectionId, opened, fetchDirectory])
 
   // 选择文件夹

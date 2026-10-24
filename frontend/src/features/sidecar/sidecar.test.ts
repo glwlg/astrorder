@@ -25,8 +25,8 @@ describe('Artifact & Drawio Viewer Integration', () => {
     expect(artifact.readUrl).toContain('path=')
   })
 
-  it('should match drawio viewer with high score for .drawio file', () => {
-    const artifact = resolveArtifactFromPath('workflow.drawio.xml', mockSession)
+  it.each(['workflow.drawio.xml', 'workflow.drawio.svg'])('should match drawio viewer with high score for %s', (name) => {
+    const artifact = resolveArtifactFromPath(name, mockSession)
     const viewer = artifactViewerRegistry.findViewer(artifact)
 
     expect(viewer).not.toBeNull()
@@ -34,10 +34,24 @@ describe('Artifact & Drawio Viewer Integration', () => {
     expect(viewer?.capabilities.canEdit).toBe(true)
   })
 
-  it('should return null for unmatched arbitrary extension file', () => {
-    const artifact = resolveArtifactFromPath('C:/projects/astrorder/data.unknown_bin_ext', mockSession)
+  it.each(['go.mod', 'go.sum', 'Dockerfile', 'Makefile', 'LICENSE', '.npmrc', 'config.custom', 'data.unknown_bin_ext'])('opens %s with the text editor when no dedicated viewer matches', (name) => {
+    const artifact = resolveArtifactFromPath(`C:/projects/astrorder/${name}`, mockSession)
     const viewer = artifactViewerRegistry.findViewer(artifact)
 
-    expect(viewer).toBeNull()
+    expect(viewer?.id).toBe('monaco-viewer')
+  })
+
+  it.each(['app.exe', 'archive.zip', 'library.dll', 'module.wasm'])('does not open %s in the text editor', (name) => {
+    expect(artifactViewerRegistry.findViewer(resolveArtifactFromPath(name, mockSession))).toBeNull()
+  })
+
+  it.each(['creatures.png', 'photo.JPG', 'favicon.svg', 'animation.gif', 'picture.avif'])('opens %s in the image viewer with its remote context', (name) => {
+    const artifact = resolveArtifactFromPath(`/home/luwei/${name}`, { ...mockSession, workspace: '/home/luwei', connection_id: 'ssh-images' })
+    expect(artifactViewerRegistry.findViewer(artifact)?.id).toBe('image-viewer')
+    expect(artifact.writable).toBe(false)
+    const url = new URL(artifact.readUrl, 'http://localhost')
+    expect(url.searchParams.get('session_id')).toBe(mockSession.id)
+    expect(url.searchParams.get('connection_id')).toBe('ssh-images')
+    expect(url.searchParams.get('path')).toBe(`/home/luwei/${name}`)
   })
 })

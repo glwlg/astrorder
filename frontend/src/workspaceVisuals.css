@@ -872,7 +872,7 @@ html.is-desktop-app #root {
   border: 1px solid var(--astr-border, rgba(255, 255, 255, 0.12)) !important;
 }
 .monitor-stat-dot.is-running {
-  background: var(--astr-text);
+  background: var(--astr-running-gold);
   box-shadow: none;
 }
 .monitor-stat-dot.is-waiting {

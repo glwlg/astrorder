@@ -70,6 +70,11 @@ func (s *runtimeQueryService) GetHistoryPage(ctx context.Context, request *sessi
 		return nil, status.Error(codes.Unavailable, "native history continuation has no cursor")
 	}
 	if proto.Size(response) > MaxBusinessBytes {
+		// Items and continuation above are lossless. The optional native page
+		// repeats those rows and must not make an otherwise valid page unreadable.
+		response.Native = nil
+	}
+	if proto.Size(response) > MaxBusinessBytes {
 		return nil, status.Error(codes.ResourceExhausted, "typed history exceeds business limit")
 	}
 	return response, nil

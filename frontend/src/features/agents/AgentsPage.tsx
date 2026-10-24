@@ -1,4 +1,4 @@
-import { Alert, Badge, Button, Checkbox, Group, Modal, Paper, SimpleGrid, Stack, Switch, Tabs, Text, TextInput, Title } from '@mantine/core'
+import { Alert, Badge, Button, Checkbox, Group, Modal, Paper, SimpleGrid, Stack, Tabs, Text, TextInput, Title } from '@mantine/core'
 import { IconRefresh, IconTerminal } from '@tabler/icons-react'
 import { useEffect, useRef, useState } from 'react'
 import { useMediaQuery } from '@mantine/hooks'
@@ -88,32 +88,6 @@ function remoteStateColor(state: SshConnection['state']): string {
 function AgentCard({ agent }: { agent: Agent }) {
   const brand = agentKindLabel(agent.kind)
   const name = agent.name.includes(brand) ? agent.name : `${agent.name} · ${brand}`
-  const [mcpEnabled, setMcpEnabled] = useState(true)
-  const [loadingMcp, setLoadingMcp] = useState(false)
-
-  useEffect(() => {
-    let active = true
-    void api.getAgentMcpStatus(agent.id).then((res) => {
-      if (active) setMcpEnabled(res.enabled)
-    }).catch(() => {})
-    return () => { active = false }
-  }, [agent.id])
-
-  const handleToggleMcp = async (val: boolean) => {
-    setLoadingMcp(true)
-    try {
-      await api.toggleAgentMcpStatus(agent.id, val)
-      setMcpEnabled(val)
-      notifications.show({
-        color: val ? 'teal' : 'gray',
-        message: `已${val ? '允许' : '禁止'} ${agent.name} 调度星序平台 (MCP)`,
-      })
-    } catch (e: any) {
-      notifications.show({ color: 'red', message: e.message || '修改 MCP 权限失败' })
-    } finally {
-      setLoadingMcp(false)
-    }
-  }
 
   return (
       <div className="agent-configuration">
@@ -125,24 +99,7 @@ function AgentCard({ agent }: { agent: Agent }) {
         <Tabs defaultValue="access" keepMounted={false} className="agent-configuration-tabs">
           <Tabs.List><Tabs.Tab value="access">授权</Tabs.Tab><Tabs.Tab value="capabilities">能力</Tabs.Tab><Tabs.Tab value="maintenance">维护</Tabs.Tab></Tabs.List>
           <Tabs.Panel value="access" pt="lg">
-          <Group justify="space-between" align="center">
-            <div>
-              <Text size="xs" fw={700}>
-                星序 MCP 调度授权
-              </Text>
-              <Text size="11px" c="dimmed">
-                {mcpEnabled ? '允许此 Agent 发现并调用星序平台能力与跨机协同' : '已禁止此 Agent 调度星序 MCP 工具链'}
-              </Text>
-            </div>
-            <Switch
-              checked={mcpEnabled}
-              onChange={(e) => void handleToggleMcp(e.currentTarget.checked)}
-              disabled={loadingMcp}
-              color="indigo"
-              size="xs"
-              aria-label="切换星序 MCP 权限"
-            />
-          </Group>
+          <SessionCLIConfiguration agent={agent} />
           </Tabs.Panel>
           <Tabs.Panel value="capabilities" pt="lg">
           <Text size="xs" fw={600} c="dimmed" mb={8} style={{ letterSpacing: '0.02em' }}>
@@ -172,6 +129,39 @@ function AgentCard({ agent }: { agent: Agent }) {
       </Stack>
     </div>
   )
+}
+
+function SessionCLIConfiguration({ agent }: { agent: Agent }) {
+  const supported = ['codex', 'hermes', 'grok'].includes(agent.kind)
+  const [status, setStatus] = useState<{ ready: boolean; message: string; home: string } | null>(null)
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(supported)
+  const [installing, setInstalling] = useState(false)
+  useEffect(() => {
+    if (!supported) return
+    let active = true
+    void api.getAgentSessionCLI(agent.id).then(result => { if (active) setStatus(result) })
+      .catch((failure: Error) => { if (active) setError(failure.message || '读取 CLI 配置失败') })
+      .finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
+  }, [agent.id, supported])
+  const configure = async () => {
+    setInstalling(true)
+    setError('')
+    try { setStatus(await api.configureAgentSessionCLI(agent.id)) }
+    catch (failure) { setError(failure instanceof Error ? failure.message : '配置会话 CLI 失败') }
+    finally { setInstalling(false) }
+  }
+  return <Stack gap="sm">
+    <Text size="xs" fw={700}>星序 CLI 与技能</Text>
+    <Text size="xs" c="dimmed">配置后可在能力中心分发星序技能。身份使用当前 Agent，调用时自动识别当前会话。</Text>
+    {supported ? <>
+      <Text size="xs">{loading ? '正在检查配置…' : status?.message}</Text>
+      {status?.home && <Text size="xs" c="dimmed">安装目录：{status.home}</Text>}
+      {error && <Alert title="CLI 配置失败" color="red">{error}</Alert>}
+      <Group><Button size="xs" variant="default" disabled={loading} loading={installing} onClick={() => void configure()}>{status?.ready ? '重新配置' : '配置会话 CLI'}</Button></Group>
+    </> : <Text size="xs" c="dimmed">此 Agent 暂不支持星序会话 CLI。</Text>}
+  </Stack>
 }
 
 function AgentUpgradeAction({ agent }: { agent: Agent }) {

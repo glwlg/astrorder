@@ -43,6 +43,8 @@ type route struct {
 var routes = []route{
 	{http.MethodGet, capPrefix + "targets"},
 	{http.MethodGet, capPrefix + "summary"},
+	{http.MethodGet, capPrefix + "session-cli"},
+	{http.MethodPost, capPrefix + "session-cli"},
 	{http.MethodPost, capPrefix + "mcp/update"},
 	{http.MethodPost, capPrefix + "mcp/ping"},
 	{http.MethodPost, capPrefix + "plugins/update"},
@@ -119,6 +121,24 @@ func invalid(w http.ResponseWriter) {
 
 func (h *handler) capabilities(ctx context.Context, w http.ResponseWriter, r *http.Request, tail string) {
 	switch tail {
+	case "session-cli":
+		id := r.URL.Query().Get("agent_id")
+		if r.Method == http.MethodPost {
+			var body struct {
+				AgentID string `json:"agent_id"`
+			}
+			if decode(r, &body) != nil {
+				invalid(w)
+				return
+			}
+			id = body.AgentID
+		}
+		if strings.TrimSpace(id) == "" {
+			invalid(w)
+			return
+		}
+		result, err := h.svc.SessionCLI(ctx, id, r.Method == http.MethodPost)
+		reply(w, result, err)
 	case "targets":
 		targets, err := h.svc.TargetList(ctx)
 		if err != nil {

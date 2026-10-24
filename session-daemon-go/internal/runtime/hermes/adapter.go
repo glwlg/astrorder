@@ -2,6 +2,7 @@ package hermes
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
@@ -32,6 +33,9 @@ type Config struct {
 type SessionState struct {
 	SessionID    string
 	CommandID    string
+	SubmissionID string
+	AdmissionID  string
+	completions  map[string]map[string]any
 	sending      bool
 	Handle       string
 	Status       string
@@ -569,7 +573,7 @@ func (a *Adapter) handleSend(ctx context.Context, session *SessionState, req cor
 		}
 	}
 
-	text, err = a.attachInputs(ctx, handle, text, attachments)
+	text, stagedImages, err := a.attachInputs(ctx, handle, text, attachments)
 	if err != nil {
 		return core.Result{}, err
 	}
@@ -579,8 +583,22 @@ func (a *Adapter) handleSend(ctx context.Context, session *SessionState, req cor
 		"text":       text,
 		"surface":    "hud",
 	}
+	if len(stagedImages) > 0 {
+		submitParams["attachments"] = stagedImages
+	}
 	a.mu.Lock()
 	session.CommandID, _ = req.Fields["command_id"].(string)
+	if a.canonical {
+		// The owner echoes this admission identity in persisted_turn, including
+		// when completion races the prompt.submit response.
+		session.SubmissionID = session.CommandID
+		if session.SubmissionID == "" {
+			session.SubmissionID = rand.Text()
+		}
+		session.AdmissionID = ""
+		session.completions = make(map[string]map[string]any)
+		submitParams["submission_id"] = session.SubmissionID
+	}
 	session.Status = "running"
 	a.mu.Unlock()
 	if a.config.Emit != nil {
@@ -589,7 +607,7 @@ func (a *Adapter) handleSend(ctx context.Context, session *SessionState, req cor
 			return core.Result{}, err
 		}
 	}
-	_, err = a.rpc(ctx, "prompt.submit", submitParams)
+	response, err := a.rpc(ctx, "prompt.submit", submitParams)
 	if err != nil {
 		a.mu.Lock()
 		if !a.failed && !a.closed {
@@ -605,6 +623,17 @@ func (a *Adapter) handleSend(ctx context.Context, session *SessionState, req cor
 		return core.Result{}, fmt.Errorf("prompt.submit failed: %w", err)
 	}
 
+	a.mu.Lock()
+	var completion map[string]any
+	if a.canonical && session.CommandID != "" {
+		session.AdmissionID, _ = response["admission_id"].(string)
+		completion = session.completions[session.AdmissionID]
+	}
+	session.completions = nil
+	a.mu.Unlock()
+	if completion != nil {
+		a.handleGatewayEvent(completion)
+	}
 	a.mu.RLock()
 	status := session.Status
 	a.mu.RUnlock()

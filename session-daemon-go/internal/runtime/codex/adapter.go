@@ -557,6 +557,9 @@ func (a *Adapter) Command(ctx context.Context, r core.Request) (core.Result, err
 	case "session.disconnect":
 		return core.Result{SessionID: r.SessionID, Status: rt.Status(), Payload: map[string]any{"disconnected": r.SessionID}}, nil
 	case "session.close":
+		if err := a.confirmSleepSafe(ctx, rt, r.SessionID); err != nil {
+			return core.Result{}, err
+		}
 		s.mu.Lock()
 		if s.mutating || s.inputUnconfirmed || rt.Status() != "idle" {
 			s.mu.Unlock()
@@ -565,7 +568,9 @@ func (a *Adapter) Command(ctx context.Context, r core.Request) (core.Result, err
 		s.mutating = true
 		s.mu.Unlock()
 		defer func() { s.mu.Lock(); s.mutating = false; s.mu.Unlock() }()
-		rt.Close()
+		if err := rt.closeIdleTransport(ctx); err != nil {
+			return core.Result{}, err
+		}
 		rt.mu.Lock()
 		done, confirmed := rt.processDone, rt.exitConfirmed
 		rt.mu.Unlock()

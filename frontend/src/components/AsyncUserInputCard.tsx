@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { IconMessageQuestion } from '@tabler/icons-react'
 import { api } from '../api/client'
 import type { Command, CommandPayload, Message } from '../domain/types'
 import { useAstrorderStore } from '../state/store'
@@ -16,6 +17,7 @@ export function hasLaterNativeInput(messages: Message[], index: number): boolean
 export function AsyncUserInputCard({ message, commands = [], continued = false, readOnly = false }: { message: Message; commands?: Command[]; continued?: boolean; readOnly?: boolean }) {
  const questions = message.questions || []
  const [values, setValues] = useState<Record<number, string>>({})
+ const [customValues, setCustomValues] = useState<Record<number, string>>({})
  const [busy, setBusy] = useState(false)
  const [error, setError] = useState('')
  const [receipt, setReceipt] = useState<Command | null>(null)
@@ -56,16 +58,16 @@ export function AsyncUserInputCard({ message, commands = [], continued = false, 
   } catch (cause) { setError(cause instanceof Error ? cause.message : '回答发送失败') }
   finally { setBusy(false) }
  }
- return <section className="approval-card user-input-card" aria-label="会话内异步询问" style={{ padding: 14, border: '1px solid var(--mantine-color-default-border, #ddd)', borderRadius: 10 }}>
-  <strong>Codex 向你提问</strong>
-  {continued || sent ? <><p role="status">{sent ? '回答已接收。' : '已有后续输入，此问题已结束。'}</p>{questions.map((q, i) => <p key={i}>{q.title}</p>)}</> : <form onSubmit={e => { e.preventDefault(); void submit() }}>
-   {questions.map((q, i) => <fieldset key={i} disabled={busy || uncertain || readOnly} style={{ border: 0, padding: '12px 0', margin: 0, minWidth: 0 }}>
-    <legend style={{ fontWeight: 600 }}>{q.title}</legend>
-    {q.options?.map(option => <label key={option} style={{ display: 'block', padding: '6px 0', overflowWrap: 'anywhere' }}><input type="radio" name={`${message.id}:${i}`} checked={values[i] === option} onChange={() => setValues(v => ({ ...v, [i]: option }))} /> {option}</label>)}
-    <label style={{ display: 'block', marginTop: 8 }}>自行填写<input aria-label={`${q.title} 自行填写`} value={values[i] || ''} onChange={e => setValues(v => ({ ...v, [i]: e.target.value }))} style={{ display: 'block', width: '100%', boxSizing: 'border-box', padding: 10, color: 'inherit', background: 'transparent', border: '1px solid #aaa', borderRadius: 6 }} /></label>
+ return <section className="user-input-card" aria-label="会话内异步询问">
+  <div className="user-input-heading"><IconMessageQuestion size={16} aria-hidden /><span>Codex 向你提问</span></div>
+  {continued || sent ? <><p className="user-input-status" role="status">{sent ? '回答已接收。' : '已有后续输入，此问题已结束。'}</p>{questions.map((q, i) => <p className="user-input-summary" key={i}>{q.title}</p>)}</> : <form onSubmit={e => { e.preventDefault(); void submit() }}>
+   {questions.map((q, i) => <fieldset className="user-input-field" key={i} disabled={busy || uncertain || readOnly}>
+    <legend>{q.title}</legend>
+    <div className="user-input-options">{q.options?.map(option => <label className="user-input-option" key={option}><input type="radio" name={`${message.id}:${i}`} checked={values[i] === option} onChange={() => { setValues(v => ({ ...v, [i]: option })); setCustomValues(v => ({ ...v, [i]: '' })) }} /><span>{option}</span></label>)}</div>
+    <label className="user-input-custom"><span>自行填写</span><input aria-label={`${q.title} 自行填写`} placeholder={q.options?.length ? '也可以输入其他回答…' : '输入你的回答…'} value={customValues[i] || ''} onChange={e => { setCustomValues(v => ({ ...v, [i]: e.target.value })); setValues(v => ({ ...v, [i]: e.target.value })) }} /></label>
    </fieldset>)}
-   {error && <p role="alert">{error}</p>}
-   <button type="submit" disabled={readOnly || busy || !valid && !uncertain}>{busy ? '发送中…' : uncertain ? '检查发送结果' : '发送回答'}</button>
+   {error && <p className="user-input-error" role="alert">{error}</p>}
+   <div className="user-input-actions"><button className="user-input-submit" type="submit" disabled={readOnly || busy || !valid && !uncertain}>{busy ? '发送中…' : uncertain ? '检查发送结果' : '发送回答'}</button></div>
   </form>}
  </section>
 }

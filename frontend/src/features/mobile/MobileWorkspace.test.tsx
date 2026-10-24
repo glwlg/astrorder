@@ -4,13 +4,13 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { api } from '../../api/client'
+import { api, ApiError } from '../../api/client'
 import { selectMessages, useAstrorderStore } from '../../state/store'
 import { MobileWorkspace, cleanServerName, displayShortModel } from './MobileWorkspace'
 import type { OutboxEntry } from './mobileOutbox'
 import { mobileOutboxStorage, directOutboxStorage } from './mobileOutboxStorage'
 import { scopeKey } from '../../domain/semantics'
-import { draftStorage } from '../chat/draftStorage'
+import { draftStorage, draftShelfStorage } from '../chat/draftStorage'
 import * as localVoiceStream from '../chat/localVoiceStream'
 
 vi.mock('./serverOutbox', async importOriginal => {
@@ -53,10 +53,39 @@ beforeEach(() => {
   vi.spyOn(draftStorage, 'load').mockResolvedValue(undefined)
   vi.spyOn(draftStorage, 'save').mockResolvedValue(undefined)
   vi.spyOn(draftStorage, 'remove').mockResolvedValue(undefined)
+  vi.spyOn(draftShelfStorage, 'load').mockResolvedValue([])
+  vi.spyOn(draftShelfStorage, 'save').mockResolvedValue(undefined)
   useAstrorderStore.getState().resetRuntime()
   useAstrorderStore.getState().hydrateBootstrap({ protocol_version: 1, cursor: 0, agents: [{ id: 'inert', kind: 'hermes', name: '协议测试', status: 'ready', capabilities: ['chat', 'stop', 'attachments'], limitation: null }], sessions: [session] })
 })
 describe('independent mobile composer', () => {
+  it('returns an explicit busy refusal to the persisted mobile composer', async () => {
+    vi.stubGlobal('crypto', { getRandomValues: globalThis.crypto.getRandomValues.bind(globalThis.crypto) })
+    useAstrorderStore.getState().setConnection('connected')
+    vi.spyOn(api, 'createCommand').mockRejectedValue(new ApiError(500, 'daemon command was rejected before a confirmed receipt: config.set model failed: RPC error 4001: session_busy', 'command_rejected'))
+    mount()
+    await screen.findByText('bound-model')
+    fireEvent.change(screen.getByLabelText('消息内容'), { target: { value: '手机未发出的消息' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送' }))
+    await waitFor(() => expect(screen.getByLabelText('消息内容')).toHaveValue('手机未发出的消息'))
+    await waitFor(() => expect(draftStorage.save).toHaveBeenCalledWith('inert::native-test', expect.objectContaining({ text: '手机未发出的消息' })))
+    expect(memory.directRows).toEqual([])
+  })
+  it('stashes text and screenshots without sending and restores into an empty input', async () => {
+    mount()
+    await screen.findByText('bound-model')
+    fireEvent.change(screen.getByLabelText('消息内容'), { target: { value: '手机草稿' } })
+    const file = new File(['png'], 'screen.png', { type: 'image/png' })
+    fireEvent.paste(screen.getByLabelText('消息内容'), { clipboardData: { files: [file], items: [] } })
+    fireEvent.click(screen.getByRole('button', { name: '草稿箱' }))
+    await waitFor(() => expect(screen.getByLabelText('消息内容')).toHaveValue(''))
+    expect(draftShelfStorage.save).toHaveBeenCalledWith('inert::native-test', [expect.objectContaining({ draft: expect.objectContaining({ text: '手机草稿', attachments: [expect.objectContaining({ file })] }) })])
+    useAstrorderStore.setState({ drafts: {} })
+    fireEvent.click(screen.getByRole('button', { name: '草稿箱' }))
+    fireEvent.click(await screen.findByRole('button', { name: '恢复草稿' }))
+    await waitFor(() => expect(screen.getByLabelText('消息内容')).toHaveValue('手机草稿'))
+    expect(api.createCommand).not.toHaveBeenCalled()
+  })
   it.each(['scheduled', 'handoff'] as const)('distinguishes a %s relationship in the mobile conversation header', async relation => {
     const child = { ...session, id: 'child', title: '协作目标', handoff_from_agent_id: session.agent_id, handoff_from_session_id: session.id,
       parent_agent_id: session.agent_id, parent_session_id: session.id, handoff_context: relation === 'handoff' ? '交接摘要' : null }

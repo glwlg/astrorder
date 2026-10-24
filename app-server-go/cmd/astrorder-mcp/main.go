@@ -1,27 +1,19 @@
 package main
 
 import (
-	"context"
 	"fmt"
+	"io"
 	"os"
-	"os/signal"
-	"syscall"
-
-	"astrorder.dev/app-server/internal/agentremote"
 )
 
 func main() {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+	os.Exit(run(os.Stderr))
+}
 
-	cfg, err := agentremote.ResolveConfig(os.LookupEnv, os.ReadFile)
-	var client *agentremote.Client
-	if err == nil {
-		client, _ = agentremote.NewClient(cfg)
-	}
-
-	if err := agentremote.RunStdio(ctx, os.Stdin, os.Stdout, client); err != nil {
-		fmt.Fprintf(os.Stderr, "astrorder-mcp: %v\n", err)
-		os.Exit(1)
-	}
+// run reports the retirement without reading configuration, credentials, or
+// the network. The old MCP stdio executable must fail clearly and point users
+// at the supported CLI and HTTP surfaces.
+func run(stderr io.Writer) int {
+	fmt.Fprintln(stderr, "astrorder-mcp: retired; use the astrorder-agent CLI or the HTTP Agent API")
+	return 1
 }

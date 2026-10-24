@@ -140,7 +140,7 @@ run_clean "Build astrorder-sessiond.exe" "$daemon_dir" "$go_bin" build -trimpath
 run_clean "Build astrorder-app.exe" "$app_dir" "$go_bin" build -trimpath -o "$partial_native/astrorder-app.exe" ./cmd/astrorder-app
 run_clean "Build astrorderctl.exe" "$app_dir" "$go_bin" build -trimpath -o "$partial_native/astrorderctl.exe" ./cmd/astrorderctl
 run_clean "Build astrorder-agent.exe" "$app_dir" "$go_bin" build -trimpath -o "$partial_native/astrorder-agent.exe" ./cmd/astrorder-agent
-run_clean "Build astrorder-mcp.exe" "$app_dir" "$go_bin" build -trimpath -o "$partial_native/astrorder-mcp.exe" ./cmd/astrorder-mcp
+
 run_clean "Build astrorder-helper.exe" "$app_dir" "$go_bin" build -trimpath -o "$partial_native/astrorder-helper.exe" ./cmd/astrorder-helper
 run_clean "Build astrorder-model-helper.exe" "$daemon_dir" "$go_bin" build -trimpath -o "$partial_native/astrorder-model-helper.exe" ./cmd/astrorder-model-helper
 run_clean "Build astrorder-memory-helper.exe" "$app_dir" "$go_bin" build -trimpath -o "$partial_native/astrorder-memory-helper.exe" ./cmd/astrorder-memory-helper
@@ -155,6 +155,9 @@ for helper_arch in amd64 arm64; do
   run_clean "Build target helper for $helper_platform" "$app_dir" \
     "GOOS=linux" "GOARCH=$helper_arch" "CGO_ENABLED=0" "$go_bin" build -trimpath \
     -o "$partial_native/helpers/$helper_platform/astrorder-helper" ./cmd/astrorder-helper
+  run_clean "Build session CLI for $helper_platform" "$app_dir" \
+    "GOOS=linux" "GOARCH=$helper_arch" "CGO_ENABLED=0" "$go_bin" build -trimpath \
+    -o "$partial_native/helpers/$helper_platform/astrorder-agent" ./cmd/astrorder-agent
 done
 
 (
@@ -164,14 +167,15 @@ done
     astrorder-app.exe \
     astrorderctl.exe \
     astrorder-agent.exe \
-    astrorder-mcp.exe \
     astrorder-helper.exe \
     astrorder-model-helper.exe \
     astrorder-memory-helper.exe \
     helpers/linux-amd64/astrorder-model-helper \
     helpers/linux-arm64/astrorder-model-helper \
     helpers/linux-amd64/astrorder-helper \
-    helpers/linux-arm64/astrorder-helper > SHA256SUMS
+    helpers/linux-arm64/astrorder-helper \
+    helpers/linux-amd64/astrorder-agent \
+    helpers/linux-arm64/astrorder-agent > SHA256SUMS
 )
 
 candidate_name="candidate-$(date -u +%Y%m%dT%H%M%SZ)-${partial_dir##*.}"

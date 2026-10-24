@@ -25,7 +25,10 @@ import { mobileOutboxStorage } from '../mobile/mobileOutboxStorage'
 import { AgentCommandMenu, AgentMentionMenu, buildCommandMenuItems, type CommandMenuItem, filterAgentMentions, formatAgentMention, useAgentCommands, useAgentMentions, useFileMentions, useGitBranches } from './AgentCommandMenu'
 import { useSidecarStore } from '../sidecar/sidecarStore'
 import { expandSystemMentions } from './systemMentions'
-import { usePersistentDraft } from './draftStorage'
+import { draftStorage, usePersistentDraft } from './draftStorage'
+import { isUnsentError, removeUnsentMessage, restoreUnsentDraft, sendErrorMessage } from './sendFailure'
+import { DraftShelfControl } from './DraftShelfControl'
+import { queueBlockReason } from './queueBlockReason'
 import { UNCOMMITTED_REVIEW_MESSAGE } from './reviewRelay'
 
 
@@ -141,7 +144,7 @@ function composeOutgoingText(text: string, refs: SessionRef[], sessionKey: strin
 
   if (!refs.length) return processed
   const lines = refs.map((ref) => `- ${ref.title || '未命名会话'} (${ref.key})`)
-  const block = `星序会话引用：\n${lines.join('\n')}\n需要这些会话的内容时，调用 Astrorder MCP 工具 sessions_read，参数 key 为上列会话键。`
+  const block = `星序会话引用：\n${lines.join('\n')}\n需要这些会话的内容时，加载 astrorder-sessions 技能，通过技能目录内的 astrorder-agent sessions read --key <会话键> 读取上列会话。`
   return processed.trim() ? `${block}\n\n${processed}` : block
 }
 function hasCapability(agent: Agent | undefined, capability: string): boolean {
@@ -150,9 +153,7 @@ function hasCapability(agent: Agent | undefined, capability: string): boolean {
 }
 
 function errorMessage(error: unknown): string {
-  if (error instanceof ApiError) return error.detail
-  if (error instanceof Error) return error.message
-  return '提交失败，请检查服务连接。'
+  return sendErrorMessage(error)
 }
 
 function localCommand(session: Session, id: string, action: CommandAction, text: string): Command {
@@ -197,6 +198,15 @@ export function ChatComposer({
   const submittingRef = useRef(false)
   const [error, setError] = useState<string | null>(null)
   const [submittedCommandId, setSubmittedCommandId] = useState<string | null>(null)
+  const [recoveryDraft, setRecoveryDraft] = useState<DraftState | null>(null)
+  useEffect(() => {
+    let mounted = true
+    setRecoveryDraft(null)
+    void draftStorage.load(`sending:${scopeKey(session.agent_id, session.id)}`).then(saved => {
+      if (mounted && saved) setRecoveryDraft(saved)
+    }).catch(nextError => { if (mounted) setError(errorMessage(nextError)) })
+    return () => { mounted = false }
+  }, [session.agent_id, session.id])
   const [commandIndex, setCommandIndex] = useState(0)
   const [dismissedMenuText, setDismissedMenuText] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -242,6 +252,7 @@ export function ChatComposer({
   const nativeBusy = session.status === 'running' || session.status === 'waiting_approval'
   const busy = submitting || nativeBusy
   const pending = queue.filter(row => row.payload.agent_id === session.agent_id && row.payload.session_id === session.id && !['accepted', 'running', 'completed'].includes(row.state))
+  const queuePause = !nativeBusy && pending.some(row => row.state === 'queued') ? queueBlockReason(commands, session.agent_id, session.id) : null
   const canStop = hasCapability(agent, 'stop') && busy
   const sessionRefs = draft.sessionRefs || []
   const hasDraft = isDraftSendable(draft.text, draft.attachments, sessionRefs)
@@ -378,6 +389,8 @@ export function ChatComposer({
 
   const submitDirectMessage = async (customText: string) => {
     if (submitting || submittingRef.current || !canChat) return
+    if (recoveryDraft) { setError('请先核对并恢复上一条消息，再发送新消息。'); return }
+    const originalDraft: DraftState = { text: customText, attachments: [], sessionRefs: [] }
     const commandId = newCommandId()
     const command = localCommand(session, commandId, 'send', customText)
     const store = useAstrorderStore.getState()
@@ -402,7 +415,9 @@ export function ChatComposer({
     setSubmitting(true)
     setError(null)
     setSubmittedCommandId(commandId)
+    let dispatched = false
     try {
+      await draftStorage.save(`sending:${scopeKey(session.agent_id, session.id)}`, originalDraft)
       const result = await submitBrowserCommand({
         commandId,
         session,
@@ -411,17 +426,26 @@ export function ChatComposer({
         action: 'send',
         targetId: null,
         uploadAttachment: api.uploadAttachment,
-        createCommand: api.createCommand,
+        createCommand: payload => { dispatched = true; return api.createCommand(payload) },
       })
       store.updateOutboxAttachments(session.agent_id, session.id, commandId, result.attachments)
       store.mergeCommands([result.command])
+      if (!['failed', 'unknown', 'received'].includes(result.command.state)) await draftStorage.remove(`sending:${scopeKey(session.agent_id, session.id)}`)
       notifySessionSubmitted(session)
       await queryClient.invalidateQueries({ queryKey: ['astrorder', 'commands', session.agent_id, session.id] })
       await queryClient.invalidateQueries({ queryKey: ['astrorder', 'messages', session.agent_id, session.id] })
     } catch (nextError) {
       const status = nextError instanceof ApiError && nextError.status >= 400 && nextError.status < 500 ? 'failed' : 'unknown'
       store.markOutboxError(session.agent_id, session.id, commandId, errorMessage(nextError), status)
-      setError(errorMessage(nextError))
+      let detail = errorMessage(nextError)
+      if (!dispatched || isUnsentError(nextError)) {
+        try {
+          detail += ' ' + await restoreUnsentDraft(session.agent_id, session.id, originalDraft)
+          await draftStorage.remove(`sending:${scopeKey(session.agent_id, session.id)}`)
+          removeUnsentMessage(session.agent_id, session.id, commandId)
+        } catch (saveError) { detail += ` ${errorMessage(saveError)}` }
+      } else setRecoveryDraft(originalDraft)
+      setError(detail)
     } finally {
       submittingRef.current = false
       setSubmitting(false)
@@ -466,6 +490,8 @@ export function ChatComposer({
   }
 
   const submit = async (action: CommandAction, targetId: string | null = null) => {
+    if (action === 'send' && recoveryDraft) { setError('请先核对并恢复上一条消息，再发送新消息。'); return }
+    const originalDraft = { ...draft, attachments: [...draft.attachments], sessionRefs: [...(draft.sessionRefs || [])] }
     const files = draft.attachments.filter(item => !item.attachment).map((item) => item.file)
     const uploadedAttachments = draft.attachments.flatMap(item => item.attachment ? [item.attachment] : [])
     const outgoing = composeOutgoingText(draft.text, sessionRefs, `${session.agent_id}::${session.id}`)
@@ -535,7 +561,9 @@ export function ChatComposer({
       // 乐观更新会话状态为 running，防止 Hermes 或原生轮询延迟导致的“无动静”体感
       store.updateSession(session.agent_id, session.id, { status: 'running' })
     }
+    let dispatched = false
     try {
+      if (action === 'send') await draftStorage.save(`sending:${scopeKey(session.agent_id, session.id)}`, originalDraft)
       const result = await submitBrowserCommand({
         commandId,
         session,
@@ -545,11 +573,12 @@ export function ChatComposer({
         action,
         targetId,
         uploadAttachment: api.uploadAttachment,
-        createCommand: api.createCommand,
+        createCommand: payload => { dispatched = true; return api.createCommand(payload) },
       })
       store.updateOutboxAttachments(session.agent_id, session.id, commandId, result.attachments)
       store.mergeCommands([result.command])
       if (action === 'send') {
+        if (!['failed', 'unknown', 'received'].includes(result.command.state)) await draftStorage.remove(`sending:${scopeKey(session.agent_id, session.id)}`)
         if (result.command.state !== 'failed' && result.command.state !== 'unknown') {
           notifySessionSubmitted(session)
         }
@@ -561,9 +590,16 @@ export function ChatComposer({
       store.updateSession(session.agent_id, session.id, { status: session.status || 'idle' })
       const status = nextError instanceof ApiError && nextError.status >= 400 && nextError.status < 500 ? 'failed' : 'unknown'
       store.markOutboxError(session.agent_id, session.id, commandId, errorMessage(nextError), status)
-      setError(errorMessage(nextError))
-      // An ambiguous direct send must never become a new queued command.
-      // Draft and File objects intentionally remain in Zustand after a failed send.
+      let detail = errorMessage(nextError)
+      if (action === 'send' && (!dispatched || isUnsentError(nextError))) {
+        try {
+          detail += ' ' + await restoreUnsentDraft(session.agent_id, session.id, originalDraft)
+          await draftStorage.remove(`sending:${scopeKey(session.agent_id, session.id)}`)
+          removeUnsentMessage(session.agent_id, session.id, commandId)
+        } catch (saveError) { detail += ` ${errorMessage(saveError)}` }
+      }
+      if (action === 'send' && dispatched && !isUnsentError(nextError)) setRecoveryDraft(originalDraft)
+      setError(detail)
     } finally {
       submittingRef.current = false
       setSubmitting(false)
@@ -692,6 +728,12 @@ ${draft.text}` : entry.payload.text)
         <GoalManager key={`${session.agent_id}::${session.id}`} session={session} agent={agent} tasks={tasks} />
         <GitStatusBar session={session} />
         <Stack gap="xs">
+        {queuePause && <Text size="xs" c="dimmed" role="status">{queuePause}</Text>}
+        {recoveryDraft && <InlineNotice title="有一条发送结果待核对的消息" actions={<Button variant="subtle" size="compact-xs" onClick={() => void restoreUnsentDraft(session.agent_id, session.id, recoveryDraft).then(async detail => {
+          await draftStorage.remove(`sending:${scopeKey(session.agent_id, session.id)}`)
+          setRecoveryDraft(null)
+          setError(`${detail} 再次发送前请确认原消息未被接收。`)
+        }).catch(nextError => setError(errorMessage(nextError)))}>恢复内容</Button>}>文字与附件已保留。请先核对会话记录，避免重复发送。</InlineNotice>}
         {pending.map(entry => (
           <Paper key={entry.payload.id} withBorder radius="md" p="xs" aria-label="排队消息">
             <Group justify="space-between" gap="xs" wrap="nowrap">
@@ -839,6 +881,15 @@ ${draft.text}` : entry.payload.text)
             <IconPlus size={20} />
             <input ref={fileInputRef} hidden type="file" multiple accept={supportsImages ? undefined : 'text/*,.txt,.md,.json,.csv,.py,.go,.ts,.tsx,.js,.jsx,.html,.css,.yaml,.yml,.toml,.xml,.log,.sh,.bat,.ps1'} onChange={addFiles} />
           </Button>
+          <div style={{ position: 'relative', flexShrink: 0 }}>
+            <DraftShelfControl key={draftKey} scope={draftKey} draft={draft} disabled={submitting || voice.status !== 'idle'} onError={setError} onReplace={(expected, replacement) => {
+              const current = useAstrorderStore.getState().drafts[draftKey]
+              if (current ? current !== expected : Boolean(expected.text || expected.attachments.length || expected.sessionRefs?.length)) return false
+              updateDraft(replacement)
+              textareaRef.current?.focus()
+              return true
+            }} />
+          </div>
           <ApprovalModeControl session={session} agentKind={agent?.kind} />
           <span className="composer-toolbar-spacer" />
           {usage && (

@@ -9,6 +9,7 @@ import { gitDiffViewer } from './viewers/gitdiff'
 import { sideChatViewer } from './viewers/sidechat'
 import { agentGraphViewer } from './viewers/agentgraph'
 import { htmlViewer } from './viewers/html'
+import { imageViewer } from './viewers/image'
 import { mermaidViewer } from './viewers/mermaid'
 import { monacoViewer } from './viewers/monaco'
 import { xtermViewer } from './viewers/terminal'
@@ -38,6 +39,7 @@ class ArtifactViewerRegistry {
     this.register(diffViewer)
     this.register(threeViewer)
     this.register(htmlViewer)
+    this.register(imageViewer)
     this.register(xtermViewer)
     this.register(monacoViewer)
     this.register(fileTreeViewer)
@@ -142,11 +144,10 @@ class ArtifactViewerRegistry {
       }
     }
 
-    // 如果没有特定专用查看器匹配，且该文件为非图片非音频的代码/文本，默认回退到 Monaco 代码编辑器
+    // 未知扩展名及无扩展名文件也允许尝试文本读取，由编辑器检查实际内容。
     const monaco = this.getViewerById('monaco-viewer')
-    const hasKnownTextExtension = Boolean(monaco?.extensions?.some((ext) => lowerName.endsWith(ext.toLowerCase())))
-    const hasExplicitTextMime = mime.startsWith('text/') && mime !== 'text/plain'
-    if (!bestViewer && monaco && isEnabled('monaco-viewer') && !isNonPreviewableFile(lowerName) && (hasKnownTextExtension || hasExplicitTextMime)) {
+    const mayBeText = !mime || mime.startsWith('text/') || mime === 'application/octet-stream'
+    if (!bestViewer && monaco && isEnabled('monaco-viewer') && !isNonPreviewableFile(lowerName) && mayBeText) {
       return monaco
     }
 

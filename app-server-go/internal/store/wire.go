@@ -44,6 +44,12 @@ func sessionWire(row map[string]any) (map[string]any, error) {
 	}
 	result["parent_session_id"] = result["handoff_from_session_id"]
 	result["parent_agent_id"] = result["handoff_from_agent_id"]
+	if result["delegation_parent_session_id"] == "" {
+		result["delegation_parent_session_id"] = nil
+	}
+	if result["delegation_parent_agent_id"] == "" {
+		result["delegation_parent_agent_id"] = nil
+	}
 	return result, nil
 }
 

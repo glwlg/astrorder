@@ -185,7 +185,7 @@ func Dial(ctx context.Context, cfg Config) (*Client, error) {
 		conn:      conn,
 		Daemon:    sessiondv1.NewDaemonControlClient(conn),
 		Session:   sessiondv1.NewSessionControlClient(conn),
-		Runtime:   sessiondv1.NewRuntimeQueryClient(conn),
+		Runtime:   historyPagingClient{RuntimeQueryClient: sessiondv1.NewRuntimeQueryClient(conn)},
 		Operation: sessiondv1.NewOperationQueryClient(conn),
 		Model:     sessiondv1.NewModelConfigClient(conn),
 		Events:    sessiondv1.NewEventStreamClient(conn),

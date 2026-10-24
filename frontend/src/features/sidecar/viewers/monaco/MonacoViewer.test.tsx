@@ -48,4 +48,19 @@ describe('MonacoViewer markdown mode', () => {
     fireEvent.click(screen.getByRole('button', { name: '编辑 Markdown' }))
     expect(screen.getByTestId('monaco-editor')).toBeInTheDocument()
   })
+
+  it('rejects binary bytes even when the filename has no extension', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Uint8Array([127, 69, 76, 70, 0, 1, 2, 3]))))
+    const artifact: ArtifactRef = { id: 'binary', sessionId: 's', agentId: 'a', name: 'program', kind: 'workspace_file', path: '/repo/program', readUrl: '/files/program', mediaType: 'text/plain', writable: true }
+    render(<MantineProvider><MonacoViewer artifact={artifact} /></MantineProvider>)
+    expect(await screen.findByText('此文件包含二进制内容，无法作为文本打开')).toBeInTheDocument()
+    expect(screen.queryByTestId('monaco-editor')).not.toBeInTheDocument()
+  })
+
+  it('reads UTF-16 text with a BOM without treating zero bytes as binary', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Uint8Array([255, 254, 65, 0, 66, 0]))))
+    const artifact: ArtifactRef = { id: 'utf16', sessionId: 's', agentId: 'a', name: 'notes.custom', kind: 'workspace_file', readUrl: '/files/notes', mediaType: 'text/plain', writable: true }
+    render(<MantineProvider><MonacoViewer artifact={artifact} /></MantineProvider>)
+    await waitFor(() => expect(screen.getByLabelText('测试代码编辑器')).toHaveValue('AB'))
+  })
 })

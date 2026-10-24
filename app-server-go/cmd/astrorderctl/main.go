@@ -76,6 +76,8 @@ func run(args []string, output io.Writer) int {
 			return runLogin(args[1:], output)
 		case "sync":
 			return runSync(args[1:], output)
+		case "agent-skill":
+			return runAgentSkill(args[1:], output)
 		}
 	}
 	fail := func(message string) int {

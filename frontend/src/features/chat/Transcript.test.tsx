@@ -44,6 +44,17 @@ const outbound: OutboxEntry = {
 }
 
 describe('transcript follow mode', () => {
+  it('splits long running activity into 100-item packs and closes earlier packs', () => {
+    const messages: Message[] = Array.from({ length: 201 }, (_, i) => ({ ...message, id: `tool-${i}`, role: 'tool', kind: 'tool', text: '', tool: { name: 'commandExecution', status: 'completed', arguments: { command: `echo ${i}` } } }))
+    const view = render(<MantineProvider><Transcript outbox={[]} messages={messages} session={runningSession} /></MantineProvider>)
+    const packs = screen.getAllByRole('region', { name: '思考与工具' })
+    expect(packs).toHaveLength(3)
+    expect(packs.map(pack => pack.querySelector('details')!.open)).toEqual([false, false, true])
+    fireEvent.click(packs[0].querySelector('summary')!)
+    expect(packs[0].querySelectorAll('.activity-fold')).toHaveLength(100)
+    view.rerender(<MantineProvider><Transcript outbox={[]} messages={[...messages, { ...messages[0], id: 'tool-201' }]} session={runningSession} /></MantineProvider>)
+    expect(packs[0].querySelector('details')).toHaveAttribute('open')
+  })
   it('hides empty user echoes without hiding pending text or attachment-only sends', () => {
     const input: Message = { ...message, id: 'optimistic-send', role: 'user', text: '这个要怎么弄？', command_id: 'send' }
     const empty: Message = { ...input, id: 'native-user', text: '' }

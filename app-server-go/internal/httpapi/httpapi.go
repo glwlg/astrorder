@@ -90,6 +90,8 @@ type registeredRoute struct {
 
 var registeredRoutes = []registeredRoute{
 	{Registration: Registration{Kind: KindHTTP, Method: http.MethodGet, Path: "/health", Auth: AuthPublic, Ownership: OwnershipGo}, serve: serveHealth},
+	{Registration: Registration{Kind: KindHTTP, Method: http.MethodGet, Path: "/api/v1/draft-shelf", Auth: AuthBrowser, Ownership: OwnershipGo}, serve: serveDraftShelf},
+	{Registration: Registration{Kind: KindHTTP, Method: http.MethodPut, Path: "/api/v1/draft-shelf", Auth: AuthBrowser, Ownership: OwnershipGo}, serve: serveDraftShelf},
 	{Registration: Registration{Kind: KindHTTP, Method: http.MethodPost, Path: "/api/v1/auth/session", Auth: AuthPublic, Ownership: OwnershipGo}, serve: serveAuthSession},
 	{Registration: Registration{Kind: KindHTTP, Method: http.MethodGet, Path: "/api/v1/auth/session", Auth: AuthPublic, Ownership: OwnershipGo}, serve: serveAuthSession},
 	{Registration: Registration{Kind: KindHTTP, Method: http.MethodDelete, Path: "/api/v1/auth/session", Auth: AuthPublic, Ownership: OwnershipGo}, serve: serveAuthSession},
@@ -136,6 +138,7 @@ type Options struct {
 }
 
 type api struct {
+	draftStore      *store.Store
 	qr              *qrLogins
 	config          config.Config
 	auth            *auth.Authenticator
@@ -311,11 +314,23 @@ func NewHandlerChecked(options Options) (http.Handler, error) {
 			}); ok && options.NativeSessions != nil {
 				options.NativeSessions.SetNativeSessionRegistrar(registrar.RegisterNativeSession)
 			}
+			if sleeper, ok := sessionHandler.(interface{ RunIdleSleep(context.Context) }); ok && options.Context != nil && options.DaemonClient != nil {
+				go sleeper.RunIdleSleep(options.Context)
+			}
 			if runner, ok := sessionHandler.(interface{ RunQueue(context.Context) }); ok && options.Context != nil && options.DaemonClient != nil {
 				go runner.RunQueue(options.Context)
 			}
 			if refresher, ok := sessionHandler.(activityRefresher); ok && options.DaemonClient != nil {
 				go reconcileActivityOnStart(refresher, options.Logger)
+			}
+		}
+		if recovery, ok := sessionHandler.(interface {
+			RecoverDisconnectedSessions(context.Context, string, string) error
+		}); ok && options.Context != nil {
+			if connections, ok := options.Connections.(interface {
+				SetSessionRecovery(context.Context, func(context.Context, string, string) error)
+			}); ok {
+				connections.SetSessionRecovery(options.Context, recovery.RecoverDisconnectedSessions)
 			}
 		}
 		if agentHandler == nil {
@@ -349,6 +364,7 @@ func NewHandlerChecked(options Options) (http.Handler, error) {
 	}
 
 	app := &api{
+		draftStore:      options.Store,
 		qr:              newQRLogins(),
 		config:          options.Config,
 		auth:            authenticator,

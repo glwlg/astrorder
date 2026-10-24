@@ -2,6 +2,5 @@
   "name": "astrorder-codex",
   "version": "0.1.0",
   "description": "Astrorder setup guidance for the Codex app-server companion",
-  "skills": "./skills/",
-  "mcpServers": "./.mcp.json"
+  "skills": "./skills/"
 }

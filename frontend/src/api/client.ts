@@ -180,12 +180,14 @@ export interface KernelOperationResponse {
 export class ApiError extends Error {
   readonly status: number
   readonly detail: string
+  readonly code?: string
 
-  constructor(status: number, detail: string) {
+  constructor(status: number, detail: string, code?: string) {
     super(detail)
     this.name = 'ApiError'
     this.status = status
     this.detail = detail
+    this.code = code
   }
 }
 
@@ -224,7 +226,7 @@ export async function authenticatedApiFetch(path: string, init: RequestInit = {}
   })
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await authenticatedApiFetch(`${API_PREFIX}${path}`, init)
   const payload = await parseResponse(response)
   if (!response.ok) {
@@ -232,7 +234,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       typeof payload === 'object' && payload !== null && 'detail' in payload && typeof payload.detail === 'string'
         ? payload.detail
         : `请求失败（${response.status}）`
-    throw new ApiError(response.status, detail)
+    throw new ApiError(response.status, detail, payload && typeof payload === 'object' && 'code' in payload && typeof payload.code === 'string' ? payload.code : undefined)
   }
   return payload as T
 }
@@ -372,6 +374,8 @@ export const api = {
   getPreferences: () => request<WorkspacePreferences>('/preferences'),
   importPreferences: (values: PreferencePatch) => jsonRequest<WorkspacePreferences>('/preferences/import', values),
   updatePreferences: (values: PreferencePatch) => jsonRequest<WorkspacePreferences>('/preferences', values, 'PATCH'),
+  getAgentSessionCLI: (agentId: string) => request<{ ready: boolean; message: string; home: string }>(`/capabilities/session-cli?agent_id=${encodeURIComponent(agentId)}`),
+  configureAgentSessionCLI: (agentId: string) => jsonRequest<{ ready: boolean; message: string; home: string }>('/capabilities/session-cli', { agent_id: agentId }),
   getObservations: (agentId: string, sessionId?: string) => request<{ status: { installed?: boolean; trusted?: boolean; needs_review?: boolean; last_event_at?: number }; items: { id: string; event: string; label: string; observed_at: number; tool_name?: string }[] }>(`/agents/${encodeURIComponent(agentId)}/observations${sessionId ? '?session_id='+encodeURIComponent(sessionId) : ''}`),
   installObserver: (agentId: string) => jsonRequest<{ ok: boolean; installed?: boolean; trusted?: boolean; needs_review?: boolean; error?: string; trust_error?: string; rewrite?: { files: number; handlers: number } }>(`/agents/${encodeURIComponent(agentId)}/observer`, {}),
   getAuthSession: () => request<AuthSession>('/auth/session'),
@@ -395,6 +399,8 @@ export const api = {
     const query = agentId ? `?agent_id=${encodeURIComponent(agentId)}` : ''
     return request<{ items: Session[] }>(`/sessions${query}`)
   },
+  renewSessionView: (sessionId: string, agentId: string) =>
+    request<{ ok: boolean }>(`${sessionPath(sessionId)}/view-lease?agent_id=${encodeURIComponent(agentId)}`, { method: 'POST' }),
   syncSession: (sessionId: string, agentId: string) =>
     request<Session>(`${sessionPath(sessionId)}/sync?agent_id=${encodeURIComponent(agentId)}`, { method: 'POST' }),
   refreshSessionActivity: (agentId?: string) => {
@@ -553,13 +559,7 @@ export const api = {
       capability: 'swarm.telemetry.get',
       input: { key },
     }),
-  getAgentMcpStatus: (agentId: string) =>
-    request<{ agent_id: string; enabled: boolean }>(`/agents/${encodeURIComponent(agentId)}/mcp`),
-  toggleAgentMcpStatus: (agentId: string, enabled: boolean) =>
-    jsonRequest<{ agent_id: string; enabled: boolean }>(`/agents/${encodeURIComponent(agentId)}/mcp`, {
-      agent_id: agentId,
-      enabled,
-    }),
+
   listSos: () =>
     jsonRequest<{ items: any[]; count: number }>('/agent/invoke', {
       capability: 'swarm.sos.list',
@@ -740,7 +740,8 @@ export const api = {
       target_name: string
       kind: string
       counts: { skills: number; mcp: number; plugins: number; marketplaces: number }
-      skills: Array<{ name: string; path?: string; scope?: string; agents?: string[]; source?: string; sourceUrl?: string; description?: string; agent?: string }>
+      skill_agents?: Array<{ id: string; label: string }>
+      skills: Array<{ name: string; path?: string; scope?: string; agents?: string[]; source?: string; sourceUrl?: string; description?: string; agent?: string; category?: string; content?: string }>
       mcp_servers: Array<{
         name: string
         agent: string

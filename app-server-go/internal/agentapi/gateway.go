@@ -33,7 +33,7 @@ type BrowserManager interface {
 	CallCDP(ctx context.Context, sessionKey string, method string, params map[string]any, targetID string) (map[string]any, error)
 }
 
-// Options configure the Agent API gateway and MCP handlers.
+// Options configure the Agent API gateway. MCP handlers are retired.
 type Options struct {
 	Store            *store.Store
 	Client           *daemonclient.Client
@@ -59,7 +59,8 @@ func NewAgentApiError(code, message string) *AgentApiError {
 	return &AgentApiError{Code: code, Message: message}
 }
 
-// Handler handles /api/v1/agent/catalog, /api/v1/agent/invoke, and /api/v1/agent/mcp.
+// Handler handles /api/v1/agent/catalog, /api/v1/agent/invoke, and the retired
+// MCP endpoints (which always return 410 Gone).
 type Handler struct {
 	options    Options
 	blackboard *blackboard.Service
@@ -83,13 +84,17 @@ func NewHandler(options Options) (http.Handler, error) {
 }
 
 // Matches returns true if method and path match the Agent API gateway routes.
+// Retired MCP routes remain matched so they can answer with 410 Gone instead of
+// silently falling through to 404.
 func Matches(method, path string) bool {
 	clean := strings.TrimRight(path, "/")
 	switch clean {
 	case "/api/v1/agent/catalog":
 		return method == http.MethodGet
-	case "/api/v1/agent/invoke", "/api/v1/agent/mcp":
+	case "/api/v1/agent/invoke":
 		return method == http.MethodPost
+	case "/api/v1/agent/mcp":
+		return method == http.MethodGet || method == http.MethodPost
 	case "/api/v1/blackboard":
 		return method == http.MethodGet
 	default:

@@ -144,7 +144,10 @@ func (h *Handler) handleSessionAgentCommands(w http.ResponseWriter, r *http.Requ
 		row, rowErr := h.store.GetSession(ctx, aid, sessionID)
 		agent, agentErr := h.store.GetAgent(ctx, aid)
 		if rowErr == nil && agentErr == nil && row != nil && stringValue(agent, "kind") == "codex" {
-			writeJSON(w, http.StatusOK, map[string]any{"items": []any{}, "supported": false, "detail": "Codex 未提供原生命令列表接口。"})
+			writeJSON(w, http.StatusOK, map[string]any{"items": []map[string]any{
+				{"name": "compact", "description": "压缩当前会话上下文", "input_hint": "可选：压缩说明"},
+				{"name": "review", "description": "代码审查 / 审查工作区变更", "input_hint": "可选：审查说明"},
+			}, "supported": true, "detail": "Codex app-server 原生操作；不包含仅在 CLI 界面执行的命令。"})
 			return
 		}
 	}

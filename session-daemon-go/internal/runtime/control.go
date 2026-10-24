@@ -133,12 +133,30 @@ func (r *Registry) Command(ctx context.Context, request Request) (Result, error)
 		r.mu.Unlock()
 		return Result{}, fmt.Errorf("runtime does not support commands")
 	}
+	// Closing a native transport must not race any admitted operation,
+	// including read-only queries which can still use that transport.
+	closing := request.Action == "session.close"
+	if closing && (r.operations[kind] != 0 || r.reloading[kind]) {
+		r.mu.Unlock()
+		return Result{}, ErrRuntimeBusy
+	}
 	if err := r.reserveLocked(kind); err != nil {
 		r.mu.Unlock()
 		return Result{}, err
 	}
+	if closing {
+		r.reloading[kind] = true
+	}
 	r.mu.Unlock()
-	defer r.release(kind)
+	defer func() {
+		r.mu.Lock()
+		if closing {
+			delete(r.reloading, kind)
+		}
+		r.inflight--
+		r.operations[kind]--
+		r.mu.Unlock()
+	}()
 	result, err := commander.Command(ctx, request)
 	if err != nil {
 		return Result{}, err

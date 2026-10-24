@@ -67,6 +67,9 @@ func TestSessionControlOfficialTCPAndDurableReceipts(t *testing.T) {
 	if receipt.Session.GetAgentId() != "fixture" {
 		t.Fatalf("create omitted authoritative owner: %+v", receipt.Session)
 	}
+	if !receipt.Accepted || receipt.GetCompleted() == nil || !receipt.GetCompleted().Accepted {
+		t.Fatalf("create receipt accepted missing or false: receipt.Accepted=%v, completed=%+v", receipt.Accepted, receipt.GetCompleted())
+	}
 	if _, err = client.CreateSession(f.ctx, create); err != nil {
 		t.Fatal(err)
 	}

@@ -31,8 +31,9 @@ import {
     IconMaximize,
 } from '@tabler/icons-react'
 import type { Agent, Session } from '../../domain/types'
-import { AgentBrandIcon } from '../../components/AgentBrandIcon'
 import { scopeKey } from '../../domain/semantics'
+import { AgentBrandIcon } from '../../components/AgentBrandIcon'
+import { buildSwarmTopology, type SwarmConstellationNode } from '../../domain/swarmTopology'
 import { MonitorCard } from './MonitorPage'
 import { api } from '../../api/client'
 import { useQueryClient } from '@tanstack/react-query'
@@ -170,219 +171,95 @@ export function SwarmDagView({
 
 
 
+  const topology = useMemo(() => {
+    return buildSwarmTopology(allSessions, { activeRootKey })
+  }, [allSessions, activeRootKey])
+
   // 构建星图拓扑结构
   const { nodes, edges, rootCount, workerCount } = useMemo(() => {
-    const sessionMap = new Map<string, Session>()
-    const childrenMap = new Map<string, string[]>()
-    const parentMap = new Map<string, string>()
-
-    for (const s of allSessions) {
-      const k = scopeKey(s.agent_id, s.id)
-      sessionMap.set(k, s)
-      childrenMap.set(k, [])
-    }
-
-    // 全量扫描识别父子血缘映射
-    for (const s of allSessions) {
-      const childKey = scopeKey(s.agent_id, s.id)
-      let parentKey: string | null = null
-
-      if (s.parent_session_key && sessionMap.has(s.parent_session_key)) {
-        parentKey = s.parent_session_key
-      } else if (s.parent_session_id) {
-        const candidateKey = scopeKey(s.parent_agent_id || s.agent_id, s.parent_session_id)
-        if (sessionMap.has(candidateKey)) {
-          parentKey = candidateKey
-        } else {
-          for (const [k, p] of sessionMap.entries()) {
-            if (p.id === s.parent_session_id) {
-              parentKey = k
-              break
-            }
-          }
-        }
-      }
-
-      if (parentKey && parentKey !== childKey) {
-        parentMap.set(childKey, parentKey)
-        const list = childrenMap.get(parentKey) || []
-        list.push(childKey)
-        childrenMap.set(parentKey, list)
-      }
-    }
-
-    const constellationKeys = new Set<string>()
-    for (const [pKey, cList] of childrenMap.entries()) {
-      if (cList.length > 0) {
-        constellationKeys.add(pKey)
-        cList.forEach((c) => constellationKeys.add(c))
-      }
-    }
-    for (const cKey of parentMap.keys()) {
-      constellationKeys.add(cKey)
-    }
-
-    // 补充：包含所有被标记为主星/群星的根会话，以及显式选中的 activeRootKey，即便目前伴星数为 0
-    for (const s of allSessions) {
-      const k = scopeKey(s.agent_id, s.id)
-      const title = s.title || ''
-      const isCandidate = (
-        title.includes('主星') ||
-        title.includes('群星') ||
-        title.includes('星系') ||
-        k === activeRootKey
-      )
-      if (isCandidate && !parentMap.has(k)) {
-        constellationKeys.add(k)
-      }
-    }
-
-    // 拓扑分层 (Rank assignment)
-    const levelMap = new Map<string, number>()
-    const computeLevel = (k: string, visited = new Set<string>()): number => {
-      if (levelMap.has(k)) return levelMap.get(k)!
-      if (visited.has(k)) return 0
-      visited.add(k)
-      const pKey = parentMap.get(k)
-      if (!pKey || !constellationKeys.has(pKey)) {
-        levelMap.set(k, 0)
-        return 0
-      }
-      const lvl = computeLevel(pKey, visited) + 1
-      levelMap.set(k, lvl)
-      return lvl
-    }
-
-    for (const k of constellationKeys) {
-      computeLevel(k)
-    }
-
-    const layers = new Map<number, string[]>()
-    let maxLevel = 0
-    for (const [k, lvl] of levelMap.entries()) {
-      if (!layers.has(lvl)) layers.set(lvl, [])
-      layers.get(lvl)!.push(k)
-      if (lvl > maxLevel) maxLevel = lvl
+    const constellation = topology.getConstellation(activeRootKey)
+    if (!constellation.rootKey || !constellation.rootSession) {
+      return { nodes: [], edges: [], rootCount: 0, workerCount: 0 }
     }
 
     const COLLAPSED_HEIGHT = 46
     const calculatedNodes: SwarmDagNode[] = []
     const nodeCoords = new Map<string, { x: number; y: number; width: number; height: number }>()
 
-    // 按各个星系主星独立聚合排布，支持单星系收起与垂直空间自适应
-    const rootKeys = Array.from(constellationKeys).filter((k) => !parentMap.has(k))
-    let currentY = 0
-    const CONSTELLATION_GAP = 28
+    const rootKey = constellation.rootKey
+    const isCollapsed = collapsedRootKeys.has(rootKey)
+    const currentY = 0
 
-    // 一次只展示一个选中的主星拓扑；优先匹配当前选中的 activeRootKey
-    let selectedTargetKey: string | null = null
-    if (activeRootKey && (sessionMap.has(activeRootKey) || rootKeys.includes(activeRootKey))) {
-      selectedTargetKey = activeRootKey
-    } else if (rootKeys.length > 0) {
-      selectedTargetKey = rootKeys[0]
-    }
-    const targetRoots = selectedTargetKey ? [selectedTargetKey] : []
-
-    for (const rootKey of targetRoots) {
-      const isCollapsed = collapsedRootKeys.has(rootKey)
-      const rootSession = sessionMap.get(rootKey)
-      if (!rootSession) continue
-
-      // 收集该星系所有节点并层级分级
-      const familyNodes: { key: string; level: number }[] = []
-      const queue: { key: string; level: number }[] = [{ key: rootKey, level: 0 }]
-      const visited = new Set<string>()
-
-      while (queue.length > 0) {
-        const item = queue.shift()!
-        if (visited.has(item.key)) continue
-        visited.add(item.key)
-        familyNodes.push(item)
-        const children = childrenMap.get(item.key) || []
-        for (const childKey of children) {
-          queue.push({ key: childKey, level: item.level + 1 })
-        }
+    if (isCollapsed) {
+      // 折叠态：主星收缩为 46px 紧凑胶囊，伴星隐藏
+      nodeCoords.set(rootKey, { x: 0, y: currentY, width: CARD_WIDTH, height: COLLAPSED_HEIGHT })
+      calculatedNodes.push({
+        session: constellation.rootSession,
+        agent: agents[constellation.rootSession.agent_id],
+        key: rootKey,
+        level: 0,
+        x: 0,
+        y: currentY,
+        width: CARD_WIDTH,
+        height: COLLAPSED_HEIGHT,
+        parentKey: null,
+        childrenKeys: constellation.nodes.find((n) => n.key === rootKey)?.childrenKeys || [],
+      })
+    } else {
+      // 展开态：按层级 (level) 排布各层级伴星
+      const familyLayers = new Map<number, SwarmConstellationNode[]>()
+      for (const item of constellation.nodes) {
+        if (!familyLayers.has(item.level)) familyLayers.set(item.level, [])
+        familyLayers.get(item.level)!.push(item)
       }
 
-      if (isCollapsed) {
-        // 折叠态：主星收缩为 46px 紧凑胶囊，伴星隐藏
-        nodeCoords.set(rootKey, { x: 0, y: currentY, width: CARD_WIDTH, height: COLLAPSED_HEIGHT })
-        calculatedNodes.push({
-          session: rootSession,
-          agent: agents[rootSession.agent_id],
-          key: rootKey,
-          level: 0,
-          x: 0,
-          y: currentY,
-          width: CARD_WIDTH,
-          height: COLLAPSED_HEIGHT,
-          parentKey: null,
-          childrenKeys: childrenMap.get(rootKey) || [],
-        })
-        currentY += COLLAPSED_HEIGHT + CONSTELLATION_GAP
-      } else {
-        // 展开态：排布各层级伴星
-        const familyLayers = new Map<number, string[]>()
-        for (const item of familyNodes) {
-          if (!familyLayers.has(item.level)) familyLayers.set(item.level, [])
-          familyLayers.get(item.level)!.push(item.key)
-        }
-
-        let maxLayerCount = 1
-        for (const list of familyLayers.values()) {
-          if (list.length > maxLayerCount) maxLayerCount = list.length
-        }
-        const constellationHeight = maxLayerCount * (CARD_HEIGHT + VERTICAL_GAP) - VERTICAL_GAP
-
-        for (const [lvl, keys] of familyLayers.entries()) {
-          const startX = lvl * (CARD_WIDTH + HORIZONTAL_GAP)
-          keys.forEach((k, idx) => {
-            const s = sessionMap.get(k)!
-            const y = currentY + idx * (CARD_HEIGHT + VERTICAL_GAP)
-            nodeCoords.set(k, { x: startX, y, width: CARD_WIDTH, height: CARD_HEIGHT })
-            calculatedNodes.push({
-              session: s,
-              agent: agents[s.agent_id],
-              key: k,
-              level: lvl,
-              x: startX,
-              y,
-              width: CARD_WIDTH,
-              height: CARD_HEIGHT,
-              parentKey: parentMap.get(k) || null,
-              childrenKeys: childrenMap.get(k) || [],
-            })
+      for (const [lvl, keys] of familyLayers.entries()) {
+        const startX = lvl * (CARD_WIDTH + HORIZONTAL_GAP)
+        keys.forEach((item, idx) => {
+          const y = currentY + idx * (CARD_HEIGHT + VERTICAL_GAP)
+          nodeCoords.set(item.key, { x: startX, y, width: CARD_WIDTH, height: CARD_HEIGHT })
+          calculatedNodes.push({
+            session: item.session,
+            agent: agents[item.session.agent_id],
+            key: item.key,
+            level: lvl,
+            x: startX,
+            y,
+            width: CARD_WIDTH,
+            height: CARD_HEIGHT,
+            parentKey: item.parentKey,
+            childrenKeys: item.childrenKeys,
           })
-        }
-        currentY += constellationHeight + CONSTELLATION_GAP
+        })
       }
     }
 
     // 生成平滑连接边
     const calculatedEdges: SwarmDagEdge[] = []
-    for (const [childKey, parentKey] of parentMap.entries()) {
-      if (!constellationKeys.has(childKey) || !constellationKeys.has(parentKey)) continue
-      const fromPos = nodeCoords.get(parentKey)
-      const toPos = nodeCoords.get(childKey)
-      if (fromPos && toPos) {
-        const parentSession = sessionMap.get(parentKey)
-        const childSession = sessionMap.get(childKey)
-        const isActive =
-          parentSession?.status === 'running' ||
-          parentSession?.status === 'waiting_approval' ||
-          childSession?.status === 'running' ||
-          childSession?.status === 'waiting_approval'
-        calculatedEdges.push({
-          id: `${parentKey}->${childKey}`,
-          fromKey: parentKey,
-          toKey: childKey,
-          x1: fromPos.x + fromPos.width,
-          y1: fromPos.y + fromPos.height / 2,
-          x2: toPos.x,
-          y2: toPos.y + toPos.height / 2,
-          active: Boolean(isActive),
-          status: childSession?.status || parentSession?.status,
-        })
+    if (!isCollapsed) {
+      for (const edge of constellation.edges) {
+        const fromPos = nodeCoords.get(edge.fromKey)
+        const toPos = nodeCoords.get(edge.toKey)
+        if (fromPos && toPos) {
+          const parentSession = topology.sessionMap.get(edge.fromKey)
+          const childSession = topology.sessionMap.get(edge.toKey)
+          const isActive =
+            parentSession?.status === 'running' ||
+            parentSession?.status === 'waiting_approval' ||
+            childSession?.status === 'running' ||
+            childSession?.status === 'waiting_approval'
+          calculatedEdges.push({
+            id: edge.id,
+            fromKey: edge.fromKey,
+            toKey: edge.toKey,
+            x1: fromPos.x + fromPos.width,
+            y1: fromPos.y + fromPos.height / 2,
+            x2: toPos.x,
+            y2: toPos.y + toPos.height / 2,
+            active: Boolean(isActive),
+            status: childSession?.status || parentSession?.status,
+          })
+        }
       }
     }
 
@@ -395,14 +272,16 @@ export function SwarmDagView({
       rootCount: roots,
       workerCount: workers,
     }
-  }, [allSessions, agents, collapsedRootKeys, activeRootKey])
+  }, [topology, agents, collapsedRootKeys, activeRootKey])
 
   // 默认选中当前主星或其伴星
   useEffect(() => {
-    if (activeRootKey && nodes.some((n) => n.key === activeRootKey)) {
-      setSelectedKey(activeRootKey)
-    } else if (nodes.length > 0 && (!selectedKey || !nodes.some((n) => n.key === selectedKey))) {
-      setSelectedKey(nodes[0].key)
+    setSelectedKey(activeRootKey || null)
+  }, [activeRootKey])
+
+  useEffect(() => {
+    if (nodes.length > 0 && (!selectedKey || !nodes.some((n) => n.key === selectedKey))) {
+      setSelectedKey(activeRootKey && nodes.some((n) => n.key === activeRootKey) ? activeRootKey : nodes[0].key)
     }
   }, [activeRootKey, nodes, selectedKey])
 
@@ -1595,9 +1474,9 @@ export function SwarmDagView({
               <Badge
                 size="sm"
                 variant="light"
-                color={modalSession.parent_session_id ? 'cyan' : 'indigo'}
+                color={topology.parentMap.has(scopeKey(modalSession.agent_id, modalSession.id)) ? 'cyan' : 'indigo'}
               >
-                {modalSession.parent_session_id ? '🪐 伴星会话' : '🌟 主星会话'}
+                {topology.parentMap.has(scopeKey(modalSession.agent_id, modalSession.id)) ? '🪐 伴星会话' : '🌟 主星会话'}
               </Badge>
             </Group>
           ) : null

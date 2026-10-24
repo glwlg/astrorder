@@ -13,6 +13,36 @@ func nativeRemovedKey(agentID, sessionID string) string {
 	return "native_removed:" + string(encoded)
 }
 
+// NativeSessionRemovedTx applies the same durable removal policy to catalog
+// queries and connector events while holding their write transaction.
+func NativeSessionRemovedTx(ctx context.Context, tx *sql.Tx, agentID, sessionID string) (bool, error) {
+	var removed int
+	err := tx.QueryRowContext(ctx, `SELECT count(*) FROM workspace_preferences WHERE "key"=?`, nativeRemovedKey(agentID, sessionID)).Scan(&removed)
+	return removed > 0, err
+}
+
+// RepairRemovedAntigravityCatalog removes idle, unbound catalog projections
+// recreated by older connector observers despite a persisted user deletion.
+// Live bindings and native conversation stores are left alone.
+func (s *Store) RepairRemovedAntigravityCatalog(ctx context.Context) error {
+	return s.WithTx(ctx, func(tx *sql.Tx) error {
+		rows, err := queryRows(ctx, tx, `SELECT s.agent_id,s.id FROM sessions s
+JOIN agents a ON a.id=s.agent_id
+WHERE a.kind='antigravity' AND s.status='idle' AND s.control_state='unbound'
+AND s.runtime_owner IS NULL
+AND EXISTS(SELECT 1 FROM workspace_preferences p WHERE p.key='native_removed:' || json_array(s.agent_id,s.id))`)
+		if err != nil {
+			return err
+		}
+		for _, row := range rows {
+			if _, err := DeleteSessionTx(ctx, tx, row["agent_id"].(string), row["id"].(string)); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 // InsertSessionIfAbsent records a session discovered in a native store. It never
 // touches an existing row, so it cannot overwrite the title, status or kind of a
 // session Astrorder created itself while the same thread was being discovered.
@@ -43,11 +73,11 @@ func (s *Store) InsertSessionIfAbsent(ctx context.Context, payload map[string]an
 	controlState := payloadStringDefault(payload, "control_state", "owned")
 	inserted := false
 	err = s.WithTx(ctx, func(tx *sql.Tx) error {
-		var removed int
-		if scanErr := tx.QueryRowContext(ctx, `SELECT count(*) FROM workspace_preferences WHERE "key"=?`, nativeRemovedKey(agentID, id)).Scan(&removed); scanErr != nil {
-			return scanErr
+		removed, err := NativeSessionRemovedTx(ctx, tx, agentID, id)
+		if err != nil {
+			return err
 		}
-		if removed > 0 {
+		if removed {
 			return nil
 		}
 		result, execErr := tx.ExecContext(ctx, `INSERT INTO sessions

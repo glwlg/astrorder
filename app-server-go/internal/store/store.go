@@ -16,7 +16,7 @@ import (
 )
 
 // CurrentSchemaVersion is the schema version understood by this package.
-const CurrentSchemaVersion = 3
+const CurrentSchemaVersion = 5
 
 // SchemaMode controls whether opening a store may migrate its schema.
 type SchemaMode uint8

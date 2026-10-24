@@ -230,7 +230,7 @@ INSERT INTO ssh_connections VALUES ('default','host',22,'user',NULL,NULL,NULL,NU
 	if _, _, err := identity.CreateCommand(ctx, map[string]any{"id": "command", "agent_id": "agent", "session_id": "history-old", "action": "send", "text": "keep"}, "queued"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := identity.DB().Exec(fmt.Sprintf("PRAGMA user_version = %d", CurrentSchemaVersion-1)); err != nil {
+	if _, err := identity.DB().Exec("PRAGMA user_version = 3"); err != nil {
 		t.Fatal(err)
 	}
 	_ = identity.Close()
@@ -499,7 +499,7 @@ func TestApplyFrameIsRegisteredAtomicContiguousAndReopenSafe(t *testing.T) {
 
 func assertCanonicalSchema(ctx context.Context, t *testing.T, st *Store) error {
 	t.Helper()
-	wantTables := []string{"agent_connection_choices", "agents", "attachments", "commands", "connection_history", "daemon_checkpoints", "events", "messages", "projects", "review_relay_bindings", "review_relay_runs", "sessions", "ssh_connections", "tasks", "token_metrics", "workspace_preferences"}
+	wantTables := []string{"agent_connection_choices", "agents", "attachments", "commands", "connection_history", "daemon_checkpoints", "delegation_edges", "delegation_operations", "draft_shelves", "events", "messages", "projects", "review_relay_bindings", "review_relay_runs", "sessions", "ssh_connections", "tasks", "token_metrics", "workspace_preferences"}
 	rows, err := st.QueryRows(ctx, "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
 	if err != nil {
 		return err
@@ -513,7 +513,8 @@ func assertCanonicalSchema(ctx context.Context, t *testing.T, st *Store) error {
 	}
 	wantIndices := []string{
 		"ix_agents_connection_id", "ix_agents_source_id", "ix_commands_agent_id", "ix_commands_session_id",
-		"ix_connection_history_connection_id", "ix_events_agent_id", "ix_events_session_id", "ix_messages_agent_id",
+		"ix_connection_history_connection_id", "ix_delegation_edges_parent", "ix_delegation_operations_caller",
+		"ix_events_agent_id", "ix_events_session_id", "ix_messages_agent_id",
 		"ix_messages_session_id", "ix_projects_agent_id", "ix_projects_connection_id", "ix_projects_source_id",
 		"ix_review_relay_runs_source_agent_id", "ix_review_relay_runs_source_session_id", "ix_sessions_agent_id",
 		"ix_sessions_connection_id", "ix_sessions_handoff_from_agent_id", "ix_sessions_handoff_from_session_id",

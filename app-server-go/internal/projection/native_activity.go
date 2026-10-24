@@ -86,6 +86,13 @@ func projectNativeActivity(ctx context.Context, tx *sql.Tx, streamID, agentID st
 				Data: map[string]any{"hook_event": hook},
 			})
 		}
+		// Process startup/shutdown can happen during app updates or reconnects
+		// without any new conversation. Keep transcript invalidation above, but
+		// do not let lifecycle hooks (including replay) advance activity time.
+		hook, _ := payload["hook_event"].(string)
+		if hook == "SessionStart" || hook == "SessionEnd" {
+			continue
+		}
 		current, err := store.ParseTime(row["updated_at"])
 		if err == nil && !observed.After(current) {
 			continue

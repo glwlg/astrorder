@@ -29,6 +29,20 @@ func (j *Journal) TrackSession(id, status string) error {
 	}
 	return nil
 }
+func (j *Journal) PrepareResume(id string) error {
+	j.mu.Lock()
+	retired := j.retired[id]
+	j.mu.Unlock()
+	if !retired {
+		return nil
+	}
+	if err := j.TrackSession(id, "idle"); err != nil {
+		return err
+	}
+	_, err := j.Commit(id, "session.resumed", map[string]any{"session_id": id}, "idle")
+	return err
+}
+
 func (j *Journal) ForgetSession(id string) error {
 	j.commitGate.Lock()
 	defer j.commitGate.Unlock()

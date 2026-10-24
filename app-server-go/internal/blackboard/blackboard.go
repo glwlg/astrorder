@@ -36,175 +36,422 @@ func NewService(st *store.Store, pub Publisher) *Service {
 // 2. session_key: group::id -> group:id, swarm::root -> swarm:root, agent::session -> stored scope or session:agent::session
 // 3. group_id -> group:id
 // 4. parent_key ancestry walk -> swarm:rootAgent::rootSession
-// 5. caller agent/session fields or unique active session
+// 5. Explicit caller agent/session fields resolved through delegation edges
 func (s *Service) ResolveNamespace(ctx context.Context, payload map[string]any) (string, error) {
-	if rawNS, ok := payload["namespace"].(string); ok {
-		val := strings.TrimSpace(rawNS)
-		if val != "" && val != "session:default" {
+	// 1. Caller validation first: caller errors/conflicts MUST NOT be bypassed by explicit namespace/session_key
+	callerAid, callerSid, hasCaller, cErr := extractCaller(payload)
+	if cErr != nil {
+		return "", cErr
+	}
+
+	// 2. Explicit namespace (e.g. global, custom, or explicit session namespace)
+	if rawNS, exists := payload["namespace"]; exists && rawNS != nil {
+		val, ok := rawNS.(string)
+		if !ok {
+			return "", errors.New("namespace must be a string")
+		}
+		if val == "" {
+			return "", errors.New("namespace cannot be empty")
+		}
+		if strings.ContainsAny(val, " 	\r\n") {
+			return "", errors.New("namespace contains illegal whitespace")
+		}
+		if val != "session:default" {
 			if !strings.HasPrefix(val, "session:") {
 				return val, nil
 			}
-			sessionRef := strings.TrimSpace(strings.TrimPrefix(val, "session:"))
-			if sessionRef != "" {
-				if strings.Contains(sessionRef, "::") {
-					parts := strings.SplitN(sessionRef, "::", 2)
-					aid, sid := parts[0], parts[1]
-					scope, _ := s.GetSessionScope(ctx, aid, sid)
-					if scope != "" {
-						return scope, nil
-					}
-					return "session:" + aid + "::" + sid, nil
-				}
-				callerAgent, _ := payload["caller_agent_id"].(string)
-				if callerAgent == "" {
-					callerAgent, _ = payload["agent_id"].(string)
-				}
-				if s.store != nil {
-					var found map[string]any
-					if callerAgent != "" {
-						found, _ = s.store.GetSession(ctx, callerAgent, sessionRef)
-					} else {
-						found, _ = s.store.FindSessionByID(ctx, sessionRef)
-					}
-					if found != nil {
-						aid, _ := found["agent_id"].(string)
-						sid, _ := found["id"].(string)
-						scope, _ := s.GetSessionScope(ctx, aid, sid)
-						if scope != "" {
-							return scope, nil
-						}
-						return "session:" + aid + "::" + sid, nil
-					}
-				}
-				return "session:" + sessionRef, nil
+			sessionRef := strings.TrimPrefix(val, "session:")
+			if sessionRef == "" {
+				return "", errors.New("session namespace reference cannot be empty")
 			}
-		}
-	}
-
-	if rawSK, ok := payload["session_key"].(string); ok {
-		sk := strings.TrimSpace(rawSK)
-		if sk != "" {
-			if strings.HasPrefix(sk, "group::") {
-				return "group:" + strings.TrimPrefix(sk, "group::"), nil
-			}
-			if strings.HasPrefix(sk, "swarm::") {
-				return "swarm:" + strings.TrimPrefix(sk, "swarm::"), nil
-			}
-			if strings.Contains(sk, "::") {
-				parts := strings.SplitN(sk, "::", 2)
+			if strings.Contains(sessionRef, "::") {
+				parts := strings.SplitN(sessionRef, "::", 2)
 				aid, sid := parts[0], parts[1]
-				scope, _ := s.GetSessionScope(ctx, aid, sid)
-				if scope != "" {
-					return scope, nil
+				if err := validateIdentifier("agent_id", aid); err != nil {
+					return "", err
 				}
-				return "session:" + sk, nil
-			}
-			return "session:" + sk, nil
-		}
-	}
-
-	if groupID, ok := payload["group_id"].(string); ok && strings.TrimSpace(groupID) != "" {
-		return "group:" + strings.TrimSpace(groupID), nil
-	}
-
-	if parentKey, ok := payload["parent_key"].(string); ok && strings.Contains(parentKey, "::") {
-		currKey := strings.TrimSpace(parentKey)
-		visited := make(map[string]bool)
-		for currKey != "" && !visited[currKey] {
-			visited[currKey] = true
-			if !strings.Contains(currKey, "::") {
-				break
-			}
-			parts := strings.SplitN(currKey, "::", 2)
-			aid, sid := parts[0], parts[1]
-			if s.store == nil {
-				break
-			}
-			sess, _ := s.store.GetSession(ctx, aid, sid)
-			if sess != nil && sess["parent_session_id"] != nil && sess["parent_session_id"] != "" {
-				pAid, _ := sess["parent_agent_id"].(string)
-				if pAid == "" {
-					pAid = aid
+				if err := validateIdentifier("session_id", sid); err != nil {
+					return "", err
 				}
-				pSid, _ := sess["parent_session_id"].(string)
-				currKey = pAid + "::" + pSid
-			} else {
-				break
+				scope, err := s.GetSessionScope(ctx, aid, sid)
+				if err != nil {
+					return "", err
+				}
+				return scope, nil
 			}
-		}
-		return "swarm:" + currKey, nil
-	}
-
-	callerAid, _ := payload["caller_agent_id"].(string)
-	if callerAid == "" {
-		callerAid, _ = payload["agent_id"].(string)
-	}
-	callerSid, _ := payload["caller_session_id"].(string)
-	if callerSid == "" {
-		callerSid, _ = payload["session_id"].(string)
-	}
-
-	if callerAid != "" && callerSid != "" {
-		scope, _ := s.GetSessionScope(ctx, callerAid, callerSid)
-		if scope != "" {
+			// Bare sessionRef: requires explicit agent_id, cannot guess
+			if callerAid == "" {
+				return "", errors.New("bare session_id requires explicit agent_id or composite key 'agent_id::session_id'")
+			}
+			if err := validateIdentifier("session_id", sessionRef); err != nil {
+				return "", err
+			}
+			scope, err := s.GetSessionScope(ctx, callerAid, sessionRef)
+			if err != nil {
+				return "", err
+			}
 			return scope, nil
 		}
-		return "session:" + callerAid + "::" + callerSid, nil
 	}
 
-	if callerAid != "" && s.store != nil {
-		sessions, err := s.store.ListSessions(ctx, callerAid)
-		if err == nil {
-			var active []map[string]any
-			for _, sess := range sessions {
-				status, _ := sess["status"].(string)
-				if status == "running" || status == "waiting_approval" {
-					active = append(active, sess)
-				}
+	// 3. Explicit session_key (e.g. group::id, swarm::root, agent::session)
+	if rawSK, exists := payload["session_key"]; exists && rawSK != nil {
+		sk, ok := rawSK.(string)
+		if !ok {
+			return "", errors.New("session_key must be a string")
+		}
+		if sk == "" {
+			return "", errors.New("session_key cannot be empty")
+		}
+		if strings.ContainsAny(sk, " 	\r\n") {
+			return "", errors.New("session_key contains illegal whitespace")
+		}
+		if strings.HasPrefix(sk, "group::") {
+			groupID := strings.TrimPrefix(sk, "group::")
+			if err := validateIdentifier("group_id", groupID); err != nil {
+				return "", err
 			}
-			if len(active) == 1 {
-				sid, _ := active[0]["id"].(string)
-				scope, _ := s.GetSessionScope(ctx, callerAid, sid)
-				if scope != "" {
-					return scope, nil
+			return "group:" + groupID, nil
+		}
+		if strings.HasPrefix(sk, "swarm::") {
+			rootID := strings.TrimPrefix(sk, "swarm::")
+			if err := validateIdentifier("swarm_root", rootID); err != nil {
+				return "", err
+			}
+			return "swarm:" + rootID, nil
+		}
+		if strings.Contains(sk, "::") {
+			parts := strings.SplitN(sk, "::", 2)
+			aid, sid := parts[0], parts[1]
+			if err := validateIdentifier("agent_id", aid); err != nil {
+				return "", err
+			}
+			if err := validateIdentifier("session_id", sid); err != nil {
+				return "", err
+			}
+			scope, err := s.GetSessionScope(ctx, aid, sid)
+			if err != nil {
+				return "", err
+			}
+			return scope, nil
+		}
+		// Bare session_key: requires explicit agent_id, cannot guess
+		if callerAid == "" {
+			return "", errors.New("bare session_key requires explicit agent_id or composite key 'agent_id::session_id'")
+		}
+		if err := validateIdentifier("session_id", sk); err != nil {
+			return "", err
+		}
+		scope, err := s.GetSessionScope(ctx, callerAid, sk)
+		if err != nil {
+			return "", err
+		}
+		return scope, nil
+	}
+
+	// 4. Explicit group_id
+	if rawGID, exists := payload["group_id"]; exists && rawGID != nil {
+		groupID, ok := rawGID.(string)
+		if !ok {
+			return "", errors.New("group_id must be a string")
+		}
+		if err := validateIdentifier("group_id", groupID); err != nil {
+			return "", err
+		}
+		return "group:" + groupID, nil
+	}
+
+	// 5. Explicit parent_key
+	if rawPK, exists := payload["parent_key"]; exists && rawPK != nil {
+		parentKey, ok := rawPK.(string)
+		if !ok {
+			return "", errors.New("parent_key must be a string")
+		}
+		if !strings.Contains(parentKey, "::") {
+			return "", errors.New("parent_key must be 'agent_id::session_id'")
+		}
+		if strings.ContainsAny(parentKey, " 	\r\n") {
+			return "", errors.New("parent_key contains illegal whitespace")
+		}
+		parts := strings.SplitN(parentKey, "::", 2)
+		aid, sid := parts[0], parts[1]
+		if err := validateIdentifier("parent_agent_id", aid); err != nil {
+			return "", err
+		}
+		if err := validateIdentifier("parent_session_id", sid); err != nil {
+			return "", err
+		}
+		if s.store != nil {
+			_, hasParent, err := s.store.GetDelegationParent(ctx, aid, sid)
+			if err != nil {
+				return "", fmt.Errorf("check delegation parent: %w", err)
+			}
+			children, err := s.store.ListDelegationChildren(ctx, aid, sid)
+			if err != nil {
+				return "", fmt.Errorf("check delegation children: %w", err)
+			}
+			if hasParent || len(children) > 0 {
+				root, rErr := s.store.ResolveDelegationRoot(ctx, aid, sid)
+				if rErr != nil {
+					return "", fmt.Errorf("resolve delegation root: %w", rErr)
 				}
-				return "session:" + callerAid + "::" + sid, nil
+				if root.AgentID != "" && root.SessionID != "" {
+					return fmt.Sprintf("swarm:%s::%s", root.AgentID, root.SessionID), nil
+				}
 			}
 		}
-		return "", errors.New("No unique active session; pass session_key explicitly")
+		// Not part of a delegation edge: do not guess along parent_session_id / handoff
+		return fmt.Sprintf("session:%s::%s", aid, sid), nil
 	}
 
-	return "", errors.New("Blackboard namespace could not be resolved; pass session_key explicitly")
+	// 6. Valid explicit caller identity
+	if hasCaller && callerAid != "" && callerSid != "" {
+		scope, err := s.GetSessionScope(ctx, callerAid, callerSid)
+		if err != nil {
+			return "", err
+		}
+		return scope, nil
+	}
+
+	return "", errors.New("Blackboard namespace could not be resolved: missing exact caller identity, session_key, or explicit namespace")
 }
 
-// GetSessionScope checks blackboard_scope:{aid}::{sid} and group_session: mapping in preferences.
+func validateIdentifier(name, val string) error {
+	if val == "" {
+		return fmt.Errorf("%s cannot be empty", name)
+	}
+	if strings.ContainsAny(val, " 	\r\n") {
+		return fmt.Errorf("%s contains illegal whitespace", name)
+	}
+	return nil
+}
+
+func extractCaller(payload map[string]any) (string, string, bool, error) {
+	var callerAid, callerSid string
+	hasCallerMap := false
+
+	if rawCaller, exists := payload["caller"]; exists {
+		if rawCaller == nil {
+			return "", "", false, errors.New("caller cannot be null")
+		}
+		callerMap, isMap := rawCaller.(map[string]any)
+		if !isMap {
+			return "", "", false, errors.New("caller must be a JSON object")
+		}
+		if len(callerMap) == 0 {
+			return "", "", false, errors.New("caller object cannot be empty")
+		}
+
+		aidVal, hasAid := callerMap["aid"]
+		agentIdVal, hasAgentId := callerMap["agent_id"]
+		if hasAid && hasAgentId && aidVal != agentIdVal {
+			return "", "", false, errors.New("conflicting aid and agent_id in caller object")
+		}
+		if hasAid {
+			s, ok := aidVal.(string)
+			if !ok {
+				return "", "", false, errors.New("caller aid must be a string")
+			}
+			callerAid = s
+		} else if hasAgentId {
+			s, ok := agentIdVal.(string)
+			if !ok {
+				return "", "", false, errors.New("caller agent_id must be a string")
+			}
+			callerAid = s
+		}
+
+		sidVal, hasSid := callerMap["sid"]
+		sessionIdVal, hasSessionId := callerMap["session_id"]
+		if hasSid && hasSessionId && sidVal != sessionIdVal {
+			return "", "", false, errors.New("conflicting sid and session_id in caller object")
+		}
+		if hasSid {
+			s, ok := sidVal.(string)
+			if !ok {
+				return "", "", false, errors.New("caller sid must be a string")
+			}
+			callerSid = s
+		} else if hasSessionId {
+			s, ok := sessionIdVal.(string)
+			if !ok {
+				return "", "", false, errors.New("caller session_id must be a string")
+			}
+			callerSid = s
+		}
+
+		if (callerAid != "" && callerSid == "") || (callerAid == "" && callerSid != "") {
+			return "", "", false, errors.New("caller object must specify both agent_id and session_id")
+		}
+		hasCallerMap = true
+	}
+
+	var topAid string
+	topAid1, hasTopAid1 := payload["caller_agent_id"]
+	topAid2, hasTopAid2 := payload["agent_id"]
+	if hasTopAid1 && topAid1 == nil {
+		return "", "", false, errors.New("caller_agent_id cannot be null")
+	}
+	if hasTopAid2 && topAid2 == nil {
+		return "", "", false, errors.New("agent_id cannot be null")
+	}
+	var sTopAid1, sTopAid2 string
+	if hasTopAid1 {
+		s, ok := topAid1.(string)
+		if !ok {
+			return "", "", false, errors.New("caller_agent_id must be a string")
+		}
+		sTopAid1 = s
+	}
+	if hasTopAid2 {
+		s, ok := topAid2.(string)
+		if !ok {
+			return "", "", false, errors.New("agent_id must be a string")
+		}
+		sTopAid2 = s
+	}
+	if hasTopAid1 && hasTopAid2 && sTopAid1 != "" && sTopAid2 != "" && sTopAid1 != sTopAid2 {
+		return "", "", false, errors.New("conflicting caller_agent_id and agent_id in payload")
+	}
+	if sTopAid1 != "" {
+		topAid = sTopAid1
+	} else {
+		topAid = sTopAid2
+	}
+
+	var topSid string
+	topSid1, hasTopSid1 := payload["caller_session_id"]
+	topSid2, hasTopSid2 := payload["session_id"]
+	if hasTopSid1 && topSid1 == nil {
+		return "", "", false, errors.New("caller_session_id cannot be null")
+	}
+	if hasTopSid2 && topSid2 == nil {
+		return "", "", false, errors.New("session_id cannot be null")
+	}
+	var sTopSid1, sTopSid2 string
+	if hasTopSid1 {
+		s, ok := topSid1.(string)
+		if !ok {
+			return "", "", false, errors.New("caller_session_id must be a string")
+		}
+		sTopSid1 = s
+	}
+	if hasTopSid2 {
+		s, ok := topSid2.(string)
+		if !ok {
+			return "", "", false, errors.New("session_id must be a string")
+		}
+		sTopSid2 = s
+	}
+	if hasTopSid1 && hasTopSid2 && sTopSid1 != "" && sTopSid2 != "" && sTopSid1 != sTopSid2 {
+		return "", "", false, errors.New("conflicting caller_session_id and session_id in payload")
+	}
+	if sTopSid1 != "" {
+		topSid = sTopSid1
+	} else {
+		topSid = sTopSid2
+	}
+
+	if callerAid != "" && topAid != "" && callerAid != topAid {
+		return "", "", false, errors.New("conflicting caller agent_id in payload")
+	}
+	if callerSid != "" && topSid != "" && callerSid != topSid {
+		return "", "", false, errors.New("conflicting caller session_id in payload")
+	}
+
+	aid := callerAid
+	if aid == "" {
+		aid = topAid
+	}
+	sid := callerSid
+	if sid == "" {
+		sid = topSid
+	}
+
+	hasAny := hasCallerMap || hasTopAid1 || hasTopAid2 || hasTopSid1 || hasTopSid2
+	if !hasAny {
+		return "", "", false, nil
+	}
+
+	if aid != "" {
+		if err := validateIdentifier("agent_id", aid); err != nil {
+			return "", "", false, err
+		}
+	}
+	if sid != "" {
+		if err := validateIdentifier("session_id", sid); err != nil {
+			return "", "", false, err
+		}
+	}
+
+	if (aid != "" && sid == "") || (aid == "" && sid != "") {
+		return "", "", false, errors.New("caller must specify both agent_id and session_id")
+	}
+
+	return aid, sid, true, nil
+}
+
+// GetSessionScope checks blackboard_scope:{aid}::{sid}, group_session: mapping,
+// and real delegation_edges root resolution, strictly propagating DB errors.
 func (s *Service) GetSessionScope(ctx context.Context, agentID, sessionID string) (string, error) {
 	if s.store == nil {
-		return "", nil
+		return "", errors.New("store is required to resolve session scope")
 	}
+	if err := validateIdentifier("agent_id", agentID); err != nil {
+		return "", err
+	}
+	if err := validateIdentifier("session_id", sessionID); err != nil {
+		return "", err
+	}
+
+	// 1. Explicit blackboard_scope preference
 	key := fmt.Sprintf("blackboard_scope:%s::%s", agentID, sessionID)
 	pref, err := s.store.GetPreference(ctx, key)
-	if err == nil && pref.Exists {
+	if err != nil {
+		return "", fmt.Errorf("read blackboard_scope preference: %w", err)
+	}
+	if pref.Exists {
 		if scopeStr, ok := pref.Value.(string); ok && scopeStr != "" {
 			return scopeStr, nil
 		}
 	}
 
-	// Check group_session:{group_id}:{agent_id} == session_id
+	// 2. Check group_session:{group_id}:{agent_id} == session_id
 	suffix := ":" + agentID
 	rows, err := s.store.QueryRows(ctx, `SELECT "key", value FROM workspace_preferences WHERE "key" LIKE 'group_session:%'`)
-	if err == nil {
-		for _, row := range rows {
-			k, _ := row["key"].(string)
-			v, _ := row["value"].(string)
-			vClean := strings.Trim(v, `"`)
-			if strings.HasSuffix(k, suffix) && vClean == sessionID {
-				groupID := strings.TrimSuffix(strings.TrimPrefix(k, "group_session:"), suffix)
-				return "group:" + groupID, nil
-			}
+	if err != nil {
+		return "", fmt.Errorf("query group_session preferences: %w", err)
+	}
+	for _, row := range rows {
+		k, _ := row["key"].(string)
+		v, _ := row["value"].(string)
+		vClean := strings.Trim(v, `"`)
+		if strings.HasSuffix(k, suffix) && vClean == sessionID {
+			groupID := strings.TrimSuffix(strings.TrimPrefix(k, "group_session:"), suffix)
+			return "group:" + groupID, nil
 		}
 	}
-	return "", nil
+
+	// 3. Check real delegation edges
+	_, hasParent, err := s.store.GetDelegationParent(ctx, agentID, sessionID)
+	if err != nil {
+		return "", fmt.Errorf("get delegation parent: %w", err)
+	}
+	children, err := s.store.ListDelegationChildren(ctx, agentID, sessionID)
+	if err != nil {
+		return "", fmt.Errorf("list delegation children: %w", err)
+	}
+	if hasParent || len(children) > 0 {
+		root, rErr := s.store.ResolveDelegationRoot(ctx, agentID, sessionID)
+		if rErr != nil {
+			return "", fmt.Errorf("resolve delegation root: %w", rErr)
+		}
+		if root.AgentID != "" && root.SessionID != "" {
+			return fmt.Sprintf("swarm:%s::%s", root.AgentID, root.SessionID), nil
+		}
+	}
+
+	return fmt.Sprintf("session:%s::%s", agentID, sessionID), nil
 }
 
 // Get retrieves a key or all keys in a namespace.

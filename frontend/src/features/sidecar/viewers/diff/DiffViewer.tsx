@@ -104,7 +104,7 @@ export function DiffViewer({ artifact, toolbarAction }: ViewerContext) {
             <Text size="xs" fw={600} truncate title={artifact.name}>
               {artifact.name}
             </Text>
-            <Badge size="xs" color="teal" variant="light">
+            <Badge size="xs" variant="transparent" style={{ color: 'var(--astr-green)' }}>
               +{addedCount}
             </Badge>
             <Badge size="xs" color="red" variant="light">

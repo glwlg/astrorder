@@ -113,6 +113,10 @@ func runServer(ctx context.Context, cfg config.Config, ready io.Writer, logger *
 			_ = st.Close()
 			return fmt.Errorf("repair Grok registrations: %w", err)
 		}
+		if err := st.RepairRemovedAntigravityCatalog(ctx); err != nil {
+			_ = st.Close()
+			return fmt.Errorf("repair removed Antigravity catalog: %w", err)
+		}
 		defer func() {
 			if closeErr := st.Close(); closeErr != nil {
 				logger.Warn("failed to close store", "error", closeErr)
@@ -281,7 +285,10 @@ func runServer(ctx context.Context, cfg config.Config, ready io.Writer, logger *
 			Kernels: kernelcontrol.New(cfg.SourcePath, executable),
 		})
 		hookResolver := targetfs.NewResolver(targetfs.ResolverOptions{Store: st, HelperAssetsDir: bundledHelperAssetsDir()})
-		capabilitiesHandler = capabilities.NewHandler(capabilities.New(&envtarget.Resolver{Store: st, Remote: hookResolver}), authorizer)
+		capabilityService := capabilities.New(&envtarget.Resolver{Store: st, Remote: hookResolver})
+		capabilityService.Agents = st
+		capabilityService.CLITransport = capabilities.TransportProvisioner(listenPort, os.Getenv("ASTRORDER_PUBLIC_URL"), cfg.BrowserSecret)
+		capabilitiesHandler = capabilities.NewHandler(capabilityService, authorizer)
 		connHandler, err := connections.NewHandler(connections.Options{Store: st, Client: client, Authorizer: authorizer, Publisher: eventHub, Hooks: connections.NewNativeHookInstaller(hookResolver)})
 		if err != nil {
 			return fmt.Errorf("configure connections: %w", err)

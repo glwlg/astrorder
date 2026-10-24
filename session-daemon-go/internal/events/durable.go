@@ -17,7 +17,15 @@ func Open(path string, capacity int) (*Journal, error) {
 		store.Close()
 		return nil, err
 	}
+	retired, err := store.RetiredSessions(id)
+	if err != nil {
+		store.Close()
+		return nil, err
+	}
 	j := New(capacity)
+	for _, sid := range retired {
+		j.retired[sid] = true
+	}
 	j.store = store
 	j.identity = id
 	for _, f := range latest {

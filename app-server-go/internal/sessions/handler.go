@@ -92,6 +92,7 @@ type Handler struct {
 	attachmentsDir    string
 	maxAttachmentSize int64
 	resolver          *targetfs.Resolver
+	views             viewLeases
 	titleBusy         sync.Map
 	nativeGuard
 }
@@ -145,6 +146,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleUserActivity(w, r)
 	case "refresh_activity":
 		h.handleRefreshActivity(w, r)
+	case "view_lease":
+		h.handleViewLease(w, r, params.SessionID)
 	case "sync_session":
 		h.handleSyncSession(w, r, params.SessionID)
 	case "list_messages":

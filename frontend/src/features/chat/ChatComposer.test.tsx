@@ -2,11 +2,11 @@ import { MantineProvider } from '@mantine/core'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { api } from '../../api/client'
+import { api, ApiError } from '../../api/client'
 import type { Agent, Session } from '../../domain/types'
 import { useAstrorderStore } from '../../state/store'
 import { ChatComposer, interpretGatewayError } from './ChatComposer'
-import { draftStorage } from './draftStorage'
+import { draftStorage, draftShelfStorage } from './draftStorage'
 
 vi.mock('../mobile/serverOutbox', async importOriginal => {
   const actual = await importOriginal<typeof import('../mobile/serverOutbox')>()
@@ -23,7 +23,22 @@ vi.mock('../mobile/mobileOutboxStorage', () => ({
 const session: Session = { id: 'native-one', agent_id: 'hermes', title: 'one', workspace: null, status: 'idle', updated_at: '2026-01-01T00:00:00Z' }
 const agent: Agent = { id: 'hermes', name: 'Hermes', kind: 'hermes', status: 'ready', capabilities: ['chat', 'stop', 'attachments'], limitation: null }
 const savedDrafts = new Map<string, any>()
+const savedShelf = new Map<string, any[]>()
+it('shows why an idle queue is paused by a historical unknown receipt', async () => {
+  useAstrorderStore.getState().mergeCommands([
+    { id: 'old', agent_id: session.agent_id, session_id: session.id, action: 'send', state: 'unknown', text: 'old', attachments: [], created_at: '2026-01-01T00:00:00Z', error: null },
+    { id: 'next', agent_id: session.agent_id, session_id: session.id, action: 'enqueue', state: 'queued', text: '待发内容', attachments: [], created_at: '2026-01-01T00:01:00Z', error: null },
+  ])
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(<MantineProvider><QueryClientProvider client={client}><ChatComposer session={session} agent={agent} /></QueryClientProvider></MantineProvider>)
+  expect(await screen.findByText(/自动发送已暂停：上一条消息的发送结果尚未确认/)).toBeInTheDocument()
+  expect(api.sendQueuedCommand).not.toHaveBeenCalled()
+  client.clear()
+})
 beforeEach(() => {
+  savedShelf.clear()
+  vi.spyOn(draftShelfStorage, 'load').mockImplementation(async key => savedShelf.get(key) || [])
+  vi.spyOn(draftShelfStorage, 'save').mockImplementation(async (key, entries) => { savedShelf.set(key, entries) })
   vi.spyOn(api, 'sendQueuedCommand').mockImplementation(async (id, aid, sid) => {
     const command = Object.values(useAstrorderStore.getState().commands).find(c => c.id === id && c.agent_id === aid && c.session_id === sid)!
     return { ...command, state: 'accepted' }
@@ -38,6 +53,106 @@ beforeEach(() => {
   vi.spyOn(draftStorage, 'remove').mockImplementation(async key => { savedDrafts.delete(key) })
 })
 afterEach(() => { cleanup(); vi.restoreAllMocks(); queueMemory.rows = []; useAstrorderStore.getState().resetRuntime() })
+it.each([false, true])('returns a refused message and image without overwriting newer input: %s', async newer => {
+  let reject!: (error: Error) => void
+  vi.spyOn(api, 'getSessionModel').mockResolvedValue({ model: 'native-model', provider: 'provider' })
+  vi.spyOn(api, 'createCommand').mockImplementation(() => new Promise((_resolve, no) => { reject = no }))
+  vi.spyOn(api, 'uploadAttachment').mockResolvedValue({ id: 'image', name: 'shot.png', media_type: 'image/png', url: '/image' })
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const wrap = () => <MantineProvider><QueryClientProvider client={client}><ChatComposer session={session} agent={agent} /></QueryClientProvider></MantineProvider>
+  const view = render(wrap())
+  await screen.findByRole('button', { name: '选择会话模型' })
+  const input = screen.getByLabelText('消息内容')
+  const file = new File(['image bytes'], 'shot.png', { type: 'image/png' })
+  fireEvent.change(input, { target: { value: '被拒绝的消息' } })
+  fireEvent.paste(input, { clipboardData: { files: [file], items: [] } })
+  fireEvent.click(screen.getByRole('button', { name: '发送' }))
+  await waitFor(() => expect(reject).toBeTypeOf('function'))
+  if (newer) fireEvent.change(input, { target: { value: '新输入' } })
+  reject(new ApiError(500, 'rpc error: code = FailedPrecondition desc = daemon command was rejected before a confirmed receipt: config.set model failed: RPC error 4001: session_busy', 'command_rejected'))
+  await waitFor(() => expect(input).toHaveValue(newer ? '新输入' : '被拒绝的消息'))
+  expect(screen.getByText(/Hermes.*忙碌/)).toBeInTheDocument()
+  expect(useAstrorderStore.getState().outbox).toEqual({})
+  if (newer) {
+    await waitFor(() => expect(savedShelf.get('hermes::native-one')).toEqual([expect.objectContaining({ draft: expect.objectContaining({ text: '被拒绝的消息', attachments: [expect.objectContaining({ file })] }) })]))
+    client.clear()
+    return
+  }
+  await waitFor(() => expect(savedDrafts.get('hermes::native-one')).toMatchObject({ text: '被拒绝的消息', attachments: [expect.objectContaining({ file })] }))
+  view.unmount()
+  useAstrorderStore.getState().resetRuntime()
+  render(wrap())
+  await waitFor(() => expect(screen.getByLabelText('消息内容')).toHaveValue('被拒绝的消息'))
+  expect(screen.getByText('shot.png')).toBeInTheDocument()
+  client.clear()
+})
+
+it('keeps a full recovery copy before direct dispatch and through an unknown result', async () => {
+  vi.spyOn(api, 'getSessionModel').mockResolvedValue({ model: 'native-model', provider: 'provider' })
+  vi.spyOn(api, 'createCommand').mockImplementation(async () => {
+    expect(savedDrafts.get('sending:hermes::native-one')).toMatchObject({ text: '不可丢失的消息' })
+    throw new TypeError('Failed to fetch')
+  })
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(<MantineProvider><QueryClientProvider client={client}><ChatComposer session={session} agent={agent} /></QueryClientProvider></MantineProvider>)
+  await screen.findByRole('button', { name: '选择会话模型' })
+  fireEvent.change(screen.getByLabelText('消息内容'), { target: { value: '不可丢失的消息' } })
+  fireEvent.click(screen.getByRole('button', { name: '发送' }))
+  await screen.findByText(/网络连接中断/)
+  expect(savedDrafts.get('sending:hermes::native-one')).toMatchObject({ text: '不可丢失的消息' })
+  expect(screen.getByLabelText('消息内容')).toHaveValue('')
+  client.clear()
+})
+
+it('stashes screenshots with text and preserves the occupied composer on restore after remount', async () => {
+  vi.spyOn(api, 'getSessionModel').mockResolvedValue({ model: 'native-model', provider: 'provider' })
+  const send = vi.spyOn(api, 'createCommand')
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const wrap = (value = session) => <MantineProvider><QueryClientProvider client={client}><ChatComposer session={value} agent={agent} /></QueryClientProvider></MantineProvider>
+  const view = render(wrap({ ...session, status: 'running' }))
+  await waitFor(() => expect(draftShelfStorage.load).toHaveBeenCalled())
+  fireEvent.change(screen.getByLabelText('消息内容'), { target: { value: '准备好的下一轮' } })
+  const files = [new File(['first'], 'first.png', { type: 'image/png' }), new File(['second'], 'second.png', { type: 'image/png' })]
+  fireEvent.paste(screen.getByLabelText('消息内容'), { clipboardData: { files, items: [] } })
+  fireEvent.click(screen.getByRole('button', { name: '草稿箱' }))
+  await waitFor(() => expect(screen.getByLabelText('消息内容')).toHaveValue(''))
+  const stored = savedShelf.get('hermes::native-one')![0]
+  expect(stored.draft.text).toBe('准备好的下一轮')
+  expect(stored.draft.attachments.map((item: any) => item.file)).toEqual(files)
+  expect(screen.queryByLabelText('待发送附件')).not.toBeInTheDocument()
+  view.rerender(wrap(session))
+  expect(send).not.toHaveBeenCalled()
+  view.unmount()
+  useAstrorderStore.getState().resetRuntime()
+  const restored = render(wrap())
+  await waitFor(() => expect(screen.getByRole('button', { name: '草稿箱' })).toBeEnabled())
+  fireEvent.change(screen.getByLabelText('消息内容'), { target: { value: '先纠正上一轮' } })
+  fireEvent.contextMenu(screen.getByRole('button', { name: '草稿箱' }))
+  fireEvent.click(await screen.findByRole('button', { name: '恢复草稿' }))
+  await waitFor(() => expect(screen.getByLabelText('消息内容')).toHaveValue('准备好的下一轮'))
+  expect(screen.getByText('first.png')).toBeInTheDocument()
+  expect(screen.getByText('second.png')).toBeInTheDocument()
+  expect(savedShelf.get('hermes::native-one')!.some(row => row.draft.text === '先纠正上一轮')).toBe(true)
+  // Restoring moves the source into the persistent composer without sending.
+  await waitFor(() => expect(savedShelf.get('hermes::native-one')!.some(row => row.id === stored.id)).toBe(false))
+  expect(send).not.toHaveBeenCalled()
+  restored.unmount()
+  client.clear()
+})
+
+it('keeps the composer intact when saving a stashed draft fails', async () => {
+  vi.spyOn(api, 'getSessionModel').mockResolvedValue({ model: 'native-model', provider: 'provider' })
+  vi.mocked(draftShelfStorage.save).mockRejectedValue(new Error('草稿暂存失败：存储空间不足'))
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(<MantineProvider><QueryClientProvider client={client}><ChatComposer session={session} agent={agent} /></QueryClientProvider></MantineProvider>)
+  await waitFor(() => expect(draftShelfStorage.load).toHaveBeenCalled())
+  fireEvent.change(screen.getByLabelText('消息内容'), { target: { value: '不能丢的内容' } })
+  fireEvent.click(screen.getByRole('button', { name: '草稿箱' }))
+  expect(await screen.findByText('草稿暂存失败：存储空间不足')).toBeInTheDocument()
+  expect(screen.getByLabelText('消息内容')).toHaveValue('不能丢的内容')
+  client.clear()
+})
+
 it('embeds the model picker and follows the native session status for stop', async () => {
   useAstrorderStore.getState().resetRuntime()
   vi.spyOn(api, 'getSessionModel').mockResolvedValue({ model: 'native-model', provider: 'provider' })

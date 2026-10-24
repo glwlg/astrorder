@@ -17,6 +17,9 @@ var nativeAttachLocks sync.Map
 func (h *Handler) ensureNativeBinding(ctx context.Context, session map[string]any) error {
 	err := h.bindNativeSession(ctx, session)
 	if err == nil {
+		_, err = h.store.DeletePreference(ctx, sleepPreferenceKey(stringValue(session, "agent_id"), stringValue(session, "id")))
+	}
+	if err == nil {
 		err = h.restoreCodexApproval(ctx, session)
 	}
 	if err == nil {
@@ -52,7 +55,7 @@ func (h *Handler) bindNativeSession(ctx context.Context, session map[string]any)
 	ref := buildSessionRef(aid, nativeID, stringValue(session, "connection_id"))
 	_, err = h.client.Runtime.ReadModel(ctx, &pb.ReadModelRequest{Session: ref})
 	recoverable := func(err error) bool {
-		return status.Code(err) == codes.NotFound || kind == "hermes" && status.Code(err) == codes.Unavailable
+		return status.Code(err) == codes.NotFound || (kind == "hermes" || kind == "codex") && status.Code(err) == codes.Unavailable
 	}
 	if !recoverable(err) {
 		return err
