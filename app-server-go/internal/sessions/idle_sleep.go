@@ -105,8 +105,7 @@ func (h *Handler) reclaimIdle(ctx context.Context, now time.Time, since map[stri
 			delete(since, key)
 			continue
 		}
-		// Hold the viewer lock through close: a newly opened tab renews after close
-		// and its binding path resumes the exact native identity.
+		// Hold the viewer lock through close so a concurrent renewal cannot be lost.
 		h.views.mu.Lock()
 		if h.views.until[key].After(now) {
 			h.views.mu.Unlock()

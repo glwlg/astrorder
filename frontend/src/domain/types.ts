@@ -184,6 +184,7 @@ export interface EventEnvelope {
 }
 
 export interface BootstrapPayload {
+  notifications?: EventNotification[];
   commands?: Command[];
   approvals?: Approval[];
   protocol_version: number;
@@ -209,6 +210,7 @@ export type EventNotificationKind =
   "task_completed" | "task_failed" | "approval_pending";
 
 export interface EventNotification {
+  cursor?: number;
   key: string;
   kind: EventNotificationKind;
   title: string;

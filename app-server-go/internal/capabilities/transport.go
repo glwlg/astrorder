@@ -1,11 +1,14 @@
 package capabilities
 
 import (
+	"astrorder.dev/app-server/internal/agentskill"
 	"astrorder.dev/app-server/internal/envtarget"
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/url"
+	"path"
 	"strings"
 )
 
@@ -66,8 +69,34 @@ func (s *Service) prepareDispatchedCLI(ctx context.Context, dest envtarget.Env, 
 			}
 		}
 	}
+	if len(ids) > 1 {
+		paths, err := dest.Paths(ctx)
+		if err != nil {
+			return err
+		}
+		home := skillHome(paths, kind)
+		callerPath := path.Join(home, agentskill.CallerFile)
+		if err := checkOfficialTarget(ctx, dest, home, callerPath); err != nil {
+			return err
+		}
+		raw, err := dest.Read(ctx, callerPath)
+		if err != nil && !errors.Is(err, envtarget.ErrNotExist) {
+			return err
+		}
+		var caller struct {
+			AgentID string `json:"agent_id"`
+		}
+		if json.Unmarshal(raw, &caller) == nil {
+			for _, id := range ids {
+				if caller.AgentID == id {
+					ids = []string{id}
+					break
+				}
+			}
+		}
+	}
 	if len(ids) != 1 {
-		return envtarget.Errorf(422, "请先接入目标机器上的 %s Agent，才能自动配置技能", kind)
+		return envtarget.Errorf(422, "请先为目标机器上的 %s Agent 配置星序会话 CLI，才能分发技能", kind)
 	}
 	_, err = s.SessionCLI(ctx, ids[0], true)
 	return err

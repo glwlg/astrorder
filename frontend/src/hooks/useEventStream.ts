@@ -5,6 +5,7 @@ import { connectEventStream, type EventStreamStatus } from "../api/eventStream";
 import {
   deliverBrowserNotification,
   notificationForEvent,
+  restorePushSubscription,
 } from "../domain/notifications";
 import { useAstrorderStore } from "../state/store";
 import { api } from "../api/client";
@@ -30,6 +31,10 @@ export function useEventStream(
   navigateRef.current = navigate;
   useEffect(() => {
     if (!authenticated) return;
+    void restorePushSubscription().catch(error => mantineNotifications.show({
+      id: "push-registration-error", color: "red",
+      message: `后台通知连接失败：${error instanceof Error ? error.message : '请重新启用通知'}`,
+    }));
     let stopped = false;
     let timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
@@ -140,7 +145,7 @@ export function useEventStream(
               }
             },
           });
-          deliverBrowserNotification(notification);
+          void deliverBrowserNotification(notification);
         }
         const previousSessionStatus = event.agent_id && event.session_id
           ? store.sessions[scopeKey(event.agent_id, event.session_id)]?.status

@@ -1,12 +1,12 @@
 import { IconBell, IconBellOff, IconCheck } from '@tabler/icons-react'
 import { ActionIcon, Menu, Tooltip } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
-  deliverBrowserNotification,
+  disableSystemNotifications,
   notificationPermission,
   requestNotificationPermission,
-  setSystemNotificationEnabled,
+  testSystemNotification,
   type NotificationPermissionState,
 } from '../domain/notifications'
 
@@ -19,42 +19,42 @@ const labels: Record<NotificationPermissionState, string> = {
 
 export function NotificationPermissionControl() {
   const [permission, setPermission] = useState<NotificationPermissionState>(() => notificationPermission())
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    const refresh = () => setPermission(notificationPermission())
+    window.addEventListener('astrorder:notification-settings', refresh)
+    window.addEventListener('focus', refresh)
+    return () => {
+      window.removeEventListener('astrorder:notification-settings', refresh)
+      window.removeEventListener('focus', refresh)
+    }
+  }, [])
 
-  const enable = async () => {
-    setSystemNotificationEnabled(true)
-    const next = await requestNotificationPermission()
-    setPermission(next)
-    if (next === 'granted') {
-      notifications.show({ color: 'teal', message: '系统通知已开启' })
-      deliverBrowserNotification({
-        key: 'test-notification-' + Date.now(),
-        kind: 'task_completed',
-        title: '系统通知已开启',
-        message: '会话完成与待审批将通过系统通知实时提醒。',
-        agent_id: 'system',
-        session_id: 'system',
-        created_at: new Date().toISOString(),
-      })
+  const run = async (action: () => Promise<void>) => {
+    setBusy(true)
+    try { await action() } catch (error) {
+      notifications.show({ color: 'red', message: error instanceof Error ? error.message : '通知设置失败，请重试' })
+    } finally {
+      setPermission(notificationPermission())
+      setBusy(false)
     }
   }
+  const enable = () => run(async () => {
+    const next = await requestNotificationPermission()
+    if (next === 'granted') notifications.show({ color: 'teal', message: '后台通知已开启，任务完成和待回答问题将提醒你。' })
+    else if (next === 'unsupported') notifications.show({ color: 'orange', message: '当前浏览器不支持后台通知；iPhone 请通过 HTTPS 打开星序并添加到主屏幕。' })
+  })
+  const disable = () => run(async () => {
+    await disableSystemNotifications()
+    notifications.show({ color: 'gray', message: '后台通知已停用' })
+  })
+  const sendTest = () => run(async () => {
+    await testSystemNotification()
+    notifications.show({ color: 'teal', message: '测试通知已提交，请检查系统通知栏。' })
+  })
 
-  const disable = () => {
-    setSystemNotificationEnabled(false)
-    setPermission('default')
-    notifications.show({ color: 'gray', message: '系统通知已停用' })
-  }
-
-  const sendTest = () => {
-    notifications.show({ color: 'teal', message: '已发送测试系统通知' })
-    deliverBrowserNotification({
-      key: 'test-notification-' + Date.now(),
-      kind: 'task_completed',
-      title: '星序 · 测试通知',
-      message: '系统通知已重新注册并测试成功。',
-      agent_id: 'system',
-      session_id: 'system',
-      created_at: new Date().toISOString(),
-    })
+  const showDeniedHelp = () => {
+    notifications.show({ color: 'orange', message: '通知权限已被拒绝，请在系统或浏览器的星序通知设置中允许通知后重试。' })
   }
 
   const isGranted = permission === 'granted'
@@ -67,7 +67,7 @@ export function NotificationPermissionControl() {
           variant="subtle"
           size="md"
           radius="md"
-          disabled
+          onClick={showDeniedHelp}
           aria-live="polite"
           aria-label={labels.denied}
         >
@@ -85,6 +85,7 @@ export function NotificationPermissionControl() {
           size="md"
           radius="md"
           onClick={() => void enable()}
+          loading={busy}
           aria-live="polite"
           aria-label={labels[permission]}
         >
@@ -103,6 +104,7 @@ export function NotificationPermissionControl() {
             size="md"
             radius="md"
             color="teal"
+            loading={busy}
             aria-live="polite"
             aria-label="后台通知已启用"
           >

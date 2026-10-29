@@ -74,12 +74,12 @@ func (s *Store) ClaimQueuedCommand(ctx context.Context, aid, sid, cid string) (m
 	return result, claimed, err
 }
 
-// CancelQueuedCommand competes atomically with claim; dispatched work is retained.
+// CancelQueuedCommand removes a queue record without cancelling native work.
 func (s *Store) CancelQueuedCommand(ctx context.Context, aid, sid, cid string) (map[string]any, bool, error) {
 	var result map[string]any
 	cancelled := false
 	err := s.WithTx(ctx, func(tx *sql.Tx) error {
-		mutation, err := tx.ExecContext(ctx, `UPDATE commands SET state='cancelled',updated_at=? WHERE agent_id=? AND session_id=? AND id=? AND (state='queued' OR (action='enqueue' AND state='failed'))`, nowDatabaseTime(), aid, sid, cid)
+		mutation, err := tx.ExecContext(ctx, `UPDATE commands SET state='cancelled',updated_at=? WHERE agent_id=? AND session_id=? AND id=? AND (state='queued' OR (action='enqueue' AND state IN ('failed','unknown')))`, nowDatabaseTime(), aid, sid, cid)
 		if err != nil {
 			return err
 		}

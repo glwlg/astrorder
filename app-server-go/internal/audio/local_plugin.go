@@ -169,11 +169,6 @@ func (m *LocalR2T2Manager) Enable(wait bool, persist bool) error {
 	}
 	m.enabled = true
 
-	if m.cmd != nil && m.cmd.Process != nil && m.state == "running" && m.IsHealthy(m.appCtx) {
-		m.mu.Unlock()
-		return nil
-	}
-
 	if m.workerRunning {
 		m.mu.Unlock()
 		if wait {
@@ -414,8 +409,6 @@ func (m *LocalR2T2Manager) startWorker(ctx context.Context, readyChan chan<- err
 	}
 
 	_ = os.MkdirAll(m.resourceDir, 0o755)
-	logFile, _ := os.OpenFile(filepath.Join(m.resourceDir, "llama-server.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
-
 	args := []string{
 		"-m", m.modelPath,
 		"--mmproj", m.mmprojPath,
@@ -445,12 +438,15 @@ func (m *LocalR2T2Manager) startWorker(ctx context.Context, readyChan chan<- err
 		configurePlatformProcess(cmd)
 	}
 
+	logFile, _ := os.OpenFile(filepath.Join(m.resourceDir, "llama-server.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if logFile != nil {
+		defer logFile.Close()
 		cmd.Stdout = logFile
 		cmd.Stderr = logFile
 	}
 
-	if err := cmd.Start(); err != nil {
+	releaseOwner, err := startPlatformProcess(cmd)
+	if err != nil {
 		m.mu.Lock()
 		m.state = "error"
 		m.errText = err.Error()
@@ -471,8 +467,8 @@ func (m *LocalR2T2Manager) startWorker(ctx context.Context, readyChan chan<- err
 	// Wait for process exit in background monitor (only monitor calls cmd.Wait)
 	go func() {
 		defer close(exitCh)
-		if logFile != nil {
-			defer logFile.Close()
+		if releaseOwner != nil {
+			defer releaseOwner()
 		}
 		_ = cmd.Wait()
 
@@ -505,6 +501,7 @@ func (m *LocalR2T2Manager) startWorker(ctx context.Context, readyChan chan<- err
 		if cmd.Process != nil {
 			_ = cmd.Process.Kill()
 		}
+		<-exitCh
 		readyChan <- err
 		return
 	}
@@ -540,9 +537,15 @@ func (m *LocalR2T2Manager) waitUntilReady(ctx context.Context, port int) error {
 
 		m.mu.RLock()
 		cmd := m.cmd
+		exited := m.processExit
 		m.mu.RUnlock()
-		if cmd == nil || (cmd.ProcessState != nil && cmd.ProcessState.Exited()) {
+		if cmd == nil {
 			return errors.New("llama.cpp 服务在模型加载期间退出。")
+		}
+		select {
+		case <-exited:
+			return errors.New("llama.cpp 服务在模型加载期间退出。")
+		default:
 		}
 
 		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, checkURL, nil)

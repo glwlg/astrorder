@@ -97,6 +97,11 @@ function mermaidSource(children: ReactNode): string | null {
   return /(?:^|\s)language-mermaid(?:\s|$)/.test(language) || looksLikeMermaid ? code : null
 }
 
+function MarkdownPre({ children }: { children?: ReactNode }) {
+  const code = mermaidSource(children)
+  return code ? <MermaidDiagram code={code} /> : <MarkdownCodeBlock>{children}</MarkdownCodeBlock>
+}
+
 function cleanHref(raw: string | undefined): string {
   if (!raw) return ''
   let cleaned = raw.trim()
@@ -435,10 +440,7 @@ export function MarkdownContent({
             )
           },
           table: (props) => <div className="markdown-table-wrap"><table>{props.children}</table></div>,
-          pre: (props) => {
-            const code = mermaidSource(props.children)
-            return code ? <MermaidDiagram code={code} /> : <MarkdownCodeBlock>{props.children}</MarkdownCodeBlock>
-          },
+          pre: MarkdownPre,
         }}
       >
         {normalizedValue}

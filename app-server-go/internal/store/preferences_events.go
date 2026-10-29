@@ -84,11 +84,27 @@ func (s *Store) LatestCursor(ctx context.Context) (int64, error) {
 
 // AppendEvent inserts one event unless its nullable-agent scope already contains the event ID.
 func (s *Store) AppendEvent(ctx context.Context, event Event) (*Event, error) {
-	var result *Event
+	events, err := s.AppendEvents(ctx, []Event{event})
+	if err != nil || len(events) == 0 {
+		return nil, err
+	}
+	return &events[0], nil
+}
+
+// AppendEvents commits related application events together, omitting duplicates.
+func (s *Store) AppendEvents(ctx context.Context, events []Event) ([]Event, error) {
+	var result []Event
 	err := s.WithTx(ctx, func(tx *sql.Tx) error {
-		inserted, err := insertEventTx(ctx, tx, event, s.eventRetention)
-		result = inserted
-		return err
+		for _, event := range events {
+			inserted, err := insertEventTx(ctx, tx, event, s.eventRetention)
+			if err != nil {
+				return err
+			}
+			if inserted != nil {
+				result = append(result, *inserted)
+			}
+		}
+		return nil
 	})
 	return result, err
 }

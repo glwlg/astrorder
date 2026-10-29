@@ -12,6 +12,11 @@ func nativeTurnKey(agentID, sessionID string) string {
  return "native_turn:"+string(encoded)
 }
 
+func NativeTurnCommandKey(agentID, sessionID string) string {
+	encoded, _ := json.Marshal([]string{agentID, sessionID})
+	return "native_turn_command:" + string(encoded)
+}
+
 // ActiveTurn returns the durable exact native turn ID for one Agent/session.
 func(s *Store)ActiveTurn(ctx context.Context,agentID,sessionID string)(string,error){
  value,err:=s.GetPreference(ctx,nativeTurnKey(agentID,sessionID));if err!=nil||!value.Exists||value.Value==nil{return "",err}

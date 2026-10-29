@@ -15,6 +15,7 @@ import (
 	"github.com/coder/websocket"
 
 	"astrorder.dev/app-server/internal/auth"
+	"astrorder.dev/app-server/internal/notifications"
 	"astrorder.dev/app-server/internal/store"
 )
 
@@ -75,19 +76,18 @@ func (h *EventHub) Publish(ctx context.Context, eventType string, data map[strin
 		Data:      data,
 	}
 
-	var inserted *store.Event
+	events := []store.Event{ev}
 	if h.store != nil {
-		var err error
-		inserted, err = h.store.AppendEvent(ctx, ev)
+		notices, err := notifications.Events(ctx, h.store.DB(), events)
+		if err != nil {
+			return fmt.Errorf("create notification: %w", err)
+		}
+		events, err = h.store.AppendEvents(ctx, append(events, notices...))
 		if err != nil {
 			return fmt.Errorf("append event: %w", err)
 		}
 	}
-	if inserted == nil {
-		inserted = &ev
-	}
-
-	h.broadcastCommitted([]store.Event{*inserted})
+	h.broadcastCommitted(events)
 	return nil
 }
 

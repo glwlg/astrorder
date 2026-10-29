@@ -28,6 +28,7 @@ const (
 	defaultBaseURL        = "http://127.0.0.1:30001"
 	invokePath            = "/api/v1/agent/invoke"
 	defaultRequestTimeout = 60 * time.Second
+	browserRequestTimeout = 30 * time.Minute
 	defaultMaxBodyBytes   = int64(16_000_000)
 	defaultMaxErrorBytes  = int64(64 << 10)
 )
@@ -920,6 +921,9 @@ func invoke(ctx context.Context, capability string, payload map[string]any, envL
 	timeout := config.RequestTimeout
 	if timeout <= 0 {
 		timeout = defaultRequestTimeout
+		if capability == "browser.run" {
+			timeout = browserRequestTimeout
+		}
 	}
 	requestContext, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()

@@ -54,10 +54,18 @@ func (h *Handler) handleListMessages(w http.ResponseWriter, r *http.Request, sid
 	if nativeID == "" {
 		nativeID = sid
 	}
-	// Reading a Codex transcript does not need the daemon to own the thread, and
-	// owning it can be refused (another client is the active writer, or the
-	// thread is archived). A cursor from the unbound path stays on that path.
-	if strings.HasPrefix(before, unboundCursorPrefix) {
+	agent, err := h.store.GetAgent(ctx, aid)
+	if err != nil {
+		writeJSONError(w, 500, "Agent storage unavailable")
+		return
+	}
+	// Codex history reads must never resume a dormant thread.
+	unbound := strings.HasPrefix(before, unboundCursorPrefix)
+	if stringValue(agent, "kind") == "codex" && before == "" {
+		_, readErr := h.client.Runtime.ReadModel(ctx, &pb.ReadModelRequest{Session: buildSessionRef(aid, nativeID, stringValue(row, "connection_id"))})
+		unbound = readErr != nil
+	}
+	if unbound {
 		items, next, err := h.readCodexHistoryUnbound(ctx, row, nativeID, before, limit)
 		if err != nil {
 			writeJSONError(w, 503, "Native history read failed")
@@ -66,15 +74,11 @@ func (h *Handler) handleListMessages(w http.ResponseWriter, r *http.Request, sid
 		writeJSON(w, 200, map[string]any{"items": items, "next_cursor": next})
 		return
 	}
-	if err := h.ensureNativeBinding(ctx, row); err != nil {
-		if items, next, readErr := h.readCodexHistoryUnbound(ctx, row, nativeID, before, limit); readErr == nil {
-			writeJSON(w, 200, map[string]any{"items": items, "next_cursor": next})
+	if stringValue(agent, "kind") != "codex" {
+		if err := h.ensureNativeBinding(ctx, row); err != nil {
+			writeJSONError(w, 503, "Native session binding unavailable: "+err.Error())
 			return
-		} else {
-			logUnboundHistory(row, err, readErr)
 		}
-		writeJSONError(w, 503, "Native session binding unavailable: "+err.Error())
-		return
 	}
 	request := &pb.HistoryPageRequest{Session: buildSessionRef(aid, nativeID, stringValue(row, "connection_id")), Limit: uint32(limit)}
 	if before != "" {
@@ -98,11 +102,6 @@ func (h *Handler) handleListMessages(w http.ResponseWriter, r *http.Request, sid
 	source := stringValue(row, "source_id")
 	if source == "" {
 		source = aid
-	}
-	agent, err := h.store.GetAgent(ctx, aid)
-	if err != nil {
-		writeJSONError(w, 500, "Agent storage unavailable")
-		return
 	}
 	kind := stringValue(agent, "kind")
 	if kind == "codex" {

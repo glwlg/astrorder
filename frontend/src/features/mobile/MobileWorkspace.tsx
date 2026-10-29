@@ -3,7 +3,7 @@ import { Button, Group, Menu, Modal, TextInput, useMantineColorScheme } from '@m
 import { MobileTaskNotices } from './MobileTaskNotices'
 import { notifications } from '@mantine/notifications'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { IconSun, IconMoon, IconDeviceDesktop, IconBell, IconRefresh, IconPlayerPlay, IconInfoCircle, IconNotes, IconPlayerStop, IconSend, IconMessageCircle, IconCheck, IconX, IconMicrophone, IconPlus, IconDotsVertical, IconCpu, IconLoader2, IconPlugConnected, IconCloudDataConnection, IconFilter, IconTransfer, IconEdit, IconCopy, IconTrash, IconChalkboard, IconWorld } from '@tabler/icons-react'
+import { IconSun, IconMoon, IconDeviceDesktop, IconRefresh, IconPlayerPlay, IconInfoCircle, IconNotes, IconPlayerStop, IconSend, IconMessageCircle, IconCheck, IconX, IconMicrophone, IconPlus, IconDotsVertical, IconCpu, IconLoader2, IconPlugConnected, IconCloudDataConnection, IconFilter, IconTransfer, IconEdit, IconCopy, IconTrash, IconChalkboard, IconWorld } from '@tabler/icons-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useShallow } from 'zustand/react/shallow'
 import { useReducedMotion } from '@mantine/hooks'
@@ -12,7 +12,8 @@ import { api } from '../../api/client'
 import { sessionHandoffTargets } from '../../domain/handoff'
 import type { Agent, AgentCommand, AgentMention, Approval, Command, Message, Session, Task } from '../../domain/types'
 import { findSessionHandoff, newCommandId, scopeKey } from '../../domain/semantics'
-import { requestNotificationPermission } from '../../domain/notifications'
+import { NotificationPermissionControl } from '../../components/NotificationPermissionControl'
+import { useSessionUnread } from '../../hooks/useSessionUnread'
 import { selectApprovals, selectCommands, selectMessages, selectProjects, selectSessions, selectTasks, useAstrorderStore } from '../../state/store'
 import { useSessionResources } from '../../hooks/useAstrorderData'
 import { useSessionModel } from '../../hooks/useSessionModel'
@@ -132,6 +133,7 @@ export function MobileWorkspace() {
   const route = new URLSearchParams(location.search)
   const routeId = location.pathname.match(/\/chat\/([^/]+)$/)?.[1]
   const selected = navigableSessions.find(s => s.id === (routeId ? decodeURIComponent(routeId) : '') && s.agent_id === route.get('agent_id')) || null
+  const { isUnread, markRead } = useSessionUnread(selected ? scopeKey(selected.agent_id, selected.id) : undefined)
   const [sheet, setSheet] = useState<'sessions' | 'status' | 'goal' | 'tasks' | 'task' | 'models' | 'connections' | 'gateway' | 'blackboard' | 'browser' | 'kernels' | null>(null)
   const [workbenchMounted, setWorkbenchMounted] = useState(false)
   const [workbenchOpened, setWorkbenchOpened] = useState(false)
@@ -146,6 +148,7 @@ export function MobileWorkspace() {
   const [drawerOffset, setDrawerOffset] = useState<number | null>(null)
   const [drawerSettling, setDrawerSettling] = useState(false)
   const select = (session: Session, transition?: SessionCardCut) => {
+    markRead(scopeKey(session.agent_id, session.id))
     const currentIndex = navigableSessions.findIndex(item => item.id === selected?.id && item.agent_id === selected?.agent_id)
     const nextIndex = navigableSessions.findIndex(item => item.id === session.id && item.agent_id === session.agent_id)
     const inferred: SessionCardCut = nextIndex >= 0 && currentIndex >= 0 && nextIndex < currentIndex ? 'previous-up' : 'next-down'
@@ -283,7 +286,7 @@ export function MobileWorkspace() {
   const [search, setSearch] = useState('')
   const [handoffTarget, setHandoffTarget] = useState<Session | null>(null)
   const [forkWorktreeTarget, setForkWorktreeTarget] = useState<Session | null>(null)
-  
+
   const handleForkChatBranch = async (session: Session) => {
     try {
       const created = await api.forkSession(session.id, {
@@ -403,7 +406,7 @@ export function MobileWorkspace() {
     if (filter === 'pinned' && !pins[scopeKey(s.agent_id, s.id)]) return false
     if (filter === 'open' && !isSessionOpen(s)) return false
     if (filter === 'recent' && Date.now() - Date.parse(s.updated_at) > 86400000) return false
-    if (filter === 'unread') return (s as Session & { unread?: boolean }).unread === true
+    if (filter === 'unread') return isUnread(scopeKey(s.agent_id, s.id))
     return true
   })
   const grouped = buildProjectGroups(visible, agents, projects, search.trim().toLowerCase()).filter(project => (filter === 'all' && agentFilter === 'all') || project.sessions.length > 0)
@@ -880,6 +883,7 @@ export function MobileWorkspace() {
     {addProjectOpened && <AddProjectModal opened={addProjectOpened} onClose={() => setAddProjectOpened(false)} agents={agents} />}
     {createOpened && <NewSessionDialog agents={agents} project={createProject} initialAgentId={agentFilter !== 'all' ? agentFilter : undefined} onClose={() => setCreateOpened(false)} onCreated={session => { setSearch(''); select(session) }} />}
     <header className="m-header"><div className="m-brand"><button className="m-session-nav" aria-label="打开会话列表" onClick={() => { setSheet('sessions'); void openState.refetch() }}><IconMessageCircle size={21} /></button><div className="m-brand-home-btn" onClick={() => navigate('/chat')} role="button" aria-label="返回工作台首页"><BrandMark className="m-brand-mark" size={26} alt="" /><strong>星序</strong></div><span className={`m-dot ${connection === 'connected' ? 'online' : ''}`} aria-label={connection === 'connected' ? '已连接' : '连接中'} /></div><div className="m-header-actions">
+      <NotificationPermissionControl />
       <button aria-label="新建会话" onClick={() => { setCreateProject(resolveCurrentProject()); setCreateOpened(true) }}><IconPlus size={21} /></button>
       <Menu position="bottom-end" width={210} withinPortal>
         <Menu.Target><button aria-label="应用设置"><IconDotsVertical size={21} /></button></Menu.Target>
@@ -890,7 +894,6 @@ export function MobileWorkspace() {
           <Menu.Item leftSection={<IconPlugConnected size={17} />} onClick={() => setSheet('connections')}>连接管理</Menu.Item>
           <Menu.Item leftSection={<IconCloudDataConnection size={17} />} onClick={() => setSheet('gateway')}>模型网关</Menu.Item>
           <Menu.Item leftSection={colorScheme === 'auto' ? <IconDeviceDesktop size={17} /> : colorScheme === 'light' ? <IconSun size={17} /> : <IconMoon size={17} />} onClick={() => setColorScheme(colorScheme === 'auto' ? 'light' : colorScheme === 'light' ? 'dark' : 'auto')}>切换主题</Menu.Item>
-          <Menu.Item leftSection={<IconBell size={17} />} onClick={async () => notify(`通知权限：${await requestNotificationPermission()}`)}>通知设置</Menu.Item>
           <Menu.Item leftSection={<IconRefresh size={17} />} onClick={() => void refresh()}>刷新</Menu.Item>
         </Menu.Dropdown>
       </Menu>
@@ -989,7 +992,7 @@ export function MobileWorkspace() {
               {['queued', 'failed'].includes(entry.state) && <button type="button" disabled={!canSubmit || submitting || (isAntigravity && nativeBusy)} aria-label={entry.state === 'failed' ? '重新发送' : nativeBusy ? '立即引导' : '发送待发消息'} onClick={() => void sendQueued(entry)}>{entry.state === 'failed' ? '重新发送' : nativeBusy ? '立即引导' : '发送'}</button>}
               {['queued', 'failed', 'cancelled'].includes(entry.state) && <button type="button" aria-label="编辑待发消息" onClick={() => void editQueued(entry)}><IconEdit size={16} /></button>}
               {entry.state === 'unknown' && <button type="button" aria-label="核对发送结果" onClick={() => void refresh()}>核对结果</button>}
-              <button type="button" aria-label="删除" onClick={() => void (directOutbox.snapshot().some(row => row === entry) ? directOutbox : outbox).remove(entry.payload.agent_id, entry.payload.session_id, entry.payload.id).catch(error => notify(messageError(error), 'red'))}><IconTrash size={16} /></button>
+              {['queued', 'failed', 'unknown'].includes(entry.state) && <button type="button" aria-label="删除" title={entry.state === 'unknown' ? '移除记录不会撤回已发送的消息' : undefined} onClick={() => void (directOutbox.snapshot().some(row => row === entry) ? directOutbox : outbox).remove(entry.payload.agent_id, entry.payload.session_id, entry.payload.id).catch(error => notify(messageError(error), 'red'))}><IconTrash size={16} /></button>}
             </div>
           </motion.article>
         ))}

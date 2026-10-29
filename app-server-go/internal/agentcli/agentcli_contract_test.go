@@ -182,6 +182,28 @@ func TestDefaultURLIsLoopback30001(t *testing.T) {
 	}
 }
 
+func TestBrowserRunHasLongerDefaultTimeout(t *testing.T) {
+	env := mapLookup(map[string]string{
+		"ASTRORDER_AGENT_TOKEN":          "secret",
+		"ASTRORDER_CALLER_AGENT_ID":      "hermes",
+		"ASTRORDER_CALLER_CONNECTION_ID": "local",
+		"ASTRORDER_CALLER_PROFILE_NAME":  "default",
+		"ASTRORDER_CALLER_RUNTIME":       "hermes",
+		"ASTRORDER_CALLER_SESSION_ID":    "session-1",
+	})
+	client := &http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		deadline, ok := request.Context().Deadline()
+		if !ok || time.Until(deadline) < 29*time.Minute {
+			t.Error("browser task received a short request timeout")
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{}`)), Request: request}, nil
+	})}
+	var stdout, stderr bytes.Buffer
+	if code := RunWithConfig(context.Background(), []string{"invoke", "browser.run", "--input", `{"url":"https://example.com","goal":"read"}`}, strings.NewReader(""), &stdout, &stderr, env, Config{HTTPClient: client}); code != 0 {
+		t.Fatal(code, stderr.String())
+	}
+}
+
 type roundTripperFunc func(*http.Request) (*http.Response, error)
 
 func (function roundTripperFunc) RoundTrip(request *http.Request) (*http.Response, error) {

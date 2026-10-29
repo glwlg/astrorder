@@ -1,5 +1,6 @@
 import {
   IconChecklist,
+  IconCheck,
   IconChevronDown,
   IconChevronUp,
   IconCopy,
@@ -32,10 +33,11 @@ import {
   UnstyledButton,
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { useCallback, useMemo, useState, type CSSProperties } from 'react'
 import { LayoutGroup, motion } from 'motion/react'
 import { VariableProximity } from './animations/VariableProximity'
 import { useSessionOrder } from '../hooks/useSessionOrder'
+import { useSessionUnread } from '../hooks/useSessionUnread'
 import { AgentSessionFilter, matchesAgent } from './AgentSessionFilter'
 import { NewSessionDialog } from './NewSessionDialog'
 import { HandoffDialog } from './HandoffDialog'
@@ -53,7 +55,6 @@ import { buildProjectGroups, displaySessionTitle, formatRelativeTime, type Proje
 import { api } from '../api/client'
 import './sessionPins.css'
 const COLLAPSED_PROJECTS_STORAGE_KEY = 'astrorder:collapsed-projects'
-const SESSIONS_LAST_READ_KEY = 'astrorder:sessions-last-read'
 import { useAstrorderStore } from '../state/store'
 import { AddProjectModal } from './AddProjectModal'
 import {
@@ -248,66 +249,23 @@ export function SessionRail({
   }, [tasks, liveActivityAt])
 
   const activityStatusFor = useCallback((session: Session): SessionStatus => (
-    session.status === 'running' || session.status === 'waiting_approval' || session.status === 'error'
+    session.status === 'error'
+      ? 'idle'
+      : session.status === 'running' || session.status === 'waiting_approval'
       ? session.status
       : liveStatuses.get(scopeKey(session.agent_id, session.id)) || session.status
   ), [liveStatuses])
 
-  const [lastReadMap, setLastReadMap] = useState<Record<string, number>>(() => {
-    try {
-      return JSON.parse(localStorage.getItem(SESSIONS_LAST_READ_KEY) || '{}')
-    } catch {
-      return {}
+  const { isUnread, markRead: markSessionRead } = useSessionUnread(activeSessionKey)
+  const decoratedSessions = useMemo(() => sessions.map(session => {
+    const key = scopeKey(session.agent_id, session.id)
+    const status = activityStatusFor(session)
+    return {
+      ...session,
+      pinned: pinnedSessions[key] === true,
+      unread: status !== 'running' && status !== 'waiting_approval' && isUnread(key),
     }
-  })
-
-  const markSessionRead = useCallback((key: string) => {
-    setLastReadMap((prev) => {
-      const now = Date.now()
-      if (prev[key] && now - prev[key] < 1000) return prev
-      const next = { ...prev, [key]: now }
-      try {
-        localStorage.setItem(SESSIONS_LAST_READ_KEY, JSON.stringify(next))
-      } catch {
-        // ignore
-      }
-      return next
-    })
-  }, [])
-
-  useEffect(() => {
-    if (activeSessionKey) {
-      markSessionRead(activeSessionKey)
-    }
-  }, [activeSessionKey, markSessionRead])
-
-  // 增强装饰会话带上 pinned 和 unread
-  const decoratedSessions = useMemo(() => {
-    return sessions.map((s) => {
-      const key = scopeKey(s.agent_id, s.id)
-      const isPinned = pinnedSessions[key] === true
-      const actStatus = activityStatusFor(s)
-      const isCurrentActive = key === activeSessionKey
-      const isFinished = actStatus !== 'running' && actStatus !== 'waiting_approval'
-      const updatedAt = Date.parse(s.updated_at)
-      let unread = false
-      if (!isCurrentActive && isFinished && Number.isFinite(updatedAt)) {
-        const lastRead = lastReadMap[key]
-        if (lastRead) {
-          unread = updatedAt > lastRead
-        } else {
-          // 未打开过的会话，仅最近 24 小时内更新过的视为未读
-          const age = Date.now() - updatedAt
-          unread = age >= 0 && age < 86_400_000
-        }
-      }
-      return {
-        ...s,
-        pinned: isPinned,
-        unread,
-      }
-    })
-  }, [sessions, pinnedSessions, activeSessionKey, lastReadMap, activityStatusFor])
+  }), [sessions, pinnedSessions, activityStatusFor, isUnread])
 
   const [draggedProject, setDraggedProject] = useState<string | null>(null)
   const allGroups = useMemo(() => buildProjectGroups(decoratedSessions, agents, projects), [decoratedSessions, agents, projects])
@@ -858,6 +816,7 @@ export function SessionRail({
                 </UnstyledButton>
                 {!batchMode && <div className="session-row-actions has-pinned"><button className="session-action-btn is-active" aria-label="取消置顶" onClick={e => togglePin(session, e)}><IconPinned size={14} /></button>
                   <Menu position="bottom-end" withinPortal opened={railMenu?.kind === 'session' && railMenu.key === key} onChange={(opened) => updateRailMenu(opened, 'session', key)}><Menu.Target><button className="session-action-btn" aria-label="更多操作"><IconDotsVertical size={14} /></button></Menu.Target><Menu.Dropdown>
+                    {isUnread(key) && <Menu.Item leftSection={<IconCheck size={14} />} onClick={() => markSessionRead(key)}>标为已读</Menu.Item>}
                     <Menu.Item leftSection={<IconEdit size={14} />} onClick={() => openRenameModal(session)}>重命名</Menu.Item>
                     <Menu.Item leftSection={<IconCopy size={14} />} onClick={() => copySessionId(session)}>复制 ID</Menu.Item>
                     {forkMenuItems(session)}
@@ -1087,6 +1046,9 @@ export function SessionRail({
                               </button>
                             </Menu.Target>
                             <Menu.Dropdown onClick={(e) => e.stopPropagation()}>
+                              {isUnread(key) && <Menu.Item leftSection={<IconCheck size={14} />} onClick={() => markSessionRead(key)}>
+                                标为已读
+                              </Menu.Item>}
                               <Menu.Item leftSection={<IconEdit size={14} />} onClick={() => openRenameModal(session)}>
                                 重命名
                               </Menu.Item>

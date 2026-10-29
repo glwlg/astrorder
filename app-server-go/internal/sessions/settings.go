@@ -28,12 +28,21 @@ func (h *Handler) settingsRef(ctx context.Context, w http.ResponseWriter, r *htt
 	}
 	connID, _ := session["connection_id"].(string)
 	ref := buildSessionRef(agentID, sessionID, connID)
-	if err := h.ensureNativeBinding(ctx, session); err != nil {
-		if r.Method == http.MethodGet {
+	if nativeID := stringValue(session, "source_session_id"); nativeID != "" {
+		ref.SessionId = nativeID
+	}
+	if r.Method == http.MethodGet {
+		// Reading controls must not attach, restore policy, or clear sleep state.
+		if _, err := h.client.Runtime.ReadModel(ctx, &sessiondv1.ReadModelRequest{Session: ref}); err != nil {
 			if controlRef, handled := h.unboundSettings(ctx, w, r, session, err); handled {
 				return controlRef, agentID, session, controlRef != nil
 			}
+			writeJSONError(w, http.StatusBadGateway, "Native settings unavailable: "+err.Error())
+			return nil, "", nil, false
 		}
+		return ref, agentID, session, true
+	}
+	if err := h.ensureNativeBinding(ctx, session); err != nil {
 		writeJSONError(w, http.StatusBadGateway, "Native session binding unavailable: "+err.Error())
 		return nil, "", nil, false
 	}

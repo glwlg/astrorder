@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { useBackgroundTasks } from '../state/backgroundTasks'
 import { BackgroundTasks } from './BackgroundTasks'
+vi.mock('../state/upgradeTasks', () => ({ useUpgradeTaskRecovery: () => '' }))
 
 afterEach(() => {
   cleanup()

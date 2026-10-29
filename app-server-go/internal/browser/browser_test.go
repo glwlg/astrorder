@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -14,6 +15,7 @@ import (
 
 	"astrorder.dev/app-server/internal/auth"
 	"astrorder.dev/app-server/internal/config"
+	"astrorder.dev/app-server/internal/store"
 	"github.com/coder/websocket"
 )
 
@@ -22,6 +24,50 @@ const (
 	fixtureSessionKey = "agent-1::session-1"
 	fixtureShotBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
 )
+
+func newEngineStore(t *testing.T) *store.Store {
+	t.Helper()
+	st, err := store.Open(filepath.Join(t.TempDir(), "app.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	if err := st.SetPreference(context.Background(), "services:llm", map[string]any{
+		"base_url": "https://model.test/v1", "model": "test", "api_key": "test-key", "reasoning": "low",
+	}, true); err != nil {
+		t.Fatal(err)
+	}
+	return st
+}
+
+func TestBrowserTaskRenewsSessionMarkers(t *testing.T) {
+	fake := newFakeCDPServer(t)
+	defer fake.server.Close()
+	var tags atomic.Int32
+	fake.cdpHandlers.Store("Runtime.evaluate", func(_ string, params map[string]any) (any, error) {
+		expression, _ := params["expression"].(string)
+		if strings.Contains(expression, "window.name=") {
+			tags.Add(1)
+			return map[string]any{"result": map[string]any{"value": nil}}, nil
+		}
+		return nil, fmt.Errorf("use default evaluation")
+	})
+	manager := NewSessionManager(fake.server.URL, true)
+	var atRun int32
+	manager.engineRunner = func(_ context.Context, request engineRequest) (engineResult, error) {
+		atRun = tags.Load()
+		return engineResult{OK: true, Status: "done", TargetID: request.TargetID}, nil
+	}
+	_, err := manager.RunExternalBrowserTask(context.Background(), BrowserTaskRequest{
+		URL: "https://example.com/test", Goal: "read", SessionKey: fixtureSessionKey,
+	}, newEngineStore(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if atRun == 0 || tags.Load() <= atRun {
+		t.Fatal("the session marker was not renewed after the upstream task")
+	}
+}
 
 // FakeCDPServer mocks HTTP discovery and WebSocket CDP target.
 type FakeCDPServer struct {
@@ -551,19 +597,15 @@ func TestAgentAPIInvokeSupport(t *testing.T) {
 		Publisher:  pub,
 		CDPURL:     fake.server.URL,
 		NoAutoExec: true,
-		PlannerInvoker: func(ctx context.Context, state any, questions map[string]any) (map[string]any, error) {
-			return map[string]any{
-				"answers": map[string]any{
-					"operation":      map[string]any{"choice": "DONE"},
-					"goal_satisfied": map[string]any{"choice": "SATISFIED"},
-				},
-			}, nil
-		},
+		Store:      newEngineStore(t),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	h := rawHandler.(*Handler)
+	h.manager.engineRunner = func(_ context.Context, request engineRequest) (engineResult, error) {
+		return engineResult{OK: true, Status: "done", TargetID: request.TargetID}, nil
+	}
 	ctx := context.Background()
 
 	// Ensure tab exists first (as browser.cdp has create=false semantics)

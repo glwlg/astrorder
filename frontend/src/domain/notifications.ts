@@ -1,161 +1,128 @@
+import { api } from '../api/client'
 import type { EventEnvelope, EventNotification } from './types'
 
-function textValue(value: unknown, fallback: string): string {
-  return typeof value === 'string' && value.trim() ? value.trim() : fallback
-}
-
-function safeLabel(value: string): string {
-  return value
-    .replace(/(api[_-]?key|access[_-]?token|refresh[_-]?token|token|password|passwd|secret|authorization|private[_ -]?key)\s*[:=]\s*[^\s,;]+/gi, '$1=[REDACTED]')
-    .replace(/[\r\n\0]/g, ' ')
-    .slice(0, 160)
-}
-
-function scope(event: EventEnvelope): { agentId: string; sessionId: string } | null {
-  const agentId = typeof event.agent_id === 'string' && event.agent_id ? event.agent_id : typeof event.data.agent_id === 'string' ? event.data.agent_id : ''
-  const sessionId = typeof event.session_id === 'string' && event.session_id ? event.session_id : typeof event.data.session_id === 'string' ? event.data.session_id : ''
-  return agentId && sessionId ? { agentId, sessionId } : null
-}
-
 export function notificationForEvent(event: EventEnvelope): EventNotification | null {
-  const identity = scope(event)
-  if (!identity) return null
-
-  if (event.type === 'native.observation') {
-    const name = event.data.event
-    const observed = event.data.observed_at
-    if (event.data.approval_pending === true || event.data.notification !== true || typeof observed !== 'number' || Math.abs(Date.now() / 1000 - observed) > 60) return null
-    if (!['Interrupt', 'PermissionRequest', 'Stop'].includes(String(name))) return null
-    if (name === 'Stop') return null
-    if (name === 'Stop') {
-      const sessionTitle = safeLabel(textValue(event.data.session_title, '会话'))
-      const preview = safeLabel(textValue(event.data.preview, ''))
-      return {
-        key: `${identity.agentId}::${identity.sessionId}::observation::${String(event.data.id)}`,
-        kind: 'task_completed',
-        title: '会话已完成',
-        message: preview ? `${sessionTitle}：${preview}` : `${sessionTitle} 已完成回复。`,
-        agent_id: identity.agentId,
-        session_id: identity.sessionId,
-        created_at: new Date(observed * 1000).toISOString(),
-      }
-    }
-    const approval = name === 'PermissionRequest'
-    return {
-      key: `${identity.agentId}::${identity.sessionId}::observation::${String(event.data.id)}`,
-      kind: approval ? 'approval_pending' : 'task_failed',
-      title: approval ? '原生端等待审批' : '原生执行已中断',
-      message: approval ? '请在原生客户端处理；观察钩子不会代为授权。' : '本轮未正常完成。',
-      agent_id: identity.agentId,
-      session_id: identity.sessionId,
-      created_at: new Date(observed * 1000).toISOString(),
-    }
-  }
-
-  if (event.type === 'task.upsert') {
-    const taskId = typeof event.data.id === 'string' ? event.data.id : ''
-    if (event.data.kind === 'tool' || taskId.startsWith('codex:background:')) return null
-    const status = typeof event.data.status === 'string' ? event.data.status : ''
-    const progress = event.data.progress
-    // Clearing a native goal is a state update, including old empty-goal
-    // tombstones replayed by an earlier App Server, rather than a task failure.
-    if (status === 'cancelled' && progress && typeof progress === 'object' && 'type' in progress && progress.type === 'goal') return null
-    if (!taskId || !['failed', 'cancelled'].includes(status)) return null
-    const title = safeLabel(textValue(event.data.title, '后台任务'))
-    const failed = status !== 'completed'
-    return {
-      key: `${identity.agentId}::${identity.sessionId}::task::${taskId}::${status === 'cancelled' ? 'failed' : status}`,
-      kind: failed ? 'task_failed' : 'task_completed',
-      title: failed ? '任务失败' : '任务已完成',
-      message: `${title}${status === 'cancelled' ? '已取消' : failed ? '未完成' : '已完成'}。`,
-      agent_id: identity.agentId,
-      session_id: identity.sessionId,
-      created_at: new Date().toISOString(),
-    }
-  }
-
-  if (event.type === 'approval.upsert' && event.data.state === 'pending') {
-    const approvalId = typeof event.data.id === 'string' ? event.data.id : ''
-    if (!approvalId) return null
-    return {
-      key: `${identity.agentId}::${identity.sessionId}::approval::${approvalId}::pending`,
-      kind: 'approval_pending',
-      title: event.data.method === 'item/tool/requestUserInput' ? 'Codex 等待你的回答' : '操作等待审批',
-      message: safeLabel(textValue(event.data.title, '有一个操作等待授权确认')),
-      agent_id: identity.agentId,
-      session_id: identity.sessionId,
-      created_at: new Date().toISOString(),
-    }
-  }
-
-  return null
+  if (event.type !== 'notification.created') return null
+  const notice = event.data as unknown as EventNotification
+  if (!notice.key || !notice.agent_id || !notice.session_id || !notice.title || !notice.message ||
+    !['task_completed', 'task_failed', 'approval_pending'].includes(notice.kind)) return null
+  return { ...notice, cursor: event.cursor }
 }
 
 const NOTIFICATION_ENABLED_KEY = 'astrorder:system_notification_enabled'
+let pushSubscribed = false
 
 export function isSystemNotificationEnabled(): boolean {
-  if (typeof window === 'undefined') return true
-  try {
-    const val = localStorage.getItem(NOTIFICATION_ENABLED_KEY)
-    return val === null ? true : val === 'true'
-  } catch {
-    return true
-  }
+  try { return localStorage.getItem(NOTIFICATION_ENABLED_KEY) !== 'false' } catch { return true }
 }
 
 export function setSystemNotificationEnabled(enabled: boolean): void {
-  if (typeof window === 'undefined') return
-  try {
-    localStorage.setItem(NOTIFICATION_ENABLED_KEY, String(enabled))
-  } catch {}
+  try { localStorage.setItem(NOTIFICATION_ENABLED_KEY, String(enabled)) } catch {}
 }
 
 export type NotificationPermissionState = 'granted' | 'denied' | 'default' | 'unsupported'
 
+function desktopNotify() {
+  return typeof window !== 'undefined'
+    ? (window as unknown as { astrorderDesktop?: { notify?: (notice: { title: string; body: string; tag: string }) => Promise<boolean> } }).astrorderDesktop?.notify
+    : undefined
+}
+
+function mobileRoute(): boolean {
+  return window.location.pathname.startsWith('/mobile') || window.innerWidth < 768 || window.matchMedia?.('(max-width: 767px)').matches
+}
+
 export function notificationPermission(): NotificationPermissionState {
   if (!isSystemNotificationEnabled()) return 'default'
-  if (typeof window !== 'undefined' && (window as any).astrorderDesktop?.notify) return 'granted'
+  if (desktopNotify()) return 'granted'
   if (typeof Notification === 'undefined') return 'unsupported'
-  return Notification.permission
+  // Browser permission alone does not mean that this device has subscribed.
+  return Notification.permission === 'granted' && !pushSubscribed ? 'default' : Notification.permission
+}
+
+async function saveSubscription(subscription: PushSubscription): Promise<void> {
+  const json = subscription.toJSON()
+  if (!json.endpoint || !json.keys) throw new Error('浏览器未返回完整的通知订阅')
+  await api.savePushSubscription({ endpoint: json.endpoint, keys: json.keys, origin: window.location.origin, mobile: mobileRoute() })
+  pushSubscribed = true
+  window.dispatchEvent(new Event('astrorder:notification-settings'))
+}
+
+export async function restorePushSubscription(): Promise<void> {
+  if (desktopNotify() || !isSystemNotificationEnabled() || typeof Notification === 'undefined' || Notification.permission !== 'granted' || !('serviceWorker' in navigator)) return
+  const registration = await navigator.serviceWorker.getRegistration()
+  const subscription = await registration?.pushManager?.getSubscription()
+  if (subscription) await saveSubscription(subscription)
 }
 
 export async function requestNotificationPermission(): Promise<NotificationPermissionState> {
-  if (typeof window !== 'undefined' && (window as any).astrorderDesktop?.notify) return 'granted'
+  if (desktopNotify()) { setSystemNotificationEnabled(true); return 'granted' }
   if (typeof Notification === 'undefined') return 'unsupported'
-  if (Notification.permission !== 'default') return Notification.permission
-  return Notification.requestPermission()
+  if (Notification.permission === 'denied') return 'denied'
+  if (window.location.protocol !== 'https:' || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+    throw new Error('后台通知需要通过 HTTPS 打开星序，并使用支持推送的浏览器；iPhone 请先将星序添加到主屏幕。')
+  }
+  const permission = Notification.permission === 'granted' ? 'granted' : await Notification.requestPermission()
+  if (permission !== 'granted') return permission
+  const registration = await navigator.serviceWorker.ready
+  const { public_key } = await api.getPushSettings()
+  const decoded = atob(public_key.replace(/-/g, '+').replace(/_/g, '/'))
+  const key = Uint8Array.from(decoded, char => char.charCodeAt(0))
+  const subscription = await registration.pushManager.getSubscription() || await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key })
+  await saveSubscription(subscription)
+  setSystemNotificationEnabled(true)
+  return 'granted'
 }
 
-export function deliverBrowserNotification(notification: EventNotification): boolean {
-  if (!isSystemNotificationEnabled()) return false
-  if (typeof window !== 'undefined' && (window as any).astrorderDesktop?.notify) {
-    try {
-      void (window as any).astrorderDesktop.notify({
-        title: notification.title,
-        body: notification.message,
-        tag: notification.key,
-      })
-      return true
-    } catch {
-      // Fall through
+export async function disableSystemNotifications(): Promise<void> {
+  if (!desktopNotify() && 'serviceWorker' in navigator) {
+    const registration = await navigator.serviceWorker.getRegistration()
+    const subscription = await registration?.pushManager?.getSubscription()
+    if (subscription) {
+      await api.deletePushSubscription(subscription.endpoint)
+      await subscription.unsubscribe()
     }
   }
-  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return false
+  pushSubscribed = false
+  setSystemNotificationEnabled(false)
+  window.dispatchEvent(new Event('astrorder:notification-settings'))
+}
+
+export async function testSystemNotification(): Promise<void> {
+  if (desktopNotify()) {
+    const accepted = await deliverBrowserNotification({ key: `test-${Date.now()}`, kind: 'task_completed', title: '星序 · 测试通知', message: '任务完成和待回答问题将在这里提醒。', agent_id: 'system', session_id: 'system', created_at: new Date().toISOString() })
+    if (!accepted) throw new Error('系统未接受通知，请检查 Windows 通知设置。')
+    return
+  }
+  const registration = await navigator.serviceWorker.getRegistration()
+  const subscription = await registration?.pushManager?.getSubscription()
+  if (!subscription) throw new Error('请先启用后台通知')
+  await api.testPushSubscription(subscription.endpoint)
+}
+
+export async function deliverBrowserNotification(notification: EventNotification): Promise<boolean> {
+  if (!isSystemNotificationEnabled()) return false
+  const notify = desktopNotify()
   try {
+    if (notify) return await notify({ title: notification.title, body: notification.message, tag: notification.key })
+    // Subscribed browsers receive their system alert from Web Push, including
+    // while locked. The websocket still owns the in-app reminder.
+    if (pushSubscribed) return true
+    if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return false
+    const prefix = mobileRoute() ? '/mobile' : ''
+    const url = `${prefix}/chat/${encodeURIComponent(notification.session_id)}?agent_id=${encodeURIComponent(notification.agent_id)}`
+    const registration = 'serviceWorker' in navigator ? await navigator.serviceWorker.getRegistration() : undefined
+    if (registration) {
+      await registration.showNotification(notification.title, { body: notification.message, tag: notification.key, data: { url }, icon: '/pwa-192.png' })
+      return true
+    }
     const n = new Notification(notification.title, { body: notification.message, tag: notification.key })
-    n.onclick = (e) => {
-      e.preventDefault()
-      window.focus?.()
-      const isMobile = typeof window !== 'undefined' && (
-        window.location.pathname.startsWith('/mobile') ||
-        window.innerWidth < 768 ||
-        window.matchMedia?.('(max-width: 767px)').matches
-      )
-      const prefix = isMobile ? '/mobile' : ''
-      const targetPath = prefix + '/chat/' + encodeURIComponent(notification.session_id) + '?agent_id=' + encodeURIComponent(notification.agent_id)
-      window.history.pushState({}, '', targetPath)
+    n.onclick = event => {
+      event.preventDefault()
+      window.focus()
+      window.history.pushState({}, '', url)
       window.dispatchEvent(new PopStateEvent('popstate'))
-      n.close?.()
+      n.close()
     }
     return true
   } catch {

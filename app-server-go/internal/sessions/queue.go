@@ -154,6 +154,10 @@ func (h *Handler) handleDeleteQueuedCommand(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if !cancelled {
+		if updated["state"] == "completed" || updated["state"] == "cancelled" {
+			writeJSON(w, http.StatusOK, updated)
+			return
+		}
 		writeJSONError(w, http.StatusConflict, "Command is no longer queued")
 		return
 	}

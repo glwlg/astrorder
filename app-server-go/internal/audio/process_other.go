@@ -8,6 +8,10 @@ import (
 	"strings"
 )
 
+func startPlatformProcess(cmd *exec.Cmd) (func() error, error) {
+	return nil, cmd.Start()
+}
+
 func configurePlatformProcess(cmd *exec.Cmd) {
 	cmd.Env = sanitizedEnv()
 }

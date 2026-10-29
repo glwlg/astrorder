@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo, type ReactNode } from 'react'
+import { useState, useRef, useMemo, useEffect, type ReactNode } from 'react'
 import { ActionIcon, Badge, Button, Checkbox, Group, Loader, Menu, Modal, Paper, Progress, Stack, Table, Text, TextInput, Title } from '@mantine/core'
 import { IconArrowUpCircle, IconDotsVertical, IconPlayerPlay, IconPlayerStop, IconRefresh, IconTerminal } from '@tabler/icons-react'
 import { notifications } from '@mantine/notifications'
@@ -9,6 +9,7 @@ import { SettingsDrawer } from '../../components/SettingsDrawer'
 import { api } from '../../api/client'
 import type { SshConnection } from '../../domain/types'
 import { useBackgroundTasks } from '../../state/backgroundTasks'
+import { trackUpgradeJob } from '../../state/upgradeTasks'
 
 const blank = { display_name: '', host: '', port: '22', user: '', ssh_config_alias: '', identity_file: '' }
 export function EnvironmentConnections({ embedded = false, renderAgentConfiguration }: { embedded?: boolean; renderAgentConfiguration?: (environmentId: string, kind: string) => ReactNode }) {
@@ -26,12 +27,15 @@ export function EnvironmentConnections({ embedded = false, renderAgentConfigurat
   const selected = items.find(item => item.id === selectedId) ?? items[0]
 
   // 一键升级与批量升级状态
-  const [batchUpgrading, setBatchUpgrading] = useState(false)
+  const [batchStarting, setBatchStarting] = useState(false)
+  const [batchTaskId, setBatchTaskId] = useState<string | null>(null)
+  const batchTask = useBackgroundTasks((state) => batchTaskId ? state.tasks[batchTaskId] : undefined)
+  const batchUpgrading = batchStarting || batchTask?.status === 'running'
+  const batchLogs = batchTask?.log || ''
+  const batchOutcome = batchTask?.detail || ''
+  const batchProgress = { current: batchTask?.upgrade?.current || 0, total: batchTask?.upgrade?.total || 0, currentName: batchTask?.upgrade?.target || '' }
   const [batchModalOpen, setBatchModalOpen] = useState(false)
   const [batchMode, setBatchMode] = useState<'node' | 'all'>('all')
-  const [batchProgress, setBatchProgress] = useState<{ current: number; total: number; currentName: string }>({ current: 0, total: 0, currentName: '' })
-  const [batchLogs, setBatchLogs] = useState<string>('')
-  const [batchOutcome, setBatchOutcome] = useState('')
   const [selectedAgentIds, setSelectedAgentIds] = useState<Record<string, boolean>>({})
   const [targetsLoading, setTargetsLoading] = useState(false)
   const [upgradeTargets, setUpgradeTargets] = useState<Array<{
@@ -45,12 +49,14 @@ export function EnvironmentConnections({ embedded = false, renderAgentConfigurat
     has_update: boolean
     version_error?: string
   }>>([])
-  const batchAbortRef = useRef<AbortController | null>(null)
   const batchLogPreRef = useRef<HTMLPreElement | null>(null)
 
-  const addBackgroundTask = useBackgroundTasks((state) => state.add)
-  const completeBackgroundTask = useBackgroundTasks((state) => state.complete)
-  const failBackgroundTask = useBackgroundTasks((state) => state.fail)
+  useEffect(() => {
+    if (batchLogPreRef.current) batchLogPreRef.current.scrollTop = batchLogPreRef.current.scrollHeight
+  }, [batchLogs])
+  useEffect(() => {
+    if (batchTask && batchTask.status !== 'running') void client.invalidateQueries({ queryKey: ['astrorder'] })
+  }, [batchTask?.status, client])
 
   // 打开批量升级前预先读取当前和最新版本号列表
   const openBatchUpgradeDialog = async (mode: 'node' | 'all') => {
@@ -108,91 +114,18 @@ export function EnvironmentConnections({ embedded = false, renderAgentConfigurat
       return
     }
 
-    const abortCtrl = new AbortController()
-    batchAbortRef.current = abortCtrl
-    setBatchUpgrading(true)
-    setBatchLogs('')
-    setBatchOutcome('')
-    setBatchProgress({ current: 0, total: targets.length, currentName: targets[0].name })
-
     const title = batchMode === 'node'
       ? `批量升级 [${selected?.name}] Agent (${targets.length})`
       : `批量升级 Agent (${targets.length})`
-    const taskId = addBackgroundTask({
-      title,
-      detail: '正在批量执行版本更新…',
-      actionLabel: '查看日志',
-      log: '',
-      cancel: () => abortCtrl.abort(),
-    })
-
-    const appendLog = (line: string) => {
-      useBackgroundTasks.getState().appendLog(taskId, line)
-      setBatchLogs((prev) => {
-        const next = prev + line
-        if (batchLogPreRef.current) {
-          batchLogPreRef.current.scrollTop = batchLogPreRef.current.scrollHeight
-        }
-        return next
-      })
-    }
-
-    appendLog(`[INIT] 开始任务：${title}\n目标列表: ${targets.map((t) => `${t.name} (${t.kind})`).join(', ')}\n\n`)
-
-    let successCount = 0
-    let failureCount = 0
-
+    setBatchStarting(true)
     try {
-      for (let i = 0; i < targets.length; i++) {
-        if (abortCtrl.signal.aborted) {
-          appendLog(`\n[ABORT] 用户已中止批量升级任务。\n`)
-          break
-        }
-        const target = targets[i]
-        setBatchProgress({ current: i + 1, total: targets.length, currentName: target.name })
-        appendLog(`----------------------------------------\n[${i + 1}/${targets.length}] 正在升级: ${target.name} (${target.kind})...\n`)
-
-        try {
-          const res = await api.upgradeAgentStream(
-            target.id,
-            (chunk) => appendLog(chunk),
-            (cmd) => appendLog(`[EXEC] ${cmd}\n`),
-            abortCtrl.signal
-          )
-          if (res.ok) {
-            successCount++
-            appendLog(`[DONE] ${target.name} 升级成功。\n\n`)
-          } else {
-            failureCount++
-            appendLog(`[FAIL] ${target.name} 升级退出码异常: ${res.exit_code}\n\n`)
-          }
-        } catch (err: unknown) {
-          if ((err as Error)?.name === 'AbortError') {
-            appendLog(`[ABORT] ${target.name} 任务被手动取消。\n`)
-            break
-          }
-          failureCount++
-          appendLog(`[ERROR] ${target.name} 升级出错: ${(err as Error)?.message || String(err)}\n\n`)
-        }
-      }
-
-      if (abortCtrl.signal.aborted) {
-        setBatchOutcome(`升级已取消：成功 ${successCount}，失败 ${failureCount}`)
-        failBackgroundTask(taskId, '批量升级被用户取消')
-        notifications.show({ color: 'gray', title: '批量升级已取消', message: '已停止后续 Agent 的升级。' })
-      } else if (failureCount === 0) {
-        setBatchOutcome(`升级结束：成功 ${successCount}，失败 0`)
-        completeBackgroundTask(taskId, `全部 ${successCount} 个 Agent 已顺利完成升级`)
-        notifications.show({ color: 'teal', title: '批量升级完成', message: `共 ${successCount} 个 Agent 已成功升级至最新版本！` })
-      } else {
-        setBatchOutcome(`升级结束：成功 ${successCount}，失败 ${failureCount}`)
-        failBackgroundTask(taskId, `完成 ${successCount} 个，失败 ${failureCount} 个`)
-        notifications.show({ color: 'yellow', title: '批量升级部分完成', message: `成功: ${successCount}，失败: ${failureCount}。详情请查看日志。` })
-      }
+      const job = await api.startUpgradeJob(targets.map((target) => target.id), title)
+      trackUpgradeJob(job)
+      setBatchTaskId(job.id)
+    } catch (error) {
+      notifications.show({ color: 'red', message: error instanceof Error ? error.message : '启动批量升级失败' })
     } finally {
-      setBatchUpgrading(false)
-      batchAbortRef.current = null
-      void client.invalidateQueries({ queryKey: ['astrorder'] })
+      setBatchStarting(false)
     }
   }
   const run = async (key: string, action: () => Promise<unknown>) => {
@@ -499,9 +432,7 @@ export function EnvironmentConnections({ embedded = false, renderAgentConfigurat
                     variant="subtle"
                     leftSection={<IconPlayerStop size={14} />}
                     onClick={() => {
-                      if (batchAbortRef.current) {
-                        batchAbortRef.current.abort()
-                      }
+                      if (batchTaskId) useBackgroundTasks.getState().cancel(batchTaskId)
                     }}
                   >
                     中止升级
@@ -512,9 +443,8 @@ export function EnvironmentConnections({ embedded = false, renderAgentConfigurat
                     size="xs"
                     variant="light"
                     onClick={() => {
-                      setBatchLogs('')
+                      setBatchTaskId(null)
                       void openBatchUpgradeDialog(batchMode)
-                      setBatchOutcome('')
                     }}
                   >
                     返回列表

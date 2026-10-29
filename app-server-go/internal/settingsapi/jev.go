@@ -11,7 +11,7 @@ import (
 
 func (h *handler) jev(w http.ResponseWriter, r *http.Request) {
 	var payload struct {
-		APIKey  string `json:"api_key"`
+		jevPatch
 		Command string `json:"command"`
 		Output  string `json:"output"`
 	}
@@ -19,15 +19,33 @@ func (h *handler) jev(w http.ResponseWriter, r *http.Request) {
 		fail(w, 422, "Invalid request")
 		return
 	}
-	key := strings.TrimSpace(payload.APIKey)
-	if key == "" {
-		key = browser.GetJevKey(r.Context(), h.Store)
+	if r.URL.Path != "/api/v1/services/jev/test" && utf8.RuneCountInString(payload.Output) < 200 {
+		writeJSON(w, 200, map[string]any{"ok": true, "filtered": payload.Output, "noise_pruned": false})
+		return
 	}
-	planner := &browser.JevPlanner{Client: h.HTTPClient, JevKey: key}
+	config, err := browser.GetJevConfig(r.Context(), h.Store)
+	if err != nil {
+		fail(w, 500, "读取 Jev 配置失败")
+		return
+	}
+	var key *string
+	if r.URL.Path == "/api/v1/services/jev/test" {
+		config, key, err = payload.jevPatch.apply(config)
+		if err != nil {
+			fail(w, 422, err.Error())
+			return
+		}
+	}
+	endpoint, err := browser.ResolveJevConfig(r.Context(), h.Store, config, key)
+	if err != nil {
+		fail(w, 422, err.Error())
+		return
+	}
+	planner := &browser.JevPlanner{Client: h.HTTPClient, JevKey: endpoint.APIKey, JevURL: endpoint.URL, JevModel: endpoint.Model}
 	if r.URL.Path == "/api/v1/services/jev/test" {
 		result, err := planner.InvokeJevHTTP(r.Context(), "Ping health check probe: system metrics and status.", map[string]any{"recommended_component": map[string]any{"type": "choice", "instructions": "Choose the appropriate dashboard component.", "criteria": map[string]string{"StepTimeline": "Sequential stages or milestones", "MetricGrid": "Numerical metrics and counters", "DataTable": "Tabular records", "Checklist": "Verification items", "TestReport": "Test results", "CveSecurityReport": "Security findings", "ApiEndpointsCard": "API routes", "ResourceUsageBar": "Resource capacity", "StatusCard": "High-level health or status"}}})
 		if err != nil {
-			fail(w, 400, "Jev 连接测试失败")
+			fail(w, 400, "Jev 连接测试失败："+err.Error())
 			return
 		}
 		answers, _ := result["answers"].(map[string]any)
@@ -40,10 +58,6 @@ func (h *handler) jev(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	output := payload.Output
-	if utf8.RuneCountInString(output) < 200 {
-		writeJSON(w, 200, map[string]any{"ok": true, "filtered": output, "noise_pruned": false})
-		return
-	}
 	lines := strings.Split(strings.TrimSuffix(strings.ReplaceAll(output, "\r\n", "\n"), "\n"), "\n")
 	sample := []rune(output)
 	if len(sample) > 1500 {

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"astrorder.dev/app-server/internal/daemonclient"
+	"astrorder.dev/app-server/internal/notifications"
 	"astrorder.dev/app-server/internal/store"
 	sessiondv1 "astrorder.dev/contracts/gen/go/astrorder/sessiond/v1"
 	"google.golang.org/grpc/codes"
@@ -120,7 +121,12 @@ func New(client *daemonclient.Client, st *store.Store, pub Publisher) (*Projecti
 		if env == nil || ctx == nil {
 			return nil, errors.New("dynamic projection must be invoked through bound context")
 		}
-		return p.projectEnvelopeTx(ctx, tx, env)
+		events, err := p.projectEnvelopeTx(ctx, tx, env)
+		if err != nil {
+			return nil, err
+		}
+		notices, err := notifications.Events(ctx, tx, events)
+		return append(events, notices...), err
 	})
 	if err != nil {
 		return nil, fmt.Errorf("register frame projector: %w", err)
@@ -1528,10 +1534,23 @@ func projectOwnershipLostTx(
 			return nil, fmt.Errorf("update session ownership lost: %w", err)
 		}
 
+		commands, err := queryRows(ctx, tx, `SELECT id FROM commands WHERE agent_id=? AND session_id=? AND state IN ('received','queued','accepted','running')`, agent, sess)
+		if err != nil {
+			return nil, fmt.Errorf("query commands ownership lost: %w", err)
+		}
 		_, err = tx.ExecContext(ctx, `UPDATE commands SET state='unknown',error=?,updated_at=datetime('now')
 WHERE agent_id=? AND session_id=? AND state IN ('received','queued','accepted','running')`, reason, agent, sess)
 		if err != nil {
 			return nil, fmt.Errorf("update commands ownership lost: %w", err)
+		}
+		for _, command := range commands {
+			updated, err := queryRows(ctx, tx, "SELECT * FROM commands WHERE agent_id=? AND session_id=? AND id=?", agent, sess, command["id"])
+			if err != nil {
+				return nil, err
+			}
+			if len(updated) > 0 {
+				events = append(events, store.Event{ID: fmt.Sprintf("cmd-%s-%d", command["id"], time.Now().UnixNano()), Type: "command.upsert", AgentID: agent, SessionID: sess, Data: updated[0]})
+			}
 		}
 
 		events = append(events, store.Event{
@@ -1624,9 +1643,22 @@ func projectCodexNotificationTx(ctx context.Context, tx *sql.Tx, streamID, agent
 			}
 			cmdID, _ := payload["command_id"].(string)
 			if cmdID != "" {
-				_, err := tx.ExecContext(ctx, `UPDATE commands SET state='running',updated_at=datetime('now') WHERE agent_id=? AND session_id=? AND id=?`, explicitAgent, explicitSession, cmdID)
+				result, err := tx.ExecContext(ctx, `UPDATE commands SET state='running',error=NULL,updated_at=datetime('now') WHERE agent_id=? AND session_id=? AND id=? AND state NOT IN ('completed','failed','cancelled')`, explicitAgent, explicitSession, cmdID)
 				if err != nil {
 					return nil, fmt.Errorf("update codex command running: %w", err)
+				}
+				affected, err := result.RowsAffected()
+				if err != nil {
+					return nil, err
+				}
+				if affected > 0 && turnID != "" {
+					binding, err := json.Marshal([]string{turnID, cmdID})
+					if err != nil {
+						return nil, err
+					}
+					if _, err := tx.ExecContext(ctx, `INSERT INTO workspace_preferences("key",value) VALUES(?,?) ON CONFLICT("key") DO UPDATE SET value=excluded.value`, store.NativeTurnCommandKey(explicitAgent, explicitSession), string(binding)); err != nil {
+						return nil, err
+					}
 				}
 				cmdRows, err := queryRows(ctx, tx, "SELECT * FROM commands WHERE agent_id=? AND session_id=? AND id=?", explicitAgent, explicitSession, cmdID)
 				if err != nil {
@@ -1662,6 +1694,7 @@ func projectCodexNotificationTx(ctx context.Context, tx *sql.Tx, streamID, agent
 			if turnID == "" {
 				turnID, _ = params["turnId"].(string)
 			}
+			currentTurn := true
 			if turnID != "" {
 				encodedKey, _ := json.Marshal([]string{explicitAgent, explicitSession})
 				prefKey := "native_turn:" + string(encodedKey)
@@ -1669,21 +1702,45 @@ func projectCodexNotificationTx(ctx context.Context, tx *sql.Tx, streamID, agent
 				scanErr := tx.QueryRowContext(ctx, `SELECT value FROM workspace_preferences WHERE "key"=?`, prefKey).Scan(&storedVal)
 				if scanErr == nil {
 					var storedTurn string
-					if err := json.Unmarshal([]byte(storedVal), &storedTurn); err == nil && storedTurn == turnID {
-						if _, err := tx.ExecContext(ctx, `DELETE FROM workspace_preferences WHERE "key"=?`, prefKey); err != nil {
-							return nil, fmt.Errorf("clear native turn: %w", err)
+					if err := json.Unmarshal([]byte(storedVal), &storedTurn); err == nil {
+						if storedTurn == turnID {
+							if _, err := tx.ExecContext(ctx, `DELETE FROM workspace_preferences WHERE "key"=?`, prefKey); err != nil {
+								return nil, fmt.Errorf("clear native turn: %w", err)
+							}
+						} else if storedTurn != "" {
+							currentTurn = false
+						}
+					}
+				} else if scanErr != sql.ErrNoRows {
+					return nil, scanErr
+				}
+			}
+
+			if currentTurn {
+				err := updateSessionStatusTx(ctx, tx, explicitAgent, explicitSession, newSessStatus)
+				if err != nil {
+					return nil, fmt.Errorf("update codex session completed: %w", err)
+				}
+			}
+			cmdID, _ := payload["command_id"].(string)
+			if turnID != "" {
+				bound, err := codexTurnCommandTx(ctx, tx, explicitAgent, explicitSession, turnID)
+				if err != nil {
+					return nil, err
+				}
+				if bound != "" {
+					if cmdID == "" {
+						cmdID = bound
+					}
+					if cmdID == bound {
+						if _, err := tx.ExecContext(ctx, `DELETE FROM workspace_preferences WHERE "key"=?`, store.NativeTurnCommandKey(explicitAgent, explicitSession)); err != nil {
+							return nil, err
 						}
 					}
 				}
 			}
-
-			err := updateSessionStatusTx(ctx, tx, explicitAgent, explicitSession, newSessStatus)
-			if err != nil {
-				return nil, fmt.Errorf("update codex session completed: %w", err)
-			}
-			cmdID, _ := payload["command_id"].(string)
 			if cmdID != "" {
-				_, err := tx.ExecContext(ctx, `UPDATE commands SET state=?,updated_at=datetime('now') WHERE agent_id=? AND session_id=? AND id=?`, cmdState, explicitAgent, explicitSession, cmdID)
+				_, err := tx.ExecContext(ctx, `UPDATE commands SET state=?,error=NULL,updated_at=datetime('now') WHERE agent_id=? AND session_id=? AND id=? AND state NOT IN ('completed','failed','cancelled')`, cmdState, explicitAgent, explicitSession, cmdID)
 				if err != nil {
 					return nil, fmt.Errorf("update codex command completed: %w", err)
 				}
@@ -1695,12 +1752,14 @@ func projectCodexNotificationTx(ctx context.Context, tx *sql.Tx, streamID, agent
 					events = append(events, store.Event{ID: fmt.Sprintf("cmd-%s-%d", cmdID, time.Now().UnixNano()), Type: "command.upsert", AgentID: explicitAgent, SessionID: explicitSession, Data: cmdRows[0]})
 				}
 			}
-			sessRows, err := queryRows(ctx, tx, "SELECT * FROM sessions WHERE agent_id=? AND id=?", explicitAgent, explicitSession)
-			if err != nil {
-				return nil, fmt.Errorf("query session: %w", err)
-			}
-			if len(sessRows) > 0 {
-				events = append(events, sessionUpsertEvent(explicitAgent, explicitSession, sessRows[0]))
+			if currentTurn {
+				sessRows, err := queryRows(ctx, tx, "SELECT * FROM sessions WHERE agent_id=? AND id=?", explicitAgent, explicitSession)
+				if err != nil {
+					return nil, fmt.Errorf("query session: %w", err)
+				}
+				if len(sessRows) > 0 {
+					events = append(events, sessionUpsertEvent(explicitAgent, explicitSession, sessRows[0]))
+				}
 			}
 		}
 
@@ -1864,6 +1923,23 @@ func projectCodexNotificationTx(ctx context.Context, tx *sql.Tx, streamID, agent
 						event.Data["attachments"] = CodexUserAttachments(item["content"], explicitSession, itemID)
 					}
 					events = append(events, event)
+					if method == "item/completed" && itemType == "userMessage" {
+						clientID, _ := item["clientId"].(string)
+						turnID, _ := params["turnId"].(string)
+						if clientID != "" && turnID != "" {
+							original, err := codexTurnCommandTx(ctx, tx, explicitAgent, explicitSession, turnID)
+							if err != nil {
+								return nil, err
+							}
+							if original != "" && original != clientID {
+								delivered, err := projectCodexCommandCompleteTx(ctx, tx, explicitSession, map[string]any{"agent_id": explicitAgent, "session_id": explicitSession, "command_id": clientID})
+								if err != nil {
+									return nil, err
+								}
+								events = append(events, delivered...)
+							}
+						}
+					}
 				} else {
 					taskEvents, err := projectCodexToolTx(ctx, tx, explicitSession, explicitAgent, method, item)
 					if err != nil {

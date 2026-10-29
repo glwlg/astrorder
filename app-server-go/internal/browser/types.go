@@ -1,5 +1,5 @@
 // Package browser implements native browser automation capabilities (F13),
-// CDP client management, session tab isolation, Jev browser planning,
+// CDP client management, session tab isolation, upstream browser engines,
 // browser launch/proxying, and agent capability bindings.
 package browser
 
@@ -40,12 +40,11 @@ type Publisher interface {
 
 // Options configure the browser handler and manager.
 type Options struct {
-	Store          *store.Store
-	Authorizer     BrowserAuthorizer
-	Publisher      Publisher
-	CDPURL         string // Optional override for DevTools base URL, e.g. "http://127.0.0.1:9337"
-	NoAutoExec     bool   // If true, never launch browser binary automatically
-	PlannerInvoker func(ctx context.Context, state any, questions map[string]any) (map[string]any, error)
+	Store      *store.Store
+	Authorizer BrowserAuthorizer
+	Publisher  Publisher
+	CDPURL     string // Optional override for DevTools base URL, e.g. "http://127.0.0.1:9337"
+	NoAutoExec bool   // If true, never launch browser binary automatically
 }
 
 // Tab represents an open tab in the browser.

@@ -20,12 +20,14 @@ type SessionManager struct {
 	httpClient   *http.Client
 	endpoints    *CDPEndpoints
 	noAutoExec   bool
+	engineRunner func(context.Context, engineRequest) (engineResult, error)
 
 	sessionMu      sync.RWMutex
-	targetMu       sync.Mutex             // protects ownership maps across different sessions
-	sessionLocks   map[string]*sync.Mutex // lock per sessionKey
-	sessionTargets map[string][]string    // sessionKey -> list of targetIDs
-	sessionActive  map[string]string      // sessionKey -> active targetID
+	targetMu       sync.Mutex               // protects ownership maps across different sessions
+	sessionLocks   map[string]*sync.Mutex   // lock per sessionKey
+	taskLocks      map[string]chan struct{} // serialize autonomous tasks per session
+	sessionTargets map[string][]string      // sessionKey -> list of targetIDs
+	sessionActive  map[string]string        // sessionKey -> active targetID
 
 	screenMu    sync.RWMutex
 	screenshots map[string]*Snapshot // key -> snapshot (keys: sessionKey or sessionKey::targetID)
@@ -46,11 +48,23 @@ func NewSessionManager(devToolsBase string, noAutoExec bool) *SessionManager {
 		endpoints:      &CDPEndpoints{BaseURL: devToolsBase, HTTPClient: httpClient},
 		noAutoExec:     noAutoExec,
 		sessionLocks:   make(map[string]*sync.Mutex),
+		taskLocks:      make(map[string]chan struct{}),
 		sessionTargets: make(map[string][]string),
 		sessionActive:  make(map[string]string),
 		screenshots:    make(map[string]*Snapshot),
 		sessionLogs:    make(map[string][]LogEntry),
 	}
+}
+
+func (m *SessionManager) getTaskLock(sessionKey string) chan struct{} {
+	m.sessionMu.Lock()
+	defer m.sessionMu.Unlock()
+	lock := m.taskLocks[sessionKey]
+	if lock == nil {
+		lock = make(chan struct{}, 1)
+		m.taskLocks[sessionKey] = lock
+	}
+	return lock
 }
 
 // GetLock returns the lock for a specific sessionKey.

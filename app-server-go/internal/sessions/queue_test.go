@@ -119,11 +119,48 @@ func TestQueueOperations(t *testing.T) {
 			t.Fatalf("expected state cancelled, got %v", updated["state"])
 		}
 
-		// Verify cannot delete or edit again (409 conflict)
-		wConflict := httptest.NewRecorder()
-		h.handleDeleteQueuedCommand(wConflict, req, "cmd-1")
-		if wConflict.Code != http.StatusConflict {
-			t.Fatalf("expected 409 conflict, got %d: %s", wConflict.Code, wConflict.Body.String())
+		// Repeating a removal returns the existing terminal receipt.
+		wAgain := httptest.NewRecorder()
+		h.handleDeleteQueuedCommand(wAgain, req, "cmd-1")
+		if wAgain.Code != http.StatusOK {
+			t.Fatalf("expected idempotent removal, got %d: %s", wAgain.Code, wAgain.Body.String())
+		}
+	}
+}
+
+func TestRemoveUnknownAndAlreadyCompletedQueueRecords(t *testing.T) {
+	h, st, _, cleanup := setupTestServer(t, &mockDaemonServer{})
+	defer cleanup()
+	ctx := context.Background()
+	if _, err := st.UpsertSession(ctx, map[string]any{"id": "s", "agent_id": "a", "status": "idle", "updated_at": "2026-10-28T00:00:00Z"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, state := range []string{"unknown", "completed", "received"} {
+		if _, _, err := st.CreateCommand(ctx, map[string]any{"id": state, "agent_id": "a", "session_id": "s", "action": "enqueue", "text": "message"}, state); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := st.SetCommandState(ctx, "a", "s", "unknown", "unknown", "delivery unconfirmed", false); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		id, state string
+		code      int
+	}{{"unknown", "cancelled", 200}, {"completed", "completed", 200}, {"received", "", 409}} {
+		req := httptest.NewRequest(http.MethodDelete, "/api/v1/commands/"+tc.id+"?agent_id=a&session_id=s", nil)
+		w := httptest.NewRecorder()
+		h.handleDeleteQueuedCommand(w, req, tc.id)
+		if w.Code != tc.code {
+			t.Fatalf("%s: got %d %s", tc.id, w.Code, w.Body.String())
+		}
+		if tc.state != "" {
+			var row map[string]any
+			if err := json.Unmarshal(w.Body.Bytes(), &row); err != nil || row["state"] != tc.state {
+				t.Fatalf("%s: unexpected receipt %v %v", tc.id, row, err)
+			}
+			if tc.id == "unknown" && row["error"] != "delivery unconfirmed" {
+				t.Fatalf("unknown delivery evidence was lost: %v", row)
+			}
 		}
 	}
 }

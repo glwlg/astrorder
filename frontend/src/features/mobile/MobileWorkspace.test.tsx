@@ -59,6 +59,16 @@ beforeEach(() => {
   useAstrorderStore.getState().hydrateBootstrap({ protocol_version: 1, cursor: 0, agents: [{ id: 'inert', kind: 'hermes', name: '协议测试', status: 'ready', capabilities: ['chat', 'stop', 'attachments'], limitation: null }], sessions: [session] })
 })
 describe('independent mobile composer', () => {
+  it('removes an unknown server queue record without sending it again', async () => {
+    useAstrorderStore.getState().mergeCommands([{ id: 'unknown-queue', agent_id: session.agent_id, session_id: session.id, action: 'enqueue', state: 'unknown', text: '已送达的消息', attachments: [], created_at: session.updated_at, error: '发送结果未确认' }])
+    mount()
+    const row = await screen.findByLabelText('排队消息')
+    fireEvent.click(within(row).getByRole('button', { name: '删除' }))
+    await waitFor(() => expect(screen.queryByLabelText('排队消息')).not.toBeInTheDocument())
+    expect(api.deleteQueuedCommand).toHaveBeenCalledWith('unknown-queue', session.agent_id, session.id)
+    expect(api.sendQueuedCommand).not.toHaveBeenCalled()
+    expect(api.createCommand).not.toHaveBeenCalled()
+  })
   it('returns an explicit busy refusal to the persisted mobile composer', async () => {
     vi.stubGlobal('crypto', { getRandomValues: globalThis.crypto.getRandomValues.bind(globalThis.crypto) })
     useAstrorderStore.getState().setConnection('connected')

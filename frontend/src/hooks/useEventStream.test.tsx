@@ -50,6 +50,13 @@ function StreamHarness({ client = new QueryClient() }: { client?: QueryClient })
   return null
 }
 
+function noticeEvent(kind: 'task_completed' | 'task_failed', cursor: number): EventEnvelope {
+  return {
+    id: `notice-${cursor}`, cursor, type: 'notification.created', agent_id: 'agent-1', session_id: 'session-1',
+    data: { key: `notice-${kind}`, kind, title: '任务通知', message: '测试任务', agent_id: 'agent-1', session_id: 'session-1', created_at: new Date().toISOString() },
+  }
+}
+
 describe('event stream notifications', () => {
   it('does not toast replayed completion or tool progress', () => {
     useAstrorderStore.setState({ cursor: 5 })
@@ -57,7 +64,7 @@ describe('event stream notifications', () => {
     mocks.connectEventStream.mockImplementation((next) => { options = next; return vi.fn() })
     const view = render(<StreamHarness />)
     act(() => {
-      options?.onEvent(taskEvent('old'))
+      options?.onEvent(noticeEvent('task_completed', 1))
       const tool = taskEvent('tool')
       tool.cursor = 6
       tool.data.kind = 'tool'
@@ -188,7 +195,7 @@ describe('event stream notifications', () => {
     view.unmount()
   })
 
-  it('shows one notification for repeated failures and none for normal completion', () => {
+  it('shows completion and failure notices once despite repeated delivery', () => {
     vi.stubGlobal('Notification', { permission: 'default', requestPermission: vi.fn() })
     let options: { onEvent: (event: EventEnvelope) => void } | undefined
     mocks.connectEventStream.mockImplementation((nextOptions) => {
@@ -198,16 +205,15 @@ describe('event stream notifications', () => {
     render(<QueryClientProvider client={new QueryClient()}><StreamHarness /></QueryClientProvider>)
 
     act(() => {
-      options?.onEvent(taskEvent('completed'))
-      const failed = taskEvent('envelope-1', 'failed')
-      failed.cursor = 2
+      options?.onEvent(noticeEvent('task_completed', 1))
+      const failed = noticeEvent('task_failed', 2)
       options?.onEvent(failed)
       options?.onEvent({ ...failed, id: 'envelope-2', cursor: 3 })
     })
 
-    expect(mocks.show).toHaveBeenCalledOnce()
+    expect(mocks.show).toHaveBeenCalledTimes(2)
     expect(vi.mocked(Notification.requestPermission)).not.toHaveBeenCalled()
-    expect(Object.keys(useAstrorderStore.getState().notifications)).toHaveLength(1)
+    expect(Object.keys(useAstrorderStore.getState().notifications)).toHaveLength(2)
   })
 
   it('navigates internally to mobile route when clicked on mobile without opening external window', () => {
@@ -228,8 +234,7 @@ describe('event stream notifications', () => {
       </QueryClientProvider>,
     )
     act(() => {
-      const failed = taskEvent('fail-1', 'failed')
-      failed.cursor = 2
+      const failed = noticeEvent('task_failed', 2)
       options?.onEvent(failed)
     })
     expect(mocks.show).toHaveBeenCalledOnce()

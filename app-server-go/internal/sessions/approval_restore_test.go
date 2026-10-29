@@ -227,9 +227,19 @@ func TestCodexApprovalRestoredFromDurableSelection(t *testing.T) {
 					Mode string `json:"mode"`
 				}
 				_ = json.Unmarshal(w.Body.Bytes(), &body)
-				if w.Code != http.StatusOK || body.Mode != mode {
-					t.Fatalf("saved %s lost after App reconnect: %d %s", mode, w.Code, w.Body.String())
+				if w.Code != http.StatusOK || body.Mode != "manual" || peer.writes != 0 {
+					t.Fatalf("reading controls changed native policy: %d %s writes=%d", w.Code, w.Body.String(), peer.writes)
 				}
+			}
+			session, err := reopened.GetSession(ctx, "a", "native")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := fresh.ensureNativeBinding(ctx, session); err != nil {
+				t.Fatal(err)
+			}
+			if peer.mode != mode {
+				t.Fatalf("explicit binding lost saved %s: %s", mode, peer.mode)
 			}
 			wantWrites := 1
 			if mode == "manual" {

@@ -18,6 +18,17 @@ import type {
 } from '../domain/types'
 
 const API_PREFIX = '/api/v1'
+export interface UpgradeJob {
+  id: string
+  title: string
+  status: 'running' | 'completed' | 'failed' | 'cancelled'
+  detail: string
+  log: string
+  created_at: string
+  current: number
+  total: number
+  target: string
+}
 import type { PreferencePatch, WorkspacePreferences } from '../hooks/useWorkspacePreferences'
 
 export interface ReviewRelayBinding { review_agent_id: string; review_session_id: string; workspace: string; enabled: boolean }
@@ -47,6 +58,27 @@ export interface GatewayProfile {
   masked_key: string
   masked_management_key?: string
   api_key?: string
+}
+
+export interface JevConfig {
+  mode: 'gateway' | 'official'
+  model: string
+  configured: boolean
+  masked_key: string
+  gateway_type: string
+  gateway_url: string
+  gateway_configured: boolean
+}
+export type BrowserEngine = 'browser_use' | 'jev_ultrafast'
+export interface JevConfigPatch {
+  mode?: JevConfig['mode']
+  model?: string
+  api_key?: string | null
+}
+export interface JevTestDetails {
+  component: string
+  confidence?: number
+  usage?: { input_tokens?: number; output_tokens?: number }
 }
 
 export interface OcxUsageBreakdown {
@@ -381,6 +413,11 @@ export const api = {
   getAuthSession: () => request<AuthSession>('/auth/session'),
   login: (token: string) => jsonRequest<AuthSession>('/auth/session', { token }),
   logout: () => request<void>('/auth/session', { method: 'DELETE' }),
+  getPushSettings: () => request<{ public_key: string }>('/notifications/push'),
+  savePushSubscription: (subscription: { endpoint: string; keys: Record<string, string>; origin: string; mobile: boolean }) =>
+    jsonRequest<{ enabled: boolean }>('/notifications/push', subscription, 'PUT'),
+  deletePushSubscription: (endpoint: string) => jsonRequest<{ enabled: boolean }>('/notifications/push', { endpoint }, 'DELETE'),
+  testPushSubscription: (endpoint: string) => jsonRequest<{ accepted: boolean }>('/notifications/push/test', { endpoint }),
   createQrSession: () => jsonRequest<QrCreateResponse>('/auth/qr/create', {}),
   pollQrSession: (id: string) => jsonRequest<QrPollResponse>('/auth/qr/poll', { id }),
   inspectQrSession: (id: string, scan_secret: string) => jsonRequest<QrInspectResponse>('/auth/qr/inspect', { id, scan_secret }),
@@ -451,6 +488,11 @@ export const api = {
     const query = new URLSearchParams({ agent_id: agentId, session_id: sessionId })
     return request<Command>(`/commands/${encodeURIComponent(commandId)}?${query.toString()}`, { method: 'DELETE' })
   },
+  startUpgradeJob: (agentIds: string[], title: string) =>
+    jsonRequest<UpgradeJob>('/agents/upgrade/jobs', { agent_ids: agentIds, title }),
+  getUpgradeJobs: () => request<{ items: UpgradeJob[] }>('/agents/upgrade/jobs'),
+  cancelUpgradeJob: (id: string) =>
+    jsonRequest<{ cancelled: boolean }>(`/agents/upgrade/jobs/${encodeURIComponent(id)}/cancel`, {}),
   upgradeAgentStream: async (
     agentId: string,
     onChunk: (chunk: string) => void,
@@ -625,9 +667,13 @@ export const api = {
   updateNetworkConfig: (payload: { public_url?: string; allowed_origins?: string[] }) =>
     jsonRequest<{ public_url: string; allowed_origins: string[]; local_ip: string; port: number; token: string }>('/network/config', payload),
   getJevConfig: () =>
-    request<{ configured: boolean; masked_key: string }>('/services/jev/config'),
-  updateJevConfig: (payload: { api_key?: string | null }) =>
-    jsonRequest<{ configured: boolean; masked_key: string }>('/services/jev/config', payload),
+    request<JevConfig>('/services/jev/config'),
+  getBrowserEngine: () => request<{ engine: BrowserEngine }>('/services/browser/config'),
+  updateBrowserEngine: (engine: BrowserEngine) =>
+    jsonRequest<{ engine: BrowserEngine }>('/services/browser/config', { engine }),
+  updateJevConfig: (payload: JevConfigPatch) =>
+    jsonRequest<JevConfig>('/services/jev/config', payload),
+  getJevModels: () => request<{ items: Array<{ id: string; label: string }>; gateway_type: string; gateway_url: string }>('/services/jev/models'),
   getLlmConfig: () =>
     request<{ configured: boolean; masked_key: string; base_url: string; model: string; reasoning: string }>('/services/llm/config'),
   updateLlmConfig: (payload: { base_url: string; api_key?: string | null; model: string; reasoning: string }) =>
@@ -638,8 +684,8 @@ export const api = {
     jsonRequest<{ ok: boolean; filtered: string; nature: string; noise_pruned: boolean }>('/tools/jev-filter', payload),
   curateHandoffWithJev: (sessionId: string, agentId: string) =>
     jsonRequest<{ ok: boolean; summary: string; phase: string; blocker: string }>('/sessions/handoff-curate', { session_id: sessionId, agent_id: agentId }),
-  testJevConnection: (payload: { api_key?: string | null }) =>
-    jsonRequest<{ ok: boolean; details: any }>('/services/jev/test', payload),
+  testJevConnection: (payload: JevConfigPatch) =>
+    jsonRequest<{ ok: boolean; details: JevTestDetails }>('/services/jev/test', payload),
   getConnections: () => request<ConnectionsPayload>('/connections'),
   getEnvironments: () => request<{ items: Array<{ id: string; name: string; method: 'local' | 'ssh'; discovered: boolean; os?: string; agents: Array<{ kind: AgentKind; available: boolean; state: string; detail: string; executable?: string; daemon_mode?: boolean }> }> }>('/environments'),
   discoverEnvironment: (id: string) => request(`/environments/${encodeURIComponent(id)}/discover`, { method: 'POST' }),

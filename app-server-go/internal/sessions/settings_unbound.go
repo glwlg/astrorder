@@ -4,6 +4,8 @@ import (
 	pb "astrorder.dev/contracts/gen/go/astrorder/sessiond/v1"
 	"context"
 	"fmt"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"net/http"
 	"strings"
 )
@@ -11,7 +13,8 @@ import (
 // Read-only menus must not require ownership of the user's Codex thread.
 // A control probe belongs to the same runtime target and never resumes it.
 func (h *Handler) unboundSettings(ctx context.Context, w http.ResponseWriter, r *http.Request, row map[string]any, bindErr error) (*pb.SessionRef, bool) {
-	if !strings.Contains(bindErr.Error(), "already has an active writer") {
+	busy := strings.Contains(bindErr.Error(), "already has an active writer")
+	if !busy && status.Code(bindErr) != codes.NotFound && status.Code(bindErr) != codes.Unavailable {
 		return nil, false
 	}
 	aid := stringValue(row, "agent_id")
@@ -40,7 +43,10 @@ func (h *Handler) unboundSettings(ctx context.Context, w http.ResponseWriter, r 
 		if parseNativeJSON(response.Result, &data) != nil || data.Thread == nil {
 			return nil, false
 		}
-		result := map[string]any{"read_only": true, "detail": "该会话已有其他 Codex 写入者；当前仅可读取。"}
+		result := map[string]any{"read_only": busy, "model_read_only": busy}
+		if busy {
+			result["detail"] = "该会话已有其他 Codex 写入者；当前仅可读取。"
+		}
 		for from, to := range map[string]string{"model": "model", "modelProvider": "provider", "reasoningEffort": "effort"} {
 			if value, ok := data.Thread[from]; ok {
 				result[to] = value
@@ -57,6 +63,13 @@ func (h *Handler) unboundSettings(ctx context.Context, w http.ResponseWriter, r 
 	if suffix == "agent-commands" {
 		writeJSON(w, http.StatusOK, map[string]any{"items": []any{}, "supported": false, "read_only": true, "detail": "Codex 未提供原生命令列表接口。"})
 		return nil, true
+	}
+	if suffix == "approval-mode" {
+		if mode := stringValue(row, "selected_approval_mode"); mode != "" {
+			writeJSON(w, http.StatusOK, map[string]any{"mode": mode})
+			return nil, true
+		}
+		return nil, false
 	}
 	if suffix != "models" && suffix != "agent-mentions" {
 		return nil, false

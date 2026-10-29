@@ -50,7 +50,7 @@ Example `input.json`:
 ```
 
 ### 3. Run Autonomous Browser Task (`browser.run`)
-Run a bounded browsing task in this session's visible tab:
+Run a bounded browsing task in this session's visible tab using the configured browser engine:
 ```bash
 astrorder-agent invoke browser.run --input-file "<PATH_TO_INPUT.json>"
 ```

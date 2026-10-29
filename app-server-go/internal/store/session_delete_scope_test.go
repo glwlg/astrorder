@@ -24,6 +24,9 @@ func TestDeleteSessionClearsExactApprovalsAndPreservesWildcardNeighbours(t *test
 		if err := st.SetActiveTurn(ctx, "a", sid, "turn"); err != nil {
 			t.Fatal(err)
 		}
+		if err := st.SetPreference(ctx, NativeTurnCommandKey("a", sid), []string{"turn", "command"}, true); err != nil {
+			t.Fatal(err)
+		}
 		if _, err := st.AppendEvent(ctx, Event{ID: "approval-" + sid, Type: "approval.upsert", AgentID: "a", SessionID: sid, Data: map[string]any{"id": "exact", "agent_id": "a", "session_id": sid, "state": "pending"}}); err != nil {
 			t.Fatal(err)
 		}
@@ -43,5 +46,13 @@ func TestDeleteSessionClearsExactApprovalsAndPreservesWildcardNeighbours(t *test
 	turn, err := st.GetPreference(ctx, "native_turn:"+string(key))
 	if err != nil || turn.Exists {
 		t.Fatal("deleted turn remained")
+	}
+	binding, err := st.GetPreference(ctx, NativeTurnCommandKey("a", "s_%"))
+	if err != nil || binding.Exists {
+		t.Fatal("deleted turn command binding remained")
+	}
+	binding, err = st.GetPreference(ctx, NativeTurnCommandKey("a", "sXother"))
+	if err != nil || !binding.Exists {
+		t.Fatal("neighbouring turn command binding was removed")
 	}
 }

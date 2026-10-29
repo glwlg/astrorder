@@ -318,10 +318,10 @@ func DeleteSessionTx(ctx context.Context, tx *sql.Tx, agentID, sessionID string)
 	}
 	prefix := agentID + "::" + sessionID
 	if _, err := tx.ExecContext(ctx, `DELETE FROM workspace_preferences
-WHERE instr(key, ?)=1 OR instr(key, ?)=1 OR key=? OR key=? OR key=?
+WHERE instr(key, ?)=1 OR instr(key, ?)=1 OR key=? OR key=? OR key=? OR key=?
 OR (instr(key, 'approval:')=1 AND json_extract(value, '$.agent_id')=? AND json_extract(value, '$.session_id')=?)`,
 		"blackboard:session:"+prefix+":", "blackboard:swarm:"+prefix+":", "blackboard_scope:"+prefix,
-		nativeTurnKey(agentID, sessionID), SessionTitleKey(agentID, sessionID), agentID, sessionID); err != nil {
+		nativeTurnKey(agentID, sessionID), NativeTurnCommandKey(agentID, sessionID), SessionTitleKey(agentID, sessionID), agentID, sessionID); err != nil {
 		return false, err
 	}
 	result, err := tx.ExecContext(ctx, "DELETE FROM sessions WHERE agent_id=? AND id=?", agentID, sessionID)

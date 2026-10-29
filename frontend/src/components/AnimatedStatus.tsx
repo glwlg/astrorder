@@ -33,17 +33,13 @@ export function AstrorderLoader({ size = 14 }: { size?: number }) {
 export function SessionActivityBorder({ status }: { status: SessionStatus }) {
   const reducedMotion = useReducedMotion(undefined, { getInitialValueInEffect: false })
   if (status === 'running') return <SessionStarBorder />
-  if (status === 'idle') return null
-  const color = status === 'waiting_approval'
-    ? 'var(--astr-yellow)'
-    : status === 'error'
-      ? 'var(--astr-red)'
-      : 'var(--session-running-color, var(--astr-indigo, #5b6cff))'
+  if (status !== 'waiting_approval') return null
+  const color = 'var(--astr-yellow)'
   return (
     <svg className="session-state-border" data-status={status} style={{ color }} aria-hidden="true">
       <AnimatePresence>
         {status === 'waiting_approval' && <motion.rect key="waiting" x="1.25" y="1.25" width="calc(100% - 2.5px)" height="calc(100% - 2.5px)" rx="7" fill="none" stroke="currentColor" strokeWidth="1.5" initial={{ opacity: 0 }} animate={{ opacity: reducedMotion ? 0.7 : [0.3, 0.85, 0.3] }} exit={{ opacity: 0 }} transition={{ duration: 1.8, repeat: reducedMotion ? 0 : Infinity, ease: 'easeInOut' }} />}
-        {status === 'error' && <motion.rect key="error" x="1.25" y="1.25" width="calc(100% - 2.5px)" height="calc(100% - 2.5px)" rx="7" fill="none" stroke="currentColor" strokeWidth="1.5" initial={{ opacity: 0 }} animate={reducedMotion ? { opacity: 0.65 } : { opacity: [0, 1, 0.65], x: [0, -1.5, 1.5, -0.75, 0.75, 0] }} exit={{ opacity: 0 }} transition={{ duration: 0.45, ease: 'easeOut' }} />}
+
       </AnimatePresence>
     </svg>
   )

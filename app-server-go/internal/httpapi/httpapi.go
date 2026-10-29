@@ -41,6 +41,7 @@ import (
 	"astrorder.dev/app-server/internal/git"
 	"astrorder.dev/app-server/internal/memory"
 	"astrorder.dev/app-server/internal/modelgateway"
+	"astrorder.dev/app-server/internal/notifications"
 	"astrorder.dev/app-server/internal/preferences"
 	"astrorder.dev/app-server/internal/reviewrelay"
 	"astrorder.dev/app-server/internal/sessions"
@@ -125,6 +126,7 @@ type Options struct {
 	Settings        http.Handler
 	Capabilities    http.Handler
 	Connections     http.Handler
+	Notifications   http.Handler
 	Sessions        http.Handler
 	AgentAPI        http.Handler
 	DynamicOrigins  auth.DynamicOriginLookup
@@ -160,6 +162,7 @@ type api struct {
 	settings        http.Handler
 	capabilities    http.Handler
 	connections     http.Handler
+	notifications   http.Handler
 	sessions        http.Handler
 	agentAPI        http.Handler
 	reviewRelay     http.Handler
@@ -382,6 +385,7 @@ func NewHandlerChecked(options Options) (http.Handler, error) {
 		settings:        options.Settings,
 		capabilities:    options.Capabilities,
 		connections:     options.Connections,
+		notifications:   options.Notifications,
 		sessions:        sessionHandler,
 		agentAPI:        agentHandler,
 		reviewRelay:     reviewRelayHandler,
@@ -442,6 +446,10 @@ func (a *api) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 	}
 
 	// Product domain handlers mounted BEFORE migration proxy:
+	if a.notifications != nil && notifications.Matches(request.Method, request.URL.Path) {
+		a.notifications.ServeHTTP(response, request)
+		return
+	}
 	if a.reviewRelay != nil && reviewrelay.Matches(request.Method, request.URL.Path) {
 		a.reviewRelay.ServeHTTP(response, request)
 		return

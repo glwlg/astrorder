@@ -32,6 +32,7 @@ import (
 	"astrorder.dev/app-server/internal/kernelcontrol"
 	"astrorder.dev/app-server/internal/memory"
 	"astrorder.dev/app-server/internal/modelgateway"
+	"astrorder.dev/app-server/internal/notifications"
 	"astrorder.dev/app-server/internal/projection"
 	"astrorder.dev/app-server/internal/settingsapi"
 	"astrorder.dev/app-server/internal/store"
@@ -237,9 +238,16 @@ func runServer(ctx context.Context, cfg config.Config, ready io.Writer, logger *
 
 	var groupService *botgroups.Service
 	var audioService *audio.Service
-	var browserHandler, modelHandler, connectionHandler, settingsHandler, capabilitiesHandler http.Handler
+	var notificationService *notifications.Service
+	var browserHandler, modelHandler, connectionHandler, settingsHandler, capabilitiesHandler, notificationHandler http.Handler
 	if st != nil && client != nil {
 		authorizer := auth.New(cfg, &httpapi.StoreOriginLookup{Store: st})
+		notificationService, err = notifications.New(serverContext, st, authorizer, logger)
+		if err != nil {
+			return fmt.Errorf("configure notifications: %w", err)
+		}
+		defer notificationService.Close()
+		notificationHandler = notificationService
 		groupService, err = botgroups.New(serverContext, botgroups.Options{Store: st, Controller: &botgroups.NativeController{Store: st, Client: client, Publisher: eventHub, DefaultWorkspace: cfg.DefaultWorkspace}, Authorizer: authorizer, Publisher: eventHub})
 		if err != nil {
 			return fmt.Errorf("configure group orchestration: %w", err)
@@ -294,6 +302,13 @@ func runServer(ctx context.Context, cfg config.Config, ready io.Writer, logger *
 			return fmt.Errorf("configure connections: %w", err)
 		}
 		connectionHandler = connHandler
+		defer func() {
+			closeContext, cancel := context.WithTimeout(context.Background(), gracefulShutdownTimeout)
+			defer cancel()
+			if err := connHandler.Close(closeContext); err != nil {
+				log.Printf("close upgrade jobs: %v", err)
+			}
+		}()
 		connHandler.AutoConnect(serverContext)
 	}
 	var nativeSessions interface {
@@ -317,6 +332,7 @@ func runServer(ctx context.Context, cfg config.Config, ready io.Writer, logger *
 		Settings:        settingsHandler,
 		Capabilities:    capabilitiesHandler,
 		Connections:     connectionHandler,
+		Notifications:   notificationHandler,
 		DesktopShutdown: stopServer,
 		Logger:          logger,
 	})

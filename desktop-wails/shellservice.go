@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -216,7 +217,7 @@ func (s *ShellService) SetStartupEnabled(enabled bool) (StartupSettings, error) 
 }
 
 // Notifications
-func (s *ShellService) Notify(title, body string) bool {
+func (s *ShellService) Notify(title, body string) (bool, error) {
 	if s.window != nil {
 		s.window.Flash(true)
 	}
@@ -224,25 +225,29 @@ func (s *ShellService) Notify(title, body string) bool {
 	// Agent-controlled text reaches PowerShell only through environment
 	// variables; it is never interpolated into the script source.
 	if runtime.GOOS == "windows" {
-		go func() {
-			const psScript = `
+		const psScript = `
+$ErrorActionPreference = 'Stop'
 [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null
 $template = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02)
 $textNodes = $template.GetElementsByTagName("text")
 $textNodes.Item(0).AppendChild($template.CreateTextNode($env:ASTRORDER_TOAST_TITLE)) > $null
 $textNodes.Item(1).AppendChild($template.CreateTextNode($env:ASTRORDER_TOAST_BODY)) > $null
 $toast = [Windows.UI.Notifications.ToastNotification]::new($template)
-[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("Astrorder").Show($toast)
+$notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("com.astrorder.desktop")
+if ($notifier.Setting -ne [Windows.UI.Notifications.NotificationSetting]::Enabled) { throw 'Windows 通知已被禁用，请检查系统通知设置。' }
+$notifier.Show($toast)
 `
-			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-			defer cancel()
-			cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-STA", "-Command", psScript)
-			cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
-			cmd.Env = append(os.Environ(), "ASTRORDER_TOAST_TITLE="+title, "ASTRORDER_TOAST_BODY="+body)
-			_ = cmd.Run()
-		}()
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, filepath.Join(os.Getenv("SystemRoot"), "System32", "WindowsPowerShell", "v1.0", "powershell.exe"), "-NoProfile", "-NonInteractive", "-STA", "-Command", psScript)
+		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
+		cmd.Env = append(os.Environ(), "ASTRORDER_TOAST_TITLE="+title, "ASTRORDER_TOAST_BODY="+body)
+		if err := cmd.Run(); err != nil {
+			return false, fmt.Errorf("Windows 通知发送失败，请检查系统通知设置: %w", err)
+		}
+		return true, nil
 	}
-	return true
+	return false, errors.New("当前系统不支持桌面通知")
 }
 
 // Dialogs

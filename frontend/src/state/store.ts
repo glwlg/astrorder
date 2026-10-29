@@ -225,6 +225,10 @@ export const useAstrorderStore = create<AstrorderStore>((set) => ({
         projects,
         sessions,
         tasks,
+        notifications: {
+          ...Object.fromEntries((payload.notifications || []).map(notice => [notice.key, notice])),
+          ...state.notifications,
+        },
         commands: payload.cursor >= state.cursor && payload.commands ? {
           ...Object.fromEntries(Object.entries(state.commands).filter(([, command]) => command.action !== 'enqueue' || !['queued', 'received', 'accepted', 'running', 'unknown', 'failed'].includes(command.state))),
           ...Object.fromEntries(payload.commands.map(command => [commandKey(command), command])),

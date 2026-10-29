@@ -5028,6 +5028,58 @@
         }
       }
     },
+    "/api/v1/services/browser/config": {
+      "get": {
+        "operationId": "get_browser_engine",
+        "responses": {
+          "200": {
+            "description": "Selected browser engine",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/BrowserEngineConfig" }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "set_browser_engine",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/BrowserEngineConfig" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Selected browser engine",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/BrowserEngineConfig" }
+              }
+            }
+          },
+          "422": { "description": "Invalid browser engine" }
+        }
+      }
+    },
+    "/api/v1/services/jev/models": {
+      "get": {
+        "operationId": "get_jev_gateway_models",
+        "responses": {
+          "200": {
+            "description": "System One models available through the configured LLM gateway",
+            "content": {
+              "application/json": {
+                "schema": { "type": "object", "additionalProperties": true }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/services/jev/config": {
       "get": {
         "operationId": "get_jev_config_get",
@@ -7727,8 +7779,25 @@
         ],
         "title": "HandoffSessionPayload"
       },
+      "BrowserEngineConfig": {
+        "type": "object",
+        "required": ["engine"],
+        "properties": {
+          "engine": {
+            "type": "string",
+            "enum": ["browser_use", "jev_ultrafast"]
+          }
+        }
+      },
       "JevConfigPatch": {
         "properties": {
+          "mode": {
+            "type": "string",
+            "enum": ["gateway", "official"]
+          },
+          "model": {
+            "type": "string"
+          },
           "api_key": {
             "anyOf": [
               {

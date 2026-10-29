@@ -3,11 +3,32 @@ package projection
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"astrorder.dev/app-server/internal/store"
 )
+
+func codexTurnCommandTx(ctx context.Context, tx *sql.Tx, aid, sid, turnID string) (string, error) {
+	var raw string
+	err := tx.QueryRowContext(ctx, `SELECT value FROM workspace_preferences WHERE "key"=?`, store.NativeTurnCommandKey(aid, sid)).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	var binding []string
+	if err := json.Unmarshal([]byte(raw), &binding); err != nil {
+		return "", err
+	}
+	if len(binding) == 2 && binding[0] == turnID {
+		return binding[1], nil
+	}
+	return "", nil
+}
 
 // Guidance completes input delivery while the original turn remains active.
 func projectCodexCommandCompleteTx(ctx context.Context, tx *sql.Tx, streamID string, payload map[string]any) ([]store.Event, error) {

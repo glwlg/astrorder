@@ -409,9 +409,6 @@ func (a *Adapter) Command(ctx context.Context, r core.Request) (core.Result, err
 				if !ok || !validToken(v, 160) {
 					return core.Result{}, fmt.Errorf("codex settings are invalid")
 				}
-				if key == "effort" && !validEffort(v) {
-					return core.Result{}, fmt.Errorf("codex reasoning effort is invalid")
-				}
 				params[key] = v
 				payload[key] = v
 			}
@@ -496,7 +493,7 @@ func (a *Adapter) Command(ctx context.Context, r core.Request) (core.Result, err
 			params["modelProvider"] = provider
 		}
 		if effort, ok := fields["effort"].(string); ok && effort != "" {
-			if !validEffort(effort) {
+			if !validToken(effort, 160) {
 				return core.Result{}, fmt.Errorf("codex reasoning effort is invalid")
 			}
 			params["effort"] = effort
@@ -530,7 +527,7 @@ func (a *Adapter) Command(ctx context.Context, r core.Request) (core.Result, err
 		return core.Result{SessionID: r.SessionID, Status: rt.Status(), Payload: map[string]any{"mode": mode}}, nil
 	case "session.reasoning.set":
 		effort, _ := fields["effort"].(string)
-		if !validEffort(effort) {
+		if !validToken(effort, 160) {
 			return core.Result{}, fmt.Errorf("codex reasoning effort is invalid")
 		}
 		method = "thread/settings/update"
@@ -716,13 +713,6 @@ func (a *Adapter) Command(ctx context.Context, r core.Request) (core.Result, err
 		s.mu.Unlock()
 	}
 	return core.Result{SessionID: r.SessionID, Status: rt.Status(), Payload: payload}, nil
-}
-func validEffort(value string) bool {
-	switch value {
-	case "none", "minimal", "low", "medium", "high", "xhigh":
-		return true
-	}
-	return false
 }
 func adapterInput(rt *Runtime, fields map[string]any) ([]map[string]any, error) {
 	raw, exists := fields["input"]

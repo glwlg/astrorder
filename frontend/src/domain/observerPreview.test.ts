@@ -1,6 +1,6 @@
 import { expect,it } from 'vitest'
 import { notificationForEvent } from './notifications'
-it('does not notify for a normal native reply completion',()=>{
+it('waits for the canonical completion notice instead of toasting raw observer events',()=>{
  const result=notificationForEvent({id:'preview',cursor:1,type:'native.observation',agent_id:'codex',session_id:'session',data:{event:'Stop',id:'event',notification:true,observed_at:Date.now()/1000,session_title:'修复登录问题',preview:'已修复登录失败，并通过回归测试。'}})
  expect(result).toBeNull()
 })

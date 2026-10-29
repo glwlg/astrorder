@@ -130,20 +130,25 @@ type Options struct {
 
 // Handler manages /api/v1/connections, /api/v1/environments, and /api/v1/agents endpoints.
 type Handler struct {
-	store       *store.Store
-	client      *daemonclient.Client
-	authorizer  *auth.Authenticator
-	publisher   Publisher
-	versioner   VersionExecutor
-	upgrader    UpgradeExecutor
-	osProber    OSProber
-	sshBinary   string
-	executables RemoteExecutableResolver
-	hooks       HookInstaller
-	discovery   *discoveryCache
-	restoreMu   sync.Mutex
-	autoOnce    sync.Once
-	recovery    sessionRecovery
+	store          *store.Store
+	client         *daemonclient.Client
+	authorizer     *auth.Authenticator
+	publisher      Publisher
+	versioner      VersionExecutor
+	upgrader       UpgradeExecutor
+	osProber       OSProber
+	sshBinary      string
+	executables    RemoteExecutableResolver
+	hooks          HookInstaller
+	discovery      *discoveryCache
+	restoreMu      sync.Mutex
+	autoOnce       sync.Once
+	recovery       sessionRecovery
+	upgradeMu      sync.Mutex
+	upgradeJobs    map[string]*upgradeJob
+	upgradeContext context.Context
+	upgradeCancel  context.CancelFunc
+	upgradeWG      sync.WaitGroup
 }
 
 // NewHandler creates a new connections HTTP handler.
@@ -167,18 +172,22 @@ func NewHandler(opts Options) (*Handler, error) {
 	if executables == nil {
 		executables = &NativeRemoteExecutableResolver{SSHBinary: opts.SSHBinary}
 	}
+	upgradeContext, upgradeCancel := context.WithCancel(context.Background())
 	return &Handler{
-		store:       opts.Store,
-		client:      opts.Client,
-		authorizer:  opts.Authorizer,
-		publisher:   opts.Publisher,
-		versioner:   versioner,
-		upgrader:    upgrader,
-		osProber:    osProber,
-		sshBinary:   opts.SSHBinary,
-		executables: executables,
-		hooks:       opts.Hooks,
-		discovery:   newDiscoveryCache(),
+		upgradeJobs:    make(map[string]*upgradeJob),
+		upgradeContext: upgradeContext,
+		upgradeCancel:  upgradeCancel,
+		store:          opts.Store,
+		client:         opts.Client,
+		authorizer:     opts.Authorizer,
+		publisher:      opts.Publisher,
+		versioner:      versioner,
+		upgrader:       upgrader,
+		osProber:       osProber,
+		sshBinary:      opts.SSHBinary,
+		executables:    executables,
+		hooks:          opts.Hooks,
+		discovery:      newDiscoveryCache(),
 	}, nil
 }
 
@@ -321,6 +330,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleListAgents(w, r)
 	case r.Method == http.MethodGet && path == "/api/v1/agents/upgrade/targets":
 		h.handleAgentUpgradeTargets(w, r)
+	case (r.Method == http.MethodGet || r.Method == http.MethodPost) && path == "/api/v1/agents/upgrade/jobs":
+		h.handleUpgradeJobs(w, r)
+	case r.Method == http.MethodPost && strings.HasPrefix(path, "/api/v1/agents/upgrade/jobs/") && strings.HasSuffix(path, "/cancel"):
+		h.handleCancelUpgradeJob(w, r)
 	case r.Method == http.MethodGet && strings.HasPrefix(path, "/api/v1/agents/") && strings.HasSuffix(path, "/observations"):
 		h.handleAgentObservations(w, r)
 	case r.Method == http.MethodPost && strings.HasPrefix(path, "/api/v1/agents/") && strings.HasSuffix(path, "/observer"):

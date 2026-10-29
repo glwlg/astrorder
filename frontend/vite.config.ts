@@ -23,6 +23,7 @@ export default defineConfig({
       filename: 'sw-astrorder.js',
       includeAssets: ['favicon.png', 'favicon.ico', 'apple-touch-icon.png', 'pwa-192.png', 'pwa-512.png'],
       workbox: {
+        importScripts: ['sw-notification-events.js'],
         skipWaiting: true,
         clientsClaim: true,
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2,webmanifest}'],

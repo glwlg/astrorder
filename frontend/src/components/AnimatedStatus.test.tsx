@@ -64,15 +64,14 @@ describe('SessionActivityBorder motion preference', () => {
     expect(group).toHaveAttribute('data-repeat', 'Infinity')
   })
 
-  it('keeps approval and error visuals static under the current preference', () => {
+  it('keeps the approval visual static and removes the error border', () => {
     motionPreference(true)
     const { container, rerender } = render(<SessionActivityBorder status="waiting_approval" />)
     const approval = container.querySelector('rect')!
     expect(JSON.parse(approval.getAttribute('data-animate')!).opacity).toBe(0.7)
     expect(container.querySelector('svg')).toHaveStyle({ color: 'var(--astr-yellow)' })
     rerender(<SessionActivityBorder status="error" />)
-    expect(JSON.parse(container.querySelector('rect')!.getAttribute('data-animate')!).opacity).toBe(0.65)
-    expect(container.querySelector('svg')).toHaveStyle({ color: 'var(--astr-red)' })
+    expect(container).toBeEmptyDOMElement()
   })
 
   it('removes the preference listener when the border unmounts', () => {

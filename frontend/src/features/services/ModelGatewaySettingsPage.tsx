@@ -3,6 +3,7 @@ import { UsageGatewaySettingsCard } from './UsageGatewaySettingsCard'
 import { OpenVikingSettingsCard } from './OpenVikingSettingsCard'
 import { LlmSettingsCard } from './LlmSettingsCard'
 import { JevSettingsCard } from './JevSettingsCard'
+import { BrowserEngineSettingsCard } from './BrowserEngineSettingsCard'
 
 export function ModelGatewaySettingsPage() {
   return (
@@ -12,6 +13,7 @@ export function ModelGatewaySettingsPage() {
         <UsageGatewaySettingsCard />
         <OpenVikingSettingsCard />
         <LlmSettingsCard />
+        <BrowserEngineSettingsCard />
         <JevSettingsCard />
       </Stack>
     </div>

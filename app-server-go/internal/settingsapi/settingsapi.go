@@ -54,15 +54,17 @@ type handler struct {
 }
 
 var paths = map[string][]string{
-	"/api/v1/network/config":       {http.MethodGet, http.MethodPost},
-	"/api/v1/services/llm/config":  {http.MethodGet, http.MethodPost},
-	"/api/v1/services/llm/test":    {http.MethodPost},
-	"/api/v1/services/jev/test":    {http.MethodPost},
-	"/api/v1/tools/jev-filter":     {http.MethodPost},
-	"/api/v1/services/jev/config":  {http.MethodGet, http.MethodPost},
-	"/api/v1/runtime/launch":       {http.MethodPost},
-	"/api/v1/runtime":              {http.MethodGet},
-	"/api/v1/codex-desktop/status": {http.MethodGet},
+	"/api/v1/network/config":          {http.MethodGet, http.MethodPost},
+	"/api/v1/services/llm/config":     {http.MethodGet, http.MethodPost},
+	"/api/v1/services/llm/test":       {http.MethodPost},
+	"/api/v1/services/jev/test":       {http.MethodPost},
+	"/api/v1/services/jev/models":     {http.MethodGet},
+	"/api/v1/tools/jev-filter":        {http.MethodPost},
+	"/api/v1/services/jev/config":     {http.MethodGet, http.MethodPost},
+	"/api/v1/services/browser/config": {http.MethodGet, http.MethodPost},
+	"/api/v1/runtime/launch":          {http.MethodPost},
+	"/api/v1/runtime":                 {http.MethodGet},
+	"/api/v1/codex-desktop/status":    {http.MethodGet},
 }
 
 // Matches reports whether this package owns the route.
@@ -122,6 +124,8 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	case "/api/v1/services/llm/test":
 		h.testLLM(w, r)
+	case "/api/v1/services/jev/models":
+		h.jevModels(w, r)
 	case "/api/v1/services/jev/config":
 		if r.Method == http.MethodGet {
 			h.getJev(w, r)
@@ -130,6 +134,8 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	case "/api/v1/services/jev/test", "/api/v1/tools/jev-filter":
 		h.jev(w, r)
+	case "/api/v1/services/browser/config":
+		h.browserEngine(w, r)
 	case "/api/v1/runtime/launch":
 		var payload struct {
 			Kind      string `json:"kind"`
@@ -415,48 +421,6 @@ func (h *handler) testLLM(w http.ResponseWriter, r *http.Request) {
 		model = strings.TrimSpace(patch.Model)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "model": model, "reply": reply.Choices[0].Message.Content})
-}
-
-// ---- Jev --------------------------------------------------------------
-
-func (h *handler) jevView(ctx context.Context) map[string]any {
-	key, _ := h.stringPref(ctx, prefJevKey)
-	masked := ""
-	switch {
-	case len(key) > 20:
-		masked = key[:10] + "..." + key[len(key)-8:]
-	case key != "":
-		masked = "已配置"
-	}
-	return map[string]any{"configured": key != "", "masked_key": masked}
-}
-
-func (h *handler) getJev(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, h.jevView(r.Context()))
-}
-
-func (h *handler) setJev(w http.ResponseWriter, r *http.Request) {
-	var patch struct {
-		APIKey *string `json:"api_key"`
-	}
-	if err := decode(r, &patch); err != nil {
-		fail(w, http.StatusUnprocessableEntity, "Invalid request")
-		return
-	}
-	key := ""
-	if patch.APIKey != nil {
-		key = strings.TrimSpace(*patch.APIKey)
-	}
-	if key == "" {
-		if _, err := h.Store.DeletePreference(r.Context(), prefJevKey); err != nil {
-			fail(w, http.StatusInternalServerError, "Preference storage is unavailable")
-			return
-		}
-	} else if err := h.Store.SetPreference(r.Context(), prefJevKey, key, true); err != nil {
-		fail(w, http.StatusInternalServerError, "Preference storage is unavailable")
-		return
-	}
-	writeJSON(w, http.StatusOK, h.jevView(r.Context()))
 }
 
 // ---- runtime ----------------------------------------------------------

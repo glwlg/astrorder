@@ -52,12 +52,12 @@ describe('sessionActivityStatus', () => {
     expect(sessionActivityStatus(approvalSession)).toBe('waiting_approval')
   })
 
-  it('returns error when session.status is error', () => {
+  it('shows failed sessions without an exceptional activity indicator', () => {
     const errorSession: Session = {
       ...baseSession,
       status: 'error',
     }
-    expect(sessionActivityStatus(errorSession)).toBe('error')
+    expect(sessionActivityStatus(errorSession)).toBe('idle')
   })
 
   it('uses session status rather than command delivery state', () => {

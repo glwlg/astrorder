@@ -107,7 +107,7 @@ describe('MobileSessionDrawer', () => {
     expect(row?.querySelector('svg[data-status="running"]')).toBeNull()
   })
 
-  it('keeps idle rows undecorated and preserves approval and error indicators', () => {
+  it('keeps idle and connection-error rows quiet while preserving approval indicators', () => {
     const statusGroups = [{ ...groups[0], sessions: [
       session({ id: 'idle', title: 'Idle fixture' }),
       session({ id: 'approval', title: 'Approval fixture', status: 'waiting_approval' }),
@@ -118,7 +118,8 @@ describe('MobileSessionDrawer', () => {
       expect(screen.getByRole('button', { name: title }).closest('.m-session-row')?.querySelector('.session-star-border')).toBeNull()
     }
     expect(screen.getByRole('button', { name: 'Approval fixture' }).closest('.m-session-row')?.querySelector('svg[data-status="waiting_approval"] rect')).not.toBeNull()
-    expect(screen.getByRole('button', { name: 'Error fixture' }).closest('.m-session-row')?.querySelector('svg[data-status="error"] rect')).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'Error fixture' }).closest('.m-session-row')?.querySelector('.status-unread')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Error fixture' }).closest('.m-session-row')?.querySelector('svg[data-status="error"]')).toBeNull()
   })
 
   it('removes the star border when a session finishes without remounting the drawer', () => {

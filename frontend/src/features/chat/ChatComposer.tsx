@@ -771,12 +771,12 @@ ${draft.text}` : entry.payload.text)
                         {entry.state === 'unknown' ? '核对结果' : '重试'}
                       </Button>
                     )}
-                    <Button size="compact-xs" variant="subtle" color="blue" onClick={() => void editQueued(entry)}>
+                    {entry.state === 'failed' && <Button size="compact-xs" variant="subtle" color="blue" onClick={() => void editQueued(entry)}>
                       编辑
-                    </Button>
-                    <Button size="compact-xs" variant="subtle" color="red" onClick={() => void deleteQueued(entry.payload.id)}>
+                    </Button>}
+                    {(entry.state === 'failed' || entry.state === 'unknown') && <Button size="compact-xs" variant="subtle" color="red" title={entry.state === 'unknown' ? '移除记录不会撤回已发送的消息' : undefined} onClick={() => void deleteQueued(entry.payload.id)}>
                       删除
-                    </Button>
+                    </Button>}
                   </>
                 )}
               </Group>

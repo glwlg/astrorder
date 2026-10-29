@@ -51,7 +51,7 @@ func (d *DesktopService) Notify(ctx context.Context, title, body string) (bool, 
 	if err := requireWindow(ctx, d.shell.window); err != nil {
 		return false, err
 	}
-	return d.shell.Notify(title, body), nil
+	return d.shell.Notify(title, body)
 }
 func (d *DesktopService) Minimize(ctx context.Context) error {
 	if err := requireWindow(ctx, d.shell.window); err != nil {

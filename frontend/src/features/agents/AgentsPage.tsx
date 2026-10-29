@@ -14,6 +14,7 @@ import { NativeObservationPanel } from '../../components/NativeObservationPanel'
 import { api } from '../../api/client'
 import { notifications } from '@mantine/notifications'
 import { useBackgroundTasks } from '../../state/backgroundTasks'
+import { trackUpgradeJob } from '../../state/upgradeTasks'
 
 const allCapabilities: { key: string; label: string }[] = [
   { key: 'chat', label: '对话交互' },
@@ -165,92 +166,30 @@ function SessionCLIConfiguration({ agent }: { agent: Agent }) {
 }
 
 function AgentUpgradeAction({ agent }: { agent: Agent }) {
-  const [upgrading, setUpgrading] = useState(false)
+  const [starting, setStarting] = useState(false)
+  const [taskId, setTaskId] = useState<string | null>(null)
   const [resultModalOpen, setResultModalOpen] = useState(false)
-  const [logOutput, setLogOutput] = useState('')
-  const [cmdName, setCmdName] = useState('')
-  const [isSuccess, setIsSuccess] = useState(true)
-  const abortCtrlRef = useRef<AbortController | null>(null)
+  const task = useBackgroundTasks((state) => taskId ? state.tasks[taskId] : undefined)
+  const upgrading = starting || task?.status === 'running'
+  const logOutput = task?.log || ''
+  const cmdName = logOutput.match(/\[EXEC\] (.*)/)?.[1] || ''
+  const isSuccess = task?.status !== 'failed'
   const logPreRef = useRef<HTMLPreElement | null>(null)
-
-  const addBackgroundTask = useBackgroundTasks((state) => state.add)
-  const completeBackgroundTask = useBackgroundTasks((state) => state.complete)
-  const failBackgroundTask = useBackgroundTasks((state) => state.fail)
+  useEffect(() => {
+    if (logPreRef.current) logPreRef.current.scrollTop = logPreRef.current.scrollHeight
+  }, [logOutput])
 
   const handleUpgrade = async () => {
-    setUpgrading(true)
-    setLogOutput('')
-    setCmdName('')
-    setIsSuccess(true)
-    setResultModalOpen(true)
-
-    const abortCtrl = new AbortController()
-    abortCtrlRef.current = abortCtrl
-
-    // 登记到全局统一后台任务
-    const taskId = addBackgroundTask({
-      title: `升级 ${agent.name}`,
-      detail: '正在执行版本升级指令…',
-      actionLabel: '查看日志',
-      log: '',
-      cancel: () => abortCtrl.abort(),
-    })
-
+    setStarting(true)
     try {
-      const res = await api.upgradeAgentStream(
-        agent.id,
-        (chunk) => {
-          useBackgroundTasks.getState().appendLog(taskId, chunk)
-          setLogOutput((prev) => {
-            const next = prev + chunk
-            if (logPreRef.current) {
-              logPreRef.current.scrollTop = logPreRef.current.scrollHeight
-            }
-            return next
-          })
-        },
-        (command) => {
-          useBackgroundTasks.getState().appendLog(taskId, `[EXEC] ${command}\n`)
-          setCmdName(command)
-        },
-        abortCtrl.signal,
-      )
-
-      setIsSuccess(res.ok)
-      if (res.ok) {
-        completeBackgroundTask(taskId, '升级已顺利完成')
-        notifications.show({
-          color: 'teal',
-          title: '升级成功',
-          message: `${agent.name} 升级指令已执行完成。`,
-        })
-      } else {
-        failBackgroundTask(taskId, `升级退出码: ${res.exit_code}`)
-        notifications.show({
-          color: 'red',
-          title: '升级异常',
-          message: `${agent.name} 升级命令返回非零退出码: ${res.exit_code}`,
-        })
-      }
-    } catch (err: any) {
-      if (err.name === 'AbortError') {
-        failBackgroundTask(taskId, '用户已取消任务')
-        notifications.show({
-          color: 'gray',
-          title: '升级已取消',
-          message: `${agent.name} 升级已被手动取消。`,
-        })
-      } else {
-        failBackgroundTask(taskId, err.message || '升级失败')
-        notifications.show({
-          color: 'red',
-          title: '升级失败',
-          message: err.message || '执行升级命令失败',
-        })
-      }
+      const job = await api.startUpgradeJob([agent.id], `升级 ${agent.name}`)
+      trackUpgradeJob(job)
+      setTaskId(job.id)
+      setResultModalOpen(true)
+    } catch (error) {
+      notifications.show({ color: 'red', message: error instanceof Error ? error.message : '启动升级失败' })
     } finally {
-      setUpgrading(false)
-      abortCtrlRef.current = null
+      setStarting(false)
     }
   }
 
@@ -285,7 +224,7 @@ function AgentUpgradeAction({ agent }: { agent: Agent }) {
           <Group gap={8}>
             <IconTerminal size={18} color={isSuccess ? 'var(--astr-teal)' : 'var(--astr-red)'} />
             <Text fw={600} size="sm">{agent.name} 升级执行日志</Text>
-            {upgrading && <Badge size="xs" color="indigo" variant="light">实时流式输出中…</Badge>}
+            {upgrading && <Badge size="xs" color="indigo" variant="light">升级进行中…</Badge>}
           </Group>
         }
         size="lg"
@@ -298,7 +237,7 @@ function AgentUpgradeAction({ agent }: { agent: Agent }) {
           </Paper>
           <Paper p="sm" withBorder radius="sm" style={{ background: '#090d16', maxHeight: '380px', overflowY: 'auto' }}>
             <pre ref={logPreRef} style={{ margin: 0, fontSize: '11px', fontFamily: 'monospace', color: isSuccess ? '#86efac' : '#fca5a5', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-              {logOutput || (upgrading ? '正在建立连接并拉取执行流…' : '升级完成，无额外日志输出。')}
+              {logOutput || (upgrading ? '等待升级输出…' : task?.detail || '暂无升级日志')}
             </pre>
           </Paper>
           <Group justify="space-between" align="center">

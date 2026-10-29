@@ -27,12 +27,18 @@ func TestStreamLifecycle(t *testing.T) {
 	defer a.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	created, err := a.Create(ctx, core.Request{Fields: map[string]any{}})
+	created, err := a.Create(ctx, core.Request{Fields: map[string]any{"effort": "future-effort"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if created.SessionID != "11111111-1111-4111-8111-111111111111" || created.Payload["agent_id"] != "local-antigravity" {
 		t.Fatalf("identity: %#v", created)
+	}
+	a.mu.Lock()
+	args := a.sessions[created.SessionID].cmd.Args
+	a.mu.Unlock()
+	if !strings.Contains(strings.Join(args, "\x00"), "--effort\x00future-effort") {
+		t.Fatalf("effort was not forwarded to Agent: %q", args)
 	}
 	r := core.Request{SessionID: created.SessionID, Action: "session.send", Fields: map[string]any{"text": "hello", "command_id": "cmd"}}
 	if _, err = a.Command(ctx, r); err != nil {

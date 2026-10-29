@@ -26,6 +26,7 @@ const bridgePath = "/astrorder-desktop-bridge.js"
 // order, so window.astrorderDesktop exists before main.tsx reads it.
 const bridgeTemplate = `import * as svc from '/bindings/astrorder.dev/desktop/desktopservice.js';
 import { installFilePaths, resolvePreviewImages } from '/desktop-files.js';
+import { installExternalLinks } from '/desktop-links.js';
 window.__ASTRORDER_BACKEND_HOST__ = %s;
 const getPathForFile = installFilePaths(window);
 
@@ -49,6 +50,7 @@ window.astrorderDesktop = Object.freeze({
   showStatistics: (url, bounds, refresh) => svc.ShowStatistics(String(url), { ...bounds, scale: window.devicePixelRatio }, Boolean(refresh)),
   hideStatistics: () => svc.HideStatistics(),
 });
+installExternalLinks(window, window.astrorderDesktop.openExternal);
 document.documentElement.classList.add('is-desktop-app');
 // No-op unless the shell was started with --smoke-report.
 void svc.ReportReady();
@@ -131,7 +133,7 @@ func assetHandler(cfg Config) (http.Handler, error) {
 			}
 			proxy.ServeHTTP(w, r)
 			return
-		case r.URL.Path == "/desktop-files.js" || r.URL.Path == "/image-preview.html":
+		case r.URL.Path == "/desktop-files.js" || r.URL.Path == "/desktop-links.js" || r.URL.Path == "/image-preview.html":
 			static.ServeHTTP(w, r)
 			return
 		case strings.HasPrefix(r.URL.Path, "/bindings/"):

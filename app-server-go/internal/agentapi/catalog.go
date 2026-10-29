@@ -142,7 +142,7 @@ var Capabilities = []Capability{
 	},
 	{
 		ID:      "browser.run",
-		Summary: "Run a bounded browser task in this Astrorder session's visible Edge tab using Jev. Later calls continue that tab and login state unless reset is true.",
+		Summary: "Run a bounded browser task using the configured browser engine in this Astrorder session's Edge tab. Later calls continue that session unless reset is true.",
 		Input: map[string]any{
 			"url":                "initial http/https page URL",
 			"goal":               "complete browser goal with a visible completion condition",

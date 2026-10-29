@@ -12,6 +12,7 @@ import './mobileMessageMenu.css'
 import { SessionActivityBorder } from '../../components/AnimatedStatus'
 import { AgentBrandIcon } from '../../components/AgentBrandIcon'
 import { StatusDot } from '../../components/Status'
+import { useSessionUnread } from '../../hooks/useSessionUnread'
 import { hapticFeedback } from './mobileGestures'
 
 type SessionMenu = { session: Session; x: number; y: number }
@@ -39,6 +40,7 @@ export function MobileSessionDrawer({ groups, pins, pinnedProjects, selectedKey,
       return {}
     }
   })
+  const { isUnread } = useSessionUnread()
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [sessionMenu, setSessionMenu] = useState<SessionMenu | null>(null)
   const [projectMenu, setProjectMenu] = useState<ProjectMenu | null>(null)
@@ -162,7 +164,7 @@ export function MobileSessionDrawer({ groups, pins, pinnedProjects, selectedKey,
         )}
         <span>{title}</span>
         <small>{formatRelativeTime(session.updated_at)}</small>
-        {activityStatus !== 'idle' && <StatusDot status={activityStatus} />}
+        {activityStatus === 'idle' && isUnread(key) ? <StatusDot status="unread" /> : activityStatus !== 'idle' && <StatusDot status={activityStatus} />}
       </button>
       <button className="m-session-more" aria-label={`会话操作 ${title}`} onClick={event => {
         event.stopPropagation()

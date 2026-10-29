@@ -510,14 +510,7 @@ func (h *Handler) Invoke(ctx context.Context, capability string, input map[strin
 			return nil, err
 		}
 
-		var planner *JevPlanner
-		if h.options.PlannerInvoker != nil {
-			planner = &JevPlanner{
-				Invoker: h.options.PlannerInvoker,
-			}
-		}
-
-		res, err := h.manager.RunBrowserTask(ctx, BrowserTaskRequest{
+		res, err := h.manager.RunExternalBrowserTask(ctx, BrowserTaskRequest{
 			URL:               u,
 			Goal:              goal,
 			Inputs:            inputsMap,
@@ -525,7 +518,7 @@ func (h *Handler) Invoke(ctx context.Context, capability string, input map[strin
 			Reset:             reset,
 			IncludeScreenshot: includeScreenshot,
 			SessionKey:        sessionKey,
-		}, h.options.Store, planner)
+		}, h.options.Store)
 		if err != nil {
 			return nil, err
 		}

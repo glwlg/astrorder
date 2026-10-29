@@ -2,9 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import { ActionIcon, Button, Group, Loader, Modal, Paper, Stack, Text, Tooltip, UnstyledButton } from '@mantine/core'
 import { IconAlertCircle, IconCheck, IconChecklist, IconTrash, IconX } from '@tabler/icons-react'
 import { useBackgroundTasks } from '../state/backgroundTasks'
+import { useUpgradeTaskRecovery } from '../state/upgradeTasks'
 import './backgroundTasks.css'
 
 export function BackgroundTasks() {
+  const upgradeError = useUpgradeTaskRecovery()
   const [opened, setOpened] = useState(false)
   const taskMap = useBackgroundTasks((state) => state.tasks)
   const tasks = Object.values(taskMap).sort((a, b) => b.createdAt - a.createdAt)
@@ -22,7 +24,7 @@ export function BackgroundTasks() {
     else task.action?.()
     setOpened(false)
   }
-  if (!tasks.length) return null
+  if (!tasks.length && !upgradeError) return null
 
   const running = tasks.filter((task) => task.status === 'running').length
   const finishedCount = tasks.length - running
@@ -43,6 +45,7 @@ export function BackgroundTasks() {
         </Group>
       </Group>
       <Stack className="background-tasks-list" gap={0}>
+        {upgradeError && <Text size="xs" c="red" role="alert" p="md">升级任务状态暂不可用：{upgradeError}</Text>}
         {tasks.map((task) => <div
           className="background-task"
           key={task.id}

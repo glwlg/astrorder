@@ -9,6 +9,7 @@ import { SessionRail } from './SessionRail'
 import type { Agent, Project, Session } from '../domain/types'
 
 beforeEach(() => {
+  useAstrorderStore.setState({ notifications: {} })
   const preferences = { appearance: {}, session_pins: {}, pinned_projects: [], project_order: [] }
   vi.spyOn(api, 'getPreferences').mockResolvedValue(preferences)
   vi.spyOn(api, 'importPreferences').mockImplementation(async values => ({ ...preferences, ...values, appearance: values.appearance as typeof preferences.appearance || {} }))
@@ -507,7 +508,28 @@ describe('SessionRail local handoff', () => {
     expect(row.closest('.session-row-wrapper')).toHaveStyle({ '--session-running-color': 'var(--astr-indigo, #5b6cff)' })
   })
 
-  it('displays unread dot for completed unread session and clears it on selection', () => {
+  it('does not mark metadata-only updates unread', () => {
+    const view = render(<MantineProvider><SessionRail sessions={[{ ...sessions[0], status: 'error', updated_at: new Date().toISOString() }]} agents={agents} projects={projects} onSelect={vi.fn()} /></MantineProvider>)
+    expect(view.container.querySelector('.session-row')).not.toHaveClass('is-unread')
+    view.unmount()
+  })
+
+  it('marks a session read from its context menu without selecting it', async () => {
+    useAstrorderStore.getState().addNotification({
+      key: 'menu-notice', cursor: 1, kind: 'task_completed', title: '会话已完成', message: '回复',
+      agent_id: sessions[0].agent_id, session_id: sessions[0].id, created_at: new Date().toISOString(),
+    })
+    const onSelect = vi.fn()
+    const view = render(<MantineProvider><SessionRail sessions={[sessions[0]]} agents={agents} projects={projects} onSelect={onSelect} /></MantineProvider>)
+    const row = view.container.querySelector('.session-row')!
+    fireEvent.contextMenu(row)
+    fireEvent.click(await screen.findByRole('menuitem', { name: '标为已读' }))
+    expect(row).not.toHaveClass('is-unread')
+    expect(onSelect).not.toHaveBeenCalled()
+    view.unmount()
+  })
+
+  it.each(['idle', 'error'] as const)('displays ordinary unread dot for %s session and clears it on selection', (status) => {
     const map = new Map<string, string>()
     vi.stubGlobal('localStorage', {
       getItem: (key: string) => map.get(key) || null,
@@ -518,10 +540,15 @@ describe('SessionRail local handoff', () => {
     const recentSession: Session = {
       ...sessions[0],
       id: 'recent-unread',
+      status,
       updated_at: new Date().toISOString(),
     }
 
     const onSelect = vi.fn()
+    useAstrorderStore.getState().addNotification({
+      key: 'notice-unread', cursor: 1, kind: 'task_completed', title: '会话已完成', message: '真实回复',
+      agent_id: recentSession.agent_id, session_id: recentSession.id, created_at: new Date().toISOString(),
+    })
     const view = render(
       <MantineProvider>
         <SessionRail sessions={[recentSession]} agents={agents} projects={projects} onSelect={onSelect} />
@@ -534,8 +561,8 @@ describe('SessionRail local handoff', () => {
 
     fireEvent.click(row)
     expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ id: 'recent-unread' }))
-    const readStored = JSON.parse(map.get('astrorder:sessions-last-read') || '{}')
-    expect(readStored[scopeKey('local', 'recent-unread')]).toBeGreaterThan(0)
+    const readStored = JSON.parse(map.get('astrorder:sessions-read-notice') || '{}')
+    expect(readStored[scopeKey('local', 'recent-unread')]).toBe('notice-unread')
 
     view.unmount()
     vi.unstubAllGlobals()

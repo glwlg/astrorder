@@ -212,9 +212,6 @@ func (a *Adapter) openReplacing(ctx context.Context, id string, p map[string]any
 		return core.Result{}, err
 	}
 	model, effort := str(p, "model"), str(p, "effort")
-	if effort != "" && effort != "low" && effort != "medium" && effort != "high" && effort != "xhigh" && effort != "max" {
-		return core.Result{}, fmt.Errorf("invalid Antigravity effort")
-	}
 	a.mu.Lock()
 	if a.closed || a.opening[id] {
 		a.mu.Unlock()

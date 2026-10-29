@@ -1,6 +1,7 @@
 package sessions
 
 import (
+	"astrorder.dev/app-server/internal/notifications"
 	"net/http"
 	"sort"
 
@@ -99,7 +100,13 @@ func (h *Handler) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusInternalServerError, "Failed to read queued commands")
 		return
 	}
+	notices, err := notifications.Latest(ctx, h.store, cursor)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "Failed to read session notifications")
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
+		"notifications":    notices,
 		"commands":         commands,
 		"protocol_version": 1,
 		"agents":           effectiveAgents,

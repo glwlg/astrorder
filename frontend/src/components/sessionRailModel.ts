@@ -10,7 +10,8 @@ export function sessionActivityStatus(
   session: Partial<Pick<Session, 'id' | 'agent_id' | 'status' | 'live'>>,
   _commandsMap?: Record<string, Command> | Command[],
 ): SessionStatus {
-  if (session.status === 'running' || session.status === 'waiting_approval' || session.status === 'error') {
+  if (session.status === 'error') return 'idle'
+  if (session.status === 'running' || session.status === 'waiting_approval') {
     return session.status
   }
   if (session.agent_id && session.id) {

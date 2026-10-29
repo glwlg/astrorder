@@ -7,6 +7,7 @@ export type BackgroundTask = {
   status: 'running' | 'completed' | 'failed' | 'cancelled'
   createdAt: number
   log?: string
+  upgrade?: { current: number; total: number; target: string }
   actionLabel?: string
   action?: () => void
   cancel: () => void | Promise<void>
@@ -47,11 +48,11 @@ export const useBackgroundTasks = create<BackgroundTaskStore>((set) => ({
     const task = state.tasks[id]
     if (!task || task.status !== 'running') return state
     void Promise.resolve(task.cancel()).catch((error) => {
-      set((latest) => latest.tasks[id]?.status === 'cancelled' ? ({
-        tasks: { ...latest.tasks, [id]: { ...latest.tasks[id], status: 'failed', detail: error instanceof Error ? error.message : '取消任务失败' } },
+      set((latest) => latest.tasks[id] && (latest.tasks[id].status === 'cancelled' || task.upgrade) ? ({
+        tasks: { ...latest.tasks, [id]: { ...latest.tasks[id], status: task.upgrade ? latest.tasks[id].status : 'failed', detail: error instanceof Error ? error.message : '取消任务失败' } },
       }) : latest)
     })
-    return { tasks: { ...state.tasks, [id]: { ...task, status: 'cancelled', detail: '已取消' } } }
+    return { tasks: { ...state.tasks, [id]: { ...task, status: task.upgrade ? 'running' : 'cancelled', detail: task.upgrade ? '正在取消…' : '已取消' } } }
   }),
   dismiss: (id) => set((state) => {
     const tasks = { ...state.tasks }

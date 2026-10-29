@@ -47,11 +47,5 @@ func (h *Handler) handleViewLease(w http.ResponseWriter, r *http.Request, sid st
 		return
 	}
 	h.views.touch(aid+"::"+sid, time.Now())
-	if stringValue(row, "control_state") == "owned" {
-		if err := h.ensureNativeBinding(r.Context(), row); err != nil {
-			writeJSONError(w, http.StatusServiceUnavailable, "会话唤醒失败，请稍后重试")
-			return
-		}
-	}
 	writeJSON(w, 200, map[string]any{"ok": true, "expires_in_seconds": 90})
 }
