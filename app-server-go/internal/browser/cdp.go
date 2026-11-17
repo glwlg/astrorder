@@ -119,15 +119,6 @@ func (c *CDPClient) readLoop() {
 	defer func() {
 		c.closed.Store(true)
 		close(c.done)
-		// Drain all pending calls
-		c.pending.Range(func(key, value any) bool {
-			if ch, ok := value.(chan cdpResponse); ok {
-				ch <- cdpResponse{
-					Error: &cdpError{Message: "浏览器页面连接中断，可以在原窗口继续任务"},
-				}
-			}
-			return true
-		})
 	}()
 
 	for {
@@ -167,6 +158,15 @@ func (c *CDPClient) Close() error {
 		_ = c.ws.Close(websocket.StatusNormalClosure, "closed")
 	})
 	return nil
+}
+
+func (c *CDPClient) CloseNow() error {
+	var err error
+	c.closeOnce.Do(func() {
+		c.closed.Store(true)
+		err = c.ws.CloseNow()
+	})
+	return err
 }
 
 // CDPEndpoints represents DevTools HTTP discovery discovery.
@@ -242,10 +242,16 @@ func (e *CDPEndpoints) ListPages(ctx context.Context) ([]PageTarget, error) {
 	if err := dec.Decode(&targets); err != nil {
 		return nil, err
 	}
+	if targets == nil {
+		return nil, errors.New("invalid browser target list")
+	}
 
 	var pages []PageTarget
 	for _, t := range targets {
 		if t.Type == "page" {
+			if t.ID == "" {
+				return nil, errors.New("browser target is missing an ID")
+			}
 			pages = append(pages, t)
 		}
 	}
@@ -264,5 +270,8 @@ func (e *CDPEndpoints) ClosePage(ctx context.Context, targetID string) error {
 	}
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("close browser page: HTTP %d", resp.StatusCode)
+	}
 	return nil
 }

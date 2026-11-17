@@ -248,7 +248,7 @@ func runServer(ctx context.Context, cfg config.Config, ready io.Writer, logger *
 		}
 		defer notificationService.Close()
 		notificationHandler = notificationService
-		groupService, err = botgroups.New(serverContext, botgroups.Options{Store: st, Controller: &botgroups.NativeController{Store: st, Client: client, Publisher: eventHub, DefaultWorkspace: cfg.DefaultWorkspace}, Authorizer: authorizer, Publisher: eventHub})
+		groupService, err = botgroups.New(serverContext, botgroups.Options{Store: st, Controller: &botgroups.NativeController{Store: st, Client: client, Publisher: eventHub, DefaultWorkspace: cfg.DefaultWorkspace, AttachmentsDir: cfg.AttachmentsDir, MaxAttachmentSize: cfg.MaxAttachmentSize}, Authorizer: authorizer, Publisher: eventHub, FileResolver: targetfs.NewResolver(targetfs.ResolverOptions{Store: st, DefaultWorkspace: cfg.DefaultWorkspace, HelperAssetsDir: bundledHelperAssetsDir()})})
 		if err != nil {
 			return fmt.Errorf("configure group orchestration: %w", err)
 		}

@@ -1,8 +1,10 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, render } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { EventEnvelope } from '../domain/types'
+import type { EventEnvelope, Message, Session } from '../domain/types'
+import { api } from '../api/client'
 import { useAstrorderStore } from '../state/store'
+import { useSessionResources } from './useAstrorderData'
 import { useEventStream } from './useEventStream'
 
 const mocks = vi.hoisted(() => ({
@@ -137,6 +139,143 @@ describe('event stream notifications', () => {
     view.unmount()
   })
 
+  it('refreshes the matching transcript as soon as a completion notification arrives', () => {
+    let options: { onEvent: (event: EventEnvelope) => void } | undefined
+    mocks.connectEventStream.mockImplementation(next => { options = next; return vi.fn() })
+    const client = new QueryClient()
+    const invalidate = vi.spyOn(client, 'invalidateQueries').mockResolvedValue()
+    const view = render(<StreamHarness client={client} />)
+    act(() => options?.onEvent(noticeEvent('task_completed', 1)))
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['astrorder', 'messages', 'agent-1', 'session-1'] })
+    view.unmount()
+  })
+
+  it('shows the completed native reply when a notification overtakes queued stream output', async () => {
+    let options: { onEvent: (event: EventEnvelope) => void } | undefined
+    mocks.connectEventStream.mockImplementation(next => { options = next; return vi.fn() })
+    const session: Session = { id: 'session-1', agent_id: 'agent-1', title: '测试', status: 'running', workspace: null, updated_at: '2026-10-16T02:00:00Z' }
+    const user: Message = { id: 'user', agent_id: session.agent_id, session_id: session.id, role: 'user', kind: 'message', text: '问题', turn_id: 'turn', created_at: session.updated_at, attachments: [], tool: null, command_id: null }
+    const reply: Message = { ...user, id: 'reply', role: 'assistant', text: '前半完整' }
+    vi.spyOn(api, 'renewSessionView').mockResolvedValue({ ok: true })
+    vi.spyOn(api, 'syncSession').mockResolvedValue(session)
+    const getMessages = vi.spyOn(api, 'getMessages').mockResolvedValue({ items: [user], next_cursor: null })
+    vi.spyOn(api, 'getCommands').mockResolvedValue({ items: [] })
+    vi.spyOn(api, 'getTasks').mockResolvedValue({ items: [] })
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    function LiveView() {
+      useEventStream(true, client)
+      const resources = useSessionResources(session, true)
+      return <div data-testid="answer">{resources.visibleMessages.find(message => message.id === reply.id)?.text}</div>
+    }
+    const view = render(<QueryClientProvider client={client}><LiveView /></QueryClientProvider>)
+    try {
+      await waitFor(() => expect(getMessages).toHaveBeenCalled())
+      act(() => {
+        options?.onEvent({ id: 'first', cursor: 0, type: 'message.delta', agent_id: session.agent_id, session_id: session.id, data: { ...reply, text: '前' } })
+        options?.onEvent({ id: 'second', cursor: 0, type: 'message.delta', agent_id: session.agent_id, session_id: session.id, data: { ...reply, text: '半' } })
+      })
+      getMessages.mockResolvedValue({ items: [user, reply], next_cursor: null })
+      act(() => options?.onEvent(noticeEvent('task_completed', 1)))
+      await waitFor(() => expect(screen.getByTestId('answer')).toHaveTextContent(/^前半完整$/))
+      act(() => {
+        options?.onEvent({ id: 'third', cursor: 0, type: 'message.delta', agent_id: session.agent_id, session_id: session.id, data: { ...reply, text: '完' } })
+        options?.onEvent({ id: 'fourth', cursor: 0, type: 'message.delta', agent_id: session.agent_id, session_id: session.id, data: { ...reply, text: '整' } })
+      })
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)) })
+      expect(screen.getByTestId('answer')).toHaveTextContent(/^前半完整$/)
+    } finally {
+      view.unmount()
+      client.clear()
+      vi.restoreAllMocks()
+    }
+  })
+
+  it('renders a burst of deltas together and flushes the completed message immediately', async () => {
+    vi.useFakeTimers()
+    let options: { onEvent: (event: EventEnvelope) => void } | undefined
+    mocks.connectEventStream.mockImplementation(next => { options = next; return vi.fn() })
+    const view = render(<StreamHarness />)
+    const updates = vi.fn()
+    const unsubscribe = useAstrorderStore.subscribe(updates)
+    const data = { id: 'reply', agent_id: 'agent-1', session_id: 'session-1', role: 'assistant', kind: 'message', text: '字', turn_id: 'turn', created_at: '2026-10-16T02:00:00Z', attachments: [], tool: null, command_id: null }
+    try {
+      act(() => {
+        for (let i = 0; i < 100; i++) {
+          options?.onEvent({ id: `delta-${i}`, cursor: 0, type: 'message.delta', agent_id: 'agent-1', session_id: 'session-1', data })
+          options?.onEvent({ id: `native-${i}`, cursor: 0, type: 'codex.notification', agent_id: 'agent-1', session_id: 'session-1', data: { frame: { method: 'item/agentMessage/delta' } } })
+        }
+      })
+      expect(useAstrorderStore.getState().messages['agent-1::session-1'].reply.text).toBe('字')
+      await act(async () => { await vi.advanceTimersByTimeAsync(20) })
+      expect(useAstrorderStore.getState().messages['agent-1::session-1'].reply.text).toBe('字'.repeat(100))
+      expect(updates.mock.calls.length).toBeLessThan(10)
+      act(() => {
+        options?.onEvent({ id: 'delta-last', cursor: 0, type: 'message.delta', agent_id: 'agent-1', session_id: 'session-1', data: { ...data, text: '尾' } })
+        options?.onEvent({ id: 'complete', cursor: 0, type: 'message.upsert', agent_id: 'agent-1', session_id: 'session-1', data: { ...data, text: '完整回复' } })
+      })
+      expect(useAstrorderStore.getState().messages['agent-1::session-1'].reply.text).toBe('完整回复')
+      act(() => options?.onEvent({ id: 'delta-2', cursor: 0, type: 'message.delta', agent_id: 'agent-1', session_id: 'session-1', data }))
+      await act(async () => { await vi.advanceTimersByTimeAsync(20) })
+      expect(useAstrorderStore.getState().messages['agent-1::session-1'].reply.text).toBe('完整回复')
+    } finally {
+      unsubscribe()
+      view.unmount()
+      vi.useRealTimers()
+    }
+  })
+
+  it.each([
+    ['hermes.stream', { frame: { delta: '字' } }],
+    ['grok.notification', { frame: { params: { update: { sessionUpdate: 'agent_message_chunk' } } } }],
+  ])('batches normalized output alongside %s raw frames', async (type, raw) => {
+    vi.useFakeTimers()
+    let options: { onEvent: (event: EventEnvelope) => void } | undefined
+    mocks.connectEventStream.mockImplementation(next => { options = next; return vi.fn() })
+    const view = render(<StreamHarness />)
+    const updates = vi.fn()
+    const unsubscribe = useAstrorderStore.subscribe(updates)
+    const data = { id: 'reply', agent_id: 'agent-1', session_id: 'session-1', role: 'assistant', kind: 'message', text: '字', created_at: '2026-10-16T02:00:00Z', attachments: [], tool: null, command_id: null }
+    try {
+      act(() => {
+        for (let i = 0; i < 20; i++) {
+          options?.onEvent({ id: `delta-${i}`, cursor: 0, type: 'message.delta', agent_id: 'agent-1', session_id: 'session-1', data })
+          options?.onEvent({ id: `raw-${i}`, cursor: 0, type, agent_id: 'agent-1', session_id: 'session-1', data: raw })
+        }
+      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(20) })
+      expect(useAstrorderStore.getState().messages['agent-1::session-1'].reply.text).toBe('字'.repeat(20))
+      expect(updates.mock.calls.length).toBeLessThanOrEqual(2)
+    } finally {
+      unsubscribe()
+      view.unmount()
+      vi.useRealTimers()
+    }
+  })
+
+  it('flushes pending output on disconnect and unmount', () => {
+    vi.useFakeTimers()
+    let options: { onEvent: (event: EventEnvelope) => void; onStatus: (status: 'disconnected') => void } | undefined
+    mocks.connectEventStream.mockImplementation(next => { options = next; return vi.fn() })
+    const view = render(<StreamHarness />)
+    const data = { id: 'reply', agent_id: 'agent-1', session_id: 'session-1', role: 'assistant', kind: 'message', text: '一', created_at: '2026-10-16T02:00:00Z', attachments: [], tool: null, command_id: null }
+    try {
+      act(() => {
+        options?.onEvent({ id: 'first', cursor: 0, type: 'message.delta', agent_id: 'agent-1', session_id: 'session-1', data })
+        options?.onEvent({ id: 'second', cursor: 0, type: 'message.delta', agent_id: 'agent-1', session_id: 'session-1', data: { ...data, text: '二' } })
+        options?.onStatus('disconnected')
+      })
+      expect(useAstrorderStore.getState().messages['agent-1::session-1'].reply.text).toBe('一二')
+      act(() => {
+        options?.onEvent({ id: 'third', cursor: 0, type: 'message.delta', agent_id: 'agent-1', session_id: 'session-1', data: { ...data, text: '三' } })
+        view.unmount()
+      })
+      expect(useAstrorderStore.getState().messages['agent-1::session-1'].reply.text).toBe('一二三')
+    } finally {
+      view.unmount()
+      vi.useRealTimers()
+    }
+  })
+
   it('coalesces hook refreshes and follows activity received during a pending history read', async () => {
     vi.useFakeTimers()
     let options: { onEvent: (event: EventEnvelope) => void } | undefined
@@ -242,5 +381,25 @@ describe('event stream notifications', () => {
     expect(typeof toastProps.onClick).toBe('function')
     toastProps.onClick()
     expect(navigate).toHaveBeenCalledWith('/mobile/chat/session-1?agent_id=agent-1')
+  })
+
+  it('opens the group from a group reminder without jumping into the member session', () => {
+    let options: { onEvent: (event: EventEnvelope) => void } | undefined
+    mocks.connectEventStream.mockImplementation((next) => { options = next; return vi.fn() })
+    const navigate = vi.fn()
+    const client = new QueryClient()
+    window.history.pushState({}, '', '/chat/old-session')
+    function GroupHarness() { useEventStream(true, client, navigate); return null }
+    render(<GroupHarness />)
+    act(() => {
+      const event = noticeEvent('task_completed', 8)
+      options?.onEvent({ ...event, data: { ...event.data, group_id: 'group-review', title: '复核讨论' } })
+    })
+    expect(mocks.show).toHaveBeenCalledOnce()
+    const toast = mocks.show.mock.calls[0][0]
+    expect(toast.title).toBe('复核讨论')
+    toast.onClick()
+    expect(navigate).toHaveBeenCalledWith('/groups/group-review')
+    expect(navigate).not.toHaveBeenCalledWith(expect.stringContaining('/chat/'))
   })
 })

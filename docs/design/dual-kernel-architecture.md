@@ -1,216 +1,45 @@
-# Astrorder 大小内核分离架构设计规范
+# 大小内核架构
 
-## 1. 背景与核心问题
+星序使用独立的 Go App Server 和 Go Session Daemon，通过本地 gRPC 通信。React 前端由浏览器、移动端和 Wails 3 桌面客户端共用。
 
-### 1.1 现状痛点
-在 Astrorder 中，用户高频使用 AI Agent（Codex、Hermes）执行代码重构、功能迭代与服务自维护。
-目前星序单进程架构下：
-- **自迭代死锁**：当 Agent 会话修改星序自身代码并执行重启服务（`restart_service.py`）时，系统通过 PID 杀死整个后端进程树。
-- **运行态丢失**：正在执行命令、写文件或跑测试的 Codex App-Server、Hermes CLI 子进程及 PTY/SSH 连接随之被强杀，导致多会话中断、输出丢失、状态残缺。
-- **状态同步脆弱**：大内核需通过文件轮询、DB 嗅探或启发式平滑窗口判定运行状态，延迟高且易抖动。
+## 职责与代码归属
 
-### 1.2 架构目标
-- **大小内核分离**：
-  - **小内核（Session Daemon）**：极简常驻守护核，负责会话 Runtime 宿主、进程树守护、命令中断与输出增量缓冲（WAL）。极少变更，原则上不重启。
-  - **大内核（App Server）**：业务功能核，负责 Web/REST API、前端资源、Sidecar 工作台、历史持久化与状态投影。支持随时高频热重载与重启。
-- **无感断线重连（Detached Reconnect & Replay）**：
-  - 大内核重启期间，小内核接管会话流并持续存入环形缓冲区（Ring Buffer）。
-  - 大内核启动后通过增量序列号（`seq_id`）拉取缺失帧并补推给前端，前端及底层 Agent 无需中断轮次。
+| 层次 | 职责 | 代码 |
+| --- | --- | --- |
+| 客户端 | 会话与项目、输入和审批、群聊、文件工作台、运行观察 | `frontend/` |
+| 桌面壳 | 原生窗口、托盘、通知、文件选择、图片预览、服务控制入口 | `desktop-wails/` |
+| 大内核 | HTTP/WebSocket、鉴权、应用数据、事件投影、群聊编排、文件/Git、黑板与辅助集成 | `app-server-go/` |
+| 小内核 | Agent/SSH/PTY 托管、原生控制、执行状态、WAL 与持久操作回执、模型配置执行 | `session-daemon-go/` |
+| 内核契约 | protobuf 消息、gRPC 服务、流与操作身份 | `contracts/` |
 
----
-
-## 2. 拓扑与职责划分
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                      客户端 UI (Browser / Mobile / Desktop)  │
-└──────────────────────────────┬──────────────────────────────┘
-                               │ HTTP / WebSocket (Port: 30001)
-                               ▼
-┌─────────────────────────────────────────────────────────────┐
-│ 大内核：Astrorder App Server (可高频迭代、随时重启)          │
-│ · 宿主：FastAPI / Uvicorn (Port: 30001)                      │
-│ · 职责：                                                     │
-│   1. 前端静态资产与 UI 路由 (Vite dist / index.html)        │
-│   2. 业务 REST API (项目分组、历史分页、附件管理、文件检索)    │
-│   3. Sidecar 扩展能力 (Monaco、Draw.io、Git Diff、文件树)     │
-│   4. 数据落地 (SQLite: astrorder.sqlite3)                   │
-│   5. 作为 Client 连接小内核 IPC，转推事件到前端 WebSocket    │
-└──────────────────────────────┬──────────────────────────────┘
-                               │ 本地轻量 IPC (UDS 或 Loopback TCP: 30009)
-                               ▼
-┌─────────────────────────────────────────────────────────────┐
-│ 小内核：Astrorder Session Daemon (驻留守护核，极简稳定)      │
-│ · 宿主：纯 Python asyncio 守护进程 (Port: 30009)             │
-│ · 职责：                                                     │
-│   1. 真实 Runtime 宿主 (Codex app-server、Hermes、SSH、PTY)  │
-│   2. 会话执行状态机 (running / waiting_approval / idle / error)│
-│   3. 内存 WAL 环形缓冲池 (Ring Buffer, 保证大内核断线无损)    │
-│   4. 审批转发与中断执行 (turn/interrupt, approval response)   │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    UI[浏览器 / 移动端 / Wails 桌面] -->|HTTP / WebSocket| APP[Go 大内核]
+    APP -->|gRPC 控制 / 查询 / 事件 / 终端| DAEMON[Go 小内核]
+    APP --> APPDB[(应用数据库 / 附件 / 配置)]
+    DAEMON --> WAL[(会话事件 / 操作回执)]
+    DAEMON --> NATIVE[Codex / Hermes / Grok / Antigravity / SSH / PTY]
 ```
 
----
+## 生命周期
 
-## 3. 进程与生命周期模型
+大内核与小内核是独立故障域。会话与子进程由小内核托管，大内核停止或更新时，Agent、SSH 和终端进程继续运行；桌面和业务功能不拥有这些进程的生命周期。
 
-### 3.1 进程所有权转移
-- **旧模式**：`App Server (30001)` -> 直接 `Popen` 派生 `codex app-server` / `hermes-agent` / `ssh`。
-- **新模式**：`Session Daemon (30009)` 成为所有 Agent 运行时、子进程、SSH 隧道与 PTY 的直接父进程。
-- **重启范围**：`restart_service.py` 严格受限于仅查找并终止端口 `30001` 的 App Server 进程；禁止向 Daemon（PID 或 30009 端口）发送退出信号。
+大内核恢复后从已确认的事件序列继续消费，结合快照、重放和实时流恢复投影。连接缺失或状态不明确时，不能伪造空闲、成功或重新发送结果不确定的命令。事件与操作的实际结构以 protobuf 和 Go 实现为准，不维护另一套 WebSocket/JSON 内核协议。
 
-### 3.2 离线托管模式（Detached Mode）
-1. 当大内核停止，小内核检测到 IPC 连接断开（Socket EOF / Reset）：
-   - 小内核不终止任何子进程。
-   - 子进程继续正常输出 stdout/stderr/JSON-RPC。
-   - 小内核持续把输出封装为带单调递增 `seq_id` 的事件帧，写入每个会话独立的内存 Ring Buffer。
-   - 若遇到审批请求（如 Codex command approval），将其保存在待决池（Pending Approvals）中，等待大内核上线或超时策略。
+控制器使用可执行路径、PID、创建时间和端口归属核验服务身份。大内核可以独立构建、发布和重启。小内核更新由用户通过托盘激活，候选暂存与生效必须区分；维护规则见 [AGENTS.md](../../AGENTS.md)。
 
----
+## 数据边界
 
-## 4. IPC 通信协议规范 (WebSocket/JSON-RPC 30009)
+原生会话身份与历史由 Agent 运行时拥有。App 保存产品配置、会话投影、群聊、黑板、附件及投递队列；小内核保存托管与重放所需的运行记录。不要将同一业务数据复制为多个权威写入者。
 
-大内核与小内核之间采用本地 WebSocket 全双工流式传输，通信编码一律为 UTF-8 JSON。
+用户数据库、附件、凭据和正式状态目录与构建输出分离。Go 程序或必需配置缺失时明确报错，不调用旧 Python 服务或旧桌面实现代替。
 
-### 4.1 消息基本信封 (Frame Envelope)
-小内核推向大内核的所有事件均包装为标准 Envelope：
-```json
-{
-  "session_id": "01a08904-37d0-70e3-ade5-ec1bb61cd045",
-  "seq_id": 1042,
-  "timestamp": 1726051200.123,
-  "event": "token_chunk",
-  "payload": {
-    "delta": "const app = express();"
-  }
-}
-```
+## 维护入口
 
-### 4.2 控制与同步指令（大内核 -> 小内核）
+- [通信契约](../CONTRACT.md)：HTTP、浏览器事件和内部 gRPC 的来源。
+- [小内核维护](../session-daemon.md)：代码归属、配置与验证。
+- [安装与更新](../production-deployment.md)：构建产物、安装布局和发布边界。
+- [桌面开发](../../desktop-wails/README.md)：Windows/WSL 构建与开发隔离。
 
-#### 1. `daemon.handshake` & `session.sync`（连接与断线回放）
-大内核启动后发起握手，并上报当前持久化层各会话已确认的最大 `seq_id`：
-```json
-{
-  "action": "session.sync",
-  "request_id": "req-sync-01",
-  "sessions": {
-    "01a08904-37d0-70e3-ade5-ec1bb61cd045": 1020,
-    "01a08904-44aa-7111-bbee-cc2233445566": 55
-  }
-}
-```
-**小内核响应**：
-小内核返回该会话在 `seq_id > 1020` 之后的所有暂存事件数组，随后恢复实时推流。
-
-#### 2. `session.spawn`（启动/托管运行时）
-```json
-{
-  "action": "session.spawn",
-  "session_id": "01a08904-37d0-70e3-ade5-ec1bb61cd045",
-  "agent_type": "codex",
-  "connection_id": "local",
-  "cwd": "/home/luwei/workspace/OpsCore",
-  "params": {
-    "model": "gpt-5-codex",
-    "approval_policy": "on-request",
-    "sandbox": "workspace-write"
-  }
-}
-```
-
-#### 3. `session.send`（投递轮次）
-```json
-{
-  "action": "session.send",
-  "session_id": "01a08904-37d0-70e3-ade5-ec1bb61cd045",
-  "turn_id": "turn-9988",
-  "prompt": "帮我更新一下前端打包配置",
-  "attachments": []
-}
-```
-
-#### 4. `session.interrupt`（停止轮次）
-```json
-{
-  "action": "session.interrupt",
-  "session_id": "01a08904-37d0-70e3-ade5-ec1bb61cd045",
-  "turn_id": "turn-9988"
-}
-```
-
-#### 5. `session.approve`（决策审批）
-```json
-{
-  "action": "session.approve",
-  "session_id": "01a08904-37d0-70e3-ade5-ec1bb61cd045",
-  "request_id": "call-approval-771",
-  "decision": "accept"
-}
-```
-
-#### 6. `daemon.status`（权威状态嗅探）
-```json
-{
-  "action": "daemon.status"
-}
-```
-**小内核响应**：
-返回当前所有由小内核接管的活跃会话以及其权威运行状态（`running` / `waiting_approval` / `idle` / `error`），消灭大内核的盲目轮询与延迟。
-
----
-
-## 5. 缓冲与回放协议 (Memory WAL Ring-Buffer)
-
-### 5.1 环形队列配置
-- 每个活跃会话在小内核中分配固定上限的环形队列（默认容量：`CAPACITY = 2000` 帧）。
-- 帧以单调递增整数 `seq_id` 标定（从 1 开始）。
-- 超出容量时丢弃最老的非关键帧（仅保留关键快照点或截断）。
-
-### 5.2 重连一致性保证
-1. 大内核数据库维护每个会话的 `last_synced_seq_id`。
-2. 大内核重启完成后与小内核握手：
-   - 若 `last_synced_seq_id >= min_seq_id`：小内核执行完整增量补发（Catch-up），大内核转推给前端。
-   - 若 `last_synced_seq_id < min_seq_id`（极罕见长时间下线溢出）：小内核标记 `overflow=true`，大内核触发全量会话历史快照刷新。
-
----
-
-## 6. 实施路线图
-
-### Phase 1: 小内核守护进程原型（Daemon Prototype）
-- 创建独立可执行脚本 `backend/src/astrorder/daemon/session_daemon.py`。
-- 实现基于标准库 `asyncio` 的 WebSocket 服务，支持多会话 Ring Buffer 与序列号递增。
-- 实现 `session.sync` 与回放协议单元测试。
-
-### Phase 2A: App Server Bridge 与控制协议（已实现）
-- 大内核作为 daemon 的订阅端：按 daemon epoch + session checkpoint 持久化和回放 canonical connector event。
-- daemon 在 `session.sync` 完成后才开始 live 推流；WAL overflow 明确隔离，不能将 retained tail 当完整历史。
-- `session.spawn` / `session.send` / `session.interrupt` / `session.approve` 经显式 runtime registry 路由；大内核可用独立 IPC socket 发送 control request。
-- 该阶段默认关闭，不启动 daemon，也不迁移或接管当前原生 runtime。
-
-### Phase 2B-1: Codex transport owner（已生产启用）
-- `CodexDaemonRuntime` 将每个显式 daemon-owned native thread 的 Codex app-server 作为 daemon 子进程持有，并通过 `initialize` / `thread/resume` 验证后接收 turn control。
-- Codex raw notification 写入 WAL；大内核通过 handler registry 按 exact `agent_id` + native thread ID 投影，handler 未就绪时不得确认 checkpoint。
-- 启用可执行 runtime 需要独立 daemon IPC secret；socket 先 `daemon.handshake`，runtime registry 也拒绝未认证配置。
-- 提供显式 CLI / factory opt-in，未改动当前 local/remote Codex UI connection 的默认 transport。
-
-### Phase 2B-2: 生产接入与其余 runtime（已生产启用）
-- `CodexConnection`、local Hermes、SSH Hermes 与 browser PTY 均有显式 daemon-owned control/projection adapter；旧 App-owned runtime 不做隐式迁移。
-- Codex attachments、model/effort、approval、interrupt、disconnect/reattach 保持原生 identity；Hermes/SSH command completion、connector event、native history page 经 daemon WAL/bridge 投影。
-- Hermes plugin 与 SSH reverse tunnel 的 connector endpoint 指向 daemon loopback listener；connector secret 与 daemon IPC secret 分离且都只从环境读取。
-- 产品默认ownership开关保持关闭；当前production已显式启用。Codex、local Hermes、SSH Hermes和PTY均完成真实生产生命周期、附件、控制及restart验收。
-
-### Phase 3: 服务管理与工具链解绑（Lifecycle Scripts）
-- 重构 `scripts/restart_service.py`，加入仅对大内核端口（30001）的精准过滤。
-- 增加小内核独立托管命令（如 `scripts/start_daemon.py`、`scripts/status_daemon.py`）。
-- 已实现 authenticated graceful daemon shutdown；daemon secret 不进入命令行参数，production restart 不触碰 daemon listener。
-
-### Phase 4: 闭环验证（Dogfooding Acceptance）
-- 已在隔离端口用真实 Chrome 与真实 Codex app-server 创建 daemon-owned session，从 UI 下发临时文件修改任务；任务运行中停止 App Server，daemon/Codex 继续执行并写入 WAL。
-- 重启同一 App Server 后无需显式 connect API 即恢复 Codex projection，同一 session 显示 user/tool/assistant transcript 并回到 idle；生产服务与现有用户 runtime 未参与该验收。
-
-### Phase 5: 大小模型与成本路由（已生产启用）
-- App在native command dispatch前按结构信号决策：普通短输入使用small；附件、长输入或上一命令failed/unknown使下一命令使用large；后续普通输入自动降回small。
-- 路由不检查会话标题或prompt语义，不重试已发送命令。新session readiness race只允许对同一target执行一次幂等model/effort control+readback重试。
-- 每Agent按UTC日持久化cost units ledger；small/large默认成本分别为1/5。预算不足以承担large时强制small，不虚构供应商美元价格。
-- model、provider与reasoning必须由native readback确认后才记录ledger并发送command；失败command持久化为failed且native send调用为零。
+历史 Python 内核和 Electron 桌面实现通过 Git 历史追溯。

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 )
@@ -79,7 +80,9 @@ func (h *Handler) Manager() *SessionManager {
 
 // CloseSession releases browser tabs and cached captures for a deleted session.
 func (h *Handler) CloseSession(ctx context.Context, sessionKey string) {
-	h.manager.CloseSession(ctx, sessionKey)
+	if err := h.manager.CloseSession(ctx, sessionKey); err != nil {
+		slog.Error("close browser session failed", "error", err)
+	}
 }
 
 // RunTask implements agentapi.BrowserManager interface.
@@ -200,7 +203,10 @@ func (h *Handler) handleScreenshot(w http.ResponseWriter, r *http.Request) error
 	refresh := q.Get("refresh") == "true"
 	targetID := q.Get("target_id")
 
-	snap := h.manager.LatestScreenshot(r.Context(), sessionKey, targetID)
+	snap, err := h.manager.LatestScreenshot(r.Context(), sessionKey, targetID)
+	if err != nil {
+		return err
+	}
 	if refresh {
 		newSnap, err := h.manager.CaptureScreenshot(r.Context(), sessionKey, true, targetID)
 		if err == nil {
@@ -547,7 +553,7 @@ func (h *Handler) Invoke(ctx context.Context, capability string, input map[strin
 		if err != nil {
 			return nil, err
 		}
-		snap, err := h.manager.CaptureScreenshot(ctx, sessionKey, true, "")
+		snap, err := h.manager.CaptureScreenshot(ctx, sessionKey, false, "")
 		if err != nil {
 			return nil, err
 		}

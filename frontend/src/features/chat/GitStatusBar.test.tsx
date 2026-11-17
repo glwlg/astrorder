@@ -1,4 +1,5 @@
 import { MantineProvider } from '@mantine/core'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { Session } from '../../domain/types'
@@ -8,6 +9,11 @@ import { GitStatusBar } from './GitStatusBar'
 const session: Session = {
   id: 's1', agent_id: 'codex', title: 'Test', workspace: 'P:/workspace/project',
   status: 'idle', updated_at: '2026-09-28T00:00:00Z',
+}
+
+function renderStatus(value: Session = session) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return render(<MantineProvider env="test"><QueryClientProvider client={client}><GitStatusBar session={value} /></QueryClientProvider></MantineProvider>)
 }
 
 beforeEach(() => {
@@ -27,9 +33,9 @@ it('shows the file count from git status instead of saying the workspace is clea
   vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
     branch: 'master', branches: ['master'], changed_files: 3, insertions: 0, deletions: 0,
   }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
-  render(<MantineProvider env="test"><GitStatusBar session={session} /></MantineProvider>)
+  renderStatus()
 
-  expect(await screen.findByText('个文件变更')).toBeInTheDocument()
+  expect(await screen.findByText('3 个文件变更')).toBeInTheDocument()
   expect(screen.queryByText('工作区无修改')).not.toBeInTheDocument()
   expect(screen.queryByText('+0')).not.toBeInTheDocument()
   expect(screen.queryByText('-0')).not.toBeInTheDocument()
@@ -38,7 +44,7 @@ it('shows the file count from git status instead of saying the workspace is clea
 it('keeps branch metadata unknown until Git returns it', async () => {
   let respond!: (value: Response) => void
   vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(resolve => { respond = resolve })))
-  render(<MantineProvider env="test"><GitStatusBar session={session} /></MantineProvider>)
+  renderStatus()
   expect(screen.queryByText('master')).not.toBeInTheDocument()
   respond(new Response(JSON.stringify({ branch: 'feature/mobile', branches: ['feature/mobile'], changed_files: 0 }), { status: 200 }))
   expect(await screen.findByText('feature/mobile')).toBeInTheDocument()
@@ -52,7 +58,7 @@ it('switches and creates branches for the exact session and verifies Git status'
   })
   vi.stubGlobal('fetch', fetcher)
   const user = userEvent.setup()
-  render(<MantineProvider env="test"><GitStatusBar session={{ ...session, connection_id: 'remote-test' }} /></MantineProvider>)
+  renderStatus({ ...session, connection_id: 'remote-test' })
   await waitFor(() => expect(screen.getByRole('button', { name: '切换或创建 Git 分支' })).toBeEnabled())
   await user.click(screen.getByRole('button', { name: '切换或创建 Git 分支' }))
   await user.click(await screen.findByRole('menuitem', { name: 'review' }))
@@ -71,7 +77,24 @@ it('switches and creates branches for the exact session and verifies Git status'
 
 it('shows an unavailable workspace instead of a false clean status when Git rejects the path', async () => {
   vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 422 })))
-  render(<MantineProvider env="test"><GitStatusBar session={session} /></MantineProvider>)
+  renderStatus()
   expect(await screen.findByText('工作区状态不可用')).toBeInTheDocument()
   expect(screen.queryByText('工作区无修改')).not.toBeInTheDocument()
+})
+
+it('does not carry a previous session branch into a different workspace', async () => {
+  let finishSecond!: (value: Response) => void
+  vi.stubGlobal('fetch', vi.fn((url: unknown) => {
+    if (String(url).includes('session_id=s2')) return new Promise<Response>(resolve => { finishSecond = resolve })
+    return Promise.resolve(new Response(JSON.stringify({ branch: 'master', branches: ['master'], changed_files: 0 }), { status: 200 }))
+  }))
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const view = render(<MantineProvider env="test"><QueryClientProvider client={client}><GitStatusBar session={session} /></QueryClientProvider></MantineProvider>)
+  expect(await screen.findByText('master')).toBeInTheDocument()
+
+  view.rerender(<MantineProvider env="test"><QueryClientProvider client={client}><GitStatusBar session={{ ...session, id: 's2', workspace: '/other' }} /></QueryClientProvider></MantineProvider>)
+  expect(screen.queryByText('master')).not.toBeInTheDocument()
+  expect(screen.getByText('读取分支…')).toBeInTheDocument()
+  finishSecond(new Response(JSON.stringify({ branch: 'other', branches: ['other'], changed_files: 0 }), { status: 200 }))
+  expect(await screen.findByText('other')).toBeInTheDocument()
 })

@@ -12,3 +12,7 @@
 .background-task-copy { min-width:0; }
 .background-task-copy .mantine-Text-root { overflow-wrap:anywhere; }
 .background-task-actions { display:flex; align-items:center; gap:4px; }
+.background-tasks-panel, .background-tasks-trigger { position: relative; }
+.background-tasks-trigger.liquid-surface { color: var(--astr-text); border: 1px solid var(--astr-border); }
+.background-tasks-trigger.liquid-surface .mantine-Loader-root { --loader-color: var(--astr-blue) !important; }
+.background-tasks-trigger.liquid-surface .background-tasks-count { background: var(--astr-selected); }

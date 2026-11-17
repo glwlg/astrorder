@@ -987,7 +987,7 @@ export function MobileWorkspace() {
           <motion.article className={queueLift?.id === entry.payload.id ? 'm-queue-item is-lifted' : 'm-queue-item'} key={entry.payload.id} data-command-id={entry.payload.id} aria-label="排队消息" layout={!reducedMotion} initial={reducedMotion ? false : { opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, x: reducedMotion ? 0 : 24 }} transition={{ duration: reducedMotion ? 0 : 0.2 }} onPointerDown={event => onQueuePointerDown(entry, event)} onPointerMove={onQueuePointerMove} onPointerUp={onQueuePointerUp} onPointerCancel={onQueuePointerCancel} onTouchStart={event => event.stopPropagation()}>
             <p>{entry.payload.text || '附件消息'}</p>
             <small>{queueLabels[entry.state]}{entry.attachments.length + entry.files.length > 0 ? ` · ${entry.attachments.length + entry.files.length} 个附件` : ''}</small>
-            {entry.error && <small role="alert">{entry.error}</small>}
+            {entry.error && entry.error !== queuePause && <small role="alert">{entry.error}</small>}
             <div className="m-queue-actions" onPointerDown={event => event.stopPropagation()}>
               {['queued', 'failed'].includes(entry.state) && <button type="button" disabled={!canSubmit || submitting || (isAntigravity && nativeBusy)} aria-label={entry.state === 'failed' ? '重新发送' : nativeBusy ? '立即引导' : '发送待发消息'} onClick={() => void sendQueued(entry)}>{entry.state === 'failed' ? '重新发送' : nativeBusy ? '立即引导' : '发送'}</button>}
               {['queued', 'failed', 'cancelled'].includes(entry.state) && <button type="button" aria-label="编辑待发消息" onClick={() => void editQueued(entry)}><IconEdit size={16} /></button>}

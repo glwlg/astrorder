@@ -13,6 +13,9 @@ import (
 func TestQueueDispatchRequiresLiveIdleAndSurvivesHandlerReplacement(t *testing.T) {
 	owned, aid, kind := true, "a", pb.RuntimeKind_RUNTIME_KIND_HERMES
 	srv := &guidanceModelServer{snapshot: &pb.SessionSnapshot{Session: &pb.SessionRef{SessionId: "s", AgentId: &aid}, RuntimeOwned: &owned, Runtime: &kind, Status: pb.SessionStatus_SESSION_STATUS_RUNNING}}
+	srv.getHistoryPageCb = func(r *pb.HistoryPageRequest) (*pb.HistoryPageResponse, error) {
+		return &pb.HistoryPageResponse{Session: r.Session}, nil
+	}
 	h, st, _, cleanup := setupTestServer(t, &srv.mockDaemonServer)
 	defer cleanup()
 	addr, stop := startGuidanceStatusTarget(t, srv)

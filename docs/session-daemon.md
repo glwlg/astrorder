@@ -28,7 +28,7 @@ Session Daemon 的唯一实现是 `session-daemon-go/`。Python 小内核已移�
 
 runtime 由 Go JSON 配置控制。
 
-沿用 `AGENTS.md` 的权威状态和重启约束。App 更新不得顺带重启小内核。本次是源码清理，未更新安装目录或重启生产服务。
+遵守 `AGENTS.md` 的更新约束。App 更新不得顺带重启小内核；小内核候选由 Agent 构建和暂存，用户通过系统托盘“小内核 → 更新小内核”激活。
 
 ## 验证
 
@@ -36,4 +36,4 @@ runtime 由 Go JSON 配置控制。
 - 在仓库根目录运行 Node 隔离 HTTP 验收：`node scripts/migration/isolated-http-verify.mjs <仓库绝对路径> <临时目录>`。
 - 设置 `ASTRORDER_TEST_DAEMON_EXECUTABLE` 为新编译二进制绝对路径，在 `app-server-go/` 运行 `go test ./cmd/astrorder-app -run TestDaemonRestartWithRealIsolatedLifecycle -count=1`，验证私有状态目录中的真实重启。
 
-`docs/design/` 和 `docs/reports/` 中较早的迁移描述是历史证据，涉及 Python 小内核的路径或命令不再是维护入口。
+架构说明见[大小内核职责](design/dual-kernel-architecture.md)，安装目录和候选更新流程见[安装与更新](production-deployment.md)。`docs/reports/` 中保留的文件是兼容性校验仍读取的冻结证据，不代表当前部署状态。

@@ -1,13 +1,7 @@
 import { Text, UnstyledButton } from '@mantine/core'
 import {
-  IconBrain,
-  IconFolder,
-  IconChalkboard,
-  IconMessages,
-  IconSparkles,
-  IconTerminal2,
-  IconWorld,
-} from '@tabler/icons-react'
+  BrainIcon, BrowserIcon, ChalkboardSimpleIcon, ChatsCircleIcon, FolderSimpleIcon, GraphIcon, SparkleIcon, TerminalWindowIcon,
+} from '../../components/workbenchIcons'
 import type { Session } from '../../domain/types'
 import { useShortcutStore } from '../shortcuts/shortcuts'
 
@@ -35,43 +29,43 @@ export function SidecarWelcomeMenu({
   const bindings = useShortcutStore(state => state.bindings)
   const menuItems = [
     {
-      icon: <IconChalkboard size={18} color="var(--astr-indigo, #6366f1)" />,
+      icon: <ChalkboardSimpleIcon size={20} weight="duotone" color="var(--astr-blue)" />,
       label: "黑板",
       shortcut: bindings.blackboard || '未设置',
       onClick: onOpenBlackboard || onOpenFileTree,
     },
     {
-      icon: <IconBrain size={18} color="var(--astr-purple, #8b5cf6)" />,
+      icon: <BrainIcon size={20} weight="duotone" color="var(--astr-blue)" />,
       label: "知识记忆",
       shortcut: bindings.memory || '未设置',
       onClick: onOpenMemory || onOpenFileTree,
     },
     {
-      icon: <IconFolder size={18} color="var(--astr-blue, #3b82f6)" />,
+      icon: <FolderSimpleIcon size={20} weight="duotone" color="var(--astr-blue)" />,
       label: '文件',
       shortcut: bindings.fileTree || '未设置',
       onClick: onOpenFileTree,
     },
     {
-      icon: <IconMessages size={18} color="var(--astr-indigo, #6366f1)" />,
+      icon: <ChatsCircleIcon size={20} weight="duotone" color="var(--astr-blue)" />,
       label: '侧边聊天',
       shortcut: bindings.sideChat || '未设置',
       onClick: onOpenSideChat,
     },
     {
-      icon: <IconBrain size={18} color="var(--astr-purple, #a855f7)" />,
+      icon: <GraphIcon size={20} weight="duotone" color="var(--astr-blue)" />,
       label: '决策状态机',
       shortcut: bindings.agentGraph || '未设置',
       onClick: onOpenAgentGraph,
     },
     {
-      icon: <IconWorld size={18} color="var(--astr-cyan, #06b6d4)" />,
+      icon: <BrowserIcon size={20} weight="duotone" color="var(--astr-blue)" />,
       label: '浏览器',
       shortcut: bindings.browser || '未设置',
       onClick: onOpenBrowser,
     },
     {
-      icon: <IconTerminal2 size={18} color="var(--astr-green, #10b981)" />,
+      icon: <TerminalWindowIcon size={20} weight="duotone" color="var(--astr-blue)" />,
       label: '终端',
       shortcut: bindings.terminal || '未设置',
       onClick: onOpenTerminal,
@@ -91,36 +85,12 @@ export function SidecarWelcomeMenu({
       }}
     >
       <div style={{ width: '100%', maxWidth: '460px' }}>
-        {/* Codex 风格功能列表 */}
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '2px',
-            background: 'var(--astr-surface)',
-            borderRadius: '8px',
-            border: '1px solid var(--astr-border)',
-            overflow: 'hidden',
-          }}
-        >
+        <div className="sidecar-welcome-list">
           {menuItems.map((item) => (
             <UnstyledButton
               key={item.label}
               onClick={item.onClick}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                padding: '10px 16px',
-                transition: 'background 0.12s ease',
-              }}
-              styles={{
-                root: {
-                  '&:hover': {
-                    background: 'var(--astr-card-hover, rgba(0, 0, 0, 0.04))',
-                  },
-                },
-              }}
+              className="sidecar-welcome-item"
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                 <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -133,13 +103,7 @@ export function SidecarWelcomeMenu({
               <Text
                 size="xs"
                 c="dimmed"
-                style={{
-                  fontFamily: 'monospace',
-                  background: 'var(--astr-card)',
-                  border: '1px solid var(--astr-border)',
-                  padding: '2px 6px',
-                  borderRadius: '4px',
-                }}
+                className="sidecar-welcome-shortcut"
               >
                 {item.shortcut}
               </Text>
@@ -151,22 +115,14 @@ export function SidecarWelcomeMenu({
         {session.workspace && (
           <div style={{ marginTop: '24px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
-              <IconSparkles size={14} color="var(--astr-muted)" />
+              <SparkleIcon size={14} color="var(--astr-muted)" />
               <Text size="xs" fw={600} c="dimmed">
                 推荐工作区
               </Text>
             </div>
             <UnstyledButton
               onClick={onOpenFileTree}
-              style={{
-                display: 'block',
-                width: '100%',
-                padding: '10px 14px',
-                borderRadius: '6px',
-                background: 'var(--astr-card)',
-                border: '1px solid var(--astr-border)',
-                cursor: 'pointer',
-              }}
+              className="sidecar-workspace-link"
             >
               <Text size="xs" fw={500} truncate title={session.workspace}>
                 {session.project_name ? `${session.project_name} · ` : ''}

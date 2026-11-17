@@ -77,10 +77,12 @@ type FakeCDPServer struct {
 	version      VersionInfo
 	cdpHandlers  sync.Map // targetID -> func(method string, params map[string]any) (any, error)
 	requestCalls atomic.Int64
+	available    atomic.Bool
 }
 
 func newFakeCDPServer(t *testing.T) *FakeCDPServer {
-	fake := &FakeCDPServer{}
+	fake := &FakeCDPServer{pages: []PageTarget{}}
+	fake.available.Store(true)
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/json/version", func(w http.ResponseWriter, r *http.Request) {
@@ -99,7 +101,7 @@ func newFakeCDPServer(t *testing.T) *FakeCDPServer {
 		targetID := strings.TrimPrefix(r.URL.Path, "/json/close/")
 		fake.pagesMu.Lock()
 		defer fake.pagesMu.Unlock()
-		var kept []PageTarget
+		kept := make([]PageTarget, 0, len(fake.pages))
 		for _, p := range fake.pages {
 			if p.ID != targetID {
 				kept = append(kept, p)
@@ -148,6 +150,17 @@ func newFakeCDPServer(t *testing.T) *FakeCDPServer {
 				_ = c.Write(context.Background(), websocket.MessageText, data)
 			} else if req.Method == "Target.activateTarget" {
 				resp := map[string]any{"id": req.ID, "result": map[string]any{}}
+				data, _ := json.Marshal(resp)
+				_ = c.Write(context.Background(), websocket.MessageText, data)
+			} else if req.Method == "Extensions.getExtensions" {
+				path, err := filepath.Abs(ExtensionPath())
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				resp := map[string]any{"id": req.ID, "result": map[string]any{
+					"extensions": []any{map[string]any{"id": "fixture-extension", "path": path, "enabled": true}},
+				}}
 				data, _ := json.Marshal(resp)
 				_ = c.Write(context.Background(), websocket.MessageText, data)
 			}
@@ -266,7 +279,13 @@ func newFakeCDPServer(t *testing.T) *FakeCDPServer {
 		}
 	})
 
-	server := httptest.NewServer(mux)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !fake.available.Load() {
+			http.Error(w, "browser not running", http.StatusServiceUnavailable)
+			return
+		}
+		mux.ServeHTTP(w, r)
+	}))
 	fake.server = server
 	fake.version = VersionInfo{
 		Browser:              "Chrome/124.0.0.0",
@@ -373,12 +392,18 @@ func TestSessionTabIsolationAndWindowNameRecovery(t *testing.T) {
 	}
 
 	// 3. Recover session targets
-	tabsA := mgr.ListTabs(ctx, "agent::session-a")
+	tabsA, err := mgr.ListTabs(ctx, "agent::session-a")
+	if err != nil {
+		t.Fatalf("list session A tabs: %v", err)
+	}
 	if len(tabsA.Tabs) != 1 || tabsA.Tabs[0].ID != pageA.ID {
 		t.Fatalf("session A tabs mismatch: %#v", tabsA)
 	}
 
-	tabsB := mgr.ListTabs(ctx, "agent::session-b")
+	tabsB, err := mgr.ListTabs(ctx, "agent::session-b")
+	if err != nil {
+		t.Fatalf("list session B tabs: %v", err)
+	}
 	if len(tabsB.Tabs) != 1 || tabsB.Tabs[0].ID != pageB.ID {
 		t.Fatalf("session B tabs mismatch: %#v", tabsB)
 	}
@@ -608,12 +633,7 @@ func TestAgentAPIInvokeSupport(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	// Ensure tab exists first (as browser.cdp has create=false semantics)
-	if _, err := h.manager.NewTab(ctx, fixtureSessionKey, ""); err != nil {
-		t.Fatalf("setup tab failed: %v", err)
-	}
-
-	// browser.cdp invoke
+	// The first CDP invocation prepares its own session tab.
 	cdpRes, err := h.Invoke(ctx, "browser.cdp", map[string]any{
 		"session_key": fixtureSessionKey,
 		"method":      "Runtime.evaluate",

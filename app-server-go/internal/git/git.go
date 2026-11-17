@@ -310,7 +310,7 @@ func runGit(ctx context.Context, resolved targetfs.Resolved, request targetfs.Gi
 }
 
 func parseBranches(output []byte) (string, []string) {
-	current := "master"
+	current := ""
 	branches := make([]string, 0)
 	seen := make(map[string]bool)
 	for _, raw := range strings.Split(strings.ReplaceAll(string(output), "\r\n", "\n"), "\n") {

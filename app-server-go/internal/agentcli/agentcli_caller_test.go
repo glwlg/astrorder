@@ -843,7 +843,7 @@ func TestTokenDPAPIFallbackOnLoopback(t *testing.T) {
 
 	env := map[string]string{
 		"ASTRORDER_AGENT_URL": server.URL, // loopback URL with custom OpenEnvironment
-		"ASTRORDER_STATE_DIR": "C:\\Astrorder\\State",
+		"ASTRORDER_STATE_DIR": t.TempDir(),
 	}
 
 	var stdout, stderr bytes.Buffer
@@ -870,7 +870,7 @@ func TestTokenDPAPISkippedOnRemoteURL(t *testing.T) {
 
 	env := map[string]string{
 		"ASTRORDER_AGENT_URL": "http://remote-server.com:30001",
-		"ASTRORDER_STATE_DIR": "C:\\Astrorder\\State",
+		"ASTRORDER_STATE_DIR": t.TempDir(),
 	}
 
 	var stdout, stderr bytes.Buffer

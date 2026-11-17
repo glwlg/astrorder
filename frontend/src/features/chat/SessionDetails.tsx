@@ -77,7 +77,7 @@ export function SessionDetails({
             {approvals.map((approval) => isUserInput(approval) ? <UserInputCard key={approval.id} approval={approval} /> : (
               <Paper className="approval-card" withBorder p="sm" radius="md" key={approval.id}>
                 <Text size="sm" fw={600}>{approval.title}</Text>
-                {approval.detail && <Text size="xs" c="dimmed" mt={4}><MarkdownContent value={approval.detail} /></Text>}
+                {approval.detail && <Text size="xs" c="dimmed" mt={4}><MarkdownContent value={approval.detail} session={session} /></Text>}
                 {canApprove ? (
                   <Group mt="xs" gap="xs">
                     <button className="approval-button approval-approve" type="button" onClick={() => onApproval(approval, 'approve')}>允许</button>

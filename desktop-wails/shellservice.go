@@ -18,7 +18,7 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
-// daemonStopNeedsConfirmation mirrors the Electron shell: active sessions or
+// daemonStopNeedsConfirmation guards the desktop action: active sessions or
 // any non-running/unreadable daemon state require explicit user consent.
 func daemonStopNeedsConfirmation(daemon map[string]any) (bool, string) {
 	if daemon == nil {
@@ -44,6 +44,8 @@ type ShellInfo struct {
 	KernelManagement  bool   `json:"kernelManagement"`
 }
 
+const desktopFramework = "Wails v3.0.0"
+
 type ShellService struct {
 	app         *application.App
 	window      *application.WebviewWindow
@@ -60,7 +62,7 @@ type ShellService struct {
 
 func (s *ShellService) Info() ShellInfo {
 	return ShellInfo{
-		Framework:         "Wails v3.0.0-beta.28",
+		Framework:         desktopFramework,
 		BackendConfigured: s.config.Backend != nil,
 		StateDir:          s.config.StateDir,
 		KernelManagement:  s.ctl != nil,
@@ -217,7 +219,7 @@ func (s *ShellService) SetStartupEnabled(enabled bool) (StartupSettings, error) 
 }
 
 // Notifications
-func (s *ShellService) Notify(title, body string) (bool, error) {
+func (s *ShellService) Notify(title, body string, paths ...string) (bool, error) {
 	if s.window != nil {
 		s.window.Flash(true)
 	}
@@ -225,6 +227,14 @@ func (s *ShellService) Notify(title, body string) (bool, error) {
 	// Agent-controlled text reaches PowerShell only through environment
 	// variables; it is never interpolated into the script source.
 	if runtime.GOOS == "windows" {
+		launch := ""
+		if len(paths) > 0 && paths[0] != "" {
+			var err error
+			launch, err = s.notificationLaunchURL(paths[0])
+			if err != nil {
+				return false, err
+			}
+		}
 		const psScript = `
 $ErrorActionPreference = 'Stop'
 [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null
@@ -232,6 +242,10 @@ $template = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateCont
 $textNodes = $template.GetElementsByTagName("text")
 $textNodes.Item(0).AppendChild($template.CreateTextNode($env:ASTRORDER_TOAST_TITLE)) > $null
 $textNodes.Item(1).AppendChild($template.CreateTextNode($env:ASTRORDER_TOAST_BODY)) > $null
+if ($env:ASTRORDER_TOAST_URL) {
+  $template.DocumentElement.SetAttribute("activationType", "protocol")
+  $template.DocumentElement.SetAttribute("launch", $env:ASTRORDER_TOAST_URL)
+}
 $toast = [Windows.UI.Notifications.ToastNotification]::new($template)
 $notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("com.astrorder.desktop")
 if ($notifier.Setting -ne [Windows.UI.Notifications.NotificationSetting]::Enabled) { throw 'Windows 通知已被禁用，请检查系统通知设置。' }
@@ -241,7 +255,7 @@ $notifier.Show($toast)
 		defer cancel()
 		cmd := exec.CommandContext(ctx, filepath.Join(os.Getenv("SystemRoot"), "System32", "WindowsPowerShell", "v1.0", "powershell.exe"), "-NoProfile", "-NonInteractive", "-STA", "-Command", psScript)
 		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
-		cmd.Env = append(os.Environ(), "ASTRORDER_TOAST_TITLE="+title, "ASTRORDER_TOAST_BODY="+body)
+		cmd.Env = append(os.Environ(), "ASTRORDER_TOAST_TITLE="+title, "ASTRORDER_TOAST_BODY="+body, "ASTRORDER_TOAST_URL="+launch)
 		if err := cmd.Run(); err != nil {
 			return false, fmt.Errorf("Windows 通知发送失败，请检查系统通知设置: %w", err)
 		}

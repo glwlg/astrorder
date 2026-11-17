@@ -75,7 +75,7 @@ func (h *handler) jevView(ctx context.Context) (map[string]any, error) {
 func (h *handler) getJev(w http.ResponseWriter, r *http.Request) {
 	view, err := h.jevView(r.Context())
 	if err != nil {
-		fail(w, 500, "读取 Jev 配置失败")
+		fail(w, 500, "读取 System One 配置失败")
 		return
 	}
 	writeJSON(w, http.StatusOK, view)
@@ -89,7 +89,7 @@ func (h *handler) setJev(w http.ResponseWriter, r *http.Request) {
 	}
 	config, err := browser.GetJevConfig(r.Context(), h.Store)
 	if err != nil {
-		fail(w, 500, "读取 Jev 配置失败")
+		fail(w, 500, "读取 System One 配置失败")
 		return
 	}
 	config, key, err := patch.apply(config)
@@ -105,7 +105,7 @@ func (h *handler) setJev(w http.ResponseWriter, r *http.Request) {
 	}
 	raw, err := json.Marshal(config)
 	if err != nil {
-		fail(w, 500, "保存 Jev 配置失败")
+		fail(w, 500, "保存 System One 配置失败")
 		return
 	}
 	err = h.Store.WithTx(r.Context(), func(tx *sql.Tx) error {
@@ -128,7 +128,7 @@ func (h *handler) setJev(w http.ResponseWriter, r *http.Request) {
 		return err
 	})
 	if err != nil {
-		fail(w, 500, "保存 Jev 配置失败")
+		fail(w, 500, "保存 System One 配置失败")
 		return
 	}
 	h.getJev(w, r)

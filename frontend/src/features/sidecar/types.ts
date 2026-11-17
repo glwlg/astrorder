@@ -1,8 +1,10 @@
 import type { ComponentType, ReactNode } from 'react'
 import type { ArtifactRef } from '../../domain/artifact'
+import type { Session } from '../../domain/types'
 
 export interface ViewerContext {
   artifact: ArtifactRef
+  session?: Session | null
   isActive?: boolean
   toolbarAction?: ReactNode
   onSave?: (content: string) => Promise<boolean>

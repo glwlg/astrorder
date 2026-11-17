@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ClipboardEvent } from "react";
 import {
   ActionIcon,
   Badge,
@@ -26,23 +26,24 @@ import type {
   Approval,
   BotGroup,
   BotGroupMemberState,
+  DraftState,
   GroupMessage,
 } from "../../domain/types";
 import { AgentBrandIcon } from "../../components/AgentBrandIcon";
+import { ComposerGlassSurface, GlassButtonLens } from "../../components/GlassPanel";
 import { useAstrorderStore } from "../../state/store";
 import { useShallow } from "zustand/react/shallow";
+import { groupChatStatus } from "./groupChatStatus";
+import { GroupChatMessage } from "./GroupChatMessage";
+import { GroupChatActivity } from "./GroupChatActivity";
+import { GroupChatHeader } from "./GroupChatHeader";
+import { GroupChatNotice } from "./GroupChatNotice";
+import { GroupChatImageDraft } from "./GroupChatImages";
+import { clipboardFiles } from "./composerMedia";
+import { scopeKey } from "../../domain/semantics";
+import { GroupFileSourceScope } from "./GroupFileSourceScope";
 
-function senderLabel(
-  msg: GroupMessage,
-  members: BotGroup["members"],
-  agents: Record<string, Agent>,
-): string {
-  if (msg.sender_type === "user") return "用户 (指挥官)";
-  const found = members.find((m) => m.agent_id === msg.sender_id);
-  if (found?.alias) return `${found.alias} (${found.name || msg.sender_id})`;
-  const ag = agents[msg.sender_id];
-  return ag?.name || found?.name || msg.sender_id;
-}
+const EMPTY_GROUP_DRAFT: DraftState = { text: "", attachments: [] };
 
 export function BotGroupChatPage({
   group,
@@ -50,6 +51,7 @@ export function BotGroupChatPage({
   onClose,
   blackboardOpen,
   onToggleBlackboard,
+  onOpenBlackboard,
   onEdit,
 }: {
   group: BotGroup;
@@ -57,12 +59,26 @@ export function BotGroupChatPage({
   onClose?: () => void;
   blackboardOpen?: boolean;
   onToggleBlackboard?: () => void;
+  onOpenBlackboard?: (key: string) => void;
   onEdit?: () => void;
 }) {
   const [messages, setMessages] = useState<GroupMessage[]>([]);
-  const [input, setInput] = useState("");
+  const [historyLoaded, setHistoryLoaded] = useState(false);
+  const [historyError, setHistoryError] = useState("");
+  const [stateError, setStateError] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
+  const draft = useAstrorderStore((state) => state.drafts[scopeKey("group", group.id)] || EMPTY_GROUP_DRAFT);
+  const input = draft.text;
+  const updateDraft = (update: (current: DraftState) => DraftState) => {
+    const store = useAstrorderStore.getState();
+    store.setDraft("group", group.id, update(store.drafts[scopeKey("group", group.id)] || EMPTY_GROUP_DRAFT));
+  };
+  const setInput = (value: string | ((current: string) => string)) =>
+    updateDraft((current) => ({ ...current, text: typeof value === "function" ? value(current.text) : value }));
   const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
   const [activeHop, setActiveHop] = useState(group.active_hop || 0);
+  const [maxHops, setMaxHops] = useState(group.max_hops);
   const [activeSpeaker, setActiveSpeaker] = useState<string | null>(
     group.active_speaker_agent_id || null,
   );
@@ -72,7 +88,14 @@ export function BotGroupChatPage({
   const [memberStates, setMemberStates] = useState<
     Record<string, BotGroupMemberState>
   >(group.member_states || {});
+  const [coordination, setCoordination] = useState(group.coordination);
+  const [muteBusy, setMuteBusy] = useState(false);
+  const muteBusyRef = useRef(false);
+  const muteRevisionRef = useRef(0);
+  const [retrying, setRetrying] = useState(false);
+  const [recovering, setRecovering] = useState(false);
   const [approvalBusy, setApprovalBusy] = useState<string | null>(null);
+  const [motionPaused, setMotionPaused] = useState(false);
   const approvals = useAstrorderStore(
     useShallow((state) => Object.values(state.approvals)),
   );
@@ -91,40 +114,97 @@ export function BotGroupChatPage({
   const [mentionQuery, setMentionQuery] = useState("");
   const [mentionIndex, setMentionIndex] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const pageRef = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<HTMLElement>(null);
+  const followLatestRef = useRef(true);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const currentGroupRef = useRef(group.id);
+  const loadRequestRef = useRef(0);
+  const activeLoadRef = useRef<{ groupId: string; request: number } | null>(null);
+  currentGroupRef.current = group.id;
+
+  useLayoutEffect(() => {
+    const page = pageRef.current;
+    const composer = composerRef.current;
+    if (!page || !composer) return;
+    const measure = () => {
+      const height = Math.ceil(composer.getBoundingClientRect().height);
+      if (height > 0) page.style.setProperty("--group-composer-height", `${height}px`);
+      if (followLatestRef.current && scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(composer);
+    return () => observer.disconnect();
+  }, []);
+
+  const applyGroupSnapshot = (snapshot: BotGroup) => {
+    setActiveHop(snapshot.active_hop || 0);
+    setMaxHops(snapshot.max_hops);
+    setActiveSpeaker(snapshot.active_speaker_agent_id || null);
+    setActiveSpeakers(snapshot.active_speakers ||
+      (snapshot.active_speaker_agent_id ? [snapshot.active_speaker_agent_id] : []));
+    setMemberStates(snapshot.member_states || {});
+    setCoordination(snapshot.coordination);
+    setStateError("");
+  };
 
   const loadMessages = async () => {
-    try {
-      const [resMsgs, resGroup] = await Promise.all([
-        api.listGroupMessages(group.id),
-        api.getBotGroup(group.id),
-      ]);
-      setMessages(resMsgs.items);
-      setActiveHop(resGroup.group.active_hop || 0);
-      setActiveSpeaker(resGroup.group.active_speaker_agent_id || null);
-      setActiveSpeakers(
-        resGroup.group.active_speakers ||
-          (resGroup.group.active_speaker_agent_id
-            ? [resGroup.group.active_speaker_agent_id]
-            : []),
-      );
-      setMemberStates(resGroup.group.member_states || {});
-    } catch (err) {
-      console.error("Failed to load group messages", err);
+    if (activeLoadRef.current?.groupId === group.id) return;
+    const requestedGroup = group.id;
+    const request = ++loadRequestRef.current;
+    const muteRevision = muteRevisionRef.current;
+    activeLoadRef.current = { groupId: requestedGroup, request };
+    const [resMsgs, resGroup] = await Promise.allSettled([
+      api.listGroupMessages(requestedGroup),
+      api.getBotGroup(requestedGroup),
+    ]);
+    if (activeLoadRef.current?.request === request) activeLoadRef.current = null;
+    if (currentGroupRef.current !== requestedGroup || request !== loadRequestRef.current) return;
+    if (resMsgs.status === "fulfilled") {
+      setMessages(resMsgs.value.items);
+      setHistoryLoaded(true);
+      setHistoryError("");
+    } else {
+      setHistoryError(resMsgs.reason instanceof Error ? resMsgs.reason.message : "请稍后重试");
+    }
+    if (resGroup.status === "fulfilled") {
+      if (muteRevision === muteRevisionRef.current && !muteBusyRef.current) {
+        applyGroupSnapshot(resGroup.value.group);
+      }
+    } else if (muteRevision === muteRevisionRef.current && !muteBusyRef.current) {
+      setStateError(resGroup.reason instanceof Error ? resGroup.reason.message : "请稍后重试");
     }
   };
 
   useEffect(() => {
+    followLatestRef.current = true;
+    setMessages([]);
+    setHistoryLoaded(false);
+    setHistoryError("");
+    setStateError("");
+    setActiveHop(group.active_hop || 0);
+    setMaxHops(group.max_hops);
+    setActiveSpeaker(group.active_speaker_agent_id || null);
+    setActiveSpeakers(group.active_speakers || []);
+    setMemberStates(group.member_states || {});
+    setCoordination(group.coordination);
     void loadMessages();
     const timer = setInterval(() => void loadMessages(), 3000);
     return () => clearInterval(timer);
   }, [group.id]);
 
   useEffect(() => {
-    if (scrollRef.current) {
+    setMaxHops(group.max_hops);
+  }, [group.max_hops]);
+
+  const activityKey = JSON.stringify([coordination?.status, activeSpeaker, activeSpeakers,
+    Object.entries(memberStates).map(([id, state]) => [id, state.status])]);
+  useEffect(() => {
+    if (scrollRef.current && followLatestRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages.length]);
+  }, [messages.length, historyLoaded, activityKey]);
 
   // Mention items including @all
   const mentionItems = [
@@ -132,19 +212,19 @@ export function BotGroupChatPage({
       id: "__all__",
       name: "all",
       label: "所有人 (@all)",
-      desc: "全员协同广播",
+      desc: "发送给所有未禁言成员",
       kind: undefined as string | undefined,
       isAll: true,
     },
     ...group.members.map((m) => {
       const ag = agents[m.agent_id];
       return {
-        id: m.agent_id,
-        name: m.name || m.agent_id,
+        id: m.id || m.agent_id,
+        name: m.alias || m.name || m.agent_id,
         label: `${m.name || m.agent_id}${m.alias ? " · " + m.alias : ""}`,
-        desc: ag
-          ? `${ag.name || ag.id} (${m.machine_id === "local" ? "本机" : m.machine_id})`
-          : m.machine_id,
+        desc: memberStates[m.id || m.agent_id]?.muted ? "已禁言，不接收消息" : ag
+          ? `${ag.name || ag.id} (${m.machine_id === "local" ? "本机" : m.machine_id})${m.workspace ? ` · ${m.workspace}` : ""}`
+          : `${m.machine_id}${m.workspace ? ` · ${m.workspace}` : ""}`,
         kind: ag?.kind,
         isAll: false,
       };
@@ -223,31 +303,64 @@ export function BotGroupChatPage({
       }
     }
 
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229) {
       e.preventDefault();
       void send();
     }
   };
 
+  const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    const files = clipboardFiles(event).filter((file) => file.type.startsWith("image/"));
+    if (!files.length || submittingRef.current) return;
+    event.preventDefault();
+    if (files.some((file) => !["image/png", "image/jpeg", "image/gif", "image/webp"].includes(file.type))) {
+      notifications.show({ color: "red", message: "群聊支持 PNG、JPEG、GIF 和 WebP 图片" });
+      return;
+    }
+    if (draft.attachments.length + files.length > 32) {
+      notifications.show({ color: "red", message: "一次最多发送 32 张图片" });
+      return;
+    }
+    const text = event.clipboardData.getData?.("text/plain") || "";
+    const { selectionStart: start, selectionEnd: end } = event.currentTarget;
+    updateDraft((current) => ({
+      ...current,
+      text: text ? current.text.slice(0, start) + text + current.text.slice(end) : current.text,
+      attachments: [...current.attachments, ...files.map((file) => ({ key: crypto.randomUUID(), file }))],
+    }));
+  };
+
   const send = async () => {
-    if (submitting || !input.trim()) return;
+    if (submittingRef.current || (!input.trim() && !draft.attachments.length) || !historyLoaded || historyError || stateError) return;
+    const text = input.trim();
+    const requestedGroup = group.id;
+    submittingRef.current = true;
     setSubmitting(true);
     setMentionMenuOpen(false);
     try {
-      const text = input.trim();
-      setInput("");
-      const res = await api.sendGroupMessage(group.id, { text });
-      setMessages((prev) => [...prev, res.message]);
-      if (res.target_agent_id) {
-        setActiveSpeaker(res.target_agent_id);
-        setActiveHop(1);
+      const attachmentIds: string[] = [];
+      for (const item of draft.attachments) {
+        const attachment = item.attachment || await api.uploadAttachment(item.file);
+        attachmentIds.push(attachment.id);
+        updateDraft((current) => ({ ...current, attachments: current.attachments.map((entry) => entry.key === item.key ? { ...entry, attachment } : entry) }));
       }
+      const res = await api.sendGroupMessage(requestedGroup, { text, ...(attachmentIds.length ? { attachment_ids: attachmentIds } : {}) });
+      const sentKeys = new Set(draft.attachments.map((item) => item.key));
+      updateDraft((current) => ({
+        ...current,
+        text: current.text === draft.text ? "" : current.text,
+        attachments: current.attachments.filter((item) => !sentKeys.has(item.key)),
+      }));
+      if (currentGroupRef.current !== requestedGroup) return;
+      setMessages((prev) => [...prev, res.message]);
+      await loadMessages();
     } catch (err) {
       notifications.show({
         color: "red",
         message: err instanceof Error ? err.message : "发送群消息失败",
       });
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   };
@@ -256,16 +369,102 @@ export function BotGroupChatPage({
     try {
       await api.stopGroup(group.id);
       setActiveSpeaker(null);
+      setActiveSpeakers([]);
       setActiveHop(0);
+      setCoordination({ status: "stopped" });
       notifications.show({ color: "yellow", message: "已中断群聊接力流转" });
     } catch (err) {
       notifications.show({ color: "red", message: "中断失败" });
     }
   };
 
+  const retryGroup = async () => {
+    setRetrying(true);
+    try {
+      const result = await api.retryGroup(group.id);
+      setCoordination(result.group.coordination);
+      await loadMessages();
+    } catch (err) {
+      notifications.show({
+        color: "red",
+        message: err instanceof Error ? err.message : "重试失败",
+      });
+    } finally {
+      setRetrying(false);
+    }
+  };
+
+  const reloadHistory = async () => {
+    setRefreshing(true);
+    try {
+      await loadMessages();
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const recoverGroup = async () => {
+    setRecovering(true);
+    try {
+      const result = await api.recoverGroup(group.id);
+      setCoordination(result.group.coordination);
+      await loadMessages();
+    } catch (err) {
+      notifications.show({
+        color: "red",
+        message: err instanceof Error ? err.message : "恢复回复失败",
+      });
+    } finally {
+      setRecovering(false);
+    }
+  };
+
+  const roundActive = coordination &&
+    ["deciding", "running", "waiting", "error"].includes(coordination.status);
+  const status = groupChatStatus(coordination, Boolean(activeSpeaker || activeSpeakers.length));
+  const loadFailed = Boolean(historyError || stateError);
+  const notice = historyError
+    ? `群聊记录加载失败：${historyError}`
+    : stateError
+      ? `群聊状态更新失败：${stateError}`
+      : coordination?.status === "error"
+        ? coordination.error || "群聊任务未能继续"
+        : "";
+  let currentHop = activeHop;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].sender_type === "user") break;
+    currentHop = Math.max(currentHop, messages[i].hop_count);
+  }
+  const canRecover = Object.values(memberStates).some(
+    (state) => state.status === "failed" && state.last_error === "context deadline exceeded",
+  );
+
   const insertMentionDirect = (name: string) => {
     setInput((prev) => `${prev}@${name} `);
     textareaRef.current?.focus();
+  };
+
+  const toggleMemberMuted = async (ids: string[], muted: boolean) => {
+    if (muteBusyRef.current) return;
+    const requestedGroup = group.id;
+    muteBusyRef.current = true;
+    muteRevisionRef.current++;
+    setMuteBusy(true);
+    try {
+      const result = await api.updateBotGroup(requestedGroup, {
+        member_mutes: Object.fromEntries(ids.map((id) => [id, muted])),
+      });
+      if (currentGroupRef.current === requestedGroup) applyGroupSnapshot(result.group);
+    } catch (err) {
+      notifications.show({
+        color: "red",
+        message: err instanceof Error ? err.message : "更新成员禁言失败",
+      });
+    } finally {
+      muteRevisionRef.current++;
+      muteBusyRef.current = false;
+      setMuteBusy(false);
+    }
   };
 
   const respondToApproval = async (
@@ -299,44 +498,35 @@ export function BotGroupChatPage({
   };
 
   return (
-    <div
-      className="bot-group-chat-page"
-      style={{ height: "100%", display: "flex", flexDirection: "column" }}
-    >
-      <Paper
-        p="sm"
-        withBorder
-        style={{ borderTop: 0, borderLeft: 0, borderRight: 0, borderRadius: 0 }}
-      >
-        <Group justify="space-between" align="center" wrap="nowrap">
-          <Group gap="sm" wrap="nowrap" align="center">
-            <IconUsers size={20} color="var(--mantine-color-indigo-5)" />
-            <div>
-              <Group gap={6} align="center">
-                <Text fw={600} size="md">
-                  {group.name}
-                </Text>
-                <Badge size="xs" variant="light" color="indigo">
-                  群聊 ({group.members.length} 人)
-                </Badge>
-                {activeSpeaker && (
-                  <Badge size="xs" color="teal" variant="filled">
-                    接力流转中: {activeHop}/{group.max_hops}
-                  </Badge>
-                )}
-              </Group>
-              {group.description && (
-                <Text size="xs" c="dimmed" lineClamp={1}>
-                  {group.description}
-                </Text>
-              )}
-            </div>
-          </Group>
-
-          <Group gap="xs" wrap="nowrap">
+    <GroupFileSourceScope groupId={group.id} revision={messages.at(-1)?.id}>
+    <div ref={pageRef} className="bot-group-chat-page">
+      <GroupChatHeader
+        group={group}
+        agents={agents}
+        memberStates={memberStates}
+        coordination={coordination}
+        activeSpeakers={activeSpeakers.length ? activeSpeakers : activeSpeaker ? [activeSpeaker] : []}
+        status={status}
+        currentHop={historyLoaded || activeHop > 0 ? currentHop : "—"}
+        maxHops={maxHops}
+        onToggleMuted={(ids, muted) => void toggleMemberMuted(ids, muted)}
+        muteBusy={muteBusy}
+        motionPaused={motionPaused}
+        onToggleMotion={() => setMotionPaused((value) => !value)}
+        actions={<>
+            {canRecover && (
+              <Button
+                size="compact-sm"
+                variant="light"
+                loading={recovering}
+                onClick={() => void recoverGroup()}
+              >
+                恢复回复并继续
+              </Button>
+            )}
             {onEdit && (
               <Button
-                size="compact-xs"
+                size="compact-sm"
                 variant="light"
                 color="gray"
                 leftSection={<IconSettings size={13} />}
@@ -347,7 +537,7 @@ export function BotGroupChatPage({
             )}
             {onToggleBlackboard && (
               <Button
-                size="compact-xs"
+                size="compact-sm"
                 variant={blackboardOpen ? "filled" : "light"}
                 color="indigo"
                 leftSection={<IconChalkboard size={13} />}
@@ -356,9 +546,9 @@ export function BotGroupChatPage({
                 黑板
               </Button>
             )}
-            {activeSpeaker && (
+            {(activeSpeaker || roundActive) && (
               <Button
-                size="compact-xs"
+                size="compact-sm"
                 color="red"
                 variant="light"
                 leftSection={<IconPlayerStop size={13} />}
@@ -368,78 +558,50 @@ export function BotGroupChatPage({
               </Button>
             )}
             {onClose && (
-              <ActionIcon variant="subtle" color="gray" onClick={onClose}>
+              <ActionIcon variant="subtle" color="gray" onClick={onClose} aria-label="关闭群聊">
                 <IconX size={16} />
               </ActionIcon>
             )}
-          </Group>
-        </Group>
-
-        <Group gap={6} mt={8} wrap="nowrap" style={{ overflowX: "auto" }}>
-          <Badge
-            size="sm"
-            variant="light"
-            color="indigo"
-            style={{ cursor: "pointer", textTransform: "none" }}
-            onClick={() => insertMentionDirect("all")}
-            leftSection={<IconAt size={12} />}
-            title="点击输入 @all 全员广播"
-          >
-            all (全员)
-          </Badge>
-          {group.members.map((m) => {
-            const ag = agents[m.agent_id];
-            const isSpeaking =
-              activeSpeakers.includes(m.agent_id) ||
-              activeSpeaker === m.agent_id;
-            const state = memberStates[m.agent_id];
-            const statusColor =
-              state?.status === "failed"
-                ? "red"
-                : state?.status === "success"
-                  ? "teal"
-                  : state?.status === "running"
-                    ? "blue"
-                    : "gray";
-            return (
-              <Badge
-                key={m.agent_id}
-                size="sm"
-                variant={isSpeaking ? "filled" : "outline"}
-                color={isSpeaking ? "teal" : statusColor}
-                style={{ cursor: "pointer", textTransform: "none" }}
-                onClick={() => insertMentionDirect(m.name || m.agent_id)}
-                title={state?.last_error || "点击在输入框 @TA"}
-                leftSection={
-                  ag ? <AgentBrandIcon kind={ag.kind} size={12} /> : undefined
-                }
-              >
-                {m.name || m.agent_id}
-                {m.alias ? " · " + m.alias : ""}
-                {state?.status === "failed"
-                  ? " · 失败"
-                  : state?.status === "success"
-                    ? " · 完成"
-                    : state?.status === "running"
-                      ? " · 执行中"
-                      : ""}
-              </Badge>
-            );
-          })}
-        </Group>
-      </Paper>
+        </>}
+      >
+        {notice && (
+          <Paper mt="sm" p="sm" radius="md" withBorder role="alert">
+            <Group justify="space-between" align="center">
+              <Text size="sm" c="red" style={{ flex: "1 1 220px", overflowWrap: "anywhere" }}>
+                {notice}
+              </Text>
+              <Group gap="xs">
+                {loadFailed && (
+                  <Button size="compact-xs" variant="light" loading={refreshing} onClick={() => void reloadHistory()}>
+                    重新加载记录
+                  </Button>
+                )}
+                {coordination?.status === "error" && (
+                  <Button size="compact-xs" variant="light" disabled={loadFailed} loading={retrying} onClick={() => void retryGroup()}>
+                    重新判断
+                  </Button>
+                )}
+              </Group>
+            </Group>
+          </Paper>
+        )}
+        {!loadFailed && coordination?.status === "waiting" && (
+          <Text mt="sm" size="sm" c="dimmed" role="status" aria-label="群聊发送状态">
+            System One 暂缓发送，待发消息已保留；有新回复或消息后将重新判断。
+          </Text>
+        )}
+      </GroupChatHeader>
 
       <div
         ref={scrollRef}
-        style={{
-          flex: 1,
-          overflowY: "auto",
-          padding: "16px 20px",
-          display: "flex",
-          flexDirection: "column",
-          gap: 14,
+        className="bot-group-chat-messages"
+        onScroll={(event) => {
+          const el = event.currentTarget;
+          followLatestRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 100;
         }}
+        aria-busy={!historyLoaded && !historyError}
       >
+        <div className="group-chat-feed">
         {pendingApprovals.map((approval) => (
           <Paper
             key={approval.id}
@@ -479,83 +641,50 @@ export function BotGroupChatPage({
             </Group>
           </Paper>
         ))}
-        {messages.length === 0 && (
-          <div style={{ margin: "auto", textAlign: "center", opacity: 0.6 }}>
-            <IconUsers
-              size={36}
-              style={{ margin: "0 auto 8px", display: "block" }}
-            />
+        {!historyLoaded && !historyError && (
+          <Text size="sm" c="dimmed" style={{ margin: "auto" }}>正在加载群聊记录…</Text>
+        )}
+        {historyLoaded && !historyError && messages.length === 0 && (
+          <div className="group-chat-empty">
+            <span className="group-chat-empty-icon"><IconUsers size={32} stroke={1.5} /></span>
+            <Text fw={600} mb={6}>群聊已就绪</Text>
             <Text size="sm">
-              群聊已就绪。在下方输入框键入 @ 即可选择特定成员或 @all
-              进行广播协作。
+              输入 @ 选择成员，或 @all 发送给所有人。
             </Text>
             <Text size="xs" c="dimmed" mt={4}>
-              规则：Agent 回复若未包含 @其它成员 则自动静默闭嘴；单次最多接力{" "}
-              {group.max_hops} 轮。
+              每轮最多接力 {maxHops} 次。
             </Text>
           </div>
         )}
 
-        {messages.map((m) => {
-          const isUser = m.sender_type === "user";
-          const label = senderLabel(m, group.members, agents);
-          const ag = agents[m.sender_id];
-          return (
-            <div
-              key={m.id}
-              style={{
-                alignSelf: isUser ? "flex-end" : "flex-start",
-                maxWidth: "82%",
-              }}
-            >
-              <Group
-                gap={6}
-                align="center"
-                mb={2}
-                justify={isUser ? "flex-end" : "flex-start"}
-              >
-                {!isUser && ag && <AgentBrandIcon kind={ag.kind} size={13} />}
-                <Text size="xs" fw={500} c={isUser ? "indigo" : "dimmed"}>
-                  {label}
-                </Text>
-                {m.hop_count > 0 && (
-                  <Badge size="xs" variant="dot" color="orange">
-                    第 {m.hop_count} 跳
-                  </Badge>
-                )}
-              </Group>
-              <Paper
-                p="sm"
-                radius="md"
-                withBorder
-                style={{
-                  background: isUser
-                    ? "color-mix(in srgb, var(--mantine-color-indigo-6) 12%, var(--astr-surface, #fff))"
-                    : "var(--astr-surface, #fff)",
-                  whiteSpace: "pre-wrap",
-                  wordBreak: "break-word",
-                  fontSize: 14,
-                  lineHeight: 1.55,
-                }}
-              >
-                {m.text}
-              </Paper>
-            </div>
-          );
-        })}
+        {messages.map((message) => message.sender_type === "system" ? (
+          <GroupChatNotice key={message.id} message={message} members={group.members} agents={agents} onOpenBlackboard={onOpenBlackboard} />
+        ) : (
+          <GroupChatMessage key={message.id} message={message} members={group.members} memberStates={memberStates} agents={agents} />
+        ))}
+        <GroupChatActivity
+          key={group.id}
+          members={historyLoaded && !loadFailed ? group.members : []}
+          memberStates={memberStates}
+          coordination={historyLoaded && !loadFailed ? coordination : { status: "idle" }}
+          activeSpeakers={activeSpeakers.length ? activeSpeakers : activeSpeaker ? [activeSpeaker] : []}
+          agents={agents}
+          approvals={pendingApprovals}
+          motionPaused={motionPaused}
+          onToggleMotion={() => setMotionPaused((value) => !value)}
+        />
+        </div>
       </div>
 
-      <Paper
-        p="sm"
-        withBorder
-        style={{
-          borderBottom: 0,
-          borderLeft: 0,
-          borderRight: 0,
-          borderRadius: 0,
-          position: "relative",
-        }}
-      >
+      <footer ref={composerRef} className="group-chat-composer">
+        <div className="group-chat-composer-card">
+        <ComposerGlassSurface active snapshot=".bot-group-chat-page">
+        {group.members.length > 0 && group.members.every((member) => memberStates[member.id || member.agent_id]?.muted) && (
+          <Text size="xs" c="dimmed" px="sm" pt="xs" role="status">全员已禁言，消息仅保存在群聊中</Text>
+        )}
+        {draft.attachments.length > 0 && <div className="group-chat-image-drafts" aria-label="待发送图片">
+          {draft.attachments.map((item) => <GroupChatImageDraft key={item.key} file={item.file} disabled={submitting} onRemove={() => updateDraft((current) => ({ ...current, attachments: current.attachments.filter((entry) => entry.key !== item.key) }))} />)}
+        </div>}
         {mentionMenuOpen && mentionItems.length > 0 && (
           <Paper
             withBorder
@@ -564,6 +693,9 @@ export function BotGroupChatPage({
             p={4}
             role="listbox"
             aria-label="群成员建议"
+            className="group-chat-mention-menu"
+            data-liquid-surface="menu"
+            data-liquid-snapshot=".bot-group-chat-page"
             style={{
               position: "absolute",
               zIndex: 50,
@@ -629,10 +761,12 @@ export function BotGroupChatPage({
           </Paper>
         )}
 
-        <Stack gap="xs">
           <Textarea
             ref={textareaRef}
-            placeholder="输入消息，键入 @ 可呼出群成员列表或 @all…"
+            aria-label="群聊消息"
+            placeholder="输入消息或粘贴图片，@ 选择成员…"
+            variant="unstyled"
+            classNames={{ input: "group-chat-input" }}
             minRows={2}
             maxRows={6}
             autosize
@@ -643,25 +777,35 @@ export function BotGroupChatPage({
               checkMentionTrigger(val, e.currentTarget.selectionStart);
             }}
             onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
             disabled={submitting}
           />
-          <Group justify="space-between" align="center">
-            <Text size="xs" c="dimmed">
-              提示：输入 @ 即可定向指定 Agent 或 @all 广播
-            </Text>
+          <div className="group-chat-composer-actions">
+            <div className="group-chat-composer-tools">
+              <button type="button" className="group-chat-mention-all" onClick={() => insertMentionDirect("all")} aria-label="在消息中提及所有成员">
+                <GlassButtonLens />
+                <IconAt size={16} aria-hidden="true" />所有人
+              </button>
+              <span className="group-chat-composer-shortcuts">Enter 发送 <span aria-hidden="true">·</span> Shift + Enter 换行</span>
+            </div>
             <Button
-              size="xs"
+              size="sm"
+              radius="md"
+              className="group-chat-send"
               color="indigo"
               rightSection={<IconSend size={14} />}
               onClick={() => void send()}
               loading={submitting}
-              disabled={!input.trim()}
+              disabled={(!input.trim() && !draft.attachments.length) || !historyLoaded || loadFailed}
             >
+              <GlassButtonLens />
               发送
             </Button>
-          </Group>
-        </Stack>
-      </Paper>
+          </div>
+        </ComposerGlassSurface>
+        </div>
+      </footer>
     </div>
+    </GroupFileSourceScope>
   );
 }

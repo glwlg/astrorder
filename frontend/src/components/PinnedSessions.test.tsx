@@ -9,7 +9,7 @@ afterEach(() => {
  vi.unstubAllGlobals()
 })
 
-it('places pinned sessions above every project without duplication and keeps the 24-hour tab', () => {
+it('places pinned sessions above every project without duplication and keeps the 24-hour filter', async () => {
  const pinned: Session = { id: 'pinned', agent_id: 'a', title: 'Pinned session', workspace: '/repo', project_name: 'Project', status: 'idle', updated_at: new Date().toISOString() }
  const old = { ...pinned, id: 'old', title: 'Old session', updated_at: new Date(Date.now() - 25 * 3600000).toISOString() }
  const values = new Map([['astrorder_pinned_sessions', JSON.stringify({ [scopeKey('a', 'pinned')]: true })]])
@@ -20,7 +20,8 @@ it('places pinned sessions above every project without duplication and keeps the
  const project = view.container.querySelector('.session-project-group')!
  expect(region.compareDocumentPosition(project) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
  expect(project.textContent).not.toContain('Pinned session')
- fireEvent.click(screen.getByRole('tab', { name: '24小时' }))
+ fireEvent.click(screen.getByRole('button', { name: '24小时' }))
+ expect(screen.getByRole('button', { name: '24小时' })).toHaveAttribute('aria-pressed', 'true')
  expect(screen.queryByText('Old session')).not.toBeInTheDocument()
  expect(within(region).getByText('Pinned session')).toBeVisible()
 })

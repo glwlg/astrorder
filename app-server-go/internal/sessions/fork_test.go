@@ -74,3 +74,39 @@ func TestForkRouteUsesNativeHermesBoundary(t *testing.T) {
 		t.Fatalf("child missing: %v", row)
 	}
 }
+
+func TestForkRoutePassesCodexParentWorkspace(t *testing.T) {
+	called := false
+	srv := &mockDaemonServer{createCb: func(r *pb.CreateSessionRequest) (*pb.CommandReceipt, error) {
+		called = true
+		o := r.GetCodex()
+		if o == nil || o.GetParentSessionId() != "parent" || o.GetCwd() != "/project" {
+			t.Fatalf("fork lost parent workspace: %v", r)
+		}
+		return &pb.CommandReceipt{OperationState: pb.OperationState_OPERATION_STATE_COMPLETED, Session: &pb.SessionRef{SessionId: "child", AgentId: r.Target.AgentId}, Status: pb.SessionStatus_SESSION_STATUS_IDLE, Outcome: &pb.CommandReceipt_Completed{Completed: &pb.CommandResult{}}}, nil
+	}}
+	h, st, _, cleanup := setupTestServer(t, srv)
+	defer cleanup()
+	ctx := context.Background()
+	if _, err := st.UpsertAgent(ctx, map[string]any{"id": "a", "kind": "codex", "name": "test", "status": "ready"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.UpsertSession(ctx, map[string]any{"id": "parent", "agent_id": "a", "title": "old", "workspace": "/project", "status": "idle", "control_state": "owned", "history_state": "available", "updated_at": "2026-10-15T00:00:00Z"}); err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest("POST", "/api/v1/sessions/parent/fork", strings.NewReader(`{"agent_id":"a","title":"child"}`))
+	r.Header.Set("Authorization", "Bearer browser-sec")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != 200 || !called {
+		t.Fatalf("fork: %d %s", w.Code, w.Body.String())
+	}
+	parent, err := st.GetSession(ctx, "a", "parent")
+	if err != nil || parent["workspace"] != "/project" || parent["title"] != "old" {
+		t.Fatalf("source session changed: %v %v", parent, err)
+	}
+	child, err := st.GetSession(ctx, "a", "child")
+	if err != nil || child["workspace"] != "/project" || child["parent_session_id"] != "parent" {
+		t.Fatalf("child lineage or workspace missing: %v %v", child, err)
+	}
+}

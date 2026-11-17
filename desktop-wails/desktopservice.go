@@ -47,11 +47,11 @@ func (d *DesktopService) SetClipboardFiles(ctx context.Context, paths []string) 
 	}
 	return d.shell.SetClipboardFiles(paths)
 }
-func (d *DesktopService) Notify(ctx context.Context, title, body string) (bool, error) {
+func (d *DesktopService) Notify(ctx context.Context, title, body, path string) (bool, error) {
 	if err := requireWindow(ctx, d.shell.window); err != nil {
 		return false, err
 	}
-	return d.shell.Notify(title, body)
+	return d.shell.Notify(title, body, path)
 }
 func (d *DesktopService) Minimize(ctx context.Context) error {
 	if err := requireWindow(ctx, d.shell.window); err != nil {

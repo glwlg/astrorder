@@ -1,0 +1,69 @@
+.chat-column > .composer-card.composer-glass {
+  padding: 0;
+  background: transparent;
+  border-color: rgb(122 109 142 / 16%);
+  box-shadow: 0 12px 30px -16px rgb(51 34 76 / 24%), 0 2px 8px rgb(51 34 76 / 5%);
+}
+.composer-glass > .glass-panel--composer > .glass-panel-content { padding: 10px 14px 12px; }
+.composer-glass .composer-row { background: rgb(255 255 255 / 18%); }
+.chat-column .composer-glass :is(.attachment-button, .codex-model-pill, .approval-mode-capsule, .composer-git-branch) {
+  position: relative;
+  background: rgb(255 255 255 / 38%);
+  border: 1px solid rgb(255 255 255 / 78%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 90%), 0 1px 3px rgb(58 39 81 / 7%);
+  transition: background 140ms ease-out, box-shadow 140ms ease-out;
+}
+.composer-glass .attachment-button { border-radius: 8px; }
+.chat-column .composer-glass .approval-mode-capsule.is-full-access {
+  background: color-mix(in oklab, var(--astr-teal) 5%, rgb(255 255 255 / 38%));
+}
+.chat-column .composer-glass :is(.attachment-button, .codex-model-pill, .approval-mode-capsule, .composer-git-branch):not(:disabled):hover {
+  background: rgb(255 255 255 / 60%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 96%), 0 2px 6px rgb(58 39 81 / 12%);
+}
+.chat-column .composer-glass :is(.attachment-button, .codex-model-pill, .approval-mode-capsule, .composer-git-branch):not(:disabled):active {
+  background: rgb(235 229 246 / 45%);
+  box-shadow: inset 0 1px 2px rgb(58 39 81 / 12%);
+}
+.chat-column .composer-glass .send-button:not(:disabled) {
+  background: linear-gradient(135deg in oklab, rgb(124 39 218 / 90%), rgb(185 34 122 / 94%));
+  border-color: rgb(255 255 255 / 52%);
+  box-shadow: inset 0 1px 1px rgb(255 255 255 / 68%), inset 0 -1px 1px rgb(57 14 96 / 22%), 0 2px 0 #642199, 0 5px 10px rgb(110 34 163 / 17%);
+}
+.chat-column .composer-glass .send-button[data-action='stop']:not(:disabled) {
+  background: linear-gradient(135deg in oklab, rgb(199 34 75 / 92%), rgb(171 20 47 / 94%));
+  box-shadow: inset 0 1px 1px rgb(255 255 255 / 62%), inset 0 -1px 1px rgb(95 12 35 / 20%), 0 2px 0 #941b3a, 0 5px 10px rgb(150 30 50 / 14%);
+}
+.chat-column .composer-glass .send-button:not(:disabled):active {
+  translate: 0 1px;
+  box-shadow: inset 0 1px 2px rgb(57 14 96 / 22%), 0 1px 0 rgb(77 26 111 / 50%);
+}
+
+/* The dropdown keeps Mantine's focus, dismissal and positioning behavior.
+   Only its material is supplied by the shared glass surface. */
+:is(.codex-model-popover-dropdown, .approval-mode-dropdown, .composer-draft-shelf, .composer-branch-menu, [role='listbox']):has(> .glass-panel--menu) {
+  padding: 0 !important;
+  background: transparent !important;
+  border-color: rgb(255 255 255 / 76%) !important;
+  box-shadow: 0 12px 28px -10px rgb(51 34 76 / 24%), 0 2px 8px rgb(51 34 76 / 7%) !important;
+}
+.codex-model-popover-dropdown > .glass-panel--menu > .glass-panel-content { padding: 0; }
+.codex-model-popover-dropdown:has(> .glass-panel--menu) .codex-model-card { background: transparent; }
+.composer-glass [role='listbox'] > .glass-panel--menu > .glass-panel-content { padding: 4px; }
+
+:root[data-mantine-color-scheme='dark'] .chat-column > .composer-card.composer-glass { background: transparent; border-color: rgb(202 184 225 / 15%); }
+:root[data-mantine-color-scheme='dark'] .composer-glass .composer-row { background: rgb(24 21 31 / 18%); }
+:root[data-mantine-color-scheme='dark'] .composer-glass :is(.attachment-button, .codex-model-pill, .approval-mode-capsule, .composer-git-branch) {
+  background: rgb(48 40 59 / 38%);
+  border-color: rgb(224 211 241 / 15%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 12%), 0 1px 3px rgb(0 0 0 / 15%);
+}
+:root[data-mantine-color-scheme='dark'] .chat-column .composer-glass .approval-mode-capsule.is-full-access { background: rgb(48 40 59 / 38%); }
+:root[data-mantine-color-scheme='dark'] .composer-glass :is(.attachment-button, .codex-model-pill, .approval-mode-capsule, .composer-git-branch):not(:disabled):hover { background: rgb(72 58 89 / 52%); }
+:root[data-mantine-color-scheme='dark'] :is(.codex-model-popover-dropdown, .approval-mode-dropdown, .composer-draft-shelf, .composer-branch-menu, [role='listbox']):has(> .glass-panel--menu) { border-color: rgb(224 211 241 / 18%) !important; }
+@media (max-width: 62em) {
+  .composer-glass > .glass-panel--composer > .glass-panel-content { padding: 10px 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .composer-glass :is(.attachment-button, .codex-model-pill, .approval-mode-capsule, .composer-git-branch) { transition: none; }
+}

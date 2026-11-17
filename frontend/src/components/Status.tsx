@@ -33,7 +33,7 @@ export function SessionStatusLabel({ status }: { status: SessionStatus }) {
   return (
     <Group className="status-label" gap={6} wrap="nowrap">
       <StatusDot status={status} />
-      <Text size="xs" c="dimmed">{sessionLabels[status]}</Text>
+      <Text size="xs">{sessionLabels[status]}</Text>
     </Group>
   )
 }

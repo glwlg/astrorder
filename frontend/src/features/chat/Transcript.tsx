@@ -2,7 +2,7 @@ import { UserInputCard, isUserInput } from '../../components/UserInputCard'
 import { AsyncUserInputCard, isAsyncQuestion, hasLaterNativeInput } from '../../components/AsyncUserInputCard'
 import { IconArrowDown, IconPaperclip, IconRefresh, IconTool, IconVectorTriangle } from '@tabler/icons-react'
 import { ActionIcon, Anchor, Button, Group, Paper, Stack, Text, Tooltip } from '@mantine/core'
-import { IconCheck, IconChecks, IconCopy, IconEdit, IconGitFork, IconShieldCheck } from '@tabler/icons-react'
+import { IconCheck, IconChecks, IconCopy, IconEdit, IconGitFork, IconShieldCheck, IconX } from '@tabler/icons-react'
 import { useMemo, useState, type ReactNode } from 'react'
 import { InlineNotice } from '../../components/InlineNotice'
 import type { Approval, Attachment, Message, OutboxEntry, Session } from '../../domain/types'
@@ -14,7 +14,7 @@ import { MarkdownContent } from '../../components/MarkdownContent'
 import { LazyDetails } from '../../components/LazyDetails'
 import { MessageBody } from '../../components/MessageBody'
 import { useOlderMessages } from '../../hooks/useOlderMessages'
-import { describeTool, FileChangeDiffBlock, fileChangeDiffs, PackSummary, ShellOutputBlock, ToolLineIcon, unwrapCommand } from './toolPresentation'
+import { activityDuration, activityState, describeTool, FileChangeDiffBlock, fileChangeDiffs, PackSummary, ShellOutputBlock, ToolLineIcon, unwrapCommand } from './toolPresentation'
 import { ToolOutputBlock } from './ToolOutputBlock'
 import { isCompactionMessage, CompactionDivider } from './CompactionDivider'
 import { ShinyText } from '../../components/animations/ShinyText'
@@ -27,6 +27,7 @@ import { useSidecarStore } from '../sidecar/sidecarStore'
 import { useAstrorderStore } from '../../state/store'
 import { useReducedMotion } from '@mantine/hooks'
 import { AnimatePresence, motion } from 'motion/react'
+import { WorkbenchMark } from '../../components/WorkbenchMark'
 
 export function AttachmentList({
   attachments,
@@ -158,6 +159,7 @@ function MessageItem({
   hasAssistantReplied = false,
   isAgentAccepted = false,
   asyncInput,
+  showAuthorMark = false,
 }: {
   message: Message
   onImageClick?: (url: string) => void
@@ -170,6 +172,7 @@ function MessageItem({
   hasAssistantReplied?: boolean
   isAgentAccepted?: boolean
   asyncInput?: { commands: import('../../domain/types').Command[]; continued: boolean; readOnly: boolean }
+  showAuthorMark?: boolean
 }) {
   const isUser = message.role === 'user'
   const isActivity = isMessageActivity(message)
@@ -193,21 +196,30 @@ function MessageItem({
     const hasFileDiff = fileChangeDiffs(message).length > 0
     const unwrappedCmd = unwrapCommand(String(toolArgs.command || toolArgs.cmd || ''))
     const cmdStatus = desc.isFailed ? 'failed' : desc.isRunning ? 'running' : 'success'
+    const state = activityState(message)
+    const duration = activityDuration(message)
     const foldTitle = isCommand
       ? `${desc.isRunning ? '运行' : desc.isFailed ? '运行失败' : '已运行'} ${unwrappedCmd || desc.target || desc.fullTitle}`
       : (desc.target || desc.fullTitle)
     return (
-      <article className={`message-activity message-kind-${message.kind}`} data-testid={`message-${message.id}`}>
+      <article className={`message-activity message-kind-${message.kind}`} data-status={state} data-testid={`message-${message.id}`}>
+        <span className="activity-node" aria-hidden="true">{state === 'completed' ? <IconCheck /> : state === 'failed' ? <IconX /> : null}</span>
         <LazyDetails className={`activity-fold ${desc.isFailed ? 'is-failed' : ''}`} loading={desc.isRunning} summary={
           <span className="activity-fold-summary">
             <span className="activity-icon"><ToolLineIcon icon={desc.iconKey} size={14} /></span>
-            <span className="activity-title">{foldTitle}</span>
-            {desc.isFailed && <span className="activity-badge is-failed">失败</span>}
-            {desc.isRunning && <span className="activity-badge is-running"><ShinyText text="执行中" speed={1.5} /></span>}
+            <span className="activity-title">{!isCommand && !isThinking && desc.target
+              ? <>{desc.action} <code className="activity-target">{desc.target}</code></>
+              : foldTitle}</span>
+            <span className="activity-item-meta">
+              {desc.isFailed ? <><span className="activity-badge is-failed">失败</span><span className="activity-detail-link">查看详情</span></>
+                : desc.isRunning ? <span className="activity-badge is-running">执行中</span>
+                  : state === 'completed' ? <span>已完成</span> : null}
+              {duration && <span className="activity-item-duration">· {duration}</span>}
+            </span>
           </span>
         }>
           {isThinking ? (
-            message.text && <div className="activity-thinking-content"><MarkdownContent value={message.text} /></div>
+            message.text && <div className="activity-thinking-content"><MarkdownContent value={message.text} session={session} /></div>
           ) : isCommand ? (
             <ShellOutputBlock command={unwrappedCmd || desc.fullTitle} output={message.text} status={cmdStatus} />
           ) : hasFileDiff ? (
@@ -252,7 +264,8 @@ function MessageItem({
       data-testid={`message-${message.id}`}
       aria-label={`${messageLabel(message)}消息`}
     >
-      <Paper className={`message-bubble ${inlineMeta ? 'message-bubble-inline' : ''} ${isUser ? 'message-bubble-user' : isActivity ? 'message-bubble-activity' : ''}`} withBorder={!isActivity} radius="lg" p="sm">
+      {showAuthorMark && <span className="message-author-mark" aria-hidden="true"><WorkbenchMark size={26} /></span>}
+      <Paper className={`message-bubble ${inlineMeta ? 'message-bubble-inline' : ''} ${isUser ? 'message-bubble-user' : isActivity ? 'message-bubble-activity' : ''}`} withBorder={!isActivity} radius="lg">
         {asyncInput ? <AsyncUserInputCard message={message} {...asyncInput} /> : message.text && (
           <MessageBody
             value={message.text}
@@ -350,6 +363,8 @@ export function Transcript({
         <button
           type="button"
           className="return-bottom"
+            data-liquid-surface="control"
+            data-liquid-snapshot=".chat-workbench"
           aria-label="回到底部"
           onClick={scrollToBottom}
           data-testid="return-bottom"
@@ -428,6 +443,7 @@ export function Transcript({
                   exit={{ opacity: 0 }}
                   transition={{ duration: 0.28, ease: [0.2, 0.8, 0.2, 1] }}
                 >
+                  <div className="activity-section-label" aria-hidden="true">执行记录</div>
                   <LazyDetails
                     key={`activity-pack-${message.id}-${shouldOpen}`}
                     defaultOpen={shouldOpen}
@@ -451,7 +467,8 @@ export function Transcript({
             }
             const currentDate = new Date(message.created_at).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
             const prevDate = prevMessage ? new Date(prevMessage.created_at).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' }) : null
-            const showDateDivider = Date.parse(message.created_at) > 0 && currentDate !== prevDate
+            const today = new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
+            const showDateDivider = Date.parse(message.created_at) > 0 && currentDate !== prevDate && (prevDate !== null || currentDate !== today)
             const hasAssistantReplied = message.role === 'user' && visibleMessages.slice(idx + 1).some(m => m.role !== 'user')
             const matchedCmd = message.command_id
               ? commands.find(c => c.id === message.command_id)
@@ -479,6 +496,7 @@ export function Transcript({
                   session={session}
                   isLatest={idx === visibleMessages.length - 1}
                   inlineMeta={message.role === 'assistant' && !isFinalReply}
+                  showAuthorMark={message.role === 'assistant' && (!prevMessage || prevMessage.role === 'user')}
                   onEdit={message.id === lastUserMessageId ? onEditLastUserMessage : undefined}
                   onFork={onForkAtMessage && canForkTurn ? () => onForkAtMessage(message, idx) : undefined}
                   hasAssistantReplied={hasAssistantReplied}
@@ -521,7 +539,7 @@ export function Transcript({
                     </Group>
                     {approval.detail && (
                       <div className="approval-card-detail">
-                        <MarkdownContent value={approval.detail} onImageClick={onImageClick} />
+                        <MarkdownContent value={approval.detail} onImageClick={onImageClick} session={session} />
                       </div>
                     )}
                     {canApprove && onApproval ? (

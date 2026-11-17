@@ -31,11 +31,13 @@ func decodeMagpieModels(body io.Reader) ([]magpieCatalogModel, error) {
 
 type magpieQuotaWindow struct {
 	Name      string     `json:"name"`
-	Used      float64    `json:"used"`
-	Remaining float64    `json:"remaining"`
+	Used      *float64   `json:"used,omitempty"`
+	Remaining *float64   `json:"remaining,omitempty"`
 	ResetsAt  *time.Time `json:"resetsAt,omitempty"`
 	Unlimited bool       `json:"unlimited,omitempty"`
 	Display   string     `json:"display,omitempty"`
+	Text      bool       `json:"text,omitempty"`
+	Balance   *float64   `json:"balance,omitempty"`
 }
 type magpieQuota struct {
 	Provider     string              `json:"provider"`
@@ -51,6 +53,7 @@ type magpieQuota struct {
 	AsOf         *time.Time          `json:"asOf,omitempty"`
 	ReadAt       *time.Time          `json:"readAt,omitempty"`
 	ReadDeferred bool                `json:"readDeferred,omitempty"`
+	Last         bool                `json:"last,omitempty"`
 }
 
 func (h *Handler) magpieQuotas(r *http.Request, cfg GatewayConfig) ([]magpieQuota, error) {
@@ -152,10 +155,10 @@ func (h *Handler) serveMagpieModelQuota(w http.ResponseWriter, r *http.Request, 
 		custom := []map[string]any{}
 		compat := map[string]any{}
 		for _, win := range q.Windows {
-			if win.Unlimited {
+			if win.Unlimited || win.Text || win.Balance != nil || win.Used == nil {
 				continue
 			}
-			row := map[string]any{"label": win.Name, "percent": win.Used}
+			row := map[string]any{"label": win.Name, "percent": *win.Used}
 			if win.ResetsAt != nil {
 				row["resetAt"] = win.ResetsAt.UnixMilli()
 			}
@@ -166,18 +169,17 @@ func (h *Handler) serveMagpieModelQuota(w http.ResponseWriter, r *http.Request, 
 			case "5h", "5hour", "5hours":
 				percentKey = "shortPercent"
 				resetKey = "shortResetAt"
-			case "7d", "week", "weekly":
+			case "7d", "7day", "7days", "week", "weekly":
 				percentKey = "weeklyPercent"
 				resetKey = "weeklyResetAt"
 			}
 			if percentKey != "" {
-				compat[percentKey] = win.Used
+				compat[percentKey] = *win.Used
 				if win.ResetsAt != nil {
 					compat[resetKey] = win.ResetsAt.UnixMilli()
 				}
 			}
 		}
-		compat["customWindows"] = custom
 		label := q.Alias
 		if label == "" {
 			label = q.User
@@ -185,11 +187,23 @@ func (h *Handler) serveMagpieModelQuota(w http.ResponseWriter, r *http.Request, 
 		if label == "" {
 			label = q.Name
 		}
-		// Errors and balances never become an invented 100% allowance.
-		if len(custom) == 0 {
-			continue
+		var quota any
+		if len(custom) > 0 {
+			compat["customWindows"] = custom
+			quota = compat
 		}
-		accounts = append(accounts, map[string]any{"id": fmt.Sprintf("%s/%s/%d", q.Provider, q.User, i), "email": q.User, "logLabel": label, "plan": q.Plan, "error": q.Error, "quota": compat})
+		account := map[string]any{
+			"id": fmt.Sprintf("%s/%s/%d", q.Provider, q.User, i), "email": q.User,
+			"logLabel": label, "plan": q.Plan, "error": q.Error, "last": q.Last,
+			"readDeferred": q.ReadDeferred, "quota": quota,
+		}
+		if q.AsOf != nil {
+			account["asOf"] = q.AsOf
+		}
+		if q.ReadAt != nil {
+			account["readAt"] = q.ReadAt
+		}
+		accounts = append(accounts, account)
 	}
 	writeJSON(w, 200, map[string]any{"model": candidate, "providers": providers, "reports": reports, "accounts": accounts})
 }

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"astrorder.dev/app-server/internal/artifacts"
 	"astrorder.dev/app-server/internal/store"
 )
 
@@ -21,6 +22,7 @@ type Publisher interface {
 type Service struct {
 	store     *store.Store
 	publisher Publisher
+	resolver  FileResolver
 }
 
 // NewService creates a blackboard Service.
@@ -468,6 +470,9 @@ func (s *Service) Get(ctx context.Context, payload map[string]any) (map[string]a
 	}
 
 	if key != "" {
+		if strings.HasPrefix(ns, "group:") && strings.HasPrefix(key, artifacts.ContentPrefix) {
+			return s.artifactContent(ctx, ns, key, payload)
+		}
 		dbKey := fmt.Sprintf("blackboard:%s:%s", ns, key)
 		pref, err := s.store.GetPreference(ctx, dbKey)
 		if err != nil {
@@ -515,6 +520,9 @@ func (s *Service) Set(ctx context.Context, payload map[string]any) (map[string]a
 		return nil, err
 	}
 
+	if artifacts.Reserved(ns, key) {
+		return nil, errors.New("产物目录由星序自动维护，不能手动覆盖")
+	}
 	value := payload["value"]
 	value = enrichComponentPayload(key, value)
 
@@ -559,11 +567,18 @@ func (s *Service) Delete(ctx context.Context, payload map[string]any) (map[strin
 	if key == "*" {
 		cleanNS = true
 	}
+	if !cleanNS && artifacts.Reserved(ns, key) {
+		return nil, errors.New("产物目录由星序自动维护，不能手动删除")
+	}
 
 	if cleanNS {
 		prefix := fmt.Sprintf("blackboard:%s:", ns)
+		preserve := ""
+		if strings.HasPrefix(ns, "group:") {
+			preserve = prefix + artifacts.Key
+		}
 		err := s.store.WithTx(ctx, func(tx *sql.Tx) error {
-			_, e := tx.ExecContext(ctx, `DELETE FROM workspace_preferences WHERE instr("key", ?) = 1`, prefix)
+			_, e := tx.ExecContext(ctx, `DELETE FROM workspace_preferences WHERE instr("key", ?) = 1 AND "key" <> ?`, prefix, preserve)
 			return e
 		})
 		if err != nil {

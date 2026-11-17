@@ -1,5 +1,6 @@
 import { MantineProvider } from '@mantine/core'
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, expect, it, vi } from 'vitest'
 import type { Agent, Session } from '../domain/types'
 import { AgentSessionFilter } from './AgentSessionFilter'
@@ -18,7 +19,8 @@ it('keeps bounded icon selection available with many kinds and scopes it to the 
   fireEvent.click(trigger)
   expect(await screen.findAllByRole('menuitem')).toHaveLength(22)
   fireEvent.click(trigger)
-  fireEvent.change(screen.getByLabelText('按连接筛选'), { target: { value: 'remote' } })
+  fireEvent.click(screen.getByRole('combobox', { name: '按连接筛选' }))
+  fireEvent.click(await screen.findByRole('option', { name: '开发机' }))
   expect(onChange).toHaveBeenLastCalledWith('connection:remote|kind:all')
   view.unmount()
   render(<MantineProvider env="test"><AgentSessionFilter agents={agents} value="connection:remote|kind:all" onChange={onChange} /></MantineProvider>)
@@ -32,7 +34,10 @@ it('omits Grok on all three disconnected servers even when each has historical s
   const agents = { live: agent('live', 'codex'), ...Object.fromEntries(['one', 'two', 'three'].map(id => [id, agent(id, 'grok', id, 'disconnected')])) }
   const sessions = ['one', 'two', 'three'].map(agent_id => ({ agent_id })) as Session[]
   render(<MantineProvider env="test"><AgentSessionFilter agents={agents} sessions={sessions} value="all" onChange={vi.fn()} /></MantineProvider>)
-  expect(within(screen.getByLabelText('按连接筛选')).getAllByRole('option').map(o => o.getAttribute('value'))).toEqual(['all', 'local'])
+  const connection = screen.getByRole('combobox', { name: '按连接筛选' })
+  fireEvent.click(connection)
+  expect(within(await screen.findByRole('listbox')).getAllByRole('option').map(o => o.textContent)).toEqual(['全部连接', '本机'])
+  fireEvent.keyDown(connection, { key: 'Escape' })
   fireEvent.click(screen.getByRole('button', { name: '按 Agent 类型筛选' }))
   expect(await screen.findByRole('menuitem', { name: 'Codex' })).toBeInTheDocument()
   expect(screen.queryByRole('menuitem', { name: /Grok/ })).not.toBeInTheDocument()
@@ -50,9 +55,32 @@ it('preserves the saved selection while the initial Agent catalog is loading', (
   expect(onChange).not.toHaveBeenCalled()
   expect(screen.getByRole('button', { name: '按 Agent 类型筛选' })).toHaveAttribute('title', 'Codex')
 })
-it('resets an unavailable kind when switching connections', () => {
+it('resets an unavailable kind when switching connections', async () => {
   const onChange = vi.fn()
   render(<MantineProvider env="test"><AgentSessionFilter agents={{ local: agent('local', 'hermes'), remote: agent('remote', 'codex', 'remote') }} value="connection:local|kind:hermes" onChange={onChange} /></MantineProvider>)
-  fireEvent.change(screen.getByLabelText('按连接筛选'), { target: { value: 'remote' } })
+  fireEvent.click(screen.getByRole('combobox', { name: '按连接筛选' }))
+  fireEvent.click(await screen.findByRole('option', { name: '开发机' }))
   expect(onChange).toHaveBeenCalledWith('connection:remote|kind:all')
+})
+
+it('supports keyboard selection, escape and reselecting the current connection', async () => {
+  const user = userEvent.setup()
+  const onChange = vi.fn()
+  render(<MantineProvider env="test"><AgentSessionFilter agents={{ local: agent('local', 'codex'), remote: agent('remote', 'codex', 'remote') }} value="all" onChange={onChange} /></MantineProvider>)
+  const connection = screen.getByRole('combobox', { name: '按连接筛选' })
+  await user.tab()
+  expect(connection).toHaveFocus()
+  await user.keyboard('{ArrowDown}')
+  expect(connection).toHaveAttribute('aria-expanded', 'true')
+  expect(screen.getByRole('option', { name: '全部连接', selected: true })).toBeInTheDocument()
+  await user.keyboard('{Escape}')
+  expect(connection).toHaveAttribute('aria-expanded', 'false')
+  expect(onChange).not.toHaveBeenCalled()
+  await user.keyboard('{ArrowDown}{Enter}')
+  expect(onChange).not.toHaveBeenCalled()
+  expect(connection).toHaveValue('全部连接')
+  await user.keyboard('{ArrowDown}{ArrowDown}{Enter}')
+  expect(onChange).toHaveBeenLastCalledWith('connection:local|kind:all')
+  expect(connection).toHaveAttribute('aria-expanded', 'false')
+  expect(connection).toHaveFocus()
 })

@@ -21,12 +21,12 @@ it('expands sessions 4 at a time and allows collapse', async () => {
 
   // 初始默认展示 4 个，还有 7 个
   expect(titles()).toHaveLength(4)
-  expect(screen.getByText('展开更多（还有 7 个会话）')).toBeInTheDocument()
+  expect(screen.getByText('展开更多（7）')).toBeInTheDocument()
 
   // 第一次点击展开更多：展示 8 个，还有 3 个，且出现收起按钮
   fireEvent.click(screen.getByText(/展开更多/))
   expect(titles()).toHaveLength(8)
-  expect(screen.getByText('展开更多（还有 3 个会话）')).toBeInTheDocument()
+  expect(screen.getByText('展开更多（3）')).toBeInTheDocument()
   expect(screen.getByText('收起')).toBeInTheDocument()
 
   // 第二次点击展开更多：展示全部 11 个，没有更多展开按钮，只有收起按钮
@@ -37,7 +37,7 @@ it('expands sessions 4 at a time and allows collapse', async () => {
 
   // 点击收起：重置回 4 个
   fireEvent.click(screen.getByRole('button', { name: /收起/ }))
-  expect(screen.getByText('展开更多（还有 7 个会话）')).toBeInTheDocument()
+  expect(screen.getByText('展开更多（7）')).toBeInTheDocument()
   expect(screen.queryByText('收起')).not.toBeInTheDocument()
   expect(screen.getAllByRole('button', { name: /session-/ })).toHaveLength(4)
 })

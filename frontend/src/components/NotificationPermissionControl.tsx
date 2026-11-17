@@ -1,4 +1,4 @@
-import { IconBell, IconBellOff, IconCheck } from '@tabler/icons-react'
+import { BellSimpleIcon, BellSimpleSlashIcon, CheckIcon } from './workbenchIcons'
 import { ActionIcon, Menu, Tooltip } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useEffect, useState } from 'react'
@@ -71,7 +71,7 @@ export function NotificationPermissionControl() {
           aria-live="polite"
           aria-label={labels.denied}
         >
-          <IconBellOff size={18} />
+          <BellSimpleSlashIcon size={24} aria-hidden="true" />
         </ActionIcon>
       </Tooltip>
     )
@@ -89,7 +89,7 @@ export function NotificationPermissionControl() {
           aria-live="polite"
           aria-label={labels[permission]}
         >
-          <IconBell size={18} />
+          <BellSimpleIcon size={24} aria-hidden="true" />
         </ActionIcon>
       </Tooltip>
     )
@@ -108,15 +108,15 @@ export function NotificationPermissionControl() {
             aria-live="polite"
             aria-label="后台通知已启用"
           >
-            <IconBell size={18} />
+            <BellSimpleIcon size={24} weight="duotone" aria-hidden="true" />
           </ActionIcon>
         </Tooltip>
       </Menu.Target>
       <Menu.Dropdown>
-        <Menu.Item leftSection={<IconCheck size={14} color="var(--astr-muted)" />} onClick={sendTest}>
+        <Menu.Item leftSection={<CheckIcon size={16} color="var(--astr-muted)" />} onClick={sendTest}>
           测试系统通知
         </Menu.Item>
-        <Menu.Item leftSection={<IconBellOff size={14} />} color="red" onClick={disable}>
+        <Menu.Item leftSection={<BellSimpleSlashIcon size={16} />} color="red" onClick={disable}>
           停用系统通知
         </Menu.Item>
       </Menu.Dropdown>

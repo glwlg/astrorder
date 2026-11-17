@@ -15,7 +15,11 @@ import (
 
 func TestMemoryHelperHomeAction(t *testing.T) {
 	tempHome := t.TempDir()
-	cmd := exec.Command("go", "run", ".", "home")
+	executable := filepath.Join(t.TempDir(), "astrorder-memory-helper.exe")
+	if output, err := exec.Command("go", "build", "-o", executable, ".").CombinedOutput(); err != nil {
+		t.Fatalf("build helper failed: %v, out: %s", err, output)
+	}
+	cmd := exec.Command(executable, "home")
 	cmd.Env = append(os.Environ(), "USERPROFILE="+tempHome, "HOME="+tempHome)
 	out, err := cmd.CombinedOutput()
 	if err != nil {

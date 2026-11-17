@@ -1,0 +1,56 @@
+/* Keep decoration behind the existing controls; their semantics and focus stay intact. */
+.liquid-surface {
+  isolation: isolate;
+  background: transparent !important;
+}
+.liquid-surface:where(.mantine-Notification-root) { position: relative; }
+.liquid-surface-layer {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  overflow: clip;
+  pointer-events: none;
+  background: rgb(255 255 255 / 8%);
+  backdrop-filter: blur(2px) saturate(105%);
+  box-shadow:
+    inset 1px 1px 1px rgb(255 255 255 / 90%),
+    inset -1px -1px 1px rgb(70 58 88 / 22%),
+    0 5px 16px rgb(33 25 48 / 6%);
+}
+.liquid-surface-lens {
+  display: block;
+  position: sticky;
+  top: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  pointer-events: none;
+}
+.liquid-surface-lens > canvas { pointer-events: none; }
+.liquid-surface:where(.mantine-Menu-dropdown, .mantine-Popover-dropdown, .mantine-HoverCard-dropdown, .mantine-Notification-root, .background-tasks-panel, .group-chat-mention-menu) .liquid-surface-layer {
+  /* Text must stay legible over a busy transcript, without increasing blur. */
+  background: color-mix(in oklab, var(--astr-surface, white) 82%, transparent);
+}
+.liquid-surface[data-liquid-surface='selection'] .liquid-surface-layer {
+  background: color-mix(in oklab, var(--astr-selected, #ede8f6) 70%, transparent);
+  box-shadow: inset 1px 1px 1px rgb(255 255 255 / 85%), inset -1px -1px 1px rgb(87 68 113 / 14%), 0 2px 6px rgb(33 25 48 / 5%);
+}
+.liquid-surface[data-liquid-surface='control'] .liquid-surface-layer {
+  background: color-mix(in oklab, var(--astr-surface, white) 78%, transparent);
+}
+.workspace-navigation .sidebar-primary-nav .sidebar-nav-link.liquid-surface {
+  background: transparent !important;
+}
+:root[data-mantine-color-scheme='dark'] .liquid-surface-layer,
+:root[data-preview-theme='dark'] .liquid-surface-layer {
+  box-shadow: inset 1px 1px 1px rgb(255 255 255 / 22%), inset -1px -1px 1px rgb(0 0 0 / 35%), 0 5px 16px rgb(0 0 0 / 14%);
+}
+:root[data-preview-theme='dark'] .liquid-surface-layer { background: rgb(24 21 31 / 8%); }
+:root[data-mantine-color-scheme='dark'] .liquid-surface[data-liquid-surface='selection'] .liquid-surface-layer {
+  background: color-mix(in oklab, var(--astr-selected) 70%, transparent);
+}
+:root[data-mantine-color-scheme='dark'] .liquid-surface[data-liquid-surface='control'] .liquid-surface-layer {
+  background: color-mix(in oklab, var(--astr-surface) 78%, transparent);
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { describeTool, fileChangeDiffs, formatPackSummary, unwrapCommand } from './toolPresentation'
+import { activityDuration, activityState, describeTool, fileChangeDiffs, formatPackSummary, unwrapCommand } from './toolPresentation'
 import type { Message } from '../../domain/types'
 
 function makeMessage(override: Partial<Message>): Message {
@@ -119,5 +119,27 @@ describe('formatPackSummary', () => {
     const m2 = makeMessage({ id: '2', tool: { name: 'read_file', arguments: { path: 'b.py' } } })
     const m3 = makeMessage({ id: '3', tool: { name: 'commandExecution', arguments: { command: 'pytest' } } })
     expect(formatPackSummary([m1, m2, m3])).toBe('编辑 · 读取 · 测试 (共 3 项)')
+  })
+})
+
+describe('activity execution facts', () => {
+  it('keeps unknown tool state distinct from completed execution', () => {
+    expect(activityState(makeMessage({ tool: { name: 'read_file' } }))).toBe('recorded')
+    expect(activityState(makeMessage({ tool: { name: 'read_file', status: 'completed' } }))).toBe('completed')
+    expect(activityState(makeMessage({ completed_at: '2026-09-10T00:00:41Z' }))).toBe('completed')
+  })
+
+  it('keeps failures and running state even when completion metadata is present', () => {
+    const completed_at = '2026-09-10T00:00:41Z'
+    expect(activityState(makeMessage({ completed_at, tool: { name: 'commandExecution', status: 'failed' } }))).toBe('failed')
+    expect(activityState(makeMessage({ completed_at, tool: { name: 'commandExecution', status: 'running' } }))).toBe('running')
+  })
+
+  it('only shows durations from valid native timestamps', () => {
+    expect(activityDuration(makeMessage({}))).toBeNull()
+    expect(activityDuration(makeMessage({ completed_at: 'invalid' }))).toBeNull()
+    expect(activityDuration(makeMessage({ created_at: 'invalid', completed_at: '2026-09-10T00:00:41Z' }))).toBeNull()
+    expect(activityDuration(makeMessage({ completed_at: '2026-09-09T23:59:59Z' }))).toBeNull()
+    expect(activityDuration(makeMessage({ completed_at: '2026-09-10T00:02:17Z' }))).toBe('2 分 17 秒')
   })
 })

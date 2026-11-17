@@ -193,15 +193,47 @@ func Events(ctx context.Context, db queryer, events []store.Event) ([]store.Even
 			message = "会话"
 		}
 		message = fmt.Sprintf("%s · %s", message, title)
+		var groupID, groupName, memberName string
+		if kind != "approval_pending" {
+			groupID, groupName, memberName, err = groupIdentity(ctx, db, event.AgentID, event.SessionID)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if groupID != "" {
+			message = fmt.Sprintf("%s · %s", memberName, title)
+			title = groupName
+		}
 		notices = append(notices, store.Event{
 			ID: key, Type: EventType, AgentID: event.AgentID, SessionID: event.SessionID,
 			Data: map[string]any{
 				"key": key, "kind": kind, "title": title, "message": message,
 				"agent_id": event.AgentID, "session_id": event.SessionID,
+				"group_id": groupID, "group_name": groupName,
 				"created_at": time.Now().UTC().Format(time.RFC3339Nano),
 				"target_id":  target, "turn_id": turn, "source": event.Type,
 			},
 		})
 	}
 	return notices, nil
+}
+
+// Only the exact dedicated session binding changes a notification's identity.
+// The same Agent's other sessions and the original fork source remain single chats.
+func groupIdentity(ctx context.Context, db queryer, agentID, sessionID string) (id, name, member string, err error) {
+	err = db.QueryRowContext(ctx, `SELECT
+		json_extract(g.value,'$.id'),json_extract(g.value,'$.name'),
+		coalesce(nullif(json_extract(m.value,'$.alias'),''),nullif(json_extract(m.value,'$.name'),''),json_extract(m.value,'$.agent_id'))
+		FROM workspace_preferences b
+		JOIN workspace_preferences g ON instr(g.key,'bot_group:')=1
+		JOIN json_each(g.value,'$.members') m ON
+			b.key='group_session:'||json_extract(g.value,'$.id')||':'||coalesce(nullif(json_extract(m.value,'$.id'),''),json_extract(m.value,'$.agent_id'))
+		WHERE instr(b.key,'group_session:')=1
+			AND json_extract(b.value,'$.agent_id')=? AND json_extract(b.value,'$.session_id')=?
+			AND json_extract(m.value,'$.agent_id')=? LIMIT 1`,
+		agentID, sessionID, agentID).Scan(&id, &name, &member)
+	if err == sql.ErrNoRows {
+		err = nil
+	}
+	return
 }

@@ -1,15 +1,11 @@
 node_modules/
 .codex-tmp/
 frontend/node_modules/
-desktop/node_modules/
-desktop/dist/
-desktop/release/
 frontend/dist/
 frontend/playwright-report/
 frontend/test-results/
 /frontend/.vitest/
 frontend/vite.hosts.local.json
-backend/.venv/
 **/__pycache__/
 **/.pytest_cache/
 **/.ruff_cache/
@@ -41,7 +37,6 @@ stitch-*.png
 /app-server-go/tmp/
 /session-daemon-go/bin/
 /session-daemon-go/*.exe
-/backend/.pytest_temp/
 /scratch/
 /scratch-fg-*/
 /.tools/

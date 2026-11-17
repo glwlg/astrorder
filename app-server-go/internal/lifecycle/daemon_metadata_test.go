@@ -3,10 +3,14 @@ package lifecycle
 import (
 	"context"
 	"os"
+	"runtime"
 	"testing"
 )
 
 func TestDaemonStatusDoesNotReadAppProcessIdentity(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("native Windows process identity test")
+	}
 	state := t.TempDir()
 	identity, err := InspectProcess(os.Getpid())
 	if err != nil {

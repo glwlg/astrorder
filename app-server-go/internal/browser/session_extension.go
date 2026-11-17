@@ -3,13 +3,24 @@ package browser
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 type extensionCDP interface {
 	Call(context.Context, string, map[string]any) (json.RawMessage, error)
+}
+
+func (m *SessionManager) ensureSessionExtension(ctx context.Context, client extensionCDP, enableDeveloperMode func(context.Context) error) error {
+	release, err := acquireBrowserLock(ctx, m.extensionLock)
+	if err != nil {
+		return err
+	}
+	defer release()
+	return ensureSessionExtension(ctx, client, enableDeveloperMode)
 }
 
 // ensureSessionExtension makes grouping available in the managed CDP browser.
@@ -67,7 +78,7 @@ func ensureSessionExtension(ctx context.Context, client extensionCDP, enableDeve
 	return nil
 }
 
-func (m *SessionManager) enableExtensionDeveloperMode(ctx context.Context, client extensionCDP) error {
+func (m *SessionManager) enableExtensionDeveloperMode(ctx context.Context, client extensionCDP) (resultErr error) {
 	raw, err := client.Call(ctx, "Target.createTarget", map[string]any{"url": "edge://extensions/", "background": true})
 	if err != nil {
 		return err
@@ -81,7 +92,13 @@ func (m *SessionManager) enableExtensionDeveloperMode(ctx context.Context, clien
 	if target.ID == "" {
 		return fmt.Errorf("extension settings target is missing")
 	}
-	defer client.Call(ctx, "Target.closeTarget", map[string]any{"targetId": target.ID})
+	defer func() {
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+		defer cancel()
+		if _, err := client.Call(cleanup, "Target.closeTarget", map[string]any{"targetId": target.ID}); err != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("清理扩展设置标签页失败: %w", err))
+		}
+	}()
 	pages, err := m.endpoints.ListPages(ctx)
 	if err != nil {
 		return err
@@ -94,7 +111,7 @@ func (m *SessionManager) enableExtensionDeveloperMode(ctx context.Context, clien
 		if err != nil {
 			return err
 		}
-		defer connection.Close()
+		defer connection.CloseNow()
 		raw, err = connection.Call(ctx, "Runtime.evaluate", map[string]any{"expression": `(async()=>{const api=chrome.developerPrivate;if(!api)throw new Error('Extension management API unavailable');await api.updateProfileConfiguration({inDeveloperMode:true});const profile=await api.getProfileConfiguration();if(!profile.inDeveloperMode)throw new Error('Developer mode was not enabled');return true})()`, "awaitPromise": true, "returnByValue": true})
 		if err != nil {
 			return err

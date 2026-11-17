@@ -81,3 +81,38 @@ func TestRemoveUnknownQueueRecordKeepsEvidenceAndNeverRequeues(t *testing.T) {
 		t.Fatalf("removed unrelated direct send: %+v %v %v", row, removed, err)
 	}
 }
+
+func TestAutomaticQueueClaimRechecksFIFOAndConflictingCommands(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "app.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	if _, err := st.UpsertAgent(ctx, map[string]any{"id": "a", "kind": "codex", "name": "fixture", "status": "ready"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.UpsertSession(ctx, map[string]any{"id": "s", "agent_id": "a", "status": "idle", "control_state": "owned", "updated_at": "2026-10-30T00:00:00Z"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"first", "second"} {
+		if _, _, err := st.CreateCommand(ctx, map[string]any{"id": id, "agent_id": "a", "session_id": "s", "action": "enqueue", "text": id}, "queued"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, ok, err := st.ClaimAutomaticQueuedCommand(ctx, "a", "s", "second", "s", "", "codex"); err != nil || ok {
+		t.Fatalf("later command claimed before FIFO head: %v %v", ok, err)
+	}
+	if _, ok, err := st.ClaimAutomaticQueuedCommand(ctx, "a", "s", "first", "s", "different", "codex"); err != nil || ok {
+		t.Fatalf("claimed a rebound session: %v %v", ok, err)
+	}
+	if _, ok, err := st.ClaimAutomaticQueuedCommand(ctx, "a", "s", "first", "s", "", "codex"); err != nil || !ok {
+		t.Fatalf("first command was not claimed: %v %v", ok, err)
+	}
+	if _, ok, err := st.ClaimAutomaticQueuedCommand(ctx, "a", "s", "second", "s", "", "codex"); err != nil || ok {
+		t.Fatalf("second command crossed an outstanding claim: %v %v", ok, err)
+	}
+	if _, ok, err := st.SetQueuedNotice(ctx, "a", "s", "first", "stale decision"); err != nil || ok {
+		t.Fatalf("stale decision overwrote claimed command: %v %v", ok, err)
+	}
+}

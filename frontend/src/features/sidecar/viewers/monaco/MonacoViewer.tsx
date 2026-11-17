@@ -7,6 +7,8 @@ import Editor from '@monaco-editor/react'
 import { downloadFile } from '../../fileTransfer'
 import type { ViewerContext } from '../../types'
 import { authenticatedApiFetch } from '../../../../api/client'
+import { scopeKey } from '../../../../domain/semantics'
+import { useAstrorderStore } from '../../../../state/store'
 
 const EXT_TO_LANG: Record<string, string> = {
   ts: 'typescript',
@@ -52,7 +54,9 @@ function decodeText(bytes: Uint8Array): { text: string; readOnly: boolean } {
   return { text, readOnly: Boolean(utf16) }
 }
 
-export function MonacoViewer({ artifact, onSave, onDirtyChange, toolbarAction, isActive = true }: ViewerContext) {
+export function MonacoViewer({ artifact, session: sourceSession, onSave, onDirtyChange, toolbarAction, isActive = true }: ViewerContext) {
+  const storedSession = useAstrorderStore((state) => state.sessions[scopeKey(artifact.agentId, artifact.sessionId)])
+  const session = sourceSession === undefined ? storedSession || null : sourceSession
   const onDirtyChangeRef = useRef(onDirtyChange)
   onDirtyChangeRef.current = onDirtyChange
 
@@ -69,7 +73,7 @@ export function MonacoViewer({ artifact, onSave, onDirtyChange, toolbarAction, i
   const [visualizing, setVisualizing] = useState(false)
   const [isVisualMode, setIsVisualMode] = useState(false)
 
-  const handleJevVisualize = async () => {
+  const handleVisualize = async () => {
     if (visualRendered) {
       setIsVisualMode(!isVisualMode)
       return
@@ -257,10 +261,10 @@ export function MonacoViewer({ artifact, onSave, onDirtyChange, toolbarAction, i
               color="teal"
               leftSection={isVisualMode ? <IconCode size={13} /> : <IconSparkles size={13} />}
               loading={visualizing}
-              onClick={handleJevVisualize}
-              title={isVisualMode ? '切换回代码编辑器' : '使用 Jev 决策自动转为 Generative UI 卡片'}
+              onClick={handleVisualize}
+              title={isVisualMode ? '切换回代码编辑器' : '自动转换为可视化卡片'}
             >
-              {isVisualMode ? '代码视图' : 'Jev 视觉化'}
+              {isVisualMode ? '代码视图' : '视觉化'}
             </Button>
             <ActionIcon
               variant="subtle"
@@ -293,7 +297,7 @@ export function MonacoViewer({ artifact, onSave, onDirtyChange, toolbarAction, i
           </div>
         ) : isReadingMode && isMarkdown ? (
           <div style={{ padding: '20px 24px', height: '100%', overflowY: 'auto', background: 'var(--astr-surface)' }}>
-            <MarkdownContent value={content} />
+            <MarkdownContent value={content} session={session} />
           </div>
         ) : isVisualMode && visualRendered ? (
           <div style={{ padding: 16, height: '100%', overflowY: 'auto', background: 'var(--astr-surface)' }}>

@@ -11,6 +11,7 @@ import {
   IconPinned,
   IconPlus,
   IconRefresh,
+  IconSearch,
   IconTrash,
   IconTransfer,
   IconGitFork,
@@ -18,7 +19,7 @@ import {
   IconGitBranch,
 } from '@tabler/icons-react'
 import {
-  
+  ActionIcon,
   Button,
   Checkbox,
   Collapse,
@@ -33,9 +34,8 @@ import {
   UnstyledButton,
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { useCallback, useMemo, useState, type CSSProperties } from 'react'
-import { LayoutGroup, motion } from 'motion/react'
-import { VariableProximity } from './animations/VariableProximity'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { motion } from 'motion/react'
 import { useSessionOrder } from '../hooks/useSessionOrder'
 import { useSessionUnread } from '../hooks/useSessionUnread'
 import { AgentSessionFilter, matchesAgent } from './AgentSessionFilter'
@@ -64,6 +64,8 @@ import {
   type ProjectAppearanceEntry,
 } from './projectAppearance'
 import { SessionActivityBorder } from './AnimatedStatus'
+import { PlusIcon } from './workbenchIcons'
+import { SessionQuickFilters } from './SessionQuickFilters'
 
 type PendingConfirmation =
   | { kind: 'delete-session'; session: Session; coords: ConfirmationCoordinates }
@@ -92,6 +94,7 @@ export function SessionRail({
   onSelect: (session: Session) => void
 }) {
   const [filter, setFilter] = useState('')
+  const searchRef = useRef<HTMLInputElement>(null)
   const sessions = useSessionOrder(incomingSessions)
   const tasks = useAstrorderStore((state) => state.tasks)
   const liveActivityAt = useAstrorderStore((state) => state.liveActivityAt)
@@ -115,6 +118,16 @@ export function SessionRail({
   }
   const [createProject, setCreateProject] = useState<ProjectGroup | null>(null)
   const [createOpened, setCreateOpened] = useState(false)
+  useEffect(() => {
+    const focusSearch = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        searchRef.current?.focus()
+      }
+    }
+    window.addEventListener('keydown', focusSearch)
+    return () => window.removeEventListener('keydown', focusSearch)
+  }, [])
   const [addProjectOpened, setAddProjectOpened] = useState(false)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => {
     try {
@@ -598,54 +611,38 @@ export function SessionRail({
   return (
     <Stack className="session-rail" gap="sm">
       <div className="session-rail-controls">
-      <AgentSessionFilter agents={agents} sessions={sessions} value={agentFilter} onChange={updateAgentFilter} />
-      <Group gap={4} wrap="nowrap" className="session-rail-tools">
-        <input className="session-search" aria-label="搜索会话" placeholder="搜索项目或会话" value={filter} onChange={event => setFilter(event.currentTarget.value)} />
-        <Tooltip label="刷新最后活动时间" withArrow position="bottom">
-          <Button
-            size="xs"
-            variant="subtle"
-            color="gray"
-            px={0}
-            w={36}
-            loading={refreshingActivity}
-            onClick={() => void refreshActivity()}
-            aria-label="刷新最后活动时间"
-          >
-            <IconRefresh size={17} />
-          </Button>
+      <div className="session-search-row">
+        <div className="session-search-field">
+          <IconSearch size={21} stroke={1.8} aria-hidden="true" />
+          <input ref={searchRef} className="session-search" aria-label="搜索会话" placeholder="搜索会话" value={filter} onChange={event => setFilter(event.currentTarget.value)} />
+          <kbd aria-hidden="true">Ctrl K</kbd>
+        </div>
+        <Tooltip label="新增项目" position="bottom">
+          <ActionIcon className="session-add-project" variant="default" size={44} aria-label="新增项目" onClick={() => setAddProjectOpened(true)}>
+            <PlusIcon size={22} aria-hidden="true" />
+          </ActionIcon>
         </Tooltip>
-        <Tooltip label={batchMode ? '退出批量管理' : '批量管理会话'} withArrow position="bottom">
-          <Button
-            size="xs"
-            variant={batchMode ? 'filled' : 'subtle'}
-            color={batchMode ? 'indigo' : 'gray'}
-            px={0}
-            w={36}
-            onClick={() => {
-              setBatchMode(prev => !prev)
-              setSelectedSessionKeys(new Set())
-            }}
-            aria-label={batchMode ? '退出批量管理' : '批量管理会话'}
-            aria-pressed={batchMode}
-          >
-            <IconChecklist size={17} />
-          </Button>
-        </Tooltip>
-        <Tooltip label="新增项目" withArrow position="bottom">
-          <Button
-            size="xs"
-            variant="subtle"
-            color="gray"
-            px={0}
-            w={36}
-            onClick={() => setAddProjectOpened(true)}
-            aria-label="新增项目"
-          >
-            <IconPlus size={17} />
-          </Button>
-        </Tooltip>
-      </Group>
+      </div>
+      <AgentSessionFilter agents={agents} sessions={sessions} value={agentFilter} onChange={updateAgentFilter} showLabel />
+      <SessionQuickFilters value={statusFilter} onChange={setStatusFilter}>
+      <Menu position="bottom-end" width={210} withinPortal>
+        <Menu.Target>
+          <button type="button" className="session-rail-more" aria-label="会话列表操作">
+            <IconDotsVertical size={16} aria-hidden="true" />
+          </button>
+        </Menu.Target>
+        <Menu.Dropdown>
+        <Menu.Item leftSection={<IconRefresh size={17} />} disabled={refreshingActivity} onClick={() => void refreshActivity()}>
+          {refreshingActivity ? '正在刷新活动时间…' : '刷新最后活动时间'}
+        </Menu.Item>
+        <Menu.Item leftSection={<IconChecklist size={17} />} onClick={() => {
+          setBatchMode(prev => !prev)
+          setSelectedSessionKeys(new Set())
+        }}>{batchMode ? '退出批量管理' : '批量管理会话'}</Menu.Item>
+        <Menu.Item leftSection={<IconPlus size={17} />} onClick={() => setAddProjectOpened(true)}>新增项目</Menu.Item>
+        </Menu.Dropdown>
+      </Menu>
+      </SessionQuickFilters>
       {addProjectOpened && (
         <AddProjectModal
           opened={addProjectOpened}
@@ -665,48 +662,6 @@ export function SessionRail({
           }}
         />
       )}
-      <div className="session-rail-filters" role="tablist" aria-label="会话筛选">
-        <LayoutGroup id="session-rail-filters-group">
-          {([
-            ['all', '全部'],
-            ['running', '运行中'],
-            ['unread', '未读'],
-            ['pinned', '置顶'],
-            ['recent', '24小时'],
-          ] as const).map(([value, label]) => {
-            const isActive = statusFilter === value
-            return (
-              <button
-                className={`session-filter ${isActive ? 'is-active' : ''}`}
-                key={value}
-                type="button"
-                role="tab"
-                aria-selected={isActive}
-                onClick={() => setStatusFilter(value)}
-                style={{ position: 'relative' }}
-              >
-                {isActive && (
-                  <motion.span
-                    layoutId="session-filter-pill-bg"
-                    style={{
-                      position: 'absolute',
-                      inset: 0,
-                      borderRadius: 999,
-                      background: 'color-mix(in srgb, var(--astr-indigo, #5b6cff) 12%, var(--astr-surface))',
-                      border: '1px solid color-mix(in srgb, var(--astr-indigo, #5b6cff) 30%, transparent)',
-                      zIndex: 0,
-                    }}
-                    transition={{ type: 'spring', stiffness: 450, damping: 30 }}
-                  />
-                )}
-                <span style={{ position: 'relative', zIndex: 1 }}>
-                  <VariableProximity label={label} active={isActive} />
-                </span>
-              </button>
-            )
-          })}
-        </LayoutGroup>
-      </div>
       {batchMode && (
         <div className="session-batch-toolbar" style={{ padding: '6px 8px', background: 'var(--astr-subtle, rgba(0,0,0,0.04))', border: '1px solid var(--mantine-color-default-border)', borderRadius: 8, marginTop: 4 }}>
           <Group justify="space-between" align="center" gap="xs" wrap="nowrap">
@@ -754,7 +709,7 @@ export function SessionRail({
       ) : (
         <>
         {groups.some(project => project.sessions.some(s => pinnedSessions[scopeKey(s.agent_id, s.id)])) && <section className="session-pinned-section" aria-label="置顶会话">
-          <div className="session-pinned-heading"><IconPinned size={15} />置顶会话</div>
+          <div className="session-pinned-heading">置顶</div>
           <>
           {groups.flatMap(project => project.sessions).filter(s => pinnedSessions[scopeKey(s.agent_id, s.id)]).map(session => {
             const key = scopeKey(session.agent_id, session.id)
@@ -801,6 +756,7 @@ export function SessionRail({
                     event.dataTransfer.effectAllowed = 'copy'
                   }}
                 >
+                  <span className="session-row-glyph"><AgentKindBadge agent={agents[session.agent_id]} iconOnly /></span>
                   <span className="session-row-title">
                     {projectCustom?.icon && (
                       <ProjectGlyph
@@ -812,7 +768,7 @@ export function SessionRail({
                     )}
                     {displaySessionTitle(session)}
                   </span>
-                  <div className="session-row-info"><AgentKindBadge agent={agents[session.agent_id]} iconOnly /><span className="session-row-time">{formatRelativeTime(session.updated_at)}</span>{(session as any).unread && activityStatus === 'idle' ? <StatusDot status="unread" /> : <StatusDot status={activityStatus} />}</div>
+                  <div className="session-row-info"><span className="session-row-time">{key === activeSessionKey && isRunning ? '运行中' : formatRelativeTime(session.updated_at)}</span>{(session as any).unread && activityStatus === 'idle' ? <StatusDot status="unread" /> : <StatusDot status={activityStatus} />}</div>
                 </UnstyledButton>
                 {!batchMode && <div className="session-row-actions has-pinned"><button className="session-action-btn is-active" aria-label="取消置顶" onClick={e => togglePin(session, e)}><IconPinned size={14} /></button>
                   <Menu position="bottom-end" withinPortal opened={railMenu?.kind === 'session' && railMenu.key === key} onChange={(opened) => updateRailMenu(opened, 'session', key)}><Menu.Target><button className="session-action-btn" aria-label="更多操作"><IconDotsVertical size={14} /></button></Menu.Target><Menu.Dropdown>
@@ -829,6 +785,7 @@ export function SessionRail({
           })}
           </>
         </section>}
+        <div className="session-project-section-heading"><span>项目</span><span>{groups.length}</span></div>
         {groups.map((project) => {
           const projectCollapseKey = `project:${project.key}`
           const projectCollapsed = collapsed[projectCollapseKey] === true
@@ -844,6 +801,7 @@ export function SessionRail({
           return (
             <section
               className="session-project-group"
+              data-active={project.sessions.some(session => scopeKey(session.agent_id, session.id) === activeSessionKey) || undefined}
               key={project.key}
               aria-label={`${project.label}${project.remoteLabel ? ` ${project.remoteLabel}` : ''}`}
             >
@@ -1014,11 +972,11 @@ export function SessionRail({
                             event.dataTransfer.effectAllowed = 'copy'
                           }}
                         >
+                          <span className="session-row-glyph"><AgentKindBadge agent={agents[session.agent_id]} iconOnly /></span>
                           <span className="session-row-title" title={displaySessionTitle(session)}>
                             {displaySessionTitle(session)}
                           </span>
                           <div className="session-row-info">
-                            <AgentKindBadge agent={agents[session.agent_id]} iconOnly />
                             <span className="session-row-time">{formatRelativeTime(session.updated_at)}</span>
                             {(session as any).unread && activityStatus === 'idle' ? <StatusDot status="unread" /> : <StatusDot status={activityStatus} />}
                           </div>
@@ -1089,7 +1047,7 @@ export function SessionRail({
                           }}
                         >
                           <IconChevronDown size={12} />
-                          <span>展开更多（还有 {remainingSessionsCount} 个会话）</span>
+                          <span>展开更多（{remainingSessionsCount}）</span>
                         </UnstyledButton>
                       )}
                       {canCollapse && (

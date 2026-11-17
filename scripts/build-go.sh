@@ -2,10 +2,18 @@
 set -euo pipefail
 
 readonly expected_buf_version="1.66.1"
-readonly expected_go_version="go1.27.2"
+readonly expected_go_version="go1.27.3"
 readonly expected_protoc_gen_go_version="v1.36.12"
 readonly expected_protoc_gen_go_grpc_version="1.6.2"
-readonly expected_grpcio_tools_version="1.84.0"
+
+build_only=0
+if [[ $# -gt 0 ]]; then
+  if [[ $# -ne 1 || "$1" != "--build-only" ]]; then
+    printf 'Usage: %s [--build-only]\n' "$0" >&2
+    exit 2
+  fi
+  build_only=1
+fi
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "$script_dir/.." && pwd)"
@@ -44,16 +52,6 @@ buf_bin="$(resolve_tool "${ASTRORDER_BUF:-buf}")"
 go_bin="$(resolve_tool "${ASTRORDER_GO:-go}")"
 protoc_gen_go_bin="$(resolve_tool "${ASTRORDER_PROTOC_GEN_GO:-protoc-gen-go}")"
 protoc_gen_go_grpc_bin="$(resolve_tool "${ASTRORDER_PROTOC_GEN_GO_GRPC:-protoc-gen-go-grpc}")"
-
-go_only="${ASTRORDER_GO_ONLY:-1}"
-case "$go_only" in
-  0|1) ;;
-  *) printf 'ERROR: ASTRORDER_GO_ONLY must be 0 or 1.\n' >&2; exit 2 ;;
-esac
-python_bin=""
-if [[ "$go_only" == "0" ]]; then
-  python_bin="$(resolve_tool "${ASTRORDER_GRPC_TOOLS_PYTHON:-python}")"
-fi
 
 output_root="${ASTRORDER_GO_OUTPUT_DIR:-$repo_root/.runtime/go-build}"
 mkdir -p -- "$output_root"
@@ -119,31 +117,28 @@ contract_env=(
   "ASTRORDER_PROTOC_GEN_GO=$protoc_gen_go_bin"
   "ASTRORDER_PROTOC_GEN_GO_GRPC=$protoc_gen_go_grpc_bin"
 )
-if [[ "$go_only" == "0" ]]; then
-  run_clean "Python grpcio/grpcio-tools version check" "$contracts_dir" "$python_bin" -c "import grpc, importlib.metadata; assert grpc.__version__ == '$expected_grpcio_tools_version', grpc.__version__; assert importlib.metadata.version('grpcio-tools') == '$expected_grpcio_tools_version', importlib.metadata.version('grpcio-tools')"
-  contract_env+=("ASTRORDER_GENERATE_PYTHON=1" "ASTRORDER_GRPC_TOOLS_PYTHON=$python_bin" "ASTRORDER_INTEROP_PYTHON=$python_bin")
-else
-  contract_env+=("ASTRORDER_GENERATE_PYTHON=0")
-fi
-
 run_clean "Buf lint" "$contracts_dir" "$buf_bin" lint
 run_clean "Buf descriptor build" "$contracts_dir" "$buf_bin" build
-run_clean "Contract tests and deterministic generation" "$contracts_dir" "${contract_env[@]}" "$go_bin" test ./... -count=1
-run_clean "Contract vet" "$contracts_dir" "$go_bin" vet ./...
-run_clean "Session Daemon tests" "$daemon_dir" "$go_bin" test ./... -count=1
-run_clean "Session Daemon vet" "$daemon_dir" "$go_bin" vet ./...
-run_clean "App Server tests" "$app_dir" "$go_bin" test ./... -count=1
-run_clean "App Server vet" "$app_dir" "$go_bin" vet ./...
+if [[ "$build_only" == "1" ]]; then
+  printf 'NOTE: --build-only skips Go tests and vet; run the full build separately for validation.\n'
+else
+  run_clean "Contract tests and deterministic generation" "$contracts_dir" "${contract_env[@]}" "$go_bin" test ./... -count=1
+  run_clean "Contract vet" "$contracts_dir" "$go_bin" vet ./...
+  run_clean "Session Daemon tests" "$daemon_dir" "$go_bin" test ./... -count=1
+  run_clean "Session Daemon vet" "$daemon_dir" "$go_bin" vet ./...
+  run_clean "App Server tests" "$app_dir" "$go_bin" test ./... -count=1
+  run_clean "App Server vet" "$app_dir" "$go_bin" vet ./...
+fi
 
 partial_native="$(native_path "$partial_dir")"
-run_clean "Build astrorder-sessiond.exe" "$daemon_dir" "$go_bin" build -trimpath -o "$partial_native/astrorder-sessiond.exe" ./cmd/astrorder-sessiond
-run_clean "Build astrorder-app.exe" "$app_dir" "$go_bin" build -trimpath -o "$partial_native/astrorder-app.exe" ./cmd/astrorder-app
-run_clean "Build astrorderctl.exe" "$app_dir" "$go_bin" build -trimpath -o "$partial_native/astrorderctl.exe" ./cmd/astrorderctl
-run_clean "Build astrorder-agent.exe" "$app_dir" "$go_bin" build -trimpath -o "$partial_native/astrorder-agent.exe" ./cmd/astrorder-agent
+run_clean "Build astrorder-sessiond.exe" "$daemon_dir" "GOOS=windows" "GOARCH=amd64" "CGO_ENABLED=0" "$go_bin" build -trimpath -o "$partial_native/astrorder-sessiond.exe" ./cmd/astrorder-sessiond
+run_clean "Build astrorder-app.exe" "$app_dir" "GOOS=windows" "GOARCH=amd64" "CGO_ENABLED=0" "$go_bin" build -trimpath -o "$partial_native/astrorder-app.exe" ./cmd/astrorder-app
+run_clean "Build astrorderctl.exe" "$app_dir" "GOOS=windows" "GOARCH=amd64" "CGO_ENABLED=0" "$go_bin" build -trimpath -o "$partial_native/astrorderctl.exe" ./cmd/astrorderctl
+run_clean "Build astrorder-agent.exe" "$app_dir" "GOOS=windows" "GOARCH=amd64" "CGO_ENABLED=0" "$go_bin" build -trimpath -o "$partial_native/astrorder-agent.exe" ./cmd/astrorder-agent
 
-run_clean "Build astrorder-helper.exe" "$app_dir" "$go_bin" build -trimpath -o "$partial_native/astrorder-helper.exe" ./cmd/astrorder-helper
-run_clean "Build astrorder-model-helper.exe" "$daemon_dir" "$go_bin" build -trimpath -o "$partial_native/astrorder-model-helper.exe" ./cmd/astrorder-model-helper
-run_clean "Build astrorder-memory-helper.exe" "$app_dir" "$go_bin" build -trimpath -o "$partial_native/astrorder-memory-helper.exe" ./cmd/astrorder-memory-helper
+run_clean "Build astrorder-helper.exe" "$app_dir" "GOOS=windows" "GOARCH=amd64" "CGO_ENABLED=0" "$go_bin" build -trimpath -o "$partial_native/astrorder-helper.exe" ./cmd/astrorder-helper
+run_clean "Build astrorder-model-helper.exe" "$daemon_dir" "GOOS=windows" "GOARCH=amd64" "CGO_ENABLED=0" "$go_bin" build -trimpath -o "$partial_native/astrorder-model-helper.exe" ./cmd/astrorder-model-helper
+run_clean "Build astrorder-memory-helper.exe" "$app_dir" "GOOS=windows" "GOARCH=amd64" "CGO_ENABLED=0" "$go_bin" build -trimpath -o "$partial_native/astrorder-memory-helper.exe" ./cmd/astrorder-memory-helper
 
 for helper_arch in amd64 arm64; do
   helper_platform="linux-$helper_arch"

@@ -47,6 +47,7 @@ type Notice struct {
 	Message   string    `json:"message"`
 	AgentID   string    `json:"agent_id"`
 	SessionID string    `json:"session_id"`
+	GroupID   string    `json:"group_id"`
 	CreatedAt time.Time `json:"created_at"`
 	TargetID  string    `json:"target_id"`
 	Source    string    `json:"source"`
@@ -273,14 +274,7 @@ func (s *Service) readSubscription(ctx context.Context, key string, sub *subscri
 }
 
 func (s *Service) send(ctx context.Context, sub subscription, notice Notice) (int, error) {
-	path := "/"
-	if notice.SessionID != "" && notice.AgentID != "" {
-		prefix := ""
-		if sub.Mobile {
-			prefix = "/mobile"
-		}
-		path = prefix + "/chat/" + url.PathEscape(notice.SessionID) + "?agent_id=" + url.QueryEscape(notice.AgentID)
-	}
+	path := noticePath(notice, sub.Mobile)
 	ttl := 3600
 	if notice.Kind == "approval_pending" {
 		ttl = 300
@@ -299,6 +293,20 @@ func (s *Service) send(ctx context.Context, sub subscription, notice Notice) (in
 	defer response.Body.Close()
 	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 8192))
 	return response.StatusCode, nil
+}
+
+func noticePath(notice Notice, mobile bool) string {
+	prefix := ""
+	if mobile {
+		prefix = "/mobile"
+	}
+	if notice.GroupID != "" {
+		return prefix + "/groups/" + url.PathEscape(notice.GroupID)
+	}
+	if notice.SessionID != "" && notice.AgentID != "" {
+		return prefix + "/chat/" + url.PathEscape(notice.SessionID) + "?agent_id=" + url.QueryEscape(notice.AgentID)
+	}
+	return "/"
 }
 
 func (s *Service) deliverPending(ctx context.Context) error {

@@ -3,10 +3,9 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $ExpectedBufVersion = '1.66.1'
-$ExpectedGoVersion = 'go1.27.2'
+$ExpectedGoVersion = 'go1.27.3'
 $ExpectedProtocGenGoVersion = 'v1.36.12'
 $ExpectedProtocGenGoGrpcVersion = '1.6.2'
-$ExpectedGrpcToolsVersion = '1.84.0'
 
 function Resolve-Tool {
     param([Parameter(Mandatory = $true)][string]$Requested)
@@ -72,7 +71,7 @@ function Set-CleanBuildEnvironment {
         }
     }
     $env:GOENV = 'off'
-    $env:GOTOOLCHAIN = 'local'
+    $env:GOTOOLCHAIN = $ExpectedGoVersion
 }
 
 function Restore-Environment {
@@ -95,15 +94,6 @@ $buf = Resolve-Tool $(if ($env:ASTRORDER_BUF) { $env:ASTRORDER_BUF } else { 'buf
 $go = Resolve-Tool $(if ($env:ASTRORDER_GO) { $env:ASTRORDER_GO } else { 'go' })
 $protocGenGo = Resolve-Tool $(if ($env:ASTRORDER_PROTOC_GEN_GO) { $env:ASTRORDER_PROTOC_GEN_GO } else { 'protoc-gen-go' })
 $protocGenGoGrpc = Resolve-Tool $(if ($env:ASTRORDER_PROTOC_GEN_GO_GRPC) { $env:ASTRORDER_PROTOC_GEN_GO_GRPC } else { 'protoc-gen-go-grpc' })
-$goOnlyRaw = if ($env:ASTRORDER_GO_ONLY) { $env:ASTRORDER_GO_ONLY } else { '1' }
-if ($goOnlyRaw -notin @('0', '1')) {
-    throw 'ASTRORDER_GO_ONLY must be 0 or 1.'
-}
-$goOnly = $goOnlyRaw -eq '1'
-$python = $null
-if (-not $goOnly) {
-    $python = Resolve-Tool $(if ($env:ASTRORDER_GRPC_TOOLS_PYTHON) { $env:ASTRORDER_GRPC_TOOLS_PYTHON } else { 'python' })
-}
 $outputRoot = if ($env:ASTRORDER_GO_OUTPUT_DIR) {
     [IO.Path]::GetFullPath($env:ASTRORDER_GO_OUTPUT_DIR)
 }
@@ -135,19 +125,6 @@ try {
     $env:ASTRORDER_BUF = $buf
     $env:ASTRORDER_PROTOC_GEN_GO = $protocGenGo
     $env:ASTRORDER_PROTOC_GEN_GO_GRPC = $protocGenGoGrpc
-    if ($goOnly) {
-        $env:ASTRORDER_GENERATE_PYTHON = '0'
-    }
-    else {
-        Invoke-Native 'Python grpcio/grpcio-tools version check' $contractsDir $python @(
-            '-c',
-            "import grpc, importlib.metadata; assert grpc.__version__ == '$ExpectedGrpcToolsVersion', grpc.__version__; assert importlib.metadata.version('grpcio-tools') == '$ExpectedGrpcToolsVersion', importlib.metadata.version('grpcio-tools')"
-        )
-        $env:ASTRORDER_GENERATE_PYTHON = '1'
-        $env:ASTRORDER_GRPC_TOOLS_PYTHON = $python
-        $env:ASTRORDER_INTEROP_PYTHON = $python
-    }
-
     Invoke-Native 'Buf lint' $contractsDir $buf @('lint')
     Invoke-Native 'Buf descriptor build' $contractsDir $buf @('build')
     Invoke-Native 'Contract tests and deterministic generation' $contractsDir $go @('test', './...', '-count=1')

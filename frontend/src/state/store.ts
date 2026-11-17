@@ -5,6 +5,7 @@ import type {
   Agent,
   Approval,
   BootstrapPayload,
+  BotGroup,
   Command,
   CommandState,
   ConnectionStatus,
@@ -26,10 +27,15 @@ export interface AstrorderStore {
   messages: Record<string, Record<string, Message>>
   messageRevision: number
   messageEventRevisions: Record<string, Record<string, number>>
+  messageCatchUps: Record<string, Record<string, string>>
+  messageStreams: Record<string, Record<string, true>>
   commands: Record<string, Command>
   tasks: Record<string, Task>
   approvals: Record<string, Approval>
   notifications: Record<string, EventNotification>
+  botGroups: Record<string, BotGroup>
+  botGroupRevision: number
+  botGroupEventRevisions: Record<string, number>
   outbox: Record<string, OutboxEntry>
   drafts: Record<string, DraftState>
   liveActivityAt: Record<string, number>
@@ -39,11 +45,12 @@ export interface AstrorderStore {
   resyncRequired: boolean
   setConnection: (connection: ConnectionStatus) => void
   hydrateBootstrap: (payload: BootstrapPayload) => void
-  mergeMessages: (agentId: string, sessionId: string, items: Message[]) => void
-  mergeMessagesPrepend: (agentId: string, sessionId: string, items: Message[]) => void
+  mergeMessages: (agentId: string, sessionId: string, items: Message[], ahead?: Record<string, string>) => void
+  mergeMessagesPrepend: (agentId: string, sessionId: string, items: Message[], ahead?: Record<string, string>) => void
   mergeCommands: (items: Command[]) => void
   mergeTasks: (items: Task[]) => void
   addNotification: (notification: EventNotification) => boolean
+  hydrateBotGroups: (items: BotGroup[], revisionAtRequest: number) => void
   addOutbox: (command: Command, status?: OutboxStatus) => void
   updateOutboxAttachments: (
     agentId: string,
@@ -60,6 +67,7 @@ markOutboxError: (
     status?: OutboxStatus,
   ) => void
   applyEvent: (event: EventEnvelope) => void
+  applyMessageDeltas: (events: EventEnvelope[]) => void
   setDraft: (agentId: string, sessionId: string, draft: DraftState) => void
   setDraftText: (agentId: string, sessionId: string, text: string) => void
   updateSession: (agentId: string, sessionId: string, patch: Partial<Session>) => void
@@ -118,6 +126,90 @@ function taskKey(task: Task): string {
 
 function messageMap(items: Message[]): Record<string, Message> {
   return Object.fromEntries(items.map((item) => [item.id, visibleHermesMessage(item)]))
+}
+
+function historyCatchUps(state: AstrorderStore, key: string, items: Message[], ahead: Record<string, string> = {}) {
+  const pending = { ...state.messageCatchUps[key] }
+  const current = state.messages[key] || {}
+  for (const item of items) {
+    const previous = current[item.id]
+    if (ahead[item.id] !== undefined) {
+      pending[item.id] = (pending[item.id] || '') + ahead[item.id]
+    } else if (pending[item.id] && previous) {
+      if (item.text.startsWith(previous.text)) pending[item.id] += item.text.slice(previous.text.length)
+      else delete pending[item.id]
+    }
+  }
+  if (Object.keys(pending).length) return { ...state.messageCatchUps, [key]: pending }
+  const result = { ...state.messageCatchUps }
+  delete result[key]
+  return result
+}
+
+function liveMessageUpdate(state: AstrorderStore, event: EventEnvelope): Partial<AstrorderStore> | null {
+  let message = event.data as unknown as Message
+  if (!message.id || !message.session_id || !message.agent_id) return null
+  const key = scopeKey(message.agent_id, message.session_id)
+  const previous = state.messages[key]?.[message.id]
+  const originalPending = state.messageCatchUps[key]?.[message.id]
+  let pending = originalPending
+  if (previous && event.type === 'message.upsert' && !message.text && !state.messageEventRevisions[key]?.[message.id]
+    && message.role === 'assistant' && previous.role === 'assistant' && previous.text) {
+    pending = previous.text
+  }
+  let messageCatchUps = state.messageCatchUps
+  let consumedCatchUp = false
+  if (previous && event.type === 'message.delta') {
+    let text = previous.text + message.text
+    if (pending) {
+      if (pending.startsWith(message.text)) {
+        text = previous.text
+        pending = pending.slice(message.text.length)
+        consumedCatchUp = true
+      } else if (message.text.startsWith(pending)) {
+        text = previous.text + message.text.slice(pending.length)
+        pending = ''
+      } else {
+        text = previous.text.slice(0, -pending.length) + message.text
+        pending = ''
+      }
+    }
+    message = { ...previous, ...message, text, created_at: previous.created_at, command_id: message.command_id || previous.command_id }
+  } else if (previous && pending && event.type === 'message.upsert') {
+    if (!message.text) {
+      message = { ...message, text: previous.text }
+      consumedCatchUp = true
+    } else {
+      pending = ''
+    }
+  }
+  if (originalPending !== pending) {
+    const scope = { ...state.messageCatchUps[key] }
+    if (pending) scope[message.id] = pending
+    else delete scope[message.id]
+    messageCatchUps = { ...state.messageCatchUps }
+    if (Object.keys(scope).length) messageCatchUps[key] = scope
+    else delete messageCatchUps[key]
+  }
+  if (previous && message.timestamp_source !== 'native') {
+    message = { ...message, created_at: previous.created_at, timestamp_source: previous.timestamp_source, completed_at: previous.completed_at, turn_id: message.turn_id || previous.turn_id }
+  }
+  const current = Object.values(state.messages[key] || {})
+  const merged = mergeMessagesById(current, [message])
+  const streams = { ...state.messageStreams[key] }
+  if (event.type === 'message.delta' || (message.role === 'assistant' && (!message.text || pending))) streams[message.id] = true
+  else delete streams[message.id]
+  const messageStreams = { ...state.messageStreams }
+  if (Object.keys(streams).length) messageStreams[key] = streams
+  else delete messageStreams[key]
+  return {
+    messages: { ...state.messages, [key]: messageMap(merged) },
+    messageRevision: state.messageRevision + 1,
+    messageEventRevisions: { ...state.messageEventRevisions, [key]: { ...state.messageEventRevisions[key], [message.id]: state.messageRevision + 1 } },
+    messageCatchUps,
+    messageStreams,
+    liveActivityAt: message.tool?.background === true || consumedCatchUp ? state.liveActivityAt : touchLiveActivity(state.liveActivityAt, key),
+  }
 }
 
 function mergeCommandIntoState(
@@ -194,10 +286,15 @@ export const useAstrorderStore = create<AstrorderStore>((set) => ({
   messages: {},
   messageRevision: 0,
   messageEventRevisions: {},
+  messageCatchUps: {},
+  messageStreams: {},
   commands: {},
   tasks: {},
   approvals: {},
   notifications: {},
+  botGroups: {},
+  botGroupRevision: 0,
+  botGroupEventRevisions: {},
   outbox: {},
   drafts: {},
   liveActivityAt: {},
@@ -240,15 +337,15 @@ export const useAstrorderStore = create<AstrorderStore>((set) => ({
       }
     }),
 
-  mergeMessages: (agentId, sessionId, items) =>
+  mergeMessages: (agentId, sessionId, items, ahead) =>
     set((state) => {
       const key = scopeKey(agentId, sessionId)
       const current = Object.values(state.messages[key] || {})
       const merged = mergeMessagesById(current, items)
-      return { messages: { ...state.messages, [key]: messageMap(merged) } }
+      return { messages: { ...state.messages, [key]: messageMap(merged) }, messageCatchUps: historyCatchUps(state, key, items, ahead) }
     }),
 
-  mergeMessagesPrepend: (agentId, sessionId, items) =>
+  mergeMessagesPrepend: (agentId, sessionId, items, ahead) =>
     set((state) => {
       const key = scopeKey(agentId, sessionId)
       const current = Object.values(state.messages[key] || {})
@@ -263,7 +360,7 @@ export const useAstrorderStore = create<AstrorderStore>((set) => ({
         }
       }
       const merged = [...prepended, ...current.map((item) => incoming.get(item.id) || item)]
-      return { messages: { ...state.messages, [key]: messageMap(merged) } }
+      return { messages: { ...state.messages, [key]: messageMap(merged) }, messageCatchUps: historyCatchUps(state, key, items, ahead) }
     }),
 
   mergeCommands: (items) =>
@@ -284,6 +381,18 @@ export const useAstrorderStore = create<AstrorderStore>((set) => ({
       for (const task of items) tasks[taskKey(task)] = { ...tasks[taskKey(task)], ...task }
       return { tasks }
     }),
+
+  hydrateBotGroups: (items, revisionAtRequest) => set((state) => {
+    const next = Object.fromEntries(items.map((group) => [group.id, group]))
+    // A snapshot requested before a live update must not overwrite that update
+    // or resurrect a group deleted while the request was in flight.
+    for (const [id, revision] of Object.entries(state.botGroupEventRevisions)) {
+      if (revision <= revisionAtRequest) continue
+      if (state.botGroups[id]) next[id] = state.botGroups[id]
+      else delete next[id]
+    }
+    return { botGroups: next }
+  }),
 
   addNotification: (notification) => {
     let added = false
@@ -354,6 +463,21 @@ export const useAstrorderStore = create<AstrorderStore>((set) => ({
         return { ...base, resyncRequired: true }
       }
 
+      if (event.type === 'bot_group.upsert') {
+        const group = event.data as unknown as BotGroup
+        if (!group.id) return base
+        const revision = state.botGroupRevision + 1
+        return { ...base, botGroups: { ...state.botGroups, [group.id]: group }, botGroupRevision: revision, botGroupEventRevisions: { ...state.botGroupEventRevisions, [group.id]: revision } }
+      }
+      if (event.type === 'bot_group.delete') {
+        const id = event.data.id
+        const botGroups = { ...state.botGroups }
+        if (typeof id !== 'string') return base
+        delete botGroups[id]
+        const revision = state.botGroupRevision + 1
+        return { ...base, botGroups, botGroupRevision: revision, botGroupEventRevisions: { ...state.botGroupEventRevisions, [id]: revision } }
+      }
+
       if (event.type === 'agent.upsert') {
         const agent = event.data as unknown as Agent
         if (!agent.id) return base
@@ -416,25 +540,7 @@ export const useAstrorderStore = create<AstrorderStore>((set) => ({
       }
 
       if (event.type === 'message.upsert' || event.type === 'message.delta') {
-        let message = event.data as unknown as Message
-        if (!message.id || !message.session_id || !message.agent_id) return base
-        const key = scopeKey(message.agent_id, message.session_id)
-        const previous = state.messages[key]?.[message.id]
-        if (event.type === 'message.delta' && previous) {
-          message = { ...previous, ...message, text: previous.text + message.text, created_at: previous.created_at, command_id: message.command_id || previous.command_id }
-        }
-        if (previous && message.timestamp_source !== 'native') {
-          message = { ...message, created_at: previous.created_at, timestamp_source: previous.timestamp_source, completed_at: previous.completed_at, turn_id: message.turn_id || previous.turn_id }
-        }
-        const current = Object.values(state.messages[key] || {})
-        const merged = mergeMessagesById(current, [message])
-        return {
-          ...base,
-          messages: { ...state.messages, [key]: messageMap(merged) },
-          messageRevision: state.messageRevision + 1,
-          messageEventRevisions: { ...state.messageEventRevisions, [key]: { ...state.messageEventRevisions[key], [message.id]: state.messageRevision + 1 } },
-          liveActivityAt: message.tool?.background === true ? state.liveActivityAt : touchLiveActivity(state.liveActivityAt, key),
-        }
+        return { ...base, ...liveMessageUpdate(state, event) }
       }
 
       if (event.type === 'command.upsert') {
@@ -466,6 +572,48 @@ export const useAstrorderStore = create<AstrorderStore>((set) => ({
       return base
     }),
 
+  applyMessageDeltas: (events) =>
+    set((state) => {
+      const seen = new Set(Object.keys(state.seenEventIds))
+      const groups = new Map<string, { event: EventEnvelope; fragments: string[] }>()
+      let received = false
+      for (const event of events) {
+        const eventKey = JSON.stringify([event.agent_id, event.id])
+        if (seen.has(eventKey)) continue
+        seen.add(eventKey)
+        received = true
+        const message = event.data as unknown as Message
+        if (!message.id || !message.agent_id || !message.session_id) continue
+        const key = JSON.stringify([message.agent_id, message.session_id, message.id])
+        const group = groups.get(key)
+        if (!group) {
+          groups.set(key, { event, fragments: [message.text] })
+          continue
+        }
+        const previous = group.event.data
+        const data = { ...previous, ...event.data }
+        if (data.timestamp_source !== 'native') {
+          data.created_at = previous.created_at
+          data.timestamp_source = previous.timestamp_source
+          data.completed_at = previous.completed_at
+        }
+        data.command_id = data.command_id || previous.command_id
+        data.turn_id = data.turn_id || previous.turn_id
+        group.event = { ...group.event, data }
+        group.fragments.push(message.text)
+      }
+      if (!received) return state
+      let next = state
+      for (const { event, fragments } of groups.values()) {
+        const update = liveMessageUpdate(next, { ...event, data: { ...event.data, text: fragments.join('') } })
+        if (update) next = { ...next, ...update }
+      }
+      return {
+        ...next,
+        seenEventIds: Object.fromEntries([...seen].slice(-MAX_SEEN_EVENT_IDS).map(id => [id, true])),
+      }
+    }),
+
   setDraft: (agentId, sessionId, draft) =>
     set((state) => ({ drafts: { ...state.drafts, [scopeKey(agentId, sessionId)]: draft } })),
 
@@ -492,10 +640,15 @@ export const useAstrorderStore = create<AstrorderStore>((set) => ({
       messages: {},
       messageRevision: 0,
       messageEventRevisions: {},
+      messageCatchUps: {},
+      messageStreams: {},
       commands: {},
       tasks: {},
       approvals: {},
       notifications: {},
+      botGroups: {},
+      botGroupRevision: 0,
+      botGroupEventRevisions: {},
       outbox: {},
       drafts: {},
       liveActivityAt: {},

@@ -6,7 +6,7 @@ import {
   IconFileText,
 } from '@tabler/icons-react'
 import { Anchor } from '@mantine/core'
-import { isValidElement, useEffect, useRef, useState, type ReactNode } from 'react'
+import { isValidElement, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { Session } from '../domain/types'
@@ -17,6 +17,10 @@ import { useSidecarStore } from '../features/sidecar/sidecarStore'
 import { useAstrorderStore } from '../state/store'
 import { renderMermaid } from './renderMermaid'
 import { CodexVisualization, extractVisualizations } from './CodexVisualization'
+import { MarkdownLinkMenu, type MarkdownLinkMenuTarget } from './MarkdownLinkMenu'
+import { FileSourceContext } from '../features/sidecar/FileSourceContext'
+import { GroupFileLink } from './GroupFileLink'
+import { findGroupFile } from '../features/chat/groupFileSources'
 
 function MermaidDiagram({ code }: { code: string }) {
   const [svg, setSvg] = useState('')
@@ -108,10 +112,12 @@ function cleanHref(raw: string | undefined): string {
   if (cleaned.startsWith('<') && cleaned.endsWith('>')) {
     cleaned = cleaned.slice(1, -1).trim()
   }
-  if (cleaned.startsWith('file:///')) {
-    cleaned = cleaned.slice(8)
-  } else if (cleaned.startsWith('file://')) {
-    cleaned = cleaned.slice(7)
+  if (/^file:\/\//i.test(cleaned)) {
+    const fileUrl = new URL(cleaned)
+    cleaned = fileUrl.hostname && fileUrl.hostname !== 'localhost'
+      ? `//${fileUrl.hostname}${fileUrl.pathname}`
+      : fileUrl.pathname
+    if (/^\/[a-zA-Z]:[/\\]/.test(cleaned)) cleaned = cleaned.slice(1)
   }
   return cleaned
 }
@@ -133,6 +139,13 @@ function isLocalPath(path: string): boolean {
   return artifactViewerRegistry.isSupportedExtension(path) || isNonPreviewableFile(path)
 }
 
+function isFileLink(raw: string | undefined, cleaned: string): boolean {
+  if (!raw || !cleaned) return false
+  if (/^file:\/\//i.test(raw) || /^[a-zA-Z]:(?:[/\\]|%2f|%5c)/i.test(cleaned)) return true
+  if (/^(?:[a-z][a-z\d+.-]*:|\/\/|\/api\/|#)/i.test(cleaned)) return false
+  return true
+}
+
 function safeUrl(value: string | undefined): string | undefined {
   if (!value) return undefined
   const cleaned = cleanHref(value)
@@ -149,7 +162,7 @@ function artifactSuffixes(match: string): string[] {
   return [match, ...Array.from(match.matchAll(/ +/g), (space) => match.slice(space.index! + space[0].length))]
 }
 
-function autoLinkArtifacts(text: string, rootFiles: Set<string> | null, checkedPaths: Set<string> | null): string {
+function autoLinkArtifacts(text: string, rootFiles: Set<string> | null, checkedPaths: Set<string> | null, knownArtifact?: (path: string) => boolean): string {
   const extRegex = artifactViewerRegistry.getExtensionPattern()
   const lines = text.split('\n')
   let inCodeBlock = false
@@ -165,7 +178,7 @@ function autoLinkArtifacts(text: string, rootFiles: Set<string> | null, checkedP
     let step = line.replace(/`([^`\r\n]+)`/g, (match, raw) => {
       const trimmed = String(raw).trim()
       if ((artifactViewerRegistry.isSupportedExtension(trimmed) || isNonPreviewableFile(trimmed)) &&
-          (/[\\/]/.test(trimmed) || rootFiles?.has(trimmed))) {
+          (/[\\/]/.test(trimmed) || rootFiles?.has(trimmed) || knownArtifact?.(trimmed))) {
         return `[${trimmed}](<${trimmed}>)`
       }
       return match
@@ -191,7 +204,7 @@ function autoLinkArtifacts(text: string, rootFiles: Set<string> | null, checkedP
       const charAfter = offset + match.length < fullStr.length ? fullStr[offset + match.length] : ''
       if (charBefore === '`' || charAfter === '`') return match
       const target = artifactSuffixes(fileName).find((candidate) =>
-        /[\\/]/.test(candidate) ? checkedPaths?.has(candidate) : rootFiles?.has(candidate))
+        knownArtifact?.(candidate) || (/[\\/]/.test(candidate) ? checkedPaths?.has(candidate) : rootFiles?.has(candidate)))
       if (!target) return match
 
       return `${fileName.slice(0, fileName.length - target.length)}[${target}](<${target}>)`
@@ -213,12 +226,14 @@ export function MarkdownContent({
   onImageClick?: (url: string) => void
   session?: Session | null
 }) {
+  const fileSourceScope = useContext(FileSourceContext)
   const defaultSession = useAstrorderStore((state) => Object.values(state.sessions)[0] as Session | undefined)
-  const currentSession = session || defaultSession
+  const currentSession = session === undefined ? defaultSession : session
   const openArtifact = useSidecarStore((state) => state.openArtifact)
-  const rootKey = session?.workspace ? JSON.stringify([session.id, session.workspace, session.connection_id]) : ''
+  const rootKey = !fileSourceScope && session?.workspace ? JSON.stringify([session.id, session.workspace, session.connection_id]) : ''
   const [rootFiles, setRootFiles] = useState<{ key: string; names: Set<string> } | null>(null)
   const [checkedPaths, setCheckedPaths] = useState<{ key: string; names: Set<string> } | null>(null)
+  const [linkMenu, setLinkMenu] = useState<MarkdownLinkMenuTarget | null>(null)
   const extRegex = artifactViewerRegistry.getExtensionPattern()
   const pathKey = JSON.stringify([...new Set(
     Array.from(value.matchAll(new RegExp(extRegex.source, 'gi')))
@@ -274,10 +289,11 @@ export function MarkdownContent({
     visualizations.text,
     rootFiles?.key === rootKey && rootKey ? rootFiles.names : null,
     checkedPaths?.key === checkKey && rootKey ? checkedPaths.names : null,
+    fileSourceScope ? (path) => Boolean(findGroupFile(fileSourceScope.files, path)) : undefined,
   )
 
   const resolvePathWithWorkspace = (raw: string): string => {
-    const unquoted = decodeURIComponent(raw.trim().replace(/^<|>$/g, ''))
+    const unquoted = raw.trim().replace(/^<|>$/g, '')
     if (/^https?:\/\//i.test(unquoted)) {
       try {
         const u = new URL(unquoted)
@@ -286,17 +302,24 @@ export function MarkdownContent({
         return unquoted
       }
     }
-    if (currentSession?.workspace && !/^[a-zA-Z]:[/\\]/.test(unquoted) && !unquoted.startsWith('/')) {
+    const decoded = decodeURIComponent(unquoted.replace(/%(?![\da-f]{2})/gi, '%25'))
+    if (currentSession?.workspace && !/^[a-zA-Z]:[/\\]/.test(decoded) && !decoded.startsWith('/') && !decoded.startsWith('\\\\')) {
       const sep = currentSession.workspace.includes('\\') ? '\\' : '/'
-      return `${currentSession.workspace}${sep}${unquoted}`
+      return `${currentSession.workspace}${sep}${decoded}`
     }
-    return unquoted
+    return decoded
+  }
+
+  const openLinkMenu = (event: React.MouseEvent, kind: 'url' | 'file', value: string) => {
+    event.preventDefault()
+    event.stopPropagation()
+    setLinkMenu({ x: event.clientX, y: event.clientY, kind, value })
   }
 
   const handleOpenLocalFile = async (path: string) => {
     const fullPath = resolvePathWithWorkspace(path)
     if (currentSession) {
-      const artifact = resolveArtifactFromPath(fullPath, currentSession)
+      const artifact = resolveArtifactFromPath(fullPath.replace(/%/g, '%25'), currentSession)
       const viewer = artifactViewerRegistry.findViewer(artifact)
       if (viewer) {
         openArtifact(artifact, viewer.id)
@@ -325,9 +348,17 @@ export function MarkdownContent({
           a: (props) => {
             const { href, children, ...rest } = props
             const cleaned = cleanHref(href)
+            const httpUrl = /^https?:\/\//i.test(cleaned)
+            if (fileSourceScope && !httpUrl && isFileLink(href, cleaned)) {
+              return findGroupFile(fileSourceScope.files, cleaned)
+                ? <GroupFileLink href={cleaned} onImageClick={onImageClick}>{children}</GroupFileLink>
+                : <span title={fileSourceScope.checking ? '文件正在核验' : '文件来源尚未核验'}>{children}</span>
+            }
 
-            if (isLocalPath(cleaned)) {
+            if ((httpUrl && isLocalPath(cleaned)) || isFileLink(href, cleaned)) {
               const fullPath = resolvePathWithWorkspace(cleaned)
+              const menuTarget = httpUrl ? cleaned : fullPath
+              const menuKind = httpUrl ? 'url' : 'file'
               if (isImagePath(cleaned)) {
                 const query = new URLSearchParams({ path: fullPath })
                 if (currentSession?.id) query.set('session_id', currentSession.id)
@@ -341,6 +372,7 @@ export function MarkdownContent({
                       if (onImageClick) onImageClick(rawUrl)
                       else window.open(rawUrl, '_blank')
                     }}
+                    onContextMenu={(event) => openLinkMenu(event, menuKind, menuTarget)}
                     title={`预览图片：${cleaned}`}
                   >
                     <IconEye size={13} aria-hidden="true" />
@@ -350,7 +382,7 @@ export function MarkdownContent({
               }
 
               // 委托注册表：动态获取匹配的 Viewer 及其自声明图标与标签
-              const dummyArtifact = currentSession ? resolveArtifactFromPath(fullPath, currentSession) : null
+              const dummyArtifact = currentSession ? resolveArtifactFromPath(fullPath.replace(/%/g, '%25'), currentSession) : null
               const matchedViewer = dummyArtifact ? artifactViewerRegistry.findViewer(dummyArtifact) : null
 
               const Icon = matchedViewer ? matchedViewer.icon : IconFileText
@@ -364,7 +396,8 @@ export function MarkdownContent({
                 <button
                   type="button"
                   className={linkClass}
-                  onClick={() => void handleOpenLocalFile(fullPath)}
+                  onClick={() => void handleOpenLocalFile(cleaned)}
+                  onContextMenu={(event) => openLinkMenu(event, menuKind, menuTarget)}
                   title={actionTitle}
                 >
                   <Icon size={13} aria-hidden="true" />
@@ -378,7 +411,7 @@ export function MarkdownContent({
             if (!safe) return <>{children}</>
 
             // 如果链接是 http/https 但指向注册插件所支持的扩展名，由注册表动态决策拦截
-            const isArtifactUrl = artifactViewerRegistry.isSupportedExtension(safe)
+            const isArtifactUrl = httpUrl && artifactViewerRegistry.isSupportedExtension(safe)
             if (isArtifactUrl && currentSession) {
               const dummy = resolveArtifactFromPath(safe, currentSession)
               const matched = artifactViewerRegistry.findViewer(dummy)
@@ -390,6 +423,7 @@ export function MarkdownContent({
                   type="button"
                   className="markdown-local-link markdown-file-link"
                   onClick={() => void handleOpenLocalFile(safe)}
+                  onContextMenu={(event) => openLinkMenu(event, 'url', safe)}
                   title={`在工作台打开：${safe}`}
                 >
                   <Icon size={13} aria-hidden="true" />
@@ -406,6 +440,7 @@ export function MarkdownContent({
                 href={safe}
                 target={external ? '_blank' : undefined}
                 rel={external ? 'noreferrer' : undefined}
+                onContextMenu={httpUrl ? (event) => openLinkMenu(event, 'url', cleaned) : undefined}
               >
                 {children}
                 {external && <IconExternalLink className="markdown-external-icon" size={13} aria-hidden="true" />}
@@ -417,26 +452,36 @@ export function MarkdownContent({
             const isFile = /^[a-zA-Z]:[/\\]/.test(cleaned) || (
               !/^(?:[a-z][a-z\d+.-]*:|\/\/|\/api\/|#)/i.test(cleaned) && isLocalPath(cleaned)
             )
+            if (fileSourceScope && isFile) {
+              return findGroupFile(fileSourceScope.files, cleaned)
+                ? <GroupFileLink href={cleaned} image={props.alt || '图片'} onImageClick={onImageClick} />
+                : <span title={fileSourceScope.checking ? '图片正在核验' : '图片来源尚未核验'}>{props.alt || '图片'}</span>
+            }
             let src = safeUrl(cleaned)
+            let filePath = ''
             if (isFile) {
               const fullPath = resolvePathWithWorkspace(cleaned)
+              filePath = fullPath
               const query = new URLSearchParams({ path: fullPath })
               if (currentSession?.id) query.set('session_id', currentSession.id)
               if (currentSession?.connection_id) query.set('connection_id', currentSession.connection_id)
               src = `/api/v1/files/raw?${query.toString()}`
             }
             if (!src) return null
+            const menuKind = isFile ? 'file' : /^https?:\/\//i.test(cleaned) ? 'url' : null
+            const onContextMenu = menuKind ? (event: React.MouseEvent) => openLinkMenu(event, menuKind, isFile ? filePath : cleaned) : undefined
             return onImageClick ? (
               <button
                 type="button"
                 className="markdown-image-button"
                 onClick={() => onImageClick(src)}
+                onContextMenu={onContextMenu}
                 aria-label={`放大图片：${props.alt || ''}`}
               >
                 <img src={src} alt={props.alt || ''} loading="lazy" />
               </button>
             ) : (
-              <img src={src} alt={props.alt || ''} loading="lazy" />
+              <img src={src} alt={props.alt || ''} loading="lazy" onContextMenu={onContextMenu} />
             )
           },
           table: (props) => <div className="markdown-table-wrap"><table>{props.children}</table></div>,
@@ -445,6 +490,7 @@ export function MarkdownContent({
       >
         {normalizedValue}
       </ReactMarkdown>
+      {linkMenu && <MarkdownLinkMenu target={linkMenu} session={session} onClose={() => setLinkMenu(null)} />}
       {visualizations.paths.map(path => <CodexVisualization key={path} path={path} session={currentSession} />)}
     </div>
   )

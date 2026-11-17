@@ -4,6 +4,7 @@ import { IconAlertTriangle, IconCheck, IconClockCheck, IconHandStop } from '@tab
 import { notifications } from '@mantine/notifications'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../../api/client'
+import { ComposerGlassMenu, GlassButtonLens } from '../../components/GlassPanel'
 import type { ApprovalMode, Session } from '../../domain/types'
 
 export interface ApprovalModeItem {
@@ -196,13 +197,14 @@ export function ApprovalModeControl({
           aria-label={`当前审批模式：${activeItem.label}`}
           title={`审批模式：${activeItem.label}（点击切换）`}
         >
+          <GlassButtonLens />
           <ActiveIcon size={14} className="approval-mode-capsule-icon" />
           <span className="approval-mode-capsule-label">{activeItem.capsuleLabel}</span>
         </button>
       </Popover.Target>
 
       <Popover.Dropdown className="approval-mode-dropdown">
-        {options}
+        <ComposerGlassMenu active={opened}>{options}</ComposerGlassMenu>
       </Popover.Dropdown>
     </Popover>
   )

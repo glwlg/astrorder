@@ -34,6 +34,7 @@ func main() {
 	check := flag.Bool("check", false, "validate configuration and embedded React assets without opening a window")
 	smoke := flag.String("smoke-report", "", "write a GUI startup report and exit; development verification only")
 	packaged := flag.Bool("packaged", defaultPackaged == "true", "run as packaged desktop app")
+	notification := flag.String("notification", "", "open a notification in this desktop installation")
 	flag.Parse()
 
 	if *packaged && *smoke != "" {
@@ -51,7 +52,7 @@ func main() {
 
 	if *check {
 		_ = json.NewEncoder(os.Stdout).Encode(ShellInfo{
-			Framework:         "Wails v3.0.0-beta.28",
+			Framework:         desktopFramework,
 			BackendConfigured: cfg.Backend != nil,
 			StateDir:          cfg.StateDir,
 			KernelManagement:  ctlErr == nil,
@@ -95,6 +96,7 @@ func main() {
 			UniqueID: fmt.Sprintf("com.astrorder.desktop.%x", sha256.Sum256([]byte(strings.ToLower(cfg.StateDir)))),
 			OnSecondInstanceLaunch: func(data application.SecondInstanceData) {
 				if service.window != nil {
+					service.openNotificationFromArgs(data.Args)
 					service.window.Restore()
 					service.window.Show().Focus()
 				}
@@ -111,6 +113,12 @@ func main() {
 	// The smoke run loads the real React entry; the injected desktop bridge
 	// calls ReportReady once the generated bindings resolve.
 	startURL := "/"
+	if *notification != "" {
+		startURL, err = notificationPathFromURL(*notification, cfg.StateDir)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
 
 	service.window = app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:           "main",
@@ -161,7 +169,7 @@ func main() {
 					service.showError("星序启动失败", err)
 					return
 				}
-				service.window.SetURL("/")
+				service.window.SetURL(startURL)
 			}()
 		})
 	}

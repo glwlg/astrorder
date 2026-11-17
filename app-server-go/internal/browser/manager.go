@@ -16,15 +16,19 @@ import (
 
 // SessionManager manages CDP sessions, tabs, and tab state locks.
 type SessionManager struct {
-	devToolsBase string
-	httpClient   *http.Client
-	endpoints    *CDPEndpoints
-	noAutoExec   bool
-	engineRunner func(context.Context, engineRequest) (engineResult, error)
+	devToolsBase  string
+	httpClient    *http.Client
+	endpoints     *CDPEndpoints
+	noAutoExec    bool
+	launchBrowser func(int) error
+	engineRunner  func(context.Context, engineRequest) (engineResult, error)
 
 	sessionMu      sync.RWMutex
 	targetMu       sync.Mutex               // protects ownership maps across different sessions
-	sessionLocks   map[string]*sync.Mutex   // lock per sessionKey
+	launchLock     chan struct{}            // serialize browser startup
+	extensionLock  chan struct{}            // serialize shared extension setup
+	sessionLocks   map[string]chan struct{} // serialize session operations
+	pageLocks      map[string]chan struct{} // serialize session page ownership
 	taskLocks      map[string]chan struct{} // serialize autonomous tasks per session
 	sessionTargets map[string][]string      // sessionKey -> list of targetIDs
 	sessionActive  map[string]string        // sessionKey -> active targetID
@@ -47,7 +51,11 @@ func NewSessionManager(devToolsBase string, noAutoExec bool) *SessionManager {
 		httpClient:     httpClient,
 		endpoints:      &CDPEndpoints{BaseURL: devToolsBase, HTTPClient: httpClient},
 		noAutoExec:     noAutoExec,
-		sessionLocks:   make(map[string]*sync.Mutex),
+		launchBrowser:  LaunchBrowserProcess,
+		launchLock:     make(chan struct{}, 1),
+		extensionLock:  make(chan struct{}, 1),
+		sessionLocks:   make(map[string]chan struct{}),
+		pageLocks:      make(map[string]chan struct{}),
 		taskLocks:      make(map[string]chan struct{}),
 		sessionTargets: make(map[string][]string),
 		sessionActive:  make(map[string]string),
@@ -67,26 +75,63 @@ func (m *SessionManager) getTaskLock(sessionKey string) chan struct{} {
 	return lock
 }
 
-// GetLock returns the lock for a specific sessionKey.
-func (m *SessionManager) getLock(sessionKey string) *sync.Mutex {
-	m.sessionMu.Lock()
-	defer m.sessionMu.Unlock()
-	l, ok := m.sessionLocks[sessionKey]
-	if !ok {
-		l = &sync.Mutex{}
-		m.sessionLocks[sessionKey] = l
+func (m *SessionManager) acquireLock(ctx context.Context, sessionKey string, page bool) (func(), error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
-	return l
+	m.sessionMu.Lock()
+	locks := m.sessionLocks
+	if page {
+		locks = m.pageLocks
+	}
+	lock := locks[sessionKey]
+	if lock == nil {
+		lock = make(chan struct{}, 1)
+		locks[sessionKey] = lock
+	}
+	m.sessionMu.Unlock()
+	return acquireBrowserLock(ctx, lock)
+}
+
+func acquireBrowserLock(ctx context.Context, lock chan struct{}) (func(), error) {
+	select {
+	case lock <- struct{}{}:
+		if err := ctx.Err(); err != nil {
+			<-lock
+			return nil, err
+		}
+		return func() { <-lock }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 // EnsureBrowser checks if CDP is reachable, or launches the browser if allowed.
 func (m *SessionManager) EnsureBrowser(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	_, err := m.endpoints.GetVersion(ctx)
 	if err == nil {
 		return nil
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if m.noAutoExec {
 		return fmt.Errorf("CDP 端口不可用，未允许自动启动: %w", err)
+	}
+
+	release, err := acquireBrowserLock(ctx, m.launchLock)
+	if err != nil {
+		return err
+	}
+	defer release()
+	if _, err := m.endpoints.GetVersion(ctx); err == nil {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 
 	// Try launching
@@ -97,7 +142,7 @@ func (m *SessionManager) EnsureBrowser(ctx context.Context) error {
 			port = p
 		}
 	}
-	if launchErr := LaunchBrowserProcess(port); launchErr != nil {
+	if launchErr := m.launchBrowser(port); launchErr != nil {
 		return fmt.Errorf("启动浏览器失败: %w", launchErr)
 	}
 
@@ -117,87 +162,8 @@ func (m *SessionManager) EnsureBrowser(ctx context.Context) error {
 	return errors.New("Edge 已启动，但 CDP 端口不可用")
 }
 
-// RecoverSessionTargets inspects existing pages via /json/list and recovers window.name tags.
-func (m *SessionManager) recoverSessionTargets(ctx context.Context, pages []PageTarget) {
-	m.targetMu.Lock()
-	defer m.targetMu.Unlock()
-	pageIDs := make(map[string]bool)
-	for _, p := range pages {
-		pageIDs[p.ID] = true
-	}
-
-	// Clean dead targets
-	for sKey, targets := range m.sessionTargets {
-		var alive []string
-		for _, tid := range targets {
-			if pageIDs[tid] {
-				alive = append(alive, tid)
-			}
-		}
-		if len(alive) == 0 {
-			delete(m.sessionTargets, sKey)
-			delete(m.sessionActive, sKey)
-		} else {
-			m.sessionTargets[sKey] = alive
-			if !pageIDs[m.sessionActive[sKey]] {
-				m.sessionActive[sKey] = alive[len(alive)-1]
-			}
-		}
-	}
-
-	known := make(map[string]bool)
-	for _, targets := range m.sessionTargets {
-		for _, tid := range targets {
-			known[tid] = true
-		}
-	}
-
-	for _, p := range pages {
-		if known[p.ID] || p.WebSocketDebuggerURL == "" {
-			continue
-		}
-		client, err := DialCDP(ctx, p.WebSocketDebuggerURL)
-		if err != nil {
-			continue
-		}
-		res, err := client.Call(ctx, "Runtime.evaluate", map[string]any{
-			"expression":    "window.name",
-			"returnByValue": true,
-		})
-		_ = client.Close()
-		if err != nil {
-			continue
-		}
-
-		var evalResult struct {
-			Result struct {
-				Value any `json:"value"`
-			} `json:"result"`
-		}
-		_ = json.Unmarshal(res, &evalResult)
-		strVal, _ := evalResult.Result.Value.(string)
-		if sKey, ok := MarkerSessionKey(strVal); ok && sKey != "" {
-			targets := m.sessionTargets[sKey]
-			already := false
-			for _, tid := range targets {
-				if tid == p.ID {
-					already = true
-					break
-				}
-			}
-			if !already {
-				targets = append(targets, p.ID)
-				m.sessionTargets[sKey] = targets
-			}
-			if m.sessionActive[sKey] == "" {
-				m.sessionActive[sKey] = p.ID
-			}
-		}
-	}
-}
-
 // NewPage creates a new browser page using Target.createTarget on browser websocket.
-func (m *SessionManager) newPage(ctx context.Context) (*PageTarget, error) {
+func (m *SessionManager) newPage(ctx context.Context) (_ *PageTarget, resultErr error) {
 	var ver *VersionInfo
 	ver, err := m.endpoints.GetVersion(ctx)
 	if err != nil {
@@ -218,11 +184,11 @@ func (m *SessionManager) newPage(ctx context.Context) (*PageTarget, error) {
 	if err != nil {
 		return nil, fmt.Errorf("connect browser cdp: %w", err)
 	}
-	defer browserConn.Close()
+	defer browserConn.CloseNow()
 
 	// Fixture-backed managers must never alter a real browser profile.
 	if !m.noAutoExec {
-		if err := ensureSessionExtension(ctx, browserConn, func(ctx context.Context) error {
+		if err := m.ensureSessionExtension(ctx, browserConn, func(ctx context.Context) error {
 			return m.enableExtensionDeveloperMode(ctx, browserConn)
 		}); err != nil {
 			return nil, err
@@ -240,6 +206,13 @@ func (m *SessionManager) newPage(ctx context.Context) (*PageTarget, error) {
 	if err := json.Unmarshal(res, &createResp); err != nil || createResp.TargetID == "" {
 		return nil, fmt.Errorf("invalid Target.createTarget response: %v", err)
 	}
+	defer func() {
+		if resultErr != nil {
+			if err := m.discardUnboundPage(ctx, createResp.TargetID); err != nil {
+				resultErr = errors.Join(resultErr, fmt.Errorf("清理新建浏览器标签页失败: %w", err))
+			}
+		}
+	}()
 
 	_, _ = browserConn.Call(ctx, "Target.activateTarget", map[string]any{"targetId": createResp.TargetID})
 
@@ -260,12 +233,18 @@ func (m *SessionManager) newPage(ctx context.Context) (*PageTarget, error) {
 	return nil, errors.New("Edge 已创建标签页，但未能连接")
 }
 
+func (m *SessionManager) discardUnboundPage(ctx context.Context, targetID string) error {
+	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	defer cancel()
+	return m.endpoints.ClosePage(cleanup, targetID)
+}
+
 func (m *SessionManager) tagPage(ctx context.Context, page *PageTarget, sessionKey string) error {
 	client, err := DialCDP(ctx, page.WebSocketDebuggerURL)
 	if err != nil {
 		return err
 	}
-	defer client.Close()
+	defer client.CloseNow()
 
 	marker := SessionMarker(sessionKey)
 	b, _ := json.Marshal(marker)
@@ -278,13 +257,25 @@ func (m *SessionManager) tagPage(ctx context.Context, page *PageTarget, sessionK
 
 // SessionPage resolves or creates the page target for sessionKey.
 func (m *SessionManager) SessionPage(ctx context.Context, sessionKey string, reset bool, create bool, targetID string) (*PageTarget, bool, error) {
-	pages, _ := m.endpoints.ListPages(ctx)
-	m.recoverSessionTargets(ctx, pages)
+	release, err := m.acquireLock(ctx, sessionKey, true)
+	if err != nil {
+		return nil, false, err
+	}
+	defer release()
+	if create {
+		if err := m.EnsureBrowser(ctx); err != nil {
+			return nil, false, err
+		}
+	}
+	pages, err := m.sessionPages(ctx, sessionKey, targetID)
+	if err != nil {
+		return nil, false, err
+	}
 
 	m.targetMu.Lock()
-	defer m.targetMu.Unlock()
 	targets := m.sessionTargets[sessionKey]
 	if targetID != "" && !ownsTarget(targets, targetID) {
+		m.targetMu.Unlock()
 		return nil, false, errors.New("指定的标签页不属于当前会话")
 	}
 	resolvedID := targetID
@@ -302,18 +293,27 @@ func (m *SessionManager) SessionPage(ctx context.Context, sessionKey string, res
 
 	if existing != nil && !reset {
 		m.sessionActive[sessionKey] = existing.ID
+		m.targetMu.Unlock()
 		return existing, false, nil
 	}
+	m.targetMu.Unlock()
 
 	if existing != nil {
-		_ = m.endpoints.ClosePage(ctx, existing.ID)
+		if err := m.endpoints.ClosePage(ctx, existing.ID); err != nil {
+			return nil, false, fmt.Errorf("关闭浏览器标签页失败: %w", err)
+		}
+		m.targetMu.Lock()
 		var kept []string
-		for _, tid := range targets {
+		for _, tid := range m.sessionTargets[sessionKey] {
 			if tid != existing.ID {
 				kept = append(kept, tid)
 			}
 		}
 		m.sessionTargets[sessionKey] = kept
+		if m.sessionActive[sessionKey] == existing.ID {
+			delete(m.sessionActive, sessionKey)
+		}
+		m.targetMu.Unlock()
 		m.screenMu.Lock()
 		delete(m.screenshots, sessionKey)
 		delete(m.screenshots, sessionKey+"::"+existing.ID)
@@ -323,6 +323,9 @@ func (m *SessionManager) SessionPage(ctx context.Context, sessionKey string, res
 	if !create {
 		return nil, false, errors.New("该会话还没有浏览器标签页")
 	}
+	if targetID != "" && existing == nil {
+		return nil, false, errors.New("指定的浏览器标签页已关闭")
+	}
 
 	page, err := m.newPage(ctx)
 	if err != nil {
@@ -330,22 +333,24 @@ func (m *SessionManager) SessionPage(ctx context.Context, sessionKey string, res
 	}
 
 	if err := m.tagPage(ctx, page, sessionKey); err != nil {
-		_ = m.endpoints.ClosePage(ctx, page.ID)
-		return nil, false, fmt.Errorf("bind browser session: %w", err)
+		bindErr := fmt.Errorf("bind browser session: %w", err)
+		if cleanupErr := m.discardUnboundPage(ctx, page.ID); cleanupErr != nil {
+			bindErr = errors.Join(bindErr, fmt.Errorf("清理新建浏览器标签页失败: %w", cleanupErr))
+		}
+		return nil, false, bindErr
 	}
-	targets = m.sessionTargets[sessionKey]
-	already := false
-	for _, tid := range targets {
-		if tid == page.ID {
-			already = true
-			break
+	m.targetMu.Lock()
+	for owner, owned := range m.sessionTargets {
+		if owner != sessionKey && ownsTarget(owned, page.ID) {
+			m.targetMu.Unlock()
+			return nil, false, errors.New("浏览器标签页已属于其他会话")
 		}
 	}
-	if !already {
-		targets = append(targets, page.ID)
-		m.sessionTargets[sessionKey] = targets
+	if !ownsTarget(m.sessionTargets[sessionKey], page.ID) {
+		m.sessionTargets[sessionKey] = append(m.sessionTargets[sessionKey], page.ID)
 	}
 	m.sessionActive[sessionKey] = page.ID
+	m.targetMu.Unlock()
 	return page, true, nil
 }
 
@@ -476,9 +481,16 @@ func (m *SessionManager) handleCDPEvent(logKey string, method string, params jso
 }
 
 // ListTabs returns Tab info for a sessionKey.
-func (m *SessionManager) ListTabs(ctx context.Context, sessionKey string) TabsInfo {
-	pages, _ := m.endpoints.ListPages(ctx)
-	m.recoverSessionTargets(ctx, pages)
+func (m *SessionManager) ListTabs(ctx context.Context, sessionKey string) (TabsInfo, error) {
+	release, err := m.acquireLock(ctx, sessionKey, true)
+	if err != nil {
+		return TabsInfo{}, err
+	}
+	defer release()
+	pages, err := m.sessionPages(ctx, sessionKey, "")
+	if err != nil {
+		return TabsInfo{}, err
+	}
 
 	m.targetMu.Lock()
 	defer m.targetMu.Unlock()
@@ -513,12 +525,15 @@ func (m *SessionManager) ListTabs(ctx context.Context, sessionKey string) TabsIn
 		SessionKey:     sessionKey,
 		ActiveTargetID: activeID,
 		Tabs:           tabs,
-	}
+	}, nil
 }
 
 // RememberScreenshot stores screenshot snapshot and associates tabs info.
-func (m *SessionManager) RememberScreenshot(ctx context.Context, sessionKey string, data string, pageURL string, pageTitle string, targetID string) *Snapshot {
-	tabsInfo := m.ListTabs(ctx, sessionKey)
+func (m *SessionManager) RememberScreenshot(ctx context.Context, sessionKey string, data string, pageURL string, pageTitle string, targetID string) (*Snapshot, error) {
+	tabsInfo, err := m.ListTabs(ctx, sessionKey)
+	if err != nil {
+		return nil, err
+	}
 	tid := targetID
 	if tid == "" {
 		tid = tabsInfo.ActiveTargetID
@@ -556,11 +571,11 @@ func (m *SessionManager) RememberScreenshot(ctx context.Context, sessionKey stri
 	}
 	m.screenMu.Unlock()
 
-	return snapshot
+	return snapshot, nil
 }
 
 // LatestScreenshot returns cached snapshot if available.
-func (m *SessionManager) LatestScreenshot(ctx context.Context, sessionKey string, targetID string) *Snapshot {
+func (m *SessionManager) LatestScreenshot(ctx context.Context, sessionKey string, targetID string) (*Snapshot, error) {
 	m.screenMu.RLock()
 	key := sessionKey
 	if targetID != "" {
@@ -570,76 +585,101 @@ func (m *SessionManager) LatestScreenshot(ctx context.Context, sessionKey string
 	m.screenMu.RUnlock()
 
 	if snap == nil {
-		return nil
+		return nil, nil
 	}
 
 	// Update tabs dynamically
-	tabsInfo := m.ListTabs(ctx, sessionKey)
+	tabsInfo, err := m.ListTabs(ctx, sessionKey)
+	if err != nil {
+		return nil, err
+	}
 	res := *snap
 	res.Tabs = tabsInfo.Tabs
 	res.ActiveTargetID = tabsInfo.ActiveTargetID
-	return &res
+	return &res, nil
 }
 
 // CloseSession closes all browser tabs for the session.
-func (m *SessionManager) CloseSession(ctx context.Context, sessionKey string) {
-	lock := m.getLock(sessionKey)
-	lock.Lock()
-	defer lock.Unlock()
-
-	pages, _ := m.endpoints.ListPages(ctx)
-	m.recoverSessionTargets(ctx, pages)
+func (m *SessionManager) CloseSession(ctx context.Context, sessionKey string) error {
+	releaseSession, err := m.acquireLock(ctx, sessionKey, false)
+	if err != nil {
+		return err
+	}
+	defer releaseSession()
+	releasePage, err := m.acquireLock(ctx, sessionKey, true)
+	if err != nil {
+		return err
+	}
+	defer releasePage()
+	if _, err := m.sessionPages(ctx, sessionKey, ""); err != nil {
+		return err
+	}
 
 	m.targetMu.Lock()
-	targets := m.sessionTargets[sessionKey]
+	targets := append([]string(nil), m.sessionTargets[sessionKey]...)
+	m.targetMu.Unlock()
+	for _, tid := range targets {
+		if err := m.endpoints.ClosePage(ctx, tid); err != nil {
+			return fmt.Errorf("关闭浏览器标签页失败: %w", err)
+		}
+	}
+	m.targetMu.Lock()
 	delete(m.sessionTargets, sessionKey)
 	delete(m.sessionActive, sessionKey)
 	m.targetMu.Unlock()
-
 	m.screenMu.Lock()
 	delete(m.screenshots, sessionKey)
 	for _, tid := range targets {
 		delete(m.screenshots, sessionKey+"::"+tid)
 	}
 	m.screenMu.Unlock()
-
-	for _, tid := range targets {
-		_ = m.endpoints.ClosePage(ctx, tid)
-	}
+	return nil
 }
 
 // SelectTab selects a tab for the session and activates it in CDP.
 func (m *SessionManager) SelectTab(ctx context.Context, sessionKey string, targetID string) (*Snapshot, error) {
-	lock := m.getLock(sessionKey)
-	lock.Lock()
-	defer lock.Unlock()
-
-	pages, _ := m.endpoints.ListPages(ctx)
-	m.recoverSessionTargets(ctx, pages)
-
-	m.targetMu.Lock()
-	targets := m.sessionTargets[sessionKey]
-	found := false
-	for _, tid := range targets {
-		if tid == targetID {
-			found = true
-			break
-		}
+	releaseSession, err := m.acquireLock(ctx, sessionKey, false)
+	if err != nil {
+		return nil, err
 	}
-	if !found {
+	defer releaseSession()
+	if err := func() error {
+		releasePage, err := m.acquireLock(ctx, sessionKey, true)
+		if err != nil {
+			return err
+		}
+		defer releasePage()
+		if _, err := m.sessionPages(ctx, sessionKey, targetID); err != nil {
+			return err
+		}
+		m.targetMu.Lock()
+		if !ownsTarget(m.sessionTargets[sessionKey], targetID) {
+			m.targetMu.Unlock()
+			return errors.New("指定的标签页不属于当前会话")
+		}
 		m.targetMu.Unlock()
-		return nil, errors.New("指定的标签页不属于当前会话")
-	}
-
-	m.sessionActive[sessionKey] = targetID
-	m.targetMu.Unlock()
-
-	ver, _ := m.endpoints.GetVersion(ctx)
-	if ver != nil && ver.WebSocketDebuggerURL != "" {
-		if client, err := DialCDP(ctx, ver.WebSocketDebuggerURL); err == nil {
-			_, _ = client.Call(ctx, "Target.activateTarget", map[string]any{"targetId": targetID})
-			_ = client.Close()
+		ver, err := m.endpoints.GetVersion(ctx)
+		if err != nil {
+			return err
 		}
+		if ver.WebSocketDebuggerURL == "" {
+			return errors.New("browser webSocketDebuggerUrl is missing")
+		}
+		client, err := DialCDP(ctx, ver.WebSocketDebuggerURL)
+		if err != nil {
+			return err
+		}
+		_, err = client.Call(ctx, "Target.activateTarget", map[string]any{"targetId": targetID})
+		_ = client.CloseNow()
+		if err != nil {
+			return err
+		}
+		m.targetMu.Lock()
+		m.sessionActive[sessionKey] = targetID
+		m.targetMu.Unlock()
+		return nil
+	}(); err != nil {
+		return nil, err
 	}
 
 	return m.CaptureScreenshot(ctx, sessionKey, false, targetID)
@@ -647,86 +687,106 @@ func (m *SessionManager) SelectTab(ctx context.Context, sessionKey string, targe
 
 // NewTab creates a new tab in the session.
 func (m *SessionManager) NewTab(ctx context.Context, sessionKey string, urlStr string) (*Snapshot, error) {
-	lock := m.getLock(sessionKey)
-	lock.Lock()
-
-	pages, _ := m.endpoints.ListPages(ctx)
-	m.recoverSessionTargets(ctx, pages)
-
-	page, err := m.newPage(ctx)
+	page, err := func() (*PageTarget, error) {
+		releaseSession, err := m.acquireLock(ctx, sessionKey, false)
+		if err != nil {
+			return nil, err
+		}
+		defer releaseSession()
+		releasePage, err := m.acquireLock(ctx, sessionKey, true)
+		if err != nil {
+			return nil, err
+		}
+		defer releasePage()
+		if err := m.EnsureBrowser(ctx); err != nil {
+			return nil, err
+		}
+		if _, err := m.sessionPages(ctx, sessionKey, ""); err != nil {
+			return nil, err
+		}
+		page, err := m.newPage(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if err := m.tagPage(ctx, page, sessionKey); err != nil {
+			bindErr := fmt.Errorf("bind browser session: %w", err)
+			if cleanupErr := m.discardUnboundPage(ctx, page.ID); cleanupErr != nil {
+				bindErr = errors.Join(bindErr, fmt.Errorf("清理新建浏览器标签页失败: %w", cleanupErr))
+			}
+			return nil, bindErr
+		}
+		m.targetMu.Lock()
+		defer m.targetMu.Unlock()
+		for owner, targets := range m.sessionTargets {
+			if owner != sessionKey && ownsTarget(targets, page.ID) {
+				return nil, errors.New("浏览器标签页已属于其他会话")
+			}
+		}
+		if !ownsTarget(m.sessionTargets[sessionKey], page.ID) {
+			m.sessionTargets[sessionKey] = append(m.sessionTargets[sessionKey], page.ID)
+		}
+		m.sessionActive[sessionKey] = page.ID
+		return page, nil
+	}()
 	if err != nil {
-		lock.Unlock()
 		return nil, err
 	}
-	if err := m.tagPage(ctx, page, sessionKey); err != nil {
-		_ = m.endpoints.ClosePage(ctx, page.ID)
-		lock.Unlock()
-		return nil, fmt.Errorf("bind browser session: %w", err)
-	}
-	m.targetMu.Lock()
-
-	targets := m.sessionTargets[sessionKey]
-	already := false
-	for _, tid := range targets {
-		if tid == page.ID {
-			already = true
-			break
-		}
-	}
-	if !already {
-		targets = append(targets, page.ID)
-		m.sessionTargets[sessionKey] = targets
-	}
-	m.sessionActive[sessionKey] = page.ID
-
 	if urlStr != "" && urlStr != "about:blank" {
-		m.targetMu.Unlock()
-		lock.Unlock()
 		return m.Navigate(ctx, sessionKey, urlStr, page.ID)
 	}
-	m.targetMu.Unlock()
-	lock.Unlock()
 	return m.CaptureScreenshot(ctx, sessionKey, false, page.ID)
 }
 
 // CloseTab closes a specific tab and updates active target.
 func (m *SessionManager) CloseTab(ctx context.Context, sessionKey string, targetID string) (*Snapshot, error) {
-	lock := m.getLock(sessionKey)
-	lock.Lock()
-	defer lock.Unlock()
-
-	pages, _ := m.endpoints.ListPages(ctx)
-	m.recoverSessionTargets(ctx, pages)
-
-	m.targetMu.Lock()
-	targets := m.sessionTargets[sessionKey]
-	if !ownsTarget(targets, targetID) {
+	releaseSession, err := m.acquireLock(ctx, sessionKey, false)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseSession()
+	nextActive, err := func() (string, error) {
+		releasePage, err := m.acquireLock(ctx, sessionKey, true)
+		if err != nil {
+			return "", err
+		}
+		defer releasePage()
+		if _, err := m.sessionPages(ctx, sessionKey, targetID); err != nil {
+			return "", err
+		}
+		m.targetMu.Lock()
+		if !ownsTarget(m.sessionTargets[sessionKey], targetID) {
+			m.targetMu.Unlock()
+			return "", errors.New("指定的标签页不属于当前会话")
+		}
 		m.targetMu.Unlock()
-		return nil, errors.New("指定的标签页不属于当前会话")
-	}
-	var remaining []string
-	for _, tid := range targets {
-		if tid != targetID {
-			remaining = append(remaining, tid)
+		if err := m.endpoints.ClosePage(ctx, targetID); err != nil {
+			return "", fmt.Errorf("关闭浏览器标签页失败: %w", err)
 		}
-	}
-	m.sessionTargets[sessionKey] = remaining
-
-	if m.sessionActive[sessionKey] == targetID {
-		if len(remaining) > 0 {
-			m.sessionActive[sessionKey] = remaining[len(remaining)-1]
-		} else {
-			delete(m.sessionActive, sessionKey)
+		m.targetMu.Lock()
+		defer m.targetMu.Unlock()
+		var remaining []string
+		for _, tid := range m.sessionTargets[sessionKey] {
+			if tid != targetID {
+				remaining = append(remaining, tid)
+			}
 		}
+		m.sessionTargets[sessionKey] = remaining
+		if m.sessionActive[sessionKey] == targetID {
+			if len(remaining) > 0 {
+				m.sessionActive[sessionKey] = remaining[len(remaining)-1]
+			} else {
+				delete(m.sessionActive, sessionKey)
+			}
+		}
+		return m.sessionActive[sessionKey], nil
+	}()
+	if err != nil {
+		return nil, err
 	}
-	nextActive := m.sessionActive[sessionKey]
-	m.targetMu.Unlock()
 
 	m.screenMu.Lock()
 	delete(m.screenshots, sessionKey+"::"+targetID)
 	m.screenMu.Unlock()
-
-	_ = m.endpoints.ClosePage(ctx, targetID)
 
 	if nextActive != "" {
 		return m.CaptureScreenshot(ctx, sessionKey, false, nextActive)
@@ -761,7 +821,7 @@ func (m *SessionManager) CaptureScreenshot(ctx context.Context, sessionKey strin
 	if err != nil {
 		return nil, err
 	}
-	defer client.Close()
+	defer client.CloseNow()
 
 	shotRes, err := client.Call(ctx, "Page.captureScreenshot", map[string]any{
 		"format":  "jpeg",
@@ -799,7 +859,7 @@ func (m *SessionManager) CaptureScreenshot(ctx context.Context, sessionKey strin
 		pTitle = page.Title
 	}
 
-	return m.RememberScreenshot(ctx, sessionKey, shotData.Data, pURL, pTitle, page.ID), nil
+	return m.RememberScreenshot(ctx, sessionKey, shotData.Data, pURL, pTitle, page.ID)
 }
 
 // Navigate navigates a session tab to a URL.
@@ -809,9 +869,11 @@ func (m *SessionManager) Navigate(ctx context.Context, sessionKey string, urlStr
 		return nil, errors.New("url 必须是完整的 http 或 https 地址")
 	}
 
-	lock := m.getLock(sessionKey)
-	lock.Lock()
-	defer lock.Unlock()
+	release, err := m.acquireLock(ctx, sessionKey, false)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 
 	page, _, err := m.SessionPage(ctx, sessionKey, false, true, targetID)
 	if err != nil {
@@ -822,7 +884,7 @@ func (m *SessionManager) Navigate(ctx context.Context, sessionKey string, urlStr
 	if err != nil {
 		return nil, err
 	}
-	defer client.Close()
+	defer client.CloseNow()
 
 	if _, err := client.Call(ctx, "Page.navigate", map[string]any{"url": urlStr}); err != nil {
 		return nil, err
@@ -887,14 +949,16 @@ func (m *SessionManager) Navigate(ctx context.Context, sessionKey string, urlStr
 	}
 	_ = json.Unmarshal(shotRes, &shotData)
 
-	return m.RememberScreenshot(ctx, sessionKey, shotData.Data, pageURL, pageTitle, page.ID), nil
+	return m.RememberScreenshot(ctx, sessionKey, shotData.Data, pageURL, pageTitle, page.ID)
 }
 
 // Interact performs mouse/keyboard/navigation actions on a session tab.
 func (m *SessionManager) Interact(ctx context.Context, sessionKey string, action string, targetID string, x, y, ratioX, ratioY, deltaY *float64, text *string) (*Snapshot, error) {
-	lock := m.getLock(sessionKey)
-	lock.Lock()
-	defer lock.Unlock()
+	release, err := m.acquireLock(ctx, sessionKey, false)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 
 	page, _, err := m.SessionPage(ctx, sessionKey, false, true, targetID)
 	if err != nil {
@@ -905,7 +969,7 @@ func (m *SessionManager) Interact(ctx context.Context, sessionKey string, action
 	if err != nil {
 		return nil, err
 	}
-	defer client.Close()
+	defer client.CloseNow()
 
 	_, _ = client.Call(ctx, "Runtime.enable", nil)
 	_, _ = client.Call(ctx, "Log.enable", nil)
@@ -1009,12 +1073,12 @@ func (m *SessionManager) Interact(ctx context.Context, sessionKey string, action
 	}
 	_ = json.Unmarshal(shotRes, &shotData)
 
-	return m.RememberScreenshot(ctx, sessionKey, shotData.Data, pURL, pTitle, page.ID), nil
+	return m.RememberScreenshot(ctx, sessionKey, shotData.Data, pURL, pTitle, page.ID)
 }
 
 // ExtractPageContent extracts document title, URL, and body text.
 func (m *SessionManager) ExtractPageContent(ctx context.Context, sessionKey string, targetID string) (*PageContent, error) {
-	page, _, err := m.SessionPage(ctx, sessionKey, false, false, targetID)
+	page, _, err := m.SessionPage(ctx, sessionKey, false, true, targetID)
 	if err != nil {
 		return nil, err
 	}
@@ -1023,7 +1087,7 @@ func (m *SessionManager) ExtractPageContent(ctx context.Context, sessionKey stri
 	if err != nil {
 		return nil, err
 	}
-	defer client.Close()
+	defer client.CloseNow()
 
 	expr := `(() => {
 		const title = document.title || '';
@@ -1102,7 +1166,7 @@ func (m *SessionManager) CallCDP(ctx context.Context, sessionKey string, method 
 		return nil, fmt.Errorf("不允许调用 CDP 方法：%s", method)
 	}
 
-	page, _, err := m.SessionPage(ctx, sessionKey, false, false, targetID)
+	page, _, err := m.SessionPage(ctx, sessionKey, false, true, targetID)
 	if err != nil {
 		return nil, err
 	}
@@ -1111,7 +1175,7 @@ func (m *SessionManager) CallCDP(ctx context.Context, sessionKey string, method 
 	if err != nil {
 		return nil, err
 	}
-	defer client.Close()
+	defer client.CloseNow()
 
 	res, err := client.Call(ctx, method, params)
 	if err != nil {

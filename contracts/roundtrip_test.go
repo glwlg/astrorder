@@ -7,8 +7,38 @@ import (
 	"testing"
 
 	pb "astrorder.dev/contracts/gen/go/astrorder/sessiond/v1"
+	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 )
+
+func TestUnknownFieldsSurviveKnownFieldUpdates(t *testing.T) {
+	wire, err := proto.Marshal(&pb.NativeJson{Schema: "fixture.native@1", Utf8Json: []byte(`{"id":9007199254740993}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	unknown := protowire.AppendTag(nil, 19001, protowire.BytesType)
+	unknown = protowire.AppendBytes(unknown, []byte{0xde, 0xad, 0x00, 0xbe, 0xef})
+	wire = append(wire, unknown...)
+	var decoded pb.NativeJson
+	if err := proto.Unmarshal(wire, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	decoded.Schema = "fixture.native@2"
+	returned, err := proto.Marshal(&decoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output pb.NativeJson
+	if err := proto.Unmarshal(returned, &output); err != nil {
+		t.Fatal(err)
+	}
+	if output.Schema != decoded.Schema || !bytes.Equal(output.Utf8Json, decoded.Utf8Json) {
+		t.Fatalf("known fields changed: %v", &output)
+	}
+	if !bytes.Equal(output.ProtoReflect().GetUnknown(), unknown) {
+		t.Fatalf("unknown fields changed: got=%x want=%x", output.ProtoReflect().GetUnknown(), unknown)
+	}
+}
 
 func TestPresenceEmptyFalseZeroAndExplicitNullRoundTrip(t *testing.T) {
 	empty := ""

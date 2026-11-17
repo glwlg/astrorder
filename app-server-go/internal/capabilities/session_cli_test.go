@@ -97,3 +97,51 @@ func TestSessionCLISetupEnablesFirstOfficialDispatch(t *testing.T) {
 		t.Fatal("binding changed on failure")
 	}
 }
+
+func TestSessionCLIUpgradeRefreshesExistingOfficialModules(t *testing.T) {
+	ctx := context.Background()
+	env := localEnv("local")
+	env.Run_ = currentCLI
+	svc := serviceFor(env)
+	svc.Agents = cliAgentStore{map[string]any{"id": "codex-main", "kind": "codex", "connection_id": "local", "profile_name": "default"}}
+	binary := []byte("old-client")
+	svc.CLIBinary = func(context.Context, envtarget.Env) (string, []byte, error) {
+		return "astrorder-agent", binary, nil
+	}
+	for _, module := range []string{"astrorder-sessions", "astrorder-blackboard"} {
+		file := env.P.Codex + "/skills/" + module + "/scripts/astrorder-agent"
+		env.Bins[file] = file
+	}
+	if _, err := svc.SessionCLI(ctx, "codex-main", true); err != nil {
+		t.Fatal(err)
+	}
+	deliver, err := svc.officialSkillDelivery("astrorder-blackboard")
+	if err != nil {
+		t.Fatal(err)
+	}
+	folder, _, err := deliver(ctx, env, "codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalDoc := append([]byte(nil), env.Files[folder+"/SKILL.md"]...)
+	binary = []byte("new-client")
+	if _, err := svc.SessionCLI(ctx, "codex-main", true); err != nil {
+		t.Fatal(err)
+	}
+	if string(env.Files[folder+"/scripts/astrorder-agent"]) != "new-client" || string(env.Files[folder+"/SKILL.md"]) != string(originalDoc) {
+		t.Fatal("official blackboard client was not upgraded without changing its instructions")
+	}
+	var manifest officialManifest
+	if err := json.Unmarshal(env.Files[folder+"/"+officialManifestFile], &manifest); err != nil || manifest.Files["scripts/astrorder-agent"] != payloadHash(binary) {
+		t.Fatal("updated client manifest did not match")
+	}
+
+	env.Files[folder+"/SKILL.md"] = []byte("user edit")
+	binary = []byte("later-client")
+	if _, err := svc.SessionCLI(ctx, "codex-main", true); err == nil {
+		t.Fatal("upgrade overwrote a user-edited official module")
+	}
+	if string(env.Files[folder+"/SKILL.md"]) != "user edit" || string(env.Files[env.P.Codex+"/skills/astrorder-sessions/scripts/astrorder-agent"]) != "new-client" {
+		t.Fatal("refused upgrade changed installed files")
+	}
+}

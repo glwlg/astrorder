@@ -30,7 +30,7 @@ export function BackgroundTasks() {
   const finishedCount = tasks.length - running
 
   return <div className="background-tasks">
-    {opened && <Paper className="background-tasks-panel" withBorder shadow="lg" radius="lg" role="dialog" aria-label="后台任务">
+    {opened && <Paper className="background-tasks-panel" data-liquid-surface="panel" withBorder shadow="lg" radius="lg" role="dialog" aria-label="后台任务">
       <Group justify="space-between" px="md" py="sm">
         <Text fw={600}>后台任务</Text>
         <Group gap={6}>
@@ -81,7 +81,7 @@ export function BackgroundTasks() {
         </Group>
       </Stack>
     </Modal>
-    <UnstyledButton className="background-tasks-trigger" onClick={() => setOpened((value) => !value)} aria-expanded={opened} aria-label="后台任务">
+    <UnstyledButton className="background-tasks-trigger" data-liquid-surface="control" onClick={() => setOpened((value) => !value)} aria-expanded={opened} aria-label="后台任务">
       {running ? <Loader size={17} color="white" /> : <IconChecklist size={18} />}
       <span>后台任务</span>
       <span className="background-tasks-count">{tasks.length}</span>

@@ -19,7 +19,7 @@ function routePart(value: string): string {
   }
 }
 
-export function AppShellLayout() {
+export function AppShellLayout({ chatReturnPath }: { chatReturnPath: string }) {
   const navigate = useNavigate()
   const location = useLocation()
   const [mobileOpened, { open: openMobile, close: closeMobile }] = useDisclosure(false)
@@ -37,15 +37,15 @@ export function AppShellLayout() {
       const stored = localStorage.getItem(SIDEBAR_WIDTH_KEY)
       if (stored) {
         const val = parseInt(stored, 10)
-        if (val >= 260 && val <= 420) return val
+        if (val >= 320 && val <= 520) return val
       }
     } catch {}
-    return 328
+    return 352
   })
 
   const isResizingRef = useRef(false)
   const startXRef = useRef(0)
-  const startWidthRef = useRef(328)
+  const startWidthRef = useRef(352)
   const [isResizing, setIsResizing] = useState(false)
 
   const handleResizerMouseDown = (e: React.MouseEvent) => {
@@ -60,7 +60,7 @@ export function AppShellLayout() {
     const handleMouseMove = (moveEvent: MouseEvent) => {
       if (!isResizingRef.current) return
       const delta = moveEvent.clientX - startXRef.current
-      const newWidth = Math.min(Math.max(startWidthRef.current + delta, 260), 420)
+      const newWidth = Math.min(Math.max(startWidthRef.current + delta, 320), 520)
       setSidebarWidth(newWidth)
     }
 
@@ -92,15 +92,15 @@ export function AppShellLayout() {
   return (
     <AppShell
       className="astrorder-shell"
-      header={{ height: 48 }}
+      header={{ height: 64 }}
       navbar={{ width: sidebarWidth, breakpoint: 'md', collapsed: { mobile: true } }}
       padding={0}
     >
       <AppShell.Header className="sidebar-header">
         <AppHeader connection={connection} onMenu={openMobile} />
       </AppShell.Header>
-      <AppShell.Navbar className="desktop-navbar" p="md" style={{ width: sidebarWidth }}>
-        <Sidebar sessions={sessions} agents={agents} projects={projects} activeSessionKey={activeSessionKey} onSelectSession={selectSession} />
+      <AppShell.Navbar className="desktop-navbar" p={0} style={{ width: sidebarWidth }}>
+        <Sidebar sessions={sessions} agents={agents} projects={projects} activeSessionKey={activeSessionKey} chatReturnPath={chatReturnPath} onSelectSession={selectSession} />
         <div
           className="sidebar-resizer"
           data-resizing={isResizing}
@@ -124,7 +124,7 @@ export function AppShellLayout() {
         size="min(88vw, 360px)"
         hiddenFrom="md"
       >
-        <Sidebar sessions={sessions} agents={agents} projects={projects} activeSessionKey={activeSessionKey} onSelectSession={selectSession} onNavigate={closeMobile} />
+        <Sidebar sessions={sessions} agents={agents} projects={projects} activeSessionKey={activeSessionKey} chatReturnPath={chatReturnPath} onSelectSession={selectSession} onNavigate={closeMobile} />
       </Drawer>
       <BackgroundTasks />
     </AppShell>

@@ -3,6 +3,7 @@ package agentapi
 import (
 	"context"
 	"errors"
+	"log/slog"
 
 	"net/http"
 	"strings"
@@ -39,10 +40,12 @@ type Options struct {
 	Client           *daemonclient.Client
 	Authorizer       Authorizer
 	Publisher        Publisher
+	Logger           *slog.Logger
 	BrowserManager   BrowserManager
 	BrowserInvoke    func(context.Context, string, map[string]any) (any, error)
-	CommandSubmit func(context.Context,map[string]any)(map[string]any,error)
+	CommandSubmit    func(context.Context, map[string]any) (map[string]any, error)
 	DefaultWorkspace string
+	FileResolver     blackboard.FileResolver
 }
 
 // AgentApiError represents structured Agent API errors.
@@ -77,7 +80,7 @@ func NewHandler(options Options) (http.Handler, error) {
 		options: options,
 	}
 
-	h.blackboard = blackboard.NewService(options.Store, options.Publisher)
+	h.blackboard = blackboard.NewService(options.Store, options.Publisher).WithFileResolver(options.FileResolver)
 	h.swarm = swarm.NewService(options.Store, options.Publisher, h)
 
 	return h, nil
@@ -93,6 +96,8 @@ func Matches(method, path string) bool {
 		return method == http.MethodGet
 	case "/api/v1/agent/invoke":
 		return method == http.MethodPost
+	case "/api/v1/agent/usage":
+		return method == http.MethodGet
 	case "/api/v1/agent/mcp":
 		return method == http.MethodGet || method == http.MethodPost
 	case "/api/v1/blackboard":

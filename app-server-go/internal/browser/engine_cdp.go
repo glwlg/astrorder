@@ -284,6 +284,11 @@ func startScopedCDP(ctx context.Context, upstreamURL, target string, onTarget fu
 }
 
 func (m *SessionManager) rememberEngineTarget(ctx context.Context, sessionKey, target string) {
+	release, err := m.acquireLock(ctx, sessionKey, true)
+	if err != nil {
+		return
+	}
+	defer release()
 	m.targetMu.Lock()
 	for owner, targets := range m.sessionTargets {
 		if owner != sessionKey && ownsTarget(targets, target) {

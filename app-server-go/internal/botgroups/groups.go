@@ -16,13 +16,16 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
+	"astrorder.dev/app-server/internal/artifacts"
 	"astrorder.dev/app-server/internal/auth"
 	"astrorder.dev/app-server/internal/store"
 )
 
 type Member struct {
+	ID               string  `json:"id,omitempty"`
 	MachineID        string  `json:"machine_id"`
 	AgentID          string  `json:"agent_id"`
 	Name             *string `json:"name"`
@@ -33,9 +36,12 @@ type Member struct {
 	ThinkingEffort   *string `json:"thinking_effort"`
 	ApprovalPolicy   *string `json:"approval_policy"`
 	Workspace        *string `json:"workspace"`
+	SourceSessionID  *string `json:"source_session_id,omitempty"`
+	ForkSessionID    *string `json:"fork_session_id,omitempty"`
 }
 type MemberState struct {
 	Status    string `json:"status"`
+	Muted     bool   `json:"muted,omitempty"`
 	SessionID string `json:"session_id,omitempty"`
 	LastError string `json:"last_error,omitempty"`
 	UpdatedAt string `json:"updated_at"`
@@ -53,31 +59,41 @@ type Group struct {
 	CreatedAt      string                 `json:"created_at"`
 	UpdatedAt      string                 `json:"updated_at"`
 	StoppedAt      string                 `json:"stopped_at,omitempty"`
+	Coordination   *Coordination          `json:"coordination,omitempty"`
 }
 type Message struct {
-	ID         string   `json:"id"`
-	GroupID    string   `json:"group_id"`
-	SenderType string   `json:"sender_type"`
-	SenderID   string   `json:"sender_id"`
-	SenderName string   `json:"sender_name"`
-	Text       string   `json:"text"`
-	Mentions   []string `json:"mentions"`
-	HopCount   int      `json:"hop_count"`
-	CreatedAt  string   `json:"created_at"`
-	SessionID  string   `json:"session_id,omitempty"`
-	NativeIDs  []string `json:"native_ids,omitempty"`
+	ID             string           `json:"id"`
+	GroupID        string           `json:"group_id"`
+	SenderType     string           `json:"sender_type"`
+	SenderID       string           `json:"sender_id"`
+	SenderMemberID string           `json:"sender_member_id,omitempty"`
+	SenderName     string           `json:"sender_name"`
+	Text           string           `json:"text"`
+	Mentions       []string         `json:"mentions"`
+	HopCount       int              `json:"hop_count"`
+	CreatedAt      string           `json:"created_at"`
+	SessionID      string           `json:"session_id,omitempty"`
+	NativeIDs      []string         `json:"native_ids,omitempty"`
+	Attachments    []map[string]any `json:"attachments,omitempty"`
 }
 type Reply struct {
 	Text      string
 	NativeIDs []string
+	CreatedAt string
 }
 type Turn struct {
-	GroupID   string
-	Member    Member
-	Prompt    string
-	Hop       int
-	CommandID string
-	SessionID string
+	GroupID     string
+	Member      Member
+	Prompt      string
+	Hop         int
+	CommandID   string
+	SessionID   string
+	ThroughID   string
+	Attachments []map[string]any
+	// RecordBaseline persists native message IDs before the command is sent.
+	RecordBaseline func([]string) error
+	// RecordAccepted advances the cursor only after the native send is confirmed.
+	RecordAccepted func() error
 }
 
 // Controller binds one exact session and returns a completed native reply.
@@ -92,10 +108,13 @@ type replyReader interface {
 }
 type Publisher interface{ PublishCommitted([]store.Event) }
 type Options struct {
-	Store      *store.Store
-	Controller Controller
-	Authorizer *auth.Authenticator
-	Publisher  Publisher
+	Store           *store.Store
+	Controller      Controller
+	Authorizer      *auth.Authenticator
+	Publisher       Publisher
+	Decider         Decider
+	FileResolver    ArtifactFileResolver
+	ArtifactDecider ArtifactDecider
 }
 type activeTurn struct {
 	turn         Turn
@@ -103,14 +122,18 @@ type activeTurn struct {
 	explicitStop bool
 }
 type Service struct {
-	options      Options
-	ctx          context.Context
-	cancel       context.CancelFunc
-	mu           sync.Mutex
-	submissionMu sync.Mutex
-	active       map[string]map[string]*activeTurn
-	wg           sync.WaitGroup
-	closed       bool
+	options           Options
+	ctx               context.Context
+	cancel            context.CancelFunc
+	mu                sync.Mutex
+	submissionMu      sync.Mutex
+	active            map[string]map[string]*activeTurn
+	scheduling        map[string]bool
+	reschedule        map[string]bool
+	wg                sync.WaitGroup
+	closed            bool
+	artifactWorkers   map[string]bool
+	artifactRequested map[string]bool
 }
 
 var errMissing = errors.New("群聊未找到")
@@ -119,35 +142,88 @@ func New(ctx context.Context, options Options) (*Service, error) {
 	if options.Store == nil || options.Controller == nil || options.Authorizer == nil || options.Publisher == nil {
 		return nil, errors.New("group store, controller, authentication and event publisher are required")
 	}
+	if options.Decider == nil {
+		options.Decider = &systemOneDecider{store: options.Store}
+	}
+	if options.ArtifactDecider == nil {
+		options.ArtifactDecider = &systemOneArtifactDecider{store: options.Store}
+	}
 	ctx, cancel := context.WithCancel(ctx)
-	s := &Service{options: options, ctx: ctx, cancel: cancel, active: make(map[string]map[string]*activeTurn)}
+	s := &Service{options: options, ctx: ctx, cancel: cancel, active: make(map[string]map[string]*activeTurn), scheduling: make(map[string]bool), reschedule: make(map[string]bool)}
 	groups, err := s.list(ctx)
 	if err != nil {
 		cancel()
 		return nil, err
 	}
 	for _, g := range groups {
-		needsRecovery := false
-		for _, state := range g.MemberStates {
-			if state.Status == "running" {
-				needsRecovery = true
+		if err := s.initializeFileIndex(ctx, g.ID); err != nil {
+			cancel()
+			return nil, err
+		}
+		s.scheduleArtifacts(g.ID)
+		type recovery struct {
+			member   Member
+			session  string
+			delivery Delivery
+		}
+		recoverable := []recovery{}
+		unknown := map[string]bool{}
+		_, canResume := options.Controller.(recoveryController)
+		for _, member := range g.Members {
+			mid := memberID(member)
+			state := g.MemberStates[mid]
+			if state.Status != "running" {
+				continue
+			}
+			var delivery Delivery
+			if g.Coordination != nil {
+				delivery = g.Coordination.InFlight[mid]
+			}
+			if canResume && state.SessionID != "" && delivery.CommandID != "" && delivery.BaselineCaptured {
+				recoverable = append(recoverable, recovery{member, state.SessionID, delivery})
+			} else {
+				unknown[mid] = true
 			}
 		}
-		if needsRecovery {
+		if len(unknown) > 0 {
 			if _, err = s.mutate(ctx, g.ID, func(group *Group) error {
 				for id, state := range group.MemberStates {
-					if state.Status == "running" {
+					if unknown[id] {
 						state.Status = "unknown"
 						state.LastError = "App 已重新连接，原生执行结果未确认；不会自动重发。"
 						state.UpdatedAt = now()
 						group.MemberStates[id] = state
 					}
 				}
+				speakers := make([]string, 0, len(group.ActiveSpeakers))
+				for _, mid := range group.ActiveSpeakers {
+					if !unknown[mid] {
+						speakers = append(speakers, mid)
+					}
+				}
+				group.ActiveSpeakers = speakers
+				group.ActiveSpeaker = nil
+				if len(speakers) > 0 {
+					group.ActiveSpeaker = &speakers[0]
+				} else {
+					group.ActiveHop = 0
+				}
+				if group.Coordination != nil {
+					group.Coordination.Status = "error"
+					group.Coordination.Error = "成员的执行结果尚未确认，请核对会话"
+					group.Coordination.Revision++
+				}
 				return nil
 			}); err != nil {
 				cancel()
 				return nil, err
 			}
+		}
+		for _, item := range recoverable {
+			s.resume(g.ID, item.member, item.session, item.delivery)
+		}
+		if g.Coordination != nil && len(unknown) == 0 && (len(g.Coordination.Pending) > 0 || g.Coordination.Status == "deciding") {
+			s.schedule(g.ID)
 		}
 	}
 	return s, nil
@@ -164,7 +240,10 @@ func Matches(method, path string) bool {
 	if len(parts) == 2 {
 		return method == http.MethodGet || method == http.MethodPatch || method == http.MethodDelete
 	}
-	return len(parts) == 3 && ((parts[2] == "messages" && (method == http.MethodGet || method == http.MethodPost)) || (parts[2] == "stop" && method == http.MethodPost))
+	if parts[2] == "artifacts" {
+		return len(parts) == 3 && (method == http.MethodGet || method == http.MethodPost)
+	}
+	return len(parts) == 3 && ((parts[2] == "messages" && (method == http.MethodGet || method == http.MethodPost)) || ((parts[2] == "stop" || parts[2] == "retry" || parts[2] == "recover") && method == http.MethodPost))
 }
 func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if failure := s.options.Authorizer.AuthorizeBrowser(r); failure != nil {
@@ -195,6 +274,10 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	} else {
 		id := parts[1]
 		switch {
+		case len(parts) == 3 && parts[2] == "artifacts" && r.Method == http.MethodPost:
+			result, err = s.recheckArtifacts(r.Context(), id)
+		case len(parts) == 3 && parts[2] == "artifacts":
+			result, err = s.artifactDirectory(r.Context(), id)
 		case len(parts) == 2 && r.Method == http.MethodGet:
 			var group Group
 			group, err = s.get(r.Context(), id)
@@ -213,6 +296,14 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case parts[2] == "stop":
 			var group Group
 			group, err = s.stop(r.Context(), id)
+			result = map[string]any{"ok": err == nil, "group": group}
+		case parts[2] == "retry":
+			var group Group
+			group, err = s.retryDecision(r.Context(), id)
+			result = map[string]any{"ok": err == nil, "group": group}
+		case parts[2] == "recover":
+			var group Group
+			group, err = s.recoverTimedOut(r.Context(), id)
 			result = map[string]any{"ok": err == nil, "group": group}
 		case r.Method == http.MethodGet:
 			var messages []Message
@@ -249,6 +340,12 @@ type serviceError struct {
 func (e *serviceError) Error() string { return e.err.Error() }
 func (e *serviceError) Unwrap() error { return e.err }
 func now() string                     { return time.Now().UTC().Format(time.RFC3339Nano) }
+func memberID(member Member) string {
+	if member.ID != "" {
+		return member.ID
+	}
+	return member.AgentID
+}
 func randomID(prefix string) (string, error) {
 	var b [8]byte
 	if _, err := rand.Read(b[:]); err != nil {
@@ -318,6 +415,33 @@ func (s *Service) list(ctx context.Context) ([]Group, error) {
 	return groups, nil
 }
 func (s *Service) messages(ctx context.Context, id string) ([]Message, error) {
+	messages, err := s.storedMessages(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	resolved := make([]Message, 0, len(messages))
+	for _, message := range messages {
+		if message.SenderType == "agent" {
+			// Legacy copied replies are no longer a history source.
+			if message.SessionID == "" || len(message.NativeIDs) == 0 {
+				continue
+			}
+			reader, ok := s.options.Controller.(replyReader)
+			if !ok {
+				return nil, errors.New("native group history is unavailable")
+			}
+			message.Text, err = reader.ReadReply(ctx, message.SenderID, message.SessionID, message.NativeIDs)
+			if err != nil {
+				return nil, fmt.Errorf("读取成员「%s」的群聊回复失败：%w", message.SenderName, err)
+			}
+		}
+		resolved = append(resolved, message)
+	}
+	s.scheduleArtifacts(id)
+	return resolved, nil
+}
+
+func (s *Service) storedMessages(ctx context.Context, id string) ([]Message, error) {
 	value, err := s.options.Store.GetPreference(ctx, "bot_group_msgs:"+id)
 	if err != nil {
 		return nil, err
@@ -333,25 +457,7 @@ func (s *Service) messages(ctx context.Context, id string) ([]Message, error) {
 			return nil, err
 		}
 	}
-	resolved := make([]Message, 0, len(messages))
-	for _, message := range messages {
-		if message.SenderType == "agent" {
-			// Legacy copied replies are no longer a history source.
-			if message.SessionID == "" || len(message.NativeIDs) == 0 {
-				continue
-			}
-			reader, ok := s.options.Controller.(replyReader)
-			if !ok {
-				return nil, errors.New("native group history is unavailable")
-			}
-			message.Text, err = reader.ReadReply(ctx, message.SenderID, message.SessionID, message.NativeIDs)
-			if err != nil {
-				return nil, err
-			}
-		}
-		resolved = append(resolved, message)
-	}
-	return resolved, nil
+	return messages, nil
 }
 func readGroupTx(ctx context.Context, tx *sql.Tx, id string) (Group, error) {
 	var raw string
@@ -400,6 +506,9 @@ func appendEventTx(ctx context.Context, tx *sql.Tx, kind string, value any) (sto
 	return store.Event{ID: id, Cursor: cursor, Type: kind, Data: data}, err
 }
 func (s *Service) mutate(ctx context.Context, id string, fn func(*Group) error) (Group, error) {
+	return s.mutateTx(ctx, id, func(group *Group, _ *sql.Tx) error { return fn(group) })
+}
+func (s *Service) mutateTx(ctx context.Context, id string, fn func(*Group, *sql.Tx) error) (Group, error) {
 	var group Group
 	var event store.Event
 	err := s.options.Store.WithTx(ctx, func(tx *sql.Tx) error {
@@ -408,7 +517,7 @@ func (s *Service) mutate(ctx context.Context, id string, fn func(*Group) error) 
 		if err != nil {
 			return err
 		}
-		if err = fn(&group); err != nil {
+		if err = fn(&group, tx); err != nil {
 			return err
 		}
 		group.UpdatedAt = now()
@@ -423,20 +532,47 @@ func (s *Service) mutate(ctx context.Context, id string, fn func(*Group) error) 
 	}
 	return group, err
 }
-func validateGroup(g Group) error {
-	if strings.TrimSpace(g.Name) == "" || utf8.RuneCountInString(g.Name) > 128 || utf8.RuneCountInString(g.Description) > 512 || g.MaxHops < 1 || g.MaxHops > 10 || len(g.Members) < 1 || len(g.Members) > 16 {
+func validateGroup(g Group, previous map[string]Member) error {
+	if strings.TrimSpace(g.Name) == "" || utf8.RuneCountInString(g.Name) > 128 || utf8.RuneCountInString(g.Description) > 512 || g.MaxHops < 1 || g.MaxHops > 20 || len(g.Members) < 1 || len(g.Members) > 16 {
 		return errors.New("Invalid group configuration")
 	}
 	seen := map[string]bool{}
+	aliases := map[string]bool{}
+	agentCounts := map[string]int{}
+	for _, member := range g.Members {
+		agentCounts[member.AgentID]++
+	}
 	for _, m := range g.Members {
-		if m.MachineID == "" || len(m.MachineID) > 128 || m.AgentID == "" || len(m.AgentID) > 256 || seen[m.AgentID] {
+		id := memberID(m)
+		if m.MachineID == "" || len(m.MachineID) > 128 || m.AgentID == "" || len(m.AgentID) > 256 || id == "" || len(id) > 256 || seen[id] {
 			return errors.New("Invalid or duplicate group member")
 		}
-		seen[m.AgentID] = true
+		seen[id] = true
+		alias := ""
+		if m.Alias != nil {
+			alias = strings.TrimSpace(*m.Alias)
+		}
+		old, existed := previous[id]
+		legacyAlias := existed && old.ID == "" && m.ID == "" && memberValue(old.Alias) == alias
+		if alias == "" && agentCounts[m.AgentID] > 1 {
+			return errors.New("同一 Agent 的多个成员需要设置不同的群内别名")
+		}
+		if alias != "" {
+			key := strings.ToLower(alias)
+			invalid := key == "all" || key == "所有人" || strings.ContainsFunc(alias, func(r rune) bool { return unicode.IsSpace(r) || r == '@' })
+			otherLegacy, duplicate := aliases[key]
+			if (invalid && (!legacyAlias || agentCounts[m.AgentID] > 1)) || (duplicate && (!legacyAlias || !otherLegacy)) {
+				return errors.New("群内别名不能重复，也不能包含空格或 @")
+			}
+			aliases[key] = legacyAlias
+		}
+		if (m.SourceSessionID == nil) != (m.ForkSessionID == nil) {
+			return errors.New("分叉成员需要同时提供来源会话和分叉会话")
+		}
 		for _, item := range []struct {
 			value *string
 			limit int
-		}{{m.Name, 128}, {m.Alias, 128}, {m.SystemRolePrompt, 2000}, {m.ModelProvider, 160}, {m.ModelName, 160}, {m.ThinkingEffort, 32}, {m.ApprovalPolicy, 32}, {m.Workspace, 2000}} {
+		}{{m.Name, 128}, {m.Alias, 128}, {m.SystemRolePrompt, 2000}, {m.ModelProvider, 160}, {m.ModelName, 160}, {m.ThinkingEffort, 32}, {m.ApprovalPolicy, 32}, {m.Workspace, 2000}, {m.SourceSessionID, 256}, {m.ForkSessionID, 256}} {
 			if item.value != nil && utf8.RuneCountInString(*item.value) > item.limit {
 				return errors.New("Invalid member configuration")
 			}
@@ -444,7 +580,7 @@ func validateGroup(g Group) error {
 	}
 	return nil
 }
-func applyFields(g *Group, payload map[string]json.RawMessage) error {
+func applyFields(g *Group, payload map[string]json.RawMessage, previous map[string]Member) error {
 	for key, raw := range payload {
 		var destination any
 		switch key {
@@ -458,7 +594,12 @@ func applyFields(g *Group, payload map[string]json.RawMessage) error {
 		case "max_hops":
 			destination = &g.MaxHops
 		case "members":
-			destination = &g.Members
+			var members []Member
+			if err := json.Unmarshal(raw, &members); err != nil {
+				return errors.New("Invalid request")
+			}
+			g.Members = members
+			continue
 		default:
 			continue
 		}
@@ -468,22 +609,32 @@ func applyFields(g *Group, payload map[string]json.RawMessage) error {
 	}
 	g.Name = strings.TrimSpace(g.Name)
 	g.Description = strings.TrimSpace(g.Description)
-	return validateGroup(*g)
+	return validateGroup(*g, previous)
 }
 func (s *Service) create(ctx context.Context, payload map[string]json.RawMessage) (Group, error) {
 	id, err := randomID("group-")
 	if err != nil {
 		return Group{}, err
 	}
-	g := Group{ID: id, MaxHops: 3, ActiveSpeakers: []string{}, MemberStates: map[string]MemberState{}, CreatedAt: now(), UpdatedAt: now()}
-	if err = applyFields(&g, payload); err != nil {
+	g := Group{ID: id, MaxHops: 10, ActiveSpeakers: []string{}, MemberStates: map[string]MemberState{}, CreatedAt: now(), UpdatedAt: now()}
+	if err = applyFields(&g, payload, nil); err != nil {
 		return Group{}, err
 	}
 	for _, m := range g.Members {
-		g.MemberStates[m.AgentID] = MemberState{Status: "idle", UpdatedAt: now()}
+		g.MemberStates[memberID(m)] = MemberState{Status: "idle", UpdatedAt: now()}
 	}
 	var event store.Event
 	err = s.options.Store.WithTx(ctx, func(tx *sql.Tx) error {
+		for _, member := range g.Members {
+			if err := bindForkTx(ctx, tx, id, member); err != nil {
+				return err
+			}
+			if member.ForkSessionID != nil {
+				state := g.MemberStates[memberID(member)]
+				state.SessionID = *member.ForkSessionID
+				g.MemberStates[memberID(member)] = state
+			}
+		}
 		if err := putTx(ctx, tx, "bot_group:"+id, g); err != nil {
 			return err
 		}
@@ -497,6 +648,12 @@ func (s *Service) create(ctx context.Context, payload map[string]json.RawMessage
 	return g, err
 }
 func (s *Service) update(ctx context.Context, id string, payload map[string]json.RawMessage) (Group, error) {
+	if raw, ok := payload["member_mutes"]; ok {
+		if len(payload) != 1 {
+			return Group{}, errors.New("禁言设置请单独提交")
+		}
+		return s.updateMemberMutes(ctx, id, raw)
+	}
 	s.submissionMu.Lock()
 	defer s.submissionMu.Unlock()
 	s.mu.Lock()
@@ -504,17 +661,89 @@ func (s *Service) update(ctx context.Context, id string, payload map[string]json
 	if len(s.active[id]) > 0 {
 		return Group{}, &serviceError{409, errors.New("群聊正在运行，请先停止")}
 	}
-	return s.mutate(ctx, id, func(g *Group) error {
-		if err := applyFields(g, payload); err != nil {
+	return s.mutateTx(ctx, id, func(g *Group, tx *sql.Tx) error {
+		if g.Coordination != nil && g.Coordination.Status == "deciding" {
+			return &serviceError{409, errors.New("群聊正在判断，请稍后调整设置")}
+		}
+		for _, state := range g.MemberStates {
+			if state.Status == "running" || state.Status == "unknown" {
+				return &serviceError{409, errors.New("群聊仍有执行中或未确认的成员，请先停止或核对")}
+			}
+		}
+		_, changesLimit := payload["max_hops"]
+		// A paused round keeps its queue and cursors. Changing only its limit
+		// must not require stopping the round or implicitly retry its delivery.
+		if changesLimit && len(payload) == 1 && (g.Coordination == nil || len(g.Coordination.InFlight) == 0) {
+			previous := make(map[string]Member, len(g.Members))
+			for _, member := range g.Members {
+				previous[memberID(member)] = member
+			}
+			if err := applyFields(g, payload, previous); err != nil {
+				return err
+			}
+			if g.Coordination != nil {
+				g.Coordination.Revision++
+			}
+			return nil
+		}
+		if g.Coordination != nil && (len(g.Coordination.Pending) > 0 || len(g.Coordination.InFlight) > 0) {
+			return &serviceError{409, errors.New("群聊仍有待处理任务，当前只能单独调整接力上限；修改其他设置请先停止或核对")}
+		}
+		previous := make(map[string]Member, len(g.Members))
+		for _, member := range g.Members {
+			previous[memberID(member)] = member
+		}
+		if err := applyFields(g, payload, previous); err != nil {
 			return err
 		}
 		states := map[string]MemberState{}
 		for _, m := range g.Members {
-			state, ok := g.MemberStates[m.AgentID]
+			id := memberID(m)
+			state, ok := g.MemberStates[id]
 			if !ok {
 				state = MemberState{Status: "idle", UpdatedAt: now()}
 			}
-			states[m.AgentID] = state
+			old, existed := previous[id]
+			if existed {
+				delete(previous, id)
+				bound, err := groupBindingExistsTx(ctx, tx, g.ID, id)
+				if err != nil {
+					return err
+				}
+				if bound && !sameMemberSession(old, m) {
+					return &serviceError{409, errors.New("已有会话的成员不能更换 Agent、工作区或会话来源，请移除后重新添加")}
+				}
+				if !bound && m.ForkSessionID != nil {
+					if err := bindForkTx(ctx, tx, g.ID, m); err != nil {
+						return err
+					}
+					state.SessionID = *m.ForkSessionID
+				}
+			} else {
+				bound, err := groupBindingExistsTx(ctx, tx, g.ID, id)
+				if err != nil {
+					return err
+				}
+				if bound {
+					return errors.New("群成员标识已被使用")
+				}
+				if err := bindForkTx(ctx, tx, g.ID, m); err != nil {
+					return err
+				}
+				if m.ForkSessionID != nil {
+					state.SessionID = *m.ForkSessionID
+				}
+			}
+			states[id] = state
+		}
+		for id := range previous {
+			if err := unbindMemberTx(ctx, tx, g.ID, id); err != nil {
+				return err
+			}
+			if g.Coordination != nil {
+				delete(g.Coordination.Delivered, id)
+				delete(g.Coordination.SkippedThrough, id)
+			}
 		}
 		g.MemberStates = states
 		return nil
@@ -532,7 +761,16 @@ func (s *Service) remove(ctx context.Context, id string) error {
 	}
 	var event store.Event
 	err := s.options.Store.WithTx(ctx, func(tx *sql.Tx) error {
-		for _, key := range []string{"bot_group:" + id, "bot_group_msgs:" + id} {
+		group, err := readGroupTx(ctx, tx, id)
+		if err != nil && !errors.Is(err, errMissing) {
+			return err
+		}
+		for _, member := range group.Members {
+			if err := unbindMemberTx(ctx, tx, id, memberID(member)); err != nil {
+				return err
+			}
+		}
+		for _, key := range []string{"bot_group:" + id, "bot_group_msgs:" + id, "bot_group_artifacts_cursor:" + id, fileIndexKey(id), artifacts.DatabaseKey(id)} {
 			if _, err := tx.ExecContext(ctx, `DELETE FROM workspace_preferences WHERE key=?`, key); err != nil {
 				return err
 			}
@@ -542,7 +780,6 @@ func (s *Service) remove(ctx context.Context, id string) error {
 				return err
 			}
 		}
-		var err error
 		event, err = appendEventTx(ctx, tx, "bot_group.delete", map[string]any{"id": id})
 		return err
 	})
@@ -556,9 +793,9 @@ func (s *Service) remove(ctx context.Context, id string) error {
 func Mentions(text string, members []Member) []string {
 	lower := strings.ToLower(text)
 	result := []string{}
-	if strings.Contains(lower, "@all") || strings.Contains(lower, "@所有人") {
+	if mentionPosition(lower, "all") >= 0 || mentionPosition(lower, "所有人") >= 0 {
 		for _, m := range members {
-			result = append(result, m.AgentID)
+			result = append(result, memberID(m))
 		}
 		return result
 	}
@@ -567,6 +804,14 @@ func Mentions(text string, members []Member) []string {
 		agent string
 	}
 	matches := []match{}
+	aliasPositions := map[int]bool{}
+	for _, m := range members {
+		if m.Alias != nil && strings.TrimSpace(*m.Alias) != "" {
+			if at := mentionPosition(lower, strings.ToLower(strings.TrimSpace(*m.Alias))); at >= 0 {
+				aliasPositions[at] = true
+			}
+		}
+	}
 	for _, m := range members {
 		patterns := []string{m.AgentID}
 		if m.Name != nil {
@@ -577,20 +822,20 @@ func Mentions(text string, members []Member) []string {
 				}
 			}
 		}
-		if m.Alias != nil {
-			patterns = append(patterns, *m.Alias)
-		}
 		position := -1
+		if m.Alias != nil && strings.TrimSpace(*m.Alias) != "" {
+			position = mentionPosition(lower, strings.ToLower(strings.TrimSpace(*m.Alias)))
+		}
 		for _, pattern := range patterns {
 			if pattern == "" {
 				continue
 			}
-			if at := strings.Index(lower, "@"+strings.ToLower(pattern)); at >= 0 && (position < 0 || at < position) {
+			if at := mentionPosition(lower, strings.ToLower(pattern)); at >= 0 && !aliasPositions[at] && (position < 0 || at < position) {
 				position = at
 			}
 		}
 		if position >= 0 {
-			matches = append(matches, match{position, m.AgentID})
+			matches = append(matches, match{position, memberID(m)})
 		}
 	}
 	sort.SliceStable(matches, func(i, j int) bool { return matches[i].pos < matches[j].pos })
@@ -599,36 +844,68 @@ func Mentions(text string, members []Member) []string {
 	}
 	return result
 }
+func mentionPosition(text, name string) int {
+	needle := "@" + name
+	offset := 0
+	for offset < len(text) {
+		at := strings.Index(text[offset:], needle)
+		if at < 0 {
+			return -1
+		}
+		at += offset
+		end := at + len(needle)
+		if end == len(text) {
+			return at
+		}
+		next, _ := utf8.DecodeRuneInString(text[end:])
+		if !unicode.IsLetter(next) && !unicode.IsDigit(next) && next != '_' && next != '-' {
+			return at
+		}
+		offset = end
+	}
+	return -1
+}
+func appendMessageTx(ctx context.Context, tx *sql.Tx, message Message) ([]store.Event, int, error) {
+	var raw string
+	messages := []Message{}
+	err := tx.QueryRowContext(ctx, `SELECT value FROM workspace_preferences WHERE key=?`, "bot_group_msgs:"+message.GroupID).Scan(&raw)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, 0, err
+	}
+	if err == nil {
+		if err = json.Unmarshal([]byte(raw), &messages); err != nil {
+			return nil, 0, err
+		}
+	}
+	persisted := message
+	if persisted.SenderType == "agent" {
+		persisted.Text = ""
+	}
+	messages = append(messages, persisted)
+	if err = putTx(ctx, tx, "bot_group_msgs:"+message.GroupID, messages); err != nil {
+		return nil, 0, err
+	}
+	event, err := appendEventTx(ctx, tx, "bot_group.message", message)
+	if err != nil {
+		return nil, 0, err
+	}
+	events := []store.Event{event}
+	return events, len(messages), nil
+}
+
 func (s *Service) appendMessage(ctx context.Context, message Message) error {
-	var event store.Event
+	var events []store.Event
 	err := s.options.Store.WithTx(ctx, func(tx *sql.Tx) error {
 		if _, err := readGroupTx(ctx, tx, message.GroupID); err != nil {
 			return err
 		}
-		var raw string
-		messages := []Message{}
-		err := tx.QueryRowContext(ctx, `SELECT value FROM workspace_preferences WHERE key=?`, "bot_group_msgs:"+message.GroupID).Scan(&raw)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
-		if err == nil {
-			if err = json.Unmarshal([]byte(raw), &messages); err != nil {
-				return err
-			}
-		}
-		persisted := message
-		if persisted.SenderType == "agent" {
-			persisted.Text = ""
-		}
-		messages = append(messages, persisted)
-		if err = putTx(ctx, tx, "bot_group_msgs:"+message.GroupID, messages); err != nil {
-			return err
-		}
-		event, err = appendEventTx(ctx, tx, "bot_group.message", message)
+		var err error
+		events, _, err = appendMessageTx(ctx, tx, message)
 		return err
 	})
 	if err == nil {
-		s.options.Publisher.PublishCommitted([]store.Event{event})
+		s.options.Publisher.PublishCommitted(events)
+		s.scheduleArtifacts(message.GroupID)
 	}
 	return err
 }
@@ -645,13 +922,27 @@ func (s *Service) send(ctx context.Context, id string, payload map[string]json.R
 	if err != nil {
 		return nil, err
 	}
-	var text, target string
+	var text, targetAgent, targetMember string
 	var mentions []string
-	if err = json.Unmarshal(payload["text"], &text); err != nil || strings.TrimSpace(text) == "" || utf8.RuneCountInString(text) > 32000 {
+	if raw, ok := payload["text"]; ok {
+		if err = json.Unmarshal(raw, &text); err != nil {
+			return nil, errors.New("Invalid group message")
+		}
+	}
+	attachments, err := s.messageAttachments(ctx, payload["attachment_ids"])
+	if err != nil {
+		return nil, err
+	}
+	if (strings.TrimSpace(text) == "" && len(attachments) == 0) || utf8.RuneCountInString(text) > 32000 {
 		return nil, errors.New("Invalid group message")
 	}
 	if raw, ok := payload["target_agent_id"]; ok && string(raw) != "null" {
-		if err = json.Unmarshal(raw, &target); err != nil {
+		if err = json.Unmarshal(raw, &targetAgent); err != nil {
+			return nil, errors.New("Invalid target")
+		}
+	}
+	if raw, ok := payload["target_member_id"]; ok && string(raw) != "null" {
+		if err = json.Unmarshal(raw, &targetMember); err != nil {
 			return nil, errors.New("Invalid target")
 		}
 	}
@@ -664,54 +955,70 @@ func (s *Service) send(ctx context.Context, id string, payload map[string]json.R
 		mentions = Mentions(text, g.Members)
 	}
 	targets := mentions
-	if target != "" {
-		targets = []string{target}
+	if targetMember != "" {
+		targets = []string{targetMember}
+	} else if targetAgent != "" {
+		targets = nil
+		for _, member := range g.Members {
+			if member.AgentID == targetAgent {
+				targets = append(targets, memberID(member))
+			}
+		}
+		if len(targets) != 1 {
+			return nil, errors.New("请指定明确的群成员")
+		}
 	}
 	if len(targets) == 0 {
 		for _, m := range g.Members {
-			targets = append(targets, m.AgentID)
+			targets = append(targets, memberID(m))
 		}
 	}
 	members := map[string]Member{}
 	for _, m := range g.Members {
-		members[m.AgentID] = m
+		members[memberID(m)] = m
 	}
+	uniqueTargets := make([]string, 0, len(targets))
+	seenTargets := map[string]bool{}
 	for _, id := range targets {
 		if _, ok := members[id]; !ok {
 			return nil, errors.New("目标不在群聊成员中")
 		}
-		if state := g.MemberStates[id]; state.Status == "running" || state.Status == "unknown" {
-			return nil, &serviceError{409, errors.New("成员仍有执行中或未确认结果，请先停止或核对")}
+		if seenTargets[id] {
+			continue
 		}
-		s.mu.Lock()
-		busy := s.active[g.ID][id] != nil
-		s.mu.Unlock()
-		if busy {
-			return nil, &serviceError{409, errors.New("成员正在运行")}
+		seenTargets[id] = true
+		if g.MemberStates[id].Muted {
+			continue
+		}
+		uniqueTargets = append(uniqueTargets, id)
+		if state := g.MemberStates[id]; state.Status == "unknown" {
+			return nil, &serviceError{409, errors.New("成员仍有未确认的执行结果，请先核对")}
 		}
 	}
+	targets = uniqueTargets
 	messageID, err := randomID("gmsg-")
 	if err != nil {
 		return nil, err
 	}
-	message := Message{ID: messageID, GroupID: id, SenderType: "user", SenderID: "human", SenderName: "用户", Text: strings.TrimSpace(text), Mentions: mentions, CreatedAt: now()}
-	if err = s.appendMessage(ctx, message); err != nil {
-		return nil, err
-	}
-	for _, target := range targets {
-		s.dispatch(id, members[target], text, 1)
-	}
+	message := Message{ID: messageID, GroupID: id, SenderType: "user", SenderID: "human", SenderName: "用户", Text: strings.TrimSpace(text), Mentions: mentions, Attachments: attachments, CreatedAt: now()}
 	history, err := s.messages(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	var first any
-	if len(targets) > 0 {
-		first = targets[0]
+	historyCount, err := s.queueUserMessage(ctx, id, message, targets, history)
+	if err != nil {
+		return nil, err
 	}
-	return map[string]any{"ok": true, "message": message, "target_agent_id": first, "history_count": len(history)}, nil
+	s.schedule(id)
+	var firstMember, firstAgent any
+	if len(targets) > 0 {
+		firstMember = targets[0]
+		firstAgent = members[targets[0]].AgentID
+	}
+	return map[string]any{"ok": true, "message": message, "target_agent_id": firstAgent, "target_member_id": firstMember, "history_count": historyCount}, nil
 }
-func (s *Service) dispatch(id string, member Member, text string, hop int) {
+func (s *Service) dispatch(id string, member Member, text string, hop int, throughID, commandID string, attachments []map[string]any) {
+	mid := memberID(member)
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
@@ -720,149 +1027,61 @@ func (s *Service) dispatch(id string, member Member, text string, hop int) {
 	if s.active[id] == nil {
 		s.active[id] = map[string]*activeTurn{}
 	}
-	if s.active[id][member.AgentID] != nil {
+	if s.active[id][mid] != nil {
 		s.mu.Unlock()
 		return
 	}
-	ctx, cancel := context.WithTimeout(s.ctx, 120*time.Second)
-	commandID, err := randomID("cmd-g-")
-	if err != nil {
-		cancel()
-		s.mu.Unlock()
-		return
-	}
-	run := &activeTurn{turn: Turn{GroupID: id, Member: member, Prompt: text, Hop: hop, CommandID: commandID}, cancel: cancel}
-	s.active[id][member.AgentID] = run
+	ctx, cancel := context.WithCancel(s.ctx)
+	run := &activeTurn{turn: Turn{GroupID: id, Member: member, Prompt: text, Hop: hop, CommandID: commandID, ThroughID: throughID, Attachments: attachments}, cancel: cancel}
+	s.active[id][mid] = run
 	s.wg.Add(1)
 	s.mu.Unlock()
 	go func() {
 		defer s.wg.Done()
 		defer cancel()
 		turn := run.turn
-		g, err := s.mutate(ctx, id, func(g *Group) error {
-			if hop > g.MaxHops {
-				return errors.New("群聊已达到最大转交次数")
-			}
-			g.ActiveHop = max(g.ActiveHop, hop)
-			g.ActiveSpeakers = append(g.ActiveSpeakers, member.AgentID)
-			g.ActiveSpeaker = &member.AgentID
-			g.MemberStates[member.AgentID] = MemberState{Status: "running", UpdatedAt: now()}
-			return nil
-		})
-		if err == nil {
-			history, readErr := s.messages(ctx, id)
-			if readErr != nil {
-				err = readErr
-			} else {
-				lines := []string{fmt.Sprintf("你正在参与星序多 Agent 协作群「%s」。", g.Name), "直截了当地回复与解决问题。需要交接时明确 @成员名称，完成后返回简短结果。", fmt.Sprintf("共享黑板 session_key=group::%s", id)}
-				if member.SystemRolePrompt != nil {
-					lines = append(lines, "你的群内职责："+*member.SystemRolePrompt)
+		turn.RecordBaseline = func(ids []string) error {
+			_, err := s.mutate(ctx, id, func(g *Group) error {
+				if g.Coordination == nil {
+					return errors.New("群聊任务状态不存在")
 				}
-				for _, m := range g.Members {
-					name := m.AgentID
-					if m.Name != nil {
-						name = *m.Name
-					}
-					lines = append(lines, "- @"+name)
+				delivery, ok := g.Coordination.InFlight[mid]
+				if !ok || delivery.CommandID != commandID {
+					return errors.New("群聊任务已变化")
 				}
-				for _, message := range history[max(0, len(history)-6):] {
-					lines = append(lines, "["+message.SenderName+"]: "+message.Text)
-				}
-				lines = append(lines, "当前任务："+text)
-				turn.Prompt = strings.Join(lines, "\n")
-			}
-		}
-		var reply Reply
-		if err == nil {
-			reply, err = s.options.Controller.Run(ctx, turn, func(session string) error {
-				s.mu.Lock()
-				run.turn.SessionID = session
-				stopped := run.explicitStop
-				boundTurn := run.turn
-				s.mu.Unlock()
-				if stopped {
-					interruptContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-					defer cancel()
-					if err := s.options.Controller.Interrupt(interruptContext, boundTurn); err != nil {
-						return err
-					}
-					return context.Canceled
-				}
-				_, err := s.mutate(ctx, id, func(g *Group) error {
-					state := g.MemberStates[member.AgentID]
-					state.SessionID = session
-					g.MemberStates[member.AgentID] = state
-					return nil
-				})
-				return err
+				delivery.BaselineCaptured = true
+				delivery.BaselineIDs = append([]string(nil), ids...)
+				g.Coordination.InFlight[mid] = delivery
+				return nil
 			})
+			return err
 		}
-		s.submissionMu.Lock()
-		defer s.submissionMu.Unlock()
-		s.mu.Lock()
-		current := s.active[id][member.AgentID] == run
-		sessionID := run.turn.SessionID
-		s.mu.Unlock()
-		if !current || s.ctx.Err() != nil {
-			return
+		turn.RecordAccepted = func() error {
+			return s.recordAccepted(ctx, id, mid, commandID)
 		}
-		state := MemberState{Status: "success", SessionID: sessionID, UpdatedAt: now()}
-		if err != nil {
-			state.Status = "failed"
-			state.LastError = err.Error()
-			reply.Text = "执行失败：" + err.Error()
-		}
-		messageID, idErr := randomID("gmsg-")
-		if idErr == nil {
-			name := member.AgentID
-			if member.Name != nil {
-				name = *member.Name
-			}
-			message := Message{ID: messageID, GroupID: id, SenderType: "agent", SenderID: member.AgentID, SenderName: name, Text: reply.Text, Mentions: Mentions(reply.Text, g.Members), HopCount: hop, CreatedAt: now(), SessionID: sessionID, NativeIDs: reply.NativeIDs}
-			if err != nil {
-				message.SenderType = "system"
-			}
-			if message.Text != "" {
-				if appendErr := s.appendMessage(s.ctx, message); appendErr != nil {
-					state.Status = "failed"
-					state.LastError = appendErr.Error()
+		reply, err := s.options.Controller.Run(ctx, turn, func(session string) error {
+			s.mu.Lock()
+			run.turn.SessionID = session
+			stopped := run.explicitStop
+			boundTurn := run.turn
+			s.mu.Unlock()
+			if stopped {
+				interruptContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+				defer cancel()
+				if err := s.options.Controller.Interrupt(interruptContext, boundTurn); err != nil {
+					return err
 				}
+				return context.Canceled
 			}
-		}
-		_, updateErr := s.mutate(s.ctx, id, func(g *Group) error {
-			g.MemberStates[member.AgentID] = state
-			remaining := []string{}
-			for _, id := range g.ActiveSpeakers {
-				if id != member.AgentID {
-					remaining = append(remaining, id)
-				}
-			}
-			g.ActiveSpeakers = remaining
-			g.ActiveSpeaker = nil
-			if len(remaining) == 0 {
-				g.ActiveHop = 0
-			} else {
-				g.ActiveSpeaker = &remaining[0]
-			}
-			return nil
+			_, err := s.mutate(ctx, id, func(g *Group) error {
+				state := g.MemberStates[mid]
+				state.SessionID = session
+				g.MemberStates[mid] = state
+				return nil
+			})
+			return err
 		})
-		s.mu.Lock()
-		if s.active[id][member.AgentID] == run {
-			delete(s.active[id], member.AgentID)
-		}
-		s.mu.Unlock()
-		if updateErr != nil || err != nil || hop >= g.MaxHops {
-			return
-		}
-		for _, target := range Mentions(reply.Text, g.Members) {
-			if target != member.AgentID {
-				for _, m := range g.Members {
-					if m.AgentID == target {
-						s.dispatch(id, m, reply.Text, hop+1)
-					}
-				}
-			}
-		}
+		s.finishDelivery(id, member, run, reply, err)
 	}()
 }
 func (s *Service) stop(ctx context.Context, id string) (Group, error) {
@@ -886,11 +1105,12 @@ func (s *Service) stopLocked(ctx context.Context, id string) (Group, error) {
 		return Group{}, readErr
 	}
 	for _, member := range group.Members {
-		state := group.MemberStates[member.AgentID]
+		mid := memberID(member)
+		state := group.MemberStates[mid]
 		if (state.Status == "running" || state.Status == "unknown") && state.SessionID != "" {
 			found := false
 			for _, turn := range turns {
-				if turn.Member.AgentID == member.AgentID {
+				if memberID(turn.Member) == mid {
 					found = true
 				}
 			}
@@ -910,7 +1130,7 @@ func (s *Service) stopLocked(ctx context.Context, id string) (Group, error) {
 			err := s.options.Controller.Interrupt(interruptCtx, turn)
 			cancel()
 			if err != nil {
-				failures[turn.Member.AgentID] = err.Error()
+				failures[memberID(turn.Member)] = err.Error()
 			}
 		}
 	}
@@ -919,15 +1139,42 @@ func (s *Service) stopLocked(ctx context.Context, id string) (Group, error) {
 		g.ActiveSpeaker = nil
 		g.ActiveSpeakers = []string{}
 		g.StoppedAt = now()
+		if g.Coordination != nil {
+			flow := ensureCoordination(g, nil)
+			flow.Status = "stopped"
+			flow.Error = ""
+			flow.Pending = make(map[string]PendingDelivery)
+			for _, turn := range turns {
+				mid := memberID(turn.Member)
+				if failures[mid] != "" {
+					flow.Status = "error"
+					flow.Error = "部分成员未确认停止，请核对会话"
+					continue
+				}
+				if delivery, ok := flow.InFlight[mid]; ok {
+					flow.Delivered[mid] = delivery.ThroughID
+					delete(flow.InFlight, mid)
+				}
+			}
+			flow.Revision++
+		}
 		for _, turn := range turns {
-			state := g.MemberStates[turn.Member.AgentID]
+			mid := memberID(turn.Member)
+			state := g.MemberStates[mid]
 			state.Status = "cancelled"
 			state.UpdatedAt = now()
-			if detail := failures[turn.Member.AgentID]; detail != "" {
-				state.Status = "failed"
+			if detail := failures[mid]; detail != "" {
+				state.Status = "unknown"
 				state.LastError = detail
 			}
-			g.MemberStates[turn.Member.AgentID] = state
+			g.MemberStates[mid] = state
+		}
+		for mid, state := range g.MemberStates {
+			if state.Status == "waiting" {
+				state.Status = "cancelled"
+				state.UpdatedAt = now()
+				g.MemberStates[mid] = state
+			}
 		}
 		return nil
 	})

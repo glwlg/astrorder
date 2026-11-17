@@ -27,7 +27,7 @@ type LLMConfig struct {
 	Reasoning string `json:"reasoning"`
 }
 
-// GetJevKey retrieves configured Jev API key from store or env.
+// GetJevKey retrieves the configured System One API key from store or env.
 func GetJevKey(ctx context.Context, st *store.Store) string {
 	if st != nil {
 		pref, err := st.GetPreference(ctx, "services:jev_api_key")
@@ -115,10 +115,10 @@ type JevPlanner struct {
 	JevModel string
 }
 
-// InvokeJevHTTP makes the HTTP call to TypeSafe AI Jev endpoint.
+// InvokeJevHTTP makes the HTTP call to the System One endpoint.
 func (p *JevPlanner) InvokeJevHTTP(ctx context.Context, state any, questions map[string]any) (map[string]any, error) {
 	if p.JevKey == "" {
-		return nil, errors.New("Jev API Key 未配置，请在设置中配置 Jev API Key。")
+		return nil, errors.New("System One API Key 未配置，请在设置中配置 System One API Key。")
 	}
 
 	client := p.Client
@@ -143,7 +143,7 @@ func (p *JevPlanner) InvokeJevHTTP(ctx context.Context, state any, questions map
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {
-		return nil, fmt.Errorf("marshal jev request: %w", err)
+		return nil, fmt.Errorf("marshal System One request: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(data))
@@ -155,29 +155,29 @@ func (p *JevPlanner) InvokeJevHTTP(ctx context.Context, state any, questions map
 
 	resp, err := requestClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("Jev API 网络异常: %w", err)
+		return nil, fmt.Errorf("System One API 网络异常: %w", err)
 	}
 	defer resp.Body.Close()
 
 	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 16000001))
 	if err != nil {
-		return nil, fmt.Errorf("read jev response: %w", err)
+		return nil, fmt.Errorf("read System One response: %w", err)
 	}
 	if len(bodyBytes) > 16000000 {
-		return nil, errors.New("Jev response exceeds size limit")
+		return nil, errors.New("System One response exceeds size limit")
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Jev API 调用失败 (%d): %s", resp.StatusCode, string(bodyBytes))
+		return nil, fmt.Errorf("System One API 调用失败 (%d): %s", resp.StatusCode, string(bodyBytes))
 	}
 
 	var res map[string]any
 	dec := json.NewDecoder(bytes.NewReader(bodyBytes))
 	dec.UseNumber()
 	if err := dec.Decode(&res); err != nil {
-		return nil, fmt.Errorf("decode jev response: %w", err)
+		return nil, fmt.Errorf("decode System One response: %w", err)
 	}
 	if err := dec.Decode(new(any)); err != io.EOF {
-		return nil, errors.New("decode jev response: unexpected trailing json data")
+		return nil, errors.New("decode System One response: unexpected trailing json data")
 	}
 	return res, nil
 }

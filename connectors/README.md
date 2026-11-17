@@ -1,44 +1,27 @@
-# Astrorder 智能体连接器 (Embedded Connectors)
+# Agent 运行时与插件
 
-星序连接器（Connectors）负责星序控制面与底层各大原生 AI Agent 运行时的生命周期桥接与事件双工同步。星序严格遵循**原生真值权威原则**，不使用平庸的命令行爬虫或虚假 Mock 数据，真实反映各个 Agent 的连接能力。
+原生 Agent 进程由 `session-daemon-go/internal/runtime/` 托管。`connectors/` 保存宿主插件和安装资产，不提供第二套 Python Codex 控制服务。
 
----
+## 运行时归属
 
-## 1. 支持的智能体连接器矩阵
+| 对象 | 当前实现 |
+| --- | --- |
+| Codex 会话、模型、审批与中断 | Go 小内核的 Codex app-server 适配 |
+| Hermes 本机与远程会话 | Go 小内核托管及 Hermes 原生插件 |
+| Grok、Antigravity | Go 原生运行时与观察适配 |
+| SSH、WSL、交互终端 | Go 小内核的远程环境和 PTY 管理 |
+| Agent CLI、技能分发、观察钩子 | Go `astrorder-agent`、`astrorder-helper` 与能力中心 |
 
-| 智能体类型 | 协议与连接方式 | 宿主位置 | 核心支持能力 |
-|---|---|---|---|
-| **Codex** | `codex app-server` 标准 JSON-RPC 协议 (stdio / IPC) | Session Daemon / 本机 | 多轮会话、中断控制 (`turn/interrupt`)、模型与思考深度切换、三档审批模式 (`ask`/`auto`/`full`)、CDP 图像附件上传 |
-| **Hermes** | 官方插件包装器 (`hermes_agent.plugins`) + TUI-Gateway | Session Daemon / 本机 | 会话生命周期流、实时观察流、模型配置同步、会话销毁对齐 |
-| **Grok** | 本地 CLI 进程与远端 Grok 运行时通道 | Session Daemon / 远程 | 深度推理流式输出 (`grok-3-deepthink`)、多轮交互、状态快照 |
-| **SSH 远程环境** | 原生 SSH PTY 隧道 | 远端 Linux/Unix 服务器 | 远程 Agent 自动发现、远程工作区终端交互、远程 Docker 与开发集群代理 |
+## 安装资产
 
----
+- `codex/codex-plugin/`：Codex 插件清单和技能资产。
+- `hermes/astrorder_hermes_plugin/`：Hermes 轻量宿主插件，运行于 Hermes 自己的 Python 环境。
+- `.hermes/plugins/astrorder-hermes/`：随安装器交付的 Hermes 插件包装目录。
 
-## 2. 连接器安全规范
+这些目录由当前安装器使用，不能因为包含 Python 文件就删除。Hermes 插件不承载星序 HTTP 服务或应用数据库。
 
-1. **凭证双轨严格隔离**：
-   - `ASTRORDER_BROWSER_SECRET`（浏览器访问凭据）与 `ASTRORDER_CONNECTOR_SECRET`（连接器内部通讯密钥）强行解耦，且连接器凭据绝不返回至前端网络层。
-2. **零凭证落盘原则**：
-   - SSH 连接只记录主机地址、端口、用户与私钥本地引用路径，系统内部绝不留存或持久化私钥文本、明文口令。
-3. **安全沙箱受控接入**：
-   - 所有连接器进程严格运行在隔离的子进程树下，大内核仅通过本地 Loopback IPC 与常驻 Session Daemon 守护进程通讯，防止主服务迭代导致连接断裂。
+## 连接与身份
 
----
+通过星序的连接管理和能力中心配置本机、WSL 与 SSH 环境，由小内核按运行时协议托管。Agent ID、connection ID 和原生 session ID 各自保持原样，不通过名称或最近活跃时间推测身份。
 
-## 3. 本地连接安装与运行
-
-### 3.1 Hermes 本地安装
-```bash
-# 安装 Hermes 连接器插件包
-uv pip install ./connectors/hermes
-```
-在星序前端「连接管理」中点击连接本机 Hermes 时，星序会自动在当前活动的 Hermes profile 插件目录下配置受控轻量包装器并完成插件激活。
-
-### 3.2 Codex 伴随进程运行
-```bash
-# 安装 Codex 连接器组件
-uv pip install ./connectors/codex
-astrorder-codex-connector
-```
-在 Session Daemon 模式下，守护进程小内核会自动托管 Codex `app-server` 子进程，支持多任务并发调度与无感断线重放。
+浏览器访问凭据与连接器内部凭据分开管理；私钥路径是引用，不在项目源码、技能或日志中写入密钥内容。大内核更新不结束托管 Agent，维护边界见 [AGENTS.md](../AGENTS.md)。

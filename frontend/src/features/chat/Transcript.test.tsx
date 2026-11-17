@@ -44,6 +44,41 @@ const outbound: OutboxEntry = {
 }
 
 describe('transcript follow mode', () => {
+  it('counts failed operations as processed and leaves unknown and running operations pending', () => {
+    const states = ['completed', 'failed', 'running', undefined]
+    render(<MantineProvider><Transcript session={runningSession} outbox={[]} messages={states.map((status, i) => ({
+      ...message, id: `state-${i}`, role: 'tool', kind: 'tool',
+      tool: { name: 'commandExecution', status, arguments: { command: `echo ${i}` } },
+    }))} /></MantineProvider>)
+    expect(screen.getByLabelText('已处理 2 项，共 4 项')).toHaveTextContent('2 / 4')
+    expect(screen.getByTestId('message-state-1')).toHaveAttribute('data-status', 'failed')
+    expect(screen.getByTestId('message-state-2')).toHaveAttribute('data-status', 'running')
+    expect(screen.getByTestId('message-state-3')).toHaveAttribute('data-status', 'recorded')
+  })
+
+  it('keeps long command output intact when opening and copying it', () => {
+    const command = 'printf "%s" long-output'
+    const output = `${'ordinary progress\n'.repeat(30)}fatal: complete output\n`
+    const copy = vi.fn().mockResolvedValue(undefined)
+    const previousClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard')
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: copy } })
+    try {
+      render(<MantineProvider><Transcript outbox={[]} messages={[
+        { ...message, id: 'command', role: 'tool', kind: 'tool', text: output, tool: { name: 'commandExecution', status: 'completed', arguments: { command } } },
+      ]} /></MantineProvider>)
+      const pack = screen.getByRole('region', { name: '思考与工具' })
+      fireEvent.click(pack.querySelector('summary')!)
+      fireEvent.click(screen.getByTestId('message-command').querySelector('summary')!)
+      expect(pack.querySelector('.shell-output-text')?.textContent).toBe(output)
+      expect(screen.queryByRole('button', { name: /降噪/ })).not.toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: '复制终端输出' }))
+      expect(copy).toHaveBeenCalledWith(`$ ${command}\n${output}`)
+    } finally {
+      if (previousClipboard) Object.defineProperty(navigator, 'clipboard', previousClipboard)
+      else Reflect.deleteProperty(navigator, 'clipboard')
+    }
+  })
+
   it('splits long running activity into 100-item packs and closes earlier packs', () => {
     const messages: Message[] = Array.from({ length: 201 }, (_, i) => ({ ...message, id: `tool-${i}`, role: 'tool', kind: 'tool', text: '', tool: { name: 'commandExecution', status: 'completed', arguments: { command: `echo ${i}` } } }))
     const view = render(<MantineProvider><Transcript outbox={[]} messages={messages} session={runningSession} /></MantineProvider>)

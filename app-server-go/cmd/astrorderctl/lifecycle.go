@@ -69,6 +69,9 @@ func runAppContext(parent context.Context, args []string, output io.Writer) int 
 	if *root == "" || *state == "" || !filepath.IsAbs(*root) || !filepath.IsAbs(*state) {
 		return cliFailure(output, errors.New("App controls require absolute --root and --state-dir"))
 	}
+	if handled, code := maybeBrokerLifecycle(parent, "app", operation, *root, *state, false, output); handled {
+		return code
+	}
 	values, err := publicEnvironment(filepath.Join(*state, "production.json"))
 	if err != nil {
 		return cliFailure(output, err)

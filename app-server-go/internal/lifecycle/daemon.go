@@ -278,7 +278,9 @@ func daemonStatus(ctx context.Context, options validatedDaemonOptions) (DaemonSt
 	result.PortOwned = result.IdentityVerified && len(pids) == 1 && pids[0] == identity.PID
 
 	if !result.IdentityVerified || !result.PortOwned {
-		if len(pids) == 0 && errors.Is(inspectErr, os.ErrNotExist) {
+		// A different native creation time proves that the PID was reused.
+		// An active listener still stays a conflict.
+		if len(pids) == 0 && (errors.Is(inspectErr, os.ErrNotExist) || processIdentityReused(identity, current, inspectErr)) {
 			result.State = StateStopped
 		} else {
 			result.State = StateConflict

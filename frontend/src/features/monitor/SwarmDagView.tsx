@@ -391,6 +391,8 @@ export function SwarmDagView({
     >
       {/* 顶部左侧：坐标指示与视口控制 HUD */}
       <div
+        data-liquid-surface="toolbar"
+        data-liquid-snapshot=".swarm-dag-viewport"
         style={{
           position: 'absolute',
           top: 14,

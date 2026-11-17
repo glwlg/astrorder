@@ -2,7 +2,7 @@ import { Stack, Text, Title } from '@mantine/core'
 import { UsageGatewaySettingsCard } from './UsageGatewaySettingsCard'
 import { OpenVikingSettingsCard } from './OpenVikingSettingsCard'
 import { LlmSettingsCard } from './LlmSettingsCard'
-import { JevSettingsCard } from './JevSettingsCard'
+import { SystemOneSettingsCard } from './JevSettingsCard'
 import { BrowserEngineSettingsCard } from './BrowserEngineSettingsCard'
 
 export function ModelGatewaySettingsPage() {
@@ -14,7 +14,7 @@ export function ModelGatewaySettingsPage() {
         <OpenVikingSettingsCard />
         <LlmSettingsCard />
         <BrowserEngineSettingsCard />
-        <JevSettingsCard />
+        <SystemOneSettingsCard />
       </Stack>
     </div>
   )

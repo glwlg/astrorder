@@ -2,8 +2,8 @@ import { useEffect } from 'react'
 import { api } from '../../api/client'
 import { notifications } from '@mantine/notifications'
 import { ActionIcon, Tooltip } from '@mantine/core'
-import { IconFolderSearch, IconLayoutSidebarRightCollapse, IconPlus } from '@tabler/icons-react'
-import { SidecarTabs } from './SidecarTabs'
+import { IconFolderSearch } from '@tabler/icons-react'
+import { SidecarHeader } from './SidecarHeader'
 import { SidecarWelcomeMenu } from './SidecarWelcomeMenu'
 import { SessionDetails } from '../chat/SessionDetails'
 import { artifactViewerRegistry } from './registry'
@@ -146,55 +146,18 @@ export function SidecarHost({
         flexDirection: 'column',
         height: '100%',
         minWidth: 0,
-        borderLeft: '1px solid var(--astr-border)',
         background: 'var(--astr-surface)',
       }}
     >
-      <div
-        className="sidecar-header-bar"
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          borderBottom: '1px solid var(--astr-border)',
-          height: 'var(--astr-header-height, 48px)',
-          minHeight: 'var(--astr-header-height, 48px)',
-          maxHeight: 'var(--astr-header-height, 48px)',
-          padding: '0 10px',
-          boxSizing: 'border-box',
-          background: 'var(--astr-surface)',
-          flexShrink: 0,
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0, flex: 1, overflow: 'hidden' }}>
-          <SidecarTabs
-            tabs={tabs}
-            activeId={activeTabId}
-            dirtyTabs={dirtyTabs}
-            onSelect={setActiveTabId}
-            onClose={closeTab}
-          />
-          <Tooltip label="新建面板（返回操作菜单）">
-            <ActionIcon
-              variant="subtle"
-              size="sm"
-              color="gray"
-              onClick={() => setActiveTabId('')}
-              title="新建面板"
-            >
-              <IconPlus size={14} />
-            </ActionIcon>
-          </Tooltip>
-        </div>
-
-        {surface === 'desktop' && <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <Tooltip label="收起工作台">
-            <ActionIcon variant="subtle" size="sm" color="gray" onClick={onCloseSidecar} aria-label="收起工作台">
-              <IconLayoutSidebarRightCollapse size={16} />
-            </ActionIcon>
-          </Tooltip>
-        </div>}
-      </div>
+      <SidecarHeader
+        tabs={tabs}
+        activeId={activeTabId}
+        dirtyTabs={dirtyTabs}
+        onSelect={setActiveTabId}
+        onCloseTab={closeTab}
+        onNewPanel={() => setActiveTabId('')}
+        onClose={surface === 'desktop' ? onCloseSidecar : undefined}
+      />
 
       <div style={{ flex: 1, minHeight: 0, overflow: 'auto', position: 'relative' }}>
         {/* 没有活动 Tab 时显示操作菜单；已打开的插件保持挂载，仅切换可见性。 */}
@@ -211,7 +174,7 @@ export function SidecarHost({
           />
         )}
         {activeTab?.type === 'details' && (
-          <div style={{ padding: '8px 16px' }}>
+          <div className="sidecar-session-details">
             <SessionDetails
               session={session}
               agent={agent}

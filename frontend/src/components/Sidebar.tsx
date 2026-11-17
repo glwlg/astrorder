@@ -1,4 +1,4 @@
-import { IconAdjustments, IconBolt, IconBrain, IconChartHistogram, IconDeviceDesktop, IconKeyboard, IconLayoutDashboard, IconMessageCircle, IconPuzzle, IconSettings, IconTopologyStarRing, IconUsers, IconWorld } from '@tabler/icons-react'
+import { ChartLineUpIcon, ChatCircleDotsIcon, CpuIcon, DesktopIcon, GearSixIcon, GlobeHemisphereWestIcon, GraphIcon, KeyboardIcon, LightningIcon, PuzzlePieceIcon, SlidersHorizontalIcon, SquaresFourIcon, UsersThreeIcon } from './workbenchIcons'
 import { ActionIcon, HoverCard, Modal, NavLink, Stack, Tabs, Text, Tooltip } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useQuery } from '@tanstack/react-query'
@@ -21,13 +21,20 @@ import { CapabilitiesSettingsCard } from '../features/services/CapabilitiesSetti
 import { SessionRail } from './SessionRail'
 import { BotGroupRail } from './BotGroupRail'
 import { SwarmRootRail } from './SwarmRootRail'
+import { useAstrorderStore } from '../state/store'
+import { groupHasActiveTask } from '../domain/groupActivity'
+import { GroupTaskIndicator } from './GroupTaskIndicator'
+import { NotificationPermissionControl } from './NotificationPermissionControl'
+import { WorkspaceThemeToggle } from './WorkspaceThemeToggle'
+import { connectionName } from './AgentSessionFilter'
+import { scopeKey } from '../domain/semantics'
 
 const navItems = [
-  { to: '/chat', label: '会话', icon: IconMessageCircle, id: 'chat' },
-  { to: '/monitor', label: '监控室', icon: IconLayoutDashboard, id: 'monitor' },
-  { to: '/swarm', label: '星图', icon: IconTopologyStarRing, id: 'swarm' },
-  { to: '/groups', label: '群聊', icon: IconUsers, id: 'groups' },
-  { to: '/analytics', label: '统计', icon: IconChartHistogram, id: 'analytics' },
+  { to: '/chat', label: '会话', icon: ChatCircleDotsIcon, id: 'chat' },
+  { to: '/monitor', label: '监控室', icon: SquaresFourIcon, id: 'monitor' },
+  { to: '/swarm', label: '星图', icon: GraphIcon, id: 'swarm' },
+  { to: '/groups', label: '群聊', icon: UsersThreeIcon, id: 'groups' },
+  { to: '/analytics', label: '统计', icon: ChartLineUpIcon, id: 'analytics' },
 ]
 
 function TodayUsagePreview({ data, pending, error, updatedAt }: {
@@ -109,6 +116,7 @@ export function Sidebar({
   agents,
   projects = [],
   activeSessionKey,
+  chatReturnPath = '/chat',
   onSelectSession,
   onNavigate,
 }: {
@@ -116,6 +124,7 @@ export function Sidebar({
   agents: Record<string, Agent>
   projects?: Project[]
   activeSessionKey?: string
+  chatReturnPath?: string
   onSelectSession: (session: Session) => void
   onNavigate?: () => void
 }) {
@@ -138,11 +147,16 @@ export function Sidebar({
   const isMonitorRoute = location.pathname.startsWith('/monitor')
   const isAnalytics = location.pathname.startsWith('/analytics')
   const isChat = !isSwarm && !isGroups && !isMonitorRoute && !isAnalytics
+  const groupsBusy = useAstrorderStore(state => Object.values(state.botGroups).some(groupHasActiveTask))
+  const connection = useAstrorderStore(state => state.connection)
+  const activeSession = sessions.find(session => scopeKey(session.agent_id, session.id) === activeSessionKey)
+  const activeAgent = activeSession ? agents[activeSession.agent_id] : undefined
+  const connectionLabel = connection === 'connected' ? '已连接' : connection === 'connecting' ? '连接中' : connection === 'error' ? '连接异常' : '离线'
 
   return (
     <>
-      <Stack className="sidebar-content" gap="md">
-        <nav aria-label="主导航">
+      <div className="workspace-sidebar">
+        <nav className="workspace-navigation" aria-label="主导航">
           <div className="sidebar-primary-nav">
             {navItems.map(({ to, label, icon: Icon, id }) => {
               const isThisMonitor = id === 'monitor'
@@ -155,12 +169,16 @@ export function Sidebar({
               const link = (
                 <NavLink
                     component={RouterNavLink}
-                    to={to}
-                    leftSection={<Icon size={18} stroke={1.8} />}
+                    to={id === 'chat' ? chatReturnPath : to}
+                    label={label}
+                    leftSection={<Icon size={25} weight={isActive ? 'duotone' : 'regular'} aria-hidden="true" />}
                     onClick={onNavigate}
                     data-active={isActive ? 'true' : undefined}
-                    aria-label={label}
+                    aria-current={isActive ? 'page' : undefined}
+                    aria-label={id === 'groups' && groupsBusy && !isGroups ? '群聊，有任务进行中' : label}
                     className={`sidebar-nav-link ${isActive ? 'active' : ''} ${isThisMonitor && isMonitorDragOver ? 'is-drag-over' : ''}`}
+                    data-liquid-surface={isActive ? 'selection' : undefined}
+                    data-liquid-snapshot=".workspace-navigation"
                     onDragOver={isThisMonitor ? (e) => {
                       e.preventDefault()
                       e.dataTransfer.dropEffect = 'copy'
@@ -189,7 +207,12 @@ export function Sidebar({
                     } : undefined}
                 />
               )
-              return id === 'analytics' ? (
+              return id === 'groups' && groupsBusy && !isGroups ? (
+                <div key={to} className="group-task-nav-tab">
+                  <Tooltip label="群聊有任务进行中" position="bottom" withArrow openDelay={200}>{link}</Tooltip>
+                  <GroupTaskIndicator />
+                </div>
+              ) : id === 'analytics' ? (
                 <HoverCard key={to} width={280} position="bottom-end" role="tooltip" withArrow openDelay={150} closeDelay={150}>
                   <HoverCard.Target>{link}</HoverCard.Target>
                   <HoverCard.Dropdown>
@@ -201,8 +224,21 @@ export function Sidebar({
               )
             })}
           </div>
+          <div className="workspace-navigation-tools">
+            <div className="workspace-tool-item"><NotificationPermissionControl /><span aria-hidden="true">通知</span></div>
+            <div className="workspace-tool-item"><WorkspaceThemeToggle /><span aria-hidden="true">主题</span></div>
+            <div className="workspace-tool-item">
+            <Tooltip label="设置" position="right">
+              <ActionIcon variant="subtle" aria-label="打开设置" onClick={() => setSettingsOpened(true)}>
+                <GearSixIcon size={24} aria-hidden="true" />
+              </ActionIcon>
+            </Tooltip>
+            <span aria-hidden="true">设置</span>
+            </div>
+          </div>
         </nav>
-        <div className="sidebar-divider" />
+        <div className="workspace-sidebar-panel">
+          <Stack className="sidebar-content" gap="md">
         {isSwarm ? (
           <SwarmRootRail
             sessions={sessions}
@@ -220,9 +256,6 @@ export function Sidebar({
               <Text size="xs" fw={700} c="dimmed">项目会话</Text>
               <div className="rail-heading-actions">
                 <Text size="xs" c="dimmed">{sessions.length}</Text>
-                <ActionIcon variant="subtle" color="gray" size="sm" aria-label="打开设置" title="设置" onClick={() => setSettingsOpened(true)}>
-                  <IconSettings size={16} />
-                </ActionIcon>
               </div>
             </div>
             <SessionRail
@@ -238,6 +271,12 @@ export function Sidebar({
           </>
         )}
       </Stack>
+          <footer className="workspace-connection" data-status={connection}>
+            <span className="workspace-connection-dot" aria-hidden="true" />
+            <span>{activeAgent ? `${connectionName(activeAgent)} · ` : ''}{connectionLabel}</span>
+          </footer>
+        </div>
+      </div>
       <SettingsDrawerScope>{hasOpenDrawer => <Modal
         className="settings-modal"
         opened={settingsOpened}
@@ -253,14 +292,14 @@ export function Sidebar({
       >
         <Tabs defaultValue="connections" orientation="vertical" keepMounted={true} className="settings-tabs">
           <Tabs.List>
-            <Tabs.Tab value="connections" leftSection={<IconAdjustments size={16} />}>连接</Tabs.Tab>
-            <Tabs.Tab value="models" leftSection={<IconBrain size={16} />}>模型与网关</Tabs.Tab>
-            <Tabs.Tab value="skills" leftSection={<IconBolt size={16} />}>能力中心</Tabs.Tab>
-            <Tabs.Tab value="rtk" leftSection={<IconChartHistogram size={16} />}>RTK</Tabs.Tab>
-            <Tabs.Tab value="network" leftSection={<IconWorld size={16} />}>网络与移动端</Tabs.Tab>
-            <Tabs.Tab value="shortcuts" leftSection={<IconKeyboard size={16} />}>快捷键</Tabs.Tab>
-            <Tabs.Tab value="desktop" leftSection={<IconDeviceDesktop size={16} />}>桌面客户端</Tabs.Tab>
-            <Tabs.Tab value="plugins" leftSection={<IconPuzzle size={16} />}>插件</Tabs.Tab>
+            <Tabs.Tab value="connections" leftSection={<SlidersHorizontalIcon size={16} />}>连接</Tabs.Tab>
+            <Tabs.Tab value="models" leftSection={<CpuIcon size={16} />}>模型与网关</Tabs.Tab>
+            <Tabs.Tab value="skills" leftSection={<LightningIcon size={16} />}>能力中心</Tabs.Tab>
+            <Tabs.Tab value="rtk" leftSection={<ChartLineUpIcon size={16} />}>RTK</Tabs.Tab>
+            <Tabs.Tab value="network" leftSection={<GlobeHemisphereWestIcon size={16} />}>网络与移动端</Tabs.Tab>
+            <Tabs.Tab value="shortcuts" leftSection={<KeyboardIcon size={16} />}>快捷键</Tabs.Tab>
+            <Tabs.Tab value="desktop" leftSection={<DesktopIcon size={16} />}>桌面客户端</Tabs.Tab>
+            <Tabs.Tab value="plugins" leftSection={<PuzzlePieceIcon size={16} />}>插件</Tabs.Tab>
           </Tabs.List>
           <Tabs.Panel value="connections" className="settings-tab-panel"><AgentsPage /></Tabs.Panel>
           <Tabs.Panel value="models" className="settings-tab-panel"><ModelGatewaySettingsPage /></Tabs.Panel>

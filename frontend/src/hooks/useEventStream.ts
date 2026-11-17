@@ -5,12 +5,30 @@ import { connectEventStream, type EventStreamStatus } from "../api/eventStream";
 import {
   deliverBrowserNotification,
   notificationForEvent,
+  notificationPath,
   restorePushSubscription,
 } from "../domain/notifications";
 import { useAstrorderStore } from "../state/store";
 import { api } from "../api/client";
 import { nativeActivityEvent } from "./useSessionOrder";
 import { scopeKey } from "../domain/semantics";
+import type { EventEnvelope } from "../domain/types";
+
+function isRawMessageDelta(event: EventEnvelope): boolean {
+  if (event.cursor !== 0) return false;
+  const frame = (event.data.frame || event.data) as Record<string, unknown>;
+  if (event.type === "codex.notification") {
+    return ["item/agentMessage/delta", "item/reasoning/delta", "item/plan/delta"].includes(String(frame.method));
+  }
+  if (event.type === "hermes.stream") {
+    return typeof (frame.delta ?? event.data.delta) === "string";
+  }
+  if (event.type === "grok.notification") {
+    const params = frame.params as { update?: { sessionUpdate?: string } } | undefined;
+    return ["agent_message_chunk", "agent_thought_chunk", "user_message_chunk"].includes(String(params?.update?.sessionUpdate));
+  }
+  return false;
+}
 
 function storeStatus(status: EventStreamStatus) {
   const connection =
@@ -62,6 +80,28 @@ export function useEventStream(
     }
 
     let disposed = false;
+    let groupRefresh: Promise<void> | undefined;
+    let groupRefreshPending = false;
+    const refreshGroups = (): Promise<void> => {
+      if (groupRefresh) {
+        groupRefreshPending = true;
+        return groupRefresh;
+      }
+      const before = useAstrorderStore.getState().botGroupRevision;
+      groupRefresh = api.listBotGroups().then((result) => {
+        if (!disposed) useAstrorderStore.getState().hydrateBotGroups(result.items, before);
+      }).catch(() => {
+        // The stream reconnect or explicit resync requests another snapshot.
+      }).finally(() => {
+        groupRefresh = undefined;
+        if (groupRefreshPending && !disposed) {
+          groupRefreshPending = false;
+          void refreshGroups();
+        }
+      });
+      return groupRefresh;
+    };
+    void refreshGroups();
     const hookRefreshes = new Map<string, {
       agent: string; session: string; dirty: boolean; running: boolean;
       timer?: ReturnType<typeof setTimeout>;
@@ -95,19 +135,75 @@ export function useEventStream(
         }
       }, 250);
     };
+    let pendingDeltas: EventEnvelope[] = [];
+    let deltaTimer: ReturnType<typeof setTimeout> | undefined;
+    const flushDeltas = () => {
+      clearTimeout(deltaTimer);
+      deltaTimer = undefined;
+      if (!pendingDeltas.length) return;
+      const events = pendingDeltas;
+      pendingDeltas = [];
+      const store = useAstrorderStore.getState();
+      const knownTurns = new Map<string, Set<unknown>>();
+      for (const event of events) {
+        if (event.agent_id && event.session_id && event.data.turn_id) {
+          const key = scopeKey(event.agent_id, event.session_id);
+          let turns = knownTurns.get(key);
+          if (!turns) {
+            turns = new Set(Object.values(store.messages[key] || {}).map(row => row.turn_id));
+            knownTurns.set(key, turns);
+          }
+          if (!turns.has(event.data.turn_id)) {
+            scheduleHookRefresh(event.agent_id, event.session_id);
+            turns.add(event.data.turn_id);
+          }
+        }
+      }
+      store.applyMessageDeltas(events);
+    };
     const stop = connectEventStream({
       after: useAstrorderStore.getState().cursor,
-      onStatus: storeStatus,
+      onStatus: status => {
+        if (status !== "connected") flushDeltas();
+        storeStatus(status);
+      },
       onResume: () => {
+        void refreshGroups();
         for (const resource of ["bootstrap", "messages", "commands", "tasks", "session_usage"]) {
           void queryClient.invalidateQueries({ queryKey: ["astrorder", resource] });
         }
       },
       onEvent: (event) => {
+        if (event.type === "message.delta" && event.cursor === 0) {
+          const store = useAstrorderStore.getState();
+          const { id, agent_id: agentId, session_id: sessionId } = event.data;
+          if (typeof id === "string" && typeof agentId === "string" && typeof sessionId === "string"
+            && !store.messageEventRevisions[scopeKey(agentId, sessionId)]?.[id]) {
+            if (event.agent_id && event.session_id && event.data.turn_id) {
+              const rows = Object.values(store.messages[scopeKey(event.agent_id, event.session_id)] || {});
+              if (!rows.some(row => row.turn_id === event.data.turn_id)) {
+                scheduleHookRefresh(event.agent_id, event.session_id);
+              }
+            }
+            store.applyEvent(event);
+            return;
+          }
+          pendingDeltas.push(event);
+          if (pendingDeltas.length >= 512) flushDeltas();
+          else if (!deltaTimer) deltaTimer = setTimeout(flushDeltas, 16);
+          return;
+        }
+        if (isRawMessageDelta(event)) return;
+        flushDeltas();
         const store = useAstrorderStore.getState();
         const notification =
           event.cursor > store.cursor ? notificationForEvent(event) : null;
         if (notification && store.addNotification(notification)) {
+          if (notification.kind === "task_completed" || notification.kind === "task_failed") {
+            void queryClient.invalidateQueries({
+              queryKey: ["astrorder", "messages", notification.agent_id, notification.session_id],
+            });
+          }
           mantineNotifications.show({
             id: notification.key,
             title: notification.title,
@@ -127,14 +223,8 @@ export function useEventStream(
                   (window.location.pathname.startsWith("/mobile") ||
                     window.innerWidth < 768 ||
                     window.matchMedia?.("(max-width: 767px)").matches);
-                const prefix = isMobile ? "/mobile" : "";
-                const targetPath =
-                  prefix +
-                  "/chat/" +
-                  encodeURIComponent(notification.session_id) +
-                  "?agent_id=" +
-                  encodeURIComponent(notification.agent_id);
-                const nav = navigateRef.current || navigate;
+                const targetPath = notificationPath(notification, isMobile);
+                const nav = navigateRef.current;
                 if (nav) {
                   nav(targetPath);
                 } else if (typeof window !== "undefined") {
@@ -157,6 +247,7 @@ export function useEventStream(
           }
         }
         store.applyEvent(event);
+        if (event.type === "resync_required") void refreshGroups();
         const nativeFrame = event.data.frame as { method?: string } | undefined;
         if (
           (event.type === "codex.notification" && nativeFrame?.method === "turn/completed") ||
@@ -369,6 +460,7 @@ export function useEventStream(
       },
     });
     return () => {
+      flushDeltas();
       disposed = true;
       for (const refresh of hookRefreshes.values()) clearTimeout(refresh.timer);
       hookRefreshes.clear();

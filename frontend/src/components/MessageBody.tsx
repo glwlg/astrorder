@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { IconPlayerPause } from '@tabler/icons-react'
 import { LazyDetails } from './LazyDetails'
 import { CodeCommentsBlock, extractCodeComments } from './CodeCommentsBlock'
+import './MessageBody.css'
 
 /** Presentation only: preserve native text, parse file mentions, and never turn filesystem references into arbitrary external URLs. */
 export function MessageBody({
@@ -177,7 +178,11 @@ export function MessageBody({
           })}
         </div>
       )}
-      {(userComments.length ? userText : lines.join('\n')).trim() && renderMarkdown(userComments.length ? userText : lines.join('\n'))}
+      {(userComments.length ? userText : lines.join('\n')).trim() && (
+        <div className="message-user-prose">
+          {renderMarkdown(userComments.length ? userText : lines.join('\n'))}
+        </div>
+      )}
       {userComments.length > 0 && <CodeCommentsBlock comments={userComments} />}
     </>
   )

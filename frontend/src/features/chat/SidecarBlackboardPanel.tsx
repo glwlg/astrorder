@@ -1,24 +1,37 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ActionIcon, Badge, Button, Group, Modal, Paper, ScrollArea, Stack, Text, TextInput, Textarea, Tooltip } from '@mantine/core'
 import { IconChalkboard, IconDownload, IconPlus, IconRefresh, IconX } from '@tabler/icons-react'
 import { notifications } from '@mantine/notifications'
 import { api } from '../../api/client'
-import { BlackboardItemRenderer } from '../monitor/BlackboardJsonRender'
+import { GroupBlackboardItem as BlackboardItemRenderer } from './GroupBlackboardItem'
 
 export function SidecarBlackboardPanel({
   namespace,
   title = '黑板',
   onClose,
+  focusKey,
+  focusRequest,
 }: {
   namespace: string
   title?: string
   onClose?: () => void
+  focusKey?: string
+  focusRequest?: number
 }) {
   const [items, setItems] = useState<Record<string, unknown>>({})
   const [loading, setLoading] = useState(false)
   const [createOpened, setCreateOpened] = useState(false)
   const [newKey, setNewKey] = useState('')
   const [newVal, setNewVal] = useState('')
+  const itemRefs = useRef(new Map<string, HTMLDivElement>())
+  const focusedItemAvailable = Boolean(focusKey && Object.hasOwn(items, focusKey))
+
+  useEffect(() => {
+    if (!focusKey || !focusedItemAvailable) return
+    const entry = itemRefs.current.get(focusKey)
+    entry?.scrollIntoView({ block: 'nearest', behavior: 'instant' })
+    entry?.focus({ preventScroll: true })
+  }, [focusKey, focusRequest, focusedItemAvailable])
 
   const fetchItems = async () => {
     setLoading(true)
@@ -153,14 +166,22 @@ export function SidecarBlackboardPanel({
         ) : (
           <Stack gap="xs">
             {entries.slice().reverse().map(([k, v]) => (
-              <BlackboardItemRenderer
+              <div
                 key={k}
-                itemKey={k}
-                itemValue={v}
-                namespace={namespace}
-                onUpdated={fetchItems}
-                onDelete={() => void handleDelete(k)}
-              />
+                className="group-blackboard-entry"
+                data-focused={focusKey === k || undefined}
+                tabIndex={focusKey === k ? -1 : undefined}
+                aria-label={`黑板条目 ${k}`}
+                ref={(element) => { if (element) itemRefs.current.set(k, element); else itemRefs.current.delete(k) }}
+              >
+                <BlackboardItemRenderer
+                  itemKey={k}
+                  itemValue={v}
+                  namespace={namespace}
+                  onUpdated={fetchItems}
+                  onDelete={() => void handleDelete(k)}
+                />
+              </div>
             ))}
           </Stack>
         )}

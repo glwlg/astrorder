@@ -1,8 +1,15 @@
-import { Alert, Badge, ThemeIcon, createTheme, defaultVariantColorsResolver } from '@mantine/core'
+import { Alert, Badge, Notification, ThemeIcon, createTheme, defaultVariantColorsResolver } from '@mantine/core'
 
 // Passive status uses typography and icons, never a colored surface.
 export const theme = createTheme({
-  primaryColor: 'indigo',
+  primaryColor: 'violet',
+  colors: {
+    violet: ['#f7f2ff', '#eee4ff', '#ddc9ff', '#c8a5ff', '#b181fb', '#9b61f2', '#8a3ffc', '#7630db', '#6424bd', '#501b99'],
+  },
+  fontFamily: '"Segoe UI", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", "Noto Sans CJK SC", system-ui, sans-serif',
+  fontFamilyMonospace: '"Astrorder JetBrains Mono", "Cascadia Mono", Consolas, monospace',
+  headings: { fontFamily: 'inherit' },
+  fontSizes: { xs: '0.75rem', sm: '0.875rem', md: '1rem', lg: '1.125rem', xl: '1.25rem' },
   defaultRadius: 'md',
   variantColorResolver(input) {
     const resolved = defaultVariantColorsResolver(input)
@@ -17,6 +24,21 @@ export const theme = createTheme({
     }
   },
   components: {
+    Notification: Notification.extend({
+      defaultProps: { withBorder: true, radius: 'lg' },
+      styles: {
+        root: {
+          background: 'color-mix(in srgb, var(--astr-surface) 97%, var(--astr-blue))',
+          border: '1px solid var(--astr-overlay-border)',
+          boxShadow: 'var(--astr-overlay-shadow)',
+          padding: '.875rem .75rem .875rem 1.375rem',
+        },
+        body: { minWidth: 0 },
+        title: { color: 'var(--astr-text)', fontSize: '.875rem', fontWeight: 650, lineHeight: 1.45 },
+        description: { color: 'var(--astr-text)', fontSize: '.8125rem', lineHeight: 1.6, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' },
+        closeButton: { color: 'var(--astr-muted)', alignSelf: 'flex-start', width: '1.75rem', height: '1.75rem' },
+      },
+    }),
     Badge: Badge.extend({
       defaultProps: { variant: 'transparent', radius: 'sm' },
       vars: () => ({ root: { '--badge-dot-color': 'currentColor' } }),

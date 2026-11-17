@@ -73,27 +73,11 @@
         0%, 100% { transform: scale(0.85); opacity: 0.3; }
         50% { transform: scale(1.25); opacity: 0.85; }
       }
-      .splash-orbit-svg {
+      .splash-brand-mark {
         width: 56px;
         height: 56px;
-        overflow: visible;
+        display: block;
         filter: drop-shadow(0 0 10px var(--splash-glow));
-      }
-      .splash-ring {
-        transform-origin: 16px 16px;
-        animation: splash-spin 2.6s linear infinite;
-      }
-      @keyframes splash-spin {
-        from { transform: rotate(0deg); }
-        to { transform: rotate(360deg); }
-      }
-      .splash-core-star {
-        transform-origin: 16px 16px;
-        animation: splash-star-pulse 1.8s ease-in-out infinite;
-      }
-      @keyframes splash-star-pulse {
-        0%, 100% { transform: scale(0.88); opacity: 0.55; }
-        50% { transform: scale(1.15); opacity: 1; }
       }
       .splash-header-title {
         font-size: 20px;
@@ -132,7 +116,7 @@
         100% { transform: translateX(350%); }
       }
       @media (prefers-reduced-motion: reduce) {
-        .splash-ring, .splash-core-star, .splash-orbit-halo, .splash-bar-fill { animation: none; }
+        .splash-orbit-halo, .splash-bar-fill { animation: none; }
         .splash-bar-fill { width: 100%; }
       }
     </style>
@@ -142,16 +126,7 @@
       <div id="app-splash-root" aria-label="正在加载星序工作台">
         <div class="splash-orbit-box">
           <div class="splash-orbit-halo"></div>
-          <svg class="splash-orbit-svg" viewBox="0 0 32 32" fill="none">
-            <g class="splash-ring" style="color: var(--splash-accent);">
-              <circle cx="16" cy="16" r="12" stroke="currentColor" stroke-width="2" stroke-dasharray="13 6" />
-              <circle cx="16" cy="4" r="2.2" fill="currentColor" />
-              <circle cx="28" cy="16" r="2.2" fill="currentColor" />
-              <circle cx="16" cy="28" r="2.2" fill="currentColor" />
-              <circle cx="4" cy="16" r="2.2" fill="currentColor" />
-            </g>
-            <path class="splash-core-star" d="M16 8c1 5 3 7 8 8-5 1-7 3-8 8-1-5-3-7-8-8 5-1 7-3 8-8Z" fill="var(--splash-accent)" />
-          </svg>
+          <img class="splash-brand-mark" src="/logo.png" width="56" height="56" alt="" />
         </div>
         <div class="splash-header-title">星序 · Astrorder</div>
         <div class="splash-header-sub">群星各有所长，协作自有秩序</div>

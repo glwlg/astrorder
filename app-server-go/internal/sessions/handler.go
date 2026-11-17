@@ -94,6 +94,8 @@ type Handler struct {
 	resolver          *targetfs.Resolver
 	views             viewLeases
 	titleBusy         sync.Map
+	queueBusy         sync.Map
+	queueDecisions    sync.Map
 	nativeGuard
 }
 

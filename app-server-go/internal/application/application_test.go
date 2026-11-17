@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -116,10 +117,14 @@ func TestDispatchingRunnerAndFS(t *testing.T) {
 		Store:       st,
 		LocalRunner: LocalRunner{},
 	}
+	name, args := "sh", []string{"-c", "echo hello"}
+	if runtime.GOOS == "windows" {
+		name, args = "cmd", []string{"/c", "echo hello"}
+	}
 	res, err := runner.Run(context.Background(), memory.NativeCommand{
 		Target: memory.Target{Kind: memory.TargetLocal},
-		Name:   "cmd",
-		Args:   []string{"/c", "echo hello"},
+		Name:   name,
+		Args:   args,
 	})
 	if err != nil || !strings.Contains(res.Stdout, "hello") {
 		t.Fatalf("local runner run failed: %v, out=%s", err, res.Stdout)

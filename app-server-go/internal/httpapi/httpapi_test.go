@@ -66,6 +66,38 @@ func TestHealthAndUnknownAPIWithoutUpstream(t *testing.T) {
 	}
 }
 
+func TestRemovedLogFilterIsNotDispatchedOrDocumented(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	handler := NewHandler(Options{Config: testConfig(), Store: st})
+	removed := request(t, handler, http.MethodPost, "/api/v1/tools/jev-filter", strings.NewReader(`{"output":"test"}`), map[string]string{"Authorization": "Bearer browser-secret"})
+	if removed.Code != http.StatusNotFound {
+		t.Fatalf("removed log filter = %d %s", removed.Code, removed.Body.String())
+	}
+	openapi := request(t, handler, http.MethodGet, "/openapi.json", nil, nil)
+	var document struct {
+		Paths      map[string]json.RawMessage `json:"paths"`
+		Components struct {
+			Schemas map[string]json.RawMessage `json:"schemas"`
+		} `json:"components"`
+	}
+	if err := json.Unmarshal(openapi.Body.Bytes(), &document); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := document.Paths["/api/v1/tools/jev-filter"]; ok {
+		t.Fatal("removed log filter is still documented")
+	}
+	if _, ok := document.Components.Schemas["JevFilterPayload"]; ok {
+		t.Fatal("removed log filter payload is still documented")
+	}
+	if _, ok := document.Components.Schemas["SystemOneConfigPatch"]; !ok {
+		t.Fatal("System One configuration is not documented")
+	}
+}
+
 func TestAuthSessionLifecycle(t *testing.T) {
 	handler := NewHandler(Options{Config: testConfig()})
 	wrong := request(t, handler, http.MethodPost, "/api/v1/auth/session", strings.NewReader(`{"token":"wrong"}`), map[string]string{"Origin": "http://testserver"})

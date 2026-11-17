@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import {
   Button,
   Group,
@@ -10,122 +10,30 @@ import {
   UnstyledButton,
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import {
-  IconCheck,
-  IconGitBranch,
-  IconPlus,
-} from '@tabler/icons-react'
+import { CaretUpIcon, CheckIcon, GitBranchIcon, PlusIcon } from '../../components/workbenchIcons'
 import type { Session } from '../../domain/types'
+import { useGitStatus } from '../../hooks/useGitStatus'
 import { useSidecarStore } from '../sidecar/sidecarStore'
-import { CountUp } from '../../components/animations/CountUp'
+import { ComposerGlassMenu, GlassButtonLens } from '../../components/GlassPanel'
 
 interface GitStatusBarProps {
   session: Session
 }
 
 export function GitStatusBar({ session }: GitStatusBarProps) {
-  const [branch, setBranch] = useState<string | null>(null)
-  const [branches, setBranches] = useState<string[]>([])
-  const [insertions, setInsertions] = useState(0)
-  const [deletions, setDeletions] = useState(0)
-  const [changedFiles, setChangedFiles] = useState(0)
-  const [statusUnavailable, setStatusUnavailable] = useState(false)
   const [createModalOpened, setCreateModalOpened] = useState(false)
   const [newBranchName, setNewBranchName] = useState('')
   const [switching, setSwitching] = useState(false)
-
+  const [menuOpened, setMenuOpened] = useState(false)
+  const git = useGitStatus(session)
+  const statusUnavailable = !session.workspace || git.isError
+  const statusLoading = !statusUnavailable && git.isPending
+  const branch = statusUnavailable ? null : git.data?.branch || null
+  const branches = Array.isArray(git.data?.branches) ? [...new Set(git.data.branches)] : []
+  const insertions = git.data?.insertions || 0
+  const deletions = git.data?.deletions || 0
+  const changedFiles = git.data?.changed_files || 0
   const openGitDiff = useSidecarStore((s) => s.openGitDiff)
-
-  const fetchStatus = async () => {
-    if (!session.workspace) {
-      setStatusUnavailable(true)
-      return
-    }
-    try {
-      let localToken: string | null = null
-      try {
-        if (typeof localStorage !== 'undefined') {
-          localToken = localStorage.getItem('astrorder:token')
-        }
-      } catch {}
-      const headers: Record<string, string> = {}
-      if (localToken) {
-        headers['Authorization'] = `Bearer ${localToken}`
-      }
-      const params = new URLSearchParams()
-      if (session.workspace) params.set('workspace', session.workspace)
-      if (session.id) params.set('session_id', session.id)
-      if (session.connection_id) params.set('connection_id', session.connection_id)
-
-      const resp = await fetch(`/api/v1/git/status?${params.toString()}`, { headers })
-      if (resp.ok) {
-        const data = await resp.json()
-        setBranch(data.branch || null)
-        setBranches(Array.isArray(data.branches) ? [...new Set<string>(data.branches)] : [])
-        setInsertions(data.insertions || 0)
-        setDeletions(data.deletions || 0)
-        setChangedFiles(data.changed_files || 0)
-        setStatusUnavailable(false)
-      } else {
-        setStatusUnavailable(true)
-      }
-    } catch {
-      setStatusUnavailable(true)
-    }
-  }
-
-  useEffect(() => {
-    const controller = new AbortController()
-    const fetchStatusWithSignal = async () => {
-      if (!session.workspace) {
-        setStatusUnavailable(true)
-        return
-      }
-      try {
-        let localToken: string | null = null
-        try {
-          if (typeof localStorage !== 'undefined') {
-            localToken = localStorage.getItem('astrorder:token')
-          }
-        } catch {}
-        const headers: Record<string, string> = {}
-        if (localToken) {
-          headers['Authorization'] = `Bearer ${localToken}`
-        }
-        const params = new URLSearchParams()
-        if (session.workspace) params.set('workspace', session.workspace)
-        if (session.id) params.set('session_id', session.id)
-        if (session.connection_id) params.set('connection_id', session.connection_id)
-
-        const resp = await fetch(`/api/v1/git/status?${params.toString()}`, {
-          headers,
-          signal: controller.signal,
-        })
-        if (resp.ok) {
-          const data = await resp.json()
-          setBranch(data.branch || null)
-          setBranches(Array.isArray(data.branches) ? [...new Set<string>(data.branches)] : [])
-          setInsertions(data.insertions || 0)
-          setDeletions(data.deletions || 0)
-          setChangedFiles(data.changed_files || 0)
-          setStatusUnavailable(false)
-        } else {
-          setStatusUnavailable(true)
-        }
-      } catch {
-        if (!controller.signal.aborted) setStatusUnavailable(true)
-      }
-    }
-
-    void fetchStatusWithSignal()
-    const timer = setInterval(() => {
-      void fetchStatusWithSignal()
-    }, 15000)
-    return () => {
-      controller.abort()
-      clearInterval(timer)
-    }
-  }, [session.id, session.workspace, session.connection_id])
 
   const handleSwitchBranch = async (targetBranch: string) => {
     if (targetBranch === branch || switching) return
@@ -159,8 +67,7 @@ export function GitStatusBar({ session }: GitStatusBarProps) {
           message: data?.detail || '切换分支失败',
         })
       } else {
-        setBranch(targetBranch)
-        void fetchStatus()
+        await git.refetch()
       }
     } catch (err: unknown) {
       notifications.show({
@@ -205,10 +112,9 @@ export function GitStatusBar({ session }: GitStatusBarProps) {
           message: data?.detail || '创建新分支失败',
         })
       } else {
-        setBranch(cleanName)
         setCreateModalOpened(false)
         setNewBranchName('')
-        void fetchStatus()
+        await git.refetch()
       }
     } catch (err: unknown) {
       notifications.show({
@@ -229,30 +135,22 @@ export function GitStatusBar({ session }: GitStatusBarProps) {
     <>
       <div
         className="composer-git-status-bar"
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '4px 10px 6px',
-          borderBottom: '1px solid var(--astr-border)',
-          marginBottom: '6px',
-          fontSize: '12px',
-        }}
       >
         {/* 左侧：分支选择器（点击切换/新建分支） */}
-        <Menu shadow="md" width={220} position="bottom-start">
+        <Menu opened={menuOpened} onChange={setMenuOpened} shadow="md" width={280} position="top-start" offset={8}
+          middlewares={{
+            flip: false,
+            shift: { padding: 12 },
+            size: {
+              padding: 12,
+              apply: ({ availableHeight, elements }) => {
+                elements.floating.style.setProperty('--branch-menu-available-height', `${availableHeight}px`)
+              },
+            },
+          }}>
           <Menu.Target>
             <UnstyledButton
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '5px',
-                color: 'var(--astr-text, #374151)',
-                cursor: 'pointer',
-                borderRadius: '4px',
-                padding: '2px 6px',
-                transition: 'background 0.1s ease',
-              }}
+              className="composer-git-branch"
               styles={{
                 root: {
                   '&:hover': {
@@ -264,23 +162,26 @@ export function GitStatusBar({ session }: GitStatusBarProps) {
               aria-label="切换或创建 Git 分支"
               disabled={statusUnavailable || !branch || switching}
             >
-              <IconGitBranch size={15} color="var(--astr-green, #10b981)" />
-              <Text size="xs" fw={600} c="dimmed" style={{ color: 'var(--astr-text)' }}>
-                {branch || (statusUnavailable ? '分支未知' : '读取分支…')}
+              <GlassButtonLens />
+              <GitBranchIcon size={20} aria-hidden="true" />
+              <Text size="xs" fw={600}>
+                {branch || (statusLoading ? '读取分支…' : '分支未知')}
               </Text>
+              <CaretUpIcon className="composer-git-chevron" size={16} aria-hidden="true" />
             </UnstyledButton>
           </Menu.Target>
 
-          <Menu.Dropdown>
+          <Menu.Dropdown className="composer-branch-menu">
+            <ComposerGlassMenu active={menuOpened}>
             <Menu.Label>本地分支列表</Menu.Label>
             {branches.map((b) => (
               <Menu.Item
                 key={b}
                 leftSection={
                   b === branch ? (
-                    <IconCheck size={14} color="var(--astr-green, #10b981)" />
+                    <CheckIcon size={16} color="var(--astr-green)" />
                   ) : (
-                    <span style={{ width: 14 }} />
+                    <span style={{ width: 16 }} />
                   )
                 }
                 onClick={() => void handleSwitchBranch(b)}
@@ -292,13 +193,14 @@ export function GitStatusBar({ session }: GitStatusBarProps) {
             ))}
             <Menu.Divider />
             <Menu.Item
-              leftSection={<IconPlus size={14} color="var(--astr-blue, #3b82f6)" />}
+              leftSection={<PlusIcon size={16} color="var(--astr-blue)" />}
               onClick={() => setCreateModalOpened(true)}
             >
               <Text size="xs" c="blue">
                 基于当前创建新分支...
               </Text>
             </Menu.Item>
+            </ComposerGlassMenu>
           </Menu.Dropdown>
         </Menu>
 
@@ -307,15 +209,7 @@ export function GitStatusBar({ session }: GitStatusBarProps) {
           <UnstyledButton
             onClick={handleOpenDiffTree}
             aria-label="查看工作区 Git Diff"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-              cursor: 'pointer',
-              borderRadius: '4px',
-              padding: '2px 6px',
-              transition: 'background 0.1s ease',
-            }}
+            className="composer-git-changes"
             styles={{
               root: {
                 '&:hover': {
@@ -325,37 +219,29 @@ export function GitStatusBar({ session }: GitStatusBarProps) {
             }}
           >
             {statusUnavailable ? (
-              <span style={{ fontSize: '11px', color: 'var(--astr-muted)' }}>工作区状态不可用</span>
+              <span className="git-changed-files">工作区状态不可用</span>
+            ) : statusLoading ? (
+              <span className="git-changed-files">读取工作区…</span>
             ) : changedFiles > 0 ? (
               <>
-                <span style={{ fontSize: '11px', color: 'var(--astr-muted)' }}>
-                  <CountUp to={changedFiles} duration={0.5} /> 个文件变更
+                <span className="git-changed-files">
+                  {changedFiles} 个文件变更
                 </span>
                 {(insertions > 0 || deletions > 0) && <>
                   <span
-                    style={{
-                      color: 'var(--astr-green, #10b981)',
-                      fontWeight: 700,
-                      fontFamily: 'monospace',
-                      fontSize: '12px',
-                    }}
+                    className="git-insertions"
                   >
-                    +<CountUp to={insertions} duration={0.6} />
+                    +{insertions}
                   </span>
                   <span
-                    style={{
-                      color: 'var(--astr-red, #ef4444)',
-                      fontWeight: 700,
-                      fontFamily: 'monospace',
-                      fontSize: '12px',
-                    }}
+                    className="git-deletions"
                   >
-                    -<CountUp to={deletions} duration={0.6} />
+                    -{deletions}
                   </span>
                 </>}
               </>
             ) : (
-              <span style={{ fontSize: '11px', color: 'var(--astr-muted)' }}>工作区无修改</span>
+              <span className="git-changed-files">工作区无修改</span>
             )}
           </UnstyledButton>
         </Tooltip>

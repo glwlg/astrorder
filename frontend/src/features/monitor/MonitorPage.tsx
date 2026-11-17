@@ -44,6 +44,14 @@ function active(session: Session) {
   return session.status === 'running' || session.status === 'waiting_approval' || session.live === true
 }
 
+function activeMessageCommand(status: Session['status'], commands: Command[]) {
+  if (status !== 'running' && status !== 'waiting_approval') return undefined
+  return commands.find((command) =>
+    (command.action === 'send' || command.action === 'enqueue') &&
+    (command.state === 'running' || command.state === 'accepted'),
+  )
+}
+
 function savedSessions(key = STORAGE_KEY): string[] {
   try {
     const value = JSON.parse(localStorage.getItem(key) || '[]')
@@ -162,7 +170,7 @@ export function MonitorCard({
   const previousActiveCommandRef = useRef<string | null>(null)
   const completionTimeoutRef = useRef<number | null>(null)
   const [completionFlash, setCompletionFlash] = useState(false)
-  const activeCommand = commands.find((command) => command.state === 'running' || command.state === 'accepted')
+  const activeCommand = activeMessageCommand(status, commands)
   const isStopAction = session.status === 'running' && !draft.text.trim() && !draft.attachments.length
 
   const addFiles = (files: File[]) => {
@@ -586,10 +594,10 @@ function MonitorListRow({
   const commands = useAstrorderStore(useShallow((state) => selectCommands(state, session.agent_id, session.id)))
   const messages = useAstrorderStore(useShallow((state) => selectMessages(state, session.agent_id, session.id)))
   const approvals = useAstrorderStore(useShallow((state) => selectApprovals(state, session.agent_id, session.id)))
-  const activeCommand = commands.find((command) => command.state === 'running' || command.state === 'accepted')
   const activities = messages.filter((message) => message.kind === 'thinking' || message.kind === 'tool').slice(-1)
   const latestActivity = activities[0]
   const status = session.status === 'idle' && session.live ? 'running' : session.status
+  const activeCommand = activeMessageCommand(status, commands)
   const workspaceShort = session.workspace ? session.workspace.replace(/\\/g, "/").split("/").filter(Boolean).slice(-2).join("/") : ""
 
   return (

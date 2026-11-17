@@ -3,28 +3,32 @@ import { cpSync, createReadStream, existsSync, mkdirSync, readFileSync, rmSync, 
 import { createHash } from 'node:crypto'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { prepareWailsImeFix } from './wails-ime-fix.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const desktop = path.join(root, 'desktop-wails')
 const release = path.join(root, 'release')
-const node = path.join(root, '.tools', 'wails', 'node-v26.11.1-win-x64', 'node.exe')
-const npm = path.join(root, '.tools', 'wails', 'node-v26.11.1-win-x64', 'node_modules', 'npm', 'bin', 'npm-cli.js')
-const wails = path.join(root, '.tools', 'wails', 'bin', 'wails3.exe')
-const makensis = path.join(root, '.tools', 'nsis', 'makensis.exe')
-const goStage = path.join(root, 'desktop', '.runtime', 'go-stage')
 const versions = JSON.parse(readFileSync(path.join(desktop, 'toolchain.json'), 'utf8'))
+const windows = process.platform === 'win32'
+const nodeDir = path.join(root, '.tools', 'wails', `node-v${versions.node}-win-x64`)
+const node = windows ? path.join(nodeDir, 'node.exe') : process.execPath
+const npm = windows ? path.join(nodeDir, 'node_modules', 'npm', 'bin', 'npm-cli.js') : 'npm'
+const wails = windows ? path.join(root, '.tools', 'wails', 'bin', 'wails3.exe') : 'wails3'
+const makensis = windows ? path.join(root, '.tools', 'nsis', 'makensis.exe') : 'makensis'
+const goStage = path.join(root, '.runtime', 'go-stage')
 // Same environment as scripts/desktop-wails.mjs: pinned Go toolchain and the
 // Wails frontend build flag (disables the PWA service worker inside WebView2).
 const env = { ...process.env, GOTOOLCHAIN: `go${versions.go}`, ASTRORDER_WAILS: '1' }
+const windowsEnv = { ...env, GOOS: 'windows', GOARCH: 'amd64', CGO_ENABLED: '0' }
 
 function hashFile(filePath) {
   const content = readFileSync(filePath)
   return createHash('sha256').update(content).digest('hex')
 }
 
-function run(cmd, args, cwd) {
+function run(cmd, args, cwd, processEnv = env) {
   console.log(`> [${cwd || process.cwd()}] ${cmd} ${args.join(' ')}`)
-  const result = spawnSync(cmd, args, { cwd: cwd || root, env, stdio: 'inherit', shell: false, windowsHide: true })
+  const result = spawnSync(cmd, args, { cwd: cwd || root, env: processEnv, stdio: 'inherit', shell: false, windowsHide: true })
   if (result.error) throw result.error
   if (result.status !== 0) {
     throw new Error(`Command failed with exit code ${result.status}: ${cmd} ${args.join(' ')}`)
@@ -56,23 +60,24 @@ async function verifyStage(stageDir) {
 async function main() {
   console.log('=== Astrorder Wails 3 候选安装器构建流程 ===')
 
-  if (!existsSync(makensis)) {
+  if (!windows && process.platform !== 'linux') throw new Error('Windows and WSL/Linux build hosts are supported.')
+  if (windows && !existsSync(makensis)) {
     throw new Error(`makensis.exe not found at ${makensis}. Run scripts/install-nsis.ps1 first.`)
   }
   // Rebuild the canonical kernel artifacts before packaging source changes.
   console.log('\n[1/7] 构建并验证 Go 阶段构件...')
-  run(node, ['desktop/stage-go-artifacts.js'], root)
+  run(node, ['scripts/stage-go-artifacts.js'], root)
   const verifiedArtifacts = await verifyStage(goStage)
   console.log(`已成功验证 ${verifiedArtifacts.length} 个基础构件及其 SHA256。`)
 
   // 2. 生成 Wails bindings
   console.log('\n[2/7] 生成 Wails 原生绑定...')
   // Must match scripts/desktop-wails.mjs: the shell embeds assets/bindings.
-  run(wails, ['generate', 'bindings', '-b', '-i', '-names', '-d', 'assets/bindings', '.'], desktop)
+  run(wails, ['generate', 'bindings', '-b', '-i', '-names', '-d', 'assets/bindings', '.'], desktop, windowsEnv)
 
   // 3. 构建前端
   console.log('\n[3/7] 构建前端 React SPA...')
-  run(node, [npm, 'run', 'build'], path.join(root, 'frontend'))
+  run(windows ? node : npm, windows ? [npm, 'run', 'build'] : ['run', 'build'], path.join(root, 'frontend'))
   const embeddedApp = path.join(desktop, 'assets', 'app')
   rmSync(embeddedApp, { recursive: true, force: true })
   cpSync(path.join(root, 'frontend', 'dist'), embeddedApp, { recursive: true })
@@ -86,14 +91,20 @@ async function main() {
 
   run(wails, ['generate', 'syso', '-arch', 'amd64', '-icon', 'assets/app.ico', '-manifest', 'assets/windows.manifest', '-out', 'rsrc_windows_amd64.syso'], desktop)
 
-  run('go', [
-    'build',
-    '-trimpath',
-    '-tags', 'production',
-    '-ldflags', '-H=windowsgui -s -w -X main.defaultPackaged=true',
-    '-o', astrorderExe,
-    '.'
-  ], desktop)
+  const imeFix = prepareWailsImeFix(desktop, windowsEnv)
+  try {
+    run('go', [
+      'build',
+      '-modfile', imeFix.modfile,
+      '-trimpath',
+      '-tags', 'production',
+      '-ldflags', '-H=windowsgui -s -w -X main.defaultPackaged=true',
+      '-o', astrorderExe,
+      '.'
+    ], desktop, imeFix.env)
+  } finally {
+    imeFix.cleanup()
+  }
 
   if (!existsSync(astrorderExe)) throw new Error('Astrorder.exe build failed')
   const exeHash = hashFile(astrorderExe)
@@ -126,12 +137,7 @@ async function main() {
   // separate build without ASTRORDER_WAILS before entering the installer.
   const browserEnv = { ...env }
   delete browserEnv.ASTRORDER_WAILS
-  const browserBuild = spawnSync(node, [npm, 'run', 'build'], {
-    cwd: path.join(root, 'frontend'), env: browserEnv,
-    stdio: 'inherit', shell: false, windowsHide: true,
-  })
-  if (browserBuild.error) throw browserBuild.error
-  if (browserBuild.status !== 0) throw new Error(`Browser build failed: ${browserBuild.status}`)
+  run(windows ? node : npm, windows ? [npm, 'run', 'build'] : ['run', 'build'], path.join(root, 'frontend'), browserEnv)
   if (!existsSync(path.join(root, 'frontend', 'dist', 'sw-astrorder.js'))) throw new Error('Browser PWA worker missing')
   if (existsSync(path.join(embeddedApp, 'sw-astrorder.js'))) throw new Error('Desktop embeds a PWA worker')
 
@@ -156,7 +162,7 @@ async function main() {
   console.log('\n[6/7] 执行 NSIS 编译安装器...')
   mkdirSync(release, { recursive: true })
   const nsiScript = path.join(desktop, 'installer.nsi')
-  run(makensis, ['/INPUTCHARSET', 'UTF8', nsiScript], desktop)
+  run(makensis, [windows ? '/INPUTCHARSET' : '-INPUTCHARSET', 'UTF8', nsiScript], desktop)
 
   const installerExe = path.join(release, 'Astrorder-Setup-0.1.0.exe')
   if (!existsSync(installerExe)) throw new Error('Installer generation failed')

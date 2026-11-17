@@ -1,8 +1,11 @@
 module astrorder.dev/desktop
 
-go 1.27.2
+go 1.27.3
 
-require github.com/wailsapp/wails/v3 v3.0.0-beta.28
+require (
+	github.com/wailsapp/wails/v3 v3.0.0
+	golang.org/x/sys v0.49.0
+)
 
 require (
 	github.com/adrg/xdg v0.5.3 // indirect
@@ -11,5 +14,4 @@ require (
 	github.com/godbus/dbus/v5 v5.2.3 // indirect
 	github.com/mattn/go-colorable v0.1.16 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
-	golang.org/x/sys v0.49.0 // indirect
 )

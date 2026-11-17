@@ -1,16 +1,11 @@
 import {
-  IconBrain,
-  IconChecklist,
-  IconChalkboard,
-  IconFolder,
   IconGitFork,
-  IconInfoCircle,
-  IconLayoutSidebarRightExpand,
   IconSparkles,
   IconTransfer,
   IconX,
 } from '@tabler/icons-react'
-import { ActionIcon, Button, Drawer, Group, Modal, Select, Stack, Switch, Text, TextInput, Title, Tooltip } from '@mantine/core'
+import { ShieldCheckIcon, SidebarSimpleIcon, SlidersHorizontalIcon, SquaresFourIcon } from '../../components/workbenchIcons'
+import { ActionIcon, Button, Drawer, Group, Modal, Select, Stack, Switch, Text, TextInput, Tooltip } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { isUserInput } from '../../components/UserInputCard'
 import { useDisclosure, useMediaQuery } from '@mantine/hooks'
@@ -25,7 +20,7 @@ import type { Approval, Command, Message, Session, Task } from '../../domain/typ
 import { EmptyState } from '../../components/EmptyState'
 import { SessionStatusLabel } from '../../components/Status'
 import { WelcomeView } from './WelcomeView'
-import { displaySessionTitle, sessionActivityStatus } from '../../components/sessionRailModel'
+import { sessionActivityStatus } from '../../components/sessionRailModel'
 import { AgentKindBadge } from '../../components/SessionRuntimeFacts'
 import { agentKindLabel } from '../../components/AgentBrandIcon'
 import { selectApprovals, selectCommands, selectOutbox, selectSessions, selectTasks, useAstrorderStore } from '../../state/store'
@@ -39,16 +34,18 @@ import { REASONING_EFFORTS } from './composerMedia'
 
 
 import { SessionDetails } from './SessionDetails'
+import { SessionToolsMenu } from './SessionToolsMenu'
 import { useBackgroundProcesses } from './useBackgroundProcesses'
 import { SessionRuntimeBar } from './SessionRuntimeBar'
 import { TaskDetails } from './TaskDetails'
 import { Transcript } from './Transcript'
 import { SidecarHost } from '../sidecar/SidecarHost'
 import { useSidecarStore } from '../sidecar/sidecarStore'
-import { BlurText } from '../../components/animations/BlurText'
 import { ErrorBoundary } from '../../components/ErrorBoundary'
 import { BotGroupChatPage } from './BotGroupChatPage'
 import { useShortcutHandlers } from '../shortcuts/shortcuts'
+import { SessionBreadcrumb } from './SessionBreadcrumb'
+import { WorkspaceChangesPanel } from './WorkspaceChangesPanel'
 
 
 const NO_COMMANDS: Command[] = []
@@ -333,13 +330,28 @@ function ChatPageBody() {
   const switchSession = useSidecarStore((state) => state.switchSession)
   const sidecarWidth = useSidecarStore((state) => state.sidecarWidth)
   const setSidecarWidth = useSidecarStore((state) => state.setSidecarWidth)
+  const [changesOpened, { toggle: toggleChanges, close: closeChanges }] = useDisclosure(false)
   const [isResizing, setIsResizing] = useState(false)
+  const showRightPanel = detailsPinned || sidecarOpen
+  const toggleRightPanel = () => {
+    if (showRightPanel) {
+      setDetailsPinned(false)
+      setSidecarOpen(false)
+    } else {
+      setSidecarOpen(true)
+    }
+  }
 
   // 当会话/项目发生切换时，自动保存并切换侧边栏记忆状态，保持每个会话 Tab 隔离且不丢失
   useEffect(() => {
     if (selected) {
       const sessionKey = `${selected.agent_id}:${selected.id}`
       switchSession(sessionKey)
+      // Details are a drawer (or explicitly pinned), never a workbench tab.
+      const sidecar = useSidecarStore.getState()
+      for (const tab of sidecar.tabs) {
+        if (tab.type === 'details') sidecar.closeTab(tab.id)
+      }
     }
   }, [selected?.id, selected?.agent_id, switchSession])
 
@@ -376,7 +388,7 @@ function ChatPageBody() {
     fileTree: () => useSidecarStore.getState().openFileTree(selected.id, selected.agent_id, selected.workspace || undefined, selected.project_name || selected.title, selected.connection_id || undefined),
     browser: () => useSidecarStore.getState().openBrowser(selected.id, selected.agent_id, undefined, selected.connection_id || undefined),
     terminal: () => useSidecarStore.getState().openTerminal(selected.id, selected.agent_id, selected.project_name || selected.title, selected.connection_id || undefined),
-    sidecar: () => useSidecarStore.getState().setIsOpen(!useSidecarStore.getState().isOpen),
+    sidecar: toggleRightPanel,
   } : {})
   const [taskDetailsOpened, { open: openTaskDetails, close: closeTaskDetails }] = useDisclosure(false)
   const [taskSelection, setTaskSelection] = useState<Pick<Task, 'id' | 'agent_id' | 'session_id'> | null>(null)
@@ -496,7 +508,6 @@ function ChatPageBody() {
   }
 
   const resourceError = resources.messages.error || resources.commands.error || resources.tasks.error
-  const showRightPanel = detailsPinned || sidecarOpen
 
   const handleOpenFork = (message: Message, turnIndex: number) => {
     if (!selected) return
@@ -540,23 +551,11 @@ function ChatPageBody() {
 
   return (
     <div className="route-page chat-page">
-      <div
-        ref={layoutRef}
-        className={`chat-layout${showRightPanel ? ' has-details' : ''}`}
-        style={{
-          gridTemplateColumns: showRightPanel ? `minmax(0, 1fr) ${sidecarWidth}%` : undefined,
-        }}
-      >
-        <section className="chat-column">
+      <div className="chat-workbench">
           <div className="chat-heading">
             <Group justify="space-between" align="center" wrap="nowrap">
               <div className="chat-title-block">
-                <Group gap={8} wrap="nowrap" align="center">
-                  <IconFolder size={17} className="chat-title-icon" />
-                  <Title order={2} size="h4" className="chat-title-text">
-                    <BlurText text={displaySessionTitle(selected)} />
-                  </Title>
-                </Group>
+                <SessionBreadcrumb session={selected} />
                 {handoffPeer && <Button
                   variant="subtle"
                   size="compact-xs"
@@ -585,7 +584,7 @@ function ChatPageBody() {
                       setReviewModalOpen(true)
                     }}
                   >
-                    <IconChecklist size={16} />
+                    <ShieldCheckIcon size={22} aria-hidden="true" />
                   </ActionIcon>
                 </Tooltip>
                 {reviewRun?.status === 'draft_ready' && <Text size="xs" c="teal">审查结果已回填</Text>}
@@ -593,49 +592,42 @@ function ChatPageBody() {
                 {reviewRun?.status === 'failed' && <Text size="xs" c="red">审查失败</Text>}
 
                 {!!approvals.length && <Button size="compact-sm" color="yellow" variant="light" onClick={openDetails}>{approvals.some(isUserInput) ? '等待回答' : '等待授权'} · {approvals.length}</Button>}
-                <Tooltip label="知识记忆看板 (Ctrl+Alt+M)" position="bottom">
-                  <ActionIcon
-                    variant="subtle"
-                    size="sm"
-                    color="indigo"
-                    onClick={() => useSidecarStore.getState().openMemory(selected.id)}
-                    aria-label="知识记忆看板"
-                  >
-                    <IconBrain size={16} />
-                  </ActionIcon>
-                </Tooltip>
-                <Tooltip label="作战黑板 (Ctrl+Alt+B)" position="bottom">
-                  <ActionIcon
-                    variant="subtle"
-                    size="sm"
-                    color="violet"
-                    onClick={() => useSidecarStore.getState().openBlackboard(selected.id, selected.agent_id, selected.connection_id || undefined)}
-                    aria-label="作战黑板"
-                  >
-                    <IconChalkboard size={16} />
-                  </ActionIcon>
-                </Tooltip>
                 <Tooltip label="会话详情" position="bottom">
                   <ActionIcon className="chat-details-button" variant="subtle" size="sm" onClick={openDetails} aria-label="打开会话详情">
-                    <IconInfoCircle size={16} />
+                    <SlidersHorizontalIcon size={22} aria-hidden="true" />
                   </ActionIcon>
                 </Tooltip>
-                {!showRightPanel && (
-                  <Tooltip label="展开工作台侧边栏" position="bottom-end">
-                    <ActionIcon
-                      variant="subtle"
-                      size="sm"
-                      color="gray"
-                      onClick={() => setSidecarOpen(true)}
-                      aria-label="展开工作台侧边栏"
-                    >
-                      <IconLayoutSidebarRightExpand size={16} />
-                    </ActionIcon>
-                  </Tooltip>
-                )}
+                <Tooltip label="工作区变更" position="bottom">
+                  <ActionIcon className="chat-changes-toggle" variant="subtle"
+                    aria-label={changesOpened ? '收起变更悬浮面板' : '打开变更悬浮面板'}
+                    aria-expanded={changesOpened} aria-controls="workspace-changes-panel" onClick={toggleChanges}>
+                    <SquaresFourIcon size={22} weight={changesOpened ? 'duotone' : 'regular'} aria-hidden="true" />
+                  </ActionIcon>
+                </Tooltip>
+                <Tooltip label={showRightPanel ? '收起工作台侧边栏' : '展开工作台侧边栏'} position="bottom">
+                  <ActionIcon
+                    className="chat-sidecar-toggle"
+                    variant="subtle"
+                    aria-label={showRightPanel ? '收起工作台侧边栏' : '展开工作台侧边栏'}
+                    aria-expanded={showRightPanel}
+                    aria-controls="session-sidecar"
+                    onClick={toggleRightPanel}
+                  >
+                    <SidebarSimpleIcon size={22} mirrored weight={showRightPanel ? 'duotone' : 'regular'} aria-hidden="true" />
+                  </ActionIcon>
+                </Tooltip>
+                <SessionToolsMenu session={selected} />
               </Group>
             </Group>
           </div>
+      <div
+        ref={layoutRef}
+        className={`chat-layout${showRightPanel ? ' has-details' : ''}`}
+        style={{
+          gridTemplateColumns: showRightPanel ? `minmax(0, 1fr) ${sidecarWidth}%` : undefined,
+        }}
+      >
+        <section className="chat-column">
           <SessionRuntimeBar key={scopeKey(selected.agent_id, selected.id)} commands={commands} tasks={runtimeTasks} backgroundError={background.error} onTaskOpen={(task) => { setTaskSelection({ id: task.id, agent_id: task.agent_id, session_id: task.session_id }); openTaskDetails() }} />
           <Transcript
             activityBreaks={resources.activityBreaks}
@@ -682,6 +674,7 @@ function ChatPageBody() {
             } : undefined}
           >
           <ChatComposer
+            glass
             key={`composer:${scopeKey(selected.agent_id, selected.id)}`}
             session={selected}
             agent={agent}
@@ -693,6 +686,7 @@ function ChatPageBody() {
           </SessionComposerGate>
         </section>
         <aside
+          id="session-sidecar"
           className="desktop-details"
           style={{ position: 'relative', width: '100%', padding: 0, display: showRightPanel ? 'block' : 'none' }}
         >
@@ -731,16 +725,19 @@ function ChatPageBody() {
                   approvals={approvals}
                   onApproval={(approval, action) => void handleApproval(approval, action)}
                   onCloseSidecar={() => setSidecarOpen(false)}
+                  isVisible={showRightPanel && sidecarOpen}
                 />
               </ErrorBoundary>
             </div>
             {!sidecarOpen && detailsPinned && (
-              <div style={{ padding: '16px 0 0 18px' }}>
+              <div className="pinned-session-details">
                 <Button variant="subtle" size="compact-sm" onClick={() => setDetailsPinned(false)}>收起详情侧栏</Button>
                 <SessionDetails session={selected} agent={agent} commands={commands} messages={messages} approvals={approvals} onApproval={(approval, action) => void handleApproval(approval, action)} />
               </div>
             )}
           </aside>
+      </div>
+      {changesOpened && <WorkspaceChangesPanel session={selected} messages={messages} onClose={closeChanges} />}
       </div>
       <DrawerDetails opened={detailsOpened} onClose={closeDetails} onPin={() => { setDetailsPinned(true); closeDetails() }} session={selected} agent={agent} commands={commands} messages={messages} approvals={approvals} onApproval={(approval, action) => void handleApproval(approval, action)} />
       <Drawer opened={taskDetailsOpened && selectedTask !== null} onClose={() => { closeTaskDetails(); setTaskSelection(null) }} title="任务详情" position={mobileTaskSheet ? 'bottom' : 'right'} size={mobileTaskSheet ? 'min(88vh, 620px)' : 'min(92vw, 520px)'}>

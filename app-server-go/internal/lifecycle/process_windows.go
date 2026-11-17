@@ -16,6 +16,8 @@ import (
 	"strings"
 	"syscall"
 	"unsafe"
+
+	"golang.org/x/sys/windows"
 )
 
 const (
@@ -66,6 +68,16 @@ func InspectProcess(pid int) (ProcessIdentity, error) {
 		if errors.Is(err, syscall.Errno(87)) {
 			return ProcessIdentity{}, os.ErrNotExist
 		}
+		if errors.Is(err, syscall.ERROR_ACCESS_DENIED) {
+			creationTime, exists, snapshotErr := processSnapshotCreationTime(pid)
+			if snapshotErr != nil {
+				return ProcessIdentity{}, fmt.Errorf("inspect process snapshot: %w", errors.Join(err, snapshotErr))
+			}
+			if !exists {
+				return ProcessIdentity{}, os.ErrNotExist
+			}
+			return ProcessIdentity{}, &processAccessError{creationTime: creationTime, err: err}
+		}
 		return ProcessIdentity{}, err
 	}
 	defer syscall.CloseHandle(handle)
@@ -92,6 +104,53 @@ func InspectProcess(pid int) (ProcessIdentity, error) {
 	return ProcessIdentity{
 		PID: pid, ExecutablePath: filepath.Clean(syscall.UTF16ToString(buffer[:size])), CreationTime: creationTime,
 	}, nil
+}
+
+// An exited process can retain a PID object while another process holds a
+// handle to it. OpenProcess can also deny access to a new protected process
+// that reused the PID. A system snapshot distinguishes both cases without
+// requiring access to the process.
+func processSnapshotCreationTime(pid int) (uint64, bool, error) {
+	const maxSnapshotSize = 64 << 20
+	size := uint32(256 << 10)
+	for size <= maxSnapshotSize {
+		buffer := make([]byte, size)
+		var returned uint32
+		err := windows.NtQuerySystemInformation(windows.SystemProcessInformation, unsafe.Pointer(&buffer[0]), size, &returned)
+		if errors.Is(err, windows.STATUS_INFO_LENGTH_MISMATCH) {
+			size *= 2
+			if returned > size {
+				size = returned + 64<<10
+			}
+			continue
+		}
+		if err != nil {
+			return 0, false, err
+		}
+		limit := len(buffer)
+		if returned > 0 && returned < uint32(limit) {
+			limit = int(returned)
+		}
+		entrySize := int(unsafe.Sizeof(windows.SYSTEM_PROCESS_INFORMATION{}))
+		for offset := 0; ; {
+			if offset > limit-entrySize {
+				return 0, false, errors.New("Windows process snapshot was truncated")
+			}
+			entry := (*windows.SYSTEM_PROCESS_INFORMATION)(unsafe.Pointer(&buffer[offset]))
+			if entry.UniqueProcessID == uintptr(pid) {
+				return uint64(entry.CreateTime), true, nil
+			}
+			next := int(entry.NextEntryOffset)
+			if next == 0 {
+				return 0, false, nil
+			}
+			if next < entrySize || next > limit-offset {
+				return 0, false, errors.New("Windows process snapshot has an invalid entry")
+			}
+			offset += next
+		}
+	}
+	return 0, false, errors.New("Windows process snapshot exceeds the size limit")
 }
 
 // ListeningPIDs returns native owner PIDs for exact TCP listeners on port.

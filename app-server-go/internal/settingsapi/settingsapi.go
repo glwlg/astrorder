@@ -1,5 +1,5 @@
 // Package settingsapi serves the small settings endpoints the Settings dialog
-// reads on open: network exposure, the helper LLM, the Jev key, the managed
+// reads on open: network exposure, the helper LLM, the System One key, the managed
 // runtime list and the Codex Desktop control status. They are plain
 // workspace-preference reads and writes; nothing here starts a process.
 package settingsapi
@@ -59,7 +59,6 @@ var paths = map[string][]string{
 	"/api/v1/services/llm/test":       {http.MethodPost},
 	"/api/v1/services/jev/test":       {http.MethodPost},
 	"/api/v1/services/jev/models":     {http.MethodGet},
-	"/api/v1/tools/jev-filter":        {http.MethodPost},
 	"/api/v1/services/jev/config":     {http.MethodGet, http.MethodPost},
 	"/api/v1/services/browser/config": {http.MethodGet, http.MethodPost},
 	"/api/v1/runtime/launch":          {http.MethodPost},
@@ -132,8 +131,8 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		} else {
 			h.setJev(w, r)
 		}
-	case "/api/v1/services/jev/test", "/api/v1/tools/jev-filter":
-		h.jev(w, r)
+	case "/api/v1/services/jev/test":
+		h.testJev(w, r)
 	case "/api/v1/services/browser/config":
 		h.browserEngine(w, r)
 	case "/api/v1/runtime/launch":

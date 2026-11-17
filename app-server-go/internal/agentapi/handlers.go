@@ -1883,7 +1883,7 @@ func (h *Handler) invokeBrowserScreenshot(ctx context.Context, payload map[strin
 		return nil, NewAgentApiError("browser_task_failed", "Browser manager is not configured")
 	}
 
-	snap, err := h.options.BrowserManager.CaptureScreenshot(ctx, sessionKey, true, "")
+	snap, err := h.options.BrowserManager.CaptureScreenshot(ctx, sessionKey, false, "")
 	if err != nil {
 		return nil, NewAgentApiError("browser_task_failed", err.Error())
 	}

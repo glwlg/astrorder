@@ -1,7 +1,6 @@
 import { ShinyText } from '../../components/animations/ShinyText'
 import {
   IconBolt,
-  IconSparkles,
   IconBulb,
   IconCheck,
   IconCopy,
@@ -15,7 +14,6 @@ import {
 } from '@tabler/icons-react'
 import type { Message } from '../../domain/types'
 import { useState, type MouseEvent } from 'react'
-import { api } from '../../api/client'
 import { JsonRenderView } from '../monitor/BlackboardJsonRender'
 
 export type ToolIconKey =
@@ -80,6 +78,23 @@ export interface ToolDescription {
   fullTitle: string
   isFailed: boolean
   isRunning: boolean
+}
+
+export function activityState(message: Message): 'completed' | 'failed' | 'running' | 'recorded' {
+  if (message.tool?.status === 'failed') return 'failed'
+  if (message.tool?.status === 'running') return 'running'
+  if (message.tool?.status === 'completed' || message.tool?.status === 'succeeded' || message.completed_at) return 'completed'
+  return 'recorded'
+}
+
+export function activityDuration(message: Message): string | null {
+  if (!message.completed_at) return null
+  const start = Date.parse(message.created_at)
+  const end = Date.parse(message.completed_at)
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return null
+  const seconds = Math.round((end - start) / 1000)
+  if (seconds < 1) return '不到 1 秒'
+  return seconds >= 60 ? `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒` : `${seconds} 秒`
 }
 
 export function fileChangeDiffs(message: Message): Array<{ file: string; diff: string }> {
@@ -365,6 +380,16 @@ export function PackSummary({ pack, isRunning: propIsRunning }: { pack: Message[
   const hasFailed = pack.some(m => m.tool?.status === 'failed')
   const isRunning = propIsRunning ?? pack.some(m => m.tool?.status === 'running')
 
+  if (propIsRunning) {
+    const completed = pack.filter(message => ['completed', 'failed'].includes(activityState(message))).length
+    return (
+      <span className="pack-summary-row pack-summary-running">
+        <strong>{pack.every(message => message.kind === 'thinking') ? '正在思考' : '正在执行'}</strong>
+        <span className="pack-summary-progress" aria-label={`已处理 ${completed} 项，共 ${pack.length} 项`}>{completed} / {pack.length}</span>
+      </span>
+    )
+  }
+
   if (pack.length === 1) {
     const desc = describeTool(pack[0])
     return (
@@ -447,28 +472,6 @@ export function ShellOutputBlock({
   status?: "success" | "failed" | "running"
 }) {
   const [copied, setCopied] = useState(false)
-  const [filteredOutput, setFilteredOutput] = useState<string | null>(null)
-  const [filtering, setFiltering] = useState(false)
-  const [showFiltered, setShowFiltered] = useState(true)
-
-  const handleJevFilter = async (e: MouseEvent<HTMLButtonElement>) => {
-    e.stopPropagation()
-    if (filteredOutput !== null) {
-      setShowFiltered(!showFiltered)
-      return
-    }
-    if (!output || filtering) return
-    setFiltering(true)
-    try {
-      const res = await api.filterWithJev({ command, output })
-      setFilteredOutput(res.filtered)
-      setShowFiltered(true)
-    } catch {
-      // fallback
-    } finally {
-      setFiltering(false)
-    }
-  }
   const handleCopy = (e: MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation()
     const content = output ? `$ ${command}\n${output}` : `$ ${command}`
@@ -481,19 +484,6 @@ export function ShellOutputBlock({
     <div className="shell-terminal-card" aria-label="终端执行输出">
       <div className="shell-terminal-header">
         <span className="shell-terminal-label">Shell</span>
-        {output && output.length > 250 && (
-          <button
-            type="button"
-            className={`shell-terminal-copy ${filteredOutput && showFiltered ? 'is-active' : ''}`}
-            onClick={handleJevFilter}
-            title={filteredOutput ? (showFiltered ? '显示完整原始日志' : '切换至 Jev 降噪精简视图') : '使用 Jev 语义降噪过滤'}
-            aria-label="Jev 语义降噪"
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 6px', width: 'auto', fontSize: 10, color: filteredOutput && showFiltered ? '#10b981' : 'var(--astr-muted)' }}
-          >
-            <IconSparkles size={11} />
-            <span>{filtering ? '降噪中…' : (filteredOutput ? (showFiltered ? '已降噪 (查看原始)' : '查看降噪') : 'Jev 降噪')}</span>
-          </button>
-        )}
         <button
           type="button"
           className="shell-terminal-copy"
@@ -509,7 +499,7 @@ export function ShellOutputBlock({
           <span className="shell-prompt">$</span>
           <span className="shell-command-text">{command}</span>
         </div>
-        {output && <div className="shell-output-text">{filteredOutput && showFiltered ? filteredOutput : output}</div>}
+        {output && <div className="shell-output-text">{output}</div>}
       </div>
       <div className="shell-terminal-footer">
         {status === "failed" ? (

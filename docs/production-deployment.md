@@ -1,31 +1,55 @@
-# Single-service production deployment (Windows)
+# 安装版构建与更新
 
-The production service uses one Uvicorn worker, without reload or Vite. FastAPI serves the compiled `frontend/dist` assets, API, and WebSocket on port 30001. Agent connector subprocesses remain separate native runtimes; they are not additional web workers.
+星序安装版由 Wails 3 桌面客户端、Go 大内核和 Go 小内核组成。浏览器静态资源由 Go 大内核提供，不运行 Vite、FastAPI 或 Uvicorn。
 
-## Start
+## 构建候选安装器
 
-From the repository root, under the same Windows account used for deployment:
+在工具链准备完成后，从仓库根目录执行：
 
-```bash
-backend/.venv/Scripts/python.exe scripts/run_production.py
+```sh
+node scripts/build-installer.mjs
 ```
 
-Do not start a second instance while port 30001 is occupied. The entrypoint loads `.runtime/production.json` and `.runtime/production.credentials.dpapi`. Both are ignored by Git. The latter uses Windows current-user DPAPI; copying it to a different account or machine is not a credential migration method.
+脚本重新构建 Go 构件、桌面绑定、前端和 Wails 程序，校验构件哈希后生成 `release/Astrorder-Setup-0.1.0.exe` 及安装器清单。公共构件暂存目录是 `.runtime/go-stage/`。
 
-## Update
+桌面内嵌前端使用 `ASTRORDER_WAILS=1` 构建，不注册 PWA worker；浏览器资源另行构建，包含 `sw-astrorder.js`。不能将两份产物混用。原生图片预览的 HTML 嵌入桌面 EXE，修改该页面时必须重新构建桌面程序。
 
-1. Build `frontend/dist` with `npm run build` from `frontend/`.
-2. Back up the configured SQLite database with SQLite's backup API.
-3. Identify the exact current process by port 30001, repository cwd, and `scripts/run_production.py` command line.
-4. Preserve selected Agent connections and wait for user work to become idle. Close owned connectors before stopping that exact service.
-5. Start the entrypoint and verify health, authenticated bootstrap, native IDs, selected connections, static routes, and WebSocket on 30001.
+桌面必须使用项目构建脚本，以保留 Wails 中文输入法修复；直接 `go build` 不包含该修复。
 
-The old development restart scripts targeting 30002 are not appropriate for this deployment. Do not restart Vite.
+## 安装布局与数据
 
-## Local settings
+本机安装位置为 `P:\DevApp\Astrorder`：
 
-`.runtime/production.json` contains nonsecret `ASTRORDER_*` environment settings, including database and attachment locations, static asset directory, port, and explicit allowed origins. Private domain names belong here, not in tracked source. Vite's optional `frontend/vite.hosts.local.json` is development-only and not used by the production service.
+- `Astrorder.exe`：桌面程序。
+- `server/bin/`：大小内核、控制器和辅助程序。
+- `server/frontend/dist/`：浏览器/PWA 静态资源。
+- `server/connectors/`、`server/.hermes/`：Agent 安装资产。
 
-Logs are stored in `.runtime/production.log`; deployment backups and readback results are also under `.runtime/`.
+用户状态目录为 `%LOCALAPPDATA%\Astrorder`。数据库、附件、配置、DPAPI 凭据和 WebView 状态与程序文件分开维护，不因源码清理或资源同步删除。DPAPI 凭据绑定 Windows 当前用户，复制文件不能代替账户间的凭据迁移。
 
-The web listener is loopback-only. Existing reverse proxies or access-control gateways should forward to `127.0.0.1:30001`, including WebSocket upgrades. Keep their access protection enabled. Automatic startup at Windows login/boot is not installed by this entrypoint.
+## 大内核状态与重启
+
+在 Windows PowerShell 中使用已安装的控制器：
+
+```powershell
+$ServerRoot = 'P:\DevApp\Astrorder\server'
+$StateDir = Join-Path $env:LOCALAPPDATA 'Astrorder'
+$Control = Join-Path $ServerRoot 'bin\astrorderctl.exe'
+& $Control app status --root $ServerRoot --state-dir $StateDir
+& $Control app restart --root $ServerRoot --state-dir $StateDir
+```
+
+只对明确归属的进程操作，核对 PID、创建时间、可执行文件路径和端口归属。大内核重启后核对健康状态、鉴权、静态资源与事件重连，同时确认小内核及其托管进程身份未变化。
+
+## 发布边界
+
+- **前端资源**：构建浏览器版本，使用 `astrorderctl sync --dev-root` 与 `--installed-root` 同步 `frontend/dist`，核对磁盘与 HTTP 返回资源哈希。
+- **桌面程序**：备份旧文件，只替换并重启桌面进程，核对 EXE 哈希、`--check` 与窗口启动。不要按进程树结束小内核或 Agent。
+- **大内核**：构建并验证后独立替换、重启，不捆绑小内核更新。
+- **小内核**：只将验证后的候选暂存为同目录的 `astrorder-sessiond.exe.new`，核对哈希及 `update-check`；用户通过托盘手动激活。暂存不代表上线，Agent 不执行小内核停止、重启或更新。
+
+仅构建或静态资源校验通过，不代表安装与原生交互已验收。每次交付以当次运行结果为准，不沿用历史报告中的进程号、哈希或测试数量。
+
+## 隔离验证
+
+Windows 安装器隔离验收使用 `node scripts/verify-installer-isolation.mjs`。开发壳使用独立状态目录和明确回环地址，禁止共用正式安装版状态。小内核发布约束以 [AGENTS.md](../AGENTS.md) 为准。

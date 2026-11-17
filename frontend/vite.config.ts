@@ -1,5 +1,6 @@
 import react from '@vitejs/plugin-react'
 import { existsSync, readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vitest/config'
 import { VitePWA } from 'vite-plugin-pwa'
 
@@ -46,6 +47,15 @@ export default defineConfig({
   },
   build: {
     chunkSizeWarningLimit: 3000,
+    rollupOptions: {
+      input: {
+        index: fileURLToPath(new URL('./index.html', import.meta.url)),
+        'image-preview-glass': fileURLToPath(new URL('./src/native/imagePreviewGlass.ts', import.meta.url)),
+      },
+      output: {
+        entryFileNames: chunk => chunk.name === 'image-preview-glass' ? 'assets/image-preview-glass.js' : 'assets/[name]-[hash].js',
+      },
+    },
   },
   test: {
     environment: 'jsdom',

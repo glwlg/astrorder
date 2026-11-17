@@ -8,7 +8,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import userEvent from '@testing-library/user-event'
 
-vi.mock('../../api/client', () => ({ api: { getAnalyticsConfig: vi.fn(), getAnalyticsUsage: vi.fn() } }))
+vi.mock('../../api/client', () => ({ api: { getAnalyticsConfig: vi.fn(), getAnalyticsUsage: vi.fn(), getAgentUsage: vi.fn() } }))
 afterEach(() => { cleanup(); vi.resetAllMocks(); delete (window as unknown as { astrorderDesktop?: unknown }).astrorderDesktop })
 const config = { gateway_type: 'magpie', management_url: 'https://gateway.example/', statistics_url: 'https://gateway.example/#usage' }
 const mount = () => render(<MantineProvider><AnalyticsPage /></MantineProvider>)
@@ -60,6 +60,22 @@ it('uses a native top-level page on desktop and hides it on navigation', async (
   await waitFor(() => expect(showStatistics.mock.calls.length).toBeGreaterThan(shownBefore))
   view.unmount()
   expect(hideStatistics).toHaveBeenCalled()
+})
+
+it('hides the native gateway view when switching to CLI usage', async () => {
+  const showStatistics = vi.fn().mockResolvedValue(undefined)
+  const hideStatistics = vi.fn().mockResolvedValue(undefined)
+  ;(window as unknown as { astrorderDesktop: unknown }).astrorderDesktop = { showStatistics, hideStatistics }
+  vi.mocked(api.getAnalyticsConfig).mockResolvedValue(config as never)
+  vi.mocked(api.getAgentUsage).mockResolvedValue({
+    range: '7d', summary: { calls: 0, succeeded: 0, failed: 0, active_agents: 0 }, agents: [], capabilities: [], recent: [],
+  })
+  mount()
+  await waitFor(() => expect(showStatistics).toHaveBeenCalled())
+  fireEvent.click(screen.getByRole('tab', { name: 'CLI 使用' }))
+  expect(await screen.findByText('此时间范围内暂无调用记录')).toBeInTheDocument()
+  expect(hideStatistics).toHaveBeenCalled()
+  expect(screen.queryByTitle('网关统计页')).not.toBeInTheDocument()
 })
 
 it('keeps the native statistics page visible while its usage preview is hovered', async () => {

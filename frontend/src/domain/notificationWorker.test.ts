@@ -32,6 +32,16 @@ it('opens the session from a notification with no window', async () => {
   await pending
   expect(w.openWindow).toHaveBeenCalledWith('https://astrorder.test/mobile/chat/s?agent_id=a')
 })
+it('opens the group from its notification, including when another chat is open', async () => {
+  const client = { url: 'https://astrorder.test/mobile/chat/original', navigate: vi.fn().mockResolvedValue(undefined), focus: vi.fn().mockResolvedValue(undefined) }
+  const w = worker([client])
+  let pending: Promise<void> | undefined
+  w.handlers.notificationclick({ notification: { close: vi.fn(), data: { url: '/mobile/groups/group-1' } }, waitUntil: (promise: Promise<void>) => { pending = promise } })
+  await pending
+  expect(client.navigate).toHaveBeenCalledWith('https://astrorder.test/mobile/groups/group-1')
+  expect(client.focus).toHaveBeenCalledOnce()
+  expect(w.openWindow).not.toHaveBeenCalled()
+})
 it('focuses an existing page and rejects a cross-origin notification target', async () => {
   const client = { url: 'https://astrorder.test/mobile', navigate: vi.fn().mockResolvedValue(undefined), focus: vi.fn().mockResolvedValue(undefined) }
   const w = worker([client])

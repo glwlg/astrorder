@@ -3,12 +3,14 @@ import { Alert, Button, Center, Paper, Stack, Text, Title } from '@mantine/core'
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { useMediaQuery } from '@mantine/hooks'
 import { MobileWorkspace } from '../features/mobile/MobileWorkspace'
+import { MobileGroupsPage } from '../features/mobile/MobileGroupsPage'
 import { useQueryClient } from '@tanstack/react-query'
 import { ApiError } from '../api/client'
 import { AuthPage } from '../components/AuthPage'
 import { AppShellLayout } from './AppShellLayout'
 import { useAuthSession, useBootstrap } from '../hooks/useAstrorderData'
 import { useServerOutboxSync } from '../hooks/useServerOutboxSync'
+import { useChatReturnPath } from '../hooks/useChatReturnPath'
 import { useEventStream } from '../hooks/useEventStream'
 import { ChatPage } from '../features/chat/ChatPage'
 import { GroupsPage } from '../features/chat/GroupsPage'
@@ -75,8 +77,9 @@ function AuthenticatedApp() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const bootstrap = useBootstrap(true)
+  const chatReturnPath = useChatReturnPath()
   useShortcutHandlers({
-    chat: () => navigate('/chat'),
+    chat: () => navigate(chatReturnPath),
     monitor: () => navigate('/monitor'),
     swarm: () => navigate('/swarm'),
   })
@@ -91,7 +94,13 @@ function AuthenticatedApp() {
   const isMobile = mobileViewport || forceMobile
 
   if (isMobile) {
-    return <MobileWorkspace />
+    return <Routes>
+      <Route path="/mobile/groups" element={<MobileGroupsPage />} />
+      <Route path="/mobile/groups/:groupId" element={<MobileGroupsPage />} />
+      <Route path="/groups" element={<MobileGroupsPage />} />
+      <Route path="/groups/:groupId" element={<MobileGroupsPage />} />
+      <Route path="*" element={<MobileWorkspace />} />
+    </Routes>
   }
 
   if (isMobilePath) {
@@ -101,7 +110,7 @@ function AuthenticatedApp() {
 
   return (
     <Routes>
-      <Route element={<AppShellLayout />}>
+      <Route element={<AppShellLayout chatReturnPath={chatReturnPath} />}>
         <Route index element={<Navigate to="/chat" replace />} />
         <Route path="chat" element={<ChatPage />} />
         <Route path="chat/:sessionId" element={<ChatPage />} />

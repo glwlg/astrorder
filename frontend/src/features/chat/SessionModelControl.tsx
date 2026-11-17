@@ -13,6 +13,7 @@ import { useQuery } from '@tanstack/react-query'
 import { api, type OcxModelQuotaResponse } from '../../api/client'
 import type { Session } from '../../domain/types'
 import { useSessionModel } from '../../hooks/useSessionModel'
+import { ComposerGlassMenu, GlassButtonLens } from '../../components/GlassPanel'
 import { REASONING_EFFORTS } from './composerMedia'
 import './SessionModelControl.css'
 
@@ -177,6 +178,7 @@ export function SessionModelControl({ session }: { session: Session }) {
             setView('main')
           }}
         > 
+          <GlassButtonLens />
           <span className="codex-model-pill-text">{displayModelName}</span>
           <ModelQuotaBadge modelRoute={currentModelRoute} size="dot" />
           {!modelOnly && effortLabel && <span className="codex-model-pill-effort">{effortLabel}</span>}
@@ -185,6 +187,7 @@ export function SessionModelControl({ session }: { session: Session }) {
       </Popover.Target>
 
       <Popover.Dropdown className="codex-model-popover-dropdown">
+        <ComposerGlassMenu active={opened}>
         {(model.data?.read_only || model.data?.model_read_only) && <Text size="xs" c="dimmed" p="xs">{model.data.detail || '会话被其他客户端占用，当前只能读取模型信息。释放后点击刷新即可重新检查。'}</Text>}
         {view === 'main' && !modelOnly ? (
           <div className="codex-model-card" style={{ '--effort-color': EFFORT_COLORS[sliderIndex] } as React.CSSProperties}>
@@ -323,6 +326,7 @@ export function SessionModelControl({ session }: { session: Session }) {
             </div>
           </div>
         )}
+        </ComposerGlassMenu>
       </Popover.Dropdown>
     </Popover>
   )

@@ -350,7 +350,7 @@ func NewHandlerChecked(options Options) (http.Handler, error) {
 				browserInvoke = invoker.Invoke
 			}
 			var err error
-			agentHandler, err = agentapi.NewHandler(agentapi.Options{Store: options.Store, Client: options.DaemonClient, Authorizer: authenticator, Publisher: eventHub, DefaultWorkspace: options.Config.DefaultWorkspace, BrowserInvoke: browserInvoke, CommandSubmit: commandSubmit})
+			agentHandler, err = agentapi.NewHandler(agentapi.Options{Store: options.Store, Client: options.DaemonClient, Authorizer: authenticator, Publisher: eventHub, Logger: logger, DefaultWorkspace: options.Config.DefaultWorkspace, FileResolver: resolver, BrowserInvoke: browserInvoke, CommandSubmit: commandSubmit})
 			if err != nil {
 				return nil, fmt.Errorf("configure agent handler: %w", err)
 			}

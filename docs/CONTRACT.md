@@ -1,122 +1,39 @@
-# Protocol v1 — 核心通信协议与数据契约规范
+# 通信契约
 
-所有 JSON 通信字段命名遵循 `snake_case`。接口基址为 `/api/v1`。时间戳统一遵循 ISO-8601 UTC（格式：`YYYY-MM-DDTHH:mm:ss.sssZ`）。
-消息、会话与指令标识符均采用由 `agent_id + session_id` 作用域隔离的不透明字符串，绝不采用易冲突的文本派生 ID。连接器源事件通过 `(agent_id, event.id)` 去重，服务端游标（`cursor`）保持全局严格单调递增。
+星序对浏览器提供 HTTP/JSON 与 WebSocket，对 Agent 提供 CLI/MCP 能力；大小内核之间使用 protobuf/gRPC。各通道使用独立身份与鉴权，不能将浏览器凭据用于连接器或内核控制。
 
----
+## 契约来源
 
-## 1. 原生会话权威性原则 (Native Session Authority)
+| 内容 | 权威维护位置 |
+| --- | --- |
+| HTTP 路由和处理器 | `app-server-go/internal/httpapi/` 及各业务模块 |
+| OpenAPI 兼容性定义 | `app-server-go/internal/httpapi/openapi.json`，服务的 `/openapi.json` 与 `/docs` |
+| 前端请求与共享类型 | `frontend/src/api/client.ts`、`frontend/src/domain/types.ts` |
+| 浏览器事件通道 | `frontend/src/api/eventStream.ts`、`app-server-go/internal/application/eventhub.go` |
+| Agent 能力目录与鉴权 | `app-server-go/internal/agentapi/` |
+| 内核消息、服务与流 | `contracts/proto/astrorder/sessiond/v1/sessiond.proto` |
 
-星序是 Codex、Hermes、Grok 与 SSH 远端服务器的**控制面与观察面**，坚决不构建平行割裂的第二套会话对账系统：
-- `Session.id` 始终严格对齐底层原生的持久会话或线程 ID（如 Codex Thread ID、Hermes Session Key）。
-- 智能体命名空间（`agent_id`）用于隔离跨智能体 ID 碰撞，绝不将私有内部信息拼接至会话 ID 中。
-- 本地数据库（SQLite）仅作为高速缓存与离线工件投影，原生状态才是不可动摇的权威真值。
+OpenAPI 保留公开兼容性定义，新增 Go 路由还须核对实际处理器，不把冻结基线当成全部实时能力目录。避免在说明文档里复制另一套容易过期的接口和 TypeScript 类型。
 
----
+## 身份与数据
 
-## 2. 核心共享类型 (Core Shared Types)
+- JSON 产品字段使用 `snake_case`；消息、会话、连接和操作标识符是不透明身份，不从标题、时间或文件名派生。
+- 会话以 `agent_id + session_id` 隔离，原生会话和历史由原生 Agent 拥有。App 保存产品数据、投影与队列，不建立独立的原生历史权威副本。
+- 本地、WSL 与 SSH 的路径必须连同来源解析。群聊产物保存首次发布者的来源，后续相同路径按已有产物引用。
+- 缺失、显式空值、空字符串、零与 false 按对应契约区分，不通过浮点数中转原生大整数标识。
 
-### 2.1 智能体定义 (Agent)
-```typescript
-type AgentKind = 'hermes' | 'codex' | 'grok' | 'ssh'
-type AgentStatus = 'disconnected' | 'connecting' | 'connected' | 'ready' | 'error'
-type ControlState = 'ready' | 'owned' | 'waiting_approval' | 'unknown'
+## 浏览器请求与事件
 
-interface Agent {
-  id: string
-  kind: AgentKind
-  name: string
-  status: AgentStatus
-  capabilities: string[]
-  limitation: string | null
-  source_id?: string | null
-  connection_id?: string | null
-  profile_name?: string | null
-  runtime_id?: string | null
-  control_state: ControlState
-  daemon_mode?: boolean
-  updated_at: string
-}
-```
+HTTP API 位于 `/api/v1`。浏览器事件位于 `/ws/v1/events?after={cursor}`，用于只读事件和断线重放；命令通过 HTTP 提交，不通过浏览器事件 socket 发送。
 
-### 2.2 会话定义 (Session)
-```typescript
-type SessionStatus = 'idle' | 'running' | 'waiting_approval' | 'error'
-type ApprovalMode = 'ask' | 'auto' | 'full'
-type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'max'
+客户端按事件身份去重并推进 durable cursor，重连后从确认游标恢复。收到指令受理、队列提交或操作创建回执，不等于模型已经完成本轮；最终结果须结合对应的 command、turn、会话状态和消息判断。
 
-interface Session {
-  id: string
-  agent_id: string
-  title: string
-  workspace?: string | null
-  status: SessionStatus
-  project_id?: string | null
-  project_name?: string | null
-  selected_model?: string | null
-  selected_reasoning_effort?: ReasoningEffort | null
-  selected_approval_mode?: ApprovalMode | null
-  history_state: 'local' | 'pending' | 'ready'
-  updated_at: string
-}
-```
+认证方式由服务与桌面适配层实现。不得在日志或文档中保存实际 token、Cookie、私钥、连接器密钥或 gRPC 凭据。
 
-### 2.3 消息定义 (Message)
-```typescript
-type MessageRole = 'user' | 'assistant' | 'tool' | 'system'
-type MessageKind = 'text' | 'thinking' | 'tool_call' | 'tool_result' | 'file'
+## 内核 gRPC
 
-interface Message {
-  id: string
-  session_id: string
-  agent_id: string
-  role: MessageRole
-  kind: MessageKind
-  text: string
-  attachments?: Attachment[]
-  tool?: {
-    name: string
-    arguments?: Record<string, any>
-    result?: any
-  } | null
-  command_id?: string | null
-  created_at: string
-}
-```
+Go 大内核通过生成的客户端连接 Go 小内核。请求按具体 protobuf RPC 定义，不使用任意方法名和 JSON 的通用转发入口。原生扩展使用 `NativeJson` 保留原始字节和精确数字。
 
----
+事件流区分快照、重放、实时就绪、实时事件、重同步与溢出；终端使用双向流传递输入、输出、大小变化、关闭与游标。修改消息结构后须重新生成 Go 代码并验证描述符、presence、大整数和流边界。
 
-## 3. 关键 REST 与 WebSocket 接口规范
-
-### 3.1 鉴权与初始化
-- `POST /api/v1/auth/session`：通过有效访问凭证换取 HttpOnly Session Cookie。
-- `GET /api/v1/auth/session`：查询当前浏览器连接的会话鉴权有效性。
-- `GET /api/v1/bootstrap`：拉取星序全局启动快照（智能体列表、活动项目、会话列表、审批待决队列与最新事件游标）。
-
-### 3.2 会话与指令控制
-- `POST /api/v1/sessions/{id}/commands`：向底层 Agent 运行时提交用户指令（纯文本、附件或工具执行），返回受理凭证（`state: 'accepted'`）。
-- `POST /api/v1/sessions/{id}/stop`：向底层 Agent 运行时发送中断请求（映射为 Codex `turn/interrupt` 或 Hermes 停止信号）。
-- `PATCH /api/v1/sessions/{id}/model`：动态调整当前会话的模型绑定及思考深度（`reasoning_effort`）。
-- `PATCH /api/v1/sessions/{id}/approval-mode`：配置审批拦截模式（`ask` 询问 / `auto` 智能 / `full` 完全信任）。
-
-### 3.3 工件与工作区边界 API
-- `GET /api/v1/sessions/{id}/artifacts/content?path=...`：读取受控工作区内的文件内容（带 ETag / SHA-256 校验）。
-- `PUT /api/v1/sessions/{id}/artifacts/content?path=...`：受控写回工作区文件，强校验会话工作区物理路径，防范目录穿越。
-
-### 3.4 交互终端与 PTY Relay
-- `POST /api/v1/terminals`：创建当前会话作用域的交互式终端实例。
-- `GET /api/v1/terminals/{id}`：获取终端运行状态与输出缓冲。
-- `DELETE /api/v1/terminals/{id}`：优雅释放与终止指定终端子进程。
-
-### 3.5 多智能体群组（Bot Groups）API
-- `GET /api/v1/bot-groups`：查询当前用户定义的多智能体协作群列表。
-- `POST /api/v1/bot-groups`：创建包含指定成员（`machine_id`、`agent_id`、`alias`）的协作群。
-- `GET /api/v1/bot-groups/{id}/messages`：拉取群内交互消息与多方流式讨论记录。
-- `POST /api/v1/bot-groups/{id}/messages`：向群组提交指令，自动解析 `@成员` 并驱动多智能体协同响应。
-- `POST /api/v1/bot-groups/{id}/stop`：紧急打断并终止当前群内正在进行的智能体接力执行。
-
-### 3.6 会话分叉与 Git Worktree 隔离
-- `POST /api/v1/sessions/{id}/fork`：根据指定会话一键派生新会话。若设置 `worktree: true`，系统将自动基于 Git Worktree 在宿主机上检出独立工作区路径，实现多分支安全并行探索。
-
-### 3.7 双工事件流 (Event Stream)
-- `GET /ws/v1/events?after={cursor}`：浏览器全双工事件通道。支持断线自动回补重传缺失游标后的增量事件帧（`message.upsert`、`session.upsert`、`task.upsert`、`command.upsert`）。
+结果不确定的变更不能自动以新操作身份重新执行。进程托管、WAL 和模型配置执行属于小内核，HTTP 和产品编排属于大内核。详见 [gRPC 契约](../contracts/README.md) 与[大小内核架构](design/dual-kernel-architecture.md)。

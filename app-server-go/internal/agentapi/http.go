@@ -6,13 +6,21 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
+	"astrorder.dev/app-server/internal/auth"
 	"astrorder.dev/app-server/internal/blackboard"
+	"astrorder.dev/app-server/internal/store"
 )
 
 func (h *Handler) Invoke(ctx context.Context, capability string, payload map[string]any) (any, error) {
+	return h.invoke(ctx, capability, payload, nil)
+}
+
+func (h *Handler) invoke(ctx context.Context, capability string, payload map[string]any, verifiedCaller **Caller) (any, error) {
 	if payload == nil {
 		payload = map[string]any{}
 	}
@@ -28,6 +36,9 @@ func (h *Handler) Invoke(ctx context.Context, capability string, payload map[str
 		}
 		if _, vErr := h.ValidateCaller(ctx, caller); vErr != nil {
 			return nil, vErr
+		}
+		if verifiedCaller != nil {
+			*verifiedCaller = caller
 		}
 
 		// Check all 5 caller_* fields if already present in payload: reject null, non-string, empty, or conflict
@@ -279,7 +290,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		agentJSON(w, 503, map[string]any{"detail": "Authentication is not configured"})
 		return
 	}
-	if path == "/api/v1/blackboard" {
+	if path == "/api/v1/blackboard" || path == "/api/v1/agent/usage" {
 		if failure := h.options.Authorizer.AuthorizeBrowser(r); failure != nil {
 			agentJSON(w, failure.Status, map[string]any{"detail": failure.Detail})
 			return
@@ -291,6 +302,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	caller := r.Header.Get("x-astrorder-agent-id")
+	var verifiedCaller *Caller
 	invoke := func(capability string, payload map[string]any) (any, error) {
 		if payload == nil {
 			payload = map[string]any{}
@@ -298,7 +310,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if caller != "" && payload["caller_agent_id"] == nil {
 			payload["caller_agent_id"] = caller
 		}
-		return h.Invoke(r.Context(), capability, payload)
+		return h.invoke(r.Context(), capability, payload, &verifiedCaller)
 	}
 	switch {
 	case path == "/api/v1/agent/catalog":
@@ -314,6 +326,21 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		agentJSON(w, 200, result)
+	case path == "/api/v1/agent/usage":
+		period := r.URL.Query().Get("range")
+		if period == "" {
+			period = "7d"
+		}
+		if period != "24h" && period != "7d" && period != "30d" && period != "all" {
+			agentJSON(w, http.StatusBadRequest, map[string]any{"detail": "Invalid usage range"})
+			return
+		}
+		report, err := h.options.Store.AgentUsage(r.Context(), period, time.Now())
+		if err != nil {
+			agentJSON(w, http.StatusInternalServerError, map[string]any{"detail": "Unable to read agent usage"})
+			return
+		}
+		agentJSON(w, http.StatusOK, report)
 	case path == "/api/v1/agent/invoke":
 		var body struct {
 			Capability string         `json:"capability"`
@@ -327,11 +354,52 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			agentError(w, errors.New("Invalid capability"))
 			return
 		}
+		started := time.Now()
 		result, err := invoke(body.Capability, body.Input)
+		if isAgentUsageRequest(r) {
+			h.recordAgentUsage(r.Context(), body.Capability, verifiedCaller, started, err == nil)
+		}
 		if err != nil {
 			agentError(w, err)
 			return
 		}
 		agentJSON(w, 200, result)
+	}
+}
+
+// The UI also calls /agent/invoke. CLI and headless API clients do not send
+// browser fetch metadata or a browser session cookie.
+func isAgentUsageRequest(r *http.Request) bool {
+	if r.Header.Get("Origin") != "" || r.Header.Get("Sec-Fetch-Mode") != "" {
+		return false
+	}
+	_, err := r.Cookie(auth.CookieName)
+	return errors.Is(err, http.ErrNoCookie)
+}
+
+func (h *Handler) recordAgentUsage(ctx context.Context, capability string, caller *Caller, started time.Time, success bool) {
+	known := false
+	for _, item := range AllCapabilities {
+		if item.ID == capability {
+			known = true
+			break
+		}
+	}
+	if !known {
+		capability = "unknown"
+	}
+	record := store.AgentInvocation{Capability: capability, Success: success, Duration: time.Since(started), OccurredAt: time.Now()}
+	if caller != nil {
+		record.AgentID = caller.AgentID
+		record.Runtime = caller.Runtime
+	}
+	recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	defer cancel()
+	if err := h.options.Store.RecordAgentInvocation(recordCtx, record); err != nil {
+		logger := h.options.Logger
+		if logger == nil {
+			logger = slog.Default()
+		}
+		logger.Error("record agent usage failed", "error", err)
 	}
 }

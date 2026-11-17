@@ -77,6 +77,25 @@
         }
       }
     },
+    "/api/v1/agent/usage": {
+      "get": {
+        "operationId": "agent_usage_get",
+        "summary": "Agent CLI and headless API invocation statistics",
+        "parameters": [
+          {
+            "name": "range",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string", "enum": ["24h", "7d", "30d", "all"], "default": "7d" }
+          }
+        ],
+        "responses": {
+          "200": { "description": "Invocation totals, breakdowns, and recent activity" },
+          "400": { "description": "Invalid range" },
+          "401": { "description": "Browser authentication required" }
+        }
+      }
+    },
     "/api/v1/agent/mcp": {
       "post": {
         "operationId": "agent_mcp_post",
@@ -1106,6 +1125,63 @@
         }
       }
     },
+    "/api/v1/bot-groups/{group_id}/artifacts": {
+      "get": {
+        "operationId": "list_group_artifacts_get",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Verified file references and delivered group artifacts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items", "references", "checking"],
+                  "properties": {
+                    "items": { "type": "array", "items": { "type": "object" } },
+                    "references": { "type": "array", "items": { "type": "object" } },
+                    "checking": { "type": "boolean" },
+                    "error": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "recheck_group_artifacts_post",
+        "parameters": [
+          { "name": "group_id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Rebuild verified file references and delivered artifacts from native history",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items", "references", "checking"],
+                  "properties": {
+                    "items": { "type": "array", "items": { "type": "object" } },
+                    "references": { "type": "array", "items": { "type": "object" } },
+                    "checking": { "type": "boolean" },
+                    "error": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/bot-groups/{group_id}/messages": {
       "get": {
         "operationId": "list_group_messages_get",
@@ -1191,6 +1267,54 @@
               }
             }
           }
+        }
+      }
+    },
+    "/api/v1/bot-groups/{group_id}/recover": {
+      "post": {
+        "operationId": "recover_group_timeouts_post",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Recovered replies and resumed group coordination",
+            "content": {
+              "application/json": {
+                "schema": { "type": "object", "additionalProperties": true }
+              }
+            }
+          },
+          "409": { "description": "The original replies could not be uniquely verified" }
+        }
+      }
+    },
+    "/api/v1/bot-groups/{group_id}/retry": {
+      "post": {
+        "operationId": "retry_group_coordination_post",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Group coordination resumed",
+            "content": {
+              "application/json": {
+                "schema": { "type": "object", "additionalProperties": true }
+              }
+            }
+          },
+          "409": { "description": "The group has no decision to retry" }
         }
       }
     },
@@ -5067,7 +5191,7 @@
     },
     "/api/v1/services/jev/models": {
       "get": {
-        "operationId": "get_jev_gateway_models",
+        "operationId": "get_system_one_gateway_models",
         "responses": {
           "200": {
             "description": "System One models available through the configured LLM gateway",
@@ -5082,7 +5206,7 @@
     },
     "/api/v1/services/jev/config": {
       "get": {
-        "operationId": "get_jev_config_get",
+        "operationId": "get_system_one_config_get",
         "parameters": [],
         "responses": {
           "200": {
@@ -5092,7 +5216,7 @@
                 "schema": {
                   "additionalProperties": true,
                   "type": "object",
-                  "title": "Response Get Jev Config Api V1 Services Jev Config Get"
+                  "title": "Response Get System One Config Api V1 Services System One Config Get"
                 }
               }
             }
@@ -5100,7 +5224,7 @@
         }
       },
       "post": {
-        "operationId": "update_jev_config_post",
+        "operationId": "update_system_one_config_post",
         "parameters": [],
         "responses": {
           "200": {
@@ -5110,7 +5234,7 @@
                 "schema": {
                   "additionalProperties": true,
                   "type": "object",
-                  "title": "Response Update Jev Config Api V1 Services Jev Config Post"
+                  "title": "Response Update System One Config Api V1 Services System One Config Post"
                 }
               }
             }
@@ -5130,7 +5254,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/JevConfigPatch"
+                "$ref": "#/components/schemas/SystemOneConfigPatch"
               }
             }
           },
@@ -5140,7 +5264,7 @@
     },
     "/api/v1/services/jev/test": {
       "post": {
-        "operationId": "test_jev_connection_post",
+        "operationId": "test_system_one_connection_post",
         "parameters": [],
         "responses": {
           "200": {
@@ -5150,7 +5274,7 @@
                 "schema": {
                   "additionalProperties": true,
                   "type": "object",
-                  "title": "Response Test Jev Connection Api V1 Services Jev Test Post"
+                  "title": "Response Test System One Connection Api V1 Services System One Test Post"
                 }
               }
             }
@@ -5170,7 +5294,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/JevConfigPatch"
+                "$ref": "#/components/schemas/SystemOneConfigPatch"
               }
             }
           },
@@ -5403,7 +5527,7 @@
     },
     "/api/v1/sessions/handoff-curate": {
       "post": {
-        "operationId": "jev_handoff_curate_endpoint_post",
+        "operationId": "system_one_handoff_curate_endpoint_post",
         "parameters": [],
         "responses": {
           "200": {
@@ -5413,7 +5537,7 @@
                 "schema": {
                   "additionalProperties": true,
                   "type": "object",
-                  "title": "Response Jev Handoff Curate Endpoint Api V1 Sessions Handoff Curate Post"
+                  "title": "Response System One Handoff Curate Endpoint Api V1 Sessions Handoff Curate Post"
                 }
               }
             }
@@ -5433,7 +5557,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/JevHandoffCuratePayload"
+                "$ref": "#/components/schemas/SystemOneHandoffCuratePayload"
               }
             }
           },
@@ -6568,46 +6692,6 @@
         }
       }
     },
-    "/api/v1/tools/jev-filter": {
-      "post": {
-        "operationId": "jev_filter_endpoint_post",
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "type": "object",
-                  "title": "Response Jev Filter Endpoint Api V1 Tools Jev Filter Post"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/JevFilterPayload"
-              }
-            }
-          },
-          "required": true
-        }
-      }
-    },
     "/api/v1/user-activity": {
       "get": {
         "operationId": "user_activity_get",
@@ -6954,6 +7038,42 @@
               }
             ],
             "title": "Workspace"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Member Id"
+          },
+          "source_session_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Session Id"
+          },
+          "fork_session_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fork Session Id"
           }
         },
         "type": "object",
@@ -7292,10 +7412,10 @@
           },
           "max_hops": {
             "type": "integer",
-            "maximum": 10,
+            "maximum": 20,
             "minimum": 1,
             "title": "Max Hops",
-            "default": 3
+            "default": 10
           }
         },
         "type": "object",
@@ -7789,7 +7909,7 @@
           }
         }
       },
-      "JevConfigPatch": {
+      "SystemOneConfigPatch": {
         "properties": {
           "mode": {
             "type": "string",
@@ -7811,25 +7931,9 @@
           }
         },
         "type": "object",
-        "title": "JevConfigPatch"
+        "title": "SystemOneConfigPatch"
       },
-      "JevFilterPayload": {
-        "properties": {
-          "command": {
-            "type": "string",
-            "title": "Command",
-            "default": ""
-          },
-          "output": {
-            "type": "string",
-            "title": "Output",
-            "default": ""
-          }
-        },
-        "type": "object",
-        "title": "JevFilterPayload"
-      },
-      "JevHandoffCuratePayload": {
+      "SystemOneHandoffCuratePayload": {
         "properties": {
           "session_id": {
             "type": "string",
@@ -7845,7 +7949,7 @@
           "session_id",
           "agent_id"
         ],
-        "title": "JevHandoffCuratePayload"
+        "title": "SystemOneHandoffCuratePayload"
       },
       "LlmConfigPatch": {
         "properties": {
@@ -8473,7 +8577,6 @@
           "text": {
             "type": "string",
             "maxLength": 32000,
-            "minLength": 1,
             "title": "Text"
           },
           "target_agent_id": {
@@ -8494,11 +8597,41 @@
             },
             "type": "array",
             "title": "Mentions"
+          },
+          "target_member_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Member Id"
+          },
+          "attachment_ids": {
+            "type": "array",
+            "maxItems": 32,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "title": "Attachment Ids"
           }
         },
         "type": "object",
-        "required": [
-          "text"
+        "anyOf": [
+          {
+            "required": ["text"],
+            "properties": { "text": { "minLength": 1 } }
+          },
+          {
+            "required": ["attachment_ids"],
+            "properties": { "attachment_ids": { "minItems": 1 } }
+          }
         ],
         "title": "SendGroupMessagePayload"
       },
@@ -8865,6 +8998,12 @@
       },
       "UpdateBotGroupPayload": {
         "properties": {
+          "member_mutes": {
+            "type": "object",
+            "additionalProperties": { "type": "boolean" },
+            "minProperties": 1,
+            "description": "Update mute states by group member ID. Submit separately from other group settings."
+          },
           "name": {
             "anyOf": [
               {
@@ -8910,7 +9049,7 @@
             "anyOf": [
               {
                 "type": "integer",
-                "maximum": 10,
+                "maximum": 20,
                 "minimum": 1
               },
               {

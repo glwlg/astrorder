@@ -23,6 +23,7 @@ import {
 import { useShallow } from 'zustand/react/shallow'
 import type { ViewerContext } from '../../types'
 import { selectMessages, selectTasks, useAstrorderStore } from '../../../../state/store'
+import { scopeKey } from '../../../../domain/semantics'
 import type { Message, Task } from '../../../../domain/types'
 import { MarkdownContent } from '../../../../components/MarkdownContent'
 import { parseNodesFromSession, type AgentGraphNode, type StepKind, type StepStatus } from './parseAgentGraph'
@@ -60,6 +61,7 @@ function getNodeIcon(kind: StepKind, status: StepStatus) {
 export function AgentGraphViewer({ artifact }: ViewerContext) {
   const sessionId = artifact.sessionId
   const agentId = artifact.agentId
+  const session = useAstrorderStore((state) => state.sessions[scopeKey(agentId, sessionId)])
 
   const messages = useAstrorderStore(
     useShallow((s) => (sessionId && agentId ? selectMessages(s, agentId, sessionId) : EMPTY_MESSAGES))
@@ -319,7 +321,7 @@ export function AgentGraphViewer({ artifact }: ViewerContext) {
                   详细思考/执行输出
                 </Text>
                 <Paper p="xs" withBorder style={{ maxHeight: 360, overflow: 'auto' }}>
-                  <MarkdownContent value={selectedNode.detail} />
+                  <MarkdownContent value={selectedNode.detail} session={session} />
                 </Paper>
               </div>
             )}

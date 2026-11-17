@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Command, Message, Project } from '../domain/types'
 import { selectOutbox, selectProjects, selectSessions, useAstrorderStore } from './store'
 
@@ -66,6 +66,22 @@ describe('shared runtime store', () => {
     expect(Object.values(useAstrorderStore.getState().messages['agent-1::session-1'])).toEqual([expect.objectContaining({ id: 'reply', text: 'Hello world!' })])
     store.applyEvent({ ...first, id: 'other-agent', agent_id: 'other', data: { ...first.data, agent_id: 'other', text: 'isolated' } })
     expect(useAstrorderStore.getState().messages['other::session-1'].reply.text).toBe('isolated')
+  })
+
+  it('coalesces deltas without losing ordering, deduplication, or session isolation', () => {
+    const store = useAstrorderStore.getState()
+    const first = { id: 'delta-1', cursor: 0, type: 'message.delta', agent_id: session.agent_id, session_id: session.id, data: { ...message('reply', 'A'), role: 'assistant' } }
+    const other = { ...first, id: 'delta-2', agent_id: 'other', data: { ...first.data, agent_id: 'other', text: 'X' } }
+    const last = { ...first, id: 'delta-3', data: { ...first.data, text: 'B' } }
+    const listener = vi.fn()
+    const unsubscribe = useAstrorderStore.subscribe(listener)
+    store.applyMessageDeltas([first, first, other, last])
+    expect(listener).toHaveBeenCalledOnce()
+    expect(useAstrorderStore.getState().messages['agent-1::session-1'].reply.text).toBe('AB')
+    expect(useAstrorderStore.getState().messages['other::session-1'].reply.text).toBe('X')
+    store.applyEvent(last)
+    expect(useAstrorderStore.getState().messages['agent-1::session-1'].reply.text).toBe('AB')
+    unsubscribe()
   })
 
   it('does not revive completed activity from terminal task updates', () => {

@@ -41,8 +41,8 @@ export function ImageViewer({ artifact, toolbarAction }: ViewerContext) {
   }, [artifact.readUrl, artifact.name, artifact.mediaType, revision])
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
-      <Paper p="xs" withBorder style={{ borderRadius: 0 }}>
+    <div className="sidecar-image-viewer" style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, position: 'relative' }}>
+      <Paper p="xs" withBorder data-liquid-surface="toolbar" data-liquid-snapshot=".sidecar-image-viewer" style={{ position: 'absolute', inset: '8px 8px auto', zIndex: 10, borderRadius: 10 }}>
         <Group justify="space-between" wrap="nowrap">
           <Text size="xs" fw={600} truncate title={artifact.path || artifact.name}>{artifact.name}</Text>
           <Group gap="xs" wrap="nowrap">

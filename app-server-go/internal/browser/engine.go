@@ -188,11 +188,13 @@ func (m *SessionManager) RunExternalBrowserTask(ctx context.Context, req Browser
 		return nil, ctx.Err()
 	}
 	start := time.Now()
-	if req.Reset {
-		m.CloseSession(ctx, req.SessionKey)
-	}
 	if err := m.EnsureBrowser(ctx); err != nil {
 		return nil, err
+	}
+	if req.Reset {
+		if err := m.CloseSession(ctx, req.SessionKey); err != nil {
+			return nil, err
+		}
 	}
 	page, created, err := m.SessionPage(ctx, req.SessionKey, false, true, "")
 	if err != nil {
@@ -243,9 +245,19 @@ func (m *SessionManager) RunExternalBrowserTask(ctx context.Context, req Browser
 		}
 		target = result.TargetID
 		m.rememberEngineTarget(ctx, req.SessionKey, target)
+		release, err := m.acquireLock(ctx, req.SessionKey, true)
+		if err != nil {
+			return nil, err
+		}
 		m.targetMu.Lock()
+		if !ownsTarget(m.sessionTargets[req.SessionKey], target) {
+			m.targetMu.Unlock()
+			release()
+			return nil, errors.New("浏览器引擎返回的标签页不可用")
+		}
 		m.sessionActive[req.SessionKey] = target
 		m.targetMu.Unlock()
+		release()
 	}
 	m.targetMu.Lock()
 	targets := append([]string(nil), m.sessionTargets[req.SessionKey]...)

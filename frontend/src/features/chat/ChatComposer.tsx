@@ -1,6 +1,7 @@
 import { IconBrain, IconMicrophone, IconPaperclip, IconPlus, IconPlayerStop, IconArrowUp, IconX } from '@tabler/icons-react'
 import { Badge, Button, Group, Paper, Stack, Text, Textarea } from '@mantine/core'
 import { InlineNotice } from '../../components/InlineNotice'
+import { ComposerGlassSurface, GlassButtonLens } from '../../components/GlassPanel'
 import { useQueryClient } from '@tanstack/react-query'
 import { type ChangeEvent, type ClipboardEvent, type DragEvent, type KeyboardEvent, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useShallow } from 'zustand/react/shallow'
@@ -11,13 +12,12 @@ import { selectCommands, useAstrorderStore } from '../../state/store'
 import { submitBrowserCommand } from './commandActions'
 import { applyVoiceTranscript, useVoiceInput } from './useVoiceInput'
 import { SessionModelControl } from './SessionModelControl'
-import { Magnet } from '../../components/animations/Magnet'
-import { ClickSpark } from '../../components/animations/ClickSpark'
 import { GitStatusBar } from './GitStatusBar'
 import { GoalManager } from './GoalManager'
 import { clipboardFiles } from './composerMedia'
 import { notifySessionSubmitted } from '../../hooks/useSessionOrder'
 import '../agents/agentsLayout.css'
+import './composerGlass.css'
 import { ApprovalModeControl } from './ApprovalModeControl'
 import { sharedServerOutbox } from '../mobile/serverOutbox'
 import type { OutboxEntry } from '../mobile/mobileOutbox'
@@ -178,6 +178,7 @@ export function ChatComposer({
   usage,
   onHeightChange,
   onPreviewImage,
+  glass = false,
 }: {
   session: Session
   agent?: Agent
@@ -185,6 +186,7 @@ export function ChatComposer({
   usage?: { last_input_tokens: number; context_window: number; context_available?: boolean; source?: string }
   onHeightChange?: (height: number) => void
   onPreviewImage?: (images: string[], index: number) => void
+  glass?: boolean
 }) {
   const queryClient = useQueryClient()
   const draftKey = scopeKey(session.agent_id, session.id)
@@ -712,10 +714,9 @@ ${draft.text}` : entry.payload.text)
     <>
       <Paper
         ref={cardRef}
-        className={`composer-card${sessionDragOver ? ' is-session-drag-over' : ''}${fileDragOver ? ' is-file-drag-over' : ''}`}
+        className={`composer-card${glass ? ' composer-glass' : ''}${sessionDragOver ? ' is-session-drag-over' : ''}${fileDragOver ? ' is-file-drag-over' : ''}`}
         withBorder
         radius="lg"
-        p="sm"
         onDragOver={handleSessionDragOver}
         onDragLeave={(e) => {
           if (!e.currentTarget.contains(e.relatedTarget as Node)) {
@@ -725,6 +726,7 @@ ${draft.text}` : entry.payload.text)
         }}
         onDrop={handleSessionDrop}
       >
+        <ComposerGlassSurface active={glass}>
         <GoalManager key={`${session.agent_id}::${session.id}`} session={session} agent={agent} tasks={tasks} />
         <GitStatusBar session={session} />
         <Stack gap="xs">
@@ -867,7 +869,7 @@ ${draft.text}` : entry.payload.text)
         <div style={{ position: 'relative' }}>
           <AgentCommandMenu agent={agent} items={agentCommands} activeIndex={commandIndex} onSelect={selectAgentCommand} />
           <AgentMentionMenu agent={agent} items={agentMentions} activeIndex={commandIndex} onSelect={selectAgentMention} />
-          <Textarea ref={textareaRef} className="composer-input" aria-label="消息内容" placeholder={supportsImages ? '随心输入，可粘贴图片' : '随心输入'} variant="unstyled" autosize minRows={2} maxRows={8} value={draft.text} onChange={(event) => { setCommandIndex(0); setDismissedMenuText(null); setText(event.currentTarget.value) }} onPaste={handlePaste} onKeyDown={handleKeyDown} disabled={!canChat || submitting} />
+          <Textarea ref={textareaRef} className="composer-input" aria-label="消息内容" placeholder={supportsImages ? '随心输入，可粘贴图片' : '随心输入'} variant="unstyled" autosize minRows={1} maxRows={8} value={draft.text} onChange={(event) => { setCommandIndex(0); setDismissedMenuText(null); setText(event.currentTarget.value) }} onPaste={handlePaste} onKeyDown={handleKeyDown} disabled={!canChat || submitting} />
         </div>
         <Group className="composer-row" align="center" gap="xs" wrap="nowrap">
           <Button
@@ -878,6 +880,7 @@ ${draft.text}` : entry.payload.text)
             disabled={!canAttach || !canChat || submitting}
             aria-label={canAttach ? '添加附件' : '附件能力未提供'}
           >
+            <GlassButtonLens />
             <IconPlus size={20} />
             <input ref={fileInputRef} hidden type="file" multiple accept={supportsImages ? undefined : 'text/*,.txt,.md,.json,.csv,.py,.go,.ts,.tsx,.js,.jsx,.html,.css,.yaml,.yml,.toml,.xml,.log,.sh,.bat,.ps1'} onChange={addFiles} />
           </Button>
@@ -915,27 +918,30 @@ ${draft.text}` : entry.payload.text)
             loading={voice.status === 'transcribing'}
             onClick={voice.toggle}
           >
+            <GlassButtonLens />
             {voice.status === 'recording' || voice.status === 'requesting' ? <IconPlayerStop size={19} color="var(--mantine-color-red-6)" /> : <IconMicrophone size={19} />}
           </Button>
 
-          <Magnet padding={20} magnetStrength={3.5} disabled={submitting}>
-            <ClickSpark sparkColor={isStopAction ? '#ef4444' : '#3b82f6'} sparkSize={12} sparkRadius={36} sparkCount={8}>
+          <div className="composer-submit-wrap">
               <Button
                 className="send-button"
-                color={isStopAction ? 'red' : 'indigo'}
+                color={isStopAction ? 'red' : 'violet'}
+                data-action={isStopAction ? 'stop' : 'send'}
                 radius="xl"
                 disabled={submitting || (isStopAction ? !canStop : !canChat || !hasDraft)}
                 onClick={() => void submit(isStopAction ? 'stop' : 'send', isStopAction ? session.id : null)}
                 aria-label={isStopAction ? '停止' : nativeBusy ? '加入队列' : '发送'}
                 aria-busy={submitting}
               >
+                <GlassButtonLens />
+                <span>{isStopAction ? '停止' : nativeBusy ? '排队' : '发送'}</span>
                 {isStopAction ? <IconPlayerStop size={18} /> : <IconArrowUp size={18} />}
               </Button>
-            </ClickSpark>
-          </Magnet>
+          </div>
         </Group>
 
         </Stack>
+        </ComposerGlassSurface>
       </Paper>
       {voice.error && <div role="alert">{voice.error}</div>}
       {voice.status === 'transcribing' && <div role="status">正在转写…</div>}

@@ -49,6 +49,7 @@ export interface SidecarState {
   openGitDiff: (sessionId: string, agentId: string, workspacePath?: string, connectionId?: string, baseBranch?: string) => void
   openBrowser: (sessionId: string, agentId: string, initialUrl?: string, connectionId?: string) => void
   openBlackboard: (sessionId?: string, agentId?: string, connectionId?: string) => void
+  openGroupBlackboard: (groupId: string, groupName: string, focusKey?: string) => void
   openMemory: (sessionId?: string) => void
   switchSession: (sessionKey: string) => void
   resetSessionSidecar: () => void
@@ -57,6 +58,10 @@ export interface SidecarState {
 
 function tabLifecycleKey(agentId: string, tabId: string) {
   return JSON.stringify([agentId, tabId])
+}
+
+export function groupSidecarKey(groupId: string): string {
+  return `group:${groupId}`
 }
 
 const unavailableStorage = {
@@ -422,6 +427,31 @@ export const useSidecarStore = create<SidecarState>()(persist((set, get) => ({
         },
       })
     }
+  },
+
+  openGroupBlackboard: (groupId, groupName, focusKey) => {
+    const ownerKey = groupSidecarKey(groupId)
+    get().switchSession(ownerKey)
+    const { tabs, sessionMemories, mountedTabs } = get()
+    const id = `blackboard:${ownerKey}`
+    const previous = tabs.find(tab => tab.id === id)?.artifact
+    const artifact: ArtifactRef = {
+      id, name: '群聊黑板', kind: 'workspace_file', mediaType: 'application/x-blackboard',
+      sessionId: groupId, agentId: '', readUrl: '', writable: true,
+      metadata: {
+        namespace: ownerKey,
+        title: `群聊黑板 · ${groupName}`,
+        focusKey,
+        focusRequest: Number(previous?.metadata?.focusRequest || 0) + 1,
+      },
+    }
+    const tab: SidecarTab = { id, type: 'artifact', title: '群聊黑板', artifact, viewerId: 'blackboard-viewer', closable: true }
+    const nextTabs = previous ? tabs.map(current => current.id === id ? tab : current) : [...tabs, tab]
+    set({
+      tabs: nextTabs, activeTabId: id, isOpen: true,
+      mountedTabs: { ...mountedTabs, [ownerKey]: nextTabs },
+      sessionMemories: { ...sessionMemories, [ownerKey]: { tabs: nextTabs, activeTabId: id, isOpen: true } },
+    })
   },
 
   openMemory: (sessionId?: string) => {

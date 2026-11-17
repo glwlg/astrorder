@@ -240,7 +240,6 @@ export function NetworkSettingsPage() {
           </Stack>
         </Card>
 
-        {/* 2.5 Jev 模型服务配置 */}
         
         
         

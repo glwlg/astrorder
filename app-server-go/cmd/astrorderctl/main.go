@@ -60,6 +60,8 @@ func runIsolatedVerify(args []string, output io.Writer) int {
 func run(args []string, output io.Writer) int {
 	if len(args) > 0 {
 		switch args[0] {
+		case "lifecycle-broker":
+			return runLifecycleBroker(args[1:], output)
 		case "kernel-operation":
 			return runKernelOperation(args[1:], output)
 		case "verify":

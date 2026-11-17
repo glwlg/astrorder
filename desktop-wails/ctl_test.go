@@ -11,19 +11,28 @@ import (
 	"time"
 )
 
-func TestCtlExecutableResolution(t *testing.T) {
-	root, err := filepath.Abs("..")
-	if err != nil {
+func testCtlRoot(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	bin := filepath.Join(root, "bin")
+	if err := os.MkdirAll(bin, 0700); err != nil {
 		t.Fatal(err)
 	}
-	exe := resolveCtlExecutable(root)
-	if exe == "" {
-		t.Fatalf("expected to resolve astrorderctl executable in workspace %s", root)
+	if err := os.WriteFile(filepath.Join(bin, "astrorderctl.exe"), []byte("fixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+func TestCtlExecutableResolution(t *testing.T) {
+	root := testCtlRoot(t)
+	if exe := resolveCtlExecutable(root); exe != filepath.Join(root, "bin", "astrorderctl.exe") {
+		t.Fatalf("resolved executable = %q", exe)
 	}
 }
 
 func TestCtlValidation(t *testing.T) {
-	root, _ := filepath.Abs("..")
+	root := testCtlRoot(t)
 	client, err := NewCtlClient(root, t.TempDir())
 	if err != nil {
 		t.Fatal(err)

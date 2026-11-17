@@ -7,7 +7,7 @@ import { spawn } from 'node:child_process'
 const [rootArg, scratchArg, stageArg] = process.argv.slice(2)
 assert(rootArg && scratchArg, 'usage: node isolated-http-verify.mjs <root> <scratch> [binary-directory]')
 const root = path.resolve(rootArg)
-const stage = path.resolve(stageArg || path.join(root, 'desktop/.runtime/go-stage'))
+const stage = path.resolve(stageArg || path.join(root, '.runtime/go-stage'))
 const packagedStatic = path.resolve(stage, '..', 'frontend', 'dist')
 const staticDir = stageArg ? packagedStatic : path.join(root, 'frontend', 'dist')
 await fs.access(path.join(staticDir, 'index.html'))
@@ -80,7 +80,7 @@ try {
     ['GET', '/chat', undefined, 200, body => assert.match(body, /<html/i)],
     ['GET', '/openapi.json', undefined, 200, body => assert.ok(JSON.parse(body).paths['/api/v1/sessions'])],
     ['GET', '/docs', undefined, 200, body => assert.match(body, /html/i)],
-    ['POST', '/api/v1/tools/jev-filter', { output: 'short fixture output' }, 200, body => assert.equal(JSON.parse(body).filtered, 'short fixture output')],
+    ['POST', '/api/v1/tools/jev-filter', { output: 'short fixture output' }, 404],
     ['POST', '/api/v1/runtime/launch', { kind: 'codex', workspace: state }, 409],
     ['POST', '/api/v1/services/daemon/restart', { confirm_active: false }, 422],
     ['GET', '/api/v1/services/daemon/restart/missing', undefined, 404],

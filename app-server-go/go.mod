@@ -1,6 +1,6 @@
 module astrorder.dev/app-server
 
-go 1.27.2
+go 1.27.3
 
 require (
 	astrorder.dev/contracts v0.0.0-00010101000000-000000000000

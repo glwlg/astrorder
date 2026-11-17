@@ -30,37 +30,15 @@ func TestGenerationIsRepeatableAndMatchesCheckedInOutputs(t *testing.T) {
 	if grpcPlugin == "" {
 		grpcPlugin = "protoc-gen-go-grpc"
 	}
-	python := os.Getenv("ASTRORDER_GRPC_TOOLS_PYTHON")
-	generatePython := os.Getenv("ASTRORDER_GENERATE_PYTHON") != "0"
-	if generatePython && python == "" {
-		t.Fatal("ASTRORDER_GRPC_TOOLS_PYTHON is required unless ASTRORDER_GENERATE_PYTHON=0")
-	}
 	first := filepath.Join(t.TempDir(), "first")
 	second := filepath.Join(t.TempDir(), "second")
 	directories := []string{"gen/go"}
-	if generatePython {
-		directories = append(directories, "gen/python")
-	}
 	for _, output := range []string{first, second} {
 		if err := os.MkdirAll(output, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if generatePython {
-			if err := os.MkdirAll(filepath.Join(output, "gen", "python"), 0o755); err != nil {
-				t.Fatal(err)
-			}
-		}
 		template := writeRuntimeBufTemplate(t, output, goPlugin, grpcPlugin)
-		runWithEnv(t, toolEnv(), buf, "generate", "--template", template, "--output", output)
-		if generatePython {
-			protos, err := filepath.Glob(filepath.Join("proto", "astrorder", "sessiond", "v1", "*.proto"))
-			if err != nil || len(protos) == 0 {
-				t.Fatalf("discover protos: %v (%d files)", err, len(protos))
-			}
-			args := []string{"-m", "grpc_tools.protoc", "-Iproto", "--python_out=" + filepath.Join(output, "gen", "python"), "--grpc_python_out=" + filepath.Join(output, "gen", "python")}
-			args = append(args, protos...)
-			runWithEnv(t, toolEnv(), python, args...)
-		}
+		run(t, buf, "generate", "--template", template, "--output", output)
 	}
 	firstHashes := generatedHashes(t, first, directories...)
 	secondHashes := generatedHashes(t, second, directories...)
@@ -75,14 +53,9 @@ func TestGenerationIsRepeatableAndMatchesCheckedInOutputs(t *testing.T) {
 
 func run(t *testing.T, name string, args ...string) {
 	t.Helper()
-	runWithEnv(t, nil, name, args...)
-}
-
-func runWithEnv(t *testing.T, extraEnv []string, name string, args ...string) {
-	t.Helper()
 	cmd := exec.Command(name, args...)
 	cmd.Dir = "."
-	cmd.Env = append(toolEnv(), extraEnv...)
+	cmd.Env = toolEnv()
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("%s %s: %v\n%s", name, strings.Join(args, " "), err, output)
@@ -164,7 +137,7 @@ func generatedHashes(t *testing.T, root string, directories ...string) []string 
 			if err != nil {
 				return err
 			}
-			if entry.IsDir() || strings.HasSuffix(path, ".pyc") || strings.Contains(path, "__pycache__") {
+			if entry.IsDir() {
 				return nil
 			}
 			raw, readErr := os.ReadFile(path)

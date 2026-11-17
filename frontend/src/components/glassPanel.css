@@ -1,0 +1,76 @@
+.glass-panel {
+  position: sticky;
+  top: 0;
+  z-index: 0;
+  height: 100%;
+  min-height: 0;
+  overflow: clip;
+  isolation: isolate;
+  border-radius: inherit;
+}
+.glass-panel-lens {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  border-radius: inherit;
+  pointer-events: none;
+}
+/* The canvas only paints the rim. The flat centre softly blurs the live
+   backdrop without re-rasterising or displacing its content. */
+.glass-panel::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  border-radius: inherit;
+  background: rgb(255 255 255 / 8%);
+  backdrop-filter: blur(2px) saturate(105%);
+  pointer-events: none;
+}
+.glass-panel::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  border: 1px solid rgb(255 255 255 / 80%);
+  border-radius: inherit;
+  box-shadow:
+    inset 1px 1px 1px rgb(255 255 255 / 95%),
+    inset -1px -1px 1px rgb(70 58 88 / 28%),
+    inset 0 0 0 3px rgb(255 255 255 / 13%);
+  pointer-events: none;
+}
+.glass-panel-content {
+  position: relative;
+  z-index: 4;
+  height: 100%;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  border-radius: inherit;
+}
+.glass-panel > canvas { pointer-events: none; }
+.glass-panel--composer,
+.glass-panel--menu { height: auto; }
+.glass-panel--composer,
+.glass-panel--composer > .glass-panel-content { overflow: visible; }
+.glass-panel--composer > .glass-panel-content,
+.glass-panel--menu > .glass-panel-content { height: auto; }
+.glass-panel--menu > .glass-panel-content { overflow: visible; padding: 12px; }
+.glass-button-lens {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  border-radius: 7px;
+  pointer-events: none;
+}
+.send-button .glass-button-lens { border-radius: 9px; }
+:root[data-mantine-color-scheme='dark'] .glass-panel::before {
+  background: rgb(24 21 31 / 8%);
+}
+:root[data-mantine-color-scheme='dark'] .glass-panel::after {
+  border-color: rgb(255 255 255 / 20%);
+  box-shadow:
+    inset 1px 1px 1px rgb(255 255 255 / 25%),
+    inset -1px -1px 1px rgb(0 0 0 / 35%),
+    inset 0 0 0 3px rgb(255 255 255 / 5%);
+}

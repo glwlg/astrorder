@@ -130,6 +130,10 @@ func (s *Service) SessionCLI(ctx context.Context, id string, install bool) (*Ses
 	if readErr == nil {
 		caller = before
 	}
+	refresh, err := planOfficialCLIRefresh(ctx, d.env, d.home, d.kind, bin, binary, caller)
+	if err != nil {
+		return nil, err
+	}
 	transportPath := path.Join(d.home, "astrorder-transport.json")
 	var transport, oldTransport []byte
 	var transportReadErr error
@@ -188,6 +192,9 @@ func (s *Service) SessionCLI(ctx context.Context, id string, install bool) (*Ses
 	}); err != nil {
 		rollback()
 		return nil, err
+	}
+	if err := applyOfficialCLIRefresh(ctx, d.env, d.home, d.kind, bin, binary, refresh); err != nil {
+		return nil, envtarget.Errorf(502, "会话 CLI 已配置，但其他官方技能的客户端更新失败：%s", err.Error())
 	}
 	status.Ready = true
 	status.Message = "已配置并核验"

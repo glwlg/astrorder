@@ -1,0 +1,8 @@
+.message-user-prose {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.message-user-prose :is(p, li) {
+  white-space: pre-wrap;
+}

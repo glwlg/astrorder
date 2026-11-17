@@ -54,7 +54,7 @@ func TestMagpieNativeQuota(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
-		_, _ = w.Write([]byte(`{"object":"list","data":[{"provider":"codex","name":"Codex","user":"fixture-account","kind":"subscription","plan":"plus","windows":[{"name":"5h","used":95,"remaining":5,"resetsAt":"2026-10-16T01:00:00Z"},{"name":"7d","used":20,"remaining":80}]},{"provider":"other","name":"Other","kind":"balance","balance":"$12","windows":[]}]}`))
+		_, _ = w.Write([]byte(`{"object":"list","data":[{"provider":"codex","name":"Codex","user":"first","kind":"subscription","plan":"plus","readAt":"2026-10-16T00:45:00Z","windows":[{"name":"5 hours","used":95,"remaining":5,"resetsAt":"2026-10-16T01:00:00Z"},{"name":"7 days","used":20,"remaining":80}]},{"provider":"codex","name":"Codex","user":"second","kind":"subscription","plan":"pro","last":true,"asOf":"2026-10-16T00:30:00Z","windows":[{"name":"7 days","used":89,"remaining":11}]},{"provider":"codex","name":"Codex","user":"unavailable","kind":"subscription","readDeferred":true,"windows":[{"name":"5 hours"},{"name":"notice","text":true,"display":"available","used":0,"remaining":100},{"name":"balance","balance":42,"used":0,"remaining":100}]},{"provider":"other","name":"Other","kind":"balance","balance":"$12","windows":[]}]}`))
 	})
 	w := analyticsRequest(t, h, "/api/v1/analytics/model-quota?model=codex/gpt-test")
 	if w.Code != 200 {
@@ -64,7 +64,12 @@ func TestMagpieNativeQuota(t *testing.T) {
 		Providers []string         `json:"providers"`
 		Reports   []map[string]any `json:"reports"`
 		Accounts  []struct {
-			Quota struct {
+			Email        string `json:"email"`
+			Last         bool   `json:"last"`
+			AsOf         string `json:"asOf"`
+			ReadAt       string `json:"readAt"`
+			ReadDeferred bool   `json:"readDeferred"`
+			Quota        *struct {
 				Short  float64 `json:"shortPercent"`
 				Weekly float64 `json:"weeklyPercent"`
 			} `json:"quota"`
@@ -73,8 +78,17 @@ func TestMagpieNativeQuota(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if len(got.Providers) != 1 || got.Providers[0] != "codex" || len(got.Accounts) != 1 || got.Accounts[0].Quota.Short != 95 || got.Accounts[0].Quota.Weekly != 20 {
+	if len(got.Providers) != 1 || got.Providers[0] != "codex" || len(got.Accounts) != 3 {
+		t.Fatalf("missing accounts: %s", w.Body.String())
+	}
+	if got.Accounts[0].ReadAt != "2026-10-16T00:45:00Z" || got.Accounts[0].Quota == nil || got.Accounts[0].Quota.Short != 95 || got.Accounts[0].Quota.Weekly != 20 {
 		t.Fatalf("missing quota: %s", w.Body.String())
+	}
+	if got.Accounts[1].Email != "second" || !got.Accounts[1].Last || got.Accounts[1].AsOf != "2026-10-16T00:30:00Z" || got.Accounts[1].Quota == nil || got.Accounts[1].Quota.Weekly != 89 {
+		t.Fatalf("second account quota or latest-account marker missing: %s", w.Body.String())
+	}
+	if got.Accounts[2].Quota != nil || !got.Accounts[2].ReadDeferred {
+		t.Fatalf("missing usage must not become a 0%% quota: %s", w.Body.String())
 	}
 	for _, route := range []string{"codex/gpt-test", "magpie/codex/gpt-test", "codex/codex/gpt-test"} {
 		w = analyticsRequest(t, h, "/api/v1/analytics/model-quota?model="+route)

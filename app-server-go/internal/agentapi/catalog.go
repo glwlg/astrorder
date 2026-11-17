@@ -211,13 +211,15 @@ var Capabilities = []Capability{
 		Summary: "【星序作战黑板-读取】读取共享任务状态、规格事实、共享记忆或工件（Blackboard）。当用户提到“查看黑板”、“读取黑板”、“黑板里有什么”时，直接调用本工具。严禁使用 Python 脚本读写源码或数据库。Read shared mission state, specifications or facts from the Astrorder Blackboard.",
 		Input: map[string]any{
 			"session_key": "专属会话作用域标识（传入上下文提示中的会话 ID，如单聊 'agent_id::session_id'、群聊 'group::group_id' 或星图 'swarm::root_key'）",
-			"key":         "specific blackboard key, or omit to list all keys",
+			"key":         "specific blackboard key, or omit to list all keys; group artifacts lists files with content_key for reading their actual content",
 			"namespace":   "optional custom namespace scope override (default: resolved from session_key)",
+			"offset":      "optional byte offset when reading artifact content (default 0)",
+			"limit":       "optional artifact content byte count (default 262144, max 4194304); truncated reads return next_offset",
 		},
 	},
 	{
 		ID:      "blackboard.set",
-		Summary: "【星序作战黑板-写入/发布】将任务状态、结构化事实、备忘录、分析结论或工件写入星序作战黑板（Blackboard）。当用户指示“写到黑板”、“记入黑板”、“更新黑板”、“同步到黑板”时，必须直接调用本工具。强烈建议在 value 中显式声明 component 属性以呈现精美 Generative UI（如 'StepTimeline' 流水线、'Checklist' 验收清单、'DataTable' 表格、'MetricGrid' 指标卡、'GomokuBoard' 棋盘），未声明时系统将通过 Jev 决策模型自动推断选择最优组件补全。",
+		Summary: "【星序作战黑板-写入/发布】将任务状态、结构化事实、备忘录、分析结论或工件写入星序作战黑板（Blackboard）。当用户指示“写到黑板”、“记入黑板”、“更新黑板”、“同步到黑板”时，必须直接调用本工具。建议在 value 中显式声明 component 属性以呈现 Generative UI（如 'StepTimeline' 流水线、'Checklist' 验收清单、'DataTable' 表格、'MetricGrid' 指标卡、'GomokuBoard' 棋盘）。",
 		Input: map[string]any{
 			"session_key": "专属会话作用域标识（传入上下文提示中的会话 ID，如单聊 'agent_id::session_id'、群聊 'group::group_id' 或星图 'swarm::root_key'）",
 			"key":         "blackboard key",
@@ -241,7 +243,7 @@ var Capabilities = []Capability{
 	},
 	{
 		ID:      "blackboard.auto_render",
-		Summary: "Analyze unformatted text or summary and use Jev decision model to automatically determine the best json-render UI component, formatting it directly to Blackboard.",
+		Summary: "Analyze unformatted text or summary and select a json-render UI component based on its content, formatting it directly to Blackboard.",
 		Input: map[string]any{
 			"key":       "blackboard key to publish to",
 			"content":   "raw mission status, log, test result, or facts to render",

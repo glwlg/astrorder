@@ -60,7 +60,7 @@ export interface GatewayProfile {
   api_key?: string
 }
 
-export interface JevConfig {
+export interface SystemOneConfig {
   mode: 'gateway' | 'official'
   model: string
   configured: boolean
@@ -70,12 +70,12 @@ export interface JevConfig {
   gateway_configured: boolean
 }
 export type BrowserEngine = 'browser_use' | 'jev_ultrafast'
-export interface JevConfigPatch {
-  mode?: JevConfig['mode']
+export interface SystemOneConfigPatch {
+  mode?: SystemOneConfig['mode']
   model?: string
   api_key?: string | null
 }
-export interface JevTestDetails {
+export interface SystemOneTestDetails {
   component: string
   confidence?: number
   usage?: { input_tokens?: number; output_tokens?: number }
@@ -103,7 +103,7 @@ export interface OcxUsageBreakdown {
   shareRatio: number
   estimatedCostUsd: number
 }
-export interface MagpieQuotaWindow { name: string; used: number; remaining: number; resetsAt?: string; unlimited?: boolean; display?: string }
+export interface MagpieQuotaWindow { name: string; used?: number; remaining?: number; resetsAt?: string; unlimited?: boolean; display?: string; text?: boolean; balance?: number }
 export interface MagpieQuota { provider: string; name: string; kind: string; user?: string; plan?: string; alias?: string; from?: string; balance?: string; error?: string; asOf?: string; readAt?: string; readDeferred?: boolean; windows: MagpieQuotaWindow[] }
 export interface OcxUsageResponse {
   gatewayType?: 'magpie' | 'opencodex'
@@ -130,8 +130,17 @@ export interface OcxModelQuotaReport {
   label: string
   quota?: { fiveHourPercent?: number; fiveHourResetAt?: number; weeklyPercent?: number; weeklyResetAt?: number; monthlyPercent?: number; monthlyResetAt?: number; customWindows?: OcxQuotaWindow[] }
 }
-export interface OcxModelQuotaAccount { id: string; email?: string; logLabel?: string; plan?: string; paused?: boolean; error?: string; quota?: { customWindows?: OcxQuotaWindow[]; shortPercent?: number; shortResetAt?: number; weeklyPercent?: number; weeklyResetAt?: number } | null }
+export interface OcxModelQuotaAccount { id: string; email?: string; logLabel?: string; plan?: string; paused?: boolean; error?: string; last?: boolean; asOf?: string; readAt?: string; readDeferred?: boolean; quota?: { customWindows?: OcxQuotaWindow[]; shortPercent?: number; shortResetAt?: number; weeklyPercent?: number; weeklyResetAt?: number } | null }
 export interface OcxModelQuotaResponse { model: string; providers: string[]; reports: OcxModelQuotaReport[]; accounts: OcxModelQuotaAccount[] }
+
+export type AgentUsageRange = '24h' | '7d' | '30d' | 'all'
+export interface AgentUsageReport {
+  range: AgentUsageRange
+  summary: { calls: number; succeeded: number; failed: number; active_agents: number }
+  agents: Array<{ agent_id: string; name: string; runtime: string; calls: number; succeeded: number; failed: number }>
+  capabilities: Array<{ capability: string; calls: number; succeeded: number; failed: number }>
+  recent: Array<{ capability: string; agent_id: string; name: string; runtime: string; success: boolean; duration_ms: number; occurred_at: string }>
+}
 
 export interface QrCreateResponse {
   id: string
@@ -613,16 +622,24 @@ export const api = {
     request<{ group: import('../domain/types').BotGroup }>(`/bot-groups/${encodeURIComponent(groupId)}`),
   createBotGroup: (payload: { name: string; description?: string | null; members: import('../domain/types').BotGroupMember[]; max_hops?: number }) =>
     jsonRequest<{ group: import('../domain/types').BotGroup; ok: boolean }>('/bot-groups', payload),
-  updateBotGroup: (groupId: string, payload: Partial<{ name: string; description: string; members: import('../domain/types').BotGroupMember[]; max_hops: number }>) =>
+  updateBotGroup: (groupId: string, payload: Partial<{ name: string; description: string; members: import('../domain/types').BotGroupMember[]; max_hops: number; member_mutes: Record<string, boolean> }>) =>
     jsonRequest<{ group: import('../domain/types').BotGroup; ok: boolean }>(`/bot-groups/${encodeURIComponent(groupId)}`, payload, 'PATCH'),
   deleteBotGroup: (groupId: string) =>
     request<{ ok: boolean; id: string }>(`/bot-groups/${encodeURIComponent(groupId)}`, { method: 'DELETE' }),
   listGroupMessages: (groupId: string) =>
     request<{ items: import('../domain/types').GroupMessage[]; count: number }>(`/bot-groups/${encodeURIComponent(groupId)}/messages`),
-  sendGroupMessage: (groupId: string, payload: { text: string; target_agent_id?: string | null; mentions?: string[] }) =>
-    jsonRequest<{ ok: boolean; message: import('../domain/types').GroupMessage; target_agent_id: string | null; history_count: number }>(`/bot-groups/${encodeURIComponent(groupId)}/messages`, payload),
+  getGroupArtifacts: (groupId: string) =>
+    request<import('../domain/types').GroupFiles>(`/bot-groups/${encodeURIComponent(groupId)}/artifacts`),
+  recheckGroupArtifacts: (groupId: string) =>
+    request<import('../domain/types').GroupFiles>(`/bot-groups/${encodeURIComponent(groupId)}/artifacts`, { method: 'POST' }),
+  sendGroupMessage: (groupId: string, payload: { text: string; attachment_ids?: string[]; target_agent_id?: string | null; target_member_id?: string | null; mentions?: string[] }) =>
+    jsonRequest<{ ok: boolean; message: import('../domain/types').GroupMessage; target_agent_id: string | null; target_member_id?: string | null; history_count: number }>(`/bot-groups/${encodeURIComponent(groupId)}/messages`, payload),
   stopGroup: (groupId: string) =>
     jsonRequest<{ ok: boolean; group: import('../domain/types').BotGroup }>(`/bot-groups/${encodeURIComponent(groupId)}/stop`, {}),
+  retryGroup: (groupId: string) =>
+    jsonRequest<{ ok: boolean; group: import('../domain/types').BotGroup }>(`/bot-groups/${encodeURIComponent(groupId)}/retry`, {}),
+  recoverGroup: (groupId: string) =>
+    jsonRequest<{ ok: boolean; group: import('../domain/types').BotGroup }>(`/bot-groups/${encodeURIComponent(groupId)}/recover`, {}),
   batchDeleteSessions: (sessions: Array<{ agent_id: string; id: string }>) =>
     jsonRequest<{ ok: boolean; deleted: Array<{ agent_id: string; id: string }>; failed: Array<{ agent_id: string; id: string; error: string }> }>(
       '/sessions/batch-delete',
@@ -666,26 +683,24 @@ export const api = {
     request<{ public_url: string; allowed_origins: string[]; local_ip: string; port: number; token: string }>('/network/config'),
   updateNetworkConfig: (payload: { public_url?: string; allowed_origins?: string[] }) =>
     jsonRequest<{ public_url: string; allowed_origins: string[]; local_ip: string; port: number; token: string }>('/network/config', payload),
-  getJevConfig: () =>
-    request<JevConfig>('/services/jev/config'),
+  getSystemOneConfig: () =>
+    request<SystemOneConfig>('/services/jev/config'),
   getBrowserEngine: () => request<{ engine: BrowserEngine }>('/services/browser/config'),
   updateBrowserEngine: (engine: BrowserEngine) =>
     jsonRequest<{ engine: BrowserEngine }>('/services/browser/config', { engine }),
-  updateJevConfig: (payload: JevConfigPatch) =>
-    jsonRequest<JevConfig>('/services/jev/config', payload),
-  getJevModels: () => request<{ items: Array<{ id: string; label: string }>; gateway_type: string; gateway_url: string }>('/services/jev/models'),
+  updateSystemOneConfig: (payload: SystemOneConfigPatch) =>
+    jsonRequest<SystemOneConfig>('/services/jev/config', payload),
+  getSystemOneModels: () => request<{ items: Array<{ id: string; label: string }>; gateway_type: string; gateway_url: string }>('/services/jev/models'),
   getLlmConfig: () =>
     request<{ configured: boolean; masked_key: string; base_url: string; model: string; reasoning: string }>('/services/llm/config'),
   updateLlmConfig: (payload: { base_url: string; api_key?: string | null; model: string; reasoning: string }) =>
     jsonRequest<{ configured: boolean; masked_key: string; base_url: string; model: string; reasoning: string }>('/services/llm/config', payload),
   testLlmConnection: (payload: { base_url: string; api_key?: string | null; model: string; reasoning: string }) =>
     jsonRequest<{ ok: boolean; model: string; reply: string }>('/services/llm/test', payload),
-  filterWithJev: (payload: { command: string; output: string }) =>
-    jsonRequest<{ ok: boolean; filtered: string; nature: string; noise_pruned: boolean }>('/tools/jev-filter', payload),
-  curateHandoffWithJev: (sessionId: string, agentId: string) =>
+  curateHandoffWithSystemOne: (sessionId: string, agentId: string) =>
     jsonRequest<{ ok: boolean; summary: string; phase: string; blocker: string }>('/sessions/handoff-curate', { session_id: sessionId, agent_id: agentId }),
-  testJevConnection: (payload: JevConfigPatch) =>
-    jsonRequest<{ ok: boolean; details: JevTestDetails }>('/services/jev/test', payload),
+  testSystemOneConnection: (payload: SystemOneConfigPatch) =>
+    jsonRequest<{ ok: boolean; details: SystemOneTestDetails }>('/services/jev/test', payload),
   getConnections: () => request<ConnectionsPayload>('/connections'),
   getEnvironments: () => request<{ items: Array<{ id: string; name: string; method: 'local' | 'ssh'; discovered: boolean; os?: string; agents: Array<{ kind: AgentKind; available: boolean; state: string; detail: string; executable?: string; daemon_mode?: boolean }> }> }>('/environments'),
   discoverEnvironment: (id: string) => request(`/environments/${encodeURIComponent(id)}/discover`, { method: 'POST' }),
@@ -739,6 +754,7 @@ export const api = {
       cache_hit_rate: number
       speed?: number | null
     }>(`/sessions/${encodeURIComponent(sessionId)}/usage${agentId ? '?agent_id=' + encodeURIComponent(agentId) : ''}`),
+  getAgentUsage: (range: AgentUsageRange) => request<AgentUsageReport>(`/agent/usage?range=${encodeURIComponent(range)}`),
   getAnalyticsConfig: () => request<{ statistics_url?: string; gateway_type: 'opencodex' | 'magpie'; management_url: string; inference_url: string; target_overrides: Record<string, string>; masked_key: string; masked_management_key?: string; gateway_profiles?: Record<string, GatewayProfile> }>('/analytics/config'),
   updateAnalyticsConfig: (payload: { statistics_url?: string; gateway_type: 'opencodex' | 'magpie'; management_url: string; inference_url: string; target_overrides: Record<string, string>; api_key?: string; management_key?: string; clear_management_key?: boolean; gateway_profiles?: Record<string, any> }) => jsonRequest<{ statistics_url?: string; gateway_type: 'opencodex' | 'magpie'; management_url: string; inference_url: string; target_overrides: Record<string, string>; masked_key: string; masked_management_key?: string; gateway_profiles?: Record<string, GatewayProfile> }>('/analytics/config', payload, 'PUT'),
   getModelSyncTargets: () => request<{ items: Array<{ id: string; kind: 'local' | 'wsl' | 'ssh'; name: string; state?: string; agents: string[] }> }>('/model-sync/targets'),

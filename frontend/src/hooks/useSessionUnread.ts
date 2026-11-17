@@ -16,6 +16,7 @@ export function useSessionUnread(activeKey?: string) {
   const latest = useMemo(() => {
     const result: Record<string, EventNotification> = {}
     for (const notice of Object.values(notices)) {
+      if (notice.group_id) continue
       const key = scopeKey(notice.agent_id, notice.session_id)
       if (!result[key] || (notice.cursor || 0) > (result[key].cursor || 0)) result[key] = notice
     }

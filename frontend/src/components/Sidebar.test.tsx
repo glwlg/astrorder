@@ -1,11 +1,12 @@
 import { MantineProvider } from '@mantine/core'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api, type OcxUsageResponse } from '../api/client'
-import type { Project } from '../domain/types'
+import type { BotGroup, Project } from '../domain/types'
+import { useAstrorderStore } from '../state/store'
 import { Sidebar } from './Sidebar'
 
 const zeroSessionProject: Project = {
@@ -34,7 +35,7 @@ describe('Sidebar project catalog wiring', () => {
       ],
     } as unknown as OcxUsageResponse)
   })
-  afterEach(() => { cleanup(); vi.restoreAllMocks() })
+  afterEach(() => { cleanup(); vi.restoreAllMocks(); useAstrorderStore.getState().resetRuntime() })
 
   function renderSidebar(projects: Project[] = []) {
     return render(
@@ -54,6 +55,29 @@ describe('Sidebar project catalog wiring', () => {
     expect(screen.getByRole('button', { name: /无会话项目.*0 个会话/ })).toBeInTheDocument()
     expect(screen.getByText('ssh-wsl')).toBeInTheDocument()
     expect(screen.queryByText('连接 ssh-wsl')).not.toBeInTheDocument()
+  })
+
+  it('shows live group activity outside the group page and stops after completion', async () => {
+    const group: BotGroup = { id: 'group-1', name: '群聊', members: [], max_hops: 10, coordination: { status: 'deciding' }, created_at: '', updated_at: '' }
+    useAstrorderStore.setState({ botGroups: { [group.id]: group } })
+    renderSidebar()
+    expect(screen.getByRole('link', { name: '群聊，有任务进行中' })).toHaveAttribute('href', '/groups')
+    await userEvent.click(screen.getByRole('button', { name: '暂停群聊任务动效' }))
+    expect(screen.getByRole('button', { name: '播放群聊任务动效' }).parentElement).toHaveAttribute('data-paused', 'true')
+    expect(screen.getByRole('link', { name: '会话' })).toHaveAttribute('data-active', 'true')
+    act(() => useAstrorderStore.getState().applyEvent({ id: 'done', type: 'bot_group.upsert', cursor: 1, agent_id: null, session_id: null, data: { ...group, coordination: { status: 'complete' } } }))
+    expect(screen.queryByRole('button', { name: '播放群聊任务动效' })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '群聊' })).toBeInTheDocument()
+  })
+
+  it('removes the activity indicator after entering the group page', async () => {
+    const group: BotGroup = { id: 'group-1', name: '群聊', members: [], max_hops: 10, coordination: { status: 'running' }, created_at: '', updated_at: '' }
+    vi.spyOn(api, 'listBotGroups').mockResolvedValue({ items: [group], count: 1 })
+    useAstrorderStore.setState({ botGroups: { [group.id]: group } })
+    renderSidebar()
+    await userEvent.click(screen.getByRole('link', { name: '群聊，有任务进行中' }))
+    expect(screen.queryByRole('button', { name: '暂停群聊任务动效' })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '群聊' })).toHaveAttribute('data-active', 'true')
   })
 
   it('preloads today’s model usage and shows it when the statistics tab is hovered', async () => {

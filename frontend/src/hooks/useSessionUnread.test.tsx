@@ -25,6 +25,13 @@ it('never derives unread from recent metadata, status changes, or native activit
   })
   expect(result.current.isUnread('a::s')).toBe(false)
 })
+it('keeps group reminders out of the member single-chat unread state', () => {
+  const { result } = renderHook(() => useSessionUnread())
+  act(() => useAstrorderStore.getState().addNotification({ ...notice('group-notice', 1), group_id: 'group-1' }))
+  expect(result.current.isUnread('a::s')).toBe(false)
+  act(() => useAstrorderStore.getState().addNotification(notice('single-chat', 2)))
+  expect(result.current.isUnread('a::s')).toBe(true)
+})
 it('acknowledges a real result without opening a session and preserves it across refresh and replay', () => {
   act(() => useAstrorderStore.getState().hydrateBootstrap({ protocol_version: 1, agents: [], sessions: [session], notifications: [notice('n1', 1)], cursor: 1 }))
   const first = renderHook(() => useSessionUnread())

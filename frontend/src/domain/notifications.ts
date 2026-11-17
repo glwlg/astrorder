@@ -24,12 +24,18 @@ export type NotificationPermissionState = 'granted' | 'denied' | 'default' | 'un
 
 function desktopNotify() {
   return typeof window !== 'undefined'
-    ? (window as unknown as { astrorderDesktop?: { notify?: (notice: { title: string; body: string; tag: string }) => Promise<boolean> } }).astrorderDesktop?.notify
+    ? (window as unknown as { astrorderDesktop?: { notify?: (notice: { title: string; body: string; tag: string; url: string }) => Promise<boolean> } }).astrorderDesktop?.notify
     : undefined
 }
 
 function mobileRoute(): boolean {
   return window.location.pathname.startsWith('/mobile') || window.innerWidth < 768 || window.matchMedia?.('(max-width: 767px)').matches
+}
+
+export function notificationPath(notification: EventNotification, mobile = mobileRoute()): string {
+  const prefix = mobile ? '/mobile' : ''
+  if (notification.group_id) return `${prefix}/groups/${encodeURIComponent(notification.group_id)}`
+  return `${prefix}/chat/${encodeURIComponent(notification.session_id)}?agent_id=${encodeURIComponent(notification.agent_id)}`
 }
 
 export function notificationPermission(): NotificationPermissionState {
@@ -103,14 +109,13 @@ export async function testSystemNotification(): Promise<void> {
 export async function deliverBrowserNotification(notification: EventNotification): Promise<boolean> {
   if (!isSystemNotificationEnabled()) return false
   const notify = desktopNotify()
+  const url = notificationPath(notification)
   try {
-    if (notify) return await notify({ title: notification.title, body: notification.message, tag: notification.key })
+    if (notify) return await notify({ title: notification.title, body: notification.message, tag: notification.key, url })
     // Subscribed browsers receive their system alert from Web Push, including
     // while locked. The websocket still owns the in-app reminder.
     if (pushSubscribed) return true
     if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return false
-    const prefix = mobileRoute() ? '/mobile' : ''
-    const url = `${prefix}/chat/${encodeURIComponent(notification.session_id)}?agent_id=${encodeURIComponent(notification.agent_id)}`
     const registration = 'serviceWorker' in navigator ? await navigator.serviceWorker.getRegistration() : undefined
     if (registration) {
       await registration.showNotification(notification.title, { body: notification.message, tag: notification.key, data: { url }, icon: '/pwa-192.png' })

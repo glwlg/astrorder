@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useEffect, useRef } from 'react'
 import { api } from '../../api/client'
 import { AgentBrandIcon } from '../../components/AgentBrandIcon'
+import { ComposerGlassMenu } from '../../components/GlassPanel'
 import '../../components/animations/AnimatedList.css'
 import type { Agent, AgentCommand, AgentMention, Session } from '../../domain/types'
 
@@ -141,7 +142,7 @@ export function filterAgentMentions(items: AgentMention[], text: string): AgentM
   }
   const browserItem: AgentMention = {
     name: '浏览器',
-    description: '星序 Jev 浏览器自动执行 (支持英文 @browser)',
+    description: '星序浏览器自动执行（支持英文 @browser）',
     kind: 'skill',
     path: 'system:browser',
   }
@@ -229,6 +230,7 @@ export function AgentCommandMenu({
       className="astr-animated-list"
       style={{ position: 'absolute', zIndex: 20, left: 0, right: 0, bottom: 'calc(100% + 6px)', maxHeight: 'min(280px, 45vh)', overflowY: 'auto' }}
     >
+      <ComposerGlassMenu active>
       <Stack gap={2}>
         {items.map((item, index) => {
           if (!('kind' in item)) {
@@ -329,6 +331,7 @@ export function AgentCommandMenu({
           )
         })}
       </Stack>
+      </ComposerGlassMenu>
     </Paper>
   )
 }
@@ -352,6 +355,7 @@ export function AgentMentionMenu({
   if (!items.length) return null
   return (
     <Paper ref={listRef} withBorder shadow="md" radius="md" p={4} role="listbox" aria-label="可提及资源" style={{ position: 'absolute', zIndex: 20, left: 0, right: 0, bottom: 'calc(100% + 6px)', maxHeight: 'min(280px, 45vh)', overflowY: 'auto' }}>
+      <ComposerGlassMenu active>
       <Stack gap={2}>
         {items.map((item, index) => (
           <UnstyledButton key={`${item.kind}:${item.name}`} role="option" aria-selected={index === activeIndex} onMouseDown={event => event.preventDefault()} onClick={() => onSelect(item)} p="xs" style={{ borderRadius: 8, background: index === activeIndex ? 'var(--mantine-color-default-hover)' : undefined }}>
@@ -366,6 +370,7 @@ export function AgentMentionMenu({
           </UnstyledButton>
         ))}
       </Stack>
+      </ComposerGlassMenu>
     </Paper>
   )
 }

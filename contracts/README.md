@@ -1,17 +1,14 @@
 # Astrorder session-daemon v1 typed contracts
 
-Status: implemented P1 contract surface; not declared frozen and not a claim that the P9 cutover is complete.
-
-This module defines the typed protobuf/gRPC boundary for migrating the App/Session Daemon transport without duplicating the Go kernel. It was reconciled at source revision `ff32f947024b1840b939ebfb8e58e45886d34b47` against the Go dispatchers, runtime adapters, current App callers, Grok connector, tests, the P0 inventory, and `docs/design/astrorder-full-go-migration.md`.
+This module defines the typed protobuf/gRPC boundary between the Go App Server and Go Session Daemon. Runtime ownership and lifecycle constraints are described in [the dual-kernel architecture](../docs/design/dual-kernel-architecture.md).
 
 ## Artifacts
 
 - `proto/astrorder/sessiond/v1/sessiond.proto`: v1 services and owned messages.
 - `action-map.json`: request, response, event, alias, native-query, and App-direct disposition namespaces.
 - `gen/go`: generated Go messages, clients, and server interfaces.
-- `gen/python`: transitional generated Python messages and stubs. This output is development-only and is removed after the Python App migration.
 - `descriptor_test.go`: service, action, alias, oneof, observer, and forbidden-surface checks.
-- `roundtrip_test.go`: presence, explicit-null, exact integer, native bytes/hash, stream, connector, terminal, SSH, and fixed-limit checks.
+- `roundtrip_test.go`: presence, explicit-null, exact integer, native bytes/hash, unknown fields, stream, connector, terminal, SSH, and fixed-limit checks.
 - `generation_test.go`: two independent generation runs and SHA-256 comparison against checked-in output.
 
 ## Contract boundaries
@@ -26,13 +23,13 @@ SSH configuration is typed. `identity_file` and executable/path aliases are refe
 
 The maximum compatibility business payload is 16,000,000 bytes. The gRPC send/receive limit must be configured to at least 33,554,432 bytes on both clients and servers. That runtime setting is not automatically changed by generated code.
 
-## Resolved migration dispositions
+## Runtime semantics
 
 - Observer reporting uses `ObservedActiveStatus`, which can express only positive `RUNNING` or `WAITING_APPROVAL` evidence for an owned session. Absence from a native active list is inconclusive and cannot report idle.
 - `session.approval.respond` and native Hermes `approval.respond` both map to `SessionControl.RespondApproval`; neither creates a duplicate RPC.
 - Per-session App shutdown maps to `DetachSession`, not runtime teardown. Connection/runtime teardown uses guarded `DisconnectRuntime` or `DisconnectConnector`.
 - Grok history and deletion remain Go App-native file reader/deleter capabilities.
-- WSL and SSH model-config targets stay typed, but plan/apply must return `UNSUPPORTED_UNTIL_GO_EXECUTOR` until the embedded Python remote executor is replaced.
+- Model-config planning and execution belong to `session-daemon-go/internal/modelconfig/`; remote targets use the packaged Go helpers.
 - Existing ledger rows keep their current scope, JSON hash, and stored response schema. `LEGACY_JSON_V1` names that reader path. New typed mutations use `ASTRORDER_OPERATION_V1`; protobuf wire bytes are never the canonical hash input.
 - Event streaming models snapshot, replay, live-ready, live, resync-required, and overflow explicitly. Session/event sequence values are `int64`.
 - Terminal transport is one bidirectional stream with open, bytes input/output, resize, interrupt, explicit close, exit, overflow, and reconnect cursor frames.
@@ -45,7 +42,6 @@ The maximum compatibility business payload is 16,000,000 bytes. The gRPC send/re
 - `protoc-gen-go-grpc v1.6.2`
 - `google.golang.org/grpc v1.84.0`
 - `google.golang.org/protobuf v1.36.12`
-- transitional `grpcio-tools==1.84.0` and `grpcio==1.84.0`
 
 `buf.gen.yaml` uses the portable plugin names `protoc-gen-go` and `protoc-gen-go-grpc`. The pinned versions must be on `PATH`, or the root build scripts can receive their executable paths through `ASTRORDER_PROTOC_GEN_GO` and `ASTRORDER_PROTOC_GEN_GO_GRPC`; those scripts write a temporary runtime Buf template and leave the checked-in template portable.
 
@@ -56,14 +52,14 @@ From `contracts/`, with the pinned tools on `PATH`:
 ```text
 buf lint
 buf build
-ASTRORDER_VERIFY_GENERATION=1 ASTRORDER_GRPC_TOOLS_PYTHON=python go test ./... -count=1
+ASTRORDER_VERIFY_GENERATION=1 go test ./... -count=1
 ```
 
-For transitional cross-language verification, set `ASTRORDER_INTEROP_PYTHON` to the same `grpcio-tools==1.84.0` interpreter. The test serializes in Go, decodes and modifies in a Python subprocess using the generated module, and decodes the returned bytes in Go.
+The root `scripts/build-go.sh` and `scripts/build-go.ps1` scripts verify the pinned toolchain, Buf definitions, deterministic Go generation, tests, and vet before compiling candidate artifacts. The Bash script also supports `--build-only`, which skips Go tests and vet for candidate packaging after separate validation.
 
-The root build scripts default to development mode: Go and transitional Python generation, deterministic generation, and Go/Python interoperability are required. Tool locations are selectable with `ASTRORDER_BUF`, `ASTRORDER_GO`, `ASTRORDER_PROTOC_GEN_GO`, `ASTRORDER_PROTOC_GEN_GO_GRPC`, and `ASTRORDER_GRPC_TOOLS_PYTHON`.
+Tool locations are selectable with `ASTRORDER_BUF`, `ASTRORDER_GO`, `ASTRORDER_PROTOC_GEN_GO`, and `ASTRORDER_PROTOC_GEN_GO_GRPC`. No Python generator or interpreter is required.
 
-`ASTRORDER_GO_ONLY=1` is the P9-compatible path: it verifies only checked-in Go bindings and does not resolve, import, or run Python. `ASTRORDER_GO_OUTPUT_DIR` selects the retained output parent; the default is the ignored `.runtime/go-build`. A successful build publishes a new candidate directory containing `astrorder-sessiond.exe`, `astrorder-app.exe`, `astrorderctl.exe`, `astrorder-agent.exe`, `astrorder-helper.exe`, and `SHA256SUMS`. A failed test, vet, or build removes only its unique partial directory and never writes a success manifest.
+`ASTRORDER_GO_OUTPUT_DIR` selects the output parent; the default is the ignored `.runtime/go-build`. Successful builds produce a unique candidate directory containing the Go executables, Linux target helpers, and `SHA256SUMS`. A failed build does not publish a success manifest. `scripts/stage-go-artifacts.js` verifies and stages a candidate into `.runtime/go-stage` for the Wails installer; staging does not update the installed runtime.
 
 ## Intentional Buf lint exceptions
 

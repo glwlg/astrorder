@@ -25,6 +25,14 @@ describe('Artifact & Drawio Viewer Integration', () => {
     expect(artifact.readUrl).toContain('path=')
   })
 
+  it.each(['/design', '/dev', '/data/projects/review'])('does not prefix an already resolved path beneath %s again', (workspace) => {
+    const artifact = resolveArtifactFromPath(`${workspace}/plans/technical.md`, { ...mockSession, workspace, connection_id: 'ssh-work' })
+    expect(artifact.path).toBe(`${workspace}/plans/technical.md`)
+    const url = new URL(artifact.readUrl, 'http://localhost')
+    expect(url.searchParams.get('path')).toBe(artifact.path)
+    expect(url.searchParams.get('connection_id')).toBe('ssh-work')
+  })
+
   it.each(['workflow.drawio.xml', 'workflow.drawio.svg'])('should match drawio viewer with high score for %s', (name) => {
     const artifact = resolveArtifactFromPath(name, mockSession)
     const viewer = artifactViewerRegistry.findViewer(artifact)

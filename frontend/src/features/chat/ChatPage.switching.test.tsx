@@ -6,6 +6,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { api } from '../../api/client'
 import { selectMessages, useAstrorderStore } from '../../state/store'
 import { ChatPage } from './ChatPage'
+import { useSidecarStore } from '../sidecar/sidecarStore'
 
 function Switcher() {
   const navigate = useNavigate()
@@ -43,6 +44,7 @@ it.each([
 
 it('uses the same placeholder display title as the session rail and updates after generated naming', async () => {
   useAstrorderStore.getState().resetRuntime()
+  useSidecarStore.setState({ isOpen: false })
   const session = { id: 'title', agent_id: 'codex', title: 'New Session', workspace: '/workspace/OpsCore', status: 'idle' as const, updated_at: '2026-10-14T00:00:00Z' }
   useAstrorderStore.getState().hydrateBootstrap({ protocol_version: 1, cursor: 0, agents: [], sessions: [session] })
   vi.spyOn(api, 'syncSession').mockResolvedValue(session)
@@ -52,6 +54,26 @@ it('uses the same placeholder display title as the session rail and updates afte
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   render(<MantineProvider><QueryClientProvider client={client}><MemoryRouter initialEntries={['/chat/title?agent_id=codex']}><Routes><Route path="/chat/:sessionId" element={<ChatPage />} /></Routes></MemoryRouter></QueryClientProvider></MantineProvider>)
   expect(await screen.findByRole('heading', { level: 2, name: 'OpsCore' })).toBeInTheDocument()
+  const toggle = screen.getByRole('button', { name: '展开工作台侧边栏' })
+  expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  fireEvent.click(toggle)
+  expect(screen.getByRole('button', { name: '收起工作台侧边栏' })).toHaveAttribute('aria-expanded', 'true')
+  expect(screen.getByText('推荐工作区')).toBeInTheDocument()
+  expect(document.querySelector('#workspace-changes-panel')).toBeNull()
+  expect(useSidecarStore.getState().tabs.some(tab => tab.type === 'details')).toBe(false)
+  fireEvent.click(screen.getByRole('button', { name: '收起工作台侧边栏' }))
+  expect(screen.getByRole('button', { name: '展开工作台侧边栏' })).toHaveAttribute('aria-expanded', 'false')
+  const layoutColumns = (document.querySelector('.chat-layout') as HTMLElement).style.gridTemplateColumns
+  const sidecarBefore = useSidecarStore.getState()
+  fireEvent.click(screen.getByRole('button', { name: '打开变更悬浮面板' }))
+  expect(screen.getByRole('complementary', { name: '工作区变更' })).toBeInTheDocument()
+  expect(document.querySelector('#session-sidecar #workspace-changes-panel')).toBeNull()
+  expect((document.querySelector('.chat-layout') as HTMLElement).style.gridTemplateColumns).toBe(layoutColumns)
+  expect(useSidecarStore.getState().isOpen).toBe(false)
+  expect(useSidecarStore.getState().tabs).toEqual(sidecarBefore.tabs)
+  expect(useSidecarStore.getState().activeTabId).toBe(sidecarBefore.activeTabId)
+  fireEvent.click(screen.getByRole('button', { name: '收起变更' }))
+  expect(document.querySelector('#workspace-changes-panel')).toBeNull()
   await act(async () => { await client.ensureQueryData({ queryKey: ['astrorder', 'session-sync', 'codex', 'title'], queryFn: () => api.syncSession('title', 'codex') }) })
   act(() => useAstrorderStore.getState().applyEvent({ id: 'title-ready', cursor: 1, type: 'session.upsert', agent_id: 'codex', session_id: 'title', data: { ...session, title: '同步部署提示优化' } }))
   expect(await screen.findByRole('heading', { level: 2, name: '同步部署提示优化' })).toBeInTheDocument()

@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -132,10 +133,13 @@ func (m *mockDaemonServer) DeleteSession(ctx context.Context, req *sessiondv1.De
 }
 
 type mockPublisher struct {
+	mu     sync.Mutex
 	events []map[string]any
 }
 
 func (p *mockPublisher) Publish(ctx context.Context, eventType string, data map[string]any) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.events = append(p.events, map[string]any{"type": eventType, "data": data})
 	return nil
 }

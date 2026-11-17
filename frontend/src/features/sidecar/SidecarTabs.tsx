@@ -2,15 +2,8 @@ import { useRef, useState } from 'react'
 import { ActionIcon, Menu, Text, Tooltip } from '@mantine/core'
 import { LayoutGroup, motion } from 'motion/react'
 import {
-  IconArrowLeft,
-  IconArrowRight,
-  IconDots,
-  IconFolder,
-  IconInfoCircle,
-  IconTerminal2,
-  IconWorld,
-  IconX,
-} from '@tabler/icons-react'
+  ArrowLeftIcon, ArrowRightIcon, BrowserIcon, DotsThreeIcon, FolderSimpleIcon, InfoIcon, TerminalWindowIcon, XIcon,
+} from '../../components/workbenchIcons'
 import { artifactViewerRegistry } from './registry'
 import { useSidecarStore, type SidecarTab } from './sidecarStore'
 
@@ -62,17 +55,6 @@ export function SidecarTabs({
       ref={tabsBarRef}
       onWheel={handleWheel}
       className="sidecar-tabs-bar"
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: '2px',
-        overflowX: 'auto',
-        maxWidth: '100%',
-        padding: '3px',
-        background: 'color-mix(in srgb, var(--astr-surface-muted) 85%, var(--astr-surface))',
-        borderRadius: '8px',
-        border: '1px solid var(--astr-border)',
-      }}
     >
       {tabs.map((tab) => {
         const isActive = tab.id === activeId
@@ -82,10 +64,7 @@ export function SidecarTabs({
         return (
           <div
             key={tab.id}
-            style={{
-              position: 'relative',
-              display: 'inline-flex',
-            }}
+            className="sidecar-tab"
             onClick={() => onSelect(tab.id)}
             onContextMenu={(e) => {
               e.preventDefault()
@@ -98,49 +77,30 @@ export function SidecarTabs({
             {isActive && (
               <motion.div
                 layoutId="sidecar-active-tab-pill"
-                style={{
-                  position: 'absolute',
-                  inset: 0,
-                  borderRadius: '6px',
-                  background: 'var(--astr-surface)',
-                  border: '1px solid var(--astr-border)',
-                  boxShadow: '0 1px 4px rgba(0, 0, 0, 0.1), 0 1px 2px rgba(0, 0, 0, 0.06)',
-                  zIndex: 0,
-                }}
+                className="sidecar-tab-active"
+                data-liquid-surface="selection"
+                data-liquid-snapshot=".sidecar-header-bar"
                 transition={{ type: 'spring', stiffness: 400, damping: 28 }}
               />
             )}
-            <div
-              style={{
-                position: 'relative',
-                zIndex: 1,
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                padding: '4px 9px',
-                cursor: 'pointer',
-                fontSize: '12px',
-                userSelect: 'none',
-                whiteSpace: 'nowrap',
-              }}
-            >
+            <div className="sidecar-tab-label">
             {/* 图标 */}
             {tab.type === 'details' ? (
-              <IconInfoCircle size={14} color="var(--astr-muted)" />
+              <InfoIcon size={16} color="var(--astr-muted)" />
             ) : tab.id.startsWith('filetree:') ? (
-              <IconFolder size={14} color="var(--astr-blue, #3b82f6)" />
+              <FolderSimpleIcon size={16} weight="duotone" color="var(--astr-blue)" />
             ) : tab.id.startsWith('terminal:') ? (
-              <IconTerminal2 size={14} color="var(--astr-green, #10b981)" />
+              <TerminalWindowIcon size={16} weight="duotone" color="var(--astr-blue)" />
             ) : tab.id.startsWith('browser:') ? (
-              <IconWorld size={14} color="var(--astr-cyan, #06b6d4)" />
+              <BrowserIcon size={16} weight="duotone" color="var(--astr-blue)" />
             ) : viewer?.icon ? (
               <viewer.icon size={14} />
             ) : (
-              <IconInfoCircle size={14} color="var(--astr-muted)" />
+              <InfoIcon size={16} color="var(--astr-muted)" />
             )}
 
             {/* 标题 */}
-            <Text size="xs" fw={isActive ? 650 : 450} c={isActive ? 'var(--astr-text)' : 'dimmed'}>
+            <Text size="xs" fw={isActive ? 650 : 450} c={isActive ? 'var(--astr-text)' : 'dimmed'} title={tab.title}>
               {tab.title}
             </Text>
 
@@ -172,7 +132,7 @@ export function SidecarTabs({
                 style={{ marginLeft: 2, flexShrink: 0 }}
                 title="关闭标签页"
               >
-                <IconX size={12} />
+                <XIcon size={12} aria-hidden="true" />
               </ActionIcon>
             )}
             </div>
@@ -205,7 +165,7 @@ export function SidecarTabs({
       <Menu.Dropdown>
         {targetTab?.closable && (
           <Menu.Item
-            leftSection={<IconX size={14} />}
+            leftSection={<XIcon size={14} />}
             onClick={() => {
               if (contextMenuTabId) onClose(contextMenuTabId)
             }}
@@ -214,7 +174,7 @@ export function SidecarTabs({
           </Menu.Item>
         )}
         <Menu.Item
-          leftSection={<IconDots size={14} />}
+          leftSection={<DotsThreeIcon size={14} />}
           disabled={!canCloseOther}
           onClick={() => {
             if (contextMenuTabId) closeOtherTabs(contextMenuTabId)
@@ -223,7 +183,7 @@ export function SidecarTabs({
           关闭其他标签页
         </Menu.Item>
         <Menu.Item
-          leftSection={<IconArrowRight size={14} />}
+          leftSection={<ArrowRightIcon size={14} />}
           disabled={!canCloseRight}
           onClick={() => {
             if (contextMenuTabId) closeTabsToRight(contextMenuTabId)
@@ -232,7 +192,7 @@ export function SidecarTabs({
           关闭右侧标签页
         </Menu.Item>
         <Menu.Item
-          leftSection={<IconArrowLeft size={14} />}
+          leftSection={<ArrowLeftIcon size={14} />}
           disabled={!canCloseLeft}
           onClick={() => {
             if (contextMenuTabId) closeTabsToLeft(contextMenuTabId)
@@ -243,7 +203,7 @@ export function SidecarTabs({
         <Menu.Divider />
         <Menu.Item
           color="red"
-          leftSection={<IconX size={14} />}
+          leftSection={<XIcon size={14} />}
           onClick={() => closeAllTabs()}
         >
           关闭全部标签页

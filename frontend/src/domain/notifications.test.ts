@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { EventEnvelope } from './types'
-import { deliverBrowserNotification, disableSystemNotifications, notificationForEvent, notificationPermission, restorePushSubscription, setSystemNotificationEnabled, testSystemNotification } from './notifications'
+import { deliverBrowserNotification, disableSystemNotifications, notificationForEvent, notificationPath, notificationPermission, restorePushSubscription, setSystemNotificationEnabled, testSystemNotification } from './notifications'
 import { useAstrorderStore } from '../state/store'
 import { api } from '../api/client'
 
@@ -24,6 +24,21 @@ describe('canonical notifications', () => {
     }
     expect(notificationForEvent({ ...event, data: { ...event.data, kind: 'unexpected' } })).toBeNull()
     expect(notificationForEvent({ ...event, data: { ...event.data, key: '' } })).toBeNull()
+  })
+  it('uses the group route for browser and desktop notification payloads', async () => {
+    const notice = notificationForEvent({ ...event, data: { ...event.data, group_id: 'group-1', group_name: '讨论群', title: '讨论群' } })!
+    expect(notificationPath(notice, false)).toBe('/groups/group-1')
+    expect(notificationPath(notice, true)).toBe('/mobile/groups/group-1')
+    const notify = vi.fn().mockResolvedValue(true)
+    const original = Object.getOwnPropertyDescriptor(window, 'astrorderDesktop')
+    Object.defineProperty(window, 'astrorderDesktop', { configurable: true, value: { notify } })
+    try {
+      expect(await deliverBrowserNotification(notice)).toBe(true)
+      expect(notify).toHaveBeenCalledWith(expect.objectContaining({ title: '讨论群', url: '/groups/group-1' }))
+    } finally {
+      if (original) Object.defineProperty(window, 'astrorderDesktop', original)
+      else Reflect.deleteProperty(window, 'astrorderDesktop')
+    }
   })
   it('restores subscriptions without asking permission, avoids duplicate websocket alerts, and unsubscribes', async () => {
     const requestPermission = vi.fn()

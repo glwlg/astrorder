@@ -28,7 +28,9 @@ export function resolveArtifactFromLocalPath(
   if (ws) {
     const isWindowsAbsolute = /^[a-zA-Z]:[\/\\]/.test(cleaned) || cleaned.startsWith('\\\\')
     const isLinuxAbsolute = /^\/(?:home|mnt|Users|tmp|var|private|opt|etc|usr|root)\b/i.test(cleaned)
-    const isAlreadyFull = isWindowsAbsolute || (isLinuxAbsolute && (ws.startsWith('/') || cleaned.startsWith(ws)))
+    const workspaceRoot = ws.replace(/[/\\]+$/, '')
+    const isWithinWorkspace = cleaned === ws || cleaned.startsWith(`${workspaceRoot}/`) || cleaned.startsWith(`${workspaceRoot}\\`)
+    const isAlreadyFull = isWindowsAbsolute || isWithinWorkspace || (isLinuxAbsolute && (ws.startsWith('/') || cleaned.startsWith(ws)))
 
     if (!isAlreadyFull) {
       // 剥离可能存在的冗余前导斜杠 (如 AI 输出的 /backend/src/... 或 /frontend/...)

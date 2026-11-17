@@ -50,6 +50,12 @@ func TestFrozenRoutesHaveGoDispatch(t *testing.T) {
 				covered = covered || match(method, p)
 			}
 			covered = covered || isFilesRoute(p) || isGitRoute(p) || isAttachmentsRoute(p) || isMemoryRoute(p) || p == "/api/v1/preferences" || p == "/api/v1/preferences/import"
+			if method == "POST" && p == "/api/v1/tools/jev-filter" {
+				if covered {
+					t.Errorf("removed log-filter route is still registered: %s %s", method, p)
+				}
+				continue
+			}
 			if !covered {
 				t.Errorf("no Go dispatch: %s %s", method, p)
 			}

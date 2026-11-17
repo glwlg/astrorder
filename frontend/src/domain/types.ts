@@ -217,6 +217,8 @@ export interface EventNotification {
   message: string;
   agent_id: string;
   session_id: string;
+  group_id?: string;
+  group_name?: string;
   created_at: string;
 }
 
@@ -337,6 +339,7 @@ export type ConnectionStatus =
   "disconnected" | "connecting" | "connected" | "error";
 
 export interface BotGroupMember {
+  id?: string;
   machine_id: string;
   agent_id: string;
   name?: string | null;
@@ -347,10 +350,13 @@ export interface BotGroupMember {
   thinking_effort?: string | null;
   approval_policy?: ApprovalMode | null;
   workspace?: string | null;
+  source_session_id?: string | null;
+  fork_session_id?: string | null;
 }
 
 export interface BotGroupMemberState {
-  status: "idle" | "running" | "success" | "failed";
+  status: "idle" | "waiting" | "running" | "success" | "failed" | "unknown" | "cancelled";
+  muted?: boolean;
   session_id?: string | null;
   last_error?: string | null;
   updated_at?: string;
@@ -366,6 +372,10 @@ export interface BotGroup {
   active_speaker_agent_id?: string | null;
   active_speakers?: string[];
   member_states?: Record<string, BotGroupMemberState>;
+  coordination?: {
+    status: "idle" | "deciding" | "running" | "waiting" | "complete" | "error" | "stopped";
+    error?: string;
+  };
   created_at: string;
   updated_at: string;
 }
@@ -373,12 +383,37 @@ export interface BotGroup {
 export interface GroupMessage {
   id: string;
   group_id: string;
-  sender_type: "user" | "agent";
+  sender_type: "user" | "agent" | "system";
   sender_id: string;
+  sender_member_id?: string | null;
   sender_name?: string | null;
   text: string;
   mentions: string[];
   hop_count: number;
-  attachments?: string[];
+  attachments?: Attachment[];
   created_at: string;
+}
+
+export interface GroupFileReference {
+  id: string;
+  group_id: string;
+  member_id: string;
+  member_name: string;
+  agent_id: string;
+  session_id: string;
+  connection_id: string;
+  workspace: string;
+  path: string;
+  aliases: string[];
+  name: string;
+  content_key: string;
+  created_at: string;
+  evidence_id?: string;
+}
+
+export interface GroupFiles {
+  items: GroupFileReference[];
+  references: GroupFileReference[];
+  checking: boolean;
+  error?: string;
 }

@@ -1,4 +1,3 @@
-import { SidecarBlackboardPanel } from "./SidecarBlackboardPanel";
 import { useEffect, useState } from "react";
 import { Button, Center, Paper, Stack, Text, Title } from "@mantine/core";
 import { IconUsers } from "@tabler/icons-react";
@@ -8,8 +7,10 @@ import type { BotGroup } from "../../domain/types";
 import { useAstrorderStore } from "../../state/store";
 import { BotGroupChatPage } from "./BotGroupChatPage";
 import { CreateBotGroupDialog } from "../../components/CreateBotGroupDialog";
+import { groupSidecarKey, useSidecarStore } from "../sidecar/sidecarStore";
+import { GroupSidecarPanel } from "./GroupSidecarPanel";
 
-export function GroupsPage() {
+export function GroupsPage({ routePrefix = "" }: { routePrefix?: string }) {
   const { groupId } = useParams();
   const navigate = useNavigate();
   const agents = useAstrorderStore((state) => state.agents);
@@ -53,7 +54,7 @@ export function GroupsPage() {
             });
         }
       } else if (items.length > 0) {
-        navigate(`/groups/${items[0].id}`, { replace: true });
+        navigate(`${routePrefix}/groups/${items[0].id}`, { replace: true });
       }
     });
     const timer = setInterval(() => void loadGroups(), 10000);
@@ -61,19 +62,28 @@ export function GroupsPage() {
       mounted = false;
       clearInterval(timer);
     };
-  }, [groupId, navigate]);
+  }, [groupId, navigate, routePrefix]);
 
-  const [sidecarOpen, setSidecarOpen] = useState(false);
+  const activeSidecarKey = useSidecarStore((state) => state.activeSessionKey);
+  const activeTabId = useSidecarStore((state) => state.activeTabId);
+  const paneOpen = useSidecarStore((state) => state.isOpen);
+  const ownerKey = groupId ? groupSidecarKey(groupId) : null;
+  const sidecarOpen = activeSidecarKey === ownerKey && paneOpen;
+  const blackboardOpen = sidecarOpen && activeTabId === `blackboard:${ownerKey}`;
   useEffect(() => {
-    if (!groupId) return;
-    setSidecarOpen(
-      localStorage.getItem(`astrorder:group:blackboard:${groupId}`) === "open",
-    );
+    if (!groupId || activeGroup?.id !== groupId) return;
+    const store = useSidecarStore.getState();
+    const key = groupSidecarKey(groupId);
+    const remembered = store.activeSessionKey === key || Boolean(store.sessionMemories[key]);
+    store.switchSession(key);
+    if (!remembered && localStorage.getItem(`astrorder:group:blackboard:${groupId}`) === "open") {
+      store.openGroupBlackboard(groupId, activeGroup.name);
+    }
     const onBlackboardChange = (event: Event) => {
       const detail = (event as CustomEvent<{ namespace?: string }>).detail;
       if (detail?.namespace === `group:${groupId}`) {
         localStorage.setItem(`astrorder:group:blackboard:${groupId}`, "open");
-        setSidecarOpen(true);
+        useSidecarStore.getState().openGroupBlackboard(groupId, activeGroup.name);
       }
     };
     window.addEventListener("astrorder:blackboard-change", onBlackboardChange);
@@ -82,27 +92,20 @@ export function GroupsPage() {
         "astrorder:blackboard-change",
         onBlackboardChange,
       );
-  }, [groupId]);
+  }, [groupId, activeGroup?.id, activeGroup?.name]);
 
   const toggleBlackboard = () => {
-    if (!groupId) return;
-    setSidecarOpen((open) => {
-      localStorage.setItem(
-        `astrorder:group:blackboard:${groupId}`,
-        open ? "closed" : "open",
-      );
-      return !open;
-    });
+    if (!activeGroup || activeGroup.id !== groupId) return;
+    const store = useSidecarStore.getState();
+    if (blackboardOpen) store.setIsOpen(false);
+    else store.openGroupBlackboard(activeGroup.id, activeGroup.name);
+    localStorage.setItem(`astrorder:group:blackboard:${groupId}`, blackboardOpen ? "closed" : "open");
   };
-  if (activeGroup) {
+  if (activeGroup && (!groupId || activeGroup.id === groupId)) {
     return (
-      <div className="route-page chat-page">
+      <div className="route-page chat-page group-page">
         <div
-          className="chat-layout"
-          style={{
-            gridTemplateColumns: sidecarOpen ? "minmax(0, 1fr) 45%" : undefined,
-            height: "100%",
-          }}
+          className={`chat-layout group-chat-layout${sidecarOpen ? " has-group-sidecar" : ""}`}
         >
           <section
             className="chat-column"
@@ -116,28 +119,19 @@ export function GroupsPage() {
             <BotGroupChatPage
               group={activeGroup}
               agents={agents}
-              blackboardOpen={sidecarOpen}
+              blackboardOpen={blackboardOpen}
               onToggleBlackboard={toggleBlackboard}
+              onOpenBlackboard={(key) => {
+                useSidecarStore.getState().openGroupBlackboard(activeGroup.id, activeGroup.name, key);
+                localStorage.setItem(`astrorder:group:blackboard:${activeGroup.id}`, "open");
+              }}
               onEdit={() => setSettingsOpened(true)}
             />
           </section>
-          {sidecarOpen && (
-            <aside
-              className="desktop-details"
-              style={{
-                width: "100%",
-                height: "100%",
-                padding: 0,
-                borderLeft: "1px solid var(--astr-border)",
-                background: "var(--astr-surface)",
-              }}
-            >
-              <SidecarBlackboardPanel
-                namespace={"group:" + activeGroup.id}
-                title={"群聊黑板 · " + activeGroup.name}
-                onClose={toggleBlackboard}
-              />
-            </aside>
+          {activeSidecarKey === ownerKey && (
+            <div className="group-sidecar-slot" hidden={!sidecarOpen}>
+              <GroupSidecarPanel group={activeGroup} />
+            </div>
           )}
         </div>
         <CreateBotGroupDialog
@@ -186,7 +180,7 @@ export function GroupsPage() {
         onClose={() => setCreateOpened(false)}
         onCreated={(g) => {
           setBotGroups((prev) => [g, ...prev]);
-          navigate(`/groups/${g.id}`);
+          navigate(`${routePrefix}/groups/${g.id}`);
         }}
       />
     </Center>

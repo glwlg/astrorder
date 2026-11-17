@@ -61,10 +61,11 @@ export function Minimize() {
 /**
  * @param {string} title
  * @param {string} body
+ * @param {string} path
  * @returns {$CancellablePromise<boolean>}
  */
-export function Notify(title, body) {
-    return $Call.ByName("main.DesktopService.Notify", title, body);
+export function Notify(title, body, path) {
+    return $Call.ByName("main.DesktopService.Notify", title, body, path);
 }
 
 /**

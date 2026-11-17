@@ -356,6 +356,9 @@ a { color: inherit; }
   width: fit-content;
   max-width: 100%;
 }
+.activity-pack > .lazy-details[open] {
+  width: 100%;
+}
 .activity-pack + .activity-pack {
   border-top: 1px solid var(--astr-border);
   padding-top: 10px;
@@ -459,7 +462,8 @@ a { color: inherit; }
     transition: none;
   }
 }
-.activity-timeline { border-left: 2px solid var(--astr-border); padding-left: 12px; display: grid; gap: 6px; max-height: 380px; overflow-y: auto; overscroll-behavior: contain; padding-right: 6px; scrollbar-width: thin; }
+.activity-timeline { border-left: 2px solid var(--astr-border); padding-left: 12px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; max-height: 380px; overflow-y: auto; overscroll-behavior: contain; padding-right: 6px; scrollbar-width: thin; }
+.message-activity { min-width: 0; }
 .activity-fold {
   border: none !important;
   background: transparent !important;
@@ -489,9 +493,9 @@ a { color: inherit; }
 .activity-fold[open] > summary {
   margin-bottom: 6px;
 }
-.activity-fold-summary { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.activity-fold-summary { display: inline-flex; flex: 1 1 auto; align-items: center; gap: 6px; min-width: 0; max-width: 100%; overflow: hidden; white-space: nowrap; }
 .activity-icon { font-size: 13px; flex-shrink: 0; }
-.activity-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+.activity-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
 .activity-badge { font-size: 10px; padding: 1px 5px; border-radius: 4px; font-weight: 500; flex-shrink: 0; }
 .activity-badge.is-failed { background: transparent; color: var(--astr-red); }
 .activity-badge.is-running { background: transparent; color: var(--astr-muted); }
@@ -649,7 +653,7 @@ a { color: inherit; }
   align-items: baseline;
   color: var(--astr-text);
   white-space: pre-wrap;
-  word-break: break-all;
+  overflow-wrap: anywhere;
   font-weight: 500;
 }
 .shell-prompt {
@@ -659,13 +663,14 @@ a { color: inherit; }
 }
 .shell-command-text {
   color: var(--astr-text);
+  min-width: 0;
 }
 .shell-output-text {
   margin-top: 6px;
   color: var(--astr-text);
   opacity: 0.88;
   white-space: pre-wrap;
-  word-break: break-all;
+  overflow-wrap: anywhere;
 }
 .shell-terminal-footer {
   display: flex;

@@ -44,6 +44,11 @@ func runDaemonContext(parent context.Context, args []string, output io.Writer) i
 	if *root == "" || *state == "" || !filepath.IsAbs(*root) || !filepath.IsAbs(*state) {
 		return cliFailure(output, errors.New("daemon controls require absolute --root and --state-dir"))
 	}
+	if operation != "update" {
+		if handled, code := maybeBrokerLifecycle(parent, "daemon", operation, *root, *state, *confirmActive, output); handled {
+			return code
+		}
+	}
 
 	if operation == "update-check" || operation == "update" {
 		public, readErr := publicEnvironment(filepath.Join(*state, "production.json"))
@@ -63,6 +68,9 @@ func runDaemonContext(parent context.Context, args []string, output io.Writer) i
 		}
 		if operation == "update-check" || !update.UpdateAvailable {
 			return cliSuccess(output, map[string]any{"ok": true, "daemon": update})
+		}
+		if handled, code := maybeBrokerLifecycle(parent, "daemon", operation, *root, *state, *confirmActive, output); handled {
+			return code
 		}
 	}
 

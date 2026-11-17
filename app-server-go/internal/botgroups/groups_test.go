@@ -22,6 +22,20 @@ type controlledAgents struct {
 	release     chan struct{}
 }
 
+type decisionFunc func(context.Context, DecisionInput) (Decision, error)
+
+func (f decisionFunc) Decide(ctx context.Context, input DecisionInput) (Decision, error) {
+	return f(ctx, input)
+}
+
+var sendAllDecider = decisionFunc(func(_ context.Context, input DecisionInput) (Decision, error) {
+	decision := Decision{Send: make(map[string]bool), Complete: true}
+	for _, candidate := range input.Candidates {
+		decision.Send[candidate.MemberID] = true
+	}
+	return decision, nil
+})
+
 func (c *controlledAgents) Run(ctx context.Context, turn Turn, bound func(string) error) (Reply, error) {
 	if err := bound("group-native-session"); err != nil {
 		return Reply{}, err
@@ -57,7 +71,7 @@ func TestGroupStopCancelsOnlyBoundMemberAndPreservesMessages(t *testing.T) {
 	}
 	defer st.Close()
 	controller := &controlledAgents{started: make(chan Turn, 2), interrupted: make(chan Turn, 2), release: make(chan struct{})}
-	service, err := New(context.Background(), Options{Store: st, Controller: controller, Authorizer: auth.New(config.Config{BrowserSecret: "fixture"}, nil), Publisher: &publisher{}})
+	service, err := New(context.Background(), Options{Store: st, Controller: controller, Authorizer: auth.New(config.Config{BrowserSecret: "fixture"}, nil), Publisher: &publisher{}, Decider: sendAllDecider})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +147,7 @@ func TestRestartPreservesUnconfirmedTurnWithoutRedispatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	controller := &controlledAgents{started: make(chan Turn, 1), interrupted: make(chan Turn, 1), release: make(chan struct{})}
-	service, err := New(ctx, Options{Store: st, Controller: controller, Authorizer: auth.New(config.Config{BrowserSecret: "fixture"}, nil), Publisher: &publisher{}})
+	service, err := New(ctx, Options{Store: st, Controller: controller, Authorizer: auth.New(config.Config{BrowserSecret: "fixture"}, nil), Publisher: &publisher{}, Decider: sendAllDecider})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +176,7 @@ func TestRestartPreservesUnconfirmedTurnWithoutRedispatch(t *testing.T) {
 	}
 }
 
-func TestConcurrentSendReservesMemberBeforeAcceptingSecondMessage(t *testing.T) {
+func TestConcurrentSendQueuesMessagesForBusyMember(t *testing.T) {
 	ctx := context.Background()
 	st, err := store.Open(filepath.Join(t.TempDir(), "app.db"))
 	if err != nil {
@@ -170,7 +184,7 @@ func TestConcurrentSendReservesMemberBeforeAcceptingSecondMessage(t *testing.T) 
 	}
 	defer st.Close()
 	controller := &controlledAgents{started: make(chan Turn, 4), interrupted: make(chan Turn, 4), release: make(chan struct{})}
-	service, err := New(ctx, Options{Store: st, Controller: controller, Authorizer: auth.New(config.Config{BrowserSecret: "fixture"}, nil), Publisher: &publisher{}})
+	service, err := New(ctx, Options{Store: st, Controller: controller, Authorizer: auth.New(config.Config{BrowserSecret: "fixture"}, nil), Publisher: &publisher{}, Decider: sendAllDecider})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,14 +214,24 @@ func TestConcurrentSendReservesMemberBeforeAcceptingSecondMessage(t *testing.T) 
 			accepted++
 		}
 	}
-	if accepted != 1 {
+	if accepted != 12 {
 		t.Fatalf("accepted %d submissions for one running member", accepted)
 	}
 	messages, err := service.messages(ctx, g.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(messages) != 1 {
+	if len(messages) != 12 {
 		t.Fatalf("accepted-but-undispatched messages: %d", len(messages))
+	}
+	select {
+	case <-controller.started:
+	case <-time.After(time.Second):
+		t.Fatal("member did not start")
+	}
+	select {
+	case <-controller.started:
+		t.Fatal("busy member received concurrent deliveries")
+	case <-time.After(100 * time.Millisecond):
 	}
 }

@@ -44,6 +44,17 @@ func TestRegistrationsExposeGitRoutes(t *testing.T) {
 	}
 }
 
+func TestParseBranchesDoesNotInventCurrentBranch(t *testing.T) {
+	current, branches := parseBranches(nil)
+	if current != "" || len(branches) != 0 {
+		t.Fatalf("empty branch output = %q, %v", current, branches)
+	}
+	current, branches = parseBranches([]byte("  main\n* feature/work\n"))
+	if current != "feature/work" || len(branches) != 2 {
+		t.Fatalf("branch output = %q, %v", current, branches)
+	}
+}
+
 func TestGitHTTPStatusPreservesQuotedUnicodeAndCountsBothColumns(t *testing.T) {
 	repository := initRepository(t)
 	if err := os.WriteFile(filepath.Join(repository, "空 格.txt"), []byte("first\nsecond\n"), 0o600); err != nil {

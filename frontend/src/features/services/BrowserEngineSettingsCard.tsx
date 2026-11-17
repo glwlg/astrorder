@@ -34,9 +34,9 @@ export function BrowserEngineSettingsCard() {
       <SegmentedControl fullWidth aria-label="浏览器引擎" value={engine} disabled={saved === null || busy}
         onChange={value => setEngine(value as BrowserEngine)} data={[
           { value: 'browser_use', label: 'Browser Use' },
-          { value: 'jev_ultrafast', label: 'Jev Ultrafast' },
+          { value: 'jev_ultrafast', label: 'System One' },
         ]} />
-      <Text size="xs" c="dimmed">{engine === 'browser_use' ? '使用普通模型服务执行浏览器任务，模型需要支持结构化输出。' : '使用 Jev 模型服务执行浏览器任务；生成文本时使用普通模型服务。'}</Text>
+      <Text size="xs" c="dimmed">{engine === 'browser_use' ? '使用普通模型服务执行浏览器任务，模型需要支持结构化输出。' : '使用 System One 模型服务执行浏览器任务；生成文本时使用普通模型服务。'}</Text>
       <Group justify="flex-end"><Button onClick={() => void save()} loading={busy} disabled={saved === null || saved === engine}>保存配置</Button></Group>
     </Stack>
   </Card>

@@ -235,7 +235,7 @@ describe('independent mobile composer', () => {
     const chip = await screen.findByRole('button', { name: '上下文用量' })
     expect(chip).toHaveTextContent('24.0k / 200k')
     fireEvent.click(chip)
-    expect(await screen.findByLabelText('运行信息')).toHaveTextContent('缓存命中率 50%')
+    expect(await screen.findByLabelText('运行信息')).toHaveTextContent('缓存命中率 50.0%')
     expect(usage).toHaveBeenCalledWith(session.id, session.agent_id)
   })
   it('shows native connection, agent, model and branch in runtime status', async () => {
@@ -585,7 +585,7 @@ describe('independent mobile composer', () => {
     expect(screen.queryByLabelText('按 Agent 筛选')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '筛选' }))
     expect(screen.getByRole('button', { name: '未读' })).toBeInTheDocument()
-    expect(screen.getByLabelText('按连接筛选')).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: '按连接筛选' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '按 Agent 类型筛选' })).toBeInTheDocument()
   })
   it('opens the session drawer from a left-edge right swipe', async () => {

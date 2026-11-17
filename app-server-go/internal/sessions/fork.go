@@ -109,7 +109,7 @@ func (h *Handler) handleForkSession(w http.ResponseWriter, r *http.Request, sid 
 	} else if kind == "antigravity" {
 		req.Options = &pb.CreateSessionRequest_Antigravity{Antigravity: &pb.AntigravityCreateOptions{Cwd: stringValue(parent, "workspace"), ParentSessionId: &nativeID, TargetMessageId: body.TargetMessageID}}
 	} else {
-		req.Options = &pb.CreateSessionRequest_Codex{Codex: &pb.CodexCreateOptions{ParentSessionId: &nativeID}}
+		req.Options = &pb.CreateSessionRequest_Codex{Codex: &pb.CodexCreateOptions{Cwd: stringValue(parent, "workspace"), ParentSessionId: &nativeID}}
 	}
 	receipt, err := h.client.Session.CreateSession(r.Context(), req)
 	if err == nil {

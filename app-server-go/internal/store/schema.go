@@ -22,6 +22,16 @@ type tableDefinition struct {
 }
 
 var tables = []tableDefinition{
+	{Name: "agent_invocation_usage", Create: `CREATE TABLE agent_invocation_usage (
+	row_id INTEGER NOT NULL,
+	capability VARCHAR(128) NOT NULL,
+	agent_id VARCHAR(256) NOT NULL,
+	runtime VARCHAR(32) NOT NULL,
+	success BOOLEAN NOT NULL,
+	duration_ms INTEGER NOT NULL,
+	created_at_ms INTEGER NOT NULL,
+	PRIMARY KEY (row_id)
+)`},
 	{Name: "draft_shelves", Create: `CREATE TABLE draft_shelves (
 scope TEXT NOT NULL,
 revision INTEGER NOT NULL,
@@ -309,6 +319,7 @@ PRIMARY KEY (scope)
 var indices = []string{
 	"CREATE INDEX IF NOT EXISTS ix_agents_connection_id ON agents (connection_id)",
 	"CREATE INDEX IF NOT EXISTS ix_agents_source_id ON agents (source_id)",
+	"CREATE INDEX IF NOT EXISTS ix_agent_invocation_usage_created_at ON agent_invocation_usage (created_at_ms)",
 	"CREATE INDEX IF NOT EXISTS ix_commands_agent_id ON commands (agent_id)",
 	"CREATE INDEX IF NOT EXISTS ix_commands_session_id ON commands (session_id)",
 	"CREATE INDEX IF NOT EXISTS ix_connection_history_connection_id ON connection_history (connection_id)",

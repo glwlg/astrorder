@@ -44,7 +44,7 @@ func TestJevModeSwitchPreservesOfficialKeyAndUsesCurrentGateway(t *testing.T) {
 		urls = append(urls, r.URL.String())
 		models = append(models, body.Model)
 		keys = append(keys, r.Header.Get("Authorization"))
-		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"answers":{"recommended_component":{"choice":"MetricGrid","confidence":0.9},"log_nature":{"choice":"Success"}}}`))}, nil
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"answers":{"recommended_component":{"choice":"MetricGrid","confidence":0.9}}}`))}, nil
 	})}
 	// Testing an unsaved mode must not change the saved connection.
 	w := call(h, "POST", "/api/v1/services/jev/test", `{"mode":"gateway","model":"typesafe/jev-preview"}`)
@@ -59,8 +59,7 @@ func TestJevModeSwitchPreservesOfficialKeyAndUsesCurrentGateway(t *testing.T) {
 	if w.Code != 200 || !strings.Contains(w.Body.String(), `"configured":true`) || strings.Contains(w.Body.String(), "gateway-secret") || strings.Contains(w.Body.String(), "official-secret") {
 		t.Fatal(w.Code, w.Body.String())
 	}
-	output, _ := json.Marshal(map[string]string{"output": strings.Repeat("operation succeeded\n", 25), "command": "check"})
-	if w = call(h, "POST", "/api/v1/tools/jev-filter", string(output)); w.Code != 200 {
+	if w = call(h, "POST", "/api/v1/services/jev/test", `{}`); w.Code != 200 {
 		t.Fatal(w.Code, w.Body.String())
 	}
 	saveJevGateway(t, h, "magpie", "https://new-gateway.test/v1", "rotated-secret")

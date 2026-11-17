@@ -13,3 +13,8 @@ it('explains missing completion and ignores accepted controls and other sessions
 it('keeps a claimed request blocked while it crosses native admission', () => {
  expect(queueBlockReason([command('claim', 'enqueue', 'received')], 'a', 's')).toContain('上一条指令仍在提交')
 })
+it('shows the server decision for the queued message on both clients', () => {
+ const waiting = { ...command('next', 'enqueue', 'queued'), error: '上一轮回复需要你的确认，待发消息已保留' }
+ expect(queueBlockReason([waiting], 'a', 's')).toBe(waiting.error)
+ expect(queueBlockReason([waiting, command('old', 'send', 'unknown')], 'a', 's')).toContain('上一条消息的发送结果尚未确认')
+})

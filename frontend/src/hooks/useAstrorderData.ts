@@ -23,20 +23,35 @@ export function mergeHistoryPages(
 ): void {
   const store = useAstrorderStore.getState()
   const revisions = store.messageEventRevisions[scopeKey(agentId, sessionId)] || {}
-  // A response cannot overwrite message events received after its request began.
+  // Preserve newer live events unless native history already contains their
+  // entire text and additional output that is still queued on the stream.
   const current = store.messages[scopeKey(agentId, sessionId)] || {}
-  const safeItems = (page: typeof pages[number]) => page.items.flatMap(item => {
-    if (page.liveRevisionAtRequest === undefined || (revisions[item.id] || 0) <= page.liveRevisionAtRequest) return [item]
-    const live = current[item.id]
-    // Native start time remains authoritative even when the body snapshot is stale.
-    return live && item.timestamp_source === 'native'
-      ? [{ ...live, created_at: item.created_at, timestamp_source: item.timestamp_source, completed_at: item.completed_at, turn_id: item.turn_id || live.turn_id }]
-      : []
-  })
+  const streams = store.messageStreams[scopeKey(agentId, sessionId)] || {}
+  const safeItems = (page: typeof pages[number]) => {
+    const ahead: Record<string, string> = {}
+    const items = page.items.flatMap(item => {
+      const live = current[item.id]
+      if (live && streams[item.id] && item.role === 'assistant' && live.role === 'assistant' && item.kind === live.kind
+        && item.text.length > live.text.length && item.text.startsWith(live.text)) {
+        ahead[item.id] = item.text.slice(live.text.length)
+        return [item]
+      }
+      if (page.liveRevisionAtRequest === undefined || (revisions[item.id] || 0) <= page.liveRevisionAtRequest) return [item]
+      // Native start time remains authoritative even when the body snapshot is stale.
+      return live && item.timestamp_source === 'native'
+        ? [{ ...live, created_at: item.created_at, timestamp_source: item.timestamp_source, completed_at: item.completed_at, turn_id: item.turn_id || live.turn_id }]
+        : []
+    })
+    return { items, ahead }
+  }
   const [latest, ...older] = pages
-  if (latest) store.mergeMessages(agentId, sessionId, safeItems(latest))
+  if (latest) {
+    const safe = safeItems(latest)
+    store.mergeMessages(agentId, sessionId, safe.items, safe.ahead)
+  }
   for (const page of older) {
-    store.mergeMessagesPrepend(agentId, sessionId, safeItems(page))
+    const safe = safeItems(page)
+    store.mergeMessagesPrepend(agentId, sessionId, safe.items, safe.ahead)
   }
 }
 

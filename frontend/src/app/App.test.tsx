@@ -5,6 +5,7 @@ import { userEvent } from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
+import { useAstrorderStore } from '../state/store'
 
 const emptyPreferences = { appearance: {}, session_pins: {}, pinned_projects: [], project_order: [] }
 
@@ -21,9 +22,27 @@ function renderApp(initialEntries = ['/']) {
   )
 }
 
-afterEach(() => { cleanup(); vi.restoreAllMocks() })
+afterEach(() => { cleanup(); vi.restoreAllMocks(); useAstrorderStore.getState().resetRuntime() })
 
 describe('isolated browser API fixture scope — not production Agent data', () => {
+  it('opens a mobile group notification directly in the group conversation', async () => {
+    const group = { id: 'group-review', name: '授权复核讨论', members: [], max_hops: 10, coordination: { status: 'complete' }, created_at: '', updated_at: '' }
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = String(input)
+      const json = (value: unknown) => new Response(JSON.stringify(value), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      if (url.endsWith('/auth/session')) return json({ authenticated: true })
+      if (url.endsWith('/bootstrap')) return json({ protocol_version: 1, agents: [], sessions: [], cursor: 0 })
+      if (url.endsWith('/bot-groups')) return json({ items: [group], count: 1 })
+      if (url.endsWith('/bot-groups/group-review')) return json({ group })
+      if (url.endsWith('/bot-groups/group-review/messages')) return json({ items: [{ id: 'group-reply', group_id: group.id, sender_type: 'user', sender_id: 'human', text: '群里的最终回复', mentions: [], hop_count: 0, created_at: '' }], count: 1 })
+      return json({ items: [] })
+    })
+    vi.stubGlobal('WebSocket', class { close() {} })
+    renderApp(['/mobile/groups/group-review?view=mobile'])
+    expect(await screen.findByText('群里的最终回复')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '返回会话' })).toBeInTheDocument()
+    expect(screen.queryByText('还没有可用会话')).not.toBeInTheDocument()
+  })
   it('shows the authentication screen for an unauthenticated browser', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify({ authenticated: false }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
@@ -103,6 +122,11 @@ describe('isolated browser API fixture scope — not production Agent data', () 
     await userEvent.click(screen.getAllByRole('link', { name: /监控室/ })[0])
     expect(await screen.findByRole('heading', { name: '监控室' })).toBeInTheDocument()
     expect(screen.getByTestId('monitor-card-agent-b-shared')).toHaveTextContent('会话 B')
+    expect(screen.getByRole('link', { name: '会话' })).toHaveAttribute('href', '/chat/shared?agent_id=agent-b')
+    await userEvent.click(screen.getByRole('link', { name: '会话' }))
+    expect(await screen.findByRole('heading', { name: '会话 B', level: 2 })).toBeInTheDocument()
+    expect(await screen.findByText('来自 B')).toBeInTheDocument()
+    expect(screen.queryByText('来自 A')).not.toBeInTheDocument()
   })
 
   it('redirects PC desktop viewport away from /mobile route to desktop workspace', async () => {

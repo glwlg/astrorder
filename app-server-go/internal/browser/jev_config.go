@@ -20,7 +20,7 @@ type JevConfig struct {
 
 func (c JevConfig) Validate() error {
 	if c.Mode != "official" && c.Mode != "gateway" {
-		return errors.New("请选择通过 LLM 网关或 Jev 官方")
+		return errors.New("请选择通过 LLM 网关或 System One 官方")
 	}
 	if c.Mode == "gateway" && strings.TrimSpace(c.Model) == "" {
 		return errors.New("请选择 System One 模型")
@@ -63,7 +63,7 @@ func ResolveJevConfig(ctx context.Context, st *store.Store, config JevConfig, of
 			key = strings.TrimSpace(*officialKey)
 		}
 		if key == "" {
-			return JevEndpoint{}, errors.New("请配置 Jev 官方 API Key")
+			return JevEndpoint{}, errors.New("请配置 System One 官方 API Key")
 		}
 		return JevEndpoint{URL: defaultJevURL, APIKey: key, Model: "jev-latest"}, nil
 	}

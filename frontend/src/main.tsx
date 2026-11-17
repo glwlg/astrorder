@@ -10,7 +10,9 @@ import App from './app/App.tsx'
 import { installGlobalNativeHoldBlocker } from './features/mobile/mobileGestures'
 import './index.css'
 import './workspaceVisuals.css'
+import './brightWorkbench.css'
 import { theme } from './theme'
+import { LiquidSurfaces } from './components/LiquidSurfaces'
 import { registerSW } from 'virtual:pwa-register'
 
 installGlobalNativeHoldBlocker()
@@ -48,10 +50,11 @@ if (staticSplash) {
 
 createRoot(rootEl).render(
   <StrictMode>
-    <MantineProvider theme={theme} defaultColorScheme="auto">
+    <MantineProvider theme={theme} defaultColorScheme="light">
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
           <Notifications position="top-right" zIndex={3000} />
+          <LiquidSurfaces />
           <App />
         </BrowserRouter>
       </QueryClientProvider>

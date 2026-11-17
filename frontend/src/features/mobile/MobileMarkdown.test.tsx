@@ -1,7 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { expect, it, vi } from 'vitest'
 import { MobileMarkdown } from './MobileMarkdown'
-import { MobileArtifactSheet } from './MobileArtifactSheet'
 
 it('opens Windows file links without navigating and serves local images through the session', () => {
   const onFileClick = vi.fn()
@@ -21,11 +20,4 @@ it('opens Windows file links without navigating and serves local images through 
     'src',
     '/api/v1/files/raw?path=C%3A%2FUsers%2Fluwei%2Foutput%2Fchart.png&session_id=session-1',
   )
-})
-
-it('previews an HTML artifact inside the mobile sheet', () => {
-  render(<MobileArtifactSheet path="C:/Users/luwei/output/周报_20260929.html" onClose={vi.fn()} />)
-  const frame = screen.getByTitle('周报_20260929.html')
-  expect(frame).toHaveAttribute('sandbox', 'allow-scripts')
-  expect(frame).toHaveAttribute('src', expect.stringContaining('/api/v1/files/raw?path='))
 })

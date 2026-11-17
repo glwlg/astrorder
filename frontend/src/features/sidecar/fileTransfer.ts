@@ -4,6 +4,7 @@ import { authenticatedApiFetch } from '../../api/client'
 type FileDesktop = {
   setClipboardFiles?: (paths: string[]) => Promise<boolean>
   saveDownload?: (url: string, filename: string) => Promise<boolean>
+  openExternal?: (url: string) => Promise<void>
 }
 export function fileDesktop(): FileDesktop | undefined {
   return (window as unknown as { astrorderDesktop?: FileDesktop }).astrorderDesktop

@@ -270,13 +270,13 @@ func appStatus(ctx context.Context, options validatedAppOptions) (AppStatusResul
 	}
 	result.Process = identity
 	current, inspectErr := InspectProcess(identity.PID)
-	if inspectErr != nil && !errors.Is(inspectErr, os.ErrNotExist) {
+	if inspectErr != nil && !errors.Is(inspectErr, os.ErrNotExist) && !processIdentityReused(identity, current, inspectErr) {
 		return AppStatusResult{}, fmt.Errorf("inspect saved App process: %w", inspectErr)
 	}
 	result.IdentityVerified = inspectErr == nil && current == identity && samePath(current.ExecutablePath, options.ExecutablePath)
 	result.PortOwned = result.IdentityVerified && len(pids) == 1 && pids[0] == identity.PID
 	if !result.IdentityVerified || !result.PortOwned {
-		if len(pids) == 0 && errors.Is(inspectErr, os.ErrNotExist) {
+		if len(pids) == 0 && !result.Healthy && (errors.Is(inspectErr, os.ErrNotExist) || processIdentityReused(identity, current, inspectErr)) {
 			result.State = StateStopped
 		} else {
 			result.State = StateConflict

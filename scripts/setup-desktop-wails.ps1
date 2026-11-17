@@ -39,15 +39,22 @@ try {
     Assert-Exit 'Node version'
     if ($ActualNode.Trim() -ne "v$($Versions.node)") { throw "Unexpected Node version: $ActualNode" }
     $env:GOBIN = Join-Path $Tools 'bin'
-    if (-not (Test-Path $Wails)) {
+    $ActualWails = ''
+    if (Test-Path $Wails) {
+        # Windows PowerShell 5 wraps native stderr as ErrorRecord even on exit 0.
+        $ErrorActionPreference = 'Continue'
+        try { $ActualWails = & $Wails version 2>&1 } finally { $ErrorActionPreference = 'Stop' }
+        Assert-Exit 'Wails version'
+        $ActualWails = ($ActualWails -join "`n").Trim()
+    }
+    if ($ActualWails -ne $Versions.wails) {
         & go install "github.com/wailsapp/wails/v3/cmd/wails3@$($Versions.wails)"
         Assert-Exit 'Wails CLI installation'
     }
-    # Windows PowerShell 5 wraps native stderr as ErrorRecord even on exit 0.
     $ErrorActionPreference = 'Continue'
     try { $ActualWails = & $Wails version 2>&1 } finally { $ErrorActionPreference = 'Stop' }
     Assert-Exit 'Wails version'
-    if (($ActualWails -join "`n").Trim() -ne $Versions.wails) { throw 'Unexpected Wails CLI version; remove only .tools/wails/bin/wails3.exe and rerun setup.' }
+    if (($ActualWails -join "`n").Trim() -ne $Versions.wails) { throw 'Unexpected Wails CLI version after installation.' }
     & $Node (Join-Path $Root 'scripts/desktop-wails.mjs') install
     Assert-Exit 'Locked dependency installation'
     Write-Output "Ready: Node $ActualNode, Wails $($Versions.wails), Go $($Versions.go)"

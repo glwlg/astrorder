@@ -1,5 +1,8 @@
 import '@testing-library/jest-dom/vitest'
-import { vi } from 'vitest'
+import { cleanup } from '@testing-library/react'
+import { afterEach, vi } from 'vitest'
+
+afterEach(cleanup)
 
 // Node's native storage shadows JSDOM storage on newer runtimes.
 // Keep browser tests isolated in their own window, without disk-backed state.
@@ -20,7 +23,8 @@ class ResizeObserverMock {
   unobserve() {}
   disconnect() {}
 }
-vi.stubGlobal('ResizeObserver', ResizeObserverMock)
+Object.defineProperty(globalThis, 'ResizeObserver', { configurable: true, writable: true, value: ResizeObserverMock })
+Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, writable: true, value: vi.fn() })
 Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', { configurable: true, value: () => null })
 // JSDOM lacks FontFaceSet; Mantine autosizing observes browser font loading.
 Object.defineProperty(document, 'fonts', { configurable: true, value: new EventTarget() })

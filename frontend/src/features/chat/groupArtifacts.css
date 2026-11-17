@@ -1,0 +1,10 @@
+.group-artifacts-list {
+  display: grid;
+  gap: 12px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.group-artifacts-list > li { min-width: 0; }
+.group-artifact-path { overflow-wrap: anywhere; }
+.markdown-file-link-label { font-size: 11px; opacity: .75; margin-left: 4px; }

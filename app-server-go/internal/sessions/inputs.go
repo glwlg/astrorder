@@ -18,6 +18,13 @@ import (
 // commandInputs opens registered blobs under the injected storage root. Remote
 // native processes receive bytes or paths written on their own filesystem.
 func (h *Handler) commandInputs(ctx context.Context, command, session map[string]any) ([]*pb.InputPart, error) {
+	return CommandInputs(ctx, Options{Store: h.store, AttachmentsDir: h.attachmentsDir, MaxAttachmentSize: h.maxAttachmentSize, Resolver: h.resolver}, command, session)
+}
+
+// CommandInputs uses the same registered-attachment validation and native input
+// encoding for direct sessions and group deliveries.
+func CommandInputs(ctx context.Context, options Options, command, session map[string]any) ([]*pb.InputPart, error) {
+	h := &Handler{store: options.Store, attachmentsDir: options.AttachmentsDir, maxAttachmentSize: options.MaxAttachmentSize, resolver: options.Resolver}
 	text := stringValue(command, "text")
 	input := []*pb.InputPart{}
 	if text != "" {

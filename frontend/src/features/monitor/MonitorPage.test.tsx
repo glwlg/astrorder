@@ -1,8 +1,9 @@
 import { MantineProvider } from '@mantine/core'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../../api/client'
+import type { Command } from '../../domain/types'
 import { useAstrorderStore } from '../../state/store'
 import { MonitorPage } from './MonitorPage'
 import { draftStorage } from '../chat/draftStorage'
@@ -30,6 +31,13 @@ const idleSession = { id: 'session-2', agent_id: 'agent-1', title: '闲置会话
 const reviewSession = { id: 'session-review', agent_id: 'agent-1', title: 'The following is the Codex agent history whose request action you are assessing', workspace: '/repo', status: 'idle' as const, updated_at: '2026-09-07T08:00:00Z' }
 const storage = new Map<string, string>()
 const savedDrafts = new Map<string, any>()
+
+function monitorCommand(id: string, action: Command['action'], state: Command['state'], text = ''): Command {
+  return {
+    id, agent_id: activeSession.agent_id, session_id: activeSession.id, action, state, text,
+    attachments: [], created_at: activeSession.updated_at, error: null, target_id: null,
+  }
+}
 
 describe('MonitorPage', () => {
   beforeEach(() => {
@@ -127,6 +135,63 @@ describe('MonitorPage', () => {
     })
 
     expect(await screen.findByTestId('monitor-card-agent-1-session-1')).toHaveClass('is-completion-flash')
+  })
+
+  it.each(['grid', 'list'])('does not show a completed session as executing because of old stop commands in %s view', async layout => {
+    storage.set('astrorder:monitor-sessions', JSON.stringify(['agent-1::session-1']))
+    useAstrorderStore.setState({
+      sessions: { ...useAstrorderStore.getState().sessions, 'agent-1::session-1': { ...activeSession, status: 'idle' } },
+    })
+    useAstrorderStore.getState().mergeCommands([
+      monitorCommand('old-stop-1', 'stop', 'accepted'),
+      monitorCommand('old-stop-2', 'stop', 'accepted'),
+    ])
+    renderPage()
+    if (layout === 'list') fireEvent.click(screen.getByText('列表'))
+
+    const card = await screen.findByTestId('monitor-card-agent-1-session-1')
+    expect(within(card).getByLabelText('空闲')).toBeInTheDocument()
+    expect(within(card).queryByText('命令执行中…')).not.toBeInTheDocument()
+    expect(within(card).queryByText('执行中')).not.toBeInTheDocument()
+  })
+
+  it.each(['grid', 'list'])('shows the actual active message and clears it when the session finishes in %s view', async layout => {
+    useAstrorderStore.getState().mergeCommands([
+      monitorCommand('old-stop', 'stop', 'accepted'),
+      monitorCommand('old-approval', 'approve', 'accepted'),
+      monitorCommand('running-message', 'send', 'running', '正在处理的会话消息'),
+    ])
+    renderPage()
+    if (layout === 'list') fireEvent.click(screen.getByText('列表'))
+
+    const card = await screen.findByTestId('monitor-card-agent-1-session-1')
+    expect(within(card).getByLabelText('正在运行')).toBeInTheDocument()
+    expect(within(card).getByText('正在处理的会话消息')).toBeInTheDocument()
+    expect(within(card).queryByText('命令执行中…')).not.toBeInTheDocument()
+
+    act(() => {
+      useAstrorderStore.setState({
+        sessions: { ...useAstrorderStore.getState().sessions, 'agent-1::session-1': { ...activeSession, status: 'idle' } },
+      })
+    })
+    await waitFor(() => expect(within(card).getByLabelText('空闲')).toBeInTheDocument())
+    expect(within(card).queryByText('正在处理的会话消息')).not.toBeInTheDocument()
+    expect(within(card).queryByText('执行中')).not.toBeInTheDocument()
+  })
+
+  it.each(['grid', 'list'])('shows an accepted queued message while live activity marks the session running in %s view', async layout => {
+    useAstrorderStore.setState({
+      sessions: { ...useAstrorderStore.getState().sessions, 'agent-1::session-1': { ...activeSession, status: 'idle', live: true } },
+    })
+    useAstrorderStore.getState().mergeCommands([
+      monitorCommand('queued-message', 'enqueue', 'accepted', '已发送的排队消息'),
+    ])
+    renderPage()
+    if (layout === 'list') fireEvent.click(screen.getByText('列表'))
+
+    const card = await screen.findByTestId('monitor-card-agent-1-session-1')
+    expect(within(card).getByLabelText('正在运行')).toBeInTheDocument()
+    expect(within(card).getByText('已发送的排队消息')).toBeInTheDocument()
   })
 
   it('flashes when a command completes before the session status catches up', async () => {

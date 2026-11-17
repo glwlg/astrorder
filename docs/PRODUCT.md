@@ -1,27 +1,29 @@
 # 星序 · Astrorder — 产品与技术全景架构规范
 
 **品牌定义**：星序 · Astrorder。寓意：*群星各有所长，协作自有秩序*。
-**产品定位**：面向工程落地与沉浸式人机协作的**本机优先、多智能体协同控制工作台与工件处理中心**。原生直连 Codex、Hermes、Grok 与远程 SSH 服务器，跨桌面端（Electron / Web）与移动端（独立触屏工作台）提供一致的控制与观察面。
+**产品定位**：面向工程落地与沉浸式人机协作的**本机优先、多智能体协同控制工作台与工件处理中心**。原生直连 Codex、Hermes、Grok 与远程 SSH 服务器，跨桌面端（Wails / Web）与移动端（独立触屏工作台）提供控制与观察能力。
 
 ---
 
 ## 1. 系统架构分层
 
 ### 1.1 大小内核分离架构 (Dual-Kernel Architecture)
-- **常驻小内核（Session Daemon，Port 30009）**：
+- **常驻小内核（Go Session Daemon）**：
   - 极简稳定常驻进程，负责底层 Agent Runtime（Codex app-server、Hermes CLI、Grok、SSH 远端连接及本地 PTY 终端）子进程树守护与命令中断。
-  - 内存 WAL 环形缓冲区（Ring Buffer）：即使大内核升级重启，输出与事件流无损缓冲，重连后基于 `seq_id` 增量补推，实现自迭代自维护永不断联。
-- **业务大内核（App Server，FastAPI / Uvicorn，Port 30001 / 30002）**：
-  - 承载 Web/REST API、WebSocket 双工流、前端单页应用（SPA）托管、工作区工件解析及 SQLite 数据持久化。支持高频热更新与重启，不干扰底层正在执行的 Agent 任务。
+  - 维护事件日志、SQLite 持久化与重放，向大内核提供 protobuf/gRPC 服务。大内核重新连接后按事件游标恢复投影。
+- **业务大内核（Go App Server）**：
+  - 承载 HTTP API、浏览器事件 WebSocket、前端静态资源、工作区工件解析及 SQLite 产品数据。与小内核独立升级和重启。
 - **跨平台客户端**：
-  - **桌面客户端（Electron）**：原生窗口管理器、系统托盘、多窗口画廊（图片/工件独立弹出）、快捷启动与自检脚本。
+  - **桌面客户端（Wails 3）**：原生窗口、系统托盘、独立图片预览、系统通知和生命周期控制入口。
   - **移动端独立壳（Responsive Touch Shell）**：针对 390px 级竖屏与移动视口专门构建手势抽屉、底部 Sheet 交互与离线队列缓冲，非桌面界面的机械压缩。
 
 ### 1.2 核心技术栈
-- **前端**：React 18 · TypeScript · Vite · Mantine UI · Zustand · Monaco Editor · xterm.js · Lucide / Tabler Icons · react-markdown + remark-gfm
-- **后端**：Python 3.11+ · FastAPI · Pydantic · SQLAlchemy · SQLite · Uvicorn · Asyncio
-- **客户端**：Electron · Node.js
-- **测试保障**：Vitest · Playwright (CDP) · pytest · Ruff
+- **前端**：React · TypeScript · Vite · Mantine UI · Zustand · TanStack Query · Monaco Editor · xterm.js · Tabler Icons · liquidGL · react-markdown + remark-gfm
+- **大小内核**：Go · protobuf/gRPC · SQLite
+- **桌面客户端**：Wails 3 · Windows WebView2
+- **测试与构建**：Go test / vet · Vitest · Node test · Buf · NSIS
+
+具体依赖版本以各模块的 `go.mod`、`frontend/package-lock.json` 和 `desktop-wails/toolchain.json` 为准。源码职责见[大小内核架构](design/dual-kernel-architecture.md)，构建和更新见[安装与更新](production-deployment.md)。
 
 ---
 
@@ -35,7 +37,7 @@
    - **Grok**：支持远端与本地 Grok 运行时深度推理及上下文同步。
    - **SSH 远端环境**：支持通过私钥引用与别名跨网段托管远程开发机上的 Agent，无明文凭证存储、无 shell 拼接注入风险。
 3. **跨 Agent 协作交接（Handoff）**：支持在不同智能体之间无缝继承上下文与关键工程产物，多 Agent 协同攻关。
-4. **多智能体群组协同（Bot Groups）**：支持创建跨主机、跨模型的专属协作讨论组，基于 `@Agent` 语法与规则触发自动多方轮次接力。
+4. **多智能体群组协同（Bot Groups）**：成员按独立身份加入，可重复添加同一 Agent、选择不同工作区或从已有会话分叉。System One 按被提及成员的依赖关系决定发送时机与本轮是否结束，支持禁言与共享产物。详见[群聊协作](design/bots-group-orchestration.md)。
 5. **Swarm DAG 拓扑编排与黑板系统**：提供多智能体分布式任务 DAG 状态追踪，并借助全局黑板（Blackboard）保持高维上下文一致。
 6. **Git Worktree 会话分叉**：支持为探索性任务一键创建独立的 Git Worktree 隔离工作区，多 Agent 并行攻关零冲突。
 
@@ -58,6 +60,6 @@
 
 ## 3. 安全与运行基准
 
-1. **凭证隔离与双轨防线**：浏览器访问凭证仅采用 HttpOnly Cookie 存储，与 Agent 连接器通讯密钥物理隔离，防范 XSS 窃取。
+1. **凭证隔离**：浏览器、Agent 能力入口、连接器与内核控制采用各自的认证边界。凭据处理以当前认证及桌面适配层实现为准，不在日志中记录密钥或访问令牌。
 2. **工作区边界保护**：所有本地/远程文件读写、命令执行均强校验会话工作区物理路径，坚决防范路径穿越（Path Traversal）。
 3. **真实运行时原则**：拒绝在生产环境填充假数据或伪造「已连接」状态；空状态即代表无活动连接，透明可靠。
