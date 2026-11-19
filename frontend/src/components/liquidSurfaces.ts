@@ -3,8 +3,18 @@ import { createGlassRim } from './glassRim'
 import { loadLiquidGlass } from './liquidGlass'
 import './liquidSurfaces.css'
 
+const sidebar = '.workspace-sidebar[data-liquid-snapshot]'
+const sidebarControls = [
+  '.sidebar-nav-link[data-liquid-surface]',
+  '.session-search-field',
+  '.agent-connection-control',
+  '.agent-kind-select',
+  '.session-quick-filters',
+  '.session-project-header',
+].map(control => `${sidebar} ${control}`).join(',')
 const selector = [
   '[data-liquid-surface]',
+  sidebarControls,
   '.mantine-Menu-dropdown',
   '.mantine-Popover-dropdown',
   '.mantine-HoverCard-dropdown',
@@ -21,13 +31,22 @@ export function installLiquidSurfaces({ root = document.body, snapshot = 'body',
   let refreshTimer: ReturnType<typeof setTimeout> | undefined
   type Binding = {
     layer: HTMLElement
+    lensTarget: HTMLElement
     lenses: LiquidGlassLens[]
-    rims: ReturnType<typeof createGlassRim>[]
+    canvases: HTMLCanvasElement[]
     ignored: boolean
   }
   const bindings = new Map<HTMLElement, Binding>()
+  const rims = new Map<HTMLCanvasElement, { mask: ReturnType<typeof createGlassRim>; targets: number }>()
   const release = (surface: HTMLElement, binding: Binding) => {
-    for (const rim of binding.rims) rim.destroy()
+    for (const canvas of binding.canvases) {
+      const rim = rims.get(canvas)!
+      rim.mask.untrack(binding.lensTarget)
+      if (--rim.targets === 0) {
+        rim.mask.destroy()
+        rims.delete(canvas)
+      }
+    }
     for (const lens of binding.lenses) lens.destroy()
     binding.layer.remove()
     surface.classList.remove('liquid-surface')
@@ -39,6 +58,7 @@ export function installLiquidSurfaces({ root = document.body, snapshot = 'body',
     if (refreshTimer !== undefined || disposed) return
     refreshTimer = setTimeout(() => {
       refreshTimer = undefined
+      for (const { mask } of rims.values()) mask.update()
       const renderers = new Set([...bindings.values()].flatMap(binding => binding.lenses.map(lens => lens.renderer)))
       for (const renderer of renderers) if (renderer) void renderer.captureSnapshot()
     }, 160)
@@ -66,7 +86,10 @@ export function installLiquidSurfaces({ root = document.body, snapshot = 'body',
       lensTarget.className = 'liquid-surface-lens'
       lensTarget.id = `liquid-surface-${++nextId}`
       layer.append(lensTarget)
-      const binding: Binding = { layer, lenses: [], rims: [], ignored: surface.hasAttribute('data-liquid-ignore') }
+      const sidebarHost = surface.matches(sidebarControls) ? surface.closest<HTMLElement>(sidebar) : null
+      const binding: Binding = {
+        layer, lensTarget, lenses: [], canvases: [], ignored: surface.hasAttribute('data-liquid-ignore'),
+      }
       bindings.set(surface, binding)
       surface.classList.add('liquid-surface')
       surface.setAttribute('data-liquid-ignore', '')
@@ -74,22 +97,27 @@ export function installLiquidSurfaces({ root = document.body, snapshot = 'body',
       surface.append(layer)
       void ready.then(({ default: liquidGL }) => {
         if (disposed || bindings.get(surface) !== binding) return
-        const compact = surface.dataset.liquidSurface === 'control' || surface.dataset.liquidSurface === 'selection'
+        const compact = !!sidebarHost || surface.dataset.liquidSurface === 'control' || surface.dataset.liquidSurface === 'selection'
         const result = liquidGL({
           target: `#${lensTarget.id}`,
-          snapshot: surface.dataset.liquidSnapshot || snapshot,
+          snapshot: sidebarHost?.dataset.liquidSnapshot || surface.dataset.liquidSnapshot || snapshot,
           content: false, engine: 'auto', resolution: Math.min(window.devicePixelRatio, 1.5),
-          zIndex: 0, refraction: 0, bevelDepth: compact ? 0.002 : 0.006,
+          zIndex: 0, refraction: 0, bevelDepth: compact && !sidebarHost ? 0.002 : 0.006,
           bevelWidth: compact ? 0.16 : 0.08, aberration: 0, magnify: 1, frost: 0,
-          tint: dark ? 'rgba(100, 88, 116, 0.2)' : null,
+          tint: dark && !sidebarHost ? 'rgba(100, 88, 116, 0.2)' : null,
           shadow: false, specular: !compact && !reducedMotion, reveal: 'none', tilt: false,
           on: { init: () => { if (!disposed && bindings.get(surface) === binding) surface.dataset.materialStatus = 'ready' } },
         })
         binding.lenses = Array.isArray(result) ? result : result ? [result] : []
-        for (const canvas of new Set(binding.lenses.flatMap(lens => lens.renderer ? [lens.renderer.canvas] : []))) {
-          const rim = createGlassRim(canvas)
-          rim.track(lensTarget, compact ? 2 : 5)
-          binding.rims.push(rim)
+        binding.canvases = [...new Set(binding.lenses.flatMap(lens => lens.renderer ? [lens.renderer.canvas] : []))]
+        for (const canvas of binding.canvases) {
+          let rim = rims.get(canvas)
+          if (!rim) {
+            rim = { mask: createGlassRim(canvas), targets: 0 }
+            rims.set(canvas, rim)
+          }
+          rim.targets++
+          rim.mask.track(lensTarget, compact ? 2 : 5, sidebarHost ? surface.closest<HTMLElement>('.session-rail-list') ?? undefined : undefined)
         }
       }).catch((error: unknown) => {
         if (disposed || bindings.get(surface) !== binding) return
@@ -120,7 +148,14 @@ export function installLiquidSurfaces({ root = document.body, snapshot = 'body',
     if (changed) refresh()
   })
   observer.observe(root, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['class', 'style', 'hidden', 'data-liquid-surface'] })
-  root.addEventListener('scroll', refresh, true)
+  const onScroll = (event: Event) => {
+    if (event.target instanceof Element && event.target.matches('.session-rail-list')) {
+      for (const { mask } of rims.values()) mask.update()
+      return
+    }
+    refresh()
+  }
+  root.addEventListener('scroll', onScroll, true)
   root.addEventListener('load', refresh, true)
   window.addEventListener('resize', schedule)
   sync()
@@ -128,7 +163,7 @@ export function installLiquidSurfaces({ root = document.body, snapshot = 'body',
     disposed = true
     observer.disconnect()
     clearTimeout(refreshTimer)
-    root.removeEventListener('scroll', refresh, true)
+    root.removeEventListener('scroll', onScroll, true)
     root.removeEventListener('load', refresh, true)
     window.removeEventListener('resize', schedule)
     for (const [surface, binding] of bindings) release(surface, binding)

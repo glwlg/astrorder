@@ -103,7 +103,8 @@ export interface Message {
   turn_id?: string | null;
   tool: Record<string, unknown> | null;
   delivery?: string | null;
-  questions?: { title: string; options?: string[] | null }[] | null;
+  answered?: boolean;
+  questions?: { title: string; options?: string[] | null; multi_select?: boolean }[] | null;
 }
 
 export interface Command {
@@ -259,6 +260,9 @@ export interface SshConnectionSettings {
   ssh_config_alias: string | null;
   identity_file: string | null;
   hermes_path: string | null;
+  codex_executable?: string | null;
+  grok_executable?: string | null;
+  antigravity_executable?: string | null;
   workspace: string | null;
 }
 

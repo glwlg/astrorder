@@ -37,7 +37,10 @@ func (h *Handler) handleForkSession(w http.ResponseWriter, r *http.Request, sid 
 		return
 	}
 	kind := stringValue(agent, "kind")
-	if kind != "hermes" && kind != "codex" && kind != "antigravity" {
+	if kind == "antigravity-ssh" {
+		kind = "antigravity"
+	}
+	if kind != "hermes" && kind != "codex" {
 		writeJSONError(w, 422, "This Agent does not support native session forks")
 		return
 	}

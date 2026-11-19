@@ -8,6 +8,7 @@ package capabilities
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"sort"
@@ -18,7 +19,7 @@ import (
 
 const redactedValue = "[REDACTED]"
 
-var agents = []string{"codex", "hermes", "grok"}
+var agents = []string{"codex", "hermes", "grok", "antigravity"}
 
 var (
 	mcpNameRE    = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}$`)
@@ -202,11 +203,29 @@ func parseYAMLMap(data []byte) (map[string]any, error) {
 	return out, nil
 }
 
-func parseConfig(agent string, data []byte) (map[string]any, error) {
-	if agent == "hermes" {
-		return parseYAMLMap(data)
+func parseJSONMap(data []byte) (map[string]any, error) {
+	out := map[string]any{}
+	if len(bytes.TrimSpace(data)) == 0 {
+		return out, nil
 	}
-	return parseTOML(data)
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil, fmt.Errorf("invalid JSON: %w", err)
+	}
+	if out == nil {
+		out = map[string]any{}
+	}
+	return out, nil
+}
+
+func parseConfig(agent string, data []byte) (map[string]any, error) {
+	switch agent {
+	case "hermes":
+		return parseYAMLMap(data)
+	case "antigravity":
+		return parseJSONMap(data)
+	default:
+		return parseTOML(data)
+	}
 }
 
 func cleanOutput(stdout, stderr string) string {

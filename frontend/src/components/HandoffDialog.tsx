@@ -29,14 +29,25 @@ export function HandoffDialog({
   const [models, setModels] = useState<ModelChoice[]>([])
   const [modelKey, setModelKey] = useState('')
   const [effort, setEffort] = useState('')
-  const [loadingModels, setLoadingModels] = useState(Boolean(initialAgentId))
-  const [modelError, setModelError] = useState('')
+  const selectedTarget = targets.find((agent) => agent.id === agentId)
+  const isAntigravityTarget = selectedTarget?.kind === 'antigravity' || selectedTarget?.kind === 'antigravity-ssh'
+  const canProbeWithoutSession = isAntigravityTarget || selectedTarget?.kind === 'codex'
   const probe = sessions.find((session) => session.agent_id === agentId)
+  const modelSessionId = probe?.id ?? (canProbeWithoutSession ? '__probe__' : '')
+  const initialHasModelSource = Boolean(
+    initialAgentId &&
+      (sessions.some((session) => session.agent_id === initialAgentId) ||
+        targets[0]?.kind === 'antigravity' ||
+        targets[0]?.kind === 'antigravity-ssh' ||
+        targets[0]?.kind === 'codex'),
+  )
+  const [loadingModels, setLoadingModels] = useState(initialHasModelSource)
+  const [modelError, setModelError] = useState('')
 
   useEffect(() => {
-    if (!agentId || !probe) return
+    if (!agentId || !modelSessionId) return
     let active = true
-    void api.getSessionModels(probe.id, agentId)
+    void api.getSessionModels(modelSessionId, agentId)
       .then(({ items }) => {
         if (active) setModels(items)
       })
@@ -47,21 +58,24 @@ export function HandoffDialog({
         if (active) setLoadingModels(false)
       })
     return () => { active = false }
-  }, [agentId, probe])
+  }, [agentId, modelSessionId])
 
   const changeAgent = (value: string) => {
     if (value === agentId) return
+    const nextTarget = targets.find((agent) => agent.id === value)
+    const nextCanProbe = nextTarget?.kind === 'antigravity' || nextTarget?.kind === 'antigravity-ssh' || nextTarget?.kind === 'codex'
     setAgentId(value)
     setModels([])
     setModelKey('')
+    setEffort('')
     setModelError('')
-    setLoadingModels(Boolean(value && sessions.some((session) => session.agent_id === value)))
+    setLoadingModels(Boolean(value && (sessions.some((session) => session.agent_id === value) || nextCanProbe)))
   }
 
   const submit = () => {
     const target = targets.find((agent) => agent.id === agentId)
     const model = models.find((item) => JSON.stringify([item.provider, item.model]) === modelKey)
-    if (!target || !model || !effort) return
+    if (!target || !model || (!isAntigravityTarget && !effort)) return
     onClose()
     const operationId = crypto.randomUUID()
     const taskId = useBackgroundTasks.getState().add({
@@ -72,7 +86,7 @@ export function HandoffDialog({
     void api.handoffSession(source.id, source.agent_id, target.id, operationId, {
         provider: model.provider,
         model: model.model,
-        effort,
+        effort: isAntigravityTarget ? '' : effort,
       })
       .then((created) => {
         onTransferred(created, target)
@@ -104,16 +118,18 @@ export function HandoffDialog({
         data={[{ value: '', label: loadingModels ? '正在读取模型…' : '请选择模型' }, ...models.map((item) => ({ value: JSON.stringify([item.provider, item.model]), label: item.label }))]}
         disabled={!agentId || loadingModels}
       />
-      {(modelError || (agentId && !probe)) && <Text size="sm" c="red">{modelError || '目标 Agent 尚无会话，无法读取可用模型。'}</Text>}
-      <NativeSelect
-        label="思考程度"
-        value={effort}
-        onChange={(event) => setEffort(event.currentTarget.value)}
-        data={[{ value: '', label: '请选择思考程度' }, ...REASONING_EFFORTS]}
-      />
+      {(modelError || (agentId && !modelSessionId)) && <Text size="sm" c="red">{modelError || '目标 Agent 尚无会话，无法读取可用模型。'}</Text>}
+      {!isAntigravityTarget && (
+        <NativeSelect
+          label="思考程度"
+          value={effort}
+          onChange={(event) => setEffort(event.currentTarget.value)}
+          data={[{ value: '', label: '请选择思考程度' }, ...REASONING_EFFORTS]}
+        />
+      )}
       <Group justify="flex-end">
         <Button variant="default" onClick={onClose}>取消</Button>
-        <Button onClick={submit} disabled={!agentId || !modelKey || !effort}>转交</Button>
+        <Button onClick={submit} disabled={!agentId || !modelKey || (!isAntigravityTarget && !effort)}>转交</Button>
       </Group>
     </Stack>
   </Modal>

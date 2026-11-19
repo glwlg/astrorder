@@ -41,8 +41,11 @@ var nativeQuerySpecs = map[protoreflect.Name]nativeQuerySpec{
 	"hermes_session_history":   {family: "hermes", method: "session.history", fields: map[protoreflect.Name]string{"session_id": "session_id", "before": "before", "limit": "limit"}, required: map[protoreflect.Name]bool{"session_id": true}},
 	"hermes_models_list":       {family: "hermes", method: "models.list"},
 	"hermes_commands_list":     {family: "hermes", method: "commands.list"},
-	"antigravity_session_list": {family: "antigravity", method: "session.list"},
-	"antigravity_models_list":  {family: "antigravity", method: "models.list"},
+	"antigravity_session_list":  {family: "antigravity", method: "session.list"},
+	"antigravity_models_list":   {family: "antigravity", method: "models.list"},
+	"antigravity_quota_read":    {family: "antigravity", method: "quota.read"},
+	"antigravity_session_usage": {family: "antigravity", method: "session.usage", fields: map[protoreflect.Name]string{"conversation_id": "conversation_id", "readonly": "readonly"}, required: map[protoreflect.Name]bool{"conversation_id": true}},
+	"antigravity_usage_summary": {family: "antigravity", method: "usage.summary", fields: map[protoreflect.Name]string{"since_ms": "since_ms", "until_ms": "until_ms"}},
 	"grok_initialize":          {family: "grok", method: "initialize"},
 	"grok_session_list":        {family: "grok", method: "session/list", fields: map[protoreflect.Name]string{"cwd": "cwd", "cursor": "cursor"}},
 }
@@ -77,6 +80,8 @@ func translateNativeQuery(request *sessiondv1.NativeQueryRequest) (core.Request,
 		kind, family = "hermes", "hermes"
 	case sessiondv1.RuntimeKind_RUNTIME_KIND_ANTIGRAVITY:
 		kind, family = "antigravity", "antigravity"
+	case sessiondv1.RuntimeKind_RUNTIME_KIND_ANTIGRAVITY_SSH:
+		kind, family = "antigravity-ssh", "antigravity"
 	case sessiondv1.RuntimeKind_RUNTIME_KIND_GROK:
 		kind, family = "grok", "grok"
 	case sessiondv1.RuntimeKind_RUNTIME_KIND_CODEX_SSH:

@@ -4,6 +4,8 @@ import (
 	core "astrorder.dev/session-daemon/internal/runtime"
 	"context"
 	"database/sql"
+	"encoding/base64"
+	"encoding/json"
 	"google.golang.org/protobuf/encoding/protowire"
 	"os"
 	"path/filepath"
@@ -124,4 +126,72 @@ func TestNativeReadOnlyAcceptance(t *testing.T) {
 		total += len(seen)
 	}
 	t.Logf("read-only native acceptance: models=%d sessions=%d history_items=%d; no prompts sent", len(models), len(sessions), total)
+}
+
+func TestNativeHistoryUserMediaEnrichmentAndScopeConfinement(t *testing.T) {
+	base := t.TempDir()
+	convDir := filepath.Join(base, "conversations")
+	id := "5f4b0925-6116-40d0-a2ab-8e2fc6e6a4fc"
+	uploadDir := filepath.Join(base, "brain", id, ".user_uploaded")
+	logsDir := filepath.Join(base, "brain", id, ".system_generated", "logs")
+	if err := os.MkdirAll(convDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(uploadDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(logsDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	pngBytes, _ := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/ZfoAAAAASUVORK5CYII=")
+	validImg := filepath.Join(uploadDir, "uploaded_media_1.png")
+	outsideImg := filepath.Join(base, "outside_secret.png")
+	if err := os.WriteFile(validImg, pngBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(outsideImg, pngBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	line1, _ := json.Marshal(map[string]any{
+		"step_index": 1,
+		"source":     "USER_EXPLICIT",
+		"type":       "USER_INPUT",
+		"media": []map[string]any{
+			{"mime_type": "image/png", "uri": validImg},
+			{"mime_type": "image/png", "uri": outsideImg},
+		},
+	})
+	if err := os.WriteFile(filepath.Join(logsDir, "transcript.jsonl"), append(line1, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := sql.Open("sqlite", filepath.Join(convDir, id+".db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`CREATE TABLE steps(idx INTEGER PRIMARY KEY,step_type INTEGER,status INTEGER,step_format INTEGER,step_payload BLOB,metadata BLOB)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO steps VALUES(1,14,3,0,?,NULL)`, nativeText(14, "看这张图")); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+
+	items, _, err := readHistory(context.Background(), convDir, id, "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(items))
+	}
+	atts, ok := items[0]["attachments"].([]any)
+	if !ok || len(atts) != 1 {
+		t.Fatalf("expected 1 confined attachment (outside path rejected), got %+v", items[0]["attachments"])
+	}
+	att := atts[0].(map[string]any)
+	if att["name"] != "uploaded_media_1.png" || att["media_type"] != "image/png" || att["url"] != "data:image/png;base64,"+base64.StdEncoding.EncodeToString(pngBytes) {
+		t.Fatalf("unexpected attachment payload: %+v", att)
+	}
 }

@@ -25,7 +25,11 @@ func (h *Handler) RecoverDisconnectedSessions(ctx context.Context, connectionID,
 	}
 	var failures []error
 	for _, agent := range agents {
-		if normalizeConnectionID(stringValue(agent, "connection_id")) != normalizeConnectionID(connectionID) || stringValue(agent, "kind") != kind {
+		agentKind := stringValue(agent, "kind")
+		if agentKind == "antigravity-ssh" {
+			agentKind = "antigravity"
+		}
+		if normalizeConnectionID(stringValue(agent, "connection_id")) != normalizeConnectionID(connectionID) || agentKind != kind {
 			continue
 		}
 		if err := h.requireAgentConnection(ctx, agent); err != nil {

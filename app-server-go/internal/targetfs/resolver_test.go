@@ -80,3 +80,41 @@ func (s resolverStore) FindSessionByID(context.Context, string) (map[string]any,
 func (s resolverStore) GetSSHConnection(context.Context, string) (map[string]any, error) {
 	return s.connection, nil
 }
+
+func TestSSHResolverAllowsRemoteAntigravityBrainRootOutsideProjectWorkspace(t *testing.T) {
+	store := resolverStore{
+		connection: map[string]any{
+			"id": "wsl-main",
+			"settings": map[string]any{
+				"host":      "127.0.0.1",
+				"user":      "luwei",
+				"workspace": "/home/luwei/workspace/demo",
+			},
+		},
+	}
+	resolver := NewResolver(ResolverOptions{
+		Store:      store,
+		HelperPath: "/opt/astrorder/targetfs-helper",
+	})
+	resolved, err := resolver.Resolve(context.Background(), ResolveRequest{
+		ConnectionID: "wsl-main",
+		Workspace:    "/home/luwei/.gemini/antigravity-cli/brain/52794208-5f2e-4120-a6b1-99e5ee29c7f1",
+	})
+	if err != nil || resolved.Kind != "ssh" {
+		t.Fatalf("resolve ssh brain workspace: resolved=%+v err=%v", resolved, err)
+	}
+	rfs, ok := resolved.FileSystem.(*remoteFileSystem)
+	if !ok {
+		t.Fatalf("expected *remoteFileSystem, got %T", resolved.FileSystem)
+	}
+	foundGemini := false
+	for _, root := range rfs.allowedRoots {
+		if root == "/home/luwei/.gemini" {
+			foundGemini = true
+			break
+		}
+	}
+	if !foundGemini {
+		t.Fatalf("expected /home/luwei/.gemini in allowedRoots, got %v", rfs.allowedRoots)
+	}
+}

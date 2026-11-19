@@ -141,3 +141,53 @@ func TestGrokAttachmentValidationAndDelivery(t *testing.T) {
 		t.Fatal("expected error rejecting binary attachment for grok, got nil")
 	}
 }
+
+func TestAntigravityStagesImageAndFileAttachmentsToTargetWorkspace(t *testing.T) {
+	h, st, _, cleanup := setupTestServer(t, &mockDaemonServer{})
+	defer cleanup()
+	ctx := context.Background()
+	h.attachmentsDir = t.TempDir()
+	work := t.TempDir()
+	h.resolver = targetfs.NewResolver(targetfs.ResolverOptions{Store: st, DefaultWorkspace: work, AllowedRoots: []string{work}})
+
+	if _, err := st.UpsertAgent(ctx, map[string]any{"id": "agy-agent", "kind": "antigravity", "name": "Antigravity", "status": "ready"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(h.attachmentsDir, "shot.blob"), []byte("png-payload"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(h.attachmentsDir, "spec.blob"), []byte("spec-payload"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddAttachment(ctx, map[string]any{"id": "att-shot", "name": "shot.png", "media_type": "image/png", "storage_name": "shot.blob", "size": 11}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddAttachment(ctx, map[string]any{"id": "att-spec", "name": "spec.md", "media_type": "text/markdown", "storage_name": "spec.blob", "size": 12}); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := map[string]any{
+		"id":          "cmd-agy",
+		"agent_id":    "agy-agent",
+		"text":        "inspect screenshot and spec",
+		"attachments": []any{map[string]any{"id": "att-shot"}, map[string]any{"id": "att-spec"}},
+	}
+	parts, err := h.commandInputs(ctx, cmd, map[string]any{"workspace": work})
+	if err != nil {
+		t.Fatalf("antigravity attachment preparation failed: %v", err)
+	}
+	if len(parts) != 2 || parts[0].GetText() == nil || parts[1].GetImageUrl() == nil {
+		t.Fatalf("antigravity ACP must send text + native base64 ImageUrl InputPart, got: %+v", parts)
+	}
+	if !strings.HasPrefix(parts[1].GetImageUrl().GetUrl(), "data:image/png;base64,") {
+		t.Fatalf("expected base64 PNG data URI, got %q", parts[1].GetImageUrl().GetUrl())
+	}
+	text := parts[0].GetText().Text
+	if !strings.Contains(text, "spec.md") || !strings.Contains(text, ".astrorder/attachments/") {
+		t.Fatalf("staged non-image file path missing from prompt text: %q", text)
+	}
+	matches, err := filepath.Glob(filepath.Join(work, ".astrorder", "attachments", "*", "spec.md"))
+	if err != nil || len(matches) != 1 {
+		t.Fatalf("expected staged file spec.md, got %v (err=%v)", matches, err)
+	}
+}

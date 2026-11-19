@@ -1,4 +1,4 @@
-import { IconBrain, IconMicrophone, IconPaperclip, IconPlus, IconPlayerStop, IconArrowUp, IconX } from '@tabler/icons-react'
+import { IconBrain, IconMicrophone, IconPaperclip, IconPlus, IconPlayerStop, IconX } from '@tabler/icons-react'
 import { Badge, Button, Group, Paper, Stack, Text, Textarea } from '@mantine/core'
 import { InlineNotice } from '../../components/InlineNotice'
 import { ComposerGlassSurface, GlassButtonLens } from '../../components/GlassPanel'
@@ -250,7 +250,7 @@ export function ChatComposer({
 
   const canChat = hasCapability(agent, 'chat')
   const canAttach = hasCapability(agent, 'attachments')
-  const supportsImages = agent?.kind !== 'grok' && agent?.kind !== 'antigravity'
+  const supportsImages = agent?.kind !== 'grok'
   const nativeBusy = session.status === 'running' || session.status === 'waiting_approval'
   const busy = submitting || nativeBusy
   const pending = queue.filter(row => row.payload.agent_id === session.agent_id && row.payload.session_id === session.id && !['accepted', 'running', 'completed'].includes(row.state))
@@ -300,7 +300,7 @@ export function ChatComposer({
     }
   }, [agent?.status, nativeBusy, outbox, outboxReady, pending, session.agent_id, session.id])
 
-  const setText = (text: string) => updateDraft({ ...draft, text })
+  const setText = (text: string) => updateDraft(current => ({ ...current, text }))
   const addSessionRef = (ref: SessionRef) => {
     const selfKey = scopeKey(session.agent_id, session.id)
     if (ref.key === selfKey || (ref.agent_id === session.agent_id && ref.id === session.id)) return
@@ -803,7 +803,8 @@ ${draft.text}` : entry.payload.text)
                     onClick={() => {
                       const rec = parsed.recommendedModel
                       if (!rec) return
-                      void api.setSessionModel(session.id, session.agent_id, rec.provider, rec.model)
+                      const provider = agent?.kind === 'antigravity' ? 'antigravity' : rec.provider
+                      void api.setSessionModel(session.id, session.agent_id, provider, rec.model)
                         .then(() => setError(null))
                         .catch((e) => setError(errorMessage(e)))
                     }}
@@ -933,9 +934,8 @@ ${draft.text}` : entry.payload.text)
                 aria-label={isStopAction ? '停止' : nativeBusy ? '加入队列' : '发送'}
                 aria-busy={submitting}
               >
-                <GlassButtonLens />
                 <span>{isStopAction ? '停止' : nativeBusy ? '排队' : '发送'}</span>
-                {isStopAction ? <IconPlayerStop size={18} /> : <IconArrowUp size={18} />}
+                {isStopAction && <IconPlayerStop size={18} />}
               </Button>
           </div>
         </Group>

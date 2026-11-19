@@ -3,9 +3,6 @@ package antigravity
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -13,64 +10,57 @@ import (
 	core "astrorder.dev/session-daemon/internal/runtime"
 )
 
-func TestDeleteRequiresNativeRemovalAndIdleOwner(t *testing.T) {
+func TestDeleteRequiresIdleOwnerAndRemovesConversation(t *testing.T) {
 	home := t.TempDir()
 	a := New(Config{Home: home})
 	id := "11111111-1111-4111-8111-111111111111"
-	os.MkdirAll(a.historyDir(), 0700)
+	if err := os.MkdirAll(a.historyDir(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	convFile := filepath.Join(a.historyDir(), id+".db")
+	if err := os.WriteFile(convFile, []byte("sqlite-placeholder"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
 	db, err := sql.Open("sqlite", filepath.Join(home, ".gemini", "antigravity-cli", "conversation_summaries.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	if _, err = db.Exec("CREATE TABLE conversation_summaries(conversation_id TEXT); INSERT INTO conversation_summaries VALUES(?)", id); err != nil {
+	if _, err = db.Exec("CREATE TABLE conversation_summaries(conversation_id TEXT PRIMARY KEY, not_fully_idle INTEGER DEFAULT 0, killed INTEGER DEFAULT 0); INSERT INTO conversation_summaries VALUES(?, 0, 0)", id); err != nil {
 		t.Fatal(err)
 	}
-	calls := 0
-	remove := false
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls++
-		if r.URL.Path != "/exa.language_server_pb.LanguageServerService/DeleteCascadeTrajectory" {
-			t.Errorf("wrong method: %s", r.URL.Path)
-		}
-		var body map[string]any
-		json.NewDecoder(r.Body).Decode(&body)
-		if body["cascadeId"] != id {
-			t.Error("wrong native identity")
-		}
-		if remove {
-			if _, err := db.Exec("DELETE FROM conversation_summaries WHERE conversation_id=?", id); err != nil {
-				t.Error(err)
-			}
-		}
-		json.NewEncoder(w).Encode(map[string]any{})
-	}))
-	defer srv.Close()
-	s := &session{id: id, status: "running", nativeURL: srv.URL}
+
+	s := newSession(id, home, nil)
+	s.status = "running"
+	s.promptRunning = true
 	a.sessions[id] = s
+
 	req := core.Request{SessionID: id, Action: "session.delete"}
-	if _, err := a.Command(context.Background(), req); err == nil || calls != 0 {
-		t.Fatal("active deletion dispatched")
+	if _, err := a.Command(context.Background(), req); err == nil {
+		t.Fatal("active deletion accepted")
 	}
+
 	s.status = "idle"
-	if _, err := a.Command(context.Background(), req); err == nil || calls != 1 {
-		t.Fatal("HTTP success falsely confirmed deletion")
+	s.promptRunning = false
+	result, err := a.Command(context.Background(), req)
+	if err != nil || result.Payload["deleted"] != id || a.sessions[id] != nil {
+		t.Fatalf("delete: %+v %v", result, err)
 	}
-	if a.sessions[id] == nil {
-		t.Fatal("unconfirmed owner removed")
+	if _, err := os.Stat(convFile); !os.IsNotExist(err) {
+		t.Fatal("conversation .db file was not removed")
 	}
-	if _, err := a.Command(context.Background(), req); err == nil || calls != 1 {
-		t.Fatal("unconfirmed deletion was redispatched")
-	}
-	if _, err := a.Command(context.Background(), core.Request{SessionID: id, Action: "session.send", Fields: map[string]any{"text": "must stay blocked"}}); err == nil {
-		t.Fatal("unconfirmed deletion unlocked sends")
-	}
-	remove = true
-	if _, err := db.Exec("DELETE FROM conversation_summaries WHERE conversation_id=?", id); err != nil {
+
+	// Verify a conversation settled in "error" (no active turn) can also be deleted.
+	id2 := "22222222-2222-4222-8222-222222222222"
+	if _, err := db.Exec("INSERT INTO conversation_summaries VALUES(?, 0, 0)", id2); err != nil {
 		t.Fatal(err)
 	}
-	result, err := a.Command(context.Background(), req)
-	if err != nil || result.Payload["deleted"] != id || a.sessions[id] != nil || calls != 1 {
-		t.Fatalf("delete: %+v %v", result, err)
+	s2 := newSession(id2, home, nil)
+	s2.status = "error"
+	a.sessions[id2] = s2
+	res2, err := a.Command(context.Background(), core.Request{SessionID: id2, Action: "session.delete"})
+	if err != nil || res2.Payload["deleted"] != id2 || a.sessions[id2] != nil {
+		t.Fatalf("settled error delete failed: %+v %v", res2, err)
 	}
 }

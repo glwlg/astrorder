@@ -204,6 +204,9 @@ func (c Config) Register(d *protocol.Daemon) error {
 	grokSSH := core.NewMultiplexRegistry(remote.NewRemoteGrokFactory(d.Emit))
 	d.RegisterRuntime("grok-ssh", grokSSH)
 
+	antigravitySSH := core.NewMultiplexRegistry(remote.NewRemoteAntigravityFactory(d.Emit, helperAssets))
+	d.RegisterRuntime("antigravity-ssh", antigravitySSH)
+
 	sshHermes := core.NewMultiplexRegistry(remote.NewRemoteHermesFactory(d.Emit))
 	d.RegisterRuntime("ssh", sshHermes)
 

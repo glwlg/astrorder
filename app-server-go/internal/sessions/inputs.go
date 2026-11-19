@@ -91,7 +91,7 @@ func CommandInputs(ctx context.Context, options Options, command, session map[st
 		if total > limit {
 			return nil, commandFailure(413, "Total attachment size exceeds limit")
 		}
-		if kind != "codex" && kind != "codex-ssh" {
+		if kind != "codex" && kind != "codex-ssh" && kind != "antigravity" && kind != "antigravity-ssh" {
 			if kind == "grok" {
 				if strings.HasPrefix(media, "image/") {
 					return nil, commandFailure(422, "Image attachments are not supported by Grok")
@@ -104,10 +104,12 @@ func CommandInputs(ctx context.Context, options Options, command, session map[st
 			input = append(input, &pb.InputPart{Part: &pb.InputPart_Attachment{Attachment: &pb.AttachmentInput{Name: name, MediaType: media, Content: data, SourceId: &id}}})
 			continue
 		}
-		switch media {
-		case "image/png", "image/jpeg", "image/gif", "image/webp":
-			input = append(input, &pb.InputPart{Part: &pb.InputPart_ImageUrl{ImageUrl: &pb.ImageUrlInput{Url: "data:" + media + ";base64," + base64.StdEncoding.EncodeToString(data)}}})
-			continue
+		if kind == "codex" || kind == "codex-ssh" || kind == "antigravity" || kind == "antigravity-ssh" {
+			switch media {
+			case "image/png", "image/jpeg", "image/gif", "image/webp":
+				input = append(input, &pb.InputPart{Part: &pb.InputPart_ImageUrl{ImageUrl: &pb.ImageUrlInput{Url: "data:" + media + ";base64," + base64.StdEncoding.EncodeToString(data)}}})
+				continue
+			}
 		}
 		if h.resolver == nil {
 			return nil, commandFailure(503, "Attachment target filesystem unavailable")

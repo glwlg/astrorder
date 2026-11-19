@@ -67,7 +67,23 @@ func (m *MultiplexRegistry) getOrChild(request Request) (string, Adapter, error)
 	}
 
 	if child, exists := m.children[connID]; exists {
-		return connID, child.adapter, nil
+		if child.canonical == canonical {
+			return connID, child.adapter, nil
+		}
+		hasOwned := false
+		for _, cid := range m.sessions {
+			if cid == connID {
+				hasOwned = true
+				break
+			}
+		}
+		if hasOwned {
+			return connID, child.adapter, nil
+		}
+		if closer, ok := child.adapter.(interface{ Close() error }); ok {
+			_ = closer.Close()
+		}
+		delete(m.children, connID)
 	}
 
 	adapter, err := m.factory(connID, rawSettings)
@@ -214,7 +230,11 @@ func (m *MultiplexRegistry) DisconnectConnection(ctx context.Context, connection
 	m.mu.Unlock()
 
 	// 先尝试平滑关闭底层 adapter；若底层关闭失败，不能静默解绑和注销，必须暴露错误并保留状态
-	if closer, ok := child.adapter.(interface{ Close() error }); ok {
+	if disc, ok := child.adapter.(RuntimeDisconnector); ok {
+		if _, err := disc.Shutdown(ctx); err != nil {
+			return nil, fmt.Errorf("failed to disconnect connection adapter: %w", err)
+		}
+	} else if closer, ok := child.adapter.(interface{ Close() error }); ok {
 		if err := closer.Close(); err != nil {
 			return nil, fmt.Errorf("failed to close connection adapter: %w", err)
 		}

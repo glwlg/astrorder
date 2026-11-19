@@ -5,6 +5,8 @@ import (
 	"net/http"
 
 	sessiondv1 "astrorder.dev/contracts/gen/go/astrorder/sessiond/v1"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 func (h *Handler) settingsRef(ctx context.Context, w http.ResponseWriter, r *http.Request, sessionID string) (*sessiondv1.SessionRef, string, map[string]any, bool) {
@@ -19,6 +21,15 @@ func (h *Handler) settingsRef(ctx context.Context, w http.ResponseWriter, r *htt
 		return nil, "", nil, false
 	}
 	if session == nil {
+		if r.Method == http.MethodGet && sessionID == "__probe__" && h.client != nil && h.client.Runtime != nil && h.client.Session != nil {
+			agent, aErr := h.store.GetAgent(ctx, agentID)
+			if aErr == nil && agent != nil {
+				probeRow := map[string]any{"id": "__probe__", "agent_id": agentID, "connection_id": stringValue(agent, "connection_id")}
+				if controlRef, handled := h.unboundSettings(ctx, w, r, probeRow, status.Error(codes.NotFound, "probe")); handled {
+					return controlRef, agentID, probeRow, controlRef != nil
+				}
+			}
+		}
 		writeJSONError(w, http.StatusNotFound, "Session was not found")
 		return nil, "", nil, false
 	}
@@ -93,7 +104,7 @@ func (h *Handler) handleSessionModels(w http.ResponseWriter, r *http.Request, se
 
 func (h *Handler) handleGetSessionModel(w http.ResponseWriter, r *http.Request, sessionID string) {
 	ctx := r.Context()
-	ref, agentID, _, ok := h.settingsRef(ctx, w, r, sessionID)
+	ref, agentID, sessRow, ok := h.settingsRef(ctx, w, r, sessionID)
 	if !ok {
 		return
 	}
@@ -123,19 +134,43 @@ func (h *Handler) handleGetSessionModel(w http.ResponseWriter, r *http.Request, 
 		writeJSONError(w, 500, "Agent storage unavailable")
 		return
 	}
-	if stringValue(agent, "kind") == "antigravity" {
+	if agentKind := stringValue(agent, "kind"); agentKind == "antigravity" || agentKind == "antigravity-ssh" {
 		var native map[string]any
 		if resp.Native != nil {
 			_ = parseNativeJSON(resp.Native, &native)
 		}
 		result["model_read_only"] = native["model_switch_supported"] != true
-		result["reasoning_read_only"] = true
+		result["reasoning_read_only"] = native["reasoning_switch_supported"] != true
+		if se, ok := native["supported_efforts"]; ok {
+			result["supported_efforts"] = se
+		}
 		if native["read_only"] == true {
 			result["read_only"] = true
 			result["detail"] = native["detail"]
 		}
 		if result["model_read_only"] == true && result["read_only"] != true {
 			result["detail"] = "当前小内核尚不支持 Antigravity 模型切换，请更新小内核。"
+		}
+		if stringValue(result, "provider") == "" {
+			result["provider"] = "antigravity"
+		}
+		if curModel := stringValue(result, "model"); isAntigravityInternalWorkerModel(curModel) {
+			if saved != nil && stringValue(saved, "model") != "" && !isAntigravityInternalWorkerModel(stringValue(saved, "model")) {
+				result["model"] = stringValue(saved, "model")
+			} else {
+				result["model"] = "gemini-pro-orchestrator"
+			}
+		}
+		if stringValue(result, "model") == "" {
+			if saved != nil {
+				if m := stringValue(saved, "model"); m != "" {
+					result["model"] = m
+				}
+			}
+			if stringValue(result, "model") == "" {
+				target, _ := h.resolveRuntimeTarget(ctx, agent)
+				h.backfillAntigravityModel(ctx, target, agentID, sessRow, result["read_only"] == true, result)
+			}
 		}
 	}
 	if saved != nil {
@@ -198,7 +233,7 @@ func (h *Handler) handleSessionAgentCommands(w http.ResponseWriter, r *http.Requ
 		}
 		items = append(items, item)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "supported": true})
 }
 
 func (h *Handler) handleSessionAgentMentions(w http.ResponseWriter, r *http.Request, sessionID string) {
@@ -304,7 +339,7 @@ func (h *Handler) handleSetSessionModel(w http.ResponseWriter, r *http.Request, 
 	connID, _ := session["connection_id"].(string)
 	ref := buildSessionRef(payload.AgentID, sessionID, connID)
 	meta := newCommandMeta("", "")
-	if err := h.ensureNativeBinding(ctx, session); err != nil {
+	if err := h.ensureNativeBindingLazy(ctx, session, map[string]any{"model": payload.Model}); err != nil {
 		writeJSONError(w, http.StatusBadGateway, "Native session binding unavailable: "+err.Error())
 		return
 	}
@@ -435,7 +470,7 @@ func (h *Handler) handleSetSessionReasoning(w http.ResponseWriter, r *http.Reque
 
 func (h *Handler) handleGetSessionApprovalMode(w http.ResponseWriter, r *http.Request, sessionID string) {
 	ctx := r.Context()
-	ref, _, _, ok := h.settingsRef(ctx, w, r, sessionID)
+	ref, _, session, ok := h.settingsRef(ctx, w, r, sessionID)
 	if !ok {
 		return
 	}
@@ -443,6 +478,9 @@ func (h *Handler) handleGetSessionApprovalMode(w http.ResponseWriter, r *http.Re
 		Session: ref,
 	})
 	if err != nil {
+		if _, handled := h.unboundSettings(ctx, w, r, session, err); handled {
+			return
+		}
 		writeJSONError(w, http.StatusBadGateway, "Failed to read approval mode: "+err.Error())
 		return
 	}
@@ -483,7 +521,16 @@ func (h *Handler) handleSetSessionApprovalMode(w http.ResponseWriter, r *http.Re
 	meta := newCommandMeta("", "")
 	// An explicit new choice supersedes the saved choice; do not briefly
 	// restore the previous access mode before applying it.
-	if err := h.bindNativeSession(ctx, session); err != nil {
+	attachPerm := map[string]any{"lazy_open": true}
+	switch payload.Mode {
+	case "full_access":
+		attachPerm["permission_mode"] = "always-proceed"
+	case "auto":
+		attachPerm["permission_mode"] = "auto"
+	case "manual":
+		attachPerm["permission_mode"] = "request-review"
+	}
+	if err := h.bindNativeSessionWithOptions(ctx, session, attachPerm); err != nil {
 		writeJSONError(w, http.StatusBadGateway, "Native session binding unavailable: "+err.Error())
 		return
 	}

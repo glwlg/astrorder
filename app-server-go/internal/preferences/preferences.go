@@ -31,8 +31,26 @@ type State struct {
 	ProjectOrder   any            `json:"project_order"`
 }
 
-var colors = set("", "red", "orange", "amber", "yellow", "lime", "green", "emerald", "teal", "cyan", "sky", "blue", "indigo", "violet", "purple", "fuchsia", "pink", "rose", "slate")
-var icons = set("folder", "rocket", "tools", "database", "cloud", "code", "package", "book", "bug", "flame", "zap", "star", "heart", "globe", "server", "terminal", "lightbulb", "shield", "target", "gear", "coffee")
+var colors = set(
+	"", "red", "orange", "amber", "yellow", "lime", "green", "emerald", "teal", "cyan",
+	"sky", "blue", "indigo", "violet", "purple", "fuchsia", "pink", "rose", "slate",
+	"coral", "salmon", "terracotta", "mint", "turquoise", "ocean", "periwinkle",
+	"lavender", "grape", "berry", "mulberry", "graphite",
+)
+var icons = set(
+	"folder", "rocket", "tools", "database", "cloud", "code", "package", "book", "bug",
+	"flame", "zap", "star", "heart", "globe", "server", "terminal", "lightbulb", "shield",
+	"target", "gear", "coffee", "cube", "diamond", "planet", "sparkles", "atom", "brain",
+	"cpu", "network", "git-branch", "git-pull-request", "braces", "chart", "activity",
+	"dashboard", "flask", "leaf", "flower", "palette", "music", "camera", "puzzle",
+	"glass-orbit", "glass-prism", "glass-rocket", "glass-layers", "glass-cube", "glass-flower",
+)
+
+// Illustrated assets carry their own palette; their accent also colors running sessions.
+var artIconColors = map[string]string{
+	"glass-orbit": "blue", "glass-prism": "violet", "glass-rocket": "red",
+	"glass-layers": "emerald", "glass-cube": "cyan", "glass-flower": "fuchsia",
+}
 
 // Read returns only the four public P02 namespaces; tombstone appearance values are omitted.
 func Read(ctx context.Context, st *store.Store) (State, error) {
@@ -167,6 +185,9 @@ func validatePatch(patch Patch, importing bool) (map[string]any, error) {
 				if !iconOK {
 					return nil, fmt.Errorf("appearance %q has invalid icon", key)
 				}
+			}
+			if bound, ok := artIconColors[icon]; ok {
+				color = bound
 			}
 			if !colors[color] || !icons[icon] {
 				return nil, fmt.Errorf("appearance %q has invalid color or icon", key)

@@ -520,10 +520,14 @@ export const useAstrorderStore = create<AstrorderStore>((set) => ({
         const session = event.data as unknown as Session
         if (!session.id || !session.agent_id) return base
         const key = scopeKey(session.agent_id, session.id)
+        const prev = state.sessions[key]
+        const mergedSession = Boolean(session.ephemeral) || Boolean(prev?.ephemeral)
+          ? { ...session, ephemeral: true }
+          : session
         return {
           ...base,
-          sessions: { ...state.sessions, [key]: session },
-          liveActivityAt: session.status === 'idle' || session.status === 'error'
+          sessions: { ...state.sessions, [key]: mergedSession },
+          liveActivityAt: mergedSession.status === 'idle' || mergedSession.status === 'error'
             ? clearLiveActivity(state.liveActivityAt, key) : state.liveActivityAt,
         }
       }

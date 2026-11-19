@@ -6,6 +6,8 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	"astrorder.dev/app-server/internal/auth"
 	"astrorder.dev/app-server/internal/daemonclient"
@@ -40,6 +42,11 @@ type Handler struct {
 	publisher  Publisher
 	httpClient *http.Client
 	jobs       *jobManager
+
+	directRouteMu        sync.Mutex
+	directRouteCachedAt  time.Time
+	directRouteConfigKey string
+	directRoutedToGw     map[string]bool
 }
 
 // NewHandler constructs a new model gateway HTTP handler.

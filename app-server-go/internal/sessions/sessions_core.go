@@ -107,12 +107,16 @@ func (h *Handler) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 				Effort:          optString(payload.Effort),
 			},
 		}
-	case "antigravity":
+	case "antigravity", "antigravity-ssh":
 		if payload.Provider != "" && payload.Provider != "antigravity" {
 			writeJSONError(w, 422, "Antigravity requires its native provider")
 			return
 		}
-		req.Options = &sessiondv1.CreateSessionRequest_Antigravity{Antigravity: &sessiondv1.AntigravityCreateOptions{Cwd: workspace, Model: optString(payload.Model), Effort: optString(payload.Effort), ParentSessionId: optString(payload.ParentSessionID)}}
+		agyEffort := payload.Effort
+		if payload.Model != "" {
+			agyEffort = ""
+		}
+		req.Options = &sessiondv1.CreateSessionRequest_Antigravity{Antigravity: &sessiondv1.AntigravityCreateOptions{Cwd: workspace, Model: optString(payload.Model), Effort: optString(agyEffort), ParentSessionId: optString(payload.ParentSessionID)}}
 	case "grok":
 		req.Options = &sessiondv1.CreateSessionRequest_Grok{
 			Grok: &sessiondv1.GrokCreateOptions{
@@ -209,7 +213,8 @@ func (h *Handler) handleUpdateSession(w http.ResponseWriter, r *http.Request, se
 			return
 		}
 		// Grok ACP exposes no title mutation. Astrorder titles are local metadata.
-		if stringValue(agent, "kind") != "grok" && stringValue(agent, "kind") != "antigravity" {
+		agentKind := stringValue(agent, "kind")
+		if agentKind != "grok" && agentKind != "grok-ssh" && agentKind != "antigravity" && agentKind != "antigravity-ssh" {
 			if h.client == nil || h.client.Session == nil {
 				writeJSONError(w, 503, "Daemon client is not configured")
 				return
@@ -271,7 +276,15 @@ func (h *Handler) handleDeleteSession(w http.ResponseWriter, r *http.Request, se
 			writeJSONError(w, http.StatusInternalServerError, "Agent storage is unavailable")
 			return
 		}
-		if kind := stringValue(agent, "kind"); kind == "codex" || kind == "grok" || kind == "antigravity" {
+		agentKind := stringValue(agent, "kind")
+		isAntigravity := agentKind == "antigravity" || agentKind == "antigravity-ssh"
+		isGrok := agentKind == "grok" || agentKind == "grok-ssh"
+		if isAntigravity {
+			if err := h.ensureNativeBindingForDelete(ctx, existing); err != nil {
+				writeJSONError(w, http.StatusBadGateway, "Native session binding unavailable: "+err.Error())
+				return
+			}
+		} else if agentKind == "codex" || agentKind == "codex-ssh" || isGrok {
 			if err := h.ensureNativeBinding(ctx, existing); err != nil {
 				writeJSONError(w, http.StatusBadGateway, "Native session binding unavailable: "+err.Error())
 				return
@@ -284,12 +297,12 @@ func (h *Handler) handleDeleteSession(w http.ResponseWriter, r *http.Request, se
 			Session: ref,
 		}
 		if receipt, err := h.client.Session.DeleteSession(ctx, delReq); err != nil {
-			if stringValue(agent, "kind") == "grok" || stringValue(agent, "kind") == "antigravity" || status.Code(err) != codes.NotFound && !strings.Contains(err.Error(), "session is not daemon-owned") {
+			if isGrok || isAntigravity || status.Code(err) != codes.NotFound && !strings.Contains(err.Error(), "session is not daemon-owned") {
 				writeJSONError(w, http.StatusBadGateway, "Delete failed: "+err.Error())
 				return
 			}
 		} else if err := confirmedReceipt(receipt); err != nil {
-			if stringValue(agent, "kind") == "grok" || stringValue(agent, "kind") == "antigravity" || !strings.Contains(err.Error(), "session is not daemon-owned") {
+			if isGrok || isAntigravity || !strings.Contains(err.Error(), "session is not daemon-owned") {
 				writeJSONError(w, http.StatusBadGateway, err.Error())
 				return
 			}

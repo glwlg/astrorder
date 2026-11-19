@@ -80,8 +80,62 @@ export interface ToolDescription {
   isRunning: boolean
 }
 
+export function extractToolArgs(tool: Message['tool'] | null | undefined): Record<string, unknown> {
+  if (!tool || typeof tool !== 'object') return {}
+  const record = tool as Record<string, unknown>
+  if (record.arguments && typeof record.arguments === 'object' && !Array.isArray(record.arguments)) {
+    const args = record.arguments as Record<string, unknown>
+    if (Object.keys(args).length > 0) return args
+  }
+  const rawInput = record.input
+  if (rawInput && typeof rawInput === 'object' && !Array.isArray(rawInput)) {
+    return rawInput as Record<string, unknown>
+  }
+  if (typeof rawInput === 'string') {
+    const trimmed = rawInput.trim()
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+      try {
+        const parsed = JSON.parse(trimmed)
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          return parsed as Record<string, unknown>
+        }
+      } catch {}
+    }
+  }
+  if (record.arguments && typeof record.arguments === 'object' && !Array.isArray(record.arguments)) {
+    return record.arguments as Record<string, unknown>
+  }
+  return {}
+}
+
+function firstStringArg(args: Record<string, unknown>, ...keys: string[]): string {
+  for (const key of keys) {
+    const val = args[key]
+    if (typeof val === 'string' && val.trim() !== '') {
+      return val
+    }
+  }
+  return ''
+}
+
+function firstNumberArg(args: Record<string, unknown>, ...keys: string[]): number | null {
+  for (const key of keys) {
+    const val = args[key]
+    if (typeof val === 'number' && Number.isFinite(val)) return val
+    if (typeof val === 'string' && val.trim() !== '') {
+      const n = Number(val)
+      if (Number.isFinite(n)) return n
+    }
+  }
+  return null
+}
+
+function isToolFailed(status: unknown): boolean {
+  return status === 'failed' || status === 'error'
+}
+
 export function activityState(message: Message): 'completed' | 'failed' | 'running' | 'recorded' {
-  if (message.tool?.status === 'failed') return 'failed'
+  if (isToolFailed(message.tool?.status)) return 'failed'
   if (message.tool?.status === 'running') return 'running'
   if (message.tool?.status === 'completed' || message.tool?.status === 'succeeded' || message.completed_at) return 'completed'
   return 'recorded'
@@ -99,7 +153,7 @@ export function activityDuration(message: Message): string | null {
 
 export function fileChangeDiffs(message: Message): Array<{ file: string; diff: string }> {
   const tool = message.tool
-  const args = (tool?.arguments && typeof tool.arguments === 'object') ? (tool.arguments as Record<string, unknown>) : {}
+  const args = extractToolArgs(tool)
   const name = String(tool?.name || '')
 
   if (Array.isArray(args.changes)) {
@@ -119,7 +173,7 @@ export function fileChangeDiffs(message: Message): Array<{ file: string; diff: s
       try {
         const parsed = JSON.parse(text)
         if (typeof parsed?.diff === 'string' && parsed.diff.trim()) {
-          const filePath = String(args.path || parsed.path || parsed.file || '文件变更')
+          const filePath = firstStringArg(args, 'path', 'Path', 'TargetFile', 'AbsolutePath') || String(parsed.path || parsed.file || '文件变更')
           const fileName = filePath.split(/[/\\]/).pop() || filePath
           return [{ file: fileName, diff: parsed.diff }]
         }
@@ -127,12 +181,14 @@ export function fileChangeDiffs(message: Message): Array<{ file: string; diff: s
     }
   }
 
-  if (typeof args.path === 'string' && typeof args.old_string === 'string' && typeof args.new_string === 'string') {
-    const filePath = args.path
+  const filePath = firstStringArg(args, 'path', 'Path', 'TargetFile', 'AbsolutePath')
+  const oldStr = firstStringArg(args, 'old_string', 'Target', 'TargetContent')
+  const newStr = firstStringArg(args, 'new_string', 'Replacement', 'ReplacementContent')
+  if (filePath && (oldStr !== '' || newStr !== '')) {
     const fileName = filePath.split(/[/\\]/).pop() || filePath
-    const oldLines = args.old_string.split('\n').map((l: string) => '-' + l).join('\n')
-    const newLines = args.new_string.split('\n').map((l: string) => '+' + l).join('\n')
-    const diff = '--- a/' + fileName + '\n+++ b/' + fileName + '\n@@\n' + oldLines + '\n' + newLines
+    const oldLines = oldStr ? oldStr.split('\n').map((l: string) => '-' + l).join('\n') + '\n' : ''
+    const newLines = newStr ? newStr.split('\n').map((l: string) => '+' + l).join('\n') : ''
+    const diff = '--- a/' + fileName + '\n+++ b/' + fileName + '\n@@\n' + oldLines + newLines
     return [{ file: fileName, diff }]
   }
 
@@ -187,7 +243,7 @@ export function ToolLineIcon({
 }
 
 export function describeTool(message: Message): ToolDescription {
-  const isFailed = message.tool?.status === 'failed'
+  const isFailed = isToolFailed(message.tool?.status)
   const isRunning = message.tool?.status === 'running'
 
   if (message.kind === 'thinking') {
@@ -205,19 +261,31 @@ export function describeTool(message: Message): ToolDescription {
   }
 
   const tool = message.tool || { name: 'tool', arguments: {} }
- const name = String(tool.name || '')
- const args = (tool.arguments && typeof tool.arguments === 'object') ? (tool.arguments as Record<string, unknown>) : {}
+  const name = String(tool.name || '')
+  const args = extractToolArgs(tool)
 
   // 1. Shell commands
-  if (name === 'commandExecution' || name === 'terminal' || name === 'bash' || name === 'sh' || name === 'exec' || name === 'exec_command' || Boolean(args.command) || Boolean(args.cmd)) {
-    const rawCmd = String(args.command || args.cmd || '')
-    const cmd = unwrapCommand(rawCmd) || name
+  if (
+    name === 'commandExecution' ||
+    name === 'terminal' ||
+    name === 'bash' ||
+    name === 'sh' ||
+    name === 'exec' ||
+    name === 'exec_command' ||
+    name === 'run_command' ||
+    name === 'command_status' ||
+    name === 'send_command_input' ||
+    Boolean(firstStringArg(args, 'command', 'cmd', 'CommandLine', 'Command'))
+  ) {
+    const rawCmd = firstStringArg(args, 'command', 'cmd', 'CommandLine', 'Command')
+    const summaryFallback = firstStringArg(args, 'summary', 'toolSummary', 'Summary')
+    const cmd = unwrapCommand(rawCmd) || summaryFallback || name
     let action = '运行'
-   if (/^git\s/i.test(cmd)) action = 'Git'
-   else if (/^(?:pytest|python\s+-m\s+pytest|npm\s+test|vitest|cargo\s+test)\b/i.test(cmd)) action = '测试'
-   else if (/^(?:cat|head|tail|sed)\b/i.test(cmd)) action = '查看'
-   else if (/^(?:rg|grep|find)\b/i.test(cmd)) action = '搜索'
-   else if (/^(?:docker|systemctl|service)\b/i.test(cmd)) action = '服务'
+    if (/^git\s/i.test(cmd)) action = 'Git'
+    else if (/^(?:pytest|python\s+-m\s+pytest|npm\s+test|vitest|cargo\s+test|go\s+test)\b/i.test(cmd)) action = '测试'
+    else if (/^(?:cat|head|tail|sed)\b/i.test(cmd)) action = '查看'
+    else if (/^(?:rg|grep|find)\b/i.test(cmd)) action = '搜索'
+    else if (/^(?:docker|systemctl|service)\b/i.test(cmd)) action = '服务'
 
     const target = cmd.length > 70 ? cmd.slice(0, 67) + '...' : cmd
     return {
@@ -231,13 +299,28 @@ export function describeTool(message: Message): ToolDescription {
   }
 
   // 2. File modification
-  if (name === 'fileChange' || name === 'patch' || name === 'write_file' || name === 'edit' || args.changes) {
+  if (
+    name === 'fileChange' ||
+    name === 'patch' ||
+    name === 'write_file' ||
+    name === 'write_to_file' ||
+    name === 'edit' ||
+    name === 'edit_file' ||
+    name === 'replace_file_content' ||
+    name === 'multi_replace_file_content' ||
+    name === 'sed_file' ||
+    name === 'notebook_edit' ||
+    args.changes
+  ) {
     let file = ''
     if (Array.isArray(args.changes) && args.changes[0] && typeof args.changes[0] === 'object') {
-      const paths = (args.changes as Array<{ path?: string }>).map(c => String(c.path || '').split(/[/\\\\]/).pop()).filter(Boolean)
+      const paths = (args.changes as Array<{ path?: string }>).map(c => String(c.path || '').split(/[/\\]/).pop()).filter(Boolean)
       file = paths.slice(0, 2).join(', ') + (paths.length > 2 ? ` 等 ${paths.length} 个文件` : '')
-    } else if (args.path) {
-      file = String(args.path).split(/[/\\\\]/).pop() || String(args.path)
+    } else {
+      const pathVal = firstStringArg(args, 'path', 'Path', 'TargetFile', 'AbsolutePath')
+      if (pathVal) {
+        file = pathVal.split(/[/\\]/).pop() || pathVal
+      }
     }
     const target = file || '文件'
     return {
@@ -251,8 +334,28 @@ export function describeTool(message: Message): ToolDescription {
   }
 
   // 3. File read
-  if (name === 'read_file' || name === 'fileRead' || (name === 'read' && args.path)) {
-    const file = String(args.path || '').split(/[/\\\\]/).pop() || String(args.path || '')
+  if (
+    name === 'read_file' ||
+    name === 'fileRead' ||
+    name === 'view_file' ||
+    name === 'view_file_outline' ||
+    name === 'view_code_item' ||
+    name === 'list_dir' ||
+    name === 'read_resource' ||
+    name === 'read_url_content' ||
+    (name === 'read' && Boolean(firstStringArg(args, 'path', 'Path', 'AbsolutePath')))
+  ) {
+    const pathVal = firstStringArg(args, 'path', 'Path', 'AbsolutePath', 'File', 'TargetFile', 'DirectoryPath', 'Uri', 'Url')
+    let file = pathVal.split(/[/\\]/).pop() || pathVal
+    if (file) {
+      const startLine = firstNumberArg(args, 'start_line', 'StartLine', 'offset')
+      const endLine = firstNumberArg(args, 'end_line', 'EndLine')
+      if (startLine != null && endLine != null) {
+        file = `${file}:${startLine}-${endLine}`
+      } else if (startLine != null) {
+        file = `${file}:${startLine}`
+      }
+    }
     const target = file || '文件'
     return {
       iconKey: 'read',
@@ -265,8 +368,17 @@ export function describeTool(message: Message): ToolDescription {
   }
 
   // 4. Search
-  if (name === 'search_files' || name === 'fileSearch' || name === 'grep' || name === 'web_search') {
-    const q = String(args.pattern || args.query || '')
+  if (
+    name === 'search_files' ||
+    name === 'fileSearch' ||
+    name === 'grep' ||
+    name === 'web_search' ||
+    name === 'grep_search' ||
+    name === 'find_by_name' ||
+    name === 'search_web' ||
+    name === 'SearchContext'
+  ) {
+    const q = firstStringArg(args, 'pattern', 'query', 'Pattern', 'Query', 'SearchPath', 'SearchDirectory', 'Directory')
     const target = q.length > 40 ? q.slice(0, 37) + '...' : q
     return {
       iconKey: 'search',
@@ -344,7 +456,7 @@ export function formatPackSummary(pack: Message[]): string {
     return `${desc.fullTitle}${desc.isFailed ? ' · 失败' : desc.isRunning ? ' · 运行中' : ''}`
   }
 
-  const hasFailed = pack.some(m => m.tool?.status === 'failed')
+  const hasFailed = pack.some(m => isToolFailed(m.tool?.status))
   const isRunning = pack.some(m => m.tool?.status === 'running')
 
   const descriptions = pack.map(describeTool)
@@ -377,7 +489,7 @@ export function formatPackSummary(pack: Message[]): string {
 export function PackSummary({ pack, isRunning: propIsRunning }: { pack: Message[]; isRunning?: boolean }) {
   if (!pack.length) return <span>思考与工具</span>
 
-  const hasFailed = pack.some(m => m.tool?.status === 'failed')
+  const hasFailed = pack.some(m => isToolFailed(m.tool?.status))
   const isRunning = propIsRunning ?? pack.some(m => m.tool?.status === 'running')
 
   if (propIsRunning) {

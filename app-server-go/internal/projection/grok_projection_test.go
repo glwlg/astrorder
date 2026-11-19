@@ -161,3 +161,91 @@ func TestProjectGrokNotification_AgentMessageChunk(t *testing.T) {
 		t.Fatalf("transcript persisted: %d", count)
 	}
 }
+
+func TestUpsertSessionTxPreservesEphemeralBoolean(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+
+	schema := `CREATE TABLE sessions (
+		id TEXT,
+		agent_id TEXT,
+		title TEXT,
+		workspace TEXT,
+		status TEXT,
+		source_id TEXT,
+		connection_id TEXT,
+		source_session_id TEXT,
+		project_id TEXT,
+		project_name TEXT,
+		history_state TEXT,
+		native_kind TEXT,
+		ephemeral BOOLEAN DEFAULT '0' NOT NULL,
+		control_state TEXT,
+		runtime_owner TEXT,
+		selected_model_provider TEXT,
+		selected_model TEXT,
+		selected_reasoning_effort TEXT,
+		selected_approval_mode TEXT,
+		handoff_from_agent_id TEXT,
+		handoff_from_session_id TEXT,
+		handoff_context TEXT,
+		handoff_context_consumed BOOLEAN DEFAULT '0' NOT NULL,
+		updated_at TEXT,
+		PRIMARY KEY (agent_id, id)
+	);
+	CREATE TABLE workspace_preferences (
+		"key" TEXT PRIMARY KEY,
+		value TEXT
+	);`
+	if _, err := db.Exec(schema); err != nil {
+		t.Fatalf("create schema: %v", err)
+	}
+
+	ctx := context.Background()
+	tx1, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row1, err := upsertSessionTx(ctx, tx1, map[string]any{
+		"id":        "fork-1",
+		"agent_id":  "codex-1",
+		"title":     "转交摘要",
+		"status":    "idle",
+		"ephemeral": true,
+	})
+	if err != nil {
+		_ = tx1.Rollback()
+		t.Fatal(err)
+	}
+	if err := tx1.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if row1["ephemeral"] != true {
+		t.Fatalf("expected bool(true) on first upsert, got %T (%v)", row1["ephemeral"], row1["ephemeral"])
+	}
+
+	// Second upsert from daemon catalog omit/false must preserve ephemeral = true!
+	tx2, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row2, err := upsertSessionTx(ctx, tx2, map[string]any{
+		"id":       "fork-1",
+		"agent_id": "codex-1",
+		"title":    "转交摘要",
+		"status":   "running",
+	})
+	if err != nil {
+		_ = tx2.Rollback()
+		t.Fatal(err)
+	}
+	if err := tx2.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if row2["ephemeral"] != true {
+		t.Fatalf("expected ephemeral=true preserved after subsequent upsert, got %T (%v)", row2["ephemeral"], row2["ephemeral"])
+	}
+}

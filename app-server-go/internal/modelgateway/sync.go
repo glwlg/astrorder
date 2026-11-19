@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -67,7 +68,7 @@ func (h *Handler) listTargets(ctx context.Context) ([]targetInfo, error) {
 						Kind:   "wsl",
 						Distro: line,
 						Name:   "WSL · " + line,
-						Agents: []string{"codex", "grok", "hermes"},
+						Agents: []string{"codex", "grok", "hermes", "antigravity"},
 					})
 				}
 			}
@@ -90,7 +91,7 @@ func (h *Handler) listTargets(ctx context.Context) ([]targetInfo, error) {
 			ConnectionID: cid,
 			Name:         displayName,
 			State:        state,
-			Agents:       []string{"codex", "grok", "hermes"},
+			Agents:       []string{"codex", "grok", "hermes", "antigravity"},
 		})
 	}
 
@@ -144,6 +145,14 @@ func (h *Handler) resolveTargetProto(ctx context.Context, targetID string) (*ses
 				port = int64(p)
 			case int64:
 				port = p
+			case json.Number:
+				if parsed, err := p.Int64(); err == nil && parsed > 0 && parsed <= 65535 {
+					port = parsed
+				}
+			case string:
+				if parsed, err := strconv.ParseInt(p, 10, 64); err == nil && parsed > 0 && parsed <= 65535 {
+					port = parsed
+				}
 			}
 		}
 		var user *string
@@ -220,9 +229,6 @@ func (h *Handler) validateSelections(ctx context.Context, raw any) ([]syncTarget
 
 		if _, err := h.resolveTargetProto(ctx, tid); err != nil {
 			return nil, err
-		}
-		if agentSet["antigravity"] && tid != "local" {
-			return nil, errors.New("Antigravity 网关下发目前仅支持本机")
 		}
 
 		seen[tid] = true
@@ -373,7 +379,7 @@ func (h *Handler) buildTargetPlan(ctx context.Context, catalog *Catalog, sel syn
 					List []map[string]any `json:"list"`
 				} `json:"models"`
 			}
-			if json.Unmarshal(cur.Content, &previous) == nil {
+			if len(oldCatalogModels) == 0 && json.Unmarshal(cur.Content, &previous) == nil {
 				for _, model := range previous.Models.List {
 					if id, ok := model["modelId"].(string); ok {
 						oldCatalogModels = append(oldCatalogModels, map[string]any{"slug": id})

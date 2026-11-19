@@ -5,7 +5,7 @@ import type { Agent, Session } from '../../domain/types'
 import { sessionHandoffTargets } from '../../domain/handoff'
 import { scopeKey } from '../../domain/semantics'
 import { displaySessionTitle, formatRelativeTime, sessionActivityStatus, type ProjectGroup } from '../../components/sessionRailModel'
-import { ProjectGlyph, PROJECT_APPEARANCE_COLORS, type ProjectAppearanceMap } from '../../components/projectAppearance'
+import { ProjectGlyph, projectAppearanceColor, type ProjectAppearanceMap } from '../../components/projectAppearance'
 import { useAstrorderStore } from '../../state/store'
 import { useShallow } from 'zustand/react/shallow'
 import './mobileMessageMenu.css'
@@ -114,10 +114,10 @@ export function MobileSessionDrawer({ groups, pins, pinnedProjects, selectedKey,
     const activityStatus = sessionActivityStatus(session, commands)
     const isRunning = activityStatus === 'running'
     const parentGroup = groups.find(g => g.sessions.some(s => s.id === session.id && s.agent_id === session.agent_id))
-    const projectColor = (parentGroup && appearance[parentGroup.key]?.color) ||
-      appearance[session.project_id || '']?.color ||
-      (session.project_id ? appearance[`project:${session.project_id}`]?.color : undefined)
-    const resolvedAccent = (projectColor && (PROJECT_APPEARANCE_COLORS[projectColor] || projectColor)) || undefined
+    const projectCustom = (parentGroup && appearance[parentGroup.key]) ||
+      appearance[session.project_id || ''] ||
+      (session.project_id ? appearance[`project:${session.project_id}`] : undefined)
+    const resolvedAccent = projectAppearanceColor(projectCustom)
     return <div
       className={`m-session-row m-hold ${key === selectedKey ? 'selected' : ''} ${isRunning ? 'is-running' : ''}`}
       key={key}
@@ -246,12 +246,12 @@ export function MobileSessionDrawer({ groups, pins, pinnedProjects, selectedKey,
         <button role="menuitem" onClick={() => { void (onCopySessionId ? onCopySessionId(sessionMenu.session) : navigator.clipboard?.writeText(sessionMenu.session.id)); setSessionMenu(null) }}>
           <IconCopy size={17} />复制 ID
         </button>
-        {onForkSession && (
+        {onForkSession && agents?.[sessionMenu.session.agent_id]?.kind !== 'antigravity' && agents?.[sessionMenu.session.agent_id]?.kind !== 'antigravity-ssh' && (
           <button role="menuitem" onClick={() => { onForkSession(sessionMenu.session); setSessionMenu(null) }}>
             <IconDeviceDesktop size={17} />创建聊天分支
           </button>
         )}
-        {onForkWorktreeSession && agents?.[sessionMenu.session.agent_id]?.kind !== 'antigravity' && (
+        {onForkWorktreeSession && agents?.[sessionMenu.session.agent_id]?.kind !== 'antigravity' && agents?.[sessionMenu.session.agent_id]?.kind !== 'antigravity-ssh' && (
           <button role="menuitem" onClick={() => { onForkWorktreeSession(sessionMenu.session); setSessionMenu(null) }}>
             <IconGitBranch size={17} />在新工作树中创建分支
           </button>

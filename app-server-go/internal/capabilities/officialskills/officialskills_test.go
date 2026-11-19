@@ -64,7 +64,7 @@ func TestOfficialSkillsCatalog(t *testing.T) {
 		if sk.Description == "" || strings.ContainsAny(sk.Description, "\r\n") || len([]rune(sk.Description)) > 90 {
 			t.Errorf("skill %s description is not a short single line: %q", sk.Name, sk.Description)
 		}
-		if len(sk.SupportedAgents) != 3 {
+		if len(sk.SupportedAgents) != 4 {
 			t.Errorf("skill %s supported agents = %v", sk.Name, sk.SupportedAgents)
 		}
 	}

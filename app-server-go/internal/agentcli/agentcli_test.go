@@ -67,3 +67,22 @@ func TestRunCatalogMakesOneRequest(t *testing.T) {
 		t.Fatalf("requests = %d, want 1", got)
 	}
 }
+
+func TestResolveCallerSupportsAntigravityConversationID(t *testing.T) {
+	env := map[string]string{
+		"ASTRORDER_CALLER_AGENT_ID":      "agy-wsl",
+		"ASTRORDER_CALLER_CONNECTION_ID": "wsl-main",
+		"ASTRORDER_CALLER_PROFILE_NAME":  "default",
+		"ANTIGRAVITY_CONVERSATION_ID":    "52794208-5f2e-4120-a6b1-99e5ee29c7f1",
+	}
+	caller, err := resolveCaller(func(k string) (string, bool) {
+		v, ok := env[k]
+		return v, ok
+	}, Config{})
+	if err != nil {
+		t.Fatalf("resolveCaller antigravity: %v", err)
+	}
+	if caller.Runtime != "antigravity" || caller.SessionID != "52794208-5f2e-4120-a6b1-99e5ee29c7f1" || caller.ConnectionID != "wsl-main" {
+		t.Fatalf("unexpected caller: %+v", caller)
+	}
+}

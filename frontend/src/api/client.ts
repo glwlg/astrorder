@@ -105,22 +105,60 @@ export interface OcxUsageBreakdown {
 }
 export interface MagpieQuotaWindow { name: string; used?: number; remaining?: number; resetsAt?: string; unlimited?: boolean; display?: string; text?: boolean; balance?: number }
 export interface MagpieQuota { provider: string; name: string; kind: string; user?: string; plan?: string; alias?: string; from?: string; balance?: string; error?: string; asOf?: string; readAt?: string; readDeferred?: boolean; windows: MagpieQuotaWindow[] }
+export interface DirectUsageAgentSummary {
+  agentId: string
+  name: string
+  kind: string
+  connectionId: string
+  connectionName: string
+  sessions: number
+  requests: number
+  totalTokens: number
+  inputTokens: number
+  outputTokens: number
+  cacheReadInputTokens: number
+  cacheCreationInputTokens: number
+  reasoningOutputTokens: number
+  cacheHitRate: number
+  shareRatio: number
+}
+export interface DirectUsageSessionRow {
+  sessionId: string
+  agentId: string
+  agentName: string
+  agentKind: string
+  connectionName: string
+  title: string
+  workspace: string
+  model: string
+  updatedAt: string
+  requests: number
+  inputTokens: number
+  outputTokens: number
+  cacheReadInputTokens: number
+  cacheCreationInputTokens: number
+  reasoningOutputTokens: number
+  totalTokens: number
+}
 export interface OcxUsageResponse {
-  gatewayType?: 'magpie' | 'opencodex'
+  gatewayType?: 'magpie' | 'opencodex' | 'direct'
   bucket?: 'hour' | 'day' | 'week'
   range: string
   surface: string
   since: number
   generatedAt: string
   summary: Record<string, number>
-  days: Array<{ date: string; requests: number; measuredRequests: number; reportedRequests: number; totalTokens: number; estimatedCostUsd: number; models?: Array<{ model: string; provider: string; requests: number; totalTokens: number; inputTokens?: number; outputTokens?: number }> }>
+  days: Array<{ date: string; requests: number; measuredRequests?: number; reportedRequests?: number; totalTokens: number; inputTokens?: number; outputTokens?: number; cacheReadInputTokens?: number; reasoningOutputTokens?: number; estimatedCostUsd?: number; models?: Array<{ model: string; provider: string; requests: number; totalTokens: number; inputTokens?: number; outputTokens?: number }> }>
   models: OcxUsageBreakdown[]
   providers: OcxUsageBreakdown[]
   accounts: Array<{ accountLogLabel: string; ambiguous: boolean; requests: number; attemptCount: number; measuredAttempts: number; reportedAttempts: number; estimatedAttempts: number; unmeteredAttempts: number; inputTokens: number; outputTokens: number; cacheReadInputTokens: number; cacheCreationInputTokens: number; reasoningOutputTokens: number; totalTokens: number; usageCoverageRatio: number; estimatedCostUsd: number; pricedAttempts: number; unpricedAttempts: number; priceCoverageRatio: number }>
-  historyTruncated: boolean
-  truncatedPrefixBytes: number
-  entriesTruncated: boolean
-  entriesDropped: number
+  directAgents?: DirectUsageAgentSummary[]
+  directSessions?: DirectUsageSessionRow[]
+  daemonUpgradeRequired?: boolean
+  historyTruncated?: boolean
+  truncatedPrefixBytes?: number
+  entriesTruncated?: boolean
+  entriesDropped?: number
   snapshotWindowStart?: number
   snapshotWindowEnd?: number
 }
@@ -314,6 +352,7 @@ export interface BrowserSnapshot {
   captured_at: number
   tabs?: BrowserTab[]
   active_target_id?: string
+  target_id?: string
   error_count?: number
 }
 
@@ -357,7 +396,7 @@ export const api = {
   getBrowserScreenshot: (agentId: string, sessionId: string, refresh = false, targetId?: string) => request<BrowserSnapshot>(
     `/browser/screenshot?agent_id=${encodeURIComponent(agentId)}&session_id=${encodeURIComponent(sessionId)}&refresh=${refresh}${targetId ? '&target_id=' + encodeURIComponent(targetId) : ''}`
   ),
-  navigateBrowser: (agentId: string, sessionId: string, url: string) => jsonRequest<BrowserSnapshot>('/browser/navigate', { agent_id: agentId, session_id: sessionId, url }),
+  navigateBrowser: (agentId: string, sessionId: string, url: string, targetId?: string) => jsonRequest<BrowserSnapshot>('/browser/navigate', { agent_id: agentId, session_id: sessionId, url, target_id: targetId }),
   selectBrowserTab: (agentId: string, sessionId: string, targetId: string) => jsonRequest<BrowserSnapshot>('/browser/tabs/select', { agent_id: agentId, session_id: sessionId, target_id: targetId }),
   newBrowserTab: (agentId: string, sessionId: string, url?: string) => jsonRequest<BrowserSnapshot>('/browser/tabs/new', { agent_id: agentId, session_id: sessionId, url }),
   closeBrowserTab: (agentId: string, sessionId: string, targetId: string) => jsonRequest<BrowserSnapshot>('/browser/tabs/close', { agent_id: agentId, session_id: sessionId, target_id: targetId }),
@@ -855,13 +894,14 @@ export const api = {
   }>('/capabilities/dispatch', payload, 'POST'),
 
   getAnalyticsQuotas: () => request<{ gatewayType: string; data: MagpieQuota[] }>('/analytics/quotas'),
-  getAnalyticsUsage: (params: { range: 'today' | 'all' | '30d' | '7d'; surface: 'all' | 'codex' | 'hermes' | 'grok'; since?: number; until?: number }) => {
+  getAnalyticsUsage: (params: { range: 'today' | 'all' | '30d' | '7d'; surface: 'all' | 'codex' | 'hermes' | 'grok' | 'antigravity' | 'claude'; source?: 'all' | 'direct' | 'gateway'; since?: number; until?: number }) => {
     const query = new URLSearchParams({ range: params.range, surface: params.surface })
+    if (params.source) query.set('source', params.source)
     if (params.since !== undefined) query.set('since', String(params.since))
     if (params.until !== undefined) query.set('until', String(params.until))
     return request<OcxUsageResponse>(`/analytics/usage?${query.toString()}`)
   },
-  getModelQuota: (model: string) => request<OcxModelQuotaResponse>(`/analytics/model-quota?model=${encodeURIComponent(model)}`),
+  getModelQuota: (model: string, agentId?: string) => request<OcxModelQuotaResponse>(`/analytics/model-quota?model=${encodeURIComponent(model)}${agentId ? `&agent_id=${encodeURIComponent(agentId)}` : ''}`),
   writeFile: (payload: { path: string; content: string; session_id: string; connection_id?: string | null }) =>
     jsonRequest<{ status: string; path: string }>('/system/write-file', payload),
   searchFiles: (params: { q?: string; sessionId?: string; connectionId?: string; limit?: number }) => {

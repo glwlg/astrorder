@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"strings"
 
 	sessiondv1 "astrorder.dev/contracts/gen/go/astrorder/sessiond/v1"
 )
@@ -47,7 +48,11 @@ func (h *Handler) requireAgentConnection(ctx context.Context, agent map[string]a
 	if connID == "" {
 		connID = "local"
 	}
-	enabled, present, err := h.store.GetAgentConnectionChoice(ctx, connID+":"+stringValue(agent, "kind"))
+	kind := stringValue(agent, "kind")
+	if kind == "antigravity-ssh" {
+		kind = "antigravity"
+	}
+	enabled, present, err := h.store.GetAgentConnectionChoice(ctx, connID+":"+kind)
 	if err != nil {
 		return err
 	}
@@ -86,11 +91,12 @@ func (h *Handler) resolveRuntimeTarget(ctx context.Context, agent map[string]any
 		} else {
 			target.Runtime = sessiondv1.RuntimeKind_RUNTIME_KIND_HERMES
 		}
-	case "antigravity":
-		if isSSH {
-			return nil, fmt.Errorf("Antigravity SSH runtime is not supported yet")
+	case "antigravity", "antigravity-ssh":
+		if isSSH || kind == "antigravity-ssh" {
+			target.Runtime = sessiondv1.RuntimeKind_RUNTIME_KIND_ANTIGRAVITY_SSH
+		} else {
+			target.Runtime = sessiondv1.RuntimeKind_RUNTIME_KIND_ANTIGRAVITY
 		}
-		target.Runtime = sessiondv1.RuntimeKind_RUNTIME_KIND_ANTIGRAVITY
 	case "grok":
 		if isSSH {
 			target.Runtime = sessiondv1.RuntimeKind_RUNTIME_KIND_GROK_SSH
@@ -116,6 +122,11 @@ func (h *Handler) resolveRuntimeTarget(ctx context.Context, agent map[string]any
 			switch p := pVal.(type) {
 			case int:
 				portNum = p
+			case float64:
+				if p < 1 || p > 65535 || p != float64(int(p)) {
+					return nil, fmt.Errorf("invalid SSH port")
+				}
+				portNum = int(p)
 			case int64:
 				if p < 1 || p > 65535 {
 					return nil, fmt.Errorf("invalid SSH port")
@@ -180,12 +191,54 @@ func (h *Handler) resolveRuntimeTarget(ctx context.Context, agent map[string]any
 			defaultHermes := "/home/luwei/.local/bin/hermes"
 			sshConf.HermesPath = &defaultHermes
 		}
+		if ae := firstSSHSettingString(settings, sshRow, "antigravity_executable"); ae != "" {
+			sshConf.AntigravityExecutable = &ae
+		} else if kind == "antigravity" || kind == "antigravity-ssh" {
+			resolved := h.resolveAntigravitySSHExecutable(ctx, sshRow, stringValue(settings, "user"))
+			sshConf.AntigravityExecutable = &resolved
+		}
 		if profile, ok := sshRow["profile_name"].(string); ok && profile != "" {
 			sshConf.ProfileName = &profile
 		}
 		target.Ssh = sshConf
 	}
 	return target, nil
+}
+
+func firstSSHSettingString(settings, sshRow map[string]any, key string) string {
+	for _, source := range []map[string]any{settings, sshRow} {
+		if source == nil {
+			continue
+		}
+		if v, ok := source[key].(string); ok {
+			if trimmed := strings.TrimSpace(v); trimmed != "" {
+				return trimmed
+			}
+		}
+	}
+	return ""
+}
+
+func remoteAntigravityDefault(user string) string {
+	u := strings.TrimSpace(user)
+	if u == "" {
+		u = "luwei"
+	}
+	if u == "root" {
+		return "/root/.local/bin/agy"
+	}
+	return "/home/" + u + "/.local/bin/agy"
+}
+
+func (h *Handler) resolveAntigravitySSHExecutable(ctx context.Context, sshRow map[string]any, user string) string {
+	if h.remoteExecutable != nil {
+		if resolved, err := h.remoteExecutable.Resolve(ctx, "antigravity", sshRow); err == nil {
+			if trimmed := strings.TrimSpace(resolved); trimmed != "" {
+				return trimmed
+			}
+		}
+	}
+	return remoteAntigravityDefault(user)
 }
 
 func parseNativeJSON(nj *sessiondv1.NativeJson, dst any) error {

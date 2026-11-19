@@ -200,3 +200,155 @@ func TestRealSSHRemoteAdaptersOnDebian(t *testing.T) {
 		}
 	})
 }
+
+func TestRealWindowsSSHRemoteAntigravity(t *testing.T) {
+	if os.Getenv("ASTRORDER_TEST_REAL_AGY_SSH") != "1" {
+		t.Skip("skipping real Antigravity SSH test; enable with ASTRORDER_TEST_REAL_AGY_SSH=1")
+	}
+	host := os.Getenv("ASTRORDER_TEST_AGY_HOST")
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	user := os.Getenv("ASTRORDER_TEST_AGY_USER")
+	if user == "" {
+		user = "luwei"
+	}
+	exe := os.Getenv("ASTRORDER_TEST_AGY_EXECUTABLE")
+	if exe == "" {
+		exe = "/home/luwei/.local/bin/agy"
+	}
+	helpersDir := os.Getenv("ASTRORDER_TEST_HELPER_ASSETS_DIR")
+
+	emit := func(string, string, map[string]any, string) error { return nil }
+	factory := NewRemoteAntigravityFactory(emit, helpersDir)
+	adapter, err := factory("wsl-live-verify", map[string]any{
+		"host":                   host,
+		"user":                   user,
+		"port":                   22,
+		"antigravity_executable": exe,
+		"workspace":              "/home/" + user,
+	})
+	if err != nil {
+		t.Fatalf("create remote Antigravity adapter: %v", err)
+	}
+	if disc, ok := adapter.(core.RuntimeDisconnector); ok {
+		defer func() { _, _ = disc.Shutdown(context.Background()) }()
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	// 1. Verify exact "接入" path (AttachSession runtime_control -> Spawn -> models over Windows ssh.exe).
+	spawner := adapter.(core.Spawner)
+	probe, err := spawner.Spawn(ctx, core.Request{
+		SessionID: "probe-antigravity-wsl-live-verify",
+		Fields:    map[string]any{"runtime_control": true},
+	})
+	if err != nil {
+		t.Fatalf("remote Antigravity runtime_control attach failed: %v", err)
+	}
+	if probe.SessionID != "probe-antigravity-wsl-live-verify" {
+		t.Fatalf("unexpected probe result: %+v", probe)
+	}
+
+	// 2. Verify session.models over live SSH.
+	commander := adapter.(core.Commander)
+	modelsRes, err := commander.Command(ctx, core.Request{
+		SessionID: "probe-antigravity-wsl-live-verify",
+		Action:    "session.models",
+	})
+	if err != nil {
+		t.Fatalf("remote Antigravity session.models failed: %v", err)
+	}
+	t.Logf("remote Antigravity models count: %d", len(modelsRes.Payload["items"].([]map[string]any)))
+
+	// 3. Verify astrorder-model-helper auto-install + session.list + missing-workspace resume + session.delete over live SSH.
+	if helpersDir != "" {
+		querier := adapter.(core.Querier)
+		listRes, err := querier.Query(ctx, core.Request{
+			Fields: map[string]any{"method": "session.list"},
+		})
+		if err != nil {
+			t.Fatalf("remote Antigravity session.list via SSH helper failed: %v", err)
+		}
+		t.Logf("remote Antigravity session.list succeeded: %v", listRes["items"] != nil)
+
+		quotaRes, err := querier.Query(ctx, core.Request{
+			Fields: map[string]any{"method": "quota.read"},
+		})
+		if err != nil {
+			t.Fatalf("remote Antigravity quota.read failed: %v", err)
+		}
+		t.Logf("remote Antigravity compliant tier metadata succeeded: provider=%v plan=%v", quotaRes["provider"], quotaRes["plan"])
+
+		if items, ok := listRes["items"].([]map[string]any); ok && len(items) > 0 {
+			firstID, _ := items[0]["id"].(string)
+			if firstID != "" {
+				usageRes, uErr := querier.Query(ctx, core.Request{
+					Fields: map[string]any{"method": "session.usage", "conversation_id": firstID},
+				})
+				if uErr != nil {
+					t.Fatalf("remote Antigravity session.usage(%s) failed: %v", firstID, uErr)
+				}
+				t.Logf("remote Antigravity session.usage(%s): context_available=%v model=%v last_in=%v window=%v",
+					firstID, usageRes["context_available"], usageRes["model"], usageRes["last_input_tokens"], usageRes["context_window"])
+			}
+		}
+
+		rawTmp, err := exec.Command("ssh", "-o", "BatchMode=yes", user+"@"+host, "mktemp -d /tmp/astrorder-agy-del-XXXXXXXX").Output()
+		if err != nil {
+			t.Fatalf("mktemp remote dir failed: %v", err)
+		}
+		tmpDir := strings.TrimSpace(string(rawTmp))
+		if !strings.HasPrefix(tmpDir, "/tmp/astrorder-agy-del-") {
+			t.Fatalf("unexpected temp dir: %q", tmpDir)
+		}
+		defer func() {
+			_ = exec.Command("ssh", "-o", "BatchMode=yes", user+"@"+host, "rm -rf -- "+sshtrans.Quote(tmpDir)).Run()
+		}()
+
+		created, err := adapter.Create(ctx, core.Request{
+			Fields: map[string]any{"cwd": tmpDir},
+		})
+		if err != nil || created.SessionID == "" {
+			t.Fatalf("remote Antigravity disposable create failed: %v", err)
+		}
+		t.Logf("created disposable Antigravity session %s in %s", created.SessionID, tmpDir)
+
+		if _, err := commander.Command(ctx, core.Request{
+			SessionID: created.SessionID,
+			Action:    "session.close",
+		}); err != nil {
+			t.Fatalf("remote Antigravity session.close failed: %v", err)
+		}
+
+		// Delete the session's original workspace directory on the remote host to
+		// reproduce deleted temporary workspace paths (e.g. /tmp/magpie-agy-bridge-*).
+		if err := exec.Command("ssh", "-o", "BatchMode=yes", user+"@"+host, "rm -rf -- "+sshtrans.Quote(tmpDir)).Run(); err != nil {
+			t.Fatalf("remove remote temp workspace failed: %v", err)
+		}
+
+		resumed, err := spawner.Spawn(ctx, core.Request{
+			SessionID: created.SessionID,
+			Fields:    map[string]any{"cwd": tmpDir},
+		})
+		if err != nil || resumed.SessionID != created.SessionID {
+			t.Fatalf("remote Antigravity resume with deleted workspace failed: %v", err)
+		}
+
+		delRes, err := commander.Command(ctx, core.Request{
+			SessionID: created.SessionID,
+			Action:    "session.delete",
+		})
+		if err != nil || delRes.Payload["deleted"] != created.SessionID {
+			t.Fatalf("remote Antigravity session.delete failed: res=%+v err=%v", delRes, err)
+		}
+		t.Logf("deleted disposable Antigravity session %s after workspace removal", created.SessionID)
+
+		if _, err := spawner.Spawn(ctx, core.Request{
+			SessionID: created.SessionID,
+			Fields:    map[string]any{"cwd": tmpDir},
+		}); err == nil {
+			t.Fatalf("deleted Antigravity session %s unexpectedly resumed", created.SessionID)
+		}
+	}
+}

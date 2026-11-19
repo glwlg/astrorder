@@ -106,7 +106,9 @@ export function CreateBotGroupDialog({
   const [formError, setFormError] = useState("");
   const forked = useRef<Record<string, string>>({});
   const projects = useAstrorderStore((state) => state.projects);
-  const activeAgents = Object.values(agents).filter((agent) => agent.status === "ready");
+  const activeAgents = Object.values(agents).filter(
+    (agent) => agent.status === "ready" && agent.kind !== "antigravity" && agent.kind !== "antigravity-ssh",
+  );
 
   useEffect(() => {
     if (!opened) return;
@@ -297,7 +299,7 @@ export function CreateBotGroupDialog({
             {members.map((member) => {
               const agent = agents[member.agentId];
               const options = agentOptions[member.agentId];
-              const forkSupported = agent?.kind === "codex" || agent?.kind === "hermes";
+              const forkSupported = agent?.kind === "codex" || agent?.kind === "hermes" || agent?.kind === "antigravity";
               const candidates = (options?.sessions || []).filter(
                 (session) => (session.connection_id || "local") === member.machineId,
               );
@@ -358,10 +360,13 @@ export function CreateBotGroupDialog({
                         data={selectedModel} value={member.model || null} onChange={(value) => updateMember(member.key, { model: value || "" })} disabled={busy} />
                       <Select size="xs" label="思考强度" comboboxProps={{ withinPortal: true, zIndex: 500 }} placeholder="运行时默认" clearable
                         data={REASONING_EFFORTS.map((item) => ({ value: item.value, label: item.label }))} value={member.effort || null}
-                        onChange={(value) => updateMember(member.key, { effort: value || "" })} disabled={busy} />
+                        onChange={(value) => updateMember(member.key, { effort: value || "" })} disabled={busy || agent?.kind === "antigravity"} />
                       <Select size="xs" label="审批模式" comboboxProps={{ withinPortal: true, zIndex: 500 }}
-                        data={[{ value: "manual", label: "每次询问" }, { value: "auto", label: "自动审批" }, { value: "full_access", label: "完全访问" }]}
-                        value={member.approval} onChange={(value) => updateMember(member.key, { approval: value || "manual" })} disabled={busy} />
+                        data={agent?.kind === "antigravity"
+                          ? [{ value: "manual", label: "每次询问" }, { value: "full_access", label: "完全访问" }]
+                          : [{ value: "manual", label: "每次询问" }, { value: "auto", label: "自动审批" }, { value: "full_access", label: "完全访问" }]}
+                        value={agent?.kind === "antigravity" && member.approval === "auto" ? "manual" : member.approval}
+                        onChange={(value) => updateMember(member.key, { approval: value || "manual" })} disabled={busy} />
                     </Group>
                   </Stack>
                 </Paper>

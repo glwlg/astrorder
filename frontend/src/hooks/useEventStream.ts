@@ -257,6 +257,11 @@ export function useEventStream(
           void queryClient.invalidateQueries({
             queryKey: ["astrorder", "messages", event.agent_id, event.session_id],
           });
+          if (event.session_id && event.agent_id) {
+            void queryClient.invalidateQueries({
+              queryKey: ["astrorder", "session_usage", event.session_id, event.agent_id],
+            });
+          }
         }
         if (event.type === "transcript.invalidate" && event.agent_id && event.session_id) {
           scheduleHookRefresh(event.agent_id, event.session_id);
@@ -280,6 +285,11 @@ export function useEventStream(
               event.session_id,
             ],
           });
+          if (event.session_id && event.agent_id) {
+            void queryClient.invalidateQueries({
+              queryKey: ["astrorder", "session_usage", event.session_id, event.agent_id],
+            });
+          }
         }
         if (event.type === "native.observation") {
           void queryClient.invalidateQueries({

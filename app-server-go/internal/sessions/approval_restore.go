@@ -22,7 +22,11 @@ func (h *Handler) restoreCodexApproval(ctx context.Context, session map[string]a
 	if err != nil {
 		return err
 	}
-	if kind := stringValue(agent, "kind"); kind != "codex" && kind != "antigravity" {
+	kind := stringValue(agent, "kind")
+	if kind == "antigravity-ssh" {
+		kind = "antigravity"
+	}
+	if kind != "codex" && kind != "antigravity" {
 		return nil
 	}
 	lock := h.approvalSelectionLock(aid, sid)
@@ -39,7 +43,7 @@ func (h *Handler) restoreCodexApproval(ctx context.Context, session map[string]a
 	if mode == "" {
 		return nil
 	}
-	if mode != "manual" && mode != "auto" && mode != "full_access" || stringValue(agent, "kind") == "antigravity" && mode == "auto" {
+	if mode != "manual" && mode != "auto" && mode != "full_access" {
 		return fmt.Errorf("saved approval mode is invalid")
 	}
 	nativeID := stringValue(current, "source_session_id")

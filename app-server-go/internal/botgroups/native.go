@@ -15,10 +15,16 @@ import (
 	"astrorder.dev/app-server/internal/daemonclient"
 	"astrorder.dev/app-server/internal/sessions"
 	"astrorder.dev/app-server/internal/store"
+	"astrorder.dev/app-server/internal/targetfs"
 	pb "astrorder.dev/contracts/gen/go/astrorder/sessiond/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
+
+// RemoteExecutableResolver resolves the absolute POSIX path of a remote CLI over SSH.
+type RemoteExecutableResolver interface {
+	Resolve(ctx context.Context, kind string, sshConn map[string]any) (string, error)
+}
 
 // NativeController issues typed commands through the daemon and waits for
 // correlated completion in the command ledger and results in native history. App cancellation
@@ -31,6 +37,8 @@ type NativeController struct {
 	DefaultWorkspace  string
 	AttachmentsDir    string
 	MaxAttachmentSize int64
+	RemoteExecutable  RemoteExecutableResolver
+	Resolver          *targetfs.Resolver
 }
 
 type uncertainDeliveryError struct{ cause error }
@@ -94,6 +102,8 @@ func (c *NativeController) target(ctx context.Context, member Member) (*pb.Runti
 		if remote {
 			target.Runtime = pb.RuntimeKind_RUNTIME_KIND_GROK_SSH
 		}
+	case "antigravity", "antigravity-ssh":
+		return nil, "", errors.New("遵循 Google Antigravity 第三方接入规范，不支持多 Agent 自动群聊后台调用")
 	default:
 		return nil, "", errors.New("group Agent runtime is unsupported")
 	}
@@ -128,9 +138,20 @@ func (c *NativeController) target(ctx context.Context, member Member) (*pb.Runti
 			}
 			port = uint32(parsed)
 		}
-		target.Ssh = &pb.SshConnectConfig{Host: stringField("host"), Port: port, User: ptr("user"), SshConfigAlias: ptr("ssh_config_alias"), IdentityFile: ptr("identity_file"), HermesPath: ptr("hermes_path"), CodexExecutable: ptr("codex_executable"), GrokExecutable: ptr("grok_executable")}
-		if workspace == "" {
-			workspace = stringField("workspace")
+		var antigravityExec *string
+		if explicit := firstNonEmptyGroupSetting(settings, connection, "antigravity_executable"); explicit != "" {
+			antigravityExec = &explicit
+		} else if kind == "antigravity" || kind == "antigravity-ssh" {
+			resolved := c.resolveAntigravitySSHExecutable(ctx, connection, stringField("user"))
+			antigravityExec = &resolved
+		}
+		target.Ssh = &pb.SshConnectConfig{Host: stringField("host"), Port: port, User: ptr("user"), SshConfigAlias: ptr("ssh_config_alias"), IdentityFile: ptr("identity_file"), HermesPath: ptr("hermes_path"), CodexExecutable: ptr("codex_executable"), GrokExecutable: ptr("grok_executable"), AntigravityExecutable: antigravityExec}
+		if workspace == "" || (member.Workspace == nil && !strings.HasPrefix(workspace, "/")) {
+			if remoteWs := stringField("workspace"); remoteWs != "" {
+				workspace = remoteWs
+			} else if !strings.HasPrefix(workspace, "/") && workspace != "" {
+				workspace = remoteHomeDefault(stringField("user"))
+			}
 		}
 		if workspace != "" {
 			target.Ssh.Workspace = &workspace
@@ -140,6 +161,46 @@ func (c *NativeController) target(ctx context.Context, member Member) (*pb.Runti
 		}
 	}
 	return target, workspace, nil
+}
+
+func firstNonEmptyGroupSetting(settings, connection map[string]any, key string) string {
+	for _, source := range []map[string]any{settings, connection} {
+		if source == nil {
+			continue
+		}
+		if value, ok := source[key].(string); ok {
+			if trimmed := strings.TrimSpace(value); trimmed != "" {
+				return trimmed
+			}
+		}
+	}
+	return ""
+}
+
+func remoteHomeDefault(user string) string {
+	u := strings.TrimSpace(user)
+	if u == "" {
+		u = "luwei"
+	}
+	if u == "root" {
+		return "/root"
+	}
+	return "/home/" + u
+}
+
+func remoteAntigravityDefault(user string) string {
+	return remoteHomeDefault(user) + "/.local/bin/agy"
+}
+
+func (c *NativeController) resolveAntigravitySSHExecutable(ctx context.Context, connection map[string]any, user string) string {
+	if c.RemoteExecutable != nil {
+		if resolved, err := c.RemoteExecutable.Resolve(ctx, "antigravity", connection); err == nil {
+			if trimmed := strings.TrimSpace(resolved); trimmed != "" {
+				return trimmed
+			}
+		}
+	}
+	return remoteAntigravityDefault(user)
 }
 func (c *NativeController) session(ctx context.Context, turn Turn) (*pb.SessionRef, error) {
 	if c.Store == nil || c.Client == nil || c.Publisher == nil {
@@ -223,6 +284,13 @@ func (c *NativeController) session(ctx context.Context, turn Turn) (*pb.SessionR
 		create.Options = &pb.CreateSessionRequest_Codex{Codex: &pb.CodexCreateOptions{Cwd: workspace, Model: turn.Member.ModelName, Provider: turn.Member.ModelProvider, Effort: turn.Member.ThinkingEffort, NativeOptions: native(extras)}}
 	case pb.RuntimeKind_RUNTIME_KIND_HERMES, pb.RuntimeKind_RUNTIME_KIND_SSH_HERMES:
 		create.Options = &pb.CreateSessionRequest_Hermes{Hermes: &pb.HermesCreateOptions{Model: turn.Member.ModelName, Provider: turn.Member.ModelProvider, Effort: turn.Member.ThinkingEffort, NativeOptions: native(extras)}}
+	case pb.RuntimeKind_RUNTIME_KIND_ANTIGRAVITY, pb.RuntimeKind_RUNTIME_KIND_ANTIGRAVITY_SSH:
+		delete(extras, "cwd")
+		agyEffort := turn.Member.ThinkingEffort
+		if turn.Member.ModelName != nil && *turn.Member.ModelName != "" {
+			agyEffort = nil
+		}
+		create.Options = &pb.CreateSessionRequest_Antigravity{Antigravity: &pb.AntigravityCreateOptions{Cwd: workspace, Model: turn.Member.ModelName, Effort: agyEffort}}
 	default:
 		delete(extras, "cwd")
 		create.Options = &pb.CreateSessionRequest_Grok{Grok: &pb.GrokCreateOptions{Cwd: workspace, Model: turn.Member.ModelName, Effort: turn.Member.ThinkingEffort, NativeOptions: native(extras)}}
@@ -409,7 +477,8 @@ func (c *NativeController) Run(ctx context.Context, turn Turn, bound func(string
 		attachments[i] = attachment
 	}
 	payload := map[string]any{"id": turn.CommandID, "agent_id": turn.Member.AgentID, "session_id": ref.SessionId, "action": "send", "text": turn.Prompt, "attachments": attachments}
-	input, err := sessions.CommandInputs(ctx, sessions.Options{Store: c.Store, AttachmentsDir: c.AttachmentsDir, MaxAttachmentSize: c.MaxAttachmentSize}, payload, nil)
+	storedSession, _ := c.Store.GetSession(ctx, turn.Member.AgentID, ref.SessionId)
+	input, err := sessions.CommandInputs(ctx, sessions.Options{Store: c.Store, AttachmentsDir: c.AttachmentsDir, MaxAttachmentSize: c.MaxAttachmentSize, Resolver: c.Resolver}, payload, storedSession)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -420,7 +489,15 @@ func (c *NativeController) Run(ctx context.Context, turn Turn, bound func(string
 	if !created {
 		return Reply{}, errors.New("group command was already submitted; reconciliation required")
 	}
-	receipt, err := c.Client.Session.Send(ctx, &pb.SendRequest{Meta: meta(turn.CommandID), Session: ref, Input: input, Policy: &pb.SendPolicy{Model: turn.Member.ModelName}})
+	var sendPolicy *pb.SendPolicy
+	if memberAgent, agentErr := c.Store.GetAgent(ctx, turn.Member.AgentID); agentErr == nil && memberAgent != nil {
+		if k, _ := memberAgent["kind"].(string); k != "antigravity" && k != "antigravity-ssh" {
+			sendPolicy = &pb.SendPolicy{Model: turn.Member.ModelName}
+		}
+	} else {
+		sendPolicy = &pb.SendPolicy{Model: turn.Member.ModelName}
+	}
+	receipt, err := c.Client.Session.Send(ctx, &pb.SendRequest{Meta: meta(turn.CommandID), Session: ref, Input: input, Policy: sendPolicy})
 	if err == nil {
 		err = confirm(receipt)
 	}
@@ -649,6 +726,31 @@ func (c *NativeController) readCodexReplyHistory(ctx context.Context, ref *pb.Se
 	}
 }
 
+func (c *NativeController) attachAntigravityForHistory(ctx context.Context, ref *pb.SessionRef, kind string) error {
+	if (kind != "antigravity" && kind != "antigravity-ssh") || c.Client == nil || c.Client.Session == nil || c.Store == nil {
+		return errors.New("history reattach unavailable")
+	}
+	row, err := c.Store.GetSession(ctx, ref.GetAgentId(), ref.SessionId)
+	if err != nil || row == nil {
+		return errors.New("group session record is missing")
+	}
+	storedConnection, _ := row["connection_id"].(string)
+	workspace, _ := row["workspace"].(string)
+	target, resolvedWS, err := c.target(ctx, Member{AgentID: ref.GetAgentId(), MachineID: storedConnection, Workspace: &workspace})
+	if err != nil {
+		return err
+	}
+	attachReq := &pb.AttachSessionRequest{Session: ref, Target: target}
+	if resolvedWS != "" {
+		attachReq.Cwd = &resolvedWS
+	}
+	receipt, err := c.Client.Session.AttachSession(ctx, attachReq)
+	if err != nil || receipt == nil || !receipt.Attached {
+		return errors.New("failed to attach Antigravity session for group history")
+	}
+	return nil
+}
+
 func (c *NativeController) historyPages(ctx context.Context, ref *pb.SessionRef, wanted map[string]bool, throughUser string) ([]map[string]any, error) {
 	if c.Client.Runtime == nil {
 		return nil, errors.New("native group history is unavailable")
@@ -661,8 +763,15 @@ func (c *NativeController) historyPages(ctx context.Context, ref *pb.SessionRef,
 	request := &pb.HistoryPageRequest{Session: ref, Limit: 200}
 	items := []map[string]any{}
 	seenCursors := map[string]bool{}
+	attachedRetry := false
 	for {
 		page, err := c.Client.Runtime.GetHistoryPage(ctx, request)
+		if err != nil && !attachedRetry && (status.Code(err) == codes.NotFound || strings.Contains(err.Error(), "not owned")) {
+			if attachErr := c.attachAntigravityForHistory(ctx, ref, kind); attachErr == nil {
+				attachedRetry = true
+				page, err = c.Client.Runtime.GetHistoryPage(ctx, request)
+			}
+		}
 		if err != nil {
 			return nil, err
 		}

@@ -11,7 +11,7 @@ import type { SshConnection } from '../../domain/types'
 import { useBackgroundTasks } from '../../state/backgroundTasks'
 import { trackUpgradeJob } from '../../state/upgradeTasks'
 
-const blank = { display_name: '', host: '', port: '22', user: '', ssh_config_alias: '', identity_file: '' }
+const blank = { display_name: '', host: '', port: '22', user: '', ssh_config_alias: '', identity_file: '', workspace: '', codex_executable: '', grok_executable: '', antigravity_executable: '' }
 export function EnvironmentConnections({ embedded = false, renderAgentConfiguration }: { embedded?: boolean; renderAgentConfiguration?: (environmentId: string, kind: string) => ReactNode }) {
   const client = useQueryClient()
   const query = useQuery({ queryKey: ['astrorder', 'environments'], queryFn: api.getEnvironments, retry: false, refetchInterval: 10000 })
@@ -137,11 +137,33 @@ export function EnvironmentConnections({ embedded = false, renderAgentConfigurat
   const edit = (row?: SshConnection) => {
     setEditing(row?.id || 'new')
     setEditingOpened(true)
-    setForm({ display_name: row?.display_name || '', host: row?.settings?.host || '', port: String(row?.settings?.port || 22), user: row?.settings?.user || '', ssh_config_alias: row?.settings?.ssh_config_alias || '', identity_file: row?.settings?.identity_file || '' })
+    setForm({
+      display_name: row?.display_name || '',
+      host: row?.settings?.host || '',
+      port: String(row?.settings?.port || 22),
+      user: row?.settings?.user || '',
+      ssh_config_alias: row?.settings?.ssh_config_alias || '',
+      identity_file: row?.settings?.identity_file || '',
+      workspace: row?.settings?.workspace || '',
+      codex_executable: row?.settings?.codex_executable || '',
+      grok_executable: row?.settings?.grok_executable || '',
+      antigravity_executable: row?.settings?.antigravity_executable || '',
+    })
   }
   const save = async () => {
     const previous = connections.data?.ssh.items.find(row => row.id === editing)?.settings
-    const payload = { ...previous, ...form, hermes_path: previous?.hermes_path || null, workspace: previous?.workspace || null, port: Number(form.port), profile_name: previous?.profile_name || 'default', connection_id: editing === 'new' ? null : editing }
+    const payload = {
+      ...previous,
+      ...form,
+      hermes_path: previous?.hermes_path || null,
+      workspace: form.workspace.trim() || previous?.workspace || null,
+      codex_executable: form.codex_executable.trim() || null,
+      grok_executable: form.grok_executable.trim() || null,
+      antigravity_executable: form.antigravity_executable.trim() || null,
+      port: Number(form.port),
+      profile_name: previous?.profile_name || 'default',
+      connection_id: editing === 'new' ? null : editing,
+    }
     const saved = editing === 'new' ? await api.saveSshConnection(payload) : await api.updateSshConnection(editing!, payload)
     setEditingOpened(false)
     await api.discoverEnvironment(saved.id)
@@ -216,12 +238,12 @@ export function EnvironmentConnections({ embedded = false, renderAgentConfigurat
               <div className="connection-agent-description"><Group gap="xs"><Text fw={600} size="sm">{agentKindLabel(agent.kind)}</Text>{agent.daemon_mode && <Text size="xs" c="dimmed" data-testid={`environment-daemon-mode-${selected.id}-${agent.kind}`}>守护进程托管</Text>}</Group>
                 {embedded && <details className="mobile-connection-agent-info"><summary>执行路径</summary><Text size="xs" c="dimmed" className="connection-agent-path">{agent.executable || agent.detail || '尚未发现执行路径'}</Text></details>}
                 {!embedded && <Text size="xs" c={agent.state === 'error' ? 'red' : 'dimmed'} className="connection-agent-path">{agent.executable || agent.detail || '尚未发现执行路径'}</Text>}
-                {agent.state === 'error' && (embedded || agent.executable) && <Text size="xs" c="red" className="connection-agent-error">{agent.detail}</Text>}
+                {Boolean(agent.detail) && (agent.state === 'error' ? (embedded || Boolean(agent.executable)) : (agent.state !== 'connected' && Boolean(agent.executable))) && <Text size="xs" c={agent.state === 'error' ? 'red' : 'yellow'} className="connection-agent-error">{agent.detail}</Text>}
               </div>
               <Text size="xs" className="connection-agent-state" c={agent.state === 'error' ? 'red' : 'dimmed'}>{agent.state === 'connected' ? '已接入' : agent.state === 'error' ? '连接失败' : agent.state === 'authentication_required' ? '需要登录' : agent.state === 'unsupported' ? '暂不支持' : agent.available ? '已发现' : selected.discovered ? '未安装' : '待发现'}</Text>
               <Group gap="xs" wrap="nowrap">
                 {renderAgentConfiguration && <Button size="compact-xs" variant="default" onClick={() => { setConfiguration({ environmentId: selected.id, kind: agent.kind }); setConfigurationOpened(true) }} aria-label={`配置 ${agentKindLabel(agent.kind)}`}>配置</Button>}
-                {agent.state !== 'connected' && <Button size="compact-xs" disabled={!!busy || !agent.available} loading={busy === `${selected.id}:${agent.kind}`} onClick={() => void run(`${selected.id}:${agent.kind}`, () => api.changeEnvironmentAgent(selected.id, agent.kind, true))}>接入</Button>}
+                {agent.state !== 'connected' && <Button size="compact-xs" disabled={!!busy || !agent.available || Boolean(agent.detail?.includes('尚不支持'))} loading={busy === `${selected.id}:${agent.kind}`} onClick={() => void run(`${selected.id}:${agent.kind}`, () => api.changeEnvironmentAgent(selected.id, agent.kind, true))}>接入</Button>}
                 <Menu position="bottom-end" withinPortal><Menu.Target><ActionIcon variant="default" size="sm" aria-label={`${agentKindLabel(agent.kind)} 更多操作`}><IconDotsVertical size={15} /></ActionIcon></Menu.Target><Menu.Dropdown>
                   <Menu.Item disabled={!!busy || agent.state !== 'connected'} onClick={() => void run(`${selected.id}:${agent.kind}`, () => api.changeEnvironmentAgent(selected.id, agent.kind, false))}>断开</Menu.Item>
                   <Menu.Item color="red" disabled={!!busy || (!agent.available && agent.state !== 'connected')} onClick={() => void run(`restart:${selected.id}:${agent.kind}`, () => api.restartEnvironmentAgent(selected.id, agent.kind))}>强制重启</Menu.Item>
@@ -236,7 +258,7 @@ export function EnvironmentConnections({ embedded = false, renderAgentConfigurat
     </div>
     <SettingsDrawer closeButtonProps={{ 'aria-label': '关闭运行配置' }} opened={configurationOpened} onClose={() => setConfigurationOpened(false)} onExitTransitionEnd={() => setConfiguration(null)} title={configuration ? `${agentKindLabel(configuration.kind)} · 运行配置` : '运行配置'}>{configuration && renderAgentConfiguration?.(configuration.environmentId, configuration.kind)}</SettingsDrawer>
     <SettingsDrawer closeButtonProps={{ 'aria-label': '关闭 SSH 配置' }} opened={editingOpened} onClose={() => setEditingOpened(false)} onExitTransitionEnd={() => setEditing(null)} title={editing === 'new' ? '配置 SSH 连接' : '修改 SSH 连接'}>
-      <Stack>{([['display_name', '连接名称'], ['ssh_config_alias', 'SSH 配置别名'], ['host', '主机'], ['port', '端口'], ['user', '用户'], ['identity_file', '私钥文件引用（不读取或上传）']] as const).map(([field, label]) => <TextInput key={field} label={label} value={form[field]} onChange={event => { const value = event.currentTarget.value; setForm(current => ({ ...current, [field]: value })) }} />)}
+      <Stack>{([['display_name', '连接名称'], ['ssh_config_alias', 'SSH 配置别名'], ['host', '主机'], ['port', '端口'], ['user', '用户'], ['identity_file', '私钥文件引用（不读取或上传）'], ['workspace', '默认远程工作区路径（选填）'], ['codex_executable', 'Codex 远程可执行路径（选填，留空自动探测）'], ['grok_executable', 'Grok 远程可执行路径（选填，留空自动探测）'], ['antigravity_executable', 'Antigravity (agy) 远程可执行路径（选填，留空自动探测）']] as const).map(([field, label]) => <TextInput key={field} label={label} value={form[field]} onChange={event => { const value = event.currentTarget.value; setForm(current => ({ ...current, [field]: value })) }} />)}
         <Text size="sm" c="dimmed">使用系统 SSH 和已审核的主机指纹；保存后自动发现 Agent，不会自动启动或接入它们。</Text>
         <Button loading={busy === 'save'} onClick={() => void run('save', save)}>保存并发现 Agent</Button>
       </Stack>

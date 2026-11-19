@@ -112,8 +112,14 @@ func (s *Service) skillDelivery(ctx context.Context, source envtarget.Env, sourc
 		return nil, err
 	}
 	var chosen *skillLocation
+	wantSourceRoot := ""
+	if sourceAgent != "" && sourceAgent != "all" {
+		if home := skillHome(sn.paths, sourceAgent); home != "" {
+			wantSourceRoot = home + "/skills"
+		}
+	}
 	for i, location := range locations[name] {
-		if chosen == nil || sourceAgent != "" && sourceAgent != "all" && strings.HasPrefix(location.root, sn.paths.Home) && strings.Contains(location.root, "/."+sourceAgent+"/") {
+		if chosen == nil || (wantSourceRoot != "" && location.root == wantSourceRoot) {
 			chosen = &locations[name][i]
 		}
 	}
@@ -137,7 +143,11 @@ func (s *Service) skillDelivery(ctx context.Context, source envtarget.Env, sourc
 		if err != nil {
 			return "", "", err
 		}
-		root := map[string]string{"codex": paths.Codex, "hermes": paths.Hermes, "grok": paths.Grok}[agent] + "/skills"
+		home := skillHome(paths, agent)
+		if home == "" {
+			return "", "", envtarget.Errorf(422, "无法确定 %s 的技能目录", agent)
+		}
+		root := home + "/skills"
 		defer s.lock(dest.Target().ID + "|skills-dispatch|" + root)()
 		for _, manifest := range []string{officialManifestFile, "astrorder-manifest.json"} {
 			if _, err := dest.Read(ctx, root+"/"+folder+"/"+manifest); err == nil {

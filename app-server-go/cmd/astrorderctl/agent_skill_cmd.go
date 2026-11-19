@@ -11,7 +11,7 @@ import (
 
 func runAgentSkill(args []string, output io.Writer) int {
 	if len(args) < 1 {
-		return cliFailure(output, errors.New("usage: astrorderctl agent-skill install --runtime hermes|codex|grok --home PATH --cli PATH --agent-id ID --connection-id ID --profile-name ID"))
+		return cliFailure(output, errors.New("usage: astrorderctl agent-skill install --runtime hermes|codex|grok|antigravity --home PATH --cli PATH --agent-id ID --connection-id ID --profile-name ID"))
 	}
 	switch args[0] {
 	case "install":
@@ -25,7 +25,7 @@ func runAgentSkillInstall(args []string, output io.Writer) int {
 	flags := flag.NewFlagSet("agent-skill install", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 
-	runtime := flags.String("runtime", "", "target agent runtime: hermes, codex or grok")
+	runtime := flags.String("runtime", "", "target agent runtime: hermes, codex, grok or antigravity")
 	home := flags.String("home", "", "absolute home directory of agent")
 	cli := flags.String("cli", "", "absolute path to verified astrorder-agent executable")
 	agentID := flags.String("agent-id", "", "caller agent ID")

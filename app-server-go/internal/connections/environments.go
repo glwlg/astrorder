@@ -177,6 +177,9 @@ type remoteRuntimeEvidence struct {
 	// known contract value. An unknown enum can never confirm a live
 	// attachment.
 	controlStatusKnown bool
+	// daemonUnsupported is true when the connected daemon reports the legacy
+	// SSH runtime set without registering this newer remote runtime kind.
+	daemonUnsupported bool
 }
 
 // remoteRuntimeKind maps an environment agent kind to its remote runtime kind.
@@ -186,6 +189,8 @@ func remoteRuntimeKind(kind string) sessiondv1.RuntimeKind {
 		return sessiondv1.RuntimeKind_RUNTIME_KIND_CODEX_SSH
 	case "grok":
 		return sessiondv1.RuntimeKind_RUNTIME_KIND_GROK_SSH
+	case "antigravity":
+		return sessiondv1.RuntimeKind_RUNTIME_KIND_ANTIGRAVITY_SSH
 	default:
 		return sessiondv1.RuntimeKind_RUNTIME_KIND_SSH_HERMES
 	}
@@ -217,11 +222,16 @@ func (h *Handler) collectRemoteEvidence(ctx context.Context, connID string) (map
 		entry.owned = runtime.GetOwnedSessions()
 		byKind[runtime.GetRuntime()] = entry
 	}
+	legacySSHSet := byKind[sessiondv1.RuntimeKind_RUNTIME_KIND_SSH_HERMES].registered &&
+		byKind[sessiondv1.RuntimeKind_RUNTIME_KIND_CODEX_SSH].registered &&
+		byKind[sessiondv1.RuntimeKind_RUNTIME_KIND_GROK_SSH].registered
 	for kind, entry := range evidence {
 		entry.statusKnown = true
 		if runtime, ok := byKind[remoteRuntimeKind(kind)]; ok {
 			entry.registered = runtime.registered
 			entry.owned = runtime.owned
+		} else if kind == "antigravity" && legacySSHSet {
+			entry.daemonUnsupported = true
 		}
 		for _, session := range status.Sessions {
 			if session.GetSession().GetSessionId() != entry.controlSessionID {
@@ -365,6 +375,8 @@ func remoteAgentState(kind string, evidence remoteRuntimeEvidence, stored map[st
 	case liveOwned:
 		state, detail = "connected", "远端运行时已由小内核持有。"
 		available = true
+	case evidence.daemonUnsupported:
+		detail = "当前小内核尚不支持远程 Antigravity，请通过系统托盘更新小内核。"
 	}
 	return state, detail, agentID, daemonMode, available
 }
@@ -383,10 +395,6 @@ func (h *Handler) remoteEnvironmentAgents(ctx context.Context, connID string, ro
 	}
 	agents := make([]map[string]any, 0, len(environmentKinds))
 	for _, kind := range environmentKinds {
-		if kind == "antigravity" {
-			agents = append(agents, map[string]any{"kind": kind, "available": false, "state": "unsupported", "detail": "Antigravity 暂不支持 SSH 接入。", "daemon_mode": true})
-			continue
-		}
 		choiceEnabled, choicePresent, err := h.store.GetAgentConnectionChoice(ctx, connID+":"+kind)
 		if err != nil {
 			return nil, err
@@ -541,9 +549,6 @@ func (h *Handler) probeRemote(ctx context.Context, connID string, conn map[strin
 	result := discoveryResult{Versions: map[string]string{}, Available: map[string]bool{}, Executables: map[string]string{}}
 	answered := false
 	for _, kind := range environmentKinds {
-		if kind == "antigravity" {
-			continue
-		}
 		version, _, err := h.versioner.GetVersion(ctx, kind, connID, conn)
 		if err != nil {
 			result.Available[kind] = false

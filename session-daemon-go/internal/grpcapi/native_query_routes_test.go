@@ -67,7 +67,7 @@ func TestQueryNativeRoutesClosedSelectorsAndRemoteConnections(t *testing.T) {
 		kind   sessiondv1.RuntimeKind
 		legacy string
 		branch string
-	}{{5, "codex-ssh", "codex_thread_list"}, {4, "ssh", "hermes_projects_tree"}, {7, "grok-ssh", "grok_initialize"}} {
+	}{{5, "codex-ssh", "codex_thread_list"}, {4, "ssh", "hermes_projects_tree"}, {7, "grok-ssh", "grok_initialize"}, {9, "antigravity-ssh", "antigravity_session_list"}} {
 		t.Run(test.legacy, func(t *testing.T) {
 			connections := []string{}
 			multiplex := core.NewMultiplexRegistry(func(id string, settings map[string]any) (core.Adapter, error) {

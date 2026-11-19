@@ -25,6 +25,7 @@ func Registrations() []Registration {
 		{Kind: "http", Method: http.MethodGet, Path: "/api/v1/browser/screenshot", Auth: "browser", Owner: "go-app"},
 		{Kind: "http", Method: http.MethodPost, Path: "/api/v1/browser/navigate", Auth: "browser", Owner: "go-app"},
 		{Kind: "http", Method: http.MethodPost, Path: "/api/v1/browser/interact", Auth: "browser", Owner: "go-app"},
+		{Kind: "http", Method: http.MethodPost, Path: "/api/v1/browser/design", Auth: "browser", Owner: "go-app"},
 		{Kind: "http", Method: http.MethodGet, Path: "/api/v1/browser/page-content", Auth: "browser", Owner: "go-app"},
 		{Kind: "http", Method: http.MethodGet, Path: "/api/v1/browser/diagnostics", Auth: "browser", Owner: "go-app"},
 		{Kind: "http", Method: http.MethodPost, Path: "/api/v1/browser/tabs/select", Auth: "browser", Owner: "go-app"},
@@ -46,6 +47,7 @@ func Matches(method, path string) bool {
 		return method == http.MethodGet
 	case "/api/v1/browser/navigate",
 		"/api/v1/browser/interact",
+		"/api/v1/browser/design",
 		"/api/v1/browser/tabs/select",
 		"/api/v1/browser/tabs/new",
 		"/api/v1/browser/tabs/close",
@@ -140,6 +142,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		err = h.handleNavigate(w, r)
 	case "/api/v1/browser/interact":
 		err = h.handleInteract(w, r)
+	case "/api/v1/browser/design":
+		err = h.handleDesign(w, r)
 	case "/api/v1/browser/page-content":
 		err = h.handlePageContent(w, r)
 	case "/api/v1/browser/diagnostics":
@@ -229,6 +233,7 @@ func (h *Handler) handleNavigate(w http.ResponseWriter, r *http.Request) error {
 		AgentID   string `json:"agent_id"`
 		SessionID string `json:"session_id"`
 		URL       string `json:"url"`
+		TargetID  string `json:"target_id"`
 	}
 	dec := json.NewDecoder(r.Body)
 	dec.UseNumber()
@@ -241,7 +246,7 @@ func (h *Handler) handleNavigate(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	sessionKey := payload.AgentID + "::" + payload.SessionID
-	snap, err := h.manager.Navigate(r.Context(), sessionKey, payload.URL, "")
+	snap, err := h.manager.Navigate(r.Context(), sessionKey, payload.URL, payload.TargetID)
 	if err != nil {
 		return &httpError{status: http.StatusBadRequest, message: err.Error()}
 	}

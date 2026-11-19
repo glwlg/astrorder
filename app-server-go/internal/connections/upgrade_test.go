@@ -87,6 +87,7 @@ func TestUpgradeTargetsExcludeRemovedEnvironmentRegistrations(t *testing.T) {
 	}
 	for _, a := range []map[string]any{
 		{"id": "hermes-current", "name": "WSL · Hermes", "kind": "hermes", "status": "ready", "connection_id": "wsl-current"},
+		{"id": "agy-current", "name": "WSL · Antigravity", "kind": "antigravity", "status": "ready", "connection_id": "wsl-current"},
 		{"id": "hermes-old", "name": "WSL", "kind": "hermes", "status": "disconnected", "connection_id": "ssh-removed"},
 	} {
 		if _, err = st.UpsertAgent(ctx, a); err != nil {
@@ -110,11 +111,11 @@ func TestUpgradeTargetsExcludeRemovedEnvironmentRegistrations(t *testing.T) {
 	if err = json.Unmarshal(w.Body.Bytes(), &result); err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Items) != 1 || result.Items[0]["id"] != "hermes-current" {
-		t.Fatalf("removed WSL must not be an upgrade target: %s", w.Body.String())
+	if len(result.Items) != 2 || result.Items[0]["id"] != "agy-current" || result.Items[1]["id"] != "hermes-current" {
+		t.Fatalf("expected active remote Antigravity and Hermes targets only: %s", w.Body.String())
 	}
-	if calls := probe.callList(); len(calls) != 1 || calls[0] != "hermes|wsl-current" {
-		t.Fatalf("orphan must not be probed: %v", calls)
+	if calls := probe.callList(); strings.Join(calls, ",") != "antigravity|wsl-current,hermes|wsl-current" {
+		t.Fatalf("orphan must not be probed and antigravity must be probed: %v", calls)
 	}
 	if old, _ := st.GetAgent(ctx, "hermes-old"); old == nil {
 		t.Fatal("history registration deleted")

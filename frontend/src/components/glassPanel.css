@@ -63,7 +63,6 @@
   border-radius: 7px;
   pointer-events: none;
 }
-.send-button .glass-button-lens { border-radius: 9px; }
 :root[data-mantine-color-scheme='dark'] .glass-panel::before {
   background: rgb(24 21 31 / 8%);
 }

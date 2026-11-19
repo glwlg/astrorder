@@ -44,6 +44,30 @@ const outbound: OutboxEntry = {
 }
 
 describe('transcript follow mode', () => {
+  it('folds long pasted text while keeping attachments and copying the complete original', () => {
+    const text = `第一行\n${'长文本\n'.repeat(2000)}最后一行`
+    const copy = vi.fn().mockResolvedValue(undefined)
+    const previousClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard')
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: copy } })
+    try {
+      const view = render(<MantineProvider><Transcript outbox={[]} messages={[{
+        ...message, role: 'user', text,
+        attachments: [{ id: 'image', name: 'image.png', media_type: 'image/png', url: '/image.png' }],
+      }]} /></MantineProvider>)
+      expect(view.container.textContent).not.toContain('最后一行')
+      expect(screen.getByAltText('image.png')).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: '复制消息' }))
+      expect(copy).toHaveBeenCalledWith(text)
+      fireEvent.click(screen.getByText('展开全文'))
+      expect(view.container.textContent).toContain('最后一行')
+      fireEvent.click(screen.getByText('收起长消息'))
+      expect(view.container.textContent).not.toContain('最后一行')
+    } finally {
+      if (previousClipboard) Object.defineProperty(navigator, 'clipboard', previousClipboard)
+      else Reflect.deleteProperty(navigator, 'clipboard')
+    }
+  })
+
   it('counts failed operations as processed and leaves unknown and running operations pending', () => {
     const states = ['completed', 'failed', 'running', undefined]
     render(<MantineProvider><Transcript session={runningSession} outbox={[]} messages={states.map((status, i) => ({

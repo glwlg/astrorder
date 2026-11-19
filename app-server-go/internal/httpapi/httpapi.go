@@ -112,12 +112,13 @@ func Registrations() []Registration {
 }
 
 type Options struct {
-	Context         context.Context
-	Config          config.Config
-	Store           *store.Store
-	DaemonClient    *daemonclient.Client
-	Resolver        *targetfs.Resolver
-	EventHub        *application.EventHub
+	Context          context.Context
+	Config           config.Config
+	Store            *store.Store
+	DaemonClient     *daemonclient.Client
+	Resolver         *targetfs.Resolver
+	RemoteExecutable connections.RemoteExecutableResolver
+	EventHub         *application.EventHub
 	MemoryService   *memory.Service
 	BotGroups       *botgroups.Service
 	AudioService    *audio.Service
@@ -308,7 +309,7 @@ func NewHandlerChecked(options Options) (http.Handler, error) {
 	if options.Store != nil {
 		if sessionHandler == nil {
 			var err error
-			sessionHandler, err = sessions.NewHandler(sessions.Options{Store: options.Store, Client: options.DaemonClient, Authorizer: authenticator, Publisher: eventHub, DefaultWorkspace: options.Config.DefaultWorkspace, AttachmentsDir: options.Config.AttachmentsDir, MaxAttachmentSize: maxAttachmentSize, Resolver: resolver})
+			sessionHandler, err = sessions.NewHandler(sessions.Options{Store: options.Store, Client: options.DaemonClient, Authorizer: authenticator, Publisher: eventHub, DefaultWorkspace: options.Config.DefaultWorkspace, AttachmentsDir: options.Config.AttachmentsDir, MaxAttachmentSize: maxAttachmentSize, Resolver: resolver, RemoteExecutable: options.RemoteExecutable})
 			if err != nil {
 				return nil, fmt.Errorf("configure session handler: %w", err)
 			}
@@ -350,7 +351,7 @@ func NewHandlerChecked(options Options) (http.Handler, error) {
 				browserInvoke = invoker.Invoke
 			}
 			var err error
-			agentHandler, err = agentapi.NewHandler(agentapi.Options{Store: options.Store, Client: options.DaemonClient, Authorizer: authenticator, Publisher: eventHub, Logger: logger, DefaultWorkspace: options.Config.DefaultWorkspace, FileResolver: resolver, BrowserInvoke: browserInvoke, CommandSubmit: commandSubmit})
+			agentHandler, err = agentapi.NewHandler(agentapi.Options{Store: options.Store, Client: options.DaemonClient, Authorizer: authenticator, Publisher: eventHub, Logger: logger, DefaultWorkspace: options.Config.DefaultWorkspace, FileResolver: resolver, RemoteExecutable: options.RemoteExecutable, BrowserInvoke: browserInvoke, CommandSubmit: commandSubmit})
 			if err != nil {
 				return nil, fmt.Errorf("configure agent handler: %w", err)
 			}

@@ -180,8 +180,10 @@ func expectedRuntimeKinds(kind, connectionID string) []sessiondv1.RuntimeKind {
 			return []sessiondv1.RuntimeKind{sessiondv1.RuntimeKind_RUNTIME_KIND_SSH_HERMES}
 		}
 		return []sessiondv1.RuntimeKind{sessiondv1.RuntimeKind_RUNTIME_KIND_HERMES}
-	case "antigravity":
-		if ssh { return nil }
+	case "antigravity", "antigravity-ssh":
+		if ssh || kind == "antigravity-ssh" {
+			return []sessiondv1.RuntimeKind{sessiondv1.RuntimeKind_RUNTIME_KIND_ANTIGRAVITY_SSH}
+		}
 		return []sessiondv1.RuntimeKind{sessiondv1.RuntimeKind_RUNTIME_KIND_ANTIGRAVITY}
 	case "grok":
 		if ssh {

@@ -128,6 +128,9 @@ func (h *Handler) Submit(ctx context.Context, payload map[string]any) (map[strin
 		h.ensureSessionTitle(ctx, session, stringValue(stored, "text"))
 	}
 	if action == "enqueue" {
+		if stringValue(session, "control_state") == "unbound" && h.client != nil {
+			_ = h.ensureNativeBinding(ctx, session)
+		}
 		return stored, nil
 	}
 	return h.submitStored(ctx, stored)
@@ -421,6 +424,14 @@ func (h *Handler) restoreModel(ctx context.Context, ref *pb.SessionRef) error {
 		return commandFailure(502, "Saved model readback unavailable; message was not sent")
 	}
 	provider, model := stringValue(binding, "provider"), stringValue(binding, "model")
+	if provider == "antigravity" || current.GetProvider() == "antigravity" {
+		if isAntigravityInternalWorkerModel(model) {
+			return h.restoreReasoning(ctx, ref, binding, current)
+		}
+		if isAntigravityInternalWorkerModel(current.GetModel()) && strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "gemini-pro-orchestrator") {
+			return h.restoreReasoning(ctx, ref, binding, current)
+		}
+	}
 	if modelBindingMatches(provider, model, current.GetProvider(), current.GetModel()) {
 		return h.restoreReasoning(ctx, ref, binding, current)
 	}
@@ -439,6 +450,22 @@ func (h *Handler) restoreModel(ctx context.Context, ref *pb.SessionRef) error {
 }
 
 func (h *Handler) restoreReasoning(ctx context.Context, ref *pb.SessionRef, binding map[string]any, current *pb.ModelState) error {
+	isAntigravity := current.GetProvider() == "antigravity"
+	if !isAntigravity && ref != nil && ref.GetAgentId() != "" {
+		if agent, err := h.store.GetAgent(ctx, ref.GetAgentId()); err == nil && agent != nil {
+			kind := stringValue(agent, "kind")
+			isAntigravity = kind == "antigravity" || kind == "antigravity-ssh"
+		}
+	}
+	if isAntigravity {
+		var native map[string]any
+		if current.GetNative() != nil {
+			_ = parseNativeJSON(current.GetNative(), &native)
+		}
+		if native["reasoning_switch_supported"] != true {
+			return nil
+		}
+	}
 	effort := stringValue(binding, "effort")
 	if effort == "" || current.GetEffort() == effort {
 		return nil

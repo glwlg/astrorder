@@ -47,11 +47,12 @@ import { moveProject, reconcileProjectOrder } from './projectOrder'
 import { useWorkspacePreferences } from '../hooks/useWorkspacePreferences'
 import type { Agent, Project, Session, SessionStatus, Task } from '../domain/types'
 import { scopeKey } from '../domain/semantics'
-import { StatusDot } from './Status'
+import { SessionRowMeta } from './SessionRowMeta'
 import { ConfirmPopover } from './ConfirmPopover'
 import { confirmationCoordinatesFromEvent, type ConfirmationCoordinates } from './confirmationPosition'
 import { AgentKindBadge } from './SessionRuntimeFacts'
-import { buildProjectGroups, displaySessionTitle, formatRelativeTime, type ProjectGroup, type RailFilter } from './sessionRailModel'
+import { agentKindLabel } from './AgentBrandIcon'
+import { buildProjectGroups, displaySessionTitle, type ProjectGroup, type RailFilter } from './sessionRailModel'
 import { api } from '../api/client'
 import './sessionPins.css'
 const COLLAPSED_PROJECTS_STORAGE_KEY = 'astrorder:collapsed-projects'
@@ -60,7 +61,7 @@ import { AddProjectModal } from './AddProjectModal'
 import {
   ProjectAppearanceModal,
   ProjectGlyph,
-  PROJECT_APPEARANCE_COLORS,
+  projectAppearanceColor,
   type ProjectAppearanceEntry,
 } from './projectAppearance'
 import { SessionActivityBorder } from './AnimatedStatus'
@@ -72,11 +73,9 @@ type PendingConfirmation =
   | { kind: 'delete-project'; project: ProjectGroup; coords: ConfirmationCoordinates }
   | { kind: 'batch-delete-sessions'; count: number; sessions: Session[]; coords?: ConfirmationCoordinates }
 
-function sessionRunningStyle(session: Session, accent?: string): CSSProperties {
-  const resolvedAccent = (accent && (PROJECT_APPEARANCE_COLORS[accent] || accent)) || undefined
-  const agentId = session?.agent_id || ''
+function sessionRunningStyle(appearance?: ProjectAppearanceEntry): CSSProperties {
   return {
-    '--session-running-color': resolvedAccent || (agentId.includes('codex') ? 'var(--astr-teal, #12b886)' : 'var(--astr-indigo, #5b6cff)'),
+    '--session-running-color': projectAppearanceColor(appearance) || 'var(--astr-text)',
   } as CSSProperties
 }
 
@@ -213,33 +212,33 @@ export function SessionRail({
     }
   }
 
-  const forkMenuItems = (session: Session) => agents[session.agent_id]?.kind === 'antigravity' ? (
-    <Menu.Item leftSection={<IconGitFork size={14} />} onClick={() => void handleForkChatBranch(session)}>
-      创建聊天分支
-    </Menu.Item>
-  ) : (
-    <Menu.Sub>
-      <Menu.Sub.Target>
-        <Menu.Sub.Item leftSection={<IconGitFork size={14} />}>
-          分叉
-        </Menu.Sub.Item>
-      </Menu.Sub.Target>
-      <Menu.Sub.Dropdown onClick={(e) => e.stopPropagation()}>
-        <Menu.Item
-          leftSection={<IconDeviceDesktop size={14} />}
-          onClick={() => void handleForkChatBranch(session)}
-        >
-          创建聊天分支
-        </Menu.Item>
-        {agents[session.agent_id]?.kind !== 'antigravity' && <Menu.Item
-          leftSection={<IconGitBranch size={14} />}
-          onClick={() => setForkWorktreeTarget(session)}
-        >
-          在新工作树中创建聊天分支
-        </Menu.Item>}
-      </Menu.Sub.Dropdown>
-    </Menu.Sub>
-  )
+  const forkMenuItems = (session: Session) => {
+    const kind = agents[session.agent_id]?.kind
+    if (kind === 'antigravity' || kind === 'antigravity-ssh') return null
+    return (
+      <Menu.Sub>
+        <Menu.Sub.Target>
+          <Menu.Sub.Item leftSection={<IconGitFork size={14} />}>
+            分叉
+          </Menu.Sub.Item>
+        </Menu.Sub.Target>
+        <Menu.Sub.Dropdown onClick={(e) => e.stopPropagation()}>
+          <Menu.Item
+            leftSection={<IconDeviceDesktop size={14} />}
+            onClick={() => void handleForkChatBranch(session)}
+          >
+            创建聊天分支
+          </Menu.Item>
+          <Menu.Item
+            leftSection={<IconGitBranch size={14} />}
+            onClick={() => setForkWorktreeTarget(session)}
+          >
+            在新工作树中创建聊天分支
+          </Menu.Item>
+        </Menu.Sub.Dropdown>
+      </Menu.Sub>
+    )
+  }
   const [batchMode, setBatchMode] = useState(false)
   const [selectedSessionKeys, setSelectedSessionKeys] = useState<Set<string>>(new Set())
 
@@ -307,7 +306,7 @@ export function SessionRail({
   }
 
   const handleSaveAppearance = (projectKey: string, entry: ProjectAppearanceEntry) => {
-    void updatePreferences({ appearance: { [projectKey]: entry } })
+    return updatePreferences({ appearance: { [projectKey]: entry } })
   }
 
   const togglePin = (session: Session, event: React.MouseEvent) => {
@@ -618,8 +617,8 @@ export function SessionRail({
           <kbd aria-hidden="true">Ctrl K</kbd>
         </div>
         <Tooltip label="新增项目" position="bottom">
-          <ActionIcon className="session-add-project" variant="default" size={44} aria-label="新增项目" onClick={() => setAddProjectOpened(true)}>
-            <PlusIcon size={22} aria-hidden="true" />
+          <ActionIcon className="session-add-project" variant="subtle" size={30} aria-label="新增项目" onClick={() => setAddProjectOpened(true)}>
+            <PlusIcon size={18} aria-hidden="true" />
           </ActionIcon>
         </Tooltip>
       </div>
@@ -718,7 +717,6 @@ export function SessionRail({
             const parentProject = groups.find(p => p.sessions.some(s => s.id === session.id && s.agent_id === session.agent_id))
             const projectCustom = (parentProject && projectAppearance[parentProject.key]) ||
               (session.project_id ? projectAppearance[`project:${session.project_id}`] : undefined)
-            const projectColor = projectCustom?.color
             return (
               <motion.div
                 initial={false}
@@ -727,7 +725,7 @@ export function SessionRail({
                 transition={{ type: 'spring', stiffness: 450, damping: 35 }}
                 className={`session-row-wrapper ${isRunning ? 'is-running' : ''}`}
                 key={key}
-                style={sessionRunningStyle(session, projectColor)}
+                style={sessionRunningStyle(projectCustom)}
                 onContextMenu={(event) => { if (!batchMode) openRailMenu(event, 'session', key) }}
               >
                 {batchMode && (
@@ -757,7 +755,7 @@ export function SessionRail({
                   }}
                 >
                   <span className="session-row-glyph"><AgentKindBadge agent={agents[session.agent_id]} iconOnly /></span>
-                  <span className="session-row-title">
+                  <span className="session-row-title" title={displaySessionTitle(session)}>
                     {projectCustom?.icon && (
                       <ProjectGlyph
                         iconName={projectCustom.icon}
@@ -768,7 +766,7 @@ export function SessionRail({
                     )}
                     {displaySessionTitle(session)}
                   </span>
-                  <div className="session-row-info"><span className="session-row-time">{key === activeSessionKey && isRunning ? '运行中' : formatRelativeTime(session.updated_at)}</span>{(session as any).unread && activityStatus === 'idle' ? <StatusDot status="unread" /> : <StatusDot status={activityStatus} />}</div>
+                  <SessionRowMeta status={activityStatus} updatedAt={session.updated_at} unread={(session as any).unread} />
                 </UnstyledButton>
                 {!batchMode && <div className="session-row-actions has-pinned"><button className="session-action-btn is-active" aria-label="取消置顶" onClick={e => togglePin(session, e)}><IconPinned size={14} /></button>
                   <Menu position="bottom-end" withinPortal opened={railMenu?.kind === 'session' && railMenu.key === key} onChange={(opened) => updateRailMenu(opened, 'session', key)}><Menu.Target><button className="session-action-btn" aria-label="更多操作"><IconDotsVertical size={14} /></button></Menu.Target><Menu.Dropdown>
@@ -927,7 +925,7 @@ export function SessionRail({
                 </div>
               </div>
               <Collapse expanded={!projectCollapsed}>
-                <Stack className="session-project-sessions" gap={4} mt={8}>
+                <Stack className="session-project-sessions">
                   <>
                   {visibleSessions.map((session) => {
                     const key = scopeKey(session.agent_id, session.id)
@@ -942,7 +940,7 @@ export function SessionRail({
                         transition={{ type: 'spring', stiffness: 450, damping: 35 }}
                         className={`session-row-wrapper ${isRunning ? 'is-running' : ''}`}
                         key={key}
-                        style={sessionRunningStyle(session, projectCustom?.color)}
+                        style={sessionRunningStyle(projectCustom)}
                         onContextMenu={(event) => { if (!batchMode) openRailMenu(event, 'session', key) }}
                       >
                         {batchMode && (
@@ -976,10 +974,7 @@ export function SessionRail({
                           <span className="session-row-title" title={displaySessionTitle(session)}>
                             {displaySessionTitle(session)}
                           </span>
-                          <div className="session-row-info">
-                            <span className="session-row-time">{formatRelativeTime(session.updated_at)}</span>
-                            {(session as any).unread && activityStatus === 'idle' ? <StatusDot status="unread" /> : <StatusDot status={activityStatus} />}
-                          </div>
+                          <SessionRowMeta status={activityStatus} updatedAt={session.updated_at} unread={(session as any).unread} />
                         </UnstyledButton>
                         {!batchMode && <div className={`session-row-actions ${isPinned ? 'has-pinned' : ''}`}>
                           <Tooltip label={isPinned ? '取消置顶' : '置顶'} withArrow position="top">
@@ -1132,7 +1127,7 @@ export function SessionRail({
           useAstrorderStore.setState((state) => ({
             sessions: { ...state.sessions, [scopeKey(created.agent_id, created.id)]: created },
           }))
-          notifications.show({ color: 'teal', message: `已转交给 ${target.kind === 'codex' ? 'Codex' : 'Hermes'}` })
+          notifications.show({ color: 'teal', message: `已转交给 ${agentKindLabel(target.kind)}` })
         }}
         onOpenTransferred={onSelect}
       />}      <ConfirmPopover

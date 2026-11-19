@@ -8,16 +8,12 @@ import (
 	"testing"
 )
 
-func TestForkRouteUsesNativeAntigravityBoundary(t *testing.T) {
+func TestForkRouteRejectsAntigravityUnderACP(t *testing.T) {
 	parentID := "11111111-1111-4111-8111-111111111111"
 	called := false
 	srv := &mockDaemonServer{createCb: func(r *pb.CreateSessionRequest) (*pb.CommandReceipt, error) {
 		called = true
-		o := r.GetAntigravity()
-		if o == nil || o.GetParentSessionId() != parentID || o.GetTargetMessageId() != "antigravity:"+parentID+":1" {
-			t.Fatalf("wrong native boundary: %v", r)
-		}
-		return &pb.CommandReceipt{OperationState: pb.OperationState_OPERATION_STATE_COMPLETED, Session: &pb.SessionRef{SessionId: "22222222-2222-4222-8222-222222222222", AgentId: r.Target.AgentId}, Status: pb.SessionStatus_SESSION_STATUS_IDLE, Outcome: &pb.CommandReceipt_Completed{Completed: &pb.CommandResult{}}}, nil
+		return nil, nil
 	}}
 	h, st, _, cleanup := setupTestServer(t, srv)
 	defer cleanup()
@@ -28,8 +24,8 @@ func TestForkRouteUsesNativeAntigravityBoundary(t *testing.T) {
 	r.Header.Set("Authorization", "Bearer browser-sec")
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
-	if w.Code != 200 || !called {
-		t.Fatalf("fork: %d %s", w.Code, w.Body.String())
+	if w.Code != 422 || called {
+		t.Fatalf("expected 422 fork rejection for Antigravity ACP: code=%d called=%v body=%s", w.Code, called, w.Body.String())
 	}
 }
 

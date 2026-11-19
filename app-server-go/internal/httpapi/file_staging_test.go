@@ -6,12 +6,22 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"astrorder.dev/app-server/internal/targetfs"
 )
 
 func TestFileResolverAllowsConfiguredLocalStaging(t *testing.T) {
 	cfg := testConfig()
-	cfg.StagingDir = filepath.Join(t.TempDir(), "staging")
-	handler := NewHandler(Options{Config: cfg})
+	root := t.TempDir()
+	cfg.StagingDir = filepath.Join(root, "staging")
+	// This fixture tests staging configuration, with a known helper path so
+	// missing installation assets do not reject the request before staging.
+	resolver := targetfs.NewResolver(targetfs.ResolverOptions{
+		WSLBinary:       filepath.Join(root, "missing-wsl"),
+		WSLHelperPath:   "fixture",
+		LocalStageRoots: []string{root},
+	})
+	handler := NewHandler(Options{Config: cfg, Resolver: resolver})
 	response := request(t, handler, http.MethodPost, "/api/v1/files/stage", strings.NewReader(`{"paths":["/tmp/file.txt"],"connection_id":"wsl:fixture","copy_to_clipboard":false}`), map[string]string{"Authorization": "Bearer browser-secret", "Origin": "http://testserver"})
 	if strings.Contains(response.Body.String(), "Local staging storage is not configured") {
 		t.Fatalf("configured staging root was lost: %d %s", response.Code, response.Body.String())

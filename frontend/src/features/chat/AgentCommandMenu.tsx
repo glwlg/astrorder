@@ -57,10 +57,10 @@ export function useAgentMentions(session: Session | null | undefined, enabled: b
 
 export function useFileMentions(session: Session | null | undefined, query: string, enabled: boolean) {
   return useQuery({
-    queryKey: ['astrorder', 'file-mentions', session?.agent_id, session?.id, query],
+    queryKey: ['astrorder', 'file-mentions', session?.agent_id, session?.id, session?.connection_id, query],
     queryFn: async () => {
       if (!session) return []
-      const result = await api.searchFiles({ q: query, sessionId: session.id, limit: 100 })
+      const result = await api.searchFiles({ q: query, sessionId: session.id, connectionId: session.connection_id || undefined, limit: 100 })
       const root = result.root.replace(/[\\/]+$/, '')
       return result.items.map(item => ({
         name: item.path.startsWith(root) ? item.path.slice(root.length).replace(/^[\\/]+/, '') : item.name,

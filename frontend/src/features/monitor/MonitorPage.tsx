@@ -463,6 +463,7 @@ export function MonitorCard({
                             size="compact-xs"
                             variant="light"
                             color="indigo"
+                            disabled={agent?.kind === 'antigravity' && (session.status === 'running' || session.status === 'waiting_approval')}
                             loading={queueBusyId === item.id}
                             onClick={() => void onSendQueued?.(item)}
                           >
@@ -707,6 +708,7 @@ function MonitorListRow({
                       size="compact-xs"
                       variant="light"
                       color="indigo"
+                      disabled={agent?.kind === 'antigravity' && (session.status === 'running' || session.status === 'waiting_approval')}
                       loading={queueBusyId === item.id}
                       onClick={() => void onSendQueued?.(item)}
                     >
@@ -835,6 +837,8 @@ export function MonitorPage() {
   const queuedSessionKeys = useMemo(() => new Set(queuedCommands.map(item => scopeKey(item.agentId, item.sessionId))), [queuedCommands])
 
   const sendQueued = async (item: MonitorQueueItem) => {
+    const targetSession = sessions.find(s => s.agent_id === item.agentId && s.id === item.sessionId)
+    if (agents[item.agentId]?.kind === 'antigravity' && (targetSession?.status === 'running' || targetSession?.status === 'waiting_approval')) return
     setQueueBusyId(item.id)
     try {
       if (item.source === 'local') await queueOutbox.flush(item.agentId, item.sessionId, item.id)

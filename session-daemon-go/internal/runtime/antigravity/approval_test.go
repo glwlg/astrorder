@@ -1,17 +1,24 @@
 package antigravity
 
 import (
-	core "astrorder.dev/session-daemon/internal/runtime"
 	"context"
 	"os"
 	"testing"
 	"time"
+
+	core "astrorder.dev/session-daemon/internal/runtime"
 )
 
-func TestApprovalModeNativeReadback(t *testing.T) {
+func TestApprovalModeACPReadback(t *testing.T) {
 	exe, _ := os.Executable()
 	dir := t.TempDir()
-	a := New(Config{Executable: exe, Arguments: []string{"-test.run=TestStreamHelper", "--"}, Environment: []string{"ASTRORDER_AGY_HELPER=1"}, Workspace: dir, Allowed: []string{dir}})
+	a := New(Config{
+		Executable:  exe,
+		Arguments:   []string{"-test.run=TestStreamHelper", "--"},
+		Environment: []string{"ASTRORDER_AGY_HELPER=1"},
+		Workspace:   dir,
+		Allowed:     []string{dir},
+	})
 	defer a.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -23,7 +30,7 @@ func TestApprovalModeNativeReadback(t *testing.T) {
 	if err != nil || read.Payload["mode"] != "manual" {
 		t.Fatalf("initial read: %+v %v", read, err)
 	}
-	for _, mode := range []string{"full_access", "manual"} {
+	for _, mode := range []string{"auto", "full_access", "manual"} {
 		changed, e := a.Command(ctx, core.Request{SessionID: created.SessionID, Action: "session.approval.set", Fields: map[string]any{"mode": mode}})
 		if e != nil || changed.SessionID != created.SessionID || changed.Payload["accepted"] != true {
 			t.Fatalf("switch %s: %+v %v", mode, changed, e)
@@ -32,7 +39,7 @@ func TestApprovalModeNativeReadback(t *testing.T) {
 		if e != nil || read.Payload["mode"] != mode {
 			t.Fatalf("readback %s: %+v %v", mode, read, e)
 		}
-		// A model reconnect must retain the permission selection.
+		// Model switch over ACP retains the permission selection without restarting the process.
 		if _, e = a.Command(ctx, core.Request{SessionID: created.SessionID, Action: "session.model.set", Fields: map[string]any{"model": "claude-test"}}); e != nil {
 			t.Fatal(e)
 		}
@@ -41,7 +48,7 @@ func TestApprovalModeNativeReadback(t *testing.T) {
 			t.Fatalf("model change lost permissions: %+v %v", read, e)
 		}
 	}
-	if _, err = a.Command(ctx, core.Request{SessionID: created.SessionID, Action: "session.approval.set", Fields: map[string]any{"mode": "auto"}}); err == nil {
-		t.Fatal("unsupported auto mode accepted")
+	if _, err = a.Command(ctx, core.Request{SessionID: created.SessionID, Action: "session.approval.set", Fields: map[string]any{"mode": "invalid_mode"}}); err == nil {
+		t.Fatal("unsupported invalid mode accepted")
 	}
 }

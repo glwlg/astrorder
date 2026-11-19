@@ -23,6 +23,7 @@ type Env struct {
 	Dirs    map[string]bool
 	Bins    map[string]string
 	Run_    RunFunc
+	Shell_  func(script string, stdin []byte, args []string, env *Env) (envtarget.Result, error)
 	Calls   []envtarget.Command
 	FailOn  map[string]error // path -> error returned by Write
 	mu      sync.Mutex
@@ -35,7 +36,7 @@ func New(id string) *Env {
 	home := "/home/test"
 	return &Env{
 		Info:    envtarget.Target{ID: id, Kind: "ssh", Name: id},
-		P:       envtarget.Paths{Home: home, Codex: home + "/.codex", Hermes: home + "/.hermes", Grok: home + "/.grok", Agents: home + "/.agents"},
+		P:       envtarget.Paths{Home: home, Codex: home + "/.codex", Hermes: home + "/.hermes", Grok: home + "/.grok", Antigravity: home + "/.gemini/config", Agents: home + "/.agents"},
 		Files:   map[string][]byte{},
 		Dirs:    map[string]bool{},
 		Bins:    map[string]string{},
@@ -165,7 +166,10 @@ func (e *Env) Which(_ context.Context, name string) (string, bool) {
 	return found, ok
 }
 
-func (e *Env) Shell(context.Context, string, []byte, ...string) (envtarget.Result, error) {
+func (e *Env) Shell(_ context.Context, script string, stdin []byte, args ...string) (envtarget.Result, error) {
+	if e.Shell_ != nil {
+		return e.Shell_(script, stdin, args, e)
+	}
 	return envtarget.Result{}, envtarget.Errorf(501, "not supported")
 }
 

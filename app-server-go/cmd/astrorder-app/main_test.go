@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net"
@@ -120,5 +121,52 @@ func TestRunServerDrainsHijackedConnections(t *testing.T) {
 	case <-upstreamClosed:
 	case <-time.After(time.Second):
 		t.Fatal("upstream hijacked connection remained open")
+	}
+}
+
+type stubResolver struct {
+	calls int
+	path  string
+	err   error
+}
+
+func (s *stubResolver) Resolve(_ context.Context, _ string, sshConn map[string]any) (string, error) {
+	s.calls++
+	if explicit, _ := sshConn["antigravity_executable"].(string); explicit != "" {
+		return explicit, nil
+	}
+	return s.path, s.err
+}
+
+func TestCachedRemoteExecutableResolverCachesPositiveAndRetriesErrors(t *testing.T) {
+	inner := &stubResolver{err: errors.New("ssh offline")}
+	cached := newCachedRemoteExecutableResolver(inner, 30*time.Second)
+	conn := map[string]any{"id": "wsl", "host": "127.0.0.1", "port": 22, "user": "luwei"}
+
+	// Errors must never be cached.
+	if _, err := cached.Resolve(context.Background(), "antigravity", conn); err == nil {
+		t.Fatal("expected error when inner fails")
+	}
+	inner.err = nil
+	inner.path = "/usr/local/bin/agy"
+
+	got1, err := cached.Resolve(context.Background(), "antigravity", conn)
+	if err != nil || got1 != "/usr/local/bin/agy" || inner.calls != 2 {
+		t.Fatalf("unexpected first positive resolution: got=%q err=%v calls=%d", got1, err, inner.calls)
+	}
+
+	// Second resolution within TTL reuses cached positive path without extra probe.
+	got2, err := cached.Resolve(context.Background(), "antigravity", conn)
+	if err != nil || got2 != "/usr/local/bin/agy" || inner.calls != 2 {
+		t.Fatalf("expected cached hit without extra inner call: got=%q err=%v calls=%d", got2, err, inner.calls)
+	}
+
+	// Explicit override bypasses cached path.
+	got3, err := cached.Resolve(context.Background(), "antigravity", map[string]any{
+		"id": "wsl", "host": "127.0.0.1", "port": 22, "user": "luwei",
+		"antigravity_executable": "/custom/agy",
+	})
+	if err != nil || got3 != "/custom/agy" {
+		t.Fatalf("expected explicit override /custom/agy, got=%q err=%v", got3, err)
 	}
 }

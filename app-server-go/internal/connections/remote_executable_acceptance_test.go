@@ -13,9 +13,10 @@ func TestAcceptanceRemoteNativeTargetPreservesExecutablePaths(t *testing.T) {
 	settings := map[string]any{
 		"host": "fixture.invalid", "port": 2222,
 		"workspace": "/srv/fixture", "user": "fixture",
-		"codex_executable":  "/opt/native/codex",
-		"grok_executable":   "/opt/native/grok",
-		"hermes_executable": "/opt/native/hermes",
+		"codex_executable":       "/opt/native/codex",
+		"grok_executable":        "/opt/native/grok",
+		"hermes_executable":      "/opt/native/hermes",
+		"antigravity_executable": "/opt/native/agy",
 	}
 	for _, row := range []struct {
 		kind       string
@@ -25,6 +26,7 @@ func TestAcceptanceRemoteNativeTargetPreservesExecutablePaths(t *testing.T) {
 		{"codex", pb.RuntimeKind_RUNTIME_KIND_CODEX_SSH, "/opt/native/codex"},
 		{"grok", pb.RuntimeKind_RUNTIME_KIND_GROK_SSH, "/opt/native/grok"},
 		{"hermes", pb.RuntimeKind_RUNTIME_KIND_SSH_HERMES, "/opt/native/hermes"},
+		{"antigravity", pb.RuntimeKind_RUNTIME_KIND_ANTIGRAVITY_SSH, "/opt/native/agy"},
 	} {
 		t.Run(row.kind, func(t *testing.T) {
 			target := runtimeTarget(row.kind, &connID, map[string]any{"id": connID, "settings": settings})
@@ -39,6 +41,8 @@ func TestAcceptanceRemoteNativeTargetPreservesExecutablePaths(t *testing.T) {
 				got = target.Ssh.GetGrokExecutable()
 			case "hermes":
 				got = target.Ssh.GetHermesExecutable()
+			case "antigravity":
+				got = target.Ssh.GetAntigravityExecutable()
 			}
 			if got != row.executable {
 				t.Fatalf("remote %s native executable omitted or changed: got=%q want=%q", row.kind, got, row.executable)

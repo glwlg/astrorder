@@ -437,11 +437,78 @@ describe('SessionRail local handoff', () => {
     useAstrorderStore.getState().resetRuntime()
   })
 
-  it('offers Antigravity native fork without a worktree option', async () => {
+  it('transfers Codex session to Antigravity without effort selection or existing target session', async () => {
+    const codexSource: Session = {
+      id: 'codex-1',
+      agent_id: 'remote-codex',
+      title: 'Codex 工作',
+      workspace: '/repo',
+      connection_id: 'ssh-wsl',
+      status: 'idle',
+      updated_at: '2026-09-07T10:00:00Z',
+      source_id: 'source-remote-codex',
+    }
+    const target: Session = {
+      ...codexSource,
+      id: 'agy-target',
+      agent_id: 'remote-agy',
+      handoff_from_agent_id: 'remote-codex',
+      handoff_from_session_id: 'codex-1',
+    }
+    const models = vi.spyOn(api, 'getSessionModels').mockResolvedValue({
+      items: [{ provider: 'antigravity', model: 'gemini-4-carbon-medium', label: 'Gemini 4 Carbon (Medium)' }],
+    })
+    const handoff = vi.spyOn(api, 'handoffSession').mockResolvedValue(target)
+    const testAgents: Record<string, Agent> = {
+      'remote-codex': { ...agents.codex, id: 'remote-codex', connection_id: 'ssh-wsl' },
+      'remote-agy': {
+        id: 'remote-agy',
+        kind: 'antigravity-ssh',
+        name: 'WSL AGY',
+        status: 'ready',
+        capabilities: [],
+        limitation: null,
+        source_id: 'source-remote-agy',
+        connection_id: 'ssh-wsl',
+      },
+    }
+    const view = render(
+      <MantineProvider>
+        <SessionRail sessions={[codexSource]} agents={testAgents} onSelect={vi.fn()} />
+      </MantineProvider>,
+    )
+
+    const row = view.container.querySelector('.session-row-title[title="Codex 工作"]')!.closest('.session-row-wrapper')!
+    fireEvent.click(row.querySelector('button[aria-label="更多操作"]')!)
+    fireEvent.click(await screen.findByRole('menuitem', { name: '转交' }))
+
+    expect(await screen.findByRole('dialog', { name: '转交会话' })).toBeInTheDocument()
+    await waitFor(() => expect(models).toHaveBeenCalledWith('__probe__', 'remote-agy'))
+    expect(screen.queryByLabelText('思考程度')).not.toBeInTheDocument()
+    await screen.findByRole('option', { name: 'Gemini 4 Carbon (Medium)' })
+    fireEvent.change(screen.getByLabelText('模型'), { target: { value: JSON.stringify(['antigravity', 'gemini-4-carbon-medium']) } })
+    fireEvent.click(screen.getByRole('button', { name: '转交' }))
+
+    await waitFor(() => expect(handoff).toHaveBeenCalledWith('codex-1', 'remote-codex', 'remote-agy', expect.any(String), {
+      provider: 'antigravity', model: 'gemini-4-carbon-medium', effort: '',
+    }))
+
+    models.mockRestore()
+    handoff.mockRestore()
+    view.unmount()
+    const tasks = Object.values(useBackgroundTasks.getState().tasks)
+    for (const task of tasks) {
+      useBackgroundTasks.getState().dismiss(task.id)
+    }
+    useAstrorderStore.getState().resetRuntime()
+  })
+
+  it('hides unsupported fork actions on Antigravity ACP sessions', async () => {
     const agyAgents = { ...agents, [sessions[0].agent_id]: { ...agents[sessions[0].agent_id], kind: 'antigravity' as const } }
     const view = render(<MantineProvider><SessionRail sessions={[sessions[0]]} agents={agyAgents} onSelect={vi.fn()} /></MantineProvider>)
     fireEvent.click(view.container.querySelector('button[aria-label="更多操作"]')!)
-    expect(await screen.findByRole('menuitem', { name: '创建聊天分支' })).toBeInTheDocument()
+    expect(await screen.findByRole('menuitem', { name: '重命名' })).toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: '创建聊天分支' })).not.toBeInTheDocument()
     expect(screen.queryByRole('menuitem', { name: '在新工作树中创建聊天分支' })).not.toBeInTheDocument()
     view.unmount()
   })
@@ -495,7 +562,7 @@ describe('SessionRail local handoff', () => {
     vi.unstubAllGlobals()
   })
 
-  it('uses the green running state instead of the completed unread indicator', () => {
+  it('uses the project running state instead of the completed unread indicator', () => {
     const view = render(
       <MantineProvider>
         <SessionRail sessions={[{ ...sessions[0], status: 'running', updated_at: new Date().toISOString() }]} agents={agents} projects={projects} onSelect={vi.fn()} />
@@ -505,7 +572,7 @@ describe('SessionRail local handoff', () => {
     expect(row).toHaveClass('is-running')
     expect(row.querySelector('.status-running')).toBeInTheDocument()
     expect(row.querySelector('.status-unread')).toBeNull()
-    expect(row.closest('.session-row-wrapper')).toHaveStyle({ '--session-running-color': 'var(--astr-indigo, #5b6cff)' })
+    expect(row.closest('.session-row-wrapper')).toHaveStyle({ '--session-running-color': 'var(--astr-text)' })
   })
 
   it('does not mark metadata-only updates unread', () => {

@@ -53,6 +53,29 @@ beforeEach(() => {
   vi.spyOn(draftStorage, 'remove').mockImplementation(async key => { savedDrafts.delete(key) })
 })
 afterEach(() => { cleanup(); vi.restoreAllMocks(); queueMemory.rows = []; useAstrorderStore.getState().resetRuntime() })
+it('edits screenshot feedback as ordinary text and sends it with the annotated image', async () => {
+  const file = new File(['red frame'], '界面调整预览.jpg', { type: 'image/jpeg' })
+  useAstrorderStore.getState().setDraft(session.agent_id, session.id, {
+    text: '去掉箭头', attachments: [{ key: 'browser-design-adjustment', file }], sessionRefs: [],
+  })
+  vi.spyOn(api, 'getSessionModel').mockResolvedValue({ model: 'native-model', provider: 'provider' })
+  vi.spyOn(api, 'uploadAttachment').mockResolvedValue({ id: 'preview', name: file.name, media_type: file.type, url: '/preview' })
+  const create = vi.spyOn(api, 'createCommand').mockImplementation(async input => ({
+    ...input, state: 'running', attachments: [], created_at: session.updated_at, error: null, target_id: null,
+  }))
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(<MantineProvider><QueryClientProvider client={client}><ChatComposer session={session} agent={agent} /></QueryClientProvider></MantineProvider>)
+  await screen.findByRole('button', { name: '选择会话模型' })
+  const input = screen.getByLabelText('消息内容')
+  expect(input).toHaveValue('去掉箭头')
+  fireEvent.change(input, { target: { value: '去掉箭头\n按钮再小一点' } })
+  fireEvent.click(screen.getByRole('button', { name: '发送' }))
+  await waitFor(() => expect(create).toHaveBeenCalledOnce())
+  expect(create.mock.calls[0][0]).toMatchObject({ text: '去掉箭头\n按钮再小一点', attachment_ids: ['preview'] })
+  expect(api.uploadAttachment).toHaveBeenCalledWith(file)
+  client.clear()
+})
+
 it.each([false, true])('returns a refused message and image without overwriting newer input: %s', async newer => {
   let reject!: (error: Error) => void
   vi.spyOn(api, 'getSessionModel').mockResolvedValue({ model: 'native-model', provider: 'provider' })

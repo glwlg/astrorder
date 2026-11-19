@@ -239,8 +239,10 @@ func runServer(ctx context.Context, cfg config.Config, ready io.Writer, logger *
 	var groupService *botgroups.Service
 	var audioService *audio.Service
 	var notificationService *notifications.Service
+	var remoteExecutable connections.RemoteExecutableResolver
 	var browserHandler, modelHandler, connectionHandler, settingsHandler, capabilitiesHandler, notificationHandler http.Handler
 	if st != nil && client != nil {
+		remoteExecutable = newCachedRemoteExecutableResolver(&connections.NativeRemoteExecutableResolver{}, 30*time.Second)
 		authorizer := auth.New(cfg, &httpapi.StoreOriginLookup{Store: st})
 		notificationService, err = notifications.New(serverContext, st, authorizer, logger)
 		if err != nil {
@@ -248,7 +250,8 @@ func runServer(ctx context.Context, cfg config.Config, ready io.Writer, logger *
 		}
 		defer notificationService.Close()
 		notificationHandler = notificationService
-		groupService, err = botgroups.New(serverContext, botgroups.Options{Store: st, Controller: &botgroups.NativeController{Store: st, Client: client, Publisher: eventHub, DefaultWorkspace: cfg.DefaultWorkspace, AttachmentsDir: cfg.AttachmentsDir, MaxAttachmentSize: cfg.MaxAttachmentSize}, Authorizer: authorizer, Publisher: eventHub, FileResolver: targetfs.NewResolver(targetfs.ResolverOptions{Store: st, DefaultWorkspace: cfg.DefaultWorkspace, HelperAssetsDir: bundledHelperAssetsDir()})})
+		groupFileResolver := targetfs.NewResolver(targetfs.ResolverOptions{Store: st, DefaultWorkspace: cfg.DefaultWorkspace, HelperAssetsDir: bundledHelperAssetsDir()})
+		groupService, err = botgroups.New(serverContext, botgroups.Options{Store: st, Controller: &botgroups.NativeController{Store: st, Client: client, Publisher: eventHub, DefaultWorkspace: cfg.DefaultWorkspace, AttachmentsDir: cfg.AttachmentsDir, MaxAttachmentSize: cfg.MaxAttachmentSize, RemoteExecutable: remoteExecutable, Resolver: groupFileResolver}, Authorizer: authorizer, Publisher: eventHub, FileResolver: groupFileResolver})
 		if err != nil {
 			return fmt.Errorf("configure group orchestration: %w", err)
 		}
@@ -297,7 +300,7 @@ func runServer(ctx context.Context, cfg config.Config, ready io.Writer, logger *
 		capabilityService.Agents = st
 		capabilityService.CLITransport = capabilities.TransportProvisioner(listenPort, os.Getenv("ASTRORDER_PUBLIC_URL"), cfg.BrowserSecret)
 		capabilitiesHandler = capabilities.NewHandler(capabilityService, authorizer)
-		connHandler, err := connections.NewHandler(connections.Options{Store: st, Client: client, Authorizer: authorizer, Publisher: eventHub, Hooks: connections.NewNativeHookInstaller(hookResolver)})
+		connHandler, err := connections.NewHandler(connections.Options{Store: st, Client: client, Authorizer: authorizer, Publisher: eventHub, Hooks: connections.NewNativeHookInstaller(hookResolver), RemoteExecutable: remoteExecutable})
 		if err != nil {
 			return fmt.Errorf("configure connections: %w", err)
 		}
@@ -318,23 +321,24 @@ func runServer(ctx context.Context, cfg config.Config, ready io.Writer, logger *
 		nativeSessions = eventProjection
 	}
 	handler, err := httpapi.NewHandlerChecked(httpapi.Options{
-		Context:         serverContext,
-		NativeSessions:  nativeSessions,
-		Config:          cfg,
-		Store:           st,
-		DaemonClient:    client,
-		EventHub:        eventHub,
-		MemoryService:   memoryService,
-		BotGroups:       groupService,
-		AudioService:    audioService,
-		BrowserHandler:  browserHandler,
-		ModelGateway:    modelHandler,
-		Settings:        settingsHandler,
-		Capabilities:    capabilitiesHandler,
-		Connections:     connectionHandler,
-		Notifications:   notificationHandler,
-		DesktopShutdown: stopServer,
-		Logger:          logger,
+		Context:          serverContext,
+		NativeSessions:   nativeSessions,
+		Config:           cfg,
+		Store:            st,
+		DaemonClient:     client,
+		RemoteExecutable: remoteExecutable,
+		EventHub:         eventHub,
+		MemoryService:    memoryService,
+		BotGroups:        groupService,
+		AudioService:     audioService,
+		BrowserHandler:   browserHandler,
+		ModelGateway:     modelHandler,
+		Settings:         settingsHandler,
+		Capabilities:     capabilitiesHandler,
+		Connections:      connectionHandler,
+		Notifications:    notificationHandler,
+		DesktopShutdown:  stopServer,
+		Logger:           logger,
 	})
 	if err != nil {
 		return fmt.Errorf("configure http handler: %w", err)
@@ -442,4 +446,62 @@ type serverErrorWriter struct {
 func (w *serverErrorWriter) Write(message []byte) (int, error) {
 	w.logger.Error("http server error", "message", string(message))
 	return len(message), nil
+}
+
+type cachedRemoteExecutableEntry struct {
+	path      string
+	expiresAt time.Time
+}
+
+type cachedRemoteExecutableResolver struct {
+	inner connections.RemoteExecutableResolver
+	ttl   time.Duration
+	mu    sync.Mutex
+	cache map[string]cachedRemoteExecutableEntry
+}
+
+func newCachedRemoteExecutableResolver(inner connections.RemoteExecutableResolver, ttl time.Duration) *cachedRemoteExecutableResolver {
+	return &cachedRemoteExecutableResolver{
+		inner: inner,
+		ttl:   ttl,
+		cache: make(map[string]cachedRemoteExecutableEntry),
+	}
+}
+
+func (r *cachedRemoteExecutableResolver) Resolve(ctx context.Context, kind string, sshConn map[string]any) (string, error) {
+	if r == nil || r.inner == nil {
+		return "", errors.New("remote executable resolver is not configured")
+	}
+	settings, _ := sshConn["settings"].(map[string]any)
+	field := func(key string) any {
+		if settings != nil && settings[key] != nil && settings[key] != "" {
+			return settings[key]
+		}
+		if sshConn != nil {
+			return sshConn[key]
+		}
+		return nil
+	}
+	if explicit := field(kind + "_executable"); explicit != nil && explicit != "" {
+		return r.inner.Resolve(ctx, kind, sshConn)
+	}
+	key := fmt.Sprintf("%s\x00%v\x00%v\x00%v\x00%v\x00%v\x00%v",
+		kind, field("id"), field("host"), field("port"), field("user"), field("ssh_config_alias"), field("identity_file"))
+	now := time.Now()
+	if r.ttl > 0 {
+		r.mu.Lock()
+		entry, ok := r.cache[key]
+		r.mu.Unlock()
+		if ok && now.Before(entry.expiresAt) {
+			return entry.path, nil
+		}
+	}
+	resolved, err := r.inner.Resolve(ctx, kind, sshConn)
+	if err != nil || resolved == "" || r.ttl <= 0 {
+		return resolved, err
+	}
+	r.mu.Lock()
+	r.cache[key] = cachedRemoteExecutableEntry{path: resolved, expiresAt: time.Now().Add(r.ttl)}
+	r.mu.Unlock()
+	return resolved, nil
 }

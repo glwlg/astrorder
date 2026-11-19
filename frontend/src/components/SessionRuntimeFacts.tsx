@@ -100,7 +100,9 @@ export function SessionRuntimeFacts({ session, agent }: { session: Session; agen
   const remote = connections.data?.ssh?.items?.find(item => item.id === connectionId)
   const local = connections.data?.local
   const sourceName = remote?.display_name || (connectionId ? `SSH · ${connectionId}` : local?.agent_id === session.agent_id ? `本机 · ${local.profile_name || agent?.profile_name || 'default'}` : agent?.name || session.agent_id)
-  const sourceState = remote?.state || (local?.agent_id === session.agent_id ? local.state : agent?.status)
+  const sourceState = connectionId && agent?.kind && agent.kind !== 'hermes'
+    ? agent.status
+    : remote?.state || (local?.agent_id === session.agent_id ? local.state : agent?.status)
   const connected = sourceState === 'connected' || sourceState === 'ready'
   const git = useGitStatus(session)
   const branch = session.workspace
@@ -108,7 +110,7 @@ export function SessionRuntimeFacts({ session, agent }: { session: Session; agen
     : model.data?.branch === undefined ? model.isFetching ? '读取中…' : '原生未返回' : model.data.branch || '非 Git 工作区'
   const usage = useQuery({ queryKey: ['astrorder', 'session_usage', session.id, session.agent_id], queryFn: () => api.getSessionUsage(session.id, session.agent_id), retry: false, staleTime: 5000, refetchInterval: session.status === 'running' ? 3000 : false })
   const modelRoute = model.data?.model ? `${model.data.provider ? `${model.data.provider}/` : ''}${model.data.model}` : ''
-  const quota = useQuery({ queryKey: ['astrorder', 'model-quota', modelRoute], queryFn: () => api.getModelQuota(modelRoute), enabled: Boolean(modelRoute), retry: false, staleTime: 60000, refetchInterval: session.status === 'running' ? 60000 : false })
+  const quota = useQuery({ queryKey: ['astrorder', 'model-quota', modelRoute, session.agent_id], queryFn: () => api.getModelQuota(modelRoute, session.agent_id), enabled: Boolean(modelRoute), retry: false, staleTime: 60000, refetchInterval: session.status === 'running' ? 60000 : false })
   const reports = quota.data?.reports || []
   const accounts = (quota.data?.accounts || []).filter(account => !account.paused)
 

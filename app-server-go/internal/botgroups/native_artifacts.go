@@ -12,6 +12,8 @@ import (
 	"astrorder.dev/app-server/internal/artifacts"
 	"astrorder.dev/app-server/internal/sessions"
 	pb "astrorder.dev/contracts/gen/go/astrorder/sessiond/v1"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // NativeFileOperation is an executed operation from the reply's native turn.
@@ -111,6 +113,41 @@ func nativeFileOperations(raw map[string]any) []NativeFileOperation {
 			return []NativeFileOperation{{ID: id, Kind: "commandExecution", Command: command, Cwd: cwd, ExitCode: &code, Output: output}}
 		}
 	}
+	if item["kind"] == "tool" {
+		tool, _ := item["tool"].(map[string]any)
+		if tool == nil || tool["status"] != "completed" {
+			return nil
+		}
+		toolName, _ := tool["name"].(string)
+		var inputMap map[string]any
+		switch rawIn := tool["input"].(type) {
+		case map[string]any:
+			inputMap = rawIn
+		case string:
+			_ = json.Unmarshal([]byte(rawIn), &inputMap)
+		}
+		switch toolName {
+		case "write_file", "edit_file", "write_to_file", "replace_file_content", "multi_replace_file_content":
+			for _, key := range []string{"Path", "path", "TargetFile", "target_file"} {
+				if p, ok := inputMap[key].(string); ok && strings.TrimSpace(p) != "" {
+					return []NativeFileOperation{{ID: id, Kind: "fileChange", Path: strings.TrimSpace(p)}}
+				}
+			}
+		case "run_command":
+			cmdStr, _ := inputMap["CommandLine"].(string)
+			if cmdStr == "" {
+				cmdStr, _ = inputMap["command"].(string)
+			}
+			cwd, _ := inputMap["Cwd"].(string)
+			if cwd == "" {
+				cwd, _ = inputMap["cwd"].(string)
+			}
+			if cmdStr != "" && len(cmdStr) <= 64*1024 {
+				zero := 0
+				return []NativeFileOperation{{ID: id, Kind: "commandExecution", Command: cmdStr, Cwd: cwd, ExitCode: &zero}}
+			}
+		}
+	}
 	return nil
 }
 
@@ -171,6 +208,11 @@ func (c *NativeController) ReadArtifactEvidence(ctx context.Context, agentID, se
 				request.Before = &pb.NullableString{State: &pb.NullableString_Value{Value: cursor}}
 			}
 			page, err := c.Client.Runtime.GetHistoryPage(ctx, request)
+			if err != nil && (status.Code(err) == codes.NotFound || strings.Contains(err.Error(), "not owned")) {
+				if attachErr := c.attachAntigravityForHistory(ctx, ref, kind); attachErr == nil {
+					page, err = c.Client.Runtime.GetHistoryPage(ctx, request)
+				}
+			}
 			if err != nil {
 				return nil, err
 			}

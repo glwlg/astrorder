@@ -15,7 +15,7 @@ import (
 
 func newEnv(id string) *envtargettest.Env {
 	env := envtargettest.New(id)
-	env.Bins["codex"], env.Bins["hermes"], env.Bins["grok"], env.Bins["npx"], env.Bins["rtk"] = "/bin/codex", "/bin/hermes", "/bin/grok", "/bin/npx", "/bin/rtk"
+	env.Bins["codex"], env.Bins["hermes"], env.Bins["grok"], env.Bins["agy"], env.Bins["npx"], env.Bins["rtk"] = "/bin/codex", "/bin/hermes", "/bin/grok", "/bin/agy", "/bin/npx", "/bin/rtk"
 	return env
 }
 
@@ -98,7 +98,7 @@ func TestUpdateMCPEndToEndOnEachAgent(t *testing.T) {
 			seen[server.Agent] = true
 		}
 	}
-	if len(seen) != 3 {
+	if len(seen) != 4 || !seen["antigravity"] {
 		t.Fatalf("added server visible for %v", seen)
 	}
 	for _, agent := range agents {
@@ -281,15 +281,18 @@ func TestDispatchSkillCopiesDirectory(t *testing.T) {
 	src.Files[src.P.Codex+"/skills/alpha/SKILL.md"] = []byte("---\nname: alpha\n---\n")
 	src.Packed[src.P.Codex+"/skills/alpha"] = []byte("archive")
 	svc := serviceFor(src, dst)
-	result, err := svc.Dispatch(context.Background(), "skill", "src", "codex", "alpha", []DispatchTarget{{"dst", "hermes"}, {"dst", "grok"}})
+	result, err := svc.Dispatch(context.Background(), "skill", "src", "codex", "alpha", []DispatchTarget{{"dst", "hermes"}, {"dst", "grok"}, {"dst", "antigravity"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.SuccessCount != 2 {
+	if result.SuccessCount != 3 {
 		t.Fatalf("%+v", result)
 	}
 	if _, ok := dst.Unpacks[dst.P.Hermes+"/skills/alpha"]; !ok {
 		t.Errorf("hermes skill dir not written: %v", dst.Unpacks)
+	}
+	if _, ok := dst.Unpacks[dst.P.Home+"/.gemini/antigravity/skills/alpha"]; !ok {
+		t.Errorf("antigravity skill dir not written: %v", dst.Unpacks)
 	}
 	if _, err := svc.Dispatch(context.Background(), "skill", "src", "codex", "../etc", []DispatchTarget{{"dst", "codex"}}); err == nil {
 		t.Error("path-like skill name accepted")

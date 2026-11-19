@@ -41,17 +41,17 @@ describe('ApprovalModeControl', () => {
     localStorage.clear()
   })
 
-  it('offers Antigravity native rules and full access without unsupported auto review', async () => {
+  it('offers all three ACP approval modes including auto review for Antigravity', async () => {
     vi.spyOn(api, 'getSessionApprovalMode').mockResolvedValue({ mode: 'manual' })
-    const setSpy = vi.spyOn(api, 'setSessionApprovalMode').mockResolvedValue({ mode: 'full_access' })
+    const setSpy = vi.spyOn(api, 'setSessionApprovalMode').mockResolvedValue({ mode: 'auto' })
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(<MantineProvider><QueryClientProvider client={queryClient}><ApprovalModeControl session={testSession} agentKind="antigravity" /></QueryClientProvider></MantineProvider>)
-    fireEvent.click(await screen.findByRole('button', { name: /当前审批模式：按原生规则/ }))
-    expect(await screen.findByText(/需要批准的操作会被拒绝/)).toBeInTheDocument()
-    expect(screen.queryByText('帮我批准')).not.toBeInTheDocument()
-    fireEvent.click(screen.getByText('完全访问权限'))
-    await waitFor(() => expect(setSpy).toHaveBeenCalledWith(testSession.id, testSession.agent_id, 'full_access'))
-    expect(await screen.findByRole('button', { name: /当前审批模式：完全访问权限/ })).toBeInTheDocument()
+    fireEvent.click(await screen.findByRole('button', { name: /当前审批模式：请求批准/ }))
+    expect(await screen.findByText('帮我批准')).toBeInTheDocument()
+    expect(screen.getByText('完全访问权限')).toBeInTheDocument()
+    fireEvent.click(screen.getByText('帮我批准'))
+    await waitFor(() => expect(setSpy).toHaveBeenCalledWith(testSession.id, testSession.agent_id, 'auto'))
+    expect(await screen.findByRole('button', { name: /当前审批模式：帮我批准/ })).toBeInTheDocument()
   })
 
   it('does not query or offer unsupported approval modes', () => {

@@ -40,6 +40,20 @@ func discoverAntigravity() string {
 			return p
 		}
 	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		binName := "agy"
+		if runtime.GOOS == "windows" {
+			binName = "agy.exe"
+		}
+		for _, candidate := range []string{
+			filepath.Join(home, ".local", "bin", binName),
+			filepath.Join(home, ".antigravity", "bin", binName),
+		} {
+			if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+				return candidate
+			}
+		}
+	}
 	return ""
 }
 

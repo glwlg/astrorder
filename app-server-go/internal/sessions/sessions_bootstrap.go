@@ -60,6 +60,19 @@ func (h *Handler) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 					caps = append(caps, c)
 				}
 			}
+		} else if kind == "antigravity" || kind == "antigravity-ssh" {
+			filtered := make([]string, 0, len(caps))
+			for _, c := range caps {
+				if c != "fork" {
+					filtered = append(filtered, c)
+				}
+			}
+			caps = filtered
+			for _, c := range []string{"chat", "events", "history", "launch", "stop", "delete", "queue", "approvals", "task_events", "attachments"} {
+				if !hasCap(c) {
+					caps = append(caps, c)
+				}
+			}
 		}
 		sort.Strings(caps)
 		eff["capabilities"] = caps

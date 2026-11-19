@@ -143,3 +143,44 @@ describe('activity execution facts', () => {
     expect(activityDuration(makeMessage({ completed_at: '2026-09-10T00:02:17Z' }))).toBe('2 分 17 秒')
   })
 })
+
+describe('antigravity tool normalization fallback', () => {
+  it('describes Antigravity run_command, read_file, and edit_file with concrete targets and error state', () => {
+    const cmdDesc = describeTool(makeMessage({
+      tool: {
+        name: 'run_command',
+        status: 'error',
+        input: JSON.stringify({ CommandLine: 'git status -sb', toolSummary: 'Check repo' }),
+      },
+    }))
+    expect(cmdDesc.iconKey).toBe('terminal')
+    expect(cmdDesc.action).toBe('Git')
+    expect(cmdDesc.target).toBe('git status -sb')
+    expect(cmdDesc.isFailed).toBe(true)
+
+    const readDesc = describeTool(makeMessage({
+      tool: {
+        name: 'read_file',
+        status: 'completed',
+        arguments: { Path: '/repo/internal/adapter.go', StartLine: 405, EndLine: 630 },
+      },
+    }))
+    expect(readDesc.iconKey).toBe('read')
+    expect(readDesc.action).toBe('读取')
+    expect(readDesc.target).toBe('adapter.go:405-630')
+
+    const editMsg = makeMessage({
+      tool: {
+        name: 'edit_file',
+        status: 'completed',
+        arguments: { Path: '/repo/main.go', Target: 'oldCall()', Replacement: 'newCall()' },
+      },
+    })
+    const editDesc = describeTool(editMsg)
+    expect(editDesc.iconKey).toBe('edit')
+    expect(editDesc.target).toBe('main.go')
+    expect(fileChangeDiffs(editMsg)).toEqual([
+      { file: 'main.go', diff: '--- a/main.go\n+++ b/main.go\n@@\n-oldCall()\n+newCall()' },
+    ])
+  })
+})

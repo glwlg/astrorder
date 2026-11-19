@@ -304,7 +304,7 @@ export function UsageGatewaySettingsCard() {
       <Group justify="space-between" mb="md">
         <Group gap="xs"><IconCloudDataConnection size={18} color="#2563EB" /><div>
           <Text fw={600} size="sm">LLM 网关与模型同步</Text>
-          <Text size="xs" c="dimmed">用量实时读取；Codex 与 Grok 配置按目标同步</Text>
+          <Text size="xs" c="dimmed">用量实时读取；Codex、Grok 与 Antigravity 配置按目标同步</Text>
         </div></Group>
         <Badge size="xs" variant="light" color={gatewayType === 'magpie' ? 'indigo' : 'teal'}>{gatewayType === 'magpie' ? 'Magpie' : 'OpenCodeX'}{maskedKey ? ` · ${maskedKey}` : ''}</Badge>
       </Group>

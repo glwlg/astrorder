@@ -60,6 +60,17 @@ func object(value any) map[string]any {
 	return valueMap
 }
 
+func hasQuestions(value any) bool {
+	switch typed := value.(type) {
+	case []any:
+		return len(typed) > 0
+	case []map[string]any:
+		return len(typed) > 0
+	default:
+		return false
+	}
+}
+
 // Events uses the same committed native outcome for desktop reminders and Web
 // Push. Only notification metadata is persisted, never transcript/question text.
 func Events(ctx context.Context, db queryer, events []store.Event) ([]store.Event, error) {
@@ -94,8 +105,7 @@ func Events(ctx context.Context, db queryer, events []store.Event) ([]store.Even
 				id = "turn:" + turn
 			}
 		case "message.upsert":
-			questions, _ := data["questions"].([]any)
-			if text(data, "role") != "assistant" || text(data, "delivery") != "async" || len(questions) == 0 {
+			if text(data, "role") != "assistant" || text(data, "delivery") != "async" || data["answered"] == true || !hasQuestions(data["questions"]) {
 				continue
 			}
 			target, turn = text(data, "id"), text(data, "turn_id")
@@ -153,6 +163,9 @@ func Events(ctx context.Context, db queryer, events []store.Event) ([]store.Even
 		case "command.upsert":
 			// Antigravity reports its terminal turn through this receipt. Codex
 			// and Hermes also complete steering receipts before the turn ends.
+			if data["awaiting_input"] == true {
+				continue
+			}
 			turn = text(data, "id")
 			if turn == "" || (text(data, "action") != "send" && text(data, "action") != "enqueue") {
 				continue
@@ -182,9 +195,12 @@ func Events(ctx context.Context, db queryer, events []store.Event) ([]store.Even
 		if err != nil {
 			return nil, err
 		}
-		if ephemeral || (event.Type == "command.upsert" && agentKind != "antigravity") ||
+		if ephemeral || (event.Type == "command.upsert" && agentKind != "antigravity" && agentKind != "antigravity-ssh") ||
 			(event.Type == "hermes.command_complete" && (status == "running" || status == "waiting_approval")) {
 			continue
+		}
+		if event.Type == "message.upsert" && (agentKind == "antigravity" || agentKind == "antigravity-ssh") {
+			title = "Antigravity 等待你的回答"
 		}
 		sum := sha256.Sum256([]byte(event.AgentID + "\x00" + event.SessionID + "\x00" + id))
 		key := "notice-" + hex.EncodeToString(sum[:])

@@ -47,10 +47,14 @@ func TestCodexAsyncAnswerUsesOrdinaryHTTPCommand(t *testing.T) {
 }
 
 func TestCodexAsyncQuestionsSurviveNativeHistoryProjection(t *testing.T) {
-	for _, kind := range []string{"codex", "codex-ssh"} {
-		questions := []any{map[string]any{"title": "喜欢什么？", "options": []any{"时间旅行", "人工智能"}}}
-		rows := projectHistoryItem(map[string]any{"turnId": "turn", "item": map[string]any{"id": "question", "type": "agentMessage", "text": "喜欢什么？", "delivery": "async", "questions": questions}}, "a", "s", "s", "a", kind)
-		if len(rows) != 1 || rows[0]["delivery"] != "async" || rows[0]["questions"] == nil {
+	for _, kind := range []string{"codex", "codex-ssh", "antigravity", "antigravity-ssh"} {
+		questions := []any{map[string]any{"title": "喜欢什么？", "options": []any{"时间旅行", "人工智能"}, "multi_select": true}}
+		input := map[string]any{"turnId": "turn", "item": map[string]any{"id": "question", "type": "agentMessage", "role": "assistant", "kind": "message", "text": "喜欢什么？", "delivery": "async", "answered": true, "questions": questions}}
+		if strings.HasPrefix(kind, "antigravity") {
+			input = map[string]any{"id": "antigravity:s:10", "role": "assistant", "kind": "message", "text": "喜欢什么？", "delivery": "async", "answered": true, "questions": questions}
+		}
+		rows := projectHistoryItem(input, "a", "s", "s", "a", kind)
+		if len(rows) != 1 || rows[0]["delivery"] != "async" || rows[0]["questions"] == nil || rows[0]["answered"] != true {
 			t.Fatalf("%s lost async question: %#v", kind, rows)
 		}
 	}

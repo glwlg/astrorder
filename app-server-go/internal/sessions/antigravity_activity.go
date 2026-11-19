@@ -7,13 +7,34 @@ import (
 	"time"
 
 	pb "astrorder.dev/contracts/gen/go/astrorder/sessiond/v1"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
+
+func isPreUpgradeAntigravitySSHError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "connection is invalid") || strings.Contains(msg, "SSH transport options") {
+		return false
+	}
+	switch status.Code(err) {
+	case codes.InvalidArgument, codes.Unimplemented, codes.NotFound:
+		return true
+	default:
+		return strings.Contains(msg, `runtime "antigravity-ssh" is not registered`)
+	}
+}
 
 // Refresh only metadata; native SQLite remains the transcript source. Existing
 // status, user titles, ownership and deletion tombstones are not replaced.
 func (h *Handler) refreshAntigravityActivity(ctx context.Context, agent map[string]any, target *pb.RuntimeTarget) (int, error) {
 	response, err := h.client.Runtime.QueryNative(ctx, &pb.NativeQueryRequest{Target: target, Query: &pb.NativeQueryRequest_AntigravitySessionList{AntigravitySessionList: &pb.AntigravitySessionListQuery{}}})
 	if err != nil {
+		if target.GetRuntime() == pb.RuntimeKind_RUNTIME_KIND_ANTIGRAVITY_SSH && isPreUpgradeAntigravitySSHError(err) {
+			return 0, nil
+		}
 		return 0, fmt.Errorf("native Antigravity session list failed: %w", err)
 	}
 	var parsed struct {
@@ -82,6 +103,13 @@ func (h *Handler) refreshAntigravityActivity(ctx context.Context, agent map[stri
 		}
 		if existing == nil {
 			continue
+		}
+		existingTitle := strings.TrimSpace(stringValue(existing, "title"))
+		if title != native.ID && (existingTitle == "" || existingTitle == "New Session" || existingTitle == "新对话" || existingTitle == "新会话" || existingTitle == native.ID) && existingTitle != title {
+			if upgraded, upErr := h.store.UpdateSession(ctx, aid, native.ID, map[string]any{"title": title}); upErr == nil && upgraded != nil {
+				h.publishEvent(ctx, "session.upsert", upgraded)
+				count++
+			}
 		}
 		updated, changed, err := h.store.AdvanceSessionActivity(ctx, aid, native.ID, at)
 		if err != nil {

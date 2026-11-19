@@ -54,7 +54,7 @@ var officialCatalog = []OfficialSkill{
 		Content:               string(sessionsSkillMD),
 		RequiresCallerBinding: true,
 		RequiresCLI:           true,
-		SupportedAgents:       []string{"codex", "hermes", "grok"},
+		SupportedAgents:       []string{"codex", "hermes", "grok", "antigravity"},
 	},
 	{
 		Name:                  "astrorder-browser",
@@ -68,7 +68,7 @@ var officialCatalog = []OfficialSkill{
 		Content:               string(browserSkillMD),
 		RequiresCallerBinding: true,
 		RequiresCLI:           true,
-		SupportedAgents:       []string{"codex", "hermes", "grok"},
+		SupportedAgents:       []string{"codex", "hermes", "grok", "antigravity"},
 	},
 	{
 		Name:                  "astrorder-blackboard",
@@ -82,7 +82,7 @@ var officialCatalog = []OfficialSkill{
 		Content:               string(blackboardSkillMD),
 		RequiresCallerBinding: true,
 		RequiresCLI:           true,
-		SupportedAgents:       []string{"codex", "hermes", "grok"},
+		SupportedAgents:       []string{"codex", "hermes", "grok", "antigravity"},
 	},
 	{
 		Name:                  "astrorder-swarm",
@@ -96,7 +96,7 @@ var officialCatalog = []OfficialSkill{
 		Content:               string(swarmSkillMD),
 		RequiresCallerBinding: true,
 		RequiresCLI:           true,
-		SupportedAgents:       []string{"codex", "hermes", "grok"},
+		SupportedAgents:       []string{"codex", "hermes", "grok", "antigravity"},
 	},
 	{
 		Name:                  "astrorder-workspace",
@@ -110,7 +110,7 @@ var officialCatalog = []OfficialSkill{
 		Content:               string(workspaceSkillMD),
 		RequiresCallerBinding: true,
 		RequiresCLI:           true,
-		SupportedAgents:       []string{"codex", "hermes", "grok"},
+		SupportedAgents:       []string{"codex", "hermes", "grok", "antigravity"},
 	},
 	{
 		Name:                  "astrorder-monitor",
@@ -124,7 +124,7 @@ var officialCatalog = []OfficialSkill{
 		Content:               string(monitorSkillMD),
 		RequiresCallerBinding: true,
 		RequiresCLI:           true,
-		SupportedAgents:       []string{"codex", "hermes", "grok"},
+		SupportedAgents:       []string{"codex", "hermes", "grok", "antigravity"},
 	},
 }
 

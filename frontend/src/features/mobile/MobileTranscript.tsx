@@ -12,7 +12,7 @@ import { useOlderMessages } from '../../hooks/useOlderMessages'
 import { LazyDetails } from '../../components/LazyDetails'
 import { MessageBody } from '../../components/MessageBody'
 import { sessionSwipeGesture, sessionDragPreview, startsAtSessionDrawerEdge, type SessionSwipeGesture } from './mobileGestures'
-import { describeTool, FileChangeDiffBlock, fileChangeDiffs, PackSummary, ShellOutputBlock, ToolLineIcon, unwrapCommand } from '../chat/toolPresentation'
+import { describeTool, extractToolArgs, FileChangeDiffBlock, fileChangeDiffs, PackSummary, ShellOutputBlock, ToolLineIcon, unwrapCommand } from '../chat/toolPresentation'
 import { ToolOutputBlock } from '../chat/ToolOutputBlock'
 import { isCompactionMessage, CompactionDivider } from '../chat/CompactionDivider'
 import { useReducedMotion } from '@mantine/hooks'
@@ -82,10 +82,11 @@ export function MobileTranscript({ messages, activityBreaks, commands = [], appr
           return <LazyDetails className="m-think-pack" key={m.id} loading={isPackRunning} summary={<PackSummary pack={pack} isRunning={isPackRunning} />}>
             <div className="m-think-rail">{pack.map(item => {
               const desc = describeTool(item)
-              const itemArgs = (item.tool?.arguments && typeof item.tool.arguments === 'object') ? (item.tool.arguments as Record<string, unknown>) : {}
-              const isCmd = desc.iconKey === 'terminal' || Boolean(itemArgs.command || itemArgs.cmd)
+              const itemArgs = extractToolArgs(item.tool)
+              const rawCmd = String(itemArgs.command || itemArgs.cmd || itemArgs.CommandLine || itemArgs.Command || '')
+              const isCmd = desc.iconKey === 'terminal' || Boolean(rawCmd)
               const hasFileDiff = fileChangeDiffs(item).length > 0
-              const unwrapped = unwrapCommand(String(itemArgs.command || itemArgs.cmd || ''))
+              const unwrapped = unwrapCommand(rawCmd)
               const itemStatus = desc.isFailed ? 'failed' : desc.isRunning ? 'running' : 'success'
               const foldTitle = isCmd
                 ? `${desc.isRunning ? '运行' : desc.isFailed ? '运行失败' : '已运行'} ${unwrapped || desc.target || desc.fullTitle}`
@@ -105,7 +106,7 @@ export function MobileTranscript({ messages, activityBreaks, commands = [], appr
                 ) : (
                   <ToolOutputBlock
                     text={item.text}
-                    payload={item.tool?.arguments != null && Object.keys(item.tool.arguments).length > 0 ? (item.tool.arguments as Record<string, unknown>) : null}
+                    payload={Object.keys(itemArgs).length > 0 ? itemArgs : null}
                     toolName={String(item.tool?.name || '')}
                   />
                 )}

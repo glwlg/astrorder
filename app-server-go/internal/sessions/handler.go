@@ -20,6 +20,11 @@ type Publisher interface {
 	Publish(ctx context.Context, eventType string, data map[string]any) error
 }
 
+// RemoteExecutableResolver resolves the absolute POSIX path of a remote CLI over SSH.
+type RemoteExecutableResolver interface {
+	Resolve(ctx context.Context, kind string, sshConn map[string]any) (string, error)
+}
+
 // Options provides required and optional dependencies for the sessions service.
 type Options struct {
 	Store             *store.Store
@@ -30,6 +35,7 @@ type Options struct {
 	AttachmentsDir    string
 	MaxAttachmentSize int64
 	Resolver          *targetfs.Resolver
+	RemoteExecutable  RemoteExecutableResolver
 }
 
 type taskState struct {
@@ -92,6 +98,7 @@ type Handler struct {
 	attachmentsDir    string
 	maxAttachmentSize int64
 	resolver          *targetfs.Resolver
+	remoteExecutable  RemoteExecutableResolver
 	views             viewLeases
 	titleBusy         sync.Map
 	queueBusy         sync.Map
@@ -114,6 +121,7 @@ func NewHandler(options Options) (http.Handler, error) {
 		attachmentsDir:    options.AttachmentsDir,
 		maxAttachmentSize: options.MaxAttachmentSize,
 		resolver:          options.Resolver,
+		remoteExecutable:  options.RemoteExecutable,
 	}, nil
 }
 

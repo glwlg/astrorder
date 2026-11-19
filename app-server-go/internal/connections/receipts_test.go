@@ -37,7 +37,7 @@ func receiptFixture(t *testing.T, server *fakeDaemonService) (http.Handler, *sto
 	t.Cleanup(func() { _ = client.Close() })
 	publisher := &dummyPublisher{}
 	handler, err := connections.NewHandler(connections.Options{Store: st, Client: client, Publisher: publisher,
-		RemoteExecutable: &recordingExecutableResolver{results: map[string]string{"codex": "/opt/fixture/codex", "grok": "/opt/fixture/grok"}},
+		RemoteExecutable: &recordingExecutableResolver{results: map[string]string{"codex": "/opt/fixture/codex", "grok": "/opt/fixture/grok", "antigravity": "/opt/fixture/agy"}},
 	})
 	if err != nil {
 		t.Fatal(err)

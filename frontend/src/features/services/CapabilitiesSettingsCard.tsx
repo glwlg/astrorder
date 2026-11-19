@@ -1347,6 +1347,7 @@ export function CapabilitiesSettingsCard() {
                 { value: 'codex', label: 'OpenAI Codex (~/.codex/config.toml)' },
                 { value: 'hermes', label: 'Hermes Agent (~/.hermes/config.yaml)' },
                 { value: 'grok', label: 'xAI Grok (~/.grok/config.toml)' },
+                { value: 'antigravity', label: 'Google Antigravity (~/.gemini/config/mcp_config.json)' },
               ]}
               value={mcpFormAgent}
               onChange={(val) => setMcpFormAgent(val || 'codex')}

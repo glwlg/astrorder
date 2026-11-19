@@ -45,7 +45,7 @@ $Control = Join-Path $ServerRoot 'bin\astrorderctl.exe'
 
 - **前端资源**：构建浏览器版本，使用 `astrorderctl sync --dev-root` 与 `--installed-root` 同步 `frontend/dist`，核对磁盘与 HTTP 返回资源哈希。
 - **桌面程序**：备份旧文件，只替换并重启桌面进程，核对 EXE 哈希、`--check` 与窗口启动。不要按进程树结束小内核或 Agent。
-- **大内核**：构建并验证后独立替换、重启，不捆绑小内核更新。
+- **大内核**：构建并验证后独立替换、重启，不捆绑小内核更新。发布前必须同时核对 `server/bin/helpers/linux-amd64/astrorder-helper` 和 `server/bin/helpers/linux-arm64/astrorder-helper` 及其 SHA-256；这些是远程文件、Git 和产物访问的运行依赖。缺失时从校验通过的 Go 阶段构件补齐 `helpers/`，不能只替换 `astrorder-app.exe`。发布后对已连接的 SSH/WSL 目标执行真实文件树读取，确认自动安装及绝对路径调用正常。
 - **小内核**：只将验证后的候选暂存为同目录的 `astrorder-sessiond.exe.new`，核对哈希及 `update-check`；用户通过托盘手动激活。暂存不代表上线，Agent 不执行小内核停止、重启或更新。
 
 仅构建或静态资源校验通过，不代表安装与原生交互已验收。每次交付以当次运行结果为准，不沿用历史报告中的进程号、哈希或测试数量。

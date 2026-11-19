@@ -107,6 +107,8 @@ func rtkAgentState(kind string, p envtarget.Paths, files map[string][]byte) RTKA
 			agent.Detail = "插件目录: " + dir
 		}
 		return agent
+	case "antigravity":
+		return RTKAgent{Kind: "antigravity", Name: "Google Antigravity", Detail: "RTK 暂不支持 Antigravity"}
 	}
 	return RTKAgent{Kind: "grok", Name: "xAI Grok", Detail: "RTK 暂不支持 Grok"}
 }
@@ -120,7 +122,7 @@ func (s *Service) rtkAgents(ctx context.Context, env envtarget.Env, p envtarget.
 	if err != nil {
 		return nil, err
 	}
-	return []RTKAgent{rtkAgentState("codex", p, files), rtkAgentState("hermes", p, files), rtkAgentState("grok", p, files)}, nil
+	return []RTKAgent{rtkAgentState("codex", p, files), rtkAgentState("hermes", p, files), rtkAgentState("grok", p, files), rtkAgentState("antigravity", p, files)}, nil
 }
 
 func (s *Service) rtkVersion(ctx context.Context, env envtarget.Env, exe string) string {

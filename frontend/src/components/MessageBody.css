@@ -6,3 +6,40 @@
 .message-user-prose :is(p, li) {
   white-space: pre-wrap;
 }
+
+.message-long {
+  min-width: 0;
+}
+
+.message-long-preview {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 12em;
+  overflow: hidden;
+}
+
+.message-long > details > summary {
+  cursor: pointer;
+  width: fit-content;
+  max-width: 100%;
+  padding: 6px 2px;
+  color: var(--astr-muted, #68717d);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.message-long > details > summary:hover {
+  color: var(--astr-text, #253140);
+}
+
+.message-long > details > summary:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.message-long-size {
+  margin-inline-start: 10px;
+  font-variant-numeric: tabular-nums;
+}

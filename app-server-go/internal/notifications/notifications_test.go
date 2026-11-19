@@ -100,6 +100,59 @@ func TestCanonicalNoticesDeduplicateNativeFrames(t *testing.T) {
 	}
 }
 
+func TestAntigravityAsyncQuestionAndAwaitingInputSuppressFalseCompletion(t *testing.T) {
+	st := testStore(t)
+	ctx := context.Background()
+	if _, err := st.UpsertAgent(ctx, map[string]any{"id": "agy", "kind": "antigravity", "name": "Antigravity", "status": "connected"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.UpsertSession(ctx, map[string]any{"id": "s-agy", "agent_id": "agy", "title": "开发", "status": "idle", "updated_at": time.Now().UTC().Format(time.RFC3339Nano)}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Pending async question emits Antigravity prompt notice.
+	qNotices, err := Events(ctx, st.DB(), []store.Event{{
+		ID: "msg-q", Type: "message.upsert", AgentID: "agy", SessionID: "s-agy",
+		Data: map[string]any{
+			"id": "q-1", "role": "assistant", "delivery": "async", "answered": false,
+			"questions": []map[string]any{{"title": "选择方案？"}},
+		},
+	}})
+	if err != nil || len(qNotices) != 1 || qNotices[0].Data["kind"] != "approval_pending" || qNotices[0].Data["title"] != "Antigravity 等待你的回答" {
+		t.Fatalf("unexpected Antigravity question notice: %#v err=%v", qNotices, err)
+	}
+
+	// Answered async question emits nothing.
+	answeredNotices, err := Events(ctx, st.DB(), []store.Event{{
+		ID: "msg-q-done", Type: "message.upsert", AgentID: "agy", SessionID: "s-agy",
+		Data: map[string]any{
+			"id": "q-2", "role": "assistant", "delivery": "async", "answered": true,
+			"questions": []map[string]any{{"title": "选择方案？"}},
+		},
+	}})
+	if err != nil || len(answeredNotices) != 0 {
+		t.Fatalf("expected no notice for answered question, got %#v err=%v", answeredNotices, err)
+	}
+
+	// Early turn pause for ask_question (awaiting_input=true) must NOT fire task_completed ("会话已完成").
+	suppressed, err := Events(ctx, st.DB(), []store.Event{{
+		ID: "cmd-pause", Type: "command.upsert", AgentID: "agy", SessionID: "s-agy",
+		Data: map[string]any{"id": "turn-pause", "action": "send", "state": "completed", "awaiting_input": true},
+	}})
+	if err != nil || len(suppressed) != 0 {
+		t.Fatalf("expected awaiting_input command to suppress completion notice, got %#v err=%v", suppressed, err)
+	}
+
+	// Genuine turn completion still fires task_completed ("会话已完成").
+	completed, err := Events(ctx, st.DB(), []store.Event{{
+		ID: "cmd-done", Type: "command.upsert", AgentID: "agy", SessionID: "s-agy",
+		Data: map[string]any{"id": "turn-done", "action": "send", "state": "completed"},
+	}})
+	if err != nil || len(completed) != 1 || completed[0].Data["kind"] != "task_completed" || completed[0].Data["title"] != "会话已完成" {
+		t.Fatalf("expected genuine completion notice, got %#v err=%v", completed, err)
+	}
+}
+
 func browserSubscription(t *testing.T) subscription {
 	t.Helper()
 	key, err := ecdh.P256().GenerateKey(rand.Reader)

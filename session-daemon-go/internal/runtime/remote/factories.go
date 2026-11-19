@@ -2,8 +2,11 @@ package remote
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
+	"time"
 
 	"astrorder.dev/session-daemon/internal/process"
 	core "astrorder.dev/session-daemon/internal/runtime"
@@ -15,7 +18,13 @@ import (
 
 // ParseSSHConfig extracts and validates ssh.Config from an untrusted map.
 func ParseSSHConfig(settings map[string]any) (sshtrans.Config, error) {
-	cfg := sshtrans.Config{Binary: "ssh"}
+	cfg := sshtrans.Config{
+		Binary:         "ssh",
+		ConnectTimeout: 12 * time.Second,
+		Options: map[string]string{
+			"BatchMode": "yes",
+		},
+	}
 	host, _ := settings["host"].(string)
 	if host == "" {
 		return cfg, fmt.Errorf("ssh host is required")
@@ -25,10 +34,23 @@ func ParseSSHConfig(settings map[string]any) (sshtrans.Config, error) {
 	if user, ok := settings["user"].(string); ok && user != "" {
 		cfg.User = user
 	}
-	if port, ok := settings["port"].(float64); ok && port > 0 {
-		cfg.Port = int(port)
-	} else if port, ok := settings["port"].(int); ok && port > 0 {
-		cfg.Port = port
+	switch port := settings["port"].(type) {
+	case float64:
+		if port > 0 {
+			cfg.Port = int(port)
+		}
+	case int:
+		if port > 0 {
+			cfg.Port = port
+		}
+	case int64:
+		if port > 0 {
+			cfg.Port = int(port)
+		}
+	case json.Number:
+		if n, err := strconv.Atoi(port.String()); err == nil && n > 0 {
+			cfg.Port = n
+		}
 	}
 	if key, ok := settings["identity_file"].(string); ok && key != "" {
 		cfg.IdentityFile = key

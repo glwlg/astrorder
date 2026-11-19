@@ -28,8 +28,8 @@ type ResolverOptions struct {
 	WSLHelperPath    string
 	LocalStageRoots  []string
 	// HelperAssetsDir holds helpers/<platform>/astrorder-helper builds that are
-	// installed on remote targets on first use. When empty or missing, the
-	// helper is expected to be on the remote PATH.
+	// installed on remote targets on first use. Remote access requires these
+	// bundled assets unless a helper path is explicitly configured.
 	HelperAssetsDir string
 }
 
@@ -105,7 +105,11 @@ func (r *Resolver) Resolve(ctx context.Context, request ResolveRequest) (Resolve
 		distro := strings.TrimPrefix(connectionID, "wsl:")
 		wslConfig := WSLConfig{Binary: r.options.WSLBinary, Distro: distro, HelperPath: r.options.WSLHelperPath}
 		if wslConfig.HelperPath == "" {
-			wslConfig.HelperPath = r.helperPath(ctx, connectionID, wslShellRunner(wslConfig))
+			path, err := r.helperPath(ctx, connectionID, wslShellRunner(wslConfig))
+			if err != nil {
+				return Resolved{}, err
+			}
+			wslConfig.HelperPath = path
 		}
 		command, err := BuildWSLCommand(wslConfig)
 		if err != nil {
@@ -142,13 +146,26 @@ func (r *Resolver) Resolve(ctx context.Context, request ResolveRequest) (Resolve
 		connectionWorkspace = workspace
 	}
 	roots := []string{connectionWorkspace}
+	sshUser := mapString(settings, "user")
+	if sshUser == "root" {
+		roots = append(roots, "/root/.gemini")
+	} else if sshUser != "" {
+		roots = append(roots, "/home/"+sshUser+"/.gemini")
+	}
+	if idx := strings.Index(workspace, "/.gemini/antigravity"); idx > 0 {
+		roots = append(roots, workspace[:idx+len("/.gemini")])
+	}
 	sshConfig := SSHConfig{
 		Binary: r.options.SSHBinary, Host: mapString(settings, "host"), Alias: mapString(settings, "ssh_config_alias"),
 		Port: mapInt(settings, "port", 22), User: mapString(settings, "user"), IdentityFile: mapString(settings, "identity_file"),
 		ConfigFile: mapString(settings, "config_file"), HelperPath: r.options.HelperPath,
 	}
 	if sshConfig.HelperPath == "" {
-		sshConfig.HelperPath = r.helperPath(ctx, connectionID, sshShellRunner(sshConfig))
+		path, err := r.helperPath(ctx, connectionID, sshShellRunner(sshConfig))
+		if err != nil {
+			return Resolved{}, err
+		}
+		sshConfig.HelperPath = path
 	}
 	command, err := BuildSSHCommand(sshConfig)
 	if err != nil {
@@ -161,19 +178,13 @@ func (r *Resolver) Resolve(ctx context.Context, request ResolveRequest) (Resolve
 	return Resolved{FileSystem: filesystem, Workspace: workspace, ConnectionID: connectionID, Kind: "ssh"}, nil
 }
 
-// helperPath returns the installed helper path for a remote target. Without
-// bundled assets the helper is resolved from the remote PATH. Installation
-// failures are returned as the PATH fallback so the helper start error carries
-// the real cause.
-func (r *Resolver) helperPath(ctx context.Context, key string, run shellRunner) string {
+// helperPath returns the verified installation path. Missing assets and setup
+// failures must reach the caller instead of starting an unverified PATH helper.
+func (r *Resolver) helperPath(ctx context.Context, key string, run shellRunner) (string, error) {
 	if r.installer == nil {
-		return helperBinaryName
+		return "", errorf(503, "helper_asset_missing", "星序安装缺少远程文件服务组件", nil)
 	}
-	path, err := r.installer.ensure(ctx, key, run)
-	if err != nil {
-		return helperBinaryName
-	}
-	return path
+	return r.installer.ensure(ctx, key, run)
 }
 
 func CleanPath(value string) string {

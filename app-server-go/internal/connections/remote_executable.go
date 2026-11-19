@@ -11,7 +11,7 @@ import (
 )
 
 // RemoteExecutableResolver resolves the absolute POSIX path of a remote agent
-// CLI (codex/grok) through one read-only SSH probe. It never starts an agent
+// CLI (codex/grok/antigravity) through one read-only SSH probe. It never starts an agent
 // process, never submits a prompt, and never fabricates a path: an unresolved
 // executable is an explicit error.
 type RemoteExecutableResolver interface {
@@ -39,11 +39,13 @@ const remoteExecutableProbeBody = `p=$(command -v "$k" 2>/dev/null); ` +
 	`if [ -z "$p" ] && [ "$k" = codex ]; then for c in "$HOME"/.nvm/versions/node/*/bin/codex; do if [ -x "$c" ]; then p="$c"; fi; done; fi; ` +
 	`if [ -z "$p" ] && [ "$k" = hermes ] && [ -x "$HOME/.hermes/hermes-agent/venv/bin/hermes" ]; then p="$HOME/.hermes/hermes-agent/venv/bin/hermes"; fi; ` +
 	`if [ -z "$p" ] && [ "$k" = grok ] && [ -x "$HOME/.grok/bin/grok" ]; then p="$HOME/.grok/bin/grok"; fi; ` +
+	`if [ -z "$p" ] && [ "$k" = agy ]; then for c in "$HOME/.antigravity/bin/agy" "/usr/local/bin/agy"; do if [ -x "$c" ]; then p="$c"; break; fi; done; fi; ` +
 	`if [ -n "$p" ] && [ -x "$p" ]; then case "$p" in /*) printf '%s\n' "$p";; esac; fi`
 
 var remoteExecutableProbeScripts = map[string]string{
-	"codex": `k=codex; ` + remoteExecutableProbeBody,
-	"grok":  `k=grok; ` + remoteExecutableProbeBody,
+	"codex":       `k=codex; ` + remoteExecutableProbeBody,
+	"grok":        `k=grok; ` + remoteExecutableProbeBody,
+	"antigravity": `k=agy; ` + remoteExecutableProbeBody,
 }
 
 // Resolve returns the absolute POSIX path of the remote CLI for one kind.

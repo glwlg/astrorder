@@ -47,6 +47,9 @@ func (h *Handler) RefreshActivity(ctx context.Context, agentID string) (map[stri
 	for _, agent := range agents {
 		id, _ := agent["id"].(string)
 		kind, _ := agent["kind"].(string)
+		if kind == "antigravity-ssh" {
+			kind = "antigravity"
+		}
 		if id == "" || (agentID != "" && id != agentID) || (kind != "codex" && kind != "hermes" && kind != "grok" && kind != "antigravity") {
 			continue
 		}

@@ -85,15 +85,21 @@ func (h *Handler) handleGetMagpieQuotas(w http.ResponseWriter, r *http.Request) 
 	}
 	writeJSON(w, 200, map[string]any{"gatewayType": "magpie", "data": qs})
 }
-func (h *Handler) serveMagpieModelQuota(w http.ResponseWriter, r *http.Request, cfg GatewayConfig, model string) {
+func (h *Handler) serveMagpieModelQuota(w http.ResponseWriter, r *http.Request, cfg GatewayConfig, model, agentID string) {
 	qs, err := h.magpieQuotas(r, cfg)
 	if err != nil {
+		if h.shouldTryAntigravityNative(r.Context(), model, agentID) {
+			if native, ok := h.serveAntigravityNativeModelQuota(r.Context(), model, agentID); ok {
+				writeJSON(w, 200, native)
+				return
+			}
+		}
 		writeError(w, 502, "upstream_error", err.Error())
 		return
 	}
 	provider, candidate, qualified := strings.Cut(model, "/")
-	// Native bindings carry the gateway provider before an already-qualified model ID.
-	if nested, rest, ok := strings.Cut(candidate, "/"); qualified && ok && (provider == "magpie" || provider == nested) {
+	// Native bindings carry the runtime/gateway provider before an already-qualified model ID.
+	if nested, rest, ok := strings.Cut(candidate, "/"); qualified && ok && (provider == "magpie" || provider == "antigravity" || provider == "grok" || provider == nested) {
 		provider, candidate = nested, rest
 	}
 	if !qualified {
@@ -101,6 +107,12 @@ func (h *Handler) serveMagpieModelQuota(w http.ResponseWriter, r *http.Request, 
 		// Resolve unqualified models from the catalog rather than guessing the provider.
 		endpoint, err := magpieEndpoint(cfg, "")
 		if err != nil {
+			if h.shouldTryAntigravityNative(r.Context(), model, agentID) {
+				if native, ok := h.serveAntigravityNativeModelQuota(r.Context(), model, agentID); ok {
+					writeJSON(w, 200, native)
+					return
+				}
+			}
 			writeError(w, 502, "upstream_error", err.Error())
 			return
 		}
@@ -115,11 +127,23 @@ func (h *Handler) serveMagpieModelQuota(w http.ResponseWriter, r *http.Request, 
 		}
 		resp, err := h.httpClient.Do(req)
 		if err != nil {
+			if h.shouldTryAntigravityNative(r.Context(), model, agentID) {
+				if native, ok := h.serveAntigravityNativeModelQuota(r.Context(), model, agentID); ok {
+					writeJSON(w, 200, native)
+					return
+				}
+			}
 			writeError(w, 502, "upstream_error", "Magpie 模型列表读取失败")
 			return
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode != 200 {
+			if h.shouldTryAntigravityNative(r.Context(), model, agentID) {
+				if native, ok := h.serveAntigravityNativeModelQuota(r.Context(), model, agentID); ok {
+					writeJSON(w, 200, native)
+					return
+				}
+			}
 			writeError(w, 502, "upstream_error", fmt.Sprintf("Magpie 模型列表返回 HTTP %d", resp.StatusCode))
 			return
 		}
@@ -138,6 +162,12 @@ func (h *Handler) serveMagpieModelQuota(w http.ResponseWriter, r *http.Request, 
 			}
 		}
 		if provider == "" || provider == model {
+			if h.shouldTryAntigravityNative(r.Context(), model, agentID) {
+				if native, ok := h.serveAntigravityNativeModelQuota(r.Context(), model, agentID); ok {
+					writeJSON(w, 200, native)
+					return
+				}
+			}
 			writeJSON(w, 200, map[string]any{"model": candidate, "providers": []string{}, "reports": []any{}, "accounts": []any{}})
 			return
 		}
@@ -204,6 +234,12 @@ func (h *Handler) serveMagpieModelQuota(w http.ResponseWriter, r *http.Request, 
 			account["readAt"] = q.ReadAt
 		}
 		accounts = append(accounts, account)
+	}
+	if len(accounts) == 0 && len(reports) == 0 && h.shouldTryAntigravityNative(r.Context(), model, agentID) {
+		if native, ok := h.serveAntigravityNativeModelQuota(r.Context(), model, agentID); ok {
+			writeJSON(w, 200, native)
+			return
+		}
 	}
 	writeJSON(w, 200, map[string]any{"model": candidate, "providers": providers, "reports": reports, "accounts": accounts})
 }

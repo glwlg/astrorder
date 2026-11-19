@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	sessiondv1 "astrorder.dev/contracts/gen/go/astrorder/sessiond/v1"
@@ -39,6 +40,23 @@ func (h *Handler) deleteNativeSession(ctx context.Context, agentID, sessionID st
 		return errors.New("session daemon client is not configured")
 	}
 
+	agent, agentErr := h.store.GetAgent(ctx, agentID)
+	if agentErr != nil {
+		return agentErr
+	}
+	agentKind := stringValue(agent, "kind")
+	isAntigravity := agentKind == "antigravity" || agentKind == "antigravity-ssh"
+	isGrok := agentKind == "grok" || agentKind == "grok-ssh"
+	if isAntigravity {
+		if err := h.ensureNativeBindingForDelete(ctx, existing); err != nil {
+			return fmt.Errorf("native session binding unavailable: %w", err)
+		}
+	} else if agentKind == "codex" || agentKind == "codex-ssh" || isGrok {
+		if err := h.ensureNativeBinding(ctx, existing); err != nil {
+			return fmt.Errorf("native session binding unavailable: %w", err)
+		}
+	}
+
 	connID, _ := existing["connection_id"].(string)
 	ref := buildSessionRef(agentID, sessionID, connID)
 	delReq := &sessiondv1.DeleteSessionRequest{
@@ -47,11 +65,11 @@ func (h *Handler) deleteNativeSession(ctx context.Context, agentID, sessionID st
 	}
 	receipt, err := h.client.Session.DeleteSession(ctx, delReq)
 	if err != nil {
-		if status.Code(err) != codes.NotFound && !strings.Contains(err.Error(), "session is not daemon-owned") {
+		if isGrok || isAntigravity || status.Code(err) != codes.NotFound && !strings.Contains(err.Error(), "session is not daemon-owned") {
 			return fmt.Errorf("daemon delete failed: %w", err)
 		}
 	} else if err := confirmedReceipt(receipt); err != nil {
-		if !strings.Contains(err.Error(), "session is not daemon-owned") {
+		if isGrok || isAntigravity || !strings.Contains(err.Error(), "session is not daemon-owned") {
 			return err
 		}
 	}
@@ -78,6 +96,12 @@ func (h *Handler) handleBatchDeleteSessions(w http.ResponseWriter, r *http.Reque
 	deleted := make([]map[string]string, 0)
 	failed := make([]map[string]string, 0)
 
+	type deleteTask struct {
+		idx int
+		aid string
+		sid string
+	}
+	var validTasks []deleteTask
 	for _, item := range payload.Sessions {
 		aid := item["agent_id"]
 		sid := item["session_id"]
@@ -91,16 +115,36 @@ func (h *Handler) handleBatchDeleteSessions(w http.ResponseWriter, r *http.Reque
 		if err != nil || sess == nil {
 			continue
 		}
-		if err := h.deleteNativeSession(ctx, aid, sid); err != nil {
+		validTasks = append(validTasks, deleteTask{idx: len(validTasks), aid: aid, sid: sid})
+	}
+
+	results := make([]error, len(validTasks))
+	const maxConcurrentDeletes = 4
+	sem := make(chan struct{}, maxConcurrentDeletes)
+	var wg sync.WaitGroup
+	for _, t := range validTasks {
+		t := t
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			results[t.idx] = h.deleteNativeSession(ctx, t.aid, t.sid)
+		}()
+	}
+	wg.Wait()
+
+	for _, t := range validTasks {
+		if err := results[t.idx]; err != nil {
 			failed = append(failed, map[string]string{
-				"agent_id": aid,
-				"id":       sid,
+				"agent_id": t.aid,
+				"id":       t.sid,
 				"error":    err.Error(),
 			})
 		} else {
 			deleted = append(deleted, map[string]string{
-				"agent_id": aid,
-				"id":       sid,
+				"agent_id": t.aid,
+				"id":       t.sid,
 			})
 		}
 	}

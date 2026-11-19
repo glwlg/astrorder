@@ -5,6 +5,7 @@ import (
 	pb "astrorder.dev/contracts/gen/go/astrorder/sessiond/v1"
 	"context"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"testing"
 )
@@ -99,6 +100,75 @@ func TestNativeTargetDefaultsForRemoteAgents(t *testing.T) {
 	if customHermesTarget.Ssh.GetHermesPath() != "/custom/bin/hermes" {
 		t.Fatalf("unexpected custom hermes: %v", customHermesTarget.Ssh.GetHermesPath())
 	}
+
+	agyTarget, err := h.resolveRuntimeTarget(ctx, map[string]any{"id": "agy-1", "kind": "antigravity", "connection_id": "remote-node"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if agyTarget.GetRuntime() != pb.RuntimeKind_RUNTIME_KIND_ANTIGRAVITY_SSH || agyTarget.GetConnectionId() != "remote-node" {
+		t.Fatalf("unexpected remote antigravity runtime target: %+v", agyTarget)
+	}
+	if agyTarget.Ssh.GetAntigravityExecutable() != "/home/luwei/.local/bin/agy" {
+		t.Fatalf("unexpected antigravity default: %v", agyTarget.Ssh.GetAntigravityExecutable())
+	}
+
+	_, err = st.SaveSSHConnection(ctx, map[string]any{
+		"id":   "alice-node",
+		"host": "192.168.1.101",
+		"port": json.Number("22"),
+		"user": "alice",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	aliceTarget, err := h.resolveRuntimeTarget(ctx, map[string]any{"id": "agy-alice", "kind": "antigravity", "connection_id": "alice-node"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if aliceTarget.Ssh.GetAntigravityExecutable() != "/home/alice/.local/bin/agy" {
+		t.Fatalf("unexpected user-scoped antigravity fallback: %v", aliceTarget.Ssh.GetAntigravityExecutable())
+	}
+
+	hWithResolver := &Handler{
+		store:            st,
+		remoteExecutable: stubRemoteExecResolver{path: "/opt/antigravity/bin/agy"},
+	}
+	resolvedTarget, err := hWithResolver.resolveRuntimeTarget(ctx, map[string]any{"id": "agy-alice", "kind": "antigravity", "connection_id": "alice-node"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolvedTarget.Ssh.GetAntigravityExecutable() != "/opt/antigravity/bin/agy" {
+		t.Fatalf("expected resolver executable, got: %v", resolvedTarget.Ssh.GetAntigravityExecutable())
+	}
+
+	hFailingResolver := &Handler{
+		store:            st,
+		remoteExecutable: stubRemoteExecResolver{err: errors.New("probe unreachable")},
+	}
+	fallbackTarget, err := hFailingResolver.resolveRuntimeTarget(ctx, map[string]any{"id": "agy-alice", "kind": "antigravity", "connection_id": "alice-node"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fallbackTarget.Ssh.GetAntigravityExecutable() != "/home/alice/.local/bin/agy" {
+		t.Fatalf("expected fallback executable on resolver failure, got: %v", fallbackTarget.Ssh.GetAntigravityExecutable())
+	}
+
+	explicit := firstSSHSettingString(map[string]any{"antigravity_executable": "/custom/agy"}, nil, "antigravity_executable")
+	if explicit != "/custom/agy" {
+		t.Fatalf("expected explicit antigravity_executable, got %q", explicit)
+	}
+}
+
+type stubRemoteExecResolver struct {
+	path string
+	err  error
+}
+
+func (s stubRemoteExecResolver) Resolve(_ context.Context, kind string, _ map[string]any) (string, error) {
+	if kind != "antigravity" {
+		return "", errors.New("unexpected kind: " + kind)
+	}
+	return s.path, s.err
 }
 
 func TestConfirmedReceiptTransparency(t *testing.T) {

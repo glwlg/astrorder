@@ -2,17 +2,52 @@ package targetfs
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 )
 
-func TestResolverRemoteHelperFallsBackToPathWithoutBundledAssets(t *testing.T) {
-	root := t.TempDir()
-	resolver := NewResolver(ResolverOptions{DefaultWorkspace: root, AllowedRoots: []string{root}, HelperAssetsDir: filepath.Join(root, "missing")})
-	resolved, err := resolver.Resolve(context.Background(), ResolveRequest{Workspace: "/home/dev/project", ConnectionID: "wsl:Ubuntu"})
-	if err != nil || resolved.Kind != "wsl" {
-		t.Fatalf("resolved=%+v err=%v (remote targets must not fail with helper_not_configured)", resolved, err)
+func TestResolverRemoteHelperReportsMissingBundledAssets(t *testing.T) {
+	for _, connectionID := range []string{"wsl:Ubuntu", "ssh-test"} {
+		t.Run(connectionID, func(t *testing.T) {
+			resolver := NewResolver(ResolverOptions{
+				Store:           resolverStore{connection: map[string]any{"host": "example.test"}},
+				HelperAssetsDir: filepath.Join(t.TempDir(), "missing"),
+			})
+			_, err := resolver.Resolve(context.Background(), ResolveRequest{Workspace: "/home/dev/project", ConnectionID: connectionID})
+			var target *Error
+			if !errors.As(err, &target) || target.Status != 503 || target.Code != "helper_asset_missing" {
+				t.Fatalf("missing bundled helper error=%#v", err)
+			}
+			_, err = resolver.RunHelper(context.Background(), connectionID, "install-hooks")
+			if !errors.As(err, &target) || target.Status != 503 || target.Code != "helper_asset_missing" {
+				t.Fatalf("missing bundled helper runner error=%#v", err)
+			}
+		})
+	}
+}
+
+func TestResolverRemoteHelperPreservesInstallationFailure(t *testing.T) {
+	for _, connectionID := range []string{"wsl:Ubuntu", "ssh-test"} {
+		t.Run(connectionID, func(t *testing.T) {
+			root := t.TempDir()
+			resolver := NewResolver(ResolverOptions{
+				Store:           resolverStore{connection: map[string]any{"host": "example.test"}},
+				HelperAssetsDir: root,
+				SSHBinary:       filepath.Join(root, "missing-ssh"),
+				WSLBinary:       filepath.Join(root, "missing-wsl"),
+			})
+			_, err := resolver.Resolve(context.Background(), ResolveRequest{Workspace: "/home/dev/project", ConnectionID: connectionID})
+			var target *Error
+			if !errors.As(err, &target) || target.Status != 503 || target.Code != "helper_install_failed" {
+				t.Fatalf("helper installation error=%#v", err)
+			}
+			_, err = resolver.RunHelper(context.Background(), connectionID, "install-hooks")
+			if !errors.As(err, &target) || target.Status != 503 || target.Code != "helper_install_failed" {
+				t.Fatalf("helper runner installation error=%#v", err)
+			}
+		})
 	}
 }
 

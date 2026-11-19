@@ -14,7 +14,7 @@ import { MarkdownContent } from '../../components/MarkdownContent'
 import { LazyDetails } from '../../components/LazyDetails'
 import { MessageBody } from '../../components/MessageBody'
 import { useOlderMessages } from '../../hooks/useOlderMessages'
-import { activityDuration, activityState, describeTool, FileChangeDiffBlock, fileChangeDiffs, PackSummary, ShellOutputBlock, ToolLineIcon, unwrapCommand } from './toolPresentation'
+import { activityDuration, activityState, describeTool, extractToolArgs, FileChangeDiffBlock, fileChangeDiffs, PackSummary, ShellOutputBlock, ToolLineIcon, unwrapCommand } from './toolPresentation'
 import { ToolOutputBlock } from './ToolOutputBlock'
 import { isCompactionMessage, CompactionDivider } from './CompactionDivider'
 import { ShinyText } from '../../components/animations/ShinyText'
@@ -28,6 +28,7 @@ import { useAstrorderStore } from '../../state/store'
 import { useReducedMotion } from '@mantine/hooks'
 import { AnimatePresence, motion } from 'motion/react'
 import { WorkbenchMark } from '../../components/WorkbenchMark'
+import { agentKindLabel } from '../../components/AgentBrandIcon'
 
 export function AttachmentList({
   attachments,
@@ -160,6 +161,7 @@ function MessageItem({
   isAgentAccepted = false,
   asyncInput,
   showAuthorMark = false,
+  authorLabel = 'Agent',
 }: {
   message: Message
   onImageClick?: (url: string) => void
@@ -173,6 +175,7 @@ function MessageItem({
   isAgentAccepted?: boolean
   asyncInput?: { commands: import('../../domain/types').Command[]; continued: boolean; readOnly: boolean }
   showAuthorMark?: boolean
+  authorLabel?: string
 }) {
   const isUser = message.role === 'user'
   const isActivity = isMessageActivity(message)
@@ -191,10 +194,11 @@ function MessageItem({
   if (isActivity) {
     const desc = describeTool(message)
     const isThinking = message.kind === 'thinking'
-    const toolArgs = (message.tool?.arguments && typeof message.tool.arguments === 'object') ? (message.tool.arguments as Record<string, unknown>) : {}
-    const isCommand = desc.iconKey === 'terminal' || Boolean(toolArgs.command || toolArgs.cmd)
+    const toolArgs = extractToolArgs(message.tool)
+    const rawCmd = String(toolArgs.command || toolArgs.cmd || toolArgs.CommandLine || toolArgs.Command || '')
+    const isCommand = desc.iconKey === 'terminal' || Boolean(rawCmd)
     const hasFileDiff = fileChangeDiffs(message).length > 0
-    const unwrappedCmd = unwrapCommand(String(toolArgs.command || toolArgs.cmd || ''))
+    const unwrappedCmd = unwrapCommand(rawCmd)
     const cmdStatus = desc.isFailed ? 'failed' : desc.isRunning ? 'running' : 'success'
     const state = activityState(message)
     const duration = activityDuration(message)
@@ -227,7 +231,7 @@ function MessageItem({
           ) : (
             <ToolOutputBlock
               text={message.text}
-              payload={message.tool?.arguments != null && Object.keys(message.tool.arguments).length > 0 ? (message.tool.arguments as Record<string, unknown>) : null}
+              payload={Object.keys(toolArgs).length > 0 ? toolArgs : null}
               toolName={String(message.tool?.name || '')}
             />
           )}
@@ -264,7 +268,10 @@ function MessageItem({
       data-testid={`message-${message.id}`}
       aria-label={`${messageLabel(message)}消息`}
     >
-      {showAuthorMark && <span className="message-author-mark" aria-hidden="true"><WorkbenchMark size={26} /></span>}
+      {showAuthorMark && <div className="message-author">
+        <span className="message-author-mark" aria-hidden="true"><WorkbenchMark size={20} /></span>
+        <span>{authorLabel}</span>
+      </div>}
       <Paper className={`message-bubble ${inlineMeta ? 'message-bubble-inline' : ''} ${isUser ? 'message-bubble-user' : isActivity ? 'message-bubble-activity' : ''}`} withBorder={!isActivity} radius="lg">
         {asyncInput ? <AsyncUserInputCard message={message} {...asyncInput} /> : message.text && (
           <MessageBody
@@ -333,6 +340,7 @@ export function Transcript({
   onForkAtMessage?: (message: Message, turnIndex: number) => void
 }) {
   const reducedMotion = useReducedMotion(undefined, { getInitialValueInEffect: false })
+  const agentKind = useAstrorderStore(state => session ? state.agents[session.agent_id]?.kind : undefined)
   const enter = reducedMotion ? {} : { opacity: 0, y: 10, scale: 0.99 }
   const visibleMessages = messages.map(normalizeMessagePresentation).filter((message) => isCompactionMessage(message) || hasMessageContent(message))
   const isActivity = (message: Message | null) => Boolean(message && !isCompactionMessage(message) && isMessageActivity(message))
@@ -443,7 +451,6 @@ export function Transcript({
                   exit={{ opacity: 0 }}
                   transition={{ duration: 0.28, ease: [0.2, 0.8, 0.2, 1] }}
                 >
-                  <div className="activity-section-label" aria-hidden="true">执行记录</div>
                   <LazyDetails
                     key={`activity-pack-${message.id}-${shouldOpen}`}
                     defaultOpen={shouldOpen}
@@ -483,10 +490,8 @@ export function Transcript({
             return (
               <motion.div className="transcript-message-entry" key={message.id} initial={enter} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.28, ease: [0.2, 0.8, 0.2, 1] }}>
                 {showDateDivider && (
-                  <div style={{ textAlign: 'center', margin: '14px 0 6px', width: '100%' }}>
-                    <span style={{ fontSize: '11px', color: 'var(--astr-muted)', background: 'var(--astr-surface-muted)', padding: '2px 10px', borderRadius: '10px' }}>
-                      {currentDate}
-                    </span>
+                  <div className="transcript-date-divider">
+                    <span>{currentDate}</span>
                   </div>
                 )}
                 <MessageItem
@@ -496,7 +501,8 @@ export function Transcript({
                   session={session}
                   isLatest={idx === visibleMessages.length - 1}
                   inlineMeta={message.role === 'assistant' && !isFinalReply}
-                  showAuthorMark={message.role === 'assistant' && (!prevMessage || prevMessage.role === 'user')}
+                  showAuthorMark={message.role === 'assistant' && (isFinalReply || !prevMessage || prevMessage.role === 'user')}
+                  authorLabel={agentKindLabel(agentKind)}
                   onEdit={message.id === lastUserMessageId ? onEditLastUserMessage : undefined}
                   onFork={onForkAtMessage && canForkTurn ? () => onForkAtMessage(message, idx) : undefined}
                   hasAssistantReplied={hasAssistantReplied}

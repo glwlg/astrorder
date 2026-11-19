@@ -308,6 +308,46 @@ func (h *Handler) resolveAndRegisterExternalSession(ctx context.Context, agent m
 			title = rawTitle
 		}
 
+	case "antigravity":
+		resp, qErr := h.options.Client.Runtime.QueryNative(ctx, &sessiondv1.NativeQueryRequest{
+			Target: target,
+			Query: &sessiondv1.NativeQueryRequest_AntigravitySessionList{
+				AntigravitySessionList: &sessiondv1.AntigravitySessionListQuery{},
+			},
+		})
+		if qErr != nil {
+			return nil, fmt.Errorf("antigravity session.list failed for session '%s': %w", caller.SessionID, qErr)
+		}
+		if resp == nil || resp.GetResult() == nil {
+			return nil, fmt.Errorf("antigravity session '%s' returned empty response from runtime", caller.SessionID)
+		}
+		var parsed struct {
+			Items []struct {
+				ID        string `json:"id"`
+				Title     string `json:"title"`
+				Workspace string `json:"workspace"`
+			} `json:"items"`
+		}
+		if err := json.Unmarshal(resp.GetResult().GetUtf8Json(), &parsed); err != nil {
+			return nil, fmt.Errorf("failed to parse antigravity session.list response: %w", err)
+		}
+		matched := false
+		for _, item := range parsed.Items {
+			if item.ID == caller.SessionID {
+				matched = true
+				if item.Workspace != "" {
+					workspace = item.Workspace
+				}
+				if item.Title != "" {
+					title = item.Title
+				}
+				break
+			}
+		}
+		if !matched {
+			return nil, fmt.Errorf("antigravity conversation '%s' was not found on runtime target", caller.SessionID)
+		}
+
 	case "grok":
 		return nil, NewAgentApiError("unsupported", "external session verification for grok runtime is not supported; session must be created through Astrorder")
 

@@ -17,6 +17,9 @@ export function visibleTranscript(stored: Message[], loaded: Message[], baseline
     // Legacy post_llm callbacks repeated the user input with a new random ID.
     // Uncorrelated echoes are not a second native user turn.
     if (m.role === 'user' && m.id.startsWith('hermes-user-') && !m.command_id) return false
+    if (m.id.includes(':live:') && m.delivery === 'async' && loaded.some(n => !n.id.includes(':live:') && n.delivery === 'async' && n.text === m.text)) {
+      return false
+    }
     if (baseline.has(m.id)) return false
     // Receive time cannot establish that an unknown Codex turn is newer.
     // Native history refresh supplies its position; a live user echo anchors a new turn.

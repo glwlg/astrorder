@@ -1297,6 +1297,9 @@ WHERE agent_id=? AND session_id=? AND id=?`, state, data["error"], evAgentID, si
 			if err != nil || len(cmdRows) == 0 {
 				return nil, fmt.Errorf("query updated command: %w", err)
 			}
+			if data["awaiting_input"] == true {
+				cmdRows[0]["awaiting_input"] = true
+			}
 			events = append(events, store.Event{
 				ID:        fmt.Sprintf("cmd-%s-%d", cmdID, time.Now().UnixNano()),
 				Type:      "command.upsert",
@@ -1348,7 +1351,7 @@ func upsertSessionTx(ctx context.Context, tx *sql.Tx, payload map[string]any) (m
 	if u, ok := payload["updated_at"].(string); ok && u != "" {
 		updatedAt = u
 	}
-	ephemeral, _ := payload["ephemeral"].(bool)
+	ephemeral := boolFromRow(payload["ephemeral"])
 	sourceID := payloadStringDefault(payload, "source_id", agentID)
 	sourceSessionID := payloadStringDefault(payload, "source_session_id", id)
 	historyState := payloadStringDefault(payload, "history_state", "local")
@@ -1391,7 +1394,7 @@ VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		projectName := preserveNilPayload(payload, "project_name", existing["project_name"])
 		handoffAgent := preserveEmptyPayload(payload, "handoff_from_agent_id", existing["handoff_from_agent_id"])
 		handoffSession := preserveEmptyPayload(payload, "handoff_from_session_id", existing["handoff_from_session_id"])
-		existingEphemeral, _ := existing["ephemeral"].(bool)
+		existingEphemeral := boolFromRow(existing["ephemeral"])
 		nativeKind := existing["native_kind"]
 		if _, present := payload["native_kind"]; present {
 			nativeKind = payload["native_kind"]
@@ -1409,7 +1412,30 @@ WHERE agent_id=? AND id=?`, title, workspace, status, sourceID, nullablePayload(
 	if err != nil || len(rows) == 0 {
 		return nil, fmt.Errorf("query upserted session: %w", err)
 	}
+	rows[0]["ephemeral"] = boolFromRow(rows[0]["ephemeral"])
+	rows[0]["handoff_context_consumed"] = boolFromRow(rows[0]["handoff_context_consumed"])
 	return rows[0], nil
+}
+
+func boolFromRow(value any) bool {
+	switch v := value.(type) {
+	case bool:
+		return v
+	case int64:
+		return v != 0
+	case int:
+		return v != 0
+	case float64:
+		return v != 0
+	case json.Number:
+		i, err := v.Int64()
+		return err == nil && i != 0
+	case string:
+		trimmed := strings.TrimSpace(strings.ToLower(v))
+		return trimmed == "1" || trimmed == "true"
+	default:
+		return false
+	}
 }
 
 func projectRuntimeOwnerTx(
@@ -1440,10 +1466,15 @@ func projectRuntimeOwnerTx(
 		status, _ := payload["status"].(string)
 		if payload["owner_pid"] == nil && payload["runtime_owned"] == true && agentID != "" && (status == "idle" || status == "error") {
 			var kind string
-			if err := tx.QueryRowContext(ctx, "SELECT kind FROM agents WHERE id=?", agentID).Scan(&kind); err != nil {
+			err := tx.QueryRowContext(ctx, "SELECT kind FROM agents WHERE id=?", agentID).Scan(&kind)
+			if err == sql.ErrNoRows && strings.HasPrefix(agentID, "ssh-antigravity-") {
+				kind = "antigravity"
+				err = nil
+			}
+			if err != nil {
 				return nil, err
 			}
-			if kind == "antigravity" {
+			if kind == "antigravity" || kind == "antigravity-ssh" {
 				return projectSimpleSessionStatusTx(ctx, tx, streamID, agentID, status, "session.status", payload)
 			}
 		}
@@ -2381,6 +2412,12 @@ func projectTokenMetricsTx(ctx context.Context, tx *sql.Tx, streamID, agentID st
 		return 0
 	}
 
+	hasKey := func(k string) bool {
+		_, ok := payload[k]
+		return ok
+	}
+	hasCum := hasKey("total_tokens") || hasKey("input_tokens") || hasKey("output_tokens")
+
 	inputTokens := getInt("input_tokens")
 	outputTokens := getInt("output_tokens")
 	cachedTokens := getInt("cached_tokens")
@@ -2390,14 +2427,42 @@ func projectTokenMetricsTx(ctx context.Context, tx *sql.Tx, streamID, agentID st
 	lastInputTokens := getInt("last_input_tokens")
 
 	if model != "" && aid != "" && sid != "" {
+		if payload["provider"] == "antigravity" {
+			if !hasCum {
+				if err := tx.QueryRowContext(ctx,
+					`SELECT input_tokens, output_tokens, cached_tokens, reasoning_tokens, total_tokens
+					 FROM token_metrics WHERE agent_id=? AND session_id=? AND total_tokens > 0
+					 ORDER BY total_tokens DESC, updated_at DESC LIMIT 1`,
+					aid, sid,
+				).Scan(&inputTokens, &outputTokens, &cachedTokens, &reasoningTokens, &totalTokens); err == nil && totalTokens > 0 {
+					payload["input_tokens"] = inputTokens
+					payload["output_tokens"] = outputTokens
+					payload["cached_tokens"] = cachedTokens
+					payload["reasoning_tokens"] = reasoningTokens
+					payload["total_tokens"] = totalTokens
+				}
+			}
+			if lastInputTokens == 0 && contextWindow > 0 {
+				var prevLastIn int64
+				if err := tx.QueryRowContext(ctx,
+					`SELECT last_input_tokens FROM token_metrics WHERE agent_id=? AND session_id=? AND last_input_tokens > 0 ORDER BY updated_at DESC LIMIT 1`,
+					aid, sid,
+				).Scan(&prevLastIn); err == nil && prevLastIn > 0 {
+					lastInputTokens = prevLastIn
+					payload["last_input_tokens"] = lastInputTokens
+				}
+			}
+		}
+
+		nowStr := time.Now().UTC().Format("2006-01-02 15:04:05.000000")
 		_, err := tx.ExecContext(ctx, `INSERT INTO token_metrics
 (agent_id,session_id,model,provider,date,input_tokens,output_tokens,cached_tokens,reasoning_tokens,total_tokens,context_window,last_input_tokens,updated_at)
-VALUES(?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
+VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(agent_id,session_id,model,date) DO UPDATE SET
 input_tokens=excluded.input_tokens,output_tokens=excluded.output_tokens,cached_tokens=excluded.cached_tokens,
 reasoning_tokens=excluded.reasoning_tokens,total_tokens=excluded.total_tokens,context_window=excluded.context_window,
 last_input_tokens=excluded.last_input_tokens,updated_at=excluded.updated_at`,
-			aid, sid, model, payload["provider"], date, inputTokens, outputTokens, cachedTokens, reasoningTokens, totalTokens, contextWindow, lastInputTokens)
+			aid, sid, model, payload["provider"], date, inputTokens, outputTokens, cachedTokens, reasoningTokens, totalTokens, contextWindow, lastInputTokens, nowStr)
 		if err != nil {
 			return nil, fmt.Errorf("upsert token metrics: %w", err)
 		}

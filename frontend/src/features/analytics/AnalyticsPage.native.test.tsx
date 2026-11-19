@@ -111,6 +111,91 @@ it('uses the management address for existing configurations', async () => {
   expect(await screen.findByTitle('网关统计页')).toHaveAttribute('src', config.management_url)
 })
 
+it('hides the native gateway view when switching to Direct Token usage and renders breakdown', async () => {
+  const showStatistics = vi.fn().mockResolvedValue(undefined)
+  const hideStatistics = vi.fn().mockResolvedValue(undefined)
+  ;(window as unknown as { astrorderDesktop: unknown }).astrorderDesktop = { showStatistics, hideStatistics }
+  vi.mocked(api.getAnalyticsConfig).mockResolvedValue(config as never)
+  vi.mocked(api.getAnalyticsUsage).mockResolvedValue({
+    gatewayType: 'direct',
+    range: '7d',
+    surface: 'all',
+    since: 0,
+    generatedAt: '2026-11-18T09:30:00Z',
+    summary: {
+      requests: 15,
+      totalTokens: 250_000,
+      inputTokens: 30_000,
+      outputTokens: 10_000,
+      cacheReadInputTokens: 210_000,
+      reasoningOutputTokens: 4_000,
+      cacheHitRate: 0.875,
+      activeAgents: 1,
+      activeSessions: 2,
+    },
+    days: [{ date: '2026-11-18', requests: 15, totalTokens: 250_000 }],
+    models: [{
+      provider: 'antigravity',
+      model: 'gemini-4-carbon-high',
+      requests: 15,
+      totalTokens: 250_000,
+      inputTokens: 30_000,
+      outputTokens: 10_000,
+      cacheReadInputTokens: 210_000,
+      shareRatio: 1,
+    } as never],
+    providers: [],
+    accounts: [],
+    directAgents: [{
+      agentId: 'ssh-antigravity-wsl',
+      name: 'Antigravity · WSL',
+      kind: 'antigravity',
+      connectionId: 'wsl',
+      connectionName: 'WSL',
+      sessions: 2,
+      requests: 15,
+      totalTokens: 250_000,
+      inputTokens: 30_000,
+      outputTokens: 10_000,
+      cacheReadInputTokens: 210_000,
+      cacheCreationInputTokens: 0,
+      reasoningOutputTokens: 4_000,
+      cacheHitRate: 0.875,
+      shareRatio: 1,
+    }],
+    directSessions: [{
+      sessionId: '52794208-5f2e-4120-a6b1-99e5ee29c7f1',
+      agentId: 'ssh-antigravity-wsl',
+      agentName: 'Antigravity · WSL',
+      agentKind: 'antigravity',
+      connectionName: 'WSL',
+      title: 'ACP 升级会话',
+      workspace: '/home/luwei/workspace/glwlg/astrorder',
+      model: 'gemini-4-carbon-high',
+      updatedAt: '2026-11-18T09:30:00Z',
+      requests: 15,
+      inputTokens: 30_000,
+      outputTokens: 10_000,
+      cacheReadInputTokens: 210_000,
+      cacheCreationInputTokens: 0,
+      reasoningOutputTokens: 4_000,
+      totalTokens: 250_000,
+    }],
+    historyTruncated: false,
+    truncatedPrefixBytes: 0,
+    entriesTruncated: false,
+    entriesDropped: 0,
+  })
+  mount()
+  await waitFor(() => expect(showStatistics).toHaveBeenCalled())
+  fireEvent.click(screen.getByRole('tab', { name: '直连 Token' }))
+  expect(await screen.findByText('ACP 升级会话')).toBeInTheDocument()
+  expect(api.getAnalyticsUsage).toHaveBeenCalledWith({ range: '7d', surface: 'all', source: 'direct' })
+  expect(hideStatistics).toHaveBeenCalled()
+  expect(screen.queryByTitle('网关统计页')).not.toBeInTheDocument()
+  expect(screen.getByRole('region', { name: '直连会话消耗排行' })).toHaveAttribute('tabindex', '0')
+})
+
 it('reports configuration errors without leaving a blank page', async () => {
   vi.mocked(api.getAnalyticsConfig).mockRejectedValue(new Error('配置读取失败'))
   mount()

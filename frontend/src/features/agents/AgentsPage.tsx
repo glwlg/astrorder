@@ -133,7 +133,7 @@ function AgentCard({ agent }: { agent: Agent }) {
 }
 
 function SessionCLIConfiguration({ agent }: { agent: Agent }) {
-  const supported = ['codex', 'hermes', 'grok'].includes(agent.kind)
+  const supported = ['codex', 'hermes', 'grok', 'antigravity'].includes(agent.kind)
   const [status, setStatus] = useState<{ ready: boolean; message: string; home: string } | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(supported)

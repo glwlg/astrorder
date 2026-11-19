@@ -611,6 +611,28 @@ func applyFields(g *Group, payload map[string]json.RawMessage, previous map[stri
 	g.Description = strings.TrimSpace(g.Description)
 	return validateGroup(*g, previous)
 }
+func (s *Service) rejectAntigravityMembers(ctx context.Context, members []Member, previous map[string]Member) error {
+	for _, m := range members {
+		if previous != nil {
+			if old, existed := previous[memberID(m)]; existed && old.AgentID == m.AgentID {
+				continue
+			}
+		}
+		lowerID := strings.ToLower(strings.TrimSpace(m.AgentID))
+		isAgy := strings.Contains(lowerID, "antigravity")
+		if !isAgy && s.options.Store != nil {
+			if agent, err := s.options.Store.GetAgent(ctx, m.AgentID); err == nil && agent != nil {
+				kind, _ := agent["kind"].(string)
+				isAgy = kind == "antigravity" || kind == "antigravity-ssh"
+			}
+		}
+		if isAgy {
+			return errors.New("遵循 Google Antigravity 第三方接入规范，个人订阅账号不支持多 Agent 自动群聊编排，请改用单会话人工交互")
+		}
+	}
+	return nil
+}
+
 func (s *Service) create(ctx context.Context, payload map[string]json.RawMessage) (Group, error) {
 	id, err := randomID("group-")
 	if err != nil {
@@ -618,6 +640,9 @@ func (s *Service) create(ctx context.Context, payload map[string]json.RawMessage
 	}
 	g := Group{ID: id, MaxHops: 10, ActiveSpeakers: []string{}, MemberStates: map[string]MemberState{}, CreatedAt: now(), UpdatedAt: now()}
 	if err = applyFields(&g, payload, nil); err != nil {
+		return Group{}, err
+	}
+	if err = s.rejectAntigravityMembers(ctx, g.Members, nil); err != nil {
 		return Group{}, err
 	}
 	for _, m := range g.Members {
@@ -694,6 +719,9 @@ func (s *Service) update(ctx context.Context, id string, payload map[string]json
 			previous[memberID(member)] = member
 		}
 		if err := applyFields(g, payload, previous); err != nil {
+			return err
+		}
+		if err := s.rejectAntigravityMembers(ctx, g.Members, previous); err != nil {
 			return err
 		}
 		states := map[string]MemberState{}

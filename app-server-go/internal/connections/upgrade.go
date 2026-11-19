@@ -58,9 +58,13 @@ func localAgentExecutable(ctx context.Context, name string) (string, error) {
 
 // Shell source contains only a whitelisted CLI name; target settings remain argv.
 func remoteAgentSetup(kind string) string {
-	return `k=` + kind + `; { ` + remoteExecutableProbeBody + `; } >/dev/null; ` +
+	binName := kind
+	if binName == "antigravity" {
+		binName = "agy"
+	}
+	return `k=` + binName + `; { ` + remoteExecutableProbeBody + `; } >/dev/null; ` +
 		`if [ -z "$p" ]; then printf '%s\n' "$k executable not found" >&2; exit 127; fi; ` +
-		`PATH="$(dirname "$p"):$HOME/.local/bin:$HOME/.hermes/hermes-agent/venv/bin:$HOME/.vite-plus/bin:$HOME/.grok/bin:$PATH"; export PATH; `
+		`PATH="$(dirname "$p"):$HOME/.local/bin:$HOME/.antigravity/bin:$HOME/.hermes/hermes-agent/venv/bin:$HOME/.vite-plus/bin:$HOME/.grok/bin:$PATH"; export PATH; `
 }
 
 func (e *NativeUpgradeExecutor) Upgrade(ctx context.Context, kind, connID string, conn map[string]any, init func(string), output io.Writer) (int, error) {
@@ -85,7 +89,11 @@ func (e *NativeUpgradeExecutor) Upgrade(ctx context.Context, kind, connID string
 		if err != nil {
 			return -1, err
 		}
-		script := remoteAgentSetup(kind)
+		binName := kind
+		if binName == "antigravity" {
+			binName = "agy"
+		}
+		script := remoteAgentSetup(binName)
 		if kind == "codex" {
 			script += `if command -v vp >/dev/null 2>&1; then exec vp install -g @openai/codex@latest; elif command -v npm >/dev/null 2>&1; then exec npm install -g @openai/codex@latest; else printf '%s\n' 'Codex upgrade requires vp or npm' >&2; exit 127; fi`
 		} else {

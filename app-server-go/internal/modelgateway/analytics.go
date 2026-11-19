@@ -53,9 +53,14 @@ func (h *Handler) handleGetAnalyticsUsage(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusUnprocessableEntity, "invalid_range", "统计范围无效")
 		return
 	}
-	validSurfaces := map[string]bool{"all": true, "codex": true, "hermes": true, "claude": true, "grok": true}
+	validSurfaces := map[string]bool{"all": true, "codex": true, "hermes": true, "claude": true, "grok": true, "antigravity": true}
 	if !validSurfaces[surface] {
 		writeError(w, http.StatusUnprocessableEntity, "invalid_surface", "Agent 类型无效")
+		return
+	}
+	source := strings.TrimSpace(q.Get("source"))
+	if source != "" && source != "all" && source != "direct" && source != "gateway" {
+		writeError(w, http.StatusUnprocessableEntity, "invalid_source", "统计来源无效")
 		return
 	}
 
@@ -80,9 +85,24 @@ func (h *Handler) handleGetAnalyticsUsage(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	if source == "direct" {
+		direct, dErr := h.collectDirectUsage(r.Context(), cfg, rangeVal, surface, sinceStr, untilStr)
+		if dErr != nil {
+			writeError(w, http.StatusInternalServerError, "store_error", dErr.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, direct.toResponse(rangeVal, surface))
+		return
+	}
+
 	if cfg.GatewayType == "magpie" {
 		h.fetchMagpieUsage(w, r, cfg, rangeVal, surface, sinceStr, untilStr)
 		return
+	}
+
+	var direct *directUsageAggregate
+	if source != "gateway" {
+		direct, _ = h.collectDirectUsage(r.Context(), cfg, rangeVal, surface, sinceStr, untilStr)
 	}
 
 	// OpenCodeX usage
@@ -105,20 +125,34 @@ func (h *Handler) handleGetAnalyticsUsage(w http.ResponseWriter, r *http.Request
 
 	resp, err := h.httpClient.Do(req)
 	if err != nil {
+		if direct != nil && direct.Totals.totalTokens() > 0 {
+			writeJSON(w, http.StatusOK, direct.toResponse(rangeVal, surface))
+			return
+		}
 		writeError(w, http.StatusBadGateway, "upstream_error", fmt.Sprintf("LLM 网关用量请求失败：%v", err))
 		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		if direct != nil && direct.Totals.totalTokens() > 0 {
+			writeJSON(w, http.StatusOK, direct.toResponse(rangeVal, surface))
+			return
+		}
 		writeError(w, http.StatusBadGateway, "upstream_error", fmt.Sprintf("LLM 网关返回 HTTP %d", resp.StatusCode))
 		return
 	}
 
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 10_000_000))
-	var data any
-	_ = json.Unmarshal(body, &data)
-	writeJSON(w, http.StatusOK, data)
+	var data map[string]any
+	if json.Unmarshal(body, &data) == nil && data != nil && direct != nil && direct.Totals.totalTokens() > 0 {
+		mergeDirectIntoGenericResponse(data, direct)
+		writeJSON(w, http.StatusOK, data)
+		return
+	}
+	var rawData any
+	_ = json.Unmarshal(body, &rawData)
+	writeJSON(w, http.StatusOK, rawData)
 }
 
 func (h *Handler) fetchMagpieUsage(w http.ResponseWriter, r *http.Request, cfg GatewayConfig, rangeVal, surface, sinceStr, untilStr string) {
@@ -131,6 +165,18 @@ func (h *Handler) handleGetModelQuota(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_model", "model required")
 		return
 	}
+	agentID := strings.TrimSpace(r.URL.Query().Get("agent_id"))
+
+	// Direct-account Antigravity models do not carry a nested gateway provider prefix
+	// (unlike gateway-proxied `antigravity/<provider>/<slug>`). Prefer live native
+	// subscription quota first so direct login users avoid slow or empty gateway lookups.
+	trimmedAgy := strings.TrimPrefix(model, "antigravity/")
+	if !strings.Contains(trimmedAgy, "/") && h.shouldTryAntigravityNative(r.Context(), model, agentID) {
+		if native, ok := h.serveAntigravityNativeModelQuota(r.Context(), model, agentID); ok {
+			writeJSON(w, http.StatusOK, native)
+			return
+		}
+	}
 
 	cfg, err := GetGatewayConfig(r.Context(), h.store)
 	if err != nil {
@@ -139,7 +185,7 @@ func (h *Handler) handleGetModelQuota(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if cfg.GatewayType == "magpie" {
-		h.serveMagpieModelQuota(w, r, cfg, model)
+		h.serveMagpieModelQuota(w, r, cfg, model, agentID)
 		return
 	}
 
@@ -254,6 +300,13 @@ func (h *Handler) handleGetModelQuota(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if len(selectedReports) == 0 && len(accounts) == 0 && h.shouldTryAntigravityNative(r.Context(), model, agentID) {
+		if native, ok := h.serveAntigravityNativeModelQuota(r.Context(), model, agentID); ok {
+			writeJSON(w, http.StatusOK, native)
+			return
+		}
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"model":     candidate,
 		"providers": providers,
@@ -269,28 +322,90 @@ func (h *Handler) handleGetSessionUsage(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	sessionID := parts[3]
+	agentID := strings.TrimSpace(r.URL.Query().Get("agent_id"))
 
-	metrics, err := h.store.ListTokenMetrics(r.Context(), r.URL.Query().Get("agent_id"), sessionID)
+	metrics, err := h.store.ListTokenMetrics(r.Context(), agentID, sessionID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "store_error", "Session usage unavailable")
 		return
 	}
 
+	needNative := len(metrics) == 0
+	if !needNative && metrics[0]["provider"] == "antigravity" {
+		cw, _ := strconv.ParseFloat(fmt.Sprint(metrics[0]["context_window"]), 64)
+		li, _ := strconv.ParseFloat(fmt.Sprint(metrics[0]["last_input_tokens"]), 64)
+		tot, _ := strconv.ParseFloat(fmt.Sprint(metrics[0]["total_tokens"]), 64)
+		if (cw <= 0 && li <= 0) || (li > 0 && tot <= 0) || (cw > 0 && li <= 0 && tot <= 0) {
+			needNative = true
+		}
+	}
+	if needNative && agentID != "" && h.shouldTryAntigravityNative(r.Context(), "", agentID) {
+		if h.fetchAntigravityNativeSessionUsage(r.Context(), agentID, sessionID) {
+			if refreshed, rErr := h.store.ListTokenMetrics(r.Context(), agentID, sessionID); rErr == nil {
+				metrics = refreshed
+			}
+		}
+	}
+
 	if len(metrics) > 0 {
 		result := metrics[0]
-		result["ok"] = true
-		if _, exists := result["context_available"]; !exists {
-			result["context_available"] = result["provider"] != "antigravity" && result["last_input_tokens"] != nil
+		if len(metrics) > 1 && result["provider"] == "antigravity" {
+			curTot, _ := strconv.ParseFloat(fmt.Sprint(result["total_tokens"]), 64)
+			if curTot <= 0 {
+				var best map[string]any
+				var bestTot float64
+				for _, m := range metrics[1:] {
+					if m["provider"] != "antigravity" {
+						continue
+					}
+					if tVal, _ := strconv.ParseFloat(fmt.Sprint(m["total_tokens"]), 64); tVal > bestTot {
+						bestTot = tVal
+						best = m
+					}
+				}
+				if best != nil {
+					for _, k := range []string{"input_tokens", "output_tokens", "cached_tokens", "reasoning_tokens", "total_tokens"} {
+						result[k] = best[k]
+					}
+				}
+			}
+			curLi, _ := strconv.ParseFloat(fmt.Sprint(result["last_input_tokens"]), 64)
+			curCw, _ := strconv.ParseFloat(fmt.Sprint(result["context_window"]), 64)
+			if curLi <= 0 && curCw > 0 {
+				for _, m := range metrics[1:] {
+					if liVal, _ := strconv.ParseFloat(fmt.Sprint(m["last_input_tokens"]), 64); liVal > 0 {
+						result["last_input_tokens"] = m["last_input_tokens"]
+						break
+					}
+				}
+			}
 		}
+		result["ok"] = true
 		number := func(key string) float64 { value, _ := strconv.ParseFloat(fmt.Sprint(result[key]), 64); return value }
+		if _, exists := result["context_available"]; !exists {
+			if result["provider"] == "antigravity" {
+				result["context_available"] = number("context_window") > 0 || number("last_input_tokens") > 0
+			} else {
+				result["context_available"] = result["last_input_tokens"] != nil
+			}
+		}
+		if result["provider"] == "antigravity" && result["context_available"] == true && result["source"] == nil {
+			result["source"] = "native_last_request"
+		}
 		result["used_percentage"] = nil
 		if window := number("context_window"); window > 0 {
 			result["used_percentage"] = number("last_input_tokens") * 100 / window
 		}
-		result["cache_hit_rate"] = 0
+		rate := 0.0
 		if input := number("input_tokens"); input > 0 {
-			result["cache_hit_rate"] = number("cached_tokens") * 100 / input
+			rate = number("cached_tokens") * 100 / input
+			if rate < 0 {
+				rate = 0
+			} else if rate > 100 {
+				rate = 100
+			}
 		}
+		result["cache_hit_rate"] = rate
 		result["speed"] = nil
 		writeJSON(w, http.StatusOK, result)
 		return

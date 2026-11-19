@@ -43,14 +43,8 @@ export const APPROVAL_MODES: ApprovalModeItem[] = [
   },
 ]
 
-const ANTIGRAVITY_APPROVAL_MODES: ApprovalModeItem[] = [
-  { ...APPROVAL_MODES[0], label: '按原生规则', capsuleLabel: '按原生规则', description: '遵循 Antigravity 权限规则；需要批准的操作会被拒绝，无法逐次确认' },
-  APPROVAL_MODES[2],
-]
-
 export function ApprovalModeControl({
   session,
-  agentKind,
   compact = false,
   variant = 'capsule',
   disabled = false,
@@ -63,7 +57,7 @@ export function ApprovalModeControl({
   disabled?: boolean
   supported?: boolean
 }) {
-  const modes = agentKind === 'antigravity' ? ANTIGRAVITY_APPROVAL_MODES : APPROVAL_MODES
+  const modes = APPROVAL_MODES
   const queryClient = useQueryClient()
   const [opened, setOpened] = useState(false)
   const { data, isError } = useQuery({

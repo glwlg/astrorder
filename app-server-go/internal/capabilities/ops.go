@@ -29,9 +29,13 @@ func (s *Service) agentCLI(ctx context.Context, env envtarget.Env, agent string,
 	if err != nil {
 		return "", err
 	}
+	binName := agent
+	if binName == "antigravity" {
+		binName = "agy"
+	}
 	ctx, cancel := context.WithTimeout(ctx, 150*time.Second)
 	defer cancel()
-	result, err := env.Run(ctx, envtarget.Command{Name: agent, Args: args, Env: agentEnv(agent, paths)})
+	result, err := env.Run(ctx, envtarget.Command{Name: binName, Args: args, Env: agentEnv(agent, paths)})
 	if err != nil {
 		return "", err
 	}
@@ -82,10 +86,14 @@ func (s *Service) UpdateMCP(ctx context.Context, targetID, agent, action string,
 			return nil, envtarget.Errorf(422, "MCP 服务名称无效")
 		}
 		mutate := func(data []byte) ([]byte, error) {
-			if agent == "hermes" {
+			switch agent {
+			case "hermes":
 				return removeMCPYAML(data, name)
+			case "antigravity":
+				return removeMCPJSON(data, name)
+			default:
+				return removeMCPTOML(data, agent, name)
 			}
-			return removeMCPTOML(data, agent, name)
 		}
 		if err := s.editConfig(ctx, env, agent, mutate, verifyMCPRemoved(agent, name)); err != nil {
 			return nil, err
@@ -97,10 +105,14 @@ func (s *Service) UpdateMCP(ctx context.Context, targetID, agent, action string,
 
 func (s *Service) saveMCP(ctx context.Context, env envtarget.Env, agent string, in mcpInput) (*MCPResult, error) {
 	mutate := func(data []byte) ([]byte, error) {
-		if agent == "hermes" {
+		switch agent {
+		case "hermes":
 			return applyMCPYAML(data, in)
+		case "antigravity":
+			return applyMCPJSON(data, in)
+		default:
+			return applyMCPTOML(data, agent, in)
 		}
-		return applyMCPTOML(data, agent, in)
 	}
 	if err := s.editConfig(ctx, env, agent, mutate, verifyMCP(agent, in)); err != nil {
 		return nil, err
@@ -279,20 +291,26 @@ func (s *Service) applyPlugin(ctx context.Context, env envtarget.Env, agent, act
 	if !present {
 		return envtarget.Errorf(404, "%s 里没有插件 %s", agent, name)
 	}
-	_, hasCLI := env.Which(ctx, agent)
+	binName := agent
+	if binName == "antigravity" {
+		binName = "agy"
+	}
+	_, hasCLI := env.Which(ctx, binName)
 	switch {
 	case action == "uninstall" && hasCLI && agent == "codex":
 		_, err = s.agentCLI(ctx, env, "codex", "plugin", "remove", name)
 	case action == "uninstall" && hasCLI && agent == "hermes":
 		_, err = s.agentCLI(ctx, env, "hermes", "plugins", "remove", name)
-	case action == "uninstall" && hasCLI && agent == "grok":
-		_, err = s.agentCLI(ctx, env, "grok", "plugin", "uninstall", name)
-	case action == "toggle" && hasCLI && agent == "grok":
+	case action == "uninstall" && hasCLI && (agent == "grok" || agent == "antigravity"):
+		_, err = s.agentCLI(ctx, env, agent, "plugin", "uninstall", name)
+	case action == "toggle" && hasCLI && (agent == "grok" || agent == "antigravity"):
 		verb := "disable"
 		if enabled {
 			verb = "enable"
 		}
-		_, err = s.agentCLI(ctx, env, "grok", "plugin", verb, name)
+		_, err = s.agentCLI(ctx, env, agent, "plugin", verb, name)
+	case agent == "antigravity":
+		return envtarget.Errorf(404, "%s 未安装 agy", env.Target().Name)
 	default:
 		err = s.editPluginConfig(ctx, env, agent, action, name, enabled)
 	}

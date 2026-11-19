@@ -2,7 +2,7 @@ import { ChartLineUpIcon, ChatCircleDotsIcon, CpuIcon, DesktopIcon, GearSixIcon,
 import { ActionIcon, HoverCard, Modal, NavLink, Stack, Tabs, Text, Tooltip } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useQuery } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { NavLink as RouterNavLink, useLocation } from 'react-router-dom'
 import { api, type OcxUsageResponse } from '../api/client'
 import type { Agent, Project, Session } from '../domain/types'
@@ -129,6 +129,7 @@ export function Sidebar({
   onNavigate?: () => void
 }) {
   const location = useLocation()
+  const skyId = useId()
   const [settingsOpened, setSettingsOpened] = useState(false)
   useShortcutHandlers(onNavigate ? {} : { settings: () => setSettingsOpened(true) }, true)
   const [isMonitorDragOver, setIsMonitorDragOver] = useState(false)
@@ -155,7 +156,8 @@ export function Sidebar({
 
   return (
     <>
-      <div className="workspace-sidebar">
+      <div className="workspace-sidebar" data-liquid-snapshot={`[id="${skyId}"]`}>
+        <div id={skyId} className="workspace-sidebar-sky" aria-hidden="true" />
         <nav className="workspace-navigation" aria-label="主导航">
           <div className="sidebar-primary-nav">
             {navItems.map(({ to, label, icon: Icon, id }) => {
@@ -178,7 +180,6 @@ export function Sidebar({
                     aria-label={id === 'groups' && groupsBusy && !isGroups ? '群聊，有任务进行中' : label}
                     className={`sidebar-nav-link ${isActive ? 'active' : ''} ${isThisMonitor && isMonitorDragOver ? 'is-drag-over' : ''}`}
                     data-liquid-surface={isActive ? 'selection' : undefined}
-                    data-liquid-snapshot=".workspace-navigation"
                     onDragOver={isThisMonitor ? (e) => {
                       e.preventDefault()
                       e.dataTransfer.dropEffect = 'copy'

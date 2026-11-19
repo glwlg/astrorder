@@ -405,3 +405,138 @@ func TestEnvironmentsExecutableFieldPopulation(t *testing.T) {
 		}
 	}
 }
+
+func TestRestoreConnectsRemoteAntigravityAndDegradesOnPreUpdateDaemon(t *testing.T) {
+	t.Run("registered_daemon_attaches_remote_antigravity", func(t *testing.T) {
+		daemon := &fakeDaemonService{}
+		daemon.statusResponse.Store(&pb.GetStatusResponse{
+			DaemonId: "daemon-test-123",
+			Runtimes: []*pb.RuntimeStatus{
+				{Runtime: pb.RuntimeKind_RUNTIME_KIND_SSH_HERMES, Registered: true},
+				{Runtime: pb.RuntimeKind_RUNTIME_KIND_CODEX_SSH, Registered: true},
+				{Runtime: pb.RuntimeKind_RUNTIME_KIND_GROK_SSH, Registered: true},
+				{Runtime: pb.RuntimeKind_RUNTIME_KIND_ANTIGRAVITY_SSH, Registered: true},
+			},
+		})
+		resolver := &recordingResolver{
+			results: map[string]string{
+				"antigravity": "/home/luwei/.local/bin/agy",
+			},
+		}
+		h, st := setupRestoreFixture(t, daemon, resolver)
+		if _, err := st.SaveSSHConnection(context.Background(), map[string]any{
+			"id":           "wsl-node",
+			"host":         "127.0.0.1",
+			"display_name": "WSL",
+			"user":         "luwei",
+			"workspace":    "/home/luwei/workspace",
+			"state":        "configured",
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.SetAgentConnectionChoice(context.Background(), "wsl-node:antigravity", true); err != nil {
+			t.Fatal(err)
+		}
+		if err := h.Restore(context.Background()); err != nil {
+			t.Fatalf("Restore failed: %v", err)
+		}
+		daemon.attachRequestsMu.Lock()
+		reqs := append([]*pb.AttachSessionRequest(nil), daemon.attachRequests...)
+		daemon.attachRequestsMu.Unlock()
+		found := false
+		for _, req := range reqs {
+			if req.Session != nil && req.Session.SessionId == "probe-antigravity-wsl-node" {
+				found = true
+				if req.Target.GetRuntime() != pb.RuntimeKind_RUNTIME_KIND_ANTIGRAVITY_SSH || req.Target.GetConnectionId() != "wsl-node" {
+					t.Fatalf("unexpected target: %v", req.Target)
+				}
+				if req.Target.Ssh == nil || req.Target.Ssh.GetAntigravityExecutable() != "/home/luwei/.local/bin/agy" {
+					t.Fatalf("missing antigravity executable: %v", req.Target.Ssh)
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("Restore did not attach probe-antigravity-wsl-node; requests=%v", reqs)
+		}
+	})
+
+	t.Run("pre_update_daemon_skips_antigravity_without_breaking_siblings", func(t *testing.T) {
+		daemon := &fakeDaemonService{}
+		daemon.statusResponse.Store(&pb.GetStatusResponse{
+			DaemonId: "daemon-test-123",
+			Runtimes: []*pb.RuntimeStatus{
+				{Runtime: pb.RuntimeKind_RUNTIME_KIND_SSH_HERMES, Registered: true},
+				{Runtime: pb.RuntimeKind_RUNTIME_KIND_CODEX_SSH, Registered: true},
+				{Runtime: pb.RuntimeKind_RUNTIME_KIND_GROK_SSH, Registered: true},
+			},
+		})
+		resolver := &recordingResolver{
+			results: map[string]string{
+				"codex":       "/home/luwei/.vite-plus/bin/codex",
+				"antigravity": "/home/luwei/.local/bin/agy",
+			},
+		}
+		h, st := setupRestoreFixture(t, daemon, resolver)
+		if _, err := st.SaveSSHConnection(context.Background(), map[string]any{
+			"id":           "wsl-node",
+			"host":         "127.0.0.1",
+			"display_name": "WSL",
+			"user":         "luwei",
+			"state":        "configured",
+		}); err != nil {
+			t.Fatal(err)
+		}
+		for _, key := range []string{"wsl-node:codex", "wsl-node:antigravity"} {
+			if err := st.SetAgentConnectionChoice(context.Background(), key, true); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := h.Restore(context.Background()); err != nil {
+			t.Fatalf("Restore failed on pre-update daemon: %v", err)
+		}
+		daemon.attachRequestsMu.Lock()
+		reqs := append([]*pb.AttachSessionRequest(nil), daemon.attachRequests...)
+		daemon.attachRequestsMu.Unlock()
+		foundCodex := false
+		for _, req := range reqs {
+			if req.Session.GetSessionId() == "probe-codex-wsl-node" {
+				foundCodex = true
+			}
+			if req.Session.GetSessionId() == "probe-antigravity-wsl-node" {
+				t.Fatalf("attached remote antigravity against pre-update daemon: %v", req)
+			}
+		}
+		if !foundCodex {
+			t.Fatalf("sibling codex restore was broken: %v", reqs)
+		}
+
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/environments", nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("environments listing failed: %d %s", w.Code, w.Body.String())
+		}
+		var listing struct {
+			Items []map[string]any `json:"items"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &listing); err != nil {
+			t.Fatal(err)
+		}
+		for _, item := range listing.Items {
+			if item["id"] != "wsl-node" {
+				continue
+			}
+			for _, raw := range item["agents"].([]any) {
+				agent := raw.(map[string]any)
+				if agent["kind"] == "antigravity" {
+					if agent["state"] != "disconnected" {
+						t.Fatalf("expected disconnected state on pre-update daemon, got %#v", agent)
+					}
+					detail, _ := agent["detail"].(string)
+					if detail == "" {
+						t.Fatalf("expected small-kernel update detail on pre-update daemon, got %#v", agent)
+					}
+				}
+			}
+		}
+	})
+}

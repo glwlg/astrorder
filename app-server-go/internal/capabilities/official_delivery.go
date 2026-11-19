@@ -28,7 +28,7 @@ type SkillAgent struct {
 }
 
 func registeredSkillAgents() []SkillAgent {
-	return []SkillAgent{{"codex", "OpenAI Codex"}, {"hermes", "Hermes Agent"}, {"grok", "xAI Grok"}}
+	return []SkillAgent{{"codex", "OpenAI Codex"}, {"hermes", "Hermes Agent"}, {"grok", "xAI Grok"}, {"antigravity", "Google Antigravity"}}
 }
 func skillHome(p envtarget.Paths, agent string) string {
 	switch agent {
@@ -38,6 +38,8 @@ func skillHome(p envtarget.Paths, agent string) string {
 		return p.Hermes
 	case "grok":
 		return p.Grok
+	case "antigravity":
+		return antigravitySkillHome(p)
 	}
 	return ""
 }

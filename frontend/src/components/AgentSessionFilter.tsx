@@ -6,14 +6,17 @@ import type { Agent, AgentKind, Session } from '../domain/types'
 
 function parseFilter(filter: string): { connection: string; kind: AgentKind | 'all' } {
   if (filter === 'all') return { connection: 'all', kind: 'all' }
-  if (filter === 'hermes' || filter === 'codex') return { connection: 'all', kind: filter }
+  if (filter === 'hermes' || filter === 'codex' || filter === 'antigravity' || filter === 'grok') return { connection: 'all', kind: filter }
   const match = /^connection:(.*)\|kind:([^|]+)$/.exec(filter)
   return match ? { connection: match[1], kind: match[2] as AgentKind | 'all' } : { connection: 'agent:' + filter, kind: 'all' }
 }
 
 export function connectionName(agent: Agent): string {
   if (!agent.connection_id) return '本机'
-  return agent.name.trim().replace(/\s*·\s*(?:Codex|Hermes)$/i, '') || agent.connection_id
+  return agent.name
+    .trim()
+    .replace(/^(?:Antigravity|Codex|Hermes|Grok|agy)\s*·\s*/i, '')
+    .replace(/\s*·\s*(?:Codex|Hermes|Antigravity|Grok|agy)$/i, '') || agent.connection_id
 }
 
 function filterValue(connection: string, kind: AgentKind | 'all'): string {

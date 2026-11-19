@@ -34,6 +34,11 @@ type BrowserManager interface {
 	CallCDP(ctx context.Context, sessionKey string, method string, params map[string]any, targetID string) (map[string]any, error)
 }
 
+// RemoteExecutableResolver resolves the absolute POSIX path of a remote CLI over SSH.
+type RemoteExecutableResolver interface {
+	Resolve(ctx context.Context, kind string, sshConn map[string]any) (string, error)
+}
+
 // Options configure the Agent API gateway. MCP handlers are retired.
 type Options struct {
 	Store            *store.Store
@@ -46,6 +51,7 @@ type Options struct {
 	CommandSubmit    func(context.Context, map[string]any) (map[string]any, error)
 	DefaultWorkspace string
 	FileResolver     blackboard.FileResolver
+	RemoteExecutable RemoteExecutableResolver
 }
 
 // AgentApiError represents structured Agent API errors.

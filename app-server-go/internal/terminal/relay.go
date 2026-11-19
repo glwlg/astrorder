@@ -251,11 +251,23 @@ func (r *Relay) resolve(request *http.Request) (*sessiondv1.OpenTerminal, error)
 		}
 		stringAt := func(key string) string { value, _ := settings[key].(string); return value }
 		port := 22
-		if value, ok := settings["port"].(int64); ok {
+		switch value := settings["port"].(type) {
+		case int64:
 			port = int(value)
-		}
-		if value, ok := settings["port"].(int); ok {
+		case int:
 			port = value
+		case float64:
+			if value >= 1 && value <= 65535 {
+				port = int(value)
+			}
+		case json.Number:
+			if parsed, err := strconv.Atoi(value.String()); err == nil && parsed >= 1 && parsed <= 65535 {
+				port = parsed
+			}
+		case string:
+			if parsed, err := strconv.Atoi(value); err == nil && parsed >= 1 && parsed <= 65535 {
+				port = parsed
+			}
 		}
 		argv, err := targetfs.BuildSSHCommand(targetfs.SSHConfig{Host: stringAt("host"), Alias: stringAt("ssh_config_alias"), User: stringAt("user"), Port: port, IdentityFile: stringAt("identity_file"), ConfigFile: stringAt("config_file"), HelperPath: "/bin/sh"})
 		if err != nil {

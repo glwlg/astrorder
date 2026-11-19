@@ -75,6 +75,12 @@ it('summarizes model quota health accurately and defensively', () => {
 it('uses the most constrained Magpie quota window and keeps unknown quota unknown', () => {
   expect(summarizeQuota({ model: 'm', providers: ['codex'], reports: [], accounts: [{ id: 'a', quota: { shortPercent: 95, weeklyPercent: 20 } }] })?.label).toBe('已耗尽')
   expect(summarizeQuota({ model: 'm', providers: ['codex'], reports: [], accounts: [{ id: 'a', quota: null }] })).toBeNull()
+  expect(summarizeQuota({
+    model: 'gemini-4-carbon',
+    providers: ['antigravity'],
+    reports: [{ provider: 'antigravity', label: 'Google AI Ultra', quota: { customWindows: [{ label: 'Gemini 4 Carbon', percent: 30 }] } }],
+    accounts: [],
+  })?.label).toBe('余70%')
 })
 
 it('desktop shows the bound native model and switches the exact session', async () => {

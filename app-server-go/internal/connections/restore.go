@@ -70,9 +70,6 @@ func (h *Handler) Restore(ctx context.Context) error {
 	limit := make(chan struct{}, 6)
 	for _, node := range targets {
 		for _, kind := range environmentKinds {
-			if kind == "antigravity" && node.id != "local" {
-				continue
-			}
 			if ctx.Err() != nil {
 				workers.Wait()
 				return ctx.Err()
@@ -169,9 +166,6 @@ func (h *Handler) Restore(ctx context.Context) error {
 }
 
 func (h *Handler) attachEnvironmentAgent(ctx context.Context, connID, kind string, sshConn map[string]any) error {
-	if kind == "antigravity" && connID != "local" {
-		return fmt.Errorf("Antigravity SSH runtime is not supported yet")
-	}
 	if h.client == nil {
 		return fmt.Errorf("daemon client unavailable")
 	}
@@ -197,7 +191,7 @@ func (h *Handler) attachEnvironmentAgent(ctx context.Context, connID, kind strin
 			return fmt.Errorf("validate ssh settings: %w", err)
 		}
 
-		if kind == "codex" || kind == "grok" {
+		if kind == "codex" || kind == "grok" || kind == "antigravity" {
 			resolver := h.executables
 			if resolver == nil {
 				resolver = &NativeRemoteExecutableResolver{SSHBinary: h.sshBinary}

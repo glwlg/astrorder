@@ -399,7 +399,7 @@ func TestInvalidInputs(t *testing.T) {
 				ConnectionID: "c",
 				ProfileName:  "p",
 			},
-			wantErr: "must be hermes, codex or grok",
+			wantErr: "must be hermes, codex, grok or antigravity",
 		},
 		{
 			name: "relative home",
@@ -614,5 +614,25 @@ func TestAtomicWriteFile_PreservesOldTargetOnFailure(t *testing.T) {
 	stat, statErr := os.Stat(targetDir)
 	if statErr != nil || !stat.IsDir() {
 		t.Fatalf("target directory was deleted or modified: %v", statErr)
+	}
+}
+
+func TestInstallSupportsAntigravityRuntime(t *testing.T) {
+	home := filepath.Join(t.TempDir(), ".gemini", "antigravity")
+	cli := getTestCLI(t)
+
+	res, err := Install(InstallOptions{
+		Runtime:      "antigravity",
+		Home:         home,
+		CLI:          cli,
+		AgentID:      "remote-agy",
+		ConnectionID: "wsl-main",
+		ProfileName:  "default",
+	})
+	if err != nil {
+		t.Fatalf("install antigravity runtime: %v", err)
+	}
+	if res.Runtime != "antigravity" || !fileExists(res.SkillFile) || !fileExists(res.BinaryFile) {
+		t.Fatalf("unexpected antigravity install result: %+v", res)
 	}
 }

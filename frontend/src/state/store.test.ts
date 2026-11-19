@@ -105,6 +105,12 @@ describe('shared runtime store', () => {
       agent_id: child.agent_id, session_id: child.id, data: { ...child, status: 'running' },
     })
     expect(selectSessions(useAstrorderStore.getState()).map(s => s.id)).toEqual(['ordinary'])
+    useAstrorderStore.getState().applyEvent({
+      id: 'side-omits-ephemeral', cursor: 3, type: 'session.upsert',
+      agent_id: child.agent_id, session_id: child.id, data: { ...child, ephemeral: undefined, status: 'idle' },
+    })
+    expect(selectSessions(useAstrorderStore.getState()).map(s => s.id)).toEqual(['ordinary'])
+    expect(useAstrorderStore.getState().sessions['agent-1::child']?.ephemeral).toBe(true)
   })
   it('keeps the native project catalog, including zero-session projects, after bootstrap hydration', () => {
     const project: Project = {

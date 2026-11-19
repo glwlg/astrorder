@@ -87,7 +87,11 @@ const queueLabels = { queued: '排队待发', submitting: '发送中', received:
 export function cleanServerName(agent?: Agent): string {
   if (!agent) return '本机'
   if (!agent.connection_id) return '本机'
-  const name = agent.name.trim().replace(/\s*[·\s]\s*(?:Codex|Hermes|Claude|Grok|OpenCode[xr]|Gemini).*$/i, '').trim()
+  const name = agent.name
+    .trim()
+    .replace(/^(?:Antigravity|Codex|Hermes|Claude|Grok|agy)\s*·\s*/i, '')
+    .replace(/\s*[·\s]\s*(?:Codex|Hermes|Antigravity|agy|Claude|Grok|OpenCode[xr]|Gemini).*$/i, '')
+    .trim()
   return name || agent.connection_id || '远程'
 }
 
@@ -613,7 +617,8 @@ export function MobileWorkspace() {
     queueHold.current = null
     setQueueLift(null)
     if (!hold?.armed) return
-    const zone = queueSwipeZone(hold.startY, y)
+    const rawZone = queueSwipeZone(hold.startY, y)
+    const zone = rawZone === 'send' && isAntigravity && nativeBusy ? null : rawZone
     if (zone === 'send' && ['queued', 'failed'].includes(hold.entry.state)) {
       void sendQueued(hold.entry)
     } else if (zone === 'edit') {
@@ -634,15 +639,17 @@ export function MobileWorkspace() {
   const onQueuePointerMove = (event: ReactPointerEvent<HTMLElement>) => {
     const hold = queueHold.current
     if (!hold || hold.pointerId !== event.pointerId) return
+    const rawZone = queueSwipeZone(hold.startY, event.clientY)
+    const zone = rawZone === 'send' && isAntigravity && nativeBusy ? null : rawZone
     if (!hold.armed) {
       if (Math.abs(event.clientY - hold.startY) < 8) return
       hold.armed = true
       hapticFeedback(12)
-      setQueueLift({ id: hold.entry.payload.id, text: hold.entry.payload.text || '附件消息', x: event.clientX, y: event.clientY, zone: queueSwipeZone(hold.startY, event.clientY) })
+      setQueueLift({ id: hold.entry.payload.id, text: hold.entry.payload.text || '附件消息', x: event.clientX, y: event.clientY, zone })
       return
     }
     event.preventDefault()
-    setQueueLift(prev => prev ? { ...prev, x: event.clientX, y: event.clientY, zone: queueSwipeZone(hold.startY, event.clientY) } : prev)
+    setQueueLift(prev => prev ? { ...prev, x: event.clientX, y: event.clientY, zone } : prev)
   }
   const onQueuePointerUp = (event: ReactPointerEvent<HTMLElement>) => {
     const hold = queueHold.current
@@ -963,7 +970,8 @@ export function MobileWorkspace() {
                 onClick={() => {
                   if (modelReadOnly || modelLoading) return
                   const rec = parsedGatewayError.recommendedModel!
-                  void sessionModel.change(rec.provider, rec.model)
+                  const provider = isAntigravity ? 'antigravity' : rec.provider
+                  void sessionModel.change(provider, rec.model)
                     .then(() => {
                       setSessionError(null)
                       setSubmittedCommandId(null)
@@ -1018,8 +1026,8 @@ export function MobileWorkspace() {
       {voice.status === 'transcribing' && <div className="mobile-voice-status" role="status">正在转写…</div>}
       <div className="m-composer">
         <input hidden ref={fileInput} type="file" multiple onChange={e => { updateFiles([...files, ...Array.from(e.target.files || [])]); e.target.value = '' }} />
-          <button aria-label="添加附件" disabled={isAntigravity} onClick={() => fileInput.current?.click()}><IconPlus size={20} /></button>
-          <MobileVoiceHold scope={key} voice={voice}><textarea ref={textarea} aria-label="消息内容" placeholder="输入消息，或按住说话…" rows={1} value={text} onPaste={event => { const pasted = clipboardFiles(event); if (isAntigravity && pasted.length) { event.preventDefault(); notify('Antigravity 当前仅支持文本消息', 'red'); return } if (pasted.length) { event.preventDefault(); updateFiles([...files, ...pasted]) } }} onKeyDown={handleKeyDown} onChange={e => { setCommandIndex(0); setDismissedMenuText(null); setText(e.target.value) }} /></MobileVoiceHold>
+          <button aria-label="添加附件" disabled={Boolean(agents[selected?.agent_id || ''] && !agents[selected?.agent_id || '']?.capabilities?.includes('attachments'))} onClick={() => fileInput.current?.click()}><IconPlus size={20} /></button>
+          <MobileVoiceHold scope={key} voice={voice}><textarea ref={textarea} aria-label="消息内容" placeholder="输入消息，或按住说话…" rows={1} value={text} onPaste={event => { const pasted = clipboardFiles(event); if (agents[selected?.agent_id || '']?.kind === 'grok' && pasted.some(f => f.type.startsWith('image/'))) { event.preventDefault(); notify('当前智能体不支持图片附件', 'red'); return } if (pasted.length) { event.preventDefault(); updateFiles([...files, ...pasted]) } }} onKeyDown={handleKeyDown} onChange={e => { setCommandIndex(0); setDismissedMenuText(null); setText(e.target.value) }} /></MobileVoiceHold>
           <button aria-label={voice.status === 'recording' || voice.status === 'requesting' ? '停止录音' : voice.status === 'transcribing' ? '正在转写' : '语音消息'} disabled={voice.status === 'transcribing'} onClick={voice.toggle}>{voice.status === 'recording' || voice.status === 'requesting' ? <IconPlayerStop size={19} color="#ef4444" /> : <IconMicrophone size={19} />}</button>
           <ClickSpark className="m-send-spark" sparkColor={busy && !text && !files.length ? '#ef4444' : '#3b82f6'} sparkSize={10} sparkRadius={28} sparkCount={8}>
             <button type="button" className="m-send" data-stop={busy && !text && !files.length} aria-label={busy && !text && !files.length ? '停止' : '发送'} disabled={submitting || !selected} onPointerDown={pressSend} onClick={() => pressSend()}>{submitting ? <IconLoader2 className="m-spin" size={18} /> : busy && !text && !files.length ? <IconPlayerStop size={17} /> : <IconSend size={18} />}</button>
@@ -1041,7 +1049,7 @@ export function MobileWorkspace() {
       {sheet === 'browser' && selected && <div className="m-sheet-body m-blackboard-sheet"><BrowserMirrorPanel agentId={selected.agent_id} sessionId={selected.id} /></div>}
       {sheet === 'tasks' && <div className="m-sheet-body m-runtime-panel"><SessionRuntimeBar key={key} commands={commands} tasks={runtimeTasks} backgroundError={background.error} onTaskOpen={openTask} />{!visibleTasks.length && <p>当前会话暂无任务记录。</p>}</div>}
       {sheet === 'task' && task && <div className="m-sheet-body m-task-panel"><TaskDetails key={`${key}:${task.id}`} task={task} canStop={Boolean(task.target_id && resolveTaskTarget(task) && resolveTaskTarget(task)?.control_state !== 'readonly' && !readOnly && agents[task.agent_id]?.capabilities.includes('stop') && ['pending', 'running', 'waiting_approval'].includes(task.status))} onStop={item => void handleStopTask(item)} onOpenSession={(sid, aid) => { const child = sessions.find(session => session.id === sid && session.agent_id === aid); if (child) select(child); else notify('子会话尚未同步，请刷新后重试', 'red') }} onJumpToLatest={() => { const viewport = document.querySelector('.m-task-panel .task-log-scroll [data-radix-scroll-area-viewport]'); if (viewport) viewport.scrollTop = viewport.scrollHeight }} onClose={() => setSheet('tasks')} /></div>}
-      {sheet === 'models' && <div className="m-sheet-body m-model-panel">{selected && <ApprovalModeControl key={key} session={selected} variant="panel" disabled={readOnly} agentKind={agents[selected.agent_id]?.kind} />}<div className="m-effort-row">{REASONING_EFFORTS.map(item => <button key={item.value} aria-pressed={sessionModel.effort === item.value} aria-label={`思考强度 ${item.label}`} disabled={reasoningReadOnly || modelLoading} onClick={() => void sessionModel.changeEffort(item.value).catch(error => notify(messageError(error), 'red'))}>{item.label}</button>)}</div><input className="m-search" aria-label="搜索模型" placeholder="搜索模型或提供商" value={modelSearch} onChange={e => setModelSearch(e.target.value)} />{modelLoading && <p>正在处理原生模型请求…</p>}<div className="m-model-list">{modelChoices.filter(choice => choice.label.toLowerCase().includes(modelSearch.toLowerCase())).map(choice => <button className="m-model-choice" aria-pressed={modelSelection?.provider === choice.provider && modelSelection?.model === choice.model} key={`${choice.provider}/${choice.model}`} disabled={modelReadOnly || modelLoading} onClick={() => setModelSelection(choice)}><IconCpu size={17} /><span>{choice.label}</span>{modelSelection?.provider === choice.provider && modelSelection?.model === choice.model && <IconCheck size={17} />}</button>)}</div>{!modelLoading && !modelChoices.length && <p>原生运行时未返回可用模型。</p>}{modelSelection && <div className="m-model-confirm"><small>{modelSelection.label}</small><button aria-label="确认切换模型" disabled={modelReadOnly || modelLoading} onClick={() => void chooseModel(modelSelection.provider, modelSelection.model)}>{modelLoading ? '切换中…' : '确认切换模型'}</button></div>}</div>}
+      {sheet === 'models' && <div className="m-sheet-body m-model-panel">{selected && <ApprovalModeControl key={key} session={selected} variant="panel" disabled={readOnly} agentKind={agents[selected.agent_id]?.kind} />}{sessionModel.data?.detail && <p>{sessionModel.data.detail}</p>}{!isAntigravity && <div className="m-effort-row">{REASONING_EFFORTS.map(item => <button key={item.value} aria-pressed={sessionModel.effort === item.value} aria-label={`思考强度 ${item.label}`} disabled={reasoningReadOnly || modelLoading} onClick={() => void sessionModel.changeEffort(item.value).catch(error => notify(messageError(error), 'red'))}>{item.label}</button>)}</div>}<input className="m-search" aria-label="搜索模型" placeholder="搜索模型或提供商" value={modelSearch} onChange={e => setModelSearch(e.target.value)} />{modelLoading && <p>正在处理原生模型请求…</p>}<div className="m-model-list">{modelChoices.filter(choice => choice.label.toLowerCase().includes(modelSearch.toLowerCase())).map(choice => <button className="m-model-choice" aria-pressed={modelSelection?.provider === choice.provider && modelSelection?.model === choice.model} key={`${choice.provider}/${choice.model}`} disabled={modelReadOnly || modelLoading} onClick={() => setModelSelection(choice)}><IconCpu size={17} /><span>{choice.label}</span>{modelSelection?.provider === choice.provider && modelSelection?.model === choice.model && <IconCheck size={17} />}</button>)}</div>{!modelLoading && !modelChoices.length && <p>原生运行时未返回可用模型。</p>}{modelSelection && <div className="m-model-confirm"><small>{modelSelection.label}</small><button aria-label="确认切换模型" disabled={modelReadOnly || modelLoading} onClick={() => void chooseModel(modelSelection.provider, modelSelection.model)}>{modelLoading ? '切换中…' : '确认切换模型'}</button></div>}</div>}
     </section></div>}
     {workbenchMounted && selected && <MobileWorkbench session={selected} agent={agents[selected.agent_id]} commands={commands} messages={messages} approvals={approvals} onApproval={(approval, action) => void handleApproval(approval, action)} opened={workbenchOpened} onClose={closeWorkbench} />}
     {image && <div className="m-lightbox" role="dialog" aria-label="图片预览" onClick={() => setImage(null)}><button aria-label="关闭图片"><IconX size={22} /></button><img src={image} alt="预览" /></div>}

@@ -53,11 +53,13 @@ export function useWorkspacePreferences() {
     return () => { mounted.current = false; window.clearInterval(timer); window.removeEventListener('focus', refresh) }
   }, [accept])
   const updatePreferences = useCallback((patch: PreferencePatch | ((value: WorkspacePreferences) => PreferencePatch)) => {
-    queue.current = queue.current.then(async () => {
+    const result = queue.current.then(async () => {
       if (!ready.current) throw new Error('尚未读取服务端设置，请稍后重试')
       accept(await api.updatePreferences(typeof patch === 'function' ? patch(current.current) : patch))
-    }).catch(report)
-    return queue.current
+      return true
+    }).catch(error => { report(error); return false })
+    queue.current = result.then(() => {})
+    return result
   }, [accept])
   const removeProjectPreferences = (key: string) => updatePreferences(value => ({
     appearance: { [key]: null },

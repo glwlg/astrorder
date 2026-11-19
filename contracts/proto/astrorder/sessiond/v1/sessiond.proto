@@ -39,6 +39,7 @@ enum RuntimeKind {
   RUNTIME_KIND_GROK = 6;
   RUNTIME_KIND_GROK_SSH = 7;
   RUNTIME_KIND_ANTIGRAVITY = 8;
+  RUNTIME_KIND_ANTIGRAVITY_SSH = 9;
 }
 
 enum SessionStatus {
@@ -223,6 +224,7 @@ message SshConnectConfig {
   optional string display_name = 13;
   optional string hermes_path = 14;
   optional string ssh_executable = 15;
+  optional string antigravity_executable = 16;
 }
 
 message RuntimeTarget {
@@ -696,6 +698,17 @@ message GrokSessionListQuery {
 
 message AntigravitySessionListQuery {}
 message AntigravityModelsListQuery {}
+message AntigravityQuotaReadQuery {}
+
+message AntigravitySessionUsageQuery {
+  string conversation_id = 1;
+  optional bool readonly = 2;
+}
+
+message AntigravityUsageSummaryQuery {
+  optional int64 since_ms = 1;
+  optional int64 until_ms = 2;
+}
 
 message NativeQueryRequest {
   RuntimeTarget target = 1;
@@ -724,6 +737,9 @@ message NativeQueryRequest {
     GrokSessionListQuery grok_session_list = 51;
     AntigravitySessionListQuery antigravity_session_list = 60;
     AntigravityModelsListQuery antigravity_models_list = 61;
+    AntigravityQuotaReadQuery antigravity_quota_read = 62;
+    AntigravitySessionUsageQuery antigravity_session_usage = 63;
+    AntigravityUsageSummaryQuery antigravity_usage_summary = 64;
   }
 }
 

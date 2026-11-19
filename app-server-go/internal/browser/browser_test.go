@@ -316,8 +316,8 @@ func (p *fakePublisher) Publish(ctx context.Context, name string, data map[strin
 
 func TestBrowserRegistrationContract(t *testing.T) {
 	registrations := Registrations()
-	if len(registrations) != 11 {
-		t.Fatalf("expected 11 browser registrations, got %d", len(registrations))
+	if len(registrations) != 12 {
+		t.Fatalf("expected 12 browser registrations, got %d", len(registrations))
 	}
 
 	foundScreenshot := false

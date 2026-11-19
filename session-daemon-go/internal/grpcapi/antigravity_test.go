@@ -2,16 +2,175 @@ package grpcapi_test
 
 import (
 	"bufio"
+	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
 	pb "astrorder.dev/contracts/gen/go/astrorder/sessiond/v1"
 	"astrorder.dev/session-daemon/internal/runtime/antigravity"
 )
+
+func serveMockGRPCACP(r io.Reader, w io.Writer, defaultID string) {
+	var writeMu sync.Mutex
+	send := func(v map[string]any) {
+		raw, _ := json.Marshal(v)
+		raw = append(raw, '\n')
+		writeMu.Lock()
+		_, _ = w.Write(raw)
+		writeMu.Unlock()
+	}
+
+	curModel := "gemini-test"
+	curMode := "default"
+	curThought := "medium"
+
+	scan := bufio.NewScanner(r)
+	scan.Buffer(make([]byte, 65536), 4_000_000)
+	for scan.Scan() {
+		line := bytes.TrimSpace(scan.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		dec := json.NewDecoder(bytes.NewReader(line))
+		dec.UseNumber()
+		var msg map[string]any
+		if dec.Decode(&msg) != nil {
+			return
+		}
+		method, _ := msg["method"].(string)
+		rawID := msg["id"]
+		params, _ := msg["params"].(map[string]any)
+
+		switch method {
+		case "initialize":
+			send(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      rawID,
+				"result": map[string]any{
+					"protocolVersion": 1,
+					"agentCapabilities": map[string]any{
+						"loadSession":        true,
+						"promptCapabilities": map[string]any{"image": true, "embeddedContext": true},
+						"sessionCapabilities": map[string]any{
+							"resume": map[string]any{},
+							"close":  map[string]any{},
+						},
+					},
+				},
+			})
+		case "session/new", "session/resume":
+			sid, _ := params["sessionId"].(string)
+			if sid == "" {
+				sid = defaultID
+			}
+			send(map[string]any{
+				"jsonrpc": "2.0",
+				"method":  "session/update",
+				"params": map[string]any{
+					"sessionId": sid,
+					"update": map[string]any{
+						"sessionUpdate": "available_commands_update",
+						"availableCommands": []map[string]any{
+							{"name": "compact", "description": "Compact context"},
+						},
+					},
+				},
+			})
+			send(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      rawID,
+				"result": map[string]any{
+					"sessionId": sid,
+					"models": map[string]any{
+						"currentModelId": curModel,
+						"availableModels": []map[string]any{
+							{"modelId": "gemini-test", "name": "Test Gemini"},
+							{"modelId": "claude-test", "name": "Test Claude"},
+						},
+					},
+					"modes": map[string]any{
+						"currentModeId": curMode,
+					},
+					"configOptions": []map[string]any{
+						{
+							"id":           "thought_level",
+							"currentValue": curThought,
+							"options":      []map[string]any{{"value": "low"}, {"value": "medium"}, {"value": "high"}},
+						},
+					},
+				},
+			})
+		case "session/set_model":
+			if m, ok := params["modelId"].(string); ok {
+				curModel = m
+			}
+			send(map[string]any{"jsonrpc": "2.0", "id": rawID, "result": map[string]any{}})
+		case "session/set_mode":
+			if md, ok := params["modeId"].(string); ok {
+				curMode = md
+			}
+			send(map[string]any{"jsonrpc": "2.0", "id": rawID, "result": map[string]any{}})
+		case "session/set_config_option":
+			if val, ok := params["value"].(string); ok {
+				curThought = val
+			}
+			send(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      rawID,
+				"result": map[string]any{
+					"configOptions": []map[string]any{
+						{
+							"id":           "thought_level",
+							"currentValue": curThought,
+							"options":      []map[string]any{{"value": "low"}, {"value": "medium"}, {"value": "high"}},
+						},
+					},
+				},
+			})
+		case "session/close":
+			send(map[string]any{"jsonrpc": "2.0", "id": rawID, "result": map[string]any{}})
+		case "session/prompt":
+			sid, _ := params["sessionId"].(string)
+			send(map[string]any{
+				"jsonrpc": "2.0",
+				"method":  "session/update",
+				"params": map[string]any{
+					"sessionId": sid,
+					"update": map[string]any{
+						"sessionUpdate": "tool_call",
+						"toolCallId":    fmt.Sprintf("call-%v", rawID),
+						"name":          "run_command",
+						"status":        "failed",
+						"error":         "permission denied fixture",
+					},
+				},
+			})
+			send(map[string]any{
+				"jsonrpc": "2.0",
+				"method":  "session/update",
+				"params": map[string]any{
+					"sessionId": sid,
+					"update": map[string]any{
+						"sessionUpdate": "agent_message_chunk",
+						"content":       map[string]any{"type": "text", "text": "fixture response"},
+					},
+				},
+			})
+			send(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      rawID,
+				"result":  map[string]any{"stopReason": "end_turn"},
+			})
+		}
+	}
+}
 
 func TestAntigravityGRPCHelper(t *testing.T) {
 	if os.Getenv("ASTRORDER_AGY_GRPC_HELPER") != "1" {
@@ -23,36 +182,7 @@ func TestAntigravityGRPCHelper(t *testing.T) {
 			os.Exit(0)
 		}
 	}
-	id := "11111111-1111-4111-8111-111111111111"
-	model := "gemini-test"
-	for i, arg := range os.Args {
-		if arg == "--model" && i+1 < len(os.Args) {
-			model = os.Args[i+1]
-		}
-	}
-	permission := "request-review"
-	for _, arg := range os.Args {
-		if arg == "--dangerously-skip-permissions" {
-			permission = "always-proceed"
-		}
-	}
-	fmt.Printf("{\"event\":\"init\",\"conversation_id\":%q,\"init\":{\"model\":%q,\"permission_mode\":%q}}\n", id, model, permission)
-	scan := bufio.NewScanner(os.Stdin)
-	index := 0
-	for scan.Scan() {
-		var input map[string]any
-		if json.Unmarshal(scan.Bytes(), &input) != nil || input["event"] != "user" {
-			os.Exit(4)
-		}
-		message, ok := input["message"].(map[string]any)
-		if !ok || message["content"] != "fixture text" {
-			os.Exit(5)
-		}
-		index++
-		fmt.Printf("{\"event\":\"step_update\",\"step_update\":{\"conversation_id\":%q,\"step_index\":%d,\"state\":\"ERROR\",\"step_type\":\"tool\",\"tool_name\":\"run_command\",\"tool_info\":{\"error\":{\"message\":\"permission denied fixture\"}}}}\n", id, index*2)
-		fmt.Printf("{\"event\":\"step_update\",\"step_update\":{\"conversation_id\":%q,\"step_index\":%d,\"state\":\"DONE\",\"step_type\":\"agent_response\",\"text_delta\":\"fixture response\"}}\n", id, index*2+1)
-		fmt.Printf("{\"event\":\"result\",\"result\":{\"conversation_id\":%q,\"status\":\"SUCCESS\"}}\n", id)
-	}
+	serveMockGRPCACP(os.Stdin, os.Stdout, "11111111-1111-4111-8111-111111111111")
 	os.Exit(0)
 }
 
@@ -61,7 +191,16 @@ func TestAntigravityOfficialGRPCLifecycle(t *testing.T) {
 	exe, _ := os.Executable()
 	dir := t.TempDir()
 	aid := "local-antigravity"
-	a := antigravity.New(antigravity.Config{Executable: exe, Arguments: []string{"-test.run=TestAntigravityGRPCHelper", "--"}, Environment: []string{"ASTRORDER_AGY_GRPC_HELPER=1"}, Workspace: dir, Allowed: []string{dir}, Home: filepath.Join(dir, "home"), AgentID: aid, Emit: f.daemon.Emit})
+	a := antigravity.New(antigravity.Config{
+		Executable:  exe,
+		Arguments:   []string{"-test.run=TestAntigravityGRPCHelper", "--"},
+		Environment: []string{"ASTRORDER_AGY_GRPC_HELPER=1"},
+		Workspace:   dir,
+		Allowed:     []string{dir},
+		Home:        filepath.Join(dir, "home"),
+		AgentID:     aid,
+		Emit:        f.daemon.Emit,
+	})
 	defer a.Close()
 	f.daemon.RegisterRuntime("antigravity", a)
 	control := pb.NewSessionControlClient(f.conn)
@@ -78,11 +217,16 @@ func TestAntigravityOfficialGRPCLifecycle(t *testing.T) {
 	if _, err = query.QueryNative(f.ctx, &pb.NativeQueryRequest{Target: target, Query: &pb.NativeQueryRequest_AntigravityModelsList{AntigravityModelsList: &pb.AntigravityModelsListQuery{}}}); err != nil {
 		t.Fatal(err)
 	}
-	created, err := control.CreateSession(f.ctx, &pb.CreateSessionRequest{Meta: controlMeta("agy-create"), Target: target, Options: &pb.CreateSessionRequest_Antigravity{Antigravity: &pb.AntigravityCreateOptions{Cwd: dir}}})
+	created, err := control.CreateSession(f.ctx, &pb.CreateSessionRequest{
+		Meta:    controlMeta("agy-create"),
+		Target:  target,
+		Options: &pb.CreateSessionRequest_Antigravity{Antigravity: &pb.AntigravityCreateOptions{Cwd: dir}},
+	})
 	if err != nil || created.GetCompleted() == nil || created.GetSession().GetAgentId() != aid {
 		t.Fatalf("create: %v %v", created, err)
 	}
 	ref := created.Session
+
 	switched, err := query.SetModel(f.ctx, &pb.SetModelRequest{Meta: controlMeta("agy-model"), Session: ref, Provider: "antigravity", Model: "gemini-test"})
 	if err != nil || !switched.GetAccepted() {
 		t.Fatalf("switch: %v %v", switched, err)
@@ -95,7 +239,7 @@ func TestAntigravityOfficialGRPCLifecycle(t *testing.T) {
 	if err != nil || initialApproval.GetMode() != "manual" {
 		t.Fatalf("native approval: %v %v", initialApproval, err)
 	}
-	for index, mode := range []string{"full_access", "manual"} {
+	for index, mode := range []string{"auto", "full_access", "manual"} {
 		changed, e := query.SetApprovalMode(f.ctx, &pb.SetApprovalModeRequest{Meta: controlMeta(fmt.Sprintf("agy-approval-%d", index)), Session: ref, Mode: mode})
 		if e != nil || changed.GetCompleted() == nil || !changed.GetAccepted() {
 			t.Fatalf("approval switch: %v %v", changed, e)
@@ -105,22 +249,43 @@ func TestAntigravityOfficialGRPCLifecycle(t *testing.T) {
 			t.Fatalf("approval readback: %v %v", confirmed, e)
 		}
 	}
-	// Non-text input must be rejected before dispatch, including image/skill types
-	// that the shared gRPC path previously removed for non-Codex runtimes.
+
+	// ListCommands over ACP must return availableCommands.
+	cmds, err := query.ListCommands(f.ctx, &pb.ListCommandsRequest{Session: ref})
+	if err != nil || len(cmds.GetItems()) != 1 || cmds.Items[0].GetName() != "compact" {
+		t.Fatalf("ListCommands: %+v %v", cmds, err)
+	}
+
+	// External HTTP image URLs and skill inputs must be rejected before dispatch,
+	// whereas valid base64 data-URI images are supported by official agy acp!
 	for index, input := range []*pb.InputPart{
 		{Part: &pb.InputPart_ImageUrl{ImageUrl: &pb.ImageUrlInput{Url: "https://invalid.test/image.png"}}},
 		{Part: &pb.InputPart_Skill{Skill: &pb.SkillRefInput{Name: "fixture", Path: "fixture"}}},
 	} {
-		receipt, err := control.Send(f.ctx, &pb.SendRequest{Meta: controlMeta(fmt.Sprintf("agy-reject-%d", index)), Session: ref, Input: []*pb.InputPart{{Part: &pb.InputPart_Text{Text: &pb.TextInput{Text: "fixture text"}}}, input}})
+		receipt, err := control.Send(f.ctx, &pb.SendRequest{
+			Meta:    controlMeta(fmt.Sprintf("agy-reject-%d", index)),
+			Session: ref,
+			Input:   []*pb.InputPart{{Part: &pb.InputPart_Text{Text: &pb.TextInput{Text: "fixture text"}}}, input},
+		})
 		if err == nil && receipt.GetCompleted() != nil {
-			t.Fatalf("non-text input accepted: %v", receipt)
+			t.Fatalf("unsupported input accepted: %v", receipt)
 		}
 		if a.Snapshot()[ref.SessionId].Status != "idle" {
 			t.Fatal("rejection changed native activity")
 		}
 	}
+
+	dataImg := "data:image/png;base64," + base64.StdEncoding.EncodeToString([]byte{0x89, 0x50, 0x4e, 0x47})
 	for round := 0; round < 2; round++ {
-		receipt, err := control.Send(f.ctx, &pb.SendRequest{Meta: controlMeta(fmt.Sprintf("agy-send-%d", round)), Session: ref, Input: []*pb.InputPart{{Part: &pb.InputPart_Text{Text: &pb.TextInput{Text: "fixture text"}}}}})
+		inputs := []*pb.InputPart{{Part: &pb.InputPart_Text{Text: &pb.TextInput{Text: "fixture text"}}}}
+		if round == 1 {
+			inputs = append(inputs, &pb.InputPart{Part: &pb.InputPart_ImageUrl{ImageUrl: &pb.ImageUrlInput{Url: dataImg}}})
+		}
+		receipt, err := control.Send(f.ctx, &pb.SendRequest{
+			Meta:    controlMeta(fmt.Sprintf("agy-send-%d", round)),
+			Session: ref,
+			Input:   inputs,
+		})
 		if err != nil || receipt.GetCompleted() == nil || !receipt.GetAccepted() {
 			t.Fatalf("send: %v %v", receipt, err)
 		}

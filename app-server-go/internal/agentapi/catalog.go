@@ -174,7 +174,7 @@ var Capabilities = []Capability{
 		Summary: "Dispatch a task or delegate session creation onto a specific target machine (local or SSH remote host).",
 		Input: map[string]any{
 			"machine_id": "target machine ID (from machines_list: 'local' or 'ssh-...')",
-			"agent_kind": "optional target agent kind on that machine ('codex', 'hermes', 'grok')",
+			"agent_kind": "optional target agent kind on that machine ('codex', 'hermes', 'grok', 'antigravity')",
 			"title":      "optional session title",
 			"workspace":  "optional workspace directory on that machine",
 			"prompt":     "optional initial prompt text to send immediately after creation",

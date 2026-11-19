@@ -1,6 +1,7 @@
 package capabilities
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"strings"
@@ -277,6 +278,74 @@ func setHermesPlugin(data []byte, name string, enabled, remove bool) ([]byte, er
 	return yamlDump(doc)
 }
 
+// ---- JSON agent (Antigravity) ----------------------------------------
+
+func applyMCPJSON(data []byte, in mcpInput) ([]byte, error) {
+	cfg, err := parseJSONMap(data)
+	if err != nil {
+		return nil, err
+	}
+	servers := asMap(cfg["mcpServers"])
+	if servers == nil {
+		servers = map[string]any{}
+		cfg["mcpServers"] = servers
+	}
+	stored := asMap(servers[in.Name])
+	entry := map[string]any{}
+	for k, v := range stored {
+		entry[k] = v
+	}
+	if in.URL != "" {
+		entry["serverUrl"] = in.URL
+		delete(entry, "url")
+		delete(entry, "command")
+		delete(entry, "args")
+	} else {
+		entry["command"] = in.Command
+		delete(entry, "serverUrl")
+		delete(entry, "url")
+		if len(in.Args) > 0 {
+			entry["args"] = in.Args
+		} else {
+			delete(entry, "args")
+		}
+	}
+	entry["disabled"] = !in.Enabled
+	delete(entry, "enabled")
+	for key, sent := range map[string]*map[string]string{"env": in.Env, "headers": in.Headers} {
+		if sent == nil {
+			continue
+		}
+		merged := resolveSecrets(sent, asStringMap(stored[key]))
+		if len(merged) > 0 {
+			entry[key] = merged
+		} else {
+			delete(entry, key)
+		}
+	}
+	servers[in.Name] = entry
+	raw, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return append(raw, '\n'), nil
+}
+
+func removeMCPJSON(data []byte, name string) ([]byte, error) {
+	cfg, err := parseJSONMap(data)
+	if err != nil {
+		return nil, err
+	}
+	if servers := asMap(cfg["mcpServers"]); servers != nil {
+		delete(servers, name)
+	}
+	raw, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return append(raw, '\n'), nil
+}
+
 // ---- verification -----------------------------------------------------
 
 func verifyMCP(agent string, in mcpInput) func([]byte) error {
@@ -285,14 +354,20 @@ func verifyMCP(agent string, in mcpInput) func([]byte) error {
 		if err != nil {
 			return err
 		}
-		entry := asMap(asMap(cfg["mcp_servers"])[in.Name])
+		rootKey := "mcp_servers"
+		if agent == "antigravity" {
+			rootKey = "mcpServers"
+		}
+		entry := asMap(asMap(cfg[rootKey])[in.Name])
 		if entry == nil {
 			return fmt.Errorf("配置中找不到 %s", in.Name)
 		}
-		if asString(entry["url"]) != in.URL || asString(entry["command"]) != in.Command || !sameStrings(asStrings(entry["args"]), in.Args) {
+		entryURL := firstNonEmpty(asString(entry["url"]), asString(entry["serverUrl"]))
+		if entryURL != in.URL || asString(entry["command"]) != in.Command || !sameStrings(asStrings(entry["args"]), in.Args) {
 			return fmt.Errorf("%s 的连接参数与提交的不一致", in.Name)
 		}
-		if asBool(entry["enabled"], true) != in.Enabled {
+		entryEnabled := asBool(entry["enabled"], true) && !asBool(entry["disabled"], false)
+		if entryEnabled != in.Enabled {
 			return fmt.Errorf("%s 的启用状态与提交的不一致", in.Name)
 		}
 
@@ -306,7 +381,11 @@ func verifyMCPRemoved(agent, name string) func([]byte) error {
 		if err != nil {
 			return err
 		}
-		if asMap(cfg["mcp_servers"])[name] != nil {
+		rootKey := "mcp_servers"
+		if agent == "antigravity" {
+			rootKey = "mcpServers"
+		}
+		if asMap(cfg[rootKey])[name] != nil {
 			return fmt.Errorf("%s 仍在配置中", name)
 		}
 		return nil

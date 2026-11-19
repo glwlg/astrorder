@@ -88,7 +88,7 @@ func environmentsFixture(t *testing.T, server *fakeDaemonService, versioner conn
 	}
 	t.Cleanup(func() { _ = client.Close() })
 	handler, err := connections.NewHandler(connections.Options{Store: st, Client: client, VersionExecutor: versioner, OSProber: osProber,
-		RemoteExecutable: &recordingExecutableResolver{results: map[string]string{"codex": "/opt/fixture/codex", "grok": "/opt/fixture/grok"}},
+		RemoteExecutable: &recordingExecutableResolver{results: map[string]string{"codex": "/opt/fixture/codex", "grok": "/opt/fixture/grok", "antigravity": "/opt/fixture/agy"}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -147,7 +147,7 @@ func TestDiscoverEnvironmentProbesRealAvailabilityAndCachesForListing(t *testing
 	if item["id"] != "saved" || item["method"] != "ssh" || item["discovered"] != true || item["os"] != "Linux" || item["name"] != "Fixture Host" {
 		t.Fatalf("discover did not return the environment item contract: %#v", item)
 	}
-	want := []string{"hermes|saved", "codex|saved", "grok|saved"}
+	want := []string{"hermes|saved", "codex|saved", "grok|saved", "antigravity|saved"}
 	if calls := recorder.callList(); strings.Join(calls, ",") != strings.Join(want, ",") {
 		t.Fatalf("discover did not probe each kind exactly once: %v", calls)
 	}
@@ -160,6 +160,9 @@ func TestDiscoverEnvironmentProbesRealAvailabilityAndCachesForListing(t *testing
 	}
 	if agents[1]["kind"] != "codex" || agents[1]["available"] != false {
 		t.Fatalf("failed codex probe fabricated availability: %#v", agents[1])
+	}
+	if agents[3]["kind"] != "antigravity" || agents[3]["available"] != true || agents[3]["state"] != "disconnected" || agents[3]["executable"] != "/opt/fixture/agy" {
+		t.Fatalf("antigravity remote discovery lost: %#v", agents[3])
 	}
 	if agents[0]["executable"] != nil {
 		t.Fatalf("discover fabricated an executable path: %#v", agents[0])
@@ -289,9 +292,10 @@ func TestDiscoveryCacheIsolatesChangedSSHTarget(t *testing.T) {
 func TestDiscoverUnreachableRemoteReportsFailureWithoutCaching(t *testing.T) {
 	server := &fakeDaemonService{}
 	recorder := &probeRecorder{failures: map[string]error{
-		"hermes|saved": errors.New("ssh unreachable"),
-		"codex|saved":  errors.New("ssh unreachable"),
-		"grok|saved":   errors.New("ssh unreachable"),
+		"hermes|saved":      errors.New("ssh unreachable"),
+		"codex|saved":       errors.New("ssh unreachable"),
+		"grok|saved":        errors.New("ssh unreachable"),
+		"antigravity|saved": errors.New("ssh unreachable"),
 	}}
 	osProber := &fakeOSProber{err: errors.New("ssh unreachable")}
 	handler, _ := environmentsFixture(t, server, recorder, osProber)
@@ -436,6 +440,27 @@ func TestNativeVersionExecutorUsesStoredSSHInt64Port(t *testing.T) {
 			t.Fatalf("ssh probe argv missing %q: %v", want, argv)
 		}
 	}
+
+	// Antigravity must map kind="antigravity" to CLI binary k=agy over SSH.
+	agyArgvFile := filepath.Join(t.TempDir(), "agy-version-argv.json")
+	t.Setenv("ASTRORDER_SSH_VERSION_ARGV", agyArgvFile)
+	agyVer, _, err := executor.GetVersion(context.Background(), "antigravity", "remote-fixture", map[string]any{
+		"settings": map[string]any{"host": "example.invalid", "port": int64(2222), "user": "tester"},
+	})
+	if err != nil || agyVer != "1.2.3" {
+		t.Fatalf("GetVersion antigravity over ssh fixture: ver=%q err=%v", agyVer, err)
+	}
+	raw, err = os.ReadFile(agyArgvFile)
+	if err != nil {
+		t.Fatal("antigravity ssh probe was not executed", err)
+	}
+	if err := json.Unmarshal(raw, &argv); err != nil {
+		t.Fatal(err)
+	}
+	agyJoined := strings.Join(argv, " ")
+	if !strings.Contains(agyJoined, "example.invalid k=agy;") || strings.Contains(agyJoined, "k=antigravity") {
+		t.Fatalf("antigravity ssh probe did not map to k=agy: %v", argv)
+	}
 }
 
 // A discover run must execute the configured SSH binary for version and OS
@@ -468,13 +493,7 @@ func TestDiscoverUsesInjectedSSHBinaryForVersionAndOSProbes(t *testing.T) {
 		t.Fatalf("OS probe did not run through the injected ssh binary: %#v", item["os"])
 	}
 	for _, agent := range environmentAgents(t, item) {
-		if agent["kind"] == "antigravity" {
-			if agent["state"] != "unsupported" || agent["available"] != false {
-				t.Fatalf("unexpected remote Antigravity availability: %#v", agent)
-			}
-			continue
-		}
-		if agent["available"] != true {
+		if agent["available"] != true || agent["state"] == "unsupported" {
 			t.Fatalf("version probe did not run through the injected ssh binary: %#v", agent)
 		}
 	}

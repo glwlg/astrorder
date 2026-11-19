@@ -56,7 +56,14 @@ export function summarizeQuota(quota?: OcxModelQuotaResponse | null): { status: 
   if (quota.reports && quota.reports.length > 0) {
     const rep = quota.reports[0]
     if (!rep?.quota) return null
-    const used = rep.quota.weeklyPercent ?? rep.quota.fiveHourPercent ?? rep.quota.monthlyPercent ?? 0
+    const candidates = [
+      rep.quota.weeklyPercent,
+      rep.quota.fiveHourPercent,
+      rep.quota.monthlyPercent,
+      ...(rep.quota.customWindows?.map((w) => w.percent) || []),
+    ].filter((v): v is number => v != null && Number.isFinite(v))
+    if (candidates.length === 0) return null
+    const used = Math.max(...candidates)
     const remaining = Math.max(0, 100 - used)
     if (remaining <= 5) return { status: 'exhausted', label: '已耗尽', detail: `${rep.label || rep.provider} 配额已耗尽 (${used}%)` }
     if (remaining <= 25) return { status: 'tight', label: `余${Math.round(remaining)}%`, detail: `${rep.label || rep.provider} 剩余偏紧 (余 ${Math.round(remaining)}%)` }
@@ -65,10 +72,10 @@ export function summarizeQuota(quota?: OcxModelQuotaResponse | null): { status: 
   return null
 }
 
-export function ModelQuotaBadge({ modelRoute, size = 'sm' }: { modelRoute: string; size?: 'sm' | 'dot' }) {
+export function ModelQuotaBadge({ modelRoute, agentId, size = 'sm' }: { modelRoute: string; agentId?: string; size?: 'sm' | 'dot' }) {
   const query = useQuery({
-    queryKey: ['astrorder', 'model-quota', modelRoute],
-    queryFn: () => api.getModelQuota(modelRoute).catch(() => null),
+    queryKey: ['astrorder', 'model-quota', modelRoute, agentId || ''],
+    queryFn: () => api.getModelQuota(modelRoute, agentId).catch(() => null),
     enabled: Boolean(modelRoute),
     retry: false,
     staleTime: 60000,
@@ -180,7 +187,7 @@ export function SessionModelControl({ session }: { session: Session }) {
         > 
           <GlassButtonLens />
           <span className="codex-model-pill-text">{displayModelName}</span>
-          <ModelQuotaBadge modelRoute={currentModelRoute} size="dot" />
+          <ModelQuotaBadge modelRoute={currentModelRoute} agentId={session.agent_id} size="dot" />
           {!modelOnly && effortLabel && <span className="codex-model-pill-effort">{effortLabel}</span>}
           <IconChevronDown size={14} className="codex-model-pill-arrow" />
         </button>
@@ -279,9 +286,21 @@ export function SessionModelControl({ session }: { session: Session }) {
         ) : (
           <div className="codex-model-list-panel">
             <div className="codex-model-list-head">
-              <Text size="xs" c="dimmed" fw={600}>
-                选择模型
-              </Text>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                <Text size="xs" c="dimmed" fw={600}>
+                  选择模型
+                </Text>
+                <ActionIcon
+                  variant="subtle"
+                  color="gray"
+                  size="sm"
+                  aria-label="刷新模型"
+                  onClick={() => { void model.refetch(); void options.refetch() }}
+                  loading={options.isFetching || model.isFetching}
+                >
+                  <IconRefresh size={16} />
+                </ActionIcon>
+              </div>
               {modelOnly && !model.data?.model && <Text size="xs" c="dimmed">原生未报告当前模型，请选择要使用的模型。</Text>}
               <TextInput
                 size="xs"
@@ -318,7 +337,7 @@ export function SessionModelControl({ session }: { session: Session }) {
                       disabled={changing || (model.data?.read_only || model.data?.model_read_only)}
                     >
                       <span className="codex-model-menu-item-text" title={item.label}>{item.label}</span>
-                      <ModelQuotaBadge modelRoute={`${item.provider ? `${item.provider}/` : ''}${item.model}`} />
+                      <ModelQuotaBadge modelRoute={`${item.provider ? `${item.provider}/` : ''}${item.model}`} agentId={session.agent_id} />
                       {isSelected && <IconCheck size={16} className="codex-model-check-icon" />}
                     </UnstyledButton>
                   )

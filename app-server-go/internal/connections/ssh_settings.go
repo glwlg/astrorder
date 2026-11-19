@@ -68,7 +68,19 @@ func sshPort(value any) (uint32, error) {
 
 func validateSSHSettings(raw map[string]any) (map[string]any, error) {
 	settings := make(map[string]any)
-	for key, limit := range map[string]int{"display_name": 256, "profile_name": 128, "host": 253, "ssh_config_alias": 128, "user": 64, "identity_file": 1024, "hermes_path": 1024, "workspace": 1024} {
+	for key, limit := range map[string]int{
+		"display_name":           256,
+		"profile_name":           128,
+		"host":                   253,
+		"ssh_config_alias":       128,
+		"user":                   64,
+		"identity_file":          1024,
+		"hermes_path":            1024,
+		"codex_executable":       1024,
+		"grok_executable":        1024,
+		"antigravity_executable": 1024,
+		"workspace":              1024,
+	} {
 		text, err := sshText(raw, key, limit)
 		if err != nil {
 			return nil, err
@@ -99,6 +111,12 @@ func validateSSHSettings(raw map[string]any) (map[string]any, error) {
 		text := settings[key].(string)
 		if text != "" && !strings.HasPrefix(text, "/") && !strings.HasPrefix(text, `\\`) && !windowsAbsolutePattern.MatchString(text) {
 			return nil, fmt.Errorf("%s must be an absolute path", key)
+		}
+	}
+	for _, key := range []string{"codex_executable", "grok_executable", "antigravity_executable"} {
+		text := settings[key].(string)
+		if text != "" && !strings.HasPrefix(text, "/") {
+			return nil, fmt.Errorf("%s must be an absolute POSIX path", key)
 		}
 	}
 	port, err := sshPort(raw["port"])

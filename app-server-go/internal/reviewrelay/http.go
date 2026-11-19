@@ -210,6 +210,26 @@ func (h *Handler) getBinding(response http.ResponseWriter, request *http.Request
 	return nil
 }
 
+func (h *Handler) rejectAntigravityRelayAgent(ctx context.Context, agentID string) error {
+	lower := strings.ToLower(strings.TrimSpace(agentID))
+	isAgy := strings.Contains(lower, "antigravity")
+	if !isAgy && h.options.Store != nil && agentID != "" {
+		if row, err := h.options.Store.GetAgent(ctx, agentID); err == nil && row != nil {
+			if kind, _ := row["kind"].(string); kind == "antigravity" || kind == "antigravity-ssh" {
+				isAgy = true
+			}
+		}
+	}
+	if isAgy {
+		return &targetfs.Error{
+			Status: http.StatusUnprocessableEntity,
+			Code:   "antigravity_compliance_restricted",
+			Detail: "遵循 Google Antigravity 第三方接入规范，个人订阅账号不支持自动审查接力编排。",
+		}
+	}
+	return nil
+}
+
 func (h *Handler) putBinding(response http.ResponseWriter, request *http.Request, sourceAgentID, sourceSessionID string) error {
 	var payload struct {
 		ReviewAgentID   *string `json:"review_agent_id"`
@@ -222,6 +242,18 @@ func (h *Handler) putBinding(response http.ResponseWriter, request *http.Request
 	}
 	reviewAgentID, err := requiredText(payload.ReviewAgentID, maxIDLength)
 	if err != nil {
+		return err
+	}
+	if err := h.rejectAntigravityRelayAgent(request.Context(), sourceAgentID); err != nil {
+		return err
+	}
+	if err := h.rejectAntigravityRelayAgent(request.Context(), reviewAgentID); err != nil {
+		return err
+	}
+	if err := h.rejectAntigravityRelayAgent(request.Context(), sourceAgentID); err != nil {
+		return err
+	}
+	if err := h.rejectAntigravityRelayAgent(request.Context(), reviewAgentID); err != nil {
 		return err
 	}
 	reviewSessionID, err := requiredText(payload.ReviewSessionID, maxIDLength)
@@ -279,6 +311,12 @@ func (h *Handler) createRun(response http.ResponseWriter, request *http.Request)
 	}
 	reviewAgentID, err := requiredText(payload.ReviewAgentID, maxIDLength)
 	if err != nil {
+		return err
+	}
+	if err := h.rejectAntigravityRelayAgent(request.Context(), sourceAgentID); err != nil {
+		return err
+	}
+	if err := h.rejectAntigravityRelayAgent(request.Context(), reviewAgentID); err != nil {
 		return err
 	}
 	reviewSessionID, err := requiredText(payload.ReviewSessionID, maxIDLength)

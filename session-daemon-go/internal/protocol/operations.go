@@ -45,7 +45,7 @@ func (d *Daemon) control(parent context.Context, request map[string]any) map[str
 	defer d.endControl()
 	action, _ := request["action"].(string)
 	switch action {
-	case "session.create", "session.send", "session.steer", "session.review", "session.compact", "session.approve", "session.interrupt", "session.delete", "session.rename", "session.settings", "session.goal.set", "session.goal.clear", "model_config.apply", "model_config.reload":
+	case "session.create", "session.send", "session.steer", "session.review", "session.compact", "session.approve", "session.interrupt", "session.delete", "session.rename", "session.settings", "session.model.set", "session.approval.set", "session.reasoning.set", "session.close", "session.disconnect", "runtime.disconnect", "session.goal.set", "session.goal.clear", "model_config.apply", "model_config.reload":
 	default:
 		return d.controlOnce(parent, request)
 	}

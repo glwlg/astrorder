@@ -18,6 +18,8 @@ import (
 	"astrorder.dev/app-server/internal/daemonclient"
 	"astrorder.dev/app-server/internal/store"
 	sessiondv1 "astrorder.dev/contracts/gen/go/astrorder/sessiond/v1"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // Publisher broadcasts business events.
@@ -36,13 +38,12 @@ type NativeVersionExecutor struct {
 }
 
 func (e *NativeVersionExecutor) GetVersion(ctx context.Context, kind, connID string, sshConn map[string]any) (string, bool, error) {
-	binName := strings.ToLower(kind)
-	switch binName {
+	normalized := strings.ToLower(kind)
+	binName := normalized
+	switch normalized {
 	case "codex", "hermes", "grok":
 	case "antigravity":
-		if connID != "" && connID != "local" {
-			return "", false, fmt.Errorf("Antigravity SSH runtime is not supported yet")
-		}
+		binName = "agy"
 	default:
 		return "", false, fmt.Errorf("unsupported agent kind %q", kind)
 	}
@@ -238,18 +239,19 @@ func parseSSHConfig(conn map[string]any) *sessiondv1.SshConnectConfig {
 	}
 
 	return &sessiondv1.SshConnectConfig{
-		Host:             host,
-		Port:             port,
-		User:             userPtr,
-		SshConfigAlias:   aliasPtr,
-		IdentityFile:     idFilePtr,
-		Workspace:        wsPtr,
-		ProfileName:      sshConfigText(settings, conn, "profile_name"),
-		DisplayName:      sshConfigText(settings, conn, "display_name"),
-		HermesPath:       sshConfigText(settings, conn, "hermes_path"),
-		HermesExecutable: sshConfigText(settings, conn, "hermes_executable"),
-		CodexExecutable:  sshConfigText(settings, conn, "codex_executable"),
-		GrokExecutable:   sshConfigText(settings, conn, "grok_executable"),
+		Host:                  host,
+		Port:                  port,
+		User:                  userPtr,
+		SshConfigAlias:        aliasPtr,
+		IdentityFile:          idFilePtr,
+		Workspace:             wsPtr,
+		ProfileName:           sshConfigText(settings, conn, "profile_name"),
+		DisplayName:           sshConfigText(settings, conn, "display_name"),
+		HermesPath:            sshConfigText(settings, conn, "hermes_path"),
+		HermesExecutable:      sshConfigText(settings, conn, "hermes_executable"),
+		CodexExecutable:       sshConfigText(settings, conn, "codex_executable"),
+		GrokExecutable:        sshConfigText(settings, conn, "grok_executable"),
+		AntigravityExecutable: sshConfigText(settings, conn, "antigravity_executable"),
 	}
 }
 
@@ -266,37 +268,44 @@ func sshConfigText(settings, conn map[string]any, key string) *string {
 
 func runtimeTarget(agentType string, connID *string, sshConn map[string]any) *sessiondv1.RuntimeTarget {
 	kind := sessiondv1.RuntimeKind_RUNTIME_KIND_UNSPECIFIED
+	isRemote := connID != nil && *connID != "" && *connID != "local"
 	switch strings.ToLower(agentType) {
 	case "codex":
-		if connID != nil && *connID != "" {
+		if isRemote {
 			kind = sessiondv1.RuntimeKind_RUNTIME_KIND_CODEX_SSH
 		} else {
 			kind = sessiondv1.RuntimeKind_RUNTIME_KIND_CODEX
 		}
 	case "hermes":
-		if connID != nil && *connID != "" {
+		if isRemote {
 			kind = sessiondv1.RuntimeKind_RUNTIME_KIND_SSH_HERMES
 		} else {
 			kind = sessiondv1.RuntimeKind_RUNTIME_KIND_HERMES
 		}
 	case "antigravity":
-		if connID == nil || *connID == "" {
+		if isRemote {
+			kind = sessiondv1.RuntimeKind_RUNTIME_KIND_ANTIGRAVITY_SSH
+		} else {
 			kind = sessiondv1.RuntimeKind_RUNTIME_KIND_ANTIGRAVITY
 		}
 	case "grok":
-		if connID != nil && *connID != "" {
+		if isRemote {
 			kind = sessiondv1.RuntimeKind_RUNTIME_KIND_GROK_SSH
 		} else {
 			kind = sessiondv1.RuntimeKind_RUNTIME_KIND_GROK
 		}
 	}
 	var sshCfg *sessiondv1.SshConnectConfig
-	if connID != nil && *connID != "" && sshConn != nil {
-		sshCfg = parseSSHConfig(sshConn)
+	var targetConnID *string
+	if isRemote {
+		targetConnID = connID
+		if sshConn != nil {
+			sshCfg = parseSSHConfig(sshConn)
+		}
 	}
 	return &sessiondv1.RuntimeTarget{
 		Runtime:      kind,
-		ConnectionId: connID,
+		ConnectionId: targetConnID,
 		Ssh:          sshCfg,
 	}
 }
@@ -306,6 +315,18 @@ func canonicalMeta(operationID string) *sessiondv1.CommandMeta {
 		OperationId:      operationID,
 		Canonicalization: sessiondv1.CanonicalizationVersion_CANONICALIZATION_VERSION_ASTRORDER_OPERATION_V1,
 	}
+}
+
+func formatDaemonRuntimeError(kind, connID string, err error) string {
+	if err == nil {
+		return ""
+	}
+	if kind == "antigravity" && connID != "" && connID != "local" {
+		if code := status.Code(err); code == codes.InvalidArgument || code == codes.Unimplemented {
+			return "当前小内核尚不支持远程 Antigravity，请先通过系统托盘更新小内核: " + err.Error()
+		}
+	}
+	return err.Error()
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -416,7 +437,7 @@ func (h *Handler) handleAgentUpgradeTargets(w http.ResponseWriter, r *http.Reque
 	items := make([]map[string]any, 0, len(agents))
 	for _, a := range agents {
 		kind := strings.ToLower(fmt.Sprint(a["kind"]))
-		if kind != "codex" && kind != "hermes" && kind != "grok" {
+		if kind != "codex" && kind != "hermes" && kind != "grok" && kind != "antigravity" {
 			continue
 		}
 		connID, _ := a["connection_id"].(string)
@@ -641,10 +662,6 @@ func (h *Handler) handleEnvironmentAgentAction(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	if kind == "antigravity" && connID != "local" {
-		writeError(w, http.StatusUnprocessableEntity, "unsupported_runtime", "Antigravity SSH runtime is not supported yet")
-		return
-	}
 	if action != "connect" && action != "disconnect" && action != "restart" {
 		writeError(w, http.StatusUnprocessableEntity, "invalid_action", "不支持的连接操作。")
 		return
@@ -676,10 +693,10 @@ func (h *Handler) handleEnvironmentAgentAction(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// Remote codex/grok attach needs the actual CLI path: resolve it with one
-	// read-only probe before the target is built, and only for operations that
-	// attach. A failed resolution never disconnects or persists anything.
-	if connID != "local" && (kind == "codex" || kind == "grok") && (action == "connect" || action == "restart") {
+	// Remote codex/grok/antigravity attach needs the actual CLI path: resolve it
+	// with one read-only probe before the target is built, and only for operations
+	// that attach. A failed resolution never disconnects or persists anything.
+	if connID != "local" && (kind == "codex" || kind == "grok" || kind == "antigravity") && (action == "connect" || action == "restart") {
 		resolver := h.executables
 		if resolver == nil {
 			resolver = &NativeRemoteExecutableResolver{SSHBinary: h.sshBinary}
@@ -702,7 +719,7 @@ func (h *Handler) handleEnvironmentAgentAction(w http.ResponseWriter, r *http.Re
 			Target: target,
 		})
 		if err := h.disconnectReceipt(resp, err); err != nil {
-			writeError(w, http.StatusConflict, "disconnect_refused", err.Error())
+			writeError(w, http.StatusConflict, "disconnect_refused", formatDaemonRuntimeError(kind, connID, err))
 			return
 		}
 
@@ -717,7 +734,7 @@ func (h *Handler) handleEnvironmentAgentAction(w http.ResponseWriter, r *http.Re
 			RuntimeControl: true,
 		})
 		if err != nil {
-			writeError(w, http.StatusBadGateway, "attach_failed", err.Error())
+			writeError(w, http.StatusBadGateway, "attach_failed", formatDaemonRuntimeError(kind, connID, err))
 			return
 		}
 		if err := h.attachReceipt(receipt, expected); err != nil {
@@ -733,7 +750,7 @@ func (h *Handler) handleEnvironmentAgentAction(w http.ResponseWriter, r *http.Re
 			Target: target,
 		})
 		if err := h.disconnectReceipt(resp, err); err != nil {
-			writeError(w, http.StatusConflict, "disconnect_refused", err.Error())
+			writeError(w, http.StatusConflict, "disconnect_refused", formatDaemonRuntimeError(kind, connID, err))
 			return
 		}
 		// The old runtime is authoritatively released; until the re-attach is
@@ -755,7 +772,7 @@ func (h *Handler) handleEnvironmentAgentAction(w http.ResponseWriter, r *http.Re
 			RuntimeControl: true,
 		})
 		if err != nil {
-			writeError(w, http.StatusBadGateway, "restart_attach_failed", err.Error())
+			writeError(w, http.StatusBadGateway, "restart_attach_failed", formatDaemonRuntimeError(kind, connID, err))
 			return
 		}
 		if err := h.attachReceipt(receipt, expected); err != nil {

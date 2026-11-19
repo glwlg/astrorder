@@ -1,0 +1,219 @@
+.direct-usage-scroll {
+  flex: 1;
+  min-height: 0;
+}
+
+.direct-usage-content {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.direct-usage-filters {
+  margin: 16px 0;
+}
+
+.direct-usage-metric,
+.direct-usage-panel {
+  min-width: 0;
+}
+
+.direct-usage-model-dot {
+  display: inline-block;
+  inline-size: 9px;
+  block-size: 9px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.direct-usage-mono {
+  font-family: var(--mantine-font-family-monospace);
+  font-variant-numeric: tabular-nums;
+}
+
+.direct-usage-days {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.direct-usage-day-row {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  font-size: var(--mantine-font-size-xs);
+}
+
+.direct-usage-day-bar-track {
+  block-size: 8px;
+  border-radius: 999px;
+  background: var(--mantine-color-default-hover);
+  overflow: hidden;
+}
+
+.direct-usage-day-bar-fill {
+  block-size: 100%;
+  border-radius: 999px;
+  background: var(--mantine-color-blue-filled);
+  transition: inline-size 160ms ease;
+}
+
+.direct-usage-table-wrapper {
+  overflow: auto;
+  max-inline-size: 100%;
+  max-block-size: min(520px, 75vh);
+  container-type: inline-size;
+  border-radius: var(--mantine-radius-sm);
+}
+
+.direct-usage-table-wrapper:focus-visible {
+  outline: 2px solid var(--mantine-color-blue-filled);
+  outline-offset: 2px;
+}
+
+.direct-usage-table {
+  inline-size: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: var(--mantine-font-size-sm);
+  --label-2: "Agent / 节点";
+  --label-3: "模型";
+  --label-4: "步数";
+  --label-5: "输入 / 缓存 / 输出";
+  --label-6: "总消耗";
+}
+
+.direct-usage-table thead {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: 2;
+  background: var(--mantine-color-body);
+}
+
+.direct-usage-table th,
+.direct-usage-table td {
+  padding-block: 10px;
+  padding-inline: 12px;
+  border-block-end: 1px solid var(--mantine-color-default-border);
+  text-align: start;
+  vertical-align: middle;
+}
+
+.direct-usage-table thead th {
+  font-size: var(--mantine-font-size-xs);
+  font-weight: 600;
+  color: var(--mantine-color-dimmed);
+  white-space: nowrap;
+}
+
+.direct-usage-table tbody th {
+  position: sticky;
+  inset-inline-start: 0;
+  z-index: 1;
+  background: var(--mantine-color-body);
+  font-weight: 500;
+  max-inline-size: 320px;
+}
+
+.direct-usage-table tbody tr:hover td,
+.direct-usage-table tbody tr:hover th {
+  background: var(--mantine-color-default-hover);
+}
+
+.direct-usage-num {
+  text-align: end !important;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.direct-usage-session-link {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  display: block;
+  max-inline-size: 100%;
+}
+
+.direct-usage-session-link:hover .direct-usage-session-title {
+  color: var(--mantine-color-blue-filled);
+  text-decoration: underline;
+}
+
+.direct-usage-session-title {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.direct-usage-session-sub {
+  display: block;
+  font-size: var(--mantine-font-size-xs);
+  color: var(--mantine-color-dimmed);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@container (width < 600px) {
+  .direct-usage-table,
+  .direct-usage-table thead,
+  .direct-usage-table tbody,
+  .direct-usage-table tr,
+  .direct-usage-table th,
+  .direct-usage-table td {
+    display: block;
+  }
+
+  .direct-usage-table thead {
+    display: none;
+  }
+
+  .direct-usage-table tbody tr {
+    margin-block-end: 12px;
+    border: 1px solid var(--mantine-color-default-border);
+    border-radius: var(--mantine-radius-md);
+    overflow: hidden;
+  }
+
+  .direct-usage-table tbody th {
+    position: sticky;
+    inset-block-start: 0;
+    z-index: 2;
+    max-inline-size: none;
+    background: var(--mantine-color-default-hover);
+  }
+
+  .direct-usage-table td {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    text-align: end !important;
+  }
+
+  .direct-usage-table td::before {
+    font-size: var(--mantine-font-size-xs);
+    color: var(--mantine-color-dimmed);
+    font-weight: 500;
+    text-align: start;
+  }
+
+  .direct-usage-table td:nth-child(2)::before { content: var(--label-2) ": "; }
+  .direct-usage-table td:nth-child(3)::before { content: var(--label-3) ": "; }
+  .direct-usage-table td:nth-child(4)::before { content: var(--label-4) ": "; }
+  .direct-usage-table td:nth-child(5)::before { content: var(--label-5) ": "; }
+  .direct-usage-table td:nth-child(6)::before { content: var(--label-6) ": "; }
+}
+
+@media (max-width: 600px) {
+  .direct-usage-content {
+    padding: 16px;
+  }
+}

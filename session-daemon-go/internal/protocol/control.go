@@ -123,9 +123,9 @@ func (d *Daemon) controlOnce(parent context.Context, request map[string]any) map
 			if params, ok := request["params"].(map[string]any); ok {
 				if rc, ok := params["runtime_control"].(bool); ok && rc {
 					d.BindAgentControlSession(result.SessionID, result.Payload)
-					if kind == "antigravity" && result.Payload["runtime_control"] == true && result.Status == "idle" {
-						agent := map[string]any{"id": result.Payload["agent_id"], "kind": "antigravity", "name": "Antigravity", "status": "ready", "control_state": "owned", "capabilities": []string{"chat", "events", "history", "launch", "stop", "fork", "delete"}, "limitation": "agy 本机支持原生停止、分叉、删除和空闲模型/权限切换；附件、运行中引导、SSH 与转交尚未接通，上下文占用未取得，headless 不支持逐次审批。"}
-						for _, key := range []string{"runtime_id", "source_id", "connection_id"} {
+					if (kind == "antigravity" || kind == "antigravity-ssh") && result.Payload["runtime_control"] == true && result.Status == "idle" {
+						agent := map[string]any{"id": result.Payload["agent_id"], "kind": "antigravity", "name": "Antigravity", "status": "ready", "control_state": "owned", "capabilities": []string{"chat", "events", "history", "launch", "stop", "delete", "queue", "approvals", "task_events", "attachments"}, "limitation": "基于官方 agy acp 协议接入，支持逐次权限审批、动态模型/思考强度/权限模式切换、原生上下文占用、多模态图片附件及会话删除；遵循 Google 规范不开放自动多 Agent 群聊与原生会话分叉。"}
+						for _, key := range []string{"name", "runtime_id", "source_id", "connection_id"} {
 							if v, ok := result.Payload[key]; ok {
 								agent[key] = v
 							}

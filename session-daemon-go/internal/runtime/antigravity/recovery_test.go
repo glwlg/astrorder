@@ -16,7 +16,7 @@ func TestExitedTransportCanResumeExactConversationWithoutResending(t *testing.T)
 	exe, _ := os.Executable()
 	home := t.TempDir()
 	dir := filepath.Join(home, ".gemini", "antigravity-cli")
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	db, err := sql.Open("sqlite", filepath.Join(dir, "conversation_summaries.db"))
@@ -27,7 +27,14 @@ func TestExitedTransportCanResumeExactConversationWithoutResending(t *testing.T)
 	if _, err = db.Exec(`CREATE TABLE conversation_summaries(conversation_id TEXT,not_fully_idle INTEGER,killed INTEGER); INSERT INTO conversation_summaries VALUES('11111111-1111-4111-8111-111111111111',0,0)`); err != nil {
 		t.Fatal(err)
 	}
-	a := New(Config{Executable: exe, Arguments: []string{"-test.run=TestStreamHelper", "--"}, Environment: []string{"ASTRORDER_AGY_HELPER=1", "ASTRORDER_AGY_EOF=1"}, Workspace: home, Allowed: []string{home}, Home: home})
+	a := New(Config{
+		Executable:  exe,
+		Arguments:   []string{"-test.run=TestStreamHelper", "--"},
+		Environment: []string{"ASTRORDER_AGY_HELPER=1", "ASTRORDER_AGY_EOF=1"},
+		Workspace:   home,
+		Allowed:     []string{home},
+		Home:        home,
+	})
 	defer a.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -42,7 +49,7 @@ func TestExitedTransportCanResumeExactConversationWithoutResending(t *testing.T)
 		t.Fatal(err)
 	}
 	select {
-	case <-old.done:
+	case <-old.client.done:
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
@@ -62,8 +69,8 @@ func TestExitedTransportCanResumeExactConversationWithoutResending(t *testing.T)
 	a.mu.Lock()
 	current := a.sessions[created.SessionID]
 	a.mu.Unlock()
-	if current == old || current.cmd.Process.Pid == old.cmd.Process.Pid {
-		t.Fatal("transport was not replaced")
+	if current == old || current.client.pid() == old.client.pid() {
+		t.Fatal("ACP transport was not replaced")
 	}
 	current.mu.Lock()
 	command := current.command
@@ -75,7 +82,10 @@ func TestExitedTransportCanResumeExactConversationWithoutResending(t *testing.T)
 
 func TestErrorWhileTransportAliveDoesNotPermitReplacement(t *testing.T) {
 	a := New(Config{})
-	s := &session{id: "11111111-1111-4111-8111-111111111111", status: "error", done: make(chan struct{})}
+	c := &acpClient{done: make(chan struct{})}
+	s := newSession("11111111-1111-4111-8111-111111111111", "", c)
+	s.status = "error"
+	defer s.stopWorker()
 	a.sessions[s.id] = s
 	if _, err := a.Command(context.Background(), core.Request{SessionID: s.id, Action: "session.model.read"}); errors.Is(err, core.ErrSessionNotOwned) {
 		t.Fatal("live transport was declared unowned")

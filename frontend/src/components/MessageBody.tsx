@@ -1,20 +1,10 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { IconPlayerPause } from '@tabler/icons-react'
 import { LazyDetails } from './LazyDetails'
 import { CodeCommentsBlock, extractCodeComments } from './CodeCommentsBlock'
 import './MessageBody.css'
 
-/** Presentation only: preserve native text, parse file mentions, and never turn filesystem references into arbitrary external URLs. */
-export function MessageBody({
-  value,
-  user = false,
-  onImageClick,
-  onGalleryClick,
-  attachmentNames = [],
-  renderMarkdown,
-  sessionId,
-  connectionId,
-}: {
+type MessageBodyProps = {
   value: string
   user?: boolean
   onImageClick?: (url: string) => void
@@ -23,7 +13,57 @@ export function MessageBody({
   renderMarkdown: (value: string) => ReactNode
   sessionId?: string
   connectionId?: string
-}) {
+}
+
+function longMessagePreview(value: string): string | null {
+  // Only inspect a bounded prefix, even for megabytes of pasted text.
+  const prefix = value.slice(0, 4001)
+  if (value.length <= 4000 && prefix.split('\n', 41).length <= 40) return null
+  return prefix.slice(0, 600).split('\n', 9).slice(0, 8).join('\n')
+    .replace(/[\uD800-\uDBFF]$/, '').trimEnd()
+}
+
+function LongMessageBody({ preview, ...props }: MessageBodyProps & { preview: string }) {
+  const [open, setOpen] = useState(false)
+  return <div className="message-long">
+    {!open && <div className="message-long-preview">{preview}…</div>}
+    <details open={open} onToggle={event => {
+      if (event.target === event.currentTarget) setOpen(event.currentTarget.open)
+    }}>
+      <summary onClick={event => {
+        event.preventDefault()
+        setOpen(value => !value)
+      }}>
+        {open ? '收起长消息' : '展开全文'}
+        <span className="message-long-size">{props.value.length.toLocaleString()} 字符</span>
+      </summary>
+      {/* Do not parse markdown, file directives or review cards until opened. */}
+      {open && <FullMessageBody {...props} />}
+    </details>
+  </div>
+}
+
+/** Presentation only: preserve native text, parse file mentions, and never turn filesystem references into arbitrary external URLs. */
+export function MessageBody(props: MessageBodyProps) {
+  // Native notices already have their own lazy disclosure.
+  const notice = props.value.startsWith('[CONTEXT COMPACTION — REFERENCE ONLY]')
+    || props.value.startsWith('[System: The active model for this chat has changed to ')
+  const preview = props.user && !notice ? longMessagePreview(props.value) : null
+  return preview === null
+    ? <FullMessageBody {...props} />
+    : <LongMessageBody key={props.sessionId} {...props} preview={preview} />
+}
+
+function FullMessageBody({
+  value,
+  user = false,
+  onImageClick,
+  onGalleryClick,
+  attachmentNames = [],
+  renderMarkdown,
+  sessionId,
+  connectionId,
+}: MessageBodyProps) {
   const nativeSummary = value.startsWith('[CONTEXT COMPACTION — REFERENCE ONLY]')
   const modelNotice = value.startsWith('[System: The active model for this chat has changed to ')
   if (nativeSummary || modelNotice) return <LazyDetails summary={nativeSummary ? '上下文压缩摘要' : '模型已切换'}>

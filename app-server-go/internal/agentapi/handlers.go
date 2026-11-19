@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -74,11 +75,12 @@ func (h *Handler) resolveRuntimeTarget(ctx context.Context, agent map[string]any
 		} else {
 			target.Runtime = sessiondv1.RuntimeKind_RUNTIME_KIND_HERMES
 		}
-	case "antigravity":
-		if isSSH {
-			return nil, fmt.Errorf("Antigravity SSH runtime is not supported yet")
+	case "antigravity", "antigravity-ssh":
+		if isSSH || kind == "antigravity-ssh" {
+			target.Runtime = sessiondv1.RuntimeKind_RUNTIME_KIND_ANTIGRAVITY_SSH
+		} else {
+			target.Runtime = sessiondv1.RuntimeKind_RUNTIME_KIND_ANTIGRAVITY
 		}
-		target.Runtime = sessiondv1.RuntimeKind_RUNTIME_KIND_ANTIGRAVITY
 	case "grok":
 		if isSSH {
 			target.Runtime = sessiondv1.RuntimeKind_RUNTIME_KIND_GROK_SSH
@@ -101,6 +103,11 @@ func (h *Handler) resolveRuntimeTarget(ctx context.Context, agent map[string]any
 			switch p := pVal.(type) {
 			case int:
 				portNum = p
+			case float64:
+				if p < 1 || p > 65535 || p != float64(int(p)) {
+					return nil, fmt.Errorf("invalid SSH port")
+				}
+				portNum = int(p)
 			case int64:
 				if p < 1 || p > 65535 {
 					return nil, fmt.Errorf("invalid SSH port")
@@ -162,9 +169,55 @@ func (h *Handler) resolveRuntimeTarget(ctx context.Context, agent map[string]any
 			defaultHermes := "/home/luwei/.local/bin/hermes"
 			sshConf.HermesPath = &defaultHermes
 		}
+		if ae := firstSSHConfigString(settings, sshRow, "antigravity_executable"); ae != "" {
+			sshConf.AntigravityExecutable = &ae
+		} else if kind == "antigravity" || kind == "antigravity-ssh" {
+			userStr, _ := settings["user"].(string)
+			resolved := h.resolveAntigravitySSHExecutable(ctx, sshRow, userStr)
+			sshConf.AntigravityExecutable = &resolved
+		}
+		if profile, ok := sshRow["profile_name"].(string); ok && profile != "" {
+			sshConf.ProfileName = &profile
+		}
 		target.Ssh = sshConf
 	}
 	return target, nil
+}
+
+func firstSSHConfigString(settings, sshRow map[string]any, key string) string {
+	for _, source := range []map[string]any{settings, sshRow} {
+		if source == nil {
+			continue
+		}
+		if v, ok := source[key].(string); ok {
+			if trimmed := strings.TrimSpace(v); trimmed != "" {
+				return trimmed
+			}
+		}
+	}
+	return ""
+}
+
+func remoteAntigravityDefault(user string) string {
+	u := strings.TrimSpace(user)
+	if u == "" {
+		u = "luwei"
+	}
+	if u == "root" {
+		return "/root/.local/bin/agy"
+	}
+	return "/home/" + u + "/.local/bin/agy"
+}
+
+func (h *Handler) resolveAntigravitySSHExecutable(ctx context.Context, sshRow map[string]any, user string) string {
+	if h.options.RemoteExecutable != nil {
+		if resolved, err := h.options.RemoteExecutable.Resolve(ctx, "antigravity", sshRow); err == nil {
+			if trimmed := strings.TrimSpace(resolved); trimmed != "" {
+				return trimmed
+			}
+		}
+	}
+	return remoteAntigravityDefault(user)
 }
 
 // SessionSender sends instructions to sessions.
@@ -571,6 +624,21 @@ func (h *Handler) invokeSessionsRead(ctx context.Context, payload map[string]any
 			Limit:   uint32(limit),
 			Before:  reqBefore,
 		})
+		if rErr != nil && (kind == "antigravity" || kind == "antigravity-ssh") && h.options.Client.Session != nil && (status.Code(rErr) == codes.NotFound || strings.Contains(rErr.Error(), "not owned")) {
+			if target, tErr := h.resolveRuntimeTarget(ctx, agent); tErr == nil {
+				attachReq := &sessiondv1.AttachSessionRequest{Session: ref, Target: target}
+				if ws, ok := sess["workspace"].(string); ok && ws != "" {
+					attachReq.Cwd = &ws
+				}
+				if receipt, aErr := h.options.Client.Session.AttachSession(ctx, attachReq); aErr == nil && receipt != nil && receipt.Attached {
+					resp, rErr = h.options.Client.Runtime.GetHistoryPage(ctx, &sessiondv1.HistoryPageRequest{
+						Session: ref,
+						Limit:   uint32(limit),
+						Before:  reqBefore,
+					})
+				}
+			}
+		}
 		if rErr == nil && resp != nil {
 			if resp.Session == nil || resp.Session.SessionId != ref.SessionId || resp.Session.GetAgentId() != ref.GetAgentId() || resp.Session.GetConnectionId() != ref.GetConnectionId() {
 				return nil, NewAgentApiError("runtime_error", "Native history identity mismatch")
@@ -708,7 +776,8 @@ func (h *Handler) invokeSessionsCreate(ctx context.Context, payload map[string]a
 	if title == "" {
 		title = "新会话"
 	}
-	workspace, _ := payload["workspace"].(string)
+	rawWorkspace, _ := payload["workspace"].(string)
+	workspace := rawWorkspace
 	if workspace == "" {
 		workspace = h.options.DefaultWorkspace
 	}
@@ -746,6 +815,13 @@ func (h *Handler) invokeSessionsCreate(ctx context.Context, payload map[string]a
 		if rErr != nil {
 			return nil, NewAgentApiError("runtime_error", rErr.Error())
 		}
+		if rawWorkspace == "" && target.Ssh != nil && !strings.HasPrefix(workspace, "/") {
+			if target.Ssh.Workspace != nil && strings.HasPrefix(*target.Ssh.Workspace, "/") {
+				workspace = *target.Ssh.Workspace
+			} else {
+				workspace = "/home/luwei"
+			}
+		}
 		createReq := &sessiondv1.CreateSessionRequest{
 			Meta:   newCommandMeta("", ""),
 			Target: target,
@@ -769,8 +845,12 @@ func (h *Handler) invokeSessionsCreate(ctx context.Context, payload map[string]a
 					ParentSessionId: pSidPtr,
 				},
 			}
-		case "antigravity":
-			createReq.Options = &sessiondv1.CreateSessionRequest_Antigravity{Antigravity: &sessiondv1.AntigravityCreateOptions{Cwd: workspace, ParentSessionId: pSidPtr}}
+		case "antigravity", "antigravity-ssh":
+			nativeParent := pSidPtr
+			if parentAid != "" && parentAid != agentID {
+				nativeParent = nil
+			}
+			createReq.Options = &sessiondv1.CreateSessionRequest_Antigravity{Antigravity: &sessiondv1.AntigravityCreateOptions{Cwd: workspace, ParentSessionId: nativeParent}}
 		case "grok":
 			createReq.Options = &sessiondv1.CreateSessionRequest_Grok{
 				Grok: &sessiondv1.GrokCreateOptions{
@@ -927,9 +1007,22 @@ func (h *Handler) invokeSessionsDelete(ctx context.Context, payload map[string]a
 			continue
 		}
 		connID, _ := existing["connection_id"].(string)
+		ref := buildSessionRef(aid, sid, connID)
+		if agent, aErr := h.options.Store.GetAgent(ctx, aid); aErr == nil && agent != nil {
+			k, _ := agent["kind"].(string)
+			if k == "antigravity" || k == "antigravity-ssh" {
+				if target, tErr := h.resolveRuntimeTarget(ctx, agent); tErr == nil {
+					attachReq := &sessiondv1.AttachSessionRequest{Session: ref, Target: target}
+					if ws, ok := existing["workspace"].(string); ok && ws != "" {
+						attachReq.Cwd = &ws
+					}
+					_, _ = h.options.Client.Session.AttachSession(ctx, attachReq)
+				}
+			}
+		}
 		delReceipt, delErr := h.options.Client.Session.DeleteSession(ctx, &sessiondv1.DeleteSessionRequest{
 			Meta:    newCommandMeta("", ""),
-			Session: buildSessionRef(aid, sid, connID),
+			Session: ref,
 		})
 		if delErr != nil {
 			failed = append(failed, map[string]any{"agent_id": aid, "session_id": sid, "error": delErr.Error()})
@@ -1535,7 +1628,18 @@ func (h *Handler) invokePluginsOpen(ctx context.Context, payload map[string]any)
 	if normStr, ok := normPath.(string); ok && normStr != "" && urlVal == nil {
 		low := strings.ToLower(normStr)
 		if pluginID == "html" || strings.HasSuffix(low, ".html") || strings.HasSuffix(low, ".htm") {
-			urlVal = "/api/v1/files/raw?path=" + normStr
+			rawURL := "/api/v1/files/raw?path=" + url.QueryEscape(normStr)
+			if sStr, ok := sessionID.(string); ok && sStr != "" {
+				rawURL += "&session_id=" + url.QueryEscape(sStr)
+				if aStr, ok := agentID.(string); ok && aStr != "" && h.options.Store != nil {
+					if sess, err := h.options.Store.GetSession(ctx, aStr, sStr); err == nil && sess != nil {
+						if cid, ok := sess["connection_id"].(string); ok && cid != "" && cid != "local" {
+							rawURL += "&connection_id=" + url.QueryEscape(cid)
+						}
+					}
+				}
+			}
+			urlVal = rawURL
 		}
 	}
 

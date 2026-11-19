@@ -1398,6 +1398,8 @@ func resolveCaller(envLookup EnvLookup, config Config) (*Caller, error) {
 	hasCodex = hasCodex && codexID != ""
 	grokID, hasGrok := envLookup("GROK_SESSION_ID")
 	hasGrok = hasGrok && grokID != ""
+	agyID, hasAgy := envLookup("ANTIGRAVITY_CONVERSATION_ID")
+	hasAgy = hasAgy && agyID != ""
 
 	runtimeCount := 0
 	if hasHermes {
@@ -1407,6 +1409,9 @@ func resolveCaller(envLookup EnvLookup, config Config) (*Caller, error) {
 		runtimeCount++
 	}
 	if hasGrok {
+		runtimeCount++
+	}
+	if hasAgy {
 		runtimeCount++
 	}
 
@@ -1506,17 +1511,24 @@ func resolveCaller(envLookup EnvLookup, config Config) (*Caller, error) {
 			if hasGrok {
 				autoSessionID = grokID
 			}
+		case "antigravity":
+			if hasAgy {
+				autoSessionID = agyID
+			}
 		default:
 			// Unsupported runtime: requires explicit session ID
 		}
 	} else {
-		if hasHermes && !hasCodex && !hasGrok {
+		if hasHermes && !hasCodex && !hasGrok && !hasAgy {
 			runtime = "hermes"
 			autoSessionID = hermesID
-		} else if hasCodex && !hasHermes && !hasGrok {
+		} else if hasCodex && !hasHermes && !hasGrok && !hasAgy {
 			runtime = "codex"
 			autoSessionID = codexID
-		} else if hasGrok && !hasHermes && !hasCodex {
+		} else if hasAgy && !hasHermes && !hasCodex && !hasGrok {
+			runtime = "antigravity"
+			autoSessionID = agyID
+		} else if hasGrok && !hasHermes && !hasCodex && !hasAgy {
 			return nil, errors.New("grok runtime is experimental and requires explicit ASTRORDER_CALLER_RUNTIME or caller config")
 		} else {
 			return nil, errors.New("cannot determine caller runtime; set ASTRORDER_CALLER_RUNTIME or ASTRORDER_CALLER_CONFIG")
@@ -1537,7 +1549,7 @@ func resolveCaller(envLookup EnvLookup, config Config) (*Caller, error) {
 		}
 		sessionID = envSessionID
 	} else {
-		if runtime != "hermes" && runtime != "codex" && runtime != "grok" {
+		if runtime != "hermes" && runtime != "codex" && runtime != "grok" && runtime != "antigravity" {
 			return nil, fmt.Errorf("unsupported runtime %q requires explicit ASTRORDER_CALLER_SESSION_ID", runtime)
 		}
 		if autoSessionID == "" {

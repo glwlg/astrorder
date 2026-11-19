@@ -532,4 +532,162 @@ func TestAgentApiResolveRuntimeTargetRemoteDefaultsAndOverrides(t *testing.T) {
 	if hTarget.Ssh.GetHermesPath() != "/custom/bin/hermes" {
 		t.Fatalf("unexpected custom hermes: %v", hTarget.Ssh.GetHermesPath())
 	}
+
+	// default antigravity over SSH
+	agyTarget, err := h.resolveRuntimeTarget(ctx, map[string]any{"id": "agy1", "kind": "antigravity", "connection_id": "remote-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if agyTarget.GetRuntime() != sessiondv1.RuntimeKind_RUNTIME_KIND_ANTIGRAVITY_SSH || agyTarget.GetConnectionId() != "remote-1" {
+		t.Fatalf("unexpected remote antigravity target: %+v", agyTarget)
+	}
+	if agyTarget.Ssh.GetAntigravityExecutable() != "/home/luwei/.local/bin/agy" {
+		t.Fatalf("unexpected antigravity default: %v", agyTarget.Ssh.GetAntigravityExecutable())
+	}
+
+	// user-specific antigravity fallback + RemoteExecutableResolver
+	_, err = st.SaveSSHConnection(ctx, map[string]any{
+		"id":   "remote-dev",
+		"host": "192.168.1.102",
+		"port": json.Number("22"),
+		"user": "devuser",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	devTarget, err := h.resolveRuntimeTarget(ctx, map[string]any{"id": "agy2", "kind": "antigravity", "connection_id": "remote-dev"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if devTarget.Ssh.GetAntigravityExecutable() != "/home/devuser/.local/bin/agy" {
+		t.Fatalf("unexpected user fallback: %v", devTarget.Ssh.GetAntigravityExecutable())
+	}
+
+	hResolved := &Handler{options: Options{Store: st, RemoteExecutable: stubAgentAPIRemoteResolver("/opt/agy/bin/agy")}}
+	resTarget, err := hResolved.resolveRuntimeTarget(ctx, map[string]any{"id": "agy2", "kind": "antigravity", "connection_id": "remote-dev"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resTarget.Ssh.GetAntigravityExecutable() != "/opt/agy/bin/agy" {
+		t.Fatalf("unexpected resolved executable: %v", resTarget.Ssh.GetAntigravityExecutable())
+	}
+}
+
+type stubAgentAPIRemoteResolver string
+
+func (p stubAgentAPIRemoteResolver) Resolve(_ context.Context, _ string, _ map[string]any) (string, error) {
+	return string(p), nil
+}
+
+type captureCreateSessionServer struct {
+	sessiondv1.UnimplementedSessionControlServer
+	lastCreate *sessiondv1.CreateSessionRequest
+	createdID  string
+}
+
+func (c *captureCreateSessionServer) CreateSession(_ context.Context, req *sessiondv1.CreateSessionRequest) (*sessiondv1.CommandReceipt, error) {
+	c.lastCreate = req
+	return &sessiondv1.CommandReceipt{
+		Accepted:       true,
+		OperationState: sessiondv1.OperationState_OPERATION_STATE_COMPLETED,
+		Status:         sessiondv1.SessionStatus_SESSION_STATUS_IDLE,
+		Session: &sessiondv1.SessionRef{
+			SessionId:    c.createdID,
+			AgentId:      req.Target.AgentId,
+			ConnectionId: req.Target.ConnectionId,
+		},
+		Outcome: &sessiondv1.CommandReceipt_Completed{Completed: &sessiondv1.CommandResult{Accepted: true}},
+	}, nil
+}
+
+func TestAgentApiRemoteAntigravityMachinesDispatchAndForkLineage(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(filepath.Join(t.TempDir(), "app.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	if _, err := st.SaveSSHConnection(ctx, map[string]any{
+		"id":        "wsl-1",
+		"host":      "127.0.0.1",
+		"port":      22,
+		"user":      "luwei",
+		"workspace": "/home/luwei/project",
+		"state":     "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.UpsertAgent(ctx, map[string]any{
+		"id":            "ssh-antigravity-wsl-1",
+		"kind":          "antigravity",
+		"name":          "Antigravity · WSL",
+		"connection_id": "wsl-1",
+		"status":        "ready",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	capture := &captureCreateSessionServer{createdID: "11111111-1111-4111-8111-111111111111"}
+	grpcSrv := grpc.NewServer()
+	sessiondv1.RegisterSessionControlServer(grpcSrv, capture)
+	go grpcSrv.Serve(lis)
+	defer grpcSrv.Stop()
+
+	conn, err := grpc.NewClient(lis.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	h := &Handler{
+		options: Options{
+			Store:            st,
+			Client:           &daemonclient.Client{Session: sessiondv1.NewSessionControlClient(conn)},
+			DefaultWorkspace: "P:/WindowsWorkspace",
+		},
+	}
+
+	// Cross-agent dispatch from local-codex -> ssh-antigravity-wsl-1 must NOT set native ParentSessionId,
+	// and must fall back from Windows DefaultWorkspace to SSH POSIX workspace.
+	res, err := h.invokeMachinesDispatch(ctx, map[string]any{
+		"machine_id":        "wsl-1",
+		"agent_kind":        "antigravity",
+		"caller_agent_id":   "local-codex",
+		"caller_session_id": "codex-parent-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if capture.lastCreate == nil || capture.lastCreate.Target.GetRuntime() != sessiondv1.RuntimeKind_RUNTIME_KIND_ANTIGRAVITY_SSH {
+		t.Fatalf("unexpected create target: %+v", capture.lastCreate)
+	}
+	opts := capture.lastCreate.GetAntigravity()
+	if opts == nil || opts.Cwd != "/home/luwei/project" || opts.ParentSessionId != nil {
+		t.Fatalf("unexpected cross-agent antigravity create options: %+v", opts)
+	}
+	stored, err := st.GetSession(ctx, "ssh-antigravity-wsl-1", capture.createdID)
+	if err != nil || stored == nil || stored["handoff_from_session_id"] != "codex-parent-1" || stored["handoff_from_agent_id"] != "local-codex" {
+		t.Fatalf("expected Astrorder lineage preserved in store, got: %+v %v", stored, err)
+	}
+	_ = res
+
+	// Same-agent create with parent_session_id DOES pass native ParentSessionId for Antigravity fork.
+	capture.createdID = "22222222-2222-4222-8222-222222222222"
+	_, err = h.invokeSessionsCreate(ctx, map[string]any{
+		"agent_id":          "ssh-antigravity-wsl-1",
+		"parent_agent_id":   "ssh-antigravity-wsl-1",
+		"parent_session_id": "11111111-1111-4111-8111-111111111111",
+		"workspace":         "/home/luwei/project",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if capture.lastCreate.GetAntigravity().GetParentSessionId() != "11111111-1111-4111-8111-111111111111" {
+		t.Fatalf("expected native ParentSessionId forwarded on same-agent fork, got: %+v", capture.lastCreate.GetAntigravity())
+	}
 }

@@ -11,6 +11,7 @@ import {
   IconMessagePlus,
   IconPlus,
   IconPointer,
+  IconAdjustments,
   IconRefresh,
   IconTerminal2,
   IconTrash,
@@ -22,12 +23,16 @@ import {
 import { ApiError, api, type BrowserLog, type BrowserSnapshot } from '../../../../api/client'
 import { useAstrorderStore } from '../../../../state/store'
 import type { ViewerContext } from '../../types'
+import { BrowserDesignPanel } from './BrowserDesignPanel'
+import { BrowserEntryPicker } from './BrowserEntryPicker'
+import { normalizeBrowserUrl } from './browserEntries'
 
 export function BrowserMirrorPanel({ agentId, sessionId, active = true }: { agentId: string; sessionId: string; active?: boolean }) {
   const [snapshot, setSnapshot] = useState<BrowserSnapshot | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [preview, setPreview] = useState(false)
+  const [design, setDesign] = useState<{ targetId: string; snapshot: BrowserSnapshot } | null>(null)
   const [zoom, setZoom] = useState(1)
   const [urlInput, setUrlInput] = useState('')
   const [interactive, setInteractive] = useState(true)
@@ -118,10 +123,9 @@ export function BrowserMirrorPanel({ agentId, sessionId, active = true }: { agen
     }
   }
 
-  const navigate = async () => {
-    let target = urlInput.trim()
-    if (!target) return
-    if (!/^https?:\/\//i.test(target)) target = `https://${target}`
+  const navigate = async (url = urlInput) => {
+    if (!url.trim()) return
+    const target = normalizeBrowserUrl(url)
     setLoading(true)
     setError('')
     try {
@@ -307,6 +311,7 @@ export function BrowserMirrorPanel({ agentId, sessionId, active = true }: { agen
             onChange={(event) => setUrlInput(event.currentTarget.value)}
             onKeyDown={(event) => {
               if (event.key === 'Enter') {
+                if (event.nativeEvent.isComposing) return
                 event.preventDefault()
                 void navigate()
               }
@@ -330,6 +335,15 @@ export function BrowserMirrorPanel({ agentId, sessionId, active = true }: { agen
           )}
           {snapshot && (
             <>
+              <Tooltip label="调整界面">
+                <ActionIcon
+                  variant="subtle" size="sm" aria-label="调整界面"
+                  disabled={!snapshot.active_target_id}
+                  onClick={() => { if (snapshot.active_target_id) setDesign({ targetId: snapshot.active_target_id, snapshot }) }}
+                >
+                  <IconAdjustments size={15} />
+                </ActionIcon>
+              </Tooltip>
               <Tooltip label={interactive ? '点击/滚轮操作已启用' : '点击穿透已关闭'}>
                 <ActionIcon
                   variant={interactive ? 'light' : 'subtle'}
@@ -385,6 +399,7 @@ export function BrowserMirrorPanel({ agentId, sessionId, active = true }: { agen
           <Center h="100%" style={{ flexDirection: 'column', gap: 8, color: 'var(--astr-muted)' }}>
             <IconWorld size={34} stroke={1.4} />
             <Text size="sm">输入网址或点击加号新建标签页</Text>
+            <BrowserEntryPicker agentId={agentId} sessionId={sessionId} onOpen={url => void navigate(url)} />
           </Center>
         )}
         {snapshot && source && (
@@ -545,6 +560,13 @@ export function BrowserMirrorPanel({ agentId, sessionId, active = true }: { agen
           </div>
         </div>
       </Modal>
+      {design && active && (
+        <BrowserDesignPanel
+          key={`${agentId}:${sessionId}:${design.targetId}`}
+          agentId={agentId} sessionId={sessionId} targetId={design.targetId}
+          snapshot={design.snapshot} onSnapshot={setSnapshot} onClose={() => setDesign(null)}
+        />
+      )}
     </div>
   )
 }

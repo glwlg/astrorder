@@ -5,11 +5,12 @@ import { api } from '../api/client'
 import type { Command, Message } from '../domain/types'
 import { Transcript } from '../features/chat/Transcript'
 import { MobileTranscript } from '../features/mobile/MobileTranscript'
+import { useAstrorderStore } from '../state/store'
 import { AsyncUserInputCard, hasLaterNativeInput } from './AsyncUserInputCard'
 
 const message: Message = { id: 'call-question', agent_id: 'codex', session_id: 'thread', role: 'assistant', kind: 'message', text: '', attachments: [], tool: null, command_id: null, created_at: '2026-10-16T05:53:24Z', delivery: 'async', questions: [{ title: '喜欢哪种题材？', options: ['星际探索', '时间旅行', '人工智能'] }] }
 const command: Command = { id: 'async-answer:call-question', agent_id: 'codex', session_id: 'thread', action: 'send', target_id: message.id, text: '时间旅行', attachments: [], state: 'accepted', created_at: '', error: null }
-afterEach(() => { cleanup(); vi.restoreAllMocks() })
+afterEach(() => { cleanup(); useAstrorderStore.getState().resetRuntime(); vi.restoreAllMocks() })
 it.each(['desktop', 'mobile'])('renders async choices in the real %s transcript and sends ordinary user input', async mode => {
  const send = vi.spyOn(api, 'createCommand').mockResolvedValue(command)
  const sync = vi.spyOn(api, 'respondUserInput')
@@ -105,4 +106,30 @@ it('keeps a selected choice out of the free-form field and sends a typed alterna
  fireEvent.click(screen.getByRole('button', { name: '发送回答' }))
  await screen.findByText('回答已接收。')
  expect(send.mock.calls[0][0].text).toBe('历史悬疑')
+})
+it('renders Antigravity multi-select questions and closes answered native questions', async () => {
+ useAstrorderStore.setState({
+  agents: { 'local-antigravity': { id: 'local-antigravity', kind: 'antigravity', name: 'Antigravity', status: 'ready', capabilities: [], limitation: null } },
+ })
+ const agyMessage: Message = {
+  ...message,
+  id: 'antigravity:s:10',
+  agent_id: 'local-antigravity',
+  questions: [{ title: '需要汇总哪些维度？', options: ['按天趋势', '按模型拆分', '按 Agent 对比'], multi_select: true }],
+ }
+ const send = vi.spyOn(api, 'createCommand').mockResolvedValue({ ...command, id: 'async-answer:antigravity:s:10', agent_id: 'local-antigravity' })
+ vi.spyOn(api, 'getMessages').mockResolvedValue({ items: [], next_cursor: null })
+ render(<AsyncUserInputCard message={agyMessage} />)
+ expect(screen.getByText('Antigravity 向你提问')).toBeInTheDocument()
+ fireEvent.click(screen.getByRole('checkbox', { name: '按天趋势' }))
+ fireEvent.click(screen.getByRole('checkbox', { name: '按模型拆分' }))
+ fireEvent.change(screen.getByRole('textbox', { name: '需要汇总哪些维度？ 自行填写' }), { target: { value: '含缓存命中' } })
+ fireEvent.click(screen.getByRole('button', { name: '发送回答' }))
+ await screen.findByText('回答已接收。')
+ expect(send.mock.calls[0][0].text).toBe('按天趋势；按模型拆分；含缓存命中')
+
+ cleanup()
+ render(<AsyncUserInputCard message={{ ...agyMessage, answered: true }} />)
+ expect(screen.getByText('此问题已回答。')).toBeInTheDocument()
+ expect(screen.queryByRole('button', { name: '发送回答' })).not.toBeInTheDocument()
 })

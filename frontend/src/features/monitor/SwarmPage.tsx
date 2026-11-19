@@ -40,6 +40,10 @@ const STANDARD_MODELS: Record<string, Array<{ provider: string; model: string; l
     { provider: 'xai', model: 'grok-4.6', label: 'Grok 4.6 (深度推演)' },
     { provider: 'xai', model: 'grok-composer-2.5-fast', label: 'Grok Composer 2.5 Fast' },
   ],
+  antigravity: [
+    { provider: 'antigravity', model: 'gemini-3.8-pro', label: 'Gemini 3.8 Pro (复杂协同推演)' },
+    { provider: 'antigravity', model: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash (极速调度)' },
+  ],
 }
 
 const EFFORT_OPTIONS = [
@@ -136,7 +140,7 @@ export function SwarmPage() {
     if (firstAgent) {
       setSelectedAgentId(firstAgent.id)
       const match = sessions.find((s) => s.agent_id === firstAgent.id);
-      setWorkspace(match?.workspace || 'P:/workspace/glwlg/ai/astrorder')
+      setWorkspace(match?.workspace || (firstAgent.connection_id ? '' : 'P:/workspace/glwlg/ai/astrorder'))
     }
     setTitle('')
     setModelKey('')
@@ -171,7 +175,7 @@ export function SwarmPage() {
       }
 
       // 配置思考程度
-      if (effort) {
+      if (effort && agents[selectedAgentId]?.kind !== 'antigravity') {
         try {
           await api.setSessionReasoning(created.id, created.agent_id, effort)
         } catch {}
@@ -309,7 +313,7 @@ export function SwarmPage() {
               if (first) {
                 setSelectedAgentId(first.id)
                 const match = sessions.find((s) => s.agent_id === first.id);
-                if (match?.workspace) setWorkspace(match.workspace)
+                setWorkspace(match?.workspace || (first.connection_id ? '' : 'P:/workspace/glwlg/ai/astrorder'))
               }
             }}
             data={machineChoices}
@@ -322,9 +326,11 @@ export function SwarmPage() {
             description="执行调度中枢职责的智能体"
             value={selectedAgentId}
             onChange={(e) => {
-              setSelectedAgentId(e.currentTarget.value)
-              const match = sessions.find((s) => s.agent_id === e.currentTarget.value);
-              if (match?.workspace) setWorkspace(match.workspace)
+              const nextId = e.currentTarget.value
+              setSelectedAgentId(nextId)
+              const match = sessions.find((s) => s.agent_id === nextId);
+              const nextAgent = agents[nextId]
+              setWorkspace(match?.workspace || (nextAgent?.connection_id ? '' : 'P:/workspace/glwlg/ai/astrorder'))
             }}
             data={[
               { value: '', label: '请选择主星 Agent' },
@@ -357,10 +363,10 @@ export function SwarmPage() {
 
             <NativeSelect
               label="思考程度 (Reasoning Effort)"
-              value={effort}
+              value={agents[selectedAgentId]?.kind === 'antigravity' ? '' : effort}
               onChange={(e) => setEffort(e.currentTarget.value)}
               data={EFFORT_OPTIONS}
-              disabled={busy}
+              disabled={busy || agents[selectedAgentId]?.kind === 'antigravity'}
             />
           </div>
 

@@ -109,14 +109,17 @@ function remoteLabel(
 ): string | null {
   const isRemote = Boolean(connectionId || agent?.connection_id || sourceId?.startsWith('hermes-ssh-'))
   if (!isRemote) return null
-  const name = agent?.name?.trim().replace(/\s*·\s*(?:Codex|Hermes)$/i, '')
+  const name = agent?.name
+    ?.trim()
+    .replace(/^(?:Antigravity|Codex|Hermes|Grok|agy)\s*·\s*/i, '')
+    .replace(/\s*·\s*(?:Codex|Hermes|Antigravity|Grok|agy)$/i, '')
   return name || connectionId || '远程'
 }
 
 function connectionScope(source: string, connectionId: string | null | undefined, agent: Agent | undefined): string {
   const connection = connectionId || agent?.connection_id
   if (connection) return `connection:${connection}`
-  if (agent || source === 'local' || source === 'local-codex' || source.startsWith('local-hermes-') || source.startsWith('hermes-local-')) return 'connection:local'
+  if (agent || source === 'local' || source === 'local-codex' || source === 'local-antigravity' || source === 'local-grok' || source.startsWith('local-hermes-') || source.startsWith('hermes-local-')) return 'connection:local'
   return `source:${source}`
 }
 

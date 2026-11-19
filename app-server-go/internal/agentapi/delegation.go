@@ -273,6 +273,13 @@ func (h *Handler) invokeSessionsDelegate(ctx context.Context, payload map[string
 		_ = h.options.Store.FailDelegationOperation(ctx, input.OperationID, errMsg)
 		return nil, NewAgentApiError("runtime_error", rErr.Error())
 	}
+	if input.Workspace == "" && target.Ssh != nil && !strings.HasPrefix(workspace, "/") {
+		if target.Ssh.Workspace != nil && strings.HasPrefix(*target.Ssh.Workspace, "/") {
+			workspace = *target.Ssh.Workspace
+		} else {
+			workspace = "/home/luwei"
+		}
+	}
 
 	if h.options.Client == nil || h.options.Client.Session == nil {
 		errMsg := "daemon client is required"
@@ -318,9 +325,16 @@ func (h *Handler) invokeSessionsDelegate(ctx context.Context, payload map[string
 		}
 		createReq.Options = &sessiondv1.CreateSessionRequest_Hermes{Hermes: hermesOpt}
 
-	case "antigravity":
+	case "antigravity", "antigravity-ssh":
+		antigravityOpt := &sessiondv1.AntigravityCreateOptions{Cwd: workspace}
+		if input.Model != "" {
+			antigravityOpt.Model = &input.Model
+		}
+		if input.Effort != "" {
+			antigravityOpt.Effort = &input.Effort
+		}
 		createReq.Options = &sessiondv1.CreateSessionRequest_Antigravity{
-			Antigravity: &sessiondv1.AntigravityCreateOptions{Cwd: workspace},
+			Antigravity: antigravityOpt,
 		}
 
 	case "grok":

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Tabs } from '@mantine/core'
 import { GatewayStatisticsView } from './GatewayStatisticsView'
+import { DirectTokenUsageView } from './DirectTokenUsageView'
 import { AgentUsageView } from './AgentUsageView'
 
 export function AnalyticsPage() {
@@ -9,9 +10,10 @@ export function AnalyticsPage() {
     <Tabs value={view} onChange={setView} px="sm" style={{ flexShrink: 0 }}>
       <Tabs.List>
         <Tabs.Tab value="gateway">网关统计</Tabs.Tab>
+        <Tabs.Tab value="direct">直连 Token</Tabs.Tab>
         <Tabs.Tab value="agent">CLI 使用</Tabs.Tab>
       </Tabs.List>
     </Tabs>
-    {view === 'agent' ? <AgentUsageView /> : <GatewayStatisticsView />}
+    {view === 'direct' ? <DirectTokenUsageView /> : view === 'agent' ? <AgentUsageView /> : <GatewayStatisticsView />}
   </div>
 }

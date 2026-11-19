@@ -20,6 +20,7 @@ frontend/vite.hosts.local.json
 *.sqlite3-shm
 *.sqlite3-wal
 .runtime/
+/.astrorder/attachments/
 .token
 .connector_token
 .runtime*

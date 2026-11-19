@@ -12,8 +12,8 @@ const runHelperTimeout = 90 * time.Second
 const runHelperScript = `exec "$@"`
 
 // RunHelper runs `astrorder-helper <args...>` on a remote target (SSH or WSL)
-// and returns its stdout. The helper is installed first when bundled assets
-// exist, exactly as for file access. Local targets are not handled here.
+// and returns its stdout. The bundled helper is installed first, exactly as for
+// file access. Local targets are not handled here.
 func (r *Resolver) RunHelper(ctx context.Context, connectionID string, args ...string) ([]byte, error) {
 	connectionID = strings.TrimSpace(connectionID)
 	if connectionID == "" || connectionID == LocalConnectionID {
@@ -25,7 +25,10 @@ func (r *Resolver) RunHelper(ctx context.Context, connectionID string, args ...s
 	if err != nil {
 		return nil, err
 	}
-	helper := r.helperPath(ctx, connectionID, run)
+	helper, err := r.helperPath(ctx, connectionID, run)
+	if err != nil {
+		return nil, err
+	}
 	return runShell(ctx, run, nil, runHelperScript, append([]string{helper}, args...)...)
 }
 

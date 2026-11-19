@@ -279,8 +279,8 @@ func Install(opts InstallOptions) (*InstallResult, error) {
 func install(opts InstallOptions, writeFile func(string, []byte, os.FileMode) error) (_ *InstallResult, resultErr error) {
 	// 1. Validate Runtime
 	targetRuntime := strings.ToLower(strings.TrimSpace(opts.Runtime))
-	if targetRuntime != "hermes" && targetRuntime != "codex" && targetRuntime != "grok" {
-		return nil, fmt.Errorf("invalid runtime %q: must be hermes, codex or grok", opts.Runtime)
+	if targetRuntime != "hermes" && targetRuntime != "codex" && targetRuntime != "grok" && targetRuntime != "antigravity" {
+		return nil, fmt.Errorf("invalid runtime %q: must be hermes, codex, grok or antigravity", opts.Runtime)
 	}
 
 	// 2. Validate Home

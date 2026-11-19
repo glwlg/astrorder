@@ -46,9 +46,6 @@ func TestRestoreDoesNotOptIntoUnusedAgents(t *testing.T) {
 func TestExplicitDisconnectSurvivesRestoreUntilReconnect(t *testing.T) {
 	for _, node := range []string{"local", "saved"} {
 		for _, kind := range []string{"hermes", "codex", "grok", "antigravity"} {
-			if node != "local" && kind == "antigravity" {
-				continue
-			}
 			t.Run(node+"/"+kind, func(t *testing.T) {
 				daemon := &fakeDaemonService{}
 				h, st, _ := receiptFixture(t, daemon)

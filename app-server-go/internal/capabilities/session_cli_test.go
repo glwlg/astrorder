@@ -10,6 +10,7 @@ import (
 
 	"astrorder.dev/app-server/internal/agentskill"
 	"astrorder.dev/app-server/internal/envtarget"
+	"astrorder.dev/app-server/internal/envtarget/envtargettest"
 )
 
 type cliAgentStore struct{ agent map[string]any }
@@ -143,5 +144,32 @@ func TestSessionCLIUpgradeRefreshesExistingOfficialModules(t *testing.T) {
 	}
 	if string(env.Files[folder+"/SKILL.md"]) != "user edit" || string(env.Files[env.P.Codex+"/skills/astrorder-sessions/scripts/astrorder-agent"]) != "new-client" {
 		t.Fatal("refused upgrade changed installed files")
+	}
+}
+
+func TestSessionCLISetupSupportsRemoteAntigravity(t *testing.T) {
+	env := newEnv("wsl-main")
+	env.Info.ConnectionID = "wsl-main"
+	env.Run_ = currentCLI
+	env.Shell_ = func(_ string, _ []byte, _ []string, _ *envtargettest.Env) (envtarget.Result, error) {
+		return envtarget.Result{Code: 0}, nil
+	}
+	svc := serviceFor(env)
+	svc.Agents = cliAgentStore{map[string]any{"id": "agy-wsl", "kind": "antigravity", "connection_id": "wsl-main", "profile_name": "default"}}
+	svc.CLIBinary = func(context.Context, envtarget.Env) (string, []byte, error) {
+		return "astrorder-agent", []byte("#!/bin/sh\nexit 0\n"), nil
+	}
+	agyHome := env.P.Home + "/.gemini/antigravity"
+	for _, module := range []string{"astrorder-sessions", "astrorder-browser"} {
+		file := agyHome + "/skills/" + module + "/scripts/astrorder-agent"
+		env.Bins[file] = file
+	}
+	status, err := svc.SessionCLI(context.Background(), "agy-wsl", true)
+	if err != nil || !status.Ready || status.Home != agyHome {
+		t.Fatalf("remote antigravity SessionCLI: status=%+v err=%v", status, err)
+	}
+	result, err := svc.Dispatch(context.Background(), "skill", "wsl-main", "astrorder", "astrorder-browser", []DispatchTarget{{TargetID: "wsl-main", Agent: "antigravity"}})
+	if err != nil || result.SuccessCount != 1 {
+		t.Fatalf("official dispatch to remote antigravity: result=%+v err=%v", result, err)
 	}
 }

@@ -27,7 +27,7 @@ export default defineConfig({
         importScripts: ['sw-notification-events.js'],
         skipWaiting: true,
         clientsClaim: true,
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2,webmanifest}'],
+        globPatterns: ['**/*.{js,css,html,ico,png,webp,svg,woff2,webmanifest}'],
         navigateFallback: '/index.html',
         navigateFallbackDenylist: [/^\/api\//, /^\/ws\//, /^\/health/],
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,

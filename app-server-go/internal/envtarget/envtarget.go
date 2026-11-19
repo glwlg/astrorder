@@ -37,11 +37,12 @@ type Target struct {
 
 // Paths are the agent homes on a target, always slash-separated.
 type Paths struct {
-	Home   string
-	Codex  string
-	Hermes string
-	Grok   string
-	Agents string // shared ~/.agents used by the skills CLI
+	Home        string
+	Codex       string
+	Hermes      string
+	Grok        string
+	Antigravity string // ~/.gemini/config used by Antigravity (agy) global skills and MCP
+	Agents      string // shared ~/.agents used by the skills CLI
 }
 
 type Command struct {
@@ -243,7 +244,7 @@ func (e *localEnv) Paths(context.Context) (Paths, error) {
 			return
 		}
 		home = filepath.ToSlash(home)
-		paths := Paths{Home: home, Codex: home + "/.codex", Grok: home + "/.grok", Agents: home + "/.agents", Hermes: home + "/.hermes"}
+		paths := Paths{Home: home, Codex: home + "/.codex", Grok: home + "/.grok", Antigravity: home + "/.gemini/config", Agents: home + "/.agents", Hermes: home + "/.hermes"}
 		if value := strings.TrimSpace(os.Getenv("CODEX_HOME")); value != "" {
 			paths.Codex = filepath.ToSlash(value)
 		}
@@ -359,10 +360,10 @@ func extraBinDirs(home string) []string {
 		dirs = append(dirs, filepath.ToSlash(base)+"/hermes/hermes-agent/venv/Scripts")
 	}
 	dirs = append(dirs, home+"/.hermes/hermes-agent/venv/bin")
-	dirs = append(dirs, []string{home + "/.local/bin", home + "/bin", home + "/.cargo/bin", home + "/.vite-plus/bin", home + "/.grok/bin", "/usr/local/bin", "/opt/homebrew/bin"}...)
+	dirs = append(dirs, []string{home + "/.local/bin", home + "/.antigravity/bin", home + "/bin", home + "/.cargo/bin", home + "/.vite-plus/bin", home + "/.grok/bin", "/usr/local/bin", "/opt/homebrew/bin"}...)
 	if base := os.Getenv("LOCALAPPDATA"); base != "" {
 		base = filepath.ToSlash(base)
-		dirs = append(dirs, base+"/Microsoft/WinGet/Links", base+"/Programs/rtk")
+		dirs = append(dirs, base+"/agy/bin", base+"/Microsoft/WinGet/Links", base+"/Programs/rtk")
 	}
 	if base := os.Getenv("APPDATA"); base != "" {
 		dirs = append(dirs, filepath.ToSlash(base)+"/npm")
@@ -450,7 +451,7 @@ func (e *remoteEnv) Paths(ctx context.Context) (Paths, error) {
 	if result.Code != 0 || !strings.HasPrefix(home, "/") {
 		return Paths{}, Errorf(502, "%s：无法确定用户目录", e.target.Name)
 	}
-	paths := Paths{Home: home, Codex: home + "/.codex", Hermes: home + "/.hermes", Grok: home + "/.grok", Agents: home + "/.agents"}
+	paths := Paths{Home: home, Codex: home + "/.codex", Hermes: home + "/.hermes", Grok: home + "/.grok", Antigravity: home + "/.gemini/config", Agents: home + "/.agents"}
 	if profile := e.target.Profile; profile != "" && profile != "default" && !strings.ContainsAny(profile, "/\\ ") {
 		if e.IsDir(ctx, paths.Hermes+"/profiles/"+profile) {
 			paths.Hermes += "/profiles/" + profile
@@ -466,7 +467,7 @@ const (
 	readScript   = `if [ -f "$1" ]; then cat -- "$1"; else exit 3; fi`
 	writeScript  = `d=$(dirname -- "$1"); mkdir -p -- "$d" || exit 1; t="$1.astrorder.$$"; cat > "$t" || { rm -f -- "$t"; exit 1; }; if [ -f "$1" ]; then chmod --reference="$1" "$t" 2>/dev/null || true; else chmod "$2" "$t" || true; fi; mv -f -- "$t" "$1"`
 	removeScript = `rm -f -- "$1"`
-	runScript    = `PATH="$HOME/.local/bin:$HOME/.hermes/hermes-agent/venv/bin:$HOME/.vite-plus/bin:$HOME/.cargo/bin:$HOME/bin:$HOME/.grok/bin:/usr/local/bin:$PATH"; export PATH; exec env "$@"`
+	runScript    = `PATH="$HOME/.local/bin:$HOME/.antigravity/bin:$HOME/.hermes/hermes-agent/venv/bin:$HOME/.vite-plus/bin:$HOME/.cargo/bin:$HOME/bin:$HOME/.grok/bin:/usr/local/bin:$PATH"; export PATH; exec env "$@"`
 )
 
 func (e *remoteEnv) Read(ctx context.Context, name string) ([]byte, error) {
@@ -506,7 +507,7 @@ func (e *remoteEnv) Remove(ctx context.Context, name string) error {
 }
 
 func (e *remoteEnv) Which(ctx context.Context, name string) (string, bool) {
-	result, err := e.Shell(ctx, `PATH="$HOME/.local/bin:$HOME/.hermes/hermes-agent/venv/bin:$HOME/.vite-plus/bin:$HOME/.cargo/bin:$HOME/bin:$HOME/.grok/bin:/usr/local/bin:$PATH"; command -v -- "$1"`, nil, name)
+	result, err := e.Shell(ctx, `PATH="$HOME/.local/bin:$HOME/.antigravity/bin:$HOME/.hermes/hermes-agent/venv/bin:$HOME/.vite-plus/bin:$HOME/.cargo/bin:$HOME/bin:$HOME/.grok/bin:/usr/local/bin:$PATH"; command -v -- "$1"`, nil, name)
 	if err != nil || result.Code != 0 {
 		return "", false
 	}

@@ -17,6 +17,8 @@ import (
 	"astrorder.dev/app-server/internal/daemonclient"
 	"astrorder.dev/app-server/internal/store"
 	pb "astrorder.dev/contracts/gen/go/astrorder/sessiond/v1"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // init dispatches the helper-process mode before TestMain runs: the spawned
@@ -174,6 +176,46 @@ func TestRemoteGrokRestartResolvesBeforeAttach(t *testing.T) {
 	}
 }
 
+func TestRemoteAntigravityConnectResolvesExecutableAndHandlesPreUpdateDaemon(t *testing.T) {
+	resolver := &recordingExecutableResolver{results: map[string]string{"antigravity": "/home/luwei/.local/bin/agy"}}
+	server := &fakeDaemonService{}
+	handler, st := remoteExecutableFixture(t, server, resolver)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/environments/saved/agents/antigravity/connect", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("antigravity connect: HTTP=%d body=%s", w.Code, w.Body.String())
+	}
+	if calls := resolver.callList(); len(calls) != 1 || calls[0] != "antigravity" {
+		t.Fatalf("resolver calls = %v, want [antigravity]", calls)
+	}
+	req := server.attachRequest.Load()
+	if req == nil || req.Target.GetRuntime() != pb.RuntimeKind_RUNTIME_KIND_ANTIGRAVITY_SSH || req.Target.GetConnectionId() != "saved" {
+		t.Fatalf("attach target identity changed: %v", req.GetTarget())
+	}
+	if req.Target.Ssh.GetAntigravityExecutable() != "/home/luwei/.local/bin/agy" {
+		t.Fatalf("resolved antigravity executable missing from attach target: %v", req.Target.Ssh)
+	}
+	if req.Session.GetSessionId() != "probe-antigravity-saved" || req.Session.GetConnectionId() != "saved" || !req.RuntimeControl {
+		t.Fatalf("control identity changed: %v", req.Session)
+	}
+	if enabled, present, err := st.GetAgentConnectionChoice(context.Background(), "saved:antigravity"); err != nil || !present || !enabled {
+		t.Fatalf("choice not persisted: enabled=%v present=%v err=%v", enabled, present, err)
+	}
+
+	// Pre-update small kernel returns InvalidArgument on RUNTIME_KIND_ANTIGRAVITY_SSH:
+	// surface a clear tray update hint without persisting an enabled choice.
+	oldServer := &fakeDaemonService{attachError: status.Error(codes.InvalidArgument, "runtime target is invalid")}
+	oldHandler, oldSt := remoteExecutableFixture(t, oldServer, resolver)
+	w = httptest.NewRecorder()
+	oldHandler.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/environments/saved/agents/antigravity/connect", nil))
+	if w.Code != http.StatusBadGateway || !strings.Contains(w.Body.String(), "更新小内核") {
+		t.Fatalf("expected clear small-kernel upgrade hint, got HTTP=%d body=%s", w.Code, w.Body.String())
+	}
+	if _, present, err := oldSt.GetAgentConnectionChoice(context.Background(), "saved:antigravity"); err != nil || present {
+		t.Fatalf("failed pre-update attach persisted a choice: present=%v err=%v", present, err)
+	}
+}
+
 // A failed resolution must not reach the daemon at all: no attach, no
 // disconnect (restart), no choice, no stored state change, no retry.
 func TestRemoteExecutableResolutionFailureBlocksAttachAndRestart(t *testing.T) {
@@ -223,7 +265,7 @@ func TestNativeRemoteExecutableResolverProbesWithBoundedSSHCommand(t *testing.T)
 	t.Setenv("ASTRORDER_SSH_EXECUTABLE_ARGV", argvFile)
 	resolver := &connections.NativeRemoteExecutableResolver{SSHBinary: os.Args[0]}
 	conn := map[string]any{"settings": map[string]any{"host": "private-fixture.invalid", "port": 2222, "user": "fixture", "workspace": "/srv/work"}}
-	for _, kind := range []string{"codex", "grok"} {
+	for _, kind := range []string{"codex", "grok", "antigravity"} {
 		t.Run(kind, func(t *testing.T) {
 			path, err := resolver.Resolve(context.Background(), kind, conn)
 			if err != nil {
@@ -258,6 +300,10 @@ func TestNativeRemoteExecutableResolverProbesWithBoundedSSHCommand(t *testing.T)
 			case "grok":
 				if !strings.Contains(script, "k=grok") || !strings.Contains(script, ".grok/bin/grok") {
 					t.Fatalf("grok probe script lost its kind mapping: %q", script)
+				}
+			case "antigravity":
+				if !strings.Contains(script, "k=agy") || !strings.Contains(script, ".antigravity/bin/agy") || strings.Contains(script, "k=antigravity") {
+					t.Fatalf("antigravity probe script lost its k=agy mapping: %q", script)
 				}
 			}
 		})
@@ -315,6 +361,12 @@ func TestNativeRemoteExecutableResolverUsesExplicitPathWithoutProbe(t *testing.T
 	})
 	if err != nil || path != "/opt/native/explicit" {
 		t.Fatalf("explicit path: path=%q err=%v", path, err)
+	}
+	agyPath, err := resolver.Resolve(context.Background(), "antigravity", map[string]any{
+		"settings": map[string]any{"host": "private-fixture.invalid", "antigravity_executable": "/home/luwei/.local/bin/agy"},
+	})
+	if err != nil || agyPath != "/home/luwei/.local/bin/agy" {
+		t.Fatalf("explicit antigravity path: path=%q err=%v", agyPath, err)
 	}
 	if _, err := os.Stat(argvFile); !os.IsNotExist(err) {
 		t.Fatalf("explicit path still spawned a probe: %v", err)

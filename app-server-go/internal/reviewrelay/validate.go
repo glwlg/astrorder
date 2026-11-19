@@ -51,6 +51,12 @@ func (h *Handler) validate(response http.ResponseWriter, request *http.Request) 
 		if err != nil {
 			return err
 		}
+		if err := h.rejectAntigravityRelayAgent(request.Context(), sourceAgentID); err != nil {
+			return err
+		}
+		if err := h.rejectAntigravityRelayAgent(request.Context(), reviewAgentID); err != nil {
+			return err
+		}
 		sourceSession, err := h.options.Store.GetSession(request.Context(), sourceAgentID, sourceSessionID)
 		if err != nil {
 			return storageError(err)

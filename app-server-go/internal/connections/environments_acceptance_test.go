@@ -41,7 +41,7 @@ func TestAcceptanceFailedRediscoveryDoesNotRetainSuccessfulAvailability(t *testi
 		t.Fatalf("initial discover: %d %s", w.Code, w.Body.String())
 	}
 	recorder.mu.Lock()
-	recorder.failures = map[string]error{"hermes|saved": errors.New("unreachable"), "codex|saved": errors.New("unreachable"), "grok|saved": errors.New("unreachable")}
+	recorder.failures = map[string]error{"hermes|saved": errors.New("unreachable"), "codex|saved": errors.New("unreachable"), "grok|saved": errors.New("unreachable"), "antigravity|saved": errors.New("unreachable")}
 	recorder.mu.Unlock()
 	osProber.mu.Lock()
 	osProber.err = errors.New("unreachable")
@@ -121,7 +121,7 @@ func TestAcceptanceFailedRediscoveryKeepsConfirmedConnectedState(t *testing.T) {
 		t.Fatalf("initial discover: %d %s", w.Code, w.Body.String())
 	}
 	recorder.mu.Lock()
-	recorder.failures = map[string]error{"hermes|saved": errors.New("unreachable"), "codex|saved": errors.New("unreachable"), "grok|saved": errors.New("unreachable")}
+	recorder.failures = map[string]error{"hermes|saved": errors.New("unreachable"), "codex|saved": errors.New("unreachable"), "grok|saved": errors.New("unreachable"), "antigravity|saved": errors.New("unreachable")}
 	recorder.mu.Unlock()
 	osProber.mu.Lock()
 	osProber.err = errors.New("unreachable")

@@ -86,12 +86,34 @@ type snapshot struct {
 	warns []string
 }
 
+func antigravityConfigRoot(p envtarget.Paths) string {
+	if p.Antigravity != "" {
+		return p.Antigravity
+	}
+	if p.Home != "" {
+		return p.Home + "/.gemini/config"
+	}
+	return ""
+}
+
+func antigravitySkillHome(p envtarget.Paths) string {
+	if p.Home != "" {
+		return p.Home + "/.gemini/antigravity"
+	}
+	if p.Antigravity != "" {
+		return path.Dir(p.Antigravity) + "/antigravity"
+	}
+	return ""
+}
+
 func configPath(p envtarget.Paths, agent string) string {
 	switch agent {
 	case "codex":
 		return p.Codex + "/config.toml"
 	case "hermes":
 		return p.Hermes + "/config.yaml"
+	case "antigravity":
+		return antigravityConfigRoot(p) + "/mcp_config.json"
 	}
 	return p.Grok + "/config.toml"
 }
@@ -101,7 +123,7 @@ func (s *Service) snapshot(ctx context.Context, env envtarget.Env) (*snapshot, e
 	if err != nil {
 		return nil, err
 	}
-	files := []string{configPath(paths, "codex"), configPath(paths, "hermes"), configPath(paths, "grok"), paths.Agents + "/.skill-lock.json"}
+	files := []string{configPath(paths, "codex"), configPath(paths, "hermes"), configPath(paths, "grok"), configPath(paths, "antigravity"), paths.Agents + "/.skill-lock.json"}
 	raw, err := env.ReadMany(ctx, files)
 	if err != nil {
 		return nil, err
@@ -142,6 +164,9 @@ func headersKey(agent string) string {
 
 // mcpEntries returns the raw MCP server definitions of one agent.
 func (sn *snapshot) mcpEntries(agent string) map[string]any {
+	if agent == "antigravity" {
+		return asMap(sn.cfg[agent]["mcpServers"])
+	}
 	return asMap(sn.cfg[agent]["mcp_servers"])
 }
 
@@ -154,11 +179,12 @@ func (sn *snapshot) disabledMCP(agent string) []string {
 }
 
 func mcpFromEntry(agent, name string, entry map[string]any, disabled []string, redact bool) MCPServer {
-	url := asString(entry["url"])
+	url := firstNonEmpty(asString(entry["url"]), asString(entry["serverUrl"]))
+	enabled := asBool(entry["enabled"], true) && !asBool(entry["disabled"], false) && !contains(disabled, name)
 	server := MCPServer{
 		Name: name, Agent: agent, Transport: transportOf(url), URL: url, Command: asString(entry["command"]),
 		Args: asStrings(entry["args"]), Headers: asStringMap(entry[headersKey(agent)]), Env: asStringMap(entry["env"]),
-		Tools: []string{}, Source: agent, Enabled: asBool(entry["enabled"], true) && !contains(disabled, name),
+		Tools: []string{}, Source: agent, Enabled: enabled,
 	}
 	if redact {
 		server.Headers, server.Env = redactMap(server.Headers), redactMap(server.Env)
@@ -276,6 +302,9 @@ func (sn *snapshot) skillRoots() []skillRoot {
 		{sn.paths.Hermes + "/skills", "hermes"},
 		{sn.paths.Grok + "/skills", "grok"},
 		{sn.paths.Agents + "/skills", ""},
+	}
+	if agyHome := antigravitySkillHome(sn.paths); agyHome != "" {
+		roots = append(roots, skillRoot{agyHome + "/skills", "antigravity"})
 	}
 	for _, dir := range asStrings(asMap(sn.cfg["hermes"]["skills"])["external_dirs"]) {
 		dir = strings.TrimSpace(dir)

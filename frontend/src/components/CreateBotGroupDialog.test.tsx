@@ -8,6 +8,7 @@ import type { Agent, BotGroup, Session } from '../domain/types'
 const agents: Record<string, Agent> = {
   codex: { id: 'codex', kind: 'codex', name: 'Codex', status: 'ready', capabilities: ['chat'], limitation: null },
   hermes: { id: 'hermes', kind: 'hermes', name: 'Hermes', status: 'ready', capabilities: ['chat'], limitation: null, connection_id: 'ssh-debian' },
+  agy: { id: 'local-antigravity', kind: 'antigravity', name: 'Antigravity', status: 'ready', capabilities: ['chat'], limitation: null },
 }
 const parent: Session = { id: 'parent', agent_id: 'codex', title: '已有对话', workspace: '/source', status: 'idle', updated_at: '2026-11-10T00:00:00Z' }
 const child: Session = { ...parent, id: 'child', title: '分叉对话', handoff_from_agent_id: 'codex', handoff_from_session_id: 'parent' }
@@ -40,6 +41,7 @@ describe('CreateBotGroupDialog', () => {
   it('adds the same Agent twice with distinct identities and independently selected workspaces', async () => {
     const create = vi.spyOn(api, 'createBotGroup').mockResolvedValue({ ok: true, group: saved })
     const { onCreated, onClose } = openDialog()
+    expect(screen.queryByRole('button', { name: '添加 Antigravity' })).not.toBeInTheDocument()
     expect(screen.getByLabelText('单次提问最大接力轮数')).toHaveValue('10')
     fireEvent.change(screen.getByLabelText(/群聊名称/), { target: { value: '测试群' } })
     await addCodex()

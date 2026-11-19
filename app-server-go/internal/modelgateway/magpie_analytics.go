@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -152,6 +153,17 @@ func (h *Handler) readMagpie(r *http.Request, cfg GatewayConfig, path string, q 
 }
 
 func (h *Handler) serveMagpieUsage(w http.ResponseWriter, r *http.Request, cfg GatewayConfig, period, surface, since, until string) {
+	source := strings.TrimSpace(r.URL.Query().Get("source"))
+	var direct *directUsageAggregate
+	var directWg sync.WaitGroup
+	if source != "gateway" {
+		directWg.Add(1)
+		go func() {
+			defer directWg.Done()
+			direct, _ = h.collectDirectUsage(r.Context(), cfg, period, surface, since, until)
+		}()
+	}
+
 	var s magpieSummary
 	var err error
 	if surface == "all" && since == "" {
@@ -159,9 +171,18 @@ func (h *Handler) serveMagpieUsage(w http.ResponseWriter, r *http.Request, cfg G
 	} else {
 		s, err = h.filteredMagpieUsage(r, cfg, period, surface, since, until)
 	}
+	directWg.Wait()
+
 	if err != nil {
+		if direct != nil && direct.Totals.totalTokens() > 0 {
+			writeJSON(w, http.StatusOK, direct.toResponse(period, surface))
+			return
+		}
 		writeError(w, http.StatusBadGateway, "upstream_error", err.Error())
 		return
+	}
+	if direct != nil {
+		mergeDirectIntoMagpieSummary(&s, direct)
 	}
 	providers := map[string]magpieTotals{}
 	models := make([]map[string]any, 0, len(s.Models))

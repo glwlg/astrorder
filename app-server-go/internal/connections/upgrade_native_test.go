@@ -17,7 +17,12 @@ func TestRemoteVersionFindsAgentOutsideNoninteractivePATH(t *testing.T) {
 		t.Skip("bash unavailable")
 	}
 	home := filepath.ToSlash(t.TempDir())
-	for kind, path := range map[string]string{"hermes": "/.hermes/hermes-agent/venv/bin/hermes", "grok": "/.grok/bin/grok", "codex": "/.local/bin/codex"} {
+	for kind, path := range map[string]string{
+		"hermes":      "/.hermes/hermes-agent/venv/bin/hermes",
+		"grok":        "/.grok/bin/grok",
+		"codex":       "/.local/bin/codex",
+		"antigravity": "/.antigravity/bin/agy",
+	} {
 		t.Run(kind, func(t *testing.T) {
 			full := filepath.FromSlash(home + path)
 			if err := os.MkdirAll(filepath.Dir(full), 0700); err != nil {
