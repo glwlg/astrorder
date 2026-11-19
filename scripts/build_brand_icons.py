@@ -50,8 +50,7 @@ def main() -> None:
     for name in ("logo.png", "logo-dark.png"):
         save_png(image, PUBLIC / name, 512)
     for size in (192, 512):
-        for suffix in ("", "-dark"):
-            save_png(image, PUBLIC / f"pwa-{size}{suffix}.png", size)
+        save_png(image, PUBLIC / f"pwa-{size}.png", size)
     for name in ("favicon.png", "favicon-dark.png"):
         save_png(image, PUBLIC / name, 64)
     save_png(image, PUBLIC / "apple-touch-icon.png", 180)

@@ -6,6 +6,7 @@ import { AgentBrandIcon } from '../../components/AgentBrandIcon'
 import { ComposerGlassMenu } from '../../components/GlassPanel'
 import '../../components/animations/AnimatedList.css'
 import type { Agent, AgentCommand, AgentMention, Session } from '../../domain/types'
+import './AgentMentionMenu.css'
 
 export function useGitBranches(session: Session | null | undefined, enabled: boolean) {
   return useQuery({
@@ -354,23 +355,38 @@ export function AgentMentionMenu({
   }, [activeIndex])
   if (!items.length) return null
   return (
-    <Paper ref={listRef} withBorder shadow="md" radius="md" p={4} role="listbox" aria-label="可提及资源" style={{ position: 'absolute', zIndex: 20, left: 0, right: 0, bottom: 'calc(100% + 6px)', maxHeight: 'min(280px, 45vh)', overflowY: 'auto' }}>
-      <ComposerGlassMenu active>
+    <Paper
+      ref={listRef}
+      withBorder
+      shadow="md"
+      radius="md"
+      p={4}
+      role="listbox"
+      aria-label="可提及资源"
+      className="agent-mention-menu"
+    >
       <Stack gap={2}>
         {items.map((item, index) => (
-          <UnstyledButton key={`${item.kind}:${item.name}`} role="option" aria-selected={index === activeIndex} onMouseDown={event => event.preventDefault()} onClick={() => onSelect(item)} p="xs" style={{ borderRadius: 8, background: index === activeIndex ? 'var(--mantine-color-default-hover)' : undefined }}>
+          <UnstyledButton
+            key={`${item.kind}:${item.name}`}
+            className="agent-mention-menu__option"
+            role="option"
+            aria-selected={index === activeIndex}
+            onMouseDown={event => event.preventDefault()}
+            onClick={() => onSelect(item)}
+            p="xs"
+          >
             <Group gap="sm" wrap="nowrap">
               {agent && <AgentBrandIcon kind={agent.kind} size={24} />}
               <div style={{ minWidth: 0 }}>
-                <Text size="sm" fw={600}>@{item.name}</Text>
-                <Text size="xs" c="dimmed" lineClamp={1}>{item.description}</Text>
+                <Text size="sm" fw={600} truncate>@{item.name}</Text>
+                <Text size="xs" className="agent-mention-menu__meta" lineClamp={1}>{item.description}</Text>
               </div>
-              <Text size="xs" c="dimmed" ml="auto">{item.kind === 'skill' ? 'Skill' : '文件'}</Text>
+              <Text size="xs" className="agent-mention-menu__meta" ml="auto">{item.kind === 'skill' ? 'Skill' : '文件'}</Text>
             </Group>
           </UnstyledButton>
         ))}
       </Stack>
-      </ComposerGlassMenu>
     </Paper>
   )
 }
