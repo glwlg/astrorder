@@ -291,7 +291,7 @@ func TestDispatchSkillCopiesDirectory(t *testing.T) {
 	if _, ok := dst.Unpacks[dst.P.Hermes+"/skills/alpha"]; !ok {
 		t.Errorf("hermes skill dir not written: %v", dst.Unpacks)
 	}
-	if _, ok := dst.Unpacks[dst.P.Home+"/.gemini/antigravity/skills/alpha"]; !ok {
+	if _, ok := dst.Unpacks[dst.P.Antigravity+"/skills/alpha"]; !ok {
 		t.Errorf("antigravity skill dir not written: %v", dst.Unpacks)
 	}
 	if _, err := svc.Dispatch(context.Background(), "skill", "src", "codex", "../etc", []DispatchTarget{{"dst", "codex"}}); err == nil {

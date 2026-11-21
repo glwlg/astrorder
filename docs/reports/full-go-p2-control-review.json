@@ -2,7 +2,7 @@
   "schema_version": 1,
   "review_id": "full-go-p2-control-review",
   "review_date": "2026-10-09",
-  "repository": "P:/workspace/glwlg/ai/astrorder",
+  "repository": ".",
   "branch": "master",
   "commit": "ff32f947024b1840b939ebfb8e58e45886d34b47",
   "working_tree_reviewed": true,

@@ -1,0 +1,192 @@
+.agy-accounts-page {
+  max-inline-size: 1500px;
+  color: var(--astr-text);
+  scrollbar-gutter: stable;
+}
+
+.agy-accounts-toolbar,
+.agy-accounts-tools,
+.agy-target-select {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.agy-accounts-toolbar {
+  justify-content: space-between;
+  gap: 16px;
+  margin-block-end: 22px;
+}
+
+
+.agy-accounts-page > .mantine-Alert-root { margin-block-end: 12px; }
+
+.agy-target-select > label {
+  font-size: 0.8125rem;
+  color: var(--astr-muted);
+}
+
+.agy-account-table-wrap {
+  background: var(--astr-surface);
+  border: 1px solid var(--astr-border);
+  border-radius: 14px;
+  overflow: auto;
+  container: agy-table / inline-size;
+}
+
+.agy-account-table {
+  min-inline-size: 620px;
+  --table-border-color: var(--astr-border);
+}
+
+.agy-account-name-col { inline-size: clamp(130px, 16%, 208px); }
+.agy-account-time-col { inline-size: 112px; }
+.agy-account-actions-col { inline-size: 156px; }
+
+.agy-account-table thead {
+  color: var(--astr-muted);
+  background: color-mix(in srgb, var(--astr-surface-muted) 55%, var(--astr-surface));
+  font-size: 0.8125rem;
+}
+
+.agy-account-table tbody tr[data-current] {
+  background: color-mix(in srgb, var(--astr-indigo) 8%, var(--astr-surface));
+}
+
+.agy-account-table tbody th {
+  border-inline-start: 3px solid transparent;
+  text-align: start;
+}
+
+.agy-account-table tbody tr[data-current] th {
+  border-inline-start-color: var(--astr-indigo);
+}
+
+.agy-account-name {
+  display: block;
+  font-size: 0.9375rem;
+  overflow-wrap: anywhere;
+}
+
+.agy-current-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-block-start: 4px;
+  font-size: 0.72rem;
+  font-weight: 550;
+  color: var(--astr-muted);
+}
+
+.agy-current-badge::before {
+  content: '';
+  inline-size: 6px;
+  block-size: 6px;
+  border-radius: 50%;
+  background: var(--astr-indigo);
+}
+
+.agy-quota-tiles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.agy-quota-tile:last-child:nth-child(odd) { grid-column: 1 / -1; }
+
+.agy-quota-tile {
+  display: grid;
+  align-content: start;
+  gap: 5px;
+  min-block-size: 54px;
+  padding: 7px 9px;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--astr-surface-muted) 78%, transparent);
+  --quota-ink: var(--astr-indigo);
+}
+
+.agy-quota-tile[data-tone='low'] { --quota-ink: var(--mantine-color-orange-filled); }
+.agy-quota-tile[data-tone='empty'] { --quota-ink: var(--mantine-color-red-filled); }
+
+.agy-quota-tile-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 0.8125rem;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.agy-quota-tile-heading strong,
+.agy-account-timestamp { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.agy-quota-tile meter { inline-size: 100%; block-size: 4px; appearance: none; }
+.agy-quota-tile meter::-webkit-meter-bar { border: 0; background: var(--astr-border); border-radius: 3px; }
+.agy-quota-tile meter::-webkit-meter-optimum-value { background: var(--quota-ink); border-radius: 3px; }
+.agy-quota-tile meter::-moz-meter-bar { background: var(--quota-ink); border-radius: 3px; }
+.agy-quota-tile time,
+.agy-account-timestamp,
+.agy-account-muted { font-size: 0.75rem; color: var(--astr-muted); }
+.agy-row-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.agy-account-empty {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  padding: 32px 16px;
+  border: 1px solid var(--astr-border);
+  border-radius: 14px;
+  color: var(--astr-muted);
+}
+
+.agy-account-error { display: grid; gap: 3px; font-size: 0.8125rem; }
+.agy-account-error span { color: var(--astr-muted); overflow-wrap: anywhere; }
+
+.agy-account-dialog {
+  inline-size: min(440px, calc(100vw - 32px));
+  padding: 24px;
+  border: 1px solid var(--astr-border);
+  border-radius: 14px;
+  background: var(--astr-surface);
+  color: var(--astr-text);
+}
+
+.agy-account-dialog:modal { overscroll-behavior: contain; }
+.agy-account-dialog::backdrop { background: rgb(14 18 28 / 46%); overflow: hidden; overscroll-behavior: contain; }
+.agy-account-dialog h2 { font-size: 1.2rem; margin: 0; }
+.agy-account-dialog p { color: var(--astr-muted); font-size: 0.875rem; margin-block: 10px 16px; }
+
+@container agy-table (inline-size < 740px) {
+  .agy-account-name-col { inline-size: 120px; }
+  .agy-account-time-col { inline-size: 94px; }
+  .agy-account-actions-col { inline-size: 106px; }
+}
+
+.agy-credential-input textarea { resize: vertical; font-family: var(--mantine-font-family-monospace); }
+.agy-credential-file { display: grid; gap: 0.375rem; font-size: var(--mantine-font-size-sm); font-weight: 500; }
+.agy-credential-file input { max-inline-size: 100%; font: inherit; }
+
+.agent-accounts-layout.route-page { max-width: 1740px; container: account-page / inline-size; }
+.agent-accounts-layout > h1 { margin: 0 0 20px; font-size: clamp(1.375rem, 2vw, 1.75rem); }
+.agent-accounts-columns { display: grid; grid-template-columns: 174px minmax(0, 1fr); gap: clamp(16px, 2vw, 30px); align-items: start; }
+.account-platform-content { min-inline-size: 0; }
+.account-platforms { display: grid; gap: 4px; position: sticky; inset-block-start: 0; }
+.account-platforms-label { font-weight: 650; color: var(--astr-muted); font-size: .8rem; padding: 4px 10px 8px; }
+.account-platforms a { display: flex; align-items: center; gap: 8px; padding: 10px; min-block-size: 44px; border-radius: 9px; color: var(--astr-text); text-decoration: none; }
+.account-platforms a:hover { background: var(--astr-surface-muted); }
+.account-platforms a[aria-current='page'] { background: color-mix(in srgb, var(--astr-indigo) 12%, var(--astr-surface)); font-weight: 700; box-shadow: inset 3px 0 var(--astr-indigo); }
+.account-platforms a:focus-visible { outline: 2px solid var(--astr-indigo); }
+.account-platforms small { margin-inline-start: auto; color: var(--astr-muted); font-size: .68rem; }
+.account-platform-unavailable { display: grid; justify-items: center; align-content: center; min-block-size: 250px; background: var(--astr-surface); border: 1px solid var(--astr-border); border-radius: 14px; }
+.account-platform-unavailable h2, .agy-accounts-toolbar h2 { margin: 0; font-size: 1.2rem; }
+.account-platform-unavailable p { margin: 6px 0 0; color: var(--astr-muted); }
+.agy-plan-col { inline-size: 100px; }
+.agy-plan { font-size: .76rem; color: var(--astr-muted); }
+.agy-plan[data-known='true'] { display: inline-block; padding: 2px 8px; border-radius: 6px; color: var(--astr-text); background: var(--astr-surface-muted); font-weight: 600; }
+@container account-page (inline-size < 860px) {
+  .agent-accounts-columns { grid-template-columns: minmax(0,1fr); }
+  .account-platforms { position: static; display: flex; align-items: center; overflow-x: auto; }
+  .account-platforms a { white-space: nowrap; }
+}

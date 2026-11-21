@@ -79,11 +79,29 @@ type Summary struct {
 
 // snapshot is what one machine currently has configured.
 type snapshot struct {
-	env   envtarget.Env
-	paths envtarget.Paths
-	cfg   map[string]map[string]any // agent -> parsed config
-	lock  map[string]any            // ~/.agents/.skill-lock.json
-	warns []string
+	env              envtarget.Env
+	paths            envtarget.Paths
+	cfg              map[string]map[string]any // agent -> parsed config
+	agyConfig        map[string]any            // ~/.gemini/config/config.json
+	agyPlugins       []agyPluginMeta
+	agyPluginsLoaded bool
+	lock             map[string]any // ~/.agents/.skill-lock.json
+	warns            []string
+}
+
+type agyPluginMeta struct {
+	DirName     string
+	DisplayName string
+	Enabled     bool
+	Version     string
+	Description string
+	Author      string
+	Homepage    string
+	Repository  string
+	Path        string
+	Skills      []envtarget.Found
+	MCPServers  map[string]any
+	HasHooks    bool
 }
 
 func antigravityConfigRoot(p envtarget.Paths) string {
@@ -97,13 +115,15 @@ func antigravityConfigRoot(p envtarget.Paths) string {
 }
 
 func antigravitySkillHome(p envtarget.Paths) string {
-	if p.Home != "" {
-		return p.Home + "/.gemini/antigravity"
+	return antigravityConfigRoot(p)
+}
+
+func antigravityConfigFile(p envtarget.Paths) string {
+	root := antigravityConfigRoot(p)
+	if root == "" {
+		return ""
 	}
-	if p.Antigravity != "" {
-		return path.Dir(p.Antigravity) + "/antigravity"
-	}
-	return ""
+	return root + "/config.json"
 }
 
 func configPath(p envtarget.Paths, agent string) string {
@@ -124,11 +144,15 @@ func (s *Service) snapshot(ctx context.Context, env envtarget.Env) (*snapshot, e
 		return nil, err
 	}
 	files := []string{configPath(paths, "codex"), configPath(paths, "hermes"), configPath(paths, "grok"), configPath(paths, "antigravity"), paths.Agents + "/.skill-lock.json"}
+	agyCfgFile := antigravityConfigFile(paths)
+	if agyCfgFile != "" {
+		files = append(files, agyCfgFile)
+	}
 	raw, err := env.ReadMany(ctx, files)
 	if err != nil {
 		return nil, err
 	}
-	snap := &snapshot{env: env, paths: paths, cfg: map[string]map[string]any{}, lock: map[string]any{}}
+	snap := &snapshot{env: env, paths: paths, cfg: map[string]map[string]any{}, agyConfig: map[string]any{}, lock: map[string]any{}}
 	for _, agent := range agents {
 		file := configPath(paths, agent)
 		cfg, parseErr := parseConfig(agent, stripBOM(raw[file]))
@@ -137,6 +161,14 @@ func (s *Service) snapshot(ctx context.Context, env envtarget.Env) (*snapshot, e
 			cfg = map[string]any{}
 		}
 		snap.cfg[agent] = cfg
+	}
+	if agyCfgFile != "" {
+		agyCfg, parseErr := parseJSONMap(stripBOM(raw[agyCfgFile]))
+		if parseErr != nil {
+			snap.warns = append(snap.warns, "antigravity config.json 无法解析："+parseErr.Error())
+		} else {
+			snap.agyConfig = agyCfg
+		}
 	}
 	if data := raw[paths.Agents+"/.skill-lock.json"]; len(data) > 0 {
 		_ = json.Unmarshal(data, &snap.lock)
@@ -192,11 +224,142 @@ func mcpFromEntry(agent, name string, entry map[string]any, disabled []string, r
 	return server
 }
 
-func (sn *snapshot) mcpServers(agent string, redact bool) []MCPServer {
+func (sn *snapshot) discoverAntigravityPlugins(ctx context.Context) []agyPluginMeta {
+	if sn.agyPluginsLoaded {
+		return sn.agyPlugins
+	}
+	sn.agyPluginsLoaded = true
+	root := antigravityConfigRoot(sn.paths)
+	if root == "" {
+		return nil
+	}
+	pluginsDir := root + "/plugins"
+	dirs, err := sn.env.ListDir(ctx, pluginsDir)
+	if err != nil || len(dirs) == 0 {
+		return nil
+	}
+	var dirNames []string
+	for _, entry := range dirs {
+		if entry.Dir && !strings.HasPrefix(entry.Name, ".") {
+			dirNames = append(dirNames, entry.Name)
+		}
+	}
+	sort.Strings(dirNames)
+	if len(dirNames) == 0 {
+		return nil
+	}
+
+	var filesToRead []string
+	var skillDirs []string
+	for _, name := range dirNames {
+		base := pluginsDir + "/" + name
+		filesToRead = append(filesToRead,
+			base+"/plugin.json",
+			base+"/.antigravity-plugin/plugin.json",
+			base+"/.gemini-plugin/plugin.json",
+			base+"/mcp_config.json",
+			base+"/hooks.json",
+		)
+		skillDirs = append(skillDirs, base+"/skills")
+	}
+	rawFiles, _ := sn.env.ReadMany(ctx, filesToRead)
+	foundSkills, _ := sn.env.Find(ctx, skillDirs, "SKILL.md", 4, 40)
+
+	skillsByPlugin := map[string][]envtarget.Found{}
+	for _, hit := range foundSkills {
+		for _, name := range dirNames {
+			prefix := pluginsDir + "/" + name + "/skills/"
+			if strings.HasPrefix(hit.Path, prefix) && !hiddenSegment(strings.TrimPrefix(hit.Path, prefix)) {
+				skillsByPlugin[name] = append(skillsByPlugin[name], hit)
+				break
+			}
+		}
+	}
+
+	pluginOverrides := asMap(sn.agyConfig["plugins"])
+	out := make([]agyPluginMeta, 0, len(dirNames))
+	for _, dirName := range dirNames {
+		base := pluginsDir + "/" + dirName
+		var manifest map[string]any
+		hasManifest := false
+		for _, cand := range []string{base + "/plugin.json", base + "/.antigravity-plugin/plugin.json", base + "/.gemini-plugin/plugin.json"} {
+			if data := rawFiles[cand]; len(data) > 0 {
+				if parsed, parseErr := parseJSONMap(stripBOM(data)); parseErr == nil {
+					manifest = parsed
+					hasManifest = true
+					break
+				}
+			}
+		}
+		var mcpServers map[string]any
+		if mcpRaw := rawFiles[base+"/mcp_config.json"]; len(mcpRaw) > 0 {
+			if parsed, parseErr := parseJSONMap(stripBOM(mcpRaw)); parseErr == nil {
+				mcpServers = asMap(parsed["mcpServers"])
+			}
+		}
+		hasHooks := len(strings.TrimSpace(string(rawFiles[base+"/hooks.json"]))) > 0
+		pluginSkills := skillsByPlugin[dirName]
+		if !hasManifest && len(pluginSkills) == 0 && len(mcpServers) == 0 && !hasHooks {
+			continue
+		}
+
+		enabled := !asBool(manifest["disabled"], false)
+		if override := asMap(pluginOverrides[dirName]); override != nil {
+			if _, hasEnabled := override["enabled"]; hasEnabled {
+				enabled = asBool(override["enabled"], enabled)
+			}
+		}
+		displayName := firstNonEmpty(strings.TrimSpace(asString(manifest["name"])), dirName)
+		author := strings.TrimSpace(asString(manifest["author"]))
+		if authorMap := asMap(manifest["author"]); authorMap != nil {
+			author = strings.TrimSpace(asString(authorMap["name"]))
+		}
+		repo := strings.TrimSpace(asString(manifest["repository"]))
+		if repoMap := asMap(manifest["repository"]); repoMap != nil {
+			repo = strings.TrimSpace(asString(repoMap["url"]))
+		}
+		out = append(out, agyPluginMeta{
+			DirName:     dirName,
+			DisplayName: displayName,
+			Enabled:     enabled,
+			Version:     strings.TrimSpace(asString(manifest["version"])),
+			Description: strings.TrimSpace(asString(manifest["description"])),
+			Author:      author,
+			Homepage:    strings.TrimSpace(asString(manifest["homepage"])),
+			Repository:  repo,
+			Path:        base,
+			Skills:      pluginSkills,
+			MCPServers:  mcpServers,
+			HasHooks:    hasHooks,
+		})
+	}
+	sn.agyPlugins = out
+	return out
+}
+
+func (sn *snapshot) mcpServers(ctx context.Context, agent string, redact bool) []MCPServer {
 	entries := sn.mcpEntries(agent)
 	out := make([]MCPServer, 0, len(entries))
+	seen := make(map[string]bool, len(entries))
 	for _, name := range sortedAnyKeys(entries) {
+		seen[name] = true
 		out = append(out, mcpFromEntry(agent, name, asMap(entries[name]), sn.disabledMCP(agent), redact))
+	}
+	if agent == "antigravity" {
+		for _, plg := range sn.discoverAntigravityPlugins(ctx) {
+			if !plg.Enabled || len(plg.MCPServers) == 0 {
+				continue
+			}
+			for _, name := range sortedAnyKeys(plg.MCPServers) {
+				if seen[name] {
+					continue
+				}
+				seen[name] = true
+				srv := mcpFromEntry(agent, name, asMap(plg.MCPServers[name]), nil, redact)
+				srv.Source = "antigravity-plugin:" + plg.DirName
+				out = append(out, srv)
+			}
+		}
 	}
 	return out
 }
@@ -248,6 +411,45 @@ func (sn *snapshot) plugins(ctx context.Context) []Plugin {
 	for _, name := range asStrings(asMap(sn.cfg["grok"]["plugins"])["enabled"]) {
 		out = append(out, Plugin{ID: "grok::" + name, Name: name, FullName: name, Agent: "grok", Marketplace: "xai-official",
 			Enabled: true, Source: "grok-plugin", Config: map[string]any{}})
+	}
+	for _, plg := range sn.discoverAntigravityPlugins(ctx) {
+		skillNames := make([]string, 0, len(plg.Skills))
+		for _, hit := range plg.Skills {
+			sName, _ := parseFrontMatter(hit.Head, path.Base(path.Dir(hit.Path)))
+			if sName != "" && !contains(skillNames, sName) {
+				skillNames = append(skillNames, sName)
+			}
+		}
+		sort.Strings(skillNames)
+		mcpNames := sortedAnyKeys(plg.MCPServers)
+		cfg := map[string]any{
+			"path":        plg.Path,
+			"skills":      skillNames,
+			"mcp_servers": mcpNames,
+			"has_hooks":   plg.HasHooks,
+		}
+		if plg.Version != "" {
+			cfg["version"] = plg.Version
+		}
+		if plg.Description != "" {
+			cfg["description"] = plg.Description
+		}
+		if plg.Homepage != "" {
+			cfg["homepage"] = plg.Homepage
+		}
+		if plg.Repository != "" {
+			cfg["repository"] = plg.Repository
+		}
+		out = append(out, Plugin{
+			ID:          "antigravity::" + plg.DirName,
+			Name:        plg.DisplayName,
+			FullName:    plg.DirName,
+			Agent:       "antigravity",
+			Marketplace: firstNonEmpty(plg.Author, "antigravity-plugin"),
+			Enabled:     plg.Enabled,
+			Source:      "antigravity-plugin",
+			Config:      asMapOrEmpty(redactAny(cfg)),
+		})
 	}
 	return out
 }
@@ -409,6 +611,35 @@ func (sn *snapshot) discoverSkills(ctx context.Context) ([]Skill, error) {
 		}
 		order = append(order, identity)
 	}
+	for _, plg := range sn.discoverAntigravityPlugins(ctx) {
+		if !plg.Enabled {
+			continue
+		}
+		for _, hit := range plg.Skills {
+			dir := path.Dir(hit.Path)
+			name, description := parseFrontMatter(hit.Head, path.Base(dir))
+			if existing, ok := byName[name]; ok {
+				if !contains(existing.Agents, "antigravity") {
+					existing.Agents = append(existing.Agents, "antigravity")
+				}
+				if existing.Description == "" {
+					existing.Description = description
+				}
+				continue
+			}
+			byName[name] = &Skill{
+				Name:        name,
+				Path:        hit.Path,
+				Scope:       "global",
+				Agents:      []string{"antigravity"},
+				Agent:       "antigravity",
+				Source:      "antigravity-plugin:" + plg.DirName,
+				SourceURL:   firstNonEmpty(plg.Repository, plg.Homepage),
+				Description: description,
+			}
+			order = append(order, name)
+		}
+	}
 	sort.Strings(order)
 	out := make([]Skill, 0, len(order))
 	for _, name := range order {
@@ -460,7 +691,7 @@ func (s *Service) Summary(ctx context.Context, targetID, agentFilter string) (*S
 	}
 	var servers []MCPServer
 	for _, agent := range agents {
-		servers = append(servers, sn.mcpServers(agent, true)...)
+		servers = append(servers, sn.mcpServers(ctx, agent, true)...)
 	}
 	plugins, markets := sn.plugins(ctx), sn.marketplaces()
 	if agentFilter != "" && agentFilter != "all" {

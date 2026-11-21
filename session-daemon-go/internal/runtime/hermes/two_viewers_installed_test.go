@@ -25,7 +25,7 @@ func TestInstalledTwoCanonicalViewersRecoverReadOnly(t *testing.T) {
 	if json.Unmarshal(data, &argv) != nil || len(argv) < 2 {
 		t.Fatal("invalid launcher command")
 	}
-	p := NewIsolated(Config{Executable: argv[0], Arguments: argv[1:], AgentID: "local-hermes-default", Workspace: "P:/workspace/glwlg/ai/astrorder"})
+	p := NewIsolated(Config{Executable: argv[0], Arguments: argv[1:], AgentID: "local-hermes-default", Workspace: t.TempDir()})
 	defer p.Close()
 	ids := []string{"local-22d9b1551bba115ab44679ca49d8c8e71fca0cdaebfe99c14b49d8cd2a2cabb8", "20261008_202804_f6e273"}
 	for _, id := range ids {

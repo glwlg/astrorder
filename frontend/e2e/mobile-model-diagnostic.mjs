@@ -1,7 +1,7 @@
 import { chromium } from '@playwright/test'
 import fs from 'node:fs/promises'
 const origin = 'http://127.0.0.1:30001'
-const context = await chromium.launchPersistentContext('C:/Users/luwei/AppData/Local/hermes/cache/astrorder-mobile-reference-browser', { executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true, viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
+const context = await chromium.launchPersistentContext('test-results/mobile-reference-browser', { executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true, viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
 const results = []
 try {
  const data = await (await context.request.get(origin + '/api/v1/bootstrap')).json()

@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	core "astrorder.dev/session-daemon/internal/runtime"
 )
 
 func TestUsageSummaryAggregatesStepsBySlotAndCachesIncrementally(t *testing.T) {
@@ -25,7 +27,7 @@ func TestUsageSummaryAggregatesStepsBySlotAndCachesIncrementally(t *testing.T) {
 	}
 	if _, err := sumDB.Exec(`
 		CREATE TABLE conversation_summaries(conversation_id TEXT PRIMARY KEY, title TEXT, workspace_uris TEXT, killed INTEGER);
-		INSERT INTO conversation_summaries VALUES(?, 'A2 操作审计迁移', '["file:///home/luwei/workspace/OpsCore"]', 0);
+		INSERT INTO conversation_summaries VALUES(?, 'A2 操作审计迁移', '["file:///home/fixture/workspace/ExampleProject"]', 0);
 	`, id); err != nil {
 		t.Fatal(err)
 	}
@@ -106,5 +108,141 @@ func TestUsageSummaryAggregatesStepsBySlotAndCachesIncrementally(t *testing.T) {
 	day2Sessions := normalizeMapSlice(day2Res["sessions"])
 	if len(day2Sessions) != 1 || day2Sessions[0]["total"] != int64(20700) {
 		t.Fatalf("expected 20700 tokens on day 2, got %+v", day2Sessions)
+	}
+}
+
+func TestAdapterQueryReadsRequestParamsForUsageSummaryAndSessionUsage(t *testing.T) {
+	home := t.TempDir()
+	desktopDir := filepath.Join(home, ".gemini", "antigravity")
+	cliDir := filepath.Join(home, ".gemini", "antigravity-cli")
+	desktopConvDir := filepath.Join(desktopDir, "conversations")
+	cliConvDir := filepath.Join(cliDir, "conversations")
+	if err := os.MkdirAll(desktopConvDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(cliConvDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	cliID := "77777777-7777-4777-8777-777777777771"
+	desktopID := "88888888-8888-4888-8888-888888888882"
+
+	// Desktop summary DB supplies metadata for desktop-only sessions, while CLI DB overrides duplicates.
+	desktopSumDB, err := sql.Open("sqlite", filepath.Join(desktopDir, "conversation_summaries.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := desktopSumDB.Exec(`CREATE TABLE conversation_summaries(conversation_id TEXT PRIMARY KEY, title TEXT, workspace_uris TEXT, killed INTEGER)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := desktopSumDB.Exec(`INSERT INTO conversation_summaries VALUES(?, 'Desktop 会话标题', '["file:///home/fixture/desktop-proj"]', 0)`, desktopID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := desktopSumDB.Exec(`INSERT INTO conversation_summaries VALUES(?, '将被 CLI 覆盖', '["file:///home/fixture/stale"]', 0)`, cliID); err != nil {
+		t.Fatal(err)
+	}
+	desktopSumDB.Close()
+
+	cliSumDB, err := sql.Open("sqlite", filepath.Join(cliDir, "conversation_summaries.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cliSumDB.Exec(`
+		CREATE TABLE conversation_summaries(conversation_id TEXT PRIMARY KEY, title TEXT, workspace_uris TEXT, killed INTEGER);
+		INSERT INTO conversation_summaries VALUES(?, 'CLI 会话标题', '["file:///home/fixture/cli-proj"]', 0);
+	`, cliID); err != nil {
+		t.Fatal(err)
+	}
+	cliSumDB.Close()
+
+	makeStepMeta := func(unixSec int64, inTok, outTok, cacheRead uint64) []byte {
+		ts := pbVarint(1, uint64(unixSec))
+		u := append(pbVarint(2, inTok), pbVarint(3, outTok)...)
+		u = append(u, pbVarint(5, cacheRead)...)
+		return append(pbBytes(1, ts), pbBytes(9, u)...)
+	}
+	day1 := time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC).Unix()
+	day2 := time.Date(2026, 11, 18, 8, 30, 0, 0, time.UTC).Unix()
+
+	cliDB, err := sql.Open("sqlite", filepath.Join(cliConvDir, cliID+".db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cliDB.Exec(`
+		CREATE TABLE steps(idx INTEGER PRIMARY KEY,step_type INTEGER,status INTEGER,step_format INTEGER,step_payload BLOB,metadata BLOB);
+		CREATE TABLE gen_metadata(idx INTEGER PRIMARY KEY,data BLOB,size INTEGER);
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cliDB.Exec(`INSERT INTO steps VALUES(1,15,3,0,?,?)`, pbVarint(1, 15), makeStepMeta(day1, 2000, 300, 8000)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cliDB.Exec(`INSERT INTO steps VALUES(2,15,3,0,?,?)`, pbVarint(1, 15), makeStepMeta(day2, 5000, 700, 15000)); err != nil {
+		t.Fatal(err)
+	}
+	cliDB.Close()
+
+	deskDB, err := sql.Open("sqlite", filepath.Join(desktopConvDir, desktopID+".db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := deskDB.Exec(`
+		CREATE TABLE steps(idx INTEGER PRIMARY KEY,step_type INTEGER,status INTEGER,step_format INTEGER,step_payload BLOB,metadata BLOB);
+		CREATE TABLE gen_metadata(idx INTEGER PRIMARY KEY,data BLOB,size INTEGER);
+		INSERT INTO steps VALUES(1,15,3,0,?,?);
+	`, pbVarint(1, 15), makeStepMeta(day2, 1000, 200, 3000)); err != nil {
+		t.Fatal(err)
+	}
+	deskDB.Close()
+
+	adapter := New(Config{Home: home})
+	sinceDay2 := time.Date(2026, 11, 18, 0, 0, 0, 0, time.UTC).UnixMilli()
+
+	// Call Adapter.Query in the exact structure produced by grpcapi.translateNativeQuery.
+	summaryRes, err := adapter.Query(context.Background(), core.Request{
+		AgentType: "antigravity",
+		Action:    "runtime.request",
+		Fields: map[string]any{
+			"method": "usage.summary",
+			"request_params": map[string]any{
+				"since_ms": sinceDay2,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Adapter.Query(usage.summary) failed: %v", err)
+	}
+	sessions := normalizeMapSlice(summaryRes["sessions"])
+	if len(sessions) != 2 {
+		t.Fatalf("expected 2 day-2 sessions (cli + desktop), got %+v", sessions)
+	}
+	byID := map[string]map[string]any{}
+	for _, s := range sessions {
+		byID[str(s, "session_id")] = s
+	}
+	if byID[cliID]["title"] != "CLI 会话标题" || byID[cliID]["total"] != int64(20700) {
+		t.Fatalf("expected CLI session filtered to day-2 20700 tokens, got %+v", byID[cliID])
+	}
+	if byID[desktopID]["title"] != "Desktop 会话标题" || byID[desktopID]["total"] != int64(4200) {
+		t.Fatalf("expected desktop fallback title & 4200 tokens, got %+v", byID[desktopID])
+	}
+
+	// Verify session.usage also honors request_params["conversation_id"] and request_params["readonly"].
+	sessUsage, err := adapter.Query(context.Background(), core.Request{
+		AgentType: "antigravity",
+		Action:    "runtime.request",
+		Fields: map[string]any{
+			"method": "session.usage",
+			"request_params": map[string]any{
+				"conversation_id": cliID,
+				"readonly":        false,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Adapter.Query(session.usage) failed: %v", err)
+	}
+	if sessUsage["total_tokens"] != int64(31000) || sessUsage["context_available"] != true {
+		t.Fatalf("unexpected session.usage via request_params: %+v", sessUsage)
 	}
 }

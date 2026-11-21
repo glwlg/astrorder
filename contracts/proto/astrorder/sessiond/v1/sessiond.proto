@@ -1307,6 +1307,30 @@ service SessionControl {
   rpc UpdateDesktopSettings(UpdateDesktopSettingsRequest) returns (CommandReceipt);
 }
 
+enum AgyAccountAction {
+  AGY_ACCOUNT_ACTION_UNSPECIFIED = 0;
+  reserved 1 to 4;
+  AGY_ACCOUNT_ACTION_READ_STATE = 5;
+  AGY_ACCOUNT_ACTION_CAPTURE_CREDENTIAL = 6;
+  AGY_ACCOUNT_ACTION_READ_QUOTA = 7;
+  AGY_ACCOUNT_ACTION_APPLY_CREDENTIAL = 8;
+}
+
+message AgyAccountRequest {
+  reserved 4;
+  RuntimeTarget target = 1;
+  AgyAccountAction action = 2;
+  string account_id = 3;
+  bool confirm_active = 5;
+  bytes credential = 6;
+}
+
+message AgyAccountResponse {
+  NativeJson result = 1;
+  // Only returned for CAPTURE_CREDENTIAL on the authenticated daemon channel.
+  bytes credential = 2;
+}
+
 service RuntimeQuery {
   rpc QueryNative(NativeQueryRequest) returns (NativeQueryResponse);
   rpc GetHistoryPage(HistoryPageRequest) returns (HistoryPageResponse);
@@ -1321,6 +1345,7 @@ service RuntimeQuery {
   rpc ReadApprovalMode(ReadApprovalModeRequest) returns (ApprovalModeState);
   rpc SetApprovalMode(SetApprovalModeRequest) returns (CommandReceipt);
   rpc DisconnectRuntime(DisconnectRuntimeRequest) returns (DisconnectRuntimeResponse);
+  rpc ManageAgyAccount(AgyAccountRequest) returns (AgyAccountResponse);
 }
 
 service EventStream {

@@ -221,6 +221,14 @@ func (m *MultiplexRegistry) SessionsForConnection(connectionID string) []string 
 }
 
 func (m *MultiplexRegistry) DisconnectConnection(ctx context.Context, connectionID string) ([]string, error) {
+	return m.disconnectConnection(ctx, connectionID, false)
+}
+
+func (m *MultiplexRegistry) ForceDisconnectConnection(ctx context.Context, connectionID string) ([]string, error) {
+	return m.disconnectConnection(ctx, connectionID, true)
+}
+
+func (m *MultiplexRegistry) disconnectConnection(ctx context.Context, connectionID string, force bool) ([]string, error) {
 	m.mu.Lock()
 	child, exists := m.children[connectionID]
 	if !exists {
@@ -230,7 +238,15 @@ func (m *MultiplexRegistry) DisconnectConnection(ctx context.Context, connection
 	m.mu.Unlock()
 
 	// 先尝试平滑关闭底层 adapter；若底层关闭失败，不能静默解绑和注销，必须暴露错误并保留状态
-	if disc, ok := child.adapter.(RuntimeDisconnector); ok {
+	if force {
+		disc, ok := child.adapter.(ForcedRuntimeDisconnector)
+		if !ok {
+			return nil, RejectBeforeDispatch("connection does not support forced restart")
+		}
+		if _, err := disc.ForceShutdown(ctx); err != nil {
+			return nil, fmt.Errorf("failed to stop connection adapter: %w", err)
+		}
+	} else if disc, ok := child.adapter.(RuntimeDisconnector); ok {
 		if _, err := disc.Shutdown(ctx); err != nil {
 			return nil, fmt.Errorf("failed to disconnect connection adapter: %w", err)
 		}

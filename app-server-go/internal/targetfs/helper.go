@@ -38,7 +38,10 @@ func ServeHelper(ctx context.Context, input io.Reader, output io.Writer) error {
 	if err := json.Unmarshal(request.Data, &scope); err != nil {
 		return writeHelperError(output, errorf(400, "invalid_scope", "Helper scope is invalid", err))
 	}
-	filesystem, err := NewLocal(LocalOptions{Workspace: scope.Workspace, AllowedRoots: scope.AllowedRoots})
+	filesystem, err := NewLocal(LocalOptions{
+		Workspace: scope.Workspace, AllowedRoots: scope.AllowedRoots, OptionalRoots: scope.OptionalRoots,
+		RestorePaths: scope.RestorePaths,
+	})
 	if err != nil {
 		return writeHelperError(output, err)
 	}
@@ -82,7 +85,7 @@ func ServeHelper(ctx context.Context, input io.Reader, output io.Writer) error {
 			return writeHelperError(output, err)
 		}
 		return writeHelperJSON(output, result)
-	case "stat":
+	case "stat", "restore_stat":
 		var payload struct {
 			Path string `json:"path"`
 		}

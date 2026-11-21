@@ -1,8 +1,8 @@
 import { expect, it } from 'vitest'
 import type { Project, Session } from '../domain/types'
 import { buildProjectGroups } from './sessionRailModel'
-const row: Session = { id: 'native', agent_id: 'local-codex', source_id: 'local-codex', title: 'The following is the Codex agent history', workspace: '/home/luwei/workspace/OpsCore', status: 'idle', updated_at: '2026-09-01T00:00:00Z' }
-const project: Project = { id: 'p', project_id: 'p', project_name: 'OpsCore', source_id: 'local-hermes-default', agent_id: 'local-hermes-default', workspace: row.workspace, session_count: 0, updated_at: row.updated_at }
+const row: Session = { id: 'native', agent_id: 'local-codex', source_id: 'local-codex', title: 'The following is the Codex agent history', workspace: '/home/fixture/workspace/ExampleProject', status: 'idle', updated_at: '2026-09-01T00:00:00Z' }
+const project: Project = { id: 'p', project_id: 'p', project_name: 'ExampleProject', source_id: 'local-hermes-default', agent_id: 'local-hermes-default', workspace: row.workspace, session_count: 0, updated_at: row.updated_at }
 it('merges local Agents at the same path', () => {
   const groups = buildProjectGroups([{ ...row, project_id: 'codex-project' }], {}, [project, { ...project, id: 'c', project_id: 'codex-project', source_id: 'local-codex', agent_id: 'local-codex' }])
   expect(groups).toHaveLength(1)

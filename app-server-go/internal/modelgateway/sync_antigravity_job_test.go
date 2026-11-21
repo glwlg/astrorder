@@ -63,11 +63,17 @@ func TestAntigravitySyncJobRequiresExactReadback(t *testing.T) {
 			defer cancel()
 			for {
 				pref, err := st.GetPreference(ctx, "model_sync:jobs")
-				if err != nil { t.Fatal(err) }
+				if err != nil {
+					t.Fatal(err)
+				}
 				raw, _ := json.Marshal(pref.Value)
-				if strings.Contains(string(raw), `"status":"success"`) || strings.Contains(string(raw), `"status":"failed"`) { break }
-				if ctx.Err() != nil { t.Fatal("sync job did not finish") }
-				time.Sleep(10*time.Millisecond)
+				if strings.Contains(string(raw), `"status":"success"`) || strings.Contains(string(raw), `"status":"failed"`) {
+					break
+				}
+				if ctx.Err() != nil {
+					t.Fatal("sync job did not finish")
+				}
+				time.Sleep(10 * time.Millisecond)
 			}
 			if err = handler.(interface{ Close(context.Context) error }).Close(ctx); err != nil {
 				t.Fatal(err)
@@ -139,7 +145,7 @@ func TestRemoteSSHAntigravitySyncTargetsPreviewAndApply(t *testing.T) {
 		"display_name": "WSL SSH",
 		"host":         "127.0.0.1",
 		"port":         22,
-		"user":         "luwei",
+		"user":         "fixture",
 		"state":        "connected",
 	}); err != nil {
 		t.Fatal(err)

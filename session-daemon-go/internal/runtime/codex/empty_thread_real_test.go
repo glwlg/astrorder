@@ -48,7 +48,8 @@ func TestRealSSHNewEmptyHistoryWithoutSending(t *testing.T) {
 	if os.Getenv("ASTRORDER_TEST_EMPTY_SSH") != "1" {
 		t.Skip("ASTRORDER_TEST_EMPTY_SSH is not configured")
 	}
-	target := "luwei@127.0.0.1"
+	host, user, executable := realCodexSSHSettings(t)
+	target := user + "@" + host
 	raw, err := exec.Command("ssh", "-o", "BatchMode=yes", target, "mktemp -d /tmp/astrorder-empty-XXXXXXXX").Output()
 	if err != nil {
 		t.Fatal(err)
@@ -62,14 +63,14 @@ func TestRealSSHNewEmptyHistoryWithoutSending(t *testing.T) {
 			t.Error(err)
 		}
 	}()
-	transport, err := sshtrans.New(sshtrans.Config{Binary: "ssh", Host: "127.0.0.1", User: "luwei"})
+	transport, err := sshtrans.New(sshtrans.Config{Binary: "ssh", Host: host, User: user})
 	if err != nil {
 		t.Fatal(err)
 	}
-	a := NewSSHAdapter(Config{Executable: "/home/luwei/.vite-plus/bin/codex", Workspace: home, Allowed: []string{"/tmp"}, AgentID: "empty-ssh-real"}, nil, func(ctx context.Context, spec sshtrans.CommandSpec) (SSHSession, error) {
+	a := NewSSHAdapter(Config{Executable: executable, Workspace: home, Allowed: []string{"/tmp"}, AgentID: "empty-ssh-real"}, nil, func(ctx context.Context, spec sshtrans.CommandSpec) (SSHSession, error) {
 		spec.Environment = nil
 		spec.Executable = "/usr/bin/env"
-		spec.Args = append([]string{"CODEX_HOME=" + home, "/home/luwei/.vite-plus/bin/codex"}, spec.Args...)
+		spec.Args = append([]string{"CODEX_HOME=" + home, executable}, spec.Args...)
 		return transport.Start(ctx, spec)
 	})
 	defer a.Close()

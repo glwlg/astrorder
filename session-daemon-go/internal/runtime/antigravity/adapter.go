@@ -44,6 +44,10 @@ type Adapter struct {
 	remoteHelper   RemoteHelperFunc
 	quotaMu        sync.Mutex
 	tierInfo       map[string]any
+	quotaCache     map[string]any
+	quotaCachedAt  time.Time
+	quotaFailedAt  time.Time
+	quotaInFlight  chan struct{}
 	modelsMu       sync.Mutex
 	modelsCache    []map[string]any
 	modelsCachedAt time.Time
@@ -52,12 +56,12 @@ type Adapter struct {
 }
 
 type session struct {
-	mu                sync.Mutex
-	id, cwd, status   string
-	model, effort     string
-	mode, command     string
-	control, closed   bool
-	readonly          bool
+	mu                 sync.Mutex
+	id, cwd, status    string
+	model, effort      string
+	mode, command      string
+	control, closed    bool
+	readonly           bool
 	deleteOnly         bool
 	deletePending      bool
 	promptRunning      bool
@@ -67,26 +71,26 @@ type session struct {
 	cancelAt           time.Time
 	lastUpdateAt       time.Time
 	suppressReplay     bool
-	client            *acpClient
-	models            []map[string]any
-	thoughtLevels     []string
-	availableCommands []map[string]any
-	approvals         map[string]*pendingApproval
-	toolItems         map[string]*acpToolState
-	liveSeq           int
-	activeMsgID       string
-	activeText        strings.Builder
-	activeThinking    strings.Builder
-	lastUsedTokens    int64
-	contextWindow     int64
-	hasCumMetrics     bool
-	cumInputTokens    int64
-	cumOutputTokens   int64
-	cumCachedTokens   int64
-	cumReasonTokens   int64
-	cumTotalTokens    int64
-	isResumed         bool
-	lastUsageSync     time.Time
+	client             *acpClient
+	models             []map[string]any
+	thoughtLevels      []string
+	availableCommands  []map[string]any
+	approvals          map[string]*pendingApproval
+	toolItems          map[string]*acpToolState
+	liveSeq            int
+	activeMsgID        string
+	activeText         strings.Builder
+	activeThinking     strings.Builder
+	lastUsedTokens     int64
+	contextWindow      int64
+	hasCumMetrics      bool
+	cumInputTokens     int64
+	cumOutputTokens    int64
+	cumCachedTokens    int64
+	cumReasonTokens    int64
+	cumTotalTokens     int64
+	isResumed          bool
+	lastUsageSync      time.Time
 
 	eventCh   chan func()
 	eventStop chan struct{}
@@ -1431,15 +1435,23 @@ func (a *Adapter) Close() error {
 }
 
 func (a *Adapter) Shutdown(ctx context.Context) ([]string, error) {
+	return a.shutdown(ctx, false)
+}
+
+func (a *Adapter) ForceShutdown(ctx context.Context) ([]string, error) {
+	return a.shutdown(ctx, true)
+}
+
+func (a *Adapter) shutdown(ctx context.Context, force bool) ([]string, error) {
 	a.mu.Lock()
 	if len(a.opening) > 0 {
 		a.mu.Unlock()
-		return nil, fmt.Errorf("Antigravity attach in progress")
+		return nil, core.RejectBeforeDispatch("Antigravity attach in progress")
 	}
 	for _, s := range a.sessions {
-		if a.result(s).Status != "idle" {
+		if !force && a.result(s).Status != "idle" {
 			a.mu.Unlock()
-			return nil, fmt.Errorf("Antigravity active or ambiguous session cannot disconnect")
+			return nil, core.RejectBeforeDispatch("Antigravity still has a session that is not confirmed idle")
 		}
 	}
 	ids := make([]string, 0, len(a.sessions))
@@ -1452,24 +1464,44 @@ func (a *Adapter) Shutdown(ctx context.Context) ([]string, error) {
 
 	a.acpMu.Lock()
 	c := a.client
-	a.client = nil
+	if !force {
+		if c != nil {
+			c.mu.Lock()
+			stopping := c.stopRequested
+			c.mu.Unlock()
+			if stopping {
+				a.acpMu.Unlock()
+				return nil, core.RejectBeforeDispatch("Antigravity is still waiting for confirmation of a forced stop")
+			}
+		}
+		a.client = nil
+	}
 	a.acpMu.Unlock()
 
-	for _, s := range sessions {
-		if err := ctx.Err(); err != nil {
+	if force && c != nil {
+		if err := c.stopActive(ctx); err != nil {
 			return nil, err
 		}
+		a.acpMu.Lock()
+		a.client = nil
+		a.acpMu.Unlock()
+	}
+	for _, s := range sessions {
 		s.mu.Lock()
 		s.closed = true
 		isRealSession := !s.control && !s.readonly && !s.deleteOnly
+		wasActive := s.status != "idle" || s.command != "" || len(s.approvals) != 0
 		s.mu.Unlock()
 		s.stopWorker()
-		if isRealSession && c != nil && !c.exited() && c.hasClose {
+		if force && isRealSession && wasActive {
+			a.failSession(s, "Antigravity was forcibly restarted")
+		}
+		if !force && isRealSession && c != nil && !c.exited() && c.hasClose {
 			_, _ = c.call(ctx, "session/close", map[string]any{"sessionId": s.id})
 		}
 	}
 
-	if c != nil {
+	if !force && c != nil {
 		if err := c.closeIdle(ctx); err != nil {
 			return nil, err
 		}

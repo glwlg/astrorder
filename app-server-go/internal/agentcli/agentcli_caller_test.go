@@ -1179,7 +1179,7 @@ func TestIsAllowedLocalOriginStrictValidation(t *testing.T) {
 		{"http://127.0.0.1:30001#fragment", "fragment present"},
 		{"http://127.0.0.1", "no port is port 80"},
 		{"http://127.0.0.1:8080", "port not 30001"},
-		{"http://192.168.1.100:30001", "remote IP"},
+		{"http://192.0.2.100:30001", "remote IP"},
 		{"http://remote.host:30001", "remote host"},
 	}
 	for _, tc := range invalid {

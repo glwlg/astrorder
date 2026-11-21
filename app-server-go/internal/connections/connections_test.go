@@ -24,7 +24,15 @@ import (
 )
 
 type dummyPublisher struct {
-	events []string
+	events    []string
+	committed []store.Event
+}
+
+func (d *dummyPublisher) PublishCommitted(events []store.Event) {
+	d.committed = append(d.committed, events...)
+	for _, event := range events {
+		d.events = append(d.events, event.Type)
+	}
 }
 
 func (d *dummyPublisher) Publish(_ context.Context, eventType string, _ map[string]any) error {
@@ -55,6 +63,7 @@ type fakeDaemonService struct {
 	attachError        error
 	attachRequestsMu   sync.Mutex
 	attachRequests     []*sessiondv1.AttachSessionRequest
+	agyAccount         func(*sessiondv1.AgyAccountRequest) (*sessiondv1.AgyAccountResponse, error)
 }
 
 func (s *fakeDaemonService) checkAuth(ctx context.Context) error {

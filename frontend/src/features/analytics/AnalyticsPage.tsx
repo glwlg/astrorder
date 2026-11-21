@@ -10,7 +10,7 @@ export function AnalyticsPage() {
     <Tabs value={view} onChange={setView} px="sm" style={{ flexShrink: 0 }}>
       <Tabs.List>
         <Tabs.Tab value="gateway">网关统计</Tabs.Tab>
-        <Tabs.Tab value="direct">直连 Token</Tabs.Tab>
+        <Tabs.Tab value="direct">会话 Token</Tabs.Tab>
         <Tabs.Tab value="agent">CLI 使用</Tabs.Tab>
       </Tabs.List>
     </Tabs>

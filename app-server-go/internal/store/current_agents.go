@@ -23,6 +23,9 @@ func (s *Store) ListCurrentAgents(ctx context.Context) ([]map[string]any, error)
 			connection = "local"
 		}
 		kind, _ := item["kind"].(string)
+		if kind == "antigravity-ssh" {
+			kind = "antigravity"
+		}
 		enabled, present, err := s.GetAgentConnectionChoice(ctx, connection+":"+kind)
 		if err != nil {
 			return nil, err

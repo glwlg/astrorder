@@ -181,7 +181,7 @@ func TestSSHAndWSLCommandsAreFixedAndPreserveConnectionConfiguration(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantWSL := []string{"wsl.exe", "-d", "Ubuntu-24.04", "--", "/usr/local/lib/astrorder/v1/astrorder-helper", "--stdio", "--protocol", "1"}
+	wantWSL := []string{"wsl.exe", "-d", "Ubuntu-24.04", "--exec", "/usr/local/lib/astrorder/v1/astrorder-helper", "--stdio", "--protocol", "1"}
 	if !reflect.DeepEqual(wsl, wantWSL) {
 		t.Fatalf("wsl argv=%q want=%q", wsl, wantWSL)
 	}

@@ -34,7 +34,9 @@ func lifecycleControllerInJob() (bool, error) {
 
 func invokeLifecycleBroker(parent context.Context, target, operation, root, state string, confirm bool) (int, []byte, error) {
 	timeout := 70 * time.Second
-	if target == "daemon" && (operation == "restart" || operation == "update") {
+	if target == "app" && operation == "restart" {
+		timeout = 115 * time.Second
+	} else if target == "daemon" && (operation == "restart" || operation == "update") {
 		timeout = 150 * time.Second
 	}
 	ctx, cancel := context.WithTimeout(parent, timeout)

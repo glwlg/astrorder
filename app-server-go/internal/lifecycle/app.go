@@ -25,6 +25,9 @@ const (
 
 const processMetadataName = "app-process.json"
 
+// The App can drain HTTP and then close several services before exiting.
+const appShutdownTimeout = 45 * time.Second
+
 // ProcessIdentity resists PID reuse by pairing the native executable path with
 // the Windows process creation timestamp.
 type ProcessIdentity struct {
@@ -198,17 +201,23 @@ func stopAppLocked(ctx context.Context, validated validatedAppOptions) (AppStatu
 		return AppStatusResult{}, err
 	}
 
-	deadline := time.Now().Add(validated.ShutdownTimeout)
+	waitCtx, cancelWait := context.WithTimeout(ctx, validated.ShutdownTimeout)
+	defer cancelWait()
+	var inspectFailure error
 	for {
 		processExited := false
 		current, inspectErr := InspectProcess(owned.PID)
-		if errors.Is(inspectErr, os.ErrNotExist) || (inspectErr == nil && current != owned) {
+		switch {
+		case errors.Is(inspectErr, os.ErrNotExist), processIdentityReused(owned, current, inspectErr):
 			processExited = true
-		} else if inspectErr != nil && !errors.Is(inspectErr, os.ErrPermission) {
-			return AppStatusResult{}, fmt.Errorf("verify App process exit: %w", inspectErr)
+			inspectFailure = nil
+		case inspectErr != nil:
+			// Windows process inspection can fail transiently during exit.
+			inspectFailure = inspectErr
+		default:
+			processExited = current != owned
+			inspectFailure = nil
 		}
-		// Windows can temporarily deny inspection while a process exits.
-		// Continue waiting; success still requires proven exit and listener release.
 		pids, listenerErr := ListeningPIDs(validated.port)
 		if listenerErr != nil {
 			return AppStatusResult{}, fmt.Errorf("verify App listener release: %w", listenerErr)
@@ -217,13 +226,12 @@ func stopAppLocked(ctx context.Context, validated validatedAppOptions) (AppStatu
 			removeProcessMetadata(validated.StateDir, owned)
 			return AppStatusResult{State: StateStopped, Address: validated.Address}, nil
 		}
-		if err := ctx.Err(); err != nil {
-			return AppStatusResult{}, err
+		select {
+		case <-waitCtx.Done():
+			return AppStatusResult{}, fmt.Errorf("App shutdown is not confirmed (pid %d, process_exited=%t, listener_released=%t): %w",
+				owned.PID, processExited, len(pids) == 0, errors.Join(waitCtx.Err(), inspectFailure))
+		case <-time.After(50 * time.Millisecond):
 		}
-		if time.Now().After(deadline) {
-			return AppStatusResult{}, errors.New("App did not exit and release its listener before the shutdown deadline")
-		}
-		time.Sleep(50 * time.Millisecond)
 	}
 }
 
@@ -359,7 +367,7 @@ func validateAppOptions(options AppOptions) (validatedAppOptions, error) {
 		options.StartupTimeout = 30 * time.Second
 	}
 	if options.ShutdownTimeout <= 0 {
-		options.ShutdownTimeout = 10 * time.Second
+		options.ShutdownTimeout = appShutdownTimeout
 	}
 	return validatedAppOptions{AppOptions: options, port: port}, nil
 }

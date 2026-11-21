@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 )
@@ -22,6 +23,7 @@ type ResolverOptions struct {
 	Store            SessionConnectionStore
 	DefaultWorkspace string
 	AllowedRoots     []string
+	AllowTempDirs    bool
 	SSHBinary        string
 	HelperPath       string
 	WSLBinary        string
@@ -66,6 +68,7 @@ func NewResolver(options ResolverOptions) *Resolver {
 
 func (r *Resolver) Resolve(ctx context.Context, request ResolveRequest) (Resolved, error) {
 	workspace := cleanInputPath(request.Workspace)
+	sessionWorkspace := ""
 	connectionID := strings.TrimSpace(request.ConnectionID)
 	if request.SessionID != "" {
 		if r.options.Store == nil {
@@ -78,8 +81,9 @@ func (r *Resolver) Resolve(ctx context.Context, request ResolveRequest) (Resolve
 		if session == nil {
 			return Resolved{}, errorf(404, "session_not_found", "Session was not found", nil)
 		}
+		sessionWorkspace = cleanInputPath(mapString(session, "workspace"))
 		if workspace == "" {
-			workspace = mapString(session, "workspace")
+			workspace = sessionWorkspace
 		}
 		if connectionID == "" {
 			connectionID = mapString(session, "connection_id")
@@ -92,7 +96,14 @@ func (r *Resolver) Resolve(ctx context.Context, request ResolveRequest) (Resolve
 		return Resolved{}, errorf(422, "workspace_required", "Workspace is required", nil)
 	}
 	if connectionID == "" || connectionID == LocalConnectionID {
-		filesystem, err := NewLocal(LocalOptions{Workspace: workspace, AllowedRoots: r.options.AllowedRoots})
+		var optionalRoots []string
+		if sessionWorkspace != "" {
+			optionalRoots = append(optionalRoots, sessionWorkspace)
+		}
+		if r.options.AllowTempDirs {
+			optionalRoots = append(optionalRoots, localTempRoots()...)
+		}
+		filesystem, err := NewLocal(LocalOptions{Workspace: workspace, AllowedRoots: r.options.AllowedRoots, OptionalRoots: optionalRoots})
 		if err != nil {
 			return Resolved{}, err
 		}
@@ -115,7 +126,14 @@ func (r *Resolver) Resolve(ctx context.Context, request ResolveRequest) (Resolve
 		if err != nil {
 			return Resolved{}, err
 		}
-		filesystem, err := NewRemote(RemoteOptions{Workspace: workspace, AllowedRoots: []string{workspace}, Command: command, StageRoots: r.options.LocalStageRoots})
+		var optionalRoots []string
+		if sessionWorkspace != "" {
+			optionalRoots = append(optionalRoots, sessionWorkspace)
+		}
+		if r.options.AllowTempDirs {
+			optionalRoots = append(optionalRoots, remoteTempRoots()...)
+		}
+		filesystem, err := NewRemote(RemoteOptions{Workspace: workspace, AllowedRoots: []string{workspace}, OptionalRoots: optionalRoots, Command: command, StageRoots: r.options.LocalStageRoots})
 		if err != nil {
 			return Resolved{}, err
 		}
@@ -155,6 +173,13 @@ func (r *Resolver) Resolve(ctx context.Context, request ResolveRequest) (Resolve
 	if idx := strings.Index(workspace, "/.gemini/antigravity"); idx > 0 {
 		roots = append(roots, workspace[:idx+len("/.gemini")])
 	}
+	var optionalRoots []string
+	if sessionWorkspace != "" {
+		optionalRoots = append(optionalRoots, sessionWorkspace)
+	}
+	if r.options.AllowTempDirs {
+		optionalRoots = append(optionalRoots, remoteTempRoots()...)
+	}
 	sshConfig := SSHConfig{
 		Binary: r.options.SSHBinary, Host: mapString(settings, "host"), Alias: mapString(settings, "ssh_config_alias"),
 		Port: mapInt(settings, "port", 22), User: mapString(settings, "user"), IdentityFile: mapString(settings, "identity_file"),
@@ -171,7 +196,7 @@ func (r *Resolver) Resolve(ctx context.Context, request ResolveRequest) (Resolve
 	if err != nil {
 		return Resolved{}, err
 	}
-	filesystem, err := NewRemote(RemoteOptions{Workspace: workspace, AllowedRoots: roots, Command: command, StageRoots: r.options.LocalStageRoots})
+	filesystem, err := NewRemote(RemoteOptions{Workspace: workspace, AllowedRoots: roots, OptionalRoots: optionalRoots, Command: command, StageRoots: r.options.LocalStageRoots})
 	if err != nil {
 		return Resolved{}, err
 	}
@@ -251,10 +276,31 @@ func OpenLocal(path string, allowedRoots []string) (io.ReadCloser, Info, error) 
 	return result.Reader, result.Info, nil
 }
 
+func localTempRoots() []string {
+	var roots []string
+	if dir := strings.TrimSpace(os.TempDir()); dir != "" {
+		roots = append(roots, filepath.Clean(dir))
+	}
+	if runtime.GOOS != "windows" {
+		roots = append(roots, "/tmp", "/var/tmp")
+	}
+	return roots
+}
+
+func remoteTempRoots() []string {
+	return []string{"/tmp", "/var/tmp"}
+}
+
 // IsNotFound reports a normalized targetfs not-found status.
 func IsNotFound(err error) bool {
 	var target *Error
 	return errors.As(err, &target) && target.Status == 404
+}
+
+// IsForbidden reports a normalized targetfs forbidden status.
+func IsForbidden(err error) bool {
+	var target *Error
+	return errors.As(err, &target) && target.Status == 403
 }
 
 var _ = os.ErrNotExist

@@ -30,6 +30,7 @@ import (
 	"astrorder.dev/app-server/internal/attachments"
 	"astrorder.dev/app-server/internal/audio"
 	"astrorder.dev/app-server/internal/auth"
+	"astrorder.dev/app-server/internal/backups"
 	"astrorder.dev/app-server/internal/botgroups"
 	"astrorder.dev/app-server/internal/browser"
 	"astrorder.dev/app-server/internal/capabilities"
@@ -119,20 +120,21 @@ type Options struct {
 	Resolver         *targetfs.Resolver
 	RemoteExecutable connections.RemoteExecutableResolver
 	EventHub         *application.EventHub
-	MemoryService   *memory.Service
-	BotGroups       *botgroups.Service
-	AudioService    *audio.Service
-	BrowserHandler  http.Handler
-	ModelGateway    http.Handler
-	Settings        http.Handler
-	Capabilities    http.Handler
-	Connections     http.Handler
-	Notifications   http.Handler
-	Sessions        http.Handler
-	AgentAPI        http.Handler
-	DynamicOrigins  auth.DynamicOriginLookup
-	DesktopShutdown func()
-	Logger          *slog.Logger
+	MemoryService    *memory.Service
+	BotGroups        *botgroups.Service
+	AudioService     *audio.Service
+	BrowserHandler   http.Handler
+	ModelGateway     http.Handler
+	Settings         http.Handler
+	Capabilities     http.Handler
+	Connections      http.Handler
+	Notifications    http.Handler
+	Sessions         http.Handler
+	AgentAPI         http.Handler
+	Backups          http.Handler
+	DynamicOrigins   auth.DynamicOriginLookup
+	DesktopShutdown  func()
+	Logger           *slog.Logger
 	// NativeSessions receives the callback that lists a Codex session started
 	// outside Astrorder when a hook reports activity for it.
 	NativeSessions interface {
@@ -167,6 +169,7 @@ type api struct {
 	sessions        http.Handler
 	agentAPI        http.Handler
 	reviewRelay     http.Handler
+	backups         http.Handler
 }
 
 // StoreOriginLookup implements auth.DynamicOriginLookup by querying store.Store for
@@ -238,6 +241,7 @@ func NewHandlerChecked(options Options) (http.Handler, error) {
 		resolver = targetfs.NewResolver(targetfs.ResolverOptions{
 			Store:            options.Store,
 			DefaultWorkspace: defaultWS,
+			AllowTempDirs:    true,
 			HelperAssetsDir:  bundledHelperAssets(),
 			LocalStageRoots:  []string{options.Config.StagingDir},
 		})
@@ -367,6 +371,36 @@ func NewHandlerChecked(options Options) (http.Handler, error) {
 		})
 	}
 
+	backupsHandler := options.Backups
+	if backupsHandler == nil && options.Store != nil {
+		agentRestarter, _ := options.Connections.(backups.AgentRestarter)
+		defaultDestDir := ""
+		if options.Config.DatabasePath != "" {
+			if absDB, absErr := filepath.Abs(options.Config.DatabasePath); absErr == nil {
+				defaultDestDir = filepath.Join(filepath.Dir(absDB), "backups")
+			}
+		}
+		if defaultDestDir == "" {
+			if home, homeErr := os.UserHomeDir(); homeErr == nil && home != "" {
+				defaultDestDir = filepath.Join(home, "AstrorderBackups")
+			}
+		}
+		backupSvc := backups.NewService(backups.Options{
+			Store:                 options.Store,
+			Authorizer:            authenticator,
+			Resolver:              resolver,
+			Opener:                files.NativeOpener{},
+			AgentRestarter:        agentRestarter,
+			DefaultWorkspace:      options.Config.DefaultWorkspace,
+			DefaultDestinationDir: defaultDestDir,
+			Logger:                logger,
+		})
+		if options.Context != nil {
+			go backupSvc.RunScheduler(options.Context)
+		}
+		backupsHandler = backupSvc
+	}
+
 	app := &api{
 		draftStore:      options.Store,
 		qr:              newQRLogins(),
@@ -390,6 +424,7 @@ func NewHandlerChecked(options Options) (http.Handler, error) {
 		sessions:        sessionHandler,
 		agentAPI:        agentHandler,
 		reviewRelay:     reviewRelayHandler,
+		backups:         backupsHandler,
 	}
 	if options.BotGroups == nil {
 		app.botGroups = nil
@@ -453,6 +488,10 @@ func (a *api) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 	}
 	if a.reviewRelay != nil && reviewrelay.Matches(request.Method, request.URL.Path) {
 		a.reviewRelay.ServeHTTP(response, request)
+		return
+	}
+	if a.backups != nil && backups.Matches(request.Method, request.URL.Path) {
+		a.backups.ServeHTTP(response, request)
 		return
 	}
 	if a.sessions != nil && sessions.Matches(request.Method, request.URL.Path) {

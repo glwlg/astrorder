@@ -18,6 +18,10 @@ import { MonitorPage } from '../features/monitor/MonitorPage'
 import { SwarmPage } from '../features/monitor/SwarmPage'
 import { PluginsPage } from '../features/plugins/PluginsPage'
 import { AnalyticsPage } from '../features/analytics/AnalyticsPage'
+import { BackupsPage } from '../features/backups/BackupsPage'
+import { AgentAccountsLayout } from '../features/agentAccounts/AgentAccountsLayout'
+import { UnavailablePlatformPage } from '../features/agentAccounts/UnavailablePlatformPage'
+import { accountPlatforms } from '../features/agentAccounts/accountPlatforms'
 import { AstrorderLoader } from '../components/AnimatedStatus'
 import { ShinyText } from '../components/animations/ShinyText'
 import { useShortcutHandlers } from '../features/shortcuts/shortcuts'
@@ -120,6 +124,11 @@ function AuthenticatedApp() {
         <Route path="swarm" element={<SwarmPage />} />
         <Route path="plugins" element={<PluginsPage />} />
         <Route path="analytics" element={<AnalyticsPage />} />
+        <Route path="backups" element={<BackupsPage />} />
+        <Route path="agent-accounts" element={<AgentAccountsLayout />}>
+          {accountPlatforms.map(({ kind, path, Page }) =>
+            <Route key={kind} path={path} element={Page ? <Page /> : <UnavailablePlatformPage kind={kind} />} />)}
+        </Route>
         <Route path="*" element={<Navigate to="/chat" replace />} />
       </Route>
     </Routes>

@@ -478,9 +478,9 @@ func TestAgentApiResolveRuntimeTargetRemoteDefaultsAndOverrides(t *testing.T) {
 	defer st.Close()
 	_, err = st.SaveSSHConnection(ctx, map[string]any{
 		"id":   "remote-1",
-		"host": "192.168.1.100",
+		"host": "192.0.2.100",
 		"port": json.Number("22"),
-		"user": "luwei",
+		"user": "fixture",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -492,7 +492,7 @@ func TestAgentApiResolveRuntimeTargetRemoteDefaultsAndOverrides(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if codexTarget.Ssh.GetCodexExecutable() != "/home/luwei/.vite-plus/bin/codex" {
+	if codexTarget.Ssh.GetCodexExecutable() != "" {
 		t.Fatalf("unexpected codex default: %v", codexTarget.Ssh.GetCodexExecutable())
 	}
 
@@ -501,7 +501,7 @@ func TestAgentApiResolveRuntimeTargetRemoteDefaultsAndOverrides(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if grokTarget.Ssh.GetGrokExecutable() != "/home/luwei/.local/bin/grok" {
+	if grokTarget.Ssh.GetGrokExecutable() != "" {
 		t.Fatalf("unexpected grok default: %v", grokTarget.Ssh.GetGrokExecutable())
 	}
 
@@ -510,16 +510,16 @@ func TestAgentApiResolveRuntimeTargetRemoteDefaultsAndOverrides(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if hermesTarget.Ssh.GetHermesPath() != "/home/luwei/.local/bin/hermes" {
+	if hermesTarget.Ssh.GetHermesPath() != "" {
 		t.Fatalf("unexpected hermes default: %v", hermesTarget.Ssh.GetHermesPath())
 	}
 
 	// with custom hermes override
 	_, err = st.SaveSSHConnection(ctx, map[string]any{
 		"id":          "remote-custom",
-		"host":        "192.168.1.100",
+		"host":        "192.0.2.100",
 		"port":        json.Number("22"),
-		"user":        "luwei",
+		"user":        "fixture",
 		"hermes_path": "/custom/bin/hermes",
 	})
 	if err != nil {
@@ -541,14 +541,14 @@ func TestAgentApiResolveRuntimeTargetRemoteDefaultsAndOverrides(t *testing.T) {
 	if agyTarget.GetRuntime() != sessiondv1.RuntimeKind_RUNTIME_KIND_ANTIGRAVITY_SSH || agyTarget.GetConnectionId() != "remote-1" {
 		t.Fatalf("unexpected remote antigravity target: %+v", agyTarget)
 	}
-	if agyTarget.Ssh.GetAntigravityExecutable() != "/home/luwei/.local/bin/agy" {
+	if agyTarget.Ssh.GetAntigravityExecutable() != "" {
 		t.Fatalf("unexpected antigravity default: %v", agyTarget.Ssh.GetAntigravityExecutable())
 	}
 
-	// user-specific antigravity fallback + RemoteExecutableResolver
+	// missing antigravity executable with and without a resolver
 	_, err = st.SaveSSHConnection(ctx, map[string]any{
 		"id":   "remote-dev",
-		"host": "192.168.1.102",
+		"host": "192.0.2.102",
 		"port": json.Number("22"),
 		"user": "devuser",
 	})
@@ -559,8 +559,8 @@ func TestAgentApiResolveRuntimeTargetRemoteDefaultsAndOverrides(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if devTarget.Ssh.GetAntigravityExecutable() != "/home/devuser/.local/bin/agy" {
-		t.Fatalf("unexpected user fallback: %v", devTarget.Ssh.GetAntigravityExecutable())
+	if devTarget.Ssh.GetAntigravityExecutable() != "" {
+		t.Fatalf("unexpected invented executable: %v", devTarget.Ssh.GetAntigravityExecutable())
 	}
 
 	hResolved := &Handler{options: Options{Store: st, RemoteExecutable: stubAgentAPIRemoteResolver("/opt/agy/bin/agy")}}
@@ -612,8 +612,8 @@ func TestAgentApiRemoteAntigravityMachinesDispatchAndForkLineage(t *testing.T) {
 		"id":        "wsl-1",
 		"host":      "127.0.0.1",
 		"port":      22,
-		"user":      "luwei",
-		"workspace": "/home/luwei/project",
+		"user":      "fixture",
+		"workspace": "/home/fixture/project",
 		"state":     "connected",
 	}); err != nil {
 		t.Fatal(err)
@@ -667,7 +667,7 @@ func TestAgentApiRemoteAntigravityMachinesDispatchAndForkLineage(t *testing.T) {
 		t.Fatalf("unexpected create target: %+v", capture.lastCreate)
 	}
 	opts := capture.lastCreate.GetAntigravity()
-	if opts == nil || opts.Cwd != "/home/luwei/project" || opts.ParentSessionId != nil {
+	if opts == nil || opts.Cwd != "/home/fixture/project" || opts.ParentSessionId != nil {
 		t.Fatalf("unexpected cross-agent antigravity create options: %+v", opts)
 	}
 	stored, err := st.GetSession(ctx, "ssh-antigravity-wsl-1", capture.createdID)
@@ -682,7 +682,7 @@ func TestAgentApiRemoteAntigravityMachinesDispatchAndForkLineage(t *testing.T) {
 		"agent_id":          "ssh-antigravity-wsl-1",
 		"parent_agent_id":   "ssh-antigravity-wsl-1",
 		"parent_session_id": "11111111-1111-4111-8111-111111111111",
-		"workspace":         "/home/luwei/project",
+		"workspace":         "/home/fixture/project",
 	})
 	if err != nil {
 		t.Fatal(err)

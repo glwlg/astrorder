@@ -25,13 +25,13 @@ it('copies every comment with its description and full file location', async () 
 
 it('preserves escaped quotes and braces in a code-comment description', async () => {
   const raw = String.raw`发现问题：
-::code-comment{title="[P1] 不完整的模型返回仍能自动关闭问题" body="模型只返回 {\"status\":\"FIXED\"}、没有任何判断依据时，代码会自行补上“已得到确凿修复”并关闭问题；空对象或 FAILED 状态也会被当成正常的 STILL_OPEN。临时脚本已复现。应严格校验状态和非空依据，不符合契约的结果必须返回 FAILED，保留问题状态。" file="/home/luwei/workspace/OpsCore/app/services/code_review_ai_service.py" start=105 end=110 priority=1}`
+::code-comment{title="[P1] 不完整的模型返回仍能自动关闭问题" body="模型只返回 {\"status\":\"FIXED\"}、没有任何判断依据时，代码会自行补上“已得到确凿修复”并关闭问题；空对象或 FAILED 状态也会被当成正常的 STILL_OPEN。临时脚本已复现。应严格校验状态和非空依据，不符合契约的结果必须返回 FAILED，保留问题状态。" file="/home/fixture/workspace/ExampleProject/app/services/code_review_ai_service.py" start=105 end=110 priority=1}`
   const { comments, cleanText } = extractCodeComments(raw)
   expect(cleanText).toBe('发现问题：')
   expect(comments).toEqual([{
     title: '[P1] 不完整的模型返回仍能自动关闭问题',
     body: '模型只返回 {"status":"FIXED"}、没有任何判断依据时，代码会自行补上“已得到确凿修复”并关闭问题；空对象或 FAILED 状态也会被当成正常的 STILL_OPEN。临时脚本已复现。应严格校验状态和非空依据，不符合契约的结果必须返回 FAILED，保留问题状态。',
-    file: '/home/luwei/workspace/OpsCore/app/services/code_review_ai_service.py',
+    file: '/home/fixture/workspace/ExampleProject/app/services/code_review_ai_service.py',
     start: 105,
     end: 110,
     priority: 1,
@@ -43,7 +43,7 @@ it('preserves escaped quotes and braces in a code-comment description', async ()
   fireEvent.click(screen.getByRole('button', { name: '复制注释' }))
   await waitFor(() => expect(writeText).toHaveBeenCalledWith(
     '### [P1] 不完整的模型返回仍能自动关闭问题\n\n' +
-    '位置：`/home/luwei/workspace/OpsCore/app/services/code_review_ai_service.py:105-110`\n\n' +
+    '位置：`/home/fixture/workspace/ExampleProject/app/services/code_review_ai_service.py:105-110`\n\n' +
     `问题描述：${comments[0].body}`,
   ))
 })

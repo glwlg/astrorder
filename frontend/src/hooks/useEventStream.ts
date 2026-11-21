@@ -247,6 +247,9 @@ export function useEventStream(
           }
         }
         store.applyEvent(event);
+        if (event.type === "agent.connection_choice" && event.cursor > store.cursor) {
+          void queryClient.invalidateQueries({ queryKey: ["astrorder", "bootstrap"] });
+        }
         if (event.type === "resync_required") void refreshGroups();
         const nativeFrame = event.data.frame as { method?: string } | undefined;
         if (

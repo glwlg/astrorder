@@ -1,7 +1,8 @@
 import { chromium, expect } from '@playwright/test'
 import fs from 'node:fs/promises'
 const origin = process.env.ASTRORDER_UPGRADE_TEST_ORIGIN || 'http://127.0.0.1:30001'
-const out = 'C:/Users/luwei/AppData/Local/hermes/cache/scratch/agent-upgrade-fix'
+const out = 'test-results/agent-upgrade'
+await fs.mkdir(out, { recursive: true })
 const browser = await chromium.launch({ executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true })
 try {
  const page = await browser.newPage({viewport:{width:1440,height:1000}})

@@ -49,7 +49,7 @@ describe('MarkdownContent Auto-Link Artifacts', () => {
   })
 
   it('automatically detects backticked windows image path and renders previewable link', () => {
-    const text = '原始文件：`P:\\workspace\\glwlg\\game\\X-TD\\.codex-tmp\\asset-generation\\test_vfx\\raw_taiji_bagua_circle.png`'
+    const text = '原始文件：`P:\\workspace\\example-org\\game\\ExampleGame\\.codex-tmp\\asset-generation\\test_vfx\\raw_taiji_bagua_circle.png`'
     render(
       <MantineProvider>
         <MarkdownContent value={text} />
@@ -62,9 +62,9 @@ describe('MarkdownContent Auto-Link Artifacts', () => {
   })
 
   it('checks a remote session against its own workspace', async () => {
-    const remoteSession = { ...session, id: 'autolink-remote', workspace: '/home/luwei/project', connection_id: 'ssh-debian' }
+    const remoteSession = { ...session, id: 'autolink-remote', workspace: '/home/fixture/project', connection_id: 'ssh-debian' }
     const getRootFiles = vi.spyOn(api, 'getWorkspaceRootFiles').mockResolvedValue({
-      root: '/home/luwei/project',
+      root: '/home/fixture/project',
       items: [{ name: 'remote.md', is_dir: false }],
     })
     render(
@@ -93,7 +93,7 @@ describe('MarkdownContent Auto-Link Artifacts', () => {
   })
 
   it('automatically detects windows installer path with spaces and renders file link', () => {
-    const text = '安装包路径：`P:\\workspace\\glwlg\\ai\\astrorder\\desktop\\release\\Astrorder Setup 0.1.0.exe`'
+    const text = '安装包路径：`P:\\workspace\\example-org\\ai\\astrorder\\desktop\\release\\Astrorder Setup 0.1.0.exe`'
     render(
       <MantineProvider>
         <MarkdownContent value={text} />

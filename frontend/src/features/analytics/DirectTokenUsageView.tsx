@@ -1,8 +1,8 @@
 import { useEffect, useId, useState } from 'react'
-import { Alert, Badge, Button, Group, Paper, Progress, ScrollArea, SegmentedControl, SimpleGrid, Stack, Text, Title } from '@mantine/core'
+import { Alert, Badge, Button, Group, Paper, Progress, ScrollArea, SegmentedControl, Select, SimpleGrid, Stack, Text, Title } from '@mantine/core'
 import { IconRefresh } from '@tabler/icons-react'
 import { useInRouterContext, useNavigate } from 'react-router-dom'
-import { api, type DirectUsageSessionRow, type OcxUsageResponse } from '../../api/client'
+import { api, type DirectUsageSessionRow, type OcxUsageResponse, type UsageServerOption } from '../../api/client'
 import { formatTokens, getModelColor } from './usageFormat'
 import './directTokenUsage.css'
 
@@ -17,7 +17,7 @@ const rangeOptions: Array<{ label: string; value: DirectRange }> = [
 ]
 
 const surfaceOptions: Array<{ label: string; value: DirectSurface }> = [
-  { label: '全部直连', value: 'all' },
+  { label: '全部', value: 'all' },
   { label: 'Antigravity', value: 'antigravity' },
   { label: 'Codex', value: 'codex' },
   { label: 'Grok', value: 'grok' },
@@ -54,6 +54,8 @@ function SessionNavTrigger({ row }: { row: DirectUsageSessionRow }) {
 export function DirectTokenUsageView() {
   const [range, setRange] = useState<DirectRange>('7d')
   const [surface, setSurface] = useState<DirectSurface>('all')
+  const [connectionId, setConnectionId] = useState<string>('all')
+  const [knownServers, setKnownServers] = useState<UsageServerOption[]>([])
   const [revision, setRevision] = useState(0)
   const [data, setData] = useState<OcxUsageResponse | null>(null)
   const [loading, setLoading] = useState(true)
@@ -63,12 +65,21 @@ export function DirectTokenUsageView() {
 
   useEffect(() => {
     let active = true
-    api.getAnalyticsUsage({ range, surface, source: 'direct' })
+    api.getAnalyticsUsage({
+      range,
+      surface,
+      source: 'sessions',
+      ...(connectionId !== 'all' ? { connection_id: connectionId } : {}),
+    })
       .then((result) => {
-        if (active) setData(result)
+        if (!active) return
+        setData(result)
+        if (Array.isArray(result.servers)) {
+          setKnownServers(result.servers)
+        }
       })
       .catch((cause: unknown) => {
-        if (active) setError(cause instanceof Error ? cause.message : '读取直连 Token 统计失败')
+        if (active) setError(cause instanceof Error ? cause.message : '读取会话 Token 统计失败')
       })
       .finally(() => {
         if (active) setLoading(false)
@@ -76,7 +87,7 @@ export function DirectTokenUsageView() {
     return () => {
       active = false
     }
-  }, [range, surface, revision])
+  }, [range, surface, connectionId, revision])
 
   const summary = data?.summary || {}
   const totalTokens = Number(summary.totalTokens || 0)
@@ -92,16 +103,33 @@ export function DirectTokenUsageView() {
   const models = data?.models || []
   const directAgents = data?.directAgents || []
   const directSessions = data?.directSessions || []
+  const activeServers = summary.activeServers !== undefined
+    ? Number(summary.activeServers || 0)
+    : new Set(directAgents.map((a) => a.connectionId).filter(Boolean)).size
+  const selectedServerName = knownServers.find((s) => s.id === connectionId)?.name
+    || directAgents.find((a) => a.connectionId === connectionId)?.connectionName
+    || connectionId
+  const serverOptions = [
+    { label: '全部服务器', value: 'all' },
+    ...knownServers.map((s) => ({ label: s.name, value: s.id })),
+  ]
   const maxDayTokens = Math.max(1, ...days.map((d) => Number(d.totalTokens || 0)))
+
+  const handleSelectServer = (next: string) => {
+    if (!next || next === connectionId) return
+    setLoading(true)
+    setError('')
+    setConnectionId(next)
+  }
 
   return (
     <ScrollArea className="direct-usage-scroll" type="auto">
       <div className="direct-usage-content">
         <Group justify="space-between" align="flex-start" gap="md" wrap="wrap">
           <div>
-            <Title order={2} size="h3">直连 Agent Token 统计</Title>
+            <Title order={2} size="h3">会话 Token 统计</Title>
             <Text size="sm" c="dimmed" mt={4}>
-              自动汇总未经过模型网关的直连 Agent Token 消耗（含本机与 SSH 远端原生会话步骤统计），已接入网关的流量不会重复计入。
+              汇总本机与各 SSH 服务器的 Agent 会话 Token 消耗（含原生步骤级统计），支持查看全部服务器总和或按单台服务器筛选。
             </Text>
           </div>
           <Button
@@ -131,6 +159,31 @@ export function DirectTokenUsageView() {
             data={rangeOptions}
             aria-label="统计时间范围"
           />
+          {knownServers.length > 0 && (
+            serverOptions.length <= 5 ? (
+              <SegmentedControl
+                size="xs"
+                value={connectionId}
+                onChange={handleSelectServer}
+                data={serverOptions}
+                aria-label="服务器筛选"
+              />
+            ) : (
+              <Select
+                size="xs"
+                w={180}
+                value={connectionId}
+                onChange={(val) => {
+                  if (val) handleSelectServer(val)
+                }}
+                data={serverOptions}
+                allowDeselect={false}
+                searchable
+                aria-label="服务器筛选"
+                comboboxProps={{ withinPortal: true }}
+              />
+            )
+          )}
           <SegmentedControl
             size="xs"
             value={surface}
@@ -140,7 +193,7 @@ export function DirectTokenUsageView() {
               setSurface(val as DirectSurface)
             }}
             data={surfaceOptions}
-            aria-label="直连 Agent 类型"
+            aria-label="Agent 类型"
           />
         </Group>
 
@@ -151,7 +204,7 @@ export function DirectTokenUsageView() {
         )}
 
         {loading ? (
-          <Text role="status" size="sm" c="dimmed">正在读取直连 Token 统计…</Text>
+          <Text role="status" size="sm" c="dimmed">正在读取会话 Token 统计…</Text>
         ) : error ? (
           <Alert color="red">{error}</Alert>
         ) : data && (
@@ -173,15 +226,21 @@ export function DirectTokenUsageView() {
                 sub={`缓存读取 ${formatTokens(cacheReadTokens)}`}
               />
               <MetricCard
-                label="活跃直连会话"
+                label="活跃会话"
                 value={zhInt.format(activeSessions)}
-                sub={`${zhInt.format(activeAgents)} 个直连 Agent 节点`}
+                sub={
+                  connectionId === 'all'
+                    ? (activeServers > 0
+                        ? `${zhInt.format(activeServers)} 台服务器 · ${zhInt.format(activeAgents)} 个 Agent`
+                        : `${zhInt.format(activeAgents)} 个 Agent 节点`)
+                    : `${selectedServerName} · ${zhInt.format(activeAgents)} 个 Agent`
+                }
               />
             </SimpleGrid>
 
             {totalTokens === 0 && requests === 0 ? (
               <Paper withBorder radius="md" p="xl">
-                <Text size="sm" c="dimmed" ta="center">所选时间与筛选范围内暂无未走网关的直连 Token 消耗</Text>
+                <Text size="sm" c="dimmed" ta="center">所选时间与筛选范围内暂无会话 Token 消耗</Text>
               </Paper>
             ) : (
               <>
@@ -243,16 +302,29 @@ export function DirectTokenUsageView() {
                   </Paper>
 
                   <Paper withBorder radius="md" p="md" className="direct-usage-panel">
-                    <Title order={3} size="h5" mb="sm">直连 Agent / 节点分布</Title>
+                    <Title order={3} size="h5" mb="sm">服务器 / Agent 分布</Title>
                     <Stack gap="sm">
                       {directAgents.map((ag) => {
                         const share = Math.max(0, Math.min(100, Number(ag.shareRatio || 0) * 100))
+                        const isFilteredServer = connectionId === ag.connectionId
                         return (
                           <div key={ag.agentId}>
                             <Group justify="space-between" gap="xs" wrap="nowrap">
                               <Group gap={8} wrap="nowrap" style={{ minWidth: 0 }}>
                                 <Text size="sm" fw={500} truncate>{ag.name}</Text>
-                                <Badge size="xs" variant="light">{ag.connectionName}</Badge>
+                                {ag.connectionId ? (
+                                  <button
+                                    type="button"
+                                    className="direct-usage-server-chip"
+                                    aria-pressed={isFilteredServer}
+                                    onClick={() => handleSelectServer(isFilteredServer ? 'all' : ag.connectionId)}
+                                    title={isFilteredServer ? '点击恢复查看全部服务器总和' : `仅查看 ${ag.connectionName} 的会话统计`}
+                                  >
+                                    {ag.connectionName}
+                                  </button>
+                                ) : (
+                                  <Badge size="xs" variant="light">{ag.connectionName}</Badge>
+                                )}
                               </Group>
                               <Text size="sm" fw={600} className="direct-usage-mono" style={{ flexShrink: 0 }}>
                                 {formatTokens(ag.totalTokens)} ({share.toFixed(1)}%)
@@ -272,7 +344,7 @@ export function DirectTokenUsageView() {
                 {directSessions.length > 0 && (
                   <Paper withBorder radius="md" p="md" className="direct-usage-panel">
                     <Group justify="space-between" mb="sm">
-                      <Title order={3} size="h5" id={sessionsHeadingId}>直连会话消耗排行</Title>
+                      <Title order={3} size="h5" id={sessionsHeadingId}>会话消耗排行</Title>
                       <Text size="xs" c="dimmed">前 {directSessions.length} 个高消耗会话</Text>
                     </Group>
                     <div
@@ -285,7 +357,7 @@ export function DirectTokenUsageView() {
                         <thead>
                           <tr>
                             <th scope="col">会话</th>
-                            <th scope="col">Agent / 节点</th>
+                            <th scope="col">服务器 / Agent</th>
                             <th scope="col">模型</th>
                             <th scope="col" className="direct-usage-num">步数</th>
                             <th scope="col" className="direct-usage-num">输入 / 缓存 / 输出</th>

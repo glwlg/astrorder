@@ -15,7 +15,7 @@ func TestRealCanonicalHermesHistoryReadOnly(t *testing.T) {
 	if sid == "" {
 		t.Skip("explicit native history identity required")
 	}
-	a, err := NewRemoteHermesFactory(nil)("history-read-only", map[string]any{"host": "192.168.1.100", "user": "luwei", "port": 22, "profile_name": "default", "display_name": "Debian"})
+	a, err := NewRemoteHermesFactory(nil)("history-read-only", map[string]any{"host": "192.0.2.100", "user": "fixture", "port": 22, "profile_name": "default", "display_name": "Debian"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,10 +44,10 @@ func TestRealHermesControlFromSavedSSHSettings(t *testing.T) {
 	if os.Getenv("ASTRORDER_TEST_REAL_SSH") != "1" {
 		t.Skip("opt-in native SSH handshake")
 	}
-	for _, host := range []string{"192.168.1.100", "127.0.0.1"} {
+	for _, host := range []string{"192.0.2.100", "127.0.0.1"} {
 		t.Run(host, func(t *testing.T) {
-			name := map[string]string{"192.168.1.100": "Debian", "127.0.0.1": "WSL"}[host]
-			a, err := NewRemoteHermesFactory(nil)("connection-probe", map[string]any{"host": host, "user": "luwei", "port": 22, "profile_name": "default", "display_name": name})
+			name := map[string]string{"192.0.2.100": "Debian", "127.0.0.1": "WSL"}[host]
+			a, err := NewRemoteHermesFactory(nil)("connection-probe", map[string]any{"host": host, "user": "fixture", "port": 22, "profile_name": "default", "display_name": name})
 			if err != nil {
 				t.Fatal(err)
 			}

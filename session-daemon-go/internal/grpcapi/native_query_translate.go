@@ -119,7 +119,7 @@ func translateNativeQuery(request *sessiondv1.NativeQueryRequest) (core.Request,
 		}
 		descriptor := query.Descriptor().Fields().ByName(field)
 		value := query.Get(descriptor)
-		if spec.required[field] && (!query.Has(descriptor) || descriptor.Kind() == protoreflect.StringKind && value.String() == "" || descriptor.Kind() == protoreflect.Uint32Kind && value.Uint() == 0) {
+		if spec.required[field] && (!query.Has(descriptor) || isRequiredQueryFieldEmpty(descriptor, value)) {
 			return invalid()
 		}
 		if !query.Has(descriptor) {
@@ -138,8 +138,14 @@ func translateNativeQuery(request *sessiondv1.NativeQueryRequest) (core.Request,
 			params[key] = value.String()
 		case protoreflect.BoolKind:
 			params[key] = value.Bool()
+		case protoreflect.Int32Kind:
+			params[key] = int32(value.Int())
+		case protoreflect.Int64Kind:
+			params[key] = value.Int()
 		case protoreflect.Uint32Kind:
 			params[key] = uint32(value.Uint())
+		case protoreflect.Uint64Kind:
+			params[key] = value.Uint()
 		case protoreflect.MessageKind:
 			nullable := value.Message().Interface().(*sessiondv1.NullableString)
 			switch state := nullable.State.(type) {
@@ -188,6 +194,19 @@ func translateNativeQuery(request *sessiondv1.NativeQueryRequest) (core.Request,
 		return core.Request{}, status.Error(codes.ResourceExhausted, "native query exceeds business limit")
 	}
 	return core.Request{AgentType: kind, Action: "runtime.request", Fields: fields}, nil
+}
+
+func isRequiredQueryFieldEmpty(descriptor protoreflect.FieldDescriptor, value protoreflect.Value) bool {
+	switch descriptor.Kind() {
+	case protoreflect.StringKind:
+		return value.String() == ""
+	case protoreflect.Int32Kind, protoreflect.Int64Kind:
+		return value.Int() == 0
+	case protoreflect.Uint32Kind, protoreflect.Uint64Kind:
+		return value.Uint() == 0
+	default:
+		return false
+	}
 }
 
 func decodeQueryJSON(native *sessiondv1.NativeJson) (any, error) {

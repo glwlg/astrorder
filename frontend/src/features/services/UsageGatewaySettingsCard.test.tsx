@@ -18,8 +18,8 @@ vi.mock('../../api/client', () => ({
 
 const gatewayConfig = {
   gateway_type: 'magpie',
-  management_url: 'http://192.168.1.11:3430',
-  inference_url: 'http://192.168.1.11:3425/v1',
+  management_url: 'http://192.0.2.11:3430',
+  inference_url: 'http://192.0.2.11:3425/v1',
   target_overrides: {},
   masked_key: 'abc...wxyz',
   masked_management_key: '',

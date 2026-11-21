@@ -9,14 +9,14 @@ func TestRenderHermesConfigUpdatesExistingProvider(t *testing.T) {
 	existing := `model:
   default: group/luozhi
   provider: magpie
-  base_url: "http://192.168.1.100:3425/v1"
+  base_url: "http://192.0.2.100:3425/v1"
 providers:
   ocx:
     name: OCX
-    base_url: "https://llm.651971564.xyz/v1"
+    base_url: "https://llm.example.com/v1"
   magpie:
     name: magpie
-    base_url: "http://192.168.1.100:3425/v1"
+    base_url: "http://192.0.2.100:3425/v1"
     api_key: "old-key"
 `
 	bindings := map[string]map[string]string{
@@ -35,7 +35,7 @@ providers:
 		t.Fatalf("expected updated api_key in result, got:\n%s", result)
 	}
 	// model.base_url should also be updated since model.provider is magpie
-	if strings.Contains(result, `base_url: "http://192.168.1.100:3425/v1"`) {
+	if strings.Contains(result, `base_url: "http://192.0.2.100:3425/v1"`) {
 		t.Fatalf("old base_url should not be present, got:\n%s", result)
 	}
 }
@@ -44,11 +44,11 @@ func TestRenderHermesConfigUpdatesModelBaseURL(t *testing.T) {
 	existing := `model:
   default: group/luozhi
   provider: magpie
-  base_url: "http://192.168.1.100:3425/v1"
+  base_url: "http://192.0.2.100:3425/v1"
 providers:
   magpie:
     name: magpie
-    base_url: "http://192.168.1.100:3425/v1"
+    base_url: "http://192.0.2.100:3425/v1"
 `
 	bindings := map[string]map[string]string{
 		"magpie": {
@@ -78,13 +78,13 @@ func TestRenderHermesConfigInsertsUnderProvidersNotAtEnd(t *testing.T) {
 providers:
   ocx:
     name: OCX
-    base_url: "https://llm.651971564.xyz/v1"
+    base_url: "https://llm.example.com/v1"
 _left_core_installed:
   - homeassistant
 `
 	bindings := map[string]map[string]string{
 		"magpie": {
-			"base_url": "http://192.168.1.100:3425/v1",
+			"base_url": "http://192.0.2.100:3425/v1",
 			"api_key":  "test-key",
 		},
 	}

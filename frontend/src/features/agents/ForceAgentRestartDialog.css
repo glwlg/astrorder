@@ -1,0 +1,20 @@
+.force-agent-restart-dialog {
+  box-sizing: border-box;
+  width: min(26rem, calc(100% - 2rem));
+  padding: var(--mantine-spacing-lg);
+  color: var(--mantine-color-text);
+  background: var(--mantine-color-body);
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-md);
+  box-shadow: var(--mantine-shadow-lg);
+}
+
+.force-agent-restart-dialog:modal {
+  overscroll-behavior: contain;
+}
+
+.force-agent-restart-dialog::backdrop {
+  overflow: hidden;
+  overscroll-behavior: contain;
+  background: rgb(0 0 0 / 45%);
+}

@@ -192,7 +192,7 @@ func TestRemoteExecutableForwardingAndNilDefault(t *testing.T) {
 		}
 	})
 
-	t.Run("nil_default_falls_back_without_ssh_probe", func(t *testing.T) {
+	t.Run("no_resolver_leaves_executable_unset", func(t *testing.T) {
 		st := prepareStore(t)
 		cfg := testConfig()
 		cfg.DefaultWorkspace = "C:/work"
@@ -208,7 +208,7 @@ func TestRemoteExecutableForwardingAndNilDefault(t *testing.T) {
 		fakeDaemon.mu.Unlock()
 
 		rec := request(t, handler, http.MethodPost, "/api/v1/sessions",
-			strings.NewReader(`{"agent_id":"ssh-antigravity-wsl-dev","title":"Fallback Agy"}`),
+			strings.NewReader(`{"agent_id":"ssh-antigravity-wsl-dev","title":"Agy"}`),
 			map[string]string{"Authorization": "Bearer browser-secret", "Origin": "http://testserver"})
 		if rec.Code != http.StatusOK {
 			t.Fatalf("sessions create with nil RemoteExecutable = %d %s", rec.Code, rec.Body.String())
@@ -219,11 +219,11 @@ func TestRemoteExecutableForwardingAndNilDefault(t *testing.T) {
 		fakeDaemon.mu.Unlock()
 
 		if len(seen) == 0 {
-			t.Fatal("expected daemon call with fallback executable")
+			t.Fatal("expected daemon call")
 		}
 		for _, exe := range seen {
-			if exe != "/home/dev/.local/bin/agy" {
-				t.Fatalf("expected fallback /home/dev/.local/bin/agy, got %q", exe)
+			if exe != "" {
+				t.Fatalf("expected unset executable, got %q", exe)
 			}
 		}
 	})

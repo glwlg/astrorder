@@ -499,7 +499,7 @@ func TestApplyFrameIsRegisteredAtomicContiguousAndReopenSafe(t *testing.T) {
 
 func assertCanonicalSchema(ctx context.Context, t *testing.T, st *Store) error {
 	t.Helper()
-	wantTables := []string{"agent_connection_choices", "agent_invocation_usage", "agents", "attachments", "commands", "connection_history", "daemon_checkpoints", "delegation_edges", "delegation_operations", "draft_shelves", "events", "messages", "projects", "review_relay_bindings", "review_relay_runs", "sessions", "ssh_connections", "tasks", "token_metrics", "workspace_preferences"}
+	wantTables := []string{"agent_connection_choices", "agent_invocation_usage", "agents", "attachments", "backup_jobs", "backup_versions", "commands", "connection_history", "daemon_checkpoints", "delegation_edges", "delegation_operations", "draft_shelves", "events", "messages", "projects", "review_relay_bindings", "review_relay_runs", "sessions", "ssh_connections", "tasks", "token_metrics", "workspace_preferences"}
 	rows, err := st.QueryRows(ctx, "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
 	if err != nil {
 		return err
@@ -513,7 +513,7 @@ func assertCanonicalSchema(ctx context.Context, t *testing.T, st *Store) error {
 	}
 	wantIndices := []string{
 		"ix_agent_invocation_usage_created_at",
-		"ix_agents_connection_id", "ix_agents_source_id", "ix_commands_agent_id", "ix_commands_session_id",
+		"ix_agents_connection_id", "ix_agents_source_id", "ix_backup_jobs_next_run_at", "ix_backup_versions_job_id", "ix_commands_agent_id", "ix_commands_session_id",
 		"ix_connection_history_connection_id", "ix_delegation_edges_parent", "ix_delegation_operations_caller",
 		"ix_events_agent_id", "ix_events_session_id", "ix_messages_agent_id",
 		"ix_messages_session_id", "ix_projects_agent_id", "ix_projects_connection_id", "ix_projects_source_id",
@@ -537,6 +537,7 @@ func assertCanonicalSchema(ctx context.Context, t *testing.T, st *Store) error {
 	for table, defaults := range map[string]map[string]string{
 		"sessions":              {"ephemeral": "'0'", "handoff_context_consumed": "'0'"},
 		"review_relay_bindings": {"enabled": "'1'"},
+		"backup_jobs":           {"schedule_enabled": "'0'"},
 	} {
 		columns, err := st.QueryRows(ctx, "PRAGMA table_info("+table+")")
 		if err != nil {

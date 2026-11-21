@@ -1,9 +1,9 @@
 import { Menu } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { IconCopy, IconExternalLink, IconFileText } from '@tabler/icons-react'
+import { IconCopy, IconDownload, IconExternalLink, IconFileText } from '@tabler/icons-react'
 import { request } from '../api/client'
 import type { Session } from '../domain/types'
-import { fileDesktop } from '../features/sidecar/fileTransfer'
+import { downloadFile, fileDesktop } from '../features/sidecar/fileTransfer'
 
 export type MarkdownLinkMenuTarget = {
   x: number
@@ -38,6 +38,15 @@ async function openFile(path: string, session: Session | null | undefined) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ path: localPath, action: 'open' }),
   })
+}
+
+function rawDownloadTarget(path: string, session: Session | null | undefined): { url: string; filename: string } {
+  const cleanPath = path.replace(/:\d+(?::\d+)?$/, '')
+  const filename = cleanPath.split(/[/\\]/).filter(Boolean).pop() || 'download'
+  const query = new URLSearchParams({ path: cleanPath, download: '1' })
+  if (session?.id) query.set('session_id', session.id)
+  if (session?.connection_id) query.set('connection_id', session.connection_id)
+  return { url: `/api/v1/files/raw?${query.toString()}`, filename }
 }
 
 export function MarkdownLinkMenu({
@@ -93,9 +102,20 @@ export function MarkdownLinkMenu({
             在默认浏览器中打开
           </Menu.Item>
         ) : (
-          <Menu.Item leftSection={<IconFileText size={14} />} onClick={handleFile}>
-            用系统默认应用打开
-          </Menu.Item>
+          <>
+            <Menu.Item leftSection={<IconFileText size={14} />} onClick={handleFile}>
+              用系统默认应用打开
+            </Menu.Item>
+            <Menu.Item
+              leftSection={<IconDownload size={14} />}
+              onClick={() => {
+                const { url, filename } = rawDownloadTarget(target.value, session)
+                void downloadFile(url, filename)
+              }}
+            >
+              下载到本地
+            </Menu.Item>
+          </>
         )}
         <Menu.Item leftSection={<IconCopy size={14} />} onClick={() => {
           if (!navigator.clipboard?.writeText) {

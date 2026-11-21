@@ -3,7 +3,7 @@ import fs from 'node:fs/promises'
 const output = 'test-results/mobile-parity/navigation-diagnostic.json'
 const records = []
 const save = async row => { records.push(row); await fs.writeFile(output, JSON.stringify(records, null, 2)) }
-const context = await chromium.launchPersistentContext('C:/Users/luwei/AppData/Local/hermes/cache/astrorder-mobile-reference-browser', { executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true, viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
+const context = await chromium.launchPersistentContext('test-results/mobile-reference-browser', { executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true, viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
 try {
   const page = await context.newPage()
   page.setDefaultTimeout(8000)

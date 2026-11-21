@@ -196,6 +196,10 @@ func (s *Service) RemoveSkill(ctx context.Context, targetID, name string) (*Skil
 	if target == nil {
 		return nil, envtarget.Errorf(404, "%s 上没有技能 %s", env.Target().Name, name)
 	}
+	if strings.HasPrefix(target.Source, "antigravity-plugin:") {
+		pluginName := strings.TrimPrefix(target.Source, "antigravity-plugin:")
+		return nil, envtarget.Errorf(422, "技能 %s 属于 Antigravity 插件 %s，请在插件页停用或卸载该插件", name, pluginName)
+	}
 	result := &SkillRemoveResult{TargetID: targetID, Skill: name}
 	if asMap(asMap(sn.lock["skills"])[name]) != nil {
 		if _, ok := env.Which(ctx, "npx"); !ok {
@@ -218,6 +222,9 @@ func (s *Service) RemoveSkill(ctx context.Context, targetID, name string) (*Skil
 	stamp := time.Now().UTC().Format("20060102-150405")
 	archived := 0
 	for _, location := range left[name] {
+		if location.readOnly {
+			continue
+		}
 		dir := path.Dir(location.path)
 		if hiddenSegment(strings.TrimPrefix(dir, location.root+"/")) {
 			continue
@@ -241,7 +248,11 @@ func (s *Service) RemoveSkill(ctx context.Context, targetID, name string) (*Skil
 	return result, nil
 }
 
-type skillLocation struct{ path, root string }
+type skillLocation struct {
+	path     string
+	root     string
+	readOnly bool
+}
 
 // discoverSkillsDetailed maps a skill name to every SKILL.md that defines it.
 func (sn *snapshot) discoverSkillsDetailed(ctx context.Context) (map[string][]skillLocation, error) {
@@ -266,7 +277,16 @@ func (sn *snapshot) discoverSkillsDetailed(ctx context.Context) (map[string][]sk
 			continue
 		}
 		name, _ := parseFrontMatter(hit.Head, path.Base(path.Dir(hit.Path)))
-		out[name] = append(out[name], skillLocation{hit.Path, best})
+		out[name] = append(out[name], skillLocation{path: hit.Path, root: best})
+	}
+	for _, plg := range sn.discoverAntigravityPlugins(ctx) {
+		if !plg.Enabled {
+			continue
+		}
+		for _, hit := range plg.Skills {
+			name, _ := parseFrontMatter(hit.Head, path.Base(path.Dir(hit.Path)))
+			out[name] = append(out[name], skillLocation{path: hit.Path, root: plg.Path + "/skills", readOnly: true})
+		}
 	}
 	for name := range out {
 		sort.Slice(out[name], func(i, j int) bool { return out[name][i].path < out[name][j].path })

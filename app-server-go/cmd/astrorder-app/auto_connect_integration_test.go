@@ -24,11 +24,7 @@ func TestAutoConnectAfterPrivateDaemonRestart(t *testing.T) {
 	if executable == "" {
 		t.Skip("requires a private daemon candidate")
 	}
-	root, err := os.MkdirTemp("C:/Users/luwei/AppData/Local/hermes/cache/scratch", "auto-connect-native-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(root)
+	root := t.TempDir()
 	ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
 	defer cancel()
 	lis, err := net.Listen("tcp", "127.0.0.1:0")

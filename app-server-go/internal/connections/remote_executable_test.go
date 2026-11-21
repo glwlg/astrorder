@@ -177,7 +177,7 @@ func TestRemoteGrokRestartResolvesBeforeAttach(t *testing.T) {
 }
 
 func TestRemoteAntigravityConnectResolvesExecutableAndHandlesPreUpdateDaemon(t *testing.T) {
-	resolver := &recordingExecutableResolver{results: map[string]string{"antigravity": "/home/luwei/.local/bin/agy"}}
+	resolver := &recordingExecutableResolver{results: map[string]string{"antigravity": "/home/fixture/.local/bin/agy"}}
 	server := &fakeDaemonService{}
 	handler, st := remoteExecutableFixture(t, server, resolver)
 	w := httptest.NewRecorder()
@@ -192,7 +192,7 @@ func TestRemoteAntigravityConnectResolvesExecutableAndHandlesPreUpdateDaemon(t *
 	if req == nil || req.Target.GetRuntime() != pb.RuntimeKind_RUNTIME_KIND_ANTIGRAVITY_SSH || req.Target.GetConnectionId() != "saved" {
 		t.Fatalf("attach target identity changed: %v", req.GetTarget())
 	}
-	if req.Target.Ssh.GetAntigravityExecutable() != "/home/luwei/.local/bin/agy" {
+	if req.Target.Ssh.GetAntigravityExecutable() != "/home/fixture/.local/bin/agy" {
 		t.Fatalf("resolved antigravity executable missing from attach target: %v", req.Target.Ssh)
 	}
 	if req.Session.GetSessionId() != "probe-antigravity-saved" || req.Session.GetConnectionId() != "saved" || !req.RuntimeControl {
@@ -363,9 +363,9 @@ func TestNativeRemoteExecutableResolverUsesExplicitPathWithoutProbe(t *testing.T
 		t.Fatalf("explicit path: path=%q err=%v", path, err)
 	}
 	agyPath, err := resolver.Resolve(context.Background(), "antigravity", map[string]any{
-		"settings": map[string]any{"host": "private-fixture.invalid", "antigravity_executable": "/home/luwei/.local/bin/agy"},
+		"settings": map[string]any{"host": "private-fixture.invalid", "antigravity_executable": "/home/fixture/.local/bin/agy"},
 	})
-	if err != nil || agyPath != "/home/luwei/.local/bin/agy" {
+	if err != nil || agyPath != "/home/fixture/.local/bin/agy" {
 		t.Fatalf("explicit antigravity path: path=%q err=%v", agyPath, err)
 	}
 	if _, err := os.Stat(argvFile); !os.IsNotExist(err) {

@@ -121,7 +121,7 @@ export function OpenVikingSettingsCard() {
         <Group grow align="flex-end">
           <TextInput
             label="OpenViking 服务端地址"
-            placeholder="http://192.168.1.100:1933"
+            placeholder="http://localhost:1933"
             value={url}
             onChange={(e) => setUrl(e.currentTarget.value)}
           />

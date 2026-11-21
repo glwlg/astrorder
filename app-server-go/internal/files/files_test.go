@@ -159,6 +159,74 @@ func TestFilesHTTPRejectsScopeEscapeAndInvalidJSON(t *testing.T) {
 	}
 }
 
+func TestFilesHTTPAllowsTempDirsAndSkipsForbiddenInExists(t *testing.T) {
+	base := t.TempDir()
+	ws := filepath.Join(base, "workspace")
+	outside := filepath.Join(base, "outside.txt")
+	inWs := filepath.Join(ws, "note.txt")
+	if err := os.MkdirAll(ws, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(inWs, []byte("in-ws"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(outside, []byte("outside"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Even when strict scope rejects `outside`, /api/v1/files/exists skips forbidden entries
+	//    instead of failing the entire batch containing valid workspace files.
+	strictHandler := testHandler(ws, fakeStore{}, nil, nil)
+	existsBody := `{"workspace":` + quote(ws) + `,"paths":[` + quote(outside) + `,` + quote(inWs) + `]}`
+	res := call(t, strictHandler, http.MethodPost, "/api/v1/files/exists", strings.NewReader(existsBody))
+	var existsResp struct {
+		Existing []string `json:"existing"`
+	}
+	if res.Code != 200 || json.Unmarshal(res.Body.Bytes(), &existsResp) != nil || !reflect.DeepEqual(existsResp.Existing, []string{inWs}) {
+		t.Fatalf("mixed exists failed: %d %s", res.Code, res.Body.String())
+	}
+
+	// 2. When AllowTempDirs is enabled (matching production httpapi), files in os.TempDir()
+	//    work across /api/v1/files/exists, /api/v1/files/tree, and /api/v1/files/raw.
+	tmpDir, err := os.MkdirTemp("", "astrorder-http-temp-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(tmpDir) })
+	tmpReport := filepath.Join(tmpDir, "temp-report.txt")
+	if err := os.WriteFile(tmpReport, []byte("temp-report-body"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	tempResolver := targetfs.NewResolver(targetfs.ResolverOptions{
+		Store:            fakeStore{},
+		DefaultWorkspace: ws,
+		AllowedRoots:     []string{ws},
+		AllowTempDirs:    true,
+		LocalStageRoots:  []string{ws},
+	})
+	tempHandler := NewHandler(Options{Authorizer: allowBrowser{}, Resolver: tempResolver, StagingRoot: filepath.Join(ws, "stage")})
+
+	existsTempBody := `{"workspace":` + quote(ws) + `,"paths":[` + quote(tmpReport) + `]}`
+	res = call(t, tempHandler, http.MethodPost, "/api/v1/files/exists", strings.NewReader(existsTempBody))
+	var tempExistsResp struct {
+		Existing []string `json:"existing"`
+	}
+	if res.Code != 200 || json.Unmarshal(res.Body.Bytes(), &tempExistsResp) != nil || !reflect.DeepEqual(tempExistsResp.Existing, []string{tmpReport}) {
+		t.Fatalf("temp exists failed: %d %s", res.Code, res.Body.String())
+	}
+
+	res = call(t, tempHandler, http.MethodGet, "/api/v1/files/tree?depth=2&path="+queryEscape(tmpDir), nil)
+	if res.Code != 200 || !strings.Contains(res.Body.String(), `"temp-report.txt"`) {
+		t.Fatalf("temp tree failed: %d %s", res.Code, res.Body.String())
+	}
+
+	res = call(t, tempHandler, http.MethodGet, "/api/v1/files/raw?download=true&path="+queryEscape(tmpReport), nil)
+	if res.Code != 200 || res.Body.String() != "temp-report-body" {
+		t.Fatalf("temp raw failed: %d %q", res.Code, res.Body.String())
+	}
+}
+
 func testHandler(root string, store fakeStore, publisher Publisher, opener FileOpener) http.Handler {
 	resolver := targetfs.NewResolver(targetfs.ResolverOptions{Store: store, DefaultWorkspace: root, AllowedRoots: []string{root}, LocalStageRoots: []string{root}})
 	return NewHandler(Options{Authorizer: allowBrowser{}, Resolver: resolver, Publisher: publisher, Opener: opener, StagingRoot: filepath.Join(root, "stage")})

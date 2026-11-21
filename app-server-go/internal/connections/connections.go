@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"astrorder.dev/app-server/internal/agyaccounts"
 	"astrorder.dev/app-server/internal/auth"
 	"astrorder.dev/app-server/internal/daemonclient"
 	"astrorder.dev/app-server/internal/store"
@@ -25,6 +26,7 @@ import (
 // Publisher broadcasts business events.
 type Publisher interface {
 	Publish(ctx context.Context, eventType string, payload map[string]any) error
+	PublishCommitted(events []store.Event)
 }
 
 // VersionExecutor executes version queries against agent binaries or SSH.
@@ -143,6 +145,7 @@ type Handler struct {
 	hooks          HookInstaller
 	discovery      *discoveryCache
 	restoreMu      sync.Mutex
+	agyVault       *agyaccounts.Vault
 	autoOnce       sync.Once
 	recovery       sessionRecovery
 	upgradeMu      sync.Mutex
@@ -179,6 +182,7 @@ func NewHandler(opts Options) (*Handler, error) {
 		upgradeContext: upgradeContext,
 		upgradeCancel:  upgradeCancel,
 		store:          opts.Store,
+		agyVault:       agyaccounts.New(opts.Store.Path() + ".agy-accounts"),
 		client:         opts.Client,
 		authorizer:     opts.Authorizer,
 		publisher:      opts.Publisher,
@@ -195,6 +199,9 @@ func NewHandler(opts Options) (*Handler, error) {
 // Matches checks if the method and path match the connections/environments/agents routes.
 func Matches(method, path string) bool {
 	clean := strings.TrimRight(path, "/")
+	if matchesAgyAccounts(clean) {
+		return true
+	}
 	if clean == "/api/v1/agents" {
 		return method == http.MethodGet
 	}
@@ -340,12 +347,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimRight(r.URL.Path, "/")
 	// Serialize user connection changes with automatic reconciliation so a
 	// confirmed disconnect cannot be overtaken by an already queued attach.
-	if r.Method != http.MethodGet && (strings.HasPrefix(path, "/api/v1/connections/") ||
+	if r.Method != http.MethodGet && (path == agyAccountsPath || strings.HasPrefix(path, "/api/v1/connections/") ||
 		strings.HasPrefix(path, "/api/v1/environments/") && strings.Contains(path, "/agents/")) {
 		h.restoreMu.Lock()
 		defer h.restoreMu.Unlock()
 	}
 	switch {
+	case matchesAgyAccounts(path):
+		h.handleAgyAccounts(w, r, path)
 	// Agents
 	case r.Method == http.MethodGet && path == "/api/v1/agents":
 		h.handleListAgents(w, r)
@@ -657,14 +666,60 @@ func (h *Handler) handleEnvironmentAgentAction(w http.ResponseWriter, r *http.Re
 	connID := parts[3]
 	kind := parts[5]
 	action := parts[6]
-	if kind != "hermes" && kind != "codex" && kind != "grok" && kind != "antigravity" {
-		writeError(w, http.StatusUnprocessableEntity, "invalid_kind", "Unsupported agent kind")
+	var options struct {
+		ConfirmActive bool `json:"confirm_active"`
+	}
+	if action == "restart" && r.Body != nil {
+		body := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024))
+		body.DisallowUnknownFields()
+		if err := body.Decode(&options); err != io.EOF {
+			if err != nil || body.Decode(new(any)) != io.EOF {
+				writeError(w, http.StatusUnprocessableEntity, "invalid_restart_options", "重启确认参数无效。")
+				return
+			}
+		}
+	}
+	if err := h.changeEnvironmentAgent(r.Context(), connID, kind, action, options.ConfirmActive); err != nil {
+		writeError(w, err.status, err.code, err.detail)
 		return
+	}
+	items, err := h.environmentSnapshot(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "store_error", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+type environmentActionError struct {
+	status int
+	code   string
+	detail string
+}
+
+func (e *environmentActionError) Error() string { return e.detail }
+
+// RestartEnvironmentAgent applies the same runtime control as a manual restart
+// from the environments page, without fetching an unrelated environment list.
+func (h *Handler) RestartEnvironmentAgent(ctx context.Context, connID, kind string) error {
+	h.restoreMu.Lock()
+	defer h.restoreMu.Unlock()
+	if err := h.changeEnvironmentAgent(ctx, connID, kind, "restart", false); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (h *Handler) changeEnvironmentAgent(ctx context.Context, connID, kind, action string, confirmActive bool) *environmentActionError {
+	if kind != "hermes" && kind != "codex" && kind != "grok" && kind != "antigravity" {
+		return &environmentActionError{http.StatusUnprocessableEntity, "invalid_kind", "Unsupported agent kind"}
 	}
 
 	if action != "connect" && action != "disconnect" && action != "restart" {
-		writeError(w, http.StatusUnprocessableEntity, "invalid_action", "不支持的连接操作。")
-		return
+		return &environmentActionError{http.StatusUnprocessableEntity, "invalid_action", "不支持的连接操作。"}
+	}
+	if confirmActive && (action != "restart" || kind != "antigravity") {
+		return &environmentActionError{http.StatusUnprocessableEntity, "force_restart_unsupported", "当前仅 Antigravity 支持强制重启。"}
 	}
 
 	var connPtr *string
@@ -672,25 +727,21 @@ func (h *Handler) handleEnvironmentAgentAction(w http.ResponseWriter, r *http.Re
 	if connID != "local" {
 		connPtr = &connID
 		var err error
-		sshConn, err = h.store.GetSSHConnection(r.Context(), connID)
+		sshConn, err = h.store.GetSSHConnection(ctx, connID)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "store_error", err.Error())
-			return
+			return &environmentActionError{http.StatusInternalServerError, "store_error", err.Error()}
 		}
 		if sshConn == nil {
-			writeError(w, http.StatusNotFound, "connection_not_found", "Connection not found")
-			return
+			return &environmentActionError{http.StatusNotFound, "connection_not_found", "Connection not found"}
 		}
 		settings, _ := sshConn["settings"].(map[string]any)
 		if _, err := validateSSHSettings(settings); err != nil {
-			writeError(w, http.StatusUnprocessableEntity, "invalid_settings", err.Error())
-			return
+			return &environmentActionError{http.StatusUnprocessableEntity, "invalid_settings", err.Error()}
 		}
 	}
 
 	if h.client == nil {
-		writeError(w, http.StatusServiceUnavailable, "daemon_unavailable", "Session daemon client is unavailable")
-		return
+		return &environmentActionError{http.StatusServiceUnavailable, "daemon_unavailable", "Session daemon client is unavailable"}
 	}
 
 	// Remote codex/grok/antigravity attach needs the actual CLI path: resolve it
@@ -701,10 +752,9 @@ func (h *Handler) handleEnvironmentAgentAction(w http.ResponseWriter, r *http.Re
 		if resolver == nil {
 			resolver = &NativeRemoteExecutableResolver{SSHBinary: h.sshBinary}
 		}
-		executable, err := resolver.Resolve(r.Context(), kind, sshConn)
+		executable, err := resolver.Resolve(ctx, kind, sshConn)
 		if err != nil {
-			writeError(w, http.StatusBadGateway, "executable_unresolved", err.Error())
-			return
+			return &environmentActionError{http.StatusBadGateway, "executable_unresolved", err.Error()}
 		}
 		sshConn = withResolvedExecutable(sshConn, kind, executable)
 	}
@@ -714,13 +764,12 @@ func (h *Handler) handleEnvironmentAgentAction(w http.ResponseWriter, r *http.Re
 	switch action {
 	case "disconnect":
 		opID := fmt.Sprintf("disconnect-%s-%s-%d", kind, connID, time.Now().UnixNano())
-		resp, err := h.client.Runtime.DisconnectRuntime(r.Context(), &sessiondv1.DisconnectRuntimeRequest{
+		resp, err := h.client.Runtime.DisconnectRuntime(ctx, &sessiondv1.DisconnectRuntimeRequest{
 			Meta:   canonicalMeta(opID),
 			Target: target,
 		})
 		if err := h.disconnectReceipt(resp, err); err != nil {
-			writeError(w, http.StatusConflict, "disconnect_refused", formatDaemonRuntimeError(kind, connID, err))
-			return
+			return &environmentActionError{http.StatusConflict, "disconnect_refused", formatDaemonRuntimeError(kind, connID, err)}
 		}
 
 	case "connect":
@@ -728,56 +777,51 @@ func (h *Handler) handleEnvironmentAgentAction(w http.ResponseWriter, r *http.Re
 			SessionId:    fmt.Sprintf("probe-%s-%s", kind, connID),
 			ConnectionId: connPtr,
 		}
-		receipt, err := h.client.Session.AttachSession(r.Context(), &sessiondv1.AttachSessionRequest{
+		receipt, err := h.client.Session.AttachSession(ctx, &sessiondv1.AttachSessionRequest{
 			Session:        expected,
 			Target:         target,
 			RuntimeControl: true,
 		})
 		if err != nil {
-			writeError(w, http.StatusBadGateway, "attach_failed", formatDaemonRuntimeError(kind, connID, err))
-			return
+			return &environmentActionError{http.StatusBadGateway, "attach_failed", formatDaemonRuntimeError(kind, connID, err)}
 		}
 		if err := h.attachReceipt(receipt, expected); err != nil {
-			writeError(w, http.StatusBadGateway, "attach_unconfirmed", err.Error())
-			return
+			return &environmentActionError{http.StatusBadGateway, "attach_unconfirmed", err.Error()}
 		}
 
 	case "restart":
 		// Restart performs clean authoritative disconnect followed by attach
 		opID := fmt.Sprintf("restart-disconnect-%s-%s-%d", kind, connID, time.Now().UnixNano())
-		resp, err := h.client.Runtime.DisconnectRuntime(r.Context(), &sessiondv1.DisconnectRuntimeRequest{
-			Meta:   canonicalMeta(opID),
-			Target: target,
+		resp, err := h.client.Runtime.DisconnectRuntime(ctx, &sessiondv1.DisconnectRuntimeRequest{
+			Meta:          canonicalMeta(opID),
+			Target:        target,
+			ConfirmActive: confirmActive,
 		})
 		if err := h.disconnectReceipt(resp, err); err != nil {
-			writeError(w, http.StatusConflict, "disconnect_refused", formatDaemonRuntimeError(kind, connID, err))
-			return
+			return &environmentActionError{http.StatusConflict, "disconnect_refused", formatDaemonRuntimeError(kind, connID, err)}
 		}
 		// The old runtime is authoritatively released; until the re-attach is
 		// confirmed the environment may not keep claiming the previous
 		// connected state.
 		if connID != "local" && kind == "hermes" {
-			if _, err := h.store.UpdateSSHConnectionState(r.Context(), connID, "connecting", "重启进行中：旧运行时已断开，等待重新接入确认。", nil); err != nil {
-				writeError(w, http.StatusInternalServerError, "store_error", err.Error())
-				return
+			if _, err := h.store.UpdateSSHConnectionState(ctx, connID, "connecting", "重启进行中：旧运行时已断开，等待重新接入确认。", nil); err != nil {
+				return &environmentActionError{http.StatusInternalServerError, "store_error", err.Error()}
 			}
 		}
 		expected := &sessiondv1.SessionRef{
 			SessionId:    fmt.Sprintf("probe-%s-%s", kind, connID),
 			ConnectionId: connPtr,
 		}
-		receipt, err := h.client.Session.AttachSession(r.Context(), &sessiondv1.AttachSessionRequest{
+		receipt, err := h.client.Session.AttachSession(ctx, &sessiondv1.AttachSessionRequest{
 			Session:        expected,
 			Target:         target,
 			RuntimeControl: true,
 		})
 		if err != nil {
-			writeError(w, http.StatusBadGateway, "restart_attach_failed", formatDaemonRuntimeError(kind, connID, err))
-			return
+			return &environmentActionError{http.StatusBadGateway, "restart_attach_failed", formatDaemonRuntimeError(kind, connID, err)}
 		}
 		if err := h.attachReceipt(receipt, expected); err != nil {
-			writeError(w, http.StatusBadGateway, "attach_unconfirmed", err.Error())
-			return
+			return &environmentActionError{http.StatusBadGateway, "attach_unconfirmed", err.Error()}
 		}
 	}
 
@@ -788,25 +832,22 @@ func (h *Handler) handleEnvironmentAgentAction(w http.ResponseWriter, r *http.Re
 		if action == "disconnect" {
 			state, detail, event = "disconnected", "Disconnected explicitly", "ssh_connection.disconnected"
 		}
-		updated, err := h.store.UpdateSSHConnectionState(r.Context(), connID, state, detail, nil)
+		updated, err := h.store.UpdateSSHConnectionState(ctx, connID, state, detail, nil)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "store_error", err.Error())
-			return
+			return &environmentActionError{http.StatusInternalServerError, "store_error", err.Error()}
 		}
 		if updated == nil {
-			writeError(w, http.StatusNotFound, "connection_not_found", "Connection not found")
-			return
+			return &environmentActionError{http.StatusNotFound, "connection_not_found", "Connection not found"}
 		}
 		if h.publisher != nil {
-			_ = h.publisher.Publish(r.Context(), event, updated)
+			_ = h.publisher.Publish(ctx, event, updated)
 		}
 	}
 
 	// Only an authoritative success reaches this point; refused or unconfirmed
 	// operations already returned above without touching the persisted choice.
-	if err := h.store.SetAgentConnectionChoice(r.Context(), connID+":"+kind, action != "disconnect"); err != nil {
-		writeError(w, http.StatusInternalServerError, "store_error", err.Error())
-		return
+	if err := h.recordAgentConnectionChoice(ctx, connID+":"+kind, action != "disconnect"); err != nil {
+		return &environmentActionError{http.StatusInternalServerError, "store_error", err.Error()}
 	}
 	if action == "disconnect" {
 		h.forgetSessionRecovery(connID, kind)
@@ -814,12 +855,18 @@ func (h *Handler) handleEnvironmentAgentAction(w http.ResponseWriter, r *http.Re
 		h.scheduleSessionRecovery(connID, kind, true)
 	}
 
-	items, err := h.environmentSnapshot(r.Context())
+	return nil
+}
+
+func (h *Handler) recordAgentConnectionChoice(ctx context.Context, key string, enabled bool) error {
+	events, err := h.store.RecordAgentConnectionChoice(ctx, key, enabled)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "store_error", err.Error())
-		return
+		return err
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+	if h.publisher != nil {
+		h.publisher.PublishCommitted(events)
+	}
+	return nil
 }
 
 // handleConnectionsSnapshot returns connections state snapshot.
@@ -874,7 +921,7 @@ func (h *Handler) handleConnectCodex(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "attach_unconfirmed", err.Error())
 		return
 	}
-	if err := h.store.SetAgentConnectionChoice(r.Context(), "local:codex", true); err != nil {
+	if err := h.recordAgentConnectionChoice(r.Context(), "local:codex", true); err != nil {
 		writeError(w, http.StatusInternalServerError, "store_error", err.Error())
 		return
 	}
@@ -896,7 +943,7 @@ func (h *Handler) handleDisconnectCodex(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusConflict, "disconnect_refused", err.Error())
 		return
 	}
-	if err := h.store.SetAgentConnectionChoice(r.Context(), "local:codex", false); err != nil {
+	if err := h.recordAgentConnectionChoice(r.Context(), "local:codex", false); err != nil {
 		writeError(w, http.StatusInternalServerError, "store_error", err.Error())
 		return
 	}
@@ -923,7 +970,7 @@ func (h *Handler) handleConnectLocal(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "attach_unconfirmed", err.Error())
 		return
 	}
-	if err := h.store.SetAgentConnectionChoice(r.Context(), "local:hermes", true); err != nil {
+	if err := h.recordAgentConnectionChoice(r.Context(), "local:hermes", true); err != nil {
 		writeError(w, http.StatusInternalServerError, "store_error", err.Error())
 		return
 	}
@@ -945,7 +992,7 @@ func (h *Handler) handleDisconnectLocal(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusConflict, "disconnect_refused", err.Error())
 		return
 	}
-	if err := h.store.SetAgentConnectionChoice(r.Context(), "local:hermes", false); err != nil {
+	if err := h.recordAgentConnectionChoice(r.Context(), "local:hermes", false); err != nil {
 		writeError(w, http.StatusInternalServerError, "store_error", err.Error())
 		return
 	}
@@ -1153,7 +1200,7 @@ func (h *Handler) handleConnectSSHConnection(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if err := h.store.SetAgentConnectionChoice(r.Context(), actualID+":hermes", true); err != nil {
+	if err := h.recordAgentConnectionChoice(r.Context(), actualID+":hermes", true); err != nil {
 		writeError(w, http.StatusInternalServerError, "store_error", err.Error())
 		return
 	}
@@ -1196,7 +1243,7 @@ func (h *Handler) handleDisconnectSSHConnection(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	if err := h.store.SetAgentConnectionChoice(r.Context(), actualID+":hermes", false); err != nil {
+	if err := h.recordAgentConnectionChoice(r.Context(), actualID+":hermes", false); err != nil {
 		writeError(w, http.StatusInternalServerError, "store_error", err.Error())
 		return
 	}

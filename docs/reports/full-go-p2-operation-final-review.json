@@ -39,28 +39,28 @@
   ],
   "verification": [
     {
-      "cwd": "P:/workspace/glwlg/ai/astrorder/session-daemon-go",
+      "cwd": "session-daemon-go",
       "command": "env -u ASTRORDER_SSH_REAL_TEST -u ASTRORDER_TEST_REAL_SSH -u ASTRORDER_REAL_HERMES_PYTHON -u ASTRORDER_REAL_HERMES_SOURCE -u ASTRORDER_LATENCY_OUTPUT go test ./internal/grpcapi -count=1 -timeout=120s -run 'Test(GetOperationPreservesUntypedAndMalformedCompletedBytes|GetOperationReadsLegacyWSLedgerOverAuthenticatedTCPAndAfterReopen|GetOperationPreservesUncertainAndExactScopeWithoutRedispatch|GetOperationRejectsInvalidPresenceCanonicalizationAndUnavailableStorage|OperationNullFieldsNeverBecomeSyntheticTypedValues|OperationLookupRejectsUnknownIdentityFields|DefaultServerRegistersAndAdvertisesOperationQuery)$' -v",
       "exit_code": 0,
       "result": "PASS",
       "observed": "All selected top-level tests and their subtests passed; package result ok."
     },
     {
-      "cwd": "P:/workspace/glwlg/ai/astrorder/session-daemon-go",
+      "cwd": "session-daemon-go",
       "command": "env -u ASTRORDER_SSH_REAL_TEST -u ASTRORDER_TEST_REAL_SSH -u ASTRORDER_REAL_HERMES_PYTHON -u ASTRORDER_REAL_HERMES_SOURCE -u ASTRORDER_LATENCY_OUTPUT go test ./internal/protocol ./internal/journal -count=1 -timeout=120s -run 'Test(ReadStoredOperationUsesExactLegacyScopeAndNeverDispatches|ReadStoredOperationReportsUncertainAndValidatesWithoutMutation|OperationCapabilityAndReadOnlyLookup|FailedNativeOperationRetainsUncertaintyOnRetry|DurableOperationRetryDoesNotCreateTwice|OperationReservationSurvivesRestartAndConcurrentRetries)$' -v",
       "exit_code": 0,
       "result": "PASS",
       "observed": "All selected protocol and journal tests passed; both package results ok."
     },
     {
-      "cwd": "P:/workspace/glwlg/ai/astrorder/session-daemon-go",
+      "cwd": "session-daemon-go",
       "command": "env -u ASTRORDER_SSH_REAL_TEST -u ASTRORDER_TEST_REAL_SSH -u ASTRORDER_REAL_HERMES_PYTHON -u ASTRORDER_REAL_HERMES_SOURCE -u ASTRORDER_LATENCY_OUTPUT go vet ./internal/grpcapi ./internal/protocol ./internal/events ./internal/journal",
       "exit_code": 0,
       "result": "PASS",
       "observed": "No vet diagnostics."
     },
     {
-      "cwd": "C:/Users/luwei/AppData/Local/hermes/cache/scratch/p2-operation-final-review.pyGd5Q/session-daemon-go",
+      "cwd": "<local cache>/scratch/p2-operation-final-review.pyGd5Q/session-daemon-go",
       "command": "env -u ASTRORDER_SSH_REAL_TEST -u ASTRORDER_TEST_REAL_SSH -u ASTRORDER_REAL_HERMES_PYTHON -u ASTRORDER_REAL_HERMES_SOURCE -u ASTRORDER_LATENCY_OUTPUT go test ./internal/grpcapi -count=1 -timeout=120s -run '^TestPrivateUnprojectableCompletedReceiptsPreserveExactBytes$' -v",
       "exit_code": 0,
       "result": "PASS",
@@ -83,7 +83,7 @@
     "tree": "dirty working tree; reviewed files include untracked artifacts, so per-file SHA-256 values are authoritative",
     "source_stability": "Scoped hashes matched before testing and at final pin.",
     "preserved_fail_report": {
-      "path": "C:/Users/luwei/AppData/Local/hermes/cache/scratch/full-go-p2-operation-review-final-extracted.md",
+      "path": "<local cache>/scratch/full-go-p2-operation-review-final-extracted.md",
       "sha256": "d75c9b78f50b2c1c7f7054ba988faf3f892cf783bc5e1f1900cf848347bdb408",
       "modified": false
     }

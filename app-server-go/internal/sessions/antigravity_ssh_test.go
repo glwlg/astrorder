@@ -132,8 +132,8 @@ func TestAntigravitySSHActionsAndHistoryProjection(t *testing.T) {
 			if r.Target.GetRuntime() != pb.RuntimeKind_RUNTIME_KIND_ANTIGRAVITY_SSH || r.Target.GetConnectionId() != connID {
 				t.Fatalf("unexpected create target: %+v", r.Target)
 			}
-			if r.Target.GetSsh().GetAntigravityExecutable() != "/home/dev/.local/bin/agy" {
-				t.Fatalf("unexpected remote agy executable: %q", r.Target.GetSsh().GetAntigravityExecutable())
+			if r.Target.GetSsh().AntigravityExecutable != nil {
+				return nil, status.Error(codes.InvalidArgument, "remote executable should be unset without a resolver")
 			}
 			opts := r.GetAntigravity()
 			if opts == nil {

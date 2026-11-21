@@ -147,9 +147,15 @@ func TestTranscriptionsSuccessAndUpstreamContract(t *testing.T) {
 	}
 
 	authorizer := testAuthenticator()
+	st, err := store.Open(filepath.Join(t.TempDir(), "app.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
 	svc, err := NewService(Options{
 		Authorizer: authorizer,
 		HTTPClient: mockClient,
+		Store:      st,
 	})
 	if err != nil {
 		t.Fatalf("NewService: %v", err)
@@ -164,11 +170,24 @@ func TestTranscriptionsSuccessAndUpstreamContract(t *testing.T) {
 	_, _ = part.Write([]byte("RIFF1234WAVEfmt audio bytes"))
 	_ = writer.Close()
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/audio/transcriptions", body)
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-	req.Header.Set("Authorization", "Bearer test-secret")
-	rec := httptest.NewRecorder()
-	svc.ServeHTTP(rec, req)
+	transcribe := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/audio/transcriptions", bytes.NewReader(body.Bytes()))
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		req.Header.Set("Authorization", "Bearer test-secret")
+		rec := httptest.NewRecorder()
+		svc.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := transcribe(); rec.Code != http.StatusServiceUnavailable || capturedReq != nil {
+		t.Fatalf("a key alone must not send a request, status %d", rec.Code)
+	}
+	if err := st.SetPreference(context.Background(), "analytics:llm_gateway", map[string]any{
+		"gateway_type":  "opencodex",
+		"inference_url": "https://gateway.example.com/v1",
+	}, true); err != nil {
+		t.Fatal(err)
+	}
+	rec := transcribe()
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
@@ -182,6 +201,9 @@ func TestTranscriptionsSuccessAndUpstreamContract(t *testing.T) {
 
 	if capturedReq == nil {
 		t.Fatal("upstream was not called")
+	}
+	if capturedReq.URL.String() != "https://gateway.example.com/v1/audio/transcriptions" {
+		t.Fatalf("unexpected transcription destination: %s", capturedReq.URL)
 	}
 	if capturedReq.Header.Get("X-OpenCodex-API-Key") != "env-key-12345" {
 		t.Fatalf("unexpected API key: %s", capturedReq.Header.Get("X-OpenCodex-API-Key"))

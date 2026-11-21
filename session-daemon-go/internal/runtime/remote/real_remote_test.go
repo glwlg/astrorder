@@ -12,7 +12,7 @@ import (
 	sshtrans "astrorder.dev/session-daemon/internal/transport/ssh"
 )
 
-// TestRealSSHRemoteAdaptersOnDebian tests real OpenSSH transport against 192.168.1.100.
+// TestRealSSHRemoteAdaptersOnDebian exercises a configured OpenSSH host.
 // It verifies remote Codex and remote Hermes adapter creation, spawn, command and teardown
 // using disposable test workspaces and disposable session IDs without touching production.
 func TestRealSSHRemoteAdaptersOnDebian(t *testing.T) {
@@ -20,8 +20,17 @@ func TestRealSSHRemoteAdaptersOnDebian(t *testing.T) {
 		t.Skip("skipping real SSH test; enable with ASTRORDER_TEST_REAL_SSH=1")
 	}
 
-	host := "192.168.1.100"
-	user := "luwei"
+	host := os.Getenv("ASTRORDER_TEST_SSH_HOST")
+	user := os.Getenv("ASTRORDER_TEST_SSH_USER")
+	codexBin := os.Getenv("ASTRORDER_TEST_SSH_CODEX")
+	grokBin := os.Getenv("ASTRORDER_TEST_SSH_GROK")
+	hermesPython := os.Getenv("ASTRORDER_TEST_SSH_HERMES_PYTHON")
+	hermesRoot := os.Getenv("ASTRORDER_TEST_SSH_HERMES_ROOT")
+	if host == "" || user == "" || !strings.HasPrefix(codexBin, "/") ||
+		!strings.HasPrefix(grokBin, "/") || !strings.HasPrefix(hermesPython, "/") ||
+		!strings.HasPrefix(hermesRoot, "/") {
+		t.Fatal("configure ASTRORDER_TEST_SSH_HOST, ASTRORDER_TEST_SSH_USER and absolute ASTRORDER_TEST_SSH_CODEX, ASTRORDER_TEST_SSH_GROK, ASTRORDER_TEST_SSH_HERMES_PYTHON, ASTRORDER_TEST_SSH_HERMES_ROOT")
+	}
 
 	emit := func(sessionID, event string, payload map[string]any, status string) error {
 		return nil
@@ -33,7 +42,6 @@ func TestRealSSHRemoteAdaptersOnDebian(t *testing.T) {
 	// 1. Test Remote Codex Factory & Adapter
 	t.Run("RemoteCodex", func(t *testing.T) {
 		codexFactory := NewRemoteCodexFactory(emit)
-		codexBin := "/home/luwei/.vite-plus/bin/codex"
 		settings := map[string]any{
 			"host":             host,
 			"user":             user,
@@ -92,7 +100,7 @@ func TestRealSSHRemoteAdaptersOnDebian(t *testing.T) {
 	t.Run("RemoteGrok", func(t *testing.T) {
 		adapter, err := NewRemoteGrokFactory(emit)("conn-test-grok", map[string]any{
 			"host": host, "user": user, "port": 22,
-			"grok_executable": "/home/luwei/.grok/bin/grok", "workspace": "/tmp",
+			"grok_executable": grokBin, "workspace": "/tmp",
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -123,13 +131,12 @@ func TestRealSSHRemoteAdaptersOnDebian(t *testing.T) {
 	// 2. Test Remote Hermes Factory & Adapter
 	t.Run("RemoteHermes", func(t *testing.T) {
 		hermesFactory := NewRemoteHermesFactory(emit)
-		hermesPython := "/home/luwei/.hermes/hermes-agent/venv/bin/python"
-		created, err := exec.Command("ssh", "-o", "BatchMode=yes", user+"@"+host, "mktemp -d /home/luwei/astrorder-hermes-validation-XXXXXXXX").Output()
+		created, err := exec.Command("ssh", "-o", "BatchMode=yes", user+"@"+host, "mktemp -d /tmp/astrorder-hermes-validation-XXXXXXXX").Output()
 		if err != nil {
 			t.Fatal(err)
 		}
 		home := strings.TrimSpace(string(created))
-		if !strings.HasPrefix(home, "/home/luwei/astrorder-hermes-validation-") || strings.ContainsAny(home, " '\"\n\r;") {
+		if !strings.HasPrefix(home, "/tmp/astrorder-hermes-validation-") || strings.ContainsAny(home, " '\"\n\r;") {
 			t.Fatal("invalid isolated home")
 		}
 		defer func() {
@@ -142,7 +149,7 @@ func TestRealSSHRemoteAdaptersOnDebian(t *testing.T) {
 			"user":              user,
 			"port":              22,
 			"hermes_executable": "/usr/bin/env",
-			"arguments":         []any{"HERMES_HOME=" + home, "PYTHONPATH=/home/luwei/.hermes/hermes-agent", "HERMES_DISABLE_AUTO_UPDATE=1", "HERMES_DISABLE_LAZY_INSTALLS=1", hermesPython, "-m", "tui_gateway.entry"},
+			"arguments":         []any{"HERMES_HOME=" + home, "PYTHONPATH=" + hermesRoot, "HERMES_DISABLE_AUTO_UPDATE=1", "HERMES_DISABLE_LAZY_INSTALLS=1", hermesPython, "-m", "tui_gateway.entry"},
 			"workspace":         home,
 		}
 
@@ -206,16 +213,10 @@ func TestRealWindowsSSHRemoteAntigravity(t *testing.T) {
 		t.Skip("skipping real Antigravity SSH test; enable with ASTRORDER_TEST_REAL_AGY_SSH=1")
 	}
 	host := os.Getenv("ASTRORDER_TEST_AGY_HOST")
-	if host == "" {
-		host = "127.0.0.1"
-	}
 	user := os.Getenv("ASTRORDER_TEST_AGY_USER")
-	if user == "" {
-		user = "luwei"
-	}
 	exe := os.Getenv("ASTRORDER_TEST_AGY_EXECUTABLE")
-	if exe == "" {
-		exe = "/home/luwei/.local/bin/agy"
+	if host == "" || user == "" || !strings.HasPrefix(exe, "/") {
+		t.Fatal("configure ASTRORDER_TEST_AGY_HOST, ASTRORDER_TEST_AGY_USER and an absolute ASTRORDER_TEST_AGY_EXECUTABLE")
 	}
 	helpersDir := os.Getenv("ASTRORDER_TEST_HELPER_ASSETS_DIR")
 

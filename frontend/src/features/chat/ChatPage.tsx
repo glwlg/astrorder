@@ -13,7 +13,7 @@ import { useQueryClient, useQuery } from '@tanstack/react-query'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useShallow } from 'zustand/react/shallow'
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ApiError, api } from '../../api/client'
 import { findSessionHandoff, newCommandId, scopeKey } from '../../domain/semantics'
 import type { Approval, Command, Message, Session, Task } from '../../domain/types'
@@ -23,7 +23,7 @@ import { WelcomeView } from './WelcomeView'
 import { sessionActivityStatus } from '../../components/sessionRailModel'
 import { AgentKindBadge } from '../../components/SessionRuntimeFacts'
 import { agentKindLabel } from '../../components/AgentBrandIcon'
-import { selectApprovals, selectCommands, selectOutbox, selectSessions, selectTasks, useAstrorderStore } from '../../state/store'
+import { isDisconnectedSessionRoute, selectApprovals, selectCommands, selectOutbox, selectSessions, selectTasks, useAstrorderStore } from '../../state/store'
 import { useSessionResources } from '../../hooks/useAstrorderData'
 import { ChatComposer } from './ChatComposer'
 import { SessionComposerGate } from './SessionComposerGate'
@@ -70,7 +70,11 @@ function resolveSession(sessions: Session[], sessionId: string | undefined, agen
 export function ChatPage() {
   const { sessionId = '' } = useParams()
   const [searchParams] = useSearchParams()
-  const routeKey = scopeKey(searchParams.get('agent_id') || '', sessionId)
+  const agentId = searchParams.get('agent_id')
+  const routeKey = scopeKey(agentId || '', sessionId)
+  const disconnectedRoute = useAstrorderStore(state =>
+    Boolean(sessionId) && isDisconnectedSessionRoute(state, sessionId, agentId),
+  )
   const [bodyKey, setBodyKey] = useState(routeKey)
 
   useEffect(() => {
@@ -78,6 +82,8 @@ export function ChatPage() {
     const frame = window.requestAnimationFrame(() => setBodyKey(routeKey))
     return () => window.cancelAnimationFrame(frame)
   }, [bodyKey, routeKey])
+
+  if (disconnectedRoute) return <Navigate to="/chat" replace />
 
   if (bodyKey !== routeKey) {
     return (

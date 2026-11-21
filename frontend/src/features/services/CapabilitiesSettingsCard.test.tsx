@@ -327,4 +327,84 @@ describe('CapabilitiesSettingsCard - 星序官方技能与动态分发', () => {
       expect(screen.queryByText(mockUserSkill.description!)).not.toBeInTheDocument()
     })
   })
+
+  it('supports Antigravity MCP toggle, plugin metadata/install, and agent-scoped filtering', async () => {
+    vi.mocked(api.updateMcpServer).mockResolvedValue({ ok: true, action: 'toggle', agent: 'antigravity', server: 'agy-api' })
+    vi.mocked(api.updatePluginState).mockResolvedValue({ ok: true, action: 'install', agent: 'antigravity', plugin: '/tmp/my-plug', output: 'Installed' })
+    vi.mocked(api.getCapabilitiesSummary).mockResolvedValue({
+      ...mockSummary,
+      counts: { skills: 3, mcp: 2, plugins: 2, marketplaces: 1 },
+      skill_agents: [
+        { id: 'codex', label: 'OpenAI Codex' },
+        { id: 'antigravity', label: 'Google Antigravity' },
+      ],
+      mcp_servers: [
+        { name: 'codex-mcp', agent: 'codex', enabled: true, transport: 'sse/http', url: 'https://codex.example/mcp' },
+        { name: 'agy-api', agent: 'antigravity', enabled: true, transport: 'sse/http', url: 'https://agy.example/mcp', headers: { Authorization: '[REDACTED]' } },
+      ],
+      plugins: [
+        { id: 'codex::gh@curated', name: 'gh', full_name: 'gh@curated', agent: 'codex', enabled: true },
+        {
+          id: 'antigravity::modern-web-guidance',
+          name: 'modern-web-guidance',
+          full_name: 'modern-web-guidance',
+          agent: 'antigravity',
+          marketplace: 'Google Chrome',
+          enabled: true,
+          source: 'antigravity-plugin',
+          config: { version: '1.0.1', description: 'Modern web best practices', skills: ['modern-web-guidance'], mcp_servers: ['plug-mcp'], has_hooks: true },
+        },
+      ],
+    } as never)
+
+    mount()
+    await waitFor(() => {
+      expect(screen.getAllByText('Google Antigravity').length).toBeGreaterThan(0)
+    })
+
+    // Scope view to Antigravity
+    fireEvent.click(screen.getAllByRole('button', { name: 'Google Antigravity' })[0])
+
+    // Switch to MCP tab: only agy-api should appear, toggle switch works
+    fireEvent.click(screen.getByRole('button', { name: /MCP 服务器/ }))
+    await waitFor(() => {
+      expect(screen.getByText('agy-api')).toBeInTheDocument()
+      expect(screen.queryByText('codex-mcp')).not.toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByRole('switch', { name: '切换 MCP 服务 agy-api 状态' }))
+    await waitFor(() => {
+      expect(api.updateMcpServer).toHaveBeenCalledWith({
+        target_id: 'local',
+        agent: 'antigravity',
+        action: 'toggle',
+        server: { name: 'agy-api', enabled: false },
+      })
+    })
+
+    // Switch to Plugins tab: only Antigravity plugin with bundled metadata should appear
+    fireEvent.click(screen.getByRole('button', { name: /复合插件/ }))
+    await waitFor(() => {
+      expect(screen.getAllByText('modern-web-guidance').length).toBeGreaterThan(0)
+      expect(screen.getByText('v1.0.1')).toBeInTheDocument()
+      expect(screen.getByText('Skill: modern-web-guidance')).toBeInTheDocument()
+      expect(screen.getByText('含 Hooks')).toBeInTheDocument()
+      expect(screen.queryByText('gh@curated')).not.toBeInTheDocument()
+    })
+
+    // Install Antigravity plugin modal
+    fireEvent.click(screen.getByRole('button', { name: /安装 \/ 导入 Antigravity 插件/ }))
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText(/\/path\/to\/my-plugin/)).toBeInTheDocument()
+    })
+    fireEvent.change(screen.getByPlaceholderText(/\/path\/to\/my-plugin/), { target: { value: '/tmp/my-plug' } })
+    fireEvent.click(screen.getByRole('button', { name: '执行安装' }))
+    await waitFor(() => {
+      expect(api.updatePluginState).toHaveBeenCalledWith({
+        target_id: 'local',
+        agent: 'antigravity',
+        action: 'install',
+        source: '/tmp/my-plug',
+      })
+    })
+  })
 })

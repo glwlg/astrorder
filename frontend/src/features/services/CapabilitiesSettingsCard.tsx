@@ -22,6 +22,7 @@ import {
   IconCode,
   IconDeviceDesktop,
   IconDownload,
+  IconEdit,
 
   IconLayersLinked,
   IconNetwork,
@@ -127,6 +128,7 @@ export function CapabilitiesSettingsCard() {
 
   // 1. MCP 新增/编辑 Modal 状态
   const [mcpModalOpen, setMcpModalOpen] = useState(false)
+  const [mcpEditing, setMcpEditing] = useState(false)
   const [mcpFormTarget, setMcpFormTarget] = useState<string>('local')
   const [mcpFormAgent, setMcpFormAgent] = useState<string>('codex')
   const [mcpFormName, setMcpFormName] = useState<string>('')
@@ -134,9 +136,18 @@ export function CapabilitiesSettingsCard() {
   const [mcpFormUrl, setMcpFormUrl] = useState<string>('')
   const [mcpFormCommand, setMcpFormCommand] = useState<string>('')
   const [mcpFormArgs, setMcpFormArgs] = useState<string>('')
+  const [mcpFormHeaders, setMcpFormHeaders] = useState<string>('{}')
   const [mcpFormEnv, setMcpFormEnv] = useState<string>('{}')
+  const [mcpFormEnabled, setMcpFormEnabled] = useState<boolean>(true)
   const [mcpSaving, setMcpSaving] = useState(false)
   const [mcpPingStatus, setMcpPingStatus] = useState<Record<string, { loading?: boolean; text?: string; ok?: boolean }>>({})
+
+  // 1b. Antigravity 插件安装/导入 Modal 状态
+  const [pluginInstallOpen, setPluginInstallOpen] = useState(false)
+  const [pluginInstallMode, setPluginInstallMode] = useState<'install' | 'import'>('install')
+  const [pluginInstallSource, setPluginInstallSource] = useState<string>('')
+  const [pluginImportSource, setPluginImportSource] = useState<string>('claude')
+  const [pluginInstalling, setPluginInstalling] = useState(false)
 
   // 2. 市场源新增 Modal 状态
   const [marketModalOpen, setMarketModalOpen] = useState(false)
@@ -227,9 +238,16 @@ export function CapabilitiesSettingsCard() {
   }
 
   // ==========================================
-  // MCP 业务处理 (CRUD & Ping)
+  // MCP 业务处理 (CRUD, Toggle & Ping)
   // ==========================================
+  const mcpKey = (srv: { agent: string; name: string }) => `${srv.agent}::${srv.name}`
+  const isPluginManagedSource = (source?: string) => Boolean(source && source.startsWith('antigravity-plugin:'))
+  const pluginSourceName = (source?: string) => (source && source.startsWith('antigravity-plugin:') ? source.slice('antigravity-plugin:'.length) : '')
+  const agentBadgeColor = (agent: string) =>
+    agent === 'codex' ? 'indigo' : agent === 'hermes' ? 'orange' : agent === 'antigravity' ? 'violet' : 'teal'
+
   const handleOpenAddMcp = () => {
+    setMcpEditing(false)
     setMcpFormTarget(selectedTargetId)
     setMcpFormAgent(selectedAgent !== 'all' ? selectedAgent : 'codex')
     setMcpFormName('')
@@ -237,7 +255,24 @@ export function CapabilitiesSettingsCard() {
     setMcpFormUrl('')
     setMcpFormCommand('')
     setMcpFormArgs('')
+    setMcpFormHeaders('{}')
     setMcpFormEnv('{}')
+    setMcpFormEnabled(true)
+    setMcpModalOpen(true)
+  }
+
+  const handleOpenEditMcp = (srv: CapabilityTargetSummary['mcp_servers'][number]) => {
+    setMcpEditing(true)
+    setMcpFormTarget(selectedTargetId)
+    setMcpFormAgent(srv.agent || 'codex')
+    setMcpFormName(srv.name)
+    setMcpFormTransport(srv.transport === 'stdio' ? 'stdio' : 'sse/http')
+    setMcpFormUrl(srv.url || '')
+    setMcpFormCommand(srv.command || '')
+    setMcpFormArgs((srv.args || []).join(' '))
+    setMcpFormHeaders(JSON.stringify(srv.headers || {}, null, 2))
+    setMcpFormEnv(JSON.stringify(srv.env || {}, null, 2))
+    setMcpFormEnabled(srv.enabled)
     setMcpModalOpen(true)
   }
 
@@ -246,11 +281,18 @@ export function CapabilitiesSettingsCard() {
       notifications.show({ title: '校验失败', message: 'MCP 服务名称不能为空', color: 'red' })
       return
     }
-    let parsedEnv = {}
+    let parsedEnv: Record<string, string> = {}
+    let parsedHeaders: Record<string, string> = {}
     try {
       parsedEnv = JSON.parse(mcpFormEnv || '{}')
     } catch {
       notifications.show({ title: 'JSON 格式错误', message: '环境变量必须为有效的 JSON 对象', color: 'red' })
+      return
+    }
+    try {
+      parsedHeaders = JSON.parse(mcpFormHeaders || '{}')
+    } catch {
+      notifications.show({ title: 'JSON 格式错误', message: 'HTTP Headers 必须为有效的 JSON 对象', color: 'red' })
       return
     }
 
@@ -266,7 +308,8 @@ export function CapabilitiesSettingsCard() {
           url: mcpFormTransport === 'sse/http' ? mcpFormUrl.trim() : undefined,
           command: mcpFormTransport === 'stdio' ? mcpFormCommand.trim() : undefined,
           args: mcpFormTransport === 'stdio' && mcpFormArgs ? mcpFormArgs.split(' ').filter(Boolean) : undefined,
-          enabled: true,
+          enabled: mcpFormEnabled,
+          headers: mcpFormTransport === 'sse/http' ? parsedHeaders : undefined,
           env: parsedEnv,
         },
       })
@@ -277,6 +320,26 @@ export function CapabilitiesSettingsCard() {
       notifications.show({ title: '保存失败', message: err?.message || '配置更新被拒绝', color: 'red' })
     } finally {
       setMcpSaving(false)
+    }
+  }
+
+  const handleToggleMcp = async (srv: CapabilityTargetSummary['mcp_servers'][number]) => {
+    const nextState = !srv.enabled
+    try {
+      await api.updateMcpServer({
+        target_id: selectedTargetId,
+        agent: srv.agent || 'codex',
+        action: 'toggle',
+        server: { name: srv.name, enabled: nextState },
+      })
+      notifications.show({
+        title: nextState ? 'MCP 服务已启用' : 'MCP 服务已停用',
+        message: `[${srv.name}] 状态已更新到 ${srv.agent} 配置`,
+        color: 'teal',
+      })
+      loadTargetCapabilities(selectedTargetId)
+    } catch (err: any) {
+      notifications.show({ title: '状态更新失败', message: err?.message || '切换 MCP 状态失败', color: 'red' })
     }
   }
 
@@ -297,7 +360,8 @@ export function CapabilitiesSettingsCard() {
   }
 
   const handlePingMcp = async (server: any) => {
-    setMcpPingStatus((prev) => ({ ...prev, [server.name]: { loading: true } }))
+    const key = mcpKey(server)
+    setMcpPingStatus((prev) => ({ ...prev, [key]: { loading: true } }))
     try {
       const res = await api.pingMcpServer({
         target_id: selectedTargetId,
@@ -305,7 +369,7 @@ export function CapabilitiesSettingsCard() {
       })
       setMcpPingStatus((prev) => ({
         ...prev,
-        [server.name]: { loading: false, text: res.message || `${res.latency_ms}ms`, ok: res.ok },
+        [key]: { loading: false, text: res.message || `${res.latency_ms}ms`, ok: res.ok },
       }))
       notifications.show({
         title: res.ok ? '探活成功' : '探活异常',
@@ -315,15 +379,45 @@ export function CapabilitiesSettingsCard() {
     } catch (err: any) {
       setMcpPingStatus((prev) => ({
         ...prev,
-        [server.name]: { loading: false, text: '连接失败', ok: false },
+        [key]: { loading: false, text: '连接失败', ok: false },
       }))
       notifications.show({ title: '探活失败', message: err?.message || '网络连接超时', color: 'red' })
     }
   }
 
   // ==========================================
-  // 插件业务处理 (Toggle & Uninstall)
+  // 插件业务处理 (Toggle, Uninstall, Install & Import)
   // ==========================================
+  const handleInstallOrImportAgyPlugin = async () => {
+    const source = pluginInstallMode === 'install'
+      ? pluginInstallSource.trim()
+      : (pluginImportSource === 'auto' ? '' : pluginImportSource)
+    if (pluginInstallMode === 'install' && !source) {
+      notifications.show({ title: '校验失败', message: '请输入插件目录、.zip、URL 或 plugin@marketplace', color: 'red' })
+      return
+    }
+    setPluginInstalling(true)
+    try {
+      const res = await api.updatePluginState({
+        target_id: selectedTargetId,
+        agent: 'antigravity',
+        action: pluginInstallMode,
+        source,
+      })
+      notifications.show({
+        title: pluginInstallMode === 'install' ? '插件安装完成' : '插件导入完成',
+        message: res.output || `已完成 Antigravity 插件${pluginInstallMode === 'install' ? '安装' : '导入'}`,
+        color: 'green',
+      })
+      setPluginInstallOpen(false)
+      setPluginInstallSource('')
+      loadTargetCapabilities(selectedTargetId)
+    } catch (err: any) {
+      notifications.show({ title: '操作失败', message: err?.message || 'agy plugin 执行失败', color: 'red' })
+    } finally {
+      setPluginInstalling(false)
+    }
+  }
   const handleTogglePlugin = async (plg: any) => {
     const nextState = !plg.enabled
     try {
@@ -576,6 +670,16 @@ export function CapabilitiesSettingsCard() {
   // 修正选中条目不在筛选结果仍显示旧详情问题
   const selectedSkillKey = selectedSkill ? getSkillKey(selectedSkill) : null
   const activeSkill = filteredSkills.find(sk => getSkillKey(sk) === selectedSkillKey) || filteredSkills[0] || null
+
+  const filteredMcpServers = (summary?.mcp_servers || []).filter((srv) =>
+    selectedAgent === 'all' || srv.agent.toLowerCase() === selectedAgent.toLowerCase()
+  )
+  const filteredPlugins = (summary?.plugins || []).filter((plg) =>
+    selectedAgent === 'all' || plg.agent.toLowerCase() === selectedAgent.toLowerCase()
+  )
+  const filteredMarketplaces = (summary?.marketplaces || []).filter((m) =>
+    selectedAgent === 'all' || !m.agent || m.agent === 'all' || m.agent.toLowerCase() === selectedAgent.toLowerCase()
+  )
   return (
     <div className="capabilities-hub-container">
       {/* 顶部控制台 Topbar */}
@@ -647,14 +751,17 @@ export function CapabilitiesSettingsCard() {
               leftSection={<IconPlus size={14} />}
               onClick={() => {
                 if (activeTab === 'mcp') handleOpenAddMcp()
-                else if (activeTab === 'marketplaces') handleOpenAddMarket()
+                else if (activeTab === 'plugins') {
+                  setPluginInstallMode('install')
+                  setPluginInstallOpen(true)
+                } else if (activeTab === 'marketplaces') handleOpenAddMarket()
                 else {
                   setInstallTargets([selectedTargetId])
                   setInstallModalOpen(true)
                 }
               }}
             >
-              {activeTab === 'mcp' ? '新建 MCP 服务' : activeTab === 'marketplaces' ? '新增市场源' : '导入包 / 技能'}
+              {activeTab === 'mcp' ? '新建 MCP 服务' : activeTab === 'plugins' ? '安装 / 导入插件' : activeTab === 'marketplaces' ? '新增市场源' : '导入包 / 技能'}
             </Button>
           </Group>
         </div>
@@ -669,7 +776,7 @@ export function CapabilitiesSettingsCard() {
               <IconCode size={16} />
               <span>技能 (Skills)</span>
               <Badge size="xs" variant="filled" color={activeTab === 'skills' ? 'indigo' : 'gray'}>
-                {summary?.counts.skills ?? 0}
+                {selectedAgent === 'all' ? (summary?.counts.skills ?? 0) : filteredSkills.length}
               </Badge>
             </button>
 
@@ -680,7 +787,7 @@ export function CapabilitiesSettingsCard() {
               <IconLayersLinked size={16} />
               <span>MCP 服务器</span>
               <Badge size="xs" variant="filled" color={activeTab === 'mcp' ? 'teal' : 'gray'}>
-                {summary?.counts.mcp ?? 0}
+                {filteredMcpServers.length}
               </Badge>
             </button>
 
@@ -691,7 +798,7 @@ export function CapabilitiesSettingsCard() {
               <IconPlug size={16} />
               <span>复合插件 (Plugins)</span>
               <Badge size="xs" variant="filled" color={activeTab === 'plugins' ? 'orange' : 'gray'}>
-                {summary?.counts.plugins ?? 0}
+                {filteredPlugins.length}
               </Badge>
             </button>
 
@@ -702,7 +809,7 @@ export function CapabilitiesSettingsCard() {
               <IconShoppingCart size={16} />
               <span>能力市场 (Marketplaces)</span>
               <Badge size="xs" variant="filled" color={activeTab === 'marketplaces' ? 'cyan' : 'gray'}>
-                {summary?.counts.marketplaces ?? 0}
+                {filteredMarketplaces.length}
               </Badge>
             </button>
           </div>
@@ -907,7 +1014,17 @@ export function CapabilitiesSettingsCard() {
                         >
                           分发到 Agent
                         </Button>
-                        {!isOfficialSkill(activeSkill) && (
+                        {isPluginManagedSource(activeSkill.source) ? (
+                          <Button
+                            size="xs"
+                            color="orange"
+                            variant="subtle"
+                            leftSection={<IconPlug size={14} />}
+                            onClick={() => setActiveTab('plugins')}
+                          >
+                            所属插件: {pluginSourceName(activeSkill.source)}
+                          </Button>
+                        ) : !isOfficialSkill(activeSkill) && (
                           <Button size="xs" color="red" variant="subtle" leftSection={<IconTrash size={14} />} onClick={() => handleRemoveSkill(activeSkill.name)}>卸载</Button>
                         )}
                       </Group>
@@ -1015,8 +1132,12 @@ export function CapabilitiesSettingsCard() {
             </Group>
 
             <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="md">
-              {(summary?.mcp_servers || []).map((srv) => (
-                <Card key={srv.name} withBorder radius="md" p="md" style={{ background: 'var(--cap-card-bg)' }}>
+              {filteredMcpServers.map((srv) => {
+                const key = mcpKey(srv)
+                const pluginManaged = isPluginManagedSource(srv.source)
+                const ping = mcpPingStatus[key]
+                return (
+                <Card key={key} withBorder radius="md" p="md" style={{ background: 'var(--cap-card-bg)' }}>
                   <Group justify="space-between" align="flex-start" wrap="nowrap">
                     <div>
                       <Group gap="xs">
@@ -1024,7 +1145,7 @@ export function CapabilitiesSettingsCard() {
                         <Text fw={700} size="sm" style={{ color: 'var(--cap-text-primary)' }}>
                           {srv.name}
                         </Text>
-                        <Badge size="xs" color={srv.agent === 'codex' ? 'indigo' : srv.agent === 'hermes' ? 'orange' : 'teal'}>
+                        <Badge size="xs" color={agentBadgeColor(srv.agent)}>
                           {srv.agent}
                         </Badge>
                       </Group>
@@ -1033,30 +1154,61 @@ export function CapabilitiesSettingsCard() {
                           {srv.transport.toUpperCase()}
                         </Badge>
                         <Badge size="xs" color={srv.enabled ? 'teal' : 'gray'} variant="light">
-                          {srv.enabled ? '● 运行中' : '○ 已停用'}
+                          {srv.enabled ? '● 已启用' : '○ 已停用'}
                         </Badge>
+                        {pluginManaged && (
+                          <Badge size="xs" color="orange" variant="light">
+                            插件: {pluginSourceName(srv.source)}
+                          </Badge>
+                        )}
                       </Group>
                     </div>
 
-                    <Group gap={4}>
-                      <Button
-                        size="compact-xs"
-                        variant="subtle"
-                        color="indigo"
-                        title="跨端/跨 Agent 分发"
-                        onClick={() => handleOpenDispatchModal('mcp', srv)}
-                      >
-                        <IconSend size={14} />
-                      </Button>
-                      <Button
-                        size="compact-xs"
-                        variant="subtle"
-                        color="red"
-                        title="删除 MCP 服务"
-                        onClick={() => handleDeleteMcp(srv)}
-                      >
-                        <IconTrash size={14} />
-                      </Button>
+                    <Group gap={6} wrap="nowrap">
+                      <Switch
+                        checked={srv.enabled}
+                        disabled={pluginManaged}
+                        size="sm"
+                        color="teal"
+                        aria-label={`切换 MCP 服务 ${srv.name} 状态`}
+                        onChange={() => void handleToggleMcp(srv)}
+                      />
+                      {!pluginManaged && (
+                        <Button
+                          size="compact-xs"
+                          variant="subtle"
+                          color="gray"
+                          title="编辑 MCP 服务"
+                          aria-label={`编辑 MCP 服务 ${srv.name}`}
+                          onClick={() => handleOpenEditMcp(srv)}
+                        >
+                          <IconEdit size={14} />
+                        </Button>
+                      )}
+                      {!pluginManaged && (
+                        <Button
+                          size="compact-xs"
+                          variant="subtle"
+                          color="indigo"
+                          title="跨端/跨 Agent 分发"
+                          aria-label={`分发 MCP 服务 ${srv.name}`}
+                          onClick={() => handleOpenDispatchModal('mcp', srv)}
+                        >
+                          <IconSend size={14} />
+                        </Button>
+                      )}
+                      {!pluginManaged && (
+                        <Button
+                          size="compact-xs"
+                          variant="subtle"
+                          color="red"
+                          title="删除 MCP 服务"
+                          aria-label={`删除 MCP 服务 ${srv.name}`}
+                          onClick={() => handleDeleteMcp(srv)}
+                        >
+                          <IconTrash size={14} />
+                        </Button>
+                      )}
                     </Group>
                   </Group>
 
@@ -1083,23 +1235,28 @@ export function CapabilitiesSettingsCard() {
                     </div>
                   )}
 
-                  {/* 环境变量脱敏概览 */}
-                  {srv.env && Object.keys(srv.env).length > 0 && (
+                  {/* Headers / 环境变量脱敏概览 */}
+                  {srv.headers && Object.keys(srv.headers).length > 0 && (
                     <div style={{ marginTop: 8 }}>
+                      <Text size="xs" c="dimmed">请求头 Headers: {Object.keys(srv.headers).join(', ')}</Text>
+                    </div>
+                  )}
+                  {srv.env && Object.keys(srv.env).length > 0 && (
+                    <div style={{ marginTop: 4 }}>
                       <Text size="xs" c="dimmed">注入环境变量: {Object.keys(srv.env).join(', ')}</Text>
                     </div>
                   )}
 
                   <Group justify="space-between" mt="md" pt="xs" style={{ borderTop: '1px solid var(--cap-border)' }}>
-                    <Text size="xs" c={mcpPingStatus[srv.name]?.ok === false ? 'red' : mcpPingStatus[srv.name]?.ok ? 'teal' : 'dimmed'}>
-                      {mcpPingStatus[srv.name]?.loading ? '正在探活...' : mcpPingStatus[srv.name]?.text || '就绪'}
+                    <Text size="xs" c={ping?.ok === false ? 'red' : ping?.ok ? 'teal' : 'dimmed'}>
+                      {ping?.loading ? '正在探活...' : ping?.text || '就绪'}
                     </Text>
                     <Group gap="xs">
                       <Button
                         size="xs"
                         variant="subtle"
                         color="teal"
-                        loading={mcpPingStatus[srv.name]?.loading}
+                        loading={ping?.loading}
                         onClick={() => handlePingMcp(srv)}
                       >
                         探活测试 (Ping)
@@ -1107,8 +1264,14 @@ export function CapabilitiesSettingsCard() {
                     </Group>
                   </Group>
                 </Card>
-              ))}
+                )
+              })}
             </SimpleGrid>
+            {filteredMcpServers.length === 0 && (
+              <div style={{ padding: 48, textAlign: 'center', color: 'var(--cap-text-muted)', fontSize: 13 }}>
+                当前节点下暂无匹配的 MCP 服务器配置
+              </div>
+            )}
           </div>
         )}
 
@@ -1121,13 +1284,31 @@ export function CapabilitiesSettingsCard() {
                   复合插件包 (Plugins)
                 </h3>
                 <Text size="xs" c="dimmed" mt={4}>
-                  如 Ponytail、OpenAI 官方 Curated 包、文档套件等多组件集成插件包。
+                  管理 Antigravity、Codex、Hermes 与 Grok 的多组件插件包（Skills / Rules / MCP / Hooks）。
                 </Text>
               </div>
+              <Button
+                size="xs"
+                variant="light"
+                color="violet"
+                leftSection={<IconPlus size={14} />}
+                onClick={() => {
+                  setPluginInstallMode('install')
+                  setPluginInstallOpen(true)
+                }}
+              >
+                安装 / 导入 Antigravity 插件
+              </Button>
             </Group>
 
             <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="md">
-              {(summary?.plugins || []).map((plg) => (
+              {filteredPlugins.map((plg) => {
+                const version = typeof plg.config?.version === 'string' ? plg.config.version : ''
+                const description = typeof plg.config?.description === 'string' ? plg.config.description : ''
+                const bundledSkills = Array.isArray(plg.config?.skills) ? plg.config.skills.map(String) : []
+                const bundledMcp = Array.isArray(plg.config?.mcp_servers) ? plg.config.mcp_servers.map(String) : []
+                const hasHooks = plg.config?.has_hooks === true
+                return (
                 <Card key={plg.id} withBorder radius="md" p="md" style={{ background: 'var(--cap-card-bg)' }}>
                   <Group justify="space-between" align="flex-start" wrap="nowrap">
                     <div>
@@ -1136,27 +1317,61 @@ export function CapabilitiesSettingsCard() {
                         <Text fw={700} size="sm" style={{ color: 'var(--cap-text-primary)' }}>
                           {plg.name}
                         </Text>
-                        <Badge size="xs" color={plg.agent === 'codex' ? 'indigo' : plg.agent === 'hermes' ? 'orange' : 'teal'}>
+                        <Badge size="xs" color={agentBadgeColor(plg.agent)}>
                           {plg.agent}
                         </Badge>
+                        {version && (
+                          <Badge size="xs" variant="outline" color="gray">
+                            v{version}
+                          </Badge>
+                        )}
                       </Group>
-                      {plg.marketplace && (
-                        <Badge size="xs" mt={6} variant="light" color="orange">
-                          来源: {plg.marketplace}
-                        </Badge>
-                      )}
+                      <Group gap={6} mt={6}>
+                        {plg.marketplace && (
+                          <Badge size="xs" variant="light" color="orange">
+                            来源: {plg.marketplace}
+                          </Badge>
+                        )}
+                        {hasHooks && (
+                          <Badge size="xs" variant="light" color="cyan">
+                            含 Hooks
+                          </Badge>
+                        )}
+                      </Group>
                     </div>
                     <Switch
                       checked={plg.enabled}
                       size="sm"
                       color="orange"
+                      aria-label={`切换插件 ${plg.name} 状态`}
                       onChange={() => handleTogglePlugin(plg)}
                     />
                   </Group>
 
+                  {description && (
+                    <Text size="xs" c="dimmed" mt="xs" lineClamp={2}>
+                      {description}
+                    </Text>
+                  )}
+
                   <Text size="xs" c="dimmed" mt="xs" style={{ fontFamily: 'monospace' }}>
                     {plg.full_name || plg.id}
                   </Text>
+
+                  {(bundledSkills.length > 0 || bundledMcp.length > 0) && (
+                    <Group gap={4} mt="xs" wrap="wrap">
+                      {bundledSkills.map((sk) => (
+                        <Badge key={`sk-${sk}`} size="xs" variant="subtle" color="indigo">
+                          Skill: {sk}
+                        </Badge>
+                      ))}
+                      {bundledMcp.map((mc) => (
+                        <Badge key={`mcp-${mc}`} size="xs" variant="subtle" color="teal">
+                          MCP: {mc}
+                        </Badge>
+                      ))}
+                    </Group>
+                  )}
 
                   <Group justify="flex-end" mt="md" pt="xs" style={{ borderTop: '1px solid var(--cap-border)' }}>
                     <Button
@@ -1179,8 +1394,14 @@ export function CapabilitiesSettingsCard() {
                     </Button>
                   </Group>
                 </Card>
-              ))}
+                )
+              })}
             </SimpleGrid>
+            {filteredPlugins.length === 0 && (
+              <div style={{ padding: 48, textAlign: 'center', color: 'var(--cap-text-muted)', fontSize: 13 }}>
+                当前节点下暂无匹配的插件包
+              </div>
+            )}
           </div>
         )}
 
@@ -1198,7 +1419,7 @@ export function CapabilitiesSettingsCard() {
               </Group>
 
               <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing="sm">
-                {(summary?.marketplaces || []).map((m) => (
+                {filteredMarketplaces.map((m) => (
                   <Card key={m.id} withBorder radius="md" p="sm" style={{ background: 'var(--cap-card-bg)' }}>
                     <Group justify="space-between">
                       <Group gap={4}>
@@ -1329,7 +1550,7 @@ export function CapabilitiesSettingsCard() {
       <Modal
         opened={mcpModalOpen}
         onClose={() => setMcpModalOpen(false)}
-        title="新建 / 配置 MCP 服务"
+        title={mcpEditing ? `编辑 MCP 服务 (${mcpFormName})` : '新建 / 配置 MCP 服务'}
         size="lg"
       >
         <Stack gap="sm">
@@ -1339,6 +1560,7 @@ export function CapabilitiesSettingsCard() {
               data={targets.map((t) => ({ value: t.id, label: `${t.name} (${t.kind})` }))}
               value={mcpFormTarget}
               onChange={(val) => setMcpFormTarget(val || 'local')}
+              disabled={mcpEditing}
               required
             />
             <Select
@@ -1351,6 +1573,7 @@ export function CapabilitiesSettingsCard() {
               ]}
               value={mcpFormAgent}
               onChange={(val) => setMcpFormAgent(val || 'codex')}
+              disabled={mcpEditing}
               required
             />
           </Group>
@@ -1360,28 +1583,48 @@ export function CapabilitiesSettingsCard() {
             placeholder="例如: devspace, custom-mcp"
             value={mcpFormName}
             onChange={(e) => setMcpFormName(e.target.value)}
+            disabled={mcpEditing}
             required
           />
 
-          <Select
-            label="传输协议模式"
-            data={[
-              { value: 'sse/http', label: 'SSE / HTTP 远程服务端点 (推荐)' },
-              { value: 'stdio', label: 'Stdio 本地/远程子进程命令行管道' },
-            ]}
-            value={mcpFormTransport}
-            onChange={(val) => setMcpFormTransport(val as any)}
-            required
-          />
-
-          {mcpFormTransport === 'sse/http' ? (
-            <TextInput
-              label="服务端点 URL"
-              placeholder="https://example.com/mcp"
-              value={mcpFormUrl}
-              onChange={(e) => setMcpFormUrl(e.target.value)}
+          <Group grow align="flex-end">
+            <Select
+              label="传输协议模式"
+              data={[
+                { value: 'sse/http', label: 'Streamable HTTP / SSE 远程端点 (推荐)' },
+                { value: 'stdio', label: 'Stdio 本地/远程子进程命令行管道' },
+              ]}
+              value={mcpFormTransport}
+              onChange={(val) => setMcpFormTransport(val as any)}
               required
             />
+            <Switch
+              label="启用该 MCP 服务"
+              checked={mcpFormEnabled}
+              onChange={(e) => setMcpFormEnabled(e.currentTarget.checked)}
+              mb={6}
+            />
+          </Group>
+
+          {mcpFormTransport === 'sse/http' ? (
+            <>
+              <TextInput
+                label="服务端点 URL"
+                placeholder="https://example.com/mcp"
+                value={mcpFormUrl}
+                onChange={(e) => setMcpFormUrl(e.target.value)}
+                required
+              />
+              <JsonInput
+                label="HTTP Headers 配置 (JSON 格式，留空或 [REDACTED] 保留原密钥)"
+                placeholder='{"Authorization": "Bearer xxx"}'
+                value={mcpFormHeaders}
+                onChange={setMcpFormHeaders}
+                formatOnBlur
+                autosize
+                minRows={2}
+              />
+            </>
           ) : (
             <Group grow>
               <TextInput
@@ -1401,7 +1644,7 @@ export function CapabilitiesSettingsCard() {
           )}
 
           <JsonInput
-            label="环境变量 / Headers 配置 (JSON 格式)"
+            label="环境变量 Env 配置 (JSON 格式，[REDACTED] 保留原密钥)"
             placeholder='{"API_KEY": "xxx", "DEBUG": "1"}'
             value={mcpFormEnv}
             onChange={setMcpFormEnv}
@@ -1416,6 +1659,62 @@ export function CapabilitiesSettingsCard() {
             </Button>
             <Button color="indigo" loading={mcpSaving} onClick={handleSaveMcp}>
               保存并写入 Agent 配置
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      {/* =======================================================
+          MODAL 1B: 安装 / 导入 Antigravity 插件
+      ======================================================= */}
+      <Modal
+        opened={pluginInstallOpen}
+        onClose={() => setPluginInstallOpen(false)}
+        title="安装 / 导入 Antigravity 插件"
+        size="md"
+      >
+        <Stack gap="sm">
+          <Select
+            label="操作模式"
+            data={[
+              { value: 'install', label: '直接安装插件 (agy plugin install)' },
+              { value: 'import', label: '从其他 Agent 导入插件 (agy plugin import)' },
+            ]}
+            value={pluginInstallMode}
+            onChange={(val) => setPluginInstallMode((val as 'install' | 'import') || 'install')}
+          />
+
+          {pluginInstallMode === 'install' ? (
+            <TextInput
+              label="插件来源 (目录路径 / .zip / URL / plugin@marketplace)"
+              placeholder="例如: /path/to/my-plugin 或 my-plugin@marketplace"
+              value={pluginInstallSource}
+              onChange={(e) => setPluginInstallSource(e.target.value)}
+              required
+            />
+          ) : (
+            <Select
+              label="导入来源 Agent"
+              data={[
+                { value: 'claude', label: 'Claude Code (~/.claude/plugins/)' },
+                { value: 'gemini', label: 'Gemini CLI (~/.gemini/extensions/)' },
+                { value: 'auto', label: '自动检测可导入插件' },
+              ]}
+              value={pluginImportSource}
+              onChange={(val) => setPluginImportSource(val || 'claude')}
+            />
+          )}
+
+          <Text size="xs" c="dimmed">
+            将在当前选中节点 [{summary?.target_name || selectedTargetId}] 上调用原生 agy plugin 命令执行。
+          </Text>
+
+          <Group justify="flex-end" mt="md">
+            <Button variant="default" onClick={() => setPluginInstallOpen(false)}>
+              取消
+            </Button>
+            <Button color="violet" loading={pluginInstalling} onClick={() => void handleInstallOrImportAgyPlugin()}>
+              {pluginInstallMode === 'install' ? '执行安装' : '执行导入'}
             </Button>
           </Group>
         </Stack>
@@ -1510,11 +1809,13 @@ export function CapabilitiesSettingsCard() {
                       const isChecked = dispatchMatrix.some(
                         (m) => m.target_id === tgt.id && m.agent === agentName
                       )
+                      const incompatiblePlugin = dispatchType === 'plugin' && Boolean(dispatchItem?.agent) && dispatchItem.agent !== agentName
                       return (
                         <Checkbox
                           key={`${tgt.id}::${agentName}`}
                           size="xs"
-                          label={label}
+                          label={incompatiblePlugin ? `${label}（仅限同类 Agent）` : label}
+                          disabled={incompatiblePlugin}
                           checked={isChecked}
                           onChange={(e) => {
                             if (e.currentTarget.checked) {

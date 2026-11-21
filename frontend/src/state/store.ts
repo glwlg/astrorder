@@ -22,6 +22,7 @@ import type {
 
 export interface AstrorderStore {
   agents: Record<string, Agent>
+  disabledAgentConnections: ReadonlySet<string>
   projects: Record<string, Project>
   sessions: Record<string, Session>
   messages: Record<string, Record<string, Message>>
@@ -281,6 +282,7 @@ function normalizeApproval(event: EventEnvelope): Approval | null {
 
 export const useAstrorderStore = create<AstrorderStore>((set) => ({
   agents: {},
+  disabledAgentConnections: new Set(),
   projects: {},
   sessions: {},
   messages: {},
@@ -319,6 +321,9 @@ export const useAstrorderStore = create<AstrorderStore>((set) => ({
       for (const task of payload.tasks || []) tasks[taskKey(task)] = task
       return {
         agents,
+        disabledAgentConnections: payload.cursor >= state.cursor
+          ? new Set(payload.disabled_agent_connections)
+          : state.disabledAgentConnections,
         projects,
         sessions,
         tasks,
@@ -484,6 +489,16 @@ export const useAstrorderStore = create<AstrorderStore>((set) => ({
         return { ...base, agents: { ...state.agents, [agent.id]: agent } }
       }
 
+      if (event.type === 'agent.connection_choice') {
+        if (event.cursor <= state.cursor) return base
+        const { key, enabled } = event.data
+        if (typeof key !== 'string' || typeof enabled !== 'boolean') return base
+        const disabledAgentConnections = new Set(state.disabledAgentConnections)
+        if (enabled) disabledAgentConnections.delete(key)
+        else disabledAgentConnections.add(key)
+        return { ...base, disabledAgentConnections }
+      }
+
       if (event.type === 'project.upsert') {
         const project = event.data as unknown as Project
         if (!project.id || !project.source_id || !project.project_id) return base
@@ -639,6 +654,7 @@ export const useAstrorderStore = create<AstrorderStore>((set) => ({
     scheduleActivityExpiry({})
     set({
       agents: {},
+      disabledAgentConnections: new Set(),
       projects: {},
       sessions: {},
       messages: {},
@@ -664,9 +680,23 @@ export const useAstrorderStore = create<AstrorderStore>((set) => ({
   },
 }))
 
+export function isSessionAgentDisconnected(state: AstrorderStore, agentId: string): boolean {
+  const agent = state.agents[agentId]
+  if (!agent) return false
+  const kind = agent.kind === 'antigravity-ssh' ? 'antigravity' : agent.kind
+  return state.disabledAgentConnections.has(`${agent.connection_id || 'local'}:${kind}`)
+}
+
+export function isDisconnectedSessionRoute(state: AstrorderStore, sessionId: string, agentId: string | null): boolean {
+  if (agentId) return isSessionAgentDisconnected(state, agentId)
+  if (!state.disabledAgentConnections.size) return false
+  const candidates = Object.values(state.sessions).filter(session => session.id === sessionId && !isEphemeralSession(session))
+  return candidates.length === 1 && isSessionAgentDisconnected(state, candidates[0].agent_id)
+}
+
 export function selectSessions(state: AstrorderStore): Session[] {
   return Object.values(state.sessions)
-    .filter(session => !isEphemeralSession(session))
+    .filter(session => !isEphemeralSession(session) && !isSessionAgentDisconnected(state, session.agent_id))
     .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
 }
 

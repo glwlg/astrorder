@@ -1,5 +1,5 @@
 import { MantineProvider } from '@mantine/core'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { api } from '../../api/client'
 import { AnalyticsPage } from './AnalyticsPage'
@@ -111,15 +111,21 @@ it('uses the management address for existing configurations', async () => {
   expect(await screen.findByTitle('网关统计页')).toHaveAttribute('src', config.management_url)
 })
 
-it('hides the native gateway view when switching to Direct Token usage and renders breakdown', async () => {
+it('hides the native gateway view when switching to Session Token usage and supports server filtering', async () => {
   const showStatistics = vi.fn().mockResolvedValue(undefined)
   const hideStatistics = vi.fn().mockResolvedValue(undefined)
   ;(window as unknown as { astrorderDesktop: unknown }).astrorderDesktop = { showStatistics, hideStatistics }
   vi.mocked(api.getAnalyticsConfig).mockResolvedValue(config as never)
+  const servers = [
+    { id: 'local', name: '本机' },
+    { id: 'wsl', name: 'WSL' },
+    { id: 'debian', name: 'Debian' },
+  ]
   vi.mocked(api.getAnalyticsUsage).mockResolvedValue({
-    gatewayType: 'direct',
+    gatewayType: 'sessions',
     range: '7d',
     surface: 'all',
+    connectionId: 'all',
     since: 0,
     generatedAt: '2026-11-18T09:30:00Z',
     summary: {
@@ -130,6 +136,7 @@ it('hides the native gateway view when switching to Direct Token usage and rende
       cacheReadInputTokens: 210_000,
       reasoningOutputTokens: 4_000,
       cacheHitRate: 0.875,
+      activeServers: 3,
       activeAgents: 1,
       activeSessions: 2,
     },
@@ -146,6 +153,7 @@ it('hides the native gateway view when switching to Direct Token usage and rende
     } as never],
     providers: [],
     accounts: [],
+    servers,
     directAgents: [{
       agentId: 'ssh-antigravity-wsl',
       name: 'Antigravity · WSL',
@@ -168,9 +176,10 @@ it('hides the native gateway view when switching to Direct Token usage and rende
       agentId: 'ssh-antigravity-wsl',
       agentName: 'Antigravity · WSL',
       agentKind: 'antigravity',
+      connectionId: 'wsl',
       connectionName: 'WSL',
       title: 'ACP 升级会话',
-      workspace: '/home/luwei/workspace/glwlg/astrorder',
+      workspace: '/home/fixture/workspace/example-org/astrorder',
       model: 'gemini-4-carbon-high',
       updatedAt: '2026-11-18T09:30:00Z',
       requests: 15,
@@ -188,12 +197,31 @@ it('hides the native gateway view when switching to Direct Token usage and rende
   })
   mount()
   await waitFor(() => expect(showStatistics).toHaveBeenCalled())
-  fireEvent.click(screen.getByRole('tab', { name: '直连 Token' }))
+  fireEvent.click(screen.getByRole('tab', { name: '会话 Token' }))
   expect(await screen.findByText('ACP 升级会话')).toBeInTheDocument()
-  expect(api.getAnalyticsUsage).toHaveBeenCalledWith({ range: '7d', surface: 'all', source: 'direct' })
+  expect(api.getAnalyticsUsage).toHaveBeenCalledWith({ range: '7d', surface: 'all', source: 'sessions' })
   expect(hideStatistics).toHaveBeenCalled()
   expect(screen.queryByTitle('网关统计页')).not.toBeInTheDocument()
-  expect(screen.getByRole('region', { name: '直连会话消耗排行' })).toHaveAttribute('tabindex', '0')
+  expect(screen.getByRole('region', { name: '会话消耗排行' })).toHaveAttribute('tabindex', '0')
+
+  const serverFilter = screen.getByRole('radiogroup', { name: '服务器筛选' })
+  fireEvent.click(within(serverFilter).getByRole('radio', { name: 'WSL' }))
+  await waitFor(() => {
+    expect(api.getAnalyticsUsage).toHaveBeenCalledWith({
+      range: '7d',
+      surface: 'all',
+      source: 'sessions',
+      connection_id: 'wsl',
+    })
+  })
+  fireEvent.click(within(serverFilter).getByRole('radio', { name: '全部服务器' }))
+  await waitFor(() => {
+    expect(api.getAnalyticsUsage).toHaveBeenLastCalledWith({
+      range: '7d',
+      surface: 'all',
+      source: 'sessions',
+    })
+  })
 })
 
 it('reports configuration errors without leaving a blank page', async () => {

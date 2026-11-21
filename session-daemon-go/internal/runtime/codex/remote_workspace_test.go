@@ -13,12 +13,12 @@ func TestRemoteWorkspaceAdaptiveFallback(t *testing.T) {
 	}
 	// Case 1: Configured POSIX workspace fallback on Windows path
 	rt := NewWithSSHStarter(Config{
-		Workspace: "/home/luwei",
-		Allowed:   []string{"/home/luwei"},
+		Workspace: "/home/fixture",
+		Allowed:   []string{"/home/fixture"},
 	}, starter)
-	ws, err := rt.workspace(`P:\DevApp\Astrorder\server`)
-	if err != nil || ws != "/home/luwei" {
-		t.Fatalf("expected fallback to /home/luwei, got %q, err: %v", ws, err)
+	ws, err := rt.workspace(`C:\Fixture\Astrorder\server`)
+	if err != nil || ws != "/home/fixture" {
+		t.Fatalf("expected fallback to /home/fixture, got %q, err: %v", ws, err)
 	}
 
 	// Case 2: No configured workspace, fallback to "/"
@@ -32,7 +32,7 @@ func TestRemoteWorkspaceAdaptiveFallback(t *testing.T) {
 
 	// Case 3: Explicit valid POSIX path
 	rt3 := NewWithSSHStarter(Config{
-		Workspace: "/home/luwei",
+		Workspace: "/home/fixture",
 		Allowed:   []string{"/var/data"},
 	}, starter)
 	ws, err = rt3.workspace("/var/data")

@@ -28,10 +28,7 @@ func TestRealCanonicalOwnerLifecycle(t *testing.T) {
 	if json.Unmarshal(data, &argv) != nil || len(argv) < 2 {
 		t.Fatal("invalid launcher command")
 	}
-	fixtureRoot, err := os.MkdirTemp("C:/Users/luwei/AppData/Local/hermes/cache/scratch", "canonical-native-")
-	if err != nil {
-		t.Fatal(err)
-	}
+	fixtureRoot := t.TempDir()
 	home := filepath.Join(fixtureRoot, "profiles", filepath.Base(fixtureRoot))
 	if err = os.MkdirAll(home, 0700); err != nil {
 		t.Fatal(err)

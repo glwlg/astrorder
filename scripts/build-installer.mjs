@@ -123,15 +123,17 @@ async function main() {
   mkdirSync(path.dirname(codexDest), { recursive: true })
   cpSync(path.join(root, 'connectors', 'codex', 'codex-plugin'), codexDest, { recursive: true })
 
-  // 5.3 .hermes/plugins/astrorder-hermes
+  // 5.3 Bundle Hermes under its installed plugin discovery path.
+  const hermesSource = path.join(root, 'connectors', 'hermes')
   const hermesPluginDest = path.join(pkgDir, 'server', '.hermes', 'plugins', 'astrorder-hermes')
-  mkdirSync(path.dirname(hermesPluginDest), { recursive: true })
-  cpSync(path.join(root, '.hermes', 'plugins', 'astrorder-hermes'), hermesPluginDest, { recursive: true })
-
-  // 5.4 connectors/hermes/astrorder_hermes_plugin
-  const hermesConnDest = path.join(pkgDir, 'server', 'connectors', 'hermes', 'astrorder_hermes_plugin')
-  mkdirSync(path.dirname(hermesConnDest), { recursive: true })
-  cpSync(path.join(root, 'connectors', 'hermes', 'astrorder_hermes_plugin'), hermesConnDest, { recursive: true })
+  const hermesPackage = 'astrorder_hermes_plugin'
+  mkdirSync(hermesPluginDest, { recursive: true })
+  cpSync(path.join(hermesSource, 'plugin_loader.py'), path.join(hermesPluginDest, '__init__.py'))
+  cpSync(path.join(hermesSource, 'plugin.yaml'), path.join(hermesPluginDest, 'plugin.yaml'))
+  cpSync(path.join(hermesSource, hermesPackage), path.join(hermesPluginDest, hermesPackage), {
+    recursive: true,
+    filter: source => path.basename(source) !== '__pycache__' && !/\.(pyc|pyo)$/.test(source),
+  })
 
   // The shell keeps its embedded Wails build; browser/PWA assets need a
   // separate build without ASTRORDER_WAILS before entering the installer.
@@ -141,12 +143,12 @@ async function main() {
   if (!existsSync(path.join(root, 'frontend', 'dist', 'sw-astrorder.js'))) throw new Error('Browser PWA worker missing')
   if (existsSync(path.join(embeddedApp, 'sw-astrorder.js'))) throw new Error('Desktop embeds a PWA worker')
 
-  // 5.5 frontend/dist
+  // 5.4 frontend/dist
   const frontDist = path.join(pkgDir, 'server', 'frontend', 'dist')
   mkdirSync(path.dirname(frontDist), { recursive: true })
   cpSync(path.join(root, 'frontend', 'dist'), frontDist, { recursive: true })
 
-  // 5.6 favicon.ico
+  // 5.5 favicon.ico
   const favDest = path.join(pkgDir, 'server', 'frontend', 'public', 'favicon.ico')
   mkdirSync(path.dirname(favDest), { recursive: true })
   cpSync(path.join(root, 'frontend', 'public', 'favicon.ico'), favDest)

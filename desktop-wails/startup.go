@@ -83,7 +83,7 @@ func (s *ShellService) exitClient() {
 	}
 	defer s.opMu.Unlock()
 	if s.ctl != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 65*time.Second)
 		result, err := s.ctl.Run(ctx, "app", "stop", false)
 		cancel()
 		if err != nil {

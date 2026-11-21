@@ -24,7 +24,7 @@ func (echoNativeQuery) Query(_ context.Context, r core.Request) (map[string]any,
 
 func TestQueryNativeRoutesClosedSelectorsAndRemoteConnections(t *testing.T) {
 	f := startFixture(t)
-	for _, kind := range []string{"codex", "hermes", "grok"} {
+	for _, kind := range []string{"codex", "hermes", "grok", "antigravity"} {
 		f.daemon.RegisterRuntime(kind, echoNativeQuery{})
 	}
 	client := sessiondv1.NewRuntimeQueryClient(f.conn)
@@ -34,6 +34,7 @@ func TestQueryNativeRoutesClosedSelectorsAndRemoteConnections(t *testing.T) {
 	}{
 		{"codex_initialize", "initialize", 1}, {"codex_account_read", "account/read", 1}, {"codex_hooks_list", "hooks/list", 1}, {"codex_model_list", "model/list", 1}, {"codex_skills_list", "skills/list", 1}, {"codex_thread_items_list", "thread/items/list", 1}, {"codex_thread_list", "thread/list", 1}, {"codex_thread_loaded_list", "thread/loaded/list", 1}, {"codex_thread_read", "thread/read", 1},
 		{"hermes_session_list", "session.list", 3}, {"hermes_active_list", "session.active_list", 3}, {"hermes_projects_tree", "projects.tree", 3}, {"hermes_project_sessions", "projects.project_sessions", 3}, {"hermes_session_history", "session.history", 3}, {"hermes_models_list", "models.list", 3}, {"hermes_commands_list", "commands.list", 3}, {"grok_initialize", "initialize", 6}, {"grok_session_list", "session/list", 6},
+		{"antigravity_session_list", "session.list", 8}, {"antigravity_models_list", "models.list", 8}, {"antigravity_quota_read", "quota.read", 8}, {"antigravity_session_usage", "session.usage", 8}, {"antigravity_usage_summary", "usage.summary", 8},
 	}
 	for _, test := range cases {
 		t.Run(test.branch, func(t *testing.T) {
@@ -41,13 +42,17 @@ func TestQueryNativeRoutesClosedSelectorsAndRemoteConnections(t *testing.T) {
 			message := request.ProtoReflect()
 			branch := message.Descriptor().Fields().ByName(protoreflect.Name(test.branch))
 			query := message.NewField(branch).Message()
-			for _, name := range []protoreflect.Name{"thread_id", "session_id", "project_id"} {
+			for _, name := range []protoreflect.Name{"thread_id", "session_id", "project_id", "conversation_id"} {
 				if field := query.Descriptor().Fields().ByName(name); field != nil {
 					query.Set(field, protoreflect.ValueOfString("native-id"))
 				}
 			}
 			if test.branch == "codex_thread_items_list" {
 				query.Set(query.Descriptor().Fields().ByName("limit"), protoreflect.ValueOfUint32(10))
+			}
+			if test.branch == "antigravity_usage_summary" {
+				query.Set(query.Descriptor().Fields().ByName("since_ms"), protoreflect.ValueOfInt64(1795000000000))
+				query.Set(query.Descriptor().Fields().ByName("until_ms"), protoreflect.ValueOfInt64(1795086400000))
 			}
 			message.Set(branch, protoreflect.ValueOfMessage(query))
 			response, err := client.QueryNative(f.ctx, request)
@@ -60,6 +65,12 @@ func TestQueryNativeRoutesClosedSelectorsAndRemoteConnections(t *testing.T) {
 			}
 			if payload["method"] != test.method {
 				t.Fatalf("wrong native method: %v", payload)
+			}
+			if test.branch == "antigravity_usage_summary" {
+				params, _ := payload["params"].(map[string]any)
+				if params == nil || params["since_ms"] != float64(1795000000000) || params["until_ms"] != float64(1795086400000) {
+					t.Fatalf("usage summary params lost over gRPC: %v", payload)
+				}
 			}
 		})
 	}

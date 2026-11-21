@@ -22,7 +22,7 @@ describe('MarkdownContent Links Handling', () => {
     useSidecarStore.setState({ isOpen: false, activeTabId: '', tabs: [], activeSessionKey: null, sessionMemories: {} })
   })
   it('intercepts http artifact url and does not render raw refreshable link', () => {
-    const text = '访问 [order-flow.excalidraw](https://ao.651971564.xyz/abs/path/artifacts/order-flow.excalidraw)'
+    const text = '访问 [order-flow.excalidraw](https://ao.example.com/abs/path/artifacts/order-flow.excalidraw)'
     render(
       <MantineProvider>
         <MarkdownContent value={text} session={mockSession} />

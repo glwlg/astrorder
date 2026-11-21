@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"astrorder.dev/app-server/internal/connections"
 	sessiondv1 "astrorder.dev/contracts/gen/go/astrorder/sessiond/v1"
 )
 
@@ -19,31 +20,6 @@ func strField(m map[string]any, key string) string {
 	}
 	v, _ := m[key].(string)
 	return v
-}
-
-func firstNonEmptyMapStr(key string, maps ...map[string]any) string {
-	for _, m := range maps {
-		if m == nil {
-			continue
-		}
-		if v, ok := m[key].(string); ok {
-			if trimmed := strings.TrimSpace(v); trimmed != "" {
-				return trimmed
-			}
-		}
-	}
-	return ""
-}
-
-func remoteAgyDefault(user string) string {
-	u := strings.TrimSpace(user)
-	if u == "" {
-		u = "luwei"
-	}
-	if u == "root" {
-		return "/root/.local/bin/agy"
-	}
-	return "/home/" + u + "/.local/bin/agy"
 }
 
 func parseNativeGatewayJSON(nj *sessiondv1.NativeJson, dst any) error {
@@ -185,17 +161,11 @@ func (h *Handler) resolveAntigravityTarget(ctx context.Context, agentID string) 
 		sshConf.IdentityFile = &idf
 	}
 	ws := strField(settings, "workspace")
-	if ws == "" {
-		ws = "/home/luwei"
+	if ws != "" {
+		sshConf.Workspace = &ws
 	}
-	sshConf.Workspace = &ws
 
-	if ae := firstNonEmptyMapStr("antigravity_executable", settings, sshRow); ae != "" {
-		sshConf.AntigravityExecutable = &ae
-	} else {
-		defExe := remoteAgyDefault(user)
-		sshConf.AntigravityExecutable = &defExe
-	}
+	sshConf.AntigravityExecutable = connections.RuntimeExecutable(ctx, h.remoteExecutable, "antigravity", sshRow)
 	if profile := strField(sshRow, "profile_name"); profile != "" {
 		sshConf.ProfileName = &profile
 	}
@@ -254,6 +224,178 @@ func matchAntigravityQuotaModel(models []map[string]any, candidate string) map[s
 	return nil
 }
 
+type antigravityUsageBucket struct {
+	ID                string  `json:"id"`
+	Name              string  `json:"name"`
+	Description       string  `json:"description"`
+	Window            string  `json:"window"`
+	RemainingFraction float64 `json:"remaining_fraction"`
+	UsedPercent       float64 `json:"used_percent"`
+	ResetAt           int64   `json:"reset_at"`
+	ResetTime         string  `json:"reset_time"`
+}
+
+type antigravityUsageGroup struct {
+	Name        string                   `json:"name"`
+	Description string                   `json:"description"`
+	Buckets     []antigravityUsageBucket `json:"buckets"`
+}
+
+func antigravityGroupDisplayName(name string) string {
+	trimmed := strings.TrimSpace(name)
+	switch strings.ToLower(trimmed) {
+	case "gemini models":
+		return "Gemini 模型组"
+	case "claude and gpt models":
+		return "Claude / GPT 模型组"
+	default:
+		return trimmed
+	}
+}
+
+func matchAntigravityUsageGroup(groups []antigravityUsageGroup, candidate string) *antigravityUsageGroup {
+	cand := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(candidate, "antigravity/")))
+	if cand == "" || cand == "default" {
+		return nil
+	}
+
+	if strings.Contains(cand, "argon") {
+		for i := range groups {
+			if strings.Contains(strings.ToLower(groups[i].Name), "argon") {
+				return &groups[i]
+			}
+			for _, b := range groups[i].Buckets {
+				if strings.Contains(strings.ToLower(b.ID), "argon") {
+					return &groups[i]
+				}
+			}
+		}
+		for i := range groups {
+			if strings.Contains(strings.ToLower(groups[i].Name), "gemini") {
+				return &groups[i]
+			}
+		}
+		return nil
+	}
+
+	if strings.Contains(cand, "claude") || strings.Contains(cand, "gpt") || strings.Contains(cand, "openai") || strings.Contains(cand, "oss") {
+		for i := range groups {
+			lowerName := strings.ToLower(groups[i].Name)
+			lowerDesc := strings.ToLower(groups[i].Description)
+			if strings.Contains(lowerName, "claude") || strings.Contains(lowerName, "gpt") ||
+				strings.Contains(lowerDesc, "claude") || strings.Contains(lowerDesc, "gpt") {
+				return &groups[i]
+			}
+			for _, b := range groups[i].Buckets {
+				if strings.HasPrefix(strings.ToLower(b.ID), "3p-") {
+					return &groups[i]
+				}
+			}
+		}
+		return nil
+	}
+
+	if strings.Contains(cand, "gemini") || strings.Contains(cand, "orchestrator") {
+		for _, kw := range []string{"neon", "hydrogen", "flash", "carbon"} {
+			if strings.Contains(cand, kw) {
+				for i := range groups {
+					if strings.Contains(strings.ToLower(groups[i].Name), "argon") {
+						continue
+					}
+					if strings.Contains(strings.ToLower(groups[i].Description), kw) || strings.Contains(strings.ToLower(groups[i].Name), kw) {
+						return &groups[i]
+					}
+				}
+			}
+		}
+		for i := range groups {
+			lowerName := strings.ToLower(groups[i].Name)
+			if strings.Contains(lowerName, "gemini") && !strings.Contains(lowerName, "argon") {
+				return &groups[i]
+			}
+		}
+	}
+
+	normCand := cand
+	for _, suffix := range []string{"-xhigh", "-high", "-medium", "-low", "-max", "-worker"} {
+		normCand = strings.TrimSuffix(normCand, suffix)
+	}
+	normCand = strings.NewReplacer("-", " ", "_", " ", ".", " ").Replace(normCand)
+	normCand = strings.Join(strings.Fields(normCand), " ")
+	if normCand != "" {
+		for i := range groups {
+			lowerDesc := strings.ToLower(strings.NewReplacer("-", " ", "_", " ", ".", " ").Replace(groups[i].Description))
+			lowerName := strings.ToLower(strings.NewReplacer("-", " ", "_", " ", ".", " ").Replace(groups[i].Name))
+			if strings.Contains(lowerDesc, normCand) || strings.Contains(lowerName, normCand) {
+				return &groups[i]
+			}
+		}
+	}
+	return nil
+}
+
+func buildAntigravityGroupAccount(agentID, baseLabel, plan, asOf string, g antigravityUsageGroup, suffix string) map[string]any {
+	quota := map[string]any{}
+	customWindows := make([]map[string]any, 0)
+	hasShort := false
+	hasWeekly := false
+
+	for _, b := range g.Buckets {
+		winKind := strings.ToLower(strings.TrimSpace(b.Window))
+		if winKind == "5h" && !hasShort {
+			hasShort = true
+			quota["shortPercent"] = b.UsedPercent
+			if b.ResetAt > 0 {
+				quota["shortResetAt"] = b.ResetAt
+			}
+			continue
+		}
+		if winKind == "weekly" && !hasWeekly {
+			hasWeekly = true
+			quota["weeklyPercent"] = b.UsedPercent
+			if b.ResetAt > 0 {
+				quota["weeklyResetAt"] = b.ResetAt
+			}
+			continue
+		}
+		label := strings.TrimSpace(b.Name)
+		if label == "" {
+			label = strings.TrimSpace(b.ID)
+		}
+		if label == "" {
+			label = "订阅配额"
+		}
+		row := map[string]any{
+			"label":   label,
+			"percent": b.UsedPercent,
+		}
+		if b.ResetAt > 0 {
+			row["resetAt"] = b.ResetAt
+		}
+		customWindows = append(customWindows, row)
+	}
+	quota["customWindows"] = customWindows
+
+	logLabel := baseLabel
+	if groupLabel := antigravityGroupDisplayName(g.Name); groupLabel != "" {
+		logLabel = baseLabel + " · " + groupLabel
+	}
+
+	account := map[string]any{
+		"id":           "antigravity/" + agentID + "/" + suffix,
+		"logLabel":     logLabel,
+		"plan":         plan,
+		"error":        "",
+		"last":         false,
+		"readDeferred": false,
+		"quota":        quota,
+	}
+	if asOf != "" {
+		account["asOf"] = asOf
+	}
+	return account
+}
+
 func (h *Handler) serveAntigravityNativeModelQuota(ctx context.Context, model, agentID string) (map[string]any, bool) {
 	if h.client == nil || h.client.Runtime == nil {
 		return nil, false
@@ -277,11 +419,12 @@ func (h *Handler) serveAntigravityNativeModelQuota(ctx context.Context, model, a
 	}
 
 	var raw struct {
-		Provider string           `json:"provider"`
-		Plan     string           `json:"plan"`
-		PlanName string           `json:"plan_name"`
-		AsOf     string           `json:"as_of"`
-		Models   []map[string]any `json:"models"`
+		Provider string                  `json:"provider"`
+		Plan     string                  `json:"plan"`
+		PlanName string                  `json:"plan_name"`
+		AsOf     string                  `json:"as_of"`
+		Groups   []antigravityUsageGroup `json:"groups"`
+		Models   []map[string]any        `json:"models"`
 	}
 	if err := parseNativeGatewayJSON(resp.Result, &raw); err != nil {
 		return nil, false
@@ -299,6 +442,25 @@ func (h *Handler) serveAntigravityNativeModelQuota(ctx context.Context, model, a
 	logLabel := strField(agent, "name")
 	if logLabel == "" {
 		logLabel = "Antigravity 原生订阅"
+	}
+
+	if len(raw.Groups) > 0 {
+		agentKey := strField(agent, "id")
+		var accounts []map[string]any
+		if matchedGroup := matchAntigravityUsageGroup(raw.Groups, candidate); matchedGroup != nil {
+			accounts = []map[string]any{buildAntigravityGroupAccount(agentKey, logLabel, plan, raw.AsOf, *matchedGroup, "matched")}
+		} else {
+			accounts = make([]map[string]any, 0, len(raw.Groups))
+			for idx, g := range raw.Groups {
+				accounts = append(accounts, buildAntigravityGroupAccount(agentKey, logLabel, plan, raw.AsOf, g, strconv.Itoa(idx)))
+			}
+		}
+		return map[string]any{
+			"model":     candidate,
+			"providers": []string{"antigravity"},
+			"reports":   []any{},
+			"accounts":  accounts,
+		}, true
 	}
 
 	matched := matchAntigravityQuotaModel(raw.Models, candidate)

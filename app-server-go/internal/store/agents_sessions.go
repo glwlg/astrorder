@@ -92,14 +92,43 @@ func (s *Store) SetAgentStatus(ctx context.Context, agentID, status string) (map
 	return s.GetAgent(ctx, agentID)
 }
 
-// SetAgentConnectionChoice records an explicit enabled/disabled environment choice.
-func (s *Store) SetAgentConnectionChoice(ctx context.Context, id string, enabled bool) error {
+func setAgentConnectionChoice(ctx context.Context, db interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, id string, enabled bool) error {
 	if id == "" {
 		return errors.New("choice ID is required")
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO agent_connection_choices(id,enabled) VALUES(?,?)
+	_, err := db.ExecContext(ctx, `INSERT INTO agent_connection_choices(id,enabled) VALUES(?,?)
 ON CONFLICT(id) DO UPDATE SET enabled=excluded.enabled`, id, enabled)
 	return err
+}
+
+// SetAgentConnectionChoice stores an enabled/disabled environment choice.
+func (s *Store) SetAgentConnectionChoice(ctx context.Context, id string, enabled bool) error {
+	return setAgentConnectionChoice(ctx, s.db, id, enabled)
+}
+
+// RecordAgentConnectionChoice commits the user's choice and its event together.
+func (s *Store) RecordAgentConnectionChoice(ctx context.Context, id string, enabled bool) ([]Event, error) {
+	eventID, err := randomID("agent-choice-", 32)
+	if err != nil {
+		return nil, err
+	}
+	var events []Event
+	err = s.WithTx(ctx, func(tx *sql.Tx) error {
+		if err := setAgentConnectionChoice(ctx, tx, id, enabled); err != nil {
+			return err
+		}
+		event, err := insertEventTx(ctx, tx, Event{
+			ID: eventID, Type: "agent.connection_choice",
+			Data: map[string]any{"key": id, "enabled": enabled},
+		}, s.eventRetention)
+		if event != nil {
+			events = append(events, *event)
+		}
+		return err
+	})
+	return events, err
 }
 
 // GetAgentConnectionChoice returns value, presence, and any query error.
@@ -110,6 +139,30 @@ func (s *Store) GetAgentConnectionChoice(ctx context.Context, id string) (bool, 
 	}
 	enabled, err := boolValue(row["enabled"], false)
 	return enabled, true, err
+}
+
+// DisabledAgentConnectionsAtCursor reads the explicit disconnects and the event cursor from one snapshot.
+func (s *Store) DisabledAgentConnectionsAtCursor(ctx context.Context) ([]string, int64, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT choices.id, snapshot.cursor
+FROM (SELECT coalesce(max(cursor),0) AS cursor FROM events) AS snapshot
+LEFT JOIN agent_connection_choices AS choices ON choices.enabled=0
+ORDER BY choices.id`)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	ids := []string{}
+	var cursor int64
+	for rows.Next() {
+		var id sql.NullString
+		if err := rows.Scan(&id, &cursor); err != nil {
+			return nil, 0, err
+		}
+		if id.Valid {
+			ids = append(ids, id.String)
+		}
+	}
+	return ids, cursor, rows.Err()
 }
 
 // GetSession resolves only the exact (agentID, sessionID) composite identity.

@@ -47,45 +47,49 @@ type summaryCatalogMeta struct {
 
 func loadConversationSummariesMap(ctx context.Context, home string, posixPaths bool) map[string]summaryCatalogMeta {
 	out := map[string]summaryCatalogMeta{}
-	dbPath := filepath.Join(home, ".gemini", "antigravity-cli", "conversation_summaries.db")
-	db, err := openNative(dbPath)
-	if err != nil {
-		return out
+	dbPaths := []string{
+		filepath.Join(home, ".gemini", "antigravity", "conversation_summaries.db"),
+		filepath.Join(home, ".gemini", "antigravity-cli", "conversation_summaries.db"),
 	}
-	defer db.Close()
-
-	rows, err := db.QueryContext(ctx, `SELECT conversation_id, title, workspace_uris FROM conversation_summaries WHERE killed=0`)
-	if err != nil {
-		return out
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var id, title, uris string
-		if err := rows.Scan(&id, &title, &uris); err != nil || !validID(id) {
+	for _, dbPath := range dbPaths {
+		db, err := openNative(dbPath)
+		if err != nil {
 			continue
 		}
-		workspace := ""
-		var paths []string
-		if json.Unmarshal([]byte(uris), &paths) == nil && len(paths) > 0 {
-			if u, e := url.Parse(paths[0]); e == nil && u.Scheme == "file" {
-				workspace = u.Path
-				if posixPaths {
-					if workspace != "" {
-						workspace = path.Clean(workspace)
+		rows, err := db.QueryContext(ctx, `SELECT conversation_id, title, workspace_uris FROM conversation_summaries WHERE killed=0`)
+		if err != nil {
+			db.Close()
+			continue
+		}
+		for rows.Next() {
+			var id, title, uris string
+			if err := rows.Scan(&id, &title, &uris); err != nil || !validID(id) {
+				continue
+			}
+			workspace := ""
+			var paths []string
+			if json.Unmarshal([]byte(uris), &paths) == nil && len(paths) > 0 {
+				if u, e := url.Parse(paths[0]); e == nil && u.Scheme == "file" {
+					workspace = u.Path
+					if posixPaths {
+						if workspace != "" {
+							workspace = path.Clean(workspace)
+						}
+					} else {
+						if runtime.GOOS == "windows" {
+							workspace = strings.TrimPrefix(workspace, "/")
+						}
+						workspace = filepath.FromSlash(workspace)
 					}
-				} else {
-					if runtime.GOOS == "windows" {
-						workspace = strings.TrimPrefix(workspace, "/")
-					}
-					workspace = filepath.FromSlash(workspace)
 				}
 			}
+			out[id] = summaryCatalogMeta{
+				title:     strings.TrimSpace(title),
+				workspace: workspace,
+			}
 		}
-		out[id] = summaryCatalogMeta{
-			title:     strings.TrimSpace(title),
-			workspace: workspace,
-		}
+		rows.Close()
+		db.Close()
 	}
 	return out
 }

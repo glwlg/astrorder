@@ -122,11 +122,16 @@ export interface DirectUsageAgentSummary {
   cacheHitRate: number
   shareRatio: number
 }
+export interface UsageServerOption {
+  id: string
+  name: string
+}
 export interface DirectUsageSessionRow {
   sessionId: string
   agentId: string
   agentName: string
   agentKind: string
+  connectionId?: string
   connectionName: string
   title: string
   workspace: string
@@ -141,10 +146,11 @@ export interface DirectUsageSessionRow {
   totalTokens: number
 }
 export interface OcxUsageResponse {
-  gatewayType?: 'magpie' | 'opencodex' | 'direct'
+  gatewayType?: 'magpie' | 'opencodex' | 'direct' | 'sessions'
   bucket?: 'hour' | 'day' | 'week'
   range: string
   surface: string
+  connectionId?: string
   since: number
   generatedAt: string
   summary: Record<string, number>
@@ -152,6 +158,7 @@ export interface OcxUsageResponse {
   models: OcxUsageBreakdown[]
   providers: OcxUsageBreakdown[]
   accounts: Array<{ accountLogLabel: string; ambiguous: boolean; requests: number; attemptCount: number; measuredAttempts: number; reportedAttempts: number; estimatedAttempts: number; unmeteredAttempts: number; inputTokens: number; outputTokens: number; cacheReadInputTokens: number; cacheCreationInputTokens: number; reasoningOutputTokens: number; totalTokens: number; usageCoverageRatio: number; estimatedCostUsd: number; pricedAttempts: number; unpricedAttempts: number; priceCoverageRatio: number }>
+  servers?: UsageServerOption[]
   directAgents?: DirectUsageAgentSummary[]
   directSessions?: DirectUsageSessionRow[]
   daemonUpgradeRequired?: boolean
@@ -744,7 +751,8 @@ export const api = {
   getEnvironments: () => request<{ items: Array<{ id: string; name: string; method: 'local' | 'ssh'; discovered: boolean; os?: string; agents: Array<{ kind: AgentKind; available: boolean; state: string; detail: string; executable?: string; daemon_mode?: boolean }> }> }>('/environments'),
   discoverEnvironment: (id: string) => request(`/environments/${encodeURIComponent(id)}/discover`, { method: 'POST' }),
   changeEnvironmentAgent: (id: string, kind: string, connect: boolean) => request(`/environments/${encodeURIComponent(id)}/agents/${kind}/${connect ? 'connect' : 'disconnect'}`, { method: 'POST' }),
-  restartEnvironmentAgent: (id: string, kind: string) => request(`/environments/${encodeURIComponent(id)}/agents/${kind}/restart`, { method: 'POST' }),
+  restartEnvironmentAgent: (id: string, kind: string, confirmActive = false) =>
+    jsonRequest(`/environments/${encodeURIComponent(id)}/agents/${kind}/restart`, { confirm_active: confirmActive }),
   getCodexConnection: () => request<CodexConnectionStatus>('/connections/codex'),
   connectCodex: () => request<CodexConnectionStatus>('/connections/codex/connect', { method: 'POST' }),
   disconnectCodex: () => request<CodexConnectionStatus>('/connections/codex/disconnect', { method: 'POST' }),
@@ -863,14 +871,14 @@ export const api = {
   searchMarketCapabilities: (q: string) => request<{ query: string; items: Array<{ pkg: string; name: string; repo: string; installs: string; url: string }> }>(`/skills/search?q=${encodeURIComponent(q)}`),
 
   // MCP 完整生命周期
-  updateMcpServer: (payload: { target_id: string; agent: string; action: 'save' | 'delete'; server: Record<string, any> }) =>
+  updateMcpServer: (payload: { target_id: string; agent: string; action: 'save' | 'toggle' | 'delete'; server: Record<string, any> }) =>
     jsonRequest<{ ok: boolean; action: string; agent: string; server: string }>('/capabilities/mcp/update', payload, 'POST'),
   pingMcpServer: (payload: { target_id: string; server: Record<string, any> }) =>
     jsonRequest<{ ok: boolean; status_code?: number; latency_ms: number; message: string }>('/capabilities/mcp/ping', payload, 'POST'),
 
   // 插件生命周期
-  updatePluginState: (payload: { target_id: string; agent: string; action: 'toggle' | 'uninstall'; plugin_name: string; enabled?: boolean }) =>
-    jsonRequest<{ ok: boolean; action: string; agent: string; plugin: string }>('/capabilities/plugins/update', payload, 'POST'),
+  updatePluginState: (payload: { target_id: string; agent: string; action: 'toggle' | 'uninstall' | 'install' | 'import'; plugin_name?: string; source?: string; enabled?: boolean }) =>
+    jsonRequest<{ ok: boolean; action: string; agent: string; plugin: string; output?: string }>('/capabilities/plugins/update', payload, 'POST'),
 
   // 市场源生命周期
   updateMarketplace: (payload: { target_id: string; agent: string; action: 'add' | 'pull' | 'delete'; market: Record<string, any> }) =>
@@ -894,9 +902,10 @@ export const api = {
   }>('/capabilities/dispatch', payload, 'POST'),
 
   getAnalyticsQuotas: () => request<{ gatewayType: string; data: MagpieQuota[] }>('/analytics/quotas'),
-  getAnalyticsUsage: (params: { range: 'today' | 'all' | '30d' | '7d'; surface: 'all' | 'codex' | 'hermes' | 'grok' | 'antigravity' | 'claude'; source?: 'all' | 'direct' | 'gateway'; since?: number; until?: number }) => {
+  getAnalyticsUsage: (params: { range: 'today' | 'all' | '30d' | '7d'; surface: 'all' | 'codex' | 'hermes' | 'grok' | 'antigravity' | 'claude'; source?: 'all' | 'direct' | 'gateway' | 'sessions'; connection_id?: string; since?: number; until?: number }) => {
     const query = new URLSearchParams({ range: params.range, surface: params.surface })
     if (params.source) query.set('source', params.source)
+    if (params.connection_id && params.connection_id !== 'all') query.set('connection_id', params.connection_id)
     if (params.since !== undefined) query.set('since', String(params.since))
     if (params.until !== undefined) query.set('until', String(params.until))
     return request<OcxUsageResponse>(`/analytics/usage?${query.toString()}`)
@@ -921,6 +930,145 @@ export const api = {
     jsonRequest<{ existing: string[] }>('/files/exists', { workspace, paths, connection_id: connectionId }),
   createDirectory: (parentPath: string, name: string, connectionId?: string | null) =>
     jsonRequest<{ ok: boolean; path: string }>('/files/mkdir', { parent_path: parentPath, name, connection_id: connectionId }),
+
+  // 备份管理
+  listBackupTargets: () => request<{ items: BackupTarget[]; default_destination_dir: string }>('/backups/targets'),
+  browseBackupPath: (connectionId: string, targetPath?: string) => {
+    const query = new URLSearchParams({ connection_id: connectionId })
+    if (targetPath) query.set('path', targetPath)
+    return request<BackupBrowseResponse>(`/backups/browse?${query.toString()}`)
+  },
+  listBackupJobs: () => request<{ items: BackupJob[] }>('/backups/jobs'),
+  createBackupJob: (payload: BackupJobPayload) => jsonRequest<BackupJob>('/backups/jobs', payload, 'POST'),
+  cloneBackupJob: (id: string, payload: BackupJobPayload & { copy_versions: boolean }) =>
+    jsonRequest<BackupJob>(`/backups/jobs/${encodeURIComponent(id)}/clone`, payload),
+  updateBackupJob: (id: string, payload: BackupJobPayload) => jsonRequest<BackupJob>(`/backups/jobs/${encodeURIComponent(id)}`, payload, 'PUT'),
+  deleteBackupJob: (id: string, deleteFiles: boolean) =>
+    request<{ deleted: boolean }>(`/backups/jobs/${encodeURIComponent(id)}?delete_files=${deleteFiles ? 'true' : 'false'}`, { method: 'DELETE' }),
+  runBackupJob: (id: string, note: string) =>
+    jsonRequest<{ version: BackupVersion }>(`/backups/jobs/${encodeURIComponent(id)}/run`, { note }, 'POST'),
+  listBackupVersions: (jobId: string) =>
+    request<{ items: BackupVersion[] }>(`/backups/jobs/${encodeURIComponent(jobId)}/versions`),
+  updateBackupVersionNote: (versionId: string, note: string) =>
+    jsonRequest<BackupVersion>(`/backups/versions/${encodeURIComponent(versionId)}`, { note }, 'PATCH'),
+  deleteBackupVersion: (versionId: string, deleteFiles: boolean) =>
+    request<{ deleted: boolean }>(`/backups/versions/${encodeURIComponent(versionId)}?delete_files=${deleteFiles ? 'true' : 'false'}`, { method: 'DELETE' }),
+  openBackupVersionFolder: (versionId: string) =>
+    jsonRequest<{ opened: boolean; path: string }>(`/backups/versions/${encodeURIComponent(versionId)}/open`, {}, 'POST'),
+  getBackupRestorePlan: (versionId: string) =>
+    request<BackupRestorePlan>(`/backups/versions/${encodeURIComponent(versionId)}/restore`),
+  restoreBackupVersion: (versionId: string, confirmation: string) =>
+    jsonRequest<BackupRestoreResult>(`/backups/versions/${encodeURIComponent(versionId)}/restore`, { confirmation }),
+}
+
+export interface BackupRestorePlan {
+  version_id: string
+  connection_id: string
+  target_path: string
+  source_kind: 'directory' | 'file'
+  post_restore_command: string
+  post_restore_restart_agent?: BackupRestoreAgentTarget
+  restore_agent_environment_name?: string
+  hook_shell: string
+  confirmation: string
+}
+
+export interface BackupRestoreAgentTarget {
+  environment_id: string
+  kind: AgentKind
+}
+
+export interface BackupRestoreResult {
+  file_count: number
+  hook_status: 'skipped' | 'success' | 'failed'
+  hook_error?: string
+}
+
+export interface BackupTarget {
+  id: string
+  kind: 'local' | 'ssh' | 'wsl'
+  name: string
+  state: string
+  detail?: string
+  workspace?: string
+  connection_id: string
+}
+
+export interface BackupVersion {
+  id: string
+  job_id: string
+  version_number: number
+  version_label: string
+  trigger_kind: 'manual' | 'scheduled' | string
+  note: string
+  status: 'running' | 'success' | 'failed' | string
+  error_detail: string | null
+  local_path: string
+  source_kind: 'file' | 'directory' | 'unknown' | string
+  file_count: number
+  total_bytes: number
+  manifest_sha256: string | null
+  created_at: string
+  finished_at: string | null
+  exists_on_disk: boolean
+}
+
+export interface BackupJob {
+  id: string
+  name: string
+  connection_id: string
+  source_path: string
+  destination_dir: string
+  post_restore_command: string
+  post_restore_restart_agent?: BackupRestoreAgentTarget
+  schedule_enabled: boolean
+  schedule_mode: 'manual' | 'interval' | 'daily' | 'weekly' | string
+  interval_minutes: number
+  daily_time: string
+  weekday: number
+  retention_count: number
+  last_run_at: string | null
+  last_status: 'running' | 'success' | 'failed' | null | string
+  last_error: string | null
+  next_run_at: string | null
+  created_at: string
+  updated_at: string
+  target_name: string
+  target_kind: 'local' | 'ssh' | 'wsl' | string
+  target_state: string
+  version_count: number
+  latest_version: BackupVersion | null
+  is_running: boolean
+}
+
+export interface BackupJobPayload {
+  name: string
+  connection_id: string
+  source_path: string
+  destination_dir: string
+  post_restore_command?: string
+  post_restore_restart_agent?: BackupRestoreAgentTarget | null
+  schedule_enabled: boolean
+  schedule_mode: 'manual' | 'interval' | 'daily' | 'weekly' | string
+  interval_minutes: number
+  daily_time: string
+  weekday: number
+  retention_count: number
+}
+
+export interface BackupBrowseEntry {
+  name: string
+  path: string
+  is_dir: boolean
+  size: number
+}
+
+export interface BackupBrowseResponse {
+  connection_id: string
+  root: string
+  parent: string | null
+  drives: string[]
+  items: BackupBrowseEntry[]
 }
 
 export type ApiClient = typeof api

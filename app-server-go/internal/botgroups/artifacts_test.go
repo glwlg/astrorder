@@ -81,9 +81,9 @@ func artifactFixture(t *testing.T) (*Service, *artifactHistory, *groupArtifactRe
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	for _, source := range []struct{ agent, session, workspace, connection string }{
-		{"dev", "s-dev", "/home/luwei/project", "ssh-dev"},
+		{"dev", "s-dev", "/home/fixture/project", "ssh-dev"},
 		{"design", "s-design", "C:/project", "local"},
-		{"other", "s-other", "/home/luwei/project", "ssh-other"},
+		{"other", "s-other", "/home/fixture/project", "ssh-other"},
 	} {
 		if _, err := st.UpsertAgent(ctx, map[string]any{"id": source.agent, "name": source.agent, "kind": "codex", "status": "ready", "connection_id": source.connection}); err != nil {
 			t.Fatal(err)
@@ -130,18 +130,18 @@ func runArtifactIndex(t *testing.T, s *Service) groupFiles {
 
 func TestVerifiedReferencesAndDeliveredArtifactsAreSeparate(t *testing.T) {
 	s, h, r, _ := artifactFixture(t)
-	h.replies["m1"] = "[方案](docs/方案.md) [同一方案](/home/luwei/project/docs/方案.md:2)\n" +
-		"![架构图](output/chart.png)\n[skill](/home/luwei/.codex/skills/astrorder-blackboard/SKILL.md)\n" +
-		"`operation_log.py` `tmp/test-result.json` `api-review.opscore.assessment` `method-contract.list` `$.data.records[*]` `$.contractId` " +
+	h.replies["m1"] = "[方案](docs/方案.md) [同一方案](/home/fixture/project/docs/方案.md:2)\n" +
+		"![架构图](output/chart.png)\n[skill](/home/fixture/.codex/skills/astrorder-blackboard/SKILL.md)\n" +
+		"`operation_log.py` `tmp/test-result.json` `api-review.example-project.assessment` `method-contract.list` `$.data.records[*]` `$.contractId` " +
 		"`does-not-exist.go` [目录](docs/folder.md) [管道](pipe.log)"
-	for _, p := range []string{"/home/luwei/project/docs/方案.md", "/home/luwei/project/output/chart.png", "/home/luwei/.codex/skills/astrorder-blackboard/SKILL.md", "/home/luwei/project/operation_log.py", "/home/luwei/project/tmp/test-result.json"} {
+	for _, p := range []string{"/home/fixture/project/docs/方案.md", "/home/fixture/project/output/chart.png", "/home/fixture/.codex/skills/astrorder-blackboard/SKILL.md", "/home/fixture/project/operation_log.py", "/home/fixture/project/tmp/test-result.json"} {
 		r.files["ssh-dev::"+p] = targetfs.Info{Mode: 0600}
 	}
-	r.files["ssh-dev::/home/luwei/project/docs/folder.md"] = targetfs.Info{IsDir: true, Mode: fs.ModeDir}
-	r.files["ssh-dev::/home/luwei/project/pipe.log"] = targetfs.Info{Mode: fs.ModeNamedPipe}
+	r.files["ssh-dev::/home/fixture/project/docs/folder.md"] = targetfs.Info{IsDir: true, Mode: fs.ModeDir}
+	r.files["ssh-dev::/home/fixture/project/pipe.log"] = targetfs.Info{Mode: fs.ModeNamedPipe}
 	h.operations["m1"] = []NativeFileOperation{
 		{ID: "patch", Kind: "fileChange", Path: "docs/方案.md"},
-		{ID: "image", Kind: "commandExecution", Cwd: "/home/luwei/project", Command: "python -c 'plt.savefig(\"output/chart.png\")'"},
+		{ID: "image", Kind: "commandExecution", Cwd: "/home/fixture/project", Command: "python -c 'plt.savefig(\"output/chart.png\")'"},
 		{ID: "test", Kind: "fileChange", Path: "tmp/test-result.json"},
 	}
 	s.options.ArtifactDecider = artifactClassifyFunc(func(_ context.Context, input ArtifactInput) (map[string]string, error) {
@@ -198,9 +198,9 @@ func TestRebuildRemovesLegacyGuessesAndPreservesFirstSource(t *testing.T) {
 	}
 	_ = s.options.Store.SetPreference(ctx, "bot_group_artifacts_cursor:g", "m3", true)
 	h.replies["m1"] = "[原件](docs/方案.md)"
-	h.replies["m2"] = "[Windows转发](/home/luwei/project/docs/方案.md)"
+	h.replies["m2"] = "[Windows转发](/home/fixture/project/docs/方案.md)"
 	h.replies["m3"] = "[同名Linux转发](docs/方案.md)"
-	r.files["ssh-dev::/home/luwei/project/docs/方案.md"] = targetfs.Info{}
+	r.files["ssh-dev::/home/fixture/project/docs/方案.md"] = targetfs.Info{}
 	h.operations["m1"] = []NativeFileOperation{{ID: "patch", Kind: "fileChange", Path: "docs/方案.md"}}
 	for _, pair := range []struct{ id, agent string }{{"m1", "dev"}, {"m2", "design"}, {"m3", "other"}} {
 		appendArtifactMessage(t, s, artifactMessage(pair.id, pair.agent))
@@ -225,7 +225,7 @@ func TestRebuildRemovesLegacyGuessesAndPreservesFirstSource(t *testing.T) {
 func TestExistenceAndRecentTimestampWithoutNativeChangesDoNotMakeArtifact(t *testing.T) {
 	s, h, r, _ := artifactFixture(t)
 	h.replies["m1"] = "已生成 [方案](docs/方案.md)"
-	r.files["ssh-dev::/home/luwei/project/docs/方案.md"] = targetfs.Info{ModTime: time.Now()}
+	r.files["ssh-dev::/home/fixture/project/docs/方案.md"] = targetfs.Info{ModTime: time.Now()}
 	s.options.ArtifactDecider = artifactClassifyFunc(func(context.Context, ArtifactInput) (map[string]string, error) {
 		t.Fatal("no native changes should reach classifier")
 		return nil, nil
@@ -242,7 +242,7 @@ func TestNativeFailureAndInventedEvidenceDoNotPublish(t *testing.T) {
 		t.Run(failure, func(t *testing.T) {
 			s, h, r, _ := artifactFixture(t)
 			h.replies["m1"] = "[方案](docs/方案.md)"
-			r.files["ssh-dev::/home/luwei/project/docs/方案.md"] = targetfs.Info{}
+			r.files["ssh-dev::/home/fixture/project/docs/方案.md"] = targetfs.Info{}
 			h.operations["m1"] = []NativeFileOperation{{ID: "actual", Kind: "fileChange", Path: "docs/方案.md"}}
 			if failure == "native" {
 				h.evidenceErr = errors.New("native offline")
@@ -263,7 +263,7 @@ func TestNativeFailureAndInventedEvidenceDoNotPublish(t *testing.T) {
 func TestSourceOutageDoesNotRebindToForwardingMachine(t *testing.T) {
 	s, h, r, _ := artifactFixture(t)
 	h.replies["m1"] = "[方案](docs/方案.md)"
-	h.replies["m2"] = "[转发](/home/luwei/project/docs/方案.md)"
+	h.replies["m2"] = "[转发](/home/fixture/project/docs/方案.md)"
 	r.fail = errors.New("ssh-dev offline")
 	appendArtifactMessage(t, s, artifactMessage("m1", "dev"))
 	appendArtifactMessage(t, s, artifactMessage("m2", "design"))
@@ -294,7 +294,7 @@ func TestExplicitRecheckRetriesFailedEvidenceAndPreservesOtherBlackboardKeys(t *
 	ctx := context.Background()
 	h.replies["m1"] = "[方案](docs/方案.md)"
 	h.operations["m1"] = []NativeFileOperation{{ID: "patch", Kind: "fileChange", Path: "docs/方案.md"}}
-	r.files["ssh-dev::/home/luwei/project/docs/方案.md"] = targetfs.Info{}
+	r.files["ssh-dev::/home/fixture/project/docs/方案.md"] = targetfs.Info{}
 	h.evidenceErr = errors.New("native offline")
 	appendArtifactMessage(t, s, artifactMessage("m1", "dev"))
 	first := runArtifactIndex(t, s)
@@ -321,7 +321,7 @@ func TestExplicitRecheckRetriesFailedEvidenceAndPreservesOtherBlackboardKeys(t *
 func TestBackgroundValidationDoesNotBlockMessagesAndCannotResurrectDeletedGroup(t *testing.T) {
 	s, h, r, _ := artifactFixture(t)
 	h.replies["m1"] = "[方案](docs/方案.md)"
-	r.files["ssh-dev::/home/luwei/project/docs/方案.md"] = targetfs.Info{}
+	r.files["ssh-dev::/home/fixture/project/docs/方案.md"] = targetfs.Info{}
 	h.operations["m1"] = []NativeFileOperation{{ID: "patch", Kind: "fileChange", Path: "docs/方案.md"}}
 	started, release := make(chan struct{}), make(chan struct{})
 	r.onStat = func(context.Context) { close(started); <-release }

@@ -25,7 +25,7 @@
 | `app-server-go/` | HTTP API、事件投影、控制工具、群聊和文件服务 |
 | `session-daemon-go/` | Agent 与终端进程托管、WAL、原生控制和模型配置执行 |
 | `contracts/` | 大小内核之间的 protobuf/gRPC 契约与 Go 生成代码 |
-| `connectors/`、`.hermes/plugins/` | Agent 宿主插件与安装资产 |
+| `connectors/` | Agent 宿主插件源码与安装资产 |
 | `scripts/` | 构建、构件校验、安装器与隔离验证 |
 | `assets/brand/` | 当前透明品牌母版与导出说明 |
 

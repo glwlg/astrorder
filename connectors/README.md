@@ -15,8 +15,7 @@
 ## 安装资产
 
 - `codex/codex-plugin/`：Codex 插件清单和技能资产。
-- `hermes/astrorder_hermes_plugin/`：Hermes 轻量宿主插件，运行于 Hermes 自己的 Python 环境。
-- `.hermes/plugins/astrorder-hermes/`：随安装器交付的 Hermes 插件包装目录。
+- `hermes/`：Hermes 宿主插件的源码、清单和加载入口，运行于 Hermes 自己的 Python 环境。Windows 安装器将它打包为 `server/.hermes/plugins/astrorder-hermes/`。
 
 这些目录由当前安装器使用，不能因为包含 Python 文件就删除。Hermes 插件不承载星序 HTTP 服务或应用数据库。
 

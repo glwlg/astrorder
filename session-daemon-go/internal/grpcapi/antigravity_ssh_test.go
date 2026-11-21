@@ -193,10 +193,10 @@ func TestAntigravitySSHOfficialGRPCLifecycle(t *testing.T) {
 	sshCfg := &pb.SshConnectConfig{
 		Host:                  "127.0.0.1",
 		Port:                  22,
-		User:                  ptr("luwei"),
-		Workspace:             ptr("/home/luwei/workspace/glwlg/astrorder"),
+		User:                  ptr("fixture"),
+		Workspace:             ptr("/home/fixture/workspace/example-org/astrorder"),
 		DisplayName:           ptr("WSL"),
-		AntigravityExecutable: ptr("/home/luwei/.local/bin/agy"),
+		AntigravityExecutable: ptr("/home/fixture/.local/bin/agy"),
 	}
 	target := &pb.RuntimeTarget{
 		Runtime:      pb.RuntimeKind_RUNTIME_KIND_ANTIGRAVITY_SSH,
@@ -274,7 +274,7 @@ func TestAntigravitySSHOfficialGRPCLifecycle(t *testing.T) {
 		Meta:   controlMeta("agy-ssh-create"),
 		Target: target,
 		Options: &pb.CreateSessionRequest_Antigravity{
-			Antigravity: &pb.AntigravityCreateOptions{Cwd: "/home/luwei/workspace/glwlg/astrorder"},
+			Antigravity: &pb.AntigravityCreateOptions{Cwd: "/home/fixture/workspace/example-org/astrorder"},
 		},
 	})
 	if err != nil || created.GetCompleted() == nil || created.GetSession().GetConnectionId() != connID || created.GetSession().GetAgentId() != aid {
@@ -329,7 +329,7 @@ func TestAntigravitySSHOfficialGRPCLifecycle(t *testing.T) {
 		Target: target,
 		Options: &pb.CreateSessionRequest_Antigravity{
 			Antigravity: &pb.AntigravityCreateOptions{
-				Cwd:             "/home/luwei/workspace/glwlg/astrorder",
+				Cwd:             "/home/fixture/workspace/example-org/astrorder",
 				ParentSessionId: &ref.SessionId,
 			},
 		},
@@ -379,7 +379,7 @@ func TestAntigravitySSHOfficialGRPCLifecycle(t *testing.T) {
 		firstExe = recordedSpecs[0].Executable
 	}
 	stateMu.Unlock()
-	if specCount == 0 || firstExe != "/home/luwei/.local/bin/agy" {
-		t.Fatalf("expected recorded SSH specs for /home/luwei/.local/bin/agy, got count=%d first=%q", specCount, firstExe)
+	if specCount == 0 || firstExe != "/home/fixture/.local/bin/agy" {
+		t.Fatalf("expected recorded SSH specs for /home/fixture/.local/bin/agy, got count=%d first=%q", specCount, firstExe)
 	}
 }

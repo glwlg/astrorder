@@ -37,19 +37,23 @@ type WSLConfig struct {
 }
 
 type RemoteOptions struct {
-	Workspace    string
-	AllowedRoots []string
-	Command      []string
-	Environment  []string
-	StageRoots   []string
+	Workspace     string
+	AllowedRoots  []string
+	OptionalRoots []string
+	Command       []string
+	Environment   []string
+	StageRoots    []string
+	RestorePaths  bool
 }
 
 type remoteFileSystem struct {
-	workspace    string
-	allowedRoots []string
-	command      []string
-	environment  []string
-	stageRoots   []string
+	workspace     string
+	allowedRoots  []string
+	optionalRoots []string
+	command       []string
+	environment   []string
+	stageRoots    []string
+	restorePaths  bool
 }
 
 var safeSSHName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]*$`)
@@ -119,7 +123,7 @@ func BuildWSLCommand(config WSLConfig) ([]string, error) {
 	if helper == "" || strings.ContainsRune(helper, 0) {
 		return nil, errorf(503, "helper_not_configured", "WSL Astrorder helper is not configured", nil)
 	}
-	return []string{binary, "-d", config.Distro, "--", helper, "--stdio", "--protocol", strconv.Itoa(ProtocolVersion)}, nil
+	return []string{binary, "-d", config.Distro, "--exec", helper, "--stdio", "--protocol", strconv.Itoa(ProtocolVersion)}, nil
 }
 
 func quotePOSIX(value string) string {
@@ -138,16 +142,18 @@ func NewRemote(options RemoteOptions) (FileSystem, error) {
 		roots = []string{options.Workspace}
 	}
 	return &remoteFileSystem{
-		workspace: options.Workspace, allowedRoots: roots,
+		workspace: options.Workspace, allowedRoots: roots, optionalRoots: append([]string(nil), options.OptionalRoots...),
 		command: append([]string(nil), options.Command...), environment: append([]string(nil), options.Environment...),
-		stageRoots: append([]string(nil), options.StageRoots...),
+		stageRoots: append([]string(nil), options.StageRoots...), restorePaths: options.RestorePaths,
 	}, nil
 }
 
 type scopeRequest struct {
-	Workspace    string          `json:"workspace"`
-	AllowedRoots []string        `json:"allowed_roots"`
-	Request      json.RawMessage `json:"request"`
+	Workspace     string          `json:"workspace"`
+	AllowedRoots  []string        `json:"allowed_roots"`
+	OptionalRoots []string        `json:"optional_roots,omitempty"`
+	Request       json.RawMessage `json:"request"`
+	RestorePaths  bool            `json:"restore_paths,omitempty"`
 }
 
 func (r *remoteFileSystem) envelope(value any) (json.RawMessage, error) {
@@ -155,7 +161,10 @@ func (r *remoteFileSystem) envelope(value any) (json.RawMessage, error) {
 	if err != nil {
 		return nil, err
 	}
-	return json.Marshal(scopeRequest{Workspace: r.workspace, AllowedRoots: r.allowedRoots, Request: request})
+	return json.Marshal(scopeRequest{
+		Workspace: r.workspace, AllowedRoots: r.allowedRoots, OptionalRoots: r.optionalRoots,
+		Request: request, RestorePaths: r.restorePaths,
+	})
 }
 
 func mapInfoPath(info Info, path string) Info {
@@ -207,7 +216,12 @@ func (r *remoteFileSystem) WriteAtomic(ctx context.Context, path string, source 
 
 func (r *remoteFileSystem) Stat(ctx context.Context, path string) (Info, error) {
 	var result Info
-	err := r.invokeJSON(ctx, "stat", struct {
+	action := "stat"
+	if r.restorePaths {
+		// Require a helper that understands restore path rules before any writes.
+		action = "restore_stat"
+	}
+	err := r.invokeJSON(ctx, action, struct {
 		Path string `json:"path"`
 	}{Path: path}, &result)
 	return result, err

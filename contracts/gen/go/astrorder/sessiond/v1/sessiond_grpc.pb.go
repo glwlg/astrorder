@@ -882,6 +882,7 @@ const (
 	RuntimeQuery_ReadApprovalMode_FullMethodName        = "/astrorder.sessiond.v1.RuntimeQuery/ReadApprovalMode"
 	RuntimeQuery_SetApprovalMode_FullMethodName         = "/astrorder.sessiond.v1.RuntimeQuery/SetApprovalMode"
 	RuntimeQuery_DisconnectRuntime_FullMethodName       = "/astrorder.sessiond.v1.RuntimeQuery/DisconnectRuntime"
+	RuntimeQuery_ManageAgyAccount_FullMethodName        = "/astrorder.sessiond.v1.RuntimeQuery/ManageAgyAccount"
 )
 
 // RuntimeQueryClient is the client API for RuntimeQuery service.
@@ -901,6 +902,7 @@ type RuntimeQueryClient interface {
 	ReadApprovalMode(ctx context.Context, in *ReadApprovalModeRequest, opts ...grpc.CallOption) (*ApprovalModeState, error)
 	SetApprovalMode(ctx context.Context, in *SetApprovalModeRequest, opts ...grpc.CallOption) (*CommandReceipt, error)
 	DisconnectRuntime(ctx context.Context, in *DisconnectRuntimeRequest, opts ...grpc.CallOption) (*DisconnectRuntimeResponse, error)
+	ManageAgyAccount(ctx context.Context, in *AgyAccountRequest, opts ...grpc.CallOption) (*AgyAccountResponse, error)
 }
 
 type runtimeQueryClient struct {
@@ -1041,6 +1043,16 @@ func (c *runtimeQueryClient) DisconnectRuntime(ctx context.Context, in *Disconne
 	return out, nil
 }
 
+func (c *runtimeQueryClient) ManageAgyAccount(ctx context.Context, in *AgyAccountRequest, opts ...grpc.CallOption) (*AgyAccountResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AgyAccountResponse)
+	err := c.cc.Invoke(ctx, RuntimeQuery_ManageAgyAccount_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // RuntimeQueryServer is the server API for RuntimeQuery service.
 // All implementations must embed UnimplementedRuntimeQueryServer
 // for forward compatibility.
@@ -1058,6 +1070,7 @@ type RuntimeQueryServer interface {
 	ReadApprovalMode(context.Context, *ReadApprovalModeRequest) (*ApprovalModeState, error)
 	SetApprovalMode(context.Context, *SetApprovalModeRequest) (*CommandReceipt, error)
 	DisconnectRuntime(context.Context, *DisconnectRuntimeRequest) (*DisconnectRuntimeResponse, error)
+	ManageAgyAccount(context.Context, *AgyAccountRequest) (*AgyAccountResponse, error)
 	mustEmbedUnimplementedRuntimeQueryServer()
 }
 
@@ -1106,6 +1119,9 @@ func (UnimplementedRuntimeQueryServer) SetApprovalMode(context.Context, *SetAppr
 }
 func (UnimplementedRuntimeQueryServer) DisconnectRuntime(context.Context, *DisconnectRuntimeRequest) (*DisconnectRuntimeResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DisconnectRuntime not implemented")
+}
+func (UnimplementedRuntimeQueryServer) ManageAgyAccount(context.Context, *AgyAccountRequest) (*AgyAccountResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ManageAgyAccount not implemented")
 }
 func (UnimplementedRuntimeQueryServer) mustEmbedUnimplementedRuntimeQueryServer() {}
 func (UnimplementedRuntimeQueryServer) testEmbeddedByValue()                      {}
@@ -1362,6 +1378,24 @@ func _RuntimeQuery_DisconnectRuntime_Handler(srv interface{}, ctx context.Contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RuntimeQuery_ManageAgyAccount_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AgyAccountRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RuntimeQueryServer).ManageAgyAccount(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RuntimeQuery_ManageAgyAccount_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RuntimeQueryServer).ManageAgyAccount(ctx, req.(*AgyAccountRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // RuntimeQuery_ServiceDesc is the grpc.ServiceDesc for RuntimeQuery service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1420,6 +1454,10 @@ var RuntimeQuery_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DisconnectRuntime",
 			Handler:    _RuntimeQuery_DisconnectRuntime_Handler,
+		},
+		{
+			MethodName: "ManageAgyAccount",
+			Handler:    _RuntimeQuery_ManageAgyAccount_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

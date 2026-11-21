@@ -16,7 +16,7 @@ import (
 )
 
 // CurrentSchemaVersion is the schema version understood by this package.
-const CurrentSchemaVersion = 6
+const CurrentSchemaVersion = 8
 
 // SchemaMode controls whether opening a store may migrate its schema.
 type SchemaMode uint8
@@ -38,10 +38,14 @@ type Options struct {
 // Store owns the App SQLite connection pool and registered frame projections.
 type Store struct {
 	db             *sql.DB
+	path           string
 	eventRetention int64
 	projections    map[string]*Projector
 	projectionMu   sync.RWMutex
 }
+
+// Path returns the absolute path to the App database.
+func (s *Store) Path() string { return s.path }
 
 // Open opens path in isolated schema-migrator mode.
 func Open(path string) (*Store, error) {
@@ -101,7 +105,7 @@ func OpenWithOptions(path string, options Options) (*Store, error) {
 	if retention <= 0 {
 		retention = 1000
 	}
-	store := &Store{db: db, eventRetention: int64(retention), projections: make(map[string]*Projector)}
+	store := &Store{db: db, path: absolute, eventRetention: int64(retention), projections: make(map[string]*Projector)}
 	if options.SchemaMode == SchemaValidateOnly {
 		err = validateSchema(context.Background(), db)
 	} else {

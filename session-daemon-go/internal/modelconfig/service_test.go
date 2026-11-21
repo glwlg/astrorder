@@ -124,7 +124,7 @@ func TestMissingHermesDoesNotInvalidatePlanOrGetCreated(t *testing.T) {
 			FileCodexCatalog:       "{\"models\":[]}",
 			FileCodexMagpieCatalog: "{\"models\":[]}",
 			FileGrokConfig:         "[models]\ndefault = \"grok-4.5\"\n",
-			FileHermesConfig:       "providers:\n  magpie:\n    base_url: http://192.168.1.100:3425/v1\n",
+			FileHermesConfig:       "providers:\n  magpie:\n    base_url: http://192.0.2.100:3425/v1\n",
 		},
 		"api_key":  "ocx-key",
 		"api_keys": map[string]any{EnvTokenKey: "ocx-key", MagpieEnvKey: "magpie-key"},
@@ -157,7 +157,7 @@ func TestMissingHermesDoesNotInvalidatePlanOrGetCreated(t *testing.T) {
 	if err := os.WriteFile(hermesPath, []byte(original), 0600); err != nil {
 		t.Fatal(err)
 	}
-	updated := "model:\n  provider: magpie\n  base_url: http://192.168.1.100:3425/v1\nkeep: true\n"
+	updated := "model:\n  provider: magpie\n  base_url: http://192.0.2.100:3425/v1\nkeep: true\n"
 	if _, err := svc.Execute(context.Background(), "model_config.apply", map[string]any{
 		"files": map[string]any{FileHermesConfig: updated},
 	}); err != nil {

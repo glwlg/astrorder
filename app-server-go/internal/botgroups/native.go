@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"astrorder.dev/app-server/internal/connections"
 	"astrorder.dev/app-server/internal/daemonclient"
 	"astrorder.dev/app-server/internal/sessions"
 	"astrorder.dev/app-server/internal/store"
@@ -138,23 +139,20 @@ func (c *NativeController) target(ctx context.Context, member Member) (*pb.Runti
 			}
 			port = uint32(parsed)
 		}
-		var antigravityExec *string
-		if explicit := firstNonEmptyGroupSetting(settings, connection, "antigravity_executable"); explicit != "" {
-			antigravityExec = &explicit
-		} else if kind == "antigravity" || kind == "antigravity-ssh" {
-			resolved := c.resolveAntigravitySSHExecutable(ctx, connection, stringField("user"))
-			antigravityExec = &resolved
+		target.Ssh = &pb.SshConnectConfig{Host: stringField("host"), Port: port, User: ptr("user"), SshConfigAlias: ptr("ssh_config_alias"), IdentityFile: ptr("identity_file"), HermesPath: ptr("hermes_path"), CodexExecutable: ptr("codex_executable"), GrokExecutable: ptr("grok_executable")}
+		var selected string
+		if member.Workspace != nil {
+			selected = *member.Workspace
 		}
-		target.Ssh = &pb.SshConnectConfig{Host: stringField("host"), Port: port, User: ptr("user"), SshConfigAlias: ptr("ssh_config_alias"), IdentityFile: ptr("identity_file"), HermesPath: ptr("hermes_path"), CodexExecutable: ptr("codex_executable"), GrokExecutable: ptr("grok_executable"), AntigravityExecutable: antigravityExec}
-		if workspace == "" || (member.Workspace == nil && !strings.HasPrefix(workspace, "/")) {
-			if remoteWs := stringField("workspace"); remoteWs != "" {
-				workspace = remoteWs
-			} else if !strings.HasPrefix(workspace, "/") && workspace != "" {
-				workspace = remoteHomeDefault(stringField("user"))
-			}
-		}
+		workspace = connections.RemoteWorkspace(selected, stringField("workspace"))
 		if workspace != "" {
 			target.Ssh.Workspace = &workspace
+		}
+		switch kind {
+		case "codex", "codex-ssh":
+			target.Ssh.CodexExecutable = connections.RuntimeExecutable(ctx, c.RemoteExecutable, "codex", connection)
+		case "grok", "grok-ssh":
+			target.Ssh.GrokExecutable = connections.RuntimeExecutable(ctx, c.RemoteExecutable, "grok", connection)
 		}
 		if profile, ok := connection["profile_name"].(string); ok && profile != "" {
 			target.Ssh.ProfileName = &profile
@@ -163,45 +161,6 @@ func (c *NativeController) target(ctx context.Context, member Member) (*pb.Runti
 	return target, workspace, nil
 }
 
-func firstNonEmptyGroupSetting(settings, connection map[string]any, key string) string {
-	for _, source := range []map[string]any{settings, connection} {
-		if source == nil {
-			continue
-		}
-		if value, ok := source[key].(string); ok {
-			if trimmed := strings.TrimSpace(value); trimmed != "" {
-				return trimmed
-			}
-		}
-	}
-	return ""
-}
-
-func remoteHomeDefault(user string) string {
-	u := strings.TrimSpace(user)
-	if u == "" {
-		u = "luwei"
-	}
-	if u == "root" {
-		return "/root"
-	}
-	return "/home/" + u
-}
-
-func remoteAntigravityDefault(user string) string {
-	return remoteHomeDefault(user) + "/.local/bin/agy"
-}
-
-func (c *NativeController) resolveAntigravitySSHExecutable(ctx context.Context, connection map[string]any, user string) string {
-	if c.RemoteExecutable != nil {
-		if resolved, err := c.RemoteExecutable.Resolve(ctx, "antigravity", connection); err == nil {
-			if trimmed := strings.TrimSpace(resolved); trimmed != "" {
-				return trimmed
-			}
-		}
-	}
-	return remoteAntigravityDefault(user)
-}
 func (c *NativeController) session(ctx context.Context, turn Turn) (*pb.SessionRef, error) {
 	if c.Store == nil || c.Client == nil || c.Publisher == nil {
 		return nil, errors.New("group native controller is unavailable")
@@ -272,6 +231,9 @@ func (c *NativeController) session(ctx context.Context, turn Turn) (*pb.SessionR
 	}
 	if turn.Member.ForkSessionID != nil {
 		return nil, errors.New("群成员的分叉会话绑定不存在，请重新添加该成员")
+	}
+	if target.Ssh != nil && workspace == "" {
+		return nil, errors.New("请为远程群成员选择工作目录")
 	}
 	create := &pb.CreateSessionRequest{Meta: meta(turn.CommandID + "-create"), Target: target}
 	extras := map[string]any{}

@@ -66,9 +66,8 @@ func resolveHelperHome(req map[string]any) (string, error) {
 	return home, nil
 }
 
-// ExecuteHelper handles remote Antigravity local-storage SQLite operations
-// inside cmd/astrorder-model-helper. Zero loopback LanguageServer RPCs or
-// credential files are accessed.
+// ExecuteHelper handles remote Antigravity storage operations and isolated
+// account quota reads inside cmd/astrorder-model-helper.
 func ExecuteHelper(ctx context.Context, req map[string]any) (map[string]any, error) {
 	home, err := resolveHelperHome(req)
 	if err != nil {
@@ -76,6 +75,12 @@ func ExecuteHelper(ctx context.Context, req map[string]any) (map[string]any, err
 	}
 	action := str(req, "action")
 	switch action {
+	case "account.vault.state", "account.vault.capture", "account.vault.quota", "account.vault.check", "account.vault.apply":
+		credential, err := credentialField(req["credential"])
+		if err != nil {
+			return nil, err
+		}
+		return executeAgyAccount(ctx, home, str(req, "executable"), action, str(req, "account_id"), credential)
 	case "session.list":
 		items, err := listSessionsForHome(ctx, home, str(req, "agent_id"), str(req, "connection_id"), true)
 		if err != nil {

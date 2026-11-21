@@ -18,6 +18,39 @@ type RemoteExecutableResolver interface {
 	Resolve(ctx context.Context, kind string, sshConn map[string]any) (string, error)
 }
 
+// RuntimeExecutable uses the connection's configured executable or a discovered
+// path. An unresolved path stays unset so the daemon can apply its runtime rules.
+func RuntimeExecutable(ctx context.Context, resolver RemoteExecutableResolver, kind string, sshConn map[string]any) *string {
+	if explicit := explicitRemoteExecutable(kind, sshConn); explicit != "" {
+		return &explicit
+	}
+	if resolver != nil {
+		if found, err := resolver.Resolve(ctx, kind, sshConn); err == nil {
+			if clean, err := validateRemoteExecutablePath(found); err == nil {
+				return &clean
+			}
+		}
+	}
+	return nil
+}
+
+// RemoteWorkspace selects an explicit POSIX workspace or the SSH connection's
+// configured directory. It never substitutes a path from the App's machine.
+func RemoteWorkspace(requested, configured string) string {
+	if strings.HasPrefix(requested, "/") {
+		return requested
+	}
+	if strings.HasPrefix(configured, "/") {
+		return configured
+	}
+	return ""
+}
+
+func IsRemoteAgent(agent map[string]any) bool {
+	id, _ := agent["connection_id"].(string)
+	return id != "" && id != "local"
+}
+
 // NativeRemoteExecutableResolver probes the remote host with a bounded
 // OpenSSH command. Only the fixed kind whitelist below is supported.
 type NativeRemoteExecutableResolver struct {

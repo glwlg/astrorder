@@ -232,20 +232,20 @@ describe('project identity', () => {
   it('does not merge two local folders solely because their display names match', () => {
     const projects = [
       { id: 'one', project_id: 'one', project_name: 'astrorder', source_id: 'local-codex', agent_id: 'local-codex', workspace: 'P:/workspace/astrorder', session_count: 0, updated_at: '' },
-      { id: 'two', project_id: 'two', project_name: 'astrorder', source_id: 'hermes-local-1', agent_id: 'local-hermes-default', workspace: 'P:/DevApp/astrorder', session_count: 0, updated_at: '' },
+      { id: 'two', project_id: 'two', project_name: 'astrorder', source_id: 'hermes-local-1', agent_id: 'local-hermes-default', workspace: 'C:/ExampleInstall/astrorder', session_count: 0, updated_at: '' },
     ]
     const groups = buildProjectGroups([
-      { id: 'wrong-folder', agent_id: 'local-hermes-default', source_id: 'hermes-local-1', title: '另一个项目', project_name: 'astrorder', workspace: 'P:/DevApp/astrorder', status: 'idle', updated_at: '2026-09-28T00:00:00Z' },
+      { id: 'wrong-folder', agent_id: 'local-hermes-default', source_id: 'hermes-local-1', title: '另一个项目', project_name: 'astrorder', workspace: 'C:/ExampleInstall/astrorder', status: 'idle', updated_at: '2026-09-28T00:00:00Z' },
     ], {}, projects.slice(0, 1))
     expect(groups).toHaveLength(2)
-    expect(groups.find(group => group.sessions.length)?.workspace).toBe('P:/DevApp/astrorder')
+    expect(groups.find(group => group.sessions.length)?.workspace).toBe('C:/ExampleInstall/astrorder')
   })
 })
 
 function railSession(partial: Partial<Session> & Pick<Session, 'id' | 'title'>): Session {
   return {
     agent_id: 'local-codex',
-    workspace: '/home/luwei/workspace/OpsCore',
+    workspace: '/home/fixture/workspace/ExampleProject',
     status: 'idle',
     updated_at: '2026-09-11T12:00:00Z',
     ...partial,
@@ -284,14 +284,14 @@ describe('session rail hygiene', () => {
   })
 
   it('renders placeholder titles as 未命名 or the workspace name', () => {
-    expect(displaySessionTitle(railSession({ id: 'empty', title: '' }))).toBe('OpsCore')
-    expect(displaySessionTitle(railSession({ id: 'untitled', title: 'Untitled session' }))).toBe('OpsCore')
-    expect(displaySessionTitle(railSession({ id: 'remote', title: 'Astrorder 远程会话' }))).toBe('OpsCore')
-    expect(displaySessionTitle(railSession({ id: 'uuid', title: '01a08f9c2b7d4e11a5c6d7e8f90ab123' }))).toBe('OpsCore')
-    expect(displaySessionTitle(railSession({ id: 'dashed', title: '550e8400-e29b-41d4-a716-446655440000' }))).toBe('OpsCore')
-    expect(displaySessionTitle(railSession({ id: 'hermes', title: '20260911_143914_a75faf' }))).toBe('OpsCore')
+    expect(displaySessionTitle(railSession({ id: 'empty', title: '' }))).toBe('ExampleProject')
+    expect(displaySessionTitle(railSession({ id: 'untitled', title: 'Untitled session' }))).toBe('ExampleProject')
+    expect(displaySessionTitle(railSession({ id: 'remote', title: 'Astrorder 远程会话' }))).toBe('ExampleProject')
+    expect(displaySessionTitle(railSession({ id: 'uuid', title: '01a08f9c2b7d4e11a5c6d7e8f90ab123' }))).toBe('ExampleProject')
+    expect(displaySessionTitle(railSession({ id: 'dashed', title: '550e8400-e29b-41d4-a716-446655440000' }))).toBe('ExampleProject')
+    expect(displaySessionTitle(railSession({ id: 'hermes', title: '20260911_143914_a75faf' }))).toBe('ExampleProject')
     expect(displaySessionTitle(railSession({ id: 'no-ws', title: 'Untitled session', workspace: null }))).toBe('未命名')
     expect(displaySessionTitle(railSession({ id: 'real', title: '排查 Codex 思考强度' }))).toBe('排查 Codex 思考强度')
-    expect(displaySessionTitle(railSession({ id: 'hermes-unnamed', agent_id: 'local-hermes-default', title: '新会话', workspace: 'P:/workspace/glwlg/ai/astrorder' }))).toBe('未命名')
+    expect(displaySessionTitle(railSession({ id: 'hermes-unnamed', agent_id: 'local-hermes-default', title: '新会话', workspace: 'P:/workspace/example-org/ai/astrorder' }))).toBe('未命名')
   })
 })

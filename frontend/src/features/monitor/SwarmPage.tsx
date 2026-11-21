@@ -17,8 +17,9 @@ import {
 } from '@tabler/icons-react'
 import { notifications } from '@mantine/notifications'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { useAstrorderStore } from '../../state/store'
-import { isEphemeralSession, newCommandId, scopeKey } from '../../domain/semantics'
+import { useShallow } from 'zustand/react/shallow'
+import { selectSessions, useAstrorderStore } from '../../state/store'
+import { newCommandId, scopeKey } from '../../domain/semantics'
 import { api } from '../../api/client'
 import type { Agent } from '../../domain/types'
 import { buildSwarmTopology } from '../../domain/swarmTopology'
@@ -59,12 +60,7 @@ export function SwarmPage() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const activeRootKey = searchParams.get('root')
-  const sessionMap = useAstrorderStore((state) => state.sessions)
-  const sessions = useMemo(() => {
-    return Object.values(sessionMap)
-      .filter((session) => !isEphemeralSession(session))
-      .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
-  }, [sessionMap])
+  const sessions = useAstrorderStore(useShallow(selectSessions))
   const agents = useAstrorderStore((state) => state.agents)
 
   const [createOpened, setCreateOpened] = useState(false)
@@ -76,6 +72,16 @@ export function SwarmPage() {
   const [effort, setEffort] = useState('')
   const [initialPrompt, setInitialPrompt] = useState('')
   const [busy, setBusy] = useState(false)
+  const [connectionNames, setConnectionNames] = useState<Record<string, string>>({})
+
+  useEffect(() => {
+    if (!createOpened) return
+    let active = true
+    void api.getConnections().then(({ ssh }) => {
+      if (active) setConnectionNames(Object.fromEntries(ssh.items.map((connection) => [connection.id, connection.display_name])))
+    }).catch(() => {})
+    return () => { active = false }
+  }, [createOpened])
 
   useEffect(() => {
     const onOpen = () => handleOpenCreate()
@@ -91,19 +97,11 @@ export function SwarmPage() {
       const cid = a.connection_id || 'local'
       if (!seen.has(cid)) {
         seen.add(cid)
-        const name =
-          cid === 'local'
-            ? '本机 (Local Windows)'
-            : cid.includes('c5f75ce2')
-            ? 'WSL2 Linux (127.0.0.1)'
-            : cid.includes('1a32825b')
-            ? 'Debian 远端主机 (192.168.1.100)'
-            : cid
-        list.push({ value: cid, label: name })
+        list.push({ value: cid, label: cid === 'local' ? '本机' : connectionNames[cid] || cid })
       }
     }
     return list
-  }, [agents])
+  }, [agents, connectionNames])
 
   // 根据选定服务器过滤可选 Agent
   const availableAgents = useMemo(() => {
@@ -140,7 +138,7 @@ export function SwarmPage() {
     if (firstAgent) {
       setSelectedAgentId(firstAgent.id)
       const match = sessions.find((s) => s.agent_id === firstAgent.id);
-      setWorkspace(match?.workspace || (firstAgent.connection_id ? '' : 'P:/workspace/glwlg/ai/astrorder'))
+      setWorkspace(match?.workspace || '')
     }
     setTitle('')
     setModelKey('')
@@ -313,7 +311,7 @@ export function SwarmPage() {
               if (first) {
                 setSelectedAgentId(first.id)
                 const match = sessions.find((s) => s.agent_id === first.id);
-                setWorkspace(match?.workspace || (first.connection_id ? '' : 'P:/workspace/glwlg/ai/astrorder'))
+                setWorkspace(match?.workspace || '')
               }
             }}
             data={machineChoices}
@@ -329,8 +327,7 @@ export function SwarmPage() {
               const nextId = e.currentTarget.value
               setSelectedAgentId(nextId)
               const match = sessions.find((s) => s.agent_id === nextId);
-              const nextAgent = agents[nextId]
-              setWorkspace(match?.workspace || (nextAgent?.connection_id ? '' : 'P:/workspace/glwlg/ai/astrorder'))
+              setWorkspace(match?.workspace || '')
             }}
             data={[
               { value: '', label: '请选择主星 Agent' },

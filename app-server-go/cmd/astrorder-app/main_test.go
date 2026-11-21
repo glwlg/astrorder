@@ -141,7 +141,7 @@ func (s *stubResolver) Resolve(_ context.Context, _ string, sshConn map[string]a
 func TestCachedRemoteExecutableResolverCachesPositiveAndRetriesErrors(t *testing.T) {
 	inner := &stubResolver{err: errors.New("ssh offline")}
 	cached := newCachedRemoteExecutableResolver(inner, 30*time.Second)
-	conn := map[string]any{"id": "wsl", "host": "127.0.0.1", "port": 22, "user": "luwei"}
+	conn := map[string]any{"id": "wsl", "host": "127.0.0.1", "port": 22, "user": "fixture"}
 
 	// Errors must never be cached.
 	if _, err := cached.Resolve(context.Background(), "antigravity", conn); err == nil {
@@ -163,7 +163,7 @@ func TestCachedRemoteExecutableResolverCachesPositiveAndRetriesErrors(t *testing
 
 	// Explicit override bypasses cached path.
 	got3, err := cached.Resolve(context.Background(), "antigravity", map[string]any{
-		"id": "wsl", "host": "127.0.0.1", "port": 22, "user": "luwei",
+		"id": "wsl", "host": "127.0.0.1", "port": 22, "user": "fixture",
 		"antigravity_executable": "/custom/agy",
 	})
 	if err != nil || got3 != "/custom/agy" {

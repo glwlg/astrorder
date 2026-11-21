@@ -191,10 +191,10 @@ func TestCommandSpecRejectsCredentialsInArgv(t *testing.T) {
 func TestConfigValidationAndSafeArgv(t *testing.T) {
 	t.Run("valid configuration", func(t *testing.T) {
 		cfg := ssh.Config{
-			Host:           "192.168.1.100",
-			User:           "luwei",
+			Host:           "192.0.2.100",
+			User:           "fixture",
 			Port:           22,
-			IdentityFile:   "/home/luwei/.ssh/id_ed25519",
+			IdentityFile:   "/home/fixture/.ssh/id_ed25519",
 			ConnectTimeout: 5 * time.Second,
 			Options: map[string]string{
 				"BatchMode": "yes",
@@ -217,7 +217,7 @@ func TestConfigValidationAndSafeArgv(t *testing.T) {
 		if !foundSeparator {
 			t.Fatal("expected '--' separator in argv")
 		}
-		if destIndex >= len(argv) || argv[destIndex] != "luwei@192.168.1.100" {
+		if destIndex >= len(argv) || argv[destIndex] != "fixture@192.0.2.100" {
 			t.Fatalf("expected destination after '--', got %v", argv)
 		}
 	})
@@ -233,7 +233,7 @@ func TestConfigValidationAndSafeArgv(t *testing.T) {
 
 	t.Run("rejects flag user switch injection", func(t *testing.T) {
 		cfg := ssh.Config{
-			Host: "192.168.1.100",
+			Host: "192.0.2.100",
 			User: "-F/etc/shadow",
 		}
 		if err := cfg.Validate(); err == nil {
@@ -244,7 +244,7 @@ func TestConfigValidationAndSafeArgv(t *testing.T) {
 	t.Run("rejects invalid ports", func(t *testing.T) {
 		for _, port := range []int{-1, 65536, 100000} {
 			cfg := ssh.Config{
-				Host: "192.168.1.100",
+				Host: "192.0.2.100",
 				Port: port,
 			}
 			if err := cfg.Validate(); err == nil {
@@ -255,7 +255,7 @@ func TestConfigValidationAndSafeArgv(t *testing.T) {
 
 	t.Run("rejects flag identity file", func(t *testing.T) {
 		cfg := ssh.Config{
-			Host:         "192.168.1.100",
+			Host:         "192.0.2.100",
 			IdentityFile: "-oProxyCommand=evil",
 		}
 		if err := cfg.Validate(); err == nil {
@@ -275,7 +275,7 @@ func TestConfigValidationAndSafeArgv(t *testing.T) {
 
 		for _, opts := range disallowed {
 			cfg := ssh.Config{
-				Host:    "192.168.1.100",
+				Host:    "192.0.2.100",
 				Options: opts,
 			}
 			if err := cfg.Validate(); err == nil {
@@ -527,8 +527,8 @@ func TestRealSSHReadOnlyOptIn(t *testing.T) {
 	}
 
 	transport, err := ssh.New(ssh.Config{
-		Host:           "192.168.1.100",
-		User:           "luwei",
+		Host:           "192.0.2.100",
+		User:           "fixture",
 		ConnectTimeout: 5 * time.Second,
 		Options: map[string]string{
 			"BatchMode": "yes",

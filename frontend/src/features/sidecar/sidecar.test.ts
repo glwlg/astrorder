@@ -54,12 +54,12 @@ describe('Artifact & Drawio Viewer Integration', () => {
   })
 
   it.each(['creatures.png', 'photo.JPG', 'favicon.svg', 'animation.gif', 'picture.avif'])('opens %s in the image viewer with its remote context', (name) => {
-    const artifact = resolveArtifactFromPath(`/home/luwei/${name}`, { ...mockSession, workspace: '/home/luwei', connection_id: 'ssh-images' })
+    const artifact = resolveArtifactFromPath(`/home/fixture/${name}`, { ...mockSession, workspace: '/home/fixture', connection_id: 'ssh-images' })
     expect(artifactViewerRegistry.findViewer(artifact)?.id).toBe('image-viewer')
     expect(artifact.writable).toBe(false)
     const url = new URL(artifact.readUrl, 'http://localhost')
     expect(url.searchParams.get('session_id')).toBe(mockSession.id)
     expect(url.searchParams.get('connection_id')).toBe('ssh-images')
-    expect(url.searchParams.get('path')).toBe(`/home/luwei/${name}`)
+    expect(url.searchParams.get('path')).toBe(`/home/fixture/${name}`)
   })
 })

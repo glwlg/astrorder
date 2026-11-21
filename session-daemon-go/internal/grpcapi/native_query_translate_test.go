@@ -77,3 +77,97 @@ func TestNativeQueryTranslationRejectsUnknownAndOptionsOwnedFields(t *testing.T)
 		})
 	}
 }
+
+func TestNativeQueryTranslationSupportsAntigravityInt64UsageSummaryAndSessionUsage(t *testing.T) {
+	sinceMs := int64(1795000000000)
+	untilMs := int64(1795086400000)
+	connID := "ssh-1"
+
+	localReq := &sessiondv1.NativeQueryRequest{
+		Target: &sessiondv1.RuntimeTarget{Runtime: sessiondv1.RuntimeKind_RUNTIME_KIND_ANTIGRAVITY},
+		Query: &sessiondv1.NativeQueryRequest_AntigravityUsageSummary{
+			AntigravityUsageSummary: &sessiondv1.AntigravityUsageSummaryQuery{
+				SinceMs: &sinceMs,
+				UntilMs: &untilMs,
+			},
+		},
+	}
+	translated, err := translateNativeQuery(localReq)
+	if err != nil {
+		t.Fatalf("local AntigravityUsageSummary failed: %v", err)
+	}
+	params := translated.Fields["request_params"].(map[string]any)
+	if translated.AgentType != "antigravity" || translated.Fields["method"] != "usage.summary" {
+		t.Fatalf("unexpected route metadata: %#v", translated)
+	}
+	if params["since_ms"] != sinceMs || params["until_ms"] != untilMs {
+		t.Fatalf("expected exact int64 since_ms/until_ms, got %#v", params)
+	}
+
+	sshReq := &sessiondv1.NativeQueryRequest{
+		Target: &sessiondv1.RuntimeTarget{
+			Runtime:      sessiondv1.RuntimeKind_RUNTIME_KIND_ANTIGRAVITY_SSH,
+			ConnectionId: &connID,
+			Ssh:          &sessiondv1.SshConnectConfig{Host: "synthetic.invalid", Port: 22},
+		},
+		Query: &sessiondv1.NativeQueryRequest_AntigravityUsageSummary{
+			AntigravityUsageSummary: &sessiondv1.AntigravityUsageSummaryQuery{
+				SinceMs: &sinceMs,
+			},
+		},
+	}
+	translatedSSH, err := translateNativeQuery(sshReq)
+	if err != nil {
+		t.Fatalf("ssh AntigravityUsageSummary with since_ms failed: %v", err)
+	}
+	sshParams := translatedSSH.Fields["request_params"].(map[string]any)
+	if translatedSSH.AgentType != "antigravity-ssh" || sshParams["since_ms"] != sinceMs {
+		t.Fatalf("unexpected ssh usage summary translation: %#v", translatedSSH)
+	}
+	if _, hasUntil := sshParams["until_ms"]; hasUntil {
+		t.Fatalf("absent until_ms invented: %#v", sshParams)
+	}
+
+	emptyReq := &sessiondv1.NativeQueryRequest{
+		Target: &sessiondv1.RuntimeTarget{Runtime: sessiondv1.RuntimeKind_RUNTIME_KIND_ANTIGRAVITY},
+		Query: &sessiondv1.NativeQueryRequest_AntigravityUsageSummary{
+			AntigravityUsageSummary: &sessiondv1.AntigravityUsageSummaryQuery{},
+		},
+	}
+	translatedEmpty, err := translateNativeQuery(emptyReq)
+	if err != nil {
+		t.Fatalf("empty AntigravityUsageSummary failed: %v", err)
+	}
+	if len(translatedEmpty.Fields["request_params"].(map[string]any)) != 0 {
+		t.Fatalf("expected empty request_params for all-time usage summary, got %#v", translatedEmpty.Fields)
+	}
+
+	readonly := true
+	sessionReq := &sessiondv1.NativeQueryRequest{
+		Target: &sessiondv1.RuntimeTarget{Runtime: sessiondv1.RuntimeKind_RUNTIME_KIND_ANTIGRAVITY},
+		Query: &sessiondv1.NativeQueryRequest_AntigravitySessionUsage{
+			AntigravitySessionUsage: &sessiondv1.AntigravitySessionUsageQuery{
+				ConversationId: "52794208-5f2e-4120-a6b1-99e5ee29c7f1",
+				Readonly:       &readonly,
+			},
+		},
+	}
+	translatedSess, err := translateNativeQuery(sessionReq)
+	if err != nil {
+		t.Fatalf("AntigravitySessionUsage failed: %v", err)
+	}
+	sessParams := translatedSess.Fields["request_params"].(map[string]any)
+	if sessParams["conversation_id"] != "52794208-5f2e-4120-a6b1-99e5ee29c7f1" || sessParams["readonly"] != true {
+		t.Fatalf("lost session usage params: %#v", sessParams)
+	}
+
+	badSessReq := &sessiondv1.NativeQueryRequest{
+		Target: &sessiondv1.RuntimeTarget{Runtime: sessiondv1.RuntimeKind_RUNTIME_KIND_ANTIGRAVITY},
+		Query: &sessiondv1.NativeQueryRequest_AntigravitySessionUsage{
+			AntigravitySessionUsage: &sessiondv1.AntigravitySessionUsageQuery{},
+		},
+	}
+	if _, err := translateNativeQuery(badSessReq); status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("expected InvalidArgument for empty conversation_id, got %v", err)
+	}
+}

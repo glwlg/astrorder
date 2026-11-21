@@ -11,7 +11,8 @@ export const ISOLATED_APP_ORIGIN = `http://127.0.0.1:${ISOLATED_APP_PORT}`
 
 export function getIsolatedPaths(customRoot) {
   const root = customRoot || path.resolve(import.meta.dirname, '..')
-  const localAppData = process.env.LOCALAPPDATA || 'C:\\Users\\luwei\\AppData\\Local'
+  const localAppData = process.env.LOCALAPPDATA
+  if (!localAppData) throw new Error('LOCALAPPDATA is required to locate and isolate Windows application state')
   const stateDir = process.env.ASTRORDER_ISOLATED_STATE_DIR || path.join(localAppData, 'Astrorder-Wails-Dev')
   const production = path.join(localAppData, 'Astrorder')
   const relative = path.relative(production, path.resolve(stateDir))

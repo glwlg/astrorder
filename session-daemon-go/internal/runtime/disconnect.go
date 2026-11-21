@@ -16,3 +16,13 @@ type ConnectionDisconnector interface {
 type RuntimeDisconnector interface {
 	Shutdown(ctx context.Context) ([]string, error)
 }
+
+// ForcedRuntimeDisconnector stops the owned transport even with active sessions.
+// It must confirm transport exit before reporting any released sessions.
+type ForcedRuntimeDisconnector interface {
+	ForceShutdown(ctx context.Context) ([]string, error)
+}
+
+type forcedConnectionDisconnector interface {
+	ForceDisconnectConnection(ctx context.Context, connectionID string) ([]string, error)
+}

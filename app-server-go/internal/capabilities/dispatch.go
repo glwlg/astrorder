@@ -213,6 +213,13 @@ func (s *Service) pluginDelivery(ctx context.Context, source envtarget.Env, sour
 			archive = nil
 		}
 	}
+	if sourceAgent == "antigravity" {
+		if root := antigravityConfigRoot(sn.paths); root != "" {
+			if archive, err = source.PackDir(ctx, root+"/plugins/"+plugin.FullName); err != nil {
+				archive = nil
+			}
+		}
+	}
 	if sourceAgent == "grok" {
 		if listing, listErr := s.agentCLI(ctx, source, "grok", "plugin", "list"); listErr == nil {
 			for _, match := range grokPluginListRE.FindAllStringSubmatch(listing, -1) {
@@ -235,6 +242,7 @@ func (s *Service) pluginDelivery(ctx context.Context, source envtarget.Env, sour
 			return "", "目标上该插件已安装并启用", nil
 		}
 		message := "插件已启用"
+		installedPath := ""
 		_, installed := destSnap.findPlugin(ctx, agent, plugin.FullName)
 		if !installed {
 			switch agent {
@@ -251,7 +259,25 @@ func (s *Service) pluginDelivery(ctx context.Context, source envtarget.Env, sour
 				if err := dest.UnpackDir(ctx, paths.Hermes+"/plugins", plugin.Name, archive); err != nil {
 					return "", "", err
 				}
+				installedPath = paths.Hermes + "/plugins/" + plugin.Name
 				message = "插件目录已复制并启用"
+			case "antigravity":
+				if archive == nil {
+					return "", "", envtarget.Errorf(422, "源端没有可复制的 Antigravity 插件目录")
+				}
+				paths, err := dest.Paths(ctx)
+				if err != nil {
+					return "", "", err
+				}
+				root := antigravityConfigRoot(paths)
+				if root == "" {
+					return "", "", envtarget.Errorf(422, "无法确定目标 Antigravity 插件目录")
+				}
+				if err := dest.UnpackDir(ctx, root+"/plugins", plugin.FullName, archive); err != nil {
+					return "", "", err
+				}
+				installedPath = root + "/plugins/" + plugin.FullName
+				message = "Antigravity 插件目录已复制并启用"
 			case "grok":
 				if gitURL == "" {
 					return "", "", envtarget.Errorf(422, "源端查不到该插件的 Git 来源，无法在目标上安装")
@@ -265,6 +291,6 @@ func (s *Service) pluginDelivery(ctx context.Context, source envtarget.Env, sour
 		if err := s.applyPlugin(ctx, dest, agent, "toggle", plugin.FullName, true); err != nil {
 			return "", "", err
 		}
-		return "", fmt.Sprint(message), nil
+		return installedPath, fmt.Sprint(message), nil
 	}, nil
 }

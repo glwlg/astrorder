@@ -80,6 +80,59 @@ func (s *Service) UpdateMCP(ctx context.Context, targetID, agent, action string,
 			return nil, envtarget.Errorf(422, "%v", err)
 		}
 		return s.saveMCP(ctx, env, agent, in)
+	case "toggle":
+		name := strings.TrimSpace(asString(raw["name"]))
+		if !mcpNameRE.MatchString(name) {
+			return nil, envtarget.Errorf(422, "MCP 服务名称无效")
+		}
+		enabled := asBool(raw["enabled"], true)
+		stored, err := s.storedMCP(ctx, env, agent, name)
+		if err != nil {
+			if agent == "antigravity" {
+				if sn, snErr := s.snapshot(ctx, env); snErr == nil {
+					for _, plg := range sn.discoverAntigravityPlugins(ctx) {
+						if plg.Enabled && plg.MCPServers[name] != nil {
+							return nil, envtarget.Errorf(422, "MCP 服务 %s 来自 Antigravity 插件 %s，请在插件页启停对应插件", name, plg.DisplayName)
+						}
+					}
+				}
+			}
+			return nil, err
+		}
+		if agent == "antigravity" {
+			if _, hasCLI := env.Which(ctx, "agy"); hasCLI {
+				verb := "disable"
+				if enabled {
+					verb = "enable"
+				}
+				if _, cliErr := s.agentCLI(ctx, env, "antigravity", "mcp", verb, name); cliErr != nil {
+					return nil, cliErr
+				}
+				after, readErr := s.storedMCP(ctx, env, agent, name)
+				if readErr != nil || after.Enabled != enabled {
+					return nil, envtarget.Errorf(502, "切换后 MCP 服务 %s 的状态与期望不一致", name)
+				}
+				return &MCPResult{OK: true, Action: action, Agent: agent, Server: name}, nil
+			}
+		}
+		in := mcpInput{
+			Name:      stored.Name,
+			Transport: stored.Transport,
+			URL:       stored.URL,
+			Command:   stored.Command,
+			Args:      stored.Args,
+			Enabled:   enabled,
+		}
+		if len(stored.Env) > 0 {
+			in.Env = &stored.Env
+		}
+		if len(stored.Headers) > 0 {
+			in.Headers = &stored.Headers
+		}
+		if _, err := s.saveMCP(ctx, env, agent, in); err != nil {
+			return nil, err
+		}
+		return &MCPResult{OK: true, Action: action, Agent: agent, Server: name}, nil
 	case "delete":
 		name := strings.TrimSpace(asString(raw["name"]))
 		if !mcpNameRE.MatchString(name) {
@@ -251,6 +304,19 @@ type PluginResult struct {
 	Action string `json:"action"`
 	Agent  string `json:"agent"`
 	Plugin string `json:"plugin"`
+	Output string `json:"output,omitempty"`
+}
+
+func safePluginInstallTarget(text string) bool {
+	if !notFlag(text) || len(text) > 512 {
+		return false
+	}
+	for _, r := range text {
+		if r < 32 || r == 127 || strings.ContainsRune("`$&|;<>()\"'*?{}!^%", r) {
+			return false
+		}
+	}
+	return true
 }
 
 func (sn *snapshot) findPlugin(ctx context.Context, agent, name string) (Plugin, bool) {
@@ -266,20 +332,58 @@ func (s *Service) UpdatePlugin(ctx context.Context, targetID, agent, action, nam
 	if !validAgent(agent) {
 		return nil, envtarget.Errorf(422, "不支持的 Agent：%s", agent)
 	}
-	if !pluginNameRE.MatchString(name) {
-		return nil, envtarget.Errorf(422, "插件名称无效")
-	}
-	if action != "toggle" && action != "uninstall" {
-		return nil, envtarget.Errorf(422, "不支持的操作：%s", action)
-	}
 	env, err := s.open(ctx, targetID)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.applyPlugin(ctx, env, agent, action, name, enabled); err != nil {
-		return nil, err
+	switch action {
+	case "toggle", "uninstall":
+		if !pluginNameRE.MatchString(name) {
+			return nil, envtarget.Errorf(422, "插件名称无效")
+		}
+		if err := s.applyPlugin(ctx, env, agent, action, name, enabled); err != nil {
+			return nil, err
+		}
+		return &PluginResult{OK: true, Action: action, Agent: agent, Plugin: name}, nil
+	case "install":
+		if agent != "antigravity" {
+			return nil, envtarget.Errorf(422, "%s 暂不支持直接安装插件", agent)
+		}
+		target := strings.TrimSpace(name)
+		if !safePluginInstallTarget(target) {
+			return nil, envtarget.Errorf(422, "插件安装来源无效（支持本地目录、.zip、URL 或 plugin@marketplace）")
+		}
+		if _, ok := env.Which(ctx, "agy"); !ok {
+			return nil, envtarget.Errorf(404, "%s 未安装 agy", env.Target().Name)
+		}
+		out, err := s.agentCLI(ctx, env, "antigravity", "plugin", "install", target)
+		if err != nil {
+			return nil, err
+		}
+		return &PluginResult{OK: true, Action: action, Agent: agent, Plugin: target, Output: tail(out, 2000)}, nil
+	case "import":
+		if agent != "antigravity" {
+			return nil, envtarget.Errorf(422, "%s 暂不支持插件导入", agent)
+		}
+		source := strings.TrimSpace(name)
+		if source != "" && !safePluginInstallTarget(source) {
+			return nil, envtarget.Errorf(422, "插件导入来源无效（支持 gemini、claude 或本地目录路径）")
+		}
+		if _, ok := env.Which(ctx, "agy"); !ok {
+			return nil, envtarget.Errorf(404, "%s 未安装 agy", env.Target().Name)
+		}
+		args := []string{"plugin", "import"}
+		if source != "" {
+			args = append(args, source)
+		}
+		out, err := s.agentCLI(ctx, env, "antigravity", args...)
+		if err != nil {
+			return nil, err
+		}
+		return &PluginResult{OK: true, Action: action, Agent: agent, Plugin: firstNonEmpty(source, "auto"), Output: tail(out, 2000)}, nil
+	default:
+		return nil, envtarget.Errorf(422, "不支持的操作：%s", action)
 	}
-	return &PluginResult{OK: true, Action: action, Agent: agent, Plugin: name}, nil
 }
 
 func (s *Service) applyPlugin(ctx context.Context, env envtarget.Env, agent, action, name string, enabled bool) error {
@@ -287,9 +391,13 @@ func (s *Service) applyPlugin(ctx context.Context, env envtarget.Env, agent, act
 	if err != nil {
 		return err
 	}
-	_, present := sn.findPlugin(ctx, agent, name)
+	found, present := sn.findPlugin(ctx, agent, name)
 	if !present {
 		return envtarget.Errorf(404, "%s 里没有插件 %s", agent, name)
+	}
+	targetName := name
+	if agent == "antigravity" && found.FullName != "" {
+		targetName = found.FullName
 	}
 	binName := agent
 	if binName == "antigravity" {
@@ -298,21 +406,23 @@ func (s *Service) applyPlugin(ctx context.Context, env envtarget.Env, agent, act
 	_, hasCLI := env.Which(ctx, binName)
 	switch {
 	case action == "uninstall" && hasCLI && agent == "codex":
-		_, err = s.agentCLI(ctx, env, "codex", "plugin", "remove", name)
+		_, err = s.agentCLI(ctx, env, "codex", "plugin", "remove", targetName)
 	case action == "uninstall" && hasCLI && agent == "hermes":
-		_, err = s.agentCLI(ctx, env, "hermes", "plugins", "remove", name)
+		_, err = s.agentCLI(ctx, env, "hermes", "plugins", "remove", targetName)
 	case action == "uninstall" && hasCLI && (agent == "grok" || agent == "antigravity"):
-		_, err = s.agentCLI(ctx, env, agent, "plugin", "uninstall", name)
+		_, err = s.agentCLI(ctx, env, agent, "plugin", "uninstall", targetName)
 	case action == "toggle" && hasCLI && (agent == "grok" || agent == "antigravity"):
 		verb := "disable"
 		if enabled {
 			verb = "enable"
 		}
-		_, err = s.agentCLI(ctx, env, agent, "plugin", verb, name)
+		_, err = s.agentCLI(ctx, env, agent, "plugin", verb, targetName)
+	case action == "toggle" && agent == "antigravity":
+		err = s.editAntigravityPluginConfig(ctx, env, targetName, enabled)
 	case agent == "antigravity":
 		return envtarget.Errorf(404, "%s 未安装 agy", env.Target().Name)
 	default:
-		err = s.editPluginConfig(ctx, env, agent, action, name, enabled)
+		err = s.editPluginConfig(ctx, env, agent, action, targetName, enabled)
 	}
 	if err != nil {
 		return err
@@ -321,14 +431,41 @@ func (s *Service) applyPlugin(ctx context.Context, env envtarget.Env, agent, act
 	if err != nil {
 		return err
 	}
-	plugin, still := after.findPlugin(ctx, agent, name)
+	plugin, still := after.findPlugin(ctx, agent, targetName)
 	switch {
 	case action == "uninstall" && still && agent != "hermes":
-		return envtarget.Errorf(502, "卸载后 %s 仍在 %s 的配置里", name, agent)
+		return envtarget.Errorf(502, "卸载后 %s 仍在 %s 的配置里", targetName, agent)
 	case action == "toggle" && (!still || plugin.Enabled != enabled):
-		return envtarget.Errorf(502, "切换后 %s 的状态与期望不一致", name)
+		return envtarget.Errorf(502, "切换后 %s 的状态与期望不一致", targetName)
 	}
 	return nil
+}
+
+func (s *Service) editAntigravityPluginConfig(ctx context.Context, env envtarget.Env, name string, enabled bool) error {
+	paths, err := env.Paths(ctx)
+	if err != nil {
+		return err
+	}
+	file := antigravityConfigFile(paths)
+	if file == "" {
+		return envtarget.Errorf(422, "无法确定 Antigravity 配置文件路径")
+	}
+	defer s.lock(env.Target().ID + "|" + file)()
+	mutate := func(data []byte) ([]byte, error) {
+		return setAntigravityPluginEnabled(data, name, enabled)
+	}
+	verify := func(stored []byte) error {
+		cfg, parseErr := parseJSONMap(stored)
+		if parseErr != nil {
+			return parseErr
+		}
+		entry := asMap(asMap(cfg["plugins"])[name])
+		if entry == nil || asBool(entry["enabled"], !enabled) != enabled {
+			return fmt.Errorf("Antigravity 插件状态与期望不一致")
+		}
+		return nil
+	}
+	return s.commit(ctx, env, file, mutate, verify)
 }
 
 func (s *Service) editPluginConfig(ctx context.Context, env envtarget.Env, agent, action, name string, enabled bool) error {

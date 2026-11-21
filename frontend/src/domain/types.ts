@@ -190,6 +190,7 @@ export interface BootstrapPayload {
   approvals?: Approval[];
   protocol_version: number;
   agents: Agent[];
+  disabled_agent_connections?: string[];
   projects?: Project[];
   sessions: Session[];
   tasks?: Task[];

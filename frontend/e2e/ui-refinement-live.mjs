@@ -1,7 +1,8 @@
 import { chromium, expect } from '@playwright/test'
 import fs from 'node:fs/promises'
 let input = ''; for await (const chunk of process.stdin) input += chunk
-const { token } = JSON.parse(input)
+const { token, sessionId, agentId } = JSON.parse(input)
+if (!sessionId || !agentId) throw new Error("sessionId and agentId are required")
 const origin = 'http://127.0.0.1:30001'
 const output = 'test-results/ui-refinement-live'
 await fs.mkdir(output, { recursive: true })
@@ -11,7 +12,7 @@ try {
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
   expect((await context.request.post(origin + '/api/v1/auth/session', { headers: { Origin: origin }, data: { token } })).ok()).toBe(true)
   const data = await (await context.request.get(origin + '/api/v1/bootstrap')).json()
-  const selected = data.sessions.find(s => s.id === '20260906_133220_28fc67')
+  const selected = data.sessions.find(s => s.id === sessionId && s.agent_id === agentId)
   expect(selected).toBeTruthy()
   const route = `/chat/${encodeURIComponent(selected.id)}?agent_id=${encodeURIComponent(selected.agent_id)}`
   const page = await context.newPage()

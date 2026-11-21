@@ -48,7 +48,7 @@ describe('describeTool', () => {
     const msg = makeMessage({
       tool: {
         name: 'commandExecution',
-        arguments: { command: 'docker logs ikaros' },
+        arguments: { command: 'docker logs example-app' },
         status: 'failed',
       },
     })
@@ -61,7 +61,7 @@ describe('describeTool', () => {
     const msg = makeMessage({
       tool: {
         name: 'fileChange',
-        arguments: { changes: [{ path: '/home/luwei/workspace/ikaros/src/views/CameraView.vue' }] },
+        arguments: { changes: [{ path: '/home/fixture/workspace/example-app/src/views/CameraView.vue' }] },
         status: 'completed',
       },
     })

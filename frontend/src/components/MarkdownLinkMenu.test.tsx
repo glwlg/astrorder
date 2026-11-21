@@ -19,7 +19,7 @@ const localSession: Session = {
 const remoteSession: Session = {
   ...localSession,
   id: 'link-menu-remote',
-  workspace: '/home/luwei/project',
+  workspace: '/home/fixture/project',
   connection_id: 'wsl:Ubuntu',
 }
 
@@ -115,7 +115,7 @@ describe('Markdown link context menu', () => {
       .mockResolvedValueOnce(jsonResponse({ local_paths: ['C:\\Temp\\copy-123\\设计文档.pdf'], clipboard_set: false }))
       .mockResolvedValueOnce(jsonResponse({ status: 'ok' }))
     vi.stubGlobal('fetch', fetch)
-    renderMarkdown('[远程文档](<file:///home/luwei/project/docs/设计文档.pdf>)', session)
+    renderMarkdown('[远程文档](<file:///home/fixture/project/docs/设计文档.pdf>)', session)
 
     fireEvent.contextMenu(screen.getByRole('button', { name: /远程文档/ }))
     fireEvent.click(await screen.findByRole('menuitem', { name: '用系统默认应用打开' }))
@@ -123,7 +123,7 @@ describe('Markdown link context menu', () => {
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2))
     expect(fetch.mock.calls[0][0]).toBe('/api/v1/files/stage')
     expect(JSON.parse(fetch.mock.calls[0][1].body as string)).toEqual({
-      paths: ['/home/luwei/project/docs/设计文档.pdf'],
+      paths: ['/home/fixture/project/docs/设计文档.pdf'],
       session_id: session.id,
       connection_id: connectionId,
       copy_to_clipboard: false,
@@ -246,5 +246,21 @@ describe('Markdown link context menu', () => {
       message: '无法确定文件所在的会话',
     })))
     expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('downloads remote temp directory files directly from the file context menu', async () => {
+    const saveDownload = vi.fn().mockResolvedValue(true)
+    ;(window as unknown as { astrorderDesktop: unknown }).astrorderDesktop = { saveDownload }
+    renderMarkdown('[远程临时报表](/tmp/report.xlsx)', remoteSession)
+
+    fireEvent.contextMenu(screen.getByRole('button', { name: /远程临时报表/ }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: '下载到本地' }))
+
+    await waitFor(() => {
+      expect(saveDownload).toHaveBeenCalledWith(
+        '/api/v1/files/raw?path=%2Ftmp%2Freport.xlsx&download=1&session_id=link-menu-remote&connection_id=wsl%3AUbuntu',
+        'report.xlsx',
+      )
+    })
   })
 })

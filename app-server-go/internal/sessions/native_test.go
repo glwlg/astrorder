@@ -50,9 +50,9 @@ func TestNativeTargetDefaultsForRemoteAgents(t *testing.T) {
 	defer st.Close()
 	_, err = st.SaveSSHConnection(ctx, map[string]any{
 		"id":   "remote-node",
-		"host": "192.168.1.100",
+		"host": "192.0.2.100",
 		"port": json.Number("22"),
-		"user": "luwei",
+		"user": "fixture",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -63,7 +63,7 @@ func TestNativeTargetDefaultsForRemoteAgents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if codexTarget.Ssh.GetCodexExecutable() != "/home/luwei/.vite-plus/bin/codex" {
+	if codexTarget.Ssh.GetCodexExecutable() != "" {
 		t.Fatalf("unexpected codex default: %v", codexTarget.Ssh.GetCodexExecutable())
 	}
 
@@ -71,7 +71,7 @@ func TestNativeTargetDefaultsForRemoteAgents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if grokTarget.Ssh.GetGrokExecutable() != "/home/luwei/.local/bin/grok" {
+	if grokTarget.Ssh.GetGrokExecutable() != "" {
 		t.Fatalf("unexpected grok default: %v", grokTarget.Ssh.GetGrokExecutable())
 	}
 
@@ -79,15 +79,15 @@ func TestNativeTargetDefaultsForRemoteAgents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if hermesTarget.Ssh.GetHermesPath() != "/home/luwei/.local/bin/hermes" {
+	if hermesTarget.Ssh.GetHermesPath() != "" {
 		t.Fatalf("unexpected hermes default: %v", hermesTarget.Ssh.GetHermesPath())
 	}
 	// Custom hermes_path stored in SSH connection
 	_, err = st.SaveSSHConnection(ctx, map[string]any{
 		"id":          "custom-hermes-node",
-		"host":        "192.168.1.100",
+		"host":        "192.0.2.100",
 		"port":        json.Number("22"),
-		"user":        "luwei",
+		"user":        "fixture",
 		"hermes_path": "/custom/bin/hermes",
 	})
 	if err != nil {
@@ -108,13 +108,13 @@ func TestNativeTargetDefaultsForRemoteAgents(t *testing.T) {
 	if agyTarget.GetRuntime() != pb.RuntimeKind_RUNTIME_KIND_ANTIGRAVITY_SSH || agyTarget.GetConnectionId() != "remote-node" {
 		t.Fatalf("unexpected remote antigravity runtime target: %+v", agyTarget)
 	}
-	if agyTarget.Ssh.GetAntigravityExecutable() != "/home/luwei/.local/bin/agy" {
+	if agyTarget.Ssh.GetAntigravityExecutable() != "" {
 		t.Fatalf("unexpected antigravity default: %v", agyTarget.Ssh.GetAntigravityExecutable())
 	}
 
 	_, err = st.SaveSSHConnection(ctx, map[string]any{
 		"id":   "alice-node",
-		"host": "192.168.1.101",
+		"host": "192.0.2.101",
 		"port": json.Number("22"),
 		"user": "alice",
 	})
@@ -125,8 +125,8 @@ func TestNativeTargetDefaultsForRemoteAgents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if aliceTarget.Ssh.GetAntigravityExecutable() != "/home/alice/.local/bin/agy" {
-		t.Fatalf("unexpected user-scoped antigravity fallback: %v", aliceTarget.Ssh.GetAntigravityExecutable())
+	if aliceTarget.Ssh.GetAntigravityExecutable() != "" {
+		t.Fatalf("unexpected invented executable: %v", aliceTarget.Ssh.GetAntigravityExecutable())
 	}
 
 	hWithResolver := &Handler{
@@ -149,14 +149,10 @@ func TestNativeTargetDefaultsForRemoteAgents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fallbackTarget.Ssh.GetAntigravityExecutable() != "/home/alice/.local/bin/agy" {
-		t.Fatalf("expected fallback executable on resolver failure, got: %v", fallbackTarget.Ssh.GetAntigravityExecutable())
+	if fallbackTarget.Ssh.GetAntigravityExecutable() != "" {
+		t.Fatalf("resolver failure should leave executable unset, got: %v", fallbackTarget.Ssh.GetAntigravityExecutable())
 	}
 
-	explicit := firstSSHSettingString(map[string]any{"antigravity_executable": "/custom/agy"}, nil, "antigravity_executable")
-	if explicit != "/custom/agy" {
-		t.Fatalf("expected explicit antigravity_executable, got %q", explicit)
-	}
 }
 
 type stubRemoteExecResolver struct {

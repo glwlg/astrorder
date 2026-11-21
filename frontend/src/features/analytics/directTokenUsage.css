@@ -77,7 +77,7 @@
   border-collapse: separate;
   border-spacing: 0;
   font-size: var(--mantine-font-size-sm);
-  --label-2: "Agent / 节点";
+  --label-2: "服务器 / Agent";
   --label-3: "模型";
   --label-4: "步数";
   --label-5: "输入 / 缓存 / 输出";
@@ -125,6 +125,36 @@
   text-align: end !important;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+.direct-usage-server-chip {
+  appearance: none;
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-sm);
+  background: var(--mantine-color-default-hover);
+  color: var(--mantine-color-blue-text);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.4;
+  padding: 1px 6px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.direct-usage-server-chip:hover {
+  border-color: var(--mantine-color-blue-outline);
+}
+
+.direct-usage-server-chip[aria-pressed='true'] {
+  background: var(--mantine-color-blue-filled);
+  border-color: var(--mantine-color-blue-filled);
+  color: var(--mantine-color-white);
+}
+
+.direct-usage-server-chip:focus-visible {
+  outline: 2px solid var(--mantine-color-blue-filled);
+  outline-offset: 2px;
 }
 
 .direct-usage-session-link {

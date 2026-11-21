@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -93,6 +94,62 @@ func TestConfirmedRestartDisconnectsOnceThenAttaches(t *testing.T) {
 	handler.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/environments/local/agents/hermes/restart", nil))
 	if w.Code != http.StatusOK || server.disconnectHit.Load() != 1 || server.attachHit.Load() != 1 {
 		t.Fatalf("confirmed restart: HTTP=%d disconnect=%d attach=%d body=%s", w.Code, server.disconnectHit.Load(), server.attachHit.Load(), w.Body.String())
+	}
+}
+
+func TestForceRestartRequiresExplicitAntigravityConfirmation(t *testing.T) {
+	for _, tc := range []struct {
+		name, body, kind string
+		confirmed        bool
+		status           int
+	}{
+		{name: "ordinary restart", kind: "antigravity", status: http.StatusOK},
+		{name: "force restart", kind: "antigravity", body: `{"confirm_active":true}`, confirmed: true, status: http.StatusOK},
+		{name: "invalid confirmation", kind: "antigravity", body: `{"confirm_active":"true"}`, status: http.StatusUnprocessableEntity},
+		{name: "other runtime", kind: "codex", body: `{"confirm_active":true}`, status: http.StatusUnprocessableEntity},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := &fakeDaemonService{}
+			handler, _, _ := receiptFixture(t, server)
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/environments/saved/agents/"+tc.kind+"/restart", strings.NewReader(tc.body)))
+			if w.Code != tc.status {
+				t.Fatalf("HTTP=%d, want %d: %s", w.Code, tc.status, w.Body)
+			}
+			request := server.disconnectRequest.Load()
+			if tc.status != http.StatusOK {
+				if request != nil || server.attachHit.Load() != 0 {
+					t.Fatal("refused restart reached the daemon")
+				}
+				return
+			}
+			if request == nil || request.GetConfirmActive() != tc.confirmed || request.GetTarget().GetConnectionId() != "saved" || server.attachHit.Load() != 1 {
+				t.Fatalf("restart confirmation or target changed: %v", request)
+			}
+		})
+	}
+}
+
+func TestConfirmedAgentActionsCommitAndPublishConnectionChoice(t *testing.T) {
+	handler, st, publisher := receiptFixture(t, &fakeDaemonService{})
+	for i, action := range []string{"disconnect", "connect"} {
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/environments/saved/agents/antigravity/"+action, nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s HTTP=%d body=%s", action, w.Code, w.Body.String())
+		}
+		wantEnabled := action == "connect"
+		enabled, present, err := st.GetAgentConnectionChoice(context.Background(), "saved:antigravity")
+		if err != nil || !present || enabled != wantEnabled {
+			t.Fatalf("%s choice: enabled=%v present=%v err=%v", action, enabled, present, err)
+		}
+		if len(publisher.committed) != i+1 {
+			t.Fatalf("%s published events: %v", action, publisher.committed)
+		}
+		event := publisher.committed[i]
+		if event.Cursor <= 0 || event.Type != "agent.connection_choice" || event.Data["key"] != "saved:antigravity" || event.Data["enabled"] != wantEnabled {
+			t.Fatalf("%s published incorrect choice: %+v", action, event)
+		}
 	}
 }
 

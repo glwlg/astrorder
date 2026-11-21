@@ -13,7 +13,7 @@ func TestDeliveryPromptIdentifiesEachMemberOfTheSameAgent(t *testing.T) {
 		MaxHops: 10,
 		Members: []Member{
 			{ID: "design", AgentID: "codex", Alias: alias("方案设计"), Workspace: alias("/design"), SystemRolePrompt: alias("解释已经确认的设计")},
-			{ID: "developer", AgentID: "codex", Alias: alias("OpsCore开发"), Workspace: alias("/development")},
+			{ID: "developer", AgentID: "codex", Alias: alias("ExampleProject开发"), Workspace: alias("/development")},
 		},
 	}
 	for _, member := range group.Members {

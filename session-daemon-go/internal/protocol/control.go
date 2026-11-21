@@ -68,9 +68,13 @@ func (d *Daemon) controlOnce(parent context.Context, request map[string]any) map
 		defer cancel()
 		defer d.wakeModelReloads()
 
-		released, err := d.registry.DisconnectRuntime(ctx, kind, connID)
+		disconnect := d.registry.DisconnectRuntime
+		if request["confirm_active"] == true {
+			disconnect = d.registry.ForceDisconnectRuntime
+		}
+		released, err := disconnect(ctx, kind, connID)
 		if err != nil {
-			return errorResponse(request["request_id"], err.Error())
+			return controlFailure(request["request_id"], err)
 		}
 		for _, sid := range released {
 			_ = d.journal.TrackSession(sid, "idle")
@@ -162,12 +166,7 @@ func (d *Daemon) controlOnce(parent context.Context, request map[string]any) map
 		result, err = d.registry.Command(ctx, r)
 	}
 	if err != nil {
-		response := errorResponse(request["request_id"], err.Error())
-		var rejected *core.RejectedBeforeDispatch
-		if errors.As(err, &rejected) {
-			response["rejected_before_dispatch"] = true
-		}
-		return response
+		return controlFailure(request["request_id"], err)
 	}
 	// Closing releases the native binding, but its persisted thread can wake.
 	// Retiring its journal rejects startup events before TrackSession runs and
@@ -192,6 +191,15 @@ func (d *Daemon) controlOnce(parent context.Context, request map[string]any) map
 	}
 	payload["status"] = result.Status
 	return map[string]any{"action": action + ".result", "request_id": request["request_id"], "daemon_id": d.daemonID, "session_id": result.SessionID, "result": payload}
+}
+
+func controlFailure(requestID any, err error) map[string]any {
+	response := errorResponse(requestID, err.Error())
+	var rejected *core.RejectedBeforeDispatch
+	if errors.As(err, &rejected) {
+		response["rejected_before_dispatch"] = true
+	}
+	return response
 }
 
 // Emit commits native adapter output to the same replay/live stream.

@@ -1,7 +1,9 @@
 import { chromium, expect } from '@playwright/test'
 import fs from 'node:fs/promises'
+import path from 'node:path'
 const origin=process.env.ASTRORDER_FILE_TEST_ORIGIN||'http://127.0.0.1:30001'
-const output=process.env.ASTRORDER_FILE_TEST_OUTPUT||'C:/Users/luwei/AppData/Local/hermes/cache/scratch/file-transfer-fix/browser-regression.json'
+const output=process.env.ASTRORDER_FILE_TEST_OUTPUT||'test-results/file-transfer-browser.json'
+await fs.mkdir(path.dirname(output), { recursive: true })
 const browser=await chromium.launch({executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true})
 const results=[]
 try {

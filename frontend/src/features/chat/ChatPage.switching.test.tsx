@@ -13,6 +13,36 @@ function Switcher() {
   return <>{[['codex', 'one'], ['codex', 'two'], ['hermes', 'one']].map(([agent, id]) => <button key={`${agent}/${id}`} onClick={() => navigate(`/chat/${id}?agent_id=${agent}`)}>{agent}/{id}</button>)}</>
 }
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
+
+it.each(['?agent_id=remote-agy', ''])('redirects a disconnected session link %s without fetching history', async (search) => {
+  const store = useAstrorderStore.getState()
+  store.resetRuntime()
+  store.hydrateBootstrap({
+    protocol_version: 1, cursor: 1, disabled_agent_connections: ['remote:antigravity'],
+    agents: [{ id: 'remote-agy', name: 'Antigravity', kind: 'antigravity-ssh', connection_id: 'remote', status: 'disconnected', capabilities: [], limitation: null }],
+    sessions: [{ id: 'archived', agent_id: 'remote-agy', title: '远程会话', workspace: null, status: 'idle', updated_at: '2026-10-14T00:00:00Z' }],
+  })
+  const sync = vi.spyOn(api, 'syncSession')
+  const history = vi.spyOn(api, 'getMessages')
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(
+    <MantineProvider>
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={[`/chat/archived${search}`]}>
+          <Routes>
+            <Route path="/chat/:sessionId" element={<ChatPage />} />
+            <Route path="/chat" element={<h1>会话首页</h1>} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>
+    </MantineProvider>,
+  )
+  expect(await screen.findByRole('heading', { name: '会话首页' })).toBeInTheDocument()
+  expect(sync).not.toHaveBeenCalled()
+  expect(history).not.toHaveBeenCalled()
+  client.clear()
+})
+
 it.each([
   ['parent', 'codex', 'subagent'],
   ['child', 'codex', 'subagent'],
@@ -45,7 +75,7 @@ it.each([
 it('uses the same placeholder display title as the session rail and updates after generated naming', async () => {
   useAstrorderStore.getState().resetRuntime()
   useSidecarStore.setState({ isOpen: false })
-  const session = { id: 'title', agent_id: 'codex', title: 'New Session', workspace: '/workspace/OpsCore', status: 'idle' as const, updated_at: '2026-10-14T00:00:00Z' }
+  const session = { id: 'title', agent_id: 'codex', title: 'New Session', workspace: '/workspace/ExampleProject', status: 'idle' as const, updated_at: '2026-10-14T00:00:00Z' }
   useAstrorderStore.getState().hydrateBootstrap({ protocol_version: 1, cursor: 0, agents: [], sessions: [session] })
   vi.spyOn(api, 'syncSession').mockResolvedValue(session)
   vi.spyOn(api, 'getMessages').mockResolvedValue({ items: [], next_cursor: null })
@@ -53,7 +83,7 @@ it('uses the same placeholder display title as the session rail and updates afte
   vi.spyOn(api, 'getTasks').mockResolvedValue({ items: [] })
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   render(<MantineProvider><QueryClientProvider client={client}><MemoryRouter initialEntries={['/chat/title?agent_id=codex']}><Routes><Route path="/chat/:sessionId" element={<ChatPage />} /></Routes></MemoryRouter></QueryClientProvider></MantineProvider>)
-  expect(await screen.findByRole('heading', { level: 2, name: 'OpsCore' })).toBeInTheDocument()
+  expect(await screen.findByRole('heading', { level: 2, name: 'ExampleProject' })).toBeInTheDocument()
   const toggle = screen.getByRole('button', { name: '展开工作台侧边栏' })
   expect(toggle).toHaveAttribute('aria-expanded', 'false')
   fireEvent.click(toggle)

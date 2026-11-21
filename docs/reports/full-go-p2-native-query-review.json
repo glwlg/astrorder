@@ -31,11 +31,11 @@
   "findings": [],
   "checks": [
     {
-      "command": "C:/Users/luwei/.codex/tools/go1.26.4.windows-amd64/go/bin/go.exe test ./internal/grpcapi ./internal/protocol -run 'TestQueryNative|TestNativeQueryTranslation|TestRuntimeQueryUsesReadOnlyNativeRoute|TestAuthenticationCapabilitiesAndRegisteredSurface|TestDefaultServerRegisters' -count=1 -timeout=60s",
+      "command": "go test ./internal/grpcapi ./internal/protocol -run 'TestQueryNative|TestNativeQueryTranslation|TestRuntimeQueryUsesReadOnlyNativeRoute|TestAuthenticationCapabilitiesAndRegisteredSurface|TestDefaultServerRegisters' -count=1 -timeout=60s",
       "exit_code": 0
     },
     {
-      "command": "C:/Users/luwei/.codex/tools/go1.26.4.windows-amd64/go/bin/go.exe vet ./internal/grpcapi ./internal/protocol",
+      "command": "go vet ./internal/grpcapi ./internal/protocol",
       "exit_code": 0
     }
   ],

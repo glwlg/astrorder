@@ -10,6 +10,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"syscall"
+
+	"golang.org/x/sys/windows"
 )
 
 type CtlClient struct {
@@ -72,9 +74,9 @@ func (c *CtlClient) invoke(ctx context.Context, args ...string) ([]byte, error) 
 	return stdout.Bytes(), nil
 }
 
-// invokeIndependent gives the update controller its own process group and job
-// breakaway. Its output goes to a file, so losing the desktop caller cannot
-// break a stdout pipe or cancel the remaining stop/replace/start phases.
+// The CLI owns the update handoff. When it inherits a Windows job it starts
+// its lifecycle broker before stopping the daemon. The desktop only waits for
+// the result; cancellation must not kill the CLI or close its output pipe.
 func (c *CtlClient) invokeIndependent(ctx context.Context, args ...string) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -87,7 +89,7 @@ func (c *CtlClient) invokeIndependent(ctx context.Context, args ...string) ([]by
 	cmd.Dir = c.RootDir
 	cmd.Stdout = output
 	cmd.Stderr = output
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000 | 0x01000000 | 0x00000200}
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: windows.CREATE_NO_WINDOW | windows.CREATE_NEW_PROCESS_GROUP}
 	if err := cmd.Start(); err != nil {
 		output.Close()
 		os.Remove(output.Name())

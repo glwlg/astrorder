@@ -29,7 +29,11 @@ export function AppShellLayout({ chatReturnPath }: { chatReturnPath: string }) {
   const connection = useAstrorderStore((state) => state.connection)
   const routeSessionId = location.pathname.startsWith('/chat/') ? routePart(location.pathname.slice('/chat/'.length)) : null
   const routeAgentId = new URLSearchParams(location.search).get('agent_id')
-  const activeSessionKey = routeSessionId && routeAgentId ? scopeKey(routeAgentId, routeSessionId) : undefined
+  const routeCandidates = routeSessionId && !routeSessionId.startsWith('group-')
+    ? sessions.filter(session => session.id === routeSessionId && (!routeAgentId || session.agent_id === routeAgentId))
+    : location.pathname === '/chat' && sessions.length === 1 ? sessions : []
+  const activeSessionKey = routeCandidates.length === 1 ? scopeKey(routeCandidates[0].agent_id, routeCandidates[0].id) : undefined
+  const compactNavigation = location.pathname.startsWith('/agent-accounts')
 
   const SIDEBAR_WIDTH_KEY = 'astrorder:sidebar_width'
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
@@ -93,22 +97,22 @@ export function AppShellLayout({ chatReturnPath }: { chatReturnPath: string }) {
     <AppShell
       className="astrorder-shell"
       header={{ height: 64 }}
-      navbar={{ width: sidebarWidth, breakpoint: 'md', collapsed: { mobile: true } }}
+      navbar={{ width: compactNavigation ? 64 : sidebarWidth, breakpoint: 'md', collapsed: { mobile: true } }}
       padding={0}
     >
       <AppShell.Header className="sidebar-header">
         <AppHeader connection={connection} onMenu={openMobile} />
       </AppShell.Header>
-      <AppShell.Navbar className="desktop-navbar" p={0} style={{ width: sidebarWidth }}>
+      <AppShell.Navbar className="desktop-navbar" p={0} style={{ width: compactNavigation ? 64 : sidebarWidth }}>
         <Sidebar sessions={sessions} agents={agents} projects={projects} activeSessionKey={activeSessionKey} chatReturnPath={chatReturnPath} onSelectSession={selectSession} />
-        <div
+        {!compactNavigation && <div
           className="sidebar-resizer"
           data-resizing={isResizing}
           onMouseDown={handleResizerMouseDown}
           role="separator"
           aria-label="拖拽调整侧边栏宽度"
           title="按住拖拽调整宽度"
-        />
+        />}
       </AppShell.Navbar>
       <AppShell.Main className="shell-main">
         <ErrorBoundary fallbackTitle="会话主区域加载异常">

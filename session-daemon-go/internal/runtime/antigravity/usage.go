@@ -13,8 +13,16 @@ func int64FromAny(v any) (int64, bool) {
 	switch n := v.(type) {
 	case int64:
 		return n, true
+	case int32:
+		return int64(n), true
 	case int:
 		return int64(n), true
+	case uint32:
+		return int64(n), true
+	case uint64:
+		if n <= math.MaxInt64 {
+			return int64(n), true
+		}
 	case float64:
 		if n >= 0 && n < float64(math.MaxInt64) && n == math.Trunc(n) {
 			return int64(n), true

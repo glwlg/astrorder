@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Command, Message, Project } from '../domain/types'
-import { selectOutbox, selectProjects, selectSessions, useAstrorderStore } from './store'
+import type { Agent, BootstrapPayload, Command, Message, Project } from '../domain/types'
+import { isDisconnectedSessionRoute, selectOutbox, selectProjects, selectSessions, useAstrorderStore } from './store'
 
 const session = {
   id: 'session-1',
@@ -112,6 +112,42 @@ describe('shared runtime store', () => {
     expect(selectSessions(useAstrorderStore.getState()).map(s => s.id)).toEqual(['ordinary'])
     expect(useAstrorderStore.getState().sessions['agent-1::child']?.ephemeral).toBe(true)
   })
+
+  it('hides only explicitly disconnected Agent sessions and restores them after reconnect', () => {
+    const antigravity: Agent = {
+      id: session.agent_id, name: 'Antigravity', kind: 'antigravity-ssh', connection_id: 'ssh-one',
+      status: 'ready', capabilities: [], limitation: null,
+    }
+    const sameMachine: Agent = { ...antigravity, id: 'codex', kind: 'codex' }
+    const temporarilyOffline: Agent = { ...antigravity, id: 'other-antigravity', connection_id: 'ssh-two', status: 'disconnected' }
+    const snapshot: BootstrapPayload = {
+      protocol_version: 1, cursor: 4, agents: [antigravity, sameMachine, temporarilyOffline],
+      disabled_agent_connections: ['ssh-one:antigravity'],
+      sessions: [session, { ...session, agent_id: sameMachine.id }, { ...session, id: 'other', agent_id: temporarilyOffline.id }],
+    }
+    const store = useAstrorderStore.getState()
+    const choiceEvent = (cursor: number, enabled: boolean) => store.applyEvent({
+      id: `choice-${cursor}`, cursor, type: 'agent.connection_choice', agent_id: null, session_id: null,
+      data: { key: 'ssh-one:antigravity', enabled },
+    })
+    const visible = () => selectSessions(useAstrorderStore.getState()).map(item => item.agent_id)
+    store.hydrateBootstrap(snapshot)
+    expect(visible()).toEqual([sameMachine.id, temporarilyOffline.id])
+    expect(isDisconnectedSessionRoute(useAstrorderStore.getState(), session.id, session.agent_id)).toBe(true)
+    expect(isDisconnectedSessionRoute(useAstrorderStore.getState(), session.id, sameMachine.id)).toBe(false)
+    expect(useAstrorderStore.getState().sessions['agent-1::session-1']).toEqual(session)
+
+    choiceEvent(3, true)
+    store.applyEvent({ id: 'runtime-report', cursor: 5, type: 'agent.upsert', agent_id: antigravity.id, session_id: null, data: { ...antigravity } })
+    expect(visible()).toEqual([sameMachine.id, temporarilyOffline.id])
+
+    choiceEvent(6, true)
+    store.hydrateBootstrap(snapshot)
+    expect(visible()).toEqual([antigravity.id, sameMachine.id, temporarilyOffline.id])
+    choiceEvent(7, false)
+    expect(visible()).toEqual([sameMachine.id, temporarilyOffline.id])
+  })
+
   it('keeps the native project catalog, including zero-session projects, after bootstrap hydration', () => {
     const project: Project = {
       id: 'project-row-empty',

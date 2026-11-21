@@ -102,8 +102,8 @@ func TestRemoteWorkspaceAllowlistAndFallback(t *testing.T) {
 		{"parent escape rejected", "/work", "/work", "/work/../etc", "", false},
 		{"relative path rejected", "/", "/", "relative/dir", "", false},
 		{"nul byte rejected", "/", "/", "/work/\x00bad", "", false},
-		{"windows drive falls back to configured posix", "/home/luwei", "/home/luwei", `P:\DevApp\Astrorder\server`, "/home/luwei", true},
-		{"windows drive falls back to slash", "/", "", `C:\Users\luwei`, "/", true},
+		{"windows drive falls back to configured posix", "/home/fixture", "/home/fixture", `C:\Fixture\Astrorder\server`, "/home/fixture", true},
+		{"windows drive falls back to slash", "/", "", `C:\Users\fixture`, "/", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			a := NewWithSSH(Config{Workspace: tc.ws, Allowed: []string{tc.root}, ConnectionID: "wsl"}, noSSH, nil)
@@ -158,9 +158,9 @@ func TestRemoteAntigravityACPLifecycleWithHelper(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	insertSummary(parentID, "Remote Parent", "file:///home/luwei/project", 0, 0)
-	insertSummary(resumableID, "Idle Remote", "file:///home/luwei/project", 0, 0)
-	insertSummary(busyExternalID, "Busy Remote", "file:///home/luwei/project", 1, 0)
+	insertSummary(parentID, "Remote Parent", "file:///home/fixture/project", 0, 0)
+	insertSummary(resumableID, "Idle Remote", "file:///home/fixture/project", 0, 0)
+	insertSummary(busyExternalID, "Busy Remote", "file:///home/fixture/project", 1, 0)
 
 	seedStepsDB := func(dir, id string, texts ...string) {
 		t.Helper()
@@ -222,9 +222,9 @@ func TestRemoteAntigravityACPLifecycleWithHelper(t *testing.T) {
 	}
 
 	adapter := NewWithSSH(Config{
-		Executable:   "/home/luwei/.local/bin/agy",
-		Workspace:    "/home/luwei/project",
-		Allowed:      []string{"/home/luwei"},
+		Executable:   "/home/fixture/.local/bin/agy",
+		Workspace:    "/home/fixture/project",
+		Allowed:      []string{"/home/fixture"},
 		ConnectionID: "wsl",
 		AgentName:    "Antigravity · WSL",
 		Emit:         emit,

@@ -266,15 +266,16 @@ func (h *Handler) exists(response http.ResponseWriter, request *http.Request) er
 	var payload struct {
 		Workspace    string   `json:"workspace"`
 		Paths        []string `json:"paths"`
+		SessionID    string   `json:"session_id"`
 		ConnectionID string   `json:"connection_id"`
 	}
 	if err := decodeJSON(response, request, &payload); err != nil {
 		return err
 	}
-	if payload.Workspace == "" || len(payload.Paths) > 100 {
+	if (strings.TrimSpace(payload.Workspace) == "" && strings.TrimSpace(payload.SessionID) == "") || len(payload.Paths) > 100 {
 		return &targetfs.Error{Status: 400, Code: "invalid_file_path", Detail: "Invalid file path"}
 	}
-	resolved, err := h.resolve(request.Context(), payload.Workspace, "", payload.ConnectionID)
+	resolved, err := h.resolve(request.Context(), payload.Workspace, payload.SessionID, payload.ConnectionID)
 	if err != nil {
 		return err
 	}
@@ -292,7 +293,7 @@ func (h *Handler) exists(response http.ResponseWriter, request *http.Request) er
 			existing = append(existing, raw)
 			continue
 		}
-		if statErr != nil && targetfs.IsNotFound(statErr) {
+		if statErr != nil && (targetfs.IsNotFound(statErr) || targetfs.IsForbidden(statErr)) {
 			continue
 		}
 		if statErr != nil {

@@ -5,12 +5,12 @@ import { api } from '../api/client'
 import type { Session } from '../domain/types'
 import { MarkdownContent } from './MarkdownContent'
 
-const generatedImage = '/home/luwei/.codex/generated_images/01a10e85-1f2f-7913-ab78-7be247c1c86c/exec-1d4977e4-e5ed-491e-af04-e5d4f36e9934.png'
+const generatedImage = '/home/fixture/.codex/generated_images/fixture-session/exec-fixture-image.png'
 const session: Session = {
   id: 'image thread &1',
   agent_id: 'remote-codex',
   title: '图片测试',
-  workspace: '/home/luwei/project',
+  workspace: '/home/fixture/project',
   connection_id: 'wsl:Ubuntu',
   status: 'idle',
   updated_at: '2026-10-20T00:00:00Z',
@@ -30,9 +30,9 @@ describe('Markdown filesystem images', () => {
   it.each([
     ['WSL generated image outside the project', generatedImage, session, generatedImage],
     ['SSH generated image outside the project', generatedImage, { ...session, connection_id: 'ssh:image-host' }, generatedImage],
-    ['Windows absolute image', 'C:/Users/luwei/output/design.png', { ...session, connection_id: 'local', workspace: 'C:/project' }, 'C:/Users/luwei/output/design.png'],
-    ['relative image', 'output/design.png', session, '/home/luwei/project/output/design.png'],
-    ['image with spaces and Unicode', '/home/luwei/output/小妖 设计 #1.png', session, '/home/luwei/output/小妖 设计 #1.png'],
+    ['Windows absolute image', 'C:/Users/fixture/output/design.png', { ...session, connection_id: 'local', workspace: 'C:/project' }, 'C:/Users/fixture/output/design.png'],
+    ['relative image', 'output/design.png', session, '/home/fixture/project/output/design.png'],
+    ['image with spaces and Unicode', '/home/fixture/output/小妖 设计 #1.png', session, '/home/fixture/output/小妖 设计 #1.png'],
   ])('routes %s through the owning filesystem', (_name, path, owner, expectedPath) => {
     const onImageClick = vi.fn()
     render(<MantineProvider><MarkdownContent value={`![游戏设计图](<${path}>)`} session={owner} onImageClick={onImageClick} /></MantineProvider>)

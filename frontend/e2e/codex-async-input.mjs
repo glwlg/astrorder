@@ -1,7 +1,9 @@
 import { chromium, expect } from '@playwright/test'
 import fs from 'node:fs/promises'
+import path from 'node:path'
 const origin = process.env.ASTRORDER_ASYNC_TEST_ORIGIN || 'http://127.0.0.1:30039'
-const output = process.env.ASTRORDER_ASYNC_TEST_OUTPUT || 'C:/Users/luwei/AppData/Local/hermes/cache/scratch/codex-async-input/browser-regression.json'
+const output = process.env.ASTRORDER_ASYNC_TEST_OUTPUT || 'test-results/codex-async-input.json'
+await fs.mkdir(path.dirname(output), { recursive: true })
 const browser = await chromium.launch({ executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true })
 const results = []
 try {

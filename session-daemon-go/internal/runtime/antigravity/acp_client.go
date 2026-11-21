@@ -48,6 +48,7 @@ type acpClient struct {
 	nextID        int64
 	pending       map[string]chan acpCallResult
 	closed        bool
+	stopRequested bool
 	failedReason  string
 	exitConfirmed bool
 	exitErr       error
@@ -103,8 +104,16 @@ func (a *Adapter) ensureClient(ctx context.Context) (*acpClient, error) {
 		return nil, fmt.Errorf("Antigravity adapter closed")
 	}
 
-	if a.client != nil && !a.client.exited() {
-		return a.client, nil
+	if a.client != nil {
+		a.client.mu.Lock()
+		stopping := a.client.stopRequested
+		a.client.mu.Unlock()
+		if stopping {
+			return nil, fmt.Errorf("Antigravity forced restart still requires confirmation of the old process exit")
+		}
+		if !a.client.exited() {
+			return a.client, nil
+		}
 	}
 
 	startDir := ""
@@ -447,9 +456,9 @@ func (c *acpClient) readLoop(stdout io.Reader) {
 func (c *acpClient) reapTransport() (bool, error) {
 	if c.ssh != nil {
 		st, err := c.ssh.Wait()
-		confirmed := err == nil && st.ConfirmedRemoteExit && !st.LocalKilled
+		confirmed := st.ConfirmedRemoteExit && !st.LocalKilled
 		if err != nil {
-			return false, err
+			return confirmed, err
 		}
 		if !st.ConfirmedRemoteExit {
 			return false, fmt.Errorf("Antigravity remote ACP transport ended without confirmed exit")
@@ -534,6 +543,35 @@ func (c *acpClient) closeIdle(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		}
+	}
+	return nil
+}
+
+func (c *acpClient) stopActive(ctx context.Context) error {
+	c.mu.Lock()
+	c.closed = true
+	c.stopRequested = true
+	c.mu.Unlock()
+
+	if !c.exited() {
+		if c.ssh == nil && c.owner != nil {
+			if err := c.owner.Close(); err != nil {
+				return err
+			}
+		}
+		// Send EOF to the ACP worker even if a conversation is still active.
+		// Closing the local SSH process cannot prove the worker exited.
+		if c.stdin != nil {
+			_ = c.stdin.Close()
+		}
+		select {
+		case <-c.done:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	if !c.remoteExitConfirmed() {
+		return fmt.Errorf("Antigravity ACP process exit was not confirmed")
 	}
 	return nil
 }

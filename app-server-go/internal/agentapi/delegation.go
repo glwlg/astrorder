@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"astrorder.dev/app-server/internal/connections"
 	"astrorder.dev/app-server/internal/store"
 	sessiondv1 "astrorder.dev/contracts/gen/go/astrorder/sessiond/v1"
 )
@@ -170,10 +171,10 @@ func (h *Handler) invokeSessionsDelegate(ctx context.Context, payload map[string
 		// Agent. A different Agent may run on another machine or runtime.
 		workspace, _ = callerSession["workspace"].(string)
 	}
-	if workspace == "" {
+	if workspace == "" && !connections.IsRemoteAgent(targetAgent) {
 		workspace = h.options.DefaultWorkspace
 	}
-	if workspace == "" {
+	if workspace == "" && !connections.IsRemoteAgent(targetAgent) {
 		return nil, NewAgentApiError("invalid_input", "workspace is required and no default workspace configured")
 	}
 	title := input.Title
@@ -273,11 +274,12 @@ func (h *Handler) invokeSessionsDelegate(ctx context.Context, payload map[string
 		_ = h.options.Store.FailDelegationOperation(ctx, input.OperationID, errMsg)
 		return nil, NewAgentApiError("runtime_error", rErr.Error())
 	}
-	if input.Workspace == "" && target.Ssh != nil && !strings.HasPrefix(workspace, "/") {
-		if target.Ssh.Workspace != nil && strings.HasPrefix(*target.Ssh.Workspace, "/") {
-			workspace = *target.Ssh.Workspace
-		} else {
-			workspace = "/home/luwei"
+	if target.Ssh != nil {
+		workspace = connections.RemoteWorkspace(workspace, target.Ssh.GetWorkspace())
+		if workspace == "" {
+			const detail = "an absolute SSH workspace path is required"
+			_ = h.options.Store.FailDelegationOperation(ctx, input.OperationID, detail)
+			return nil, NewAgentApiError("invalid_input", detail)
 		}
 	}
 

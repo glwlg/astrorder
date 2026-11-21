@@ -22,6 +22,12 @@ type stubRuntimeQueryServer struct {
 	queryNative func(context.Context, *sessiondv1.NativeQueryRequest) (*sessiondv1.NativeQueryResponse, error)
 }
 
+type fixtureRemoteExecutable struct{ path string }
+
+func (f fixtureRemoteExecutable) Resolve(context.Context, string, map[string]any) (string, error) {
+	return f.path, nil
+}
+
 func (s *stubRuntimeQueryServer) GetCapabilities(context.Context, *sessiondv1.GetCapabilitiesRequest) (*sessiondv1.GetCapabilitiesResponse, error) {
 	return &sessiondv1.GetCapabilitiesResponse{
 		ProtocolMajor: 1,
@@ -108,7 +114,7 @@ func TestMagpieDoublePrefixUnwrapAndAntigravityNativeFallback(t *testing.T) {
 			switch q := req.Query.(type) {
 			case *sessiondv1.NativeQueryRequest_AntigravityQuotaRead:
 				seenQuotaQueries++
-				if req.Target.GetRuntime() == sessiondv1.RuntimeKind_RUNTIME_KIND_ANTIGRAVITY_SSH && req.Target.GetSsh().GetAntigravityExecutable() == "/home/luwei/.local/bin/agy" {
+				if req.Target.GetRuntime() == sessiondv1.RuntimeKind_RUNTIME_KIND_ANTIGRAVITY_SSH && req.Target.GetSsh().GetAntigravityExecutable() == "/opt/fixture/agy" {
 					seenSSHTarget = true
 				}
 				raw, _ := json.Marshal(map[string]any{
@@ -157,13 +163,14 @@ func TestMagpieDoublePrefixUnwrapAndAntigravityNativeFallback(t *testing.T) {
 
 	h, st, cleanup := setupModelGatewayWithRuntime(t, rt)
 	defer cleanup()
+	h.remoteExecutable = &fixtureRemoteExecutable{path: "/opt/fixture/agy"}
 
 	ctx := context.Background()
 	if _, err := st.SaveSSHConnection(ctx, map[string]any{
 		"id":   "debian-1",
-		"host": "192.168.1.100",
+		"host": "192.0.2.100",
 		"port": 22,
-		"user": "luwei",
+		"user": "fixture",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -250,5 +257,130 @@ func TestMagpieDoublePrefixUnwrapAndAntigravityNativeFallback(t *testing.T) {
 	}
 	if usageResp["used_percentage"] != float64(5) || usageResp["cache_hit_rate"] != float64(75) {
 		t.Fatalf("unexpected computed usage percentages: %s", w3.Body.String())
+	}
+}
+
+func TestAntigravityNativeQuotaGroupsMapping(t *testing.T) {
+	rt := &stubRuntimeQueryServer{
+		queryNative: func(ctx context.Context, req *sessiondv1.NativeQueryRequest) (*sessiondv1.NativeQueryResponse, error) {
+			if _, ok := req.Query.(*sessiondv1.NativeQueryRequest_AntigravityQuotaRead); !ok {
+				t.Fatalf("unexpected query: %T", req.Query)
+			}
+			raw, _ := json.Marshal(map[string]any{
+				"provider":  "antigravity",
+				"source":    "agy_cli_usage",
+				"plan":      "Google AI Pro",
+				"plan_name": "Google AI Pro",
+				"as_of":     "2026-11-21T01:48:00Z",
+				"groups": []map[string]any{
+					{
+						"name":        "Gemini Models",
+						"description": "Models within this group: Gemini 4 Neon, Gemini 4 Hydrogen, Orchestrator (Neon), Gemini 3.8 Flash",
+						"buckets": []map[string]any{
+							{"id": "gemini-weekly", "name": "Weekly Limit Remaining", "window": "weekly", "used_percent": 68.4, "reset_at": int64(1795701655000)},
+							{"id": "gemini-5h", "name": "Five Hour Limit Remaining", "window": "5h", "used_percent": 14.4, "reset_at": int64(1795242622000)},
+						},
+					},
+					{
+						"name":        "Claude and GPT models",
+						"description": "Models within this group: Claude Opus 5.5, Claude Sonnet 5.5, GPT-OSS 120B",
+						"buckets": []map[string]any{
+							{"id": "3p-weekly", "name": "Weekly Limit Remaining", "window": "weekly", "used_percent": 0.0},
+							{"id": "3p-5h", "name": "Five Hour Limit Remaining", "window": "5h", "used_percent": 0.0},
+						},
+					},
+					{
+						"name":        "Gemini 4 Argon",
+						"description": "For paid Pro plans, Argon quota is separate.",
+						"buckets": []map[string]any{
+							{"id": "gemini-argon-wtu-weekly", "name": "Gemini 4 Argon Weekly Limit", "window": "weekly", "used_percent": 26.6, "reset_at": int64(1795761975000)},
+						},
+					},
+				},
+			})
+			return &sessiondv1.NativeQueryResponse{
+				Target: req.Target,
+				Result: &sessiondv1.NativeJson{Schema: "antigravity.quota.read", Utf8Json: raw},
+			}, nil
+		},
+	}
+
+	h, st, cleanup := setupModelGatewayWithRuntime(t, rt)
+	defer cleanup()
+
+	ctx := context.Background()
+	if _, err := st.UpsertAgent(ctx, map[string]any{
+		"id":            "local-antigravity",
+		"kind":          "antigravity",
+		"name":          "Antigravity · 本机",
+		"connection_id": "local",
+		"status":        "ready",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	query := func(model string) map[string]any {
+		t.Helper()
+		w := httptest.NewRecorder()
+		h.handleGetModelQuota(w, httptest.NewRequest(http.MethodGet, "/api/v1/analytics/model-quota?model="+model+"&agent_id=local-antigravity", nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+		}
+		var out map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+
+	// 1. Gemini 4 Neon -> Gemini 模型组 (both 5h + weekly windows & reset timestamps)
+	neon := query("antigravity%2Fgemini-4-neon-high")
+	neonAccts := neon["accounts"].([]any)
+	if len(neonAccts) != 1 {
+		t.Fatalf("expected 1 neon account, got %+v", neon)
+	}
+	neonAcct := neonAccts[0].(map[string]any)
+	if neonAcct["logLabel"] != "Antigravity · 本机 · Gemini 模型组" || neonAcct["plan"] != "Google AI Pro" {
+		t.Fatalf("unexpected neon account metadata: %+v", neonAcct)
+	}
+	neonQ := neonAcct["quota"].(map[string]any)
+	if neonQ["shortPercent"] != 14.4 || neonQ["weeklyPercent"] != 68.4 || neonQ["shortResetAt"] == nil || neonQ["weeklyResetAt"] == nil {
+		t.Fatalf("unexpected neon windows: %+v", neonQ)
+	}
+
+	// 2. Gemini 4 Argon -> Gemini 4 Argon standalone weekly bucket
+	argon := query("antigravity%2Fgemini-4-argon-high")
+	argonAccts := argon["accounts"].([]any)
+	if len(argonAccts) != 1 {
+		t.Fatalf("expected 1 argon account, got %+v", argon)
+	}
+	argonAcct := argonAccts[0].(map[string]any)
+	if argonAcct["logLabel"] != "Antigravity · 本机 · Gemini 4 Argon" {
+		t.Fatalf("unexpected argon label: %+v", argonAcct)
+	}
+	argonQ := argonAcct["quota"].(map[string]any)
+	if argonQ["weeklyPercent"] != 26.6 || argonQ["weeklyResetAt"] == nil {
+		t.Fatalf("unexpected argon quota: %+v", argonQ)
+	}
+
+	// 3. Claude Opus 5.5 -> Claude / GPT 模型组 (0% used, no 1970 resetAt)
+	claude := query("antigravity%2Fclaude-opus-5-5")
+	claudeAccts := claude["accounts"].([]any)
+	if len(claudeAccts) != 1 {
+		t.Fatalf("expected 1 claude account, got %+v", claude)
+	}
+	claudeAcct := claudeAccts[0].(map[string]any)
+	claudeQ := claudeAcct["quota"].(map[string]any)
+	if claudeAcct["logLabel"] != "Antigravity · 本机 · Claude / GPT 模型组" || claudeQ["shortPercent"] != float64(0) || claudeQ["weeklyPercent"] != float64(0) {
+		t.Fatalf("unexpected claude quota: %+v", claudeAcct)
+	}
+	if _, exists := claudeQ["shortResetAt"]; exists {
+		t.Fatalf("unexpected resetAt on full sentinel bucket: %+v", claudeQ)
+	}
+
+	// 4. Unknown future model -> all 3 groups returned so nothing is hidden
+	unknown := query("antigravity%2Funknown-future-model")
+	if len(unknown["accounts"].([]any)) != 3 {
+		t.Fatalf("expected all 3 groups for unknown model fallback, got %+v", unknown)
 	}
 }

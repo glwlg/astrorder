@@ -67,17 +67,23 @@ func (s *runtimeQueryService) DisconnectRuntime(ctx context.Context, r *pb.Disco
 	if r.Target.ConnectionId != nil {
 		fields["connection_id"] = *r.Target.ConnectionId
 	}
+	if r.ConfirmActive {
+		fields["confirm_active"] = true
+	}
 	if err := addCommandMeta(fields, r.Meta); err != nil {
 		return nil, err
 	}
-	// Registry disconnect always requires authoritative idle. The confirmation
-	// bit cannot silently relax the existing runtime safety guard.
 	result := s.daemon.ExecuteSessionControl(ctx, fields)
 	response := &pb.DisconnectRuntimeResponse{DaemonId: s.daemon.DaemonID(), OperationState: pb.OperationState_OPERATION_STATE_COMPLETED}
 	if result["action"] == "error" {
 		if result["operation_state"] == "uncertain" {
 			response.OperationState = pb.OperationState_OPERATION_STATE_UNCERTAIN
 			response.Error = businessError(pb.ErrorKind_ERROR_KIND_FAILED_PRECONDITION, "runtime disconnect outcome uncertain", false)
+			return response, nil
+		}
+		if result["rejected_before_dispatch"] == true {
+			detail, _ := result["detail"].(string)
+			response.Error = businessError(pb.ErrorKind_ERROR_KIND_FAILED_PRECONDITION, detail, false)
 			return response, nil
 		}
 		return nil, status.Error(codes.FailedPrecondition, "runtime disconnect refused")

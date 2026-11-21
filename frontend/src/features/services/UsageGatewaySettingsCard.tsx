@@ -24,8 +24,8 @@ interface GatewayFormState {
 const DEFAULT_PROFILES: Record<'opencodex' | 'magpie', GatewayFormState> = {
   opencodex: {
     statisticsUrl: '',
-    managementUrl: 'https://ocx.651971564.xyz',
-    inferenceUrl: 'https://llm.651971564.xyz/v1',
+    managementUrl: '',
+    inferenceUrl: '',
     apiKey: '',
     maskedKey: '',
     managementKey: '',
@@ -34,8 +34,8 @@ const DEFAULT_PROFILES: Record<'opencodex' | 'magpie', GatewayFormState> = {
   },
   magpie: {
     statisticsUrl: '',
-    managementUrl: 'http://192.168.1.11:3430',
-    inferenceUrl: 'http://192.168.1.11:3425/v1',
+    managementUrl: '',
+    inferenceUrl: '',
     apiKey: '',
     maskedKey: '',
     managementKey: '',
@@ -311,8 +311,8 @@ export function UsageGatewaySettingsCard() {
       <div className="gateway-settings-layout"><Stack gap="sm" className="gateway-settings-fields">
         <Select label="网关类型" value={gatewayType} onChange={(v) => handleGatewayTypeChange((v as any) || 'opencodex')} data={[{ value: 'opencodex', label: 'OpenCodeX' }, { value: 'magpie', label: 'Magpie' }]} allowDeselect={false} />
         <TextInput label="统计页地址" description="点击统计时内嵌当前网关的网页；各网关分别保存，留空使用各自管理地址。支持完整地址及页面锚点。" placeholder="https://gateway.example/#usage" value={statisticsUrl} onChange={(event) => setStatisticsUrl(event.currentTarget.value)} disabled={busy === 'load'} />
-        <TextInput label="管理地址" placeholder={gatewayType === 'magpie' ? 'https://magpie.example.com' : 'https://ocx.example.com'} value={managementUrl} onChange={(event) => setManagementUrl(event.currentTarget.value)} disabled={busy === 'load'} />
-        <TextInput label="推理 Base URL" placeholder={gatewayType === 'magpie' ? 'http://192.168.1.11:3425/v1' : 'https://llm.example.com/v1'} value={inferenceUrl} onChange={(event) => setInferenceUrl(event.currentTarget.value)} disabled={busy === 'load'} />
+        <TextInput label="管理地址" type="url" autoCorrect="off" autoCapitalize="none" spellCheck={false} placeholder={gatewayType === 'magpie' ? 'https://magpie.example.com' : 'https://ocx.example.com'} value={managementUrl} onChange={(event) => setManagementUrl(event.currentTarget.value)} disabled={busy === 'load'} />
+        <TextInput label="推理 Base URL" type="url" autoCorrect="off" autoCapitalize="none" spellCheck={false} placeholder="https://llm.example.com/v1" value={inferenceUrl} onChange={(event) => setInferenceUrl(event.currentTarget.value)} disabled={busy === 'load'} />
         <PasswordInput label="API Key" placeholder={maskedKey ? '留空则保留当前 Key' : '可选'} value={apiKey} onChange={(event) => setApiKey(event.currentTarget.value)} />
         {gatewayType === 'magpie' && <PasswordInput label="管理端访问参数" placeholder={maskedManagementKey ? '留空则保留当前参数' : '管理页链接中的 k'} value={managementKey} onChange={(event) => setManagementKey(event.currentTarget.value)} />}
       </Stack><Stack gap="sm" className="gateway-settings-targets"><Accordion variant="contained" defaultValue="targets">

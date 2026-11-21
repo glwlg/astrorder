@@ -97,8 +97,12 @@ func runAppContext(parent context.Context, args []string, output io.Writer) int 
 	case "::":
 		host = "::1"
 	}
-	options := lifecycle.AppOptions{ExecutablePath: executable, Arguments: []string{"--config", filepath.Join(*state, "production.json")}, WorkingDir: *root, StateDir: *state, Address: net.JoinHostPort(host, strconv.Itoa(port)), Environment: processEnvironment(values), BrowserSecret: values["ASTRORDER_BROWSER_SECRET"], StartupTimeout: 30 * time.Second, ShutdownTimeout: 10 * time.Second}
-	ctx, cancel := context.WithTimeout(parent, 60*time.Second)
+	options := lifecycle.AppOptions{ExecutablePath: executable, Arguments: []string{"--config", filepath.Join(*state, "production.json")}, WorkingDir: *root, StateDir: *state, Address: net.JoinHostPort(host, strconv.Itoa(port)), Environment: processEnvironment(values), BrowserSecret: values["ASTRORDER_BROWSER_SECRET"]}
+	timeout := 60 * time.Second
+	if operation == "restart" {
+		timeout = 90 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 	var result lifecycle.AppStatusResult
 	switch operation {

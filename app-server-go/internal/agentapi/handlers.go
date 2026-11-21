@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"astrorder.dev/app-server/internal/blackboard"
+	"astrorder.dev/app-server/internal/connections"
 	"astrorder.dev/app-server/internal/sessions"
 	sessiondv1 "astrorder.dev/contracts/gen/go/astrorder/sessiond/v1"
 	"google.golang.org/grpc/codes"
@@ -147,34 +148,23 @@ func (h *Handler) resolveRuntimeTarget(ctx context.Context, agent map[string]any
 		}
 		if ws, ok := settings["workspace"].(string); ok && ws != "" {
 			sshConf.Workspace = &ws
-		} else {
-			defaultWs := "/home/luwei"
-			sshConf.Workspace = &defaultWs
 		}
 		if ce, ok := settings["codex_executable"].(string); ok && ce != "" {
 			sshConf.CodexExecutable = &ce
-		} else if kind == "codex" {
-			defaultCodex := "/home/luwei/.vite-plus/bin/codex"
-			sshConf.CodexExecutable = &defaultCodex
 		}
 		if ge, ok := settings["grok_executable"].(string); ok && ge != "" {
 			sshConf.GrokExecutable = &ge
-		} else if kind == "grok" {
-			defaultGrok := "/home/luwei/.local/bin/grok"
-			sshConf.GrokExecutable = &defaultGrok
 		}
 		if hp, ok := settings["hermes_path"].(string); ok && hp != "" {
 			sshConf.HermesPath = &hp
-		} else if kind == "hermes" {
-			defaultHermes := "/home/luwei/.local/bin/hermes"
-			sshConf.HermesPath = &defaultHermes
 		}
-		if ae := firstSSHConfigString(settings, sshRow, "antigravity_executable"); ae != "" {
-			sshConf.AntigravityExecutable = &ae
-		} else if kind == "antigravity" || kind == "antigravity-ssh" {
-			userStr, _ := settings["user"].(string)
-			resolved := h.resolveAntigravitySSHExecutable(ctx, sshRow, userStr)
-			sshConf.AntigravityExecutable = &resolved
+		switch strings.TrimSuffix(kind, "-ssh") {
+		case "codex":
+			sshConf.CodexExecutable = connections.RuntimeExecutable(ctx, h.options.RemoteExecutable, "codex", sshRow)
+		case "grok":
+			sshConf.GrokExecutable = connections.RuntimeExecutable(ctx, h.options.RemoteExecutable, "grok", sshRow)
+		case "antigravity":
+			sshConf.AntigravityExecutable = connections.RuntimeExecutable(ctx, h.options.RemoteExecutable, "antigravity", sshRow)
 		}
 		if profile, ok := sshRow["profile_name"].(string); ok && profile != "" {
 			sshConf.ProfileName = &profile
@@ -182,42 +172,6 @@ func (h *Handler) resolveRuntimeTarget(ctx context.Context, agent map[string]any
 		target.Ssh = sshConf
 	}
 	return target, nil
-}
-
-func firstSSHConfigString(settings, sshRow map[string]any, key string) string {
-	for _, source := range []map[string]any{settings, sshRow} {
-		if source == nil {
-			continue
-		}
-		if v, ok := source[key].(string); ok {
-			if trimmed := strings.TrimSpace(v); trimmed != "" {
-				return trimmed
-			}
-		}
-	}
-	return ""
-}
-
-func remoteAntigravityDefault(user string) string {
-	u := strings.TrimSpace(user)
-	if u == "" {
-		u = "luwei"
-	}
-	if u == "root" {
-		return "/root/.local/bin/agy"
-	}
-	return "/home/" + u + "/.local/bin/agy"
-}
-
-func (h *Handler) resolveAntigravitySSHExecutable(ctx context.Context, sshRow map[string]any, user string) string {
-	if h.options.RemoteExecutable != nil {
-		if resolved, err := h.options.RemoteExecutable.Resolve(ctx, "antigravity", sshRow); err == nil {
-			if trimmed := strings.TrimSpace(resolved); trimmed != "" {
-				return trimmed
-			}
-		}
-	}
-	return remoteAntigravityDefault(user)
 }
 
 // SessionSender sends instructions to sessions.
@@ -778,10 +732,10 @@ func (h *Handler) invokeSessionsCreate(ctx context.Context, payload map[string]a
 	}
 	rawWorkspace, _ := payload["workspace"].(string)
 	workspace := rawWorkspace
-	if workspace == "" {
+	if workspace == "" && !connections.IsRemoteAgent(agent) {
 		workspace = h.options.DefaultWorkspace
 	}
-	if workspace == "" {
+	if workspace == "" && !connections.IsRemoteAgent(agent) {
 		return nil, NewAgentApiError("invalid_input", "workspace is required and no default workspace configured")
 	}
 
@@ -815,11 +769,10 @@ func (h *Handler) invokeSessionsCreate(ctx context.Context, payload map[string]a
 		if rErr != nil {
 			return nil, NewAgentApiError("runtime_error", rErr.Error())
 		}
-		if rawWorkspace == "" && target.Ssh != nil && !strings.HasPrefix(workspace, "/") {
-			if target.Ssh.Workspace != nil && strings.HasPrefix(*target.Ssh.Workspace, "/") {
-				workspace = *target.Ssh.Workspace
-			} else {
-				workspace = "/home/luwei"
+		if target.Ssh != nil {
+			workspace = connections.RemoteWorkspace(workspace, target.Ssh.GetWorkspace())
+			if workspace == "" {
+				return nil, NewAgentApiError("invalid_input", "an absolute SSH workspace path is required")
 			}
 		}
 		createReq := &sessiondv1.CreateSessionRequest{

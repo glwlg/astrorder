@@ -81,6 +81,54 @@ func TestValidateSchemaRejectsStructuralDrift(t *testing.T) {
 	}
 }
 
+func TestBackupRestoreMigratesExistingJobsAndVersions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "backups-v7.sqlite3")
+	createSchemaFixture(t, path, func(kind, name, statement string) string {
+		switch name {
+		case "backup_jobs":
+			return strings.Replace(statement, "\n\tpost_restore_command TEXT NOT NULL DEFAULT '',\n\tpost_restore_agent_environment TEXT NOT NULL DEFAULT '',\n\tpost_restore_agent_kind TEXT NOT NULL DEFAULT '',", "", 1)
+		case "backup_versions":
+			return strings.Replace(statement, "\n\tconnection_id TEXT NOT NULL DEFAULT '',\n\tsource_path TEXT NOT NULL DEFAULT '',", "", 1)
+		}
+		return statement
+	})
+	db, err := sql.Open("sqlite", sqliteDSN(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for _, statement := range []string{
+		`PRAGMA user_version = 7`,
+		`INSERT INTO backup_jobs (id, name, connection_id, source_path, destination_dir, schedule_mode, interval_minutes,
+			daily_time, weekday, retention_count, created_at, updated_at)
+			VALUES ('job', 'backup', 'local', '/work/source', '/work/backups', 'manual', 60, '03:00', 1, 20, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+		`INSERT INTO backup_versions (id, job_id, version_number, version_label, trigger_kind, note, status, local_path,
+			source_kind, file_count, total_bytes, created_at)
+			VALUES ('version', 'job', 1, 'v1', 'manual', 'keep', 'success', '/work/backups/v1', 'file', 1, 10, CURRENT_TIMESTAMP)`,
+	} {
+		if _, err := db.Exec(statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	job, err := st.QueryRow(context.Background(), `SELECT source_path, post_restore_command FROM backup_jobs WHERE id = 'job'`)
+	if err != nil || job["source_path"] != "/work/source" || job["post_restore_command"] != "" {
+		t.Fatalf("migrated job=%v, err=%v", job, err)
+	}
+	version, err := st.QueryRow(context.Background(), `SELECT note, source_path, connection_id FROM backup_versions WHERE id = 'version'`)
+	if err != nil || version["note"] != "keep" || version["source_path"] != "" || version["connection_id"] != "" {
+		t.Fatalf("migrated version=%v, err=%v", version, err)
+	}
+}
+
 func TestSchemaMigrationOwnershipIsCrossProcess(t *testing.T) {
 	if os.Getenv("ASTRORDER_STORE_LOCK_HELPER") == "1" {
 		lock, err := acquireSchemaMigrationLock(os.Getenv("ASTRORDER_STORE_LOCK_PATH"))

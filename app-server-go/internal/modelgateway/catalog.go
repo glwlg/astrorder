@@ -32,16 +32,16 @@ func defaultHTTPClient() *http.Client {
 
 // NormalizedModel represents a model in the catalog.
 type NormalizedModel struct {
-	Slug                  string   `json:"slug"`
-	Provider              string   `json:"provider"`
-	ID                    string   `json:"id"`
-	ContextWindow         int      `json:"context_window"`
-	MaxInputTokens        int      `json:"max_input_tokens"`
-	AutoCompactTokenLimit int      `json:"auto_compact_token_limit"`
-	InputModalities       []string `json:"input_modalities"`
-	ReasoningEfforts      []string `json:"reasoning_efforts"`
-	DefaultReasoningEffort string  `json:"default_reasoning_effort"`
-	Native                bool     `json:"native"`
+	Slug                   string   `json:"slug"`
+	Provider               string   `json:"provider"`
+	ID                     string   `json:"id"`
+	ContextWindow          int      `json:"context_window"`
+	MaxInputTokens         int      `json:"max_input_tokens"`
+	AutoCompactTokenLimit  int      `json:"auto_compact_token_limit"`
+	InputModalities        []string `json:"input_modalities"`
+	ReasoningEfforts       []string `json:"reasoning_efforts"`
+	DefaultReasoningEffort string   `json:"default_reasoning_effort"`
+	Native                 bool     `json:"native"`
 }
 
 // Catalog represents a fetched and normalized catalog.
@@ -60,6 +60,9 @@ func fetchCatalog(ctx context.Context, client *http.Client, config GatewayConfig
 
 func fetchMagpieCatalog(ctx context.Context, client *http.Client, config GatewayConfig) (*Catalog, error) {
 	inferenceURL := strings.TrimRight(config.InferenceURL, "/")
+	if inferenceURL == "" {
+		return nil, fmt.Errorf("请先配置网关推理地址")
+	}
 	modelsURL := inferenceURL + "/models"
 	if strings.HasSuffix(inferenceURL, "/models") {
 		modelsURL = inferenceURL
@@ -153,16 +156,16 @@ func fetchMagpieCatalog(ctx context.Context, client *http.Client, config Gateway
 		}
 
 		models = append(models, NormalizedModel{
-			Slug:                  mid,
-			Provider:              provider,
-			ID:                    mid,
-			ContextWindow:         cw,
-			MaxInputTokens:        maxInput,
-			AutoCompactTokenLimit: autoCompact,
-			InputModalities:       []string{"text", "image"},
-			ReasoningEfforts:      efforts,
+			Slug:                   mid,
+			Provider:               provider,
+			ID:                     mid,
+			ContextWindow:          cw,
+			MaxInputTokens:         maxInput,
+			AutoCompactTokenLimit:  autoCompact,
+			InputModalities:        []string{"text", "image"},
+			ReasoningEfforts:       efforts,
 			DefaultReasoningEffort: defEffort,
-			Native:                false,
+			Native:                 false,
 		})
 	}
 
@@ -182,6 +185,9 @@ func fetchMagpieCatalog(ctx context.Context, client *http.Client, config Gateway
 
 func fetchOpenCodeXCatalog(ctx context.Context, client *http.Client, config GatewayConfig) (*Catalog, error) {
 	mgmtURL := strings.TrimRight(config.ManagementURL, "/")
+	if mgmtURL == "" {
+		return nil, fmt.Errorf("请先配置网关管理地址")
+	}
 
 	// 1. Models
 	modelsReq, err := http.NewRequestWithContext(ctx, http.MethodGet, mgmtURL+"/api/models", nil)
@@ -309,16 +315,16 @@ func fetchOpenCodeXCatalog(ctx context.Context, client *http.Client, config Gate
 		}
 
 		models = append(models, NormalizedModel{
-			Slug:                  slug,
-			Provider:              provider,
-			ID:                    mid,
-			ContextWindow:         cw,
-			MaxInputTokens:        maxInput,
-			AutoCompactTokenLimit: autoCompact,
-			InputModalities:       modalities,
-			ReasoningEfforts:      efforts,
+			Slug:                   slug,
+			Provider:               provider,
+			ID:                     mid,
+			ContextWindow:          cw,
+			MaxInputTokens:         maxInput,
+			AutoCompactTokenLimit:  autoCompact,
+			InputModalities:        modalities,
+			ReasoningEfforts:       efforts,
 			DefaultReasoningEffort: defEffort,
-			Native:                false,
+			Native:                 false,
 		})
 	}
 

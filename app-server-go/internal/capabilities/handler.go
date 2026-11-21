@@ -183,6 +183,7 @@ func (h *handler) capabilities(ctx context.Context, w http.ResponseWriter, r *ht
 			Agent      string `json:"agent"`
 			Action     string `json:"action"`
 			PluginName string `json:"plugin_name"`
+			Source     string `json:"source"`
 			Enabled    *bool  `json:"enabled"`
 		}
 		if decode(r, &body) != nil {
@@ -190,7 +191,8 @@ func (h *handler) capabilities(ctx context.Context, w http.ResponseWriter, r *ht
 			return
 		}
 		enabled := body.Enabled == nil || *body.Enabled
-		result, err := h.svc.UpdatePlugin(ctx, orLocal(body.TargetID), body.Agent, body.Action, body.PluginName, enabled)
+		target := firstNonEmpty(strings.TrimSpace(body.Source), strings.TrimSpace(body.PluginName))
+		result, err := h.svc.UpdatePlugin(ctx, orLocal(body.TargetID), body.Agent, body.Action, target, enabled)
 		reply(w, result, err)
 	case "marketplaces/update":
 		var body struct {

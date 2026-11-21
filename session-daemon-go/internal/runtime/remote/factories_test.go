@@ -83,9 +83,9 @@ func TestRemoteFactoriesValidateExecutable(t *testing.T) {
 	}
 	agyAdapter, err := agyFactory("conn-1", map[string]any{
 		"host":                   "test.example",
-		"antigravity_executable": "/home/luwei/.local/bin/agy",
+		"antigravity_executable": "/home/fixture/.local/bin/agy",
 		"display_name":           "WSL Ubuntu",
-		"workspace":              "/home/luwei/workspace",
+		"workspace":              "/home/fixture/workspace",
 	})
 	if err != nil || agyAdapter == nil {
 		t.Fatalf("unexpected error creating antigravity-ssh adapter: %v", err)

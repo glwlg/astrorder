@@ -50,7 +50,7 @@ func TestCommandReceiptLiveCapturedEnvelope(t *testing.T) {
 			"session_id": "local-cfd6e1a1d921e46b666191792cd4d077f7ec5119196d7cfdb0a855b09754bf8f",
 			"status":     "idle",
 			"title":      "新会话",
-			"workspace":  "P:\\workspace\\glwlg\\ai\\astrorder",
+			"workspace":  "P:\\workspace\\example-org\\ai\\astrorder",
 		},
 	}
 	receipt, err := commandReceipt("daemon-live", nil, meta, envelope)

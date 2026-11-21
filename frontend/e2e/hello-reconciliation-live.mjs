@@ -1,6 +1,7 @@
 import { chromium, expect } from '@playwright/test'
 let input=''; for await (const chunk of process.stdin) input+=chunk
-const {token}=JSON.parse(input)
+const {token, sessionId, agentId}=JSON.parse(input)
+if (!sessionId || !agentId) throw new Error("sessionId and agentId are required")
 const browser=await chromium.launch({executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true})
 try {
  const context=await browser.newContext({viewport:{width:1500,height:1000}})
@@ -8,7 +9,7 @@ try {
  expect(auth.ok()).toBe(true)
  const page=await context.newPage()
  const errors=[];page.on('pageerror',e=>errors.push(e.message))
- await page.goto('http://127.0.0.1:30001/chat/20260909_095323_ba4bde?agent_id=local-hermes-default')
+ await page.goto(`http://127.0.0.1:30001/chat/${encodeURIComponent(sessionId)}?agent_id=${encodeURIComponent(agentId)}`)
  const transcript=page.locator('.transcript')
  await expect(transcript.getByText('你好',{exact:true})).toHaveCount(1)
  await expect(transcript.getByText('你好！需要我帮你做什么？',{exact:true})).toHaveCount(1)

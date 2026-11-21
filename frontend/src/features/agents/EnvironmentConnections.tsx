@@ -10,6 +10,7 @@ import { api } from '../../api/client'
 import type { SshConnection } from '../../domain/types'
 import { useBackgroundTasks } from '../../state/backgroundTasks'
 import { trackUpgradeJob } from '../../state/upgradeTasks'
+import { ForceAgentRestartDialog } from './ForceAgentRestartDialog'
 
 const blank = { display_name: '', host: '', port: '22', user: '', ssh_config_alias: '', identity_file: '', workspace: '', codex_executable: '', grok_executable: '', antigravity_executable: '' }
 export function EnvironmentConnections({ embedded = false, renderAgentConfiguration }: { embedded?: boolean; renderAgentConfiguration?: (environmentId: string, kind: string) => ReactNode }) {
@@ -23,6 +24,7 @@ export function EnvironmentConnections({ embedded = false, renderAgentConfigurat
   const [selectedId, setSelectedId] = useState('local')
   const [configuration, setConfiguration] = useState<{ environmentId: string; kind: string } | null>(null)
   const [configurationOpened, setConfigurationOpened] = useState(false)
+  const [forceRestart, setForceRestart] = useState<{ id: string; name: string } | null>(null)
   const items = query.data?.items ?? []
   const selected = items.find(item => item.id === selectedId) ?? items[0]
 
@@ -246,7 +248,10 @@ export function EnvironmentConnections({ embedded = false, renderAgentConfigurat
                 {agent.state !== 'connected' && <Button size="compact-xs" disabled={!!busy || !agent.available || Boolean(agent.detail?.includes('尚不支持'))} loading={busy === `${selected.id}:${agent.kind}`} onClick={() => void run(`${selected.id}:${agent.kind}`, () => api.changeEnvironmentAgent(selected.id, agent.kind, true))}>接入</Button>}
                 <Menu position="bottom-end" withinPortal><Menu.Target><ActionIcon variant="default" size="sm" aria-label={`${agentKindLabel(agent.kind)} 更多操作`}><IconDotsVertical size={15} /></ActionIcon></Menu.Target><Menu.Dropdown>
                   <Menu.Item disabled={!!busy || agent.state !== 'connected'} onClick={() => void run(`${selected.id}:${agent.kind}`, () => api.changeEnvironmentAgent(selected.id, agent.kind, false))}>断开</Menu.Item>
-                  <Menu.Item color="red" disabled={!!busy || (!agent.available && agent.state !== 'connected')} onClick={() => void run(`restart:${selected.id}:${agent.kind}`, () => api.restartEnvironmentAgent(selected.id, agent.kind))}>强制重启</Menu.Item>
+                  <Menu.Item disabled={!!busy || (!agent.available && agent.state !== 'connected')} onClick={() => void run(`restart:${selected.id}:${agent.kind}`, () => api.restartEnvironmentAgent(selected.id, agent.kind))}>重启</Menu.Item>
+                  {agent.kind === 'antigravity' && (
+                    <Menu.Item color="red" disabled={!!busy || (!agent.available && agent.state !== 'connected')} onClick={() => setForceRestart({ id: selected.id, name: selected.name })}>强制重启</Menu.Item>
+                  )}
                 </Menu.Dropdown></Menu>
               </Group>
             </article>)}
@@ -256,6 +261,13 @@ export function EnvironmentConnections({ embedded = false, renderAgentConfigurat
         </> : <Text c="dimmed" p="lg">{query.isLoading ? '正在读取运行环境…' : `${!embedded ? '连接管理 · ' : ''}选择或添加一个运行环境`}</Text>}
       </div>
     </div>
+    {forceRestart && (
+      <ForceAgentRestartDialog
+        environment={forceRestart.name}
+        onClose={() => setForceRestart(null)}
+        onConfirm={() => void run(`restart:${forceRestart.id}:antigravity`, () => api.restartEnvironmentAgent(forceRestart.id, 'antigravity', true))}
+      />
+    )}
     <SettingsDrawer closeButtonProps={{ 'aria-label': '关闭运行配置' }} opened={configurationOpened} onClose={() => setConfigurationOpened(false)} onExitTransitionEnd={() => setConfiguration(null)} title={configuration ? `${agentKindLabel(configuration.kind)} · 运行配置` : '运行配置'}>{configuration && renderAgentConfiguration?.(configuration.environmentId, configuration.kind)}</SettingsDrawer>
     <SettingsDrawer closeButtonProps={{ 'aria-label': '关闭 SSH 配置' }} opened={editingOpened} onClose={() => setEditingOpened(false)} onExitTransitionEnd={() => setEditing(null)} title={editing === 'new' ? '配置 SSH 连接' : '修改 SSH 连接'}>
       <Stack>{([['display_name', '连接名称'], ['ssh_config_alias', 'SSH 配置别名'], ['host', '主机'], ['port', '端口'], ['user', '用户'], ['identity_file', '私钥文件引用（不读取或上传）'], ['workspace', '默认远程工作区路径（选填）'], ['codex_executable', 'Codex 远程可执行路径（选填，留空自动探测）'], ['grok_executable', 'Grok 远程可执行路径（选填，留空自动探测）'], ['antigravity_executable', 'Antigravity (agy) 远程可执行路径（选填，留空自动探测）']] as const).map(([field, label]) => <TextInput key={field} label={label} value={form[field]} onChange={event => { const value = event.currentTarget.value; setForm(current => ({ ...current, [field]: value })) }} />)}

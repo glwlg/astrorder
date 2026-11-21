@@ -18,7 +18,7 @@ node scripts/build-installer.mjs
 
 ## 安装布局与数据
 
-本机安装位置为 `P:\DevApp\Astrorder`：
+默认安装位置为 `%LOCALAPPDATA%\Programs\Astrorder`。安装时也可选择其他目录。安装目录包含以下文件：
 
 - `Astrorder.exe`：桌面程序。
 - `server/bin/`：大小内核、控制器和辅助程序。
@@ -32,7 +32,10 @@ node scripts/build-installer.mjs
 在 Windows PowerShell 中使用已安装的控制器：
 
 ```powershell
-$ServerRoot = 'P:\DevApp\Astrorder\server'
+$AppPathKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\App Paths\Astrorder.exe'
+$InstalledExe = (Get-Item -LiteralPath $AppPathKey).GetValue('')
+$InstallDir = Split-Path -Parent $InstalledExe
+$ServerRoot = Join-Path $InstallDir 'server'
 $StateDir = Join-Path $env:LOCALAPPDATA 'Astrorder'
 $Control = Join-Path $ServerRoot 'bin\astrorderctl.exe'
 & $Control app status --root $ServerRoot --state-dir $StateDir
@@ -49,6 +52,12 @@ $Control = Join-Path $ServerRoot 'bin\astrorderctl.exe'
 - **小内核**：只将验证后的候选暂存为同目录的 `astrorder-sessiond.exe.new`，核对哈希及 `update-check`；用户通过托盘手动激活。暂存不代表上线，Agent 不执行小内核停止、重启或更新。
 
 仅构建或静态资源校验通过，不代表安装与原生交互已验收。每次交付以当次运行结果为准，不沿用历史报告中的进程号、哈希或测试数量。
+
+在上述 PowerShell 中，若 `astrorderctl` 已加入 `PATH`，可在仓库的 `frontend` 目录构建并同步浏览器资源：
+
+```powershell
+npm run build:sync -- --installed-root "$ServerRoot"
+```
 
 ## 隔离验证
 

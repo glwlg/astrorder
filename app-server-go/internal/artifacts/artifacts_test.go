@@ -6,15 +6,15 @@ import (
 )
 
 func TestCollectPathsFromProseAndPreserveEncodedNames(t *testing.T) {
-	text := "[文档](</home/luwei/project/docs/%E6%96%B9%E6%A1%88.md:12>)\n" +
+	text := "[文档](</home/fixture/project/docs/%E6%96%B9%E6%A1%88.md:12>)\n" +
 		"代码 `src/main.go:45:2`，图片 ![图](output/result.png)\n" +
-		"文件 C:\\work\\report.md 和 /home/luwei/project/output/chart.svg。\n" +
+		"文件 C:\\work\\report.md 和 /home/fixture/project/output/chart.svg。\n" +
 		"[网站](https://example.org/docs/index.html) https://example.org/not-file.js\n" +
 		"[邮箱](mailto:user@example.test) [脚本](javascript:payload.pdf) `go test ./...`\n" +
 		"```go\nx := \"/not/an/output.go\"\n```\n" +
 		"[含空格](<docs/design plan.md>)"
 	got := Candidates(text)
-	want := []string{"/home/luwei/project/docs/%E6%96%B9%E6%A1%88.md:12", "src/main.go:45:2", "output/result.png", `C:\work\report.md`, "/home/luwei/project/output/chart.svg", "docs/design plan.md"}
+	want := []string{"/home/fixture/project/docs/%E6%96%B9%E6%A1%88.md:12", "src/main.go:45:2", "output/result.png", `C:\work\report.md`, "/home/fixture/project/output/chart.svg", "docs/design plan.md"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got=%q want=%q", got, want)
 	}
@@ -26,9 +26,9 @@ func TestCollectPathsFromProseAndPreserveEncodedNames(t *testing.T) {
 }
 
 func TestReferenceDoesNotPublishAndResolvesEncodedAliases(t *testing.T) {
-	first := File{GroupID: "g", AgentID: "linux-dev", SessionID: "dev", ConnectionID: "ssh-dev", Workspace: "/home/luwei/project", MemberID: "dev", MemberName: "开发"}
+	first := File{GroupID: "g", AgentID: "linux-dev", SessionID: "dev", ConnectionID: "ssh-dev", Workspace: "/home/fixture/project", MemberID: "dev", MemberName: "开发"}
 	file := Reference(first, "docs/方案.md")
-	if file.Path != "/home/luwei/project/docs/方案.md" || file.ContentKey != "" || len(file.Aliases) != 1 {
+	if file.Path != "/home/fixture/project/docs/方案.md" || file.ContentKey != "" || len(file.Aliases) != 1 {
 		t.Fatalf("reference=%+v", file)
 	}
 	directory := Directory{Items: []File{file}}

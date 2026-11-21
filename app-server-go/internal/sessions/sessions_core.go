@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"astrorder.dev/app-server/internal/connections"
 	sessiondv1 "astrorder.dev/contracts/gen/go/astrorder/sessiond/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -66,12 +67,10 @@ func (h *Handler) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	}
 	workspace := payload.Workspace
 	if target.Ssh != nil {
-		if !strings.HasPrefix(workspace, "/") {
-			if target.Ssh.Workspace != nil && strings.HasPrefix(*target.Ssh.Workspace, "/") {
-				workspace = *target.Ssh.Workspace
-			} else {
-				workspace = "/home/luwei"
-			}
+		workspace = connections.RemoteWorkspace(workspace, target.Ssh.GetWorkspace())
+		if workspace == "" {
+			writeJSONError(w, http.StatusUnprocessableEntity, "an absolute SSH workspace path is required")
+			return
 		}
 	} else {
 		if workspace == "" {

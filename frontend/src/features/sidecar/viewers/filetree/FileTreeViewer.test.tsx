@@ -175,15 +175,15 @@ describe('FileTreeViewer expansion persistence', () => {
 
   it('selects and reveals requested file even when paths differ in slashes (Windows vs POSIX)', async () => {
     // revealPath 为 POSIX 正斜杠，后端返回的节点为 Windows 反斜杠
-    const revealPath = 'P:/workspace/example/local-prod/ELK/logstash-pipelines/logstash-zhiyuan-portal.conf'
-    const windowsNodePath = 'P:\\workspace\\example\\local-prod\\ELK\\logstash-pipelines\\logstash-zhiyuan-portal.conf'
+    const revealPath = 'P:/workspace/example/local-prod/ELK/logstash-pipelines/logstash-example-portal.conf'
+    const windowsNodePath = 'P:\\workspace\\example\\local-prod\\ELK\\logstash-pipelines\\logstash-example-portal.conf'
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
       root: artifact.path,
       items: [{
         name: 'local-prod', path: 'P:\\workspace\\example\\local-prod', is_dir: true, children: [{
           name: 'ELK', path: 'P:\\workspace\\example\\local-prod\\ELK', is_dir: true, children: [{
             name: 'logstash-pipelines', path: 'P:\\workspace\\example\\local-prod\\ELK\\logstash-pipelines', is_dir: true, children: [
-              { name: 'logstash-zhiyuan-portal.conf', path: windowsNodePath, is_dir: false },
+              { name: 'logstash-example-portal.conf', path: windowsNodePath, is_dir: false },
             ],
           }],
         }],
@@ -198,7 +198,7 @@ describe('FileTreeViewer expansion persistence', () => {
 
     const view = renderTree({ ...artifact, metadata: { revealPath, revealAt: 1 } })
 
-    const file = await screen.findByText('logstash-zhiyuan-portal.conf')
+    const file = await screen.findByText('logstash-example-portal.conf')
     await waitFor(() => expect(file).toBeVisible())
     const row = file.closest('.file-tree-row') as HTMLElement
     expect(row).toHaveClass('is-selected')

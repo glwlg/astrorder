@@ -1,10 +1,10 @@
 package sessions
 
 import (
-	"astrorder.dev/app-server/internal/notifications"
 	"net/http"
 	"sort"
 
+	"astrorder.dev/app-server/internal/notifications"
 	sessiondv1 "astrorder.dev/contracts/gen/go/astrorder/sessiond/v1"
 )
 
@@ -92,9 +92,9 @@ func (h *Handler) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.repairSessionTitles(ctx, sessionsList)
-	cursor, err := h.store.LatestCursor(ctx)
+	disabledConnections, cursor, err := h.store.DisabledAgentConnectionsAtCursor(ctx)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "Failed to read event cursor")
+		writeJSONError(w, http.StatusInternalServerError, "Failed to read Agent connection choices")
 		return
 	}
 
@@ -119,14 +119,15 @@ func (h *Handler) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"notifications":    notices,
-		"commands":         commands,
-		"protocol_version": 1,
-		"agents":           effectiveAgents,
-		"projects":         projects,
-		"sessions":         sessionsList,
-		"cursor":           cursor,
-		"approvals":        approvals,
+		"disabled_agent_connections": disabledConnections,
+		"notifications":              notices,
+		"commands":                   commands,
+		"protocol_version":           1,
+		"agents":                     effectiveAgents,
+		"projects":                   projects,
+		"sessions":                   sessionsList,
+		"cursor":                     cursor,
+		"approvals":                  approvals,
 	})
 }
 

@@ -346,6 +346,31 @@ func removeMCPJSON(data []byte, name string) ([]byte, error) {
 	return append(raw, '\n'), nil
 }
 
+func setAntigravityPluginEnabled(data []byte, name string, enabled bool) ([]byte, error) {
+	cfg, err := parseJSONMap(data)
+	if err != nil {
+		return nil, err
+	}
+	plugins := asMap(cfg["plugins"])
+	if plugins == nil {
+		plugins = map[string]any{}
+		cfg["plugins"] = plugins
+	}
+	entry := map[string]any{}
+	if existing := asMap(plugins[name]); existing != nil {
+		for k, v := range existing {
+			entry[k] = v
+		}
+	}
+	entry["enabled"] = enabled
+	plugins[name] = entry
+	raw, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return append(raw, '\n'), nil
+}
+
 // ---- verification -----------------------------------------------------
 
 func verifyMCP(agent string, in mcpInput) func([]byte) error {

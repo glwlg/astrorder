@@ -142,7 +142,7 @@ it('renders a standalone code comment without repeating its raw directive', () =
  expect(screen.queryByText(/::code-comment/)).not.toBeInTheDocument()
 })
 it('passes sessionId and connectionId to file raw url for @image references', () => {
- const text = '请查看\n@image:/home/luwei/.hermes/images/upload.png'
+ const text = '请查看\n@image:/home/fixture/.hermes/images/upload.png'
  render(
    <MessageBody
      value={text}
@@ -155,5 +155,5 @@ it('passes sessionId and connectionId to file raw url for @image references', ()
  const img = screen.getByAltText('upload.png') as HTMLImageElement
  expect(img.src).toContain('session_id=session-123')
  expect(img.src).toContain('connection_id=ssh-456')
- expect(img.src).toContain('path=%2Fhome%2Fluwei%2F.hermes%2Fimages%2Fupload.png')
+ expect(img.src).toContain('path=%2Fhome%2Ffixture%2F.hermes%2Fimages%2Fupload.png')
 })

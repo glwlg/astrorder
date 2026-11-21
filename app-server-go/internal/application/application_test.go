@@ -59,7 +59,7 @@ func TestAppTargetResolverRemoteDiscoveryAndSSHProbe(t *testing.T) {
 	_, err = st.SaveSSHConnection(context.Background(), map[string]any{
 		"id":           "ssh-known",
 		"display_name": "Server 1",
-		"host":         "192.168.1.100",
+		"host":         "192.0.2.100",
 		"port":         22,
 		"user":         "ubuntu",
 		"remote_os":    "Linux",

@@ -1,6 +1,9 @@
 import { chromium, expect } from '@playwright/test'
 import fs from 'node:fs/promises'
 const origin = process.env.ASTRORDER_QUEUE_TEST_ORIGIN || 'http://127.0.0.1:30019'
+import path from "node:path"
+const output = process.env.ASTRORDER_QUEUE_TEST_OUTPUT || "test-results/queue-recovery.json"
+await fs.mkdir(path.dirname(output), { recursive: true })
 const browser = await chromium.launch({ executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true })
 try {
  const page = await browser.newPage({viewport:{width:1440,height:1000}})
@@ -46,5 +49,5 @@ try {
  await expect(page.getByLabel('排队消息')).toHaveCount(0)
  expect(errors).toEqual([])
  const result={passed:true,scope:'real browser UI with isolated API fixtures; no user messages sent',attachments:4,edit_restored:true,delete_removed:true,retry_sent:true,sends,deletes,page_errors:errors}
- await fs.writeFile(process.env.ASTRORDER_QUEUE_TEST_OUTPUT||'C:/Users/luwei/AppData/Local/hermes/cache/scratch/queue-recovery/browser.json',JSON.stringify(result,null,2));console.log(JSON.stringify(result))
+ await fs.writeFile(output,JSON.stringify(result,null,2));console.log(JSON.stringify(result))
 }finally{await browser.close()}

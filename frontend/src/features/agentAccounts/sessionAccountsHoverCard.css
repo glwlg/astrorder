@@ -1,0 +1,54 @@
+.session-account-card {
+  display: flex;
+  flex-direction: column;
+  max-block-size: min(62dvh, 460px);
+  padding: 10px 12px;
+  color: var(--astr-text);
+}
+/* Keep the dropdown and its absolute glass layer stationary as the list scrolls. */
+.session-account-scroll { min-block-size: 0; overflow-y: auto; overscroll-behavior: contain; }
+.session-account-heading, .session-account-row, .session-account-quota {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.session-account-heading { flex: none; padding-block-end: 6px; font-size: .86rem; }
+.session-account-heading > strong, .session-account-heading > button { flex: none; }
+.session-account-card small { display: block; color: var(--astr-muted); font-size: .73rem; }
+.session-account-heading > small, .session-account-row > strong, .session-account-tier {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.session-account-heading > button, .session-account-row > :last-child { flex-shrink: 0; margin-inline-start: auto; }
+.session-account-list { list-style: none; padding: 0; margin: 0; }
+.session-account-list li { padding: 6px 5px; border-block-start: 1px solid var(--astr-border); }
+.session-account-list li[data-current] { background: color-mix(in srgb, var(--astr-indigo) 8%, transparent); }
+.session-account-row { margin-block-end: 3px; min-block-size: 24px; }
+.session-account-row > strong { font-size: .85rem; }
+.session-account-row .agy-current-badge { margin: 0 0 0 auto; }
+.session-account-tier {
+  flex-shrink: 0;
+  max-inline-size: 36%;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: var(--astr-surface-muted);
+  font-size: .69rem;
+  font-weight: 600;
+}
+.session-account-quotas { display: flex; flex-wrap: wrap; gap: 3px 9px; }
+.session-account-quota { max-inline-size: 100%; gap: 3px; font-size: .75rem; line-height: 1.4; }
+.session-account-quota > span { overflow-wrap: anywhere; }
+.session-account-quota::before {
+  content: '';
+  flex: none;
+  inline-size: 5px;
+  block-size: 5px;
+  border-radius: 50%;
+  background: var(--mantine-color-blue-5);
+}
+.session-account-quota:nth-child(3n + 2)::before { background: var(--mantine-color-teal-5); }
+.session-account-quota:nth-child(3n)::before { background: var(--mantine-color-grape-5); }
+.session-account-quota b { font-variant-numeric: tabular-nums; }
+.session-account-quota b[data-low] { color: var(--mantine-color-orange-text); }
+.session-account-quota small { font-size: .65rem; }

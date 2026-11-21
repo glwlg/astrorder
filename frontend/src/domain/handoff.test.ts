@@ -41,7 +41,7 @@ describe('remote Antigravity parity helpers', () => {
     agent_id: 'ssh-antigravity-wsl',
     connection_id: 'wsl',
     title: '远程 Antigravity 会话',
-    workspace: '/home/luwei/workspace/astrorder',
+    workspace: '/home/fixture/workspace/astrorder',
     status: 'idle',
     updated_at: '2026-11-18T00:00:00Z',
   }
@@ -51,7 +51,7 @@ describe('remote Antigravity parity helpers', () => {
     agent_id: 'ssh-codex-wsl',
     connection_id: 'wsl',
     title: '远程 Codex 会话',
-    workspace: '/home/luwei/workspace/astrorder',
+    workspace: '/home/fixture/workspace/astrorder',
     status: 'idle',
     updated_at: '2026-11-18T00:01:00Z',
   }

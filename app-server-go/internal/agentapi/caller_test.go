@@ -337,7 +337,7 @@ func TestValidateCaller(t *testing.T) {
 							"stored_session_id": "local-3c366f26d8764917a751c8e52d1d5d4621121ba4b6ff48fef8010141d2cefcaf",
 							"info": {
 								"profile_name": "default",
-								"cwd": "P:/workspace/glwlg/ai/astrorder",
+								"cwd": "P:/workspace/example-org/ai/astrorder",
 								"title": "Hermes Session A"
 							}
 						}

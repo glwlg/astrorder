@@ -30,19 +30,25 @@ var searchIgnored = map[string]bool{
 }
 
 type LocalOptions struct {
-	Workspace    string
-	AllowedRoots []string
-	GitBinary    string
+	Workspace     string
+	AllowedRoots  []string
+	OptionalRoots []string
+	GitBinary     string
+	RestorePaths  bool
 }
 
 type localFileSystem struct {
-	workspace string
-	roots     []string
-	gitBinary string
+	workspace    string
+	roots        []string
+	gitBinary    string
+	restorePaths bool
 }
 
 func NewLocal(options LocalOptions) (FileSystem, error) {
-	workspace := strings.TrimSpace(options.Workspace)
+	workspace := options.Workspace
+	if !options.RestorePaths {
+		workspace = strings.TrimSpace(workspace)
+	}
 	if workspace == "" {
 		return nil, errorf(422, "workspace_required", "Workspace is required", nil)
 	}
@@ -52,7 +58,7 @@ func NewLocal(options LocalOptions) (FileSystem, error) {
 	}
 	roots := make([]string, 0, len(options.AllowedRoots)+1)
 	for _, raw := range options.AllowedRoots {
-		if strings.TrimSpace(raw) == "" {
+		if raw == "" || (!options.RestorePaths && strings.TrimSpace(raw) == "") {
 			continue
 		}
 		root, rootErr := canonicalExistingDirectory(raw)
@@ -63,14 +69,28 @@ func NewLocal(options LocalOptions) (FileSystem, error) {
 	}
 	if len(roots) == 0 {
 		roots = append(roots, resolvedWorkspace)
-	} else if !withinAny(resolvedWorkspace, roots) {
+	}
+	for _, raw := range options.OptionalRoots {
+		if strings.TrimSpace(raw) == "" {
+			continue
+		}
+		root, rootErr := canonicalExistingDirectory(raw)
+		if rootErr != nil {
+			continue
+		}
+		roots = appendUniquePath(roots, root)
+	}
+	if !withinAny(resolvedWorkspace, roots) {
 		return nil, errorf(403, "workspace_out_of_scope", "Workspace is outside allowed workspaces", nil)
 	}
 	gitBinary := strings.TrimSpace(options.GitBinary)
 	if gitBinary == "" {
 		gitBinary = "git"
 	}
-	return &localFileSystem{workspace: resolvedWorkspace, roots: roots, gitBinary: gitBinary}, nil
+	if options.RestorePaths && !samePath(workspace, resolvedWorkspace) {
+		return nil, errorf(409, "restore_path_link", "还原路径包含链接。", nil)
+	}
+	return &localFileSystem{workspace: resolvedWorkspace, roots: roots, gitBinary: gitBinary, restorePaths: options.RestorePaths}, nil
 }
 
 func canonicalExistingDirectory(raw string) (string, error) {
@@ -140,6 +160,9 @@ func (l *localFileSystem) existingPath(raw string) (string, error) {
 	if !withinAny(canonical, l.roots) {
 		return "", errorf(403, "path_out_of_scope", "Path is outside allowed workspaces", nil)
 	}
+	if l.restorePaths && !samePath(candidate, canonical) {
+		return "", errorf(409, "restore_path_link", "还原路径包含链接。", nil)
+	}
 	return filepath.Clean(canonical), nil
 }
 
@@ -176,6 +199,9 @@ func (l *localFileSystem) writablePath(raw string) (string, error) {
 	if !withinAny(canonical, l.roots) {
 		return "", errorf(403, "path_out_of_scope", "Path is outside allowed workspaces", nil)
 	}
+	if l.restorePaths && !samePath(candidate, canonical) {
+		return "", errorf(409, "restore_path_link", "还原路径包含链接。", nil)
+	}
 	return canonical, nil
 }
 
@@ -183,7 +209,10 @@ func (l *localFileSystem) absolutePath(raw string) (string, error) {
 	if strings.ContainsRune(raw, 0) {
 		return "", errorf(400, "invalid_path", "Invalid file path", nil)
 	}
-	candidate := strings.TrimSpace(raw)
+	candidate := raw
+	if !l.restorePaths {
+		candidate = strings.TrimSpace(raw)
+	}
 	if candidate == "" {
 		candidate = l.workspace
 	} else if !filepath.IsAbs(candidate) {
@@ -516,8 +545,12 @@ func (l *localFileSystem) Mkdir(ctx context.Context, request MkdirRequest) (Info
 	if err := ctx.Err(); err != nil {
 		return Info{}, err
 	}
-	name := strings.TrimSpace(request.Name)
-	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, "/\\\x00") {
+	name := request.Name
+	if !l.restorePaths {
+		name = strings.TrimSpace(name)
+	}
+	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, "/\x00") ||
+		((!l.restorePaths || runtime.GOOS == "windows") && strings.ContainsRune(name, '\\')) {
 		return Info{}, errorf(400, "invalid_directory_name", "文件夹名称不合法。", nil)
 	}
 	parent, err := l.existingPath(request.Parent)

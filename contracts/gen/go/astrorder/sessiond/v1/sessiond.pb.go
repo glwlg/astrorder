@@ -1024,6 +1024,61 @@ func (SshLogLevel) EnumDescriptor() ([]byte, []int) {
 	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{17}
 }
 
+type AgyAccountAction int32
+
+const (
+	AgyAccountAction_AGY_ACCOUNT_ACTION_UNSPECIFIED        AgyAccountAction = 0
+	AgyAccountAction_AGY_ACCOUNT_ACTION_READ_STATE         AgyAccountAction = 5
+	AgyAccountAction_AGY_ACCOUNT_ACTION_CAPTURE_CREDENTIAL AgyAccountAction = 6
+	AgyAccountAction_AGY_ACCOUNT_ACTION_READ_QUOTA         AgyAccountAction = 7
+	AgyAccountAction_AGY_ACCOUNT_ACTION_APPLY_CREDENTIAL   AgyAccountAction = 8
+)
+
+// Enum value maps for AgyAccountAction.
+var (
+	AgyAccountAction_name = map[int32]string{
+		0: "AGY_ACCOUNT_ACTION_UNSPECIFIED",
+		5: "AGY_ACCOUNT_ACTION_READ_STATE",
+		6: "AGY_ACCOUNT_ACTION_CAPTURE_CREDENTIAL",
+		7: "AGY_ACCOUNT_ACTION_READ_QUOTA",
+		8: "AGY_ACCOUNT_ACTION_APPLY_CREDENTIAL",
+	}
+	AgyAccountAction_value = map[string]int32{
+		"AGY_ACCOUNT_ACTION_UNSPECIFIED":        0,
+		"AGY_ACCOUNT_ACTION_READ_STATE":         5,
+		"AGY_ACCOUNT_ACTION_CAPTURE_CREDENTIAL": 6,
+		"AGY_ACCOUNT_ACTION_READ_QUOTA":         7,
+		"AGY_ACCOUNT_ACTION_APPLY_CREDENTIAL":   8,
+	}
+)
+
+func (x AgyAccountAction) Enum() *AgyAccountAction {
+	p := new(AgyAccountAction)
+	*p = x
+	return p
+}
+
+func (x AgyAccountAction) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (AgyAccountAction) Descriptor() protoreflect.EnumDescriptor {
+	return file_astrorder_sessiond_v1_sessiond_proto_enumTypes[18].Descriptor()
+}
+
+func (AgyAccountAction) Type() protoreflect.EnumType {
+	return &file_astrorder_sessiond_v1_sessiond_proto_enumTypes[18]
+}
+
+func (x AgyAccountAction) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use AgyAccountAction.Descriptor instead.
+func (AgyAccountAction) EnumDescriptor() ([]byte, []int) {
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{18}
+}
+
 // NativeJson is exactly one UTF-8 JSON value. Consumers must validate it with
 // json.Decoder.UseNumber (or an equivalent lossless decoder) before use.
 type NativeJson struct {
@@ -12609,6 +12664,135 @@ func (x *DisconnectConnectorResponse) GetError() *BusinessError {
 	return nil
 }
 
+type AgyAccountRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Target        *RuntimeTarget         `protobuf:"bytes,1,opt,name=target,proto3" json:"target,omitempty"`
+	Action        AgyAccountAction       `protobuf:"varint,2,opt,name=action,proto3,enum=astrorder.sessiond.v1.AgyAccountAction" json:"action,omitempty"`
+	AccountId     string                 `protobuf:"bytes,3,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
+	ConfirmActive bool                   `protobuf:"varint,5,opt,name=confirm_active,json=confirmActive,proto3" json:"confirm_active,omitempty"`
+	Credential    []byte                 `protobuf:"bytes,6,opt,name=credential,proto3" json:"credential,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AgyAccountRequest) Reset() {
+	*x = AgyAccountRequest{}
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[165]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AgyAccountRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AgyAccountRequest) ProtoMessage() {}
+
+func (x *AgyAccountRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[165]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AgyAccountRequest.ProtoReflect.Descriptor instead.
+func (*AgyAccountRequest) Descriptor() ([]byte, []int) {
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{165}
+}
+
+func (x *AgyAccountRequest) GetTarget() *RuntimeTarget {
+	if x != nil {
+		return x.Target
+	}
+	return nil
+}
+
+func (x *AgyAccountRequest) GetAction() AgyAccountAction {
+	if x != nil {
+		return x.Action
+	}
+	return AgyAccountAction_AGY_ACCOUNT_ACTION_UNSPECIFIED
+}
+
+func (x *AgyAccountRequest) GetAccountId() string {
+	if x != nil {
+		return x.AccountId
+	}
+	return ""
+}
+
+func (x *AgyAccountRequest) GetConfirmActive() bool {
+	if x != nil {
+		return x.ConfirmActive
+	}
+	return false
+}
+
+func (x *AgyAccountRequest) GetCredential() []byte {
+	if x != nil {
+		return x.Credential
+	}
+	return nil
+}
+
+type AgyAccountResponse struct {
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Result *NativeJson            `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
+	// Only returned for CAPTURE_CREDENTIAL on the authenticated daemon channel.
+	Credential    []byte `protobuf:"bytes,2,opt,name=credential,proto3" json:"credential,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AgyAccountResponse) Reset() {
+	*x = AgyAccountResponse{}
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[166]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AgyAccountResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AgyAccountResponse) ProtoMessage() {}
+
+func (x *AgyAccountResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_astrorder_sessiond_v1_sessiond_proto_msgTypes[166]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AgyAccountResponse.ProtoReflect.Descriptor instead.
+func (*AgyAccountResponse) Descriptor() ([]byte, []int) {
+	return file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP(), []int{166}
+}
+
+func (x *AgyAccountResponse) GetResult() *NativeJson {
+	if x != nil {
+		return x.Result
+	}
+	return nil
+}
+
+func (x *AgyAccountResponse) GetCredential() []byte {
+	if x != nil {
+		return x.Credential
+	}
+	return nil
+}
+
 var File_astrorder_sessiond_v1_sessiond_proto protoreflect.FileDescriptor
 
 const file_astrorder_sessiond_v1_sessiond_proto_rawDesc = "" +
@@ -13642,7 +13826,21 @@ const file_astrorder_sessiond_v1_sessiond_proto_rawDesc = "" +
 	"\fdisconnected\x18\x02 \x01(\bR\fdisconnected\x12N\n" +
 	"\x0foperation_state\x18\x03 \x01(\x0e2%.astrorder.sessiond.v1.OperationStateR\x0eoperationState\x12?\n" +
 	"\x05error\x18\x04 \x01(\v2$.astrorder.sessiond.v1.BusinessErrorH\x00R\x05error\x88\x01\x01B\b\n" +
-	"\x06_error*\xe9\x01\n" +
+	"\x06_error\"\xfe\x01\n" +
+	"\x11AgyAccountRequest\x12<\n" +
+	"\x06target\x18\x01 \x01(\v2$.astrorder.sessiond.v1.RuntimeTargetR\x06target\x12?\n" +
+	"\x06action\x18\x02 \x01(\x0e2'.astrorder.sessiond.v1.AgyAccountActionR\x06action\x12\x1d\n" +
+	"\n" +
+	"account_id\x18\x03 \x01(\tR\taccountId\x12%\n" +
+	"\x0econfirm_active\x18\x05 \x01(\bR\rconfirmActive\x12\x1e\n" +
+	"\n" +
+	"credential\x18\x06 \x01(\fR\n" +
+	"credentialJ\x04\b\x04\x10\x05\"o\n" +
+	"\x12AgyAccountResponse\x129\n" +
+	"\x06result\x18\x01 \x01(\v2!.astrorder.sessiond.v1.NativeJsonR\x06result\x12\x1e\n" +
+	"\n" +
+	"credential\x18\x02 \x01(\fR\n" +
+	"credential*\xe9\x01\n" +
 	"\rContractLimit\x12\x1e\n" +
 	"\x1aCONTRACT_LIMIT_UNSPECIFIED\x10\x00\x12/\n" +
 	"(CONTRACT_LIMIT_MAX_COMPAT_BUSINESS_BYTES\x10\x80\xc8\xd0\a\x12)\n" +
@@ -13755,7 +13953,13 @@ const file_astrorder_sessiond_v1_sessiond_proto_rawDesc = "" +
 	"\x13SSH_LOG_LEVEL_DEBUG\x10\x06\x12\x19\n" +
 	"\x15SSH_LOG_LEVEL_DEBUG_1\x10\a\x12\x19\n" +
 	"\x15SSH_LOG_LEVEL_DEBUG_2\x10\b\x12\x19\n" +
-	"\x15SSH_LOG_LEVEL_DEBUG_3\x10\t2\xbe\x02\n" +
+	"\x15SSH_LOG_LEVEL_DEBUG_3\x10\t*\xd6\x01\n" +
+	"\x10AgyAccountAction\x12\"\n" +
+	"\x1eAGY_ACCOUNT_ACTION_UNSPECIFIED\x10\x00\x12!\n" +
+	"\x1dAGY_ACCOUNT_ACTION_READ_STATE\x10\x05\x12)\n" +
+	"%AGY_ACCOUNT_ACTION_CAPTURE_CREDENTIAL\x10\x06\x12!\n" +
+	"\x1dAGY_ACCOUNT_ACTION_READ_QUOTA\x10\a\x12'\n" +
+	"#AGY_ACCOUNT_ACTION_APPLY_CREDENTIAL\x10\b\"\x04\b\x01\x10\x042\xbe\x02\n" +
 	"\rDaemonControl\x12p\n" +
 	"\x0fGetCapabilities\x12-.astrorder.sessiond.v1.GetCapabilitiesRequest\x1a..astrorder.sessiond.v1.GetCapabilitiesResponse\x12^\n" +
 	"\tGetStatus\x12'.astrorder.sessiond.v1.GetStatusRequest\x1a(.astrorder.sessiond.v1.GetStatusResponse\x12[\n" +
@@ -13776,8 +13980,7 @@ const file_astrorder_sessiond_v1_sessiond_proto_rawDesc = "" +
 	"\rDetachSession\x12+.astrorder.sessiond.v1.DetachSessionRequest\x1a%.astrorder.sessiond.v1.CommandReceipt\x12q\n" +
 	"\x14ReportObservedStatus\x122.astrorder.sessiond.v1.ReportObservedStatusRequest\x1a%.astrorder.sessiond.v1.SessionReceipt\x12c\n" +
 	"\rSubmitDesktop\x12+.astrorder.sessiond.v1.SubmitDesktopRequest\x1a%.astrorder.sessiond.v1.CommandReceipt\x12s\n" +
-	"\x15UpdateDesktopSettings\x123.astrorder.sessiond.v1.UpdateDesktopSettingsRequest\x1a%.astrorder.sessiond.v1.CommandReceipt2\xd0\n" +
-	"\n" +
+	"\x15UpdateDesktopSettings\x123.astrorder.sessiond.v1.UpdateDesktopSettingsRequest\x1a%.astrorder.sessiond.v1.CommandReceipt2\xb9\v\n" +
 	"\fRuntimeQuery\x12d\n" +
 	"\vQueryNative\x12).astrorder.sessiond.v1.NativeQueryRequest\x1a*.astrorder.sessiond.v1.NativeQueryResponse\x12g\n" +
 	"\x0eGetHistoryPage\x12).astrorder.sessiond.v1.HistoryPageRequest\x1a*.astrorder.sessiond.v1.HistoryPageResponse\x12\x88\x01\n" +
@@ -13792,7 +13995,8 @@ const file_astrorder_sessiond_v1_sessiond_proto_rawDesc = "" +
 	"\tClearGoal\x12'.astrorder.sessiond.v1.ClearGoalRequest\x1a%.astrorder.sessiond.v1.CommandReceipt\x12l\n" +
 	"\x10ReadApprovalMode\x12..astrorder.sessiond.v1.ReadApprovalModeRequest\x1a(.astrorder.sessiond.v1.ApprovalModeState\x12g\n" +
 	"\x0fSetApprovalMode\x12-.astrorder.sessiond.v1.SetApprovalModeRequest\x1a%.astrorder.sessiond.v1.CommandReceipt\x12v\n" +
-	"\x11DisconnectRuntime\x12/.astrorder.sessiond.v1.DisconnectRuntimeRequest\x1a0.astrorder.sessiond.v1.DisconnectRuntimeResponse2\xd4\x01\n" +
+	"\x11DisconnectRuntime\x12/.astrorder.sessiond.v1.DisconnectRuntimeRequest\x1a0.astrorder.sessiond.v1.DisconnectRuntimeResponse\x12g\n" +
+	"\x10ManageAgyAccount\x12(.astrorder.sessiond.v1.AgyAccountRequest\x1a).astrorder.sessiond.v1.AgyAccountResponse2\xd4\x01\n" +
 	"\vEventStream\x12_\n" +
 	"\tSubscribe\x12'.astrorder.sessiond.v1.SubscribeRequest\x1a'.astrorder.sessiond.v1.EventStreamFrame0\x01\x12d\n" +
 	"\vAppendEvent\x12).astrorder.sessiond.v1.AppendEventRequest\x1a*.astrorder.sessiond.v1.AppendEventResponse2t\n" +
@@ -13821,8 +14025,8 @@ func file_astrorder_sessiond_v1_sessiond_proto_rawDescGZIP() []byte {
 	return file_astrorder_sessiond_v1_sessiond_proto_rawDescData
 }
 
-var file_astrorder_sessiond_v1_sessiond_proto_enumTypes = make([]protoimpl.EnumInfo, 18)
-var file_astrorder_sessiond_v1_sessiond_proto_msgTypes = make([]protoimpl.MessageInfo, 165)
+var file_astrorder_sessiond_v1_sessiond_proto_enumTypes = make([]protoimpl.EnumInfo, 19)
+var file_astrorder_sessiond_v1_sessiond_proto_msgTypes = make([]protoimpl.MessageInfo, 167)
 var file_astrorder_sessiond_v1_sessiond_proto_goTypes = []any{
 	(ContractLimit)(0),                      // 0: astrorder.sessiond.v1.ContractLimit
 	(CanonicalizationVersion)(0),            // 1: astrorder.sessiond.v1.CanonicalizationVersion
@@ -13842,548 +14046,556 @@ var file_astrorder_sessiond_v1_sessiond_proto_goTypes = []any{
 	(ReloadAgent)(0),                        // 15: astrorder.sessiond.v1.ReloadAgent
 	(ConnectorAckState)(0),                  // 16: astrorder.sessiond.v1.ConnectorAckState
 	(SshLogLevel)(0),                        // 17: astrorder.sessiond.v1.SshLogLevel
-	(*NativeJson)(nil),                      // 18: astrorder.sessiond.v1.NativeJson
-	(*NullableString)(nil),                  // 19: astrorder.sessiond.v1.NullableString
-	(*PresenceFixture)(nil),                 // 20: astrorder.sessiond.v1.PresenceFixture
-	(*InteropFixture)(nil),                  // 21: astrorder.sessiond.v1.InteropFixture
-	(*ExactIdentifier)(nil),                 // 22: astrorder.sessiond.v1.ExactIdentifier
-	(*SshOptions)(nil),                      // 23: astrorder.sessiond.v1.SshOptions
-	(*SshConnectConfig)(nil),                // 24: astrorder.sessiond.v1.SshConnectConfig
-	(*RuntimeTarget)(nil),                   // 25: astrorder.sessiond.v1.RuntimeTarget
-	(*SessionRef)(nil),                      // 26: astrorder.sessiond.v1.SessionRef
-	(*CommandMeta)(nil),                     // 27: astrorder.sessiond.v1.CommandMeta
-	(*BusinessError)(nil),                   // 28: astrorder.sessiond.v1.BusinessError
-	(*NullableSessionStatus)(nil),           // 29: astrorder.sessiond.v1.NullableSessionStatus
-	(*NullableBusinessError)(nil),           // 30: astrorder.sessiond.v1.NullableBusinessError
-	(*CommandResult)(nil),                   // 31: astrorder.sessiond.v1.CommandResult
-	(*CommandReceipt)(nil),                  // 32: astrorder.sessiond.v1.CommandReceipt
-	(*SessionReceipt)(nil),                  // 33: astrorder.sessiond.v1.SessionReceipt
-	(*GetCapabilitiesRequest)(nil),          // 34: astrorder.sessiond.v1.GetCapabilitiesRequest
-	(*GetCapabilitiesResponse)(nil),         // 35: astrorder.sessiond.v1.GetCapabilitiesResponse
-	(*GetStatusRequest)(nil),                // 36: astrorder.sessiond.v1.GetStatusRequest
-	(*RuntimeStatus)(nil),                   // 37: astrorder.sessiond.v1.RuntimeStatus
-	(*SessionSnapshot)(nil),                 // 38: astrorder.sessiond.v1.SessionSnapshot
-	(*GetStatusResponse)(nil),               // 39: astrorder.sessiond.v1.GetStatusResponse
-	(*ShutdownRequest)(nil),                 // 40: astrorder.sessiond.v1.ShutdownRequest
-	(*ShutdownResponse)(nil),                // 41: astrorder.sessiond.v1.ShutdownResponse
-	(*CodexCreateOptions)(nil),              // 42: astrorder.sessiond.v1.CodexCreateOptions
-	(*HermesCreateOptions)(nil),             // 43: astrorder.sessiond.v1.HermesCreateOptions
-	(*GrokCreateOptions)(nil),               // 44: astrorder.sessiond.v1.GrokCreateOptions
-	(*AntigravityCreateOptions)(nil),        // 45: astrorder.sessiond.v1.AntigravityCreateOptions
-	(*CreateSessionRequest)(nil),            // 46: astrorder.sessiond.v1.CreateSessionRequest
-	(*AttachSessionRequest)(nil),            // 47: astrorder.sessiond.v1.AttachSessionRequest
-	(*TextInput)(nil),                       // 48: astrorder.sessiond.v1.TextInput
-	(*ImageUrlInput)(nil),                   // 49: astrorder.sessiond.v1.ImageUrlInput
-	(*LocalImageInput)(nil),                 // 50: astrorder.sessiond.v1.LocalImageInput
-	(*SkillRefInput)(nil),                   // 51: astrorder.sessiond.v1.SkillRefInput
-	(*MentionRefInput)(nil),                 // 52: astrorder.sessiond.v1.MentionRefInput
-	(*AttachmentInput)(nil),                 // 53: astrorder.sessiond.v1.AttachmentInput
-	(*InputPart)(nil),                       // 54: astrorder.sessiond.v1.InputPart
-	(*SendPolicy)(nil),                      // 55: astrorder.sessiond.v1.SendPolicy
-	(*SendRequest)(nil),                     // 56: astrorder.sessiond.v1.SendRequest
-	(*SteerRequest)(nil),                    // 57: astrorder.sessiond.v1.SteerRequest
-	(*ReviewTarget)(nil),                    // 58: astrorder.sessiond.v1.ReviewTarget
-	(*StartReviewRequest)(nil),              // 59: astrorder.sessiond.v1.StartReviewRequest
-	(*CompactRequest)(nil),                  // 60: astrorder.sessiond.v1.CompactRequest
-	(*InterruptRequest)(nil),                // 61: astrorder.sessiond.v1.InterruptRequest
-	(*PermissionGrant)(nil),                 // 62: astrorder.sessiond.v1.PermissionGrant
-	(*RespondApprovalRequest)(nil),          // 63: astrorder.sessiond.v1.RespondApprovalRequest
-	(*UpdateSettingsRequest)(nil),           // 64: astrorder.sessiond.v1.UpdateSettingsRequest
-	(*RenameSessionRequest)(nil),            // 65: astrorder.sessiond.v1.RenameSessionRequest
-	(*DeleteSessionRequest)(nil),            // 66: astrorder.sessiond.v1.DeleteSessionRequest
-	(*CloseSessionRequest)(nil),             // 67: astrorder.sessiond.v1.CloseSessionRequest
-	(*DetachSessionRequest)(nil),            // 68: astrorder.sessiond.v1.DetachSessionRequest
-	(*ReportObservedStatusRequest)(nil),     // 69: astrorder.sessiond.v1.ReportObservedStatusRequest
-	(*DesktopTextInput)(nil),                // 70: astrorder.sessiond.v1.DesktopTextInput
-	(*DesktopImageInput)(nil),               // 71: astrorder.sessiond.v1.DesktopImageInput
-	(*DesktopInputPart)(nil),                // 72: astrorder.sessiond.v1.DesktopInputPart
-	(*SubmitDesktopRequest)(nil),            // 73: astrorder.sessiond.v1.SubmitDesktopRequest
-	(*UpdateDesktopSettingsRequest)(nil),    // 74: astrorder.sessiond.v1.UpdateDesktopSettingsRequest
-	(*EmptyNativeQuery)(nil),                // 75: astrorder.sessiond.v1.EmptyNativeQuery
-	(*CodexInitializeQuery)(nil),            // 76: astrorder.sessiond.v1.CodexInitializeQuery
-	(*CodexAccountReadQuery)(nil),           // 77: astrorder.sessiond.v1.CodexAccountReadQuery
-	(*CodexHooksListQuery)(nil),             // 78: astrorder.sessiond.v1.CodexHooksListQuery
-	(*CodexModelListQuery)(nil),             // 79: astrorder.sessiond.v1.CodexModelListQuery
-	(*CodexSkillsListQuery)(nil),            // 80: astrorder.sessiond.v1.CodexSkillsListQuery
-	(*CodexThreadItemsListQuery)(nil),       // 81: astrorder.sessiond.v1.CodexThreadItemsListQuery
-	(*CodexThreadListQuery)(nil),            // 82: astrorder.sessiond.v1.CodexThreadListQuery
-	(*CodexThreadLoadedListQuery)(nil),      // 83: astrorder.sessiond.v1.CodexThreadLoadedListQuery
-	(*CodexThreadReadQuery)(nil),            // 84: astrorder.sessiond.v1.CodexThreadReadQuery
-	(*HermesSessionListQuery)(nil),          // 85: astrorder.sessiond.v1.HermesSessionListQuery
-	(*HermesActiveListQuery)(nil),           // 86: astrorder.sessiond.v1.HermesActiveListQuery
-	(*HermesProjectsTreeQuery)(nil),         // 87: astrorder.sessiond.v1.HermesProjectsTreeQuery
-	(*HermesProjectSessionsQuery)(nil),      // 88: astrorder.sessiond.v1.HermesProjectSessionsQuery
-	(*HermesSessionHistoryQuery)(nil),       // 89: astrorder.sessiond.v1.HermesSessionHistoryQuery
-	(*HermesModelsListQuery)(nil),           // 90: astrorder.sessiond.v1.HermesModelsListQuery
-	(*HermesCommandsListQuery)(nil),         // 91: astrorder.sessiond.v1.HermesCommandsListQuery
-	(*GrokInitializeQuery)(nil),             // 92: astrorder.sessiond.v1.GrokInitializeQuery
-	(*GrokSessionListQuery)(nil),            // 93: astrorder.sessiond.v1.GrokSessionListQuery
-	(*AntigravitySessionListQuery)(nil),     // 94: astrorder.sessiond.v1.AntigravitySessionListQuery
-	(*AntigravityModelsListQuery)(nil),      // 95: astrorder.sessiond.v1.AntigravityModelsListQuery
-	(*AntigravityQuotaReadQuery)(nil),       // 96: astrorder.sessiond.v1.AntigravityQuotaReadQuery
-	(*AntigravitySessionUsageQuery)(nil),    // 97: astrorder.sessiond.v1.AntigravitySessionUsageQuery
-	(*AntigravityUsageSummaryQuery)(nil),    // 98: astrorder.sessiond.v1.AntigravityUsageSummaryQuery
-	(*NativeQueryRequest)(nil),              // 99: astrorder.sessiond.v1.NativeQueryRequest
-	(*NativeQueryResponse)(nil),             // 100: astrorder.sessiond.v1.NativeQueryResponse
-	(*HistoryPageRequest)(nil),              // 101: astrorder.sessiond.v1.HistoryPageRequest
-	(*HistoryPageResponse)(nil),             // 102: astrorder.sessiond.v1.HistoryPageResponse
-	(*ListBackgroundProcessesRequest)(nil),  // 103: astrorder.sessiond.v1.ListBackgroundProcessesRequest
-	(*ListBackgroundProcessesResponse)(nil), // 104: astrorder.sessiond.v1.ListBackgroundProcessesResponse
-	(*ListModelsRequest)(nil),               // 105: astrorder.sessiond.v1.ListModelsRequest
-	(*ModelOption)(nil),                     // 106: astrorder.sessiond.v1.ModelOption
-	(*ListModelsResponse)(nil),              // 107: astrorder.sessiond.v1.ListModelsResponse
-	(*ListCommandsRequest)(nil),             // 108: astrorder.sessiond.v1.ListCommandsRequest
-	(*CommandOption)(nil),                   // 109: astrorder.sessiond.v1.CommandOption
-	(*ListCommandsResponse)(nil),            // 110: astrorder.sessiond.v1.ListCommandsResponse
-	(*ReadModelRequest)(nil),                // 111: astrorder.sessiond.v1.ReadModelRequest
-	(*ModelState)(nil),                      // 112: astrorder.sessiond.v1.ModelState
-	(*SetModelRequest)(nil),                 // 113: astrorder.sessiond.v1.SetModelRequest
-	(*SetReasoningRequest)(nil),             // 114: astrorder.sessiond.v1.SetReasoningRequest
-	(*ReadApprovalModeRequest)(nil),         // 115: astrorder.sessiond.v1.ReadApprovalModeRequest
-	(*SetGoalRequest)(nil),                  // 116: astrorder.sessiond.v1.SetGoalRequest
-	(*ClearGoalRequest)(nil),                // 117: astrorder.sessiond.v1.ClearGoalRequest
-	(*ApprovalModeState)(nil),               // 118: astrorder.sessiond.v1.ApprovalModeState
-	(*SetApprovalModeRequest)(nil),          // 119: astrorder.sessiond.v1.SetApprovalModeRequest
-	(*DisconnectRuntimeRequest)(nil),        // 120: astrorder.sessiond.v1.DisconnectRuntimeRequest
-	(*DisconnectRuntimeResponse)(nil),       // 121: astrorder.sessiond.v1.DisconnectRuntimeResponse
-	(*SessionCursor)(nil),                   // 122: astrorder.sessiond.v1.SessionCursor
-	(*SubscribeRequest)(nil),                // 123: astrorder.sessiond.v1.SubscribeRequest
-	(*RuntimeOwnerEvent)(nil),               // 124: astrorder.sessiond.v1.RuntimeOwnerEvent
-	(*OwnershipLostEvent)(nil),              // 125: astrorder.sessiond.v1.OwnershipLostEvent
-	(*PtyOutputEvent)(nil),                  // 126: astrorder.sessiond.v1.PtyOutputEvent
-	(*ConnectorEventPayload)(nil),           // 127: astrorder.sessiond.v1.ConnectorEventPayload
-	(*EventEnvelope)(nil),                   // 128: astrorder.sessiond.v1.EventEnvelope
-	(*StateSnapshot)(nil),                   // 129: astrorder.sessiond.v1.StateSnapshot
-	(*SessionWatermark)(nil),                // 130: astrorder.sessiond.v1.SessionWatermark
-	(*LiveReady)(nil),                       // 131: astrorder.sessiond.v1.LiveReady
-	(*ResyncRequired)(nil),                  // 132: astrorder.sessiond.v1.ResyncRequired
-	(*StreamOverflow)(nil),                  // 133: astrorder.sessiond.v1.StreamOverflow
-	(*EventStreamFrame)(nil),                // 134: astrorder.sessiond.v1.EventStreamFrame
-	(*AppendEventRequest)(nil),              // 135: astrorder.sessiond.v1.AppendEventRequest
-	(*AppendEventResponse)(nil),             // 136: astrorder.sessiond.v1.AppendEventResponse
-	(*OpenTerminal)(nil),                    // 137: astrorder.sessiond.v1.OpenTerminal
-	(*TerminalInput)(nil),                   // 138: astrorder.sessiond.v1.TerminalInput
-	(*TerminalResize)(nil),                  // 139: astrorder.sessiond.v1.TerminalResize
-	(*TerminalInterrupt)(nil),               // 140: astrorder.sessiond.v1.TerminalInterrupt
-	(*TerminalClose)(nil),                   // 141: astrorder.sessiond.v1.TerminalClose
-	(*TerminalClientFrame)(nil),             // 142: astrorder.sessiond.v1.TerminalClientFrame
-	(*TerminalOpened)(nil),                  // 143: astrorder.sessiond.v1.TerminalOpened
-	(*TerminalOutput)(nil),                  // 144: astrorder.sessiond.v1.TerminalOutput
-	(*TerminalExit)(nil),                    // 145: astrorder.sessiond.v1.TerminalExit
-	(*TerminalOverflow)(nil),                // 146: astrorder.sessiond.v1.TerminalOverflow
-	(*TerminalServerFrame)(nil),             // 147: astrorder.sessiond.v1.TerminalServerFrame
-	(*OperationKey)(nil),                    // 148: astrorder.sessiond.v1.OperationKey
-	(*GetOperationRequest)(nil),             // 149: astrorder.sessiond.v1.GetOperationRequest
-	(*OperationReceipt)(nil),                // 150: astrorder.sessiond.v1.OperationReceipt
-	(*LocalTarget)(nil),                     // 151: astrorder.sessiond.v1.LocalTarget
-	(*WslTarget)(nil),                       // 152: astrorder.sessiond.v1.WslTarget
-	(*SshTarget)(nil),                       // 153: astrorder.sessiond.v1.SshTarget
-	(*ModelConfigTarget)(nil),               // 154: astrorder.sessiond.v1.ModelConfigTarget
-	(*ModelConfigFileInput)(nil),            // 155: astrorder.sessiond.v1.ModelConfigFileInput
-	(*SensitiveEnvironmentValue)(nil),       // 156: astrorder.sessiond.v1.SensitiveEnvironmentValue
-	(*ModelConfigPlanRequest)(nil),          // 157: astrorder.sessiond.v1.ModelConfigPlanRequest
-	(*ModelConfigFileState)(nil),            // 158: astrorder.sessiond.v1.ModelConfigFileState
-	(*ModelConfigChange)(nil),               // 159: astrorder.sessiond.v1.ModelConfigChange
-	(*ModelConfigPlanResponse)(nil),         // 160: astrorder.sessiond.v1.ModelConfigPlanResponse
-	(*ModelConfigApplyRequest)(nil),         // 161: astrorder.sessiond.v1.ModelConfigApplyRequest
-	(*FileDigest)(nil),                      // 162: astrorder.sessiond.v1.FileDigest
-	(*ModelConfigApplyResponse)(nil),        // 163: astrorder.sessiond.v1.ModelConfigApplyResponse
-	(*ModelConfigReloadRequest)(nil),        // 164: astrorder.sessiond.v1.ModelConfigReloadRequest
-	(*ModelConfigReloadResponse)(nil),       // 165: astrorder.sessiond.v1.ModelConfigReloadResponse
-	(*ConnectorAgent)(nil),                  // 166: astrorder.sessiond.v1.ConnectorAgent
-	(*ConnectorHello)(nil),                  // 167: astrorder.sessiond.v1.ConnectorHello
-	(*ConnectorHeartbeat)(nil),              // 168: astrorder.sessiond.v1.ConnectorHeartbeat
-	(*ConnectorEvent)(nil),                  // 169: astrorder.sessiond.v1.ConnectorEvent
-	(*ConnectorDisconnect)(nil),             // 170: astrorder.sessiond.v1.ConnectorDisconnect
-	(*ConnectorIngressFrame)(nil),           // 171: astrorder.sessiond.v1.ConnectorIngressFrame
-	(*ConnectorRegistered)(nil),             // 172: astrorder.sessiond.v1.ConnectorRegistered
-	(*ConnectorEventAccepted)(nil),          // 173: astrorder.sessiond.v1.ConnectorEventAccepted
-	(*ConnectorRejected)(nil),               // 174: astrorder.sessiond.v1.ConnectorRejected
-	(*ConnectorOverflow)(nil),               // 175: astrorder.sessiond.v1.ConnectorOverflow
-	(*ConnectorDisconnected)(nil),           // 176: astrorder.sessiond.v1.ConnectorDisconnected
-	(*ConnectorHeartbeatAck)(nil),           // 177: astrorder.sessiond.v1.ConnectorHeartbeatAck
-	(*ConnectorIngressAck)(nil),             // 178: astrorder.sessiond.v1.ConnectorIngressAck
-	(*BindControlSessionRequest)(nil),       // 179: astrorder.sessiond.v1.BindControlSessionRequest
-	(*BindControlSessionResponse)(nil),      // 180: astrorder.sessiond.v1.BindControlSessionResponse
-	(*DisconnectConnectorRequest)(nil),      // 181: astrorder.sessiond.v1.DisconnectConnectorRequest
-	(*DisconnectConnectorResponse)(nil),     // 182: astrorder.sessiond.v1.DisconnectConnectorResponse
+	(AgyAccountAction)(0),                   // 18: astrorder.sessiond.v1.AgyAccountAction
+	(*NativeJson)(nil),                      // 19: astrorder.sessiond.v1.NativeJson
+	(*NullableString)(nil),                  // 20: astrorder.sessiond.v1.NullableString
+	(*PresenceFixture)(nil),                 // 21: astrorder.sessiond.v1.PresenceFixture
+	(*InteropFixture)(nil),                  // 22: astrorder.sessiond.v1.InteropFixture
+	(*ExactIdentifier)(nil),                 // 23: astrorder.sessiond.v1.ExactIdentifier
+	(*SshOptions)(nil),                      // 24: astrorder.sessiond.v1.SshOptions
+	(*SshConnectConfig)(nil),                // 25: astrorder.sessiond.v1.SshConnectConfig
+	(*RuntimeTarget)(nil),                   // 26: astrorder.sessiond.v1.RuntimeTarget
+	(*SessionRef)(nil),                      // 27: astrorder.sessiond.v1.SessionRef
+	(*CommandMeta)(nil),                     // 28: astrorder.sessiond.v1.CommandMeta
+	(*BusinessError)(nil),                   // 29: astrorder.sessiond.v1.BusinessError
+	(*NullableSessionStatus)(nil),           // 30: astrorder.sessiond.v1.NullableSessionStatus
+	(*NullableBusinessError)(nil),           // 31: astrorder.sessiond.v1.NullableBusinessError
+	(*CommandResult)(nil),                   // 32: astrorder.sessiond.v1.CommandResult
+	(*CommandReceipt)(nil),                  // 33: astrorder.sessiond.v1.CommandReceipt
+	(*SessionReceipt)(nil),                  // 34: astrorder.sessiond.v1.SessionReceipt
+	(*GetCapabilitiesRequest)(nil),          // 35: astrorder.sessiond.v1.GetCapabilitiesRequest
+	(*GetCapabilitiesResponse)(nil),         // 36: astrorder.sessiond.v1.GetCapabilitiesResponse
+	(*GetStatusRequest)(nil),                // 37: astrorder.sessiond.v1.GetStatusRequest
+	(*RuntimeStatus)(nil),                   // 38: astrorder.sessiond.v1.RuntimeStatus
+	(*SessionSnapshot)(nil),                 // 39: astrorder.sessiond.v1.SessionSnapshot
+	(*GetStatusResponse)(nil),               // 40: astrorder.sessiond.v1.GetStatusResponse
+	(*ShutdownRequest)(nil),                 // 41: astrorder.sessiond.v1.ShutdownRequest
+	(*ShutdownResponse)(nil),                // 42: astrorder.sessiond.v1.ShutdownResponse
+	(*CodexCreateOptions)(nil),              // 43: astrorder.sessiond.v1.CodexCreateOptions
+	(*HermesCreateOptions)(nil),             // 44: astrorder.sessiond.v1.HermesCreateOptions
+	(*GrokCreateOptions)(nil),               // 45: astrorder.sessiond.v1.GrokCreateOptions
+	(*AntigravityCreateOptions)(nil),        // 46: astrorder.sessiond.v1.AntigravityCreateOptions
+	(*CreateSessionRequest)(nil),            // 47: astrorder.sessiond.v1.CreateSessionRequest
+	(*AttachSessionRequest)(nil),            // 48: astrorder.sessiond.v1.AttachSessionRequest
+	(*TextInput)(nil),                       // 49: astrorder.sessiond.v1.TextInput
+	(*ImageUrlInput)(nil),                   // 50: astrorder.sessiond.v1.ImageUrlInput
+	(*LocalImageInput)(nil),                 // 51: astrorder.sessiond.v1.LocalImageInput
+	(*SkillRefInput)(nil),                   // 52: astrorder.sessiond.v1.SkillRefInput
+	(*MentionRefInput)(nil),                 // 53: astrorder.sessiond.v1.MentionRefInput
+	(*AttachmentInput)(nil),                 // 54: astrorder.sessiond.v1.AttachmentInput
+	(*InputPart)(nil),                       // 55: astrorder.sessiond.v1.InputPart
+	(*SendPolicy)(nil),                      // 56: astrorder.sessiond.v1.SendPolicy
+	(*SendRequest)(nil),                     // 57: astrorder.sessiond.v1.SendRequest
+	(*SteerRequest)(nil),                    // 58: astrorder.sessiond.v1.SteerRequest
+	(*ReviewTarget)(nil),                    // 59: astrorder.sessiond.v1.ReviewTarget
+	(*StartReviewRequest)(nil),              // 60: astrorder.sessiond.v1.StartReviewRequest
+	(*CompactRequest)(nil),                  // 61: astrorder.sessiond.v1.CompactRequest
+	(*InterruptRequest)(nil),                // 62: astrorder.sessiond.v1.InterruptRequest
+	(*PermissionGrant)(nil),                 // 63: astrorder.sessiond.v1.PermissionGrant
+	(*RespondApprovalRequest)(nil),          // 64: astrorder.sessiond.v1.RespondApprovalRequest
+	(*UpdateSettingsRequest)(nil),           // 65: astrorder.sessiond.v1.UpdateSettingsRequest
+	(*RenameSessionRequest)(nil),            // 66: astrorder.sessiond.v1.RenameSessionRequest
+	(*DeleteSessionRequest)(nil),            // 67: astrorder.sessiond.v1.DeleteSessionRequest
+	(*CloseSessionRequest)(nil),             // 68: astrorder.sessiond.v1.CloseSessionRequest
+	(*DetachSessionRequest)(nil),            // 69: astrorder.sessiond.v1.DetachSessionRequest
+	(*ReportObservedStatusRequest)(nil),     // 70: astrorder.sessiond.v1.ReportObservedStatusRequest
+	(*DesktopTextInput)(nil),                // 71: astrorder.sessiond.v1.DesktopTextInput
+	(*DesktopImageInput)(nil),               // 72: astrorder.sessiond.v1.DesktopImageInput
+	(*DesktopInputPart)(nil),                // 73: astrorder.sessiond.v1.DesktopInputPart
+	(*SubmitDesktopRequest)(nil),            // 74: astrorder.sessiond.v1.SubmitDesktopRequest
+	(*UpdateDesktopSettingsRequest)(nil),    // 75: astrorder.sessiond.v1.UpdateDesktopSettingsRequest
+	(*EmptyNativeQuery)(nil),                // 76: astrorder.sessiond.v1.EmptyNativeQuery
+	(*CodexInitializeQuery)(nil),            // 77: astrorder.sessiond.v1.CodexInitializeQuery
+	(*CodexAccountReadQuery)(nil),           // 78: astrorder.sessiond.v1.CodexAccountReadQuery
+	(*CodexHooksListQuery)(nil),             // 79: astrorder.sessiond.v1.CodexHooksListQuery
+	(*CodexModelListQuery)(nil),             // 80: astrorder.sessiond.v1.CodexModelListQuery
+	(*CodexSkillsListQuery)(nil),            // 81: astrorder.sessiond.v1.CodexSkillsListQuery
+	(*CodexThreadItemsListQuery)(nil),       // 82: astrorder.sessiond.v1.CodexThreadItemsListQuery
+	(*CodexThreadListQuery)(nil),            // 83: astrorder.sessiond.v1.CodexThreadListQuery
+	(*CodexThreadLoadedListQuery)(nil),      // 84: astrorder.sessiond.v1.CodexThreadLoadedListQuery
+	(*CodexThreadReadQuery)(nil),            // 85: astrorder.sessiond.v1.CodexThreadReadQuery
+	(*HermesSessionListQuery)(nil),          // 86: astrorder.sessiond.v1.HermesSessionListQuery
+	(*HermesActiveListQuery)(nil),           // 87: astrorder.sessiond.v1.HermesActiveListQuery
+	(*HermesProjectsTreeQuery)(nil),         // 88: astrorder.sessiond.v1.HermesProjectsTreeQuery
+	(*HermesProjectSessionsQuery)(nil),      // 89: astrorder.sessiond.v1.HermesProjectSessionsQuery
+	(*HermesSessionHistoryQuery)(nil),       // 90: astrorder.sessiond.v1.HermesSessionHistoryQuery
+	(*HermesModelsListQuery)(nil),           // 91: astrorder.sessiond.v1.HermesModelsListQuery
+	(*HermesCommandsListQuery)(nil),         // 92: astrorder.sessiond.v1.HermesCommandsListQuery
+	(*GrokInitializeQuery)(nil),             // 93: astrorder.sessiond.v1.GrokInitializeQuery
+	(*GrokSessionListQuery)(nil),            // 94: astrorder.sessiond.v1.GrokSessionListQuery
+	(*AntigravitySessionListQuery)(nil),     // 95: astrorder.sessiond.v1.AntigravitySessionListQuery
+	(*AntigravityModelsListQuery)(nil),      // 96: astrorder.sessiond.v1.AntigravityModelsListQuery
+	(*AntigravityQuotaReadQuery)(nil),       // 97: astrorder.sessiond.v1.AntigravityQuotaReadQuery
+	(*AntigravitySessionUsageQuery)(nil),    // 98: astrorder.sessiond.v1.AntigravitySessionUsageQuery
+	(*AntigravityUsageSummaryQuery)(nil),    // 99: astrorder.sessiond.v1.AntigravityUsageSummaryQuery
+	(*NativeQueryRequest)(nil),              // 100: astrorder.sessiond.v1.NativeQueryRequest
+	(*NativeQueryResponse)(nil),             // 101: astrorder.sessiond.v1.NativeQueryResponse
+	(*HistoryPageRequest)(nil),              // 102: astrorder.sessiond.v1.HistoryPageRequest
+	(*HistoryPageResponse)(nil),             // 103: astrorder.sessiond.v1.HistoryPageResponse
+	(*ListBackgroundProcessesRequest)(nil),  // 104: astrorder.sessiond.v1.ListBackgroundProcessesRequest
+	(*ListBackgroundProcessesResponse)(nil), // 105: astrorder.sessiond.v1.ListBackgroundProcessesResponse
+	(*ListModelsRequest)(nil),               // 106: astrorder.sessiond.v1.ListModelsRequest
+	(*ModelOption)(nil),                     // 107: astrorder.sessiond.v1.ModelOption
+	(*ListModelsResponse)(nil),              // 108: astrorder.sessiond.v1.ListModelsResponse
+	(*ListCommandsRequest)(nil),             // 109: astrorder.sessiond.v1.ListCommandsRequest
+	(*CommandOption)(nil),                   // 110: astrorder.sessiond.v1.CommandOption
+	(*ListCommandsResponse)(nil),            // 111: astrorder.sessiond.v1.ListCommandsResponse
+	(*ReadModelRequest)(nil),                // 112: astrorder.sessiond.v1.ReadModelRequest
+	(*ModelState)(nil),                      // 113: astrorder.sessiond.v1.ModelState
+	(*SetModelRequest)(nil),                 // 114: astrorder.sessiond.v1.SetModelRequest
+	(*SetReasoningRequest)(nil),             // 115: astrorder.sessiond.v1.SetReasoningRequest
+	(*ReadApprovalModeRequest)(nil),         // 116: astrorder.sessiond.v1.ReadApprovalModeRequest
+	(*SetGoalRequest)(nil),                  // 117: astrorder.sessiond.v1.SetGoalRequest
+	(*ClearGoalRequest)(nil),                // 118: astrorder.sessiond.v1.ClearGoalRequest
+	(*ApprovalModeState)(nil),               // 119: astrorder.sessiond.v1.ApprovalModeState
+	(*SetApprovalModeRequest)(nil),          // 120: astrorder.sessiond.v1.SetApprovalModeRequest
+	(*DisconnectRuntimeRequest)(nil),        // 121: astrorder.sessiond.v1.DisconnectRuntimeRequest
+	(*DisconnectRuntimeResponse)(nil),       // 122: astrorder.sessiond.v1.DisconnectRuntimeResponse
+	(*SessionCursor)(nil),                   // 123: astrorder.sessiond.v1.SessionCursor
+	(*SubscribeRequest)(nil),                // 124: astrorder.sessiond.v1.SubscribeRequest
+	(*RuntimeOwnerEvent)(nil),               // 125: astrorder.sessiond.v1.RuntimeOwnerEvent
+	(*OwnershipLostEvent)(nil),              // 126: astrorder.sessiond.v1.OwnershipLostEvent
+	(*PtyOutputEvent)(nil),                  // 127: astrorder.sessiond.v1.PtyOutputEvent
+	(*ConnectorEventPayload)(nil),           // 128: astrorder.sessiond.v1.ConnectorEventPayload
+	(*EventEnvelope)(nil),                   // 129: astrorder.sessiond.v1.EventEnvelope
+	(*StateSnapshot)(nil),                   // 130: astrorder.sessiond.v1.StateSnapshot
+	(*SessionWatermark)(nil),                // 131: astrorder.sessiond.v1.SessionWatermark
+	(*LiveReady)(nil),                       // 132: astrorder.sessiond.v1.LiveReady
+	(*ResyncRequired)(nil),                  // 133: astrorder.sessiond.v1.ResyncRequired
+	(*StreamOverflow)(nil),                  // 134: astrorder.sessiond.v1.StreamOverflow
+	(*EventStreamFrame)(nil),                // 135: astrorder.sessiond.v1.EventStreamFrame
+	(*AppendEventRequest)(nil),              // 136: astrorder.sessiond.v1.AppendEventRequest
+	(*AppendEventResponse)(nil),             // 137: astrorder.sessiond.v1.AppendEventResponse
+	(*OpenTerminal)(nil),                    // 138: astrorder.sessiond.v1.OpenTerminal
+	(*TerminalInput)(nil),                   // 139: astrorder.sessiond.v1.TerminalInput
+	(*TerminalResize)(nil),                  // 140: astrorder.sessiond.v1.TerminalResize
+	(*TerminalInterrupt)(nil),               // 141: astrorder.sessiond.v1.TerminalInterrupt
+	(*TerminalClose)(nil),                   // 142: astrorder.sessiond.v1.TerminalClose
+	(*TerminalClientFrame)(nil),             // 143: astrorder.sessiond.v1.TerminalClientFrame
+	(*TerminalOpened)(nil),                  // 144: astrorder.sessiond.v1.TerminalOpened
+	(*TerminalOutput)(nil),                  // 145: astrorder.sessiond.v1.TerminalOutput
+	(*TerminalExit)(nil),                    // 146: astrorder.sessiond.v1.TerminalExit
+	(*TerminalOverflow)(nil),                // 147: astrorder.sessiond.v1.TerminalOverflow
+	(*TerminalServerFrame)(nil),             // 148: astrorder.sessiond.v1.TerminalServerFrame
+	(*OperationKey)(nil),                    // 149: astrorder.sessiond.v1.OperationKey
+	(*GetOperationRequest)(nil),             // 150: astrorder.sessiond.v1.GetOperationRequest
+	(*OperationReceipt)(nil),                // 151: astrorder.sessiond.v1.OperationReceipt
+	(*LocalTarget)(nil),                     // 152: astrorder.sessiond.v1.LocalTarget
+	(*WslTarget)(nil),                       // 153: astrorder.sessiond.v1.WslTarget
+	(*SshTarget)(nil),                       // 154: astrorder.sessiond.v1.SshTarget
+	(*ModelConfigTarget)(nil),               // 155: astrorder.sessiond.v1.ModelConfigTarget
+	(*ModelConfigFileInput)(nil),            // 156: astrorder.sessiond.v1.ModelConfigFileInput
+	(*SensitiveEnvironmentValue)(nil),       // 157: astrorder.sessiond.v1.SensitiveEnvironmentValue
+	(*ModelConfigPlanRequest)(nil),          // 158: astrorder.sessiond.v1.ModelConfigPlanRequest
+	(*ModelConfigFileState)(nil),            // 159: astrorder.sessiond.v1.ModelConfigFileState
+	(*ModelConfigChange)(nil),               // 160: astrorder.sessiond.v1.ModelConfigChange
+	(*ModelConfigPlanResponse)(nil),         // 161: astrorder.sessiond.v1.ModelConfigPlanResponse
+	(*ModelConfigApplyRequest)(nil),         // 162: astrorder.sessiond.v1.ModelConfigApplyRequest
+	(*FileDigest)(nil),                      // 163: astrorder.sessiond.v1.FileDigest
+	(*ModelConfigApplyResponse)(nil),        // 164: astrorder.sessiond.v1.ModelConfigApplyResponse
+	(*ModelConfigReloadRequest)(nil),        // 165: astrorder.sessiond.v1.ModelConfigReloadRequest
+	(*ModelConfigReloadResponse)(nil),       // 166: astrorder.sessiond.v1.ModelConfigReloadResponse
+	(*ConnectorAgent)(nil),                  // 167: astrorder.sessiond.v1.ConnectorAgent
+	(*ConnectorHello)(nil),                  // 168: astrorder.sessiond.v1.ConnectorHello
+	(*ConnectorHeartbeat)(nil),              // 169: astrorder.sessiond.v1.ConnectorHeartbeat
+	(*ConnectorEvent)(nil),                  // 170: astrorder.sessiond.v1.ConnectorEvent
+	(*ConnectorDisconnect)(nil),             // 171: astrorder.sessiond.v1.ConnectorDisconnect
+	(*ConnectorIngressFrame)(nil),           // 172: astrorder.sessiond.v1.ConnectorIngressFrame
+	(*ConnectorRegistered)(nil),             // 173: astrorder.sessiond.v1.ConnectorRegistered
+	(*ConnectorEventAccepted)(nil),          // 174: astrorder.sessiond.v1.ConnectorEventAccepted
+	(*ConnectorRejected)(nil),               // 175: astrorder.sessiond.v1.ConnectorRejected
+	(*ConnectorOverflow)(nil),               // 176: astrorder.sessiond.v1.ConnectorOverflow
+	(*ConnectorDisconnected)(nil),           // 177: astrorder.sessiond.v1.ConnectorDisconnected
+	(*ConnectorHeartbeatAck)(nil),           // 178: astrorder.sessiond.v1.ConnectorHeartbeatAck
+	(*ConnectorIngressAck)(nil),             // 179: astrorder.sessiond.v1.ConnectorIngressAck
+	(*BindControlSessionRequest)(nil),       // 180: astrorder.sessiond.v1.BindControlSessionRequest
+	(*BindControlSessionResponse)(nil),      // 181: astrorder.sessiond.v1.BindControlSessionResponse
+	(*DisconnectConnectorRequest)(nil),      // 182: astrorder.sessiond.v1.DisconnectConnectorRequest
+	(*DisconnectConnectorResponse)(nil),     // 183: astrorder.sessiond.v1.DisconnectConnectorResponse
+	(*AgyAccountRequest)(nil),               // 184: astrorder.sessiond.v1.AgyAccountRequest
+	(*AgyAccountResponse)(nil),              // 185: astrorder.sessiond.v1.AgyAccountResponse
 }
 var file_astrorder_sessiond_v1_sessiond_proto_depIdxs = []int32{
 	3,   // 0: astrorder.sessiond.v1.NullableString.null:type_name -> astrorder.sessiond.v1.NullValue
-	19,  // 1: astrorder.sessiond.v1.PresenceFixture.nullable_text:type_name -> astrorder.sessiond.v1.NullableString
-	20,  // 2: astrorder.sessiond.v1.InteropFixture.present:type_name -> astrorder.sessiond.v1.PresenceFixture
-	20,  // 3: astrorder.sessiond.v1.InteropFixture.absent:type_name -> astrorder.sessiond.v1.PresenceFixture
-	18,  // 4: astrorder.sessiond.v1.InteropFixture.native:type_name -> astrorder.sessiond.v1.NativeJson
-	144, // 5: astrorder.sessiond.v1.InteropFixture.terminal:type_name -> astrorder.sessiond.v1.TerminalOutput
+	20,  // 1: astrorder.sessiond.v1.PresenceFixture.nullable_text:type_name -> astrorder.sessiond.v1.NullableString
+	21,  // 2: astrorder.sessiond.v1.InteropFixture.present:type_name -> astrorder.sessiond.v1.PresenceFixture
+	21,  // 3: astrorder.sessiond.v1.InteropFixture.absent:type_name -> astrorder.sessiond.v1.PresenceFixture
+	19,  // 4: astrorder.sessiond.v1.InteropFixture.native:type_name -> astrorder.sessiond.v1.NativeJson
+	145, // 5: astrorder.sessiond.v1.InteropFixture.terminal:type_name -> astrorder.sessiond.v1.TerminalOutput
 	17,  // 6: astrorder.sessiond.v1.SshOptions.log_level:type_name -> astrorder.sessiond.v1.SshLogLevel
-	23,  // 7: astrorder.sessiond.v1.SshConnectConfig.options:type_name -> astrorder.sessiond.v1.SshOptions
+	24,  // 7: astrorder.sessiond.v1.SshConnectConfig.options:type_name -> astrorder.sessiond.v1.SshOptions
 	4,   // 8: astrorder.sessiond.v1.RuntimeTarget.runtime:type_name -> astrorder.sessiond.v1.RuntimeKind
-	24,  // 9: astrorder.sessiond.v1.RuntimeTarget.ssh:type_name -> astrorder.sessiond.v1.SshConnectConfig
+	25,  // 9: astrorder.sessiond.v1.RuntimeTarget.ssh:type_name -> astrorder.sessiond.v1.SshConnectConfig
 	1,   // 10: astrorder.sessiond.v1.CommandMeta.canonicalization:type_name -> astrorder.sessiond.v1.CanonicalizationVersion
 	8,   // 11: astrorder.sessiond.v1.BusinessError.kind:type_name -> astrorder.sessiond.v1.ErrorKind
-	18,  // 12: astrorder.sessiond.v1.BusinessError.details:type_name -> astrorder.sessiond.v1.NativeJson
+	19,  // 12: astrorder.sessiond.v1.BusinessError.details:type_name -> astrorder.sessiond.v1.NativeJson
 	5,   // 13: astrorder.sessiond.v1.NullableSessionStatus.value:type_name -> astrorder.sessiond.v1.SessionStatus
 	3,   // 14: astrorder.sessiond.v1.NullableSessionStatus.null:type_name -> astrorder.sessiond.v1.NullValue
-	28,  // 15: astrorder.sessiond.v1.NullableBusinessError.value:type_name -> astrorder.sessiond.v1.BusinessError
+	29,  // 15: astrorder.sessiond.v1.NullableBusinessError.value:type_name -> astrorder.sessiond.v1.BusinessError
 	3,   // 16: astrorder.sessiond.v1.NullableBusinessError.null:type_name -> astrorder.sessiond.v1.NullValue
-	18,  // 17: astrorder.sessiond.v1.CommandResult.native:type_name -> astrorder.sessiond.v1.NativeJson
+	19,  // 17: astrorder.sessiond.v1.CommandResult.native:type_name -> astrorder.sessiond.v1.NativeJson
 	7,   // 18: astrorder.sessiond.v1.CommandReceipt.operation_state:type_name -> astrorder.sessiond.v1.OperationState
-	26,  // 19: astrorder.sessiond.v1.CommandReceipt.session:type_name -> astrorder.sessiond.v1.SessionRef
+	27,  // 19: astrorder.sessiond.v1.CommandReceipt.session:type_name -> astrorder.sessiond.v1.SessionRef
 	5,   // 20: astrorder.sessiond.v1.CommandReceipt.status:type_name -> astrorder.sessiond.v1.SessionStatus
-	31,  // 21: astrorder.sessiond.v1.CommandReceipt.completed:type_name -> astrorder.sessiond.v1.CommandResult
-	28,  // 22: astrorder.sessiond.v1.CommandReceipt.uncertain:type_name -> astrorder.sessiond.v1.BusinessError
-	28,  // 23: astrorder.sessiond.v1.CommandReceipt.rejected:type_name -> astrorder.sessiond.v1.BusinessError
-	26,  // 24: astrorder.sessiond.v1.SessionReceipt.session:type_name -> astrorder.sessiond.v1.SessionRef
+	32,  // 21: astrorder.sessiond.v1.CommandReceipt.completed:type_name -> astrorder.sessiond.v1.CommandResult
+	29,  // 22: astrorder.sessiond.v1.CommandReceipt.uncertain:type_name -> astrorder.sessiond.v1.BusinessError
+	29,  // 23: astrorder.sessiond.v1.CommandReceipt.rejected:type_name -> astrorder.sessiond.v1.BusinessError
+	27,  // 24: astrorder.sessiond.v1.SessionReceipt.session:type_name -> astrorder.sessiond.v1.SessionRef
 	5,   // 25: astrorder.sessiond.v1.SessionReceipt.status:type_name -> astrorder.sessiond.v1.SessionStatus
-	18,  // 26: astrorder.sessiond.v1.SessionReceipt.native:type_name -> astrorder.sessiond.v1.NativeJson
+	19,  // 26: astrorder.sessiond.v1.SessionReceipt.native:type_name -> astrorder.sessiond.v1.NativeJson
 	1,   // 27: astrorder.sessiond.v1.GetCapabilitiesResponse.canonicalization_versions:type_name -> astrorder.sessiond.v1.CanonicalizationVersion
 	0,   // 28: astrorder.sessiond.v1.GetCapabilitiesResponse.max_business_bytes:type_name -> astrorder.sessiond.v1.ContractLimit
 	0,   // 29: astrorder.sessiond.v1.GetCapabilitiesResponse.max_wire_bytes:type_name -> astrorder.sessiond.v1.ContractLimit
 	2,   // 30: astrorder.sessiond.v1.GetCapabilitiesResponse.event_stream_version:type_name -> astrorder.sessiond.v1.EventStreamVersion
 	4,   // 31: astrorder.sessiond.v1.RuntimeStatus.runtime:type_name -> astrorder.sessiond.v1.RuntimeKind
-	28,  // 32: astrorder.sessiond.v1.RuntimeStatus.health_error:type_name -> astrorder.sessiond.v1.BusinessError
-	26,  // 33: astrorder.sessiond.v1.SessionSnapshot.session:type_name -> astrorder.sessiond.v1.SessionRef
+	29,  // 32: astrorder.sessiond.v1.RuntimeStatus.health_error:type_name -> astrorder.sessiond.v1.BusinessError
+	27,  // 33: astrorder.sessiond.v1.SessionSnapshot.session:type_name -> astrorder.sessiond.v1.SessionRef
 	5,   // 34: astrorder.sessiond.v1.SessionSnapshot.status:type_name -> astrorder.sessiond.v1.SessionStatus
-	18,  // 35: astrorder.sessiond.v1.SessionSnapshot.native:type_name -> astrorder.sessiond.v1.NativeJson
+	19,  // 35: astrorder.sessiond.v1.SessionSnapshot.native:type_name -> astrorder.sessiond.v1.NativeJson
 	4,   // 36: astrorder.sessiond.v1.SessionSnapshot.runtime:type_name -> astrorder.sessiond.v1.RuntimeKind
-	37,  // 37: astrorder.sessiond.v1.GetStatusResponse.runtimes:type_name -> astrorder.sessiond.v1.RuntimeStatus
-	38,  // 38: astrorder.sessiond.v1.GetStatusResponse.sessions:type_name -> astrorder.sessiond.v1.SessionSnapshot
-	28,  // 39: astrorder.sessiond.v1.GetStatusResponse.storage_error:type_name -> astrorder.sessiond.v1.BusinessError
-	28,  // 40: astrorder.sessiond.v1.GetStatusResponse.model_config_error:type_name -> astrorder.sessiond.v1.BusinessError
-	18,  // 41: astrorder.sessiond.v1.CodexCreateOptions.native_options:type_name -> astrorder.sessiond.v1.NativeJson
-	18,  // 42: astrorder.sessiond.v1.HermesCreateOptions.native_options:type_name -> astrorder.sessiond.v1.NativeJson
-	18,  // 43: astrorder.sessiond.v1.GrokCreateOptions.native_options:type_name -> astrorder.sessiond.v1.NativeJson
-	27,  // 44: astrorder.sessiond.v1.CreateSessionRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
-	25,  // 45: astrorder.sessiond.v1.CreateSessionRequest.target:type_name -> astrorder.sessiond.v1.RuntimeTarget
-	42,  // 46: astrorder.sessiond.v1.CreateSessionRequest.codex:type_name -> astrorder.sessiond.v1.CodexCreateOptions
-	43,  // 47: astrorder.sessiond.v1.CreateSessionRequest.hermes:type_name -> astrorder.sessiond.v1.HermesCreateOptions
-	44,  // 48: astrorder.sessiond.v1.CreateSessionRequest.grok:type_name -> astrorder.sessiond.v1.GrokCreateOptions
-	45,  // 49: astrorder.sessiond.v1.CreateSessionRequest.antigravity:type_name -> astrorder.sessiond.v1.AntigravityCreateOptions
-	26,  // 50: astrorder.sessiond.v1.AttachSessionRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
-	25,  // 51: astrorder.sessiond.v1.AttachSessionRequest.target:type_name -> astrorder.sessiond.v1.RuntimeTarget
-	18,  // 52: astrorder.sessiond.v1.AttachSessionRequest.native_options:type_name -> astrorder.sessiond.v1.NativeJson
-	48,  // 53: astrorder.sessiond.v1.InputPart.text:type_name -> astrorder.sessiond.v1.TextInput
-	49,  // 54: astrorder.sessiond.v1.InputPart.image_url:type_name -> astrorder.sessiond.v1.ImageUrlInput
-	50,  // 55: astrorder.sessiond.v1.InputPart.local_image:type_name -> astrorder.sessiond.v1.LocalImageInput
-	51,  // 56: astrorder.sessiond.v1.InputPart.skill:type_name -> astrorder.sessiond.v1.SkillRefInput
-	52,  // 57: astrorder.sessiond.v1.InputPart.mention:type_name -> astrorder.sessiond.v1.MentionRefInput
-	53,  // 58: astrorder.sessiond.v1.InputPart.attachment:type_name -> astrorder.sessiond.v1.AttachmentInput
-	18,  // 59: astrorder.sessiond.v1.SendPolicy.native_options:type_name -> astrorder.sessiond.v1.NativeJson
-	27,  // 60: astrorder.sessiond.v1.SendRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
-	26,  // 61: astrorder.sessiond.v1.SendRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
-	54,  // 62: astrorder.sessiond.v1.SendRequest.input:type_name -> astrorder.sessiond.v1.InputPart
-	55,  // 63: astrorder.sessiond.v1.SendRequest.policy:type_name -> astrorder.sessiond.v1.SendPolicy
-	27,  // 64: astrorder.sessiond.v1.SteerRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
-	26,  // 65: astrorder.sessiond.v1.SteerRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
-	54,  // 66: astrorder.sessiond.v1.SteerRequest.input:type_name -> astrorder.sessiond.v1.InputPart
-	18,  // 67: astrorder.sessiond.v1.ReviewTarget.native:type_name -> astrorder.sessiond.v1.NativeJson
-	27,  // 68: astrorder.sessiond.v1.StartReviewRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
-	26,  // 69: astrorder.sessiond.v1.StartReviewRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
-	58,  // 70: astrorder.sessiond.v1.StartReviewRequest.target:type_name -> astrorder.sessiond.v1.ReviewTarget
+	38,  // 37: astrorder.sessiond.v1.GetStatusResponse.runtimes:type_name -> astrorder.sessiond.v1.RuntimeStatus
+	39,  // 38: astrorder.sessiond.v1.GetStatusResponse.sessions:type_name -> astrorder.sessiond.v1.SessionSnapshot
+	29,  // 39: astrorder.sessiond.v1.GetStatusResponse.storage_error:type_name -> astrorder.sessiond.v1.BusinessError
+	29,  // 40: astrorder.sessiond.v1.GetStatusResponse.model_config_error:type_name -> astrorder.sessiond.v1.BusinessError
+	19,  // 41: astrorder.sessiond.v1.CodexCreateOptions.native_options:type_name -> astrorder.sessiond.v1.NativeJson
+	19,  // 42: astrorder.sessiond.v1.HermesCreateOptions.native_options:type_name -> astrorder.sessiond.v1.NativeJson
+	19,  // 43: astrorder.sessiond.v1.GrokCreateOptions.native_options:type_name -> astrorder.sessiond.v1.NativeJson
+	28,  // 44: astrorder.sessiond.v1.CreateSessionRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
+	26,  // 45: astrorder.sessiond.v1.CreateSessionRequest.target:type_name -> astrorder.sessiond.v1.RuntimeTarget
+	43,  // 46: astrorder.sessiond.v1.CreateSessionRequest.codex:type_name -> astrorder.sessiond.v1.CodexCreateOptions
+	44,  // 47: astrorder.sessiond.v1.CreateSessionRequest.hermes:type_name -> astrorder.sessiond.v1.HermesCreateOptions
+	45,  // 48: astrorder.sessiond.v1.CreateSessionRequest.grok:type_name -> astrorder.sessiond.v1.GrokCreateOptions
+	46,  // 49: astrorder.sessiond.v1.CreateSessionRequest.antigravity:type_name -> astrorder.sessiond.v1.AntigravityCreateOptions
+	27,  // 50: astrorder.sessiond.v1.AttachSessionRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	26,  // 51: astrorder.sessiond.v1.AttachSessionRequest.target:type_name -> astrorder.sessiond.v1.RuntimeTarget
+	19,  // 52: astrorder.sessiond.v1.AttachSessionRequest.native_options:type_name -> astrorder.sessiond.v1.NativeJson
+	49,  // 53: astrorder.sessiond.v1.InputPart.text:type_name -> astrorder.sessiond.v1.TextInput
+	50,  // 54: astrorder.sessiond.v1.InputPart.image_url:type_name -> astrorder.sessiond.v1.ImageUrlInput
+	51,  // 55: astrorder.sessiond.v1.InputPart.local_image:type_name -> astrorder.sessiond.v1.LocalImageInput
+	52,  // 56: astrorder.sessiond.v1.InputPart.skill:type_name -> astrorder.sessiond.v1.SkillRefInput
+	53,  // 57: astrorder.sessiond.v1.InputPart.mention:type_name -> astrorder.sessiond.v1.MentionRefInput
+	54,  // 58: astrorder.sessiond.v1.InputPart.attachment:type_name -> astrorder.sessiond.v1.AttachmentInput
+	19,  // 59: astrorder.sessiond.v1.SendPolicy.native_options:type_name -> astrorder.sessiond.v1.NativeJson
+	28,  // 60: astrorder.sessiond.v1.SendRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
+	27,  // 61: astrorder.sessiond.v1.SendRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	55,  // 62: astrorder.sessiond.v1.SendRequest.input:type_name -> astrorder.sessiond.v1.InputPart
+	56,  // 63: astrorder.sessiond.v1.SendRequest.policy:type_name -> astrorder.sessiond.v1.SendPolicy
+	28,  // 64: astrorder.sessiond.v1.SteerRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
+	27,  // 65: astrorder.sessiond.v1.SteerRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	55,  // 66: astrorder.sessiond.v1.SteerRequest.input:type_name -> astrorder.sessiond.v1.InputPart
+	19,  // 67: astrorder.sessiond.v1.ReviewTarget.native:type_name -> astrorder.sessiond.v1.NativeJson
+	28,  // 68: astrorder.sessiond.v1.StartReviewRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
+	27,  // 69: astrorder.sessiond.v1.StartReviewRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	59,  // 70: astrorder.sessiond.v1.StartReviewRequest.target:type_name -> astrorder.sessiond.v1.ReviewTarget
 	10,  // 71: astrorder.sessiond.v1.StartReviewRequest.delivery:type_name -> astrorder.sessiond.v1.ReviewDelivery
-	27,  // 72: astrorder.sessiond.v1.CompactRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
-	26,  // 73: astrorder.sessiond.v1.CompactRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
-	27,  // 74: astrorder.sessiond.v1.InterruptRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
-	26,  // 75: astrorder.sessiond.v1.InterruptRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
-	18,  // 76: astrorder.sessiond.v1.PermissionGrant.native:type_name -> astrorder.sessiond.v1.NativeJson
-	27,  // 77: astrorder.sessiond.v1.RespondApprovalRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
-	26,  // 78: astrorder.sessiond.v1.RespondApprovalRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
-	22,  // 79: astrorder.sessiond.v1.RespondApprovalRequest.approval_id:type_name -> astrorder.sessiond.v1.ExactIdentifier
+	28,  // 72: astrorder.sessiond.v1.CompactRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
+	27,  // 73: astrorder.sessiond.v1.CompactRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	28,  // 74: astrorder.sessiond.v1.InterruptRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
+	27,  // 75: astrorder.sessiond.v1.InterruptRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	19,  // 76: astrorder.sessiond.v1.PermissionGrant.native:type_name -> astrorder.sessiond.v1.NativeJson
+	28,  // 77: astrorder.sessiond.v1.RespondApprovalRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
+	27,  // 78: astrorder.sessiond.v1.RespondApprovalRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	23,  // 79: astrorder.sessiond.v1.RespondApprovalRequest.approval_id:type_name -> astrorder.sessiond.v1.ExactIdentifier
 	9,   // 80: astrorder.sessiond.v1.RespondApprovalRequest.decision:type_name -> astrorder.sessiond.v1.ApprovalDecision
-	62,  // 81: astrorder.sessiond.v1.RespondApprovalRequest.permissions:type_name -> astrorder.sessiond.v1.PermissionGrant
-	18,  // 82: astrorder.sessiond.v1.RespondApprovalRequest.user_input:type_name -> astrorder.sessiond.v1.NativeJson
-	27,  // 83: astrorder.sessiond.v1.UpdateSettingsRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
-	26,  // 84: astrorder.sessiond.v1.UpdateSettingsRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
-	27,  // 85: astrorder.sessiond.v1.RenameSessionRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
-	26,  // 86: astrorder.sessiond.v1.RenameSessionRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
-	27,  // 87: astrorder.sessiond.v1.DeleteSessionRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
-	26,  // 88: astrorder.sessiond.v1.DeleteSessionRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
-	27,  // 89: astrorder.sessiond.v1.CloseSessionRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
-	26,  // 90: astrorder.sessiond.v1.CloseSessionRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
-	27,  // 91: astrorder.sessiond.v1.DetachSessionRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
-	26,  // 92: astrorder.sessiond.v1.DetachSessionRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
-	26,  // 93: astrorder.sessiond.v1.ReportObservedStatusRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	63,  // 81: astrorder.sessiond.v1.RespondApprovalRequest.permissions:type_name -> astrorder.sessiond.v1.PermissionGrant
+	19,  // 82: astrorder.sessiond.v1.RespondApprovalRequest.user_input:type_name -> astrorder.sessiond.v1.NativeJson
+	28,  // 83: astrorder.sessiond.v1.UpdateSettingsRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
+	27,  // 84: astrorder.sessiond.v1.UpdateSettingsRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	28,  // 85: astrorder.sessiond.v1.RenameSessionRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
+	27,  // 86: astrorder.sessiond.v1.RenameSessionRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	28,  // 87: astrorder.sessiond.v1.DeleteSessionRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
+	27,  // 88: astrorder.sessiond.v1.DeleteSessionRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	28,  // 89: astrorder.sessiond.v1.CloseSessionRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
+	27,  // 90: astrorder.sessiond.v1.CloseSessionRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	28,  // 91: astrorder.sessiond.v1.DetachSessionRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
+	27,  // 92: astrorder.sessiond.v1.DetachSessionRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	27,  // 93: astrorder.sessiond.v1.ReportObservedStatusRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
 	6,   // 94: astrorder.sessiond.v1.ReportObservedStatusRequest.observed_active_status:type_name -> astrorder.sessiond.v1.ObservedActiveStatus
-	70,  // 95: astrorder.sessiond.v1.DesktopInputPart.text:type_name -> astrorder.sessiond.v1.DesktopTextInput
-	71,  // 96: astrorder.sessiond.v1.DesktopInputPart.image:type_name -> astrorder.sessiond.v1.DesktopImageInput
-	27,  // 97: astrorder.sessiond.v1.SubmitDesktopRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
-	26,  // 98: astrorder.sessiond.v1.SubmitDesktopRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
-	72,  // 99: astrorder.sessiond.v1.SubmitDesktopRequest.input:type_name -> astrorder.sessiond.v1.DesktopInputPart
-	27,  // 100: astrorder.sessiond.v1.UpdateDesktopSettingsRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
-	26,  // 101: astrorder.sessiond.v1.UpdateDesktopSettingsRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
-	18,  // 102: astrorder.sessiond.v1.EmptyNativeQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
-	18,  // 103: astrorder.sessiond.v1.CodexInitializeQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
-	18,  // 104: astrorder.sessiond.v1.CodexAccountReadQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
-	18,  // 105: astrorder.sessiond.v1.CodexHooksListQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
-	19,  // 106: astrorder.sessiond.v1.CodexModelListQuery.cursor:type_name -> astrorder.sessiond.v1.NullableString
-	18,  // 107: astrorder.sessiond.v1.CodexModelListQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
-	18,  // 108: astrorder.sessiond.v1.CodexSkillsListQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
-	19,  // 109: astrorder.sessiond.v1.CodexThreadItemsListQuery.cursor:type_name -> astrorder.sessiond.v1.NullableString
-	18,  // 110: astrorder.sessiond.v1.CodexThreadItemsListQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
-	19,  // 111: astrorder.sessiond.v1.CodexThreadListQuery.cursor:type_name -> astrorder.sessiond.v1.NullableString
-	18,  // 112: astrorder.sessiond.v1.CodexThreadListQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
-	18,  // 113: astrorder.sessiond.v1.CodexThreadLoadedListQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
-	18,  // 114: astrorder.sessiond.v1.CodexThreadReadQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
-	18,  // 115: astrorder.sessiond.v1.HermesSessionListQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
-	18,  // 116: astrorder.sessiond.v1.HermesActiveListQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
-	18,  // 117: astrorder.sessiond.v1.HermesProjectsTreeQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
-	18,  // 118: astrorder.sessiond.v1.HermesProjectSessionsQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
-	19,  // 119: astrorder.sessiond.v1.HermesSessionHistoryQuery.before:type_name -> astrorder.sessiond.v1.NullableString
-	18,  // 120: astrorder.sessiond.v1.HermesSessionHistoryQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
-	18,  // 121: astrorder.sessiond.v1.HermesModelsListQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
-	18,  // 122: astrorder.sessiond.v1.HermesCommandsListQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
-	18,  // 123: astrorder.sessiond.v1.GrokInitializeQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
-	25,  // 124: astrorder.sessiond.v1.NativeQueryRequest.target:type_name -> astrorder.sessiond.v1.RuntimeTarget
-	18,  // 125: astrorder.sessiond.v1.NativeQueryRequest.top_level_payload:type_name -> astrorder.sessiond.v1.NativeJson
-	76,  // 126: astrorder.sessiond.v1.NativeQueryRequest.codex_initialize:type_name -> astrorder.sessiond.v1.CodexInitializeQuery
-	77,  // 127: astrorder.sessiond.v1.NativeQueryRequest.codex_account_read:type_name -> astrorder.sessiond.v1.CodexAccountReadQuery
-	78,  // 128: astrorder.sessiond.v1.NativeQueryRequest.codex_hooks_list:type_name -> astrorder.sessiond.v1.CodexHooksListQuery
-	79,  // 129: astrorder.sessiond.v1.NativeQueryRequest.codex_model_list:type_name -> astrorder.sessiond.v1.CodexModelListQuery
-	80,  // 130: astrorder.sessiond.v1.NativeQueryRequest.codex_skills_list:type_name -> astrorder.sessiond.v1.CodexSkillsListQuery
-	81,  // 131: astrorder.sessiond.v1.NativeQueryRequest.codex_thread_items_list:type_name -> astrorder.sessiond.v1.CodexThreadItemsListQuery
-	82,  // 132: astrorder.sessiond.v1.NativeQueryRequest.codex_thread_list:type_name -> astrorder.sessiond.v1.CodexThreadListQuery
-	83,  // 133: astrorder.sessiond.v1.NativeQueryRequest.codex_thread_loaded_list:type_name -> astrorder.sessiond.v1.CodexThreadLoadedListQuery
-	84,  // 134: astrorder.sessiond.v1.NativeQueryRequest.codex_thread_read:type_name -> astrorder.sessiond.v1.CodexThreadReadQuery
-	85,  // 135: astrorder.sessiond.v1.NativeQueryRequest.hermes_session_list:type_name -> astrorder.sessiond.v1.HermesSessionListQuery
-	86,  // 136: astrorder.sessiond.v1.NativeQueryRequest.hermes_active_list:type_name -> astrorder.sessiond.v1.HermesActiveListQuery
-	87,  // 137: astrorder.sessiond.v1.NativeQueryRequest.hermes_projects_tree:type_name -> astrorder.sessiond.v1.HermesProjectsTreeQuery
-	88,  // 138: astrorder.sessiond.v1.NativeQueryRequest.hermes_project_sessions:type_name -> astrorder.sessiond.v1.HermesProjectSessionsQuery
-	89,  // 139: astrorder.sessiond.v1.NativeQueryRequest.hermes_session_history:type_name -> astrorder.sessiond.v1.HermesSessionHistoryQuery
-	90,  // 140: astrorder.sessiond.v1.NativeQueryRequest.hermes_models_list:type_name -> astrorder.sessiond.v1.HermesModelsListQuery
-	91,  // 141: astrorder.sessiond.v1.NativeQueryRequest.hermes_commands_list:type_name -> astrorder.sessiond.v1.HermesCommandsListQuery
-	92,  // 142: astrorder.sessiond.v1.NativeQueryRequest.grok_initialize:type_name -> astrorder.sessiond.v1.GrokInitializeQuery
-	93,  // 143: astrorder.sessiond.v1.NativeQueryRequest.grok_session_list:type_name -> astrorder.sessiond.v1.GrokSessionListQuery
-	94,  // 144: astrorder.sessiond.v1.NativeQueryRequest.antigravity_session_list:type_name -> astrorder.sessiond.v1.AntigravitySessionListQuery
-	95,  // 145: astrorder.sessiond.v1.NativeQueryRequest.antigravity_models_list:type_name -> astrorder.sessiond.v1.AntigravityModelsListQuery
-	96,  // 146: astrorder.sessiond.v1.NativeQueryRequest.antigravity_quota_read:type_name -> astrorder.sessiond.v1.AntigravityQuotaReadQuery
-	97,  // 147: astrorder.sessiond.v1.NativeQueryRequest.antigravity_session_usage:type_name -> astrorder.sessiond.v1.AntigravitySessionUsageQuery
-	98,  // 148: astrorder.sessiond.v1.NativeQueryRequest.antigravity_usage_summary:type_name -> astrorder.sessiond.v1.AntigravityUsageSummaryQuery
-	25,  // 149: astrorder.sessiond.v1.NativeQueryResponse.target:type_name -> astrorder.sessiond.v1.RuntimeTarget
-	18,  // 150: astrorder.sessiond.v1.NativeQueryResponse.result:type_name -> astrorder.sessiond.v1.NativeJson
-	26,  // 151: astrorder.sessiond.v1.HistoryPageRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
-	19,  // 152: astrorder.sessiond.v1.HistoryPageRequest.before:type_name -> astrorder.sessiond.v1.NullableString
-	26,  // 153: astrorder.sessiond.v1.HistoryPageResponse.session:type_name -> astrorder.sessiond.v1.SessionRef
-	18,  // 154: astrorder.sessiond.v1.HistoryPageResponse.items:type_name -> astrorder.sessiond.v1.NativeJson
-	19,  // 155: astrorder.sessiond.v1.HistoryPageResponse.next_cursor:type_name -> astrorder.sessiond.v1.NullableString
-	18,  // 156: astrorder.sessiond.v1.HistoryPageResponse.native:type_name -> astrorder.sessiond.v1.NativeJson
-	26,  // 157: astrorder.sessiond.v1.ListBackgroundProcessesRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
-	18,  // 158: astrorder.sessiond.v1.ListBackgroundProcessesResponse.processes:type_name -> astrorder.sessiond.v1.NativeJson
-	26,  // 159: astrorder.sessiond.v1.ListModelsRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
-	18,  // 160: astrorder.sessiond.v1.ModelOption.native:type_name -> astrorder.sessiond.v1.NativeJson
-	106, // 161: astrorder.sessiond.v1.ListModelsResponse.items:type_name -> astrorder.sessiond.v1.ModelOption
-	26,  // 162: astrorder.sessiond.v1.ListCommandsRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
-	18,  // 163: astrorder.sessiond.v1.CommandOption.native:type_name -> astrorder.sessiond.v1.NativeJson
-	109, // 164: astrorder.sessiond.v1.ListCommandsResponse.items:type_name -> astrorder.sessiond.v1.CommandOption
-	26,  // 165: astrorder.sessiond.v1.ReadModelRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
-	26,  // 166: astrorder.sessiond.v1.ModelState.session:type_name -> astrorder.sessiond.v1.SessionRef
-	18,  // 167: astrorder.sessiond.v1.ModelState.native:type_name -> astrorder.sessiond.v1.NativeJson
-	27,  // 168: astrorder.sessiond.v1.SetModelRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
-	26,  // 169: astrorder.sessiond.v1.SetModelRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
-	27,  // 170: astrorder.sessiond.v1.SetReasoningRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
-	26,  // 171: astrorder.sessiond.v1.SetReasoningRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
-	26,  // 172: astrorder.sessiond.v1.ReadApprovalModeRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
-	27,  // 173: astrorder.sessiond.v1.SetGoalRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
-	26,  // 174: astrorder.sessiond.v1.SetGoalRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
-	27,  // 175: astrorder.sessiond.v1.ClearGoalRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
-	26,  // 176: astrorder.sessiond.v1.ClearGoalRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
-	26,  // 177: astrorder.sessiond.v1.ApprovalModeState.session:type_name -> astrorder.sessiond.v1.SessionRef
-	27,  // 178: astrorder.sessiond.v1.SetApprovalModeRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
-	26,  // 179: astrorder.sessiond.v1.SetApprovalModeRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
-	27,  // 180: astrorder.sessiond.v1.DisconnectRuntimeRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
-	25,  // 181: astrorder.sessiond.v1.DisconnectRuntimeRequest.target:type_name -> astrorder.sessiond.v1.RuntimeTarget
+	71,  // 95: astrorder.sessiond.v1.DesktopInputPart.text:type_name -> astrorder.sessiond.v1.DesktopTextInput
+	72,  // 96: astrorder.sessiond.v1.DesktopInputPart.image:type_name -> astrorder.sessiond.v1.DesktopImageInput
+	28,  // 97: astrorder.sessiond.v1.SubmitDesktopRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
+	27,  // 98: astrorder.sessiond.v1.SubmitDesktopRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	73,  // 99: astrorder.sessiond.v1.SubmitDesktopRequest.input:type_name -> astrorder.sessiond.v1.DesktopInputPart
+	28,  // 100: astrorder.sessiond.v1.UpdateDesktopSettingsRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
+	27,  // 101: astrorder.sessiond.v1.UpdateDesktopSettingsRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	19,  // 102: astrorder.sessiond.v1.EmptyNativeQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
+	19,  // 103: astrorder.sessiond.v1.CodexInitializeQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
+	19,  // 104: astrorder.sessiond.v1.CodexAccountReadQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
+	19,  // 105: astrorder.sessiond.v1.CodexHooksListQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
+	20,  // 106: astrorder.sessiond.v1.CodexModelListQuery.cursor:type_name -> astrorder.sessiond.v1.NullableString
+	19,  // 107: astrorder.sessiond.v1.CodexModelListQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
+	19,  // 108: astrorder.sessiond.v1.CodexSkillsListQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
+	20,  // 109: astrorder.sessiond.v1.CodexThreadItemsListQuery.cursor:type_name -> astrorder.sessiond.v1.NullableString
+	19,  // 110: astrorder.sessiond.v1.CodexThreadItemsListQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
+	20,  // 111: astrorder.sessiond.v1.CodexThreadListQuery.cursor:type_name -> astrorder.sessiond.v1.NullableString
+	19,  // 112: astrorder.sessiond.v1.CodexThreadListQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
+	19,  // 113: astrorder.sessiond.v1.CodexThreadLoadedListQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
+	19,  // 114: astrorder.sessiond.v1.CodexThreadReadQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
+	19,  // 115: astrorder.sessiond.v1.HermesSessionListQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
+	19,  // 116: astrorder.sessiond.v1.HermesActiveListQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
+	19,  // 117: astrorder.sessiond.v1.HermesProjectsTreeQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
+	19,  // 118: astrorder.sessiond.v1.HermesProjectSessionsQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
+	20,  // 119: astrorder.sessiond.v1.HermesSessionHistoryQuery.before:type_name -> astrorder.sessiond.v1.NullableString
+	19,  // 120: astrorder.sessiond.v1.HermesSessionHistoryQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
+	19,  // 121: astrorder.sessiond.v1.HermesModelsListQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
+	19,  // 122: astrorder.sessiond.v1.HermesCommandsListQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
+	19,  // 123: astrorder.sessiond.v1.GrokInitializeQuery.options:type_name -> astrorder.sessiond.v1.NativeJson
+	26,  // 124: astrorder.sessiond.v1.NativeQueryRequest.target:type_name -> astrorder.sessiond.v1.RuntimeTarget
+	19,  // 125: astrorder.sessiond.v1.NativeQueryRequest.top_level_payload:type_name -> astrorder.sessiond.v1.NativeJson
+	77,  // 126: astrorder.sessiond.v1.NativeQueryRequest.codex_initialize:type_name -> astrorder.sessiond.v1.CodexInitializeQuery
+	78,  // 127: astrorder.sessiond.v1.NativeQueryRequest.codex_account_read:type_name -> astrorder.sessiond.v1.CodexAccountReadQuery
+	79,  // 128: astrorder.sessiond.v1.NativeQueryRequest.codex_hooks_list:type_name -> astrorder.sessiond.v1.CodexHooksListQuery
+	80,  // 129: astrorder.sessiond.v1.NativeQueryRequest.codex_model_list:type_name -> astrorder.sessiond.v1.CodexModelListQuery
+	81,  // 130: astrorder.sessiond.v1.NativeQueryRequest.codex_skills_list:type_name -> astrorder.sessiond.v1.CodexSkillsListQuery
+	82,  // 131: astrorder.sessiond.v1.NativeQueryRequest.codex_thread_items_list:type_name -> astrorder.sessiond.v1.CodexThreadItemsListQuery
+	83,  // 132: astrorder.sessiond.v1.NativeQueryRequest.codex_thread_list:type_name -> astrorder.sessiond.v1.CodexThreadListQuery
+	84,  // 133: astrorder.sessiond.v1.NativeQueryRequest.codex_thread_loaded_list:type_name -> astrorder.sessiond.v1.CodexThreadLoadedListQuery
+	85,  // 134: astrorder.sessiond.v1.NativeQueryRequest.codex_thread_read:type_name -> astrorder.sessiond.v1.CodexThreadReadQuery
+	86,  // 135: astrorder.sessiond.v1.NativeQueryRequest.hermes_session_list:type_name -> astrorder.sessiond.v1.HermesSessionListQuery
+	87,  // 136: astrorder.sessiond.v1.NativeQueryRequest.hermes_active_list:type_name -> astrorder.sessiond.v1.HermesActiveListQuery
+	88,  // 137: astrorder.sessiond.v1.NativeQueryRequest.hermes_projects_tree:type_name -> astrorder.sessiond.v1.HermesProjectsTreeQuery
+	89,  // 138: astrorder.sessiond.v1.NativeQueryRequest.hermes_project_sessions:type_name -> astrorder.sessiond.v1.HermesProjectSessionsQuery
+	90,  // 139: astrorder.sessiond.v1.NativeQueryRequest.hermes_session_history:type_name -> astrorder.sessiond.v1.HermesSessionHistoryQuery
+	91,  // 140: astrorder.sessiond.v1.NativeQueryRequest.hermes_models_list:type_name -> astrorder.sessiond.v1.HermesModelsListQuery
+	92,  // 141: astrorder.sessiond.v1.NativeQueryRequest.hermes_commands_list:type_name -> astrorder.sessiond.v1.HermesCommandsListQuery
+	93,  // 142: astrorder.sessiond.v1.NativeQueryRequest.grok_initialize:type_name -> astrorder.sessiond.v1.GrokInitializeQuery
+	94,  // 143: astrorder.sessiond.v1.NativeQueryRequest.grok_session_list:type_name -> astrorder.sessiond.v1.GrokSessionListQuery
+	95,  // 144: astrorder.sessiond.v1.NativeQueryRequest.antigravity_session_list:type_name -> astrorder.sessiond.v1.AntigravitySessionListQuery
+	96,  // 145: astrorder.sessiond.v1.NativeQueryRequest.antigravity_models_list:type_name -> astrorder.sessiond.v1.AntigravityModelsListQuery
+	97,  // 146: astrorder.sessiond.v1.NativeQueryRequest.antigravity_quota_read:type_name -> astrorder.sessiond.v1.AntigravityQuotaReadQuery
+	98,  // 147: astrorder.sessiond.v1.NativeQueryRequest.antigravity_session_usage:type_name -> astrorder.sessiond.v1.AntigravitySessionUsageQuery
+	99,  // 148: astrorder.sessiond.v1.NativeQueryRequest.antigravity_usage_summary:type_name -> astrorder.sessiond.v1.AntigravityUsageSummaryQuery
+	26,  // 149: astrorder.sessiond.v1.NativeQueryResponse.target:type_name -> astrorder.sessiond.v1.RuntimeTarget
+	19,  // 150: astrorder.sessiond.v1.NativeQueryResponse.result:type_name -> astrorder.sessiond.v1.NativeJson
+	27,  // 151: astrorder.sessiond.v1.HistoryPageRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	20,  // 152: astrorder.sessiond.v1.HistoryPageRequest.before:type_name -> astrorder.sessiond.v1.NullableString
+	27,  // 153: astrorder.sessiond.v1.HistoryPageResponse.session:type_name -> astrorder.sessiond.v1.SessionRef
+	19,  // 154: astrorder.sessiond.v1.HistoryPageResponse.items:type_name -> astrorder.sessiond.v1.NativeJson
+	20,  // 155: astrorder.sessiond.v1.HistoryPageResponse.next_cursor:type_name -> astrorder.sessiond.v1.NullableString
+	19,  // 156: astrorder.sessiond.v1.HistoryPageResponse.native:type_name -> astrorder.sessiond.v1.NativeJson
+	27,  // 157: astrorder.sessiond.v1.ListBackgroundProcessesRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	19,  // 158: astrorder.sessiond.v1.ListBackgroundProcessesResponse.processes:type_name -> astrorder.sessiond.v1.NativeJson
+	27,  // 159: astrorder.sessiond.v1.ListModelsRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	19,  // 160: astrorder.sessiond.v1.ModelOption.native:type_name -> astrorder.sessiond.v1.NativeJson
+	107, // 161: astrorder.sessiond.v1.ListModelsResponse.items:type_name -> astrorder.sessiond.v1.ModelOption
+	27,  // 162: astrorder.sessiond.v1.ListCommandsRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	19,  // 163: astrorder.sessiond.v1.CommandOption.native:type_name -> astrorder.sessiond.v1.NativeJson
+	110, // 164: astrorder.sessiond.v1.ListCommandsResponse.items:type_name -> astrorder.sessiond.v1.CommandOption
+	27,  // 165: astrorder.sessiond.v1.ReadModelRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	27,  // 166: astrorder.sessiond.v1.ModelState.session:type_name -> astrorder.sessiond.v1.SessionRef
+	19,  // 167: astrorder.sessiond.v1.ModelState.native:type_name -> astrorder.sessiond.v1.NativeJson
+	28,  // 168: astrorder.sessiond.v1.SetModelRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
+	27,  // 169: astrorder.sessiond.v1.SetModelRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	28,  // 170: astrorder.sessiond.v1.SetReasoningRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
+	27,  // 171: astrorder.sessiond.v1.SetReasoningRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	27,  // 172: astrorder.sessiond.v1.ReadApprovalModeRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	28,  // 173: astrorder.sessiond.v1.SetGoalRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
+	27,  // 174: astrorder.sessiond.v1.SetGoalRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	28,  // 175: astrorder.sessiond.v1.ClearGoalRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
+	27,  // 176: astrorder.sessiond.v1.ClearGoalRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	27,  // 177: astrorder.sessiond.v1.ApprovalModeState.session:type_name -> astrorder.sessiond.v1.SessionRef
+	28,  // 178: astrorder.sessiond.v1.SetApprovalModeRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
+	27,  // 179: astrorder.sessiond.v1.SetApprovalModeRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	28,  // 180: astrorder.sessiond.v1.DisconnectRuntimeRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
+	26,  // 181: astrorder.sessiond.v1.DisconnectRuntimeRequest.target:type_name -> astrorder.sessiond.v1.RuntimeTarget
 	7,   // 182: astrorder.sessiond.v1.DisconnectRuntimeResponse.operation_state:type_name -> astrorder.sessiond.v1.OperationState
-	28,  // 183: astrorder.sessiond.v1.DisconnectRuntimeResponse.error:type_name -> astrorder.sessiond.v1.BusinessError
-	26,  // 184: astrorder.sessiond.v1.SessionCursor.session:type_name -> astrorder.sessiond.v1.SessionRef
-	122, // 185: astrorder.sessiond.v1.SubscribeRequest.cursors:type_name -> astrorder.sessiond.v1.SessionCursor
+	29,  // 183: astrorder.sessiond.v1.DisconnectRuntimeResponse.error:type_name -> astrorder.sessiond.v1.BusinessError
+	27,  // 184: astrorder.sessiond.v1.SessionCursor.session:type_name -> astrorder.sessiond.v1.SessionRef
+	123, // 185: astrorder.sessiond.v1.SubscribeRequest.cursors:type_name -> astrorder.sessiond.v1.SessionCursor
 	5,   // 186: astrorder.sessiond.v1.OwnershipLostEvent.previous_status:type_name -> astrorder.sessiond.v1.SessionStatus
-	18,  // 187: astrorder.sessiond.v1.ConnectorEventPayload.data:type_name -> astrorder.sessiond.v1.NativeJson
-	26,  // 188: astrorder.sessiond.v1.EventEnvelope.session:type_name -> astrorder.sessiond.v1.SessionRef
+	19,  // 187: astrorder.sessiond.v1.ConnectorEventPayload.data:type_name -> astrorder.sessiond.v1.NativeJson
+	27,  // 188: astrorder.sessiond.v1.EventEnvelope.session:type_name -> astrorder.sessiond.v1.SessionRef
 	5,   // 189: astrorder.sessiond.v1.EventEnvelope.status:type_name -> astrorder.sessiond.v1.SessionStatus
-	18,  // 190: astrorder.sessiond.v1.EventEnvelope.native_payload:type_name -> astrorder.sessiond.v1.NativeJson
-	124, // 191: astrorder.sessiond.v1.EventEnvelope.runtime_owner:type_name -> astrorder.sessiond.v1.RuntimeOwnerEvent
-	125, // 192: astrorder.sessiond.v1.EventEnvelope.ownership_lost:type_name -> astrorder.sessiond.v1.OwnershipLostEvent
-	126, // 193: astrorder.sessiond.v1.EventEnvelope.pty_output:type_name -> astrorder.sessiond.v1.PtyOutputEvent
-	127, // 194: astrorder.sessiond.v1.EventEnvelope.connector:type_name -> astrorder.sessiond.v1.ConnectorEventPayload
-	18,  // 195: astrorder.sessiond.v1.EventEnvelope.native:type_name -> astrorder.sessiond.v1.NativeJson
-	38,  // 196: astrorder.sessiond.v1.StateSnapshot.sessions:type_name -> astrorder.sessiond.v1.SessionSnapshot
-	26,  // 197: astrorder.sessiond.v1.SessionWatermark.session:type_name -> astrorder.sessiond.v1.SessionRef
-	130, // 198: astrorder.sessiond.v1.LiveReady.watermarks:type_name -> astrorder.sessiond.v1.SessionWatermark
-	26,  // 199: astrorder.sessiond.v1.ResyncRequired.session:type_name -> astrorder.sessiond.v1.SessionRef
+	19,  // 190: astrorder.sessiond.v1.EventEnvelope.native_payload:type_name -> astrorder.sessiond.v1.NativeJson
+	125, // 191: astrorder.sessiond.v1.EventEnvelope.runtime_owner:type_name -> astrorder.sessiond.v1.RuntimeOwnerEvent
+	126, // 192: astrorder.sessiond.v1.EventEnvelope.ownership_lost:type_name -> astrorder.sessiond.v1.OwnershipLostEvent
+	127, // 193: astrorder.sessiond.v1.EventEnvelope.pty_output:type_name -> astrorder.sessiond.v1.PtyOutputEvent
+	128, // 194: astrorder.sessiond.v1.EventEnvelope.connector:type_name -> astrorder.sessiond.v1.ConnectorEventPayload
+	19,  // 195: astrorder.sessiond.v1.EventEnvelope.native:type_name -> astrorder.sessiond.v1.NativeJson
+	39,  // 196: astrorder.sessiond.v1.StateSnapshot.sessions:type_name -> astrorder.sessiond.v1.SessionSnapshot
+	27,  // 197: astrorder.sessiond.v1.SessionWatermark.session:type_name -> astrorder.sessiond.v1.SessionRef
+	131, // 198: astrorder.sessiond.v1.LiveReady.watermarks:type_name -> astrorder.sessiond.v1.SessionWatermark
+	27,  // 199: astrorder.sessiond.v1.ResyncRequired.session:type_name -> astrorder.sessiond.v1.SessionRef
 	11,  // 200: astrorder.sessiond.v1.ResyncRequired.reason:type_name -> astrorder.sessiond.v1.ResyncReason
-	122, // 201: astrorder.sessiond.v1.StreamOverflow.last_emitted:type_name -> astrorder.sessiond.v1.SessionCursor
-	129, // 202: astrorder.sessiond.v1.EventStreamFrame.snapshot:type_name -> astrorder.sessiond.v1.StateSnapshot
-	128, // 203: astrorder.sessiond.v1.EventStreamFrame.replay:type_name -> astrorder.sessiond.v1.EventEnvelope
-	131, // 204: astrorder.sessiond.v1.EventStreamFrame.live_ready:type_name -> astrorder.sessiond.v1.LiveReady
-	128, // 205: astrorder.sessiond.v1.EventStreamFrame.live:type_name -> astrorder.sessiond.v1.EventEnvelope
-	132, // 206: astrorder.sessiond.v1.EventStreamFrame.resync_required:type_name -> astrorder.sessiond.v1.ResyncRequired
-	133, // 207: astrorder.sessiond.v1.EventStreamFrame.overflow:type_name -> astrorder.sessiond.v1.StreamOverflow
-	26,  // 208: astrorder.sessiond.v1.AppendEventRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
+	123, // 201: astrorder.sessiond.v1.StreamOverflow.last_emitted:type_name -> astrorder.sessiond.v1.SessionCursor
+	130, // 202: astrorder.sessiond.v1.EventStreamFrame.snapshot:type_name -> astrorder.sessiond.v1.StateSnapshot
+	129, // 203: astrorder.sessiond.v1.EventStreamFrame.replay:type_name -> astrorder.sessiond.v1.EventEnvelope
+	132, // 204: astrorder.sessiond.v1.EventStreamFrame.live_ready:type_name -> astrorder.sessiond.v1.LiveReady
+	129, // 205: astrorder.sessiond.v1.EventStreamFrame.live:type_name -> astrorder.sessiond.v1.EventEnvelope
+	133, // 206: astrorder.sessiond.v1.EventStreamFrame.resync_required:type_name -> astrorder.sessiond.v1.ResyncRequired
+	134, // 207: astrorder.sessiond.v1.EventStreamFrame.overflow:type_name -> astrorder.sessiond.v1.StreamOverflow
+	27,  // 208: astrorder.sessiond.v1.AppendEventRequest.session:type_name -> astrorder.sessiond.v1.SessionRef
 	5,   // 209: astrorder.sessiond.v1.AppendEventRequest.status:type_name -> astrorder.sessiond.v1.SessionStatus
-	18,  // 210: astrorder.sessiond.v1.AppendEventRequest.payload:type_name -> astrorder.sessiond.v1.NativeJson
-	26,  // 211: astrorder.sessiond.v1.AppendEventResponse.session:type_name -> astrorder.sessiond.v1.SessionRef
-	25,  // 212: astrorder.sessiond.v1.OpenTerminal.target:type_name -> astrorder.sessiond.v1.RuntimeTarget
-	26,  // 213: astrorder.sessiond.v1.OpenTerminal.session:type_name -> astrorder.sessiond.v1.SessionRef
-	137, // 214: astrorder.sessiond.v1.TerminalClientFrame.open:type_name -> astrorder.sessiond.v1.OpenTerminal
-	138, // 215: astrorder.sessiond.v1.TerminalClientFrame.input:type_name -> astrorder.sessiond.v1.TerminalInput
-	139, // 216: astrorder.sessiond.v1.TerminalClientFrame.resize:type_name -> astrorder.sessiond.v1.TerminalResize
-	140, // 217: astrorder.sessiond.v1.TerminalClientFrame.interrupt:type_name -> astrorder.sessiond.v1.TerminalInterrupt
-	141, // 218: astrorder.sessiond.v1.TerminalClientFrame.close:type_name -> astrorder.sessiond.v1.TerminalClose
-	26,  // 219: astrorder.sessiond.v1.TerminalOpened.session:type_name -> astrorder.sessiond.v1.SessionRef
+	19,  // 210: astrorder.sessiond.v1.AppendEventRequest.payload:type_name -> astrorder.sessiond.v1.NativeJson
+	27,  // 211: astrorder.sessiond.v1.AppendEventResponse.session:type_name -> astrorder.sessiond.v1.SessionRef
+	26,  // 212: astrorder.sessiond.v1.OpenTerminal.target:type_name -> astrorder.sessiond.v1.RuntimeTarget
+	27,  // 213: astrorder.sessiond.v1.OpenTerminal.session:type_name -> astrorder.sessiond.v1.SessionRef
+	138, // 214: astrorder.sessiond.v1.TerminalClientFrame.open:type_name -> astrorder.sessiond.v1.OpenTerminal
+	139, // 215: astrorder.sessiond.v1.TerminalClientFrame.input:type_name -> astrorder.sessiond.v1.TerminalInput
+	140, // 216: astrorder.sessiond.v1.TerminalClientFrame.resize:type_name -> astrorder.sessiond.v1.TerminalResize
+	141, // 217: astrorder.sessiond.v1.TerminalClientFrame.interrupt:type_name -> astrorder.sessiond.v1.TerminalInterrupt
+	142, // 218: astrorder.sessiond.v1.TerminalClientFrame.close:type_name -> astrorder.sessiond.v1.TerminalClose
+	27,  // 219: astrorder.sessiond.v1.TerminalOpened.session:type_name -> astrorder.sessiond.v1.SessionRef
 	12,  // 220: astrorder.sessiond.v1.TerminalExit.cause:type_name -> astrorder.sessiond.v1.TerminalExitCause
-	143, // 221: astrorder.sessiond.v1.TerminalServerFrame.opened:type_name -> astrorder.sessiond.v1.TerminalOpened
-	144, // 222: astrorder.sessiond.v1.TerminalServerFrame.output:type_name -> astrorder.sessiond.v1.TerminalOutput
-	145, // 223: astrorder.sessiond.v1.TerminalServerFrame.exit:type_name -> astrorder.sessiond.v1.TerminalExit
-	146, // 224: astrorder.sessiond.v1.TerminalServerFrame.overflow:type_name -> astrorder.sessiond.v1.TerminalOverflow
-	28,  // 225: astrorder.sessiond.v1.TerminalServerFrame.error:type_name -> astrorder.sessiond.v1.BusinessError
-	19,  // 226: astrorder.sessiond.v1.OperationKey.agent_type_compat:type_name -> astrorder.sessiond.v1.NullableString
-	19,  // 227: astrorder.sessiond.v1.OperationKey.connection_id:type_name -> astrorder.sessiond.v1.NullableString
-	19,  // 228: astrorder.sessiond.v1.OperationKey.session_id:type_name -> astrorder.sessiond.v1.NullableString
+	144, // 221: astrorder.sessiond.v1.TerminalServerFrame.opened:type_name -> astrorder.sessiond.v1.TerminalOpened
+	145, // 222: astrorder.sessiond.v1.TerminalServerFrame.output:type_name -> astrorder.sessiond.v1.TerminalOutput
+	146, // 223: astrorder.sessiond.v1.TerminalServerFrame.exit:type_name -> astrorder.sessiond.v1.TerminalExit
+	147, // 224: astrorder.sessiond.v1.TerminalServerFrame.overflow:type_name -> astrorder.sessiond.v1.TerminalOverflow
+	29,  // 225: astrorder.sessiond.v1.TerminalServerFrame.error:type_name -> astrorder.sessiond.v1.BusinessError
+	20,  // 226: astrorder.sessiond.v1.OperationKey.agent_type_compat:type_name -> astrorder.sessiond.v1.NullableString
+	20,  // 227: astrorder.sessiond.v1.OperationKey.connection_id:type_name -> astrorder.sessiond.v1.NullableString
+	20,  // 228: astrorder.sessiond.v1.OperationKey.session_id:type_name -> astrorder.sessiond.v1.NullableString
 	1,   // 229: astrorder.sessiond.v1.OperationKey.canonicalization:type_name -> astrorder.sessiond.v1.CanonicalizationVersion
-	148, // 230: astrorder.sessiond.v1.GetOperationRequest.key:type_name -> astrorder.sessiond.v1.OperationKey
-	148, // 231: astrorder.sessiond.v1.OperationReceipt.key:type_name -> astrorder.sessiond.v1.OperationKey
+	149, // 230: astrorder.sessiond.v1.GetOperationRequest.key:type_name -> astrorder.sessiond.v1.OperationKey
+	149, // 231: astrorder.sessiond.v1.OperationReceipt.key:type_name -> astrorder.sessiond.v1.OperationKey
 	7,   // 232: astrorder.sessiond.v1.OperationReceipt.state:type_name -> astrorder.sessiond.v1.OperationState
-	32,  // 233: astrorder.sessiond.v1.OperationReceipt.typed_response:type_name -> astrorder.sessiond.v1.CommandReceipt
-	30,  // 234: astrorder.sessiond.v1.OperationReceipt.error:type_name -> astrorder.sessiond.v1.NullableBusinessError
-	29,  // 235: astrorder.sessiond.v1.OperationReceipt.status:type_name -> astrorder.sessiond.v1.NullableSessionStatus
-	24,  // 236: astrorder.sessiond.v1.SshTarget.config:type_name -> astrorder.sessiond.v1.SshConnectConfig
-	151, // 237: astrorder.sessiond.v1.ModelConfigTarget.local:type_name -> astrorder.sessiond.v1.LocalTarget
-	152, // 238: astrorder.sessiond.v1.ModelConfigTarget.wsl:type_name -> astrorder.sessiond.v1.WslTarget
-	153, // 239: astrorder.sessiond.v1.ModelConfigTarget.ssh:type_name -> astrorder.sessiond.v1.SshTarget
+	33,  // 233: astrorder.sessiond.v1.OperationReceipt.typed_response:type_name -> astrorder.sessiond.v1.CommandReceipt
+	31,  // 234: astrorder.sessiond.v1.OperationReceipt.error:type_name -> astrorder.sessiond.v1.NullableBusinessError
+	30,  // 235: astrorder.sessiond.v1.OperationReceipt.status:type_name -> astrorder.sessiond.v1.NullableSessionStatus
+	25,  // 236: astrorder.sessiond.v1.SshTarget.config:type_name -> astrorder.sessiond.v1.SshConnectConfig
+	152, // 237: astrorder.sessiond.v1.ModelConfigTarget.local:type_name -> astrorder.sessiond.v1.LocalTarget
+	153, // 238: astrorder.sessiond.v1.ModelConfigTarget.wsl:type_name -> astrorder.sessiond.v1.WslTarget
+	154, // 239: astrorder.sessiond.v1.ModelConfigTarget.ssh:type_name -> astrorder.sessiond.v1.SshTarget
 	14,  // 240: astrorder.sessiond.v1.ModelConfigFileInput.file:type_name -> astrorder.sessiond.v1.ManagedFile
-	154, // 241: astrorder.sessiond.v1.ModelConfigPlanRequest.target:type_name -> astrorder.sessiond.v1.ModelConfigTarget
-	155, // 242: astrorder.sessiond.v1.ModelConfigPlanRequest.proposed_files:type_name -> astrorder.sessiond.v1.ModelConfigFileInput
+	155, // 241: astrorder.sessiond.v1.ModelConfigPlanRequest.target:type_name -> astrorder.sessiond.v1.ModelConfigTarget
+	156, // 242: astrorder.sessiond.v1.ModelConfigPlanRequest.proposed_files:type_name -> astrorder.sessiond.v1.ModelConfigFileInput
 	14,  // 243: astrorder.sessiond.v1.ModelConfigFileState.file:type_name -> astrorder.sessiond.v1.ManagedFile
 	14,  // 244: astrorder.sessiond.v1.ModelConfigChange.file:type_name -> astrorder.sessiond.v1.ManagedFile
-	154, // 245: astrorder.sessiond.v1.ModelConfigPlanResponse.target:type_name -> astrorder.sessiond.v1.ModelConfigTarget
+	155, // 245: astrorder.sessiond.v1.ModelConfigPlanResponse.target:type_name -> astrorder.sessiond.v1.ModelConfigTarget
 	13,  // 246: astrorder.sessiond.v1.ModelConfigPlanResponse.target_support:type_name -> astrorder.sessiond.v1.ModelConfigTargetSupport
-	158, // 247: astrorder.sessiond.v1.ModelConfigPlanResponse.current_files:type_name -> astrorder.sessiond.v1.ModelConfigFileState
-	159, // 248: astrorder.sessiond.v1.ModelConfigPlanResponse.changes:type_name -> astrorder.sessiond.v1.ModelConfigChange
-	28,  // 249: astrorder.sessiond.v1.ModelConfigPlanResponse.error:type_name -> astrorder.sessiond.v1.BusinessError
-	27,  // 250: astrorder.sessiond.v1.ModelConfigApplyRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
-	154, // 251: astrorder.sessiond.v1.ModelConfigApplyRequest.target:type_name -> astrorder.sessiond.v1.ModelConfigTarget
-	155, // 252: astrorder.sessiond.v1.ModelConfigApplyRequest.files:type_name -> astrorder.sessiond.v1.ModelConfigFileInput
-	156, // 253: astrorder.sessiond.v1.ModelConfigApplyRequest.environment_values:type_name -> astrorder.sessiond.v1.SensitiveEnvironmentValue
+	159, // 247: astrorder.sessiond.v1.ModelConfigPlanResponse.current_files:type_name -> astrorder.sessiond.v1.ModelConfigFileState
+	160, // 248: astrorder.sessiond.v1.ModelConfigPlanResponse.changes:type_name -> astrorder.sessiond.v1.ModelConfigChange
+	29,  // 249: astrorder.sessiond.v1.ModelConfigPlanResponse.error:type_name -> astrorder.sessiond.v1.BusinessError
+	28,  // 250: astrorder.sessiond.v1.ModelConfigApplyRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
+	155, // 251: astrorder.sessiond.v1.ModelConfigApplyRequest.target:type_name -> astrorder.sessiond.v1.ModelConfigTarget
+	156, // 252: astrorder.sessiond.v1.ModelConfigApplyRequest.files:type_name -> astrorder.sessiond.v1.ModelConfigFileInput
+	157, // 253: astrorder.sessiond.v1.ModelConfigApplyRequest.environment_values:type_name -> astrorder.sessiond.v1.SensitiveEnvironmentValue
 	14,  // 254: astrorder.sessiond.v1.FileDigest.file:type_name -> astrorder.sessiond.v1.ManagedFile
 	7,   // 255: astrorder.sessiond.v1.ModelConfigApplyResponse.operation_state:type_name -> astrorder.sessiond.v1.OperationState
 	13,  // 256: astrorder.sessiond.v1.ModelConfigApplyResponse.target_support:type_name -> astrorder.sessiond.v1.ModelConfigTargetSupport
 	14,  // 257: astrorder.sessiond.v1.ModelConfigApplyResponse.changed:type_name -> astrorder.sessiond.v1.ManagedFile
-	162, // 258: astrorder.sessiond.v1.ModelConfigApplyResponse.digests:type_name -> astrorder.sessiond.v1.FileDigest
-	28,  // 259: astrorder.sessiond.v1.ModelConfigApplyResponse.error:type_name -> astrorder.sessiond.v1.BusinessError
-	27,  // 260: astrorder.sessiond.v1.ModelConfigReloadRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
+	163, // 258: astrorder.sessiond.v1.ModelConfigApplyResponse.digests:type_name -> astrorder.sessiond.v1.FileDigest
+	29,  // 259: astrorder.sessiond.v1.ModelConfigApplyResponse.error:type_name -> astrorder.sessiond.v1.BusinessError
+	28,  // 260: astrorder.sessiond.v1.ModelConfigReloadRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
 	15,  // 261: astrorder.sessiond.v1.ModelConfigReloadRequest.agents:type_name -> astrorder.sessiond.v1.ReloadAgent
 	7,   // 262: astrorder.sessiond.v1.ModelConfigReloadResponse.operation_state:type_name -> astrorder.sessiond.v1.OperationState
 	15,  // 263: astrorder.sessiond.v1.ModelConfigReloadResponse.reloaded:type_name -> astrorder.sessiond.v1.ReloadAgent
 	15,  // 264: astrorder.sessiond.v1.ModelConfigReloadResponse.pending:type_name -> astrorder.sessiond.v1.ReloadAgent
-	28,  // 265: astrorder.sessiond.v1.ModelConfigReloadResponse.error:type_name -> astrorder.sessiond.v1.BusinessError
-	18,  // 266: astrorder.sessiond.v1.ConnectorAgent.native:type_name -> astrorder.sessiond.v1.NativeJson
-	166, // 267: astrorder.sessiond.v1.ConnectorHello.agent:type_name -> astrorder.sessiond.v1.ConnectorAgent
+	29,  // 265: astrorder.sessiond.v1.ModelConfigReloadResponse.error:type_name -> astrorder.sessiond.v1.BusinessError
+	19,  // 266: astrorder.sessiond.v1.ConnectorAgent.native:type_name -> astrorder.sessiond.v1.NativeJson
+	167, // 267: astrorder.sessiond.v1.ConnectorHello.agent:type_name -> astrorder.sessiond.v1.ConnectorAgent
 	5,   // 268: astrorder.sessiond.v1.ConnectorEvent.status:type_name -> astrorder.sessiond.v1.SessionStatus
-	18,  // 269: astrorder.sessiond.v1.ConnectorEvent.data:type_name -> astrorder.sessiond.v1.NativeJson
-	167, // 270: astrorder.sessiond.v1.ConnectorIngressFrame.hello:type_name -> astrorder.sessiond.v1.ConnectorHello
-	168, // 271: astrorder.sessiond.v1.ConnectorIngressFrame.heartbeat:type_name -> astrorder.sessiond.v1.ConnectorHeartbeat
-	169, // 272: astrorder.sessiond.v1.ConnectorIngressFrame.event:type_name -> astrorder.sessiond.v1.ConnectorEvent
-	170, // 273: astrorder.sessiond.v1.ConnectorIngressFrame.disconnect:type_name -> astrorder.sessiond.v1.ConnectorDisconnect
-	28,  // 274: astrorder.sessiond.v1.ConnectorRejected.error:type_name -> astrorder.sessiond.v1.BusinessError
+	19,  // 269: astrorder.sessiond.v1.ConnectorEvent.data:type_name -> astrorder.sessiond.v1.NativeJson
+	168, // 270: astrorder.sessiond.v1.ConnectorIngressFrame.hello:type_name -> astrorder.sessiond.v1.ConnectorHello
+	169, // 271: astrorder.sessiond.v1.ConnectorIngressFrame.heartbeat:type_name -> astrorder.sessiond.v1.ConnectorHeartbeat
+	170, // 272: astrorder.sessiond.v1.ConnectorIngressFrame.event:type_name -> astrorder.sessiond.v1.ConnectorEvent
+	171, // 273: astrorder.sessiond.v1.ConnectorIngressFrame.disconnect:type_name -> astrorder.sessiond.v1.ConnectorDisconnect
+	29,  // 274: astrorder.sessiond.v1.ConnectorRejected.error:type_name -> astrorder.sessiond.v1.BusinessError
 	16,  // 275: astrorder.sessiond.v1.ConnectorIngressAck.state:type_name -> astrorder.sessiond.v1.ConnectorAckState
-	172, // 276: astrorder.sessiond.v1.ConnectorIngressAck.registered:type_name -> astrorder.sessiond.v1.ConnectorRegistered
-	173, // 277: astrorder.sessiond.v1.ConnectorIngressAck.event_accepted:type_name -> astrorder.sessiond.v1.ConnectorEventAccepted
-	174, // 278: astrorder.sessiond.v1.ConnectorIngressAck.rejected:type_name -> astrorder.sessiond.v1.ConnectorRejected
-	175, // 279: astrorder.sessiond.v1.ConnectorIngressAck.overflow:type_name -> astrorder.sessiond.v1.ConnectorOverflow
-	176, // 280: astrorder.sessiond.v1.ConnectorIngressAck.disconnected:type_name -> astrorder.sessiond.v1.ConnectorDisconnected
-	177, // 281: astrorder.sessiond.v1.ConnectorIngressAck.heartbeat:type_name -> astrorder.sessiond.v1.ConnectorHeartbeatAck
-	26,  // 282: astrorder.sessiond.v1.BindControlSessionRequest.control_session:type_name -> astrorder.sessiond.v1.SessionRef
-	27,  // 283: astrorder.sessiond.v1.DisconnectConnectorRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
+	173, // 276: astrorder.sessiond.v1.ConnectorIngressAck.registered:type_name -> astrorder.sessiond.v1.ConnectorRegistered
+	174, // 277: astrorder.sessiond.v1.ConnectorIngressAck.event_accepted:type_name -> astrorder.sessiond.v1.ConnectorEventAccepted
+	175, // 278: astrorder.sessiond.v1.ConnectorIngressAck.rejected:type_name -> astrorder.sessiond.v1.ConnectorRejected
+	176, // 279: astrorder.sessiond.v1.ConnectorIngressAck.overflow:type_name -> astrorder.sessiond.v1.ConnectorOverflow
+	177, // 280: astrorder.sessiond.v1.ConnectorIngressAck.disconnected:type_name -> astrorder.sessiond.v1.ConnectorDisconnected
+	178, // 281: astrorder.sessiond.v1.ConnectorIngressAck.heartbeat:type_name -> astrorder.sessiond.v1.ConnectorHeartbeatAck
+	27,  // 282: astrorder.sessiond.v1.BindControlSessionRequest.control_session:type_name -> astrorder.sessiond.v1.SessionRef
+	28,  // 283: astrorder.sessiond.v1.DisconnectConnectorRequest.meta:type_name -> astrorder.sessiond.v1.CommandMeta
 	7,   // 284: astrorder.sessiond.v1.DisconnectConnectorResponse.operation_state:type_name -> astrorder.sessiond.v1.OperationState
-	28,  // 285: astrorder.sessiond.v1.DisconnectConnectorResponse.error:type_name -> astrorder.sessiond.v1.BusinessError
-	34,  // 286: astrorder.sessiond.v1.DaemonControl.GetCapabilities:input_type -> astrorder.sessiond.v1.GetCapabilitiesRequest
-	36,  // 287: astrorder.sessiond.v1.DaemonControl.GetStatus:input_type -> astrorder.sessiond.v1.GetStatusRequest
-	40,  // 288: astrorder.sessiond.v1.DaemonControl.Shutdown:input_type -> astrorder.sessiond.v1.ShutdownRequest
-	46,  // 289: astrorder.sessiond.v1.SessionControl.CreateSession:input_type -> astrorder.sessiond.v1.CreateSessionRequest
-	47,  // 290: astrorder.sessiond.v1.SessionControl.AttachSession:input_type -> astrorder.sessiond.v1.AttachSessionRequest
-	56,  // 291: astrorder.sessiond.v1.SessionControl.Send:input_type -> astrorder.sessiond.v1.SendRequest
-	57,  // 292: astrorder.sessiond.v1.SessionControl.Steer:input_type -> astrorder.sessiond.v1.SteerRequest
-	59,  // 293: astrorder.sessiond.v1.SessionControl.StartReview:input_type -> astrorder.sessiond.v1.StartReviewRequest
-	60,  // 294: astrorder.sessiond.v1.SessionControl.Compact:input_type -> astrorder.sessiond.v1.CompactRequest
-	61,  // 295: astrorder.sessiond.v1.SessionControl.Interrupt:input_type -> astrorder.sessiond.v1.InterruptRequest
-	63,  // 296: astrorder.sessiond.v1.SessionControl.RespondApproval:input_type -> astrorder.sessiond.v1.RespondApprovalRequest
-	64,  // 297: astrorder.sessiond.v1.SessionControl.UpdateSettings:input_type -> astrorder.sessiond.v1.UpdateSettingsRequest
-	65,  // 298: astrorder.sessiond.v1.SessionControl.RenameSession:input_type -> astrorder.sessiond.v1.RenameSessionRequest
-	66,  // 299: astrorder.sessiond.v1.SessionControl.DeleteSession:input_type -> astrorder.sessiond.v1.DeleteSessionRequest
-	67,  // 300: astrorder.sessiond.v1.SessionControl.CloseSession:input_type -> astrorder.sessiond.v1.CloseSessionRequest
-	68,  // 301: astrorder.sessiond.v1.SessionControl.DetachSession:input_type -> astrorder.sessiond.v1.DetachSessionRequest
-	69,  // 302: astrorder.sessiond.v1.SessionControl.ReportObservedStatus:input_type -> astrorder.sessiond.v1.ReportObservedStatusRequest
-	73,  // 303: astrorder.sessiond.v1.SessionControl.SubmitDesktop:input_type -> astrorder.sessiond.v1.SubmitDesktopRequest
-	74,  // 304: astrorder.sessiond.v1.SessionControl.UpdateDesktopSettings:input_type -> astrorder.sessiond.v1.UpdateDesktopSettingsRequest
-	99,  // 305: astrorder.sessiond.v1.RuntimeQuery.QueryNative:input_type -> astrorder.sessiond.v1.NativeQueryRequest
-	101, // 306: astrorder.sessiond.v1.RuntimeQuery.GetHistoryPage:input_type -> astrorder.sessiond.v1.HistoryPageRequest
-	103, // 307: astrorder.sessiond.v1.RuntimeQuery.ListBackgroundProcesses:input_type -> astrorder.sessiond.v1.ListBackgroundProcessesRequest
-	105, // 308: astrorder.sessiond.v1.RuntimeQuery.ListModels:input_type -> astrorder.sessiond.v1.ListModelsRequest
-	108, // 309: astrorder.sessiond.v1.RuntimeQuery.ListCommands:input_type -> astrorder.sessiond.v1.ListCommandsRequest
-	111, // 310: astrorder.sessiond.v1.RuntimeQuery.ReadModel:input_type -> astrorder.sessiond.v1.ReadModelRequest
-	113, // 311: astrorder.sessiond.v1.RuntimeQuery.SetModel:input_type -> astrorder.sessiond.v1.SetModelRequest
-	114, // 312: astrorder.sessiond.v1.RuntimeQuery.SetReasoning:input_type -> astrorder.sessiond.v1.SetReasoningRequest
-	116, // 313: astrorder.sessiond.v1.RuntimeQuery.SetGoal:input_type -> astrorder.sessiond.v1.SetGoalRequest
-	117, // 314: astrorder.sessiond.v1.RuntimeQuery.ClearGoal:input_type -> astrorder.sessiond.v1.ClearGoalRequest
-	115, // 315: astrorder.sessiond.v1.RuntimeQuery.ReadApprovalMode:input_type -> astrorder.sessiond.v1.ReadApprovalModeRequest
-	119, // 316: astrorder.sessiond.v1.RuntimeQuery.SetApprovalMode:input_type -> astrorder.sessiond.v1.SetApprovalModeRequest
-	120, // 317: astrorder.sessiond.v1.RuntimeQuery.DisconnectRuntime:input_type -> astrorder.sessiond.v1.DisconnectRuntimeRequest
-	123, // 318: astrorder.sessiond.v1.EventStream.Subscribe:input_type -> astrorder.sessiond.v1.SubscribeRequest
-	135, // 319: astrorder.sessiond.v1.EventStream.AppendEvent:input_type -> astrorder.sessiond.v1.AppendEventRequest
-	142, // 320: astrorder.sessiond.v1.TerminalStream.Open:input_type -> astrorder.sessiond.v1.TerminalClientFrame
-	149, // 321: astrorder.sessiond.v1.OperationQuery.GetOperation:input_type -> astrorder.sessiond.v1.GetOperationRequest
-	157, // 322: astrorder.sessiond.v1.ModelConfig.Plan:input_type -> astrorder.sessiond.v1.ModelConfigPlanRequest
-	161, // 323: astrorder.sessiond.v1.ModelConfig.Apply:input_type -> astrorder.sessiond.v1.ModelConfigApplyRequest
-	164, // 324: astrorder.sessiond.v1.ModelConfig.Reload:input_type -> astrorder.sessiond.v1.ModelConfigReloadRequest
-	171, // 325: astrorder.sessiond.v1.ConnectorIngress.Connect:input_type -> astrorder.sessiond.v1.ConnectorIngressFrame
-	179, // 326: astrorder.sessiond.v1.ConnectorIngress.BindControlSession:input_type -> astrorder.sessiond.v1.BindControlSessionRequest
-	181, // 327: astrorder.sessiond.v1.ConnectorIngress.DisconnectConnector:input_type -> astrorder.sessiond.v1.DisconnectConnectorRequest
-	35,  // 328: astrorder.sessiond.v1.DaemonControl.GetCapabilities:output_type -> astrorder.sessiond.v1.GetCapabilitiesResponse
-	39,  // 329: astrorder.sessiond.v1.DaemonControl.GetStatus:output_type -> astrorder.sessiond.v1.GetStatusResponse
-	41,  // 330: astrorder.sessiond.v1.DaemonControl.Shutdown:output_type -> astrorder.sessiond.v1.ShutdownResponse
-	32,  // 331: astrorder.sessiond.v1.SessionControl.CreateSession:output_type -> astrorder.sessiond.v1.CommandReceipt
-	33,  // 332: astrorder.sessiond.v1.SessionControl.AttachSession:output_type -> astrorder.sessiond.v1.SessionReceipt
-	32,  // 333: astrorder.sessiond.v1.SessionControl.Send:output_type -> astrorder.sessiond.v1.CommandReceipt
-	32,  // 334: astrorder.sessiond.v1.SessionControl.Steer:output_type -> astrorder.sessiond.v1.CommandReceipt
-	32,  // 335: astrorder.sessiond.v1.SessionControl.StartReview:output_type -> astrorder.sessiond.v1.CommandReceipt
-	32,  // 336: astrorder.sessiond.v1.SessionControl.Compact:output_type -> astrorder.sessiond.v1.CommandReceipt
-	32,  // 337: astrorder.sessiond.v1.SessionControl.Interrupt:output_type -> astrorder.sessiond.v1.CommandReceipt
-	32,  // 338: astrorder.sessiond.v1.SessionControl.RespondApproval:output_type -> astrorder.sessiond.v1.CommandReceipt
-	32,  // 339: astrorder.sessiond.v1.SessionControl.UpdateSettings:output_type -> astrorder.sessiond.v1.CommandReceipt
-	32,  // 340: astrorder.sessiond.v1.SessionControl.RenameSession:output_type -> astrorder.sessiond.v1.CommandReceipt
-	32,  // 341: astrorder.sessiond.v1.SessionControl.DeleteSession:output_type -> astrorder.sessiond.v1.CommandReceipt
-	32,  // 342: astrorder.sessiond.v1.SessionControl.CloseSession:output_type -> astrorder.sessiond.v1.CommandReceipt
-	32,  // 343: astrorder.sessiond.v1.SessionControl.DetachSession:output_type -> astrorder.sessiond.v1.CommandReceipt
-	33,  // 344: astrorder.sessiond.v1.SessionControl.ReportObservedStatus:output_type -> astrorder.sessiond.v1.SessionReceipt
-	32,  // 345: astrorder.sessiond.v1.SessionControl.SubmitDesktop:output_type -> astrorder.sessiond.v1.CommandReceipt
-	32,  // 346: astrorder.sessiond.v1.SessionControl.UpdateDesktopSettings:output_type -> astrorder.sessiond.v1.CommandReceipt
-	100, // 347: astrorder.sessiond.v1.RuntimeQuery.QueryNative:output_type -> astrorder.sessiond.v1.NativeQueryResponse
-	102, // 348: astrorder.sessiond.v1.RuntimeQuery.GetHistoryPage:output_type -> astrorder.sessiond.v1.HistoryPageResponse
-	104, // 349: astrorder.sessiond.v1.RuntimeQuery.ListBackgroundProcesses:output_type -> astrorder.sessiond.v1.ListBackgroundProcessesResponse
-	107, // 350: astrorder.sessiond.v1.RuntimeQuery.ListModels:output_type -> astrorder.sessiond.v1.ListModelsResponse
-	110, // 351: astrorder.sessiond.v1.RuntimeQuery.ListCommands:output_type -> astrorder.sessiond.v1.ListCommandsResponse
-	112, // 352: astrorder.sessiond.v1.RuntimeQuery.ReadModel:output_type -> astrorder.sessiond.v1.ModelState
-	32,  // 353: astrorder.sessiond.v1.RuntimeQuery.SetModel:output_type -> astrorder.sessiond.v1.CommandReceipt
-	32,  // 354: astrorder.sessiond.v1.RuntimeQuery.SetReasoning:output_type -> astrorder.sessiond.v1.CommandReceipt
-	32,  // 355: astrorder.sessiond.v1.RuntimeQuery.SetGoal:output_type -> astrorder.sessiond.v1.CommandReceipt
-	32,  // 356: astrorder.sessiond.v1.RuntimeQuery.ClearGoal:output_type -> astrorder.sessiond.v1.CommandReceipt
-	118, // 357: astrorder.sessiond.v1.RuntimeQuery.ReadApprovalMode:output_type -> astrorder.sessiond.v1.ApprovalModeState
-	32,  // 358: astrorder.sessiond.v1.RuntimeQuery.SetApprovalMode:output_type -> astrorder.sessiond.v1.CommandReceipt
-	121, // 359: astrorder.sessiond.v1.RuntimeQuery.DisconnectRuntime:output_type -> astrorder.sessiond.v1.DisconnectRuntimeResponse
-	134, // 360: astrorder.sessiond.v1.EventStream.Subscribe:output_type -> astrorder.sessiond.v1.EventStreamFrame
-	136, // 361: astrorder.sessiond.v1.EventStream.AppendEvent:output_type -> astrorder.sessiond.v1.AppendEventResponse
-	147, // 362: astrorder.sessiond.v1.TerminalStream.Open:output_type -> astrorder.sessiond.v1.TerminalServerFrame
-	150, // 363: astrorder.sessiond.v1.OperationQuery.GetOperation:output_type -> astrorder.sessiond.v1.OperationReceipt
-	160, // 364: astrorder.sessiond.v1.ModelConfig.Plan:output_type -> astrorder.sessiond.v1.ModelConfigPlanResponse
-	163, // 365: astrorder.sessiond.v1.ModelConfig.Apply:output_type -> astrorder.sessiond.v1.ModelConfigApplyResponse
-	165, // 366: astrorder.sessiond.v1.ModelConfig.Reload:output_type -> astrorder.sessiond.v1.ModelConfigReloadResponse
-	178, // 367: astrorder.sessiond.v1.ConnectorIngress.Connect:output_type -> astrorder.sessiond.v1.ConnectorIngressAck
-	180, // 368: astrorder.sessiond.v1.ConnectorIngress.BindControlSession:output_type -> astrorder.sessiond.v1.BindControlSessionResponse
-	182, // 369: astrorder.sessiond.v1.ConnectorIngress.DisconnectConnector:output_type -> astrorder.sessiond.v1.DisconnectConnectorResponse
-	328, // [328:370] is the sub-list for method output_type
-	286, // [286:328] is the sub-list for method input_type
-	286, // [286:286] is the sub-list for extension type_name
-	286, // [286:286] is the sub-list for extension extendee
-	0,   // [0:286] is the sub-list for field type_name
+	29,  // 285: astrorder.sessiond.v1.DisconnectConnectorResponse.error:type_name -> astrorder.sessiond.v1.BusinessError
+	26,  // 286: astrorder.sessiond.v1.AgyAccountRequest.target:type_name -> astrorder.sessiond.v1.RuntimeTarget
+	18,  // 287: astrorder.sessiond.v1.AgyAccountRequest.action:type_name -> astrorder.sessiond.v1.AgyAccountAction
+	19,  // 288: astrorder.sessiond.v1.AgyAccountResponse.result:type_name -> astrorder.sessiond.v1.NativeJson
+	35,  // 289: astrorder.sessiond.v1.DaemonControl.GetCapabilities:input_type -> astrorder.sessiond.v1.GetCapabilitiesRequest
+	37,  // 290: astrorder.sessiond.v1.DaemonControl.GetStatus:input_type -> astrorder.sessiond.v1.GetStatusRequest
+	41,  // 291: astrorder.sessiond.v1.DaemonControl.Shutdown:input_type -> astrorder.sessiond.v1.ShutdownRequest
+	47,  // 292: astrorder.sessiond.v1.SessionControl.CreateSession:input_type -> astrorder.sessiond.v1.CreateSessionRequest
+	48,  // 293: astrorder.sessiond.v1.SessionControl.AttachSession:input_type -> astrorder.sessiond.v1.AttachSessionRequest
+	57,  // 294: astrorder.sessiond.v1.SessionControl.Send:input_type -> astrorder.sessiond.v1.SendRequest
+	58,  // 295: astrorder.sessiond.v1.SessionControl.Steer:input_type -> astrorder.sessiond.v1.SteerRequest
+	60,  // 296: astrorder.sessiond.v1.SessionControl.StartReview:input_type -> astrorder.sessiond.v1.StartReviewRequest
+	61,  // 297: astrorder.sessiond.v1.SessionControl.Compact:input_type -> astrorder.sessiond.v1.CompactRequest
+	62,  // 298: astrorder.sessiond.v1.SessionControl.Interrupt:input_type -> astrorder.sessiond.v1.InterruptRequest
+	64,  // 299: astrorder.sessiond.v1.SessionControl.RespondApproval:input_type -> astrorder.sessiond.v1.RespondApprovalRequest
+	65,  // 300: astrorder.sessiond.v1.SessionControl.UpdateSettings:input_type -> astrorder.sessiond.v1.UpdateSettingsRequest
+	66,  // 301: astrorder.sessiond.v1.SessionControl.RenameSession:input_type -> astrorder.sessiond.v1.RenameSessionRequest
+	67,  // 302: astrorder.sessiond.v1.SessionControl.DeleteSession:input_type -> astrorder.sessiond.v1.DeleteSessionRequest
+	68,  // 303: astrorder.sessiond.v1.SessionControl.CloseSession:input_type -> astrorder.sessiond.v1.CloseSessionRequest
+	69,  // 304: astrorder.sessiond.v1.SessionControl.DetachSession:input_type -> astrorder.sessiond.v1.DetachSessionRequest
+	70,  // 305: astrorder.sessiond.v1.SessionControl.ReportObservedStatus:input_type -> astrorder.sessiond.v1.ReportObservedStatusRequest
+	74,  // 306: astrorder.sessiond.v1.SessionControl.SubmitDesktop:input_type -> astrorder.sessiond.v1.SubmitDesktopRequest
+	75,  // 307: astrorder.sessiond.v1.SessionControl.UpdateDesktopSettings:input_type -> astrorder.sessiond.v1.UpdateDesktopSettingsRequest
+	100, // 308: astrorder.sessiond.v1.RuntimeQuery.QueryNative:input_type -> astrorder.sessiond.v1.NativeQueryRequest
+	102, // 309: astrorder.sessiond.v1.RuntimeQuery.GetHistoryPage:input_type -> astrorder.sessiond.v1.HistoryPageRequest
+	104, // 310: astrorder.sessiond.v1.RuntimeQuery.ListBackgroundProcesses:input_type -> astrorder.sessiond.v1.ListBackgroundProcessesRequest
+	106, // 311: astrorder.sessiond.v1.RuntimeQuery.ListModels:input_type -> astrorder.sessiond.v1.ListModelsRequest
+	109, // 312: astrorder.sessiond.v1.RuntimeQuery.ListCommands:input_type -> astrorder.sessiond.v1.ListCommandsRequest
+	112, // 313: astrorder.sessiond.v1.RuntimeQuery.ReadModel:input_type -> astrorder.sessiond.v1.ReadModelRequest
+	114, // 314: astrorder.sessiond.v1.RuntimeQuery.SetModel:input_type -> astrorder.sessiond.v1.SetModelRequest
+	115, // 315: astrorder.sessiond.v1.RuntimeQuery.SetReasoning:input_type -> astrorder.sessiond.v1.SetReasoningRequest
+	117, // 316: astrorder.sessiond.v1.RuntimeQuery.SetGoal:input_type -> astrorder.sessiond.v1.SetGoalRequest
+	118, // 317: astrorder.sessiond.v1.RuntimeQuery.ClearGoal:input_type -> astrorder.sessiond.v1.ClearGoalRequest
+	116, // 318: astrorder.sessiond.v1.RuntimeQuery.ReadApprovalMode:input_type -> astrorder.sessiond.v1.ReadApprovalModeRequest
+	120, // 319: astrorder.sessiond.v1.RuntimeQuery.SetApprovalMode:input_type -> astrorder.sessiond.v1.SetApprovalModeRequest
+	121, // 320: astrorder.sessiond.v1.RuntimeQuery.DisconnectRuntime:input_type -> astrorder.sessiond.v1.DisconnectRuntimeRequest
+	184, // 321: astrorder.sessiond.v1.RuntimeQuery.ManageAgyAccount:input_type -> astrorder.sessiond.v1.AgyAccountRequest
+	124, // 322: astrorder.sessiond.v1.EventStream.Subscribe:input_type -> astrorder.sessiond.v1.SubscribeRequest
+	136, // 323: astrorder.sessiond.v1.EventStream.AppendEvent:input_type -> astrorder.sessiond.v1.AppendEventRequest
+	143, // 324: astrorder.sessiond.v1.TerminalStream.Open:input_type -> astrorder.sessiond.v1.TerminalClientFrame
+	150, // 325: astrorder.sessiond.v1.OperationQuery.GetOperation:input_type -> astrorder.sessiond.v1.GetOperationRequest
+	158, // 326: astrorder.sessiond.v1.ModelConfig.Plan:input_type -> astrorder.sessiond.v1.ModelConfigPlanRequest
+	162, // 327: astrorder.sessiond.v1.ModelConfig.Apply:input_type -> astrorder.sessiond.v1.ModelConfigApplyRequest
+	165, // 328: astrorder.sessiond.v1.ModelConfig.Reload:input_type -> astrorder.sessiond.v1.ModelConfigReloadRequest
+	172, // 329: astrorder.sessiond.v1.ConnectorIngress.Connect:input_type -> astrorder.sessiond.v1.ConnectorIngressFrame
+	180, // 330: astrorder.sessiond.v1.ConnectorIngress.BindControlSession:input_type -> astrorder.sessiond.v1.BindControlSessionRequest
+	182, // 331: astrorder.sessiond.v1.ConnectorIngress.DisconnectConnector:input_type -> astrorder.sessiond.v1.DisconnectConnectorRequest
+	36,  // 332: astrorder.sessiond.v1.DaemonControl.GetCapabilities:output_type -> astrorder.sessiond.v1.GetCapabilitiesResponse
+	40,  // 333: astrorder.sessiond.v1.DaemonControl.GetStatus:output_type -> astrorder.sessiond.v1.GetStatusResponse
+	42,  // 334: astrorder.sessiond.v1.DaemonControl.Shutdown:output_type -> astrorder.sessiond.v1.ShutdownResponse
+	33,  // 335: astrorder.sessiond.v1.SessionControl.CreateSession:output_type -> astrorder.sessiond.v1.CommandReceipt
+	34,  // 336: astrorder.sessiond.v1.SessionControl.AttachSession:output_type -> astrorder.sessiond.v1.SessionReceipt
+	33,  // 337: astrorder.sessiond.v1.SessionControl.Send:output_type -> astrorder.sessiond.v1.CommandReceipt
+	33,  // 338: astrorder.sessiond.v1.SessionControl.Steer:output_type -> astrorder.sessiond.v1.CommandReceipt
+	33,  // 339: astrorder.sessiond.v1.SessionControl.StartReview:output_type -> astrorder.sessiond.v1.CommandReceipt
+	33,  // 340: astrorder.sessiond.v1.SessionControl.Compact:output_type -> astrorder.sessiond.v1.CommandReceipt
+	33,  // 341: astrorder.sessiond.v1.SessionControl.Interrupt:output_type -> astrorder.sessiond.v1.CommandReceipt
+	33,  // 342: astrorder.sessiond.v1.SessionControl.RespondApproval:output_type -> astrorder.sessiond.v1.CommandReceipt
+	33,  // 343: astrorder.sessiond.v1.SessionControl.UpdateSettings:output_type -> astrorder.sessiond.v1.CommandReceipt
+	33,  // 344: astrorder.sessiond.v1.SessionControl.RenameSession:output_type -> astrorder.sessiond.v1.CommandReceipt
+	33,  // 345: astrorder.sessiond.v1.SessionControl.DeleteSession:output_type -> astrorder.sessiond.v1.CommandReceipt
+	33,  // 346: astrorder.sessiond.v1.SessionControl.CloseSession:output_type -> astrorder.sessiond.v1.CommandReceipt
+	33,  // 347: astrorder.sessiond.v1.SessionControl.DetachSession:output_type -> astrorder.sessiond.v1.CommandReceipt
+	34,  // 348: astrorder.sessiond.v1.SessionControl.ReportObservedStatus:output_type -> astrorder.sessiond.v1.SessionReceipt
+	33,  // 349: astrorder.sessiond.v1.SessionControl.SubmitDesktop:output_type -> astrorder.sessiond.v1.CommandReceipt
+	33,  // 350: astrorder.sessiond.v1.SessionControl.UpdateDesktopSettings:output_type -> astrorder.sessiond.v1.CommandReceipt
+	101, // 351: astrorder.sessiond.v1.RuntimeQuery.QueryNative:output_type -> astrorder.sessiond.v1.NativeQueryResponse
+	103, // 352: astrorder.sessiond.v1.RuntimeQuery.GetHistoryPage:output_type -> astrorder.sessiond.v1.HistoryPageResponse
+	105, // 353: astrorder.sessiond.v1.RuntimeQuery.ListBackgroundProcesses:output_type -> astrorder.sessiond.v1.ListBackgroundProcessesResponse
+	108, // 354: astrorder.sessiond.v1.RuntimeQuery.ListModels:output_type -> astrorder.sessiond.v1.ListModelsResponse
+	111, // 355: astrorder.sessiond.v1.RuntimeQuery.ListCommands:output_type -> astrorder.sessiond.v1.ListCommandsResponse
+	113, // 356: astrorder.sessiond.v1.RuntimeQuery.ReadModel:output_type -> astrorder.sessiond.v1.ModelState
+	33,  // 357: astrorder.sessiond.v1.RuntimeQuery.SetModel:output_type -> astrorder.sessiond.v1.CommandReceipt
+	33,  // 358: astrorder.sessiond.v1.RuntimeQuery.SetReasoning:output_type -> astrorder.sessiond.v1.CommandReceipt
+	33,  // 359: astrorder.sessiond.v1.RuntimeQuery.SetGoal:output_type -> astrorder.sessiond.v1.CommandReceipt
+	33,  // 360: astrorder.sessiond.v1.RuntimeQuery.ClearGoal:output_type -> astrorder.sessiond.v1.CommandReceipt
+	119, // 361: astrorder.sessiond.v1.RuntimeQuery.ReadApprovalMode:output_type -> astrorder.sessiond.v1.ApprovalModeState
+	33,  // 362: astrorder.sessiond.v1.RuntimeQuery.SetApprovalMode:output_type -> astrorder.sessiond.v1.CommandReceipt
+	122, // 363: astrorder.sessiond.v1.RuntimeQuery.DisconnectRuntime:output_type -> astrorder.sessiond.v1.DisconnectRuntimeResponse
+	185, // 364: astrorder.sessiond.v1.RuntimeQuery.ManageAgyAccount:output_type -> astrorder.sessiond.v1.AgyAccountResponse
+	135, // 365: astrorder.sessiond.v1.EventStream.Subscribe:output_type -> astrorder.sessiond.v1.EventStreamFrame
+	137, // 366: astrorder.sessiond.v1.EventStream.AppendEvent:output_type -> astrorder.sessiond.v1.AppendEventResponse
+	148, // 367: astrorder.sessiond.v1.TerminalStream.Open:output_type -> astrorder.sessiond.v1.TerminalServerFrame
+	151, // 368: astrorder.sessiond.v1.OperationQuery.GetOperation:output_type -> astrorder.sessiond.v1.OperationReceipt
+	161, // 369: astrorder.sessiond.v1.ModelConfig.Plan:output_type -> astrorder.sessiond.v1.ModelConfigPlanResponse
+	164, // 370: astrorder.sessiond.v1.ModelConfig.Apply:output_type -> astrorder.sessiond.v1.ModelConfigApplyResponse
+	166, // 371: astrorder.sessiond.v1.ModelConfig.Reload:output_type -> astrorder.sessiond.v1.ModelConfigReloadResponse
+	179, // 372: astrorder.sessiond.v1.ConnectorIngress.Connect:output_type -> astrorder.sessiond.v1.ConnectorIngressAck
+	181, // 373: astrorder.sessiond.v1.ConnectorIngress.BindControlSession:output_type -> astrorder.sessiond.v1.BindControlSessionResponse
+	183, // 374: astrorder.sessiond.v1.ConnectorIngress.DisconnectConnector:output_type -> astrorder.sessiond.v1.DisconnectConnectorResponse
+	332, // [332:375] is the sub-list for method output_type
+	289, // [289:332] is the sub-list for method input_type
+	289, // [289:289] is the sub-list for extension type_name
+	289, // [289:289] is the sub-list for extension extendee
+	0,   // [0:289] is the sub-list for field type_name
 }
 
 func init() { file_astrorder_sessiond_v1_sessiond_proto_init() }
@@ -14592,8 +14804,8 @@ func file_astrorder_sessiond_v1_sessiond_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_astrorder_sessiond_v1_sessiond_proto_rawDesc), len(file_astrorder_sessiond_v1_sessiond_proto_rawDesc)),
-			NumEnums:      18,
-			NumMessages:   165,
+			NumEnums:      19,
+			NumMessages:   167,
 			NumExtensions: 0,
 			NumServices:   8,
 		},

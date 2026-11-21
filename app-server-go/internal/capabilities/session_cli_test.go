@@ -159,7 +159,7 @@ func TestSessionCLISetupSupportsRemoteAntigravity(t *testing.T) {
 	svc.CLIBinary = func(context.Context, envtarget.Env) (string, []byte, error) {
 		return "astrorder-agent", []byte("#!/bin/sh\nexit 0\n"), nil
 	}
-	agyHome := env.P.Home + "/.gemini/antigravity"
+	agyHome := env.P.Antigravity
 	for _, module := range []string{"astrorder-sessions", "astrorder-browser"} {
 		file := agyHome + "/skills/" + module + "/scripts/astrorder-agent"
 		env.Bins[file] = file

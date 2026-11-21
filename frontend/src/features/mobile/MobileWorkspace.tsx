@@ -14,7 +14,7 @@ import type { Agent, AgentCommand, AgentMention, Approval, Command, Message, Ses
 import { findSessionHandoff, newCommandId, scopeKey } from '../../domain/semantics'
 import { NotificationPermissionControl } from '../../components/NotificationPermissionControl'
 import { useSessionUnread } from '../../hooks/useSessionUnread'
-import { selectApprovals, selectCommands, selectMessages, selectProjects, selectSessions, selectTasks, useAstrorderStore } from '../../state/store'
+import { isDisconnectedSessionRoute, selectApprovals, selectCommands, selectMessages, selectProjects, selectSessions, selectTasks, useAstrorderStore } from '../../state/store'
 import { useSessionResources } from '../../hooks/useAstrorderData'
 import { useSessionModel } from '../../hooks/useSessionModel'
 import { useSessionOrder, notifySessionSubmitted } from '../../hooks/useSessionOrder'
@@ -136,7 +136,12 @@ export function MobileWorkspace() {
   }, [sessions, openState.data])
   const route = new URLSearchParams(location.search)
   const routeId = location.pathname.match(/\/chat\/([^/]+)$/)?.[1]
-  const selected = navigableSessions.find(s => s.id === (routeId ? decodeURIComponent(routeId) : '') && s.agent_id === route.get('agent_id')) || null
+  const sessionId = routeId ? decodeURIComponent(routeId) : ''
+  const agentId = route.get('agent_id')
+  const disconnectedRoute = useAstrorderStore(state =>
+    Boolean(sessionId) && isDisconnectedSessionRoute(state, sessionId, agentId),
+  )
+  const selected = navigableSessions.find(s => s.id === sessionId && s.agent_id === agentId) || null
   const { isUnread, markRead } = useSessionUnread(selected ? scopeKey(selected.agent_id, selected.id) : undefined)
   const [sheet, setSheet] = useState<'sessions' | 'status' | 'goal' | 'tasks' | 'task' | 'models' | 'connections' | 'gateway' | 'blackboard' | 'browser' | 'kernels' | null>(null)
   const [workbenchMounted, setWorkbenchMounted] = useState(false)
@@ -161,7 +166,12 @@ export function MobileWorkspace() {
     navigate(`/mobile/chat/${encodeURIComponent(session.id)}?agent_id=${encodeURIComponent(session.agent_id)}`, { replace: true })
     setSheet(null)
   }
-  useEffect(() => { if (!routeId && sessions.length) navigate(`/mobile/chat/${encodeURIComponent(sessions[0].id)}?agent_id=${encodeURIComponent(sessions[0].agent_id)}`, { replace: true }) }, [routeId, sessions, navigate])
+  useEffect(() => {
+    if (routeId && !disconnectedRoute) return
+    const next = sessions[0]
+    if (next) navigate(`/mobile/chat/${encodeURIComponent(next.id)}?agent_id=${encodeURIComponent(next.agent_id)}`, { replace: true })
+    else if (disconnectedRoute) navigate('/mobile', { replace: true })
+  }, [routeId, disconnectedRoute, sessions, navigate])
   const resources = useSessionResources(selected, true)
   const sessionModel = useSessionModel(selected)
   const sessionUsage = useQuery({ queryKey: ['astrorder', 'session_usage', selected?.id, selected?.agent_id], queryFn: () => api.getSessionUsage(selected!.id, selected!.agent_id), enabled: Boolean(selected), retry: false, staleTime: 5000, refetchInterval: selected?.status === 'running' ? 3000 : false })

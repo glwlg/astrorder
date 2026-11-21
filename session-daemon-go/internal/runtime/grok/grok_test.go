@@ -757,7 +757,7 @@ func TestFakeACP_EmitFailure(t *testing.T) {
 }
 
 func TestRealGrokIntegration(t *testing.T) {
-	grokBin := "/home/luwei/.grok/bin/grok"
+	grokBin := "/home/fixture/.grok/bin/grok"
 	if _, err := os.Stat(grokBin); err != nil {
 		t.Skip("real Grok binary not found on host; native not verifiable")
 	}

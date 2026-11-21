@@ -1460,11 +1460,16 @@ func projectRuntimeOwnerTx(
 	}
 
 	if pid <= 0 {
-		// Early agy builds emitted terminal status under runtime.owner without
-		// a PID. Replay that exact legacy shape as status, never as ownership.
+		// Antigravity emitted terminal status under runtime.owner without a PID.
+		// SSH agents also report running here without a local process to own.
 		agentID, _ := payload["agent_id"].(string)
 		status, _ := payload["status"].(string)
-		if payload["owner_pid"] == nil && payload["runtime_owned"] == true && agentID != "" && (status == "idle" || status == "error") {
+		sessionID, _ := payload["session_id"].(string)
+		connectionID, _ := payload["connection_id"].(string)
+		terminalStatus := status == "idle" || status == "error"
+		sshRunning := status == "running" && connectionID != "" && agentID == "ssh-antigravity-"+connectionID &&
+			sessionID == streamID && (pbOwner == nil || pbOwner.OwnerPid == nil)
+		if payload["owner_pid"] == nil && payload["runtime_owned"] == true && agentID != "" && (terminalStatus || sshRunning) {
 			var kind string
 			err := tx.QueryRowContext(ctx, "SELECT kind FROM agents WHERE id=?", agentID).Scan(&kind)
 			if err == sql.ErrNoRows && strings.HasPrefix(agentID, "ssh-antigravity-") {

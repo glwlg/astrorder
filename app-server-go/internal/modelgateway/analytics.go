@@ -59,10 +59,11 @@ func (h *Handler) handleGetAnalyticsUsage(w http.ResponseWriter, r *http.Request
 		return
 	}
 	source := strings.TrimSpace(q.Get("source"))
-	if source != "" && source != "all" && source != "direct" && source != "gateway" {
+	if source != "" && source != "all" && source != "direct" && source != "gateway" && source != "sessions" {
 		writeError(w, http.StatusUnprocessableEntity, "invalid_source", "统计来源无效")
 		return
 	}
+	connectionID := strings.TrimSpace(q.Get("connection_id"))
 
 	sinceStr := q.Get("since")
 	untilStr := q.Get("until")
@@ -85,8 +86,8 @@ func (h *Handler) handleGetAnalyticsUsage(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if source == "direct" {
-		direct, dErr := h.collectDirectUsage(r.Context(), cfg, rangeVal, surface, sinceStr, untilStr)
+	if source == "sessions" || source == "direct" {
+		direct, dErr := h.collectSessionUsage(r.Context(), cfg, rangeVal, surface, connectionID, sinceStr, untilStr, source == "direct")
 		if dErr != nil {
 			writeError(w, http.StatusInternalServerError, "store_error", dErr.Error())
 			return
@@ -103,6 +104,15 @@ func (h *Handler) handleGetAnalyticsUsage(w http.ResponseWriter, r *http.Request
 	var direct *directUsageAggregate
 	if source != "gateway" {
 		direct, _ = h.collectDirectUsage(r.Context(), cfg, rangeVal, surface, sinceStr, untilStr)
+	}
+
+	if cfg.ManagementURL == "" {
+		if direct != nil {
+			writeJSON(w, http.StatusOK, direct.toResponse(rangeVal, surface))
+		} else {
+			writeError(w, http.StatusServiceUnavailable, "config_error", "请先配置网关管理地址")
+		}
+		return
 	}
 
 	// OpenCodeX usage
@@ -186,6 +196,10 @@ func (h *Handler) handleGetModelQuota(w http.ResponseWriter, r *http.Request) {
 
 	if cfg.GatewayType == "magpie" {
 		h.serveMagpieModelQuota(w, r, cfg, model, agentID)
+		return
+	}
+	if cfg.ManagementURL == "" {
+		writeError(w, http.StatusServiceUnavailable, "config_error", "请先配置网关管理地址")
 		return
 	}
 

@@ -11,8 +11,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "sync": "astrorderctl sync --dev-root .. --installed-root P:/DevApp/Astrorder/server",
-    "build:sync": "tsc -b && vite build && astrorderctl sync --dev-root .. --installed-root P:/DevApp/Astrorder/server"
+    "sync": "astrorderctl sync --dev-root ..",
+    "build:sync": "tsc -b && vite build && astrorderctl sync --dev-root .."
   },
   "dependencies": {
     "@json-render/core": "0.21.0",

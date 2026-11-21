@@ -32,7 +32,7 @@ import { api } from '../../api/client'
 export function NetworkSettingsPage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [publicUrl, setPublicUrl] = useState('https://ao.651971564.xyz')
+  const [publicUrl, setPublicUrl] = useState('')
   const [allowedOrigins, setAllowedOrigins] = useState<string[]>([])
   const [localIp, setLocalIp] = useState('127.0.0.1')
   const [port, setPort] = useState(30001)
@@ -43,7 +43,7 @@ export function NetworkSettingsPage() {
     setLoading(true)
     try {
       const res = await api.getNetworkConfig()
-      setPublicUrl(res.public_url || 'https://ao.651971564.xyz')
+      setPublicUrl(res.public_url || '')
       setAllowedOrigins(res.allowed_origins || [])
       setLocalIp(res.local_ip || '127.0.0.1')
       setPort(res.port || 30001)
@@ -164,7 +164,7 @@ export function NetworkSettingsPage() {
             <TextInput
               label="公网 / 内网穿透域名 (Public URL)"
               description="手机浏览器或 PWA 应用通过此地址访问星序工作台（例如 Cloudflare Tunnel / FRP 域名）"
-              placeholder="https://ao.651971564.xyz"
+              placeholder="https://astrorder.example.com"
               value={publicUrl}
               onChange={(e) => setPublicUrl(e.currentTarget.value)}
               disabled={saving}
@@ -269,11 +269,11 @@ export function NetworkSettingsPage() {
             {/* 添加新来源栏 */}
             <Group gap="xs">
               <TextInput
-                placeholder="例如 https://ao.651971564.xyz 或 http://192.168.1.11:30001"
+                placeholder="例如 https://astrorder.example.com 或 http://localhost:30001"
                 value={newOrigin}
                 onChange={(e) => setNewOrigin(e.currentTarget.value)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
+                  if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
                     e.preventDefault()
                     handleAddOrigin()
                   }

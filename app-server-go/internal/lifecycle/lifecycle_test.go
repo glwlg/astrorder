@@ -101,6 +101,61 @@ func TestAppLifecycleUsesExactIdentityHealthAndAuthenticatedExit(t *testing.T) {
 	}
 }
 
+func TestAppRestartWaitsForGracefulCleanupAfterListenerCloses(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("native Windows process identity test")
+	}
+	stateDir := t.TempDir()
+	address := unusedLoopbackAddress(t)
+	const secret = "isolated-graceful-restart-secret"
+
+	// Use a file so only the first process delays its exit. The replacement
+	// still uses the same launch configuration and can stop normally.
+	delayPath := filepath.Join(stateDir, "delay-shutdown")
+	if err := os.WriteFile(delayPath, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	options := AppOptions{
+		ExecutablePath: os.Args[0],
+		Arguments:      []string{"-test.run=^TestLifecycleHelperProcess$"},
+		WorkingDir:     stateDir,
+		Environment: append(os.Environ(),
+			"ASTRORDER_LIFECYCLE_HELPER=1",
+			"ASTRORDER_LIFECYCLE_ADDRESS="+address,
+			"ASTRORDER_LIFECYCLE_SECRET="+secret,
+			"ASTRORDER_LIFECYCLE_DELAY_PATH="+delayPath,
+		),
+		StateDir:      stateDir,
+		Address:       address,
+		BrowserSecret: secret,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
+	defer cancel()
+	started, err := StartApp(ctx, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 14*time.Second)
+		defer cancel()
+		if _, err := StopApp(cleanupCtx, options); err != nil {
+			t.Errorf("stop isolated App: %v", err)
+		}
+	})
+	restarted, err := RestartApp(ctx, options)
+	if err != nil {
+		// Allow the already stopping fixture to finish before cleanup.
+		time.Sleep(2 * time.Second)
+		t.Fatal(err)
+	}
+	if restarted.State != StateRunning || !restarted.PortOwned || restarted.Process == started.Process {
+		t.Fatalf("replacement App was not confirmed running: %+v", restarted)
+	}
+	if _, err := InspectProcess(started.Process.PID); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("old App exit was not confirmed: %v", err)
+	}
+}
+
 func TestValidateAppOptionsRejectsBroadStateOrExternalLogTargets(t *testing.T) {
 	base := t.TempDir()
 	volumeRoot := filepath.Clean(filepath.VolumeName(base) + string(filepath.Separator))
@@ -344,6 +399,13 @@ func TestLifecycleHelperProcess(t *testing.T) {
 	}
 	if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		t.Fatal(err)
+	}
+	if path := os.Getenv("ASTRORDER_LIFECYCLE_DELAY_PATH"); path != "" {
+		if err := os.Remove(path); err == nil {
+			time.Sleep(11 * time.Second)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			t.Fatal(err)
+		}
 	}
 }
 

@@ -2,6 +2,35 @@ import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 import type { ArtifactRef } from '../../domain/artifact'
 
+function normalizeComparePath(raw: string): string {
+  const trimmed = raw.trim().replace(/\\/g, '/')
+  if (!trimmed) return ''
+  if (trimmed === '/') return '/'
+  if (/^[a-zA-Z]:\/?$/.test(trimmed)) return `${trimmed[0].toLowerCase()}:/`
+  const stripped = trimmed.replace(/\/+$/, '')
+  return /^[a-zA-Z]:\//.test(stripped) ? `${stripped[0].toLowerCase()}${stripped.slice(1)}` : stripped
+}
+
+function isPathWithinRoot(filePath: string, rootPath?: string): boolean {
+  if (!rootPath) return false
+  const normFile = normalizeComparePath(filePath)
+  const normRoot = normalizeComparePath(rootPath)
+  if (!normFile || !normRoot) return false
+  if (normFile === normRoot) return true
+  if (normRoot === '/' || /^[a-z]:\/$/.test(normRoot)) return normFile.startsWith(normRoot)
+  return normFile.startsWith(`${normRoot}/`)
+}
+
+function parentDirectoryOf(filePath: string): string {
+  const trimmed = filePath.trim().replace(/[\\/]+$/, '')
+  if (!trimmed) return ''
+  const slashIdx = Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\'))
+  if (slashIdx < 0) return ''
+  if (slashIdx === 0 && trimmed.startsWith('/')) return '/'
+  if (/^[a-zA-Z]:$/.test(trimmed.slice(0, slashIdx))) return `${trimmed.slice(0, slashIdx)}${trimmed[slashIdx]}`
+  return trimmed.slice(0, slashIdx)
+}
+
 export type SidecarTabType = 'details' | 'artifact'
 
 export interface SidecarTab {
@@ -224,6 +253,61 @@ export const useSidecarStore = create<SidecarState>()(persist((set, get) => ({
   },
 
   revealFileInTree: (sessionId, agentId, filePath, workspacePath, workspaceName, connectionId) => {
+    const dirRoot = parentDirectoryOf(filePath)
+    if (workspacePath && dirRoot && !isPathWithinRoot(filePath, workspacePath)) {
+      const current = get()
+      const tabId = `filetree:${sessionId}:${dirRoot}`
+      const dirLabel = dirRoot.replace(/[/\\]+$/, '').split(/[/\\]/).filter(Boolean).pop() || dirRoot
+      const title = `目录 (${dirLabel})`
+      const nextMetadata = { revealPath: filePath, revealAt: Date.now() }
+      const existingIndex = current.tabs.findIndex((tab) => tab.id === tabId)
+      const nextTabs = existingIndex >= 0
+        ? current.tabs.map((tab, index) => index === existingIndex && tab.artifact ? {
+            ...tab,
+            title,
+            artifact: {
+              ...tab.artifact,
+              name: title,
+              path: dirRoot,
+              connectionId,
+              metadata: { ...tab.artifact.metadata, ...nextMetadata },
+            },
+          } : tab)
+        : [
+            ...current.tabs,
+            {
+              id: tabId,
+              type: 'artifact' as const,
+              title,
+              artifact: {
+                id: tabId,
+                name: title,
+                kind: 'workspace_file' as const,
+                mediaType: 'application/x-directory',
+                readUrl: '',
+                writable: false,
+                path: dirRoot,
+                sessionId,
+                agentId,
+                connectionId,
+                metadata: nextMetadata,
+              },
+              viewerId: 'filetree-viewer',
+              closable: true,
+            },
+          ]
+      set({
+        tabs: nextTabs,
+        isOpen: true,
+        activeTabId: tabId,
+        sessionMemories: current.activeSessionKey ? {
+          ...current.sessionMemories,
+          [current.activeSessionKey]: { tabs: nextTabs, activeTabId: tabId, isOpen: true },
+        } : current.sessionMemories,
+      })
+      return
+    }
+
     get().openFileTree(sessionId, agentId, workspacePath, workspaceName, connectionId)
     const tabId = `filetree:${sessionId}`
     const current = get()

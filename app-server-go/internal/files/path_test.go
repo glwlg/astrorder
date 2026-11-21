@@ -7,8 +7,8 @@ import (
 
 func TestFileParentPreservesTargetPathSyntax(t *testing.T) {
 	for _, test := range []struct{ input, want string }{
-		{"/home/luwei/workspace/OpsCore/app.go", "/home/luwei/workspace/OpsCore"},
-		{"/home/luwei/中文 空格/app.go", "/home/luwei/中文 空格"},
+		{"/home/fixture/workspace/ExampleProject/app.go", "/home/fixture/workspace/ExampleProject"},
+		{"/home/fixture/中文 空格/app.go", "/home/fixture/中文 空格"},
 		{"/app.go", "/"},
 		{"//server/share/app.go", "//server/share"},
 		{filepath.Join(t.TempDir(), "app.go"), ""},

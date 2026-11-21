@@ -1,6 +1,7 @@
 import { chromium, expect } from '@playwright/test'
 import fs from 'node:fs/promises'
-const out='C:/Users/luwei/AppData/Local/hermes/cache/scratch/file-transfer-fix'
+const out = process.env.ASTRORDER_FILE_TEST_NATIVE_DIR
+if (!out) throw new Error("ASTRORDER_FILE_TEST_NATIVE_DIR is required")
 let browser
 for(let i=0;i<50;i++){
  try {browser=await chromium.connectOverCDP('http://127.0.0.1:9357');break}catch{await new Promise(r=>setTimeout(r,200))}

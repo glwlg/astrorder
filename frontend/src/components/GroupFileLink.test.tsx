@@ -13,7 +13,7 @@ import { GroupFileLink } from "./GroupFileLink";
 const file: GroupFileReference = {
   id: "file-bbbbbbbb", group_id: "group-files", member_id: "dev", member_name: "开发",
   agent_id: "agent-dev", session_id: "same-native-session", connection_id: "ssh-dev",
-  workspace: "/home/luwei/project", path: "/home/luwei/project/docs/方案.md", aliases: ["docs/方案.md"],
+  workspace: "/home/fixture/project", path: "/home/fixture/project/docs/方案.md", aliases: ["docs/方案.md"],
   name: "方案.md", content_key: "artifacts.file-bbbbbbbb", created_at: "",
 };
 const windows: Session = {
@@ -42,7 +42,7 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); delete (window as
 
 describe("automatic group artifacts", () => {
   it("opens a path forwarded by Windows using the first Linux publisher without a source dialog", async () => {
-    mount(`[设计转发](</home/luwei/project/docs/%E6%96%B9%E6%A1%88.md:12>)`);
+    mount(`[设计转发](</home/fixture/project/docs/%E6%96%B9%E6%A1%88.md:12>)`);
     fireEvent.click(screen.getByRole("button", { name: /设计转发/ }));
     await waitFor(() => expect(useSidecarStore.getState().tabs).toHaveLength(1));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -76,7 +76,7 @@ describe("automatic group artifacts", () => {
 
   it("keeps unknown paths and blackboard keys as text without probing the sender's filesystem", () => {
     load.mockResolvedValue([]);
-    mount("[未收集](docs/missing.md) `$.data.records[*]` `api-review.opscore.assessment`");
+    mount("[未收集](docs/missing.md) `$.data.records[*]` `api-review.example-project.assessment`");
     expect(screen.getByText("未收集")).toBeInTheDocument();
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
     expect(load).not.toHaveBeenCalled();
@@ -123,7 +123,7 @@ describe("automatic group artifacts", () => {
   });
 
   it("opens an existing skill reference without placing it in the delivered artifact list", () => {
-    const skill = { ...file, id: "skill", path: "/home/luwei/.codex/skills/astrorder-blackboard/SKILL.md", name: "SKILL.md", content_key: "", aliases: [] };
+    const skill = { ...file, id: "skill", path: "/home/fixture/.codex/skills/astrorder-blackboard/SKILL.md", name: "SKILL.md", content_key: "", aliases: [] };
     mount(`[工具说明](${skill.path})`, [skill]);
     fireEvent.click(screen.getByRole("button", { name: /工具说明/ }));
     expect(useSidecarStore.getState().tabs[0].artifact?.path).toBe(skill.path);

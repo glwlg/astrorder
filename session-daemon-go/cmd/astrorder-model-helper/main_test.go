@@ -86,7 +86,7 @@ func TestModelHelperBackwardCompatibilityAndAntigravitySubcommand(t *testing.T) 
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(`CREATE TABLE conversation_summaries(conversation_id TEXT,title TEXT,last_modified_time TEXT,workspace_uris TEXT,not_fully_idle NUMERIC,killed NUMERIC);
-		INSERT INTO conversation_summaries VALUES(?,'Helper Title','2026-11-17 16:00:00Z','["file:///home/luwei/ws"]',0,0)`, cid); err != nil {
+		INSERT INTO conversation_summaries VALUES(?,'Helper Title','2026-11-17 16:00:00Z','["file:///home/fixture/ws"]',0,0)`, cid); err != nil {
 		t.Fatal(err)
 	}
 	_ = db.Close()

@@ -416,6 +416,10 @@ func TestStreamHelper(t *testing.T) {
 			fmt.Println("claude-test\tTest Claude")
 			os.Exit(0)
 		}
+		if arg == "/usage" {
+			fmt.Println(`{"status":"SUCCESS","command":{"name":"usage","data":{"description":"Quota summary","groups":[{"name":"Gemini Models","description":"Models within this group: Gemini 4 Neon, Gemini 3.8 Flash","buckets":[{"id":"gemini-weekly","name":"Weekly Limit Remaining","window":"weekly","remaining_fraction":0.75,"reset_time":"2026-11-26T14:00:55Z"}]}]}}}`)
+			os.Exit(0)
+		}
 	}
 	serveMockACP(os.Stdin, os.Stdout, "11111111-1111-4111-8111-111111111111", os.Getenv("ASTRORDER_AGY_EOF") == "1")
 	os.Exit(0)
@@ -475,10 +479,14 @@ func TestACPLifecycleAndCapabilities(t *testing.T) {
 		t.Fatalf("expected ACP slash commands, got %+v", cmds)
 	}
 
-	// Verify compliant tier-only quota metadata from _meta.antigravity.tier.
+	// Verify compliant tier metadata + official `agy -p '/usage'` quota groups.
 	quotaRes, err := a.Query(ctx, core.Request{Fields: map[string]any{"method": "quota.read"}})
 	if err != nil || quotaRes["plan"] != "Google AI Ultra" {
 		t.Fatalf("unexpected ACP tier quota: %+v %v", quotaRes, err)
+	}
+	groups, _ := quotaRes["groups"].([]map[string]any)
+	if len(groups) != 1 || groups[0]["name"] != "Gemini Models" {
+		t.Fatalf("expected official usage groups in quota.read, got: %+v", quotaRes)
 	}
 
 	// Send text + multimodal PNG attachment.

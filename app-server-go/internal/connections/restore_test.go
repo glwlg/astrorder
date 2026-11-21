@@ -148,7 +148,7 @@ func TestRestoreRestoresEnabledRemoteConnections(t *testing.T) {
 	daemon := &fakeDaemonService{}
 	resolver := &recordingResolver{
 		results: map[string]string{
-			"codex": "/home/luwei/.vite-plus/bin/codex",
+			"codex": "/home/fixture/.vite-plus/bin/codex",
 		},
 	}
 	h, st := setupRestoreFixture(t, daemon, resolver)
@@ -158,8 +158,8 @@ func TestRestoreRestoresEnabledRemoteConnections(t *testing.T) {
 		"id":           "remote-debian",
 		"host":         "192.168.1.50",
 		"display_name": "Debian Server",
-		"user":         "luwei",
-		"workspace":    "/home/luwei/workspace",
+		"user":         "fixture",
+		"workspace":    "/home/fixture/workspace",
 		"state":        "configured",
 	})
 	if err != nil {
@@ -191,8 +191,8 @@ func TestRestoreRestoresEnabledRemoteConnections(t *testing.T) {
 			if req.Target == nil || req.Target.Runtime != pb.RuntimeKind_RUNTIME_KIND_CODEX_SSH {
 				t.Errorf("expected RuntimeKind CODEX_SSH, got %v", req.Target)
 			}
-			if req.Target.Ssh == nil || req.Target.Ssh.GetCodexExecutable() != "/home/luwei/.vite-plus/bin/codex" {
-				t.Errorf("expected codex executable /home/luwei/.vite-plus/bin/codex, got %v", req.Target.Ssh)
+			if req.Target.Ssh == nil || req.Target.Ssh.GetCodexExecutable() != "/home/fixture/.vite-plus/bin/codex" {
+				t.Errorf("expected codex executable /home/fixture/.vite-plus/bin/codex, got %v", req.Target.Ssh)
 			}
 		}
 		if req.Session != nil && req.Session.SessionId == "probe-grok-"+connID {
@@ -212,8 +212,8 @@ func TestRestoreRestoresConnectedHermesWhenChoiceNotSet(t *testing.T) {
 		"id":           "remote-hermes-box",
 		"host":         "192.168.1.60",
 		"display_name": "Hermes Remote",
-		"user":         "luwei",
-		"workspace":    "/home/luwei/hermes",
+		"user":         "fixture",
+		"workspace":    "/home/fixture/hermes",
 		"state":        "connected",
 	})
 	if err != nil {
@@ -315,7 +315,7 @@ func TestEnvironmentsExecutableFieldPopulation(t *testing.T) {
 	daemon := &fakeDaemonService{}
 	resolver := &recordingResolver{
 		results: map[string]string{
-			"codex": "/home/luwei/.vite-plus/bin/codex",
+			"codex": "/home/fixture/.vite-plus/bin/codex",
 		},
 	}
 	h, st := setupRestoreFixture(t, daemon, resolver)
@@ -325,7 +325,7 @@ func TestEnvironmentsExecutableFieldPopulation(t *testing.T) {
 		"id":           "debian-box",
 		"host":         "192.168.1.10",
 		"display_name": "Debian Box",
-		"user":         "luwei",
+		"user":         "fixture",
 		"state":        "configured",
 		"hermes_path":  "/opt/hermes/bin/hermes",
 	}); err != nil {
@@ -351,8 +351,8 @@ func TestEnvironmentsExecutableFieldPopulation(t *testing.T) {
 		switch kind {
 		case "codex":
 			// Probed executable
-			if agent["executable"] != "/home/luwei/.vite-plus/bin/codex" {
-				t.Errorf("expected codex executable /home/luwei/.vite-plus/bin/codex, got %v", agent["executable"])
+			if agent["executable"] != "/home/fixture/.vite-plus/bin/codex" {
+				t.Errorf("expected codex executable /home/fixture/.vite-plus/bin/codex, got %v", agent["executable"])
 			}
 		case "hermes":
 			// Explicit hermes_path
@@ -395,7 +395,7 @@ func TestEnvironmentsExecutableFieldPopulation(t *testing.T) {
 		if item["id"] == "debian-box" {
 			for _, a := range itemAgents {
 				agent := a.(map[string]any)
-				if agent["kind"] == "codex" && agent["executable"] != "/home/luwei/.vite-plus/bin/codex" {
+				if agent["kind"] == "codex" && agent["executable"] != "/home/fixture/.vite-plus/bin/codex" {
 					t.Errorf("listing codex missing executable: %v", agent)
 				}
 				if agent["kind"] == "hermes" && agent["executable"] != "/opt/hermes/bin/hermes" {
@@ -420,7 +420,7 @@ func TestRestoreConnectsRemoteAntigravityAndDegradesOnPreUpdateDaemon(t *testing
 		})
 		resolver := &recordingResolver{
 			results: map[string]string{
-				"antigravity": "/home/luwei/.local/bin/agy",
+				"antigravity": "/home/fixture/.local/bin/agy",
 			},
 		}
 		h, st := setupRestoreFixture(t, daemon, resolver)
@@ -428,8 +428,8 @@ func TestRestoreConnectsRemoteAntigravityAndDegradesOnPreUpdateDaemon(t *testing
 			"id":           "wsl-node",
 			"host":         "127.0.0.1",
 			"display_name": "WSL",
-			"user":         "luwei",
-			"workspace":    "/home/luwei/workspace",
+			"user":         "fixture",
+			"workspace":    "/home/fixture/workspace",
 			"state":        "configured",
 		}); err != nil {
 			t.Fatal(err)
@@ -450,7 +450,7 @@ func TestRestoreConnectsRemoteAntigravityAndDegradesOnPreUpdateDaemon(t *testing
 				if req.Target.GetRuntime() != pb.RuntimeKind_RUNTIME_KIND_ANTIGRAVITY_SSH || req.Target.GetConnectionId() != "wsl-node" {
 					t.Fatalf("unexpected target: %v", req.Target)
 				}
-				if req.Target.Ssh == nil || req.Target.Ssh.GetAntigravityExecutable() != "/home/luwei/.local/bin/agy" {
+				if req.Target.Ssh == nil || req.Target.Ssh.GetAntigravityExecutable() != "/home/fixture/.local/bin/agy" {
 					t.Fatalf("missing antigravity executable: %v", req.Target.Ssh)
 				}
 			}
@@ -472,8 +472,8 @@ func TestRestoreConnectsRemoteAntigravityAndDegradesOnPreUpdateDaemon(t *testing
 		})
 		resolver := &recordingResolver{
 			results: map[string]string{
-				"codex":       "/home/luwei/.vite-plus/bin/codex",
-				"antigravity": "/home/luwei/.local/bin/agy",
+				"codex":       "/home/fixture/.vite-plus/bin/codex",
+				"antigravity": "/home/fixture/.local/bin/agy",
 			},
 		}
 		h, st := setupRestoreFixture(t, daemon, resolver)
@@ -481,7 +481,7 @@ func TestRestoreConnectsRemoteAntigravityAndDegradesOnPreUpdateDaemon(t *testing
 			"id":           "wsl-node",
 			"host":         "127.0.0.1",
 			"display_name": "WSL",
-			"user":         "luwei",
+			"user":         "fixture",
 			"state":        "configured",
 		}); err != nil {
 			t.Fatal(err)

@@ -81,12 +81,7 @@ func ResolveOpenCodexProfile(ctx context.Context, st *store.Store) OpenCodexGate
 		profile.APIKey = envToken
 	}
 
-	// If inference URL is still empty and default is needed
-	if profile.InferenceURL == "" {
-		profile.InferenceURL = "https://llm.651971564.xyz/v1"
-	}
-
-	profile.InferenceURL = strings.TrimRight(profile.InferenceURL, "/")
+	profile.InferenceURL = strings.TrimRight(strings.TrimSpace(profile.InferenceURL), "/")
 	return profile
 }
 

@@ -1,8 +1,11 @@
 import { chromium, expect } from '@playwright/test'
-import { execFileSync } from 'node:child_process'
 import fs from 'node:fs/promises'
 const origin='http://127.0.0.1:30001'
-const token=execFileSync('P:/DevApp/Astrorder/server/bin/astrorderctl.exe',['login','--state-dir','C:/Users/luwei/AppData/Local/astrorder'],{encoding:'utf8',windowsHide:true}).trim()
+const token = process.env.ASTRORDER_E2E_TOKEN
+if (!token) throw new Error("ASTRORDER_E2E_TOKEN is required")
+const expectedProjects = JSON.parse(process.env.ASTRORDER_E2E_PROJECTS || "[]")
+if (!expectedProjects.length) throw new Error("ASTRORDER_E2E_PROJECTS must list the expected projects")
+await fs.mkdir("test-results", { recursive: true })
 const browser=await chromium.launch({executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true})
 try {
  const context=await browser.newContext({viewport:{width:1440,height:1000}})
@@ -16,7 +19,7 @@ try {
  await expect(page.locator('.session-project-group').first()).toBeVisible({timeout:15000})
  const groups=page.locator('.session-project-group')
  const results=[]
- for(const name of ['astrorder','OpsCore','xiuxian']){
+ for(const name of expectedProjects){
   const selected=groups.filter({has:page.locator('.session-project-header')}).filter({hasText:name}).first()
   await selected.getByRole('button',{name:'新建会话',exact:true}).click()
   const select=page.getByLabel('选择 Agent',{exact:true})
@@ -30,6 +33,6 @@ try {
   await page.getByRole('button',{name:'取消',exact:true}).click()
  }
  const output={ok:true,scope:'installed frontend and live API; opened dialogs only, no session creation or model request',results}
- await fs.writeFile('C:/Users/luwei/AppData/Local/hermes/cache/scratch/grok-registration-fix/browser-verified.json',JSON.stringify(output,null,2))
+ await fs.writeFile('test-results/grok-registration.json',JSON.stringify(output,null,2))
  console.log(JSON.stringify(output))
 }finally{await browser.close()}

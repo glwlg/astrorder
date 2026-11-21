@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"astrorder.dev/app-server/internal/auth"
+	"astrorder.dev/app-server/internal/connections"
 	"astrorder.dev/app-server/internal/daemonclient"
 
 	"astrorder.dev/app-server/internal/store"
@@ -27,21 +28,23 @@ type BrowserAuthorizer interface {
 
 // Options configures the model gateway handler.
 type Options struct {
-	Store      *store.Store
-	Client     *daemonclient.Client
-	Authorizer BrowserAuthorizer
-	Publisher  Publisher
-	HTTPClient *http.Client
+	Store            *store.Store
+	Client           *daemonclient.Client
+	Authorizer       BrowserAuthorizer
+	Publisher        Publisher
+	HTTPClient       *http.Client
+	RemoteExecutable connections.RemoteExecutableResolver
 }
 
 // Handler handles model gateway, analytics, quota, and model sync routes.
 type Handler struct {
-	store      *store.Store
-	client     *daemonclient.Client
-	authorizer BrowserAuthorizer
-	publisher  Publisher
-	httpClient *http.Client
-	jobs       *jobManager
+	store            *store.Store
+	client           *daemonclient.Client
+	authorizer       BrowserAuthorizer
+	publisher        Publisher
+	httpClient       *http.Client
+	remoteExecutable connections.RemoteExecutableResolver
+	jobs             *jobManager
 
 	directRouteMu        sync.Mutex
 	directRouteCachedAt  time.Time
@@ -60,12 +63,13 @@ func NewHandler(opts Options) (http.Handler, error) {
 	}
 	h := &Handler{
 
-		store:      opts.Store,
-		client:     opts.Client,
-		authorizer: opts.Authorizer,
-		publisher:  opts.Publisher,
-		httpClient: httpClient,
-		jobs:       newJobManager(),
+		store:            opts.Store,
+		client:           opts.Client,
+		authorizer:       opts.Authorizer,
+		publisher:        opts.Publisher,
+		httpClient:       httpClient,
+		remoteExecutable: opts.RemoteExecutable,
+		jobs:             newJobManager(),
 	}
 	return h, nil
 }

@@ -197,19 +197,52 @@ func listSessionsForHome(ctx context.Context, home, agentID, connectionID string
 	return items, rows.Err()
 }
 
+func queryParam(fields map[string]any, key string) (any, bool) {
+	if fields == nil {
+		return nil, false
+	}
+	if rp, ok := fields["request_params"].(map[string]any); ok && rp != nil {
+		if v, exists := rp[key]; exists {
+			return v, true
+		}
+	}
+	v, exists := fields[key]
+	return v, exists
+}
+
 func (a *Adapter) Query(ctx context.Context, r core.Request) (map[string]any, error) {
 	switch str(r.Fields, "method") {
+	case "account.vault.state", "account.vault.capture", "account.vault.quota", "account.vault.check", "account.vault.apply":
+		if r.Action != "agy.account" {
+			return nil, fmt.Errorf("unsupported Antigravity read query")
+		}
+		credential, _ := r.Fields["credential"].([]byte)
+		return a.queryAgyAccounts(ctx, str(r.Fields, "method"), str(r.Fields, "account_id"), credential)
 	case "models.list":
 		items, err := a.models(ctx)
 		return map[string]any{"items": items}, err
 	case "quota.read":
 		return a.quotaRead(ctx)
 	case "session.usage":
-		readonly, _ := r.Fields["readonly"].(bool)
-		return a.readSessionUsage(ctx, str(r.Fields, "conversation_id"), readonly)
+		cid := ""
+		if raw, ok := queryParam(r.Fields, "conversation_id"); ok {
+			if s, ok := raw.(string); ok {
+				cid = s
+			}
+		}
+		readonly := false
+		if raw, ok := queryParam(r.Fields, "readonly"); ok {
+			readonly, _ = raw.(bool)
+		}
+		return a.readSessionUsage(ctx, cid, readonly)
 	case "usage.summary":
-		sinceMs, _ := int64FromAny(r.Fields["since_ms"])
-		untilMs, _ := int64FromAny(r.Fields["until_ms"])
+		var sinceMs, untilMs int64
+		if raw, ok := queryParam(r.Fields, "since_ms"); ok {
+			sinceMs, _ = int64FromAny(raw)
+		}
+		if raw, ok := queryParam(r.Fields, "until_ms"); ok {
+			untilMs, _ = int64FromAny(raw)
+		}
 		return a.readUsageSummary(ctx, sinceMs, untilMs)
 	case "session.list":
 		if a.remoteHelper != nil {

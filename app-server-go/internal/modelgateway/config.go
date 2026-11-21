@@ -64,18 +64,10 @@ func defaultGatewayProfiles() map[string]GatewayProfile {
 	return map[string]GatewayProfile{
 		"opencodex": {
 			GatewayType:     "opencodex",
-			ManagementURL:   "https://ocx.651971564.xyz",
-			InferenceURL:    "https://llm.651971564.xyz/v1",
-			APIKey:          "",
-			ManagementKey:   "",
 			TargetOverrides: map[string]string{},
 		},
 		"magpie": {
 			GatewayType:     "magpie",
-			ManagementURL:   "http://192.168.1.11:3430",
-			InferenceURL:    "http://192.168.1.11:3425/v1",
-			APIKey:          "",
-			ManagementKey:   "",
 			TargetOverrides: map[string]string{},
 		},
 	}

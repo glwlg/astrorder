@@ -1,4 +1,4 @@
-import { ChartLineUpIcon, ChatCircleDotsIcon, CpuIcon, DesktopIcon, GearSixIcon, GlobeHemisphereWestIcon, GraphIcon, KeyboardIcon, LightningIcon, PuzzlePieceIcon, SlidersHorizontalIcon, SquaresFourIcon, UsersThreeIcon } from './workbenchIcons'
+import { ChartLineUpIcon, ChatCircleDotsIcon, CpuIcon, DesktopIcon, GearSixIcon, GlobeHemisphereWestIcon, GraphIcon, HardDrivesIcon, KeyboardIcon, LightningIcon, PuzzlePieceIcon, SlidersHorizontalIcon, SquaresFourIcon, UsersThreeIcon } from './workbenchIcons'
 import { ActionIcon, HoverCard, Modal, NavLink, Stack, Tabs, Text, Tooltip } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useQuery } from '@tanstack/react-query'
@@ -28,6 +28,7 @@ import { NotificationPermissionControl } from './NotificationPermissionControl'
 import { WorkspaceThemeToggle } from './WorkspaceThemeToggle'
 import { connectionName } from './AgentSessionFilter'
 import { scopeKey } from '../domain/semantics'
+import { SessionAccountsHoverCard } from '../features/agentAccounts/SessionAccountsHoverCard'
 
 const navItems = [
   { to: '/chat', label: '会话', icon: ChatCircleDotsIcon, id: 'chat' },
@@ -35,6 +36,8 @@ const navItems = [
   { to: '/swarm', label: '星图', icon: GraphIcon, id: 'swarm' },
   { to: '/groups', label: '群聊', icon: UsersThreeIcon, id: 'groups' },
   { to: '/analytics', label: '统计', icon: ChartLineUpIcon, id: 'analytics' },
+  { to: '/backups', label: '备份', icon: HardDrivesIcon, id: 'backups' },
+  { to: '/agent-accounts', label: '账号', icon: UsersThreeIcon, id: 'agentAccounts' },
 ]
 
 function TodayUsagePreview({ data, pending, error, updatedAt }: {
@@ -147,7 +150,9 @@ export function Sidebar({
   const isGroups = location.pathname.startsWith('/groups') || location.pathname.startsWith('/chat/group-')
   const isMonitorRoute = location.pathname.startsWith('/monitor')
   const isAnalytics = location.pathname.startsWith('/analytics')
-  const isChat = !isSwarm && !isGroups && !isMonitorRoute && !isAnalytics
+  const isBackups = location.pathname.startsWith('/backups')
+  const isAgentAccounts = location.pathname.startsWith('/agent-accounts')
+  const isChat = !isSwarm && !isGroups && !isMonitorRoute && !isAnalytics && !isBackups && !isAgentAccounts
   const groupsBusy = useAstrorderStore(state => Object.values(state.botGroups).some(groupHasActiveTask))
   const connection = useAstrorderStore(state => state.connection)
   const activeSession = sessions.find(session => scopeKey(session.agent_id, session.id) === activeSessionKey)
@@ -167,6 +172,8 @@ export function Sidebar({
                 (id === 'groups' && isGroups) ||
                 (id === 'monitor' && isMonitorRoute) ||
                 (id === 'analytics' && isAnalytics) ||
+                (id === 'backups' && isBackups) ||
+                (id === 'agentAccounts' && isAgentAccounts) ||
                 (id === 'chat' && isChat)
               const link = (
                 <NavLink
@@ -220,6 +227,8 @@ export function Sidebar({
                     <TodayUsagePreview data={todayUsage.data} pending={todayUsage.isPending} error={todayUsage.isError} updatedAt={todayUsage.dataUpdatedAt} />
                   </HoverCard.Dropdown>
                 </HoverCard>
+              ) : id === 'agentAccounts' ? (
+                <SessionAccountsHoverCard key={to} link={link} session={activeSession} agent={activeAgent} />
               ) : (
                 <Tooltip key={to} label={label} position="bottom" withArrow openDelay={200}>{link}</Tooltip>
               )
@@ -238,7 +247,7 @@ export function Sidebar({
             </div>
           </div>
         </nav>
-        <div className="workspace-sidebar-panel">
+        {!isAgentAccounts && <div className="workspace-sidebar-panel">
           <Stack className="sidebar-content" gap="md">
         {isSwarm ? (
           <SwarmRootRail
@@ -276,7 +285,7 @@ export function Sidebar({
             <span className="workspace-connection-dot" aria-hidden="true" />
             <span>{activeAgent ? `${connectionName(activeAgent)} · ` : ''}{connectionLabel}</span>
           </footer>
-        </div>
+        </div>}
       </div>
       <SettingsDrawerScope>{hasOpenDrawer => <Modal
         className="settings-modal"

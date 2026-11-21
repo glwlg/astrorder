@@ -170,7 +170,7 @@ func wslShellRunner(config WSLConfig) shellRunner {
 		if err != nil {
 			return nil, err
 		}
-		// wsl.exe -d <distro> -- /bin/sh  → append the shell script and arguments.
+		// Replace the helper protocol flags with arguments for /bin/sh.
 		base := argv[:len(argv)-3]
 		full := append(append([]string{}, base...), "-c", script, "astrorder-helper-setup")
 		full = append(full, args...)

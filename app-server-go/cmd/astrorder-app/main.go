@@ -250,7 +250,7 @@ func runServer(ctx context.Context, cfg config.Config, ready io.Writer, logger *
 		}
 		defer notificationService.Close()
 		notificationHandler = notificationService
-		groupFileResolver := targetfs.NewResolver(targetfs.ResolverOptions{Store: st, DefaultWorkspace: cfg.DefaultWorkspace, HelperAssetsDir: bundledHelperAssetsDir()})
+		groupFileResolver := targetfs.NewResolver(targetfs.ResolverOptions{Store: st, DefaultWorkspace: cfg.DefaultWorkspace, AllowTempDirs: true, HelperAssetsDir: bundledHelperAssetsDir()})
 		groupService, err = botgroups.New(serverContext, botgroups.Options{Store: st, Controller: &botgroups.NativeController{Store: st, Client: client, Publisher: eventHub, DefaultWorkspace: cfg.DefaultWorkspace, AttachmentsDir: cfg.AttachmentsDir, MaxAttachmentSize: cfg.MaxAttachmentSize, RemoteExecutable: remoteExecutable, Resolver: groupFileResolver}, Authorizer: authorizer, Publisher: eventHub, FileResolver: groupFileResolver})
 		if err != nil {
 			return fmt.Errorf("configure group orchestration: %w", err)
@@ -271,7 +271,7 @@ func runServer(ctx context.Context, cfg config.Config, ready io.Writer, logger *
 				logger.Warn("audio cleanup failed", "error", closeErr)
 			}
 		}()
-		modelHandler, err = modelgateway.NewHandler(modelgateway.Options{Store: st, Client: client, Authorizer: authorizer, Publisher: eventHub})
+		modelHandler, err = modelgateway.NewHandler(modelgateway.Options{Store: st, Client: client, Authorizer: authorizer, Publisher: eventHub, RemoteExecutable: remoteExecutable})
 		if err != nil {
 			return fmt.Errorf("configure model gateway: %w", err)
 		}

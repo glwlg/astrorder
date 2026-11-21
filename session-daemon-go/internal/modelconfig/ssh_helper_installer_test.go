@@ -29,7 +29,7 @@ func TestSSHHelperInstallerCachesAndRecoversMissingBinary(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	remotePath := "/home/luwei/.local/lib/astrorder/model-helper/" + digest + "/astrorder-model-helper"
+	remotePath := "/home/fixture/.local/lib/astrorder/model-helper/" + digest + "/astrorder-model-helper"
 	installCount := 0
 	invokeCount := 0
 	failNext127 := false
@@ -92,7 +92,7 @@ func TestSSHHelperInstallerCachesAndRecoversMissingBinary(t *testing.T) {
 	binaryBytes = []byte("#!/bin/sh\necho fake-helper-v2\n")
 	sum2 := sha256.Sum256(binaryBytes)
 	digest = hex.EncodeToString(sum2[:])
-	remotePath = "/home/luwei/.local/lib/astrorder/model-helper/" + digest + "/astrorder-model-helper"
+	remotePath = "/home/fixture/.local/lib/astrorder/model-helper/" + digest + "/astrorder-model-helper"
 	if err := os.WriteFile(filepath.Join(linuxDir, "astrorder-model-helper"), binaryBytes, 0o700); err != nil {
 		t.Fatal(err)
 	}

@@ -1,9 +1,11 @@
 import { chromium, expect } from '@playwright/test'
 import fs from 'node:fs/promises'
+import path from 'node:path'
 
 // Isolated API and socket fixtures: no real credentials or Agent mutations.
 const origin = process.env.ASTRORDER_ORDER_TEST_ORIGIN || 'http://127.0.0.1:30019'
-const output = process.env.ASTRORDER_ORDER_TEST_OUTPUT || 'C:/Users/luwei/AppData/Local/hermes/cache/scratch/codex-order-browser.json'
+const output = process.env.ASTRORDER_ORDER_TEST_OUTPUT || 'test-results/codex-order-browser.json'
+await fs.mkdir(path.dirname(output), { recursive: true })
 const browser = await chromium.launch({ executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true })
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } })

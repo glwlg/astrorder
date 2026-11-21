@@ -281,6 +281,9 @@ func (h *Handler) buildTargetPlan(ctx context.Context, catalog *Catalog, sel syn
 	if ov, ok := config.TargetOverrides[sel.TargetID]; ok && ov != "" {
 		inferenceURL = ov
 	}
+	if inferenceURL == "" {
+		return nil, errors.New("请先配置网关推理地址")
+	}
 
 	files := make(map[string]string)
 	var oldCatalogModels []any
