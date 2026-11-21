@@ -26,6 +26,7 @@
 .session-account-list li[data-current] { background: color-mix(in srgb, var(--astr-indigo) 8%, transparent); }
 .session-account-row { margin-block-end: 3px; min-block-size: 24px; }
 .session-account-row > strong { font-size: .85rem; }
+.session-account-row .session-account-stamp { margin-inline-start: auto; font-size: .66rem; }
 .session-account-row .agy-current-badge { margin: 0 0 0 auto; }
 .session-account-tier {
   flex-shrink: 0;
@@ -36,7 +37,9 @@
   font-size: .69rem;
   font-weight: 600;
 }
-.session-account-quotas { display: flex; flex-wrap: wrap; gap: 3px 9px; }
+.session-account-quotas { display: grid; gap: 3px; }
+.session-account-period { display: grid; grid-template-columns: 3.1em minmax(0, 1fr); gap: 4px; align-items: baseline; font-size: .75rem; }
+.session-account-period-values { display: flex; flex-wrap: wrap; gap: 2px 9px; }
 .session-account-quota { max-inline-size: 100%; gap: 3px; font-size: .75rem; line-height: 1.4; }
 .session-account-quota > span { overflow-wrap: anywhere; }
 .session-account-quota::before {
@@ -47,8 +50,8 @@
   border-radius: 50%;
   background: var(--mantine-color-blue-5);
 }
-.session-account-quota:nth-child(3n + 2)::before { background: var(--mantine-color-teal-5); }
-.session-account-quota:nth-child(3n)::before { background: var(--mantine-color-grape-5); }
+.session-account-quota[data-color='1']::before { background: var(--mantine-color-teal-5); }
+.session-account-quota[data-color='2']::before { background: var(--mantine-color-grape-5); }
 .session-account-quota b { font-variant-numeric: tabular-nums; }
-.session-account-quota b[data-low] { color: var(--mantine-color-orange-text); }
-.session-account-quota small { font-size: .65rem; }
+.session-account-quota b[data-tone='low'] { color: var(--mantine-color-orange-text); }
+.session-account-quota b[data-tone='empty'] { color: var(--mantine-color-red-text); }

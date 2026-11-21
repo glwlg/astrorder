@@ -5,8 +5,9 @@ import { AgentBrandIcon, agentKindLabel } from '../../components/AgentBrandIcon'
 import { connectionName } from '../../components/AgentSessionFilter'
 import { AgyAccountDialog } from './AgyAccountDialog'
 import { AgyQuotaSummary } from './AgyQuotaSummary'
+import { agyStamp } from './agyQuotaFormat'
 import type { AgyAccount } from './agyAccountsApi'
-import { useRefreshSettings, useScheduledRefresh } from './accountRefresh'
+import { agySessionEnvironment } from './AgyQuotaRefreshProvider'
 import { useAgyAccountMutation } from './useAgyAccountMutation'
 import { useAgyAccountOverview } from './useAgyAccountOverview'
 import './AgyAccountsPage.css'
@@ -22,9 +23,8 @@ function AccountCard({ link, title, children }: { link: ReactElement; title: str
 
 export function SessionAccountsHoverCard({ link, session, agent }: { link: ReactElement; session?: Session; agent?: Agent }) {
   const kind = agent?.kind.replace(/-ssh$/, '')
-  const environment = session?.connection_id || agent?.connection_id || (agent?.kind.endsWith('-ssh') ? '' : 'local')
-  const mismatch = session?.connection_id && agent?.connection_id && session.connection_id !== agent.connection_id
-  if (session && agent && kind === 'antigravity' && environment && !mismatch) {
+  const environment = agySessionEnvironment(session, agent)
+  if (session && agent && environment) {
     const machine = environment === 'local' ? '本机' : agent.connection_id ? connectionName(agent) : environment
     return <AgySessionCard key={JSON.stringify([session.agent_id, session.id, environment])} link={link}
       environment={environment} machine={machine} active={session.status === 'running' || session.status === 'waiting_approval'} />
@@ -57,8 +57,6 @@ function AgyPreview({ environment, machine, busy, error, onSwitch }: {
   environment: string; machine: string; busy: boolean; error?: string; onSwitch: (account: AgyAccount, unsaved: boolean) => void
 }) {
   const { accounts, state, rows, quotas, refresh, refreshing } = useAgyAccountOverview(environment, true)
-  const [settings] = useRefreshSettings('antigravity')
-  useScheduledRefresh(environment, settings, mode => { if (!refreshing && !busy) void refresh(mode) })
   return <>
     <header className="session-account-heading">
       <AgentBrandIcon kind="antigravity" size={22} />
@@ -79,13 +77,17 @@ function AgyPreview({ environment, machine, busy, error, onSwitch }: {
           <div className="session-account-row">
             <strong title={account.name}>{account.name}</strong>
             {plan && <span className="session-account-tier" title={plan}>{plan.replace(/^Google AI /i, '')}</span>}
+            {quota.data && <small className="session-account-stamp">{quota.isFetching || quota.isError ? '上次成功' : '更新于'} <time dateTime={quota.data.as_of}>{agyStamp(quota.data.as_of)}</time></small>}
             {account.current ? <span className="agy-current-badge">当前使用</span> :
               <Button size="compact-sm" variant="light" aria-label={`切换到 ${account.name}`} disabled={!state.isSuccess || busy || refreshing}
                 onClick={() => onSwitch(account, state.data?.current_account_id === 'current')}>切换</Button>}
           </div>
-          {quota.data ? <AgyQuotaSummary quota={quota.data} /> :
-            <small>{state.data?.quota_supported === false ? '此系统暂不支持额度查询' : quota.isFetching ? '正在读取额度…' : '尚未刷新'}</small>}
-          {quota.isError && <small role="status">{quota.error.message}</small>}
+          {state.data?.quota_supported === false ? <small>此系统暂不支持额度查询</small> : <>
+            {quota.data && <AgyQuotaSummary quota={quota.data} />}
+            {quota.isFetching && <small role="status">正在读取最新额度…</small>}
+            {quota.isError && <small role="status">刷新失败：{quota.error.message}</small>}
+            {!quota.data && !quota.isFetching && !quota.isError && <small>尚未刷新</small>}
+          </>}
         </li>
       })}</ul>
     </div>

@@ -1,23 +1,36 @@
-import type { AgyQuota } from './agyAccountsApi'
+import type { AgyQuota, AgyQuotaBucket } from './agyAccountsApi'
 import { agyStamp, percentFormatter, windowName, windowOrder } from './agyQuotaFormat'
 
 const groupLabels: Record<string, string> = { 'Gemini Models': 'Gemini', 'Claude and GPT models': 'Claude / GPT' }
 
 export function AgyQuotaSummary({ quota }: { quota: AgyQuota }) {
-  const items = quota.groups.flatMap(({ name, buckets }) => {
-    const bucket = [...buckets].sort((a, b) => windowOrder(a.window) - windowOrder(b.window))[0]
-    if (!bucket) return []
-    const window = windowName(bucket.window, bucket.name)
-    const percent = percentFormatter.format(bucket.remaining_fraction)
-    const label = `${name} · ${window}剩余额度`
-    const details = [label, percent, bucket.reset_at && `${agyStamp(bucket.reset_at)} 重置`, `更新于 ${agyStamp(quota.as_of)}`]
-    return <span key={`${name}-${bucket.id}`} className="session-account-quota" role="meter"
-      aria-label={label} aria-valuemin={0} aria-valuemax={1} aria-valuenow={bucket.remaining_fraction}
-      aria-valuetext={percent} title={details.filter(Boolean).join(' · ')}>
-      <span>{groupLabels[name] ?? name}</span>
-      <b data-low={bucket.remaining_fraction <= .25 || undefined}>{percent}</b>
-      <small>{window === '5 小时' ? '5h' : window === '每周' ? '周' : window}</small>
-    </span>
+  type Entry = { group: string; color: number; bucket: AgyQuotaBucket }
+  const periods = new Map<string, Entry[]>()
+  quota.groups.forEach(({ name, buckets }, index) => {
+    for (const bucket of buckets) {
+      const period = windowName(bucket.window, bucket.name)
+      const entries = periods.get(period) ?? []
+      entries.push({ group: name, color: index % 3, bucket })
+      periods.set(period, entries)
+    }
   })
-  return items.length ? <div className="session-account-quotas">{items}</div> : <small>暂无额度数据</small>
+  const rows = [...periods].sort(([, a], [, b]) => windowOrder(a[0].bucket.window) - windowOrder(b[0].bucket.window))
+  if (!rows.length) return <small>暂无额度数据</small>
+  return <div className="session-account-quotas">{rows.map(([period, entries]) =>
+    <div className="session-account-period" role="group" aria-label={`${period}额度`} key={period}>
+      <small>{period}</small>
+      <div className="session-account-period-values">{entries.map(({ group, color, bucket }) => {
+        const remaining = bucket.remaining_fraction
+        const percent = percentFormatter.format(remaining)
+        const label = `${group} · ${period}剩余额度`
+        const details = [label, percent, bucket.reset_at && `${agyStamp(bucket.reset_at)} 重置`, `更新于 ${agyStamp(quota.as_of)}`]
+        return <span key={`${group}-${bucket.id}`} className="session-account-quota" data-color={color} role="meter"
+          aria-label={label} aria-valuemin={0} aria-valuemax={1} aria-valuenow={remaining}
+          aria-valuetext={percent} title={details.filter(Boolean).join(' · ')}>
+          <span>{groupLabels[group] ?? group}</span>
+          <b data-tone={remaining === 0 ? 'empty' : remaining <= .25 ? 'low' : undefined}>{percent}</b>
+        </span>
+      })}</div>
+    </div>
+  )}</div>
 }

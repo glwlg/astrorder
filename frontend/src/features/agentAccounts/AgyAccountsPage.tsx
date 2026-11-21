@@ -9,7 +9,8 @@ import { AgyAccountImportDialog } from './AgyAccountImportDialog'
 import { AgyQuotaTiles } from './AgyQuotaTiles'
 import { agyStamp } from './agyQuotaFormat'
 import { AccountRefreshSettings } from './AccountRefreshSettings'
-import { useRefreshSettings, useScheduledRefresh } from './accountRefresh'
+import { useRefreshSettings } from './accountRefresh'
+import { useAccountPageRefreshTarget } from './AgyQuotaRefreshProvider'
 import { metadataPolicy, useAgyAccountOverview } from './useAgyAccountOverview'
 import { useAgyAccountMutation } from './useAgyAccountMutation'
 import './AgyAccountsPage.css'
@@ -28,9 +29,7 @@ export function AgyAccountsPage() {
   const prompt = dialog?.environment === environment ? dialog.prompt : null
 
   const mutation = useAgyAccountMutation(environment)
-  useScheduledRefresh(environment, settings, mode => {
-    if (!mutation.isPending && !dialog && !importOpen && !refreshing) void refresh(mode)
-  })
+  useAccountPageRefreshTarget(environment, Boolean(dialog || importOpen))
 
   async function openAction(account?: typeof rows[number]) {
     const latest = await targetState.refetch({ cancelRefetch: false })

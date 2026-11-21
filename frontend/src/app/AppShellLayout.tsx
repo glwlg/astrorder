@@ -14,6 +14,7 @@ import { ErrorBoundary } from '../components/ErrorBoundary'
 import { Sidebar } from '../components/Sidebar'
 import { BackgroundTasks } from '../components/BackgroundTasks'
 import { useShortcutHandlers } from '../features/shortcuts/shortcuts'
+import { agySessionEnvironment, AgyQuotaRefreshProvider } from '../features/agentAccounts/AgyQuotaRefreshProvider'
 
 const SIDEBAR_WIDTH_KEY = 'astrorder:sidebar_width'
 const SIDEBAR_COLLAPSED_KEY = 'astrorder:sidebar_panel_collapsed'
@@ -87,6 +88,7 @@ export function AppShellLayout({ chatReturnPath }: { chatReturnPath: string }) {
     ? sessions.filter(session => session.id === routeSessionId && (!routeAgentId || session.agent_id === routeAgentId))
     : location.pathname === '/chat' && !forceWelcome && sessions.length === 1 ? sessions : []
   const activeSessionKey = routeCandidates.length === 1 ? scopeKey(routeCandidates[0].agent_id, routeCandidates[0].id) : undefined
+  const session = routeCandidates.length === 1 ? routeCandidates[0] : undefined
   const compactNavigation =
     location.pathname.startsWith('/agent-accounts') ||
     location.pathname.startsWith('/backups') ||
@@ -356,7 +358,9 @@ export function AppShellLayout({ chatReturnPath }: { chatReturnPath: string }) {
       </AppShell.Navbar>
       <AppShell.Main className="shell-main">
         <ErrorBoundary fallbackTitle="会话主区域加载异常">
-          <Outlet />
+          <AgyQuotaRefreshProvider sessionEnvironment={agySessionEnvironment(session, session && agents[session.agent_id])}>
+            <Outlet />
+          </AgyQuotaRefreshProvider>
         </ErrorBoundary>
       </AppShell.Main>
       <Drawer

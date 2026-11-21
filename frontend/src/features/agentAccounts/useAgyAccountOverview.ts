@@ -1,5 +1,4 @@
-import { useEffect, useRef } from 'react'
-import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
+import { QueryObserver, useIsMutating, useMutation, useQueries, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { agyAccountsApi, type AgyQuota } from './agyAccountsApi'
 
 export const metadataPolicy = { staleTime: Infinity, retry: false, retryOnMount: false, refetchOnMount: false, refetchOnWindowFocus: false, refetchOnReconnect: false } as const
@@ -28,7 +27,6 @@ function quotaOptions(environment: string, id: string) {
 }
 
 export function useAgyAccountOverview(environment: string, readCurrent = false) {
-  const client = useQueryClient()
   const accounts = useQuery({ ...metadataPolicy, ...libraryOptions })
   const state = useQuery({ ...metadataPolicy, ...targetStateOptions(environment),
     enabled: readCurrent && Boolean(environment), staleTime: readCurrent ? 0 : Infinity, refetchOnMount: readCurrent })
@@ -36,39 +34,52 @@ export function useAgyAccountOverview(environment: string, readCurrent = false) 
   const rows = (accounts.data?.items ?? []).map(account => ({ ...account, current: account.id === currentID }))
   if (currentID === 'current') rows.unshift({ id: 'current', name: '未保存账号', current: true })
   const quotas = useQueries({ queries: rows.map(row => ({ ...quotaOptions(environment, row.id), enabled: false })) })
-  const busy = useRef(false)
-  const scope = useRef<AbortController | null>(null)
-  useEffect(() => {
-    const controller = new AbortController()
-    scope.current = controller
-    return () => { controller.abort(); busy.current = false }
-  }, [environment])
-
-  async function refresh(mode: 'all' | 'current' | { id: string }) {
-    if (!environment || busy.current) return
-    const controller = scope.current
-    busy.current = true
-    try {
-      const [latest, library] = await Promise.all([
-        state.refetch({ cancelRefetch: false }),
-        mode === 'all' ? accounts.refetch({ cancelRefetch: false }) : accounts,
-      ])
-      if (controller?.signal.aborted || latest.isError || !latest.data?.quota_supported || (mode === 'all' && library.isError)) return
-      const active = latest.data.current_account_id
-      const ids = new Set<string>()
-      if (mode === 'all') library.data?.items.forEach(account => ids.add(account.id))
-      if (typeof mode === 'object') ids.add(mode.id)
-      else if (active) ids.add(active)
-      // Each row observes its own result, so one unavailable account does not erase the others.
-      await Promise.allSettled([...ids].map(id => client.fetchQuery({ ...quotaOptions(environment, id), staleTime: 0 })))
-    } finally {
-      if (!controller?.signal.aborted) busy.current = false
-    }
-  }
+  const refresh = useAgyQuotaRefresh(environment)
+  const refreshing = useIsMutating({ mutationKey: refreshKey(environment), exact: true }) > 0
   async function refreshLibrary() {
     await accounts.refetch()
     if (environment) await state.refetch()
   }
-  return { accounts, state, rows, quotas, currentID, refresh, refreshLibrary,
-    refreshing: state.isFetching || quotas.some(quota => quota.isFetching) }
+  return { accounts, state, rows, quotas, currentID, refresh, refreshLibrary, refreshing }
+}
+
+const refreshKey = (environment: string) => ['agy-quota-refresh', environment]
+type RefreshMode = 'all' | 'current' | { id: string }
+
+async function fetchForRefresh<T>(client: QueryClient, options: {
+  queryKey: string[]; queryFn: (ctx: { signal: AbortSignal }) => Promise<T>
+}) {
+  // A refresh owns its reads until completion, even when the last view unmounts.
+  const observer = new QueryObserver(client, { ...options, enabled: false })
+  const release = observer.subscribe(() => {})
+  try {
+    return await client.fetchQuery({ ...options, staleTime: 0, retry: false })
+  } finally {
+    release()
+  }
+}
+
+export function useAgyQuotaRefresh(environment: string) {
+  const client = useQueryClient()
+  const mutationKey = refreshKey(environment)
+  const job = useMutation({
+    mutationKey, retry: false,
+    mutationFn: async ({ target, mode }: { target: string; mode: RefreshMode }) => {
+      const [latest, library] = await Promise.allSettled([
+        fetchForRefresh(client, targetStateOptions(target)),
+        mode === 'all' ? fetchForRefresh(client, libraryOptions) : undefined,
+      ])
+      if (latest.status === 'rejected' || !latest.value.quota_supported || library.status === 'rejected') return
+      const active = latest.value.current_account_id
+      const ids = new Set<string>()
+      library.value?.items.forEach(account => ids.add(account.id))
+      if (typeof mode === 'object') ids.add(mode.id)
+      else if (active) ids.add(active)
+      // Each row observes its own result, so one unavailable account does not erase the others.
+      await Promise.allSettled([...ids].map(id => fetchForRefresh(client, quotaOptions(target, id))))
+    },
+  })
+  return (mode: RefreshMode) => {
+    if (environment && !client.isMutating({ mutationKey, exact: true })) job.mutate({ target: environment, mode })
+  }
 }

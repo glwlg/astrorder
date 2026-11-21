@@ -23,7 +23,7 @@ export function AccountRefreshSettings({ platform, settings, onChange, onClose }
       <h2 id={title}>{platform} 刷新设置</h2>
       {interval('all', '全部账号刷新间隔')}
       {interval('current', '当前账号刷新间隔')}
-      <p>仅在查看此平台时自动刷新。</p>
+      <p>查看 {platform} 账号页或会话时按间隔刷新。窗口隐藏期间暂停，返回时补刷已到期的额度。</p>
       <Button onClick={close}>完成</Button>
     </Stack>
   </dialog>
