@@ -105,3 +105,42 @@ it('preserves caller-owned ignore attributes and cancels initialization after im
   expect(liquidGL).not.toHaveBeenCalled()
   expect(document.querySelector('[data-liquid-ignore]')).not.toBeNull()
 })
+
+it('inherits lightweight sidebar snapshot for nested rail controls and ensures static surfaces anchor their layer', async () => {
+  document.body.innerHTML = '<div class="workspace-sidebar" data-liquid-snapshot="#sidebar-sky"><div id="sidebar-sky"></div><div class="swarm-root-rail"><button data-liquid-surface="control">启动主星</button></div></div>'
+  const button = document.querySelector('button')!
+  dispose = installLiquidSurfaces()
+  await waitFor(() => expect(liquidGL).toHaveBeenCalledOnce())
+  expect(liquidGL).toHaveBeenCalledWith(expect.objectContaining({ snapshot: '#sidebar-sky' }))
+  expect(button.style.position).toBe('relative')
+  dispose()
+  dispose = undefined
+  expect(button.style.position).toBe('')
+})
+
+it('uses lightweight CSS Liquid Glass without spawning WebGL canvases for static ambient sky backdrops', async () => {
+  document.body.innerHTML = '<div id="astr-shell-sky"></div><div class="welcome-ambient-backdrop"></div><div data-liquid-surface="toolbar" data-liquid-snapshot="#astr-shell-sky"></div><div data-liquid-surface="panel" data-liquid-snapshot=".welcome-ambient-backdrop"></div>'
+  dispose = installLiquidSurfaces()
+  await new Promise(resolve => setTimeout(resolve, 40))
+  expect(liquidGL).not.toHaveBeenCalled()
+  for (const el of document.querySelectorAll<HTMLElement>('[data-liquid-surface]')) {
+    expect(el).toHaveClass('liquid-surface')
+    expect(el.dataset.materialStatus).toBe('ready')
+    expect(el.querySelector('.liquid-surface-layer')).not.toBeNull()
+  }
+})
+
+it('runs the workbench-wide css engine with zero liquidGL canvases across sidebar controls and portalled menus', async () => {
+  document.body.innerHTML =
+    '<div class="workspace-sidebar" data-liquid-snapshot="#sky"><div id="sky"></div><div class="session-search-field"></div></div>' +
+    '<div class="mantine-Menu-dropdown" role="menu"><button role="menuitem">项</button></div>'
+  dispose = installLiquidSurfaces({ engine: 'css' })
+  await new Promise(resolve => setTimeout(resolve, 40))
+  expect(liquidGL).not.toHaveBeenCalled()
+  const search = document.querySelector<HTMLElement>('.session-search-field')!
+  const menu = document.querySelector<HTMLElement>('.mantine-Menu-dropdown')!
+  expect(search).toHaveClass('liquid-surface')
+  expect(search.dataset.materialStatus).toBe('ready')
+  expect(menu).toHaveClass('liquid-surface')
+  expect(menu.dataset.materialStatus).toBe('ready')
+})

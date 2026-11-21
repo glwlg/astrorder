@@ -82,13 +82,28 @@
   line-height: 1.5;
 }
 
+.sidecar-welcome-container {
+  container-type: inline-size;
+  background: radial-gradient(circle 420px at 50% 42%, color-mix(in oklab, var(--astr-indigo) 7%, transparent), transparent 72%);
+}
+
 .sidecar-welcome-list {
-  display: flex;
-  flex-direction: column;
-  padding: .375rem;
-  border: 1px solid var(--astr-border);
-  border-radius: .875rem;
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 2px;
+  padding: .5rem;
+  border: 1px solid color-mix(in oklab, var(--astr-indigo) 14%, var(--astr-border));
+  border-radius: 1rem;
   background: var(--astr-surface);
+}
+
+@container (min-width: 540px) {
+  .sidecar-welcome-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px;
+    padding: .625rem;
+  }
 }
 
 .sidecar-welcome-list .sidecar-welcome-item {
@@ -98,8 +113,9 @@
   gap: .75rem;
   min-block-size: 2.75rem;
   padding: .625rem .75rem;
-  border-radius: .5rem;
+  border-radius: .625rem;
   color: var(--astr-text);
+  transition: background-color 140ms ease, transform 140ms ease;
 }
 
 .sidecar-welcome-shortcut {
@@ -112,13 +128,15 @@
 }
 
 .sidecar-welcome-container .sidecar-workspace-link {
+  position: relative;
   display: block;
   inline-size: 100%;
-  padding: .625rem .875rem;
-  border: 1px solid var(--astr-border);
-  border-radius: .625rem;
+  padding: .6875rem .875rem;
+  border: 1px solid color-mix(in oklab, var(--astr-indigo) 14%, var(--astr-border));
+  border-radius: .75rem;
   background: var(--astr-surface-muted);
   color: var(--astr-text);
+  transition: border-color 140ms ease, background-color 140ms ease;
 }
 
 :where(.desktop-sidecar, .mobile-sidecar, .group-sidecar) :where(button, a):focus-visible {

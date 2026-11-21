@@ -853,9 +853,20 @@ html.is-desktop-app #root {
 
 /* Monitor Page: Wide layout optimization */
 .monitor-page {
+  position: relative;
   max-width: 100% !important;
   padding-inline: clamp(16px, 2vw, 32px) !important;
   transition: outline 0.15s ease, background 0.15s ease;
+}
+.monitor-ambient-backdrop {
+  background:
+    radial-gradient(circle at 86% 6%, color-mix(in oklab, var(--astr-indigo) 10%, transparent), transparent 36%),
+    radial-gradient(circle at 12% 16%, color-mix(in oklab, var(--astr-running-gold, #c6a0ff) 7%, transparent), transparent 40%),
+    var(--astr-bg);
+}
+.monitor-page > :not(.monitor-ambient-backdrop) {
+  position: relative;
+  z-index: 1;
 }
 .monitor-page.is-drop-active {
   outline: 2px dashed var(--astr-indigo, #5b6cff);
@@ -940,11 +951,14 @@ html.is-desktop-app #root {
   justify-content: center;
   overflow-y: auto;
   padding: clamp(24px, 4vw, 48px) 20px;
-  background: radial-gradient(circle 600px at 50% 30%, rgba(59, 130, 246, 0.04), transparent 75%), var(--astr-surface);
+  background:
+    radial-gradient(circle 680px at 50% 24%, color-mix(in oklab, var(--astr-indigo) 10%, transparent), transparent 72%),
+    radial-gradient(circle 480px at 84% 78%, color-mix(in oklab, var(--astr-selected) 36%, transparent), transparent 68%),
+    var(--astr-surface);
 }
 .welcome-inner-container {
   width: 100%;
-  max-width: 640px;
+  max-width: 660px;
   margin: auto;
 }
 .welcome-logo-badge {
@@ -957,21 +971,21 @@ html.is-desktop-app #root {
 .welcome-logo-badge::before {
   content: '';
   position: absolute;
-  inset: -12px;
+  inset: -14px;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(59, 130, 246, 0.18) 0%, rgba(59, 130, 246, 0.05) 50%, transparent 72%);
+  background: radial-gradient(circle, color-mix(in oklab, var(--astr-indigo) 26%, transparent) 0%, color-mix(in oklab, var(--astr-indigo) 8%, transparent) 52%, transparent 72%);
   pointer-events: none;
   animation: welcome-halo-pulse 3s ease-in-out infinite;
 }
 @keyframes welcome-halo-pulse {
-  0%, 100% { transform: scale(0.92); opacity: 0.5; }
+  0%, 100% { transform: scale(0.92); opacity: 0.55; }
   50% { transform: scale(1.15); opacity: 0.95; }
 }
 .welcome-logo-img {
   position: relative;
   z-index: 1;
   display: block;
-  filter: drop-shadow(0 4px 12px rgba(59, 130, 246, 0.22));
+  filter: drop-shadow(0 6px 16px color-mix(in oklab, var(--astr-indigo) 28%, transparent));
   transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .welcome-logo-badge:hover .welcome-logo-img {
@@ -979,20 +993,21 @@ html.is-desktop-app #root {
 }
 .welcome-new-btn {
   font-size: 12px;
-  color: var(--astr-indigo, #5b6cff);
+  color: var(--astr-indigo);
   cursor: pointer;
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: 6px;
   transition: background 0.15s ease;
 }
 .welcome-new-btn:hover {
-  background: color-mix(in srgb, var(--astr-indigo, #5b6cff) 10%, transparent);
+  background: color-mix(in oklab, var(--astr-indigo) 12%, transparent);
 }
 .welcome-card {
-  border: 1px solid var(--astr-border);
-  border-radius: 12px;
+  position: relative;
+  border: 1px solid color-mix(in oklab, var(--astr-indigo) 12%, var(--astr-border));
+  border-radius: 14px;
   background: var(--astr-surface);
-  padding: 12px 14px;
+  padding: 13px 15px;
   transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.15s ease, box-shadow 0.18s ease;
 }
 .welcome-session-card {
@@ -1003,48 +1018,48 @@ html.is-desktop-app #root {
 }
 .welcome-session-card:hover {
   transform: translateY(-2px);
-  border-color: color-mix(in srgb, var(--astr-indigo, #5b6cff) 40%, var(--astr-border));
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.06);
+  border-color: color-mix(in oklab, var(--astr-indigo) 46%, var(--astr-border));
+  box-shadow: 0 10px 26px color-mix(in oklab, var(--astr-indigo) 14%, transparent);
 }
 .welcome-status-running {
-  color: var(--astr-muted);
-  background: transparent;
-  padding: 1px 6px;
+  color: var(--astr-indigo);
+  background: color-mix(in oklab, var(--astr-indigo) 10%, transparent);
+  padding: 2px 7px;
   border-radius: 999px;
-  font-weight: 500;
+  font-weight: 600;
 }
 .welcome-shortcut-card {
-  padding: 10px 14px;
-  background: color-mix(in srgb, var(--astr-surface-muted) 50%, var(--astr-surface));
+  padding: 11px 15px;
+  background: color-mix(in oklab, var(--astr-surface-muted) 50%, var(--astr-surface));
 }
 .welcome-kbd {
   font-family: var(--mantine-font-family-monospace, monospace);
   font-size: 11px;
   font-weight: 600;
   color: var(--astr-text);
-  background: color-mix(in srgb, var(--astr-border) 60%, transparent);
+  background: color-mix(in oklab, var(--astr-selected) 60%, var(--astr-surface));
   padding: 2px 7px;
-  border-radius: 5px;
-  border: 1px solid color-mix(in srgb, var(--astr-border) 90%, transparent);
+  border-radius: 6px;
+  border: 1px solid color-mix(in oklab, var(--astr-indigo) 18%, var(--astr-border));
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
 @keyframes filetree-reveal-pulse {
   0% {
-    background-color: rgba(59, 130, 246, 0.45);
-    box-shadow: inset 3px 0 0 #2563eb, 0 0 0 2px rgba(59, 130, 246, 0.6);
+    background-color: color-mix(in oklab, var(--astr-indigo) 36%, transparent);
+    box-shadow: inset 3px 0 0 var(--astr-indigo), 0 0 0 2px color-mix(in oklab, var(--astr-indigo) 45%, transparent);
   }
   30% {
-    background-color: rgba(59, 130, 246, 0.35);
-    box-shadow: inset 3px 0 0 #2563eb, 0 0 0 3px rgba(59, 130, 246, 0.35);
+    background-color: color-mix(in oklab, var(--astr-indigo) 28%, transparent);
+    box-shadow: inset 3px 0 0 var(--astr-indigo), 0 0 0 3px color-mix(in oklab, var(--astr-indigo) 28%, transparent);
   }
   70% {
-    background-color: rgba(59, 130, 246, 0.25);
-    box-shadow: inset 3px 0 0 #2563eb;
+    background-color: color-mix(in oklab, var(--astr-indigo) 20%, transparent);
+    box-shadow: inset 3px 0 0 var(--astr-indigo);
   }
   100% {
-    background-color: rgba(59, 130, 246, 0.16);
-    box-shadow: inset 3px 0 0 #2563eb;
+    background-color: color-mix(in oklab, var(--astr-indigo) 14%, transparent);
+    box-shadow: inset 3px 0 0 var(--astr-indigo);
   }
 }
 
@@ -1053,15 +1068,15 @@ html.is-desktop-app #root {
 }
 
 .file-tree-row.is-selected {
-  background-color: rgba(59, 130, 246, 0.16) !important;
-  box-shadow: inset 3px 0 0 #2563eb !important;
-  outline: 1px solid var(--astr-blue, #3b82f6) !important;
+  background-color: color-mix(in oklab, var(--astr-indigo) 14%, transparent) !important;
+  box-shadow: inset 3px 0 0 var(--astr-indigo) !important;
+  outline: 1px solid color-mix(in oklab, var(--astr-indigo) 55%, transparent) !important;
 }
 
 :root[data-mantine-color-scheme='dark'] .file-tree-row.is-selected {
-  background-color: rgba(59, 130, 246, 0.25) !important;
-  box-shadow: inset 3px 0 0 #60a5fa !important;
-  outline: 1px solid var(--astr-blue, #60a5fa) !important;
+  background-color: color-mix(in oklab, var(--astr-indigo) 22%, transparent) !important;
+  box-shadow: inset 3px 0 0 var(--astr-indigo) !important;
+  outline: 1px solid color-mix(in oklab, var(--astr-indigo) 65%, transparent) !important;
 }
 
 .file-tree-row.is-revealed {

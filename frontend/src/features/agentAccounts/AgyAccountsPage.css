@@ -42,7 +42,7 @@
 
 .agy-account-name-col { inline-size: clamp(130px, 16%, 208px); }
 .agy-account-time-col { inline-size: 112px; }
-.agy-account-actions-col { inline-size: 156px; }
+.agy-account-actions-col { inline-size: 196px; }
 
 .agy-account-table thead {
   color: var(--astr-muted);
@@ -128,7 +128,7 @@
 .agy-quota-tile time,
 .agy-account-timestamp,
 .agy-account-muted { font-size: 0.75rem; color: var(--astr-muted); }
-.agy-row-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.agy-row-actions { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; }
 
 .agy-account-empty {
   display: flex;
@@ -161,14 +161,19 @@
 @container agy-table (inline-size < 740px) {
   .agy-account-name-col { inline-size: 120px; }
   .agy-account-time-col { inline-size: 94px; }
-  .agy-account-actions-col { inline-size: 106px; }
+  .agy-account-actions-col { inline-size: 116px; }
+  .agy-row-actions { flex-wrap: wrap; }
 }
 
 .agy-credential-input textarea { resize: vertical; font-family: var(--mantine-font-family-monospace); }
 .agy-credential-file { display: grid; gap: 0.375rem; font-size: var(--mantine-font-size-sm); font-weight: 500; }
 .agy-credential-file input { max-inline-size: 100%; font: inherit; }
 
-.agent-accounts-layout.route-page { max-width: 1740px; container: account-page / inline-size; }
+.agent-accounts-layout.route-page {
+  max-width: 1740px;
+  container: account-page / inline-size;
+  background: radial-gradient(ellipse at 88% 4%, color-mix(in oklab, var(--astr-indigo) 7%, transparent), transparent 45%);
+}
 .agent-accounts-layout > h1 { margin: 0 0 20px; font-size: clamp(1.375rem, 2vw, 1.75rem); }
 .agent-accounts-columns { display: grid; grid-template-columns: 174px minmax(0, 1fr); gap: clamp(16px, 2vw, 30px); align-items: start; }
 .account-platform-content { min-inline-size: 0; }

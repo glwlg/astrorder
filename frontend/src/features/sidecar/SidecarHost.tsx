@@ -1,8 +1,8 @@
 import { useEffect } from 'react'
 import { api } from '../../api/client'
 import { notifications } from '@mantine/notifications'
-import { ActionIcon, Tooltip } from '@mantine/core'
-import { IconFolderSearch } from '@tabler/icons-react'
+import { ActionIcon, Group, Tooltip } from '@mantine/core'
+import { IconFolderSearch, IconQuote } from '@tabler/icons-react'
 import { SidecarHeader } from './SidecarHeader'
 import { SidecarWelcomeMenu } from './SidecarWelcomeMenu'
 import { SessionDetails } from '../chat/SessionDetails'
@@ -197,26 +197,57 @@ export function SidecarHost({
               >
                 {viewer ? (() => {
                   const ViewerComponent = viewer.component
-                  const toolbarAction = artifact.path && artifact.mediaType !== 'application/x-directory' ? (
-                    <Tooltip label="在文件树中定位">
-                      <ActionIcon
-                        variant="subtle"
-                        size="sm"
-                        color="gray"
-                        aria-label="在文件树中定位"
-                        onClick={() => useSidecarStore.getState().revealFileInTree(
-                          artifact.sessionId,
-                          artifact.agentId,
-                          artifact.path!,
-                          session.workspace || undefined,
-                          session.project_name || session.title,
-                          artifact.connectionId,
-                        )}
-                      >
-                        <IconFolderSearch size={16} />
-                      </ActionIcon>
-                    </Tooltip>
-                  ) : undefined
+                  const quoteArtifactToComposer = () => {
+                    const selected = typeof window !== 'undefined' ? window.getSelection()?.toString().trim() || '' : ''
+                    const refLabel = artifact.path || artifact.name
+                    const text = selected
+                      ? `参考 ${refLabel}：\n\`\`\`\n${selected.slice(0, 1200)}\n\`\`\`\n`
+                      : `参考 \`${refLabel}\` `
+                    window.dispatchEvent(
+                      new CustomEvent('astrorder:quote-to-composer', {
+                        detail: { agentId: session.agent_id, sessionId: session.id, text },
+                      }),
+                    )
+                    notifications.show({
+                      color: 'violet',
+                      message: selected ? `已引用所选片段（${refLabel}）到输入框` : `已引用 ${refLabel} 到输入框`,
+                    })
+                  }
+                  const toolbarAction = (
+                    <Group gap={4} wrap="nowrap">
+                      <Tooltip label="引用到输入框追问（选中片段可带代码引用）">
+                        <ActionIcon
+                          variant="subtle"
+                          size="sm"
+                          color="violet"
+                          aria-label="引用到输入框"
+                          onClick={quoteArtifactToComposer}
+                        >
+                          <IconQuote size={15} />
+                        </ActionIcon>
+                      </Tooltip>
+                      {artifact.path && artifact.mediaType !== 'application/x-directory' && (
+                        <Tooltip label="在文件树中定位">
+                          <ActionIcon
+                            variant="subtle"
+                            size="sm"
+                            color="gray"
+                            aria-label="在文件树中定位"
+                            onClick={() => useSidecarStore.getState().revealFileInTree(
+                              artifact.sessionId,
+                              artifact.agentId,
+                              artifact.path!,
+                              session.workspace || undefined,
+                              session.project_name || session.title,
+                              artifact.connectionId,
+                            )}
+                          >
+                            <IconFolderSearch size={16} />
+                          </ActionIcon>
+                        </Tooltip>
+                      )}
+                    </Group>
+                  )
                   return (
                     <ViewerComponent
                       artifact={artifact}

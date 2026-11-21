@@ -792,7 +792,7 @@ export function BotGroupChatPage({
               size="sm"
               radius="md"
               className="group-chat-send"
-              color="indigo"
+              color="violet"
               rightSection={<IconSend size={14} />}
               onClick={() => void send()}
               loading={submitting}

@@ -1,12 +1,13 @@
 import { useState } from 'react'
-import { Button, Group, Modal, NativeSelect, Stack, Text, TextInput } from '@mantine/core'
+import { Button, Group, Modal, Stack, Text, TextInput } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { api } from '../api/client'
 import type { Agent, Session } from '../domain/types'
 import { scopeKey } from '../domain/semantics'
 import { useAstrorderStore } from '../state/store'
 import type { ProjectGroup } from './sessionRailModel'
-import { agentKindLabel } from './AgentBrandIcon'
+import { AgentBrandIcon, agentKindLabel } from './AgentBrandIcon'
+import { BrandedSelect } from './BrandedSelect'
 
 export function agentEnvironment(agent: Agent): string {
   return agent.connection_id || 'local'
@@ -41,7 +42,18 @@ export function NewSessionDialog({ agents, project, initialAgentId, onClose, onC
   return <Modal opened onClose={() => { if (!busy) onClose() }} title="新建会话" centered size="md" zIndex={400}>
     <Stack>
       {project && <Text size="sm">项目：{project.label}</Text>}
-      <NativeSelect label="选择 Agent" value={agentId} onChange={event => setAgentId(event.currentTarget.value)} data={[{ value: '', label: '请选择 Agent' }, ...choices.map(agent => ({ value: agent.id, label: agentLabel(agent) }))]} disabled={busy} />
+      <BrandedSelect
+        label="选择 Agent"
+        placeholder="请选择 Agent"
+        value={agentId}
+        onChange={setAgentId}
+        disabled={busy}
+        options={choices.map(agent => ({
+          value: agent.id,
+          label: agentLabel(agent),
+          icon: <AgentBrandIcon kind={agent.kind} size={15} />,
+        }))}
+      />
       {!choices.length && <Text size="sm" c="dimmed">该环境暂无已接入 Agent，请先在连接管理中接入。</Text>}
       <TextInput label="会话名称（选填，留空由 Agent 自动命名）" placeholder="留空由 Agent 自动命名" value={title} onChange={event => setTitle(event.currentTarget.value)} disabled={busy} />
       <TextInput label="工作区" value={workspace} onChange={event => setWorkspace(event.currentTarget.value)} placeholder="使用所选 Agent 环境的路径" disabled={busy || !!projectWorkspace} />

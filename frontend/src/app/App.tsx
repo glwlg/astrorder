@@ -1,9 +1,8 @@
-﻿import { IconAlertTriangle, IconLoader2 } from '@tabler/icons-react'
-import { Alert, Button, Center, Paper, Stack, Text, Title } from '@mantine/core'
+﻿import { Suspense, lazy, type ComponentType } from 'react'
+import { IconAlertTriangle, IconLoader2 } from '@tabler/icons-react'
+import { Alert, Button, Center, Loader, Paper, Stack, Text, Title } from '@mantine/core'
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { useMediaQuery } from '@mantine/hooks'
-import { MobileWorkspace } from '../features/mobile/MobileWorkspace'
-import { MobileGroupsPage } from '../features/mobile/MobileGroupsPage'
 import { useQueryClient } from '@tanstack/react-query'
 import { ApiError } from '../api/client'
 import { AuthPage } from '../components/AuthPage'
@@ -13,20 +12,38 @@ import { useServerOutboxSync } from '../hooks/useServerOutboxSync'
 import { useChatReturnPath } from '../hooks/useChatReturnPath'
 import { useEventStream } from '../hooks/useEventStream'
 import { ChatPage } from '../features/chat/ChatPage'
-import { GroupsPage } from '../features/chat/GroupsPage'
-import { MonitorPage } from '../features/monitor/MonitorPage'
-import { SwarmPage } from '../features/monitor/SwarmPage'
-import { PluginsPage } from '../features/plugins/PluginsPage'
-import { AnalyticsPage } from '../features/analytics/AnalyticsPage'
-import { BackupsPage } from '../features/backups/BackupsPage'
-import { AgentAccountsLayout } from '../features/agentAccounts/AgentAccountsLayout'
-import { UnavailablePlatformPage } from '../features/agentAccounts/UnavailablePlatformPage'
 import { accountPlatforms } from '../features/agentAccounts/accountPlatforms'
 import { AstrorderLoader } from '../components/AnimatedStatus'
 import { ShinyText } from '../components/animations/ShinyText'
 import { useShortcutHandlers } from '../features/shortcuts/shortcuts'
-import { QrAuthorizePage } from '../features/auth/QrAuthorizePage'
-import { QrScanPage } from '../features/auth/QrScanPage'
+
+function lazyNamed<T extends ComponentType<any>>(
+  loader: () => Promise<Record<string, unknown>>,
+  name: string,
+) {
+  return lazy(() => loader().then((mod) => ({ default: mod[name] as T })))
+}
+
+const MobileWorkspace = lazyNamed(() => import('../features/mobile/MobileWorkspace'), 'MobileWorkspace')
+const MobileGroupsPage = lazyNamed(() => import('../features/mobile/MobileGroupsPage'), 'MobileGroupsPage')
+const GroupsPage = lazyNamed(() => import('../features/chat/GroupsPage'), 'GroupsPage')
+const MonitorPage = lazyNamed(() => import('../features/monitor/MonitorPage'), 'MonitorPage')
+const SwarmPage = lazyNamed(() => import('../features/monitor/SwarmPage'), 'SwarmPage')
+const PluginsPage = lazyNamed(() => import('../features/plugins/PluginsPage'), 'PluginsPage')
+const AnalyticsPage = lazyNamed(() => import('../features/analytics/AnalyticsPage'), 'AnalyticsPage')
+const BackupsPage = lazyNamed(() => import('../features/backups/BackupsPage'), 'BackupsPage')
+const AgentAccountsLayout = lazyNamed(() => import('../features/agentAccounts/AgentAccountsLayout'), 'AgentAccountsLayout')
+const UnavailablePlatformPage = lazyNamed(() => import('../features/agentAccounts/UnavailablePlatformPage'), 'UnavailablePlatformPage')
+const QrAuthorizePage = lazyNamed(() => import('../features/auth/QrAuthorizePage'), 'QrAuthorizePage')
+const QrScanPage = lazyNamed(() => import('../features/auth/QrScanPage'), 'QrScanPage')
+
+function RouteSuspenseFallback() {
+  return (
+    <Center style={{ height: '100%', minHeight: 240 }}>
+      <Loader size="sm" color="violet" />
+    </Center>
+  )
+}
 
 function LoadingPage({ label = '正在启动星序工作台…' }: { label?: string }) {
   return (
@@ -98,13 +115,17 @@ function AuthenticatedApp() {
   const isMobile = mobileViewport || forceMobile
 
   if (isMobile) {
-    return <Routes>
-      <Route path="/mobile/groups" element={<MobileGroupsPage />} />
-      <Route path="/mobile/groups/:groupId" element={<MobileGroupsPage />} />
-      <Route path="/groups" element={<MobileGroupsPage />} />
-      <Route path="/groups/:groupId" element={<MobileGroupsPage />} />
-      <Route path="*" element={<MobileWorkspace />} />
-    </Routes>
+    return (
+      <Suspense fallback={<RouteSuspenseFallback />}>
+        <Routes>
+          <Route path="/mobile/groups" element={<MobileGroupsPage />} />
+          <Route path="/mobile/groups/:groupId" element={<MobileGroupsPage />} />
+          <Route path="/groups" element={<MobileGroupsPage />} />
+          <Route path="/groups/:groupId" element={<MobileGroupsPage />} />
+          <Route path="*" element={<MobileWorkspace />} />
+        </Routes>
+      </Suspense>
+    )
   }
 
   if (isMobilePath) {
@@ -118,16 +139,16 @@ function AuthenticatedApp() {
         <Route index element={<Navigate to="/chat" replace />} />
         <Route path="chat" element={<ChatPage />} />
         <Route path="chat/:sessionId" element={<ChatPage />} />
-        <Route path="groups" element={<GroupsPage />} />
-        <Route path="groups/:groupId" element={<GroupsPage />} />
-        <Route path="monitor" element={<MonitorPage />} />
-        <Route path="swarm" element={<SwarmPage />} />
-        <Route path="plugins" element={<PluginsPage />} />
-        <Route path="analytics" element={<AnalyticsPage />} />
-        <Route path="backups" element={<BackupsPage />} />
-        <Route path="agent-accounts" element={<AgentAccountsLayout />}>
+        <Route path="groups" element={<Suspense fallback={<RouteSuspenseFallback />}><GroupsPage /></Suspense>} />
+        <Route path="groups/:groupId" element={<Suspense fallback={<RouteSuspenseFallback />}><GroupsPage /></Suspense>} />
+        <Route path="monitor" element={<Suspense fallback={<RouteSuspenseFallback />}><MonitorPage /></Suspense>} />
+        <Route path="swarm" element={<Suspense fallback={<RouteSuspenseFallback />}><SwarmPage /></Suspense>} />
+        <Route path="plugins" element={<Suspense fallback={<RouteSuspenseFallback />}><PluginsPage /></Suspense>} />
+        <Route path="analytics" element={<Suspense fallback={<RouteSuspenseFallback />}><AnalyticsPage /></Suspense>} />
+        <Route path="backups" element={<Suspense fallback={<RouteSuspenseFallback />}><BackupsPage /></Suspense>} />
+        <Route path="agent-accounts" element={<Suspense fallback={<RouteSuspenseFallback />}><AgentAccountsLayout /></Suspense>}>
           {accountPlatforms.map(({ kind, path, Page }) =>
-            <Route key={kind} path={path} element={Page ? <Page /> : <UnavailablePlatformPage kind={kind} />} />)}
+            <Route key={kind} path={path} element={<Suspense fallback={<RouteSuspenseFallback />}>{Page ? <Page /> : <UnavailablePlatformPage kind={kind} />}</Suspense>} />)}
         </Route>
         <Route path="*" element={<Navigate to="/chat" replace />} />
       </Route>
@@ -147,14 +168,16 @@ export default function App() {
   // Handle /auth/qr and /auth/qr/scan routes after auth check, before bootstrap
   if (location.pathname === '/auth/qr') {
     return (
-      <QrAuthorizePage
-        key={location.key}
-        authenticated={Boolean(auth.data?.authenticated)}
-        onAuthenticated={() => {
-          void queryClient.invalidateQueries({ queryKey: ['astrorder', 'auth-session'] })
-        }}
-        onDone={() => navigate('/chat')}
-      />
+      <Suspense fallback={<RouteSuspenseFallback />}>
+        <QrAuthorizePage
+          key={location.key}
+          authenticated={Boolean(auth.data?.authenticated)}
+          onAuthenticated={() => {
+            void queryClient.invalidateQueries({ queryKey: ['astrorder', 'auth-session'] })
+          }}
+          onDone={() => navigate('/chat')}
+        />
+      </Suspense>
     )
   }
 
@@ -169,7 +192,11 @@ export default function App() {
         />
       )
     }
-    return <QrScanPage onDone={() => navigate('/chat')} />
+    return (
+      <Suspense fallback={<RouteSuspenseFallback />}>
+        <QrScanPage onDone={() => navigate('/chat')} />
+      </Suspense>
+    )
   }
 
   if (auth.data?.authenticated) return <AuthenticatedApp />

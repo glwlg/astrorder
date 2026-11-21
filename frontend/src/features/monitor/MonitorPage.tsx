@@ -14,7 +14,7 @@ import { SessionModelControl } from '../chat/SessionModelControl'
 import { ApprovalModeControl } from '../chat/ApprovalModeControl'
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../../api/client'
 import type { Agent, Command, Session } from '../../domain/types'
 import { EmptyState } from '../../components/EmptyState'
@@ -50,6 +50,18 @@ function activeMessageCommand(status: Session['status'], commands: Command[]) {
     (command.action === 'send' || command.action === 'enqueue') &&
     (command.state === 'running' || command.state === 'accepted'),
   )
+}
+
+function formatMonitorCommandText(raw?: string | null): string {
+  const trimmed = (raw || '').trim()
+  if (!trimmed) return '命令执行中…'
+  if (/^【星序\s*[·・]/.test(trimmed)) {
+    const dividerMatch = trimmed.match(/\n-{8,}\s*\n([\s\S]+)$/)
+    if (dividerMatch && dividerMatch[1].trim()) {
+      return dividerMatch[1].trim()
+    }
+  }
+  return trimmed
 }
 
 function savedSessions(key = STORAGE_KEY): string[] {
@@ -303,12 +315,6 @@ export function MonitorCard({
                 </div>
               </Group>
               <Group gap={6} wrap="nowrap" style={{ flexShrink: 0 }}>
-                {session.workspace && (
-                  <div className="monitor-card-path" title={session.workspace}>
-                    <IconFolder size={11} style={{ display: 'inline', verticalAlign: '-1px', marginRight: 3 }} />
-                    {workspaceShort || session.workspace}
-                  </div>
-                )}
                 <MonitorStatusIcon status={status} />
                 {approvals.length > 0 && (
                   <Tooltip label={approvals.length + ' 个操作待审批'} withArrow>
@@ -317,36 +323,44 @@ export function MonitorCard({
                     </Badge>
                   </Tooltip>
                 )}
-                <Tooltip label="打开此会话" withArrow>
-                  <ActionIcon variant="subtle" color="gray" size="sm" aria-label="打开会话" onClick={onOpen}>
-                    <IconArrowUpRight size={14} />
-                  </ActionIcon>
-                </Tooltip>
-                <Tooltip label="回到底部" withArrow>
-                  <ActionIcon variant="subtle" color="gray" size="sm" aria-label="回到底部" onClick={scrollToBottom}>
-                    <IconArrowDown size={14} />
-                  </ActionIcon>
-                </Tooltip>
-                {onToggleFocus && (
-                  <Tooltip label={isFocused ? '退出聚焦 (Esc)' : '全屏聚焦'} withArrow>
-                    <ActionIcon
-                      variant="subtle"
-                      color={isFocused ? 'indigo' : 'gray'}
-                      size="sm"
-                      aria-label={isFocused ? '退出聚焦' : '全屏聚焦'}
-                      onClick={onToggleFocus}
-                    >
-                      {isFocused ? <IconArrowsMinimize size={14} /> : <IconArrowsMaximize size={14} />}
+                <div className="monitor-card-secondary-actions">
+                  {session.workspace && (
+                    <div className="monitor-card-path" title={session.workspace}>
+                      <IconFolder size={11} style={{ display: 'inline', verticalAlign: '-1px', marginRight: 3 }} />
+                      {workspaceShort || session.workspace}
+                    </div>
+                  )}
+                  <Tooltip label="打开此会话" withArrow>
+                    <ActionIcon variant="subtle" color="gray" size="sm" aria-label="打开会话" onClick={onOpen}>
+                      <IconArrowUpRight size={14} />
                     </ActionIcon>
                   </Tooltip>
-                )}
-                {onRemove && (
-                  <Tooltip label="移出监控室" withArrow>
-                    <ActionIcon variant="subtle" color="gray" size="sm" aria-label="移出监控室" onClick={onRemove}>
-                      <IconX size={14} />
+                  <Tooltip label="回到底部" withArrow>
+                    <ActionIcon variant="subtle" color="gray" size="sm" aria-label="回到底部" onClick={scrollToBottom}>
+                      <IconArrowDown size={14} />
                     </ActionIcon>
                   </Tooltip>
-                )}
+                  {onToggleFocus && (
+                    <Tooltip label={isFocused ? '退出聚焦 (Esc)' : '全屏聚焦'} withArrow>
+                      <ActionIcon
+                        variant="subtle"
+                        color={isFocused ? 'indigo' : 'gray'}
+                        size="sm"
+                        aria-label={isFocused ? '退出聚焦' : '全屏聚焦'}
+                        onClick={onToggleFocus}
+                      >
+                        {isFocused ? <IconArrowsMinimize size={14} /> : <IconArrowsMaximize size={14} />}
+                      </ActionIcon>
+                    </Tooltip>
+                  )}
+                  {onRemove && (
+                    <Tooltip label="移出矩阵" withArrow>
+                      <ActionIcon variant="subtle" color="gray" size="sm" aria-label="移出矩阵" onClick={onRemove}>
+                        <IconX size={14} />
+                      </ActionIcon>
+                    </Tooltip>
+                  )}
+                </div>
               </Group>
             </Group>
           </div>
@@ -429,7 +443,7 @@ export function MonitorCard({
                 {activeCommand && (
                   <div className="monitor-active-command-row">
                     <IconClock size={13} className="activity-icon is-pulsing" />
-                    <span className="command-text">{activeCommand.text || '命令执行中…'}</span>
+                    <span className="command-text" title={formatMonitorCommandText(activeCommand.text)}>{formatMonitorCommandText(activeCommand.text)}</span>
                     <ShinyText text="执行中" speed={1.5} className="monitor-mini-tag" />
                   </div>
                 )}
@@ -637,7 +651,7 @@ function MonitorListRow({
             {activeCommand ? (
               <span className='monitor-row-activity-text is-command'>
                 <IconClock size={12} className='activity-icon is-pulsing' style={{ flexShrink: 0 }} />
-                <span className='activity-line'>{activeCommand.text || '命令执行中…'}</span>
+                <span className='activity-line'>{formatMonitorCommandText(activeCommand.text)}</span>
                 <ShinyText text='执行中' speed={1.5} className='monitor-mini-tag' />
               </span>
             ) : latestActivity ? (
@@ -676,8 +690,8 @@ function MonitorListRow({
             </ActionIcon>
           </Tooltip>
           {onRemove && (
-            <Tooltip label='移出监控室' withArrow>
-              <ActionIcon variant='subtle' color='gray' size='sm' aria-label='移出监控室' onClick={onRemove}>
+            <Tooltip label='移出矩阵' withArrow>
+              <ActionIcon variant='subtle' color='gray' size='sm' aria-label='移出矩阵' onClick={onRemove}>
                 <IconX size={14} />
               </ActionIcon>
             </Tooltip>
@@ -744,6 +758,8 @@ function MonitorListRow({
 
 export function MonitorPage() {
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const projectFilter = (searchParams.get('project') || '').trim()
   const [layout, setLayout] = useState('grid')
   const [pickerOpen, setPickerOpen] = useState(false)
   const [search, setSearch] = useState('')
@@ -929,8 +945,33 @@ export function MonitorPage() {
 
   // 伴星过滤：拥有父会话血缘的子任务（伴星）默认不平铺在普通监控室网格/列表中，保持监控大盘干净独立
   const gridVisibleSessions = useMemo(() => {
-    return orderedSessions.filter((s) => !s.parent_session_id && !s.parent_session_key)
-  }, [orderedSessions])
+    const base = orderedSessions.filter((s) => !s.parent_session_id && !s.parent_session_key)
+    if (!projectFilter) return base
+    return base.filter((s) => {
+      const label = (s.project_name || s.workspace?.split(/[/\\]/).filter(Boolean).pop() || '').trim()
+      return label === projectFilter
+    })
+  }, [orderedSessions, projectFilter])
+
+  const tileProjectSessions = () => {
+    if (!projectFilter) return
+    const matching = sessions
+      .filter((s) => !s.parent_session_id && !s.parent_session_key)
+      .filter((s) => {
+        const label = (s.project_name || s.workspace?.split(/[/\\]/).filter(Boolean).pop() || '').trim()
+        return label === projectFilter
+      })
+      .sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''))
+      .slice(0, 4)
+    if (!matching.length) return
+    const keys = matching.map((s) => scopeKey(s.agent_id, s.id))
+    const nextManual = Array.from(new Set([...manualKeys, ...keys]))
+    saveManual(nextManual)
+    if (excludedKeys.some((k) => keys.includes(k))) {
+      saveExcluded(excludedKeys.filter((k) => !keys.includes(k)))
+    }
+    notifications.show({ color: 'violet', message: `已将「${projectFilter}」最近 ${matching.length} 个会话平铺到矩阵` })
+  }
 
   // 监听并固化顺序，防止任何会话因为 updated_at 改变而前后乱跳
   useEffect(() => {
@@ -1203,16 +1244,17 @@ export function MonitorPage() {
           addManual(key)
           notifications.show({
             color: 'teal',
-            message: `已将“${title}”加入监控室`,
+            message: `已将“${title}”加入矩阵`,
           })
         } else if (key) {
           notifications.show({
             color: 'blue',
-            message: `“${title}”已在监控室中`,
+            message: `“${title}”已在矩阵中`,
           })
         }
       }}
     >
+      <div className="monitor-ambient-backdrop" aria-hidden="true" style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 0 }} />
       {resizingInfo && (
         <div className="monitor-resizing-overlay">
           <div className={`monitor-dimension-tooltip ${resizingInfo.isSnapped ? 'is-snapped' : ''}`}>
@@ -1250,9 +1292,40 @@ export function MonitorPage() {
       )}
 
       <Group className="route-heading monitor-heading" justify="space-between" align="center" mb="lg" wrap="wrap">
-        <Title order={2} size="h2" style={{ margin: 0 }}>监控室</Title>
+        <Group gap="sm" align="center" wrap="wrap">
+          <Title order={2} size="h2" style={{ margin: 0 }}>矩阵</Title>
+          {projectFilter && (
+            <Group gap={6} wrap="nowrap">
+              <Badge
+                size="md"
+                variant="light"
+                color="violet"
+                rightSection={
+                  <ActionIcon
+                    size="xs"
+                    variant="transparent"
+                    color="violet"
+                    aria-label="清除项目筛选"
+                    onClick={() => {
+                      const next = new URLSearchParams(searchParams)
+                      next.delete('project')
+                      setSearchParams(next, { replace: true })
+                    }}
+                  >
+                    <IconX size={11} />
+                  </ActionIcon>
+                }
+              >
+                项目：{projectFilter}
+              </Badge>
+              <Button size="compact-xs" variant="light" color="violet" onClick={tileProjectSessions}>
+                一键平铺活跃会话
+              </Button>
+            </Group>
+          )}
+        </Group>
         <Group gap="sm" wrap="wrap" align="center">
-          <Group className="monitor-summary-bar" gap={6} align="center">
+          <Group className="monitor-summary-bar" data-liquid-surface="toolbar" data-liquid-snapshot=".monitor-ambient-backdrop" gap={6} align="center">
             <Group gap={5} className={`monitor-stat-item ${counts.running > 0 ? 'is-active' : ''}`}>
               <span className="monitor-stat-dot is-running" />
               <Text size="xs" fw={600}>{counts.running}</Text>
@@ -1326,7 +1399,7 @@ export function MonitorPage() {
             { label: '网格', value: 'grid' },
             { label: '列表', value: 'list' },
           ]}
-          aria-label="监控室布局"
+          aria-label="矩阵布局"
         />
         </Group>
       </Group>
@@ -1355,7 +1428,7 @@ export function MonitorPage() {
           </Stack>
         </Paper>
       )}
-      {orderedSessions.length === 0 ? <EmptyState icon={<IconCircleCheck />} title="监控室暂无会话" description="运行中的会话会自动加入，也可以手动添加会话。" />
+      {orderedSessions.length === 0 ? <EmptyState icon={<IconCircleCheck />} title="矩阵暂无会话" description="运行中的会话会自动加入，也可以手动添加会话。" />
         : layout === 'list' ? (
           <div className="monitor-list-view">
             <Stack gap={8}>

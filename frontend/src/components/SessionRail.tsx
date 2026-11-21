@@ -34,7 +34,7 @@ import {
   UnstyledButton,
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useCallback, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { motion } from 'motion/react'
 import { useSessionOrder } from '../hooks/useSessionOrder'
 import { useSessionUnread } from '../hooks/useSessionUnread'
@@ -117,16 +117,6 @@ export function SessionRail({
   }
   const [createProject, setCreateProject] = useState<ProjectGroup | null>(null)
   const [createOpened, setCreateOpened] = useState(false)
-  useEffect(() => {
-    const focusSearch = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
-        event.preventDefault()
-        searchRef.current?.focus()
-      }
-    }
-    window.addEventListener('keydown', focusSearch)
-    return () => window.removeEventListener('keydown', focusSearch)
-  }, [])
   const [addProjectOpened, setAddProjectOpened] = useState(false)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => {
     try {
@@ -614,7 +604,21 @@ export function SessionRail({
         <div className="session-search-field">
           <IconSearch size={21} stroke={1.8} aria-hidden="true" />
           <input ref={searchRef} className="session-search" aria-label="搜索会话" placeholder="搜索会话" value={filter} onChange={event => setFilter(event.currentTarget.value)} />
-          <kbd aria-hidden="true">Ctrl K</kbd>
+          <kbd
+            role="button"
+            tabIndex={0}
+            title="打开全能星令面板 (Ctrl+K)"
+            style={{ cursor: 'pointer' }}
+            onClick={() => window.dispatchEvent(new CustomEvent('astrorder:open-command-palette'))}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                window.dispatchEvent(new CustomEvent('astrorder:open-command-palette'))
+              }
+            }}
+          >
+            Ctrl K
+          </kbd>
         </div>
         <Tooltip label="新增项目" position="bottom">
           <ActionIcon className="session-add-project" variant="subtle" size={30} aria-label="新增项目" onClick={() => setAddProjectOpened(true)}>

@@ -15,16 +15,21 @@
   border-radius: inherit;
   pointer-events: none;
 }
-/* The canvas only paints the rim. The flat centre softly blurs the live
-   backdrop without re-rasterising or displacing its content. */
+/* The canvas only paints the optical rim. The flat centre provides a high-clarity
+   frosted glass body so scrolling prose never bleeds into composer controls. */
 .glass-panel::before {
   content: '';
   position: absolute;
   inset: 0;
   z-index: 3;
   border-radius: inherit;
-  background: rgb(255 255 255 / 8%);
-  backdrop-filter: blur(2px) saturate(105%);
+  background: linear-gradient(
+    180deg,
+    rgb(255 255 255 / 84%) 0%,
+    rgb(249 246 254 / 76%) 100%
+  );
+  backdrop-filter: blur(20px) saturate(165%);
+  -webkit-backdrop-filter: blur(20px) saturate(165%);
   pointer-events: none;
 }
 .glass-panel::after {
@@ -32,12 +37,12 @@
   position: absolute;
   inset: 0;
   z-index: 5;
-  border: 1px solid rgb(255 255 255 / 80%);
+  border: 1px solid rgb(255 255 255 / 86%);
   border-radius: inherit;
   box-shadow:
-    inset 1px 1px 1px rgb(255 255 255 / 95%),
-    inset -1px -1px 1px rgb(70 58 88 / 28%),
-    inset 0 0 0 3px rgb(255 255 255 / 13%);
+    inset 0 1px 1px rgb(255 255 255 / 96%),
+    inset 0 -1px 1px rgb(117 64 189 / 16%),
+    inset 0 0 0 2px rgb(255 255 255 / 22%);
   pointer-events: none;
 }
 .glass-panel-content {
@@ -64,12 +69,18 @@
   pointer-events: none;
 }
 :root[data-mantine-color-scheme='dark'] .glass-panel::before {
-  background: rgb(24 21 31 / 8%);
+  background: linear-gradient(
+    180deg,
+    rgb(32 29 43 / 86%) 0%,
+    rgb(24 22 33 / 80%) 100%
+  );
+  backdrop-filter: blur(20px) saturate(155%);
+  -webkit-backdrop-filter: blur(20px) saturate(155%);
 }
 :root[data-mantine-color-scheme='dark'] .glass-panel::after {
-  border-color: rgb(255 255 255 / 20%);
+  border-color: rgb(210 190 250 / 24%);
   box-shadow:
-    inset 1px 1px 1px rgb(255 255 255 / 25%),
-    inset -1px -1px 1px rgb(0 0 0 / 35%),
-    inset 0 0 0 3px rgb(255 255 255 / 5%);
+    inset 0 1px 1px rgb(238 225 255 / 24%),
+    inset 0 -1px 1px rgb(0 0 0 / 42%),
+    inset 0 0 0 2px rgb(188 146 255 / 7%);
 }

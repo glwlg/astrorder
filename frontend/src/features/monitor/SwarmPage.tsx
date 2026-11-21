@@ -4,7 +4,6 @@ import {
   Button,
   Group,
   Modal,
-  NativeSelect,
   Stack,
   Text,
   TextInput,
@@ -12,7 +11,10 @@ import {
   Title,
 } from '@mantine/core'
 import {
+  IconBolt,
+  IconCpu,
   IconPlus,
+  IconServer,
   IconTopologyStarRing,
 } from '@tabler/icons-react'
 import { notifications } from '@mantine/notifications'
@@ -23,6 +25,8 @@ import { newCommandId, scopeKey } from '../../domain/semantics'
 import { api } from '../../api/client'
 import type { Agent } from '../../domain/types'
 import { buildSwarmTopology } from '../../domain/swarmTopology'
+import { AgentBrandIcon } from '../../components/AgentBrandIcon'
+import { BrandedSelect } from '../../components/BrandedSelect'
 import { SwarmDagView } from './SwarmDagView'
 
 const STANDARD_MODELS: Record<string, Array<{ provider: string; model: string; label: string }>> = {
@@ -212,13 +216,14 @@ export function SwarmPage() {
 
   return (
     <div
+      className="route-page swarm-page"
       style={{
         display: 'flex',
         flexDirection: 'column',
-        height: '100%',
+        maxWidth: 'none',
         padding: '16px 20px',
         boxSizing: 'border-box',
-        background: 'var(--astr-canvas-bg, #f8f9fb)',
+        background: 'var(--astr-canvas-bg, var(--astr-bg))',
         overflow: 'hidden',
       }}
     >
@@ -234,17 +239,17 @@ export function SwarmPage() {
       >
         <Group gap="sm">
           <Group gap="xs">
-            <IconTopologyStarRing size={24} color="#5B5BD6" />
-            <Title order={2} size="h3" fw={700} c="var(--astr-text, #111827)">
+            <IconTopologyStarRing size={24} color="var(--astr-indigo)" />
+            <Title order={2} size="h3" fw={700} c="var(--astr-text)">
               星图阵列
             </Title>
           </Group>
-          <div style={{ width: 1, height: 18, background: 'var(--astr-border, #E5E7EB)' }} />
+          <div style={{ width: 1, height: 18, background: 'var(--astr-border)' }} />
           <Group gap={6}>
-            <Badge size="sm" variant="light" color="indigo">
+            <Badge size="sm" variant="light" color="violet">
               {rootCount} 个活跃星系
             </Badge>
-            <Badge size="sm" variant="light" color="cyan">
+            <Badge size="sm" variant="light" color="violet">
               {workerCount} 个协同伴星
             </Badge>
           </Group>
@@ -252,11 +257,11 @@ export function SwarmPage() {
 
         <Group gap="xs">
           <Button
-            color="indigo"
+            color="violet"
             size="sm"
             leftSection={<IconPlus size={16} />}
             onClick={handleOpenCreate}
-            style={{ fontWeight: 600, boxShadow: '0 1px 3px rgba(91, 91, 214, 0.25)' }}
+            style={{ fontWeight: 600, boxShadow: '0 2px 10px color-mix(in oklab, var(--astr-indigo) 28%, transparent)' }}
           >
             启动主星会话
           </Button>
@@ -281,7 +286,7 @@ export function SwarmPage() {
         onClose={() => !busy && setCreateOpened(false)}
         title={
           <Group gap="xs">
-            <IconTopologyStarRing size={20} color="#5B5BD6" />
+            <IconTopologyStarRing size={20} color="var(--astr-indigo)" />
             <Text fw={700} size="md">
               启动协同 · 新建主星会话
             </Text>
@@ -297,45 +302,47 @@ export function SwarmPage() {
           </Text>
 
           {/* 1. 服务器 / 主机环境 */}
-          <NativeSelect
+          <BrandedSelect
             label="目标运行服务器 (Server / Host)"
             description="选择调度中枢运行所在的物理机或远程容器"
             value={selectedMachine}
-            onChange={(e) => {
-              setSelectedMachine(e.currentTarget.value)
+            onChange={(val) => {
+              setSelectedMachine(val)
               const first = Object.values(agents).find(
                 (a: Agent) =>
                   a.status === 'ready' &&
-                  (e.currentTarget.value === 'all' || (a.connection_id || 'local') === e.currentTarget.value)
+                  (val === 'all' || (a.connection_id || 'local') === val)
               )
               if (first) {
                 setSelectedAgentId(first.id)
-                const match = sessions.find((s) => s.agent_id === first.id);
+                const match = sessions.find((s) => s.agent_id === first.id)
                 setWorkspace(match?.workspace || '')
               }
             }}
-            data={machineChoices}
+            options={machineChoices.map((m) => ({
+              value: m.value,
+              label: m.label,
+              icon: <IconServer size={14} color="var(--astr-indigo)" />,
+            }))}
             disabled={busy}
           />
 
           {/* 2. 选择 Agent */}
-          <NativeSelect
+          <BrandedSelect
             label="指派主星 Agent"
             description="执行调度中枢职责的智能体"
+            placeholder="请选择主星 Agent"
             value={selectedAgentId}
-            onChange={(e) => {
-              const nextId = e.currentTarget.value
+            onChange={(nextId) => {
               setSelectedAgentId(nextId)
-              const match = sessions.find((s) => s.agent_id === nextId);
+              const match = sessions.find((s) => s.agent_id === nextId)
               setWorkspace(match?.workspace || '')
             }}
-            data={[
-              { value: '', label: '请选择主星 Agent' },
-              ...availableAgents.map((a: Agent) => ({
-                value: a.id,
-                label: `${a.name || a.id} (${a.connection_id || '本机'})`,
-              })),
-            ]}
+            options={availableAgents.map((a: Agent) => ({
+              value: a.id,
+              label: `${a.name || a.id} (${a.connection_id || '本机'})`,
+              icon: <AgentBrandIcon kind={a.kind} size={15} />,
+            }))}
             disabled={busy}
           />
 
@@ -350,19 +357,29 @@ export function SwarmPage() {
 
           {/* 4. 模型与思考程度双列组合 */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-            <NativeSelect
+            <BrandedSelect
               label="运行模型 (Model)"
+              placeholder="默认模型"
               value={modelKey}
-              onChange={(e) => setModelKey(e.currentTarget.value)}
-              data={modelChoices}
+              onChange={setModelKey}
+              options={modelChoices.map((m) => ({
+                value: m.value,
+                label: m.label,
+                icon: <IconCpu size={14} color="var(--astr-indigo)" />,
+              }))}
               disabled={busy || !selectedAgentId}
             />
 
-            <NativeSelect
+            <BrandedSelect
               label="思考程度 (Reasoning Effort)"
+              placeholder="默认思考程度"
               value={agents[selectedAgentId]?.kind === 'antigravity' ? '' : effort}
-              onChange={(e) => setEffort(e.currentTarget.value)}
-              data={EFFORT_OPTIONS}
+              onChange={setEffort}
+              options={EFFORT_OPTIONS.map((opt) => ({
+                value: opt.value,
+                label: opt.label,
+                icon: <IconBolt size={14} color="var(--astr-indigo)" />,
+              }))}
               disabled={busy || agents[selectedAgentId]?.kind === 'antigravity'}
             />
           </div>
@@ -391,7 +408,7 @@ export function SwarmPage() {
               取消
             </Button>
             <Button
-              color="indigo"
+              color="violet"
               onClick={() => void handleCreate()}
               loading={busy}
               disabled={!selectedAgentId}

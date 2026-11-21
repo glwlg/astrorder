@@ -22,9 +22,19 @@ import { FileSourceContext } from '../features/sidecar/FileSourceContext'
 import { GroupFileLink } from './GroupFileLink'
 import { findGroupFile } from '../features/chat/groupFileSources'
 
+function hashSnippet(value: string): string {
+  let hash = 2166136261
+  for (let i = 0; i < value.length; i++) {
+    hash ^= value.charCodeAt(i)
+    hash = Math.imul(hash, 16777619)
+  }
+  return (hash >>> 0).toString(36)
+}
+
 function MermaidDiagram({ code }: { code: string }) {
   const [svg, setSvg] = useState('')
   const [failed, setFailed] = useState(false)
+  const openArtifact = useSidecarStore((state) => state.openArtifact)
 
   useEffect(() => {
     let active = true
@@ -38,9 +48,37 @@ function MermaidDiagram({ code }: { code: string }) {
     return () => { active = false }
   }, [code])
 
+  const openInSidecar = () => {
+    const id = `inline-mermaid:${hashSnippet(code)}`
+    openArtifact(
+      {
+        id,
+        sessionId: 'inline',
+        agentId: '',
+        name: 'Mermaid 图表.mmd',
+        kind: 'workspace_file',
+        readUrl: '',
+        mediaType: 'text/vnd.mermaid',
+        writable: false,
+        metadata: { inlineContent: code },
+      },
+      'mermaid-viewer',
+    )
+  }
+
   if (failed) return <MarkdownCodeBlock><code>{code}</code></MarkdownCodeBlock>
   return (
     <div className="markdown-mermaid" aria-label="Mermaid 图表">
+      <button
+        type="button"
+        className="markdown-canvas-btn markdown-mermaid-canvas-btn"
+        onClick={openInSidecar}
+        aria-label="在侧边画布查看 Mermaid 图表"
+        title="在右侧画布展开与缩放查看"
+      >
+        <IconEye size={12} aria-hidden="true" />
+        <span>画布查看</span>
+      </button>
       {svg ? <div dangerouslySetInnerHTML={{ __html: svg }} /> : <span>正在渲染图表…</span>}
     </div>
   )
@@ -49,12 +87,16 @@ function MermaidDiagram({ code }: { code: string }) {
 function MarkdownCodeBlock({ children }: { children?: ReactNode }) {
   const [copied, setCopied] = useState(false)
   const codeRef = useRef<HTMLElement>(null)
+  const openArtifact = useSidecarStore((state) => state.openArtifact)
 
   let language = ''
-  if (isValidElement<{ className?: string }>(children)) {
+  let rawText = ''
+  if (isValidElement<{ className?: string; children?: ReactNode }>(children)) {
     const match = (children.props.className || '').match(/language-([a-zA-Z0-9_-]+)/)
     if (match) language = match[1]
+    if (typeof children.props.children === 'string') rawText = children.props.children
   }
+  const lineCount = rawText ? rawText.split('\n').length : 0
 
   const handleCopy = (e: React.MouseEvent) => {
     e.stopPropagation()
@@ -65,19 +107,55 @@ function MarkdownCodeBlock({ children }: { children?: ReactNode }) {
     setTimeout(() => setCopied(false), 1600)
   }
 
+  const handleOpenInCanvas = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    const text = codeRef.current?.innerText || codeRef.current?.textContent || rawText
+    if (!text.trim()) return
+    const ext = language ? `.${language.toLowerCase()}` : '.txt'
+    const id = `inline-code:${hashSnippet(text)}`
+    openArtifact(
+      {
+        id,
+        sessionId: 'inline',
+        agentId: '',
+        name: `代码片段${ext}`,
+        kind: 'workspace_file',
+        readUrl: '',
+        mediaType: 'text/plain',
+        writable: false,
+        metadata: { inlineContent: text },
+      },
+      'monaco-viewer',
+    )
+  }
+
   return (
     <div className="markdown-code-wrapper">
       <div className="markdown-code-header">
         <span className="markdown-code-lang">{(language || 'code').toUpperCase()}</span>
-        <button
-          type="button"
-          className="markdown-code-copy-btn"
-          onClick={handleCopy}
-          aria-label={copied ? '已复制代码' : '复制代码'}
-        >
-          {copied ? <IconCheck size={12} color="var(--astr-teal, #12b886)" /> : <IconCopy size={12} />}
-          <span>{copied ? '已复制' : '复制'}</span>
-        </button>
+        <div className="markdown-code-actions">
+          {lineCount >= 6 && (
+            <button
+              type="button"
+              className="markdown-code-copy-btn markdown-canvas-btn"
+              onClick={handleOpenInCanvas}
+              aria-label="在侧边画布查看代码"
+              title="在右侧 Monaco 画布中对照查看"
+            >
+              <IconEye size={12} aria-hidden="true" />
+              <span>画布</span>
+            </button>
+          )}
+          <button
+            type="button"
+            className="markdown-code-copy-btn"
+            onClick={handleCopy}
+            aria-label={copied ? '已复制代码' : '复制代码'}
+          >
+            {copied ? <IconCheck size={12} color="var(--astr-teal, #12b886)" /> : <IconCopy size={12} />}
+            <span>{copied ? '已复制' : '复制'}</span>
+          </button>
+        </div>
       </div>
       <pre className="markdown-code-block">
         {isValidElement<{ children?: ReactNode }>(children) ? (

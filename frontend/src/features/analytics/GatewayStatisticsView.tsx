@@ -39,11 +39,10 @@ export function GatewayStatisticsView() {
   }
 
   return <div className="analytics-gateway-view" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-    <Group justify="space-between" px="sm" py={6} style={{ flexShrink: 0, borderBottom: '1px solid var(--astr-border)' }}>
-      <Text size="sm" fw={600}>网关统计</Text>
+    <Group justify="flex-end" px="md" py={6} style={{ flexShrink: 0, borderBottom: '1px solid var(--astr-border)', background: 'color-mix(in oklab, var(--astr-surface-muted) 45%, var(--astr-surface))' }}>
       <Group gap={6}>
-        <Button size="compact-xs" variant="subtle" leftSection={<IconRefresh size={14} />} onClick={() => setRevision(value => value + 1)}>刷新</Button>
-        {url && <Button component="a" href={url} onClick={openExternal} target="_blank" rel="noopener noreferrer" size="compact-xs" variant="subtle" leftSection={<IconExternalLink size={14} />}>外部打开</Button>}
+        <Button size="compact-xs" variant="subtle" color="violet" leftSection={<IconRefresh size={14} />} onClick={() => setRevision(value => value + 1)}>刷新</Button>
+        {url && <Button component="a" href={url} onClick={openExternal} target="_blank" rel="noopener noreferrer" size="compact-xs" variant="subtle" color="violet" leftSection={<IconExternalLink size={14} />}>外部打开</Button>}
       </Group>
     </Group>
     {loading ? <Text role="status" p="md" size="sm" c="dimmed">正在读取统计页地址…</Text> : error ? <Alert m="md" color="red">{error}</Alert> : <>

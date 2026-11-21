@@ -74,18 +74,19 @@ export function BotGroupRail({
   return (
     <div className="bot-group-rail" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
       {/* 顶部标题与新建群聊操作区 */}
-      <div className="rail-heading" style={{ padding: '0 4px 10px 4px', borderBottom: '1px solid var(--astr-border)' }}>
+      <div className="rail-heading">
         <Group justify="space-between" align="center" style={{ width: '100%' }} wrap="nowrap">
           <Group gap={6} wrap="nowrap">
-            <IconUsers size={16} color="var(--astr-indigo, #5b6cff)" />
-            <Text size="xs" fw={700} c="dimmed">群聊协作 (Bots)</Text>
-            <Badge size="xs" variant="light" color="indigo">{botGroups.length}</Badge>
+            <IconUsers size={16} color="var(--astr-indigo)" />
+            <Text size="xs" fw={700} c="dimmed">群聊协作</Text>
+            <Badge size="xs" variant="light" color="violet">{botGroups.length}</Badge>
           </Group>
           <Tooltip label="新建多 Agent 群聊" withArrow position="bottom">
             <Button
               size="compact-xs"
               variant="light"
-              color="indigo"
+              color="violet"
+              data-liquid-surface="control"
               onClick={() => setCreateOpened(true)}
               leftSection={<IconPlus size={13} />}
               style={{ fontWeight: 600 }}
@@ -104,7 +105,7 @@ export function BotGroupRail({
           <Stack align="center" gap="xs" p="xl" style={{ textAlign: 'center' }}>
             <IconUsers size={28} color="var(--astr-muted)" stroke={1.4} />
             <Text size="xs" c="dimmed">暂无群聊会话</Text>
-            <Button size="xs" variant="subtle" color="indigo" onClick={() => setCreateOpened(true)}>
+            <Button size="xs" variant="light" color="violet" onClick={() => setCreateOpened(true)}>
               立即创建
             </Button>
           </Stack>
@@ -115,22 +116,20 @@ export function BotGroupRail({
               return (
                 <UnstyledButton
                   key={bg.id}
-                  className="session-row"
+                  className={`session-row ${isActive ? 'is-active' : ''}`}
+                  data-liquid-surface={isActive ? 'selection' : undefined}
                   onClick={() => {
                     navigate(`/groups/${bg.id}`)
                     onNavigate?.()
                   }}
                   style={{
                     padding: '8px 10px',
-                    borderRadius: 8,
+                    borderRadius: 9,
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'space-between',
-                    background: isActive
-                      ? 'color-mix(in srgb, var(--astr-indigo, #5b6cff) 14%, var(--astr-surface))'
-                      : undefined,
                     border: isActive
-                      ? '1px solid color-mix(in srgb, var(--astr-indigo, #5b6cff) 30%, transparent)'
+                      ? '1px solid color-mix(in oklab, var(--astr-indigo) 32%, var(--astr-border))'
                       : '1px solid transparent',
                     transition: 'all 0.15s ease',
                   }}

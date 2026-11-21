@@ -166,7 +166,7 @@ export function GroupsPage({ routePrefix = "" }: { routePrefix?: string }) {
               : "当前暂无活跃群聊。支持将多个 Agent 汇聚于同一群聊，通过 @ 协同接力完成复合任务。"}
           </Text>
           <Button
-            color="indigo"
+            color="violet"
             onClick={() => setCreateOpened(true)}
             leftSection={<IconUsers size={16} />}
           >

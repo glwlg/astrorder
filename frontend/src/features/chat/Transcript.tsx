@@ -3,7 +3,8 @@ import { AsyncUserInputCard, isAsyncQuestion, hasLaterNativeInput } from '../../
 import { IconArrowDown, IconPaperclip, IconRefresh, IconTool, IconVectorTriangle } from '@tabler/icons-react'
 import { ActionIcon, Anchor, Button, Group, Paper, Stack, Text, Tooltip } from '@mantine/core'
 import { IconCheck, IconChecks, IconCopy, IconEdit, IconGitFork, IconShieldCheck, IconX } from '@tabler/icons-react'
-import { useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useMemo, useState, type ReactNode } from 'react'
+import { TurnMinimap } from './TurnMinimap'
 import { InlineNotice } from '../../components/InlineNotice'
 import type { Approval, Attachment, Message, OutboxEntry, Session } from '../../domain/types'
 import { attachmentHref } from '../../domain/attachmentHref'
@@ -354,6 +355,14 @@ export function Transcript({
     scrollToBottom,
     capturePrependAnchor,
   } = useStickToBottom<HTMLDivElement>({ contentVersion, forceFollowVersion: outboundVersion })
+  const [scrollerEl, setScrollerEl] = useState<HTMLDivElement | null>(null)
+  const bindTranscriptRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      setContainerRef(node)
+      setScrollerEl(node)
+    },
+    [setContainerRef],
+  )
   const older = useOlderMessages({ hasMore: hasMoreHistory, loading: loadingOlder, load: () => onLoadOlder?.(), capture: capturePrependAnchor })
   const busy = session?.status === 'running' || session?.status === 'waiting_approval'
   const lastVisibleMessage = visibleMessages[visibleMessages.length - 1]
@@ -382,7 +391,7 @@ export function Transcript({
       )}
       <div
         className="transcript"
-        ref={setContainerRef}
+        ref={bindTranscriptRef}
         onScroll={event => { onScroll(); older.onScroll(event) }}
         onWheel={older.onWheel}
         onTouchStart={older.onTouchStart}
@@ -441,10 +450,12 @@ export function Transcript({
               const hasSubsequentFinalReply = remaining.some(m => m.role === 'assistant' && m.kind === 'message' && m.text.trim())
               const isPackRunning = Boolean(busy && isLatestActivity && !hasLaterUserMessage)
               const shouldOpen = isPackRunning && !hasSubsequentFinalReply
+              const isDeferredPack = !shouldOpen && idx + pack.length < visibleMessages.length - 6
               return (
                 <motion.section
-                  className="activity-pack"
+                  className={`activity-pack${isDeferredPack ? ' is-deferred-turn' : ''}`}
                   aria-label="思考与工具"
+                  data-turn-id={message.id}
                   key={message.id}
                   initial={enter}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -487,8 +498,9 @@ export function Transcript({
               && !turnRemainder.some(item => item.role === 'assistant' && !isActivity(item))
               && !(busy && nextUserOffset < 0)
             const canForkTurn = isFinalReply
+            const isDeferredEntry = idx < visibleMessages.length - 6
             return (
-              <motion.div className="transcript-message-entry" key={message.id} initial={enter} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.28, ease: [0.2, 0.8, 0.2, 1] }}>
+              <motion.div className={`transcript-message-entry${isDeferredEntry ? ' is-deferred-turn' : ''}`} data-turn-id={message.id} key={message.id} initial={enter} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.28, ease: [0.2, 0.8, 0.2, 1] }}>
                 {showDateDivider && (
                   <div className="transcript-date-divider">
                     <span>{currentDate}</span>
@@ -576,6 +588,12 @@ export function Transcript({
           )}
         </div>
       </div>
+      <TurnMinimap
+        visibleMessages={visibleMessages}
+        activityPacks={packs}
+        approvals={approvals}
+        scroller={scrollerEl}
+      />
     </section>
   )
 }

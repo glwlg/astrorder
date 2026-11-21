@@ -106,10 +106,20 @@ export function MonacoViewer({ artifact, session: sourceSession, onSave, onDirty
   }
   const initialContentRef = useRef('')
 
+  const inlineContent = typeof artifact.metadata?.inlineContent === 'string' ? artifact.metadata.inlineContent : null
+
   const fetchContent = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
+      if (inlineContent !== null) {
+        setEncodingReadOnly(true)
+        setContent(inlineContent)
+        initialContentRef.current = inlineContent
+        setDirty(false)
+        onDirtyChangeRef.current?.(false)
+        return
+      }
       const res = await authenticatedApiFetch(artifact.readUrl)
       if (!res.ok) throw new Error(`读取失败 (${res.status})`)
       let decoded: ReturnType<typeof decodeText>
@@ -131,7 +141,7 @@ export function MonacoViewer({ artifact, session: sourceSession, onSave, onDirty
     } finally {
       setLoading(false)
     }
-  }, [artifact.readUrl])
+  }, [artifact.readUrl, inlineContent])
 
   useEffect(() => {
     void fetchContent()

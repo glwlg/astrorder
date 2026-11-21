@@ -135,8 +135,8 @@ a { color: inherit; }
   opacity: 1;
   width: 6px;
   height: 48px;
-  background: #3b82f6;
-  box-shadow: 0 0 14px rgba(59, 130, 246, 0.65);
+  background: var(--astr-indigo);
+  box-shadow: 0 0 14px color-mix(in oklab, var(--astr-indigo) 60%, transparent);
 }
 .shell-main { position: relative; z-index: 1; min-height: calc(100vh - 64px); overflow: hidden; }
 .sidebar-content { height: 100%; min-height: 0; }
@@ -400,8 +400,8 @@ a { color: inherit; }
     box-shadow: 0 0 0 0 transparent;
   }
   50% {
-    background: color-mix(in srgb, #3b82f6 12%, transparent);
-    box-shadow: 0 0 16px color-mix(in srgb, #3b82f6 28%, transparent);
+    background: color-mix(in srgb, var(--astr-indigo) 12%, transparent);
+    box-shadow: 0 0 16px color-mix(in srgb, var(--astr-indigo) 28%, transparent);
   }
 }
 
@@ -427,7 +427,7 @@ a { color: inherit; }
 
 /* Luminous pulsating breathing halo around star loader */
 .lazy-details-indicator.is-loading {
-  color: #3b82f6;
+  color: var(--astr-indigo);
   position: relative;
   display: inline-flex;
   align-items: center;
@@ -438,7 +438,7 @@ a { color: inherit; }
   position: absolute;
   inset: -4px;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(59, 130, 246, 0.5) 0%, transparent 70%);
+  background: radial-gradient(circle, color-mix(in srgb, var(--astr-indigo) 50%, transparent) 0%, transparent 70%);
   animation: indicator-pulse-halo 2.2s ease-in-out infinite;
   pointer-events: none;
 }
@@ -1025,7 +1025,7 @@ a { color: inherit; }
   max-width: 100%;
 }
 .monitor-card-wrapper.is-drop-target {
-  outline: 2px solid #3b82f6;
+  outline: 2px solid var(--astr-indigo);
   outline-offset: 4px;
   border-radius: 18px;
   transform: scale(1.015);
@@ -1042,9 +1042,9 @@ a { color: inherit; }
 .placeholder-inner-box {
   width: 100%;
   height: 100%;
-  border: 2px dashed color-mix(in srgb, var(--astr-border) 80%, #3b82f6);
+  border: 2px dashed color-mix(in oklab, var(--astr-border) 60%, var(--astr-indigo));
   border-radius: var(--mantine-radius-lg, 16px);
-  background: color-mix(in srgb, var(--astr-surface-muted) 60%, transparent);
+  background: color-mix(in oklab, var(--astr-selected) 24%, transparent);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1071,7 +1071,7 @@ a { color: inherit; }
   opacity: 1 !important;
   background: var(--astr-surface) !important;
   box-shadow: 0 24px 64px rgba(0, 0, 0, 0.28), 0 4px 16px rgba(0, 0, 0, 0.12) !important;
-  border: 2px solid #3b82f6 !important;
+  border: 2px solid var(--astr-indigo) !important;
   transform: scale(1.025) rotate(1deg);
   transform-origin: center center;
 }
@@ -1102,9 +1102,9 @@ a { color: inherit; }
   inset: 0;
   z-index: 20;
   pointer-events: none;
-  border: 2px solid #3b82f6;
+  border: 2px solid var(--astr-indigo);
   border-radius: inherit;
-  box-shadow: inset 0 0 10px rgba(59, 130, 246, 0.2);
+  box-shadow: inset 0 0 12px color-mix(in oklab, var(--astr-indigo) 26%, transparent);
   animation: monitor-completion-flash 1.8s ease-out;
 }
 @media (prefers-reduced-motion: reduce) {
@@ -1277,12 +1277,12 @@ a { color: inherit; }
 }
 .grid-picker-cell:hover,
 .grid-picker-cell.is-active {
-  border-color: #3b82f6;
-  background: color-mix(in srgb, #3b82f6 30%, var(--astr-surface));
-  box-shadow: 0 0 8px rgba(59, 130, 246, 0.3);
+  border-color: var(--astr-indigo);
+  background: color-mix(in srgb, var(--astr-indigo) 28%, var(--astr-surface));
+  box-shadow: 0 0 8px color-mix(in srgb, var(--astr-indigo) 32%, transparent);
 }
 .grid-picker-cell.is-current {
-  border-color: #3b82f6;
+  border-color: var(--astr-indigo);
 }
 .monitor-dimension-tooltip {
   position: fixed;
@@ -1302,12 +1302,12 @@ a { color: inherit; }
   transition: border-color 0.15s ease, background 0.15s ease;
 }
 .monitor-dimension-tooltip.is-snapped {
-  border-color: #3b82f6;
-  background: rgba(30, 58, 138, 0.92);
-  box-shadow: 0 8px 24px rgba(59, 130, 246, 0.35);
+  border-color: var(--astr-indigo);
+  background: rgba(45, 29, 82, 0.92);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--astr-indigo) 38%, transparent);
 }
 .monitor-dimension-tooltip .snap-indicator {
-  color: #60a5fa;
+  color: var(--astr-running-gold, #c6a0ff);
   font-weight: 500;
   font-size: 12px;
   margin-left: 4px;
@@ -1396,12 +1396,34 @@ a { color: inherit; }
 .monitor-active-command-row {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 11.5px;
-  color: var(--astr-indigo, #5b6cff);
-  padding: 4px 8px;
-  background: color-mix(in srgb, var(--astr-indigo, #5b6cff) 6%, transparent);
-  border-radius: 6px;
+  gap: 8px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--astr-indigo);
+  padding: 6px 10px;
+  background: color-mix(in oklab, var(--astr-indigo) 8%, transparent);
+  border: 1px solid color-mix(in oklab, var(--astr-indigo) 20%, transparent);
+  border-radius: 8px;
+}
+.monitor-active-command-row .command-text {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  line-height: 1.45;
+  color: var(--astr-text);
+  overflow-wrap: anywhere;
+}
+.monitor-active-command-row .monitor-mini-tag {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--astr-indigo) 14%, transparent);
 }
 
 /* Miniature Composer Footer */
@@ -1473,7 +1495,7 @@ a { color: inherit; }
   cursor: pointer;
 }
 .monitor-row-title:hover {
-  color: #3b82f6;
+  color: var(--astr-indigo);
 }
 .monitor-row-path {
   font-size: 11px;
@@ -1872,7 +1894,7 @@ a { color: inherit; }
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: radial-gradient(circle 500px at 50% 45%, rgba(59, 130, 246, 0.08), transparent 75%), var(--astr-bg, #15181e);
+  background: radial-gradient(circle 500px at 50% 45%, color-mix(in srgb, var(--astr-indigo, #7540bd) 10%, transparent), transparent 75%), var(--astr-bg, #15181e);
   color: var(--astr-text, #e5e9f1);
   user-select: none;
   -webkit-user-select: none;
@@ -1895,22 +1917,22 @@ a { color: inherit; }
   position: absolute;
   inset: -14px;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(59, 130, 246, 0.35) 0%, transparent 70%);
+  background: radial-gradient(circle, color-mix(in srgb, var(--astr-indigo, #9a6bff) 36%, transparent) 0%, transparent 70%);
   animation: splash-halo-pulse 2.4s ease-in-out infinite;
   pointer-events: none;
 }
 .splash-loader-wrap {
   position: relative;
   z-index: 1;
-  color: #3b82f6;
-  filter: drop-shadow(0 0 10px rgba(59, 130, 246, 0.5));
+  color: var(--astr-indigo, #9a6bff);
+  filter: drop-shadow(0 0 10px color-mix(in srgb, var(--astr-indigo, #9a6bff) 50%, transparent));
 }
 .splash-title {
   font-size: 22px;
   font-weight: 700;
   letter-spacing: 0.02em;
   margin: 0 0 8px;
-  background: linear-gradient(135deg, var(--astr-text, #fff) 0%, color-mix(in srgb, var(--astr-text, #fff) 70%, #3b82f6) 60%, #3b82f6 100%);
+  background: linear-gradient(135deg, var(--astr-text, #fff) 0%, color-mix(in srgb, var(--astr-text, #fff) 66%, var(--astr-indigo, #9a6bff)) 60%, var(--astr-indigo, #9a6bff) 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
@@ -1937,7 +1959,7 @@ a { color: inherit; }
   bottom: 0;
   width: 45%;
   border-radius: 999px;
-  background: linear-gradient(90deg, transparent, #3b82f6, #60a5fa, transparent);
+  background: linear-gradient(90deg, transparent, var(--astr-indigo, #7540bd), var(--astr-running-gold, #c6a0ff), transparent);
   animation: splash-sweep 1.6s ease-in-out infinite;
 }
 .splash-status-text {
@@ -1947,4 +1969,127 @@ a { color: inherit; }
 @media (prefers-reduced-motion: reduce) {
   .splash-orbit-halo, .splash-progress-bar { animation: none; }
   .splash-progress-bar { width: 100%; }
+}
+
+/* Phase 2: Matrix Card Three-Signal Progressive Disclosure & Tabular Telemetry */
+.monitor-summary-bar {
+  font-variant-numeric: tabular-nums;
+}
+.monitor-card-secondary-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 0.34;
+  transition: opacity 150ms ease, background 150ms ease;
+  padding: 2px 4px;
+  border-radius: 8px;
+}
+.monitor-card-wrapper:hover .monitor-card-secondary-actions,
+.monitor-card-wrapper:focus-within .monitor-card-secondary-actions,
+.monitor-card-wrapper.is-focused .monitor-card-secondary-actions {
+  opacity: 1;
+  background: color-mix(in oklab, var(--astr-surface-muted) 68%, transparent);
+}
+@media (pointer: coarse) {
+  .monitor-card-secondary-actions {
+    opacity: 1;
+  }
+}
+
+/* Phase 3: Artifact-First Canvas Controls on Chat Code & Mermaid Blocks */
+.markdown-code-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.markdown-mermaid {
+  position: relative;
+}
+.markdown-mermaid-canvas-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in oklab, var(--astr-indigo) 30%, var(--astr-border));
+  background: color-mix(in oklab, var(--astr-surface) 88%, transparent);
+  backdrop-filter: blur(10px);
+  color: var(--astr-indigo);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 140ms ease, background 140ms ease;
+}
+.markdown-mermaid:hover .markdown-mermaid-canvas-btn,
+.markdown-mermaid:focus-within .markdown-mermaid-canvas-btn {
+  opacity: 1;
+}
+.markdown-canvas-btn:hover {
+  color: var(--astr-indigo);
+}
+
+/* Progressive branded styling for modal NativeSelect controls (Chrome 135+ / Edge WebView2) */
+@supports (appearance: base-select) {
+  .mantine-NativeSelect-input,
+  .mantine-NativeSelect-input::picker(select) {
+    appearance: base-select;
+  }
+  .mantine-NativeSelect-input::picker(select) {
+    border: 1px solid color-mix(in oklab, var(--astr-indigo) 24%, var(--astr-border));
+    border-radius: 12px;
+    padding: 4px;
+    background: var(--astr-surface);
+    color: var(--astr-text);
+    box-shadow: 0 16px 36px -12px rgb(18 12 36 / 32%);
+    max-height: 280px;
+    overflow-y: auto;
+  }
+  .mantine-NativeSelect-input::picker-icon {
+    color: var(--astr-muted);
+  }
+  .mantine-NativeSelect-input option {
+    padding: 6px 10px;
+    border-radius: 8px;
+    color: var(--astr-text);
+    cursor: pointer;
+  }
+  .mantine-NativeSelect-input option:hover,
+  .mantine-NativeSelect-input option:checked {
+    background: color-mix(in oklab, var(--astr-selected) 72%, transparent);
+    color: var(--astr-indigo);
+  }
+  .mantine-NativeSelect-input option::checkmark {
+    color: var(--astr-indigo);
+  }
+}
+
+/* Pure CSS shimmer for ShinyText (zero JS requestAnimationFrame / DOM mutation overhead) */
+@keyframes astr-shiny-sweep {
+  from { background-position: 150% center; }
+  to { background-position: -50% center; }
+}
+.astr-shiny-text.is-pause-hover:hover {
+  animation-play-state: paused !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .astr-shiny-text {
+    animation: none !important;
+    background-position: 50% center !important;
+  }
+}
+
+/* Defer layout/paint of older off-screen transcript turns (never applied to latest viewport turns) */
+.transcript-message-entry.is-deferred-turn {
+  content-visibility: auto;
+  contain-intrinsic-size: auto none auto 160px;
+}
+
+.activity-pack.is-deferred-turn {
+  content-visibility: auto;
+  contain-intrinsic-size: auto none auto 56px;
 }

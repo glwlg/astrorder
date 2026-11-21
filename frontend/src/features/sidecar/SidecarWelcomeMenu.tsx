@@ -84,8 +84,12 @@ export function SidecarWelcomeMenu({
         padding: '32px 24px',
       }}
     >
-      <div style={{ width: '100%', maxWidth: '460px' }}>
-        <div className="sidecar-welcome-list">
+      <div style={{ width: '100%', maxWidth: '560px' }}>
+        <div
+          className="sidecar-welcome-list"
+          data-liquid-surface="card"
+          data-liquid-snapshot=".desktop-sidecar"
+        >
           {menuItems.map((item) => (
             <UnstyledButton
               key={item.label}
@@ -113,9 +117,9 @@ export function SidecarWelcomeMenu({
 
         {/* 推荐工作区信息 */}
         {session.workspace && (
-          <div style={{ marginTop: '24px' }}>
+          <div style={{ marginTop: '20px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
-              <SparkleIcon size={14} color="var(--astr-muted)" />
+              <SparkleIcon size={14} color="var(--astr-indigo)" />
               <Text size="xs" fw={600} c="dimmed">
                 推荐工作区
               </Text>
@@ -123,6 +127,8 @@ export function SidecarWelcomeMenu({
             <UnstyledButton
               onClick={onOpenFileTree}
               className="sidecar-workspace-link"
+              data-liquid-surface="control"
+              data-liquid-snapshot=".desktop-sidecar"
             >
               <Text size="xs" fw={500} truncate title={session.workspace}>
                 {session.project_name ? `${session.project_name} · ` : ''}

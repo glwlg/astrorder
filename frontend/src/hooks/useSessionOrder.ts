@@ -12,7 +12,7 @@ function newerStamp(left?: string, right?: string): string | undefined {
 }
 export function reconcileSessionOrder(previous: string[], sessions: Session[], sort: boolean): string[] {
   const key = (s: Session) => scopeKey(s.agent_id, s.id)
-  if (sort || previous.length === 0) return [...sessions].sort((a, b) => b.updated_at.localeCompare(a.updated_at)).map(key)
+  if (sort || previous.length === 0) return [...sessions].sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || '')).map(key)
   const present = new Set(sessions.map(key))
   const retained = previous.filter(id => present.has(id))
   const known = new Set(retained)

@@ -33,13 +33,20 @@ export function MermaidViewer({ artifact, onSave, onDirtyChange, toolbarAction, 
     }
   }, [])
 
+  const inlineContent = typeof artifact.metadata?.inlineContent === 'string' ? artifact.metadata.inlineContent : null
+
   const fetchContent = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      const res = await authenticatedApiFetch(artifact.readUrl)
-      if (!res.ok) throw new Error(`读取失败 (${res.status})`)
-      const text = await res.text()
+      let text = ''
+      if (inlineContent !== null) {
+        text = inlineContent
+      } else {
+        const res = await authenticatedApiFetch(artifact.readUrl)
+        if (!res.ok) throw new Error(`读取失败 (${res.status})`)
+        text = await res.text()
+      }
       setCode(text)
       initialCodeRef.current = text
       setDirty(false)
@@ -51,7 +58,7 @@ export function MermaidViewer({ artifact, onSave, onDirtyChange, toolbarAction, 
     } finally {
       setLoading(false)
     }
-  }, [artifact.readUrl, renderChart])
+  }, [artifact.readUrl, inlineContent, renderChart])
 
   useEffect(() => {
     void fetchContent()

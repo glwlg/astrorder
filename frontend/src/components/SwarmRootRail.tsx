@@ -60,18 +60,19 @@ export function SwarmRootRail({
   return (
     <div className="swarm-root-rail" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
       {/* 顶部标题与启动主星操作 */}
-      <div className="rail-heading" style={{ padding: '0 4px 10px 4px', borderBottom: '1px solid var(--astr-border)' }}>
+      <div className="rail-heading">
         <Group justify="space-between" align="center" style={{ width: '100%' }} wrap="nowrap">
           <Group gap={6} wrap="nowrap">
-            <IconTopologyStarRing size={16} color="var(--astr-indigo, #5b6cff)" />
+            <IconTopologyStarRing size={16} color="var(--astr-indigo)" />
             <Text size="xs" fw={700} c="dimmed">星图主星列表</Text>
-            <Badge size="xs" variant="light" color="indigo">{rootStars.length}</Badge>
+            <Badge size="xs" variant="light" color="violet">{rootStars.length}</Badge>
           </Group>
           <Tooltip label="启动新主星会话" withArrow position="bottom">
             <Button
               size="compact-xs"
               variant="light"
-              color="indigo"
+              color="violet"
+              data-liquid-surface="control"
               onClick={handleLaunchNewStar}
               leftSection={<IconPlus size={13} />}
               style={{ fontWeight: 600 }}
@@ -88,7 +89,7 @@ export function SwarmRootRail({
           <Stack align="center" gap="xs" p="xl" style={{ textAlign: 'center' }}>
             <IconTopologyStarRing size={30} color="var(--astr-muted)" stroke={1.4} />
             <Text size="xs" c="dimmed">暂无主星拓扑</Text>
-            <Button size="xs" variant="subtle" color="indigo" onClick={handleLaunchNewStar}>
+            <Button size="xs" variant="light" color="violet" onClick={handleLaunchNewStar}>
               点亮第一颗主星
             </Button>
           </Stack>
@@ -101,19 +102,17 @@ export function SwarmRootRail({
               return (
                 <UnstyledButton
                   key={star.key}
-                  className="session-row"
+                  className={`session-row ${isSelected ? 'is-active' : ''}`}
+                  data-liquid-surface={isSelected ? 'selection' : undefined}
                   onClick={() => handleSelectStar(star.key)}
                   style={{
                     padding: '8px 10px',
-                    borderRadius: 8,
+                    borderRadius: 9,
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'space-between',
-                    background: isSelected
-                      ? 'color-mix(in srgb, var(--astr-indigo, #5b6cff) 14%, var(--astr-surface))'
-                      : undefined,
                     border: isSelected
-                      ? '1px solid color-mix(in srgb, var(--astr-indigo, #5b6cff) 35%, transparent)'
+                      ? '1px solid color-mix(in oklab, var(--astr-indigo) 35%, var(--astr-border))'
                       : '1px solid transparent',
                     transition: 'all 0.15s ease',
                   }}
@@ -126,8 +125,8 @@ export function SwarmRootRail({
                             width: 6,
                             height: 6,
                             borderRadius: '50%',
-                            background: '#3b82f6',
-                            boxShadow: '0 0 0 3px rgba(59, 130, 246, 0.25)',
+                            background: 'var(--astr-running)',
+                            boxShadow: '0 0 0 3px color-mix(in oklab, var(--astr-running) 25%, transparent)',
                             display: 'inline-block',
                             flexShrink: 0,
                           }}

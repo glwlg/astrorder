@@ -370,16 +370,16 @@ export function SwarmDagView({
 
   return (
     <div
-      className="swarm-dag-viewport dot-grid"
+      className="swarm-dag-viewport"
       style={{
         position: 'relative',
         width: '100%',
-        height: 'calc(100vh - 160px)',
-        minHeight: 580,
+        height: '100%',
+        minHeight: 480,
         overflow: 'hidden',
-        borderRadius: 12,
-        background: 'var(--astr-canvas-bg, #f8f9fb)',
-        border: '1px solid var(--astr-border, #e5e7eb)',
+        borderRadius: 14,
+        background: 'var(--astr-canvas-bg, var(--astr-bg))',
+        border: '1px solid var(--astr-border)',
         cursor: isDraggingRef.current ? 'grabbing' : 'default',
         userSelect: 'none',
       }}
@@ -389,10 +389,21 @@ export function SwarmDagView({
       onMouseLeave={handleMouseUp}
       onWheel={handleWheel}
     >
+      <div
+        className="swarm-dag-backdrop dot-grid"
+        aria-hidden="true"
+        style={{
+          position: 'absolute',
+          inset: 0,
+          pointerEvents: 'none',
+          zIndex: 0,
+          backgroundColor: 'var(--astr-canvas-bg, var(--astr-bg))',
+        }}
+      />
       {/* 顶部左侧：坐标指示与视口控制 HUD */}
       <div
         data-liquid-surface="toolbar"
-        data-liquid-snapshot=".swarm-dag-viewport"
+        data-liquid-snapshot=".swarm-dag-backdrop"
         style={{
           position: 'absolute',
           top: 14,
@@ -402,10 +413,10 @@ export function SwarmDagView({
           alignItems: 'center',
           gap: 12,
           padding: '6px 12px',
-          borderRadius: 8,
-          background: 'var(--astr-surface, #ffffff)',
-          border: '1px solid var(--astr-border, #e5e7eb)',
-          boxShadow: '0 1px 4px rgba(0, 0, 0, 0.04)',
+          borderRadius: 10,
+          background: 'var(--astr-surface)',
+          border: '1px solid var(--astr-border)',
+          color: 'var(--astr-text)',
         }}
         onMouseDown={(e) => e.stopPropagation()}
         onWheel={(e) => e.stopPropagation()}
@@ -413,36 +424,38 @@ export function SwarmDagView({
         <Group gap="xs">
           <Badge
             variant="light"
-            color="indigo"
+            color="violet"
             size="sm"
-            style={{ fontWeight: 600, letterSpacing: '0.2px' }}
+            style={{ fontWeight: 600, letterSpacing: '0.2px', color: 'var(--astr-indigo)' }}
           >
             星图阵列
           </Badge>
-          <Text size="xs" fw={500} c="dimmed">
+          <Text size="xs" fw={500} c="var(--astr-muted)">
             {rootCount} 个主星 · {workerCount} 个伴星
           </Text>
         </Group>
-        <div style={{ width: 1, height: 16, background: 'var(--astr-border, #e5e7eb)' }} />
+        <div style={{ width: 1, height: 16, background: 'var(--astr-border)' }} />
         <Group gap={3}>
           <Tooltip label="缩小" withArrow>
             <Button
               variant="subtle"
-              color="gray"
               size="compact-xs"
+              style={{ color: 'var(--astr-text)' }}
+              aria-label="缩小"
               onClick={() => setZoom((z) => Math.max(z - 0.15, 0.4))}
             >
               <IconZoomOut size={14} />
             </Button>
           </Tooltip>
-          <Text size="xs" fw={600} style={{ minWidth: 38, textAlign: 'center' }} c="dimmed">
+          <Text size="xs" fw={600} style={{ minWidth: 38, textAlign: 'center', color: 'var(--astr-text)', fontVariantNumeric: 'tabular-nums' }}>
             {Math.round(zoom * 100)}%
           </Text>
           <Tooltip label="放大" withArrow>
             <Button
               variant="subtle"
-              color="gray"
               size="compact-xs"
+              style={{ color: 'var(--astr-text)' }}
+              aria-label="放大"
               onClick={() => setZoom((z) => Math.min(z + 0.15, 1.8))}
             >
               <IconZoomIn size={14} />
@@ -451,8 +464,9 @@ export function SwarmDagView({
           <Tooltip label="居中复位" withArrow>
             <Button
               variant="subtle"
-              color="gray"
               size="compact-xs"
+              style={{ color: 'var(--astr-text)' }}
+              aria-label="居中复位"
               onClick={() => {
                 setZoom(1)
                 setPan({ x: 60, y: 70 })
@@ -466,36 +480,42 @@ export function SwarmDagView({
 
       {nodes.length === 0 && (
         <div
+          data-liquid-surface="card"
+          data-liquid-snapshot=".swarm-dag-backdrop"
           style={{
             position: 'absolute',
             top: '50%',
             left: '50%',
             transform: 'translate(-50%, -50%)',
+            zIndex: 5,
             textAlign: 'center',
             pointerEvents: 'none',
+            padding: '26px 34px',
+            borderRadius: 18,
+            border: '1px solid color-mix(in oklab, var(--astr-indigo) 26%, var(--astr-border))',
+            boxShadow: '0 12px 32px color-mix(in oklab, var(--astr-indigo) 14%, transparent)',
           }}
         >
           <div
             style={{
-              width: 64,
-              height: 64,
-              borderRadius: 16,
-              margin: '0 auto 12px',
-              border: '1px solid var(--astr-border, #e5e7eb)',
+              width: 56,
+              height: 56,
+              borderRadius: 15,
+              margin: '0 auto 14px',
+              border: '1px solid color-mix(in oklab, var(--astr-indigo) 32%, var(--astr-border))',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              background: 'var(--astr-surface, #ffffff)',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
+              background: 'color-mix(in oklab, var(--astr-indigo) 14%, var(--astr-surface))',
             }}
           >
-            <IconActivity size={28} color="var(--astr-indigo, #5b5bd6)" />
+            <IconActivity size={26} color="var(--astr-indigo)" />
           </div>
-          <Text size="sm" fw={600} c="var(--astr-text, #202124)">
+          <Text size="sm" fw={650} c="var(--astr-text)">
             暂无派生伴星的星系
           </Text>
-          <Text size="xs" c="dimmed" mt={4} style={{ maxWidth: 360, lineHeight: 1.6 }}>
-            可通过主星对话输入 <span style={{ color: 'var(--astr-indigo, #5b5bd6)', fontWeight: 600 }}>@群星</span> 派生伴星协同任务，拓扑链路将在此动态延展。
+          <Text size="xs" c="var(--astr-muted)" mt={6} style={{ maxWidth: 360, lineHeight: 1.65 }}>
+            可通过主星对话输入 <span style={{ color: 'var(--astr-indigo)', fontWeight: 600 }}>@群星</span> 派生伴星协同任务，拓扑链路将在此动态延展。
           </Text>
         </div>
       )}
@@ -542,7 +562,7 @@ export function SwarmDagView({
               refY="4"
               orient="auto"
             >
-              <polygon points="0 0.5, 10 4, 0 7.5" fill="#5B5BD6" />
+              <polygon points="0 0.5, 10 4, 0 7.5" fill="var(--astr-indigo)" />
             </marker>
             <marker
               id="arrow-amber"
@@ -552,7 +572,7 @@ export function SwarmDagView({
               refY="4"
               orient="auto"
             >
-              <polygon points="0 0.5, 10 4, 0 7.5" fill="#D97706" />
+              <polygon points="0 0.5, 10 4, 0 7.5" fill="var(--astr-yellow)" />
             </marker>
           </defs>
 
@@ -561,7 +581,7 @@ export function SwarmDagView({
             const midX = (e.x1 + e.x2) / 2
             const d = `M ${e.x1} ${e.y1} C ${midX} ${e.y1}, ${midX} ${e.y2}, ${e.x2} ${e.y2}`
             const isWaiting = e.status === 'waiting_approval'
-            const strokeColor = isWaiting ? '#D97706' : '#5B5BD6'
+            const strokeColor = isWaiting ? 'var(--astr-yellow)' : 'var(--astr-indigo)'
             const markerId = isWaiting ? 'url(#arrow-amber)' : 'url(#arrow-blue)'
 
             return (
@@ -1010,16 +1030,18 @@ export function SwarmDagView({
       {/* 4. 浮动节点检视舱 (Floating Node Inspector, 默认 460px 宽度，可自由加宽至 680px) */}
       {selectedNode && (
         <aside
+          data-liquid-surface="panel"
+          data-liquid-snapshot=".swarm-dag-backdrop"
           style={{
             position: 'absolute',
             right: 16,
             top: 14,
             bottom: 14,
             width: isWideInspector ? 680 : 460,
-            background: 'var(--astr-surface, #ffffff)',
-            borderRadius: 12,
-            border: '1px solid var(--astr-border, #E5E7EB)',
-            boxShadow: '0 8px 28px rgba(0, 0, 0, 0.12)',
+            background: 'var(--astr-surface)',
+            borderRadius: 14,
+            border: '1px solid var(--astr-border)',
+            boxShadow: '0 12px 32px rgba(0, 0, 0, 0.16)',
             zIndex: 20,
             display: 'flex',
             flexDirection: 'column',
@@ -1244,6 +1266,8 @@ export function SwarmDagView({
 
       {/* 底部 HUD 战术图例栏 */}
       <div
+        data-liquid-surface="toolbar"
+        data-liquid-snapshot=".swarm-dag-backdrop"
         style={{
           position: 'absolute',
           bottom: 14,
@@ -1253,36 +1277,35 @@ export function SwarmDagView({
           display: 'flex',
           alignItems: 'center',
           gap: 16,
-          padding: '6px 16px',
+          padding: '7px 18px',
           borderRadius: 99,
-          background: 'var(--astr-surface, #ffffff)',
-          border: '1px solid var(--astr-border, #e5e7eb)',
-          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.06)',
+          background: 'var(--astr-surface)',
+          border: '1px solid var(--astr-border)',
           fontSize: 12,
-          color: 'var(--astr-text, #475569)',
+          color: 'var(--astr-text)',
         }}
         onMouseDown={(e) => e.stopPropagation()}
         onWheel={(e) => e.stopPropagation()}
       >
-        <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-          <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--astr-text)' }} />
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--astr-running)' }} />
           运行中 ({runningCount})
         </span>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-          <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#F59E0B' }} />
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--astr-yellow)' }} />
           等待审批 ({waitingCount})
         </span>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-          <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#EF4444' }} />
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--astr-red)' }} />
           异常求援 ({sosCount})
         </span>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-          <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#94A3B8' }} />
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--astr-muted)' }} />
           空闲就绪 ({idleCount})
         </span>
-        <div style={{ width: 1, height: 14, background: 'var(--astr-border, #E5E7EB)' }} />
-        <span style={{ fontSize: 11, color: '#94A3B8' }}>
-          🖱️ 拖拽画布 · 滚轮缩放 · 点击卡片检视
+        <div style={{ width: 1, height: 14, background: 'var(--astr-border)' }} />
+        <span style={{ fontSize: 11, color: 'var(--astr-muted)' }}>
+          拖拽画布 · 滚轮缩放 · 点击卡片检视
         </span>
       </div>
 
@@ -1363,10 +1386,10 @@ export function SwarmDagView({
               style={{
                 padding: '10px 12px',
                 borderRadius: 8,
-                background: '#FEF2F2',
-                border: '1px solid #FECACA',
+                background: 'color-mix(in oklab, var(--astr-red) 10%, var(--astr-surface))',
+                border: '1px solid color-mix(in oklab, var(--astr-red) 35%, var(--astr-border))',
                 fontSize: 12,
-                color: '#991B1B',
+                color: 'var(--astr-red)',
               }}
             >
               <div style={{ fontWeight: 700, marginBottom: 4 }}>
@@ -1375,7 +1398,7 @@ export function SwarmDagView({
               <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.6 }}>
                 <li>删除主星会话与 <strong>{deleteModalData.sessions.length - 1} 个关联伴星会话</strong>（共 {deleteModalData.sessions.length} 个）；</li>
                 <li>彻底清空专属黑板（空间：<code style={{ fontFamily: 'monospace' }}>swarm:{deleteModalData.rootNode.key}</code>）；</li>
-                <li>自动从监控室视图及待办队列中移除。</li>
+                <li>自动从矩阵视图及待办队列中移除。</li>
               </ul>
             </div>
 

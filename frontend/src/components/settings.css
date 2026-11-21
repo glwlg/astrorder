@@ -1,6 +1,21 @@
 /* Quiet settings surfaces; retain the application theme outside this dialog. */
 .settings-modal, .environment-connections { --astr-text-muted: var(--astr-muted); }
-.settings-modal .mantine-Modal-content { position: relative; isolation: isolate; }
+.settings-modal .mantine-Modal-content {
+  position: relative;
+  isolation: isolate;
+  border: 1px solid color-mix(in oklab, var(--astr-indigo) 24%, var(--astr-border)) !important;
+  box-shadow:
+    0 24px 64px rgb(20 14 36 / 28%),
+    0 6px 20px rgb(20 14 36 / 12%),
+    inset 0 1px 0 rgb(255 255 255 / 45%) !important;
+}
+:root[data-mantine-color-scheme='dark'] .settings-modal .mantine-Modal-content {
+  border-color: color-mix(in oklab, var(--astr-indigo) 32%, var(--astr-border)) !important;
+  box-shadow:
+    0 28px 80px rgb(0 0 0 / 72%),
+    0 0 0 1px rgb(188 146 255 / 14%),
+    inset 0 1px 0 rgb(238 225 255 / 16%) !important;
+}
 .environment-connections { position: relative; }
 /* Ordinary app overlays are globally transparent; nested settings need a local mask. */
 .settings-contained-drawer .mantine-Drawer-overlay { background-color: var(--overlay-bg) !important; }
@@ -11,7 +26,12 @@
 .settings-modal .settings-tabs > .mantine-Tabs-list { flex: 0 0 188px; padding: 20px 12px !important; border-bottom: 0 !important; border-right: 1px solid var(--astr-border); background: var(--astr-surface-muted); gap: 6px; }
 .settings-modal .settings-tabs > .mantine-Tabs-list::before { display: none; }
 .settings-modal .mantine-Tabs-tab { border: 0; border-radius: 6px; justify-content: flex-start; padding: 12px; font-size: 13px; color: var(--astr-text-muted); }
-.settings-modal .mantine-Tabs-tab[data-active] { color: var(--astr-text); background: var(--astr-surface); font-weight: 600; }
+.settings-modal .mantine-Tabs-tab[data-active] {
+  color: var(--astr-indigo);
+  background: color-mix(in oklab, var(--astr-selected) 68%, var(--astr-surface));
+  font-weight: 600;
+  box-shadow: inset 3px 0 0 var(--astr-indigo);
+}
 .settings-modal .settings-tab-panel { min-width: 0; padding: 28px 32px !important; background: var(--astr-surface-muted); }
 .settings-modal .settings-tab-panel[data-tab-panel-skills] { padding: 0 !important; }
 .settings-page-heading { margin-bottom: 24px; }
@@ -22,7 +42,8 @@
 .settings-modal .mantine-Card-root, .settings-modal .rtk-settings > .mantine-Paper-root { box-shadow: none; border-color: var(--astr-border); background: var(--astr-surface); }
 .settings-modal .mantine-Input-input { background: var(--astr-surface-muted); border-color: var(--astr-border); font-size: 13px; }
 .settings-modal .mantine-InputWrapper-label { font-size: 12px; font-weight: 500; margin-bottom: 7px; }
-.settings-modal .mantine-Button-root[data-variant='filled'], .settings-modal .mantine-Button-root:not([data-variant]) { background: var(--astr-text); color: var(--astr-surface); }
+.settings-modal .mantine-Button-root[data-variant='filled'], .settings-modal .mantine-Button-root:not([data-variant]) { background: var(--astr-accent-strong, #7540bd); color: #ffffff; }
+.settings-modal .mantine-Button-root[data-variant='filled']:hover, .settings-modal .mantine-Button-root:not([data-variant]):hover { background: var(--astr-indigo); }
 .settings-modal .mantine-Button-root[data-variant='light'] { background: var(--astr-surface-muted); color: var(--astr-text); }
 .settings-modal .mantine-Badge-root, .environment-connections .mantine-Badge-root { background: transparent; border: 0; color: var(--astr-text-muted); font-weight: 500; text-transform: none; letter-spacing: 0; padding-inline: 0; }
 .settings-table-scroll { overflow-x: auto; }
@@ -39,7 +60,7 @@
 .connection-hosts-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .connection-host-list { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; }
 .connection-host { width: 100%; border: 1px solid var(--astr-border); border-radius: 8px; padding: 12px; background: var(--astr-surface); color: var(--astr-text); text-align: left; cursor: pointer; }
-.connection-host[aria-pressed='true'] { border-color: var(--astr-text); box-shadow: inset 0 0 0 1px var(--astr-text); background: var(--astr-surface-muted); }
+.connection-host[aria-pressed='true'] { border-color: var(--astr-indigo); box-shadow: inset 0 0 0 1px var(--astr-indigo); background: color-mix(in oklab, var(--astr-selected) 52%, var(--astr-surface)); }
 .connection-host-name { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 12px; font-weight: 600; }
 .connection-host-name small { font-size: 10px; color: var(--astr-muted); font-weight: 400; }
 .connection-host-address, .connection-host-meta { display: block; margin-top: 6px; font-size: 10px; color: var(--astr-muted); overflow-wrap: anywhere; }
@@ -54,7 +75,13 @@
 .connection-agent-description { min-width: 0; }
 .connection-agent-path { overflow-wrap: anywhere; font-family: ui-monospace, monospace; margin-top: 4px; }
 .connection-agent-state { white-space: nowrap; }
-.connection-agent-state::before { content: ''; display: inline-block; width: 4px; height: 4px; background: currentColor; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+.connection-agent-state::before { content: ''; display: inline-block; width: 6px; height: 6px; background: currentColor; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+.connection-agent-state[data-state='connected'] { color: var(--astr-teal) !important; font-weight: 600; }
+.connection-agent-state[data-state='connected']::before { box-shadow: 0 0 0 3px color-mix(in oklab, var(--astr-teal) 18%, transparent); }
+.connection-agent-state[data-state='authentication_required'],
+.connection-agent-state[data-state='disconnected'][data-available='true'],
+.connection-agent-state[data-state='discovered'][data-available='true'] { color: var(--astr-yellow) !important; }
+.connection-agent-state[data-state='error'] { color: var(--astr-red) !important; font-weight: 550; }
 .connection-detail-footer { display: flex; justify-content: space-between; align-items: center; padding: 10px 24px; border-top: 1px solid var(--astr-border); background: var(--astr-surface); flex-shrink: 0; }
 .agent-configuration { padding: 8px 0; }
 .agent-configuration-tabs .mantine-Tabs-tab { font-size: 13px; }

@@ -13,7 +13,7 @@ import { useQueryClient, useQuery } from '@tanstack/react-query'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useShallow } from 'zustand/react/shallow'
-import { Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ApiError, api } from '../../api/client'
 import { findSessionHandoff, newCommandId, scopeKey } from '../../domain/semantics'
 import type { Approval, Command, Message, Session, Task } from '../../domain/types'
@@ -59,8 +59,8 @@ function errorText(error: unknown): string {
   return '会话数据读取失败。'
 }
 
-function resolveSession(sessions: Session[], sessionId: string | undefined, agentId: string | null): Session | null {
-  if (!sessionId) return sessions.length === 1 ? sessions[0] : null
+function resolveSession(sessions: Session[], sessionId: string | undefined, agentId: string | null, forceWelcome = false): Session | null {
+  if (!sessionId) return !forceWelcome && sessions.length === 1 ? sessions[0] : null
   const decodedId = decodeURIComponent(sessionId)
   const candidates = sessions.filter((session) => session.id === decodedId || session.id === sessionId)
   if (agentId) return candidates.find((session) => session.agent_id === agentId) || null
@@ -85,17 +85,25 @@ export function ChatPage() {
 
   if (disconnectedRoute) return <Navigate to="/chat" replace />
 
-  if (bodyKey !== routeKey) {
+  if (bodyKey !== routeKey && Boolean(sessionId)) {
     return (
       <div className="route-page chat-page chat-page-switching" aria-live="polite">
-        <div className="chat-layout">
-          <section className="chat-column">
-            <div className="transcript">
-              <div className="transcript-inner">
-                <p className="transcript-status">正在打开会话…</p>
+        <div className="chat-workbench">
+          <div className="chat-heading">
+            <div className="chat-switch-skeleton-bar" style={{ width: 180, height: 16 }} />
+          </div>
+          <div className="chat-layout">
+            <section className="chat-column">
+              <div className="transcript">
+                <div className="transcript-inner chat-switch-skeleton-stack">
+                  <div className="chat-switch-skeleton-bar" style={{ width: '42%', height: 14 }} />
+                  <div className="chat-switch-skeleton-bar" style={{ width: '78%', height: 14 }} />
+                  <div className="chat-switch-skeleton-bar" style={{ width: '61%', height: 14 }} />
+                  <p className="transcript-status chat-switch-status">正在打开会话…</p>
+                </div>
               </div>
-            </div>
-          </section>
+            </section>
+          </div>
         </div>
       </div>
     )
@@ -106,14 +114,16 @@ export function ChatPage() {
 
 function ChatPageBody() {
   const { sessionId } = useParams()
+  const location = useLocation()
   const [searchParams] = useSearchParams()
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const sessions = useAstrorderStore(useShallow(selectSessions))
   const agents = useAstrorderStore((state) => state.agents)
+  const forceWelcome = Boolean((location.state as { welcome?: boolean } | null)?.welcome)
   const selected = useMemo(
-    () => resolveSession(sessions, sessionId ? decodeURIComponent(sessionId) : undefined, searchParams.get('agent_id')),
-    [searchParams, sessionId, sessions],
+    () => resolveSession(sessions, sessionId ? decodeURIComponent(sessionId) : undefined, searchParams.get('agent_id'), forceWelcome),
+    [forceWelcome, searchParams, sessionId, sessions],
   )
 
   const sessionUsage = useQuery({ queryKey: ['astrorder', 'session_usage', selected?.id, selected?.agent_id], queryFn: () => selected ? api.getSessionUsage(selected.id, selected.agent_id) : Promise.reject(), enabled: Boolean(selected), retry: false, staleTime: 0, refetchOnWindowFocus: false })
@@ -850,7 +860,7 @@ function ChatPageBody() {
               取消
             </Button>
             <Button
-              color="indigo"
+              color="violet"
               onClick={() => void handleConfirmFork()}
               loading={forkLoading}
               leftSection={<IconGitFork size={15} />}

@@ -55,7 +55,7 @@
 .direct-usage-day-bar-fill {
   block-size: 100%;
   border-radius: 999px;
-  background: var(--mantine-color-blue-filled);
+  background: var(--astr-indigo, #7540bd);
   transition: inline-size 160ms ease;
 }
 
@@ -68,7 +68,7 @@
 }
 
 .direct-usage-table-wrapper:focus-visible {
-  outline: 2px solid var(--mantine-color-blue-filled);
+  outline: 2px solid var(--astr-indigo, #7540bd);
   outline-offset: 2px;
 }
 
@@ -132,7 +132,7 @@
   border: 1px solid var(--mantine-color-default-border);
   border-radius: var(--mantine-radius-sm);
   background: var(--mantine-color-default-hover);
-  color: var(--mantine-color-blue-text);
+  color: var(--astr-indigo, #7540bd);
   font-size: 10px;
   font-weight: 700;
   line-height: 1.4;
@@ -143,17 +143,17 @@
 }
 
 .direct-usage-server-chip:hover {
-  border-color: var(--mantine-color-blue-outline);
+  border-color: var(--astr-indigo, #7540bd);
 }
 
 .direct-usage-server-chip[aria-pressed='true'] {
-  background: var(--mantine-color-blue-filled);
-  border-color: var(--mantine-color-blue-filled);
+  background: var(--astr-accent-strong, #7540bd);
+  border-color: var(--astr-accent-strong, #7540bd);
   color: var(--mantine-color-white);
 }
 
 .direct-usage-server-chip:focus-visible {
-  outline: 2px solid var(--mantine-color-blue-filled);
+  outline: 2px solid var(--astr-indigo, #7540bd);
   outline-offset: 2px;
 }
 
@@ -171,7 +171,7 @@
 }
 
 .direct-usage-session-link:hover .direct-usage-session-title {
-  color: var(--mantine-color-blue-filled);
+  color: var(--astr-indigo, #7540bd);
   text-decoration: underline;
 }
 

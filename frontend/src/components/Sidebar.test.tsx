@@ -2,7 +2,7 @@ import { MantineProvider } from '@mantine/core'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, useLocation } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api, type OcxUsageResponse } from '../api/client'
 import type { BotGroup, Project } from '../domain/types'
@@ -132,5 +132,96 @@ describe('Sidebar project catalog wiring', () => {
     await userEvent.hover(screen.getByRole('link', { name: '统计' }))
     expect(await screen.findByText('今日用量暂不可用')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '会话' })).toBeInTheDocument()
+  })
+
+  it('returns to the welcome page when clicking 会话 inside an active chat session', async () => {
+    function LocationProbe() {
+      const location = useLocation()
+      return <output data-testid="loc">{`${location.pathname}${location.search}|${Boolean((location.state as { welcome?: boolean } | null)?.welcome)}`}</output>
+    }
+    render(
+      <MantineProvider>
+        <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+          <MemoryRouter initialEntries={['/chat/session-1?agent_id=codex']}>
+            <Sidebar
+              sessions={[]}
+              agents={{}}
+              activeSessionKey="codex::session-1"
+              chatReturnPath="/chat/session-1?agent_id=codex"
+              onSelectSession={vi.fn()}
+            />
+            <LocationProbe />
+          </MemoryRouter>
+        </QueryClientProvider>
+      </MantineProvider>,
+    )
+    const chatTab = screen.getByRole('link', { name: '会话' })
+    expect(chatTab).toHaveAttribute('href', '/chat')
+    await userEvent.click(chatTab)
+    expect(screen.getByTestId('loc')).toHaveTextContent('/chat|true')
+  })
+
+  it('still returns to the last chat session when clicking 会话 from another tab', () => {
+    const { container } = render(
+      <MantineProvider>
+        <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+          <MemoryRouter initialEntries={['/monitor']}>
+            <Sidebar
+              sessions={[]}
+              agents={{}}
+              chatReturnPath="/chat/session-1?agent_id=codex"
+              onSelectSession={vi.fn()}
+            />
+          </MemoryRouter>
+        </QueryClientProvider>
+      </MantineProvider>,
+    )
+    expect(screen.getByRole('link', { name: '会话' })).toHaveAttribute('href', '/chat/session-1?agent_id=codex')
+    expect(container.querySelector('.workspace-sidebar-panel')).toBeInTheDocument()
+  })
+
+  it('supports Arc-style collapse toggle and peek pin header on desktop routes with a rail panel', async () => {
+    const onToggle = vi.fn()
+    const { container, rerender } = render(
+      <MantineProvider>
+        <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+          <MemoryRouter initialEntries={['/chat']}>
+            <Sidebar
+              sessions={[]}
+              agents={{}}
+              onSelectSession={vi.fn()}
+              panelCollapsed={false}
+              isPeeking={false}
+              onTogglePanelCollapse={onToggle}
+            />
+          </MemoryRouter>
+        </QueryClientProvider>
+      </MantineProvider>,
+    )
+    const collapseBtn = screen.getByRole('button', { name: '收起侧边栏' })
+    expect(collapseBtn).toHaveAttribute('aria-expanded', 'true')
+    await userEvent.click(collapseBtn)
+    expect(onToggle).toHaveBeenCalledOnce()
+
+    rerender(
+      <MantineProvider>
+        <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+          <MemoryRouter initialEntries={['/chat']}>
+            <Sidebar
+              sessions={[]}
+              agents={{}}
+              onSelectSession={vi.fn()}
+              panelCollapsed={true}
+              isPeeking={true}
+              onTogglePanelCollapse={onToggle}
+            />
+          </MemoryRouter>
+        </QueryClientProvider>
+      </MantineProvider>,
+    )
+    expect(container.querySelector('.workspace-sidebar')).toHaveClass('is-panel-collapsed', 'is-panel-peeking')
+    const pinBtn = screen.getByRole('button', { name: '固定侧栏' })
+    expect(pinBtn).toBeInTheDocument()
+    expect(pinBtn.textContent?.trim()).toBe('')
   })
 })

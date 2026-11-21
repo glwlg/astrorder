@@ -1,0 +1,341 @@
+/* Phase 1: Command Deck + Omni-Composer Welcome View */
+.welcome-workspace-stage {
+  position: relative;
+  isolation: isolate;
+}
+
+.welcome-ambient-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle 680px at 50% 18%, color-mix(in oklab, var(--astr-indigo) 12%, transparent), transparent 68%),
+    radial-gradient(circle 460px at 84% 82%, color-mix(in oklab, var(--astr-selected) 36%, transparent), transparent 66%),
+    radial-gradient(circle 360px at 14% 76%, color-mix(in oklab, var(--astr-running-gold, #c6a0ff) 9%, transparent), transparent 64%),
+    var(--astr-surface);
+}
+
+:root[data-mantine-color-scheme='dark'] .welcome-ambient-backdrop {
+  background:
+    radial-gradient(circle 720px at 50% 18%, color-mix(in oklab, var(--astr-indigo) 16%, transparent), transparent 68%),
+    radial-gradient(circle 500px at 84% 82%, color-mix(in oklab, var(--astr-selected) 32%, transparent), transparent 66%),
+    var(--astr-canvas-bg, var(--astr-bg));
+}
+
+.welcome-inner-container {
+  position: relative;
+  z-index: 1;
+  max-width: 740px;
+}
+
+.welcome-omni-form {
+  position: relative;
+  margin-bottom: 24px;
+}
+
+.welcome-omni-shell {
+  position: relative;
+  border-radius: 18px;
+  border: 1px solid color-mix(in oklab, var(--astr-indigo) 22%, var(--astr-border));
+  padding: 14px 16px 12px;
+  box-shadow:
+    0 16px 38px -18px color-mix(in oklab, var(--astr-indigo) 28%, rgb(24 18 40 / 24%)),
+    0 2px 6px rgb(24 18 40 / 5%);
+  transition: border-color 160ms ease, box-shadow 180ms ease;
+}
+
+.welcome-omni-shell:focus-within {
+  border-color: color-mix(in oklab, var(--astr-indigo) 56%, var(--astr-border));
+  box-shadow:
+    0 18px 44px -16px color-mix(in oklab, var(--astr-indigo) 36%, rgb(24 18 40 / 28%)),
+    0 0 0 3px color-mix(in oklab, var(--astr-indigo) 12%, transparent);
+}
+
+.welcome-omni-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.welcome-omni-textarea {
+  display: block;
+  field-sizing: content;
+  width: 100%;
+  height: auto;
+  min-block-size: 3lh;
+  max-block-size: 9lh;
+  resize: none;
+  border: 0;
+  outline: none;
+  padding: 2px 2px 8px;
+  background: transparent;
+  color: var(--astr-text);
+  font: 450 14.5px/1.6 var(--astr-session-font);
+  overflow-y: auto;
+}
+
+.welcome-omni-textarea::placeholder {
+  color: var(--astr-muted);
+  opacity: 0.85;
+}
+
+.welcome-omni-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in oklab, var(--astr-border) 62%, transparent);
+  flex-wrap: wrap;
+}
+
+.welcome-omni-selectors {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.welcome-omni-select-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  max-width: 220px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in oklab, var(--astr-border) 82%, transparent);
+  background: color-mix(in oklab, var(--astr-surface-muted) 64%, transparent);
+  color: var(--astr-text);
+  font: 550 12px/1.4 var(--astr-session-font);
+  cursor: pointer;
+  transition: border-color 140ms ease, background 140ms ease, color 140ms ease;
+}
+
+.welcome-omni-select-trigger:hover:not(:disabled),
+.welcome-omni-select-trigger[aria-expanded='true'] {
+  border-color: color-mix(in oklab, var(--astr-indigo) 54%, var(--astr-border));
+  background: color-mix(in oklab, var(--astr-selected) 52%, var(--astr-surface));
+}
+
+.welcome-omni-select-trigger:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--astr-indigo) 60%, transparent);
+  outline-offset: 1px;
+}
+
+.welcome-omni-select-trigger:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.welcome-omni-select-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.welcome-omni-chevron {
+  flex: none;
+  color: var(--astr-muted);
+  transition: transform 150ms ease;
+}
+
+.welcome-omni-select-trigger[aria-expanded='true'] .welcome-omni-chevron {
+  transform: rotate(180deg);
+  color: var(--astr-indigo);
+}
+
+.welcome-omni-menu-dropdown {
+  padding: 5px !important;
+  border-radius: 13px !important;
+  border: 1px solid color-mix(in oklab, var(--astr-indigo) 22%, var(--astr-border)) !important;
+  box-shadow:
+    0 18px 40px -12px rgb(20 14 38 / 26%),
+    0 4px 12px rgb(20 14 38 / 8%) !important;
+}
+
+.welcome-omni-menu-scroll {
+  max-height: 272px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.welcome-omni-menu-item {
+  border-radius: 8px !important;
+  padding: 6px 8px !important;
+  min-height: 32px;
+}
+
+.welcome-omni-menu-item.is-selected {
+  background: color-mix(in oklab, var(--astr-selected) 68%, transparent) !important;
+  color: var(--astr-indigo) !important;
+}
+
+.welcome-omni-menu-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 1px;
+}
+
+.welcome-omni-menu-title {
+  font-size: 12.5px;
+  font-weight: 560;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.welcome-omni-menu-sub {
+  font-size: 10.5px;
+  color: var(--astr-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.welcome-omni-submit {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(135deg, var(--astr-indigo), var(--astr-accent-strong, #6424bd));
+  color: #fff;
+  font: 600 12.5px/1 var(--astr-session-font);
+  cursor: pointer;
+  box-shadow: 0 6px 16px -6px color-mix(in oklab, var(--astr-indigo) 55%, transparent);
+  transition: transform 140ms ease, filter 140ms ease, opacity 140ms ease;
+}
+
+.welcome-omni-submit:hover:not(:disabled) {
+  filter: brightness(1.07);
+  transform: translateY(-1px);
+}
+
+.welcome-omni-submit:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.welcome-omni-hint {
+  font-size: 11px;
+  color: var(--astr-muted);
+}
+
+/* Attention Strip */
+.welcome-attention-card {
+  border-color: color-mix(in oklab, var(--astr-yellow) 44%, var(--astr-border));
+}
+
+.welcome-attention-card.is-error {
+  border-color: color-mix(in oklab, var(--astr-red) 44%, var(--astr-border));
+}
+
+/* Telemetry Ribbon */
+.welcome-telemetry-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 15px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in oklab, var(--astr-indigo) 14%, var(--astr-border));
+  margin-bottom: 18px;
+}
+
+.welcome-telemetry-metrics {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.welcome-metric {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--astr-muted);
+}
+
+.welcome-metric strong {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--astr-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.welcome-metric.is-highlight strong {
+  color: var(--astr-indigo);
+}
+
+.welcome-quick-links {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.welcome-quick-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 550;
+  color: var(--astr-text);
+  border: 1px solid color-mix(in oklab, var(--astr-border) 80%, transparent);
+  background: color-mix(in oklab, var(--astr-surface-muted) 56%, transparent);
+  cursor: pointer;
+  transition: border-color 140ms ease, background 140ms ease, color 140ms ease;
+}
+
+.welcome-quick-link:hover {
+  border-color: color-mix(in oklab, var(--astr-indigo) 45%, var(--astr-border));
+  background: color-mix(in oklab, var(--astr-selected) 56%, transparent);
+  color: var(--astr-indigo);
+}
+
+/* Compact Shortcut Strip */
+.welcome-shortcut-strip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+  padding-top: 6px;
+}
+
+.welcome-shortcut-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--astr-muted);
+}
+
+.welcome-time-mono {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .welcome-omni-submit,
+  .welcome-omni-shell {
+    transition: none;
+  }
+}

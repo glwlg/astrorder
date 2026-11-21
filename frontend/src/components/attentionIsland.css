@@ -1,0 +1,315 @@
+/* Floating Astrorder Dynamic Attention Pill ("星序灵动岛") */
+.astr-shell-sky {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(circle 520px at 50% 0%, color-mix(in oklab, var(--astr-indigo) 12%, transparent), transparent 68%),
+    radial-gradient(circle 420px at 85% 92%, color-mix(in oklab, var(--astr-running-gold, #c6a0ff) 8%, transparent), transparent 72%),
+    var(--astr-bg);
+  transition: background 600ms ease;
+}
+
+.astr-shell-sky::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 500ms ease;
+}
+
+.astr-shell-sky[data-ambient-state='running']::after {
+  opacity: 0.9;
+  background:
+    radial-gradient(circle 560px at 54% -6%, color-mix(in oklab, var(--astr-indigo) 14%, transparent), transparent 66%),
+    radial-gradient(circle 460px at 92% 88%, color-mix(in oklab, var(--astr-running-gold, #c6a0ff) 10%, transparent), transparent 70%);
+}
+
+.astr-shell-sky[data-ambient-state='attention']::after {
+  opacity: 0.95;
+  background:
+    radial-gradient(circle 540px at 50% -8%, color-mix(in oklab, var(--astr-yellow) 16%, transparent), transparent 64%),
+    radial-gradient(circle 380px at 90% 8%, color-mix(in oklab, var(--astr-yellow) 10%, transparent), transparent 68%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .astr-shell-sky::after {
+    transition: none;
+  }
+}
+
+.astrorder-shell .shell-main {
+  position: relative;
+  z-index: 1;
+}
+
+.attention-island {
+  position: fixed;
+  top: 11px;
+  left: calc(var(--astr-shell-rail-width, 352px) + (100vw - var(--astr-shell-rail-width, 352px)) / 2);
+  transform: translateX(-50%);
+  z-index: 260;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  max-width: min(560px, calc(100vw - var(--astr-shell-rail-width, 352px) - 320px));
+  pointer-events: none;
+  transition: left 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.attention-island-pill {
+  position: relative;
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-height: 36px;
+  padding: 4px 8px 4px 12px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in oklab, var(--astr-indigo) 24%, var(--astr-border));
+  box-shadow:
+    0 10px 28px -8px color-mix(in oklab, var(--astr-indigo) 22%, rgb(16 14 28 / 26%)),
+    0 2px 6px rgb(16 14 28 / 8%);
+  animation: attention-island-enter 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.attention-island.is-attention .attention-island-pill {
+  border-color: color-mix(in oklab, var(--astr-yellow) 52%, var(--astr-border));
+  box-shadow:
+    0 12px 30px -8px color-mix(in oklab, var(--astr-yellow) 26%, rgb(16 14 28 / 32%)),
+    0 0 0 1px color-mix(in oklab, var(--astr-yellow) 16%, transparent);
+}
+
+.attention-island-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  flex: 1 1 auto;
+  padding: 2px 4px 2px 0;
+  color: var(--astr-text);
+  font-size: 12px;
+  line-height: 1.3;
+  cursor: pointer;
+}
+
+.attention-island-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.attention-island-dot.is-running {
+  background: var(--astr-indigo);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--astr-indigo) 22%, transparent);
+  animation: attention-dot-pulse 2s ease-in-out infinite;
+}
+
+.attention-island-dot.is-attention {
+  background: var(--astr-yellow);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--astr-yellow) 28%, transparent);
+  animation: attention-dot-pulse 1.5s ease-in-out infinite;
+}
+
+.attention-island-brand {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+}
+
+.attention-island-icon-warn {
+  color: var(--astr-yellow);
+  flex: none;
+}
+
+.attention-island-icon-run {
+  color: var(--astr-indigo);
+  flex: none;
+}
+
+.attention-island-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.attention-island-title {
+  font-weight: 650;
+  color: var(--astr-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 170px;
+}
+
+.attention-island-sep {
+  color: var(--astr-muted);
+  flex: none;
+}
+
+.attention-island-detail {
+  color: var(--astr-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+
+.attention-island-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  background: color-mix(in oklab, var(--astr-indigo) 16%, transparent);
+  color: var(--astr-indigo);
+  flex: none;
+}
+
+.attention-island.is-attention .attention-island-count {
+  background: color-mix(in oklab, var(--astr-yellow) 20%, transparent);
+  color: var(--astr-yellow);
+}
+
+.attention-island-chevron {
+  display: inline-flex;
+  align-items: center;
+  color: var(--astr-muted);
+  flex: none;
+}
+
+.attention-island-inline-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+
+.attention-island-tray {
+  position: relative;
+  pointer-events: auto;
+  width: min(440px, calc(100vw - 32px));
+  max-height: min(440px, calc(100vh - 96px));
+  overflow-y: auto;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid color-mix(in oklab, var(--astr-indigo) 22%, var(--astr-border));
+  box-shadow:
+    0 20px 44px -12px rgb(16 14 28 / 32%),
+    0 4px 12px rgb(16 14 28 / 10%);
+  animation: attention-island-enter 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.attention-tray-section + .attention-tray-section {
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in oklab, var(--astr-border) 65%, transparent);
+}
+
+.attention-tray-item {
+  padding: 10px 11px;
+  border-radius: 11px;
+  background: color-mix(in oklab, var(--astr-surface-muted) 68%, transparent);
+  border: 1px solid color-mix(in oklab, var(--astr-border) 75%, transparent);
+}
+
+.attention-tray-item.is-attention {
+  border-color: color-mix(in oklab, var(--astr-yellow) 36%, var(--astr-border));
+  background: color-mix(in oklab, var(--astr-yellow) 6%, var(--astr-surface));
+}
+
+.attention-tray-code {
+  display: block;
+  margin-top: 6px;
+  padding: 6px 8px;
+  border-radius: 7px;
+  font-family: var(--mantine-font-family-monospace, monospace);
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--astr-text);
+  background: color-mix(in oklab, var(--astr-bg) 80%, transparent);
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 96px;
+}
+
+.attention-tray-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 9px;
+  border-radius: 9px;
+  color: var(--astr-text);
+  transition: background 120ms ease;
+}
+
+.attention-tray-row:hover {
+  background: color-mix(in oklab, var(--astr-selected) 62%, transparent);
+}
+
+.attention-running-pill {
+  flex: none;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--astr-indigo);
+  background: color-mix(in oklab, var(--astr-indigo) 12%, transparent);
+  padding: 2px 7px;
+  border-radius: 999px;
+}
+
+@keyframes attention-island-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes attention-dot-pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.65;
+    transform: scale(0.86);
+  }
+}
+
+@media (max-width: 61.999em) {
+  .attention-island {
+    top: 10px;
+    left: 50%;
+    max-width: calc(100vw - 120px);
+  }
+  .attention-island-detail,
+  .attention-island-sep {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .attention-island,
+  .attention-island-pill,
+  .attention-island-tray,
+  .attention-island-dot {
+    animation: none;
+    transition: none;
+  }
+}

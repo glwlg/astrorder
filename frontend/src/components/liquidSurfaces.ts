@@ -22,9 +22,29 @@ const selector = [
 ].join(',')
 let nextId = 0
 
+function isCssOnlyStaticBackdrop(snapshotSelector: string, sidebarHost: HTMLElement | null): boolean {
+  if (sidebarHost) return false
+  return (
+    snapshotSelector === '#astr-shell-sky' ||
+    snapshotSelector === '.welcome-ambient-backdrop' ||
+    snapshotSelector === '.swarm-dag-backdrop' ||
+    snapshotSelector === '.monitor-ambient-backdrop'
+  )
+}
+
+function isStaticBackdropSnapshot(snapshotSelector: string): boolean {
+  return (
+    snapshotSelector === '#astr-shell-sky' ||
+    snapshotSelector === '.welcome-ambient-backdrop' ||
+    snapshotSelector === '.swarm-dag-backdrop' ||
+    snapshotSelector === '.monitor-ambient-backdrop' ||
+    snapshotSelector.startsWith('[id="')
+  )
+}
+
 /** Decorate existing controls without replacing their DOM, focus or event handlers. */
-export function installLiquidSurfaces({ root = document.body, snapshot = 'body', dark = false, reducedMotion = false }: {
-  root?: HTMLElement; snapshot?: string; dark?: boolean; reducedMotion?: boolean
+export function installLiquidSurfaces({ root = document.body, snapshot = 'body', dark = false, reducedMotion = false, engine = 'webgl' }: {
+  root?: HTMLElement; snapshot?: string; dark?: boolean; reducedMotion?: boolean; engine?: 'css' | 'webgl'
 } = {}) {
   let disposed = false
   let scheduled = false
@@ -35,6 +55,8 @@ export function installLiquidSurfaces({ root = document.body, snapshot = 'body',
     lenses: LiquidGlassLens[]
     canvases: HTMLCanvasElement[]
     ignored: boolean
+    positioned: boolean
+    staticBackdrop: boolean
   }
   const bindings = new Map<HTMLElement, Binding>()
   const rims = new Map<HTMLCanvasElement, { mask: ReturnType<typeof createGlassRim>; targets: number }>()
@@ -52,6 +74,7 @@ export function installLiquidSurfaces({ root = document.body, snapshot = 'body',
     surface.classList.remove('liquid-surface')
     delete surface.dataset.materialStatus
     if (!binding.ignored) surface.removeAttribute('data-liquid-ignore')
+    if (binding.positioned) surface.style.removeProperty('position')
     bindings.delete(surface)
   }
   const refresh = () => {
@@ -59,7 +82,12 @@ export function installLiquidSurfaces({ root = document.body, snapshot = 'body',
     refreshTimer = setTimeout(() => {
       refreshTimer = undefined
       for (const { mask } of rims.values()) mask.update()
-      const renderers = new Set([...bindings.values()].flatMap(binding => binding.lenses.map(lens => lens.renderer)))
+      // Skip redundant html2canvas re-captures for dedicated static ambient sky backdrops during streaming
+      const renderers = new Set(
+        [...bindings.values()]
+          .filter(binding => !binding.staticBackdrop)
+          .flatMap(binding => binding.lenses.map(lens => lens.renderer)),
+      )
       for (const renderer of renderers) if (renderer) void renderer.captureSnapshot()
     }, 160)
   }
@@ -67,7 +95,7 @@ export function installLiquidSurfaces({ root = document.body, snapshot = 'body',
     const style = getComputedStyle(element)
     return element.getClientRects().length > 0 && style.visibility !== 'hidden' && style.display !== 'none'
   }
-  const ready = loadLiquidGlass()
+  const ready = engine === 'css' ? null : loadLiquidGlass()
   const sync = () => {
     scheduled = false
     if (disposed) return
@@ -86,22 +114,40 @@ export function installLiquidSurfaces({ root = document.body, snapshot = 'body',
       lensTarget.className = 'liquid-surface-lens'
       lensTarget.id = `liquid-surface-${++nextId}`
       layer.append(lensTarget)
-      const sidebarHost = surface.matches(sidebarControls) ? surface.closest<HTMLElement>(sidebar) : null
+      const sidebarHost = surface.closest<HTMLElement>(sidebar)
+      const resolvedSnapshot = surface.dataset.liquidSnapshot || sidebarHost?.dataset.liquidSnapshot || snapshot
+      const cssOnly =
+        engine === 'css' ||
+        surface.dataset.liquidEngine === 'css' ||
+        isCssOnlyStaticBackdrop(resolvedSnapshot, sidebarHost)
+      const needsPosition = getComputedStyle(surface).position === 'static'
       const binding: Binding = {
-        layer, lensTarget, lenses: [], canvases: [], ignored: surface.hasAttribute('data-liquid-ignore'),
+        layer,
+        lensTarget,
+        lenses: [],
+        canvases: [],
+        ignored: surface.hasAttribute('data-liquid-ignore'),
+        positioned: needsPosition,
+        staticBackdrop: cssOnly || isStaticBackdropSnapshot(resolvedSnapshot),
       }
       bindings.set(surface, binding)
+      if (needsPosition) surface.style.position = 'relative'
       surface.classList.add('liquid-surface')
       surface.setAttribute('data-liquid-ignore', '')
-      surface.dataset.materialStatus = 'loading'
       surface.append(layer)
+      // Pure GPU-composited CSS Liquid Glass fast path: zero WebGL canvases and zero html2canvas snapshots.
+      if (cssOnly || !ready) {
+        surface.dataset.materialStatus = 'ready'
+        continue
+      }
+      surface.dataset.materialStatus = 'loading'
       void ready.then(({ default: liquidGL }) => {
         if (disposed || bindings.get(surface) !== binding) return
         const compact = !!sidebarHost || surface.dataset.liquidSurface === 'control' || surface.dataset.liquidSurface === 'selection'
         const result = liquidGL({
           target: `#${lensTarget.id}`,
-          snapshot: sidebarHost?.dataset.liquidSnapshot || surface.dataset.liquidSnapshot || snapshot,
-          content: false, engine: 'auto', resolution: Math.min(window.devicePixelRatio, 1.5),
+          snapshot: resolvedSnapshot,
+          content: false, engine: 'auto', resolution: 1,
           zIndex: 0, refraction: 0, bevelDepth: compact && !sidebarHost ? 0.002 : 0.006,
           bevelWidth: compact ? 0.16 : 0.08, aberration: 0, magnify: 1, frost: 0,
           tint: dark && !sidebarHost ? 'rgba(100, 88, 116, 0.2)' : null,
@@ -145,9 +191,9 @@ export function installLiquidSurfaces({ root = document.body, snapshot = 'body',
         [...record.removedNodes, ...record.addedNodes].some(node => node instanceof Element && (node.matches(selector) || node.querySelector(selector)))
       )) schedule()
     }
-    if (changed) refresh()
+    if (changed && engine !== 'css') refresh()
   })
-  observer.observe(root, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['class', 'style', 'hidden', 'data-liquid-surface'] })
+  observer.observe(root, { subtree: true, childList: true, characterData: engine !== 'css', attributes: true, attributeFilter: ['class', 'style', 'hidden', 'data-liquid-surface'] })
   const onScroll = (event: Event) => {
     if (event.target instanceof Element && event.target.matches('.session-rail-list')) {
       for (const { mask } of rims.values()) mask.update()
@@ -155,16 +201,20 @@ export function installLiquidSurfaces({ root = document.body, snapshot = 'body',
     }
     refresh()
   }
-  root.addEventListener('scroll', onScroll, true)
-  root.addEventListener('load', refresh, true)
+  if (engine !== 'css') {
+    root.addEventListener('scroll', onScroll, true)
+    root.addEventListener('load', refresh, true)
+  }
   window.addEventListener('resize', schedule)
   sync()
   return () => {
     disposed = true
     observer.disconnect()
     clearTimeout(refreshTimer)
-    root.removeEventListener('scroll', onScroll, true)
-    root.removeEventListener('load', refresh, true)
+    if (engine !== 'css') {
+      root.removeEventListener('scroll', onScroll, true)
+      root.removeEventListener('load', refresh, true)
+    }
     window.removeEventListener('resize', schedule)
     for (const [surface, binding] of bindings) release(surface, binding)
   }

@@ -1,0 +1,141 @@
+/* Unified Star-Violet Liquid Glass Select Control for Dialogs & Forms */
+.astr-branded-select {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.astr-branded-select-label {
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--astr-text);
+  line-height: 1.4;
+}
+
+.astr-branded-select-desc {
+  font-size: 11.5px;
+  color: var(--astr-muted);
+  line-height: 1.35;
+  margin-top: -2px;
+}
+
+.astr-branded-select-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-height: 36px;
+  padding: 0 11px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in oklab, var(--astr-border) 88%, transparent);
+  background: color-mix(in oklab, var(--astr-surface) 92%, var(--astr-surface-muted));
+  color: var(--astr-text);
+  font: 500 13px/1.4 var(--astr-session-font);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 140ms ease, background 140ms ease, box-shadow 140ms ease;
+}
+
+.astr-branded-select-trigger.is-placeholder {
+  color: var(--astr-muted);
+}
+
+.astr-branded-select-trigger:hover:not(:disabled),
+.astr-branded-select-trigger[aria-expanded='true'] {
+  border-color: color-mix(in oklab, var(--astr-indigo) 54%, var(--astr-border));
+  background: color-mix(in oklab, var(--astr-selected) 26%, var(--astr-surface));
+}
+
+.astr-branded-select-trigger:focus-visible {
+  outline: none;
+  border-color: var(--astr-indigo);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--astr-indigo) 16%, transparent);
+}
+
+.astr-branded-select-trigger:disabled {
+  opacity: 0.52;
+  cursor: not-allowed;
+}
+
+.astr-branded-select-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1 1 0;
+}
+
+.astr-branded-select-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+
+.astr-branded-select-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.astr-branded-select-chevron {
+  flex: none;
+  color: var(--astr-muted);
+  transition: transform 150ms ease, color 150ms ease;
+}
+
+.astr-branded-select-trigger[aria-expanded='true'] .astr-branded-select-chevron {
+  transform: rotate(180deg);
+  color: var(--astr-indigo);
+}
+
+.astr-branded-select-dropdown {
+  padding: 5px !important;
+  border-radius: 12px !important;
+  border: 1px solid color-mix(in oklab, var(--astr-indigo) 22%, var(--astr-border)) !important;
+  box-shadow:
+    0 18px 40px -12px rgb(20 14 38 / 28%),
+    0 4px 12px rgb(20 14 38 / 10%) !important;
+}
+
+.astr-branded-select-scroll {
+  max-height: 264px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.astr-branded-select-item {
+  border-radius: 8px !important;
+  padding: 6px 9px !important;
+  min-height: 34px;
+}
+
+.astr-branded-select-item.is-selected {
+  background: color-mix(in oklab, var(--astr-selected) 68%, transparent) !important;
+  color: var(--astr-indigo) !important;
+}
+
+.astr-branded-select-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 1px;
+}
+
+.astr-branded-select-item-title {
+  font-size: 12.5px;
+  font-weight: 550;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.astr-branded-select-item-desc {
+  font-size: 10.5px;
+  color: var(--astr-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

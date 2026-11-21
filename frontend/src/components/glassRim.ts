@@ -8,6 +8,7 @@ export function createGlassRim(canvas: HTMLCanvasElement) {
     maskMode: canvas.style.maskMode,
   }
 
+  let writingMask = false
   const update = () => {
     const bounds = canvas.getBoundingClientRect()
     const rings: string[] = []
@@ -39,14 +40,20 @@ export function createGlassRim(canvas: HTMLCanvasElement) {
     const image = bounds.width > 0 && bounds.height > 0 && rings.length > 0
       ? `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${bounds.width}" height="${bounds.height}" viewBox="0 0 ${bounds.width} ${bounds.height}"><defs>${clipPaths.join('')}</defs>${rings.join('')}</svg>`)}")`
       : 'linear-gradient(transparent, transparent)'
-    if (canvas.style.maskImage !== image) canvas.style.maskImage = image
+    if (canvas.style.maskImage !== image) {
+      writingMask = true
+      canvas.style.maskImage = image
+      writingMask = false
+    }
   }
   Object.assign(canvas.style, { maskSize: '100% 100%', maskRepeat: 'no-repeat', maskMode: 'alpha' })
   update()
   const resize = new ResizeObserver(update)
   resize.observe(canvas)
   // liquidGL also adjusts the canvas origin when its scroll anchor moves.
-  const position = new MutationObserver(update)
+  const position = new MutationObserver(() => {
+    if (!writingMask) update()
+  })
   position.observe(canvas, { attributes: true, attributeFilter: ['style'] })
 
   return {

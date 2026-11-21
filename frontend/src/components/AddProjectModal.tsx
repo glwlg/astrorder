@@ -6,7 +6,6 @@ import {
   Group,
   Loader,
   Modal,
-  NativeSelect,
   Paper,
   ScrollArea,
   Stack,
@@ -29,6 +28,8 @@ import { useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { api, authenticatedApiFetch } from '../api/client'
 import type { Agent, SshConnection } from '../domain/types'
+import { AgentBrandIcon } from './AgentBrandIcon'
+import { BrandedSelect } from './BrandedSelect'
 const emptyAgents: Record<string, Agent> = {}
 
 interface DirectoryItem {
@@ -338,14 +339,17 @@ export function AddProjectModal({
     >
       <Stack gap="md">
         {/* Step 1: 先选服务器 */}
-        <NativeSelect
+        <BrandedSelect
           label="1. 选择运行服务器"
           description="指定项目所在的本地环境或远端 SSH 服务器"
-          data={serverList}
+          options={serverList.map((srv) => ({
+            value: srv.value,
+            label: srv.label,
+            icon: loadingServers ? <Loader size={13} /> : <IconServer size={14} color="var(--astr-indigo)" />,
+          }))}
           value={connectionId}
-          onChange={(e) => setConnectionId(e.currentTarget.value)}
+          onChange={setConnectionId}
           disabled={loadingServers || submitting}
-          leftSection={loadingServers ? <Loader size={14} /> : <IconServer size={16} />}
         />
 
         {/* Step 2: 选择文件夹 (复用文件树组件/浏览) */}
@@ -552,11 +556,15 @@ export function AddProjectModal({
 
         {/* Step 4: 默认 Agent */}
         {agentOptions.length > 0 && (
-          <NativeSelect
+          <BrandedSelect
             label="4. 初始智能体"
-            data={agentOptions}
+            options={agentOptions.map((opt) => ({
+              value: opt.value,
+              label: opt.label,
+              icon: <AgentBrandIcon kind={agents[opt.value]?.kind} size={15} />,
+            }))}
             value={selectedAgentId}
-            onChange={(e) => setSelectedAgentId(e.currentTarget.value)}
+            onChange={setSelectedAgentId}
             disabled={submitting}
           />
         )}

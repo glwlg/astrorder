@@ -1,23 +1,17 @@
-import { ChartLineUpIcon, ChatCircleDotsIcon, CpuIcon, DesktopIcon, GearSixIcon, GlobeHemisphereWestIcon, GraphIcon, HardDrivesIcon, KeyboardIcon, LightningIcon, PuzzlePieceIcon, SlidersHorizontalIcon, SquaresFourIcon, UsersThreeIcon } from './workbenchIcons'
-import { ActionIcon, HoverCard, Modal, NavLink, Stack, Tabs, Text, Tooltip } from '@mantine/core'
+import { ChartLineUpIcon, ChatCircleDotsIcon, CpuIcon, DesktopIcon, GearSixIcon, GlobeHemisphereWestIcon, GraphIcon, HardDrivesIcon, IdentificationCardIcon, KeyboardIcon, LightningIcon, PuzzlePieceIcon, SlidersHorizontalIcon, SquaresFourIcon, UsersThreeIcon } from './workbenchIcons'
+import { IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconPin } from '@tabler/icons-react'
+import { ActionIcon, Center, HoverCard, Loader, Modal, NavLink, Stack, Tabs, Text, Tooltip } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useQuery } from '@tanstack/react-query'
-import { useId, useState } from 'react'
+import { Suspense, lazy, useEffect, useId, useState } from 'react'
 import { NavLink as RouterNavLink, useLocation } from 'react-router-dom'
 import { api, type OcxUsageResponse } from '../api/client'
 import type { Agent, Project, Session } from '../domain/types'
-import { RtkSettingsPage } from '../features/rtk/RtkSettingsPage'
 import './settings.css'
+import './arcSidebar.css'
 import { SettingsDrawerScope } from './SettingsDrawer'
-import { ShortcutSettingsPage } from '../features/shortcuts/ShortcutSettingsPage'
 import { useShortcutHandlers } from '../features/shortcuts/shortcuts'
-import { AgentsPage } from '../features/agents/AgentsPage'
 import { formatTokens, getModelColor } from '../features/analytics/usageFormat'
-import { PluginsPage } from '../features/plugins/PluginsPage'
-import { NetworkSettingsPage } from '../features/network/NetworkSettingsPage'
-import { DesktopSettingsPage } from '../features/services/DesktopSettingsPage'
-import { ModelGatewaySettingsPage } from '../features/services/ModelGatewaySettingsPage'
-import { CapabilitiesSettingsCard } from '../features/services/CapabilitiesSettingsCard'
 import { SessionRail } from './SessionRail'
 import { BotGroupRail } from './BotGroupRail'
 import { SwarmRootRail } from './SwarmRootRail'
@@ -30,14 +24,23 @@ import { connectionName } from './AgentSessionFilter'
 import { scopeKey } from '../domain/semantics'
 import { SessionAccountsHoverCard } from '../features/agentAccounts/SessionAccountsHoverCard'
 
+const AgentsPage = lazy(() => import('../features/agents/AgentsPage').then((m) => ({ default: m.AgentsPage })))
+const ModelGatewaySettingsPage = lazy(() => import('../features/services/ModelGatewaySettingsPage').then((m) => ({ default: m.ModelGatewaySettingsPage })))
+const CapabilitiesSettingsCard = lazy(() => import('../features/services/CapabilitiesSettingsCard').then((m) => ({ default: m.CapabilitiesSettingsCard })))
+const RtkSettingsPage = lazy(() => import('../features/rtk/RtkSettingsPage').then((m) => ({ default: m.RtkSettingsPage })))
+const NetworkSettingsPage = lazy(() => import('../features/network/NetworkSettingsPage').then((m) => ({ default: m.NetworkSettingsPage })))
+const ShortcutSettingsPage = lazy(() => import('../features/shortcuts/ShortcutSettingsPage').then((m) => ({ default: m.ShortcutSettingsPage })))
+const DesktopSettingsPage = lazy(() => import('../features/services/DesktopSettingsPage').then((m) => ({ default: m.DesktopSettingsPage })))
+const PluginsPage = lazy(() => import('../features/plugins/PluginsPage').then((m) => ({ default: m.PluginsPage })))
+
 const navItems = [
   { to: '/chat', label: '会话', icon: ChatCircleDotsIcon, id: 'chat' },
-  { to: '/monitor', label: '监控室', icon: SquaresFourIcon, id: 'monitor' },
+  { to: '/monitor', label: '矩阵', icon: SquaresFourIcon, id: 'monitor' },
   { to: '/swarm', label: '星图', icon: GraphIcon, id: 'swarm' },
   { to: '/groups', label: '群聊', icon: UsersThreeIcon, id: 'groups' },
   { to: '/analytics', label: '统计', icon: ChartLineUpIcon, id: 'analytics' },
   { to: '/backups', label: '备份', icon: HardDrivesIcon, id: 'backups' },
-  { to: '/agent-accounts', label: '账号', icon: UsersThreeIcon, id: 'agentAccounts' },
+  { to: '/agent-accounts', label: '账号', icon: IdentificationCardIcon, id: 'agentAccounts' },
 ]
 
 function TodayUsagePreview({ data, pending, error, updatedAt }: {
@@ -103,12 +106,12 @@ function addSessionToMonitor(sessionKey: string, title?: string) {
       window.dispatchEvent(new CustomEvent('astrorder:monitor-sessions-changed', { detail: next }))
       notifications.show({
         color: 'teal',
-        message: `已将“${title || '会话'}”加入监控室`,
+        message: `已将“${title || '会话'}”加入矩阵`,
       })
     } else {
       notifications.show({
         color: 'blue',
-        message: `“${title || '会话'}”已在监控室中`,
+        message: `“${title || '会话'}”已在矩阵中`,
       })
     }
   } catch {}
@@ -122,6 +125,12 @@ export function Sidebar({
   chatReturnPath = '/chat',
   onSelectSession,
   onNavigate,
+  panelCollapsed = false,
+  isPeeking = false,
+  onTogglePanelCollapse,
+  onPeekEnter,
+  onPeekLeave,
+  onDismissPeek,
 }: {
   sessions: Session[]
   agents: Record<string, Agent>
@@ -130,11 +139,23 @@ export function Sidebar({
   chatReturnPath?: string
   onSelectSession: (session: Session) => void
   onNavigate?: () => void
+  panelCollapsed?: boolean
+  isPeeking?: boolean
+  onTogglePanelCollapse?: () => void
+  onPeekEnter?: () => void
+  onPeekLeave?: () => void
+  onDismissPeek?: () => void
 }) {
   const location = useLocation()
   const skyId = useId()
   const [settingsOpened, setSettingsOpened] = useState(false)
   useShortcutHandlers(onNavigate ? {} : { settings: () => setSettingsOpened(true) }, true)
+  useEffect(() => {
+    if (onNavigate) return
+    const onOpenSettings = () => setSettingsOpened(true)
+    window.addEventListener('astrorder:open-settings', onOpenSettings)
+    return () => window.removeEventListener('astrorder:open-settings', onOpenSettings)
+  }, [onNavigate])
   const [isMonitorDragOver, setIsMonitorDragOver] = useState(false)
   const todayUsage = useQuery({
     queryKey: ['astrorder', 'analytics', 'today-models'],
@@ -153,15 +174,26 @@ export function Sidebar({
   const isBackups = location.pathname.startsWith('/backups')
   const isAgentAccounts = location.pathname.startsWith('/agent-accounts')
   const isChat = !isSwarm && !isGroups && !isMonitorRoute && !isAnalytics && !isBackups && !isAgentAccounts
+  const isInChatSession = isChat && (
+    (location.pathname.startsWith('/chat/') && !location.pathname.startsWith('/chat/group-')) ||
+    Boolean(activeSessionKey)
+  )
   const groupsBusy = useAstrorderStore(state => Object.values(state.botGroups).some(groupHasActiveTask))
   const connection = useAstrorderStore(state => state.connection)
   const activeSession = sessions.find(session => scopeKey(session.agent_id, session.id) === activeSessionKey)
   const activeAgent = activeSession ? agents[activeSession.agent_id] : undefined
   const connectionLabel = connection === 'connected' ? '已连接' : connection === 'connecting' ? '连接中' : connection === 'error' ? '连接异常' : '离线'
 
+  const hasSecondaryPanel = !(isAgentAccounts || isBackups || isAnalytics)
+  const isCollapsedDesktop = Boolean(!onNavigate && hasSecondaryPanel && panelCollapsed)
+  const isPeekingDesktop = Boolean(isCollapsedDesktop && isPeeking)
+
   return (
     <>
-      <div className="workspace-sidebar" data-liquid-snapshot={`[id="${skyId}"]`}>
+      <div
+        className={`workspace-sidebar${isCollapsedDesktop ? ' is-panel-collapsed' : ''}${isPeekingDesktop ? ' is-panel-peeking' : ''}`}
+        data-liquid-snapshot={`[id="${skyId}"]`}
+      >
         <div id={skyId} className="workspace-sidebar-sky" aria-hidden="true" />
         <nav className="workspace-navigation" aria-label="主导航">
           <div className="sidebar-primary-nav">
@@ -175,13 +207,21 @@ export function Sidebar({
                 (id === 'backups' && isBackups) ||
                 (id === 'agentAccounts' && isAgentAccounts) ||
                 (id === 'chat' && isChat)
+              const canHoverPeekTab =
+                isCollapsedDesktop &&
+                ((id === 'chat' && (isChat || isMonitorRoute)) ||
+                  (id === 'swarm' && isSwarm) ||
+                  (id === 'groups' && isGroups))
               const link = (
                 <NavLink
                     component={RouterNavLink}
-                    to={id === 'chat' ? chatReturnPath : to}
+                    to={id === 'chat' ? (isInChatSession ? '/chat' : chatReturnPath) : to}
+                    state={id === 'chat' && isInChatSession ? { welcome: true } : undefined}
                     label={label}
                     leftSection={<Icon size={25} weight={isActive ? 'duotone' : 'regular'} aria-hidden="true" />}
                     onClick={onNavigate}
+                    onMouseEnter={canHoverPeekTab ? onPeekEnter : undefined}
+                    data-peek-trigger={canHoverPeekTab ? 'true' : undefined}
                     data-active={isActive ? 'true' : undefined}
                     aria-current={isActive ? 'page' : undefined}
                     aria-label={id === 'groups' && groupsBusy && !isGroups ? '群聊，有任务进行中' : label}
@@ -230,11 +270,34 @@ export function Sidebar({
               ) : id === 'agentAccounts' ? (
                 <SessionAccountsHoverCard key={to} link={link} session={activeSession} agent={activeAgent} />
               ) : (
-                <Tooltip key={to} label={label} position="bottom" withArrow openDelay={200}>{link}</Tooltip>
+                <Tooltip key={to} label={id === 'chat' && isInChatSession ? '回到欢迎页' : label} position="bottom" withArrow openDelay={200}>{link}</Tooltip>
               )
             })}
           </div>
           <div className="workspace-navigation-tools">
+            {!onNavigate && hasSecondaryPanel && onTogglePanelCollapse && (
+              <div className="workspace-tool-item sidebar-collapse-tool">
+                <Tooltip
+                  label={panelCollapsed ? '展开并固定侧栏 (Ctrl+B)' : '收起侧栏 (Ctrl+B)'}
+                  position="right"
+                >
+                  <ActionIcon
+                    variant="subtle"
+                    aria-label={panelCollapsed ? '展开侧边栏' : '收起侧边栏'}
+                    aria-expanded={!panelCollapsed}
+                    data-collapsed={panelCollapsed ? 'true' : undefined}
+                    onClick={onTogglePanelCollapse}
+                  >
+                    {panelCollapsed ? (
+                      <IconLayoutSidebarLeftExpand size={20} aria-hidden="true" />
+                    ) : (
+                      <IconLayoutSidebarLeftCollapse size={20} aria-hidden="true" />
+                    )}
+                  </ActionIcon>
+                </Tooltip>
+                <span aria-hidden="true">{panelCollapsed ? '展开' : '收起'}</span>
+              </div>
+            )}
             <div className="workspace-tool-item"><NotificationPermissionControl /><span aria-hidden="true">通知</span></div>
             <div className="workspace-tool-item"><WorkspaceThemeToggle /><span aria-hidden="true">主题</span></div>
             <div className="workspace-tool-item">
@@ -247,18 +310,48 @@ export function Sidebar({
             </div>
           </div>
         </nav>
-        {!isAgentAccounts && <div className="workspace-sidebar-panel">
-          <Stack className="sidebar-content" gap="md">
+        {hasSecondaryPanel && (
+          <div
+            className="workspace-sidebar-panel"
+            aria-hidden={isCollapsedDesktop && !isPeekingDesktop ? true : undefined}
+            inert={isCollapsedDesktop && !isPeekingDesktop ? true : undefined}
+            onMouseEnter={isCollapsedDesktop ? onPeekEnter : undefined}
+            onMouseLeave={isCollapsedDesktop ? onPeekLeave : undefined}
+          >
+            {isPeekingDesktop && onTogglePanelCollapse && (
+              <div className="sidebar-peek-header">
+                <Text size="xs" fw={650} c="dimmed">
+                  {isSwarm ? '星图主星' : isGroups ? '群聊协作' : '项目会话'}
+                </Text>
+                <Tooltip label="固定侧栏 (Ctrl+B)" position="right" withArrow>
+                  <button
+                    type="button"
+                    className="sidebar-peek-pin-btn"
+                    aria-label="固定侧栏"
+                    onClick={onTogglePanelCollapse}
+                  >
+                    <IconPin size={14} aria-hidden="true" />
+                  </button>
+                </Tooltip>
+              </div>
+            )}
+            <Stack className="sidebar-content" gap="md">
         {isSwarm ? (
           <SwarmRootRail
             sessions={sessions}
             agents={agents}
-            onNavigate={onNavigate}
+            onNavigate={() => {
+              onNavigate?.()
+              onDismissPeek?.()
+            }}
           />
         ) : isGroups ? (
           <BotGroupRail
             agents={agents}
-            onNavigate={onNavigate}
+            onNavigate={() => {
+              onNavigate?.()
+              onDismissPeek?.()
+            }}
           />
         ) : (
           <>
@@ -276,16 +369,18 @@ export function Sidebar({
               onSelect={(session) => {
                 onSelectSession(session)
                 onNavigate?.()
+                onDismissPeek?.()
               }}
             />
           </>
         )}
       </Stack>
-          <footer className="workspace-connection" data-status={connection}>
-            <span className="workspace-connection-dot" aria-hidden="true" />
-            <span>{activeAgent ? `${connectionName(activeAgent)} · ` : ''}{connectionLabel}</span>
-          </footer>
-        </div>}
+            <footer className="workspace-connection" data-status={connection}>
+              <span className="workspace-connection-dot" aria-hidden="true" />
+              <span>{activeAgent ? `${connectionName(activeAgent)} · ` : ''}{connectionLabel}</span>
+            </footer>
+          </div>
+        )}
       </div>
       <SettingsDrawerScope>{hasOpenDrawer => <Modal
         className="settings-modal"
@@ -300,28 +395,32 @@ export function Sidebar({
           body: { flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', padding: '0 16px 16px' },
         }}
       >
-        <Tabs defaultValue="connections" orientation="vertical" keepMounted={true} className="settings-tabs">
-          <Tabs.List>
-            <Tabs.Tab value="connections" leftSection={<SlidersHorizontalIcon size={16} />}>连接</Tabs.Tab>
-            <Tabs.Tab value="models" leftSection={<CpuIcon size={16} />}>模型与网关</Tabs.Tab>
-            <Tabs.Tab value="skills" leftSection={<LightningIcon size={16} />}>能力中心</Tabs.Tab>
-            <Tabs.Tab value="rtk" leftSection={<ChartLineUpIcon size={16} />}>RTK</Tabs.Tab>
-            <Tabs.Tab value="network" leftSection={<GlobeHemisphereWestIcon size={16} />}>网络与移动端</Tabs.Tab>
-            <Tabs.Tab value="shortcuts" leftSection={<KeyboardIcon size={16} />}>快捷键</Tabs.Tab>
-            <Tabs.Tab value="desktop" leftSection={<DesktopIcon size={16} />}>桌面客户端</Tabs.Tab>
-            <Tabs.Tab value="plugins" leftSection={<PuzzlePieceIcon size={16} />}>插件</Tabs.Tab>
-          </Tabs.List>
-          <Tabs.Panel value="connections" className="settings-tab-panel"><AgentsPage /></Tabs.Panel>
-          <Tabs.Panel value="models" className="settings-tab-panel"><ModelGatewaySettingsPage /></Tabs.Panel>
-          <Tabs.Panel value="skills" className="settings-tab-panel" data-tab-panel-skills="true" style={{ overflow: 'hidden' }}>
-            <CapabilitiesSettingsCard />
-          </Tabs.Panel>
-          <Tabs.Panel value="rtk" className="settings-tab-panel" keepMounted={false}><RtkSettingsPage /></Tabs.Panel>
-          <Tabs.Panel value="network" className="settings-tab-panel"><NetworkSettingsPage /></Tabs.Panel>
-          <Tabs.Panel value="shortcuts" className="settings-tab-panel" keepMounted={false}><ShortcutSettingsPage /></Tabs.Panel>
-          <Tabs.Panel value="desktop" className="settings-tab-panel"><DesktopSettingsPage /></Tabs.Panel>
-          <Tabs.Panel value="plugins" className="settings-tab-panel"><PluginsPage /></Tabs.Panel>
-        </Tabs>
+        {settingsOpened && (
+          <Suspense fallback={<Center style={{ flex: 1 }}><Loader size="sm" color="violet" /></Center>}>
+            <Tabs defaultValue="connections" orientation="vertical" keepMounted={true} className="settings-tabs">
+              <Tabs.List>
+                <Tabs.Tab value="connections" leftSection={<SlidersHorizontalIcon size={16} />}>连接</Tabs.Tab>
+                <Tabs.Tab value="models" leftSection={<CpuIcon size={16} />}>模型与网关</Tabs.Tab>
+                <Tabs.Tab value="skills" leftSection={<LightningIcon size={16} />}>能力中心</Tabs.Tab>
+                <Tabs.Tab value="rtk" leftSection={<ChartLineUpIcon size={16} />}>RTK</Tabs.Tab>
+                <Tabs.Tab value="network" leftSection={<GlobeHemisphereWestIcon size={16} />}>网络与移动端</Tabs.Tab>
+                <Tabs.Tab value="shortcuts" leftSection={<KeyboardIcon size={16} />}>快捷键</Tabs.Tab>
+                <Tabs.Tab value="desktop" leftSection={<DesktopIcon size={16} />}>桌面客户端</Tabs.Tab>
+                <Tabs.Tab value="plugins" leftSection={<PuzzlePieceIcon size={16} />}>插件</Tabs.Tab>
+              </Tabs.List>
+              <Tabs.Panel value="connections" className="settings-tab-panel"><AgentsPage /></Tabs.Panel>
+              <Tabs.Panel value="models" className="settings-tab-panel"><ModelGatewaySettingsPage /></Tabs.Panel>
+              <Tabs.Panel value="skills" className="settings-tab-panel" data-tab-panel-skills="true" style={{ overflow: 'hidden' }}>
+                <CapabilitiesSettingsCard />
+              </Tabs.Panel>
+              <Tabs.Panel value="rtk" className="settings-tab-panel" keepMounted={false}><RtkSettingsPage /></Tabs.Panel>
+              <Tabs.Panel value="network" className="settings-tab-panel"><NetworkSettingsPage /></Tabs.Panel>
+              <Tabs.Panel value="shortcuts" className="settings-tab-panel" keepMounted={false}><ShortcutSettingsPage /></Tabs.Panel>
+              <Tabs.Panel value="desktop" className="settings-tab-panel"><DesktopSettingsPage /></Tabs.Panel>
+              <Tabs.Panel value="plugins" className="settings-tab-panel"><PluginsPage /></Tabs.Panel>
+            </Tabs>
+          </Suspense>
+        )}
       </Modal>}</SettingsDrawerScope>
     </>
   )

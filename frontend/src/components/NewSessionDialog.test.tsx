@@ -1,5 +1,6 @@
 import { MantineProvider } from '@mantine/core'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, expect, it, vi } from 'vitest'
 import { api } from '../api/client'
 import type { Agent } from '../domain/types'
@@ -10,16 +11,18 @@ it('requires explicit Agent selection and uses the returned native ID', async ()
  const created = { id: 'native-id', agent_id: 'codex', title: 'new', workspace: '/work', status: 'idle' as const, updated_at: '2026-09-09T00:00:00Z' }
  const create = vi.spyOn(api, 'createSession').mockResolvedValue(created)
  const onCreated = vi.fn()
- render(<MantineProvider><NewSessionDialog agents={agents} project={null} onClose={() => {}} onCreated={onCreated} /></MantineProvider>)
+ const { container } = render(<MantineProvider><NewSessionDialog agents={agents} project={null} onClose={() => {}} onCreated={onCreated} /></MantineProvider>)
+ expect(container.querySelectorAll('select')).toHaveLength(0)
  expect(await screen.findByRole('button', { name: '创建会话' })).toBeDisabled()
- fireEvent.change(screen.getByLabelText('选择 Agent'), { target: { value: 'codex' } })
+ await userEvent.click(screen.getByRole('button', { name: '选择 Agent' }))
+ await userEvent.click(await screen.findByRole('menuitem', { name: /Codex · codex · 本机/ }))
  fireEvent.change(screen.getByLabelText('工作区'), { target: { value: '/work' } })
  fireEvent.click(screen.getByRole('button', { name: '创建会话' }))
  await waitFor(() => expect(create).toHaveBeenCalledWith(expect.objectContaining({ agent_id: 'codex', workspace: '/work' })))
  expect(onCreated).toHaveBeenCalledWith(created)
 })
 
-it('offers exactly the Grok from the project environment', () => {
+it('offers exactly the Grok from the project environment', async () => {
  const all = Object.fromEntries(['local', 'wsl', 'debian'].map(environment => {
   const id = environment + '-grok'
   return [id, { id, kind: 'grok', name: 'Grok Build', status: 'ready', capabilities: ['chat'], limitation: null, connection_id: environment === 'local' ? null : environment }]
@@ -28,9 +31,10 @@ it('offers exactly the Grok from the project environment', () => {
   const owner = environment + '-grok'
   const project = { key: environment, agentId: owner, label: environment, workspace: '/work', sessions: [], sessionCount: 0, latestUpdatedAt: '' }
   const view = render(<MantineProvider><NewSessionDialog agents={all} project={project} onClose={() => {}} onCreated={() => {}} /></MantineProvider>)
-  const choices = screen.getAllByRole('option').filter(option => (option as HTMLOptionElement).value)
+  await userEvent.click(screen.getByRole('button', { name: '选择 Agent' }))
+  const choices = await screen.findAllByRole('menuitem')
   expect(choices).toHaveLength(1)
-  expect(choices[0]).toHaveValue(owner)
+  expect(choices[0]).toHaveTextContent(agentLabel(all[owner]))
   view.unmount()
  }
 })

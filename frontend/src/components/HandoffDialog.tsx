@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react'
-import { Button, Group, Modal, NativeSelect, Stack, Text } from '@mantine/core'
+import { Button, Group, Modal, Stack, Text } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
+import { IconBolt, IconCpu } from '@tabler/icons-react'
 import { api } from '../api/client'
 import type { Agent, Session } from '../domain/types'
 import { REASONING_EFFORTS } from '../features/chat/composerMedia'
+import { AgentBrandIcon } from './AgentBrandIcon'
+import { BrandedSelect } from './BrandedSelect'
 import { agentLabel } from './NewSessionDialog'
 import { useBackgroundTasks } from '../state/backgroundTasks'
 
@@ -105,26 +108,42 @@ export function HandoffDialog({
 
   return <Modal opened onClose={onClose} title="转交会话" centered size="sm">
     <Stack>
-      <NativeSelect
+      <BrandedSelect
         label="目标 Agent"
+        placeholder="请选择 Agent"
         value={agentId}
-        onChange={(event) => changeAgent(event.currentTarget.value)}
-        data={[{ value: '', label: '请选择 Agent' }, ...targets.map((agent) => ({ value: agent.id, label: agentLabel(agent) }))]}
+        onChange={changeAgent}
+        options={targets.map((agent) => ({
+          value: agent.id,
+          label: agentLabel(agent),
+          icon: <AgentBrandIcon kind={agent.kind} size={15} />,
+        }))}
       />
-      <NativeSelect
+      <BrandedSelect
         label="模型"
+        placeholder={loadingModels ? '正在读取模型…' : '请选择模型'}
         value={modelKey}
-        onChange={(event) => setModelKey(event.currentTarget.value)}
-        data={[{ value: '', label: loadingModels ? '正在读取模型…' : '请选择模型' }, ...models.map((item) => ({ value: JSON.stringify([item.provider, item.model]), label: item.label }))]}
+        onChange={setModelKey}
         disabled={!agentId || loadingModels}
+        options={models.map((item) => ({
+          value: JSON.stringify([item.provider, item.model]),
+          label: item.label,
+          description: item.provider,
+          icon: <IconCpu size={14} color="var(--astr-indigo)" />,
+        }))}
       />
       {(modelError || (agentId && !modelSessionId)) && <Text size="sm" c="red">{modelError || '目标 Agent 尚无会话，无法读取可用模型。'}</Text>}
       {!isAntigravityTarget && (
-        <NativeSelect
+        <BrandedSelect
           label="思考程度"
+          placeholder="请选择思考程度"
           value={effort}
-          onChange={(event) => setEffort(event.currentTarget.value)}
-          data={[{ value: '', label: '请选择思考程度' }, ...REASONING_EFFORTS]}
+          onChange={setEffort}
+          options={REASONING_EFFORTS.map((item) => ({
+            value: item.value,
+            label: item.label,
+            icon: <IconBolt size={14} color="var(--astr-indigo)" />,
+          }))}
         />
       )}
       <Group justify="flex-end">

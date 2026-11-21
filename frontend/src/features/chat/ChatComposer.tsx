@@ -212,6 +212,21 @@ export function ChatComposer({
   const [commandIndex, setCommandIndex] = useState(0)
   const [dismissedMenuText, setDismissedMenuText] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  useEffect(() => {
+    const onQuote = (event: Event) => {
+      const detail = (event as CustomEvent<{ agentId?: string; sessionId?: string; text?: string }>).detail
+      if (!detail?.text) return
+      if (detail.agentId && detail.agentId !== session.agent_id) return
+      if (detail.sessionId && detail.sessionId !== session.id) return
+      updateDraft((current) => {
+        const prefix = current.text.trim() ? `${current.text.replace(/\s+$/, '')}\n` : ''
+        return { ...current, text: `${prefix}${detail.text}` }
+      })
+      requestAnimationFrame(() => textareaRef.current?.focus())
+    }
+    window.addEventListener('astrorder:quote-to-composer', onQuote)
+    return () => window.removeEventListener('astrorder:quote-to-composer', onQuote)
+  }, [session.agent_id, session.id, updateDraft])
   const [sessionDragOver, setSessionDragOver] = useState(false)
   const [fileDragOver, setFileDragOver] = useState(false)
   const [outbox] = useState(() => sharedServerOutbox(mobileOutboxStorage))

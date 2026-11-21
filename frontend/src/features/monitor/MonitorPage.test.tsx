@@ -1,6 +1,7 @@
 import { MantineProvider } from '@mantine/core'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../../api/client'
 import type { Command } from '../../domain/types'
@@ -57,14 +58,16 @@ describe('MonitorPage', () => {
   })
   afterEach(() => { cleanup(); vi.restoreAllMocks() })
 
-  function renderPage() {
+  function renderPage(initialEntries: string[] = ['/monitor']) {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     return render(
-      <MantineProvider>
-        <QueryClientProvider client={queryClient}>
-          <MonitorPage />
-        </QueryClientProvider>
-      </MantineProvider>,
+      <MemoryRouter initialEntries={initialEntries}>
+        <MantineProvider>
+          <QueryClientProvider client={queryClient}>
+            <MonitorPage />
+          </QueryClientProvider>
+        </MantineProvider>
+      </MemoryRouter>,
     )
   }
 
@@ -122,7 +125,7 @@ describe('MonitorPage', () => {
     fireEvent.mouseMove(card, { clientX: 120, clientY: 100 })
     expect(card.style.getPropertyValue('--spotlight-x')).toBe('100px')
     expect(card.style.getPropertyValue('--spotlight-y')).toBe('70px')
-    fireEvent.click(within(card).getByRole('button', { name: '移出监控室' }))
+    fireEvent.click(within(card).getByRole('button', { name: '移出矩阵' }))
     expect(screen.queryByTestId('monitor-card-agent-1-session-1')).not.toBeInTheDocument()
   })
 
@@ -212,7 +215,7 @@ describe('MonitorPage', () => {
   it('does not automatically re-add a manually removed running session', async () => {
     renderPage()
     await waitFor(() => expect(screen.getByTestId('monitor-card-agent-1-session-1')).toBeInTheDocument())
-    fireEvent.click(screen.getByRole('button', { name: '移出监控室' }))
+    fireEvent.click(screen.getByRole('button', { name: '移出矩阵' }))
 
     await waitFor(() => expect(screen.queryByTestId('monitor-card-agent-1-session-1')).not.toBeInTheDocument())
     expect(JSON.parse(localStorage.getItem('astrorder:monitor-excluded-sessions') || '[]')).toContain('agent-1::session-1')
@@ -372,5 +375,41 @@ describe('MonitorPage', () => {
 
     expect(await screen.findByTestId('monitor-card-agent-1-session-2')).toBeInTheDocument()
     expect(JSON.parse(localStorage.getItem('astrorder:monitor-sessions') || '[]')).toContain('agent-1::session-2')
+  })
+
+  it('strips injected Astrorder directive boilerplate from active command previews', async () => {
+    useAstrorderStore.getState().mergeCommands([
+      monitorCommand(
+        'browser-directive',
+        'send',
+        'running',
+        '【星序 · 浏览器自动执行指令】\n加载 astrorder-browser 技能。\n----------------------------------------\n审查星序的 UI 和 UX 设计',
+      ),
+    ])
+    renderPage()
+
+    const card = await screen.findByTestId('monitor-card-agent-1-session-1')
+    expect(within(card).getByText('审查星序的 UI 和 UX 设计')).toBeInTheDocument()
+    expect(within(card).queryByText(/加载 astrorder-browser 技能/)).not.toBeInTheDocument()
+  })
+
+  it('filters by ?project= query and tiles project sessions with one click', async () => {
+    useAstrorderStore.setState({
+      sessions: {
+        'agent-1::session-1': { ...activeSession, project_name: 'OpsCore', workspace: '/ws/OpsCore' },
+        'agent-1::session-2': { ...idleSession, project_name: 'OpsCore', workspace: '/ws/OpsCore' },
+        'agent-1::session-other': { id: 'session-other', agent_id: 'agent-1', title: '其他项目会话', project_name: 'Other', workspace: '/ws/Other', status: 'running' as const, updated_at: '2026-09-07T10:01:00Z' },
+      },
+    })
+    renderPage(['/monitor?project=OpsCore'])
+
+    expect(screen.getByText('项目：OpsCore')).toBeInTheDocument()
+    expect(screen.getByTestId('monitor-card-agent-1-session-1')).toBeInTheDocument()
+    expect(screen.queryByTestId('monitor-card-agent-1-session-other')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('monitor-card-agent-1-session-2')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '一键平铺活跃会话' }))
+    expect(await screen.findByTestId('monitor-card-agent-1-session-2')).toBeInTheDocument()
+    expect(screen.queryByTestId('monitor-card-agent-1-session-other')).not.toBeInTheDocument()
   })
 })
