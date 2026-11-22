@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Alert, Button, Loader, NativeSelect, Table } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useQuery } from '@tanstack/react-query'
@@ -16,13 +17,14 @@ import { useAgyAccountMutation } from './useAgyAccountMutation'
 import './AgyAccountsPage.css'
 
 export function AgyAccountsPage() {
-  const [selection, setSelection] = useState('')
+  const [params, setParams] = useSearchParams()
+  const selection = params.get('environment')
   const [dialog, setDialog] = useState<{ prompt: AccountPrompt; environment: string } | null>(null)
   const [importOpen, setImportOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settings, setSettings] = useRefreshSettings('antigravity')
   const targets = useQuery({ ...metadataPolicy, queryKey: ['agy-account-targets'], queryFn: agyAccountsApi.targets })
-  const target = targets.data?.items.find(item => item.id === selection) ?? targets.data?.items[0]
+  const target = selection ? targets.data?.items.find(item => item.id === selection) : targets.data?.items[0]
   const environment = target?.id ?? ''
   const { accounts, state: targetState, currentID, rows, quotas, refreshing, refresh, refreshLibrary } = useAgyAccountOverview(environment)
   const quotaSupported = targetState.data?.quota_supported
@@ -44,13 +46,16 @@ export function AgyAccountsPage() {
     <header className="agy-accounts-toolbar">
       <div><h2>Antigravity</h2><span className="agy-account-muted">{accounts.data ? `${accounts.data.items.length} 个已保存账号` : '账号库'}</span></div>
       <div className="agy-accounts-tools">
-        {target && <div className="agy-target-select">
+        {Boolean(targets.data?.items.length) && <div className="agy-target-select">
           <label htmlFor="agy-account-target">目标 Agent</label>
           <NativeSelect id="agy-account-target" value={environment} onChange={event => {
             mutation.reset()
-            setSelection(event.currentTarget.value)
+            const next = new URLSearchParams(params)
+            next.set('environment', event.currentTarget.value)
+            setParams(next, { replace: true })
           }}
-            data={targets.data?.items.map(({ id, name }) => ({ value: id, label: name }))} disabled={mutation.isPending} />
+            data={[...(target ? [] : [{ value: '', label: '请选择目标 Agent', disabled: true }]),
+              ...(targets.data?.items ?? []).map(({ id, name }) => ({ value: id, label: name }))]} disabled={mutation.isPending} />
         </div>}
         <Button variant="default" leftSection={<IconRefresh size={16} />} onClick={() => { void targets.refetch(); if (target) void refresh('all'); else void accounts.refetch() }}
           loading={refreshing} disabled={mutation.isPending || accounts.isPending}>刷新全部</Button>
@@ -66,7 +71,7 @@ export function AgyAccountsPage() {
     {mutation.isError && <Alert color="red" title="账号操作未完成">{mutation.error.message}</Alert>}
     {mutation.isPending && <Alert role="status">{mutation.variables?.kind === 'save' ? '正在保存当前账号…' : '正在切换账号并重新接入 AGY…'}</Alert>}
     {accounts.isPending && <div className="agy-account-empty" role="status"><Loader size="xs" /> 正在读取账号</div>}
-    {targets.isSuccess && !target && <Alert>接入 AGY Agent 后即可应用账号和查询额度。</Alert>}
+    {targets.isSuccess && !target && <Alert>{targets.data.items.length ? '所选目标不可用，请重新选择目标 Agent。' : '接入 AGY Agent 后即可应用账号和查询额度。'}</Alert>}
     {accounts.isSuccess && !rows.length && <div className="agy-account-empty">暂无已保存账号，可导入 AGY Token JSON 或保存当前账号。</div>}
     {accounts.isSuccess && rows.length > 0 && <div className="agy-account-table-wrap">
       <Table className="agy-account-table" aria-label="AGY 账号额度总览" verticalSpacing="md" horizontalSpacing="md">
@@ -84,8 +89,8 @@ export function AgyAccountsPage() {
             </Table.Th>
             <Table.Td><span className="agy-plan" data-known={Boolean(quota.data?.plan || quota.data?.tier_id)}>{quota.data?.plan || quota.data?.tier_id || (quota.data ? '未返回' : '—')}</span></Table.Td>
             <Table.Td aria-busy={quota.isFetching}>
-              {quota.isError && <div className="agy-account-error" role="status"><strong>额度查询失败</strong><span>{quota.error.message}</span></div>}
-              {quota.data ? <AgyQuotaTiles quota={quota.data} /> : !quota.isError &&
+              {quota.error && <div className="agy-account-error" role="status"><strong>额度查询失败</strong><span>{quota.error.message}</span></div>}
+              {quota.data ? <AgyQuotaTiles quota={quota.data} /> : !quota.error &&
                 <span className="agy-account-muted">{!target ? '请选择目标 Agent' : quotaSupported === false ? '此系统暂不支持隔离查询' : quota.isFetching ? '正在读取额度…' : '尚未刷新'}</span>}
             </Table.Td>
             <Table.Td className="agy-account-timestamp">

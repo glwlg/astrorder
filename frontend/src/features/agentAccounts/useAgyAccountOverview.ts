@@ -1,5 +1,6 @@
 import { QueryObserver, useIsMutating, useMutation, useQueries, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
-import { agyAccountsApi, type AgyQuota } from './agyAccountsApi'
+import { agyAccountsApi } from './agyAccountsApi'
+import { snapshotOptions, storeQuotaSnapshot } from './agyQuotaSnapshots'
 
 export const metadataPolicy = { staleTime: Infinity, retry: false, retryOnMount: false, refetchOnMount: false, refetchOnWindowFocus: false, refetchOnReconnect: false } as const
 export const libraryOptions = { queryKey: ['agy-accounts'], queryFn: ({ signal }: { signal: AbortSignal }) => agyAccountsApi.accounts(signal) }
@@ -9,31 +10,28 @@ export const targetStateOptions = (environment: string) => ({
 })
 const quotaKey = (environment: string, id: string) => ['agy-account-quota', environment, id]
 
-function quotaOptions(environment: string, id: string) {
-  const key = `astrorder:agy-quota:v1:${encodeURIComponent(environment)}:${encodeURIComponent(id)}`
+function quotaOptions(client: QueryClient, environment: string, id: string) {
   return {
     queryKey: quotaKey(environment, id), retry: false,
-    initialData: () => {
-      if (id === 'current') return undefined
-      const cached = localStorage.getItem(key)
-      return cached ? JSON.parse(cached) as AgyQuota : undefined
-    },
     queryFn: async ({ signal }: { signal: AbortSignal }) => {
       const value = await agyAccountsApi.quota(environment, id, signal)
-      if (!signal.aborted && id !== 'current') localStorage.setItem(key, JSON.stringify(value))
-      return value
+      if (!signal.aborted) storeQuotaSnapshot(client, environment, id, value)
+      return null
     },
   }
 }
 
-export function useAgyAccountOverview(environment: string, readCurrent = false) {
+export function useAgyAccountOverview(environment: string) {
+  const client = useQueryClient()
   const accounts = useQuery({ ...metadataPolicy, ...libraryOptions })
   const state = useQuery({ ...metadataPolicy, ...targetStateOptions(environment),
-    enabled: readCurrent && Boolean(environment), staleTime: readCurrent ? 0 : Infinity, refetchOnMount: readCurrent })
+    enabled: Boolean(environment), staleTime: 0, refetchOnMount: true })
   const currentID = state.data?.current_account_id
   const rows = (accounts.data?.items ?? []).map(account => ({ ...account, current: account.id === currentID }))
   if (currentID === 'current') rows.unshift({ id: 'current', name: '未保存账号', current: true })
-  const quotas = useQueries({ queries: rows.map(row => ({ ...quotaOptions(environment, row.id), enabled: false })) })
+  const reads = useQueries({ queries: rows.map(row => ({ ...quotaOptions(client, environment, row.id), enabled: false })) })
+  const snapshots = useQueries({ queries: rows.map(row => snapshotOptions(environment, row.id)) })
+  const quotas = reads.map((read, i) => ({ data: snapshots[i].data, isFetching: read.isFetching, error: read.error }))
   const refresh = useAgyQuotaRefresh(environment)
   const refreshing = useIsMutating({ mutationKey: refreshKey(environment), exact: true }) > 0
   async function refreshLibrary() {
@@ -76,7 +74,7 @@ export function useAgyQuotaRefresh(environment: string) {
       if (typeof mode === 'object') ids.add(mode.id)
       else if (active) ids.add(active)
       // Each row observes its own result, so one unavailable account does not erase the others.
-      await Promise.allSettled([...ids].map(id => fetchForRefresh(client, quotaOptions(target, id))))
+      await Promise.allSettled([...ids].map(id => fetchForRefresh(client, quotaOptions(client, target, id))))
     },
   })
   return (mode: RefreshMode) => {

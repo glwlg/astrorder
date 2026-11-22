@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import type { Agent, Session } from '../../domain/types'
 import { useRefreshSettings, useScheduledRefresh } from './accountRefresh'
 import { useAgyQuotaRefresh } from './useAgyAccountOverview'
+import { syncQuotaWindows } from './agyQuotaSnapshots'
 
 export function agySessionEnvironment(session?: Session, agent?: Agent) {
   if (!session || agent?.kind.replace(/-ssh$/, '') !== 'antigravity') return ''
@@ -27,6 +28,7 @@ export function AgyQuotaRefreshProvider({ sessionEnvironment, children }: { sess
   const environment = page?.environment ?? sessionEnvironment
   const refresh = useAgyQuotaRefresh(environment)
   const client = useQueryClient()
+  useEffect(() => syncQuotaWindows(client), [client])
   useScheduledRefresh(environment, settings, scope => {
     if (page?.paused || client.isMutating({ mutationKey: ['agy-account-action', environment] }) ||
         client.isFetching({ queryKey: ['agy-account-quota', environment] })) return

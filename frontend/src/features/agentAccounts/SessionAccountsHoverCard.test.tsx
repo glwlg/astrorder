@@ -23,7 +23,7 @@ it.each(['state', 'quota'])('finishes a manual refresh when the card closes duri
   ] }] }
   const fresh = { ...old, as_of: '2026-11-21T14:18:00Z', groups: [{ ...old.groups[0],
     buckets: [{ ...old.groups[0].buckets[0], remaining_fraction: 1 }] }] }
-  const key = 'astrorder:agy-quota:v1:dev:a'
+  const key = 'astrorder:agy-quota:v2:a'
   localStorage.setItem(key, JSON.stringify(old))
   vi.spyOn(agyAccountsApi, 'accounts').mockResolvedValue({ items: [{ id: 'a', name: '工作账号' }] })
   let finish!: () => void

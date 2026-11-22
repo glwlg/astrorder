@@ -56,7 +56,7 @@ function AgySessionCard({ link, environment, machine, active }: { link: ReactEle
 function AgyPreview({ environment, machine, busy, error, onSwitch }: {
   environment: string; machine: string; busy: boolean; error?: string; onSwitch: (account: AgyAccount, unsaved: boolean) => void
 }) {
-  const { accounts, state, rows, quotas, refresh, refreshing } = useAgyAccountOverview(environment, true)
+  const { accounts, state, rows, quotas, refresh, refreshing } = useAgyAccountOverview(environment)
   return <>
     <header className="session-account-heading">
       <AgentBrandIcon kind="antigravity" size={22} />
@@ -77,17 +77,16 @@ function AgyPreview({ environment, machine, busy, error, onSwitch }: {
           <div className="session-account-row">
             <strong title={account.name}>{account.name}</strong>
             {plan && <span className="session-account-tier" title={plan}>{plan.replace(/^Google AI /i, '')}</span>}
-            {quota.data && <small className="session-account-stamp">{quota.isFetching || quota.isError ? '上次成功' : '更新于'} <time dateTime={quota.data.as_of}>{agyStamp(quota.data.as_of)}</time></small>}
+            {quota.data && <small className="session-account-stamp">{quota.isFetching || quota.error ? '上次成功' : '更新于'} <time dateTime={quota.data.as_of}>{agyStamp(quota.data.as_of)}</time></small>}
             {account.current ? <span className="agy-current-badge">当前使用</span> :
               <Button size="compact-sm" variant="light" aria-label={`切换到 ${account.name}`} disabled={!state.isSuccess || busy || refreshing}
                 onClick={() => onSwitch(account, state.data?.current_account_id === 'current')}>切换</Button>}
           </div>
-          {state.data?.quota_supported === false ? <small>此系统暂不支持额度查询</small> : <>
-            {quota.data && <AgyQuotaSummary quota={quota.data} />}
-            {quota.isFetching && <small role="status">正在读取最新额度…</small>}
-            {quota.isError && <small role="status">刷新失败：{quota.error.message}</small>}
-            {!quota.data && !quota.isFetching && !quota.isError && <small>尚未刷新</small>}
-          </>}
+          {quota.data && <AgyQuotaSummary quota={quota.data} />}
+          {quota.isFetching && <small role="status">正在读取最新额度…</small>}
+          {quota.error && <small role="status">刷新失败：{quota.error.message}</small>}
+          {state.data?.quota_supported === false ? <small>此目标不支持刷新额度</small> :
+            !quota.data && !quota.isFetching && !quota.error && <small>尚未刷新</small>}
         </li>
       })}</ul>
     </div>

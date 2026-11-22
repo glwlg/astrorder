@@ -23,6 +23,7 @@ import { WorkspaceThemeToggle } from './WorkspaceThemeToggle'
 import { connectionName } from './AgentSessionFilter'
 import { scopeKey } from '../domain/semantics'
 import { SessionAccountsHoverCard } from '../features/agentAccounts/SessionAccountsHoverCard'
+import { agySessionEnvironment } from '../features/agentAccounts/AgyQuotaRefreshProvider'
 
 const AgentsPage = lazy(() => import('../features/agents/AgentsPage').then((m) => ({ default: m.AgentsPage })))
 const ModelGatewaySettingsPage = lazy(() => import('../features/services/ModelGatewaySettingsPage').then((m) => ({ default: m.ModelGatewaySettingsPage })))
@@ -182,6 +183,7 @@ export function Sidebar({
   const connection = useAstrorderStore(state => state.connection)
   const activeSession = sessions.find(session => scopeKey(session.agent_id, session.id) === activeSessionKey)
   const activeAgent = activeSession ? agents[activeSession.agent_id] : undefined
+  const accountEnvironment = agySessionEnvironment(activeSession, activeAgent)
   const connectionLabel = connection === 'connected' ? '已连接' : connection === 'connecting' ? '连接中' : connection === 'error' ? '连接异常' : '离线'
 
   const hasSecondaryPanel = !(isAgentAccounts || isBackups || isAnalytics)
@@ -215,7 +217,8 @@ export function Sidebar({
               const link = (
                 <NavLink
                     component={RouterNavLink}
-                    to={id === 'chat' ? (isInChatSession ? '/chat' : chatReturnPath) : to}
+                    to={id === 'agentAccounts' && accountEnvironment ? `${to}?${new URLSearchParams({ environment: accountEnvironment })}` :
+                      id === 'chat' ? (isInChatSession ? '/chat' : chatReturnPath) : to}
                     state={id === 'chat' && isInChatSession ? { welcome: true } : undefined}
                     label={label}
                     leftSection={<Icon size={25} weight={isActive ? 'duotone' : 'regular'} aria-hidden="true" />}

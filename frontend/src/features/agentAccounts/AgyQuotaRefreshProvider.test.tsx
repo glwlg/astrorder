@@ -38,7 +38,7 @@ it('refreshes only the active account across chat and the account page, with the
   ui.rerender(view('', 'dev'))
   await advance(0)
   expect(quota.mock.calls.map(([env, id]) => [env, id])).toEqual([['dev', 'dev-user']])
-  expect(localStorage.getItem('astrorder:agy-quota:v1:dev:dev-user')).toContain('as_of')
+  expect(localStorage.getItem('astrorder:agy-quota:v2:dev-user')).toContain('as_of')
   ui.rerender(view('wsl'))
   await advance(5)
   expect(quota.mock.calls.map(([env, id]) => [env, id])).toEqual([['dev', 'dev-user'], ['wsl', 'wsl-user']])
