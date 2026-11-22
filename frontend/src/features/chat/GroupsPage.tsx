@@ -10,11 +10,23 @@ import { CreateBotGroupDialog } from "../../components/CreateBotGroupDialog";
 import { groupSidecarKey, useSidecarStore } from "../sidecar/sidecarStore";
 import { GroupSidecarPanel } from "./GroupSidecarPanel";
 
-export function GroupsPage({ routePrefix = "", surface = "desktop" }: { routePrefix?: string; surface?: "desktop" | "mobile" }) {
-  const { groupId } = useParams();
+export function GroupsPage({
+  routePrefix = "",
+  surface = "desktop",
+  groupId: groupIdProp,
+  onGroupUpdated,
+}: {
+  routePrefix?: string;
+  surface?: "desktop" | "mobile";
+  groupId?: string;
+  onGroupUpdated?: (group: BotGroup) => void;
+}) {
+  const params = useParams();
+  const groupId = groupIdProp ?? params.groupId;
   const navigate = useNavigate();
   const agents = useAstrorderStore((state) => state.agents);
-  const [_botGroups, setBotGroups] = useState<BotGroup[]>([]);
+  const storeGroup = useAstrorderStore((state) => (groupId ? state.botGroups[groupId] : undefined));
+  const [botGroups, setBotGroups] = useState<BotGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeGroup, setActiveGroup] = useState<BotGroup | null>(null);
   const [createOpened, setCreateOpened] = useState(false);
@@ -98,16 +110,23 @@ export function GroupsPage({ routePrefix = "", surface = "desktop" }: { routePre
       );
   }, [groupId, activeGroup?.id, activeGroup?.name, surface]);
 
+  const resolvedGroup =
+    activeGroup && (!groupId || activeGroup.id === groupId)
+      ? activeGroup
+      : groupId
+        ? botGroups.find((g) => g.id === groupId) || storeGroup || null
+        : null;
+
   const toggleBlackboard = () => {
-    if (!activeGroup || activeGroup.id !== groupId) return;
+    if (!resolvedGroup || resolvedGroup.id !== groupId) return;
     const store = useSidecarStore.getState();
     if (blackboardOpen) store.setIsOpen(false);
-    else store.openGroupBlackboard(activeGroup.id, activeGroup.name);
+    else store.openGroupBlackboard(resolvedGroup.id, resolvedGroup.name);
     if (surface !== "mobile") {
       localStorage.setItem(`astrorder:group:blackboard:${groupId}`, blackboardOpen ? "closed" : "open");
     }
   };
-  if (activeGroup && (!groupId || activeGroup.id === groupId)) {
+  if (resolvedGroup) {
     return (
       <div className="route-page chat-page group-page">
         <div
@@ -123,30 +142,37 @@ export function GroupsPage({ routePrefix = "", surface = "desktop" }: { routePre
             }}
           >
             <BotGroupChatPage
-              group={activeGroup}
+              group={resolvedGroup}
               agents={agents}
               surface={surface}
               blackboardOpen={blackboardOpen}
               onToggleBlackboard={toggleBlackboard}
               onOpenBlackboard={(key) => {
-                useSidecarStore.getState().openGroupBlackboard(activeGroup.id, activeGroup.name, key);
-                localStorage.setItem(`astrorder:group:blackboard:${activeGroup.id}`, "open");
+                useSidecarStore.getState().openGroupBlackboard(resolvedGroup.id, resolvedGroup.name, key);
+                localStorage.setItem(`astrorder:group:blackboard:${resolvedGroup.id}`, "open");
               }}
               onEdit={() => setSettingsOpened(true)}
             />
           </section>
           {activeSidecarKey === ownerKey && (
             <div className="group-sidecar-slot" hidden={!sidecarOpen}>
-              <GroupSidecarPanel group={activeGroup} />
+              <GroupSidecarPanel group={resolvedGroup} />
             </div>
           )}
         </div>
         <CreateBotGroupDialog
           agents={agents}
           opened={settingsOpened}
-          group={activeGroup}
+          group={resolvedGroup}
           onClose={() => setSettingsOpened(false)}
-          onCreated={(updated) => setActiveGroup(updated)}
+          onCreated={(updated) => {
+            setActiveGroup(updated);
+            setBotGroups((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+            useAstrorderStore.setState((state) => ({
+              botGroups: { ...state.botGroups, [updated.id]: updated },
+            }));
+            onGroupUpdated?.(updated);
+          }}
         />
       </div>
     );
@@ -187,6 +213,10 @@ export function GroupsPage({ routePrefix = "", surface = "desktop" }: { routePre
         onClose={() => setCreateOpened(false)}
         onCreated={(g) => {
           setBotGroups((prev) => [g, ...prev]);
+          useAstrorderStore.setState((state) => ({
+            botGroups: { ...state.botGroups, [g.id]: g },
+          }));
+          onGroupUpdated?.(g);
           navigate(`${routePrefix}/groups/${g.id}`);
         }}
       />

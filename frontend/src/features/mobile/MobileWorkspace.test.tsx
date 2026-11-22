@@ -6,7 +6,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api, ApiError } from '../../api/client'
 import { selectMessages, useAstrorderStore } from '../../state/store'
-import { MobileWorkspace, cleanServerName, displayShortModel } from './MobileWorkspace'
+import { MobileWorkspace, cleanServerName, displayMobileProjectName, displayShortModel } from './MobileWorkspace'
 import type { OutboxEntry } from './mobileOutbox'
 import { mobileOutboxStorage, directOutboxStorage } from './mobileOutboxStorage'
 import { scopeKey } from '../../domain/semantics'
@@ -922,12 +922,97 @@ describe('independent mobile composer', () => {
     await waitFor(() => expect(create).toHaveBeenCalledWith(expect.objectContaining({ text: '第一行' })))
   })
 
-  it('exposes group chat navigation in both header and session drawer', async () => {
+  it('slides between session and group lists inside the unified sidebar drawer', async () => {
+    vi.spyOn(api, 'listBotGroups').mockResolvedValue({
+      items: [{
+        id: 'group-1',
+        name: '架构联调群',
+        description: '接口对齐',
+        members: [{ id: 'm1', machine_id: 'local', agent_id: 'inert', alias: '架构' }],
+        member_states: {},
+        coordination: { status: 'complete' },
+        max_hops: 10,
+        created_at: session.updated_at,
+        updated_at: session.updated_at,
+      }],
+      count: 1,
+    })
+    const deleteGroup = vi.spyOn(api, 'deleteBotGroup').mockResolvedValue({ ok: true, id: 'group-1' })
     mount()
     expect(screen.getByRole('button', { name: '群聊' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '打开会话列表' }))
-    const nav = await screen.findByRole('navigation', { name: '移动端模式切换' })
-    expect(within(nav).getByRole('button', { name: '对话' })).toHaveAttribute('aria-current', 'page')
-    expect(within(nav).getByRole('button', { name: '群聊' })).toBeInTheDocument()
+    const drawer = await screen.findByRole('dialog', { name: '会话列表' })
+    const tablist = within(drawer).getByRole('tablist', { name: '移动端模式切换' })
+    expect(tablist).toHaveAttribute('data-active-tab', 'sessions')
+    expect(within(tablist).getByRole('tab', { name: '对话' })).toHaveAttribute('aria-selected', 'true')
+
+    // Slide to 群聊 tab in-place inside the sidebar drawer without closing it
+    fireEvent.click(within(tablist).getByRole('tab', { name: /群聊/ }))
+    const groupDrawer = await screen.findByRole('dialog', { name: '群聊列表' })
+    expect(within(groupDrawer).getByRole('tablist', { name: '移动端模式切换' })).toHaveAttribute('data-active-tab', 'groups')
+    expect(await within(groupDrawer).findByRole('button', { name: '架构联调群' })).toBeInTheDocument()
+
+    // Disbanding a group from sidebar confirms via ConfirmPopover
+    fireEvent.click(within(groupDrawer).getByRole('button', { name: '群聊操作 架构联调群' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: '解散群聊' }))
+    const confirm = await screen.findByRole('dialog', { name: '解散群聊？' })
+    fireEvent.click(within(confirm).getByRole('button', { name: '解散' }))
+    await waitFor(() => expect(deleteGroup).toHaveBeenCalledWith('group-1'))
+  })
+
+  it('shows the active project name in the mobile header instead of the brand logo and name', async () => {
+    const projectSession = { ...session, workspace: '/home/luwei/workspace/glwlg/astrorder', source_id: 'source-mobile', project_id: 'project-astrorder', project_name: 'astrorder' }
+    useAstrorderStore.getState().hydrateBootstrap({
+      protocol_version: 1,
+      cursor: 1,
+      agents: [{ id: 'inert', kind: 'hermes', name: '协议测试', status: 'ready', capabilities: ['chat', 'stop', 'attachments'], limitation: null, source_id: 'source-mobile' }],
+      projects: [{ id: 'project-row', source_id: 'source-mobile', agent_id: 'inert', project_id: 'project-astrorder', project_name: 'astrorder', workspace: '/home/luwei/workspace/glwlg/astrorder', session_count: 1, updated_at: session.updated_at }],
+      sessions: [projectSession],
+    })
+    const view = mount()
+    const projectBtn = screen.getByRole('button', { name: '当前项目 astrorder，打开会话列表' })
+    expect(projectBtn).toHaveTextContent('astrorder')
+    expect(projectBtn).not.toHaveTextContent('星序')
+    expect(view.container.querySelector('.m-brand-mark')).toBeNull()
+
+    fireEvent.click(projectBtn)
+    expect(await screen.findByRole('dialog', { name: '会话列表' })).toBeInTheDocument()
+  })
+
+  it('resolves mobile header project names from catalog groups, workspace paths, and empty fallbacks', () => {
+    expect(displayMobileProjectName(null, null)).toBeNull()
+    expect(displayMobileProjectName(
+      { ...session, workspace: '/home/luwei/workspace/OpsCore' },
+      { key: 'workspace:local\u0000/home/luwei/workspace/OpsCore', label: '/home/luwei/workspace/OpsCore', sessions: [], sessionCount: 1, latestUpdatedAt: '', workspace: '/home/luwei/workspace/OpsCore' },
+    )).toBe('OpsCore')
+    expect(displayMobileProjectName(
+      { ...session, workspace: 'P:\\workspace\\astrorder' },
+      null,
+    )).toBe('astrorder')
+    expect(displayMobileProjectName(
+      { ...session, workspace: null, project_name: null },
+      { key: 'unmarked:inert', label: '未标记项目', sessions: [], sessionCount: 1, latestUpdatedAt: '' },
+    )).toBe('未标记项目')
+  })
+
+  it('falls back to brand mark and title in header when no session is selected', () => {
+    useAstrorderStore.getState().hydrateBootstrap({
+      protocol_version: 1,
+      cursor: 1,
+      agents: [{ id: 'inert', kind: 'hermes', name: '协议测试', status: 'ready', capabilities: ['chat'], limitation: null }],
+      sessions: [],
+    })
+    const view = render(
+      <MantineProvider>
+        <QueryClientProvider client={new QueryClient()}>
+          <MemoryRouter initialEntries={['/mobile']}>
+            <MobileWorkspace />
+          </MemoryRouter>
+        </QueryClientProvider>
+      </MantineProvider>,
+    )
+    const homeBtn = screen.getByRole('button', { name: '星序导航' })
+    expect(homeBtn).toHaveTextContent('星序')
+    expect(view.container.querySelector('.m-brand-mark')).toBeInTheDocument()
   })
 })

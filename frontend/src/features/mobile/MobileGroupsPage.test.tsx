@@ -1,6 +1,7 @@
 import { MantineProvider } from '@mantine/core'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../../api/client'
 import type { BotGroup } from '../../domain/types'
@@ -37,16 +38,24 @@ const groups: BotGroup[] = [
   },
 ]
 
+const sampleSession = {
+  id: 'session-1',
+  agent_id: 'hermes',
+  title: '回到单聊会话',
+  workspace: '/workspace/astrorder',
+  project_name: 'astrorder',
+  status: 'idle' as const,
+  updated_at: '2026-11-20T00:00:00Z',
+}
+
 function mount(initialPath = '/mobile/groups/group-alpha') {
   return render(
     <MantineProvider>
-      <MemoryRouter initialEntries={[initialPath]}>
-        <Routes>
-          <Route path="/mobile/groups" element={<MobileGroupsPage />} />
-          <Route path="/mobile/groups/:groupId" element={<MobileGroupsPage />} />
-          <Route path="/mobile" element={<div>mobile-home</div>} />
-        </Routes>
-      </MemoryRouter>
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={[initialPath]}>
+          <MobileGroupsPage />
+        </MemoryRouter>
+      </QueryClientProvider>
     </MantineProvider>,
   )
 }
@@ -54,6 +63,25 @@ function mount(initialPath = '/mobile/groups/group-alpha') {
 beforeEach(() => {
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   useAstrorderStore.getState().resetRuntime()
+  useAstrorderStore.getState().hydrateBootstrap({
+    protocol_version: 1,
+    cursor: 0,
+    agents: [
+      { id: 'codex', kind: 'codex', name: 'Codex', status: 'ready', capabilities: ['chat'], limitation: null },
+      { id: 'hermes', kind: 'hermes', name: 'Hermes', status: 'ready', capabilities: ['chat'], limitation: null },
+    ],
+    sessions: [sampleSession],
+  })
+  const preferences = { appearance: {}, session_pins: {}, pinned_projects: [], project_order: [] }
+  vi.spyOn(api, 'getPreferences').mockResolvedValue(preferences)
+  vi.spyOn(api, 'importPreferences').mockResolvedValue(preferences)
+  vi.spyOn(api, 'updatePreferences').mockResolvedValue(preferences)
+  vi.spyOn(api, 'getOpenSessions').mockResolvedValue({ known_agent_ids: [], items: [] })
+  vi.spyOn(api, 'getSessionModel').mockResolvedValue({ provider: 'p', model: 'bound-model' })
+  vi.spyOn(api, 'getSessionUsage').mockResolvedValue({ ok: true, session_id: sampleSession.id, model: 'bound-model', context_window: 128000, last_input_tokens: 1000, context_available: true, source: 'native_last_request', used_percentage: 1, total_tokens: 1000, input_tokens: 1000, output_tokens: 0, cached_tokens: 0, reasoning_tokens: 0, cache_hit_rate: 0 })
+  vi.spyOn(api, 'getMessages').mockResolvedValue({ items: [], next_cursor: null })
+  vi.spyOn(api, 'getCommands').mockResolvedValue({ items: [] })
+  vi.spyOn(api, 'getTasks').mockResolvedValue({ items: [] })
   vi.spyOn(api, 'listBotGroups').mockResolvedValue({ items: groups, count: groups.length })
   vi.spyOn(api, 'getBotGroup').mockImplementation(async (id) => ({
     group: groups.find((item) => item.id === id) || groups[0],
@@ -69,12 +97,15 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('MobileGroupsPage 2.0', () => {
-  it('switches groups via the bottom sheet and collapses member mute cards by default', async () => {
+describe('MobileGroupsPage 2.0 (Unified Sidebar Shell)', () => {
+  it('uses the unified mobile header and left sidebar drawer with sliding session/group tabs', async () => {
     localStorage.setItem('astrorder:group:blackboard:group-alpha', 'open')
     mount()
-    const picker = await screen.findByRole('button', { name: '切换群聊' })
-    await waitFor(() => expect(picker).toHaveTextContent('API授权复核讨论'))
+
+    // Header shows active group name in the same top-bar title slot as project names
+    const headerTitle = await screen.findByRole('button', { name: '当前群聊 API授权复核讨论，打开群聊列表' })
+    expect(headerTitle).toHaveTextContent('API授权复核讨论')
+    expect(screen.getByRole('button', { name: '应用设置' })).toBeInTheDocument()
 
     // Mobile never auto-covers chat with fullscreen blackboard from desktop localStorage
     expect(screen.queryByRole('complementary', { name: '群聊工作台' })).toBeNull()
@@ -89,11 +120,30 @@ describe('MobileGroupsPage 2.0', () => {
     expect(membersToggle).toHaveAttribute('aria-expanded', 'true')
     expect(screen.getByRole('button', { name: '方案设计禁言' })).toBeInTheDocument()
 
-    // Open mobile bottom sheet to switch to another group
-    fireEvent.click(picker)
-    const sheet = await screen.findByRole('dialog', { name: '选择群聊' })
-    fireEvent.click(within(sheet).getByRole('button', { name: /前端动效评审/ }))
-    await waitFor(() => expect(screen.getByRole('button', { name: '切换群聊' })).toHaveTextContent('前端动效评审'))
+    // Open left sidebar drawer from the header title -> defaults to 群聊 tab
+    fireEvent.click(headerTitle)
+    const drawer = await screen.findByRole('dialog', { name: '群聊列表' })
+    expect(drawer).toHaveClass('m-session-sheet')
+    const tablist = within(drawer).getByRole('tablist', { name: '移动端模式切换' })
+    expect(tablist).toHaveAttribute('data-active-tab', 'groups')
+    expect(within(tablist).getByRole('tab', { name: /群聊/ })).toHaveAttribute('aria-selected', 'true')
+
+    // Switch to another group directly inside the sidebar drawer
+    fireEvent.click(within(drawer).getByRole('button', { name: '前端动效评审' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '群聊列表' })).not.toBeInTheDocument())
+    expect(await screen.findByRole('button', { name: '当前群聊 前端动效评审，打开群聊列表' })).toHaveTextContent('前端动效评审')
+
+    // Reopen drawer and slide to 对话 tab IN-PLACE without closing the drawer
+    fireEvent.click(screen.getByRole('button', { name: '打开群聊列表' }))
+    const reopened = await screen.findByRole('dialog', { name: '群聊列表' })
+    fireEvent.click(within(reopened).getByRole('tab', { name: '对话' }))
+    expect(screen.getByRole('dialog', { name: '会话列表' })).toBeInTheDocument()
+    expect(within(screen.getByRole('dialog', { name: '会话列表' })).getByRole('tablist')).toHaveAttribute('data-active-tab', 'sessions')
+
+    // Select a session from the sidebar to return smoothly to single-session chat
+    fireEvent.click(await within(screen.getByRole('dialog', { name: '会话列表' })).findByRole('button', { name: '回到单聊会话' }))
+    await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: '回到单聊会话' })).toBeInTheDocument())
+    expect(screen.getByRole('button', { name: '当前项目 astrorder，打开会话列表' })).toHaveTextContent('astrorder')
   })
 
   it('uses mobile pill composer: Enter inserts newline, @ button opens mention menu, and Send button submits', async () => {

@@ -25,7 +25,6 @@ function lazyNamed<T extends ComponentType<any>>(
 }
 
 const MobileWorkspace = lazyNamed(() => import('../features/mobile/MobileWorkspace'), 'MobileWorkspace')
-const MobileGroupsPage = lazyNamed(() => import('../features/mobile/MobileGroupsPage'), 'MobileGroupsPage')
 const GroupsPage = lazyNamed(() => import('../features/chat/GroupsPage'), 'GroupsPage')
 const MonitorPage = lazyNamed(() => import('../features/monitor/MonitorPage'), 'MonitorPage')
 const SwarmPage = lazyNamed(() => import('../features/monitor/SwarmPage'), 'SwarmPage')
@@ -117,13 +116,7 @@ function AuthenticatedApp() {
   if (isMobile) {
     return (
       <Suspense fallback={<RouteSuspenseFallback />}>
-        <Routes>
-          <Route path="/mobile/groups" element={<MobileGroupsPage />} />
-          <Route path="/mobile/groups/:groupId" element={<MobileGroupsPage />} />
-          <Route path="/groups" element={<MobileGroupsPage />} />
-          <Route path="/groups/:groupId" element={<MobileGroupsPage />} />
-          <Route path="*" element={<MobileWorkspace />} />
-        </Routes>
+        <MobileWorkspace />
       </Suspense>
     )
   }

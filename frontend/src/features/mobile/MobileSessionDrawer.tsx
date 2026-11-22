@@ -51,7 +51,9 @@ export function MobileSessionDrawer({ groups, pins, pinnedProjects, selectedKey,
   const commands = useAstrorderStore(useShallow((state) => state.commands))
   useAstrorderStore((state) => state.tasks)
   useAstrorderStore((state) => state.liveActivityAt)
-  const currentProjectKey = groups.find((group) => group.sessions.some((session) => scopeKey(session.agent_id, session.id) === selectedKey))?.key
+  const currentProjectKey =
+    groups.find((group) => group.sessions.some((session) => scopeKey(session.agent_id, session.id) === selectedKey))?.key
+    ?? groups[0]?.key
   const isCollapsed = (key: string) => {
     if (isSearching) return false
     return collapsed[key] ?? key !== currentProjectKey
