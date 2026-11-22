@@ -1,15 +1,18 @@
 import { AnimatePresence, motion } from 'motion/react'
+import { useReducedMotion } from '@mantine/hooks'
 import { useState, type CSSProperties, type ReactNode } from 'react'
-import { sessionCardPose, type SessionCardCut, type SessionCardPose } from './mobileGestures'
+import type { SessionCardCut, SessionCardPose } from './mobileGestures'
 
-const tween = { duration: 0.48, ease: [0.2, 0.8, 0.2, 1] as const }
-const rest = { x: 0, y: 0, rotateX: 0, rotateY: 0, rotateZ: 0, z: 0, scale: 1 }
+const tween = { duration: 0.24, ease: [0.22, 0.85, 0.3, 1] as const }
 
 export function MobileSessionDeck({ sessionKey, cut, drag, children }: { sessionKey: string; cut: SessionCardCut; drag: SessionCardPose | null; children: ReactNode }) {
+  const reducedMotion = useReducedMotion(undefined, { getInitialValueInEffect: false })
   const [active, setActive] = useState(cut)
   if (cut !== active) setActive(cut)
-  const leave = sessionCardPose(active, 'leave')
-  const enter = sessionCardPose(active, 'enter')
+  const forward = active.startsWith('next')
+  const enterOffset = reducedMotion ? 0 : forward ? 44 : -44
+  const leaveOffset = reducedMotion ? 0 : forward ? -44 : 44
+  const dragX = drag ? Math.max(-72, Math.min(72, drag.x * 0.35)) : 0
   return (
     <div className="m-session-deck" data-session-key={sessionKey}>
       <AnimatePresence initial={false}>
@@ -17,19 +20,13 @@ export function MobileSessionDeck({ sessionKey, cut, drag, children }: { session
           key={sessionKey}
           className={`m-session-stage is-${active}`}
           data-session-cut={active}
-          initial={{ ...enter, opacity: 1 }}
-          animate={drag ? { ...drag, opacity: 1 } : { ...rest, opacity: 1 }}
-          exit={{ ...leave, opacity: 1 }}
-          transition={drag ? { duration: 0 } : tween}
+          initial={{ x: enterOffset, opacity: reducedMotion ? 1 : 0 }}
+          animate={drag ? { x: dragX, opacity: 1 } : { x: 0, opacity: 1 }}
+          exit={{ x: leaveOffset, opacity: 0 }}
+          transition={drag || reducedMotion ? { duration: 0 } : tween}
           style={{
             position: 'absolute',
             inset: 0,
-            transformOrigin: drag?.origin || enter.origin,
-            transformStyle: 'preserve-3d',
-            WebkitTransformStyle: 'preserve-3d',
-            backfaceVisibility: 'hidden',
-            WebkitBackfaceVisibility: 'hidden',
-            boxShadow: drag ? '0 28px 48px #0006' : '0 10px 28px #0002',
           } as CSSProperties}
         >
           {children}

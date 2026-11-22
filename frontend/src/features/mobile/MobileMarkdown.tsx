@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -6,8 +6,13 @@ import { isMobileLocalFilePath, mobileFileUrl, resolveMobileFilePath } from './m
 
 function CodeBlock({ children }: { children?: ReactNode }) {
   const element = useRef<HTMLPreElement>(null)
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [wrap, setWrap] = useState(false)
   const [copied, setCopied] = useState(false)
+
+  useEffect(() => () => {
+    if (copiedTimer.current !== null) clearTimeout(copiedTimer.current)
+  }, [])
 
   let language = ''
   if (children && typeof children === 'object' && 'props' in children) {
@@ -23,8 +28,25 @@ function CodeBlock({ children }: { children?: ReactNode }) {
       <div className="m-code-actions">
         {language ? <span className="m-code-lang">{language.toUpperCase()}</span> : <span />}
         <div className="m-code-btns">
-          <button onClick={() => setWrap(!wrap)}>{wrap ? '取消换行' : '换行'}</button>
-          <button onClick={async () => { try { await navigator.clipboard.writeText(element.current?.textContent || ''); setCopied(true) } catch { setCopied(false) } }}>{copied ? '已复制' : '复制'}</button>
+          <button type="button" onClick={() => setWrap(!wrap)}>{wrap ? '取消换行' : '换行'}</button>
+          <button
+            type="button"
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(element.current?.textContent || '')
+                setCopied(true)
+                if (copiedTimer.current !== null) clearTimeout(copiedTimer.current)
+                copiedTimer.current = setTimeout(() => {
+                  copiedTimer.current = null
+                  setCopied(false)
+                }, 1800)
+              } catch {
+                setCopied(false)
+              }
+            }}
+          >
+            {copied ? '已复制' : '复制'}
+          </button>
         </div>
       </div>
       <pre ref={element} style={{ whiteSpace: wrap ? 'pre-wrap' : 'pre', wordBreak: wrap ? 'break-all' : 'normal' }}>{children}</pre>

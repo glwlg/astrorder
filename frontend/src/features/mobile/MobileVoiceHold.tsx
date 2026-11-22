@@ -5,7 +5,7 @@ import type { useVoiceInput } from '../chat/useVoiceInput'
 import './mobileVoice.css'
 
 type Zone = 'draft' | 'cancel' | 'edit'
-export function MobileVoiceHold({ scope, voice, children }: { scope: string; voice: ReturnType<typeof useVoiceInput>; children: ReactNode }) {
+export function MobileVoiceHold({ scope, voice, disabled = false, children }: { scope: string; voice: ReturnType<typeof useVoiceInput>; disabled?: boolean; children: ReactNode }) {
   const latest = useRef(voice)
   latest.current = voice
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -31,10 +31,17 @@ export function MobileVoiceHold({ scope, voice, children }: { scope: string; voi
     setHolding(false)
     return () => { clearTimer(); gesture.current = null }
   }, [scope])
+  useEffect(() => {
+    if (disabled && gesture.current && !gesture.current.active) {
+      clearTimer()
+      gesture.current = null
+    }
+  }, [disabled])
   const down = (event: PointerEvent<HTMLDivElement>) => {
-    if (event.pointerType !== 'touch' || gesture.current || voice.status !== 'idle') return
+    if (disabled || event.pointerType !== 'touch' || gesture.current || voice.status !== 'idle') return
     const target = event.target as HTMLElement
     if (target.tagName !== 'TEXTAREA') return
+    if ((target as HTMLTextAreaElement).value.length > 0) return
     suppressClick.current = false
     gesture.current = { id: event.pointerId, x: event.clientX, y: event.clientY, active: false, zone: 'draft', target }
     timer.current = setTimeout(() => {
@@ -66,7 +73,7 @@ export function MobileVoiceHold({ scope, voice, children }: { scope: string; voi
     release(cancel)
   }
   const visible = holding && (voice.status === 'recording' || voice.status === 'requesting')
-  return <div className="mobile-voice-hold" onPointerDown={down} onPointerMove={move} onPointerUp={event => up(event)} onPointerCancel={event => up(event, true)} onLostPointerCapture={event => up(event, true)} onContextMenu={event => { if (gesture.current) event.preventDefault() }} onClickCapture={event => { if (suppressClick.current) { suppressClick.current = false; event.preventDefault(); event.stopPropagation() } }}>
+  return <div className="mobile-voice-hold" data-voice-hold={disabled ? 'disabled' : 'enabled'} onPointerDown={down} onPointerMove={move} onPointerUp={event => up(event)} onPointerCancel={event => up(event, true)} onLostPointerCapture={event => up(event, true)} onContextMenu={event => { if (gesture.current) event.preventDefault() }} onClickCapture={event => { if (suppressClick.current) { suppressClick.current = false; event.preventDefault(); event.stopPropagation() } }}>
     {children}
     {visible && createPortal(<div className={`mobile-voice-overlay is-${zone}`} aria-live="polite">
       <div className="mobile-voice-center">

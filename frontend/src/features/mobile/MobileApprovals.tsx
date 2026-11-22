@@ -17,9 +17,12 @@ export function MobileApprovals({ session, approvals }: { session: Session; appr
     } catch (error) { notifications.show({ message: error instanceof Error ? error.message : '授权请求失败', color: 'red' }) }
     finally { setBusy(null) }
   }
-  return <div className="m-native-approvals">{approvals.map(approval => isUserInput(approval) ? <UserInputCard key={approval.id} approval={approval} /> : <section key={approval.id} aria-label="待处理审批">
-    <h3>{approval.title}</h3><pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 160, overflow: 'auto' }}>{approval.detail}</pre>
-    <button disabled={Boolean(busy)} onClick={() => void respond(approval, 'approve')}>允许本次</button>
-    <button disabled={Boolean(busy)} onClick={() => void respond(approval, 'cancel')}>拒绝</button>
+  return <div className="m-native-approvals">{approvals.map(approval => isUserInput(approval) ? <UserInputCard key={approval.id} approval={approval} /> : <section key={approval.id} className="approval-card m-approval-card" aria-label="待处理审批">
+    <h3>{approval.title}</h3>
+    {approval.detail && <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 160, overflow: 'auto' }}>{approval.detail}</pre>}
+    <div className="m-approval-actions">
+      <button type="button" className="approval-button approval-approve" disabled={Boolean(busy)} onClick={() => void respond(approval, 'approve')}>允许本次</button>
+      <button type="button" className="approval-button approval-cancel" disabled={Boolean(busy)} onClick={() => void respond(approval, 'cancel')}>拒绝</button>
+    </div>
   </section>)}</div>
 }

@@ -1,0 +1,314 @@
+/* Mobile account switching & quota sheet.
+ * Kept unlayered so scoped mobile rules out-specify unlayered desktop AgyAccountsPage.css rules. */
+.mobile-workspace .m-sheet.m-accounts-sheet {
+  height: 92dvh;
+  max-height: 92dvh;
+  overflow: hidden;
+  padding: 8px 0 0;
+}
+
+.mobile-workspace .m-accounts-sheet > header {
+  padding: 2px 16px 10px;
+  border-bottom: 1px solid var(--m-border);
+}
+
+.mobile-workspace .m-accounts-sheet .m-sheet-header-actions button {
+  width: 40px;
+  height: 40px;
+}
+
+.mobile-workspace .m-sheet-body.m-accounts-body {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+
+.mobile-workspace .m-accounts-panel {
+  flex: 1 1 0;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.mobile-workspace .m-accounts-toolbar {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 16px 10px;
+  border-bottom: 1px solid var(--m-border);
+  background: var(--m-surface);
+}
+
+.mobile-workspace .m-accounts-target-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 44px;
+  align-items: end;
+  gap: 10px;
+}
+
+.mobile-workspace .m-accounts-select {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.mobile-workspace .m-accounts-select > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  color: var(--m-muted);
+}
+
+.mobile-workspace .m-accounts-select select {
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--m-border);
+  border-radius: 12px;
+  font: inherit;
+  font-size: 16px;
+  color: var(--m-text);
+  background: var(--m-low);
+}
+
+.mobile-workspace .m-accounts-refresh-btn {
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  border-radius: 12px;
+  border: 1px solid var(--m-border);
+  background: var(--m-low);
+  color: var(--m-text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mobile-workspace .m-accounts-refresh-btn:active {
+  background: color-mix(in srgb, var(--m-primary) 12%, var(--m-low));
+  border-color: var(--m-primary);
+  color: var(--m-primary);
+}
+
+.mobile-workspace .m-accounts-refresh-btn:disabled {
+  opacity: 0.45;
+}
+
+.mobile-workspace .m-accounts-tool-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.mobile-workspace .m-accounts-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 32px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--m-border) 85%, transparent);
+  background: color-mix(in srgb, var(--m-low) 72%, var(--m-surface));
+  color: var(--m-text);
+  font-size: 12px;
+  font-weight: 550;
+}
+
+.mobile-workspace .m-accounts-chip:active {
+  background: color-mix(in srgb, var(--m-primary) 12%, var(--m-surface));
+  border-color: var(--m-primary);
+  color: var(--m-primary);
+}
+
+.mobile-workspace .m-accounts-chip:disabled {
+  opacity: 0.45;
+}
+
+.mobile-workspace .m-accounts-list {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  background: var(--m-bg);
+  padding: 12px 14px max(env(safe-area-inset-bottom, 0px), 24px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mobile-workspace .m-accounts-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mobile-workspace .m-accounts-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 36px 16px;
+  border: 1px solid var(--m-border);
+  border-radius: 14px;
+  background: var(--m-surface);
+  color: var(--m-muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+.mobile-workspace .m-account-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 13px 14px;
+  border-radius: 15px;
+  border: 1px solid var(--m-border);
+  background: var(--m-surface);
+  box-shadow: 0 2px 10px rgba(24, 16, 44, 0.04);
+}
+
+.mobile-workspace .m-account-card[data-current] {
+  border-color: color-mix(in srgb, var(--m-primary) 48%, var(--m-border));
+  background: color-mix(in srgb, var(--m-primary) 5%, var(--m-surface));
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--m-primary) 10%, transparent);
+}
+
+.mobile-workspace .m-account-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.mobile-workspace .m-account-card-title {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.mobile-workspace .m-account-card-title strong {
+  font-size: 14.5px;
+  font-weight: 650;
+  color: var(--m-text);
+  overflow-wrap: anywhere;
+  line-height: 1.3;
+}
+
+.mobile-workspace .m-account-card-badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.mobile-workspace .m-account-card-badges .agy-current-badge {
+  margin-block-start: 0;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--m-primary) 13%, transparent);
+  color: var(--m-primary);
+  font-weight: 600;
+}
+
+.mobile-workspace .m-account-card-badges .agy-current-badge::before {
+  background: var(--m-primary);
+}
+
+.mobile-workspace .m-account-tier {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: var(--m-low);
+  color: var(--m-text);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.mobile-workspace .m-account-card-time {
+  flex: none;
+  font-size: 11px;
+  color: var(--m-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  padding-top: 2px;
+}
+
+.mobile-workspace .m-account-card-body {
+  min-width: 0;
+}
+
+.mobile-workspace .m-account-card-body .agy-quota-tiles {
+  gap: 6px;
+}
+
+.mobile-workspace .m-account-card-body .agy-quota-tile {
+  background: color-mix(in srgb, var(--m-low) 78%, var(--m-surface));
+  border-radius: 10px;
+  padding: 8px 9px;
+  --quota-ink: var(--m-primary);
+}
+
+.mobile-workspace .m-account-card-body .agy-quota-tile[data-tone='low'] {
+  --quota-ink: var(--mantine-color-orange-filled);
+}
+
+.mobile-workspace .m-account-card-body .agy-quota-tile[data-tone='empty'] {
+  --quota-ink: var(--mantine-color-red-filled);
+}
+
+.mobile-workspace .m-account-muted {
+  display: block;
+  font-size: 12px;
+  color: var(--m-muted);
+}
+
+.mobile-workspace .m-account-card-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--m-border) 68%, transparent);
+}
+
+.mobile-workspace .m-account-card-actions .mantine-Button-root {
+  min-height: 36px;
+  height: 36px;
+  border-radius: 10px;
+  font-size: 12.5px;
+}
+
+.mobile-workspace .m-account-card-actions > :last-child {
+  margin-left: auto;
+}
+
+/* Native <dialog> styling for AgyAccountDialog / Import / Refresh Settings on mobile */
+body:has(.mobile-workspace) .agy-account-dialog {
+  inline-size: min(420px, calc(100vw - 24px));
+  max-block-size: calc(100dvh - 32px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+  overflow-y: auto;
+  padding: 20px 18px max(env(safe-area-inset-bottom, 0px), 18px);
+  border-radius: 18px;
+  background: var(--m-surface, var(--astr-surface));
+  color: var(--m-text, var(--astr-text));
+  border: 1px solid var(--m-border, var(--astr-border));
+}
+
+@media (orientation: landscape) and (max-height: 500px) {
+  .mobile-workspace .m-sheet.m-accounts-sheet {
+    height: 100dvh;
+    max-height: 100dvh;
+    border-radius: 0;
+  }
+}

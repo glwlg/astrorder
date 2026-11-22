@@ -1,13 +1,13 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { ActionIcon, Tooltip } from "@mantine/core";
-import { IconPlayerPause, IconPlayerPlay, IconUsers, IconVolumeOff } from "@tabler/icons-react";
+import { IconChevronDown, IconPlayerPause, IconPlayerPlay, IconUsers, IconVolumeOff } from "@tabler/icons-react";
 import type { Agent, BotGroup, BotGroupMemberState } from "../../domain/types";
 import { GroupChatAvatar } from "./GroupChatAvatar";
 import { groupMemberStatus } from "./groupChatStatus";
 import { groupMemberTone } from "./groupChatPresentation";
 import "./groupChat.css";
 
-export function GroupChatHeader({ group, agents, memberStates, coordination, activeSpeakers, status, currentHop, maxHops, onToggleMuted, muteBusy, actions, children, motionPaused, onToggleMotion }: {
+export function GroupChatHeader({ group, agents, memberStates, coordination, activeSpeakers, status, currentHop, maxHops, onToggleMuted, muteBusy, actions, children, motionPaused, onToggleMotion, surface = "desktop" }: {
   group: BotGroup;
   agents: Record<string, Agent>;
   memberStates: Record<string, BotGroupMemberState>;
@@ -22,7 +22,10 @@ export function GroupChatHeader({ group, agents, memberStates, coordination, act
   children?: ReactNode;
   motionPaused: boolean;
   onToggleMotion: () => void;
+  surface?: "desktop" | "mobile";
 }) {
+  const [membersOpen, setMembersOpen] = useState(false);
+  const isMobile = surface === "mobile";
   const memberIds = group.members.map((member) => member.id || member.agent_id);
   const mutedCount = memberIds.filter((id) => memberStates[id]?.muted).length;
   const allMuted = memberIds.length > 0 && mutedCount === memberIds.length;
@@ -31,6 +34,104 @@ export function GroupChatHeader({ group, agents, memberStates, coordination, act
       memberStates[member.id || member.agent_id]?.status === "running" ||
       (!coordination && !memberStates[member.id || member.agent_id] && activeSpeakers.includes(member.id || member.agent_id)),
     ));
+
+  const membersList = (
+    <div className="group-chat-members" role="group" aria-label="群聊成员">
+      <Tooltip label={allMuted ? "恢复所有成员" : "禁言所有成员"} events={{ hover: true, focus: true, touch: false }}>
+        <button
+          type="button"
+          className="group-member-broadcast"
+          data-muted={allMuted || undefined}
+          onClick={() => { if (!muteBusy) onToggleMuted(memberIds, !allMuted); }}
+          aria-label="所有成员禁言"
+          aria-pressed={allMuted ? true : mutedCount > 0 ? "mixed" : false}
+          aria-disabled={muteBusy}
+        >
+          {allMuted ? <IconVolumeOff size={17} aria-hidden="true" /> : <IconUsers size={17} aria-hidden="true" />}
+          <span>所有成员 <small>{allMuted ? "全部恢复" : mutedCount > 0 ? `${mutedCount}/${memberIds.length} 已禁言` : "全部禁言"}</small></span>
+        </button>
+      </Tooltip>
+      {group.members.map((member) => {
+        const id = member.id || member.agent_id;
+        const name = member.alias || member.name || member.agent_id;
+        const state = memberStates[id];
+        const muted = state?.muted === true;
+        const memberStatus = groupMemberStatus(state, coordination);
+        const active = !coordination || coordination.status === "running" || coordination.status === "deciding";
+        const running = !muted && active && (state?.status === "running" || (!coordination && !state && activeSpeakers.includes(id)));
+        const detail = [
+          muted ? "点击恢复，禁言期间的消息不会补发" : "点击禁言",
+          muted && state?.status === "running" ? "当前任务继续执行，不再接收新消息" : "",
+          member.name || agents[member.agent_id]?.name,
+          member.workspace,
+          state?.last_error || (state?.status === "waiting" && coordination?.status === "error" ? coordination.error : ""),
+        ].filter(Boolean).join("\n");
+        return (
+          <Tooltip key={id} label={detail || name} multiline maw={420} withArrow events={{ hover: true, focus: true, touch: false }} styles={{ tooltip: { whiteSpace: "pre-wrap", overflowWrap: "anywhere" } }}>
+            <button
+              type="button"
+              className="group-member-chip group-member-tone"
+              data-tone={groupMemberTone(member, group.members)}
+              data-running={running || undefined}
+              data-muted={muted || undefined}
+              onClick={() => { if (!muteBusy) onToggleMuted([id], !muted); }}
+              aria-label={`${name}禁言`}
+              aria-pressed={muted}
+              aria-disabled={muteBusy}
+              aria-description={detail}
+            >
+              <GroupChatAvatar kind={agents[member.agent_id]?.kind} tone={groupMemberTone(member, group.members)} />
+              <span className="group-member-chip-copy">
+                <span className="group-member-name">{name}</span>
+                <span className="group-member-state" data-status={muted ? "muted" : running ? "running" : state?.status || "idle"} data-color={muted ? undefined : memberStatus.color}>
+                  {muted ? <IconVolumeOff size={12} aria-hidden="true" /> : <i aria-hidden="true" />}
+                  {muted ? "已禁言" : memberStatus.label || (running ? "执行中" : "就绪")}
+                </span>
+              </span>
+            </button>
+          </Tooltip>
+        );
+      })}
+    </div>
+  );
+
+  if (isMobile) {
+    return (
+      <header className="group-chat-header is-mobile">
+        <div className="m-group-subbar">
+          <div className="m-group-subbar-meta">
+            {status && (
+              <span className="group-chat-round-status" data-status={coordination?.status || "running"}>
+                <i aria-hidden="true" />
+                {status.label}
+              </span>
+            )}
+            <span className="m-group-hop-pill">接力 {currentHop}/{maxHops}</span>
+            <button
+              type="button"
+              className={`m-group-members-toggle${membersOpen ? " is-open" : ""}`}
+              aria-label="群成员管理"
+              aria-expanded={membersOpen}
+              onClick={() => setMembersOpen((open) => !open)}
+            >
+              <IconUsers size={13} aria-hidden="true" />
+              <span>
+                {group.members.length} 成员
+                {mutedCount > 0 ? ` · ${mutedCount} 禁言` : ""}
+              </span>
+              <IconChevronDown size={13} className="m-group-members-chevron" aria-hidden="true" />
+            </button>
+          </div>
+          <div className="m-group-subbar-actions">
+            {actions}
+          </div>
+        </div>
+        {membersOpen && membersList}
+        {children}
+      </header>
+    );
+  }
+
   return (
     <header className="group-chat-header">
       <div className="group-chat-header-main">
@@ -60,63 +161,7 @@ export function GroupChatHeader({ group, agents, memberStates, coordination, act
           {actions}
         </div>
       </div>
-      <div className="group-chat-members" role="group" aria-label="群聊成员">
-        <Tooltip label={allMuted ? "恢复所有成员" : "禁言所有成员"} events={{ hover: true, focus: true, touch: false }}>
-          <button
-            type="button"
-            className="group-member-broadcast"
-            data-muted={allMuted || undefined}
-            onClick={() => { if (!muteBusy) onToggleMuted(memberIds, !allMuted); }}
-            aria-label="所有成员禁言"
-            aria-pressed={allMuted ? true : mutedCount > 0 ? "mixed" : false}
-            aria-disabled={muteBusy}
-          >
-            {allMuted ? <IconVolumeOff size={17} aria-hidden="true" /> : <IconUsers size={17} aria-hidden="true" />}
-            <span>所有成员 <small>{allMuted ? "全部恢复" : mutedCount > 0 ? `${mutedCount}/${memberIds.length} 已禁言` : "全部禁言"}</small></span>
-          </button>
-        </Tooltip>
-        {group.members.map((member) => {
-          const id = member.id || member.agent_id;
-          const name = member.alias || member.name || member.agent_id;
-          const state = memberStates[id];
-          const muted = state?.muted === true;
-          const memberStatus = groupMemberStatus(state, coordination);
-          const active = !coordination || coordination.status === "running" || coordination.status === "deciding";
-          const running = !muted && active && (state?.status === "running" || (!coordination && !state && activeSpeakers.includes(id)));
-          const detail = [
-            muted ? "点击恢复，禁言期间的消息不会补发" : "点击禁言",
-            muted && state?.status === "running" ? "当前任务继续执行，不再接收新消息" : "",
-            member.name || agents[member.agent_id]?.name,
-            member.workspace,
-            state?.last_error || (state?.status === "waiting" && coordination?.status === "error" ? coordination.error : ""),
-          ].filter(Boolean).join("\n");
-          return (
-            <Tooltip key={id} label={detail || name} multiline maw={420} withArrow events={{ hover: true, focus: true, touch: false }} styles={{ tooltip: { whiteSpace: "pre-wrap", overflowWrap: "anywhere" } }}>
-              <button
-                type="button"
-                className="group-member-chip group-member-tone"
-                data-tone={groupMemberTone(member, group.members)}
-                data-running={running || undefined}
-                data-muted={muted || undefined}
-                onClick={() => { if (!muteBusy) onToggleMuted([id], !muted); }}
-                aria-label={`${name}禁言`}
-                aria-pressed={muted}
-                aria-disabled={muteBusy}
-                aria-description={detail}
-              >
-                <GroupChatAvatar kind={agents[member.agent_id]?.kind} tone={groupMemberTone(member, group.members)} />
-                <span className="group-member-chip-copy">
-                  <span className="group-member-name">{name}</span>
-                  <span className="group-member-state" data-status={muted ? "muted" : running ? "running" : state?.status || "idle"} data-color={muted ? undefined : memberStatus.color}>
-                    {muted ? <IconVolumeOff size={12} aria-hidden="true" /> : <i aria-hidden="true" />}
-                    {muted ? "已禁言" : memberStatus.label || (running ? "执行中" : "就绪")}
-                  </span>
-                </span>
-              </button>
-            </Tooltip>
-          );
-        })}
-      </div>
+      {membersList}
       {children}
     </header>
   );

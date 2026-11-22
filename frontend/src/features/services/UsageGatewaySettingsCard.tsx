@@ -372,9 +372,9 @@ export function UsageGatewaySettingsCard() {
             )}
           </Stack>
         )}
-        <Group justify="space-between">
+        <Group className="gateway-settings-actions" justify="space-between">
           <Button variant="subtle" color="red" size="xs" disabled={!maskedKey} onClick={() => void save(true)}>清除 Key</Button>
-          <Group>
+          <Group className="gateway-settings-actions-primary" gap="xs">
             <Button size="xs" variant="light" color="indigo" disabled={!targets.length} onClick={syncAll}>一键全量下发</Button>
             <Button size="xs" variant="default" loading={busy === 'preview'} disabled={!selected.length} leftSection={<IconRefresh size={15} />} onClick={showPreview}>预览选中</Button>
             <Button size="xs" disabled={!managementUrl.trim() || !inferenceUrl.trim()} loading={busy === 'save'} onClick={() => void save()}>保存配置</Button>

@@ -193,7 +193,12 @@ export function QrScanPage({
   }
 
   return (
-    <Center style={{ minHeight: '100vh', padding: 16 }}>
+    <Center
+      style={{
+        minHeight: '100dvh',
+        padding: 'max(16px, env(safe-area-inset-top, 0px)) 16px max(16px, env(safe-area-inset-bottom, 0px))',
+      }}
+    >
       <Paper withBorder radius="lg" p="xl" maw={460} w="100%">
         <Stack gap="md">
           <Group justify="space-between" align="center">

@@ -264,6 +264,7 @@ export function CreateBotGroupDialog({
 
   return (
     <Modal opened={opened} onClose={() => { if (!busy) onClose(); }}
+      className="bot-group-dialog"
       title={group ? "群聊设置" : "新建多 Agent 群聊"} size="lg" centered zIndex={400}>
       <Stack gap="md">
         <TextInput label="群聊名称" placeholder="如：全栈跨机发布组" value={name}
@@ -278,13 +279,13 @@ export function CreateBotGroupDialog({
             {activeAgents.length === 0 && <Text size="sm" c="dimmed">没有可用的 Agent</Text>}
             {activeAgents.map((agent) => (
               <Paper key={agent.id} withBorder p="xs" radius="md">
-                <Group justify="space-between" wrap="nowrap">
-                  <Group gap="xs" wrap="nowrap">
+                <Group className="bot-group-agent-row" justify="space-between" wrap="nowrap" gap="xs">
+                  <Group gap="xs" wrap="nowrap" style={{ minWidth: 0, flex: 1 }}>
                     <AgentBrandIcon kind={agent.kind} size={18} />
-                    <Text size="sm" fw={500}>{agent.name || agent.id}</Text>
-                    <Badge size="xs" variant="outline" color="gray">{machineLabel(agent.connection_id || "local")}</Badge>
+                    <Text size="sm" fw={500} truncate="end" style={{ minWidth: 0 }}>{agent.name || agent.id}</Text>
+                    <Badge size="xs" variant="outline" color="gray" style={{ flexShrink: 0, maxWidth: 112 }}>{machineLabel(agent.connection_id || "local")}</Badge>
                   </Group>
-                  <ActionIcon variant="light" aria-label={`添加 ${agent.name || agent.id}`} onClick={() => addMember(agent)} disabled={busy || members.length >= 16}>
+                  <ActionIcon variant="light" aria-label={`添加 ${agent.name || agent.id}`} onClick={() => addMember(agent)} disabled={busy || members.length >= 16} style={{ flexShrink: 0 }}>
                     <IconPlus size={16} />
                   </ActionIcon>
                 </Group>
@@ -320,20 +321,20 @@ export function CreateBotGroupDialog({
                 ? [{ value: member.model, label: (JSON.parse(member.model) as string[]).join(" / ") }, ...models] : models;
               return (
                 <Paper key={member.key} withBorder p="sm" radius="md">
-                  <Group justify="space-between" wrap="nowrap" mb="xs">
-                    <Group gap="xs" wrap="nowrap">
+                  <Group justify="space-between" wrap="nowrap" gap="xs" mb="xs">
+                    <Group gap="xs" wrap="nowrap" style={{ minWidth: 0, flex: 1 }}>
                       {agent && <AgentBrandIcon kind={agent.kind} size={18} />}
-                      <Text size="sm" fw={600}>{member.name}</Text>
-                      <Badge size="xs" variant="outline" color="gray">{machineLabel(member.machineId)}</Badge>
-                      {!agent && <Badge size="xs" color="gray">离线</Badge>}
+                      <Text size="sm" fw={600} truncate="end" style={{ minWidth: 0 }}>{member.name}</Text>
+                      <Badge size="xs" variant="outline" color="gray" style={{ flexShrink: 0, maxWidth: 108 }}>{machineLabel(member.machineId)}</Badge>
+                      {!agent && <Badge size="xs" color="gray" style={{ flexShrink: 0 }}>离线</Badge>}
                     </Group>
                     <ActionIcon variant="subtle" color="red" aria-label={`移除 ${member.alias || member.name}`}
-                      disabled={busy} onClick={() => setMembers((prev) => prev.filter((item) => item.key !== member.key))}>
+                      disabled={busy} onClick={() => setMembers((prev) => prev.filter((item) => item.key !== member.key))} style={{ flexShrink: 0 }}>
                       <IconTrash size={16} />
                     </ActionIcon>
                   </Group>
                   <Stack gap="xs">
-                    <Group grow gap="xs">
+                    <Group className="bot-group-member-pair" grow gap="xs">
                       <TextInput size="xs" label="群内别名" placeholder="用于 @ 成员" value={member.alias}
                         onChange={(event) => updateMember(member.key, { alias: event.currentTarget.value })} disabled={busy} />
                       <TextInput size="xs" label="角色职责（可选）" value={member.role}
@@ -355,7 +356,7 @@ export function CreateBotGroupDialog({
                     {member.locked && <Text size="xs" c="dimmed">已有会话的成员不能更换工作区或来源；需要变更时请移除后重新添加。</Text>}
                     {member.forkUncertain && <Text size="xs" c="red">分叉结果未确认，请检查会话列表，再移除并重新添加该成员。</Text>}
                     {options?.error && <Text size="xs" c="red">{options.error}</Text>}
-                    <Group grow gap="xs" align="end">
+                    <Group className="bot-group-member-tri" grow gap="xs" align="end">
                       <Select size="xs" label="模型" comboboxProps={{ withinPortal: true, zIndex: 500 }} placeholder="运行时默认" clearable searchable
                         data={selectedModel} value={member.model || null} onChange={(value) => updateMember(member.key, { model: value || "" })} disabled={busy} />
                       <Select size="xs" label="思考强度" comboboxProps={{ withinPortal: true, zIndex: 500 }} placeholder="运行时默认" clearable

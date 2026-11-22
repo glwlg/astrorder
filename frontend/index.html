@@ -6,8 +6,10 @@
     <link rel="icon" type="image/png" sizes="64x64" href="/favicon-dark.png" media="(prefers-color-scheme: dark)" />
     <link rel="icon" type="image/png" sizes="64x64" href="/favicon.png" />
     <link rel="icon" href="/favicon.ico" sizes="any" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content" />
-    <meta name="theme-color" content="#15181e" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#f6f4fa" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#11141b" media="(prefers-color-scheme: dark)" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="星序" />
@@ -17,19 +19,19 @@
     <title>星序 · Astrorder</title>
     <style id="astrorder-boot-splash">
       :root {
-        --splash-bg: #15181e;
-        --splash-fg: #e5e9f1;
-        --splash-muted: #8a94a6;
-        --splash-accent: #3b82f6;
-        --splash-glow: rgba(59, 130, 246, 0.4);
+        --splash-bg: #11141b;
+        --splash-fg: #e8ebf5;
+        --splash-muted: #98a2b8;
+        --splash-accent: #bc92ff;
+        --splash-glow: rgba(188, 146, 255, 0.34);
       }
       @media (prefers-color-scheme: light) {
         :root {
-          --splash-bg: #f6f8fb;
-          --splash-fg: #192132;
-          --splash-muted: #647084;
-          --splash-accent: #2563eb;
-          --splash-glow: rgba(37, 99, 235, 0.3);
+          --splash-bg: #f6f4fa;
+          --splash-fg: #221d2d;
+          --splash-muted: #6a637a;
+          --splash-accent: #7540bd;
+          --splash-glow: rgba(117, 64, 189, 0.24);
         }
       }
       html, body {

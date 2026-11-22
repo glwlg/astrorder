@@ -1,9 +1,9 @@
 import { type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type TouchEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import { Button, Group, Menu, Modal, TextInput, useMantineColorScheme } from '@mantine/core'
+import { Button, Group, Menu, Modal, TextInput, useComputedColorScheme, useMantineColorScheme } from '@mantine/core'
 import { MobileTaskNotices } from './MobileTaskNotices'
 import { notifications } from '@mantine/notifications'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { IconSun, IconMoon, IconDeviceDesktop, IconRefresh, IconPlayerPlay, IconInfoCircle, IconNotes, IconPlayerStop, IconSend, IconMessageCircle, IconCheck, IconX, IconMicrophone, IconPlus, IconDotsVertical, IconCpu, IconLoader2, IconPlugConnected, IconCloudDataConnection, IconFilter, IconTransfer, IconEdit, IconCopy, IconTrash, IconChalkboard, IconWorld } from '@tabler/icons-react'
+import { IconSun, IconMoon, IconDeviceDesktop, IconRefresh, IconPlayerPlay, IconInfoCircle, IconNotes, IconPlayerStop, IconSend, IconMessageCircle, IconCheck, IconX, IconMicrophone, IconPlus, IconDotsVertical, IconCpu, IconLoader2, IconPlugConnected, IconCloudDataConnection, IconFilter, IconTransfer, IconEdit, IconCopy, IconTrash, IconChalkboard, IconWorld, IconUsers, IconSwitchHorizontal } from '@tabler/icons-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useShallow } from 'zustand/react/shallow'
 import { useReducedMotion } from '@mantine/hooks'
@@ -76,10 +76,13 @@ import { isGoalTask, selectSessionGoal } from '../chat/goalStatus'
 import { MobileBlackboardPanel } from './MobileBlackboardPanel'
 import { MobileWorkbench } from './MobileWorkbench'
 import { KernelManagementPanel } from './KernelManagementPanel'
+import { MobileAccountsPanel } from './MobileAccountsPanel'
+import { useMobileVisualViewport } from './useMobileVisualViewport'
+import { AgyQuotaRefreshProvider, agySessionEnvironment } from '../agentAccounts/AgyQuotaRefreshProvider'
 import './mobile.css'
-import './mobilePolish.css'
 import './mobileParity.css'
 import './mobileConnections.css'
+import './mobileAccounts.css'
 
 const messageError = sendErrorMessage
 const queueLabels = { queued: '排队待发', submitting: '发送中', received: '等待原生确认', accepted: '已接受，等待本轮结束', running: '执行中', unknown: '结果未确认，未自动重发', failed: '未发送成功，内容已保留', cancelled: '已取消', completed: '已完成' }
@@ -115,6 +118,17 @@ export function MobileWorkspace() {
   const location = useLocation()
   const queryClient = useQueryClient()
   const { colorScheme, setColorScheme } = useMantineColorScheme()
+  const computedColorScheme = useComputedColorScheme('light')
+  useEffect(() => {
+    const themeColor = computedColorScheme === 'dark' ? '#11141b' : '#f6f4fa'
+    let meta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]:not([media])')
+    if (!meta) {
+      meta = document.createElement('meta')
+      meta.name = 'theme-color'
+      document.head.appendChild(meta)
+    }
+    meta.content = themeColor
+  }, [computedColorScheme])
   const rawSessions = useAstrorderStore(useShallow(selectSessions))
   const sessions = useSessionOrder(rawSessions)
   const projects = useAstrorderStore(useShallow(selectProjects))
@@ -143,7 +157,9 @@ export function MobileWorkspace() {
   )
   const selected = navigableSessions.find(s => s.id === sessionId && s.agent_id === agentId) || null
   const { isUnread, markRead } = useSessionUnread(selected ? scopeKey(selected.agent_id, selected.id) : undefined)
-  const [sheet, setSheet] = useState<'sessions' | 'status' | 'goal' | 'tasks' | 'task' | 'models' | 'connections' | 'gateway' | 'blackboard' | 'browser' | 'kernels' | null>(null)
+  const [sheet, setSheet] = useState<'sessions' | 'status' | 'goal' | 'tasks' | 'task' | 'models' | 'connections' | 'accounts' | 'gateway' | 'blackboard' | 'browser' | 'kernels' | null>(() =>
+    location.pathname.startsWith('/agent-accounts') || location.pathname.startsWith('/mobile/agent-accounts') ? 'accounts' : null,
+  )
   const [workbenchMounted, setWorkbenchMounted] = useState(false)
   const [workbenchOpened, setWorkbenchOpened] = useState(false)
   const closeWorkbench = useCallback(() => setWorkbenchOpened(false), [])
@@ -176,7 +192,9 @@ export function MobileWorkspace() {
   const sessionModel = useSessionModel(selected)
   const sessionUsage = useQuery({ queryKey: ['astrorder', 'session_usage', selected?.id, selected?.agent_id], queryFn: () => api.getSessionUsage(selected!.id, selected!.agent_id), enabled: Boolean(selected), retry: false, staleTime: 5000, refetchInterval: selected?.status === 'running' ? 3000 : false })
   const readOnly = selected?.control_state === 'readonly' || sessionModel.data?.read_only === true
-  const isAntigravity = agents[selected?.agent_id || '']?.kind === 'antigravity'
+  const selectedAgent = selected ? agents[selected.agent_id] : undefined
+  const isAntigravity = selectedAgent?.kind === 'antigravity' || selectedAgent?.kind === 'antigravity-ssh'
+  const agyEnvironment = agySessionEnvironment(selected ?? undefined, selectedAgent)
   const modelReadOnly = readOnly || sessionModel.data?.model_read_only === true
   const reasoningReadOnly = modelReadOnly || sessionModel.data?.reasoning_read_only === true
   const messages = resources.visibleMessages
@@ -261,21 +279,31 @@ export function MobileWorkspace() {
   const fileInput = useRef<HTMLInputElement>(null)
   const textarea = useRef<HTMLTextAreaElement>(null)
   const composer = useRef<HTMLElement>(null)
+  const workspaceRef = useRef<HTMLDivElement>(null)
+  useMobileVisualViewport(workspaceRef)
   useLayoutEffect(() => {
     const panel = composer.current
     const transcript = panel?.closest('.mobile-workspace')?.querySelector<HTMLElement>('.m-transcript')
     if (!panel || !transcript) return
-    const reserveSpace = () => transcript.style.setProperty('padding-bottom', `${panel.getBoundingClientRect().height + 24}px`, 'important')
+    const reserveSpace = () => {
+      const clearance = `${panel.getBoundingClientRect().height + 24}px`
+      transcript.style.setProperty('padding-bottom', clearance)
+      transcript.style.setProperty('scroll-padding-bottom', clearance)
+    }
     reserveSpace()
     const observer = new ResizeObserver(reserveSpace)
     observer.observe(panel)
-    return () => { observer.disconnect(); transcript.style.removeProperty('padding-bottom') }
+    return () => {
+      observer.disconnect()
+      transcript.style.removeProperty('padding-bottom')
+      transcript.style.removeProperty('scroll-padding-bottom')
+    }
   }, [key])
   useLayoutEffect(() => {
     const input = textarea.current
     if (!input) return
-    input.style.height = '34px'
-    input.style.height = `${Math.min(140, Math.max(34, input.scrollHeight))}px`
+    input.style.height = '38px'
+    input.style.height = `${Math.min(140, Math.max(38, input.scrollHeight))}px`
   }, [text, key])
   const [sessionError, setSessionError] = useState<string | null>(null)
   const [submittedCommandId, setSubmittedCommandId] = useState<string | null>(null)
@@ -364,6 +392,7 @@ export function MobileWorkspace() {
     }
     if (choices.length && (event.key === 'Tab' || (event.key === 'Enter' && !event.shiftKey))) {
       event.preventDefault()
+      if (event.nativeEvent.isComposing || event.keyCode === 229) return
       if (mentionMenuOpen) selectAgentMention(agentMentions[Math.min(commandIndex, agentMentions.length - 1)])
       else selectAgentCommand(agentCommands[Math.min(commandIndex, agentCommands.length - 1)])
       return
@@ -373,8 +402,9 @@ export function MobileWorkspace() {
       setDismissedMenuText(text)
       return
     }
-    if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
       event.preventDefault()
+      if (event.nativeEvent.isComposing || event.keyCode === 229) return
       if (!submitting) void send()
     }
   }
@@ -451,7 +481,11 @@ export function MobileWorkspace() {
     catch (error) { notify(messageError(error), 'red') }
     finally { setModelLoading(false) }
   }
-  const refresh = async () => { await queryClient.invalidateQueries({ queryKey: ['astrorder'] }); notify('进度已对齐最新状态') }
+  const refresh = async () => {
+    void navigator.serviceWorker?.getRegistration?.().then(reg => reg?.update()).catch(() => {})
+    await queryClient.invalidateQueries({ queryKey: ['astrorder'] })
+    notify('进度已对齐最新状态')
+  }
   const handoffPeer = useMemo(() => {
     const peer = findSessionHandoff(selected, sessions)
     return peer ? { ...peer, label: `${peer.direction === 'from' ? '转交自' : '已转交至'} ${agentKindLabel(agents[peer.session.agent_id]?.kind)}` } : null
@@ -507,7 +541,7 @@ export function MobileWorkspace() {
     if (!quickText) {
       setDraft({ text: '', attachments: [], sessionRefs: [] })
       setQuote('')
-      if (textarea.current) textarea.current.style.height = '35px'
+      if (textarea.current) textarea.current.style.height = '38px'
     }
     const store = useAstrorderStore.getState()
     const command: Command = { id: commandId, agent_id: selected.agent_id, session_id: selected.id, action: 'send', state: 'received', text: body, attachments: chosenAttachments, created_at: new Date().toISOString(), error: null, target_id: null }
@@ -896,10 +930,11 @@ export function MobileWorkspace() {
       || null
   }
 
-  return <div className="mobile-workspace" data-mobile-shell="independent" data-sheet={sheet || undefined} data-queue-drop={queueLift?.zone || undefined} onContextMenuCapture={(event) => suppressNativeHold(event.nativeEvent)} onTouchStartCapture={handleWorkspaceTouchStart} onTouchMoveCapture={handleWorkspaceTouchMove} onTouchEndCapture={handleWorkspaceTouchEnd} onTouchCancelCapture={() => { edgeTouch.current = null }}>
+  return <AgyQuotaRefreshProvider sessionEnvironment={agyEnvironment}><div ref={workspaceRef} className="mobile-workspace" data-mobile-shell="independent" data-sheet={sheet || undefined} data-queue-drop={queueLift?.zone || undefined} onContextMenuCapture={(event) => suppressNativeHold(event.nativeEvent)} onTouchStartCapture={handleWorkspaceTouchStart} onTouchMoveCapture={handleWorkspaceTouchMove} onTouchEndCapture={handleWorkspaceTouchEnd} onTouchCancelCapture={() => { edgeTouch.current = null }}>
     {addProjectOpened && <AddProjectModal opened={addProjectOpened} onClose={() => setAddProjectOpened(false)} agents={agents} />}
     {createOpened && <NewSessionDialog agents={agents} project={createProject} initialAgentId={agentFilter !== 'all' ? agentFilter : undefined} onClose={() => setCreateOpened(false)} onCreated={session => { setSearch(''); select(session) }} />}
-    <header className="m-header"><div className="m-brand"><button className="m-session-nav" aria-label="打开会话列表" onClick={() => { setSheet('sessions'); void openState.refetch() }}><IconMessageCircle size={21} /></button><div className="m-brand-home-btn" onClick={() => navigate('/chat')} role="button" aria-label="返回工作台首页"><BrandMark className="m-brand-mark" size={26} alt="" /><strong>星序</strong></div><span className={`m-dot ${connection === 'connected' ? 'online' : ''}`} aria-label={connection === 'connected' ? '已连接' : '连接中'} /></div><div className="m-header-actions">
+    <header className="m-header"><div className="m-brand"><button className="m-session-nav" aria-label="打开会话列表" onClick={() => { setSheet('sessions'); void openState.refetch() }}><IconMessageCircle size={21} /></button><button type="button" className="m-brand-home-btn" onClick={() => { setSheet('sessions'); void openState.refetch() }} aria-label="星序导航"><BrandMark className="m-brand-mark" size={24} alt="" /><strong>星序</strong></button><span className={`m-dot ${connection === 'connected' ? 'online' : ''}`} aria-label={connection === 'connected' ? '已连接' : '连接中'} /></div><div className="m-header-actions">
+      <button aria-label="群聊" onClick={() => navigate('/mobile/groups')}><IconUsers size={20} /></button>
       <NotificationPermissionControl />
       <button aria-label="新建会话" onClick={() => { setCreateProject(resolveCurrentProject()); setCreateOpened(true) }}><IconPlus size={21} /></button>
       <Menu position="bottom-end" width={210} withinPortal>
@@ -908,6 +943,7 @@ export function MobileWorkspace() {
           <Menu.Label>星序</Menu.Label>
           <Menu.Item leftSection={<IconDeviceDesktop size={17} />} onClick={() => navigate('/auth/qr/scan')}>扫码登录电脑</Menu.Item>
           <Menu.Item leftSection={<IconCpu size={17} />} onClick={() => setSheet('kernels')}>内核管理</Menu.Item>
+          <Menu.Item leftSection={<IconSwitchHorizontal size={17} />} onClick={() => setSheet('accounts')}>账号切换</Menu.Item>
           <Menu.Item leftSection={<IconPlugConnected size={17} />} onClick={() => setSheet('connections')}>连接管理</Menu.Item>
           <Menu.Item leftSection={<IconCloudDataConnection size={17} />} onClick={() => setSheet('gateway')}>模型网关</Menu.Item>
           <Menu.Item leftSection={colorScheme === 'auto' ? <IconDeviceDesktop size={17} /> : colorScheme === 'light' ? <IconSun size={17} /> : <IconMoon size={17} />} onClick={() => setColorScheme(colorScheme === 'auto' ? 'light' : colorScheme === 'light' ? 'dark' : 'auto')}>切换主题</Menu.Item>
@@ -941,6 +977,7 @@ export function MobileWorkspace() {
             <Menu.Item leftSection={<IconNotes size={17} />} onClick={() => setSheet('tasks')}>任务与子代理</Menu.Item>
             {goal && <Menu.Item leftSection={<IconNotes size={17} />} onClick={() => setSheet('goal')}>目标管理</Menu.Item>}
             <Menu.Item leftSection={<IconDeviceDesktop size={17} />} onClick={openWorkbench}>工作区</Menu.Item>
+            {agyEnvironment && <Menu.Item leftSection={<IconSwitchHorizontal size={17} />} onClick={() => setSheet('accounts')}>账号切换</Menu.Item>}
             <Menu.Item leftSection={<IconChalkboard size={17} />} onClick={() => setSheet('blackboard')}>黑板</Menu.Item>
             <Menu.Item leftSection={<IconWorld size={17} />} onClick={() => setSheet('browser')}>浏览器镜像</Menu.Item>
             <Menu.Item leftSection={<IconEdit size={17} />} onClick={() => openRename(selected)}>重命名</Menu.Item>
@@ -970,28 +1007,41 @@ export function MobileWorkspace() {
       {visibleError && (
         <InlineNotice alert title={parsedGatewayError?.isKnownGatewayIssue ? parsedGatewayError.title : '请求未完成'} onClose={() => { setSessionError(null); setSubmittedCommandId(null) }}>
           <div>{parsedGatewayError?.description || visibleError}</div>
-          {parsedGatewayError?.type === "quota" && parsedGatewayError.recommendedModel && selected && (
+          {parsedGatewayError?.type === "quota" && (parsedGatewayError.recommendedModel || agyEnvironment) && selected && (
             <div className="m-gateway-alert-actions">
-              <span>推荐切换：</span>
-              <button
-                type="button"
-                className="m-gateway-rec-btn"
-                disabled={modelReadOnly || modelLoading}
-                onClick={() => {
-                  if (modelReadOnly || modelLoading) return
-                  const rec = parsedGatewayError.recommendedModel!
-                  const provider = isAntigravity ? 'antigravity' : rec.provider
-                  void sessionModel.change(provider, rec.model)
-                    .then(() => {
-                      setSessionError(null)
-                      setSubmittedCommandId(null)
-                      notify("已切换至 " + rec.label, "teal")
-                    })
-                    .catch(e => setSessionError(messageError(e)))
-                }}
-              >
-                切换至 {parsedGatewayError.recommendedModel.label}
-              </button>
+              {parsedGatewayError.recommendedModel && (
+                <>
+                  <span>推荐切换：</span>
+                  <button
+                    type="button"
+                    className="m-gateway-rec-btn"
+                    disabled={modelReadOnly || modelLoading}
+                    onClick={() => {
+                      if (modelReadOnly || modelLoading) return
+                      const rec = parsedGatewayError.recommendedModel!
+                      const provider = isAntigravity ? 'antigravity' : rec.provider
+                      void sessionModel.change(provider, rec.model)
+                        .then(() => {
+                          setSessionError(null)
+                          setSubmittedCommandId(null)
+                          notify("已切换至 " + rec.label, "teal")
+                        })
+                        .catch(e => setSessionError(messageError(e)))
+                    }}
+                  >
+                    切换至 {parsedGatewayError.recommendedModel.label}
+                  </button>
+                </>
+              )}
+              {agyEnvironment && (
+                <button
+                  type="button"
+                  className="m-gateway-rec-btn"
+                  onClick={() => setSheet('accounts')}
+                >
+                  切换账号
+                </button>
+              )}
             </div>
           )}
         </InlineNotice>
@@ -1020,15 +1070,6 @@ export function MobileWorkspace() {
       {!!approvals.length && <button className="m-queue-banner" onClick={() => setSheet('status')}>{approvals.some(isUserInput) ? '等待回答' : '等待授权'} · {approvals.length} 项</button>}
       {quote && <div className="m-quote"><span>{quote}</span><button aria-label="取消引用" onClick={() => setQuote('')}><IconX size={16} /></button></div>}
       {!!files.length && <div className="m-attachments">{files.map((file, i) => <MobileAttachmentPreview key={`${file.name}-${i}`} file={file} onOpen={setImage} onRemove={() => updateFiles(files.filter((_, n) => n !== i))} />)}</div>}
-      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-        <DraftShelfControl key={`shelf:${key}`} scope={key} draft={draft} disabled={submitting || voice.status !== 'idle'} onError={setSessionError} onReplace={(expected, replacement) => {
-          const current = useAstrorderStore.getState().drafts[key]
-          if (current ? current !== expected : Boolean(expected.text || expected.attachments.length || expected.sessionRefs?.length)) return false
-          setDraft(replacement)
-          textarea.current?.focus({ preventScroll: true })
-          return true
-        }} />
-      </div>
       <div style={{ position: 'relative' }}>
       <AgentCommandMenu agent={agents[selected?.agent_id || '']} items={agentCommands} activeIndex={commandIndex} onSelect={selectAgentCommand} />
       <AgentMentionMenu agent={agents[selected?.agent_id || '']} items={agentMentions} activeIndex={commandIndex} onSelect={selectAgentMention} />
@@ -1037,9 +1078,18 @@ export function MobileWorkspace() {
       <div className="m-composer">
         <input hidden ref={fileInput} type="file" multiple onChange={e => { updateFiles([...files, ...Array.from(e.target.files || [])]); e.target.value = '' }} />
           <button aria-label="添加附件" disabled={Boolean(agents[selected?.agent_id || ''] && !agents[selected?.agent_id || '']?.capabilities?.includes('attachments'))} onClick={() => fileInput.current?.click()}><IconPlus size={20} /></button>
-          <MobileVoiceHold scope={key} voice={voice}><textarea ref={textarea} aria-label="消息内容" placeholder="输入消息，或按住说话…" rows={1} value={text} onPaste={event => { const pasted = clipboardFiles(event); if (agents[selected?.agent_id || '']?.kind === 'grok' && pasted.some(f => f.type.startsWith('image/'))) { event.preventDefault(); notify('当前智能体不支持图片附件', 'red'); return } if (pasted.length) { event.preventDefault(); updateFiles([...files, ...pasted]) } }} onKeyDown={handleKeyDown} onChange={e => { setCommandIndex(0); setDismissedMenuText(null); setText(e.target.value) }} /></MobileVoiceHold>
+          <div className="m-composer-draft">
+            <DraftShelfControl key={`shelf:${key}`} scope={key} draft={draft} disabled={submitting || voice.status !== 'idle'} onError={setSessionError} onReplace={(expected, replacement) => {
+              const current = useAstrorderStore.getState().drafts[key]
+              if (current ? current !== expected : Boolean(expected.text || expected.attachments.length || expected.sessionRefs?.length)) return false
+              setDraft(replacement)
+              textarea.current?.focus({ preventScroll: true })
+              return true
+            }} />
+          </div>
+          <MobileVoiceHold scope={key} voice={voice} disabled={text.length > 0}><textarea ref={textarea} aria-label="消息内容" enterKeyHint="enter" placeholder="发消息，按住说话…" rows={1} value={text} onPaste={event => { const pasted = clipboardFiles(event); if (agents[selected?.agent_id || '']?.kind === 'grok' && pasted.some(f => f.type.startsWith('image/'))) { event.preventDefault(); notify('当前智能体不支持图片附件', 'red'); return } if (pasted.length) { event.preventDefault(); updateFiles([...files, ...pasted]) } }} onKeyDown={handleKeyDown} onChange={e => { setCommandIndex(0); setDismissedMenuText(null); setText(e.target.value) }} /></MobileVoiceHold>
           <button aria-label={voice.status === 'recording' || voice.status === 'requesting' ? '停止录音' : voice.status === 'transcribing' ? '正在转写' : '语音消息'} disabled={voice.status === 'transcribing'} onClick={voice.toggle}>{voice.status === 'recording' || voice.status === 'requesting' ? <IconPlayerStop size={19} color="#ef4444" /> : <IconMicrophone size={19} />}</button>
-          <ClickSpark className="m-send-spark" sparkColor={busy && !text && !files.length ? '#ef4444' : '#3b82f6'} sparkSize={10} sparkRadius={28} sparkCount={8}>
+          <ClickSpark className="m-send-spark" sparkColor={busy && !text && !files.length ? '#ef4444' : '#7540bd'} sparkSize={10} sparkRadius={28} sparkCount={8}>
             <button type="button" className="m-send" data-stop={busy && !text && !files.length} aria-label={busy && !text && !files.length ? '停止' : '发送'} disabled={submitting || !selected} onPointerDown={pressSend} onClick={() => pressSend()}>{submitting ? <IconLoader2 className="m-spin" size={18} /> : busy && !text && !files.length ? <IconPlayerStop size={17} /> : <IconSend size={18} />}</button>
           </ClickSpark>
         </div>
@@ -1047,12 +1097,17 @@ export function MobileWorkspace() {
       </SessionComposerGate>}
     </section>
     {messageAction?.sessionKey === key && <MobileMessageMenu anchor={messageAction} onClose={closeMessageMenu} onCopy={() => void copy(messageAction.text)} onQuote={() => { setQuote(messageAction.text); textarea.current?.focus({ preventScroll: true }) }} />}
-    {sheet && <div className={`m-backdrop ${sheet === 'sessions' ? 'm-session-backdrop' : ''}`} onClick={() => setSheet(null)} onTouchStartCapture={handleDrawerTouchStart} onTouchMoveCapture={handleDrawerTouchMove} onTouchEndCapture={handleDrawerTouchEnd} onTouchCancelCapture={handleDrawerTouchCancel}><section ref={node => { drawerSheet.current = node }} style={sheet === 'sessions' && drawerOffset !== null ? { transform: `translate3d(${drawerOffset}px, 0, 0)`, transition: drawerSettling ? 'transform .22s cubic-bezier(.2,.8,.2,1)' : 'none', animation: 'none' } : undefined} className={`m-sheet ${sheet === 'connections' ? 'm-connections-sheet' : sheet === 'sessions' ? 'm-session-sheet' : sheet === 'blackboard' || sheet === 'browser' ? 'm-blackboard-dialog' : ''}`} role="dialog" aria-label={sheet === 'sessions' ? '会话列表' : sheet === 'blackboard' ? '会话黑板' : sheet === 'browser' ? '浏览器镜像' : sheet === 'kernels' ? '内核管理' : '详情'} onClick={e => e.stopPropagation()} onTouchStart={handleDrawerTouchStart} onTouchMove={handleDrawerTouchMove} onTouchEnd={handleDrawerTouchEnd} onTouchCancel={handleDrawerTouchCancel}><div className="m-handle" /><header><h2>{({ sessions: '会话', status: '运行状态', goal: '目标管理', tasks: '任务与子代理', task: '任务详情', models: '选择模型', connections: '连接管理', gateway: '模型网关', blackboard: '黑板', browser: '浏览器镜像', kernels: '内核管理' })[sheet]}</h2><div className="m-sheet-header-actions">{sheet === 'sessions' && <><button aria-label="筛选" aria-pressed={filtersOpen} onClick={() => setFiltersOpen(open => !open)}><IconFilter size={18} /></button><button aria-label="新建项目" onClick={() => setAddProjectOpened(true)}><IconPlus size={20} /></button></>}<button aria-label="关闭面板" onClick={() => setSheet(null)}><IconX size={20} /></button></div></header>
+    {sheet && <div className={`m-backdrop ${sheet === 'sessions' ? 'm-session-backdrop' : ''}`} onClick={() => setSheet(null)} onTouchStartCapture={handleDrawerTouchStart} onTouchMoveCapture={handleDrawerTouchMove} onTouchEndCapture={handleDrawerTouchEnd} onTouchCancelCapture={handleDrawerTouchCancel}><section ref={node => { drawerSheet.current = node }} style={sheet === 'sessions' && drawerOffset !== null ? { transform: `translate3d(${drawerOffset}px, 0, 0)`, transition: drawerSettling ? 'transform .22s cubic-bezier(.2,.8,.2,1)' : 'none', animation: 'none' } : undefined} className={`m-sheet ${sheet === 'connections' ? 'm-connections-sheet' : sheet === 'accounts' ? 'm-accounts-sheet' : sheet === 'sessions' ? 'm-session-sheet' : sheet === 'blackboard' || sheet === 'browser' ? 'm-blackboard-dialog' : ''}`} role="dialog" aria-label={sheet === 'sessions' ? '会话列表' : sheet === 'accounts' ? '账号切换' : sheet === 'blackboard' ? '会话黑板' : sheet === 'browser' ? '浏览器镜像' : sheet === 'kernels' ? '内核管理' : '详情'} onClick={e => e.stopPropagation()} onTouchStart={handleDrawerTouchStart} onTouchMove={handleDrawerTouchMove} onTouchEnd={handleDrawerTouchEnd} onTouchCancel={handleDrawerTouchCancel}><div className="m-handle" /><header><h2>{({ sessions: '会话', status: '运行状态', goal: '目标管理', tasks: '任务与子代理', task: '任务详情', models: '选择模型', connections: '连接管理', accounts: '账号切换', gateway: '模型网关', blackboard: '黑板', browser: '浏览器镜像', kernels: '内核管理' })[sheet]}</h2><div className="m-sheet-header-actions">{sheet === 'sessions' && <><button aria-label="筛选" aria-pressed={filtersOpen} onClick={() => setFiltersOpen(open => !open)}><IconFilter size={18} /></button><button aria-label="新建项目" onClick={() => setAddProjectOpened(true)}><IconPlus size={20} /></button></>}<button aria-label="关闭面板" onClick={() => setSheet(null)}><IconX size={20} /></button></div></header>
       {sheet === 'connections' && <div className="m-sheet-body m-connections-body"><EnvironmentConnections embedded /></div>}
+      {sheet === 'accounts' && <div className="m-sheet-body m-accounts-body"><MobileAccountsPanel preferredEnvironment={agyEnvironment} /></div>}
       {sheet === 'kernels' && <div className="m-sheet-body"><KernelManagementPanel /></div>}
-      {sheet === 'gateway' && <div className="m-sheet-body" style={{ padding: 12 }}><UsageGatewaySettingsCard /></div>}
+      {sheet === 'gateway' && <div className="m-sheet-body m-gateway-body"><UsageGatewaySettingsCard /></div>}
+      {sheet === 'sessions' && <nav className="m-drawer-nav" aria-label="移动端模式切换">
+        <button type="button" aria-current="page" onClick={() => setSheet(null)}><IconMessageCircle size={16} />对话</button>
+        <button type="button" onClick={() => { setSheet(null); navigate('/mobile/groups') }}><IconUsers size={16} />群聊</button>
+      </nav>}
       {sheet === 'sessions' && filtersOpen && <><div className="m-drawer-filter-row"><AgentSessionFilter agents={agents} sessions={sessions} value={agentFilter} onChange={updateAgentFilter} /></div><nav className="m-filters">{[['all','全部'],['unread','未读'],['open','开放中'],['pinned','置顶'],['recent','24小时']].map(([id,label]) => <button className={filter === id ? 'active' : ''} key={id} onClick={() => setFilter(id)}>{label}</button>)}</nav></>}
-      {sheet === 'sessions' && <><div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}><input className="m-search" aria-label="搜索会话" placeholder="搜索会话" value={search} onChange={e => setSearch(e.target.value)} />{search && <button aria-label="清空搜索" onClick={() => setSearch('')} style={{ position: 'absolute', right: 8, padding: 4, display: 'inline-flex', alignItems: 'center', color: 'var(--m-muted)' }}><IconX size={16} /></button>}</div><MobileSessionDrawer groups={groups} pins={pins} pinnedProjects={pinnedProjects} onPinProject={project => { void updatePreferences(value => ({ pinned_projects: value.pinned_projects.includes(project.key) ? value.pinned_projects.filter(key => key !== project.key) : [project.key, ...value.pinned_projects] })) }} selectedKey={key} appearance={appearance} onSelect={select} onCreate={project => { setCreateProject(project); setCreateOpened(true) }} onDeleteProject={requestDeleteProject} onDeleteSession={requestDeleteSession} onPin={s => { const sessionKey = scopeKey(s.agent_id, s.id); void updatePreferences(value => ({ session_pins: { [sessionKey]: !value.session_pins[sessionKey] } })) }} agents={agents} onHandoffSession={setHandoffTarget} onRenameSession={openRename} onCopySessionId={copySessionId} onForkSession={handleForkChatBranch} onForkWorktreeSession={setForkWorktreeTarget} isSearching={Boolean(search.trim())} /></>}
+      {sheet === 'sessions' && <><div className="m-search-wrap"><input className="m-search" aria-label="搜索会话" placeholder="搜索会话" value={search} onChange={e => setSearch(e.target.value)} />{search && <button aria-label="清空搜索" onClick={() => setSearch('')} style={{ position: 'absolute', right: 8, padding: 6, display: 'inline-flex', alignItems: 'center', color: 'var(--m-muted)' }}><IconX size={16} /></button>}</div><MobileSessionDrawer groups={groups} pins={pins} pinnedProjects={pinnedProjects} onPinProject={project => { void updatePreferences(value => ({ pinned_projects: value.pinned_projects.includes(project.key) ? value.pinned_projects.filter(key => key !== project.key) : [project.key, ...value.pinned_projects] })) }} selectedKey={key} appearance={appearance} onSelect={select} onCreate={project => { setCreateProject(project); setCreateOpened(true) }} onDeleteProject={requestDeleteProject} onDeleteSession={requestDeleteSession} onPin={s => { const sessionKey = scopeKey(s.agent_id, s.id); void updatePreferences(value => ({ session_pins: { [sessionKey]: !value.session_pins[sessionKey] } })) }} agents={agents} onHandoffSession={setHandoffTarget} onRenameSession={openRename} onCopySessionId={copySessionId} onForkSession={handleForkChatBranch} onForkWorktreeSession={setForkWorktreeTarget} isSearching={Boolean(search.trim())} /></>}
       {sheet === 'status' && selected && <div className="m-sheet-body"><MobileApprovals session={selected} approvals={approvals} /><SessionRuntimeFacts session={selected} agent={agents[selected.agent_id]} />{agents[selected.agent_id]?.kind==='codex' && <NativeObservationPanel agentId={selected.agent_id} sessionId={selected.id} />}</div>}
       {sheet === 'goal' && selected && <div className="m-sheet-body m-goal-panel"><GoalManager key={key} session={selected} agent={agents[selected.agent_id]} tasks={tasks} disabled={readOnly} /></div>}
       {sheet === 'blackboard' && selected && <div className="m-sheet-body m-blackboard-sheet"><MobileBlackboardPanel namespace={`session:${selected.agent_id}::${selected.id}`} /></div>}
@@ -1136,5 +1191,5 @@ export function MobileWorkspace() {
     </Modal>
     {queueLift && <div className="m-queue-ghost" data-zone={queueLift.zone || undefined} style={{ left: queueLift.x, top: queueLift.y }}>{queueLift.text}</div>}
     <BackgroundTasks />
-  </div>
+  </div></AgyQuotaRefreshProvider>
 }

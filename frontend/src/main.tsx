@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client'
 import '@mantine/core/styles.css'
 import '@mantine/notifications/styles.css'
 import { MantineProvider } from '@mantine/core'
-import { Notifications } from '@mantine/notifications'
+import { Notifications, notifications } from '@mantine/notifications'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter } from 'react-router-dom'
 import App from './app/App.tsx'
@@ -22,6 +22,42 @@ if (typeof window !== 'undefined' && 'astrorderDesktop' in window) {
 }
 
 if (import.meta.env.PROD) {
+  const hadController = typeof navigator !== 'undefined' && Boolean(navigator.serviceWorker?.controller)
+  let updateNotified = false
+  if (hadController && navigator.serviceWorker) {
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (updateNotified) return
+      updateNotified = true
+      notifications.show({
+        id: 'astrorder-pwa-update',
+        color: 'violet',
+        autoClose: false,
+        title: '发现新版本',
+        message: (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 4 }}>
+            <span>新版本已就绪，刷新即可生效</span>
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              style={{
+                flex: 'none',
+                border: 0,
+                borderRadius: 8,
+                padding: '5px 11px',
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: 'pointer',
+                background: '#7540bd',
+                color: '#ffffff',
+              }}
+            >
+              立即刷新
+            </button>
+          </div>
+        ),
+      })
+    })
+  }
   registerSW({
     immediate: true,
     onRegisteredSW(_url, registration) {

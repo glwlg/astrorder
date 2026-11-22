@@ -13,7 +13,11 @@ import {
 import { notifications } from "@mantine/notifications";
 import {
   IconAt,
+  IconChevronDown,
+  IconLoader2,
+  IconMicrophone,
   IconPlayerStop,
+  IconPlus,
   IconChalkboard,
   IconSend,
   IconSettings,
@@ -42,12 +46,15 @@ import { GroupChatImageDraft } from "./GroupChatImages";
 import { clipboardFiles } from "./composerMedia";
 import { scopeKey } from "../../domain/semantics";
 import { GroupFileSourceScope } from "./GroupFileSourceScope";
+import { applyVoiceTranscript, useVoiceInput } from "./useVoiceInput";
+import { MobileVoiceHold } from "../mobile/MobileVoiceHold";
 
 const EMPTY_GROUP_DRAFT: DraftState = { text: "", attachments: [] };
 
 export function BotGroupChatPage({
   group,
   agents,
+  surface = "desktop",
   onClose,
   blackboardOpen,
   onToggleBlackboard,
@@ -56,12 +63,15 @@ export function BotGroupChatPage({
 }: {
   group: BotGroup;
   agents: Record<string, Agent>;
+  surface?: "desktop" | "mobile";
   onClose?: () => void;
   blackboardOpen?: boolean;
   onToggleBlackboard?: () => void;
   onOpenBlackboard?: (key: string) => void;
   onEdit?: () => void;
 }) {
+  const isMobile = surface === "mobile";
+  const imageInputRef = useRef<HTMLInputElement>(null);
   const [messages, setMessages] = useState<GroupMessage[]>([]);
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const [historyError, setHistoryError] = useState("");
@@ -117,11 +127,20 @@ export function BotGroupChatPage({
   const pageRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLElement>(null);
   const followLatestRef = useRef(true);
+  const [followingLatest, setFollowingLatest] = useState(true);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const currentGroupRef = useRef(group.id);
   const loadRequestRef = useRef(0);
   const activeLoadRef = useRef<{ groupId: string; request: number } | null>(null);
   currentGroupRef.current = group.id;
+  const groupScope = scopeKey("group", group.id);
+  const voice = useVoiceInput(groupScope, (transcript, event) => {
+    if (event.kind === "final" && event.submit) {
+      void send(transcript);
+    } else {
+      setInput((current) => applyVoiceTranscript(current, transcript, event));
+    }
+  });
 
   useLayoutEffect(() => {
     const page = pageRef.current;
@@ -137,6 +156,14 @@ export function BotGroupChatPage({
     observer.observe(composer);
     return () => observer.disconnect();
   }, []);
+
+  useLayoutEffect(() => {
+    if (!isMobile) return;
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "38px";
+    el.style.height = `${Math.min(132, Math.max(38, el.scrollHeight))}px`;
+  }, [input, group.id, isMobile]);
 
   const applyGroupSnapshot = (snapshot: BotGroup) => {
     setActiveHop(snapshot.active_hop || 0);
@@ -179,6 +206,7 @@ export function BotGroupChatPage({
 
   useEffect(() => {
     followLatestRef.current = true;
+    setFollowingLatest(true);
     setMessages([]);
     setHistoryLoaded(false);
     setHistoryError("");
@@ -293,6 +321,7 @@ export function BotGroupChatPage({
       }
       if (e.key === "Enter" || e.key === "Tab") {
         e.preventDefault();
+        if (e.nativeEvent.isComposing || e.keyCode === 229) return;
         selectMention(mentionItems[mentionIndex] || mentionItems[0]);
         return;
       }
@@ -303,36 +332,57 @@ export function BotGroupChatPage({
       }
     }
 
+    if (isMobile) {
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+        void send();
+      }
+      return;
+    }
+
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229) {
       e.preventDefault();
       void send();
     }
   };
 
+  const appendImageFiles = (files: File[], insertText?: { value: string; start: number; end: number }) => {
+    const images = files.filter((file) => file.type.startsWith("image/"));
+    if (!images.length || submittingRef.current) return false;
+    if (images.some((file) => !["image/png", "image/jpeg", "image/gif", "image/webp"].includes(file.type))) {
+      notifications.show({ color: "red", message: "群聊支持 PNG、JPEG、GIF 和 WebP 图片" });
+      return true;
+    }
+    if (draft.attachments.length + images.length > 32) {
+      notifications.show({ color: "red", message: "一次最多发送 32 张图片" });
+      return true;
+    }
+    updateDraft((current) => ({
+      ...current,
+      text: insertText?.value
+        ? current.text.slice(0, insertText.start) + insertText.value + current.text.slice(insertText.end)
+        : current.text,
+      attachments: [...current.attachments, ...images.map((file) => ({ key: crypto.randomUUID(), file }))],
+    }));
+    return true;
+  };
+
   const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
     const files = clipboardFiles(event).filter((file) => file.type.startsWith("image/"));
     if (!files.length || submittingRef.current) return;
     event.preventDefault();
-    if (files.some((file) => !["image/png", "image/jpeg", "image/gif", "image/webp"].includes(file.type))) {
-      notifications.show({ color: "red", message: "群聊支持 PNG、JPEG、GIF 和 WebP 图片" });
-      return;
-    }
-    if (draft.attachments.length + files.length > 32) {
-      notifications.show({ color: "red", message: "一次最多发送 32 张图片" });
-      return;
-    }
     const text = event.clipboardData.getData?.("text/plain") || "";
     const { selectionStart: start, selectionEnd: end } = event.currentTarget;
-    updateDraft((current) => ({
-      ...current,
-      text: text ? current.text.slice(0, start) + text + current.text.slice(end) : current.text,
-      attachments: [...current.attachments, ...files.map((file) => ({ key: crypto.randomUUID(), file }))],
-    }));
+    appendImageFiles(files, { value: text, start, end });
   };
 
-  const send = async () => {
-    if (submittingRef.current || (!input.trim() && !draft.attachments.length) || !historyLoaded || historyError || stateError) return;
-    const text = input.trim();
+  const send = async (overrideText?: string) => {
+    const mergedRaw = overrideText !== undefined
+      ? (input ? (input.endsWith(" ") ? `${input}${overrideText}` : `${input}\n${overrideText}`) : overrideText)
+      : input;
+    if (submittingRef.current || (!mergedRaw.trim() && !draft.attachments.length) || !historyLoaded || historyError || stateError) return;
+    const text = mergedRaw.trim();
     const requestedGroup = group.id;
     submittingRef.current = true;
     setSubmitting(true);
@@ -499,10 +549,11 @@ export function BotGroupChatPage({
 
   return (
     <GroupFileSourceScope groupId={group.id} revision={messages.at(-1)?.id}>
-    <div ref={pageRef} className="bot-group-chat-page">
+    <div ref={pageRef} className={`bot-group-chat-page${isMobile ? " is-mobile" : ""}`}>
       <GroupChatHeader
         group={group}
         agents={agents}
+        surface={surface}
         memberStates={memberStates}
         coordination={coordination}
         activeSpeakers={activeSpeakers.length ? activeSpeakers : activeSpeaker ? [activeSpeaker] : []}
@@ -516,28 +567,43 @@ export function BotGroupChatPage({
         actions={<>
             {canRecover && (
               <Button
-                size="compact-sm"
+                size={isMobile ? "compact-xs" : "compact-sm"}
                 variant="light"
                 loading={recovering}
+                aria-label="恢复回复并继续"
                 onClick={() => void recoverGroup()}
               >
-                恢复回复并继续
+                {isMobile ? "恢复" : "恢复回复并继续"}
               </Button>
             )}
             {onEdit && (
-              <Button
-                size="compact-sm"
-                variant="light"
-                color="gray"
-                leftSection={<IconSettings size={13} />}
-                onClick={onEdit}
-              >
-                群设置
-              </Button>
+              isMobile ? (
+                <ActionIcon
+                  size={30}
+                  radius="md"
+                  variant="light"
+                  color="gray"
+                  aria-label="群设置"
+                  title="群设置"
+                  onClick={onEdit}
+                >
+                  <IconSettings size={15} />
+                </ActionIcon>
+              ) : (
+                <Button
+                  size="compact-sm"
+                  variant="light"
+                  color="gray"
+                  leftSection={<IconSettings size={13} />}
+                  onClick={onEdit}
+                >
+                  群设置
+                </Button>
+              )
             )}
             {onToggleBlackboard && (
               <Button
-                size="compact-sm"
+                size={isMobile ? "compact-xs" : "compact-sm"}
                 variant={blackboardOpen ? "filled" : "light"}
                 color="indigo"
                 leftSection={<IconChalkboard size={13} />}
@@ -547,15 +613,29 @@ export function BotGroupChatPage({
               </Button>
             )}
             {(activeSpeaker || roundActive) && (
-              <Button
-                size="compact-sm"
-                color="red"
-                variant="light"
-                leftSection={<IconPlayerStop size={13} />}
-                onClick={() => void stopGroup()}
-              >
-                中断流转
-              </Button>
+              isMobile ? (
+                <ActionIcon
+                  size={30}
+                  radius="md"
+                  color="red"
+                  variant="light"
+                  aria-label="中断流转"
+                  title="中断流转"
+                  onClick={() => void stopGroup()}
+                >
+                  <IconPlayerStop size={15} />
+                </ActionIcon>
+              ) : (
+                <Button
+                  size="compact-sm"
+                  color="red"
+                  variant="light"
+                  leftSection={<IconPlayerStop size={13} />}
+                  onClick={() => void stopGroup()}
+                >
+                  中断流转
+                </Button>
+              )
             )}
             {onClose && (
               <ActionIcon variant="subtle" color="gray" onClick={onClose} aria-label="关闭群聊">
@@ -597,7 +677,9 @@ export function BotGroupChatPage({
         className="bot-group-chat-messages"
         onScroll={(event) => {
           const el = event.currentTarget;
-          followLatestRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 100;
+          const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 100;
+          followLatestRef.current = atBottom;
+          setFollowingLatest((prev) => (prev === atBottom ? prev : atBottom));
         }}
         aria-busy={!historyLoaded && !historyError}
       >
@@ -676,6 +758,155 @@ export function BotGroupChatPage({
         </div>
       </div>
 
+      {isMobile && !followingLatest && (
+        <button
+          type="button"
+          className="m-return-bottom m-group-return-bottom"
+          aria-label="回到底部"
+          onClick={() => {
+            followLatestRef.current = true;
+            setFollowingLatest(true);
+            scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+          }}
+        >
+          {roundActive || activeSpeaker ? <span className="return-bottom-wave" aria-hidden="true"><i /><i /><i /></span> : <IconChevronDown size={19} />}
+        </button>
+      )}
+
+      {isMobile ? (
+        <footer ref={composerRef} className="m-composer-float m-group-composer-float">
+          {!mentionMenuOpen && group.members.length > 0 && group.members.every((member) => memberStates[member.id || member.agent_id]?.muted) && (
+            <div className="m-group-muted-notice" role="status">全员已禁言，消息仅保存在群聊中</div>
+          )}
+          {draft.attachments.length > 0 && (
+            <div className="group-chat-image-drafts m-group-image-drafts" aria-label="待发送图片">
+              {draft.attachments.map((item) => (
+                <GroupChatImageDraft
+                  key={item.key}
+                  file={item.file}
+                  disabled={submitting}
+                  onRemove={() => updateDraft((current) => ({ ...current, attachments: current.attachments.filter((entry) => entry.key !== item.key) }))}
+                />
+              ))}
+            </div>
+          )}
+          <div style={{ position: "relative" }}>
+            {mentionMenuOpen && mentionItems.length > 0 && (
+              <div
+                role="listbox"
+                aria-label="群成员建议"
+                className="group-chat-mention-menu m-group-mention-menu"
+              >
+                {mentionItems.map((item, idx) => {
+                  const isSelected = idx === mentionIndex;
+                  return (
+                    <button
+                      type="button"
+                      key={item.id}
+                      className={`m-group-mention-item${isSelected ? " is-selected" : ""}`}
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                      }}
+                      onClick={() => selectMention(item)}
+                    >
+                      {item.isAll ? (
+                        <span className="m-group-mention-avatar is-all" aria-hidden="true">
+                          <IconUsers size={15} />
+                        </span>
+                      ) : item.kind ? (
+                        <span className="m-group-mention-avatar" aria-hidden="true">
+                          <AgentBrandIcon kind={item.kind} size={17} />
+                        </span>
+                      ) : (
+                        <span className="m-group-mention-avatar" aria-hidden="true">
+                          <IconAt size={15} />
+                        </span>
+                      )}
+                      <span className="m-group-mention-copy">
+                        <strong>@{item.name}</strong>
+                        <small>{item.desc}</small>
+                      </span>
+                      {item.isAll && <span className="m-group-mention-tag">全员</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            {voice.error && <div className="mobile-voice-status" role="alert">{voice.error}</div>}
+            {voice.status === "transcribing" && <div className="mobile-voice-status" role="status">正在转写…</div>}
+            <div className="m-composer m-group-composer">
+              <input
+                hidden
+                ref={imageInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/gif,image/webp"
+                multiple
+                onChange={(event) => {
+                  const chosen = Array.from(event.target.files || []);
+                  if (chosen.length) appendImageFiles(chosen);
+                  event.target.value = "";
+                }}
+              />
+              <button
+                type="button"
+                aria-label="添加图片"
+                disabled={submitting}
+                onClick={() => imageInputRef.current?.click()}
+              >
+                <IconPlus size={20} />
+              </button>
+              <button
+                type="button"
+                aria-label="提及成员"
+                aria-expanded={mentionMenuOpen}
+                disabled={submitting}
+                onClick={() => {
+                  setMentionQuery("");
+                  setMentionIndex(0);
+                  setMentionMenuOpen((open) => !open);
+                }}
+              >
+                <IconAt size={19} />
+              </button>
+              <MobileVoiceHold scope={groupScope} voice={voice} disabled={input.length > 0}>
+                <textarea
+                  ref={textareaRef}
+                  aria-label="群聊消息"
+                  enterKeyHint="enter"
+                  placeholder="发群消息，按住说话…"
+                  rows={1}
+                  value={input}
+                  onChange={(e) => {
+                    const val = e.currentTarget.value;
+                    setInput(val);
+                    checkMentionTrigger(val, e.currentTarget.selectionStart);
+                  }}
+                  onKeyDown={handleKeyDown}
+                  onPaste={handlePaste}
+                  disabled={submitting}
+                />
+              </MobileVoiceHold>
+              <button
+                type="button"
+                aria-label={voice.status === "recording" || voice.status === "requesting" ? "停止录音" : voice.status === "transcribing" ? "正在转写" : "语音消息"}
+                disabled={submitting || voice.status === "transcribing"}
+                onClick={voice.toggle}
+              >
+                {voice.status === "recording" || voice.status === "requesting" ? <IconPlayerStop size={19} color="#ef4444" /> : <IconMicrophone size={19} />}
+              </button>
+              <button
+                type="button"
+                className="m-send"
+                aria-label="发送"
+                onClick={() => void send()}
+                disabled={submitting || (!input.trim() && !draft.attachments.length) || !historyLoaded || loadFailed}
+              >
+                {submitting ? <IconLoader2 className="m-spin" size={18} /> : <IconSend size={18} />}
+              </button>
+            </div>
+          </div>
+        </footer>
+      ) : (
       <footer ref={composerRef} className="group-chat-composer">
         <div className="group-chat-composer-card">
         <ComposerGlassSurface active snapshot=".bot-group-chat-page">
@@ -805,6 +1036,7 @@ export function BotGroupChatPage({
         </ComposerGlassSurface>
         </div>
       </footer>
+      )}
     </div>
     </GroupFileSourceScope>
   );

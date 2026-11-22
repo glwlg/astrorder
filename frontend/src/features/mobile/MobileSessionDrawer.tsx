@@ -42,13 +42,13 @@ export function MobileSessionDrawer({ groups, pins, pinnedProjects, selectedKey,
   })
   const { isUnread } = useSessionUnread()
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
+  const [pinnedExpanded, setPinnedExpanded] = useState(false)
   const [sessionMenu, setSessionMenu] = useState<SessionMenu | null>(null)
   const [projectMenu, setProjectMenu] = useState<ProjectMenu | null>(null)
   const suppressSelect = useRef(false)
   const hold = useRef<ReturnType<typeof setTimeout> | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const commands = useAstrorderStore(useShallow((state) => state.commands))
-  useAstrorderStore((state) => state.messages)
   useAstrorderStore((state) => state.tasks)
   useAstrorderStore((state) => state.liveActivityAt)
   const currentProjectKey = groups.find((group) => group.sessions.some((session) => scopeKey(session.agent_id, session.id) === selectedKey))?.key
@@ -67,6 +67,9 @@ export function MobileSessionDrawer({ groups, pins, pinnedProjects, selectedKey,
     })
   }
   const pinned = groups.flatMap((group) => group.sessions).filter((session) => pins[scopeKey(session.agent_id, session.id)])
+  const selectedPinnedIndex = pinned.findIndex((session) => scopeKey(session.agent_id, session.id) === selectedKey)
+  const showAllPinned = Boolean(isSearching) || pinnedExpanded || pinned.length <= 4 || selectedPinnedIndex >= 4
+  const visiblePinned = showAllPinned ? pinned : pinned.slice(0, 4)
   const cancelHold = () => { if (hold.current) clearTimeout(hold.current); hold.current = null }
   useEffect(() => () => cancelHold(), [])
   useLayoutEffect(() => {
@@ -178,7 +181,28 @@ export function MobileSessionDrawer({ groups, pins, pinnedProjects, selectedKey,
   }
 
   return <div className="m-project-list">
-    {!!pinned.length && <section className="m-pinned-sessions" aria-label="置顶会话"><h3><IconPinned size={16} />置顶会话</h3>{pinned.map(row)}</section>}
+    {!!pinned.length && (
+      <section className="m-pinned-sessions" aria-label="置顶会话">
+        <h3><IconPinned size={15} />置顶会话</h3>
+        {visiblePinned.map(row)}
+        {pinned.length > 4 && !isSearching && (
+          <button
+            className="m-disclosure-chip"
+            onClick={() => setPinnedExpanded((prev) => !prev)}
+            aria-label={showAllPinned ? '收起置顶会话' : `展开剩余 ${pinned.length - visiblePinned.length} 个置顶会话`}
+          >
+            <IconChevronDown
+              size={14}
+              style={{
+                transform: showAllPinned ? 'rotate(180deg)' : 'none',
+                transition: 'transform 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
+              }}
+            />
+            <span>{showAllPinned ? '收起置顶' : `展开全部置顶 (${pinned.length - visiblePinned.length})`}</span>
+          </button>
+        )}
+      </section>
+    )}
     {groups.map((project) => {
       const regular = project.sessions.filter((session) => !pins[scopeKey(session.agent_id, session.id)])
       const collapsedNow = isCollapsed(project.key)

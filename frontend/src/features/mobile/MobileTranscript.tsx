@@ -15,8 +15,6 @@ import { sessionSwipeGesture, sessionDragPreview, startsAtSessionDrawerEdge, typ
 import { describeTool, extractToolArgs, FileChangeDiffBlock, fileChangeDiffs, PackSummary, ShellOutputBlock, ToolLineIcon, unwrapCommand } from '../chat/toolPresentation'
 import { ToolOutputBlock } from '../chat/ToolOutputBlock'
 import { isCompactionMessage, CompactionDivider } from '../chat/CompactionDivider'
-import { useReducedMotion } from '@mantine/hooks'
-import { AnimatePresence, motion } from 'motion/react'
 
 export interface MessageActionAnchor { text: string; x: number; y: number; element: HTMLElement; selectText?: () => void }
 
@@ -28,8 +26,6 @@ export function MobileTranscript({ messages, activityBreaks, commands = [], appr
   activityBreaks?: readonly string[]
   onSwipePreview?: (pose: import('./mobileGestures').SessionCardPose | null) => void
 }) {
-  const reducedMotion = useReducedMotion(undefined, { getInitialValueInEffect: false })
-  const enter = reducedMotion ? {} : { opacity: 0, y: 10, scale: 0.99 }
   const { setContainerRef, following, onScroll, scrollToBottom, capturePrependAnchor } = useStickToBottom<HTMLDivElement>({ contentVersion: `${messages.map(m => m.id + ':' + m.text.length).join('|')}|${approvals.map(a => a.id).join('|')}` })
   const older = useOlderMessages({ hasMore: hasOlder, loading: loadingOlder, load: loadOlder, capture: capturePrependAnchor })
   const touch = useRef<{ x: number; y: number } | null>(null)
@@ -65,13 +61,12 @@ export function MobileTranscript({ messages, activityBreaks, commands = [], appr
       onTouchEnd={e => { cancelHold(); onSwipePreview?.(null); if (!touch.current) return; const start = touch.current; const end = e.changedTouches[0]; touch.current = null; const gesture = sessionSwipeGesture(start.x, start.y, end.clientX, end.clientY); if (gesture) onSwipe(gesture) }}
       onTouchMove={e => { cancelHold(); older.onTouchMove(e); if (!touch.current || !onSwipePreview) return; onSwipePreview(sessionDragPreview(e.touches[0].clientX - touch.current.x, e.touches[0].clientY - touch.current.y)) }} onTouchCancel={cancelHold}>
       {hasOlder && <button className="m-earlier" disabled={loadingOlder} onClick={() => void older.request()}>{loadingOlder ? '正在加载更早消息…' : '查看更早的消息 ↑'}</button>}
-      <AnimatePresence initial={false}>
       {rows.map((m, i) => {
         if (isCompactionMessage(m)) {
           return (
-            <motion.div key={`m-compaction-${m.id}`} initial={enter} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.28, ease: [0.2, 0.8, 0.2, 1] }}>
+            <div key={`m-compaction-${m.id}`}>
               <CompactionDivider message={m} />
-            </motion.div>
+            </div>
           )
         }
         if (activity(m)) {
@@ -119,7 +114,7 @@ export function MobileTranscript({ messages, activityBreaks, commands = [], appr
             })}</div>
           </LazyDetails>
         }
-        return <motion.article key={m.id} layout="position" initial={enter} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.28, ease: [0.2, 0.8, 0.2, 1] }} className={`m-msg m-hold ${m.role === 'user' ? 'm-user' : 'm-assistant'}`} data-message-id={m.id}
+        return <article key={m.id} className={`m-msg m-hold ${m.role === 'user' ? 'm-user' : 'm-assistant'}`} data-message-id={m.id}
           tabIndex={0}
           onContextMenu={e => { if ((e.target as Element).closest('.m-select-text')) return; e.preventDefault(); e.stopPropagation(); cancelHold(); const rect = e.currentTarget.getBoundingClientRect(); action(m, e.currentTarget, e.clientX || rect.left + rect.width / 2, e.clientY || rect.top + 20) }}
           onTouchStart={e => { cancelHold(); if ((e.target as Element).closest('.m-select-text')) return; const element = e.currentTarget; const point = e.touches[0]; hold.current = setTimeout(() => { action(m, element, point.clientX, point.clientY); navigator.vibrate?.(20) }, 500) }}>
@@ -137,7 +132,7 @@ export function MobileTranscript({ messages, activityBreaks, commands = [], appr
               : commands.filter(c => c.text.trim() === m.text.trim()).sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))[0]
             const isAgentAccepted = hasAssistantReplied || Boolean(matchedCmd && (matchedCmd.state === 'accepted' || matchedCmd.state === 'running' || matchedCmd.state === 'completed'))
             return (
-              <small className="m-delivered" style={{ color: isAgentAccepted ? 'var(--m-primary, #4c6ef5)' : 'var(--m-muted, #868e96)' }}>
+              <small className="m-delivered" style={{ color: isAgentAccepted ? 'var(--m-primary)' : 'var(--m-muted)' }}>
                 {isAgentAccepted ? (
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}><IconChecks size={13} /> {hasAssistantReplied ? '已响应' : '已接收'}</span>
                 ) : (
@@ -146,9 +141,8 @@ export function MobileTranscript({ messages, activityBreaks, commands = [], appr
               </small>
             )
           })()}
-        </motion.article>
+        </article>
       })}
-      </AnimatePresence>
       {busy && (!rows.length || rows[rows.length - 1].role === 'user') && <div className="m-thinking-placeholder">··· 正在思考与响应中…</div>}
       {approvals.length > 0 && (
         <section className="m-native-approvals" aria-label="对话待处理审批">

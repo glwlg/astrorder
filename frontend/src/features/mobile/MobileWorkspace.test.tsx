@@ -206,17 +206,17 @@ describe('independent mobile composer', () => {
     fireEvent.click(within(confirm).getByRole('button', { name: '停止任务' }))
     await waitFor(() => expect(stop).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ agent_id: child.agent_id, session_id: child.id, target_id: child.id, action: 'stop' })))
   })
-  it('sends the final held transcript once after release and preserves the typed draft', async () => {
+  it('sends the final held transcript once after release on an empty input and disables hold-to-talk when text exists', async () => {
     useAstrorderStore.getState().setConnection('connected')
     vi.stubGlobal('navigator', Object.create(navigator, { mediaDevices: { value: { getUserMedia: vi.fn().mockResolvedValue({ getTracks: () => [{ stop: vi.fn() }] }) } } }))
     vi.spyOn(api, 'getLocalVoicePlugin').mockResolvedValue({ id: 'r2t2-local-voice', name: 'R2T2', enabled: true, state: 'running', available: true, progress: null, error: null, pid: 1, device: 'Vulkan0', model: 'test' })
     let callbacks!: localVoiceStream.LocalVoiceStreamCallbacks
     const controller = { stop: vi.fn(), cancel: vi.fn() }
-    vi.spyOn(localVoiceStream, 'startLocalVoiceStream').mockImplementation(async (_media, next) => { callbacks = next; return controller })
+    const startStream = vi.spyOn(localVoiceStream, 'startLocalVoiceStream').mockImplementation(async (_media, next) => { callbacks = next; return controller })
     const create = vi.spyOn(api, 'createCommand').mockImplementation(async input => ({ ...input, state: input.action === 'enqueue' ? 'queued' : 'accepted', attachments: [], created_at: session.updated_at, error: null }))
     mount()
     const input = screen.getByLabelText('消息内容')
-    fireEvent.change(input, { target: { value: '保留草稿' } })
+    expect(input.closest('.mobile-voice-hold')).toHaveAttribute('data-voice-hold', 'enabled')
     fireEvent.pointerDown(input, { pointerId: 1, pointerType: 'touch', clientX: 180, clientY: 600 })
     await waitFor(() => expect(callbacks).toBeDefined())
     act(() => callbacks.onTranscript('还没说完'))
@@ -227,6 +227,15 @@ describe('independent mobile composer', () => {
     act(() => callbacks.onDone('最终语音消息'))
     act(() => callbacks.onDone('重复结束'))
     await waitFor(() => expect(create).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ text: '最终语音消息', action: 'send', session_id: session.id })))
+
+    // Once text is present, hold-to-talk is disabled so native text selection works
+    startStream.mockClear()
+    fireEvent.change(input, { target: { value: '保留草稿' } })
+    expect(input.closest('.mobile-voice-hold')).toHaveAttribute('data-voice-hold', 'disabled')
+    fireEvent.pointerDown(input, { pointerId: 2, pointerType: 'touch', clientX: 180, clientY: 600 })
+    await new Promise(resolve => setTimeout(resolve, 420))
+    fireEvent.pointerUp(input, { pointerId: 2 })
+    expect(startStream).not.toHaveBeenCalled()
     expect(input).toHaveValue('保留草稿')
   })
   it('shows native context usage and opens detailed runtime facts', async () => {
@@ -891,5 +900,34 @@ describe('independent mobile composer', () => {
     fireEvent.change(input, { target: { value: '新会话标题' } })
     fireEvent.click(within(dialog).getByRole('button', { name: '保存' }))
     await waitFor(() => expect(update).toHaveBeenCalledWith(session.id, { agent_id: session.agent_id, title: '新会话标题' }))
+  })
+
+  it('keeps Enter as newline on mobile and submits via send button or Ctrl+Enter', async () => {
+    useAstrorderStore.getState().setConnection('connected')
+    const create = vi.spyOn(api, 'createCommand')
+    mount()
+    const input = screen.getByRole('textbox', { name: '消息内容' })
+    expect(input).toHaveAttribute('enterkeyhint', 'enter')
+    fireEvent.change(input, { target: { value: '第一行' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(create).not.toHaveBeenCalled()
+    expect(input).toHaveValue('第一行')
+
+    // IME composing (keyCode 229) must not submit even with Ctrl+Enter
+    fireEvent.keyDown(input, { key: 'Enter', ctrlKey: true, keyCode: 229 })
+    expect(create).not.toHaveBeenCalled()
+
+    // Explicit button click submits
+    fireEvent.click(screen.getByRole('button', { name: '发送' }))
+    await waitFor(() => expect(create).toHaveBeenCalledWith(expect.objectContaining({ text: '第一行' })))
+  })
+
+  it('exposes group chat navigation in both header and session drawer', async () => {
+    mount()
+    expect(screen.getByRole('button', { name: '群聊' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '打开会话列表' }))
+    const nav = await screen.findByRole('navigation', { name: '移动端模式切换' })
+    expect(within(nav).getByRole('button', { name: '对话' })).toHaveAttribute('aria-current', 'page')
+    expect(within(nav).getByRole('button', { name: '群聊' })).toBeInTheDocument()
   })
 })

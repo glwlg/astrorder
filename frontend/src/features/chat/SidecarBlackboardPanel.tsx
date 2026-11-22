@@ -113,30 +113,33 @@ export function SidecarBlackboardPanel({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--astr-surface)' }}>
       <div
+        className="sidecar-blackboard-header"
         style={{
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          height: 48,
-          padding: '0 12px',
+          gap: 8,
+          minHeight: 48,
+          padding: '6px 12px',
           borderBottom: '1px solid var(--astr-border)',
           background: 'var(--astr-surface)',
           flexShrink: 0,
+          minWidth: 0,
         }}
       >
-        <Group gap="xs">
-          <IconChalkboard size={18} color="var(--astr-indigo, #6366f1)" />
-          <Text fw={600} size="sm">{title}</Text>
-          <Badge size="xs" variant="light" color="indigo">{entries.length}</Badge>
+        <Group gap={6} wrap="nowrap" style={{ minWidth: 0, flex: 1 }}>
+          <IconChalkboard size={18} color="var(--astr-indigo, #6366f1)" style={{ flexShrink: 0 }} />
+          <Text fw={600} size="sm" truncate="end" title={title} style={{ minWidth: 0 }}>{title}</Text>
+          <Badge size="xs" variant="light" color="indigo" style={{ flexShrink: 0 }}>{entries.length}</Badge>
         </Group>
-        <Group gap={6}>
+        <Group gap={4} wrap="nowrap" style={{ flexShrink: 0 }}>
           <Tooltip label="导出 Markdown 文档" withArrow>
-            <ActionIcon variant="subtle" color="indigo" size="sm" onClick={handleExportMarkdown} disabled={entries.length === 0}>
+            <ActionIcon variant="subtle" color="indigo" size="sm" aria-label="导出 Markdown 文档" onClick={handleExportMarkdown} disabled={entries.length === 0}>
               <IconDownload size={15} />
             </ActionIcon>
           </Tooltip>
           <Tooltip label="刷新" withArrow>
-            <ActionIcon variant="subtle" color="gray" size="sm" onClick={fetchItems} loading={loading}>
+            <ActionIcon variant="subtle" color="gray" size="sm" aria-label="刷新黑板" onClick={fetchItems} loading={loading}>
               <IconRefresh size={15} />
             </ActionIcon>
           </Tooltip>
@@ -150,7 +153,7 @@ export function SidecarBlackboardPanel({
             写入
           </Button>
           {onClose && (
-            <ActionIcon variant="subtle" color="gray" size="sm" onClick={onClose}>
+            <ActionIcon className="sidecar-blackboard-close" variant="subtle" color="gray" size="sm" aria-label="关闭黑板" onClick={onClose}>
               <IconX size={15} />
             </ActionIcon>
           )}
@@ -187,7 +190,7 @@ export function SidecarBlackboardPanel({
         )}
       </ScrollArea>
 
-      <Modal opened={createOpened} onClose={() => setCreateOpened(false)} title="向黑板写入参数" centered size="sm">
+      <Modal opened={createOpened} onClose={() => setCreateOpened(false)} title="向黑板写入参数" centered size="sm" zIndex={450}>
         <Stack gap="sm">
           <TextInput
             label="参数 Key"

@@ -10,7 +10,7 @@ import { CreateBotGroupDialog } from "../../components/CreateBotGroupDialog";
 import { groupSidecarKey, useSidecarStore } from "../sidecar/sidecarStore";
 import { GroupSidecarPanel } from "./GroupSidecarPanel";
 
-export function GroupsPage({ routePrefix = "" }: { routePrefix?: string }) {
+export function GroupsPage({ routePrefix = "", surface = "desktop" }: { routePrefix?: string; surface?: "desktop" | "mobile" }) {
   const { groupId } = useParams();
   const navigate = useNavigate();
   const agents = useAstrorderStore((state) => state.agents);
@@ -76,6 +76,10 @@ export function GroupsPage({ routePrefix = "" }: { routePrefix?: string }) {
     const key = groupSidecarKey(groupId);
     const remembered = store.activeSessionKey === key || Boolean(store.sessionMemories[key]);
     store.switchSession(key);
+    if (surface === "mobile") {
+      if (useSidecarStore.getState().isOpen) useSidecarStore.getState().setIsOpen(false);
+      return;
+    }
     if (!remembered && localStorage.getItem(`astrorder:group:blackboard:${groupId}`) === "open") {
       store.openGroupBlackboard(groupId, activeGroup.name);
     }
@@ -92,14 +96,16 @@ export function GroupsPage({ routePrefix = "" }: { routePrefix?: string }) {
         "astrorder:blackboard-change",
         onBlackboardChange,
       );
-  }, [groupId, activeGroup?.id, activeGroup?.name]);
+  }, [groupId, activeGroup?.id, activeGroup?.name, surface]);
 
   const toggleBlackboard = () => {
     if (!activeGroup || activeGroup.id !== groupId) return;
     const store = useSidecarStore.getState();
     if (blackboardOpen) store.setIsOpen(false);
     else store.openGroupBlackboard(activeGroup.id, activeGroup.name);
-    localStorage.setItem(`astrorder:group:blackboard:${groupId}`, blackboardOpen ? "closed" : "open");
+    if (surface !== "mobile") {
+      localStorage.setItem(`astrorder:group:blackboard:${groupId}`, blackboardOpen ? "closed" : "open");
+    }
   };
   if (activeGroup && (!groupId || activeGroup.id === groupId)) {
     return (
@@ -119,6 +125,7 @@ export function GroupsPage({ routePrefix = "" }: { routePrefix?: string }) {
             <BotGroupChatPage
               group={activeGroup}
               agents={agents}
+              surface={surface}
               blackboardOpen={blackboardOpen}
               onToggleBlackboard={toggleBlackboard}
               onOpenBlackboard={(key) => {

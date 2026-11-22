@@ -32,7 +32,7 @@ export function ClickSpark({
 }: ClickSparkProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const sparksRef = useRef<Spark[]>([])
-  const startTimeRef = useRef<number | null>(null)
+  const rafRef = useRef<number | null>(null)
   const padding = 30 // allow sparks to explode beyond button bounds
 
   useEffect(() => {
@@ -72,17 +72,13 @@ export function ClickSpark({
 
   const easeFunc = useCallback((t: number) => t * (2 - t), [])
 
-  useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-
-    let animationId: number
-
-    const draw = (timestamp: number) => {
-      if (!startTimeRef.current) {
-        startTimeRef.current = timestamp
+  const drawFrame = useCallback(
+    (timestamp: number) => {
+      const canvas = canvasRef.current
+      const ctx = canvas?.getContext('2d')
+      if (!canvas || !ctx) {
+        rafRef.current = null
+        return
       }
       ctx.clearRect(0, 0, canvas.width, canvas.height)
 
@@ -112,15 +108,27 @@ export function ClickSpark({
         return true
       })
 
-      animationId = requestAnimationFrame(draw)
-    }
+      if (sparksRef.current.length > 0) {
+        rafRef.current = requestAnimationFrame(drawFrame)
+      } else {
+        rafRef.current = null
+      }
+    },
+    [sparkColor, sparkSize, sparkRadius, duration, easeFunc, extraScale],
+  )
 
-    animationId = requestAnimationFrame(draw)
-    return () => cancelAnimationFrame(animationId)
-  }, [sparkColor, sparkSize, sparkRadius, duration, easeFunc, extraScale])
+  useEffect(() => {
+    return () => {
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current)
+        rafRef.current = null
+      }
+    }
+  }, [])
 
   const handleClick = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return
+    if (typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return
     const canvas = canvasRef.current
     if (!canvas) return
     const rect = canvas.getBoundingClientRect()
@@ -136,6 +144,9 @@ export function ClickSpark({
     }))
 
     sparksRef.current.push(...newSparks)
+    if (rafRef.current === null) {
+      rafRef.current = requestAnimationFrame(drawFrame)
+    }
   }
 
   return (
