@@ -44,6 +44,13 @@ function active(session: Session) {
   return session.status === 'running' || session.status === 'waiting_approval' || session.live === true
 }
 
+function isCompanionSubagentSession(session: Session): boolean {
+  // Only explicit delegation/swarm subagent workers are companion tasks;
+  // forked or handed-off sessions (`parent_session_id` / `parent_session_key` / `handoff_from_*`)
+  // are normal top-level user sessions and must remain visible in the matrix.
+  return Boolean(session.delegation_parent_session_id?.trim())
+}
+
 function activeMessageCommand(status: Session['status'], commands: Command[]) {
   if (status !== 'running' && status !== 'waiting_approval') return undefined
   return commands.find((command) =>
@@ -896,6 +903,7 @@ export function MonitorPage() {
   useEffect(() => {
     const next = new Set(autoKeys)
     for (const session of sessions) {
+      if (isCompanionSubagentSession(session)) continue
       const key = scopeKey(session.agent_id, session.id)
       if ((active(session) || queuedSessionKeys.has(key)) && !manual.has(key) && !excluded.has(key)) next.add(key)
     }
@@ -943,20 +951,23 @@ export function MonitorPage() {
     return result
   }, [candidateSessions, slotOrder])
 
-  // 伴星过滤：拥有父会话血缘的子任务（伴星）默认不平铺在普通监控室网格/列表中，保持监控大盘干净独立
+  // 伴星过滤：仅过滤显式委派的子任务（delegation_parent_session_id），fork/交接会话属于正常会话；用户显式加入的会话始终展示
   const gridVisibleSessions = useMemo(() => {
-    const base = orderedSessions.filter((s) => !s.parent_session_id && !s.parent_session_key)
+    const base = orderedSessions.filter((s) => {
+      const key = scopeKey(s.agent_id, s.id)
+      return manual.has(key) || !isCompanionSubagentSession(s)
+    })
     if (!projectFilter) return base
     return base.filter((s) => {
       const label = (s.project_name || s.workspace?.split(/[/\\]/).filter(Boolean).pop() || '').trim()
       return label === projectFilter
     })
-  }, [orderedSessions, projectFilter])
+  }, [manual, orderedSessions, projectFilter])
 
   const tileProjectSessions = () => {
     if (!projectFilter) return
     const matching = sessions
-      .filter((s) => !s.parent_session_id && !s.parent_session_key)
+      .filter((s) => !isCompanionSubagentSession(s))
       .filter((s) => {
         const label = (s.project_name || s.workspace?.split(/[/\\]/).filter(Boolean).pop() || '').trim()
         return label === projectFilter
@@ -988,21 +999,29 @@ export function MonitorPage() {
   const candidates = useMemo(() => {
     const shown = new Set(gridVisibleSessions.map(session => scopeKey(session.agent_id, session.id)))
     const query = search.trim().toLowerCase()
-    return sessions.filter(session => !session.parent_session_id && !session.parent_session_key && !shown.has(scopeKey(session.agent_id, session.id)) && (!query || (session.title + ' ' + (session.workspace || '') + ' ' + (agents[session.agent_id]?.name || '')).toLowerCase().includes(query)))
+    return sessions.filter(session => !isCompanionSubagentSession(session) && !shown.has(scopeKey(session.agent_id, session.id)) && (!query || (session.title + ' ' + (session.workspace || '') + ' ' + (agents[session.agent_id]?.name || '')).toLowerCase().includes(query)))
   }, [agents, gridVisibleSessions, search, sessions])
+
+  const appendSlotOrder = (keys: string[]) => {
+    setSlotOrder((prev) => {
+      const merged = Array.from(new Set([...prev, ...keys]))
+      try { localStorage.setItem(ORDER_STORAGE_KEY, JSON.stringify(merged)) } catch {}
+      return merged
+    })
+  }
 
   const saveManual = (next: string[]) => {
     setManualKeys(next)
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(next)) } catch {}
     // 同步固化到 slotOrder，确保无论怎么刷新或触发更新，顺序保持稳定
-    saveNewOrder(Array.from(new Set([...slotOrder, ...next])))
+    appendSlotOrder(next)
   }
 
   const saveAutomatic = (next: string[]) => {
     setAutoKeys(next)
     try { localStorage.setItem(AUTO_STORAGE_KEY, JSON.stringify(next)) } catch {}
     // 同步固化到 slotOrder
-    saveNewOrder(Array.from(new Set([...slotOrder, ...next])))
+    appendSlotOrder(next)
   }
 
   const saveExcluded = (next: string[]) => {
@@ -1106,7 +1125,7 @@ export function MonitorPage() {
       if (active && active.overIndex !== null && active.overIndex !== active.sourceIndex) {
         const from = active.sourceIndex
         const to = active.overIndex
-        const nextList = [...orderedSessions]
+        const nextList = [...gridVisibleSessions]
         if (nextList[from] && nextList[to]) {
           const temp = nextList[from]
           nextList[from] = nextList[to]
@@ -1205,9 +1224,9 @@ export function MonitorPage() {
     window.addEventListener('mouseup', onMouseUp)
   }
 
-  const counts = useMemo(() => ({ running: orderedSessions.filter(active).length, waiting: orderedSessions.filter(session => session.status === 'waiting_approval').length }), [orderedSessions])
+  const counts = useMemo(() => ({ running: gridVisibleSessions.filter(active).length, waiting: gridVisibleSessions.filter(session => session.status === 'waiting_approval').length }), [gridVisibleSessions])
 
-  const liftedSession = liftedDrag !== null ? orderedSessions[liftedDrag.sourceIndex] : null
+  const liftedSession = liftedDrag !== null ? gridVisibleSessions[liftedDrag.sourceIndex] : null
   const visibleKeys = useMemo(() => new Set(gridVisibleSessions.map(s => scopeKey(s.agent_id, s.id))), [gridVisibleSessions])
   const unassignedQueued = useMemo(() => queuedCommands.filter(item => !visibleKeys.has(scopeKey(item.agentId, item.sessionId))), [queuedCommands, visibleKeys])
 
@@ -1240,8 +1259,17 @@ export function MonitorPage() {
         if (!key) {
           key = e.dataTransfer.getData('text/plain')
         }
-        if (key && !manualKeys.includes(key)) {
+        if (key && !visibleKeys.has(key)) {
           addManual(key)
+          if (projectFilter) {
+            const droppedSession = sessions.find(s => scopeKey(s.agent_id, s.id) === key)
+            const droppedLabel = (droppedSession?.project_name || droppedSession?.workspace?.split(/[/\\]/).filter(Boolean).pop() || '').trim()
+            if (droppedSession && droppedLabel !== projectFilter) {
+              const next = new URLSearchParams(searchParams)
+              next.delete('project')
+              setSearchParams(next, { replace: true })
+            }
+          }
           notifications.show({
             color: 'teal',
             message: `已将“${title}”加入矩阵`,

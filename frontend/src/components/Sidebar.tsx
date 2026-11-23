@@ -97,8 +97,10 @@ function addSessionToMonitor(sessionKey: string, title?: string) {
   try {
     const raw = localStorage.getItem('astrorder:monitor-sessions')
     const current: string[] = raw ? JSON.parse(raw) : []
-    if (!current.includes(sessionKey)) {
-      const next = [...current, sessionKey]
+    const excludedValues: string[] = JSON.parse(localStorage.getItem('astrorder:monitor-excluded-sessions') || '[]')
+    const wasExcluded = excludedValues.includes(sessionKey)
+    if (!current.includes(sessionKey) || wasExcluded) {
+      const next = current.includes(sessionKey) ? current : [...current, sessionKey]
       localStorage.setItem('astrorder:monitor-sessions', JSON.stringify(next))
       for (const storageKey of ['astrorder:monitor-auto-sessions', 'astrorder:monitor-excluded-sessions']) {
         const values: string[] = JSON.parse(localStorage.getItem(storageKey) || '[]')

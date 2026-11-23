@@ -412,4 +412,112 @@ describe('MonitorPage', () => {
     expect(await screen.findByTestId('monitor-card-agent-1-session-2')).toBeInTheDocument()
     expect(screen.queryByTestId('monitor-card-agent-1-session-other')).not.toBeInTheDocument()
   })
+
+  it('shows forked or handed-off sessions with parent_session_id in the matrix and supports dragging them in', async () => {
+    const handoffRunning = {
+      id: 'session-handoff',
+      agent_id: 'agent-1',
+      title: 'GitHub热门AI炒股项目实测对比',
+      workspace: '/ws/stock',
+      status: 'running' as const,
+      updated_at: '2026-09-07T10:05:00Z',
+      parent_session_id: 'codex-origin',
+      parent_session_key: 'codex::codex-origin',
+      handoff_from_agent_id: 'codex',
+      handoff_from_session_id: 'codex-origin',
+    }
+    const forkedIdle = {
+      id: 'session-forked',
+      agent_id: 'agent-1',
+      title: '分叉出来的空闲会话',
+      workspace: '/ws/stock',
+      status: 'idle' as const,
+      updated_at: '2026-09-07T09:30:00Z',
+      parent_session_id: 'session-1',
+    }
+    const delegatedWorker = {
+      id: 'session-worker',
+      agent_id: 'agent-1',
+      title: '伴星子任务',
+      workspace: '/ws/stock',
+      status: 'running' as const,
+      updated_at: '2026-09-07T10:06:00Z',
+      delegation_parent_agent_id: 'agent-1',
+      delegation_parent_session_id: 'session-1',
+    }
+    useAstrorderStore.setState({
+      sessions: {
+        'agent-1::session-1': activeSession,
+        'agent-1::session-handoff': handoffRunning,
+        'agent-1::session-forked': forkedIdle,
+        'agent-1::session-worker': delegatedWorker,
+      },
+    })
+
+    const { container } = renderPage()
+    // Running handoff session must appear immediately; delegation worker stays out of default matrix.
+    expect(await screen.findByTestId('monitor-card-agent-1-session-handoff')).toBeInTheDocument()
+    expect(screen.queryByTestId('monitor-card-agent-1-session-worker')).not.toBeInTheDocument()
+    expect(screen.getByText('2 个会话')).toBeInTheDocument()
+
+    // Dragging an idle forked session into the matrix must render its card instead of hiding it.
+    const page = container.querySelector('.monitor-page')!
+    fireEvent.drop(page, {
+      dataTransfer: {
+        types: ['application/x-astrorder-session'],
+        getData: (type: string) =>
+          type === 'application/x-astrorder-session'
+            ? JSON.stringify({
+                agent_id: forkedIdle.agent_id,
+                id: forkedIdle.id,
+                title: forkedIdle.title,
+                key: `${forkedIdle.agent_id}::${forkedIdle.id}`,
+              })
+            : '',
+      },
+    })
+    expect(await screen.findByTestId('monitor-card-agent-1-session-forked')).toBeInTheDocument()
+    expect(screen.getByText('3 个会话')).toBeInTheDocument()
+  })
+
+  it('clears a conflicting ?project= filter when dropping a session from another project onto the matrix', async () => {
+    const otherSession = {
+      id: 'session-stock',
+      agent_id: 'agent-1',
+      title: '跨项目拖入会话',
+      project_name: 'stock',
+      workspace: '/ws/stock',
+      status: 'idle' as const,
+      updated_at: '2026-09-07T10:02:00Z',
+    }
+    storage.set('astrorder:monitor-sessions', JSON.stringify(['agent-1::session-stock']))
+    useAstrorderStore.setState({
+      sessions: {
+        'agent-1::session-1': { ...activeSession, project_name: 'OpsCore', workspace: '/ws/OpsCore' },
+        'agent-1::session-stock': otherSession,
+      },
+    })
+
+    const { container } = renderPage(['/monitor?project=OpsCore'])
+    expect(screen.queryByTestId('monitor-card-agent-1-session-stock')).not.toBeInTheDocument()
+
+    const page = container.querySelector('.monitor-page')!
+    fireEvent.drop(page, {
+      dataTransfer: {
+        types: ['application/x-astrorder-session'],
+        getData: (type: string) =>
+          type === 'application/x-astrorder-session'
+            ? JSON.stringify({
+                agent_id: otherSession.agent_id,
+                id: otherSession.id,
+                title: otherSession.title,
+                key: `${otherSession.agent_id}::${otherSession.id}`,
+              })
+            : '',
+      },
+    })
+
+    expect(await screen.findByTestId('monitor-card-agent-1-session-stock')).toBeInTheDocument()
+    expect(screen.queryByText('项目：OpsCore')).not.toBeInTheDocument()
+  })
 })
