@@ -64,6 +64,36 @@ func ServeHelper(ctx context.Context, input io.Reader, output io.Writer) error {
 			ContentType string `json:"content_type"`
 		}{Info: result.Info, ContentType: result.ContentType}
 		return writeHelperStream(output, metadata, result.Info.Size, result.Reader)
+	case "read_range":
+		var payload struct {
+			Path   string `json:"path"`
+			Offset int64  `json:"offset"`
+			Length int64  `json:"length"`
+		}
+		if err := json.Unmarshal(scope.Request, &payload); err != nil {
+			return writeHelperError(output, errorf(400, "invalid_request", "Read range request is invalid", err))
+		}
+		rr, ok := filesystem.(RangeReader)
+		if !ok {
+			return writeHelperError(output, errorf(500, "range_unavailable", "Range reading is unavailable", nil))
+		}
+		result, err := rr.ReadRange(ctx, payload.Path, payload.Offset, payload.Length)
+		if err != nil {
+			return writeHelperError(output, err)
+		}
+		defer result.Reader.Close()
+		chunkSize := result.Info.Size - payload.Offset
+		if payload.Length > 0 && payload.Length < chunkSize {
+			chunkSize = payload.Length
+		}
+		if chunkSize < 0 {
+			chunkSize = 0
+		}
+		metadata := struct {
+			Info        Info   `json:"info"`
+			ContentType string `json:"content_type"`
+		}{Info: result.Info, ContentType: result.ContentType}
+		return writeHelperStream(output, metadata, chunkSize, result.Reader)
 	case "write_atomic":
 		var payload struct {
 			Path      string      `json:"path"`

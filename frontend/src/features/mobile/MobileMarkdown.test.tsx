@@ -102,3 +102,23 @@ it('resets code block copied feedback back to copy after a short delay', async (
   })
   expect(screen.getByRole('button', { name: '复制' })).toBeInTheDocument()
 })
+
+it('opens local video markdown links in the mobile video player callback', () => {
+  const onVideoClick = vi.fn()
+  const onFileClick = vi.fn()
+  render(
+    <MobileMarkdown
+      value={'成片：[ai-ops-platform.mp4](films/ai-ops-platform/ai-ops-platform.mp4)'}
+      workspace="/workspace/OpsCore"
+      sessionId="session-vid"
+      onVideoClick={onVideoClick}
+      onFileClick={onFileClick}
+    />,
+  )
+  fireEvent.click(screen.getByRole('link', { name: 'ai-ops-platform.mp4' }))
+  expect(onVideoClick).toHaveBeenCalledWith(
+    expect.stringContaining('/api/v1/files/raw?path=%2Fworkspace%2FOpsCore%2Ffilms%2Fai-ops-platform%2Fai-ops-platform.mp4'),
+    'ai-ops-platform.mp4',
+  )
+  expect(onFileClick).not.toHaveBeenCalled()
+})

@@ -174,6 +174,13 @@ type FileSystem interface {
 	ExecGit(context.Context, GitRequest) (GitResult, error)
 }
 
+// RangeReader is an optional capability for streaming a byte range of a file
+// without reading the whole payload (required for video scrubbing & iOS Safari).
+// When length <= 0, the range extends through EOF.
+type RangeReader interface {
+	ReadRange(ctx context.Context, path string, offset, length int64) (*ReadResult, error)
+}
+
 // Request and Response are the helper protocol envelopes. Request data is
 // typed by Action; write payload bytes follow the JSON header on stdin.
 type Request struct {

@@ -120,7 +120,7 @@ func (h *Handler) ServeHTTP(response http.ResponseWriter, request *http.Request)
 
 func match(method, path string) (Registration, bool) {
 	for _, registration := range Registrations() {
-		if registration.Method == method && registration.Path == path {
+		if registration.Path == path && (registration.Method == method || (path == "/api/v1/files/raw" && method == http.MethodHead)) {
 			return registration, true
 		}
 	}
@@ -305,6 +305,85 @@ func (h *Handler) exists(response http.ResponseWriter, request *http.Request) er
 	return nil
 }
 
+func mediaContentTypeFallback(name, detected string) string {
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".mp4", ".m4v":
+		return "video/mp4"
+	case ".webm":
+		return "video/webm"
+	case ".mov":
+		return "video/quicktime"
+	case ".ogv":
+		return "video/ogg"
+	case ".mkv":
+		return "video/x-matroska"
+	case ".mp3":
+		return "audio/mpeg"
+	case ".wav":
+		return "audio/wav"
+	case ".m4a":
+		return "audio/mp4"
+	case ".ogg":
+		return "audio/ogg"
+	}
+	if strings.TrimSpace(detected) != "" {
+		return detected
+	}
+	return "application/octet-stream"
+}
+
+// parseSingleByteRange parses an RFC 9110 single byte range header ("bytes=start-end",
+// "bytes=start-", or "bytes=-suffix"). ok=false means ignore Range (treat as full 200);
+// unsatisfiable=true means respond 416 Range Not Satisfiable.
+func parseSingleByteRange(header string, totalSize int64) (start, end int64, ok bool, unsatisfiable bool) {
+	trimmed := strings.TrimSpace(header)
+	if !strings.HasPrefix(trimmed, "bytes=") {
+		return 0, 0, false, false
+	}
+	spec := strings.TrimSpace(strings.TrimPrefix(trimmed, "bytes="))
+	if spec == "" || strings.Contains(spec, ",") {
+		// Multi-range requests are rare for media; fall back cleanly to 200 full response.
+		return 0, 0, false, false
+	}
+	dash := strings.IndexByte(spec, '-')
+	if dash < 0 {
+		return 0, 0, false, false
+	}
+	if totalSize <= 0 {
+		return 0, 0, false, true
+	}
+	startStr := strings.TrimSpace(spec[:dash])
+	endStr := strings.TrimSpace(spec[dash+1:])
+	if startStr == "" {
+		suffix, err := strconv.ParseInt(endStr, 10, 64)
+		if err != nil || suffix <= 0 {
+			return 0, 0, false, true
+		}
+		if suffix >= totalSize {
+			return 0, totalSize - 1, true, false
+		}
+		return totalSize - suffix, totalSize - 1, true, false
+	}
+	parsedStart, err := strconv.ParseInt(startStr, 10, 64)
+	if err != nil || parsedStart < 0 {
+		return 0, 0, false, true
+	}
+	if parsedStart >= totalSize {
+		return 0, 0, false, true
+	}
+	if endStr == "" {
+		return parsedStart, totalSize - 1, true, false
+	}
+	parsedEnd, err := strconv.ParseInt(endStr, 10, 64)
+	if err != nil || parsedEnd < parsedStart {
+		return 0, 0, false, true
+	}
+	if parsedEnd >= totalSize {
+		parsedEnd = totalSize - 1
+	}
+	return parsedStart, parsedEnd, true, false
+}
+
 func (h *Handler) raw(response http.ResponseWriter, request *http.Request) error {
 	query := request.URL.Query()
 	path := targetfs.CleanPath(query.Get("path"))
@@ -315,16 +394,107 @@ func (h *Handler) raw(response http.ResponseWriter, request *http.Request) error
 	if err != nil {
 		return err
 	}
+	download := parseBool(query.Get("download"))
+	rangeHeader := strings.TrimSpace(request.Header.Get("Range"))
+
+	// Fast HEAD path for remote/non-seekable targets or any target to avoid opening body needlessly.
+	if request.Method == http.MethodHead {
+		info, statErr := resolved.FileSystem.Stat(request.Context(), path)
+		if statErr != nil {
+			return statErr
+		}
+		if info.IsDir {
+			return &targetfs.Error{Status: 404, Code: "file_not_found", Detail: "File was not found"}
+		}
+		ct := mediaContentTypeFallback(info.Name, mime.TypeByExtension(filepath.Ext(info.Name)))
+		response.Header().Set("Content-Type", ct)
+		response.Header().Set("Accept-Ranges", "bytes")
+		response.Header().Set("Content-Length", strconv.FormatInt(info.Size, 10))
+		if download {
+			response.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": info.Name}))
+		}
+		response.WriteHeader(http.StatusOK)
+		return nil
+	}
+
+	// Remote/Range-capable path when the client asks for a byte range (video streaming/seeking & iOS Safari).
+	if rangeHeader != "" {
+		if rangeReader, supportsRange := resolved.FileSystem.(targetfs.RangeReader); supportsRange {
+			info, statErr := resolved.FileSystem.Stat(request.Context(), path)
+			if statErr != nil {
+				return statErr
+			}
+			if info.IsDir {
+				return &targetfs.Error{Status: 404, Code: "file_not_found", Detail: "File was not found"}
+			}
+			start, end, ok, unsatisfiable := parseSingleByteRange(rangeHeader, info.Size)
+			if unsatisfiable {
+				response.Header().Set("Accept-Ranges", "bytes")
+				response.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", info.Size))
+				response.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
+				return nil
+			}
+			if ok {
+				chunkLen := end - start + 1
+				result, rangeErr := rangeReader.ReadRange(request.Context(), path, start, chunkLen)
+				if rangeErr != nil {
+					var targetErr *targetfs.Error
+					// Backward compatibility when an older remote helper does not implement read_range yet.
+					if errors.As(rangeErr, &targetErr) && targetErr.Code == "unsupported_action" {
+						full, fullErr := resolved.FileSystem.Read(request.Context(), path)
+						if fullErr != nil {
+							return fullErr
+						}
+						defer full.Reader.Close()
+						if start > 0 {
+							if _, skipErr := io.CopyN(io.Discard, full.Reader, start); skipErr != nil {
+								return skipErr
+							}
+						}
+						response.Header().Set("Content-Type", mediaContentTypeFallback(full.Info.Name, full.ContentType))
+						response.Header().Set("Accept-Ranges", "bytes")
+						response.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, info.Size))
+						response.Header().Set("Content-Length", strconv.FormatInt(chunkLen, 10))
+						if download {
+							response.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": full.Info.Name}))
+						}
+						response.WriteHeader(http.StatusPartialContent)
+						_, err = copyHTTP(request.Context(), response, io.LimitReader(full.Reader, chunkLen))
+						return err
+					}
+					return rangeErr
+				}
+				defer result.Reader.Close()
+				response.Header().Set("Content-Type", mediaContentTypeFallback(result.Info.Name, result.ContentType))
+				response.Header().Set("Accept-Ranges", "bytes")
+				response.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, info.Size))
+				response.Header().Set("Content-Length", strconv.FormatInt(chunkLen, 10))
+				if download {
+					response.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": result.Info.Name}))
+				}
+				response.WriteHeader(http.StatusPartialContent)
+				_, err = copyHTTP(request.Context(), response, result.Reader)
+				return err
+			}
+		}
+	}
+
 	result, err := resolved.FileSystem.Read(request.Context(), path)
 	if err != nil {
 		return err
 	}
 	defer result.Reader.Close()
-	response.Header().Set("Content-Type", result.ContentType)
-	response.Header().Set("Content-Length", strconv.FormatInt(result.Info.Size, 10))
-	if parseBool(query.Get("download")) {
+	contentType := mediaContentTypeFallback(result.Info.Name, result.ContentType)
+	response.Header().Set("Content-Type", contentType)
+	response.Header().Set("Accept-Ranges", "bytes")
+	if download {
 		response.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": result.Info.Name}))
 	}
+	if seeker, ok := result.Reader.(io.ReadSeeker); ok && !download {
+		http.ServeContent(response, request, result.Info.Name, result.Info.ModTime, seeker)
+		return nil
+	}
+	response.Header().Set("Content-Length", strconv.FormatInt(result.Info.Size, 10))
 	response.WriteHeader(http.StatusOK)
 	_, err = copyHTTP(request.Context(), response, result.Reader)
 	return err

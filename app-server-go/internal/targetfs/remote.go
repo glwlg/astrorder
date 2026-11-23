@@ -194,6 +194,30 @@ func (r *remoteFileSystem) Read(ctx context.Context, path string) (*ReadResult, 
 	return &ReadResult{Info: metadata.Info, ContentType: metadata.ContentType, Reader: reader}, nil
 }
 
+func (r *remoteFileSystem) ReadRange(ctx context.Context, path string, offset, length int64) (*ReadResult, error) {
+	data, err := r.envelope(struct {
+		Path   string `json:"path"`
+		Offset int64  `json:"offset"`
+		Length int64  `json:"length"`
+	}{Path: path, Offset: offset, Length: length})
+	if err != nil {
+		return nil, err
+	}
+	response, reader, err := r.start(ctx, Request{Version: ProtocolVersion, Action: "read_range", Data: data})
+	if err != nil {
+		return nil, err
+	}
+	var metadata struct {
+		Info        Info   `json:"info"`
+		ContentType string `json:"content_type"`
+	}
+	if err := json.Unmarshal(response.Data, &metadata); err != nil {
+		reader.Close()
+		return nil, errorf(502, "invalid_helper_response", "Target helper returned invalid file metadata", err)
+	}
+	return &ReadResult{Info: metadata.Info, ContentType: metadata.ContentType, Reader: reader}, nil
+}
+
 func (r *remoteFileSystem) WriteAtomic(ctx context.Context, path string, source io.Reader, mode fs.FileMode) (Info, error) {
 	data, err := r.envelope(struct {
 		Path      string      `json:"path"`

@@ -3,6 +3,7 @@ package targetfs
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -368,5 +369,58 @@ func TestCleanPathPreservesPOSIXRootAndNormalizesWindowsDriveFileURIs(t *testing
 		if got := CleanPath(tc.input); got != tc.want {
 			t.Errorf("CleanPath(%q) = %q, want %q", tc.input, got, tc.want)
 		}
+	}
+}
+
+func TestReadRangeAndHelperProtocol(t *testing.T) {
+	root := t.TempDir()
+	videoPath := filepath.Join(root, "clip.mp4")
+	content := []byte("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+	if err := os.WriteFile(videoPath, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	fsys, err := NewLocal(LocalOptions{Workspace: root, AllowedRoots: []string{root}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr, ok := fsys.(RangeReader)
+	if !ok {
+		t.Fatal("localFileSystem must implement RangeReader")
+	}
+	res, err := rr.ReadRange(context.Background(), videoPath, 10, 6)
+	if err != nil {
+		t.Fatalf("ReadRange failed: %v", err)
+	}
+	defer res.Reader.Close()
+	got, err := io.ReadAll(res.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "ABCDEF" || res.Info.Size != int64(len(content)) || res.ContentType != "video/mp4" {
+		t.Fatalf("got=%q size=%d ct=%q", string(got), res.Info.Size, res.ContentType)
+	}
+
+	// Verify helper stdio protocol read_range returns only the requested slice with full file size metadata.
+	reqData, _ := json.Marshal(scopeRequest{
+		Workspace:    root,
+		AllowedRoots: []string{root},
+		Request:      mustJSON(t, map[string]any{"path": videoPath, "offset": 2, "length": 5}),
+	})
+	headerBytes, _ := json.Marshal(Request{Version: ProtocolVersion, Action: "read_range", Data: reqData})
+	var out bytes.Buffer
+	if err := ServeHelper(context.Background(), bytes.NewReader(append(headerBytes, '\n')), &out); err != nil {
+		t.Fatalf("ServeHelper read_range failed: %v", err)
+	}
+	idx := bytes.IndexByte(out.Bytes(), '\n')
+	if idx < 0 {
+		t.Fatalf("missing response header newline: %q", out.String())
+	}
+	var resp Response
+	if err := json.Unmarshal(out.Bytes()[:idx], &resp); err != nil || !resp.OK || resp.PayloadSize != 5 {
+		t.Fatalf("unexpected helper response: %+v err=%v", resp, err)
+	}
+	if body := string(out.Bytes()[idx+1:]); body != "23456" {
+		t.Fatalf("helper read_range payload=%q, want 23456", body)
 	}
 }

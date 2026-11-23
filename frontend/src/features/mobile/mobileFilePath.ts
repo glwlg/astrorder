@@ -1,4 +1,5 @@
 import { imageMediaType } from '../sidecar/viewers/image/formats'
+import { videoMediaType } from '../sidecar/viewers/video/formats'
 
 const LOCAL_FILE_RE = /^(?:file:\/\/\/?|[a-zA-Z]:[/\\]|\/(?!\/|api\/)|\.{1,2}[/\\]|[^:#?\s]+\.[a-zA-Z0-9]{1,8}(?:[?#]|$))/
 
@@ -18,6 +19,12 @@ export function isMobileImageFilePath(path: string): boolean {
   const clean = path.trim().split(/[?#]/)[0]
   if (!clean || /\.drawio\.svg$/i.test(clean)) return false
   return Boolean(imageMediaType(clean))
+}
+
+export function isMobileVideoFilePath(path: string): boolean {
+  const clean = path.trim().split(/[?#]/)[0]
+  if (!clean) return false
+  return Boolean(videoMediaType(clean))
 }
 
 export function resolveMobileFilePath(raw: string, workspace?: string | null): string {

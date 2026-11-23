@@ -227,6 +227,62 @@ func TestFilesHTTPAllowsTempDirsAndSkipsForbiddenInExists(t *testing.T) {
 	}
 }
 
+func TestFilesRawSupportsVideoRangeAndHead(t *testing.T) {
+	root := t.TempDir()
+	videoPath := filepath.Join(root, "demo.mp4")
+	payload := []byte("0123456789abcdefghijklmnopqrstuvwxyz")
+	if err := os.WriteFile(videoPath, payload, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	handler := testHandler(root, fakeStore{}, &eventRecorder{}, &openRecorder{})
+	rawURL := "/api/v1/files/raw?path=" + queryEscape(videoPath)
+
+	// HEAD request returns video MIME type, Accept-Ranges, Content-Length, and empty body.
+	headRes := call(t, handler, http.MethodHead, rawURL, nil)
+	if headRes.Code != http.StatusOK {
+		t.Fatalf("HEAD status=%d body=%s", headRes.Code, headRes.Body.String())
+	}
+	if headRes.Header().Get("Content-Type") != "video/mp4" {
+		t.Fatalf("HEAD Content-Type=%q, want video/mp4", headRes.Header().Get("Content-Type"))
+	}
+	if headRes.Header().Get("Accept-Ranges") != "bytes" {
+		t.Fatalf("HEAD Accept-Ranges=%q, want bytes", headRes.Header().Get("Accept-Ranges"))
+	}
+	if headRes.Header().Get("Content-Length") != "36" || headRes.Body.Len() != 0 {
+		t.Fatalf("HEAD len=%q body=%d", headRes.Header().Get("Content-Length"), headRes.Body.Len())
+	}
+
+	// iOS Safari initial probe: Range: bytes=0-1 -> 206 Partial Content.
+	req := httptest.NewRequest(http.MethodGet, rawURL, nil)
+	req.Header.Set("Range", "bytes=0-1")
+	probeRes := httptest.NewRecorder()
+	handler.ServeHTTP(probeRes, req)
+	if probeRes.Code != http.StatusPartialContent {
+		t.Fatalf("Range 0-1 status=%d body=%q", probeRes.Code, probeRes.Body.String())
+	}
+	if probeRes.Header().Get("Content-Range") != "bytes 0-1/36" || probeRes.Body.String() != "01" {
+		t.Fatalf("Range 0-1 headers=%v body=%q", probeRes.Header(), probeRes.Body.String())
+	}
+
+	// Mid-file seek range: Range: bytes=10-15 -> "abcdef".
+	req = httptest.NewRequest(http.MethodGet, rawURL, nil)
+	req.Header.Set("Range", "bytes=10-15")
+	midRes := httptest.NewRecorder()
+	handler.ServeHTTP(midRes, req)
+	if midRes.Code != http.StatusPartialContent || midRes.Body.String() != "abcdef" || midRes.Header().Get("Content-Range") != "bytes 10-15/36" {
+		t.Fatalf("Range 10-15 status=%d headers=%v body=%q", midRes.Code, midRes.Header(), midRes.Body.String())
+	}
+
+	// Out-of-bounds range -> 416 Range Not Satisfiable.
+	req = httptest.NewRequest(http.MethodGet, rawURL, nil)
+	req.Header.Set("Range", "bytes=999-1000")
+	badRes := httptest.NewRecorder()
+	handler.ServeHTTP(badRes, req)
+	if badRes.Code != http.StatusRequestedRangeNotSatisfiable || badRes.Header().Get("Content-Range") != "bytes */36" {
+		t.Fatalf("Range 999-1000 status=%d headers=%v", badRes.Code, badRes.Header())
+	}
+}
+
 func testHandler(root string, store fakeStore, publisher Publisher, opener FileOpener) http.Handler {
 	resolver := targetfs.NewResolver(targetfs.ResolverOptions{Store: store, DefaultWorkspace: root, AllowedRoots: []string{root}, LocalStageRoots: []string{root}})
 	return NewHandler(Options{Authorizer: allowBrowser{}, Resolver: resolver, Publisher: publisher, Opener: opener, StagingRoot: filepath.Join(root, "stage")})

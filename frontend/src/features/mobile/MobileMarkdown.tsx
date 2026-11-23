@@ -8,9 +8,10 @@ import {
   IconBulb,
   IconFlame,
   IconInfoCircle,
+  IconMovie,
 } from '@tabler/icons-react'
 import { highlightCode, parseCalloutBlockquote, type CalloutKind } from '../../components/markdownHighlight'
-import { extractMobileMarkdownImageUrls, isMobileImageFilePath, isMobileLocalFilePath, mobileFileUrl, resolveMobileFilePath } from './mobileFilePath'
+import { extractMobileMarkdownImageUrls, isMobileImageFilePath, isMobileLocalFilePath, isMobileVideoFilePath, mobileFileUrl, resolveMobileFilePath } from './mobileFilePath'
 
 const CALLOUT_ICONS: Record<CalloutKind, typeof IconInfoCircle> = {
   note: IconInfoCircle,
@@ -76,10 +77,11 @@ function CodeBlock({ children }: { children?: ReactNode }) {
   )
 }
 
-export function MobileMarkdown({ value, onFileClick, onImageClick, workspace, sessionId, connectionId }: {
+export function MobileMarkdown({ value, onFileClick, onImageClick, onVideoClick, workspace, sessionId, connectionId }: {
   value: string
   onFileClick?: (path: string) => void
   onImageClick?: (url: string, gallery?: string[]) => void
+  onVideoClick?: (url: string, name: string) => void
   workspace?: string | null
   sessionId?: string
   connectionId?: string | null
@@ -89,8 +91,8 @@ export function MobileMarkdown({ value, onFileClick, onImageClick, workspace, se
     () => extractMobileMarkdownImageUrls(value, workspace, sessionId, connectionId),
     [value, workspace, sessionId, connectionId],
   )
-  const callbacks = useRef({ onFileClick, onImageClick })
-  callbacks.current = { onFileClick, onImageClick }
+  const callbacks = useRef({ onFileClick, onImageClick, onVideoClick })
+  callbacks.current = { onFileClick, onImageClick, onVideoClick }
   const openImage = (targetUrl: string) => {
     const gallery = galleryRef.current
     if (gallery.length > 1) {
@@ -121,7 +123,7 @@ export function MobileMarkdown({ value, onFileClick, onImageClick, workspace, se
     a: ({ href, children }) => {
       const url = href || ''
       const isLocal = isMobileLocalFilePath(url)
-      if (isLocal && (onImageClick || onFileClick)) {
+      if (isLocal && (onImageClick || onVideoClick || onFileClick)) {
         const resolvedPath = resolveMobileFilePath(url, workspace)
         const rawUrl = mobileFileUrl(url, workspace, sessionId, connectionId)
         if (onImageClick && isMobileImageFilePath(resolvedPath)) {
@@ -135,6 +137,22 @@ export function MobileMarkdown({ value, onFileClick, onImageClick, workspace, se
               }}
             >
               {children}
+            </a>
+          )
+        }
+        if (onVideoClick && isMobileVideoFilePath(resolvedPath)) {
+          const videoName = resolvedPath.split(/[\\/]/).pop() || 'video.mp4'
+          return (
+            <a
+              className="m-file-pill is-video"
+              href={rawUrl}
+              onClick={(e) => {
+                e.preventDefault()
+                callbacks.current.onVideoClick?.(rawUrl, videoName)
+              }}
+            >
+              <IconMovie size={13} aria-hidden="true" style={{ flexShrink: 0 }} />
+              <span>{children}</span>
             </a>
           )
         }
@@ -168,6 +186,6 @@ export function MobileMarkdown({ value, onFileClick, onImageClick, workspace, se
       return <img src={url} alt={alt || ''} loading="lazy" style={{ maxWidth: '100%', borderRadius: 8, marginTop: 8, marginBottom: 8, display: 'block' }} />
     },
     table: ({ children }) => <div className="m-table-wrap"><table>{children}</table></div>,
-  }), [workspace, sessionId, connectionId, Boolean(onFileClick), Boolean(onImageClick)])
+  }), [workspace, sessionId, connectionId, Boolean(onFileClick), Boolean(onImageClick), Boolean(onVideoClick)])
   return <div className="markdown-content"><ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml urlTransform={url => url} components={components}>{value}</ReactMarkdown></div>
 }

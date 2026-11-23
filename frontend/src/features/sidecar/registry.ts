@@ -10,6 +10,7 @@ import { sideChatViewer } from './viewers/sidechat'
 import { agentGraphViewer } from './viewers/agentgraph'
 import { htmlViewer } from './viewers/html'
 import { imageViewer } from './viewers/image'
+import { videoViewer } from './viewers/video'
 import { mermaidViewer } from './viewers/mermaid'
 import { monacoViewer } from './viewers/monaco'
 import { xtermViewer } from './viewers/terminal'
@@ -40,6 +41,7 @@ class ArtifactViewerRegistry {
     this.register(threeViewer)
     this.register(htmlViewer)
     this.register(imageViewer)
+    this.register(videoViewer)
     this.register(xtermViewer)
     this.register(monacoViewer)
     this.register(fileTreeViewer)

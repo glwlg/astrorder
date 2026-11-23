@@ -9,6 +9,7 @@ import {
   IconFile,
   IconFileCode,
   IconFileDescription,
+  IconMovie,
   IconPhoto,
 } from '@tabler/icons-react'
 import { authenticatedApiFetch } from '../api/client'
@@ -20,6 +21,7 @@ export interface FileHoverTarget {
   displayName: string
   readUrl: string
   isImage: boolean
+  isVideo?: boolean
   isNonPreviewable: boolean
   line?: number
   endLine?: number
@@ -201,7 +203,7 @@ export function FileLinkHoverPreview({
 
   useEffect(() => {
     setCopied(false)
-    if (!target || target.isImage || target.isNonPreviewable || !target.readUrl) {
+    if (!target || target.isImage || target.isVideo || target.isNonPreviewable || !target.readUrl) {
       setState({ loading: false })
       return
     }
@@ -349,11 +351,13 @@ export function FileLinkHoverPreview({
   const parentDir = shortParentPath(target.path)
   const HeadIcon = target.isImage
     ? IconPhoto
-    : isMarkdownPath(target.path)
-      ? IconFileDescription
-      : target.isNonPreviewable
-        ? IconFile
-        : IconFileCode
+    : target.isVideo
+      ? IconMovie
+      : isMarkdownPath(target.path)
+        ? IconFileDescription
+        : target.isNonPreviewable
+          ? IconFile
+          : IconFileCode
 
   const handleCopySnippet = () => {
     const text = computedSlice?.rawCopy
@@ -426,6 +430,11 @@ export function FileLinkHoverPreview({
                 onOpen()
               }}
             />
+          </div>
+        ) : target.isVideo ? (
+          <div className="file-hover-empty">
+            <p>视频文件 · 点击在侧边栏播放器中流式观看（支持倍速、画中画与进度拖拽）</p>
+            <small>{target.path}</small>
           </div>
         ) : target.isNonPreviewable || state.binary ? (
           <div className="file-hover-empty">

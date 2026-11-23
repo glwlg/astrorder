@@ -3158,7 +3158,15 @@ body:has(.mobile-workspace) {
   color: var(--m-text);
 }
 
-
-
-
-
+.m-bubble .m-file-pill.is-video,
+.m-thumbs .m-file-pill.is-video {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--m-primary) 12%, transparent);
+  color: var(--m-primary);
+  text-decoration: none;
+  vertical-align: middle;
+}

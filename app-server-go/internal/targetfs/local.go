@@ -246,7 +246,10 @@ func (l *localFileSystem) Read(ctx context.Context, path string) (*ReadResult, e
 		file.Close()
 		return nil, errorf(404, "file_not_found", "File was not found", nil)
 	}
-	contentType := mime.TypeByExtension(filepath.Ext(info.Name()))
+	contentType := detectMediaContentType(info.Name())
+	if contentType == "" {
+		contentType = mime.TypeByExtension(filepath.Ext(info.Name()))
+	}
 	if contentType == "" {
 		probe := make([]byte, 512)
 		length, readErr := file.Read(probe)
@@ -261,6 +264,97 @@ func (l *localFileSystem) Read(ctx context.Context, path string) (*ReadResult, e
 		}
 	}
 	return &ReadResult{Info: portableInfo(resolved, info), ContentType: contentType, Reader: file}, nil
+}
+
+type limitedReadCloser struct {
+	io.Reader
+	closer io.Closer
+}
+
+func (l *limitedReadCloser) Close() error {
+	return l.closer.Close()
+}
+
+func detectMediaContentType(name string) string {
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".mp4", ".m4v":
+		return "video/mp4"
+	case ".webm":
+		return "video/webm"
+	case ".mov":
+		return "video/quicktime"
+	case ".ogv":
+		return "video/ogg"
+	case ".mkv":
+		return "video/x-matroska"
+	case ".mp3":
+		return "audio/mpeg"
+	case ".wav":
+		return "audio/wav"
+	case ".m4a":
+		return "audio/mp4"
+	case ".ogg":
+		return "audio/ogg"
+	default:
+		return ""
+	}
+}
+
+func (l *localFileSystem) ReadRange(ctx context.Context, path string, offset, length int64) (*ReadResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if offset < 0 {
+		return nil, errorf(416, "invalid_range", "Byte range offset must be non-negative", nil)
+	}
+	resolved, err := l.existingPath(path)
+	if err != nil {
+		return nil, err
+	}
+	file, err := os.Open(resolved)
+	if err != nil {
+		return nil, errorf(500, "read_failed", "Failed to read file", err)
+	}
+	info, err := file.Stat()
+	if err != nil {
+		file.Close()
+		return nil, errorf(500, "stat_failed", "Failed to inspect file", err)
+	}
+	if !info.Mode().IsRegular() {
+		file.Close()
+		return nil, errorf(404, "file_not_found", "File was not found", nil)
+	}
+	totalSize := info.Size()
+	if offset > totalSize || (totalSize > 0 && offset == totalSize) {
+		file.Close()
+		return nil, errorf(416, "range_not_satisfiable", "Requested byte range is outside file bounds", nil)
+	}
+	contentType := detectMediaContentType(info.Name())
+	if contentType == "" {
+		contentType = mime.TypeByExtension(filepath.Ext(info.Name()))
+	}
+	if contentType == "" {
+		probe := make([]byte, 512)
+		probeLen, readErr := file.Read(probe)
+		if readErr != nil && !errors.Is(readErr, io.EOF) {
+			file.Close()
+			return nil, errorf(500, "read_failed", "Failed to read file", readErr)
+		}
+		contentType = http.DetectContentType(probe[:probeLen])
+	}
+	if _, seekErr := file.Seek(offset, io.SeekStart); seekErr != nil {
+		file.Close()
+		return nil, errorf(500, "read_failed", "Failed to seek file", seekErr)
+	}
+	remaining := totalSize - offset
+	if length <= 0 || length > remaining {
+		length = remaining
+	}
+	return &ReadResult{
+		Info:        portableInfo(resolved, info),
+		ContentType: contentType,
+		Reader:      &limitedReadCloser{Reader: io.LimitReader(file, length), closer: file},
+	}, nil
 }
 
 func (l *localFileSystem) WriteAtomic(ctx context.Context, path string, source io.Reader, mode fs.FileMode) (Info, error) {

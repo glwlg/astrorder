@@ -22,6 +22,7 @@ import remarkGfm from 'remark-gfm'
 import type { Session } from '../domain/types'
 import { api } from '../api/client'
 import { artifactViewerRegistry, isNonPreviewableFile } from '../features/sidecar/registry'
+import { videoMediaType } from '../features/sidecar/viewers/video/formats'
 import { resolveArtifactFromPath } from '../features/sidecar/resolver'
 import { useSidecarStore } from '../features/sidecar/sidecarStore'
 import { useAstrorderStore } from '../state/store'
@@ -756,6 +757,7 @@ export const MarkdownContent = memo(function MarkdownContent({
                     displayName,
                     readUrl: previewUrl,
                     isImage: false,
+                    isVideo: Boolean(videoMediaType(cleaned)),
                     isNonPreviewable: isNonPreviewableFile(cleaned),
                     line: parsedHref.line,
                     endLine: parsedHref.endLine,
