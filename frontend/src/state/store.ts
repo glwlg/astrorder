@@ -79,6 +79,7 @@ const emptyDraft = (): DraftState => ({ text: '', attachments: [], sessionRefs: 
 const MAX_SEEN_EVENT_IDS = 1024
 const LIVE_ACTIVITY_REFRESH_MS = 5000
 export const LIVE_ACTIVITY_MS = 15_000
+export const MID_TURN_IDLE_GRACE_MS = 10_000
 let activityExpiryTimer: ReturnType<typeof setTimeout> | undefined
 
 function scheduleActivityExpiry(activity: Record<string, number>): void {
@@ -99,6 +100,43 @@ function clearLiveActivity(current: Record<string, number>, key: string): Record
   if (!(key in current)) return current
   const next = { ...current }
   delete next[key]
+  scheduleActivityExpiry(next)
+  return next
+}
+
+function isSessionMidTurnActivity(messages: Record<string, Message> | undefined): boolean {
+  if (!messages) return false
+  let latest: Message | null = null
+  let latestTs = -Infinity
+  for (const msg of Object.values(messages)) {
+    if (!msg) continue
+    const hasBody = Boolean(msg.text?.trim() || msg.tool || msg.attachments?.length)
+    if (!hasBody) continue
+    const ts = Date.parse(msg.created_at) || 0
+    if (!latest || ts >= latestTs) {
+      latest = msg
+      latestTs = ts
+    }
+  }
+  if (!latest) return false
+  return latest.role === 'tool' || latest.kind === 'tool' || latest.kind === 'thinking'
+}
+
+function settleLiveActivityOnIdle(
+  state: AstrorderStore,
+  key: string,
+  prev: Session | undefined,
+): Record<string, number> {
+  const wasActive = prev?.status === 'running' || key in state.liveActivityAt
+  if (!wasActive || !isSessionMidTurnActivity(state.messages[key])) {
+    return clearLiveActivity(state.liveActivityAt, key)
+  }
+  // Duplicate idle upserts while already counting down must not extend the grace timer.
+  if (prev?.status === 'idle' && key in state.liveActivityAt) {
+    return state.liveActivityAt
+  }
+  const graceTimestamp = Date.now() - (LIVE_ACTIVITY_MS - MID_TURN_IDLE_GRACE_MS)
+  const next = { ...state.liveActivityAt, [key]: graceTimestamp }
   scheduleActivityExpiry(next)
   return next
 }
@@ -542,8 +580,11 @@ export const useAstrorderStore = create<AstrorderStore>((set) => ({
         return {
           ...base,
           sessions: { ...state.sessions, [key]: mergedSession },
-          liveActivityAt: mergedSession.status === 'idle' || mergedSession.status === 'error'
-            ? clearLiveActivity(state.liveActivityAt, key) : state.liveActivityAt,
+          liveActivityAt: mergedSession.status === 'error'
+            ? clearLiveActivity(state.liveActivityAt, key)
+            : mergedSession.status === 'idle'
+              ? settleLiveActivityOnIdle(state, key, prev)
+              : state.liveActivityAt,
         }
       }
 
@@ -566,7 +607,13 @@ export const useAstrorderStore = create<AstrorderStore>((set) => ({
         const command = event.data as unknown as Command
         if (!command.id || !command.session_id || !command.agent_id) return base
         const next = mergeCommandIntoState({ ...state, ...base }, command)
-        return { ...base, ...next }
+        const key = scopeKey(command.agent_id, command.session_id)
+        const shouldClear = command.state === 'cancelled' || command.state === 'failed'
+        return {
+          ...base,
+          ...next,
+          ...(shouldClear ? { liveActivityAt: clearLiveActivity(state.liveActivityAt, key) } : {}),
+        }
       }
 
       if (event.type === 'task.upsert' || event.type === 'task.live') {

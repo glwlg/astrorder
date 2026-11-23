@@ -377,4 +377,46 @@ describe('transcript follow mode', () => {
     expect(screen.getAllByAltText('upload.png')).toHaveLength(1)
     expect(screen.queryByText(/@image:/)).not.toBeInTheDocument()
   })
+
+  it('keeps the active execution bar open across brief mid-turn status dips and collapses once a final reply arrives', () => {
+    const toolMsg: Message = {
+      ...message,
+      id: 'tool-1',
+      role: 'tool',
+      kind: 'tool',
+      text: 'ok',
+      tool: { name: 'run_command', status: 'completed', arguments: { command: 'echo hi' } },
+    }
+    const view = render(
+      <MantineProvider>
+        <Transcript outbox={[]} session={runningSession} messages={[toolMsg]} />
+      </MantineProvider>,
+    )
+
+    const details = screen.getByRole('region', { name: '思考与工具' }).querySelector('details')!
+    expect(details.open).toBe(true)
+
+    view.rerender(
+      <MantineProvider>
+        <Transcript outbox={[]} session={{ ...runningSession, status: 'idle' }} messages={[toolMsg]} />
+      </MantineProvider>,
+    )
+    expect(screen.getByRole('region', { name: '思考与工具' }).querySelector('details')).toBe(details)
+    expect(details.open).toBe(true)
+
+    view.rerender(
+      <MantineProvider>
+        <Transcript
+          outbox={[]}
+          session={{ ...runningSession, status: 'idle' }}
+          messages={[
+            toolMsg,
+            { ...message, id: 'final-reply', role: 'assistant', kind: 'message', text: '全部完成了。', created_at: '2026-01-02T00:01:00Z' },
+          ]}
+        />
+      </MantineProvider>,
+    )
+    expect(screen.getByRole('region', { name: '思考与工具' }).querySelector('details')).toBe(details)
+    expect(details.open).toBe(false)
+  })
 })

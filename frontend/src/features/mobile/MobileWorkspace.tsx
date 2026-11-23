@@ -14,7 +14,7 @@ import type { Agent, AgentCommand, AgentMention, Approval, BotGroup, Command, Me
 import { findSessionHandoff, newCommandId, scopeKey } from '../../domain/semantics'
 import { NotificationPermissionMenuItems } from '../../components/NotificationPermissionControl'
 import { useSessionUnread } from '../../hooks/useSessionUnread'
-import { isDisconnectedSessionRoute, selectApprovals, selectCommands, selectMessages, selectProjects, selectSessions, selectTasks, useAstrorderStore } from '../../state/store'
+import { isDisconnectedSessionRoute, LIVE_ACTIVITY_MS, selectApprovals, selectCommands, selectMessages, selectProjects, selectSessions, selectTasks, useAstrorderStore } from '../../state/store'
 import { useSessionResources } from '../../hooks/useAstrorderData'
 import { useSessionModel } from '../../hooks/useSessionModel'
 import { useSessionSwarm } from '../../hooks/useSessionSwarm'
@@ -332,6 +332,8 @@ export function MobileWorkspace() {
   const activeTasks = visibleTasks.filter(task => ['pending', 'running', 'waiting_approval'].includes(task.status))
   const activeSubagents = tasks.filter(task => task.kind === 'subagent' && (task.status === 'running' || task.status === 'waiting_approval' || task.status === 'pending') && task.progress?.blocking !== false)
   const approvals = useAstrorderStore(useShallow(state => selected ? selectApprovals(state, selected.agent_id, selected.id) : []))
+  const selectedLiveAt = useAstrorderStore((state) => (selected ? state.liveActivityAt[scopeKey(selected.agent_id, selected.id)] : undefined))
+  const liveActive = typeof selectedLiveAt === 'number' && Date.now() - selectedLiveAt >= 0 && Date.now() - selectedLiveAt < LIVE_ACTIVITY_MS
   const nativeBusy = selected?.status === 'running' || selected?.status === 'waiting_approval' || activeSubagents.length > 0
   const [messageAction, setMessageAction] = useState<(MessageActionAnchor & { sessionKey: string }) | null>(null)
   const closeMessageMenu = useCallback(() => setMessageAction(null), [])
@@ -1281,7 +1283,7 @@ export function MobileWorkspace() {
       </div>
       {goal && <button className={`m-goal-summary is-${goal.tone}`} aria-label="目标管理" title={goalSupported ? '管理原生目标' : '查看原生目标'} onClick={() => setSheet('goal')}><IconNotes size={15} /><span>{`${goal.label} · ${goal.title}`}</span></button>}
       {!!visibleTasks.length && <button className="m-task-summary" aria-label="任务与子代理" onClick={() => setSheet('tasks')}>任务与子代理 · {activeTasks.length} 项活动 / {visibleTasks.length} 项记录</button>}
-      <MobileTranscript session={selected} activityBreaks={resources.activityBreaks} readOnly={readOnly} messages={messages} commands={commands} approvals={approvals} onApproval={(approval, action) => void handleApproval(approval, action)} busy={busy} loadOlder={() => resources.messages.fetchNextPage()} hasOlder={!!resources.messages.hasNextPage} loadingOlder={resources.messages.isFetchingNextPage} onMessageAction={anchor => setMessageAction({ ...anchor, sessionKey: key })} onImage={openImagePreview} onFile={openFile} workspace={selected?.workspace} connectionId={selected?.connection_id} onSwipe={switchSession} onSwipePreview={setSessionDrag} checkpoints={sessionCheckpoints.items} onOpenCheckpoint={(cp: SessionCheckpoint) => { setFocusedCheckpointId(cp.id); setSheet('checkpoints') }} highlightMessageId={new URLSearchParams(location.search).get('message_id')} />
+      <MobileTranscript session={selected} activityBreaks={resources.activityBreaks} readOnly={readOnly} messages={messages} commands={commands} approvals={approvals} onApproval={(approval, action) => void handleApproval(approval, action)} busy={busy || liveActive} loadOlder={() => resources.messages.fetchNextPage()} hasOlder={!!resources.messages.hasNextPage} loadingOlder={resources.messages.isFetchingNextPage} onMessageAction={anchor => setMessageAction({ ...anchor, sessionKey: key })} onImage={openImagePreview} onFile={openFile} workspace={selected?.workspace} connectionId={selected?.connection_id} onSwipe={switchSession} onSwipePreview={setSessionDrag} checkpoints={sessionCheckpoints.items} onOpenCheckpoint={(cp: SessionCheckpoint) => { setFocusedCheckpointId(cp.id); setSheet('checkpoints') }} highlightMessageId={new URLSearchParams(location.search).get('message_id')} />
     </MobileSessionDeck> : <div className="m-empty">从左上角选择会话，或新建会话</div>}</main>
     <section ref={composer} className="m-composer-float">
       {selected && <SessionConnectionNotice key={`connection:${key}`} session={selected} error={(resources.messages.error || resources.commands.error || resources.tasks.error) ? messageError(resources.messages.error || resources.commands.error || resources.tasks.error) : undefined} onRetry={() => Promise.all([resources.messages.refetch(), resources.commands.refetch(), resources.tasks.refetch()])} />}

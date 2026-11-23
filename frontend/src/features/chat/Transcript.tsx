@@ -27,7 +27,8 @@ import { AstrorderLoader } from '../../components/AnimatedStatus'
 import { artifactViewerRegistry } from '../sidecar/registry'
 import { resolveArtifactFromPath } from '../sidecar/resolver'
 import { useSidecarStore } from '../sidecar/sidecarStore'
-import { useAstrorderStore } from '../../state/store'
+import { LIVE_ACTIVITY_MS, useAstrorderStore } from '../../state/store'
+import { scopeKey } from '../../domain/semantics'
 import { useReducedMotion } from '@mantine/hooks'
 import { AnimatePresence, motion } from 'motion/react'
 import { WorkbenchMark } from '../../components/WorkbenchMark'
@@ -336,6 +337,77 @@ function MessageItem({
   )
 }
 
+const ACTIVITY_PACK_COLLAPSE_GRACE_MS = 4_500
+
+function ActivityPackSection({
+  id,
+  pack,
+  isRunning,
+  definitivelyEnded,
+  isDeferred,
+  enter,
+  onImageClick,
+  onGalleryClick,
+  session,
+}: {
+  id: string
+  pack: Message[]
+  isRunning: boolean
+  definitivelyEnded: boolean
+  isDeferred: boolean
+  enter: { opacity?: number; y?: number; scale?: number }
+  onImageClick?: (url: string) => void
+  onGalleryClick?: (url: string, allImages: string[]) => void
+  session?: Session | null
+}) {
+  const [autoOpen, setAutoOpen] = useState(isRunning)
+  const packSize = pack.length
+
+  useEffect(() => {
+    if (isRunning) {
+      setAutoOpen(true)
+      return
+    }
+    if (definitivelyEnded) {
+      setAutoOpen(false)
+      return
+    }
+    if (!autoOpen) return
+    const timer = window.setTimeout(() => setAutoOpen(false), ACTIVITY_PACK_COLLAPSE_GRACE_MS)
+    return () => window.clearTimeout(timer)
+  }, [autoOpen, definitivelyEnded, isRunning, packSize])
+
+  return (
+    <motion.section
+      className={`activity-pack${isDeferred ? ' is-deferred-turn' : ''}`}
+      aria-label="思考与工具"
+      data-turn-id={id}
+      initial={enter}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.28, ease: [0.2, 0.8, 0.2, 1] }}
+    >
+      <LazyDetails
+        autoOpen={autoOpen}
+        loading={isRunning}
+        summary={<PackSummary pack={pack} isRunning={isRunning} />}
+      >
+        <div className="activity-timeline">
+          {pack.map((item) => (
+            <MessageItem
+              message={item}
+              key={item.id}
+              onImageClick={onImageClick}
+              onGalleryClick={onGalleryClick}
+              session={session}
+            />
+          ))}
+        </div>
+      </LazyDetails>
+    </motion.section>
+  )
+}
+
 export function Transcript({
   messages,
   activityBreaks,
@@ -443,7 +515,11 @@ export function Transcript({
       void onLoadOlder()
     }
   }, [hasMoreHistory, highlightMessageId, loadingOlder, onLoadOlder, scrollerEl, visibleMessages])
-  const busy = session?.status === 'running' || session?.status === 'waiting_approval'
+  const liveActivityAt = useAstrorderStore((state) => (
+    session ? state.liveActivityAt[scopeKey(session.agent_id, session.id)] : undefined
+  ))
+  const liveActive = typeof liveActivityAt === 'number' && Date.now() - liveActivityAt >= 0 && Date.now() - liveActivityAt < LIVE_ACTIVITY_MS
+  const busy = session?.status === 'running' || session?.status === 'waiting_approval' || liveActive
   const lastVisibleMessage = visibleMessages[visibleMessages.length - 1]
   const isWaiting = Boolean(session?.status === 'running' && (!lastVisibleMessage || lastVisibleMessage.role === 'user'))
 
@@ -530,36 +606,20 @@ export function Transcript({
               const isPackRunning = Boolean(busy && isLatestActivity && !hasLaterUserMessage)
               const shouldOpen = isPackRunning && !hasSubsequentFinalReply
               const isDeferredPack = !shouldOpen && idx + pack.length < visibleMessages.length - 6
+              const definitivelyEnded = Boolean(hasSubsequentFinalReply || hasLaterUserMessage)
               return (
-                <motion.section
-                  className={`activity-pack${isDeferredPack ? ' is-deferred-turn' : ''}`}
-                  aria-label="思考与工具"
-                  data-turn-id={message.id}
-                  key={message.id}
-                  initial={enter}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.28, ease: [0.2, 0.8, 0.2, 1] }}
-                >
-                  <LazyDetails
-                    key={`activity-pack-${message.id}-${shouldOpen}`}
-                    defaultOpen={shouldOpen}
-                    loading={shouldOpen}
-                    summary={<PackSummary pack={pack} isRunning={shouldOpen} />}
-                  >
-                    <div className="activity-timeline">
-                      {pack.map((item) => (
-                        <MessageItem
-                          message={item}
-                          key={item.id}
-                          onImageClick={onImageClick}
-                          onGalleryClick={onGalleryClick}
-                          session={session}
-                        />
-                      ))}
-                    </div>
-                  </LazyDetails>
-                </motion.section>
+                <ActivityPackSection
+                  key={`activity-pack-${message.id}`}
+                  id={message.id}
+                  pack={pack}
+                  isRunning={shouldOpen}
+                  definitivelyEnded={definitivelyEnded}
+                  isDeferred={isDeferredPack}
+                  enter={enter}
+                  onImageClick={onImageClick}
+                  onGalleryClick={onGalleryClick}
+                  session={session}
+                />
               )
             }
             const currentDate = new Date(message.created_at).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })

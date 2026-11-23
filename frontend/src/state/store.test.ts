@@ -447,4 +447,49 @@ describe('shared runtime store', () => {
     expect(selectProjects(useAstrorderStore.getState())).toHaveLength(0)
     expect(Object.keys(useAstrorderStore.getState().sessions)).toHaveLength(0)
   })
+
+  it('holds mid-turn liveActivityAt grace on transient idle dips and clears immediately on final reply or cancel', () => {
+    const store = useAstrorderStore.getState()
+    const key = `${session.agent_id}::${session.id}`
+    store.applyEvent({
+      id: 'run-1', cursor: 10, type: 'session.upsert', agent_id: session.agent_id, session_id: session.id,
+      data: { ...session, status: 'running' },
+    })
+    store.applyEvent({
+      id: 'tool-1', cursor: 11, type: 'message.upsert', agent_id: session.agent_id, session_id: session.id,
+      data: { ...message('tool-1', 'ok'), role: 'tool', kind: 'tool', tool: { name: 'run_command', status: 'completed' }, created_at: '2026-01-01T00:01:00Z' },
+    })
+    store.applyEvent({
+      id: 'idle-blip-1', cursor: 12, type: 'session.upsert', agent_id: session.agent_id, session_id: session.id,
+      data: { ...session, status: 'idle' },
+    })
+    const graceTs = useAstrorderStore.getState().liveActivityAt[key]
+    expect(graceTs).toBeTypeOf('number')
+
+    store.applyEvent({
+      id: 'idle-blip-2', cursor: 13, type: 'session.upsert', agent_id: session.agent_id, session_id: session.id,
+      data: { ...session, status: 'idle' },
+    })
+    expect(useAstrorderStore.getState().liveActivityAt[key]).toBe(graceTs)
+
+    store.applyEvent({
+      id: 'cmd-cancel', cursor: 14, type: 'command.upsert', agent_id: session.agent_id, session_id: session.id,
+      data: { ...command('cmd-1'), state: 'cancelled' },
+    })
+    expect(useAstrorderStore.getState().liveActivityAt[key]).toBeUndefined()
+
+    store.applyEvent({
+      id: 'run-2', cursor: 15, type: 'session.upsert', agent_id: session.agent_id, session_id: session.id,
+      data: { ...session, status: 'running' },
+    })
+    store.applyEvent({
+      id: 'reply-final', cursor: 16, type: 'message.upsert', agent_id: session.agent_id, session_id: session.id,
+      data: { ...message('reply-final', '全部搞定'), role: 'assistant', kind: 'message', created_at: '2026-01-01T00:02:00Z' },
+    })
+    store.applyEvent({
+      id: 'idle-done', cursor: 17, type: 'session.upsert', agent_id: session.agent_id, session_id: session.id,
+      data: { ...session, status: 'idle' },
+    })
+    expect(useAstrorderStore.getState().liveActivityAt[key]).toBeUndefined()
+  })
 })

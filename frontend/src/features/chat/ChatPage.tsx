@@ -138,6 +138,10 @@ function ChatPageBody() {
     }
     return null
   }, [forceWelcome, rawSessionsMap, searchParams, sessionId, sessions])
+  const selectedLiveActivityAt = useAstrorderStore((state) => (
+    selected ? state.liveActivityAt[scopeKey(selected.agent_id, selected.id)] : undefined
+  ))
+  void selectedLiveActivityAt
 
   const sessionUsage = useQuery({ queryKey: ['astrorder', 'session_usage', selected?.id, selected?.agent_id], queryFn: () => selected ? api.getSessionUsage(selected.id, selected.agent_id) : Promise.reject(), enabled: Boolean(selected), retry: false, staleTime: 0, refetchOnWindowFocus: false })
 
