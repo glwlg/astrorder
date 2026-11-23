@@ -1,8 +1,24 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { isValidElement, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import {
+  IconAlertCircle,
+  IconAlertTriangle,
+  IconBulb,
+  IconFlame,
+  IconInfoCircle,
+} from '@tabler/icons-react'
+import { highlightCode, parseCalloutBlockquote, type CalloutKind } from '../../components/markdownHighlight'
 import { isMobileLocalFilePath, mobileFileUrl, resolveMobileFilePath } from './mobileFilePath'
+
+const CALLOUT_ICONS: Record<CalloutKind, typeof IconInfoCircle> = {
+  note: IconInfoCircle,
+  tip: IconBulb,
+  important: IconAlertCircle,
+  warning: IconAlertTriangle,
+  caution: IconFlame,
+}
 
 function CodeBlock({ children }: { children?: ReactNode }) {
   const element = useRef<HTMLPreElement>(null)
@@ -15,13 +31,13 @@ function CodeBlock({ children }: { children?: ReactNode }) {
   }, [])
 
   let language = ''
-  if (children && typeof children === 'object' && 'props' in children) {
-    const props = (children as { props?: { className?: string } }).props
-    if (typeof props?.className === 'string') {
-      const match = props.className.match(/language-(\w+)/)
-      if (match) language = match[1]
-    }
+  let rawText = ''
+  if (isValidElement<{ className?: string; children?: ReactNode }>(children)) {
+    const match = (children.props.className || '').match(/language-([a-zA-Z0-9_-]+)/)
+    if (match) language = match[1]
+    if (typeof children.props.children === 'string') rawText = children.props.children
   }
+  const highlighted = rawText && language ? highlightCode(rawText, language) : null
 
   return (
     <div className="m-code-block">
@@ -33,7 +49,7 @@ function CodeBlock({ children }: { children?: ReactNode }) {
             type="button"
             onClick={async () => {
               try {
-                await navigator.clipboard.writeText(element.current?.textContent || '')
+                await navigator.clipboard.writeText(element.current?.textContent || rawText)
                 setCopied(true)
                 if (copiedTimer.current !== null) clearTimeout(copiedTimer.current)
                 copiedTimer.current = setTimeout(() => {
@@ -49,7 +65,13 @@ function CodeBlock({ children }: { children?: ReactNode }) {
           </button>
         </div>
       </div>
-      <pre ref={element} style={{ whiteSpace: wrap ? 'pre-wrap' : 'pre', wordBreak: wrap ? 'break-all' : 'normal' }}>{children}</pre>
+      <pre ref={element} style={{ whiteSpace: wrap ? 'pre-wrap' : 'pre', wordBreak: wrap ? 'break-all' : 'normal' }}>
+        {isValidElement<{ children?: ReactNode }>(children) ? (
+          <code {...children.props}>{highlighted ?? children.props.children}</code>
+        ) : (
+          children
+        )}
+      </pre>
     </div>
   )
 }
@@ -66,11 +88,38 @@ export function MobileMarkdown({ value, onFileClick, onImageClick, workspace, se
   callbacks.current = { onFileClick, onImageClick }
   const components = useMemo<Components>(() => ({
     pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
+    blockquote: ({ children }) => {
+      const callout = parseCalloutBlockquote(children)
+      if (callout) {
+        const Icon = CALLOUT_ICONS[callout.kind]
+        return (
+          <aside className={`markdown-callout is-${callout.kind}`} role="note">
+            <div className="markdown-callout-title">
+              <Icon size={14} aria-hidden="true" />
+              <span>{callout.label}</span>
+            </div>
+            <div className="markdown-callout-body">{callout.children}</div>
+          </aside>
+        )
+      }
+      return <blockquote>{children}</blockquote>
+    },
     a: ({ href, children }) => {
       const url = href || ''
       const isLocal = isMobileLocalFilePath(url)
       if (isLocal && onFileClick) {
-        return <a href={mobileFileUrl(url, workspace, sessionId, connectionId)} onClick={(e) => { e.preventDefault(); callbacks.current.onFileClick?.(resolveMobileFilePath(url, workspace)) }}>{children}</a>
+        return (
+          <a
+            className="m-file-pill"
+            href={mobileFileUrl(url, workspace, sessionId, connectionId)}
+            onClick={(e) => {
+              e.preventDefault()
+              callbacks.current.onFileClick?.(resolveMobileFilePath(url, workspace))
+            }}
+          >
+            {children}
+          </a>
+        )
       }
       return /^(?:https?:\/\/|mailto:|\/api\/v1\/)/i.test(url)
         ? <a href={url} target="_blank" rel="noopener noreferrer">{children}</a>

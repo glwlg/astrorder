@@ -102,12 +102,17 @@ describe('independent mobile composer', () => {
     useAstrorderStore.setState(state => ({ sessions: { ...state.sessions, [scopeKey(child.agent_id, child.id)]: child } }))
     mount()
     await screen.findByText('bound-model')
+    expect(screen.queryByRole('button', { name: /已转交至|转交自|^来自 / })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '会话操作' }))
     if (relation === 'scheduled') {
-      expect(screen.queryByRole('button', { name: /已转交至|转交自|^来自 / })).not.toBeInTheDocument()
+      expect(screen.queryByRole('menuitem', { name: /已转交至|转交自|^来自 / })).not.toBeInTheDocument()
     } else {
-      fireEvent.click(await screen.findByRole('button', { name: '已转交至 Hermes' }))
-      expect(await screen.findByRole('heading', { level: 1, name: child.title })).toBeInTheDocument()
-      fireEvent.click(await screen.findByRole('button', { name: '转交自 Hermes' }))
+      fireEvent.click(await screen.findByRole('menuitem', { name: '已转交至 Hermes' }))
+      const childHeading = await screen.findByRole('heading', { level: 1, name: child.title })
+      expect(childHeading).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /已转交至|转交自/ })).not.toBeInTheDocument()
+      fireEvent.click(within(childHeading.closest('.m-card-head') as HTMLElement).getByRole('button', { name: '会话操作' }))
+      fireEvent.click(await screen.findByRole('menuitem', { name: '转交自 Hermes' }))
       expect(await screen.findByRole('heading', { level: 1, name: session.title })).toBeInTheDocument()
     }
   })
@@ -575,6 +580,55 @@ describe('independent mobile composer', () => {
     fireEvent.click(screen.getByRole('button', { name: '思考强度 低' }))
     await waitFor(() => expect(notifications.show).toHaveBeenCalled())
     expect(notifications.show).toHaveBeenCalledWith(expect.objectContaining({ message: '思考强度未确认', color: 'red' }))
+  })
+  it('separates Antigravity base models and thinking effort in mobile model sheet', async () => {
+    useAstrorderStore.getState().hydrateBootstrap({
+      protocol_version: 1,
+      cursor: 0,
+      agents: [{ id: 'inert', kind: 'antigravity', name: 'AGY', status: 'ready', capabilities: ['chat', 'stop'], limitation: null }],
+      sessions: [session],
+    })
+    vi.spyOn(api, 'getSessionModel').mockResolvedValue({
+      provider: 'antigravity',
+      model: 'gemini-4-neon-xhigh',
+      effort: 'xhigh',
+      model_read_only: false,
+      reasoning_read_only: false,
+    })
+    vi.spyOn(api, 'getSessionModels').mockResolvedValue({
+      items: [
+        { provider: 'antigravity', model: 'gemini-4-neon-high', label: 'Gemini 4 Neon (High)' },
+        { provider: 'antigravity', model: 'gemini-4-neon-xhigh', label: 'Gemini 4 Neon (XHigh)' },
+        { provider: 'antigravity', model: 'gemini-4-neon-low', label: 'Gemini 4 Neon (Low)' },
+        { provider: 'antigravity', model: 'gemini-4-carbon-high', label: 'Gemini 4 Carbon (High)' },
+        { provider: 'antigravity', model: 'gemini-4-carbon-medium', label: 'Gemini 4 Carbon (Medium)' },
+      ],
+    })
+    const change = vi.spyOn(api, 'setSessionModel').mockImplementation(async (_sid, _aid, provider, model) => ({
+      provider,
+      model,
+      effort: model.match(/-(low|medium|high|xhigh)$/)?.[1] ?? null,
+    }))
+    mount()
+    const chip = await screen.findByRole('button', { name: '选择会话模型' })
+    await waitFor(() => expect(chip).toHaveTextContent('gemini-4-neon · 超高'))
+
+    fireEvent.click(chip)
+    expect(await screen.findByRole('button', { name: 'Gemini 4 Neon' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Gemini 4 Neon (High)' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '思考强度 超高' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.queryByRole('button', { name: '思考强度 最高' })).not.toBeInTheDocument()
+
+    // Tap effort directly on active model -> immediately switches concrete variant
+    fireEvent.click(screen.getByRole('button', { name: '思考强度 高' }))
+    await waitFor(() => expect(change).toHaveBeenCalledWith('native-test', 'inert', 'antigravity', 'gemini-4-neon-high'))
+
+    // Preview Carbon -> effort row updates to Carbon's levels (medium/high), select medium and confirm
+    fireEvent.click(screen.getByRole('button', { name: 'Gemini 4 Carbon' }))
+    expect(screen.queryByRole('button', { name: '思考强度 超高' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '思考强度 中' }))
+    fireEvent.click(screen.getByRole('button', { name: '确认切换模型' }))
+    await waitFor(() => expect(change).toHaveBeenCalledWith('native-test', 'inert', 'antigravity', 'gemini-4-carbon-medium'))
   })
   it('shows mobile pins above all projects, without a duplicate project row', () => {
     localStorage.setItem('astrorder_pinned_sessions', JSON.stringify({ [scopeKey('inert', session.id)]: true }))

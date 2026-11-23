@@ -103,6 +103,8 @@ type Handler struct {
 	titleBusy         sync.Map
 	queueBusy         sync.Map
 	queueDecisions    sync.Map
+	scheduleBusy      sync.Map
+	scheduleWake      chan struct{}
 	nativeGuard
 }
 
@@ -122,6 +124,7 @@ func NewHandler(options Options) (http.Handler, error) {
 		maxAttachmentSize: options.MaxAttachmentSize,
 		resolver:          options.Resolver,
 		remoteExecutable:  options.RemoteExecutable,
+		scheduleWake:      make(chan struct{}, 1),
 	}, nil
 }
 
@@ -214,6 +217,22 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleBackgroundProcesses(w, r, params.SessionID)
 	case "list_tasks":
 		h.handleListTasks(w, r, params.SessionID)
+	case "get_session_swarm":
+		h.handleGetSessionSwarm(w, r, params.SessionID)
+	case "list_all_schedules":
+		h.handleListAllSchedules(w, r)
+	case "preview_schedule":
+		h.handlePreviewSchedule(w, r)
+	case "list_session_schedules":
+		h.handleListSessionSchedules(w, r, params.SessionID)
+	case "create_session_schedule":
+		h.handleCreateSessionSchedule(w, r, params.SessionID)
+	case "update_schedule":
+		h.handleUpdateSchedule(w, r, params.ScheduleID)
+	case "delete_schedule":
+		h.handleDeleteSchedule(w, r, params.ScheduleID)
+	case "run_schedule_now":
+		h.handleRunScheduleNow(w, r, params.ScheduleID)
 	case "edit_queued_command":
 		h.handleEditQueuedCommand(w, r, params.CommandID)
 	case "delete_queued_command":

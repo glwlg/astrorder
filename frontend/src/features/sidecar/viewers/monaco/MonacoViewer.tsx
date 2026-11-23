@@ -65,7 +65,13 @@ export function MonacoViewer({ artifact, session: sourceSession, onSave, onDirty
   const [content, setContent] = useState('')
   const [language, setLanguage] = useState(() => detectLanguage(artifact.name))
   const isMarkdown = /\.(?:md|markdown)$/i.test(artifact.name)
-  const [isReadingMode, setIsReadingMode] = useState(isMarkdown)
+  const targetLine = typeof (artifact.metadata as { line?: unknown } | undefined)?.line === 'number'
+    ? (artifact.metadata as { line: number }).line
+    : undefined
+  const targetEndLine = typeof (artifact.metadata as { endLine?: unknown } | undefined)?.endLine === 'number'
+    ? (artifact.metadata as { endLine: number }).endLine
+    : undefined
+  const [isReadingMode, setIsReadingMode] = useState(() => isMarkdown && !targetLine)
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
   const [encodingReadOnly, setEncodingReadOnly] = useState(false)
@@ -148,18 +154,36 @@ export function MonacoViewer({ artifact, session: sourceSession, onSave, onDirty
   }, [fetchContent])
 
   const editorRef = useRef<any>(null)
+  const revealTargetLine = useCallback((editor: any, line?: number, endLine?: number) => {
+    if (!editor || typeof line !== 'number' || line <= 0) return
+    setTimeout(() => {
+      try {
+        editor.revealLineInCenter(line)
+        if (typeof endLine === 'number' && endLine >= line) {
+          editor.setSelection({
+            startLineNumber: line,
+            startColumn: 1,
+            endLineNumber: endLine,
+            endColumn: 1000,
+          })
+        } else {
+          editor.setPosition({ lineNumber: line, column: 1 })
+        }
+      } catch {}
+    }, 80)
+  }, [])
+
   const handleEditorMount = (editor: any) => {
     editorRef.current = editor
-    const line = (artifact.metadata as any)?.line
-    if (typeof line === 'number' && line > 0) {
-      setTimeout(() => {
-        try {
-          editor.revealLineInCenter(line)
-          editor.setPosition({ lineNumber: line, column: 1 })
-        } catch {}
-      }, 80)
-    }
+    revealTargetLine(editor, targetLine, targetEndLine)
   }
+
+  useEffect(() => {
+    if (targetLine) {
+      if (isMarkdown) setIsReadingMode(false)
+      revealTargetLine(editorRef.current, targetLine, targetEndLine)
+    }
+  }, [isMarkdown, revealTargetLine, targetEndLine, targetLine])
 
   const handleEditorChange = (value: string | undefined) => {
     const val = value ?? ''

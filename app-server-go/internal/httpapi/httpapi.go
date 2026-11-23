@@ -328,6 +328,9 @@ func NewHandlerChecked(options Options) (http.Handler, error) {
 			if runner, ok := sessionHandler.(interface{ RunQueue(context.Context) }); ok && options.Context != nil && options.DaemonClient != nil {
 				go runner.RunQueue(options.Context)
 			}
+			if scheduler, ok := sessionHandler.(interface{ RunSchedules(context.Context) }); ok && options.Context != nil && options.DaemonClient != nil {
+				go scheduler.RunSchedules(options.Context)
+			}
 			if refresher, ok := sessionHandler.(activityRefresher); ok && options.DaemonClient != nil {
 				go reconcileActivityOnStart(refresher, options.Logger)
 			}

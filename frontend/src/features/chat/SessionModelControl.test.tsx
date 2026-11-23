@@ -273,3 +273,64 @@ it('strips the first prefix before slash and keeps full model label in formatDis
   expect(formatDisplayModel('gpt-5.6-sol')).toBe('gpt-5.6-sol')
   expect(formatDisplayModel('')).toBe('')
 })
+
+it('separates Antigravity base models and per-model thinking effort levels cleanly', async () => {
+  vi.spyOn(api, 'getSessionModel').mockResolvedValue({
+    provider: 'antigravity',
+    model: 'gemini-4-neon-xhigh',
+    effort: 'xhigh',
+    model_read_only: false,
+    reasoning_read_only: false,
+    supported_efforts: ['low', 'medium', 'high', 'xhigh'],
+  })
+  vi.spyOn(api, 'getSessionModels').mockResolvedValue({
+    items: [
+      { provider: 'antigravity', model: 'gemini-4-neon-high', label: 'Gemini 4 Neon (High)' },
+      { provider: 'antigravity', model: 'gemini-4-neon-xhigh', label: 'Gemini 4 Neon (XHigh)' },
+      { provider: 'antigravity', model: 'gemini-4-neon-medium', label: 'Gemini 4 Neon (Medium)' },
+      { provider: 'antigravity', model: 'gemini-4-neon-low', label: 'Gemini 4 Neon (Low)' },
+      { provider: 'antigravity', model: 'gemini-4-carbon-medium', label: 'Gemini 4 Carbon (Medium)' },
+      { provider: 'antigravity', model: 'gemini-4-carbon-high', label: 'Gemini 4 Carbon (High)' },
+      { provider: 'antigravity', model: 'gemini-4-carbon-low', label: 'Gemini 4 Carbon (Low)' },
+      { provider: 'antigravity', model: 'gemini-pro-orchestrator', label: 'Orchestrator (Carbon)' },
+    ],
+  })
+  const change = vi.spyOn(api, 'setSessionModel').mockImplementation(async (_sid, _aid, provider, model) => {
+    const suffix = model.match(/-(low|medium|high|xhigh)$/)?.[1] ?? null
+    return { provider, model, effort: suffix }
+  })
+
+  renderControl()
+
+  // Pill strips redundant -xhigh suffix and displays clean base model + effort label.
+  const pill = await screen.findByRole('button', { name: '选择会话模型' })
+  await waitFor(() => expect(pill).toHaveTextContent('gemini-4-neon'))
+  expect(pill).toHaveTextContent('超高')
+  expect(pill).not.toHaveTextContent('gemini-4-neon-xhigh')
+
+  // Open main popover card: Neon exposes 4 effort ticks (low..xhigh, no max).
+  fireEvent.click(pill)
+  const slider = await screen.findByRole('slider', { name: '思考强度' })
+  await waitFor(() => expect(slider).toHaveAttribute('aria-valuemax', '3'))
+  expect(screen.getByRole('button', { name: '高' })).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: '最高' })).not.toBeInTheDocument()
+
+  // Switch effort via tick button -> calls setSessionModel with concrete variant.
+  fireEvent.click(screen.getByRole('button', { name: '高' }))
+  await waitFor(() => expect(change).toHaveBeenCalledWith('native', 'source', 'antigravity', 'gemini-4-neon-high'))
+
+  // Switch to model list: duplicates collapsed into clean base models.
+  fireEvent.click(await screen.findByRole('button', { name: '切换到选择模型' }))
+  expect(await screen.findByText('Gemini 4 Neon')).toBeInTheDocument()
+  expect(screen.getByText('Gemini 4 Carbon')).toBeInTheDocument()
+  expect(screen.getByText('Orchestrator (Carbon)')).toBeInTheDocument()
+  expect(screen.queryByText('Gemini 4 Neon (High)')).not.toBeInTheDocument()
+  expect(screen.queryByText('Gemini 4 Carbon (Low)')).not.toBeInTheDocument()
+
+  // Select Gemini 4 Carbon while current effort is 'high' -> resolves to gemini-4-carbon-high and updates slider max to 2 (3 levels).
+  fireEvent.click(screen.getByText('Gemini 4 Carbon'))
+  await waitFor(() => expect(change).toHaveBeenCalledWith('native', 'source', 'antigravity', 'gemini-4-carbon-high'))
+  const carbonSlider = await screen.findByRole('slider', { name: '思考强度' })
+  await waitFor(() => expect(carbonSlider).toHaveAttribute('aria-valuemax', '2'))
+  expect(screen.queryByRole('button', { name: '超高' })).not.toBeInTheDocument()
+})

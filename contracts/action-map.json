@@ -124,6 +124,7 @@
     {"runtime":"antigravity","method":"models.list","oneof_branch":"antigravity_models_list","disposition":"typed-read"},
     {"runtime":"antigravity","method":"quota.read","oneof_branch":"antigravity_quota_read","disposition":"typed-read"},
     {"runtime":"antigravity","method":"session.list","oneof_branch":"antigravity_session_list","disposition":"typed-read"},
+    {"runtime":"antigravity","method":"session.swarm","oneof_branch":"antigravity_session_swarm","disposition":"typed-read"},
     {"runtime":"antigravity","method":"session.usage","oneof_branch":"antigravity_session_usage","disposition":"typed-read"},
     {"runtime":"antigravity","method":"usage.summary","oneof_branch":"antigravity_usage_summary","disposition":"typed-read"},
     {"runtime":"codex","method":"account/read","oneof_branch":"codex_account_read","disposition":"typed-read"},

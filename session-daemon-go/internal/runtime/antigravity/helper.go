@@ -169,6 +169,16 @@ func ExecuteHelper(ctx context.Context, req map[string]any) (map[string]any, err
 		}
 		return usage, nil
 
+	case "session_swarm":
+		id := str(req, "conversation_id")
+		if !validID(id) {
+			return nil, &RemoteHelperError{Message: "invalid Antigravity conversation ID", BeforeDispatch: true}
+		}
+		readonly, _ := req["readonly"].(bool)
+		memberID := strings.TrimSpace(str(req, "member_conversation_id"))
+		memberLimit, _ := intVal(req["member_limit"])
+		return readNativeSessionSwarm(ctx, home, id, readonly, memberID, memberLimit)
+
 	case "usage_summary":
 		sinceMs, _ := int64FromAny(req["since_ms"])
 		untilMs, _ := int64FromAny(req["until_ms"])

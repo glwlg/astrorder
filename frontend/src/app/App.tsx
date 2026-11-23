@@ -27,7 +27,6 @@ function lazyNamed<T extends ComponentType<any>>(
 const MobileWorkspace = lazyNamed(() => import('../features/mobile/MobileWorkspace'), 'MobileWorkspace')
 const GroupsPage = lazyNamed(() => import('../features/chat/GroupsPage'), 'GroupsPage')
 const MonitorPage = lazyNamed(() => import('../features/monitor/MonitorPage'), 'MonitorPage')
-const SwarmPage = lazyNamed(() => import('../features/monitor/SwarmPage'), 'SwarmPage')
 const PluginsPage = lazyNamed(() => import('../features/plugins/PluginsPage'), 'PluginsPage')
 const AnalyticsPage = lazyNamed(() => import('../features/analytics/AnalyticsPage'), 'AnalyticsPage')
 const BackupsPage = lazyNamed(() => import('../features/backups/BackupsPage'), 'BackupsPage')
@@ -101,7 +100,6 @@ function AuthenticatedApp() {
   useShortcutHandlers({
     chat: () => navigate(chatReturnPath),
     monitor: () => navigate('/monitor'),
-    swarm: () => navigate('/swarm'),
   })
   useEventStream(Boolean(bootstrap.data), queryClient, navigate)
   useServerOutboxSync(Boolean(bootstrap.data))
@@ -135,7 +133,7 @@ function AuthenticatedApp() {
         <Route path="groups" element={<Suspense fallback={<RouteSuspenseFallback />}><GroupsPage /></Suspense>} />
         <Route path="groups/:groupId" element={<Suspense fallback={<RouteSuspenseFallback />}><GroupsPage /></Suspense>} />
         <Route path="monitor" element={<Suspense fallback={<RouteSuspenseFallback />}><MonitorPage /></Suspense>} />
-        <Route path="swarm" element={<Suspense fallback={<RouteSuspenseFallback />}><SwarmPage /></Suspense>} />
+        <Route path="swarm" element={<Navigate to="/chat" replace />} />
         <Route path="plugins" element={<Suspense fallback={<RouteSuspenseFallback />}><PluginsPage /></Suspense>} />
         <Route path="analytics" element={<Suspense fallback={<RouteSuspenseFallback />}><AnalyticsPage /></Suspense>} />
         <Route path="backups" element={<Suspense fallback={<RouteSuspenseFallback />}><BackupsPage /></Suspense>} />

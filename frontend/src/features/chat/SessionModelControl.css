@@ -162,8 +162,39 @@
   inset-inline-start: calc(var(--slider-thumb-size) / -2) !important;
   transition: width 0.28s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.45s cubic-bezier(0.4, 0, 0.2, 1) !important;
 }
+.codex-model-slider-wrap.is-at-max .mantine-Slider-bar,
 .codex-model-slider-wrap .mantine-Slider-root:has([aria-valuenow="4"]) .mantine-Slider-bar {
   width: calc(100% + var(--slider-thumb-size)) !important;
+}
+.codex-model-effort-ticks {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 8px;
+  padding: 0 2px;
+}
+.codex-model-effort-tick {
+  border: 0;
+  background: transparent;
+  padding: 2px 4px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--astr-muted);
+  cursor: pointer;
+  transition: color 140ms ease, background 140ms ease;
+}
+.codex-model-effort-tick:hover:not(:disabled) {
+  color: var(--astr-text);
+  background: color-mix(in srgb, var(--astr-text) 6%, transparent);
+}
+.codex-model-effort-tick.is-active {
+  color: var(--effort-color, #0066cc);
+  font-weight: 650;
+}
+.codex-model-effort-tick:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 .codex-model-slider-wrap .mantine-Slider-thumb {
   transform: translate(-50%, -50%);

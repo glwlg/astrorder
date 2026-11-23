@@ -159,12 +159,12 @@
 .message-bubble-user { padding: 10px 14px; border: 0; border-radius: 14px; color: #232936; background: #F3F3F3; }
 :root[data-mantine-color-scheme='dark'] .message-bubble-user { color: var(--astr-text); background: var(--astr-surface-muted); }
 .markdown-content { font-size: 14px; line-height: 1.75; }
-.transcript .message-bubble .markdown-content { font-size: 15px; line-height: 1.75; }
+.transcript .message-bubble .markdown-content { font-size: 14.5px; line-height: 1.78; }
 .markdown-content p { margin: .55em 0; }
-.markdown-content ul, .markdown-content ol { margin: .65em 0; }
-.markdown-content li + li { margin-top: .25em; }
-.markdown-content h1, .markdown-content h2, .markdown-content h3 { line-height: 1.5; margin: 1em 0 .5em; }
-.markdown-content h1 { font-size: 20px; }.markdown-content h2 { font-size: 18px; }.markdown-content h3 { font-size: 16px; }
+.markdown-content ul, .markdown-content ol { margin: .55em 0; }
+.markdown-content li + li { margin-top: .34em; }
+.markdown-content h1, .markdown-content h2, .markdown-content h3 { line-height: 1.42; }
+.markdown-content h1 { font-size: 20px; }.markdown-content h2 { font-size: 17.5px; }.markdown-content h3 { font-size: 15.5px; }
 .activity-pack { width: 100%; flex-shrink: 0; }
 .activity-pack > details > summary { font-size: 12px; color: var(--astr-muted); cursor: pointer; padding: 2px 0; }
 .transcript .activity-pack > .lazy-details > summary, .transcript .activity-title { font-size: 13px; }
@@ -221,27 +221,277 @@
 .markdown-local-link {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
+  max-width: 100%;
   background: transparent;
   border: 0;
-  padding: 1px 4px;
+  padding: 0 3px;
   margin: 0 1px;
   border-radius: 4px;
-  color: var(--astr-indigo);
-  font: inherit;
+  color: color-mix(in oklab, var(--astr-indigo, #7540bd) 74%, var(--astr-text));
+  font-family: var(--astr-session-mono-font, ui-monospace, Consolas, monospace);
+  font-size: 0.88em;
   font-weight: 500;
+  line-height: 1.45;
   text-decoration: underline;
-  text-underline-offset: 2px;
+  text-decoration-color: color-mix(in oklab, var(--astr-indigo, #7540bd) 28%, transparent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: background 0.14s ease, color 0.14s ease, text-decoration-color 0.14s ease;
   vertical-align: baseline;
 }
+.markdown-local-link > svg {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  opacity: 0.52;
+  transition: opacity 0.14s ease;
+}
+.markdown-local-link-label {
+  overflow-wrap: anywhere;
+}
+.markdown-local-link-line {
+  font-size: 0.9em;
+  opacity: 0.58;
+  font-variant-numeric: tabular-nums;
+}
 .markdown-local-link:hover {
-  background: color-mix(in srgb, var(--astr-indigo) 10%, transparent);
-  color: var(--astr-indigo);
+  background: color-mix(in oklab, var(--astr-indigo, #7540bd) 9%, transparent);
+  color: var(--astr-indigo, #7540bd);
+  text-decoration-color: transparent;
+}
+.markdown-local-link:hover > svg {
+  opacity: 0.88;
 }
 .markdown-local-link:active {
-  transform: translateY(1px);
+  transform: translateY(0.5px);
+}
+:root[data-mantine-color-scheme='dark'] .markdown-local-link {
+  color: #cab8ee;
+  text-decoration-color: rgb(202 184 238 / 28%);
+}
+:root[data-mantine-color-scheme='dark'] .markdown-local-link:hover {
+  background: rgb(138 92 214 / 18%);
+  color: #e4d7ff;
+  text-decoration-color: transparent;
+}
+
+/* File Link Hover Peek Card */
+@keyframes file-hover-in {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes file-hover-in-above {
+  from { opacity: 0; transform: translateY(-3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.file-hover-card.is-above {
+  animation-name: file-hover-in-above;
+}
+.file-hover-card {
+  position: fixed;
+  z-index: 420;
+  width: min(540px, calc(100vw - 24px));
+  max-height: 360px;
+  display: flex;
+  flex-direction: column;
+  border-radius: 12px;
+  border: 1px solid color-mix(in oklab, var(--astr-border) 95%, transparent);
+  background: color-mix(in oklab, var(--astr-surface) 96%, transparent);
+  backdrop-filter: blur(14px);
+  box-shadow: 0 18px 42px -14px rgb(28 18 46 / 24%), 0 2px 8px rgb(28 18 46 / 8%);
+  color: var(--astr-text);
+  overflow: hidden;
+  animation: file-hover-in 0.12s ease-out;
+}
+.file-hover-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 10px;
+  border-bottom: 1px solid color-mix(in oklab, var(--astr-border) 78%, transparent);
+  background: color-mix(in oklab, var(--astr-surface-muted) 72%, var(--astr-surface));
+}
+.file-hover-ident {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+.file-hover-ident > svg {
+  flex: none;
+  color: var(--astr-muted);
+}
+.file-hover-name {
+  font-family: var(--astr-session-mono-font, ui-monospace, Consolas, monospace);
+  font-size: 12px;
+  font-weight: 620;
+  color: var(--astr-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.file-hover-line-badge {
+  flex: none;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: color-mix(in oklab, var(--astr-indigo, #7540bd) 11%, transparent);
+  color: var(--astr-indigo, #7540bd);
+  font-family: var(--astr-session-mono-font, ui-monospace, Consolas, monospace);
+  font-size: 10.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.file-hover-dir {
+  font-size: 11px;
+  color: var(--astr-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.file-hover-actions {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.file-hover-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2.5px 7px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--astr-muted);
+  font-size: 11px;
+  font-weight: 550;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.file-hover-btn:hover {
+  background: color-mix(in oklab, var(--astr-indigo, #7540bd) 10%, var(--astr-surface));
+  color: var(--astr-text);
+}
+.file-hover-btn.is-primary {
+  color: var(--astr-indigo, #7540bd);
+}
+.file-hover-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-width: thin;
+}
+.file-hover-code {
+  padding: 8px 0;
+  font: 12px/1.58 var(--astr-session-mono-font, ui-monospace, Consolas, monospace);
+  tab-size: 2;
+  user-select: text;
+}
+.file-hover-code-row {
+  display: flex;
+  align-items: flex-start;
+  padding: 0 12px 0 0;
+  white-space: pre;
+  min-width: max-content;
+}
+.file-hover-code-row.is-target {
+  background: color-mix(in oklab, var(--astr-indigo, #7540bd) 9%, transparent);
+  box-shadow: inset 2.5px 0 0 var(--astr-indigo, #7540bd);
+}
+.file-hover-gutter {
+  flex: none;
+  width: 42px;
+  padding-right: 10px;
+  text-align: right;
+  color: color-mix(in oklab, var(--astr-muted) 62%, transparent);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+.file-hover-code-row.is-target .file-hover-gutter {
+  color: var(--astr-indigo, #7540bd);
+  font-weight: 600;
+}
+.file-hover-code-text {
+  flex: 1;
+  color: var(--astr-text);
+}
+.file-hover-md {
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.68;
+}
+.file-hover-md h1 { font-size: 16px; margin-top: 0.9em; }
+.file-hover-md h2 { font-size: 14.5px; margin-top: 0.85em; }
+.file-hover-md h3 { font-size: 13.5px; margin-top: 0.75em; }
+.file-hover-img-wrap {
+  padding: 12px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: color-mix(in oklab, var(--astr-surface-muted) 45%, transparent);
+}
+.file-hover-img {
+  max-width: 100%;
+  max-height: 270px;
+  object-fit: contain;
+  border-radius: 6px;
+  cursor: zoom-in;
+}
+.file-hover-empty {
+  padding: 20px 16px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--astr-muted);
+}
+.file-hover-empty p { margin: 0 0 6px; }
+.file-hover-empty small { display: block; font-family: var(--astr-session-mono-font); font-size: 11px; overflow-wrap: anywhere; opacity: 0.8; }
+.file-hover-empty.is-error { color: #ba385b; }
+.file-hover-foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 10px;
+  border-top: 1px solid color-mix(in oklab, var(--astr-border) 72%, transparent);
+  background: color-mix(in oklab, var(--astr-surface-muted) 55%, var(--astr-surface));
+  font-size: 11px;
+  color: var(--astr-muted);
+}
+.file-hover-more {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: var(--astr-indigo, #7540bd);
+  font-size: 11px;
+  font-weight: 550;
+  cursor: pointer;
+}
+.file-hover-more:hover { text-decoration: underline; }
+:root[data-mantine-color-scheme='dark'] .file-hover-card {
+  background: rgb(25 23 32 / 96%);
+  border-color: rgb(205 178 240 / 20%);
+  box-shadow: 0 20px 48px -12px rgb(0 0 0 / 55%);
+}
+:root[data-mantine-color-scheme='dark'] .file-hover-line-badge {
+  background: rgb(138 92 214 / 22%);
+  color: #dbc9ff;
+}
+:root[data-mantine-color-scheme='dark'] .file-hover-btn.is-primary,
+:root[data-mantine-color-scheme='dark'] .file-hover-more {
+  color: #cbb5f6;
+}
+:root[data-mantine-color-scheme='dark'] .file-hover-code-row.is-target {
+  background: rgb(138 92 214 / 18%);
+}
+@media (prefers-reduced-motion: reduce) {
+  .file-hover-card { animation: none; }
 }
 .pack-summary-row {
   display: inline-flex;

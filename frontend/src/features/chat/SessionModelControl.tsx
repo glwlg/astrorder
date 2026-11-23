@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import { ActionIcon, Popover, Slider, Text, TextInput, UnstyledButton } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import {
+  IconArrowLeft,
   IconBolt,
   IconCheck,
   IconChevronDown,
@@ -14,20 +15,27 @@ import { api, type OcxModelQuotaResponse } from '../../api/client'
 import type { Session } from '../../domain/types'
 import { useSessionModel } from '../../hooks/useSessionModel'
 import { ComposerGlassMenu, GlassButtonLens } from '../../components/GlassPanel'
-import { REASONING_EFFORTS } from './composerMedia'
+import {
+  availableEffortsForModel,
+  effortLabelOf,
+  findModelGroup,
+  groupModelChoices,
+  isAntigravityProvider,
+  normalizeEffortValue,
+  parseAntigravityModelId,
+  resolveGroupVariant,
+  type ModelChoice,
+  type ModelChoiceGroup,
+} from './antigravityModels'
 import './SessionModelControl.css'
 
-type Choice = { provider: string; model: string; label: string }
-
-const EFFORT_COLORS = ['#93c5fd', '#60a5fa', '#3b82f6', '#0066cc', '#1e40af']
-
-const EFFORT_MARKS = [
-  { value: 0, label: '' },
-  { value: 1, label: '' },
-  { value: 2, label: '' },
-  { value: 3, label: '' },
-  { value: 4, label: '' },
-]
+const EFFORT_COLOR_BY_VALUE: Record<string, string> = {
+  low: '#93c5fd',
+  medium: '#60a5fa',
+  high: '#3b82f6',
+  xhigh: '#0066cc',
+  max: '#1e40af',
+}
 
 export function formatDisplayModel(label: string): string {
   if (!label) return ''
@@ -98,7 +106,7 @@ export function SessionModelControl({ session }: { session: Session }) {
   const [opened, setOpened] = useState(false)
   const [view, setView] = useState<'main' | 'models'>('main')
   const [search, setSearch] = useState('')
-  const [choice, setChoice] = useState<Choice | null>(null)
+  const [choice, setChoice] = useState<ModelChoice | null>(null)
   const [changing, setChanging] = useState(false)
   const [draftEffortIndex, setDraftEffortIndex] = useState<number | null>(null)
 
@@ -110,13 +118,47 @@ export function SessionModelControl({ session }: { session: Session }) {
     retry: false,
   })
 
-  const applyChoice = async (target: Choice) => {
+  const isAntigravity = isAntigravityProvider(model.data?.provider)
+    || Boolean(options.data?.items?.some((item) => isAntigravityProvider(item.provider)))
+  const groupedOptions = useMemo(
+    () => groupModelChoices(options.data?.items || []),
+    [options.data?.items],
+  )
+  const parsedCurrent = useMemo(
+    () => (isAntigravity ? parseAntigravityModelId(model.data?.model) : { baseModel: model.data?.model || '', effort: null }),
+    [isAntigravity, model.data?.model],
+  )
+  const activeGroup = useMemo(
+    () => findModelGroup(groupedOptions, model.data?.provider, model.data?.model),
+    [groupedOptions, model.data?.provider, model.data?.model],
+  )
+  const effectiveEffort = normalizeEffortValue(model.effort) ?? parsedCurrent.effort
+  const availableEfforts = useMemo(
+    () => availableEffortsForModel(activeGroup, model.data?.supported_efforts),
+    [activeGroup, model.data?.supported_efforts],
+  )
+
+  const modelOnly = isAntigravity
+    ? (activeGroup
+      ? (activeGroup.isGrouped
+        ? false
+        : activeGroup.efforts.length === 1
+          ? true
+          : model.data?.reasoning_read_only === true)
+      : (parsedCurrent.effort !== null ? false : model.data?.reasoning_read_only === true))
+    : model.data?.reasoning_read_only === true
+
+  const applyGroup = async (group: ModelChoiceGroup) => {
+    const target = resolveGroupVariant(group, effectiveEffort)
     setChoice(target)
     setChanging(true)
     try {
       await model.change(target.provider, target.model)
       setView('main')
-      if (model.data?.reasoning_read_only) setOpened(false)
+      const nextHasEffort = isAntigravity
+        ? group.isGrouped
+        : !model.data?.reasoning_read_only
+      if (!nextHasEffort) setOpened(false)
     } catch (error) {
       notifications.show({
         message: error instanceof Error ? error.message : '模型切换未确认',
@@ -128,15 +170,23 @@ export function SessionModelControl({ session }: { session: Session }) {
   }
 
   const applyEffortByIndex = async (index: number) => {
-    const effortObj = REASONING_EFFORTS[index]
-    if (!effortObj || effortObj.value === model.effort) {
+    const effortObj = availableEfforts[index]
+    if (!effortObj || effortObj.value === effectiveEffort) {
       setDraftEffortIndex(null)
       return
     }
     if (changing) return
     setChanging(true)
     try {
-      await model.changeEffort(effortObj.value)
+      const variant = activeGroup?.isGrouped
+        ? activeGroup.efforts.find((item) => item.effort === effortObj.value)?.choice
+        : undefined
+      if (variant) {
+        setChoice(variant)
+        await model.change(variant.provider, variant.model)
+      } else {
+        await model.changeEffort(effortObj.value)
+      }
     } catch (error) {
       setDraftEffortIndex(null)
       notifications.show({
@@ -149,17 +199,38 @@ export function SessionModelControl({ session }: { session: Session }) {
     }
   }
 
-  const resolvedEffortIndex = REASONING_EFFORTS.findIndex((item) => item.value === model.effort)
+  const maxEffortIndex = Math.max(1, availableEfforts.length - 1)
+  const resolvedEffortIndex = availableEfforts.findIndex((item) => item.value === effectiveEffort)
+  const fallbackEffortIndex = availableEfforts.findIndex((item) => item.value === 'medium')
   const currentEffortIndex = resolvedEffortIndex >= 0
     ? resolvedEffortIndex
-    : REASONING_EFFORTS.findIndex((item) => item.value === 'medium')
-  const sliderIndex = draftEffortIndex ?? currentEffortIndex
+    : fallbackEffortIndex >= 0 ? fallbackEffortIndex : 0
+  const sliderIndex = Math.min(maxEffortIndex, draftEffortIndex ?? currentEffortIndex)
+  const activeEffortColor = EFFORT_COLOR_BY_VALUE[availableEfforts[sliderIndex]?.value] || '#3b82f6'
+  const effortMarks = useMemo(
+    () => availableEfforts.map((_, idx) => ({ value: idx, label: '' })),
+    [availableEfforts],
+  )
   const effortLabel = draftEffortIndex !== null || resolvedEffortIndex >= 0
-    ? REASONING_EFFORTS[sliderIndex]?.label
-    : model.effort || '未确认'
-  const modelOnly = model.data?.reasoning_read_only === true
-  const displayModelName = modelOnly && !model.data?.model ? '选择模型' : formatDisplayModel(model.label)
+    ? availableEfforts[sliderIndex]?.label
+    : effortLabelOf(effectiveEffort) || model.effort || '未确认'
+
+  const displayModelName = modelOnly && !model.data?.model
+    ? '选择模型'
+    : isAntigravity && model.data?.model && parsedCurrent.effort
+      ? `${parsedCurrent.baseModel}${model.data.deferred ? ' · 下轮生效' : ''}`
+      : formatDisplayModel(model.label)
+  const cardModelName = activeGroup?.isGrouped
+    ? `${activeGroup.label}${model.data?.deferred ? ' · 下轮生效' : ''}`
+    : displayModelName
+  const showPillEffort = Boolean(effortLabel) && (!modelOnly || Boolean(parsedCurrent.effort))
   const currentModelRoute = model.data?.model ? `${model.data.provider ? `${model.data.provider}/` : ''}${model.data.model}` : ''
+  const effortControlDisabled = changing
+    || Boolean(model.data?.read_only || model.data?.model_read_only)
+    || (isAntigravity
+      ? (!activeGroup?.isGrouped && (options.isPending || Boolean(model.data?.reasoning_read_only)))
+      : Boolean(model.data?.reasoning_read_only))
+  const searchQuery = search.trim().toLowerCase()
 
   return (
     <Popover
@@ -168,6 +239,7 @@ export function SessionModelControl({ session }: { session: Session }) {
         setOpened(open)
         if (!open) setView('main')
       }}
+      hideDetached={false}
       position="top-end"
       offset={10}
       shadow="md"
@@ -188,7 +260,7 @@ export function SessionModelControl({ session }: { session: Session }) {
           <GlassButtonLens />
           <span className="codex-model-pill-text">{displayModelName}</span>
           <ModelQuotaBadge modelRoute={currentModelRoute} agentId={session.agent_id} size="dot" />
-          {!modelOnly && effortLabel && <span className="codex-model-pill-effort">{effortLabel}</span>}
+          {showPillEffort && <span className="codex-model-pill-effort">{effortLabel}</span>}
           <IconChevronDown size={14} className="codex-model-pill-arrow" />
         </button>
       </Popover.Target>
@@ -197,7 +269,7 @@ export function SessionModelControl({ session }: { session: Session }) {
         <ComposerGlassMenu active={opened}>
         {(model.data?.read_only || model.data?.model_read_only) && <Text size="xs" c="dimmed" p="xs">{model.data.detail || '会话被其他客户端占用，当前只能读取模型信息。释放后点击刷新即可重新检查。'}</Text>}
         {view === 'main' && !modelOnly ? (
-          <div className="codex-model-card" style={{ '--effort-color': EFFORT_COLORS[sliderIndex] } as React.CSSProperties}>
+          <div className="codex-model-card" style={{ '--effort-color': activeEffortColor } as React.CSSProperties}>
             <div className="codex-model-header-row">
               <span className="codex-model-icon-bolt" title="思维与推理">
                 <IconBolt size={18} />
@@ -223,7 +295,7 @@ export function SessionModelControl({ session }: { session: Session }) {
                   </AnimatePresence>
                   <IconChevronRight size={15} />
                 </span>
-                <span className="codex-model-name-label" title={model.label}>{displayModelName}</span>
+                <span className="codex-model-name-label" title={model.label}>{cardModelName}</span>
               </button>
               <ActionIcon
                 variant="subtle"
@@ -237,21 +309,21 @@ export function SessionModelControl({ session }: { session: Session }) {
               </ActionIcon>
             </div>
 
-            <div className="codex-model-slider-wrap">
+            <div className={`codex-model-slider-wrap${sliderIndex === maxEffortIndex ? ' is-at-max' : ''}`}>
               <Slider
-                disabled={changing || model.data?.reasoning_read_only || (model.data?.read_only || model.data?.model_read_only)}
+                disabled={effortControlDisabled}
                 size={18}
                 thumbSize={22}
-                color={EFFORT_COLORS[sliderIndex]}
+                color={activeEffortColor}
                 min={0}
-                max={4}
+                max={maxEffortIndex}
                 step={1}
-                marks={EFFORT_MARKS}
+                marks={effortMarks}
                 value={sliderIndex}
                 thumbLabel="思考强度"
                 onChange={setDraftEffortIndex}
                 onChangeEnd={(val) => void applyEffortByIndex(val)}
-                label={(val) => REASONING_EFFORTS[val]?.label}
+                label={(val) => availableEfforts[val]?.label}
                 styles={{
                   root: { width: '100%' },
                   track: {
@@ -260,7 +332,7 @@ export function SessionModelControl({ session }: { session: Session }) {
                   bar: {
                     borderRadius: 999,
                     // Mantine extends both ends; intermediate fills must stop at the thumb.
-                    width: sliderIndex === 4 ? undefined : `calc(${sliderIndex * 25}% + var(--slider-size))`,
+                    width: sliderIndex === maxEffortIndex ? undefined : `calc(${(sliderIndex / maxEffortIndex) * 100}% + var(--slider-size))`,
                   },
                   thumb: {
                     border: '2px solid #ffffff',
@@ -281,15 +353,41 @@ export function SessionModelControl({ session }: { session: Session }) {
                   },
                 }}
               />
+              <div className="codex-model-effort-ticks">
+                {availableEfforts.map((item, idx) => (
+                  <button
+                    key={item.value}
+                    type="button"
+                    className={`codex-model-effort-tick${idx === sliderIndex ? ' is-active' : ''}`}
+                    disabled={effortControlDisabled}
+                    onClick={() => void applyEffortByIndex(idx)}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         ) : (
           <div className="codex-model-list-panel">
             <div className="codex-model-list-head">
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                <Text size="xs" c="dimmed" fw={600}>
-                  选择模型
-                </Text>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  {!modelOnly && (
+                    <ActionIcon
+                      variant="subtle"
+                      color="gray"
+                      size="xs"
+                      aria-label="返回思考强度"
+                      onClick={() => setView('main')}
+                    >
+                      <IconArrowLeft size={14} />
+                    </ActionIcon>
+                  )}
+                  <Text size="xs" c="dimmed" fw={600}>
+                    选择模型
+                  </Text>
+                </div>
                 <ActionIcon
                   variant="subtle"
                   color="gray"
@@ -318,26 +416,39 @@ export function SessionModelControl({ session }: { session: Session }) {
                   读取可用模型…
                 </Text>
               )}
-              {options.data?.items
+              {groupedOptions
                 .filter((item) =>
-                  item.label.toLowerCase().includes(search.toLowerCase()),
+                  !searchQuery
+                    || item.label.toLowerCase().includes(searchQuery)
+                    || item.baseModel.toLowerCase().includes(searchQuery),
                 )
                 .map((item) => {
-                  const isSelected = choice
-                    ? choice.provider === item.provider && choice.model === item.model
-                    : model.data
-                      ? (model.data.provider ?? '') === (item.provider ?? '') && model.data.model === item.model
-                      : model.label === item.model || model.label === `${item.provider ? `${item.provider}/` : ''}${item.model}`
+                  const isSelected = activeGroup
+                    ? activeGroup.key === item.key
+                    : choice
+                      ? (choice.provider === item.provider && (
+                        choice.model === item.defaultVariant.model
+                        || choice.model === item.baseModel
+                        || item.efforts.some((e) => e.choice.model === choice.model)
+                      ))
+                      : model.data
+                        ? (model.data.provider ?? '') === (item.provider ?? '') && (
+                          model.data.model === item.defaultVariant.model
+                          || model.data.model === item.baseModel
+                          || item.efforts.some((e) => e.choice.model === model.data?.model)
+                        )
+                        : model.label === item.defaultVariant.model
+                          || model.label === `${item.provider ? `${item.provider}/` : ''}${item.defaultVariant.model}`
 
                   return (
                     <UnstyledButton
-                      key={JSON.stringify([item.provider, item.model])}
+                      key={item.key}
                       className={"codex-model-menu-item" + (isSelected ? " is-selected" : "")}
-                      onClick={() => void applyChoice(item)}
+                      onClick={() => void applyGroup(item)}
                       disabled={changing || (model.data?.read_only || model.data?.model_read_only)}
                     >
                       <span className="codex-model-menu-item-text" title={item.label}>{item.label}</span>
-                      <ModelQuotaBadge modelRoute={`${item.provider ? `${item.provider}/` : ''}${item.model}`} agentId={session.agent_id} />
+                      <ModelQuotaBadge modelRoute={`${item.provider ? `${item.provider}/` : ''}${item.defaultVariant.model}`} agentId={session.agent_id} />
                       {isSelected && <IconCheck size={16} className="codex-model-check-icon" />}
                     </UnstyledButton>
                   )

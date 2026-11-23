@@ -12,6 +12,12 @@ import type {
   ConnectionsPayload,
   RuntimePayload,
   Session,
+  SessionSwarm,
+  SessionSchedule,
+  SessionScheduleInput,
+  SessionSchedulePatch,
+  SessionSchedulePreview,
+  SessionScheduleRunResult,
   SshConnection,
   SshConnectionSettings,
   Task,
@@ -47,7 +53,7 @@ export interface ReviewRelayRun {
   created_at: string
   updated_at: string
 }
-export interface SessionModelBinding { model: string; provider: string | null; deferred?: boolean; branch?: string; effort?: string | null; read_only?: boolean; model_read_only?: boolean; reasoning_read_only?: boolean; detail?: string }
+export interface SessionModelBinding { model: string; provider: string | null; deferred?: boolean; branch?: string; effort?: string | null; supported_efforts?: string[]; read_only?: boolean; model_read_only?: boolean; reasoning_read_only?: boolean; detail?: string }
 export interface CodexConnectionStatus { kind: 'codex'; state: 'disconnected' | 'connecting' | 'connected' | 'error' | 'authentication_required'; available: boolean; agent_id: string; session_count: number; auth_required: boolean; detail: string; daemon_mode: boolean }
 export interface GatewayProfile {
   statistics_url?: string
@@ -521,6 +527,57 @@ export const api = {
     request<{ items: Task[] }>(
       `${sessionPath(sessionId)}/tasks?agent_id=${encodeURIComponent(agentId)}`,
     ),
+  getSessionSwarm: (
+    sessionId: string,
+    agentId: string,
+    options?: { memberConversationId?: string; memberLimit?: number },
+  ) => {
+    const query = new URLSearchParams({ agent_id: agentId })
+    if (options?.memberConversationId) {
+      query.set('member_conversation_id', options.memberConversationId)
+    }
+    if (options?.memberLimit) {
+      query.set('member_limit', String(options.memberLimit))
+    }
+    return request<SessionSwarm>(`${sessionPath(sessionId)}/swarm?${query.toString()}`)
+  },
+  listAllSchedules: () => request<{ items: SessionSchedule[] }>('/schedules'),
+  listSessionSchedules: (sessionId: string, agentId: string) =>
+    request<{ items: SessionSchedule[] }>(
+      `${sessionPath(sessionId)}/schedules?agent_id=${encodeURIComponent(agentId)}`,
+    ),
+  createSessionSchedule: (sessionId: string, payload: SessionScheduleInput) =>
+    request<SessionSchedule>(`${sessionPath(sessionId)}/schedules`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  updateSessionSchedule: (scheduleId: string, payload: SessionSchedulePatch) =>
+    request<SessionSchedule>(`/schedules/${encodeURIComponent(scheduleId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+  deleteSessionSchedule: (scheduleId: string) =>
+    request<{ deleted: boolean; id: string }>(`/schedules/${encodeURIComponent(scheduleId)}`, {
+      method: 'DELETE',
+    }),
+  runSessionScheduleNow: (scheduleId: string) =>
+    request<SessionScheduleRunResult>(`/schedules/${encodeURIComponent(scheduleId)}/run`, {
+      method: 'POST',
+    }),
+  previewSessionSchedule: (payload: {
+    schedule_kind: string
+    cron_expr?: string
+    interval_minutes?: number
+    daily_time?: string
+    weekday_mask?: number
+    run_at?: string
+    timezone?: string
+    count?: number
+  }) =>
+    request<SessionSchedulePreview>('/schedules/preview', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   uploadAttachment: async (file: File) => {
     const form = new FormData()
     // WebView2's intercepted multipart stream can omit disk-backed File bytes.
@@ -716,8 +773,8 @@ export const api = {
   getSessionModels: (sessionId: string, agentId: string) => request<{ items: { provider: string; model: string; label: string }[] }>(`${sessionPath(sessionId)}/models?agent_id=${encodeURIComponent(agentId)}`),
   getAgentCommands: (sessionId: string, agentId: string) => request<{ items: AgentCommand[] }>(`${sessionPath(sessionId)}/agent-commands?agent_id=${encodeURIComponent(agentId)}`),
   getAgentMentions: (sessionId: string, agentId: string) => request<{ items: AgentMention[] }>(`${sessionPath(sessionId)}/agent-mentions?agent_id=${encodeURIComponent(agentId)}`),
-  setSessionModel: (sessionId: string, agentId: string, provider: string, model: string) => jsonRequest<{ provider: string; model: string; deferred?: boolean }>(`${sessionPath(sessionId)}/model`, { agent_id: agentId, provider, model }),
-  setSessionReasoning: (sessionId: string, agentId: string, effort: string) => jsonRequest<{ effort: string }>(`${sessionPath(sessionId)}/reasoning`, { agent_id: agentId, effort }),
+  setSessionModel: (sessionId: string, agentId: string, provider: string, model: string) => jsonRequest<{ provider: string; model: string; deferred?: boolean; effort?: string | null; reasoning_read_only?: boolean; supported_efforts?: string[] }>(`${sessionPath(sessionId)}/model`, { agent_id: agentId, provider, model }),
+  setSessionReasoning: (sessionId: string, agentId: string, effort: string) => jsonRequest<{ effort: string; provider?: string; model?: string }>(`${sessionPath(sessionId)}/reasoning`, { agent_id: agentId, effort }),
   respondUserInput: (sessionId: string, payload: { id: string; agent_id: string; request_id: string; answers: Record<string, { answers: string[] }> }) => jsonRequest<{ accepted: boolean; request_id: string }>(`${sessionPath(sessionId)}/user-input`, payload),
   getSessionApprovalMode: (sessionId: string, agentId: string) => request<{ mode: import('../domain/types').ApprovalMode }>(`${sessionPath(sessionId)}/approval-mode?agent_id=${encodeURIComponent(agentId)}`),
   setSessionApprovalMode: (sessionId: string, agentId: string, mode: import('../domain/types').ApprovalMode) => jsonRequest<{ mode: import('../domain/types').ApprovalMode }>(`${sessionPath(sessionId)}/approval-mode`, { agent_id: agentId, mode }),

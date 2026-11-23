@@ -16,7 +16,6 @@ import {
   IconSend,
   IconSettings,
   IconSun,
-  IconTopologyStarRing,
   IconUsers,
 } from '@tabler/icons-react'
 import { useNavigate } from 'react-router-dom'
@@ -122,7 +121,6 @@ export function CommandPalette({ opened, onClose, onToggleSidebar, onOpenSetting
     const routes: Array<{ id: string; title: string; subtitle: string; to: string; keywords: string }> = [
       { id: 'route:welcome', title: '星序指挥台（欢迎页）', subtitle: '/chat', to: '/chat', keywords: 'welcome home 指挥台 欢迎页 首页' },
       { id: 'route:matrix', title: '矩阵（多会话网格）', subtitle: '/monitor', to: '/monitor', keywords: 'matrix monitor 矩阵 监控室 多窗' },
-      { id: 'route:swarm', title: '星图（主伴星拓扑）', subtitle: '/swarm', to: '/swarm', keywords: 'swarm topology 星图 主星 伴星' },
       { id: 'route:groups', title: '群聊协作', subtitle: '/groups', to: '/groups', keywords: 'groups chat 群聊 接力' },
       { id: 'route:analytics', title: '用量统计', subtitle: '/analytics', to: '/analytics', keywords: 'analytics usage token 统计 网关' },
       { id: 'route:backups', title: '文件与目录备份', subtitle: '/backups', to: '/backups', keywords: 'backups 备份 快照' },
@@ -175,18 +173,6 @@ export function CommandPalette({ opened, onClose, onToggleSidebar, onOpenSetting
         onRun: () => {
           onClose()
           onOpenSettings()
-        },
-      },
-      {
-        id: 'action:new-swarm',
-        category: 'action',
-        title: '启动新主星会话',
-        subtitle: '前往星图并打开创建弹窗',
-        keywords: 'swarm new root 启动主星 新建星图',
-        onRun: () => {
-          onClose()
-          navigate('/swarm')
-          setTimeout(() => window.dispatchEvent(new CustomEvent('astrorder:open-create-swarm')), 120)
         },
       },
     )
@@ -342,7 +328,6 @@ export function CommandPalette({ opened, onClose, onToggleSidebar, onOpenSetting
     if (item.category === 'project') return <IconFolder size={15} color="var(--astr-indigo)" />
     if (item.id === 'route:welcome') return <IconHome size={15} color="var(--astr-indigo)" />
     if (item.id === 'route:matrix') return <IconLayoutGrid size={15} color="var(--astr-indigo)" />
-    if (item.id === 'route:swarm') return <IconTopologyStarRing size={15} color="var(--astr-indigo)" />
     if (item.id === 'route:groups') return <IconUsers size={15} color="var(--astr-indigo)" />
     if (item.id === 'route:analytics') return <IconChartBar size={15} color="var(--astr-indigo)" />
     if (item.id === 'route:backups') return <IconDatabase size={15} color="var(--astr-indigo)" />

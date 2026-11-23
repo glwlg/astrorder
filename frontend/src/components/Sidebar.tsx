@@ -1,4 +1,4 @@
-import { ChartLineUpIcon, ChatCircleDotsIcon, CpuIcon, DesktopIcon, GearSixIcon, GlobeHemisphereWestIcon, GraphIcon, HardDrivesIcon, IdentificationCardIcon, KeyboardIcon, LightningIcon, PuzzlePieceIcon, SlidersHorizontalIcon, SquaresFourIcon, UsersThreeIcon } from './workbenchIcons'
+import { ChartLineUpIcon, ChatCircleDotsIcon, CpuIcon, DesktopIcon, GearSixIcon, GlobeHemisphereWestIcon, HardDrivesIcon, IdentificationCardIcon, KeyboardIcon, LightningIcon, PuzzlePieceIcon, SlidersHorizontalIcon, SquaresFourIcon, UsersThreeIcon } from './workbenchIcons'
 import { IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconPin } from '@tabler/icons-react'
 import { ActionIcon, Center, HoverCard, Loader, Modal, NavLink, Stack, Tabs, Text, Tooltip } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
@@ -14,7 +14,6 @@ import { useShortcutHandlers } from '../features/shortcuts/shortcuts'
 import { formatTokens, getModelColor } from '../features/analytics/usageFormat'
 import { SessionRail } from './SessionRail'
 import { BotGroupRail } from './BotGroupRail'
-import { SwarmRootRail } from './SwarmRootRail'
 import { useAstrorderStore } from '../state/store'
 import { groupHasActiveTask } from '../domain/groupActivity'
 import { GroupTaskIndicator } from './GroupTaskIndicator'
@@ -37,7 +36,6 @@ const PluginsPage = lazy(() => import('../features/plugins/PluginsPage').then((m
 const navItems = [
   { to: '/chat', label: '会话', icon: ChatCircleDotsIcon, id: 'chat' },
   { to: '/monitor', label: '矩阵', icon: SquaresFourIcon, id: 'monitor' },
-  { to: '/swarm', label: '星图', icon: GraphIcon, id: 'swarm' },
   { to: '/groups', label: '群聊', icon: UsersThreeIcon, id: 'groups' },
   { to: '/analytics', label: '统计', icon: ChartLineUpIcon, id: 'analytics' },
   { to: '/backups', label: '备份', icon: HardDrivesIcon, id: 'backups' },
@@ -168,13 +166,12 @@ export function Sidebar({
     retry: false,
   })
 
-  const isSwarm = location.pathname.startsWith('/swarm')
   const isGroups = location.pathname.startsWith('/groups') || location.pathname.startsWith('/chat/group-')
   const isMonitorRoute = location.pathname.startsWith('/monitor')
   const isAnalytics = location.pathname.startsWith('/analytics')
   const isBackups = location.pathname.startsWith('/backups')
   const isAgentAccounts = location.pathname.startsWith('/agent-accounts')
-  const isChat = !isSwarm && !isGroups && !isMonitorRoute && !isAnalytics && !isBackups && !isAgentAccounts
+  const isChat = !isGroups && !isMonitorRoute && !isAnalytics && !isBackups && !isAgentAccounts
   const isInChatSession = isChat && (
     (location.pathname.startsWith('/chat/') && !location.pathname.startsWith('/chat/group-')) ||
     Boolean(activeSessionKey)
@@ -202,7 +199,6 @@ export function Sidebar({
             {navItems.map(({ to, label, icon: Icon, id }) => {
               const isThisMonitor = id === 'monitor'
               const isActive =
-                (id === 'swarm' && isSwarm) ||
                 (id === 'groups' && isGroups) ||
                 (id === 'monitor' && isMonitorRoute) ||
                 (id === 'analytics' && isAnalytics) ||
@@ -212,7 +208,6 @@ export function Sidebar({
               const canHoverPeekTab =
                 isCollapsedDesktop &&
                 ((id === 'chat' && (isChat || isMonitorRoute)) ||
-                  (id === 'swarm' && isSwarm) ||
                   (id === 'groups' && isGroups))
               const link = (
                 <NavLink
@@ -324,7 +319,7 @@ export function Sidebar({
             {isPeekingDesktop && onTogglePanelCollapse && (
               <div className="sidebar-peek-header">
                 <Text size="xs" fw={650} c="dimmed">
-                  {isSwarm ? '星图主星' : isGroups ? '群聊协作' : '项目会话'}
+                  {isGroups ? '群聊协作' : '项目会话'}
                 </Text>
                 <Tooltip label="固定侧栏 (Ctrl+B)" position="right" withArrow>
                   <button
@@ -339,16 +334,7 @@ export function Sidebar({
               </div>
             )}
             <Stack className="sidebar-content" gap="md">
-        {isSwarm ? (
-          <SwarmRootRail
-            sessions={sessions}
-            agents={agents}
-            onNavigate={() => {
-              onNavigate?.()
-              onDismissPeek?.()
-            }}
-          />
-        ) : isGroups ? (
+        {isGroups ? (
           <BotGroupRail
             agents={agents}
             onNavigate={() => {

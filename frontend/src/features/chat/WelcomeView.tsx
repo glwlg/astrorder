@@ -14,7 +14,6 @@ import {
   IconFolderPlus,
   IconLayoutGrid,
   IconSend,
-  IconTopologyStarRing,
   IconUsers,
 } from '@tabler/icons-react'
 import { useNavigate } from 'react-router-dom'
@@ -679,10 +678,6 @@ export function WelcomeView({ sessions, agents, onNewSession }: WelcomeViewProps
             <UnstyledButton className="welcome-quick-link" onClick={() => navigate('/monitor')}>
               <IconLayoutGrid size={13} color="var(--astr-indigo)" />
               <span>矩阵</span>
-            </UnstyledButton>
-            <UnstyledButton className="welcome-quick-link" onClick={() => navigate('/swarm')}>
-              <IconTopologyStarRing size={13} color="var(--astr-indigo)" />
-              <span>星图</span>
             </UnstyledButton>
             <UnstyledButton className="welcome-quick-link" onClick={() => navigate('/groups')}>
               <IconUsers size={13} color="var(--astr-indigo)" />

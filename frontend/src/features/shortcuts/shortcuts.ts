@@ -7,7 +7,6 @@ export const shortcutActions = [
   { id: 'sidebar', label: '展开或收起左侧栏', group: '通用', defaultKey: 'Ctrl+B', description: '切换左侧会话列表的固定展开或贴边收起状态。' },
   { id: 'chat', label: '前往会话', group: '导航', defaultKey: 'Ctrl+Alt+1', description: '打开会话工作台。' },
   { id: 'monitor', label: '前往矩阵', group: '导航', defaultKey: 'Ctrl+Alt+2', description: '打开矩阵。' },
-  { id: 'swarm', label: '前往星图', group: '导航', defaultKey: 'Ctrl+Alt+3', description: '打开星图。' },
   { id: 'quickOpen', label: '快速打开文件', group: '当前会话', defaultKey: 'Ctrl+P', description: '搜索当前工作区中的文件。' },
   { id: 'fileTree', label: '打开文件树', group: '当前会话', defaultKey: 'Ctrl+Shift+E', description: '显示当前工作区的文件树。' },
   { id: 'terminal', label: '打开终端', group: '当前会话', defaultKey: 'Ctrl+`', description: '打开当前会话的内置终端。' },

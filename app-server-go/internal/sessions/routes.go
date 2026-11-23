@@ -46,6 +46,14 @@ var allRoutes = []Registration{
 	{Method: http.MethodGet, Path: "/api/v1/sessions/{session_id}/commands"},
 	{Method: http.MethodGet, Path: "/api/v1/sessions/{session_id}/background-processes"},
 	{Method: http.MethodGet, Path: "/api/v1/sessions/{session_id}/tasks"},
+	{Method: http.MethodGet, Path: "/api/v1/sessions/{session_id}/swarm"},
+	{Method: http.MethodGet, Path: "/api/v1/sessions/{session_id}/schedules"},
+	{Method: http.MethodPost, Path: "/api/v1/sessions/{session_id}/schedules"},
+	{Method: http.MethodGet, Path: "/api/v1/schedules"},
+	{Method: http.MethodPost, Path: "/api/v1/schedules/preview"},
+	{Method: http.MethodPatch, Path: "/api/v1/schedules/{schedule_id}"},
+	{Method: http.MethodDelete, Path: "/api/v1/schedules/{schedule_id}"},
+	{Method: http.MethodPost, Path: "/api/v1/schedules/{schedule_id}/run"},
 	{Method: http.MethodPost, Path: "/api/v1/commands"},
 	{Method: http.MethodPatch, Path: "/api/v1/commands/{command_id}"},
 	{Method: http.MethodDelete, Path: "/api/v1/commands/{command_id}"},
@@ -74,6 +82,7 @@ type parsedParams struct {
 	SessionID   string
 	CommandID   string
 	OperationID string
+	ScheduleID  string
 }
 
 func parseRoute(method, path string) (string, parsedParams) {
@@ -128,6 +137,14 @@ func parseRoute(method, path string) (string, parsedParams) {
 	case "/api/v1/projects/delete":
 		if method == http.MethodPost {
 			return "delete_project", params
+		}
+	case "/api/v1/schedules":
+		if method == http.MethodGet {
+			return "list_all_schedules", params
+		}
+	case "/api/v1/schedules/preview":
+		if method == http.MethodPost {
+			return "preview_schedule", params
 		}
 	}
 
@@ -217,6 +234,37 @@ func parseRoute(method, path string) (string, parsedParams) {
 				if method == http.MethodGet {
 					return "list_tasks", params
 				}
+			case "swarm":
+				if method == http.MethodGet {
+					return "get_session_swarm", params
+				}
+			case "schedules":
+				if method == http.MethodGet {
+					return "list_session_schedules", params
+				}
+				if method == http.MethodPost {
+					return "create_session_schedule", params
+				}
+			}
+		}
+	}
+
+	// Dynamic routes under /api/v1/schedules/{schedule_id}...
+	if strings.HasPrefix(path, "/api/v1/schedules/") {
+		sub := strings.TrimPrefix(path, "/api/v1/schedules/")
+		parts := strings.Split(sub, "/")
+		if len(parts) == 1 && parts[0] != "" {
+			params.ScheduleID = parts[0]
+			if method == http.MethodPatch {
+				return "update_schedule", params
+			}
+			if method == http.MethodDelete {
+				return "delete_schedule", params
+			}
+		} else if len(parts) == 2 && parts[0] != "" && parts[1] == "run" {
+			params.ScheduleID = parts[0]
+			if method == http.MethodPost {
+				return "run_schedule_now", params
 			}
 		}
 	}

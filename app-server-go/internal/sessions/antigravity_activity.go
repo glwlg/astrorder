@@ -44,6 +44,7 @@ func (h *Handler) refreshAntigravityActivity(ctx context.Context, agent map[stri
 			Workspace string `json:"workspace"`
 			UpdatedAt string `json:"updated_at"`
 			Status    string `json:"status"`
+			Ephemeral bool   `json:"ephemeral"`
 		} `json:"items"`
 	}
 	if response == nil {
@@ -81,7 +82,7 @@ func (h *Handler) refreshAntigravityActivity(ctx context.Context, agent map[stri
 		if status != "running" && status != "waiting_approval" && status != "error" {
 			status = "idle"
 		}
-		row := map[string]any{"id": native.ID, "agent_id": aid, "title": title, "workspace": optionalText(native.Workspace), "status": status, "source_id": aid, "source_session_id": native.ID, "history_state": "available", "control_state": "unbound", "native_kind": "rpc", "updated_at": at.UTC().Format(time.RFC3339Nano)}
+		row := map[string]any{"id": native.ID, "agent_id": aid, "title": title, "workspace": optionalText(native.Workspace), "status": status, "source_id": aid, "source_session_id": native.ID, "history_state": "available", "control_state": "unbound", "native_kind": "rpc", "ephemeral": native.Ephemeral, "updated_at": at.UTC().Format(time.RFC3339Nano)}
 		if conn := stringValue(agent, "connection_id"); conn != "" && conn != "local" {
 			row["connection_id"] = conn
 		}
@@ -105,8 +106,15 @@ func (h *Handler) refreshAntigravityActivity(ctx context.Context, agent map[stri
 			continue
 		}
 		existingTitle := strings.TrimSpace(stringValue(existing, "title"))
+		patch := map[string]any{}
 		if title != native.ID && (existingTitle == "" || existingTitle == "New Session" || existingTitle == "新对话" || existingTitle == "新会话" || existingTitle == native.ID) && existingTitle != title {
-			if upgraded, upErr := h.store.UpdateSession(ctx, aid, native.ID, map[string]any{"title": title}); upErr == nil && upgraded != nil {
+			patch["title"] = title
+		}
+		if native.Ephemeral && existing["ephemeral"] != true {
+			patch["ephemeral"] = true
+		}
+		if len(patch) > 0 {
+			if upgraded, upErr := h.store.UpdateSession(ctx, aid, native.ID, patch); upErr == nil && upgraded != nil {
 				h.publishEvent(ctx, "session.upsert", upgraded)
 				count++
 			}

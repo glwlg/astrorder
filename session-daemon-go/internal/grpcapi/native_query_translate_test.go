@@ -170,4 +170,40 @@ func TestNativeQueryTranslationSupportsAntigravityInt64UsageSummaryAndSessionUsa
 	if _, err := translateNativeQuery(badSessReq); status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("expected InvalidArgument for empty conversation_id, got %v", err)
 	}
+
+	memberConvID := "62794208-5f2e-4120-a6b1-99e5ee29c7f2"
+	memberLimit := int32(25)
+	swarmReq := &sessiondv1.NativeQueryRequest{
+		Target: &sessiondv1.RuntimeTarget{Runtime: sessiondv1.RuntimeKind_RUNTIME_KIND_ANTIGRAVITY},
+		Query: &sessiondv1.NativeQueryRequest_AntigravitySessionSwarm{
+			AntigravitySessionSwarm: &sessiondv1.AntigravitySessionSwarmQuery{
+				ConversationId:       "52794208-5f2e-4120-a6b1-99e5ee29c7f1",
+				Readonly:             &readonly,
+				MemberConversationId: &memberConvID,
+				MemberLimit:          &memberLimit,
+			},
+		},
+	}
+	translatedSwarm, err := translateNativeQuery(swarmReq)
+	if err != nil {
+		t.Fatalf("AntigravitySessionSwarm failed: %v", err)
+	}
+	swarmParams := translatedSwarm.Fields["request_params"].(map[string]any)
+	if translatedSwarm.Fields["method"] != "session.swarm" ||
+		swarmParams["conversation_id"] != "52794208-5f2e-4120-a6b1-99e5ee29c7f1" ||
+		swarmParams["readonly"] != true ||
+		swarmParams["member_conversation_id"] != memberConvID ||
+		swarmParams["member_limit"] != int32(25) {
+		t.Fatalf("lost session swarm params: %#v", swarmParams)
+	}
+
+	badSwarmReq := &sessiondv1.NativeQueryRequest{
+		Target: &sessiondv1.RuntimeTarget{Runtime: sessiondv1.RuntimeKind_RUNTIME_KIND_ANTIGRAVITY},
+		Query: &sessiondv1.NativeQueryRequest_AntigravitySessionSwarm{
+			AntigravitySessionSwarm: &sessiondv1.AntigravitySessionSwarmQuery{},
+		},
+	}
+	if _, err := translateNativeQuery(badSwarmReq); status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("expected InvalidArgument for empty swarm conversation_id, got %v", err)
+	}
 }

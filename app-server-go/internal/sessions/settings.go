@@ -3,11 +3,22 @@ package sessions
 import (
 	"context"
 	"net/http"
+	"strings"
 
 	sessiondv1 "astrorder.dev/contracts/gen/go/astrorder/sessiond/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
+
+func antigravityEffortFromModel(model string) string {
+	lower := strings.ToLower(strings.TrimSpace(model))
+	for _, suffix := range []string{"-xhigh", "-low", "-medium", "-high", "-max"} {
+		if strings.HasSuffix(lower, suffix) {
+			return strings.TrimPrefix(suffix, "-")
+		}
+	}
+	return ""
+}
 
 func (h *Handler) settingsRef(ctx context.Context, w http.ResponseWriter, r *http.Request, sessionID string) (*sessiondv1.SessionRef, string, map[string]any, bool) {
 	agentID := r.URL.Query().Get("agent_id")
@@ -171,6 +182,9 @@ func (h *Handler) handleGetSessionModel(w http.ResponseWriter, r *http.Request, 
 				target, _ := h.resolveRuntimeTarget(ctx, agent)
 				h.backfillAntigravityModel(ctx, target, agentID, sessRow, result["read_only"] == true, result)
 			}
+		}
+		if inferred := antigravityEffortFromModel(stringValue(result, "model")); inferred != "" && stringValue(result, "effort") == "" {
+			result["effort"] = inferred
 		}
 	}
 	if saved != nil {
@@ -389,10 +403,40 @@ func (h *Handler) handleSetSessionModel(w http.ResponseWriter, r *http.Request, 
 		writeJSONError(w, http.StatusInternalServerError, "Failed to persist model binding: "+err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	respBody := map[string]any{
 		"provider": confirmedProvider,
 		"model":    confirmedModel,
-	})
+	}
+	isAntigravity := confirmedProvider == "antigravity"
+	if !isAntigravity {
+		if agent, aErr := h.store.GetAgent(ctx, payload.AgentID); aErr == nil && agent != nil {
+			kind := stringValue(agent, "kind")
+			isAntigravity = kind == "antigravity" || kind == "antigravity-ssh"
+		}
+	}
+	if isAntigravity {
+		confirmedEffort := antigravityEffortFromModel(confirmedModel)
+		if confirmedEffort == "" && readback.Effort != nil {
+			confirmedEffort = strings.TrimSpace(*readback.Effort)
+		}
+		_, _ = h.store.SetSessionReasoningBinding(ctx, payload.AgentID, sessionID, confirmedEffort)
+		if confirmedEffort != "" {
+			respBody["effort"] = confirmedEffort
+		} else {
+			respBody["effort"] = nil
+		}
+		var native map[string]any
+		if readback.Native != nil {
+			_ = parseNativeJSON(readback.Native, &native)
+		}
+		if native != nil {
+			respBody["reasoning_read_only"] = native["reasoning_switch_supported"] != true
+			if se, ok := native["supported_efforts"]; ok {
+				respBody["supported_efforts"] = se
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, respBody)
 }
 
 type setSessionReasoningPayload struct {
@@ -463,9 +507,31 @@ func (h *Handler) handleSetSessionReasoning(w http.ResponseWriter, r *http.Reque
 		writeJSONError(w, http.StatusInternalServerError, "Failed to persist reasoning binding: "+err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	respBody := map[string]any{
 		"effort": readEffort,
-	})
+	}
+	if readback.Model != nil && strings.TrimSpace(*readback.Model) != "" {
+		readProvider := ""
+		if readback.Provider != nil {
+			readProvider = strings.TrimSpace(*readback.Provider)
+		}
+		isAntigravity := readProvider == "antigravity"
+		if !isAntigravity {
+			if agent, aErr := h.store.GetAgent(ctx, payload.AgentID); aErr == nil && agent != nil {
+				kind := stringValue(agent, "kind")
+				isAntigravity = kind == "antigravity" || kind == "antigravity-ssh"
+			}
+		}
+		if isAntigravity {
+			if readProvider == "" {
+				readProvider = "antigravity"
+			}
+			_, _ = h.store.SetSessionModelBinding(ctx, payload.AgentID, sessionID, readProvider, strings.TrimSpace(*readback.Model))
+			respBody["provider"] = readProvider
+			respBody["model"] = strings.TrimSpace(*readback.Model)
+		}
+	}
+	writeJSON(w, http.StatusOK, respBody)
 }
 
 func (h *Handler) handleGetSessionApprovalMode(w http.ResponseWriter, r *http.Request, sessionID string) {

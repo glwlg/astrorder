@@ -31,6 +31,8 @@ type mockDaemonServer struct {
 	renameCb         func(*sessiondv1.RenameSessionRequest) (*sessiondv1.CommandReceipt, error)
 	deleteCb         func(*sessiondv1.DeleteSessionRequest) (*sessiondv1.CommandReceipt, error)
 	readModelCb      func(*sessiondv1.ReadModelRequest) (*sessiondv1.ModelState, error)
+	setModelCb       func(*sessiondv1.SetModelRequest) (*sessiondv1.CommandReceipt, error)
+	setReasoningCb   func(*sessiondv1.SetReasoningRequest) (*sessiondv1.CommandReceipt, error)
 	attachCb         func(*sessiondv1.AttachSessionRequest) (*sessiondv1.SessionReceipt, error)
 	getHistoryPageCb func(*sessiondv1.HistoryPageRequest) (*sessiondv1.HistoryPageResponse, error)
 	sendCb           func(*sessiondv1.SendRequest) (*sessiondv1.CommandReceipt, error)
@@ -80,6 +82,20 @@ func (m *mockDaemonServer) ReadModel(ctx context.Context, req *sessiondv1.ReadMo
 		return m.readModelCb(req)
 	}
 	return &sessiondv1.ModelState{}, nil
+}
+
+func (m *mockDaemonServer) SetModel(ctx context.Context, req *sessiondv1.SetModelRequest) (*sessiondv1.CommandReceipt, error) {
+	if m.setModelCb != nil {
+		return m.setModelCb(req)
+	}
+	return m.UnimplementedRuntimeQueryServer.SetModel(ctx, req)
+}
+
+func (m *mockDaemonServer) SetReasoning(ctx context.Context, req *sessiondv1.SetReasoningRequest) (*sessiondv1.CommandReceipt, error) {
+	if m.setReasoningCb != nil {
+		return m.setReasoningCb(req)
+	}
+	return m.UnimplementedRuntimeQueryServer.SetReasoning(ctx, req)
 }
 
 func (m *mockDaemonServer) AttachSession(ctx context.Context, req *sessiondv1.AttachSessionRequest) (*sessiondv1.SessionReceipt, error) {

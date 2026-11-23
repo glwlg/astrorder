@@ -1,7 +1,6 @@
 import {
   IconGitFork,
   IconSparkles,
-  IconTransfer,
   IconX,
 } from '@tabler/icons-react'
 import { ShieldCheckIcon, SidebarSimpleIcon, SlidersHorizontalIcon, SquaresFourIcon } from '../../components/workbenchIcons'
@@ -25,6 +24,8 @@ import { AgentKindBadge } from '../../components/SessionRuntimeFacts'
 import { agentKindLabel } from '../../components/AgentBrandIcon'
 import { isDisconnectedSessionRoute, selectApprovals, selectCommands, selectOutbox, selectSessions, selectTasks, useAstrorderStore } from '../../state/store'
 import { useSessionResources } from '../../hooks/useAstrorderData'
+import { isAntigravityAgent, useSessionSwarm } from '../../hooks/useSessionSwarm'
+import { useSessionSchedules } from '../../hooks/useSessionSchedules'
 import { ChatComposer } from './ChatComposer'
 import { SessionComposerGate } from './SessionComposerGate'
 import { SessionConnectionNotice } from './SessionConnectionNotice'
@@ -119,12 +120,20 @@ function ChatPageBody() {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const sessions = useAstrorderStore(useShallow(selectSessions))
+  const rawSessionsMap = useAstrorderStore((state) => state.sessions)
   const agents = useAstrorderStore((state) => state.agents)
   const forceWelcome = Boolean((location.state as { welcome?: boolean } | null)?.welcome)
-  const selected = useMemo(
-    () => resolveSession(sessions, sessionId ? decodeURIComponent(sessionId) : undefined, searchParams.get('agent_id'), forceWelcome),
-    [forceWelcome, searchParams, sessionId, sessions],
-  )
+  const selected = useMemo(() => {
+    const decoded = sessionId ? decodeURIComponent(sessionId) : undefined
+    const requestedAgent = searchParams.get('agent_id')
+    const visible = resolveSession(sessions, decoded, requestedAgent, forceWelcome)
+    if (visible) return visible
+    // Allow direct navigation into hidden Swarm / subagent child sessions (`ephemeral: true`).
+    if (!forceWelcome && decoded && requestedAgent) {
+      return rawSessionsMap[scopeKey(requestedAgent, decoded)] ?? null
+    }
+    return null
+  }, [forceWelcome, rawSessionsMap, searchParams, sessionId, sessions])
 
   const sessionUsage = useQuery({ queryKey: ['astrorder', 'session_usage', selected?.id, selected?.agent_id], queryFn: () => selected ? api.getSessionUsage(selected.id, selected.agent_id) : Promise.reject(), enabled: Boolean(selected), retry: false, staleTime: 0, refetchOnWindowFocus: false })
 
@@ -445,6 +454,13 @@ function ChatPageBody() {
   }, [agents, selected])
 
   const background = useBackgroundProcesses(selected, Boolean(agent && ['hermes', 'codex'].includes(agent.kind)))
+  const sessionSwarm = useSessionSwarm(selected, agent, changesOpened)
+  const sessionSchedules = useSessionSchedules(selected)
+  const enabledScheduleCount = useMemo(
+    () => (sessionSchedules.data || []).filter((item) => item.enabled).length,
+    [sessionSchedules.data],
+  )
+  const showSwarmPanel = isAntigravityAgent(agent)
   const runtimeTasks = [...tasks.filter(task => task.kind !== 'background'), ...background.items]
   const handleApproval = async (approval: Approval, action: 'approve' | 'cancel') => {
     if (!selected || !agent?.capabilities.includes('approvals')) return
@@ -572,14 +588,6 @@ function ChatPageBody() {
             <Group justify="space-between" align="center" wrap="nowrap">
               <div className="chat-title-block">
                 <SessionBreadcrumb session={selected} />
-                {handoffPeer && <Button
-                  variant="subtle"
-                  size="compact-xs"
-                  leftSection={<IconTransfer size={13} />}
-                  onClick={() => navigate(`/chat/${encodeURIComponent(handoffPeer.session.id)}?agent_id=${encodeURIComponent(handoffPeer.session.agent_id)}`)}
-                >
-                  {handoffPeer.direction === 'from' ? '转交自' : '已转交至'} {agentKindLabel(agents[handoffPeer.session.agent_id]?.kind)}
-                </Button>}
               </div>
               <Group gap="xs" wrap="nowrap" className="chat-heading-actions">
                 <AgentKindBadge agent={agent} />
@@ -613,10 +621,36 @@ function ChatPageBody() {
                     <SlidersHorizontalIcon size={22} aria-hidden="true" />
                   </ActionIcon>
                 </Tooltip>
-                <Tooltip label="工作区变更" position="bottom">
-                  <ActionIcon className="chat-changes-toggle" variant="subtle"
-                    aria-label={changesOpened ? '收起变更悬浮面板' : '打开变更悬浮面板'}
-                    aria-expanded={changesOpened} aria-controls="workspace-changes-panel" onClick={toggleChanges}>
+                <Tooltip
+                  label={
+                    showSwarmPanel
+                      ? sessionSwarm.data?.active
+                        ? 'Swarm 运行中 · 定时 · 产物'
+                        : enabledScheduleCount > 0
+                          ? `Swarm · ${enabledScheduleCount} 个定时运行中 · 产物`
+                          : 'Swarm · 定时 · 产物'
+                      : enabledScheduleCount > 0
+                        ? `${enabledScheduleCount} 个定时运行中 · 产物`
+                        : '定时 · 产物'
+                  }
+                  position="bottom"
+                >
+                  <ActionIcon
+                    className={`chat-changes-toggle${sessionSwarm.data?.active ? ' has-swarm-active' : enabledScheduleCount > 0 ? ' has-schedules-active' : ''}`}
+                    variant="subtle"
+                    aria-label={
+                      changesOpened
+                        ? showSwarmPanel
+                          ? '收起 Swarm、定时与产物悬浮面板'
+                          : '收起定时与产物悬浮面板'
+                        : showSwarmPanel
+                          ? '打开 Swarm、定时与产物悬浮面板'
+                          : '打开定时与产物悬浮面板'
+                    }
+                    aria-expanded={changesOpened}
+                    aria-controls="workspace-changes-panel"
+                    onClick={toggleChanges}
+                  >
                     <SquaresFourIcon size={22} weight={changesOpened ? 'duotone' : 'regular'} aria-hidden="true" />
                   </ActionIcon>
                 </Tooltip>
@@ -748,14 +782,63 @@ function ChatPageBody() {
             {!sidecarOpen && detailsPinned && (
               <div className="pinned-session-details">
                 <Button variant="subtle" size="compact-sm" onClick={() => setDetailsPinned(false)}>收起详情侧栏</Button>
-                <SessionDetails session={selected} agent={agent} commands={commands} messages={messages} approvals={approvals} onApproval={(approval, action) => void handleApproval(approval, action)} />
+                <SessionDetails
+                  session={selected}
+                  agent={agent}
+                  commands={commands}
+                  messages={messages}
+                  approvals={approvals}
+                  onApproval={(approval, action) => void handleApproval(approval, action)}
+                  handoffLink={handoffPeer ? {
+                    label: `${handoffPeer.direction === 'from' ? '转交自' : '已转交至'} ${agentKindLabel(agents[handoffPeer.session.agent_id]?.kind)}`,
+                    title: handoffPeer.session.title,
+                    onOpen: () => navigate(`/chat/${encodeURIComponent(handoffPeer.session.id)}?agent_id=${encodeURIComponent(handoffPeer.session.agent_id)}`),
+                  } : null}
+                />
               </div>
             )}
           </aside>
       </div>
-      {changesOpened && <WorkspaceChangesPanel session={selected} messages={messages} onClose={closeChanges} />}
+      {changesOpened && (
+        <WorkspaceChangesPanel
+          session={selected}
+          agent={agent}
+          messages={messages}
+          swarm={sessionSwarm.data}
+          swarmLoading={sessionSwarm.isPending}
+          swarmFetching={sessionSwarm.isFetching}
+          swarmError={sessionSwarm.error}
+          onRefreshSwarm={() => void sessionSwarm.refetch()}
+          schedules={sessionSchedules.data}
+          schedulesLoading={sessionSchedules.isPending}
+          schedulesError={sessionSchedules.error}
+          onOpenSession={(aid, sid) => {
+            closeChanges()
+            navigate(`/chat/${encodeURIComponent(sid)}?agent_id=${encodeURIComponent(aid)}`)
+          }}
+          onClose={closeChanges}
+        />
+      )}
       </div>
-      <DrawerDetails opened={detailsOpened} onClose={closeDetails} onPin={() => { setDetailsPinned(true); closeDetails() }} session={selected} agent={agent} commands={commands} messages={messages} approvals={approvals} onApproval={(approval, action) => void handleApproval(approval, action)} />
+      <DrawerDetails
+        opened={detailsOpened}
+        onClose={closeDetails}
+        onPin={() => { setDetailsPinned(true); closeDetails() }}
+        session={selected}
+        agent={agent}
+        commands={commands}
+        messages={messages}
+        approvals={approvals}
+        onApproval={(approval, action) => void handleApproval(approval, action)}
+        handoffLink={handoffPeer ? {
+          label: `${handoffPeer.direction === 'from' ? '转交自' : '已转交至'} ${agentKindLabel(agents[handoffPeer.session.agent_id]?.kind)}`,
+          title: handoffPeer.session.title,
+          onOpen: () => {
+            closeDetails()
+            navigate(`/chat/${encodeURIComponent(handoffPeer.session.id)}?agent_id=${encodeURIComponent(handoffPeer.session.agent_id)}`)
+          },
+        } : null}
+      />
       <Drawer opened={taskDetailsOpened && selectedTask !== null} onClose={() => { closeTaskDetails(); setTaskSelection(null) }} title="任务详情" position={mobileTaskSheet ? 'bottom' : 'right'} size={mobileTaskSheet ? 'min(88vh, 620px)' : 'min(92vw, 520px)'}>
         {selectedTask && <TaskDetails task={selectedTask} canStop={Boolean(agent?.capabilities.includes('stop') && sessions.some(session => session.agent_id === selectedTask.agent_id && session.id === selectedTask.target_id) && ['pending', 'running', 'waiting_approval'].includes(selectedTask.status))} onStop={(task) => void handleStopTask(task)} onOpenSession={(sid, aid) => { closeTaskDetails(); setTaskSelection(null); navigate(`/chat/${encodeURIComponent(sid)}?agent_id=${encodeURIComponent(aid)}`) }} onJumpToLatest={() => window.scrollTo({ top: document.body.scrollHeight, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })} onClose={() => { closeTaskDetails(); setTaskSelection(null) }} />}
       </Drawer>
@@ -917,6 +1000,7 @@ function DrawerDetails({
   messages: import('../../domain/types').Message[]
   approvals: Approval[]
   onApproval: (approval: Approval, action: 'approve' | 'cancel') => void
+  handoffLink?: { label: string; title?: string; onOpen: () => void } | null
 }) {
   return (
     <Drawer opened={opened} onClose={onClose} title="会话详情" position="right" size="min(92vw, 380px)">

@@ -57,4 +57,4 @@ node scripts/build-installer.mjs
 
 小内核候选仅暂存为 `astrorder-sessiond.exe.new`。用户通过托盘「小内核 → 更新小内核」激活，由独立控制器完成替换；Agent 不停止、重启或更新小内核。构建、暂存和上线是不同步骤。
 
-构建成功、`--check` 通过与真实窗口交互分别验收，不引用历史测试数量或进程号作为当前状态。发布步骤见[安装与更新](../docs/production-deployment.md)，操作约束见 [AGENTS.md](../AGENTS.md)。
+构建成功、`--check` 通过与真实窗口交互分别验收，不引用历史测试数量或进程号作为当前状态。发布步骤见[构建、安装与更新](../docs/DEPLOYMENT.md)，操作约束见 [AGENTS.md](../AGENTS.md)。

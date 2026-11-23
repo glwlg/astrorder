@@ -58,6 +58,7 @@ export interface Session {
   project_name?: string | null;
   history_state?: string;
   control_state?: string;
+  selected_approval_mode?: string | null;
   handoff_from_agent_id?: string | null;
   handoff_from_session_id?: string | null;
   handoff_context?: string | null;
@@ -421,4 +422,154 @@ export interface GroupFiles {
   references: GroupFileReference[];
   checking: boolean;
   error?: string;
+}
+
+export type SessionSwarmMemberState = "working" | "waiting" | "stopped" | "killed";
+
+export interface SessionSwarmSummary {
+  total: number;
+  working: number;
+  waiting: number;
+  stopped: number;
+  killed: number;
+}
+
+export interface SessionSwarmMember {
+  name: string;
+  role: string;
+  is_coordinator: boolean;
+  conversation_id: string;
+  parent_conversation_id?: string;
+  agent_id?: string;
+  in_catalog?: boolean;
+  model?: string;
+  workspace_mode?: string;
+  state: SessionSwarmMemberState;
+  brief?: string;
+  title?: string;
+  last_message?: string;
+  updated_at?: string;
+  spawned_by?: string;
+  nesting_depth?: number;
+}
+
+export interface SessionSwarmBoardItem {
+  id: string;
+  kind: "brief" | "message" | "model_change" | "kill" | string;
+  author: string;
+  author_conversation_id?: string;
+  targets?: string[];
+  text: string;
+  created_at?: string;
+}
+
+export interface SessionSwarmMemberMessage {
+  id: string;
+  role: string;
+  kind: string;
+  text: string;
+  created_at?: string;
+  tool_name?: string;
+  tool_status?: string;
+}
+
+export interface SessionSwarm {
+  supported: boolean;
+  available: boolean;
+  active: boolean;
+  needs_daemon_upgrade?: boolean;
+  kind: "swarm" | "subagents" | "none" | string;
+  title: string;
+  coordinator_session_id: string;
+  current_session_id: string;
+  is_coordinator: boolean;
+  summary: SessionSwarmSummary;
+  members: SessionSwarmMember[];
+  board: SessionSwarmBoardItem[];
+  updated_at?: string;
+  member_conversation_id?: string;
+  member_messages?: SessionSwarmMemberMessage[];
+}
+
+export type SessionScheduleKind = "once" | "interval" | "daily" | "weekly" | "cron";
+export type SessionScheduleWhenBusy = "skip" | "queue";
+export type SessionScheduleMisfirePolicy = "grace_once" | "skip" | "run_once";
+
+export interface SessionSchedule {
+  id: string;
+  agent_id: string;
+  session_id: string;
+  name: string;
+  prompt: string;
+  enabled: boolean;
+  schedule_kind: SessionScheduleKind;
+  cron_expr: string;
+  interval_minutes: number;
+  daily_time: string;
+  weekday_mask: number;
+  run_at?: string;
+  timezone: string;
+  when_busy: SessionScheduleWhenBusy;
+  misfire_policy: SessionScheduleMisfirePolicy;
+  misfire_grace_sec: number;
+  next_run_at?: string;
+  last_run_at?: string;
+  last_status: string;
+  last_error: string;
+  last_command_id: string;
+  consecutive_failures: number;
+  pause_reason: string;
+  created_at: string;
+  updated_at: string;
+  session_title?: string;
+  session_status?: string;
+  session_approval_mode?: string;
+  agent_name?: string;
+  agent_kind?: string;
+}
+
+export interface SessionScheduleInput {
+  agent_id: string;
+  name?: string;
+  prompt: string;
+  enabled?: boolean;
+  schedule_kind: SessionScheduleKind;
+  cron_expr?: string;
+  interval_minutes?: number;
+  daily_time?: string;
+  weekday_mask?: number;
+  run_at?: string;
+  timezone?: string;
+  when_busy?: SessionScheduleWhenBusy;
+  misfire_policy?: SessionScheduleMisfirePolicy;
+  misfire_grace_sec?: number;
+}
+
+export interface SessionSchedulePatch {
+  name?: string;
+  prompt?: string;
+  enabled?: boolean;
+  schedule_kind?: SessionScheduleKind;
+  cron_expr?: string;
+  interval_minutes?: number;
+  daily_time?: string;
+  weekday_mask?: number;
+  run_at?: string;
+  timezone?: string;
+  when_busy?: SessionScheduleWhenBusy;
+  misfire_policy?: SessionScheduleMisfirePolicy;
+  misfire_grace_sec?: number;
+}
+
+export interface SessionSchedulePreview {
+  valid: boolean;
+  timezone: string;
+  next_runs: string[];
+}
+
+export interface SessionScheduleRunResult {
+  schedule: SessionSchedule;
+  outcome: string;
+  command_id?: string;
+  detail?: string;
 }

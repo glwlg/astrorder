@@ -19,7 +19,7 @@ import (
 
 var treeIgnored = map[string]bool{
 	".git": true, ".venv": true, "node_modules": true, "__pycache__": true,
-	".pytest_cache": true, ".ruff_cache": true, "dist": true,
+	".pytest_cache": true, ".ruff_cache": true,
 }
 
 var searchIgnored = map[string]bool{

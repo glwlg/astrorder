@@ -1,6 +1,6 @@
 import { UserInputCard, isUserInput } from '../../components/UserInputCard'
-import { IconAlertTriangle, IconBolt, IconCircleCheck, IconClock, IconShieldCheck } from '@tabler/icons-react'
-import { Badge, Divider, Group, Paper, Stack, Text, Title } from '@mantine/core'
+import { IconAlertTriangle, IconBolt, IconCircleCheck, IconClock, IconShieldCheck, IconTransfer } from '@tabler/icons-react'
+import { Badge, Button, Divider, Group, Paper, Stack, Text, Title } from '@mantine/core'
 import type { Agent, Approval, Command, Message, Session } from '../../domain/types'
 import { AgentStatusBadge, SessionStatusLabel } from '../../components/Status'
 import { MarkdownContent } from '../../components/MarkdownContent'
@@ -36,6 +36,7 @@ export function SessionDetails({
   messages,
   approvals,
   onApproval,
+  handoffLink,
 }: {
   session: Session
   agent?: Agent
@@ -43,6 +44,7 @@ export function SessionDetails({
   messages: Message[]
   approvals: Approval[]
   onApproval: (approval: Approval, action: 'approve' | 'cancel') => void
+  handoffLink?: { label: string; title?: string; onOpen: () => void } | null
 }) {
   const canApprove = agent?.capabilities.includes('approvals') === true
   const activities = messages.filter((message) => message.kind === 'thinking' || message.kind === 'tool').slice(-8).reverse()
@@ -52,6 +54,18 @@ export function SessionDetails({
         <Text size="xs" c="dimmed">当前会话</Text>
         <Title order={3} size="h4" mt={3}>{session.title || '未命名会话'}</Title>
         <Text size="xs" c="dimmed" className="workspace-path">{session.workspace || '未提供工作区'}</Text>
+        {handoffLink && (
+          <Button
+            mt={6}
+            variant="light"
+            size="compact-xs"
+            leftSection={<IconTransfer size={13} />}
+            title={handoffLink.title}
+            onClick={handoffLink.onOpen}
+          >
+            {handoffLink.label}
+          </Button>
+        )}
       </div>
       <Group justify="space-between">
         <SessionStatusLabel status={session.status} />

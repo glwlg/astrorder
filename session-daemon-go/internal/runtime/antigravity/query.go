@@ -136,20 +136,55 @@ func listSessionsForHome(ctx context.Context, home, agentID, connectionID string
 		return nil, err
 	}
 	defer db.Close()
-	rows, err := db.QueryContext(ctx, `SELECT conversation_id,title,last_modified_time,workspace_uris,not_fully_idle,killed FROM conversation_summaries WHERE killed=0 ORDER BY last_modified_time DESC`)
+
+	cols := tableColumns(ctx, db, "conversation_summaries")
+	colExpr := func(name, fallback string) string {
+		if cols[name] {
+			return name
+		}
+		return fallback
+	}
+	parentFromTable := map[string]string{}
+	if pRows, pErr := db.QueryContext(ctx, `SELECT conversation_id, parent_id FROM conversation_parents`); pErr == nil {
+		for pRows.Next() {
+			var cid, pid string
+			if pRows.Scan(&cid, &pid) == nil && validID(cid) && validID(pid) && cid != pid {
+				parentFromTable[cid] = pid
+			}
+		}
+		pRows.Close()
+	}
+
+	query := fmt.Sprintf(
+		`SELECT conversation_id,title,last_modified_time,workspace_uris,not_fully_idle,killed,%s,%s,%s FROM conversation_summaries WHERE killed=0 ORDER BY last_modified_time DESC`,
+		colExpr("parent_conversation_id", `""`),
+		colExpr("nesting_depth", `0`),
+		colExpr("agent_name", `""`),
+	)
+	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	items := []map[string]any{}
 	for rows.Next() {
-		var id, title, stamp, uris string
+		var id, title, stamp, uris, parentID, agentName string
 		var active, killed bool
-		if err = rows.Scan(&id, &title, &stamp, &uris, &active, &killed); err != nil {
+		var nestingDepth int
+		if err = rows.Scan(&id, &title, &stamp, &uris, &active, &killed, &parentID, &nestingDepth, &agentName); err != nil {
 			return nil, err
 		}
 		if !validID(id) {
 			continue
+		}
+		parentID = strings.TrimSpace(parentID)
+		if parentID == "" {
+			parentID = parentFromTable[id]
+		}
+		agentName = strings.TrimSpace(agentName)
+		isChild := parentID != "" || nestingDepth > 0
+		if isChild && strings.TrimSpace(title) == "" && agentName != "" {
+			title = "@" + agentName
 		}
 		status := "idle"
 		if active {
@@ -188,6 +223,12 @@ func listSessionsForHome(ctx context.Context, home, agentID, connectionID string
 			"history_state":     "available",
 			"control_state":     "unbound",
 			"native_kind":       "rpc",
+		}
+		if isChild {
+			row["ephemeral"] = true
+			if parentID != "" {
+				row["parent_session_id"] = parentID
+			}
 		}
 		if connectionID != "" {
 			row["connection_id"] = connectionID
@@ -235,6 +276,30 @@ func (a *Adapter) Query(ctx context.Context, r core.Request) (map[string]any, er
 			readonly, _ = raw.(bool)
 		}
 		return a.readSessionUsage(ctx, cid, readonly)
+	case "session.swarm":
+		cid := ""
+		if raw, ok := queryParam(r.Fields, "conversation_id"); ok {
+			if s, ok := raw.(string); ok {
+				cid = s
+			}
+		}
+		readonly := false
+		if raw, ok := queryParam(r.Fields, "readonly"); ok {
+			readonly, _ = raw.(bool)
+		}
+		memberID := ""
+		if raw, ok := queryParam(r.Fields, "member_conversation_id"); ok {
+			if s, ok := raw.(string); ok {
+				memberID = strings.TrimSpace(s)
+			}
+		}
+		memberLimit := 0
+		if raw, ok := queryParam(r.Fields, "member_limit"); ok {
+			if n, ok := intVal(raw); ok {
+				memberLimit = n
+			}
+		}
+		return a.readSessionSwarm(ctx, cid, readonly, memberID, memberLimit)
 	case "usage.summary":
 		var sinceMs, untilMs int64
 		if raw, ok := queryParam(r.Fields, "since_ms"); ok {

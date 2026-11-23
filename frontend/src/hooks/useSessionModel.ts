@@ -31,7 +31,7 @@ export function useSessionModel(session: Session | null) {
     if (binding?.reasoning_read_only) throw new Error('当前运行时不支持切换思考强度')
     if (binding?.read_only || binding?.model_read_only) throw new Error(binding.detail || '会话被其他客户端占用，当前只能读取模型信息')
     const result = await api.setSessionReasoning(session.id, session.agent_id, effort)
-    client.setQueryData<SessionModelBinding>(queryKey, previous => previous ? { ...previous, effort: result.effort } : previous)
+    client.setQueryData<SessionModelBinding>(queryKey, previous => previous ? { ...previous, ...result, effort: result.effort } : previous)
     return result
   }
   return { ...query, label, change, changeEffort, effort: binding?.effort || null }

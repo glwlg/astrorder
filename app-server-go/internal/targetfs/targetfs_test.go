@@ -39,6 +39,12 @@ func TestLocalFileSystemPreservesNamesBinaryAndTreeContract(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(workspace, "A-dir"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Mkdir(filepath.Join(workspace, "dist"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(workspace, "node_modules"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 
 	read, err := fsys.Read(context.Background(), filepath.Join(workspace, "目录", "季度 周报.bin"))
 	if err != nil {
@@ -61,7 +67,7 @@ func TestLocalFileSystemPreservesNamesBinaryAndTreeContract(t *testing.T) {
 	for i := range tree.Items {
 		gotNames[i] = tree.Items[i].Name
 	}
-	if want := []string{"A-dir", "目录", "z.txt"}; !reflect.DeepEqual(gotNames, want) {
+	if want := []string{"A-dir", "dist", "目录", "z.txt"}; !reflect.DeepEqual(gotNames, want) {
 		t.Fatalf("tree order=%q want=%q", gotNames, want)
 	}
 

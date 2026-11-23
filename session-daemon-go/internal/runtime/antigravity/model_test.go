@@ -54,3 +54,39 @@ func TestSwitchModelAndReasoningOverACP(t *testing.T) {
 		t.Fatalf("send after switch: %#v %v", sent, err)
 	}
 }
+
+func TestApplyModelEffortStateForCatalogVariants(t *testing.T) {
+	s := &session{
+		models: []map[string]any{
+			{"id": "gemini-4-neon-high", "label": "Gemini 4 Neon (High)"},
+			{"id": "gemini-4-neon-xhigh", "label": "Gemini 4 Neon (XHigh)"},
+			{"id": "gemini-4-neon-medium", "label": "Gemini 4 Neon (Medium)"},
+			{"id": "gemini-4-neon-low", "label": "Gemini 4 Neon (Low)"},
+			{"id": "gemini-4-carbon-high", "label": "Gemini 4 Carbon (High)"},
+			{"id": "gemini-4-carbon-medium", "label": "Gemini 4 Carbon (Medium)"},
+			{"id": "gemini-4-carbon-low", "label": "Gemini 4 Carbon (Low)"},
+			{"id": "gemini-pro-orchestrator", "label": "Orchestrator (Carbon)"},
+			{"id": "gpt-oss-120b-medium", "label": "GPT-OSS 120B (Medium)"},
+		},
+	}
+
+	applyModelEffortStateLocked(s, "gemini-4-neon-xhigh")
+	if s.effort != "xhigh" || len(s.thoughtLevels) != 4 || s.thoughtLevels[3] != "xhigh" {
+		t.Fatalf("expected 4 thought levels including xhigh for Neon, got effort=%q levels=%v", s.effort, s.thoughtLevels)
+	}
+
+	applyModelEffortStateLocked(s, "gemini-4-carbon-high")
+	if s.effort != "high" || len(s.thoughtLevels) != 3 || s.thoughtLevels[2] != "high" {
+		t.Fatalf("expected 3 thought levels for Carbon, got effort=%q levels=%v", s.effort, s.thoughtLevels)
+	}
+
+	applyModelEffortStateLocked(s, "gpt-oss-120b-medium")
+	if s.effort != "medium" || len(s.thoughtLevels) != 0 {
+		t.Fatalf("expected fixed medium effort with no switchable levels for GPT-OSS, got effort=%q levels=%v", s.effort, s.thoughtLevels)
+	}
+
+	applyModelEffortStateLocked(s, "gemini-pro-orchestrator")
+	if s.effort != "" || len(s.thoughtLevels) != 0 {
+		t.Fatalf("expected empty effort/levels for Orchestrator, got effort=%q levels=%v", s.effort, s.thoughtLevels)
+	}
+}

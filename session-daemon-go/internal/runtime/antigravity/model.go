@@ -29,6 +29,8 @@ func (a *Adapter) validateModelChoice(ctx context.Context, s *session, model str
 	return core.RejectBeforeDispatch("unknown Antigravity model")
 }
 
+var standardAntigravityEfforts = []string{"low", "medium", "high", "xhigh", "max"}
+
 func inferEffortFromModelID(model string, levels []string) string {
 	lower := strings.ToLower(strings.TrimSpace(model))
 	for _, lv := range levels {
@@ -36,7 +38,83 @@ func inferEffortFromModelID(model string, levels []string) string {
 			return lv
 		}
 	}
+	for _, lv := range standardAntigravityEfforts {
+		if strings.HasSuffix(lower, "-"+lv) {
+			return lv
+		}
+	}
 	return ""
+}
+
+func antigravityBaseModelID(model string) string {
+	trimmed := strings.TrimSpace(model)
+	lower := strings.ToLower(trimmed)
+	for _, lv := range []string{"xhigh", "low", "medium", "high", "max"} {
+		suffix := "-" + lv
+		if strings.HasSuffix(lower, suffix) && len(trimmed) > len(suffix) {
+			return trimmed[:len(trimmed)-len(suffix)]
+		}
+	}
+	return trimmed
+}
+
+func deriveThoughtLevelsForModel(model string, models []map[string]any) []string {
+	base := strings.ToLower(antigravityBaseModelID(model))
+	if base == "" {
+		return nil
+	}
+	found := map[string]bool{}
+	for _, item := range models {
+		id := firstNonEmptyStr(item, "id", "model")
+		if id == "" || strings.ToLower(antigravityBaseModelID(id)) != base {
+			continue
+		}
+		if eff := inferEffortFromModelID(id, nil); eff != "" {
+			found[eff] = true
+		}
+	}
+	if len(found) <= 1 {
+		return nil
+	}
+	levels := make([]string, 0, len(found))
+	for _, lv := range standardAntigravityEfforts {
+		if found[lv] {
+			levels = append(levels, lv)
+		}
+	}
+	return levels
+}
+
+func applyModelEffortStateLocked(s *session, model string) {
+	s.model = model
+	if len(s.models) > 0 {
+		if derived := deriveThoughtLevelsForModel(model, s.models); len(derived) > 0 {
+			s.thoughtLevels = derived
+			s.effort = inferEffortFromModelID(model, derived)
+			return
+		}
+		if inferred := inferEffortFromModelID(model, nil); inferred != "" {
+			s.thoughtLevels = nil
+			s.effort = inferred
+			return
+		}
+		if !modelSupportsThoughtLevel(model, model) {
+			s.effort = ""
+			s.thoughtLevels = nil
+		}
+		return
+	}
+	if inferred := inferEffortFromModelID(model, s.thoughtLevels); inferred != "" {
+		s.effort = inferred
+	} else if modelSupportsThoughtLevel(model, model) && len(s.thoughtLevels) == 0 {
+		s.thoughtLevels = []string{"low", "medium", "high"}
+		if inferred := inferEffortFromModelID(model, s.thoughtLevels); inferred != "" {
+			s.effort = inferred
+		}
+	} else if !modelSupportsThoughtLevel(model, model) {
+		s.effort = ""
+		s.thoughtLevels = nil
+	}
 }
 
 func (a *Adapter) applyModelOnOpen(ctx context.Context, s *session, c *acpClient, model string) error {
@@ -56,13 +134,7 @@ func (a *Adapter) applyModelOnOpen(ctx context.Context, s *session, c *acpClient
 		return mapRPCErrorToPreDispatch(err)
 	}
 	s.mu.Lock()
-	s.model = model
-	if inferred := inferEffortFromModelID(model, s.thoughtLevels); inferred != "" {
-		s.effort = inferred
-	} else if !modelSupportsThoughtLevel(model, model) {
-		s.effort = ""
-		s.thoughtLevels = nil
-	}
+	applyModelEffortStateLocked(s, model)
 	s.mu.Unlock()
 	return nil
 }
@@ -122,18 +194,7 @@ func (a *Adapter) switchModel(ctx context.Context, s *session, p map[string]any)
 	}
 
 	s.mu.Lock()
-	s.model = model
-	if inferred := inferEffortFromModelID(model, s.thoughtLevels); inferred != "" {
-		s.effort = inferred
-	} else if modelSupportsThoughtLevel(model, model) && len(s.thoughtLevels) == 0 {
-		s.thoughtLevels = []string{"low", "medium", "high"}
-		if inferred := inferEffortFromModelID(model, s.thoughtLevels); inferred != "" {
-			s.effort = inferred
-		}
-	} else if !modelSupportsThoughtLevel(model, model) {
-		s.effort = ""
-		s.thoughtLevels = nil
-	}
+	applyModelEffortStateLocked(s, model)
 	s.mu.Unlock()
 
 	_ = a.announce(s)

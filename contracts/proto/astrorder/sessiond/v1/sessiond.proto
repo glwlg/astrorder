@@ -710,6 +710,13 @@ message AntigravityUsageSummaryQuery {
   optional int64 until_ms = 2;
 }
 
+message AntigravitySessionSwarmQuery {
+  string conversation_id = 1;
+  optional bool readonly = 2;
+  optional string member_conversation_id = 3;
+  optional int32 member_limit = 4;
+}
+
 message NativeQueryRequest {
   RuntimeTarget target = 1;
   // Preserves native payload/hash/sha256 fields that exist outside request params.
@@ -740,6 +747,7 @@ message NativeQueryRequest {
     AntigravityQuotaReadQuery antigravity_quota_read = 62;
     AntigravitySessionUsageQuery antigravity_session_usage = 63;
     AntigravityUsageSummaryQuery antigravity_usage_summary = 64;
+    AntigravitySessionSwarmQuery antigravity_session_swarm = 65;
   }
 }
 

@@ -45,6 +45,7 @@ var nativeQuerySpecs = map[protoreflect.Name]nativeQuerySpec{
 	"antigravity_models_list":   {family: "antigravity", method: "models.list"},
 	"antigravity_quota_read":    {family: "antigravity", method: "quota.read"},
 	"antigravity_session_usage": {family: "antigravity", method: "session.usage", fields: map[protoreflect.Name]string{"conversation_id": "conversation_id", "readonly": "readonly"}, required: map[protoreflect.Name]bool{"conversation_id": true}},
+	"antigravity_session_swarm": {family: "antigravity", method: "session.swarm", fields: map[protoreflect.Name]string{"conversation_id": "conversation_id", "readonly": "readonly", "member_conversation_id": "member_conversation_id", "member_limit": "member_limit"}, required: map[protoreflect.Name]bool{"conversation_id": true}},
 	"antigravity_usage_summary": {family: "antigravity", method: "usage.summary", fields: map[protoreflect.Name]string{"since_ms": "since_ms", "until_ms": "until_ms"}},
 	"grok_initialize":          {family: "grok", method: "initialize"},
 	"grok_session_list":        {family: "grok", method: "session/list", fields: map[protoreflect.Name]string{"cwd": "cwd", "cursor": "cursor"}},

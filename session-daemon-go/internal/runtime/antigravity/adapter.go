@@ -471,7 +471,7 @@ func parseACPAvailableModels(raw any, thoughtLevels []string) []map[string]any {
 func modelSupportsThoughtLevel(id, label string) bool {
 	lowerID := strings.ToLower(id)
 	lowerLabel := strings.ToLower(label)
-	for _, suffix := range []string{"-low", "-medium", "-high"} {
+	for _, suffix := range []string{"-low", "-medium", "-high", "-xhigh", "-max"} {
 		if strings.HasSuffix(lowerID, suffix) {
 			return true
 		}
@@ -899,7 +899,7 @@ func (s *session) hasBackgroundToolOutputLocked() bool {
 		if strings.Contains(st.rawOutput, "Tool is running as a background task") {
 			return true
 		}
-		if (st.name == "schedule" || st.name == "invoke_subagent" || st.name == "run_workflow") && st.acpStatus != "failed" && st.acpStatus != "error" && st.acpStatus != "cancelled" {
+		if (st.name == "schedule" || st.name == "invoke_subagent" || st.name == "run_workflow" || st.name == "swarm") && st.acpStatus != "failed" && st.acpStatus != "error" && st.acpStatus != "cancelled" {
 			return true
 		}
 	}

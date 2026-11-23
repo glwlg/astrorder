@@ -1,6 +1,6 @@
 # Astrorder session-daemon v1 typed contracts
 
-This module defines the typed protobuf/gRPC boundary between the Go App Server and Go Session Daemon. Runtime ownership and lifecycle constraints are described in [the dual-kernel architecture](../docs/design/dual-kernel-architecture.md).
+This module defines the typed protobuf/gRPC boundary between the Go App Server and Go Session Daemon. Runtime ownership and lifecycle constraints are described in [the architecture guide](../docs/ARCHITECTURE.md).
 
 ## Artifacts
 

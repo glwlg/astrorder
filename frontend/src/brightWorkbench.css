@@ -386,7 +386,7 @@ body { font-family: var(--astr-session-font); font-size: 14px; }
 .chat-heading-actions .status-label { padding-right: 10px; border-right: 1px solid var(--astr-border); }
 .chat-heading-actions .status-label .mantine-Text-root { font-size: 12px; color: var(--astr-muted); }
 .chat-heading-actions .chat-sidecar-toggle[aria-expanded='true'] { color: var(--astr-blue); background: var(--astr-selected); }
-.chat-column { --astr-reading-width: 1200px; --composer-bottom: 24px; --composer-gap: 36px; container: chat / inline-size; background: radial-gradient(ellipse at 5% 100%, color-mix(in oklab, var(--astr-selected) 26%, transparent), transparent 48%), radial-gradient(ellipse at 100% 0, color-mix(in oklab, var(--astr-surface-muted) 65%, transparent), transparent 42%), var(--astr-surface); }
+.chat-column { --astr-reading-width: 900px; --composer-bottom: 24px; --composer-gap: 36px; container: chat / inline-size; background: radial-gradient(ellipse at 5% 100%, color-mix(in oklab, var(--astr-selected) 26%, transparent), transparent 48%), radial-gradient(ellipse at 100% 0, color-mix(in oklab, var(--astr-surface-muted) 65%, transparent), transparent 42%), var(--astr-surface); }
 .chat-column > .transcript-wrap::after {
   content: '';
   position: absolute;
@@ -427,19 +427,20 @@ body { font-family: var(--astr-session-font); font-size: 14px; }
 .chat-column .message-bubble { font-family: var(--astr-session-font); font-size: 14px; font-weight: 400; line-height: 1.75; }
 .chat-column .message-bubble-user { font-size: 14px; font-weight: 400; }
 .chat-column .message-bubble .markdown-content,
-.chat-column .message-bubble-inline { font-size: 14px; line-height: 1.75; }
+.chat-column .message-bubble-inline { font-size: 14.5px; line-height: 1.78; }
 .chat-column .message-bubble-user,
-.chat-column .message-bubble-user .markdown-content { line-height: 1.7; }
+.chat-column .message-bubble-user .markdown-content { font-size: 14px; line-height: 1.7; }
 .chat-column .message-meta { font-family: var(--astr-session-font); font-size: 11px; line-height: 1.4; color: var(--astr-muted); }
 .chat-column .message-meta time { font-variant-numeric: tabular-nums; }
-.chat-column .markdown-content strong { color: var(--astr-text); font-weight: 650; }
-.chat-column .markdown-content :is(h1, h2, h3) { font-weight: 650; letter-spacing: -.015em; }
-.chat-column .markdown-content h1 { font-size: 20px; }
-.chat-column .markdown-content h2 { font-size: 17px; }
-.chat-column .markdown-content h3 { font-size: 15px; }
+.chat-column .markdown-content strong { color: var(--astr-text); font-weight: 660; }
+.chat-column .markdown-content :is(h1, h2, h3, h4) { font-weight: 670; letter-spacing: -.015em; }
+.chat-column .markdown-content h1 { font-size: 21px; }
+.chat-column .markdown-content h2 { font-size: 17.5px; }
+.chat-column .markdown-content h3 { font-size: 15.5px; }
+.chat-column .markdown-content h4 { font-size: 14.25px; }
 .chat-column .message-meta-inline { margin-left: 12px; }
 .chat-column .message-action-btn { width: 26px !important; min-width: 26px !important; height: 26px !important; }
-.chat-column .markdown-content code { font-family: var(--astr-session-mono-font); font-size: .86em; }
+.chat-column .markdown-content :not(pre) > code { font-family: var(--astr-session-mono-font); font-size: .86em; }
 .chat-column .message-waiting-bubble { color: var(--astr-muted); font-size: 0.875rem; }
 
 .chat-column .activity-pack { width: 100%; min-width: 0; margin-block: 0; }

@@ -169,7 +169,7 @@ export function useEventStream(
       },
       onResume: () => {
         void refreshGroups();
-        for (const resource of ["bootstrap", "messages", "commands", "tasks", "session_usage"]) {
+        for (const resource of ["bootstrap", "messages", "commands", "tasks", "session_usage", "session-swarm", "session-schedules"]) {
           void queryClient.invalidateQueries({ queryKey: ["astrorder", resource] });
         }
       },
@@ -273,6 +273,27 @@ export function useEventStream(
           void queryClient.invalidateQueries({
             queryKey: ["astrorder", "session_usage", event.session_id, event.agent_id],
           });
+        }
+        if (
+          event.type === "session_schedule.upsert" ||
+          event.type === "session_schedule.delete" ||
+          event.type === "session.delete"
+        ) {
+          void queryClient.invalidateQueries({
+            queryKey: ["astrorder", "session-schedules"],
+          });
+        }
+        if (event.type === "task.upsert" && event.agent_id && event.session_id) {
+          const progress = event.data.progress as Record<string, unknown> | undefined;
+          const tool = typeof progress?.tool === "string" ? progress.tool : "";
+          if (progress?.source === "antigravity" && ["swarm", "invoke_subagent", "send_message"].includes(tool)) {
+            void queryClient.invalidateQueries({
+              queryKey: ["astrorder", "session-swarm", event.agent_id, event.session_id],
+            });
+            void queryClient.invalidateQueries({
+              queryKey: ["astrorder", "session-swarm-member", event.agent_id, event.session_id],
+            });
+          }
         }
         if (
           event.type === "command.upsert" &&

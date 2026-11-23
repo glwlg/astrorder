@@ -3,7 +3,7 @@ import { Button, Group, Menu, Modal, TextInput, useComputedColorScheme, useManti
 import { MobileTaskNotices } from './MobileTaskNotices'
 import { notifications } from '@mantine/notifications'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { IconSun, IconMoon, IconDeviceDesktop, IconRefresh, IconPlayerPlay, IconInfoCircle, IconNotes, IconPlayerStop, IconSend, IconMessageCircle, IconCheck, IconX, IconMicrophone, IconPlus, IconDotsVertical, IconCpu, IconLoader2, IconPlugConnected, IconCloudDataConnection, IconFilter, IconTransfer, IconEdit, IconCopy, IconTrash, IconChalkboard, IconWorld, IconUsers, IconSwitchHorizontal } from '@tabler/icons-react'
+import { IconSun, IconMoon, IconDeviceDesktop, IconRefresh, IconPlayerPlay, IconInfoCircle, IconNotes, IconPlayerStop, IconSend, IconMessageCircle, IconCheck, IconX, IconMicrophone, IconPlus, IconDotsVertical, IconCpu, IconLoader2, IconPlugConnected, IconCloudDataConnection, IconFilter, IconTransfer, IconEdit, IconCopy, IconTrash, IconChalkboard, IconWorld, IconUsers, IconUsersGroup, IconSwitchHorizontal, IconClock } from '@tabler/icons-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useShallow } from 'zustand/react/shallow'
 import { useReducedMotion } from '@mantine/hooks'
@@ -17,6 +17,8 @@ import { useSessionUnread } from '../../hooks/useSessionUnread'
 import { isDisconnectedSessionRoute, selectApprovals, selectCommands, selectMessages, selectProjects, selectSessions, selectTasks, useAstrorderStore } from '../../state/store'
 import { useSessionResources } from '../../hooks/useAstrorderData'
 import { useSessionModel } from '../../hooks/useSessionModel'
+import { useSessionSwarm } from '../../hooks/useSessionSwarm'
+import { formatNextRunChip, useSessionSchedules } from '../../hooks/useSessionSchedules'
 import { useSessionOrder, notifySessionSubmitted } from '../../hooks/useSessionOrder'
 import { buildProjectGroups, displaySessionTitle } from '../../components/sessionRailModel'
 import type { ProjectGroup } from '../../components/sessionRailModel'
@@ -29,6 +31,16 @@ import { confirmationCoordinatesFromEvent, type ConfirmationCoordinates } from '
 import { AgentSessionFilter, matchesAgent } from '../../components/AgentSessionFilter'
 import { adjacentOpenSession, isSessionOpen } from '../../components/sessionVisibility'
 import { clipboardFiles, REASONING_EFFORTS } from '../chat/composerMedia'
+import {
+  effortLabelOf,
+  findModelGroup,
+  groupModelChoices,
+  normalizeEffortValue,
+  parseAntigravityModelId,
+  resolveGroupVariant,
+  type ModelChoice,
+  type ModelChoiceGroup,
+} from '../chat/antigravityModels'
 import { usePersistentDraft } from '../chat/draftStorage'
 import { removeUnsentMessage, restoreUnsentDraft, sendErrorMessage } from '../chat/sendFailure'
 import { DraftShelfControl } from '../chat/DraftShelfControl'
@@ -50,7 +62,7 @@ import { EnvironmentConnections } from '../agents/EnvironmentConnections'
 import { UsageGatewaySettingsCard } from '../services/UsageGatewaySettingsCard'
 import { isUserInput } from '../../components/UserInputCard'
 import { MobileApprovals } from './MobileApprovals'
-import { AgentKindBadge, SessionRuntimeFacts } from '../../components/SessionRuntimeFacts'
+import { SessionRuntimeFacts } from '../../components/SessionRuntimeFacts'
 import { MobileAttachmentPreview } from './MobileAttachmentPreview'
 import { sharedServerOutbox } from './serverOutbox'
 import { MobileOutbox as LocalOutbox, type OutboxEntry } from './mobileOutbox'
@@ -72,8 +84,10 @@ import { SessionConnectionNotice } from '../chat/SessionConnectionNotice'
 import { InlineNotice } from '../../components/InlineNotice'
 import { GroupsPage } from '../chat/GroupsPage'
 import { GoalManager } from '../chat/GoalManager'
+import { SessionSchedulesView } from '../chat/SessionSchedulesView'
 import { useBackgroundProcesses } from '../chat/useBackgroundProcesses'
 import { SessionRuntimeBar } from '../chat/SessionRuntimeBar'
+import { SessionSwarmView } from '../chat/SessionSwarmView'
 import { TaskDetails } from '../chat/TaskDetails'
 import { isGoalTask, selectSessionGoal } from '../chat/goalStatus'
 import { MobileBlackboardPanel } from './MobileBlackboardPanel'
@@ -188,9 +202,13 @@ export function MobileWorkspace() {
   const disconnectedRoute = useAstrorderStore(state =>
     !isGroupRoute && Boolean(sessionId) && isDisconnectedSessionRoute(state, sessionId, agentId),
   )
-  const selected = !isGroupRoute ? (navigableSessions.find(s => s.id === sessionId && s.agent_id === agentId) || null) : null
+  const rawSessionsMap = useAstrorderStore(state => state.sessions)
+  const selected = !isGroupRoute
+    ? (navigableSessions.find(s => s.id === sessionId && s.agent_id === agentId)
+      || (sessionId && agentId && !disconnectedRoute ? rawSessionsMap[scopeKey(agentId, sessionId)] || null : null))
+    : null
   const { isUnread, markRead } = useSessionUnread(selected ? scopeKey(selected.agent_id, selected.id) : undefined)
-  const [sheet, setSheet] = useState<'sessions' | 'status' | 'goal' | 'tasks' | 'task' | 'models' | 'connections' | 'accounts' | 'gateway' | 'blackboard' | 'browser' | 'kernels' | null>(() =>
+  const [sheet, setSheet] = useState<'sessions' | 'status' | 'goal' | 'tasks' | 'task' | 'swarm' | 'schedules' | 'models' | 'connections' | 'accounts' | 'gateway' | 'blackboard' | 'browser' | 'kernels' | null>(() =>
     location.pathname.startsWith('/agent-accounts') || location.pathname.startsWith('/mobile/agent-accounts') ? 'accounts' : null,
   )
   const [drawerTab, setDrawerTab] = useState<'sessions' | 'groups'>(() => (isGroupRoute ? 'groups' : 'sessions'))
@@ -279,6 +297,19 @@ export function MobileWorkspace() {
   const readOnly = selected?.control_state === 'readonly' || sessionModel.data?.read_only === true
   const selectedAgent = selected ? agents[selected.agent_id] : undefined
   const isAntigravity = selectedAgent?.kind === 'antigravity' || selectedAgent?.kind === 'antigravity-ssh'
+  const sessionSwarm = useSessionSwarm(selected, selectedAgent, sheet === 'swarm')
+  const sessionSchedules = useSessionSchedules(selected)
+  const enabledSchedules = useMemo(
+    () => (sessionSchedules.data || []).filter((item) => item.enabled),
+    [sessionSchedules.data],
+  )
+  const nextScheduleChip = useMemo(() => {
+    const withNext = enabledSchedules
+      .filter((item) => Boolean(item.next_run_at))
+      .sort((a, b) => (a.next_run_at || '').localeCompare(b.next_run_at || ''))
+    if (withNext.length === 0) return ''
+    return formatNextRunChip(withNext[0].next_run_at)
+  }, [enabledSchedules])
   const agyEnvironment = agySessionEnvironment(selected ?? undefined, selectedAgent)
   const modelReadOnly = readOnly || sessionModel.data?.model_read_only === true
   const reasoningReadOnly = modelReadOnly || sessionModel.data?.reasoning_read_only === true
@@ -548,23 +579,86 @@ export function MobileWorkspace() {
   }, [stableOrder, grouped, pinnedProjects])
   const notify = (message: string, color = 'blue') => notifications.show({ message, color, autoClose: color === 'red' ? 5000 : 2200, withCloseButton: color === 'red' })
   const [modelSearch, setModelSearch] = useState('')
-  const [modelChoices, setModelChoices] = useState<{ provider: string; model: string; label: string }[]>([])
+  const [modelChoices, setModelChoices] = useState<ModelChoice[]>([])
   const [modelLoading, setModelLoading] = useState(false)
 
-  const [modelSelection, setModelSelection] = useState<{ provider: string; model: string; label: string } | null>(null)
+  const [modelSelection, setModelSelection] = useState<ModelChoiceGroup | null>(null)
+  const [draftModelEffort, setDraftModelEffort] = useState<string | null>(null)
+  const groupedModelChoices = useMemo(
+    () => groupModelChoices(modelChoices, { treatAllAsAntigravity: isAntigravity }),
+    [isAntigravity, modelChoices],
+  )
+  const parsedCurrentModel = useMemo(
+    () => (isAntigravity ? parseAntigravityModelId(sessionModel.data?.model) : { baseModel: sessionModel.data?.model || '', effort: null }),
+    [isAntigravity, sessionModel.data?.model],
+  )
+  const activeMobileModelGroup = useMemo(
+    () => findModelGroup(groupedModelChoices, sessionModel.data?.provider, sessionModel.data?.model),
+    [groupedModelChoices, sessionModel.data?.provider, sessionModel.data?.model],
+  )
+  const previewMobileModelGroup = modelSelection ?? activeMobileModelGroup
+  const mobileEffortOptions = useMemo(() => {
+    if (!isAntigravity) return REASONING_EFFORTS
+    if (previewMobileModelGroup?.isGrouped && previewMobileModelGroup.efforts.length > 1) {
+      return previewMobileModelGroup.efforts.map((item) => ({ value: item.effort, label: item.label }))
+    }
+    return []
+  }, [isAntigravity, previewMobileModelGroup])
+  const activeMobileEffort = normalizeEffortValue(draftModelEffort)
+    ?? normalizeEffortValue(sessionModel.effort)
+    ?? parsedCurrentModel.effort
+  const mobileModelChipText = useMemo(() => {
+    if (isAntigravity && sessionModel.data?.model && parsedCurrentModel.effort) {
+      const effLabel = effortLabelOf(parsedCurrentModel.effort) || parsedCurrentModel.effort
+      return `${parsedCurrentModel.baseModel} · ${effLabel}${sessionModel.data.deferred ? ' · 下轮生效' : ''}`
+    }
+    return displayShortModel(sessionModel.label)
+  }, [isAntigravity, parsedCurrentModel.baseModel, parsedCurrentModel.effort, sessionModel.data?.deferred, sessionModel.data?.model, sessionModel.label])
   const openModels = async () => {
     if (!selected) return
-    setSheet('models'); setModelLoading(true); setModelChoices([]); setModelSearch(''); setModelSelection(null)
+    setSheet('models'); setModelLoading(true); setModelChoices([]); setModelSearch(''); setModelSelection(null); setDraftModelEffort(null)
     try { setModelChoices((await api.getSessionModels(selected.id, selected.agent_id)).items) }
     catch (error) { notify(messageError(error), 'red') }
     finally { setModelLoading(false) }
   }
-  const chooseModel = async (provider: string, model: string) => {
+  const chooseModel = async (provider: string, model: string, closeSheet = true) => {
     if (!selected || modelReadOnly || modelLoading) return
     setModelLoading(true)
-    try { await sessionModel.change(provider, model); setSheet(null) }
+    try {
+      await sessionModel.change(provider, model)
+      setDraftModelEffort(null)
+      if (closeSheet) setSheet(null)
+    }
     catch (error) { notify(messageError(error), 'red') }
     finally { setModelLoading(false) }
+  }
+  const selectMobileModelGroup = (group: ModelChoiceGroup) => {
+    setModelSelection(group)
+    if (isAntigravity && group.isGrouped) {
+      const resolved = resolveGroupVariant(group, activeMobileEffort)
+      setDraftModelEffort(parseAntigravityModelId(resolved.model).effort)
+    } else {
+      setDraftModelEffort(null)
+    }
+  }
+  const selectMobileEffort = async (effortValue: string) => {
+    if (!isAntigravity) {
+      await sessionModel.changeEffort(effortValue).catch(error => notify(messageError(error), 'red'))
+      return
+    }
+    if (modelSelection && modelSelection.key !== activeMobileModelGroup?.key) {
+      setDraftModelEffort(effortValue)
+      return
+    }
+    const targetGroup = activeMobileModelGroup
+    const variant = targetGroup?.isGrouped
+      ? targetGroup.efforts.find((item) => item.effort === effortValue)?.choice
+      : undefined
+    if (variant) {
+      await chooseModel(variant.provider, variant.model, false)
+    } else {
+      await sessionModel.changeEffort(effortValue).catch(error => notify(messageError(error), 'red'))
+    }
   }
   const refresh = async () => {
     void navigator.serviceWorker?.getRegistration?.().then(reg => reg?.update()).catch(() => {})
@@ -1086,15 +1180,19 @@ export function MobileWorkspace() {
         <div className="m-card-head-main">
           <h1>{displaySessionTitle(selected)}</h1>
           <div className="m-card-meta">
-            <AgentKindBadge agent={agents[selected.agent_id]} iconOnly />
-            <span className="m-server-name">{cleanServerName(agents[selected.agent_id])}</span>
             <button className="m-model-chip" aria-label="选择会话模型" title={sessionModel.label} onClick={() => void openModels()}>
-              <IconCpu size={13} /><span>{displayShortModel(sessionModel.label)}</span>
+              <IconCpu size={13} /><span>{mobileModelChipText}</span>
             </button>
             <button className="m-usage-chip" aria-label="上下文用量" title={sessionUsage.data?.source === 'native_last_request' ? '原生记录的上次请求输入用量' : '当前上下文用量'} onClick={() => setSheet('status')}>{sessionUsage.data ? sessionUsage.data.context_available === false ? '上下文未取得' : sessionUsage.data.context_window > 0 ? `${(sessionUsage.data.last_input_tokens / 1000).toFixed(1)}k / ${(sessionUsage.data.context_window / 1000).toFixed(0)}k` : `${(sessionUsage.data.last_input_tokens / 1000).toFixed(1)}k` : sessionUsage.isError ? '用量暂不可读' : '读取用量…'}</button>
-            {handoffPeer && (
-              <button className="m-model-chip" aria-label={handoffPeer.label} title={handoffPeer.session.title} onClick={() => select(handoffPeer.session)}>
-                <IconTransfer size={13} /><span>{handoffPeer.label}</span>
+            {enabledSchedules.length > 0 && (
+              <button
+                className="m-sched-chip"
+                aria-label="定时任务"
+                title={`已启用 ${enabledSchedules.length} 个定时任务`}
+                onClick={() => setSheet('schedules')}
+              >
+                <IconClock size={13} />
+                <span>{nextScheduleChip || `${enabledSchedules.length} 定时`}</span>
               </button>
             )}
           </div>
@@ -1104,6 +1202,8 @@ export function MobileWorkspace() {
           <Menu.Dropdown>
             <Menu.Item disabled={readOnly} leftSection={<IconPlayerPlay size={17} />} onClick={() => void send('继续')}>继续</Menu.Item>
             <Menu.Item leftSection={<IconInfoCircle size={17} />} onClick={() => setSheet('status')}>运行状态</Menu.Item>
+            {isAntigravity && <Menu.Item leftSection={<IconUsersGroup size={17} />} onClick={() => setSheet('swarm')}>Swarm 团队</Menu.Item>}
+            <Menu.Item leftSection={<IconClock size={17} />} onClick={() => setSheet('schedules')}>定时任务{enabledSchedules.length > 0 ? ` (${enabledSchedules.length})` : ''}</Menu.Item>
             <Menu.Item leftSection={<IconNotes size={17} />} onClick={() => setSheet('tasks')}>任务与子代理</Menu.Item>
             {goal && <Menu.Item leftSection={<IconNotes size={17} />} onClick={() => setSheet('goal')}>目标管理</Menu.Item>}
             <Menu.Item leftSection={<IconDeviceDesktop size={17} />} onClick={openWorkbench}>工作区</Menu.Item>
@@ -1113,6 +1213,14 @@ export function MobileWorkspace() {
             <Menu.Item leftSection={<IconEdit size={17} />} onClick={() => openRename(selected)}>重命名</Menu.Item>
             <Menu.Item leftSection={<IconCopy size={17} />} onClick={() => copySessionId(selected)}>复制 ID</Menu.Item>
             <Menu.Item disabled={readOnly} leftSection={<IconNotes size={17} />} onClick={() => void send('帮我总结当前会话的最新进展与遗留事项')}>总结进展</Menu.Item>
+            {handoffPeer && (
+              <Menu.Item
+                leftSection={<IconTransfer size={17} />}
+                onClick={() => select(handoffPeer.session)}
+              >
+                {handoffPeer.label}
+              </Menu.Item>
+            )}
             {selected && handoffTargets(selected).length > 0 && (
               <Menu.Item
                 leftSection={<IconTransfer size={17} />}
@@ -1229,7 +1337,7 @@ export function MobileWorkspace() {
       </>
     )}
     {!isGroupRoute && messageAction?.sessionKey === key && <MobileMessageMenu anchor={messageAction} onClose={closeMessageMenu} onCopy={() => void copy(messageAction.text)} onQuote={() => { setQuote(messageAction.text); textarea.current?.focus({ preventScroll: true }) }} />}
-    {sheet && <div className={`m-backdrop ${sheet === 'sessions' ? 'm-session-backdrop' : ''}`} onClick={() => setSheet(null)} onTouchStartCapture={handleDrawerTouchStart} onTouchMoveCapture={handleDrawerTouchMove} onTouchEndCapture={handleDrawerTouchEnd} onTouchCancelCapture={handleDrawerTouchCancel}><section ref={node => { drawerSheet.current = node }} style={sheet === 'sessions' && drawerOffset !== null ? { transform: `translate3d(${drawerOffset}px, 0, 0)`, transition: drawerSettling ? 'transform .22s cubic-bezier(.2,.8,.2,1)' : 'none', animation: 'none' } : undefined} className={`m-sheet ${sheet === 'connections' ? 'm-connections-sheet' : sheet === 'accounts' ? 'm-accounts-sheet' : sheet === 'sessions' ? 'm-session-sheet' : sheet === 'blackboard' || sheet === 'browser' ? 'm-blackboard-dialog' : ''}`} role="dialog" aria-label={sheet === 'sessions' ? (drawerTab === 'groups' ? '群聊列表' : '会话列表') : sheet === 'accounts' ? '账号切换' : sheet === 'blackboard' ? '会话黑板' : sheet === 'browser' ? '浏览器镜像' : sheet === 'kernels' ? '内核管理' : '详情'} onClick={e => e.stopPropagation()} onTouchStart={handleDrawerTouchStart} onTouchMove={handleDrawerTouchMove} onTouchEnd={handleDrawerTouchEnd} onTouchCancel={handleDrawerTouchCancel}><div className="m-handle" /><header><h2>{sheet === 'sessions' ? (drawerTab === 'groups' ? '群聊' : '会话') : ({ status: '运行状态', goal: '目标管理', tasks: '任务与子代理', task: '任务详情', models: '选择模型', connections: '连接管理', accounts: '账号切换', gateway: '模型网关', blackboard: '黑板', browser: '浏览器镜像', kernels: '内核管理' })[sheet]}</h2><div className="m-sheet-header-actions">{sheet === 'sessions' && drawerTab === 'sessions' && <><button aria-label="筛选" aria-pressed={filtersOpen} onClick={() => setFiltersOpen(open => !open)}><IconFilter size={18} /></button><button aria-label="新建项目" onClick={() => setAddProjectOpened(true)}><IconPlus size={20} /></button></>}{sheet === 'sessions' && drawerTab === 'groups' && <button aria-label="新建群聊" onClick={() => setCreateGroupOpened(true)}><IconPlus size={20} /></button>}<button aria-label="关闭面板" onClick={() => setSheet(null)}><IconX size={20} /></button></div></header>
+    {sheet && <div className={`m-backdrop ${sheet === 'sessions' ? 'm-session-backdrop' : ''}`} onClick={() => setSheet(null)} onTouchStartCapture={handleDrawerTouchStart} onTouchMoveCapture={handleDrawerTouchMove} onTouchEndCapture={handleDrawerTouchEnd} onTouchCancelCapture={handleDrawerTouchCancel}><section ref={node => { drawerSheet.current = node }} style={sheet === 'sessions' && drawerOffset !== null ? { transform: `translate3d(${drawerOffset}px, 0, 0)`, transition: drawerSettling ? 'transform .22s cubic-bezier(.2,.8,.2,1)' : 'none', animation: 'none' } : undefined} className={`m-sheet ${sheet === 'connections' ? 'm-connections-sheet' : sheet === 'accounts' ? 'm-accounts-sheet' : sheet === 'sessions' ? 'm-session-sheet' : sheet === 'blackboard' || sheet === 'browser' ? 'm-blackboard-dialog' : ''}`} role="dialog" aria-label={sheet === 'sessions' ? (drawerTab === 'groups' ? '群聊列表' : '会话列表') : sheet === 'accounts' ? '账号切换' : sheet === 'swarm' ? 'Swarm 团队' : sheet === 'schedules' ? '定时任务' : sheet === 'blackboard' ? '会话黑板' : sheet === 'browser' ? '浏览器镜像' : sheet === 'kernels' ? '内核管理' : '详情'} onClick={e => e.stopPropagation()} onTouchStart={handleDrawerTouchStart} onTouchMove={handleDrawerTouchMove} onTouchEnd={handleDrawerTouchEnd} onTouchCancel={handleDrawerTouchCancel}><div className="m-handle" /><header><h2>{sheet === 'sessions' ? (drawerTab === 'groups' ? '群聊' : '会话') : ({ status: '运行状态', goal: '目标管理', tasks: '任务与子代理', task: '任务详情', swarm: 'Swarm 团队', schedules: '定时任务', models: '选择模型', connections: '连接管理', accounts: '账号切换', gateway: '模型网关', blackboard: '黑板', browser: '浏览器镜像', kernels: '内核管理' })[sheet]}</h2><div className="m-sheet-header-actions">{sheet === 'sessions' && drawerTab === 'sessions' && <><button aria-label="筛选" aria-pressed={filtersOpen} onClick={() => setFiltersOpen(open => !open)}><IconFilter size={18} /></button><button aria-label="新建项目" onClick={() => setAddProjectOpened(true)}><IconPlus size={20} /></button></>}{sheet === 'sessions' && drawerTab === 'groups' && <button aria-label="新建群聊" onClick={() => setCreateGroupOpened(true)}><IconPlus size={20} /></button>}{sheet === 'swarm' && <button aria-label="刷新 Swarm" onClick={() => void sessionSwarm.refetch()}><IconRefresh size={18} /></button>}<button aria-label="关闭面板" onClick={() => setSheet(null)}><IconX size={20} /></button></div></header>
       {sheet === 'connections' && <div className="m-sheet-body m-connections-body"><EnvironmentConnections embedded /></div>}
       {sheet === 'accounts' && <div className="m-sheet-body m-accounts-body"><MobileAccountsPanel preferredEnvironment={agyEnvironment} /></div>}
       {sheet === 'kernels' && <div className="m-sheet-body"><KernelManagementPanel /></div>}
@@ -1247,8 +1355,54 @@ export function MobileWorkspace() {
       {sheet === 'blackboard' && selected && <div className="m-sheet-body m-blackboard-sheet"><MobileBlackboardPanel namespace={`session:${selected.agent_id}::${selected.id}`} /></div>}
       {sheet === 'browser' && selected && <div className="m-sheet-body m-blackboard-sheet"><BrowserMirrorPanel agentId={selected.agent_id} sessionId={selected.id} /></div>}
       {sheet === 'tasks' && <div className="m-sheet-body m-runtime-panel"><SessionRuntimeBar key={key} commands={commands} tasks={runtimeTasks} backgroundError={background.error} onTaskOpen={openTask} />{!visibleTasks.length && <p>当前会话暂无任务记录。</p>}</div>}
+      {sheet === 'swarm' && selected && (
+        <div className="m-sheet-body m-swarm-sheet">
+          <SessionSwarmView
+            compact
+            session={selected}
+            agent={selectedAgent}
+            swarm={sessionSwarm.data}
+            loading={sessionSwarm.isPending}
+            fetching={sessionSwarm.isFetching}
+            error={sessionSwarm.error}
+            onRefresh={() => void sessionSwarm.refetch()}
+            onOpenSession={(aid, sid) => {
+              const target = useAstrorderStore.getState().sessions[scopeKey(aid, sid)]
+                || sessions.find(s => s.agent_id === aid && s.id === sid)
+              if (target) {
+                select(target)
+              } else {
+                navigate(`/mobile/chat/${encodeURIComponent(sid)}?agent_id=${encodeURIComponent(aid)}`, { replace: true })
+                setSheet(null)
+              }
+            }}
+          />
+        </div>
+      )}
+      {sheet === 'schedules' && selected && (
+        <div className="m-sheet-body m-swarm-sheet">
+          <SessionSchedulesView
+            compact
+            session={selected}
+            agent={selectedAgent}
+            schedules={sessionSchedules.data || []}
+            loading={sessionSchedules.isPending}
+            error={sessionSchedules.error}
+            onOpenSession={(aid, sid) => {
+              const target = useAstrorderStore.getState().sessions[scopeKey(aid, sid)]
+                || sessions.find(s => s.agent_id === aid && s.id === sid)
+              if (target) {
+                select(target)
+              } else {
+                navigate(`/mobile/chat/${encodeURIComponent(sid)}?agent_id=${encodeURIComponent(aid)}`, { replace: true })
+                setSheet(null)
+              }
+            }}
+          />
+        </div>
+      )}
       {sheet === 'task' && task && <div className="m-sheet-body m-task-panel"><TaskDetails key={`${key}:${task.id}`} task={task} canStop={Boolean(task.target_id && resolveTaskTarget(task) && resolveTaskTarget(task)?.control_state !== 'readonly' && !readOnly && agents[task.agent_id]?.capabilities.includes('stop') && ['pending', 'running', 'waiting_approval'].includes(task.status))} onStop={item => void handleStopTask(item)} onOpenSession={(sid, aid) => { const child = sessions.find(session => session.id === sid && session.agent_id === aid); if (child) select(child); else notify('子会话尚未同步，请刷新后重试', 'red') }} onJumpToLatest={() => { const viewport = document.querySelector('.m-task-panel .task-log-scroll [data-radix-scroll-area-viewport]'); if (viewport) viewport.scrollTop = viewport.scrollHeight }} onClose={() => setSheet('tasks')} /></div>}
-      {sheet === 'models' && <div className="m-sheet-body m-model-panel">{selected && <ApprovalModeControl key={key} session={selected} variant="panel" disabled={readOnly} agentKind={agents[selected.agent_id]?.kind} />}{sessionModel.data?.detail && <p>{sessionModel.data.detail}</p>}{!isAntigravity && <div className="m-effort-row">{REASONING_EFFORTS.map(item => <button key={item.value} aria-pressed={sessionModel.effort === item.value} aria-label={`思考强度 ${item.label}`} disabled={reasoningReadOnly || modelLoading} onClick={() => void sessionModel.changeEffort(item.value).catch(error => notify(messageError(error), 'red'))}>{item.label}</button>)}</div>}<input className="m-search" aria-label="搜索模型" placeholder="搜索模型或提供商" value={modelSearch} onChange={e => setModelSearch(e.target.value)} />{modelLoading && <p>正在处理原生模型请求…</p>}<div className="m-model-list">{modelChoices.filter(choice => choice.label.toLowerCase().includes(modelSearch.toLowerCase())).map(choice => <button className="m-model-choice" aria-pressed={modelSelection?.provider === choice.provider && modelSelection?.model === choice.model} key={`${choice.provider}/${choice.model}`} disabled={modelReadOnly || modelLoading} onClick={() => setModelSelection(choice)}><IconCpu size={17} /><span>{choice.label}</span>{modelSelection?.provider === choice.provider && modelSelection?.model === choice.model && <IconCheck size={17} />}</button>)}</div>{!modelLoading && !modelChoices.length && <p>原生运行时未返回可用模型。</p>}{modelSelection && <div className="m-model-confirm"><small>{modelSelection.label}</small><button aria-label="确认切换模型" disabled={modelReadOnly || modelLoading} onClick={() => void chooseModel(modelSelection.provider, modelSelection.model)}>{modelLoading ? '切换中…' : '确认切换模型'}</button></div>}</div>}
+      {sheet === 'models' && <div className="m-sheet-body m-model-panel">{selected && <ApprovalModeControl key={key} session={selected} variant="panel" disabled={readOnly} agentKind={agents[selected.agent_id]?.kind} />}{sessionModel.data?.detail && <p>{sessionModel.data.detail}</p>}{mobileEffortOptions.length > 0 && <div className="m-effort-row">{mobileEffortOptions.map(item => <button key={item.value} aria-pressed={activeMobileEffort === item.value} aria-label={`思考强度 ${item.label}`} disabled={(isAntigravity ? modelReadOnly : reasoningReadOnly) || modelLoading} onClick={() => void selectMobileEffort(item.value)}>{item.label}</button>)}</div>}<input className="m-search" aria-label="搜索模型" placeholder="搜索模型或提供商" value={modelSearch} onChange={e => setModelSearch(e.target.value)} />{modelLoading && <p>正在处理原生模型请求…</p>}<div className="m-model-list">{groupedModelChoices.filter(choice => { const q = modelSearch.trim().toLowerCase(); return !q || choice.label.toLowerCase().includes(q) || choice.baseModel.toLowerCase().includes(q) }).map(choice => { const selectedChoice = modelSelection ? modelSelection.key === choice.key : activeMobileModelGroup?.key === choice.key; return <button className="m-model-choice" aria-pressed={selectedChoice} key={choice.key} disabled={modelReadOnly || modelLoading} onClick={() => selectMobileModelGroup(choice)}><IconCpu size={17} /><span>{choice.label}</span>{selectedChoice && <IconCheck size={17} />}</button> })}</div>{!modelLoading && !groupedModelChoices.length && <p>原生运行时未返回可用模型。</p>}{modelSelection && (() => { const resolved = resolveGroupVariant(modelSelection, activeMobileEffort); const resolvedEff = isAntigravity && modelSelection.isGrouped ? effortLabelOf(parseAntigravityModelId(resolved.model).effort) : null; return <div className="m-model-confirm"><small>{resolvedEff ? `${modelSelection.label} · ${resolvedEff}` : modelSelection.label}</small><button aria-label="确认切换模型" disabled={modelReadOnly || modelLoading} onClick={() => void chooseModel(resolved.provider, resolved.model)}>{modelLoading ? '切换中…' : '确认切换模型'}</button></div> })()}</div>}
     </section></div>}
     {workbenchMounted && selected && <MobileWorkbench session={selected} agent={agents[selected.agent_id]} commands={commands} messages={messages} approvals={approvals} onApproval={(approval, action) => void handleApproval(approval, action)} opened={workbenchOpened} onClose={closeWorkbench} />}
     {image && <div className="m-lightbox" role="dialog" aria-label="图片预览" onClick={() => setImage(null)}><button aria-label="关闭图片"><IconX size={22} /></button><img src={image} alt="预览" /></div>}

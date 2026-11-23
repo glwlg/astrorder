@@ -1,9 +1,19 @@
 import {
+  IconAlertCircle,
+  IconAlertTriangle,
+  IconBraces,
+  IconBulb,
   IconCheck,
   IconCopy,
   IconExternalLink,
   IconEye,
-  IconFileText,
+  IconFile,
+  IconFileCode,
+  IconFileDescription,
+  IconFlame,
+  IconInfoCircle,
+  IconPhoto,
+  IconTextWrap,
 } from '@tabler/icons-react'
 import { Anchor } from '@mantine/core'
 import { isValidElement, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
@@ -21,6 +31,8 @@ import { MarkdownLinkMenu, type MarkdownLinkMenuTarget } from './MarkdownLinkMen
 import { FileSourceContext } from '../features/sidecar/FileSourceContext'
 import { GroupFileLink } from './GroupFileLink'
 import { findGroupFile } from '../features/chat/groupFileSources'
+import { highlightCode, parseCalloutBlockquote, type CalloutKind } from './markdownHighlight'
+import { FileLinkHoverPreview, type FileHoverTarget } from './FileLinkHoverPreview'
 
 function hashSnippet(value: string): string {
   let hash = 2166136261
@@ -86,6 +98,7 @@ function MermaidDiagram({ code }: { code: string }) {
 
 function MarkdownCodeBlock({ children }: { children?: ReactNode }) {
   const [copied, setCopied] = useState(false)
+  const [wrap, setWrap] = useState(false)
   const codeRef = useRef<HTMLElement>(null)
   const openArtifact = useSidecarStore((state) => state.openArtifact)
 
@@ -100,7 +113,7 @@ function MarkdownCodeBlock({ children }: { children?: ReactNode }) {
 
   const handleCopy = (e: React.MouseEvent) => {
     e.stopPropagation()
-    const text = codeRef.current?.innerText || codeRef.current?.textContent || ''
+    const text = codeRef.current?.innerText || codeRef.current?.textContent || rawText
     if (!text) return
     void navigator.clipboard.writeText(text)
     setCopied(true)
@@ -129,11 +142,26 @@ function MarkdownCodeBlock({ children }: { children?: ReactNode }) {
     )
   }
 
+  const renderedCode = rawText && language ? highlightCode(rawText, language) : null
+
   return (
-    <div className="markdown-code-wrapper">
+    <div className={`markdown-code-wrapper${wrap ? ' is-wrapped' : ''}`}>
       <div className="markdown-code-header">
         <span className="markdown-code-lang">{(language || 'code').toUpperCase()}</span>
         <div className="markdown-code-actions">
+          <button
+            type="button"
+            className={`markdown-code-copy-btn${wrap ? ' is-active' : ''}`}
+            onClick={(e) => {
+              e.stopPropagation()
+              setWrap((v) => !v)
+            }}
+            aria-label={wrap ? '关闭自动换行' : '开启自动换行'}
+            title={wrap ? '切换为横向滚动' : '切换为自动换行'}
+          >
+            <IconTextWrap size={12} aria-hidden="true" />
+            <span>{wrap ? '滚动' : '换行'}</span>
+          </button>
           {lineCount >= 6 && (
             <button
               type="button"
@@ -160,7 +188,7 @@ function MarkdownCodeBlock({ children }: { children?: ReactNode }) {
       <pre className="markdown-code-block">
         {isValidElement<{ children?: ReactNode }>(children) ? (
           <code {...children.props} ref={codeRef}>
-            {children.props.children}
+            {renderedCode ?? children.props.children}
           </code>
         ) : (
           <code ref={codeRef}>{children}</code>
@@ -184,29 +212,85 @@ function MarkdownPre({ children }: { children?: ReactNode }) {
   return code ? <MermaidDiagram code={code} /> : <MarkdownCodeBlock>{children}</MarkdownCodeBlock>
 }
 
-function cleanHref(raw: string | undefined): string {
-  if (!raw) return ''
+interface ParsedFileHref {
+  path: string
+  line?: number
+  endLine?: number
+}
+
+function extractLineRange(hash: string): { line?: number; endLine?: number } {
+  const match = hash.match(/^#?L(\d+)(?:-L?(\d+))?$/i)
+  if (!match) return {}
+  const line = Number(match[1])
+  const endLine = match[2] ? Number(match[2]) : undefined
+  if (!Number.isFinite(line) || line <= 0) return {}
+  return { line, endLine: endLine && endLine >= line ? endLine : undefined }
+}
+
+function parseFileHref(raw: string | undefined): ParsedFileHref {
+  if (!raw) return { path: '' }
   let cleaned = raw.trim()
   if (cleaned.startsWith('<') && cleaned.endsWith('>')) {
     cleaned = cleaned.slice(1, -1).trim()
   }
   if (/^file:\/\//i.test(cleaned)) {
-    const fileUrl = new URL(cleaned)
-    cleaned = fileUrl.hostname && fileUrl.hostname !== 'localhost'
-      ? `//${fileUrl.hostname}${fileUrl.pathname}`
-      : fileUrl.pathname
-    if (/^\/[a-zA-Z]:[/\\]/.test(cleaned)) cleaned = cleaned.slice(1)
+    try {
+      const fileUrl = new URL(cleaned)
+      let pathname = fileUrl.hostname && fileUrl.hostname !== 'localhost'
+        ? `//${fileUrl.hostname}${fileUrl.pathname}`
+        : fileUrl.pathname
+      if (/^\/[a-zA-Z]:[/\\]/.test(pathname)) pathname = pathname.slice(1)
+      return { path: pathname, ...extractLineRange(fileUrl.hash) }
+    } catch {
+      return { path: cleaned }
+    }
   }
-  return cleaned
+  // Handle relative / local paths with trailing `#L10-L20`
+  const hashIdx = cleaned.indexOf('#')
+  if (hashIdx > 0 && !/^(?:https?|mailto):/i.test(cleaned)) {
+    const lineInfo = extractLineRange(cleaned.slice(hashIdx))
+    if (lineInfo.line) {
+      return { path: cleaned.slice(0, hashIdx), ...lineInfo }
+    }
+  }
+  return { path: cleaned }
+}
+
+function cleanHref(raw: string | undefined): string {
+  return parseFileHref(raw).path
 }
 
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.svg', '.gif', '.bmp', '.ico'])
+const DOC_EXTENSIONS = new Set(['.md', '.markdown', '.txt', '.log', '.pdf', '.docx'])
+const CONFIG_EXTENSIONS = new Set(['.json', '.yaml', '.yml', '.toml', '.ini', '.env', '.conf', '.cfg', '.properties', '.xml'])
+
+function fileExtension(path: string): string {
+  const clean = path.toLowerCase().split(/[?#]/)[0]
+  const base = clean.split(/[\\/]/).pop() || clean
+  if (base === '.env' || base.startsWith('.env.')) return '.env'
+  const dot = base.lastIndexOf('.')
+  return dot === -1 ? '' : base.slice(dot)
+}
 
 function isImagePath(path: string): boolean {
-  const dot = path.lastIndexOf('.')
-  if (dot === -1) return false
-  const ext = path.slice(dot).toLowerCase().split(/[?#]/)[0]
-  return IMAGE_EXTENSIONS.has(ext)
+  return IMAGE_EXTENSIONS.has(fileExtension(path))
+}
+
+function pickFilePillStyle(path: string, matchedViewer: ReturnType<typeof artifactViewerRegistry.findViewer>) {
+  const ext = fileExtension(path)
+  if (matchedViewer && matchedViewer.id !== 'monaco-viewer') {
+    return { Icon: matchedViewer.icon, tone: 'accent' as const }
+  }
+  if (DOC_EXTENSIONS.has(ext)) {
+    return { Icon: IconFileDescription, tone: 'doc' as const }
+  }
+  if (CONFIG_EXTENSIONS.has(ext)) {
+    return { Icon: IconBraces, tone: 'config' as const }
+  }
+  if (matchedViewer?.id === 'monaco-viewer') {
+    return { Icon: IconFileCode, tone: 'code' as const }
+  }
+  return { Icon: IconFile, tone: 'file' as const }
 }
 
 function isLocalPath(path: string): boolean {
@@ -233,6 +317,35 @@ function safeUrl(value: string | undefined): string | undefined {
   return undefined
 }
 
+const SHELL_COMMAND_PREFIX_RE = /^(?:bash|sh|zsh|fish|python3?|node|npm|npx|pnpm|yarn|uv|go|git|docker|kubectl|helm|kustomize|curl|wget|rm|cp|mv|cat|head|tail|grep|rg|find|ls|cd|chmod|chown|sudo|env|powershell|pwsh|cmd|make|cargo|pytest|vitest)\s+/i
+const SHELL_SYNTAX_RE = /(?:&&|\|\||[|;`$<>]|\s--?[a-zA-Z0-9])/
+
+function looksLikeBacktickedFilePath(
+  raw: string,
+  rootFiles: Set<string> | null,
+  knownArtifact?: (path: string) => boolean,
+): boolean {
+  const trimmed = raw.trim()
+  if (!trimmed) return false
+  if (SHELL_COMMAND_PREFIX_RE.test(trimmed) || SHELL_SYNTAX_RE.test(trimmed)) return false
+  if (!artifactViewerRegistry.isSupportedExtension(trimmed) && !isNonPreviewableFile(trimmed)) {
+    return false
+  }
+  const hasSlash = /[\\/]/.test(trimmed)
+  if (hasSlash) {
+    // Allow spaces inside Windows drive paths (e.g. `P:\...\Astrorder Setup 0.1.0.exe`) or POSIX absolute paths,
+    // or inside the filename after a slash, but reject `cmd arg/file.sh` where whitespace precedes the first slash.
+    const firstSlash = trimmed.search(/[\\/]/)
+    const firstSpace = trimmed.search(/\s/)
+    if (firstSpace !== -1 && firstSpace < firstSlash) return false
+    return true
+  }
+  return Boolean(rootFiles?.has(trimmed) || knownArtifact?.(trimmed))
+}
+
+// Protected spans that bare-filename auto-linking must NEVER rewrite inside.
+const PROTECTED_SPAN_RE = /(\[[^\]\r\n]*\]\((?:<[^>\r\n]*>|[^)\s\r\n]+)\)|`[^`\r\n]+`|(?:https?|file):\/\/[^\s)\]>\r\n]+)/gi
+
 /**
  * 自动感知纯文本中属于已注册插件的工件文件名，并转译为 Markdown 链接
  */
@@ -240,7 +353,12 @@ function artifactSuffixes(match: string): string[] {
   return [match, ...Array.from(match.matchAll(/ +/g), (space) => match.slice(space.index! + space[0].length))]
 }
 
-function autoLinkArtifacts(text: string, rootFiles: Set<string> | null, checkedPaths: Set<string> | null, knownArtifact?: (path: string) => boolean): string {
+function autoLinkArtifacts(
+  text: string,
+  rootFiles: Set<string> | null,
+  checkedPaths: Set<string> | null,
+  knownArtifact?: (path: string) => boolean,
+): string {
   const extRegex = artifactViewerRegistry.getExtensionPattern()
   const lines = text.split('\n')
   let inCodeBlock = false
@@ -252,44 +370,68 @@ function autoLinkArtifacts(text: string, rootFiles: Set<string> | null, checkedP
     }
     if (inCodeBlock) return line
 
-    // 1. 先将行内反引号包裹的有效工件路径（如 `P:\...\test.png` 或 `docs/design.md`）转换为 Markdown 链接
-    let step = line.replace(/`([^`\r\n]+)`/g, (match, raw) => {
-      const trimmed = String(raw).trim()
-      if ((artifactViewerRegistry.isSupportedExtension(trimmed) || isNonPreviewableFile(trimmed)) &&
-          (/[\\/]/.test(trimmed) || rootFiles?.has(trimmed) || knownArtifact?.(trimmed))) {
-        return `[${trimmed}](<${trimmed}>)`
+    // Split line into protected spans (existing markdown links, inline code, URLs) and plain prose.
+    const parts = line.split(PROTECTED_SPAN_RE)
+    return parts.map((segment, index) => {
+      if (!segment) return segment
+      // Odd indices are captured protected spans.
+      if (index % 2 === 1) {
+        // Only upgrade standalone backticked file paths (never shell commands or existing links).
+        if (segment.startsWith('`') && segment.endsWith('`')) {
+          const inner = segment.slice(1, -1)
+          if (looksLikeBacktickedFilePath(inner, rootFiles, knownArtifact)) {
+            const trimmed = inner.trim()
+            return `[${trimmed}](<${trimmed}>)`
+          }
+        }
+        return segment
       }
-      return match
-    })
 
-    // 2. 将非代码块中的裸工件名/路径转为 Markdown 链接
-    return step.replace(extRegex, (match, fileName, offset, fullStr) => {
-      const before = fullStr.slice(Math.max(0, offset - 2), offset)
-      const after = fullStr.slice(offset + match.length, offset + match.length + 2)
-      if (
-        before.endsWith('](') ||
-        before.endsWith('(<') ||
-        before.endsWith('(') ||
-        before.endsWith('`') ||
-        after.startsWith('`') ||
-        after.startsWith('>)') ||
-        after.startsWith(')') ||
-        before.endsWith('[')
-      ) {
-        return match
-      }
-      const charBefore = offset > 0 ? fullStr[offset - 1] : ''
-      const charAfter = offset + match.length < fullStr.length ? fullStr[offset + match.length] : ''
-      if (charBefore === '`' || charAfter === '`') return match
-      const target = artifactSuffixes(fileName).find((candidate) =>
-        knownArtifact?.(candidate) || (/[\\/]/.test(candidate) ? checkedPaths?.has(candidate) : rootFiles?.has(candidate)))
-      if (!target) return match
-
-      return `${fileName.slice(0, fileName.length - target.length)}[${target}](<${target}>)`
-    })
+      // Plain prose: auto-link verified workspace filenames / relative paths.
+      return segment.replace(extRegex, (match, fileName) => {
+        const target = artifactSuffixes(fileName).find((candidate) =>
+          knownArtifact?.(candidate) || (/[\\/]/.test(candidate) ? checkedPaths?.has(candidate) : rootFiles?.has(candidate)),
+        )
+        if (!target) return match
+        return `${fileName.slice(0, fileName.length - target.length)}[${target}](<${target}>)`
+      })
+    }).join('')
   })
 
   return processed.join('\n')
+}
+
+function extractPlainProseForPathCheck(value: string): string {
+  const lines = value.split('\n')
+  let inCodeBlock = false
+  const prose: string[] = []
+  for (const line of lines) {
+    if (/^\s*(```|~~~)/.test(line)) {
+      inCodeBlock = !inCodeBlock
+      continue
+    }
+    if (inCodeBlock) continue
+    const parts = line.split(PROTECTED_SPAN_RE)
+    for (let i = 0; i < parts.length; i += 2) {
+      if (parts[i]) prose.push(parts[i])
+    }
+  }
+  return prose.join('\n')
+}
+
+function childrenPlainText(node: ReactNode): string {
+  if (typeof node === 'string' || typeof node === 'number') return String(node)
+  if (Array.isArray(node)) return node.map(childrenPlainText).join('')
+  if (isValidElement<{ children?: ReactNode }>(node)) return childrenPlainText(node.props.children)
+  return ''
+}
+
+const CALLOUT_ICONS: Record<CalloutKind, typeof IconInfoCircle> = {
+  note: IconInfoCircle,
+  tip: IconBulb,
+  important: IconAlertCircle,
+  warning: IconAlertTriangle,
+  caution: IconFlame,
 }
 
 const rootFileCache = new Map<string, { expires: number; promise: Promise<Set<string>> }>()
@@ -312,9 +454,75 @@ export function MarkdownContent({
   const [rootFiles, setRootFiles] = useState<{ key: string; names: Set<string> } | null>(null)
   const [checkedPaths, setCheckedPaths] = useState<{ key: string; names: Set<string> } | null>(null)
   const [linkMenu, setLinkMenu] = useState<MarkdownLinkMenuTarget | null>(null)
+  const [hoverTarget, setHoverTarget] = useState<(FileHoverTarget & { onOpen: () => void }) | null>(null)
+  const hoverOpenTimer = useRef<number | null>(null)
+  const hoverCloseTimer = useRef<number | null>(null)
+
+  const clearHoverTimers = () => {
+    if (hoverOpenTimer.current !== null) {
+      window.clearTimeout(hoverOpenTimer.current)
+      hoverOpenTimer.current = null
+    }
+    if (hoverCloseTimer.current !== null) {
+      window.clearTimeout(hoverCloseTimer.current)
+      hoverCloseTimer.current = null
+    }
+  }
+
+  useEffect(() => () => clearHoverTimers(), [])
+
+  const closeHoverNow = () => {
+    clearHoverTimers()
+    setHoverTarget(null)
+  }
+
+  const scheduleHoverOpen = (
+    element: HTMLElement,
+    info: Omit<FileHoverTarget, 'rect'> & { onOpen: () => void },
+  ) => {
+    if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+      if (window.matchMedia('(hover: none)').matches) return
+    }
+    clearHoverTimers()
+    const rect = element.getBoundingClientRect()
+    const snapshot = {
+      left: rect.left,
+      right: rect.right,
+      top: rect.top,
+      bottom: rect.bottom,
+      width: rect.width,
+      height: rect.height,
+    }
+    hoverOpenTimer.current = window.setTimeout(() => {
+      hoverOpenTimer.current = null
+      setHoverTarget({ ...info, rect: snapshot })
+    }, 320)
+  }
+
+  const scheduleHoverClose = () => {
+    if (hoverOpenTimer.current !== null) {
+      window.clearTimeout(hoverOpenTimer.current)
+      hoverOpenTimer.current = null
+    }
+    if (hoverCloseTimer.current !== null) {
+      window.clearTimeout(hoverCloseTimer.current)
+    }
+    hoverCloseTimer.current = window.setTimeout(() => {
+      hoverCloseTimer.current = null
+      setHoverTarget(null)
+    }, 180)
+  }
+
+  const buildRawPreviewUrl = (fullPath: string, httpUrl: boolean): string => {
+    if (httpUrl) return fullPath
+    if (currentSession) {
+      return resolveArtifactFromPath(fullPath.replace(/%/g, '%25'), currentSession).readUrl
+    }
+    return `/api/v1/files/raw?path=${encodeURIComponent(fullPath)}`
+  }
   const extRegex = artifactViewerRegistry.getExtensionPattern()
   const pathKey = JSON.stringify([...new Set(
-    Array.from(value.matchAll(new RegExp(extRegex.source, 'gi')))
+    Array.from(extractPlainProseForPathCheck(value).matchAll(new RegExp(extRegex.source, 'gi')))
       .flatMap((match) => artifactSuffixes(match[1]).filter((candidate) => /[\\/]/.test(candidate))),
   )].slice(0, 100))
   const checkKey = `${rootKey}:${pathKey}`
@@ -394,10 +602,13 @@ export function MarkdownContent({
     setLinkMenu({ x: event.clientX, y: event.clientY, kind, value })
   }
 
-  const handleOpenLocalFile = async (path: string) => {
+  const handleOpenLocalFile = async (path: string, line?: number, endLine?: number) => {
     const fullPath = resolvePathWithWorkspace(path)
     if (currentSession) {
       const artifact = resolveArtifactFromPath(fullPath.replace(/%/g, '%25'), currentSession)
+      if (line) {
+        artifact.metadata = { ...(artifact.metadata || {}), line, ...(endLine ? { endLine } : {}) }
+      }
       const viewer = artifactViewerRegistry.findViewer(artifact)
       if (viewer) {
         openArtifact(artifact, viewer.id)
@@ -425,7 +636,8 @@ export function MarkdownContent({
         components={{
           a: (props) => {
             const { href, children, ...rest } = props
-            const cleaned = cleanHref(href)
+            const parsedHref = parseFileHref(href)
+            const cleaned = parsedHref.path
             const httpUrl = /^https?:\/\//i.test(cleaned)
             if (fileSourceScope && !httpUrl && isFileLink(href, cleaned)) {
               return findGroupFile(fileSourceScope.files, cleaned)
@@ -442,45 +654,82 @@ export function MarkdownContent({
                 if (currentSession?.id) query.set('session_id', currentSession.id)
                 if (currentSession?.connection_id) query.set('connection_id', currentSession.connection_id)
                 const rawUrl = `/api/v1/files/raw?${query.toString()}`
+                const openImage = () => {
+                  closeHoverNow()
+                  if (onImageClick) onImageClick(rawUrl)
+                  else window.open(rawUrl, '_blank')
+                }
+                const displayName = childrenPlainText(children).trim() || cleaned.split(/[\\/]/).pop() || cleaned
                 return (
                   <button
                     type="button"
-                    className="markdown-local-link markdown-image-link"
-                    onClick={() => {
-                      if (onImageClick) onImageClick(rawUrl)
-                      else window.open(rawUrl, '_blank')
+                    className="markdown-local-link markdown-image-link is-tone-image"
+                    onClick={openImage}
+                    onMouseEnter={(e) => scheduleHoverOpen(e.currentTarget, {
+                      path: fullPath,
+                      displayName,
+                      readUrl: rawUrl,
+                      isImage: true,
+                      isNonPreviewable: false,
+                      onOpen: openImage,
+                    })}
+                    onMouseLeave={scheduleHoverClose}
+                    onContextMenu={(event) => {
+                      closeHoverNow()
+                      openLinkMenu(event, menuKind, menuTarget)
                     }}
-                    onContextMenu={(event) => openLinkMenu(event, menuKind, menuTarget)}
-                    title={`预览图片：${cleaned}`}
                   >
-                    <IconEye size={13} aria-hidden="true" />
-                    <span>{children}</span>
+                    <IconPhoto size={13} aria-hidden="true" />
+                    <span className="markdown-local-link-label">{children}</span>
                   </button>
                 )
               }
 
-              // 委托注册表：动态获取匹配的 Viewer 及其自声明图标与标签
               const dummyArtifact = currentSession ? resolveArtifactFromPath(fullPath.replace(/%/g, '%25'), currentSession) : null
               const matchedViewer = dummyArtifact ? artifactViewerRegistry.findViewer(dummyArtifact) : null
-
-              const Icon = matchedViewer ? matchedViewer.icon : IconFileText
-              const badgeText = matchedViewer ? matchedViewer.badgeLabel || '[工件]' : '[文件]'
-              const actionTitle = matchedViewer ? `在右侧打开${matchedViewer.title}：${cleaned}` : `在文件树中定位：${cleaned}`
+              const { Icon, tone } = pickFilePillStyle(cleaned, matchedViewer)
+              const lineLabel = parsedHref.line
+                ? parsedHref.endLine && parsedHref.endLine !== parsedHref.line
+                  ? `:${parsedHref.line}-${parsedHref.endLine}`
+                  : `:${parsedHref.line}`
+                : ''
+              const labelAlreadyHasLine = lineLabel && /:\d+/.test(childrenPlainText(children))
               const linkClass = matchedViewer
-                ? `markdown-local-link markdown-file-link markdown-${matchedViewer.id.replace('-viewer', '')}-link`
-                : 'markdown-local-link markdown-file-link'
+                ? `markdown-local-link markdown-file-link markdown-${matchedViewer.id.replace('-viewer', '')}-link is-tone-${tone}`
+                : `markdown-local-link markdown-file-link is-tone-${tone}`
+              const displayName = childrenPlainText(children).trim() || cleaned.split(/[\\/]/).pop() || cleaned
+              const previewUrl = buildRawPreviewUrl(httpUrl ? cleaned : fullPath, httpUrl)
+              const openFile = () => {
+                closeHoverNow()
+                void handleOpenLocalFile(cleaned, parsedHref.line, parsedHref.endLine)
+              }
 
               return (
                 <button
                   type="button"
                   className={linkClass}
-                  onClick={() => void handleOpenLocalFile(cleaned)}
-                  onContextMenu={(event) => openLinkMenu(event, menuKind, menuTarget)}
-                  title={actionTitle}
+                  onClick={openFile}
+                  onMouseEnter={(e) => scheduleHoverOpen(e.currentTarget, {
+                    path: fullPath,
+                    displayName,
+                    readUrl: previewUrl,
+                    isImage: false,
+                    isNonPreviewable: isNonPreviewableFile(cleaned),
+                    line: parsedHref.line,
+                    endLine: parsedHref.endLine,
+                    onOpen: openFile,
+                  })}
+                  onMouseLeave={scheduleHoverClose}
+                  onContextMenu={(event) => {
+                    closeHoverNow()
+                    openLinkMenu(event, menuKind, menuTarget)
+                  }}
                 >
                   <Icon size={13} aria-hidden="true" />
-                  <span>{children}</span>
-                  <span style={{ fontSize: 11, opacity: 0.75, marginLeft: 4 }}>{badgeText}</span>
+                  <span className="markdown-local-link-label">{children}</span>
+                  {lineLabel && !labelAlreadyHasLine && (
+                    <span className="markdown-local-link-line">{lineLabel}</span>
+                  )}
                 </button>
               )
             }
@@ -488,25 +737,22 @@ export function MarkdownContent({
             const safe = safeUrl(href)
             if (!safe) return <>{children}</>
 
-            // 如果链接是 http/https 但指向注册插件所支持的扩展名，由注册表动态决策拦截
             const isArtifactUrl = httpUrl && artifactViewerRegistry.isSupportedExtension(safe)
             if (isArtifactUrl && currentSession) {
               const dummy = resolveArtifactFromPath(safe, currentSession)
               const matched = artifactViewerRegistry.findViewer(dummy)
-              const Icon = matched ? matched.icon : IconFileText
-              const badge = matched ? matched.badgeLabel || '[工件]' : '[工件]'
+              const { Icon, tone } = pickFilePillStyle(safe, matched)
 
               return (
                 <button
                   type="button"
-                  className="markdown-local-link markdown-file-link"
+                  className={`markdown-local-link markdown-file-link is-tone-${tone}`}
                   onClick={() => void handleOpenLocalFile(safe)}
                   onContextMenu={(event) => openLinkMenu(event, 'url', safe)}
                   title={`在工作台打开：${safe}`}
                 >
                   <Icon size={13} aria-hidden="true" />
-                  <span>{children}</span>
-                  <span style={{ fontSize: 11, opacity: 0.75, marginLeft: 4 }}>{badge}</span>
+                  <span className="markdown-local-link-label">{children}</span>
                 </button>
               )
             }
@@ -524,6 +770,22 @@ export function MarkdownContent({
                 {external && <IconExternalLink className="markdown-external-icon" size={13} aria-hidden="true" />}
               </Anchor>
             )
+          },
+          blockquote: ({ children }) => {
+            const callout = parseCalloutBlockquote(children)
+            if (callout) {
+              const Icon = CALLOUT_ICONS[callout.kind]
+              return (
+                <aside className={`markdown-callout is-${callout.kind}`} role="note">
+                  <div className="markdown-callout-title">
+                    <Icon size={15} aria-hidden="true" />
+                    <span>{callout.label}</span>
+                  </div>
+                  <div className="markdown-callout-body">{callout.children}</div>
+                </aside>
+              )
+            }
+            return <blockquote>{children}</blockquote>
           },
           img: (props) => {
             const cleaned = cleanHref(props.src)
@@ -569,6 +831,13 @@ export function MarkdownContent({
         {normalizedValue}
       </ReactMarkdown>
       {linkMenu && <MarkdownLinkMenu target={linkMenu} session={session} onClose={() => setLinkMenu(null)} />}
+      <FileLinkHoverPreview
+        target={hoverTarget}
+        onMouseEnter={clearHoverTimers}
+        onMouseLeave={scheduleHoverClose}
+        onOpen={() => hoverTarget?.onOpen()}
+        onClose={closeHoverNow}
+      />
       {visualizations.paths.map(path => <CodexVisualization key={path} path={path} session={currentSession} />)}
     </div>
   )

@@ -110,6 +110,9 @@ func (h *Handler) unboundSettings(ctx context.Context, w http.ResponseWriter, r 
 				}
 			}
 			h.backfillAntigravityModel(ctx, target, aid, row, readonly, result)
+			if inferred := antigravityEffortFromModel(stringValue(result, "model")); inferred != "" {
+				result["effort"] = inferred
+			}
 			if readonly {
 				result["detail"] = "此会话来自 Antigravity 桌面版，可读取历史；agy CLI 无法续聊，请新建 Antigravity 会话。"
 			}

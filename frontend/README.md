@@ -1,6 +1,6 @@
 # 星序 · Astrorder 前端
 
-本目录是星序工作台的 React/Vite 前端。业务请求通过 [HTTP 与 WebSocket 契约](../docs/CONTRACT.md) 连接 Go App Server，桌面系统能力通过 Wails 适配层调用。
+本目录是星序工作台的 React/Vite 前端。业务请求通过 HTTP 与 WebSocket 连接 Go App Server（详见[架构说明](../docs/ARCHITECTURE.md)），桌面系统能力通过 Wails 适配层调用。
 
 ## 开发
 
@@ -19,12 +19,14 @@ npm run build
 
 ## 页面
 
-- `/chat`：按 `agent_id + session_id` 隔离的会话、历史分页、Markdown、附件、命令 outbox、排队、停止和审批。
-- `/monitor`：共享同一 Zustand 事件状态的多会话监控卡片。
-- `/groups`：群聊、成员管理、共享黑板与产物。
-- `/swarm`：分布式任务与拓扑。
+- `/chat`：按 `agent_id + session_id` 隔离的会话工作台（历史分页、Markdown 与文件悬浮预览、工作区 Sidecar、Swarm 团队、定时任务、附件、排队、停止和审批）。
+- `/monitor`：共享同一 Zustand 事件状态的多会话监控矩阵。
+- `/groups`：多 Agent 群聊、成员管理、共享黑板与产物。
+- `/analytics`：模型网关用量与 Agent CLI 统计。
+- `/backups`：配置与工作区备份恢复。
+- `/accounts`：Agent 账号与配额切换。
 - `/plugins`：连接、能力与服务设置。
-- `/analytics`：模型网关统计与 Agent CLI 使用情况。
+- `/mobile`：独立触屏移动端工作台与 PWA 入口。
 
 浏览器命令走 HTTP；事件 WebSocket 只读并按 durable cursor 重放。认证由 Go App Server 与桌面适配层共同处理，浏览器和桌面入口的凭据传递方式以 `src/api/` 和 `src/desktop/adapter.ts` 为准。
 

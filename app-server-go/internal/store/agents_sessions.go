@@ -318,6 +318,14 @@ func (s *Store) UpdateSession(ctx context.Context, agentID, sessionID string, up
 			args = append(args, value)
 		}
 	}
+	if value, ok := updates["ephemeral"]; ok {
+		flag, err := boolValue(value, false)
+		if err != nil {
+			return nil, errors.New("ephemeral must be a boolean")
+		}
+		sets = append(sets, "ephemeral=?")
+		args = append(args, flag)
+	}
 	if value, ok := updates["runtime_owner"]; ok {
 		encoded, err := encodeJSON(value)
 		if err != nil {
@@ -364,7 +372,7 @@ func (s *Store) DeleteSession(ctx context.Context, agentID, sessionID string) (b
 
 // DeleteSessionTx shares exact session cleanup with checkpointed event projection.
 func DeleteSessionTx(ctx context.Context, tx *sql.Tx, agentID, sessionID string) (bool, error) {
-	for _, table := range []string{"messages", "commands", "tasks"} {
+	for _, table := range []string{"messages", "commands", "tasks", "session_schedules"} {
 		if _, err := tx.ExecContext(ctx, "DELETE FROM "+table+" WHERE agent_id=? AND session_id=?", agentID, sessionID); err != nil {
 			return false, err
 		}
