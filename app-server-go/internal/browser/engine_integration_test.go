@@ -258,8 +258,7 @@ func TestRealUpstreamBrowserEngines(t *testing.T) {
 				requests.Add(1)
 				var request map[string]any
 				if json.NewDecoder(r.Body).Decode(&request) == nil {
-					reasoning, _ := request["reasoning"].(map[string]any)
-					reasoningCorrect.Store(reasoning["effort"] == "low" && request["reasoning_effort"] == nil)
+					reasoningCorrect.Store(request["reasoning_effort"] == "low" && request["reasoning"] == nil)
 				}
 				actions := []map[string]any{
 					{"wait": map[string]any{"seconds": 0}},

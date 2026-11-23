@@ -5,13 +5,17 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
 
 	pb "astrorder.dev/contracts/gen/go/astrorder/sessiond/v1"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const handoffSummaryPrompt = `请为接手这个会话的另一个 Agent 生成一份完整、可直接继续工作的交接摘要。
@@ -63,6 +67,68 @@ func (h *Handler) handleHandoff(w http.ResponseWriter, r *http.Request, sid stri
 
 func (h *Handler) handleCancelHandoff(w http.ResponseWriter, r *http.Request, id string) {
 	writeJSON(w, 200, map[string]any{"cancelled": h.bgTasks.cancel("handoff:" + id)})
+}
+
+func (h *Handler) handleGetHandoffContext(w http.ResponseWriter, r *http.Request, sid string) {
+	agentID := strings.TrimSpace(r.URL.Query().Get("agent_id"))
+	if agentID == "" {
+		writeJSONError(w, http.StatusUnprocessableEntity, "agent_id is required")
+		return
+	}
+	ctx := r.Context()
+	session, err := h.store.GetSession(ctx, agentID, sid)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if session == nil {
+		writeJSONError(w, http.StatusNotFound, "Session was not found")
+		return
+	}
+	consumed, _ := session["handoff_context_consumed"].(bool)
+	fromAgentID := stringValue(session, "handoff_from_agent_id")
+	fromSessionID := stringValue(session, "handoff_from_session_id")
+	rawCtx := strings.TrimSpace(stringValue(session, "handoff_context"))
+	if rawCtx == "" {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"available":         false,
+			"consumed":          consumed,
+			"source_agent_id":   fromAgentID,
+			"source_session_id": fromSessionID,
+		})
+		return
+	}
+	summary, mode, sourceKind, err := h.readHandoffSummary(ctx, rawCtx, session, true)
+	if err != nil {
+		writeQueueError(w, err)
+		return
+	}
+	var sourceAgentName, sourceSessionTitle string
+	if fromAgentID != "" {
+		if fromAgent, agentErr := h.store.GetAgent(ctx, fromAgentID); agentErr == nil && fromAgent != nil {
+			sourceAgentName = stringValue(fromAgent, "name")
+			if sourceKind == "" {
+				sourceKind = stringValue(fromAgent, "kind")
+			}
+		}
+		if fromSessionID != "" {
+			if fromSession, sessErr := h.store.GetSession(ctx, fromAgentID, fromSessionID); sessErr == nil && fromSession != nil {
+				sourceSessionTitle = stringValue(fromSession, "title")
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"available":            true,
+		"mode":                 mode,
+		"summary":              summary,
+		"consumed":             consumed,
+		"source_agent_id":      fromAgentID,
+		"source_agent_kind":    sourceKind,
+		"source_agent_name":    sourceAgentName,
+		"source_session_id":    fromSessionID,
+		"source_session_title": sourceSessionTitle,
+		"workspace":            stringValue(session, "workspace"),
+	})
 }
 
 func (h *Handler) handoff(ctx context.Context, sid string, req handoffRequest) (map[string]any, error) {
@@ -207,7 +273,7 @@ func (h *Handler) handoff(ctx context.Context, sid string, req handoffRequest) (
 		// Google Antigravity compliance: never fork or trigger an automated AI-to-AI
 		// summary prompt on personal Antigravity accounts; deterministically build a
 		// bounded handoff digest from existing local conversation messages.
-		items, err := h.handoffMessages(taskCtx, kind, sourceRef)
+		items, err := h.handoffMessages(taskCtx, sourceAgent, kind, sourceRef)
 		if err != nil {
 			return nil, err
 		}
@@ -223,12 +289,14 @@ func (h *Handler) handoff(ctx context.Context, sid string, req handoffRequest) (
 		forkRef := fork.Session
 		var summaryTurn string
 		defer func() {
-			cleanup, stop := context.WithTimeout(context.Background(), 5*time.Second)
-			defer stop()
 			if journal["state"] != "completed" {
-				_, _ = h.client.Session.Interrupt(cleanup, &pb.InterruptRequest{Meta: newCommandMeta("", ""), Session: forkRef, TurnId: optString(summaryTurn)})
+				intCtx, stopInt := context.WithTimeout(context.Background(), 5*time.Second)
+				_, _ = h.client.Session.Interrupt(intCtx, &pb.InterruptRequest{Meta: newCommandMeta("", ""), Session: forkRef, TurnId: optString(summaryTurn)})
+				stopInt()
 			}
-			_, _ = h.client.Session.CloseSession(cleanup, &pb.CloseSessionRequest{Meta: newCommandMeta("", ""), Session: forkRef})
+			closeCtx, stopClose := context.WithTimeout(context.Background(), 10*time.Second)
+			_, _ = h.client.Session.CloseSession(closeCtx, &pb.CloseSessionRequest{Meta: newCommandMeta("", ""), Session: forkRef})
+			stopClose()
 		}()
 		journal["summary_session_id"] = forkID
 		if err = save(); err != nil {
@@ -242,14 +310,17 @@ func (h *Handler) handoff(ctx context.Context, sid string, req handoffRequest) (
 		if err = h.restoreModel(taskCtx, forkRef); err != nil {
 			return nil, err
 		}
-		// A baseline prevents inherited assistant answers being mistaken for a summary.
-		baseline, err := h.handoffMessages(taskCtx, kind, forkRef)
+		// A newest-page baseline prevents inherited assistant answers from being
+		// mistaken for the summary without paging the entire thread history.
+		baseline, _, err := h.handoffHistoryPage(taskCtx, sourceAgent, kind, forkRef, 50, nil)
 		if err != nil {
 			return nil, err
 		}
 		seen := map[string]bool{}
 		for _, item := range baseline {
-			seen[stringValue(item, "id")] = true
+			if id := stringValue(item, "id"); id != "" {
+				seen[id] = true
+			}
 		}
 		sendID := req.OperationID + ":summary-send"
 		send, err := h.client.Session.Send(taskCtx, &pb.SendRequest{Meta: newCommandMeta(sendID, sendID), Session: forkRef, Input: []*pb.InputPart{{Part: &pb.InputPart_Text{Text: &pb.TextInput{Text: handoffSummaryPrompt}}}}, Policy: &pb.SendPolicy{NativeOptions: &pb.NativeJson{Schema: "astrorder." + kind + ".send.options.v1", Utf8Json: []byte(`{"idle_only":true}`)}}})
@@ -367,26 +438,118 @@ func (h *Handler) handoffIdle(ctx context.Context, agent map[string]any, ref *pb
 	return commandFailure(503, "Source ownership was not confirmed")
 }
 
-func (h *Handler) handoffMessages(ctx context.Context, kind string, ref *pb.SessionRef) ([]map[string]any, error) {
+func canFallbackHandoffCodexUnbound(err error) bool {
+	switch status.Code(err) {
+	case codes.DeadlineExceeded, codes.Unavailable, codes.NotFound:
+		return true
+	default:
+		return errors.Is(err, context.DeadlineExceeded)
+	}
+}
+
+func (h *Handler) handoffCodexHistoryPageUnbound(ctx context.Context, agent map[string]any, ref *pb.SessionRef, limit uint32, before *pb.NullableString) ([]map[string]any, *pb.NullableString, error) {
+	if agent == nil || h.client == nil || h.client.Runtime == nil {
+		return nil, nil, fmt.Errorf("unbound codex history unavailable")
+	}
+	target, err := h.resolveRuntimeTarget(ctx, agent)
+	if err != nil {
+		return nil, nil, err
+	}
+	query := &pb.CodexThreadItemsListQuery{ThreadId: ref.SessionId, Limit: limit}
+	descending := "desc"
+	query.SortDirection = &descending
+	if cursor := before.GetValue(); cursor != "" {
+		if !strings.HasPrefix(cursor, unboundCursorPrefix) {
+			return nil, nil, fmt.Errorf("history cursor belongs to another read path")
+		}
+		query.Cursor = &pb.NullableString{State: &pb.NullableString_Value{Value: strings.TrimPrefix(cursor, unboundCursorPrefix)}}
+	}
+	response, err := h.client.Runtime.QueryNative(ctx, &pb.NativeQueryRequest{
+		Target: target,
+		Query:  &pb.NativeQueryRequest_CodexThreadItemsList{CodexThreadItemsList: query},
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	var page struct {
+		Data       []map[string]any `json:"data"`
+		NextCursor *string          `json:"nextCursor"`
+	}
+	if err := parseNativeJSON(response.Result, &page); err != nil {
+		return nil, nil, err
+	}
+	messages := make([]map[string]any, 0, len(page.Data))
+	for i := len(page.Data) - 1; i >= 0; i-- {
+		messages = append(messages, projectHistoryItem(page.Data[i], ref.GetAgentId(), ref.SessionId, ref.SessionId, ref.GetAgentId(), "codex")...)
+	}
+	var next *pb.NullableString
+	if page.NextCursor != nil && *page.NextCursor != "" {
+		next = &pb.NullableString{State: &pb.NullableString_Value{Value: unboundCursorPrefix + *page.NextCursor}}
+	}
+	return messages, next, nil
+}
+
+func (h *Handler) handoffHistoryPage(ctx context.Context, agent map[string]any, kind string, ref *pb.SessionRef, limit uint32, before *pb.NullableString) ([]map[string]any, *pb.NullableString, error) {
+	if before != nil && strings.HasPrefix(before.GetValue(), unboundCursorPrefix) {
+		items, next, err := h.handoffCodexHistoryPageUnbound(ctx, agent, ref, limit, before)
+		if err != nil {
+			slog.Warn("handoff unbound codex history page failed", "agent_id", ref.GetAgentId(), "session_id", ref.GetSessionId(), "error", err)
+			return nil, nil, commandFailure(503, "Native handoff history unavailable")
+		}
+		return items, next, nil
+	}
+	pageCtx := ctx
+	cancel := func() {}
+	// Bound Codex reads wait behind any buffered stdio notifications; bound the wait
+	// on page 1 when the read-only catalog fallback is available.
+	if kind == "codex" && agent != nil && (before == nil || before.GetValue() == "") {
+		pageCtx, cancel = context.WithTimeout(ctx, 12*time.Second)
+	}
+	page, err := h.client.Runtime.GetHistoryPage(pageCtx, &pb.HistoryPageRequest{Session: ref, Limit: limit, Before: before})
+	cancel()
+	if err != nil {
+		slog.Warn("handoff history page read failed", "agent_id", ref.GetAgentId(), "session_id", ref.GetSessionId(), "kind", kind, "has_cursor", before != nil && before.GetValue() != "", "error", err)
+		if kind == "codex" && agent != nil && ctx.Err() == nil && (before == nil || before.GetValue() == "") && canFallbackHandoffCodexUnbound(err) {
+			items, next, fallbackErr := h.handoffCodexHistoryPageUnbound(ctx, agent, ref, limit, nil)
+			if fallbackErr == nil {
+				slog.Info("handoff history recovered via unbound codex read", "agent_id", ref.GetAgentId(), "session_id", ref.GetSessionId(), "items", len(items))
+				return items, next, nil
+			}
+			slog.Warn("handoff unbound codex fallback failed", "agent_id", ref.GetAgentId(), "session_id", ref.GetSessionId(), "error", fallbackErr)
+		}
+		return nil, nil, commandFailure(503, "Native handoff history unavailable")
+	}
+	if page == nil || page.Session == nil || page.Session.SessionId != ref.SessionId || page.Session.GetAgentId() != ref.GetAgentId() || page.Session.GetConnectionId() != ref.GetConnectionId() {
+		return nil, nil, commandFailure(502, "Handoff history identity mismatch")
+	}
+	messages := make([]map[string]any, 0, len(page.Items))
+	for _, native := range page.Items {
+		var item map[string]any
+		if parseNativeJSON(native, &item) != nil {
+			return nil, nil, commandFailure(502, "Invalid handoff history")
+		}
+		messages = append(messages, projectHistoryItem(item, ref.GetAgentId(), ref.SessionId, ref.SessionId, ref.GetAgentId(), kind)...)
+	}
+	return messages, page.NextCursor, nil
+}
+
+func (h *Handler) handoffMessages(ctx context.Context, agent map[string]any, kind string, ref *pb.SessionRef) ([]map[string]any, error) {
 	var before *pb.NullableString
 	messages := []map[string]any{}
 	seen := map[string]bool{}
 	for pages := 0; pages < 10000; pages++ {
-		page, err := h.client.Runtime.GetHistoryPage(ctx, &pb.HistoryPageRequest{Session: ref, Limit: 200, Before: before})
+		pageMessages, nextCursor, err := h.handoffHistoryPage(ctx, agent, kind, ref, 200, before)
 		if err != nil {
-			return nil, commandFailure(503, "Native handoff history unavailable")
+			return nil, err
 		}
-		if page == nil || page.Session == nil || page.Session.SessionId != ref.SessionId || page.Session.GetAgentId() != ref.GetAgentId() || page.Session.GetConnectionId() != ref.GetConnectionId() {
-			return nil, commandFailure(502, "Handoff history identity mismatch")
+		// Pages arrive newest-page first while each page is chronological; prepend
+		// older pages so the combined transcript remains oldest-to-newest.
+		if len(messages) == 0 {
+			messages = pageMessages
+		} else if len(pageMessages) > 0 {
+			messages = append(pageMessages, messages...)
 		}
-		for _, native := range page.Items {
-			var item map[string]any
-			if parseNativeJSON(native, &item) != nil {
-				return nil, commandFailure(502, "Invalid handoff history")
-			}
-			messages = append(messages, projectHistoryItem(item, ref.GetAgentId(), ref.SessionId, ref.SessionId, ref.GetAgentId(), kind)...)
-		}
-		cursor := page.NextCursor.GetValue()
+		cursor := nextCursor.GetValue()
 		if cursor == "" {
 			return messages, nil
 		}
@@ -394,7 +557,7 @@ func (h *Handler) handoffMessages(ctx context.Context, kind string, ref *pb.Sess
 			return nil, commandFailure(502, "Handoff history cursor did not advance")
 		}
 		seen[cursor] = true
-		before = page.NextCursor
+		before = nextCursor
 	}
 	return nil, commandFailure(502, "Handoff history exceeds page limit")
 }
@@ -403,19 +566,44 @@ func (h *Handler) waitHandoffSummary(ctx context.Context, agent map[string]any, 
 	if err := h.awaitHandoffCompletion(ctx, ref, receipt, commandID); err != nil {
 		return "", err
 	}
+	kind := stringValue(agent, "kind")
+	expectedTurn := receipt.GetTurnId()
 	ticker := time.NewTicker(400 * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		{
-			items, err := h.handoffMessages(ctx, stringValue(agent, "kind"), ref)
-			if err != nil {
-				return "", err
-			}
-			for i := len(items) - 1; i >= 0; i-- {
-				item := items[i]
-				if !baseline[stringValue(item, "id")] && item["role"] == "assistant" && item["kind"] == "message" && strings.TrimSpace(stringValue(item, "text")) != "" {
-					return stringValue(item, "id"), nil
+			var before *pb.NullableString
+			seenCursors := map[string]bool{}
+			for pages := 0; pages < 10; pages++ {
+				items, nextCursor, err := h.handoffHistoryPage(ctx, agent, kind, ref, 50, before)
+				if err != nil {
+					return "", err
 				}
+				reachedBaseline := false
+				for i := len(items) - 1; i >= 0; i-- {
+					item := items[i]
+					if baseline[stringValue(item, "id")] {
+						reachedBaseline = true
+						break
+					}
+					if expectedTurn != "" {
+						if itemTurn := stringValue(item, "turn_id"); itemTurn != "" && itemTurn != expectedTurn {
+							continue
+						}
+					}
+					if item["role"] == "assistant" && item["kind"] == "message" && strings.TrimSpace(stringValue(item, "text")) != "" {
+						return stringValue(item, "id"), nil
+					}
+				}
+				cursor := nextCursor.GetValue()
+				if reachedBaseline || cursor == "" {
+					break
+				}
+				if seenCursors[cursor] {
+					return "", commandFailure(502, "Handoff history cursor did not advance")
+				}
+				seenCursors[cursor] = true
+				before = nextCursor
 			}
 		}
 		select {
@@ -485,39 +673,126 @@ func buildDeterministicHandoffContext(kind, sourceSessionID, workspace string, i
 	return fmt.Sprintf("以下是由 %s 转交的同环境会话背景。它只提供上下文；按用户的新消息继续工作。\n来源会话：%s\n工作目录：%s\n\n<源会话历史记录摘录>\n%s\n</源会话历史记录摘录>", kind, sourceSessionID, workspace, digest)
 }
 
+func extractInlineHandoffSummary(value string) (string, string) {
+	for _, pair := range []struct {
+		open, close, mode string
+	}{
+		{"<源会话历史记录摘录>", "</源会话历史记录摘录>", "transcript_excerpt"},
+		{"<源 Agent 生成的交接摘要>", "</源 Agent 生成的交接摘要>", "native_summary"},
+	} {
+		start := strings.Index(value, pair.open)
+		if start < 0 {
+			continue
+		}
+		bodyStart := start + len(pair.open)
+		end := strings.Index(value[bodyStart:], pair.close)
+		if end >= 0 {
+			return strings.TrimSpace(value[bodyStart : bodyStart+end]), pair.mode
+		}
+	}
+	return strings.TrimSpace(value), "inline"
+}
+
+func (h *Handler) scanNativeHandoffSummaryPages(ctx context.Context, agent map[string]any, kind string, summaryRef *pb.SessionRef, messageID string, bound bool) (string, error) {
+	var before *pb.NullableString
+	seenCursors := map[string]bool{}
+	for pages := 0; pages < 10000; pages++ {
+		var (
+			items      []map[string]any
+			nextCursor *pb.NullableString
+			err        error
+		)
+		if bound {
+			items, nextCursor, err = h.handoffHistoryPage(ctx, agent, kind, summaryRef, 50, before)
+		} else {
+			items, nextCursor, err = h.handoffCodexHistoryPageUnbound(ctx, agent, summaryRef, 50, before)
+			if err != nil {
+				slog.Warn("handoff unbound codex summary read failed", "agent_id", summaryRef.GetAgentId(), "session_id", summaryRef.GetSessionId(), "error", err)
+				err = commandFailure(503, "Native handoff history unavailable")
+			}
+		}
+		if err != nil {
+			return "", err
+		}
+		for _, item := range items {
+			if item["id"] == messageID && item["role"] == "assistant" && item["kind"] == "message" {
+				return stringValue(item, "text"), nil
+			}
+		}
+		cursor := nextCursor.GetValue()
+		if cursor == "" {
+			break
+		}
+		if seenCursors[cursor] {
+			return "", commandFailure(502, "Handoff history cursor did not advance")
+		}
+		seenCursors[cursor] = true
+		before = nextCursor
+	}
+	return "", commandFailure(503, "Native handoff summary was not found; message was not sent")
+}
+
+func (h *Handler) readHandoffSummary(ctx context.Context, value string, session map[string]any, preferUnbound bool) (string, string, string, error) {
+	if !strings.HasPrefix(value, handoffRefPrefix) {
+		summary, mode := extractInlineHandoffSummary(value)
+		return summary, mode, "", nil
+	}
+	var ref handoffReference
+	if json.Unmarshal([]byte(strings.TrimPrefix(value, handoffRefPrefix)), &ref) != nil || ref.AgentID == "" || ref.SessionID == "" || ref.MessageID == "" {
+		return "", "", "", commandFailure(422, "Invalid native handoff reference")
+	}
+	agent, err := h.store.GetAgent(ctx, ref.AgentID)
+	if err != nil {
+		return "", "", "", err
+	}
+	if agent == nil || normalizeConnectionID(stringValue(agent, "connection_id")) != normalizeConnectionID(ref.ConnectionID) || normalizeConnectionID(stringValue(session, "connection_id")) != normalizeConnectionID(ref.ConnectionID) {
+		return "", "", "", commandFailure(409, "Handoff reference belongs to another environment")
+	}
+	if h.client == nil || h.client.Session == nil || h.client.Runtime == nil {
+		return "", "", "", commandFailure(503, "Daemon unavailable")
+	}
+	kind := stringValue(agent, "kind")
+	summaryRef := buildSessionRef(ref.AgentID, ref.SessionID, ref.ConnectionID)
+	triedUnbound := false
+	if preferUnbound && kind == "codex" {
+		triedUnbound = true
+		if summary, unboundErr := h.scanNativeHandoffSummaryPages(ctx, agent, kind, summaryRef, ref.MessageID, false); unboundErr == nil {
+			return summary, "native_summary", kind, nil
+		} else {
+			slog.Warn("handoff preview unbound codex read failed; falling back to bound read", "agent_id", ref.AgentID, "session_id", ref.SessionID, "error", unboundErr)
+		}
+	}
+	// A closed summary runtime can be rebound to the same native identity.
+	row := map[string]any{"id": ref.SessionID, "agent_id": ref.AgentID, "connection_id": ref.ConnectionID, "workspace": session["workspace"]}
+	bound := true
+	if err = h.bindNativeSession(ctx, row); err != nil {
+		if kind != "codex" || triedUnbound {
+			return "", "", "", commandFailure(503, "Native summary binding unavailable")
+		}
+		slog.Warn("handoff summary bind failed; falling back to unbound codex read", "agent_id", ref.AgentID, "session_id", ref.SessionID, "error", err)
+		bound = false
+	}
+	if bound {
+		defer func() {
+			cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_, _ = h.client.Session.CloseSession(cleanup, &pb.CloseSessionRequest{Meta: newCommandMeta("", ""), Session: summaryRef})
+		}()
+	}
+	summary, err := h.scanNativeHandoffSummaryPages(ctx, agent, kind, summaryRef, ref.MessageID, bound)
+	if err != nil {
+		return "", "", "", err
+	}
+	return summary, "native_summary", kind, nil
+}
+
 func (h *Handler) resolveHandoffContext(ctx context.Context, value string, session map[string]any) (string, error) {
 	if !strings.HasPrefix(value, handoffRefPrefix) {
 		return value, nil
 	} // Existing legacy handoffs remain readable.
-	var ref handoffReference
-	if json.Unmarshal([]byte(strings.TrimPrefix(value, handoffRefPrefix)), &ref) != nil || ref.AgentID == "" || ref.SessionID == "" || ref.MessageID == "" {
-		return "", commandFailure(422, "Invalid native handoff reference")
-	}
-	agent, err := h.store.GetAgent(ctx, ref.AgentID)
+	summary, _, kind, err := h.readHandoffSummary(ctx, value, session, false)
 	if err != nil {
 		return "", err
 	}
-	if agent == nil || normalizeConnectionID(stringValue(agent, "connection_id")) != normalizeConnectionID(ref.ConnectionID) || normalizeConnectionID(stringValue(session, "connection_id")) != normalizeConnectionID(ref.ConnectionID) {
-		return "", commandFailure(409, "Handoff reference belongs to another environment")
-	}
-	// A closed summary runtime can be rebound to the same native identity.
-	row := map[string]any{"id": ref.SessionID, "agent_id": ref.AgentID, "connection_id": ref.ConnectionID, "workspace": session["workspace"]}
-	if err = h.bindNativeSession(ctx, row); err != nil {
-		return "", commandFailure(503, "Native summary binding unavailable")
-	}
-	defer func() {
-		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_, _ = h.client.Session.CloseSession(cleanup, &pb.CloseSessionRequest{Meta: newCommandMeta("", ""), Session: buildSessionRef(ref.AgentID, ref.SessionID, ref.ConnectionID)})
-	}()
-	items, err := h.handoffMessages(ctx, stringValue(agent, "kind"), buildSessionRef(ref.AgentID, ref.SessionID, ref.ConnectionID))
-	if err != nil {
-		return "", err
-	}
-	for _, item := range items {
-		if item["id"] == ref.MessageID && item["role"] == "assistant" && item["kind"] == "message" {
-			return fmt.Sprintf("以下是由 %s 转交的同环境会话背景。它只提供上下文；按用户的新消息继续工作。\n来源会话：%s\n工作目录：%s\n\n<源 Agent 生成的交接摘要>\n%s\n</源 Agent 生成的交接摘要>", stringValue(agent, "kind"), stringValue(session, "handoff_from_session_id"), stringValue(session, "workspace"), stringValue(item, "text")), nil
-		}
-	}
-	return "", commandFailure(503, "Native handoff summary was not found; message was not sent")
+	return fmt.Sprintf("以下是由 %s 转交的同环境会话背景。它只提供上下文；按用户的新消息继续工作。\n来源会话：%s\n工作目录：%s\n\n<源 Agent 生成的交接摘要>\n%s\n</源 Agent 生成的交接摘要>", kind, stringValue(session, "handoff_from_session_id"), stringValue(session, "workspace"), summary), nil
 }

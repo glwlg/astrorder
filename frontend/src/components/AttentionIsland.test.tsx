@@ -108,12 +108,28 @@ describe('AttentionIsland', () => {
     renderIsland()
     expect(screen.getByText('后台编译任务')).toBeInTheDocument()
 
-    await userEvent.click(screen.getByRole('button', { name: /展开运行中星辰/ }))
+    await userEvent.click(screen.getByRole('button', { name: /展开运行中会话/ }))
     expect(screen.getByRole('dialog', { name: '跨会话实时动态' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '进入矩阵' })).toBeInTheDocument()
 
     await userEvent.click(screen.getByRole('button', { name: '暂时收起状态提示' }))
     expect(screen.queryByText('后台编译任务')).not.toBeInTheDocument()
+  })
+
+  it('displays session count wording when multiple background sessions are running', () => {
+    useAstrorderStore.getState().hydrateBootstrap({
+      protocol_version: 1,
+      cursor: 4,
+      agents: [{ id: 'codex', name: 'Codex', kind: 'codex', status: 'ready', capabilities: ['chat'], limitation: null }],
+      sessions: [
+        { id: 'active-session', agent_id: 'codex', title: '当前会话', workspace: '/repo', status: 'idle', updated_at: '2026-11-21T08:00:00Z' },
+        { id: 'bg-1', agent_id: 'codex', title: '任务一', workspace: '/repo', status: 'running', updated_at: '2026-11-21T08:05:00Z' },
+        { id: 'bg-2', agent_id: 'codex', title: '任务二', workspace: '/repo', status: 'running', updated_at: '2026-11-21T08:06:00Z' },
+      ],
+    })
+
+    renderIsland()
+    expect(screen.getByText('2 个会话运行中')).toBeInTheDocument()
   })
 
   it('suppresses running pulse on /monitor while still showing pending approvals', () => {

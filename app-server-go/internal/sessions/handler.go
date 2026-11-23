@@ -191,6 +191,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleForkSession(w, r, params.SessionID)
 	case "handoff_session":
 		h.handleHandoff(w, r, params.SessionID)
+	case "get_handoff_context":
+		h.handleGetHandoffContext(w, r, params.SessionID)
 	case "cancel_handoff":
 		h.handleCancelHandoff(w, r, params.OperationID)
 	case "create_session":

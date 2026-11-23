@@ -17,6 +17,7 @@ import { sessionSwipeGesture, sessionDragPreview, startsAtSessionDrawerEdge, typ
 import { describeTool, extractToolArgs, FileChangeDiffBlock, fileChangeDiffs, formatCommandRowDisplay, PackSummary, ShellOutputBlock, ToolLineIcon, unwrapCommand } from '../chat/toolPresentation'
 import { ToolOutputBlock } from '../chat/ToolOutputBlock'
 import { isCompactionMessage, CompactionDivider } from '../chat/CompactionDivider'
+import { HandoffSummaryCard } from '../chat/HandoffSummaryCard'
 
 export interface MessageActionAnchor { text: string; x: number; y: number; element: HTMLElement; selectText?: () => void }
 
@@ -100,6 +101,23 @@ export function MobileTranscript({ session, messages, activityBreaks, commands =
       onTouchStart={e => { older.onTouchStart(e); if ((e.target as Element).closest('.m-select-text') || startsAtSessionDrawerEdge(e.touches[0].clientX)) { touch.current = null; onSwipePreview?.(null); return }; touch.current = { x: e.touches[0].clientX, y: e.touches[0].clientY } }}
       onTouchEnd={e => { cancelHold(); onSwipePreview?.(null); if (!touch.current) return; const start = touch.current; const end = e.changedTouches[0]; touch.current = null; const gesture = sessionSwipeGesture(start.x, start.y, end.clientX, end.clientY); if (gesture) onSwipe(gesture) }}
       onTouchMove={e => { cancelHold(); older.onTouchMove(e); if (!touch.current || !onSwipePreview) return; onSwipePreview(sessionDragPreview(e.touches[0].clientX - touch.current.x, e.touches[0].clientY - touch.current.y)) }} onTouchCancel={cancelHold}>
+      {session?.handoff_context?.trim() && (
+        <HandoffSummaryCard
+          key={`handoff:${session.agent_id}:${session.id}`}
+          session={session}
+          compact
+          renderMarkdown={(summary) => (
+            <MarkdownContent
+              value={summary}
+              onFileClick={onFile}
+              onImageClick={onImage}
+              workspace={workspace}
+              sessionId={session.id}
+              connectionId={connectionId}
+            />
+          )}
+        />
+      )}
       {hasOlder && <button className="m-earlier" disabled={loadingOlder} onClick={() => void older.request()}>{loadingOlder ? '正在加载更早消息…' : '查看更早的消息 ↑'}</button>}
       {rows.map((m, i) => {
         if (isCompactionMessage(m)) {

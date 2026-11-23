@@ -33,6 +33,7 @@ var allRoutes = []Registration{
 	{Method: http.MethodPost, Path: "/api/v1/sessions/{session_id}/sync"},
 	{Method: http.MethodPost, Path: "/api/v1/sessions/{session_id}/fork"},
 	{Method: http.MethodPost, Path: "/api/v1/sessions/{session_id}/handoff"},
+	{Method: http.MethodGet, Path: "/api/v1/sessions/{session_id}/handoff-context"},
 	{Method: http.MethodGet, Path: "/api/v1/sessions/{session_id}/messages"},
 	{Method: http.MethodGet, Path: "/api/v1/sessions/{session_id}/models"},
 	{Method: http.MethodGet, Path: "/api/v1/sessions/{session_id}/agent-commands"},
@@ -183,6 +184,10 @@ func parseRoute(method, path string) (string, parsedParams) {
 			case "handoff":
 				if method == http.MethodPost {
 					return "handoff_session", params
+				}
+			case "handoff-context":
+				if method == http.MethodGet {
+					return "get_handoff_context", params
 				}
 			case "messages":
 				if method == http.MethodGet {

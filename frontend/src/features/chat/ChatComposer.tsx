@@ -246,6 +246,7 @@ export function ChatComposer({
       if (height > 0 && height !== lastHeight) {
         lastHeight = height
         el.parentElement?.style.setProperty('--composer-height', `${height}px`)
+        window.dispatchEvent(new CustomEvent('astrorder:composer-height', { detail: { key: draftKey, height } }))
         onHeightChange?.(height)
       }
     }
@@ -261,7 +262,7 @@ export function ChatComposer({
     return () => {
       el.parentElement?.style.removeProperty('--composer-height')
     }
-  }, [onHeightChange])
+  }, [draftKey, onHeightChange])
 
   const canChat = hasCapability(agent, 'chat')
   const canAttach = hasCapability(agent, 'attachments')

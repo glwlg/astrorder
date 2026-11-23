@@ -171,6 +171,14 @@ func TestSessionTitleUsesConfiguredLLMAndProtectsConcurrentRename(t *testing.T) 
 				if r.URL.Path != "/v1/chat/completions" || body["model"] != "configured-title-model" || r.Header.Get("Authorization") != "Bearer fixture-key" {
 					t.Errorf("wrong configured LLM request")
 				}
+				if _, hasOpenRouterReasoning := body["reasoning"]; hasOpenRouterReasoning {
+					t.Errorf("must not send non-standard reasoning object to standard/Gemini gateway: %#v", body)
+				}
+				if body["reasoning_effort"] == "none" {
+					w.WriteHeader(http.StatusBadRequest)
+					_, _ = w.Write([]byte(`[{"error":{"code":400,"message":"Thinking cannot be disabled for this model (reasoning_effort).","status":"INVALID_ARGUMENT"}}]`))
+					return
+				}
 				close(started)
 				<-release
 				w.Header().Set("Content-Type", "application/json")

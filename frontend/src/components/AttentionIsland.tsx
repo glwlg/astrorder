@@ -251,7 +251,7 @@ export function AttentionIsland({ activeSessionKey }: AttentionIslandProps) {
           className="attention-island-trigger"
           onClick={() => setExpanded((v) => !v)}
           aria-expanded={expanded}
-          aria-label={hasAttention ? `展开待处理审批，共 ${attentionCount} 项` : `展开运行中星辰，共 ${activityCount} 项`}
+          aria-label={hasAttention ? `展开待处理审批，共 ${attentionCount} 项` : `展开运行中会话，共 ${activityCount} 项`}
         >
           <span className={`attention-island-dot is-${tone}`} aria-hidden="true" />
           {primaryAgent ? (
@@ -285,7 +285,7 @@ export function AttentionIsland({ activeSessionKey }: AttentionIslandProps) {
               <>
                 <strong className="attention-island-title">
                   {runningSessions.length > 1
-                    ? `${runningSessions.length} 颗星辰运行中`
+                    ? `${runningSessions.length} 个会话运行中`
                     : displaySessionTitle(primaryRunning)}
                 </strong>
                 {runningSessions.length === 1 && (

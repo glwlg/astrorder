@@ -6,8 +6,74 @@ import json
 import os
 import sys
 import threading
+import urllib.error
+import urllib.parse
 
 config = json.loads(sys.stdin.readline())
+
+
+def normalize_base_url(base_url):
+    trimmed = (base_url or "").strip().rstrip("/")
+    parsed = urllib.parse.urlparse(trimmed)
+    if parsed.hostname and parsed.hostname.lower() == "generativelanguage.googleapis.com":
+        path = parsed.path.rstrip("/")
+        if path == "":
+            parsed = parsed._replace(path="/v1beta/openai")
+            return urllib.parse.urlunparse(parsed).rstrip("/")
+        if path in {"/v1", "/v1beta"}:
+            parsed = parsed._replace(path=f"{path}/openai")
+            return urllib.parse.urlunparse(parsed).rstrip("/")
+    return trimmed
+
+
+def apply_reasoning_body(url, body, reasoning):
+    for name in ("reasoning", "reasoning_effort", "thinking"):
+        body.pop(name, None)
+    effort = (reasoning or "").strip()
+    if not effort:
+        return
+    host = (urllib.parse.urlparse(str(url)).hostname or "").lower()
+    if host == "api.deepseek.com":
+        body["thinking"] = {"type": "disabled" if effort == "none" else "enabled"}
+        if effort != "none":
+            body["reasoning_effort"] = effort
+    elif host == "openrouter.ai" or host.endswith(".openrouter.ai"):
+        if effort == "none":
+            body["reasoning"] = {"enabled": False}
+        else:
+            body["reasoning"] = {"effort": effort}
+    else:
+        body["reasoning_effort"] = effort
+
+
+def strip_reasoning_fields(body):
+    removed = False
+    for name in ("reasoning", "reasoning_effort", "thinking"):
+        if name in body:
+            body.pop(name, None)
+            removed = True
+    return removed
+
+
+def is_reasoning_rejection(status_code, text):
+    if status_code not in (400, 422):
+        return False
+    lower = (text or "").lower()
+    return any(
+        needle in lower
+        for needle in (
+            "reasoning_effort",
+            '"reasoning"',
+            "'reasoning'",
+            "thinking",
+            "unknown name",
+            "cannot find field",
+            "unrecognized request argument",
+            "unsupported parameter",
+            "extra_forbidden",
+            "extra inputs are not permitted",
+        )
+    )
 
 
 def watch_parent():
@@ -27,26 +93,64 @@ async def browser_use():
     from browser_use.llm import ChatOpenAI
 
     llm_config = config["llm"]
+    base_url = normalize_base_url(llm_config["base_url"])
 
-    async def apply_reasoning(request):
-        if request.method != "POST" or not request.url.path.endswith("/chat/completions"):
-            return
-        if request.url.host == "api.openai.com":
-            return
-        body = json.loads(request.content)
-        body.pop("reasoning_effort", None)
-        reasoning = llm_config["reasoning"]
-        if request.url.host == "api.deepseek.com":
-            body["thinking"] = {"type": "disabled" if reasoning == "none" else "enabled"}
-            if reasoning != "none":
-                body["reasoning_effort"] = reasoning
-        elif reasoning == "none":
-            body["reasoning"] = {"enabled": False}
-        else:
-            body["reasoning"] = {"effort": reasoning}
-        content = json.dumps(body, ensure_ascii=False).encode("utf-8")
-        request.headers["Content-Length"] = str(len(content))
-        request.stream = httpx.ByteStream(content)
+    class CompatTransport(httpx.AsyncHTTPTransport):
+        def __init__(self):
+            super().__init__()
+            self.drop_reasoning = False
+            self.use_max_completion_tokens = False
+
+        def _rewrite(self, request, body):
+            content = json.dumps(body, ensure_ascii=False).encode("utf-8")
+            headers = request.headers.copy()
+            headers["Content-Length"] = str(len(content))
+            return httpx.Request(
+                method=request.method,
+                url=request.url,
+                headers=headers,
+                content=content,
+                extensions=request.extensions,
+            )
+
+        async def handle_async_request(self, request):
+            if request.method != "POST" or not request.url.path.endswith("/chat/completions"):
+                return await super().handle_async_request(request)
+            try:
+                raw = await request.aread()
+                body = json.loads(raw)
+            except Exception:
+                return await super().handle_async_request(request)
+
+            if self.drop_reasoning:
+                strip_reasoning_fields(body)
+            else:
+                apply_reasoning_body(request.url, body, llm_config["reasoning"])
+            if self.use_max_completion_tokens and "max_tokens" in body:
+                body["max_completion_tokens"] = body.pop("max_tokens")
+
+            response = await super().handle_async_request(self._rewrite(request, body))
+            if response.status_code not in (400, 422):
+                return response
+
+            err_bytes = await response.aread()
+            err_text = err_bytes.decode("utf-8", errors="ignore")
+            changed = False
+            if is_reasoning_rejection(response.status_code, err_text) and strip_reasoning_fields(body):
+                self.drop_reasoning = True
+                changed = True
+            if (
+                "max_tokens" in body
+                and "max_tokens" in err_text.lower()
+                and "max_completion_tokens" in err_text.lower()
+            ):
+                body["max_completion_tokens"] = body.pop("max_tokens")
+                self.use_max_completion_tokens = True
+                changed = True
+            if not changed:
+                return response
+            await response.aclose()
+            return await super().handle_async_request(self._rewrite(request, body))
 
     task = config["goal"]
     secrets = {}
@@ -71,11 +175,11 @@ async def browser_use():
         if action_count(agent) >= config["max_steps"] and not agent.history.is_done():
             agent.stop()
 
-    async with httpx.AsyncClient(event_hooks={"request": [apply_reasoning]}, follow_redirects=True) as http:
+    async with httpx.AsyncClient(transport=CompatTransport(), follow_redirects=True) as http:
         llm = ChatOpenAI(
             model=llm_config["model"],
             api_key=llm_config["api_key"],
-            base_url=llm_config["base_url"],
+            base_url=base_url,
             http_client=http,
             reasoning_effort=None if llm_config["reasoning"] == "none" else llm_config["reasoning"],
             temperature=None,
@@ -151,22 +255,39 @@ def jev_ultrafast():
             return message.get("result", {})
 
     original_post = upstream_model.post_json
+    drop_reasoning = False
 
     def post(url, key, body):
+        nonlocal drop_reasoning
         if url == "https://api.typesafe.ai/v1/systemone":
             url = config["jev"]["url"]
             key = config["jev"]["api_key"]
             body["model"] = config["jev"]["model"]
         elif url.endswith("/chat/completions"):
-            for name in ("reasoning", "reasoning_effort", "thinking"):
-                body.pop(name, None)
-            reasoning = config["llm"]["reasoning"]
-            if "api.deepseek.com/" in url:
-                body["thinking"] = {"type": "disabled" if reasoning == "none" else "enabled"}
-            elif reasoning == "none":
-                body["reasoning"] = {"enabled": False}
+            if drop_reasoning:
+                strip_reasoning_fields(body)
             else:
-                body["reasoning"] = {"effort": reasoning}
+                apply_reasoning_body(url, body, config["llm"]["reasoning"])
+            try:
+                return original_post(url, key, body)
+            except Exception as exc:
+                status_code = getattr(exc, "code", None)
+                err_text = str(exc)
+                if isinstance(exc, urllib.error.HTTPError):
+                    try:
+                        err_text = exc.read().decode("utf-8", errors="ignore")
+                    except Exception:
+                        pass
+                elif status_code is None:
+                    resp = getattr(exc, "response", None)
+                    status_code = getattr(resp, "status_code", None)
+                    if resp is not None and getattr(resp, "text", None):
+                        err_text = resp.text
+                if (status_code in (400, 422) or "400" in err_text) and is_reasoning_rejection(status_code or 400, err_text):
+                    if strip_reasoning_fields(body):
+                        drop_reasoning = True
+                        return original_post(url, key, body)
+                raise
         return original_post(url, key, body)
 
     original_field_text = upstream_agent.field_text
@@ -194,7 +315,7 @@ def jev_ultrafast():
     os.environ["TYPESAFE_API_KEY"] = config["jev"]["api_key"]
     os.environ["TYPESAFE_MODEL"] = config["jev"]["model"]
     os.environ["TEXT_MODEL_API_KEY"] = config["llm"]["api_key"]
-    os.environ["TEXT_MODEL_BASE_URL"] = config["llm"]["base_url"]
+    os.environ["TEXT_MODEL_BASE_URL"] = normalize_base_url(config["llm"]["base_url"])
     os.environ["TEXT_MODEL"] = config["llm"]["model"]
     os.environ["TEXT_MODEL_REASONING"] = config["llm"]["reasoning"]
     agent = None

@@ -755,3 +755,321 @@ func TestAntigravityReattachPermissionAndWorkerModelRestore(t *testing.T) {
 		t.Fatal("expected Send to be dispatched without SetModel failure")
 	}
 }
+
+func TestHandoffCodexReadsOnlyNewestPageAndFallsBackToUnboundOnTimeout(t *testing.T) {
+	var (
+		sends            []*pb.SendRequest
+		historyPageCalls int
+		unboundQueries   int
+	)
+	srv := &mockDaemonServer{}
+	srv.statusCb = func() (*pb.GetStatusResponse, error) {
+		owned, runtime := true, pb.RuntimeKind_RUNTIME_KIND_CODEX_SSH
+		return &pb.GetStatusResponse{DaemonId: "test-daemon", Sessions: []*pb.SessionSnapshot{
+			{Session: buildSessionRef("codex-agent", "native-codex", "ssh-wsl"), Status: pb.SessionStatus_SESSION_STATUS_IDLE, RuntimeOwned: &owned, Runtime: &runtime},
+		}}, nil
+	}
+	srv.readModelCb = func(req *pb.ReadModelRequest) (*pb.ModelState, error) {
+		if req.GetSession().GetAgentId() == "agy-agent" {
+			return &pb.ModelState{Provider: optString("antigravity"), Model: optString("gemini-4-carbon-medium")}, nil
+		}
+		return &pb.ModelState{Provider: optString("magpie"), Model: optString("group/pro"), Effort: optString("xhigh")}, nil
+	}
+	srv.createCb = func(r *pb.CreateSessionRequest) (*pb.CommandReceipt, error) {
+		if r.GetCodex() != nil {
+			return &pb.CommandReceipt{
+				Session:        buildSessionRef("codex-agent", "codex-summary", "ssh-wsl"),
+				OperationState: pb.OperationState_OPERATION_STATE_COMPLETED,
+				Status:         pb.SessionStatus_SESSION_STATUS_IDLE,
+				Outcome:        &pb.CommandReceipt_Completed{Completed: &pb.CommandResult{}},
+			}, nil
+		}
+		return &pb.CommandReceipt{
+			Session:        buildSessionRef("agy-agent", "agy-target", "ssh-wsl"),
+			OperationState: pb.OperationState_OPERATION_STATE_COMPLETED,
+			Status:         pb.SessionStatus_SESSION_STATUS_IDLE,
+			Outcome:        &pb.CommandReceipt_Completed{Completed: &pb.CommandResult{}},
+		}, nil
+	}
+	srv.getHistoryPageCb = func(r *pb.HistoryPageRequest) (*pb.HistoryPageResponse, error) {
+		historyPageCalls++
+		if r.Before != nil && r.Before.GetValue() != "" {
+			t.Fatalf("handoff should not walk older pages for codex baseline/summary; got cursor=%q", r.Before.GetValue())
+		}
+		if len(sends) == 0 {
+			// Baseline page has a NextCursor indicating 29 older pages exist; handoff must NOT chase them.
+			return &pb.HistoryPageResponse{
+				Session:    r.Session,
+				Items:      []*pb.NativeJson{{Schema: "codex.item.v1", Utf8Json: []byte(`{"turnId":"turn-old","item":{"id":"msg-old","type":"agentMessage","text":"prior turn"}}`)}},
+				NextCursor: &pb.NullableString{State: &pb.NullableString_Value{Value: "codex:page-2"}},
+			}, nil
+		}
+		// Simulate the exact failure where the bound Codex runtime's readLoop is backlogged
+		// behind delta commits and ReadSession times out after 30s.
+		return nil, status.Error(codes.DeadlineExceeded, "context deadline exceeded")
+	}
+	srv.queryCb = func(r *pb.NativeQueryRequest) (*pb.NativeQueryResponse, error) {
+		unboundQueries++
+		q := r.GetCodexThreadItemsList()
+		if q == nil || q.ThreadId != "codex-summary" {
+			t.Fatalf("unexpected unbound query: %+v", r)
+		}
+		// Codex thread/items/list sortDirection=desc returns newest first.
+		native, err := encodeNativeJSON("codex.thread_items_list.v1", map[string]any{
+			"data": []any{
+				map[string]any{"turnId": "turn-1", "item": map[string]any{"id": "msg-summary", "type": "agentMessage", "text": "# Handoff Summary\nRecovered via unbound read."}},
+				map[string]any{"turnId": "turn-1", "item": map[string]any{"id": "usr-prompt", "type": "userMessage", "content": []any{map[string]any{"type": "text", "text": "summarize"}}}},
+				map[string]any{"turnId": "turn-old", "item": map[string]any{"id": "msg-old", "type": "agentMessage", "text": "prior turn"}},
+			},
+			"nextCursor": "older-page-token",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return &pb.NativeQueryResponse{Result: native}, nil
+	}
+	srv.sendCb = func(r *pb.SendRequest) (*pb.CommandReceipt, error) {
+		sends = append(sends, r)
+		return &pb.CommandReceipt{
+			Session:        r.Session,
+			Accepted:       true,
+			TurnId:         optString("turn-1"),
+			OperationState: pb.OperationState_OPERATION_STATE_COMPLETED,
+			Status:         pb.SessionStatus_SESSION_STATUS_RUNNING,
+			Outcome:        &pb.CommandReceipt_Completed{Completed: &pb.CommandResult{}},
+		}, nil
+	}
+	srv.eventsCb = func(r *pb.SubscribeRequest, stream grpc.ServerStreamingServer[pb.EventStreamFrame]) error {
+		native, _ := encodeNativeJSON("astrorder.event.payload.v1", map[string]any{
+			"agent_id": "codex-agent",
+			"frame": map[string]any{
+				"method": "turn/completed",
+				"params": map[string]any{"turn": map[string]any{"id": "turn-1", "status": "completed"}},
+			},
+		})
+		return stream.Send(&pb.EventStreamFrame{Frame: &pb.EventStreamFrame_Live{Live: &pb.EventEnvelope{
+			DaemonId:      "test-daemon",
+			Session:       &pb.SessionRef{SessionId: "codex-summary"},
+			SeqId:         1,
+			EventType:     "codex.notification",
+			NativePayload: native,
+		}}})
+	}
+	srv.closeCb = func(r *pb.CloseSessionRequest) (*pb.CommandReceipt, error) {
+		return &pb.CommandReceipt{
+			OperationState: pb.OperationState_OPERATION_STATE_COMPLETED,
+			Outcome:        &pb.CommandReceipt_Completed{Completed: &pb.CommandResult{}},
+		}, nil
+	}
+	// Also test resolveHandoffContext when rebinding fails (e.g. active writer lock still held).
+	srv.attachCb = func(r *pb.AttachSessionRequest) (*pb.SessionReceipt, error) {
+		if r.GetSession().GetSessionId() == "codex-summary" {
+			return nil, status.Error(codes.Unavailable, "thread codex-summary already has an active writer")
+		}
+		return &pb.SessionReceipt{Attached: true, Session: r.Session, Status: pb.SessionStatus_SESSION_STATUS_IDLE}, nil
+	}
+
+	h, st, _, cleanup := setupTestServer(t, srv)
+	defer cleanup()
+	ctx := context.Background()
+	if _, err := st.SaveSSHConnection(ctx, map[string]any{"id": "ssh-wsl", "host": "127.0.0.1", "workspace": "/work", "state": "ready"}); err != nil {
+		t.Fatal(err)
+	}
+	st.UpsertAgent(ctx, map[string]any{"id": "codex-agent", "kind": "codex", "name": "Codex", "status": "ready", "connection_id": "ssh-wsl"})
+	st.UpsertAgent(ctx, map[string]any{"id": "agy-agent", "kind": "antigravity-ssh", "name": "Antigravity", "status": "ready", "connection_id": "ssh-wsl"})
+	st.UpsertSession(ctx, map[string]any{"id": "codex-parent", "source_session_id": "native-codex", "agent_id": "codex-agent", "title": "work", "workspace": "/work", "connection_id": "ssh-wsl", "status": "idle", "updated_at": "2026-11-22T00:00:00Z"})
+
+	w := handoffPost(h, "/api/v1/sessions/codex-parent/handoff", `{"operation_id":"codex-timeout-fallback","source_agent_id":"codex-agent","target_agent_id":"agy-agent","provider":"antigravity","model":"gemini-4-carbon-medium","effort":""}`)
+	if w.Code != 200 {
+		t.Fatalf("expected Codex -> Antigravity handoff to recover via unbound read, got %d: %s", w.Code, w.Body.String())
+	}
+	if historyPageCalls != 2 {
+		t.Fatalf("expected exactly 2 bound GetHistoryPage calls (1 baseline + 1 timed-out summary read), got %d", historyPageCalls)
+	}
+	if unboundQueries != 1 {
+		t.Fatalf("expected 1 unbound fallback query during handoff, got %d", unboundQueries)
+	}
+
+	// First send to target Antigravity should resolve the summary even when summary bind fails.
+	sendW := handoffPost(h, "/api/v1/commands", `{"id":"send-agy-after-fallback","agent_id":"agy-agent","session_id":"agy-target","action":"send","text":"continue work"}`)
+	if sendW.Code != 200 {
+		t.Fatalf("first send failed: %d %s", sendW.Code, sendW.Body.String())
+	}
+	if len(sends) != 2 || !strings.Contains(sends[1].Input[0].GetText().Text, "Recovered via unbound read.") {
+		t.Fatalf("expected recovered handoff summary in first send, got %+v", sends)
+	}
+	if unboundQueries != 2 {
+		t.Fatalf("expected unbound read on first send after bind failure, got %d", unboundQueries)
+	}
+}
+
+func handoffGet(h *Handler, path string) *httptest.ResponseRecorder {
+	r := httptest.NewRequest(http.MethodGet, path, nil)
+	r.Header.Set("Authorization", "Bearer browser-sec")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	return w
+}
+
+func TestGetSessionHandoffContext(t *testing.T) {
+	var (
+		unboundQueries int
+		attachCalls    int
+		closeCalls     int
+	)
+	srv := &mockDaemonServer{}
+	srv.queryCb = func(r *pb.NativeQueryRequest) (*pb.NativeQueryResponse, error) {
+		unboundQueries++
+		q := r.GetCodexThreadItemsList()
+		if q == nil || q.ThreadId != "codex-summary" {
+			t.Fatalf("unexpected unbound query: %+v", r)
+		}
+		native, err := encodeNativeJSON("codex.thread_items_list.v1", map[string]any{
+			"data": []any{
+				map[string]any{"turnId": "turn-1", "item": map[string]any{"id": "msg-summary", "type": "agentMessage", "text": "## 当前进展\n已完成核心链路验证。\n\n- 下一步：发布新版"}},
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return &pb.NativeQueryResponse{Result: native}, nil
+	}
+	srv.attachCb = func(r *pb.AttachSessionRequest) (*pb.SessionReceipt, error) {
+		attachCalls++
+		return &pb.SessionReceipt{Attached: true, Session: r.Session, Status: pb.SessionStatus_SESSION_STATUS_IDLE}, nil
+	}
+	srv.closeCb = func(r *pb.CloseSessionRequest) (*pb.CommandReceipt, error) {
+		closeCalls++
+		return &pb.CommandReceipt{
+			OperationState: pb.OperationState_OPERATION_STATE_COMPLETED,
+			Outcome:        &pb.CommandReceipt_Completed{Completed: &pb.CommandResult{}},
+		}, nil
+	}
+	srv.sendCb = func(r *pb.SendRequest) (*pb.CommandReceipt, error) {
+		return &pb.CommandReceipt{
+			Session:        r.Session,
+			Accepted:       true,
+			OperationState: pb.OperationState_OPERATION_STATE_COMPLETED,
+			Status:         pb.SessionStatus_SESSION_STATUS_RUNNING,
+			Outcome:        &pb.CommandReceipt_Completed{Completed: &pb.CommandResult{}},
+		}, nil
+	}
+	srv.getHistoryPageCb = func(r *pb.HistoryPageRequest) (*pb.HistoryPageResponse, error) {
+		return &pb.HistoryPageResponse{
+			Session: r.Session,
+			Items: []*pb.NativeJson{
+				{Schema: "codex.item.v1", Utf8Json: []byte(`{"turnId":"turn-1","item":{"id":"msg-summary","type":"agentMessage","text":"## 当前进展\n已完成核心链路验证。\n\n- 下一步：发布新版"}}`)},
+			},
+		}, nil
+	}
+
+	h, st, _, cleanup := setupTestServer(t, srv)
+	defer cleanup()
+	ctx := context.Background()
+	st.UpsertAgent(ctx, map[string]any{"id": "codex-agent", "kind": "codex", "name": "Codex", "status": "ready"})
+	st.UpsertAgent(ctx, map[string]any{"id": "agy-agent", "kind": "antigravity", "name": "Antigravity", "status": "ready"})
+	st.UpsertSession(ctx, map[string]any{"id": "src-codex", "agent_id": "codex-agent", "title": "监控Agent", "workspace": "/work", "status": "idle", "updated_at": "2026-11-23T00:00:00Z"})
+
+	refBytes, _ := json.Marshal(handoffReference{AgentID: "codex-agent", SessionID: "codex-summary", MessageID: "msg-summary"})
+	st.UpsertSession(ctx, map[string]any{
+		"id":                      "agy-target",
+		"agent_id":                "agy-agent",
+		"title":                   "监控Agent",
+		"workspace":               "/work",
+		"status":                  "idle",
+		"updated_at":              "2026-11-23T00:01:00Z",
+		"handoff_from_agent_id":   "codex-agent",
+		"handoff_from_session_id": "src-codex",
+		"handoff_context":         handoffRefPrefix + string(refBytes),
+	})
+
+	// 1. Native Codex summary preview prefers read-only unbound query without attaching/closing.
+	w := handoffGet(h, "/api/v1/sessions/agy-target/handoff-context?agent_id=agy-agent")
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 for native handoff preview, got %d: %s", w.Code, w.Body.String())
+	}
+	var nativeResp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &nativeResp); err != nil {
+		t.Fatal(err)
+	}
+	if nativeResp["available"] != true || nativeResp["mode"] != "native_summary" || nativeResp["consumed"] != false {
+		t.Fatalf("unexpected native preview metadata: %+v", nativeResp)
+	}
+	if nativeResp["source_agent_kind"] != "codex" || nativeResp["source_session_title"] != "监控Agent" {
+		t.Fatalf("unexpected source metadata: %+v", nativeResp)
+	}
+	if got := stringValue(nativeResp, "summary"); got != "## 当前进展\n已完成核心链路验证。\n\n- 下一步：发布新版" {
+		t.Fatalf("unexpected summary body: %q", got)
+	}
+	if unboundQueries != 1 || attachCalls != 0 || closeCalls != 0 {
+		t.Fatalf("expected pure unbound read (queries=1 attach=0 close=0), got queries=%d attach=%d close=%d", unboundQueries, attachCalls, closeCalls)
+	}
+
+	// After claiming context on first send, preview remains readable and reports consumed=true.
+	if _, err := st.ClaimSessionHandoffContext(ctx, "agy-agent", "agy-target"); err != nil {
+		t.Fatal(err)
+	}
+	wAfter := handoffGet(h, "/api/v1/sessions/agy-target/handoff-context?agent_id=agy-agent")
+	if wAfter.Code != http.StatusOK {
+		t.Fatalf("expected 200 after consume, got %d: %s", wAfter.Code, wAfter.Body.String())
+	}
+	var afterResp map[string]any
+	if err := json.Unmarshal(wAfter.Body.Bytes(), &afterResp); err != nil {
+		t.Fatal(err)
+	}
+	if afterResp["available"] != true || afterResp["consumed"] != true || !strings.Contains(stringValue(afterResp, "summary"), "已完成核心链路验证") {
+		t.Fatalf("unexpected post-consume response: %+v", afterResp)
+	}
+
+	// 2. Deterministic Antigravity excerpt strips wrapper boilerplate cleanly.
+	excerpt := buildDeterministicHandoffContext("antigravity", "src-agy", "/work", []map[string]any{
+		{"role": "user", "kind": "message", "text": "修复采集端下拉框"},
+		{"role": "assistant", "kind": "message", "text": "已修复并验证通过。"},
+	})
+	st.UpsertSession(ctx, map[string]any{
+		"id":                      "codex-target",
+		"agent_id":                "codex-agent",
+		"title":                   "反向转交",
+		"workspace":               "/work",
+		"status":                  "idle",
+		"updated_at":              "2026-11-23T00:02:00Z",
+		"handoff_from_agent_id":   "agy-agent",
+		"handoff_from_session_id": "src-agy",
+		"handoff_context":         excerpt,
+	})
+	wExcerpt := handoffGet(h, "/api/v1/sessions/codex-target/handoff-context?agent_id=codex-agent")
+	if wExcerpt.Code != http.StatusOK {
+		t.Fatalf("expected 200 for excerpt handoff, got %d: %s", wExcerpt.Code, wExcerpt.Body.String())
+	}
+	var excerptResp map[string]any
+	if err := json.Unmarshal(wExcerpt.Body.Bytes(), &excerptResp); err != nil {
+		t.Fatal(err)
+	}
+	if excerptResp["available"] != true || excerptResp["mode"] != "transcript_excerpt" || excerptResp["source_agent_kind"] != "antigravity" {
+		t.Fatalf("unexpected excerpt metadata: %+v", excerptResp)
+	}
+	if summary := stringValue(excerptResp, "summary"); strings.Contains(summary, "<源会话历史记录摘录>") || !strings.Contains(summary, "修复采集端下拉框") {
+		t.Fatalf("unexpected extracted excerpt summary: %q", summary)
+	}
+
+	// 3. Session without handoff_context returns available=false.
+	wNone := handoffGet(h, "/api/v1/sessions/src-codex/handoff-context?agent_id=codex-agent")
+	if wNone.Code != http.StatusOK {
+		t.Fatalf("expected 200 for non-handoff session, got %d: %s", wNone.Code, wNone.Body.String())
+	}
+	var noneResp map[string]any
+	if err := json.Unmarshal(wNone.Body.Bytes(), &noneResp); err != nil {
+		t.Fatal(err)
+	}
+	if noneResp["available"] != false {
+		t.Fatalf("expected available=false, got %+v", noneResp)
+	}
+
+	// 4. Validation errors.
+	if wBad := handoffGet(h, "/api/v1/sessions/agy-target/handoff-context"); wBad.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422 without agent_id, got %d", wBad.Code)
+	}
+	if wMissing := handoffGet(h, "/api/v1/sessions/no-such-session/handoff-context?agent_id=agy-agent"); wMissing.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for unknown session, got %d", wMissing.Code)
+	}
+}
