@@ -13,6 +13,7 @@ import './workspaceVisuals.css'
 import './brightWorkbench.css'
 import { theme } from './theme'
 import { LiquidSurfaces } from './components/LiquidSurfaces'
+import { startClientPerf } from './perf/clientPerf'
 import { registerSW } from 'virtual:pwa-register'
 
 installGlobalNativeHoldBlocker()
@@ -87,6 +88,19 @@ const queryClient = new QueryClient({
     queries: {
       gcTime: 1000 * 60 * 60 * 24,
     },
+  },
+})
+
+startClientPerf({
+  getQueryStats: () => {
+    const all = queryClient.getQueryCache().getAll()
+    let active = 0
+    let fetching = 0
+    for (const q of all) {
+      if (q.getObserversCount() > 0) active++
+      if (q.state.fetchStatus === 'fetching') fetching++
+    }
+    return { total: all.length, active, fetching }
   },
 })
 
