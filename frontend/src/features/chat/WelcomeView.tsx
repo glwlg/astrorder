@@ -147,20 +147,30 @@ export function WelcomeView({ sessions, agents, onNewSession }: WelcomeViewProps
     [approvalsMap],
   )
 
+  const notificationsMap = useAstrorderStore((state) => state.notifications)
+
   const attentionSessions = useMemo(() => {
     const approvalKeys = new Set(pendingApprovals.map((a) => scopeKey(a.agent_id || '', a.session_id || '')))
+    const latestNotice = new Map<string, (typeof notificationsMap)[string]>()
+    for (const notice of Object.values(notificationsMap)) {
+      if (notice.group_id || !notice.agent_id || !notice.session_id) continue
+      const key = scopeKey(notice.agent_id, notice.session_id)
+      const prev = latestNotice.get(key)
+      if (!prev || (notice.cursor || 0) > (prev.cursor || 0)) latestNotice.set(key, notice)
+    }
     const recentErrorCutoff = Date.now() - 2 * 60 * 60 * 1000
     return sessions.filter((session) => {
       const key = scopeKey(session.agent_id, session.id)
       if (approvalKeys.has(key)) return false
       if (session.status === 'waiting_approval') return true
-      if (session.status === 'error' && session.updated_at) {
-        const ts = Date.parse(session.updated_at)
+      const notice = latestNotice.get(key)
+      if (notice?.kind === 'task_failed') {
+        const ts = Date.parse(notice.created_at || session.updated_at || '')
         return Number.isFinite(ts) && ts >= recentErrorCutoff
       }
       return false
     })
-  }, [pendingApprovals, sessions])
+  }, [notificationsMap, pendingApprovals, sessions])
 
   const runningCount = useMemo(
     () => sessions.filter((s) => sessionActivityStatus(s) === 'running').length,

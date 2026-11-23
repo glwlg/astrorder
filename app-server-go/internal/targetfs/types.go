@@ -138,7 +138,11 @@ const (
 	// a canonical JSON WorkspaceSnapshot in GitResult.Stdout. Local targets run
 	// it directly; remote targets run the identical operation inside the target
 	// helper, so a remote workspace path is never resolved on the App Server.
-	GitSnapshotReadonly GitOperation = "snapshot"
+	GitSnapshotReadonly  GitOperation = "snapshot"
+	GitCheckpointCapture GitOperation = "checkpoint_capture"
+	GitCheckpointDiff    GitOperation = "checkpoint_diff"
+	GitCheckpointRestore GitOperation = "checkpoint_restore"
+	GitCheckpointDelete  GitOperation = "checkpoint_delete"
 )
 
 type GitRequest struct {

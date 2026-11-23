@@ -1,4 +1,4 @@
-import { ChartLineUpIcon, ChatCircleDotsIcon, CpuIcon, DesktopIcon, GearSixIcon, GlobeHemisphereWestIcon, HardDrivesIcon, IdentificationCardIcon, KeyboardIcon, LightningIcon, PuzzlePieceIcon, SlidersHorizontalIcon, SquaresFourIcon, UsersThreeIcon } from './workbenchIcons'
+import { ChartLineUpIcon, ChatCircleDotsIcon, CpuIcon, DesktopIcon, GearSixIcon, GlobeHemisphereWestIcon, HardDrivesIcon, IdentificationCardIcon, KeyboardIcon, LightningIcon, PuzzlePieceIcon, SlidersHorizontalIcon, SquaresFourIcon, TrayIcon, UsersThreeIcon } from './workbenchIcons'
 import { IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconPin } from '@tabler/icons-react'
 import { ActionIcon, Center, HoverCard, Loader, Modal, NavLink, Stack, Tabs, Text, Tooltip } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
@@ -23,6 +23,7 @@ import { connectionName } from './AgentSessionFilter'
 import { scopeKey } from '../domain/semantics'
 import { SessionAccountsHoverCard } from '../features/agentAccounts/SessionAccountsHoverCard'
 import { agySessionEnvironment } from '../features/agentAccounts/AgyQuotaRefreshProvider'
+import { useActionInbox } from '../features/inbox/useActionInbox'
 
 const AgentsPage = lazy(() => import('../features/agents/AgentsPage').then((m) => ({ default: m.AgentsPage })))
 const ModelGatewaySettingsPage = lazy(() => import('../features/services/ModelGatewaySettingsPage').then((m) => ({ default: m.ModelGatewaySettingsPage })))
@@ -35,6 +36,7 @@ const PluginsPage = lazy(() => import('../features/plugins/PluginsPage').then((m
 
 const navItems = [
   { to: '/chat', label: '会话', icon: ChatCircleDotsIcon, id: 'chat' },
+  { to: '/inbox', label: '待办', icon: TrayIcon, id: 'inbox' },
   { to: '/monitor', label: '矩阵', icon: SquaresFourIcon, id: 'monitor' },
   { to: '/groups', label: '群聊', icon: UsersThreeIcon, id: 'groups' },
   { to: '/analytics', label: '统计', icon: ChartLineUpIcon, id: 'analytics' },
@@ -166,12 +168,14 @@ export function Sidebar({
     retry: false,
   })
 
+  const isInbox = location.pathname.startsWith('/inbox')
   const isGroups = location.pathname.startsWith('/groups') || location.pathname.startsWith('/chat/group-')
   const isMonitorRoute = location.pathname.startsWith('/monitor')
   const isAnalytics = location.pathname.startsWith('/analytics')
   const isBackups = location.pathname.startsWith('/backups')
   const isAgentAccounts = location.pathname.startsWith('/agent-accounts')
-  const isChat = !isGroups && !isMonitorRoute && !isAnalytics && !isBackups && !isAgentAccounts
+  const isChat = !isInbox && !isGroups && !isMonitorRoute && !isAnalytics && !isBackups && !isAgentAccounts
+  const { totalCount: inboxTotalCount, urgentCount: inboxUrgentCount } = useActionInbox(activeSessionKey)
   const isInChatSession = isChat && (
     (location.pathname.startsWith('/chat/') && !location.pathname.startsWith('/chat/group-')) ||
     Boolean(activeSessionKey)
@@ -199,6 +203,7 @@ export function Sidebar({
             {navItems.map(({ to, label, icon: Icon, id }) => {
               const isThisMonitor = id === 'monitor'
               const isActive =
+                (id === 'inbox' && isInbox) ||
                 (id === 'groups' && isGroups) ||
                 (id === 'monitor' && isMonitorRoute) ||
                 (id === 'analytics' && isAnalytics) ||
@@ -253,7 +258,14 @@ export function Sidebar({
                     } : undefined}
                 />
               )
-              return id === 'groups' && groupsBusy && !isGroups ? (
+              return id === 'inbox' && inboxTotalCount > 0 ? (
+                <div key={to} className="sidebar-inbox-nav-wrap">
+                  <Tooltip label={`待办收件箱（${inboxTotalCount} 项待处理）`} position="bottom" withArrow openDelay={200}>{link}</Tooltip>
+                  <span className={`sidebar-inbox-badge${inboxUrgentCount > 0 ? ' is-urgent' : ''}`} aria-hidden="true">
+                    {inboxTotalCount > 99 ? '99+' : inboxTotalCount}
+                  </span>
+                </div>
+              ) : id === 'groups' && groupsBusy && !isGroups ? (
                 <div key={to} className="group-task-nav-tab">
                   <Tooltip label="群聊有任务进行中" position="bottom" withArrow openDelay={200}>{link}</Tooltip>
                   <GroupTaskIndicator />

@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ActionIcon, Menu, Text, Tooltip } from '@mantine/core'
 import { LayoutGroup, motion } from 'motion/react'
 import {
@@ -26,6 +26,14 @@ export function SidecarTabs({
   const [menuOpened, setMenuOpened] = useState(false)
   const [menuPosition, setMenuPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
   const tabsBarRef = useRef<HTMLDivElement>(null)
+  const activeTabRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const el = activeTabRef.current
+    if (el && typeof el.scrollIntoView === 'function') {
+      el.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' })
+    }
+  }, [activeId, tabs.length])
 
   const closeOtherTabs = useSidecarStore((state) => state.closeOtherTabs)
   const closeTabsToRight = useSidecarStore((state) => state.closeTabsToRight)
@@ -64,6 +72,7 @@ export function SidecarTabs({
         return (
           <div
             key={tab.id}
+            ref={isActive ? activeTabRef : undefined}
             className="sidecar-tab"
             onClick={() => onSelect(tab.id)}
             onContextMenu={(e) => {

@@ -1016,6 +1016,49 @@ export const api = {
     request<BackupRestorePlan>(`/backups/versions/${encodeURIComponent(versionId)}/restore`),
   restoreBackupVersion: (versionId: string, confirmation: string) =>
     jsonRequest<BackupRestoreResult>(`/backups/versions/${encodeURIComponent(versionId)}/restore`, { confirmation }),
+
+  // 按轮次代码检查点（Turn Checkpoints）
+  listCheckpoints: (sessionId: string, agentId?: string) =>
+    request<{ items: SessionCheckpoint[] }>(
+      `${sessionPath(sessionId)}/checkpoints${agentId ? `?agent_id=${encodeURIComponent(agentId)}` : ''}`,
+    ),
+  createCheckpoint: (
+    sessionId: string,
+    payload: { agent_id: string; label?: string; kind?: string; command_id?: string },
+  ) =>
+    jsonRequest<{ checkpoint: SessionCheckpoint; created: boolean }>(
+      `${sessionPath(sessionId)}/checkpoints`,
+      payload,
+    ),
+  diffCheckpoints: (
+    sessionId: string,
+    params: { agent_id?: string; from: string; to?: string; path?: string },
+  ) => {
+    const query = new URLSearchParams({ from: params.from })
+    if (params.agent_id) query.set('agent_id', params.agent_id)
+    if (params.to) query.set('to', params.to)
+    if (params.path) query.set('path', params.path)
+    return request<CheckpointDiffResponse>(`${sessionPath(sessionId)}/checkpoints/diff?${query.toString()}`)
+  },
+  restoreCheckpoint: (sessionId: string, checkpointId: string, agentId?: string, path?: string) =>
+    jsonRequest<CheckpointRestoreResponse>(
+      `${sessionPath(sessionId)}/checkpoints/${encodeURIComponent(checkpointId)}/restore`,
+      {
+        ...(agentId ? { agent_id: agentId } : {}),
+        ...(path ? { path } : {}),
+      },
+    ),
+  deleteCheckpoint: (sessionId: string, checkpointId: string, agentId?: string) =>
+    request<{ ok: boolean }>(
+      `${sessionPath(sessionId)}/checkpoints/${encodeURIComponent(checkpointId)}${agentId ? `?agent_id=${encodeURIComponent(agentId)}` : ''}`,
+      { method: 'DELETE' },
+    ),
+
+  // 跨会话历史消息全文检索
+  searchMessages: (query: string, limit = 20) => {
+    const params = new URLSearchParams({ q: query, limit: String(limit) })
+    return request<{ query: string; items: MessageSearchHit[] }>(`/sessions/search?${params.toString()}`)
+  },
 }
 
 export interface BackupRestorePlan {
@@ -1126,6 +1169,69 @@ export interface BackupBrowseResponse {
   parent: string | null
   drives: string[]
   items: BackupBrowseEntry[]
+}
+
+export interface SessionCheckpointFile {
+  path: string
+  status: string
+  insertions: number
+  deletions: number
+}
+
+export interface SessionCheckpoint {
+  id: string
+  agent_id: string
+  session_id: string
+  turn_number: number
+  kind: 'auto_before' | 'auto_after' | 'manual' | 'pre_restore' | string
+  command_id?: string
+  label: string
+  workspace: string
+  repo_root: string
+  branch: string
+  head_sha: string
+  tree_sha: string
+  commit_sha: string
+  ref_name: string
+  prev_tree_sha?: string
+  files_changed: number
+  insertions: number
+  deletions: number
+  files: SessionCheckpointFile[]
+  created_at: string
+}
+
+export interface CheckpointDiffResponse {
+  from_tree: string
+  to_tree: string
+  files_changed: number
+  insertions: number
+  deletions: number
+  files: SessionCheckpointFile[]
+  diff: string
+  truncated?: boolean
+}
+
+export interface CheckpointRestoreResponse {
+  ok: boolean
+  restored: SessionCheckpoint
+  restored_path?: string
+  removed_files: number
+  backup: SessionCheckpoint | null
+}
+
+export interface MessageSearchHit {
+  id: string
+  agent_id: string
+  session_id: string
+  role: string
+  snippet: string
+  created_at: string
+  session_title: string
+  project_name?: string
+  workspace?: string
+  agent_kind?: string
+  agent_name?: string
 }
 
 export type ApiClient = typeof api

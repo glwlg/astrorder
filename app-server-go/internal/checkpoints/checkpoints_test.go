@@ -1,0 +1,349 @@
+package checkpoints
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"astrorder.dev/app-server/internal/auth"
+	"astrorder.dev/app-server/internal/store"
+	"astrorder.dev/app-server/internal/targetfs"
+)
+
+type allowAllBrowser struct{}
+
+func (allowAllBrowser) AuthorizeBrowser(*http.Request) *auth.Error { return nil }
+
+type memSessionStore struct {
+	*store.Store
+	session map[string]any
+}
+
+func (m memSessionStore) FindSessionByID(context.Context, string) (map[string]any, error) {
+	return m.session, nil
+}
+func (m memSessionStore) GetSSHConnection(context.Context, string) (map[string]any, error) {
+	return nil, nil
+}
+
+func initGitWorkspace(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@local",
+			"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@local",
+		)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run("init")
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n// v1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	run("add", "main.go")
+	run("commit", "-m", "init")
+	return dir
+}
+
+func TestCheckpointsHTTPCreateDiffRestoreDelete(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.sqlite3")
+	st, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	repo := initGitWorkspace(t)
+	sessionRecord := map[string]any{
+		"id":            "sess-1",
+		"agent_id":      "agent-1",
+		"title":         "测试会话",
+		"workspace":     repo,
+		"connection_id": "local",
+	}
+	adapter := memSessionStore{Store: st, session: sessionRecord}
+	resolver := targetfs.NewResolver(targetfs.ResolverOptions{
+		Store:            adapter,
+		DefaultWorkspace: repo,
+		AllowedRoots:     []string{repo},
+	})
+	svc := NewService(Options{
+		Store:      adapter,
+		Authorizer: allowAllBrowser{},
+		Resolver:   resolver,
+	})
+	defer svc.Close()
+
+	// Create checkpoint #1 (v1)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions/sess-1/checkpoints", strings.NewReader(`{"agent_id":"agent-1","label":"第1轮完成"}`))
+	svc.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("create #1 failed: %d %s", rec.Code, rec.Body.String())
+	}
+	var create1 struct {
+		Checkpoint store.SessionCheckpoint `json:"checkpoint"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &create1); err != nil {
+		t.Fatal(err)
+	}
+
+	// Modify file and create checkpoint #2 (v2)
+	if err := os.WriteFile(filepath.Join(repo, "main.go"), []byte("package main\n// v2\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/sessions/sess-1/checkpoints", strings.NewReader(`{"agent_id":"agent-1","label":"第2轮完成"}`))
+	svc.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("create #2 failed: %d %s", rec.Code, rec.Body.String())
+	}
+	var create2 struct {
+		Checkpoint store.SessionCheckpoint `json:"checkpoint"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &create2); err != nil {
+		t.Fatal(err)
+	}
+	if create2.Checkpoint.FilesChanged != 1 || create2.Checkpoint.TurnNumber != 2 {
+		t.Fatalf("unexpected cp2: %+v", create2.Checkpoint)
+	}
+
+	// Diff checkpoint #1 -> #2
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/sessions/sess-1/checkpoints/diff?agent_id=agent-1&from="+create1.Checkpoint.TreeSHA+"&to="+create2.Checkpoint.TreeSHA, nil)
+	svc.ServeHTTP(rec, req)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "// v2") {
+		t.Fatalf("diff failed: %d %s", rec.Code, rec.Body.String())
+	}
+
+	// Restore back to checkpoint #1 -> auto-creates pre_restore backup #3
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/sessions/sess-1/checkpoints/"+create1.Checkpoint.ID+"/restore", strings.NewReader(`{"agent_id":"agent-1"}`))
+	svc.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("restore failed: %d %s", rec.Code, rec.Body.String())
+	}
+	got, _ := os.ReadFile(filepath.Join(repo, "main.go"))
+	if !strings.Contains(string(got), "// v1") {
+		t.Fatalf("file not restored to v1: %q", string(got))
+	}
+
+	// List checkpoints -> should now contain 3 items (newest first: pre_restore, turn 2, turn 1)
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/sessions/sess-1/checkpoints?agent_id=agent-1", nil)
+	svc.ServeHTTP(rec, req)
+	var listResp struct {
+		Items []store.SessionCheckpoint `json:"items"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &listResp); err != nil || len(listResp.Items) != 3 || listResp.Items[0].Kind != "pre_restore" {
+		t.Fatalf("unexpected list: %d %s", rec.Code, rec.Body.String())
+	}
+
+	// Delete checkpoint #2
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodDelete, "/api/v1/sessions/sess-1/checkpoints/"+create2.Checkpoint.ID+"?agent_id=agent-1", nil)
+	svc.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("delete failed: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+type fakeSubscriber struct {
+	ch chan *store.Event
+}
+
+func (f *fakeSubscriber) Subscribe() (<-chan *store.Event, func()) {
+	return f.ch, func() {}
+}
+
+func TestCheckpointsAutoCaptureOnSessionUpsertAndCodexTurnCompleted(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "auto.sqlite3")
+	st, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	repo := initGitWorkspace(t)
+	adapter := memSessionStore{
+		Store: st,
+		session: map[string]any{
+			"id":            "sess-auto",
+			"agent_id":      "agent-auto",
+			"title":         "自动捕获测试",
+			"workspace":     repo,
+			"connection_id": "local",
+		},
+	}
+	resolver := targetfs.NewResolver(targetfs.ResolverOptions{
+		Store:            adapter,
+		DefaultWorkspace: repo,
+		AllowedRoots:     []string{repo},
+	})
+	sub := &fakeSubscriber{ch: make(chan *store.Event, 8)}
+	svc := NewService(Options{
+		Store:      adapter,
+		Authorizer: allowAllBrowser{},
+		Resolver:   resolver,
+		Subscriber: sub,
+	})
+	defer svc.Close()
+
+	waitForCount := func(want int) []store.SessionCheckpoint {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			items, err := st.ListSessionCheckpoints(context.Background(), "agent-auto", "sess-auto", 20)
+			if err == nil && len(items) >= want {
+				return items
+			}
+			time.Sleep(30 * time.Millisecond)
+		}
+		items, _ := st.ListSessionCheckpoints(context.Background(), "agent-auto", "sess-auto", 20)
+		t.Fatalf("timed out waiting for %d checkpoints, got %d", want, len(items))
+		return nil
+	}
+
+	// Native session starts running via session.upsert -> auto_before captured
+	sub.ch <- &store.Event{Type: "session.upsert", AgentID: "agent-auto", SessionID: "sess-auto", Data: map[string]any{"status": "running"}}
+	items := waitForCount(1)
+	if items[0].Kind != "auto_before" {
+		t.Fatalf("expected auto_before, got %+v", items[0])
+	}
+
+	// Modify file, then complete via codex.notification turn/completed -> auto_after captured
+	if err := os.WriteFile(filepath.Join(repo, "main.go"), []byte("package main\n// codex turn\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sub.ch <- &store.Event{
+		Type:      "codex.notification",
+		AgentID:   "agent-auto",
+		SessionID: "sess-auto",
+		Data:      map[string]any{"frame": map[string]any{"method": "turn/completed"}},
+	}
+	items = waitForCount(2)
+	if items[0].Kind != "auto_after" || items[0].FilesChanged != 1 {
+		t.Fatalf("expected auto_after with 1 changed file, got %+v", items[0])
+	}
+}
+
+func TestCheckpointsSingleFileRestoreAndAutoRetentionGC(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "gc.sqlite3")
+	st, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	repo := initGitWorkspace(t)
+	if err := os.WriteFile(filepath.Join(repo, "keep.txt"), []byte("keep-v1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	adapter := memSessionStore{
+		Store: st,
+		session: map[string]any{
+			"id":            "sess-gc",
+			"agent_id":      "agent-gc",
+			"title":         "单文件回滚与清理测试",
+			"workspace":     repo,
+			"connection_id": "local",
+		},
+	}
+	resolver := targetfs.NewResolver(targetfs.ResolverOptions{
+		Store:            adapter,
+		DefaultWorkspace: repo,
+		AllowedRoots:     []string{repo},
+	})
+	svc := NewService(Options{
+		Store:             adapter,
+		Authorizer:        allowAllBrowser{},
+		Resolver:          resolver,
+		MaxAutoPerSession: 2,
+	})
+	defer svc.Close()
+
+	// Manual snapshot #1 (must NEVER be pruned!)
+	cpManual, _, err := svc.Capture(context.Background(), "agent-gc", "sess-gc", "manual", "", "手动里程碑", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Capture 3 auto snapshots -> with MaxAutoPerSession=2, oldest auto must be pruned while manual stays!
+	for i, ver := range []string{"v2", "v3", "v4"} {
+		if err := os.WriteFile(filepath.Join(repo, "main.go"), []byte("package main\n// "+ver+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if i == 2 {
+			if err := os.WriteFile(filepath.Join(repo, "keep.txt"), []byte("keep-v4\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(repo, "extra.txt"), []byte("extra\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, _, err := svc.Capture(context.Background(), "agent-gc", "sess-gc", "auto_after", "", ver, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	listed, err := st.ListSessionCheckpoints(context.Background(), "agent-gc", "sess-gc", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 3 {
+		t.Fatalf("expected 1 manual + 2 retained auto = 3 checkpoints, got %d: %+v", len(listed), listed)
+	}
+	hasManual := false
+	for _, item := range listed {
+		if item.ID == cpManual.ID {
+			hasManual = true
+		}
+	}
+	if !hasManual {
+		t.Fatalf("manual checkpoint was erroneously pruned: %+v", listed)
+	}
+
+	// Single-file restore: revert ONLY main.go back to cpManual (v1), keeping keep.txt at keep-v4!
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions/sess-gc/checkpoints/"+cpManual.ID+"/restore", strings.NewReader(`{"agent_id":"agent-gc","path":"main.go"}`))
+	svc.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("single-file restore failed: %d %s", rec.Code, rec.Body.String())
+	}
+	mainContent, _ := os.ReadFile(filepath.Join(repo, "main.go"))
+	keepContent, _ := os.ReadFile(filepath.Join(repo, "keep.txt"))
+	if !strings.Contains(string(mainContent), "// v1") {
+		t.Fatalf("main.go was not restored to v1: %q", string(mainContent))
+	}
+	if strings.TrimSpace(string(keepContent)) != "keep-v4" {
+		t.Fatalf("keep.txt should stay keep-v4 during single-file restore, got %q", string(keepContent))
+	}
+
+	// Single-file restore of newly added extra.txt (absent in cpManual) -> removes ONLY extra.txt!
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/sessions/sess-gc/checkpoints/"+cpManual.ID+"/restore", strings.NewReader(`{"agent_id":"agent-gc","path":"extra.txt"}`))
+	svc.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("single-file remove restore failed: %d %s", rec.Code, rec.Body.String())
+	}
+	if _, statErr := os.Stat(filepath.Join(repo, "extra.txt")); !os.IsNotExist(statErr) {
+		t.Fatalf("extra.txt should have been removed by single-file restore, err=%v", statErr)
+	}
+	keepContent2, _ := os.ReadFile(filepath.Join(repo, "keep.txt"))
+	if strings.TrimSpace(string(keepContent2)) != "keep-v4" {
+		t.Fatalf("keep.txt should still stay keep-v4, got %q", string(keepContent2))
+	}
+}

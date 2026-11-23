@@ -30,10 +30,14 @@ function withWailsImeFix(callback) {
   try { callback(fix) } finally { fix.cleanup() }
 }
 function frontend() {
-  runNpm(['run', 'build'])
   const target = path.join(desktop, 'assets', 'app')
   rmSync(target, { recursive: true, force: true })
-  cpSync(path.join(root, 'frontend', 'dist'), target, { recursive: true })
+  run(
+    windows ? node : npm,
+    windows ? [npm, 'run', 'build'] : ['run', 'build'],
+    path.join(root, 'frontend'),
+    { env: { ...env, ASTRORDER_OUT_DIR: target } },
+  )
 }
 if (!windows && process.platform !== 'linux') throw new Error('Windows and WSL/Linux build hosts are supported.')
 if (windows) {

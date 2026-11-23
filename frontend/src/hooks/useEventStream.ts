@@ -169,7 +169,7 @@ export function useEventStream(
       },
       onResume: () => {
         void refreshGroups();
-        for (const resource of ["bootstrap", "messages", "commands", "tasks", "session_usage", "session-swarm", "session-schedules"]) {
+        for (const resource of ["bootstrap", "messages", "commands", "tasks", "session_usage", "session-swarm", "session-schedules", "checkpoints"]) {
           void queryClient.invalidateQueries({ queryKey: ["astrorder", resource] });
         }
       },
@@ -282,6 +282,22 @@ export function useEventStream(
           void queryClient.invalidateQueries({
             queryKey: ["astrorder", "session-schedules"],
           });
+        }
+        if (event.type === "checkpoints.updated") {
+          const aid = String(event.data.agent_id || event.agent_id || "");
+          const sid = String(event.data.session_id || event.session_id || "");
+          if (aid && sid) {
+            void queryClient.invalidateQueries({
+              queryKey: ["astrorder", "checkpoints", aid, sid],
+            });
+          } else {
+            void queryClient.invalidateQueries({
+              queryKey: ["astrorder", "checkpoints"],
+            });
+          }
+          if (event.data.action === "restore") {
+            void queryClient.invalidateQueries({ queryKey: ["astrorder", "git"] });
+          }
         }
         if (event.type === "task.upsert" && event.agent_id && event.session_id) {
           const progress = event.data.progress as Record<string, unknown> | undefined;

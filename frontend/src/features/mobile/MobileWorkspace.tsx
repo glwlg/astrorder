@@ -3,7 +3,7 @@ import { Button, Group, Menu, Modal, TextInput, useComputedColorScheme, useManti
 import { MobileTaskNotices } from './MobileTaskNotices'
 import { notifications } from '@mantine/notifications'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { IconSun, IconMoon, IconDeviceDesktop, IconRefresh, IconPlayerPlay, IconInfoCircle, IconNotes, IconPlayerStop, IconSend, IconMessageCircle, IconCheck, IconX, IconMicrophone, IconPlus, IconDotsVertical, IconCpu, IconLoader2, IconPlugConnected, IconCloudDataConnection, IconFilter, IconTransfer, IconEdit, IconCopy, IconTrash, IconChalkboard, IconWorld, IconUsers, IconUsersGroup, IconSwitchHorizontal, IconClock } from '@tabler/icons-react'
+import { IconSun, IconMoon, IconDeviceDesktop, IconRefresh, IconPlayerPlay, IconInfoCircle, IconNotes, IconPlayerStop, IconSend, IconMessageCircle, IconCheck, IconX, IconMicrophone, IconPlus, IconDotsVertical, IconCpu, IconLoader2, IconPlugConnected, IconCloudDataConnection, IconFilter, IconTransfer, IconEdit, IconCopy, IconTrash, IconChalkboard, IconWorld, IconUsers, IconUsersGroup, IconSwitchHorizontal, IconClock, IconInbox, IconHistory } from '@tabler/icons-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useShallow } from 'zustand/react/shallow'
 import { useReducedMotion } from '@mantine/hooks'
@@ -12,13 +12,15 @@ import { api } from '../../api/client'
 import { sessionHandoffTargets } from '../../domain/handoff'
 import type { Agent, AgentCommand, AgentMention, Approval, BotGroup, Command, Message, Session, Task } from '../../domain/types'
 import { findSessionHandoff, newCommandId, scopeKey } from '../../domain/semantics'
-import { NotificationPermissionControl } from '../../components/NotificationPermissionControl'
+import { NotificationPermissionMenuItems } from '../../components/NotificationPermissionControl'
 import { useSessionUnread } from '../../hooks/useSessionUnread'
 import { isDisconnectedSessionRoute, selectApprovals, selectCommands, selectMessages, selectProjects, selectSessions, selectTasks, useAstrorderStore } from '../../state/store'
 import { useSessionResources } from '../../hooks/useAstrorderData'
 import { useSessionModel } from '../../hooks/useSessionModel'
 import { useSessionSwarm } from '../../hooks/useSessionSwarm'
 import { formatNextRunChip, useSessionSchedules } from '../../hooks/useSessionSchedules'
+import { useSessionCheckpoints } from '../../hooks/useSessionCheckpoints'
+import type { MessageSearchHit, SessionCheckpoint } from '../../api/client'
 import { useSessionOrder, notifySessionSubmitted } from '../../hooks/useSessionOrder'
 import { buildProjectGroups, displaySessionTitle } from '../../components/sessionRailModel'
 import type { ProjectGroup } from '../../components/sessionRailModel'
@@ -88,10 +90,14 @@ import { SessionSchedulesView } from '../chat/SessionSchedulesView'
 import { useBackgroundProcesses } from '../chat/useBackgroundProcesses'
 import { SessionRuntimeBar } from '../chat/SessionRuntimeBar'
 import { SessionSwarmView } from '../chat/SessionSwarmView'
+import { SessionCheckpointsPanel } from '../chat/SessionCheckpointsPanel'
 import { TaskDetails } from '../chat/TaskDetails'
 import { isGoalTask, selectSessionGoal } from '../chat/goalStatus'
 import { MobileBlackboardPanel } from './MobileBlackboardPanel'
 import { MobileWorkbench } from './MobileWorkbench'
+import { MobileImageLightbox } from './MobileImageLightbox'
+import { ActionInboxView } from '../inbox/ActionInboxView'
+import { useActionInbox } from '../inbox/useActionInbox'
 import { KernelManagementPanel } from './KernelManagementPanel'
 import { MobileAccountsPanel } from './MobileAccountsPanel'
 import { useMobileVisualViewport } from './useMobileVisualViewport'
@@ -208,7 +214,8 @@ export function MobileWorkspace() {
       || (sessionId && agentId && !disconnectedRoute ? rawSessionsMap[scopeKey(agentId, sessionId)] || null : null))
     : null
   const { isUnread, markRead } = useSessionUnread(selected ? scopeKey(selected.agent_id, selected.id) : undefined)
-  const [sheet, setSheet] = useState<'sessions' | 'status' | 'goal' | 'tasks' | 'task' | 'swarm' | 'schedules' | 'models' | 'connections' | 'accounts' | 'gateway' | 'blackboard' | 'browser' | 'kernels' | null>(() =>
+  const { totalCount: inboxTotalCount, urgentCount: inboxUrgentCount } = useActionInbox(selected ? scopeKey(selected.agent_id, selected.id) : undefined)
+  const [sheet, setSheet] = useState<'sessions' | 'inbox' | 'checkpoints' | 'status' | 'goal' | 'tasks' | 'task' | 'swarm' | 'schedules' | 'models' | 'connections' | 'accounts' | 'gateway' | 'blackboard' | 'browser' | 'kernels' | null>(() =>
     location.pathname.startsWith('/agent-accounts') || location.pathname.startsWith('/mobile/agent-accounts') ? 'accounts' : null,
   )
   const [drawerTab, setDrawerTab] = useState<'sessions' | 'groups'>(() => (isGroupRoute ? 'groups' : 'sessions'))
@@ -299,6 +306,7 @@ export function MobileWorkspace() {
   const isAntigravity = selectedAgent?.kind === 'antigravity' || selectedAgent?.kind === 'antigravity-ssh'
   const sessionSwarm = useSessionSwarm(selected, selectedAgent, sheet === 'swarm')
   const sessionSchedules = useSessionSchedules(selected)
+  const sessionCheckpoints = useSessionCheckpoints(selected, Boolean(selected?.workspace))
   const enabledSchedules = useMemo(
     () => (sessionSchedules.data || []).filter((item) => item.enabled),
     [sessionSchedules.data],
@@ -330,7 +338,15 @@ export function MobileWorkspace() {
   const [taskSelection, setTaskSelection] = useState<Pick<Task, 'id' | 'agent_id' | 'session_id'> | null>(null)
   const task = tasks.find(item => item.id === taskSelection?.id && item.agent_id === taskSelection.agent_id && item.session_id === taskSelection.session_id) ?? null
 
-  const [image, setImage] = useState<string | null>(null)
+  const [imageGallery, setImageGallery] = useState<{ images: string[]; index: number } | null>(null)
+  const openImagePreview = useCallback((url: string, gallery?: string[]) => {
+    if (gallery && gallery.length > 1) {
+      const idx = gallery.indexOf(url)
+      setImageGallery({ images: gallery, index: idx >= 0 ? idx : 0 })
+      return
+    }
+    setImageGallery({ images: [url], index: 0 })
+  }, [])
   const openFile = (path: string) => {
     if (!selected) return
     const artifact = resolveArtifactFromPath(path, selected)
@@ -442,6 +458,26 @@ export function MobileWorkspace() {
   const [confirmation, setConfirmation] = useState<MobileConfirmation | null>(null)
   const [confirmationLoading, setConfirmationLoading] = useState(false)
   const [search, setSearch] = useState('')
+  const [searchHits, setSearchHits] = useState<MessageSearchHit[]>([])
+  const [searchLoading, setSearchLoading] = useState(false)
+  const [focusedCheckpointId, setFocusedCheckpointId] = useState<string | null>(null)
+  useEffect(() => {
+    const trimmed = search.trim()
+    if (sheet !== 'sessions' || drawerTab !== 'sessions' || trimmed.length < 2) {
+      setSearchHits([])
+      setSearchLoading(false)
+      return
+    }
+    let cancelled = false
+    setSearchLoading(true)
+    const timer = window.setTimeout(() => {
+      void api.searchMessages(trimmed, 12)
+        .then((res) => { if (!cancelled) setSearchHits(res.items || []) })
+        .catch(() => { if (!cancelled) setSearchHits([]) })
+        .finally(() => { if (!cancelled) setSearchLoading(false) })
+    }, 250)
+    return () => { cancelled = true; window.clearTimeout(timer) }
+  }, [drawerTab, search, sheet])
   const [handoffTarget, setHandoffTarget] = useState<Session | null>(null)
   const [forkWorktreeTarget, setForkWorktreeTarget] = useState<Session | null>(null)
 
@@ -1148,10 +1184,13 @@ export function MobileWorkspace() {
     {createOpened && <NewSessionDialog agents={agents} project={createProject} initialAgentId={agentFilter !== 'all' ? agentFilter : undefined} onClose={() => setCreateOpened(false)} onCreated={session => { setSearch(''); select(session) }} />}
     {createGroupOpened && <CreateBotGroupDialog agents={agents} opened={createGroupOpened} onClose={() => setCreateGroupOpened(false)} onCreated={created => { upsertGroupInCache(created); setCreateGroupOpened(false); setGroupSearch(''); selectGroup(created) }} />}
     <header className="m-header"><div className="m-brand"><button className="m-session-nav" aria-label={isGroupRoute ? '打开群聊列表' : '打开会话列表'} onClick={() => openDrawer()}>{isGroupRoute ? <IconUsers size={21} /> : <IconMessageCircle size={21} />}</button>{isGroupRoute ? <button type="button" className="m-brand-home-btn is-project" onClick={() => openDrawer('groups')} aria-label={selectedGroup ? `当前群聊 ${selectedGroup.name}，打开群聊列表` : '群聊列表'} title={selectedGroup?.name || '群聊'}><strong>{selectedGroup ? selectedGroup.name : '群聊'}</strong></button> : <button type="button" className={`m-brand-home-btn${headerProjectName ? ' is-project' : ''}`} onClick={() => openDrawer('sessions')} aria-label={headerProjectName ? `当前项目 ${headerProjectName}，打开会话列表` : '星序导航'} title={headerProjectName || undefined}>{headerProjectName ? <strong>{headerProjectName}</strong> : <><BrandMark className="m-brand-mark" size={24} alt="" /><strong>星序</strong></>}</button>}<span className={`m-dot ${connection === 'connected' ? 'online' : ''}`} aria-label={connection === 'connected' ? '已连接' : '连接中'} /></div><div className="m-header-actions">
+      <button className="m-inbox-trigger" aria-label={inboxTotalCount > 0 ? `待办收件箱，${inboxTotalCount} 项待处理` : '待办收件箱'} onClick={() => setSheet('inbox')}>
+        <IconInbox size={20} />
+        {inboxTotalCount > 0 && <span className={`m-inbox-badge${inboxUrgentCount > 0 ? ' is-urgent' : ''}`} aria-hidden="true">{inboxTotalCount > 99 ? '99+' : inboxTotalCount}</span>}
+      </button>
       {isGroupRoute
         ? <button aria-label="对话" onClick={() => openDrawer('sessions')}><IconMessageCircle size={20} /></button>
         : <button aria-label="群聊" onClick={() => openDrawer('groups')}><IconUsers size={20} /></button>}
-      <NotificationPermissionControl />
       {isGroupRoute
         ? <button aria-label="新建群聊" onClick={() => setCreateGroupOpened(true)}><IconPlus size={21} /></button>
         : <button aria-label="新建会话" onClick={() => { setCreateProject(resolveCurrentProject()); setCreateOpened(true) }}><IconPlus size={21} /></button>}
@@ -1166,6 +1205,9 @@ export function MobileWorkspace() {
           <Menu.Item leftSection={<IconCloudDataConnection size={17} />} onClick={() => setSheet('gateway')}>模型网关</Menu.Item>
           <Menu.Item leftSection={colorScheme === 'auto' ? <IconDeviceDesktop size={17} /> : colorScheme === 'light' ? <IconSun size={17} /> : <IconMoon size={17} />} onClick={() => setColorScheme(colorScheme === 'auto' ? 'light' : colorScheme === 'light' ? 'dark' : 'auto')}>切换主题</Menu.Item>
           <Menu.Item leftSection={<IconRefresh size={17} />} onClick={() => void refresh()}>刷新</Menu.Item>
+          <Menu.Divider />
+          <Menu.Label>通知</Menu.Label>
+          <NotificationPermissionMenuItems />
         </Menu.Dropdown>
       </Menu>
     </div></header>
@@ -1207,6 +1249,7 @@ export function MobileWorkspace() {
             <Menu.Item leftSection={<IconNotes size={17} />} onClick={() => setSheet('tasks')}>任务与子代理</Menu.Item>
             {goal && <Menu.Item leftSection={<IconNotes size={17} />} onClick={() => setSheet('goal')}>目标管理</Menu.Item>}
             <Menu.Item leftSection={<IconDeviceDesktop size={17} />} onClick={openWorkbench}>工作区</Menu.Item>
+            {selected.workspace && <Menu.Item leftSection={<IconHistory size={17} />} onClick={() => { setFocusedCheckpointId(null); setSheet('checkpoints') }}>代码检查点{sessionCheckpoints.items.length > 0 ? ` (${sessionCheckpoints.items.length})` : ''}</Menu.Item>}
             {agyEnvironment && <Menu.Item leftSection={<IconSwitchHorizontal size={17} />} onClick={() => setSheet('accounts')}>账号切换</Menu.Item>}
             <Menu.Item leftSection={<IconChalkboard size={17} />} onClick={() => setSheet('blackboard')}>黑板</Menu.Item>
             <Menu.Item leftSection={<IconWorld size={17} />} onClick={() => setSheet('browser')}>浏览器镜像</Menu.Item>
@@ -1238,7 +1281,7 @@ export function MobileWorkspace() {
       </div>
       {goal && <button className={`m-goal-summary is-${goal.tone}`} aria-label="目标管理" title={goalSupported ? '管理原生目标' : '查看原生目标'} onClick={() => setSheet('goal')}><IconNotes size={15} /><span>{`${goal.label} · ${goal.title}`}</span></button>}
       {!!visibleTasks.length && <button className="m-task-summary" aria-label="任务与子代理" onClick={() => setSheet('tasks')}>任务与子代理 · {activeTasks.length} 项活动 / {visibleTasks.length} 项记录</button>}
-      <MobileTranscript activityBreaks={resources.activityBreaks} readOnly={readOnly} messages={messages} commands={commands} approvals={approvals} onApproval={(approval, action) => void handleApproval(approval, action)} busy={busy} loadOlder={() => resources.messages.fetchNextPage()} hasOlder={!!resources.messages.hasNextPage} loadingOlder={resources.messages.isFetchingNextPage} onMessageAction={anchor => setMessageAction({ ...anchor, sessionKey: key })} onImage={setImage} onFile={openFile} workspace={selected?.workspace} connectionId={selected?.connection_id} onSwipe={switchSession} onSwipePreview={setSessionDrag} />
+      <MobileTranscript session={selected} activityBreaks={resources.activityBreaks} readOnly={readOnly} messages={messages} commands={commands} approvals={approvals} onApproval={(approval, action) => void handleApproval(approval, action)} busy={busy} loadOlder={() => resources.messages.fetchNextPage()} hasOlder={!!resources.messages.hasNextPage} loadingOlder={resources.messages.isFetchingNextPage} onMessageAction={anchor => setMessageAction({ ...anchor, sessionKey: key })} onImage={openImagePreview} onFile={openFile} workspace={selected?.workspace} connectionId={selected?.connection_id} onSwipe={switchSession} onSwipePreview={setSessionDrag} checkpoints={sessionCheckpoints.items} onOpenCheckpoint={(cp: SessionCheckpoint) => { setFocusedCheckpointId(cp.id); setSheet('checkpoints') }} highlightMessageId={new URLSearchParams(location.search).get('message_id')} />
     </MobileSessionDeck> : <div className="m-empty">从左上角选择会话，或新建会话</div>}</main>
     <section ref={composer} className="m-composer-float">
       {selected && <SessionConnectionNotice key={`connection:${key}`} session={selected} error={(resources.messages.error || resources.commands.error || resources.tasks.error) ? messageError(resources.messages.error || resources.commands.error || resources.tasks.error) : undefined} onRetry={() => Promise.all([resources.messages.refetch(), resources.commands.refetch(), resources.tasks.refetch()])} />}
@@ -1307,7 +1350,7 @@ export function MobileWorkspace() {
       <MobileTaskNotices key={`task-notices:${key}`} scope={key} tasks={activeTasks} onOpen={item => item.kind === 'background' ? setSheet('tasks') : openTask(item)} />
       {!!approvals.length && <button className="m-queue-banner" onClick={() => setSheet('status')}>{approvals.some(isUserInput) ? '等待回答' : '等待授权'} · {approvals.length} 项</button>}
       {quote && <div className="m-quote"><span>{quote}</span><button aria-label="取消引用" onClick={() => setQuote('')}><IconX size={16} /></button></div>}
-      {!!files.length && <div className="m-attachments">{files.map((file, i) => <MobileAttachmentPreview key={`${file.name}-${i}`} file={file} onOpen={setImage} onRemove={() => updateFiles(files.filter((_, n) => n !== i))} />)}</div>}
+      {!!files.length && <div className="m-attachments">{files.map((file, i) => <MobileAttachmentPreview key={`${file.name}-${i}`} file={file} onOpen={url => openImagePreview(url)} onRemove={() => updateFiles(files.filter((_, n) => n !== i))} />)}</div>}
       <div style={{ position: 'relative' }}>
       <AgentCommandMenu agent={agents[selected?.agent_id || '']} items={agentCommands} activeIndex={commandIndex} onSelect={selectAgentCommand} />
       <AgentMentionMenu agent={agents[selected?.agent_id || '']} items={agentMentions} activeIndex={commandIndex} onSelect={selectAgentMention} />
@@ -1337,7 +1380,7 @@ export function MobileWorkspace() {
       </>
     )}
     {!isGroupRoute && messageAction?.sessionKey === key && <MobileMessageMenu anchor={messageAction} onClose={closeMessageMenu} onCopy={() => void copy(messageAction.text)} onQuote={() => { setQuote(messageAction.text); textarea.current?.focus({ preventScroll: true }) }} />}
-    {sheet && <div className={`m-backdrop ${sheet === 'sessions' ? 'm-session-backdrop' : ''}`} onClick={() => setSheet(null)} onTouchStartCapture={handleDrawerTouchStart} onTouchMoveCapture={handleDrawerTouchMove} onTouchEndCapture={handleDrawerTouchEnd} onTouchCancelCapture={handleDrawerTouchCancel}><section ref={node => { drawerSheet.current = node }} style={sheet === 'sessions' && drawerOffset !== null ? { transform: `translate3d(${drawerOffset}px, 0, 0)`, transition: drawerSettling ? 'transform .22s cubic-bezier(.2,.8,.2,1)' : 'none', animation: 'none' } : undefined} className={`m-sheet ${sheet === 'connections' ? 'm-connections-sheet' : sheet === 'accounts' ? 'm-accounts-sheet' : sheet === 'sessions' ? 'm-session-sheet' : sheet === 'blackboard' || sheet === 'browser' ? 'm-blackboard-dialog' : ''}`} role="dialog" aria-label={sheet === 'sessions' ? (drawerTab === 'groups' ? '群聊列表' : '会话列表') : sheet === 'accounts' ? '账号切换' : sheet === 'swarm' ? 'Swarm 团队' : sheet === 'schedules' ? '定时任务' : sheet === 'blackboard' ? '会话黑板' : sheet === 'browser' ? '浏览器镜像' : sheet === 'kernels' ? '内核管理' : '详情'} onClick={e => e.stopPropagation()} onTouchStart={handleDrawerTouchStart} onTouchMove={handleDrawerTouchMove} onTouchEnd={handleDrawerTouchEnd} onTouchCancel={handleDrawerTouchCancel}><div className="m-handle" /><header><h2>{sheet === 'sessions' ? (drawerTab === 'groups' ? '群聊' : '会话') : ({ status: '运行状态', goal: '目标管理', tasks: '任务与子代理', task: '任务详情', swarm: 'Swarm 团队', schedules: '定时任务', models: '选择模型', connections: '连接管理', accounts: '账号切换', gateway: '模型网关', blackboard: '黑板', browser: '浏览器镜像', kernels: '内核管理' })[sheet]}</h2><div className="m-sheet-header-actions">{sheet === 'sessions' && drawerTab === 'sessions' && <><button aria-label="筛选" aria-pressed={filtersOpen} onClick={() => setFiltersOpen(open => !open)}><IconFilter size={18} /></button><button aria-label="新建项目" onClick={() => setAddProjectOpened(true)}><IconPlus size={20} /></button></>}{sheet === 'sessions' && drawerTab === 'groups' && <button aria-label="新建群聊" onClick={() => setCreateGroupOpened(true)}><IconPlus size={20} /></button>}{sheet === 'swarm' && <button aria-label="刷新 Swarm" onClick={() => void sessionSwarm.refetch()}><IconRefresh size={18} /></button>}<button aria-label="关闭面板" onClick={() => setSheet(null)}><IconX size={20} /></button></div></header>
+    {sheet && <div className={`m-backdrop ${sheet === 'sessions' ? 'm-session-backdrop' : ''}`} onClick={() => setSheet(null)} onTouchStartCapture={handleDrawerTouchStart} onTouchMoveCapture={handleDrawerTouchMove} onTouchEndCapture={handleDrawerTouchEnd} onTouchCancelCapture={handleDrawerTouchCancel}><section ref={node => { drawerSheet.current = node }} style={sheet === 'sessions' && drawerOffset !== null ? { transform: `translate3d(${drawerOffset}px, 0, 0)`, transition: drawerSettling ? 'transform .22s cubic-bezier(.2,.8,.2,1)' : 'none', animation: 'none' } : undefined} className={`m-sheet ${sheet === 'connections' ? 'm-connections-sheet' : sheet === 'accounts' ? 'm-accounts-sheet' : sheet === 'sessions' ? 'm-session-sheet' : sheet === 'blackboard' || sheet === 'browser' ? 'm-blackboard-dialog' : ''}`} role="dialog" aria-label={sheet === 'sessions' ? (drawerTab === 'groups' ? '群聊列表' : '会话列表') : sheet === 'inbox' ? '待办收件箱' : sheet === 'checkpoints' ? '代码检查点' : sheet === 'accounts' ? '账号切换' : sheet === 'swarm' ? 'Swarm 团队' : sheet === 'schedules' ? '定时任务' : sheet === 'blackboard' ? '会话黑板' : sheet === 'browser' ? '浏览器镜像' : sheet === 'kernels' ? '内核管理' : '详情'} onClick={e => e.stopPropagation()} onTouchStart={handleDrawerTouchStart} onTouchMove={handleDrawerTouchMove} onTouchEnd={handleDrawerTouchEnd} onTouchCancel={handleDrawerTouchCancel}><div className="m-handle" /><header><h2>{sheet === 'sessions' ? (drawerTab === 'groups' ? '群聊' : '会话') : ({ inbox: '待我决策', checkpoints: '代码检查点', status: '运行状态', goal: '目标管理', tasks: '任务与子代理', task: '任务详情', swarm: 'Swarm 团队', schedules: '定时任务', models: '选择模型', connections: '连接管理', accounts: '账号切换', gateway: '模型网关', blackboard: '黑板', browser: '浏览器镜像', kernels: '内核管理' })[sheet]}</h2><div className="m-sheet-header-actions">{sheet === 'sessions' && drawerTab === 'sessions' && <><button aria-label="筛选" aria-pressed={filtersOpen} onClick={() => setFiltersOpen(open => !open)}><IconFilter size={18} /></button><button aria-label="新建项目" onClick={() => setAddProjectOpened(true)}><IconPlus size={20} /></button></>}{sheet === 'sessions' && drawerTab === 'groups' && <button aria-label="新建群聊" onClick={() => setCreateGroupOpened(true)}><IconPlus size={20} /></button>}{sheet === 'swarm' && <button aria-label="刷新 Swarm" onClick={() => void sessionSwarm.refetch()}><IconRefresh size={18} /></button>}<button aria-label="关闭面板" onClick={() => setSheet(null)}><IconX size={20} /></button></div></header>
       {sheet === 'connections' && <div className="m-sheet-body m-connections-body"><EnvironmentConnections embedded /></div>}
       {sheet === 'accounts' && <div className="m-sheet-body m-accounts-body"><MobileAccountsPanel preferredEnvironment={agyEnvironment} /></div>}
       {sheet === 'kernels' && <div className="m-sheet-body"><KernelManagementPanel /></div>}
@@ -1348,8 +1391,26 @@ export function MobileWorkspace() {
         <button type="button" role="tab" aria-selected={drawerTab === 'groups'} aria-current={drawerTab === 'groups' ? 'page' : undefined} onClick={() => { setDrawerTab('groups'); void botGroupsQuery.refetch() }}><IconUsers size={16} /><span>群聊</span>{botGroupList.length > 0 && <small className="m-drawer-nav-count">{botGroupList.length}</small>}</button>
       </div>}
       {sheet === 'sessions' && drawerTab === 'sessions' && filtersOpen && <><div className="m-drawer-filter-row"><AgentSessionFilter agents={agents} sessions={sessions} value={agentFilter} onChange={updateAgentFilter} /></div><nav className="m-filters">{[['all','全部'],['unread','未读'],['open','开放中'],['pinned','置顶'],['recent','24小时']].map(([id,label]) => <button className={filter === id ? 'active' : ''} key={id} onClick={() => setFilter(id)}>{label}</button>)}</nav></>}
-      {sheet === 'sessions' && drawerTab === 'sessions' && <><div className="m-search-wrap"><input className="m-search" aria-label="搜索会话" placeholder="搜索会话" value={search} onChange={e => setSearch(e.target.value)} />{search && <button aria-label="清空搜索" onClick={() => setSearch('')} style={{ position: 'absolute', right: 8, padding: 6, display: 'inline-flex', alignItems: 'center', color: 'var(--m-muted)' }}><IconX size={16} /></button>}</div><MobileSessionDrawer groups={groups} pins={pins} pinnedProjects={pinnedProjects} onPinProject={project => { void updatePreferences(value => ({ pinned_projects: value.pinned_projects.includes(project.key) ? value.pinned_projects.filter(key => key !== project.key) : [project.key, ...value.pinned_projects] })) }} selectedKey={key} appearance={appearance} onSelect={select} onCreate={project => { setCreateProject(project); setCreateOpened(true) }} onDeleteProject={requestDeleteProject} onDeleteSession={requestDeleteSession} onPin={s => { const sessionKey = scopeKey(s.agent_id, s.id); void updatePreferences(value => ({ session_pins: { [sessionKey]: !value.session_pins[sessionKey] } })) }} agents={agents} onHandoffSession={setHandoffTarget} onRenameSession={openRename} onCopySessionId={copySessionId} onForkSession={handleForkChatBranch} onForkWorktreeSession={setForkWorktreeTarget} isSearching={Boolean(search.trim())} /></>}
+      {sheet === 'sessions' && drawerTab === 'sessions' && <><div className="m-search-wrap"><input className="m-search" aria-label="搜索会话" placeholder="搜索会话或历史消息" value={search} onChange={e => setSearch(e.target.value)} />{search && <button aria-label="清空搜索" onClick={() => setSearch('')} style={{ position: 'absolute', right: 8, padding: 6, display: 'inline-flex', alignItems: 'center', color: 'var(--m-muted)' }}><IconX size={16} /></button>}</div><MobileSessionDrawer groups={groups} pins={pins} pinnedProjects={pinnedProjects} onPinProject={project => { void updatePreferences(value => ({ pinned_projects: value.pinned_projects.includes(project.key) ? value.pinned_projects.filter(key => key !== project.key) : [project.key, ...value.pinned_projects] })) }} selectedKey={key} appearance={appearance} onSelect={select} onCreate={project => { setCreateProject(project); setCreateOpened(true) }} onDeleteProject={requestDeleteProject} onDeleteSession={requestDeleteSession} onPin={s => { const sessionKey = scopeKey(s.agent_id, s.id); void updatePreferences(value => ({ session_pins: { [sessionKey]: !value.session_pins[sessionKey] } })) }} agents={agents} onHandoffSession={setHandoffTarget} onRenameSession={openRename} onCopySessionId={copySessionId} onForkSession={handleForkChatBranch} onForkWorktreeSession={setForkWorktreeTarget} isSearching={Boolean(search.trim())} searchHits={searchHits} searchLoading={searchLoading} onSelectSearchHit={(hit) => { navigate(`/mobile/chat/${encodeURIComponent(hit.session_id)}?agent_id=${encodeURIComponent(hit.agent_id)}&message_id=${encodeURIComponent(hit.id)}`, { replace: true }); setSheet(null) }} /></>}
       {sheet === 'sessions' && drawerTab === 'groups' && <><div className="m-search-wrap"><input className="m-search" aria-label="搜索群聊" placeholder="搜索群聊" value={groupSearch} onChange={e => setGroupSearch(e.target.value)} />{groupSearch && <button aria-label="清空搜索" onClick={() => setGroupSearch('')} style={{ position: 'absolute', right: 8, padding: 6, display: 'inline-flex', alignItems: 'center', color: 'var(--m-muted)' }}><IconX size={16} /></button>}</div><MobileGroupDrawer groups={botGroupList} selectedGroupId={isGroupRoute ? routeGroupId : ''} agents={agents} loading={botGroupsQuery.isLoading} search={groupSearch} onSelect={selectGroup} onCreate={() => setCreateGroupOpened(true)} onDeleteGroup={requestDeleteGroup} /></>}
+      {sheet === 'inbox' && (
+        <div className="m-sheet-body">
+          <ActionInboxView
+            compact
+            onOpenSession={(aid, sid) => {
+              const target = useAstrorderStore.getState().sessions[scopeKey(aid, sid)]
+                || sessions.find(s => s.agent_id === aid && s.id === sid)
+              if (target) {
+                select(target)
+              } else {
+                navigate(`/mobile/chat/${encodeURIComponent(sid)}?agent_id=${encodeURIComponent(aid)}`, { replace: true })
+                setSheet(null)
+              }
+            }}
+          />
+        </div>
+      )}
+      {sheet === 'checkpoints' && selected && <div className="m-sheet-body m-checkpoints-sheet"><SessionCheckpointsPanel compact session={selected} initialCheckpointId={focusedCheckpointId} /></div>}
       {sheet === 'status' && selected && <div className="m-sheet-body"><MobileApprovals session={selected} approvals={approvals} /><SessionRuntimeFacts session={selected} agent={agents[selected.agent_id]} />{agents[selected.agent_id]?.kind==='codex' && <NativeObservationPanel agentId={selected.agent_id} sessionId={selected.id} />}</div>}
       {sheet === 'goal' && selected && <div className="m-sheet-body m-goal-panel"><GoalManager key={key} session={selected} agent={agents[selected.agent_id]} tasks={tasks} disabled={readOnly} /></div>}
       {sheet === 'blackboard' && selected && <div className="m-sheet-body m-blackboard-sheet"><MobileBlackboardPanel namespace={`session:${selected.agent_id}::${selected.id}`} /></div>}
@@ -1405,7 +1466,12 @@ export function MobileWorkspace() {
       {sheet === 'models' && <div className="m-sheet-body m-model-panel">{selected && <ApprovalModeControl key={key} session={selected} variant="panel" disabled={readOnly} agentKind={agents[selected.agent_id]?.kind} />}{sessionModel.data?.detail && <p>{sessionModel.data.detail}</p>}{mobileEffortOptions.length > 0 && <div className="m-effort-row">{mobileEffortOptions.map(item => <button key={item.value} aria-pressed={activeMobileEffort === item.value} aria-label={`思考强度 ${item.label}`} disabled={(isAntigravity ? modelReadOnly : reasoningReadOnly) || modelLoading} onClick={() => void selectMobileEffort(item.value)}>{item.label}</button>)}</div>}<input className="m-search" aria-label="搜索模型" placeholder="搜索模型或提供商" value={modelSearch} onChange={e => setModelSearch(e.target.value)} />{modelLoading && <p>正在处理原生模型请求…</p>}<div className="m-model-list">{groupedModelChoices.filter(choice => { const q = modelSearch.trim().toLowerCase(); return !q || choice.label.toLowerCase().includes(q) || choice.baseModel.toLowerCase().includes(q) }).map(choice => { const selectedChoice = modelSelection ? modelSelection.key === choice.key : activeMobileModelGroup?.key === choice.key; return <button className="m-model-choice" aria-pressed={selectedChoice} key={choice.key} disabled={modelReadOnly || modelLoading} onClick={() => selectMobileModelGroup(choice)}><IconCpu size={17} /><span>{choice.label}</span>{selectedChoice && <IconCheck size={17} />}</button> })}</div>{!modelLoading && !groupedModelChoices.length && <p>原生运行时未返回可用模型。</p>}{modelSelection && (() => { const resolved = resolveGroupVariant(modelSelection, activeMobileEffort); const resolvedEff = isAntigravity && modelSelection.isGrouped ? effortLabelOf(parseAntigravityModelId(resolved.model).effort) : null; return <div className="m-model-confirm"><small>{resolvedEff ? `${modelSelection.label} · ${resolvedEff}` : modelSelection.label}</small><button aria-label="确认切换模型" disabled={modelReadOnly || modelLoading} onClick={() => void chooseModel(resolved.provider, resolved.model)}>{modelLoading ? '切换中…' : '确认切换模型'}</button></div> })()}</div>}
     </section></div>}
     {workbenchMounted && selected && <MobileWorkbench session={selected} agent={agents[selected.agent_id]} commands={commands} messages={messages} approvals={approvals} onApproval={(approval, action) => void handleApproval(approval, action)} opened={workbenchOpened} onClose={closeWorkbench} />}
-    {image && <div className="m-lightbox" role="dialog" aria-label="图片预览" onClick={() => setImage(null)}><button aria-label="关闭图片"><IconX size={22} /></button><img src={image} alt="预览" /></div>}
+    <MobileImageLightbox
+      images={imageGallery?.images ?? null}
+      index={imageGallery?.index ?? 0}
+      onIndexChange={next => setImageGallery(current => current ? { ...current, index: next } : null)}
+      onClose={() => setImageGallery(null)}
+    />
 
     <ConfirmPopover
       opened={confirmation !== null}

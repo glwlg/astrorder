@@ -46,6 +46,8 @@ export default defineConfig({
     },
   },
   build: {
+    outDir: process.env.ASTRORDER_OUT_DIR || 'dist',
+    emptyOutDir: true,
     chunkSizeWarningLimit: 3000,
     rollupOptions: {
       input: {

@@ -90,6 +90,7 @@ export function AppShellLayout({ chatReturnPath }: { chatReturnPath: string }) {
   const activeSessionKey = routeCandidates.length === 1 ? scopeKey(routeCandidates[0].agent_id, routeCandidates[0].id) : undefined
   const session = routeCandidates.length === 1 ? routeCandidates[0] : undefined
   const compactNavigation =
+    location.pathname.startsWith('/inbox') ||
     location.pathname.startsWith('/agent-accounts') ||
     location.pathname.startsWith('/backups') ||
     location.pathname.startsWith('/analytics')

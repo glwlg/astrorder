@@ -1,8 +1,10 @@
 import { UserInputCard, isUserInput } from '../../components/UserInputCard'
 import { AsyncUserInputCard, isAsyncQuestion, hasLaterNativeInput } from '../../components/AsyncUserInputCard'
-import { useEffect, useRef, useState } from 'react'
-import { IconCheck, IconChecks, IconChevronDown } from '@tabler/icons-react'
-import type { Approval, Message } from '../../domain/types'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { IconCheck, IconChecks, IconChevronDown, IconHistory } from '@tabler/icons-react'
+import type { SessionCheckpoint } from '../../api/client'
+import { mapCheckpointsToMessages } from '../../domain/turnCheckpoints'
+import type { Approval, Message, Session } from '../../domain/types'
 import { attachmentHref } from '../../domain/attachmentHref'
 import { hasMessageContent, isMessageActivity, normalizeMessagePresentation } from '../../domain/messagePresentation'
 import { activityPacks } from '../../domain/activityPacks'
@@ -12,25 +14,33 @@ import { useOlderMessages } from '../../hooks/useOlderMessages'
 import { LazyDetails } from '../../components/LazyDetails'
 import { MessageBody } from '../../components/MessageBody'
 import { sessionSwipeGesture, sessionDragPreview, startsAtSessionDrawerEdge, type SessionSwipeGesture } from './mobileGestures'
-import { describeTool, extractToolArgs, FileChangeDiffBlock, fileChangeDiffs, PackSummary, ShellOutputBlock, ToolLineIcon, unwrapCommand } from '../chat/toolPresentation'
+import { describeTool, extractToolArgs, FileChangeDiffBlock, fileChangeDiffs, formatCommandRowDisplay, PackSummary, ShellOutputBlock, ToolLineIcon, unwrapCommand } from '../chat/toolPresentation'
 import { ToolOutputBlock } from '../chat/ToolOutputBlock'
 import { isCompactionMessage, CompactionDivider } from '../chat/CompactionDivider'
 
 export interface MessageActionAnchor { text: string; x: number; y: number; element: HTMLElement; selectText?: () => void }
 
-export function MobileTranscript({ messages, activityBreaks, commands = [], approvals = [], onApproval, busy, loadOlder, hasOlder, loadingOlder, onMessageAction, onImage, onFile, workspace, connectionId, readOnly = false, onSwipe, onSwipePreview }: {
+export function MobileTranscript({ session, messages, activityBreaks, commands = [], approvals = [], onApproval, busy, loadOlder, hasOlder, loadingOlder, onMessageAction, onImage, onFile, workspace, connectionId, readOnly = false, onSwipe, onSwipePreview, checkpoints, onOpenCheckpoint, highlightMessageId }: {
+  session?: Session | null
   messages: Message[]; commands?: import('../../domain/types').Command[]; approvals?: Approval[]; onApproval?: (approval: Approval, action: 'approve' | 'cancel') => void
   busy: boolean; loadOlder: () => unknown; hasOlder: boolean; loadingOlder: boolean
-  onMessageAction: (anchor: MessageActionAnchor) => void; onImage: (url: string) => void; onFile?: (path: string) => void; workspace?: string | null; connectionId?: string | null; onSwipe: (gesture: SessionSwipeGesture) => void
+  onMessageAction: (anchor: MessageActionAnchor) => void; onImage: (url: string, gallery?: string[]) => void; onFile?: (path: string) => void; workspace?: string | null; connectionId?: string | null; onSwipe: (gesture: SessionSwipeGesture) => void
   readOnly?: boolean
   activityBreaks?: readonly string[]
   onSwipePreview?: (pose: import('./mobileGestures').SessionCardPose | null) => void
+  checkpoints?: SessionCheckpoint[]
+  onOpenCheckpoint?: (cp: SessionCheckpoint) => void
+  highlightMessageId?: string | null
 }) {
   const { setContainerRef, following, onScroll, scrollToBottom, capturePrependAnchor } = useStickToBottom<HTMLDivElement>({ contentVersion: `${messages.map(m => m.id + ':' + m.text.length).join('|')}|${approvals.map(a => a.id).join('|')}` })
   const older = useOlderMessages({ hasMore: hasOlder, loading: loadingOlder, load: loadOlder, capture: capturePrependAnchor })
   const touch = useRef<{ x: number; y: number } | null>(null)
   const hold = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [selectedText, setSelectedText] = useState<HTMLElement | null>(null)
+  const [activeHighlightId, setActiveHighlightId] = useState<string | null>(null)
+  const listNodeRef = useRef<HTMLDivElement | null>(null)
+  const highlightScrolledRef = useRef<string | null>(null)
+  const highlightLoadAttemptsRef = useRef<number>(0)
   useEffect(() => () => { if (hold.current) clearTimeout(hold.current) }, [])
   useEffect(() => {
     if (!selectedText) return
@@ -55,8 +65,38 @@ export function MobileTranscript({ messages, activityBreaks, commands = [], appr
   const rows = messages.map(normalizeMessagePresentation).filter(m => isCompactionMessage(m) || hasMessageContent(m))
   const activity = (m: Message) => !isCompactionMessage(m) && isMessageActivity(m)
   const packs = activityPacks(rows, activityBreaks)
+  const checkpointByMsgId = useMemo(
+    () => mapCheckpointsToMessages(rows, checkpoints ?? []),
+    [rows, checkpoints],
+  )
+  useEffect(() => {
+    highlightScrolledRef.current = null
+    highlightLoadAttemptsRef.current = 0
+  }, [highlightMessageId, session?.id, session?.agent_id])
+  useEffect(() => {
+    if (!highlightMessageId || highlightScrolledRef.current === highlightMessageId) return
+    const exists = rows.some((m) => m.id === highlightMessageId)
+    if (exists) {
+      const container = listNodeRef.current
+      if (!container) return
+      const escaped = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(highlightMessageId) : highlightMessageId.replace(/"/g, '\\"')
+      const el = container.querySelector<HTMLElement>(`[data-message-id="${escaped}"]`)
+      if (!el) return
+      highlightScrolledRef.current = highlightMessageId
+      el.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'center' })
+      setActiveHighlightId(highlightMessageId)
+      const timer = window.setTimeout(() => {
+        setActiveHighlightId((current) => (current === highlightMessageId ? null : current))
+      }, 2600)
+      return () => window.clearTimeout(timer)
+    }
+    if (hasOlder && !loadingOlder && highlightLoadAttemptsRef.current < 3) {
+      highlightLoadAttemptsRef.current += 1
+      void loadOlder()
+    }
+  }, [hasOlder, highlightMessageId, loadOlder, loadingOlder, rows])
   return <>
-    <div className="m-transcript" role="log" ref={setContainerRef} onScroll={e => { onScroll(); older.onScroll(e) }} onWheel={older.onWheel}
+    <div className="m-transcript" role="log" ref={(node) => { setContainerRef(node); listNodeRef.current = node }} onScroll={e => { onScroll(); older.onScroll(e) }} onWheel={older.onWheel}
       onTouchStart={e => { older.onTouchStart(e); if ((e.target as Element).closest('.m-select-text') || startsAtSessionDrawerEdge(e.touches[0].clientX)) { touch.current = null; onSwipePreview?.(null); return }; touch.current = { x: e.touches[0].clientX, y: e.touches[0].clientY } }}
       onTouchEnd={e => { cancelHold(); onSwipePreview?.(null); if (!touch.current) return; const start = touch.current; const end = e.changedTouches[0]; touch.current = null; const gesture = sessionSwipeGesture(start.x, start.y, end.clientX, end.clientY); if (gesture) onSwipe(gesture) }}
       onTouchMove={e => { cancelHold(); older.onTouchMove(e); if (!touch.current || !onSwipePreview) return; onSwipePreview(sessionDragPreview(e.touches[0].clientX - touch.current.x, e.touches[0].clientY - touch.current.y)) }} onTouchCancel={cancelHold}>
@@ -79,13 +119,19 @@ export function MobileTranscript({ messages, activityBreaks, commands = [], appr
               const desc = describeTool(item)
               const itemArgs = extractToolArgs(item.tool)
               const rawCmd = String(itemArgs.command || itemArgs.cmd || itemArgs.CommandLine || itemArgs.Command || '')
+              const rawCwd = String(itemArgs.cwd || itemArgs.Cwd || '')
+              const rawExitCode = (item.tool as { exit_code?: unknown } | null | undefined)?.exit_code
+              const exitCode = typeof rawExitCode === 'number' && Number.isFinite(rawExitCode) ? rawExitCode : null
               const isCmd = desc.iconKey === 'terminal' || Boolean(rawCmd)
               const hasFileDiff = fileChangeDiffs(item).length > 0
               const unwrapped = unwrapCommand(rawCmd)
+              const cmdDisplay = isCmd ? formatCommandRowDisplay(desc, unwrapped) : null
               const itemStatus = desc.isFailed ? 'failed' : desc.isRunning ? 'running' : 'success'
-              const foldTitle = isCmd
-                ? `${desc.isRunning ? '运行' : desc.isFailed ? '运行失败' : '已运行'} ${unwrapped || desc.target || desc.fullTitle}`
-                : (desc.target || desc.fullTitle)
+              const foldTitle = cmdDisplay
+                ? `${cmdDisplay.action} ${cmdDisplay.text}`
+                : item.kind !== 'thinking' && desc.target
+                  ? `${desc.action} ${desc.target}`
+                  : (desc.target || desc.fullTitle)
               return <LazyDetails className={`m-fold ${desc.isFailed ? 'is-failed' : ''}`} key={item.id} loading={desc.isRunning} summary={<span className="m-fold-summary">
                 <span className="m-fold-icon"><ToolLineIcon icon={desc.iconKey} size={14} /></span>
                 <span className="m-fold-title">{foldTitle}</span>
@@ -95,14 +141,23 @@ export function MobileTranscript({ messages, activityBreaks, commands = [], appr
                 {item.kind === 'thinking' ? (
                   item.text && <div className="m-thinking-content"><MarkdownContent value={item.text} /></div>
                 ) : isCmd ? (
-                  <ShellOutputBlock command={unwrapped || desc.fullTitle} output={item.text} status={itemStatus} />
+                  <ShellOutputBlock
+                    command={unwrapped || desc.fullTitle}
+                    output={item.text}
+                    status={itemStatus}
+                    summary={desc.summary}
+                    cwd={rawCwd || undefined}
+                    exitCode={exitCode}
+                  />
                 ) : hasFileDiff ? (
-                  <FileChangeDiffBlock message={item} />
+                  <FileChangeDiffBlock message={item} session={session} />
                 ) : (
                   <ToolOutputBlock
                     text={item.text}
                     payload={Object.keys(itemArgs).length > 0 ? itemArgs : null}
                     toolName={String(item.tool?.name || '')}
+                    session={session}
+                    onImageClick={onImage}
                   />
                 )}
                 {!!item.attachments?.length && <div className="m-thumbs">{item.attachments.map(a => {
@@ -114,17 +169,25 @@ export function MobileTranscript({ messages, activityBreaks, commands = [], appr
             })}</div>
           </LazyDetails>
         }
-        return <article key={m.id} className={`m-msg m-hold ${m.role === 'user' ? 'm-user' : 'm-assistant'}`} data-message-id={m.id}
+        return <article key={m.id} className={`m-msg m-hold ${m.role === 'user' ? 'm-user' : 'm-assistant'}${activeHighlightId === m.id ? ' is-search-highlight' : ''}`} data-message-id={m.id}
           tabIndex={0}
           onContextMenu={e => { if ((e.target as Element).closest('.m-select-text')) return; e.preventDefault(); e.stopPropagation(); cancelHold(); const rect = e.currentTarget.getBoundingClientRect(); action(m, e.currentTarget, e.clientX || rect.left + rect.width / 2, e.clientY || rect.top + 20) }}
           onTouchStart={e => { cancelHold(); if ((e.target as Element).closest('.m-select-text')) return; const element = e.currentTarget; const point = e.touches[0]; hold.current = setTimeout(() => { action(m, element, point.clientX, point.clientY); navigator.vibrate?.(20) }, 500) }}>
           {isAsyncQuestion(m) && <AsyncUserInputCard message={m} commands={commands} readOnly={readOnly} continued={hasLaterNativeInput(rows, i)} />}
           {!isAsyncQuestion(m) && m.text.trim() && <div className="m-bubble"><MessageBody value={m.text} user={m.role === 'user'} onImageClick={onImage} attachmentNames={m.attachments.filter((attachment) => attachment.media_type.startsWith('image/')).map((attachment) => attachment.name)} renderMarkdown={value => <MarkdownContent value={value} onFileClick={onFile} onImageClick={onImage} workspace={workspace} sessionId={m.session_id} connectionId={connectionId} />} sessionId={m.session_id} connectionId={connectionId || undefined} /></div>}
-          {!!m.attachments.length && <div className="m-thumbs">{m.attachments.map(a => {
-            const href = attachmentHref(a)
-            if (!href) return <span key={a.id} className="m-file-link">{a.name}（链接不可用）</span>
-            return a.media_type.startsWith('image/') ? <button key={a.id} onClick={() => onImage(href)}><img src={href} alt={a.name} /></button> : <a key={a.id} className="m-file-link" href={href} target="_blank" rel="noreferrer">{a.name}</a>
-          })}</div>}
+          {!!m.attachments.length && (() => {
+            const imageUrls = m.attachments
+              .filter(a => a.media_type.startsWith('image/'))
+              .map(a => attachmentHref(a))
+              .filter((href): href is string => Boolean(href))
+            return <div className="m-thumbs">{m.attachments.map(a => {
+              const href = attachmentHref(a)
+              if (!href) return <span key={a.id} className="m-file-link">{a.name}（链接不可用）</span>
+              return a.media_type.startsWith('image/')
+                ? <button key={a.id} onClick={() => imageUrls.length > 1 ? onImage(href, imageUrls) : onImage(href)}><img src={href} alt={a.name} /></button>
+                : <a key={a.id} className="m-file-link" href={href} target="_blank" rel="noreferrer">{a.name}</a>
+            })}</div>
+          })()}
           {m.role === 'user' && (() => {
             const hasAssistantReplied = rows.slice(i + 1).some(r => r.role !== 'user')
             const matchedCmd = m.command_id
@@ -139,6 +202,25 @@ export function MobileTranscript({ messages, activityBreaks, commands = [], appr
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}><IconCheck size={13} /> 已发送</span>
                 )}
               </small>
+            )
+          })()}
+          {m.role === 'assistant' && (() => {
+            const cp = checkpointByMsgId.get(m.id)
+            if (!cp || !onOpenCheckpoint) return null
+            return (
+              <button
+                type="button"
+                className="cp-inline-pill cp-inline-pill-mobile"
+                onClick={() => onOpenCheckpoint(cp)}
+              >
+                <IconHistory size={13} aria-hidden="true" />
+                <span>
+                  #{cp.turn_number}
+                  {cp.files_changed > 0 ? ` · ${cp.files_changed} 文件` : ''}
+                </span>
+                {cp.insertions > 0 && <span className="cp-stat-add">+{cp.insertions}</span>}
+                {cp.deletions > 0 && <span className="cp-stat-del">-{cp.deletions}</span>}
+              </button>
             )
           })()}
         </article>

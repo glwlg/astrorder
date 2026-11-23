@@ -219,13 +219,21 @@ func CleanPath(value string) string {
 func cleanInputPath(value string) string {
 	value = strings.TrimSpace(value)
 	value = strings.Trim(value, "<>\"'")
-	if strings.HasPrefix(value, "file:///") {
-		return value[8:]
-	}
-	if strings.HasPrefix(value, "file://") {
-		return value[7:]
+	if len(value) >= 7 && strings.EqualFold(value[:7], "file://") {
+		rest := value[7:]
+		if len(rest) >= len("localhost/") && strings.EqualFold(rest[:len("localhost/")], "localhost/") {
+			rest = rest[len("localhost"):]
+		}
+		if len(rest) >= 3 && rest[0] == '/' && isASCIIAlpha(rest[1]) && rest[2] == ':' && (len(rest) == 3 || rest[3] == '/' || rest[3] == '\\') {
+			return rest[1:]
+		}
+		return rest
 	}
 	return value
+}
+
+func isASCIIAlpha(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
 }
 
 func stringMap(value any) (map[string]any, bool) {

@@ -62,4 +62,17 @@ describe('Artifact & Drawio Viewer Integration', () => {
     expect(url.searchParams.get('connection_id')).toBe('ssh-images')
     expect(url.searchParams.get('path')).toBe(`/home/fixture/${name}`)
   })
+
+  it('resolves POSIX file:/// image URIs cleanly without losing leading slash or crashing on bare percent', () => {
+    const session = { ...mockSession, workspace: '/home/luwei/workspace/OpsCore', connection_id: 'ssh-ops' }
+    const fromFileUri = resolveArtifactFromPath(
+      'file:///home/luwei/workspace/OpsCore/docs/designs/security-drill/03-drill-arena.png',
+      session,
+    )
+    expect(fromFileUri.path).toBe('/home/luwei/workspace/OpsCore/docs/designs/security-drill/03-drill-arena.png')
+    expect(artifactViewerRegistry.findViewer(fromFileUri)?.id).toBe('image-viewer')
+
+    const withPercent = resolveArtifactFromPath('/home/luwei/workspace/OpsCore/100% pass.png', session)
+    expect(withPercent.path).toBe('/home/luwei/workspace/OpsCore/100% pass.png')
+  })
 })

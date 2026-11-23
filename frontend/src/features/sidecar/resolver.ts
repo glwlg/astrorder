@@ -2,11 +2,44 @@ import type { ArtifactRef } from '../../domain/artifact'
 import type { Session } from '../../domain/types'
 import { artifactViewerRegistry } from './registry'
 
+function safeDecodeURIComponent(value: string): string {
+  try {
+    return decodeURIComponent(value.replace(/%(?![0-9a-fA-F]{2})/g, '%25'))
+  } catch {
+    return value
+  }
+}
+
 /**
  * 分离文件路径与行号后缀，如 /path/to/file.py:123:4 -> { path: '/path/to/file.py', line: 123 }
  */
 export function splitPathAndLine(raw: string): { path: string; line?: number } {
-  let cleaned = decodeURIComponent(raw.trim().replace(/^[<"']|[>"']$/g, ''))
+  const unquoted = raw.trim().replace(/^[<"']|[>"']$/g, '')
+  let cleaned = ''
+  if (/^file:\/\//i.test(unquoted)) {
+    try {
+      const fileUrl = new URL(unquoted)
+      let pathname = fileUrl.hostname && fileUrl.hostname.toLowerCase() !== 'localhost'
+        ? `//${fileUrl.hostname}${fileUrl.pathname}`
+        : fileUrl.pathname
+      pathname = safeDecodeURIComponent(pathname)
+      if (/^\/[a-zA-Z]:[/\\]/.test(pathname)) pathname = pathname.slice(1)
+      const hashLine = fileUrl.hash.match(/^#?L(\d+)/i)
+      if (hashLine) {
+        return { path: pathname, line: parseInt(hashLine[1], 10) }
+      }
+      cleaned = pathname
+    } catch {
+      const stripped = safeDecodeURIComponent(unquoted.replace(/^file:\/\/(?:localhost)?/i, ''))
+      cleaned = /^\/[a-zA-Z]:[/\\]/.test(stripped) ? stripped.slice(1) : stripped
+    }
+  } else {
+    cleaned = safeDecodeURIComponent(unquoted)
+  }
+  const hashMatch = cleaned.match(/^(.*?)#L(\d+)(?:-L?\d+)?$/i)
+  if (hashMatch) {
+    return { path: hashMatch[1], line: parseInt(hashMatch[2], 10) }
+  }
   const match = cleaned.match(/^(.*?):(\d+)(?::\d+)?$/)
   if (match) {
     return { path: match[1], line: parseInt(match[2], 10) }

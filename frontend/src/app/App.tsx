@@ -26,6 +26,7 @@ function lazyNamed<T extends ComponentType<any>>(
 
 const MobileWorkspace = lazyNamed(() => import('../features/mobile/MobileWorkspace'), 'MobileWorkspace')
 const GroupsPage = lazyNamed(() => import('../features/chat/GroupsPage'), 'GroupsPage')
+const ActionInboxPage = lazyNamed(() => import('../features/inbox/ActionInboxPage'), 'ActionInboxPage')
 const MonitorPage = lazyNamed(() => import('../features/monitor/MonitorPage'), 'MonitorPage')
 const PluginsPage = lazyNamed(() => import('../features/plugins/PluginsPage'), 'PluginsPage')
 const AnalyticsPage = lazyNamed(() => import('../features/analytics/AnalyticsPage'), 'AnalyticsPage')
@@ -130,6 +131,7 @@ function AuthenticatedApp() {
         <Route index element={<Navigate to="/chat" replace />} />
         <Route path="chat" element={<ChatPage />} />
         <Route path="chat/:sessionId" element={<ChatPage />} />
+        <Route path="inbox" element={<Suspense fallback={<RouteSuspenseFallback />}><ActionInboxPage /></Suspense>} />
         <Route path="groups" element={<Suspense fallback={<RouteSuspenseFallback />}><GroupsPage /></Suspense>} />
         <Route path="groups/:groupId" element={<Suspense fallback={<RouteSuspenseFallback />}><GroupsPage /></Suspense>} />
         <Route path="monitor" element={<Suspense fallback={<RouteSuspenseFallback />}><MonitorPage /></Suspense>} />

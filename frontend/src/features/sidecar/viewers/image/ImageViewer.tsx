@@ -42,10 +42,10 @@ export function ImageViewer({ artifact, toolbarAction }: ViewerContext) {
 
   return (
     <div className="sidecar-image-viewer" style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, position: 'relative' }}>
-      <Paper p="xs" withBorder data-liquid-surface="toolbar" data-liquid-snapshot=".sidecar-image-viewer" style={{ position: 'absolute', inset: '8px 8px auto', zIndex: 10, borderRadius: 10 }}>
-        <Group justify="space-between" wrap="nowrap">
-          <Text size="xs" fw={600} truncate title={artifact.path || artifact.name}>{artifact.name}</Text>
-          <Group gap="xs" wrap="nowrap">
+      <Paper p="xs" withBorder data-liquid-surface="toolbar" data-liquid-snapshot=".sidecar-image-viewer" style={{ flex: 'none', margin: '8px 8px 0', zIndex: 10, borderRadius: 10 }}>
+        <Group justify="space-between" wrap="nowrap" gap="xs">
+          <Text size="xs" fw={600} truncate title={artifact.path || artifact.name} style={{ minWidth: 0 }}>{artifact.name}</Text>
+          <Group gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
             {toolbarAction}
             <Button size="compact-xs" variant="subtle" onClick={() => setActualSize(value => !value)}>{actualSize ? '适应窗口' : '原始尺寸'}</Button>
             <Tooltip label="刷新"><ActionIcon variant="subtle" aria-label="刷新图片" onClick={() => setRevision(value => value + 1)}><IconRefresh size={14} /></ActionIcon></Tooltip>
@@ -53,10 +53,32 @@ export function ImageViewer({ artifact, toolbarAction }: ViewerContext) {
           </Group>
         </Group>
       </Paper>
-      <div style={{ flex: 1, minHeight: 0, position: 'relative', overflow: 'auto', textAlign: 'center', padding: 16 }}>
+      <div className="sidecar-image-canvas" style={{ flex: 1, minHeight: 0, position: 'relative', overflow: 'auto', display: 'flex', padding: 16 }}>
         <LoadingOverlay visible={loading} />
-        {error ? <div><Text size="sm">{error}</Text><Button size="xs" mt="md" variant="light" onClick={() => setRevision(value => value + 1)}>重试</Button></div> : source && (
-          <img src={source} alt={artifact.name} style={{ maxWidth: actualSize ? undefined : '100%', maxHeight: actualSize ? undefined : '100%', objectFit: 'contain' }} onLoad={() => setLoading(false)} onError={() => { setLoading(false); setError('图片解码失败，文件可能已损坏或格式不受支持') }} />
+        {error ? (
+          <div className="sidecar-image-error" style={{ margin: 'auto', textAlign: 'center', maxWidth: '100%' }}>
+            <Text size="sm">{error}</Text>
+            <Button size="xs" mt="md" variant="light" onClick={() => setRevision(value => value + 1)}>重试</Button>
+          </div>
+        ) : source && (
+          <img
+            src={source}
+            alt={artifact.name}
+            style={{
+              margin: 'auto',
+              display: 'block',
+              width: 'auto',
+              height: 'auto',
+              flexShrink: actualSize ? 0 : 1,
+              minWidth: actualSize ? undefined : 0,
+              minHeight: actualSize ? undefined : 0,
+              maxWidth: actualSize ? 'none' : '100%',
+              maxHeight: actualSize ? 'none' : '100%',
+              objectFit: 'contain',
+            }}
+            onLoad={() => setLoading(false)}
+            onError={() => { setLoading(false); setError('图片解码失败，文件可能已损坏或格式不受支持') }}
+          />
         )}
       </div>
     </div>

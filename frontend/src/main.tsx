@@ -24,46 +24,59 @@ if (typeof window !== 'undefined' && 'astrorderDesktop' in window) {
 if (import.meta.env.PROD) {
   const hadController = typeof navigator !== 'undefined' && Boolean(navigator.serviceWorker?.controller)
   let updateNotified = false
-  if (hadController && navigator.serviceWorker) {
-    navigator.serviceWorker.addEventListener('controllerchange', () => {
-      if (updateNotified) return
-      updateNotified = true
-      notifications.show({
-        id: 'astrorder-pwa-update',
-        color: 'violet',
-        autoClose: false,
-        title: '发现新版本',
-        message: (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 4 }}>
-            <span>新版本已就绪，刷新即可生效</span>
-            <button
-              type="button"
-              onClick={() => window.location.reload()}
-              style={{
-                flex: 'none',
-                border: 0,
-                borderRadius: 8,
-                padding: '5px 11px',
-                fontSize: 12,
-                fontWeight: 600,
-                cursor: 'pointer',
-                background: '#7540bd',
-                color: '#ffffff',
-              }}
-            >
-              立即刷新
-            </button>
-          </div>
-        ),
-      })
+  const showUpdateNotification = (reloadAction: () => void) => {
+    if (updateNotified) return
+    updateNotified = true
+    notifications.show({
+      id: 'astrorder-pwa-update',
+      color: 'violet',
+      autoClose: false,
+      title: '发现新版本',
+      message: (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 4 }}>
+          <span>新版本已就绪，刷新即可生效</span>
+          <button
+            type="button"
+            onClick={reloadAction}
+            style={{
+              flex: 'none',
+              border: 0,
+              borderRadius: 8,
+              padding: '5px 11px',
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: 'pointer',
+              background: '#7540bd',
+              color: '#ffffff',
+            }}
+          >
+            立即刷新
+          </button>
+        </div>
+      ),
     })
   }
-  registerSW({
+  if (hadController && navigator.serviceWorker) {
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      showUpdateNotification(() => window.location.reload())
+    })
+  }
+  const updateSW = registerSW({
     immediate: true,
-    onRegisteredSW(_url, registration) {
-      document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') void registration?.update()
+    onNeedRefresh() {
+      showUpdateNotification(() => {
+        void updateSW(true)
       })
+    },
+    onRegisteredSW(_url, registration) {
+      const checkUpdate = () => {
+        void registration?.update()
+      }
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') checkUpdate()
+      })
+      window.addEventListener('focus', checkUpdate)
+      window.addEventListener('online', checkUpdate)
     },
   })
 }

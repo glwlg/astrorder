@@ -883,6 +883,10 @@ func projectSimpleSessionStatusTx(
 		return nil, nil
 	}
 
+	if newStatus == "error" && isSessionSleptTx(ctx, tx, ident.AgentID, ident.SessionID) {
+		newStatus = "idle"
+	}
+
 	err = updateSessionStatusTx(ctx, tx, ident.AgentID, ident.SessionID, newStatus)
 	if err != nil {
 		return nil, fmt.Errorf("update session status %s: %w", newStatus, err)
@@ -906,6 +910,18 @@ func projectSimpleSessionStatusTx(
 		Data:      payload,
 	})
 	return events, nil
+}
+
+func isSessionSleptTx(ctx context.Context, tx *sql.Tx, agentID, sessionID string) bool {
+	encoded, err := json.Marshal([]string{agentID, sessionID})
+	if err != nil {
+		return false
+	}
+	var raw string
+	if err := tx.QueryRowContext(ctx, `SELECT value FROM workspace_preferences WHERE "key"=?`, "session_sleep:"+string(encoded)).Scan(&raw); err != nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(raw), "true")
 }
 
 func projectHermesApprovalRequestTx(ctx context.Context, tx *sql.Tx, streamID string, payload map[string]any) ([]store.Event, error) {

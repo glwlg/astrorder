@@ -1,22 +1,21 @@
 import {
   IconGitFork,
   IconSparkles,
-  IconX,
 } from '@tabler/icons-react'
-import { ShieldCheckIcon, SidebarSimpleIcon, SlidersHorizontalIcon, SquaresFourIcon } from '../../components/workbenchIcons'
+import { ClockCounterClockwiseIcon, ShieldCheckIcon, SidebarSimpleIcon, SlidersHorizontalIcon, SquaresFourIcon } from '../../components/workbenchIcons'
 import { ActionIcon, Button, Drawer, Group, Modal, Select, Stack, Switch, Text, TextInput, Tooltip } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { isUserInput } from '../../components/UserInputCard'
 import { useDisclosure, useMediaQuery } from '@mantine/hooks'
 import { useQueryClient, useQuery } from '@tanstack/react-query'
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ApiError, api } from '../../api/client'
 import { findSessionHandoff, newCommandId, scopeKey } from '../../domain/semantics'
 import type { Approval, Command, Message, Session, Task } from '../../domain/types'
 import { EmptyState } from '../../components/EmptyState'
+import { ImageLightbox } from '../../components/ImageLightbox'
 import { SessionStatusLabel } from '../../components/Status'
 import { WelcomeView } from './WelcomeView'
 import { sessionActivityStatus } from '../../components/sessionRailModel'
@@ -26,6 +25,7 @@ import { isDisconnectedSessionRoute, selectApprovals, selectCommands, selectOutb
 import { useSessionResources } from '../../hooks/useAstrorderData'
 import { isAntigravityAgent, useSessionSwarm } from '../../hooks/useSessionSwarm'
 import { useSessionSchedules } from '../../hooks/useSessionSchedules'
+import { useSessionCheckpoints } from '../../hooks/useSessionCheckpoints'
 import { ChatComposer } from './ChatComposer'
 import { SessionComposerGate } from './SessionComposerGate'
 import { SessionConnectionNotice } from './SessionConnectionNotice'
@@ -42,11 +42,15 @@ import { TaskDetails } from './TaskDetails'
 import { Transcript } from './Transcript'
 import { SidecarHost } from '../sidecar/SidecarHost'
 import { useSidecarStore } from '../sidecar/sidecarStore'
+import { resolveArtifactFromPath } from '../sidecar/resolver'
+import { artifactViewerRegistry } from '../sidecar/registry'
+import type { SessionCheckpoint } from '../../api/client'
 import { ErrorBoundary } from '../../components/ErrorBoundary'
 import { BotGroupChatPage } from './BotGroupChatPage'
 import { useShortcutHandlers } from '../shortcuts/shortcuts'
 import { SessionBreadcrumb } from './SessionBreadcrumb'
 import { WorkspaceChangesPanel } from './WorkspaceChangesPanel'
+import { SessionCheckpointsPanel } from './SessionCheckpointsPanel'
 
 
 const NO_COMMANDS: Command[] = []
@@ -416,6 +420,23 @@ function ChatPageBody() {
     sidecar: toggleRightPanel,
   } : {})
   const [taskDetailsOpened, { open: openTaskDetails, close: closeTaskDetails }] = useDisclosure(false)
+  const [checkpointsOpened, { open: openCheckpoints, close: closeCheckpoints }] = useDisclosure(false)
+  const [focusedCheckpointId, setFocusedCheckpointId] = useState<string | null>(null)
+  const handleOpenCheckpoint = useCallback((cp: SessionCheckpoint) => {
+    setFocusedCheckpointId(cp.id)
+    openCheckpoints()
+  }, [openCheckpoints])
+  const handleOpenCheckpointFile = useCallback((relativePath: string) => {
+    if (!selected?.workspace) return
+    const base = selected.workspace.replace(/[\\/]+$/, '')
+    const sep = base.includes('\\') && !base.includes('/') ? '\\' : '/'
+    const fullPath = /^[a-zA-Z]:[\\/]|^\//.test(relativePath) ? relativePath : `${base}${sep}${relativePath}`
+    const artifact = resolveArtifactFromPath(fullPath, selected)
+    const viewer = artifactViewerRegistry.findViewer(artifact)
+    if (!viewer) return
+    useSidecarStore.getState().openArtifact(artifact, viewer.id)
+    closeCheckpoints()
+  }, [closeCheckpoints, selected])
   const [taskSelection, setTaskSelection] = useState<Pick<Task, 'id' | 'agent_id' | 'session_id'> | null>(null)
   const [gallery, setGallery] = useState<{ images: string[]; index: number } | null>(null)
   const openGallery = (images: string[], index: number) => {
@@ -456,6 +477,7 @@ function ChatPageBody() {
   const background = useBackgroundProcesses(selected, Boolean(agent && ['hermes', 'codex'].includes(agent.kind)))
   const sessionSwarm = useSessionSwarm(selected, agent, changesOpened)
   const sessionSchedules = useSessionSchedules(selected)
+  const sessionCheckpoints = useSessionCheckpoints(selected, Boolean(selected?.workspace))
   const enabledScheduleCount = useMemo(
     () => (sessionSchedules.data || []).filter((item) => item.enabled).length,
     [sessionSchedules.data],
@@ -616,6 +638,26 @@ function ChatPageBody() {
                 {reviewRun?.status === 'failed' && <Text size="xs" c="red">审查失败</Text>}
 
                 {!!approvals.length && <Button size="compact-sm" color="yellow" variant="light" onClick={openDetails}>{approvals.some(isUserInput) ? '等待回答' : '等待授权'} · {approvals.length}</Button>}
+                {selected.workspace && (
+                  <Tooltip
+                    label={sessionCheckpoints.items.length > 0 ? `代码检查点（${sessionCheckpoints.items.length}）` : '按轮次代码检查点'}
+                    position="bottom"
+                  >
+                    <ActionIcon
+                      className="chat-checkpoints-toggle"
+                      variant="subtle"
+                      aria-label="打开代码检查点"
+                      onClick={() => { setFocusedCheckpointId(null); openCheckpoints() }}
+                    >
+                      <ClockCounterClockwiseIcon size={22} weight={checkpointsOpened ? 'duotone' : 'regular'} aria-hidden="true" />
+                      {sessionCheckpoints.items.length > 0 && (
+                        <span className="chat-checkpoints-badge" aria-hidden="true">
+                          {sessionCheckpoints.items.length > 99 ? '99+' : sessionCheckpoints.items.length}
+                        </span>
+                      )}
+                    </ActionIcon>
+                  </Tooltip>
+                )}
                 <Tooltip label="会话详情" position="bottom">
                   <ActionIcon className="chat-details-button" variant="subtle" size="sm" onClick={openDetails} aria-label="打开会话详情">
                     <SlidersHorizontalIcon size={22} aria-hidden="true" />
@@ -705,6 +747,9 @@ function ChatPageBody() {
              void resources.commands.refetch()
            }}
            commands={commands}
+           checkpoints={sessionCheckpoints.items}
+           onOpenCheckpoint={handleOpenCheckpoint}
+           highlightMessageId={searchParams.get('message_id')}
            onForkAtMessage={handleOpenFork}
            onEditLastUserMessage={(text) => {
               useAstrorderStore.getState().setDraft(selected.agent_id, selected.id, { text, attachments: [] })
@@ -842,63 +887,27 @@ function ChatPageBody() {
       <Drawer opened={taskDetailsOpened && selectedTask !== null} onClose={() => { closeTaskDetails(); setTaskSelection(null) }} title="任务详情" position={mobileTaskSheet ? 'bottom' : 'right'} size={mobileTaskSheet ? 'min(88vh, 620px)' : 'min(92vw, 520px)'}>
         {selectedTask && <TaskDetails task={selectedTask} canStop={Boolean(agent?.capabilities.includes('stop') && sessions.some(session => session.agent_id === selectedTask.agent_id && session.id === selectedTask.target_id) && ['pending', 'running', 'waiting_approval'].includes(selectedTask.status))} onStop={(task) => void handleStopTask(task)} onOpenSession={(sid, aid) => { closeTaskDetails(); setTaskSelection(null); navigate(`/chat/${encodeURIComponent(sid)}?agent_id=${encodeURIComponent(aid)}`) }} onJumpToLatest={() => window.scrollTo({ top: document.body.scrollHeight, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })} onClose={() => { closeTaskDetails(); setTaskSelection(null) }} />}
       </Drawer>
-      {gallery && gallery.images.length > 0 &&
-        typeof document !== 'undefined' &&
-        createPortal(
-          <div
-            className="desktop-lightbox"
-            role="dialog"
-            aria-label="图片预览"
-            onClick={() => setGallery(null)}
-          >
-            <button
-              type="button"
-              className="desktop-lightbox-close"
-              aria-label="关闭图片"
-              onClick={() => setGallery(null)}
-            >
-              <IconX size={24} />
-            </button>
-            {gallery.images.length > 1 && (
-              <>
-                <button
-                  type="button"
-                  className="desktop-lightbox-nav prev"
-                  aria-label="上一张图片"
-                  disabled={gallery.index <= 0}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setGallery(g => g ? { ...g, index: Math.max(0, g.index - 1) } : null)
-                  }}
-                >
-                  ‹
-                </button>
-                <button
-                  type="button"
-                  className="desktop-lightbox-nav next"
-                  aria-label="下一张图片"
-                  disabled={gallery.index >= gallery.images.length - 1}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setGallery(g => g ? { ...g, index: Math.min(g.images.length - 1, g.index + 1) } : null)
-                  }}
-                >
-                  ›
-                </button>
-                <div className="desktop-lightbox-counter" onClick={(e) => e.stopPropagation()}>
-                  {gallery.index + 1} / {gallery.images.length}
-                </div>
-              </>
-            )}
-            <img
-              className="desktop-lightbox-image"
-              src={gallery.images[gallery.index]}
-              alt="放大预览"
-              onClick={(e) => e.stopPropagation()}
-            />
-          </div>,
-          document.body,
+      <Drawer
+        opened={checkpointsOpened && Boolean(selected)}
+        onClose={() => { setFocusedCheckpointId(null); closeCheckpoints() }}
+        title="按轮次代码检查点"
+        position={mobileTaskSheet ? 'bottom' : 'right'}
+        size={mobileTaskSheet ? 'min(90vh, 680px)' : 'min(94vw, 560px)'}
+      >
+        {selected && (
+          <SessionCheckpointsPanel
+            session={selected}
+            initialCheckpointId={focusedCheckpointId}
+            onOpenFile={handleOpenCheckpointFile}
+          />
         )}
+      </Drawer>
+      <ImageLightbox
+        images={gallery?.images ?? null}
+        index={gallery?.index ?? 0}
+        onIndexChange={(nextIndex) => setGallery(g => g ? { ...g, index: nextIndex } : null)}
+        onClose={() => setGallery(null)}
+      />
       {selected && <QuickOpen session={selected} opened={quickOpenOpened} onClose={() => setQuickOpenOpened(false)} />}
 
       {/* 从任意回复分叉会话弹窗 */}

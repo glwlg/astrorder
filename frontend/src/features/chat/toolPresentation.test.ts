@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { activityDuration, activityState, describeTool, fileChangeDiffs, formatPackSummary, unwrapCommand } from './toolPresentation'
+import { render, screen } from '@testing-library/react'
+import { activityDuration, activityState, describeTool, fileChangeDiffs, formatCommandRowDisplay, formatPackSummary, PackSummary, unwrapCommand } from './toolPresentation'
 import type { Message } from '../../domain/types'
 
 function makeMessage(override: Partial<Message>): Message {
@@ -84,7 +85,7 @@ describe('describeTool', () => {
       },
     })
     expect(fileChangeDiffs(msg)).toEqual([
-      { file: 'App.tsx', diff: '@@ -1 +1 @@\n-old\n+new' },
+      { file: 'App.tsx', path: '/repo/src/App.tsx', diff: '@@ -1 +1 @@\n-old\n+new' },
     ])
   })
 
@@ -180,7 +181,61 @@ describe('antigravity tool normalization fallback', () => {
     expect(editDesc.iconKey).toBe('edit')
     expect(editDesc.target).toBe('main.go')
     expect(fileChangeDiffs(editMsg)).toEqual([
-      { file: 'main.go', diff: '--- a/main.go\n+++ b/main.go\n@@\n-oldCall()\n+newCall()' },
+      { file: 'main.go', path: '/repo/main.go', diff: '--- a/main.go\n+++ b/main.go\n@@\n-oldCall()\n+newCall()' },
     ])
+  })
+
+  it('renders image read_file, clean thinking headline, noisy command summary, and excludes thinking from running tool progress', () => {
+    const imgDesc = describeTool(makeMessage({
+      tool: {
+        name: 'read_file',
+        status: 'completed',
+        arguments: { Path: '/tmp/scratch/agent-detail-install-light.png', path: '/tmp/scratch/agent-detail-install-light.png' },
+      },
+    }))
+    expect(imgDesc.iconKey).toBe('image')
+    expect(imgDesc.action).toBe('查看图片')
+    expect(imgDesc.target).toBe('agent-detail-install-light.png')
+
+    const thinkDesc = describeTool(makeMessage({
+      kind: 'thinking',
+      role: 'assistant',
+      text: 'Initial hypothesis centered on `detail-pending` metrics in [MonitorPage](file:///app/MonitorPage.tsx).',
+    }))
+    expect(thinkDesc.target).toBe('Initial hypothesis centered on detail-pending metrics in MonitorPage.')
+
+    const cmdDesc = describeTool(makeMessage({
+      tool: {
+        name: 'run_command',
+        status: 'completed',
+        arguments: {
+          CommandLine: 'XDG_CONFIG_HOME=/tmp/xdg-cfg XDG_CACHE_HOME=/tmp/xdg-cache node /home/user/.gemini/verify_agent_install_ui.mjs',
+          toolSummary: 'Verify agent install UI',
+        },
+      },
+    }))
+    const rowDisplay = formatCommandRowDisplay(cmdDesc, 'XDG_CONFIG_HOME=/tmp/xdg-cfg XDG_CACHE_HOME=/tmp/xdg-cache node /home/user/.gemini/verify_agent_install_ui.mjs')
+    expect(rowDisplay.isHumanSummary).toBe(true)
+    expect(rowDisplay.text).toBe('Verify agent install UI')
+
+    const swarmDesc = describeTool(makeMessage({
+      tool: { name: 'swarm', status: 'completed', arguments: { action: 'add', name: 'reviewer' } },
+    }))
+    expect(swarmDesc.action).toBe('Swarm')
+    expect(swarmDesc.target).toBe('add reviewer')
+
+    // Running pack progress counts executable tool steps instead of showing 2 / 4 because of thinking steps
+    render(
+      PackSummary({
+        isRunning: true,
+        pack: [
+          makeMessage({ id: 't1', kind: 'thinking', role: 'assistant', text: 'Step 1 thought' }),
+          makeMessage({ id: 'c1', tool: { name: 'read_file', status: 'completed', arguments: { Path: '/a.ts' } } }),
+          makeMessage({ id: 't2', kind: 'thinking', role: 'assistant', text: 'Step 2 thought' }),
+          makeMessage({ id: 'c2', tool: { name: 'edit_file', status: 'completed', arguments: { Path: '/a.ts' } } }),
+        ],
+      }),
+    )
+    expect(screen.getByLabelText('已处理 2 项，共 2 项')).toHaveTextContent('2 / 2')
   })
 })

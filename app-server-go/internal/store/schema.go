@@ -392,6 +392,29 @@ PRIMARY KEY (scope)
 	updated_at DATETIME NOT NULL,
 	PRIMARY KEY (id)
 )`},
+	{Name: "session_checkpoints", Create: `CREATE TABLE session_checkpoints (
+	id VARCHAR(64) NOT NULL,
+	agent_id VARCHAR(256) NOT NULL,
+	session_id VARCHAR(256) NOT NULL,
+	turn_number INTEGER NOT NULL DEFAULT 0,
+	kind VARCHAR(32) NOT NULL,
+	command_id VARCHAR(256) NOT NULL DEFAULT '',
+	label TEXT NOT NULL DEFAULT '',
+	workspace TEXT NOT NULL DEFAULT '',
+	repo_root TEXT NOT NULL DEFAULT '',
+	branch VARCHAR(256) NOT NULL DEFAULT '',
+	head_sha VARCHAR(64) NOT NULL DEFAULT '',
+	tree_sha VARCHAR(64) NOT NULL,
+	commit_sha VARCHAR(64) NOT NULL DEFAULT '',
+	ref_name TEXT NOT NULL DEFAULT '',
+	prev_tree_sha VARCHAR(64) NOT NULL DEFAULT '',
+	files_changed INTEGER NOT NULL DEFAULT 0,
+	insertions INTEGER NOT NULL DEFAULT 0,
+	deletions INTEGER NOT NULL DEFAULT 0,
+	files_json JSON NOT NULL,
+	created_at DATETIME NOT NULL,
+	PRIMARY KEY (id)
+)`},
 }
 
 var indices = []string{
@@ -416,6 +439,7 @@ var indices = []string{
 	"CREATE INDEX IF NOT EXISTS ix_review_relay_runs_source_session_id ON review_relay_runs (source_session_id)",
 	"CREATE INDEX IF NOT EXISTS ix_session_schedules_due ON session_schedules (enabled, next_run_at)",
 	"CREATE INDEX IF NOT EXISTS ix_session_schedules_session ON session_schedules (agent_id, session_id)",
+	"CREATE INDEX IF NOT EXISTS ix_session_checkpoints_session ON session_checkpoints (agent_id, session_id, turn_number, created_at)",
 	"CREATE INDEX IF NOT EXISTS ix_sessions_agent_id ON sessions (agent_id)",
 	"CREATE INDEX IF NOT EXISTS ix_sessions_connection_id ON sessions (connection_id)",
 	"CREATE INDEX IF NOT EXISTS ix_sessions_handoff_from_agent_id ON sessions (handoff_from_agent_id)",

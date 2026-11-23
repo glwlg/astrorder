@@ -10,7 +10,7 @@ import {
   IconInfoCircle,
 } from '@tabler/icons-react'
 import { highlightCode, parseCalloutBlockquote, type CalloutKind } from '../../components/markdownHighlight'
-import { isMobileLocalFilePath, mobileFileUrl, resolveMobileFilePath } from './mobileFilePath'
+import { extractMobileMarkdownImageUrls, isMobileImageFilePath, isMobileLocalFilePath, mobileFileUrl, resolveMobileFilePath } from './mobileFilePath'
 
 const CALLOUT_ICONS: Record<CalloutKind, typeof IconInfoCircle> = {
   note: IconInfoCircle,
@@ -79,13 +79,27 @@ function CodeBlock({ children }: { children?: ReactNode }) {
 export function MobileMarkdown({ value, onFileClick, onImageClick, workspace, sessionId, connectionId }: {
   value: string
   onFileClick?: (path: string) => void
-  onImageClick?: (url: string) => void
+  onImageClick?: (url: string, gallery?: string[]) => void
   workspace?: string | null
   sessionId?: string
   connectionId?: string | null
 }) {
+  const galleryRef = useRef<string[]>([])
+  galleryRef.current = useMemo(
+    () => extractMobileMarkdownImageUrls(value, workspace, sessionId, connectionId),
+    [value, workspace, sessionId, connectionId],
+  )
   const callbacks = useRef({ onFileClick, onImageClick })
   callbacks.current = { onFileClick, onImageClick }
+  const openImage = (targetUrl: string) => {
+    const gallery = galleryRef.current
+    if (gallery.length > 1) {
+      const normalized = gallery.includes(targetUrl) ? gallery : [targetUrl, ...gallery]
+      callbacks.current.onImageClick?.(targetUrl, normalized)
+    } else {
+      callbacks.current.onImageClick?.(targetUrl)
+    }
+  }
   const components = useMemo<Components>(() => ({
     pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
     blockquote: ({ children }) => {
@@ -107,19 +121,37 @@ export function MobileMarkdown({ value, onFileClick, onImageClick, workspace, se
     a: ({ href, children }) => {
       const url = href || ''
       const isLocal = isMobileLocalFilePath(url)
-      if (isLocal && onFileClick) {
-        return (
-          <a
-            className="m-file-pill"
-            href={mobileFileUrl(url, workspace, sessionId, connectionId)}
-            onClick={(e) => {
-              e.preventDefault()
-              callbacks.current.onFileClick?.(resolveMobileFilePath(url, workspace))
-            }}
-          >
-            {children}
-          </a>
-        )
+      if (isLocal && (onImageClick || onFileClick)) {
+        const resolvedPath = resolveMobileFilePath(url, workspace)
+        const rawUrl = mobileFileUrl(url, workspace, sessionId, connectionId)
+        if (onImageClick && isMobileImageFilePath(resolvedPath)) {
+          return (
+            <a
+              className="m-file-pill is-image"
+              href={rawUrl}
+              onClick={(e) => {
+                e.preventDefault()
+                openImage(rawUrl)
+              }}
+            >
+              {children}
+            </a>
+          )
+        }
+        if (onFileClick) {
+          return (
+            <a
+              className="m-file-pill"
+              href={rawUrl}
+              onClick={(e) => {
+                e.preventDefault()
+                callbacks.current.onFileClick?.(resolvedPath)
+              }}
+            >
+              {children}
+            </a>
+          )
+        }
       }
       return /^(?:https?:\/\/|mailto:|\/api\/v1\/)/i.test(url)
         ? <a href={url} target="_blank" rel="noopener noreferrer">{children}</a>
@@ -131,7 +163,7 @@ export function MobileMarkdown({ value, onFileClick, onImageClick, workspace, se
         : src
       if (!url || !/^(?:https?:\/\/|\/api\/v1\/)/i.test(url)) return null
       if (onImageClick) {
-        return <button type="button" style={{ border: 'none', background: 'none', padding: 0, display: 'block' }} onClick={() => callbacks.current.onImageClick?.(url)}><img src={url} alt={alt || ''} loading="lazy" style={{ maxWidth: '100%', borderRadius: 8, marginTop: 8, marginBottom: 8, display: 'block' }} /></button>
+        return <button type="button" style={{ border: 'none', background: 'none', padding: 0, display: 'block' }} onClick={() => openImage(url)}><img src={url} alt={alt || ''} loading="lazy" style={{ maxWidth: '100%', borderRadius: 8, marginTop: 8, marginBottom: 8, display: 'block' }} /></button>
       }
       return <img src={url} alt={alt || ''} loading="lazy" style={{ maxWidth: '100%', borderRadius: 8, marginTop: 8, marginBottom: 8, display: 'block' }} />
     },

@@ -773,8 +773,17 @@ func (l *localFileSystem) ExecGit(ctx context.Context, request GitRequest) (GitR
 	if err != nil || !info.IsDir() {
 		return GitResult{}, errorf(422, "invalid_workspace", "无法读取该工作区的 Git 状态；请确认会话工作区目录。", err)
 	}
-	if request.Operation == GitSnapshotReadonly {
+	switch request.Operation {
+	case GitSnapshotReadonly:
 		return captureLocalSnapshot(ctx, l.gitBinary, workspace, l.roots)
+	case GitCheckpointCapture:
+		return captureLocalCheckpoint(ctx, l.gitBinary, workspace, request.Branch, request.BaseBranch)
+	case GitCheckpointDiff:
+		return diffLocalCheckpoint(ctx, l.gitBinary, workspace, request.BaseBranch, request.Branch, request.Path)
+	case GitCheckpointRestore:
+		return restoreLocalCheckpoint(ctx, l.gitBinary, workspace, l.roots, request.BaseBranch, request.Branch, request.Path)
+	case GitCheckpointDelete:
+		return deleteLocalCheckpoint(ctx, l.gitBinary, workspace, request.Branch)
 	}
 	args, err := gitArgs(request)
 	if err != nil {

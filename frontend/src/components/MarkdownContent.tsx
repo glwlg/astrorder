@@ -440,10 +440,12 @@ const pathCheckCache = new Map<string, { expires: number; promise: Promise<Set<s
 export function MarkdownContent({
   value,
   onImageClick,
+  onGalleryClick,
   session,
 }: {
   value: string
   onImageClick?: (url: string) => void
+  onGalleryClick?: (url: string, allUrls: string[]) => void
   session?: Session | null
 }) {
   const fileSourceScope = useContext(FileSourceContext)
@@ -656,6 +658,32 @@ export function MarkdownContent({
                 const rawUrl = `/api/v1/files/raw?${query.toString()}`
                 const openImage = () => {
                   closeHoverNow()
+                  if (onGalleryClick) {
+                    const allUrls: string[] = []
+                    const seen = new Set<string>()
+                    const linkRe = /(!?)\[[^\]]*\]\((<[^>]+>|[^)\s]+)(?:\s+"[^"]*")?\)/g
+                    for (const m of value.matchAll(linkRe)) {
+                      const rawTarget = (m[2] || '').trim()
+                      if (!rawTarget) continue
+                      const parsed = parseFileHref(rawTarget).path
+                      const isHttp = /^https?:\/\//i.test(parsed)
+                      if ((!isHttp && isFileLink(rawTarget, parsed) && isImagePath(parsed)) || (isHttp && isLocalPath(parsed) && isImagePath(parsed))) {
+                        const fp = resolvePathWithWorkspace(parsed)
+                        const q = new URLSearchParams({ path: fp })
+                        if (currentSession?.id) q.set('session_id', currentSession.id)
+                        if (currentSession?.connection_id) q.set('connection_id', currentSession.connection_id)
+                        const u = `/api/v1/files/raw?${q.toString()}`
+                        if (!seen.has(u)) {
+                          seen.add(u)
+                          allUrls.push(u)
+                        }
+                      }
+                    }
+                    if (allUrls.length > 1) {
+                      onGalleryClick(rawUrl, allUrls.includes(rawUrl) ? allUrls : [rawUrl, ...allUrls])
+                      return
+                    }
+                  }
                   if (onImageClick) onImageClick(rawUrl)
                   else window.open(rawUrl, '_blank')
                 }

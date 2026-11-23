@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type 
 import { createPortal } from 'react-dom'
 import { IconChevronDown, IconChevronRight, IconCopy, IconDotsVertical, IconEdit, IconPin, IconPinned, IconPlus, IconTrash, IconTransfer, IconDeviceDesktop, IconGitBranch } from '@tabler/icons-react'
 import type { Agent, Session } from '../../domain/types'
+import type { MessageSearchHit } from '../../api/client'
 import { sessionHandoffTargets } from '../../domain/handoff'
 import { scopeKey } from '../../domain/semantics'
 import { displaySessionTitle, formatRelativeTime, sessionActivityStatus, type ProjectGroup } from '../../components/sessionRailModel'
@@ -18,7 +19,7 @@ import { hapticFeedback } from './mobileGestures'
 type SessionMenu = { session: Session; x: number; y: number }
 type ProjectMenu = { project: ProjectGroup; x: number; y: number }
 
-export function MobileSessionDrawer({ groups, pins, pinnedProjects, selectedKey, appearance, onSelect, onPin, onPinProject, onCreate, onDeleteProject, onDeleteSession, agents, onHandoffSession, onRenameSession, onCopySessionId, onForkSession, onForkWorktreeSession, isSearching }: {
+export function MobileSessionDrawer({ groups, pins, pinnedProjects, selectedKey, appearance, onSelect, onPin, onPinProject, onCreate, onDeleteProject, onDeleteSession, agents, onHandoffSession, onRenameSession, onCopySessionId, onForkSession, onForkWorktreeSession, isSearching, searchHits, searchLoading, onSelectSearchHit }: {
   groups: ProjectGroup[]; pins: Record<string, boolean>; selectedKey: string; appearance: ProjectAppearanceMap
   onSelect: (session: Session) => void; onPin: (session: Session) => void
   pinnedProjects: string[]; onPinProject: (project: ProjectGroup) => void
@@ -32,6 +33,9 @@ export function MobileSessionDrawer({ groups, pins, pinnedProjects, selectedKey,
   onForkSession?: (session: Session) => void
   onForkWorktreeSession?: (session: Session) => void
   isSearching?: boolean
+  searchHits?: MessageSearchHit[]
+  searchLoading?: boolean
+  onSelectSearchHit?: (hit: MessageSearchHit) => void
 }) {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => {
     try {
@@ -258,6 +262,33 @@ export function MobileSessionDrawer({ groups, pins, pinnedProjects, selectedKey,
         </div>}
       </section>
     })}
+    {isSearching && (searchLoading || (searchHits && searchHits.length > 0)) && (
+      <section className="m-msg-search-section" aria-label="历史消息命中">
+        <div className="m-msg-search-head">
+          <span>历史消息命中</span>
+          <span>{searchLoading ? '检索中…' : `${searchHits?.length || 0} 条`}</span>
+        </div>
+        {searchHits?.map((hit) => (
+          <button
+            key={`${hit.agent_id}:${hit.session_id}:${hit.id}`}
+            type="button"
+            className="m-msg-search-hit"
+            onClick={() => onSelectSearchHit?.(hit)}
+          >
+            <span className="m-msg-search-hit-top">
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                <AgentBrandIcon kind={hit.agent_kind || agents?.[hit.agent_id]?.kind} size={14} />
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {hit.session_title || hit.session_id}
+                </span>
+              </span>
+              <span className="m-msg-search-hit-time">{formatRelativeTime(hit.created_at)}</span>
+            </span>
+            <span className="m-msg-search-hit-snippet">{hit.role === 'user' ? '我：' : '回复：'}{hit.snippet}</span>
+          </button>
+        ))}
+      </section>
+    )}
     {sessionMenu && createPortal(
       <div ref={menuRef} role="menu" aria-label="会话操作" className="m-message-popover m-drawer-menu" style={{ '--menu-x': `${sessionMenu.x - 114}px` } as CSSProperties}>
         <button role="menuitem" onClick={() => { onPin(sessionMenu.session); setSessionMenu(null) }}>

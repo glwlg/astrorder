@@ -17,7 +17,7 @@ const labels: Record<NotificationPermissionState, string> = {
   unsupported: '当前环境不支持系统通知',
 }
 
-export function NotificationPermissionControl() {
+export function useNotificationPermissionControl() {
   const [permission, setPermission] = useState<NotificationPermissionState>(() => notificationPermission())
   const [busy, setBusy] = useState(false)
   useEffect(() => {
@@ -52,10 +52,46 @@ export function NotificationPermissionControl() {
     await testSystemNotification()
     notifications.show({ color: 'teal', message: '测试通知已提交，请检查系统通知栏。' })
   })
-
   const showDeniedHelp = () => {
     notifications.show({ color: 'orange', message: '通知权限已被拒绝，请在系统或浏览器的星序通知设置中允许通知后重试。' })
   }
+
+  return { permission, busy, enable, disable, sendTest, showDeniedHelp }
+}
+
+export function NotificationPermissionMenuItems() {
+  const { permission, busy, enable, disable, sendTest, showDeniedHelp } = useNotificationPermissionControl()
+
+  if (permission === 'denied') {
+    return (
+      <Menu.Item leftSection={<BellSimpleSlashIcon size={17} />} onClick={showDeniedHelp}>
+        后台通知已拒绝
+      </Menu.Item>
+    )
+  }
+
+  if (permission !== 'granted') {
+    return (
+      <Menu.Item leftSection={<BellSimpleIcon size={17} />} disabled={busy} onClick={() => void enable()}>
+        {permission === 'unsupported' ? '系统通知不可用' : '启用后台通知'}
+      </Menu.Item>
+    )
+  }
+
+  return (
+    <>
+      <Menu.Item leftSection={<CheckIcon size={17} color="var(--astr-teal, #12b886)" />} disabled={busy} onClick={() => void sendTest()}>
+        测试系统通知
+      </Menu.Item>
+      <Menu.Item leftSection={<BellSimpleSlashIcon size={17} />} color="red" disabled={busy} onClick={() => void disable()}>
+        停用系统通知
+      </Menu.Item>
+    </>
+  )
+}
+
+export function NotificationPermissionControl() {
+  const { permission, busy, enable, disable, sendTest, showDeniedHelp } = useNotificationPermissionControl()
 
   const isGranted = permission === 'granted'
   const isDenied = permission === 'denied'

@@ -38,9 +38,14 @@ describe('ImageViewer', () => {
   it('shows a failed read and retries the same file', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(new Response('', { status: 404 })).mockResolvedValueOnce(new Response('image'))
     vi.stubGlobal('fetch', fetchMock)
-    render(<MantineProvider><ImageViewer artifact={artifact} /></MantineProvider>)
+    const { container } = render(<MantineProvider><ImageViewer artifact={artifact} /></MantineProvider>)
     expect(await screen.findByText('读取图片失败 (404)')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '重试' }))
+    const toolbar = container.querySelector('[data-liquid-surface="toolbar"]') as HTMLElement | null
+    expect(toolbar).not.toBeNull()
+    expect(toolbar?.style.position).not.toBe('absolute')
+    const retryButton = screen.getByRole('button', { name: '重试' })
+    expect(container.querySelector('.sidecar-image-canvas')).toContainElement(retryButton)
+    fireEvent.click(retryButton)
     fireEvent.error(await screen.findByRole('img', { name: artifact.name }))
     expect(await screen.findByText('图片解码失败，文件可能已损坏或格式不受支持')).toBeInTheDocument()
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))

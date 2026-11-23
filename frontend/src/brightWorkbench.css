@@ -458,30 +458,33 @@ body { font-family: var(--astr-session-font); font-size: 14px; }
 .pack-summary-progress { font-size: 12px; color: var(--astr-muted); font-weight: 450; }
 .chat-column .pack-summary-row { min-width: 0; font-size: 12px; font-weight: 500; gap: 8px; }
 .chat-column .pack-summary-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chat-column .activity-timeline { margin-left: 0; padding: 0 2px 4px 0; gap: 2px; border-left: 0; max-height: 400px; overflow-y: auto; scrollbar-width: thin; }
-.chat-column .message-activity { position: relative; min-width: 0; padding-left: 28px; }
-.chat-column .message-activity::before { content: ''; position: absolute; left: 9px; top: 0; bottom: -3px; border-left: 1px solid var(--astr-border); }
-.chat-column .message-activity:first-child::before { top: 20px; }
-.chat-column .message-activity:last-child::before { bottom: calc(100% - 22px); }
-.activity-node { position: absolute; z-index: 1; left: 3px; top: 13px; display: grid; place-items: center; width: 13px; height: 13px; border-radius: 50%; color: var(--astr-muted); background: var(--astr-surface); border: 1px solid var(--astr-input-border); }
-.activity-node > svg { width: 10px; height: 10px; stroke-width: 2.5; }
+.chat-column .activity-timeline { margin-left: 0; padding: 0 2px 4px 0; gap: 2px; border-left: 0; max-height: 420px; overflow-y: auto; scrollbar-width: thin; }
+.chat-column .message-activity { position: relative; min-width: 0; padding-left: 26px; }
+.chat-column .message-activity::before { content: ''; position: absolute; left: 9px; top: 0; bottom: -3px; border-left: 1px solid color-mix(in oklab, var(--astr-border) 85%, transparent); }
+.chat-column .message-activity:first-child::before { top: 16px; }
+.chat-column .message-activity:last-child::before { bottom: calc(100% - 17px); }
+.activity-node { position: absolute; z-index: 1; left: 3px; top: 10px; display: grid; place-items: center; width: 13px; height: 13px; border-radius: 50%; color: var(--astr-muted); background: var(--astr-surface); border: 1px solid var(--astr-input-border); }
+.activity-node > svg { width: 9.5px; height: 9.5px; stroke-width: 2.5; }
+.message-activity.message-kind-thinking > .activity-node { left: 6px; top: 13px; width: 7px; height: 7px; border-color: transparent; background: color-mix(in oklab, var(--astr-muted) 42%, var(--astr-surface)); }
 .message-activity[data-status='completed'] > .activity-node { background: var(--astr-surface); border-color: var(--astr-teal); color: var(--astr-teal); }
 .message-activity[data-status='failed'] > .activity-node { background: var(--astr-red); border-color: var(--astr-red); color: #fff; }
-.message-activity[data-status='running'] > .activity-node { border-width: 3px; border-color: var(--astr-selected); border-top-color: var(--astr-blue); border-right-color: var(--astr-blue); animation: workbench-spin 1s linear infinite; }
+.message-activity[data-status='running'] > .activity-node { border-width: 2.5px; border-color: var(--astr-selected); border-top-color: var(--astr-blue); border-right-color: var(--astr-blue); animation: workbench-spin 1s linear infinite; }
 .chat-column .activity-fold { padding: 0 !important; }
-.chat-column .activity-fold > summary { gap: 8px; min-height: 42px; padding: 7px 10px !important; border-radius: 7px !important; font-family: var(--astr-session-font); }
-.chat-column .activity-fold > summary > .lazy-details-indicator { opacity: 0.55; }
+.chat-column .activity-fold > summary { gap: 7px; min-height: 34px; padding: 5px 9px !important; border-radius: 7px !important; font-family: var(--astr-session-font); }
+.chat-column .activity-fold > summary > .lazy-details-indicator { opacity: 0.5; }
 .chat-column .activity-fold.is-failed > summary { background: #fff0f1 !important; }
 :root[data-mantine-color-scheme='dark'] .chat-column .activity-fold.is-failed > summary { background: #3b242b !important; }
 .chat-column .activity-icon { display: inline-flex; flex: none; }
-.chat-column .activity-icon > svg { width: 17px; height: 17px; stroke-width: 1.75; color: var(--astr-muted); }
-.chat-column .activity-fold-summary { gap: 9px; }
-.chat-column .activity-title { font-size: 12px; font-weight: 450; font-family: var(--astr-session-font); }
-.activity-target { margin-left: 6px; padding: 2px 6px; border-radius: 5px; background: var(--astr-surface-muted); font: 450 .8125rem/1.5 var(--astr-session-mono-font); }
+.chat-column .activity-icon > svg { width: 15px; height: 15px; stroke-width: 1.75; color: var(--astr-muted); }
+.chat-column .activity-fold-summary { gap: 8px; }
+.chat-column .activity-title { font-size: 12.5px; font-weight: 450; font-family: var(--astr-session-font); color: var(--astr-text); }
+.chat-column .message-kind-thinking .activity-title { color: var(--astr-muted); font-size: 12px; }
+.activity-cmd-summary { margin-left: 4px; color: var(--astr-text); font-weight: 500; }
+.activity-target { margin-left: 5px; padding: 1px 6px; border-radius: 5px; background: color-mix(in oklab, var(--astr-surface-muted) 92%, var(--astr-border)); font: 450 .8rem/1.45 var(--astr-session-mono-font); color: var(--astr-text); }
 .activity-item-meta { display: flex; align-items: center; gap: 6px; flex: none; margin-left: auto; padding-left: 10px; font-size: 11px; color: var(--astr-muted); white-space: nowrap; }
 .activity-detail-link { color: var(--astr-blue); text-decoration: underline; text-underline-offset: 3px; font-weight: 550; }
 .chat-column .activity-badge { font-size: 0.75rem; }
-.chat-column .activity-fold[open] > summary { margin-bottom: 10px; }
+.chat-column .activity-fold[open] > summary { margin-bottom: 6px; }
 .chat-column .activity-fold .shell-terminal-body,
 .chat-column .activity-fold .tool-output { font-size: 0.8125rem; }
 

@@ -329,3 +329,44 @@ func TestListRevealPathIsAlwaysExpandedEvenWhenTruncated(t *testing.T) {
 		t.Fatal("reveal target must be present")
 	}
 }
+
+func TestCleanPathPreservesPOSIXRootAndNormalizesWindowsDriveFileURIs(t *testing.T) {
+	cases := []struct {
+		input string
+		want  string
+	}{
+		{
+			input: "file:///home/luwei/workspace/OpsCore/docs/designs/security-drill/03-drill-arena.png",
+			want:  "/home/luwei/workspace/OpsCore/docs/designs/security-drill/03-drill-arena.png",
+		},
+		{
+			input: "file://localhost/home/luwei/docs/a.png",
+			want:  "/home/luwei/docs/a.png",
+		},
+		{
+			input: "file:///C:/Users/fixture/output/chart.png",
+			want:  "C:/Users/fixture/output/chart.png",
+		},
+		{
+			input: "file://localhost/C:/Users/fixture/output/chart.png",
+			want:  "C:/Users/fixture/output/chart.png",
+		},
+		{
+			input: "FILE:///c:\\Users\\fixture\\chart.png",
+			want:  "c:\\Users\\fixture\\chart.png",
+		},
+		{
+			input: "file://C:/Users/fixture/chart.png",
+			want:  "C:/Users/fixture/chart.png",
+		},
+		{
+			input: "  </home/luwei/a.png>  ",
+			want:  "/home/luwei/a.png",
+		},
+	}
+	for _, tc := range cases {
+		if got := CleanPath(tc.input); got != tc.want {
+			t.Errorf("CleanPath(%q) = %q, want %q", tc.input, got, tc.want)
+		}
+	}
+}

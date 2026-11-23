@@ -5,16 +5,20 @@ import {
   IconCheck,
   IconCopy,
   IconEdit,
+  IconExternalLink,
   IconFileText,
+  IconGitPullRequest,
   IconPhoto,
   IconSearch,
   IconTerminal2,
   IconTool,
   IconX,
 } from '@tabler/icons-react'
-import type { Message } from '../../domain/types'
+import type { Message, Session } from '../../domain/types'
 import { useState, type MouseEvent } from 'react'
-import { JsonRenderView } from '../monitor/BlackboardJsonRender'
+import { artifactViewerRegistry } from '../sidecar/registry'
+import { resolveArtifactFromPath } from '../sidecar/resolver'
+import { useSidecarStore } from '../sidecar/sidecarStore'
 
 export type ToolIconKey =
   | 'terminal'
@@ -25,6 +29,31 @@ export type ToolIconKey =
   | 'image'
   | 'mcp'
   | 'tool'
+
+const IMAGE_FILE_EXT_RE = /\.(?:png|jpe?g|gif|webp|svg|bmp|ico|avif)$/i
+
+export function isImageFilePath(rawPath: string): boolean {
+  if (!rawPath) return false
+  const clean = rawPath.trim().split(/[?#]/)[0]
+  return IMAGE_FILE_EXT_RE.test(clean)
+}
+
+export function cleanThinkingHeadline(rawText: string): string {
+  const lines = rawText.trim().split('\n')
+  for (const rawLine of lines) {
+    const cleaned = rawLine
+      .replace(/^\s*(?:#+\s*|[-*+]\s+|\d+\.\s+|>\s*)+/, '')
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+      .replace(/`([^`]+)`/g, '$1')
+      .replace(/\*\*([^*]+)\*\*/g, '$1')
+      .replace(/__([^_]+)__/g, '$1')
+      .replace(/\*([^*]+)\*/g, '$1')
+      .replace(/\s+/g, ' ')
+      .trim()
+    if (cleaned.length > 0) return cleaned
+  }
+  return ''
+}
 
 export function unwrapCommand(raw: string): string {
   if (!raw) return ''
@@ -75,6 +104,7 @@ export interface ToolDescription {
   icon?: string
   action: string
   target: string
+  summary?: string
   fullTitle: string
   isFailed: boolean
   isRunning: boolean
@@ -151,7 +181,39 @@ export function activityDuration(message: Message): string | null {
   return seconds >= 60 ? `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒` : `${seconds} 秒`
 }
 
-export function fileChangeDiffs(message: Message): Array<{ file: string; diff: string }> {
+export interface FileChangeDiffItem {
+  file: string
+  path?: string
+  diff: string
+}
+
+function buildMultiReplaceDiffFromChunks(fileName: string, rawChunks: unknown): string {
+  let chunks: Array<Record<string, unknown>> = []
+  if (Array.isArray(rawChunks)) {
+    chunks = rawChunks.filter((el): el is Record<string, unknown> => Boolean(el && typeof el === 'object'))
+  } else if (typeof rawChunks === 'string' && rawChunks.trim().startsWith('[')) {
+    try {
+      const parsed = JSON.parse(rawChunks)
+      if (Array.isArray(parsed)) {
+        chunks = parsed.filter((el): el is Record<string, unknown> => Boolean(el && typeof el === 'object'))
+      }
+    } catch {}
+  }
+  if (!chunks.length) return ''
+  const parts: string[] = [`--- a/${fileName}`, `+++ b/${fileName}`]
+  for (const ch of chunks) {
+    const oldStr = firstStringArg(ch, 'TargetContent', 'old_string', 'Target')
+    const newStr = firstStringArg(ch, 'ReplacementContent', 'new_string', 'Replacement')
+    if (!oldStr && !newStr) continue
+    const startLine = firstNumberArg(ch, 'StartLine', 'start_line')
+    parts.push(startLine && startLine > 0 ? `@@ -${startLine} @@` : '@@')
+    if (oldStr) parts.push(oldStr.replace(/\r\n/g, '\n').split('\n').map(l => '-' + l).join('\n'))
+    if (newStr) parts.push(newStr.replace(/\r\n/g, '\n').split('\n').map(l => '+' + l).join('\n'))
+  }
+  return parts.length > 2 ? parts.join('\n') : ''
+}
+
+export function fileChangeDiffs(message: Message): FileChangeDiffItem[] {
   const tool = message.tool
   const args = extractToolArgs(tool)
   const name = String(tool?.name || '')
@@ -161,8 +223,9 @@ export function fileChangeDiffs(message: Message): Array<{ file: string; diff: s
       if (!change || typeof change !== 'object') return []
       const item = change as { path?: unknown; diff?: unknown }
       if (typeof item.diff !== 'string' || !item.diff.trim()) return []
-      const path = typeof item.path === 'string' ? item.path : '文件变更'
-      return [{ file: path.split(/[/\\]/).pop() || path, diff: item.diff }]
+      const fullPath = typeof item.path === 'string' ? item.path : ''
+      const fileName = (fullPath ? fullPath.split(/[/\\]/).pop() : '') || fullPath || '文件变更'
+      return [fullPath ? { file: fileName, path: fullPath, diff: item.diff } : { file: fileName, diff: item.diff }]
     })
     if (list.length > 0) return list
   }
@@ -175,7 +238,7 @@ export function fileChangeDiffs(message: Message): Array<{ file: string; diff: s
         if (typeof parsed?.diff === 'string' && parsed.diff.trim()) {
           const filePath = firstStringArg(args, 'path', 'Path', 'TargetFile', 'AbsolutePath') || String(parsed.path || parsed.file || '文件变更')
           const fileName = filePath.split(/[/\\]/).pop() || filePath
-          return [{ file: fileName, diff: parsed.diff }]
+          return [{ file: fileName, path: filePath, diff: parsed.diff }]
         }
       } catch {}
     }
@@ -186,26 +249,146 @@ export function fileChangeDiffs(message: Message): Array<{ file: string; diff: s
   const newStr = firstStringArg(args, 'new_string', 'Replacement', 'ReplacementContent')
   if (filePath && (oldStr !== '' || newStr !== '')) {
     const fileName = filePath.split(/[/\\]/).pop() || filePath
-    const oldLines = oldStr ? oldStr.split('\n').map((l: string) => '-' + l).join('\n') + '\n' : ''
-    const newLines = newStr ? newStr.split('\n').map((l: string) => '+' + l).join('\n') : ''
+    const oldLines = oldStr ? oldStr.replace(/\r\n/g, '\n').split('\n').map((l: string) => '-' + l).join('\n') + '\n' : ''
+    const newLines = newStr ? newStr.replace(/\r\n/g, '\n').split('\n').map((l: string) => '+' + l).join('\n') : ''
     const diff = '--- a/' + fileName + '\n+++ b/' + fileName + '\n@@\n' + oldLines + newLines
-    return [{ file: fileName, diff }]
+    return [{ file: fileName, path: filePath, diff }]
+  }
+
+  if (filePath && args.ReplacementChunks) {
+    const fileName = filePath.split(/[/\\]/).pop() || filePath
+    const diff = buildMultiReplaceDiffFromChunks(fileName, args.ReplacementChunks)
+    if (diff) return [{ file: fileName, path: filePath, diff }]
+  }
+
+  if (
+    filePath &&
+    (name === 'write_file' || name === 'write_to_file')
+  ) {
+    const content = firstStringArg(args, 'Content', 'CodeContent', 'content')
+    if (content) {
+      const fileName = filePath.split(/[/\\]/).pop() || filePath
+      const capped = content.length > 65536 ? `${content.slice(0, 65536)}\n... (truncated)` : content
+      const added = capped.replace(/\r\n/g, '\n').split('\n').map((l: string) => '+' + l).join('\n')
+      const diff = `--- /dev/null\n+++ b/${fileName}\n@@\n${added}`
+      return [{ file: fileName, path: filePath, diff }]
+    }
   }
 
   return []
 }
 
-export function FileChangeDiffBlock({ message }: { message: Message }) {
+function openFileInSidecar(filePath: string, session: Session, line?: number) {
+  const artifact = resolveArtifactFromPath(filePath.replace(/%/g, '%25'), session)
+  if (line && line > 0) {
+    artifact.metadata = { ...(artifact.metadata || {}), line }
+  }
+  const viewer = artifactViewerRegistry.findViewer(artifact)
+  if (viewer) {
+    useSidecarStore.getState().openArtifact(artifact, viewer.id)
+    return
+  }
+  useSidecarStore.getState().revealFileInTree(
+    session.id,
+    session.agent_id,
+    artifact.path || filePath,
+    session.workspace || undefined,
+    session.project_name || session.title,
+    session.connection_id || undefined,
+  )
+}
+
+function DiffCard({ change, session }: { change: FileChangeDiffItem; session?: Session | null }) {
+  const [copied, setCopied] = useState(false)
+  const rawLines = change.diff.split('\n')
+  let added = 0
+  let removed = 0
+  for (const ln of rawLines) {
+    if (ln.startsWith('+') && !ln.startsWith('+++')) added++
+    else if (ln.startsWith('-') && !ln.startsWith('---')) removed++
+  }
+  const lines = rawLines.filter((ln) => {
+    const t = ln.trim()
+    if (ln.startsWith('--- ') || ln.startsWith('+++ ')) return false
+    if (t === '@@' || t === '@@ @@') return false
+    return true
+  })
+
+  const handleCopy = (e: MouseEvent<HTMLButtonElement>) => {
+    e.stopPropagation()
+    void navigator.clipboard.writeText(change.diff)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1600)
+  }
+
+  return (
+    <div className="tool-rich-view tool-diff-view">
+      <div className="tool-rich-header">
+        <span className="tool-rich-title" title={change.path || change.file}>
+          <IconGitPullRequest size={13} className="tool-rich-title-icon" />
+          <span className="tool-rich-filename">{change.file}</span>
+          {added > 0 && <span className="tool-diff-stat is-add">+{added}</span>}
+          {removed > 0 && <span className="tool-diff-stat is-del">-{removed}</span>}
+        </span>
+        <div className="tool-rich-actions">
+          {session && change.path && (
+            <button
+              type="button"
+              className="tool-rich-btn"
+              onClick={(e) => {
+                e.stopPropagation()
+                openFileInSidecar(change.path!, session)
+              }}
+              title="在右侧栏打开文件"
+            >
+              <IconExternalLink size={12} />
+              <span>打开</span>
+            </button>
+          )}
+          <button
+            type="button"
+            className="tool-rich-btn"
+            onClick={handleCopy}
+            title="复制差异内容"
+            aria-label="复制差异"
+          >
+            {copied ? <IconCheck size={12} color="var(--astr-teal, #12b886)" /> : <IconCopy size={12} />}
+          </button>
+        </div>
+      </div>
+      <div className="tool-diff-body">
+        {lines.map((line, idx) => {
+          const isAdd = line.startsWith('+') && !line.startsWith('+++')
+          const isDel = line.startsWith('-') && !line.startsWith('---')
+          const isHunk = line.startsWith('@@')
+          const isHeader = line.startsWith('--- ') || line.startsWith('+++ ')
+          const cls = isAdd
+            ? 'tool-diff-line is-add'
+            : isDel
+              ? 'tool-diff-line is-del'
+              : isHunk
+                ? 'tool-diff-line is-hunk'
+                : isHeader
+                  ? 'tool-diff-line is-meta'
+                  : 'tool-diff-line'
+          return (
+            <div key={idx} className={cls}>
+              {line || ' '}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+export function FileChangeDiffBlock({ message, session }: { message: Message; session?: Session | null }) {
   const changes = fileChangeDiffs(message)
   if (!changes.length) return null
   return (
     <div className="file-change-diffs">
       {changes.map((change, index) => (
-        <JsonRenderView
-          key={`${change.file}-${index}`}
-          itemKey={change.file}
-          itemValue={{ file: change.file, diff: change.diff }}
-        />
+        <DiffCard key={`${change.file}-${index}`} change={change} session={session} />
       ))}
     </div>
   )
@@ -247,9 +430,8 @@ export function describeTool(message: Message): ToolDescription {
   const isRunning = message.tool?.status === 'running'
 
   if (message.kind === 'thinking') {
-    const rawText = (message.text || '').trim()
-    const firstLine = rawText.split('\n').map(l => l.replace(/^#+\s*|\*\*|\*/g, '').trim()).find(l => l.length > 0) || ''
-    const target = firstLine.length > 60 ? firstLine.slice(0, 57) + '...' : firstLine
+    const firstLine = cleanThinkingHeadline(message.text || '')
+    const target = firstLine.length > 72 ? firstLine.slice(0, 69) + '...' : firstLine
     return {
       iconKey: 'thinking',
       action: '思考',
@@ -292,6 +474,7 @@ export function describeTool(message: Message): ToolDescription {
       iconKey: 'terminal',
       action,
       target,
+      summary: summaryFallback && summaryFallback !== cmd ? summaryFallback : undefined,
       fullTitle: cmd.length > 75 ? cmd.slice(0, 72) + '...' : cmd,
       isFailed,
       isRunning,
@@ -322,31 +505,71 @@ export function describeTool(message: Message): ToolDescription {
         file = pathVal.split(/[/\\]/).pop() || pathVal
       }
     }
+    const isWrite = name === 'write_file' || name === 'write_to_file'
+    const action = isWrite ? '写入' : '编辑'
     const target = file || '文件'
     return {
       iconKey: 'edit',
-      action: '编辑',
+      action,
       target,
-      fullTitle: `编辑文件: ${target}`,
+      fullTitle: `${action}文件: ${target}`,
       isFailed,
       isRunning,
     }
   }
 
-  // 3. File read
+  // 3. Directory listing & URL reading
+  if (name === 'list_dir') {
+    const dirVal = firstStringArg(args, 'DirectoryPath', 'path', 'Path', 'AbsolutePath')
+    const dirName = dirVal.replace(/[/\\]+$/, '').split(/[/\\]/).pop() || dirVal || '目录'
+    return {
+      iconKey: 'read',
+      action: '浏览目录',
+      target: dirName,
+      fullTitle: `浏览目录: ${dirName}`,
+      isFailed,
+      isRunning,
+    }
+  }
+
+  if (name === 'read_url_content' || name === 'open_browser_url') {
+    const rawUrl = firstStringArg(args, 'Url', 'url', 'Uri', 'uri')
+    const shortUrl = rawUrl.length > 56 ? rawUrl.slice(0, 53) + '...' : rawUrl
+    return {
+      iconKey: 'search',
+      action: name === 'open_browser_url' ? '浏览器' : '抓取网页',
+      target: shortUrl || '网页',
+      fullTitle: shortUrl ? `抓取网页: ${shortUrl}` : '抓取网页',
+      isFailed,
+      isRunning,
+    }
+  }
+
+  // 4. File read (with image detection!)
   if (
     name === 'read_file' ||
     name === 'fileRead' ||
     name === 'view_file' ||
     name === 'view_file_outline' ||
     name === 'view_code_item' ||
-    name === 'list_dir' ||
     name === 'read_resource' ||
-    name === 'read_url_content' ||
     (name === 'read' && Boolean(firstStringArg(args, 'path', 'Path', 'AbsolutePath')))
   ) {
     const pathVal = firstStringArg(args, 'path', 'Path', 'AbsolutePath', 'File', 'TargetFile', 'DirectoryPath', 'Uri', 'Url')
     let file = pathVal.split(/[/\\]/).pop() || pathVal
+
+    if (pathVal && isImageFilePath(pathVal)) {
+      const target = file || '图片'
+      return {
+        iconKey: 'image',
+        action: '查看图片',
+        target,
+        fullTitle: `查看图片: ${target}`,
+        isFailed,
+        isRunning,
+      }
+    }
+
     if (file) {
       const startLine = firstNumberArg(args, 'start_line', 'StartLine', 'offset')
       const endLine = firstNumberArg(args, 'end_line', 'EndLine')
@@ -367,7 +590,7 @@ export function describeTool(message: Message): ToolDescription {
     }
   }
 
-  // 4. Search
+  // 5. Search
   if (
     name === 'search_files' ||
     name === 'fileSearch' ||
@@ -378,21 +601,24 @@ export function describeTool(message: Message): ToolDescription {
     name === 'search_web' ||
     name === 'SearchContext'
   ) {
+    const isWeb = name === 'search_web' || name === 'web_search'
     const q = firstStringArg(args, 'pattern', 'query', 'Pattern', 'Query', 'SearchPath', 'SearchDirectory', 'Directory')
-    const target = q.length > 40 ? q.slice(0, 37) + '...' : q
+    const target = q.length > 44 ? q.slice(0, 41) + '...' : q
+    const action = isWeb ? '联网搜索' : '搜索'
     return {
       iconKey: 'search',
-      action: '搜索',
+      action,
       target: target ? `“${target}”` : '',
-      fullTitle: target ? `搜索 “${target}”` : '搜索',
+      fullTitle: target ? `${action} “${target}”` : action,
       isFailed,
       isRunning,
     }
   }
 
-  // 5. Image view
+  // 6. Image view
   if (name === 'imageView' || name === 'image_view') {
-    const file = String(args.path || '').split(/[/\\\\]/).pop() || String(args.path || '')
+    const p = firstStringArg(args, 'path', 'Path', 'AbsolutePath')
+    const file = p.split(/[/\\]/).pop() || p
     const target = file || '图片'
     return {
       iconKey: 'image',
@@ -404,7 +630,112 @@ export function describeTool(message: Message): ToolDescription {
     }
   }
 
-  // 6. MCP
+  // 7. Antigravity orchestration / agent tools
+  if (name === 'swarm') {
+    const subAction = firstStringArg(args, 'action')
+    const memberName = firstStringArg(args, 'name', 'title')
+    const target = [subAction, memberName].filter(Boolean).join(' ') || '协同'
+    return {
+      iconKey: 'mcp',
+      action: 'Swarm',
+      target,
+      fullTitle: `Swarm: ${target}`,
+      isFailed,
+      isRunning,
+    }
+  }
+  if (name === 'post_message' || name === 'read_board' || name === 'swarm_wait') {
+    const actionMap: Record<string, string> = {
+      post_message: '看板发言',
+      read_board: '读取看板',
+      swarm_wait: '等待看板',
+    }
+    const action = actionMap[name]
+    const rawMsg = firstStringArg(args, 'text')
+    const since = firstNumberArg(args, 'since')
+    const target = rawMsg
+      ? (rawMsg.length > 44 ? rawMsg.slice(0, 41) + '...' : rawMsg)
+      : since != null
+        ? `since #${since}`
+        : '最新消息'
+    return {
+      iconKey: 'mcp',
+      action,
+      target,
+      fullTitle: `${action}: ${target}`,
+      isFailed,
+      isRunning,
+    }
+  }
+  if (name === 'invoke_subagent' || name === 'define_subagent' || name === 'manage_subagents') {
+    const actionMap: Record<string, string> = {
+      invoke_subagent: '子代理',
+      define_subagent: '定义子代理',
+      manage_subagents: '管理子代理',
+    }
+    const action = actionMap[name]
+    const target = firstStringArg(args, 'Role', 'Name', 'Action', 'TypeName') || name
+    return {
+      iconKey: 'mcp',
+      action,
+      target,
+      fullTitle: `${action}: ${target}`,
+      isFailed,
+      isRunning,
+    }
+  }
+  if (name === 'send_message') {
+    const recipient = firstStringArg(args, 'Recipient', 'recipient')
+    const shortId = recipient.length > 16 ? recipient.slice(0, 12) + '…' : recipient
+    return {
+      iconKey: 'mcp',
+      action: '发送消息',
+      target: shortId || 'Agent',
+      fullTitle: `发送消息: ${shortId || 'Agent'}`,
+      isFailed,
+      isRunning,
+    }
+  }
+  if (name === 'schedule') {
+    const cron = firstStringArg(args, 'CronExpression')
+    const dur = firstNumberArg(args, 'DurationSeconds')
+    const target = cron || (dur != null ? `${dur}s 后唤醒` : '定时触发')
+    return {
+      iconKey: 'tool',
+      action: '定时调度',
+      target,
+      fullTitle: `定时调度: ${target}`,
+      isFailed,
+      isRunning,
+    }
+  }
+  if (name === 'manage_task') {
+    const sub = firstStringArg(args, 'Action', 'action')
+    const tid = firstStringArg(args, 'TaskId', 'task_id')
+    const shortTid = tid.includes('/') ? tid.split('/').pop() || tid : tid
+    const target = [sub, shortTid].filter(Boolean).join(' ') || '任务'
+    return {
+      iconKey: 'terminal',
+      action: '后台任务',
+      target,
+      fullTitle: `后台任务: ${target}`,
+      isFailed,
+      isRunning,
+    }
+  }
+  if (name === 'run_workflow') {
+    const target = firstStringArg(args, 'Description', 'ScriptPath') || '工作流'
+    return {
+      iconKey: 'mcp',
+      action: '工作流',
+      target: target.length > 48 ? target.slice(0, 45) + '...' : target,
+      fullTitle: `工作流: ${target}`,
+      isFailed,
+      isRunning,
+    }
+  }
+
+  // 8. MCP
   if (name.startsWith('mcp:')) {
     const sub = name.slice(4)
     return {
@@ -446,6 +777,31 @@ export function describeTool(message: Message): ToolDescription {
     fullTitle: `工具 · ${name}`,
     isFailed,
     isRunning,
+  }
+}
+
+export function formatCommandRowDisplay(
+  desc: ToolDescription,
+  unwrappedCmd: string,
+): { action: string; text: string; isHumanSummary: boolean; tooltip: string } {
+  const cmd = unwrappedCmd || desc.target || desc.fullTitle
+  const hasNoisyPrefix = /^(?:[A-Z_][A-Z0-9_]*=\S+\s+|cd\s+\S+\s*&&\s*)/.test(cmd)
+  const isLongOrMultiline = cmd.length > 48 || cmd.includes('\n')
+  const action = desc.isRunning ? '运行' : desc.isFailed ? '运行失败' : desc.action === '运行' ? '已运行' : desc.action
+  if (desc.summary && (hasNoisyPrefix || isLongOrMultiline)) {
+    return {
+      action,
+      text: desc.summary,
+      isHumanSummary: true,
+      tooltip: cmd,
+    }
+  }
+  const singleLine = cmd.replace(/\s*\r?\n\s*/g, ' ').trim()
+  return {
+    action,
+    text: singleLine.length > 72 ? singleLine.slice(0, 69) + '...' : singleLine,
+    isHumanSummary: false,
+    tooltip: cmd,
   }
 }
 
@@ -493,11 +849,20 @@ export function PackSummary({ pack, isRunning: propIsRunning }: { pack: Message[
   const isRunning = propIsRunning ?? pack.some(m => m.tool?.status === 'running')
 
   if (propIsRunning) {
-    const completed = pack.filter(message => ['completed', 'failed'].includes(activityState(message))).length
+    const toolItems = pack.filter(message => message.kind !== 'thinking')
+    if (toolItems.length === 0) {
+      return (
+        <span className="pack-summary-row pack-summary-running">
+          <strong>正在思考</strong>
+          <span className="pack-summary-progress" aria-label={`思考 ${pack.length} 段`}>{pack.length} 段</span>
+        </span>
+      )
+    }
+    const completed = toolItems.filter(message => ['completed', 'failed'].includes(activityState(message))).length
     return (
       <span className="pack-summary-row pack-summary-running">
-        <strong>{pack.every(message => message.kind === 'thinking') ? '正在思考' : '正在执行'}</strong>
-        <span className="pack-summary-progress" aria-label={`已处理 ${completed} 项，共 ${pack.length} 项`}>{completed} / {pack.length}</span>
+        <strong>正在执行</strong>
+        <span className="pack-summary-progress" aria-label={`已处理 ${completed} 项，共 ${toolItems.length} 项`}>{completed} / {toolItems.length}</span>
       </span>
     )
   }
@@ -577,11 +942,17 @@ export function PackSummary({ pack, isRunning: propIsRunning }: { pack: Message[
 export function ShellOutputBlock({
   command,
   output,
-  status = "success",
+  status = 'success',
+  summary,
+  cwd,
+  exitCode,
 }: {
   command: string
   output?: string | null
-  status?: "success" | "failed" | "running"
+  status?: 'success' | 'failed' | 'running'
+  summary?: string
+  cwd?: string
+  exitCode?: number | null
 }) {
   const [copied, setCopied] = useState(false)
   const handleCopy = (e: MouseEvent<HTMLButtonElement>) => {
@@ -595,7 +966,10 @@ export function ShellOutputBlock({
   return (
     <div className="shell-terminal-card" aria-label="终端执行输出">
       <div className="shell-terminal-header">
-        <span className="shell-terminal-label">Shell</span>
+        <span className="shell-terminal-label">
+          Shell
+          {summary && <span className="shell-terminal-summary">· {summary}</span>}
+        </span>
         <button
           type="button"
           className="shell-terminal-copy"
@@ -614,11 +988,11 @@ export function ShellOutputBlock({
         {output && <div className="shell-output-text">{output}</div>}
       </div>
       <div className="shell-terminal-footer">
-        {status === "failed" ? (
+        {status === 'failed' ? (
           <span className="shell-status-badge is-failed">
-            <IconX size={12} /> 失败
+            <IconX size={12} /> 失败{typeof exitCode === 'number' && exitCode !== 0 ? ` (退出码 ${exitCode})` : ''}
           </span>
-        ) : status === "running" ? (
+        ) : status === 'running' ? (
           <span className="shell-status-badge is-running">
             <ShinyText text="执行中…" speed={1.5} />
           </span>
@@ -627,6 +1001,7 @@ export function ShellOutputBlock({
             <IconCheck size={12} /> 成功
           </span>
         )}
+        {cwd && <span className="shell-terminal-cwd" title={cwd}>{cwd}</span>}
       </div>
     </div>
   )

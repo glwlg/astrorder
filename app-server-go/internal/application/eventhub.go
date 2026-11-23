@@ -191,6 +191,12 @@ func (h *EventHub) broadcast(ev *store.Event) {
 	}
 }
 
+// Subscribe returns a live stream of committed events for in-process domain
+// observers (such as turn checkpoint capture) along with an unsubscribe hook.
+func (h *EventHub) Subscribe() (<-chan *store.Event, func()) {
+	return h.subscribe()
+}
+
 func (h *EventHub) subscribe() (chan *store.Event, func()) {
 	ch := make(chan *store.Event, 256)
 	h.mu.Lock()

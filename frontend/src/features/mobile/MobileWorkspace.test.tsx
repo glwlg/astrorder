@@ -630,6 +630,16 @@ describe('independent mobile composer', () => {
     fireEvent.click(screen.getByRole('button', { name: '确认切换模型' }))
     await waitFor(() => expect(change).toHaveBeenCalledWith('native-test', 'inert', 'antigravity', 'gemini-4-carbon-medium'))
   })
+  it('places notification settings inside the top-right app menu instead of the mobile header bar', async () => {
+    mount()
+    const header = document.querySelector('.m-header') as HTMLElement
+    expect(header).not.toBeNull()
+    expect(within(header).queryByRole('button', { name: /启用后台通知|后台通知已启用|后台通知已拒绝|系统通知/ })).not.toBeInTheDocument()
+
+    fireEvent.click(within(header).getByRole('button', { name: '应用设置' }))
+    expect(await screen.findByRole('menuitem', { name: /启用后台通知|系统通知不可用|测试系统通知|后台通知已拒绝/ })).toBeInTheDocument()
+  })
+
   it('shows mobile pins above all projects, without a duplicate project row', () => {
     localStorage.setItem('astrorder_pinned_sessions', JSON.stringify({ [scopeKey('inert', session.id)]: true }))
     const view = mount()

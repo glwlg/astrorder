@@ -2,8 +2,10 @@ import { UserInputCard, isUserInput } from '../../components/UserInputCard'
 import { AsyncUserInputCard, isAsyncQuestion, hasLaterNativeInput } from '../../components/AsyncUserInputCard'
 import { IconArrowDown, IconPaperclip, IconRefresh, IconTool, IconVectorTriangle } from '@tabler/icons-react'
 import { ActionIcon, Anchor, Button, Group, Paper, Stack, Text, Tooltip } from '@mantine/core'
-import { IconCheck, IconChecks, IconCopy, IconEdit, IconGitFork, IconShieldCheck, IconX } from '@tabler/icons-react'
-import { useCallback, useMemo, useState, type ReactNode } from 'react'
+import { IconCheck, IconChecks, IconCopy, IconEdit, IconGitFork, IconHistory, IconShieldCheck, IconX } from '@tabler/icons-react'
+import type { SessionCheckpoint } from '../../api/client'
+import { mapCheckpointsToMessages } from '../../domain/turnCheckpoints'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { TurnMinimap } from './TurnMinimap'
 import { InlineNotice } from '../../components/InlineNotice'
 import type { Approval, Attachment, Message, OutboxEntry, Session } from '../../domain/types'
@@ -15,7 +17,7 @@ import { MarkdownContent } from '../../components/MarkdownContent'
 import { LazyDetails } from '../../components/LazyDetails'
 import { MessageBody } from '../../components/MessageBody'
 import { useOlderMessages } from '../../hooks/useOlderMessages'
-import { activityDuration, activityState, describeTool, extractToolArgs, FileChangeDiffBlock, fileChangeDiffs, PackSummary, ShellOutputBlock, ToolLineIcon, unwrapCommand } from './toolPresentation'
+import { activityDuration, activityState, describeTool, extractToolArgs, FileChangeDiffBlock, fileChangeDiffs, formatCommandRowDisplay, PackSummary, ShellOutputBlock, ToolLineIcon, unwrapCommand } from './toolPresentation'
 import { ToolOutputBlock } from './ToolOutputBlock'
 import { isCompactionMessage, CompactionDivider } from './CompactionDivider'
 import { ShinyText } from '../../components/animations/ShinyText'
@@ -163,6 +165,8 @@ function MessageItem({
   asyncInput,
   showAuthorMark = false,
   authorLabel = 'Agent',
+  checkpoint,
+  onOpenCheckpoint,
 }: {
   message: Message
   onImageClick?: (url: string) => void
@@ -177,6 +181,8 @@ function MessageItem({
   asyncInput?: { commands: import('../../domain/types').Command[]; continued: boolean; readOnly: boolean }
   showAuthorMark?: boolean
   authorLabel?: string
+  checkpoint?: SessionCheckpoint
+  onOpenCheckpoint?: (cp: SessionCheckpoint) => void
 }) {
   const isUser = message.role === 'user'
   const isActivity = isMessageActivity(message)
@@ -197,28 +203,36 @@ function MessageItem({
     const isThinking = message.kind === 'thinking'
     const toolArgs = extractToolArgs(message.tool)
     const rawCmd = String(toolArgs.command || toolArgs.cmd || toolArgs.CommandLine || toolArgs.Command || '')
+    const rawCwd = String(toolArgs.cwd || toolArgs.Cwd || '')
+    const rawExitCode = (message.tool as { exit_code?: unknown } | null | undefined)?.exit_code
+    const exitCode = typeof rawExitCode === 'number' && Number.isFinite(rawExitCode) ? rawExitCode : null
     const isCommand = desc.iconKey === 'terminal' || Boolean(rawCmd)
     const hasFileDiff = fileChangeDiffs(message).length > 0
     const unwrappedCmd = unwrapCommand(rawCmd)
+    const cmdDisplay = isCommand ? formatCommandRowDisplay(desc, unwrappedCmd) : null
     const cmdStatus = desc.isFailed ? 'failed' : desc.isRunning ? 'running' : 'success'
     const state = activityState(message)
     const duration = activityDuration(message)
-    const foldTitle = isCommand
-      ? `${desc.isRunning ? '运行' : desc.isFailed ? '运行失败' : '已运行'} ${unwrappedCmd || desc.target || desc.fullTitle}`
-      : (desc.target || desc.fullTitle)
+    const foldTitle = desc.target || desc.fullTitle
     return (
       <article className={`message-activity message-kind-${message.kind}`} data-status={state} data-testid={`message-${message.id}`}>
-        <span className="activity-node" aria-hidden="true">{state === 'completed' ? <IconCheck /> : state === 'failed' ? <IconX /> : null}</span>
+        <span className="activity-node" aria-hidden="true">{!isThinking && (state === 'completed' ? <IconCheck /> : state === 'failed' ? <IconX /> : null)}</span>
         <LazyDetails className={`activity-fold ${desc.isFailed ? 'is-failed' : ''}`} loading={desc.isRunning} summary={
           <span className="activity-fold-summary">
             <span className="activity-icon"><ToolLineIcon icon={desc.iconKey} size={14} /></span>
-            <span className="activity-title">{!isCommand && !isThinking && desc.target
-              ? <>{desc.action} <code className="activity-target">{desc.target}</code></>
-              : foldTitle}</span>
+            <span className="activity-title" title={cmdDisplay ? cmdDisplay.tooltip : desc.fullTitle}>
+              {cmdDisplay ? (
+                cmdDisplay.isHumanSummary
+                  ? <>{cmdDisplay.action} <span className="activity-cmd-summary">{cmdDisplay.text}</span></>
+                  : <>{cmdDisplay.action} <code className="activity-target">{cmdDisplay.text}</code></>
+              ) : !isThinking && desc.target ? (
+                <>{desc.action} <code className="activity-target">{desc.target}</code></>
+              ) : foldTitle}
+            </span>
             <span className="activity-item-meta">
               {desc.isFailed ? <><span className="activity-badge is-failed">失败</span><span className="activity-detail-link">查看详情</span></>
                 : desc.isRunning ? <span className="activity-badge is-running">执行中</span>
-                  : state === 'completed' ? <span>已完成</span> : null}
+                  : !isThinking && state === 'completed' ? <span>已完成</span> : null}
               {duration && <span className="activity-item-duration">· {duration}</span>}
             </span>
           </span>
@@ -226,14 +240,23 @@ function MessageItem({
           {isThinking ? (
             message.text && <div className="activity-thinking-content"><MarkdownContent value={message.text} session={session} /></div>
           ) : isCommand ? (
-            <ShellOutputBlock command={unwrappedCmd || desc.fullTitle} output={message.text} status={cmdStatus} />
+            <ShellOutputBlock
+              command={unwrappedCmd || desc.fullTitle}
+              output={message.text}
+              status={cmdStatus}
+              summary={desc.summary}
+              cwd={rawCwd || undefined}
+              exitCode={exitCode}
+            />
           ) : hasFileDiff ? (
-            <FileChangeDiffBlock message={message} />
+            <FileChangeDiffBlock message={message} session={session} />
           ) : (
             <ToolOutputBlock
               text={message.text}
               payload={Object.keys(toolArgs).length > 0 ? toolArgs : null}
               toolName={String(message.tool?.name || '')}
+              session={session}
+              onImageClick={onImageClick}
             />
           )}
           <AttachmentList attachments={message.attachments} onImageClick={onImageClick} session={session} />
@@ -261,6 +284,22 @@ function MessageItem({
           <ActionIcon variant="subtle" size="xs" color="gray" onClick={() => onEdit(message.text)} aria-label="编辑消息" className="message-action-btn"><IconEdit size={13} /></ActionIcon>
         </Tooltip>}
       </span>
+      {!isUser && checkpoint && onOpenCheckpoint && (
+        <button
+          type="button"
+          className="cp-inline-pill"
+          title={`查看检查点 #${checkpoint.turn_number} 差异或安全回滚`}
+          onClick={() => onOpenCheckpoint(checkpoint)}
+        >
+          <IconHistory size={12} aria-hidden="true" />
+          <span>
+            #{checkpoint.turn_number}
+            {checkpoint.files_changed > 0 ? ` · ${checkpoint.files_changed} 文件` : ''}
+          </span>
+          {checkpoint.insertions > 0 && <span className="cp-stat-add">+{checkpoint.insertions}</span>}
+          {checkpoint.deletions > 0 && <span className="cp-stat-del">-{checkpoint.deletions}</span>}
+        </button>
+      )}
     </span>
   )
   return (
@@ -281,7 +320,7 @@ function MessageItem({
             onImageClick={onImageClick}
             onGalleryClick={onGalleryClick}
             attachmentNames={message.attachments.filter((attachment) => attachment.media_type.startsWith('image/')).map((attachment) => attachment.name)}
-            renderMarkdown={(value) => <MarkdownContent value={value} onImageClick={onImageClick} session={session} />}
+            renderMarkdown={(value) => <MarkdownContent value={value} onImageClick={onImageClick} onGalleryClick={onGalleryClick} session={session} />}
             sessionId={session?.id}
             connectionId={session?.connection_id || undefined}
           />
@@ -318,6 +357,9 @@ export function Transcript({
   commands = [],
   onEditLastUserMessage,
   onForkAtMessage,
+  checkpoints = [],
+  onOpenCheckpoint,
+  highlightMessageId,
 }: {
   messages: Message[]
   activityBreaks?: readonly string[]
@@ -339,6 +381,9 @@ export function Transcript({
   commands?: import('../../domain/types').Command[]
   onEditLastUserMessage?: (text: string) => void
   onForkAtMessage?: (message: Message, turnIndex: number) => void
+  checkpoints?: SessionCheckpoint[]
+  onOpenCheckpoint?: (cp: SessionCheckpoint) => void
+  highlightMessageId?: string | null
 }) {
   const reducedMotion = useReducedMotion(undefined, { getInitialValueInEffect: false })
   const agentKind = useAstrorderStore(state => session ? state.agents[session.agent_id]?.kind : undefined)
@@ -346,6 +391,13 @@ export function Transcript({
   const visibleMessages = messages.map(normalizeMessagePresentation).filter((message) => isCompactionMessage(message) || hasMessageContent(message))
   const isActivity = (message: Message | null) => Boolean(message && !isCompactionMessage(message) && isMessageActivity(message))
   const packs = activityPacks(visibleMessages, activityBreaks)
+  const checkpointByMsgId = useMemo(
+    () => mapCheckpointsToMessages(visibleMessages, checkpoints),
+    [visibleMessages, checkpoints],
+  )
+  const [activeHighlightId, setActiveHighlightId] = useState<string | null>(null)
+  const highlightScrolledRef = useRef<string | null>(null)
+  const highlightLoadAttemptsRef = useRef<number>(0)
   const outboundVersion = outbox.map((item) => item.command.id).join(',')
   const contentVersion = `${messages.map((item) => `${item.id}:${item.text.length}`).join(',')}|${outbox.map((item) => `${item.command.id}:${item.status}`).join(',')}|${approvals.map((item) => item.id).join(',')}|${composerHeight ?? 0}`
   const {
@@ -364,6 +416,33 @@ export function Transcript({
     [setContainerRef],
   )
   const older = useOlderMessages({ hasMore: hasMoreHistory, loading: loadingOlder, load: () => onLoadOlder?.(), capture: capturePrependAnchor })
+  const sessionKey = session ? `${session.agent_id}::${session.id}` : ''
+  useEffect(() => {
+    highlightScrolledRef.current = null
+    highlightLoadAttemptsRef.current = 0
+  }, [highlightMessageId, sessionKey])
+  useEffect(() => {
+    if (!highlightMessageId || highlightScrolledRef.current === highlightMessageId) return
+    const exists = visibleMessages.some((m) => m.id === highlightMessageId)
+    if (exists) {
+      const container = scrollerEl
+      if (!container) return
+      const escaped = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(highlightMessageId) : highlightMessageId.replace(/"/g, '\\"')
+      const targetEl = container.querySelector<HTMLElement>(`[data-testid="message-${escaped}"]`)
+      if (!targetEl) return
+      highlightScrolledRef.current = highlightMessageId
+      targetEl.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'center' })
+      setActiveHighlightId(highlightMessageId)
+      const timer = window.setTimeout(() => {
+        setActiveHighlightId((current) => (current === highlightMessageId ? null : current))
+      }, 2600)
+      return () => window.clearTimeout(timer)
+    }
+    if (hasMoreHistory && !loadingOlder && onLoadOlder && highlightLoadAttemptsRef.current < 3) {
+      highlightLoadAttemptsRef.current += 1
+      void onLoadOlder()
+    }
+  }, [hasMoreHistory, highlightMessageId, loadingOlder, onLoadOlder, scrollerEl, visibleMessages])
   const busy = session?.status === 'running' || session?.status === 'waiting_approval'
   const lastVisibleMessage = visibleMessages[visibleMessages.length - 1]
   const isWaiting = Boolean(session?.status === 'running' && (!lastVisibleMessage || lastVisibleMessage.role === 'user'))
@@ -500,7 +579,7 @@ export function Transcript({
             const canForkTurn = isFinalReply
             const isDeferredEntry = idx < visibleMessages.length - 6
             return (
-              <motion.div className={`transcript-message-entry${isDeferredEntry ? ' is-deferred-turn' : ''}`} data-turn-id={message.id} key={message.id} initial={enter} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.28, ease: [0.2, 0.8, 0.2, 1] }}>
+              <motion.div className={`transcript-message-entry${isDeferredEntry ? ' is-deferred-turn' : ''}${activeHighlightId === message.id ? ' is-search-highlight' : ''}`} data-turn-id={message.id} key={message.id} initial={enter} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.28, ease: [0.2, 0.8, 0.2, 1] }}>
                 {showDateDivider && (
                   <div className="transcript-date-divider">
                     <span>{currentDate}</span>
@@ -520,6 +599,8 @@ export function Transcript({
                   hasAssistantReplied={hasAssistantReplied}
                   isAgentAccepted={isAgentAccepted}
                   asyncInput={isAsyncQuestion(message) ? { commands, continued: hasLaterNativeInput(visibleMessages, idx), readOnly: session?.control_state === 'readonly' } : undefined}
+                  checkpoint={checkpointByMsgId.get(message.id)}
+                  onOpenCheckpoint={onOpenCheckpoint}
                 />
               </motion.div>
             )

@@ -33,6 +33,8 @@ import (
 	"astrorder.dev/app-server/internal/backups"
 	"astrorder.dev/app-server/internal/botgroups"
 	"astrorder.dev/app-server/internal/browser"
+	"astrorder.dev/app-server/internal/checkpoints"
+	"astrorder.dev/app-server/internal/search"
 	"astrorder.dev/app-server/internal/capabilities"
 	"astrorder.dev/app-server/internal/config"
 	"astrorder.dev/app-server/internal/connections"
@@ -169,6 +171,8 @@ type api struct {
 	sessions        http.Handler
 	agentAPI        http.Handler
 	reviewRelay     http.Handler
+	checkpoints     http.Handler
+	search          http.Handler
 	backups         http.Handler
 }
 
@@ -366,11 +370,25 @@ func NewHandlerChecked(options Options) (http.Handler, error) {
 	}
 
 	var reviewRelayHandler http.Handler
+	var checkpointsHandler http.Handler
+	var searchHandler http.Handler
 	if options.Store != nil {
+		_, _ = options.Store.HealSleptErrorSessions(context.Background())
 		reviewRelayHandler = reviewrelay.NewHandler(reviewrelay.Options{
 			Store:      options.Store,
 			Authorizer: authenticator,
 			Resolver:   resolver,
+		})
+		checkpointsHandler = checkpoints.NewService(checkpoints.Options{
+			Store:      options.Store,
+			Authorizer: authenticator,
+			Resolver:   resolver,
+			Publisher:  eventHub,
+			Subscriber: eventHub,
+		})
+		searchHandler = search.NewHandler(search.Options{
+			Store:      options.Store,
+			Authorizer: authenticator,
 		})
 	}
 
@@ -427,6 +445,8 @@ func NewHandlerChecked(options Options) (http.Handler, error) {
 		sessions:        sessionHandler,
 		agentAPI:        agentHandler,
 		reviewRelay:     reviewRelayHandler,
+		checkpoints:     checkpointsHandler,
+		search:          searchHandler,
 		backups:         backupsHandler,
 	}
 	if options.BotGroups == nil {
@@ -491,6 +511,14 @@ func (a *api) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 	}
 	if a.reviewRelay != nil && reviewrelay.Matches(request.Method, request.URL.Path) {
 		a.reviewRelay.ServeHTTP(response, request)
+		return
+	}
+	if a.checkpoints != nil && checkpoints.Matches(request.Method, request.URL.Path) {
+		a.checkpoints.ServeHTTP(response, request)
+		return
+	}
+	if a.search != nil && search.Matches(request.Method, request.URL.Path) {
+		a.search.ServeHTTP(response, request)
 		return
 	}
 	if a.backups != nil && backups.Matches(request.Method, request.URL.Path) {

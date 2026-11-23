@@ -9,8 +9,10 @@ import {
   IconFolder,
   IconHome,
   IconId,
+  IconInbox,
   IconLayoutGrid,
   IconLayoutSidebarLeftCollapse,
+  IconMessageSearch,
   IconMoon,
   IconSearch,
   IconSend,
@@ -20,15 +22,16 @@ import {
 } from '@tabler/icons-react'
 import { useNavigate } from 'react-router-dom'
 import { useShallow } from 'zustand/react/shallow'
-import { api } from '../api/client'
+import { api, type MessageSearchHit } from '../api/client'
 import { newCommandId, scopeKey } from '../domain/semantics'
 import type { Session } from '../domain/types'
 import { selectProjects, selectSessions, useAstrorderStore } from '../state/store'
+import { useActionInbox } from '../features/inbox/useActionInbox'
 import { AgentBrandIcon } from './AgentBrandIcon'
-import { displaySessionTitle, sessionActivityStatus } from './sessionRailModel'
+import { displaySessionTitle, formatRelativeTime, sessionActivityStatus } from './sessionRailModel'
 import './commandPalette.css'
 
-type PaletteCategory = 'session' | 'route' | 'action' | 'project'
+type PaletteCategory = 'session' | 'message' | 'route' | 'action' | 'project'
 
 interface PaletteItem {
   id: string
@@ -63,6 +66,9 @@ export function CommandPalette({ opened, onClose, onToggleSidebar, onOpenSetting
   const [dispatchTarget, setDispatchTarget] = useState<Session | null>(null)
   const [dispatchText, setDispatchText] = useState('')
   const [dispatching, setDispatching] = useState(false)
+  const [messageHits, setMessageHits] = useState<MessageSearchHit[]>([])
+  const [searchingMessages, setSearchingMessages] = useState(false)
+  const { totalCount: inboxCount } = useActionInbox()
 
   const inputRef = useRef<HTMLInputElement>(null)
   const dispatchRef = useRef<HTMLInputElement>(null)
@@ -75,9 +81,39 @@ export function CommandPalette({ opened, onClose, onToggleSidebar, onOpenSetting
     setSelectedIndex(0)
     setDispatchTarget(null)
     setDispatchText('')
+    setMessageHits([])
+    setSearchingMessages(false)
     keyboardNavigatingRef.current = false
     requestAnimationFrame(() => inputRef.current?.focus())
   }, [opened])
+
+  useEffect(() => {
+    const trimmed = query.trim()
+    if (!opened || trimmed.length < 2) {
+      setMessageHits([])
+      setSearchingMessages(false)
+      return
+    }
+    let cancelled = false
+    setSearchingMessages(true)
+    const timer = window.setTimeout(() => {
+      void api
+        .searchMessages(trimmed, 10)
+        .then((res) => {
+          if (!cancelled) setMessageHits(res.items || [])
+        })
+        .catch(() => {
+          if (!cancelled) setMessageHits([])
+        })
+        .finally(() => {
+          if (!cancelled) setSearchingMessages(false)
+        })
+    }, 200)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [opened, query])
 
   useEffect(() => {
     if (dispatchTarget) {
@@ -118,11 +154,12 @@ export function CommandPalette({ opened, onClose, onToggleSidebar, onOpenSetting
     }
 
     // 2. Routes
-    const routes: Array<{ id: string; title: string; subtitle: string; to: string; keywords: string }> = [
+    const routes: Array<{ id: string; title: string; subtitle: string; to: string; keywords: string; badge?: string }> = [
+      { id: 'route:inbox', title: '待我决策（行动收件箱）', subtitle: '/inbox', to: '/inbox', keywords: 'inbox action todo 待办 决策 审批 收件箱', badge: inboxCount > 0 ? `${inboxCount} 项` : undefined },
       { id: 'route:welcome', title: '星序指挥台（欢迎页）', subtitle: '/chat', to: '/chat', keywords: 'welcome home 指挥台 欢迎页 首页' },
       { id: 'route:matrix', title: '矩阵（多会话网格）', subtitle: '/monitor', to: '/monitor', keywords: 'matrix monitor 矩阵 监控室 多窗' },
       { id: 'route:groups', title: '群聊协作', subtitle: '/groups', to: '/groups', keywords: 'groups chat 群聊 接力' },
-      { id: 'route:analytics', title: '用量统计', subtitle: '/analytics', to: '/analytics', keywords: 'analytics usage token 统计 网关' },
+      { id: 'route:analytics', title: '用量统计', subtitle: '/analytics', to: '/analytics', keywords: 'analytics usage token 统计' },
       { id: 'route:backups', title: '文件与目录备份', subtitle: '/backups', to: '/backups', keywords: 'backups 备份 快照' },
       { id: 'route:accounts', title: 'Agent 账号管理', subtitle: '/agent-accounts', to: '/agent-accounts', keywords: 'accounts quota 账号 额度' },
     ]
@@ -133,6 +170,7 @@ export function CommandPalette({ opened, onClose, onToggleSidebar, onOpenSetting
         title: r.title,
         subtitle: r.subtitle,
         keywords: `${r.title} ${r.keywords}`,
+        badge: r.badge,
         onRun: () => {
           onClose()
           navigate(r.to, r.to === '/chat' ? { state: { welcome: true } } : undefined)
@@ -197,7 +235,7 @@ export function CommandPalette({ opened, onClose, onToggleSidebar, onOpenSetting
     }
 
     return items
-  }, [agents, computedScheme, navigate, onClose, onOpenSettings, onToggleSidebar, projects, sessions, setColorScheme])
+  }, [agents, computedScheme, inboxCount, navigate, onClose, onOpenSettings, onToggleSidebar, projects, sessions, setColorScheme])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -209,13 +247,31 @@ export function CommandPalette({ opened, onClose, onToggleSidebar, onOpenSetting
       return [...topSessions, ...topRoutes, ...topActions]
     }
     const tokens = q.split(/\s+/).filter(Boolean)
-    return allItems
+    const localMatches = allItems
       .filter((item) => {
         const hay = item.keywords.toLowerCase()
         return tokens.every((tok) => hay.includes(tok))
       })
-      .slice(0, 24)
-  }, [allItems, query])
+      .slice(0, 16)
+    const remoteMessages: PaletteItem[] = messageHits.map((hit) => {
+      const title = hit.session_title?.trim() || hit.workspace?.split(/[/\\]/).filter(Boolean).pop() || hit.session_id
+      const timeText = formatRelativeTime(hit.created_at)
+      const roleTag = hit.role === 'user' ? '我' : '回复'
+      return {
+        id: `msg:${hit.agent_id}:${hit.session_id}:${hit.id}`,
+        category: 'message',
+        title: `${title}${timeText ? ` · ${timeText}` : ''}`,
+        subtitle: `${roleTag}：${hit.snippet}`,
+        keywords: hit.snippet,
+        agentKind: hit.agent_kind || agents[hit.agent_id]?.kind,
+        onRun: () => {
+          onClose()
+          navigate(`/chat/${encodeURIComponent(hit.session_id)}?agent_id=${encodeURIComponent(hit.agent_id)}&message_id=${encodeURIComponent(hit.id)}`)
+        },
+      }
+    })
+    return [...localMatches, ...remoteMessages]
+  }, [agents, allItems, messageHits, navigate, onClose, query])
 
   const clampedIndex = filtered.length > 0 ? Math.min(selectedIndex, filtered.length - 1) : 0
 
@@ -318,6 +374,7 @@ export function CommandPalette({ opened, onClose, onToggleSidebar, onOpenSetting
 
   const categoryLabel: Record<PaletteCategory, string> = {
     session: '会话',
+    message: '消息',
     route: '视图',
     action: '动作',
     project: '项目',
@@ -325,7 +382,9 @@ export function CommandPalette({ opened, onClose, onToggleSidebar, onOpenSetting
 
   const renderIcon = (item: PaletteItem) => {
     if (item.category === 'session') return <AgentBrandIcon kind={item.agentKind} size={15} />
+    if (item.category === 'message') return item.agentKind ? <AgentBrandIcon kind={item.agentKind} size={15} /> : <IconMessageSearch size={15} color="var(--astr-indigo)" />
     if (item.category === 'project') return <IconFolder size={15} color="var(--astr-indigo)" />
+    if (item.id === 'route:inbox') return <IconInbox size={15} color="var(--astr-indigo)" />
     if (item.id === 'route:welcome') return <IconHome size={15} color="var(--astr-indigo)" />
     if (item.id === 'route:matrix') return <IconLayoutGrid size={15} color="var(--astr-indigo)" />
     if (item.id === 'route:groups') return <IconUsers size={15} color="var(--astr-indigo)" />
@@ -395,8 +454,8 @@ export function CommandPalette({ opened, onClose, onToggleSidebar, onOpenSetting
                 aria-expanded="true"
                 aria-controls="command-palette-listbox"
                 aria-activedescendant={filtered.length > 0 ? `command-palette-opt-${clampedIndex}` : undefined}
-                aria-label="搜索会话、项目、视图或快捷命令"
-                placeholder="搜索会话、项目、视图或动作…（选中会话按 Tab 可不切页快发指令）"
+                aria-label="搜索会话、历史消息、项目、视图或快捷命令"
+                placeholder="搜索会话、历史消息、项目或星令…（选中会话按 Tab 可快发指令）"
                 value={query}
                 onChange={(e) => {
                   setQuery(e.target.value)
@@ -417,7 +476,9 @@ export function CommandPalette({ opened, onClose, onToggleSidebar, onOpenSetting
               }}
             >
               {filtered.length === 0 ? (
-                <div className="command-palette-empty">未找到匹配的会话、项目或星令</div>
+                <div className="command-palette-empty">
+                  {searchingMessages ? '正在检索跨会话历史消息…' : '未找到匹配的会话、历史消息或星令'}
+                </div>
               ) : (
                 filtered.map((item, idx) => {
                   const active = idx === clampedIndex
