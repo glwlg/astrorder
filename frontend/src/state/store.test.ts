@@ -448,6 +448,75 @@ describe('shared runtime store', () => {
     expect(Object.keys(useAstrorderStore.getState().sessions)).toHaveLength(0)
   })
 
+  it('evicts oldest inactive session messages while preserving running and recent sessions', () => {
+    const store = useAstrorderStore.getState()
+    const sessions = Array.from({ length: 16 }, (_, i) => ({
+      ...session,
+      id: `sess-${i}`,
+      status: i === 0 ? ('running' as const) : ('idle' as const),
+    }))
+    store.hydrateBootstrap({ protocol_version: 1, agents: [], sessions, cursor: 1 })
+    for (let i = 0; i < 16; i += 1) {
+      store.mergeMessages(session.agent_id, `sess-${i}`, [
+        { ...message(`m-${i}`, `msg ${i}`), session_id: `sess-${i}` },
+      ])
+    }
+    const cachedKeys = Object.keys(useAstrorderStore.getState().messages)
+    expect(cachedKeys.length).toBeLessThanOrEqual(12)
+    // Running session sess-0 is protected even though it was accessed earliest.
+    expect(cachedKeys).toContain(`${session.agent_id}::sess-0`)
+    // Most recent session sess-15 is kept.
+    expect(cachedKeys).toContain(`${session.agent_id}::sess-15`)
+    // Earliest idle session sess-1 was evicted.
+    expect(cachedKeys).not.toContain(`${session.agent_id}::sess-1`)
+  })
+
+  it('prunes old terminal tasks from inactive sessions while retaining active tasks', () => {
+    const store = useAstrorderStore.getState()
+    // Seed 900 completed tasks in an older inactive session plus 1 running task.
+    const oldTasks = Array.from({ length: 900 }, (_, i) => ({
+      id: `old-task-${i}`,
+      agent_id: session.agent_id,
+      session_id: 'old-session',
+      kind: 'tool' as const,
+      title: `tool ${i}`,
+      status: i === 0 ? ('running' as const) : ('completed' as const),
+      progress: null,
+      command: null,
+      logs: [],
+      target_id: null,
+      created_at: `2026-01-01T00:00:${String(i % 60).padStart(2, '0')}Z`,
+      updated_at: `2026-01-01T00:${String(Math.floor(i / 60)).padStart(2, '0')}:${String(i % 60).padStart(2, '0')}Z`,
+    }))
+    store.mergeTasks(oldTasks)
+    // Touch 6 newer sessions so old-session ages out of the recent-6 protected window.
+    for (let i = 1; i <= 6; i += 1) {
+      store.mergeMessages(session.agent_id, `recent-${i}`, [
+        { ...message(`rm-${i}`, `recent ${i}`), session_id: `recent-${i}` },
+      ])
+    }
+    store.mergeTasks([
+      {
+        id: 'new-task',
+        agent_id: session.agent_id,
+        session_id: 'recent-6',
+        kind: 'tool' as const,
+        title: 'new tool',
+        status: 'completed',
+        progress: null,
+        command: null,
+        logs: [],
+        target_id: null,
+        created_at: '2026-01-02T00:00:00Z',
+        updated_at: '2026-01-02T00:00:00Z',
+      },
+    ])
+    const allTasks = useAstrorderStore.getState().tasks
+    expect(Object.keys(allTasks).length).toBeLessThanOrEqual(800)
+    expect(allTasks[`${session.agent_id}::old-session::old-task-0`]?.status).toBe('running')
+    expect(allTasks[`${session.agent_id}::recent-6::new-task`]).toBeDefined()
+  })
+
   it('holds mid-turn liveActivityAt grace on transient idle dips and clears immediately on final reply or cancel', () => {
     const store = useAstrorderStore.getState()
     const key = `${session.agent_id}::${session.id}`
@@ -466,18 +535,21 @@ describe('shared runtime store', () => {
     const graceTs = useAstrorderStore.getState().liveActivityAt[key]
     expect(graceTs).toBeTypeOf('number')
 
+    // Duplicate idle upsert must not wipe or extend the grace timestamp.
     store.applyEvent({
       id: 'idle-blip-2', cursor: 13, type: 'session.upsert', agent_id: session.agent_id, session_id: session.id,
       data: { ...session, status: 'idle' },
     })
     expect(useAstrorderStore.getState().liveActivityAt[key]).toBe(graceTs)
 
+    // Cancelled command clears grace immediately.
     store.applyEvent({
       id: 'cmd-cancel', cursor: 14, type: 'command.upsert', agent_id: session.agent_id, session_id: session.id,
       data: { ...command('cmd-1'), state: 'cancelled' },
     })
     expect(useAstrorderStore.getState().liveActivityAt[key]).toBeUndefined()
 
+    // Final assistant reply followed by idle clears immediately with zero grace.
     store.applyEvent({
       id: 'run-2', cursor: 15, type: 'session.upsert', agent_id: session.agent_id, session_id: session.id,
       data: { ...session, status: 'running' },

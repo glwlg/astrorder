@@ -32,21 +32,66 @@ export function useUpgradeTaskRecovery() {
   const [error, setError] = useState('')
   useEffect(() => {
     let active = true
-    let timer: ReturnType<typeof setTimeout>
+    let inFlight = false
+    let lastCheckedAt = 0
+    let timer: ReturnType<typeof setTimeout> | undefined
+
+    const schedule = (delayMs: number) => {
+      if (!active) return
+      if (timer !== undefined) clearTimeout(timer)
+      timer = setTimeout(() => {
+        timer = undefined
+        void refresh()
+      }, delayMs)
+    }
+
     const refresh = async () => {
+      if (!active || inFlight) return
+      inFlight = true
+      lastCheckedAt = Date.now()
+      let keepPolling = false
       try {
         const result = await api.getUpgradeJobs()
         if (!active) return
         for (const job of result.items) trackUpgradeJob(job, true)
+        keepPolling = result.items.some((job) => job.status === 'running')
         setError('')
       } catch (error) {
+        keepPolling = true
         if (active) setError(error instanceof Error ? error.message : '升级任务状态读取失败')
       } finally {
-        if (active) timer = setTimeout(refresh, 1200)
+        inFlight = false
+        if (active && keepPolling) {
+          schedule(1200)
+        }
       }
     }
+
+    const unsubscribe = useBackgroundTasks.subscribe((state) => {
+      if (!active) return
+      const hasRunningUpgrade = Object.values(state.tasks).some(
+        (task) => Boolean(task.upgrade) && task.status === 'running',
+      )
+      if (hasRunningUpgrade && !inFlight && timer === undefined) {
+        schedule(1200)
+      }
+    })
+
+    const onFocus = () => {
+      if (!active || inFlight || timer !== undefined) return
+      if (Date.now() - lastCheckedAt >= 30_000) {
+        void refresh()
+      }
+    }
+    window.addEventListener('focus', onFocus)
+
     void refresh()
-    return () => { active = false; clearTimeout(timer) }
+    return () => {
+      active = false
+      if (timer !== undefined) clearTimeout(timer)
+      unsubscribe()
+      window.removeEventListener('focus', onFocus)
+    }
   }, [])
   return error
 }

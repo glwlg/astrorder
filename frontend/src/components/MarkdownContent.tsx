@@ -16,7 +16,7 @@ import {
   IconTextWrap,
 } from '@tabler/icons-react'
 import { Anchor } from '@mantine/core'
-import { isValidElement, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
+import { isValidElement, memo, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { Session } from '../domain/types'
@@ -142,7 +142,10 @@ function MarkdownCodeBlock({ children }: { children?: ReactNode }) {
     )
   }
 
-  const renderedCode = rawText && language ? highlightCode(rawText, language) : null
+  const renderedCode = useMemo(
+    () => (rawText && language ? highlightCode(rawText, language) : null),
+    [rawText, language],
+  )
 
   return (
     <div className={`markdown-code-wrapper${wrap ? ' is-wrapped' : ''}`}>
@@ -437,7 +440,7 @@ const CALLOUT_ICONS: Record<CalloutKind, typeof IconInfoCircle> = {
 const rootFileCache = new Map<string, { expires: number; promise: Promise<Set<string>> }>()
 const pathCheckCache = new Map<string, { expires: number; promise: Promise<Set<string>> }>()
 
-export function MarkdownContent({
+export const MarkdownContent = memo(function MarkdownContent({
   value,
   onImageClick,
   onGalleryClick,
@@ -449,7 +452,11 @@ export function MarkdownContent({
   session?: Session | null
 }) {
   const fileSourceScope = useContext(FileSourceContext)
-  const defaultSession = useAstrorderStore((state) => Object.values(state.sessions)[0] as Session | undefined)
+  const defaultSession = useAstrorderStore((state) => {
+    if (session !== undefined) return undefined
+    for (const key in state.sessions) return state.sessions[key]
+    return undefined
+  })
   const currentSession = session === undefined ? defaultSession : session
   const openArtifact = useSidecarStore((state) => state.openArtifact)
   const rootKey = !fileSourceScope && session?.workspace ? JSON.stringify([session.id, session.workspace, session.connection_id]) : ''
@@ -522,11 +529,13 @@ export function MarkdownContent({
     }
     return `/api/v1/files/raw?path=${encodeURIComponent(fullPath)}`
   }
-  const extRegex = artifactViewerRegistry.getExtensionPattern()
-  const pathKey = JSON.stringify([...new Set(
-    Array.from(extractPlainProseForPathCheck(value).matchAll(new RegExp(extRegex.source, 'gi')))
-      .flatMap((match) => artifactSuffixes(match[1]).filter((candidate) => /[\\/]/.test(candidate))),
-  )].slice(0, 100))
+  const pathKey = useMemo(() => {
+    const extRegex = artifactViewerRegistry.getExtensionPattern()
+    return JSON.stringify([...new Set(
+      Array.from(extractPlainProseForPathCheck(value).matchAll(new RegExp(extRegex.source, 'gi')))
+        .flatMap((match) => artifactSuffixes(match[1]).filter((candidate) => /[\\/]/.test(candidate))),
+    )].slice(0, 100))
+  }, [value])
   const checkKey = `${rootKey}:${pathKey}`
 
   useEffect(() => {
@@ -572,12 +581,17 @@ export function MarkdownContent({
     return () => { active = false }
   }, [checkKey, pathKey, rootKey, session?.workspace, session?.connection_id])
 
-  const visualizations = extractVisualizations(value)
-  const normalizedValue = autoLinkArtifacts(
-    visualizations.text,
-    rootFiles?.key === rootKey && rootKey ? rootFiles.names : null,
-    checkedPaths?.key === checkKey && rootKey ? checkedPaths.names : null,
-    fileSourceScope ? (path) => Boolean(findGroupFile(fileSourceScope.files, path)) : undefined,
+  const visualizations = useMemo(() => extractVisualizations(value), [value])
+  const effectiveRootFiles = rootFiles?.key === rootKey && rootKey ? rootFiles.names : null
+  const effectiveCheckedPaths = checkedPaths?.key === checkKey && rootKey ? checkedPaths.names : null
+  const normalizedValue = useMemo(
+    () => autoLinkArtifacts(
+      visualizations.text,
+      effectiveRootFiles,
+      effectiveCheckedPaths,
+      fileSourceScope ? (path) => Boolean(findGroupFile(fileSourceScope.files, path)) : undefined,
+    ),
+    [effectiveCheckedPaths, effectiveRootFiles, fileSourceScope, visualizations.text],
   )
 
   const resolvePathWithWorkspace = (raw: string): string => {
@@ -859,14 +873,16 @@ export function MarkdownContent({
         {normalizedValue}
       </ReactMarkdown>
       {linkMenu && <MarkdownLinkMenu target={linkMenu} session={session} onClose={() => setLinkMenu(null)} />}
-      <FileLinkHoverPreview
-        target={hoverTarget}
-        onMouseEnter={clearHoverTimers}
-        onMouseLeave={scheduleHoverClose}
-        onOpen={() => hoverTarget?.onOpen()}
-        onClose={closeHoverNow}
-      />
+      {hoverTarget && (
+        <FileLinkHoverPreview
+          target={hoverTarget}
+          onMouseEnter={clearHoverTimers}
+          onMouseLeave={scheduleHoverClose}
+          onOpen={() => hoverTarget.onOpen()}
+          onClose={closeHoverNow}
+        />
+      )}
       {visualizations.paths.map(path => <CodexVisualization key={path} path={path} session={currentSession} />)}
     </div>
   )
-}
+})

@@ -6,12 +6,14 @@ import { useWorkspacePreferences, type WorkspacePreferences } from './useWorkspa
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
-it('imports legacy preferences, refreshes a second device and preserves state on save failure', async () => {
+it('imports legacy preferences, refreshes a second device after focus cooldown and preserves state on save failure', async () => {
+  let now = 1_000_000
+  vi.spyOn(Date, 'now').mockImplementation(() => now)
   const legacy = { 'astrorder:project_appearance': JSON.stringify({ p: { icon: 'cloud', color: 'orange' } }), astrorder_pinned_sessions: JSON.stringify({ s: true }) }
   vi.stubGlobal('localStorage', { getItem: (key: string) => legacy[key as keyof typeof legacy] || null })
   let server: WorkspacePreferences = { appearance: { p: { icon: 'cloud', color: 'orange' } }, session_pins: { s: true }, pinned_projects: [], project_order: [] }
   const imported = vi.spyOn(api, 'importPreferences').mockImplementation(async () => server)
-  vi.spyOn(api, 'getPreferences').mockImplementation(async () => server)
+  const fetched = vi.spyOn(api, 'getPreferences').mockImplementation(async () => server)
   const save = vi.spyOn(api, 'updatePreferences').mockImplementation(async patch => {
     server = { ...server, session_pins: { ...server.session_pins, ...patch.session_pins } }
     return server
@@ -22,7 +24,14 @@ it('imports legacy preferences, refreshes a second device and preserves state on
   vi.stubGlobal('localStorage', { getItem: () => null })
   const phone = renderHook(useWorkspacePreferences)
   await waitFor(() => expect(phone.result.current.preferences.appearance.p.color).toBe('orange'))
+  const fetchesBeforeFocus = fetched.mock.calls.length
   await act(async () => { await desktop.result.current.updatePreferences(value => ({ session_pins: { s: !value.session_pins.s } })) })
+  // Within the 60s cooldown window, rapid focus events should not storm /preferences.
+  act(() => window.dispatchEvent(new Event('focus')))
+  await act(async () => {})
+  expect(fetched).toHaveBeenCalledTimes(fetchesBeforeFocus)
+  // After the 60s cooldown window, focus refreshes the second device.
+  now += 61_000
   act(() => window.dispatchEvent(new Event('focus')))
   await waitFor(() => expect(phone.result.current.preferences.session_pins.s).toBe(false))
   const notify = vi.spyOn(notifications, 'show').mockReturnValue('error')

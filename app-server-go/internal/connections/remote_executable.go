@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -53,12 +54,30 @@ func IsRemoteAgent(agent map[string]any) bool {
 
 // NativeRemoteExecutableResolver probes the remote host with a bounded
 // OpenSSH command. Only the fixed kind whitelist below is supported.
+// Resolved paths are cached briefly per target and concurrent identical probes
+// share one SSH call.
 type NativeRemoteExecutableResolver struct {
 	SSHBinary string
+
+	mu       sync.Mutex
+	cache    map[string]cachedExecutablePath
+	inFlight map[string]*executableProbeCall
+}
+
+type cachedExecutablePath struct {
+	path      string
+	expiresAt time.Time
+}
+
+type executableProbeCall struct {
+	done chan struct{}
+	path string
+	err  error
 }
 
 const (
 	remoteExecutableProbeTimeout = 6 * time.Second
+	remoteExecutableCacheTTL     = 5 * time.Minute
 	remoteExecutableStdoutLimit  = 64 << 10
 	remoteExecutableStderrLimit  = 8 << 10
 	remoteExecutablePathLimit    = 4096
@@ -103,6 +122,49 @@ func (r *NativeRemoteExecutableResolver) Resolve(ctx context.Context, kind strin
 	if binary == "" {
 		binary = "ssh"
 	}
+	cacheKey := kind + "\x00" + binary + "\x00" + target + "\x00" + strings.Join(argv, "\x00")
+	r.mu.Lock()
+	if entry, ok := r.cache[cacheKey]; ok && time.Now().Before(entry.expiresAt) {
+		r.mu.Unlock()
+		return entry.path, nil
+	}
+	if call, ok := r.inFlight[cacheKey]; ok {
+		r.mu.Unlock()
+		select {
+		case <-call.done:
+			return call.path, call.err
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	}
+	if r.inFlight == nil {
+		r.inFlight = make(map[string]*executableProbeCall)
+	}
+	call := &executableProbeCall{done: make(chan struct{})}
+	r.inFlight[cacheKey] = call
+	r.mu.Unlock()
+
+	path, err := r.probe(ctx, kind, binary, target, argv, script)
+
+	r.mu.Lock()
+	delete(r.inFlight, cacheKey)
+	if err == nil {
+		if r.cache == nil {
+			r.cache = make(map[string]cachedExecutablePath)
+		}
+		r.cache[cacheKey] = cachedExecutablePath{
+			path:      path,
+			expiresAt: time.Now().Add(remoteExecutableCacheTTL),
+		}
+	}
+	call.path = path
+	call.err = err
+	close(call.done)
+	r.mu.Unlock()
+	return path, err
+}
+
+func (r *NativeRemoteExecutableResolver) probe(ctx context.Context, kind, binary, target string, argv []string, script string) (string, error) {
 	cmdCtx, cancel := context.WithTimeout(ctx, remoteExecutableProbeTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(cmdCtx, binary, append(argv, target, script)...)

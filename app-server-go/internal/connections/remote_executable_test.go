@@ -385,3 +385,25 @@ func TestNativeRemoteExecutableResolverRejectsUnsupportedKind(t *testing.T) {
 		t.Fatalf("unsupported kind spawned a probe: %v", err)
 	}
 }
+
+func TestNativeRemoteExecutableResolverCachesResolvedPath(t *testing.T) {
+	argvFile := filepath.Join(t.TempDir(), "executable-argv.json")
+	t.Setenv("ASTRORDER_SSH_EXECUTABLE_ARGV", argvFile)
+	resolver := &connections.NativeRemoteExecutableResolver{SSHBinary: os.Args[0]}
+	conn := map[string]any{"settings": map[string]any{"host": "private-fixture.invalid", "port": 2222, "user": "fixture"}}
+
+	first, err := resolver.Resolve(context.Background(), "antigravity", conn)
+	if err != nil || first != "/opt/native/codex" {
+		t.Fatalf("first resolve failed: path=%q err=%v", first, err)
+	}
+	if err := os.Remove(argvFile); err != nil {
+		t.Fatalf("remove argv file: %v", err)
+	}
+	second, err := resolver.Resolve(context.Background(), "antigravity", conn)
+	if err != nil || second != first {
+		t.Fatalf("cached resolve failed: path=%q err=%v", second, err)
+	}
+	if _, err := os.Stat(argvFile); !os.IsNotExist(err) {
+		t.Fatalf("cached resolve unexpectedly spawned another SSH probe")
+	}
+}

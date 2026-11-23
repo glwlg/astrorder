@@ -62,3 +62,12 @@ it('shows status read errors and recovers without starting the upgrade again', a
   expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   expect(useBackgroundTasks.getState().tasks[job.id].status).toBe('running')
 })
+
+it('stops polling when no upgrade jobs are running', async () => {
+  vi.mocked(api.getUpgradeJobs).mockResolvedValue({ items: [] })
+  render(<MantineProvider><BackgroundTasks /></MantineProvider>)
+  await act(async () => {})
+  expect(api.getUpgradeJobs).toHaveBeenCalledTimes(1)
+  await act(async () => { await vi.advanceTimersByTimeAsync(15_000) })
+  expect(api.getUpgradeJobs).toHaveBeenCalledTimes(1)
+})

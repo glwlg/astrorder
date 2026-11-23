@@ -50,6 +50,16 @@ type Handler struct {
 	directRouteCachedAt  time.Time
 	directRouteConfigKey string
 	directRoutedToGw     map[string]bool
+
+	analyticsFlightMu sync.Mutex
+	analyticsFlights  map[string]*analyticsUsageFlight
+}
+
+type analyticsUsageFlight struct {
+	done        chan struct{}
+	status      int
+	contentType string
+	body        []byte
 }
 
 // NewHandler constructs a new model gateway HTTP handler.

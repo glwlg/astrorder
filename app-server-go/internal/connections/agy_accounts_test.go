@@ -7,7 +7,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"astrorder.dev/contracts/agycredential"
 	pb "astrorder.dev/contracts/gen/go/astrorder/sessiond/v1"
@@ -97,5 +100,78 @@ func TestAgyImportOnceAndApplyToTwoTargets(t *testing.T) {
 	}
 	if items := request(http.MethodGet, base, nil, http.StatusOK); strings.Count(items, imported.ID) != 1 {
 		t.Fatal("cross-target application duplicated the saved account")
+	}
+}
+
+func TestAgyReadStateCacheAndConcurrentQuotaSingleflight(t *testing.T) {
+	const base = "/api/v1/agy-accounts"
+	var stateHits atomic.Int32
+	var quotaHits atomic.Int32
+	quotaStarted := make(chan struct{}, 2)
+	releaseQuota := make(chan struct{})
+	fake := &fakeDaemonService{agyAccount: func(req *pb.AgyAccountRequest) (*pb.AgyAccountResponse, error) {
+		switch req.Action {
+		case pb.AgyAccountAction_AGY_ACCOUNT_ACTION_READ_STATE:
+			stateHits.Add(1)
+			raw, _ := json.Marshal(map[string]any{"identity": "", "quota_supported": true})
+			return &pb.AgyAccountResponse{Result: &pb.NativeJson{Schema: "astrorder.agy-account-vault-result.v1", Utf8Json: raw}}, nil
+		case pb.AgyAccountAction_AGY_ACCOUNT_ACTION_READ_QUOTA:
+			quotaHits.Add(1)
+			select {
+			case quotaStarted <- struct{}{}:
+			default:
+			}
+			<-releaseQuota
+			raw, _ := json.Marshal(map[string]any{"as_of": "2026-11-23T06:00:00Z", "groups": []any{}})
+			return &pb.AgyAccountResponse{Result: &pb.NativeJson{Schema: "astrorder.agy-account-vault-result.v1", Utf8Json: raw}}, nil
+		default:
+			return nil, status.Error(codes.Unimplemented, "unexpected")
+		}
+	}}
+	h, st := setupRestoreFixture(t, fake, &recordingResolver{results: map[string]string{"antigravity": "/usr/bin/agy"}})
+	if _, err := st.UpsertAgent(t.Context(), map[string]any{"id": "agy-local", "kind": "antigravity", "name": "AGY", "status": "ready", "connection_id": "local"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Sequential READ_STATE calls hit the short-TTL cache.
+	for range 3 {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, base+"?environment_id=local", nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("READ_STATE failed: %d %s", w.Code, w.Body.String())
+		}
+	}
+	if got := stateHits.Load(); got != 1 {
+		t.Fatalf("expected 1 upstream READ_STATE call due to TTL cache, got %d", got)
+	}
+
+	// Concurrent READ_QUOTA calls coalesce into a single upstream ManageAgyAccount RPC.
+	var wg sync.WaitGroup
+	codesOut := make([]int, 2)
+	for i := range 2 {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, base+"?environment_id=local&account_id=current", nil))
+			codesOut[idx] = w.Code
+		}(i)
+	}
+	select {
+	case <-quotaStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("quota call never started")
+	}
+	// Give the second goroutine a brief moment to join the in-flight call.
+	time.Sleep(30 * time.Millisecond)
+	close(releaseQuota)
+	wg.Wait()
+	for i, code := range codesOut {
+		if code != http.StatusOK {
+			t.Fatalf("concurrent quota caller %d got HTTP %d", i, code)
+		}
+	}
+	if got := quotaHits.Load(); got != 1 {
+		t.Fatalf("expected 1 upstream READ_QUOTA call due to singleflight coalescing, got %d", got)
 	}
 }

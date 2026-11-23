@@ -10,19 +10,50 @@ export function useBackgroundProcesses(session: { id: string; agent_id: string }
   useEffect(() => {
     if (!sessionId || !agentId || !enabled) return
     let disposed = false
-    let timer: ReturnType<typeof setTimeout>
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const schedule = (delayMs: number) => {
+      if (disposed) return
+      clearTimeout(timer)
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+        timer = undefined
+        return
+      }
+      timer = setTimeout(() => {
+        timer = undefined
+        void poll()
+      }, delayMs)
+    }
     const poll = async () => {
+      if (disposed) return
+      let nextDelay = 12_000
       try {
         const result = await api.getBackgroundProcesses(sessionId, agentId)
-        if (!disposed) setSnapshot({ key, items: result.items, error: null })
+        if (!disposed) {
+          setSnapshot({ key, items: result.items, error: null })
+          if (result.items.length > 0) nextDelay = 3000
+        }
       } catch (error) {
         if (!disposed) setSnapshot({ key, items: [], error: error instanceof Error ? error.message : String(error) })
       } finally {
-        if (!disposed) timer = setTimeout(() => void poll(), 3000)
+        schedule(nextDelay)
       }
     }
+    const onVisibilityChange = () => {
+      if (!disposed && document.visibilityState === 'visible' && timer === undefined) {
+        void poll()
+      }
+    }
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', onVisibilityChange)
+    }
     void poll()
-    return () => { disposed = true; clearTimeout(timer) }
+    return () => {
+      disposed = true
+      clearTimeout(timer)
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', onVisibilityChange)
+      }
+    }
   }, [key, enabled, sessionId, agentId])
   return enabled && snapshot.key === key ? snapshot : { items: [], error: null }
 }

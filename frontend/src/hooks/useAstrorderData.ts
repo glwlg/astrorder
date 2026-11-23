@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
+import { useInfiniteQuery, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
 import { migrateSessionPins } from '../domain/migrateSessionPins'
 import { scopeKey } from '../domain/semantics'
@@ -12,9 +12,26 @@ import {
 import type { Message, Session } from '../domain/types'
 import { selectMessages, useAstrorderStore } from '../state/store'
 import { visibleTranscript } from '../domain/visibleTranscript'
-import { loadActivityHistory, visibleHistoryItems } from '../domain/loadActivityHistory'
+import { loadActivityHistory, visibleHistoryItems, type HistoryPage } from '../domain/loadActivityHistory'
+import { clientPerf } from '../perf/clientPerf'
+
+type LoadedHistoryPage = HistoryPage & {
+  completeActivityGroup: boolean
+  liveRevisionAtRequest: number
+}
 
 const EMPTY_STORED_MESSAGES: Message[] = []
+const EMPTY_OLDER_PAGES: LoadedHistoryPage[] = []
+const olderPagesByClient = new WeakMap<QueryClient, Map<string, LoadedHistoryPage[]>>()
+
+function getOlderPagesMap(client: QueryClient): Map<string, LoadedHistoryPage[]> {
+  let map = olderPagesByClient.get(client)
+  if (!map) {
+    map = new Map()
+    olderPagesByClient.set(client, map)
+  }
+  return map
+}
 
 export function mergeHistoryPages(
   agentId: string,
@@ -68,12 +85,15 @@ export function useBootstrap(authenticated: boolean) {
   const query = useQuery({
     queryKey: ['astrorder', 'bootstrap'],
     queryFn: async () => {
+      const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now()
       const payload = await api.getBootstrap()
       try {
         await migrateSessionPins(payload.sessions, localStorage)
       } catch {
         // Unavailable storage must not block native session loading.
       }
+      const endedAt = typeof performance !== 'undefined' ? performance.now() : Date.now()
+      clientPerf.recordBootstrap(Math.max(0, endedAt - startedAt))
       return payload
     },
     enabled: authenticated,
@@ -105,9 +125,15 @@ export function useSessionResources(session: Session | null, authenticated: bool
 
   const agentId = session?.agent_id
   const sessionId = session?.id
+  const sessionScopeKey = agentId && sessionId ? scopeKey(agentId, sessionId) : ''
   const stored = useAstrorderStore(useShallow((state) =>
     agentId && sessionId ? selectMessages(state, agentId, sessionId) : EMPTY_STORED_MESSAGES,
   ))
+  useEffect(() => {
+    if (!authenticated || !sessionScopeKey) return
+    const cached = Object.keys(useAstrorderStore.getState().messages[sessionScopeKey] || {}).length > 0
+    clientPerf.markSessionSwitchStart(sessionScopeKey, cached)
+  }, [authenticated, sessionScopeKey])
   const sync = useQuery({
     queryKey: ['astrorder', 'session-sync', session?.agent_id, session?.id],
     queryFn: () => api.syncSession(session!.id, session!.agent_id),
@@ -127,33 +153,105 @@ export function useSessionResources(session: Session | null, authenticated: bool
     }
   }, [sync.data])
 
-  const messages = useInfiniteQuery({
+  const queryClient = useQueryClient()
+  const latestPageQuery = useQuery<LoadedHistoryPage>({
     queryKey: ['astrorder', 'messages', session?.agent_id, session?.id],
-    queryFn: async ({ pageParam }) => {
+    queryFn: async () => {
       const liveRevisionAtRequest = useAstrorderStore.getState().messageRevision
       const page = await loadActivityHistory(
         (before, limit) => api.getMessages(session!.id, session!.agent_id, before, limit),
-        pageParam,
-        pageParam ? OLDER_HISTORY_LIMIT : INITIAL_HISTORY_LIMIT,
+        undefined,
+        INITIAL_HISTORY_LIMIT,
       )
       return { ...page, liveRevisionAtRequest }
     },
-    initialPageParam: undefined as string | undefined,
-    getNextPageParam: (lastPage) => lastPage.next_cursor || undefined,
     enabled: ready,
     retry: false,
     staleTime: 30_000,
     gcTime: 1000 * 60 * 60 * 24,
   })
 
-  const autoFetchedRef = useRef<Record<string, number>>({})
-  const fetchNextPageRef = useRef(messages.fetchNextPage)
-  fetchNextPageRef.current = messages.fetchNextPage
-  const hasNextPage = messages.hasNextPage
-  const isFetchingNextPage = messages.isFetchingNextPage
-  const pages = messages.data?.pages
+  const [olderPages, setOlderPages] = useState<LoadedHistoryPage[]>(() =>
+    sessionScopeKey ? getOlderPagesMap(queryClient).get(sessionScopeKey) || EMPTY_OLDER_PAGES : EMPTY_OLDER_PAGES,
+  )
+  const [isFetchingNextPage, setIsFetchingNextPage] = useState(false)
+  const olderFetchInFlightRef = useRef<Promise<void> | null>(null)
+  const olderPagesRef = useRef(olderPages)
+  olderPagesRef.current = olderPages
+
   useEffect(() => {
-    if (!session || !pages || pages.length === 0 || isFetchingNextPage) return
+    setIsFetchingNextPage(false)
+    olderFetchInFlightRef.current = null
+    if (!sessionScopeKey) {
+      setOlderPages(EMPTY_OLDER_PAGES)
+      return
+    }
+    setOlderPages(getOlderPagesMap(queryClient).get(sessionScopeKey) || EMPTY_OLDER_PAGES)
+  }, [queryClient, sessionScopeKey])
+
+  const pages = useMemo<LoadedHistoryPage[]>(() => {
+    if (!latestPageQuery.data) return olderPages
+    return [latestPageQuery.data, ...olderPages]
+  }, [latestPageQuery.data, olderPages])
+
+  const pagesRef = useRef(pages)
+  pagesRef.current = pages
+
+  const lastCursor = pages.length > 0 ? pages[pages.length - 1].next_cursor : null
+  const hasNextPage = Boolean(lastCursor)
+
+  const fetchNextPage = useCallback(async () => {
+    if (!ready || !session || !sessionScopeKey) return
+    if (olderFetchInFlightRef.current) return olderFetchInFlightRef.current
+    const currentPages = pagesRef.current
+    const cursor = currentPages.length > 0 ? currentPages[currentPages.length - 1].next_cursor : null
+    if (!cursor) return
+
+    const scopeAtStart = sessionScopeKey
+    const targetSessionId = session.id
+    const targetAgentId = session.agent_id
+    setIsFetchingNextPage(true)
+    let pending: Promise<void> | null = null
+    pending = (async () => {
+      try {
+        const liveRevisionAtRequest = useAstrorderStore.getState().messageRevision
+        const page = await loadActivityHistory(
+          (before, limit) => api.getMessages(targetSessionId, targetAgentId, before, limit),
+          cursor,
+          OLDER_HISTORY_LIMIT,
+        )
+        const loaded: LoadedHistoryPage = { ...page, liveRevisionAtRequest }
+        const storeMap = getOlderPagesMap(queryClient)
+        const prev = storeMap.get(scopeAtStart) || EMPTY_OLDER_PAGES
+        const next = [...prev, loaded]
+        storeMap.set(scopeAtStart, next)
+        if (scopeAtStart === sessionScopeKey) {
+          setOlderPages(next)
+        }
+      } finally {
+        if (olderFetchInFlightRef.current === pending) {
+          olderFetchInFlightRef.current = null
+        }
+        setIsFetchingNextPage(false)
+      }
+    })()
+    olderFetchInFlightRef.current = pending
+    return pending
+  }, [queryClient, ready, session, sessionScopeKey])
+
+  const messages = useMemo(() => ({
+    ...latestPageQuery,
+    data: pages.length > 0 ? { pages } : undefined,
+    hasNextPage,
+    isFetchingNextPage,
+    fetchNextPage,
+  }), [fetchNextPage, hasNextPage, isFetchingNextPage, latestPageQuery, pages])
+
+  const autoFetchedRef = useRef<Record<string, number>>({})
+  const fetchNextPageRef = useRef(fetchNextPage)
+  fetchNextPageRef.current = fetchNextPage
+  useEffect(() => {
+    if (!session || pages.length === 0 || isFetchingNextPage) return
     const sKey = `${session.agent_id}::${session.id}`
     const fetchedCount = autoFetchedRef.current[sKey] || 0
     const allLoaded = pages.flatMap((page) => page.items)
@@ -180,10 +278,10 @@ export function useSessionResources(session: Session | null, authenticated: bool
     gcTime: 1000 * 60 * 60 * 24,
   })
   useEffect(() => {
-    if (agentId && sessionId && messages.data) {
-      mergeHistoryPages(agentId, sessionId, messages.data.pages)
+    if (agentId && sessionId && pages.length > 0) {
+      mergeHistoryPages(agentId, sessionId, pages)
     }
-  }, [messages.data, agentId, sessionId])
+  }, [pages, agentId, sessionId])
   useEffect(() => {
     if (commands.data) useAstrorderStore.getState().mergeCommands(commands.data.items)
   }, [commands.data])
@@ -193,9 +291,15 @@ export function useSessionResources(session: Session | null, authenticated: bool
 
   const visibleMessages = useMemo(() => {
     if (!session) return []
-    if (messages.data && messages.data.pages.length > 0) {
-      const loadedItems = [...messages.data.pages].reverse().flatMap(page => page.items)
-      const revisionAtRequest = messages.data.pages[0].liveRevisionAtRequest
+    if (pages.length > 0) {
+      const seenLoaded = new Map<string, Message>()
+      for (let i = pages.length - 1; i >= 0; i--) {
+        for (const item of pages[i].items) {
+          seenLoaded.set(item.id, item)
+        }
+      }
+      const loadedItems = [...seenLoaded.values()]
+      const revisionAtRequest = pages[0].liveRevisionAtRequest
       const revisions = useAstrorderStore.getState().messageEventRevisions[scopeKey(session.agent_id, session.id)] || {}
       // Cached history is not a live extension of the current native window.
       // Codex often has no item timestamps (the wire uses the Unix epoch), so
@@ -206,12 +310,26 @@ export function useSessionResources(session: Session | null, authenticated: bool
       return visibleTranscript(stored, loadedItems, baseline)
     }
     return stored
-  }, [session, messages.data, stored])
+  }, [session, pages, stored])
 
-  const activityBreaks = useMemo(() => (messages.data?.pages || []).flatMap(page => {
-    const first = visibleHistoryItems(page.items)[0]
-    return first ? [first.id] : []
-  }), [messages.data])
+  const activityBreaks = useMemo(() => {
+    const breaks: string[] = []
+    const seen = new Set<string>()
+    for (const page of pages) {
+      const first = visibleHistoryItems(page.items)[0]
+      if (first && !seen.has(first.id)) {
+        seen.add(first.id)
+        breaks.push(first.id)
+      }
+    }
+    return breaks
+  }, [pages])
+  useEffect(() => {
+    if (!authenticated || !sessionScopeKey) return
+    if (messages.isSuccess || stored.length > 0) {
+      clientPerf.markSessionSwitchReady(sessionScopeKey, visibleMessages.length)
+    }
+  }, [authenticated, sessionScopeKey, messages.isSuccess, stored.length, visibleMessages.length])
   return { messages, commands, tasks, visibleMessages, activityBreaks }
 }
 

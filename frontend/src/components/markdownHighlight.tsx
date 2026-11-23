@@ -206,8 +206,22 @@ function buildRules(family: string): TokenRule[] {
 
 const IDENT_RE = /[A-Za-z_][A-Za-z0-9_]*/y
 
+const MAX_HIGHLIGHT_CHARS = 8000
+const MAX_HIGHLIGHT_LINES = 160
+
+function exceedsLineCap(code: string, maxLines: number): boolean {
+  let lines = 1
+  for (let i = 0; i < code.length; i += 1) {
+    if (code.charCodeAt(i) === 10) {
+      lines += 1
+      if (lines > maxLines) return true
+    }
+  }
+  return false
+}
+
 export function highlightCode(code: string, language: string): ReactNode {
-  if (!code || code.length > 24000) return code
+  if (!code || code.length > MAX_HIGHLIGHT_CHARS || exceedsLineCap(code, MAX_HIGHLIGHT_LINES)) return code
   const family = resolveFamily(language)
   if (!family) return code
 

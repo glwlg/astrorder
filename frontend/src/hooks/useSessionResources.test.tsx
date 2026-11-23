@@ -191,3 +191,44 @@ it('loads messages without waiting for session sync', async () => {
   expect(hook.result.current.visibleMessages).toHaveLength(1)
   client.clear()
 })
+
+it('refreshes only the newest page on message invalidation without re-fetching older history pages', async () => {
+  const session: Session = { id: 'paged-refresh', agent_id: 'codex', title: 'Paged', status: 'idle', workspace: null, updated_at: '2026-11-23T00:00:00Z' }
+  const makeMsg = (id: string, role: Message['role']): Message => ({
+    id, agent_id: session.agent_id, session_id: session.id, role, kind: 'message', text: id,
+    attachments: [], tool: null, command_id: null, created_at: '2026-11-23T00:00:00Z',
+  })
+  const older = [makeMsg('old-user', 'user'), makeMsg('old-reply', 'assistant')]
+  const latest = [makeMsg('new-user', 'user'), makeMsg('new-reply', 'assistant')]
+  const latestUpdated = [...latest, makeMsg('fresh-reply', 'assistant')]
+  let latestCalls = 0
+  let olderCalls = 0
+  useAstrorderStore.getState().resetRuntime()
+  vi.spyOn(api, 'syncSession').mockResolvedValue(session)
+  vi.spyOn(api, 'getMessages').mockImplementation(async (_sid, _aid, before) => {
+    if (before) {
+      olderCalls++
+      return { items: older, next_cursor: null }
+    }
+    latestCalls++
+    return { items: latestCalls === 1 ? latest : latestUpdated, next_cursor: 'cursor-older' }
+  })
+  vi.spyOn(api, 'getCommands').mockResolvedValue({ items: [] })
+  vi.spyOn(api, 'getTasks').mockResolvedValue({ items: [] })
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  const hook = renderHook(() => useSessionResources(session, true), { wrapper })
+  await waitFor(() => expect(hook.result.current.visibleMessages.map(m => m.id)).toEqual(['new-user', 'new-reply']))
+  await act(async () => { await hook.result.current.messages.fetchNextPage() })
+  await waitFor(() => expect(hook.result.current.visibleMessages.map(m => m.id)).toEqual(['old-user', 'old-reply', 'new-user', 'new-reply']))
+  expect(latestCalls).toBe(1)
+  expect(olderCalls).toBe(1)
+
+  await act(async () => {
+    await client.invalidateQueries({ queryKey: ['astrorder', 'messages', session.agent_id, session.id] })
+  })
+  await waitFor(() => expect(hook.result.current.visibleMessages.map(m => m.id)).toEqual(['old-user', 'old-reply', 'new-user', 'new-reply', 'fresh-reply']))
+  expect(latestCalls).toBe(2)
+  expect(olderCalls).toBe(1)
+  client.clear()
+})

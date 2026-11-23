@@ -169,6 +169,41 @@ func (s *Store) ListTasks(ctx context.Context, agentID, sessionID string) ([]map
 	return wireRows(rows, taskWire)
 }
 
+// ListSessionTasksBounded returns all non-terminal tasks plus bounded recent terminal tasks
+// (preserving recent todo/subagent history) so long-lived sessions never emit multi-megabyte payloads.
+func (s *Store) ListSessionTasksBounded(ctx context.Context, agentID, sessionID string, maxTerminal int) ([]map[string]any, error) {
+	if maxTerminal <= 0 {
+		return s.ListTasks(ctx, agentID, sessionID)
+	}
+	const maxStructuredTerminal = 100
+	rows, err := s.QueryRows(ctx, `SELECT * FROM (
+		SELECT * FROM tasks
+		WHERE agent_id=? AND session_id=? AND status NOT IN ('completed','failed','cancelled','canceled','done')
+		UNION ALL
+		SELECT * FROM (
+			SELECT * FROM tasks
+			WHERE agent_id=? AND session_id=? AND status IN ('completed','failed','cancelled','canceled','done')
+			  AND kind IN ('todo','subagent')
+			ORDER BY updated_at DESC,row_id DESC LIMIT ?
+		)
+		UNION ALL
+		SELECT * FROM (
+			SELECT * FROM tasks
+			WHERE agent_id=? AND session_id=? AND status IN ('completed','failed','cancelled','canceled','done')
+			  AND kind NOT IN ('todo','subagent')
+			ORDER BY updated_at DESC,row_id DESC LIMIT ?
+		)
+	) ORDER BY updated_at DESC,row_id DESC`,
+		agentID, sessionID,
+		agentID, sessionID, maxStructuredTerminal,
+		agentID, sessionID, maxTerminal,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return wireRows(rows, taskWire)
+}
+
 // UpsertTask writes an exact task projection.
 func (s *Store) UpsertTask(ctx context.Context, payload map[string]any) (map[string]any, error) {
 	var result map[string]any

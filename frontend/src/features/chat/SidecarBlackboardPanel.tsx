@@ -1,9 +1,12 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ActionIcon, Badge, Button, Group, Modal, Paper, ScrollArea, Stack, Text, TextInput, Textarea, Tooltip } from '@mantine/core'
 import { IconChalkboard, IconDownload, IconPlus, IconRefresh, IconX } from '@tabler/icons-react'
 import { notifications } from '@mantine/notifications'
 import { api } from '../../api/client'
 import { GroupBlackboardItem as BlackboardItemRenderer } from './GroupBlackboardItem'
+
+const BLACKBOARD_FALLBACK_POLL_MS = 30_000
+const BLACKBOARD_EVENT_DEBOUNCE_MS = 180
 
 export function SidecarBlackboardPanel({
   namespace,
@@ -24,7 +27,17 @@ export function SidecarBlackboardPanel({
   const [newKey, setNewKey] = useState('')
   const [newVal, setNewVal] = useState('')
   const itemRefs = useRef(new Map<string, HTMLDivElement>())
+  const mountedRef = useRef(true)
+  const inFlightRef = useRef(false)
+  const lastFetchedAtRef = useRef(0)
   const focusedItemAvailable = Boolean(focusKey && Object.hasOwn(items, focusKey))
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
 
   useEffect(() => {
     if (!focusKey || !focusedItemAvailable) return
@@ -33,23 +46,57 @@ export function SidecarBlackboardPanel({
     entry?.focus({ preventScroll: true })
   }, [focusKey, focusRequest, focusedItemAvailable])
 
-  const fetchItems = async () => {
+  const fetchItems = useCallback(async (force = false) => {
+    if (inFlightRef.current && !force) return
+    inFlightRef.current = true
     setLoading(true)
     try {
       const res = await api.getBlackboard(namespace)
+      if (!mountedRef.current) return
+      lastFetchedAtRef.current = Date.now()
       setItems(res.items || {})
     } catch {
       // fallback
     } finally {
-      setLoading(false)
+      inFlightRef.current = false
+      if (mountedRef.current) setLoading(false)
     }
-  }
+  }, [namespace])
 
   useEffect(() => {
-    void fetchItems()
-    const timer = setInterval(() => void fetchItems(), 4000)
-    return () => clearInterval(timer)
-  }, [namespace])
+    let debounceTimer: ReturnType<typeof setTimeout> | undefined
+    void fetchItems(true)
+
+    const onBlackboardChange = (event: Event) => {
+      const detail = (event as CustomEvent<{ namespace?: string } | undefined>).detail
+      if (detail?.namespace && detail.namespace !== namespace) return
+      clearTimeout(debounceTimer)
+      debounceTimer = setTimeout(() => {
+        void fetchItems()
+      }, BLACKBOARD_EVENT_DEBOUNCE_MS)
+    }
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && Date.now() - lastFetchedAtRef.current >= 10_000) {
+        void fetchItems()
+      }
+    }
+
+    const timer = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        void fetchItems()
+      }
+    }, BLACKBOARD_FALLBACK_POLL_MS)
+
+    window.addEventListener('astrorder:blackboard-change', onBlackboardChange)
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () => {
+      clearTimeout(debounceTimer)
+      clearInterval(timer)
+      window.removeEventListener('astrorder:blackboard-change', onBlackboardChange)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+    }
+  }, [fetchItems, namespace])
 
   const handleSave = async () => {
     if (!newKey.trim()) return
@@ -139,7 +186,7 @@ export function SidecarBlackboardPanel({
             </ActionIcon>
           </Tooltip>
           <Tooltip label="刷新" withArrow>
-            <ActionIcon variant="subtle" color="gray" size="sm" aria-label="刷新黑板" onClick={fetchItems} loading={loading}>
+            <ActionIcon variant="subtle" color="gray" size="sm" aria-label="刷新黑板" onClick={() => void fetchItems(true)} loading={loading}>
               <IconRefresh size={15} />
             </ActionIcon>
           </Tooltip>
@@ -181,7 +228,7 @@ export function SidecarBlackboardPanel({
                   itemKey={k}
                   itemValue={v}
                   namespace={namespace}
-                  onUpdated={fetchItems}
+                  onUpdated={() => void fetchItems(true)}
                   onDelete={() => void handleDelete(k)}
                 />
               </div>

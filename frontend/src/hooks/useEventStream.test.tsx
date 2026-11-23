@@ -402,4 +402,49 @@ describe('event stream notifications', () => {
     expect(navigate).toHaveBeenCalledWith('/groups/group-review')
     expect(navigate).not.toHaveBeenCalledWith(expect.stringContaining('/chat/'))
   })
+
+  it('throttles duplicate end-of-turn message and token usage invalidation storms with leading edge', async () => {
+    vi.useFakeTimers()
+    let options: { onEvent: (event: EventEnvelope) => void } | undefined
+    mocks.connectEventStream.mockImplementation((next) => { options = next; return vi.fn() })
+    const client = new QueryClient()
+    const invalidate = vi.spyOn(client, 'invalidateQueries').mockResolvedValue()
+    const view = render(<StreamHarness client={client} />)
+    try {
+      act(() => {
+        // Leading edge fires immediately on the first completion event
+        options?.onEvent(noticeEvent('task_completed', 10))
+        // Burst of overlapping completion signals within the 1500ms cooldown window
+        options?.onEvent({ id: 'cmd-done', cursor: 11, type: 'command.upsert', agent_id: 'agent-1', session_id: 'session-1', data: { id: 'cmd-1', agent_id: 'agent-1', session_id: 'session-1', state: 'completed', kind: 'prompt', input: 'hi', output: 'ok', created_at: '2026-10-16T02:00:00Z', updated_at: '2026-10-16T02:00:01Z' } })
+        options?.onEvent({ id: 'turn-done', cursor: 12, type: 'codex.notification', agent_id: 'agent-1', session_id: 'session-1', data: { frame: { method: 'turn/completed' } } })
+        options?.onEvent({ id: 'stop-hook', cursor: 13, type: 'native.observation', agent_id: 'agent-1', session_id: 'session-1', data: { event: 'Stop' } })
+      })
+      const messageCalls = () => invalidate.mock.calls.filter(([arg]) => {
+        const key = (arg as { queryKey?: unknown[] } | undefined)?.queryKey
+        return Array.isArray(key) && key[1] === 'messages' && key[2] === 'agent-1' && key[3] === 'session-1'
+      })
+      expect(messageCalls()).toHaveLength(1)
+
+      // Trailing refresh fires once after the 1500ms window
+      await act(async () => { await vi.advanceTimersByTimeAsync(1500) })
+      expect(messageCalls()).toHaveLength(2)
+
+      // Token usage bursts collapse across the 2500ms cooldown window
+      act(() => {
+        options?.onEvent({ id: 'u1', cursor: 14, type: 'token.usage', agent_id: 'agent-1', session_id: 'session-usage-burst', data: {} })
+        options?.onEvent({ id: 'u2', cursor: 15, type: 'token.usage', agent_id: 'agent-1', session_id: 'session-usage-burst', data: {} })
+        options?.onEvent({ id: 'u3', cursor: 16, type: 'token.usage', agent_id: 'agent-1', session_id: 'session-usage-burst', data: {} })
+      })
+      const usageCalls = () => invalidate.mock.calls.filter(([arg]) => {
+        const key = (arg as { queryKey?: unknown[] } | undefined)?.queryKey
+        return Array.isArray(key) && key[1] === 'session_usage' && key[2] === 'session-usage-burst' && key[3] === 'agent-1'
+      })
+      expect(usageCalls()).toHaveLength(1)
+      await act(async () => { await vi.advanceTimersByTimeAsync(2500) })
+      expect(usageCalls()).toHaveLength(2)
+    } finally {
+      view.unmount()
+      vi.useRealTimers()
+    }
+  })
 })

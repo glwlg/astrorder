@@ -36,6 +36,7 @@ import { REASONING_EFFORTS } from './composerMedia'
 
 import { SessionDetails } from './SessionDetails'
 import { SessionToolsMenu } from './SessionToolsMenu'
+import { PerfProfiler } from '../../perf/clientPerf'
 import { useBackgroundProcesses } from './useBackgroundProcesses'
 import { SessionRuntimeBar } from './SessionRuntimeBar'
 import { TaskDetails } from './TaskDetails'
@@ -190,16 +191,27 @@ function ChatPageBody() {
     && candidate.workspace === selected?.workspace
     && (candidate.connection_id || agents[candidate.agent_id]?.connection_id || 'local') === (selected?.connection_id || agents[selected?.agent_id || '']?.connection_id || 'local')
     && agents[candidate.agent_id]?.kind === 'codex'
-  )), [agents, selected, sessions])
+  )), [agents, selected?.agent_id, selected?.connection_id, selected?.id, selected?.workspace, sessions])
+  const reviewPeerSignature = useMemo(
+    () => reviewPeers.map((candidate) => scopeKey(candidate.agent_id, candidate.id)).sort().join(','),
+    [reviewPeers],
+  )
+  const reviewPeersRef = useRef(reviewPeers)
+  reviewPeersRef.current = reviewPeers
+  const selectedAgentId = selected?.agent_id ?? ''
+  const selectedSessionId = selected?.id ?? ''
+  const selectedStatus = selected?.status ?? ''
+  const selectedLastUserAt = selected?.last_user_at ?? ''
+  const hasReviewRun = Boolean(reviewRun)
 
   useEffect(() => {
-    if (!selected || reviewRun) return
+    if (!selectedAgentId || !selectedSessionId || hasReviewRun) return
     let cancelled = false
-    void api.getReviewRelayRuns(selected.agent_id, selected.id).then(({ items }) => {
+    void api.getReviewRelayRuns(selectedAgentId, selectedSessionId).then(({ items }) => {
       if (cancelled || !items.length) return
       const persisted = items[0]
       if (!isRecoverableReviewRun(persisted)) return
-      const peer = reviewPeers.find((candidate) => (
+      const peer = reviewPeersRef.current.find((candidate) => (
         candidate.agent_id === persisted.review_agent_id && candidate.id === persisted.review_session_id
       ))
       if (!peer || persisted.status === 'validating') return
@@ -213,7 +225,7 @@ function ChatPageBody() {
       })
     }).catch(() => undefined)
     return () => { cancelled = true }
-  }, [reviewPeers, reviewRun, selected])
+  }, [hasReviewRun, reviewPeerSignature, selectedAgentId, selectedSessionId])
 
   useEffect(() => {
     if (!reviewRun || reviewRun.status !== 'reviewing') return
@@ -340,20 +352,21 @@ function ChatPageBody() {
     }
   }
   useEffect(() => {
-    if (!selected || selected.status !== 'idle' || reviewRun || !selected.last_user_at) return
+    if (!selectedAgentId || !selectedSessionId || selectedStatus !== 'idle' || hasReviewRun || !selectedLastUserAt) return
+    const revision = selectedLastUserAt
+    const markerKey = `astrorder:review-triggered:${scopeKey(selectedAgentId, selectedSessionId)}`
+    if (localStorage.getItem(markerKey) === revision) return
     let cancelled = false
-    const revision = selected.last_user_at
-    const markerKey = `astrorder:review-triggered:${scopeKey(selected.agent_id, selected.id)}`
-    void api.getReviewRelayBinding(selected.agent_id, selected.id).then((binding) => {
+    void api.getReviewRelayBinding(selectedAgentId, selectedSessionId).then((binding) => {
       if (cancelled || !binding?.enabled) return
       const bindingKey = scopeKey(binding.review_agent_id, binding.review_session_id)
       if (localStorage.getItem(markerKey) === revision) return
-      if (!reviewPeers.some((peer) => scopeKey(peer.agent_id, peer.id) === bindingKey)) return
+      if (!reviewPeersRef.current.some((peer) => scopeKey(peer.agent_id, peer.id) === bindingKey)) return
       localStorage.setItem(markerKey, revision)
       void startReview(bindingKey)
     }).catch(() => undefined)
     return () => { cancelled = true }
-  }, [reviewPeers, reviewRun, selected])
+  }, [hasReviewRun, reviewPeerSignature, selectedAgentId, selectedLastUserAt, selectedSessionId, selectedStatus])
   const handoffPeer = useMemo(() => findSessionHandoff(selected, sessions), [selected, sessions])
   const [detailsOpened, { open: openDetails, close: closeDetails }] = useDisclosure(false)
   const [detailsPinned, setDetailsPinned] = useState(false)
@@ -443,7 +456,7 @@ function ChatPageBody() {
   }, [closeCheckpoints, selected])
   const [taskSelection, setTaskSelection] = useState<Pick<Task, 'id' | 'agent_id' | 'session_id'> | null>(null)
   const [gallery, setGallery] = useState<{ images: string[]; index: number } | null>(null)
-  const openGallery = (images: string[], index: number) => {
+  const openGallery = useCallback((images: string[], index: number) => {
     const desktop = (window as unknown as { astrorderDesktop?: { openPreview?: (payload: { images: string[]; index: number }) => Promise<void> } }).astrorderDesktop
     if (desktop?.openPreview) {
       const abs = images.map((src) => {
@@ -455,9 +468,8 @@ function ChatPageBody() {
       return
     }
     setGallery({ images, index })
-  }
+  }, [])
   const [quickOpenOpened, setQuickOpenOpened] = useState(false)
-  const [composerHeight, setComposerHeight] = useState<number>(124)
   const mobileTaskSheet = useMediaQuery('(max-width: 767px)')
   const resources = useSessionResources(selected, true)
   const messages = resources.visibleMessages
@@ -545,6 +557,63 @@ function ChatPageBody() {
     }
   }
 
+  const handleImageClick = useCallback((url: string) => openGallery([url], 0), [openGallery])
+  const handleGalleryClick = useCallback((url: string, allImages: string[]) => {
+    const idx = allImages.indexOf(url)
+    openGallery(allImages, idx >= 0 ? idx : 0)
+  }, [openGallery])
+  const handleEditLastUserMessage = useCallback((text: string) => {
+    if (!selected) return
+    useAstrorderStore.getState().setDraft(selected.agent_id, selected.id, { text, attachments: [] })
+    const el = document.querySelector<HTMLTextAreaElement>('.composer-input textarea')
+    if (el) {
+      el.focus()
+      el.setSelectionRange(el.value.length, el.value.length)
+    }
+  }, [selected])
+  const handleLoadOlder = useCallback(() => resources.messages.fetchNextPage(), [resources.messages])
+  const handleRetryResources = useCallback(() => {
+    void resources.messages.refetch()
+    void resources.commands.refetch()
+  }, [resources.commands, resources.messages])
+  const handleApprovalCallback = useCallback(
+    (approval: Approval, action: 'approve' | 'cancel') => { void handleApproval(approval, action) },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [selected, agent, queryClient],
+  )
+  const handleOpenForkCallback = useCallback(
+    (message: Message, turnIndex: number) => {
+      if (!selected) return
+      setForkTargetMessage({ message, turnIndex })
+      const baseTitle = selected.title || '新会话'
+      setForkTitle(`${baseTitle} (分叉)`)
+      setForkBranchName(`fork-${Date.now().toString(36)}`)
+      setForkWorktree(false)
+      setForkModalOpen(true)
+    },
+    [selected],
+  )
+
+  const resourceError = resources.messages.error || resources.commands.error || resources.tasks.error
+  const resourceErrorText = resourceError ? errorText(resourceError) : undefined
+  const handleRetryAllResources = useCallback(
+    () => Promise.all([resources.messages.refetch(), resources.commands.refetch(), resources.tasks.refetch()]),
+    [resources.commands, resources.messages, resources.tasks],
+  )
+  const connectionNotice = useMemo(
+    () => (
+      selected ? (
+        <SessionConnectionNotice
+          key={scopeKey(selected.agent_id, selected.id)}
+          session={selected}
+          error={resourceErrorText}
+          onRetry={handleRetryAllResources}
+        />
+      ) : null
+    ),
+    [handleRetryAllResources, resourceErrorText, selected],
+  )
+
   if (activeBotGroup) {
     return (
       <div className="route-page chat-page">
@@ -564,8 +633,6 @@ function ChatPageBody() {
       </div>
     )
   }
-
-  const resourceError = resources.messages.error || resources.commands.error || resources.tasks.error
 
   const handleOpenFork = (message: Message, turnIndex: number) => {
     if (!selected) return
@@ -725,6 +792,7 @@ function ChatPageBody() {
       >
         <section className="chat-column">
           <SessionRuntimeBar key={scopeKey(selected.agent_id, selected.id)} commands={commands} tasks={runtimeTasks} backgroundError={background.error} onTaskOpen={(task) => { setTaskSelection({ id: task.id, agent_id: task.agent_id, session_id: task.session_id }); openTaskDetails() }} />
+          <PerfProfiler id="Transcript">
           <Transcript
             activityBreaks={resources.activityBreaks}
             key={`transcript:${scopeKey(selected.agent_id, selected.id)}`}
@@ -733,37 +801,24 @@ function ChatPageBody() {
             outbox={outbox}
             approvals={approvals}
             canApprove={agent?.capabilities.includes('approvals') === true}
-            onApproval={(approval, action) => void handleApproval(approval, action)}
-            composerHeight={composerHeight}
+            onApproval={handleApprovalCallback}
             loading={resources.messages.isLoading || resources.commands.isLoading}
             hasMoreHistory={Boolean(resources.messages.hasNextPage)}
             loadingOlder={resources.messages.isFetchingNextPage}
-            onLoadOlder={() => resources.messages.fetchNextPage()}
-            onImageClick={(url) => openGallery([url], 0)}
-            onGalleryClick={(url, allImages) => {
-              const idx = allImages.indexOf(url)
-              openGallery(allImages, idx >= 0 ? idx : 0)
-            }}
-            error={resourceError ? errorText(resourceError) : undefined}
-            notice={<SessionConnectionNotice key={scopeKey(selected.agent_id, selected.id)} session={selected} error={resourceError ? errorText(resourceError) : undefined} onRetry={() => Promise.all([resources.messages.refetch(), resources.commands.refetch(), resources.tasks.refetch()])} />}
-           onRetry={() => {
-             void resources.messages.refetch()
-             void resources.commands.refetch()
-           }}
-           commands={commands}
-           checkpoints={sessionCheckpoints.items}
-           onOpenCheckpoint={handleOpenCheckpoint}
-           highlightMessageId={searchParams.get('message_id')}
-           onForkAtMessage={handleOpenFork}
-           onEditLastUserMessage={(text) => {
-              useAstrorderStore.getState().setDraft(selected.agent_id, selected.id, { text, attachments: [] })
-              const el = document.querySelector<HTMLTextAreaElement>('.composer-input textarea')
-              if (el) {
-                el.focus()
-                el.setSelectionRange(el.value.length, el.value.length)
-              }
-            }}
-         />
+            onLoadOlder={handleLoadOlder}
+            onImageClick={handleImageClick}
+            onGalleryClick={handleGalleryClick}
+            error={resourceErrorText}
+            notice={connectionNotice}
+            onRetry={handleRetryResources}
+            commands={commands}
+            onForkAtMessage={handleOpenForkCallback}
+            onEditLastUserMessage={handleEditLastUserMessage}
+            checkpoints={sessionCheckpoints.items}
+            onOpenCheckpoint={handleOpenCheckpoint}
+            highlightMessageId={searchParams.get('message_id')}
+          />
+          </PerfProfiler>
           <SessionComposerGate
             key={`gate:${scopeKey(selected.agent_id, selected.id)}`}
             session={selected}
@@ -772,6 +827,7 @@ function ChatPageBody() {
               handleOpenFork(messages[index], index)
             } : undefined}
           >
+          <PerfProfiler id="ChatComposer">
           <ChatComposer
             glass
             key={`composer:${scopeKey(selected.agent_id, selected.id)}`}
@@ -779,9 +835,9 @@ function ChatPageBody() {
             agent={agent}
             tasks={tasks}
             usage={sessionUsage.data}
-            onHeightChange={setComposerHeight}
             onPreviewImage={openGallery}
           />
+          </PerfProfiler>
           </SessionComposerGate>
         </section>
         <aside

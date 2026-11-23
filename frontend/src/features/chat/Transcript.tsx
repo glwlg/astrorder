@@ -5,7 +5,7 @@ import { ActionIcon, Anchor, Button, Group, Paper, Stack, Text, Tooltip } from '
 import { IconCheck, IconChecks, IconCopy, IconEdit, IconGitFork, IconHistory, IconShieldCheck, IconX } from '@tabler/icons-react'
 import type { SessionCheckpoint } from '../../api/client'
 import { mapCheckpointsToMessages } from '../../domain/turnCheckpoints'
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { TurnMinimap } from './TurnMinimap'
 import { InlineNotice } from '../../components/InlineNotice'
 import type { Approval, Attachment, Message, OutboxEntry, Session } from '../../domain/types'
@@ -20,6 +20,7 @@ import { useOlderMessages } from '../../hooks/useOlderMessages'
 import { activityDuration, activityState, describeTool, extractToolArgs, FileChangeDiffBlock, fileChangeDiffs, formatCommandRowDisplay, PackSummary, ShellOutputBlock, ToolLineIcon, unwrapCommand } from './toolPresentation'
 import { ToolOutputBlock } from './ToolOutputBlock'
 import { isCompactionMessage, CompactionDivider } from './CompactionDivider'
+import { HandoffSummaryCard } from './HandoffSummaryCard'
 import { ShinyText } from '../../components/animations/ShinyText'
 import { StarBorder } from '../../components/animations/StarBorder'
 import { GlareHover } from '../../components/animations/GlareHover'
@@ -30,9 +31,24 @@ import { useSidecarStore } from '../sidecar/sidecarStore'
 import { LIVE_ACTIVITY_MS, useAstrorderStore } from '../../state/store'
 import { scopeKey } from '../../domain/semantics'
 import { useReducedMotion } from '@mantine/hooks'
-import { AnimatePresence, motion } from 'motion/react'
+import { motion } from 'motion/react'
 import { WorkbenchMark } from '../../components/WorkbenchMark'
 import { agentKindLabel } from '../../components/AgentBrandIcon'
+
+const zhDateFormatter = new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
+const zhTimeFormatter = new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit' })
+const INITIAL_VISIBLE_ROWS = 60
+const VISIBLE_ROW_STEP = 60
+
+function formatMessageDate(iso: string): string {
+  const ts = Date.parse(iso)
+  return ts > 0 ? zhDateFormatter.format(ts) : ''
+}
+
+function formatMessageTime(iso: string): string {
+  const ts = Date.parse(iso)
+  return ts > 0 ? zhTimeFormatter.format(ts) : ''
+}
 
 export function AttachmentList({
   attachments,
@@ -45,7 +61,11 @@ export function AttachmentList({
   session?: Session | null
   onGalleryClick?: (url: string, allImages: string[]) => void
 }) {
-  const defaultSession = useAstrorderStore((state) => Object.values(state.sessions)[0] as Session | undefined)
+  const defaultSession = useAstrorderStore((state) => {
+    if (session) return undefined
+    for (const key in state.sessions) return state.sessions[key]
+    return undefined
+  })
   const currentSession = session || defaultSession
   const openArtifact = useSidecarStore((state) => state.openArtifact)
 
@@ -152,7 +172,7 @@ function messageLabel(message: Message): string {
   return 'Agent'
 }
 
-function MessageItem({
+const MessageItem = memo(function MessageItem({
   message,
   onImageClick,
   onGalleryClick,
@@ -265,10 +285,11 @@ function MessageItem({
       </article>
     )
   }
+  const formattedTime = formatMessageTime(message.created_at)
   const metadata = (
     <span className={`message-meta ${inlineMeta ? 'message-meta-inline' : ''}`}>
       {isReviewMode && <span className="message-review-mode-tag">审查模式</span>}
-      {Date.parse(message.created_at) > 0 && <time dateTime={message.created_at}>{new Date(message.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</time>}
+      {formattedTime && <time dateTime={message.created_at}>{formattedTime}</time>}
       {isUser && <span className="message-status-ticks" title={hasAssistantReplied ? 'Agent 已响应' : isAgentAccepted ? 'Agent 已接收' : '已发送'} style={{ display: 'inline-flex', alignItems: 'center', color: hasAssistantReplied || isAgentAccepted ? 'var(--astr-indigo, #5b6cff)' : 'var(--astr-muted)' }}>
         {hasAssistantReplied || isAgentAccepted ? <IconChecks size={14} /> : <IconCheck size={14} />}
       </span>}
@@ -335,17 +356,16 @@ function MessageItem({
       {!inlineMeta && metadata}
     </article>
   )
-}
+})
 
 const ACTIVITY_PACK_COLLAPSE_GRACE_MS = 4_500
 
-function ActivityPackSection({
+const ActivityPackSection = memo(function ActivityPackSection({
   id,
   pack,
   isRunning,
   definitivelyEnded,
   isDeferred,
-  enter,
   onImageClick,
   onGalleryClick,
   session,
@@ -355,7 +375,6 @@ function ActivityPackSection({
   isRunning: boolean
   definitivelyEnded: boolean
   isDeferred: boolean
-  enter: { opacity?: number; y?: number; scale?: number }
   onImageClick?: (url: string) => void
   onGalleryClick?: (url: string, allImages: string[]) => void
   session?: Session | null
@@ -378,14 +397,10 @@ function ActivityPackSection({
   }, [autoOpen, definitivelyEnded, isRunning, packSize])
 
   return (
-    <motion.section
+    <section
       className={`activity-pack${isDeferred ? ' is-deferred-turn' : ''}`}
       aria-label="思考与工具"
       data-turn-id={id}
-      initial={enter}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0 }}
-      transition={{ duration: 0.28, ease: [0.2, 0.8, 0.2, 1] }}
     >
       <LazyDetails
         autoOpen={autoOpen}
@@ -404,11 +419,29 @@ function ActivityPackSection({
           ))}
         </div>
       </LazyDetails>
-    </motion.section>
+    </section>
   )
-}
+})
 
-export function Transcript({
+type VisualRow =
+  | { kind: 'compaction'; id: string; message: Message }
+  | { kind: 'pack'; id: string; pack: Message[]; shouldOpen: boolean; definitivelyEnded: boolean; isDeferred: boolean }
+  | {
+      kind: 'message'
+      id: string
+      idx: number
+      message: Message
+      dateDivider: string | null
+      hasAssistantReplied: boolean
+      isAgentAccepted: boolean
+      isFinalReply: boolean
+      showAuthorMark: boolean
+      isLatest: boolean
+      isDeferred: boolean
+      continuedNativeInput: boolean
+    }
+
+export const Transcript = memo(function Transcript({
   messages,
   activityBreaks,
   outbox,
@@ -429,7 +462,7 @@ export function Transcript({
   commands = [],
   onEditLastUserMessage,
   onForkAtMessage,
-  checkpoints = [],
+  checkpoints,
   onOpenCheckpoint,
   highlightMessageId,
 }: {
@@ -457,21 +490,171 @@ export function Transcript({
   onOpenCheckpoint?: (cp: SessionCheckpoint) => void
   highlightMessageId?: string | null
 }) {
-  const reducedMotion = useReducedMotion(undefined, { getInitialValueInEffect: false })
+  const _reducedMotion = useReducedMotion(undefined, { getInitialValueInEffect: false })
+  void _reducedMotion
   const agentKind = useAstrorderStore(state => session ? state.agents[session.agent_id]?.kind : undefined)
-  const enter = reducedMotion ? {} : { opacity: 0, y: 10, scale: 0.99 }
-  const visibleMessages = messages.map(normalizeMessagePresentation).filter((message) => isCompactionMessage(message) || hasMessageContent(message))
-  const isActivity = (message: Message | null) => Boolean(message && !isCompactionMessage(message) && isMessageActivity(message))
-  const packs = activityPacks(visibleMessages, activityBreaks)
+  const authorLabel = agentKindLabel(agentKind)
+  const liveActivityAt = useAstrorderStore((state) => (
+    session ? state.liveActivityAt[scopeKey(session.agent_id, session.id)] : undefined
+  ))
+  const liveActive = typeof liveActivityAt === 'number' && Date.now() - liveActivityAt >= 0 && Date.now() - liveActivityAt < LIVE_ACTIVITY_MS
+  const busy = session?.status === 'running' || session?.status === 'waiting_approval' || liveActive
+
+  const visibleMessages = useMemo(
+    () => messages.map(normalizeMessagePresentation).filter((message) => isCompactionMessage(message) || hasMessageContent(message)),
+    [messages],
+  )
+  const packs = useMemo(() => activityPacks(visibleMessages, activityBreaks), [visibleMessages, activityBreaks])
   const checkpointByMsgId = useMemo(
-    () => mapCheckpointsToMessages(visibleMessages, checkpoints),
+    () => mapCheckpointsToMessages(visibleMessages, checkpoints ?? []),
     [visibleMessages, checkpoints],
   )
+
+  const lastUserMessageId = useMemo(() => {
+    for (let i = visibleMessages.length - 1; i >= 0; i--) {
+      if (visibleMessages[i].role === 'user') return visibleMessages[i].id
+    }
+    return null
+  }, [visibleMessages])
+
+  const visualRows = useMemo<VisualRow[]>(() => {
+    const n = visibleMessages.length
+    if (n === 0) return []
+    const isAct = (m: Message) => !isCompactionMessage(m) && isMessageActivity(m)
+
+    // Precompute O(N) suffix flags in a single reverse pass instead of O(N^2) slices.
+    const hasLaterActivity = new Uint8Array(n)
+    const hasLaterUser = new Uint8Array(n)
+    const hasLaterNonUser = new Uint8Array(n)
+    const hasLaterFinalText = new Uint8Array(n)
+    const hasLaterAssistantInTurn = new Uint8Array(n)
+
+    let seenActivity = false
+    let seenUser = false
+    let seenNonUser = false
+    let seenFinalText = false
+    let seenAssistantBeforeNextUser = false
+    for (let i = n - 1; i >= 0; i--) {
+      hasLaterActivity[i] = seenActivity ? 1 : 0
+      hasLaterUser[i] = seenUser ? 1 : 0
+      hasLaterNonUser[i] = seenNonUser ? 1 : 0
+      hasLaterFinalText[i] = seenFinalText ? 1 : 0
+      hasLaterAssistantInTurn[i] = seenAssistantBeforeNextUser ? 1 : 0
+
+      const m = visibleMessages[i]
+      if (isAct(m)) seenActivity = true
+      if (m.role === 'user') {
+        seenAssistantBeforeNextUser = false
+        if (m.kind === 'message') seenUser = true
+      } else {
+        seenNonUser = true
+        if (m.role === 'assistant' && !isAct(m)) {
+          seenAssistantBeforeNextUser = true
+          if (m.kind === 'message' && m.text.trim()) seenFinalText = true
+        }
+      }
+    }
+
+    // Index commands once per render in O(C) instead of scanning commands per user message.
+    const commandById = new Map<string, import('../../domain/types').Command>()
+    const latestCommandByText = new Map<string, { state: string; ts: number }>()
+    for (const cmd of commands) {
+      commandById.set(cmd.id, cmd)
+      const trimmed = cmd.text.trim()
+      if (!trimmed) continue
+      const ts = Date.parse(cmd.created_at) || 0
+      const prev = latestCommandByText.get(trimmed)
+      if (!prev || ts > prev.ts) {
+        latestCommandByText.set(trimmed, { state: cmd.state, ts })
+      }
+    }
+
+    const today = zhDateFormatter.format(Date.now())
+    const rows: VisualRow[] = []
+    let prevDate: string | null = null
+
+    for (let idx = 0; idx < n; idx++) {
+      const message = visibleMessages[idx]
+      if (isCompactionMessage(message)) {
+        rows.push({ kind: 'compaction', id: message.id, message })
+        continue
+      }
+      if (isAct(message)) {
+        const pack = packs.get(idx)
+        if (!pack) continue
+        const endIdx = idx + pack.length - 1
+        const isLatestActivity = !hasLaterActivity[endIdx]
+        const laterUser = Boolean(hasLaterUser[endIdx])
+        const laterFinalReply = Boolean(hasLaterFinalText[endIdx])
+        const isPackRunning = Boolean(busy && isLatestActivity && !laterUser)
+        const shouldOpen = isPackRunning && !laterFinalReply
+        const definitivelyEnded = laterFinalReply || laterUser
+        const isDeferred = !shouldOpen && idx + pack.length < n - 6
+        rows.push({ kind: 'pack', id: message.id, pack, shouldOpen, definitivelyEnded, isDeferred })
+        continue
+      }
+
+      const prevMessage = idx > 0 ? visibleMessages[idx - 1] : null
+      const currentDate = formatMessageDate(message.created_at)
+      const prevMsgDate = prevMessage ? formatMessageDate(prevMessage.created_at) : null
+      const showDateDivider = Boolean(currentDate) && currentDate !== prevMsgDate && (prevMsgDate !== null || currentDate !== today)
+      prevDate = currentDate || prevDate
+
+      const hasAssistantReplied = message.role === 'user' && Boolean(hasLaterNonUser[idx])
+      let isAgentAccepted = hasAssistantReplied
+      if (!isAgentAccepted && message.role === 'user') {
+        const matchedState = message.command_id
+          ? commandById.get(message.command_id)?.state
+          : latestCommandByText.get(message.text.trim())?.state
+        isAgentAccepted = matchedState === 'accepted' || matchedState === 'running' || matchedState === 'completed'
+      }
+
+      const isFinalReply = message.role === 'assistant'
+        && !hasLaterAssistantInTurn[idx]
+        && !(busy && !hasLaterUser[idx])
+      const showAuthorMark = message.role === 'assistant' && (isFinalReply || !prevMessage || prevMessage.role === 'user')
+      const continuedNativeInput = isAsyncQuestion(message) ? hasLaterNativeInput(visibleMessages, idx) : false
+
+      rows.push({
+        kind: 'message',
+        id: message.id,
+        idx,
+        message,
+        dateDivider: showDateDivider ? currentDate : null,
+        hasAssistantReplied,
+        isAgentAccepted,
+        isFinalReply,
+        showAuthorMark,
+        isLatest: idx === n - 1,
+        isDeferred: idx < n - 6,
+        continuedNativeInput,
+      })
+    }
+    return rows
+  }, [busy, commands, packs, visibleMessages])
+
+  const [visibleRowLimit, setVisibleRowLimit] = useState(INITIAL_VISIBLE_ROWS)
   const [activeHighlightId, setActiveHighlightId] = useState<string | null>(null)
   const highlightScrolledRef = useRef<string | null>(null)
   const highlightLoadAttemptsRef = useRef<number>(0)
-  const outboundVersion = outbox.map((item) => item.command.id).join(',')
-  const contentVersion = `${messages.map((item) => `${item.id}:${item.text.length}`).join(',')}|${outbox.map((item) => `${item.command.id}:${item.status}`).join(',')}|${approvals.map((item) => item.id).join(',')}|${composerHeight ?? 0}`
+  const hiddenRowCount = Math.max(0, visualRows.length - visibleRowLimit)
+  const renderedRows = useMemo(
+    () => (hiddenRowCount > 0 ? visualRows.slice(hiddenRowCount) : visualRows),
+    [hiddenRowCount, visualRows],
+  )
+  const renderedMessages = useMemo(() => {
+    if (hiddenRowCount === 0) return visibleMessages
+    const out: Message[] = []
+    for (const row of renderedRows) {
+      if (row.kind === 'pack') out.push(...row.pack)
+      else out.push(row.message)
+    }
+    return out
+  }, [hiddenRowCount, renderedRows, visibleMessages])
+
+  const lastMessage = visibleMessages[visibleMessages.length - 1]
+  const outboundVersion = useMemo(() => outbox.map((item) => item.command.id).join(','), [outbox])
+  const contentVersion = `${visibleMessages.length}:${lastMessage?.id ?? ''}:${lastMessage?.text.length ?? 0}|${outbox.map((item) => `${item.command.id}:${item.status}`).join(',')}|${approvals.map((item) => item.id).join(',')}|${composerHeight ?? 0}|${visibleRowLimit}`
   const {
     setContainerRef,
     following,
@@ -487,20 +670,57 @@ export function Transcript({
     },
     [setContainerRef],
   )
-  const older = useOlderMessages({ hasMore: hasMoreHistory, loading: loadingOlder, load: () => onLoadOlder?.(), capture: capturePrependAnchor })
+
   const sessionKey = session ? `${session.agent_id}::${session.id}` : ''
+  const followingRef = useRef(following)
+  followingRef.current = following
+  useEffect(() => {
+    if (!sessionKey) return
+    const onComposerHeight = (event: Event) => {
+      const detail = (event as CustomEvent<{ key?: string }>).detail
+      if (detail?.key === sessionKey && followingRef.current) {
+        scrollToBottom()
+      }
+    }
+    window.addEventListener('astrorder:composer-height', onComposerHeight)
+    return () => window.removeEventListener('astrorder:composer-height', onComposerHeight)
+  }, [scrollToBottom, sessionKey])
+
+  const older = useOlderMessages({
+    hasMore: hiddenRowCount > 0 || hasMoreHistory,
+    loading: loadingOlder,
+    load: () => {
+      if (hiddenRowCount > 0) {
+        capturePrependAnchor()
+        setVisibleRowLimit((limit) => limit + VISIBLE_ROW_STEP)
+        return
+      }
+      return onLoadOlder?.()
+    },
+    capture: capturePrependAnchor,
+  })
+
   useEffect(() => {
     highlightScrolledRef.current = null
     highlightLoadAttemptsRef.current = 0
   }, [highlightMessageId, sessionKey])
+
   useEffect(() => {
     if (!highlightMessageId || highlightScrolledRef.current === highlightMessageId) return
-    const exists = visibleMessages.some((m) => m.id === highlightMessageId)
-    if (exists) {
+    const targetRowIdx = visualRows.findIndex((row) =>
+      row.kind === 'pack'
+        ? row.pack.some((m) => m.id === highlightMessageId)
+        : row.message.id === highlightMessageId,
+    )
+    if (targetRowIdx >= 0) {
+      if (targetRowIdx < hiddenRowCount) {
+        setVisibleRowLimit(Math.max(visibleRowLimit, visualRows.length - targetRowIdx + 10))
+        return
+      }
       const container = scrollerEl
       if (!container) return
-      const escaped = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(highlightMessageId) : highlightMessageId.replace(/"/g, '\\"')
-      const targetEl = container.querySelector<HTMLElement>(`[data-testid="message-${escaped}"]`)
+      const selector = `[data-testid="message-${typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(highlightMessageId) : highlightMessageId.replace(/"/g, '\\"')}"]`
+      const targetEl = container.querySelector<HTMLElement>(selector)
       if (!targetEl) return
       highlightScrolledRef.current = highlightMessageId
       targetEl.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'center' })
@@ -514,21 +734,22 @@ export function Transcript({
       highlightLoadAttemptsRef.current += 1
       void onLoadOlder()
     }
-  }, [hasMoreHistory, highlightMessageId, loadingOlder, onLoadOlder, scrollerEl, visibleMessages])
-  const liveActivityAt = useAstrorderStore((state) => (
-    session ? state.liveActivityAt[scopeKey(session.agent_id, session.id)] : undefined
-  ))
-  const liveActive = typeof liveActivityAt === 'number' && Date.now() - liveActivityAt >= 0 && Date.now() - liveActivityAt < LIVE_ACTIVITY_MS
-  const busy = session?.status === 'running' || session?.status === 'waiting_approval' || liveActive
+  }, [hasMoreHistory, hiddenRowCount, highlightMessageId, loadingOlder, onLoadOlder, scrollerEl, visibleRowLimit, visualRows])
+
   const lastVisibleMessage = visibleMessages[visibleMessages.length - 1]
   const isWaiting = Boolean(session?.status === 'running' && (!lastVisibleMessage || lastVisibleMessage.role === 'user'))
-
-  const lastUserMessageId = useMemo(() => {
-    for (let i = visibleMessages.length - 1; i >= 0; i--) {
-      if (visibleMessages[i].role === 'user') return visibleMessages[i].id
+  const forkHandlerRef = useRef(onForkAtMessage)
+  forkHandlerRef.current = onForkAtMessage
+  const forkCallbackMapRef = useRef(new Map<string, () => void>())
+  const getForkCallback = useCallback((message: Message, idx: number) => {
+    const key = `${message.id}:${idx}`
+    let fn = forkCallbackMapRef.current.get(key)
+    if (!fn) {
+      fn = () => forkHandlerRef.current?.(message, idx)
+      forkCallbackMapRef.current.set(key, fn)
     }
-    return null
-  }, [visibleMessages])
+    return fn
+  }, [])
   return (
     <section className="transcript-wrap" aria-label="会话记录">
       {!following && (
@@ -556,7 +777,43 @@ export function Transcript({
         aria-relevant="additions text"
       >
         <div className="transcript-inner">
-          {hasMoreHistory && (
+          {session?.handoff_context?.trim() && (
+            <HandoffSummaryCard
+              key={`handoff:${session.agent_id}:${session.id}`}
+              session={session}
+              renderMarkdown={(summary) => (
+                <MarkdownContent value={summary} onImageClick={onImageClick} session={session} />
+              )}
+            />
+          )}
+          {hiddenRowCount > 0 ? (
+            <Group justify="center" gap="xs" className="history-window-controls">
+              <Button
+                className="history-button"
+                size="compact-sm"
+                variant="subtle"
+                onClick={() => {
+                  capturePrependAnchor()
+                  setVisibleRowLimit((limit) => limit + VISIBLE_ROW_STEP)
+                }}
+              >
+                {`显示更早 ${Math.min(hiddenRowCount, VISIBLE_ROW_STEP)} 条记录（共折叠 ${hiddenRowCount} 条）`}
+              </Button>
+              {hiddenRowCount > VISIBLE_ROW_STEP && (
+                <Button
+                  size="compact-xs"
+                  variant="subtle"
+                  color="gray"
+                  onClick={() => {
+                    capturePrependAnchor()
+                    setVisibleRowLimit(visualRows.length)
+                  }}
+                >
+                  展开全部
+                </Button>
+              )}
+            </Group>
+          ) : hasMoreHistory && (
             <Button
               className="history-button"
               size="compact-sm"
@@ -572,77 +829,48 @@ export function Transcript({
           {!loading && !error && messages.length === 0 && outbox.length === 0 && (
             <Stack className="transcript-empty" align="center" gap="xs">
               <IconTool size={25} stroke={1.4} aria-hidden="true" />
-              <Text c="dimmed" size="sm">这个会话还没有可显示的记录。</Text>
-              <Text c="dimmed" size="xs">发送后，只有服务端确认的消息会进入正式记录。</Text>
+              {session?.handoff_context?.trim() ? (
+                <>
+                  <Text c="dimmed" size="sm">会话已转交就绪</Text>
+                  <Text c="dimmed" size="xs">可展开上方「交接摘要」查看背景；发送首条消息时会自动附带给当前 Agent。</Text>
+                </>
+              ) : (
+                <>
+                  <Text c="dimmed" size="sm">这个会话还没有可显示的记录。</Text>
+                  <Text c="dimmed" size="xs">发送后，只有服务端确认的消息会进入正式记录。</Text>
+                </>
+              )}
             </Stack>
           )}
-          <AnimatePresence initial={false}>
-          {visibleMessages.map((message, idx) => {
-            if (isCompactionMessage(message)) {
+          {renderedRows.map((row) => {
+            if (row.kind === 'compaction') {
               return (
-                <motion.div
-                  key={`compaction-${message.id}`}
-                  initial={enter}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.28, ease: [0.2, 0.8, 0.2, 1] }}
-                >
-                  <CompactionDivider message={message} />
-                </motion.div>
+                <div key={`compaction-${row.id}`}>
+                  <CompactionDivider message={row.message} />
+                </div>
               )
             }
-            const prevMessage = idx > 0 ? visibleMessages[idx - 1] : null
-            // 判断过程块：连续的非普通用户消息（包括思考、工具活动等过程性输出）
-            // 当后续出现了最终的 assistant 回复（或会话结束生成完毕），该过程块自动收起为类似 Codex 的“用时 X 分钟 Y 秒”或“过程概要”
-            if (isActivity(message)) {
-              const pack = packs.get(idx)
-              if (!pack) return null
-              const remaining = visibleMessages.slice(idx + pack.length)
-              const isLatestActivity = !remaining.some(isActivity)
-              const hasLaterUserMessage = remaining.some(m => m.role === 'user' && m.kind === 'message')
-              // 如果该会话仍然在运行，且该活动块之后尚未出现 assistant 的最终文本答复，则保持展开；
-              // 一旦会话完成（!busy）或当前轮次已产出了最终文本回复，该活动块自动折叠收起，对齐 Codex
-              const hasSubsequentFinalReply = remaining.some(m => m.role === 'assistant' && m.kind === 'message' && m.text.trim())
-              const isPackRunning = Boolean(busy && isLatestActivity && !hasLaterUserMessage)
-              const shouldOpen = isPackRunning && !hasSubsequentFinalReply
-              const isDeferredPack = !shouldOpen && idx + pack.length < visibleMessages.length - 6
-              const definitivelyEnded = Boolean(hasSubsequentFinalReply || hasLaterUserMessage)
+            if (row.kind === 'pack') {
               return (
                 <ActivityPackSection
-                  key={`activity-pack-${message.id}`}
-                  id={message.id}
-                  pack={pack}
-                  isRunning={shouldOpen}
-                  definitivelyEnded={definitivelyEnded}
-                  isDeferred={isDeferredPack}
-                  enter={enter}
+                  key={`activity-pack-${row.id}`}
+                  id={row.id}
+                  pack={row.pack}
+                  isRunning={row.shouldOpen}
+                  definitivelyEnded={row.definitivelyEnded}
+                  isDeferred={row.isDeferred}
                   onImageClick={onImageClick}
                   onGalleryClick={onGalleryClick}
                   session={session}
                 />
               )
             }
-            const currentDate = new Date(message.created_at).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
-            const prevDate = prevMessage ? new Date(prevMessage.created_at).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' }) : null
-            const today = new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
-            const showDateDivider = Date.parse(message.created_at) > 0 && currentDate !== prevDate && (prevDate !== null || currentDate !== today)
-            const hasAssistantReplied = message.role === 'user' && visibleMessages.slice(idx + 1).some(m => m.role !== 'user')
-            const matchedCmd = message.command_id
-              ? commands.find(c => c.id === message.command_id)
-              : commands.filter(c => c.text.trim() === message.text.trim()).sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))[0]
-            const isAgentAccepted = Boolean(hasAssistantReplied || (matchedCmd && (matchedCmd.state === 'accepted' || matchedCmd.state === 'running' || matchedCmd.state === 'completed')))
-            const nextUserOffset = visibleMessages.slice(idx + 1).findIndex(item => item.role === 'user')
-            const turnRemainder = visibleMessages.slice(idx + 1, nextUserOffset < 0 ? undefined : idx + 1 + nextUserOffset)
-            const isFinalReply = message.role === 'assistant' && !isActivity(message)
-              && !turnRemainder.some(item => item.role === 'assistant' && !isActivity(item))
-              && !(busy && nextUserOffset < 0)
-            const canForkTurn = isFinalReply
-            const isDeferredEntry = idx < visibleMessages.length - 6
+            const { message, idx } = row
             return (
-              <motion.div className={`transcript-message-entry${isDeferredEntry ? ' is-deferred-turn' : ''}${activeHighlightId === message.id ? ' is-search-highlight' : ''}`} data-turn-id={message.id} key={message.id} initial={enter} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.28, ease: [0.2, 0.8, 0.2, 1] }}>
-                {showDateDivider && (
+              <div className={`transcript-message-entry${row.isDeferred ? ' is-deferred-turn' : ''}${activeHighlightId === message.id ? ' is-search-highlight' : ''}`} data-turn-id={message.id} key={message.id}>
+                {row.dateDivider && (
                   <div className="transcript-date-divider">
-                    <span>{currentDate}</span>
+                    <span>{row.dateDivider}</span>
                   </div>
                 )}
                 <MessageItem
@@ -650,19 +878,19 @@ export function Transcript({
                   onImageClick={onImageClick}
                   onGalleryClick={onGalleryClick}
                   session={session}
-                  isLatest={idx === visibleMessages.length - 1}
-                  inlineMeta={message.role === 'assistant' && !isFinalReply}
-                  showAuthorMark={message.role === 'assistant' && (isFinalReply || !prevMessage || prevMessage.role === 'user')}
-                  authorLabel={agentKindLabel(agentKind)}
+                  isLatest={row.isLatest}
+                  inlineMeta={message.role === 'assistant' && !row.isFinalReply}
+                  showAuthorMark={row.showAuthorMark}
+                  authorLabel={authorLabel}
                   onEdit={message.id === lastUserMessageId ? onEditLastUserMessage : undefined}
-                  onFork={onForkAtMessage && canForkTurn ? () => onForkAtMessage(message, idx) : undefined}
-                  hasAssistantReplied={hasAssistantReplied}
-                  isAgentAccepted={isAgentAccepted}
-                  asyncInput={isAsyncQuestion(message) ? { commands, continued: hasLaterNativeInput(visibleMessages, idx), readOnly: session?.control_state === 'readonly' } : undefined}
+                  onFork={onForkAtMessage && row.isFinalReply ? getForkCallback(message, idx) : undefined}
+                  hasAssistantReplied={row.hasAssistantReplied}
+                  isAgentAccepted={row.isAgentAccepted}
+                  asyncInput={isAsyncQuestion(message) ? { commands, continued: row.continuedNativeInput, readOnly: session?.control_state === 'readonly' } : undefined}
                   checkpoint={checkpointByMsgId.get(message.id)}
                   onOpenCheckpoint={onOpenCheckpoint}
                 />
-              </motion.div>
+              </div>
             )
           })}
           {isWaiting && (
@@ -685,7 +913,6 @@ export function Transcript({
               </div>
             </motion.div>
           )}
-          </AnimatePresence>
           {approvals.length > 0 && (
             <section className="transcript-approvals" aria-label="对话待处理审批">
               <Stack gap="xs" mt="xs">
@@ -730,11 +957,11 @@ export function Transcript({
         </div>
       </div>
       <TurnMinimap
-        visibleMessages={visibleMessages}
+        visibleMessages={renderedMessages}
         activityPacks={packs}
         approvals={approvals}
         scroller={scrollerEl}
       />
     </section>
   )
-}
+})

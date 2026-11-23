@@ -21,7 +21,8 @@ export function useGitStatus(session: Session) {
     },
     enabled: Boolean(session.workspace),
     retry: false,
-    staleTime: 15_000,
-    refetchInterval: 15_000,
+    staleTime: 45_000,
+    refetchIntervalInBackground: false,
+    refetchInterval: () => (typeof document !== 'undefined' && document.visibilityState === 'hidden' ? false : 90_000),
   })
 }

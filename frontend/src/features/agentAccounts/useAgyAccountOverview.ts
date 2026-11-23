@@ -25,7 +25,7 @@ export function useAgyAccountOverview(environment: string) {
   const client = useQueryClient()
   const accounts = useQuery({ ...metadataPolicy, ...libraryOptions })
   const state = useQuery({ ...metadataPolicy, ...targetStateOptions(environment),
-    enabled: Boolean(environment), staleTime: 0, refetchOnMount: true })
+    enabled: Boolean(environment), staleTime: 30_000, refetchOnMount: true })
   const currentID = state.data?.current_account_id
   const rows = (accounts.data?.items ?? []).map(account => ({ ...account, current: account.id === currentID }))
   if (currentID === 'current') rows.unshift({ id: 'current', name: '未保存账号', current: true })

@@ -100,6 +100,17 @@ describe('safe markdown rendering', () => {
     expect(screen.getByRole('button', { name: '开启自动换行' })).toBeInTheDocument()
   })
 
+  it('skips per-token span explosion on very long code blocks while preserving intact text', () => {
+    const longGo = Array.from({ length: 180 }, (_, i) => `func f${i}() string { return "v${i}" }`).join('\n')
+    const { container } = render(
+      <MantineProvider>
+        <MarkdownContent value={`\`\`\`go\n${longGo}\n\`\`\``} />
+      </MantineProvider>,
+    )
+    expect(container.querySelectorAll('.markdown-code-block span')).toHaveLength(0)
+    expect(container.querySelector('.markdown-code-block code')?.textContent).toContain('func f179()')
+  })
+
   it('shows hover file preview with highlighted target lines after hover intent delay', async () => {
     vi.useFakeTimers()
     const fetchMock = vi.fn().mockResolvedValue(

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -18,7 +19,90 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-const agyAccountsPath = "/api/v1/agy-accounts"
+const (
+	agyAccountsPath      = "/api/v1/agy-accounts"
+	agyStateReadCacheTTL = 15 * time.Second
+)
+
+type agyReadCache struct {
+	mu       sync.Mutex
+	states   map[string]cachedAgyState
+	inFlight map[string]*agyReadFlight
+}
+
+type cachedAgyState struct {
+	out       *pb.AgyAccountResponse
+	expiresAt time.Time
+}
+
+type agyReadFlight struct {
+	done chan struct{}
+	out  *pb.AgyAccountResponse
+	err  error
+}
+
+func (c *agyReadCache) invalidate(envID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if envID == "" {
+		c.states = nil
+		return
+	}
+	delete(c.states, envID)
+}
+
+func (c *agyReadCache) run(
+	ctx context.Context,
+	key string,
+	cacheEnv string,
+	fn func(context.Context) (*pb.AgyAccountResponse, error),
+) (*pb.AgyAccountResponse, error) {
+	c.mu.Lock()
+	if cacheEnv != "" {
+		if entry, ok := c.states[cacheEnv]; ok && time.Now().Before(entry.expiresAt) {
+			c.mu.Unlock()
+			return entry.out, nil
+		}
+	}
+	if flight, ok := c.inFlight[key]; ok {
+		c.mu.Unlock()
+		select {
+		case <-flight.done:
+			return flight.out, flight.err
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	if c.inFlight == nil {
+		c.inFlight = make(map[string]*agyReadFlight)
+	}
+	flight := &agyReadFlight{done: make(chan struct{})}
+	c.inFlight[key] = flight
+	c.mu.Unlock()
+
+	// Detach cancellation of one waiting HTTP caller from the shared upstream probe,
+	// while keeping the bounded 95s handler deadline.
+	callCtx, cancel := context.WithTimeout(context.Background(), 95*time.Second)
+	defer cancel()
+	out, err := fn(callCtx)
+
+	c.mu.Lock()
+	delete(c.inFlight, key)
+	if err == nil && cacheEnv != "" {
+		if c.states == nil {
+			c.states = make(map[string]cachedAgyState)
+		}
+		c.states[cacheEnv] = cachedAgyState{
+			out:       out,
+			expiresAt: time.Now().Add(agyStateReadCacheTTL),
+		}
+	}
+	flight.out = out
+	flight.err = err
+	close(flight.done)
+	c.mu.Unlock()
+	return out, err
+}
 
 type agyAccountTarget struct {
 	ID   string `json:"id"`
@@ -96,6 +180,7 @@ func (h *Handler) storeAgyCredential(w http.ResponseWriter, name string, credent
 		writeError(w, http.StatusInternalServerError, "vault_error", "无法保存 AGY 账号")
 		return
 	}
+	h.agyReadCache.invalidate("")
 	writeJSON(w, http.StatusOK, map[string]any{"account_id": id})
 }
 
@@ -236,7 +321,19 @@ func (h *Handler) handleAgyAccounts(w http.ResponseWriter, r *http.Request, path
 		}
 	}
 	req.Target = runtimeTarget("antigravity", &envID, sshConn)
-	out, err := h.client.Runtime.ManageAgyAccount(ctx, req)
+	var out *pb.AgyAccountResponse
+	switch req.Action {
+	case pb.AgyAccountAction_AGY_ACCOUNT_ACTION_READ_STATE:
+		out, err = h.agyReadCache.run(ctx, "state:"+envID, envID, func(callCtx context.Context) (*pb.AgyAccountResponse, error) {
+			return h.client.Runtime.ManageAgyAccount(callCtx, req)
+		})
+	case pb.AgyAccountAction_AGY_ACCOUNT_ACTION_READ_QUOTA:
+		out, err = h.agyReadCache.run(ctx, "quota:"+envID+":"+req.AccountId, "", func(callCtx context.Context) (*pb.AgyAccountResponse, error) {
+			return h.client.Runtime.ManageAgyAccount(callCtx, req)
+		})
+	default:
+		out, err = h.client.Runtime.ManageAgyAccount(ctx, req)
+	}
 	if err != nil {
 		message := status.Convert(err).Message()
 		code := http.StatusConflict
@@ -294,6 +391,7 @@ func (h *Handler) handleAgyAccounts(w http.ResponseWriter, r *http.Request, path
 			writeError(w, http.StatusBadGateway, "agy_account_response", "AGY 切换结果未确认")
 			return
 		}
+		h.agyReadCache.invalidate(envID)
 		attachErr := h.changeEnvironmentAgent(ctx, envID, "antigravity", "connect", false)
 		writeJSON(w, http.StatusOK, map[string]any{"account_id": applied.AccountID, "restarted": attachErr == nil})
 	case pb.AgyAccountAction_AGY_ACCOUNT_ACTION_READ_QUOTA:

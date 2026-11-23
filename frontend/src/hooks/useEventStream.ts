@@ -13,6 +13,7 @@ import { api } from "../api/client";
 import { nativeActivityEvent } from "./useSessionOrder";
 import { scopeKey } from "../domain/semantics";
 import type { EventEnvelope } from "../domain/types";
+import { clientPerf } from "../perf/clientPerf";
 
 function isRawMessageDelta(event: EventEnvelope): boolean {
   if (event.cursor !== 0) return false;
@@ -54,8 +55,22 @@ export function useEventStream(
       message: `后台通知连接失败：${error instanceof Error ? error.message : '请重新启用通知'}`,
     }));
     let stopped = false;
-    let timer: ReturnType<typeof setTimeout>;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let lastPresenceAt = 0;
+    const schedulePresence = (delayMs: number) => {
+      if (stopped) return;
+      if (timer !== undefined) clearTimeout(timer);
+      timer = setTimeout(() => {
+        timer = undefined;
+        void poll();
+      }, delayMs);
+    };
     const poll = async () => {
+      if (stopped) return;
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+        return;
+      }
+      lastPresenceAt = Date.now();
       try {
         const result = await api.getPresence();
         if (!stopped)
@@ -65,12 +80,21 @@ export function useEventStream(
       } catch {
         /* A temporarily unavailable source must not discard its last activity. */
       }
-      if (!stopped) timer = setTimeout(() => void poll(), 5000);
+      if (!stopped) schedulePresence(30_000);
     };
-    timer = setTimeout(() => void poll(), 2000);
+    const onVisibilityChange = () => {
+      if (stopped) return;
+      if (document.visibilityState === "visible" && timer === undefined) {
+        const elapsed = Date.now() - lastPresenceAt;
+        schedulePresence(elapsed >= 10_000 ? 500 : 10_000 - elapsed);
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    schedulePresence(2000);
     return () => {
       stopped = true;
-      clearTimeout(timer);
+      if (timer !== undefined) clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [authenticated]);
   useEffect(() => {
@@ -106,6 +130,84 @@ export function useEventStream(
       agent: string; session: string; dirty: boolean; running: boolean;
       timer?: ReturnType<typeof setTimeout>;
     }>();
+    const createLeadingThrottler = (cooldownMs: number) => {
+      const state = new Map<string, { lastAt: number; timer?: ReturnType<typeof setTimeout>; run?: () => void }>();
+      return {
+        trigger(key: string, fn: () => void) {
+          const now = Date.now();
+          let entry = state.get(key);
+          if (!entry) {
+            entry = { lastAt: 0 };
+            state.set(key, entry);
+          }
+          const elapsed = now - entry.lastAt;
+          if (entry.lastAt === 0 || elapsed >= cooldownMs) {
+            if (entry.timer) {
+              clearTimeout(entry.timer);
+              entry.timer = undefined;
+            }
+            entry.run = undefined;
+            entry.lastAt = now;
+            fn();
+            return;
+          }
+          entry.run = fn;
+          if (!entry.timer) {
+            entry.timer = setTimeout(() => {
+              entry!.timer = undefined;
+              if (disposed || !entry!.run) return;
+              const pending = entry!.run;
+              entry!.run = undefined;
+              entry!.lastAt = Date.now();
+              pending();
+            }, cooldownMs - elapsed);
+          }
+        },
+        clear() {
+          for (const entry of state.values()) {
+            if (entry.timer) clearTimeout(entry.timer);
+          }
+          state.clear();
+        },
+      };
+    };
+    const messageInvalidator = createLeadingThrottler(1500);
+    const usageInvalidator = createLeadingThrottler(2500);
+    const swarmInvalidator = createLeadingThrottler(3000);
+    const invalidateSessionMessages = (agentId: string | null | undefined, sessionId: string | null | undefined) => {
+      if (!agentId || !sessionId) return;
+      const key = scopeKey(agentId, sessionId);
+      const pendingHook = hookRefreshes.get(key);
+      if (pendingHook?.timer) {
+        clearTimeout(pendingHook.timer);
+        pendingHook.timer = undefined;
+        pendingHook.dirty = false;
+      }
+      messageInvalidator.trigger(key, () => {
+        void queryClient.invalidateQueries({
+          queryKey: ["astrorder", "messages", agentId, sessionId],
+        });
+      });
+    };
+    const invalidateSessionUsage = (sessionId: string | null | undefined, agentId: string | null | undefined) => {
+      if (!sessionId || !agentId) return;
+      usageInvalidator.trigger(scopeKey(agentId, sessionId), () => {
+        void queryClient.invalidateQueries({
+          queryKey: ["astrorder", "session_usage", sessionId, agentId],
+        });
+      });
+    };
+    const invalidateSessionSwarm = (agentId: string | null | undefined, sessionId: string | null | undefined) => {
+      if (!agentId || !sessionId) return;
+      swarmInvalidator.trigger(scopeKey(agentId, sessionId), () => {
+        void queryClient.invalidateQueries({
+          queryKey: ["astrorder", "session-swarm", agentId, sessionId],
+        });
+        void queryClient.invalidateQueries({
+          queryKey: ["astrorder", "session-swarm-member", agentId, sessionId],
+        });
+      });
+    };
     const scheduleHookRefresh = (agent: string, session: string) => {
       const key = scopeKey(agent, session);
       let refresh = hookRefreshes.get(key);
@@ -159,12 +261,16 @@ export function useEventStream(
           }
         }
       }
+      const applyStart = typeof performance !== "undefined" ? performance.now() : Date.now();
       store.applyMessageDeltas(events);
+      const applyEnd = typeof performance !== "undefined" ? performance.now() : Date.now();
+      clientPerf.recordWsDeltaFlush(events.length, Math.max(0, applyEnd - applyStart));
     };
     const stop = connectEventStream({
       after: useAstrorderStore.getState().cursor,
       onStatus: status => {
         if (status !== "connected") flushDeltas();
+        clientPerf.recordWsStatus(status);
         storeStatus(status);
       },
       onResume: () => {
@@ -185,7 +291,10 @@ export function useEventStream(
                 scheduleHookRefresh(event.agent_id, event.session_id);
               }
             }
+            const t0 = typeof performance !== "undefined" ? performance.now() : Date.now();
             store.applyEvent(event);
+            const t1 = typeof performance !== "undefined" ? performance.now() : Date.now();
+            clientPerf.recordWsEvent(event.type, 1, Math.max(0, t1 - t0));
             return;
           }
           pendingDeltas.push(event);
@@ -200,9 +309,7 @@ export function useEventStream(
           event.cursor > store.cursor ? notificationForEvent(event) : null;
         if (notification && store.addNotification(notification)) {
           if (notification.kind === "task_completed" || notification.kind === "task_failed") {
-            void queryClient.invalidateQueries({
-              queryKey: ["astrorder", "messages", notification.agent_id, notification.session_id],
-            });
+            invalidateSessionMessages(notification.agent_id, notification.session_id);
           }
           mantineNotifications.show({
             id: notification.key,
@@ -246,7 +353,10 @@ export function useEventStream(
             scheduleHookRefresh(event.agent_id, event.session_id);
           }
         }
+        const applyT0 = typeof performance !== "undefined" ? performance.now() : Date.now();
         store.applyEvent(event);
+        const applyT1 = typeof performance !== "undefined" ? performance.now() : Date.now();
+        clientPerf.recordWsEvent(event.type, 1, Math.max(0, applyT1 - applyT0));
         if (event.type === "agent.connection_choice" && event.cursor > store.cursor) {
           void queryClient.invalidateQueries({ queryKey: ["astrorder", "bootstrap"] });
         }
@@ -257,22 +367,14 @@ export function useEventStream(
           (event.type === "session.upsert" && previousSessionStatus === "running" &&
             ["idle", "error"].includes(String(event.data.status)))
         ) {
-          void queryClient.invalidateQueries({
-            queryKey: ["astrorder", "messages", event.agent_id, event.session_id],
-          });
-          if (event.session_id && event.agent_id) {
-            void queryClient.invalidateQueries({
-              queryKey: ["astrorder", "session_usage", event.session_id, event.agent_id],
-            });
-          }
+          invalidateSessionMessages(event.agent_id, event.session_id);
+          invalidateSessionUsage(event.session_id, event.agent_id);
         }
         if (event.type === "transcript.invalidate" && event.agent_id && event.session_id) {
           scheduleHookRefresh(event.agent_id, event.session_id);
         }
         if (event.type === "token.usage") {
-          void queryClient.invalidateQueries({
-            queryKey: ["astrorder", "session_usage", event.session_id, event.agent_id],
-          });
+          invalidateSessionUsage(event.session_id, event.agent_id);
         }
         if (
           event.type === "session_schedule.upsert" ||
@@ -303,12 +405,7 @@ export function useEventStream(
           const progress = event.data.progress as Record<string, unknown> | undefined;
           const tool = typeof progress?.tool === "string" ? progress.tool : "";
           if (progress?.source === "antigravity" && ["swarm", "invoke_subagent", "send_message"].includes(tool)) {
-            void queryClient.invalidateQueries({
-              queryKey: ["astrorder", "session-swarm", event.agent_id, event.session_id],
-            });
-            void queryClient.invalidateQueries({
-              queryKey: ["astrorder", "session-swarm-member", event.agent_id, event.session_id],
-            });
+            invalidateSessionSwarm(event.agent_id, event.session_id);
           }
         }
         if (
@@ -317,19 +414,8 @@ export function useEventStream(
             String(event.data.state),
           )
         ) {
-          void queryClient.invalidateQueries({
-            queryKey: [
-              "astrorder",
-              "messages",
-              event.agent_id,
-              event.session_id,
-            ],
-          });
-          if (event.session_id && event.agent_id) {
-            void queryClient.invalidateQueries({
-              queryKey: ["astrorder", "session_usage", event.session_id, event.agent_id],
-            });
-          }
+          invalidateSessionMessages(event.agent_id, event.session_id);
+          invalidateSessionUsage(event.session_id, event.agent_id);
         }
         if (event.type === "native.observation") {
           void queryClient.invalidateQueries({
@@ -354,14 +440,7 @@ export function useEventStream(
             );
           }
           if (event.data.event === "Stop")
-            void queryClient.invalidateQueries({
-              queryKey: [
-                "astrorder",
-                "messages",
-                event.agent_id,
-                event.session_id,
-              ],
-            });
+            invalidateSessionMessages(event.agent_id, event.session_id);
         }
         if (event.type === "blackboard.change") {
           window.dispatchEvent(
@@ -514,6 +593,9 @@ export function useEventStream(
       disposed = true;
       for (const refresh of hookRefreshes.values()) clearTimeout(refresh.timer);
       hookRefreshes.clear();
+      messageInvalidator.clear();
+      usageInvalidator.clear();
+      swarmInvalidator.clear();
       stop();
     };
   }, [authenticated, queryClient]);

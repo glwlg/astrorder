@@ -55,6 +55,31 @@ func (h *Handler) handleListCommands(w http.ResponseWriter, r *http.Request, ses
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
+const (
+	defaultListTasksMaxTerminal = 120
+	maxTerminalTaskLogLines     = 50
+)
+
+func isTerminalTaskStatus(status any) bool {
+	switch status {
+	case "completed", "failed", "cancelled", "canceled", "done":
+		return true
+	default:
+		return false
+	}
+}
+
+func trimTerminalTaskLogs(items []map[string]any) {
+	for _, item := range items {
+		if !isTerminalTaskStatus(item["status"]) {
+			continue
+		}
+		if logs, ok := item["logs"].([]any); ok && len(logs) > maxTerminalTaskLogLines {
+			item["logs"] = logs[len(logs)-maxTerminalTaskLogLines:]
+		}
+	}
+}
+
 func (h *Handler) handleListTasks(w http.ResponseWriter, r *http.Request, sessionID string) {
 	ctx := r.Context()
 	agentID := r.URL.Query().Get("agent_id")
@@ -71,11 +96,12 @@ func (h *Handler) handleListTasks(w http.ResponseWriter, r *http.Request, sessio
 		writeJSONError(w, http.StatusNotFound, "Session was not found")
 		return
 	}
-	items, err := h.store.ListTasks(ctx, agentID, sessionID)
+	items, err := h.store.ListSessionTasksBounded(ctx, agentID, sessionID, defaultListTasksMaxTerminal)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	trimTerminalTaskLogs(items)
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }
 

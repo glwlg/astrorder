@@ -146,6 +146,7 @@ type Handler struct {
 	discovery      *discoveryCache
 	restoreMu      sync.Mutex
 	agyVault       *agyaccounts.Vault
+	agyReadCache   agyReadCache
 	autoOnce       sync.Once
 	recovery       sessionRecovery
 	upgradeMu      sync.Mutex

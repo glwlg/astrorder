@@ -131,7 +131,7 @@ describe('FileTreeViewer expansion persistence', () => {
 
     const first = renderTree()
     const folder = await screen.findByText('src')
-    await waitFor(() => expect(screen.getByText('index.ts')).not.toBeVisible())
+    expect(screen.queryByText('index.ts')).not.toBeInTheDocument()
 
     fireEvent.doubleClick(folder.closest('.file-tree-row') as HTMLElement)
     await waitFor(() => expect(screen.getByText('index.ts')).toBeVisible())
@@ -140,6 +140,35 @@ describe('FileTreeViewer expansion persistence', () => {
     renderTree()
     await screen.findByText('src')
     await waitFor(() => expect(screen.getByText('index.ts')).toBeVisible())
+  })
+
+  it('virtualizes massive expanded trees instead of mounting thousands of collapsed or off-screen rows', async () => {
+    const bigChildren = Array.from({ length: 1500 }, (_, i) => ({
+      name: `file-${i}.ts`,
+      path: `P:/workspace/example/big/file-${i}.ts`,
+      is_dir: false,
+      size: 120,
+    }))
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      root: artifact.path,
+      items: [{
+        name: 'big',
+        path: 'P:/workspace/example/big',
+        is_dir: true,
+        children: bigChildren,
+      }],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+
+    const view = renderTree()
+    const folder = await screen.findByText('big')
+    // Collapsed directory mounts zero child rows.
+    expect(view.container.querySelectorAll('.file-tree-row')).toHaveLength(1)
+
+    fireEvent.doubleClick(folder.closest('.file-tree-row') as HTMLElement)
+    await waitFor(() => expect(screen.getByText('file-0.ts')).toBeInTheDocument())
+    // Even after expanding 1,500 files, virtual windowing keeps DOM rows bounded.
+    expect(view.container.querySelectorAll('.file-tree-row').length).toBeLessThan(130)
+    expect(view.container.querySelectorAll('svg').length).toBeLessThan(180)
   })
 
   it('expands and selects a requested file', async () => {

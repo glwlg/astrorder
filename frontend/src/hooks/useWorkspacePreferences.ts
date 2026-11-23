@@ -33,7 +33,9 @@ export function useWorkspacePreferences() {
   }, [])
   useEffect(() => {
     mounted.current = true
+    let lastSyncedAt = 0
     const refresh = () => {
+      lastSyncedAt = Date.now()
       queue.current = queue.current.then(async () => {
         if (!mounted.current) return
         if (!ready.current) {
@@ -47,10 +49,17 @@ export function useWorkspacePreferences() {
         }
       }).catch(report)
     }
+    const refreshOnFocus = () => {
+      if (Date.now() - lastSyncedAt < 60_000) return
+      refresh()
+    }
     refresh()
-    const timer = window.setInterval(refresh, 10000)
-    window.addEventListener('focus', refresh)
-    return () => { mounted.current = false; window.clearInterval(timer); window.removeEventListener('focus', refresh) }
+    const timer = window.setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+      refresh()
+    }, 180_000)
+    window.addEventListener('focus', refreshOnFocus)
+    return () => { mounted.current = false; window.clearInterval(timer); window.removeEventListener('focus', refreshOnFocus) }
   }, [accept])
   const updatePreferences = useCallback((patch: PreferencePatch | ((value: WorkspacePreferences) => PreferencePatch)) => {
     const result = queue.current.then(async () => {

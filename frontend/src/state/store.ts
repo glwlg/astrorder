@@ -77,10 +77,110 @@ markOutboxError: (
 
 const emptyDraft = (): DraftState => ({ text: '', attachments: [], sessionRefs: [] })
 const MAX_SEEN_EVENT_IDS = 1024
+const MAX_CACHED_MESSAGE_SESSIONS = 12
+const MAX_CACHED_TASKS = 800
 const LIVE_ACTIVITY_REFRESH_MS = 5000
 export const LIVE_ACTIVITY_MS = 15_000
 export const MID_TURN_IDLE_GRACE_MS = 10_000
 let activityExpiryTimer: ReturnType<typeof setTimeout> | undefined
+let sessionAccessOrder: string[] = []
+
+function touchSessionScope(key: string): void {
+  const idx = sessionAccessOrder.indexOf(key)
+  if (idx >= 0) {
+    if (idx === sessionAccessOrder.length - 1) return
+    sessionAccessOrder.splice(idx, 1)
+  }
+  sessionAccessOrder.push(key)
+}
+
+function isTerminalTaskStatus(status: Task['status']): boolean {
+  return status === 'completed' || status === 'failed' || status === 'cancelled'
+}
+
+function isProtectedSessionScope(state: AstrorderStore, key: string, activeKey: string): boolean {
+  if (key === activeKey) return true
+  const session = state.sessions[key]
+  if (session && (session.status === 'running' || session.status === 'waiting_approval')) return true
+  if (key in state.liveActivityAt) return true
+  if (state.messageStreams[key] && Object.keys(state.messageStreams[key]).length > 0) return true
+  const prefix = `${key}::`
+  for (const outboxKey of Object.keys(state.outbox)) {
+    if (outboxKey.startsWith(prefix)) return true
+  }
+  return false
+}
+
+function pruneInactiveMessageScopes(
+  state: AstrorderStore,
+  activeKey: string,
+  messages: Record<string, Record<string, Message>>,
+  messageEventRevisions: Record<string, Record<string, number>>,
+  messageCatchUps: Record<string, Record<string, string>>,
+  messageStreams: Record<string, Record<string, true>>,
+): Pick<AstrorderStore, 'messages' | 'messageEventRevisions' | 'messageCatchUps' | 'messageStreams'> {
+  touchSessionScope(activeKey)
+  const totalScopes = Object.keys(messages).length
+  if (totalScopes <= MAX_CACHED_MESSAGE_SESSIONS) {
+    return { messages, messageEventRevisions, messageCatchUps, messageStreams }
+  }
+  let overflow = totalScopes - MAX_CACHED_MESSAGE_SESSIONS
+  const nextMessages = { ...messages }
+  let nextRevisions = messageEventRevisions
+  let nextCatchUps = messageCatchUps
+  let nextStreams = messageStreams
+  const remainingOrder: string[] = []
+
+  for (const key of sessionAccessOrder) {
+    if (!(key in nextMessages)) continue
+    if (overflow > 0 && !isProtectedSessionScope(state, key, activeKey)) {
+      delete nextMessages[key]
+      if (key in nextRevisions) {
+        if (nextRevisions === messageEventRevisions) nextRevisions = { ...messageEventRevisions }
+        delete nextRevisions[key]
+      }
+      if (key in nextCatchUps) {
+        if (nextCatchUps === messageCatchUps) nextCatchUps = { ...messageCatchUps }
+        delete nextCatchUps[key]
+      }
+      if (key in nextStreams) {
+        if (nextStreams === messageStreams) nextStreams = { ...messageStreams }
+        delete nextStreams[key]
+      }
+      overflow -= 1
+      continue
+    }
+    remainingOrder.push(key)
+  }
+  sessionAccessOrder = remainingOrder
+  return {
+    messages: nextMessages,
+    messageEventRevisions: nextRevisions,
+    messageCatchUps: nextCatchUps,
+    messageStreams: nextStreams,
+  }
+}
+
+function pruneTaskMap(tasks: Record<string, Task>, protectedScopes: Set<string>): Record<string, Task> {
+  const entries = Object.entries(tasks)
+  if (entries.length <= MAX_CACHED_TASKS) return tasks
+  let overflow = entries.length - MAX_CACHED_TASKS
+  const evictable: Array<[string, Task]> = []
+  for (const entry of entries) {
+    const [, task] = entry
+    if (!isTerminalTaskStatus(task.status)) continue
+    if (protectedScopes.has(scopeKey(task.agent_id, task.session_id))) continue
+    evictable.push(entry)
+  }
+  if (evictable.length === 0) return tasks
+  evictable.sort((a, b) => (a[1].updated_at || '').localeCompare(b[1].updated_at || ''))
+  const next = { ...tasks }
+  for (let i = 0; i < evictable.length && overflow > 0; i += 1) {
+    delete next[evictable[i][0]]
+    overflow -= 1
+  }
+  return next
+}
 
 function scheduleActivityExpiry(activity: Record<string, number>): void {
   clearTimeout(activityExpiryTimer)
@@ -385,7 +485,16 @@ export const useAstrorderStore = create<AstrorderStore>((set) => ({
       const key = scopeKey(agentId, sessionId)
       const current = Object.values(state.messages[key] || {})
       const merged = mergeMessagesById(current, items)
-      return { messages: { ...state.messages, [key]: messageMap(merged) }, messageCatchUps: historyCatchUps(state, key, items, ahead) }
+      const nextMessages = { ...state.messages, [key]: messageMap(merged) }
+      const nextCatchUps = historyCatchUps(state, key, items, ahead)
+      return pruneInactiveMessageScopes(
+        state,
+        key,
+        nextMessages,
+        state.messageEventRevisions,
+        nextCatchUps,
+        state.messageStreams,
+      )
     }),
 
   mergeMessagesPrepend: (agentId, sessionId, items, ahead) =>
@@ -403,7 +512,16 @@ export const useAstrorderStore = create<AstrorderStore>((set) => ({
         }
       }
       const merged = [...prepended, ...current.map((item) => incoming.get(item.id) || item)]
-      return { messages: { ...state.messages, [key]: messageMap(merged) }, messageCatchUps: historyCatchUps(state, key, items, ahead) }
+      const nextMessages = { ...state.messages, [key]: messageMap(merged) }
+      const nextCatchUps = historyCatchUps(state, key, items, ahead)
+      return pruneInactiveMessageScopes(
+        state,
+        key,
+        nextMessages,
+        state.messageEventRevisions,
+        nextCatchUps,
+        state.messageStreams,
+      )
     }),
 
   mergeCommands: (items) =>
@@ -421,8 +539,13 @@ export const useAstrorderStore = create<AstrorderStore>((set) => ({
   mergeTasks: (items) =>
     set((state) => {
       const tasks = { ...state.tasks }
-      for (const task of items) tasks[taskKey(task)] = { ...tasks[taskKey(task)], ...task }
-      return { tasks }
+      const protectedScopes = new Set(sessionAccessOrder.slice(-6))
+      for (const task of items) {
+        const sKey = scopeKey(task.agent_id, task.session_id)
+        protectedScopes.add(sKey)
+        tasks[taskKey(task)] = { ...tasks[taskKey(task)], ...task }
+      }
+      return { tasks: pruneTaskMap(tasks, protectedScopes) }
     }),
 
   hydrateBotGroups: (items, revisionAtRequest) => set((state) => {
@@ -621,9 +744,15 @@ export const useAstrorderStore = create<AstrorderStore>((set) => ({
         if (!task.id || !task.session_id || !task.agent_id) return base
         const key = taskKey(task)
         const sessionKey = scopeKey(task.agent_id, task.session_id)
+        const protectedScopes = new Set(sessionAccessOrder.slice(-6))
+        protectedScopes.add(sessionKey)
+        const nextTasks = pruneTaskMap(
+          { ...state.tasks, [key]: { ...state.tasks[key], ...task } },
+          protectedScopes,
+        )
         return {
           ...base,
-          tasks: { ...state.tasks, [key]: { ...state.tasks[key], ...task } },
+          tasks: nextTasks,
           liveActivityAt: task.progress?.blocking === false || !['running', 'waiting_approval'].includes(task.status)
             ? state.liveActivityAt : touchLiveActivity(state.liveActivityAt, sessionKey),
         }
@@ -699,6 +828,7 @@ export const useAstrorderStore = create<AstrorderStore>((set) => ({
 
   resetRuntime: () => {
     scheduleActivityExpiry({})
+    sessionAccessOrder = []
     set({
       agents: {},
       disabledAgentConnections: new Set(),

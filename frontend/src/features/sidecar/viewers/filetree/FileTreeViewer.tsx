@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { ActionIcon, Badge, Button, Collapse, Group, LoadingOverlay, Menu, Paper, ScrollArea, Text } from '@mantine/core'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { ActionIcon, Badge, Button, Group, LoadingOverlay, Menu, Paper, Text } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import {
   IconCheck,
@@ -151,164 +151,139 @@ function resolveTargetInTree(nodes: TreeNode[], target: string) {
   return findNodeAndParents(nodes, target, [], true) || findNodeAndParents(nodes, target, [], false)
 }
 
-function FileTreeNodeItem({
+const FILE_TREE_ROW_HEIGHT = 26
+const FILE_TREE_OVERSCAN = 14
+const FILE_TREE_FALLBACK_VIEWPORT_HEIGHT = 2080
+
+interface FlattenedTreeRow {
+  node: TreeNode
+  level: number
+  opened: boolean
+}
+
+function isExpandedKey(nodePath: string, expandedKeys: Set<string>): boolean {
+  if (expandedKeys.size === 0) return false
+  const key = pathKey(nodePath)
+  if (expandedKeys.has(key)) return true
+  for (const candidate of expandedKeys) {
+    if (key.endsWith('/' + candidate) || candidate.endsWith('/' + key)) return true
+  }
+  return false
+}
+
+function flattenVisibleTree(nodes: TreeNode[], expandedKeys: Set<string>, level = 0, out: FlattenedTreeRow[] = []): FlattenedTreeRow[] {
+  for (const node of nodes) {
+    const opened = node.is_dir && isExpandedKey(node.path, expandedKeys)
+    out.push({ node, level, opened })
+    if (opened && node.children && node.children.length > 0) {
+      flattenVisibleTree(node.children, expandedKeys, level + 1, out)
+    }
+  }
+  return out
+}
+
+const FileTreeRow = memo(function FileTreeRow({
   node,
-  sessionId,
-  agentId,
-  connectionId,
-  expandedPaths,
-  selectedPath,
-  revealedPath,
+  level,
+  opened,
+  isSelected,
+  isRevealed,
   revealPulseKey,
   onSelectPath,
+  onOpenNode,
   onToggleDirectory,
   onContextMenu,
-  level = 0,
 }: {
   node: TreeNode
-  sessionId: string
-  agentId: string
-  connectionId?: string
-  expandedPaths: Set<string>
-  selectedPath: string | null
-  revealedPath?: string | null
-  revealPulseKey?: number
+  level: number
+  opened: boolean
+  isSelected: boolean
+  isRevealed: boolean
+  revealPulseKey: number
   onSelectPath: (path: string) => void
+  onOpenNode: (node: TreeNode) => void
   onToggleDirectory: (path: string) => void
   onContextMenu: (node: TreeNode, e: React.MouseEvent) => void
-  level?: number
 }) {
-  const opened = expandedPaths.has(node.path) || [...expandedPaths].some((p) => isSamePath(p, node.path))
-  const isSelected = Boolean(selectedPath && isSamePath(selectedPath, node.path))
-  const isRevealed = Boolean(revealedPath && isSamePath(revealedPath, node.path))
-  const openArtifact = useSidecarStore((s) => s.openArtifact)
-
-  const openFile = () => {
-    if (node.is_dir) {
-      onToggleDirectory(node.path)
-      return
-    }
-
-    const artifact = resolveArtifactFromPath(node.path, {
-      id: sessionId,
-      agent_id: agentId,
-      connection_id: connectionId,
-      workspace: null,
-      title: '',
-      status: 'idle',
-      updated_at: '',
-    })
-
-    const viewer = artifactViewerRegistry.findViewer(artifact)
-    if (viewer) {
-      openArtifact(artifact, viewer.id)
-    }
-  }
-
-  const handleClick = (e: React.MouseEvent) => {
-    e.stopPropagation()
-    onSelectPath(node.path)
-  }
-
-  const handleDoubleClick = (e: React.MouseEvent) => {
-    e.stopPropagation()
-    openFile()
-  }
-
   return (
-    <div>
-      <Group
-        key={`${node.path}:${isRevealed ? revealPulseKey : 'idle'}`}
-        gap={4}
-        wrap="nowrap"
-        onClick={handleClick}
-        onDoubleClick={handleDoubleClick}
-        onContextMenu={(e) => {
-          e.preventDefault()
-          e.stopPropagation()
-          onSelectPath(node.path)
-          onContextMenu(node, e)
-        }}
-        style={{
-          padding: '3px 6px',
-          paddingLeft: 6 + level * 14,
-          borderRadius: 4,
-          cursor: 'pointer',
-          userSelect: 'none',
-          fontSize: 12,
-          backgroundColor: isSelected ? 'var(--astr-hover, rgba(59, 130, 246, 0.16))' : undefined,
-          outline: isSelected ? '1px solid var(--astr-blue, #3b82f6)' : 'none',
-          boxShadow: isSelected ? 'inset 3px 0 0 var(--astr-blue, #2563eb)' : 'none',
-        }}
-        className={`file-tree-row${isSelected ? ' is-selected' : ''}${isRevealed ? ' is-revealed' : ''}`}
-        data-file-path={node.path}
-      >
-        {node.is_dir ? (
-          <>
-            <span
-              onClick={(e) => {
-                e.stopPropagation()
-                onToggleDirectory(node.path)
-              }}
-              style={{ display: 'inline-flex', alignItems: 'center' }}
-            >
-              {opened ? <IconChevronDown size={13} color="gray" /> : <IconChevronRight size={13} color="gray" />}
-            </span>
-            {opened ? <IconFolderOpen size={14} color="#f59e0b" /> : <IconFolder size={14} color="#f59e0b" />}
-          </>
-        ) : (
-          <>
-            <span style={{ width: 13 }} />
-            <IconFile size={14} color="var(--astr-muted)" />
-          </>
-        )}
-
-        <Text
-          size="xs"
-          truncate
-          style={{
-            flex: 1,
-            fontWeight: isSelected ? 600 : 400,
-            color: isSelected ? 'var(--astr-blue, #2563eb)' : undefined,
-          }}
-        >
-          {node.name}
-        </Text>
-
-        {!node.is_dir && node.size !== undefined && node.size > 0 && (
-          <Text size="10px" c="dimmed">
-            {node.size > 1024 ? `${(node.size / 1024).toFixed(1)}KB` : `${node.size}B`}
-          </Text>
-        )}
-      </Group>
-
-      {node.is_dir && node.children && (
-        <Collapse expanded={opened}>
-          {node.children.map((child) => (
-            <FileTreeNodeItem
-              key={child.path}
-              node={child}
-              sessionId={sessionId}
-              agentId={agentId}
-              connectionId={connectionId}
-              expandedPaths={expandedPaths}
-              selectedPath={selectedPath}
-              revealedPath={revealedPath}
-              revealPulseKey={revealPulseKey}
-              onSelectPath={onSelectPath}
-              onToggleDirectory={onToggleDirectory}
-              onContextMenu={onContextMenu}
-              level={level + 1}
-            />
-          ))}
-        </Collapse>
+    <Group
+      key={`${node.path}:${isRevealed ? revealPulseKey : 'idle'}`}
+      gap={4}
+      wrap="nowrap"
+      onClick={(e) => {
+        e.stopPropagation()
+        onSelectPath(node.path)
+      }}
+      onDoubleClick={(e) => {
+        e.stopPropagation()
+        onOpenNode(node)
+      }}
+      onContextMenu={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        onSelectPath(node.path)
+        onContextMenu(node, e)
+      }}
+      style={{
+        height: FILE_TREE_ROW_HEIGHT,
+        boxSizing: 'border-box',
+        padding: '0 6px',
+        paddingLeft: 6 + level * 14,
+        borderRadius: 4,
+        cursor: 'pointer',
+        userSelect: 'none',
+        fontSize: 12,
+        backgroundColor: isSelected ? 'var(--astr-hover, rgba(59, 130, 246, 0.16))' : undefined,
+        outline: isSelected ? '1px solid var(--astr-blue, #3b82f6)' : 'none',
+        boxShadow: isSelected ? 'inset 3px 0 0 var(--astr-blue, #2563eb)' : 'none',
+      }}
+      className={`file-tree-row${isSelected ? ' is-selected' : ''}${isRevealed ? ' is-revealed' : ''}`}
+      data-file-path={node.path}
+    >
+      {node.is_dir ? (
+        <>
+          <span
+            onClick={(e) => {
+              e.stopPropagation()
+              onToggleDirectory(node.path)
+            }}
+            style={{ display: 'inline-flex', alignItems: 'center' }}
+          >
+            {opened ? <IconChevronDown size={13} color="gray" /> : <IconChevronRight size={13} color="gray" />}
+          </span>
+          {opened ? <IconFolderOpen size={14} color="#f59e0b" /> : <IconFolder size={14} color="#f59e0b" />}
+        </>
+      ) : (
+        <>
+          <span style={{ width: 13 }} />
+          <IconFile size={14} color="var(--astr-muted)" />
+        </>
       )}
-    </div>
+
+      <Text
+        size="xs"
+        truncate
+        style={{
+          flex: 1,
+          fontWeight: isSelected ? 600 : 400,
+          color: isSelected ? 'var(--astr-blue, #2563eb)' : undefined,
+        }}
+      >
+        {node.name}
+      </Text>
+
+      {!node.is_dir && node.size !== undefined && node.size > 0 && (
+        <Text size="10px" c="dimmed">
+          {node.size > 1024 ? `${(node.size / 1024).toFixed(1)}KB` : `${node.size}B`}
+        </Text>
+      )}
+    </Group>
   )
-}
+})
 
 export function FileTreeViewer({ artifact, isActive = true }: ViewerContext) {
   const paneRef = useRef<HTMLDivElement>(null)
+  const viewportRef = useRef<HTMLDivElement>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [treeData, setTreeData] = useState<TreeNode[]>([])
@@ -319,6 +294,33 @@ export function FileTreeViewer({ artifact, isActive = true }: ViewerContext) {
   const [revealedPath, setRevealedPath] = useState<string | null>(null)
   const [revealPulseKey, setRevealPulseKey] = useState<number>(0)
   const [contextMenu, setContextMenu] = useState<{ node: TreeNode; x: number; y: number } | null>(null)
+  const [scrollTop, setScrollTop] = useState(0)
+  const [viewportHeight, setViewportHeight] = useState(0)
+
+  const expandedKeys = useMemo(() => new Set([...expandedPaths].map(pathKey)), [expandedPaths])
+  const visibleRows = useMemo(
+    () => (isActive ? flattenVisibleTree(treeData, expandedKeys) : []),
+    [expandedKeys, isActive, treeData],
+  )
+
+  useEffect(() => {
+    const viewport = viewportRef.current
+    if (!viewport || !isActive) return
+    const updateHeight = () => {
+      const next = viewport.clientHeight
+      if (next > 0) setViewportHeight((prev) => (prev === next ? prev : next))
+    }
+    updateHeight()
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(updateHeight)
+    observer.observe(viewport)
+    return () => observer.disconnect()
+  }, [isActive, error])
+
+  const handleViewportScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
+    const top = event.currentTarget.scrollTop
+    setScrollTop((prev) => (Math.abs(prev - top) >= FILE_TREE_ROW_HEIGHT / 2 ? top : prev))
+  }, [])
 
   const handleContextMenu = useCallback((node: TreeNode, e: React.MouseEvent) => {
     setContextMenu({
@@ -346,6 +348,27 @@ export function FileTreeViewer({ artifact, isActive = true }: ViewerContext) {
     setSelectedPath(path)
     setRevealedPath(null)
   }, [])
+
+  const openArtifact = useSidecarStore((s) => s.openArtifact)
+  const handleOpenNode = useCallback((node: TreeNode) => {
+    if (node.is_dir) {
+      toggleDirectory(node.path)
+      return
+    }
+    const targetArtifact = resolveArtifactFromPath(node.path, {
+      id: artifact.sessionId,
+      agent_id: artifact.agentId,
+      connection_id: artifact.connectionId,
+      workspace: null,
+      title: '',
+      status: 'idle',
+      updated_at: '',
+    })
+    const viewer = artifactViewerRegistry.findViewer(targetArtifact)
+    if (viewer) {
+      openArtifact(targetArtifact, viewer.id)
+    }
+  }, [artifact.agentId, artifact.connectionId, artifact.sessionId, openArtifact, toggleDirectory])
 
   const fetchTree = useCallback(async () => {
     setLoading(true)
@@ -408,6 +431,16 @@ export function FileTreeViewer({ artifact, isActive = true }: ViewerContext) {
     setExpandedPaths((current) => {
       const next = new Set([...current, ...parents])
       writeExpandedPaths(storageKey, next)
+      const nextKeys = new Set([...next].map(pathKey))
+      const flattened = flattenVisibleTree(treeData, nextKeys)
+      const targetIndex = flattened.findIndex((row) => isSamePath(row.node.path, targetNode.path))
+      if (targetIndex >= 0 && isActive) {
+        const viewport = viewportRef.current
+        const viewH = viewport?.clientHeight || viewportHeight || FILE_TREE_FALLBACK_VIEWPORT_HEIGHT
+        const desiredTop = Math.max(0, targetIndex * FILE_TREE_ROW_HEIGHT - Math.floor(viewH / 2))
+        if (viewport) viewport.scrollTop = desiredTop
+        setScrollTop(desiredTop)
+      }
       return next
     })
 
@@ -443,7 +476,7 @@ export function FileTreeViewer({ artifact, isActive = true }: ViewerContext) {
     return () => {
       cancelled = true
     }
-  }, [isActive, revealAt, revealPath, storageKey, treeData])
+  }, [isActive, revealAt, revealPath, storageKey, treeData, viewportHeight])
 
   const handleCopyFiles = useCallback(async (paths: string[]) => {
     if (!paths.length) return
@@ -578,27 +611,41 @@ export function FileTreeViewer({ artifact, isActive = true }: ViewerContext) {
               重试
             </Button>
           </div>
-        ) : (
-          <ScrollArea style={{ height: '100%', padding: '8px 4px' }}>
-            {treeData.map((node) => (
-              <FileTreeNodeItem
-                key={node.path}
-                node={node}
-                sessionId={artifact.sessionId}
-                agentId={artifact.agentId}
-                connectionId={artifact.connectionId}
-                expandedPaths={expandedPaths}
-                selectedPath={selectedPath}
-                revealedPath={revealedPath}
-                revealPulseKey={revealPulseKey}
-                onSelectPath={handleSelectPath}
-                onToggleDirectory={toggleDirectory}
-                onContextMenu={handleContextMenu}
-                level={0}
-              />
-            ))}
-          </ScrollArea>
-        )}
+        ) : (() => {
+          const effectiveHeight = viewportHeight > 0 ? viewportHeight : FILE_TREE_FALLBACK_VIEWPORT_HEIGHT
+          const totalRows = visibleRows.length
+          const startIndex = Math.max(0, Math.floor(scrollTop / FILE_TREE_ROW_HEIGHT) - FILE_TREE_OVERSCAN)
+          const visibleCount = Math.ceil(effectiveHeight / FILE_TREE_ROW_HEIGHT) + FILE_TREE_OVERSCAN * 2
+          const endIndex = Math.min(totalRows, startIndex + visibleCount)
+          const topSpacerHeight = startIndex * FILE_TREE_ROW_HEIGHT
+          const bottomSpacerHeight = Math.max(0, (totalRows - endIndex) * FILE_TREE_ROW_HEIGHT)
+          const windowRows = visibleRows.slice(startIndex, endIndex)
+          return (
+            <div
+              ref={viewportRef}
+              onScroll={handleViewportScroll}
+              style={{ height: '100%', overflowY: 'auto', padding: '8px 4px', boxSizing: 'border-box' }}
+            >
+              {topSpacerHeight > 0 && <div style={{ height: topSpacerHeight }} aria-hidden="true" />}
+              {windowRows.map(({ node, level, opened }) => (
+                <FileTreeRow
+                  key={node.path}
+                  node={node}
+                  level={level}
+                  opened={opened}
+                  isSelected={Boolean(selectedPath && isSamePath(selectedPath, node.path))}
+                  isRevealed={Boolean(revealedPath && isSamePath(revealedPath, node.path))}
+                  revealPulseKey={revealPulseKey}
+                  onSelectPath={handleSelectPath}
+                  onOpenNode={handleOpenNode}
+                  onToggleDirectory={toggleDirectory}
+                  onContextMenu={handleContextMenu}
+                />
+              ))}
+              {bottomSpacerHeight > 0 && <div style={{ height: bottomSpacerHeight }} aria-hidden="true" />}
+            </div>
+          )
+        })()}
       </div>
 
       <Menu

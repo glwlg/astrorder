@@ -378,6 +378,20 @@ describe('transcript follow mode', () => {
     expect(screen.queryByText(/@image:/)).not.toBeInTheDocument()
   })
 
+  it('windows very long transcripts to recent visual rows and expands older rows on demand', () => {
+    const many: Message[] = Array.from({ length: 90 }, (_, i) => ({
+      ...message,
+      id: `m-${i}`,
+      role: i % 2 === 0 ? 'user' : 'assistant',
+      text: `第 ${i} 条内容`,
+    }))
+    render(<MantineProvider><Transcript outbox={[]} messages={many} /></MantineProvider>)
+    expect(screen.queryByTestId('message-m-0')).toBeNull()
+    expect(screen.getByTestId('message-m-89')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /显示更早 30 条记录/ }))
+    expect(screen.getByTestId('message-m-0')).toBeInTheDocument()
+  })
+
   it('keeps the active execution bar open across brief mid-turn status dips and collapses once a final reply arrives', () => {
     const toolMsg: Message = {
       ...message,
@@ -396,6 +410,7 @@ describe('transcript follow mode', () => {
     const details = screen.getByRole('region', { name: '思考与工具' }).querySelector('details')!
     expect(details.open).toBe(true)
 
+    // Brief mid-turn idle blip with no final reply yet must NOT immediately collapse or remount the bar.
     view.rerender(
       <MantineProvider>
         <Transcript outbox={[]} session={{ ...runningSession, status: 'idle' }} messages={[toolMsg]} />
@@ -404,6 +419,7 @@ describe('transcript follow mode', () => {
     expect(screen.getByRole('region', { name: '思考与工具' }).querySelector('details')).toBe(details)
     expect(details.open).toBe(true)
 
+    // Once the final assistant reply arrives, the execution bar collapses immediately without remounting.
     view.rerender(
       <MantineProvider>
         <Transcript

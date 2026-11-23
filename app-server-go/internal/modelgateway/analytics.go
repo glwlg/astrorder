@@ -1,6 +1,7 @@
 package modelgateway
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -13,6 +14,32 @@ import (
 
 	"astrorder.dev/app-server/internal/store"
 )
+
+type bufferedResponseWriter struct {
+	header http.Header
+	status int
+	body   bytes.Buffer
+}
+
+func (b *bufferedResponseWriter) Header() http.Header {
+	if b.header == nil {
+		b.header = make(http.Header)
+	}
+	return b.header
+}
+
+func (b *bufferedResponseWriter) WriteHeader(code int) {
+	if b.status == 0 {
+		b.status = code
+	}
+}
+
+func (b *bufferedResponseWriter) Write(p []byte) (int, error) {
+	if b.status == 0 {
+		b.status = http.StatusOK
+	}
+	return b.body.Write(p)
+}
 
 func (h *Handler) handleGetAnalyticsConfig(w http.ResponseWriter, r *http.Request) {
 	cfg, err := GetGatewayConfig(r.Context(), h.store)
@@ -80,6 +107,63 @@ func (h *Handler) handleGetAnalyticsUsage(w http.ResponseWriter, r *http.Request
 		}
 	}
 
+	flightKey := rangeVal + "|" + surface + "|" + source + "|" + connectionID + "|" + sinceStr + "|" + untilStr
+	h.analyticsFlightMu.Lock()
+	if flight, ok := h.analyticsFlights[flightKey]; ok {
+		h.analyticsFlightMu.Unlock()
+		select {
+		case <-flight.done:
+			if flight.contentType != "" {
+				w.Header().Set("Content-Type", flight.contentType)
+			}
+			status := flight.status
+			if status == 0 {
+				status = http.StatusOK
+			}
+			w.WriteHeader(status)
+			_, _ = w.Write(flight.body)
+			return
+		case <-r.Context().Done():
+			writeError(w, http.StatusRequestTimeout, "request_canceled", "请求已取消")
+			return
+		}
+	}
+	if h.analyticsFlights == nil {
+		h.analyticsFlights = make(map[string]*analyticsUsageFlight)
+	}
+	flight := &analyticsUsageFlight{done: make(chan struct{})}
+	h.analyticsFlights[flightKey] = flight
+	h.analyticsFlightMu.Unlock()
+
+	buf := &bufferedResponseWriter{}
+	defer func() {
+		status := buf.status
+		if status == 0 {
+			status = http.StatusOK
+		}
+		ct := buf.Header().Get("Content-Type")
+		body := append([]byte(nil), buf.body.Bytes()...)
+		h.analyticsFlightMu.Lock()
+		delete(h.analyticsFlights, flightKey)
+		flight.status = status
+		flight.contentType = ct
+		flight.body = body
+		close(flight.done)
+		h.analyticsFlightMu.Unlock()
+
+		for k, vals := range buf.Header() {
+			for _, v := range vals {
+				w.Header().Add(k, v)
+			}
+		}
+		w.WriteHeader(status)
+		_, _ = w.Write(body)
+	}()
+
+	h.serveAnalyticsUsageUncoalesced(buf, r, rangeVal, surface, source, connectionID, sinceStr, untilStr)
+}
+
+func (h *Handler) serveAnalyticsUsageUncoalesced(w http.ResponseWriter, r *http.Request, rangeVal, surface, source, connectionID, sinceStr, untilStr string) {
 	cfg, err := GetGatewayConfig(r.Context(), h.store)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "config_error", err.Error())

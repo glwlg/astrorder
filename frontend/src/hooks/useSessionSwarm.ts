@@ -24,7 +24,8 @@ export function useSessionSwarm(
       if (!supported) return false
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return false
       const data = query.state.data
-      if (panelOpen || data?.active) return 5000
+      if (panelOpen) return 5000
+      if (data?.active) return 10000
       if (session?.status === 'running') return 30000
       return false
     },

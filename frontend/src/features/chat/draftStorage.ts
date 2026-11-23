@@ -14,31 +14,52 @@ function hasIndexedDb(): boolean {
   return typeof indexedDB !== 'undefined'
 }
 
+let dbPromise: Promise<IDBDatabase> | null = null
+
 function open(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
+  if (dbPromise) return dbPromise
+  const pending = new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open(DATABASE, 1)
     request.onupgradeneeded = () => request.result.createObjectStore(STORE)
-    request.onsuccess = () => resolve(request.result)
-    request.onerror = () => reject(request.error)
+    request.onsuccess = () => {
+      const db = request.result
+      db.onversionchange = () => {
+        db.close()
+        if (dbPromise === pending) dbPromise = null
+      }
+      db.onclose = () => {
+        if (dbPromise === pending) dbPromise = null
+      }
+      resolve(db)
+    }
+    request.onerror = () => {
+      if (dbPromise === pending) dbPromise = null
+      reject(request.error)
+    }
   })
+  dbPromise = pending
+  return pending
 }
 
 async function transact<T>(mode: IDBTransactionMode, run: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
   const db = await open()
-  try {
-    return await new Promise<T>((resolve, reject) => {
-      const transaction = db.transaction(STORE, mode)
-      const request = run(transaction.objectStore(STORE))
-      let result: T
-      request.onsuccess = () => { result = request.result }
-      request.onerror = () => reject(request.error)
-      transaction.oncomplete = () => resolve(result)
-      transaction.onerror = () => reject(transaction.error)
-      transaction.onabort = () => reject(transaction.error)
-    })
-  } finally {
-    db.close()
-  }
+  return await new Promise<T>((resolve, reject) => {
+    let transaction: IDBTransaction
+    try {
+      transaction = db.transaction(STORE, mode)
+    } catch (error) {
+      dbPromise = null
+      reject(error)
+      return
+    }
+    const request = run(transaction.objectStore(STORE))
+    let result: T
+    request.onsuccess = () => { result = request.result }
+    request.onerror = () => reject(request.error)
+    transaction.oncomplete = () => resolve(result)
+    transaction.onerror = () => reject(transaction.error)
+    transaction.onabort = () => reject(transaction.error)
+  })
 }
 
 function queueWrite(key: string, write: () => Promise<unknown>): Promise<void> {
@@ -110,8 +131,22 @@ const legacyDraftShelfStorage = {
 type StoredFile = { name: string; type: string; lastModified: number; data: string }
 type StoredEntry = Omit<StashedDraft, 'draft'> & { draft: Omit<DraftState, 'attachments'> & { attachments: Array<Omit<DraftState['attachments'][number], 'file'> & { file: StoredFile }> } }
 type ShelfResponse = { revision: number; entries: StoredEntry[] }
+type ShelfMetaResponse = { revision: number; count?: number; entries?: StoredEntry[] }
+const MAX_CACHED_SHELVES = 8
 const revisions = new Map<string, number>()
+const shelfCache = new Map<string, { revision: number; entries: StashedDraft[] }>()
+const legacyMigratedScopes = new Set<string>()
 const shelfPath = (key: string) => `/draft-shelf?scope=${encodeURIComponent(key)}`
+const shelfMetaPath = (key: string) => `/draft-shelf?scope=${encodeURIComponent(key)}&meta=1`
+
+function putShelfCache(key: string, revision: number, entries: StashedDraft[]): void {
+  shelfCache.delete(key)
+  shelfCache.set(key, { revision, entries })
+  if (shelfCache.size > MAX_CACHED_SHELVES) {
+    const oldest = shelfCache.keys().next().value
+    if (oldest !== undefined) shelfCache.delete(oldest)
+  }
+}
 
 async function encodeEntries(entries: StashedDraft[]): Promise<StoredEntry[]> {
   return Promise.all(entries.map(async row => ({ ...row, draft: { ...row.draft, attachments: await Promise.all(row.draft.attachments.map(async item => {
@@ -137,9 +172,30 @@ function decodeEntries(entries: StoredEntry[]): StashedDraft[] {
 export const draftShelfStorage = {
   async load(key: string): Promise<StashedDraft[]> {
     await writes.get(`remote-shelf:${key}`)?.catch(() => undefined)
-    let result = await request<ShelfResponse>(shelfPath(key))
-    const legacy = await legacyDraftShelfStorage.load(key)
-    const imported = legacy.filter(row => !result.entries.some(saved => saved.id === row.id))
+    const legacy = legacyMigratedScopes.has(key) ? [] : await legacyDraftShelfStorage.load(key)
+    let result: ShelfResponse | null = null
+    if (legacy.length === 0) {
+      legacyMigratedScopes.add(key)
+      const meta = await request<ShelfMetaResponse>(shelfMetaPath(key))
+      if (Array.isArray(meta.entries)) {
+        result = { revision: meta.revision, entries: meta.entries }
+      } else {
+        if (meta.count === 0) {
+          revisions.set(key, meta.revision)
+          putShelfCache(key, meta.revision, [])
+          return []
+        }
+        const cached = shelfCache.get(key)
+        if (cached && cached.revision === meta.revision) {
+          revisions.set(key, meta.revision)
+          return cached.entries
+        }
+      }
+    }
+    if (!result) {
+      result = await request<ShelfResponse>(shelfPath(key))
+    }
+    const imported = legacy.filter(row => !result!.entries.some(saved => saved.id === row.id))
     if (imported.length) {
       try {
         result = await request<ShelfResponse>(shelfPath(key), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ revision: result.revision, entries: [...await encodeEntries(imported), ...result.entries] }) })
@@ -148,12 +204,17 @@ export const draftShelfStorage = {
         // later load retry if any entries are still missing.
         if (!(error instanceof ApiError) || error.status !== 409) throw error
         result = await request<ShelfResponse>(shelfPath(key))
-        if (imported.some(row => !result.entries.some(saved => saved.id === row.id))) throw error
+        if (imported.some(row => !result!.entries.some(saved => saved.id === row.id))) throw error
       }
     }
-    if (legacy.length) await legacyDraftShelfStorage.save(key, [])
+    if (legacy.length) {
+      await legacyDraftShelfStorage.save(key, [])
+      legacyMigratedScopes.add(key)
+    }
     revisions.set(key, result.revision)
-    return decodeEntries(result.entries)
+    const decoded = decodeEntries(result.entries)
+    putShelfCache(key, result.revision, decoded)
+    return decoded
   },
   save(key: string, entries: StashedDraft[]): Promise<void> {
     const revision = revisions.get(key)
@@ -161,6 +222,7 @@ export const draftShelfStorage = {
     return queueWrite(`remote-shelf:${key}`, async () => {
       const result = await request<ShelfResponse>(shelfPath(key), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ revision, entries: await encodeEntries(entries) }) })
       revisions.set(key, result.revision)
+      putShelfCache(key, result.revision, entries)
     })
   },
 }
@@ -194,7 +256,15 @@ export function usePersistentDraft(agentId: string, sessionId: string) {
 
   useEffect(() => {
     if (!key || hydratedKey !== key) return
-    void (hasContent(draft) ? draftStorage.save(key, draft) : draftStorage.remove(key)).catch(error => console.error('Unable to save draft', error))
+    if (!hasContent(draft)) {
+      void draftStorage.remove(key).catch(error => console.error('Unable to save draft', error))
+      return
+    }
+    // Debounce IndexedDB/localStorage writes while typing to avoid blocking every keystroke.
+    const timer = window.setTimeout(() => {
+      void draftStorage.save(key, draft).catch(error => console.error('Unable to save draft', error))
+    }, 300)
+    return () => window.clearTimeout(timer)
   }, [draft, hydratedKey, key])
 
   useEffect(() => {

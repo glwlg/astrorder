@@ -6,6 +6,8 @@ import { isCompactionMessage } from '../features/chat/CompactionDivider'
 export type HistoryPage = { items: Message[]; next_cursor: string | null }
 export const visibleHistoryItems = (items: Message[]) => items.map(normalizeMessagePresentation).filter(item => isCompactionMessage(item) || hasMessageContent(item))
 
+const MAX_EXTRA_ACTIVITY_PAGES = 3
+
 /** Publish only after the leading activity group is complete or reaches a native boundary. */
 export async function loadActivityHistory(
   read: (before: string | undefined, limit: number) => Promise<HistoryPage>,
@@ -14,7 +16,8 @@ export async function loadActivityHistory(
 ): Promise<HistoryPage & { completeActivityGroup: boolean }> {
   let page = await read(before, limit)
   const seen = new Set<string>(before ? [before] : [])
-  while (page.next_cursor) {
+  let extraPages = 0
+  while (page.next_cursor && extraPages < MAX_EXTRA_ACTIVITY_PAGES) {
     const visible = visibleHistoryItems(page.items)
     let count = 0
     while (count < visible.length && isPackActivity(visible[count])) count++
@@ -22,6 +25,7 @@ export async function loadActivityHistory(
     const cursor = page.next_cursor
     if (seen.has(cursor)) throw new Error('历史分页游标未前进，请重试')
     seen.add(cursor)
+    extraPages++
     const older = await read(cursor, ACTIVITY_PACK_LIMIT - count % ACTIVITY_PACK_LIMIT)
     const unique = new Map(older.items.map(item => [item.id, item]))
     for (const item of page.items) unique.set(item.id, item)

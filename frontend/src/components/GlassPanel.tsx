@@ -6,7 +6,9 @@ import { createGlassRim } from './glassRim'
 import { loadLiquidGlass } from './liquidGlass'
 import './glassPanel.css'
 
-const ComposerGlassContext = createContext<string | null>(null)
+export type GlassEngine = 'css' | 'webgl'
+type ComposerGlassScope = { snapshot: string; engine: GlassEngine }
+const ComposerGlassContext = createContext<ComposerGlassScope | null>(null)
 type GlassVariant = 'panel' | 'composer' | 'menu'
 const materials = {
   panel: { refraction: 0, bevelDepth: 0.009, bevelWidth: 0.09 },
@@ -16,25 +18,35 @@ const materials = {
 const instances = (result: LiquidGlassLens | LiquidGlassLens[] | undefined) =>
   Array.isArray(result) ? result : result ? [result] : []
 
-export function ComposerGlassSurface({ active, children, snapshot = '.chat-workbench' }: { active: boolean; children: ReactNode; snapshot?: string }) {
-  return active ? <GlassPanel active snapshot={snapshot} variant="composer">{children}</GlassPanel> : children
+export function ComposerGlassSurface({
+  active,
+  children,
+  snapshot = '.chat-workbench',
+  engine = 'css',
+}: {
+  active: boolean
+  children: ReactNode
+  snapshot?: string
+  engine?: GlassEngine
+}) {
+  return active ? <GlassPanel active snapshot={snapshot} variant="composer" engine={engine}>{children}</GlassPanel> : children
 }
 
 /** React context also reaches Mantine's portalled dropdowns. */
 export function ComposerGlassMenu({ active, children }: { active: boolean; children: ReactNode }) {
-  const enabled = useContext(ComposerGlassContext)
-  return enabled ? <GlassPanel active={active} snapshot={enabled} variant="menu">{children}</GlassPanel> : children
+  const scope = useContext(ComposerGlassContext)
+  return scope ? <GlassPanel active={active} snapshot={scope.snapshot} variant="menu" engine={scope.engine}>{children}</GlassPanel> : children
 }
 
 export function GlassButtonLens() {
-  const enabled = useContext(ComposerGlassContext)
+  const scope = useContext(ComposerGlassContext)
   const id = useId().replace(/[^a-zA-Z0-9_-]/g, '')
-  return enabled ? <span id={`glass-button-${id}`} className="glass-button-lens" aria-hidden="true" /> : null
+  return scope?.engine === 'webgl' ? <span id={`glass-button-${id}`} className="glass-button-lens" aria-hidden="true" /> : null
 }
 
-/** Refract the actual interface behind the floating panel; keep controls live. */
-export function GlassPanel({ children, active, snapshot, variant = 'panel' }: {
-  children: ReactNode; active: boolean; snapshot: string; variant?: GlassVariant
+/** Frosted floating panel; defaults to pure GPU CSS backdrop-filter without html2canvas snapshots. */
+export function GlassPanel({ children, active, snapshot, variant = 'panel', engine = 'css' }: {
+  children: ReactNode; active: boolean; snapshot: string; variant?: GlassVariant; engine?: GlassEngine
 }) {
   const id = useId().replace(/[^a-zA-Z0-9_-]/g, '')
   const surfaceRef = useRef<HTMLDivElement>(null)
@@ -42,7 +54,18 @@ export function GlassPanel({ children, active, snapshot, variant = 'panel' }: {
   const reducedMotion = useReducedMotion()
 
   useEffect(() => {
-    if (!active) return
+    const surface = surfaceRef.current
+    if (!surface) return
+    if (!active) {
+      delete surface.dataset.materialStatus
+      return
+    }
+    if (engine === 'css') {
+      surface.dataset.materialStatus = 'ready'
+      return () => {
+        delete surface.dataset.materialStatus
+      }
+    }
     let cancelled = false
     let lenses: LiquidGlassLens[] = []
     const buttons = new Map<HTMLElement, LiquidGlassLens[]>()
@@ -50,7 +73,6 @@ export function GlassPanel({ children, active, snapshot, variant = 'panel' }: {
     let observer: MutationObserver | undefined
     let buttonObserver: MutationObserver | undefined
     let refreshTimer: ReturnType<typeof setTimeout> | undefined
-    const surface = surfaceRef.current!
     const backdrop = document.querySelector(snapshot)!
     const trackRim = (target: HTMLElement, bound: LiquidGlassLens[], width: number) => {
       for (const lens of bound) {
@@ -153,13 +175,15 @@ export function GlassPanel({ children, active, snapshot, variant = 'panel' }: {
       for (const bound of buttons.values()) for (const lens of bound) lens.destroy()
       delete surface.dataset.materialStatus
     }
-  }, [active, id, reducedMotion, scheme, snapshot, variant])
+  }, [active, engine, id, reducedMotion, scheme, snapshot, variant])
+
+  const scopeValue = variant === 'composer' ? { snapshot, engine } : null
 
   return (
     <div ref={surfaceRef} className={`glass-panel glass-panel--${variant}${active ? ' is-active' : ''}`} data-liquid-ignore>
-      <div id={`glass-lens-${id}`} className="glass-panel-lens" aria-hidden="true" />
+      {engine === 'webgl' && <div id={`glass-lens-${id}`} className="glass-panel-lens" aria-hidden="true" />}
       <div className="glass-panel-content" data-liquid-ignore>
-        {variant === 'composer' ? <ComposerGlassContext.Provider value={snapshot}>{children}</ComposerGlassContext.Provider> : children}
+        {scopeValue ? <ComposerGlassContext.Provider value={scopeValue}>{children}</ComposerGlassContext.Provider> : children}
       </div>
     </div>
   )

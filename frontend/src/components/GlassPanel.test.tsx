@@ -27,8 +27,36 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
+it('uses the pure CSS glass fast path by default without invoking liquidGL or html2canvas snapshots', () => {
+  const view = render(<MantineProvider>
+    <ComposerGlassSurface active>
+      <button>发送<GlassButtonLens /></button>
+      {createPortal(<ComposerGlassMenu active><button>切换模型</button></ComposerGlassMenu>, document.body)}
+    </ComposerGlassSurface>
+  </MantineProvider>)
+  expect(liquidGL).not.toHaveBeenCalled()
+  expect(captureSnapshot).not.toHaveBeenCalled()
+  const composerPanel = view.container.querySelector('.glass-panel--composer')
+  expect(composerPanel).toHaveAttribute('data-material-status', 'ready')
+  expect(view.container.querySelector('.glass-panel-lens')).toBeNull()
+  expect(view.container.querySelector('.glass-button-lens')).toBeNull()
+  const menuPanel = document.body.querySelector('.glass-panel--menu')
+  expect(menuPanel).toHaveAttribute('data-material-status', 'ready')
+
+  const backdrop = document.querySelector('.chat-workbench')!
+  backdrop.dispatchEvent(new Event('scroll'))
+  backdrop.textContent = 'streamed output'
+  expect(liquidGL).not.toHaveBeenCalled()
+  expect(captureSnapshot).not.toHaveBeenCalled()
+
+  view.rerender(<MantineProvider>
+    <GlassPanel active={false} snapshot=".chat-workbench">隐藏</GlassPanel>
+  </MantineProvider>)
+  expect(view.container.querySelector('.glass-panel')).not.toHaveAttribute('data-material-status')
+})
+
 it('refreshes nested scrolls and streamed text without recapturing its own UI or leaving pending work', async () => {
-  const view = render(<MantineProvider><GlassPanel active snapshot=".chat-workbench">变更</GlassPanel></MantineProvider>)
+  const view = render(<MantineProvider><GlassPanel active engine="webgl" snapshot=".chat-workbench">变更</GlassPanel></MantineProvider>)
   await waitFor(() => expect(liquidGL).toHaveBeenCalledOnce())
   vi.useFakeTimers()
   const backdrop = document.querySelector('.chat-workbench')!
@@ -49,7 +77,7 @@ it('refreshes nested scrolls and streamed text without recapturing its own UI or
 })
 
 it('refracts the actual workbench, excludes its own controls, and releases the lens when hidden', async () => {
-  const view = render(<MantineProvider><GlassPanel active snapshot=".chat-workbench"><button>会话操作</button></GlassPanel></MantineProvider>)
+  const view = render(<MantineProvider><GlassPanel active engine="webgl" snapshot=".chat-workbench"><button>会话操作</button></GlassPanel></MantineProvider>)
   await waitFor(() => expect(liquidGL).toHaveBeenCalledTimes(1))
   const options = liquidGL.mock.calls[0][0] as unknown as { snapshot: string; content: boolean }
   expect(options.snapshot).toBe('.chat-workbench')
@@ -57,7 +85,7 @@ it('refracts the actual workbench, excludes its own controls, and releases the l
   expect(view.container.querySelector('.glass-panel-backdrop')).toBeNull()
   expect(options.content).toBe(false)
 
-  view.rerender(<MantineProvider><GlassPanel active={false} snapshot=".chat-workbench"><button>会话操作</button></GlassPanel></MantineProvider>)
+  view.rerender(<MantineProvider><GlassPanel active={false} engine="webgl" snapshot=".chat-workbench"><button>会话操作</button></GlassPanel></MantineProvider>)
   expect(destroy).toHaveBeenCalledTimes(1)
   expect(screen.getByRole('button', { name: '会话操作' })).toBeVisible()
   expect(view.container.querySelector('.glass-panel')).not.toHaveAttribute('data-material-status')
@@ -66,9 +94,9 @@ it('refracts the actual workbench, excludes its own controls, and releases the l
 })
 
 it('does not initialise a hidden panel, and destroys each instance on unmount', async () => {
-  const view = render(<MantineProvider><GlassPanel active={false} snapshot=".chat-workbench">文件变更</GlassPanel></MantineProvider>)
+  const view = render(<MantineProvider><GlassPanel active={false} engine="webgl" snapshot=".chat-workbench">文件变更</GlassPanel></MantineProvider>)
   expect(liquidGL).not.toHaveBeenCalled()
-  view.rerender(<MantineProvider><GlassPanel active snapshot=".chat-workbench">文件变更</GlassPanel></MantineProvider>)
+  view.rerender(<MantineProvider><GlassPanel active engine="webgl" snapshot=".chat-workbench">文件变更</GlassPanel></MantineProvider>)
   await waitFor(() => expect(liquidGL).toHaveBeenCalledTimes(1))
   view.unmount()
   expect(destroy).toHaveBeenCalledTimes(1)
@@ -76,7 +104,7 @@ it('does not initialise a hidden panel, and destroys each instance on unmount', 
 
 it('binds controls that appear after loading, refreshes their shared renderer once, and releases removed controls', async () => {
   const content = (late: boolean) => <MantineProvider>
-    <ComposerGlassSurface active>
+    <ComposerGlassSurface active engine="webgl">
       <button>附件<GlassButtonLens /></button>
       {late && <button>模型<GlassButtonLens /></button>}
     </ComposerGlassSurface>
@@ -98,7 +126,7 @@ it('binds controls that appear after loading, refreshes their shared renderer on
 
 it('passes the material scope through portals and releases dropdown lenses immediately when closed', async () => {
   const content = (opened: boolean, enabled = true) => <MantineProvider>
-    <ComposerGlassSurface active={enabled}>
+    <ComposerGlassSurface active={enabled} engine="webgl">
       {createPortal(<ComposerGlassMenu active={opened}><button>切换模型</button></ComposerGlassMenu>, document.body)}
     </ComposerGlassSurface>
   </MantineProvider>
@@ -121,7 +149,7 @@ it('uses the group backdrop for the composer and its portalled menus', async () 
   group.className = 'bot-group-chat-page'
   document.body.append(group)
   const view = render(<MantineProvider>
-    <ComposerGlassSurface active snapshot=".bot-group-chat-page">
+    <ComposerGlassSurface active engine="webgl" snapshot=".bot-group-chat-page">
       <button>发送<GlassButtonLens /></button>
       {createPortal(<ComposerGlassMenu active>群成员</ComposerGlassMenu>, document.body)}
     </ComposerGlassSurface>

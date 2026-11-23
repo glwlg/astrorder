@@ -66,6 +66,22 @@ func serveDraftShelf(a *api, w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, 422, "Invalid draft scope")
 		return
 	}
+	if r.Method == http.MethodGet && r.URL.Query().Get("meta") == "1" {
+		var revision int64
+		var count int
+		err := a.draftStore.DB().QueryRowContext(
+			r.Context(),
+			"SELECT revision, COALESCE(json_array_length(entries), 0) FROM draft_shelves WHERE scope=?",
+			scope,
+		).Scan(&revision, &count)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			writeJSONError(w, 500, "Unable to read drafts")
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"revision": revision, "count": count})
+		return
+	}
 	result := draftShelf{Entries: []json.RawMessage{}}
 	if r.Method == http.MethodGet {
 		var raw string

@@ -16,6 +16,25 @@ import (
 	"time"
 )
 
+func writeMessagesJSON(w http.ResponseWriter, r *http.Request, payload map[string]any) {
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "Failed to encode messages")
+		return
+	}
+	sum := sha256.Sum256(raw)
+	etag := `W/"` + hex.EncodeToString(sum[:8]) + `"`
+	w.Header().Set("ETag", etag)
+	w.Header().Set("Cache-Control", "private, no-cache")
+	if strings.TrimSpace(r.Header.Get("If-None-Match")) == etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(raw)
+}
+
 func (h *Handler) handleListMessages(w http.ResponseWriter, r *http.Request, sid string) {
 	ctx := r.Context()
 	aid := r.URL.Query().Get("agent_id")
@@ -71,7 +90,7 @@ func (h *Handler) handleListMessages(w http.ResponseWriter, r *http.Request, sid
 			writeJSONError(w, 503, "Native history read failed")
 			return
 		}
-		writeJSON(w, 200, map[string]any{"items": items, "next_cursor": next})
+		writeMessagesJSON(w, r, map[string]any{"items": items, "next_cursor": next})
 		return
 	}
 	if stringValue(agent, "kind") != "codex" {
@@ -87,7 +106,7 @@ func (h *Handler) handleListMessages(w http.ResponseWriter, r *http.Request, sid
 	page, err := h.client.Runtime.GetHistoryPage(ctx, request)
 	if err != nil {
 		if items, next, readErr := h.readCodexHistoryUnbound(ctx, row, nativeID, before, limit); readErr == nil {
-			writeJSON(w, 200, map[string]any{"items": items, "next_cursor": next})
+			writeMessagesJSON(w, r, map[string]any{"items": items, "next_cursor": next})
 			return
 		} else {
 			logUnboundHistory(row, err, readErr)
@@ -142,7 +161,7 @@ func (h *Handler) handleListMessages(w http.ResponseWriter, r *http.Request, sid
 			next = value.Value
 		}
 	}
-	writeJSON(w, 200, map[string]any{"items": items, "next_cursor": next})
+	writeMessagesJSON(w, r, map[string]any{"items": items, "next_cursor": next})
 }
 func historyText(value any) string {
 	if text, ok := value.(string); ok {
