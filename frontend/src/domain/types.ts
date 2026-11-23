@@ -62,11 +62,25 @@ export interface Session {
   handoff_from_agent_id?: string | null;
   handoff_from_session_id?: string | null;
   handoff_context?: string | null;
+  handoff_context_consumed?: boolean;
   parent_session_id?: string | null;
   parent_agent_id?: string | null;
   parent_session_key?: string | null;
   delegation_parent_agent_id?: string | null;
   delegation_parent_session_id?: string | null;
+}
+
+export interface SessionHandoffContext {
+  available: boolean;
+  mode?: 'native_summary' | 'transcript_excerpt' | 'inline' | string;
+  summary?: string;
+  consumed?: boolean;
+  source_agent_id?: string;
+  source_agent_kind?: string;
+  source_agent_name?: string;
+  source_session_id?: string;
+  source_session_title?: string;
+  workspace?: string;
 }
 
 export interface Project {

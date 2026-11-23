@@ -31,7 +31,7 @@ func (b StatisticsBounds) validate() error {
 func validateStatisticsAddress(address string) error {
 	u, err := url.Parse(address)
 	if err != nil || strings.ContainsAny(address, "\r\n\x00") || u == nil || u.Hostname() == "" || u.User != nil || (u.Scheme != "http" && u.Scheme != "https") {
-		return errors.New("统计页地址必须是完整的 http 或 https 地址，且不能包含用户名或密码")
+		return errors.New("嵌入页面地址必须是完整的 http 或 https 地址，且不能包含用户名或密码")
 	}
 	return nil
 }
@@ -56,7 +56,7 @@ func (s *StatisticsView) show(address string, bounds StatisticsBounds, refresh b
 		// This is a top-level web document, not an HTML iframe. The native child
 		// HWND provides the visual embedding without changing SameSite semantics.
 		s.window = s.shell.app.Window.NewWithOptions(application.WebviewWindowOptions{
-			Name: "gateway-statistics", Title: "网关统计", URL: address,
+			Name: "embedded-integration", Title: "集成页面", URL: address,
 			Width: 800, Height: 600, Hidden: true, Frameless: true, DisableResize: true,
 			Windows: application.WindowsWindow{HiddenOnTaskbar: true, DisableFramelessWindowDecorations: true},
 		})

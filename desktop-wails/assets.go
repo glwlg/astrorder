@@ -47,6 +47,8 @@ window.astrorderDesktop = Object.freeze({
   openDirectoryDialog: (defaultPath) => svc.OpenDirectoryDialog(String(defaultPath ?? '')),
   openFileDialog: (defaultPath) => svc.OpenFileDialog(String(defaultPath ?? '')),
   openExternal: (url) => svc.OpenExternal(String(url)),
+  showEmbeddedPage: (url, bounds, refresh) => svc.ShowEmbeddedPage(String(url), { ...bounds, scale: window.devicePixelRatio }, Boolean(refresh)),
+  hideEmbeddedPage: () => svc.HideEmbeddedPage(),
   showStatistics: (url, bounds, refresh) => svc.ShowStatistics(String(url), { ...bounds, scale: window.devicePixelRatio }, Boolean(refresh)),
   hideStatistics: () => svc.HideStatistics(),
 });

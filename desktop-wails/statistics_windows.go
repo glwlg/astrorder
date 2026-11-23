@@ -17,7 +17,7 @@ var statisticsGetParent = syscall.NewLazyDLL("user32.dll").NewProc("GetParent")
 func placeStatisticsWindow(child, parent *application.WebviewWindow, b StatisticsBounds) error {
 	hwnd, owner := uintptr(child.NativeWindow()), uintptr(parent.NativeWindow())
 	if hwnd == 0 || owner == 0 {
-		return fmt.Errorf("网关统计视图尚未初始化")
+		return fmt.Errorf("嵌入页面视图尚未初始化")
 	}
 	current, _, _ := statisticsGetParent.Call(hwnd)
 	if current != owner {
@@ -26,7 +26,7 @@ func placeStatisticsWindow(child, parent *application.WebviewWindow, b Statistic
 		statisticsSetParent.Call(hwnd, owner)
 		current, _, _ = statisticsGetParent.Call(hwnd)
 		if current != owner {
-			return fmt.Errorf("无法将网关统计视图嵌入主窗口")
+			return fmt.Errorf("无法将嵌入页面视图嵌入主窗口")
 		}
 	}
 	scale := b.Scale
@@ -42,7 +42,7 @@ func placeStatisticsWindow(child, parent *application.WebviewWindow, b Statistic
 	x, y = min(x, int(rect.Right)), min(y, int(rect.Bottom))
 	width, height = min(width, int(rect.Right)-x), min(height, int(rect.Bottom)-y)
 	if !w32.SetWindowPos(hwnd, w32.HWND_TOP, x, y, width, height, w32.SWP_NOACTIVATE|w32.SWP_FRAMECHANGED) {
-		return fmt.Errorf("无法调整网关统计视图尺寸")
+		return fmt.Errorf("无法调整嵌入页面视图尺寸")
 	}
 	return nil
 }

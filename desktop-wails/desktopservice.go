@@ -97,18 +97,24 @@ func (d *DesktopService) OpenExternal(ctx context.Context, url string) error {
 	}
 	return d.shell.OpenExternal(url)
 }
-func (d *DesktopService) ShowStatistics(ctx context.Context, address string, bounds StatisticsBounds, refresh bool) error {
+func (d *DesktopService) ShowEmbeddedPage(ctx context.Context, address string, bounds StatisticsBounds, refresh bool) error {
 	if err := requireWindow(ctx, d.shell.window); err != nil {
 		return err
 	}
 	return d.shell.statistics.show(address, bounds, refresh)
 }
-func (d *DesktopService) HideStatistics(ctx context.Context) error {
+func (d *DesktopService) HideEmbeddedPage(ctx context.Context) error {
 	if err := requireWindow(ctx, d.shell.window); err != nil {
 		return err
 	}
 	d.shell.statistics.hide()
 	return nil
+}
+func (d *DesktopService) ShowStatistics(ctx context.Context, address string, bounds StatisticsBounds, refresh bool) error {
+	return d.ShowEmbeddedPage(ctx, address, bounds, refresh)
+}
+func (d *DesktopService) HideStatistics(ctx context.Context) error {
+	return d.HideEmbeddedPage(ctx)
 }
 func (d *DesktopService) OpenPreview(ctx context.Context, payload PreviewPayload) error {
 	if err := requireWindow(ctx, d.shell.window); err != nil {

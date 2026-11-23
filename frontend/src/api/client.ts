@@ -12,6 +12,7 @@ import type {
   ConnectionsPayload,
   RuntimePayload,
   Session,
+  SessionHandoffContext,
   SessionSwarm,
   SessionSchedule,
   SessionScheduleInput,
@@ -22,6 +23,7 @@ import type {
   SshConnectionSettings,
   Task,
 } from '../domain/types'
+import { clientPerf } from '../perf/clientPerf'
 
 const API_PREFIX = '/api/v1'
 export interface UpgradeJob {
@@ -283,18 +285,18 @@ export class ApiError extends Error {
   }
 }
 
-async function parseResponse(response: Response): Promise<unknown> {
-  if (response.status === 204) return undefined
+async function parseResponseWithSize(response: Response): Promise<{ payload: unknown; bytes: number }> {
+  if (response.status === 204) return { payload: undefined, bytes: 0 }
   try {
     const raw = await response.text()
-    if (!raw) return undefined
+    if (!raw) return { payload: undefined, bytes: 0 }
     try {
-      return JSON.parse(raw) as unknown
+      return { payload: JSON.parse(raw) as unknown, bytes: raw.length }
     } catch {
-      return raw
+      return { payload: raw, bytes: raw.length }
     }
   } catch {
-    return undefined
+    return { payload: undefined, bytes: 0 }
   }
 }
 
@@ -319,16 +321,28 @@ export async function authenticatedApiFetch(path: string, init: RequestInit = {}
 }
 
 export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const response = await authenticatedApiFetch(`${API_PREFIX}${path}`, init)
-  const payload = await parseResponse(response)
-  if (!response.ok) {
-    const detail =
-      typeof payload === 'object' && payload !== null && 'detail' in payload && typeof payload.detail === 'string'
-        ? payload.detail
-        : `请求失败（${response.status}）`
-    throw new ApiError(response.status, detail, payload && typeof payload === 'object' && 'code' in payload && typeof payload.code === 'string' ? payload.code : undefined)
+  const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now()
+  const method = (init.method || 'GET').toUpperCase()
+  let status = 0
+  let bytes = 0
+  try {
+    const response = await authenticatedApiFetch(`${API_PREFIX}${path}`, init)
+    status = response.status
+    const parsed = await parseResponseWithSize(response)
+    bytes = parsed.bytes
+    const payload = parsed.payload
+    if (!response.ok) {
+      const detail =
+        typeof payload === 'object' && payload !== null && 'detail' in payload && typeof payload.detail === 'string'
+          ? payload.detail
+          : `请求失败（${response.status}）`
+      throw new ApiError(response.status, detail, payload && typeof payload === 'object' && 'code' in payload && typeof payload.code === 'string' ? payload.code : undefined)
+    }
+    return payload as T
+  } finally {
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now()
+    clientPerf.recordApiTiming(method, path, status, Math.max(0, now - startedAt), bytes)
   }
-  return payload as T
 }
 
 function jsonRequest<T>(path: string, body: unknown, method = 'POST'): Promise<T> {
@@ -686,6 +700,8 @@ export const api = {
     jsonRequest<Session>(`${sessionPath(sessionId)}/fork`, { ...payload, create_worktree: worktree, worktree_branch: branch_name }),
   handoffSession: (sessionId: string, sourceAgentId: string, targetAgentId: string, operationId: string, selection: { provider: string; model: string; effort: string }) =>
     jsonRequest<Session>(`${sessionPath(sessionId)}/handoff`, { operation_id: operationId, source_agent_id: sourceAgentId, target_agent_id: targetAgentId, ...selection }),
+  getSessionHandoffContext: (sessionId: string, agentId: string) =>
+    request<SessionHandoffContext>(`${sessionPath(sessionId)}/handoff-context?agent_id=${encodeURIComponent(agentId)}`),
   cancelHandoff: async (operationId: string) => {
     const result = await jsonRequest<{ cancelled: boolean }>(`/handoffs/${encodeURIComponent(operationId)}/cancel`, {})
     if (!result.cancelled) throw new Error('转交任务已结束，无法取消')
@@ -1017,6 +1033,26 @@ export const api = {
   restoreBackupVersion: (versionId: string, confirmation: string) =>
     jsonRequest<BackupRestoreResult>(`/backups/versions/${encodeURIComponent(versionId)}/restore`, { confirmation }),
 
+  // 插件配置（数据库持久化）
+  getPluginSettings: () => request<PluginSettingsResponse>('/plugins/settings'),
+  updatePluginSettings: (payload: {
+    enabled?: Record<string, boolean>
+    configs?: Record<string, Record<string, unknown>>
+    import_only?: boolean
+  }) => jsonRequest<PluginSettingsResponse>('/plugins/settings', payload, 'PUT'),
+
+  // 侧边栏外链集成（数据库持久化）
+  listIntegrations: () => request<{ items: IntegrationItem[] }>('/integrations'),
+  createIntegration: (payload: IntegrationPayload) => jsonRequest<IntegrationItem>('/integrations', payload, 'POST'),
+  updateIntegration: (id: string, payload: Partial<IntegrationPayload>) =>
+    jsonRequest<IntegrationItem>(`/integrations/${encodeURIComponent(id)}`, payload, 'PUT'),
+  deleteIntegration: (id: string) =>
+    request<{ deleted: boolean; id: string }>(`/integrations/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  reorderIntegrations: (ids: string[]) =>
+    jsonRequest<{ items: IntegrationItem[] }>('/integrations/reorder', { ids }, 'POST'),
+  fetchIntegrationMeta: (url: string) =>
+    jsonRequest<IntegrationMetaResponse>('/integrations/fetch-meta', { url }, 'POST'),
+
   // 按轮次代码检查点（Turn Checkpoints）
   listCheckpoints: (sessionId: string, agentId?: string) =>
     request<{ items: SessionCheckpoint[] }>(
@@ -1059,6 +1095,45 @@ export const api = {
     const params = new URLSearchParams({ q: query, limit: String(limit) })
     return request<{ query: string; items: MessageSearchHit[] }>(`/sessions/search?${params.toString()}`)
   },
+}
+
+export interface PluginSettingsResponse {
+  enabled: Record<string, boolean>
+  configs: Record<string, Record<string, unknown>>
+}
+
+export type IntegrationIconType = 'auto' | 'builtin' | 'image' | 'emoji'
+export type IntegrationOpenMode = 'embed' | 'external'
+
+export interface IntegrationItem {
+  id: string
+  name: string
+  url: string
+  icon_type: IntegrationIconType
+  icon_value: string
+  auto_icon_value?: string
+  open_mode: IntegrationOpenMode
+  visible: boolean
+  order: number
+  created_at: string
+  updated_at: string
+}
+
+export interface IntegrationPayload {
+  name?: string
+  url: string
+  icon_type?: IntegrationIconType
+  icon_value?: string
+  auto_icon_value?: string
+  open_mode?: IntegrationOpenMode
+  visible?: boolean
+}
+
+export interface IntegrationMetaResponse {
+  title: string
+  icon_data_url: string
+  icon_source_url: string
+  warning?: string
 }
 
 export interface BackupRestorePlan {

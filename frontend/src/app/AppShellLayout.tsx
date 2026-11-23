@@ -15,6 +15,9 @@ import { Sidebar } from '../components/Sidebar'
 import { BackgroundTasks } from '../components/BackgroundTasks'
 import { useShortcutHandlers } from '../features/shortcuts/shortcuts'
 import { agySessionEnvironment, AgyQuotaRefreshProvider } from '../features/agentAccounts/AgyQuotaRefreshProvider'
+import { usePluginSettingsStore } from '../features/plugins/pluginSettingsStore'
+import { useIntegrationsStore } from '../features/integrations/integrationStore'
+import { PerfProfiler } from '../perf/clientPerf'
 
 const SIDEBAR_WIDTH_KEY = 'astrorder:sidebar_width'
 const SIDEBAR_COLLAPSED_KEY = 'astrorder:sidebar_panel_collapsed'
@@ -93,7 +96,23 @@ export function AppShellLayout({ chatReturnPath }: { chatReturnPath: string }) {
     location.pathname.startsWith('/inbox') ||
     location.pathname.startsWith('/agent-accounts') ||
     location.pathname.startsWith('/backups') ||
-    location.pathname.startsWith('/analytics')
+    location.pathname.startsWith('/analytics') ||
+    location.pathname.startsWith('/integrations')
+
+  useEffect(() => {
+    let lastHydratedAt = Date.now()
+    void usePluginSettingsStore.getState().hydrate()
+    void useIntegrationsStore.getState().hydrate()
+    const onFocus = () => {
+      const now = Date.now()
+      if (now - lastHydratedAt < 120_000) return
+      lastHydratedAt = now
+      void usePluginSettingsStore.getState().hydrate(true)
+      void useIntegrationsStore.getState().hydrate(true)
+    }
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [])
 
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
     try {
@@ -318,20 +337,22 @@ export function AppShellLayout({ chatReturnPath }: { chatReturnPath: string }) {
         <AppHeader connection={connection} onMenu={openMobile} />
       </AppShell.Header>
       <AppShell.Navbar className="desktop-navbar" p={0} style={{ width: effectiveRailWidth }}>
-        <Sidebar
-          sessions={sessions}
-          agents={agents}
-          projects={projects}
-          activeSessionKey={activeSessionKey}
-          chatReturnPath={chatReturnPath}
-          onSelectSession={selectSession}
-          panelCollapsed={!compactNavigation && panelCollapsed}
-          isPeeking={!compactNavigation && panelCollapsed && isPeeking}
-          onTogglePanelCollapse={togglePanelCollapse}
-          onPeekEnter={handlePeekEnter}
-          onPeekLeave={handlePeekLeave}
-          onDismissPeek={dismissPeek}
-        />
+        <PerfProfiler id="Sidebar">
+          <Sidebar
+            sessions={sessions}
+            agents={agents}
+            projects={projects}
+            activeSessionKey={activeSessionKey}
+            chatReturnPath={chatReturnPath}
+            onSelectSession={selectSession}
+            panelCollapsed={!compactNavigation && panelCollapsed}
+            isPeeking={!compactNavigation && panelCollapsed && isPeeking}
+            onTogglePanelCollapse={togglePanelCollapse}
+            onPeekEnter={handlePeekEnter}
+            onPeekLeave={handlePeekLeave}
+            onDismissPeek={dismissPeek}
+          />
+        </PerfProfiler>
         {!compactNavigation && panelCollapsed && !isPeeking && (
           <div
             className="sidebar-edge-peek-zone"

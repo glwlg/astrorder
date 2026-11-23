@@ -11,7 +11,6 @@ type Preview = Awaited<ReturnType<typeof api.previewModelSync>>
 type SyncJob = Awaited<ReturnType<typeof api.getModelSyncJobs>>['items'][number]
 
 interface GatewayFormState {
-  statisticsUrl: string
   managementUrl: string
   inferenceUrl: string
   apiKey: string
@@ -23,7 +22,6 @@ interface GatewayFormState {
 
 const DEFAULT_PROFILES: Record<'opencodex' | 'magpie', GatewayFormState> = {
   opencodex: {
-    statisticsUrl: '',
     managementUrl: '',
     inferenceUrl: '',
     apiKey: '',
@@ -33,7 +31,6 @@ const DEFAULT_PROFILES: Record<'opencodex' | 'magpie', GatewayFormState> = {
     overrides: {},
   },
   magpie: {
-    statisticsUrl: '',
     managementUrl: '',
     inferenceUrl: '',
     apiKey: '',
@@ -47,7 +44,6 @@ const DEFAULT_PROFILES: Record<'opencodex' | 'magpie', GatewayFormState> = {
 export function UsageGatewaySettingsCard() {
   const [gatewayType, setGatewayType] = useState<'opencodex' | 'magpie'>('opencodex')
   const [profiles, setProfiles] = useState<Record<'opencodex' | 'magpie', GatewayFormState>>(DEFAULT_PROFILES)
-  const [statisticsUrl, setStatisticsUrl] = useState('')
   const [managementUrl, setManagementUrl] = useState(DEFAULT_PROFILES.opencodex.managementUrl)
   const [inferenceUrl, setInferenceUrl] = useState(DEFAULT_PROFILES.opencodex.inferenceUrl)
   const [apiKey, setApiKey] = useState('')
@@ -81,7 +77,6 @@ export function UsageGatewaySettingsCard() {
       if (config.gateway_profiles?.opencodex) {
         const p = config.gateway_profiles.opencodex
         nextProfiles.opencodex = {
-          statisticsUrl: p.statistics_url || '',
           managementUrl: p.management_url || DEFAULT_PROFILES.opencodex.managementUrl,
           inferenceUrl: p.inference_url || DEFAULT_PROFILES.opencodex.inferenceUrl,
           overrides: p.target_overrides || {},
@@ -94,7 +89,6 @@ export function UsageGatewaySettingsCard() {
       if (config.gateway_profiles?.magpie) {
         const p = config.gateway_profiles.magpie
         nextProfiles.magpie = {
-          statisticsUrl: p.statistics_url || '',
           managementUrl: p.management_url || DEFAULT_PROFILES.magpie.managementUrl,
           inferenceUrl: p.inference_url || DEFAULT_PROFILES.magpie.inferenceUrl,
           overrides: p.target_overrides || {},
@@ -106,7 +100,6 @@ export function UsageGatewaySettingsCard() {
       }
 
       nextProfiles[currentType] = {
-        statisticsUrl: config.statistics_url ?? nextProfiles[currentType].statisticsUrl,
         managementUrl: config.management_url || nextProfiles[currentType].managementUrl,
         inferenceUrl: config.inference_url || nextProfiles[currentType].inferenceUrl,
         overrides: config.target_overrides || {},
@@ -116,7 +109,6 @@ export function UsageGatewaySettingsCard() {
         managementKey: '',
       }
 
-      setStatisticsUrl(nextProfiles[currentType].statisticsUrl)
       setProfiles(nextProfiles)
       setGatewayType(currentType)
       setManagementUrl(nextProfiles[currentType].managementUrl)
@@ -142,7 +134,6 @@ export function UsageGatewaySettingsCard() {
       const updated: Record<'opencodex' | 'magpie', GatewayFormState> = {
         ...prev,
         [gatewayType]: {
-          statisticsUrl,
           managementUrl,
           inferenceUrl,
           apiKey,
@@ -154,7 +145,6 @@ export function UsageGatewaySettingsCard() {
       }
       const targetState = updated[nextType] || DEFAULT_PROFILES[nextType]
       setGatewayType(nextType)
-      setStatisticsUrl(targetState.statisticsUrl)
       setManagementUrl(targetState.managementUrl)
       setInferenceUrl(targetState.inferenceUrl)
       setApiKey(targetState.apiKey)
@@ -171,7 +161,6 @@ export function UsageGatewaySettingsCard() {
     try {
       const currentProfilePayload = {
         gateway_type: gatewayType,
-        statistics_url: statisticsUrl.trim(),
         management_url: managementUrl.trim(),
         inference_url: inferenceUrl.trim(),
         target_overrides: Object.fromEntries(Object.entries(overrides).filter(([, value]) => value.trim()).map(([key, value]) => [key, value.trim()])),
@@ -186,7 +175,6 @@ export function UsageGatewaySettingsCard() {
         } else {
           allProfilesPayload[t] = {
             gateway_type: t,
-            statistics_url: p.statisticsUrl.trim(),
             management_url: p.managementUrl.trim(),
             inference_url: p.inferenceUrl.trim(),
             target_overrides: p.overrides,
@@ -211,7 +199,6 @@ export function UsageGatewaySettingsCard() {
             if (next[gt as 'opencodex' | 'magpie']) {
               next[gt as 'opencodex' | 'magpie'] = {
                 ...next[gt as 'opencodex' | 'magpie'],
-                statisticsUrl: p.statistics_url || '',
                 managementUrl: p.management_url,
                 inferenceUrl: p.inference_url,
                 maskedKey: p.masked_key,
@@ -310,7 +297,6 @@ export function UsageGatewaySettingsCard() {
       </Group>
       <div className="gateway-settings-layout"><Stack gap="sm" className="gateway-settings-fields">
         <Select label="网关类型" value={gatewayType} onChange={(v) => handleGatewayTypeChange((v as any) || 'opencodex')} data={[{ value: 'opencodex', label: 'OpenCodeX' }, { value: 'magpie', label: 'Magpie' }]} allowDeselect={false} />
-        <TextInput label="统计页地址" description="点击统计时内嵌当前网关的网页；各网关分别保存，留空使用各自管理地址。支持完整地址及页面锚点。" placeholder="https://gateway.example/#usage" value={statisticsUrl} onChange={(event) => setStatisticsUrl(event.currentTarget.value)} disabled={busy === 'load'} />
         <TextInput label="管理地址" type="url" autoCorrect="off" autoCapitalize="none" spellCheck={false} placeholder={gatewayType === 'magpie' ? 'https://magpie.example.com' : 'https://ocx.example.com'} value={managementUrl} onChange={(event) => setManagementUrl(event.currentTarget.value)} disabled={busy === 'load'} />
         <TextInput label="推理 Base URL" type="url" autoCorrect="off" autoCapitalize="none" spellCheck={false} placeholder="https://llm.example.com/v1" value={inferenceUrl} onChange={(event) => setInferenceUrl(event.currentTarget.value)} disabled={busy === 'load'} />
         <PasswordInput label="API Key" placeholder={maskedKey ? '留空则保留当前 Key' : '可选'} value={apiKey} onChange={(event) => setApiKey(event.currentTarget.value)} />

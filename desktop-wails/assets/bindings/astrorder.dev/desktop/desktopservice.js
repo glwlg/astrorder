@@ -33,6 +33,13 @@ export function GetStartupSettings() {
 /**
  * @returns {$CancellablePromise<void>}
  */
+export function HideEmbeddedPage() {
+    return $Call.ByName("main.DesktopService.HideEmbeddedPage");
+}
+
+/**
+ * @returns {$CancellablePromise<void>}
+ */
 export function HideStatistics() {
     return $Call.ByName("main.DesktopService.HideStatistics");
 }
@@ -139,6 +146,16 @@ export function SetClipboardFiles(paths) {
  */
 export function SetStartupEnabled(enabled) {
     return $Call.ByName("main.DesktopService.SetStartupEnabled", enabled);
+}
+
+/**
+ * @param {string} address
+ * @param {$models.StatisticsBounds} bounds
+ * @param {boolean} refresh
+ * @returns {$CancellablePromise<void>}
+ */
+export function ShowEmbeddedPage(address, bounds, refresh) {
+    return $Call.ByName("main.DesktopService.ShowEmbeddedPage", address, bounds, refresh);
 }
 
 /**

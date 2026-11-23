@@ -10,6 +10,12 @@ import (
 func TestStatisticsCannotCallDesktopCapabilities(t *testing.T) {
 	d := &DesktopService{shell: &ShellService{}}
 	ctx := context.WithValue(context.Background(), application.WindowKey, &application.WebviewWindow{})
+	if err := d.ShowEmbeddedPage(ctx, "https://gateway.example/", StatisticsBounds{}, false); err == nil {
+		t.Fatal("untrusted window can open embedded page")
+	}
+	if err := d.HideEmbeddedPage(ctx); err == nil {
+		t.Fatal("untrusted window can hide embedded page")
+	}
 	if err := d.ShowStatistics(ctx, "https://gateway.example/", StatisticsBounds{}, false); err == nil {
 		t.Fatal("untrusted window can open statistics")
 	}

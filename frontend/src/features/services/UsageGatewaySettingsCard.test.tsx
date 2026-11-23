@@ -48,47 +48,37 @@ async function openPreview() {
   return screen.findByText(/个网关模型/)
 }
 
-it('keeps statistics page addresses per gateway across switching and saving', async () => {
+it('keeps management and inference addresses per gateway across switching without a statistics page field', async () => {
   vi.mocked(api.getAnalyticsConfig).mockResolvedValue({
     ...gatewayConfig,
-    statistics_url: 'https://magpie.example/#usage',
+    management_url: 'https://magpie.example',
     gateway_profiles: {
-      opencodex: { ...gatewayConfig, gateway_type: 'opencodex', statistics_url: 'https://ocx.example/#usage' },
-      magpie: { ...gatewayConfig, statistics_url: 'https://magpie.example/#usage' },
+      opencodex: { ...gatewayConfig, gateway_type: 'opencodex', management_url: 'https://ocx.example' },
+      magpie: { ...gatewayConfig, management_url: 'https://magpie.example' },
     },
   } as never)
   mount()
   await screen.findByLabelText('Codex')
-  const input = screen.getByLabelText('统计页地址')
-  expect(input).toHaveValue('https://magpie.example/#usage')
+  expect(screen.queryByLabelText('统计页地址')).not.toBeInTheDocument()
+  const input = screen.getByLabelText('管理地址')
+  expect(input).toHaveValue('https://magpie.example')
   const switchTo = (name: string) => {
     fireEvent.click(screen.getByRole('combobox', { name: '网关类型' }))
     fireEvent.click(screen.getByRole('option', { name, hidden: true }))
   }
   switchTo('OpenCodeX')
-  expect(input).toHaveValue('https://ocx.example/#usage')
-  fireEvent.change(input, { target: { value: 'https://ocx.example/new#usage' } })
+  expect(input).toHaveValue('https://ocx.example')
+  fireEvent.change(input, { target: { value: 'https://ocx.example/new' } })
   switchTo('Magpie')
-  expect(input).toHaveValue('https://magpie.example/#usage')
+  expect(input).toHaveValue('https://magpie.example')
   fireEvent.click(screen.getByRole('button', { name: '保存配置' }))
   expect(api.updateAnalyticsConfig).toHaveBeenCalledWith(expect.objectContaining({
-    gateway_type: 'magpie', statistics_url: 'https://magpie.example/#usage',
+    gateway_type: 'magpie', management_url: 'https://magpie.example',
     gateway_profiles: expect.objectContaining({
-      magpie: expect.objectContaining({ statistics_url: 'https://magpie.example/#usage' }),
-      opencodex: expect.objectContaining({ statistics_url: 'https://ocx.example/new#usage' }),
+      magpie: expect.objectContaining({ management_url: 'https://magpie.example' }),
+      opencodex: expect.objectContaining({ management_url: 'https://ocx.example/new' }),
     }),
   }))
-})
-
-it('loads and saves the statistics page address', async () => {
-  vi.mocked(api.getAnalyticsConfig).mockResolvedValue({ ...gatewayConfig, statistics_url: 'https://gateway.example/#usage' } as never)
-  mount()
-  const input = await screen.findByLabelText('统计页地址')
-  await screen.findByLabelText('Codex')
-  expect(input).toHaveValue('https://gateway.example/#usage')
-  fireEvent.change(input, { target: { value: 'https://other.example/stats' } })
-  fireEvent.click(screen.getByRole('button', { name: '保存配置' }))
-  expect(api.updateAnalyticsConfig).toHaveBeenCalledWith(expect.objectContaining({ statistics_url: 'https://other.example/stats' }))
 })
 
 it('offers Antigravity only on supported targets and previews its selection', async () => {

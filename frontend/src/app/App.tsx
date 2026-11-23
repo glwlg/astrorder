@@ -1,4 +1,4 @@
-﻿import { Suspense, lazy, type ComponentType } from 'react'
+﻿import { Suspense, lazy, useEffect, type ComponentType } from 'react'
 import { IconAlertTriangle, IconLoader2 } from '@tabler/icons-react'
 import { Alert, Button, Center, Loader, Paper, Stack, Text, Title } from '@mantine/core'
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
@@ -16,6 +16,7 @@ import { accountPlatforms } from '../features/agentAccounts/accountPlatforms'
 import { AstrorderLoader } from '../components/AnimatedStatus'
 import { ShinyText } from '../components/animations/ShinyText'
 import { useShortcutHandlers } from '../features/shortcuts/shortcuts'
+import { clientPerf, PerfProfiler } from '../perf/clientPerf'
 
 function lazyNamed<T extends ComponentType<any>>(
   loader: () => Promise<Record<string, unknown>>,
@@ -31,6 +32,7 @@ const MonitorPage = lazyNamed(() => import('../features/monitor/MonitorPage'), '
 const PluginsPage = lazyNamed(() => import('../features/plugins/PluginsPage'), 'PluginsPage')
 const AnalyticsPage = lazyNamed(() => import('../features/analytics/AnalyticsPage'), 'AnalyticsPage')
 const BackupsPage = lazyNamed(() => import('../features/backups/BackupsPage'), 'BackupsPage')
+const IntegrationPage = lazyNamed(() => import('../features/integrations/IntegrationPage'), 'IntegrationPage')
 const AgentAccountsLayout = lazyNamed(() => import('../features/agentAccounts/AgentAccountsLayout'), 'AgentAccountsLayout')
 const UnavailablePlatformPage = lazyNamed(() => import('../features/agentAccounts/UnavailablePlatformPage'), 'UnavailablePlatformPage')
 const QrAuthorizePage = lazyNamed(() => import('../features/auth/QrAuthorizePage'), 'QrAuthorizePage')
@@ -104,6 +106,13 @@ function AuthenticatedApp() {
   })
   useEventStream(Boolean(bootstrap.data), queryClient, navigate)
   useServerOutboxSync(Boolean(bootstrap.data))
+  useEffect(() => {
+    clientPerf.setAuthenticated(true)
+    return () => clientPerf.setAuthenticated(false)
+  }, [])
+  useEffect(() => {
+    clientPerf.setRoute(location.pathname)
+  }, [location.pathname])
 
   if (bootstrap.isLoading) return <LoadingPage label="正在读取已认证工作台…" />
   if (bootstrap.error) return <BootstrapError error={bootstrap.error} retry={() => void bootstrap.refetch()} />
@@ -115,7 +124,9 @@ function AuthenticatedApp() {
   if (isMobile) {
     return (
       <Suspense fallback={<RouteSuspenseFallback />}>
-        <MobileWorkspace />
+        <PerfProfiler id="MobileWorkspace">
+          <MobileWorkspace />
+        </PerfProfiler>
       </Suspense>
     )
   }
@@ -139,6 +150,7 @@ function AuthenticatedApp() {
         <Route path="plugins" element={<Suspense fallback={<RouteSuspenseFallback />}><PluginsPage /></Suspense>} />
         <Route path="analytics" element={<Suspense fallback={<RouteSuspenseFallback />}><AnalyticsPage /></Suspense>} />
         <Route path="backups" element={<Suspense fallback={<RouteSuspenseFallback />}><BackupsPage /></Suspense>} />
+        <Route path="integrations/:integrationId" element={<Suspense fallback={<RouteSuspenseFallback />}><IntegrationPage /></Suspense>} />
         <Route path="agent-accounts" element={<Suspense fallback={<RouteSuspenseFallback />}><AgentAccountsLayout /></Suspense>}>
           {accountPlatforms.map(({ kind, path, Page }) =>
             <Route key={kind} path={path} element={<Suspense fallback={<RouteSuspenseFallback />}>{Page ? <Page /> : <UnavailablePlatformPage kind={kind} />}</Suspense>} />)}

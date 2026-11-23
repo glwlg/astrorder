@@ -25,12 +25,14 @@ import {
   IconChevronUp,
   IconInfoCircle,
   IconMicrophone,
+  IconPlugConnected,
   IconPuzzle,
+  IconSettings,
 } from '@tabler/icons-react'
 import { api, type LocalVoicePluginStatus } from '../../api/client'
 import { artifactViewerRegistry } from '../sidecar/registry'
 import type { ArtifactViewer, ViewerConfigOption } from '../sidecar/types'
-import { usePluginSettingsStore } from './pluginSettingsStore'
+import { SIDEBAR_INTEGRATIONS_PLUGIN_ID, usePluginSettingsStore } from './pluginSettingsStore'
 
 function LocalVoicePluginCard() {
   const [status, setStatus] = useState<LocalVoicePluginStatus | null>(null)
@@ -420,9 +422,68 @@ function PluginCard({ viewer }: { viewer: ArtifactViewer }) {
   )
 }
 
+function SidebarIntegrationsPluginCard() {
+  const enabled = usePluginSettingsStore((s) => s.isPluginEnabled(SIDEBAR_INTEGRATIONS_PLUGIN_ID))
+  const togglePlugin = usePluginSettingsStore((s) => s.togglePlugin)
+
+  return (
+    <Card withBorder radius="md" p="md" style={{ background: 'var(--astr-surface)' }}>
+      <Group justify="space-between" align="flex-start" wrap="nowrap">
+        <Group gap="sm" wrap="nowrap" align="flex-start">
+          <div
+            style={{
+              padding: 8,
+              borderRadius: 8,
+              background: enabled ? 'rgba(99, 102, 241, 0.12)' : 'var(--astr-surface-muted)',
+              color: enabled ? 'var(--astr-indigo)' : 'var(--astr-muted)',
+              display: 'flex',
+            }}
+          >
+            <IconPlugConnected size={24} />
+          </div>
+          <div>
+            <Group gap="xs">
+              <Text fw={600} size="sm">侧边栏外链集成</Text>
+              <Badge size="xs" variant="light" color="indigo">工作台插件</Badge>
+            </Group>
+            <Text size="xs" c="dimmed" mt={4}>
+              在侧边栏挂载第三方网关、监控面板、文档站等外链菜单，自动抓取站点图标并支持自定义图标；桌面端采用独立原生视图保留登录态。
+            </Text>
+            {enabled && (
+              <Button
+                size="compact-xs"
+                variant="light"
+                color="violet"
+                mt={8}
+                leftSection={<IconSettings size={13} />}
+                onClick={() => window.dispatchEvent(new CustomEvent('astrorder:open-settings', { detail: { tab: 'integrations' } }))}
+              >
+                管理集成
+              </Button>
+            )}
+          </div>
+        </Group>
+        <Switch
+          aria-label="启用 侧边栏外链集成"
+          checked={enabled}
+          onChange={() => togglePlugin(SIDEBAR_INTEGRATIONS_PLUGIN_ID)}
+        />
+      </Group>
+    </Card>
+  )
+}
+
 export function PluginsPage() {
   const viewers = artifactViewerRegistry.getAllViewers()
-  const enabledCount = viewers.filter((v) => usePluginSettingsStore.getState().isPluginEnabled(v.id)).length
+  const hydrate = usePluginSettingsStore((s) => s.hydrate)
+  const enabledPlugins = usePluginSettingsStore((s) => s.enabledPlugins)
+
+  useEffect(() => {
+    void hydrate()
+  }, [hydrate])
+
+  const allToggleableIds = [SIDEBAR_INTEGRATIONS_PLUGIN_ID, ...viewers.map((v) => v.id)]
+  const enabledCount = allToggleableIds.filter((id) => enabledPlugins[id] !== false).length
 
   return (
     <div className="route-page plugins-page" style={{ padding: '24px 32px', maxWidth: 1100, margin: '0 auto' }}>
@@ -448,14 +509,14 @@ export function PluginsPage() {
                 插件管理
               </Title>
               <Text size="xs" c="dimmed" mt={2}>
-                管理本地运行时能力、富媒介渲染器与编辑插件。
+                管理本地运行时能力、工作台扩展插件与富媒介渲染器，配置自动同步至数据库。
               </Text>
             </div>
           </Group>
 
           <Group gap="xs">
             <Badge size="md" variant="light" color="indigo">
-              已启用 {enabledCount} / {viewers.length}
+              已启用 {enabledCount} / {allToggleableIds.length}
             </Badge>
           </Group>
         </Group>
@@ -463,6 +524,7 @@ export function PluginsPage() {
 
       <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md" mb="md">
         <LocalVoicePluginCard />
+        <SidebarIntegrationsPluginCard />
       </SimpleGrid>
 
       <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">

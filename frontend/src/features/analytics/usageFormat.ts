@@ -23,11 +23,3 @@ export function getModelColor(model: string = '', provider: string = ''): string
   for (let i = 0; i < key.length; i++) hash = ((hash * 31) + key.charCodeAt(i)) >>> 0
   return `hsl(${hash % 360} 60% 50%)`
 }
-
-export function statisticsPageURL(config: { statistics_url?: string; management_url: string }): string {
-  const value = (config.statistics_url || config.management_url).trim()
-  try {
-    const url = new URL(value)
-    return ['http:', 'https:'].includes(url.protocol) && !url.username && !/^https?:\/\/[^/?#]*@/i.test(value) ? value : ''
-  } catch { return '' }
-}

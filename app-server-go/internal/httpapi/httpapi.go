@@ -42,6 +42,7 @@ import (
 	"astrorder.dev/app-server/internal/daemonclient"
 	"astrorder.dev/app-server/internal/files"
 	"astrorder.dev/app-server/internal/git"
+	"astrorder.dev/app-server/internal/integrations"
 	"astrorder.dev/app-server/internal/memory"
 	"astrorder.dev/app-server/internal/modelgateway"
 	"astrorder.dev/app-server/internal/notifications"
@@ -51,6 +52,7 @@ import (
 	"astrorder.dev/app-server/internal/settingsapi"
 	"astrorder.dev/app-server/internal/store"
 	"astrorder.dev/app-server/internal/targetfs"
+	"astrorder.dev/app-server/internal/telemetry"
 	"astrorder.dev/app-server/internal/terminal"
 )
 
@@ -134,6 +136,8 @@ type Options struct {
 	Sessions         http.Handler
 	AgentAPI         http.Handler
 	Backups          http.Handler
+	Integrations     http.Handler
+	Telemetry        http.Handler
 	DynamicOrigins   auth.DynamicOriginLookup
 	DesktopShutdown  func()
 	Logger           *slog.Logger
@@ -174,6 +178,8 @@ type api struct {
 	checkpoints     http.Handler
 	search          http.Handler
 	backups         http.Handler
+	integrations    http.Handler
+	telemetry       http.Handler
 }
 
 // StoreOriginLookup implements auth.DynamicOriginLookup by querying store.Store for
@@ -422,6 +428,29 @@ func NewHandlerChecked(options Options) (http.Handler, error) {
 		backupsHandler = backupSvc
 	}
 
+	integrationsHandler := options.Integrations
+	if integrationsHandler == nil && options.Store != nil {
+		integrationsHandler = integrations.NewHandler(integrations.Options{
+			Store:      options.Store,
+			Authorizer: authenticator,
+		})
+	}
+
+	telemetryHandler := options.Telemetry
+	if telemetryHandler == nil {
+		telemetryDir := ""
+		if options.Config.DatabasePath != "" {
+			if absDB, absErr := filepath.Abs(options.Config.DatabasePath); absErr == nil {
+				telemetryDir = filepath.Join(filepath.Dir(absDB), "telemetry")
+			}
+		}
+		telemetryHandler = telemetry.NewHandler(telemetry.Options{
+			Authorizer:   authenticator,
+			TelemetryDir: telemetryDir,
+			Logger:       logger,
+		})
+	}
+
 	app := &api{
 		draftStore:      options.Store,
 		qr:              newQRLogins(),
@@ -448,6 +477,8 @@ func NewHandlerChecked(options Options) (http.Handler, error) {
 		checkpoints:     checkpointsHandler,
 		search:          searchHandler,
 		backups:         backupsHandler,
+		integrations:    integrationsHandler,
+		telemetry:       telemetryHandler,
 	}
 	if options.BotGroups == nil {
 		app.botGroups = nil
@@ -523,6 +554,14 @@ func (a *api) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 	}
 	if a.backups != nil && backups.Matches(request.Method, request.URL.Path) {
 		a.backups.ServeHTTP(response, request)
+		return
+	}
+	if a.integrations != nil && integrations.Matches(request.Method, request.URL.Path) {
+		a.integrations.ServeHTTP(response, request)
+		return
+	}
+	if a.telemetry != nil && telemetry.Matches(request.Method, request.URL.Path) {
+		a.telemetry.ServeHTTP(response, request)
 		return
 	}
 	if a.sessions != nil && sessions.Matches(request.Method, request.URL.Path) {

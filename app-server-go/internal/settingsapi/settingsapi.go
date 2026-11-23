@@ -16,6 +16,7 @@ import (
 
 	"astrorder.dev/app-server/internal/auth"
 	"astrorder.dev/app-server/internal/kernelcontrol"
+	"astrorder.dev/app-server/internal/llmcompat"
 	"astrorder.dev/app-server/internal/store"
 )
 
@@ -61,6 +62,7 @@ var paths = map[string][]string{
 	"/api/v1/services/jev/models":     {http.MethodGet},
 	"/api/v1/services/jev/config":     {http.MethodGet, http.MethodPost},
 	"/api/v1/services/browser/config": {http.MethodGet, http.MethodPost},
+	"/api/v1/plugins/settings":        {http.MethodGet, http.MethodPut},
 	"/api/v1/runtime/launch":          {http.MethodPost},
 	"/api/v1/runtime":                 {http.MethodGet},
 	"/api/v1/codex-desktop/status":    {http.MethodGet},
@@ -135,6 +137,12 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.testJev(w, r)
 	case "/api/v1/services/browser/config":
 		h.browserEngine(w, r)
+	case "/api/v1/plugins/settings":
+		if r.Method == http.MethodGet {
+			h.getPluginSettings(w, r)
+		} else {
+			h.setPluginSettings(w, r)
+		}
 	case "/api/v1/runtime/launch":
 		var payload struct {
 			Kind      string `json:"kind"`
@@ -347,20 +355,6 @@ func (h *handler) setLLM(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, llmView(config))
 }
 
-func reasoningPayload(baseURL, reasoning string) map[string]any {
-	if strings.Contains(strings.TrimRight(baseURL, "/")+"/", "api.deepseek.com/") {
-		kind := "enabled"
-		if reasoning == "none" {
-			kind = "disabled"
-		}
-		return map[string]any{"thinking": map[string]any{"type": kind}}
-	}
-	if reasoning == "none" {
-		return map[string]any{"reasoning": map[string]any{"enabled": false}}
-	}
-	return map[string]any{"reasoning": map[string]any{"effort": reasoning}}
-}
-
 func (h *handler) testLLM(w http.ResponseWriter, r *http.Request) {
 	var patch llmPatch
 	if err := decode(r, &patch); err != nil {
@@ -382,44 +376,28 @@ func (h *handler) testLLM(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body := map[string]any{
-		"model": strings.TrimSpace(patch.Model), "max_tokens": 16,
+		"model": strings.TrimSpace(patch.Model), "max_tokens": 2048,
 		"messages": []map[string]string{{"role": "user", "content": "Reply with OK only."}},
 	}
-	for name, value := range reasoningPayload(base, patch.Reasoning) {
-		body[name] = value
-	}
-	encoded, _ := json.Marshal(body)
-	request, err := http.NewRequestWithContext(r.Context(), http.MethodPost, base+"/chat/completions", strings.NewReader(string(encoded)))
+	llmcompat.ApplyReasoning(base, patch.Reasoning, body)
+	status, raw, err := llmcompat.PostChatCompletion(r.Context(), h.HTTPClient, base, key, body)
 	if err != nil {
 		fail(w, http.StatusBadRequest, "LLM 连接测试失败："+err.Error())
 		return
 	}
-	request.Header.Set("Authorization", "Bearer "+key)
-	request.Header.Set("Content-Type", "application/json")
-	response, err := h.HTTPClient.Do(request)
-	if err != nil {
-		fail(w, http.StatusBadRequest, "LLM 连接测试失败："+err.Error())
+	model, content, ok := llmcompat.ExtractMessageText(raw)
+	if status >= 400 || !ok {
+		msg := "LLM 连接测试失败：HTTP " + strconv.Itoa(status)
+		if detail := llmcompat.ExtractErrorMessage(raw); detail != "" {
+			msg += "：" + detail
+		}
+		fail(w, http.StatusBadRequest, msg)
 		return
 	}
-	defer response.Body.Close()
-	var reply struct {
-		Model   string `json:"model"`
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-	}
-	raw, _ := io.ReadAll(io.LimitReader(response.Body, 1<<20))
-	if response.StatusCode >= 400 || json.Unmarshal(raw, &reply) != nil || len(reply.Choices) == 0 {
-		fail(w, http.StatusBadRequest, "LLM 连接测试失败：HTTP "+strconv.Itoa(response.StatusCode))
-		return
-	}
-	model := reply.Model
 	if model == "" {
 		model = strings.TrimSpace(patch.Model)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "model": model, "reply": reply.Choices[0].Message.Content})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "model": model, "reply": content})
 }
 
 // ---- runtime ----------------------------------------------------------

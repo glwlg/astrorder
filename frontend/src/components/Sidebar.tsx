@@ -1,14 +1,15 @@
 import { ChartLineUpIcon, ChatCircleDotsIcon, CpuIcon, DesktopIcon, GearSixIcon, GlobeHemisphereWestIcon, HardDrivesIcon, IdentificationCardIcon, KeyboardIcon, LightningIcon, PuzzlePieceIcon, SlidersHorizontalIcon, SquaresFourIcon, TrayIcon, UsersThreeIcon } from './workbenchIcons'
-import { IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconPin } from '@tabler/icons-react'
+import { IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconPin, IconPlugConnected, IconPlus } from '@tabler/icons-react'
 import { ActionIcon, Center, HoverCard, Loader, Modal, NavLink, Stack, Tabs, Text, Tooltip } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useQuery } from '@tanstack/react-query'
 import { Suspense, lazy, useEffect, useId, useState } from 'react'
-import { NavLink as RouterNavLink, useLocation } from 'react-router-dom'
-import { api, type OcxUsageResponse } from '../api/client'
+import { NavLink as RouterNavLink, useLocation, useNavigate } from 'react-router-dom'
+import { api, type IntegrationItem, type OcxUsageResponse } from '../api/client'
 import type { Agent, Project, Session } from '../domain/types'
 import './settings.css'
 import './arcSidebar.css'
+import '../features/integrations/integrations.css'
 import { SettingsDrawerScope } from './SettingsDrawer'
 import { useShortcutHandlers } from '../features/shortcuts/shortcuts'
 import { formatTokens, getModelColor } from '../features/analytics/usageFormat'
@@ -23,6 +24,10 @@ import { connectionName } from './AgentSessionFilter'
 import { scopeKey } from '../domain/semantics'
 import { SessionAccountsHoverCard } from '../features/agentAccounts/SessionAccountsHoverCard'
 import { agySessionEnvironment } from '../features/agentAccounts/AgyQuotaRefreshProvider'
+import { SIDEBAR_INTEGRATIONS_PLUGIN_ID, usePluginSettingsStore } from '../features/plugins/pluginSettingsStore'
+import { useIntegrationsStore } from '../features/integrations/integrationStore'
+import { IntegrationIcon } from '../features/integrations/integrationIcons'
+import { IntegrationFormModal } from '../features/integrations/IntegrationFormModal'
 import { useActionInbox } from '../features/inbox/useActionInbox'
 
 const AgentsPage = lazy(() => import('../features/agents/AgentsPage').then((m) => ({ default: m.AgentsPage })))
@@ -32,6 +37,7 @@ const RtkSettingsPage = lazy(() => import('../features/rtk/RtkSettingsPage').the
 const NetworkSettingsPage = lazy(() => import('../features/network/NetworkSettingsPage').then((m) => ({ default: m.NetworkSettingsPage })))
 const ShortcutSettingsPage = lazy(() => import('../features/shortcuts/ShortcutSettingsPage').then((m) => ({ default: m.ShortcutSettingsPage })))
 const DesktopSettingsPage = lazy(() => import('../features/services/DesktopSettingsPage').then((m) => ({ default: m.DesktopSettingsPage })))
+const IntegrationsSettingsPage = lazy(() => import('../features/integrations/IntegrationsSettingsPage').then((m) => ({ default: m.IntegrationsSettingsPage })))
 const PluginsPage = lazy(() => import('../features/plugins/PluginsPage').then((m) => ({ default: m.PluginsPage })))
 
 const navItems = [
@@ -150,12 +156,52 @@ export function Sidebar({
   onDismissPeek?: () => void
 }) {
   const location = useLocation()
+  const navigate = useNavigate()
   const skyId = useId()
   const [settingsOpened, setSettingsOpened] = useState(false)
+  const [settingsTab, setSettingsTab] = useState<string>('connections')
+  const [addIntegrationOpened, setAddIntegrationOpened] = useState(false)
+  const [draggingIntegrationId, setDraggingIntegrationId] = useState<string | null>(null)
+  const [dragOverIntegration, setDragOverIntegration] = useState<{ id: string; pos: 'before' | 'after' } | null>(null)
+  const integrationsPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(SIDEBAR_INTEGRATIONS_PLUGIN_ID))
+  const integrationItems = useIntegrationsStore((s) => s.items)
+  const reorderIntegrations = useIntegrationsStore((s) => s.reorder)
+  const visibleIntegrations = integrationItems.filter((item) => item.visible)
+
+  const handleIntegrationDrop = async (sourceId: string, targetId: string, pos: 'before' | 'after') => {
+    setDraggingIntegrationId(null)
+    setDragOverIntegration(null)
+    if (!sourceId || !targetId || sourceId === targetId) return
+    const nextIds = integrationItems.map((entry) => entry.id)
+    const fromIdx = nextIds.indexOf(sourceId)
+    if (fromIdx < 0) return
+    nextIds.splice(fromIdx, 1)
+    const targetIdx = nextIds.indexOf(targetId)
+    if (targetIdx < 0) return
+    nextIds.splice(pos === 'after' ? targetIdx + 1 : targetIdx, 0, sourceId)
+    try {
+      await reorderIntegrations(nextIds)
+    } catch (cause) {
+      notifications.show({ color: 'red', message: cause instanceof Error ? cause.message : '保存集成排序失败' })
+    }
+  }
+
+  useEffect(() => {
+    if (!integrationsPluginEnabled && settingsTab === 'integrations') {
+      setSettingsTab('plugins')
+    }
+  }, [integrationsPluginEnabled, settingsTab])
+
   useShortcutHandlers(onNavigate ? {} : { settings: () => setSettingsOpened(true) }, true)
   useEffect(() => {
     if (onNavigate) return
-    const onOpenSettings = () => setSettingsOpened(true)
+    const onOpenSettings = (event: Event) => {
+      const detail = (event as CustomEvent<{ tab?: string }>).detail
+      if (detail?.tab) {
+        setSettingsTab(detail.tab)
+      }
+      setSettingsOpened(true)
+    }
     window.addEventListener('astrorder:open-settings', onOpenSettings)
     return () => window.removeEventListener('astrorder:open-settings', onOpenSettings)
   }, [onNavigate])
@@ -164,8 +210,9 @@ export function Sidebar({
     queryKey: ['astrorder', 'analytics', 'today-models'],
     queryFn: () => api.getAnalyticsUsage({ range: 'today', surface: 'all' }),
     enabled: !onNavigate,
-    staleTime: 60_000,
-    refetchInterval: 60_000,
+    staleTime: 180_000,
+    refetchInterval: 180_000,
+    refetchIntervalInBackground: false,
     refetchOnWindowFocus: false,
     retry: false,
   })
@@ -176,12 +223,13 @@ export function Sidebar({
   const isAnalytics = location.pathname.startsWith('/analytics')
   const isBackups = location.pathname.startsWith('/backups')
   const isAgentAccounts = location.pathname.startsWith('/agent-accounts')
-  const isChat = !isInbox && !isGroups && !isMonitorRoute && !isAnalytics && !isBackups && !isAgentAccounts
-  const { totalCount: inboxTotalCount, urgentCount: inboxUrgentCount } = useActionInbox(activeSessionKey)
+  const isIntegrations = location.pathname.startsWith('/integrations/')
+  const isChat = !isInbox && !isGroups && !isMonitorRoute && !isAnalytics && !isBackups && !isAgentAccounts && !isIntegrations
   const isInChatSession = isChat && (
     (location.pathname.startsWith('/chat/') && !location.pathname.startsWith('/chat/group-')) ||
     Boolean(activeSessionKey)
   )
+  const { totalCount: inboxTotalCount, urgentCount: inboxUrgentCount } = useActionInbox(activeSessionKey)
   const groupsBusy = useAstrorderStore(state => Object.values(state.botGroups).some(groupHasActiveTask))
   const connection = useAstrorderStore(state => state.connection)
   const activeSession = sessions.find(session => scopeKey(session.agent_id, session.id) === activeSessionKey)
@@ -189,9 +237,25 @@ export function Sidebar({
   const accountEnvironment = agySessionEnvironment(activeSession, activeAgent)
   const connectionLabel = connection === 'connected' ? '已连接' : connection === 'connecting' ? '连接中' : connection === 'error' ? '连接异常' : '离线'
 
-  const hasSecondaryPanel = !(isAgentAccounts || isBackups || isAnalytics)
+  const hasSecondaryPanel = !(isInbox || isAgentAccounts || isBackups || isAnalytics || isIntegrations)
   const isCollapsedDesktop = Boolean(!onNavigate && hasSecondaryPanel && panelCollapsed)
   const isPeekingDesktop = Boolean(isCollapsedDesktop && isPeeking)
+
+  const openExternalIntegration = async (item: IntegrationItem, event?: React.MouseEvent) => {
+    const desktop = (window as unknown as { astrorderDesktop?: { openExternal?: (address: string) => Promise<void> } }).astrorderDesktop
+    if (desktop?.openExternal) {
+      event?.preventDefault()
+      try {
+        await desktop.openExternal(item.url)
+      } catch (cause) {
+        notifications.show({ color: 'red', message: cause instanceof Error ? cause.message : '打开外链失败' })
+      }
+      return
+    }
+    if (!event) {
+      window.open(item.url, '_blank', 'noopener,noreferrer')
+    }
+  }
 
   return (
     <>
@@ -286,6 +350,116 @@ export function Sidebar({
               )
             })}
           </div>
+          {integrationsPluginEnabled && (
+            <>
+              <div className="sidebar-integrations-divider" aria-hidden="true" />
+              <div className="sidebar-integrations-nav" aria-label="外链集成">
+                {visibleIntegrations.map((item) => {
+                  const targetPath = `/integrations/${encodeURIComponent(item.id)}`
+                  const isItemActive = location.pathname === targetPath
+                  const trimmedName = item.name.trim()
+                  const fallbackLabel = (() => {
+                    try { return new URL(item.url).hostname || item.url } catch { return item.url }
+                  })()
+                  const tooltipLabel = trimmedName || fallbackLabel
+                  const iconOnly = !trimmedName
+                  const isDragging = draggingIntegrationId === item.id
+                  const dropPos = dragOverIntegration?.id === item.id ? dragOverIntegration.pos : undefined
+                  const iconNode = (
+                    <IntegrationIcon
+                      name={trimmedName}
+                      url={item.url}
+                      iconType={item.icon_type}
+                      iconValue={item.icon_value}
+                      size={iconOnly ? 24 : 21}
+                    />
+                  )
+                  const dragProps = {
+                    draggable: true,
+                    'data-dragging': isDragging ? 'true' : undefined,
+                    'data-drop-pos': dropPos,
+                    onDragStart: (e: React.DragEvent) => {
+                      setDraggingIntegrationId(item.id)
+                      e.dataTransfer.effectAllowed = 'move'
+                      e.dataTransfer.setData('application/x-astrorder-integration', item.id)
+                    },
+                    onDragOver: (e: React.DragEvent) => {
+                      const activeSource = draggingIntegrationId || (e.dataTransfer.types.includes('application/x-astrorder-integration') ? '__pending__' : null)
+                      if (!activeSource || activeSource === item.id) return
+                      e.preventDefault()
+                      e.dataTransfer.dropEffect = 'move'
+                      const rect = e.currentTarget.getBoundingClientRect()
+                      const pos: 'before' | 'after' = e.clientY > rect.top + rect.height / 2 ? 'after' : 'before'
+                      setDragOverIntegration((prev) => (prev?.id === item.id && prev.pos === pos ? prev : { id: item.id, pos }))
+                    },
+                    onDragLeave: (e: React.DragEvent) => {
+                      if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+                        setDragOverIntegration((prev) => (prev?.id === item.id ? null : prev))
+                      }
+                    },
+                    onDrop: (e: React.DragEvent) => {
+                      const sourceId = e.dataTransfer.getData('application/x-astrorder-integration') || draggingIntegrationId
+                      if (!sourceId) return
+                      e.preventDefault()
+                      const rect = e.currentTarget.getBoundingClientRect()
+                      const pos: 'before' | 'after' = e.clientY > rect.top + rect.height / 2 ? 'after' : 'before'
+                      void handleIntegrationDrop(sourceId, item.id, pos)
+                    },
+                    onDragEnd: () => {
+                      setDraggingIntegrationId(null)
+                      setDragOverIntegration(null)
+                    },
+                  }
+                  const navNode = item.open_mode === 'external' ? (
+                    <NavLink
+                      component="a"
+                      href={item.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      label={trimmedName || undefined}
+                      leftSection={iconNode}
+                      onClick={(event) => {
+                        void openExternalIntegration(item, event)
+                        onNavigate?.()
+                      }}
+                      aria-label={tooltipLabel}
+                      className={`sidebar-nav-link sidebar-integration-link${iconOnly ? ' is-icon-only' : ''}`}
+                      {...dragProps}
+                    />
+                  ) : (
+                    <NavLink
+                      component={RouterNavLink}
+                      to={targetPath}
+                      label={trimmedName || undefined}
+                      leftSection={iconNode}
+                      onClick={onNavigate}
+                      data-active={isItemActive ? 'true' : undefined}
+                      aria-current={isItemActive ? 'page' : undefined}
+                      aria-label={tooltipLabel}
+                      className={`sidebar-nav-link sidebar-integration-link${isItemActive ? ' active' : ''}${iconOnly ? ' is-icon-only' : ''}`}
+                      data-liquid-surface={isItemActive ? 'selection' : undefined}
+                      {...dragProps}
+                    />
+                  )
+                  return (
+                    <Tooltip key={item.id} label={tooltipLabel} position="right" withArrow openDelay={200} disabled={Boolean(draggingIntegrationId)}>
+                      {navNode}
+                    </Tooltip>
+                  )
+                })}
+                <Tooltip label="添加集成外链" position="right" withArrow openDelay={150}>
+                  <button
+                    type="button"
+                    className="sidebar-integration-add-btn"
+                    aria-label="添加集成"
+                    onClick={() => setAddIntegrationOpened(true)}
+                  >
+                    <IconPlus size={18} stroke={2} aria-hidden="true" />
+                  </button>
+                </Tooltip>
+              </div>
+            </>
+          )}
           <div className="workspace-navigation-tools">
             {!onNavigate && hasSecondaryPanel && onTogglePanelCollapse && (
               <div className="workspace-tool-item sidebar-collapse-tool">
@@ -400,7 +574,7 @@ export function Sidebar({
       >
         {settingsOpened && (
           <Suspense fallback={<Center style={{ flex: 1 }}><Loader size="sm" color="violet" /></Center>}>
-            <Tabs defaultValue="connections" orientation="vertical" keepMounted={true} className="settings-tabs">
+            <Tabs value={settingsTab} onChange={(value) => value && setSettingsTab(value)} orientation="vertical" keepMounted={true} className="settings-tabs">
               <Tabs.List>
                 <Tabs.Tab value="connections" leftSection={<SlidersHorizontalIcon size={16} />}>连接</Tabs.Tab>
                 <Tabs.Tab value="models" leftSection={<CpuIcon size={16} />}>模型与网关</Tabs.Tab>
@@ -409,6 +583,9 @@ export function Sidebar({
                 <Tabs.Tab value="network" leftSection={<GlobeHemisphereWestIcon size={16} />}>网络与移动端</Tabs.Tab>
                 <Tabs.Tab value="shortcuts" leftSection={<KeyboardIcon size={16} />}>快捷键</Tabs.Tab>
                 <Tabs.Tab value="desktop" leftSection={<DesktopIcon size={16} />}>桌面客户端</Tabs.Tab>
+                {integrationsPluginEnabled && (
+                  <Tabs.Tab value="integrations" leftSection={<IconPlugConnected size={16} />}>集成</Tabs.Tab>
+                )}
                 <Tabs.Tab value="plugins" leftSection={<PuzzlePieceIcon size={16} />}>插件</Tabs.Tab>
               </Tabs.List>
               <Tabs.Panel value="connections" className="settings-tab-panel"><AgentsPage /></Tabs.Panel>
@@ -420,11 +597,24 @@ export function Sidebar({
               <Tabs.Panel value="network" className="settings-tab-panel"><NetworkSettingsPage /></Tabs.Panel>
               <Tabs.Panel value="shortcuts" className="settings-tab-panel" keepMounted={false}><ShortcutSettingsPage /></Tabs.Panel>
               <Tabs.Panel value="desktop" className="settings-tab-panel"><DesktopSettingsPage /></Tabs.Panel>
+              {integrationsPluginEnabled && (
+                <Tabs.Panel value="integrations" className="settings-tab-panel" keepMounted={false}><IntegrationsSettingsPage /></Tabs.Panel>
+              )}
               <Tabs.Panel value="plugins" className="settings-tab-panel"><PluginsPage /></Tabs.Panel>
             </Tabs>
           </Suspense>
         )}
       </Modal>}</SettingsDrawerScope>
+      <IntegrationFormModal
+        opened={addIntegrationOpened}
+        onClose={() => setAddIntegrationOpened(false)}
+        onSaved={(saved) => {
+          if (saved.visible && saved.open_mode === 'embed') {
+            navigate(`/integrations/${encodeURIComponent(saved.id)}`)
+            onNavigate?.()
+          }
+        }}
+      />
     </>
   )
 }
