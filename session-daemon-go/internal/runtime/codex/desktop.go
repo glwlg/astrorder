@@ -20,6 +20,14 @@ func StartDesktopStopObserver(ctx context.Context, config Config, emit Emitter, 
 // native.activity event so the App can move the session's last-activity time
 // without waiting for a poll. See activity.Options.Known for status handling.
 func StartDesktopObserver(ctx context.Context, config Config, emit Emitter, known func(string) bool, pollInterval time.Duration) {
+	StartDesktopObserverWithOwner(ctx, config, emit, known, nil, pollInterval)
+}
+
+// StartDesktopObserverWithOwner behaves like StartDesktopObserver, except Stop
+// hooks for sessions currently owned by a live Codex app-server transport are
+// suppressed so synthetic turn/completed events cannot overtake buffered stdio
+// notifications from the authoritative transport.
+func StartDesktopObserverWithOwner(ctx context.Context, config Config, emit Emitter, known, owned func(string) bool, pollInterval time.Duration) {
 	home := os.Getenv("CODEX_HOME")
 	if home == "" {
 		userHome, _ := os.UserHomeDir()
@@ -31,15 +39,22 @@ func StartDesktopObserver(ctx context.Context, config Config, emit Emitter, know
 		Emit:    activity.Emit(emit),
 		Known:   known,
 		Poll:    pollInterval,
-		OnStop:  StopNotifier(config.AgentID, emit),
+		OnStop:  StopNotifierWithOwner(config.AgentID, emit, owned),
 	})
 }
 
 // StopNotifier turns a Codex Stop hook into a turn/completed notification. Local
 // and remote hosts share it so a finished turn looks the same everywhere.
 func StopNotifier(agentID string, emit Emitter) func(sessionID, turnID, eventID string) {
+	return StopNotifierWithOwner(agentID, emit, nil)
+}
+
+// StopNotifierWithOwner turns a Codex Stop hook into a turn/completed
+// notification unless owned reports that the daemon already holds a live
+// authoritative Codex app-server transport for sessionID.
+func StopNotifierWithOwner(agentID string, emit Emitter, owned func(string) bool) func(sessionID, turnID, eventID string) {
 	return func(sessionID, turnID, _ string) {
-		if emit == nil {
+		if emit == nil || (owned != nil && owned(sessionID)) {
 			return
 		}
 		_ = emit(sessionID, "codex.notification", map[string]any{

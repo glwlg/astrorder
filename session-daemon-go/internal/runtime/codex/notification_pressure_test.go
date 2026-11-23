@@ -111,3 +111,75 @@ func TestCloseReleasesBackpressuredNotificationProducer(t *testing.T) {
 		t.Fatal("notification dispatcher did not retire")
 	}
 }
+
+func TestNotificationBurstDispatchesInOrderedBatches(t *testing.T) {
+	entered, release := make(chan struct{}), make(chan struct{})
+	var once, enteredOnce sync.Once
+	unblock := func() { once.Do(func() { close(release) }) }
+	var (
+		mu       sync.Mutex
+		got      []int
+		batches  int
+		maxBatch int
+	)
+	done := make(chan struct{})
+	const count = 500
+	r := New(Config{OnNotifications: func(batch []Notification) {
+		enteredOnce.Do(func() {
+			close(entered)
+			<-release
+		})
+		mu.Lock()
+		batches++
+		if len(batch) > maxBatch {
+			maxBatch = len(batch)
+		}
+		for _, n := range batch {
+			params, _ := n.Frame["params"].(map[string]any)
+			seq, _ := params["seq"].(json.Number)
+			i, _ := seq.Int64()
+			got = append(got, int(i))
+		}
+		finished := len(got) == count
+		mu.Unlock()
+		if finished {
+			close(done)
+		}
+	}})
+	defer r.Close()
+	defer unblock()
+	r.setSession("thread", "running")
+	r.stdin = captureWriter{make(chan map[string]any, 1)}
+	var input strings.Builder
+	for i := 0; i < count; i++ {
+		fmt.Fprintf(&input, "{\"method\":\"item/agentMessage/delta\",\"params\":{\"threadId\":\"thread\",\"seq\":%d,\"delta\":\"x\"}}\n", i)
+	}
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	defer writer.Close()
+	go func() { _, _ = io.WriteString(writer, input.String()) }()
+	go r.readLoop(reader)
+	<-entered
+	// Let readLoop fill the notification channel before unblocking dispatch so
+	// subsequent dispatches must coalesce into multi-item batches.
+	time.Sleep(40 * time.Millisecond)
+	unblock()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("batched notification burst did not finish")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(got) != count {
+		t.Fatalf("got %d notifications, want %d", len(got), count)
+	}
+	for i, seq := range got {
+		if seq != i {
+			t.Fatalf("order mismatch at %d: got %d", i, seq)
+		}
+	}
+	if maxBatch <= 1 || batches >= count {
+		t.Fatalf("expected coalesced batches, got batches=%d maxBatch=%d", batches, maxBatch)
+	}
+}

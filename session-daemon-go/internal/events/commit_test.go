@@ -76,3 +76,56 @@ func TestDurableBatchOrderRetirementAndClose(t *testing.T) {
 		}
 	}
 }
+
+func TestDurableCommitBatchPreservesOrderAndChunking(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "journal-batch.db")
+	j, err := Open(p, 16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub := j.SubscribeWithCapacity(256)
+	input := make([]Frame, 150)
+	for i := range input {
+		input[i] = Frame{
+			SessionID: "stream-1",
+			Event:     "codex.notification",
+			Payload:   map[string]any{"n": i + 1},
+			Status:    "running",
+		}
+	}
+	committed, err := j.CommitBatch(input)
+	if err != nil {
+		t.Fatalf("CommitBatch: %v", err)
+	}
+	if len(committed) != len(input) {
+		t.Fatalf("committed len=%d want %d", len(committed), len(input))
+	}
+	for i, f := range committed {
+		if f.SeqID != int64(i+1) {
+			t.Fatalf("committed[%d].SeqID=%d want %d", i, f.SeqID, i+1)
+		}
+	}
+	for i := 0; i < len(input); i++ {
+		f := <-sub.frames
+		if f.SeqID != int64(i+1) {
+			t.Fatalf("live[%d].SeqID=%d want %d", i, f.SeqID, i+1)
+		}
+	}
+	if err = j.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(p, 16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	replayed, err := reopened.Replay("stream-1", 0)
+	if err != nil || len(replayed) != len(input) {
+		t.Fatalf("replayed len=%d err=%v", len(replayed), err)
+	}
+	for i, f := range replayed {
+		if f.SeqID != int64(i+1) {
+			t.Fatalf("replayed[%d].SeqID=%d want %d", i, f.SeqID, i+1)
+		}
+	}
+}

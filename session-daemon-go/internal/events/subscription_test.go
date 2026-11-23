@@ -176,14 +176,14 @@ func TestBeginSubscriptionSerializesCommittedButUnpublishedFrame(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 
 	request := commitRequest{
-		frame: Frame{
+		frames: []Frame{{
 			Timestamp: float64(time.Now().UnixMicro()) / 1e6,
 			SessionID: "gap",
 			Event:     "token",
 			Payload:   map[string]any{"text": "committed"},
 			Status:    "running",
-		},
-		done: make(chan commitResult, 1),
+		}},
+		done: make(chan commitBatchResult, 1),
 	}
 	j.commitQueue <- request
 
@@ -219,7 +219,7 @@ func TestBeginSubscriptionSerializesCommittedButUnpublishedFrame(t *testing.T) {
 
 	j.mu.Unlock()
 	muHeld = false
-	var committed commitResult
+	var committed commitBatchResult
 	select {
 	case committed = <-request.done:
 	case <-time.After(2 * time.Second):
@@ -229,7 +229,7 @@ func TestBeginSubscriptionSerializesCommittedButUnpublishedFrame(t *testing.T) {
 	}
 	j.commitGate.RUnlock()
 	gateHeld = false
-	if committed.err != nil || committed.frame.SeqID != 1 {
+	if committed.err != nil || len(committed.frames) != 1 || committed.frames[0].SeqID != 1 {
 		t.Fatalf("commit result = %+v", committed)
 	}
 

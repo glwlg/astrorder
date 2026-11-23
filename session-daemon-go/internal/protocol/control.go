@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"astrorder.dev/session-daemon/internal/events"
 	core "astrorder.dev/session-daemon/internal/runtime"
 	"context"
 	"errors"
@@ -209,4 +210,38 @@ func (d *Daemon) Emit(id, event string, payload map[string]any, status string) e
 		d.wakeModelReloads()
 	}
 	return err
+}
+
+// EmitBatch commits a burst of ordered adapter notifications in bounded atomic
+// journal transactions while preserving exact per-session sequence ordering.
+func (d *Daemon) EmitBatch(items []EventInput) error {
+	if len(items) == 0 {
+		return nil
+	}
+	now := float64(time.Now().UnixMicro()) / 1e6
+	frames := make([]events.Frame, len(items))
+	wake := false
+	for i, item := range items {
+		ts := now
+		if item.TimestampMicros != nil {
+			ts = float64(*item.TimestampMicros) / 1e6
+		}
+		frames[i] = events.Frame{
+			Timestamp: ts,
+			SessionID: item.SessionID,
+			Event:     item.Event,
+			Payload:   item.Payload,
+			Status:    item.Status,
+		}
+		if item.Status == "idle" && item.Event != "runtime.owner" {
+			wake = true
+		}
+	}
+	if _, err := d.journal.CommitBatch(frames); err != nil {
+		return err
+	}
+	if wake {
+		d.wakeModelReloads()
+	}
+	return nil
 }

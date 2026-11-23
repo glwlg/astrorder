@@ -34,13 +34,14 @@ type Notification struct {
 }
 
 type Config struct {
-	Environment    []string
-	Executable     string
-	Arguments      []string
-	Workspace      string
-	Allowed        []string
-	AgentID        string
-	OnNotification func(Notification)
+	Environment     []string
+	Executable      string
+	Arguments       []string
+	Workspace       string
+	Allowed         []string
+	AgentID         string
+	OnNotification  func(Notification)
+	OnNotifications func([]Notification)
 }
 
 type Request struct {
@@ -137,15 +138,39 @@ func (runtime *Runtime) LocalPID() int {
 	return runtime.command.Process.Pid
 }
 
+const maxNotificationDispatchBatch = 64
+
 func (runtime *Runtime) dispatchNotifications() {
 	defer close(runtime.eventDone)
 	for {
 		select {
-		case notification := <-runtime.notifications:
-			if runtime.config.OnNotification != nil {
-				runtime.config.OnNotification(notification)
+		case first := <-runtime.notifications:
+			if runtime.config.OnNotifications != nil {
+				batch := make([]Notification, 1, maxNotificationDispatchBatch)
+				batch[0] = first
+				closed := first.Method == "runtime/closed"
+			drain:
+				for !closed && len(batch) < maxNotificationDispatchBatch {
+					select {
+					case next := <-runtime.notifications:
+						batch = append(batch, next)
+						if next.Method == "runtime/closed" {
+							closed = true
+						}
+					default:
+						break drain
+					}
+				}
+				runtime.config.OnNotifications(batch)
+				if closed {
+					return
+				}
+				continue
 			}
-			if notification.Method == "runtime/closed" {
+			if runtime.config.OnNotification != nil {
+				runtime.config.OnNotification(first)
+			}
+			if first.Method == "runtime/closed" {
 				return
 			}
 		case <-runtime.done:
@@ -809,12 +834,13 @@ func (runtime *Runtime) handleNotification(method string, frame map[string]any) 
 			}
 		}
 	}
-	status, callback := runtime.status, runtime.config.OnNotification
+	status := runtime.status
+	hasCallback := runtime.config.OnNotification != nil || runtime.config.OnNotifications != nil
 	runtime.mu.Unlock()
 	if id, isRequest := frame["id"]; isRequest && approvalID == "" {
 		_ = runtime.send(map[string]any{"id": id, "error": map[string]any{"code": -32601, "message": "server request is not implemented by this runtime"}})
 	}
-	if callback != nil {
+	if hasCallback {
 		notification := Notification{CommandID: commandID, SessionID: sessionID, Method: method, ApprovalID: approvalID, Status: status, Frame: frame}
 		// Apply backpressure to native stdout instead of terminating a healthy
 		// turn when a burst temporarily outruns durable event delivery.

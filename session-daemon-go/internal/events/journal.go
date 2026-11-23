@@ -90,6 +90,42 @@ func (journal *Journal) CommitAt(sessionID, event string, payload map[string]any
 	return frame, nil
 }
 
+// CommitBatch persists an ordered slice of frames in bounded atomic batches so a
+// single streaming session amortizes durable fsyncs without reordering events.
+func (journal *Journal) CommitBatch(frames []Frame) ([]Frame, error) {
+	if len(frames) == 0 {
+		return nil, nil
+	}
+	now := float64(time.Now().UnixMicro()) / 1e6
+	normalized := make([]Frame, len(frames))
+	for i, frame := range frames {
+		if math.IsNaN(frame.Timestamp) || math.IsInf(frame.Timestamp, 0) {
+			return nil, fmt.Errorf("timestamp must be finite")
+		}
+		if frame.Timestamp == 0 {
+			frame.Timestamp = now
+		}
+		normalized[i] = frame
+	}
+	if journal.store != nil {
+		return journal.commitDurableBatch(normalized)
+	}
+	journal.mu.Lock()
+	defer journal.mu.Unlock()
+	for _, frame := range normalized {
+		if journal.retired[frame.SessionID] {
+			return nil, fmt.Errorf("session has been retired")
+		}
+	}
+	committed := make([]Frame, len(normalized))
+	for i, frame := range normalized {
+		frame.SeqID = journal.next[frame.SessionID] + 1
+		journal.publishCommitted(frame)
+		committed[i] = frame
+	}
+	return committed, nil
+}
+
 // publishCommitted runs under mu, after durable storage has acknowledged the frame.
 func (journal *Journal) publishCommitted(frame Frame) {
 	sessionID, event, status := frame.SessionID, frame.Event, frame.Status

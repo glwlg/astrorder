@@ -13,6 +13,18 @@ import (
 )
 
 type Emitter func(string, string, map[string]any, string) error
+
+// EmitEntry represents one journal notification emitted as part of an ordered batch.
+type EmitEntry struct {
+	SessionID string
+	Event     string
+	Payload   map[string]any
+	Status    string
+}
+
+// BatchEmitter commits an ordered slice of notifications atomically so streaming
+// delta bursts amortize durable journal fsyncs.
+type BatchEmitter func([]EmitEntry) error
 type adapterSession struct {
 	runtime             *Runtime
 	mu                  sync.Mutex
@@ -76,6 +88,7 @@ func approvalModeFromThread(resp map[string]any) string {
 type Adapter struct {
 	config    Config
 	emit      Emitter
+	emitBatch BatchEmitter
 	mu        sync.Mutex
 	sessions  map[string]*adapterSession
 	opening   map[string]bool
@@ -92,6 +105,30 @@ func NewAdapter(config Config, emit Emitter) *Adapter {
 
 func NewSSHAdapter(config Config, emit Emitter, starter SSHStarter) *Adapter {
 	return &Adapter{config: config, emit: emit, sessions: map[string]*adapterSession{}, opening: map[string]bool{}, starter: starter}
+}
+
+// SetBatchEmitter configures an optional ordered batch emitter used by newly
+// opened Codex runtimes to amortize durable commits under notification bursts.
+func (a *Adapter) SetBatchEmitter(fn BatchEmitter) {
+	a.mu.Lock()
+	a.emitBatch = fn
+	a.mu.Unlock()
+}
+
+// OwnsSession reports whether this adapter currently holds a live, non-control
+// Codex app-server transport for id.
+func (a *Adapter) OwnsSession(id string) bool {
+	if id == "" {
+		return false
+	}
+	a.mu.Lock()
+	s := a.sessions[id]
+	closed := a.closed
+	a.mu.Unlock()
+	if closed || s == nil || s.control {
+		return false
+	}
+	return s.runtime.transportError() == nil
 }
 func (a *Adapter) Create(ctx context.Context, r core.Request) (core.Result, error) {
 	return a.open(ctx, r, false)
@@ -198,9 +235,9 @@ func (a *Adapter) open(ctx context.Context, r core.Request, resume bool) (core.R
 	}
 	config := a.config
 	var rt *Runtime
-	config.OnNotification = func(n Notification) {
+	buildEntry := func(n Notification) (EmitEntry, bool) {
 		if n.SessionID == "" {
-			return
+			return EmitEntry{}, false
 		}
 		payload := map[string]any{"agent_id": config.AgentID, "frame": n.Frame}
 		if n.CommandID != "" {
@@ -209,13 +246,39 @@ func (a *Adapter) open(ctx context.Context, r core.Request, resume bool) (core.R
 		if n.ApprovalID != "" {
 			payload["approval_id"] = n.ApprovalID
 		}
-		if a.emit != nil {
-			event, status := "codex.notification", n.Status
-			if n.Method == "runtime/closed" {
-				event, status = "session.error", "error"
-				payload["session_id"] = n.SessionID
+		event, status := "codex.notification", n.Status
+		if n.Method == "runtime/closed" {
+			event, status = "session.error", "error"
+			payload["session_id"] = n.SessionID
+		}
+		return EmitEntry{SessionID: n.SessionID, Event: event, Payload: payload, Status: status}, true
+	}
+	a.mu.Lock()
+	emitBatch := a.emitBatch
+	a.mu.Unlock()
+	if emitBatch != nil {
+		config.OnNotifications = func(batch []Notification) {
+			entries := make([]EmitEntry, 0, len(batch))
+			for _, n := range batch {
+				if entry, ok := buildEntry(n); ok {
+					entries = append(entries, entry)
+				}
 			}
-			if err := a.emit(n.SessionID, event, payload, status); err != nil {
+			if len(entries) == 0 {
+				return
+			}
+			if err := emitBatch(entries); err != nil {
+				rt.setStatus("error")
+				rt.Close()
+			}
+		}
+	} else {
+		config.OnNotification = func(n Notification) {
+			entry, ok := buildEntry(n)
+			if !ok || a.emit == nil {
+				return
+			}
+			if err := a.emit(entry.SessionID, entry.Event, entry.Payload, entry.Status); err != nil {
 				rt.setStatus("error")
 				rt.Close()
 			}

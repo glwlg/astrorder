@@ -155,15 +155,29 @@ func (c Config) Register(d *protocol.Daemon) error {
 			return err
 		}
 	}
+	codexBatchEmit := func(entries []codex.EmitEntry) error {
+		items := make([]protocol.EventInput, len(entries))
+		for i, entry := range entries {
+			items[i] = protocol.EventInput{
+				SessionID: entry.SessionID,
+				Event:     entry.Event,
+				Status:    entry.Status,
+				Payload:   entry.Payload,
+			}
+		}
+		return d.EmitBatch(items)
+	}
 	adapters := map[string]core.Adapter{}
 	for _, r := range validated {
 		var adapter core.Adapter
 		switch r.Type {
 		case "codex":
 			cfg := codex.Config{Executable: r.Executable, Arguments: r.Arguments, Workspace: r.Workspace, Allowed: r.Allowed, AgentID: r.AgentID}
-			adapter = codex.NewAdapter(cfg, d.Emit)
+			codexAdapter := codex.NewAdapter(cfg, d.Emit)
+			codexAdapter.SetBatchEmitter(codexBatchEmit)
+			adapter = codexAdapter
 			obsCtx, obsCancel := context.WithCancel(context.Background())
-			go codex.StartDesktopObserver(obsCtx, cfg, d.Emit, d.HasSession, 500*time.Millisecond)
+			go codex.StartDesktopObserverWithOwner(obsCtx, cfg, d.Emit, d.HasSession, codexAdapter.OwnsSession, 500*time.Millisecond)
 			d.AddCloser(func() error {
 				obsCancel()
 				return nil
@@ -198,7 +212,7 @@ func (c Config) Register(d *protocol.Daemon) error {
 	}
 
 	// Always provide multiplexed SSH child registries for remote agents
-	codexSSH := core.NewMultiplexRegistry(remote.NewRemoteCodexFactoryWithActivity(d.Emit, d.HasSession))
+	codexSSH := core.NewMultiplexRegistry(remote.NewRemoteCodexFactoryWithBatch(d.Emit, codexBatchEmit, d.HasSession))
 	d.RegisterRuntime("codex-ssh", codexSSH)
 
 	grokSSH := core.NewMultiplexRegistry(remote.NewRemoteGrokFactory(d.Emit))

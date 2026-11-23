@@ -70,6 +70,13 @@ func NewRemoteCodexFactory(emit func(string, string, map[string]any, string) err
 // remote Codex reports last-activity the same way the local one does. known
 // reports whether the daemon already tracks a session; nil disables the stream.
 func NewRemoteCodexFactoryWithActivity(emit func(string, string, map[string]any, string) error, known func(string) bool) core.ChildFactory {
+	return NewRemoteCodexFactoryWithBatch(emit, nil, known)
+}
+
+// NewRemoteCodexFactoryWithBatch configures both ordered batch notification
+// commits and remote hook observation while suppressing out-of-band Stop hooks
+// for sessions currently owned by a live Codex app-server transport.
+func NewRemoteCodexFactoryWithBatch(emit func(string, string, map[string]any, string) error, emitBatch codexrt.BatchEmitter, known func(string) bool) core.ChildFactory {
 	return func(connID string, settings map[string]any) (core.Adapter, error) {
 		executable, _ := settings["codex_executable"].(string)
 		if executable == "" || strings.ContainsRune(executable, 0) || !strings.HasPrefix(executable, "/") {
@@ -116,6 +123,9 @@ func NewRemoteCodexFactoryWithActivity(emit func(string, string, map[string]any,
 		}
 
 		adapter := codexrt.NewSSHAdapter(codexConfig, emit, starter)
+		if emitBatch != nil {
+			adapter.SetBatchEmitter(emitBatch)
+		}
 		if known != nil {
 			tailCtx, cancel := context.WithCancel(context.Background())
 			adapter.OnClose(cancel)
@@ -125,7 +135,7 @@ func NewRemoteCodexFactoryWithActivity(emit func(string, string, map[string]any,
 				AgentID: codexConfig.AgentID,
 				Emit:    activity.Emit(emit),
 				Known:   known,
-				OnStop:  codexrt.StopNotifier(codexConfig.AgentID, emit),
+				OnStop:  codexrt.StopNotifierWithOwner(codexConfig.AgentID, emit, adapter.OwnsSession),
 			}, nil)
 		}
 		return adapter, nil

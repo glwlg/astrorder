@@ -148,3 +148,19 @@ func TestDesktopObserverForwardsActivityWithoutOverridingStatus(t *testing.T) {
 		t.Fatalf("calls = %v, want exactly 3", calls)
 	}
 }
+
+func TestStopNotifierWithOwnerSuppressesOwnedLiveSession(t *testing.T) {
+	var emitted []string
+	emit := func(sid, ev string, _ map[string]any, status string) error {
+		emitted = append(emitted, fmt.Sprintf("%s|%s|%s", sid, ev, status))
+		return nil
+	}
+	onStop := codex.StopNotifierWithOwner("codex-test", emit, func(id string) bool {
+		return id == "owned-live"
+	})
+	onStop("owned-live", "turn-1", "evt-1")
+	onStop("desktop-external", "turn-2", "evt-2")
+	if len(emitted) != 1 || emitted[0] != "desktop-external|codex.notification|idle" {
+		t.Fatalf("emitted = %v, want only desktop-external turn/completed", emitted)
+	}
+}
