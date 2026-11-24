@@ -73,6 +73,63 @@ function memberKey(member: SessionSwarmMember, index: number): string {
   return member.conversation_id || `${member.name}:${index}`
 }
 
+const STATE_SORT_RANK: Record<SessionSwarmMemberState, number> = {
+  working: 0,
+  waiting: 1,
+  stopped: 2,
+  killed: 3,
+}
+
+function isLiveRunningSession(session: Session): boolean {
+  if (session.status !== 'running' && session.status !== 'waiting_approval') return false
+  // Owned sessions (or sessions without an explicit unbound/readonly control_state) represent active live execution.
+  return !session.control_state || session.control_state === 'owned'
+}
+
+export function reconcileAndSortSwarmMembers(
+  rawMembers: SessionSwarmMember[],
+  session: Session,
+): SessionSwarmMember[] {
+  const nativeWorkingCount = rawMembers.filter((m) => m.state === 'working').length
+  const currentRunning = isLiveRunningSession(session)
+
+  const reconciled = rawMembers.map((member, index) => {
+    const isCurrent = Boolean(
+      member.conversation_id &&
+        (member.conversation_id === session.id || member.conversation_id === session.source_session_id),
+    )
+    let nextState = member.state
+    if (
+      isCurrent &&
+      currentRunning &&
+      member.state !== 'killed' &&
+      member.state !== 'working' &&
+      (!member.is_coordinator || nativeWorkingCount === 0)
+    ) {
+      nextState = 'working'
+    }
+    return {
+      member: nextState === member.state ? member : { ...member, state: nextState },
+      index,
+    }
+  })
+
+  reconciled.sort((a, b) => {
+    const ra = STATE_SORT_RANK[a.member.state] ?? 4
+    const rb = STATE_SORT_RANK[b.member.state] ?? 4
+    if (ra !== rb) return ra - rb
+    if (Boolean(a.member.is_coordinator) !== Boolean(b.member.is_coordinator)) {
+      return a.member.is_coordinator ? -1 : 1
+    }
+    const ua = a.member.updated_at || ''
+    const ub = b.member.updated_at || ''
+    if (ua !== ub) return ub.localeCompare(ua)
+    return a.index - b.index
+  })
+
+  return reconciled.map((item) => item.member)
+}
+
 export function SessionSwarmView({
   session,
   agent,
@@ -90,7 +147,20 @@ export function SessionSwarmView({
   const [stopping, setStopping] = useState(false)
   const [openingId, setOpeningId] = useState<string | null>(null)
 
-  const members = swarm?.members || []
+  const members = useMemo(
+    () => reconcileAndSortSwarmMembers(swarm?.members || [], session),
+    [session, swarm?.members],
+  )
+  const summary = useMemo(() => {
+    const counts = { total: members.length, working: 0, waiting: 0, stopped: 0, killed: 0 }
+    for (const member of members) {
+      if (member.state === 'working') counts.working++
+      else if (member.state === 'waiting') counts.waiting++
+      else if (member.state === 'killed') counts.killed++
+      else counts.stopped++
+    }
+    return counts
+  }, [members])
   const board = useMemo<SessionSwarmBoardItem[]>(
     () => [...(swarm?.board || [])].reverse(),
     [swarm?.board],
@@ -391,7 +461,7 @@ export function SessionSwarmView({
     )
   }
 
-  const summary = swarm.summary || { total: members.length, working: 0, waiting: 0, stopped: 0, killed: 0 }
+  const effectiveActive = Boolean(swarm.available && (summary.working > 0 || swarm.active))
 
   return (
     <div className={`swarm-panel${compact ? ' is-compact' : ''}`}>
@@ -405,8 +475,8 @@ export function SessionSwarmView({
               {swarm.kind === 'subagents' ? 'Subagents' : 'Swarm'}
             </span>
           </div>
-          <span className={`swarm-state-pill is-${swarm.active ? 'working' : 'stopped'}`}>
-            {swarm.active ? '运行中' : '已结束'}
+          <span className={`swarm-state-pill is-${effectiveActive ? 'working' : 'stopped'}`}>
+            {effectiveActive ? '运行中' : '已结束'}
           </span>
         </div>
         <div className="swarm-summary-metrics">

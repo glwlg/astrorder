@@ -87,11 +87,12 @@ func TestHandleGetSessionSwarmAntigravityAndNonAntigravity(t *testing.T) {
 	members := payload["members"].([]any)
 	m0 := members[0].(map[string]any)
 	m1 := members[1].(map[string]any)
-	if m0["in_catalog"] != true || m0["agent_id"] != "local-antigravity" {
-		t.Fatalf("expected coordinator in_catalog=true, got %+v", m0)
+	// Working members must be sorted ahead of waiting members.
+	if m0["name"] != "worker-1" || m0["state"] != "working" || m0["in_catalog"] != false || m0["agent_id"] != "local-antigravity" {
+		t.Fatalf("expected working worker-1 first with in_catalog=false, got %+v", m0)
 	}
-	if m1["in_catalog"] != false || m1["agent_id"] != "local-antigravity" {
-		t.Fatalf("expected worker in_catalog=false, got %+v", m1)
+	if m1["name"] != "coordinator" || m1["state"] != "waiting" || m1["in_catalog"] != true || m1["agent_id"] != "local-antigravity" {
+		t.Fatalf("expected waiting coordinator second with in_catalog=true, got %+v", m1)
 	}
 
 	// 2. Non-Antigravity session returns supported=false cleanly without hitting gRPC.
@@ -147,5 +148,47 @@ func TestHandleGetSessionSwarmAntigravityAndNonAntigravity(t *testing.T) {
 	coordRow, _ := st.GetSession(ctx, "local-antigravity", coordID)
 	if coordRow["ephemeral"] == true {
 		t.Fatalf("coordinator must remain non-ephemeral, got %+v", coordRow)
+	}
+
+	// 5. Reconciles live owned running coordinator when native summaries report all stopped.
+	_, _ = st.UpsertSession(ctx, map[string]any{"id": coordID, "agent_id": "local-antigravity", "status": "running", "control_state": "owned", "updated_at": "2026-11-22T12:05:00Z"})
+	rt.resp = map[string]any{
+		"supported":              true,
+		"available":              true,
+		"active":                 false,
+		"kind":                   "subagents",
+		"title":                  "Review Team",
+		"coordinator_session_id": coordID,
+		"current_session_id":     coordID,
+		"is_coordinator":         true,
+		"summary":                map[string]any{"total": 3, "working": 0, "waiting": 0, "stopped": 3, "killed": 0},
+		"members": []any{
+			map[string]any{"name": "coordinator", "is_coordinator": true, "conversation_id": coordID, "state": "stopped", "updated_at": "2026-11-22T12:01:00Z"},
+			map[string]any{"name": "old-reviewer", "is_coordinator": false, "conversation_id": workerID, "state": "stopped", "updated_at": "2026-11-22T11:00:00Z"},
+			map[string]any{"name": "new-auditor", "is_coordinator": false, "conversation_id": "33333333-3333-4333-8333-333333333333", "state": "stopped", "updated_at": "2026-11-22T12:04:00Z"},
+		},
+		"board":      []any{},
+		"updated_at": "2026-11-22T12:04:00Z",
+	}
+	liveReq := httptest.NewRequest(http.MethodGet, "/api/v1/sessions/"+coordID+"/swarm?agent_id=local-antigravity", nil)
+	liveReq.Header.Set("Authorization", "Bearer browser-sec")
+	liveRec := httptest.NewRecorder()
+	h.ServeHTTP(liveRec, liveReq)
+	if liveRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 on live reconciliation, got %d: %s", liveRec.Code, liveRec.Body.String())
+	}
+	var livePayload map[string]any
+	if err := json.Unmarshal(liveRec.Body.Bytes(), &livePayload); err != nil {
+		t.Fatal(err)
+	}
+	if livePayload["active"] != true {
+		t.Fatalf("expected active=true while owned coordinator is running, got %+v", livePayload)
+	}
+	liveMembers := livePayload["members"].([]any)
+	if liveMembers[0].(map[string]any)["name"] != "coordinator" || liveMembers[0].(map[string]any)["state"] != "working" {
+		t.Fatalf("expected reconciled running coordinator first, got %+v", liveMembers[0])
+	}
+	if liveMembers[1].(map[string]any)["name"] != "new-auditor" {
+		t.Fatalf("expected more recently updated new-auditor ahead of old-reviewer, got %+v", liveMembers[1])
 	}
 }

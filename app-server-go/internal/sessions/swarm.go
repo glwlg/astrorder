@@ -2,6 +2,7 @@ package sessions
 
 import (
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -142,21 +143,46 @@ func (h *Handler) handleGetSessionSwarm(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	// Enrich member rows with agent_id and whether the session is currently in Astrorder's catalog.
+	// Enrich member rows with agent_id, live owned status reconciliation, catalog presence, and priority sorting.
 	// Also mark non-coordinator Swarm/subagent child sessions ephemeral so they stay out of the main sidebar rail.
 	if rawMembers, ok := payload["members"].([]any); ok {
-		for _, item := range rawMembers {
+		type memberEntry struct {
+			data        map[string]any
+			origIndex   int
+			ownedActive bool
+			isCoord     bool
+		}
+		entries := make([]memberEntry, 0, len(rawMembers))
+		nativeWorking := 0
+
+		for idx, item := range rawMembers {
 			m, ok := item.(map[string]any)
 			if !ok {
 				continue
 			}
 			m["agent_id"] = aid
 			cid := stringValue(m, "conversation_id")
+			isCoord, _ := m["is_coordinator"].(bool)
+			state := strings.TrimSpace(stringValue(m, "state"))
+			if state == "working" {
+				nativeWorking++
+			}
 			inCatalog := false
+			ownedActive := false
 			if cid != "" {
-				if existing, getErr := h.store.GetSession(ctx, aid, cid); getErr == nil && existing != nil {
+				var existing map[string]any
+				if cid == sid || cid == nativeID {
+					existing = row
 					inCatalog = true
-					if isCoord, _ := m["is_coordinator"].(bool); !isCoord {
+				} else if found, getErr := h.store.GetSession(ctx, aid, cid); getErr == nil && found != nil {
+					existing = found
+					inCatalog = true
+				}
+				if existing != nil {
+					if isOwnedSessionRunning(existing) {
+						ownedActive = true
+					}
+					if !isCoord {
 						patch := map[string]any{}
 						if existing["ephemeral"] != true {
 							patch["ephemeral"] = true
@@ -175,8 +201,98 @@ func (h *Handler) handleGetSessionSwarm(w http.ResponseWriter, r *http.Request, 
 				}
 			}
 			m["in_catalog"] = inCatalog
+			entries = append(entries, memberEntry{
+				data:        m,
+				origIndex:   idx,
+				ownedActive: ownedActive,
+				isCoord:     isCoord,
+			})
 		}
+
+		// Reconcile live owned ACP runtime state when native conversation_summaries.db lags
+		// (e.g. coordinator woke up to synthesize finished subagent reports while not_fully_idle=0).
+		for _, e := range entries {
+			state := strings.TrimSpace(stringValue(e.data, "state"))
+			if state == "killed" || state == "working" || !e.ownedActive {
+				continue
+			}
+			if !e.isCoord || nativeWorking == 0 {
+				e.data["state"] = "working"
+				nativeWorking++
+			}
+		}
+
+		// Sort members so running ("working") always appear first, followed by waiting, stopped, killed.
+		// Within the same state, keep coordinator first, then most recently updated first.
+		sort.SliceStable(entries, func(i, j int) bool {
+			ri := swarmStateRank(stringValue(entries[i].data, "state"))
+			rj := swarmStateRank(stringValue(entries[j].data, "state"))
+			if ri != rj {
+				return ri < rj
+			}
+			if entries[i].isCoord != entries[j].isCoord {
+				return entries[i].isCoord
+			}
+			ui := strings.TrimSpace(stringValue(entries[i].data, "updated_at"))
+			uj := strings.TrimSpace(stringValue(entries[j].data, "updated_at"))
+			if ui != uj {
+				return ui > uj
+			}
+			return entries[i].origIndex < entries[j].origIndex
+		})
+
+		summary := map[string]int{
+			"total":   len(entries),
+			"working": 0,
+			"waiting": 0,
+			"stopped": 0,
+			"killed":  0,
+		}
+		sortedMembers := make([]any, 0, len(entries))
+		for _, e := range entries {
+			sortedMembers = append(sortedMembers, e.data)
+			switch strings.TrimSpace(stringValue(e.data, "state")) {
+			case "working":
+				summary["working"]++
+			case "waiting":
+				summary["waiting"]++
+			case "killed":
+				summary["killed"]++
+			default:
+				summary["stopped"]++
+			}
+		}
+		payload["members"] = sortedMembers
+		payload["summary"] = summary
+		available, _ := payload["available"].(bool)
+		payload["active"] = available && summary["working"] > 0
 	}
 
 	writeJSON(w, http.StatusOK, payload)
+}
+
+func isOwnedSessionRunning(sess map[string]any) bool {
+	if sess == nil {
+		return false
+	}
+	if strings.TrimSpace(stringValue(sess, "control_state")) != "owned" {
+		return false
+	}
+	status := strings.TrimSpace(stringValue(sess, "status"))
+	return status == "running" || status == "waiting_approval"
+}
+
+func swarmStateRank(state string) int {
+	switch strings.TrimSpace(state) {
+	case "working":
+		return 0
+	case "waiting":
+		return 1
+	case "stopped":
+		return 2
+	case "killed":
+		return 3
+	default:
+		return 4
+	}
 }

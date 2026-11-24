@@ -280,3 +280,41 @@ it('manages session schedules inside the 定时 tab with live preview and immedi
     when_busy: 'skip',
   })))
 })
+
+it('sorts working Swarm members ahead of waiting/stopped members and reconciles owned running coordinator status', () => {
+  // 1. Working worker must appear before waiting coordinator even if coordinator comes first in payload
+  const { container, unmount } = show({
+    agent: agyAgent,
+    swarm: {
+      ...sampleSwarm,
+      members: [
+        { ...sampleSwarm.members[0], name: 'coordinator', state: 'waiting', is_coordinator: true },
+        { ...sampleSwarm.members[1], name: 'old-stopped', conversation_id: 'w-old', state: 'stopped', updated_at: '2026-11-22T09:00:00Z' },
+        { ...sampleSwarm.members[1], name: 'active-auditor', conversation_id: 'w-live', state: 'working', updated_at: '2026-11-22T10:05:00Z' },
+      ],
+    },
+  })
+  const names1 = Array.from(container.querySelectorAll('.swarm-member-identity strong')).map((el) => el.textContent)
+  expect(names1).toEqual(['active-auditor', 'coordinator', 'old-stopped'])
+  unmount()
+
+  // 2. When native Swarm reports all stopped but the owned session is still running, coordinator reconciles to working
+  const res2 = show({
+    agent: agyAgent,
+    session: { ...session, status: 'running', control_state: 'owned' },
+    swarm: {
+      ...sampleSwarm,
+      active: false,
+      summary: { total: 3, working: 0, waiting: 0, stopped: 3, killed: 0 },
+      members: [
+        { ...sampleSwarm.members[0], name: 'coordinator', conversation_id: 'coord-1', state: 'stopped', is_coordinator: true, updated_at: '2026-11-22T10:01:00Z' },
+        { ...sampleSwarm.members[1], name: 'old-reviewer', conversation_id: 'w-1', state: 'stopped', updated_at: '2026-11-22T09:00:00Z' },
+        { ...sampleSwarm.members[1], name: 'new-auditor', conversation_id: 'w-2', state: 'stopped', updated_at: '2026-11-22T10:05:00Z' },
+      ],
+    },
+  })
+  const names2 = Array.from(res2.container.querySelectorAll('.swarm-member-identity strong')).map((el) => el.textContent)
+  expect(names2).toEqual(['coordinator', 'new-auditor', 'old-reviewer'])
+  expect(res2.container.querySelector('.swarm-summary-top .swarm-state-pill')?.textContent).toBe('运行中')
+  expect(res2.container.querySelector('.swarm-summary-metrics')?.textContent).toContain('1 运行中')
+})
