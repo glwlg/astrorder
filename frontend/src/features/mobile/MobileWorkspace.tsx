@@ -78,6 +78,16 @@ import { ForkWorktreeDialog } from '../../components/ForkWorktreeDialog'
 import { BackgroundTasks } from '../../components/BackgroundTasks'
 import { agentKindLabel } from '../../components/AgentBrandIcon'
 import { BrowserMirrorPanel } from '../sidecar/viewers/browser/BrowserMirrorViewer'
+import {
+  BLACKBOARD_VIEWER_PLUGIN_ID,
+  BROWSER_VIEWER_PLUGIN_ID,
+  VOICE_INPUT_PLUGIN_ID,
+  WORKFLOW_GIT_WORKTREE_PLUGIN_ID,
+  WORKSPACE_AGENT_ACCOUNTS_PLUGIN_ID,
+  WORKSPACE_ANALYTICS_GATEWAY_PLUGIN_ID,
+  WORKSPACE_GROUPS_PLUGIN_ID,
+} from '../plugins/builtinPlugins'
+import { usePluginSettingsStore } from '../plugins/pluginSettingsStore'
 import { AgentCommandMenu, AgentMentionMenu, filterAgentCommands, filterAgentMentions, formatAgentMention, useAgentCommands, useAgentMentions, useFileMentions } from '../chat/AgentCommandMenu'
 import { ClickSpark } from '../../components/animations/ClickSpark'
 import { expandSystemMentions } from '../chat/systemMentions'
@@ -381,6 +391,13 @@ export function MobileWorkspace() {
   useEffect(() => { setSessionError(null); setSubmittedCommandId(null) }, [selected?.id, selected?.agent_id])
   const { draft, setDraft } = usePersistentDraft(selected?.agent_id || '', selected?.id || '')
   const text = draft.text
+  const voicePluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(VOICE_INPUT_PLUGIN_ID))
+  const worktreePluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKFLOW_GIT_WORKTREE_PLUGIN_ID))
+  const groupsPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_GROUPS_PLUGIN_ID))
+  const agentAccountsPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_AGENT_ACCOUNTS_PLUGIN_ID))
+  const analyticsGatewayPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_ANALYTICS_GATEWAY_PLUGIN_ID))
+  const blackboardPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(BLACKBOARD_VIEWER_PLUGIN_ID))
+  const browserPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(BROWSER_VIEWER_PLUGIN_ID))
   const voice = useVoiceInput(key, (transcript, event) => {
     if (event.kind === 'final' && event.submit) {
       void send(transcript)
@@ -1220,9 +1237,9 @@ export function MobileWorkspace() {
           <Menu.Label>星序</Menu.Label>
           <Menu.Item leftSection={<IconDeviceDesktop size={17} />} onClick={() => navigate('/auth/qr/scan')}>扫码登录电脑</Menu.Item>
           <Menu.Item leftSection={<IconCpu size={17} />} onClick={() => setSheet('kernels')}>内核管理</Menu.Item>
-          <Menu.Item leftSection={<IconSwitchHorizontal size={17} />} onClick={() => setSheet('accounts')}>账号切换</Menu.Item>
+          {agentAccountsPluginEnabled && <Menu.Item leftSection={<IconSwitchHorizontal size={17} />} onClick={() => setSheet('accounts')}>账号切换</Menu.Item>}
           <Menu.Item leftSection={<IconPlugConnected size={17} />} onClick={() => setSheet('connections')}>连接管理</Menu.Item>
-          <Menu.Item leftSection={<IconCloudDataConnection size={17} />} onClick={() => setSheet('gateway')}>模型网关</Menu.Item>
+          {analyticsGatewayPluginEnabled && <Menu.Item leftSection={<IconCloudDataConnection size={17} />} onClick={() => setSheet('gateway')}>模型网关</Menu.Item>}
           <Menu.Item leftSection={colorScheme === 'auto' ? <IconDeviceDesktop size={17} /> : colorScheme === 'light' ? <IconSun size={17} /> : <IconMoon size={17} />} onClick={() => setColorScheme(colorScheme === 'auto' ? 'light' : colorScheme === 'light' ? 'dark' : 'auto')}>切换主题</Menu.Item>
           <Menu.Item leftSection={<IconRefresh size={17} />} onClick={() => void refresh()}>刷新</Menu.Item>
           <Menu.Divider />
@@ -1270,9 +1287,9 @@ export function MobileWorkspace() {
             {goal && <Menu.Item leftSection={<IconNotes size={17} />} onClick={() => setSheet('goal')}>目标管理</Menu.Item>}
             <Menu.Item leftSection={<IconDeviceDesktop size={17} />} onClick={openWorkbench}>工作区</Menu.Item>
             {selected.workspace && <Menu.Item leftSection={<IconHistory size={17} />} onClick={() => { setFocusedCheckpointId(null); setSheet('checkpoints') }}>代码检查点{sessionCheckpoints.items.length > 0 ? ` (${sessionCheckpoints.items.length})` : ''}</Menu.Item>}
-            {agyEnvironment && <Menu.Item leftSection={<IconSwitchHorizontal size={17} />} onClick={() => setSheet('accounts')}>账号切换</Menu.Item>}
-            <Menu.Item leftSection={<IconChalkboard size={17} />} onClick={() => setSheet('blackboard')}>黑板</Menu.Item>
-            <Menu.Item leftSection={<IconWorld size={17} />} onClick={() => setSheet('browser')}>浏览器镜像</Menu.Item>
+            {agentAccountsPluginEnabled && agyEnvironment && <Menu.Item leftSection={<IconSwitchHorizontal size={17} />} onClick={() => setSheet('accounts')}>账号切换</Menu.Item>}
+            {blackboardPluginEnabled && <Menu.Item leftSection={<IconChalkboard size={17} />} onClick={() => setSheet('blackboard')}>黑板</Menu.Item>}
+            {browserPluginEnabled && <Menu.Item leftSection={<IconWorld size={17} />} onClick={() => setSheet('browser')}>浏览器镜像</Menu.Item>}
             <Menu.Item leftSection={<IconEdit size={17} />} onClick={() => openRename(selected)}>重命名</Menu.Item>
             <Menu.Item leftSection={<IconCopy size={17} />} onClick={() => copySessionId(selected)}>复制 ID</Menu.Item>
             <Menu.Item disabled={readOnly} leftSection={<IconNotes size={17} />} onClick={() => void send('帮我总结当前会话的最新进展与遗留事项')}>总结进展</Menu.Item>
@@ -1388,8 +1405,8 @@ export function MobileWorkspace() {
               return true
             }} />
           </div>
-          <MobileVoiceHold scope={key} voice={voice} disabled={text.length > 0}><textarea ref={textarea} aria-label="消息内容" enterKeyHint="enter" placeholder="发消息，按住说话…" rows={1} value={text} onPaste={event => { const pasted = clipboardFiles(event); if (agents[selected?.agent_id || '']?.kind === 'grok' && pasted.some(f => f.type.startsWith('image/'))) { event.preventDefault(); notify('当前智能体不支持图片附件', 'red'); return } if (pasted.length) { event.preventDefault(); updateFiles([...files, ...pasted]) } }} onKeyDown={handleKeyDown} onChange={e => { setCommandIndex(0); setDismissedMenuText(null); setText(e.target.value) }} /></MobileVoiceHold>
-          <button aria-label={voice.status === 'recording' || voice.status === 'requesting' ? '停止录音' : voice.status === 'transcribing' ? '正在转写' : '语音消息'} disabled={voice.status === 'transcribing'} onClick={voice.toggle}>{voice.status === 'recording' || voice.status === 'requesting' ? <IconPlayerStop size={19} color="#ef4444" /> : <IconMicrophone size={19} />}</button>
+          <MobileVoiceHold scope={key} voice={voice} disabled={!voicePluginEnabled || text.length > 0}><textarea ref={textarea} aria-label="消息内容" enterKeyHint="enter" placeholder={voicePluginEnabled ? '发消息，按住说话…' : '发消息…'} rows={1} value={text} onPaste={event => { const pasted = clipboardFiles(event); if (agents[selected?.agent_id || '']?.kind === 'grok' && pasted.some(f => f.type.startsWith('image/'))) { event.preventDefault(); notify('当前智能体不支持图片附件', 'red'); return } if (pasted.length) { event.preventDefault(); updateFiles([...files, ...pasted]) } }} onKeyDown={handleKeyDown} onChange={e => { setCommandIndex(0); setDismissedMenuText(null); setText(e.target.value) }} /></MobileVoiceHold>
+          {voicePluginEnabled && <button aria-label={voice.status === 'recording' || voice.status === 'requesting' ? '停止录音' : voice.status === 'transcribing' ? '正在转写' : '语音消息'} disabled={voice.status === 'transcribing'} onClick={voice.toggle}>{voice.status === 'recording' || voice.status === 'requesting' ? <IconPlayerStop size={19} color="#ef4444" /> : <IconMicrophone size={19} />}</button>}
           <ClickSpark className="m-send-spark" sparkColor={busy && !text && !files.length ? '#ef4444' : '#7540bd'} sparkSize={10} sparkRadius={28} sparkCount={8}>
             <button type="button" className="m-send" data-stop={busy && !text && !files.length} aria-label={busy && !text && !files.length ? '停止' : '发送'} disabled={submitting || !selected} onPointerDown={pressSend} onClick={() => pressSend()}>{submitting ? <IconLoader2 className="m-spin" size={18} /> : busy && !text && !files.length ? <IconPlayerStop size={17} /> : <IconSend size={18} />}</button>
           </ClickSpark>
@@ -1405,14 +1422,14 @@ export function MobileWorkspace() {
       {sheet === 'accounts' && <div className="m-sheet-body m-accounts-body"><MobileAccountsPanel preferredEnvironment={agyEnvironment} /></div>}
       {sheet === 'kernels' && <div className="m-sheet-body"><KernelManagementPanel /></div>}
       {sheet === 'gateway' && <div className="m-sheet-body m-gateway-body"><UsageGatewaySettingsCard /></div>}
-      {sheet === 'sessions' && <div className="m-drawer-nav" role="tablist" aria-label="移动端模式切换" data-active-tab={drawerTab}>
+      {sheet === 'sessions' && groupsPluginEnabled && <div className="m-drawer-nav" role="tablist" aria-label="移动端模式切换" data-active-tab={drawerTab}>
         <span className="m-drawer-nav-thumb" aria-hidden="true" />
         <button type="button" role="tab" aria-selected={drawerTab === 'sessions'} aria-current={drawerTab === 'sessions' ? 'page' : undefined} onClick={() => { setDrawerTab('sessions'); void openState.refetch() }}><IconMessageCircle size={16} /><span>对话</span></button>
         <button type="button" role="tab" aria-selected={drawerTab === 'groups'} aria-current={drawerTab === 'groups' ? 'page' : undefined} onClick={() => { setDrawerTab('groups'); void botGroupsQuery.refetch() }}><IconUsers size={16} /><span>群聊</span>{botGroupList.length > 0 && <small className="m-drawer-nav-count">{botGroupList.length}</small>}</button>
       </div>}
-      {sheet === 'sessions' && drawerTab === 'sessions' && filtersOpen && <><div className="m-drawer-filter-row"><AgentSessionFilter agents={agents} sessions={sessions} value={agentFilter} onChange={updateAgentFilter} /></div><nav className="m-filters">{[['all','全部'],['unread','未读'],['open','开放中'],['pinned','置顶'],['recent','24小时']].map(([id,label]) => <button className={filter === id ? 'active' : ''} key={id} onClick={() => setFilter(id)}>{label}</button>)}</nav></>}
-      {sheet === 'sessions' && drawerTab === 'sessions' && <><div className="m-search-wrap"><input className="m-search" aria-label="搜索会话" placeholder="搜索会话或历史消息" value={search} onChange={e => setSearch(e.target.value)} />{search && <button aria-label="清空搜索" onClick={() => setSearch('')} style={{ position: 'absolute', right: 8, padding: 6, display: 'inline-flex', alignItems: 'center', color: 'var(--m-muted)' }}><IconX size={16} /></button>}</div><MobileSessionDrawer groups={groups} pins={pins} pinnedProjects={pinnedProjects} onPinProject={project => { void updatePreferences(value => ({ pinned_projects: value.pinned_projects.includes(project.key) ? value.pinned_projects.filter(key => key !== project.key) : [project.key, ...value.pinned_projects] })) }} selectedKey={key} appearance={appearance} onSelect={select} onCreate={project => { setCreateProject(project); setCreateOpened(true) }} onDeleteProject={requestDeleteProject} onDeleteSession={requestDeleteSession} onPin={s => { const sessionKey = scopeKey(s.agent_id, s.id); void updatePreferences(value => ({ session_pins: { [sessionKey]: !value.session_pins[sessionKey] } })) }} agents={agents} onHandoffSession={setHandoffTarget} onRenameSession={openRename} onCopySessionId={copySessionId} onForkSession={handleForkChatBranch} onForkWorktreeSession={setForkWorktreeTarget} isSearching={Boolean(search.trim())} searchHits={searchHits} searchLoading={searchLoading} onSelectSearchHit={(hit) => { navigate(`/mobile/chat/${encodeURIComponent(hit.session_id)}?agent_id=${encodeURIComponent(hit.agent_id)}&message_id=${encodeURIComponent(hit.id)}`, { replace: true }); setSheet(null) }} /></>}
-      {sheet === 'sessions' && drawerTab === 'groups' && <><div className="m-search-wrap"><input className="m-search" aria-label="搜索群聊" placeholder="搜索群聊" value={groupSearch} onChange={e => setGroupSearch(e.target.value)} />{groupSearch && <button aria-label="清空搜索" onClick={() => setGroupSearch('')} style={{ position: 'absolute', right: 8, padding: 6, display: 'inline-flex', alignItems: 'center', color: 'var(--m-muted)' }}><IconX size={16} /></button>}</div><MobileGroupDrawer groups={botGroupList} selectedGroupId={isGroupRoute ? routeGroupId : ''} agents={agents} loading={botGroupsQuery.isLoading} search={groupSearch} onSelect={selectGroup} onCreate={() => setCreateGroupOpened(true)} onDeleteGroup={requestDeleteGroup} /></>}
+      {sheet === 'sessions' && (!groupsPluginEnabled || drawerTab === 'sessions') && filtersOpen && <><div className="m-drawer-filter-row"><AgentSessionFilter agents={agents} sessions={sessions} value={agentFilter} onChange={updateAgentFilter} /></div><nav className="m-filters">{[['all','全部'],['unread','未读'],['open','开放中'],['pinned','置顶'],['recent','24小时']].map(([id,label]) => <button className={filter === id ? 'active' : ''} key={id} onClick={() => setFilter(id)}>{label}</button>)}</nav></>}
+      {sheet === 'sessions' && (!groupsPluginEnabled || drawerTab === 'sessions') && <><div className="m-search-wrap"><input className="m-search" aria-label="搜索会话" placeholder="搜索会话或历史消息" value={search} onChange={e => setSearch(e.target.value)} />{search && <button aria-label="清空搜索" onClick={() => setSearch('')} style={{ position: 'absolute', right: 8, padding: 6, display: 'inline-flex', alignItems: 'center', color: 'var(--m-muted)' }}><IconX size={16} /></button>}</div><MobileSessionDrawer groups={groups} pins={pins} pinnedProjects={pinnedProjects} onPinProject={project => { void updatePreferences(value => ({ pinned_projects: value.pinned_projects.includes(project.key) ? value.pinned_projects.filter(key => key !== project.key) : [project.key, ...value.pinned_projects] })) }} selectedKey={key} appearance={appearance} onSelect={select} onCreate={project => { setCreateProject(project); setCreateOpened(true) }} onDeleteProject={requestDeleteProject} onDeleteSession={requestDeleteSession} onPin={s => { const sessionKey = scopeKey(s.agent_id, s.id); void updatePreferences(value => ({ session_pins: { [sessionKey]: !value.session_pins[sessionKey] } })) }} agents={agents} onHandoffSession={setHandoffTarget} onRenameSession={openRename} onCopySessionId={copySessionId} onForkSession={handleForkChatBranch} onForkWorktreeSession={worktreePluginEnabled ? setForkWorktreeTarget : undefined} isSearching={Boolean(search.trim())} searchHits={searchHits} searchLoading={searchLoading} onSelectSearchHit={(hit) => { navigate(`/mobile/chat/${encodeURIComponent(hit.session_id)}?agent_id=${encodeURIComponent(hit.agent_id)}&message_id=${encodeURIComponent(hit.id)}`, { replace: true }); setSheet(null) }} /></>}
+      {sheet === 'sessions' && groupsPluginEnabled && drawerTab === 'groups' && <><div className="m-search-wrap"><input className="m-search" aria-label="搜索群聊" placeholder="搜索群聊" value={groupSearch} onChange={e => setGroupSearch(e.target.value)} />{groupSearch && <button aria-label="清空搜索" onClick={() => setGroupSearch('')} style={{ position: 'absolute', right: 8, padding: 6, display: 'inline-flex', alignItems: 'center', color: 'var(--m-muted)' }}><IconX size={16} /></button>}</div><MobileGroupDrawer groups={botGroupList} selectedGroupId={isGroupRoute ? routeGroupId : ''} agents={agents} loading={botGroupsQuery.isLoading} search={groupSearch} onSelect={selectGroup} onCreate={() => setCreateGroupOpened(true)} onDeleteGroup={requestDeleteGroup} /></>}
       {sheet === 'inbox' && (
         <div className="m-sheet-body">
           <ActionInboxView

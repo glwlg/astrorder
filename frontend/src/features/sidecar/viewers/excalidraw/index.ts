@@ -4,9 +4,13 @@ import { ExcalidrawViewer } from './ExcalidrawViewer'
 
 export const excalidrawViewer: ArtifactViewer = {
   id: 'excalidraw-viewer',
-  title: 'Excalidraw 白板',
+  title: '手绘白板',
   description: '轻量自由手绘白板，适合头脑风暴、逻辑设计与自由拓扑标注',
   version: '1.0.0',
+  category: 'diagram',
+  capabilitySlot: 'whiteboard',
+  capabilityLabel: '白板',
+  implementationName: 'Excalidraw',
   badgeLabel: '[白板]',
   tabColor: '#f59e0b',
   icon: IconPencil,

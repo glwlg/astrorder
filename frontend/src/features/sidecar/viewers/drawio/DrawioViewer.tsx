@@ -1,14 +1,49 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ActionIcon, Button, Group, LoadingOverlay, Paper, Text, Tooltip } from '@mantine/core'
 import { IconDeviceFloppy, IconDownload, IconRefresh } from '@tabler/icons-react'
 import { downloadFile } from '../../fileTransfer'
 import type { ViewerContext } from '../../types'
 import { authenticatedApiFetch } from '../../../../api/client'
+import { usePluginSettingsStore } from '../../../plugins/pluginSettingsStore'
 
-const DRAWIO_EMBED_ORIGIN = 'https://embed.diagrams.net'
-const DRAWIO_EMBED_URL = `${DRAWIO_EMBED_ORIGIN}/?embed=1&proto=json&configure=1&spin=1&libraries=1`
+const DEFAULT_DRAWIO_ORIGIN = 'https://embed.diagrams.net'
+
+function resolveDrawioOrigin(provider: string, customOrigin: string): string {
+  if (provider === 'self-hosted' && customOrigin.trim()) {
+    try {
+      const parsed = new URL(customOrigin.trim())
+      if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+        return parsed.origin
+      }
+    } catch {
+      // invalid URL falls back to official diagrams.net
+    }
+  }
+  return DEFAULT_DRAWIO_ORIGIN
+}
 
 export function DrawioViewer({ artifact, onSave, onDirtyChange, onClose: _onClose, toolbarAction }: ViewerContext) {
+  const provider = usePluginSettingsStore((s) => s.getPluginConfig<string>('drawio-viewer', 'provider', 'diagrams-net'))
+  const customOrigin = usePluginSettingsStore((s) => s.getPluginConfig<string>('drawio-viewer', 'customOrigin', ''))
+  const autosave = usePluginSettingsStore((s) => s.getPluginConfig<boolean>('drawio-viewer', 'autosave', true))
+  const theme = usePluginSettingsStore((s) => s.getPluginConfig<string>('drawio-viewer', 'theme', 'min'))
+
+  const embedOrigin = useMemo(() => resolveDrawioOrigin(provider, customOrigin), [provider, customOrigin])
+  const embedUrl = useMemo(() => {
+    const base = provider === 'self-hosted' && customOrigin.trim()
+      ? customOrigin.trim().replace(/\/+$/, '')
+      : embedOrigin
+    const params = new URLSearchParams({
+      embed: '1',
+      proto: 'json',
+      configure: '1',
+      spin: '1',
+      libraries: '1',
+    })
+    if (theme && theme !== 'auto') params.set('ui', theme)
+    return `${base}/?${params.toString()}`
+  }, [provider, customOrigin, embedOrigin, theme])
+
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const onDirtyChangeRef = useRef(onDirtyChange)
   onDirtyChangeRef.current = onDirtyChange
@@ -47,7 +82,7 @@ export function DrawioViewer({ artifact, onSave, onDirtyChange, onClose: _onClos
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
       // 安全校验：校验 Origin 与 iframe 实例
-      if (event.origin !== DRAWIO_EMBED_ORIGIN) return
+      if (event.origin !== embedOrigin) return
       if (event.source !== iframeRef.current?.contentWindow) return
 
       try {
@@ -63,7 +98,7 @@ export function DrawioViewer({ artifact, onSave, onDirtyChange, onClose: _onClos
                 defaultFonts: ['Inter', 'PingFang SC', 'Microsoft YaHei'],
               },
             }),
-            DRAWIO_EMBED_ORIGIN,
+            embedOrigin,
           )
         }
 
@@ -73,10 +108,10 @@ export function DrawioViewer({ artifact, onSave, onDirtyChange, onClose: _onClos
           iframeRef.current?.contentWindow?.postMessage(
             JSON.stringify({
               action: 'load',
-              autosave: 1,
+              autosave: autosave ? 1 : 0,
               xml: contentToLoad,
             }),
-            DRAWIO_EMBED_ORIGIN,
+            embedOrigin,
           )
         }
 
@@ -96,7 +131,7 @@ export function DrawioViewer({ artifact, onSave, onDirtyChange, onClose: _onClos
 
     window.addEventListener('message', handleMessage)
     return () => window.removeEventListener('message', handleMessage)
-  }, [])
+  }, [autosave, embedOrigin])
 
   // 3. 执行保存
   const handleSave = async () => {
@@ -176,8 +211,9 @@ export function DrawioViewer({ artifact, onSave, onDirtyChange, onClose: _onClos
         ) : (
           <iframe
             ref={iframeRef}
-            src={DRAWIO_EMBED_URL}
-            title={`Draw.io: ${artifact.name}`}
+            key={embedUrl}
+            src={embedUrl}
+            title={`流程图: ${artifact.name}`}
             style={{ width: '100%', height: '100%', border: 'none' }}
             sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
             allow="clipboard-read; clipboard-write"

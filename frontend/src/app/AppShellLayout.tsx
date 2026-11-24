@@ -15,6 +15,7 @@ import { Sidebar } from '../components/Sidebar'
 import { BackgroundTasks } from '../components/BackgroundTasks'
 import { useShortcutHandlers } from '../features/shortcuts/shortcuts'
 import { agySessionEnvironment, AgyQuotaRefreshProvider } from '../features/agentAccounts/AgyQuotaRefreshProvider'
+import { WORKSPACE_AGENT_ACCOUNTS_PLUGIN_ID } from '../features/plugins/builtinPlugins'
 import { usePluginSettingsStore } from '../features/plugins/pluginSettingsStore'
 import { useIntegrationsStore } from '../features/integrations/integrationStore'
 import { PerfProfiler } from '../perf/clientPerf'
@@ -56,6 +57,7 @@ export function AppShellLayout({ chatReturnPath }: { chatReturnPath: string }) {
   const approvals = useAstrorderStore((state) => state.approvals)
   const botGroups = useAstrorderStore((state) => state.botGroups)
   const [paletteOpened, setPaletteOpened] = useState(false)
+  const agentAccountsEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_AGENT_ACCOUNTS_PLUGIN_ID))
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -380,9 +382,13 @@ export function AppShellLayout({ chatReturnPath }: { chatReturnPath: string }) {
       </AppShell.Navbar>
       <AppShell.Main className="shell-main">
         <ErrorBoundary fallbackTitle="会话主区域加载异常">
-          <AgyQuotaRefreshProvider sessionEnvironment={agySessionEnvironment(session, session && agents[session.agent_id])}>
+          {agentAccountsEnabled ? (
+            <AgyQuotaRefreshProvider sessionEnvironment={agySessionEnvironment(session, session && agents[session.agent_id])}>
+              <Outlet />
+            </AgyQuotaRefreshProvider>
+          ) : (
             <Outlet />
-          </AgyQuotaRefreshProvider>
+          )}
         </ErrorBoundary>
       </AppShell.Main>
       <Drawer

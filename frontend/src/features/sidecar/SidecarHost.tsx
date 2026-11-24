@@ -9,6 +9,16 @@ import { SessionDetails } from '../chat/SessionDetails'
 import { artifactViewerRegistry } from './registry'
 import { useSidecarStore } from './sidecarStore'
 import { openDatabaseWorkbench, useHasDatabaseTool } from './databaseTool'
+import {
+  AGENT_GRAPH_VIEWER_PLUGIN_ID,
+  BLACKBOARD_VIEWER_PLUGIN_ID,
+  BROWSER_VIEWER_PLUGIN_ID,
+  FILETREE_VIEWER_PLUGIN_ID,
+  MEMORY_VIEWER_PLUGIN_ID,
+  SIDECHAT_VIEWER_PLUGIN_ID,
+  XTERM_VIEWER_PLUGIN_ID,
+} from '../plugins/builtinPlugins'
+import { usePluginSettingsStore } from '../plugins/pluginSettingsStore'
 import type { Agent, Approval, Command, Message, Session } from '../../domain/types'
 
 interface SidecarHostProps {
@@ -43,6 +53,13 @@ export function SidecarHost({
   const closeTab = useSidecarStore((state) => state.closeTab)
   const setTabDirty = useSidecarStore((state) => state.setTabDirty)
   const hasDatabaseTool = useHasDatabaseTool()
+  const fileTreeEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(FILETREE_VIEWER_PLUGIN_ID))
+  const terminalEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(XTERM_VIEWER_PLUGIN_ID))
+  const browserEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(BROWSER_VIEWER_PLUGIN_ID))
+  const sideChatEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(SIDECHAT_VIEWER_PLUGIN_ID))
+  const agentGraphEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(AGENT_GRAPH_VIEWER_PLUGIN_ID))
+  const blackboardEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(BLACKBOARD_VIEWER_PLUGIN_ID))
+  const memoryEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(MEMORY_VIEWER_PLUGIN_ID))
 
   const activeTab = tabs.find((t) => t.id === activeTabId)
   const currentSessionKey = `${session.agent_id}:${session.id}`
@@ -170,14 +187,14 @@ export function SidecarHost({
         {!activeTab && (
           <SidecarWelcomeMenu
             session={session}
-            onOpenFileTree={handleOpenFileTree}
-            onOpenTerminal={handleOpenTerminal}
-            onOpenBrowser={handleOpenBrowser}
+            onOpenFileTree={fileTreeEnabled ? handleOpenFileTree : undefined}
+            onOpenTerminal={terminalEnabled ? handleOpenTerminal : undefined}
+            onOpenBrowser={browserEnabled ? handleOpenBrowser : undefined}
             onOpenDatabase={hasDatabaseTool ? handleOpenDatabase : undefined}
-            onOpenSideChat={handleOpenSideChat}
-            onOpenAgentGraph={handleOpenAgentGraph}
-            onOpenBlackboard={handleOpenBlackboard}
-            onOpenMemory={handleOpenMemory}
+            onOpenSideChat={sideChatEnabled ? handleOpenSideChat : undefined}
+            onOpenAgentGraph={agentGraphEnabled ? handleOpenAgentGraph : undefined}
+            onOpenBlackboard={blackboardEnabled ? handleOpenBlackboard : undefined}
+            onOpenMemory={memoryEnabled ? handleOpenMemory : undefined}
           />
         )}
         {activeTab?.type === 'details' && (

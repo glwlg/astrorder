@@ -59,6 +59,8 @@ export interface ArtifactViewer {
   }
   /** 可配置选项声明 */
   configOptions?: ViewerConfigOption[]
+  /** 可选设置快捷入口（插件启用时在卡片内显示） */
+  settingsAction?: { tab: string; label: string }
   /** 插件注册能力说明、文档与支持的组件清单（点击插件右上角叹号查看） */
   documentation?: {
     summary?: string

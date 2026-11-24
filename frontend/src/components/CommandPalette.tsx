@@ -27,6 +27,14 @@ import { newCommandId, scopeKey } from '../domain/semantics'
 import type { Session } from '../domain/types'
 import { selectProjects, selectSessions, useAstrorderStore } from '../state/store'
 import { useActionInbox } from '../features/inbox/useActionInbox'
+import {
+  WORKSPACE_AGENT_ACCOUNTS_PLUGIN_ID,
+  WORKSPACE_ANALYTICS_GATEWAY_PLUGIN_ID,
+  WORKSPACE_BACKUPS_PLUGIN_ID,
+  WORKSPACE_GROUPS_PLUGIN_ID,
+  WORKSPACE_MONITOR_PLUGIN_ID,
+} from '../features/plugins/builtinPlugins'
+import { usePluginSettingsStore } from '../features/plugins/pluginSettingsStore'
 import { AgentBrandIcon } from './AgentBrandIcon'
 import { displaySessionTitle, formatRelativeTime, sessionActivityStatus } from './sessionRailModel'
 import './commandPalette.css'
@@ -60,6 +68,11 @@ export function CommandPalette({ opened, onClose, onToggleSidebar, onOpenSetting
   const sessions = useAstrorderStore(useShallow(selectSessions))
   const projects = useAstrorderStore(useShallow(selectProjects))
   const agents = useAstrorderStore((state) => state.agents)
+  const groupsEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_GROUPS_PLUGIN_ID))
+  const monitorEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_MONITOR_PLUGIN_ID))
+  const analyticsEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_ANALYTICS_GATEWAY_PLUGIN_ID))
+  const backupsEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_BACKUPS_PLUGIN_ID))
+  const accountsEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_AGENT_ACCOUNTS_PLUGIN_ID))
 
   const [query, setQuery] = useState('')
   const [selectedIndex, setSelectedIndex] = useState(0)
@@ -157,11 +170,11 @@ export function CommandPalette({ opened, onClose, onToggleSidebar, onOpenSetting
     const routes: Array<{ id: string; title: string; subtitle: string; to: string; keywords: string; badge?: string }> = [
       { id: 'route:inbox', title: '待我决策（行动收件箱）', subtitle: '/inbox', to: '/inbox', keywords: 'inbox action todo 待办 决策 审批 收件箱', badge: inboxCount > 0 ? `${inboxCount} 项` : undefined },
       { id: 'route:welcome', title: '星序指挥台（欢迎页）', subtitle: '/chat', to: '/chat', keywords: 'welcome home 指挥台 欢迎页 首页' },
-      { id: 'route:matrix', title: '矩阵（多会话网格）', subtitle: '/monitor', to: '/monitor', keywords: 'matrix monitor 矩阵 监控室 多窗' },
-      { id: 'route:groups', title: '群聊协作', subtitle: '/groups', to: '/groups', keywords: 'groups chat 群聊 接力' },
-      { id: 'route:analytics', title: '用量统计', subtitle: '/analytics', to: '/analytics', keywords: 'analytics usage token 统计' },
-      { id: 'route:backups', title: '文件与目录备份', subtitle: '/backups', to: '/backups', keywords: 'backups 备份 快照' },
-      { id: 'route:accounts', title: 'Agent 账号管理', subtitle: '/agent-accounts', to: '/agent-accounts', keywords: 'accounts quota 账号 额度' },
+      ...(monitorEnabled ? [{ id: 'route:matrix', title: '矩阵（多会话网格）', subtitle: '/monitor', to: '/monitor', keywords: 'matrix monitor 矩阵 监控室 多窗' }] : []),
+      ...(groupsEnabled ? [{ id: 'route:groups', title: '群聊协作', subtitle: '/groups', to: '/groups', keywords: 'groups chat 群聊 接力' }] : []),
+      ...(analyticsEnabled ? [{ id: 'route:analytics', title: '用量统计', subtitle: '/analytics', to: '/analytics', keywords: 'analytics usage token 统计' }] : []),
+      ...(backupsEnabled ? [{ id: 'route:backups', title: '文件与目录备份', subtitle: '/backups', to: '/backups', keywords: 'backups 备份 快照' }] : []),
+      ...(accountsEnabled ? [{ id: 'route:accounts', title: 'Agent 账号管理', subtitle: '/agent-accounts', to: '/agent-accounts', keywords: 'accounts quota 账号 额度' }] : []),
     ]
     for (const r of routes) {
       items.push({
@@ -216,26 +229,28 @@ export function CommandPalette({ opened, onClose, onToggleSidebar, onOpenSetting
     )
 
     // 4. Projects (open Matrix filtered to project)
-    const seenProjects = new Set<string>()
-    for (const project of projects) {
-      const name = (project.project_name || project.workspace?.split(/[/\\]/).filter(Boolean).pop() || '').trim()
-      if (!name || seenProjects.has(name)) continue
-      seenProjects.add(name)
-      items.push({
-        id: `project:${name}`,
-        category: 'project',
-        title: `在矩阵中聚焦项目：${name}`,
-        subtitle: project.workspace || undefined,
-        keywords: `project matrix 项目 矩阵 ${name} ${project.workspace || ''}`,
-        onRun: () => {
-          onClose()
-          navigate(`/monitor?project=${encodeURIComponent(name)}`)
-        },
-      })
+    if (monitorEnabled) {
+      const seenProjects = new Set<string>()
+      for (const project of projects) {
+        const name = (project.project_name || project.workspace?.split(/[/\\]/).filter(Boolean).pop() || '').trim()
+        if (!name || seenProjects.has(name)) continue
+        seenProjects.add(name)
+        items.push({
+          id: `project:${name}`,
+          category: 'project',
+          title: `在矩阵中聚焦项目：${name}`,
+          subtitle: project.workspace || undefined,
+          keywords: `project matrix 项目 矩阵 ${name} ${project.workspace || ''}`,
+          onRun: () => {
+            onClose()
+            navigate(`/monitor?project=${encodeURIComponent(name)}`)
+          },
+        })
+      }
     }
 
     return items
-  }, [agents, computedScheme, inboxCount, navigate, onClose, onOpenSettings, onToggleSidebar, projects, sessions, setColorScheme])
+  }, [accountsEnabled, agents, analyticsEnabled, backupsEnabled, computedScheme, groupsEnabled, inboxCount, monitorEnabled, navigate, onClose, onOpenSettings, onToggleSidebar, projects, sessions, setColorScheme])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()

@@ -30,6 +30,8 @@ import { isUnsentError, removeUnsentMessage, restoreUnsentDraft, sendErrorMessag
 import { DraftShelfControl } from './DraftShelfControl'
 import { queueBlockReason } from './queueBlockReason'
 import { UNCOMMITTED_REVIEW_MESSAGE } from './reviewRelay'
+import { VOICE_INPUT_PLUGIN_ID } from '../plugins/builtinPlugins'
+import { usePluginSettingsStore } from '../plugins/pluginSettingsStore'
 
 
 export interface InterpretedGatewayError {
@@ -193,6 +195,7 @@ export function ChatComposer({
   const { draft, setDraft: updateDraft } = usePersistentDraft(session.agent_id, session.id)
   const commands = useAstrorderStore(useShallow((state) => selectCommands(state, session.agent_id, session.id)))
   const [submitting, setSubmitting] = useState(false)
+  const voicePluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(VOICE_INPUT_PLUGIN_ID))
   const voice = useVoiceInput(draftKey, (transcript, event) => updateDraft(current => ({
     ...current,
     text: applyVoiceTranscript(current.text, transcript, event),
@@ -926,18 +929,20 @@ ${draft.text}` : entry.payload.text)
             </Badge>
           )}
           <SessionModelControl key={`model:${draftKey}`} session={session} />
-          <Button
-            className="attachment-button"
-            variant="subtle"
-            color="gray"
-            disabled={voice.status === 'transcribing' || (voice.status === 'idle' && (!canChat || submitting))}
-            aria-label={voice.status === 'recording' || voice.status === 'requesting' ? '停止录音' : voice.status === 'transcribing' ? '正在转写' : '语音输入'}
-            loading={voice.status === 'transcribing'}
-            onClick={voice.toggle}
-          >
-            <GlassButtonLens />
-            {voice.status === 'recording' || voice.status === 'requesting' ? <IconPlayerStop size={19} color="var(--mantine-color-red-6)" /> : <IconMicrophone size={19} />}
-          </Button>
+          {voicePluginEnabled && (
+            <Button
+              className="attachment-button"
+              variant="subtle"
+              color="gray"
+              disabled={voice.status === 'transcribing' || (voice.status === 'idle' && (!canChat || submitting))}
+              aria-label={voice.status === 'recording' || voice.status === 'requesting' ? '停止录音' : voice.status === 'transcribing' ? '正在转写' : '语音输入'}
+              loading={voice.status === 'transcribing'}
+              onClick={voice.toggle}
+            >
+              <GlassButtonLens />
+              {voice.status === 'recording' || voice.status === 'requesting' ? <IconPlayerStop size={19} color="var(--mantine-color-red-6)" /> : <IconMicrophone size={19} />}
+            </Button>
+          )}
 
           <div className="composer-submit-wrap">
               <Button

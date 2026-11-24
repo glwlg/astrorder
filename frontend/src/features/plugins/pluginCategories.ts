@@ -21,13 +21,13 @@ export const PLUGIN_CATEGORIES: PluginCategoryMeta[] = [
   {
     id: 'development',
     label: '开发与数据',
-    description: '数据库工具、代码编辑器、文件浏览、交互终端与代码变更比对',
+    description: '数据库工具、代码编辑器、文件浏览、交互终端、代码比对与 Git Worktree',
     icon: IconCode,
   },
   {
     id: 'workspace',
     label: '工作台与协作',
-    description: '侧边外链、黑板总线、知识记忆、并行对话与浏览器镜像',
+    description: '导航扩展模块、侧边外链、黑板总线、知识记忆、并行对话与浏览器自动化',
     icon: IconLayoutGrid,
   },
   {
@@ -45,7 +45,7 @@ export const PLUGIN_CATEGORIES: PluginCategoryMeta[] = [
   {
     id: 'runtime',
     label: '本地运行时',
-    description: '依托本机算力运行的语音听写与底层加速能力',
+    description: '语音听写引擎、命令输出压缩等本地算力与工具链加速能力',
     icon: IconCpu,
   },
 ]

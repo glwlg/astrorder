@@ -43,6 +43,8 @@ import { NewSessionDialog } from './NewSessionDialog'
 import { HandoffDialog } from './HandoffDialog'
 import { sessionHandoffTargets } from '../domain/handoff'
 import { ForkWorktreeDialog } from './ForkWorktreeDialog'
+import { WORKFLOW_GIT_WORKTREE_PLUGIN_ID } from '../features/plugins/builtinPlugins'
+import { usePluginSettingsStore } from '../features/plugins/pluginSettingsStore'
 import { moveProject, reconcileProjectOrder } from './projectOrder'
 import { useWorkspacePreferences } from '../hooks/useWorkspacePreferences'
 import type { Agent, Project, Session, SessionStatus, Task } from '../domain/types'
@@ -202,9 +204,21 @@ export function SessionRail({
     }
   }
 
+  const worktreeEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKFLOW_GIT_WORKTREE_PLUGIN_ID))
+
   const forkMenuItems = (session: Session) => {
     const kind = agents[session.agent_id]?.kind
     if (kind === 'antigravity' || kind === 'antigravity-ssh') return null
+    if (!worktreeEnabled) {
+      return (
+        <Menu.Item
+          leftSection={<IconGitFork size={14} />}
+          onClick={() => void handleForkChatBranch(session)}
+        >
+          分叉（创建聊天分支）
+        </Menu.Item>
+      )
+    }
     return (
       <Menu.Sub>
         <Menu.Sub.Target>

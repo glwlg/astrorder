@@ -19,26 +19,127 @@ import {
   Title,
   Tooltip,
 } from '@mantine/core'
+import { notifications } from '@mantine/notifications'
 import {
   IconAdjustments,
+  IconArrowUpRight,
   IconChevronDown,
   IconChevronUp,
   IconInfoCircle,
   IconMicrophone,
-  IconPlugConnected,
   IconPuzzle,
   IconSearch,
   IconSettings,
   IconX,
 } from '@tabler/icons-react'
-import { api, type LocalVoicePluginStatus } from '../../api/client'
+import { api, type BrowserEngine, type LocalVoicePluginStatus } from '../../api/client'
 import { artifactViewerRegistry } from '../sidecar/registry'
 import type { ArtifactViewer, PluginCategory, ViewerConfigOption } from '../sidecar/types'
+import {
+  BROWSER_VIEWER_PLUGIN_ID,
+  BUILTIN_SYSTEM_PLUGINS,
+  VOICE_INPUT_PLUGIN_ID,
+  type SystemPluginDescriptor,
+} from './builtinPlugins'
 import { PLUGIN_CATEGORIES, resolveViewerCategory, type PluginCategoryMeta, type PluginTabId } from './pluginCategories'
-import { SIDEBAR_INTEGRATIONS_PLUGIN_ID, usePluginSettingsStore } from './pluginSettingsStore'
+import { usePluginSettingsStore } from './pluginSettingsStore'
 import './PluginsPage.css'
 
-function LocalVoicePluginCard() {
+const BROWSER_ENGINE_LABELS: Record<BrowserEngine, string> = {
+  browser_use: 'Browser Use',
+  jev_ultrafast: 'System One',
+}
+
+function ConfigOptionControls({
+  pluginId,
+  options,
+  pluginConfigMap,
+  setPluginConfig,
+}: {
+  pluginId: string
+  options: ViewerConfigOption[]
+  pluginConfigMap?: Record<string, unknown>
+  setPluginConfig: (pluginId: string, key: string, value: unknown) => void
+}) {
+  const readValue = (key: string, fallback: unknown) =>
+    pluginConfigMap && pluginConfigMap[key] !== undefined ? pluginConfigMap[key] : fallback
+
+  return (
+    <>
+      {options.map((opt) => {
+        const currentVal = readValue(opt.key, opt.defaultValue)
+
+        if (opt.type === 'boolean') {
+          return (
+            <Group key={opt.key} justify="space-between">
+              <div>
+                <Text size="xs" fw={500}>
+                  {opt.label}
+                </Text>
+                {opt.description && (
+                  <Text size="11px" c="dimmed">
+                    {opt.description}
+                  </Text>
+                )}
+              </div>
+              <Switch
+                size="xs"
+                checked={Boolean(currentVal)}
+                onChange={(e) => setPluginConfig(pluginId, opt.key, e.currentTarget.checked)}
+              />
+            </Group>
+          )
+        }
+
+        if (opt.type === 'select' && opt.options) {
+          return (
+            <div key={opt.key}>
+              <Text size="xs" fw={500} mb={2}>
+                {opt.label}
+              </Text>
+              {opt.description && (
+                <Text size="11px" c="dimmed" mb={4}>
+                  {opt.description}
+                </Text>
+              )}
+              <Select
+                size="xs"
+                allowDeselect={false}
+                aria-label={opt.label}
+                data={opt.options}
+                value={String(currentVal)}
+                onChange={(val) => {
+                  if (val !== null) setPluginConfig(pluginId, opt.key, val)
+                }}
+              />
+            </div>
+          )
+        }
+
+        return (
+          <TextInput
+            key={opt.key}
+            size="xs"
+            label={opt.label}
+            description={opt.description}
+            value={String(currentVal ?? '')}
+            onChange={(e) => setPluginConfig(pluginId, opt.key, e.currentTarget.value)}
+          />
+        )
+      })}
+    </>
+  )
+}
+
+function VoiceInputPluginCard() {
+  const isEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(VOICE_INPUT_PLUGIN_ID))
+  const togglePlugin = usePluginSettingsStore((s) => s.togglePlugin)
+  const setPluginConfig = usePluginSettingsStore((s) => s.setPluginConfig)
+  const provider = usePluginSettingsStore((s) =>
+    s.getPluginConfig<string>(VOICE_INPUT_PLUGIN_ID, 'provider', 'local-r2t2'),
+  )
+
+  const [expanded, setExpanded] = useState(false)
   const [status, setStatus] = useState<LocalVoicePluginStatus | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -59,7 +160,7 @@ function LocalVoicePluginCard() {
     return () => { active = false; window.clearInterval(timer) }
   }, [])
 
-  const toggle = async () => {
+  const toggleLocalRuntime = async () => {
     if (!status || loading) return
     setLoading(true)
     try {
@@ -71,6 +172,7 @@ function LocalVoicePluginCard() {
     }
   }
 
+  const isLocalR2T2 = provider !== 'cloud-whisper'
   const running = status?.state === 'running'
   const stateLabel = status?.state === 'installing' ? '正在下载模型'
     : status?.state === 'starting' ? '正在加载模型'
@@ -78,35 +180,249 @@ function LocalVoicePluginCard() {
         : status?.state === 'running' ? '流式听写已启用'
           : status?.state === 'error' ? '启动失败'
             : '已停用 · 使用停止后转写'
+  const providerBadge = isLocalR2T2 ? 'R2T2 本地流式' : '云端 Whisper'
 
   return (
     <Card withBorder radius="md" p="md" style={{ background: 'var(--astr-surface)' }}>
       <Group justify="space-between" align="flex-start" wrap="nowrap">
         <Group gap="sm" wrap="nowrap" align="flex-start">
-          <div style={{ padding: 8, borderRadius: 8, background: running ? 'rgba(34, 197, 94, 0.12)' : 'var(--astr-surface-muted)', color: running ? '#16a34a' : 'var(--astr-muted)', display: 'flex' }}>
+          <div
+            style={{
+              padding: 8,
+              borderRadius: 8,
+              background: isEnabled && running && isLocalR2T2
+                ? 'rgba(34, 197, 94, 0.12)'
+                : isEnabled
+                  ? 'rgba(99, 102, 241, 0.1)'
+                  : 'var(--astr-surface-muted)',
+              color: isEnabled && running && isLocalR2T2
+                ? '#16a34a'
+                : isEnabled
+                  ? 'var(--astr-indigo)'
+                  : 'var(--astr-muted)',
+              display: 'flex',
+            }}
+          >
             <IconMicrophone size={24} />
           </div>
           <div>
-            <Group gap="xs">
-              <Text fw={600} size="sm">R2T2 本地流式听写</Text>
-              <Badge size="xs" variant="light" color="green">本地模型</Badge>
+            <Group gap="xs" wrap="wrap">
+              <Text fw={600} size="sm">语音输入与听写</Text>
+              <Badge size="xs" variant="light" color="teal">当前实现: {providerBadge}</Badge>
             </Group>
             <Text size="xs" c="dimmed" mt={4}>
-              启用后在本机显卡上加载 Confucius4-R2T2，录音时逐段回填；停用后释放显存并使用普通转写。
+              为对话与群聊输入框提供语音听写能力，支持在本地流式模型与云端 Whisper 接口间切换；停用后隐藏输入框麦克风按钮。
             </Text>
-            <Text size="xs" c={status?.state === 'error' ? 'red' : 'dimmed'} mt={8}>
-              {status?.error || stateLabel}
-            </Text>
-            {status?.state === 'installing' && <Progress value={(status.progress || 0) * 100} size="xs" mt={8} />}
+            {isEnabled && isLocalR2T2 && (
+              <Group justify="space-between" align="center" gap="xs" mt={8} wrap="nowrap">
+                <Text size="xs" c={status?.state === 'error' ? 'red' : 'dimmed'}>
+                  R2T2 本地引擎：{status?.error || stateLabel}
+                </Text>
+                <Switch
+                  size="xs"
+                  color="green"
+                  aria-label="启用 R2T2 本地流式听写"
+                  checked={Boolean(status?.enabled)}
+                  disabled={!status || loading}
+                  onChange={() => { void toggleLocalRuntime() }}
+                />
+              </Group>
+            )}
+            {isEnabled && isLocalR2T2 && status?.state === 'installing' && (
+              <Progress value={(status.progress || 0) * 100} size="xs" mt={8} />
+            )}
           </div>
         </Group>
         <Switch
-          aria-label="启用 R2T2 本地流式听写"
-          checked={Boolean(status?.enabled)}
-          disabled={!status || loading}
-          onChange={() => { void toggle() }}
+          aria-label="启用或禁用 语音输入与听写"
+          size="sm"
+          color="indigo"
+          checked={isEnabled}
+          onChange={(e) => togglePlugin(VOICE_INPUT_PLUGIN_ID, e.currentTarget.checked)}
         />
       </Group>
+
+      <Divider my="sm" />
+      <Group justify="space-between" align="center">
+        <Button
+          variant="subtle"
+          size="compact-xs"
+          color="gray"
+          leftSection={<IconAdjustments size={13} />}
+          rightSection={expanded ? <IconChevronUp size={13} /> : <IconChevronDown size={13} />}
+          onClick={() => setExpanded(!expanded)}
+        >
+          参数配置 (1)
+        </Button>
+        <Text size="xs" c="dimmed">
+          {isEnabled ? '生效中' : '已停用'}
+        </Text>
+      </Group>
+
+      <Collapse expanded={expanded}>
+        <Stack gap="xs" mt="xs" p="xs" style={{ background: 'var(--astr-surface-muted)', borderRadius: 6 }}>
+          <div>
+            <Text size="xs" fw={500} mb={2}>工具实现</Text>
+            <Text size="11px" c="dimmed" mb={4}>
+              选择语音转文字引擎实现：本地 R2T2 流式模型实时回填，云端 Whisper 不占用本机显存
+            </Text>
+            <Select
+              size="xs"
+              allowDeselect={false}
+              aria-label="语音听写实现"
+              value={isLocalR2T2 ? 'local-r2t2' : 'cloud-whisper'}
+              onChange={(val) => {
+                if (val !== null) setPluginConfig(VOICE_INPUT_PLUGIN_ID, 'provider', val)
+              }}
+              data={[
+                { value: 'local-r2t2', label: 'R2T2 本地流式模型' },
+                { value: 'cloud-whisper', label: '云端 Whisper 转写' },
+              ]}
+            />
+          </div>
+          {!isLocalR2T2 && (
+            <Text size="11px" c="dimmed">
+              录音结束后提交至后端 /api/v1/audio/transcriptions，不启动本机 GPU 语音模型。
+            </Text>
+          )}
+        </Stack>
+      </Collapse>
+    </Card>
+  )
+}
+
+function SystemPluginCard({ descriptor }: { descriptor: SystemPluginDescriptor }) {
+  const isEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(descriptor.id))
+  const togglePlugin = usePluginSettingsStore((s) => s.togglePlugin)
+  const setPluginConfig = usePluginSettingsStore((s) => s.setPluginConfig)
+  const pluginConfigMap = usePluginSettingsStore((s) => s.pluginConfigs[descriptor.id])
+
+  const [expanded, setExpanded] = useState(false)
+  const Icon = descriptor.icon
+
+  const readOptionValue = (key: string, fallback: unknown) =>
+    pluginConfigMap && pluginConfigMap[key] !== undefined ? pluginConfigMap[key] : fallback
+
+  const defaultByKey = useMemo(() => {
+    const map: Record<string, unknown> = {}
+    for (const opt of descriptor.configOptions || []) map[opt.key] = opt.defaultValue
+    return map
+  }, [descriptor.configOptions])
+
+  const visibleOptions = (descriptor.configOptions || []).filter((opt) => {
+    if (!opt.visibleWhen) return true
+    const current = readOptionValue(opt.visibleWhen.key, defaultByKey[opt.visibleWhen.key])
+    return current === opt.visibleWhen.value
+  })
+  const hasOptions = visibleOptions.length > 0
+
+  const activeProviderLabel = (() => {
+    if (!descriptor.providerConfigKey) return descriptor.implementationName || ''
+    const providerOpt = (descriptor.configOptions || []).find((opt) => opt.key === descriptor.providerConfigKey)
+    if (!providerOpt) return descriptor.implementationName || ''
+    const current = String(readOptionValue(providerOpt.key, providerOpt.defaultValue) ?? '')
+    return providerOpt.options?.find((choice) => choice.value === current)?.label || current
+  })()
+
+  return (
+    <Card withBorder radius="md" p="md" style={{ background: 'var(--astr-surface)' }}>
+      <Group justify="space-between" align="flex-start" wrap="nowrap">
+        <Group gap="sm" wrap="nowrap" align="flex-start">
+          <div
+            style={{
+              padding: 8,
+              borderRadius: 8,
+              background: isEnabled ? 'rgba(99, 102, 241, 0.12)' : 'var(--astr-surface-muted)',
+              color: isEnabled ? 'var(--astr-indigo)' : 'var(--astr-muted)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <Icon size={24} />
+          </div>
+          <div>
+            <Group gap="xs" align="center" wrap="wrap">
+              <Text fw={600} size="sm">{descriptor.title}</Text>
+              {descriptor.capabilitySlot ? (
+                <Badge size="xs" variant="light" color="teal">
+                  {activeProviderLabel ? `当前实现: ${activeProviderLabel}` : `${descriptor.capabilityLabel || descriptor.capabilitySlot}`}
+                </Badge>
+              ) : descriptor.badgeLabel ? (
+                <Badge size="xs" variant="light" color="indigo">{descriptor.badgeLabel}</Badge>
+              ) : null}
+            </Group>
+            <Text size="xs" c="dimmed" mt={4}>
+              {descriptor.description}
+            </Text>
+            {isEnabled && (descriptor.settingsAction || descriptor.routeAction) && (
+              <Group gap="xs" mt={8}>
+                {descriptor.settingsAction && (
+                  <Button
+                    size="compact-xs"
+                    variant="light"
+                    color="violet"
+                    leftSection={<IconSettings size={13} />}
+                    onClick={() => window.dispatchEvent(new CustomEvent('astrorder:open-settings', { detail: { tab: descriptor.settingsAction!.tab } }))}
+                  >
+                    {descriptor.settingsAction.label}
+                  </Button>
+                )}
+                {descriptor.routeAction && (
+                  <Button
+                    size="compact-xs"
+                    variant="subtle"
+                    color="indigo"
+                    rightSection={<IconArrowUpRight size={13} />}
+                    onClick={() => window.dispatchEvent(new CustomEvent('astrorder:navigate', { detail: { to: descriptor.routeAction!.to } }))}
+                  >
+                    {descriptor.routeAction.label}
+                  </Button>
+                )}
+              </Group>
+            )}
+          </div>
+        </Group>
+        <Switch
+          aria-label={`启用 ${descriptor.title}`}
+          size="sm"
+          color="indigo"
+          checked={isEnabled}
+          onChange={(e) => togglePlugin(descriptor.id, e.currentTarget.checked)}
+        />
+      </Group>
+
+      {hasOptions && (
+        <>
+          <Divider my="sm" />
+          <Group justify="space-between" align="center">
+            <Button
+              variant="subtle"
+              size="compact-xs"
+              color="gray"
+              leftSection={<IconAdjustments size={13} />}
+              rightSection={expanded ? <IconChevronUp size={13} /> : <IconChevronDown size={13} />}
+              onClick={() => setExpanded(!expanded)}
+            >
+              参数配置 ({visibleOptions.length})
+            </Button>
+            <Text size="xs" c="dimmed">
+              {isEnabled ? '生效中' : '已停用'}
+            </Text>
+          </Group>
+
+          <Collapse expanded={expanded}>
+            <Stack gap="xs" mt="xs" p="xs" style={{ background: 'var(--astr-surface-muted)', borderRadius: 6 }}>
+              <ConfigOptionControls
+                pluginId={descriptor.id}
+                options={visibleOptions}
+                pluginConfigMap={pluginConfigMap}
+                setPluginConfig={setPluginConfig}
+              />
+            </Stack>
+          </Collapse>
+        </>
+      )}
     </Card>
   )
 }
@@ -119,7 +435,39 @@ function PluginCard({ viewer }: { viewer: ArtifactViewer }) {
 
   const [expanded, setExpanded] = useState(false)
   const [infoOpened, setInfoOpened] = useState(false)
+  const isBrowserViewer = viewer.id === BROWSER_VIEWER_PLUGIN_ID
+  const [browserEngine, setBrowserEngine] = useState<BrowserEngine>('browser_use')
+  const [savingEngine, setSavingEngine] = useState(false)
   const Icon = viewer.icon
+
+  useEffect(() => {
+    if (!isBrowserViewer) return
+    let active = true
+    void Promise.resolve(api.getBrowserEngine?.())
+      .then((res) => {
+        if (active && res?.engine) setBrowserEngine(res.engine)
+      })
+      .catch(() => {})
+    return () => { active = false }
+  }, [isBrowserViewer])
+
+  const handleBrowserEngineChange = async (next: string | null) => {
+    if (!next || next === browserEngine) return
+    const nextEngine = next as BrowserEngine
+    const prev = browserEngine
+    setBrowserEngine(nextEngine)
+    setSavingEngine(true)
+    try {
+      const updated = await api.updateBrowserEngine(nextEngine)
+      setBrowserEngine(updated.engine)
+      notifications.show({ color: 'teal', message: `浏览器引擎已切换为 ${BROWSER_ENGINE_LABELS[updated.engine] || updated.engine}` })
+    } catch (error) {
+      setBrowserEngine(prev)
+      notifications.show({ color: 'red', message: error instanceof Error ? error.message : '切换浏览器引擎失败' })
+    } finally {
+      setSavingEngine(false)
+    }
+  }
 
   const readOptionValue = (key: string, fallback: unknown) =>
     pluginConfigMap && pluginConfigMap[key] !== undefined ? pluginConfigMap[key] : fallback
@@ -135,9 +483,11 @@ function PluginCard({ viewer }: { viewer: ArtifactViewer }) {
     const current = readOptionValue(opt.visibleWhen.key, defaultByKey[opt.visibleWhen.key])
     return current === opt.visibleWhen.value
   })
-  const hasOptions = visibleOptions.length > 0
+  const optionCount = visibleOptions.length + (isBrowserViewer ? 1 : 0)
+  const hasOptions = optionCount > 0
 
   const activeProviderLabel = (() => {
+    if (isBrowserViewer) return BROWSER_ENGINE_LABELS[browserEngine] || browserEngine
     if (!viewer.providerConfigKey) return viewer.implementationName || ''
     const providerOpt = (viewer.configOptions || []).find((opt) => opt.key === viewer.providerConfigKey)
     if (!providerOpt) return viewer.implementationName || ''
@@ -186,6 +536,18 @@ function PluginCard({ viewer }: { viewer: ArtifactViewer }) {
             <Text size="xs" c="dimmed" mt={4}>
               {viewer.description || '为工作区提供专有媒体与格式的交互渲染与处理支持。'}
             </Text>
+            {isEnabled && viewer.settingsAction && (
+              <Button
+                size="compact-xs"
+                variant="light"
+                color="violet"
+                mt={8}
+                leftSection={<IconSettings size={13} />}
+                onClick={() => window.dispatchEvent(new CustomEvent('astrorder:open-settings', { detail: { tab: viewer.settingsAction!.tab } }))}
+              >
+                {viewer.settingsAction.label}
+              </Button>
+            )}
             {viewer.id === 'blackboard-viewer' && (
               <Group gap={6} mt={6}>
                 <Badge size="xs" color="indigo" variant="light">
@@ -237,7 +599,7 @@ function PluginCard({ viewer }: { viewer: ArtifactViewer }) {
               rightSection={expanded ? <IconChevronUp size={13} /> : <IconChevronDown size={13} />}
               onClick={() => setExpanded(!expanded)}
             >
-              参数配置 ({visibleOptions.length})
+              参数配置 ({optionCount})
             </Button>
             <Text size="xs" c="dimmed">
               {isEnabled ? '生效中' : '已停用'}
@@ -246,67 +608,32 @@ function PluginCard({ viewer }: { viewer: ArtifactViewer }) {
 
           <Collapse expanded={expanded}>
             <Stack gap="xs" mt="xs" p="xs" style={{ background: 'var(--astr-surface-muted)', borderRadius: 6 }}>
-              {visibleOptions.map((opt: ViewerConfigOption) => {
-                const currentVal = readOptionValue(opt.key, opt.defaultValue)
-
-                if (opt.type === 'boolean') {
-                  return (
-                    <Group key={opt.key} justify="space-between">
-                      <div>
-                        <Text size="xs" fw={500}>
-                          {opt.label}
-                        </Text>
-                        {opt.description && (
-                          <Text size="11px" c="dimmed">
-                            {opt.description}
-                          </Text>
-                        )}
-                      </div>
-                      <Switch
-                        size="xs"
-                        checked={Boolean(currentVal)}
-                        onChange={(e) => setPluginConfig(viewer.id, opt.key, e.currentTarget.checked)}
-                      />
-                    </Group>
-                  )
-                }
-
-                if (opt.type === 'select' && opt.options) {
-                  return (
-                    <div key={opt.key}>
-                      <Text size="xs" fw={500} mb={2}>
-                        {opt.label}
-                      </Text>
-                      {opt.description && (
-                        <Text size="11px" c="dimmed" mb={4}>
-                          {opt.description}
-                        </Text>
-                      )}
-                      <Select
-                        size="xs"
-                        allowDeselect={false}
-                        aria-label={opt.label}
-                        data={opt.options}
-                        value={String(currentVal)}
-                        onChange={(val) => {
-                          if (val !== null) setPluginConfig(viewer.id, opt.key, val)
-                        }}
-                      />
-                    </div>
-                  )
-                }
-
-                return (
-                  <TextInput
-                    key={opt.key}
+              {isBrowserViewer && (
+                <div>
+                  <Text size="xs" fw={500} mb={2}>工具实现</Text>
+                  <Text size="11px" c="dimmed" mb={4}>
+                    选择自动执行网页任务的底层引擎（与「模型与网关」同步生效）
+                  </Text>
+                  <Select
                     size="xs"
-                    label={opt.label}
-                    description={opt.description}
-                    value={String(currentVal ?? '')}
-                    onChange={(e) => setPluginConfig(viewer.id, opt.key, e.currentTarget.value)}
+                    allowDeselect={false}
+                    aria-label="浏览器自动化引擎"
+                    disabled={savingEngine}
+                    value={browserEngine}
+                    onChange={(val) => { void handleBrowserEngineChange(val) }}
+                    data={[
+                      { value: 'browser_use', label: 'Browser Use' },
+                      { value: 'jev_ultrafast', label: 'System One' },
+                    ]}
                   />
-                )
-              })}
+                </div>
+              )}
+              <ConfigOptionControls
+                pluginId={viewer.id}
+                options={visibleOptions}
+                pluginConfigMap={pluginConfigMap}
+                setPluginConfig={setPluginConfig}
+              />
             </Stack>
           </Collapse>
         </>
@@ -451,57 +778,6 @@ function PluginCard({ viewer }: { viewer: ArtifactViewer }) {
   )
 }
 
-function SidebarIntegrationsPluginCard() {
-  const enabled = usePluginSettingsStore((s) => s.isPluginEnabled(SIDEBAR_INTEGRATIONS_PLUGIN_ID))
-  const togglePlugin = usePluginSettingsStore((s) => s.togglePlugin)
-
-  return (
-    <Card withBorder radius="md" p="md" style={{ background: 'var(--astr-surface)' }}>
-      <Group justify="space-between" align="flex-start" wrap="nowrap">
-        <Group gap="sm" wrap="nowrap" align="flex-start">
-          <div
-            style={{
-              padding: 8,
-              borderRadius: 8,
-              background: enabled ? 'rgba(99, 102, 241, 0.12)' : 'var(--astr-surface-muted)',
-              color: enabled ? 'var(--astr-indigo)' : 'var(--astr-muted)',
-              display: 'flex',
-            }}
-          >
-            <IconPlugConnected size={24} />
-          </div>
-          <div>
-            <Group gap="xs">
-              <Text fw={600} size="sm">侧边栏外链集成</Text>
-              <Badge size="xs" variant="light" color="indigo">工作台插件</Badge>
-            </Group>
-            <Text size="xs" c="dimmed" mt={4}>
-              在侧边栏挂载第三方网关、监控面板、文档站等外链菜单，自动抓取站点图标并支持自定义图标；桌面端采用独立原生视图保留登录态。
-            </Text>
-            {enabled && (
-              <Button
-                size="compact-xs"
-                variant="light"
-                color="violet"
-                mt={8}
-                leftSection={<IconSettings size={13} />}
-                onClick={() => window.dispatchEvent(new CustomEvent('astrorder:open-settings', { detail: { tab: 'integrations' } }))}
-              >
-                管理集成
-              </Button>
-            )}
-          </div>
-        </Group>
-        <Switch
-          aria-label="启用 侧边栏外链集成"
-          checked={enabled}
-          onChange={() => togglePlugin(SIDEBAR_INTEGRATIONS_PLUGIN_ID)}
-        />
-      </Group>
-    </Card>
-  )
-}
-
 interface CatalogEntry {
   id: string
   category: PluginCategory
@@ -570,19 +846,27 @@ export function PluginsPage() {
 
   const catalogEntries = useMemo<CatalogEntry[]>(() => {
     const entries: CatalogEntry[] = [
-      {
-        id: SIDEBAR_INTEGRATIONS_PLUGIN_ID,
-        category: 'workspace',
-        searchText: '侧边栏外链集成 sidebar integrations 外链 网关 监控面板',
+      ...BUILTIN_SYSTEM_PLUGINS.map((descriptor) => ({
+        id: descriptor.id,
+        category: descriptor.category,
+        searchText: [
+          descriptor.id,
+          descriptor.title,
+          descriptor.description,
+          descriptor.capabilityLabel || '',
+          descriptor.implementationName || '',
+          ...(descriptor.configOptions || []).flatMap((opt) => (opt.options || []).map((choice) => choice.label)),
+          ...descriptor.searchKeywords,
+        ].join(' ').toLowerCase(),
         isToggleable: true,
-        render: () => <SidebarIntegrationsPluginCard />,
-      },
+        render: () => <SystemPluginCard descriptor={descriptor} />,
+      })),
       {
-        id: 'r2t2-local-voice',
+        id: VOICE_INPUT_PLUGIN_ID,
         category: 'runtime',
-        searchText: 'R2T2 本地流式听写 语音 模型 录音 voice',
-        isToggleable: false,
-        render: () => <LocalVoicePluginCard />,
+        searchText: '语音输入与听写 r2t2 本地流式 whisper 云端 语音 模型 录音 voice',
+        isToggleable: true,
+        render: () => <VoiceInputPluginCard />,
       },
       ...viewers.map((viewer) => ({
         id: viewer.id,
@@ -593,6 +877,7 @@ export function PluginsPage() {
           viewer.description || '',
           viewer.capabilityLabel || '',
           viewer.implementationName || '',
+          ...(viewer.id === BROWSER_VIEWER_PLUGIN_ID ? ['browser use', 'system one', '浏览器', '镜像'] : []),
           ...(viewer.configOptions || []).flatMap((opt) => (opt.options || []).map((choice) => choice.label)),
           ...(viewer.extensions || []),
         ].join(' ').toLowerCase(),
@@ -678,7 +963,11 @@ export function PluginsPage() {
     if (targetId) selectTab(targetId, true)
   }
 
-  const allToggleableIds = [SIDEBAR_INTEGRATIONS_PLUGIN_ID, ...viewers.map((v) => v.id)]
+  const allToggleableIds = [
+    ...BUILTIN_SYSTEM_PLUGINS.map((p) => p.id),
+    VOICE_INPUT_PLUGIN_ID,
+    ...viewers.map((v) => v.id),
+  ]
   const enabledCount = allToggleableIds.filter((id) => enabledPlugins[id] !== false).length
 
   return (
@@ -706,7 +995,7 @@ export function PluginsPage() {
                 插件管理
               </Title>
               <Text size="xs" c="dimmed" mt={2}>
-                按能力分类管理开发工具、工作台扩展、富媒介渲染器与本地运行时，能力槽位支持按需替换实现。
+                按能力分类管理开发工具、工作台扩展、富媒介渲染器与本地运行时，能力槽位支持按需启停与替换实现。
               </Text>
             </div>
           </Group>
@@ -714,7 +1003,7 @@ export function PluginsPage() {
           <Group gap="xs" wrap="nowrap">
             <TextInput
               size="xs"
-              placeholder="搜索插件名称或文件类型…"
+              placeholder="搜索插件、实现或文件类型…"
               aria-label="搜索插件"
               value={query}
               onChange={(e) => setQuery(e.currentTarget.value)}

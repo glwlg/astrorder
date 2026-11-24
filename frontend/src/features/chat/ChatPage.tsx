@@ -43,6 +43,17 @@ import { TaskDetails } from './TaskDetails'
 import { Transcript } from './Transcript'
 import { SidecarHost } from '../sidecar/SidecarHost'
 import { useSidecarStore } from '../sidecar/sidecarStore'
+import {
+  AGENT_GRAPH_VIEWER_PLUGIN_ID,
+  BLACKBOARD_VIEWER_PLUGIN_ID,
+  BROWSER_VIEWER_PLUGIN_ID,
+  FILETREE_VIEWER_PLUGIN_ID,
+  MEMORY_VIEWER_PLUGIN_ID,
+  SIDECHAT_VIEWER_PLUGIN_ID,
+  WORKFLOW_GIT_WORKTREE_PLUGIN_ID,
+  XTERM_VIEWER_PLUGIN_ID,
+} from '../plugins/builtinPlugins'
+import { usePluginSettingsStore } from '../plugins/pluginSettingsStore'
 import { resolveArtifactFromPath } from '../sidecar/resolver'
 import { artifactViewerRegistry } from '../sidecar/registry'
 import type { SessionCheckpoint } from '../../api/client'
@@ -425,15 +436,18 @@ function ChatPageBody() {
     }
   }, [isResizing, setSidecarWidth])
 
+  const worktreeEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKFLOW_GIT_WORKTREE_PLUGIN_ID))
+  const isViewerEnabled = (id: string) => usePluginSettingsStore.getState().isPluginEnabled(id)
+
   useShortcutHandlers(selected ? {
-    sideChat: () => useSidecarStore.getState().openSideChat(selected.id, selected.agent_id, selected.title || undefined, selected.connection_id || undefined),
-    agentGraph: () => useSidecarStore.getState().openAgentGraph(selected.id, selected.agent_id, selected.title || undefined, selected.connection_id || undefined),
-    memory: () => useSidecarStore.getState().openMemory(selected.id),
-    blackboard: () => useSidecarStore.getState().openBlackboard(selected.id, selected.agent_id, selected.connection_id || undefined),
+    sideChat: () => { if (isViewerEnabled(SIDECHAT_VIEWER_PLUGIN_ID)) useSidecarStore.getState().openSideChat(selected.id, selected.agent_id, selected.title || undefined, selected.connection_id || undefined) },
+    agentGraph: () => { if (isViewerEnabled(AGENT_GRAPH_VIEWER_PLUGIN_ID)) useSidecarStore.getState().openAgentGraph(selected.id, selected.agent_id, selected.title || undefined, selected.connection_id || undefined) },
+    memory: () => { if (isViewerEnabled(MEMORY_VIEWER_PLUGIN_ID)) useSidecarStore.getState().openMemory(selected.id) },
+    blackboard: () => { if (isViewerEnabled(BLACKBOARD_VIEWER_PLUGIN_ID)) useSidecarStore.getState().openBlackboard(selected.id, selected.agent_id, selected.connection_id || undefined) },
     quickOpen: () => setQuickOpenOpened(true),
-    fileTree: () => useSidecarStore.getState().openFileTree(selected.id, selected.agent_id, selected.workspace || undefined, selected.project_name || selected.title, selected.connection_id || undefined),
-    browser: () => useSidecarStore.getState().openBrowser(selected.id, selected.agent_id, undefined, selected.connection_id || undefined),
-    terminal: () => useSidecarStore.getState().openTerminal(selected.id, selected.agent_id, selected.project_name || selected.title, selected.connection_id || undefined),
+    fileTree: () => { if (isViewerEnabled(FILETREE_VIEWER_PLUGIN_ID)) useSidecarStore.getState().openFileTree(selected.id, selected.agent_id, selected.workspace || undefined, selected.project_name || selected.title, selected.connection_id || undefined) },
+    browser: () => { if (isViewerEnabled(BROWSER_VIEWER_PLUGIN_ID)) useSidecarStore.getState().openBrowser(selected.id, selected.agent_id, undefined, selected.connection_id || undefined) },
+    terminal: () => { if (isViewerEnabled(XTERM_VIEWER_PLUGIN_ID)) useSidecarStore.getState().openTerminal(selected.id, selected.agent_id, selected.project_name || selected.title, selected.connection_id || undefined) },
     sidecar: toggleRightPanel,
   } : {})
   const [taskDetailsOpened, { open: openTaskDetails, close: closeTaskDetails }] = useDisclosure(false)
@@ -651,8 +665,8 @@ function ChatPageBody() {
       const result = await api.forkSession(selected.id, {
         agent_id: selected.agent_id,
         title: forkTitle.trim() || undefined,
-        worktree: forkWorktree,
-        branch_name: forkWorktree && forkBranchName.trim() ? forkBranchName.trim() : undefined,
+        worktree: worktreeEnabled && forkWorktree,
+        branch_name: worktreeEnabled && forkWorktree && forkBranchName.trim() ? forkBranchName.trim() : undefined,
         target_message_id: forkTargetMessage.message.id,
         turn_index: undefined,
       })
@@ -993,13 +1007,13 @@ function ChatPageBody() {
             value={forkTitle}
             onChange={(e) => setForkTitle(e.currentTarget.value)}
           />
-          {agent?.kind !== 'antigravity' && <Switch
+          {worktreeEnabled && agent?.kind !== 'antigravity' && <Switch
             label="创建独立 Git Worktree 分支工作区"
             description="在独立目录签出新 Git 分支，防止两个分支的代码修改互相干扰"
             checked={forkWorktree}
             onChange={(e) => setForkWorktree(e.currentTarget.checked)}
           />}
-          {forkWorktree && (
+          {worktreeEnabled && forkWorktree && (
             <TextInput
               label="Git 分支名"
               placeholder="例如：feature-experimental"

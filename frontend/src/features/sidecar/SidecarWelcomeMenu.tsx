@@ -7,12 +7,12 @@ import { useShortcutStore } from '../shortcuts/shortcuts'
 
 interface SidecarWelcomeMenuProps {
   session: Session
-  onOpenFileTree: () => void
-  onOpenTerminal: () => void
-  onOpenBrowser: () => void
+  onOpenFileTree?: () => void
+  onOpenTerminal?: () => void
+  onOpenBrowser?: () => void
   onOpenDatabase?: () => void
-  onOpenSideChat: () => void
-  onOpenAgentGraph: () => void
+  onOpenSideChat?: () => void
+  onOpenAgentGraph?: () => void
   onOpenBlackboard?: () => void
   onOpenMemory?: () => void
 }
@@ -30,48 +30,76 @@ export function SidecarWelcomeMenu({
 }: SidecarWelcomeMenuProps) {
   const bindings = useShortcutStore(state => state.bindings)
   const menuItems = [
-    {
-      icon: <ChalkboardSimpleIcon size={20} weight="duotone" color="var(--astr-blue)" />,
-      label: "黑板",
-      shortcut: bindings.blackboard || '未设置',
-      onClick: onOpenBlackboard || onOpenFileTree,
-    },
-    {
-      icon: <BrainIcon size={20} weight="duotone" color="var(--astr-blue)" />,
-      label: "知识记忆",
-      shortcut: bindings.memory || '未设置',
-      onClick: onOpenMemory || onOpenFileTree,
-    },
-    {
-      icon: <FolderSimpleIcon size={20} weight="duotone" color="var(--astr-blue)" />,
-      label: '文件',
-      shortcut: bindings.fileTree || '未设置',
-      onClick: onOpenFileTree,
-    },
-    {
-      icon: <ChatsCircleIcon size={20} weight="duotone" color="var(--astr-blue)" />,
-      label: '侧边聊天',
-      shortcut: bindings.sideChat || '未设置',
-      onClick: onOpenSideChat,
-    },
-    {
-      icon: <GraphIcon size={20} weight="duotone" color="var(--astr-blue)" />,
-      label: '决策状态机',
-      shortcut: bindings.agentGraph || '未设置',
-      onClick: onOpenAgentGraph,
-    },
-    {
-      icon: <BrowserIcon size={20} weight="duotone" color="var(--astr-blue)" />,
-      label: '浏览器',
-      shortcut: bindings.browser || '未设置',
-      onClick: onOpenBrowser,
-    },
-    {
-      icon: <TerminalWindowIcon size={20} weight="duotone" color="var(--astr-blue)" />,
-      label: '终端',
-      shortcut: bindings.terminal || '未设置',
-      onClick: onOpenTerminal,
-    },
+    ...(onOpenBlackboard
+      ? [
+          {
+            icon: <ChalkboardSimpleIcon size={20} weight="duotone" color="var(--astr-blue)" />,
+            label: '黑板',
+            shortcut: bindings.blackboard || '未设置',
+            onClick: onOpenBlackboard,
+          },
+        ]
+      : []),
+    ...(onOpenMemory
+      ? [
+          {
+            icon: <BrainIcon size={20} weight="duotone" color="var(--astr-blue)" />,
+            label: '知识记忆',
+            shortcut: bindings.memory || '未设置',
+            onClick: onOpenMemory,
+          },
+        ]
+      : []),
+    ...(onOpenFileTree
+      ? [
+          {
+            icon: <FolderSimpleIcon size={20} weight="duotone" color="var(--astr-blue)" />,
+            label: '文件',
+            shortcut: bindings.fileTree || '未设置',
+            onClick: onOpenFileTree,
+          },
+        ]
+      : []),
+    ...(onOpenSideChat
+      ? [
+          {
+            icon: <ChatsCircleIcon size={20} weight="duotone" color="var(--astr-blue)" />,
+            label: '侧边聊天',
+            shortcut: bindings.sideChat || '未设置',
+            onClick: onOpenSideChat,
+          },
+        ]
+      : []),
+    ...(onOpenAgentGraph
+      ? [
+          {
+            icon: <GraphIcon size={20} weight="duotone" color="var(--astr-blue)" />,
+            label: '决策状态机',
+            shortcut: bindings.agentGraph || '未设置',
+            onClick: onOpenAgentGraph,
+          },
+        ]
+      : []),
+    ...(onOpenBrowser
+      ? [
+          {
+            icon: <BrowserIcon size={20} weight="duotone" color="var(--astr-blue)" />,
+            label: '浏览器',
+            shortcut: bindings.browser || '未设置',
+            onClick: onOpenBrowser,
+          },
+        ]
+      : []),
+    ...(onOpenTerminal
+      ? [
+          {
+            icon: <TerminalWindowIcon size={20} weight="duotone" color="var(--astr-blue)" />,
+            label: '终端',
+            shortcut: bindings.terminal || '未设置',
+            onClick: onOpenTerminal,
+          },
+        ]
+      : []),
     ...(onOpenDatabase
       ? [
           {
@@ -102,33 +130,41 @@ export function SidecarWelcomeMenu({
           data-liquid-surface="card"
           data-liquid-snapshot=".desktop-sidecar"
         >
-          {menuItems.map((item) => (
-            <UnstyledButton
-              key={item.label}
-              onClick={item.onClick}
-              className="sidecar-welcome-item"
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  {item.icon}
-                </span>
-                <Text size="sm" fw={500}>
-                  {item.label}
-                </Text>
-              </div>
-              <Text
-                size="xs"
-                c="dimmed"
-                className="sidecar-welcome-shortcut"
+          {menuItems.length > 0 ? (
+            menuItems.map((item) => (
+              <UnstyledButton
+                key={item.label}
+                onClick={item.onClick}
+                className="sidecar-welcome-item"
               >
-                {item.shortcut}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    {item.icon}
+                  </span>
+                  <Text size="sm" fw={500}>
+                    {item.label}
+                  </Text>
+                </div>
+                <Text
+                  size="xs"
+                  c="dimmed"
+                  className="sidecar-welcome-shortcut"
+                >
+                  {item.shortcut}
+                </Text>
+              </UnstyledButton>
+            ))
+          ) : (
+            <div style={{ padding: '18px 16px', textAlign: 'center' }}>
+              <Text size="xs" c="dimmed">
+                当前未启用侧边工作台工具插件，可在「设置 → 插件」中开启。
               </Text>
-            </UnstyledButton>
-          ))}
+            </div>
+          )}
         </div>
 
         {/* 推荐工作区信息 */}
-        {session.workspace && (
+        {session.workspace && onOpenFileTree && (
           <div style={{ marginTop: '20px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
               <SparkleIcon size={14} color="var(--astr-indigo)" />

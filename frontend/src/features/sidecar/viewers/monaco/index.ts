@@ -4,9 +4,13 @@ import { MonacoViewer } from './MonacoViewer'
 
 export const monacoViewer: ArtifactViewer = {
   id: 'monaco-viewer',
-  title: 'Monaco 代码与文本编辑器',
-  description: '全功能 VSCode 内核代码编辑器，支持全语法高亮、缩略图导航、行号与修改写回',
+  title: '代码与文本编辑器',
+  description: '全功能代码与文本编辑器，支持语法高亮、缩略图导航、行号与修改写回',
   version: '1.0.0',
+  category: 'development',
+  capabilitySlot: 'code-editor',
+  capabilityLabel: '代码编辑器',
+  implementationName: 'Monaco',
   badgeLabel: '[代码]',
   tabColor: 'var(--astr-indigo)',
   icon: IconCode,

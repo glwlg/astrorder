@@ -16,6 +16,15 @@ import { accountPlatforms } from '../features/agentAccounts/accountPlatforms'
 import { AstrorderLoader } from '../components/AnimatedStatus'
 import { ShinyText } from '../components/animations/ShinyText'
 import { useShortcutHandlers } from '../features/shortcuts/shortcuts'
+import {
+  SIDEBAR_INTEGRATIONS_PLUGIN_ID,
+  WORKSPACE_AGENT_ACCOUNTS_PLUGIN_ID,
+  WORKSPACE_ANALYTICS_GATEWAY_PLUGIN_ID,
+  WORKSPACE_BACKUPS_PLUGIN_ID,
+  WORKSPACE_GROUPS_PLUGIN_ID,
+  WORKSPACE_MONITOR_PLUGIN_ID,
+} from '../features/plugins/builtinPlugins'
+import { usePluginSettingsStore } from '../features/plugins/pluginSettingsStore'
 import { clientPerf, PerfProfiler } from '../perf/clientPerf'
 
 function lazyNamed<T extends ComponentType<any>>(
@@ -100,9 +109,15 @@ function AuthenticatedApp() {
   const queryClient = useQueryClient()
   const bootstrap = useBootstrap(true)
   const chatReturnPath = useChatReturnPath()
+  const groupsEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_GROUPS_PLUGIN_ID))
+  const monitorEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_MONITOR_PLUGIN_ID))
+  const analyticsEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_ANALYTICS_GATEWAY_PLUGIN_ID))
+  const backupsEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_BACKUPS_PLUGIN_ID))
+  const accountsEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_AGENT_ACCOUNTS_PLUGIN_ID))
+  const integrationsEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(SIDEBAR_INTEGRATIONS_PLUGIN_ID))
   useShortcutHandlers({
     chat: () => navigate(chatReturnPath),
-    monitor: () => navigate('/monitor'),
+    ...(monitorEnabled ? { monitor: () => navigate('/monitor') } : {}),
   })
   useEventStream(Boolean(bootstrap.data), queryClient, navigate)
   useServerOutboxSync(Boolean(bootstrap.data))
@@ -143,15 +158,15 @@ function AuthenticatedApp() {
         <Route path="chat" element={<ChatPage />} />
         <Route path="chat/:sessionId" element={<ChatPage />} />
         <Route path="inbox" element={<Suspense fallback={<RouteSuspenseFallback />}><ActionInboxPage /></Suspense>} />
-        <Route path="groups" element={<Suspense fallback={<RouteSuspenseFallback />}><GroupsPage /></Suspense>} />
-        <Route path="groups/:groupId" element={<Suspense fallback={<RouteSuspenseFallback />}><GroupsPage /></Suspense>} />
-        <Route path="monitor" element={<Suspense fallback={<RouteSuspenseFallback />}><MonitorPage /></Suspense>} />
+        <Route path="groups" element={groupsEnabled ? <Suspense fallback={<RouteSuspenseFallback />}><GroupsPage /></Suspense> : <Navigate to="/chat" replace />} />
+        <Route path="groups/:groupId" element={groupsEnabled ? <Suspense fallback={<RouteSuspenseFallback />}><GroupsPage /></Suspense> : <Navigate to="/chat" replace />} />
+        <Route path="monitor" element={monitorEnabled ? <Suspense fallback={<RouteSuspenseFallback />}><MonitorPage /></Suspense> : <Navigate to="/chat" replace />} />
         <Route path="swarm" element={<Navigate to="/chat" replace />} />
         <Route path="plugins" element={<Suspense fallback={<RouteSuspenseFallback />}><PluginsPage /></Suspense>} />
-        <Route path="analytics" element={<Suspense fallback={<RouteSuspenseFallback />}><AnalyticsPage /></Suspense>} />
-        <Route path="backups" element={<Suspense fallback={<RouteSuspenseFallback />}><BackupsPage /></Suspense>} />
-        <Route path="integrations/:integrationId" element={<Suspense fallback={<RouteSuspenseFallback />}><IntegrationPage /></Suspense>} />
-        <Route path="agent-accounts" element={<Suspense fallback={<RouteSuspenseFallback />}><AgentAccountsLayout /></Suspense>}>
+        <Route path="analytics" element={analyticsEnabled ? <Suspense fallback={<RouteSuspenseFallback />}><AnalyticsPage /></Suspense> : <Navigate to="/chat" replace />} />
+        <Route path="backups" element={backupsEnabled ? <Suspense fallback={<RouteSuspenseFallback />}><BackupsPage /></Suspense> : <Navigate to="/chat" replace />} />
+        <Route path="integrations/:integrationId" element={integrationsEnabled ? <Suspense fallback={<RouteSuspenseFallback />}><IntegrationPage /></Suspense> : <Navigate to="/chat" replace />} />
+        <Route path="agent-accounts" element={accountsEnabled ? <Suspense fallback={<RouteSuspenseFallback />}><AgentAccountsLayout /></Suspense> : <Navigate to="/chat" replace />}>
           {accountPlatforms.map(({ kind, path, Page }) =>
             <Route key={kind} path={path} element={<Suspense fallback={<RouteSuspenseFallback />}>{Page ? <Page /> : <UnavailablePlatformPage kind={kind} />}</Suspense>} />)}
         </Route>

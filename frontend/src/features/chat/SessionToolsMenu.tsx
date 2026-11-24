@@ -1,11 +1,18 @@
 import { ActionIcon, Menu } from '@mantine/core'
 import { BrainIcon, ChalkboardSimpleIcon, DotsThreeVerticalIcon } from '../../components/workbenchIcons'
 import type { Session } from '../../domain/types'
+import { BLACKBOARD_VIEWER_PLUGIN_ID, MEMORY_VIEWER_PLUGIN_ID } from '../plugins/builtinPlugins'
+import { usePluginSettingsStore } from '../plugins/pluginSettingsStore'
 import { useSidecarStore } from '../sidecar/sidecarStore'
 
 export function SessionToolsMenu({ session }: {
   session: Session
 }) {
+  const memoryEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(MEMORY_VIEWER_PLUGIN_ID))
+  const blackboardEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(BLACKBOARD_VIEWER_PLUGIN_ID))
+
+  if (!memoryEnabled && !blackboardEnabled) return null
+
   return (
     <Menu position="bottom-end" width={240}>
       <Menu.Target>
@@ -14,12 +21,16 @@ export function SessionToolsMenu({ session }: {
         </ActionIcon>
       </Menu.Target>
       <Menu.Dropdown>
-        <Menu.Item leftSection={<BrainIcon size={19} />} onClick={() => useSidecarStore.getState().openMemory(session.id)}>
-          知识记忆看板
-        </Menu.Item>
-        <Menu.Item leftSection={<ChalkboardSimpleIcon size={19} />} onClick={() => useSidecarStore.getState().openBlackboard(session.id, session.agent_id, session.connection_id || undefined)}>
-          作战黑板
-        </Menu.Item>
+        {memoryEnabled && (
+          <Menu.Item leftSection={<BrainIcon size={19} />} onClick={() => useSidecarStore.getState().openMemory(session.id)}>
+            知识记忆看板
+          </Menu.Item>
+        )}
+        {blackboardEnabled && (
+          <Menu.Item leftSection={<ChalkboardSimpleIcon size={19} />} onClick={() => useSidecarStore.getState().openBlackboard(session.id, session.agent_id, session.connection_id || undefined)}>
+            作战黑板
+          </Menu.Item>
+        )}
       </Menu.Dropdown>
     </Menu>
   )

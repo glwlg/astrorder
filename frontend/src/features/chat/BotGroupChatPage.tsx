@@ -48,6 +48,8 @@ import { scopeKey } from "../../domain/semantics";
 import { GroupFileSourceScope } from "./GroupFileSourceScope";
 import { applyVoiceTranscript, useVoiceInput } from "./useVoiceInput";
 import { MobileVoiceHold } from "../mobile/MobileVoiceHold";
+import { VOICE_INPUT_PLUGIN_ID } from "../plugins/builtinPlugins";
+import { usePluginSettingsStore } from "../plugins/pluginSettingsStore";
 
 const EMPTY_GROUP_DRAFT: DraftState = { text: "", attachments: [] };
 
@@ -134,6 +136,7 @@ export function BotGroupChatPage({
   const activeLoadRef = useRef<{ groupId: string; request: number } | null>(null);
   currentGroupRef.current = group.id;
   const groupScope = scopeKey("group", group.id);
+  const voicePluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(VOICE_INPUT_PLUGIN_ID));
   const voice = useVoiceInput(groupScope, (transcript, event) => {
     if (event.kind === "final" && event.submit) {
       void send(transcript);
@@ -868,12 +871,12 @@ export function BotGroupChatPage({
               >
                 <IconAt size={19} />
               </button>
-              <MobileVoiceHold scope={groupScope} voice={voice} disabled={input.length > 0}>
+              <MobileVoiceHold scope={groupScope} voice={voice} disabled={!voicePluginEnabled || input.length > 0}>
                 <textarea
                   ref={textareaRef}
                   aria-label="群聊消息"
                   enterKeyHint="enter"
-                  placeholder="发群消息，按住说话…"
+                  placeholder={voicePluginEnabled ? "发群消息，按住说话…" : "发群消息…"}
                   rows={1}
                   value={input}
                   onChange={(e) => {
@@ -886,14 +889,16 @@ export function BotGroupChatPage({
                   disabled={submitting}
                 />
               </MobileVoiceHold>
-              <button
-                type="button"
-                aria-label={voice.status === "recording" || voice.status === "requesting" ? "停止录音" : voice.status === "transcribing" ? "正在转写" : "语音消息"}
-                disabled={submitting || voice.status === "transcribing"}
-                onClick={voice.toggle}
-              >
-                {voice.status === "recording" || voice.status === "requesting" ? <IconPlayerStop size={19} color="#ef4444" /> : <IconMicrophone size={19} />}
-              </button>
+              {voicePluginEnabled && (
+                <button
+                  type="button"
+                  aria-label={voice.status === "recording" || voice.status === "requesting" ? "停止录音" : voice.status === "transcribing" ? "正在转写" : "语音消息"}
+                  disabled={submitting || voice.status === "transcribing"}
+                  onClick={voice.toggle}
+                >
+                  {voice.status === "recording" || voice.status === "requesting" ? <IconPlayerStop size={19} color="#ef4444" /> : <IconMicrophone size={19} />}
+                </button>
+              )}
               <button
                 type="button"
                 className="m-send"

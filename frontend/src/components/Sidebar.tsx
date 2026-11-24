@@ -24,7 +24,16 @@ import { connectionName } from './AgentSessionFilter'
 import { scopeKey } from '../domain/semantics'
 import { SessionAccountsHoverCard } from '../features/agentAccounts/SessionAccountsHoverCard'
 import { agySessionEnvironment } from '../features/agentAccounts/AgyQuotaRefreshProvider'
-import { SIDEBAR_INTEGRATIONS_PLUGIN_ID, usePluginSettingsStore } from '../features/plugins/pluginSettingsStore'
+import {
+  COMMAND_COMPRESSION_PLUGIN_ID,
+  SIDEBAR_INTEGRATIONS_PLUGIN_ID,
+  WORKSPACE_AGENT_ACCOUNTS_PLUGIN_ID,
+  WORKSPACE_ANALYTICS_GATEWAY_PLUGIN_ID,
+  WORKSPACE_BACKUPS_PLUGIN_ID,
+  WORKSPACE_GROUPS_PLUGIN_ID,
+  WORKSPACE_MONITOR_PLUGIN_ID,
+} from '../features/plugins/builtinPlugins'
+import { usePluginSettingsStore } from '../features/plugins/pluginSettingsStore'
 import { useIntegrationsStore } from '../features/integrations/integrationStore'
 import { IntegrationIcon } from '../features/integrations/integrationIcons'
 import { IntegrationFormModal } from '../features/integrations/IntegrationFormModal'
@@ -164,6 +173,20 @@ export function Sidebar({
   const [draggingIntegrationId, setDraggingIntegrationId] = useState<string | null>(null)
   const [dragOverIntegration, setDragOverIntegration] = useState<{ id: string; pos: 'before' | 'after' } | null>(null)
   const integrationsPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(SIDEBAR_INTEGRATIONS_PLUGIN_ID))
+  const commandCompressionEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(COMMAND_COMPRESSION_PLUGIN_ID))
+  const groupsPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_GROUPS_PLUGIN_ID))
+  const monitorPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_MONITOR_PLUGIN_ID))
+  const analyticsGatewayEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_ANALYTICS_GATEWAY_PLUGIN_ID))
+  const backupsPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_BACKUPS_PLUGIN_ID))
+  const agentAccountsEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_AGENT_ACCOUNTS_PLUGIN_ID))
+  const visibleNavItems = navItems.filter((item) => {
+    if (item.id === 'groups') return groupsPluginEnabled
+    if (item.id === 'monitor') return monitorPluginEnabled
+    if (item.id === 'analytics') return analyticsGatewayEnabled
+    if (item.id === 'backups') return backupsPluginEnabled
+    if (item.id === 'agentAccounts') return agentAccountsEnabled
+    return true
+  })
   const integrationItems = useIntegrationsStore((s) => s.items)
   const reorderIntegrations = useIntegrationsStore((s) => s.reorder)
   const visibleIntegrations = integrationItems.filter((item) => item.visible)
@@ -190,7 +213,10 @@ export function Sidebar({
     if (!integrationsPluginEnabled && settingsTab === 'integrations') {
       setSettingsTab('plugins')
     }
-  }, [integrationsPluginEnabled, settingsTab])
+    if (!commandCompressionEnabled && settingsTab === 'rtk') {
+      setSettingsTab('plugins')
+    }
+  }, [commandCompressionEnabled, integrationsPluginEnabled, settingsTab])
 
   useShortcutHandlers(onNavigate ? {} : { settings: () => setSettingsOpened(true) }, true)
   useEffect(() => {
@@ -202,14 +228,28 @@ export function Sidebar({
       }
       setSettingsOpened(true)
     }
+    const onCloseSettings = () => setSettingsOpened(false)
+    const onNavigateRoute = (event: Event) => {
+      const detail = (event as CustomEvent<{ to?: string }>).detail
+      if (detail?.to) {
+        setSettingsOpened(false)
+        navigate(detail.to)
+      }
+    }
     window.addEventListener('astrorder:open-settings', onOpenSettings)
-    return () => window.removeEventListener('astrorder:open-settings', onOpenSettings)
-  }, [onNavigate])
+    window.addEventListener('astrorder:close-settings', onCloseSettings)
+    window.addEventListener('astrorder:navigate', onNavigateRoute)
+    return () => {
+      window.removeEventListener('astrorder:open-settings', onOpenSettings)
+      window.removeEventListener('astrorder:close-settings', onCloseSettings)
+      window.removeEventListener('astrorder:navigate', onNavigateRoute)
+    }
+  }, [navigate, onNavigate])
   const [isMonitorDragOver, setIsMonitorDragOver] = useState(false)
   const todayUsage = useQuery({
     queryKey: ['astrorder', 'analytics', 'today-models'],
     queryFn: () => api.getAnalyticsUsage({ range: 'today', surface: 'all' }),
-    enabled: !onNavigate,
+    enabled: !onNavigate && analyticsGatewayEnabled,
     staleTime: 180_000,
     refetchInterval: 180_000,
     refetchIntervalInBackground: false,
@@ -266,7 +306,7 @@ export function Sidebar({
         <div id={skyId} className="workspace-sidebar-sky" aria-hidden="true" />
         <nav className="workspace-navigation" aria-label="主导航">
           <div className="sidebar-primary-nav">
-            {navItems.map(({ to, label, icon: Icon, id }) => {
+            {visibleNavItems.map(({ to, label, icon: Icon, id }) => {
               const isThisMonitor = id === 'monitor'
               const isActive =
                 (id === 'inbox' && isInbox) ||
@@ -579,7 +619,9 @@ export function Sidebar({
                 <Tabs.Tab value="connections" leftSection={<SlidersHorizontalIcon size={16} />}>连接</Tabs.Tab>
                 <Tabs.Tab value="models" leftSection={<CpuIcon size={16} />}>模型与网关</Tabs.Tab>
                 <Tabs.Tab value="skills" leftSection={<LightningIcon size={16} />}>能力中心</Tabs.Tab>
-                <Tabs.Tab value="rtk" leftSection={<ChartLineUpIcon size={16} />}>RTK</Tabs.Tab>
+                {commandCompressionEnabled && (
+                  <Tabs.Tab value="rtk" leftSection={<ChartLineUpIcon size={16} />}>命令压缩</Tabs.Tab>
+                )}
                 <Tabs.Tab value="network" leftSection={<GlobeHemisphereWestIcon size={16} />}>网络与移动端</Tabs.Tab>
                 <Tabs.Tab value="shortcuts" leftSection={<KeyboardIcon size={16} />}>快捷键</Tabs.Tab>
                 <Tabs.Tab value="desktop" leftSection={<DesktopIcon size={16} />}>桌面客户端</Tabs.Tab>
@@ -593,7 +635,9 @@ export function Sidebar({
               <Tabs.Panel value="skills" className="settings-tab-panel" data-tab-panel-skills="true" style={{ overflow: 'hidden' }}>
                 <CapabilitiesSettingsCard />
               </Tabs.Panel>
-              <Tabs.Panel value="rtk" className="settings-tab-panel" keepMounted={false}><RtkSettingsPage /></Tabs.Panel>
+              {commandCompressionEnabled && (
+                <Tabs.Panel value="rtk" className="settings-tab-panel" keepMounted={false}><RtkSettingsPage /></Tabs.Panel>
+              )}
               <Tabs.Panel value="network" className="settings-tab-panel"><NetworkSettingsPage /></Tabs.Panel>
               <Tabs.Panel value="shortcuts" className="settings-tab-panel" keepMounted={false}><ShortcutSettingsPage /></Tabs.Panel>
               <Tabs.Panel value="desktop" className="settings-tab-panel"><DesktopSettingsPage /></Tabs.Panel>

@@ -4,9 +4,13 @@ import { XtermViewer } from './XtermViewer'
 
 export const xtermViewer: ArtifactViewer = {
   id: 'xterm-viewer',
-  title: '交互式终端 (Xterm.js)',
+  title: '交互式终端',
   description: '支持 PTY 虚拟终端交互、ANSI 颜色代码回显及 Shell 命令行控制',
   version: '1.0.0',
+  category: 'development',
+  capabilitySlot: 'terminal',
+  capabilityLabel: '交互终端',
+  implementationName: 'Xterm.js',
   badgeLabel: '[终端]',
   tabColor: '#eab308',
   icon: IconTerminal2,

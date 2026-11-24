@@ -6,8 +6,12 @@ import { SidecarMemoryPanel } from '../../SidecarMemoryPanel'
 export const memoryViewer: ArtifactViewer = {
   id: 'memory-viewer',
   title: '知识记忆',
-  description: 'OpenViking 虚拟文件系统 (viking://) 知识库资源与排障经验看板',
+  description: '跨 Agent 共享的项目级持久记忆与知识库，支持查看知识树与一键下发多环境 Hooks',
   version: '0.1.0',
+  category: 'workspace',
+  capabilitySlot: 'knowledge-memory',
+  capabilityLabel: '知识记忆',
+  providerConfigKey: 'provider',
   badgeLabel: '[记忆]',
   tabColor: 'var(--astr-indigo, #6366f1)',
   icon: IconBrain,
@@ -22,9 +26,20 @@ export const memoryViewer: ArtifactViewer = {
     return 0
   },
   capabilities: { canEdit: false },
+  configOptions: [
+    {
+      key: 'provider',
+      label: '工具实现',
+      description: '选择跨 Agent 知识库与长期记忆的底层实现，可按需替换或停用',
+      type: 'select',
+      options: [{ label: 'OpenViking', value: 'openviking' }],
+      defaultValue: 'openviking',
+    },
+  ],
+  settingsAction: { tab: 'models', label: '配置记忆服务' },
   component: MemoryViewerComponent,
   documentation: {
-    summary: 'OpenViking 为星序提供跨 Agent 共享的项目级持久记忆与知识库支持。',
+    summary: '提供星序的跨 Agent 项目级持久记忆与知识库能力（当前内置 OpenViking 虚拟文件系统实现）。',
     sections: [
       {
         title: '虚拟文件系统 (viking://)',

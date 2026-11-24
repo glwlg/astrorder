@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../../api/client'
+import { VOICE_INPUT_PLUGIN_ID } from '../plugins/builtinPlugins'
+import { usePluginSettingsStore } from '../plugins/pluginSettingsStore'
 import { startLocalVoiceStream, type LocalVoiceStreamController } from './localVoiceStream'
 
 export type VoiceTranscriptEvent =
@@ -83,7 +85,13 @@ export function useVoiceInput(scope: string, onText: (text: string, event: Voice
       const media = await navigator.mediaDevices.getUserMedia({ audio: true })
       if (!valid()) { media.getTracks().forEach(track => track.stop()); return }
       stream.current = media
-      const localStatus = await api.getLocalVoicePlugin().catch(() => null)
+      const voiceProvider = usePluginSettingsStore
+        .getState()
+        .getPluginConfig<string>(VOICE_INPUT_PLUGIN_ID, 'provider', 'local-r2t2')
+      const localStatus =
+        voiceProvider === 'cloud-whisper'
+          ? null
+          : await api.getLocalVoicePlugin().catch(() => null)
       if (!valid()) { media.getTracks().forEach(track => track.stop()); return }
       if (localStatus?.state === 'running') {
         const controller = await startLocalVoiceStream(media, {
