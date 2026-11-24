@@ -11,6 +11,8 @@ import {
   IconMovie,
 } from '@tabler/icons-react'
 import { highlightCode, parseCalloutBlockquote, type CalloutKind } from '../../components/markdownHighlight'
+import { usePluginSettingsStore } from '../plugins/pluginSettingsStore'
+import { DBX_PLUGIN_ID, isSqlLanguage } from '../sidecar/viewers/dbx'
 import { extractMobileMarkdownImageUrls, isMobileImageFilePath, isMobileLocalFilePath, isMobileVideoFilePath, mobileFileUrl, resolveMobileFilePath } from './mobileFilePath'
 
 const CALLOUT_ICONS: Record<CalloutKind, typeof IconInfoCircle> = {
@@ -21,11 +23,12 @@ const CALLOUT_ICONS: Record<CalloutKind, typeof IconInfoCircle> = {
   caution: IconFlame,
 }
 
-function CodeBlock({ children }: { children?: ReactNode }) {
+function CodeBlock({ children, onSqlOpen }: { children?: ReactNode; onSqlOpen?: (sql: string) => void }) {
   const element = useRef<HTMLPreElement>(null)
   const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [wrap, setWrap] = useState(false)
   const [copied, setCopied] = useState(false)
+  const dbxPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(DBX_PLUGIN_ID))
 
   useEffect(() => () => {
     if (copiedTimer.current !== null) clearTimeout(copiedTimer.current)
@@ -39,12 +42,24 @@ function CodeBlock({ children }: { children?: ReactNode }) {
     if (typeof children.props.children === 'string') rawText = children.props.children
   }
   const highlighted = rawText && language ? highlightCode(rawText, language) : null
+  const isSqlBlock = Boolean(language && isSqlLanguage(language))
 
   return (
     <div className="m-code-block">
       <div className="m-code-actions">
         {language ? <span className="m-code-lang">{language.toUpperCase()}</span> : <span />}
         <div className="m-code-btns">
+          {isSqlBlock && dbxPluginEnabled && onSqlOpen && (
+            <button
+              type="button"
+              onClick={() => {
+                const sql = element.current?.textContent || rawText
+                if (sql.trim()) onSqlOpen(sql)
+              }}
+            >
+              DBX 打开
+            </button>
+          )}
           <button type="button" onClick={() => setWrap(!wrap)}>{wrap ? '取消换行' : '换行'}</button>
           <button
             type="button"
@@ -77,11 +92,12 @@ function CodeBlock({ children }: { children?: ReactNode }) {
   )
 }
 
-export function MobileMarkdown({ value, onFileClick, onImageClick, onVideoClick, workspace, sessionId, connectionId }: {
+export function MobileMarkdown({ value, onFileClick, onImageClick, onVideoClick, onSqlOpen, workspace, sessionId, connectionId }: {
   value: string
   onFileClick?: (path: string) => void
   onImageClick?: (url: string, gallery?: string[]) => void
   onVideoClick?: (url: string, name: string) => void
+  onSqlOpen?: (sql: string) => void
   workspace?: string | null
   sessionId?: string
   connectionId?: string | null
@@ -91,8 +107,8 @@ export function MobileMarkdown({ value, onFileClick, onImageClick, onVideoClick,
     () => extractMobileMarkdownImageUrls(value, workspace, sessionId, connectionId),
     [value, workspace, sessionId, connectionId],
   )
-  const callbacks = useRef({ onFileClick, onImageClick, onVideoClick })
-  callbacks.current = { onFileClick, onImageClick, onVideoClick }
+  const callbacks = useRef({ onFileClick, onImageClick, onVideoClick, onSqlOpen })
+  callbacks.current = { onFileClick, onImageClick, onVideoClick, onSqlOpen }
   const openImage = (targetUrl: string) => {
     const gallery = galleryRef.current
     if (gallery.length > 1) {
@@ -103,7 +119,11 @@ export function MobileMarkdown({ value, onFileClick, onImageClick, onVideoClick,
     }
   }
   const components = useMemo<Components>(() => ({
-    pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
+    pre: ({ children }) => (
+      <CodeBlock onSqlOpen={onSqlOpen ? (sql) => callbacks.current.onSqlOpen?.(sql) : undefined}>
+        {children}
+      </CodeBlock>
+    ),
     blockquote: ({ children }) => {
       const callout = parseCalloutBlockquote(children)
       if (callout) {
@@ -186,6 +206,6 @@ export function MobileMarkdown({ value, onFileClick, onImageClick, onVideoClick,
       return <img src={url} alt={alt || ''} loading="lazy" style={{ maxWidth: '100%', borderRadius: 8, marginTop: 8, marginBottom: 8, display: 'block' }} />
     },
     table: ({ children }) => <div className="m-table-wrap"><table>{children}</table></div>,
-  }), [workspace, sessionId, connectionId, Boolean(onFileClick), Boolean(onImageClick), Boolean(onVideoClick)])
+  }), [workspace, sessionId, connectionId, Boolean(onFileClick), Boolean(onImageClick), Boolean(onVideoClick), Boolean(onSqlOpen)])
   return <div className="markdown-content"><ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml urlTransform={url => url} components={components}>{value}</ReactMarkdown></div>
 }

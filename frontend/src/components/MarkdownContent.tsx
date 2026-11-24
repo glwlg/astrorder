@@ -5,6 +5,7 @@ import {
   IconBulb,
   IconCheck,
   IconCopy,
+  IconDatabase,
   IconExternalLink,
   IconEye,
   IconFile,
@@ -16,14 +17,14 @@ import {
   IconTextWrap,
 } from '@tabler/icons-react'
 import { Anchor } from '@mantine/core'
-import { isValidElement, memo, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createContext, isValidElement, memo, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { Session } from '../domain/types'
 import { api } from '../api/client'
 import { artifactViewerRegistry, isNonPreviewableFile } from '../features/sidecar/registry'
 import { usePluginSettingsStore } from '../features/plugins/pluginSettingsStore'
-import { DBX_PLUGIN_ID, isSqlFilePath, openSqlFileInDbx } from '../features/sidecar/viewers/dbx'
+import { DBX_PLUGIN_ID, isSqlFilePath, isSqlLanguage, openSqlFileInDbx, openSqlSnippetInDbx } from '../features/sidecar/viewers/dbx'
 import { videoMediaType } from '../features/sidecar/viewers/video/formats'
 import { resolveArtifactFromPath } from '../features/sidecar/resolver'
 import { useSidecarStore } from '../features/sidecar/sidecarStore'
@@ -99,11 +100,15 @@ function MermaidDiagram({ code }: { code: string }) {
   )
 }
 
+const MarkdownSessionContext = createContext<Session | null>(null)
+
 function MarkdownCodeBlock({ children }: { children?: ReactNode }) {
   const [copied, setCopied] = useState(false)
   const [wrap, setWrap] = useState(false)
   const codeRef = useRef<HTMLElement>(null)
   const openArtifact = useSidecarStore((state) => state.openArtifact)
+  const session = useContext(MarkdownSessionContext)
+  const dbxPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(DBX_PLUGIN_ID))
 
   let language = ''
   let rawText = ''
@@ -113,6 +118,14 @@ function MarkdownCodeBlock({ children }: { children?: ReactNode }) {
     if (typeof children.props.children === 'string') rawText = children.props.children
   }
   const lineCount = rawText ? rawText.split('\n').length : 0
+  const isSqlBlock = Boolean(language && isSqlLanguage(language))
+
+  const handleOpenInDbx = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    const text = codeRef.current?.innerText || codeRef.current?.textContent || rawText
+    if (!text.trim()) return
+    openSqlSnippetInDbx({ sql: text, session })
+  }
 
   const handleCopy = (e: React.MouseEvent) => {
     e.stopPropagation()
@@ -155,6 +168,18 @@ function MarkdownCodeBlock({ children }: { children?: ReactNode }) {
       <div className="markdown-code-header">
         <span className="markdown-code-lang">{(language || 'code').toUpperCase()}</span>
         <div className="markdown-code-actions">
+          {isSqlBlock && dbxPluginEnabled && (
+            <button
+              type="button"
+              className="markdown-code-copy-btn markdown-dbx-btn"
+              onClick={handleOpenInDbx}
+              aria-label="在右侧 DBX 中打开此 SQL"
+              title="载入右侧 DBX 查询标签页（不自动执行）"
+            >
+              <IconDatabase size={12} aria-hidden="true" />
+              <span>DBX 打开</span>
+            </button>
+          )}
           <button
             type="button"
             className={`markdown-code-copy-btn${wrap ? ' is-active' : ''}`}
@@ -651,6 +676,7 @@ export const MarkdownContent = memo(function MarkdownContent({
   }
 
   return (
+    <MarkdownSessionContext.Provider value={currentSession ?? null}>
     <div className="markdown-content">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
@@ -892,5 +918,6 @@ export const MarkdownContent = memo(function MarkdownContent({
       )}
       {visualizations.paths.map(path => <CodexVisualization key={path} path={path} session={currentSession} />)}
     </div>
+    </MarkdownSessionContext.Provider>
   )
 })

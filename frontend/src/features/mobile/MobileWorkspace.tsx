@@ -10,7 +10,7 @@ import { useReducedMotion } from '@mantine/hooks'
 import { AnimatePresence, motion } from 'motion/react'
 import { api } from '../../api/client'
 import { usePluginSettingsStore } from '../plugins/pluginSettingsStore'
-import { DBX_PLUGIN_ID, isSqlFilePath, openSqlFileInDbx } from '../sidecar/viewers/dbx'
+import { DBX_PLUGIN_ID, isSqlFilePath, openSqlFileInDbx, openSqlSnippetInDbx } from '../sidecar/viewers/dbx'
 import { sessionHandoffTargets } from '../../domain/handoff'
 import type { Agent, AgentCommand, AgentMention, Approval, BotGroup, Command, Message, Session, Task } from '../../domain/types'
 import { findSessionHandoff, newCommandId, scopeKey } from '../../domain/semantics'
@@ -356,6 +356,12 @@ export function MobileWorkspace() {
   const openVideoPreview = useCallback((url: string, name: string) => {
     setVideoPreview({ url, name })
   }, [])
+  const openSqlSnippet = (sql: string) => {
+    if (!selected) return
+    useSidecarStore.getState().switchSession(`${selected.agent_id}:${selected.id}`)
+    openSqlSnippetInDbx({ sql, session: selected })
+    openWorkbench()
+  }
   const openFile = (path: string) => {
     if (!selected) return
     if (usePluginSettingsStore.getState().isPluginEnabled(DBX_PLUGIN_ID) && isSqlFilePath(path)) {
@@ -1296,7 +1302,7 @@ export function MobileWorkspace() {
       </div>
       {goal && <button className={`m-goal-summary is-${goal.tone}`} aria-label="目标管理" title={goalSupported ? '管理原生目标' : '查看原生目标'} onClick={() => setSheet('goal')}><IconNotes size={15} /><span>{`${goal.label} · ${goal.title}`}</span></button>}
       {!!visibleTasks.length && <button className="m-task-summary" aria-label="任务与子代理" onClick={() => setSheet('tasks')}>任务与子代理 · {activeTasks.length} 项活动 / {visibleTasks.length} 项记录</button>}
-      <MobileTranscript session={selected} activityBreaks={resources.activityBreaks} readOnly={readOnly} messages={messages} commands={commands} approvals={approvals} onApproval={(approval, action) => void handleApproval(approval, action)} busy={busy || liveActive} loadOlder={() => resources.messages.fetchNextPage()} hasOlder={!!resources.messages.hasNextPage} loadingOlder={resources.messages.isFetchingNextPage} onMessageAction={anchor => setMessageAction({ ...anchor, sessionKey: key })} onImage={openImagePreview} onVideo={openVideoPreview} onFile={openFile} workspace={selected?.workspace} connectionId={selected?.connection_id} onSwipe={switchSession} onSwipePreview={setSessionDrag} checkpoints={sessionCheckpoints.items} onOpenCheckpoint={(cp: SessionCheckpoint) => { setFocusedCheckpointId(cp.id); setSheet('checkpoints') }} highlightMessageId={new URLSearchParams(location.search).get('message_id')} />
+      <MobileTranscript session={selected} activityBreaks={resources.activityBreaks} readOnly={readOnly} messages={messages} commands={commands} approvals={approvals} onApproval={(approval, action) => void handleApproval(approval, action)} busy={busy || liveActive} loadOlder={() => resources.messages.fetchNextPage()} hasOlder={!!resources.messages.hasNextPage} loadingOlder={resources.messages.isFetchingNextPage} onMessageAction={anchor => setMessageAction({ ...anchor, sessionKey: key })} onImage={openImagePreview} onVideo={openVideoPreview} onFile={openFile} onSqlOpen={openSqlSnippet} workspace={selected?.workspace} connectionId={selected?.connection_id} onSwipe={switchSession} onSwipePreview={setSessionDrag} checkpoints={sessionCheckpoints.items} onOpenCheckpoint={(cp: SessionCheckpoint) => { setFocusedCheckpointId(cp.id); setSheet('checkpoints') }} highlightMessageId={new URLSearchParams(location.search).get('message_id')} />
     </MobileSessionDeck> : <div className="m-empty">从左上角选择会话，或新建会话</div>}</main>
     <section ref={composer} className="m-composer-float">
       {selected && <SessionConnectionNotice key={`connection:${key}`} session={selected} error={(resources.messages.error || resources.commands.error || resources.tasks.error) ? messageError(resources.messages.error || resources.commands.error || resources.tasks.error) : undefined} onRetry={() => Promise.all([resources.messages.refetch(), resources.commands.refetch(), resources.tasks.refetch()])} />}

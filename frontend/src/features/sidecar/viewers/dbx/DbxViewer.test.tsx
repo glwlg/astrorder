@@ -323,4 +323,63 @@ describe('DbxViewer & MarkdownLinkMenu', () => {
       expect(active?.viewerId).toBe('monaco-viewer')
     })
   })
+
+  it('adds a DBX open button to fenced SQL code blocks when plugin is enabled', async () => {
+    const sampleSession = {
+      id: 'sess-sql-block',
+      agent_id: 'codex',
+      title: 'OpsCore',
+      workspace: '/home/luwei/workspace/OpsCore',
+      status: 'idle' as const,
+      updated_at: '2026-11-24T00:00:00Z',
+    }
+    useSidecarStore.setState({
+      isOpen: false,
+      activeTabId: '',
+      tabs: [],
+      dirtyTabs: {},
+      activeSessionKey: 'codex:sess-sql-block',
+      sessionMemories: {},
+    })
+
+    const sqlSnippet = [
+      'SELECT version, checksum',
+      'FROM agent_maintenance_schema_migrations',
+      "WHERE module = 'agent-maintenance'",
+      'ORDER BY version;',
+    ].join('\n')
+
+    const { rerender } = render(
+      <MantineProvider>
+        <MarkdownContent
+          value={`\`\`\`sql\n${sqlSnippet}\n\`\`\`\n\n\`\`\`ts\nconst x = 1\n\`\`\``}
+          session={sampleSession}
+        />
+      </MantineProvider>,
+    )
+
+    const dbxButtons = screen.getAllByRole('button', { name: '在右侧 DBX 中打开此 SQL' })
+    expect(dbxButtons).toHaveLength(1)
+
+    fireEvent.click(dbxButtons[0])
+    await waitFor(() => {
+      expect(useSidecarStore.getState().activeTabId).toBe('dbx:workbench')
+    })
+    const queued = useDbxSidecarStore.getState().itemsBySession['sess-sql-block'] || []
+    expect(queued).toHaveLength(1)
+    expect(queued[0].filename).toBe('select_agent_maintenance_schema_migrations.sql')
+    expect(queued[0].content).toBe(sqlSnippet)
+    expect(queued[0].isSnippet).toBe(true)
+
+    usePluginSettingsStore.setState({ enabledPlugins: { 'dbx-viewer': false } })
+    rerender(
+      <MantineProvider>
+        <MarkdownContent
+          value={`\`\`\`sql\n${sqlSnippet}\n\`\`\``}
+          session={sampleSession}
+        />
+      </MantineProvider>,
+    )
+    expect(screen.queryByRole('button', { name: '在右侧 DBX 中打开此 SQL' })).toBeNull()
+  })
 })

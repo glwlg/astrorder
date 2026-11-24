@@ -3,7 +3,7 @@ import { notifications } from '@mantine/notifications'
 import { authenticatedApiFetch } from '../../../../api/client'
 import type { Session } from '../../../../domain/types'
 import { useSidecarStore } from '../../sidecarStore'
-import { extractSqlFileName, extractSqlLine, stripSqlLocationSuffix } from './sqlFormats'
+import { buildSqlSnippetFilename, extractSqlFileName, extractSqlLine, stripSqlLocationSuffix } from './sqlFormats'
 
 export interface DbxSqlEntry {
   id: string
@@ -11,6 +11,7 @@ export interface DbxSqlEntry {
   filename: string
   content: string
   line?: number
+  isSnippet?: boolean
   sessionId: string
   agentId: string
   connectionId?: string
@@ -38,6 +39,7 @@ interface DbxSidecarState {
       filename: string
       content: string
       line?: number
+      isSnippet?: boolean
       agentId?: string
       connectionId?: string
     },
@@ -77,6 +79,7 @@ export const useDbxSidecarStore = create<DbxSidecarState>((set, get) => ({
           filename: input.filename,
           content: input.content,
           line: input.line,
+          isSnippet: input.isSnippet ?? existing.isSnippet,
           agentId: input.agentId ?? existing.agentId,
           connectionId: input.connectionId ?? existing.connectionId,
           status: 'pending',
@@ -89,6 +92,7 @@ export const useDbxSidecarStore = create<DbxSidecarState>((set, get) => ({
           filename: input.filename,
           content: input.content,
           line: input.line,
+          isSnippet: input.isSnippet,
           sessionId: key,
           agentId: input.agentId || '',
           connectionId: input.connectionId,
@@ -241,6 +245,51 @@ export async function openSqlFileInDbx(params: {
       filename,
       content: sqlText,
       line,
+      agentId,
+      connectionId,
+    },
+    { forceNew: params.forceNew },
+  )
+
+  useSidecarStore.getState().openDbx(sessionId, agentId, connectionId)
+}
+
+function hashSqlSnippet(value: string): string {
+  let hash = 2166136261
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i)
+    hash = Math.imul(hash, 16777619)
+  }
+  return (hash >>> 0).toString(36)
+}
+
+export function openSqlSnippetInDbx(params: {
+  sql: string
+  filename?: string
+  session?: Pick<Session, 'id' | 'agent_id' | 'connection_id'> | null
+  sessionId?: string
+  agentId?: string
+  connectionId?: string
+  forceNew?: boolean
+}): void {
+  const sqlText = params.sql.replace(/\r\n/g, '\n').trim()
+  if (!sqlText) {
+    notifications.show({ color: 'yellow', message: 'SQL 代码块为空' })
+    return
+  }
+  const sessionId = params.session?.id || params.sessionId || 'global'
+  const agentId = params.session?.agent_id || params.agentId || ''
+  const connectionId = params.session?.connection_id || params.connectionId
+  const hash = hashSqlSnippet(sqlText)
+  const filename = params.filename?.trim() || buildSqlSnippetFilename(sqlText, hash)
+
+  useDbxSidecarStore.getState().enqueueSql(
+    sessionId,
+    {
+      path: `inline-sql:${hash}`,
+      filename,
+      content: sqlText,
+      isSnippet: true,
       agentId,
       connectionId,
     },

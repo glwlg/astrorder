@@ -22,11 +22,11 @@ import { HandoffSummaryCard } from '../chat/HandoffSummaryCard'
 
 export interface MessageActionAnchor { text: string; x: number; y: number; element: HTMLElement; selectText?: () => void }
 
-export function MobileTranscript({ session, messages, activityBreaks, commands = [], approvals = [], onApproval, busy, loadOlder, hasOlder, loadingOlder, onMessageAction, onImage, onVideo, onFile, workspace, connectionId, readOnly = false, onSwipe, onSwipePreview, checkpoints, onOpenCheckpoint, highlightMessageId }: {
+export function MobileTranscript({ session, messages, activityBreaks, commands = [], approvals = [], onApproval, busy, loadOlder, hasOlder, loadingOlder, onMessageAction, onImage, onVideo, onFile, onSqlOpen, workspace, connectionId, readOnly = false, onSwipe, onSwipePreview, checkpoints, onOpenCheckpoint, highlightMessageId }: {
   session?: Session | null
   messages: Message[]; commands?: import('../../domain/types').Command[]; approvals?: Approval[]; onApproval?: (approval: Approval, action: 'approve' | 'cancel') => void
   busy: boolean; loadOlder: () => unknown; hasOlder: boolean; loadingOlder: boolean
-  onMessageAction: (anchor: MessageActionAnchor) => void; onImage: (url: string, gallery?: string[]) => void; onVideo?: (url: string, name: string) => void; onFile?: (path: string) => void; workspace?: string | null; connectionId?: string | null; onSwipe: (gesture: SessionSwipeGesture) => void
+  onMessageAction: (anchor: MessageActionAnchor) => void; onImage: (url: string, gallery?: string[]) => void; onVideo?: (url: string, name: string) => void; onFile?: (path: string) => void; onSqlOpen?: (sql: string) => void; workspace?: string | null; connectionId?: string | null; onSwipe: (gesture: SessionSwipeGesture) => void
   readOnly?: boolean
   activityBreaks?: readonly string[]
   onSwipePreview?: (pose: import('./mobileGestures').SessionCardPose | null) => void
@@ -193,7 +193,7 @@ export function MobileTranscript({ session, messages, activityBreaks, commands =
           onContextMenu={e => { if ((e.target as Element).closest('.m-select-text')) return; e.preventDefault(); e.stopPropagation(); cancelHold(); const rect = e.currentTarget.getBoundingClientRect(); action(m, e.currentTarget, e.clientX || rect.left + rect.width / 2, e.clientY || rect.top + 20) }}
           onTouchStart={e => { cancelHold(); if ((e.target as Element).closest('.m-select-text')) return; const element = e.currentTarget; const point = e.touches[0]; hold.current = setTimeout(() => { action(m, element, point.clientX, point.clientY); navigator.vibrate?.(20) }, 500) }}>
           {isAsyncQuestion(m) && <AsyncUserInputCard message={m} commands={commands} readOnly={readOnly} continued={hasLaterNativeInput(rows, i)} />}
-          {!isAsyncQuestion(m) && m.text.trim() && <div className="m-bubble"><MessageBody value={m.text} user={m.role === 'user'} onImageClick={onImage} attachmentNames={m.attachments.filter((attachment) => attachment.media_type.startsWith('image/')).map((attachment) => attachment.name)} renderMarkdown={value => <MarkdownContent value={value} onFileClick={onFile} onImageClick={onImage} onVideoClick={onVideo} workspace={workspace} sessionId={m.session_id} connectionId={connectionId} />} sessionId={m.session_id} connectionId={connectionId || undefined} /></div>}
+          {!isAsyncQuestion(m) && m.text.trim() && <div className="m-bubble"><MessageBody value={m.text} user={m.role === 'user'} onImageClick={onImage} attachmentNames={m.attachments.filter((attachment) => attachment.media_type.startsWith('image/')).map((attachment) => attachment.name)} renderMarkdown={value => <MarkdownContent value={value} onFileClick={onFile} onImageClick={onImage} onVideoClick={onVideo} onSqlOpen={onSqlOpen} workspace={workspace} sessionId={m.session_id} connectionId={connectionId} />} sessionId={m.session_id} connectionId={connectionId || undefined} /></div>}
           {!!m.attachments.length && (() => {
             const imageUrls = m.attachments
               .filter(a => a.media_type.startsWith('image/'))

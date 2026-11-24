@@ -260,6 +260,24 @@ export function DbxViewer({ artifact, session }: ViewerContext) {
   }
 
   const handleOpenSourceInMonaco = (entry: DbxSqlEntry) => {
+    if (entry.isSnippet) {
+      useSidecarStore.getState().openArtifact(
+        {
+          id: entry.path,
+          name: entry.filename,
+          kind: 'workspace_file',
+          mediaType: 'text/plain',
+          readUrl: '',
+          writable: false,
+          sessionId: entry.sessionId,
+          agentId: entry.agentId || artifact.agentId,
+          connectionId: entry.connectionId || artifact.connectionId,
+          metadata: { inlineContent: entry.content },
+        },
+        'monaco-viewer',
+      )
+      return
+    }
     const targetSession = session || {
       id: entry.sessionId,
       agent_id: entry.agentId || artifact.agentId,

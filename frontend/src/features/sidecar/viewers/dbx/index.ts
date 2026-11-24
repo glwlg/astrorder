@@ -3,8 +3,8 @@ import type { ArtifactViewer } from '../../types'
 import { DBX_DEFAULT_UPSTREAM_URL, DBX_PLUGIN_ID, DbxViewer } from './DbxViewer'
 
 export { DBX_DEFAULT_UPSTREAM_URL, DBX_PLUGIN_ID, DBX_PROXY_ENTRY_URL } from './DbxViewer'
-export { openSqlFileInDbx, useDbxSidecarStore } from './dbxStore'
-export { isSqlFilePath, extractSqlFileName, extractSqlLine, stripSqlLocationSuffix } from './sqlFormats'
+export { openSqlFileInDbx, openSqlSnippetInDbx, useDbxSidecarStore } from './dbxStore'
+export { buildSqlSnippetFilename, isSqlFilePath, isSqlLanguage, extractSqlFileName, extractSqlLine, stripSqlLocationSuffix } from './sqlFormats'
 
 export const dbxViewer: ArtifactViewer = {
   id: DBX_PLUGIN_ID,
