@@ -9,8 +9,7 @@ import type { ViewerContext } from '../../types'
 import { authenticatedApiFetch } from '../../../../api/client'
 import { scopeKey } from '../../../../domain/semantics'
 import { useAstrorderStore } from '../../../../state/store'
-import { usePluginSettingsStore } from '../../../plugins/pluginSettingsStore'
-import { DBX_PLUGIN_ID, isSqlFilePath, openSqlFileInDbx } from '../dbx'
+import { isSqlFilePath, openSqlFileInDatabaseTool, useHasDatabaseTool } from '../../databaseTool'
 
 const EXT_TO_LANG: Record<string, string> = {
   ts: 'typescript',
@@ -67,7 +66,7 @@ export function MonacoViewer({ artifact, session: sourceSession, onSave, onDirty
   const [content, setContent] = useState('')
   const [language, setLanguage] = useState(() => detectLanguage(artifact.name))
   const isMarkdown = /\.(?:md|markdown)$/i.test(artifact.name)
-  const dbxPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(DBX_PLUGIN_ID))
+  const hasDatabaseTool = useHasDatabaseTool()
   const isSqlDocument = language === 'sql' || isSqlFilePath(artifact.path || artifact.name)
   const targetLine = typeof (artifact.metadata as { line?: unknown } | undefined)?.line === 'number'
     ? (artifact.metadata as { line: number }).line
@@ -277,15 +276,15 @@ export function MonacoViewer({ artifact, session: sourceSession, onSave, onDirty
                 </ActionIcon>
               </Tooltip>
             )}
-            {isSqlDocument && dbxPluginEnabled && (
-              <Tooltip label="将当前 SQL 载入右侧 DBX 查询标签页（不自动执行）">
+            {isSqlDocument && hasDatabaseTool && (
+              <Tooltip label="将当前 SQL 载入右侧数据库工具查询标签页（不自动执行）">
                 <Button
                   size="compact-xs"
                   variant="light"
                   color="teal"
                   leftSection={<IconDatabase size={13} />}
                   onClick={() => {
-                    void openSqlFileInDbx({
+                    void openSqlFileInDatabaseTool({
                       path: artifact.path || artifact.name,
                       session,
                       sessionId: artifact.sessionId,
@@ -295,7 +294,7 @@ export function MonacoViewer({ artifact, session: sourceSession, onSave, onDirty
                     })
                   }}
                 >
-                  DBX 打开
+                  数据库打开
                 </Button>
               </Tooltip>
             )}

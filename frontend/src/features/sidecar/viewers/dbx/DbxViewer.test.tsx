@@ -173,7 +173,7 @@ describe('DbxViewer & MarkdownLinkMenu', () => {
       </MantineProvider>,
     )
 
-    const iframe = await screen.findByTitle('DBX 数据库工作台')
+    const iframe = await screen.findByTitle('数据库工作台')
     expect(iframe.getAttribute('src')).toContain('/api/v1/plugins/dbx/')
     expect(screen.getByText('001_init.sql')).toBeTruthy()
 
@@ -219,7 +219,7 @@ describe('DbxViewer & MarkdownLinkMenu', () => {
       </MantineProvider>,
     )
 
-    expect(await screen.findByText('DBX 数据库服务暂不可用')).toBeTruthy()
+    expect(await screen.findByText('数据库服务暂不可用')).toBeTruthy()
     expect(screen.getByText(/wslc run -d --name astrorder-dbx/)).toBeTruthy()
   })
 
@@ -242,8 +242,9 @@ describe('DbxViewer & MarkdownLinkMenu', () => {
       </MantineProvider>,
     )
 
-    expect(await screen.findByText('在右侧 DBX 中打开')).toBeTruthy()
+    expect(await screen.findByText('在数据库工具中打开')).toBeTruthy()
     expect(screen.getByText('在代码编辑器中打开')).toBeTruthy()
+    expect(screen.queryByText(/DBX/i)).toBeNull()
 
     rerender(
       <MantineProvider>
@@ -256,11 +257,11 @@ describe('DbxViewer & MarkdownLinkMenu', () => {
     )
 
     await waitFor(() => {
-      expect(screen.queryByText('在右侧 DBX 中打开')).toBeNull()
+      expect(screen.queryByText('在数据库工具中打开')).toBeNull()
     })
   })
 
-  it('opens sql links directly in DBX on left click when dbx plugin is enabled, and falls back to Monaco when disabled', async () => {
+  it('opens sql links directly in database tool on left click when plugin is enabled, and falls back to Monaco when disabled', async () => {
     const sampleSession = {
       id: 'sess-click',
       agent_id: 'codex',
@@ -304,10 +305,10 @@ describe('DbxViewer & MarkdownLinkMenu', () => {
       </MantineProvider>,
     )
 
-    // 1. Plugin enabled (default): clicking .sql opens DBX directly
+    // 1. Plugin enabled (default): clicking .sql opens database workbench directly
     fireEvent.click(screen.getByRole('button', { name: '001_add_enabled.sql' }))
     await waitFor(() => {
-      expect(useSidecarStore.getState().activeTabId).toBe('dbx:workbench')
+      expect(useSidecarStore.getState().activeTabId).toBe('database:workbench')
     })
     const queued = useDbxSidecarStore.getState().itemsBySession['sess-click'] || []
     expect(queued).toHaveLength(1)
@@ -324,7 +325,7 @@ describe('DbxViewer & MarkdownLinkMenu', () => {
     })
   })
 
-  it('adds a DBX open button to fenced SQL code blocks when plugin is enabled', async () => {
+  it('adds a generic database tool button (without DBX branding) to fenced SQL code blocks when enabled', async () => {
     const sampleSession = {
       id: 'sess-sql-block',
       agent_id: 'codex',
@@ -358,12 +359,14 @@ describe('DbxViewer & MarkdownLinkMenu', () => {
       </MantineProvider>,
     )
 
-    const dbxButtons = screen.getAllByRole('button', { name: '在右侧 DBX 中打开此 SQL' })
-    expect(dbxButtons).toHaveLength(1)
+    const openButtons = screen.getAllByRole('button', { name: '在数据库工具中打开此 SQL' })
+    expect(openButtons).toHaveLength(1)
+    expect(openButtons[0].textContent).toContain('数据库打开')
+    expect(openButtons[0].textContent).not.toMatch(/dbx/i)
 
-    fireEvent.click(dbxButtons[0])
+    fireEvent.click(openButtons[0])
     await waitFor(() => {
-      expect(useSidecarStore.getState().activeTabId).toBe('dbx:workbench')
+      expect(useSidecarStore.getState().activeTabId).toBe('database:workbench')
     })
     const queued = useDbxSidecarStore.getState().itemsBySession['sess-sql-block'] || []
     expect(queued).toHaveLength(1)
@@ -380,6 +383,6 @@ describe('DbxViewer & MarkdownLinkMenu', () => {
         />
       </MantineProvider>,
     )
-    expect(screen.queryByRole('button', { name: '在右侧 DBX 中打开此 SQL' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '在数据库工具中打开此 SQL' })).toBeNull()
   })
 })

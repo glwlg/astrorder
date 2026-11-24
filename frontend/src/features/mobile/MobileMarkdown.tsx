@@ -11,8 +11,7 @@ import {
   IconMovie,
 } from '@tabler/icons-react'
 import { highlightCode, parseCalloutBlockquote, type CalloutKind } from '../../components/markdownHighlight'
-import { usePluginSettingsStore } from '../plugins/pluginSettingsStore'
-import { DBX_PLUGIN_ID, isSqlLanguage } from '../sidecar/viewers/dbx'
+import { isSqlLanguage, useHasDatabaseTool } from '../sidecar/databaseTool'
 import { extractMobileMarkdownImageUrls, isMobileImageFilePath, isMobileLocalFilePath, isMobileVideoFilePath, mobileFileUrl, resolveMobileFilePath } from './mobileFilePath'
 
 const CALLOUT_ICONS: Record<CalloutKind, typeof IconInfoCircle> = {
@@ -28,7 +27,7 @@ function CodeBlock({ children, onSqlOpen }: { children?: ReactNode; onSqlOpen?: 
   const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [wrap, setWrap] = useState(false)
   const [copied, setCopied] = useState(false)
-  const dbxPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(DBX_PLUGIN_ID))
+  const hasDatabaseTool = useHasDatabaseTool()
 
   useEffect(() => () => {
     if (copiedTimer.current !== null) clearTimeout(copiedTimer.current)
@@ -49,7 +48,7 @@ function CodeBlock({ children, onSqlOpen }: { children?: ReactNode; onSqlOpen?: 
       <div className="m-code-actions">
         {language ? <span className="m-code-lang">{language.toUpperCase()}</span> : <span />}
         <div className="m-code-btns">
-          {isSqlBlock && dbxPluginEnabled && onSqlOpen && (
+          {isSqlBlock && hasDatabaseTool && onSqlOpen && (
             <button
               type="button"
               onClick={() => {
@@ -57,7 +56,7 @@ function CodeBlock({ children, onSqlOpen }: { children?: ReactNode; onSqlOpen?: 
                 if (sql.trim()) onSqlOpen(sql)
               }}
             >
-              DBX 打开
+              数据库打开
             </button>
           )}
           <button type="button" onClick={() => setWrap(!wrap)}>{wrap ? '取消换行' : '换行'}</button>

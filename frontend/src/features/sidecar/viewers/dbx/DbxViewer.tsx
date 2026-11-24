@@ -201,17 +201,17 @@ export function DbxViewer({ artifact, session }: ViewerContext) {
       if (result.ok) {
         store.markEntryStatus(pendingRequest.sessionId, entry.id, 'injected')
         const hint = result.connectionBound
-          ? `已将 ${entry.filename} 载入右侧 DBX 查询标签页（请确认目标数据库后手动执行）`
-          : `已将 ${entry.filename} 载入右侧 DBX 查询标签页（请先选择目标连接后手动执行）`
+          ? `已将 ${entry.filename} 载入右侧数据库工具（请确认目标数据库后手动执行）`
+          : `已将 ${entry.filename} 载入右侧数据库工具（请先选择目标连接后手动执行）`
         setLiveStatus(hint)
         notifications.show({ color: 'teal', message: hint })
       } else {
         store.markEntryStatus(pendingRequest.sessionId, entry.id, 'failed', result.reason)
-        setLiveStatus(result.reason || '载入 DBX 失败')
+        setLiveStatus(result.reason || '载入数据库工具失败')
         notifications.show({
           color: 'yellow',
           title: `未能自动载入 ${entry.filename}`,
-          message: result.reason || '可点击上方 SQL 标签重试或复制 SQL 粘贴到 DBX',
+          message: result.reason || '可点击上方 SQL 标签重试或复制 SQL 粘贴到查询窗口',
         })
       }
     })
@@ -225,7 +225,7 @@ export function DbxViewer({ artifact, session }: ViewerContext) {
     setIframeLoaded(false)
     setIframeRevision((v) => v + 1)
     void checkStatus()
-    setLiveStatus('正在重新连接 DBX')
+    setLiveStatus('正在重新连接数据库服务')
   }
 
   const handleOpenExternal = () => {
@@ -309,28 +309,28 @@ export function DbxViewer({ artifact, session }: ViewerContext) {
         ref={toolbarRef}
         className="sidecar-dbx-toolbar"
         role="toolbar"
-        aria-label="DBX 数据库工具栏"
+        aria-label="数据库工作台工具栏"
         {...({ focusgroup: 'toolbar wrap' } as Record<string, string>)}
       >
         <div className="sidecar-dbx-toolbar-left">
           <span
             className={`sidecar-dbx-status-dot ${statusDotClass}`}
             aria-hidden="true"
-            title={canRenderFrame ? 'DBX 已连接' : checking ? '正在检测 DBX' : 'DBX 未连接'}
+            title={canRenderFrame ? '数据库服务已连接' : checking ? '正在检测数据库服务' : '数据库服务未连接'}
           />
           <IconDatabase size={15} aria-hidden="true" style={{ color: 'var(--astr-indigo)', flexShrink: 0 }} />
-          <span className="sidecar-dbx-title">DBX 数据库</span>
+          <span className="sidecar-dbx-title">数据库</span>
           <span className="sidecar-dbx-upstream" title={upstreamDisplay}>
             {upstreamDisplay}
           </span>
         </div>
 
-        <div className="sidecar-dbx-toolbar-group" role="group" aria-label="DBX 页面操作">
+        <div className="sidecar-dbx-toolbar-group" role="group" aria-label="数据库页面操作">
           <button
             type="button"
             className="sidecar-dbx-btn"
-            aria-label="刷新 DBX"
-            title="刷新 DBX"
+            aria-label="刷新数据库工作台"
+            title="刷新"
             onClick={handleRefresh}
           >
             <IconRefresh size={14} aria-hidden="true" />
@@ -339,8 +339,8 @@ export function DbxViewer({ artifact, session }: ViewerContext) {
           <button
             type="button"
             className="sidecar-dbx-btn"
-            aria-label="在新标签页打开 DBX"
-            title="在新标签页打开 DBX"
+            aria-label="在新标签页打开数据库工作台"
+            title="在新标签页打开"
             onClick={handleOpenExternal}
           >
             <IconExternalLink size={14} aria-hidden="true" />
@@ -348,12 +348,12 @@ export function DbxViewer({ artifact, session }: ViewerContext) {
           </button>
         </div>
         <span className="sidecar-dbx-separator" role="separator" aria-orientation="vertical" />
-        <div className="sidecar-dbx-toolbar-group" role="group" aria-label="DBX 插件配置">
+        <div className="sidecar-dbx-toolbar-group" role="group" aria-label="数据库插件配置">
           <button
             type="button"
             className="sidecar-dbx-btn"
-            aria-label="配置 DBX 服务地址"
-            title="配置 DBX 服务地址"
+            aria-label="管理数据库插件"
+            title="管理数据库插件"
             onClick={handleOpenPluginSettings}
           >
             <IconSettings size={14} aria-hidden="true" />
@@ -382,7 +382,7 @@ export function DbxViewer({ artifact, session }: ViewerContext) {
               <button
                 type="button"
                 className="sidecar-dbx-sql-name"
-                title={`${entry.path}\n点击重新载入到 DBX 查询标签页`}
+                title={`${entry.path}\n点击重新载入到查询标签页`}
                 onClick={() => useDbxSidecarStore.getState().requestInject(sessionKey, entry.id)}
               >
                 <IconPlayerPlay size={11} aria-hidden="true" />
@@ -430,7 +430,7 @@ export function DbxViewer({ artifact, session }: ViewerContext) {
             ref={iframeRef}
             key={iframeRevision}
             src={iframeSrc}
-            title="DBX 数据库工作台"
+            title="数据库工作台"
             className="sidecar-dbx-iframe"
             onLoad={() => setIframeLoaded(true)}
           />
@@ -440,11 +440,11 @@ export function DbxViewer({ artifact, session }: ViewerContext) {
               <Group gap="xs">
                 <IconDatabase size={20} style={{ color: 'var(--astr-indigo)' }} aria-hidden="true" />
                 <Text fw={600} size="sm">
-                  {checking ? '正在检测 DBX 数据库服务…' : 'DBX 数据库服务暂不可用'}
+                  {checking ? '正在检测数据库服务…' : '数据库服务暂不可用'}
                 </Text>
               </Group>
               <Text size="xs" c="dimmed">
-                当前配置地址：<code>{upstreamDisplay}</code>
+                当前插件实现：<code>DBX</code> · 服务地址：<code>{upstreamDisplay}</code>
               </Text>
               {status?.error && (
                 <Text size="xs" c="red">

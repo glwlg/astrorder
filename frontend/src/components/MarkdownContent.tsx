@@ -23,8 +23,14 @@ import remarkGfm from 'remark-gfm'
 import type { Session } from '../domain/types'
 import { api } from '../api/client'
 import { artifactViewerRegistry, isNonPreviewableFile } from '../features/sidecar/registry'
-import { usePluginSettingsStore } from '../features/plugins/pluginSettingsStore'
-import { DBX_PLUGIN_ID, isSqlFilePath, isSqlLanguage, openSqlFileInDbx, openSqlSnippetInDbx } from '../features/sidecar/viewers/dbx'
+import {
+  hasActiveDatabaseTool,
+  isSqlFilePath,
+  isSqlLanguage,
+  openSqlFileInDatabaseTool,
+  openSqlSnippetInDatabaseTool,
+  useHasDatabaseTool,
+} from '../features/sidecar/databaseTool'
 import { videoMediaType } from '../features/sidecar/viewers/video/formats'
 import { resolveArtifactFromPath } from '../features/sidecar/resolver'
 import { useSidecarStore } from '../features/sidecar/sidecarStore'
@@ -108,7 +114,7 @@ function MarkdownCodeBlock({ children }: { children?: ReactNode }) {
   const codeRef = useRef<HTMLElement>(null)
   const openArtifact = useSidecarStore((state) => state.openArtifact)
   const session = useContext(MarkdownSessionContext)
-  const dbxPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(DBX_PLUGIN_ID))
+  const hasDatabaseTool = useHasDatabaseTool()
 
   let language = ''
   let rawText = ''
@@ -120,11 +126,11 @@ function MarkdownCodeBlock({ children }: { children?: ReactNode }) {
   const lineCount = rawText ? rawText.split('\n').length : 0
   const isSqlBlock = Boolean(language && isSqlLanguage(language))
 
-  const handleOpenInDbx = (e: React.MouseEvent) => {
+  const handleOpenInDatabaseTool = (e: React.MouseEvent) => {
     e.stopPropagation()
     const text = codeRef.current?.innerText || codeRef.current?.textContent || rawText
     if (!text.trim()) return
-    openSqlSnippetInDbx({ sql: text, session })
+    openSqlSnippetInDatabaseTool({ sql: text, session })
   }
 
   const handleCopy = (e: React.MouseEvent) => {
@@ -168,16 +174,16 @@ function MarkdownCodeBlock({ children }: { children?: ReactNode }) {
       <div className="markdown-code-header">
         <span className="markdown-code-lang">{(language || 'code').toUpperCase()}</span>
         <div className="markdown-code-actions">
-          {isSqlBlock && dbxPluginEnabled && (
+          {isSqlBlock && hasDatabaseTool && (
             <button
               type="button"
-              className="markdown-code-copy-btn markdown-dbx-btn"
-              onClick={handleOpenInDbx}
-              aria-label="在右侧 DBX 中打开此 SQL"
-              title="载入右侧 DBX 查询标签页（不自动执行）"
+              className="markdown-code-copy-btn markdown-db-tool-btn"
+              onClick={handleOpenInDatabaseTool}
+              aria-label="在数据库工具中打开此 SQL"
+              title="载入右侧数据库工具查询标签页（不自动执行）"
             >
               <IconDatabase size={12} aria-hidden="true" />
-              <span>DBX 打开</span>
+              <span>数据库打开</span>
             </button>
           )}
           <button
@@ -649,8 +655,8 @@ export const MarkdownContent = memo(function MarkdownContent({
   const handleOpenLocalFile = async (path: string, line?: number, endLine?: number) => {
     const fullPath = resolvePathWithWorkspace(path)
     if (currentSession) {
-      if (usePluginSettingsStore.getState().isPluginEnabled(DBX_PLUGIN_ID) && isSqlFilePath(fullPath)) {
-        await openSqlFileInDbx({ path: fullPath, session: currentSession, line })
+      if (hasActiveDatabaseTool() && isSqlFilePath(fullPath)) {
+        await openSqlFileInDatabaseTool({ path: fullPath, session: currentSession, line })
         return
       }
       const artifact = resolveArtifactFromPath(fullPath.replace(/%/g, '%25'), currentSession)

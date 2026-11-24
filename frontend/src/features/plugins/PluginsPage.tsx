@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActionIcon,
   Badge,
@@ -27,12 +27,16 @@ import {
   IconMicrophone,
   IconPlugConnected,
   IconPuzzle,
+  IconSearch,
   IconSettings,
+  IconX,
 } from '@tabler/icons-react'
 import { api, type LocalVoicePluginStatus } from '../../api/client'
 import { artifactViewerRegistry } from '../sidecar/registry'
-import type { ArtifactViewer, ViewerConfigOption } from '../sidecar/types'
+import type { ArtifactViewer, PluginCategory, ViewerConfigOption } from '../sidecar/types'
+import { PLUGIN_CATEGORIES, resolveViewerCategory, type PluginCategoryMeta, type PluginTabId } from './pluginCategories'
 import { SIDEBAR_INTEGRATIONS_PLUGIN_ID, usePluginSettingsStore } from './pluginSettingsStore'
+import './PluginsPage.css'
 
 function LocalVoicePluginCard() {
   const [status, setStatus] = useState<LocalVoicePluginStatus | null>(null)
@@ -46,7 +50,6 @@ function LocalVoicePluginCard() {
         if (!active) return
         setStatus(next)
         setLoading(false)
-
       } catch {
         if (active) setLoading(false)
       }
@@ -137,13 +140,18 @@ function PluginCard({ viewer }: { viewer: ArtifactViewer }) {
             <Icon size={24} />
           </div>
           <div>
-            <Group gap="xs" align="center">
+            <Group gap="xs" align="center" wrap="wrap">
               <Text fw={600} size="sm">
                 {viewer.title}
               </Text>
               {viewer.version && (
                 <Badge size="xs" variant="outline" color="gray">
                   v{viewer.version}
+                </Badge>
+              )}
+              {viewer.capabilitySlot && (
+                <Badge size="xs" variant="light" color="teal">
+                  {viewer.capabilityLabel || viewer.capabilitySlot} · 可替换实现
                 </Badge>
               )}
               {viewer.capabilities.canEdit && (
@@ -172,7 +180,6 @@ function PluginCard({ viewer }: { viewer: ArtifactViewer }) {
         </Group>
 
         <Group gap="xs" wrap="nowrap" align="center">
-          {/* 叹号说明按钮：点击弹窗查看能力与支持组件 */}
           <Tooltip label="查看插件说明与支持能力" withArrow>
             <ActionIcon
               size="sm"
@@ -195,7 +202,6 @@ function PluginCard({ viewer }: { viewer: ArtifactViewer }) {
         </Group>
       </Group>
 
-      {/* 参数配置折叠区 */}
       {hasOptions && (
         <>
           <Divider my="sm" />
@@ -279,7 +285,6 @@ function PluginCard({ viewer }: { viewer: ArtifactViewer }) {
         </>
       )}
 
-      {/* 插件能力说明与支持组件清单弹窗 */}
       <Modal
         opened={infoOpened}
         onClose={() => setInfoOpened(false)}
@@ -318,7 +323,6 @@ function PluginCard({ viewer }: { viewer: ArtifactViewer }) {
             {viewer.documentation?.summary || viewer.description || '为工作区提供专有交互呈现与处理能力。'}
           </Text>
 
-          {/* 专属能力章节 */}
           {viewer.documentation?.sections?.map((sec, idx) => (
             <div
               key={idx}
@@ -338,7 +342,6 @@ function PluginCard({ viewer }: { viewer: ArtifactViewer }) {
             </div>
           ))}
 
-          {/* 支持的组件清单 (主要针对黑板等 json-render 插件) */}
           {viewer.documentation?.supportedComponents && viewer.documentation.supportedComponents.length > 0 && (
             <div>
               <Group justify="space-between" mb={8}>
@@ -397,7 +400,6 @@ function PluginCard({ viewer }: { viewer: ArtifactViewer }) {
             </div>
           )}
 
-          {/* 支持的文件扩展名 */}
           {viewer.extensions && viewer.extensions.length > 0 && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11 }}>
               <span style={{ color: '#64748B' }}>关联文件类型:</span>
@@ -473,23 +475,189 @@ function SidebarIntegrationsPluginCard() {
   )
 }
 
+interface CatalogEntry {
+  id: string
+  category: PluginCategory
+  searchText: string
+  isToggleable: boolean
+  render: () => React.ReactNode
+}
+
+function CategorySection({
+  meta,
+  entries,
+  enabledPlugins,
+}: {
+  meta: PluginCategoryMeta
+  entries: CatalogEntry[]
+  enabledPlugins: Record<string, boolean>
+}) {
+  if (entries.length === 0) return null
+  const Icon = meta.icon
+  const toggleable = entries.filter((entry) => entry.isToggleable)
+  const enabledCount = toggleable.filter((entry) => enabledPlugins[entry.id] !== false).length
+
+  return (
+    <section className="plugins-category-section" aria-label={meta.label}>
+      <div className="plugins-category-header">
+        <div className="plugins-category-title-wrap">
+          <span className="plugins-category-icon" aria-hidden="true">
+            <Icon size={16} />
+          </span>
+          <div style={{ minWidth: 0 }}>
+            <Group gap="xs" wrap="nowrap">
+              <Text fw={600} size="sm">{meta.label}</Text>
+              <Badge size="xs" variant="light" color="gray">
+                {toggleable.length > 0 ? `${enabledCount} / ${entries.length}` : `${entries.length} 项`}
+              </Badge>
+            </Group>
+            <Text size="xs" c="dimmed" truncate>
+              {meta.description}
+            </Text>
+          </div>
+        </div>
+      </div>
+
+      <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
+        {entries.map((entry) => (
+          <div key={entry.id}>{entry.render()}</div>
+        ))}
+      </SimpleGrid>
+    </section>
+  )
+}
+
 export function PluginsPage() {
-  const viewers = artifactViewerRegistry.getAllViewers()
+  const viewers = useMemo(() => artifactViewerRegistry.getAllViewers(), [])
   const hydrate = usePluginSettingsStore((s) => s.hydrate)
   const enabledPlugins = usePluginSettingsStore((s) => s.enabledPlugins)
+
+  const [activeTab, setActiveTab] = useState<PluginTabId>('all')
+  const [query, setQuery] = useState('')
+  const tablistRef = useRef<HTMLDivElement | null>(null)
+  const panelRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
   useEffect(() => {
     void hydrate()
   }, [hydrate])
 
+  const catalogEntries = useMemo<CatalogEntry[]>(() => {
+    const entries: CatalogEntry[] = [
+      {
+        id: SIDEBAR_INTEGRATIONS_PLUGIN_ID,
+        category: 'workspace',
+        searchText: '侧边栏外链集成 sidebar integrations 外链 网关 监控面板',
+        isToggleable: true,
+        render: () => <SidebarIntegrationsPluginCard />,
+      },
+      {
+        id: 'r2t2-local-voice',
+        category: 'runtime',
+        searchText: 'R2T2 本地流式听写 语音 模型 录音 voice',
+        isToggleable: false,
+        render: () => <LocalVoicePluginCard />,
+      },
+      ...viewers.map((viewer) => ({
+        id: viewer.id,
+        category: resolveViewerCategory(viewer),
+        searchText: [
+          viewer.id,
+          viewer.title,
+          viewer.description || '',
+          viewer.capabilityLabel || '',
+          viewer.implementationName || '',
+          ...(viewer.extensions || []),
+        ].join(' ').toLowerCase(),
+        isToggleable: true,
+        render: () => <PluginCard viewer={viewer} />,
+      })),
+    ]
+    return entries
+  }, [viewers])
+
+  const normalizedQuery = query.trim().toLowerCase()
+  const filteredEntries = useMemo(() => {
+    if (!normalizedQuery) return catalogEntries
+    return catalogEntries.filter((entry) => entry.searchText.includes(normalizedQuery))
+  }, [catalogEntries, normalizedQuery])
+
+  const entriesByCategory = useMemo(() => {
+    const grouped: Record<PluginCategory, CatalogEntry[]> = {
+      development: [],
+      workspace: [],
+      diagram: [],
+      media: [],
+      runtime: [],
+    }
+    for (const entry of filteredEntries) {
+      grouped[entry.category].push(entry)
+    }
+    return grouped
+  }, [filteredEntries])
+
+  const tabs = useMemo(
+    () => [
+      { id: 'all' as PluginTabId, label: '全部', count: filteredEntries.length },
+      ...PLUGIN_CATEGORIES.map((cat) => ({
+        id: cat.id as PluginTabId,
+        label: cat.label,
+        count: entriesByCategory[cat.id].length,
+      })),
+    ],
+    [filteredEntries.length, entriesByCategory],
+  )
+
+  const selectTab = (nextId: PluginTabId, scrollTab = true) => {
+    setActiveTab(nextId)
+    if (scrollTab && tablistRef.current) {
+      const btn = tablistRef.current.querySelector<HTMLButtonElement>(`[data-tab-id="${nextId}"]`)
+      btn?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+    }
+  }
+
+  // Sync tab selection when native find-in-page reveals a hidden="until-found" panel.
+  useEffect(() => {
+    const cleanups: Array<() => void> = []
+    for (const tab of tabs) {
+      const panel = panelRefs.current[tab.id]
+      if (!panel) continue
+      const onBeforeMatch = () => selectTab(tab.id, true)
+      panel.addEventListener('beforematch', onBeforeMatch)
+      cleanups.push(() => panel.removeEventListener('beforematch', onBeforeMatch))
+    }
+    return () => { cleanups.forEach((fn) => fn()) }
+  }, [tabs])
+
+  const handleTabKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if ('focusGroup' in HTMLElement.prototype) return
+    const list = tablistRef.current
+    if (!list) return
+    const buttons = Array.from(list.querySelectorAll<HTMLButtonElement>('[role="tab"]'))
+    const idx = buttons.indexOf(document.activeElement as HTMLButtonElement)
+    if (idx < 0 || buttons.length === 0) return
+
+    let nextIdx = -1
+    if (event.key === 'ArrowRight') nextIdx = (idx + 1) % buttons.length
+    else if (event.key === 'ArrowLeft') nextIdx = (idx - 1 + buttons.length) % buttons.length
+    else if (event.key === 'Home') nextIdx = 0
+    else if (event.key === 'End') nextIdx = buttons.length - 1
+    else return
+
+    event.preventDefault()
+    const target = buttons[nextIdx]
+    const targetId = target?.dataset.tabId as PluginTabId | undefined
+    target?.focus()
+    if (targetId) selectTab(targetId, true)
+  }
+
   const allToggleableIds = [SIDEBAR_INTEGRATIONS_PLUGIN_ID, ...viewers.map((v) => v.id)]
   const enabledCount = allToggleableIds.filter((id) => enabledPlugins[id] !== false).length
 
   return (
-    <div className="route-page plugins-page" style={{ padding: '24px 32px', maxWidth: 1100, margin: '0 auto' }}>
-      <Paper p="md" withBorder radius="lg" mb="lg" style={{ background: 'var(--astr-surface)' }}>
-        <Group justify="space-between" align="center">
-          <Group gap="sm">
+    <div className="route-page plugins-page">
+      <Paper p="md" withBorder radius="lg" mb="md" style={{ background: 'var(--astr-surface)' }}>
+        <Group justify="space-between" align="center" wrap="wrap" gap="sm">
+          <Group gap="sm" wrap="nowrap">
             <div
               style={{
                 width: 38,
@@ -500,6 +668,7 @@ export function PluginsPage() {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
+                flexShrink: 0,
               }}
             >
               <IconPuzzle size={22} />
@@ -509,12 +678,28 @@ export function PluginsPage() {
                 插件管理
               </Title>
               <Text size="xs" c="dimmed" mt={2}>
-                管理本地运行时能力、工作台扩展插件与富媒介渲染器，配置自动同步至数据库。
+                按能力分类管理开发工具、工作台扩展、富媒介渲染器与本地运行时，能力槽位支持按需替换实现。
               </Text>
             </div>
           </Group>
 
-          <Group gap="xs">
+          <Group gap="xs" wrap="nowrap">
+            <TextInput
+              size="xs"
+              placeholder="搜索插件名称或文件类型…"
+              aria-label="搜索插件"
+              value={query}
+              onChange={(e) => setQuery(e.currentTarget.value)}
+              leftSection={<IconSearch size={14} />}
+              rightSection={
+                query ? (
+                  <ActionIcon size="xs" variant="subtle" color="gray" aria-label="清空搜索" onClick={() => setQuery('')}>
+                    <IconX size={12} />
+                  </ActionIcon>
+                ) : null
+              }
+              style={{ width: 220 }}
+            />
             <Badge size="md" variant="light" color="indigo">
               已启用 {enabledCount} / {allToggleableIds.length}
             </Badge>
@@ -522,16 +707,79 @@ export function PluginsPage() {
         </Group>
       </Paper>
 
-      <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md" mb="md">
-        <LocalVoicePluginCard />
-        <SidebarIntegrationsPluginCard />
-      </SimpleGrid>
+      <div className="plugins-tabs-shell">
+        <div
+          ref={tablistRef}
+          className="plugins-tablist"
+          role="tablist"
+          aria-label="插件分类"
+          onKeyDown={handleTabKeyDown}
+          {...({ focusgroup: 'tablist nomemory' } as Record<string, string>)}
+        >
+          {tabs.map((tab) => {
+            const selected = activeTab === tab.id
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                id={`plugins-tab-${tab.id}`}
+                data-tab-id={tab.id}
+                role="tab"
+                className="plugins-tab"
+                aria-selected={selected}
+                tabIndex={selected ? 0 : -1}
+                {...(selected ? ({ focusgroupstart: '' } as Record<string, string>) : {})}
+                onClick={() => selectTab(tab.id, true)}
+              >
+                <span>{tab.label}</span>
+                <span className="plugins-tab-count">{tab.count}</span>
+              </button>
+            )
+          })}
+        </div>
+      </div>
 
-      <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
-        {viewers.map((viewer) => (
-          <PluginCard key={viewer.id} viewer={viewer} />
-        ))}
-      </SimpleGrid>
+      <div className="plugins-panels">
+        {tabs.map((tab) => {
+          const isSelected = activeTab === tab.id
+          const sectionsToRender =
+            tab.id === 'all'
+              ? PLUGIN_CATEGORIES.filter((cat) => entriesByCategory[cat.id].length > 0)
+              : PLUGIN_CATEGORIES.filter((cat) => cat.id === tab.id && entriesByCategory[cat.id].length > 0)
+
+          return (
+            <div
+              key={tab.id}
+              ref={(el) => { panelRefs.current[tab.id] = el }}
+              role="tabpanel"
+              className="plugins-tabpanel"
+              aria-labelledby={`plugins-tab-${tab.id}`}
+              hidden={isSelected ? undefined : ('until-found' as unknown as boolean)}
+            >
+              {isSelected && (
+                <div className="plugins-panel-inner">
+                  {sectionsToRender.length > 0 ? (
+                    sectionsToRender.map((cat) => (
+                      <CategorySection
+                        key={cat.id}
+                        meta={cat}
+                        entries={entriesByCategory[cat.id]}
+                        enabledPlugins={enabledPlugins}
+                      />
+                    ))
+                  ) : (
+                    <Paper withBorder radius="md" p="xl" ta="center" style={{ background: 'var(--astr-surface)' }}>
+                      <Text size="sm" c="dimmed">
+                        当前分类下没有匹配“{query.trim()}”的插件
+                      </Text>
+                    </Paper>
+                  )}
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }

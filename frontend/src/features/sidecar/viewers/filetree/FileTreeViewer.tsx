@@ -20,8 +20,7 @@ import { resolveArtifactFromPath } from '../../resolver'
 import { useSidecarStore } from '../../sidecarStore'
 import type { ViewerContext } from '../../types'
 import { artifactViewerRegistry } from '../../registry'
-import { usePluginSettingsStore } from '../../../plugins/pluginSettingsStore'
-import { DBX_PLUGIN_ID, isSqlFilePath, openSqlFileInDbx } from '../dbx'
+import { hasActiveDatabaseTool, isSqlFilePath, openSqlFileInDatabaseTool } from '../../databaseTool'
 
 interface TreeNode {
   name: string
@@ -359,8 +358,8 @@ export function FileTreeViewer({ artifact, isActive = true }: ViewerContext) {
       toggleDirectory(node.path)
       return
     }
-    if (usePluginSettingsStore.getState().isPluginEnabled(DBX_PLUGIN_ID) && isSqlFilePath(node.path)) {
-      void openSqlFileInDbx({
+    if (hasActiveDatabaseTool() && isSqlFilePath(node.path)) {
+      void openSqlFileInDatabaseTool({
         path: node.path,
         sessionId: artifact.sessionId,
         agentId: artifact.agentId,
@@ -691,7 +690,7 @@ export function FileTreeViewer({ artifact, isActive = true }: ViewerContext) {
           <Menu.Dropdown style={{ minWidth: 210 }}>
             {!contextMenu.node.is_dir &&
               isSqlFilePath(contextMenu.node.path) &&
-              usePluginSettingsStore.getState().isPluginEnabled(DBX_PLUGIN_ID) && (
+              hasActiveDatabaseTool() && (
                 <>
                   <Menu.Item
                     leftSection={<IconDatabase size={14} />}
@@ -699,7 +698,7 @@ export function FileTreeViewer({ artifact, isActive = true }: ViewerContext) {
                     onClick={() => {
                       const node = contextMenu.node
                       setContextMenu(null)
-                      void openSqlFileInDbx({
+                      void openSqlFileInDatabaseTool({
                         path: node.path,
                         sessionId: artifact.sessionId,
                         agentId: artifact.agentId,
@@ -707,7 +706,7 @@ export function FileTreeViewer({ artifact, isActive = true }: ViewerContext) {
                       })
                     }}
                   >
-                    在右侧 DBX 中打开
+                    在数据库工具中打开
                   </Menu.Item>
                   <Menu.Item
                     leftSection={<IconCode size={14} />}

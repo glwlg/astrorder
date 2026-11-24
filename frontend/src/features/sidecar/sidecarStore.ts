@@ -77,7 +77,7 @@ export interface SidecarState {
   openAgentGraph: (sessionId: string, agentId: string, workspaceName?: string, connectionId?: string) => void
   openGitDiff: (sessionId: string, agentId: string, workspacePath?: string, connectionId?: string, baseBranch?: string) => void
   openBrowser: (sessionId: string, agentId: string, initialUrl?: string, connectionId?: string) => void
-  openDbx: (sessionId?: string, agentId?: string, connectionId?: string) => void
+  openDatabaseWorkbench: (mediaType: string, viewerId: string, sessionId?: string, agentId?: string, connectionId?: string) => void
   openBlackboard: (sessionId?: string, agentId?: string, connectionId?: string) => void
   openGroupBlackboard: (groupId: string, groupName: string, focusKey?: string) => void
   openMemory: (sessionId?: string) => void
@@ -468,8 +468,14 @@ export const useSidecarStore = create<SidecarState>()(persist((set, get) => ({
     }
   },
 
-  openDbx: (sessionId?: string, agentId?: string, connectionId?: string) => {
-    const tabId = 'dbx:workbench'
+  openDatabaseWorkbench: (
+    mediaType: string,
+    viewerId: string,
+    sessionId?: string,
+    agentId?: string,
+    connectionId?: string,
+  ) => {
+    const tabId = 'database:workbench'
     const { tabs, activeSessionKey, sessionMemories } = get()
     const existingIndex = tabs.findIndex((t) => t.id === tabId)
     const resolvedSessionId = sessionId || 'global'
@@ -478,8 +484,10 @@ export const useSidecarStore = create<SidecarState>()(persist((set, get) => ({
       const nextTabs = tabs.map((tab, index) => index === existingIndex && tab.artifact
         ? {
             ...tab,
+            viewerId,
             artifact: {
               ...tab.artifact,
+              mediaType,
               sessionId: resolvedSessionId,
               agentId: resolvedAgentId,
               connectionId,
@@ -492,12 +500,12 @@ export const useSidecarStore = create<SidecarState>()(persist((set, get) => ({
         tabs: nextTabs,
       })
     } else {
-      const dbxArtifact: ArtifactRef = {
+      const dbArtifact: ArtifactRef = {
         id: tabId,
-        name: 'DBX 数据库',
+        name: '数据库',
         kind: 'workspace_file',
-        mediaType: 'application/x-astrorder-dbx',
-        readUrl: '/api/v1/plugins/dbx/',
+        mediaType,
+        readUrl: '',
         writable: false,
         sessionId: resolvedSessionId,
         agentId: resolvedAgentId,
@@ -506,9 +514,9 @@ export const useSidecarStore = create<SidecarState>()(persist((set, get) => ({
       const newTab: SidecarTab = {
         id: tabId,
         type: 'artifact',
-        title: 'DBX 数据库',
-        artifact: dbxArtifact,
-        viewerId: 'dbx-viewer',
+        title: '数据库',
+        artifact: dbArtifact,
+        viewerId,
         closable: true,
       }
       set({

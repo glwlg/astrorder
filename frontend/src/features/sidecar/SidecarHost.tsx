@@ -8,8 +8,7 @@ import { SidecarWelcomeMenu } from './SidecarWelcomeMenu'
 import { SessionDetails } from '../chat/SessionDetails'
 import { artifactViewerRegistry } from './registry'
 import { useSidecarStore } from './sidecarStore'
-import { usePluginSettingsStore } from '../plugins/pluginSettingsStore'
-import { DBX_PLUGIN_ID } from './viewers/dbx'
+import { openDatabaseWorkbench, useHasDatabaseTool } from './databaseTool'
 import type { Agent, Approval, Command, Message, Session } from '../../domain/types'
 
 interface SidecarHostProps {
@@ -43,7 +42,7 @@ export function SidecarHost({
   const setActiveTabId = useSidecarStore((state) => state.setActiveTabId)
   const closeTab = useSidecarStore((state) => state.closeTab)
   const setTabDirty = useSidecarStore((state) => state.setTabDirty)
-  const dbxPluginEnabled = usePluginSettingsStore((state) => state.isPluginEnabled(DBX_PLUGIN_ID))
+  const hasDatabaseTool = useHasDatabaseTool()
 
   const activeTab = tabs.find((t) => t.id === activeTabId)
   const currentSessionKey = `${session.agent_id}:${session.id}`
@@ -97,10 +96,8 @@ export function SidecarHost({
       .openBrowser(session.id, session.agent_id, undefined, session.connection_id || undefined)
   }
 
-  const handleOpenDbx = () => {
-    useSidecarStore
-      .getState()
-      .openDbx(session.id, session.agent_id, session.connection_id || undefined)
+  const handleOpenDatabase = () => {
+    openDatabaseWorkbench(session.id, session.agent_id, session.connection_id || undefined)
   }
 
   const handleOpenSideChat = () => {
@@ -176,7 +173,7 @@ export function SidecarHost({
             onOpenFileTree={handleOpenFileTree}
             onOpenTerminal={handleOpenTerminal}
             onOpenBrowser={handleOpenBrowser}
-            onOpenDbx={dbxPluginEnabled ? handleOpenDbx : undefined}
+            onOpenDatabase={hasDatabaseTool ? handleOpenDatabase : undefined}
             onOpenSideChat={handleOpenSideChat}
             onOpenAgentGraph={handleOpenAgentGraph}
             onOpenBlackboard={handleOpenBlackboard}

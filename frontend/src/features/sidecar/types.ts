@@ -21,11 +21,22 @@ export interface ViewerConfigOption {
   defaultValue: unknown
 }
 
+export type PluginCategory =
+  | 'development'
+  | 'workspace'
+  | 'diagram'
+  | 'media'
+  | 'runtime'
+
 export interface ArtifactViewer {
   id: string
   title: string
   description?: string
   version?: string
+  category?: PluginCategory
+  capabilitySlot?: string
+  capabilityLabel?: string
+  implementationName?: string
   badgeLabel?: string // 如 "[流程图]"、"[架构图]"、"[白板]"
   tabColor?: string // 标签页图标主色调
   icon: ComponentType<{ size?: number; className?: string }>

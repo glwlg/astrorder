@@ -89,4 +89,35 @@ describe('PluginsPage Component', () => {
     await waitFor(() => expect(setPlugin).toHaveBeenCalledWith(true))
     expect(await screen.findByText('流式听写已启用')).toBeInTheDocument()
   })
+
+  it('organizes plugins by category tabs and marks replaceable database tool implementations', async () => {
+    vi.spyOn(api, 'getLocalVoicePlugin').mockResolvedValue(disabledStatus)
+    vi.spyOn(api, 'getPluginSettings').mockResolvedValue({ enabled: {}, configs: {} })
+    render(<MantineProvider><PluginsPage /></MantineProvider>)
+
+    // Category tablist exists with all 5 categories + All
+    expect(screen.getByRole('tablist', { name: '插件分类' })).toBeInTheDocument()
+    const devTab = screen.getByRole('tab', { name: /开发与数据/ })
+    const diagramTab = screen.getByRole('tab', { name: /图表与白板/ })
+    expect(devTab).toBeInTheDocument()
+    expect(diagramTab).toBeInTheDocument()
+
+    // Switch to "开发与数据" — shows Database Tool (DBX) with replaceable slot badge, hides Draw.io
+    fireEvent.click(devTab)
+    expect(devTab).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByText('数据库管理工具 (DBX)')).toBeInTheDocument()
+    expect(screen.getByText('数据库工具 · 可替换实现')).toBeInTheDocument()
+    expect(screen.queryByText('Draw.io 架构与流程图')).toBeNull()
+
+    // Switch to "图表与白板" — shows Draw.io, hides Database Tool
+    fireEvent.click(diagramTab)
+    expect(screen.getByText('Draw.io 架构与流程图')).toBeInTheDocument()
+    expect(screen.queryByText('数据库管理工具 (DBX)')).toBeNull()
+
+    // Search filters plugins across categories
+    fireEvent.click(screen.getByRole('tab', { name: /全部/ }))
+    fireEvent.change(screen.getByRole('textbox', { name: '搜索插件' }), { target: { value: '视频' } })
+    expect(screen.getByText('视频播放器')).toBeInTheDocument()
+    expect(screen.queryByText('Draw.io 架构与流程图')).toBeNull()
+  })
 })

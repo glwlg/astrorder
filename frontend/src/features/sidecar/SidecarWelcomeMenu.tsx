@@ -10,7 +10,7 @@ interface SidecarWelcomeMenuProps {
   onOpenFileTree: () => void
   onOpenTerminal: () => void
   onOpenBrowser: () => void
-  onOpenDbx?: () => void
+  onOpenDatabase?: () => void
   onOpenSideChat: () => void
   onOpenAgentGraph: () => void
   onOpenBlackboard?: () => void
@@ -22,7 +22,7 @@ export function SidecarWelcomeMenu({
   onOpenFileTree,
   onOpenTerminal,
   onOpenBrowser,
-  onOpenDbx,
+  onOpenDatabase,
   onOpenSideChat,
   onOpenAgentGraph,
   onOpenBlackboard,
@@ -72,13 +72,13 @@ export function SidecarWelcomeMenu({
       shortcut: bindings.terminal || '未设置',
       onClick: onOpenTerminal,
     },
-    ...(onOpenDbx
+    ...(onOpenDatabase
       ? [
           {
             icon: <DatabaseIcon size={20} weight="duotone" color="#0f766e" />,
-            label: 'DBX 数据库',
-            shortcut: '右侧常驻',
-            onClick: onOpenDbx,
+            label: '数据库',
+            shortcut: '工作台',
+            onClick: onOpenDatabase,
           },
         ]
       : []),

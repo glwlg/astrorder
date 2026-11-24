@@ -251,7 +251,9 @@ export async function openSqlFileInDbx(params: {
     { forceNew: params.forceNew },
   )
 
-  useSidecarStore.getState().openDbx(sessionId, agentId, connectionId)
+  useSidecarStore
+    .getState()
+    .openDatabaseWorkbench('application/x-astrorder-dbx', 'dbx-viewer', sessionId, agentId, connectionId)
 }
 
 function hashSqlSnippet(value: string): string {
@@ -296,5 +298,7 @@ export function openSqlSnippetInDbx(params: {
     { forceNew: params.forceNew },
   )
 
-  useSidecarStore.getState().openDbx(sessionId, agentId, connectionId)
+  useSidecarStore
+    .getState()
+    .openDatabaseWorkbench('application/x-astrorder-dbx', 'dbx-viewer', sessionId, agentId, connectionId)
 }

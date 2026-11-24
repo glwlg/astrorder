@@ -3,11 +3,16 @@ import { notifications } from '@mantine/notifications'
 import { IconCode, IconCopy, IconDatabase, IconDownload, IconExternalLink, IconFileText } from '@tabler/icons-react'
 import { request } from '../api/client'
 import type { Session } from '../domain/types'
-import { usePluginSettingsStore } from '../features/plugins/pluginSettingsStore'
 import { downloadFile, fileDesktop } from '../features/sidecar/fileTransfer'
 import { resolveArtifactFromPath } from '../features/sidecar/resolver'
 import { useSidecarStore } from '../features/sidecar/sidecarStore'
-import { DBX_PLUGIN_ID, extractSqlLine, isSqlFilePath, openSqlFileInDbx, stripSqlLocationSuffix } from '../features/sidecar/viewers/dbx'
+import {
+  extractSqlLine,
+  isSqlFilePath,
+  openSqlFileInDatabaseTool,
+  stripSqlLocationSuffix,
+  useHasDatabaseTool,
+} from '../features/sidecar/databaseTool'
 
 export type MarkdownLinkMenuTarget = {
   x: number
@@ -62,8 +67,8 @@ export function MarkdownLinkMenu({
   session?: Session | null
   onClose: () => void
 }) {
-  const dbxPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(DBX_PLUGIN_ID))
-  const canOpenInDbx = Boolean(target && target.kind === 'file' && dbxPluginEnabled && isSqlFilePath(target.value))
+  const hasDatabaseTool = useHasDatabaseTool()
+  const canOpenInDatabaseTool = Boolean(target && target.kind === 'file' && hasDatabaseTool && isSqlFilePath(target.value))
 
   const showError = (error: unknown) => notifications.show({
     color: 'red',
@@ -110,15 +115,15 @@ export function MarkdownLinkMenu({
           </Menu.Item>
         ) : (
           <>
-            {canOpenInDbx && (
+            {canOpenInDatabaseTool && (
               <>
                 <Menu.Item
                   leftSection={<IconDatabase size={14} />}
                   onClick={() => {
-                    void openSqlFileInDbx({ path: target.value, session })
+                    void openSqlFileInDatabaseTool({ path: target.value, session })
                   }}
                 >
-                  在右侧 DBX 中打开
+                  在数据库工具中打开
                 </Menu.Item>
                 {session && (
                   <Menu.Item

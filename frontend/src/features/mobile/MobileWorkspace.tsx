@@ -9,8 +9,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { useReducedMotion } from '@mantine/hooks'
 import { AnimatePresence, motion } from 'motion/react'
 import { api } from '../../api/client'
-import { usePluginSettingsStore } from '../plugins/pluginSettingsStore'
-import { DBX_PLUGIN_ID, isSqlFilePath, openSqlFileInDbx, openSqlSnippetInDbx } from '../sidecar/viewers/dbx'
+import { hasActiveDatabaseTool, isSqlFilePath, openSqlFileInDatabaseTool, openSqlSnippetInDatabaseTool } from '../sidecar/databaseTool'
 import { sessionHandoffTargets } from '../../domain/handoff'
 import type { Agent, AgentCommand, AgentMention, Approval, BotGroup, Command, Message, Session, Task } from '../../domain/types'
 import { findSessionHandoff, newCommandId, scopeKey } from '../../domain/semantics'
@@ -359,14 +358,14 @@ export function MobileWorkspace() {
   const openSqlSnippet = (sql: string) => {
     if (!selected) return
     useSidecarStore.getState().switchSession(`${selected.agent_id}:${selected.id}`)
-    openSqlSnippetInDbx({ sql, session: selected })
+    openSqlSnippetInDatabaseTool({ sql, session: selected })
     openWorkbench()
   }
   const openFile = (path: string) => {
     if (!selected) return
-    if (usePluginSettingsStore.getState().isPluginEnabled(DBX_PLUGIN_ID) && isSqlFilePath(path)) {
+    if (hasActiveDatabaseTool() && isSqlFilePath(path)) {
       useSidecarStore.getState().switchSession(`${selected.agent_id}:${selected.id}`)
-      void openSqlFileInDbx({ path, session: selected })
+      void openSqlFileInDatabaseTool({ path, session: selected })
       openWorkbench()
       return
     }
