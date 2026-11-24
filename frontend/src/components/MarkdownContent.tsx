@@ -43,6 +43,7 @@ import { GroupFileLink } from './GroupFileLink'
 import { findGroupFile } from '../features/chat/groupFileSources'
 import { highlightCode, parseCalloutBlockquote, type CalloutKind } from './markdownHighlight'
 import { FileLinkHoverPreview, type FileHoverTarget } from './FileLinkHoverPreview'
+import { copyFilesToClipboard } from '../features/sidecar/fileTransfer'
 
 function hashSnippet(value: string): string {
   let hash = 2166136261
@@ -912,12 +913,16 @@ export const MarkdownContent = memo(function MarkdownContent({
       >
         {normalizedValue}
       </ReactMarkdown>
-      {linkMenu && <MarkdownLinkMenu target={linkMenu} session={session} onClose={() => setLinkMenu(null)} />}
+      {linkMenu && <MarkdownLinkMenu target={linkMenu} session={currentSession} onClose={() => setLinkMenu(null)} />}
       {hoverTarget && (
         <FileLinkHoverPreview
           target={hoverTarget}
           onMouseEnter={clearHoverTimers}
           onMouseLeave={scheduleHoverClose}
+          onCopyFile={currentSession ? () => copyFilesToClipboard([hoverTarget.path], {
+            sessionId: currentSession.id,
+            connectionId: currentSession.connection_id || null,
+          }) : undefined}
           onOpen={() => hoverTarget.onOpen()}
           onClose={closeHoverNow}
         />

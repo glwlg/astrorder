@@ -263,4 +263,52 @@ describe('Markdown link context menu', () => {
       )
     })
   })
+
+  it('copies files to the native OS clipboard directly from the file context menu', async () => {
+    const setClipboardFiles = vi.fn().mockResolvedValue(true)
+    ;(window as unknown as { astrorderDesktop: unknown }).astrorderDesktop = { setClipboardFiles }
+    const fetch = vi.fn().mockResolvedValue(
+      jsonResponse({ local_paths: ['C:\\Temp\\stage\\wave2-main-180f8a19.tar.gz'], clipboard_set: false }),
+    )
+    vi.stubGlobal('fetch', fetch)
+    renderMarkdown('[wave2-main-180f8a19.tar.gz](file:///home/fixture/project/dist/wave2-main-180f8a19.tar.gz)', remoteSession)
+
+    fireEvent.contextMenu(screen.getByRole('button', { name: /wave2-main-180f8a19\.tar\.gz/ }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: '复制文件' }))
+
+    await waitFor(() => expect(setClipboardFiles).toHaveBeenCalledWith(['C:\\Temp\\stage\\wave2-main-180f8a19.tar.gz']))
+    expect(fetch).toHaveBeenCalledWith('/api/v1/files/stage', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({
+        copy_to_clipboard: false,
+        paths: ['/home/fixture/project/dist/wave2-main-180f8a19.tar.gz'],
+        session_id: remoteSession.id,
+        connection_id: remoteSession.connection_id,
+      }),
+    }))
+  })
+
+  it('offers copy-file and copy-path buttons directly inside the binary file hover preview card', async () => {
+    const setClipboardFiles = vi.fn().mockResolvedValue(true)
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    ;(window as unknown as { astrorderDesktop: unknown }).astrorderDesktop = { setClipboardFiles }
+    vi.stubGlobal('navigator', { clipboard: { writeText } })
+    const fetch = vi.fn().mockResolvedValue(
+      jsonResponse({ local_paths: ['C:\\Temp\\stage\\wave2-main-180f8a19.tar.gz'], clipboard_set: false }),
+    )
+    vi.stubGlobal('fetch', fetch)
+
+    renderMarkdown('[wave2-main-180f8a19.tar.gz](file:///home/fixture/project/dist/wave2-main-180f8a19.tar.gz)', remoteSession)
+
+    fireEvent.mouseEnter(screen.getByRole('button', { name: /wave2-main-180f8a19\.tar\.gz/ }))
+
+    const copyFileBtn = await screen.findByRole('button', { name: '复制文件到剪贴板' })
+    const copyPathBtn = screen.getByRole('button', { name: '复制文件路径' })
+
+    fireEvent.click(copyPathBtn)
+    expect(writeText).toHaveBeenCalledWith('/home/fixture/project/dist/wave2-main-180f8a19.tar.gz')
+
+    fireEvent.click(copyFileBtn)
+    await waitFor(() => expect(setClipboardFiles).toHaveBeenCalledWith(['C:\\Temp\\stage\\wave2-main-180f8a19.tar.gz']))
+  })
 })

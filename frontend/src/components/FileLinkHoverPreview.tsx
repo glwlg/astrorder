@@ -9,6 +9,8 @@ import {
   IconFile,
   IconFileCode,
   IconFileDescription,
+  IconFiles,
+  IconLoader2,
   IconMovie,
   IconPhoto,
 } from '@tabler/icons-react'
@@ -175,12 +177,14 @@ export function FileLinkHoverPreview({
   target,
   onMouseEnter,
   onMouseLeave,
+  onCopyFile,
   onOpen,
   onClose,
 }: {
   target: FileHoverTarget | null
   onMouseEnter: () => void
   onMouseLeave: () => void
+  onCopyFile?: () => Promise<boolean> | void
   onOpen: () => void
   onClose: () => void
 }) {
@@ -200,9 +204,15 @@ export function FileLinkHoverPreview({
     error?: string
   }>({ loading: false })
   const [copied, setCopied] = useState(false)
+  const [copiedPath, setCopiedPath] = useState(false)
+  const [copyingFile, setCopyingFile] = useState(false)
+  const [copiedFile, setCopiedFile] = useState(false)
 
   useEffect(() => {
     setCopied(false)
+    setCopiedPath(false)
+    setCopyingFile(false)
+    setCopiedFile(false)
     if (!target || target.isImage || target.isVideo || target.isNonPreviewable || !target.readUrl) {
       setState({ loading: false })
       return
@@ -367,6 +377,27 @@ export function FileLinkHoverPreview({
     setTimeout(() => setCopied(false), 1400)
   }
 
+  const handleCopyPath = () => {
+    if (!target.path) return
+    void navigator.clipboard?.writeText(target.path)
+    setCopiedPath(true)
+    setTimeout(() => setCopiedPath(false), 1400)
+  }
+
+  const handleCopyFileClick = async () => {
+    if (!onCopyFile || copyingFile) return
+    setCopyingFile(true)
+    try {
+      const ok = await onCopyFile()
+      if (ok !== false) {
+        setCopiedFile(true)
+        setTimeout(() => setCopiedFile(false), 1600)
+      }
+    } finally {
+      setCopyingFile(false)
+    }
+  }
+
   return createPortal(
     <div
       ref={cardRef}
@@ -391,7 +422,26 @@ export function FileLinkHoverPreview({
           {parentDir && <span className="file-hover-dir">{parentDir}</span>}
         </div>
         <div className="file-hover-actions">
-          {computedSlice?.rawCopy && (
+          {onCopyFile && (
+            <button
+              type="button"
+              className="file-hover-btn"
+              disabled={copyingFile}
+              onClick={() => void handleCopyFileClick()}
+              aria-label="复制文件到剪贴板"
+              title="复制文件到系统剪贴板（可直接 Ctrl+V 粘贴到 Xftp 或资源管理器）"
+            >
+              {copyingFile ? (
+                <IconLoader2 size={12} className="rotating-icon" />
+              ) : copiedFile ? (
+                <IconCheck size={12} />
+              ) : (
+                <IconFiles size={12} />
+              )}
+              <span>{copyingFile ? '复制中…' : copiedFile ? '已复制' : '复制文件'}</span>
+            </button>
+          )}
+          {computedSlice?.rawCopy ? (
             <button
               type="button"
               className="file-hover-btn"
@@ -400,7 +450,18 @@ export function FileLinkHoverPreview({
               title="复制当前预览片段"
             >
               {copied ? <IconCheck size={12} /> : <IconCopy size={12} />}
-              <span>{copied ? '已复制' : '复制'}</span>
+              <span>{copied ? '已复制' : '复制内容'}</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="file-hover-btn"
+              onClick={handleCopyPath}
+              aria-label="复制文件路径"
+              title="复制文件完整路径"
+            >
+              {copiedPath ? <IconCheck size={12} /> : <IconCopy size={12} />}
+              <span>{copiedPath ? '已复制' : '复制路径'}</span>
             </button>
           )}
           <button

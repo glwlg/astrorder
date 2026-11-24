@@ -1,9 +1,9 @@
 import { Menu } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { IconCode, IconCopy, IconDatabase, IconDownload, IconExternalLink, IconFileText } from '@tabler/icons-react'
+import { IconCode, IconCopy, IconDatabase, IconDownload, IconExternalLink, IconFileText, IconFiles } from '@tabler/icons-react'
 import { request } from '../api/client'
 import type { Session } from '../domain/types'
-import { downloadFile, fileDesktop } from '../features/sidecar/fileTransfer'
+import { copyFilesToClipboard, downloadFile, fileDesktop } from '../features/sidecar/fileTransfer'
 import { resolveArtifactFromPath } from '../features/sidecar/resolver'
 import { useSidecarStore } from '../features/sidecar/sidecarStore'
 import {
@@ -91,6 +91,18 @@ export function MarkdownLinkMenu({
       }))
   }
 
+  const handleCopyFile = () => {
+    if (!target) return
+    if (!session) {
+      notifications.show({ color: 'red', title: '复制文件失败', message: '无法确定文件所在的会话' })
+      return
+    }
+    void copyFilesToClipboard([target.value], {
+      sessionId: session.id,
+      connectionId: session.connection_id || null,
+    })
+  }
+
   return (
     <Menu opened={target !== null} onChange={(opened) => { if (!opened) onClose() }} position="bottom-start" withinPortal shadow="md">
       <Menu.Target>
@@ -141,6 +153,9 @@ export function MarkdownLinkMenu({
                 )}
               </>
             )}
+            <Menu.Item leftSection={<IconFiles size={14} />} onClick={handleCopyFile}>
+              复制文件
+            </Menu.Item>
             <Menu.Item leftSection={<IconFileText size={14} />} onClick={handleFile}>
               用系统默认应用打开
             </Menu.Item>

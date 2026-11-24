@@ -15,7 +15,7 @@ import {
   IconRefresh,
 } from '@tabler/icons-react'
 import { authenticatedApiFetch } from '../../../../api/client'
-import { downloadFile, fileDesktop } from '../../fileTransfer'
+import { copyFilesToClipboard, downloadFile } from '../../fileTransfer'
 import { resolveArtifactFromPath } from '../../resolver'
 import { useSidecarStore } from '../../sidecarStore'
 import type { ViewerContext } from '../../types'
@@ -493,60 +493,10 @@ export function FileTreeViewer({ artifact, isActive = true }: ViewerContext) {
   const handleCopyFiles = useCallback(async (paths: string[]) => {
     if (!paths.length) return
     setCopying(true)
-    const id = notifications.show({
-      loading: true,
-      title: '正在复制文件',
-      message: '正在准备文件句柄与剪贴板数据…',
-      autoClose: false,
-    })
-
     try {
-      const res = await authenticatedApiFetch('/api/v1/files/stage', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          copy_to_clipboard: !fileDesktop()?.setClipboardFiles,
-          paths,
-          session_id: artifact.sessionId,
-          connection_id: artifact.connectionId || null,
-        }),
-      })
-
-      if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}))
-        throw new Error(errJson.detail || `暂存文件失败 (${res.status})`)
-      }
-
-      const data = await res.json()
-      const localPaths: string[] = data.local_paths || []
-      if (!localPaths.length) {
-        throw new Error('未获取到有效物理文件路径')
-      }
-
-      if (!data.clipboard_set) {
-        const desktopApi = fileDesktop()
-        if (!desktopApi?.setClipboardFiles) throw new Error('当前环境无法写入文件剪贴板')
-        const ok = await desktopApi.setClipboardFiles(localPaths)
-        if (!ok) throw new Error('写入 Windows 剪贴板失败')
-      }
-
-      notifications.update({
-        id,
-        color: 'teal',
-        title: '已复制到系统剪贴板',
-        message: `已复制 ${localPaths.length} 个文件/文件夹，可直接在 Xftp 或资源管理器中按 Ctrl+V 传输！`,
-        icon: <IconCheck size={16} />,
-        autoClose: 4000,
-        loading: false,
-      })
-    } catch (err: unknown) {
-      notifications.update({
-        id,
-        color: 'red',
-        title: '复制文件失败',
-        message: err instanceof Error ? err.message : '未知错误',
-        autoClose: 5000,
-        loading: false,
+      await copyFilesToClipboard(paths, {
+        sessionId: artifact.sessionId,
+        connectionId: artifact.connectionId || null,
       })
     } finally {
       setCopying(false)
