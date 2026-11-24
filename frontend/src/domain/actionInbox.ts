@@ -6,6 +6,11 @@ import {
 } from '../components/AsyncUserInputCard'
 import { isUserInput } from '../components/UserInputCard'
 import { displaySessionTitle, isHiddenRailSession, sessionActivityStatus } from '../components/sessionRailModel'
+import {
+  collectTurnArtifactReviews,
+  isArtifactFeedbackPending,
+  type ArtifactReviewItem,
+} from './artifactReview'
 import { scopeKey } from './semantics'
 import type { Agent, Approval, Command, EventNotification, Message, Session } from './types'
 
@@ -26,6 +31,8 @@ export interface ActionInboxItem {
   timestamp: string
   approval?: Approval
   questionMessage?: Message
+  artifactReview?: ArtifactReviewItem
+  artifactTurnEndAt?: string
   canApproveInline: boolean
   canQuickReply: boolean
 }
@@ -200,6 +207,44 @@ export function buildActionInboxItems(input: BuildActionInboxInput): ActionInbox
         summary: compactText(firstQuestion || msg.text) || 'Agent 提出了问题等待你回复',
         timestamp: msg.created_at || session?.updated_at || '',
         questionMessage: msg,
+        canApproveInline: false,
+        canQuickReply: false,
+      })
+      break
+    }
+  }
+
+  // 3b. Unresolved Antigravity artifact plans awaiting Proceed confirmation
+  for (const [key, bag] of Object.entries(messages)) {
+    if (coveredQuestionSessions.has(key) || coveredApprovalSessions.has(key)) continue
+    const session = sessionMap.get(key)
+    if (session?.status === 'running' || session?.control_state === 'readonly') continue
+    const rows = sortedSessionMessages(bag)
+    const sessionCommands = commandsBySession.get(key) || []
+    const collected = collectTurnArtifactReviews(rows)
+    for (let i = collected.all.length - 1; i >= 0; i -= 1) {
+      const entry = collected.all[i]
+      if (!entry.artifact.requestFeedback) continue
+      if (!isArtifactFeedbackPending(entry, sessionCommands, false)) {
+        break
+      }
+      const agent = agents[entry.artifact.agentId]
+      coveredQuestionSessions.add(key)
+      coveredAnySessions.add(key)
+      items.push({
+        id: `artifact-review:${key}:${entry.artifact.messageId}`,
+        kind: 'question',
+        priority: 2,
+        agentId: entry.artifact.agentId,
+        sessionId: entry.artifact.sessionId,
+        sessionKey: key,
+        session,
+        agent,
+        title: session ? displaySessionTitle(session) : entry.artifact.fileName,
+        summary: compactText(entry.artifact.summary) || `${entry.artifact.fileName} 等待确认 Proceed`,
+        timestamp: entry.turnEndAt || entry.artifact.createdAt || session?.updated_at || '',
+        artifactReview: entry.artifact,
+        artifactTurnEndAt: entry.turnEndAt,
         canApproveInline: false,
         canQuickReply: false,
       })

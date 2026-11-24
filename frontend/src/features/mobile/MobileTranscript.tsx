@@ -1,9 +1,11 @@
 import { UserInputCard, isUserInput } from '../../components/UserInputCard'
 import { AsyncUserInputCard, isAsyncQuestion, hasLaterNativeInput } from '../../components/AsyncUserInputCard'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { ArtifactReviewCard } from '../../components/ArtifactReviewCard'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { IconCheck, IconChecks, IconChevronDown, IconHistory, IconMovie } from '@tabler/icons-react'
 import { isMobileVideoFilePath } from './mobileFilePath'
 import type { SessionCheckpoint } from '../../api/client'
+import { collectTurnArtifactReviews } from '../../domain/artifactReview'
 import { mapCheckpointsToMessages } from '../../domain/turnCheckpoints'
 import type { Approval, Message, Session } from '../../domain/types'
 import { attachmentHref } from '../../domain/attachmentHref'
@@ -67,6 +69,10 @@ export function MobileTranscript({ session, messages, activityBreaks, commands =
   const rows = messages.map(normalizeMessagePresentation).filter(m => isCompactionMessage(m) || hasMessageContent(m))
   const activity = (m: Message) => !isCompactionMessage(m) && isMessageActivity(m)
   const packs = activityPacks(rows, activityBreaks)
+  const turnArtifacts = useMemo(
+    () => collectTurnArtifactReviews(rows, packs, { busy }),
+    [busy, packs, rows],
+  )
   const checkpointByMsgId = useMemo(
     () => mapCheckpointsToMessages(rows, checkpoints ?? []),
     [rows, checkpoints],
@@ -133,7 +139,8 @@ export function MobileTranscript({ session, messages, activityBreaks, commands =
           if (!pack) return null
           const remaining = rows.slice(i + pack.length)
           const isPackRunning = Boolean(busy && !remaining.some(activity) && !remaining.some(item => item.role === 'user' || item.role === 'assistant' && item.kind === 'message'))
-          return <LazyDetails className="m-think-pack" key={m.id} loading={isPackRunning} summary={<PackSummary pack={pack} isRunning={isPackRunning} />}>
+          const packArtifacts = turnArtifacts.byPackStart.get(i)
+          return <Fragment key={m.id}><LazyDetails className="m-think-pack" loading={isPackRunning} summary={<PackSummary pack={pack} isRunning={isPackRunning} />}>
             <div className="m-think-rail">{pack.map(item => {
               const desc = describeTool(item)
               const itemArgs = extractToolArgs(item.tool)
@@ -187,8 +194,25 @@ export function MobileTranscript({ session, messages, activityBreaks, commands =
               </LazyDetails>
             })}</div>
           </LazyDetails>
+          {packArtifacts?.map((entry) => (
+            <div key={`m-artifact:${entry.artifact.messageId}:${entry.artifact.path || entry.artifact.sourceIndex}`} className="m-artifact-entry">
+              <ArtifactReviewCard
+                artifact={entry.artifact}
+                session={session}
+                commands={commands}
+                continued={entry.continued}
+                turnRunning={entry.turnRunning}
+                turnEndAt={entry.turnEndAt}
+                readOnly={readOnly}
+                compact
+                onOpenFile={onFile}
+              />
+            </div>
+          ))}
+          </Fragment>
         }
-        return <article key={m.id} className={`m-msg m-hold ${m.role === 'user' ? 'm-user' : 'm-assistant'}${activeHighlightId === m.id ? ' is-search-highlight' : ''}`} data-message-id={m.id}
+        const msgArtifacts = turnArtifacts.byMessageIndex.get(i)
+        return <Fragment key={m.id}><article className={`m-msg m-hold ${m.role === 'user' ? 'm-user' : 'm-assistant'}${activeHighlightId === m.id ? ' is-search-highlight' : ''}`} data-message-id={m.id}
           tabIndex={0}
           onContextMenu={e => { if ((e.target as Element).closest('.m-select-text')) return; e.preventDefault(); e.stopPropagation(); cancelHold(); const rect = e.currentTarget.getBoundingClientRect(); action(m, e.currentTarget, e.clientX || rect.left + rect.width / 2, e.clientY || rect.top + 20) }}
           onTouchStart={e => { cancelHold(); if ((e.target as Element).closest('.m-select-text')) return; const element = e.currentTarget; const point = e.touches[0]; hold.current = setTimeout(() => { action(m, element, point.clientX, point.clientY); navigator.vibrate?.(20) }, 500) }}>
@@ -252,6 +276,22 @@ export function MobileTranscript({ session, messages, activityBreaks, commands =
             )
           })()}
         </article>
+        {msgArtifacts?.map((entry) => (
+          <div key={`m-artifact:${entry.artifact.messageId}:${entry.artifact.path || entry.artifact.sourceIndex}`} className="m-artifact-entry">
+            <ArtifactReviewCard
+              artifact={entry.artifact}
+              session={session}
+              commands={commands}
+              continued={entry.continued}
+              turnRunning={entry.turnRunning}
+              turnEndAt={entry.turnEndAt}
+              readOnly={readOnly}
+              compact
+              onOpenFile={onFile}
+            />
+          </div>
+        ))}
+        </Fragment>
       })}
       {busy && (!rows.length || rows[rows.length - 1].role === 'user') && <div className="m-thinking-placeholder">··· 正在思考与响应中…</div>}
       {approvals.length > 0 && (

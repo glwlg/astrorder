@@ -138,6 +138,17 @@ export function extractToolArgs(tool: Message['tool'] | null | undefined): Recor
   return {}
 }
 
+function cleanPathString(raw: string): string {
+  const trimmed = raw.trim()
+  if (trimmed.length >= 2 && trimmed.startsWith('"') && trimmed.endsWith('"')) {
+    try {
+      const parsed = JSON.parse(trimmed)
+      if (typeof parsed === 'string') return parsed.trim()
+    } catch {}
+  }
+  return trimmed
+}
+
 function firstStringArg(args: Record<string, unknown>, ...keys: string[]): string {
   for (const key of keys) {
     const val = args[key]
@@ -146,6 +157,11 @@ function firstStringArg(args: Record<string, unknown>, ...keys: string[]): strin
     }
   }
   return ''
+}
+
+function firstPathArg(args: Record<string, unknown>, ...keys: string[]): string {
+  const raw = firstStringArg(args, ...keys)
+  return raw ? cleanPathString(raw) : ''
 }
 
 function firstNumberArg(args: Record<string, unknown>, ...keys: string[]): number | null {
@@ -223,7 +239,7 @@ export function fileChangeDiffs(message: Message): FileChangeDiffItem[] {
       if (!change || typeof change !== 'object') return []
       const item = change as { path?: unknown; diff?: unknown }
       if (typeof item.diff !== 'string' || !item.diff.trim()) return []
-      const fullPath = typeof item.path === 'string' ? item.path : ''
+      const fullPath = typeof item.path === 'string' ? cleanPathString(item.path) : ''
       const fileName = (fullPath ? fullPath.split(/[/\\]/).pop() : '') || fullPath || '文件变更'
       return [fullPath ? { file: fileName, path: fullPath, diff: item.diff } : { file: fileName, diff: item.diff }]
     })
@@ -236,7 +252,7 @@ export function fileChangeDiffs(message: Message): FileChangeDiffItem[] {
       try {
         const parsed = JSON.parse(text)
         if (typeof parsed?.diff === 'string' && parsed.diff.trim()) {
-          const filePath = firstStringArg(args, 'path', 'Path', 'TargetFile', 'AbsolutePath') || String(parsed.path || parsed.file || '文件变更')
+          const filePath = firstPathArg(args, 'path', 'Path', 'TargetFile', 'AbsolutePath') || cleanPathString(String(parsed.path || parsed.file || '文件变更'))
           const fileName = filePath.split(/[/\\]/).pop() || filePath
           return [{ file: fileName, path: filePath, diff: parsed.diff }]
         }
@@ -244,7 +260,7 @@ export function fileChangeDiffs(message: Message): FileChangeDiffItem[] {
     }
   }
 
-  const filePath = firstStringArg(args, 'path', 'Path', 'TargetFile', 'AbsolutePath')
+  const filePath = firstPathArg(args, 'path', 'Path', 'TargetFile', 'AbsolutePath')
   const oldStr = firstStringArg(args, 'old_string', 'Target', 'TargetContent')
   const newStr = firstStringArg(args, 'new_string', 'Replacement', 'ReplacementContent')
   if (filePath && (oldStr !== '' || newStr !== '')) {
@@ -497,10 +513,10 @@ export function describeTool(message: Message): ToolDescription {
   ) {
     let file = ''
     if (Array.isArray(args.changes) && args.changes[0] && typeof args.changes[0] === 'object') {
-      const paths = (args.changes as Array<{ path?: string }>).map(c => String(c.path || '').split(/[/\\]/).pop()).filter(Boolean)
+      const paths = (args.changes as Array<{ path?: string }>).map(c => cleanPathString(String(c.path || '')).split(/[/\\]/).pop()).filter(Boolean)
       file = paths.slice(0, 2).join(', ') + (paths.length > 2 ? ` 等 ${paths.length} 个文件` : '')
     } else {
-      const pathVal = firstStringArg(args, 'path', 'Path', 'TargetFile', 'AbsolutePath')
+      const pathVal = firstPathArg(args, 'path', 'Path', 'TargetFile', 'AbsolutePath')
       if (pathVal) {
         file = pathVal.split(/[/\\]/).pop() || pathVal
       }
@@ -555,7 +571,7 @@ export function describeTool(message: Message): ToolDescription {
     name === 'read_resource' ||
     (name === 'read' && Boolean(firstStringArg(args, 'path', 'Path', 'AbsolutePath')))
   ) {
-    const pathVal = firstStringArg(args, 'path', 'Path', 'AbsolutePath', 'File', 'TargetFile', 'DirectoryPath', 'Uri', 'Url')
+    const pathVal = firstPathArg(args, 'path', 'Path', 'AbsolutePath', 'File', 'TargetFile', 'DirectoryPath', 'Uri', 'Url')
     let file = pathVal.split(/[/\\]/).pop() || pathVal
 
     if (pathVal && isImageFilePath(pathVal)) {

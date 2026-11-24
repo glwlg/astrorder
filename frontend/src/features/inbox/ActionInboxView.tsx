@@ -15,6 +15,7 @@ import {
 } from '@tabler/icons-react'
 import { ApiError, api } from '../../api/client'
 import { AgentBrandIcon } from '../../components/AgentBrandIcon'
+import { ArtifactReviewCard } from '../../components/ArtifactReviewCard'
 import { AsyncUserInputCard } from '../../components/AsyncUserInputCard'
 import { UserInputCard } from '../../components/UserInputCard'
 import { formatRelativeTime, sessionActivityStatus } from '../../components/sessionRailModel'
@@ -284,7 +285,9 @@ export function ActionInboxView({ compact = false, onOpenSession }: ActionInboxV
                     {item.session?.project_name && (
                       <span className="action-inbox-project-tag">{item.session.project_name}</span>
                     )}
-                    <Badge size="xs" variant="light" color={badge.color}>{badge.label}</Badge>
+                    <Badge size="xs" variant="light" color={badge.color}>
+                      {item.artifactReview ? '计划待确认' : badge.label}
+                    </Badge>
                   </div>
                   <div className="action-inbox-card-right">
                     {item.timestamp && (
@@ -311,6 +314,17 @@ export function ActionInboxView({ compact = false, onOpenSession }: ActionInboxV
                 ) : item.kind === 'question' && item.questionMessage ? (
                   <div className="action-inbox-embedded-card">
                     <AsyncUserInputCard message={item.questionMessage} commands={sessionCommands} />
+                  </div>
+                ) : item.kind === 'question' && item.artifactReview ? (
+                  <div className="action-inbox-embedded-card">
+                    <ArtifactReviewCard
+                      artifact={item.artifactReview}
+                      session={item.session}
+                      commands={sessionCommands}
+                      turnEndAt={item.artifactTurnEndAt}
+                      readOnly={item.session?.control_state === 'readonly'}
+                      compact
+                    />
                   </div>
                 ) : (
                   <>

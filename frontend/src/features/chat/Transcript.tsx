@@ -1,5 +1,7 @@
 import { UserInputCard, isUserInput } from '../../components/UserInputCard'
 import { AsyncUserInputCard, isAsyncQuestion, hasLaterNativeInput } from '../../components/AsyncUserInputCard'
+import { ArtifactReviewCard } from '../../components/ArtifactReviewCard'
+import { collectTurnArtifactReviews, type ArtifactReviewItem } from '../../domain/artifactReview'
 import { IconArrowDown, IconPaperclip, IconRefresh, IconTool, IconVectorTriangle } from '@tabler/icons-react'
 import { ActionIcon, Anchor, Button, Group, Paper, Stack, Text, Tooltip } from '@mantine/core'
 import { IconCheck, IconChecks, IconCopy, IconEdit, IconGitFork, IconHistory, IconShieldCheck, IconX } from '@tabler/icons-react'
@@ -427,6 +429,15 @@ type VisualRow =
   | { kind: 'compaction'; id: string; message: Message }
   | { kind: 'pack'; id: string; pack: Message[]; shouldOpen: boolean; definitivelyEnded: boolean; isDeferred: boolean }
   | {
+      kind: 'artifact'
+      id: string
+      artifact: ArtifactReviewItem
+      continued: boolean
+      turnRunning: boolean
+      turnEndAt: string
+      isDeferred: boolean
+    }
+  | {
       kind: 'message'
       id: string
       idx: number
@@ -505,6 +516,10 @@ export const Transcript = memo(function Transcript({
     [messages],
   )
   const packs = useMemo(() => activityPacks(visibleMessages, activityBreaks), [visibleMessages, activityBreaks])
+  const turnArtifacts = useMemo(
+    () => collectTurnArtifactReviews(visibleMessages, packs, { busy }),
+    [busy, packs, visibleMessages],
+  )
   const checkpointByMsgId = useMemo(
     () => mapCheckpointsToMessages(visibleMessages, checkpoints ?? []),
     [visibleMessages, checkpoints],
@@ -591,6 +606,20 @@ export const Transcript = memo(function Transcript({
         const definitivelyEnded = laterFinalReply || laterUser
         const isDeferred = !shouldOpen && idx + pack.length < n - 6
         rows.push({ kind: 'pack', id: message.id, pack, shouldOpen, definitivelyEnded, isDeferred })
+        const packArtifacts = turnArtifacts.byPackStart.get(idx)
+        if (packArtifacts) {
+          for (const entry of packArtifacts) {
+            rows.push({
+              kind: 'artifact',
+              id: `artifact:${entry.artifact.messageId}:${entry.artifact.path || entry.artifact.sourceIndex}`,
+              artifact: entry.artifact,
+              continued: entry.continued,
+              turnRunning: entry.turnRunning,
+              turnEndAt: entry.turnEndAt,
+              isDeferred,
+            })
+          }
+        }
         continue
       }
 
@@ -629,9 +658,23 @@ export const Transcript = memo(function Transcript({
         isDeferred: idx < n - 6,
         continuedNativeInput,
       })
+      const msgArtifacts = turnArtifacts.byMessageIndex.get(idx)
+      if (msgArtifacts) {
+        for (const entry of msgArtifacts) {
+          rows.push({
+            kind: 'artifact',
+            id: `artifact:${entry.artifact.messageId}:${entry.artifact.path || entry.artifact.sourceIndex}`,
+            artifact: entry.artifact,
+            continued: entry.continued,
+            turnRunning: entry.turnRunning,
+            turnEndAt: entry.turnEndAt,
+            isDeferred: idx < n - 6,
+          })
+        }
+      }
     }
     return rows
-  }, [busy, commands, packs, visibleMessages])
+  }, [busy, commands, packs, turnArtifacts, visibleMessages])
 
   const [visibleRowLimit, setVisibleRowLimit] = useState(INITIAL_VISIBLE_ROWS)
   const [activeHighlightId, setActiveHighlightId] = useState<string | null>(null)
@@ -647,6 +690,7 @@ export const Transcript = memo(function Transcript({
     const out: Message[] = []
     for (const row of renderedRows) {
       if (row.kind === 'pack') out.push(...row.pack)
+      else if (row.kind === 'artifact') continue
       else out.push(row.message)
     }
     return out
@@ -710,7 +754,9 @@ export const Transcript = memo(function Transcript({
     const targetRowIdx = visualRows.findIndex((row) =>
       row.kind === 'pack'
         ? row.pack.some((m) => m.id === highlightMessageId)
-        : row.message.id === highlightMessageId,
+        : row.kind === 'artifact'
+          ? false
+          : row.message.id === highlightMessageId,
     )
     if (targetRowIdx >= 0) {
       if (targetRowIdx < hiddenRowCount) {
@@ -863,6 +909,24 @@ export const Transcript = memo(function Transcript({
                   onGalleryClick={onGalleryClick}
                   session={session}
                 />
+              )
+            }
+            if (row.kind === 'artifact') {
+              return (
+                <div
+                  key={row.id}
+                  className={`transcript-artifact-entry${row.isDeferred ? ' is-deferred-turn' : ''}`}
+                >
+                  <ArtifactReviewCard
+                    artifact={row.artifact}
+                    session={session}
+                    commands={commands}
+                    continued={row.continued}
+                    turnRunning={row.turnRunning}
+                    turnEndAt={row.turnEndAt}
+                    readOnly={session?.control_state === 'readonly'}
+                  />
+                </div>
               )
             }
             const { message, idx } = row

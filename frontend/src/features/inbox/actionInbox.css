@@ -273,8 +273,10 @@
   word-break: break-all;
 }
 
-.action-inbox-embedded-card .user-input-card {
+.action-inbox-embedded-card .user-input-card,
+.action-inbox-embedded-card .artifact-review-card {
   margin: 0;
+  max-width: none;
 }
 
 .action-inbox-actions {

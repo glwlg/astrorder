@@ -1552,6 +1552,266 @@ a { color: inherit; }
 .user-input-card .user-input-summary { margin: 0; overflow-wrap: anywhere; }
 .user-input-card .user-input-error { margin: 10px 0 0; color: var(--astr-red); font-size: 12px; overflow-wrap: anywhere; }
 @media (max-width: 767px) { .user-input-card { padding: 12px; } .user-input-option { min-height: 42px; } .user-input-custom input { height: 40px; } }
+
+/* Antigravity Artifact Review & Proceed Card */
+.transcript-artifact-entry {
+  width: 100%;
+  margin: 6px 0 4px;
+}
+.m-artifact-entry {
+  width: 100%;
+  margin: 8px 0 4px;
+}
+.artifact-review-card {
+  width: 100%;
+  max-width: 720px;
+  min-width: 0;
+  padding: 13px 16px;
+  border: 1px solid var(--astr-border);
+  border-radius: 12px;
+  background: var(--astr-surface);
+  color: var(--astr-text);
+  font-size: 13.5px;
+  line-height: 1.55;
+  box-shadow: var(--astr-shadow-soft);
+  transition: border-color .16s ease, box-shadow .16s ease;
+}
+.artifact-review-card.is-pending-feedback {
+  border-color: color-mix(in oklab, var(--astr-accent, var(--astr-indigo, #7540bd)) 38%, var(--astr-border));
+  background: color-mix(in oklab, var(--astr-accent, var(--astr-indigo, #7540bd)) 3.5%, var(--astr-surface));
+  box-shadow: 0 4px 16px -8px color-mix(in oklab, var(--astr-accent, var(--astr-indigo, #7540bd)) 26%, transparent);
+}
+.artifact-review-card.is-compact {
+  padding: 11px 13px;
+  border-radius: 10px;
+}
+.artifact-review-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.artifact-review-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1 1 220px;
+  flex-wrap: wrap;
+}
+.artifact-review-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--astr-accent, var(--astr-indigo, #7540bd));
+  flex-shrink: 0;
+}
+.artifact-review-card.is-settled .artifact-review-icon {
+  color: var(--astr-muted);
+}
+.artifact-review-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 21px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .01em;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.artifact-review-badge.is-pending {
+  background: color-mix(in oklab, var(--astr-accent, var(--astr-indigo, #7540bd)) 14%, var(--astr-surface));
+  color: var(--astr-accent, var(--astr-indigo, #7540bd));
+}
+.artifact-review-badge.is-done {
+  background: color-mix(in oklab, var(--astr-teal, #12b886) 13%, var(--astr-surface));
+  color: var(--astr-teal, #12b886);
+}
+.artifact-review-badge.is-doc {
+  background: var(--astr-surface-muted);
+  color: var(--astr-muted);
+}
+.artifact-review-file-btn {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+  padding: 2px 7px;
+  border: 1px solid var(--astr-border);
+  border-radius: 6px;
+  background: var(--astr-surface-muted);
+  color: var(--astr-text);
+  font-family: var(--astr-session-mono-font, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color .15s, color .15s, background .15s;
+}
+.artifact-review-file-btn > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.artifact-review-file-btn:hover {
+  border-color: color-mix(in oklab, var(--astr-accent, var(--astr-indigo, #7540bd)) 45%, var(--astr-border));
+  color: var(--astr-accent, var(--astr-indigo, #7540bd));
+}
+.artifact-review-file-name {
+  font-family: var(--astr-session-mono-font, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--astr-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.artifact-review-open-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--astr-border);
+  border-radius: 7px;
+  background: var(--astr-surface);
+  color: var(--astr-text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: border-color .15s, background .15s, color .15s;
+}
+.artifact-review-open-btn:hover {
+  border-color: color-mix(in oklab, var(--astr-accent, var(--astr-indigo, #7540bd)) 42%, var(--astr-border));
+  background: var(--astr-surface-muted);
+  color: var(--astr-accent, var(--astr-indigo, #7540bd));
+}
+.artifact-review-summary-wrap {
+  margin-top: 9px;
+}
+.artifact-review-summary {
+  margin: 0;
+  color: var(--astr-text-secondary, var(--astr-text));
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.artifact-review-summary.is-clamped {
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.artifact-review-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-top: 5px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--astr-accent, var(--astr-indigo, #7540bd));
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.artifact-review-toggle:hover {
+  text-decoration: underline;
+}
+.artifact-review-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in oklab, var(--astr-border) 80%, transparent);
+}
+.artifact-review-hint {
+  flex: 1 1 200px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--astr-muted);
+  line-height: 1.45;
+}
+.artifact-review-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+.artifact-proceed-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 33px;
+  padding: 0 15px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: var(--astr-accent, var(--astr-indigo, #7540bd));
+  color: var(--astr-accent-contrast, #ffffff);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px -2px color-mix(in oklab, var(--astr-accent, var(--astr-indigo, #7540bd)) 45%, transparent);
+  transition: background .15s ease, transform .1s ease, opacity .15s ease;
+}
+.artifact-proceed-btn:hover:not(:disabled) {
+  background: var(--astr-accent-strong, var(--astr-accent, #6424bd));
+}
+.artifact-proceed-btn:active:not(:disabled) {
+  transform: translateY(0.5px);
+}
+.artifact-proceed-btn:disabled {
+  opacity: .52;
+  cursor: default;
+  box-shadow: none;
+}
+.artifact-review-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--astr-muted);
+}
+.artifact-review-status svg {
+  color: var(--astr-teal, #12b886);
+  flex-shrink: 0;
+}
+.artifact-review-error {
+  margin: 8px 0 0;
+  color: var(--astr-red);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+@keyframes artifact-spin-keyframes {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.artifact-spin {
+  animation: artifact-spin-keyframes 0.9s linear infinite;
+}
+@media (max-width: 767px) {
+  .artifact-review-card {
+    padding: 11px 12px;
+  }
+  .artifact-proceed-btn {
+    min-height: 36px;
+    padding: 0 14px;
+  }
+}
 .transcript-approvals { margin-top: 10px; width: 100%; }
 .transcript-approval-card { border-color: color-mix(in srgb, var(--astr-yellow) 35%, var(--astr-border)); box-shadow: var(--astr-shadow-soft); }
 .approval-card-detail { margin: 6px 0 8px; font-size: 12px; }
