@@ -723,7 +723,7 @@ function ChatPageBody() {
                 {reviewRun?.status === 'failed' && <Text size="xs" c="red">审查失败</Text>}
 
                 {!!approvals.length && <Button size="compact-sm" color="yellow" variant="light" onClick={openDetails}>{approvals.some(isUserInput) ? '等待回答' : '等待授权'} · {approvals.length}</Button>}
-                {selected.workspace && (
+                {sessionCheckpoints.pluginEnabled && selected.workspace && (
                   <Tooltip
                     label={sessionCheckpoints.items.length > 0 ? `代码检查点（${sessionCheckpoints.items.length}）` : '按轮次代码检查点'}
                     position="bottom"
@@ -828,8 +828,8 @@ function ChatPageBody() {
             commands={commands}
             onForkAtMessage={handleOpenForkCallback}
             onEditLastUserMessage={handleEditLastUserMessage}
-            checkpoints={sessionCheckpoints.items}
-            onOpenCheckpoint={handleOpenCheckpoint}
+            checkpoints={sessionCheckpoints.pluginEnabled ? sessionCheckpoints.items : []}
+            onOpenCheckpoint={sessionCheckpoints.pluginEnabled ? handleOpenCheckpoint : undefined}
             highlightMessageId={searchParams.get('message_id')}
           />
           </PerfProfiler>
@@ -962,7 +962,7 @@ function ChatPageBody() {
         {selectedTask && <TaskDetails task={selectedTask} canStop={Boolean(agent?.capabilities.includes('stop') && sessions.some(session => session.agent_id === selectedTask.agent_id && session.id === selectedTask.target_id) && ['pending', 'running', 'waiting_approval'].includes(selectedTask.status))} onStop={(task) => void handleStopTask(task)} onOpenSession={(sid, aid) => { closeTaskDetails(); setTaskSelection(null); navigate(`/chat/${encodeURIComponent(sid)}?agent_id=${encodeURIComponent(aid)}`) }} onJumpToLatest={() => window.scrollTo({ top: document.body.scrollHeight, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })} onClose={() => { closeTaskDetails(); setTaskSelection(null) }} />}
       </Drawer>
       <Drawer
-        opened={checkpointsOpened && Boolean(selected)}
+        opened={sessionCheckpoints.pluginEnabled && checkpointsOpened && Boolean(selected)}
         onClose={() => { setFocusedCheckpointId(null); closeCheckpoints() }}
         title="按轮次代码检查点"
         position={mobileTaskSheet ? 'bottom' : 'right'}

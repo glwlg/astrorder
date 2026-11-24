@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { MantineProvider } from '@mantine/core'
 import { PluginsPage } from './PluginsPage'
 import {
+  CODE_CHECKPOINTS_PLUGIN_ID,
   COMMAND_COMPRESSION_PLUGIN_ID,
   SIDEBAR_INTEGRATIONS_PLUGIN_ID,
   VOICE_INPUT_PLUGIN_ID,
@@ -37,6 +38,7 @@ describe('PluginsPage Component', () => {
     expect(screen.getByText('插件管理')).toBeInTheDocument()
     expect(screen.getByText('语音输入与听写')).toBeInTheDocument()
     expect(screen.getByText('命令输出压缩')).toBeInTheDocument()
+    expect(screen.getByText('代码检查点')).toBeInTheDocument()
     expect(screen.getByText('Git Worktree 分叉工作区')).toBeInTheDocument()
     expect(screen.getByText('侧边栏外链集成')).toBeInTheDocument()
     expect(screen.getByText('定时备份与快照')).toBeInTheDocument()
@@ -147,8 +149,10 @@ describe('PluginsPage Component', () => {
     expect(screen.getByText('当前实现: DBX')).toBeInTheDocument()
     expect(screen.queryByText('矢量流程图')).toBeNull()
 
-    // Expanding config shows "工具实现" selector with DBX as an option alongside custom web tool
-    fireEvent.click(screen.getAllByRole('button', { name: /参数配置/ })[0])
+    // Expanding config on the database plugin card shows "工具实现" selector with DBX as an option alongside custom web tool
+    const dbCard = screen.getByText('数据库管理工具').closest('.mantine-Card-root') as HTMLElement
+    expect(dbCard).toBeTruthy()
+    fireEvent.click(dbCard.querySelector('button[class*="mantine-Button-root"]')!)
     expect(screen.getByText('工具实现')).toBeInTheDocument()
     expect(screen.getByDisplayValue('DBX')).toBeInTheDocument()
     expect(screen.getByDisplayValue('http://127.0.0.1:14224')).toBeInTheDocument()
@@ -207,5 +211,29 @@ describe('PluginsPage Component', () => {
     fireEvent.click(await screen.findByText('System One'))
     await waitFor(() => expect(updateEngine).toHaveBeenCalledWith('jev_ultrafast'))
     expect(await screen.findByText('当前实现: System One')).toBeInTheDocument()
+  })
+
+  it('allows configuring code checkpoints maxAutoSnapshots count and toggling autoCapture', async () => {
+    vi.spyOn(api, 'getLocalVoicePlugin').mockResolvedValue(disabledStatus)
+    vi.spyOn(api, 'getPluginSettings').mockResolvedValue({ enabled: {}, configs: {} })
+    vi.spyOn(api, 'getBrowserEngine').mockResolvedValue({ engine: 'browser_use' })
+    const updateSpy = vi.spyOn(api, 'updatePluginSettings').mockResolvedValue({
+      enabled: {},
+      configs: { [CODE_CHECKPOINTS_PLUGIN_ID]: { maxAutoSnapshots: 15 } },
+    })
+
+    render(<MantineProvider><PluginsPage /></MantineProvider>)
+    fireEvent.change(screen.getByRole('textbox', { name: '搜索插件' }), { target: { value: '代码检查点' } })
+    expect(screen.getByText('代码检查点')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /参数配置/ }))
+    const limitInput = screen.getByLabelText('自动保留快照数')
+    expect(limitInput).toHaveValue('20')
+
+    fireEvent.change(limitInput, { target: { value: '15' } })
+    fireEvent.blur(limitInput)
+    await waitFor(() => expect(updateSpy).toHaveBeenCalledWith({
+      configs: { [CODE_CHECKPOINTS_PLUGIN_ID]: { maxAutoSnapshots: 15 } },
+    }))
   })
 })

@@ -19,6 +19,9 @@ export interface ViewerConfigOption {
   type: 'string' | 'boolean' | 'number' | 'select'
   options?: { label: string; value: string }[]
   defaultValue: unknown
+  min?: number
+  max?: number
+  step?: number
   visibleWhen?: { key: string; value: string | boolean }
 }
 

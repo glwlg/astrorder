@@ -40,7 +40,7 @@ type SessionCheckpoint struct {
 }
 
 func (s *Store) ListSessionCheckpoints(ctx context.Context, agentID, sessionID string, limit int) ([]SessionCheckpoint, error) {
-	if limit <= 0 || limit > 200 {
+	if limit <= 0 || limit > 250 {
 		limit = 60
 	}
 	var rows *sql.Rows

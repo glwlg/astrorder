@@ -69,7 +69,7 @@ export function SessionCheckpointsPanel({
   onOpenFile?: (relativePath: string) => void
 }) {
   const queryClient = useQueryClient()
-  const { items, isPending, isFetching, error, refetch, hasWorkspace } = useSessionCheckpoints(session, true)
+  const { items, isPending, isFetching, error, refetch, hasWorkspace, pluginEnabled, maxAutoSnapshots } = useSessionCheckpoints(session, true)
   const [labelInput, setLabelInput] = useState('')
   const [capturing, setCapturing] = useState(false)
   const [activeId, setActiveId] = useState<string | null>(initialCheckpointId)
@@ -225,6 +225,24 @@ export function SessionCheckpointsPanel({
     }
   }
 
+  if (!pluginEnabled) {
+    return (
+      <div className={`cp-panel${compact ? ' is-compact' : ''}`}>
+        <div className="cp-empty">
+          <IconHistory size={24} />
+          <div>「代码检查点」插件已停用。如需自动记录轮次快照与安全回滚，请在「设置 → 插件」中重新启用。</div>
+          <button
+            type="button"
+            className="cp-btn is-sm is-primary"
+            onClick={() => window.dispatchEvent(new CustomEvent('astrorder:open-settings', { detail: { tab: 'plugins' } }))}
+          >
+            前往插件管理
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   if (!hasWorkspace) {
     return (
       <div className={`cp-panel${compact ? ' is-compact' : ''}`}>
@@ -244,7 +262,7 @@ export function SessionCheckpointsPanel({
         <div className="cp-toolbar-meta">
           <span className="cp-summary">
             <IconHistory size={15} />
-            <span>{items.length > 0 ? `共 ${items.length} 个检查点` : '按轮次自动记录工作区快照'}</span>
+            <span>{items.length > 0 ? `共 ${items.length} 个检查点 · 自动保留 ${maxAutoSnapshots} 个` : `按轮次自动保留最新 ${maxAutoSnapshots} 个快照`}</span>
           </span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             {latestBranch && (

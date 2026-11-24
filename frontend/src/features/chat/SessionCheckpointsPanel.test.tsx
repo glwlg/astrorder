@@ -4,6 +4,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api, type SessionCheckpoint } from '../../api/client'
 import type { Session } from '../../domain/types'
+import { CODE_CHECKPOINTS_PLUGIN_ID } from '../plugins/builtinPlugins'
+import { usePluginSettingsStore } from '../plugins/pluginSettingsStore'
 import { SessionCheckpointsPanel } from './SessionCheckpointsPanel'
 
 const sampleSession: Session = {
@@ -74,10 +76,12 @@ function renderPanel(session: Session = sampleSession) {
 describe('SessionCheckpointsPanel', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
+    usePluginSettingsStore.getState().reset()
   })
 
   afterEach(() => {
     cleanup()
+    usePluginSettingsStore.getState().reset()
   })
 
   it('lists checkpoints, compares turn diff, captures manual snapshot, and safely restores with confirmation', async () => {
@@ -164,5 +168,13 @@ describe('SessionCheckpointsPanel', () => {
   it('shows empty guidance when session has no workspace', () => {
     renderPanel({ ...sampleSession, workspace: null })
     expect(screen.getByText(/未关联本地或远程工作区目录/)).toBeTruthy()
+  })
+
+  it('shows disabled notice and skips fetching when code-checkpoints plugin is disabled', () => {
+    const listSpy = vi.spyOn(api, 'listCheckpoints')
+    usePluginSettingsStore.setState({ enabledPlugins: { [CODE_CHECKPOINTS_PLUGIN_ID]: false } })
+    renderPanel()
+    expect(screen.getByText(/「代码检查点」插件已停用/)).toBeTruthy()
+    expect(listSpy).not.toHaveBeenCalled()
   })
 })

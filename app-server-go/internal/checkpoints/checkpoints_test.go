@@ -347,3 +347,107 @@ func TestCheckpointsSingleFileRestoreAndAutoRetentionGC(t *testing.T) {
 		t.Fatalf("keep.txt should still stay keep-v4, got %q", string(keepContent2))
 	}
 }
+
+func TestCheckpointsPluginPolicyAndConfigurableRetention(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "plugin-policy.sqlite3")
+	st, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	repo := initGitWorkspace(t)
+	adapter := memSessionStore{
+		Store: st,
+		session: map[string]any{
+			"id":            "sess-policy",
+			"agent_id":      "agent-policy",
+			"title":         "插件策略测试",
+			"workspace":     repo,
+			"connection_id": "local",
+		},
+	}
+	resolver := targetfs.NewResolver(targetfs.ResolverOptions{
+		Store:            adapter,
+		DefaultWorkspace: repo,
+		AllowedRoots:     []string{repo},
+	})
+	svc := NewService(Options{
+		Store:      adapter,
+		Authorizer: allowAllBrowser{},
+		Resolver:   resolver,
+	})
+	defer svc.Close()
+
+	// Default policy: enabled=true, autoCapture=true, maxAuto=20
+	enabled, autoCapture, maxAuto := svc.resolveRuntimePolicy(context.Background())
+	if !enabled || !autoCapture || maxAuto != 20 {
+		t.Fatalf("unexpected default policy: enabled=%v autoCapture=%v maxAuto=%d", enabled, autoCapture, maxAuto)
+	}
+
+	// Configure plugin maxAutoSnapshots=3 dynamically in workspace_preferences
+	if err := st.SetPreference(context.Background(), prefPluginsConfig, map[string]any{
+		pluginID: map[string]any{
+			configKeyMaxAuto:     3,
+			configKeyAutoCapture: true,
+		},
+	}, true); err != nil {
+		t.Fatal(err)
+	}
+	for _, ver := range []string{"p1", "p2", "p3", "p4", "p5"} {
+		if err := os.WriteFile(filepath.Join(repo, "main.go"), []byte("package main\n// "+ver+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := svc.Capture(context.Background(), "agent-policy", "sess-policy", "auto_after", "", ver, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	listed, err := st.ListSessionCheckpoints(context.Background(), "agent-policy", "sess-policy", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 3 {
+		t.Fatalf("expected dynamic plugin retention of 3 auto checkpoints, got %d", len(listed))
+	}
+
+	// Disable plugin -> captureBackground must skip capturing new checkpoints
+	if err := st.SetPreference(context.Background(), prefPluginsEnabled, map[string]any{
+		pluginID: false,
+	}, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "main.go"), []byte("package main\n// disabled-turn\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	svc.captureBackground("agent-policy", "sess-policy", "auto_after", "", "should-skip")
+	listedAfterDisable, err := st.ListSessionCheckpoints(context.Background(), "agent-policy", "sess-policy", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listedAfterDisable) != 3 || listedAfterDisable[0].Label == "should-skip" {
+		t.Fatalf("expected disabled plugin to skip auto capture, got %+v", listedAfterDisable)
+	}
+
+	// Re-enable plugin but disable autoCapture -> captureBackground still skips
+	if err := st.SetPreference(context.Background(), prefPluginsEnabled, map[string]any{
+		pluginID: true,
+	}, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetPreference(context.Background(), prefPluginsConfig, map[string]any{
+		pluginID: map[string]any{
+			configKeyMaxAuto:     3,
+			configKeyAutoCapture: false,
+		},
+	}, true); err != nil {
+		t.Fatal(err)
+	}
+	svc.captureBackground("agent-policy", "sess-policy", "auto_after", "", "auto-off-skip")
+	listedAfterAutoOff, err := st.ListSessionCheckpoints(context.Background(), "agent-policy", "sess-policy", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listedAfterAutoOff) != 3 || listedAfterAutoOff[0].Label == "auto-off-skip" {
+		t.Fatalf("expected autoCapture=false to skip auto capture, got %+v", listedAfterAutoOff)
+	}
+}

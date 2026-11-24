@@ -8,6 +8,7 @@ import {
   Divider,
   Group,
   Modal,
+  NumberInput,
   Paper,
   Progress,
   Select,
@@ -48,6 +49,70 @@ import './PluginsPage.css'
 const BROWSER_ENGINE_LABELS: Record<BrowserEngine, string> = {
   browser_use: 'Browser Use',
   jev_ultrafast: 'System One',
+}
+
+function NumberOptionControl({
+  pluginId,
+  option,
+  value,
+  setPluginConfig,
+}: {
+  pluginId: string
+  option: ViewerConfigOption
+  value: unknown
+  setPluginConfig: (pluginId: string, key: string, value: unknown) => void
+}) {
+  const min = option.min ?? 1
+  const max = option.max ?? 9999
+  const fallback = typeof option.defaultValue === 'number' ? option.defaultValue : min
+  const resolved = (() => {
+    const num = typeof value === 'number' ? value : Number(value)
+    if (!Number.isFinite(num)) return fallback
+    return Math.min(max, Math.max(min, Math.round(num)))
+  })()
+  const [draft, setDraft] = useState<string | number>(resolved)
+
+  useEffect(() => {
+    setDraft(resolved)
+  }, [resolved])
+
+  const commit = (raw: string | number) => {
+    const parsed = typeof raw === 'number' ? raw : Number(String(raw).trim())
+    if (!Number.isFinite(parsed)) {
+      setDraft(resolved)
+      return
+    }
+    const clamped = Math.min(max, Math.max(min, Math.round(parsed)))
+    setDraft(clamped)
+    if (clamped !== resolved) {
+      setPluginConfig(pluginId, option.key, clamped)
+    }
+  }
+
+  return (
+    <NumberInput
+      size="xs"
+      label={option.label}
+      description={option.description}
+      aria-label={option.label}
+      min={min}
+      max={max}
+      step={option.step ?? 1}
+      allowDecimal={false}
+      clampBehavior="blur"
+      value={draft}
+      onChange={(next) => {
+        setDraft(next)
+        if (typeof next === 'number' && Number.isFinite(next) && next >= min && next <= max) {
+          const rounded = Math.round(next)
+          if (rounded !== resolved) {
+            setPluginConfig(pluginId, option.key, rounded)
+          }
+        }
+      }}
+      onBlur={() => commit(draft)}
+    />
+  )
 }
 
 function ConfigOptionControls({
@@ -113,6 +178,18 @@ function ConfigOptionControls({
                 }}
               />
             </div>
+          )
+        }
+
+        if (opt.type === 'number') {
+          return (
+            <NumberOptionControl
+              key={opt.key}
+              pluginId={pluginId}
+              option={opt}
+              value={currentVal}
+              setPluginConfig={setPluginConfig}
+            />
           )
         }
 

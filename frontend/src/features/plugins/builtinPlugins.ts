@@ -3,6 +3,7 @@ import {
   IconArchive,
   IconChartBar,
   IconGitBranch,
+  IconHistory,
   IconId,
   IconLayoutGrid,
   IconPlugConnected,
@@ -18,6 +19,8 @@ export { SIDEBAR_INTEGRATIONS_PLUGIN_ID }
 export const COMMAND_COMPRESSION_PLUGIN_ID = 'command-compression'
 export const VOICE_INPUT_PLUGIN_ID = 'voice-input'
 export const WORKFLOW_GIT_WORKTREE_PLUGIN_ID = 'workflow-git-worktree'
+export const CODE_CHECKPOINTS_PLUGIN_ID = 'code-checkpoints'
+export const DEFAULT_MAX_AUTO_CHECKPOINTS = 20
 
 // 主工作台扩展模块插件 ID（关闭后隐藏主导航入口并停止对应后台轮询）
 export const WORKSPACE_BACKUPS_PLUGIN_ID = 'workspace-backups'
@@ -74,6 +77,34 @@ export const BUILTIN_SYSTEM_PLUGINS: SystemPluginDescriptor[] = [
     ],
     settingsAction: { tab: 'rtk', label: '管理压缩配置' },
     searchKeywords: ['rtk', '压缩', '命令行', 'token', 'context', 'compression'],
+  },
+  {
+    id: CODE_CHECKPOINTS_PLUGIN_ID,
+    title: '代码检查点',
+    description: '按对话轮次自动记录零污染 Git 工作区快照，支持单文件/整仓差异比对与一键安全回滚；关闭后停止自动捕获并隐藏会话检查点入口',
+    category: 'development',
+    icon: IconHistory,
+    badgeLabel: '开发工作流',
+    configOptions: [
+      {
+        key: 'maxAutoSnapshots',
+        label: '自动保留快照数',
+        description: '每个会话最多自动保留的轮次快照数（默认 20，范围 1–200；手动保存与回滚前备份不受此上限影响）',
+        type: 'number',
+        defaultValue: DEFAULT_MAX_AUTO_CHECKPOINTS,
+        min: 1,
+        max: 200,
+        step: 5,
+      },
+      {
+        key: 'autoCapture',
+        label: '每轮自动捕获快照',
+        description: '关闭后不再在每轮对话前后自动生成快照，仍可手动保存与回滚',
+        type: 'boolean',
+        defaultValue: true,
+      },
+    ],
+    searchKeywords: ['checkpoint', 'snapshot', 'git', 'rollback', '检查点', '快照', '回滚', '版本'],
   },
   {
     id: WORKFLOW_GIT_WORKTREE_PLUGIN_ID,

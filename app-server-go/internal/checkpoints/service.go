@@ -13,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -23,10 +24,21 @@ import (
 )
 
 const (
-	maxJSONBody                  = 256 * 1024
-	autoCaptureLimit             = 25 * time.Second
-	defaultMaxAutoPerSession     = 50
+	maxJSONBody              = 256 * 1024
+	autoCaptureLimit         = 25 * time.Second
+	defaultMaxAutoPerSession = 20
+	minMaxAutoPerSession     = 1
+	maxMaxAutoPerSession     = 200
+	pluginID                 = "code-checkpoints"
+	prefPluginsEnabled       = "plugins:enabled"
+	prefPluginsConfig        = "plugins:config"
+	configKeyMaxAuto         = "maxAutoSnapshots"
+	configKeyAutoCapture     = "autoCapture"
 )
+
+type preferenceReader interface {
+	GetPreference(context.Context, string) (store.Preference, error)
+}
 
 type BrowserAuthorizer interface {
 	AuthorizeBrowser(*http.Request) *auth.Error
@@ -194,7 +206,15 @@ func (s *Service) ServeHTTP(response http.ResponseWriter, request *http.Request)
 
 func (s *Service) handleList(response http.ResponseWriter, request *http.Request, sessionID string) error {
 	agentID := strings.TrimSpace(request.URL.Query().Get("agent_id"))
-	items, err := s.options.Store.ListSessionCheckpoints(request.Context(), agentID, sessionID, 80)
+	_, _, maxAuto := s.resolveRuntimePolicy(request.Context())
+	listLimit := maxAuto + 30
+	if listLimit < 80 {
+		listLimit = 80
+	}
+	if listLimit > 250 {
+		listLimit = 250
+	}
+	items, err := s.options.Store.ListSessionCheckpoints(request.Context(), agentID, sessionID, listLimit)
 	if err != nil {
 		return err
 	}
@@ -491,11 +511,78 @@ func (s *Service) Capture(
 	return saved, true, nil
 }
 
-func (s *Service) pruneAutoCheckpoints(ctx context.Context, resolved targetfs.Resolved, agentID, sessionID string) {
-	limit := s.options.MaxAutoPerSession
-	if limit <= 0 {
-		limit = defaultMaxAutoPerSession
+func (s *Service) resolveRuntimePolicy(ctx context.Context) (enabled bool, autoCapture bool, maxAuto int) {
+	enabled = true
+	autoCapture = true
+	maxAuto = s.options.MaxAutoPerSession
+	if maxAuto <= 0 {
+		maxAuto = defaultMaxAutoPerSession
 	}
+	reader, ok := s.options.Store.(preferenceReader)
+	if !ok || reader == nil {
+		return enabled, autoCapture, maxAuto
+	}
+	if pref, err := reader.GetPreference(ctx, prefPluginsEnabled); err == nil && pref.Exists {
+		if m, ok := pref.Value.(map[string]any); ok {
+			if raw, exists := m[pluginID]; exists {
+				if flag, ok := raw.(bool); ok {
+					enabled = flag
+				}
+			}
+		}
+	}
+	if pref, err := reader.GetPreference(ctx, prefPluginsConfig); err == nil && pref.Exists {
+		if m, ok := pref.Value.(map[string]any); ok {
+			if cfg, ok := m[pluginID].(map[string]any); ok {
+				if rawAuto, exists := cfg[configKeyAutoCapture]; exists {
+					if flag, ok := rawAuto.(bool); ok {
+						autoCapture = flag
+					}
+				}
+				if rawLimit, exists := cfg[configKeyMaxAuto]; exists {
+					if parsed, ok := parsePositiveInt(rawLimit); ok {
+						if parsed < minMaxAutoPerSession {
+							parsed = minMaxAutoPerSession
+						} else if parsed > maxMaxAutoPerSession {
+							parsed = maxMaxAutoPerSession
+						}
+						maxAuto = parsed
+					}
+				}
+			}
+		}
+	}
+	return enabled, autoCapture, maxAuto
+}
+
+func parsePositiveInt(raw any) (int, bool) {
+	switch v := raw.(type) {
+	case int:
+		if v > 0 {
+			return v, true
+		}
+	case int64:
+		if v > 0 {
+			return int(v), true
+		}
+	case float64:
+		if v >= 1 {
+			return int(v), true
+		}
+	case json.Number:
+		if n, err := v.Int64(); err == nil && n > 0 {
+			return int(n), true
+		}
+	case string:
+		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n > 0 {
+			return n, true
+		}
+	}
+	return 0, false
+}
+
+func (s *Service) pruneAutoCheckpoints(ctx context.Context, resolved targetfs.Resolved, agentID, sessionID string) {
+	_, _, limit := s.resolveRuntimePolicy(ctx)
 	prunable, err := s.options.Store.ListPrunableAutoCheckpoints(ctx, agentID, sessionID, limit)
 	if err != nil || len(prunable) == 0 {
 		return
@@ -622,6 +709,10 @@ func (s *Service) handleEvent(ev *store.Event) {
 func (s *Service) captureBackground(agentID, sessionID, kind, commandID, label string) {
 	ctx, cancel := context.WithTimeout(context.Background(), autoCaptureLimit)
 	defer cancel()
+	enabled, autoCapture, _ := s.resolveRuntimePolicy(ctx)
+	if !enabled || !autoCapture {
+		return
+	}
 	_, _, _ = s.Capture(ctx, agentID, sessionID, kind, commandID, label, true)
 }
 
