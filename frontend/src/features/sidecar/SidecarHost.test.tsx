@@ -181,7 +181,7 @@ describe('SidecarHost tab keep-alive', () => {
     act(() => useSidecarStore.getState().setTabDirty(file.id, true))
     act(() => useSidecarStore.getState().switchSession(`${remoteSession.agent_id}:${remoteSession.id}`))
     view.rerender(host(remoteSession))
-    const save = screen.getByTestId(`viewer-${file.id}`).querySelector('button:last-child')
+    const save = screen.getByTestId(`viewer-${file.id}`).querySelector(':scope > button:last-child')
     expect(save).not.toBeNull()
     fireEvent.click(save!)
     await waitFor(() => expect(fetcher).toHaveBeenCalled())

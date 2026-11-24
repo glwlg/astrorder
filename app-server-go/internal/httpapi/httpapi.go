@@ -40,6 +40,7 @@ import (
 	"astrorder.dev/app-server/internal/connections"
 	"astrorder.dev/app-server/internal/connector"
 	"astrorder.dev/app-server/internal/daemonclient"
+	"astrorder.dev/app-server/internal/dbxplugin"
 	"astrorder.dev/app-server/internal/files"
 	"astrorder.dev/app-server/internal/git"
 	"astrorder.dev/app-server/internal/integrations"
@@ -137,6 +138,7 @@ type Options struct {
 	AgentAPI         http.Handler
 	Backups          http.Handler
 	Integrations     http.Handler
+	DbxPlugin        http.Handler
 	Telemetry        http.Handler
 	DynamicOrigins   auth.DynamicOriginLookup
 	DesktopShutdown  func()
@@ -179,6 +181,7 @@ type api struct {
 	search          http.Handler
 	backups         http.Handler
 	integrations    http.Handler
+	dbxPlugin       http.Handler
 	telemetry       http.Handler
 }
 
@@ -436,6 +439,16 @@ func NewHandlerChecked(options Options) (http.Handler, error) {
 		})
 	}
 
+	dbxHandler := options.DbxPlugin
+	if dbxHandler == nil {
+		dbxHandler = dbxplugin.NewHandler(dbxplugin.Options{
+			Store:         options.Store,
+			Authorizer:    authenticator,
+			BrowserSecret: options.Config.BrowserSecret,
+			Logger:        logger,
+		})
+	}
+
 	telemetryHandler := options.Telemetry
 	if telemetryHandler == nil {
 		telemetryDir := ""
@@ -478,6 +491,7 @@ func NewHandlerChecked(options Options) (http.Handler, error) {
 		search:          searchHandler,
 		backups:         backupsHandler,
 		integrations:    integrationsHandler,
+		dbxPlugin:       dbxHandler,
 		telemetry:       telemetryHandler,
 	}
 	if options.BotGroups == nil {
@@ -558,6 +572,10 @@ func (a *api) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 	}
 	if a.integrations != nil && integrations.Matches(request.Method, request.URL.Path) {
 		a.integrations.ServeHTTP(response, request)
+		return
+	}
+	if a.dbxPlugin != nil && dbxplugin.Matches(request.Method, request.URL.Path) {
+		a.dbxPlugin.ServeHTTP(response, request)
 		return
 	}
 	if a.telemetry != nil && telemetry.Matches(request.Method, request.URL.Path) {

@@ -6,6 +6,7 @@ import {
   IconChevronDown,
   IconChevronRight,
   IconCopy,
+  IconDatabase,
   IconDownload,
   IconFile,
   IconFolder,
@@ -18,6 +19,8 @@ import { resolveArtifactFromPath } from '../../resolver'
 import { useSidecarStore } from '../../sidecarStore'
 import type { ViewerContext } from '../../types'
 import { artifactViewerRegistry } from '../../registry'
+import { usePluginSettingsStore } from '../../../plugins/pluginSettingsStore'
+import { DBX_PLUGIN_ID, isSqlFilePath, openSqlFileInDbx } from '../dbx'
 
 interface TreeNode {
   name: string
@@ -676,6 +679,29 @@ export function FileTreeViewer({ artifact, isActive = true }: ViewerContext) {
 
         {contextMenu && (
           <Menu.Dropdown style={{ minWidth: 210 }}>
+            {!contextMenu.node.is_dir &&
+              isSqlFilePath(contextMenu.node.path) &&
+              usePluginSettingsStore.getState().isPluginEnabled(DBX_PLUGIN_ID) && (
+                <>
+                  <Menu.Item
+                    leftSection={<IconDatabase size={14} />}
+                    style={{ whiteSpace: 'nowrap' }}
+                    onClick={() => {
+                      const node = contextMenu.node
+                      setContextMenu(null)
+                      void openSqlFileInDbx({
+                        path: node.path,
+                        sessionId: artifact.sessionId,
+                        agentId: artifact.agentId,
+                        connectionId: artifact.connectionId,
+                      })
+                    }}
+                  >
+                    在右侧 DBX 中打开
+                  </Menu.Item>
+                  <Menu.Divider />
+                </>
+              )}
             <Menu.Item
               leftSection={<IconCopy size={14} />}
               style={{ whiteSpace: 'nowrap' }}

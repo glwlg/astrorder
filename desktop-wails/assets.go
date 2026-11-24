@@ -101,6 +101,7 @@ func assetHandler(cfg Config) (http.Handler, error) {
 	var proxy *httputil.ReverseProxy
 	if cfg.Backend != nil {
 		proxy = httputil.NewSingleHostReverseProxy(cfg.Backend)
+		proxy.FlushInterval = -1
 		proxy.ErrorHandler = func(w http.ResponseWriter, _ *http.Request, _ error) {
 			http.Error(w, "isolated App Server is unavailable", http.StatusBadGateway)
 		}

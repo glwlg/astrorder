@@ -1,9 +1,11 @@
 import { Menu } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { IconCopy, IconDownload, IconExternalLink, IconFileText } from '@tabler/icons-react'
+import { IconCopy, IconDatabase, IconDownload, IconExternalLink, IconFileText } from '@tabler/icons-react'
 import { request } from '../api/client'
 import type { Session } from '../domain/types'
+import { usePluginSettingsStore } from '../features/plugins/pluginSettingsStore'
 import { downloadFile, fileDesktop } from '../features/sidecar/fileTransfer'
+import { DBX_PLUGIN_ID, isSqlFilePath, openSqlFileInDbx } from '../features/sidecar/viewers/dbx'
 
 export type MarkdownLinkMenuTarget = {
   x: number
@@ -58,6 +60,9 @@ export function MarkdownLinkMenu({
   session?: Session | null
   onClose: () => void
 }) {
+  const dbxPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(DBX_PLUGIN_ID))
+  const canOpenInDbx = Boolean(target && target.kind === 'file' && dbxPluginEnabled && isSqlFilePath(target.value))
+
   const showError = (error: unknown) => notifications.show({
     color: 'red',
     title: '打开失败',
@@ -103,6 +108,16 @@ export function MarkdownLinkMenu({
           </Menu.Item>
         ) : (
           <>
+            {canOpenInDbx && (
+              <Menu.Item
+                leftSection={<IconDatabase size={14} />}
+                onClick={() => {
+                  void openSqlFileInDbx({ path: target.value, session })
+                }}
+              >
+                在右侧 DBX 中打开
+              </Menu.Item>
+            )}
             <Menu.Item leftSection={<IconFileText size={14} />} onClick={handleFile}>
               用系统默认应用打开
             </Menu.Item>

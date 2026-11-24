@@ -77,6 +77,7 @@ export interface SidecarState {
   openAgentGraph: (sessionId: string, agentId: string, workspaceName?: string, connectionId?: string) => void
   openGitDiff: (sessionId: string, agentId: string, workspacePath?: string, connectionId?: string, baseBranch?: string) => void
   openBrowser: (sessionId: string, agentId: string, initialUrl?: string, connectionId?: string) => void
+  openDbx: (sessionId?: string, agentId?: string, connectionId?: string) => void
   openBlackboard: (sessionId?: string, agentId?: string, connectionId?: string) => void
   openGroupBlackboard: (groupId: string, groupName: string, focusKey?: string) => void
   openMemory: (sessionId?: string) => void
@@ -448,6 +449,66 @@ export const useSidecarStore = create<SidecarState>()(persist((set, get) => ({
         title: workspaceName ? `终端 (${workspaceName})` : '终端',
         artifact: terminalArtifact,
         viewerId: 'xterm-viewer',
+        closable: true,
+      }
+      set({
+        isOpen: true,
+        activeTabId: tabId,
+        tabs: [...tabs, newTab],
+      })
+    }
+    if (activeSessionKey) {
+      const curr = get()
+      set({
+        sessionMemories: {
+          ...sessionMemories,
+          [activeSessionKey]: { tabs: curr.tabs, activeTabId: curr.activeTabId, isOpen: true },
+        },
+      })
+    }
+  },
+
+  openDbx: (sessionId?: string, agentId?: string, connectionId?: string) => {
+    const tabId = 'dbx:workbench'
+    const { tabs, activeSessionKey, sessionMemories } = get()
+    const existingIndex = tabs.findIndex((t) => t.id === tabId)
+    const resolvedSessionId = sessionId || 'global'
+    const resolvedAgentId = agentId || ''
+    if (existingIndex >= 0) {
+      const nextTabs = tabs.map((tab, index) => index === existingIndex && tab.artifact
+        ? {
+            ...tab,
+            artifact: {
+              ...tab.artifact,
+              sessionId: resolvedSessionId,
+              agentId: resolvedAgentId,
+              connectionId,
+            },
+          }
+        : tab)
+      set({
+        isOpen: true,
+        activeTabId: tabId,
+        tabs: nextTabs,
+      })
+    } else {
+      const dbxArtifact: ArtifactRef = {
+        id: tabId,
+        name: 'DBX 数据库',
+        kind: 'workspace_file',
+        mediaType: 'application/x-astrorder-dbx',
+        readUrl: '/api/v1/plugins/dbx/',
+        writable: false,
+        sessionId: resolvedSessionId,
+        agentId: resolvedAgentId,
+        connectionId,
+      }
+      const newTab: SidecarTab = {
+        id: tabId,
+        type: 'artifact',
+        title: 'DBX 数据库',
+        artifact: dbxArtifact,
+        viewerId: 'dbx-viewer',
         closable: true,
       }
       set({

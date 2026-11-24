@@ -1,6 +1,6 @@
 import { Text, UnstyledButton } from '@mantine/core'
 import {
-  BrainIcon, BrowserIcon, ChalkboardSimpleIcon, ChatsCircleIcon, FolderSimpleIcon, GraphIcon, SparkleIcon, TerminalWindowIcon,
+  BrainIcon, BrowserIcon, ChalkboardSimpleIcon, ChatsCircleIcon, DatabaseIcon, FolderSimpleIcon, GraphIcon, SparkleIcon, TerminalWindowIcon,
 } from '../../components/workbenchIcons'
 import type { Session } from '../../domain/types'
 import { useShortcutStore } from '../shortcuts/shortcuts'
@@ -10,6 +10,7 @@ interface SidecarWelcomeMenuProps {
   onOpenFileTree: () => void
   onOpenTerminal: () => void
   onOpenBrowser: () => void
+  onOpenDbx?: () => void
   onOpenSideChat: () => void
   onOpenAgentGraph: () => void
   onOpenBlackboard?: () => void
@@ -21,6 +22,7 @@ export function SidecarWelcomeMenu({
   onOpenFileTree,
   onOpenTerminal,
   onOpenBrowser,
+  onOpenDbx,
   onOpenSideChat,
   onOpenAgentGraph,
   onOpenBlackboard,
@@ -70,6 +72,16 @@ export function SidecarWelcomeMenu({
       shortcut: bindings.terminal || '未设置',
       onClick: onOpenTerminal,
     },
+    ...(onOpenDbx
+      ? [
+          {
+            icon: <DatabaseIcon size={20} weight="duotone" color="#0f766e" />,
+            label: 'DBX 数据库',
+            shortcut: '右侧常驻',
+            onClick: onOpenDbx,
+          },
+        ]
+      : []),
   ]
 
   return (
