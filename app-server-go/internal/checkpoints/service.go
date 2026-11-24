@@ -13,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -74,10 +75,14 @@ type Options struct {
 type Service struct {
 	options Options
 
-	mu           sync.Mutex
-	sessionLocks map[string]*sync.Mutex
-	activePrompt map[string]activeTurnInfo
-	wasRunning   map[string]bool
+	mu               sync.Mutex
+	sessionLocks     map[string]*sync.Mutex
+	activePrompt     map[string]activeTurnInfo
+	wasRunning       map[string]bool
+	pendingBaselines map[string]*pendingBaseline
+	baselineWait     map[string]chan struct{}
+	turnActivities   map[string]*turnActivity
+	lastFinished     map[string]finishedTurnMark
 
 	stopOnce sync.Once
 	stopCh   chan struct{}
@@ -88,13 +93,64 @@ type activeTurnInfo struct {
 	Prompt    string
 }
 
+type pendingBaseline struct {
+	ID            string
+	AgentID       string
+	SessionID     string
+	CommandID     string
+	Workspace     string
+	RepoRoot      string
+	Branch        string
+	HeadSHA       string
+	TreeSHA       string
+	CommitSHA     string
+	RefName       string
+	ReuseExisting bool
+}
+
+type shellCommandRecord struct {
+	Cwd     string
+	Command string
+}
+
+type turnActivity struct {
+	SawMessageEvent   bool
+	SawReadOnlyTool   bool
+	SawOpaqueMutation bool
+	MutatingFilePaths []string
+	ShellCommands     []shellCommandRecord
+}
+
+func (a *turnActivity) clone() turnActivity {
+	if a == nil {
+		return turnActivity{}
+	}
+	out := *a
+	if len(a.MutatingFilePaths) > 0 {
+		out.MutatingFilePaths = append([]string(nil), a.MutatingFilePaths...)
+	}
+	if len(a.ShellCommands) > 0 {
+		out.ShellCommands = append([]shellCommandRecord(nil), a.ShellCommands...)
+	}
+	return out
+}
+
+type finishedTurnMark struct {
+	CommandID string
+	At        time.Time
+}
+
 func NewService(options Options) *Service {
 	svc := &Service{
-		options:      options,
-		sessionLocks: map[string]*sync.Mutex{},
-		activePrompt: map[string]activeTurnInfo{},
-		wasRunning:   map[string]bool{},
-		stopCh:       make(chan struct{}),
+		options:          options,
+		sessionLocks:     map[string]*sync.Mutex{},
+		activePrompt:     map[string]activeTurnInfo{},
+		wasRunning:       map[string]bool{},
+		pendingBaselines: map[string]*pendingBaseline{},
+		baselineWait:     map[string]chan struct{}{},
+		turnActivities:   map[string]*turnActivity{},
+		lastFinished:     map[string]finishedTurnMark{},
+		stopCh:           make(chan struct{}),
 	}
 	if options.Subscriber != nil && options.Store != nil && options.Resolver != nil {
 		go svc.watchEvents()
@@ -621,6 +677,10 @@ func (s *Service) watchEvents() {
 func (s *Service) handleEvent(ev *store.Event) {
 	key := ev.AgentID + "::" + ev.SessionID
 	switch ev.Type {
+	case "message.upsert", "message.delta":
+		s.recordMessageActivity(key, ev.Data)
+	case "task.upsert":
+		s.recordTaskActivity(key, ev.Data)
 	case "command.upsert":
 		action := strings.TrimSpace(fmt.Sprint(ev.Data["action"]))
 		state := strings.TrimSpace(fmt.Sprint(ev.Data["state"]))
@@ -628,49 +688,24 @@ func (s *Service) handleEvent(ev *store.Event) {
 			return
 		}
 		cmdID := strings.TrimSpace(fmt.Sprint(ev.Data["id"]))
+		if cmdID == "<nil>" {
+			cmdID = ""
+		}
 		text := strings.TrimSpace(fmt.Sprint(ev.Data["text"]))
 		if text == "<nil>" {
 			text = ""
 		}
 		if state == "accepted" || state == "running" {
-			s.mu.Lock()
-			already := s.wasRunning[key]
-			s.activePrompt[key] = activeTurnInfo{CommandID: cmdID, Prompt: truncateLabel(text)}
-			s.wasRunning[key] = true
-			s.mu.Unlock()
-			if !already {
-				go s.captureBackground(ev.AgentID, ev.SessionID, "auto_before", cmdID, "")
-			}
+			s.startTurn(key, ev.AgentID, ev.SessionID, cmdID, truncateLabel(text))
 		} else if state == "completed" {
-			s.mu.Lock()
-			info := s.activePrompt[key]
-			delete(s.wasRunning, key)
-			s.mu.Unlock()
-			label := info.Prompt
-			if label == "" {
-				label = truncateLabel(text)
-			}
-			go s.captureBackground(ev.AgentID, ev.SessionID, "auto_after", cmdID, label)
+			s.finishTurn(key, ev.AgentID, ev.SessionID, cmdID, truncateLabel(text), false)
 		}
 	case "session.upsert":
 		status := strings.TrimSpace(fmt.Sprint(ev.Data["status"]))
 		if status == "running" {
-			s.mu.Lock()
-			already := s.wasRunning[key]
-			s.wasRunning[key] = true
-			s.mu.Unlock()
-			if !already {
-				go s.captureBackground(ev.AgentID, ev.SessionID, "auto_before", "", "")
-			}
+			s.startTurn(key, ev.AgentID, ev.SessionID, "", "")
 		} else if status == "idle" {
-			s.mu.Lock()
-			was := s.wasRunning[key]
-			info := s.activePrompt[key]
-			delete(s.wasRunning, key)
-			s.mu.Unlock()
-			if was {
-				go s.captureBackground(ev.AgentID, ev.SessionID, "auto_after", info.CommandID, info.Prompt)
-			}
+			s.finishTurn(key, ev.AgentID, ev.SessionID, "", "", true)
 		}
 	case "codex.notification":
 		frame, _ := ev.Data["frame"].(map[string]any)
@@ -678,32 +713,341 @@ func (s *Service) handleEvent(ev *store.Event) {
 			frame = ev.Data
 		}
 		method := strings.TrimSpace(fmt.Sprint(frame["method"]))
-		if method == "turn/started" {
-			s.mu.Lock()
-			already := s.wasRunning[key]
-			s.wasRunning[key] = true
-			s.mu.Unlock()
-			if !already {
-				go s.captureBackground(ev.AgentID, ev.SessionID, "auto_before", "", "")
-			}
-		} else if method == "turn/completed" {
-			s.mu.Lock()
-			info := s.activePrompt[key]
-			delete(s.wasRunning, key)
-			s.mu.Unlock()
-			go s.captureBackground(ev.AgentID, ev.SessionID, "auto_after", info.CommandID, info.Prompt)
+		switch method {
+		case "turn/started":
+			s.startTurn(key, ev.AgentID, ev.SessionID, "", "")
+		case "turn/completed":
+			s.finishTurn(key, ev.AgentID, ev.SessionID, "", "", false)
+		case "item/started", "item/completed":
+			s.recordCodexItemActivity(key, frame)
 		}
 	case "hermes.command_complete", "grok.completed":
-		s.mu.Lock()
-		info := s.activePrompt[key]
-		delete(s.wasRunning, key)
-		s.mu.Unlock()
 		cmdID := strings.TrimSpace(fmt.Sprint(ev.Data["command_id"]))
-		if cmdID == "" || cmdID == "<nil>" {
-			cmdID = info.CommandID
+		if cmdID == "<nil>" {
+			cmdID = ""
 		}
-		go s.captureBackground(ev.AgentID, ev.SessionID, "auto_after", cmdID, info.Prompt)
+		s.finishTurn(key, ev.AgentID, ev.SessionID, cmdID, "", false)
 	}
+}
+
+func (s *Service) startTurn(key, agentID, sessionID, cmdID, prompt string) {
+	s.mu.Lock()
+	already := s.wasRunning[key]
+	if cmdID != "" || prompt != "" {
+		info := s.activePrompt[key]
+		if cmdID != "" {
+			info.CommandID = cmdID
+		}
+		if prompt != "" {
+			info.Prompt = prompt
+		}
+		s.activePrompt[key] = info
+	}
+	s.wasRunning[key] = true
+	if already {
+		s.mu.Unlock()
+		return
+	}
+	s.turnActivities[key] = &turnActivity{}
+	done := make(chan struct{})
+	s.baselineWait[key] = done
+	s.mu.Unlock()
+
+	go func() {
+		defer close(done)
+		s.beginTurnBaseline(key, agentID, sessionID, cmdID)
+	}()
+}
+
+func (s *Service) finishTurn(key, agentID, sessionID, cmdID, fallbackPrompt string, requireWasRunning bool) {
+	s.mu.Lock()
+	was := s.wasRunning[key]
+	if requireWasRunning && !was {
+		s.mu.Unlock()
+		return
+	}
+	if !was {
+		if prev, ok := s.lastFinished[key]; ok {
+			if (cmdID != "" && prev.CommandID == cmdID) || time.Since(prev.At) < 3*time.Second {
+				s.mu.Unlock()
+				return
+			}
+		}
+	}
+	info := s.activePrompt[key]
+	delete(s.wasRunning, key)
+	waitCh := s.baselineWait[key]
+	delete(s.baselineWait, key)
+	act := s.turnActivities[key].clone()
+	delete(s.turnActivities, key)
+	effectiveCmdID := cmdID
+	if effectiveCmdID == "" {
+		effectiveCmdID = info.CommandID
+	}
+	label := info.Prompt
+	if label == "" {
+		label = fallbackPrompt
+	}
+	s.lastFinished[key] = finishedTurnMark{CommandID: effectiveCmdID, At: time.Now()}
+	s.mu.Unlock()
+
+	go s.finishTurnCapture(key, agentID, sessionID, effectiveCmdID, label, waitCh, act)
+}
+
+func (s *Service) beginTurnBaseline(key, agentID, sessionID, commandID string) {
+	ctx, cancel := context.WithTimeout(context.Background(), autoCaptureLimit)
+	defer cancel()
+	enabled, autoCapture, _ := s.resolveRuntimePolicy(ctx)
+	if !enabled || !autoCapture {
+		return
+	}
+	resolved, resolvedAgentID, _, err := s.resolveSessionFS(ctx, agentID, sessionID)
+	if err != nil {
+		return
+	}
+	if resolvedAgentID == "" {
+		resolvedAgentID = agentID
+	}
+
+	lock := s.lockFor(resolvedAgentID, sessionID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	latest, err := s.options.Store.LatestSessionCheckpoint(ctx, resolvedAgentID, sessionID)
+	if err != nil {
+		return
+	}
+	checkpointID := newCheckpointID()
+	refName := buildCheckpointRef(resolvedAgentID, sessionID, checkpointID)
+	res, err := resolved.FileSystem.ExecGit(ctx, targetfs.GitRequest{
+		Operation: targetfs.GitCheckpointCapture,
+		Workspace: resolved.Workspace,
+		Branch:    refName,
+	})
+	if err != nil {
+		return
+	}
+	wire, err := targetfs.ParseCheckpointCapture(res.Stdout)
+	if err != nil {
+		return
+	}
+
+	next := &pendingBaseline{
+		ID:        checkpointID,
+		AgentID:   resolvedAgentID,
+		SessionID: sessionID,
+		CommandID: commandID,
+		Workspace: resolved.Workspace,
+		RepoRoot:  wire.RepoRoot,
+		Branch:    wire.Branch,
+		HeadSHA:   wire.Head,
+		TreeSHA:   wire.TreeSHA,
+		CommitSHA: wire.CommitSHA,
+		RefName:   wire.RefName,
+	}
+	if latest != nil && latest.TreeSHA == wire.TreeSHA {
+		_, _ = resolved.FileSystem.ExecGit(ctx, targetfs.GitRequest{
+			Operation: targetfs.GitCheckpointDelete,
+			Workspace: resolved.Workspace,
+			Branch:    wire.RefName,
+		})
+		next.ReuseExisting = true
+		next.RefName = ""
+	}
+
+	s.mu.Lock()
+	old := s.pendingBaselines[key]
+	s.pendingBaselines[key] = next
+	s.mu.Unlock()
+
+	if old != nil && !old.ReuseExisting && old.RefName != "" {
+		_, _ = resolved.FileSystem.ExecGit(ctx, targetfs.GitRequest{
+			Operation: targetfs.GitCheckpointDelete,
+			Workspace: old.Workspace,
+			Branch:    old.RefName,
+		})
+	}
+}
+
+func (s *Service) finishTurnCapture(
+	key, agentID, sessionID, commandID, label string,
+	waitCh chan struct{},
+	activity turnActivity,
+) {
+	ctx, cancel := context.WithTimeout(context.Background(), autoCaptureLimit)
+	defer cancel()
+	if waitCh != nil {
+		select {
+		case <-waitCh:
+		case <-ctx.Done():
+			return
+		}
+	}
+
+	s.mu.Lock()
+	baseline := s.pendingBaselines[key]
+	delete(s.pendingBaselines, key)
+	s.mu.Unlock()
+
+	cleanupBaseline := func(resolved *targetfs.Resolved) {
+		if baseline == nil || baseline.ReuseExisting || baseline.RefName == "" {
+			return
+		}
+		if resolved != nil {
+			_, _ = resolved.FileSystem.ExecGit(ctx, targetfs.GitRequest{
+				Operation: targetfs.GitCheckpointDelete,
+				Workspace: resolved.Workspace,
+				Branch:    baseline.RefName,
+			})
+		}
+	}
+
+	enabled, autoCapture, _ := s.resolveRuntimePolicy(ctx)
+	if !enabled || !autoCapture {
+		if baseline != nil && !baseline.ReuseExisting && baseline.RefName != "" {
+			if resolved, _, _, err := s.resolveSessionFS(ctx, agentID, sessionID); err == nil {
+				cleanupBaseline(&resolved)
+			}
+		}
+		return
+	}
+
+	resolved, resolvedAgentID, _, err := s.resolveSessionFS(ctx, agentID, sessionID)
+	if err != nil {
+		return
+	}
+	if resolvedAgentID == "" {
+		resolvedAgentID = agentID
+	}
+
+	lock := s.lockFor(resolvedAgentID, sessionID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	repoRootHint := ""
+	if baseline != nil {
+		repoRootHint = baseline.RepoRoot
+	}
+	if !activityAllowsWorkspaceCheckpoint(activity, resolved.Workspace, repoRootHint) {
+		cleanupBaseline(&resolved)
+		return
+	}
+
+	latest, err := s.options.Store.LatestSessionCheckpoint(ctx, resolvedAgentID, sessionID)
+	if err != nil {
+		cleanupBaseline(&resolved)
+		return
+	}
+
+	compareFrom := ""
+	if baseline != nil {
+		compareFrom = baseline.TreeSHA
+	} else if latest != nil {
+		compareFrom = latest.TreeSHA
+	}
+
+	checkpointID := newCheckpointID()
+	refName := buildCheckpointRef(resolvedAgentID, sessionID, checkpointID)
+	res, err := resolved.FileSystem.ExecGit(ctx, targetfs.GitRequest{
+		Operation:  targetfs.GitCheckpointCapture,
+		Workspace:  resolved.Workspace,
+		Branch:     refName,
+		BaseBranch: compareFrom,
+	})
+	if err != nil {
+		cleanupBaseline(&resolved)
+		return
+	}
+	wire, err := targetfs.ParseCheckpointCapture(res.Stdout)
+	if err != nil {
+		cleanupBaseline(&resolved)
+		return
+	}
+
+	// Re-check activity once the canonical RepoRoot is known (in case baseline was absent).
+	if repoRootHint == "" && !activityAllowsWorkspaceCheckpoint(activity, resolved.Workspace, wire.RepoRoot) {
+		_, _ = resolved.FileSystem.ExecGit(ctx, targetfs.GitRequest{
+			Operation: targetfs.GitCheckpointDelete,
+			Workspace: resolved.Workspace,
+			Branch:    wire.RefName,
+		})
+		cleanupBaseline(&resolved)
+		return
+	}
+
+	// If the workspace tree at turn end is identical to turn start (or latest when
+	// no turn baseline was captured), this turn made zero changes to the repository.
+	unchangedFromBaseline := baseline != nil && wire.TreeSHA == baseline.TreeSHA
+	unchangedFromLatest := baseline == nil && latest != nil && wire.TreeSHA == latest.TreeSHA
+	if unchangedFromBaseline || unchangedFromLatest {
+		_, _ = resolved.FileSystem.ExecGit(ctx, targetfs.GitRequest{
+			Operation: targetfs.GitCheckpointDelete,
+			Workspace: resolved.Workspace,
+			Branch:    wire.RefName,
+		})
+		cleanupBaseline(&resolved)
+		return
+	}
+
+	// Promote the pre-turn baseline as a clean restore anchor (never blaming
+	// prior external commits from other sessions on this turn's baseline).
+	if baseline != nil && !baseline.ReuseExisting {
+		_, _ = s.options.Store.InsertSessionCheckpoint(ctx, store.SessionCheckpoint{
+			ID:           baseline.ID,
+			AgentID:      resolvedAgentID,
+			SessionID:    sessionID,
+			Kind:         "auto_before",
+			CommandID:    baseline.CommandID,
+			Label:        "本轮开始前基线",
+			Workspace:    resolved.Workspace,
+			RepoRoot:     baseline.RepoRoot,
+			Branch:       baseline.Branch,
+			HeadSHA:      baseline.HeadSHA,
+			TreeSHA:      baseline.TreeSHA,
+			CommitSHA:    baseline.CommitSHA,
+			RefName:      baseline.RefName,
+			PrevTreeSHA:  "",
+			FilesChanged: 0,
+			Insertions:   0,
+			Deletions:    0,
+			Files:        []store.SessionCheckpointFile{},
+		})
+	}
+
+	finalLabel := strings.TrimSpace(label)
+	if finalLabel == "" {
+		finalLabel = "本轮执行完成后"
+	}
+	saved, err := s.options.Store.InsertSessionCheckpoint(ctx, store.SessionCheckpoint{
+		ID:           checkpointID,
+		AgentID:      resolvedAgentID,
+		SessionID:    sessionID,
+		Kind:         "auto_after",
+		CommandID:    commandID,
+		Label:        truncateLabel(finalLabel),
+		Workspace:    resolved.Workspace,
+		RepoRoot:     wire.RepoRoot,
+		Branch:       wire.Branch,
+		HeadSHA:      wire.Head,
+		TreeSHA:      wire.TreeSHA,
+		CommitSHA:    wire.CommitSHA,
+		RefName:      wire.RefName,
+		PrevTreeSHA:  compareFrom,
+		FilesChanged: wire.FilesChanged,
+		Insertions:   wire.Insertions,
+		Deletions:    wire.Deletions,
+		Files:        convertFiles(wire.Files),
+	})
+	if err != nil {
+		return
+	}
+	s.pruneAutoCheckpoints(ctx, resolved, resolvedAgentID, sessionID)
+	s.publish(ctx, "checkpoints.updated", map[string]any{
+		"agent_id":      saved.AgentID,
+		"session_id":    saved.SessionID,
+		"action":        "create",
+		"checkpoint_id": saved.ID,
+	})
 }
 
 func (s *Service) captureBackground(agentID, sessionID, kind, commandID, label string) {
@@ -714,6 +1058,352 @@ func (s *Service) captureBackground(agentID, sessionID, kind, commandID, label s
 		return
 	}
 	_, _, _ = s.Capture(ctx, agentID, sessionID, kind, commandID, label, true)
+}
+
+func (s *Service) recordMessageActivity(key string, data map[string]any) {
+	if data == nil {
+		return
+	}
+	role := strings.ToLower(strings.TrimSpace(fmt.Sprint(data["role"])))
+	kind := strings.ToLower(strings.TrimSpace(fmt.Sprint(data["kind"])))
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.wasRunning[key] {
+		return
+	}
+	act := s.turnActivities[key]
+	if act == nil {
+		act = &turnActivity{}
+		s.turnActivities[key] = act
+	}
+	if role == "tool" || kind == "tool" {
+		if toolMap, ok := data["tool"].(map[string]any); ok {
+			name := strings.TrimSpace(fmt.Sprint(toolMap["name"]))
+			recordToolIntoActivity(act, name, toolMap)
+		} else {
+			act.SawOpaqueMutation = true
+		}
+		return
+	}
+	if role == "assistant" {
+		act.SawMessageEvent = true
+	}
+}
+
+func (s *Service) recordTaskActivity(key string, data map[string]any) {
+	if data == nil {
+		return
+	}
+	kind := strings.ToLower(strings.TrimSpace(fmt.Sprint(data["kind"])))
+	if kind != "tool" && kind != "subagent" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.wasRunning[key] {
+		return
+	}
+	act := s.turnActivities[key]
+	if act == nil {
+		act = &turnActivity{}
+		s.turnActivities[key] = act
+	}
+	if kind == "subagent" {
+		act.SawOpaqueMutation = true
+		return
+	}
+	progress, _ := data["progress"].(map[string]any)
+	name := ""
+	if progress != nil {
+		if t, ok := progress["tool"].(string); ok && strings.TrimSpace(t) != "" {
+			name = strings.TrimSpace(t)
+		}
+	}
+	if name == "" {
+		if title, ok := data["title"].(string); ok {
+			name = strings.TrimSpace(title)
+		}
+	}
+	payload := map[string]any{}
+	if progress != nil {
+		for k, v := range progress {
+			payload[k] = v
+		}
+	}
+	if cmd, ok := data["command"]; ok && cmd != nil {
+		payload["command"] = cmd
+	}
+	recordToolIntoActivity(act, name, payload)
+}
+
+func (s *Service) recordCodexItemActivity(key string, frame map[string]any) {
+	params, _ := frame["params"].(map[string]any)
+	if params == nil {
+		return
+	}
+	item, _ := params["item"].(map[string]any)
+	if item == nil {
+		return
+	}
+	itemType := strings.TrimSpace(fmt.Sprint(item["type"]))
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.wasRunning[key] {
+		return
+	}
+	act := s.turnActivities[key]
+	if act == nil {
+		act = &turnActivity{}
+		s.turnActivities[key] = act
+	}
+	switch strings.ToLower(itemType) {
+	case "agentmessage", "reasoning", "usermessage":
+		act.SawMessageEvent = true
+	case "filechange", "patch":
+		recordToolIntoActivity(act, itemType, item)
+	case "commandexecution":
+		recordToolIntoActivity(act, itemType, item)
+	case "collabagenttoolcall", "subagentactivity", "mcptoolcall":
+		act.SawOpaqueMutation = true
+	default:
+		if itemType != "" && itemType != "<nil>" {
+			recordToolIntoActivity(act, itemType, item)
+		}
+	}
+}
+
+func recordToolIntoActivity(act *turnActivity, rawName string, payload map[string]any) {
+	name := strings.ToLower(strings.TrimSpace(rawName))
+	if name == "" || name == "<nil>" {
+		act.SawOpaqueMutation = true
+		return
+	}
+	switch name {
+	case "read_file", "fileread", "view_file", "view_file_outline", "view_code_item",
+		"list_dir", "find_by_name", "grep_search", "grep", "search_files", "filesearch",
+		"searchcontext", "search_web", "web_search", "read_url_content", "open_browser_url",
+		"image_view", "imageview", "read_resource", "list_resources",
+		"ask_question", "requestuserinput", "read_board", "post_message", "swarm_wait",
+		"command_status", "thinking", "reasoning", "todowrite", "update_plan", "read":
+		act.SawReadOnlyTool = true
+		return
+	case "write_file", "write_to_file", "edit", "edit_file", "replace_file_content",
+		"multi_replace_file_content", "sed_file", "notebook_edit", "filechange", "patch", "apply_patch":
+		paths := extractToolPaths(payload)
+		if len(paths) == 0 {
+			act.SawOpaqueMutation = true
+			return
+		}
+		act.MutatingFilePaths = append(act.MutatingFilePaths, paths...)
+		return
+	case "run_command", "commandexecution", "bash", "sh", "exec", "exec_command", "terminal":
+		cwd, cmd := extractShellInvocation(payload)
+		if cwd == "" {
+			act.SawOpaqueMutation = true
+			return
+		}
+		act.ShellCommands = append(act.ShellCommands, shellCommandRecord{Cwd: cwd, Command: cmd})
+		return
+	default:
+		act.SawOpaqueMutation = true
+	}
+}
+
+func extractToolPaths(payload map[string]any) []string {
+	if payload == nil {
+		return nil
+	}
+	var out []string
+	seen := map[string]bool{}
+	add := func(raw any) {
+		s, ok := raw.(string)
+		if !ok {
+			return
+		}
+		s = strings.TrimSpace(s)
+		if s != "" && !seen[s] {
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
+	scanMap := func(m map[string]any) {
+		for _, key := range []string{"Path", "path", "TargetFile", "target_file", "file_path", "filePath", "AbsolutePath", "absolute_path", "filename", "file"} {
+			if val, ok := m[key]; ok {
+				add(val)
+			}
+		}
+	}
+	scanMap(payload)
+	if args, ok := payload["arguments"].(map[string]any); ok {
+		scanMap(args)
+	} else if argsStr, ok := payload["arguments"].(string); ok && strings.HasPrefix(strings.TrimSpace(argsStr), "{") {
+		var parsed map[string]any
+		if json.Unmarshal([]byte(argsStr), &parsed) == nil {
+			scanMap(parsed)
+		}
+	}
+	if locs, ok := payload["locations"].([]any); ok {
+		for _, item := range locs {
+			if m, ok := item.(map[string]any); ok {
+				scanMap(m)
+			} else {
+				add(item)
+			}
+		}
+	}
+	if changes, ok := payload["changes"].([]any); ok {
+		for _, item := range changes {
+			if m, ok := item.(map[string]any); ok {
+				scanMap(m)
+			}
+		}
+	} else if changesMap, ok := payload["changes"].(map[string]any); ok {
+		for k := range changesMap {
+			add(k)
+		}
+	}
+	if diffs, ok := payload["diff"].([]any); ok {
+		for _, item := range diffs {
+			if m, ok := item.(map[string]any); ok {
+				scanMap(m)
+			}
+		}
+	}
+	return out
+}
+
+func extractShellInvocation(payload map[string]any) (cwd, command string) {
+	if payload == nil {
+		return "", ""
+	}
+	readFields := func(m map[string]any) {
+		if cwd == "" {
+			for _, key := range []string{"Cwd", "cwd", "workdir", "working_directory", "WorkingDirectory", "dir"} {
+				if v, ok := m[key].(string); ok && strings.TrimSpace(v) != "" {
+					cwd = strings.TrimSpace(v)
+					break
+				}
+			}
+		}
+		if command == "" {
+			for _, key := range []string{"CommandLine", "command", "cmd"} {
+				if v, ok := m[key].(string); ok && strings.TrimSpace(v) != "" {
+					command = strings.TrimSpace(v)
+					break
+				}
+			}
+		}
+	}
+	readFields(payload)
+	if args, ok := payload["arguments"].(map[string]any); ok {
+		readFields(args)
+	} else if argsStr, ok := payload["arguments"].(string); ok && strings.HasPrefix(strings.TrimSpace(argsStr), "{") {
+		var parsed map[string]any
+		if json.Unmarshal([]byte(argsStr), &parsed) == nil {
+			readFields(parsed)
+		}
+	}
+	return cwd, command
+}
+
+func activityAllowsWorkspaceCheckpoint(act turnActivity, workspace, repoRoot string) bool {
+	if act.SawOpaqueMutation {
+		return true
+	}
+	observedTelemetry := act.SawMessageEvent || act.SawReadOnlyTool || len(act.MutatingFilePaths) > 0 || len(act.ShellCommands) > 0
+	if !observedTelemetry {
+		// Minimal connectors or tests that do not stream per-turn message/tool
+		// telemetry fall back safely to pure tree comparison.
+		return true
+	}
+	for _, p := range act.MutatingFilePaths {
+		if pathTouchesWorkspace(p, workspace, repoRoot) {
+			return true
+		}
+	}
+	for _, sh := range act.ShellCommands {
+		if pathTouchesWorkspace(sh.Cwd, workspace, repoRoot) || commandMentionsWorkspace(sh.Command, workspace, repoRoot) {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeComparePath(raw string) (normalized string, isAbs bool) {
+	s := strings.TrimSpace(strings.ReplaceAll(raw, "\\", "/"))
+	if s == "" {
+		return "", false
+	}
+	// Normalize Windows drive paths (e.g. C:/foo -> /mnt/c/foo) so WSL and
+	// Windows path notations match cleanly.
+	if len(s) >= 2 && s[1] == ':' && ((s[0] >= 'a' && s[0] <= 'z') || (s[0] >= 'A' && s[0] <= 'Z')) {
+		drive := strings.ToLower(string(s[0]))
+		rest := strings.TrimPrefix(s[2:], "/")
+		return path.Clean("/mnt/" + drive + "/" + rest), true
+	}
+	if strings.HasPrefix(s, "/") {
+		cleaned := path.Clean(s)
+		if strings.HasPrefix(strings.ToLower(cleaned), "/mnt/") && len(cleaned) >= 6 {
+			parts := strings.SplitN(cleaned, "/", 4)
+			if len(parts) >= 3 && len(parts[2]) == 1 {
+				parts[2] = strings.ToLower(parts[2])
+				cleaned = strings.Join(parts, "/")
+			}
+		}
+		return cleaned, true
+	}
+	return path.Clean(s), false
+}
+
+func pathTouchesWorkspace(target, workspace, repoRoot string) bool {
+	normTarget, isAbs := normalizeComparePath(target)
+	if normTarget == "" {
+		return true
+	}
+	if !isAbs {
+		// Relative paths resolve against the session workspace.
+		return true
+	}
+	for _, root := range []string{workspace, repoRoot} {
+		normRoot, rootAbs := normalizeComparePath(root)
+		if !rootAbs || normRoot == "" || normRoot == "/" {
+			continue
+		}
+		if normTarget == normRoot || strings.HasPrefix(normTarget, normRoot+"/") {
+			return true
+		}
+		// Case-insensitive fallback for Windows / WSL /mnt/<drive> paths.
+		if strings.HasPrefix(normRoot, "/mnt/") && strings.HasPrefix(normTarget, "/mnt/") {
+			lt := strings.ToLower(normTarget)
+			lr := strings.ToLower(normRoot)
+			if lt == lr || strings.HasPrefix(lt, lr+"/") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func commandMentionsWorkspace(command, workspace, repoRoot string) bool {
+	if strings.TrimSpace(command) == "" {
+		return false
+	}
+	lowerCmd := strings.ToLower(strings.ReplaceAll(command, "\\", "/"))
+	for _, root := range []string{workspace, repoRoot} {
+		normRoot, isAbs := normalizeComparePath(root)
+		if !isAbs || normRoot == "" || normRoot == "/" {
+			continue
+		}
+		if strings.Contains(lowerCmd, strings.ToLower(normRoot)) {
+			return true
+		}
+		base := strings.ToLower(path.Base(normRoot))
+		if len(base) >= 3 && strings.Contains(lowerCmd, base) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) resolveSessionFS(ctx context.Context, agentID, sessionID string) (targetfs.Resolved, string, string, error) {

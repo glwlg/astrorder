@@ -85,7 +85,7 @@ export function SessionCheckpointsPanel({
     if (!initialCheckpointId) return
     const target = items.find((item) => item.id === initialCheckpointId)
     setActiveId(initialCheckpointId)
-    setCompareMode(target?.prev_tree_sha ? 'turn' : 'working')
+    setCompareMode(target && target.kind !== 'auto_before' && target.prev_tree_sha ? 'turn' : 'working')
     setSelectedFile(null)
   }, [initialCheckpointId, items])
 
@@ -96,7 +96,7 @@ export function SessionCheckpointsPanel({
 
   const diffRange = useMemo(() => {
     if (!activeCheckpoint) return null
-    if (compareMode === 'turn' && activeCheckpoint.prev_tree_sha) {
+    if (compareMode === 'turn' && activeCheckpoint.kind !== 'auto_before' && activeCheckpoint.prev_tree_sha) {
       return { from: activeCheckpoint.prev_tree_sha, to: activeCheckpoint.tree_sha }
     }
     if (compareMode === 'working') {
@@ -341,7 +341,8 @@ export function SessionCheckpointsPanel({
             const isConfirmingRestore = restoreConfirmId === cp.id
             const isConfirmingDelete = deleteConfirmId === cp.id
             const kindLabel = KIND_LABELS[cp.kind] || '检查点'
-            const hasTurnDiff = Boolean(cp.prev_tree_sha)
+            const isBaseline = cp.kind === 'auto_before'
+            const hasTurnDiff = !isBaseline && Boolean(cp.prev_tree_sha)
             const otherCheckpoints = items.filter((item) => item.id !== cp.id)
             const diffLines = diffQuery.data?.diff ? diffQuery.data.diff.split('\n') : []
             return (
@@ -366,7 +367,9 @@ export function SessionCheckpointsPanel({
 
                 <div className="cp-meta-row">
                   {cp.branch && <span>{cp.branch}</span>}
-                  {cp.files_changed > 0 ? (
+                  {isBaseline ? (
+                    <span>本轮开始前工作区基线（可供安全回滚）</span>
+                  ) : cp.files_changed > 0 ? (
                     <>
                       <span>{cp.files_changed} 个文件变化</span>
                       {cp.insertions > 0 && <span className="cp-stat-add">+{cp.insertions}</span>}

@@ -217,14 +217,26 @@ func TestCheckpointsAutoCaptureOnSessionUpsertAndCodexTurnCompleted(t *testing.T
 		return nil
 	}
 
-	// Native session starts running via session.upsert -> auto_before captured
+	// Native session starts running via session.upsert -> pending baseline is held
+	// in memory (not persisted to DB until this turn actually modifies files).
 	sub.ch <- &store.Event{Type: "session.upsert", AgentID: "agent-auto", SessionID: "sess-auto", Data: map[string]any{"status": "running"}}
-	items := waitForCount(1)
-	if items[0].Kind != "auto_before" {
-		t.Fatalf("expected auto_before, got %+v", items[0])
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		svc.mu.Lock()
+		ready := svc.pendingBaselines["agent-auto::sess-auto"] != nil
+		svc.mu.Unlock()
+		if ready {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	beforeItems, _ := st.ListSessionCheckpoints(context.Background(), "agent-auto", "sess-auto", 20)
+	if len(beforeItems) != 0 {
+		t.Fatalf("expected 0 DB checkpoints before turn mutates workspace, got %d", len(beforeItems))
 	}
 
-	// Modify file, then complete via codex.notification turn/completed -> auto_after captured
+	// Modify file, then complete via codex.notification turn/completed -> both
+	// clean auto_before anchor (0 diff) and auto_after (1 file) are persisted.
 	if err := os.WriteFile(filepath.Join(repo, "main.go"), []byte("package main\n// codex turn\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -234,9 +246,173 @@ func TestCheckpointsAutoCaptureOnSessionUpsertAndCodexTurnCompleted(t *testing.T
 		SessionID: "sess-auto",
 		Data:      map[string]any{"frame": map[string]any{"method": "turn/completed"}},
 	}
-	items = waitForCount(2)
+	items := waitForCount(2)
 	if items[0].Kind != "auto_after" || items[0].FilesChanged != 1 {
 		t.Fatalf("expected auto_after with 1 changed file, got %+v", items[0])
+	}
+	if items[1].Kind != "auto_before" || items[1].FilesChanged != 0 || items[1].PrevTreeSHA != "" {
+		t.Fatalf("expected clean auto_before anchor with 0 diff, got %+v", items[1])
+	}
+}
+
+func TestCheckpointsIgnoreExternalChangesAndOtherProjectTurns(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "isolation.sqlite3")
+	st, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	repo := initGitWorkspace(t)
+	otherProject := t.TempDir()
+	adapter := memSessionStore{
+		Store: st,
+		session: map[string]any{
+			"id":            "sess-chat",
+			"agent_id":      "agent-agy",
+			"title":         "宣传片制作",
+			"workspace":     repo,
+			"connection_id": "local",
+		},
+	}
+	resolver := targetfs.NewResolver(targetfs.ResolverOptions{
+		Store:            adapter,
+		DefaultWorkspace: repo,
+		AllowedRoots:     []string{repo},
+	})
+	sub := &fakeSubscriber{ch: make(chan *store.Event, 16)}
+	svc := NewService(Options{
+		Store:      adapter,
+		Authorizer: allowAllBrowser{},
+		Resolver:   resolver,
+		Subscriber: sub,
+	})
+	defer svc.Close()
+
+	waitBaseline := func() {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			svc.mu.Lock()
+			ready := svc.pendingBaselines["agent-agy::sess-chat"] != nil
+			svc.mu.Unlock()
+			if ready {
+				return
+			}
+			time.Sleep(15 * time.Millisecond)
+		}
+		t.Fatal("timed out waiting for pending baseline")
+	}
+	waitTurnSettled := func() {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			svc.mu.Lock()
+			running := svc.wasRunning["agent-agy::sess-chat"]
+			pending := svc.pendingBaselines["agent-agy::sess-chat"] != nil
+			svc.mu.Unlock()
+			if !running && !pending {
+				time.Sleep(120 * time.Millisecond)
+				return
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
+
+	// Seed an old manual checkpoint from "13 hours ago"
+	if _, _, err := svc.Capture(context.Background(), "agent-agy", "sess-chat", "manual", "", "旧快照", false); err != nil {
+		t.Fatal(err)
+	}
+
+	// Another session modifies many files in repo between turns!
+	if err := os.WriteFile(filepath.Join(repo, "external_1.go"), []byte("package main\n// from other session\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "external_2.go"), []byte("package main\n// from other session\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Turn 1: pure discussion turn (assistant message only, zero tools) while
+	// ANOTHER session ALSO edits repo concurrently during the turn!
+	sub.ch <- &store.Event{Type: "command.upsert", AgentID: "agent-agy", SessionID: "sess-chat", Data: map[string]any{"id": "cmd-1", "action": "send", "state": "running", "text": "讨论方案"}}
+	waitBaseline()
+	sub.ch <- &store.Event{Type: "message.upsert", AgentID: "agent-agy", SessionID: "sess-chat", Data: map[string]any{"id": "m1", "role": "assistant", "kind": "message", "text": "方案一和方案二"}}
+	// Concurrent edit from another session during Turn 1
+	if err := os.WriteFile(filepath.Join(repo, "concurrent_other.go"), []byte("package main\n// concurrent\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sub.ch <- &store.Event{Type: "command.upsert", AgentID: "agent-agy", SessionID: "sess-chat", Data: map[string]any{"id": "cmd-1", "action": "send", "state": "completed", "text": "讨论方案"}}
+	waitTurnSettled()
+
+	items, err := st.ListSessionCheckpoints(context.Background(), "agent-agy", "sess-chat", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected pure discussion turn to create 0 checkpoints even with external/concurrent edits, got %d: %+v", len(items), items)
+	}
+
+	// Turn 2: edits a file in ANOTHER project directory outside repo while another
+	// session concurrently edits repo -> must STILL create 0 checkpoints!
+	sub.ch <- &store.Event{Type: "command.upsert", AgentID: "agent-agy", SessionID: "sess-chat", Data: map[string]any{"id": "cmd-2", "action": "send", "state": "running", "text": "改另一个项目"}}
+	waitBaseline()
+	sub.ch <- &store.Event{Type: "message.upsert", AgentID: "agent-agy", SessionID: "sess-chat", Data: map[string]any{
+		"id":   "tool-other-proj",
+		"role": "tool",
+		"kind": "tool",
+		"tool": map[string]any{
+			"name":      "write_file",
+			"arguments": map[string]any{"Path": filepath.Join(otherProject, "video.py")},
+		},
+	}}
+	if err := os.WriteFile(filepath.Join(repo, "concurrent_other_2.go"), []byte("package main\n// concurrent 2\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sub.ch <- &store.Event{Type: "command.upsert", AgentID: "agent-agy", SessionID: "sess-chat", Data: map[string]any{"id": "cmd-2", "action": "send", "state": "completed", "text": "改另一个项目"}}
+	waitTurnSettled()
+
+	items, err = st.ListSessionCheckpoints(context.Background(), "agent-agy", "sess-chat", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected out-of-workspace edit turn to create 0 checkpoints, got %d: %+v", len(items), items)
+	}
+
+	// Turn 3: genuinely edits a file INSIDE repo -> creates clean auto_before (0 diff)
+	// and auto_after with ONLY the 1 file edited in Turn 3 (NOT the earlier external files)!
+	sub.ch <- &store.Event{Type: "command.upsert", AgentID: "agent-agy", SessionID: "sess-chat", Data: map[string]any{"id": "cmd-3", "action": "send", "state": "running", "text": "修改本仓 main.go"}}
+	waitBaseline()
+	sub.ch <- &store.Event{Type: "message.upsert", AgentID: "agent-agy", SessionID: "sess-chat", Data: map[string]any{
+		"id":   "tool-same-repo",
+		"role": "tool",
+		"kind": "tool",
+		"tool": map[string]any{
+			"name":      "edit_file",
+			"arguments": map[string]any{"Path": filepath.Join(repo, "main.go")},
+		},
+	}}
+	if err := os.WriteFile(filepath.Join(repo, "main.go"), []byte("package main\n// turn 3 own edit\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sub.ch <- &store.Event{Type: "command.upsert", AgentID: "agent-agy", SessionID: "sess-chat", Data: map[string]any{"id": "cmd-3", "action": "send", "state": "completed", "text": "修改本仓 main.go"}}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		items, _ = st.ListSessionCheckpoints(context.Background(), "agent-agy", "sess-chat", 20)
+		if len(items) >= 3 {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	if len(items) != 3 {
+		t.Fatalf("expected 1 old manual + 1 auto_before + 1 auto_after = 3, got %d: %+v", len(items), items)
+	}
+	if items[0].Kind != "auto_after" || items[0].FilesChanged != 1 || len(items[0].Files) != 1 || items[0].Files[0].Path != "main.go" {
+		t.Fatalf("expected auto_after with ONLY main.go changed (not external files), got %+v", items[0])
+	}
+	if items[1].Kind != "auto_before" || items[1].FilesChanged != 0 || items[1].PrevTreeSHA != "" {
+		t.Fatalf("expected clean auto_before anchor with 0 files_changed, got %+v", items[1])
 	}
 }
 

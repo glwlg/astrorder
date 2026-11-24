@@ -111,6 +111,7 @@ describe('SessionCheckpointsPanel', () => {
     await waitFor(() => {
       expect(screen.getByText('优化移动端图片灯箱')).toBeTruthy()
       expect(screen.getByText('本轮开始前基线')).toBeTruthy()
+      expect(screen.getByText('本轮开始前工作区基线（可供安全回滚）')).toBeTruthy()
     })
     expect(listSpy).toHaveBeenCalledWith('sess-1', 'agent-1')
 

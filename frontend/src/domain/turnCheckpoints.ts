@@ -19,10 +19,10 @@ export function mapCheckpointsToMessages(
   if (!messages.length || !checkpoints.length) return result
 
   // Only surface meaningful end-of-turn / manual / backup checkpoints inline.
-  // Skip pure baseline snapshots (`auto_before`) with zero file changes.
-  const candidates = checkpoints.filter(
-    (cp) => cp.kind !== 'auto_before' || cp.files_changed > 0,
-  )
+  // Pre-turn baselines (`auto_before`) are rollback anchors and must never be
+  // attached as "files changed by this reply" (even if historical rows recorded
+  // external repository drift from other sessions).
+  const candidates = checkpoints.filter((cp) => cp.kind !== 'auto_before')
   if (!candidates.length) return result
 
   // Identify final visible assistant message for each conversational turn

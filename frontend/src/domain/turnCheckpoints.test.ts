@@ -49,7 +49,7 @@ describe('mapCheckpointsToMessages', () => {
       msg({ id: 'a2', role: 'assistant', created_at: '2026-11-23T12:06:00Z' }),
     ]
     const checkpoints: SessionCheckpoint[] = [
-      cp({ id: 'cp-base', turn_number: 1, kind: 'auto_before', files_changed: 0, created_at: '2026-11-23T12:00:01Z' }),
+      cp({ id: 'cp-base', turn_number: 1, kind: 'auto_before', files_changed: 345, insertions: 10000, deletions: 500, created_at: '2026-11-23T12:00:01Z' }),
       cp({ id: 'cp-1', turn_number: 2, command_id: 'cmd-1', created_at: '2026-11-23T12:01:03Z' }),
       cp({ id: 'cp-2', turn_number: 3, kind: 'manual', created_at: '2026-11-23T12:06:20Z' }),
     ]
@@ -58,5 +58,18 @@ describe('mapCheckpointsToMessages', () => {
     expect(mapped.size).toBe(2)
     expect(mapped.get('a1')?.id).toBe('cp-1')
     expect(mapped.get('a2')?.id).toBe('cp-2')
+  })
+
+  it('never attaches auto_before baselines with external drift to an assistant reply', () => {
+    const messages: Message[] = [
+      msg({ id: 'u1', role: 'user', command_id: 'cmd-1', created_at: '2026-11-23T13:43:00Z' }),
+      msg({ id: 'a1', role: 'assistant', created_at: '2026-11-23T13:44:00Z' }),
+    ]
+    const checkpoints: SessionCheckpoint[] = [
+      cp({ id: 'cp-7', turn_number: 7, kind: 'auto_before', command_id: 'cmd-1', files_changed: 345, insertions: 101476, deletions: 17220, created_at: '2026-11-23T13:43:02Z' }),
+    ]
+
+    const mapped = mapCheckpointsToMessages(messages, checkpoints)
+    expect(mapped.size).toBe(0)
   })
 })
