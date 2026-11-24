@@ -135,4 +135,39 @@ describe('themeAccent multi-role utilities and AppearanceSettingsPage', () => {
     expect(document.documentElement.style.getPropertyValue('--astr-theme-highlight')).toBe('#10b981')
     expect(document.documentElement.style.getPropertyValue('--astr-theme-surface')).toBe('#ecfccb')
   })
+
+  it('coalesces continuous hex/picker updates in rAF and defers localStorage writes until commit', async () => {
+    vi.spyOn(api, 'updatePluginSettings').mockImplementation(async (req) => ({
+      enabled: {},
+      configs: req.configs ?? {},
+    }))
+    const rafQueue: FrameRequestCallback[] = []
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => {
+      rafQueue.push(cb)
+      return rafQueue.length
+    })
+    const setItemSpy = vi.spyOn(Storage.prototype, 'setItem')
+
+    render(
+      <MantineProvider>
+        <AppearanceSettingsPage />
+      </MantineProvider>,
+    )
+
+    const primaryHex = screen.getByLabelText('主色调 HEX 色值')
+    fireEvent.change(primaryHex, { target: { value: '#112233' } })
+    fireEvent.change(primaryHex, { target: { value: '#445566' } })
+    // Multiple immediate=false updates within a frame queue only one rAF and do NOT touch localStorage yet.
+    expect(rafQueue).toHaveLength(1)
+    expect(setItemSpy).not.toHaveBeenCalled()
+
+    // Running the single animation frame applies the latest coalesced color to CSS without localStorage write.
+    rafQueue.shift()!(16)
+    expect(document.documentElement.style.getPropertyValue('--astr-theme-primary')).toBe('#445566')
+    expect(setItemSpy).not.toHaveBeenCalled()
+
+    // Committing via blur persists to localStorage once.
+    fireEvent.blur(primaryHex)
+    expect(localStorage.getItem(THEME_ACCENT_STORAGE_KEY)).toBe('#445566')
+  })
 })

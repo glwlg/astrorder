@@ -65,6 +65,9 @@ type session struct {
 	deleteOnly         bool
 	deletePending      bool
 	promptRunning      bool
+	activePrompts      int
+	promptSeq          uint64
+	inFlightCommands   map[uint64]string
 	reactiveWaiting    bool
 	reactiveMonitorGen uint64
 	cancelRequested    bool
@@ -100,16 +103,17 @@ type session struct {
 
 func newSession(id, cwd string, c *acpClient) *session {
 	s := &session{
-		id:        id,
-		cwd:       cwd,
-		status:    "idle",
-		mode:      "manual",
-		client:    c,
-		approvals: make(map[string]*pendingApproval),
-		toolItems: make(map[string]*acpToolState),
-		eventCh:   make(chan func(), 512),
-		eventStop: make(chan struct{}),
-		eventDone: make(chan struct{}),
+		id:               id,
+		cwd:              cwd,
+		status:           "idle",
+		mode:             "manual",
+		client:           c,
+		inFlightCommands: make(map[uint64]string),
+		approvals:        make(map[string]*pendingApproval),
+		toolItems:        make(map[string]*acpToolState),
+		eventCh:          make(chan func(), 512),
+		eventStop:        make(chan struct{}),
+		eventDone:        make(chan struct{}),
 	}
 	go s.runEventWorker()
 	return s
@@ -910,11 +914,28 @@ func (a *Adapter) failSession(s *session, reason string) {
 	s.mu.Lock()
 	s.status = "error"
 	s.promptRunning = false
+	s.activePrompts = 0
 	s.reactiveWaiting = false
 	s.cancelRequested = false
 	s.reactiveMonitorGen++
 	command := s.command
 	s.command = ""
+	failedCmds := make([]string, 0, len(s.inFlightCommands)+1)
+	seenCmd := make(map[string]struct{}, len(s.inFlightCommands)+1)
+	for _, cid := range s.inFlightCommands {
+		if cid != "" {
+			if _, ok := seenCmd[cid]; !ok {
+				seenCmd[cid] = struct{}{}
+				failedCmds = append(failedCmds, cid)
+			}
+		}
+	}
+	s.inFlightCommands = make(map[uint64]string)
+	if command != "" {
+		if _, ok := seenCmd[command]; !ok {
+			failedCmds = append(failedCmds, command)
+		}
+	}
 	id := s.id
 	pending := s.approvals
 	s.approvals = make(map[string]*pendingApproval)
@@ -932,14 +953,14 @@ func (a *Adapter) failSession(s *session, reason string) {
 			"native_id":  appr.rawID,
 		}, "")
 	}
-	if command != "" {
-		_ = a.event(s, "command.upsert", map[string]any{"id": command, "state": "unknown", "error": reason}, "")
+	for _, cid := range failedCmds {
+		_ = a.event(s, "command.upsert", map[string]any{"id": cid, "state": "unknown", "error": reason}, "")
 	}
 	_ = a.announce(s)
 	_ = a.emitOwner(s, "error", reason)
 }
 
-func (a *Adapter) runPrompt(s *session, c *acpClient, commandID string, blocks []map[string]any) {
+func (a *Adapter) runPrompt(s *session, c *acpClient, seq uint64, commandID string, blocks []map[string]any) {
 	resp, err := c.call(context.Background(), "session/prompt", map[string]any{
 		"sessionId": s.id,
 		"prompt":    blocks,
@@ -957,6 +978,13 @@ func (a *Adapter) runPrompt(s *session, c *acpClient, commandID string, blocks [
 			return
 		}
 
+		delete(s.inFlightCommands, seq)
+		if s.activePrompts > 0 {
+			s.activePrompts--
+		}
+		stillInFlight := s.activePrompts > 0
+		s.promptRunning = stillInFlight
+
 		stopReason := str(resp, "stopReason")
 		nextStatus := "idle"
 		cmdState := "completed"
@@ -972,16 +1000,31 @@ func (a *Adapter) runPrompt(s *session, c *acpClient, commandID string, blocks [
 				cmdState = "failed"
 				cmdErr = err.Error()
 			}
-		} else if stopReason == "cancelled" || stopReason == "canceled" || s.cancelRequested {
+		} else if stopReason == "cancelled" || stopReason == "canceled" || (!stillInFlight && s.cancelRequested) {
 			nextStatus = "idle"
 			cmdState = "failed"
 			cmdErr = "cancelled"
 		}
 
+		if stillInFlight {
+			// Another concurrent session/prompt (e.g., an active steering turn or an
+			// earlier prompt still running) owns the live session. Keep status running
+			// and preserve live tool state; only record this prompt's usage & receipt.
+			s.mu.Unlock()
+			_ = a.emitUsage(s, resp)
+			if commandID != "" {
+				_ = a.event(s, "command.upsert", map[string]any{
+					"id":    commandID,
+					"state": cmdState,
+					"error": cmdErr,
+				}, "")
+			}
+			return
+		}
+
 		awaitingInput := err == nil && cmdState == "completed" && s.hasPendingAskQuestionLocked()
 		hasBgTool := err == nil && cmdState == "completed" && !awaitingInput && s.hasBackgroundToolOutputLocked()
 
-		s.promptRunning = false
 		s.activeMsgID = ""
 		s.activeText.Reset()
 		s.activeThinking.Reset()
@@ -1014,6 +1057,19 @@ func (a *Adapter) runPrompt(s *session, c *acpClient, commandID string, blocks [
 			s.mu.Unlock()
 			return
 		}
+		if s.activePrompts > 0 || s.promptRunning {
+			// A steering prompt started while we were checking reactive completion.
+			// Keep the session running for the new owner and only finalize this command.
+			s.mu.Unlock()
+			if commandID != "" {
+				_ = a.event(s, "command.upsert", map[string]any{
+					"id":    commandID,
+					"state": cmdState,
+					"error": cmdErr,
+				}, "")
+			}
+			return
+		}
 		if s.hasPendingAskQuestionLocked() {
 			awaitingInput = true
 			stillActive = false
@@ -1026,6 +1082,7 @@ func (a *Adapter) runPrompt(s *session, c *acpClient, commandID string, blocks [
 		}
 		if stillActive {
 			s.status = "running"
+			s.command = commandID
 			s.reactiveWaiting = true
 			s.reactiveMonitorGen++
 			gen := s.reactiveMonitorGen
@@ -1308,7 +1365,7 @@ func (a *Adapter) Command(ctx context.Context, r core.Request) (core.Result, err
 		result.Payload["next_cursor"] = next
 		result.Payload["has_more"] = next != nil
 		return result, err
-	case "session.send":
+	case "session.send", "session.steer":
 		if s.readonly {
 			return core.Result{}, core.RejectBeforeDispatch("Antigravity desktop conversation is history-only; create a CLI conversation to chat")
 		}
@@ -1324,10 +1381,40 @@ func (a *Adapter) Command(ctx context.Context, r core.Request) (core.Result, err
 				return core.Result{}, core.RejectBeforeDispatch(fmt.Sprintf("Antigravity cannot override %s per turn; switch session policy first", key))
 			}
 		}
+		idleOnly, _ := p["idle_only"].(bool)
+		steerOnly := r.Action == "session.steer"
+		if !steerOnly {
+			steerOnly, _ = p["guidance_only"].(bool)
+		}
+
 		s.mu.Lock()
 		c := s.client
 		allowImages := c == nil || c.promptImage
-		if s.closed || s.status != "idle" || s.promptRunning || c == nil || c.exited() {
+		if s.closed || s.deletePending || c == nil || c.exited() {
+			s.mu.Unlock()
+			return core.Result{}, core.RejectBeforeDispatch("Antigravity conversation is not idle")
+		}
+		steering := false
+		switch s.status {
+		case "idle":
+			if steerOnly {
+				s.mu.Unlock()
+				return core.Result{}, core.RejectBeforeDispatch("Antigravity steer requires a running turn")
+			}
+			if s.promptRunning || s.activePrompts > 0 {
+				s.mu.Unlock()
+				return core.Result{}, core.RejectBeforeDispatch("Antigravity conversation is not idle")
+			}
+		case "running":
+			if idleOnly {
+				s.mu.Unlock()
+				return core.Result{}, core.RejectBeforeDispatch("Antigravity conversation is not idle")
+			}
+			steering = true
+		case "waiting_approval":
+			s.mu.Unlock()
+			return core.Result{}, core.RejectBeforeDispatch("Antigravity conversation is waiting for approval; respond before sending")
+		default:
 			s.mu.Unlock()
 			return core.Result{}, core.RejectBeforeDispatch("Antigravity conversation is not idle")
 		}
@@ -1337,29 +1424,54 @@ func (a *Adapter) Command(ctx context.Context, r core.Request) (core.Result, err
 			return core.Result{}, bErr
 		}
 		cmdID := str(p, "command_id")
-		s.status = "running"
+		var prevReactiveCmd string
+		if steering && s.reactiveWaiting && s.activePrompts == 0 && s.command != "" && s.command != cmdID {
+			prevReactiveCmd = s.command
+		}
+		s.promptSeq++
+		seq := s.promptSeq
+		s.activePrompts++
 		s.promptRunning = true
+		s.status = "running"
 		s.reactiveWaiting = false
 		s.cancelRequested = false
 		s.reactiveMonitorGen++
 		s.command = cmdID
+		if cmdID != "" {
+			if s.inFlightCommands == nil {
+				s.inFlightCommands = make(map[uint64]string)
+			}
+			s.inFlightCommands[seq] = cmdID
+		}
 		s.activeMsgID = ""
 		s.activeText.Reset()
 		s.activeThinking.Reset()
-		preserved := make(map[string]*acpToolState)
-		for k, st := range s.toolItems {
-			if st != nil && st.name == "ask_question" && st.questionEmitted {
-				preserved[k] = st
+		if !steering {
+			preserved := make(map[string]*acpToolState)
+			for k, st := range s.toolItems {
+				if st != nil && st.name == "ask_question" && st.questionEmitted {
+					preserved[k] = st
+				}
 			}
+			s.toolItems = preserved
 		}
-		s.toolItems = preserved
 		s.mu.Unlock()
 
+		if prevReactiveCmd != "" {
+			_ = a.event(s, "command.upsert", map[string]any{
+				"id":    prevReactiveCmd,
+				"state": "completed",
+				"error": nil,
+			}, "")
+		}
 		_ = a.announce(s)
-		go a.runPrompt(s, c, cmdID, blocks)
+		go a.runPrompt(s, c, seq, cmdID, blocks)
 
 		result = a.result(s)
 		result.Payload["accepted"] = true
+		if steering {
+			result.Payload["steered"] = true
+		}
 		return result, nil
 	case "session.close":
 		s.mu.Lock()

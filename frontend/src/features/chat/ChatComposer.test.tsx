@@ -591,3 +591,45 @@ it('calibrates Grok capabilities: hides image paste hint, rejects image attachme
 
   client.clear()
 })
+
+it('enables steering for running Antigravity sessions and disables it only while waiting for approval', async () => {
+  useAstrorderStore.getState().resetRuntime()
+  useAstrorderStore.getState().setConnection('connected')
+  vi.spyOn(api, 'getSessionModel').mockResolvedValue({ model: 'gemini-3.8-flash-high', provider: 'antigravity' })
+  vi.spyOn(api, 'createCommand').mockImplementation(async input => ({ ...input, state: 'queued', attachments: [], created_at: session.updated_at, error: null }))
+  const agyAgent: Agent = { ...agent, id: 'agy-1', kind: 'antigravity', name: 'Antigravity' }
+  const agySession: Session = { ...session, agent_id: 'agy-1', status: 'running' }
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const view = render(
+    <MantineProvider>
+      <QueryClientProvider client={client}>
+        <ChatComposer session={agySession} agent={agyAgent} />
+      </QueryClientProvider>
+    </MantineProvider>,
+  )
+
+  fireEvent.change(screen.getByLabelText('消息内容'), { target: { value: 'AGY 立即引导测试' } })
+  fireEvent.click(screen.getByRole('button', { name: '加入队列' }))
+  const steerBtn = await screen.findByRole('button', { name: '立即引导' })
+  expect(steerBtn).toBeEnabled()
+
+  view.rerender(
+    <MantineProvider>
+      <QueryClientProvider client={client}>
+        <ChatComposer session={{ ...agySession, status: 'waiting_approval' }} agent={agyAgent} />
+      </QueryClientProvider>
+    </MantineProvider>,
+  )
+  expect(screen.getByRole('button', { name: '立即引导' })).toBeDisabled()
+
+  view.rerender(
+    <MantineProvider>
+      <QueryClientProvider client={client}>
+        <ChatComposer session={agySession} agent={agyAgent} />
+      </QueryClientProvider>
+    </MantineProvider>,
+  )
+  fireEvent.click(screen.getByRole('button', { name: '立即引导' }))
+  await waitFor(() => expect(api.sendQueuedCommand).toHaveBeenCalledOnce())
+  client.clear()
+})

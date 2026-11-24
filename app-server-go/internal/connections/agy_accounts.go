@@ -22,15 +22,17 @@ import (
 const (
 	agyAccountsPath      = "/api/v1/agy-accounts"
 	agyStateReadCacheTTL = 15 * time.Second
+	agyQuotaReadCacheTTL = 30 * time.Second
 )
 
 type agyReadCache struct {
 	mu       sync.Mutex
-	states   map[string]cachedAgyState
+	entries  map[string]cachedAgyRead
 	inFlight map[string]*agyReadFlight
 }
 
-type cachedAgyState struct {
+type cachedAgyRead struct {
+	envID     string
 	out       *pb.AgyAccountResponse
 	expiresAt time.Time
 }
@@ -45,21 +47,27 @@ func (c *agyReadCache) invalidate(envID string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if envID == "" {
-		c.states = nil
+		c.entries = nil
 		return
 	}
-	delete(c.states, envID)
+	for k, entry := range c.entries {
+		if entry.envID == envID {
+			delete(c.entries, k)
+		}
+	}
 }
 
 func (c *agyReadCache) run(
 	ctx context.Context,
 	key string,
 	cacheEnv string,
+	ttl time.Duration,
+	bypassCache bool,
 	fn func(context.Context) (*pb.AgyAccountResponse, error),
 ) (*pb.AgyAccountResponse, error) {
 	c.mu.Lock()
-	if cacheEnv != "" {
-		if entry, ok := c.states[cacheEnv]; ok && time.Now().Before(entry.expiresAt) {
+	if !bypassCache && ttl > 0 && cacheEnv != "" {
+		if entry, ok := c.entries[key]; ok && time.Now().Before(entry.expiresAt) {
 			c.mu.Unlock()
 			return entry.out, nil
 		}
@@ -88,13 +96,14 @@ func (c *agyReadCache) run(
 
 	c.mu.Lock()
 	delete(c.inFlight, key)
-	if err == nil && cacheEnv != "" {
-		if c.states == nil {
-			c.states = make(map[string]cachedAgyState)
+	if err == nil && ttl > 0 && cacheEnv != "" {
+		if c.entries == nil {
+			c.entries = make(map[string]cachedAgyRead)
 		}
-		c.states[cacheEnv] = cachedAgyState{
+		c.entries[key] = cachedAgyRead{
+			envID:     cacheEnv,
 			out:       out,
-			expiresAt: time.Now().Add(agyStateReadCacheTTL),
+			expiresAt: time.Now().Add(ttl),
 		}
 	}
 	flight.out = out
@@ -321,14 +330,15 @@ func (h *Handler) handleAgyAccounts(w http.ResponseWriter, r *http.Request, path
 		}
 	}
 	req.Target = runtimeTarget("antigravity", &envID, sshConn)
+	freshRead := r.URL.Query().Get("fresh") == "1" || r.URL.Query().Get("refresh") == "1"
 	var out *pb.AgyAccountResponse
 	switch req.Action {
 	case pb.AgyAccountAction_AGY_ACCOUNT_ACTION_READ_STATE:
-		out, err = h.agyReadCache.run(ctx, "state:"+envID, envID, func(callCtx context.Context) (*pb.AgyAccountResponse, error) {
+		out, err = h.agyReadCache.run(ctx, "state:"+envID, envID, agyStateReadCacheTTL, freshRead, func(callCtx context.Context) (*pb.AgyAccountResponse, error) {
 			return h.client.Runtime.ManageAgyAccount(callCtx, req)
 		})
 	case pb.AgyAccountAction_AGY_ACCOUNT_ACTION_READ_QUOTA:
-		out, err = h.agyReadCache.run(ctx, "quota:"+envID+":"+req.AccountId, "", func(callCtx context.Context) (*pb.AgyAccountResponse, error) {
+		out, err = h.agyReadCache.run(ctx, "quota:"+envID+":"+req.AccountId, envID, agyQuotaReadCacheTTL, freshRead, func(callCtx context.Context) (*pb.AgyAccountResponse, error) {
 			return h.client.Runtime.ManageAgyAccount(callCtx, req)
 		})
 	default:

@@ -79,7 +79,26 @@ body { font-family: var(--astr-session-font); font-size: 14px; }
 .workspace-navigation .sidebar-nav-link .mantine-NavLink-body { display: block; flex: none; }
 .workspace-navigation .sidebar-nav-link .mantine-NavLink-label { display: block; font-size: 10px; line-height: 1.2; font-weight: 550; }
 .workspace-navigation .sidebar-nav-link svg { width: 21px; height: 21px; }
-.workspace-navigation .group-task-nav-tab { flex: none; width: 48px; }
+.workspace-navigation .group-task-nav-tab,
+.workspace-navigation .sidebar-inbox-nav-wrap { flex: none; width: 48px; }
+.sidebar-inbox-nav-wrap { position: relative; }
+.sidebar-inbox-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--astr-accent, #7540bd);
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 17px;
+  text-align: center;
+  pointer-events: none;
+}
+.sidebar-inbox-badge.is-urgent { background: var(--astr-red, #c72233); }
 .workspace-navigation-tools { display: flex; flex-direction: column; align-items: center; gap: 12px; margin-top: auto; padding: 16px 0 22px; width: 100%; }
 .workspace-navigation-tools .mantine-ActionIcon-root { width: 42px; height: 38px; color: var(--astr-text); border-radius: 9px; }
 .workspace-navigation-tools { gap: 14px; padding-bottom: 18px; }

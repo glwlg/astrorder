@@ -353,16 +353,23 @@ export function applyThemePalette(
 
   if (typeof document !== 'undefined') {
     const root = document.documentElement
-    root.style.setProperty('--astr-theme-seed', next.primary)
-    root.style.setProperty('--astr-theme-primary', next.primary)
-    root.style.setProperty('--astr-theme-secondary', next.secondary)
-    root.style.setProperty('--astr-theme-highlight', next.highlight)
-    root.style.setProperty('--astr-theme-surface', next.surface)
-    root.style.setProperty('--astr-accent-contrast-fallback', pickContrastInk(next.primary))
-    root.style.setProperty('--astr-secondary-contrast-fallback', pickContrastInk(next.secondary))
+    const setProp = (name: string, value: string) => {
+      if (root.style.getPropertyValue(name) !== value) {
+        root.style.setProperty(name, value)
+      }
+    }
+    setProp('--astr-theme-seed', next.primary)
+    setProp('--astr-theme-primary', next.primary)
+    setProp('--astr-theme-secondary', next.secondary)
+    setProp('--astr-theme-highlight', next.highlight)
+    setProp('--astr-theme-surface', next.surface)
+    setProp('--astr-accent-contrast-fallback', pickContrastInk(next.primary))
+    setProp('--astr-secondary-contrast-fallback', pickContrastInk(next.secondary))
     if (isDefaultThemePalette(next)) {
-      root.removeAttribute('data-astr-theme-custom')
-    } else {
+      if (root.hasAttribute('data-astr-theme-custom')) {
+        root.removeAttribute('data-astr-theme-custom')
+      }
+    } else if (root.getAttribute('data-astr-theme-custom') !== 'true') {
       root.setAttribute('data-astr-theme-custom', 'true')
     }
   }

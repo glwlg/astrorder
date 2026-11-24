@@ -2,12 +2,13 @@ import type { EventEnvelope } from '../domain/types'
 import { getBackendWsHost, getWsProtocol } from '../desktop/adapter'
 
 export type EventStreamStatus = 'connecting' | 'connected' | 'disconnected' | 'error'
+export type EventStreamResumeReason = 'reconnect' | 'wake'
 
 export interface EventStreamOptions {
   after: number
   onEvent: (event: EventEnvelope) => void
   onStatus: (status: EventStreamStatus) => void
-  onResume?: () => void
+  onResume?: (reason: EventStreamResumeReason) => void
   reconnectMs?: number
 }
 
@@ -73,7 +74,7 @@ export function connectEventStream({
     current.onopen = () => {
       if (!isCurrent()) return
       onStatus('connected')
-      if (connectedBefore) onResume?.()
+      if (connectedBefore) onResume?.('reconnect')
       connectedBefore = true
     }
     current.onmessage = (message) => {
@@ -107,7 +108,7 @@ export function connectEventStream({
       connect()
       return
     }
-    onResume?.()
+    onResume?.('wake')
   }
   const onVisibilityChange = () => {
     if (document.visibilityState === 'visible') onWake()

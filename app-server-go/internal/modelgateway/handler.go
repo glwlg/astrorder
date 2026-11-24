@@ -53,6 +53,19 @@ type Handler struct {
 
 	analyticsFlightMu sync.Mutex
 	analyticsFlights  map[string]*analyticsUsageFlight
+	analyticsCache    map[string]cachedAnalyticsUsage
+}
+
+const (
+	analyticsUsageCacheTTL        = 45 * time.Second
+	analyticsUsageCacheMaxEntries = 32
+)
+
+type cachedAnalyticsUsage struct {
+	status      int
+	contentType string
+	body        []byte
+	expiresAt   time.Time
 }
 
 type analyticsUsageFlight struct {

@@ -12,6 +12,7 @@ const MAX_SLOW_APIS = 15
 const MAX_WORST_LOAFS = 12
 const MAX_WORST_INTERACTIONS = 12
 const MAX_RECENT_SWITCHES = 10
+const MAX_VALID_SWITCH_MS = 60_000
 const MAX_PAYLOAD_BYTES = 48 * 1024
 
 interface PerfScriptTiming {
@@ -292,6 +293,13 @@ class ClientPerfCollector {
 
   private profilerStats = new Map<string, ProfilerBucket>()
 
+  private readonly handleVisibilityChange = (): void => {
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+      // Mobile/desktop sleep suspends timers & rAF; drop any in-flight switch measurement so wakeups don't skew metrics.
+      this.switchPending = null
+    }
+  }
+
   start(options?: { getQueryStats?: () => QueryCacheStats }): void {
     if (options?.getQueryStats) {
       this.queryStatsProvider = options.getQueryStats
@@ -301,6 +309,9 @@ class ClientPerfCollector {
     this.currentRoute = normalizeRoute(window.location.pathname)
     ensureFetchLater()
     this.installObservers()
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', this.handleVisibilityChange)
+    }
     this.tickTimer = setInterval(() => this.onTick(), BEACON_REFRESH_MS)
     ;(window as unknown as Record<string, unknown>).__astrorderPerf = {
       snapshot: () => this.buildSnapshot(),
@@ -313,6 +324,9 @@ class ClientPerfCollector {
       clearInterval(this.tickTimer)
       this.tickTimer = null
     }
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', this.handleVisibilityChange)
+    }
     for (const obs of this.observers) {
       try {
         obs.disconnect()
@@ -324,6 +338,7 @@ class ClientPerfCollector {
       this.pendingBeaconController = null
     }
     this.pendingBeaconResult = null
+    this.switchPending = null
     this.started = false
   }
 
@@ -434,9 +449,12 @@ class ClientPerfCollector {
     const pending = this.switchPending
     if (!pending || pending.key !== key) return
     this.switchPending = null
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
     const finish = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
       const now = typeof performance !== 'undefined' ? performance.now() : Date.now()
       const elapsed = Math.max(0, round1(now - pending.startMs))
+      if (elapsed > MAX_VALID_SWITCH_MS) return
       if (this.firstSessionReadyMs === null) {
         this.firstSessionReadyMs = round1(now)
       }

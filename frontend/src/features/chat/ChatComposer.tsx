@@ -771,9 +771,9 @@ ${draft.text}` : entry.payload.text)
               <Group gap={6} wrap="nowrap" style={{ flexShrink: 0 }}>
                 {entry.state === 'queued' && (
                   <>
-                    <Button size="compact-xs" variant="light" color="indigo" disabled={nativeBusy && agent?.kind === 'antigravity'} onClick={() => void steerQueued(entry.payload.id)}>
+                    <Button size="compact-xs" variant="light" color="indigo" disabled={session.status === 'waiting_approval' && (agent?.kind === 'antigravity' || agent?.kind === 'antigravity-ssh')} onClick={() => void steerQueued(entry.payload.id)}>
                       {nativeBusy ? '立即引导' : '发送'}
-                                          </Button>
+                    </Button>
                     <Button size="compact-xs" variant="subtle" color="blue" onClick={() => void editQueued(entry)}>
                       编辑
                     </Button>

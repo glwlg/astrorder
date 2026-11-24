@@ -115,9 +115,22 @@ func (s *Syncer) InspectSelected(ctx context.Context, config Config, targetIDs [
 		return nil, err
 	}
 	statuses := make([]TargetStatus, len(targets))
-	for index, target := range targets {
-		statuses[index] = s.inspectTarget(ctx, target, config)
+	if len(targets) <= 1 {
+		for index, target := range targets {
+			statuses[index] = s.inspectTarget(ctx, target, config)
+		}
+		return statuses, nil
 	}
+	var wait sync.WaitGroup
+	for index := range targets {
+		index := index
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			statuses[index] = s.inspectTarget(ctx, targets[index], config)
+		}()
+	}
+	wait.Wait()
 	return statuses, nil
 }
 
@@ -138,6 +151,13 @@ func (s *Syncer) inspectTarget(ctx context.Context, target Target, config Config
 		message := sanitizeSecret(readErr.Error(), config.APIKey)
 		status.RawOutput = &message
 	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		if status.RawOutput == nil {
+			message := sanitizeSecret(ctxErr.Error(), config.APIKey)
+			status.RawOutput = &message
+		}
+		return status
+	}
 	if hasAgent(target, TargetAppCodex) {
 		codexStatus := s.inspectCodexState(ctx, target, config)
 		status.HooksEnabled = codexStatus.HooksEnabled
@@ -146,6 +166,13 @@ func (s *Syncer) inspectTarget(ctx context.Context, target Target, config Config
 			message := sanitizeSecret(codexStatus.Error.Error(), config.APIKey)
 			status.RawOutput = &message
 		}
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		if status.RawOutput == nil {
+			message := sanitizeSecret(ctxErr.Error(), config.APIKey)
+			status.RawOutput = &message
+		}
+		return status
 	}
 	if hasAgent(target, TargetAppHermes) {
 		hermesStatus := s.inspectHermesState(ctx, target, config)

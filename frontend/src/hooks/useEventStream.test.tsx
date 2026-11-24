@@ -447,4 +447,59 @@ describe('event stream notifications', () => {
       vi.useRealTimers()
     }
   })
+
+  it('skips brief live-socket wake invalidations and coalesces rapid reconnect storms', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-11-24T04:00:00Z'))
+    let visibility: DocumentVisibilityState = 'visible'
+    vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibility)
+    let options: { onResume: (reason?: 'reconnect' | 'wake') => void } | undefined
+    mocks.connectEventStream.mockImplementation((next) => { options = next; return vi.fn() })
+    const client = new QueryClient()
+    const invalidate = vi.spyOn(client, 'invalidateQueries').mockResolvedValue()
+    const view = render(<StreamHarness client={client} />)
+    try {
+      // Brief hide (5s) with an open socket must NOT invalidate queries on wake.
+      visibility = 'hidden'
+      document.dispatchEvent(new Event('visibilitychange'))
+      vi.advanceTimersByTime(5_000)
+      visibility = 'visible'
+      act(() => options?.onResume('wake'))
+      expect(invalidate).not.toHaveBeenCalled()
+
+      // Long hide (20s) with an open socket gently refreshes only active messages + tasks.
+      visibility = 'hidden'
+      document.dispatchEvent(new Event('visibilitychange'))
+      vi.advanceTimersByTime(20_000)
+      visibility = 'visible'
+      act(() => {
+        options?.onResume('wake')
+        // Immediate duplicate wake (e.g. online + visibilitychange) is coalesced.
+        options?.onResume('wake')
+      })
+      expect(invalidate).toHaveBeenCalledTimes(2)
+      expect(invalidate).toHaveBeenCalledWith(
+        { queryKey: ['astrorder', 'messages'], refetchType: 'active' },
+        { cancelRefetch: false },
+      )
+      expect(invalidate).toHaveBeenCalledWith(
+        { queryKey: ['astrorder', 'tasks'], refetchType: 'active' },
+        { cancelRefetch: false },
+      )
+
+      // Rapid reconnect calls within 3s only fire one full resync wave.
+      invalidate.mockClear()
+      act(() => {
+        options?.onResume('reconnect')
+        options?.onResume('reconnect')
+      })
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ['astrorder', 'bootstrap'] })
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ['astrorder', 'messages'] })
+      expect(invalidate).toHaveBeenCalledTimes(8)
+    } finally {
+      view.unmount()
+      vi.restoreAllMocks()
+      vi.useRealTimers()
+    }
+  })
 })

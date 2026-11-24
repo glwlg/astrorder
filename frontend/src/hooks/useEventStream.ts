@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { notifications as mantineNotifications } from "@mantine/notifications";
 import type { QueryClient } from "@tanstack/react-query";
-import { connectEventStream, type EventStreamStatus } from "../api/eventStream";
+import { connectEventStream, type EventStreamResumeReason, type EventStreamStatus } from "../api/eventStream";
 import {
   deliverBrowserNotification,
   notificationForEvent,
@@ -266,6 +266,18 @@ export function useEventStream(
       const applyEnd = typeof performance !== "undefined" ? performance.now() : Date.now();
       clientPerf.recordWsDeltaFlush(events.length, Math.max(0, applyEnd - applyStart));
     };
+    let hiddenAt = typeof document !== "undefined" && document.visibilityState === "hidden" ? Date.now() : 0;
+    let lastFullResumeAt = 0;
+    let lastWakeResumeAt = 0;
+    let lastResyncInvalidatedAt = 0;
+    const onDocVisibilityChange = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+        hiddenAt = Date.now();
+      }
+    };
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", onDocVisibilityChange);
+    }
     const stop = connectEventStream({
       after: useAstrorderStore.getState().cursor,
       onStatus: status => {
@@ -273,7 +285,32 @@ export function useEventStream(
         clientPerf.recordWsStatus(status);
         storeStatus(status);
       },
-      onResume: () => {
+      onResume: (reason: EventStreamResumeReason = "reconnect") => {
+        const now = Date.now();
+        if (reason === "wake") {
+          const hiddenDuration = hiddenAt > 0 ? now - hiddenAt : 0;
+          hiddenAt = 0;
+          // Socket stayed open continuously: ignore brief tab/app switches and overlapping online+visibility wakes.
+          if (hiddenDuration < 15_000 || (lastWakeResumeAt > 0 && now - lastWakeResumeAt < 20_000)) {
+            return;
+          }
+          lastWakeResumeAt = now;
+          void queryClient.invalidateQueries(
+            { queryKey: ["astrorder", "messages"], refetchType: "active" },
+            { cancelRefetch: false },
+          );
+          void queryClient.invalidateQueries(
+            { queryKey: ["astrorder", "tasks"], refetchType: "active" },
+            { cancelRefetch: false },
+          );
+          return;
+        }
+        hiddenAt = 0;
+        if (lastFullResumeAt > 0 && now - lastFullResumeAt < 3_000) {
+          return;
+        }
+        lastFullResumeAt = now;
+        lastWakeResumeAt = now;
         void refreshGroups();
         for (const resource of ["bootstrap", "messages", "commands", "tasks", "session_usage", "session-swarm", "session-schedules", "checkpoints"]) {
           void queryClient.invalidateQueries({ queryKey: ["astrorder", resource] });
@@ -576,21 +613,28 @@ export function useEventStream(
           );
         }
         if (useAstrorderStore.getState().resyncRequired) {
-          void queryClient.invalidateQueries({
-            queryKey: ["astrorder", "bootstrap"],
-          });
-          void queryClient.invalidateQueries({
-            queryKey: ["astrorder", "messages"],
-          });
-          void queryClient.invalidateQueries({
-            queryKey: ["astrorder", "commands"],
-          });
+          const now = Date.now();
+          if (now - lastResyncInvalidatedAt >= 3_000) {
+            lastResyncInvalidatedAt = now;
+            void queryClient.invalidateQueries({
+              queryKey: ["astrorder", "bootstrap"],
+            });
+            void queryClient.invalidateQueries({
+              queryKey: ["astrorder", "messages"],
+            });
+            void queryClient.invalidateQueries({
+              queryKey: ["astrorder", "commands"],
+            });
+          }
         }
       },
     });
     return () => {
       flushDeltas();
       disposed = true;
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", onDocVisibilityChange);
+      }
       for (const refresh of hookRefreshes.values()) clearTimeout(refresh.timer);
       hookRefreshes.clear();
       messageInvalidator.clear();

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActionIcon,
   Badge,
@@ -56,7 +56,7 @@ interface RoleColorPickerCardProps {
   onChange: (role: ThemeColorRole, hex: string, immediate: boolean) => void
 }
 
-function RoleColorPickerCard({
+const RoleColorPickerCard = memo(function RoleColorPickerCard({
   descriptor,
   value,
   defaultValue,
@@ -182,7 +182,7 @@ function RoleColorPickerCard({
       </Group>
     </Paper>
   )
-}
+})
 
 export function AppearanceSettingsPage() {
   const { colorScheme, setColorScheme } = useMantineColorScheme()
@@ -192,17 +192,21 @@ export function AppearanceSettingsPage() {
 
   const [previewSwitch, setPreviewSwitch] = useState(true)
   const saveTimerRef = useRef<number | null>(null)
+  const dragRafRef = useRef<number | null>(null)
+  const pendingDragPartialRef = useRef<Partial<ThemePalette> | null>(null)
 
   useEffect(() => () => {
     if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current)
+    if (dragRafRef.current !== null) window.cancelAnimationFrame(dragRafRef.current)
   }, [])
 
-  const persistPalette = (next: ThemePalette, immediate: boolean) => {
+  const persistPalette = useCallback((next: ThemePalette, immediate: boolean) => {
     if (saveTimerRef.current !== null) {
       window.clearTimeout(saveTimerRef.current)
       saveTimerRef.current = null
     }
     const commit = () => {
+      applyThemePalette(next, { persistLocal: true })
       setPluginConfigPatch(THEME_APPEARANCE_PLUGIN_ID, serializePaletteForPluginConfig(next))
     }
     if (immediate) {
@@ -213,18 +217,44 @@ export function AppearanceSettingsPage() {
         commit()
       }, 280)
     }
-  }
+  }, [setPluginConfigPatch])
 
-  const handleApplyPalette = (nextPartial: Partial<ThemePalette>, immediate: boolean) => {
-    const applied = applyThemePalette(nextPartial)
-    persistPalette(applied, immediate)
-  }
+  const handleApplyPalette = useCallback((nextPartial: Partial<ThemePalette>, immediate: boolean) => {
+    if (immediate) {
+      if (dragRafRef.current !== null) {
+        window.cancelAnimationFrame(dragRafRef.current)
+        dragRafRef.current = null
+      }
+      const merged = pendingDragPartialRef.current
+        ? { ...pendingDragPartialRef.current, ...nextPartial }
+        : nextPartial
+      pendingDragPartialRef.current = null
+      const applied = applyThemePalette(merged, { persistLocal: true })
+      persistPalette(applied, true)
+      return
+    }
+    pendingDragPartialRef.current = { ...pendingDragPartialRef.current, ...nextPartial }
+    if (dragRafRef.current !== null) return
+    const flushDrag = () => {
+      dragRafRef.current = null
+      const pending = pendingDragPartialRef.current
+      pendingDragPartialRef.current = null
+      if (!pending) return
+      const applied = applyThemePalette(pending, { persistLocal: false })
+      persistPalette(applied, false)
+    }
+    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+      dragRafRef.current = window.requestAnimationFrame(flushDrag)
+    } else {
+      flushDrag()
+    }
+  }, [persistPalette])
 
-  const handleRoleChange = (role: ThemeColorRole, rawHex: string, immediate: boolean) => {
+  const handleRoleChange = useCallback((role: ThemeColorRole, rawHex: string, immediate: boolean) => {
     const normalized = normalizeHexColor(rawHex)
     if (!normalized) return
     handleApplyPalette({ [role]: normalized }, immediate)
-  }
+  }, [handleApplyPalette])
 
   const handleAutoHarmony = () => {
     const harmonized = deriveHarmonyFromPrimary(palette.primary)

@@ -8,11 +8,15 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"astrorder.dev/app-server/internal/auth"
 )
 
-const maxMemoryRequestBody = 64 * 1024
+const (
+	maxMemoryRequestBody       = 64 * 1024
+	defaultTargetStatusTimeout = 15 * time.Second
+)
 
 const (
 	RegistrationHTTP = "http"
@@ -31,20 +35,22 @@ type Authorizer func(*http.Request) error
 type ClientFactory func(context.Context) (*OpenVikingClient, error)
 
 type ServiceOptions struct {
-	Config    *ConfigService
-	Client    ClientFactory
-	Targets   TargetResolver
-	Syncer    *Syncer
-	Authorize Authorizer
+	Config              *ConfigService
+	Client              ClientFactory
+	Targets             TargetResolver
+	Syncer              *Syncer
+	Authorize           Authorizer
+	TargetStatusTimeout time.Duration
 }
 
 type Service struct {
-	config    *ConfigService
-	client    ClientFactory
-	targets   TargetResolver
-	syncer    *Syncer
-	authorize Authorizer
-	routes    []routeDefinition
+	config              *ConfigService
+	client              ClientFactory
+	targets             TargetResolver
+	syncer              *Syncer
+	authorize           Authorizer
+	targetStatusTimeout time.Duration
+	routes              []routeDefinition
 }
 
 type routeDefinition struct {
@@ -56,7 +62,18 @@ func NewService(options ServiceOptions) (*Service, error) {
 	if options.Config == nil || options.Client == nil || options.Targets == nil || options.Syncer == nil || options.Authorize == nil {
 		return nil, errors.New("memory config, client, targets, syncer, and authorizer are required")
 	}
-	service := &Service{config: options.Config, client: options.Client, targets: options.Targets, syncer: options.Syncer, authorize: options.Authorize}
+	statusTimeout := options.TargetStatusTimeout
+	if statusTimeout <= 0 {
+		statusTimeout = defaultTargetStatusTimeout
+	}
+	service := &Service{
+		config:              options.Config,
+		client:              options.Client,
+		targets:             options.Targets,
+		syncer:              options.Syncer,
+		authorize:           options.Authorize,
+		targetStatusTimeout: statusTimeout,
+	}
 	service.routes = []routeDefinition{
 		service.route(http.MethodGet, "/api/v1/memory/config", service.getConfig),
 		service.route(http.MethodPost, "/api/v1/memory/config", service.updateConfig),
@@ -238,8 +255,14 @@ func (s *Service) targetStatus(response http.ResponseWriter, request *http.Reque
 		writeServiceError(response, http.StatusInternalServerError, "读取 OpenViking 配置失败")
 		return
 	}
-	statuses, err := s.syncer.InspectSelected(request.Context(), config, []string{request.PathValue("target_id")})
+	inspectCtx, cancel := context.WithTimeout(request.Context(), s.targetStatusTimeout)
+	defer cancel()
+	statuses, err := s.syncer.InspectSelected(inspectCtx, config, []string{request.PathValue("target_id")})
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			writeServiceError(response, http.StatusGatewayTimeout, "检查同步目标状态超时，请稍后重试")
+			return
+		}
 		writeServiceError(response, http.StatusNotFound, err.Error())
 		return
 	}

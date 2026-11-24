@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"astrorder.dev/app-server/internal/auth"
 	"astrorder.dev/app-server/internal/store"
@@ -266,5 +267,75 @@ func TestServiceUpstreamErrorDoesNotLeakAPIKey(t *testing.T) {
 	service.Handler().ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusBadGateway || bytes.Contains(recorder.Body.Bytes(), []byte("fixture-secret")) {
 		t.Fatalf("response=%d %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+type blockingTargetFS struct {
+	reads atomic.Int32
+}
+
+func (b *blockingTargetFS) ReadFile(ctx context.Context, _ Target, _ string) ([]byte, error) {
+	b.reads.Add(1)
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func (b *blockingTargetFS) WriteFileAtomic(_ context.Context, _ Target, _ string, _ []byte, _ uint32) error {
+	return nil
+}
+
+func TestServiceTargetStatusEnforcesTimeoutAndShortCircuits(t *testing.T) {
+	t.Parallel()
+	target := Target{
+		ID:     "ssh:slow-host",
+		Name:   "Slow SSH",
+		Kind:   TargetSSH,
+		Agents: []string{TargetAppCodex, TargetAppHermes},
+		Home:   "/home/fixture",
+	}
+	preferences := &preferenceFixture{value: store.Preference{Exists: true, Value: `{"url":"http://127.0.0.1:1933"}`}}
+	config, err := NewConfigService(ConfigServiceOptions{Preferences: preferences, FallbackPath: filepath.Join(t.TempDir(), "missing")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fs := &blockingTargetFS{}
+	runner := &runnerFixture{}
+	targets := resolverFixture{targets: []Target{target}}
+	syncer, err := NewSyncer(SyncerOptions{Resolver: targets, FS: fs, Runner: runner})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := NewService(ServiceOptions{
+		Config:              config,
+		Client:              NewClientFactory(config, OpenVikingClientOptions{}),
+		Targets:             targets,
+		Syncer:              syncer,
+		TargetStatusTimeout: 60 * time.Millisecond,
+		Authorize:           func(*http.Request) error { return nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	started := time.Now()
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/memory/targets/ssh:slow-host/status", nil)
+	service.Handler().ServeHTTP(recorder, request)
+	elapsed := time.Since(started)
+
+	if elapsed > 2*time.Second {
+		t.Fatalf("targetStatus hung for %v despite 60ms timeout", elapsed)
+	}
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected HTTP 200 status payload with timeout detail, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), "context deadline exceeded") {
+		t.Fatalf("expected raw_output timeout message, got %s", recorder.Body.String())
+	}
+	if got := fs.reads.Load(); got != 1 {
+		t.Fatalf("expected inspectTarget to short-circuit after first timed-out read, got %d reads", got)
+	}
+	if len(runner.commands) != 0 {
+		t.Fatalf("expected no native runner commands after timeout, got %d", len(runner.commands))
 	}
 }

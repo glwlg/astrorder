@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"astrorder.dev/app-server/internal/store"
 )
@@ -50,6 +51,12 @@ func (h *Handler) handleGetAnalyticsConfig(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, cfg.ToPublic())
 }
 
+func (h *Handler) invalidateAnalyticsCache() {
+	h.analyticsFlightMu.Lock()
+	h.analyticsCache = nil
+	h.analyticsFlightMu.Unlock()
+}
+
 func (h *Handler) handleUpdateAnalyticsConfig(w http.ResponseWriter, r *http.Request) {
 	var payload map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
@@ -61,6 +68,7 @@ func (h *Handler) handleUpdateAnalyticsConfig(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusUnprocessableEntity, "invalid_config", err.Error())
 		return
 	}
+	h.invalidateAnalyticsCache()
 	writeJSON(w, http.StatusOK, updated.ToPublic())
 }
 
@@ -107,8 +115,25 @@ func (h *Handler) handleGetAnalyticsUsage(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	flightKey := rangeVal + "|" + surface + "|" + source + "|" + connectionID + "|" + sinceStr + "|" + untilStr
+	cacheKey := rangeVal + "|" + surface + "|" + source + "|" + connectionID + "|" + sinceStr + "|" + untilStr
+	bypassCache := q.Get("refresh") == "1" || q.Get("refresh") == "true" || q.Get("nocache") == "1"
+	flightKey := cacheKey
+	if bypassCache {
+		flightKey = cacheKey + "|refresh"
+	}
+	now := time.Now()
 	h.analyticsFlightMu.Lock()
+	if !bypassCache {
+		if entry, ok := h.analyticsCache[cacheKey]; ok && now.Before(entry.expiresAt) {
+			h.analyticsFlightMu.Unlock()
+			if entry.contentType != "" {
+				w.Header().Set("Content-Type", entry.contentType)
+			}
+			w.WriteHeader(entry.status)
+			_, _ = w.Write(entry.body)
+			return
+		}
+	}
 	if flight, ok := h.analyticsFlights[flightKey]; ok {
 		h.analyticsFlightMu.Unlock()
 		select {
@@ -143,8 +168,40 @@ func (h *Handler) handleGetAnalyticsUsage(w http.ResponseWriter, r *http.Request
 		}
 		ct := buf.Header().Get("Content-Type")
 		body := append([]byte(nil), buf.body.Bytes()...)
+		completedAt := time.Now()
 		h.analyticsFlightMu.Lock()
 		delete(h.analyticsFlights, flightKey)
+		if status == http.StatusOK && len(body) > 0 {
+			if h.analyticsCache == nil {
+				h.analyticsCache = make(map[string]cachedAnalyticsUsage)
+			}
+			if len(h.analyticsCache) >= analyticsUsageCacheMaxEntries {
+				for k, v := range h.analyticsCache {
+					if !completedAt.Before(v.expiresAt) {
+						delete(h.analyticsCache, k)
+					}
+				}
+				if len(h.analyticsCache) >= analyticsUsageCacheMaxEntries {
+					var oldestKey string
+					var oldestExp time.Time
+					for k, v := range h.analyticsCache {
+						if oldestKey == "" || v.expiresAt.Before(oldestExp) {
+							oldestKey = k
+							oldestExp = v.expiresAt
+						}
+					}
+					if oldestKey != "" {
+						delete(h.analyticsCache, oldestKey)
+					}
+				}
+			}
+			h.analyticsCache[cacheKey] = cachedAnalyticsUsage{
+				status:      status,
+				contentType: ct,
+				body:        body,
+				expiresAt:   completedAt.Add(analyticsUsageCacheTTL),
+			}
+		}
 		flight.status = status
 		flight.contentType = ct
 		flight.body = body

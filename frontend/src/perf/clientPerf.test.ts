@@ -172,4 +172,49 @@ describe('clientPerf sanitizers and metrics', () => {
       vi.useRealTimers()
     }
   })
+
+  it('drops pending session switch timers on page hide and filters >60s sleep outliers', () => {
+    let visibility: DocumentVisibilityState = 'visible'
+    vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibility)
+    let nowMs = 1_000
+    vi.spyOn(performance, 'now').mockImplementation(() => nowMs)
+    vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((cb) => {
+      cb(nowMs)
+      return 1
+    })
+
+    // Flush any prior samples from earlier tests in the singleton collector
+    const fetchLaterMock = vi.fn().mockReturnValue({ activated: true })
+    const prevFetchLater = globalThis.fetchLater
+    globalThis.fetchLater = fetchLaterMock
+    try {
+      clientPerf.setAuthenticated(true)
+      clientPerf.flushNow()
+      clientPerf.start()
+
+      // 1) Switch interrupted by page hide (sleep/background) is abandoned
+      clientPerf.markSessionSwitchStart('agy::sleep-1', true)
+      visibility = 'hidden'
+      document.dispatchEvent(new Event('visibilitychange'))
+      nowMs += 2_300_000
+      visibility = 'visible'
+      clientPerf.markSessionSwitchReady('agy::sleep-1', 20)
+
+      // 2) Switch exceeding 60s without visibility event is also filtered out
+      clientPerf.markSessionSwitchStart('agy::sleep-2', false)
+      nowMs += 90_000
+      clientPerf.markSessionSwitchReady('agy::sleep-2', 15)
+
+      // 3) Normal switch (42ms) is recorded accurately
+      clientPerf.markSessionSwitchStart('agy::fast-1', true)
+      nowMs += 42
+      clientPerf.markSessionSwitchReady('agy::fast-1', 12)
+
+      const snap = clientPerf.buildSnapshot() as Record<string, any>
+      expect(snap.session_switches.count).toBe(1)
+      expect(snap.session_switches.max_ms).toBe(42)
+    } finally {
+      globalThis.fetchLater = prevFetchLater
+    }
+  })
 })

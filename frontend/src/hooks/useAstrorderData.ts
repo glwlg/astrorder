@@ -99,6 +99,8 @@ export function useBootstrap(authenticated: boolean) {
     enabled: authenticated,
     retry: false,
     staleTime: 10_000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   })
   useEffect(() => {
     if (query.data) useAstrorderStore.getState().hydrateBootstrap(query.data)
@@ -140,6 +142,8 @@ export function useSessionResources(session: Session | null, authenticated: bool
     enabled: authenticated && Boolean(session),
     retry: false,
     staleTime: 0,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   })
   const ready = authenticated && Boolean(session)
   useEffect(() => {
@@ -169,6 +173,8 @@ export function useSessionResources(session: Session | null, authenticated: bool
     retry: false,
     staleTime: 30_000,
     gcTime: 1000 * 60 * 60 * 24,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   })
 
   const [olderPages, setOlderPages] = useState<LoadedHistoryPage[]>(() =>
@@ -268,6 +274,8 @@ export function useSessionResources(session: Session | null, authenticated: bool
     retry: false,
     staleTime: 30_000,
     gcTime: 1000 * 60 * 60 * 24,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   })
   const tasks = useQuery({
     queryKey: ['astrorder', 'tasks', session?.agent_id, session?.id],
@@ -276,6 +284,8 @@ export function useSessionResources(session: Session | null, authenticated: bool
     retry: false,
     staleTime: 30_000,
     gcTime: 1000 * 60 * 60 * 24,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   })
   useEffect(() => {
     if (agentId && sessionId && pages.length > 0) {
@@ -340,6 +350,8 @@ export function useRuntime(authenticated: boolean) {
     enabled: authenticated,
     retry: false,
     staleTime: 10_000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   })
 }
 

@@ -174,4 +174,18 @@ func TestAgyReadStateCacheAndConcurrentQuotaSingleflight(t *testing.T) {
 	if got := quotaHits.Load(); got != 1 {
 		t.Fatalf("expected 1 upstream READ_QUOTA call due to singleflight coalescing, got %d", got)
 	}
+
+	// Subsequent READ_QUOTA call within the short TTL hits cache without spawning another probe.
+	wCached := httptest.NewRecorder()
+	h.ServeHTTP(wCached, httptest.NewRequest(http.MethodGet, base+"?environment_id=local&account_id=current", nil))
+	if wCached.Code != http.StatusOK || quotaHits.Load() != 1 {
+		t.Fatalf("expected cached READ_QUOTA hit: status=%d hits=%d", wCached.Code, quotaHits.Load())
+	}
+
+	// Explicit fresh=1 bypasses the quota TTL cache.
+	wFresh := httptest.NewRecorder()
+	h.ServeHTTP(wFresh, httptest.NewRequest(http.MethodGet, base+"?environment_id=local&account_id=current&fresh=1", nil))
+	if wFresh.Code != http.StatusOK || quotaHits.Load() != 2 {
+		t.Fatalf("expected fresh=1 to bypass quota cache: status=%d hits=%d", wFresh.Code, quotaHits.Load())
+	}
 }
