@@ -1776,7 +1776,7 @@ export function CapabilitiesSettingsCard() {
         onClose={() => setDispatchModalOpen(false)}
         title={
           <Group gap="xs">
-            <IconNetwork size={18} color="#6366f1" />
+            <IconNetwork size={18} color="var(--astr-accent, #7540bd)" />
             <Text fw={700}>全域资产动态分发矩阵 (Cross-Node Dispatch)</Text>
           </Group>
         }

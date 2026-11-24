@@ -268,12 +268,12 @@
   transform: translateY(0.5px);
 }
 :root[data-mantine-color-scheme='dark'] .markdown-local-link {
-  color: #cab8ee;
-  text-decoration-color: rgb(202 184 238 / 28%);
+  color: color-mix(in oklab, var(--astr-accent, #bc92ff) 78%, var(--astr-text));
+  text-decoration-color: color-mix(in oklab, var(--astr-accent, #bc92ff) 32%, transparent);
 }
 :root[data-mantine-color-scheme='dark'] .markdown-local-link:hover {
-  background: rgb(138 92 214 / 18%);
-  color: #e4d7ff;
+  background: color-mix(in oklab, var(--astr-highlight, #bc92ff) 18%, transparent);
+  color: color-mix(in oklab, var(--astr-accent, #bc92ff) 40%, #ffffff);
   text-decoration-color: transparent;
 }
 
@@ -475,20 +475,20 @@
 }
 .file-hover-more:hover { text-decoration: underline; }
 :root[data-mantine-color-scheme='dark'] .file-hover-card {
-  background: rgb(25 23 32 / 96%);
-  border-color: rgb(205 178 240 / 20%);
+  background: color-mix(in oklab, var(--astr-surface, #1c2028) 96%, transparent);
+  border-color: color-mix(in oklab, var(--astr-accent, #bc92ff) 22%, var(--astr-border));
   box-shadow: 0 20px 48px -12px rgb(0 0 0 / 55%);
 }
 :root[data-mantine-color-scheme='dark'] .file-hover-line-badge {
-  background: rgb(138 92 214 / 22%);
-  color: #dbc9ff;
+  background: color-mix(in oklab, var(--astr-highlight, #bc92ff) 22%, transparent);
+  color: var(--astr-accent, #bc92ff);
 }
 :root[data-mantine-color-scheme='dark'] .file-hover-btn.is-primary,
 :root[data-mantine-color-scheme='dark'] .file-hover-more {
-  color: #cbb5f6;
+  color: var(--astr-accent, #bc92ff);
 }
 :root[data-mantine-color-scheme='dark'] .file-hover-code-row.is-target {
-  background: rgb(138 92 214 / 18%);
+  background: color-mix(in oklab, var(--astr-highlight, #bc92ff) 18%, transparent);
 }
 @media (prefers-reduced-motion: reduce) {
   .file-hover-card { animation: none; }

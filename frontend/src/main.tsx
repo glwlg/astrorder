@@ -12,13 +12,13 @@ import './index.css'
 import './workspaceVisuals.css'
 import './brightWorkbench.css'
 import './themeAccent.css'
-import { applyAccentColor, readStoredAccentColor } from './themeAccent'
+import { applyThemePalette, readStoredThemePalette } from './themeAccent'
 import { theme } from './theme'
 import { LiquidSurfaces } from './components/LiquidSurfaces'
 import { startClientPerf } from './perf/clientPerf'
 import { registerSW } from 'virtual:pwa-register'
 
-applyAccentColor(readStoredAccentColor(), { persistLocal: false })
+applyThemePalette(readStoredThemePalette(), { persistLocal: false })
 installGlobalNativeHoldBlocker()
 
 if (typeof window !== 'undefined' && 'astrorderDesktop' in window) {

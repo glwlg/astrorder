@@ -89,9 +89,9 @@
 .agent-capability-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--astr-border); font-size: 12px; color: var(--astr-text); }
 .settings-modal .rtk-settings { max-width: 1200px; margin-inline: auto; padding: 0; }
 .settings-modal .rtk-settings h3 { font-size: 21px; }
-.settings-modal .rtk-saved { background: #536783; }
-.settings-modal .rtk-output { background: #d5dde7; }
-.settings-modal .rtk-settings .mantine-Switch-input:checked + .mantine-Switch-track { background: #536783; border-color: #536783; }
+.settings-modal .rtk-saved { background: var(--astr-accent); }
+.settings-modal .rtk-output { background: var(--astr-border); }
+.settings-modal .rtk-settings .mantine-Switch-input:checked + .mantine-Switch-track { background: var(--astr-accent); border-color: var(--astr-accent); }
 @media (max-width: 1100px) { .gateway-settings-layout { grid-template-columns: 1fr; gap: 24px; } .connection-agent-card { grid-template-columns: 36px minmax(0, 1fr) max-content; } .connection-agent-state { grid-column: 2; grid-row: 2; } .connection-agent-card > .mantine-Group-root { grid-column: 3; grid-row: 1 / 3; } .connection-detail-header { flex-wrap: wrap; } }
 @media (max-width: 767px) {
  .settings-modal .mantine-Modal-content { width: 100vw !important; height: 94dvh !important; }

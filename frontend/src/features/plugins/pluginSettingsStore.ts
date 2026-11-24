@@ -18,6 +18,7 @@ export interface PluginSettingsState {
   hydrate: (force?: boolean) => Promise<void>
   togglePlugin: (pluginId: string, enabled?: boolean) => void
   setPluginConfig: (pluginId: string, key: string, value: unknown) => void
+  setPluginConfigPatch: (pluginId: string, patch: Record<string, unknown>) => void
   isPluginEnabled: (pluginId: string) => boolean
   getPluginConfig: <T = unknown>(pluginId: string, key: string, fallback?: T) => T
   reset: () => void
@@ -121,13 +122,17 @@ export const usePluginSettingsStore = create<PluginSettingsState>((set, get) => 
   },
 
   setPluginConfig: (pluginId: string, key: string, value: unknown) => {
+    get().setPluginConfigPatch(pluginId, { [key]: value })
+  },
+
+  setPluginConfigPatch: (pluginId: string, patch: Record<string, unknown>) => {
     const prevConfigs = get().pluginConfigs
     const pluginConf = prevConfigs[pluginId] || {}
-    const nextConfigs = { ...prevConfigs, [pluginId]: { ...pluginConf, [key]: value } }
+    const nextConfigs = { ...prevConfigs, [pluginId]: { ...pluginConf, ...patch } }
     set({ pluginConfigs: nextConfigs })
     writeQueue = writeQueue.then(async () => {
       try {
-        const response = await api.updatePluginSettings({ configs: { [pluginId]: { [key]: value } } })
+        const response = await api.updatePluginSettings({ configs: { [pluginId]: patch } })
         set({ ...applyResponse(response), hydrated: true })
       } catch (error) {
         set({ pluginConfigs: prevConfigs })

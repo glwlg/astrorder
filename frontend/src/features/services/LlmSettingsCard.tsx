@@ -68,7 +68,7 @@ export function LlmSettingsCard() {
     <Card withBorder radius="md" p="md" style={{ background: 'var(--astr-surface)' }}>
       <Group justify="space-between" mb="md">
         <Group gap="xs">
-          <IconBrain size={18} color="#7C3AED" />
+          <IconBrain size={18} color="var(--astr-accent, #7540bd)" />
           <div>
             <Text fw={600} size="sm">通用 LLM</Text>
             <Text size="xs" c="dimmed">供浏览器文本填写及星序智能功能使用</Text>

@@ -124,12 +124,22 @@
     </style>
     <script>
       try {
-        var accent = localStorage.getItem('astrorder:theme-accent');
-        if (accent && /^#[0-9a-fA-F]{6}$/.test(accent)) {
-          var r = document.documentElement;
-          r.style.setProperty('--astr-theme-seed', accent);
-          r.style.setProperty('--splash-accent', accent);
-          r.style.setProperty('--splash-glow', 'color-mix(in oklab, ' + accent + ' 28%, transparent)');
+        var hexRe = /^#[0-9a-fA-F]{6}$/;
+        var rawPalette = localStorage.getItem('astrorder:theme-palette');
+        var p = rawPalette ? JSON.parse(rawPalette) : null;
+        var primary = (p && hexRe.test(p.primary) ? p.primary : null) || localStorage.getItem('astrorder:theme-accent');
+        var r = document.documentElement;
+        if (primary && hexRe.test(primary)) {
+          r.style.setProperty('--astr-theme-seed', primary);
+          r.style.setProperty('--astr-theme-primary', primary);
+          r.style.setProperty('--splash-accent', primary);
+          r.style.setProperty('--splash-glow', 'color-mix(in oklab, ' + primary + ' 28%, transparent)');
+          r.setAttribute('data-astr-theme-custom', 'true');
+        }
+        if (p && typeof p === 'object') {
+          if (hexRe.test(p.secondary)) r.style.setProperty('--astr-theme-secondary', p.secondary);
+          if (hexRe.test(p.highlight)) r.style.setProperty('--astr-theme-highlight', p.highlight);
+          if (hexRe.test(p.surface)) r.style.setProperty('--astr-theme-surface', p.surface);
         }
       } catch (e) {}
     </script>

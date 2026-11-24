@@ -1,41 +1,61 @@
-/* Dynamic accent theme tokens derived from a single --astr-theme-seed variable.
- * Imported after brightWorkbench.css so custom user accent colors update every
- * Astrorder surface, Mantine violet/indigo primitive, native form control, and
- * text selection consistently in both light and dark color schemes.
+/* Dynamic multi-role theme tokens derived from 4 customizable CSS seeds:
+ *   --astr-theme-primary   (also --astr-theme-seed) : buttons, nav icons/labels, focus rings, Mantine scales
+ *   --astr-theme-secondary                          : send button gradient, ambient nebula secondary glow, running shimmer
+ *   --astr-theme-highlight                          : active session row, active filter pill, user bubble tint, ::selection
+ *   --astr-theme-surface                            : sidebar, nav rail, canvas, muted surfaces, and border atmosphere
  *
- * Uses color-mix(in oklab, ...) rather than oklch when mixing with white/black
- * to avoid powerless-hue pinkish tint artifacts on low-chroma/gray seeds.
+ * Uses :root:root specificity so overrides consistently win over both brightWorkbench.css
+ * and Mantine's runtime-injected :root <style> sheets.
+ * Uses color-mix(in oklab, ...) when mixing with neutrals to avoid oklch powerless-hue pink shifts.
  */
 
-:root {
+:root:root {
   --astr-theme-seed: #7540bd;
+  --astr-theme-primary: var(--astr-theme-seed);
+  --astr-theme-secondary: #bf3376;
+  --astr-theme-highlight: #8b5cf6;
+  --astr-theme-surface: #dfd6f2;
   --astr-accent-contrast-fallback: #ffffff;
-  --astr-accent: var(--astr-theme-seed);
+  --astr-secondary-contrast-fallback: #ffffff;
+
+  /* Primary accent hierarchy */
+  --astr-accent: var(--astr-theme-primary);
   --astr-indigo: var(--astr-accent);
   --astr-blue: var(--astr-accent);
   --astr-running: var(--astr-accent);
-  --astr-accent-strong: color-mix(in oklab, var(--astr-theme-seed) 84%, black);
-  --astr-accent-soft: color-mix(in oklab, var(--astr-theme-seed) 13%, var(--astr-surface));
-  --astr-selected: color-mix(in oklab, var(--astr-theme-seed) 13%, var(--astr-surface));
-  --astr-running-gold: color-mix(in oklab, var(--astr-theme-seed) 76%, white);
-  --astr-selection-bg: color-mix(in oklab, var(--astr-theme-seed) 24%, white);
-  --astr-selection-fg: color-mix(in oklab, var(--astr-theme-seed) 42%, black);
-  --astr-accent-contrast: var(--astr-accent-contrast-fallback, #ffffff);
+  --astr-accent-strong: color-mix(in oklab, var(--astr-theme-primary) 84%, black);
 
-  /* Native checkboxes, radios, range sliders, and progress bars follow the accent. */
+  /* Secondary accent hierarchy */
+  --astr-secondary: var(--astr-theme-secondary);
+  --astr-secondary-strong: color-mix(in oklab, var(--astr-theme-secondary) 84%, black);
+  --astr-secondary-soft: color-mix(in oklab, var(--astr-theme-secondary) 14%, var(--astr-surface));
+  --astr-running-gold: var(--astr-secondary);
+
+  /* Highlight & selection hierarchy */
+  --astr-highlight: var(--astr-theme-highlight);
+  --astr-accent-soft: color-mix(in oklab, var(--astr-theme-highlight) 15%, var(--astr-surface));
+  --astr-selected: color-mix(in oklab, var(--astr-theme-highlight) 16%, var(--astr-surface));
+  --astr-selection-bg: color-mix(in oklab, var(--astr-theme-highlight) 26%, white);
+  --astr-selection-fg: color-mix(in oklab, var(--astr-theme-highlight) 38%, black);
+
+  /* Foreground contrast inks */
+  --astr-accent-contrast: var(--astr-accent-contrast-fallback, #ffffff);
+  --astr-secondary-contrast: var(--astr-secondary-contrast-fallback, #ffffff);
+
+  /* Native browser form controls follow primary accent. */
   accent-color: var(--astr-accent);
 
-  /* Mantine primary / violet / indigo scales synchronized with --astr-theme-seed. */
-  --astr-scale-0: color-mix(in oklab, var(--astr-theme-seed) 7%, white);
-  --astr-scale-1: color-mix(in oklab, var(--astr-theme-seed) 14%, white);
-  --astr-scale-2: color-mix(in oklab, var(--astr-theme-seed) 26%, white);
-  --astr-scale-3: color-mix(in oklab, var(--astr-theme-seed) 42%, white);
-  --astr-scale-4: color-mix(in oklab, var(--astr-theme-seed) 62%, white);
-  --astr-scale-5: color-mix(in oklab, var(--astr-theme-seed) 80%, white);
-  --astr-scale-6: var(--astr-theme-seed);
-  --astr-scale-7: color-mix(in oklab, var(--astr-theme-seed) 88%, black);
-  --astr-scale-8: color-mix(in oklab, var(--astr-theme-seed) 76%, black);
-  --astr-scale-9: color-mix(in oklab, var(--astr-theme-seed) 62%, black);
+  /* Mantine primary / violet / indigo scales synchronized with --astr-theme-primary. */
+  --astr-scale-0: color-mix(in oklab, var(--astr-theme-primary) 7%, white);
+  --astr-scale-1: color-mix(in oklab, var(--astr-theme-primary) 14%, white);
+  --astr-scale-2: color-mix(in oklab, var(--astr-theme-primary) 26%, white);
+  --astr-scale-3: color-mix(in oklab, var(--astr-theme-primary) 42%, white);
+  --astr-scale-4: color-mix(in oklab, var(--astr-theme-primary) 62%, white);
+  --astr-scale-5: color-mix(in oklab, var(--astr-theme-primary) 80%, white);
+  --astr-scale-6: var(--astr-theme-primary);
+  --astr-scale-7: color-mix(in oklab, var(--astr-theme-primary) 88%, black);
+  --astr-scale-8: color-mix(in oklab, var(--astr-theme-primary) 76%, black);
+  --astr-scale-9: color-mix(in oklab, var(--astr-theme-primary) 62%, black);
 
   --mantine-color-violet-0: var(--astr-scale-0);
   --mantine-color-violet-1: var(--astr-scale-1);
@@ -49,8 +69,8 @@
   --mantine-color-violet-9: var(--astr-scale-9);
   --mantine-color-violet-filled: var(--astr-accent);
   --mantine-color-violet-filled-hover: var(--astr-accent-strong);
-  --mantine-color-violet-light: color-mix(in oklab, var(--astr-accent) 12%, transparent);
-  --mantine-color-violet-light-hover: color-mix(in oklab, var(--astr-accent) 18%, transparent);
+  --mantine-color-violet-light: color-mix(in oklab, var(--astr-highlight) 14%, transparent);
+  --mantine-color-violet-light-hover: color-mix(in oklab, var(--astr-highlight) 20%, transparent);
   --mantine-color-violet-light-color: var(--astr-accent);
   --mantine-color-violet-outline: var(--astr-accent);
   --mantine-color-violet-outline-hover: color-mix(in oklab, var(--astr-accent) 8%, transparent);
@@ -68,8 +88,8 @@
   --mantine-color-indigo-9: var(--astr-scale-9);
   --mantine-color-indigo-filled: var(--astr-accent);
   --mantine-color-indigo-filled-hover: var(--astr-accent-strong);
-  --mantine-color-indigo-light: color-mix(in oklab, var(--astr-accent) 12%, transparent);
-  --mantine-color-indigo-light-hover: color-mix(in oklab, var(--astr-accent) 18%, transparent);
+  --mantine-color-indigo-light: color-mix(in oklab, var(--astr-highlight) 14%, transparent);
+  --mantine-color-indigo-light-hover: color-mix(in oklab, var(--astr-highlight) 20%, transparent);
   --mantine-color-indigo-light-color: var(--astr-accent);
   --mantine-color-indigo-outline: var(--astr-accent);
   --mantine-color-indigo-outline-hover: color-mix(in oklab, var(--astr-accent) 8%, transparent);
@@ -87,45 +107,150 @@
   --mantine-primary-color-9: var(--astr-scale-9);
   --mantine-primary-color-filled: var(--astr-accent);
   --mantine-primary-color-filled-hover: var(--astr-accent-strong);
-  --mantine-primary-color-light: color-mix(in oklab, var(--astr-accent) 12%, transparent);
-  --mantine-primary-color-light-hover: color-mix(in oklab, var(--astr-accent) 18%, transparent);
+  --mantine-primary-color-light: color-mix(in oklab, var(--astr-highlight) 14%, transparent);
+  --mantine-primary-color-light-hover: color-mix(in oklab, var(--astr-highlight) 20%, transparent);
   --mantine-primary-color-light-color: var(--astr-accent);
   --mantine-primary-color-contrast: var(--astr-accent-contrast);
 }
 
-:root[data-mantine-color-scheme='dark'] {
-  --astr-accent: color-mix(in oklab, var(--astr-theme-seed) 62%, white);
+/* Surface & border atmosphere tinted by --astr-theme-surface when custom theme is active. */
+:root:root[data-astr-theme-custom='true'] {
+  --astr-bg: color-mix(in oklab, var(--astr-theme-surface) 38%, #f1f3f6);
+  --astr-canvas-bg: color-mix(in oklab, var(--astr-theme-surface) 20%, #f9fafc);
+  --astr-surface-muted: color-mix(in oklab, var(--astr-theme-surface) 24%, #f4f5f8);
+  --astr-sidebar: color-mix(in oklab, var(--astr-theme-surface) 32%, #f7f8fa);
+  --astr-navigation: color-mix(in oklab, var(--astr-theme-surface) 44%, #edf0f5);
+  --astr-border: color-mix(in oklab, var(--astr-theme-surface) 30%, #dde1e8);
+  --astr-input-border: color-mix(in oklab, var(--astr-theme-surface) 34%, #cfd5e0);
+  --astr-overlay-border: color-mix(in oklab, var(--astr-theme-surface) 32%, #ccd2de);
+}
+
+:root:root[data-mantine-color-scheme='dark'] {
+  --astr-accent: color-mix(in oklab, var(--astr-theme-primary) 62%, white);
   --astr-indigo: var(--astr-accent);
   --astr-blue: var(--astr-accent);
   --astr-running: var(--astr-accent);
-  --astr-running-gold: var(--astr-accent);
-  --astr-accent-strong: color-mix(in oklab, var(--astr-theme-seed) 78%, white);
-  --astr-accent-soft: color-mix(in oklab, var(--astr-theme-seed) 26%, var(--astr-surface));
-  --astr-selected: color-mix(in oklab, var(--astr-theme-seed) 26%, var(--astr-surface));
-  --astr-selection-bg: color-mix(in oklab, var(--astr-theme-seed) 46%, #1c2028);
+  --astr-accent-strong: color-mix(in oklab, var(--astr-theme-primary) 78%, white);
+
+  --astr-secondary: color-mix(in oklab, var(--astr-theme-secondary) 68%, white);
+  --astr-secondary-strong: color-mix(in oklab, var(--astr-theme-secondary) 82%, white);
+  --astr-secondary-soft: color-mix(in oklab, var(--astr-theme-secondary) 24%, var(--astr-surface));
+  --astr-running-gold: var(--astr-secondary);
+
+  --astr-highlight: color-mix(in oklab, var(--astr-theme-highlight) 68%, white);
+  --astr-accent-soft: color-mix(in oklab, var(--astr-theme-highlight) 26%, var(--astr-surface));
+  --astr-selected: color-mix(in oklab, var(--astr-theme-highlight) 28%, var(--astr-surface));
+  --astr-selection-bg: color-mix(in oklab, var(--astr-theme-highlight) 46%, #1c2028);
   --astr-selection-fg: #ffffff;
 
   --mantine-color-violet-filled: var(--astr-accent-strong);
   --mantine-color-violet-filled-hover: var(--astr-accent);
-  --mantine-color-violet-light: color-mix(in oklab, var(--astr-accent) 18%, transparent);
-  --mantine-color-violet-light-hover: color-mix(in oklab, var(--astr-accent) 24%, transparent);
+  --mantine-color-violet-light: color-mix(in oklab, var(--astr-highlight) 20%, transparent);
+  --mantine-color-violet-light-hover: color-mix(in oklab, var(--astr-highlight) 26%, transparent);
   --mantine-color-violet-light-color: var(--astr-accent);
   --mantine-color-violet-outline: var(--astr-accent);
   --mantine-color-violet-text: var(--astr-accent);
 
   --mantine-color-indigo-filled: var(--astr-accent-strong);
   --mantine-color-indigo-filled-hover: var(--astr-accent);
-  --mantine-color-indigo-light: color-mix(in oklab, var(--astr-accent) 18%, transparent);
-  --mantine-color-indigo-light-hover: color-mix(in oklab, var(--astr-accent) 24%, transparent);
+  --mantine-color-indigo-light: color-mix(in oklab, var(--astr-highlight) 20%, transparent);
+  --mantine-color-indigo-light-hover: color-mix(in oklab, var(--astr-highlight) 26%, transparent);
   --mantine-color-indigo-light-color: var(--astr-accent);
   --mantine-color-indigo-outline: var(--astr-accent);
   --mantine-color-indigo-text: var(--astr-accent);
 
   --mantine-primary-color-filled: var(--astr-accent-strong);
   --mantine-primary-color-filled-hover: var(--astr-accent);
-  --mantine-primary-color-light: color-mix(in oklab, var(--astr-accent) 18%, transparent);
-  --mantine-primary-color-light-hover: color-mix(in oklab, var(--astr-accent) 24%, transparent);
+  --mantine-primary-color-light: color-mix(in oklab, var(--astr-highlight) 20%, transparent);
+  --mantine-primary-color-light-hover: color-mix(in oklab, var(--astr-highlight) 26%, transparent);
   --mantine-primary-color-light-color: var(--astr-accent);
+}
+
+:root:root[data-mantine-color-scheme='dark'][data-astr-theme-custom='true'] {
+  --astr-bg: color-mix(in oklab, var(--astr-theme-surface) 12%, #13161d);
+  --astr-canvas-bg: color-mix(in oklab, var(--astr-theme-surface) 9%, #101319);
+  --astr-surface: color-mix(in oklab, var(--astr-theme-surface) 10%, #1a1e26);
+  --astr-surface-muted: color-mix(in oklab, var(--astr-theme-surface) 14%, #232934);
+  --astr-sidebar: color-mix(in oklab, var(--astr-theme-surface) 13%, #171b23);
+  --astr-navigation: color-mix(in oklab, var(--astr-theme-surface) 16%, #12151c);
+  --astr-border: color-mix(in oklab, var(--astr-theme-surface) 22%, #394254);
+  --astr-input-border: color-mix(in oklab, var(--astr-theme-surface) 26%, #687790);
+  --astr-overlay-border: color-mix(in oklab, var(--astr-theme-surface) 24%, #576680);
+}
+
+/* Override brightWorkbench.css scoped .workspace-sidebar tokens so nav rail,
+ * filter pills, active session rows, and ambient sky follow custom theme roles. */
+:root .workspace-sidebar {
+  --astr-blue: var(--astr-accent-strong);
+  --astr-indigo: var(--astr-accent-strong);
+  --sidebar-sky-base: var(--astr-sidebar);
+  --sidebar-glass-active: color-mix(in oklab, var(--astr-highlight) 22%, rgb(255 255 255 / 78%));
+  --sidebar-glass-seam: color-mix(in oklab, var(--astr-accent) 16%, transparent);
+  --sidebar-nav-veil: color-mix(in oklab, var(--astr-navigation) 54%, transparent);
+}
+
+:root[data-astr-theme-custom='true'] .workspace-sidebar {
+  --astr-border: color-mix(in oklab, var(--astr-theme-surface) 24%, rgb(32 40 55 / 20%));
+  --sidebar-sky-image:
+    radial-gradient(ellipse 92% 60% at 14% 18%, color-mix(in oklab, var(--astr-theme-primary) 16%, transparent), transparent 72%),
+    radial-gradient(ellipse 88% 58% at 84% 82%, color-mix(in oklab, var(--astr-theme-secondary) 14%, transparent), transparent 74%),
+    linear-gradient(180deg, color-mix(in oklab, var(--astr-sidebar) 88%, white), var(--astr-sidebar));
+  --sidebar-sky-overlay:
+    linear-gradient(90deg, color-mix(in oklab, var(--astr-sidebar) 36%, transparent) 0%, color-mix(in oklab, var(--astr-sidebar) 54%, transparent) 68%, var(--astr-surface) 100%),
+    linear-gradient(180deg, rgb(255 255 255 / 84%) 0%, transparent 45%, color-mix(in oklab, var(--astr-sidebar) 38%, transparent) 100%);
+}
+
+:root:root[data-mantine-color-scheme='dark'] .workspace-sidebar {
+  --astr-blue: var(--astr-accent);
+  --astr-indigo: var(--astr-accent);
+  --sidebar-sky-base: var(--astr-sidebar);
+  --sidebar-glass-active: color-mix(in oklab, var(--astr-highlight) 32%, rgb(22 25 34 / 52%));
+  --sidebar-glass-seam: color-mix(in oklab, var(--astr-accent) 22%, rgb(12 14 20 / 48%));
+  --sidebar-nav-veil: color-mix(in oklab, var(--astr-navigation) 42%, transparent);
+}
+
+:root:root[data-mantine-color-scheme='dark'][data-astr-theme-custom='true'] .workspace-sidebar {
+  --astr-border: color-mix(in oklab, var(--astr-theme-surface) 24%, rgb(218 226 241 / 22%));
+  --sidebar-sky-image:
+    radial-gradient(ellipse 95% 65% at 18% 20%, color-mix(in oklab, var(--astr-theme-primary) 24%, transparent), transparent 72%),
+    radial-gradient(ellipse 90% 60% at 82% 82%, color-mix(in oklab, var(--astr-theme-secondary) 20%, transparent), transparent 74%),
+    linear-gradient(180deg, color-mix(in oklab, var(--astr-sidebar) 92%, #0e1016), var(--astr-sidebar));
+  --sidebar-sky-overlay: linear-gradient(180deg, rgb(18 20 26 / 62%), rgb(18 20 26 / 44%) 45%, rgb(15 17 23 / 62%));
+  --sidebar-glass-face: rgb(255 255 255 / 7%);
+  --sidebar-glass-hover: rgb(255 255 255 / 13%);
+  --sidebar-glass-rim: color-mix(in oklab, var(--astr-accent) 24%, rgb(255 255 255 / 26%));
+}
+
+/* Primary-to-secondary gradient send button (overrides brightWorkbench.css hardcoded purple gradient). */
+.chat-column .send-button[data-action]:not([data-action='stop']) {
+  --action-face: linear-gradient(
+    135deg in oklab,
+    var(--astr-accent),
+    color-mix(in oklab, var(--astr-accent) 48%, var(--astr-secondary)) 54%,
+    var(--astr-secondary)
+  );
+  --action-edge: var(--astr-accent-strong);
+  background: var(--action-face);
+  border-color: var(--action-edge);
+  color: var(--astr-accent-contrast, #ffffff);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 22%),
+    0 1px 2px color-mix(in oklab, var(--astr-accent-strong) 24%, transparent),
+    0 3px 7px color-mix(in oklab, var(--astr-secondary) 18%, transparent);
+}
+
+.chat-column .send-button[data-action]:not([data-action='stop']):not(:disabled):hover {
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 28%),
+    0 1px 2px color-mix(in oklab, var(--astr-accent-strong) 26%, transparent),
+    0 4px 10px color-mix(in oklab, var(--astr-secondary) 24%, transparent);
+}
+
+/* Command palette & welcome deck hero accents blend primary into secondary. */
+.command-palette-trigger-icon,
+.welcome-deck-cta {
+  background: linear-gradient(135deg in oklab, var(--astr-accent), var(--astr-secondary));
+  color: var(--astr-accent-contrast, #ffffff);
 }
 
 /* Dynamic foreground contrast on custom accent surfaces:
@@ -133,10 +258,16 @@
  * 2) Native contrast-color() where supported (Baseline 2026)
  */
 @supports (color: color(from red xyz-d65 0 0 0)) {
-  :root {
+  :root:root {
     --astr-wcag-y-threshold: 0.17913;
     --astr-accent-contrast: color(
       from var(--astr-accent) xyz-d65
+      calc(max(0, sign(var(--astr-wcag-y-threshold) - y)) * 0.9505)
+      max(0, sign(var(--astr-wcag-y-threshold) - y))
+      calc(max(0, sign(var(--astr-wcag-y-threshold) - y)) * 1.089)
+    );
+    --astr-secondary-contrast: color(
+      from var(--astr-secondary) xyz-d65
       calc(max(0, sign(var(--astr-wcag-y-threshold) - y)) * 0.9505)
       max(0, sign(var(--astr-wcag-y-threshold) - y))
       calc(max(0, sign(var(--astr-wcag-y-threshold) - y)) * 1.089)
@@ -145,12 +276,13 @@
 }
 
 @supports (color: contrast-color(red)) {
-  :root {
+  :root:root {
     --astr-accent-contrast: contrast-color(var(--astr-accent));
+    --astr-secondary-contrast: contrast-color(var(--astr-secondary));
   }
 }
 
-/* Text selection follows the active accent color. */
+/* Text selection follows the active highlight role. */
 ::selection {
   background: var(--astr-selection-bg);
   color: var(--astr-selection-fg);
@@ -161,17 +293,13 @@
   color: var(--astr-selection-fg);
 }
 
-/* Ensure readable text on dynamically colored filled controls regardless of seed lightness. */
+/* Ensure readable text on dynamically colored filled controls regardless of lightness. */
 .settings-modal .mantine-Button-root[data-variant='filled'],
 .settings-modal .mantine-Button-root:not([data-variant]),
 .sidebar-inbox-badge:not(.is-urgent),
+.action-inbox-send-btn,
 .background-tasks-trigger,
 .send-button[data-action='send'],
 .m-send:not([data-stop='true']) {
   color: var(--astr-accent-contrast, #ffffff);
-}
-
-.workspace-sidebar .sidebar-glass-seam,
-.workspace-sidebar {
-  --sidebar-glass-seam: color-mix(in oklab, var(--astr-accent) 16%, transparent);
 }
