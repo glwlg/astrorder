@@ -193,7 +193,7 @@ function VoiceInputPluginCard() {
               background: isEnabled && running && isLocalR2T2
                 ? 'rgba(34, 197, 94, 0.12)'
                 : isEnabled
-                  ? 'rgba(99, 102, 241, 0.1)'
+                  ? 'color-mix(in oklab, var(--astr-accent) 12%, transparent)'
                   : 'var(--astr-surface-muted)',
               color: isEnabled && running && isLocalR2T2
                 ? '#16a34a'
@@ -332,7 +332,7 @@ function SystemPluginCard({ descriptor }: { descriptor: SystemPluginDescriptor }
             style={{
               padding: 8,
               borderRadius: 8,
-              background: isEnabled ? 'rgba(99, 102, 241, 0.12)' : 'var(--astr-surface-muted)',
+              background: isEnabled ? 'color-mix(in oklab, var(--astr-accent) 12%, transparent)' : 'var(--astr-surface-muted)',
               color: isEnabled ? 'var(--astr-indigo)' : 'var(--astr-muted)',
               display: 'flex',
               alignItems: 'center',
@@ -503,7 +503,7 @@ function PluginCard({ viewer }: { viewer: ArtifactViewer }) {
             style={{
               padding: 8,
               borderRadius: 8,
-              background: isEnabled ? 'rgba(99, 102, 241, 0.1)' : 'var(--astr-surface-muted)',
+              background: isEnabled ? 'color-mix(in oklab, var(--astr-accent) 12%, transparent)' : 'var(--astr-surface-muted)',
               color: isEnabled ? 'var(--astr-indigo)' : 'var(--astr-muted)',
               display: 'flex',
               alignItems: 'center',
@@ -652,7 +652,7 @@ function PluginCard({ viewer }: { viewer: ArtifactViewer }) {
                 width: 28,
                 height: 28,
                 borderRadius: 6,
-                background: 'rgba(99, 102, 241, 0.1)',
+                background: 'color-mix(in oklab, var(--astr-accent) 12%, transparent)',
                 color: 'var(--astr-indigo, #5B5BD6)',
                 display: 'flex',
                 alignItems: 'center',
@@ -730,7 +730,7 @@ function PluginCard({ viewer }: { viewer: ArtifactViewer }) {
                   >
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <code style={{ fontFamily: 'monospace', fontWeight: 700, color: '#5B5BD6' }}>
+                        <code style={{ fontFamily: 'monospace', fontWeight: 700, color: 'var(--astr-accent)' }}>
                           {comp.name}
                         </code>
                         <span style={{ fontWeight: 600, color: '#1E293B' }}>- {comp.label}</span>

@@ -11,11 +11,14 @@ import { installGlobalNativeHoldBlocker } from './features/mobile/mobileGestures
 import './index.css'
 import './workspaceVisuals.css'
 import './brightWorkbench.css'
+import './themeAccent.css'
+import { applyAccentColor, readStoredAccentColor } from './themeAccent'
 import { theme } from './theme'
 import { LiquidSurfaces } from './components/LiquidSurfaces'
 import { startClientPerf } from './perf/clientPerf'
 import { registerSW } from 'virtual:pwa-register'
 
+applyAccentColor(readStoredAccentColor(), { persistLocal: false })
 installGlobalNativeHoldBlocker()
 
 if (typeof window !== 'undefined' && 'astrorderDesktop' in window) {
@@ -47,8 +50,8 @@ if (import.meta.env.PROD) {
               fontSize: 12,
               fontWeight: 600,
               cursor: 'pointer',
-              background: '#7540bd',
-              color: '#ffffff',
+              background: 'var(--astr-accent, #7540bd)',
+              color: 'var(--astr-accent-contrast, #ffffff)',
             }}
           >
             立即刷新

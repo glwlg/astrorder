@@ -29,7 +29,7 @@
     --m-success: var(--astr-teal, #087f59);
     --m-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     --m-glass-bg: rgba(255, 255, 255, 0.8);
-    --m-glass-border: rgba(117, 64, 189, 0.14);
+    --m-glass-border: color-mix(in oklab, var(--astr-accent, #7540bd) 14%, transparent);
     --m-glass-shadow: 0 10px 30px rgba(40, 24, 68, 0.1), 0 2px 6px rgba(40, 24, 68, 0.04);
     --m-glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.9);
     --m-surface-2: var(--m-low);
@@ -65,7 +65,7 @@
     --m-danger: var(--astr-red, #ff8993);
     --m-success: var(--astr-teal, #65d6ae);
     --m-glass-bg: rgba(24, 28, 40, 0.8);
-    --m-glass-border: rgba(188, 146, 255, 0.18);
+    --m-glass-border: color-mix(in oklab, var(--astr-accent, #bc92ff) 18%, transparent);
     --m-glass-shadow: 0 12px 36px rgba(0, 0, 0, 0.42), 0 2px 8px rgba(0, 0, 0, 0.24);
     --m-glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.14);
     --m-surface-2: var(--m-low);
@@ -2589,7 +2589,7 @@
 
   body:has(.mobile-workspace) .mantine-Notification-root {
     padding: 10px 14px;
-    border: 1px solid rgba(188, 146, 255, 0.2);
+    border: 1px solid color-mix(in oklab, var(--astr-accent, #bc92ff) 20%, transparent);
     border-radius: 14px;
     background: rgba(26, 24, 38, 0.94);
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.24);
@@ -2709,7 +2709,7 @@ body:has(.mobile-workspace) .mantine-Notifications-root {
 
 body:has(.mobile-workspace) .mantine-Notification-root {
   padding: 10px 14px;
-  border: 1px solid rgba(188, 146, 255, 0.2);
+  border: 1px solid color-mix(in oklab, var(--astr-accent, #bc92ff) 20%, transparent);
   border-radius: 14px;
   background: rgba(26, 24, 38, 0.94);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.24);

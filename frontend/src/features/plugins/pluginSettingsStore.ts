@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { notifications } from '@mantine/notifications'
 import { api, type PluginSettingsResponse } from '../../api/client'
+import { syncAccentFromPluginConfigs } from '../../themeAccent'
 
 export const SIDEBAR_INTEGRATIONS_PLUGIN_ID = 'sidebar-integrations'
 
@@ -58,9 +59,11 @@ let writeQueue: Promise<void> = Promise.resolve()
 let hydrateInFlight: Promise<void> | null = null
 
 function applyResponse(data: PluginSettingsResponse): Pick<PluginSettingsState, 'enabledPlugins' | 'pluginConfigs'> {
+  const configs = data?.configs && typeof data.configs === 'object' ? { ...data.configs } : {}
+  syncAccentFromPluginConfigs(configs)
   return {
     enabledPlugins: data?.enabled && typeof data.enabled === 'object' ? { ...data.enabled } : {},
-    pluginConfigs: data?.configs && typeof data.configs === 'object' ? { ...data.configs } : {},
+    pluginConfigs: configs,
   }
 }
 

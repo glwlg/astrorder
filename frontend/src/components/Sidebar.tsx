@@ -1,5 +1,5 @@
 import { ChartLineUpIcon, ChatCircleDotsIcon, CpuIcon, DesktopIcon, GearSixIcon, GlobeHemisphereWestIcon, HardDrivesIcon, IdentificationCardIcon, KeyboardIcon, LightningIcon, PuzzlePieceIcon, SlidersHorizontalIcon, SquaresFourIcon, TrayIcon, UsersThreeIcon } from './workbenchIcons'
-import { IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconPin, IconPlugConnected, IconPlus } from '@tabler/icons-react'
+import { IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconPalette, IconPin, IconPlugConnected, IconPlus } from '@tabler/icons-react'
 import { ActionIcon, Center, HoverCard, Loader, Modal, NavLink, Stack, Tabs, Text, Tooltip } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useQuery } from '@tanstack/react-query'
@@ -46,6 +46,7 @@ const RtkSettingsPage = lazy(() => import('../features/rtk/RtkSettingsPage').the
 const NetworkSettingsPage = lazy(() => import('../features/network/NetworkSettingsPage').then((m) => ({ default: m.NetworkSettingsPage })))
 const ShortcutSettingsPage = lazy(() => import('../features/shortcuts/ShortcutSettingsPage').then((m) => ({ default: m.ShortcutSettingsPage })))
 const DesktopSettingsPage = lazy(() => import('../features/services/DesktopSettingsPage').then((m) => ({ default: m.DesktopSettingsPage })))
+const AppearanceSettingsPage = lazy(() => import('../features/appearance/AppearanceSettingsPage').then((m) => ({ default: m.AppearanceSettingsPage })))
 const IntegrationsSettingsPage = lazy(() => import('../features/integrations/IntegrationsSettingsPage').then((m) => ({ default: m.IntegrationsSettingsPage })))
 const PluginsPage = lazy(() => import('../features/plugins/PluginsPage').then((m) => ({ default: m.PluginsPage })))
 
@@ -624,6 +625,7 @@ export function Sidebar({
                 )}
                 <Tabs.Tab value="network" leftSection={<GlobeHemisphereWestIcon size={16} />}>网络与移动端</Tabs.Tab>
                 <Tabs.Tab value="shortcuts" leftSection={<KeyboardIcon size={16} />}>快捷键</Tabs.Tab>
+                <Tabs.Tab value="appearance" leftSection={<IconPalette size={16} />}>外观</Tabs.Tab>
                 <Tabs.Tab value="desktop" leftSection={<DesktopIcon size={16} />}>桌面客户端</Tabs.Tab>
                 {integrationsPluginEnabled && (
                   <Tabs.Tab value="integrations" leftSection={<IconPlugConnected size={16} />}>集成</Tabs.Tab>
@@ -640,6 +642,7 @@ export function Sidebar({
               )}
               <Tabs.Panel value="network" className="settings-tab-panel"><NetworkSettingsPage /></Tabs.Panel>
               <Tabs.Panel value="shortcuts" className="settings-tab-panel" keepMounted={false}><ShortcutSettingsPage /></Tabs.Panel>
+              <Tabs.Panel value="appearance" className="settings-tab-panel" keepMounted={false}><AppearanceSettingsPage /></Tabs.Panel>
               <Tabs.Panel value="desktop" className="settings-tab-panel"><DesktopSettingsPage /></Tabs.Panel>
               {integrationsPluginEnabled && (
                 <Tabs.Panel value="integrations" className="settings-tab-panel" keepMounted={false}><IntegrationsSettingsPage /></Tabs.Panel>

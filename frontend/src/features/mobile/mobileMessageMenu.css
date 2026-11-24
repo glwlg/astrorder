@@ -10,7 +10,7 @@
   background: rgba(255, 255, 255, 0.86);
   backdrop-filter: blur(20px) saturate(180%);
   -webkit-backdrop-filter: blur(20px) saturate(180%);
-  border: 1px solid rgba(117, 64, 189, 0.16);
+  border: 1px solid color-mix(in oklab, var(--astr-accent, #7540bd) 16%, transparent);
   box-shadow:
     0 12px 32px rgba(34, 20, 62, 0.14),
     0 2px 6px rgba(34, 20, 62, 0.05),
@@ -22,7 +22,7 @@
 
 :root[data-mantine-color-scheme='dark'] .m-message-popover {
   background: rgba(26, 30, 42, 0.88);
-  border: 1px solid rgba(188, 146, 255, 0.2);
+  border: 1px solid color-mix(in oklab, var(--astr-accent, #bc92ff) 20%, transparent);
   color: #e8ebf5;
   box-shadow:
     0 16px 40px rgba(0, 0, 0, 0.42),
@@ -65,12 +65,12 @@
 }
 
 .m-message-popover button:active {
-  background: rgba(117, 64, 189, 0.12);
+  background: color-mix(in oklab, var(--astr-accent, #7540bd) 12%, transparent);
   transform: scale(0.96);
 }
 
 :root[data-mantine-color-scheme='dark'] .m-message-popover button:active {
-  background: rgba(188, 146, 255, 0.18);
+  background: color-mix(in oklab, var(--astr-accent, #bc92ff) 18%, transparent);
 }
 
 .m-bubble {

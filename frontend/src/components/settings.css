@@ -13,8 +13,8 @@
   border-color: color-mix(in oklab, var(--astr-indigo) 32%, var(--astr-border)) !important;
   box-shadow:
     0 28px 80px rgb(0 0 0 / 72%),
-    0 0 0 1px rgb(188 146 255 / 14%),
-    inset 0 1px 0 rgb(238 225 255 / 16%) !important;
+    0 0 0 1px color-mix(in oklab, var(--astr-accent) 16%, transparent),
+    inset 0 1px 0 color-mix(in oklab, var(--astr-accent) 18%, white 14%) !important;
 }
 .environment-connections { position: relative; }
 /* Ordinary app overlays are globally transparent; nested settings need a local mask. */
@@ -42,7 +42,7 @@
 .settings-modal .mantine-Card-root, .settings-modal .rtk-settings > .mantine-Paper-root { box-shadow: none; border-color: var(--astr-border); background: var(--astr-surface); }
 .settings-modal .mantine-Input-input { background: var(--astr-surface-muted); border-color: var(--astr-border); font-size: 13px; }
 .settings-modal .mantine-InputWrapper-label { font-size: 12px; font-weight: 500; margin-bottom: 7px; }
-.settings-modal .mantine-Button-root[data-variant='filled'], .settings-modal .mantine-Button-root:not([data-variant]) { background: var(--astr-accent-strong, #7540bd); color: #ffffff; }
+.settings-modal .mantine-Button-root[data-variant='filled'], .settings-modal .mantine-Button-root:not([data-variant]) { background: var(--astr-accent-strong, #7540bd); color: var(--astr-accent-contrast, #ffffff); }
 .settings-modal .mantine-Button-root[data-variant='filled']:hover, .settings-modal .mantine-Button-root:not([data-variant]):hover { background: var(--astr-indigo); }
 .settings-modal .mantine-Button-root[data-variant='light'] { background: var(--astr-surface-muted); color: var(--astr-text); }
 .settings-modal .mantine-Badge-root, .environment-connections .mantine-Badge-root { background: transparent; border: 0; color: var(--astr-text-muted); font-weight: 500; text-transform: none; letter-spacing: 0; padding-inline: 0; }

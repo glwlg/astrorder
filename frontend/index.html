@@ -122,6 +122,17 @@
         .splash-bar-fill { width: 100%; }
       }
     </style>
+    <script>
+      try {
+        var accent = localStorage.getItem('astrorder:theme-accent');
+        if (accent && /^#[0-9a-fA-F]{6}$/.test(accent)) {
+          var r = document.documentElement;
+          r.style.setProperty('--astr-theme-seed', accent);
+          r.style.setProperty('--splash-accent', accent);
+          r.style.setProperty('--splash-glow', 'color-mix(in oklab, ' + accent + ' 28%, transparent)');
+        }
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root">

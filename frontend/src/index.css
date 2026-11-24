@@ -129,7 +129,7 @@ a { color: inherit; }
   width: 5px;
   height: 38px;
   background: var(--astr-indigo, #5b6cff);
-  box-shadow: 0 0 10px rgba(91, 108, 255, 0.45);
+  box-shadow: 0 0 10px color-mix(in oklab, var(--astr-indigo, #5b6cff) 45%, transparent);
 }
 .sidebar-resizer[data-resizing="true"]::after, .sidecar-resizer[data-resizing="true"]::after {
   opacity: 1;
@@ -1380,7 +1380,7 @@ a { color: inherit; }
 .markdown-callout-body > :last-child { margin-bottom: 0; }
 .markdown-callout.is-note { --callout-accent: #2271d1; --callout-bg: rgb(34 113 209 / 6%); --callout-border: rgb(34 113 209 / 18%); }
 .markdown-callout.is-tip { --callout-accent: #128061; --callout-bg: rgb(18 128 97 / 6%); --callout-border: rgb(18 128 97 / 18%); }
-.markdown-callout.is-important { --callout-accent: #7540bd; --callout-bg: rgb(117 64 189 / 6%); --callout-border: rgb(117 64 189 / 18%); }
+.markdown-callout.is-important { --callout-accent: var(--astr-accent, #7540bd); --callout-bg: color-mix(in oklab, var(--astr-accent, #7540bd) 6%, transparent); --callout-border: color-mix(in oklab, var(--astr-accent, #7540bd) 18%, transparent); }
 .markdown-callout.is-warning { --callout-accent: #b36b00; --callout-bg: rgb(217 147 22 / 8%); --callout-border: rgb(217 147 22 / 22%); }
 .markdown-callout.is-caution { --callout-accent: #c92a47; --callout-bg: rgb(201 42 71 / 7%); --callout-border: rgb(201 42 71 / 20%); }
 

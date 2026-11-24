@@ -88,6 +88,7 @@ import {
   WORKSPACE_GROUPS_PLUGIN_ID,
 } from '../plugins/builtinPlugins'
 import { usePluginSettingsStore } from '../plugins/pluginSettingsStore'
+import { useAccentColor } from '../../themeAccent'
 import { AgentCommandMenu, AgentMentionMenu, filterAgentCommands, filterAgentMentions, formatAgentMention, useAgentCommands, useAgentMentions, useFileMentions } from '../chat/AgentCommandMenu'
 import { ClickSpark } from '../../components/animations/ClickSpark'
 import { expandSystemMentions } from '../chat/systemMentions'
@@ -391,6 +392,8 @@ export function MobileWorkspace() {
   useEffect(() => { setSessionError(null); setSubmittedCommandId(null) }, [selected?.id, selected?.agent_id])
   const { draft, setDraft } = usePersistentDraft(selected?.agent_id || '', selected?.id || '')
   const text = draft.text
+  const activeAccent = useAccentColor()
+  useEffect(() => { void usePluginSettingsStore.getState().hydrate() }, [])
   const voicePluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(VOICE_INPUT_PLUGIN_ID))
   const worktreePluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKFLOW_GIT_WORKTREE_PLUGIN_ID))
   const groupsPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_GROUPS_PLUGIN_ID))
@@ -1407,7 +1410,7 @@ export function MobileWorkspace() {
           </div>
           <MobileVoiceHold scope={key} voice={voice} disabled={!voicePluginEnabled || text.length > 0}><textarea ref={textarea} aria-label="消息内容" enterKeyHint="enter" placeholder={voicePluginEnabled ? '发消息，按住说话…' : '发消息…'} rows={1} value={text} onPaste={event => { const pasted = clipboardFiles(event); if (agents[selected?.agent_id || '']?.kind === 'grok' && pasted.some(f => f.type.startsWith('image/'))) { event.preventDefault(); notify('当前智能体不支持图片附件', 'red'); return } if (pasted.length) { event.preventDefault(); updateFiles([...files, ...pasted]) } }} onKeyDown={handleKeyDown} onChange={e => { setCommandIndex(0); setDismissedMenuText(null); setText(e.target.value) }} /></MobileVoiceHold>
           {voicePluginEnabled && <button aria-label={voice.status === 'recording' || voice.status === 'requesting' ? '停止录音' : voice.status === 'transcribing' ? '正在转写' : '语音消息'} disabled={voice.status === 'transcribing'} onClick={voice.toggle}>{voice.status === 'recording' || voice.status === 'requesting' ? <IconPlayerStop size={19} color="#ef4444" /> : <IconMicrophone size={19} />}</button>}
-          <ClickSpark className="m-send-spark" sparkColor={busy && !text && !files.length ? '#ef4444' : '#7540bd'} sparkSize={10} sparkRadius={28} sparkCount={8}>
+          <ClickSpark className="m-send-spark" sparkColor={busy && !text && !files.length ? '#ef4444' : activeAccent} sparkSize={10} sparkRadius={28} sparkCount={8}>
             <button type="button" className="m-send" data-stop={busy && !text && !files.length} aria-label={busy && !text && !files.length ? '停止' : '发送'} disabled={submitting || !selected} onPointerDown={pressSend} onClick={() => pressSend()}>{submitting ? <IconLoader2 className="m-spin" size={18} /> : busy && !text && !files.length ? <IconPlayerStop size={17} /> : <IconSend size={18} />}</button>
           </ClickSpark>
         </div>
