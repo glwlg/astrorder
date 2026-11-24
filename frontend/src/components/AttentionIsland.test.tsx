@@ -1,10 +1,11 @@
 import { MantineProvider } from '@mantine/core'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, useLocation } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api/client'
+import { clearIslandNotifications, hasIslandNotificationHost, pushIslandNotification } from '../domain/islandNotifications'
 import { useAstrorderStore } from '../state/store'
 import { AttentionIsland } from './AttentionIsland'
 
@@ -30,6 +31,7 @@ function renderIsland(initialEntry = '/chat/active-session?agent_id=codex', acti
 describe('AttentionIsland', () => {
   afterEach(() => {
     cleanup()
+    clearIslandNotifications()
     vi.restoreAllMocks()
     useAstrorderStore.getState().resetRuntime()
   })
@@ -141,5 +143,99 @@ describe('AttentionIsland', () => {
     })
     const { container } = renderIsland('/monitor', undefined)
     expect(container.querySelector('.attention-island')).toBeNull()
+  })
+
+  it('pops session notifications inside the Dynamic Island, morphs back to running pill on dismiss, and jumps on click', async () => {
+    useAstrorderStore.getState().hydrateBootstrap({
+      protocol_version: 1,
+      cursor: 5,
+      agents: [{ id: 'agy', name: 'Antigravity', kind: 'antigravity', status: 'ready', capabilities: ['chat'], limitation: null }],
+      sessions: [
+        { id: 'active-session', agent_id: 'agy', title: '当前会话', workspace: '/repo', status: 'idle', updated_at: '2026-11-24T08:00:00Z' },
+        { id: 'alert-center', agent_id: 'agy', title: '告警中心', workspace: '/opscore', status: 'idle', updated_at: '2026-11-24T08:05:00Z' },
+        { id: 'bg-1', agent_id: 'agy', title: '后台编译任务', workspace: '/repo', status: 'running', updated_at: '2026-11-24T08:06:00Z' },
+      ],
+    })
+
+    renderIsland('/chat/active-session?agent_id=agy', 'agy::active-session')
+    expect(hasIslandNotificationHost()).toBe(true)
+    expect(screen.getByText('后台编译任务')).toBeInTheDocument()
+
+    act(() => {
+      pushIslandNotification({
+        key: 'notice-alert-1',
+        kind: 'task_completed',
+        title: '会话已完成',
+        message: '告警中心 · 会话已完成',
+        agent_id: 'agy',
+        session_id: 'alert-center',
+        created_at: '2026-11-24T08:07:00Z',
+      })
+    })
+
+    // Deduplicated copy: bold session title + status detail without repeating "会话已完成"
+    expect(screen.getByText('告警中心')).toBeInTheDocument()
+    expect(screen.getByText('会话已完成')).toBeInTheDocument()
+
+    // Dismissing morphs smoothly back to the background running session pill
+    await userEvent.click(screen.getByRole('button', { name: '关闭通知' }))
+    expect(screen.queryByText('告警中心')).not.toBeInTheDocument()
+    expect(screen.getByText('后台编译任务')).toBeInTheDocument()
+
+    // Pushing again and clicking navigates directly to the notified session and clears the notice
+    act(() => {
+      pushIslandNotification({
+        key: 'notice-alert-2',
+        kind: 'task_completed',
+        title: '会话已完成',
+        message: '告警中心 · 会话已完成',
+        agent_id: 'agy',
+        session_id: 'alert-center',
+        created_at: '2026-11-24T08:08:00Z',
+      })
+    })
+
+    await userEvent.click(screen.getByRole('button', { name: '前往' }))
+    expect(screen.getByTestId('island-loc')).toHaveTextContent('/chat/alert-center?agent_id=agy')
+    expect(screen.queryByText('告警中心')).not.toBeInTheDocument()
+  })
+
+  it('pops Dynamic Island notification even when no background sessions are running and shows queue count', () => {
+    useAstrorderStore.getState().hydrateBootstrap({
+      protocol_version: 1,
+      cursor: 6,
+      agents: [{ id: 'agy', name: 'Antigravity', kind: 'antigravity', status: 'ready', capabilities: ['chat'], limitation: null }],
+      sessions: [
+        { id: 'active-session', agent_id: 'agy', title: '当前会话', workspace: '/repo', status: 'idle', updated_at: '2026-11-24T08:00:00Z' },
+      ],
+    })
+
+    const { container } = renderIsland('/chat/active-session?agent_id=agy', 'agy::active-session')
+    expect(container.querySelector('.attention-island')).toBeNull()
+
+    act(() => {
+      pushIslandNotification({
+        key: 'n-1',
+        kind: 'task_completed',
+        title: '会话已完成',
+        message: '监控Agent · 会话已完成',
+        agent_id: 'agy',
+        session_id: 's-1',
+        created_at: '2026-11-24T08:10:00Z',
+      })
+      pushIslandNotification({
+        key: 'n-2',
+        kind: 'task_failed',
+        title: '任务失败',
+        message: '代码审查 · 执行失败',
+        agent_id: 'agy',
+        session_id: 's-2',
+        created_at: '2026-11-24T08:11:00Z',
+      })
+    })
+
+    expect(container.querySelector('.attention-island.is-notice.is-notice-error')).not.toBeNull()
+    expect(screen.getByText('任务失败')).toBeInTheDocument()
+    expect(screen.getByText('+1')).toBeInTheDocument()
   })
 })

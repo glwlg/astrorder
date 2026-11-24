@@ -25,13 +25,14 @@ describe('canonical notifications', () => {
     expect(notificationForEvent({ ...event, data: { ...event.data, kind: 'unexpected' } })).toBeNull()
     expect(notificationForEvent({ ...event, data: { ...event.data, key: '' } })).toBeNull()
   })
-  it('uses the group route for browser and desktop notification payloads', async () => {
+  it('uses the group route for browser and desktop notification payloads when app is in background', async () => {
     const notice = notificationForEvent({ ...event, data: { ...event.data, group_id: 'group-1', group_name: '讨论群', title: '讨论群' } })!
     expect(notificationPath(notice, false)).toBe('/groups/group-1')
     expect(notificationPath(notice, true)).toBe('/mobile/groups/group-1')
     const notify = vi.fn().mockResolvedValue(true)
+    const isForeground = vi.fn().mockResolvedValue(false)
     const original = Object.getOwnPropertyDescriptor(window, 'astrorderDesktop')
-    Object.defineProperty(window, 'astrorderDesktop', { configurable: true, value: { notify } })
+    Object.defineProperty(window, 'astrorderDesktop', { configurable: true, value: { notify, isForeground } })
     try {
       expect(await deliverBrowserNotification(notice)).toBe(true)
       expect(notify).toHaveBeenCalledWith(expect.objectContaining({ title: '讨论群', url: '/groups/group-1' }))
@@ -39,6 +40,39 @@ describe('canonical notifications', () => {
       if (original) Object.defineProperty(window, 'astrorderDesktop', original)
       else Reflect.deleteProperty(window, 'astrorderDesktop')
     }
+  })
+  it('suppresses Windows desktop notifications while Astrorder is in foreground, but allows forced test notifications', async () => {
+    const notice = notificationForEvent(event)!
+    const notify = vi.fn().mockResolvedValue(true)
+    const isForeground = vi.fn().mockResolvedValue(true)
+    const original = Object.getOwnPropertyDescriptor(window, 'astrorderDesktop')
+    Object.defineProperty(window, 'astrorderDesktop', { configurable: true, value: { notify, isForeground } })
+    try {
+      expect(await deliverBrowserNotification(notice)).toBe(false)
+      expect(notify).not.toHaveBeenCalled()
+
+      await testSystemNotification()
+      expect(notify).toHaveBeenCalledOnce()
+      expect(notify).toHaveBeenCalledWith(expect.objectContaining({ title: '星序 · 测试通知' }))
+    } finally {
+      if (original) Object.defineProperty(window, 'astrorderDesktop', original)
+      else Reflect.deleteProperty(window, 'astrorderDesktop')
+    }
+  })
+  it('suppresses browser notifications while tab is visible and focused, and delivers when unfocused', async () => {
+    const notice = notificationForEvent(event)!
+    const notificationConstructor = vi.fn()
+    Object.assign(notificationConstructor, { permission: 'granted' })
+    vi.stubGlobal('Notification', notificationConstructor)
+    const hasFocusSpy = vi.spyOn(document, 'hasFocus')
+
+    hasFocusSpy.mockReturnValue(true)
+    expect(await deliverBrowserNotification(notice)).toBe(false)
+    expect(notificationConstructor).not.toHaveBeenCalled()
+
+    hasFocusSpy.mockReturnValue(false)
+    expect(await deliverBrowserNotification(notice)).toBe(true)
+    expect(notificationConstructor).toHaveBeenCalledOnce()
   })
   it('restores subscriptions without asking permission, avoids duplicate websocket alerts, and unsubscribes', async () => {
     const requestPermission = vi.fn()

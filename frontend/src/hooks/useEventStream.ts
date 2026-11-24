@@ -8,6 +8,10 @@ import {
   notificationPath,
   restorePushSubscription,
 } from "../domain/notifications";
+import {
+  hasIslandNotificationHost,
+  pushIslandNotification,
+} from "../domain/islandNotifications";
 import { useAstrorderStore } from "../state/store";
 import { api } from "../api/client";
 import { nativeActivityEvent } from "./useSessionOrder";
@@ -348,37 +352,41 @@ export function useEventStream(
           if (notification.kind === "task_completed" || notification.kind === "task_failed") {
             invalidateSessionMessages(notification.agent_id, notification.session_id);
           }
-          mantineNotifications.show({
-            id: notification.key,
-            title: notification.title,
-            message: `${notification.message}（点击跳转）`,
-            color:
-              notification.kind === "task_failed"
-                ? "red"
-                : notification.kind === "approval_pending"
-                  ? "yellow"
-                  : "teal",
-            autoClose: 10000,
-            style: { cursor: "pointer" },
-            onClick: () => {
-              if (notification.session_id && notification.agent_id) {
-                const isMobile =
-                  typeof window !== "undefined" &&
-                  (window.location.pathname.startsWith("/mobile") ||
-                    window.innerWidth < 768 ||
-                    window.matchMedia?.("(max-width: 767px)").matches);
-                const targetPath = notificationPath(notification, isMobile);
-                const nav = navigateRef.current;
-                if (nav) {
-                  nav(targetPath);
-                } else if (typeof window !== "undefined") {
-                  window.history.pushState({}, "", targetPath);
-                  window.dispatchEvent(new PopStateEvent("popstate"));
+          if (hasIslandNotificationHost()) {
+            pushIslandNotification(notification);
+          } else {
+            mantineNotifications.show({
+              id: notification.key,
+              title: notification.title,
+              message: `${notification.message}（点击跳转）`,
+              color:
+                notification.kind === "task_failed"
+                  ? "red"
+                  : notification.kind === "approval_pending"
+                    ? "yellow"
+                    : "teal",
+              autoClose: 10000,
+              style: { cursor: "pointer" },
+              onClick: () => {
+                if (notification.session_id && notification.agent_id) {
+                  const isMobile =
+                    typeof window !== "undefined" &&
+                    (window.location.pathname.startsWith("/mobile") ||
+                      window.innerWidth < 768 ||
+                      window.matchMedia?.("(max-width: 767px)").matches);
+                  const targetPath = notificationPath(notification, isMobile);
+                  const nav = navigateRef.current;
+                  if (nav) {
+                    nav(targetPath);
+                  } else if (typeof window !== "undefined") {
+                    window.history.pushState({}, "", targetPath);
+                    window.dispatchEvent(new PopStateEvent("popstate"));
+                  }
+                  mantineNotifications.hide(notification.key);
                 }
-                mantineNotifications.hide(notification.key);
-              }
-            },
-          });
+              },
+            });
+          }
           void deliverBrowserNotification(notification);
         }
         const previousSessionStatus = event.agent_id && event.session_id

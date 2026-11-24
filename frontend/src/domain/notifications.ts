@@ -22,10 +22,33 @@ export function setSystemNotificationEnabled(enabled: boolean): void {
 
 export type NotificationPermissionState = 'granted' | 'denied' | 'default' | 'unsupported'
 
-function desktopNotify() {
+function desktopBridge() {
   return typeof window !== 'undefined'
-    ? (window as unknown as { astrorderDesktop?: { notify?: (notice: { title: string; body: string; tag: string; url: string }) => Promise<boolean> } }).astrorderDesktop?.notify
+    ? (window as unknown as {
+        astrorderDesktop?: {
+          notify?: (notice: { title: string; body: string; tag: string; url: string }) => Promise<boolean>
+          isForeground?: () => Promise<boolean>
+        }
+      }).astrorderDesktop
     : undefined
+}
+
+function desktopNotify() {
+  return desktopBridge()?.notify
+}
+
+export async function isAppInForeground(): Promise<boolean> {
+  const checkDesktop = desktopBridge()?.isForeground
+  if (typeof checkDesktop === 'function') {
+    try {
+      return Boolean(await checkDesktop())
+    } catch {
+      // Fall back to DOM focus detection if the desktop bridge call fails.
+    }
+  }
+  if (typeof document === 'undefined') return false
+  if (document.visibilityState !== 'visible') return false
+  return typeof document.hasFocus === 'function' ? document.hasFocus() : true
 }
 
 function mobileRoute(): boolean {
@@ -96,7 +119,10 @@ export async function disableSystemNotifications(): Promise<void> {
 
 export async function testSystemNotification(): Promise<void> {
   if (desktopNotify()) {
-    const accepted = await deliverBrowserNotification({ key: `test-${Date.now()}`, kind: 'task_completed', title: '星序 · 测试通知', message: '任务完成和待回答问题将在这里提醒。', agent_id: 'system', session_id: 'system', created_at: new Date().toISOString() })
+    const accepted = await deliverBrowserNotification(
+      { key: `test-${Date.now()}`, kind: 'task_completed', title: '星序 · 测试通知', message: '任务完成和待回答问题将在这里提醒。', agent_id: 'system', session_id: 'system', created_at: new Date().toISOString() },
+      { force: true },
+    )
     if (!accepted) throw new Error('系统未接受通知，请检查 Windows 通知设置。')
     return
   }
@@ -106,8 +132,12 @@ export async function testSystemNotification(): Promise<void> {
   await api.testPushSubscription(subscription.endpoint)
 }
 
-export async function deliverBrowserNotification(notification: EventNotification): Promise<boolean> {
+export async function deliverBrowserNotification(
+  notification: EventNotification,
+  options?: { force?: boolean },
+): Promise<boolean> {
   if (!isSystemNotificationEnabled()) return false
+  if (!options?.force && (await isAppInForeground())) return false
   const notify = desktopNotify()
   const url = notificationPath(notification)
   try {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { ActionIcon, Badge, Button, Group, Stack, Text, Tooltip, UnstyledButton } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useQueryClient } from '@tanstack/react-query'
@@ -18,13 +18,24 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { useShallow } from 'zustand/react/shallow'
 import { ApiError, api } from '../api/client'
 import { groupHasActiveTask } from '../domain/groupActivity'
+import {
+  dismissIslandNotification,
+  dismissIslandNotificationsForSession,
+  registerIslandNotificationHost,
+  useIslandNotifications,
+} from '../domain/islandNotifications'
+import { notificationPath } from '../domain/notifications'
 import { newCommandId, scopeKey } from '../domain/semantics'
-import type { Approval, Command, Session } from '../domain/types'
+import type { Approval, Command, EventNotification, Session } from '../domain/types'
 import { selectSessions, useAstrorderStore } from '../state/store'
 import { AgentBrandIcon } from './AgentBrandIcon'
 import { displaySessionTitle, sessionActivityStatus } from './sessionRailModel'
 import { isUserInput } from './UserInputCard'
 import './attentionIsland.css'
+
+const NOTICE_DURATION_COMPLETED_MS = 6500
+const NOTICE_DURATION_ALERT_MS = 8500
+const NOTICE_RESUME_MIN_MS = 1200
 
 interface AttentionIslandProps {
   activeSessionKey?: string
@@ -34,6 +45,39 @@ function approvalSummary(approval: Approval): string {
   const raw = (approval.title || approval.detail || '').replace(/\s+/g, ' ').trim()
   if (!raw) return isUserInput(approval) ? '等待你的回答' : '请求执行授权'
   return raw.length > 52 ? `${raw.slice(0, 52)}…` : raw
+}
+
+function formatIslandNoticeCopy(
+  notice: EventNotification,
+  session?: Session,
+): { title: string; detail: string } {
+  const rawTitle = (notice.title || '').trim()
+  const rawMessage = (notice.message || '').trim()
+  if (notice.group_id) {
+    return {
+      title: notice.group_name?.trim() || rawTitle || '群聊通知',
+      detail: rawMessage || rawTitle,
+    }
+  }
+  const suffix = rawTitle ? ` · ${rawTitle}` : ''
+  if (suffix && rawMessage.endsWith(suffix)) {
+    const sessionPart = rawMessage.slice(0, -suffix.length).trim()
+    return {
+      title: sessionPart || (session ? displaySessionTitle(session) : rawTitle),
+      detail: rawTitle,
+    }
+  }
+  if (session) {
+    const sessionTitle = displaySessionTitle(session)
+    if (rawMessage && rawMessage !== sessionTitle) {
+      return { title: sessionTitle, detail: rawMessage }
+    }
+    return { title: sessionTitle, detail: rawTitle || '有新动态' }
+  }
+  return {
+    title: rawTitle || '会话通知',
+    detail: rawMessage && rawMessage !== rawTitle ? rawMessage : '',
+  }
 }
 
 export function AttentionIsland({ activeSessionKey }: AttentionIslandProps) {
@@ -52,6 +96,72 @@ export function AttentionIsland({ activeSessionKey }: AttentionIslandProps) {
   const [expanded, setExpanded] = useState(false)
   const [busyApprovalIds, setBusyApprovalIds] = useState<Record<string, boolean>>({})
   const [dismissedSignature, setDismissedSignature] = useState<string | null>(null)
+  const [noticeHovered, setNoticeHovered] = useState(false)
+  const islandNotices = useIslandNotifications()
+  const activeNotice = islandNotices[0] || null
+  const noticeTimerRef = useRef<{ key: string; remainingMs: number; startedAt: number } | null>(null)
+  const prevActiveSessionKeyRef = useRef<string | undefined>(activeSessionKey)
+
+  useEffect(() => registerIslandNotificationHost(), [])
+
+  // Dismiss queued island notifications when the user switches into that session.
+  useEffect(() => {
+    const prev = prevActiveSessionKeyRef.current
+    prevActiveSessionKeyRef.current = activeSessionKey
+    if (!activeSessionKey || activeSessionKey === prev) return
+    const sep = activeSessionKey.indexOf('::')
+    if (sep > 0) {
+      dismissIslandNotificationsForSession(
+        activeSessionKey.slice(0, sep),
+        activeSessionKey.slice(sep + 2),
+      )
+    }
+  }, [activeSessionKey])
+
+  const activeNoticeDurationMs = activeNotice
+    ? activeNotice.kind === 'task_completed'
+      ? NOTICE_DURATION_COMPLETED_MS
+      : NOTICE_DURATION_ALERT_MS
+    : 0
+  const noticePaused = noticeHovered || expanded
+
+  useEffect(() => {
+    if (!activeNotice) {
+      noticeTimerRef.current = null
+      return
+    }
+    const key = activeNotice.key
+    const baseMs =
+      activeNotice.kind === 'task_completed'
+        ? NOTICE_DURATION_COMPLETED_MS
+        : NOTICE_DURATION_ALERT_MS
+    let state = noticeTimerRef.current
+    if (!state || state.key !== key) {
+      state = { key, remainingMs: baseMs, startedAt: Date.now() }
+      noticeTimerRef.current = state
+    }
+    if (noticePaused) {
+      return
+    }
+    state.startedAt = Date.now()
+    const delay = Math.max(NOTICE_RESUME_MIN_MS, state.remainingMs)
+    const timer = window.setTimeout(() => {
+      if (noticeTimerRef.current?.key === key) {
+        noticeTimerRef.current = null
+      }
+      dismissIslandNotification(key)
+    }, delay)
+    return () => {
+      window.clearTimeout(timer)
+      if (noticeTimerRef.current?.key === key) {
+        const elapsed = Date.now() - noticeTimerRef.current.startedAt
+        noticeTimerRef.current.remainingMs = Math.max(
+          NOTICE_RESUME_MIN_MS,
+          noticeTimerRef.current.remainingMs - elapsed,
+        )
+      }
+    }
+  }, [activeNotice, noticePaused])
 
   const isChatSessionRoute = location.pathname.startsWith('/chat/') && !location.pathname.startsWith('/chat/group-')
   const isMonitorRoute = location.pathname.startsWith('/monitor')
@@ -120,7 +230,8 @@ export function AttentionIsland({ activeSessionKey }: AttentionIslandProps) {
     ].join('|')
   }, [activeGroups, hasActivity, runningSessions])
 
-  const isVisible = hasAttention || (hasActivity && dismissedSignature !== activitySignature)
+  const hasNotice = Boolean(activeNotice)
+  const isVisible = hasNotice || hasAttention || (hasActivity && dismissedSignature !== activitySignature)
 
   // Close expanded tray on Escape or outside click
   useEffect(() => {
@@ -211,6 +322,19 @@ export function AttentionIsland({ activeSessionKey }: AttentionIslandProps) {
     [agents, busyApprovalIds, queryClient],
   )
 
+  const openNoticeTarget = useCallback(
+    (notice: EventNotification) => {
+      dismissIslandNotification(notice.key)
+      setExpanded(false)
+      const noticeKey = !notice.group_id ? scopeKey(notice.agent_id, notice.session_id) : ''
+      if (isChatSessionRoute && activeSessionKey && noticeKey && noticeKey === activeSessionKey) {
+        return
+      }
+      navigate(notificationPath(notice, false))
+    },
+    [activeSessionKey, isChatSessionRoute, navigate],
+  )
+
   if (!isVisible) return null
 
   const primaryApproval = pendingApprovals[0] || null
@@ -233,157 +357,298 @@ export function AttentionIsland({ activeSessionKey }: AttentionIslandProps) {
   )
   const primaryBusy = primaryApproval ? Boolean(busyApprovalIds[primaryApproval.id]) : false
 
-  const tone = hasAttention ? 'attention' : 'running'
+  const noticeSession = activeNotice && !activeNotice.group_id
+    ? sessionMap.get(scopeKey(activeNotice.agent_id, activeNotice.session_id))
+    : undefined
+  const noticeAgent = activeNotice?.agent_id ? agents[activeNotice.agent_id] : undefined
+  const noticeCopy = activeNotice ? formatIslandNoticeCopy(activeNotice, noticeSession) : null
+  const noticeAlreadyActive = Boolean(
+    activeNotice &&
+      !activeNotice.group_id &&
+      isChatSessionRoute &&
+      activeSessionKey &&
+      scopeKey(activeNotice.agent_id, activeNotice.session_id) === activeSessionKey,
+  )
+  const noticeTone = activeNotice
+    ? activeNotice.kind === 'task_failed'
+      ? 'notice-error'
+      : activeNotice.kind === 'approval_pending'
+        ? 'notice-attention'
+        : 'notice-success'
+    : null
+
+  const tone = noticeTone ?? (hasAttention ? 'attention' : 'running')
+  const hasTrayContent = hasAttention || hasActivity
 
   return (
     <div
       ref={rootRef}
-      className={`attention-island is-${tone}${expanded ? ' is-expanded' : ''}`}
+      className={[
+        'attention-island',
+        `is-${tone}`,
+        hasNotice ? 'is-notice' : '',
+        expanded ? 'is-expanded' : '',
+        noticePaused ? 'is-paused' : '',
+      ]
+        .filter(Boolean)
+        .join(' ')}
       role="region"
       aria-label="星序灵动岛"
+      onMouseEnter={() => { if (hasNotice) setNoticeHovered(true) }}
+      onMouseLeave={() => setNoticeHovered(false)}
+      onFocus={() => { if (hasNotice) setNoticeHovered(true) }}
+      onBlur={(event) => {
+        if (!rootRef.current?.contains(event.relatedTarget as Node | null)) {
+          setNoticeHovered(false)
+        }
+      }}
     >
       <div
         className="attention-island-pill"
         data-liquid-surface="toolbar"
         data-liquid-snapshot="#astr-shell-sky"
+        style={
+          hasNotice
+            ? ({ '--island-notice-duration': `${activeNoticeDurationMs}ms` } as CSSProperties)
+            : undefined
+        }
       >
-        <UnstyledButton
-          className="attention-island-trigger"
-          onClick={() => setExpanded((v) => !v)}
-          aria-expanded={expanded}
-          aria-label={hasAttention ? `展开待处理审批，共 ${attentionCount} 项` : `展开运行中会话，共 ${activityCount} 项`}
-        >
-          <span className={`attention-island-dot is-${tone}`} aria-hidden="true" />
-          {primaryAgent ? (
-            <span className="attention-island-brand" aria-hidden="true">
-              <AgentBrandIcon kind={primaryAgent.kind} size={14} />
-            </span>
-          ) : hasAttention ? (
-            <IconAlertTriangle size={14} className="attention-island-icon-warn" aria-hidden="true" />
-          ) : primaryGroup ? (
-            <IconUsers size={14} className="attention-island-icon-run" aria-hidden="true" />
-          ) : (
-            <IconBolt size={14} className="attention-island-icon-run" aria-hidden="true" />
-          )}
+        {activeNotice && noticeCopy ? (
+          <>
+            <UnstyledButton
+              key={activeNotice.key}
+              className="attention-island-trigger attention-island-notice-trigger"
+              onClick={() => openNoticeTarget(activeNotice)}
+              aria-label={`${noticeCopy.title} ${noticeCopy.detail}${noticeAlreadyActive ? '' : '，点击跳转'}`}
+            >
+              <span className={`attention-island-notice-badge is-${noticeTone}`} aria-hidden="true">
+                {activeNotice.kind === 'task_failed' ? (
+                  <IconAlertTriangle size={12} stroke={2.2} />
+                ) : activeNotice.kind === 'approval_pending' ? (
+                  <IconMessageQuestion size={12} stroke={2.2} />
+                ) : (
+                  <IconCheck size={12} stroke={2.5} />
+                )}
+              </span>
+              {noticeAgent && !activeNotice.group_id ? (
+                <span className="attention-island-brand" aria-hidden="true">
+                  <AgentBrandIcon kind={noticeAgent.kind} size={14} />
+                </span>
+              ) : activeNotice.group_id ? (
+                <IconUsers size={14} className="attention-island-icon-run" aria-hidden="true" />
+              ) : null}
 
-          <span className="attention-island-copy">
-            {primaryApproval ? (
-              <>
-                <strong className="attention-island-title">
-                  {primarySession ? displaySessionTitle(primarySession) : '待审批'}
-                </strong>
-                <span className="attention-island-sep" aria-hidden="true">·</span>
-                <span className="attention-island-detail">{approvalSummary(primaryApproval)}</span>
-              </>
-            ) : primaryWaitingSession ? (
-              <>
-                <strong className="attention-island-title">{displaySessionTitle(primaryWaitingSession)}</strong>
-                <span className="attention-island-sep" aria-hidden="true">·</span>
-                <span className="attention-island-detail">等待确认</span>
-              </>
-            ) : primaryRunning ? (
-              <>
-                <strong className="attention-island-title">
-                  {runningSessions.length > 1
-                    ? `${runningSessions.length} 个会话运行中`
-                    : displaySessionTitle(primaryRunning)}
-                </strong>
-                {runningSessions.length === 1 && (
+              <span className="attention-island-copy">
+                <strong className="attention-island-title">{noticeCopy.title}</strong>
+                {noticeCopy.detail && (
                   <>
                     <span className="attention-island-sep" aria-hidden="true">·</span>
-                    <span className="attention-island-detail">正在执行</span>
+                    <span className="attention-island-detail">{noticeCopy.detail}</span>
                   </>
                 )}
-              </>
-            ) : primaryGroup ? (
-              <>
-                <strong className="attention-island-title">{primaryGroup.name || '群聊协作'}</strong>
-                <span className="attention-island-sep" aria-hidden="true">·</span>
-                <span className="attention-island-detail">接力进行中</span>
-              </>
-            ) : null}
-          </span>
+              </span>
 
-          {(attentionCount > 1 || (hasAttention && hasActivity)) && (
-            <span className="attention-island-count">{attentionCount + (hasAttention ? 0 : activityCount)}</span>
-          )}
+              {islandNotices.length > 1 && (
+                <span className="attention-island-count" aria-label={`还有 ${islandNotices.length - 1} 条通知`}>
+                  +{islandNotices.length - 1}
+                </span>
+              )}
+            </UnstyledButton>
 
-          <span className="attention-island-chevron" aria-hidden="true">
-            {expanded ? <IconChevronUp size={13} /> : <IconChevronDown size={13} />}
-          </span>
-        </UnstyledButton>
-
-        <div className="attention-island-inline-actions">
-          {primaryApproval && primaryCanDecide && (
-            <>
-              <Button
-                size="compact-xs"
-                color="violet"
-                variant="filled"
-                radius="xl"
-                loading={primaryBusy}
-                onClick={() => void handleDecision(primaryApproval, 'approve')}
-                leftSection={<IconCheck size={12} />}
-              >
-                批准
-              </Button>
-              <Button
-                size="compact-xs"
-                color="gray"
-                variant="subtle"
-                radius="xl"
-                disabled={primaryBusy}
-                onClick={() => void handleDecision(primaryApproval, 'cancel')}
-              >
-                拒绝
-              </Button>
-            </>
-          )}
-          {primaryApproval && !primaryCanDecide && primaryApproval.agent_id && primaryApproval.session_id && (
-            <Button
-              size="compact-xs"
-              color="yellow"
-              variant="light"
-              radius="xl"
-              onClick={() => openSession(primaryApproval.agent_id!, primaryApproval.session_id!)}
-              rightSection={<IconArrowRight size={12} />}
+            <div className="attention-island-inline-actions">
+              {!noticeAlreadyActive && (
+                <Button
+                  size="compact-xs"
+                  color={
+                    activeNotice.kind === 'task_failed'
+                      ? 'red'
+                      : activeNotice.kind === 'approval_pending'
+                        ? 'yellow'
+                        : 'teal'
+                  }
+                  variant="light"
+                  radius="xl"
+                  onClick={() => openNoticeTarget(activeNotice)}
+                  rightSection={<IconArrowRight size={12} />}
+                >
+                  前往
+                </Button>
+              )}
+              {hasTrayContent && (
+                <Tooltip label={expanded ? '收起后台动态' : '查看后台动态'} withArrow>
+                  <ActionIcon
+                    size="xs"
+                    variant="subtle"
+                    color="gray"
+                    radius="xl"
+                    aria-expanded={expanded}
+                    aria-label={expanded ? '收起后台动态' : '查看后台动态'}
+                    onClick={() => setExpanded((v) => !v)}
+                  >
+                    {expanded ? <IconChevronUp size={12} /> : <IconChevronDown size={12} />}
+                  </ActionIcon>
+                </Tooltip>
+              )}
+              <Tooltip label="关闭通知" withArrow>
+                <ActionIcon
+                  size="xs"
+                  variant="subtle"
+                  color="gray"
+                  radius="xl"
+                  aria-label="关闭通知"
+                  onClick={() => dismissIslandNotification(activeNotice.key)}
+                >
+                  <IconX size={12} />
+                </ActionIcon>
+              </Tooltip>
+            </div>
+            <span
+              key={`progress:${activeNotice.key}`}
+              className={`attention-island-progress is-${noticeTone}`}
+              aria-hidden="true"
+            />
+          </>
+        ) : (
+          <>
+            <UnstyledButton
+              className="attention-island-trigger"
+              onClick={() => setExpanded((v) => !v)}
+              aria-expanded={expanded}
+              aria-label={hasAttention ? `展开待处理审批，共 ${attentionCount} 项` : `展开运行中会话，共 ${activityCount} 项`}
             >
-              {isUserInput(primaryApproval) ? '回答' : '查看'}
-            </Button>
-          )}
-          {!primaryApproval && primaryWaitingSession && (
-            <Button
-              size="compact-xs"
-              color="yellow"
-              variant="light"
-              radius="xl"
-              onClick={() => openSession(primaryWaitingSession.agent_id, primaryWaitingSession.id)}
-              rightSection={<IconArrowRight size={12} />}
-            >
-              查看
-            </Button>
-          )}
-          {!hasAttention && (
-            <Tooltip label="暂时收起状态提示" withArrow>
-              <ActionIcon
-                size="xs"
-                variant="subtle"
-                color="gray"
-                radius="xl"
-                aria-label="暂时收起状态提示"
-                onClick={() => {
-                  setExpanded(false)
-                  setDismissedSignature(activitySignature)
-                }}
-              >
-                <IconX size={12} />
-              </ActionIcon>
-            </Tooltip>
-          )}
-        </div>
+              <span className={`attention-island-dot is-${tone}`} aria-hidden="true" />
+              {primaryAgent ? (
+                <span className="attention-island-brand" aria-hidden="true">
+                  <AgentBrandIcon kind={primaryAgent.kind} size={14} />
+                </span>
+              ) : hasAttention ? (
+                <IconAlertTriangle size={14} className="attention-island-icon-warn" aria-hidden="true" />
+              ) : primaryGroup ? (
+                <IconUsers size={14} className="attention-island-icon-run" aria-hidden="true" />
+              ) : (
+                <IconBolt size={14} className="attention-island-icon-run" aria-hidden="true" />
+              )}
+
+              <span className="attention-island-copy">
+                {primaryApproval ? (
+                  <>
+                    <strong className="attention-island-title">
+                      {primarySession ? displaySessionTitle(primarySession) : '待审批'}
+                    </strong>
+                    <span className="attention-island-sep" aria-hidden="true">·</span>
+                    <span className="attention-island-detail">{approvalSummary(primaryApproval)}</span>
+                  </>
+                ) : primaryWaitingSession ? (
+                  <>
+                    <strong className="attention-island-title">{displaySessionTitle(primaryWaitingSession)}</strong>
+                    <span className="attention-island-sep" aria-hidden="true">·</span>
+                    <span className="attention-island-detail">等待确认</span>
+                  </>
+                ) : primaryRunning ? (
+                  <>
+                    <strong className="attention-island-title">
+                      {runningSessions.length > 1
+                        ? `${runningSessions.length} 个会话运行中`
+                        : displaySessionTitle(primaryRunning)}
+                    </strong>
+                    {runningSessions.length === 1 && (
+                      <>
+                        <span className="attention-island-sep" aria-hidden="true">·</span>
+                        <span className="attention-island-detail">正在执行</span>
+                      </>
+                    )}
+                  </>
+                ) : primaryGroup ? (
+                  <>
+                    <strong className="attention-island-title">{primaryGroup.name || '群聊协作'}</strong>
+                    <span className="attention-island-sep" aria-hidden="true">·</span>
+                    <span className="attention-island-detail">接力进行中</span>
+                  </>
+                ) : null}
+              </span>
+
+              {(attentionCount > 1 || (hasAttention && hasActivity)) && (
+                <span className="attention-island-count">{attentionCount + (hasAttention ? 0 : activityCount)}</span>
+              )}
+
+              <span className="attention-island-chevron" aria-hidden="true">
+                {expanded ? <IconChevronUp size={13} /> : <IconChevronDown size={13} />}
+              </span>
+            </UnstyledButton>
+
+            <div className="attention-island-inline-actions">
+              {primaryApproval && primaryCanDecide && (
+                <>
+                  <Button
+                    size="compact-xs"
+                    color="violet"
+                    variant="filled"
+                    radius="xl"
+                    loading={primaryBusy}
+                    onClick={() => void handleDecision(primaryApproval, 'approve')}
+                    leftSection={<IconCheck size={12} />}
+                  >
+                    批准
+                  </Button>
+                  <Button
+                    size="compact-xs"
+                    color="gray"
+                    variant="subtle"
+                    radius="xl"
+                    disabled={primaryBusy}
+                    onClick={() => void handleDecision(primaryApproval, 'cancel')}
+                  >
+                    拒绝
+                  </Button>
+                </>
+              )}
+              {primaryApproval && !primaryCanDecide && primaryApproval.agent_id && primaryApproval.session_id && (
+                <Button
+                  size="compact-xs"
+                  color="yellow"
+                  variant="light"
+                  radius="xl"
+                  onClick={() => openSession(primaryApproval.agent_id!, primaryApproval.session_id!)}
+                  rightSection={<IconArrowRight size={12} />}
+                >
+                  {isUserInput(primaryApproval) ? '回答' : '查看'}
+                </Button>
+              )}
+              {!primaryApproval && primaryWaitingSession && (
+                <Button
+                  size="compact-xs"
+                  color="yellow"
+                  variant="light"
+                  radius="xl"
+                  onClick={() => openSession(primaryWaitingSession.agent_id, primaryWaitingSession.id)}
+                  rightSection={<IconArrowRight size={12} />}
+                >
+                  查看
+                </Button>
+              )}
+              {!hasAttention && (
+                <Tooltip label="暂时收起状态提示" withArrow>
+                  <ActionIcon
+                    size="xs"
+                    variant="subtle"
+                    color="gray"
+                    radius="xl"
+                    aria-label="暂时收起状态提示"
+                    onClick={() => {
+                      setExpanded(false)
+                      setDismissedSignature(activitySignature)
+                    }}
+                  >
+                    <IconX size={12} />
+                  </ActionIcon>
+                </Tooltip>
+              )}
+            </div>
+          </>
+        )}
       </div>
 
-      {expanded && (
+      {expanded && hasTrayContent && (
         <div
           className="attention-island-tray"
           data-liquid-surface="panel"
