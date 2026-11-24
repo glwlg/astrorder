@@ -102,17 +102,38 @@ describe('PluginsPage Component', () => {
     expect(devTab).toBeInTheDocument()
     expect(diagramTab).toBeInTheDocument()
 
-    // Switch to "开发与数据" — shows Database Tool (DBX) with replaceable slot badge, hides Draw.io
+    // Switch to "开发与数据" — shows generic "数据库管理工具" with selectable DBX provider option
     fireEvent.click(devTab)
     expect(devTab).toHaveAttribute('aria-selected', 'true')
-    expect(screen.getByText('数据库管理工具 (DBX)')).toBeInTheDocument()
-    expect(screen.getByText('数据库工具 · 可替换实现')).toBeInTheDocument()
+    expect(screen.getByText('数据库管理工具')).toBeInTheDocument()
+    expect(screen.getByText('当前实现: DBX')).toBeInTheDocument()
     expect(screen.queryByText('Draw.io 架构与流程图')).toBeNull()
+
+    // Expanding config shows "工具实现" selector with DBX as an option alongside custom web tool
+    fireEvent.click(screen.getAllByRole('button', { name: /参数配置/ })[0])
+    expect(screen.getByText('工具实现')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('DBX')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('http://127.0.0.1:14224')).toBeInTheDocument()
+    expect(screen.queryByText('Web 工具地址')).toBeNull()
+
+    // Switching "工具实现" to "自定义 Web 工具" swaps the active provider badge and config fields
+    const updateSpy = vi.spyOn(api, 'updatePluginSettings').mockResolvedValue({
+      enabled: {},
+      configs: { 'dbx-viewer': { provider: 'custom-web' } },
+    })
+    fireEvent.click(screen.getByDisplayValue('DBX'))
+    fireEvent.click(await screen.findByText('自定义 Web 工具'))
+    expect(screen.getByText('当前实现: 自定义 Web 工具')).toBeInTheDocument()
+    expect(screen.getByText('Web 工具地址')).toBeInTheDocument()
+    expect(screen.queryByText('服务地址')).toBeNull()
+    await waitFor(() => expect(updateSpy).toHaveBeenCalledWith({
+      configs: { 'dbx-viewer': { provider: 'custom-web' } },
+    }))
 
     // Switch to "图表与白板" — shows Draw.io, hides Database Tool
     fireEvent.click(diagramTab)
     expect(screen.getByText('Draw.io 架构与流程图')).toBeInTheDocument()
-    expect(screen.queryByText('数据库管理工具 (DBX)')).toBeNull()
+    expect(screen.queryByText('数据库管理工具')).toBeNull()
 
     // Search filters plugins across categories
     fireEvent.click(screen.getByRole('tab', { name: /全部/ }))

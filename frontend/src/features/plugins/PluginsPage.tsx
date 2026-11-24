@@ -115,12 +115,35 @@ function PluginCard({ viewer }: { viewer: ArtifactViewer }) {
   const isEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(viewer.id))
   const togglePlugin = usePluginSettingsStore((s) => s.togglePlugin)
   const setPluginConfig = usePluginSettingsStore((s) => s.setPluginConfig)
-  const getPluginConfig = usePluginSettingsStore((s) => s.getPluginConfig)
+  const pluginConfigMap = usePluginSettingsStore((s) => s.pluginConfigs[viewer.id])
 
   const [expanded, setExpanded] = useState(false)
   const [infoOpened, setInfoOpened] = useState(false)
   const Icon = viewer.icon
-  const hasOptions = viewer.configOptions && viewer.configOptions.length > 0
+
+  const readOptionValue = (key: string, fallback: unknown) =>
+    pluginConfigMap && pluginConfigMap[key] !== undefined ? pluginConfigMap[key] : fallback
+
+  const defaultByKey = useMemo(() => {
+    const map: Record<string, unknown> = {}
+    for (const opt of viewer.configOptions || []) map[opt.key] = opt.defaultValue
+    return map
+  }, [viewer.configOptions])
+
+  const visibleOptions = (viewer.configOptions || []).filter((opt) => {
+    if (!opt.visibleWhen) return true
+    const current = readOptionValue(opt.visibleWhen.key, defaultByKey[opt.visibleWhen.key])
+    return current === opt.visibleWhen.value
+  })
+  const hasOptions = visibleOptions.length > 0
+
+  const activeProviderLabel = (() => {
+    if (!viewer.providerConfigKey) return viewer.implementationName || ''
+    const providerOpt = (viewer.configOptions || []).find((opt) => opt.key === viewer.providerConfigKey)
+    if (!providerOpt) return viewer.implementationName || ''
+    const current = String(readOptionValue(providerOpt.key, providerOpt.defaultValue) ?? '')
+    return providerOpt.options?.find((choice) => choice.value === current)?.label || current
+  })()
 
   return (
     <Card withBorder radius="md" p="md" style={{ background: 'var(--astr-surface)' }}>
@@ -151,7 +174,7 @@ function PluginCard({ viewer }: { viewer: ArtifactViewer }) {
               )}
               {viewer.capabilitySlot && (
                 <Badge size="xs" variant="light" color="teal">
-                  {viewer.capabilityLabel || viewer.capabilitySlot} · 可替换实现
+                  {activeProviderLabel ? `当前实现: ${activeProviderLabel}` : `${viewer.capabilityLabel || viewer.capabilitySlot} · 可替换实现`}
                 </Badge>
               )}
               {viewer.capabilities.canEdit && (
@@ -214,7 +237,7 @@ function PluginCard({ viewer }: { viewer: ArtifactViewer }) {
               rightSection={expanded ? <IconChevronUp size={13} /> : <IconChevronDown size={13} />}
               onClick={() => setExpanded(!expanded)}
             >
-              参数配置 ({viewer.configOptions?.length})
+              参数配置 ({visibleOptions.length})
             </Button>
             <Text size="xs" c="dimmed">
               {isEnabled ? '生效中' : '已停用'}
@@ -223,8 +246,8 @@ function PluginCard({ viewer }: { viewer: ArtifactViewer }) {
 
           <Collapse expanded={expanded}>
             <Stack gap="xs" mt="xs" p="xs" style={{ background: 'var(--astr-surface-muted)', borderRadius: 6 }}>
-              {viewer.configOptions?.map((opt: ViewerConfigOption) => {
-                const currentVal = getPluginConfig(viewer.id, opt.key, opt.defaultValue)
+              {visibleOptions.map((opt: ViewerConfigOption) => {
+                const currentVal = readOptionValue(opt.key, opt.defaultValue)
 
                 if (opt.type === 'boolean') {
                   return (
@@ -261,9 +284,13 @@ function PluginCard({ viewer }: { viewer: ArtifactViewer }) {
                       )}
                       <Select
                         size="xs"
+                        allowDeselect={false}
+                        aria-label={opt.label}
                         data={opt.options}
                         value={String(currentVal)}
-                        onChange={(val) => setPluginConfig(viewer.id, opt.key, val)}
+                        onChange={(val) => {
+                          if (val !== null) setPluginConfig(viewer.id, opt.key, val)
+                        }}
                       />
                     </div>
                   )
@@ -566,6 +593,7 @@ export function PluginsPage() {
           viewer.description || '',
           viewer.capabilityLabel || '',
           viewer.implementationName || '',
+          ...(viewer.configOptions || []).flatMap((opt) => (opt.options || []).map((choice) => choice.label)),
           ...(viewer.extensions || []),
         ].join(' ').toLowerCase(),
         isToggleable: true,

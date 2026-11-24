@@ -19,6 +19,7 @@ export interface ViewerConfigOption {
   type: 'string' | 'boolean' | 'number' | 'select'
   options?: { label: string; value: string }[]
   defaultValue: unknown
+  visibleWhen?: { key: string; value: string | boolean }
 }
 
 export type PluginCategory =
@@ -36,6 +37,7 @@ export interface ArtifactViewer {
   category?: PluginCategory
   capabilitySlot?: string
   capabilityLabel?: string
+  providerConfigKey?: string
   implementationName?: string
   badgeLabel?: string // 如 "[流程图]"、"[架构图]"、"[白板]"
   tabColor?: string // 标签页图标主色调

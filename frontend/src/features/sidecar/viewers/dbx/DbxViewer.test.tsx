@@ -223,6 +223,37 @@ describe('DbxViewer & MarkdownLinkMenu', () => {
     expect(screen.getByText(/wslc run -d --name astrorder-dbx/)).toBeTruthy()
   })
 
+  it('supports switching database tool provider to custom-web URL', async () => {
+    usePluginSettingsStore.setState({
+      pluginConfigs: {
+        'dbx-viewer': {
+          provider: 'custom-web',
+          customUrl: 'http://127.0.0.1:8978/',
+        },
+      },
+    })
+
+    render(
+      <MantineProvider>
+        <DbxViewer
+          artifact={{
+            id: 'database:workbench',
+            name: '数据库',
+            kind: 'workspace_file',
+            mediaType: 'application/x-astrorder-dbx',
+            readUrl: '',
+            writable: false,
+            sessionId: 'sess-custom',
+            agentId: 'codex',
+          }}
+        />
+      </MantineProvider>,
+    )
+
+    const iframe = await screen.findByTitle('数据库工作台')
+    expect(iframe.getAttribute('src')).toBe('http://127.0.0.1:8978/')
+  })
+
   it('shows right-click open in DBX item only for sql files in MarkdownLinkMenu', async () => {
     const sampleSession = {
       id: 'sess-sql',

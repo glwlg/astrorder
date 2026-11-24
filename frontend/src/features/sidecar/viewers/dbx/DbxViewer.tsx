@@ -56,9 +56,18 @@ function buildProxyEntryUrl(revision: number): string {
 
 export function DbxViewer({ artifact, session }: ViewerContext) {
   const sessionKey = artifact.sessionId || session?.id || 'global'
+  const provider = usePluginSettingsStore((s) =>
+    s.getPluginConfig<string>(DBX_PLUGIN_ID, 'provider', 'dbx'),
+  )
   const configuredUpstream = usePluginSettingsStore((s) =>
     s.getPluginConfig<string>(DBX_PLUGIN_ID, 'upstreamUrl', DBX_DEFAULT_UPSTREAM_URL),
   )
+  const configuredCustomUrl = usePluginSettingsStore((s) =>
+    s.getPluginConfig<string>(DBX_PLUGIN_ID, 'customUrl', ''),
+  )
+  const isCustomProvider = provider === 'custom-web'
+  const normalizedCustomUrl = (configuredCustomUrl || '').trim()
+  const isValidCustomUrl = /^https?:\/\/[^/\s]+/i.test(normalizedCustomUrl)
   const sqlItems = useDbxSidecarStore((s) => s.itemsBySession[sessionKey] || EMPTY_SQL_LIST)
   const pendingRequest = useDbxSidecarStore((s) => s.pendingRequest)
 
@@ -72,6 +81,20 @@ export function DbxViewer({ artifact, session }: ViewerContext) {
   const toolbarRef = useRef<HTMLDivElement | null>(null)
 
   const checkStatus = useCallback(async () => {
+    if (isCustomProvider) {
+      setChecking(false)
+      setStatus({
+        configured: isValidCustomUrl,
+        upstream_url: normalizedCustomUrl,
+        base_path: '',
+        reachable: isValidCustomUrl,
+        authenticated: true,
+        password_required: false,
+        setup_required: false,
+        error: isValidCustomUrl ? '' : '请在「插件管理 → 数据库管理工具 → 参数配置」中填写自定义 Web 工具地址',
+      })
+      return
+    }
     setChecking(true)
     try {
       const res = await authenticatedApiFetch('/api/v1/plugins/dbx-status')
@@ -99,12 +122,12 @@ export function DbxViewer({ artifact, session }: ViewerContext) {
         authenticated: false,
         password_required: false,
         setup_required: false,
-        error: err instanceof Error ? err.message : '无法检查 DBX 状态',
+        error: err instanceof Error ? err.message : '无法检查数据库服务状态',
       })
     } finally {
       setChecking(false)
     }
-  }, [configuredUpstream])
+  }, [configuredUpstream, isCustomProvider, isValidCustomUrl, normalizedCustomUrl])
 
   useEffect(() => {
     void checkStatus()
@@ -170,11 +193,11 @@ export function DbxViewer({ artifact, session }: ViewerContext) {
   }, [status?.reachable])
 
   // Deliver queued SQL into the live same-origin DBX iframe whenever a request
-  // arrives or the iframe finishes loading.
+  // arrives or the iframe finishes loading. For custom web providers, keep the
+  // SQL ready in the checklist strip for one-click copy.
   useEffect(() => {
     if (!pendingRequest) return
     if (pendingRequest.sessionId !== sessionKey && pendingRequest.sessionId !== 'global') return
-    if (!status?.reachable || status.context_path_mismatch || !iframeLoaded) return
 
     const list = useDbxSidecarStore.getState().itemsBySession[pendingRequest.sessionId] || []
     const entry = list.find((item) => item.id === pendingRequest.entryId)
@@ -182,6 +205,18 @@ export function DbxViewer({ artifact, session }: ViewerContext) {
       useDbxSidecarStore.getState().clearPendingRequest(pendingRequest.requestId)
       return
     }
+
+    if (isCustomProvider) {
+      const store = useDbxSidecarStore.getState()
+      store.clearPendingRequest(pendingRequest.requestId)
+      store.markEntryStatus(pendingRequest.sessionId, entry.id, 'injected')
+      const hint = `已将 ${entry.filename} 加入顶部 SQL 清单，点击复制按钮即可粘贴到当前数据库工具执行`
+      setLiveStatus(hint)
+      notifications.show({ color: 'teal', message: hint })
+      return
+    }
+
+    if (!status?.reachable || status.context_path_mismatch || !iframeLoaded) return
 
     const controller = new AbortController()
     void injectSqlIntoDbxFrame(
@@ -217,9 +252,16 @@ export function DbxViewer({ artifact, session }: ViewerContext) {
     })
 
     return () => controller.abort()
-  }, [pendingRequest, sessionKey, status?.reachable, status?.context_path_mismatch, iframeLoaded])
+  }, [pendingRequest, sessionKey, isCustomProvider, status?.reachable, status?.context_path_mismatch, iframeLoaded])
 
-  const iframeSrc = useMemo(() => buildProxyEntryUrl(iframeRevision), [iframeRevision])
+  const iframeSrc = useMemo(
+    () => (isCustomProvider ? normalizedCustomUrl : buildProxyEntryUrl(iframeRevision)),
+    [iframeRevision, isCustomProvider, normalizedCustomUrl],
+  )
+
+  useEffect(() => {
+    setIframeLoaded(false)
+  }, [provider, iframeSrc])
 
   const handleRefresh = () => {
     setIframeLoaded(false)
@@ -229,7 +271,8 @@ export function DbxViewer({ artifact, session }: ViewerContext) {
   }
 
   const handleOpenExternal = () => {
-    window.open(DBX_PROXY_ENTRY_URL, '_blank', 'noopener,noreferrer')
+    const targetUrl = isCustomProvider && isValidCustomUrl ? normalizedCustomUrl : DBX_PROXY_ENTRY_URL
+    window.open(targetUrl, '_blank', 'noopener,noreferrer')
   }
 
   const handleOpenPluginSettings = () => {
@@ -295,8 +338,12 @@ export function DbxViewer({ artifact, session }: ViewerContext) {
     useSidecarStore.getState().openArtifact(sqlArtifact, viewer?.id || 'monaco-viewer')
   }
 
-  const canRenderFrame = Boolean(status?.reachable && !status?.context_path_mismatch)
-  const upstreamDisplay = status?.upstream_url || configuredUpstream || DBX_DEFAULT_UPSTREAM_URL
+  const canRenderFrame = isCustomProvider
+    ? isValidCustomUrl
+    : Boolean(status?.reachable && !status?.context_path_mismatch)
+  const upstreamDisplay = isCustomProvider
+    ? normalizedCustomUrl || '未配置 Web 地址'
+    : status?.upstream_url || configuredUpstream || DBX_DEFAULT_UPSTREAM_URL
   const statusDotClass = checking
     ? 'is-checking'
     : canRenderFrame
@@ -428,7 +475,7 @@ export function DbxViewer({ artifact, session }: ViewerContext) {
         {canRenderFrame ? (
           <iframe
             ref={iframeRef}
-            key={iframeRevision}
+            key={`${provider}-${iframeRevision}`}
             src={iframeSrc}
             title="数据库工作台"
             className="sidecar-dbx-iframe"
@@ -444,26 +491,32 @@ export function DbxViewer({ artifact, session }: ViewerContext) {
                 </Text>
               </Group>
               <Text size="xs" c="dimmed">
-                当前插件实现：<code>DBX</code> · 服务地址：<code>{upstreamDisplay}</code>
+                当前插件实现：<code>{isCustomProvider ? '自定义 Web 工具' : 'DBX'}</code> · 服务地址：<code>{upstreamDisplay}</code>
               </Text>
               {status?.error && (
                 <Text size="xs" c="red">
                   {status.error}
                 </Text>
               )}
-              <Text size="xs" c="dimmed">
-                本机可用 Windows 自带 <code>wslc</code> 容器启动 DBX（无密码、仅监听本机回环）：
-              </Text>
-              <pre className="sidecar-dbx-cmd">{WSLC_START_CMD}</pre>
+              {!isCustomProvider && (
+                <>
+                  <Text size="xs" c="dimmed">
+                    本机可用 Windows 自带 <code>wslc</code> 容器启动 DBX（无密码、仅监听本机回环）：
+                  </Text>
+                  <pre className="sidecar-dbx-cmd">{WSLC_START_CMD}</pre>
+                </>
+              )}
               <Group gap="xs">
                 <Button size="xs" color="indigo" leftSection={<IconRefresh size={14} />} loading={checking} onClick={() => { void checkStatus() }}>
                   重新检测
                 </Button>
-                <Button size="xs" variant="light" color="gray" leftSection={<IconCopy size={14} />} onClick={() => { void handleCopyLaunchCmd() }}>
-                  复制启动命令
-                </Button>
+                {!isCustomProvider && (
+                  <Button size="xs" variant="light" color="gray" leftSection={<IconCopy size={14} />} onClick={() => { void handleCopyLaunchCmd() }}>
+                    复制启动命令
+                  </Button>
+                )}
                 <Button size="xs" variant="subtle" color="indigo" leftSection={<IconSettings size={14} />} onClick={handleOpenPluginSettings}>
-                  修改服务地址
+                  修改工具配置
                 </Button>
               </Group>
             </div>
