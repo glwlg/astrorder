@@ -9,6 +9,74 @@ export function isAsyncQuestion(message: Message): boolean {
  return message.role === 'assistant' && message.delivery === 'async' && Boolean(message.questions?.length)
 }
 
+export function sameAsyncQuestion(a: Message, b: Message): boolean {
+ if (a.agent_id !== b.agent_id || a.session_id !== b.session_id) return false
+ if (a.id === b.id) return true
+ if (a.delivery !== 'async' || b.delivery !== 'async') return false
+ const qa = a.questions || []
+ const qb = b.questions || []
+ if (qa.length > 0 && qa.length === qb.length) {
+  if (qa.every((q, idx) => q.title.trim() === qb[idx].title.trim())) return true
+ }
+ const ta = (a.text || '').trim()
+ const tb = (b.text || '').trim()
+ return Boolean(ta && ta === tb)
+}
+
+function commandMatchesAsyncQuestion(
+ command: Command,
+ message: Message,
+ sessionMessages: readonly Message[] = [],
+): boolean {
+ if (
+  command.agent_id !== message.agent_id ||
+  command.session_id !== message.session_id ||
+  command.action !== 'send' ||
+  !['accepted', 'running', 'completed'].includes(command.state)
+ ) {
+  return false
+ }
+ if (command.target_id === message.id || command.id === `async-answer:${message.id}`) {
+  return true
+ }
+ if (
+  command.target_id &&
+  sessionMessages.some(
+   (other) => other.id === command.target_id && sameAsyncQuestion(message, other),
+  )
+ ) {
+  return true
+ }
+ const questions = message.questions || []
+ if (
+  command.id.startsWith('async-answer:') &&
+  questions.length > 1 &&
+  questions.every((q) => q.title.trim() && command.text.includes(q.title.trim()))
+ ) {
+  return true
+ }
+ return false
+}
+
+export function isAsyncQuestionAnswered(
+ message: Message,
+ sessionMessages: readonly Message[] = [],
+ sessionCommands: readonly Command[] = [],
+): boolean {
+ if (message.answered) return true
+ if (
+  sessionMessages.some(
+   (other) =>
+    other.id !== message.id &&
+    Boolean(other.answered) &&
+    sameAsyncQuestion(message, other),
+  )
+ ) {
+  return true
+ }
+ return sessionCommands.some((cmd) => commandMatchesAsyncQuestion(cmd, message, sessionMessages))
+}
+
 export function hasLaterNativeInput(messages: Message[], index: number): boolean {
  const question = messages[index]
  if (!question) return false
@@ -28,7 +96,14 @@ export function AsyncUserInputCard({ message, commands = [], continued = false, 
  const [error, setError] = useState('')
  const [receipt, setReceipt] = useState<Command | null>(null)
  const submission = useRef<CommandPayload | null>(null)
- const saved = receipt || commands.find(c => c.agent_id === message.agent_id && c.session_id === message.session_id && c.action === 'send' && c.target_id === message.id && c.state !== 'failed' && c.state !== 'cancelled')
+ const saved = receipt || commands.find(c =>
+  c.agent_id === message.agent_id &&
+  c.session_id === message.session_id &&
+  c.action === 'send' &&
+  (c.target_id === message.id || c.id === `async-answer:${message.id}` || commandMatchesAsyncQuestion(c, message)) &&
+  c.state !== 'failed' &&
+  c.state !== 'cancelled',
+ )
  const sent = Boolean(saved && ['accepted', 'running', 'completed'].includes(saved.state))
  const isClosed = continued || Boolean(message.answered)
  const uncertain = Boolean(submission.current || saved && !['failed', 'cancelled'].includes(saved.state))

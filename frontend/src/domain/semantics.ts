@@ -33,9 +33,25 @@ type ReconciledMessage = {
   id: string
   role?: string
   text?: string
+  delivery?: string | null
+  answered?: boolean
+  questions?: { title: string }[] | null
   command_id?: string | null
   created_at?: string
   attachments?: { id: string; name: string; media_type: string }[]
+}
+
+function matchesNativeAsyncQuestion(live: ReconciledMessage, native: ReconciledMessage): boolean {
+  if (!live.id.includes(':live:') || native.id.includes(':live:')) return false
+  if (live.delivery !== 'async' || native.delivery !== 'async') return false
+  const lq = live.questions || []
+  const nq = native.questions || []
+  if (lq.length > 0 && lq.length === nq.length && lq.every((q, idx) => q.title.trim() === nq[idx].title.trim())) {
+    return true
+  }
+  const lt = (live.text || '').trim()
+  const nt = (native.text || '').trim()
+  return Boolean(lt && lt === nt)
 }
 
 /** SQLite native timestamps are UTC even when their wire format omits the zone. */
@@ -85,7 +101,16 @@ export function mergeMessagesById<T extends ReconciledMessage>(existing: T[], in
   // A row may first arrive empty and later update under the same ID.
   // Reconcile after all updates so the completed row replaces its placeholder too.
   const nativeUsers = result.filter(item => item.role === 'user' && !item.id.startsWith('optimistic-'))
-  return result.filter(item => !item.id.startsWith('optimistic-') || !nativeUsers.some(native => confirmsOptimisticUser(item, native)))
+  const nativeAsyncQuestions = result.filter(item => item.delivery === 'async' && !item.id.includes(':live:'))
+  return result.filter(item => {
+    if (item.id.startsWith('optimistic-') && nativeUsers.some(native => confirmsOptimisticUser(item, native))) {
+      return false
+    }
+    if (item.id.includes(':live:') && item.delivery === 'async' && nativeAsyncQuestions.some(native => matchesNativeAsyncQuestion(item, native))) {
+      return false
+    }
+    return true
+  })
 }
 
 export function mergeMessages(existing: Message[], incoming: Message[]): Message[] {

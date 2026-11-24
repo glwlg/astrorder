@@ -138,4 +138,110 @@ describe('buildActionInboxItems', () => {
 
     expect(items).toEqual([])
   })
+
+  it('ignores stale :live: async questions once native history marks them answered or session resumes running', () => {
+    const sIdle = makeSession({ id: 's-agy', title: '监控Agent', status: 'idle' })
+    const key = scopeKey('agent-1', 's-agy')
+    const questions = [
+      { title: '将插件从 Alloy 切换为 Grafana Beyla 后，现有 alloy 插件项如何处理?', options: ['A', 'B'] },
+      { title: '本次改造范围按哪种节奏推进?', options: ['节奏1', '节奏2'] },
+    ]
+    const nativeAnswered: Message = {
+      id: 'step-42',
+      agent_id: 'agent-1',
+      session_id: 's-agy',
+      role: 'assistant',
+      kind: 'message',
+      text: '将插件从 Alloy 切换为 Grafana Beyla 后，现有 alloy 插件项如何处理?',
+      attachments: [],
+      created_at: '2026-11-24T02:55:00Z',
+      command_id: null,
+      tool: null,
+      delivery: 'async',
+      answered: true,
+      questions,
+    }
+    const staleLiveCopy: Message = {
+      ...nativeAnswered,
+      id: 'antigravity:s-agy:live:7',
+      created_at: '2026-11-24T02:55:03Z',
+      answered: false,
+    }
+
+    // Even when the stale :live: copy has a newer timestamp and answered:false, deduplication clears it.
+    expect(
+      buildActionInboxItems({
+        sessions: [sIdle],
+        agents: { 'agent-1': readyAgent },
+        approvals: {},
+        messages: { [key]: { [nativeAnswered.id]: nativeAnswered, [staleLiveCopy.id]: staleLiveCopy } },
+        notifications: {},
+        isUnread: () => false,
+      }),
+    ).toEqual([])
+
+    // Even with only the :live: copy present, an accepted answer command or running session or later tool activity clears it.
+    expect(
+      buildActionInboxItems({
+        sessions: [makeSession({ id: 's-agy', title: '监控Agent', status: 'running' })],
+        agents: { 'agent-1': readyAgent },
+        approvals: {},
+        messages: { [key]: { [staleLiveCopy.id]: staleLiveCopy } },
+        notifications: {},
+        isUnread: () => false,
+      }),
+    ).toEqual([])
+
+    expect(
+      buildActionInboxItems({
+        sessions: [sIdle],
+        agents: { 'agent-1': readyAgent },
+        approvals: {},
+        messages: { [key]: { [staleLiveCopy.id]: staleLiveCopy } },
+        commands: {
+          [`${key}::async-answer:step-42`]: {
+            id: 'async-answer:step-42',
+            agent_id: 'agent-1',
+            session_id: 's-agy',
+            action: 'send',
+            target_id: 'step-42',
+            text: `${questions[0].title}\nA\n\n${questions[1].title}\n节奏1`,
+            attachments: [],
+            state: 'completed',
+            created_at: '2026-11-24T02:55:10Z',
+            error: null,
+          },
+        },
+        notifications: {},
+        isUnread: () => false,
+      }),
+    ).toEqual([])
+
+    expect(
+      buildActionInboxItems({
+        sessions: [sIdle],
+        agents: { 'agent-1': readyAgent },
+        approvals: {},
+        messages: {
+          [key]: {
+            [staleLiveCopy.id]: staleLiveCopy,
+            'step-43': {
+              id: 'step-43',
+              agent_id: 'agent-1',
+              session_id: 's-agy',
+              role: 'tool',
+              kind: 'tool',
+              text: 'Search all alloy references',
+              attachments: [],
+              created_at: '2026-11-24T02:55:20Z',
+              command_id: null,
+              tool: { name: 'search', status: 'completed' },
+            },
+          },
+        },
+        notifications: {},
+        isUnread: () => false,
+      }),
+    ).toEqual([])
+  })
 })

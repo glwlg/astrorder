@@ -14,6 +14,7 @@ export function useActionInbox(activeSessionKey?: string): {
   const agents = useAstrorderStore((state) => state.agents)
   const approvals = useAstrorderStore((state) => state.approvals)
   const messages = useAstrorderStore((state) => state.messages)
+  const commands = useAstrorderStore((state) => state.commands)
   const notifications = useAstrorderStore((state) => state.notifications)
   const { isUnread, markRead } = useSessionUnread(activeSessionKey)
 
@@ -24,10 +25,11 @@ export function useActionInbox(activeSessionKey?: string): {
         agents,
         approvals,
         messages,
+        commands,
         notifications,
         isUnread,
       }),
-    [sessions, agents, approvals, messages, notifications, isUnread],
+    [sessions, agents, approvals, messages, commands, notifications, isUnread],
   )
 
   const urgentCount = useMemo(() => countUrgentInboxItems(items), [items])

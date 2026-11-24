@@ -1,4 +1,9 @@
-import { hasLaterNativeInput, isAsyncQuestion } from '../components/AsyncUserInputCard'
+import {
+  hasLaterNativeInput,
+  isAsyncQuestion,
+  isAsyncQuestionAnswered,
+  sameAsyncQuestion,
+} from '../components/AsyncUserInputCard'
 import { isUserInput } from '../components/UserInputCard'
 import { displaySessionTitle, isHiddenRailSession, sessionActivityStatus } from '../components/sessionRailModel'
 import { scopeKey } from './semantics'
@@ -56,14 +61,45 @@ function latestNoticeBySession(notifications: Record<string, EventNotification>)
 
 function sortedSessionMessages(bag: Record<string, Message> | undefined): Message[] {
   if (!bag) return []
-  return Object.values(bag).sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''))
+  const all = Object.values(bag)
+  const nativeAsync = all.filter((m) => m.delivery === 'async' && !m.id.includes(':live:'))
+  return all
+    .filter((m) => {
+      if (m.id.includes(':live:') && m.delivery === 'async') {
+        return !nativeAsync.some((native) => sameAsyncQuestion(m, native))
+      }
+      return true
+    })
+    .sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''))
+}
+
+function hasLaterAgentProgress(rows: Message[], index: number): boolean {
+  const question = rows[index]
+  if (!question) return false
+  const questionTs = Date.parse(question.created_at || '')
+  return rows.slice(index + 1).some((m) => {
+    if (m.agent_id !== question.agent_id || m.session_id !== question.session_id) return false
+    if (m.id === question.id) return false
+    if (m.tool?.background === true) return false
+    const msgTs = Date.parse(m.created_at || '')
+    if (Number.isFinite(questionTs) && Number.isFinite(msgTs) && msgTs <= questionTs) return false
+    if (m.kind === 'tool' || m.kind === 'thinking') return true
+    return m.role === 'assistant' && m.kind === 'message' && m.delivery !== 'async' && Boolean(m.text.trim())
+  })
 }
 
 export function buildActionInboxItems(input: BuildActionInboxInput): ActionInboxItem[] {
-  const { sessions, agents, approvals, messages, notifications, isUnread } = input
+  const { sessions, agents, approvals, messages, commands = {}, notifications, isUnread } = input
   const sessionMap = new Map<string, Session>()
   for (const session of sessions) {
     sessionMap.set(scopeKey(session.agent_id, session.id), session)
+  }
+  const commandsBySession = new Map<string, Command[]>()
+  for (const cmd of Object.values(commands)) {
+    const key = scopeKey(cmd.agent_id, cmd.session_id)
+    const list = commandsBySession.get(key)
+    if (list) list.push(cmd)
+    else commandsBySession.set(key, [cmd])
   }
   const notices = latestNoticeBySession(notifications)
 
@@ -133,12 +169,20 @@ export function buildActionInboxItems(input: BuildActionInboxInput): ActionInbox
   // 3. Unanswered async questions in loaded session transcripts
   for (const [key, bag] of Object.entries(messages)) {
     if (coveredQuestionSessions.has(key)) continue
+    const session = sessionMap.get(key)
+    if (session?.status === 'running') continue
     const rows = sortedSessionMessages(bag)
+    const sessionCommands = commandsBySession.get(key) || []
     for (let i = rows.length - 1; i >= 0; i -= 1) {
       const msg = rows[i]
       if (!isAsyncQuestion(msg)) continue
-      if (hasLaterNativeInput(rows, i)) break
-      const session = sessionMap.get(key)
+      if (
+        hasLaterNativeInput(rows, i) ||
+        isAsyncQuestionAnswered(msg, rows, sessionCommands) ||
+        hasLaterAgentProgress(rows, i)
+      ) {
+        break
+      }
       const agent = agents[msg.agent_id]
       coveredQuestionSessions.add(key)
       coveredAnySessions.add(key)

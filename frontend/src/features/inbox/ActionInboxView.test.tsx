@@ -115,4 +115,67 @@ describe('ActionInboxView', () => {
       text: '请直接提交推送',
     })))
   })
+
+  it('clears an async question card immediately once answered via command receipt or native history', async () => {
+    const qMsg = {
+      id: 'antigravity:s-mon:live:1',
+      agent_id: 'agent-1',
+      session_id: 's-mon',
+      role: 'assistant' as const,
+      kind: 'message' as const,
+      text: '请选择改造节奏',
+      attachments: [],
+      created_at: '2026-11-24T02:55:00Z',
+      command_id: null,
+      tool: null,
+      delivery: 'async' as const,
+      answered: false,
+      questions: [{ title: '本次改造范围按哪种节奏推进?', options: ['方案A', '方案B'] }],
+    }
+    vi.spyOn(api, 'createCommand').mockResolvedValue({
+      id: `async-answer:${qMsg.id}`,
+      agent_id: 'agent-1',
+      session_id: 's-mon',
+      action: 'send',
+      target_id: qMsg.id,
+      text: '方案A',
+      attachments: [],
+      state: 'accepted',
+      created_at: '2026-11-24T02:55:05Z',
+      error: null,
+    })
+    vi.spyOn(api, 'getMessages').mockResolvedValue({ items: [qMsg], next_cursor: null })
+
+    useAstrorderStore.getState().hydrateBootstrap({
+      protocol_version: 1,
+      cursor: 1,
+      agents: [{
+        id: 'agent-1',
+        kind: 'antigravity',
+        name: 'Antigravity',
+        status: 'ready',
+        capabilities: ['chat', 'approvals'],
+        limitation: null,
+      }],
+      sessions: [
+        { id: 's-mon', agent_id: 'agent-1', title: '监控Agent', workspace: '/repo', status: 'idle', updated_at: '2026-11-24T02:55:00Z' },
+      ],
+    })
+    useAstrorderStore.getState().mergeMessages('agent-1', 's-mon', [qMsg])
+
+    render(
+      <MantineProvider>
+        <QueryClientProvider client={new QueryClient()}>
+          <ActionInboxView onOpenSession={vi.fn()} />
+        </QueryClientProvider>
+      </MantineProvider>,
+    )
+
+    expect(screen.getByText('监控Agent')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('radio', { name: '方案A' }))
+    fireEvent.click(screen.getByRole('button', { name: '发送回答' }))
+
+    await waitFor(() => expect(screen.queryByText('监控Agent')).not.toBeInTheDocument())
+    expect(screen.getByText('全部处理完毕')).toBeInTheDocument()
+  })
 })
