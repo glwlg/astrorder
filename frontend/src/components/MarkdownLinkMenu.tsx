@@ -1,11 +1,13 @@
 import { Menu } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { IconCopy, IconDatabase, IconDownload, IconExternalLink, IconFileText } from '@tabler/icons-react'
+import { IconCode, IconCopy, IconDatabase, IconDownload, IconExternalLink, IconFileText } from '@tabler/icons-react'
 import { request } from '../api/client'
 import type { Session } from '../domain/types'
 import { usePluginSettingsStore } from '../features/plugins/pluginSettingsStore'
 import { downloadFile, fileDesktop } from '../features/sidecar/fileTransfer'
-import { DBX_PLUGIN_ID, isSqlFilePath, openSqlFileInDbx } from '../features/sidecar/viewers/dbx'
+import { resolveArtifactFromPath } from '../features/sidecar/resolver'
+import { useSidecarStore } from '../features/sidecar/sidecarStore'
+import { DBX_PLUGIN_ID, extractSqlLine, isSqlFilePath, openSqlFileInDbx, stripSqlLocationSuffix } from '../features/sidecar/viewers/dbx'
 
 export type MarkdownLinkMenuTarget = {
   x: number
@@ -109,14 +111,30 @@ export function MarkdownLinkMenu({
         ) : (
           <>
             {canOpenInDbx && (
-              <Menu.Item
-                leftSection={<IconDatabase size={14} />}
-                onClick={() => {
-                  void openSqlFileInDbx({ path: target.value, session })
-                }}
-              >
-                在右侧 DBX 中打开
-              </Menu.Item>
+              <>
+                <Menu.Item
+                  leftSection={<IconDatabase size={14} />}
+                  onClick={() => {
+                    void openSqlFileInDbx({ path: target.value, session })
+                  }}
+                >
+                  在右侧 DBX 中打开
+                </Menu.Item>
+                {session && (
+                  <Menu.Item
+                    leftSection={<IconCode size={14} />}
+                    onClick={() => {
+                      const cleanPath = stripSqlLocationSuffix(target.value)
+                      const line = extractSqlLine(target.value)
+                      const artifact = resolveArtifactFromPath(cleanPath.replace(/%/g, '%25'), session)
+                      if (line) artifact.metadata = { ...(artifact.metadata || {}), line }
+                      useSidecarStore.getState().openArtifact(artifact, 'monaco-viewer')
+                    }}
+                  >
+                    在代码编辑器中打开
+                  </Menu.Item>
+                )}
+              </>
             )}
             <Menu.Item leftSection={<IconFileText size={14} />} onClick={handleFile}>
               用系统默认应用打开

@@ -9,6 +9,8 @@ import { useShallow } from 'zustand/react/shallow'
 import { useReducedMotion } from '@mantine/hooks'
 import { AnimatePresence, motion } from 'motion/react'
 import { api } from '../../api/client'
+import { usePluginSettingsStore } from '../plugins/pluginSettingsStore'
+import { DBX_PLUGIN_ID, isSqlFilePath, openSqlFileInDbx } from '../sidecar/viewers/dbx'
 import { sessionHandoffTargets } from '../../domain/handoff'
 import type { Agent, AgentCommand, AgentMention, Approval, BotGroup, Command, Message, Session, Task } from '../../domain/types'
 import { findSessionHandoff, newCommandId, scopeKey } from '../../domain/semantics'
@@ -356,6 +358,12 @@ export function MobileWorkspace() {
   }, [])
   const openFile = (path: string) => {
     if (!selected) return
+    if (usePluginSettingsStore.getState().isPluginEnabled(DBX_PLUGIN_ID) && isSqlFilePath(path)) {
+      useSidecarStore.getState().switchSession(`${selected.agent_id}:${selected.id}`)
+      void openSqlFileInDbx({ path, session: selected })
+      openWorkbench()
+      return
+    }
     const artifact = resolveArtifactFromPath(path, selected)
     const viewer = artifactViewerRegistry.findViewer(artifact)
     if (!viewer) { notify('该文件暂不支持在工作区中打开', 'yellow'); return }

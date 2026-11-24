@@ -22,6 +22,8 @@ import remarkGfm from 'remark-gfm'
 import type { Session } from '../domain/types'
 import { api } from '../api/client'
 import { artifactViewerRegistry, isNonPreviewableFile } from '../features/sidecar/registry'
+import { usePluginSettingsStore } from '../features/plugins/pluginSettingsStore'
+import { DBX_PLUGIN_ID, isSqlFilePath, openSqlFileInDbx } from '../features/sidecar/viewers/dbx'
 import { videoMediaType } from '../features/sidecar/viewers/video/formats'
 import { resolveArtifactFromPath } from '../features/sidecar/resolver'
 import { useSidecarStore } from '../features/sidecar/sidecarStore'
@@ -622,6 +624,10 @@ export const MarkdownContent = memo(function MarkdownContent({
   const handleOpenLocalFile = async (path: string, line?: number, endLine?: number) => {
     const fullPath = resolvePathWithWorkspace(path)
     if (currentSession) {
+      if (usePluginSettingsStore.getState().isPluginEnabled(DBX_PLUGIN_ID) && isSqlFilePath(fullPath)) {
+        await openSqlFileInDbx({ path: fullPath, session: currentSession, line })
+        return
+      }
       const artifact = resolveArtifactFromPath(fullPath.replace(/%/g, '%25'), currentSession)
       if (line) {
         artifact.metadata = { ...(artifact.metadata || {}), line, ...(endLine ? { endLine } : {}) }

@@ -5,6 +5,7 @@ import {
   IconCheck,
   IconChevronDown,
   IconChevronRight,
+  IconCode,
   IconCopy,
   IconDatabase,
   IconDownload,
@@ -358,6 +359,15 @@ export function FileTreeViewer({ artifact, isActive = true }: ViewerContext) {
       toggleDirectory(node.path)
       return
     }
+    if (usePluginSettingsStore.getState().isPluginEnabled(DBX_PLUGIN_ID) && isSqlFilePath(node.path)) {
+      void openSqlFileInDbx({
+        path: node.path,
+        sessionId: artifact.sessionId,
+        agentId: artifact.agentId,
+        connectionId: artifact.connectionId,
+      })
+      return
+    }
     const targetArtifact = resolveArtifactFromPath(node.path, {
       id: artifact.sessionId,
       agent_id: artifact.agentId,
@@ -698,6 +708,26 @@ export function FileTreeViewer({ artifact, isActive = true }: ViewerContext) {
                     }}
                   >
                     在右侧 DBX 中打开
+                  </Menu.Item>
+                  <Menu.Item
+                    leftSection={<IconCode size={14} />}
+                    style={{ whiteSpace: 'nowrap' }}
+                    onClick={() => {
+                      const node = contextMenu.node
+                      setContextMenu(null)
+                      const targetArtifact = resolveArtifactFromPath(node.path, {
+                        id: artifact.sessionId,
+                        agent_id: artifact.agentId,
+                        connection_id: artifact.connectionId,
+                        workspace: null,
+                        title: '',
+                        status: 'idle',
+                        updated_at: '',
+                      })
+                      openArtifact(targetArtifact, 'monaco-viewer')
+                    }}
+                  >
+                    在代码编辑器中打开
                   </Menu.Item>
                   <Menu.Divider />
                 </>

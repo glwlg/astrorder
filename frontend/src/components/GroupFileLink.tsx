@@ -8,6 +8,8 @@ import { resolveArtifactFromPath, splitPathAndLine } from "../features/sidecar/r
 import { findGroupFile } from "../features/chat/groupFileSources";
 import { artifactViewerRegistry } from "../features/sidecar/registry";
 import { groupSidecarKey, useSidecarStore } from "../features/sidecar/sidecarStore";
+import { usePluginSettingsStore } from "../features/plugins/pluginSettingsStore";
+import { DBX_PLUGIN_ID, isSqlFilePath, openSqlFileInDbx } from "../features/sidecar/viewers/dbx";
 import { MarkdownLinkMenu } from "./MarkdownLinkMenu";
 
 export function groupFileSession(file: GroupFileReference): Session {
@@ -58,6 +60,11 @@ export function GroupFileLink({ href, children, image, onImageClick }: {
   const open = (file: GroupFileReference) => {
     const ref = artifact(file);
     if (image && onImageClick) { onImageClick(ref.readUrl); return; }
+    if (!image && usePluginSettingsStore.getState().isPluginEnabled(DBX_PLUGIN_ID) && isSqlFilePath(file.path)) {
+      const line = typeof ref.metadata?.line === "number" ? ref.metadata.line : undefined;
+      void openSqlFileInDbx({ path: file.path, session: groupFileSession(file), line });
+      return;
+    }
     const viewer = artifactViewerRegistry.findViewer(ref);
     if (viewer) useSidecarStore.getState().openArtifact(ref, viewer.id);
     else useSidecarStore.getState().revealFileInTree(ref.sessionId, ref.agentId, file.path, file.workspace, file.member_name, ref.connectionId);

@@ -1,8 +1,10 @@
 import { MantineProvider } from '@mantine/core'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { MarkdownContent } from '../../../../components/MarkdownContent'
 import { MarkdownLinkMenu } from '../../../../components/MarkdownLinkMenu'
 import { usePluginSettingsStore } from '../../../plugins/pluginSettingsStore'
+import { useSidecarStore } from '../../sidecarStore'
 import { tryInjectSqlSync } from './dbxBridge'
 import { useDbxSidecarStore } from './dbxStore'
 import { DbxViewer } from './DbxViewer'
@@ -222,23 +224,32 @@ describe('DbxViewer & MarkdownLinkMenu', () => {
   })
 
   it('shows right-click open in DBX item only for sql files in MarkdownLinkMenu', async () => {
+    const sampleSession = {
+      id: 'sess-sql',
+      agent_id: 'codex',
+      title: 'OpsCore',
+      workspace: '/home/luwei/workspace/OpsCore',
+      status: 'idle' as const,
+      updated_at: '2026-11-24T00:00:00Z',
+    }
     const { rerender } = render(
       <MantineProvider>
         <MarkdownLinkMenu
           target={{ x: 100, y: 100, kind: 'file', value: '/home/luwei/workspace/OpsCore/001_test.sql' }}
-          session={null}
+          session={sampleSession}
           onClose={() => {}}
         />
       </MantineProvider>,
     )
 
     expect(await screen.findByText('在右侧 DBX 中打开')).toBeTruthy()
+    expect(screen.getByText('在代码编辑器中打开')).toBeTruthy()
 
     rerender(
       <MantineProvider>
         <MarkdownLinkMenu
           target={{ x: 100, y: 100, kind: 'file', value: '/home/luwei/workspace/OpsCore/main.go' }}
-          session={null}
+          session={sampleSession}
           onClose={() => {}}
         />
       </MantineProvider>,
@@ -246,6 +257,70 @@ describe('DbxViewer & MarkdownLinkMenu', () => {
 
     await waitFor(() => {
       expect(screen.queryByText('在右侧 DBX 中打开')).toBeNull()
+    })
+  })
+
+  it('opens sql links directly in DBX on left click when dbx plugin is enabled, and falls back to Monaco when disabled', async () => {
+    const sampleSession = {
+      id: 'sess-click',
+      agent_id: 'codex',
+      title: 'OpsCore',
+      workspace: '/home/luwei/workspace/OpsCore',
+      status: 'idle' as const,
+      updated_at: '2026-11-24T00:00:00Z',
+    }
+    useSidecarStore.setState({
+      isOpen: false,
+      activeTabId: '',
+      tabs: [],
+      dirtyTabs: {},
+      activeSessionKey: 'codex:sess-click',
+      sessionMemories: {},
+    })
+    globalThis.fetch = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/api/v1/files/raw')) {
+        return Promise.resolve(
+          new Response('ALTER TABLE ops ADD COLUMN enabled BOOLEAN;', {
+            status: 200,
+            headers: { 'Content-Type': 'text/plain' },
+          }),
+        )
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify({ existing: [], entries: [] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+    }) as unknown as typeof fetch
+
+    render(
+      <MantineProvider>
+        <MarkdownContent
+          value="请执行 [001_add_enabled.sql](backend/migrations/001_add_enabled.sql)"
+          session={sampleSession}
+        />
+      </MantineProvider>,
+    )
+
+    // 1. Plugin enabled (default): clicking .sql opens DBX directly
+    fireEvent.click(screen.getByRole('button', { name: '001_add_enabled.sql' }))
+    await waitFor(() => {
+      expect(useSidecarStore.getState().activeTabId).toBe('dbx:workbench')
+    })
+    const queued = useDbxSidecarStore.getState().itemsBySession['sess-click'] || []
+    expect(queued).toHaveLength(1)
+    expect(queued[0].filename).toBe('001_add_enabled.sql')
+    expect(queued[0].content).toBe('ALTER TABLE ops ADD COLUMN enabled BOOLEAN;')
+
+    // 2. Plugin disabled: clicking .sql opens Monaco editor instead
+    usePluginSettingsStore.setState({ enabledPlugins: { 'dbx-viewer': false } })
+    fireEvent.click(screen.getByRole('button', { name: '001_add_enabled.sql' }))
+    await waitFor(() => {
+      const state = useSidecarStore.getState()
+      const active = state.tabs.find((t) => t.id === state.activeTabId)
+      expect(active?.viewerId).toBe('monaco-viewer')
     })
   })
 })
