@@ -51,6 +51,7 @@ func describeKernel(name string, state map[string]any) kernelMenuState {
 func (s *ShellService) installTray(tray *application.SystemTray, show func()) {
 	menu := s.app.NewMenu()
 	menu.Add("打开星序").OnClick(func(*application.Context) { show() })
+	menu.Add("设置").OnClick(func(*application.Context) { _ = s.OpenSettings("") })
 	menu.Add("复制访问令牌").OnClick(func(*application.Context) {
 		go func() {
 			if _, err := s.CopyAccessToken(); err != nil {

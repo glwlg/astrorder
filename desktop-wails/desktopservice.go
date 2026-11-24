@@ -17,41 +17,71 @@ func requireWindow(ctx context.Context, expected *application.WebviewWindow) err
 	}
 	return nil
 }
+
+func (d *DesktopService) requireAppWindow(ctx context.Context) error {
+	caller, ok := ctx.Value(application.WindowKey).(application.Window)
+	if !ok {
+		return errors.New("desktop capability is not available to this window")
+	}
+	if d.shell.window != nil && caller.ID() == d.shell.window.ID() {
+		return nil
+	}
+	d.shell.settingsMu.Lock()
+	settingsWin := d.shell.settingsWindow
+	d.shell.settingsMu.Unlock()
+	if settingsWin != nil && caller.ID() == settingsWin.ID() {
+		return nil
+	}
+	return errors.New("desktop capability is not available to this window")
+}
+
 func (d *DesktopService) Status(ctx context.Context) (map[string]any, error) {
-	if err := requireWindow(ctx, d.shell.window); err != nil {
+	if err := d.requireAppWindow(ctx); err != nil {
 		return nil, err
 	}
 	return d.shell.Status()
 }
 func (d *DesktopService) Run(ctx context.Context, target, action string) (map[string]any, error) {
-	if err := requireWindow(ctx, d.shell.window); err != nil {
+	if err := d.requireAppWindow(ctx); err != nil {
 		return nil, err
 	}
 	return d.shell.Run(target, action)
 }
 func (d *DesktopService) GetStartupSettings(ctx context.Context) (StartupSettings, error) {
-	if err := requireWindow(ctx, d.shell.window); err != nil {
+	if err := d.requireAppWindow(ctx); err != nil {
 		return StartupSettings{}, err
 	}
 	return d.shell.GetStartupSettings()
 }
 func (d *DesktopService) SetStartupEnabled(ctx context.Context, enabled bool) (StartupSettings, error) {
-	if err := requireWindow(ctx, d.shell.window); err != nil {
+	if err := d.requireAppWindow(ctx); err != nil {
 		return StartupSettings{}, err
 	}
 	return d.shell.SetStartupEnabled(enabled)
 }
 func (d *DesktopService) SetClipboardFiles(ctx context.Context, paths []string) (bool, error) {
-	if err := requireWindow(ctx, d.shell.window); err != nil {
+	if err := d.requireAppWindow(ctx); err != nil {
 		return false, err
 	}
 	return d.shell.SetClipboardFiles(paths)
 }
 func (d *DesktopService) Notify(ctx context.Context, title, body, path string) (bool, error) {
-	if err := requireWindow(ctx, d.shell.window); err != nil {
+	if err := d.requireAppWindow(ctx); err != nil {
 		return false, err
 	}
 	return d.shell.Notify(title, body, path)
+}
+func (d *DesktopService) OpenSettings(ctx context.Context, tab string) error {
+	if err := d.requireAppWindow(ctx); err != nil {
+		return err
+	}
+	return d.shell.OpenSettings(tab)
+}
+func (d *DesktopService) FocusMain(ctx context.Context, path string) error {
+	if err := d.requireAppWindow(ctx); err != nil {
+		return err
+	}
+	return d.shell.FocusMain(path)
 }
 func (d *DesktopService) Minimize(ctx context.Context) error {
 	if err := requireWindow(ctx, d.shell.window); err != nil {
@@ -79,20 +109,26 @@ func (d *DesktopService) IsMaximized(ctx context.Context) (bool, error) {
 	}
 	return d.shell.IsMaximized(), nil
 }
+func (d *DesktopService) IsForeground(ctx context.Context) (bool, error) {
+	if err := d.requireAppWindow(ctx); err != nil {
+		return false, err
+	}
+	return d.shell.IsForeground(), nil
+}
 func (d *DesktopService) OpenDirectoryDialog(ctx context.Context, path string) (string, error) {
-	if err := requireWindow(ctx, d.shell.window); err != nil {
+	if err := d.requireAppWindow(ctx); err != nil {
 		return "", err
 	}
 	return d.shell.OpenDirectoryDialog(path)
 }
 func (d *DesktopService) OpenFileDialog(ctx context.Context, path string) (string, error) {
-	if err := requireWindow(ctx, d.shell.window); err != nil {
+	if err := d.requireAppWindow(ctx); err != nil {
 		return "", err
 	}
 	return d.shell.OpenFileDialog(path)
 }
 func (d *DesktopService) OpenExternal(ctx context.Context, url string) error {
-	if err := requireWindow(ctx, d.shell.window); err != nil {
+	if err := d.requireAppWindow(ctx); err != nil {
 		return err
 	}
 	return d.shell.OpenExternal(url)

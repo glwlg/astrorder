@@ -248,6 +248,42 @@ export interface KernelStatusResponse {
 
 export type KernelTarget = 'app' | 'daemon'
 export type KernelAction = 'restart' | 'update'
+
+export interface CapabilityDispatchJobItem {
+  item_id: string
+  source_agent: string
+  label?: string
+}
+
+export interface CapabilityDispatchJobReport {
+  item_id: string
+  item_label?: string
+  target_id: string
+  target_name?: string
+  agent: string
+  ok: boolean
+  installed_path?: string
+  message: string
+}
+
+export interface CapabilityDispatchJob {
+  id: string
+  status: 'running' | 'completed' | 'partial' | 'failed'
+  capability_type: 'skill' | 'mcp' | 'plugin' | string
+  source_target_id: string
+  source_target_name?: string
+  items: CapabilityDispatchJobItem[]
+  target_matrix: Array<{ target_id: string; agent: string }>
+  total_steps: number
+  completed_steps: number
+  success_count: number
+  failed_count: number
+  current_label?: string
+  reports: CapabilityDispatchJobReport[]
+  created_at: string
+  updated_at: string
+  finished_at?: string
+}
 export type KernelOperationStatus = 'queued' | 'running' | 'success' | 'failed'
 
 export interface KernelOperationPayload {
@@ -973,6 +1009,19 @@ export const api = {
     success_count: number
     reports: Array<{ target_id: string; target_name?: string; agent: string; ok: boolean; installed_path?: string; message: string }>
   }>('/capabilities/dispatch', payload, 'POST'),
+
+  startCapabilityDispatchJob: (payload: {
+    capability_type: 'skill' | 'mcp' | 'plugin'
+    source_target_id: string
+    items: Array<{ item_id: string; source_agent: string; label?: string }>
+    target_matrix: Array<{ target_id: string; agent: string }>
+  }) => jsonRequest<CapabilityDispatchJob>('/capabilities/dispatch/jobs', payload, 'POST'),
+
+  listCapabilityDispatchJobs: () =>
+    request<{ jobs: CapabilityDispatchJob[] }>('/capabilities/dispatch/jobs'),
+
+  clearCapabilityDispatchJobs: () =>
+    jsonRequest<{ cleared: number; jobs: CapabilityDispatchJob[] }>('/capabilities/dispatch/jobs/clear', {}, 'POST'),
 
   getAnalyticsQuotas: () => request<{ gatewayType: string; data: MagpieQuota[] }>('/analytics/quotas'),
   getAnalyticsUsage: (params: { range: 'today' | 'all' | '30d' | '7d'; surface: 'all' | 'codex' | 'hermes' | 'grok' | 'antigravity' | 'claude'; source?: 'all' | 'direct' | 'gateway' | 'sessions'; connection_id?: string; since?: number; until?: number }) => {

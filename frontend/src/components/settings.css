@@ -45,7 +45,43 @@
 .settings-modal .mantine-Button-root[data-variant='filled'], .settings-modal .mantine-Button-root:not([data-variant]) { background: var(--astr-accent-strong, #7540bd); color: var(--astr-accent-contrast, #ffffff); }
 .settings-modal .mantine-Button-root[data-variant='filled']:hover, .settings-modal .mantine-Button-root:not([data-variant]):hover { background: var(--astr-indigo); }
 .settings-modal .mantine-Button-root[data-variant='light'] { background: var(--astr-surface-muted); color: var(--astr-text); }
-.settings-modal .mantine-Badge-root, .environment-connections .mantine-Badge-root { background: transparent; border: 0; color: var(--astr-text-muted); font-weight: 500; text-transform: none; letter-spacing: 0; padding-inline: 0; }
+.settings-modal .mantine-Badge-root:not(.capabilities-hub-container .mantine-Badge-root), .environment-connections .mantine-Badge-root { background: transparent; border: 0; color: var(--astr-text-muted); font-weight: 500; text-transform: none; letter-spacing: 0; padding-inline: 0; }
+.settings-standalone-window {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--astr-surface);
+  color: var(--astr-text);
+}
+.settings-standalone-header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--astr-border);
+  background: var(--astr-surface);
+}
+.settings-standalone-body {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.settings-standalone-body > .settings-tabs {
+  flex: 1 1 0;
+  min-height: 0;
+  height: 100%;
+}
+.settings-standalone-window .settings-tab-panel {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+}
 .settings-table-scroll { overflow-x: auto; }
 .settings-table-scroll table { min-width: 740px; }
 .settings-table-scroll th { color: var(--astr-text-muted); font-size: 11px; font-weight: 500; white-space: nowrap; padding-block: 12px; background: var(--astr-surface-muted); }

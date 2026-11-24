@@ -21,6 +21,17 @@ import { registerSW } from 'virtual:pwa-register'
 applyThemePalette(readStoredThemePalette(), { persistLocal: false })
 installGlobalNativeHoldBlocker()
 
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (event) => {
+    if (
+      event.key === 'astrorder:theme-palette' ||
+      event.key === 'astrorder:theme-seed'
+    ) {
+      applyThemePalette(readStoredThemePalette(), { persistLocal: false })
+    }
+  })
+}
+
 if (typeof window !== 'undefined' && 'astrorderDesktop' in window) {
   document.documentElement.classList.add('is-desktop-app')
 }

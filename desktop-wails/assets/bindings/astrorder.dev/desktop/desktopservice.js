@@ -24,6 +24,14 @@ export function Close() {
 }
 
 /**
+ * @param {string} path
+ * @returns {$CancellablePromise<void>}
+ */
+export function FocusMain(path) {
+    return $Call.ByName("main.DesktopService.FocusMain", path);
+}
+
+/**
  * @returns {$CancellablePromise<$models.StartupSettings>}
  */
 export function GetStartupSettings() {
@@ -42,6 +50,13 @@ export function HideEmbeddedPage() {
  */
 export function HideStatistics() {
     return $Call.ByName("main.DesktopService.HideStatistics");
+}
+
+/**
+ * @returns {$CancellablePromise<boolean>}
+ */
+export function IsForeground() {
+    return $Call.ByName("main.DesktopService.IsForeground");
 }
 
 /**
@@ -105,6 +120,14 @@ export function OpenFileDialog(path) {
  */
 export function OpenPreview(payload) {
     return $Call.ByName("main.DesktopService.OpenPreview", payload);
+}
+
+/**
+ * @param {string} tab
+ * @returns {$CancellablePromise<void>}
+ */
+export function OpenSettings(tab) {
+    return $Call.ByName("main.DesktopService.OpenSettings", tab);
 }
 
 /**

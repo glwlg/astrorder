@@ -7,6 +7,14 @@ export const SIDEBAR_INTEGRATIONS_PLUGIN_ID = 'sidebar-integrations'
 
 const LEGACY_STORAGE_KEY_ENABLED = 'astrorder:plugins:enabled'
 const LEGACY_STORAGE_KEY_CONFIG = 'astrorder:plugins:config'
+export const PLUGIN_SETTINGS_SYNC_KEY = 'astrorder:plugin-settings:sync'
+
+function notifyPluginSettingsSync() {
+  if (typeof localStorage === 'undefined') return
+  try {
+    localStorage.setItem(PLUGIN_SETTINGS_SYNC_KEY, String(Date.now()))
+  } catch {}
+}
 
 export interface PluginSettingsState {
   // pluginId -> boolean (是否启用，缺省视为 true)
@@ -111,6 +119,7 @@ export const usePluginSettingsStore = create<PluginSettingsState>((set, get) => 
       try {
         const response = await api.updatePluginSettings({ enabled: { [pluginId]: nextVal } })
         set({ ...applyResponse(response), hydrated: true })
+        notifyPluginSettingsSync()
       } catch (error) {
         set({ enabledPlugins: prevEnabled })
         notifications.show({
@@ -134,6 +143,7 @@ export const usePluginSettingsStore = create<PluginSettingsState>((set, get) => 
       try {
         const response = await api.updatePluginSettings({ configs: { [pluginId]: patch } })
         set({ ...applyResponse(response), hydrated: true })
+        notifyPluginSettingsSync()
       } catch (error) {
         set({ pluginConfigs: prevConfigs })
         notifications.show({

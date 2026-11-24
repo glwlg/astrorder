@@ -1,4 +1,4 @@
-/* Astrorder Agent Capability Hub - High-Density IDE & Control Plane Theme */
+/* Astrorder Agent Capability Hub - Clean, Scannable Control Plane */
 :root {
   --cap-bg: #0b0f17;
   --cap-surface: #111827;
@@ -10,9 +10,11 @@
   --cap-accent: var(--astr-accent, #6366f1);
   --cap-accent-glow: color-mix(in oklab, var(--astr-accent, #6366f1) 24%, transparent);
   --cap-cyan: #38bdf8;
-  --cap-teal: var(--astr-text);
+  --cap-green: #10b981;
+  --cap-teal: #14b8a6;
   --cap-purple: var(--astr-accent, #8b5cf6);
   --cap-amber: #f59e0b;
+  --cap-red: #ef4444;
   --cap-text-primary: #f8fafc;
   --cap-text-secondary: #94a3b8;
   --cap-text-muted: #64748b;
@@ -29,12 +31,14 @@
   --cap-accent: var(--astr-accent, #4f46e5);
   --cap-accent-glow: color-mix(in oklab, var(--astr-accent, #4f46e5) 16%, transparent);
   --cap-cyan: #0284c7;
-  --cap-teal: var(--astr-text);
+  --cap-green: #059669;
+  --cap-teal: #0d9488;
   --cap-purple: var(--astr-accent, #7c3aed);
   --cap-amber: #d97706;
+  --cap-red: #dc2626;
   --cap-text-primary: #0f172a;
   --cap-text-secondary: #475569;
-  --cap-text-muted: #94a3b8;
+  --cap-text-muted: #64748b;
 }
 
 .capabilities-hub-container {
@@ -55,74 +59,139 @@
   flex-direction: column;
   background: var(--cap-surface);
   border-bottom: 1px solid var(--cap-border);
-  padding: 12px 20px 10px 20px;
   flex-shrink: 0;
 }
 
-/* 顶部顶行：品牌 + 架构标签 + 全局搜索 + 环境状态 + 快捷操作 */
 .capabilities-topbar-row1 {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  flex-wrap: nowrap;
+  gap: 12px;
+  padding: 12px 18px 8px;
+  flex-wrap: wrap;
 }
 
-.engine-status-badge {
+.capabilities-topbar-row2 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 18px 8px;
+  flex-wrap: wrap;
+}
+
+.cap-node-switcher {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 8px;
+  background: var(--cap-surface-elevated);
+  border: 1px solid var(--cap-border);
+}
+
+.cap-node-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--cap-text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.14s ease;
+}
+
+.cap-node-btn:hover {
+  color: var(--cap-text-primary);
+}
+
+.cap-node-btn.active {
+  background: var(--cap-accent);
+  color: var(--astr-accent-contrast, #ffffff);
+  font-weight: 600;
+}
+
+.cap-jobs-trigger {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 10px;
-  border-radius: 6px;
-  font-size: 11px;
-  font-weight: 600;
-  background: transparent;
-  color: var(--astr-muted);
-  border: 1px solid transparent;
-  font-family: var(--mantine-font-family-monospace, monospace);
-}
-
-.cluster-nodes-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 12px;
-  border-radius: 6px;
-  font-size: 11px;
-  background: var(--cap-surface-elevated);
+  height: 30px;
+  padding: 0 11px;
+  border-radius: 7px;
   border: 1px solid var(--cap-border);
-  color: var(--cap-text-secondary);
+  background: var(--cap-card-bg);
+  color: var(--cap-text-primary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.14s ease;
 }
 
-.node-dot {
-  width: 6px;
-  height: 6px;
+.cap-jobs-trigger:hover {
+  border-color: var(--cap-accent);
+}
+
+.cap-jobs-trigger.is-running {
+  border-color: color-mix(in oklab, var(--cap-accent) 55%, var(--cap-border));
+  background: color-mix(in oklab, var(--cap-accent) 10%, var(--cap-card-bg));
+  color: var(--cap-accent);
+}
+
+.cap-jobs-dot {
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
-  background: var(--cap-teal);
-  box-shadow: none;
+  background: var(--cap-text-muted);
+  flex: none;
+}
+
+.cap-jobs-dot.is-running {
+  background: var(--cap-accent);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--cap-accent) 25%, transparent);
+  animation: cap-pulse 1.6s ease-in-out infinite;
+}
+
+.cap-jobs-dot.is-completed {
+  background: var(--cap-green);
+}
+
+.cap-jobs-dot.is-partial {
+  background: var(--cap-amber);
+}
+
+.cap-jobs-dot.is-failed {
+  background: var(--cap-red);
+}
+
+@keyframes cap-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.55; transform: scale(0.84); }
 }
 
 /* 顶部分类 Tabs */
 .capabilities-nav-tabs {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-top: 10px;
+  gap: 4px;
 }
 
 .capabilities-nav-btn {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
-  border-radius: 8px;
-  font-size: 13px;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 7px;
+  font-size: 12.5px;
   font-weight: 600;
   cursor: pointer;
   background: transparent;
   color: var(--cap-text-secondary);
   border: 1px solid transparent;
-  transition: all 0.15s ease;
+  transition: all 0.14s ease;
 }
 
 .capabilities-nav-btn:hover {
@@ -134,66 +203,104 @@
   background: var(--cap-surface-elevated);
   color: var(--cap-text-primary);
   border-color: var(--cap-border);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
 }
 
-.capabilities-nav-btn.active.tab-skills {
-  border-bottom: 2px solid var(--cap-accent);
+.cap-tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  background: color-mix(in oklab, var(--cap-text-muted) 16%, transparent);
+  color: var(--cap-text-secondary);
 }
-.capabilities-nav-btn.active.tab-mcp {
-  border-bottom: 2px solid var(--cap-teal);
+
+.capabilities-nav-btn.active .cap-tab-count {
+  background: color-mix(in oklab, var(--cap-accent) 16%, transparent);
+  color: var(--cap-accent);
 }
-.capabilities-nav-btn.active.tab-plugins {
-  border-bottom: 2px solid var(--cap-amber);
+
+/* 单一 Agent 视点胶囊 */
+.cap-agent-view-pills {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
 }
-.capabilities-nav-btn.active.tab-market {
-  border-bottom: 2px solid var(--cap-cyan);
+
+.cap-agent-pill {
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  background: transparent;
+  color: var(--cap-text-secondary);
+  border: 1px solid var(--cap-border);
+  transition: all 0.14s ease;
+}
+
+.cap-agent-pill:hover {
+  color: var(--cap-text-primary);
+  border-color: var(--cap-border-focus);
+}
+
+.cap-agent-pill.active {
+  background: color-mix(in oklab, var(--cap-accent) 14%, var(--cap-surface));
+  color: var(--cap-accent);
+  border-color: color-mix(in oklab, var(--cap-accent) 55%, var(--cap-border));
+  font-weight: 650;
 }
 
 /* 三栏工作台主体 */
 .capabilities-workbench {
   display: flex;
   flex: 1 1 0;
+  min-height: 0;
   overflow: hidden;
 }
 
-/* 侧边栏 Filter Rail */
+/* 左侧过滤侧边栏 (Filter Rail) */
 .capabilities-filter-rail {
-  width: 250px;
+  width: 214px;
   flex-shrink: 0;
   background: var(--cap-surface);
   border-right: 1px solid var(--cap-border);
   display: flex;
   flex-direction: column;
   overflow-y: auto;
-  padding: 16px 12px;
+  padding: 14px 10px;
 }
 
 .filter-section-title {
   font-size: 11px;
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.04em;
   color: var(--cap-text-muted);
-  margin-bottom: 8px;
-  padding-left: 6px;
+  margin: 0 0 6px;
+  padding-left: 8px;
 }
 
 .filter-item-btn {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 6px;
   width: 100%;
-  padding: 8px 10px;
-  border-radius: 6px;
-  font-size: 12px;
+  padding: 7px 9px;
+  border-radius: 7px;
+  font-size: 12.5px;
   font-weight: 500;
   color: var(--cap-text-secondary);
   background: transparent;
   border: 1px solid transparent;
   cursor: pointer;
   margin-bottom: 2px;
-  transition: all 0.15s ease;
+  transition: all 0.14s ease;
   text-align: left;
 }
 
@@ -203,15 +310,56 @@
 }
 
 .filter-item-btn.active {
-  background: var(--cap-surface-elevated);
-  border-color: var(--cap-border);
+  background: color-mix(in oklab, var(--cap-accent) 10%, var(--cap-surface-elevated));
+  border-color: color-mix(in oklab, var(--cap-accent) 28%, var(--cap-border));
   color: var(--cap-text-primary);
-  font-weight: 600;
+  font-weight: 650;
 }
 
-/* 中间能力卡片列表 */
+.cap-filter-count {
+  font-size: 11px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--cap-surface-elevated);
+  color: var(--cap-text-secondary);
+}
+
+.cap-filter-count.is-installed {
+  background: color-mix(in oklab, var(--cap-green) 14%, transparent);
+  color: var(--cap-green);
+}
+
+.cap-filter-count.is-uninstalled {
+  background: color-mix(in oklab, var(--cap-amber) 14%, transparent);
+  color: var(--cap-amber);
+}
+
+.cap-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.cap-status-dot.is-installed {
+  background: var(--cap-green);
+}
+
+.cap-status-dot.is-partial {
+  background: var(--cap-cyan);
+}
+
+.cap-status-dot.is-uninstalled {
+  background: var(--cap-amber);
+}
+
+/* 中间技能卡片列表 */
 .capabilities-list-pane {
-  width: 38%;
+  width: 40%;
+  min-width: 300px;
+  max-width: 460px;
   flex-shrink: 0;
   border-right: 1px solid var(--cap-border);
   display: flex;
@@ -220,14 +368,42 @@
   overflow: hidden;
 }
 
-.capability-card {
-  padding: 14px 16px;
-  margin: 6px 10px;
+.cap-list-toolbar {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--cap-border);
+  background: var(--cap-surface);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cap-select-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.cap-batch-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 10px;
   border-radius: 8px;
+  background: color-mix(in oklab, var(--cap-accent) 11%, var(--cap-card-bg));
+  border: 1px solid color-mix(in oklab, var(--cap-accent) 34%, var(--cap-border));
+}
+
+.capability-card {
+  padding: 11px 13px;
+  margin: 6px 10px;
+  border-radius: 9px;
   background: var(--cap-card-bg);
   border: 1px solid var(--cap-border);
   cursor: pointer;
-  transition: all 0.18s ease;
+  transition: border-color 0.14s ease, background 0.14s ease, box-shadow 0.14s ease;
   position: relative;
 }
 
@@ -239,23 +415,82 @@
 .capability-card.selected {
   background: var(--cap-surface-elevated);
   border-color: var(--cap-accent);
-  box-shadow: 0 0 0 1px var(--cap-accent), 0 4px 12px var(--cap-accent-glow);
+  box-shadow: 0 0 0 1px var(--cap-accent);
 }
 
-.capability-card.selected::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 10px;
-  bottom: 10px;
-  width: 3px;
-  border-radius: 0 3px 3px 0;
-  background: var(--cap-cyan);
+.capability-card.is-checked {
+  border-color: color-mix(in oklab, var(--cap-accent) 60%, var(--cap-border));
+  background: color-mix(in oklab, var(--cap-accent) 5%, var(--cap-card-bg));
+}
+
+/* 清晰的安装状态徽标（不受 settings.css Badge 覆盖影响） */
+.cap-install-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 21px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 650;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.cap-install-pill.is-installed {
+  background: color-mix(in oklab, var(--cap-green) 14%, var(--cap-surface));
+  color: var(--cap-green);
+  border: 1px solid color-mix(in oklab, var(--cap-green) 32%, transparent);
+}
+
+.cap-install-pill.is-partial {
+  background: color-mix(in oklab, var(--cap-cyan) 14%, var(--cap-surface));
+  color: var(--cap-cyan);
+  border: 1px solid color-mix(in oklab, var(--cap-cyan) 32%, transparent);
+}
+
+.cap-install-pill.is-missing {
+  background: var(--cap-surface-elevated);
+  color: var(--cap-text-muted);
+  border: 1px dashed var(--cap-border-focus);
+}
+
+.cap-agent-chips {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.cap-agent-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 7px;
+  border-radius: 5px;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.cap-agent-chip.is-installed {
+  background: color-mix(in oklab, var(--cap-green) 13%, var(--cap-surface));
+  color: var(--cap-green);
+  border: 1px solid color-mix(in oklab, var(--cap-green) 30%, transparent);
+}
+
+.cap-agent-chip.is-missing {
+  background: transparent;
+  color: var(--cap-text-muted);
+  border: 1px dashed color-mix(in oklab, var(--cap-border-focus) 80%, transparent);
+  opacity: 0.78;
 }
 
 /* 右侧深度检查器 Inspector */
 .capabilities-inspector-pane {
   flex: 1 1 0;
+  min-width: 0;
   background: var(--cap-surface);
   display: flex;
   flex-direction: column;
@@ -263,27 +498,39 @@
 }
 
 .inspector-top-meta {
-  padding: 18px 24px;
+  padding: 16px 22px 14px;
   border-bottom: 1px solid var(--cap-border);
   background: var(--cap-card-bg);
 }
 
+.cap-inspector-matrix {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--cap-surface-elevated);
+  border: 1px solid var(--cap-border);
+}
+
 .inspector-tabs-header {
   display: flex;
-  gap: 12px;
-  padding: 0 24px;
+  gap: 16px;
+  padding: 0 22px;
   background: var(--cap-surface);
   border-bottom: 1px solid var(--cap-border);
 }
 
 .inspector-tab-item {
-  padding: 12px 6px;
-  font-size: 13px;
+  padding: 10px 4px;
+  font-size: 12.5px;
   font-weight: 600;
   color: var(--cap-text-secondary);
   cursor: pointer;
   border-bottom: 2px solid transparent;
-  transition: all 0.15s ease;
+  transition: all 0.14s ease;
 }
 
 .inspector-tab-item:hover {
@@ -297,17 +544,43 @@
 
 /* Markdown 与代码块预览 */
 .code-preview-block {
-  background: #07090e;
+  background: #0d1117;
   border: 1px solid var(--cap-border);
   border-radius: 8px;
-  padding: 16px;
+  padding: 14px 16px;
   font-family: var(--mantine-font-family-monospace, "JetBrains Mono", monospace);
   font-size: 12px;
   line-height: 1.6;
-  color: #d1d5db;
+  color: #e2e8f0;
   white-space: pre-wrap;
-  word-break: break-all;
+  word-break: break-word;
   overflow-x: auto;
+}
+
+/* 后台分发实时进度浮条 */
+.cap-live-job-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 18px;
+  border-top: 1px solid color-mix(in oklab, var(--cap-accent) 34%, var(--cap-border));
+  background: color-mix(in oklab, var(--cap-accent) 8%, var(--cap-surface));
+  flex-shrink: 0;
+}
+
+.cap-live-job-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+  font-size: 12px;
+}
+
+.cap-live-job-progress {
+  width: 140px;
+  flex-shrink: 0;
 }
 
 /* 底部状态条 Footer Bar */
@@ -315,10 +588,56 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 6px 20px;
+  padding: 6px 18px;
   font-size: 11px;
   background: var(--cap-surface);
   border-top: 1px solid var(--cap-border);
   color: var(--cap-text-muted);
   flex-shrink: 0;
+}
+
+/* 后台任务卡片 */
+.cap-job-card {
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--cap-border);
+  background: var(--cap-card-bg);
+}
+
+.cap-job-report-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  background: var(--cap-surface-elevated);
+}
+
+.cap-dispatch-item-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  background: color-mix(in oklab, var(--cap-accent) 12%, var(--cap-surface));
+  color: var(--cap-text-primary);
+  border: 1px solid color-mix(in oklab, var(--cap-accent) 30%, var(--cap-border));
+}
+
+.cap-dispatch-item-chip button {
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--cap-text-muted);
+  cursor: pointer;
+}
+
+.cap-dispatch-item-chip button:hover {
+  color: var(--cap-red);
 }

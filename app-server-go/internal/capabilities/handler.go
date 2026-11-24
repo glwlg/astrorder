@@ -50,6 +50,10 @@ var routes = []route{
 	{http.MethodPost, capPrefix + "plugins/update"},
 	{http.MethodPost, capPrefix + "marketplaces/update"},
 	{http.MethodPost, capPrefix + "dispatch"},
+	{http.MethodGet, capPrefix + "dispatch/jobs"},
+	{http.MethodPost, capPrefix + "dispatch/jobs"},
+	{http.MethodPost, capPrefix + "dispatch/jobs/clear"},
+	{http.MethodGet, capPrefix + "dispatch/jobs/*"},
 	{http.MethodGet, skillsPrefix + "targets"},
 	{http.MethodGet, skillsPrefix + "search"},
 	{http.MethodGet, skillsPrefix + "target/*"},
@@ -221,7 +225,40 @@ func (h *handler) capabilities(ctx context.Context, w http.ResponseWriter, r *ht
 		}
 		result, err := h.svc.Dispatch(ctx, body.Type, orLocal(body.SourceTarget), body.SourceAgent, body.ItemID, body.Matrix)
 		reply(w, result, err)
+	case "dispatch/jobs":
+		if r.Method == http.MethodGet {
+			writeJSON(w, http.StatusOK, map[string]any{"jobs": h.svc.ListDispatchJobs()})
+			return
+		}
+		var body struct {
+			Type         string            `json:"capability_type"`
+			SourceTarget string            `json:"source_target_id"`
+			Items        []DispatchJobItem `json:"items"`
+			Matrix       []DispatchTarget  `json:"target_matrix"`
+		}
+		if decode(r, &body) != nil {
+			invalid(w)
+			return
+		}
+		job, err := h.svc.StartDispatchJob(ctx, body.Type, orLocal(body.SourceTarget), body.Items, body.Matrix)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusAccepted, job)
+	case "dispatch/jobs/clear":
+		cleared, remaining := h.svc.ClearFinishedDispatchJobs()
+		writeJSON(w, http.StatusOK, map[string]any{"cleared": cleared, "jobs": remaining})
 	default:
+		if id, ok := strings.CutPrefix(tail, "dispatch/jobs/"); ok && id != "" && r.Method == http.MethodGet {
+			job, found := h.svc.GetDispatchJob(id)
+			if !found {
+				writeJSON(w, http.StatusNotFound, map[string]string{"detail": "分发任务不存在"})
+				return
+			}
+			writeJSON(w, http.StatusOK, job)
+			return
+		}
 		http.NotFound(w, r)
 	}
 }

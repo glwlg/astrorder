@@ -26,7 +26,9 @@ type Service struct {
 	CLIBinary    func(context.Context, envtarget.Env) (string, []byte, error)
 	CLITransport func(context.Context, envtarget.Env) ([]byte, error)
 
-	locks sync.Map
+	locks          sync.Map
+	dispatchJobsMu sync.RWMutex
+	dispatchJobs   []*DispatchJob
 }
 
 func New(targets Opener) *Service {

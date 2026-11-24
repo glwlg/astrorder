@@ -46,6 +46,7 @@ const AgentAccountsLayout = lazyNamed(() => import('../features/agentAccounts/Ag
 const UnavailablePlatformPage = lazyNamed(() => import('../features/agentAccounts/UnavailablePlatformPage'), 'UnavailablePlatformPage')
 const QrAuthorizePage = lazyNamed(() => import('../features/auth/QrAuthorizePage'), 'QrAuthorizePage')
 const QrScanPage = lazyNamed(() => import('../features/auth/QrScanPage'), 'QrScanPage')
+const StandaloneSettingsPage = lazyNamed(() => import('../features/settings/SettingsWorkbench'), 'StandaloneSettingsPage')
 
 function RouteSuspenseFallback() {
   return (
@@ -115,12 +116,29 @@ function AuthenticatedApp() {
   const backupsEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_BACKUPS_PLUGIN_ID))
   const accountsEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_AGENT_ACCOUNTS_PLUGIN_ID))
   const integrationsEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(SIDEBAR_INTEGRATIONS_PLUGIN_ID))
-  useShortcutHandlers({
-    chat: () => navigate(chatReturnPath),
-    ...(monitorEnabled ? { monitor: () => navigate('/monitor') } : {}),
-  })
-  useEventStream(Boolean(bootstrap.data), queryClient, navigate)
-  useServerOutboxSync(Boolean(bootstrap.data))
+  const isStandaloneSettings =
+    location.pathname === '/settings' || location.pathname.startsWith('/settings/')
+  useShortcutHandlers(
+    isStandaloneSettings
+      ? {}
+      : {
+          chat: () => navigate(chatReturnPath),
+          ...(monitorEnabled ? { monitor: () => navigate('/monitor') } : {}),
+        },
+  )
+  useEventStream(Boolean(bootstrap.data) && !isStandaloneSettings, queryClient, navigate)
+  useServerOutboxSync(Boolean(bootstrap.data) && !isStandaloneSettings)
+  useEffect(() => {
+    if (isStandaloneSettings) return
+    const onNavigate = (event: Event) => {
+      const to = (event as CustomEvent<{ to?: string }>).detail?.to
+      if (typeof to === 'string' && to.startsWith('/') && !to.startsWith('//')) {
+        navigate(to)
+      }
+    }
+    window.addEventListener('astrorder:navigate', onNavigate)
+    return () => window.removeEventListener('astrorder:navigate', onNavigate)
+  }, [isStandaloneSettings, navigate])
   useEffect(() => {
     clientPerf.setAuthenticated(true)
     return () => clientPerf.setAuthenticated(false)
@@ -131,6 +149,14 @@ function AuthenticatedApp() {
 
   if (bootstrap.isLoading) return <LoadingPage label="正在读取已认证工作台…" />
   if (bootstrap.error) return <BootstrapError error={bootstrap.error} retry={() => void bootstrap.refetch()} />
+
+  if (isStandaloneSettings) {
+    return (
+      <Suspense fallback={<RouteSuspenseFallback />}>
+        <StandaloneSettingsPage />
+      </Suspense>
+    )
+  }
 
   const isMobilePath = location.pathname.startsWith('/mobile')
   const forceMobile = new URLSearchParams(location.search).get('view') === 'mobile'

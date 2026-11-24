@@ -27,3 +27,9 @@ func TestRealWindowsNotification(t *testing.T) {
 		t.Fatal(ok, err)
 	}
 }
+
+func TestShellServiceIsForegroundWithoutWindow(t *testing.T) {
+	if (&ShellService{}).IsForeground() {
+		t.Fatal("expected nil-window ShellService.IsForeground() to return false")
+	}
+}

@@ -1,6 +1,15 @@
 import { create } from 'zustand'
 import { api, type IntegrationItem, type IntegrationPayload } from '../../api/client'
 
+export const INTEGRATIONS_SYNC_KEY = 'astrorder:integrations:sync'
+
+function notifyIntegrationsSync() {
+  if (typeof localStorage === 'undefined') return
+  try {
+    localStorage.setItem(INTEGRATIONS_SYNC_KEY, String(Date.now()))
+  } catch {}
+}
+
 export interface IntegrationsState {
   items: IntegrationItem[]
   hydrated: boolean
@@ -43,6 +52,7 @@ export const useIntegrationsStore = create<IntegrationsState>((set, get) => ({
       items: [...state.items.filter((item) => item.id !== created.id), created].sort((a, b) => a.order - b.order),
       hydrated: true,
     }))
+    notifyIntegrationsSync()
     return created
   },
 
@@ -53,6 +63,7 @@ export const useIntegrationsStore = create<IntegrationsState>((set, get) => ({
         .map((item) => (item.id === id ? updated : item))
         .sort((a, b) => a.order - b.order),
     }))
+    notifyIntegrationsSync()
     return updated
   },
 
@@ -61,6 +72,7 @@ export const useIntegrationsStore = create<IntegrationsState>((set, get) => ({
     set((state) => ({
       items: state.items.filter((item) => item.id !== id).map((item, index) => ({ ...item, order: index })),
     }))
+    notifyIntegrationsSync()
   },
 
   reorder: async (ids) => {
@@ -78,6 +90,7 @@ export const useIntegrationsStore = create<IntegrationsState>((set, get) => ({
     try {
       const res = await api.reorderIntegrations(ids)
       set({ items: Array.isArray(res?.items) ? res.items : optimistic })
+      notifyIntegrationsSync()
     } catch (error) {
       set({ items: prev })
       throw error

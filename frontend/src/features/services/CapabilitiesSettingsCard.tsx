@@ -1,13 +1,15 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Badge,
   Button,
   Card,
   Checkbox,
+  Drawer,
   Group,
   JsonInput,
   Modal,
   Paper,
+  Progress,
   ScrollArea,
   Select,
   SimpleGrid,
@@ -19,17 +21,18 @@ import {
 import { notifications } from '@mantine/notifications'
 import {
   IconCheck,
+  IconChecklist,
   IconCode,
   IconDeviceDesktop,
   IconDownload,
   IconEdit,
-
   IconLayersLinked,
+  IconListDetails,
   IconNetwork,
-
   IconPlug,
   IconPlus,
   IconRefresh,
+  IconRotateClockwise,
   IconSearch,
   IconSend,
   IconServer,
@@ -39,11 +42,12 @@ import {
   IconTrash,
   IconX,
 } from '@tabler/icons-react'
-import { api } from '../../api/client'
+import { api, type CapabilityDispatchJob } from '../../api/client'
 import './SkillsHub.css'
 
 export interface SkillItem {
   name: string
+  display_name?: string
   path?: string
   scope?: string
   agents?: string[]
@@ -59,6 +63,10 @@ export interface SkillItem {
 export const OFFICIAL_SKILL_TITLES: Record<string, string> = {
   'astrorder-sessions': '会话管理',
   'astrorder-browser': '浏览器控制',
+  'astrorder-blackboard': '共享黑板',
+  'astrorder-swarm': 'Swarm 协同',
+  'astrorder-workspace': '工作区拓扑',
+  'astrorder-monitor': '监控墙编组',
 }
 
 export const isOfficialSkill = (s?: SkillItem | null) => {
@@ -68,10 +76,51 @@ export const isOfficialSkill = (s?: SkillItem | null) => {
 
 export const isUninstalledOfficialSkill = (s?: SkillItem | null) => {
   if (!s || !isOfficialSkill(s)) return false
-  return s.scope === 'builtin' && (!s.agents || s.agents.length === 0)
+  return getSkillInstalledAgents(s).length === 0
+}
+
+export const getSkillInstalledAgents = (s?: SkillItem | null): string[] => {
+  if (!s) return []
+  const raw = isOfficialSkill(s)
+    ? (s.installed_agents || [])
+    : (s.installed_agents && s.installed_agents.length > 0 ? s.installed_agents : (s.agents || []))
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const agent of raw) {
+    const clean = String(agent || '').trim().toLowerCase()
+    if (clean && !seen.has(clean)) {
+      seen.add(clean)
+      out.push(clean)
+    }
+  }
+  return out
+}
+
+export const isSkillInstalledForView = (s: SkillItem, selectedAgent: string): boolean => {
+  const installed = getSkillInstalledAgents(s)
+  if (selectedAgent === 'all') return installed.length > 0
+  return installed.includes(selectedAgent.toLowerCase())
+}
+
+export const getSkillDisplayTitle = (s: SkillItem): string => {
+  if (isOfficialSkill(s)) {
+    return s.display_name || OFFICIAL_SKILL_TITLES[s.name] || s.name
+  }
+  return s.name
 }
 
 export const getSkillKey = (s: SkillItem) => `${s.scope || 'installed'}:${s.name}:${s.path || ''}`
+
+const AGENT_SHORT_LABELS: Record<string, string> = {
+  codex: 'Codex',
+  hermes: 'Hermes',
+  grok: 'Grok',
+  antigravity: 'Antigravity',
+}
+
+function shortAgentLabel(id: string, fallback?: string): string {
+  return AGENT_SHORT_LABELS[id.toLowerCase()] || fallback || id
+}
 
 interface CapabilityTargetSummary {
   target_id: string
@@ -97,6 +146,23 @@ interface CapabilityTargetSummary {
   marketplaces: Array<{ id: string; name: string; agent?: string; source_type: string; source: string; last_updated?: string; description?: string }>
 }
 
+interface DispatchDraftItem {
+  item_id: string
+  source_agent: string
+  label: string
+  installedAgents?: string[]
+  raw?: any
+}
+
+function normalizeDispatchJob(raw: CapabilityDispatchJob): CapabilityDispatchJob {
+  return {
+    ...raw,
+    items: Array.isArray(raw?.items) ? raw.items : [],
+    target_matrix: Array.isArray(raw?.target_matrix) ? raw.target_matrix : [],
+    reports: Array.isArray(raw?.reports) ? raw.reports : [],
+  }
+}
+
 export function CapabilitiesSettingsCard() {
   const [targets, setTargets] = useState<Array<{ id: string; kind: string; name: string }>>([])
   const [selectedTargetId, setSelectedTargetId] = useState<string>('local')
@@ -104,16 +170,18 @@ export function CapabilitiesSettingsCard() {
   const [loading, setLoading] = useState(false)
   const [activeTab, setActiveTab] = useState<'skills' | 'mcp' | 'plugins' | 'marketplaces'>('skills')
 
-  // Agent 顶层架构视点选择器：'all' | 'codex' | 'hermes' | 'grok' | 动态注册项
+  // 单一顶层 Agent 视点过滤器
   const [selectedAgent, setSelectedAgent] = useState<string>('all')
 
-  // 技能分类过滤
+  // 技能来源与安装状态过滤
   const [skillCategory, setSkillCategory] = useState<'all' | 'astrorder' | 'proprietary' | 'community' | 'memory'>('all')
+  const [installFilter, setInstallFilter] = useState<'all' | 'installed' | 'partial' | 'uninstalled'>('all')
   const [skillSearch, setSkillSearch] = useState('')
   const [selectedSkill, setSelectedSkill] = useState<SkillItem | null>(null)
+  const [checkedSkillKeys, setCheckedSkillKeys] = useState<string[]>([])
 
-  // 检查器右侧 Tab
-  const [inspectorTab, setInspectorTab] = useState<'spec' | 'assets' | 'grants' | 'live'>('spec')
+  // 检查器右侧 Tab（保留真正有内容的两个视图）
+  const [inspectorTab, setInspectorTab] = useState<'spec' | 'install'>('spec')
 
   // 全网市场搜索
   const [marketQuery, setMarketQuery] = useState('')
@@ -126,7 +194,7 @@ export function CapabilitiesSettingsCard() {
   const [installTargets, setInstallTargets] = useState<string[]>([])
   const [installing, setInstalling] = useState(false)
 
-  // 1. MCP 新增/编辑 Modal 状态
+  // MCP 新增/编辑 Modal
   const [mcpModalOpen, setMcpModalOpen] = useState(false)
   const [mcpEditing, setMcpEditing] = useState(false)
   const [mcpFormTarget, setMcpFormTarget] = useState<string>('local')
@@ -142,14 +210,14 @@ export function CapabilitiesSettingsCard() {
   const [mcpSaving, setMcpSaving] = useState(false)
   const [mcpPingStatus, setMcpPingStatus] = useState<Record<string, { loading?: boolean; text?: string; ok?: boolean }>>({})
 
-  // 1b. Antigravity 插件安装/导入 Modal 状态
+  // Antigravity 插件安装/导入 Modal
   const [pluginInstallOpen, setPluginInstallOpen] = useState(false)
   const [pluginInstallMode, setPluginInstallMode] = useState<'install' | 'import'>('install')
   const [pluginInstallSource, setPluginInstallSource] = useState<string>('')
   const [pluginImportSource, setPluginImportSource] = useState<string>('claude')
   const [pluginInstalling, setPluginInstalling] = useState(false)
 
-  // 2. 市场源新增 Modal 状态
+  // 市场源新增 Modal
   const [marketModalOpen, setMarketModalOpen] = useState(false)
   const [marketFormAgent, setMarketFormAgent] = useState<string>('codex')
   const [marketFormName, setMarketFormName] = useState<string>('')
@@ -157,17 +225,19 @@ export function CapabilitiesSettingsCard() {
   const [marketFormSource, setMarketFormSource] = useState<string>('')
   const [marketSaving, setMarketSaving] = useState(false)
 
-  // 3. 真实跨端/跨 Agent 动态分发模态框 (Distribution Matrix)
+  // 跨端/跨 Agent 批量后台分发模态框 + 后台任务队列
   const [dispatchModalOpen, setDispatchModalOpen] = useState(false)
   const [dispatchType, setDispatchType] = useState<'skill' | 'mcp' | 'plugin'>('skill')
-  const [dispatchItem, setDispatchItem] = useState<any | null>(null)
+  const [dispatchItems, setDispatchItems] = useState<DispatchDraftItem[]>([])
   const [dispatchMatrix, setDispatchMatrix] = useState<Array<{ target_id: string; agent: string }>>([])
-  const [dispatching, setDispatching] = useState(false)
-  const [dispatchReports, setDispatchReports] = useState<Array<{ target_id: string; target_name?: string; agent: string; ok: boolean; installed_path?: string; message: string }> | null>(null)
+  const [submittingJob, setSubmittingJob] = useState(false)
+
+  const [dispatchJobs, setDispatchJobs] = useState<CapabilityDispatchJob[]>([])
+  const [jobsDrawerOpen, setJobsDrawerOpen] = useState(false)
+  const prevJobStatusesRef = useRef<Map<string, string>>(new Map())
 
   const reqIdRef = useRef(0)
 
-  // 加载所有目标环境
   const loadTargets = async () => {
     try {
       const res = await api.getCapabilitiesTargets()
@@ -180,11 +250,10 @@ export function CapabilitiesSettingsCard() {
     }
   }
 
-  // 加载选中目标的能力概要 (不向服务端传递 agentFilter，避免官方内置条目因 agents=[] 遭服务端提前过滤)
-  const loadTargetCapabilities = async (targetId: string) => {
+  const loadTargetCapabilities = useCallback(async (targetId: string) => {
     const curReqId = ++reqIdRef.current
     setLoading(true)
-    if (summary?.target_id !== targetId) setSummary(null)
+    setSummary((prev) => (prev?.target_id === targetId ? prev : null))
     try {
       const data = await api.getCapabilitiesSummary(targetId)
       if (curReqId !== reqIdRef.current) return
@@ -197,26 +266,70 @@ export function CapabilitiesSettingsCard() {
         setLoading(false)
       }
     }
-  }
+  }, [])
+
+  const loadDispatchJobs = useCallback(async () => {
+    if (typeof api.listCapabilityDispatchJobs !== 'function') return
+    try {
+      const res = await api.listCapabilityDispatchJobs()
+      const nextJobs = (Array.isArray(res?.jobs) ? res.jobs : []).map(normalizeDispatchJob)
+      setDispatchJobs(nextJobs)
+
+      let anyJustFinished = false
+      const prevMap = prevJobStatusesRef.current
+      for (const job of nextJobs) {
+        const prevStatus = prevMap.get(job.id)
+        if (prevStatus === 'running' && job.status !== 'running') {
+          anyJustFinished = true
+          const summaryTitle = job.items.length > 1 ? `${job.items[0]?.label || job.items[0]?.item_id} 等 ${job.items.length} 项` : (job.items[0]?.label || job.items[0]?.item_id || '能力')
+          notifications.show({
+            title: job.status === 'completed' ? '后台分发已完成' : job.status === 'partial' ? '后台分发部分成功' : '后台分发失败',
+            message: `${summaryTitle} · 成功 ${job.success_count}/${job.total_steps}`,
+            color: job.status === 'completed' ? 'teal' : job.status === 'partial' ? 'yellow' : 'red',
+          })
+        }
+        prevMap.set(job.id, job.status)
+      }
+      if (anyJustFinished && selectedTargetId) {
+        void loadTargetCapabilities(selectedTargetId)
+      }
+    } catch {
+      // Ignore transient poll errors; next tick will recover.
+    }
+  }, [loadTargetCapabilities, selectedTargetId])
 
   useEffect(() => {
-    loadTargets()
+    void loadTargets()
+    void loadDispatchJobs()
   }, [])
 
   useEffect(() => {
     if (selectedTargetId) {
-      loadTargetCapabilities(selectedTargetId)
+      setCheckedSkillKeys([])
+      void loadTargetCapabilities(selectedTargetId)
     }
-  }, [selectedTargetId])
+  }, [loadTargetCapabilities, selectedTargetId])
 
-  // 当切换到市场 Tab 时，如果结果为空且没在搜索，自动触发一次精选推荐拉取
+  const runningJobs = useMemo(
+    () => dispatchJobs.filter((j) => j.status === 'running'),
+    [dispatchJobs],
+  )
+  const hasRunningJobs = runningJobs.length > 0
+
+  useEffect(() => {
+    if (!hasRunningJobs) return
+    const timer = window.setInterval(() => {
+      void loadDispatchJobs()
+    }, 1200)
+    return () => window.clearInterval(timer)
+  }, [hasRunningJobs, loadDispatchJobs])
+
   useEffect(() => {
     if (activeTab === 'marketplaces' && marketResults.length === 0 && !searchingMarket) {
-      handleMarketSearch(marketQuery || 'agent')
+      void handleMarketSearch(marketQuery || 'agent')
     }
   }, [activeTab])
 
-  // 执行市场搜索
   const handleMarketSearch = async (queryText?: string) => {
     const q = (queryText !== undefined ? queryText : marketQuery).trim()
     if (!q) {
@@ -238,7 +351,7 @@ export function CapabilitiesSettingsCard() {
   }
 
   // ==========================================
-  // MCP 业务处理 (CRUD, Toggle & Ping)
+  // MCP 业务处理
   // ==========================================
   const mcpKey = (srv: { agent: string; name: string }) => `${srv.agent}::${srv.name}`
   const isPluginManagedSource = (source?: string) => Boolean(source && source.startsWith('antigravity-plugin:'))
@@ -315,7 +428,7 @@ export function CapabilitiesSettingsCard() {
       })
       notifications.show({ title: '保存成功', message: `MCP 服务 [${mcpFormName}] 已写入 ${mcpFormAgent} 配置`, color: 'green' })
       setMcpModalOpen(false)
-      loadTargetCapabilities(selectedTargetId)
+      void loadTargetCapabilities(selectedTargetId)
     } catch (err: any) {
       notifications.show({ title: '保存失败', message: err?.message || '配置更新被拒绝', color: 'red' })
     } finally {
@@ -337,7 +450,7 @@ export function CapabilitiesSettingsCard() {
         message: `[${srv.name}] 状态已更新到 ${srv.agent} 配置`,
         color: 'teal',
       })
-      loadTargetCapabilities(selectedTargetId)
+      void loadTargetCapabilities(selectedTargetId)
     } catch (err: any) {
       notifications.show({ title: '状态更新失败', message: err?.message || '切换 MCP 状态失败', color: 'red' })
     }
@@ -353,7 +466,7 @@ export function CapabilitiesSettingsCard() {
         server: { name: server.name },
       })
       notifications.show({ title: '删除成功', message: `MCP 服务 [${server.name}] 已安全移除`, color: 'green' })
-      loadTargetCapabilities(selectedTargetId)
+      void loadTargetCapabilities(selectedTargetId)
     } catch (err: any) {
       notifications.show({ title: '删除失败', message: err?.message || '操作异常', color: 'red' })
     }
@@ -363,10 +476,7 @@ export function CapabilitiesSettingsCard() {
     const key = mcpKey(server)
     setMcpPingStatus((prev) => ({ ...prev, [key]: { loading: true } }))
     try {
-      const res = await api.pingMcpServer({
-        target_id: selectedTargetId,
-        server,
-      })
+      const res = await api.pingMcpServer({ target_id: selectedTargetId, server })
       setMcpPingStatus((prev) => ({
         ...prev,
         [key]: { loading: false, text: res.message || `${res.latency_ms}ms`, ok: res.ok },
@@ -386,7 +496,7 @@ export function CapabilitiesSettingsCard() {
   }
 
   // ==========================================
-  // 插件业务处理 (Toggle, Uninstall, Install & Import)
+  // 插件业务处理
   // ==========================================
   const handleInstallOrImportAgyPlugin = async () => {
     const source = pluginInstallMode === 'install'
@@ -411,13 +521,14 @@ export function CapabilitiesSettingsCard() {
       })
       setPluginInstallOpen(false)
       setPluginInstallSource('')
-      loadTargetCapabilities(selectedTargetId)
+      void loadTargetCapabilities(selectedTargetId)
     } catch (err: any) {
       notifications.show({ title: '操作失败', message: err?.message || 'agy plugin 执行失败', color: 'red' })
     } finally {
       setPluginInstalling(false)
     }
   }
+
   const handleTogglePlugin = async (plg: any) => {
     const nextState = !plg.enabled
     try {
@@ -433,7 +544,7 @@ export function CapabilitiesSettingsCard() {
         message: `[${plg.name}] 状态已写回 ${plg.agent} 配置文件`,
         color: 'teal',
       })
-      loadTargetCapabilities(selectedTargetId)
+      void loadTargetCapabilities(selectedTargetId)
     } catch (err: any) {
       notifications.show({ title: '状态更新失败', message: err?.message || '写入被拒绝', color: 'red' })
     }
@@ -449,14 +560,14 @@ export function CapabilitiesSettingsCard() {
         plugin_name: plg.full_name || plg.name,
       })
       notifications.show({ title: '卸载成功', message: `插件 [${plg.name}] 已彻底移除`, color: 'green' })
-      loadTargetCapabilities(selectedTargetId)
+      void loadTargetCapabilities(selectedTargetId)
     } catch (err: any) {
       notifications.show({ title: '卸载失败', message: err?.message || '操作失败', color: 'red' })
     }
   }
 
   // ==========================================
-  // 市场源业务处理 (Add / Pull / Delete)
+  // 市场源业务处理
   // ==========================================
   const handleOpenAddMarket = () => {
     setMarketFormAgent(selectedAgent !== 'all' ? selectedAgent : 'codex')
@@ -485,7 +596,7 @@ export function CapabilitiesSettingsCard() {
       })
       notifications.show({ title: '订阅成功', message: `市场源 [${marketFormName}] 已写入 ${marketFormAgent} 配置文件`, color: 'green' })
       setMarketModalOpen(false)
-      loadTargetCapabilities(selectedTargetId)
+      void loadTargetCapabilities(selectedTargetId)
     } catch (err: any) {
       notifications.show({ title: '订阅失败', message: err?.message || '配置更新错误', color: 'red' })
     } finally {
@@ -503,7 +614,7 @@ export function CapabilitiesSettingsCard() {
         market: { name: m.name },
       })
       notifications.show({ title: '同步完成', message: `市场源 [${m.name}] 索引已刷新至最新版本`, color: 'green' })
-      loadTargetCapabilities(selectedTargetId)
+      void loadTargetCapabilities(selectedTargetId)
     } catch (err: any) {
       notifications.show({ title: '同步失败', message: err?.message || '网络拉取超时', color: 'red' })
     }
@@ -519,62 +630,166 @@ export function CapabilitiesSettingsCard() {
         market: { name: m.name },
       })
       notifications.show({ title: '删除成功', message: `市场源 [${m.name}] 已移除`, color: 'green' })
-      loadTargetCapabilities(selectedTargetId)
+      void loadTargetCapabilities(selectedTargetId)
     } catch (err: any) {
       notifications.show({ title: '删除失败', message: err?.message || '操作失败', color: 'red' })
     }
   }
 
   // ==========================================
-  // 真实跨端/跨 Agent 动态分发模态框
+  // 真实跨端/跨 Agent 批量后台分发
   // ==========================================
-  const handleOpenDispatchModal = (type: 'skill' | 'mcp' | 'plugin', item: any) => {
+  const availableSkillAgents = summary?.skill_agents || []
+  const allSkills = summary?.skills || []
+
+  const openSkillDispatchModal = (skillsToDispatch: SkillItem[], preselectMissingOnly = false) => {
+    const drafts: DispatchDraftItem[] = skillsToDispatch.map((sk) => ({
+      item_id: sk.name,
+      source_agent: isOfficialSkill(sk) ? 'astrorder' : (sk.agent || 'all'),
+      label: getSkillDisplayTitle(sk),
+      installedAgents: getSkillInstalledAgents(sk),
+      raw: sk,
+    }))
+    setDispatchType('skill')
+    setDispatchItems(drafts)
+    if (preselectMissingOnly && drafts.length === 1) {
+      const installedSet = new Set(drafts[0].installedAgents || [])
+      const missingOnCurrent = availableSkillAgents
+        .filter((ag) => !installedSet.has(ag.id.toLowerCase()))
+        .map((ag) => ({ target_id: selectedTargetId, agent: ag.id }))
+      setDispatchMatrix(missingOnCurrent)
+    } else if (drafts.length > 1 && selectedAgent !== 'all') {
+      setDispatchMatrix([{ target_id: selectedTargetId, agent: selectedAgent }])
+    } else {
+      setDispatchMatrix([])
+    }
+    setDispatchModalOpen(true)
+  }
+
+  const handleOpenSingleDispatchModal = (type: 'skill' | 'mcp' | 'plugin', item: any) => {
+    if (type === 'skill') {
+      openSkillDispatchModal([item], false)
+      return
+    }
     setDispatchType(type)
-    setDispatchItem(item)
-    setDispatchReports(null)
+    setDispatchItems([
+      {
+        item_id: item.name || item.id,
+        source_agent: item.agent || 'all',
+        label: item.name || item.id,
+        raw: item,
+      },
+    ])
     setDispatchMatrix([])
     setDispatchModalOpen(true)
   }
 
-  const handleExecuteDispatch = async () => {
-    if (!dispatchItem || dispatchMatrix.length === 0) {
-      notifications.show({ title: '提示', message: '请至少勾选一个目标分发节点与 Agent', color: 'yellow' })
+  const handleStartBackgroundDispatch = async () => {
+    if (dispatchItems.length === 0 || dispatchMatrix.length === 0) {
+      notifications.show({ title: '提示', message: '请至少保留一个待分发项并勾选一个目标节点与 Agent', color: 'yellow' })
       return
     }
-    setDispatching(true)
+    setSubmittingJob(true)
     try {
-      const isOfficial = isOfficialSkill(dispatchItem)
-      const res = await api.dispatchCapability({
-        capability_type: dispatchType,
-        source_target_id: selectedTargetId,
-        source_agent: isOfficial ? 'astrorder' : (dispatchItem.agent || 'all'),
-        item_id: dispatchItem.name || dispatchItem.id,
-        target_matrix: dispatchMatrix,
-        item_data: dispatchItem,
-      })
-      setDispatchReports(res.reports)
-      if (res.success_count > 0) void loadTargetCapabilities(selectedTargetId)
-      if (res.success_count === res.total_targets) {
+      if (typeof api.startCapabilityDispatchJob === 'function') {
+        const rawJob = await api.startCapabilityDispatchJob({
+          capability_type: dispatchType,
+          source_target_id: selectedTargetId,
+          items: dispatchItems.map(({ item_id, source_agent, label }) => ({
+            item_id,
+            source_agent,
+            label,
+          })),
+          target_matrix: dispatchMatrix,
+        })
+        const job = normalizeDispatchJob(rawJob)
+        prevJobStatusesRef.current.set(job.id, job.status)
+        setDispatchJobs((prev) => [job, ...prev.filter((existing) => existing.id !== job.id)])
+        setDispatchModalOpen(false)
+        setCheckedSkillKeys([])
         notifications.show({
-          title: '分发完成',
-          message: `已分发并回读核验 ${res.success_count}/${res.total_targets} 个目标 Agent`,
-          color: 'green',
+          title: '已提交后台分发任务',
+          message: `正在后台分发 ${job.items.length} 项能力到 ${job.target_matrix.length} 个目标（共 ${job.total_steps} 步），可继续其他操作`,
+          color: 'indigo',
         })
       } else {
+        // Fallback for older test mocks that only stub synchronous dispatchCapability.
+        let totalOk = 0
+        let totalSteps = 0
+        for (const draft of dispatchItems) {
+          const res = await api.dispatchCapability({
+            capability_type: dispatchType,
+            source_target_id: selectedTargetId,
+            source_agent: draft.source_agent,
+            item_id: draft.item_id,
+            target_matrix: dispatchMatrix,
+            item_data: draft.raw,
+          })
+          totalOk += res.success_count
+          totalSteps += res.total_targets
+        }
+        setDispatchModalOpen(false)
+        setCheckedSkillKeys([])
+        if (totalOk > 0) void loadTargetCapabilities(selectedTargetId)
         notifications.show({
-          title: res.success_count > 0 ? '部分分发成功' : '分发未完成',
-          message: `已完成 ${res.success_count}/${res.total_targets} 个目标，请查看逐项结果`,
-          color: 'red',
+          title: totalOk === totalSteps ? '分发完成' : '分发结果',
+          message: `已完成 ${totalOk}/${totalSteps} 个目标`,
+          color: totalOk === totalSteps ? 'teal' : 'yellow',
         })
       }
     } catch (err: any) {
-      notifications.show({ title: '分发引擎调用失败', message: err?.message || '通信管道断开', color: 'red' })
+      notifications.show({ title: '提交后台分发失败', message: err?.message || '通信异常', color: 'red' })
     } finally {
-      setDispatching(false)
+      setSubmittingJob(false)
     }
   }
 
-  // 执行安装
+  const handleRetryFailedJob = async (job: CapabilityDispatchJob) => {
+    const failedReports = (job.reports || []).filter((r) => !r.ok)
+    if (failedReports.length === 0) return
+    const itemMap = new Map((job.items || []).map((it) => [it.item_id, it]))
+    const retryItemsMap = new Map<string, { item_id: string; source_agent: string; label?: string }>()
+    const retryTargetsMap = new Map<string, { target_id: string; agent: string }>()
+    for (const r of failedReports) {
+      const orig = itemMap.get(r.item_id)
+      retryItemsMap.set(r.item_id, {
+        item_id: r.item_id,
+        source_agent: orig?.source_agent || 'all',
+        label: orig?.label || r.item_label || r.item_id,
+      })
+      retryTargetsMap.set(`${r.target_id}::${r.agent}`, { target_id: r.target_id, agent: r.agent })
+    }
+    try {
+      const rawNewJob = await api.startCapabilityDispatchJob({
+        capability_type: (job.capability_type as 'skill' | 'mcp' | 'plugin') || 'skill',
+        source_target_id: job.source_target_id || selectedTargetId,
+        items: Array.from(retryItemsMap.values()),
+        target_matrix: Array.from(retryTargetsMap.values()),
+      })
+      const newJob = normalizeDispatchJob(rawNewJob)
+      prevJobStatusesRef.current.set(newJob.id, newJob.status)
+      setDispatchJobs((prev) => [newJob, ...prev.filter((j) => j.id !== newJob.id)])
+      notifications.show({
+        title: '已重新提交失败项',
+        message: `已将 ${newJob.items.length} 项能力放入后台重试`,
+        color: 'indigo',
+      })
+    } catch (err: any) {
+      notifications.show({ title: '重试提交失败', message: err?.message || '请稍后再试', color: 'red' })
+    }
+  }
+
+  const handleClearFinishedJobs = async () => {
+    if (typeof api.clearCapabilityDispatchJobs !== 'function') return
+    try {
+      const res = await api.clearCapabilityDispatchJobs()
+      setDispatchJobs((Array.isArray(res?.jobs) ? res.jobs : []).map(normalizeDispatchJob))
+    } catch (err: any) {
+      notifications.show({ title: '清理失败', message: err?.message || '请稍后再试', color: 'red' })
+    }
+  }
+
+  // 安装 / 卸载单个技能
   const handleInstall = async (pkgSource?: string) => {
     const targetPkg = (pkgSource || customPackage).trim()
     if (!targetPkg) {
@@ -584,16 +799,13 @@ export function CapabilitiesSettingsCard() {
     const finalTargets = installTargets.length > 0 ? installTargets : [selectedTargetId]
     setInstalling(true)
     try {
-      const res = await api.installSkill({
-        target_ids: finalTargets,
-        package_source: targetPkg,
-      })
+      const res = await api.installSkill({ target_ids: finalTargets, package_source: targetPkg })
       const successCount = res.results.filter((r) => r.success).length
       if (successCount > 0) {
         notifications.show({ title: '能力安装完成', message: `已成功分发并安装到 ${successCount} 个目标环境`, color: 'green' })
         setInstallModalOpen(false)
         setCustomPackage('')
-        loadTargetCapabilities(selectedTargetId)
+        void loadTargetCapabilities(selectedTargetId)
       } else {
         const errorMsg = res.results.map((r) => `${r.target_id}: ${r.error || r.output}`).join('\n')
         notifications.show({ title: '安装未成功', message: errorMsg || '安装进程报错', color: 'red' })
@@ -605,146 +817,211 @@ export function CapabilitiesSettingsCard() {
     }
   }
 
-  // 卸载技能
   const handleRemoveSkill = async (skillName: string) => {
     if (!confirm(`确定要从 [${summary?.target_name || selectedTargetId}] 环境中卸载此能力 [${skillName}] 吗？`)) return
     try {
-      await api.removeSkill({
-        target_id: selectedTargetId,
-        skill_name: skillName,
-      })
+      await api.removeSkill({ target_id: selectedTargetId, skill_name: skillName })
       notifications.show({ title: '已卸载', message: `能力 [${skillName}] 已成功移除`, color: 'green' })
-      loadTargetCapabilities(selectedTargetId)
+      void loadTargetCapabilities(selectedTargetId)
     } catch (err: any) {
       notifications.show({ title: '卸载失败', message: err?.message || '操作异常', color: 'red' })
     }
   }
 
-  // 目标 Agent 运行时注册表（来自真实 Summary，未提供时不硬编码伪造）
-  const availableSkillAgents = summary?.skill_agents || []
-
-  // 技能列表消费真实 API 数据
-  const allSkills = summary?.skills || []
-
-  const astrorderSkills = allSkills.filter(isOfficialSkill)
-  const proprietarySkills = allSkills.filter(
-    (s) =>
-      !isOfficialSkill(s) &&
-      (s.source?.includes('native') ||
-        s.name.includes('liuruyan') ||
-        s.name.includes('photo') ||
-        s.name.includes('image') ||
-        s.name.includes('damo') ||
-        s.name.includes('temu'))
+  // 技能分类
+  const astrorderSkills = useMemo(() => allSkills.filter(isOfficialSkill), [allSkills])
+  const proprietarySkills = useMemo(
+    () =>
+      allSkills.filter(
+        (s) =>
+          !isOfficialSkill(s) &&
+          (s.source?.includes('native') ||
+            s.name.includes('liuruyan') ||
+            s.name.includes('photo') ||
+            s.name.includes('image') ||
+            s.name.includes('damo') ||
+            s.name.includes('temu')),
+      ),
+    [allSkills],
   )
-  const memorySkills = allSkills.filter(
-    (s) => !isOfficialSkill(s) && (s.path?.includes('openviking') || s.name.includes('context') || s.name.includes('viking'))
+  const memorySkills = useMemo(
+    () =>
+      allSkills.filter(
+        (s) => !isOfficialSkill(s) && (s.path?.includes('openviking') || s.name.includes('context') || s.name.includes('viking')),
+      ),
+    [allSkills],
   )
-  const communitySkills = allSkills.filter(
-    (s) => !isOfficialSkill(s) && !proprietarySkills.includes(s) && !memorySkills.includes(s)
+  const communitySkills = useMemo(
+    () => allSkills.filter((s) => !isOfficialSkill(s) && !proprietarySkills.includes(s) && !memorySkills.includes(s)),
+    [allSkills, memorySkills, proprietarySkills],
   )
 
-  // 根据分类与搜索过滤
-  const filteredSkills = allSkills.filter((sk) => {
-    if (skillCategory === 'astrorder' && !isOfficialSkill(sk)) return false
-    if (skillCategory === 'proprietary' && !proprietarySkills.includes(sk)) return false
-    if (skillCategory === 'community' && !communitySkills.includes(sk)) return false
-    if (skillCategory === 'memory' && !memorySkills.includes(sk)) return false
+  const categoryFilteredSkills = useMemo(() => {
+    return allSkills.filter((sk) => {
+      if (skillCategory === 'astrorder' && !isOfficialSkill(sk)) return false
+      if (skillCategory === 'proprietary' && !proprietarySkills.includes(sk)) return false
+      if (skillCategory === 'community' && !communitySkills.includes(sk)) return false
+      if (skillCategory === 'memory' && !memorySkills.includes(sk)) return false
+      return true
+    })
+  }, [allSkills, communitySkills, memorySkills, proprietarySkills, skillCategory])
 
-    // 官方源无需已安装也始终可发现，不被当前 Agent 已安装过滤隐藏
-    if (selectedAgent !== 'all' && !isOfficialSkill(sk)) {
-      if (!sk.agents?.some((a) => a.toLowerCase() === selectedAgent.toLowerCase())) return false
-    }
+  // 先按 Agent 视点收敛作用域：选中具体 Agent 时保留该 Agent 已装技能 + 星序官方技能（便于一眼看出官方技能是否已装）
+  const agentScopedSkills = useMemo(() => {
+    if (selectedAgent === 'all') return categoryFilteredSkills
+    return categoryFilteredSkills.filter(
+      (sk) => isOfficialSkill(sk) || isSkillInstalledForView(sk, selectedAgent),
+    )
+  }, [categoryFilteredSkills, selectedAgent])
 
-    if (skillSearch) {
-      const q = skillSearch.toLowerCase()
-      const title = isOfficialSkill(sk) ? OFFICIAL_SKILL_TITLES[sk.name] : undefined
-      const matchTitle = title && title.toLowerCase().includes(q)
-      const matchName = sk.name.toLowerCase().includes(q)
-      const matchDesc = sk.description && sk.description.toLowerCase().includes(q)
-      if (!matchTitle && !matchName && !matchDesc) return false
-    }
-    return true
-  })
+  const isSkillPartiallyInstalled = useCallback(
+    (sk: SkillItem) => {
+      if (selectedAgent !== 'all' || availableSkillAgents.length <= 1) return false
+      const installedCount = getSkillInstalledAgents(sk).length
+      return installedCount > 0 && installedCount < availableSkillAgents.length
+    },
+    [availableSkillAgents.length, selectedAgent],
+  )
 
-  // 修正选中条目不在筛选结果仍显示旧详情问题
+  const isSkillNeedsInstallForView = useCallback(
+    (sk: SkillItem) => {
+      if (selectedAgent !== 'all') return !isSkillInstalledForView(sk, selectedAgent)
+      const installedCount = getSkillInstalledAgents(sk).length
+      if (installedCount === 0) return true
+      return availableSkillAgents.length > 0 && installedCount < availableSkillAgents.length
+    },
+    [availableSkillAgents.length, selectedAgent],
+  )
+
+  // 在当前来源分类 + Agent 视点下，分别统计已安装、待补齐与未安装数量
+  const installedCountForView = useMemo(
+    () => agentScopedSkills.filter((sk) => isSkillInstalledForView(sk, selectedAgent)).length,
+    [agentScopedSkills, selectedAgent],
+  )
+  const partialCountForView = useMemo(
+    () => agentScopedSkills.filter(isSkillPartiallyInstalled).length,
+    [agentScopedSkills, isSkillPartiallyInstalled],
+  )
+  const uninstalledCountForView = agentScopedSkills.length - installedCountForView
+
+  const filteredSkills = useMemo(() => {
+    return agentScopedSkills.filter((sk) => {
+      const installedForView = isSkillInstalledForView(sk, selectedAgent)
+      if (installFilter === 'installed' && !installedForView) return false
+      if (installFilter === 'partial' && !isSkillPartiallyInstalled(sk)) return false
+      if (installFilter === 'uninstalled' && installedForView) return false
+
+      if (skillSearch) {
+        const q = skillSearch.toLowerCase()
+        const title = getSkillDisplayTitle(sk)
+        const matchTitle = title.toLowerCase().includes(q)
+        const matchName = sk.name.toLowerCase().includes(q)
+        const matchDesc = sk.description && sk.description.toLowerCase().includes(q)
+        if (!matchTitle && !matchName && !matchDesc) return false
+      }
+      return true
+    })
+  }, [agentScopedSkills, installFilter, isSkillPartiallyInstalled, selectedAgent, skillSearch])
+
   const selectedSkillKey = selectedSkill ? getSkillKey(selectedSkill) : null
-  const activeSkill = filteredSkills.find(sk => getSkillKey(sk) === selectedSkillKey) || filteredSkills[0] || null
+  const activeSkill = filteredSkills.find((sk) => getSkillKey(sk) === selectedSkillKey) || filteredSkills[0] || null
 
-  const filteredMcpServers = (summary?.mcp_servers || []).filter((srv) =>
-    selectedAgent === 'all' || srv.agent.toLowerCase() === selectedAgent.toLowerCase()
+  const checkedSkillSet = useMemo(() => new Set(checkedSkillKeys), [checkedSkillKeys])
+  const checkedSkills = useMemo(
+    () => allSkills.filter((sk) => checkedSkillSet.has(getSkillKey(sk))),
+    [allSkills, checkedSkillSet],
   )
-  const filteredPlugins = (summary?.plugins || []).filter((plg) =>
-    selectedAgent === 'all' || plg.agent.toLowerCase() === selectedAgent.toLowerCase()
+
+  const toggleSkillChecked = (key: string) => {
+    setCheckedSkillKeys((prev) =>
+      prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key],
+    )
+  }
+
+  const filteredMcpServers = (summary?.mcp_servers || []).filter(
+    (srv) => selectedAgent === 'all' || srv.agent.toLowerCase() === selectedAgent.toLowerCase(),
   )
-  const filteredMarketplaces = (summary?.marketplaces || []).filter((m) =>
-    selectedAgent === 'all' || !m.agent || m.agent === 'all' || m.agent.toLowerCase() === selectedAgent.toLowerCase()
+  const filteredPlugins = (summary?.plugins || []).filter(
+    (plg) => selectedAgent === 'all' || plg.agent.toLowerCase() === selectedAgent.toLowerCase(),
   )
+  const filteredMarketplaces = (summary?.marketplaces || []).filter(
+    (m) => selectedAgent === 'all' || !m.agent || m.agent === 'all' || m.agent.toLowerCase() === selectedAgent.toLowerCase(),
+  )
+
+  const activeAgentLabel =
+    selectedAgent === 'all'
+      ? '全部 Agent'
+      : shortAgentLabel(
+          selectedAgent,
+          availableSkillAgents.find((a) => a.id === selectedAgent)?.label,
+        )
+
+  const primaryRunningJob = runningJobs[0] || null
+  const latestJobStatus = primaryRunningJob
+    ? 'running'
+    : dispatchJobs[0]?.status || ''
+
+  // 计算分发矩阵中的已安装提示（仅针对当前已加载的节点）
+  const singleDraftInstalledSet = useMemo(() => {
+    if (dispatchType !== 'skill' || dispatchItems.length !== 1) return null
+    return new Set(dispatchItems[0].installedAgents || [])
+  }, [dispatchItems, dispatchType])
+
+  const totalDispatchSteps = dispatchItems.length * dispatchMatrix.length
+
   return (
     <div className="capabilities-hub-container">
-      {/* 顶部控制台 Topbar */}
+      {/* 精简、清晰的双行顶栏（消除重复控件） */}
       <div className="capabilities-topbar">
         <div className="capabilities-topbar-row1">
-          {/* 品牌与集群引擎状态 */}
-          <Group gap="sm">
-            <span style={{ fontSize: 16, fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--cap-text-primary)' }}>
-              Astrorder Agent Hub
-            </span>
-            <div className="engine-status-badge">Agent 能力管理与分发</div>
-            <div className="cluster-nodes-pill">
-              <span>{targets.length} 个托管节点</span>
+          <Group gap="sm" wrap="nowrap">
+            <Text fw={700} size="md" style={{ letterSpacing: '-0.02em', color: 'var(--cap-text-primary)' }}>
+              能力分发中心
+            </Text>
+            <div className="cap-node-switcher" role="group" aria-label="托管节点切换">
+              {targets.map((tgt) => {
+                const isSelected = tgt.id === selectedTargetId
+                return (
+                  <button
+                    key={tgt.id}
+                    type="button"
+                    className={`cap-node-btn${isSelected ? ' active' : ''}`}
+                    onClick={() => setSelectedTargetId(tgt.id)}
+                  >
+                    {tgt.kind === 'local' ? <IconDeviceDesktop size={13} /> : <IconServer size={13} />}
+                    <span>{tgt.name}</span>
+                  </button>
+                )
+              })}
             </div>
           </Group>
 
-          {/* 右侧环境节点热切换与快捷操作 */}
           <Group gap="xs">
-            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--cap-text-secondary)', marginRight: 4 }}>
-              托管节点:
-            </span>
-            {targets.map((tgt) => {
-              const isSelected = tgt.id === selectedTargetId
-              return (
-                <button
-                  key={tgt.id}
-                  onClick={() => setSelectedTargetId(tgt.id)}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    padding: '5px 12px',
-                    borderRadius: 6,
-                    fontSize: 12,
-                    fontWeight: isSelected ? 600 : 500,
-                    cursor: 'pointer',
-                    transition: 'all 0.15s ease',
-                    background: isSelected ? 'var(--cap-accent)' : 'var(--cap-card-bg)',
-                    color: isSelected ? '#ffffff' : 'var(--cap-text-secondary)',
-                    border: isSelected ? '1px solid var(--cap-accent)' : '1px solid var(--cap-border)',
-                  }}
-                >
-                  {tgt.kind === 'local' ? <IconDeviceDesktop size={14} /> : <IconServer size={14} />}
-                  <span>{tgt.name}</span>
-                </button>
-              )
-            })}
+            <button
+              type="button"
+              className={`cap-jobs-trigger${hasRunningJobs ? ' is-running' : ''}`}
+              onClick={() => setJobsDrawerOpen(true)}
+            >
+              <span className={`cap-jobs-dot${latestJobStatus ? ` is-${latestJobStatus}` : ''}`} aria-hidden="true" />
+              <IconListDetails size={14} aria-hidden="true" />
+              <span>
+                {primaryRunningJob
+                  ? `分发中 ${primaryRunningJob.completed_steps}/${primaryRunningJob.total_steps}`
+                  : dispatchJobs.length > 0
+                    ? `后台任务 (${dispatchJobs.length})`
+                    : '后台任务'}
+              </span>
+            </button>
 
             <Button
               size="xs"
               variant="default"
               leftSection={<IconRefresh size={14} className={loading ? 'animate-spin' : ''} />}
-              onClick={() => loadTargetCapabilities(selectedTargetId)}
+              onClick={() => void loadTargetCapabilities(selectedTargetId)}
             >
               刷新
             </Button>
-            <Button
-              size="xs"
-              variant="light"
-              color="cyan"
-              leftSection={<IconShoppingCart size={14} />}
-              onClick={() => setActiveTab('marketplaces')}
-            >
-              浏览能力市场
-            </Button>
+
             <Button
               size="xs"
               color="indigo"
@@ -761,213 +1038,339 @@ export function CapabilitiesSettingsCard() {
                 }
               }}
             >
-              {activeTab === 'mcp' ? '新建 MCP 服务' : activeTab === 'plugins' ? '安装 / 导入插件' : activeTab === 'marketplaces' ? '新增市场源' : '导入包 / 技能'}
+              {activeTab === 'mcp'
+                ? '新建 MCP'
+                : activeTab === 'plugins'
+                  ? '安装插件'
+                  : activeTab === 'marketplaces'
+                    ? '新增市场源'
+                    : '导入技能'}
             </Button>
           </Group>
         </div>
 
-        {/* 顶部分类 Tabs 与 Agent 架构视点选择器 */}
-        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', padding: '0 16px', background: 'var(--cap-header-bg)', borderBottom: '1px solid var(--cap-border)' }}>
-          <div className="capabilities-nav-tabs" style={{ borderBottom: 'none', padding: 0 }}>
+        <div className="capabilities-topbar-row2">
+          <div className="capabilities-nav-tabs">
             <button
+              type="button"
               className={`capabilities-nav-btn tab-skills ${activeTab === 'skills' ? 'active' : ''}`}
               onClick={() => setActiveTab('skills')}
             >
-              <IconCode size={16} />
-              <span>技能 (Skills)</span>
-              <Badge size="xs" variant="filled" color={activeTab === 'skills' ? 'indigo' : 'gray'}>
-                {selectedAgent === 'all' ? (summary?.counts.skills ?? 0) : filteredSkills.length}
-              </Badge>
+              <IconCode size={15} />
+              <span>技能</span>
+              <span className="cap-tab-count">{filteredSkills.length}</span>
             </button>
 
             <button
+              type="button"
               className={`capabilities-nav-btn tab-mcp ${activeTab === 'mcp' ? 'active' : ''}`}
               onClick={() => setActiveTab('mcp')}
             >
-              <IconLayersLinked size={16} />
+              <IconLayersLinked size={15} />
               <span>MCP 服务器</span>
-              <Badge size="xs" variant="filled" color={activeTab === 'mcp' ? 'teal' : 'gray'}>
-                {filteredMcpServers.length}
-              </Badge>
+              <span className="cap-tab-count">{filteredMcpServers.length}</span>
             </button>
 
             <button
+              type="button"
               className={`capabilities-nav-btn tab-plugins ${activeTab === 'plugins' ? 'active' : ''}`}
               onClick={() => setActiveTab('plugins')}
             >
-              <IconPlug size={16} />
-              <span>复合插件 (Plugins)</span>
-              <Badge size="xs" variant="filled" color={activeTab === 'plugins' ? 'orange' : 'gray'}>
-                {filteredPlugins.length}
-              </Badge>
+              <IconPlug size={15} />
+              <span>复合插件</span>
+              <span className="cap-tab-count">{filteredPlugins.length}</span>
             </button>
 
             <button
+              type="button"
               className={`capabilities-nav-btn tab-market ${activeTab === 'marketplaces' ? 'active' : ''}`}
               onClick={() => setActiveTab('marketplaces')}
             >
-              <IconShoppingCart size={16} />
-              <span>能力市场 (Marketplaces)</span>
-              <Badge size="xs" variant="filled" color={activeTab === 'marketplaces' ? 'cyan' : 'gray'}>
-                {filteredMarketplaces.length}
-              </Badge>
+              <IconShoppingCart size={15} />
+              <span>能力市场</span>
+              <span className="cap-tab-count">{filteredMarketplaces.length}</span>
             </button>
           </div>
 
-          {/* 三核 Agent 架构视点胶囊过滤器 */}
-          <Group gap={6} align="center">
-            <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--cap-text-muted)', textTransform: 'uppercase' }}>
-              架构视点:
-            </span>
-            {[{ id: 'all', label: '全部 Agent' }, ...availableSkillAgents].map((ag) => {
-              const active = selectedAgent === ag.id
-              return (
-                <button
-                  key={ag.id}
-                  onClick={() => setSelectedAgent(ag.id)}
-                  style={{
-                    padding: '3px 10px',
-                    borderRadius: 20,
-                    fontSize: 11,
-                    fontWeight: active ? 700 : 500,
-                    cursor: 'pointer',
-                    background: active ? 'rgba(99, 102, 241, 0.2)' : 'transparent',
-                    color: active ? '#818cf8' : 'var(--cap-text-secondary)',
-                    border: active ? '1px solid #818cf8' : '1px solid rgba(255,255,255,0.08)',
-                    transition: 'all 0.15s ease',
-                  }}
-                >
-                  {ag.label}
-                </button>
-              )
-            })}
-          </Group>
+          <div className="cap-agent-view-pills" role="group" aria-label="Agent 架构视点">
+            <Text size="xs" c="dimmed" fw={600} mr={2}>Agent 视点:</Text>
+            {[{ id: 'all', label: '全部 Agent' }, ...availableSkillAgents].map((ag) => (
+              <button
+                key={ag.id}
+                type="button"
+                className={`cap-agent-pill${selectedAgent === ag.id ? ' active' : ''}`}
+                onClick={() => {
+                  setSelectedAgent(ag.id)
+                  if (ag.id !== 'all' && installFilter === 'partial') {
+                    setInstallFilter('all')
+                  }
+                }}
+              >
+                {ag.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
       {/* 三栏工作台主体 */}
       <div className="capabilities-workbench">
-        {/* ===================== TAB 1: 技能 (Skills) 三栏工作台 ===================== */}
+        {/* ===================== TAB 1: 技能工作台 ===================== */}
         {activeTab === 'skills' && (
           <>
-            {/* 左 1 栏：多源过滤侧边栏 (Filter Rail) */}
+            {/* 左侧筛选栏：安装状态 + 能力来源（彻底移除重复的 Agent 过滤列表） */}
             <div className="capabilities-filter-rail">
-              <div className="filter-section-title">能力分类与归集</div>
+              <div className="filter-section-title">安装状态 · {activeAgentLabel}</div>
               <button
+                type="button"
+                className={`filter-item-btn ${installFilter === 'all' ? 'active' : ''}`}
+                onClick={() => setInstallFilter('all')}
+              >
+                <span>全部状态</span>
+                <span className="cap-filter-count">{agentScopedSkills.length}</span>
+              </button>
+              <button
+                type="button"
+                className={`filter-item-btn ${installFilter === 'installed' ? 'active' : ''}`}
+                onClick={() => setInstallFilter('installed')}
+              >
+                <Group gap={7}>
+                  <span className="cap-status-dot is-installed" aria-hidden="true" />
+                  <span>已安装</span>
+                </Group>
+                <span className="cap-filter-count is-installed">{installedCountForView}</span>
+              </button>
+              {selectedAgent === 'all' && partialCountForView > 0 && (
+                <button
+                  type="button"
+                  className={`filter-item-btn ${installFilter === 'partial' ? 'active' : ''}`}
+                  onClick={() => setInstallFilter('partial')}
+                >
+                  <Group gap={7}>
+                    <span className="cap-status-dot is-partial" aria-hidden="true" />
+                    <span>待补齐</span>
+                  </Group>
+                  <span className="cap-filter-count">{partialCountForView}</span>
+                </button>
+              )}
+              <button
+                type="button"
+                className={`filter-item-btn ${installFilter === 'uninstalled' ? 'active' : ''}`}
+                onClick={() => setInstallFilter('uninstalled')}
+              >
+                <Group gap={7}>
+                  <span className="cap-status-dot is-uninstalled" aria-hidden="true" />
+                  <span>未安装</span>
+                </Group>
+                <span className="cap-filter-count is-uninstalled">{uninstalledCountForView}</span>
+              </button>
+
+              <div className="filter-section-title" style={{ marginTop: 18 }}>能力来源</div>
+              <button
+                type="button"
                 className={`filter-item-btn ${skillCategory === 'all' ? 'active' : ''}`}
                 onClick={() => setSkillCategory('all')}
               >
-                <span>全部技能总览</span>
-                <Badge size="xs" variant="light">{allSkills.length}</Badge>
+                <span>全部技能</span>
+                <span className="cap-filter-count">{allSkills.length}</span>
               </button>
               <button
+                type="button"
                 className={`filter-item-btn ${skillCategory === 'astrorder' ? 'active' : ''}`}
                 onClick={() => setSkillCategory('astrorder')}
               >
                 <Group gap={6}><IconCode size={14} /><span>星序技能</span></Group>
-                <Badge size="xs" variant="light">{astrorderSkills.length}</Badge>
+                <span className="cap-filter-count">{astrorderSkills.length}</span>
               </button>
               <button
+                type="button"
                 className={`filter-item-btn ${skillCategory === 'proprietary' ? 'active' : ''}`}
                 onClick={() => setSkillCategory('proprietary')}
               >
-                <Group gap={6}>
-                  <IconShieldLock size={14} color="#f59e0b" />
-                  <span>原生私有业务技能</span>
-                </Group>
-                <Badge size="xs" color="yellow">{proprietarySkills.length}</Badge>
+                <Group gap={6}><IconShieldLock size={14} color="var(--cap-amber)" /><span>私有业务</span></Group>
+                <span className="cap-filter-count">{proprietarySkills.length}</span>
               </button>
               <button
+                type="button"
                 className={`filter-item-btn ${skillCategory === 'community' ? 'active' : ''}`}
                 onClick={() => setSkillCategory('community')}
               >
-                <span>社区开源 (skills.sh)</span>
-                <Badge size="xs" color="indigo">{communitySkills.length}</Badge>
+                <span>社区开源</span>
+                <span className="cap-filter-count">{communitySkills.length}</span>
               </button>
               <button
+                type="button"
                 className={`filter-item-btn ${skillCategory === 'memory' ? 'active' : ''}`}
                 onClick={() => setSkillCategory('memory')}
               >
-                <Group gap={6}>
-                  <IconSparkles size={14} color="#38bdf8" />
-                  <span>OpenViking 经验流</span>
-                </Group>
-                <Badge size="xs" color="cyan">{memorySkills.length}</Badge>
+                <Group gap={6}><IconSparkles size={14} color="var(--cap-cyan)" /><span>OpenViking</span></Group>
+                <span className="cap-filter-count">{memorySkills.length}</span>
               </button>
-
-              <div className="filter-section-title" style={{ marginTop: 20 }}>
-                过滤当前架构
-              </div>
-              <button
-                className={`filter-item-btn ${selectedAgent === 'all' ? 'active' : ''}`}
-                onClick={() => setSelectedAgent('all')}
-              >
-                <span>全部 Agent</span>
-              </button>
-              {availableSkillAgents.map(agent => (
-                <button key={agent.id} className={`filter-item-btn ${selectedAgent === agent.id ? 'active' : ''}`} onClick={() => setSelectedAgent(agent.id)}>
-                  <span>{agent.label} 架构</span>
-                </button>
-              ))}
             </div>
 
-            {/* 中间栏：高密度能力列表 (Skills Matrix) */}
+            {/* 中间栏：可多选技能列表 + 批量分发操作栏 */}
             <div className="capabilities-list-pane">
-              <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--cap-border)' }}>
+              <div className="cap-list-toolbar">
                 <TextInput
-                  placeholder={`在 ${filteredSkills.length} 个技能中检索...`}
+                  placeholder={`在 ${filteredSkills.length} 个技能中检索名称或描述...`}
                   value={skillSearch}
                   onChange={(e) => setSkillSearch(e.target.value)}
                   leftSection={<IconSearch size={14} />}
                   size="xs"
                 />
+
+                <div className="cap-select-bar">
+                  <Group gap={6}>
+                    <Button
+                      size="compact-xs"
+                      variant="subtle"
+                      color="gray"
+                      leftSection={<IconChecklist size={13} />}
+                      disabled={filteredSkills.length === 0}
+                      onClick={() => setCheckedSkillKeys(filteredSkills.map(getSkillKey))}
+                    >
+                      全选当前 ({filteredSkills.length})
+                    </Button>
+                    <Button
+                      size="compact-xs"
+                      variant="subtle"
+                      color="gray"
+                      disabled={filteredSkills.every((sk) => !isSkillNeedsInstallForView(sk))}
+                      onClick={() =>
+                        setCheckedSkillKeys(
+                          filteredSkills
+                            .filter(isSkillNeedsInstallForView)
+                            .map(getSkillKey),
+                        )
+                      }
+                    >
+                      只选未安装
+                    </Button>
+                  </Group>
+                  {checkedSkills.length > 0 && (
+                    <Button
+                      size="compact-xs"
+                      variant="subtle"
+                      color="gray"
+                      onClick={() => setCheckedSkillKeys([])}
+                    >
+                      清空已选
+                    </Button>
+                  )}
+                </div>
+
+                {checkedSkills.length > 0 && (
+                  <div className="cap-batch-bar">
+                    <Text size="xs" fw={650}>
+                      已勾选 {checkedSkills.length} 个技能
+                    </Text>
+                    <Button
+                      size="compact-xs"
+                      color="indigo"
+                      leftSection={<IconSend size={13} />}
+                      disabled={loading || availableSkillAgents.length === 0}
+                      onClick={() => openSkillDispatchModal(checkedSkills, false)}
+                    >
+                      批量分发 ({checkedSkills.length})
+                    </Button>
+                  </div>
+                )}
               </div>
 
               <ScrollArea style={{ flex: 1 }}>
-                <div style={{ padding: '6px 0' }}>
+                <div style={{ padding: '4px 0 12px' }}>
                   {filteredSkills.map((sk) => {
-                    const isSelected = activeSkill && getSkillKey(activeSkill) === getSkillKey(sk)
-                    const isProprietary =
-                      sk.source?.includes('native') ||
-                      sk.name.includes('liuruyan') ||
-                      sk.name.includes('photo') ||
-                      sk.name.includes('image')
+                    const key = getSkillKey(sk)
+                    const isSelected = activeSkill && getSkillKey(activeSkill) === key
+                    const isChecked = checkedSkillSet.has(key)
+                    const installedAgents = getSkillInstalledAgents(sk)
+                    const installedSet = new Set(installedAgents)
+                    const totalAgentCount = availableSkillAgents.length
+                    const installedForView = isSkillInstalledForView(sk, selectedAgent)
+                    const displayTitle = getSkillDisplayTitle(sk)
+
+                    let statusPillText = '未安装'
+                    let statusPillTone: 'is-installed' | 'is-partial' | 'is-missing' = 'is-missing'
+                    if (selectedAgent !== 'all') {
+                      if (installedForView) {
+                        statusPillText = `已安装 · ${activeAgentLabel}`
+                        statusPillTone = 'is-installed'
+                      } else {
+                        statusPillText = `未安装 · ${activeAgentLabel}`
+                        statusPillTone = 'is-missing'
+                      }
+                    } else if (installedAgents.length > 0) {
+                      if (totalAgentCount > 0 && installedAgents.length >= totalAgentCount) {
+                        statusPillText = `已全装 ${installedAgents.length}/${totalAgentCount}`
+                        statusPillTone = 'is-installed'
+                      } else {
+                        statusPillText = totalAgentCount > 0
+                          ? `已装 ${installedAgents.length}/${totalAgentCount}`
+                          : `已装 ${installedAgents.length}`
+                        statusPillTone = 'is-partial'
+                      }
+                    }
+
                     return (
                       <div
-                        key={getSkillKey(sk)}
+                        key={key}
                         onClick={() => setSelectedSkill(sk)}
-                        className={`capability-card ${isSelected ? 'selected' : ''}`}
+                        className={`capability-card${isSelected ? ' selected' : ''}${isChecked ? ' is-checked' : ''}`}
                       >
-                        <Group justify="space-between" wrap="nowrap" align="flex-start">
-                          <div style={{ overflow: 'hidden', flex: 1 }}>
-                            <Group gap={6} wrap="nowrap">
-                              <Text size="sm" fw={700} truncate style={{ color: 'var(--cap-text-primary)' }}>
-                                {isOfficialSkill(sk) ? (OFFICIAL_SKILL_TITLES[sk.name] || sk.name) : sk.name}
+                        <Group justify="space-between" wrap="nowrap" align="flex-start" gap={8}>
+                          <Group gap={8} wrap="nowrap" align="flex-start" style={{ minWidth: 0, flex: 1 }}>
+                            <Checkbox
+                              size="xs"
+                              mt={3}
+                              checked={isChecked}
+                              aria-label={`选择技能 ${displayTitle}`}
+                              onClick={(e) => e.stopPropagation()}
+                              onChange={() => toggleSkillChecked(key)}
+                            />
+                            <div style={{ minWidth: 0, flex: 1 }}>
+                              <Group gap={6} wrap="nowrap">
+                                <Text size="sm" fw={700} truncate style={{ color: 'var(--cap-text-primary)' }}>
+                                  {displayTitle}
+                                </Text>
+                                {isOfficialSkill(sk) && displayTitle !== sk.name && (
+                                  <Text size="xs" c="dimmed" truncate style={{ fontFamily: 'monospace' }}>
+                                    {sk.name}
+                                  </Text>
+                                )}
+                              </Group>
+                              <Text size="xs" c="dimmed" lineClamp={2} mt={3} style={{ lineHeight: 1.45 }}>
+                                {sk.description || '未提供描述'}
                               </Text>
-                              {isProprietary && !isOfficialSkill(sk) && (
-                                <Badge size="xs" color="yellow" variant="filled">
-                                  ★ 原生私有独家
-                                </Badge>
-                              )}
-                            </Group>
-                            <Text size="xs" c="dimmed" lineClamp={2} mt={4} style={{ lineHeight: 1.5 }}>
-                              {sk.description || '未提供描述'}
-                            </Text>
-                          </div>
+                            </div>
+                          </Group>
+
+                          <span className={`cap-install-pill ${statusPillTone}`}>
+                            {statusPillTone !== 'is-missing' && <IconCheck size={11} stroke={2.6} />}
+                            <span>{statusPillText}</span>
+                          </span>
                         </Group>
 
-                        {/* 底部元数据徽章 */}
-                        <Group justify="space-between" mt={10} pt={8} style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-                          <Group gap={6}>
-                            {isOfficialSkill(sk) && <Text size="xs" c="dimmed">{sk.name}</Text>}
-                            {(sk.installed_agents || sk.agents || []).map((ag: string) => (
-                              <Badge key={ag} size="xs" variant="outline" color="gray">
-                                {ag}
-                              </Badge>
-                            ))}
-                          </Group>
-                          <Text size="xs" c="dimmed">
-                            {isOfficialSkill(sk) ? '官方技能源' : '已发现安装目录'}
+                        {/* 底部清晰展示每个 Agent 的安装状态 */}
+                        <Group justify="space-between" align="center" mt={9} pt={7} style={{ borderTop: '1px solid var(--cap-border)' }} gap={6}>
+                          <div className="cap-agent-chips">
+                            {(availableSkillAgents.length > 0
+                              ? availableSkillAgents
+                              : installedAgents.map((id) => ({ id, label: shortAgentLabel(id) }))
+                            ).map((ag) => {
+                              const hasInstalled = installedSet.has(ag.id.toLowerCase())
+                              return (
+                                <span
+                                  key={ag.id}
+                                  className={`cap-agent-chip ${hasInstalled ? 'is-installed' : 'is-missing'}`}
+                                  title={hasInstalled ? `已安装到 ${ag.label}` : `尚未安装到 ${ag.label}`}
+                                >
+                                  {hasInstalled ? '✓' : '○'} {shortAgentLabel(ag.id, ag.label)}
+                                </span>
+                              )
+                            })}
+                          </div>
+                          <Text size="xs" c="dimmed" style={{ flexShrink: 0 }}>
+                            {isOfficialSkill(sk) ? '星序官方' : (sk.source || '本地')}
                           </Text>
                         </Group>
                       </div>
@@ -982,135 +1385,170 @@ export function CapabilitiesSettingsCard() {
               </ScrollArea>
             </div>
 
-            {/* 右侧栏：深度规范检查器 (Inspector Workbench) */}
+            {/* 右侧栏：技能详情与本节点安装分布 */}
             <div className="capabilities-inspector-pane">
-              {activeSkill ? (
-                <>
-                  {/* 头部元数据与操作条 */}
-                  <div className="inspector-top-meta">
-                    <Group justify="space-between" align="flex-start">
-                      <div>
-                        <Group gap="xs">
-                          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: 'var(--cap-text-primary)' }}>
-                            {activeSkill.name}
-                          </h2>
-                          <Badge color="gray" variant="outline">
-                            {isOfficialSkill(activeSkill) ? '星序官方源' : activeSkill.source || '本机技能源'}
-                          </Badge>
-                        </Group>
-                        <Text size="xs" c="dimmed" mt={6} style={{ fontFamily: 'monospace' }}>
-                          {isOfficialSkill(activeSkill) ? '官方目录 · 按模块分发到目标 Agent' : `路径: ${activeSkill.path || '未提供路径'}`}
-                        </Text>
-                      </div>
+              {activeSkill ? (() => {
+                const activeInstalled = getSkillInstalledAgents(activeSkill)
+                const activeInstalledSet = new Set(activeInstalled)
+                const missingAgents = availableSkillAgents.filter(
+                  (ag) => !activeInstalledSet.has(ag.id.toLowerCase()),
+                )
+                return (
+                  <>
+                    <div className="inspector-top-meta">
+                      <Group justify="space-between" align="flex-start" wrap="wrap" gap="sm">
+                        <div style={{ minWidth: 0, flex: '1 1 240px' }}>
+                          <Group gap="xs" wrap="wrap">
+                            <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: 'var(--cap-text-primary)' }}>
+                              {getSkillDisplayTitle(activeSkill)}
+                            </h2>
+                            <Badge size="xs" variant="light" color={isOfficialSkill(activeSkill) ? 'indigo' : 'gray'}>
+                              {isOfficialSkill(activeSkill) ? '星序官方源' : activeSkill.source || '本机技能源'}
+                            </Badge>
+                          </Group>
+                          <Text size="xs" c="dimmed" mt={4} style={{ fontFamily: 'monospace', wordBreak: 'break-all' }}>
+                            {isOfficialSkill(activeSkill)
+                              ? `模块标识: ${activeSkill.name}`
+                              : `路径: ${activeSkill.path || '未提供路径'}`}
+                          </Text>
+                        </div>
 
-                      <Group gap="xs">
-                        <Button
-                          size="xs"
-                          variant="light"
-                          color="indigo"
-                          leftSection={<IconSend size={14} />}
-                          disabled={loading || availableSkillAgents.length === 0}
-                          onClick={() => handleOpenDispatchModal('skill', activeSkill)}
-                        >
-                          分发到 Agent
-                        </Button>
-                        {isPluginManagedSource(activeSkill.source) ? (
+                        <Group gap="xs">
+                          {missingAgents.length > 0 && (
+                            <Button
+                              size="xs"
+                              variant="filled"
+                              color="indigo"
+                              leftSection={<IconSend size={13} />}
+                              disabled={loading || availableSkillAgents.length === 0}
+                              onClick={() => openSkillDispatchModal([activeSkill], true)}
+                            >
+                              分发到未安装 ({missingAgents.length})
+                            </Button>
+                          )}
                           <Button
                             size="xs"
-                            color="orange"
-                            variant="subtle"
-                            leftSection={<IconPlug size={14} />}
-                            onClick={() => setActiveTab('plugins')}
+                            variant="default"
+                            leftSection={<IconSend size={13} />}
+                            disabled={loading || availableSkillAgents.length === 0}
+                            onClick={() => handleOpenSingleDispatchModal('skill', activeSkill)}
                           >
-                            所属插件: {pluginSourceName(activeSkill.source)}
+                            分发到 Agent
                           </Button>
-                        ) : !isOfficialSkill(activeSkill) && (
-                          <Button size="xs" color="red" variant="subtle" leftSection={<IconTrash size={14} />} onClick={() => handleRemoveSkill(activeSkill.name)}>卸载</Button>
-                        )}
+                          {isPluginManagedSource(activeSkill.source) ? (
+                            <Button
+                              size="xs"
+                              color="orange"
+                              variant="subtle"
+                              leftSection={<IconPlug size={13} />}
+                              onClick={() => setActiveTab('plugins')}
+                            >
+                              插件: {pluginSourceName(activeSkill.source)}
+                            </Button>
+                          ) : !isOfficialSkill(activeSkill) && (
+                            <Button
+                              size="xs"
+                              color="red"
+                              variant="subtle"
+                              leftSection={<IconTrash size={13} />}
+                              onClick={() => void handleRemoveSkill(activeSkill.name)}
+                            >
+                              卸载
+                            </Button>
+                          )}
+                        </Group>
                       </Group>
-                    </Group>
-                  </div>
 
-                  {/* 检查器 4 个 Tab 导航 */}
-                  <div className="inspector-tabs-header">
-                    <div
-                      className={`inspector-tab-item ${inspectorTab === 'spec' ? 'active' : ''}`}
-                      onClick={() => setInspectorTab('spec')}
-                    >
-                      SKILL.md 规范与定义
+                      {/* 当前节点安装矩阵总览条 */}
+                      <div className="cap-inspector-matrix">
+                        <Text size="xs" fw={650} c="dimmed">
+                          {summary?.target_name || selectedTargetId} 安装状态:
+                        </Text>
+                        {availableSkillAgents.map((ag) => {
+                          const ok = activeInstalledSet.has(ag.id.toLowerCase())
+                          return (
+                            <span
+                              key={ag.id}
+                              className={`cap-agent-chip ${ok ? 'is-installed' : 'is-missing'}`}
+                            >
+                              {ok ? '✓ 已安装' : '○ 未安装'} · {shortAgentLabel(ag.id, ag.label)}
+                            </span>
+                          )
+                        })}
+                      </div>
                     </div>
-                    <div
-                      className={`inspector-tab-item ${inspectorTab === 'assets' ? 'active' : ''}`}
-                      onClick={() => setInspectorTab('assets')}
-                    >
-                      关联资源与脚本树 (Assets)
+
+                    <div className="inspector-tabs-header">
+                      <div
+                        className={`inspector-tab-item ${inspectorTab === 'spec' ? 'active' : ''}`}
+                        onClick={() => setInspectorTab('spec')}
+                      >
+                        SKILL.md 规范与定义
+                      </div>
+                      <div
+                        className={`inspector-tab-item ${inspectorTab === 'install' ? 'active' : ''}`}
+                        onClick={() => setInspectorTab('install')}
+                      >
+                        安装分布与来源
+                      </div>
                     </div>
-                    <div
-                      className={`inspector-tab-item ${inspectorTab === 'grants' ? 'active' : ''}`}
-                      onClick={() => setInspectorTab('grants')}
-                    >
-                      MCP 与工具授权
-                    </div>
-                    <div
-                      className={`inspector-tab-item ${inspectorTab === 'live' ? 'active' : ''}`}
-                      onClick={() => setInspectorTab('live')}
-                    >
-                      沙箱试运行 (Live Runner)
-                    </div>
-                  </div>
 
-                  {/* 检查器内容区 */}
-                  <ScrollArea style={{ flex: 1 }}>
-                    <div style={{ padding: 20 }}>
-                      {/* Tab 1: SKILL.md 规范 */}
-                      {inspectorTab === 'spec' && (
-                        <Stack gap="md">
-                          <Card withBorder radius="md" p="md" style={{ background: 'var(--cap-card-bg)' }}>
-                            <Text size="xs" fw={700} c="dimmed" mb={6}>
-                              SKILL.md 原文
-                            </Text>
-                            <div className="code-preview-block">
-                              {activeSkill.content || '当前来源未提供 SKILL.md 原文。'}
-                            </div>
-                          </Card>
+                    <ScrollArea style={{ flex: 1 }}>
+                      <div style={{ padding: 18 }}>
+                        {inspectorTab === 'spec' && (
+                          <Stack gap="md">
+                            {activeSkill.description && (
+                              <Card withBorder radius="md" p="sm" style={{ background: 'var(--cap-card-bg)' }}>
+                                <Text size="xs" fw={700} c="dimmed" mb={4}>技能描述</Text>
+                                <Text size="sm" style={{ lineHeight: 1.65, color: 'var(--cap-text-primary)' }}>
+                                  {activeSkill.description}
+                                </Text>
+                              </Card>
+                            )}
+                            <Card withBorder radius="md" p="sm" style={{ background: 'var(--cap-card-bg)' }}>
+                              <Text size="xs" fw={700} c="dimmed" mb={6}>SKILL.md 原文</Text>
+                              <div className="code-preview-block">
+                                {activeSkill.content || '当前来源未提供 SKILL.md 原文。'}
+                              </div>
+                            </Card>
+                          </Stack>
+                        )}
 
-                          <Card withBorder radius="md" p="md" style={{ background: 'var(--cap-card-bg)' }}>
-                            <Text size="xs" fw={700} c="dimmed" mb={6}>
-                              技能描述
-                            </Text>
-                            <Text size="sm" style={{ lineHeight: 1.7, color: 'var(--cap-text-primary)' }}>
-                              {activeSkill.description || '未提供描述'}
-                            </Text>
-                          </Card>
-                        </Stack>
-                      )}
-
-                      {/* Tab 2: 关联资源与脚本树 */}
-                      {inspectorTab === 'assets' && (
-                        <Stack gap="md">
-                          <Text size="sm" c="dimmed">当前接口未提供资源目录清单，请以 SKILL.md 中的实际资源说明为准。</Text>
-                        </Stack>
-                      )}
-
-                      {/* Tab 3: MCP 与工具授权 */}
-                      {inspectorTab === 'grants' && (
-                        <Stack gap="md">
-                          <Text size="sm" c="dimmed">技能分发不会自动授予工具权限。请在目标 Agent 配置所需 MCP 或 CLI，授权状态以目标 Agent 为准。</Text>
-                        </Stack>
-                      )}
-
-                      {/* Tab 4: 沙箱在线试运行 */}
-                      {inspectorTab === 'live' && (
-                        <Stack gap="md">
-                          <Text size="sm" c="dimmed">当前未接入技能试运行。分发后，请在目标 Agent 按技能说明验证实际调用。</Text>
-                        </Stack>
-                      )}
-                    </div>
-                  </ScrollArea>
-                </>
-              ) : (
-                <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--cap-text-muted)' }}>
-                  请在左侧选择一个技能以查看完整的开发者规范检查器
+                        {inspectorTab === 'install' && (
+                          <Stack gap="sm">
+                            <Card withBorder radius="md" p="md" style={{ background: 'var(--cap-card-bg)' }}>
+                              <Text size="xs" fw={700} c="dimmed" mb="xs">
+                                节点「{summary?.target_name || selectedTargetId}」各 Agent 安装详情
+                              </Text>
+                              <Stack gap={6}>
+                                {availableSkillAgents.map((ag) => {
+                                  const ok = activeInstalledSet.has(ag.id.toLowerCase())
+                                  return (
+                                    <Group key={ag.id} justify="space-between" p="xs" style={{ borderRadius: 6, background: 'var(--cap-surface-elevated)' }}>
+                                      <Text size="xs" fw={600}>{ag.label}</Text>
+                                      <span className={`cap-install-pill ${ok ? 'is-installed' : 'is-missing'}`}>
+                                        {ok ? '✓ 已安装' : '未安装'}
+                                      </span>
+                                    </Group>
+                                  )
+                                })}
+                              </Stack>
+                            </Card>
+                            <Card withBorder radius="md" p="md" style={{ background: 'var(--cap-card-bg)' }}>
+                              <Text size="xs" fw={700} c="dimmed" mb={4}>来源与路径</Text>
+                              <Text size="xs" style={{ fontFamily: 'monospace', wordBreak: 'break-all' }}>
+                                {activeSkill.path || (isOfficialSkill(activeSkill) ? '星序内置官方技能目录（按目标 Agent 模板动态生成）' : '未提供路径')}
+                              </Text>
+                            </Card>
+                          </Stack>
+                        )}
+                      </div>
+                    </ScrollArea>
+                  </>
+                )
+              })() : (
+                <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--cap-text-muted)', fontSize: 13 }}>
+                  请在左侧选择一个技能查看详情与安装状态
                 </div>
               )}
             </div>
@@ -1119,14 +1557,14 @@ export function CapabilitiesSettingsCard() {
 
         {/* ===================== TAB 2: MCP 服务器控制台 ===================== */}
         {activeTab === 'mcp' && (
-          <div style={{ flex: 1, padding: 24, overflow: 'auto' }}>
-            <Group justify="space-between" mb="lg">
+          <div style={{ flex: 1, padding: 20, overflow: 'auto' }}>
+            <Group justify="space-between" mb="md">
               <div>
-                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: 'var(--cap-text-primary)' }}>
-                  Model Context Protocol (MCP) 服务器管理
+                <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: 'var(--cap-text-primary)' }}>
+                  MCP 服务器管理
                 </h3>
-                <Text size="xs" c="dimmed" mt={4}>
-                  在 [{summary?.target_name || selectedTargetId}] 上注册的协议服务器，供已配置的 Agent 使用。
+                <Text size="xs" c="dimmed" mt={2}>
+                  在 [{summary?.target_name || selectedTargetId}] 上注册的协议服务器。
                 </Text>
               </div>
             </Group>
@@ -1137,133 +1575,84 @@ export function CapabilitiesSettingsCard() {
                 const pluginManaged = isPluginManagedSource(srv.source)
                 const ping = mcpPingStatus[key]
                 return (
-                <Card key={key} withBorder radius="md" p="md" style={{ background: 'var(--cap-card-bg)' }}>
-                  <Group justify="space-between" align="flex-start" wrap="nowrap">
-                    <div>
-                      <Group gap="xs">
-                        <IconLayersLinked size={18} color="var(--astr-muted)" />
-                        <Text fw={700} size="sm" style={{ color: 'var(--cap-text-primary)' }}>
-                          {srv.name}
-                        </Text>
-                        <Badge size="xs" color={agentBadgeColor(srv.agent)}>
-                          {srv.agent}
-                        </Badge>
-                      </Group>
-                      <Group gap={6} mt={6}>
-                        <Badge size="xs" variant="outline" color={srv.transport === 'sse/http' ? 'blue' : 'violet'}>
-                          {srv.transport.toUpperCase()}
-                        </Badge>
-                        <Badge size="xs" color={srv.enabled ? 'teal' : 'gray'} variant="light">
-                          {srv.enabled ? '● 已启用' : '○ 已停用'}
-                        </Badge>
-                        {pluginManaged && (
-                          <Badge size="xs" color="orange" variant="light">
-                            插件: {pluginSourceName(srv.source)}
+                  <Card key={key} withBorder radius="md" p="md" style={{ background: 'var(--cap-card-bg)' }}>
+                    <Group justify="space-between" align="flex-start" wrap="nowrap">
+                      <div>
+                        <Group gap="xs">
+                          <IconLayersLinked size={16} color="var(--astr-muted)" />
+                          <Text fw={700} size="sm">{srv.name}</Text>
+                          <Badge size="xs" color={agentBadgeColor(srv.agent)}>{srv.agent}</Badge>
+                        </Group>
+                        <Group gap={6} mt={6}>
+                          <Badge size="xs" variant="outline" color={srv.transport === 'sse/http' ? 'blue' : 'violet'}>
+                            {srv.transport.toUpperCase()}
                           </Badge>
+                          <Badge size="xs" color={srv.enabled ? 'teal' : 'gray'} variant="light">
+                            {srv.enabled ? '● 已启用' : '○ 已停用'}
+                          </Badge>
+                          {pluginManaged && (
+                            <Badge size="xs" color="orange" variant="light">
+                              插件: {pluginSourceName(srv.source)}
+                            </Badge>
+                          )}
+                        </Group>
+                      </div>
+
+                      <Group gap={4} wrap="nowrap">
+                        <Switch
+                          checked={srv.enabled}
+                          disabled={pluginManaged}
+                          size="sm"
+                          color="teal"
+                          aria-label={`切换 MCP 服务 ${srv.name} 状态`}
+                          onChange={() => void handleToggleMcp(srv)}
+                        />
+                        {!pluginManaged && (
+                          <>
+                            <Button size="compact-xs" variant="subtle" color="gray" aria-label={`编辑 MCP 服务 ${srv.name}`} onClick={() => handleOpenEditMcp(srv)}>
+                              <IconEdit size={14} />
+                            </Button>
+                            <Button size="compact-xs" variant="subtle" color="indigo" aria-label={`分发 MCP 服务 ${srv.name}`} onClick={() => handleOpenSingleDispatchModal('mcp', srv)}>
+                              <IconSend size={14} />
+                            </Button>
+                            <Button size="compact-xs" variant="subtle" color="red" aria-label={`删除 MCP 服务 ${srv.name}`} onClick={() => void handleDeleteMcp(srv)}>
+                              <IconTrash size={14} />
+                            </Button>
+                          </>
                         )}
                       </Group>
-                    </div>
-
-                    <Group gap={6} wrap="nowrap">
-                      <Switch
-                        checked={srv.enabled}
-                        disabled={pluginManaged}
-                        size="sm"
-                        color="teal"
-                        aria-label={`切换 MCP 服务 ${srv.name} 状态`}
-                        onChange={() => void handleToggleMcp(srv)}
-                      />
-                      {!pluginManaged && (
-                        <Button
-                          size="compact-xs"
-                          variant="subtle"
-                          color="gray"
-                          title="编辑 MCP 服务"
-                          aria-label={`编辑 MCP 服务 ${srv.name}`}
-                          onClick={() => handleOpenEditMcp(srv)}
-                        >
-                          <IconEdit size={14} />
-                        </Button>
-                      )}
-                      {!pluginManaged && (
-                        <Button
-                          size="compact-xs"
-                          variant="subtle"
-                          color="indigo"
-                          title="跨端/跨 Agent 分发"
-                          aria-label={`分发 MCP 服务 ${srv.name}`}
-                          onClick={() => handleOpenDispatchModal('mcp', srv)}
-                        >
-                          <IconSend size={14} />
-                        </Button>
-                      )}
-                      {!pluginManaged && (
-                        <Button
-                          size="compact-xs"
-                          variant="subtle"
-                          color="red"
-                          title="删除 MCP 服务"
-                          aria-label={`删除 MCP 服务 ${srv.name}`}
-                          onClick={() => handleDeleteMcp(srv)}
-                        >
-                          <IconTrash size={14} />
-                        </Button>
-                      )}
                     </Group>
-                  </Group>
 
-                  {/* 终端指令或服务 URL */}
-                  <div style={{ marginTop: 12, fontSize: 12, color: 'var(--cap-text-secondary)', wordBreak: 'break-all' }}>
-                    {srv.url ? (
-                      <div><strong style={{ color: 'var(--cap-text-primary)' }}>URL:</strong> {srv.url}</div>
-                    ) : (
-                      <div><strong style={{ color: 'var(--cap-text-primary)' }}>CLI:</strong> {srv.command} {(srv.args || []).join(' ')}</div>
+                    <div style={{ marginTop: 10, fontSize: 12, color: 'var(--cap-text-secondary)', wordBreak: 'break-all' }}>
+                      {srv.url ? (
+                        <div><strong style={{ color: 'var(--cap-text-primary)' }}>URL:</strong> {srv.url}</div>
+                      ) : (
+                        <div><strong style={{ color: 'var(--cap-text-primary)' }}>CLI:</strong> {srv.command} {(srv.args || []).join(' ')}</div>
+                      )}
+                    </div>
+
+                    {srv.tools && srv.tools.length > 0 && (
+                      <div style={{ marginTop: 8, paddingTop: 6, borderTop: '1px solid var(--cap-border)' }}>
+                        <Text size="xs" c="dimmed" mb={4}>已暴露工具 ({srv.tools.length}):</Text>
+                        <Group gap={4} wrap="wrap">
+                          {srv.tools.map((t) => (
+                            <Badge key={t} size="xs" variant="light" color="indigo" style={{ fontFamily: 'monospace' }}>
+                              {t}
+                            </Badge>
+                          ))}
+                        </Group>
+                      </div>
                     )}
-                  </div>
 
-                  {/* 工具列表展示 */}
-                  {srv.tools && srv.tools.length > 0 && (
-                    <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-                      <Text size="xs" c="dimmed" mb={4}>已暴露工具方法 ({srv.tools.length}):</Text>
-                      <Group gap={4} wrap="wrap">
-                        {srv.tools.map((t) => (
-                          <Badge key={t} size="xs" variant="subtle" color="indigo" style={{ fontFamily: 'monospace' }}>
-                            {t}
-                          </Badge>
-                        ))}
-                      </Group>
-                    </div>
-                  )}
-
-                  {/* Headers / 环境变量脱敏概览 */}
-                  {srv.headers && Object.keys(srv.headers).length > 0 && (
-                    <div style={{ marginTop: 8 }}>
-                      <Text size="xs" c="dimmed">请求头 Headers: {Object.keys(srv.headers).join(', ')}</Text>
-                    </div>
-                  )}
-                  {srv.env && Object.keys(srv.env).length > 0 && (
-                    <div style={{ marginTop: 4 }}>
-                      <Text size="xs" c="dimmed">注入环境变量: {Object.keys(srv.env).join(', ')}</Text>
-                    </div>
-                  )}
-
-                  <Group justify="space-between" mt="md" pt="xs" style={{ borderTop: '1px solid var(--cap-border)' }}>
-                    <Text size="xs" c={ping?.ok === false ? 'red' : ping?.ok ? 'teal' : 'dimmed'}>
-                      {ping?.loading ? '正在探活...' : ping?.text || '就绪'}
-                    </Text>
-                    <Group gap="xs">
-                      <Button
-                        size="xs"
-                        variant="subtle"
-                        color="teal"
-                        loading={ping?.loading}
-                        onClick={() => handlePingMcp(srv)}
-                      >
-                        探活测试 (Ping)
+                    <Group justify="space-between" mt="md" pt="xs" style={{ borderTop: '1px solid var(--cap-border)' }}>
+                      <Text size="xs" c={ping?.ok === false ? 'red' : ping?.ok ? 'teal' : 'dimmed'}>
+                        {ping?.loading ? '正在探活...' : ping?.text || '就绪'}
+                      </Text>
+                      <Button size="xs" variant="subtle" color="teal" loading={ping?.loading} onClick={() => void handlePingMcp(srv)}>
+                        探活测试
                       </Button>
                     </Group>
-                  </Group>
-                </Card>
+                  </Card>
                 )
               })}
             </SimpleGrid>
@@ -1277,14 +1666,14 @@ export function CapabilitiesSettingsCard() {
 
         {/* ===================== TAB 3: 复合插件管理 ===================== */}
         {activeTab === 'plugins' && (
-          <div style={{ flex: 1, padding: 24, overflow: 'auto' }}>
-            <Group justify="space-between" mb="lg">
+          <div style={{ flex: 1, padding: 20, overflow: 'auto' }}>
+            <Group justify="space-between" mb="md">
               <div>
-                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: 'var(--cap-text-primary)' }}>
+                <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: 'var(--cap-text-primary)' }}>
                   复合插件包 (Plugins)
                 </h3>
-                <Text size="xs" c="dimmed" mt={4}>
-                  管理 Antigravity、Codex、Hermes 与 Grok 的多组件插件包（Skills / Rules / MCP / Hooks）。
+                <Text size="xs" c="dimmed" mt={2}>
+                  管理 Antigravity、Codex、Hermes 与 Grok 的多组件插件包。
                 </Text>
               </div>
               <Button
@@ -1309,91 +1698,52 @@ export function CapabilitiesSettingsCard() {
                 const bundledMcp = Array.isArray(plg.config?.mcp_servers) ? plg.config.mcp_servers.map(String) : []
                 const hasHooks = plg.config?.has_hooks === true
                 return (
-                <Card key={plg.id} withBorder radius="md" p="md" style={{ background: 'var(--cap-card-bg)' }}>
-                  <Group justify="space-between" align="flex-start" wrap="nowrap">
-                    <div>
-                      <Group gap="xs">
-                        <IconPlug size={18} color="#f59e0b" />
-                        <Text fw={700} size="sm" style={{ color: 'var(--cap-text-primary)' }}>
-                          {plg.name}
-                        </Text>
-                        <Badge size="xs" color={agentBadgeColor(plg.agent)}>
-                          {plg.agent}
-                        </Badge>
-                        {version && (
-                          <Badge size="xs" variant="outline" color="gray">
-                            v{version}
-                          </Badge>
-                        )}
-                      </Group>
-                      <Group gap={6} mt={6}>
-                        {plg.marketplace && (
-                          <Badge size="xs" variant="light" color="orange">
-                            来源: {plg.marketplace}
-                          </Badge>
-                        )}
-                        {hasHooks && (
-                          <Badge size="xs" variant="light" color="cyan">
-                            含 Hooks
-                          </Badge>
-                        )}
-                      </Group>
-                    </div>
-                    <Switch
-                      checked={plg.enabled}
-                      size="sm"
-                      color="orange"
-                      aria-label={`切换插件 ${plg.name} 状态`}
-                      onChange={() => handleTogglePlugin(plg)}
-                    />
-                  </Group>
-
-                  {description && (
-                    <Text size="xs" c="dimmed" mt="xs" lineClamp={2}>
-                      {description}
-                    </Text>
-                  )}
-
-                  <Text size="xs" c="dimmed" mt="xs" style={{ fontFamily: 'monospace' }}>
-                    {plg.full_name || plg.id}
-                  </Text>
-
-                  {(bundledSkills.length > 0 || bundledMcp.length > 0) && (
-                    <Group gap={4} mt="xs" wrap="wrap">
-                      {bundledSkills.map((sk) => (
-                        <Badge key={`sk-${sk}`} size="xs" variant="subtle" color="indigo">
-                          Skill: {sk}
-                        </Badge>
-                      ))}
-                      {bundledMcp.map((mc) => (
-                        <Badge key={`mcp-${mc}`} size="xs" variant="subtle" color="teal">
-                          MCP: {mc}
-                        </Badge>
-                      ))}
+                  <Card key={plg.id} withBorder radius="md" p="md" style={{ background: 'var(--cap-card-bg)' }}>
+                    <Group justify="space-between" align="flex-start" wrap="nowrap">
+                      <div>
+                        <Group gap="xs">
+                          <IconPlug size={16} color="var(--cap-amber)" />
+                          <Text fw={700} size="sm">{plg.name}</Text>
+                          <Badge size="xs" color={agentBadgeColor(plg.agent)}>{plg.agent}</Badge>
+                          {version && <Badge size="xs" variant="outline" color="gray">v{version}</Badge>}
+                        </Group>
+                        <Group gap={6} mt={6}>
+                          {plg.marketplace && <Badge size="xs" variant="light" color="orange">来源: {plg.marketplace}</Badge>}
+                          {hasHooks && <Badge size="xs" variant="light" color="cyan">含 Hooks</Badge>}
+                        </Group>
+                      </div>
+                      <Switch
+                        checked={plg.enabled}
+                        size="sm"
+                        color="orange"
+                        aria-label={`切换插件 ${plg.name} 状态`}
+                        onChange={() => void handleTogglePlugin(plg)}
+                      />
                     </Group>
-                  )}
 
-                  <Group justify="flex-end" mt="md" pt="xs" style={{ borderTop: '1px solid var(--cap-border)' }}>
-                    <Button
-                      size="xs"
-                      variant="subtle"
-                      color="indigo"
-                      leftSection={<IconSend size={12} />}
-                      onClick={() => handleOpenDispatchModal('plugin', plg)}
-                    >
-                      跨端分发
-                    </Button>
-                    <Button
-                      size="xs"
-                      variant="subtle"
-                      color="red"
-                      leftSection={<IconTrash size={12} />}
-                      onClick={() => handleUninstallPlugin(plg)}
-                    >
-                      卸载
-                    </Button>
-                  </Group>
-                </Card>
+                    {description && <Text size="xs" c="dimmed" mt="xs" lineClamp={2}>{description}</Text>}
+                    <Text size="xs" c="dimmed" mt="xs" style={{ fontFamily: 'monospace' }}>{plg.full_name || plg.id}</Text>
+
+                    {(bundledSkills.length > 0 || bundledMcp.length > 0) && (
+                      <Group gap={4} mt="xs" wrap="wrap">
+                        {bundledSkills.map((sk) => (
+                          <Badge key={`sk-${sk}`} size="xs" variant="light" color="indigo">Skill: {sk}</Badge>
+                        ))}
+                        {bundledMcp.map((mc) => (
+                          <Badge key={`mcp-${mc}`} size="xs" variant="light" color="teal">MCP: {mc}</Badge>
+                        ))}
+                      </Group>
+                    )}
+
+                    <Group justify="flex-end" mt="md" pt="xs" style={{ borderTop: '1px solid var(--cap-border)' }}>
+                      <Button size="xs" variant="subtle" color="indigo" leftSection={<IconSend size={12} />} onClick={() => handleOpenSingleDispatchModal('plugin', plg)}>
+                        跨端分发
+                      </Button>
+                      <Button size="xs" variant="subtle" color="red" leftSection={<IconTrash size={12} />} onClick={() => void handleUninstallPlugin(plg)}>
+                        卸载
+                      </Button>
+                    </Group>
+                  </Card>
                 )
               })}
             </SimpleGrid>
@@ -1407,8 +1757,8 @@ export function CapabilitiesSettingsCard() {
 
         {/* ===================== TAB 4: 全网能力市场 ===================== */}
         {activeTab === 'marketplaces' && (
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 24, overflow: 'hidden' }}>
-            <div style={{ marginBottom: 20 }}>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 20, overflow: 'hidden' }}>
+            <div style={{ marginBottom: 16 }}>
               <Group justify="space-between" mb="xs">
                 <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: 'var(--cap-text-primary)' }}>
                   已接入的能力订阅源 (Marketplaces)
@@ -1423,25 +1773,16 @@ export function CapabilitiesSettingsCard() {
                   <Card key={m.id} withBorder radius="md" p="sm" style={{ background: 'var(--cap-card-bg)' }}>
                     <Group justify="space-between">
                       <Group gap={4}>
-                        <Text fw={700} size="xs" style={{ color: 'var(--cap-text-primary)' }}>{m.name}</Text>
-                        {m.agent && m.agent !== 'all' && (
-                          <Badge size="xs" color="gray">{m.agent}</Badge>
-                        )}
+                        <Text fw={700} size="xs">{m.name}</Text>
+                        {m.agent && m.agent !== 'all' && <Badge size="xs" color="gray">{m.agent}</Badge>}
                       </Group>
                       <Badge size="xs" color="pink">{m.source_type}</Badge>
                     </Group>
-                    <Text size="xs" c="dimmed" mt={4} lineClamp={1} title={m.source}>
-                      {m.source}
-                    </Text>
-
+                    <Text size="xs" c="dimmed" mt={4} lineClamp={1} title={m.source}>{m.source}</Text>
                     <Group justify="flex-end" mt="xs" gap={4}>
-                      <Button size="compact-xs" variant="subtle" color="teal" onClick={() => handlePullMarket(m)}>
-                        Pull 同步
-                      </Button>
+                      <Button size="compact-xs" variant="subtle" color="teal" onClick={() => void handlePullMarket(m)}>Pull 同步</Button>
                       {m.id !== 'global::skills.sh' && (
-                        <Button size="compact-xs" variant="subtle" color="red" onClick={() => handleDeleteMarket(m)}>
-                          删除
-                        </Button>
+                        <Button size="compact-xs" variant="subtle" color="red" onClick={() => void handleDeleteMarket(m)}>删除</Button>
                       )}
                     </Group>
                   </Card>
@@ -1449,38 +1790,35 @@ export function CapabilitiesSettingsCard() {
               </SimpleGrid>
             </div>
 
-            {/* 顶栏快速探索与快捷入口 */}
-            <Group justify="space-between" mb="xs">
-              <Group gap="xs">
-                <Text size="xs" fw={600} c="dimmed">常用热门推荐:</Text>
-                {['github', 'react', 'docker', 'video', 'python', 'pdf', 'browser'].map((tag) => (
-                  <Badge
-                    key={tag}
-                    size="xs"
-                    variant="light"
-                    color="indigo"
-                    style={{ cursor: 'pointer' }}
-                    onClick={() => {
-                      setMarketQuery(tag)
-                      handleMarketSearch(tag)
-                    }}
-                  >
-                    #{tag}
-                  </Badge>
-                ))}
-              </Group>
+            <Group gap="xs" mb="xs">
+              <Text size="xs" fw={600} c="dimmed">热门推荐:</Text>
+              {['github', 'react', 'docker', 'video', 'python', 'pdf', 'browser'].map((tag) => (
+                <Badge
+                  key={tag}
+                  size="xs"
+                  variant="light"
+                  color="indigo"
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => {
+                    setMarketQuery(tag)
+                    void handleMarketSearch(tag)
+                  }}
+                >
+                  #{tag}
+                </Badge>
+              ))}
             </Group>
 
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-              <div style={{ padding: '12px 16px', background: 'var(--cap-card-bg)', borderRadius: 8, border: '1px solid var(--cap-border)', marginBottom: 12 }}>
+              <div style={{ marginBottom: 12 }}>
                 <TextInput
-                  placeholder="搜索全网 100K+ Agent 技能与能力扩展（如: react, github, video, docker）..."
+                  placeholder="搜索全网 Agent 技能与能力扩展（如: react, github, video, docker）..."
                   value={marketQuery}
                   onChange={(e) => setMarketQuery(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleMarketSearch()}
+                  onKeyDown={(e) => e.key === 'Enter' && void handleMarketSearch()}
                   leftSection={<IconSearch size={16} />}
                   rightSection={
-                    <Button size="xs" color="indigo" loading={searchingMarket} onClick={() => handleMarketSearch()}>
+                    <Button size="xs" color="indigo" loading={searchingMarket} onClick={() => void handleMarketSearch()}>
                       搜索全网
                     </Button>
                   }
@@ -1489,8 +1827,8 @@ export function CapabilitiesSettingsCard() {
 
               <ScrollArea style={{ flex: 1 }}>
                 {searchingMarket && (
-                  <div style={{ textAlign: 'center', padding: 48, color: 'var(--cap-text-secondary)' }}>
-                    <div style={{ fontSize: 13, marginBottom: 8 }}>正在跨全网能力市场检索能力包...</div>
+                  <div style={{ textAlign: 'center', padding: 48, color: 'var(--cap-text-secondary)', fontSize: 13 }}>
+                    正在检索全网能力市场...
                   </div>
                 )}
                 <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="sm">
@@ -1498,18 +1836,11 @@ export function CapabilitiesSettingsCard() {
                     <Card key={item.pkg} withBorder radius="md" p="md" style={{ background: 'var(--cap-card-bg)' }}>
                       <Group justify="space-between" align="flex-start">
                         <div>
-                          <Text fw={700} size="sm" style={{ color: 'var(--cap-text-primary)' }}>
-                            {item.name || item.pkg}
-                          </Text>
-                          <Text size="xs" c="dimmed" mt={2}>
-                            {item.repo}
-                          </Text>
+                          <Text fw={700} size="sm">{item.name || item.pkg}</Text>
+                          <Text size="xs" c="dimmed" mt={2}>{item.repo}</Text>
                         </div>
-                        <Badge size="xs" color="gray">
-                          {item.installs}
-                        </Badge>
+                        <Badge size="xs" color="gray">{item.installs}</Badge>
                       </Group>
-
                       <Group justify="space-between" mt="md">
                         <a href={item.url} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: 'var(--cap-cyan)' }}>
                           查看主页 ↗
@@ -1529,7 +1860,7 @@ export function CapabilitiesSettingsCard() {
                 </SimpleGrid>
                 {marketResults.length === 0 && !searchingMarket && (
                   <div style={{ textAlign: 'center', padding: 40, color: 'var(--cap-text-muted)', fontSize: 13 }}>
-                    输入关键词搜索全球 100,000+ Agent 能力与社区包，支持跨端一键分发
+                    输入关键词搜索全球社区技能包
                   </div>
                 )}
               </ScrollArea>
@@ -1538,11 +1869,175 @@ export function CapabilitiesSettingsCard() {
         )}
       </div>
 
-      {/* 底部状态条 Footer Bar */}
+      {/* 后台分发实时进度浮条（不阻塞任何操作，切走窗口也照常运行） */}
+      {primaryRunningJob && (
+        <div className="cap-live-job-bar" role="status" aria-live="polite">
+          <div className="cap-live-job-meta">
+            <span className="cap-jobs-dot is-running" aria-hidden="true" />
+            <Text size="xs" fw={650} truncate>
+              正在后台分发 {(primaryRunningJob.items || []).length} 项能力
+              {primaryRunningJob.current_label ? ` · 当前：${primaryRunningJob.current_label}` : ''}
+            </Text>
+            <Text size="xs" c="dimmed" style={{ flexShrink: 0 }}>
+              {primaryRunningJob.completed_steps} / {primaryRunningJob.total_steps}
+            </Text>
+          </div>
+          <div className="cap-live-job-progress">
+            <Progress
+              value={primaryRunningJob.total_steps > 0 ? Math.round((primaryRunningJob.completed_steps / primaryRunningJob.total_steps) * 100) : 0}
+              size="sm"
+              radius="xl"
+              animated
+              color="indigo"
+            />
+          </div>
+          <Button size="compact-xs" variant="light" color="indigo" onClick={() => setJobsDrawerOpen(true)}>
+            查看进度
+          </Button>
+        </div>
+      )}
+
+      {/* 底部状态条 */}
       <div className="capabilities-footer-bar">
-        <span>{summary?.target_name || '能力中心'} · 分发结果以目标文件回读为准</span>
-        <span>{availableSkillAgents.map(agent => agent.label).join(' · ')}</span>
+        <span>{summary?.target_name || '能力中心'} · 分发以目标文件回读核验为准</span>
+        <span>{availableSkillAgents.map((agent) => shortAgentLabel(agent.id, agent.label)).join(' · ')}</span>
       </div>
+
+      {/* =======================================================
+          DRAWER: 后台分发任务队列与核验报告
+      ======================================================= */}
+      <Drawer
+        opened={jobsDrawerOpen}
+        onClose={() => setJobsDrawerOpen(false)}
+        position="right"
+        size="lg"
+        title={
+          <Group gap="xs">
+            <IconListDetails size={17} />
+            <Text fw={700} size="sm">后台分发任务队列</Text>
+            {runningJobs.length > 0 && (
+              <Badge size="xs" color="indigo" variant="light">{runningJobs.length} 运行中</Badge>
+            )}
+          </Group>
+        }
+      >
+        <Stack gap="md">
+          <Group justify="space-between">
+            <Text size="xs" c="dimmed">
+              分发任务在服务端后台执行，切换或关闭设置窗口不会中断。
+            </Text>
+            <Group gap={6}>
+              <Button size="compact-xs" variant="default" leftSection={<IconRefresh size={12} />} onClick={() => void loadDispatchJobs()}>
+                刷新
+              </Button>
+              {dispatchJobs.some((j) => j.status !== 'running') && (
+                <Button size="compact-xs" variant="subtle" color="gray" onClick={() => void handleClearFinishedJobs()}>
+                  清理已完成
+                </Button>
+              )}
+            </Group>
+          </Group>
+
+          {dispatchJobs.length === 0 ? (
+            <div style={{ padding: 40, textAlign: 'center', color: 'var(--cap-text-muted)', fontSize: 13 }}>
+              暂无后台分发任务记录
+            </div>
+          ) : (
+            <Stack gap="sm">
+              {dispatchJobs.map((job) => {
+                const pct = job.total_steps > 0 ? Math.round((job.completed_steps / job.total_steps) * 100) : 0
+                const statusLabel =
+                  job.status === 'running'
+                    ? '后台分发中'
+                    : job.status === 'completed'
+                      ? '全部成功'
+                      : job.status === 'partial'
+                        ? '部分成功'
+                        : '失败'
+                const statusColor =
+                  job.status === 'running'
+                    ? 'indigo'
+                    : job.status === 'completed'
+                      ? 'teal'
+                      : job.status === 'partial'
+                        ? 'yellow'
+                        : 'red'
+                return (
+                  <div key={job.id} className="cap-job-card">
+                    <Group justify="space-between" align="flex-start" mb={6}>
+                      <div>
+                        <Group gap={6}>
+                          <Badge size="xs" color={statusColor} variant="light">{statusLabel}</Badge>
+                          <Text size="xs" fw={700}>
+                            {(job.items || []).length} 项 {(job.capability_type || 'skill').toUpperCase()} → {(job.target_matrix || []).length} 个目标
+                          </Text>
+                        </Group>
+                        <Text size="xs" c="dimmed" mt={2}>
+                          源节点: {job.source_target_name || job.source_target_id} · 进度 {job.completed_steps}/{job.total_steps}
+                          {job.status !== 'running' ? `（成功 ${job.success_count}，失败 ${job.failed_count}）` : ''}
+                        </Text>
+                      </div>
+                      {job.status !== 'running' && job.failed_count > 0 && (
+                        <Button
+                          size="compact-xs"
+                          variant="light"
+                          color="orange"
+                          leftSection={<IconRotateClockwise size={12} />}
+                          onClick={() => void handleRetryFailedJob(job)}
+                        >
+                          重试失败项 ({job.failed_count})
+                        </Button>
+                      )}
+                    </Group>
+
+                    <Progress
+                      value={pct}
+                      size="xs"
+                      radius="xl"
+                      animated={job.status === 'running'}
+                      color={statusColor}
+                      mb={8}
+                    />
+
+                    <Group gap={4} mb={8} wrap="wrap">
+                      {(job.items || []).map((it) => (
+                        <Badge key={`${job.id}-${it.item_id}`} size="xs" variant="outline" color="gray">
+                          {it.label || it.item_id}
+                        </Badge>
+                      ))}
+                    </Group>
+
+                    {(job.reports || []).length > 0 && (
+                      <Stack gap={4} mt={6}>
+                        {(job.reports || []).map((rep, idx) => (
+                          <div key={`${job.id}-rep-${idx}`} className="cap-job-report-row">
+                            <Group gap={6} wrap="nowrap" style={{ minWidth: 0 }}>
+                              {rep.ok ? (
+                                <IconCheck size={13} color="var(--cap-green)" style={{ flexShrink: 0 }} />
+                              ) : (
+                                <IconX size={13} color="var(--cap-red)" style={{ flexShrink: 0 }} />
+                              )}
+                              <span style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>
+                                {rep.item_label || rep.item_id}
+                              </span>
+                              <span style={{ color: 'var(--cap-text-muted)', whiteSpace: 'nowrap' }}>
+                                → {rep.target_name || rep.target_id} · {shortAgentLabel(rep.agent)}
+                              </span>
+                            </Group>
+                            <span style={{ color: rep.ok ? 'var(--cap-text-secondary)' : 'var(--cap-red)', textAlign: 'right', wordBreak: 'break-word' }}>
+                              {rep.message}
+                            </span>
+                          </div>
+                        ))}
+                      </Stack>
+                    )}
+                  </div>
+                )
+              })}
+            </Stack>
+          )}
+        </Stack>
+      </Drawer>
 
       {/* =======================================================
           MODAL 1: 新建/编辑 MCP 服务
@@ -1654,12 +2149,8 @@ export function CapabilitiesSettingsCard() {
           />
 
           <Group justify="flex-end" mt="md">
-            <Button variant="default" onClick={() => setMcpModalOpen(false)}>
-              取消
-            </Button>
-            <Button color="indigo" loading={mcpSaving} onClick={handleSaveMcp}>
-              保存并写入 Agent 配置
-            </Button>
+            <Button variant="default" onClick={() => setMcpModalOpen(false)}>取消</Button>
+            <Button color="indigo" loading={mcpSaving} onClick={() => void handleSaveMcp()}>保存并写入 Agent 配置</Button>
           </Group>
         </Stack>
       </Modal>
@@ -1710,9 +2201,7 @@ export function CapabilitiesSettingsCard() {
           </Text>
 
           <Group justify="flex-end" mt="md">
-            <Button variant="default" onClick={() => setPluginInstallOpen(false)}>
-              取消
-            </Button>
+            <Button variant="default" onClick={() => setPluginInstallOpen(false)}>取消</Button>
             <Button color="violet" loading={pluginInstalling} onClick={() => void handleInstallOrImportAgyPlugin()}>
               {pluginInstallMode === 'install' ? '执行安装' : '执行导入'}
             </Button>
@@ -1740,7 +2229,6 @@ export function CapabilitiesSettingsCard() {
             onChange={(val) => setMarketFormAgent(val || 'codex')}
             required
           />
-
           <TextInput
             label="市场标识名称"
             placeholder="例如: ponytail, xai-official, custom-market"
@@ -1748,7 +2236,6 @@ export function CapabilitiesSettingsCard() {
             onChange={(e) => setMarketFormName(e.target.value)}
             required
           />
-
           <TextInput
             label="Git 仓库地址 / Registry URL"
             placeholder="https://github.com/.../marketplace.git"
@@ -1756,20 +2243,15 @@ export function CapabilitiesSettingsCard() {
             onChange={(e) => setMarketFormSource(e.target.value)}
             required
           />
-
           <Group justify="flex-end" mt="md">
-            <Button variant="default" onClick={() => setMarketModalOpen(false)}>
-              取消
-            </Button>
-            <Button color="indigo" loading={marketSaving} onClick={handleSaveMarket}>
-              订阅并同步
-            </Button>
+            <Button variant="default" onClick={() => setMarketModalOpen(false)}>取消</Button>
+            <Button color="indigo" loading={marketSaving} onClick={() => void handleSaveMarket()}>订阅并同步</Button>
           </Group>
         </Stack>
       </Modal>
 
       {/* =======================================================
-          MODAL 3: 真实跨端/跨 Agent 动态分发模态框 (Distribution Matrix)
+          MODAL 3: 单项 / 多项技能跨端后台分发矩阵
       ======================================================= */}
       <Modal
         opened={dispatchModalOpen}
@@ -1777,100 +2259,201 @@ export function CapabilitiesSettingsCard() {
         title={
           <Group gap="xs">
             <IconNetwork size={18} color="var(--astr-accent, #7540bd)" />
-            <Text fw={700}>全域资产动态分发矩阵 (Cross-Node Dispatch)</Text>
+            <Text fw={700}>
+              {dispatchItems.length > 1
+                ? `批量分发矩阵（${dispatchItems.length} 项能力）`
+                : '跨节点分发矩阵 (Background Dispatch)'}
+            </Text>
           </Group>
         }
         size="lg"
       >
         <Stack gap="md">
           <Paper p="sm" radius="md" style={{ background: 'var(--cap-card-bg)', border: '1px solid var(--cap-border)' }}>
-            <Group justify="space-between">
-              <div>
-                <Text size="xs" c="dimmed">待分发资产:</Text>
-                <Text fw={700} size="sm" style={{ color: 'var(--cap-text-primary)' }}>
-                  {dispatchItem?.name || dispatchItem?.id} ({dispatchType.toUpperCase()})
-                </Text>
-              </div>
-              <Badge color="indigo">源节点: {summary?.target_name || selectedTargetId}</Badge>
+            <Group justify="space-between" mb={6}>
+              <Text size="xs" fw={650} c="dimmed">
+                待分发清单（{dispatchItems.length} 项 {dispatchType.toUpperCase()}）
+              </Text>
+              <Badge size="xs" color="indigo" variant="light">
+                源节点: {summary?.target_name || selectedTargetId}
+              </Badge>
+            </Group>
+            <Group gap={6} wrap="wrap">
+              {dispatchItems.map((draft) => (
+                <span key={`${draft.source_agent}:${draft.item_id}`} className="cap-dispatch-item-chip">
+                  <span>{draft.label}</span>
+                  {dispatchItems.length > 1 && (
+                    <button
+                      type="button"
+                      aria-label={`移除 ${draft.label}`}
+                      onClick={() =>
+                        setDispatchItems((prev) =>
+                          prev.filter((x) => !(x.item_id === draft.item_id && x.source_agent === draft.source_agent)),
+                        )
+                      }
+                    >
+                      <IconX size={12} />
+                    </button>
+                  )}
+                </span>
+              ))}
             </Group>
           </Paper>
 
           <div>
-            <Text size="xs" fw={700} mb="xs" style={{ color: 'var(--cap-text-secondary)' }}>
-              勾选接收该能力的「目标节点 × Agent 运行时」矩阵:
-            </Text>
+            <Group justify="space-between" mb="xs" wrap="wrap" gap={6}>
+              <Text size="xs" fw={700} style={{ color: 'var(--cap-text-secondary)' }}>
+                勾选目标「托管节点 × Agent 运行时」:
+              </Text>
+              <Group gap={6}>
+                {singleDraftInstalledSet && (
+                  <Button
+                    size="compact-xs"
+                    variant="subtle"
+                    color="teal"
+                    onClick={() => {
+                      const next = availableSkillAgents
+                        .filter((ag) => !singleDraftInstalledSet.has(ag.id.toLowerCase()))
+                        .map((ag) => ({ target_id: selectedTargetId, agent: ag.id }))
+                      setDispatchMatrix(next)
+                    }}
+                  >
+                    仅选当前节点未安装
+                  </Button>
+                )}
+                <Button
+                  size="compact-xs"
+                  variant="subtle"
+                  color="indigo"
+                  onClick={() => {
+                    const allPairs: Array<{ target_id: string; agent: string }> = []
+                    for (const tgt of targets) {
+                      for (const ag of availableSkillAgents) {
+                        const incompatible =
+                          dispatchType === 'plugin' &&
+                          dispatchItems.length === 1 &&
+                          Boolean(dispatchItems[0].raw?.agent) &&
+                          dispatchItems[0].raw.agent !== ag.id
+                        if (!incompatible) {
+                          allPairs.push({ target_id: tgt.id, agent: ag.id })
+                        }
+                      }
+                    }
+                    setDispatchMatrix(allPairs)
+                  }}
+                >
+                  全选全部
+                </Button>
+                <Button size="compact-xs" variant="subtle" color="gray" onClick={() => setDispatchMatrix([])}>
+                  清空
+                </Button>
+              </Group>
+            </Group>
 
             <SimpleGrid cols={2} spacing="xs">
-              {targets.map((tgt) => (
-                <Card key={tgt.id} withBorder radius="sm" p="xs" style={{ background: 'var(--cap-header-bg)' }}>
-                  <Text fw={700} size="xs" mb={6}>{tgt.name} ({tgt.kind})</Text>
-                  <Stack gap={4}>
-                    {availableSkillAgents.map(({ id: agentName, label }) => {
-                      const isChecked = dispatchMatrix.some(
-                        (m) => m.target_id === tgt.id && m.agent === agentName
-                      )
-                      const incompatiblePlugin = dispatchType === 'plugin' && Boolean(dispatchItem?.agent) && dispatchItem.agent !== agentName
-                      return (
-                        <Checkbox
-                          key={`${tgt.id}::${agentName}`}
-                          size="xs"
-                          label={incompatiblePlugin ? `${label}（仅限同类 Agent）` : label}
-                          disabled={incompatiblePlugin}
-                          checked={isChecked}
-                          onChange={(e) => {
-                            if (e.currentTarget.checked) {
-                              setDispatchMatrix([...dispatchMatrix, { target_id: tgt.id, agent: agentName }])
+              {targets.map((tgt) => {
+                const nodeEligibleAgents = availableSkillAgents.filter(({ id: agentName }) => {
+                  const incompatiblePlugin =
+                    dispatchType === 'plugin' &&
+                    dispatchItems.length === 1 &&
+                    Boolean(dispatchItems[0].raw?.agent) &&
+                    dispatchItems[0].raw.agent !== agentName
+                  return !incompatiblePlugin
+                })
+                const nodeAllSelected =
+                  nodeEligibleAgents.length > 0 &&
+                  nodeEligibleAgents.every((ag) =>
+                    dispatchMatrix.some((m) => m.target_id === tgt.id && m.agent === ag.id),
+                  )
+                return (
+                  <Card key={tgt.id} withBorder radius="sm" p="xs" style={{ background: 'var(--cap-surface-elevated)' }}>
+                    <Group justify="space-between" mb={6}>
+                      <Text fw={700} size="xs">{tgt.name} ({tgt.kind})</Text>
+                      {nodeEligibleAgents.length > 0 && (
+                        <button
+                          type="button"
+                          style={{ border: 0, background: 'transparent', color: 'var(--cap-accent)', fontSize: 11, fontWeight: 600, cursor: 'pointer', padding: 0 }}
+                          onClick={() => {
+                            if (nodeAllSelected) {
+                              setDispatchMatrix((prev) => prev.filter((m) => m.target_id !== tgt.id))
                             } else {
-                              setDispatchMatrix(
-                                dispatchMatrix.filter(
-                                  (m) => !(m.target_id === tgt.id && m.agent === agentName)
-                                )
-                              )
+                              setDispatchMatrix((prev) => {
+                                const withoutNode = prev.filter((m) => m.target_id !== tgt.id)
+                                return [
+                                  ...withoutNode,
+                                  ...nodeEligibleAgents.map((ag) => ({ target_id: tgt.id, agent: ag.id })),
+                                ]
+                              })
                             }
                           }}
-                        />
-                      )
-                    })}
-                  </Stack>
-                </Card>
-              ))}
+                        >
+                          {nodeAllSelected ? '取消全选' : '全选本节点'}
+                        </button>
+                      )}
+                    </Group>
+                    <Stack gap={5}>
+                      {availableSkillAgents.map(({ id: agentName, label }) => {
+                        const isChecked = dispatchMatrix.some(
+                          (m) => m.target_id === tgt.id && m.agent === agentName,
+                        )
+                        const incompatiblePlugin =
+                          dispatchType === 'plugin' &&
+                          dispatchItems.length === 1 &&
+                          Boolean(dispatchItems[0].raw?.agent) &&
+                          dispatchItems[0].raw.agent !== agentName
+                        const alreadyInstalledHere =
+                          tgt.id === selectedTargetId &&
+                          Boolean(singleDraftInstalledSet?.has(agentName.toLowerCase()))
+                        return (
+                          <Checkbox
+                            key={`${tgt.id}::${agentName}`}
+                            size="xs"
+                            label={
+                              incompatiblePlugin
+                                ? `${label}（仅限同类 Agent）`
+                                : alreadyInstalledHere
+                                  ? `${label}（已安装，将覆盖更新）`
+                                  : label
+                            }
+                            disabled={incompatiblePlugin}
+                            checked={isChecked}
+                            onChange={(e) => {
+                              if (e.currentTarget.checked) {
+                                setDispatchMatrix((prev) => [...prev, { target_id: tgt.id, agent: agentName }])
+                              } else {
+                                setDispatchMatrix((prev) =>
+                                  prev.filter((m) => !(m.target_id === tgt.id && m.agent === agentName)),
+                                )
+                              }
+                            }}
+                          />
+                        )
+                      })}
+                    </Stack>
+                  </Card>
+                )
+              })}
             </SimpleGrid>
           </div>
 
-          {/* 核验审计报告 */}
-          {dispatchReports && (
-            <Paper p="sm" radius="md" style={{ background: 'var(--cap-header-bg)', border: '1px solid var(--cap-border)' }}>
-              <Text size="xs" fw={700} mb="xs" style={{ color: 'var(--cap-text-primary)' }}>
-                多端真实分发核验审计报告:
-              </Text>
-              <Stack gap={6}>
-                {dispatchReports.map((r, idx) => (
-                  <Group key={idx} justify="space-between" style={{ fontSize: 12 }}>
-                    <Group gap="xs">
-                      {r.ok ? <IconCheck size={14} color="var(--astr-muted)" /> : <IconX size={14} color="var(--astr-red)" />}
-                      <span style={{ fontWeight: 600 }}>{r.target_name || r.target_id} · {r.agent}</span>
-                    </Group>
-                    <span style={{ color: r.ok ? 'var(--cap-text-secondary)' : '#ef4444' }}>
-                      {r.message}
-                    </span>
-                  </Group>
-                ))}
-              </Stack>
-            </Paper>
-          )}
-
-          <Group justify="flex-end" mt="md">
-            <Button variant="default" onClick={() => setDispatchModalOpen(false)}>
-              关闭
-            </Button>
-            <Button
-              color="indigo"
-              loading={dispatching}
-              leftSection={<IconSend size={14} />}
-              onClick={handleExecuteDispatch}
-            >
-              开始分发
-            </Button>
+          <Group justify="space-between" align="center" mt="xs">
+            <Text size="xs" c="dimmed">
+              {totalDispatchSteps > 0
+                ? `共 ${dispatchItems.length} 项 × ${dispatchMatrix.length} 个目标 = ${totalDispatchSteps} 步（提交后转入后台执行）`
+                : '请选择目标节点与 Agent'}
+            </Text>
+            <Group gap="xs">
+              <Button variant="default" onClick={() => setDispatchModalOpen(false)}>取消</Button>
+              <Button
+                color="indigo"
+                loading={submittingJob}
+                disabled={dispatchItems.length === 0 || dispatchMatrix.length === 0}
+                leftSection={<IconSend size={14} />}
+                onClick={() => void handleStartBackgroundDispatch()}
+              >
+                放入后台分发
+              </Button>
+            </Group>
           </Group>
         </Stack>
       </Modal>
@@ -1892,9 +2475,7 @@ export function CapabilitiesSettingsCard() {
           />
 
           <div>
-            <Text size="xs" fw={600} mb="xs">
-              选择安装目标节点:
-            </Text>
+            <Text size="xs" fw={600} mb="xs">选择安装目标节点:</Text>
             <Stack gap="xs">
               {targets.map((tgt) => (
                 <Checkbox
@@ -1914,24 +2495,11 @@ export function CapabilitiesSettingsCard() {
           </div>
 
           <Group justify="flex-end" mt="md">
-            <Button variant="default" onClick={() => setInstallModalOpen(false)}>
-              取消
-            </Button>
-            <Button
-              variant="light"
-              color="gray"
-              loading={installing}
-              onClick={() => handleInstall()}
-            >
+            <Button variant="default" onClick={() => setInstallModalOpen(false)}>取消</Button>
+            <Button variant="light" color="gray" loading={installing} onClick={() => void handleInstall()}>
               直接安装到本地
             </Button>
-            <Button
-              color="indigo"
-              loading={installing}
-              onClick={() => {
-                void handleInstall()
-              }}
-            >
+            <Button color="indigo" loading={installing} onClick={() => void handleInstall()}>
               安装到所选节点
             </Button>
           </Group>
@@ -1941,5 +2509,4 @@ export function CapabilitiesSettingsCard() {
   )
 }
 
-// 保持向下兼容导出的别名
 export const SkillsSettingsCard = CapabilitiesSettingsCard

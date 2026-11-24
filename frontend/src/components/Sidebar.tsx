@@ -1,9 +1,9 @@
-import { ChartLineUpIcon, ChatCircleDotsIcon, CpuIcon, DesktopIcon, GearSixIcon, GlobeHemisphereWestIcon, HardDrivesIcon, IdentificationCardIcon, KeyboardIcon, LightningIcon, PuzzlePieceIcon, SlidersHorizontalIcon, SquaresFourIcon, TrayIcon, UsersThreeIcon } from './workbenchIcons'
-import { IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconPalette, IconPin, IconPlugConnected, IconPlus } from '@tabler/icons-react'
-import { ActionIcon, Center, HoverCard, Loader, Modal, NavLink, Stack, Tabs, Text, Tooltip } from '@mantine/core'
+import { ChartLineUpIcon, ChatCircleDotsIcon, GearSixIcon, HardDrivesIcon, IdentificationCardIcon, SquaresFourIcon, TrayIcon, UsersThreeIcon } from './workbenchIcons'
+import { IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconPin, IconPlus } from '@tabler/icons-react'
+import { ActionIcon, HoverCard, Modal, NavLink, Stack, Text, Tooltip } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useQuery } from '@tanstack/react-query'
-import { Suspense, lazy, useEffect, useId, useState } from 'react'
+import { useCallback, useEffect, useId, useState } from 'react'
 import { NavLink as RouterNavLink, useLocation, useNavigate } from 'react-router-dom'
 import { api, type IntegrationItem, type OcxUsageResponse } from '../api/client'
 import type { Agent, Project, Session } from '../domain/types'
@@ -11,6 +11,7 @@ import './settings.css'
 import './arcSidebar.css'
 import '../features/integrations/integrations.css'
 import { SettingsDrawerScope } from './SettingsDrawer'
+import { SettingsWorkbench, normalizeSettingsTab } from '../features/settings/SettingsWorkbench'
 import { useShortcutHandlers } from '../features/shortcuts/shortcuts'
 import { formatTokens, getModelColor } from '../features/analytics/usageFormat'
 import { SessionRail } from './SessionRail'
@@ -25,7 +26,6 @@ import { scopeKey } from '../domain/semantics'
 import { SessionAccountsHoverCard } from '../features/agentAccounts/SessionAccountsHoverCard'
 import { agySessionEnvironment } from '../features/agentAccounts/AgyQuotaRefreshProvider'
 import {
-  COMMAND_COMPRESSION_PLUGIN_ID,
   SIDEBAR_INTEGRATIONS_PLUGIN_ID,
   WORKSPACE_AGENT_ACCOUNTS_PLUGIN_ID,
   WORKSPACE_ANALYTICS_GATEWAY_PLUGIN_ID,
@@ -38,17 +38,6 @@ import { useIntegrationsStore } from '../features/integrations/integrationStore'
 import { IntegrationIcon } from '../features/integrations/integrationIcons'
 import { IntegrationFormModal } from '../features/integrations/IntegrationFormModal'
 import { useActionInbox } from '../features/inbox/useActionInbox'
-
-const AgentsPage = lazy(() => import('../features/agents/AgentsPage').then((m) => ({ default: m.AgentsPage })))
-const ModelGatewaySettingsPage = lazy(() => import('../features/services/ModelGatewaySettingsPage').then((m) => ({ default: m.ModelGatewaySettingsPage })))
-const CapabilitiesSettingsCard = lazy(() => import('../features/services/CapabilitiesSettingsCard').then((m) => ({ default: m.CapabilitiesSettingsCard })))
-const RtkSettingsPage = lazy(() => import('../features/rtk/RtkSettingsPage').then((m) => ({ default: m.RtkSettingsPage })))
-const NetworkSettingsPage = lazy(() => import('../features/network/NetworkSettingsPage').then((m) => ({ default: m.NetworkSettingsPage })))
-const ShortcutSettingsPage = lazy(() => import('../features/shortcuts/ShortcutSettingsPage').then((m) => ({ default: m.ShortcutSettingsPage })))
-const DesktopSettingsPage = lazy(() => import('../features/services/DesktopSettingsPage').then((m) => ({ default: m.DesktopSettingsPage })))
-const AppearanceSettingsPage = lazy(() => import('../features/appearance/AppearanceSettingsPage').then((m) => ({ default: m.AppearanceSettingsPage })))
-const IntegrationsSettingsPage = lazy(() => import('../features/integrations/IntegrationsSettingsPage').then((m) => ({ default: m.IntegrationsSettingsPage })))
-const PluginsPage = lazy(() => import('../features/plugins/PluginsPage').then((m) => ({ default: m.PluginsPage })))
 
 const navItems = [
   { to: '/chat', label: '会话', icon: ChatCircleDotsIcon, id: 'chat' },
@@ -174,7 +163,6 @@ export function Sidebar({
   const [draggingIntegrationId, setDraggingIntegrationId] = useState<string | null>(null)
   const [dragOverIntegration, setDragOverIntegration] = useState<{ id: string; pos: 'before' | 'after' } | null>(null)
   const integrationsPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(SIDEBAR_INTEGRATIONS_PLUGIN_ID))
-  const commandCompressionEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(COMMAND_COMPRESSION_PLUGIN_ID))
   const groupsPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_GROUPS_PLUGIN_ID))
   const monitorPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_MONITOR_PLUGIN_ID))
   const analyticsGatewayEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_ANALYTICS_GATEWAY_PLUGIN_ID))
@@ -210,24 +198,28 @@ export function Sidebar({
     }
   }
 
-  useEffect(() => {
-    if (!integrationsPluginEnabled && settingsTab === 'integrations') {
-      setSettingsTab('plugins')
+  const openSettings = useCallback((tab?: string) => {
+    const desktopOpenSettings = (
+      window as unknown as {
+        astrorderDesktop?: { openSettings?: (tab?: string) => Promise<void> }
+      }
+    ).astrorderDesktop?.openSettings
+    if (desktopOpenSettings) {
+      void desktopOpenSettings(tab || '')
+      return
     }
-    if (!commandCompressionEnabled && settingsTab === 'rtk') {
-      setSettingsTab('plugins')
+    if (tab) {
+      setSettingsTab(normalizeSettingsTab(tab))
     }
-  }, [commandCompressionEnabled, integrationsPluginEnabled, settingsTab])
+    setSettingsOpened(true)
+  }, [])
 
-  useShortcutHandlers(onNavigate ? {} : { settings: () => setSettingsOpened(true) }, true)
+  useShortcutHandlers(onNavigate ? {} : { settings: () => openSettings() }, true)
   useEffect(() => {
     if (onNavigate) return
     const onOpenSettings = (event: Event) => {
       const detail = (event as CustomEvent<{ tab?: string }>).detail
-      if (detail?.tab) {
-        setSettingsTab(detail.tab)
-      }
-      setSettingsOpened(true)
+      openSettings(detail?.tab)
     }
     const onCloseSettings = () => setSettingsOpened(false)
     const onNavigateRoute = (event: Event) => {
@@ -245,7 +237,7 @@ export function Sidebar({
       window.removeEventListener('astrorder:close-settings', onCloseSettings)
       window.removeEventListener('astrorder:navigate', onNavigateRoute)
     }
-  }, [navigate, onNavigate])
+  }, [navigate, onNavigate, openSettings])
   const [isMonitorDragOver, setIsMonitorDragOver] = useState(false)
   const todayUsage = useQuery({
     queryKey: ['astrorder', 'analytics', 'today-models'],
@@ -529,7 +521,7 @@ export function Sidebar({
             <div className="workspace-tool-item"><WorkspaceThemeToggle /><span aria-hidden="true">主题</span></div>
             <div className="workspace-tool-item">
             <Tooltip label="设置" position="right">
-              <ActionIcon variant="subtle" aria-label="打开设置" onClick={() => setSettingsOpened(true)}>
+              <ActionIcon variant="subtle" aria-label="打开设置" onClick={() => openSettings()}>
                 <GearSixIcon size={24} aria-hidden="true" />
               </ActionIcon>
             </Tooltip>
@@ -614,42 +606,7 @@ export function Sidebar({
         }}
       >
         {settingsOpened && (
-          <Suspense fallback={<Center style={{ flex: 1 }}><Loader size="sm" color="violet" /></Center>}>
-            <Tabs value={settingsTab} onChange={(value) => value && setSettingsTab(value)} orientation="vertical" keepMounted={true} className="settings-tabs">
-              <Tabs.List>
-                <Tabs.Tab value="connections" leftSection={<SlidersHorizontalIcon size={16} />}>连接</Tabs.Tab>
-                <Tabs.Tab value="models" leftSection={<CpuIcon size={16} />}>模型与网关</Tabs.Tab>
-                <Tabs.Tab value="skills" leftSection={<LightningIcon size={16} />}>能力中心</Tabs.Tab>
-                {commandCompressionEnabled && (
-                  <Tabs.Tab value="rtk" leftSection={<ChartLineUpIcon size={16} />}>命令压缩</Tabs.Tab>
-                )}
-                <Tabs.Tab value="network" leftSection={<GlobeHemisphereWestIcon size={16} />}>网络与移动端</Tabs.Tab>
-                <Tabs.Tab value="shortcuts" leftSection={<KeyboardIcon size={16} />}>快捷键</Tabs.Tab>
-                <Tabs.Tab value="appearance" leftSection={<IconPalette size={16} />}>外观</Tabs.Tab>
-                <Tabs.Tab value="desktop" leftSection={<DesktopIcon size={16} />}>桌面客户端</Tabs.Tab>
-                {integrationsPluginEnabled && (
-                  <Tabs.Tab value="integrations" leftSection={<IconPlugConnected size={16} />}>集成</Tabs.Tab>
-                )}
-                <Tabs.Tab value="plugins" leftSection={<PuzzlePieceIcon size={16} />}>插件</Tabs.Tab>
-              </Tabs.List>
-              <Tabs.Panel value="connections" className="settings-tab-panel"><AgentsPage /></Tabs.Panel>
-              <Tabs.Panel value="models" className="settings-tab-panel"><ModelGatewaySettingsPage /></Tabs.Panel>
-              <Tabs.Panel value="skills" className="settings-tab-panel" data-tab-panel-skills="true" style={{ overflow: 'hidden' }}>
-                <CapabilitiesSettingsCard />
-              </Tabs.Panel>
-              {commandCompressionEnabled && (
-                <Tabs.Panel value="rtk" className="settings-tab-panel" keepMounted={false}><RtkSettingsPage /></Tabs.Panel>
-              )}
-              <Tabs.Panel value="network" className="settings-tab-panel"><NetworkSettingsPage /></Tabs.Panel>
-              <Tabs.Panel value="shortcuts" className="settings-tab-panel" keepMounted={false}><ShortcutSettingsPage /></Tabs.Panel>
-              <Tabs.Panel value="appearance" className="settings-tab-panel" keepMounted={false}><AppearanceSettingsPage /></Tabs.Panel>
-              <Tabs.Panel value="desktop" className="settings-tab-panel"><DesktopSettingsPage /></Tabs.Panel>
-              {integrationsPluginEnabled && (
-                <Tabs.Panel value="integrations" className="settings-tab-panel" keepMounted={false}><IntegrationsSettingsPage /></Tabs.Panel>
-              )}
-              <Tabs.Panel value="plugins" className="settings-tab-panel"><PluginsPage /></Tabs.Panel>
-            </Tabs>
-          </Suspense>
+          <SettingsWorkbench tab={settingsTab} onTabChange={setSettingsTab} />
         )}
       </Modal>}</SettingsDrawerScope>
       <IntegrationFormModal

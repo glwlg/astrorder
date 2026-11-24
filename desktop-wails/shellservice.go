@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -47,17 +48,20 @@ type ShellInfo struct {
 const desktopFramework = "Wails v3.0.0"
 
 type ShellService struct {
-	app         *application.App
-	window      *application.WebviewWindow
-	config      Config
-	ctl         *CtlClient
-	smokeReport string
-	quit        func()
-	preview     *PreviewService
-	statistics  *StatisticsView
-	opMu        sync.Mutex
-	isPackaged  bool
-	refreshTray func()
+	app            *application.App
+	window         *application.WebviewWindow
+	settingsMu     sync.Mutex
+	settingsWindow *application.WebviewWindow
+	quitting       *atomic.Bool
+	config         Config
+	ctl            *CtlClient
+	smokeReport    string
+	quit           func()
+	preview        *PreviewService
+	statistics     *StatisticsView
+	opMu           sync.Mutex
+	isPackaged     bool
+	refreshTray    func()
 }
 
 func (s *ShellService) Info() ShellInfo {
@@ -98,6 +102,13 @@ func (s *ShellService) IsMaximized() bool {
 		return s.window.IsMaximised()
 	}
 	return false
+}
+
+func (s *ShellService) IsForeground() bool {
+	if s.window == nil {
+		return false
+	}
+	return s.window.IsVisible() && !s.window.IsMinimised() && s.window.IsFocused()
 }
 
 func (s *ShellService) Flash(flash bool) {

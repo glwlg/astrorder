@@ -1,5 +1,5 @@
 import { MantineProvider } from '@mantine/core'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../../api/client'
 import {
@@ -16,6 +16,9 @@ vi.mock('../../api/client', () => ({
     getCapabilitiesTargets: vi.fn(),
     getCapabilitiesSummary: vi.fn(),
     dispatchCapability: vi.fn(),
+    startCapabilityDispatchJob: vi.fn(),
+    listCapabilityDispatchJobs: vi.fn(),
+    clearCapabilityDispatchJobs: vi.fn(),
     installSkill: vi.fn(),
     removeSkill: vi.fn(),
     searchMarketCapabilities: vi.fn(),
@@ -86,6 +89,25 @@ beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(api.getCapabilitiesTargets).mockResolvedValue(mockTargets as never)
   vi.mocked(api.getCapabilitiesSummary).mockResolvedValue(mockSummary as never)
+  vi.mocked(api.listCapabilityDispatchJobs).mockResolvedValue({ jobs: [] } as never)
+  vi.mocked(api.clearCapabilityDispatchJobs).mockResolvedValue({ ok: true, cleared: 1, jobs: [] } as never)
+  vi.mocked(api.startCapabilityDispatchJob).mockImplementation(async (req) => ({
+    id: 'job-test-1',
+    capability_type: req.capability_type,
+    source_target_id: req.source_target_id,
+    source_target_name: '本机环境',
+    items: req.items,
+    target_matrix: req.target_matrix,
+    status: 'running',
+    total_steps: req.items.length * req.target_matrix.length,
+    completed_steps: 0,
+    success_count: 0,
+    failed_count: 0,
+    current_label: req.items[0]?.label || req.items[0]?.item_id,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    reports: [],
+  }) as never)
   vi.mocked(api.dispatchCapability).mockResolvedValue({
     ok: true,
     capability_type: 'skill',
@@ -212,7 +234,7 @@ describe('CapabilitiesSettingsCard - 星序官方技能与动态分发', () => {
     expect(screen.getAllByText(/Grok/i).length).toBeGreaterThan(0)
   })
 
-  it('calls real api.dispatchCapability with source_agent=astrorder and selected matrix', async () => {
+  it('submits background dispatch job via api.startCapabilityDispatchJob with source_agent=astrorder and selected matrix', async () => {
     mount()
 
     await waitFor(() => {
@@ -224,30 +246,212 @@ describe('CapabilitiesSettingsCard - 星序官方技能与动态分发', () => {
     })
     fireEvent.click(dispatchTrigger)
 
-    await waitFor(() => {
-      expect(screen.getByText(/分发矩阵/i)).toBeInTheDocument()
-    })
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText(/分发矩阵/i)).toBeInTheDocument()
 
-    // Find and check one of the target checkboxes
-    const checkboxes = screen.getAllByRole('checkbox')
-    expect(checkboxes.length).toBeGreaterThan(0)
-    fireEvent.click(checkboxes[0])
+    // Check one of the target checkboxes inside the dispatch modal
+    const modalCheckboxes = within(dialog).getAllByRole('checkbox')
+    expect(modalCheckboxes.length).toBeGreaterThan(0)
+    fireEvent.click(modalCheckboxes[0])
 
-    // Find and click the matrix submit button ('开始分发' or '进入分发矩阵')
-    const startDispatchBtn = screen.getByRole('button', {
-      name: /开始分发|确认分发/i,
+    const startDispatchBtn = within(dialog).getByRole('button', {
+      name: /放入后台分发/i,
     })
     fireEvent.click(startDispatchBtn)
 
     await waitFor(() => {
-      expect(api.dispatchCapability).toHaveBeenCalled()
+      expect(api.startCapabilityDispatchJob).toHaveBeenCalled()
     })
 
-    const callArgs = vi.mocked(api.dispatchCapability).mock.calls[0][0]
+    const callArgs = vi.mocked(api.startCapabilityDispatchJob).mock.calls[0][0]
     expect(callArgs.capability_type).toBe('skill')
-    expect(callArgs.source_agent).toBe('astrorder')
-    expect(callArgs.item_id).toBe('astrorder-sessions')
+    expect(callArgs.items).toEqual([
+      expect.objectContaining({
+        item_id: 'astrorder-sessions',
+        source_agent: 'astrorder',
+      }),
+    ])
     expect(callArgs.target_matrix.length).toBeGreaterThan(0)
+  })
+
+  it('shows clear installed vs uninstalled status pills, filters by installation status, and batch-dispatches multiple skills in background', async () => {
+    const installedOfficial: SkillItem = {
+      ...mockOfficialSessionsSkill,
+      installed_agents: ['codex', 'hermes', 'grok'],
+      agents: ['codex', 'hermes', 'grok'],
+    }
+    const partialOfficial: SkillItem = {
+      ...mockOfficialBrowserSkill,
+      installed_agents: ['codex'],
+      agents: ['codex'],
+    }
+    const missingOfficial: SkillItem = {
+      name: 'astrorder-swarm',
+      source: 'astrorder',
+      scope: 'builtin',
+      agent: 'astrorder',
+      installed_agents: [],
+      agents: [],
+      category: 'astrorder',
+      description: '星序 Swarm 协同能力。',
+    }
+    vi.mocked(api.getCapabilitiesSummary).mockResolvedValue({
+      ...mockSummary,
+      counts: { skills: 3, mcp: 0, plugins: 0, marketplaces: 0 },
+      skills: [installedOfficial, partialOfficial, missingOfficial],
+    } as never)
+
+    mount()
+
+    await waitFor(() => {
+      expect(screen.getByText('已全装 3/3')).toBeInTheDocument()
+      expect(screen.getByText('已装 1/3')).toBeInTheDocument()
+      expect(screen.getAllByText('未安装').length).toBeGreaterThan(0)
+    })
+
+    // Switch Agent view to Hermes: sessions is installed, browser + swarm are uninstalled
+    fireEvent.click(screen.getByRole('button', { name: 'Hermes Agent' }))
+    await waitFor(() => {
+      expect(screen.getByText('已安装 · Hermes')).toBeInTheDocument()
+      expect(screen.getAllByText('未安装 · Hermes').length).toBe(2)
+    })
+
+    // Filter to uninstalled only in left rail
+    fireEvent.click(screen.getByRole('button', { name: /^未安装/ }))
+    await waitFor(() => {
+      expect(screen.queryByText(OFFICIAL_SKILL_TITLES['astrorder-sessions'])).not.toBeInTheDocument()
+      expect(screen.getAllByText(OFFICIAL_SKILL_TITLES['astrorder-browser']).length).toBeGreaterThan(0)
+      expect(screen.getAllByText('astrorder-swarm').length).toBeGreaterThan(0)
+    })
+
+    // Select all uninstalled skills and open batch dispatch modal
+    fireEvent.click(screen.getByRole('button', { name: /只选未安装/ }))
+    const batchBtn = await screen.findByRole('button', { name: /批量分发 \(2\)/ })
+    fireEvent.click(batchBtn)
+
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText(/批量分发矩阵（2 项能力）/)).toBeInTheDocument()
+
+    // Hermes on current node is preselected when batch dispatching under Hermes view
+    fireEvent.click(within(dialog).getByRole('button', { name: /放入后台分发/ }))
+
+    await waitFor(() => {
+      expect(api.startCapabilityDispatchJob).toHaveBeenCalledWith(
+        expect.objectContaining({
+          capability_type: 'skill',
+          source_target_id: 'local',
+          items: [
+            expect.objectContaining({ item_id: 'astrorder-browser', source_agent: 'astrorder' }),
+            expect.objectContaining({ item_id: 'astrorder-swarm', source_agent: 'astrorder' }),
+          ],
+          target_matrix: [{ target_id: 'local', agent: 'hermes' }],
+        }),
+      )
+    })
+
+    // Live background progress bar should appear immediately without blocking UI
+    await waitFor(() => {
+      expect(screen.getByText(/正在后台分发 2 项能力/)).toBeInTheDocument()
+    })
+  })
+
+  it('does not crash when startCapabilityDispatchJob returns null reports array', async () => {
+    vi.mocked(api.startCapabilityDispatchJob).mockResolvedValue({
+      id: 'job-null-reports',
+      capability_type: 'skill',
+      source_target_id: 'local',
+      source_target_name: '本机环境',
+      items: [{ item_id: 'astrorder-sessions', source_agent: 'astrorder', label: '会话管理' }],
+      target_matrix: [{ target_id: 'local', agent: 'codex' }],
+      status: 'running',
+      total_steps: 1,
+      completed_steps: 0,
+      success_count: 0,
+      failed_count: 0,
+      current_label: '会话管理',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      reports: null,
+    } as never)
+
+    mount()
+    await waitFor(() => {
+      expect(screen.getAllByText(OFFICIAL_SKILL_TITLES['astrorder-sessions']).length).toBeGreaterThan(0)
+    })
+
+    fireEvent.click(await screen.findByRole('button', { name: /分发到 Agent|跨端分发/i }))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.click(within(dialog).getAllByRole('checkbox')[0])
+    fireEvent.click(within(dialog).getByRole('button', { name: /放入后台分发/ }))
+
+    await waitFor(() => {
+      expect(screen.getByText(/正在后台分发 1 项能力/)).toBeInTheDocument()
+    })
+  })
+
+  it('displays background dispatch jobs in drawer and supports retrying failed steps', async () => {
+    vi.mocked(api.listCapabilityDispatchJobs).mockResolvedValue({
+      jobs: [
+        {
+          id: 'job-partial-1',
+          capability_type: 'skill',
+          source_target_id: 'local',
+          source_target_name: '本机环境',
+          items: [
+            { item_id: 'astrorder-browser', source_agent: 'astrorder', label: '浏览器控制' },
+            { item_id: 'astrorder-swarm', source_agent: 'astrorder', label: 'astrorder-swarm' },
+          ],
+          target_matrix: [{ target_id: 'ssh-remote', agent: 'codex' }],
+          status: 'partial',
+          total_steps: 2,
+          completed_steps: 2,
+          success_count: 1,
+          failed_count: 1,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          reports: [
+            {
+              item_id: 'astrorder-browser',
+              item_label: '浏览器控制',
+              target_id: 'ssh-remote',
+              target_name: 'Debian 远程节点',
+              agent: 'codex',
+              ok: true,
+              message: '已分发并核验',
+            },
+            {
+              item_id: 'astrorder-swarm',
+              item_label: 'astrorder-swarm',
+              target_id: 'ssh-remote',
+              target_name: 'Debian 远程节点',
+              agent: 'codex',
+              ok: false,
+              message: 'ssh connection reset',
+            },
+          ],
+        },
+      ],
+    } as never)
+
+    mount()
+
+    const jobsBtn = await screen.findByRole('button', { name: /后台任务 \(1\)/ })
+    fireEvent.click(jobsBtn)
+
+    await waitFor(() => {
+      expect(screen.getByText('后台分发任务队列')).toBeInTheDocument()
+      expect(screen.getByText('ssh connection reset')).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: /重试失败项 \(1\)/ }))
+    await waitFor(() => {
+      expect(api.startCapabilityDispatchJob).toHaveBeenCalledWith({
+        capability_type: 'skill',
+        source_target_id: 'local',
+        items: [{ item_id: 'astrorder-swarm', source_agent: 'astrorder', label: 'astrorder-swarm' }],
+        target_matrix: [{ target_id: 'ssh-remote', agent: 'codex' }],
+      })
+    })
   })
 
   it('clears stale details when filter or search has empty matches', async () => {

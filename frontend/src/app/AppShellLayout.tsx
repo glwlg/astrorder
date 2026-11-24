@@ -112,8 +112,21 @@ export function AppShellLayout({ chatReturnPath }: { chatReturnPath: string }) {
       void usePluginSettingsStore.getState().hydrate(true)
       void useIntegrationsStore.getState().hydrate(true)
     }
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === 'astrorder:plugin-settings:sync') {
+        lastHydratedAt = Date.now()
+        void usePluginSettingsStore.getState().hydrate(true)
+      } else if (event.key === 'astrorder:integrations:sync') {
+        lastHydratedAt = Date.now()
+        void useIntegrationsStore.getState().hydrate(true)
+      }
+    }
     window.addEventListener('focus', onFocus)
-    return () => window.removeEventListener('focus', onFocus)
+    window.addEventListener('storage', onStorage)
+    return () => {
+      window.removeEventListener('focus', onFocus)
+      window.removeEventListener('storage', onStorage)
+    }
   }, [])
 
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
