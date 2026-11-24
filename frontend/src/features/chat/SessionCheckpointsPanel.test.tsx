@@ -178,4 +178,30 @@ describe('SessionCheckpointsPanel', () => {
     expect(screen.getByText(/「代码检查点」插件已停用/)).toBeTruthy()
     expect(listSpy).not.toHaveBeenCalled()
   })
+
+  it('virtualizes large checkpoint diffs to keep DOM node count bounded', async () => {
+    const hugeLines = Array.from({ length: 10_000 }, (_, i) => `+line-${i}`)
+    vi.spyOn(api, 'listCheckpoints').mockResolvedValue({ items: [cp2, cp1] })
+    vi.spyOn(api, 'diffCheckpoints').mockResolvedValue({
+      from_tree: cp1.tree_sha,
+      to_tree: cp2.tree_sha,
+      files_changed: 1,
+      insertions: 10_000,
+      deletions: 0,
+      files: [{ path: 'src/big.ts', status: 'M', insertions: 10_000, deletions: 0 }],
+      diff: hugeLines.join('\n'),
+    })
+
+    const { container } = renderPanel()
+    await waitFor(() => expect(screen.getByText('优化移动端图片灯箱')).toBeTruthy())
+    fireEvent.click(screen.getByRole('button', { name: '本轮变更' }))
+
+    const pre = await screen.findByLabelText('代码差异内容')
+    expect(pre.getAttribute('data-total-lines')).toBe('10000')
+    const renderedLines = container.querySelectorAll('.cp-diff-line')
+    expect(renderedLines.length).toBeGreaterThan(20)
+    expect(renderedLines.length).toBeLessThan(150)
+    expect(screen.getByText('+line-0')).toBeTruthy()
+    expect(screen.queryByText('+line-9999')).toBeNull()
+  })
 })

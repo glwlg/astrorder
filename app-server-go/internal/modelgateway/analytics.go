@@ -54,6 +54,81 @@ func (h *Handler) handleGetAnalyticsConfig(w http.ResponseWriter, r *http.Reques
 func (h *Handler) invalidateAnalyticsCache() {
 	h.analyticsFlightMu.Lock()
 	h.analyticsCache = nil
+	h.analyticsEpoch++
+	h.analyticsFlightMu.Unlock()
+}
+
+func (h *Handler) storeAnalyticsCacheLocked(cacheKey string, epoch uint64, status int, ct string, body []byte, completedAt time.Time) {
+	if status != http.StatusOK || len(body) == 0 || epoch != h.analyticsEpoch {
+		return
+	}
+	if h.analyticsCache == nil {
+		h.analyticsCache = make(map[string]cachedAnalyticsUsage)
+	}
+	if len(h.analyticsCache) >= analyticsUsageCacheMaxEntries {
+		for k, v := range h.analyticsCache {
+			if !completedAt.Before(v.staleUntil) {
+				delete(h.analyticsCache, k)
+			}
+		}
+		if len(h.analyticsCache) >= analyticsUsageCacheMaxEntries {
+			var oldestKey string
+			var oldestExp time.Time
+			for k, v := range h.analyticsCache {
+				if oldestKey == "" || v.staleUntil.Before(oldestExp) {
+					oldestKey = k
+					oldestExp = v.staleUntil
+				}
+			}
+			if oldestKey != "" {
+				delete(h.analyticsCache, oldestKey)
+			}
+		}
+	}
+	h.analyticsCache[cacheKey] = cachedAnalyticsUsage{
+		status:      status,
+		contentType: ct,
+		body:        body,
+		freshUntil:  completedAt.Add(analyticsUsageFreshTTL),
+		staleUntil:  completedAt.Add(analyticsUsageStaleTTL),
+	}
+}
+
+func (h *Handler) refreshAnalyticsCacheBackground(
+	rawURL string,
+	cacheKey string,
+	epoch uint64,
+	flight *analyticsUsageFlight,
+	rangeVal, surface, source, connectionID, sinceStr, untilStr string,
+) {
+	baseCtx := h.bgCtx
+	if baseCtx == nil {
+		baseCtx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(baseCtx, analyticsUsageBgTimeout)
+	defer cancel()
+
+	bgReq, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	buf := &bufferedResponseWriter{}
+	if err == nil {
+		h.serveAnalyticsUsageUncoalesced(buf, bgReq, rangeVal, surface, source, connectionID, sinceStr, untilStr)
+	}
+	status := buf.status
+	if status == 0 {
+		status = http.StatusOK
+	}
+	ct := buf.Header().Get("Content-Type")
+	body := append([]byte(nil), buf.body.Bytes()...)
+	completedAt := time.Now()
+	h.analyticsFlightMu.Lock()
+	delete(h.analyticsFlights, cacheKey)
+	if err == nil {
+		h.storeAnalyticsCacheLocked(cacheKey, epoch, status, ct, body, completedAt)
+	}
+	flight.status = status
+	flight.contentType = ct
+	flight.body = body
+	close(flight.done)
 	h.analyticsFlightMu.Unlock()
 }
 
@@ -124,14 +199,36 @@ func (h *Handler) handleGetAnalyticsUsage(w http.ResponseWriter, r *http.Request
 	now := time.Now()
 	h.analyticsFlightMu.Lock()
 	if !bypassCache {
-		if entry, ok := h.analyticsCache[cacheKey]; ok && now.Before(entry.expiresAt) {
-			h.analyticsFlightMu.Unlock()
-			if entry.contentType != "" {
-				w.Header().Set("Content-Type", entry.contentType)
+		if entry, ok := h.analyticsCache[cacheKey]; ok {
+			if now.Before(entry.freshUntil) {
+				h.analyticsFlightMu.Unlock()
+				if entry.contentType != "" {
+					w.Header().Set("Content-Type", entry.contentType)
+				}
+				w.WriteHeader(entry.status)
+				_, _ = w.Write(entry.body)
+				return
 			}
-			w.WriteHeader(entry.status)
-			_, _ = w.Write(entry.body)
-			return
+			if now.Before(entry.staleUntil) {
+				// Stale-while-revalidate: return cached snapshot immediately and trigger one background refresh.
+				if _, inFlight := h.analyticsFlights[cacheKey]; !inFlight {
+					if h.analyticsFlights == nil {
+						h.analyticsFlights = make(map[string]*analyticsUsageFlight)
+					}
+					bgFlight := &analyticsUsageFlight{done: make(chan struct{})}
+					h.analyticsFlights[cacheKey] = bgFlight
+					epoch := h.analyticsEpoch
+					rawURL := r.URL.RequestURI()
+					go h.refreshAnalyticsCacheBackground(rawURL, cacheKey, epoch, bgFlight, rangeVal, surface, source, connectionID, sinceStr, untilStr)
+				}
+				h.analyticsFlightMu.Unlock()
+				if entry.contentType != "" {
+					w.Header().Set("Content-Type", entry.contentType)
+				}
+				w.WriteHeader(entry.status)
+				_, _ = w.Write(entry.body)
+				return
+			}
 		}
 	}
 	if flight, ok := h.analyticsFlights[flightKey]; ok {
@@ -158,6 +255,7 @@ func (h *Handler) handleGetAnalyticsUsage(w http.ResponseWriter, r *http.Request
 	}
 	flight := &analyticsUsageFlight{done: make(chan struct{})}
 	h.analyticsFlights[flightKey] = flight
+	epoch := h.analyticsEpoch
 	h.analyticsFlightMu.Unlock()
 
 	buf := &bufferedResponseWriter{}
@@ -171,37 +269,7 @@ func (h *Handler) handleGetAnalyticsUsage(w http.ResponseWriter, r *http.Request
 		completedAt := time.Now()
 		h.analyticsFlightMu.Lock()
 		delete(h.analyticsFlights, flightKey)
-		if status == http.StatusOK && len(body) > 0 {
-			if h.analyticsCache == nil {
-				h.analyticsCache = make(map[string]cachedAnalyticsUsage)
-			}
-			if len(h.analyticsCache) >= analyticsUsageCacheMaxEntries {
-				for k, v := range h.analyticsCache {
-					if !completedAt.Before(v.expiresAt) {
-						delete(h.analyticsCache, k)
-					}
-				}
-				if len(h.analyticsCache) >= analyticsUsageCacheMaxEntries {
-					var oldestKey string
-					var oldestExp time.Time
-					for k, v := range h.analyticsCache {
-						if oldestKey == "" || v.expiresAt.Before(oldestExp) {
-							oldestKey = k
-							oldestExp = v.expiresAt
-						}
-					}
-					if oldestKey != "" {
-						delete(h.analyticsCache, oldestKey)
-					}
-				}
-			}
-			h.analyticsCache[cacheKey] = cachedAnalyticsUsage{
-				status:      status,
-				contentType: ct,
-				body:        body,
-				expiresAt:   completedAt.Add(analyticsUsageCacheTTL),
-			}
-		}
+		h.storeAnalyticsCacheLocked(cacheKey, epoch, status, ct, body, completedAt)
 		flight.status = status
 		flight.contentType = ct
 		flight.body = body

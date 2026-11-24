@@ -72,6 +72,12 @@ markOutboxError: (
   setDraft: (agentId: string, sessionId: string, draft: DraftState) => void
   setDraftText: (agentId: string, sessionId: string, text: string) => void
   updateSession: (agentId: string, sessionId: string, patch: Partial<Session>) => void
+  commitOptimisticSend: (params: {
+    command: Command
+    optimisticMessage?: Message | null
+    clearDraft?: boolean
+    markRunning?: boolean
+  }) => void
   resetRuntime: () => void
 }
 
@@ -824,6 +830,44 @@ export const useAstrorderStore = create<AstrorderStore>((set) => ({
       const current = state.sessions[key]
       if (!current) return state
       return { sessions: { ...state.sessions, [key]: { ...current, ...patch } } }
+    }),
+
+  commitOptimisticSend: ({ command, optimisticMessage, clearDraft = false, markRunning = false }) =>
+    set((state) => {
+      const key = scopeKey(command.agent_id, command.session_id)
+      const patch: Partial<AstrorderStore> = {
+        outbox: {
+          ...state.outbox,
+          [commandKey(command)]: { command, status: 'submitting', error: command.error },
+        },
+      }
+      if (optimisticMessage) {
+        const current = Object.values(state.messages[key] || {})
+        const merged = mergeMessagesById(current, [optimisticMessage])
+        const nextMessages = { ...state.messages, [key]: messageMap(merged) }
+        const nextCatchUps = historyCatchUps(state, key, [optimisticMessage])
+        Object.assign(
+          patch,
+          pruneInactiveMessageScopes(
+            state,
+            key,
+            nextMessages,
+            state.messageEventRevisions,
+            nextCatchUps,
+            state.messageStreams,
+          ),
+        )
+      }
+      if (clearDraft) {
+        patch.drafts = { ...state.drafts, [key]: emptyDraft() }
+      }
+      if (markRunning && state.sessions[key]) {
+        patch.sessions = {
+          ...state.sessions,
+          [key]: { ...state.sessions[key], status: 'running' },
+        }
+      }
+      return patch
     }),
 
   resetRuntime: () => {

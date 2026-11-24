@@ -5,6 +5,9 @@
   box-shadow: 0 18px 40px -18px rgb(51 34 76 / 28%), 0 3px 10px rgb(51 34 76 / 7%);
 }
 .composer-glass > .glass-panel--composer > .glass-panel-content { padding: 12px 16px; }
+.composer-glass .composer-input {
+  transform: translateZ(0);
+}
 .composer-glass .composer-row { background: transparent; }
 .chat-column .composer-glass :is(.attachment-button, .codex-model-pill, .approval-mode-capsule, .composer-git-branch) {
   position: relative;

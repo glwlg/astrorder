@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useId, useRef, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useId, useMemo, useRef, type ReactNode } from 'react'
 import { useComputedColorScheme } from '@mantine/core'
 import { useReducedMotion } from '@mantine/hooks'
 import type { LiquidGlassLens, LiquidGlassOptions } from 'liquid-gl'
@@ -177,7 +177,10 @@ export function GlassPanel({ children, active, snapshot, variant = 'panel', engi
     }
   }, [active, engine, id, reducedMotion, scheme, snapshot, variant])
 
-  const scopeValue = variant === 'composer' ? { snapshot, engine } : null
+  const scopeValue = useMemo(
+    () => (variant === 'composer' ? { snapshot, engine } : null),
+    [variant, snapshot, engine],
+  )
 
   return (
     <div ref={surfaceRef} className={`glass-panel glass-panel--${variant}${active ? ' is-active' : ''}`} data-liquid-ignore>

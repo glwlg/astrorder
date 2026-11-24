@@ -11,13 +11,17 @@ const emptyDraft = (): DraftState => ({ text: '', attachments: [], sessionRefs: 
 const hasContent = (draft: DraftState) => Boolean(draft.text || draft.attachments.length || draft.sessionRefs?.length)
 const entry = (draft: DraftState): StashedDraft => ({ id: newCommandId(), savedAt: new Date().toISOString(), draft })
 
-export function DraftShelfControl({ scope, draft, disabled, onReplace, onError }: {
+export function DraftShelfControl({ scope, draft, hasDraftContent, getDraft, disabled, onReplace, onError }: {
   scope: string
-  draft: DraftState
+  draft?: DraftState
+  hasDraftContent?: boolean
+  getDraft?: () => DraftState
   disabled: boolean
   onReplace: (expected: DraftState, replacement: DraftState) => boolean
   onError: (message: string) => void
 }) {
+  const resolveDraft = () => (getDraft ? getDraft() : (draft ?? emptyDraft()))
+  const draftOccupied = hasDraftContent !== undefined ? hasDraftContent : hasContent(draft ?? emptyDraft())
   const [entries, setEntries] = useState<StashedDraft[]>([])
   const [ready, setReady] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -35,7 +39,7 @@ export function DraftShelfControl({ scope, draft, disabled, onReplace, onError }
     return () => { active = false; mounted.current = false }
   }, [scope])
 
-  const save = async (next: StashedDraft[], replace?: DraftState, restoredId?: string) => {
+  const save = async (next: StashedDraft[], expectedDraft?: DraftState, replace?: DraftState, restoredId?: string) => {
     if (locked.current || disabled || !ready) return
     locked.current = true
     setBusy(true)
@@ -43,7 +47,7 @@ export function DraftShelfControl({ scope, draft, disabled, onReplace, onError }
       await draftShelfStorage.save(scope, next)
       if (!mounted.current) return
       setEntries(next)
-      if (replace && !onReplace(draft, replace)) {
+      if (replace && !onReplace(expectedDraft ?? resolveDraft(), replace)) {
         onError('输入内容已变化，暂存已保存，请再次恢复草稿。')
       } else if (replace) {
         if (restoredId) {
@@ -71,14 +75,21 @@ export function DraftShelfControl({ scope, draft, disabled, onReplace, onError }
     }
   }
 
-  const restore = (row: StashedDraft) => void save(hasContent(draft) ? [entry(draft), ...entries] : entries, {
-    ...row.draft, attachments: row.draft.attachments.map(item => ({ ...item, key: newCommandId() })),
-  }, row.id)
+  const restore = (row: StashedDraft) => {
+    const currentDraft = resolveDraft()
+    void save(hasContent(currentDraft) ? [entry(currentDraft), ...entries] : entries, currentDraft, {
+      ...row.draft, attachments: row.draft.attachments.map(item => ({ ...item, key: newCommandId() })),
+    }, row.id)
+  }
 
   return <Popover opened={opened} onChange={setOpened} position="top-start" width="min(440px, calc(100vw - 32px))" shadow="md" withinPortal>
     <Popover.Target>
-      <Button className="attachment-button" variant="subtle" color="gray" aria-label="草稿箱" title={hasContent(draft) ? '左键暂存当前内容，右键打开草稿箱' : '打开草稿箱'} aria-expanded={opened} disabled={disabled || busy || !ready}
-        onClick={() => hasContent(draft) ? void save([entry(draft), ...entries], emptyDraft()) : setOpened(value => !value)}
+      <Button className="attachment-button" variant="subtle" color="gray" aria-label="草稿箱" title={draftOccupied ? '左键暂存当前内容，右键打开草稿箱' : '打开草稿箱'} aria-expanded={opened} disabled={disabled || busy || !ready}
+        onClick={() => {
+          const currentDraft = resolveDraft()
+          if (hasContent(currentDraft)) void save([entry(currentDraft), ...entries], currentDraft, emptyDraft())
+          else setOpened(value => !value)
+        }}
         onContextMenu={event => { event.preventDefault(); if (!disabled && !busy && ready) setOpened(true) }}>
         <GlassButtonLens />
         {entries.length > 0 ? <IconArchiveFilled size={19} /> : <IconArchive size={19} />}

@@ -3,7 +3,7 @@ import { Badge, Button, Group, Paper, Stack, Text, Textarea } from '@mantine/cor
 import { InlineNotice } from '../../components/InlineNotice'
 import { ComposerGlassSurface, GlassButtonLens } from '../../components/GlassPanel'
 import { useQueryClient } from '@tanstack/react-query'
-import { type ChangeEvent, type ClipboardEvent, type DragEvent, type KeyboardEvent, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { type ChangeEvent, type ClipboardEvent, type DragEvent, type KeyboardEvent, memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { ApiError, api } from '../../api/client'
 import { isDraftSendable, newCommandId, scopeKey } from '../../domain/semantics'
@@ -117,6 +117,47 @@ export function interpretGatewayError(rawError?: string | null): InterpretedGate
 }
 
 const EMPTY_DRAFT: DraftState = { text: '', attachments: [], sessionRefs: [] }
+const EMPTY_COMMAND_ITEMS: CommandMenuItem[] = []
+const EMPTY_MENTION_ITEMS: import('../../domain/types').AgentMention[] = []
+
+const MemoGoalManager = memo(GoalManager)
+const MemoGitStatusBar = memo(GitStatusBar)
+const MemoDraftShelfControl = memo(DraftShelfControl)
+const MemoApprovalModeControl = memo(ApprovalModeControl)
+const MemoSessionModelControl = memo(SessionModelControl)
+const MemoAgentCommandMenu = memo(AgentCommandMenu)
+const MemoAgentMentionMenu = memo(AgentMentionMenu)
+
+const DraftImageThumb = memo(function DraftImageThumb({
+  file,
+  onClick,
+}: {
+  file: File
+  onClick: () => void
+}) {
+  const [url, setUrl] = useState('')
+  useEffect(() => {
+    const objectUrl = URL.createObjectURL(file)
+    setUrl(objectUrl)
+    return () => {
+      URL.revokeObjectURL(objectUrl)
+    }
+  }, [file])
+  if (!url) return null
+  return (
+    <img
+      className="draft-thumb"
+      src={url}
+      alt={file.name}
+      onClick={(e) => {
+        e.stopPropagation()
+        onClick()
+      }}
+      style={{ cursor: 'zoom-in' }}
+      title="查看大图"
+    />
+  )
+})
 
 function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -272,29 +313,39 @@ export function ChatComposer({
   const supportsImages = agent?.kind !== 'grok'
   const nativeBusy = session.status === 'running' || session.status === 'waiting_approval'
   const busy = submitting || nativeBusy
-  const pending = queue.filter(row => row.payload.agent_id === session.agent_id && row.payload.session_id === session.id && !['accepted', 'running', 'completed'].includes(row.state))
+  const pending = useMemo(
+    () => queue.filter(row => row.payload.agent_id === session.agent_id && row.payload.session_id === session.id && !['accepted', 'running', 'completed'].includes(row.state)),
+    [queue, session.agent_id, session.id],
+  )
   const queuePause = !nativeBusy && pending.some(row => row.state === 'queued') ? queueBlockReason(commands, session.agent_id, session.id) : null
   const canStop = hasCapability(agent, 'stop') && busy
   const sessionRefs = draft.sessionRefs || []
   const hasDraft = isDraftSendable(draft.text, draft.attachments, sessionRefs)
+  const hasDraftContent = Boolean(draft.text || draft.attachments.length || sessionRefs.length)
   const commandMenuOpen = (/^\/[^\s]*$/.test(draft.text) || /^\/(?:review|审查)(?:\s.*)?$/i.test(draft.text)) && dismissedMenuText !== draft.text
   const resourcesReady = !agent || agent.status === 'ready'
   const commandQuery = useAgentCommands(session, resourcesReady)
   const gitBranchesQuery = useGitBranches(session, commandMenuOpen && resourcesReady)
-  const agentCommands = commandMenuOpen
-    ? buildCommandMenuItems(commandQuery.data?.items || [], gitBranchesQuery.data || [], draft.text)
-    : []
+  const agentCommands = useMemo(
+    () => (commandMenuOpen
+      ? buildCommandMenuItems(commandQuery.data?.items || [], gitBranchesQuery.data || [], draft.text)
+      : EMPTY_COMMAND_ITEMS),
+    [commandMenuOpen, commandQuery.data?.items, gitBranchesQuery.data, draft.text],
+  )
   const mentionMatch = draft.text.match(/(?:^|\s)@[^\s@]*$/)
   const mentionMenuOpen = Boolean(mentionMatch) && dismissedMenuText !== draft.text
   const mentionText = mentionMatch?.[0].trim().slice(1) || ''
   const mentionQuery = useAgentMentions(session, resourcesReady)
   const fileMentionQuery = useFileMentions(session, mentionText, mentionMenuOpen && resourcesReady)
-  const agentMentions = mentionMenuOpen
-    ? filterAgentMentions(
-        [...(mentionQuery.data?.items || []), ...(fileMentionQuery.data || [])],
-        draft.text,
-      )
-    : []
+  const agentMentions = useMemo(
+    () => (mentionMenuOpen
+      ? filterAgentMentions(
+          [...(mentionQuery.data?.items || []), ...(fileMentionQuery.data || [])],
+          draft.text,
+        )
+      : EMPTY_MENTION_ITEMS),
+    [mentionMenuOpen, mentionQuery.data?.items, fileMentionQuery.data, draft.text],
+  )
   // 执行中且输入为空时停止；有草稿时先排队，由用户显式选择是否立即引导。
   const isStopAction = busy && !hasDraft
   const submittedCommand = submittedCommandId ? commands.find((item) => item.id === submittedCommandId) : undefined
@@ -415,7 +466,6 @@ export function ChatComposer({
     const commandId = newCommandId()
     const command = localCommand(session, commandId, 'send', customText)
     const store = useAstrorderStore.getState()
-    store.addOutbox(command, 'submitting')
 
     const optimisticMessage: Message = {
       id: `optimistic-${commandId}`,
@@ -429,8 +479,12 @@ export function ChatComposer({
       command_id: commandId,
       tool: null,
     }
-    store.mergeMessages(session.agent_id, session.id, [optimisticMessage])
-    store.setDraft(session.agent_id, session.id, EMPTY_DRAFT)
+    store.commitOptimisticSend({
+      command,
+      optimisticMessage,
+      clearDraft: true,
+      markRunning: false,
+    })
 
     submittingRef.current = true
     setSubmitting(true)
@@ -454,7 +508,9 @@ export function ChatComposer({
       if (!['failed', 'unknown', 'received'].includes(result.command.state)) await draftStorage.remove(`sending:${scopeKey(session.agent_id, session.id)}`)
       notifySessionSubmitted(session)
       await queryClient.invalidateQueries({ queryKey: ['astrorder', 'commands', session.agent_id, session.id] })
-      await queryClient.invalidateQueries({ queryKey: ['astrorder', 'messages', session.agent_id, session.id] })
+      if (['completed', 'failed', 'cancelled'].includes(result.command.state)) {
+        await queryClient.invalidateQueries({ queryKey: ['astrorder', 'messages', session.agent_id, session.id] })
+      }
     } catch (nextError) {
       const status = nextError instanceof ApiError && nextError.status >= 400 && nextError.status < 500 ? 'failed' : 'unknown'
       store.markOutboxError(session.agent_id, session.id, commandId, errorMessage(nextError), status)
@@ -554,34 +610,33 @@ export function ChatComposer({
     const commandId = newCommandId()
     const command = localCommand(session, commandId, action, action === 'send' ? outgoing : '')
     const store = useAstrorderStore.getState()
-    store.addOutbox(command, 'submitting')
 
-    // 乐观更新：在用户点击发送瞬间，立即在聊天框呈现用户消息，彻底消除等待迟滞
-    if (action === 'send' && command.text) {
-      const optimisticMessage: Message = {
-        id: `optimistic-${commandId}`,
-        session_id: session.id,
-        agent_id: session.agent_id,
-        role: 'user',
-        kind: 'message',
-        text: command.text,
-        attachments: [],
-        created_at: new Date().toISOString(),
-        command_id: commandId,
-        tool: null,
-      }
-      store.mergeMessages(session.agent_id, session.id, [optimisticMessage])
-    }
+    // 乐观更新：单次原子提交 outbox + 用户消息 + 清空草稿 + running 状态，消除按回车时的多次连锁重渲染
+    const optimisticMessage: Message | null = action === 'send' && command.text
+      ? {
+          id: `optimistic-${commandId}`,
+          session_id: session.id,
+          agent_id: session.agent_id,
+          role: 'user',
+          kind: 'message',
+          text: command.text,
+          attachments: [],
+          created_at: new Date().toISOString(),
+          command_id: commandId,
+          tool: null,
+        }
+      : null
+    store.commitOptimisticSend({
+      command,
+      optimisticMessage,
+      clearDraft: action === 'send',
+      markRunning: action === 'send',
+    })
 
     submittingRef.current = true
     setSubmitting(true)
     setError(null)
     setSubmittedCommandId(commandId)
-    if (action === 'send') {
-      store.setDraft(session.agent_id, session.id, EMPTY_DRAFT)
-      // 乐观更新会话状态为 running，防止 Hermes 或原生轮询延迟导致的“无动静”体感
-      store.updateSession(session.agent_id, session.id, { status: 'running' })
-    }
     let dispatched = false
     try {
       if (action === 'send') await draftStorage.save(`sending:${scopeKey(session.agent_id, session.id)}`, originalDraft)
@@ -605,7 +660,9 @@ export function ChatComposer({
         }
       }
       await queryClient.invalidateQueries({ queryKey: ['astrorder', 'commands', session.agent_id, session.id] })
-      await queryClient.invalidateQueries({ queryKey: ['astrorder', 'messages', session.agent_id, session.id] })
+      if (action !== 'send' || ['completed', 'failed', 'cancelled'].includes(result.command.state)) {
+        await queryClient.invalidateQueries({ queryKey: ['astrorder', 'messages', session.agent_id, session.id] })
+      }
     } catch (nextError) {
       // 发送失败则撤回 running 乐观状态
       store.updateSession(session.agent_id, session.id, { status: session.status || 'idle' })
@@ -729,6 +786,18 @@ ${draft.text}` : entry.payload.text)
   }
 
 
+  const getCurrentDraft = useCallback(
+    () => useAstrorderStore.getState().drafts[draftKey] || EMPTY_DRAFT,
+    [draftKey],
+  )
+  const handleDraftShelfReplace = useCallback((expected: DraftState, replacement: DraftState) => {
+    const current = useAstrorderStore.getState().drafts[draftKey]
+    if (current ? current !== expected : Boolean(expected.text || expected.attachments.length || expected.sessionRefs?.length)) return false
+    useAstrorderStore.getState().setDraft(session.agent_id, session.id, replacement)
+    textareaRef.current?.focus()
+    return true
+  }, [draftKey, session.agent_id, session.id])
+
   return (
     <>
       <Paper
@@ -746,8 +815,8 @@ ${draft.text}` : entry.payload.text)
         onDrop={handleSessionDrop}
       >
         <ComposerGlassSurface active={glass}>
-        <GoalManager key={`${session.agent_id}::${session.id}`} session={session} agent={agent} tasks={tasks} />
-        <GitStatusBar session={session} />
+        <MemoGoalManager key={`${session.agent_id}::${session.id}`} session={session} agent={agent} tasks={tasks} />
+        <MemoGitStatusBar session={session} />
         <Stack gap="xs">
         {queuePause && <Text size="xs" c="dimmed" role="status">{queuePause}</Text>}
         {recoveryDraft && <InlineNotice title="有一条发送结果待核对的消息" actions={<Button variant="subtle" size="compact-xs" onClick={() => void restoreUnsentDraft(session.agent_id, session.id, recoveryDraft).then(async detail => {
@@ -851,17 +920,7 @@ ${draft.text}` : entry.payload.text)
                 title={`${item.file.name} (可按 Delete/Backspace 移除)`}
               >
                 {item.file.type.startsWith('image/') ? (
-                  <img
-                    className="draft-thumb"
-                    src={URL.createObjectURL(item.file)}
-                    alt={item.file.name}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      previewDraftImage(item.key)
-                    }}
-                    style={{ cursor: 'zoom-in' }}
-                    title="查看大图"
-                  />
+                  <DraftImageThumb file={item.file} onClick={() => previewDraftImage(item.key)} />
                 ) : (
                   <IconPaperclip size={14} aria-hidden="true" />
                 )}
@@ -887,9 +946,27 @@ ${draft.text}` : entry.payload.text)
           </div>
         )}
         <div style={{ position: 'relative' }}>
-          <AgentCommandMenu agent={agent} items={agentCommands} activeIndex={commandIndex} onSelect={selectAgentCommand} />
-          <AgentMentionMenu agent={agent} items={agentMentions} activeIndex={commandIndex} onSelect={selectAgentMention} />
-          <Textarea ref={textareaRef} className="composer-input" aria-label="消息内容" placeholder={supportsImages ? '随心输入，可粘贴图片' : '随心输入'} variant="unstyled" autosize minRows={1} maxRows={8} value={draft.text} onChange={(event) => { setCommandIndex(0); setDismissedMenuText(null); setText(event.currentTarget.value) }} onPaste={handlePaste} onKeyDown={handleKeyDown} disabled={!canChat || submitting} />
+          <MemoAgentCommandMenu agent={agent} items={agentCommands} activeIndex={commandIndex} onSelect={selectAgentCommand} />
+          <MemoAgentMentionMenu agent={agent} items={agentMentions} activeIndex={commandIndex} onSelect={selectAgentMention} />
+          <Textarea
+            ref={textareaRef}
+            className="composer-input"
+            aria-label="消息内容"
+            placeholder={supportsImages ? '随心输入，可粘贴图片' : '随心输入'}
+            variant="unstyled"
+            autosize
+            minRows={1}
+            maxRows={8}
+            value={draft.text}
+            onChange={(event) => {
+              if (commandIndex !== 0) setCommandIndex(0)
+              if (dismissedMenuText !== null) setDismissedMenuText(null)
+              setText(event.currentTarget.value)
+            }}
+            onPaste={handlePaste}
+            onKeyDown={handleKeyDown}
+            disabled={!canChat || submitting}
+          />
         </div>
         <Group className="composer-row" align="center" gap="xs" wrap="nowrap">
           <Button
@@ -905,15 +982,17 @@ ${draft.text}` : entry.payload.text)
             <input ref={fileInputRef} hidden type="file" multiple accept={supportsImages ? undefined : 'text/*,.txt,.md,.json,.csv,.py,.go,.ts,.tsx,.js,.jsx,.html,.css,.yaml,.yml,.toml,.xml,.log,.sh,.bat,.ps1'} onChange={addFiles} />
           </Button>
           <div style={{ position: 'relative', flexShrink: 0 }}>
-            <DraftShelfControl key={draftKey} scope={draftKey} draft={draft} disabled={submitting || voice.status !== 'idle'} onError={setError} onReplace={(expected, replacement) => {
-              const current = useAstrorderStore.getState().drafts[draftKey]
-              if (current ? current !== expected : Boolean(expected.text || expected.attachments.length || expected.sessionRefs?.length)) return false
-              updateDraft(replacement)
-              textareaRef.current?.focus()
-              return true
-            }} />
+            <MemoDraftShelfControl
+              key={draftKey}
+              scope={draftKey}
+              hasDraftContent={hasDraftContent}
+              getDraft={getCurrentDraft}
+              disabled={submitting || voice.status !== 'idle'}
+              onError={setError}
+              onReplace={handleDraftShelfReplace}
+            />
           </div>
-          <ApprovalModeControl session={session} agentKind={agent?.kind} />
+          <MemoApprovalModeControl session={session} agentKind={agent?.kind} />
           <span className="composer-toolbar-spacer" />
           {usage && (
             <Badge
@@ -928,7 +1007,7 @@ ${draft.text}` : entry.payload.text)
                 : `${(usage.last_input_tokens / 1000).toFixed(1)}k`}
             </Badge>
           )}
-          <SessionModelControl key={`model:${draftKey}`} session={session} />
+          <MemoSessionModelControl key={`model:${draftKey}`} session={session} />
           {voicePluginEnabled && (
             <Button
               className="attachment-button"

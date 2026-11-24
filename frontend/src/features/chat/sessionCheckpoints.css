@@ -424,10 +424,32 @@
   background: var(--astr-surface-subtle, var(--m-surface-subtle, #f8fafc));
   font-family: var(--astr-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: 11.5px;
-  line-height: 1.5;
+  line-height: 18px;
   overflow-x: auto;
   max-height: 360px;
   overflow-y: auto;
+  contain: strict;
+}
+
+.cp-diff-pre:not(.is-virtual) {
+  contain: content;
+}
+
+.cp-diff-pre.is-virtual {
+  height: 360px;
+}
+
+.cp-diff-virtual-spacer {
+  position: relative;
+  min-width: max-content;
+}
+
+.cp-diff-virtual-window {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  will-change: transform;
 }
 
 [data-mantine-color-scheme="dark"] .cp-diff-pre {
@@ -436,6 +458,8 @@
 
 .cp-diff-line {
   display: block;
+  height: 18px;
+  line-height: 18px;
   padding: 0 10px;
   white-space: pre;
 }

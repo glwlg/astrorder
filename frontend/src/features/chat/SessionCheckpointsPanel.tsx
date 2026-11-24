@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
 import {
@@ -53,6 +53,93 @@ function classifyDiffLine(line: string): string {
   if (line.startsWith('+')) return 'is-add'
   if (line.startsWith('-')) return 'is-del'
   return ''
+}
+
+const VIRTUAL_DIFF_THRESHOLD = 300
+const VIRTUAL_DIFF_LINE_HEIGHT = 18
+const VIRTUAL_DIFF_OVERSCAN = 36
+const VIRTUAL_DIFF_FALLBACK_VIEWPORT = 360
+
+function VirtualCheckpointDiffPre({ lines }: { lines: readonly string[] }) {
+  const preRef = useRef<HTMLPreElement>(null)
+  const scrollRafRef = useRef<number | null>(null)
+  const [scrollTop, setScrollTop] = useState(0)
+  const [viewportHeight, setViewportHeight] = useState(VIRTUAL_DIFF_FALLBACK_VIEWPORT)
+
+  useEffect(() => {
+    setScrollTop(0)
+    if (preRef.current) {
+      preRef.current.scrollTop = 0
+      const measured = preRef.current.clientHeight
+      if (measured > 0) setViewportHeight(measured)
+    }
+  }, [lines])
+
+  useEffect(() => () => {
+    if (scrollRafRef.current !== null) window.cancelAnimationFrame(scrollRafRef.current)
+  }, [])
+
+  const handleScroll = useCallback(() => {
+    if (scrollRafRef.current !== null) return
+    const sync = () => {
+      scrollRafRef.current = null
+      const el = preRef.current
+      if (!el) return
+      setScrollTop(el.scrollTop)
+      if (el.clientHeight > 0 && el.clientHeight !== viewportHeight) {
+        setViewportHeight(el.clientHeight)
+      }
+    }
+    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+      scrollRafRef.current = window.requestAnimationFrame(sync)
+    } else {
+      sync()
+    }
+  }, [viewportHeight])
+
+  if (lines.length <= VIRTUAL_DIFF_THRESHOLD) {
+    return (
+      <pre className="cp-diff-pre" aria-label="代码差异内容">
+        {lines.map((line, idx) => (
+          <span key={idx} className={`cp-diff-line ${classifyDiffLine(line)}`}>
+            {line || ' '}
+          </span>
+        ))}
+      </pre>
+    )
+  }
+
+  const visibleCount = Math.max(20, Math.ceil(viewportHeight / VIRTUAL_DIFF_LINE_HEIGHT))
+  const startIdx = Math.max(0, Math.floor(scrollTop / VIRTUAL_DIFF_LINE_HEIGHT) - VIRTUAL_DIFF_OVERSCAN)
+  const endIdx = Math.min(lines.length, startIdx + visibleCount + VIRTUAL_DIFF_OVERSCAN * 2)
+  const totalHeight = lines.length * VIRTUAL_DIFF_LINE_HEIGHT
+  const offsetY = startIdx * VIRTUAL_DIFF_LINE_HEIGHT
+
+  return (
+    <pre
+      ref={preRef}
+      className="cp-diff-pre is-virtual"
+      aria-label="代码差异内容"
+      data-total-lines={lines.length}
+      onScroll={handleScroll}
+    >
+      <div className="cp-diff-virtual-spacer" style={{ height: `${totalHeight}px` }}>
+        <div
+          className="cp-diff-virtual-window"
+          style={{ transform: `translateY(${offsetY}px)` }}
+        >
+          {lines.slice(startIdx, endIdx).map((line, i) => {
+            const idx = startIdx + i
+            return (
+              <span key={idx} className={`cp-diff-line ${classifyDiffLine(line)}`}>
+                {line || ' '}
+              </span>
+            )
+          })}
+        </div>
+      </div>
+    </pre>
+  )
 }
 
 type DiffCompareTarget = 'turn' | 'working' | string
@@ -130,6 +217,11 @@ export function SessionCheckpointsPanel({
     staleTime: 10_000,
     retry: false,
   })
+
+  const diffLines = useMemo(
+    () => (diffQuery.data?.diff ? diffQuery.data.diff.split('\n') : []),
+    [diffQuery.data?.diff],
+  )
 
   const invalidate = async (includeGit = false) => {
     await queryClient.invalidateQueries({ queryKey: checkpointsQueryKey(session.agent_id, session.id) })
@@ -344,7 +436,6 @@ export function SessionCheckpointsPanel({
             const isBaseline = cp.kind === 'auto_before'
             const hasTurnDiff = !isBaseline && Boolean(cp.prev_tree_sha)
             const otherCheckpoints = items.filter((item) => item.id !== cp.id)
-            const diffLines = diffQuery.data?.diff ? diffQuery.data.diff.split('\n') : []
             return (
               <article
                 key={cp.id}
@@ -621,13 +712,7 @@ export function SessionCheckpointsPanel({
                         )}
 
                         {diffLines.length > 0 ? (
-                          <pre className="cp-diff-pre" aria-label="代码差异内容">
-                            {diffLines.map((line, idx) => (
-                              <span key={idx} className={`cp-diff-line ${classifyDiffLine(line)}`}>
-                                {line || ' '}
-                              </span>
-                            ))}
-                          </pre>
+                          <VirtualCheckpointDiffPre lines={diffLines} />
                         ) : (
                           <div className="cp-diff-empty">两个快照之间没有代码差异。</div>
                         )}

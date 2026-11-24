@@ -12,7 +12,7 @@ import {
 import type { Message, Session } from '../domain/types'
 import { selectMessages, useAstrorderStore } from '../state/store'
 import { visibleTranscript } from '../domain/visibleTranscript'
-import { loadActivityHistory, visibleHistoryItems, type HistoryPage } from '../domain/loadActivityHistory'
+import { loadActivityHistory, refreshActivityHistory, visibleHistoryItems, type HistoryPage } from '../domain/loadActivityHistory'
 import { clientPerf } from '../perf/clientPerf'
 
 type LoadedHistoryPage = HistoryPage & {
@@ -162,9 +162,15 @@ export function useSessionResources(session: Session | null, authenticated: bool
     queryKey: ['astrorder', 'messages', session?.agent_id, session?.id],
     queryFn: async () => {
       const liveRevisionAtRequest = useAstrorderStore.getState().messageRevision
-      const page = await loadActivityHistory(
+      const previous = queryClient.getQueryData<LoadedHistoryPage>([
+        'astrorder',
+        'messages',
+        session?.agent_id,
+        session?.id,
+      ])
+      const page = await refreshActivityHistory(
         (before, limit) => api.getMessages(session!.id, session!.agent_id, before, limit),
-        undefined,
+        previous,
         INITIAL_HISTORY_LIMIT,
       )
       return { ...page, liveRevisionAtRequest }

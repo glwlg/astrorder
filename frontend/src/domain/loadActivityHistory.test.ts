@@ -1,6 +1,6 @@
 import { expect, it, vi } from 'vitest'
 import type { Message } from './types'
-import { loadActivityHistory } from './loadActivityHistory'
+import { loadActivityHistory, refreshActivityHistory } from './loadActivityHistory'
 import { activityPacks } from './activityPacks'
 
 const tool = (id: string): Message => ({ id, agent_id: 'a', session_id: 's', role: 'tool', kind: 'tool', tool: { name: 'terminal' }, text: '', attachments: [], created_at: '1970-01-01T00:00:00Z', command_id: null })
@@ -36,4 +36,24 @@ it('keeps existing groups and their first-message identities when older history 
   expect(after.map(pack => pack.length)).toEqual([30, 100, 100])
   expect(after[2]).toEqual(before[0])
   expect(new Set(after.flat().map(m => m.id)).size).toBe(230)
+})
+
+it('refreshActivityHistory reuses cached older prefix on overlap in a single read and falls back when disjoint', async () => {
+  const older = Array.from({ length: 60 }, (_, i) => tool(`t-${i}`))
+  const previous = { items: older, next_cursor: 'cursor-older', completeActivityGroup: false }
+  const freshWindow = [...older.slice(20), tool('t-60'), tool('t-61')]
+  const readOverlap = vi.fn().mockResolvedValueOnce({ items: freshWindow, next_cursor: 'cursor-mid' })
+
+  const refreshed = await refreshActivityHistory(readOverlap, previous, 50)
+  expect(readOverlap).toHaveBeenCalledTimes(1)
+  expect(refreshed.next_cursor).toBe('cursor-older')
+  expect(refreshed.items.map(m => m.id)).toEqual([...older.map(m => m.id), 't-60', 't-61'])
+
+  // Disjoint fresh window (>50 brand-new items) falls back to multi-page completion
+  const readDisjoint = vi.fn()
+    .mockResolvedValueOnce({ items: [tool('new-1')], next_cursor: 'c1' })
+    .mockResolvedValueOnce({ items: [{ ...tool('compact'), tool: { name: 'contextCompaction' } }], next_cursor: 'c2' })
+  const fallback = await refreshActivityHistory(readDisjoint, previous, 50)
+  expect(readDisjoint).toHaveBeenCalledTimes(2)
+  expect(fallback.next_cursor).toBe('c2')
 })

@@ -54,10 +54,16 @@ type Handler struct {
 	analyticsFlightMu sync.Mutex
 	analyticsFlights  map[string]*analyticsUsageFlight
 	analyticsCache    map[string]cachedAnalyticsUsage
+	analyticsEpoch    uint64
+
+	bgCtx    context.Context
+	bgCancel context.CancelFunc
 }
 
 const (
-	analyticsUsageCacheTTL        = 45 * time.Second
+	analyticsUsageFreshTTL        = 45 * time.Second
+	analyticsUsageStaleTTL        = 10 * time.Minute
+	analyticsUsageBgTimeout       = 20 * time.Second
 	analyticsUsageCacheMaxEntries = 32
 )
 
@@ -65,7 +71,8 @@ type cachedAnalyticsUsage struct {
 	status      int
 	contentType string
 	body        []byte
-	expiresAt   time.Time
+	freshUntil  time.Time
+	staleUntil  time.Time
 }
 
 type analyticsUsageFlight struct {
@@ -84,6 +91,7 @@ func NewHandler(opts Options) (http.Handler, error) {
 	if httpClient == nil {
 		httpClient = defaultHTTPClient()
 	}
+	bgCtx, bgCancel := context.WithCancel(context.Background())
 	h := &Handler{
 
 		store:            opts.Store,
@@ -93,6 +101,8 @@ func NewHandler(opts Options) (http.Handler, error) {
 		httpClient:       httpClient,
 		remoteExecutable: opts.RemoteExecutable,
 		jobs:             newJobManager(),
+		bgCtx:            bgCtx,
+		bgCancel:         bgCancel,
 	}
 	return h, nil
 }
@@ -124,6 +134,9 @@ func Matches(method, path string) bool {
 
 // Close gracefully drains in-flight background jobs within the provided context.
 func (h *Handler) Close(ctx context.Context) error {
+	if h.bgCancel != nil {
+		h.bgCancel()
+	}
 	if h.jobs != nil {
 		return h.jobs.Close(ctx)
 	}
