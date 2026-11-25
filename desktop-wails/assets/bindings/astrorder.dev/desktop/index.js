@@ -23,3 +23,11 @@ import * as $models from "./models.js";
  * StatisticsBounds uses CSS pixels within the main window's client area.
  * @typedef {$models.StatisticsBounds} StatisticsBounds
  */
+
+/**
+ * StatisticsCutout describes an overlapping DOM overlay rectangle (in main
+ * window CSS pixels) punched out of the native child WebView window region so
+ * sidebar popovers, tooltips, Dynamic Island notices, and toast notifications
+ * remain visible and interactive without hiding the embedded page.
+ * @typedef {$models.StatisticsCutout} StatisticsCutout
+ */

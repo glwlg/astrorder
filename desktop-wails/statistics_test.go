@@ -44,4 +44,23 @@ func TestStatisticsAddressAndBounds(t *testing.T) {
 	if err := (StatisticsBounds{X: 100, Y: 30, Width: 800, Height: 600, Scale: 1.5}).validate(); err != nil {
 		t.Fatal(err)
 	}
+	if err := (StatisticsBounds{
+		X: 68, Y: 48, Width: 1200, Height: 800, Scale: 1.25,
+		Cutouts: []StatisticsCutout{
+			{X: 74, Y: 210, Width: 280, Height: 180, Radius: 12},
+			{X: 480, Y: 11, Width: 260, Height: 48, Radius: 24},
+		},
+	}).validate(); err != nil {
+		t.Fatalf("valid cutouts rejected: %v", err)
+	}
+	for _, bad := range []StatisticsBounds{
+		{Width: 100, Height: 100, Scale: 1, Cutouts: []StatisticsCutout{{Width: -5, Height: 10}}},
+		{Width: 100, Height: 100, Scale: 1, Cutouts: []StatisticsCutout{{Width: 10, Height: 10, Radius: -1}}},
+		{Width: 100, Height: 100, Scale: 1, Cutouts: []StatisticsCutout{{X: math.NaN(), Width: 10, Height: 10}}},
+		{Width: 100, Height: 100, Scale: 1, Cutouts: make([]StatisticsCutout, maxStatisticsCutouts+1)},
+	} {
+		if bad.validate() == nil {
+			t.Errorf("accepted invalid cutout bounds: %+v", bad)
+		}
+	}
 }

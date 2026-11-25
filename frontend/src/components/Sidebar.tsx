@@ -361,18 +361,18 @@ export function Sidebar({
               )
               return id === 'inbox' && inboxTotalCount > 0 ? (
                 <div key={to} className="sidebar-inbox-nav-wrap">
-                  <Tooltip label={`待办收件箱（${inboxTotalCount} 项待处理）`} position="bottom" withArrow openDelay={200}>{link}</Tooltip>
+                  <Tooltip label={`待办收件箱（${inboxTotalCount} 项待处理）`} position="right" withArrow openDelay={200}>{link}</Tooltip>
                   <span className={`sidebar-inbox-badge${inboxUrgentCount > 0 ? ' is-urgent' : ''}`} aria-hidden="true">
                     {inboxTotalCount > 99 ? '99+' : inboxTotalCount}
                   </span>
                 </div>
               ) : id === 'groups' && groupsBusy && !isGroups ? (
                 <div key={to} className="group-task-nav-tab">
-                  <Tooltip label="群聊有任务进行中" position="bottom" withArrow openDelay={200}>{link}</Tooltip>
+                  <Tooltip label="群聊有任务进行中" position="right" withArrow openDelay={200}>{link}</Tooltip>
                   <GroupTaskIndicator />
                 </div>
               ) : id === 'analytics' ? (
-                <HoverCard key={to} width={280} position="bottom-end" role="tooltip" withArrow openDelay={150} closeDelay={150}>
+                <HoverCard key={to} width={280} position="right-start" withArrow openDelay={150} closeDelay={180} transitionProps={{ duration: 0 }}>
                   <HoverCard.Target>{link}</HoverCard.Target>
                   <HoverCard.Dropdown>
                     <TodayUsagePreview data={todayUsage.data} pending={todayUsage.isPending} error={todayUsage.isError} updatedAt={todayUsage.dataUpdatedAt} />
@@ -381,7 +381,7 @@ export function Sidebar({
               ) : id === 'agentAccounts' ? (
                 <SessionAccountsHoverCard key={to} link={link} session={activeSession} agent={activeAgent} />
               ) : (
-                <Tooltip key={to} label={id === 'chat' && isInChatSession ? '回到欢迎页' : label} position="bottom" withArrow openDelay={200}>{link}</Tooltip>
+                <Tooltip key={to} label={id === 'chat' && isInChatSession ? '回到欢迎页' : label} position="right" withArrow openDelay={200}>{link}</Tooltip>
               )
             })}
           </div>

@@ -11,19 +11,47 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/events"
 )
 
-// StatisticsBounds uses CSS pixels within the main window's client area.
-type StatisticsBounds struct {
+// StatisticsCutout describes an overlapping DOM overlay rectangle (in main
+// window CSS pixels) punched out of the native child WebView window region so
+// sidebar popovers, tooltips, Dynamic Island notices, and toast notifications
+// remain visible and interactive without hiding the embedded page.
+type StatisticsCutout struct {
 	X      float64 `json:"x"`
 	Y      float64 `json:"y"`
 	Width  float64 `json:"width"`
 	Height float64 `json:"height"`
-	Scale  float64 `json:"scale"`
+	Radius float64 `json:"radius,omitempty"`
 }
+
+// StatisticsBounds uses CSS pixels within the main window's client area.
+type StatisticsBounds struct {
+	X       float64            `json:"x"`
+	Y       float64            `json:"y"`
+	Width   float64            `json:"width"`
+	Height  float64            `json:"height"`
+	Scale   float64            `json:"scale"`
+	Cutouts []StatisticsCutout `json:"cutouts,omitempty"`
+}
+
+const maxStatisticsCutouts = 64
 
 func (b StatisticsBounds) validate() error {
 	for _, v := range []float64{b.X, b.Y, b.Width, b.Height, b.Scale} {
 		if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 || v > 100000 {
 			return errors.New("invalid statistics view bounds")
+		}
+	}
+	if len(b.Cutouts) > maxStatisticsCutouts {
+		return errors.New("too many embedded view cutouts")
+	}
+	for _, c := range b.Cutouts {
+		for _, v := range []float64{c.X, c.Y, c.Width, c.Height, c.Radius} {
+			if math.IsNaN(v) || math.IsInf(v, 0) || v < -10000 || v > 100000 {
+				return errors.New("invalid embedded view cutout")
+			}
+		}
+		if c.Width < 0 || c.Height < 0 || c.Radius < 0 {
+			return errors.New("invalid embedded view cutout")
 		}
 	}
 	return nil
@@ -37,10 +65,12 @@ func validateStatisticsAddress(address string) error {
 }
 
 type StatisticsView struct {
-	shell   *ShellService
-	mu      sync.Mutex
-	window  *application.WebviewWindow
-	address string
+	shell      *ShellService
+	mu         sync.Mutex
+	window     *application.WebviewWindow
+	address    string
+	visible    bool
+	hasCutouts bool
 }
 
 func (s *StatisticsView) show(address string, bounds StatisticsBounds, refresh bool) error {
@@ -67,15 +97,22 @@ func (s *StatisticsView) show(address string, bounds StatisticsBounds, refresh b
 	s.address = address
 	if bounds.Width < 1 || bounds.Height < 1 {
 		s.window.Hide()
+		s.visible = false
 		return nil
 	}
 	var err error
-	application.InvokeSync(func() { err = placeStatisticsWindow(s.window, s.shell.window, bounds) })
+	var hasCutouts bool
+	application.InvokeSync(func() { hasCutouts, err = placeStatisticsWindow(s.window, s.shell.window, bounds, s.hasCutouts) })
 	if err != nil {
 		s.window.Hide()
+		s.visible = false
 		return err
 	}
-	s.window.Show()
+	s.hasCutouts = hasCutouts
+	if !s.visible {
+		s.window.Show()
+		s.visible = true
+	}
 	return nil
 }
 func (s *StatisticsView) hide() {
@@ -83,5 +120,6 @@ func (s *StatisticsView) hide() {
 	defer s.mu.Unlock()
 	if s.window != nil {
 		s.window.Hide()
+		s.visible = false
 	}
 }

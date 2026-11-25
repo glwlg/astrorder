@@ -22,6 +22,20 @@
  * @property {number} width
  * @property {number} height
  * @property {number} scale
+ * @property {StatisticsCutout[] | null} [cutouts]
+ */
+
+/**
+ * StatisticsCutout describes an overlapping DOM overlay rectangle (in main
+ * window CSS pixels) punched out of the native child WebView window region so
+ * sidebar popovers, tooltips, Dynamic Island notices, and toast notifications
+ * remain visible and interactive without hiding the embedded page.
+ * @typedef {Object} StatisticsCutout
+ * @property {number} x
+ * @property {number} y
+ * @property {number} width
+ * @property {number} height
+ * @property {number} [radius]
  */
 
 // In interface mode, this file is likely to contain just comments.

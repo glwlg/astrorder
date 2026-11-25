@@ -98,7 +98,7 @@ export function NotificationPermissionControl() {
 
   if (isDenied) {
     return (
-      <Tooltip label={labels.denied}>
+      <Tooltip label={labels.denied} position="right">
         <ActionIcon
           variant="subtle"
           size="md"
@@ -115,7 +115,7 @@ export function NotificationPermissionControl() {
 
   if (!isGranted) {
     return (
-      <Tooltip label={labels[permission]}>
+      <Tooltip label={labels[permission]} position="right">
         <ActionIcon
           variant="subtle"
           size="md"
@@ -132,9 +132,9 @@ export function NotificationPermissionControl() {
   }
 
   return (
-    <Menu shadow="md" width={180} position="bottom-end" withinPortal>
+    <Menu shadow="md" width={180} position="right-end" withinPortal>
       <Menu.Target>
-        <Tooltip label={labels.granted}>
+        <Tooltip label={labels.granted} position="right">
           <ActionIcon
             variant="subtle"
             size="md"
