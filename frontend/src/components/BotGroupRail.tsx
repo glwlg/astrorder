@@ -96,7 +96,6 @@ export function BotGroupRail({
               size="compact-xs"
               variant="light"
               color="violet"
-              data-liquid-surface="control"
               onClick={() => setCreateOpened(true)}
               leftSection={<IconPlus size={13} />}
               style={{ fontWeight: 600 }}
@@ -127,7 +126,6 @@ export function BotGroupRail({
                 <UnstyledButton
                   key={bg.id}
                   className={`session-row ${isActive ? 'is-active' : ''}`}
-                  data-liquid-surface={isActive ? 'selection' : undefined}
                   onClick={() => {
                     navigate(`/groups/${bg.id}`)
                     onNavigate?.()

@@ -68,11 +68,16 @@ func (h *Handler) Restore(ctx context.Context) error {
 	}
 	var workers sync.WaitGroup
 	limit := make(chan struct{}, 6)
+	enabledPlugins := h.store.ReadEnabledAgentKinds(ctx)
 	for _, node := range targets {
 		for _, kind := range environmentKinds {
 			if ctx.Err() != nil {
 				workers.Wait()
 				return ctx.Err()
+			}
+			if enabled, ok := enabledPlugins[kind]; ok && !enabled {
+				h.forgetSessionRecovery(node.id, kind)
+				continue
 			}
 			enabled, present, err := h.store.GetAgentConnectionChoice(ctx, node.id+":"+kind)
 			if err != nil {

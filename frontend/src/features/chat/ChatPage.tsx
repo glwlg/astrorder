@@ -55,6 +55,8 @@ import {
   XTERM_VIEWER_PLUGIN_ID,
 } from '../plugins/builtinPlugins'
 import { usePluginSettingsStore } from '../plugins/pluginSettingsStore'
+import { useIsOfficeExperience } from '../office/appProfile'
+import { ExportMenu } from '../office/export/ExportMenu'
 import { resolveArtifactFromPath } from '../sidecar/resolver'
 import { artifactViewerRegistry } from '../sidecar/registry'
 import type { SessionCheckpoint } from '../../api/client'
@@ -155,6 +157,7 @@ function ChatPageBody() {
     selected ? state.liveActivityAt[scopeKey(selected.agent_id, selected.id)] : undefined
   ))
   void selectedLiveActivityAt
+  const isOfficeMode = useIsOfficeExperience(selected)
 
   const sessionUsage = useQuery({ queryKey: ['astrorder', 'session_usage', selected?.id, selected?.agent_id], queryFn: () => selected ? api.getSessionUsage(selected.id, selected.agent_id) : Promise.reject(), enabled: Boolean(selected), retry: false, staleTime: 0, refetchOnWindowFocus: false })
 
@@ -217,7 +220,7 @@ function ChatPageBody() {
   const hasReviewRun = Boolean(reviewRun)
 
   useEffect(() => {
-    if (!selectedAgentId || !selectedSessionId || hasReviewRun) return
+    if (isOfficeMode || !selectedAgentId || !selectedSessionId || hasReviewRun) return
     let cancelled = false
     void api.getReviewRelayRuns(selectedAgentId, selectedSessionId).then(({ items }) => {
       if (cancelled || !items.length) return
@@ -237,7 +240,7 @@ function ChatPageBody() {
       })
     }).catch(() => undefined)
     return () => { cancelled = true }
-  }, [hasReviewRun, reviewPeerSignature, selectedAgentId, selectedSessionId])
+  }, [hasReviewRun, isOfficeMode, reviewPeerSignature, selectedAgentId, selectedSessionId])
 
   useEffect(() => {
     if (!reviewRun || reviewRun.status !== 'reviewing') return
@@ -364,7 +367,7 @@ function ChatPageBody() {
     }
   }
   useEffect(() => {
-    if (!selectedAgentId || !selectedSessionId || selectedStatus !== 'idle' || hasReviewRun || !selectedLastUserAt) return
+    if (isOfficeMode || !selectedAgentId || !selectedSessionId || selectedStatus !== 'idle' || hasReviewRun || !selectedLastUserAt) return
     const revision = selectedLastUserAt
     const markerKey = `astrorder:review-triggered:${scopeKey(selectedAgentId, selectedSessionId)}`
     if (localStorage.getItem(markerKey) === revision) return
@@ -378,7 +381,7 @@ function ChatPageBody() {
       void startReview(bindingKey)
     }).catch(() => undefined)
     return () => { cancelled = true }
-  }, [hasReviewRun, reviewPeerSignature, selectedAgentId, selectedLastUserAt, selectedSessionId, selectedStatus])
+  }, [hasReviewRun, isOfficeMode, reviewPeerSignature, selectedAgentId, selectedLastUserAt, selectedSessionId, selectedStatus])
   const handoffPeer = useMemo(() => findSessionHandoff(selected, sessions), [selected, sessions])
   const [detailsOpened, { open: openDetails, close: closeDetails }] = useDisclosure(false)
   const [detailsPinned, setDetailsPinned] = useState(false)
@@ -442,22 +445,49 @@ function ChatPageBody() {
 
   useShortcutHandlers(selected ? {
     sideChat: () => { if (isViewerEnabled(SIDECHAT_VIEWER_PLUGIN_ID)) useSidecarStore.getState().openSideChat(selected.id, selected.agent_id, selected.title || undefined, selected.connection_id || undefined) },
-    agentGraph: () => { if (isViewerEnabled(AGENT_GRAPH_VIEWER_PLUGIN_ID)) useSidecarStore.getState().openAgentGraph(selected.id, selected.agent_id, selected.title || undefined, selected.connection_id || undefined) },
-    memory: () => { if (isViewerEnabled(MEMORY_VIEWER_PLUGIN_ID)) useSidecarStore.getState().openMemory(selected.id) },
-    blackboard: () => { if (isViewerEnabled(BLACKBOARD_VIEWER_PLUGIN_ID)) useSidecarStore.getState().openBlackboard(selected.id, selected.agent_id, selected.connection_id || undefined) },
+    agentGraph: () => { if (!isOfficeMode && isViewerEnabled(AGENT_GRAPH_VIEWER_PLUGIN_ID)) useSidecarStore.getState().openAgentGraph(selected.id, selected.agent_id, selected.title || undefined, selected.connection_id || undefined) },
+    memory: () => { if (!isOfficeMode && isViewerEnabled(MEMORY_VIEWER_PLUGIN_ID)) useSidecarStore.getState().openMemory(selected.id) },
+    blackboard: () => { if (!isOfficeMode && isViewerEnabled(BLACKBOARD_VIEWER_PLUGIN_ID)) useSidecarStore.getState().openBlackboard(selected.id, selected.agent_id, selected.connection_id || undefined) },
     quickOpen: () => setQuickOpenOpened(true),
     fileTree: () => { if (isViewerEnabled(FILETREE_VIEWER_PLUGIN_ID)) useSidecarStore.getState().openFileTree(selected.id, selected.agent_id, selected.workspace || undefined, selected.project_name || selected.title, selected.connection_id || undefined) },
     browser: () => { if (isViewerEnabled(BROWSER_VIEWER_PLUGIN_ID)) useSidecarStore.getState().openBrowser(selected.id, selected.agent_id, undefined, selected.connection_id || undefined) },
-    terminal: () => { if (isViewerEnabled(XTERM_VIEWER_PLUGIN_ID)) useSidecarStore.getState().openTerminal(selected.id, selected.agent_id, selected.project_name || selected.title, selected.connection_id || undefined) },
+    terminal: () => { if (!isOfficeMode && isViewerEnabled(XTERM_VIEWER_PLUGIN_ID)) useSidecarStore.getState().openTerminal(selected.id, selected.agent_id, selected.project_name || selected.title, selected.connection_id || undefined) },
     sidecar: toggleRightPanel,
   } : {})
   const [taskDetailsOpened, { open: openTaskDetails, close: closeTaskDetails }] = useDisclosure(false)
   const [checkpointsOpened, { open: openCheckpoints, close: closeCheckpoints }] = useDisclosure(false)
   const [focusedCheckpointId, setFocusedCheckpointId] = useState<string | null>(null)
+  const [focusedMessageId, setFocusedMessageId] = useState<string | null>(null)
   const handleOpenCheckpoint = useCallback((cp: SessionCheckpoint) => {
     setFocusedCheckpointId(cp.id)
     openCheckpoints()
   }, [openCheckpoints])
+
+  // 响应侧栏「决策与轨迹」等面板派发的消息定位与检查点打开事件
+  useEffect(() => {
+    const onFocusMessage = (event: Event) => {
+      const detail = (event as CustomEvent<{ agentId?: string; sessionId?: string; messageId?: string }>).detail
+      if (!detail?.messageId || !selected) return
+      if (detail.sessionId && detail.sessionId !== selected.id) return
+      if (detail.agentId && detail.agentId !== selected.agent_id) return
+      setFocusedMessageId(null)
+      window.requestAnimationFrame(() => setFocusedMessageId(detail.messageId || null))
+    }
+    const onOpenCheckpointEvent = (event: Event) => {
+      const detail = (event as CustomEvent<{ agentId?: string; sessionId?: string; checkpointId?: string | null }>).detail
+      if (!selected) return
+      if (detail?.sessionId && detail.sessionId !== selected.id) return
+      if (detail?.agentId && detail.agentId !== selected.agent_id) return
+      setFocusedCheckpointId(detail?.checkpointId ?? null)
+      openCheckpoints()
+    }
+    window.addEventListener('astrorder:focus-message', onFocusMessage)
+    window.addEventListener('astrorder:open-checkpoint', onOpenCheckpointEvent)
+    return () => {
+      window.removeEventListener('astrorder:focus-message', onFocusMessage)
+      window.removeEventListener('astrorder:open-checkpoint', onOpenCheckpointEvent)
+    }
+  }, [openCheckpoints, selected])
   const handleOpenCheckpointFile = useCallback((relativePath: string) => {
     if (!selected?.workspace) return
     const base = selected.workspace.replace(/[\\/]+$/, '')
@@ -508,12 +538,20 @@ function ChatPageBody() {
   const background = useBackgroundProcesses(selected, Boolean(agent && ['hermes', 'codex'].includes(agent.kind)))
   const sessionSwarm = useSessionSwarm(selected, agent, changesOpened)
   const sessionSchedules = useSessionSchedules(selected)
-  const sessionCheckpoints = useSessionCheckpoints(selected, Boolean(selected?.workspace))
+  const sessionCheckpoints = useSessionCheckpoints(selected, Boolean(selected?.workspace) && !isOfficeMode)
   const enabledScheduleCount = useMemo(
     () => (sessionSchedules.data || []).filter((item) => item.enabled).length,
     [sessionSchedules.data],
   )
-  const showSwarmPanel = isAntigravityAgent(agent)
+  const showSwarmPanel = !isOfficeMode && isAntigravityAgent(agent)
+  const sessionExportMarkdown = useMemo(() => {
+    if (!isOfficeMode || messages.length === 0) return ''
+    const title = selected?.title?.trim() || '办公对话记录'
+    const blocks = messages
+      .filter((m) => (m.role === 'user' || m.role === 'assistant') && m.kind === 'message' && m.text.trim())
+      .map((m) => `### ${m.role === 'user' ? '我' : 'AI 助手'}\n\n${m.text.trim()}`)
+    return blocks.length > 0 ? `# ${title}\n\n${blocks.join('\n\n---\n\n')}` : ''
+  }, [isOfficeMode, messages, selected?.title])
   const runtimeTasks = [...tasks.filter(task => task.kind !== 'background'), ...background.items]
   const handleApproval = async (approval: Approval, action: 'approve' | 'cancel') => {
     if (!selected || !agent?.capabilities.includes('approvals')) return
@@ -715,33 +753,48 @@ function ChatPageBody() {
                 <SessionBreadcrumb session={selected} />
               </div>
               <Group gap="xs" wrap="nowrap" className="chat-heading-actions">
-                <AgentKindBadge agent={agent} />
+                {!isOfficeMode && <AgentKindBadge agent={agent} />}
                 <SessionStatusLabel status={sessionActivityStatus(selected, commands)} />
-                <Tooltip label={reviewRun?.status === 'reviewing' ? 'Codex 审查中…' : '请求 Codex 审查'} position="bottom">
-                  <ActionIcon
-                    size="sm"
-                    variant="subtle"
-                    color="teal"
-                    aria-label="请求 Codex 审查"
-                    loading={reviewRun?.status === 'reviewing'}
-                    disabled={!reviewAgents.length}
-                    onClick={() => {
-                      void api.getReviewRelayBinding(selected.agent_id, selected.id).then((binding) => {
-                        setReviewPeerKey(binding?.enabled ? scopeKey(binding.review_agent_id, binding.review_session_id) : null)
-                      }).catch(() => setReviewPeerKey(null))
-                      setReviewCreateNew(false)
-                      setReviewModalOpen(true)
-                    }}
-                  >
-                    <ShieldCheckIcon size={22} aria-hidden="true" />
-                  </ActionIcon>
-                </Tooltip>
-                {reviewRun?.status === 'draft_ready' && <Text size="xs" c="teal">审查结果已回填</Text>}
-                {reviewRun?.status === 'empty' && <Text size="xs" c="dimmed">本轮没有 code-comment</Text>}
-                {reviewRun?.status === 'failed' && <Text size="xs" c="red">审查失败</Text>}
+                {isOfficeMode && sessionExportMarkdown && (
+                  <ExportMenu
+                    markdown={sessionExportMarkdown}
+                    title={selected.title || '对话记录'}
+                    fileName={selected.title || '对话记录'}
+                    variant="icon"
+                    workspace={selected.workspace || undefined}
+                    sessionId={selected.id}
+                    connectionId={selected.connection_id}
+                  />
+                )}
+                {!isOfficeMode && (
+                  <>
+                    <Tooltip label={reviewRun?.status === 'reviewing' ? 'Codex 审查中…' : '请求 Codex 审查'} position="bottom">
+                      <ActionIcon
+                        size="sm"
+                        variant="subtle"
+                        color="teal"
+                        aria-label="请求 Codex 审查"
+                        loading={reviewRun?.status === 'reviewing'}
+                        disabled={!reviewAgents.length}
+                        onClick={() => {
+                          void api.getReviewRelayBinding(selected.agent_id, selected.id).then((binding) => {
+                            setReviewPeerKey(binding?.enabled ? scopeKey(binding.review_agent_id, binding.review_session_id) : null)
+                          }).catch(() => setReviewPeerKey(null))
+                          setReviewCreateNew(false)
+                          setReviewModalOpen(true)
+                        }}
+                      >
+                        <ShieldCheckIcon size={22} aria-hidden="true" />
+                      </ActionIcon>
+                    </Tooltip>
+                    {reviewRun?.status === 'draft_ready' && <Text size="xs" c="teal">审查结果已回填</Text>}
+                    {reviewRun?.status === 'empty' && <Text size="xs" c="dimmed">本轮没有 code-comment</Text>}
+                    {reviewRun?.status === 'failed' && <Text size="xs" c="red">审查失败</Text>}
+                  </>
+                )}
 
                 {!!approvals.length && <Button size="compact-sm" color="yellow" variant="light" onClick={openDetails}>{approvals.some(isUserInput) ? '等待回答' : '等待授权'} · {approvals.length}</Button>}
-                {sessionCheckpoints.pluginEnabled && selected.workspace && (
+                {!isOfficeMode && sessionCheckpoints.pluginEnabled && selected.workspace && (
                   <Tooltip
                     label={sessionCheckpoints.items.length > 0 ? `代码检查点（${sessionCheckpoints.items.length}）` : '按轮次代码检查点'}
                     position="bottom"
@@ -811,7 +864,7 @@ function ChatPageBody() {
                     <SidebarSimpleIcon size={22} mirrored weight={showRightPanel ? 'duotone' : 'regular'} aria-hidden="true" />
                   </ActionIcon>
                 </Tooltip>
-                <SessionToolsMenu session={selected} />
+                {!isOfficeMode && <SessionToolsMenu session={selected} />}
               </Group>
             </Group>
           </div>
@@ -845,11 +898,11 @@ function ChatPageBody() {
             onRetry={handleRetryResources}
             commands={commands}
             onForkAtMessage={forkMode !== 'none' ? handleOpenForkCallback : undefined}
-            forkActionLabel={forkMode === 'context_branch' ? '基于此回复新建交接会话' : '从此回复分叉新会话'}
+            forkActionLabel={isOfficeMode ? '从此复制新对话' : forkMode === 'context_branch' ? '基于此回复新建交接会话' : '从此回复分叉新会话'}
             onEditLastUserMessage={handleEditLastUserMessage}
-            checkpoints={sessionCheckpoints.pluginEnabled ? sessionCheckpoints.items : []}
-            onOpenCheckpoint={sessionCheckpoints.pluginEnabled ? handleOpenCheckpoint : undefined}
-            highlightMessageId={searchParams.get('message_id')}
+            checkpoints={!isOfficeMode && sessionCheckpoints.pluginEnabled ? sessionCheckpoints.items : []}
+            onOpenCheckpoint={!isOfficeMode && sessionCheckpoints.pluginEnabled ? handleOpenCheckpoint : undefined}
+            highlightMessageId={focusedMessageId || searchParams.get('message_id')}
           />
           </PerfProfiler>
           <SessionComposerGate
@@ -862,7 +915,6 @@ function ChatPageBody() {
           >
           <PerfProfiler id="ChatComposer">
           <ChatComposer
-            glass
             key={`composer:${scopeKey(selected.agent_id, selected.id)}`}
             session={selected}
             agent={agent}
@@ -919,7 +971,6 @@ function ChatPageBody() {
             </div>
             {!sidecarOpen && detailsPinned && (
               <div className="pinned-session-details">
-                <Button variant="subtle" size="compact-sm" onClick={() => setDetailsPinned(false)}>收起详情侧栏</Button>
                 <SessionDetails
                   session={selected}
                   agent={agent}
@@ -927,6 +978,9 @@ function ChatPageBody() {
                   messages={messages}
                   approvals={approvals}
                   onApproval={(approval, action) => void handleApproval(approval, action)}
+                  mode="pinned"
+                  onUnpin={() => setDetailsPinned(false)}
+                  onClose={() => setDetailsPinned(false)}
                   handoffLink={handoffPeer ? {
                     label: `${handoffPeer.direction === 'from' ? '转交自' : '已转交至'} ${agentKindLabel(agents[handoffPeer.session.agent_id]?.kind)}`,
                     title: handoffPeer.session.title,
@@ -981,7 +1035,7 @@ function ChatPageBody() {
         {selectedTask && <TaskDetails task={selectedTask} canStop={Boolean(agent?.capabilities.includes('stop') && sessions.some(session => session.agent_id === selectedTask.agent_id && session.id === selectedTask.target_id) && ['pending', 'running', 'waiting_approval'].includes(selectedTask.status))} onStop={(task) => void handleStopTask(task)} onOpenSession={(sid, aid) => { closeTaskDetails(); setTaskSelection(null); navigate(`/chat/${encodeURIComponent(sid)}?agent_id=${encodeURIComponent(aid)}`) }} onJumpToLatest={() => window.scrollTo({ top: document.body.scrollHeight, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })} onClose={() => { closeTaskDetails(); setTaskSelection(null) }} />}
       </Drawer>
       <Drawer
-        opened={sessionCheckpoints.pluginEnabled && checkpointsOpened && Boolean(selected)}
+        opened={!isOfficeMode && sessionCheckpoints.pluginEnabled && checkpointsOpened && Boolean(selected)}
         onClose={() => { setFocusedCheckpointId(null); closeCheckpoints() }}
         title="按轮次代码检查点"
         position={mobileTaskSheet ? 'bottom' : 'right'}
@@ -1011,7 +1065,7 @@ function ChatPageBody() {
           <Group gap={8}>
             <IconGitFork size={18} style={{ color: 'var(--astr-indigo)' }} />
             <span style={{ fontWeight: 600, fontSize: '14px' }}>
-              {forkMode === 'context_branch' ? '基于该回复新建交接会话' : '从该回复分叉新会话'}
+              {isOfficeMode ? '从此复制新对话' : forkMode === 'context_branch' ? '基于该回复新建交接会话' : '从该回复分叉新会话'}
             </span>
           </Group>
         }
@@ -1020,17 +1074,19 @@ function ChatPageBody() {
       >
         <Stack gap="md">
           <Text size="xs" c="dimmed">
-            {forkMode === 'context_branch'
-              ? 'Antigravity 原生协议暂不支持直接分叉；星序将截取截止到此回复的对话摘要，创建一个同工作区、同模型的全新会话，并在发送首条消息时自动注入背景上下文，不会影响原会话。'
-              : '将在当前回复节点创建全新分支，继承此前的完整对话上下文，后续尝试不会影响原会话。'}
+            {isOfficeMode
+              ? '将从当前回复位置复制开启一段全新的独立对话，保留此前讨论背景，不会影响原对话内容。'
+              : forkMode === 'context_branch'
+                ? 'Antigravity 原生协议暂不支持直接分叉；星序将截取截止到此回复的对话摘要，创建一个同工作区、同模型的全新会话，并在发送首条消息时自动注入背景上下文，不会影响原会话。'
+                : '将在当前回复节点创建全新分支，继承此前的完整对话上下文，后续尝试不会影响原会话。'}
           </Text>
           <TextInput
-            label="新会话标题"
-            placeholder={forkMode === 'context_branch' ? '输入交接会话标题' : '输入分叉会话标题'}
+            label={isOfficeMode ? '新对话标题' : '新会话标题'}
+            placeholder={isOfficeMode ? '输入新对话标题' : forkMode === 'context_branch' ? '输入交接会话标题' : '输入分叉会话标题'}
             value={forkTitle}
             onChange={(e) => setForkTitle(e.currentTarget.value)}
           />
-          {worktreeEnabled && Boolean(selected.workspace) && <Switch
+          {!isOfficeMode && worktreeEnabled && Boolean(selected.workspace) && <Switch
             label="创建独立 Git Worktree 分支工作区"
             description={agent?.kind === 'hermes'
               ? 'Hermes 将自动通过上下文交接在独立目录签出新 Git 分支，不影响原目录'
@@ -1038,7 +1094,7 @@ function ChatPageBody() {
             checked={forkWorktree}
             onChange={(e) => setForkWorktree(e.currentTarget.checked)}
           />}
-          {worktreeEnabled && Boolean(selected.workspace) && forkWorktree && (
+          {!isOfficeMode && worktreeEnabled && Boolean(selected.workspace) && forkWorktree && (
             <TextInput
               label="Git 分支名"
               placeholder="例如：feat/experimental"
@@ -1056,12 +1112,12 @@ function ChatPageBody() {
               loading={forkLoading}
               leftSection={<IconGitFork size={15} />}
             >
-              {forkMode === 'context_branch' ? '创建交接会话' : '立即分叉'}
+              {isOfficeMode ? '创建新对话' : forkMode === 'context_branch' ? '创建交接会话' : '立即分叉'}
             </Button>
           </Group>
         </Stack>
       </Modal>
-      <Modal opened={reviewModalOpen} onClose={() => setReviewModalOpen(false)} title="请求 Codex 原生审查" centered>
+      <Modal opened={!isOfficeMode && reviewModalOpen} onClose={() => setReviewModalOpen(false)} title="请求 Codex 原生审查" centered>
         <Stack gap="md">
           <Text size="sm">选择同一工作区的独立 Codex 审查会话。星序只会向它发送原生 <code>/review</code>，不会注入当前会话内容。</Text>
           <Group gap="xs">
@@ -1111,9 +1167,16 @@ function DrawerDetails({
   handoffLink?: { label: string; title?: string; onOpen: () => void } | null
 }) {
   return (
-    <Drawer opened={opened} onClose={onClose} title="会话详情" position="right" size="min(92vw, 380px)">
-      <Button visibleFrom="md" variant="subtle" size="compact-sm" onClick={onPin}>固定详情侧栏</Button>
-      <SessionDetails {...props} />
+    <Drawer
+      opened={opened}
+      onClose={onClose}
+      withCloseButton={false}
+      padding={0}
+      className="session-inspector-drawer"
+      position="right"
+      size="min(92vw, 392px)"
+    >
+      <SessionDetails {...props} mode="drawer" onPin={onPin} onClose={onClose} />
     </Drawer>
   )
 }

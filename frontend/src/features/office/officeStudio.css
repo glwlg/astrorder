@@ -1,0 +1,519 @@
+/* ============================================================================
+   Native AI Office Workstation Styles (Living Home + Multi-Doc Sources Strip)
+   Monochrome 2026 Editorial System (#FFFFFF / #F8F8FA / #18181B)
+   ============================================================================ */
+
+.office-home-stage {
+  --oh-paper: #ffffff;
+  --oh-rail: #f8f8fa;
+  --oh-rail-hover: #f0f0f4;
+  --oh-border: rgba(24, 24, 27, 0.08);
+  --oh-ink: #111114;
+  --oh-body: #27272a;
+  --oh-muted: #71717a;
+  --oh-faint: #a1a1aa;
+  --oh-obsidian: #18181b;
+  --oh-obsidian-text: #ffffff;
+
+  height: 100%;
+  overflow-y: auto;
+  background: var(--oh-paper);
+  color: var(--oh-ink);
+  padding: 28px 32px 48px;
+}
+
+:root[data-mantine-color-scheme='dark'] .office-home-stage {
+  --oh-paper: #12151c;
+  --oh-rail: #171b24;
+  --oh-rail-hover: #202633;
+  --oh-border: rgba(255, 255, 255, 0.09);
+  --oh-ink: #f4f4f6;
+  --oh-body: #d4d4d8;
+  --oh-muted: #9ca3af;
+  --oh-faint: #6b7280;
+  --oh-obsidian: #f4f4f6;
+  --oh-obsidian-text: #111114;
+}
+
+.office-home-inner {
+  max-width: 1040px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.office-home-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.office-home-greeting {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 680;
+  letter-spacing: -0.025em;
+  color: var(--oh-ink);
+}
+
+.office-home-date {
+  font-size: 12.5px;
+  color: var(--oh-muted);
+  margin-top: 3px;
+}
+
+.office-home-persona-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 11px;
+  border-radius: 999px;
+  border: 1px solid var(--oh-border);
+  background: var(--oh-rail);
+  color: var(--oh-body);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+.office-home-persona-pill:hover {
+  background: var(--oh-rail-hover);
+}
+
+.office-home-composer {
+  border: 1px solid var(--oh-border);
+  border-radius: 14px;
+  background: var(--oh-rail);
+  padding: 12px 14px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: border-color 140ms ease, background-color 140ms ease;
+}
+
+.office-home-composer:focus-within {
+  border-color: color-mix(in oklab, var(--oh-ink) 28%, transparent);
+  background: var(--oh-paper);
+  box-shadow: 0 8px 24px -12px rgba(15, 23, 42, 0.12);
+}
+
+.office-home-textarea {
+  width: 100%;
+  min-height: 62px;
+  border: none;
+  outline: none;
+  resize: none;
+  background: transparent;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--oh-ink);
+  font-family: inherit;
+}
+
+.office-home-textarea::placeholder {
+  color: var(--oh-faint);
+}
+
+.office-home-composer-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.office-home-submit {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 14px;
+  border: none;
+  border-radius: 9px;
+  background: var(--oh-obsidian);
+  color: var(--oh-obsidian-text);
+  font-size: 12.5px;
+  font-weight: 550;
+  cursor: pointer;
+}
+
+.office-home-submit:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.office-home-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.office-home-section-title {
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--oh-muted);
+  letter-spacing: 0.02em;
+}
+
+.office-home-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  border: none;
+  background: transparent;
+  color: var(--oh-muted);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+
+.office-home-link:hover {
+  background: var(--oh-rail);
+  color: var(--oh-ink);
+}
+
+/* 8-Template Quick Launch Strip */
+.office-tpl-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+@media (max-width: 820px) {
+  .office-tpl-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.office-tpl-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 11px 13px;
+  border-radius: 10px;
+  border: 1px solid var(--oh-border);
+  background: var(--oh-paper);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease, transform 120ms ease;
+}
+
+.office-tpl-card:hover {
+  background: var(--oh-rail);
+  border-color: color-mix(in oklab, var(--oh-ink) 20%, transparent);
+  transform: translateY(-1px);
+}
+
+.office-tpl-card-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.office-tpl-card-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--oh-ink);
+}
+
+.office-tpl-card-cat {
+  font-size: 10.5px;
+  color: var(--oh-faint);
+}
+
+.office-tpl-card-desc {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--oh-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* 3-Column Living Office Bento Grid */
+.office-bento-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+@media (max-width: 980px) {
+  .office-bento-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.office-bento-card {
+  border: 1px solid var(--oh-border);
+  border-radius: 12px;
+  background: var(--oh-paper);
+  padding: 14px 15px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.office-bento-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.office-bento-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  color: var(--oh-body);
+  transition: background-color 120ms ease;
+}
+
+.office-bento-row:hover {
+  background: var(--oh-rail);
+}
+
+.office-bento-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.office-bento-row-title {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--oh-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.office-bento-row-sub {
+  font-size: 11px;
+  color: var(--oh-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.office-home-quick-todo {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--oh-border);
+  background: var(--oh-rail);
+}
+
+.office-home-quick-todo input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 12px;
+  color: var(--oh-ink);
+  height: 24px;
+}
+
+/* NotebookLM-style Multi-Doc Sources Bar above Chat Composer */
+.office-sources-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 2px 4px;
+}
+
+.office-sources-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.office-tool-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 9px;
+  border-radius: 999px;
+  border: 1px solid var(--astr-border);
+  background: var(--astr-surface, #ffffff);
+  color: var(--astr-text);
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.office-tool-chip:hover:not(:disabled) {
+  background: var(--astr-surface-muted, #f4f4f5);
+}
+
+.office-tool-chip.is-primary {
+  background: #18181b;
+  border-color: #18181b;
+  color: #ffffff;
+}
+
+.office-tool-chip.is-primary:hover {
+  background: #27272a;
+}
+
+.office-tool-chip.is-active {
+  border-color: #18181b;
+  font-weight: 600;
+}
+
+.office-source-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 7px 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--astr-border);
+  background: var(--astr-surface-muted, #f8f8fa);
+  font-size: 11.5px;
+  color: var(--astr-text);
+  max-width: 190px;
+}
+
+.office-source-pill-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.office-source-pill-remove {
+  border: none;
+  background: transparent;
+  color: var(--astr-muted);
+  cursor: pointer;
+  padding: 1px;
+  display: inline-flex;
+  border-radius: 50%;
+}
+
+.office-source-pill-remove:hover {
+  color: var(--astr-text);
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.office-sources-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 6px 10px;
+  border-radius: 9px;
+  border: 1px solid var(--astr-border);
+  background: var(--astr-surface-muted, #f8f8fa);
+}
+
+.office-sources-hint {
+  font-size: 11px;
+  color: var(--astr-muted);
+  font-weight: 550;
+}
+
+.office-synth-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid var(--astr-border);
+  background: var(--astr-surface, #ffffff);
+  color: var(--astr-text);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.office-synth-btn:hover:not(:disabled) {
+  background: #18181b;
+  border-color: #18181b;
+  color: #ffffff;
+}
+
+.office-synth-clear {
+  margin-left: auto;
+  border: none;
+  background: transparent;
+  color: var(--astr-muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.office-synth-clear:hover {
+  color: var(--astr-text);
+}
+
+.office-source-picker-list {
+  max-height: 290px;
+  overflow-y: auto;
+  border: 1px solid var(--astr-border);
+  border-radius: 9px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.office-source-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.office-source-picker-row:hover,
+.office-source-picker-row.is-checked {
+  background: var(--mantine-color-default-hover);
+}
+
+.office-source-picker-copy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.office-source-picker-name {
+  font-size: 12.5px;
+  font-weight: 550;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.office-source-picker-path {
+  font-size: 11px;
+  color: var(--astr-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

@@ -153,9 +153,9 @@ export function IntegrationsSettingsPage() {
               <IconPlugConnected size={22} />
             </div>
             <div>
-              <Title order={2} size="h3">集成管理</Title>
+              <Title order={2} size="h3">常用网站与集成</Title>
               <Text size="xs" c="dimmed" mt={2}>
-                将第三方网关、监控面板、文档站等外链挂载到侧边栏；支持自动抓取站点图标、自定义图标、排序与显示控制，所有配置保存在数据库。
+                将常用办公站点、在线文档、企业邮箱或内部系统固定到侧边栏，支持自动获取图标、排序与显示控制。
               </Text>
             </div>
           </Group>
@@ -194,9 +194,9 @@ export function IntegrationsSettingsPage() {
         <Card withBorder radius="md" p="xl" style={{ background: 'var(--astr-surface)', textAlign: 'center' }}>
           <Stack align="center" gap="xs">
             <IconPlugConnected size={32} color="var(--astr-muted)" />
-            <Text fw={600} size="sm">还没有配置外部集成</Text>
+            <Text fw={600} size="sm">还没有添加常用网站</Text>
             <Text size="xs" c="dimmed" maw={420}>
-              可以添加 Magpie / OpenCodeX 网关后台、Grafana、GitLab、Portainer 等常用网页工具，点击左侧“+”按钮也能快速添加。
+              可以添加飞书、钉钉、Notion、企业邮箱、公司 OA 或内部看板等常用网页，点击左侧“+”按钮也能随时添加。
             </Text>
             <Button
               mt="xs"

@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ActionIcon, Badge, Button, Group, LoadingOverlay, Menu, Paper, Text } from '@mantine/core'
+import { ActionIcon, Badge, Button, Group, LoadingOverlay, Menu, Modal, Paper, Stack, Text, TextInput, Tooltip } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import {
   IconCheck,
@@ -9,18 +9,87 @@ import {
   IconCopy,
   IconDatabase,
   IconDownload,
+  IconEdit,
+  IconEye,
   IconFile,
+  IconFilePlus,
+  IconFileSpreadsheet,
+  IconFileText,
+  IconFileTypeDocx,
+  IconFileTypePdf,
   IconFolder,
   IconFolderOpen,
+  IconFolderPlus,
+  IconPhoto,
+  IconPresentation,
   IconRefresh,
+  IconSearch,
+  IconTrash,
+  IconUpload,
+  IconX,
 } from '@tabler/icons-react'
-import { authenticatedApiFetch } from '../../../../api/client'
+import { api, authenticatedApiFetch } from '../../../../api/client'
+import { useIsOfficeExperience } from '../../../office/appProfile'
 import { copyFilesToClipboard, downloadFile } from '../../fileTransfer'
 import { resolveArtifactFromPath } from '../../resolver'
 import { useSidecarStore } from '../../sidecarStore'
 import type { ViewerContext } from '../../types'
 import { artifactViewerRegistry } from '../../registry'
 import { hasActiveDatabaseTool, isSqlFilePath, openSqlFileInDatabaseTool } from '../../databaseTool'
+
+function renderFileIcon(name: string) {
+  const lower = name.toLowerCase()
+  if (lower.endsWith('.docx') || lower.endsWith('.doc') || lower.endsWith('.wps')) {
+    return <IconFileTypeDocx size={14} color="#2563eb" />
+  }
+  if (lower.endsWith('.xlsx') || lower.endsWith('.xls') || lower.endsWith('.csv') || lower.endsWith('.tsv') || lower.endsWith('.et')) {
+    return <IconFileSpreadsheet size={14} color="#15803d" />
+  }
+  if (lower.endsWith('.pptx') || lower.endsWith('.ppt') || lower.endsWith('.dps')) {
+    return <IconPresentation size={14} color="#ea580c" />
+  }
+  if (lower.endsWith('.pdf')) {
+    return <IconFileTypePdf size={14} color="#dc2626" />
+  }
+  if (lower.endsWith('.md') || lower.endsWith('.markdown') || lower.endsWith('.txt')) {
+    return <IconFileText size={14} color="#475569" />
+  }
+  if (/\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i.test(lower)) {
+    return <IconPhoto size={14} color="#7c3aed" />
+  }
+  return <IconFile size={14} color="var(--astr-muted)" />
+}
+
+function joinChildPath(parentDir: string, name: string): string {
+  const sep = parentDir.includes('\\') && !parentDir.includes('/') ? '\\' : '/'
+  const trimmed = parentDir.replace(/[\\/]+$/, '')
+  return trimmed ? `${trimmed}${sep}${name}` : name
+}
+
+function parentDirectoryOf(filePath: string): string {
+  const normalized = filePath.replace(/[\\/]+$/, '')
+  const lastSlash = Math.max(normalized.lastIndexOf('/'), normalized.lastIndexOf('\\'))
+  if (lastSlash <= 0) return ''
+  return normalized.slice(0, lastSlash)
+}
+
+function filterTreeNodes(nodes: TreeNode[], query: string): TreeNode[] {
+  const q = query.trim().toLowerCase()
+  if (!q) return nodes
+  const filtered: TreeNode[] = []
+  for (const node of nodes) {
+    const nameMatched = node.name.toLowerCase().includes(q)
+    const matchedChildren = node.children ? filterTreeNodes(node.children, q) : []
+    if (nameMatched || matchedChildren.length > 0) {
+      filtered.push(
+        node.is_dir
+          ? { ...node, children: nameMatched ? node.children : matchedChildren }
+          : node,
+      )
+    }
+  }
+  return filtered
+}
 
 interface TreeNode {
   name: string
@@ -174,12 +243,18 @@ function isExpandedKey(nodePath: string, expandedKeys: Set<string>): boolean {
   return false
 }
 
-function flattenVisibleTree(nodes: TreeNode[], expandedKeys: Set<string>, level = 0, out: FlattenedTreeRow[] = []): FlattenedTreeRow[] {
+function flattenVisibleTree(
+  nodes: TreeNode[],
+  expandedKeys: Set<string>,
+  level = 0,
+  out: FlattenedTreeRow[] = [],
+  expandAll = false,
+): FlattenedTreeRow[] {
   for (const node of nodes) {
-    const opened = node.is_dir && isExpandedKey(node.path, expandedKeys)
+    const opened = node.is_dir && (expandAll || isExpandedKey(node.path, expandedKeys))
     out.push({ node, level, opened })
     if (opened && node.children && node.children.length > 0) {
-      flattenVisibleTree(node.children, expandedKeys, level + 1, out)
+      flattenVisibleTree(node.children, expandedKeys, level + 1, out, expandAll)
     }
   }
   return out
@@ -259,7 +334,7 @@ const FileTreeRow = memo(function FileTreeRow({
       ) : (
         <>
           <span style={{ width: 13 }} />
-          <IconFile size={14} color="var(--astr-muted)" />
+          {renderFileIcon(node.name)}
         </>
       )}
 
@@ -284,9 +359,12 @@ const FileTreeRow = memo(function FileTreeRow({
   )
 })
 
-export function FileTreeViewer({ artifact, isActive = true }: ViewerContext) {
+export function FileTreeViewer({ artifact, session, isActive = true }: ViewerContext) {
+  const isOffice = useIsOfficeExperience(session)
   const paneRef = useRef<HTMLDivElement>(null)
   const viewportRef = useRef<HTMLDivElement>(null)
+  const uploadInputRef = useRef<HTMLInputElement>(null)
+  const uploadTargetDirRef = useRef<string>('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [treeData, setTreeData] = useState<TreeNode[]>([])
@@ -299,11 +377,28 @@ export function FileTreeViewer({ artifact, isActive = true }: ViewerContext) {
   const [contextMenu, setContextMenu] = useState<{ node: TreeNode; x: number; y: number } | null>(null)
   const [scrollTop, setScrollTop] = useState(0)
   const [viewportHeight, setViewportHeight] = useState(0)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [draggingFiles, setDraggingFiles] = useState(false)
+  const [uploading, setUploading] = useState(false)
+
+  // File & folder CRUD modals
+  const [createDocModal, setCreateDocModal] = useState<{ parentDir: string } | null>(null)
+  const [newDocName, setNewDocName] = useState('')
+  const [createDirModal, setCreateDirModal] = useState<{ parentDir: string } | null>(null)
+  const [newDirName, setNewDirName] = useState('')
+  const [renameTarget, setRenameTarget] = useState<TreeNode | null>(null)
+  const [renameValue, setRenameValue] = useState('')
+  const [deleteTarget, setDeleteTarget] = useState<TreeNode | null>(null)
+  const [mutating, setMutating] = useState(false)
 
   const expandedKeys = useMemo(() => new Set([...expandedPaths].map(pathKey)), [expandedPaths])
+  const filteredTree = useMemo(
+    () => (searchQuery.trim() ? filterTreeNodes(treeData, searchQuery) : treeData),
+    [searchQuery, treeData],
+  )
   const visibleRows = useMemo(
-    () => (isActive ? flattenVisibleTree(treeData, expandedKeys) : []),
-    [expandedKeys, isActive, treeData],
+    () => (isActive ? flattenVisibleTree(filteredTree, expandedKeys, 0, [], Boolean(searchQuery.trim())) : []),
+    [expandedKeys, filteredTree, isActive, searchQuery],
   )
 
   useEffect(() => {
@@ -358,7 +453,7 @@ export function FileTreeViewer({ artifact, isActive = true }: ViewerContext) {
       toggleDirectory(node.path)
       return
     }
-    if (hasActiveDatabaseTool() && isSqlFilePath(node.path)) {
+    if (!isOffice && hasActiveDatabaseTool() && isSqlFilePath(node.path)) {
       void openSqlFileInDatabaseTool({
         path: node.path,
         sessionId: artifact.sessionId,
@@ -380,7 +475,7 @@ export function FileTreeViewer({ artifact, isActive = true }: ViewerContext) {
     if (viewer) {
       openArtifact(targetArtifact, viewer.id)
     }
-  }, [artifact.agentId, artifact.connectionId, artifact.sessionId, openArtifact, toggleDirectory])
+  }, [artifact.agentId, artifact.connectionId, artifact.sessionId, isOffice, openArtifact, toggleDirectory])
 
   const fetchTree = useCallback(async () => {
     setLoading(true)
@@ -518,60 +613,371 @@ export function FileTreeViewer({ artifact, isActive = true }: ViewerContext) {
       }
   }
 
+  const resolveDefaultParentDir = useCallback((): string => {
+    const baseRoot = rootPath || artifact.path || ''
+    if (!selectedPath) return baseRoot
+    const node = findNodeByPath(treeData, selectedPath)
+    if (node?.is_dir) return node.path
+    return parentDirectoryOf(selectedPath) || baseRoot
+  }, [artifact.path, rootPath, selectedPath, treeData])
+
+  const uploadFilesToDir = useCallback(async (files: FileList | File[], targetDir?: string) => {
+    const list = Array.from(files)
+    if (!list.length) return
+    const destDir = targetDir || resolveDefaultParentDir()
+    setUploading(true)
+    try {
+      let okCount = 0
+      for (const file of list) {
+        await api.uploadFile({
+          file,
+          parent: destDir || undefined,
+          session_id: artifact.sessionId || undefined,
+          connection_id: artifact.connectionId || null,
+        })
+        okCount += 1
+      }
+      if (destDir) {
+        setExpandedPaths((prev) => {
+          const next = new Set(prev)
+          next.add(destDir)
+          writeExpandedPaths(storageKey, next)
+          return next
+        })
+      }
+      await fetchTree()
+      notifications.show({
+        color: 'teal',
+        message: okCount === 1 ? `已上传文件：${list[0].name}` : `已上传 ${okCount} 个文件`,
+      })
+    } catch (cause) {
+      notifications.show({
+        color: 'red',
+        message: cause instanceof Error ? cause.message : '上传文件失败',
+      })
+    } finally {
+      setUploading(false)
+    }
+  }, [artifact.connectionId, artifact.sessionId, fetchTree, resolveDefaultParentDir, storageKey])
+
+  const handleCreateDocument = async () => {
+    if (!createDocModal) return
+    const raw = newDocName.trim()
+    if (!raw) return
+    if (/[\\/]/.test(raw)) {
+      notifications.show({ color: 'yellow', message: '文档名称不能包含路径分隔符' })
+      return
+    }
+    const finalName = raw.includes('.') ? raw : `${raw}.md`
+    const targetPath = joinChildPath(createDocModal.parentDir, finalName)
+    const titleBase = finalName.replace(/\.[^.]+$/, '')
+    const initialContent = finalName.toLowerCase().endsWith('.md') ? `# ${titleBase}\n\n` : ''
+    setMutating(true)
+    try {
+      await api.writeFile({
+        path: targetPath,
+        content: initialContent,
+        session_id: artifact.sessionId,
+        connection_id: artifact.connectionId || null,
+      })
+      if (createDocModal.parentDir) {
+        setExpandedPaths((prev) => {
+          const next = new Set(prev)
+          next.add(createDocModal.parentDir)
+          writeExpandedPaths(storageKey, next)
+          return next
+        })
+      }
+      setCreateDocModal(null)
+      setNewDocName('')
+      await fetchTree()
+      setSelectedPath(targetPath)
+      const createdArtifact = resolveArtifactFromPath(targetPath, {
+        id: artifact.sessionId,
+        agent_id: artifact.agentId,
+        connection_id: artifact.connectionId,
+        workspace: rootPath || null,
+        title: '',
+        status: 'idle',
+        updated_at: '',
+      })
+      const viewer = artifactViewerRegistry.findViewer(createdArtifact)
+      if (viewer) {
+        openArtifact(createdArtifact, viewer.id)
+      }
+      notifications.show({ color: 'teal', message: `已创建文档：${finalName}` })
+    } catch (cause) {
+      notifications.show({ color: 'red', message: cause instanceof Error ? cause.message : '创建文档失败' })
+    } finally {
+      setMutating(false)
+    }
+  }
+
+  const handleCreateFolder = async () => {
+    if (!createDirModal) return
+    const trimmed = newDirName.trim()
+    if (!trimmed) return
+    setMutating(true)
+    try {
+      await api.createDirectory(createDirModal.parentDir, trimmed, artifact.connectionId || null)
+      if (createDirModal.parentDir) {
+        setExpandedPaths((prev) => {
+          const next = new Set(prev)
+          next.add(createDirModal.parentDir)
+          writeExpandedPaths(storageKey, next)
+          return next
+        })
+      }
+      setCreateDirModal(null)
+      setNewDirName('')
+      await fetchTree()
+      notifications.show({ color: 'teal', message: `已新建文件夹：${trimmed}` })
+    } catch (cause) {
+      notifications.show({ color: 'red', message: cause instanceof Error ? cause.message : '新建文件夹失败' })
+    } finally {
+      setMutating(false)
+    }
+  }
+
+  const handleRenameSubmit = async () => {
+    if (!renameTarget) return
+    const trimmed = renameValue.trim()
+    if (!trimmed || trimmed === renameTarget.name) {
+      setRenameTarget(null)
+      return
+    }
+    setMutating(true)
+    try {
+      const res = await api.renameFile({
+        path: renameTarget.path,
+        name: trimmed,
+        session_id: artifact.sessionId || undefined,
+        connection_id: artifact.connectionId || null,
+      })
+      if (selectedPath && isSamePath(selectedPath, renameTarget.path)) {
+        setSelectedPath(res.path)
+      }
+      setRenameTarget(null)
+      await fetchTree()
+      notifications.show({ color: 'teal', message: `已重命名为：${res.name}` })
+    } catch (cause) {
+      notifications.show({ color: 'red', message: cause instanceof Error ? cause.message : '重命名失败' })
+    } finally {
+      setMutating(false)
+    }
+  }
+
+  const handleDeleteConfirm = async () => {
+    if (!deleteTarget) return
+    setMutating(true)
+    try {
+      await api.deleteFile({
+        path: deleteTarget.path,
+        session_id: artifact.sessionId || undefined,
+        connection_id: artifact.connectionId || null,
+      })
+      if (selectedPath && isSamePath(selectedPath, deleteTarget.path)) {
+        setSelectedPath(null)
+      }
+      const deletedName = deleteTarget.name
+      setDeleteTarget(null)
+      await fetchTree()
+      notifications.show({ color: 'teal', message: `已删除：${deletedName}` })
+    } catch (cause) {
+      notifications.show({ color: 'red', message: cause instanceof Error ? cause.message : '删除失败' })
+    } finally {
+      setMutating(false)
+    }
+  }
+
   return (
     <div
       className="filetree-viewer-pane"
       ref={paneRef}
-      style={{ display: 'flex', flexDirection: 'column', height: '100%' }}
+      style={{ display: 'flex', flexDirection: 'column', height: '100%', position: 'relative' }}
       tabIndex={0}
       onClick={() => {
         setSelectedPath(null)
         setRevealedPath(null)
       }}
       onKeyDown={handlePaneKeyDown}
+      onDragOver={(e) => {
+        if (e.dataTransfer?.types?.includes('Files')) {
+          e.preventDefault()
+          e.stopPropagation()
+          setDraggingFiles(true)
+        }
+      }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+          setDraggingFiles(false)
+        }
+      }}
+      onDrop={(e) => {
+        if (e.dataTransfer?.files?.length) {
+          e.preventDefault()
+          e.stopPropagation()
+          setDraggingFiles(false)
+          void uploadFilesToDir(e.dataTransfer.files)
+        }
+      }}
     >
+      <input
+        ref={uploadInputRef}
+        type="file"
+        multiple
+        style={{ display: 'none' }}
+        onChange={(e) => {
+          const files = e.currentTarget.files
+          if (files && files.length > 0) {
+            const target = uploadTargetDirRef.current || resolveDefaultParentDir()
+            uploadTargetDirRef.current = ''
+            void uploadFilesToDir(files, target)
+          }
+          e.currentTarget.value = ''
+        }}
+      />
+
       <Paper p="xs" withBorder style={{ borderBottom: '1px solid var(--astr-border)', borderRadius: 0 }}>
-        <Group justify="space-between" wrap="nowrap">
-          <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
-            <IconFolderOpen size={16} style={{ color: '#f59e0b' }} />
-            <Text size="xs" fw={600} truncate title={rootPath || artifact.name}>
-              {artifact.name || '工作区文件树'}
-            </Text>
-            <Badge size="xs" variant="light" color="orange">
-              文件浏览器
-            </Badge>
+        <Stack gap={6}>
+          <Group justify="space-between" wrap="nowrap" gap={6}>
+            <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
+              <IconFolderOpen size={16} style={{ color: '#f59e0b', flexShrink: 0 }} />
+              <Text size="xs" fw={600} truncate title={rootPath || artifact.name}>
+                {artifact.name || (isOffice ? '工作区文档' : '工作区文件树')}
+              </Text>
+              <Badge size="xs" variant="light" color={isOffice ? 'gray' : 'orange'} style={{ flexShrink: 0 }}>
+                {isOffice ? '文档文件' : '文件浏览器'}
+              </Badge>
+            </Group>
+            <Group gap={4} wrap="nowrap" style={{ flexShrink: 0 }}>
+              <Tooltip label="新建文档">
+                <ActionIcon
+                  variant="subtle"
+                  size="sm"
+                  aria-label="新建文档"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setNewDocName('')
+                    setCreateDocModal({ parentDir: resolveDefaultParentDir() })
+                  }}
+                >
+                  <IconFilePlus size={14} />
+                </ActionIcon>
+              </Tooltip>
+              <Tooltip label="新建文件夹">
+                <ActionIcon
+                  variant="subtle"
+                  size="sm"
+                  aria-label="新建文件夹"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setNewDirName('')
+                    setCreateDirModal({ parentDir: resolveDefaultParentDir() })
+                  }}
+                >
+                  <IconFolderPlus size={14} />
+                </ActionIcon>
+              </Tooltip>
+              <Tooltip label="上传文件">
+                <ActionIcon
+                  variant="subtle"
+                  size="sm"
+                  aria-label="上传文件"
+                  loading={uploading}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    uploadTargetDirRef.current = resolveDefaultParentDir()
+                    uploadInputRef.current?.click()
+                  }}
+                >
+                  <IconUpload size={14} />
+                </ActionIcon>
+              </Tooltip>
+              {selectedPath && (
+                <Tooltip label="复制文件到剪贴板">
+                  <ActionIcon
+                    variant="light"
+                    color="blue"
+                    size="sm"
+                    aria-label="复制到剪贴板"
+                    loading={copying}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      void handleCopyFiles([selectedPath])
+                    }}
+                  >
+                    <IconCopy size={13} />
+                  </ActionIcon>
+                </Tooltip>
+              )}
+              <Tooltip label="刷新文件列表">
+                <ActionIcon variant="subtle" size="sm" aria-label="刷新文件树" onClick={(e) => { e.stopPropagation(); void fetchTree() }}>
+                  <IconRefresh size={14} />
+                </ActionIcon>
+              </Tooltip>
+            </Group>
           </Group>
-          <Group gap={6} wrap="nowrap">
-            {selectedPath && (
-              <Button
-                size="compact-xs"
-                variant="light"
-                color="blue"
-                leftSection={<IconCopy size={12} />}
-                loading={copying}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  void handleCopyFiles([selectedPath])
-                }}
-              >
-                复制到剪贴板
-              </Button>
-            )}
-            <ActionIcon variant="subtle" size="sm" title="刷新文件树" onClick={(e) => { e.stopPropagation(); void fetchTree() }}>
-              <IconRefresh size={14} />
-            </ActionIcon>
-          </Group>
-        </Group>
+
+          <TextInput
+            size="xs"
+            leftSection={<IconSearch size={13} />}
+            placeholder={isOffice ? '搜索文档名称…' : '筛选文件或目录…'}
+            aria-label="筛选工作区文件"
+            value={searchQuery}
+            onClick={(e) => e.stopPropagation()}
+            onChange={(e) => setSearchQuery(e.currentTarget.value)}
+            rightSection={
+              searchQuery ? (
+                <ActionIcon
+                  size="xs"
+                  variant="subtle"
+                  aria-label="清空筛选"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setSearchQuery('')
+                  }}
+                >
+                  <IconX size={12} />
+                </ActionIcon>
+              ) : null
+            }
+          />
+        </Stack>
       </Paper>
 
       <div style={{ flex: 1, position: 'relative', minHeight: 0 }}>
-        <LoadingOverlay visible={loading || copying} />
+        <LoadingOverlay visible={loading || copying || uploading} />
+        {draggingFiles && (
+          <div
+            style={{
+              position: 'absolute',
+              inset: 8,
+              zIndex: 20,
+              borderRadius: 10,
+              border: '2px dashed var(--astr-blue, #3b82f6)',
+              background: 'rgba(59, 130, 246, 0.08)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              pointerEvents: 'none',
+            }}
+          >
+            <Text size="sm" fw={600} c="blue">松开鼠标上传文件到当前目录</Text>
+          </div>
+        )}
         {error ? (
           <div style={{ padding: 24, textAlign: 'center', color: 'var(--astr-muted)' }}>
             <Text size="sm">{error}</Text>
             <Button size="xs" mt="md" variant="light" onClick={() => void fetchTree()}>
               重试
             </Button>
+          </div>
+        ) : visibleRows.length === 0 ? (
+          <div style={{ padding: 28, textAlign: 'center', color: 'var(--astr-muted)' }}>
+            <Text size="xs">
+              {searchQuery.trim() ? `未找到匹配「${searchQuery.trim()}」的文件` : '当前目录暂无文件，可点击上方新建文档或拖入文件上传'}
+            </Text>
           </div>
         ) : (() => {
           const effectiveHeight = viewportHeight > 0 ? viewportHeight : FILE_TREE_FALLBACK_VIEWPORT_HEIGHT
@@ -638,7 +1044,61 @@ export function FileTreeViewer({ artifact, isActive = true }: ViewerContext) {
 
         {contextMenu && (
           <Menu.Dropdown style={{ minWidth: 210 }}>
-            {!contextMenu.node.is_dir &&
+            {!contextMenu.node.is_dir ? (
+              <Menu.Item
+                leftSection={<IconEye size={14} />}
+                style={{ whiteSpace: 'nowrap' }}
+                onClick={() => {
+                  const node = contextMenu.node
+                  setContextMenu(null)
+                  handleOpenNode(node)
+                }}
+              >
+                打开预览
+              </Menu.Item>
+            ) : (
+              <>
+                <Menu.Item
+                  leftSection={<IconFilePlus size={14} />}
+                  style={{ whiteSpace: 'nowrap' }}
+                  onClick={() => {
+                    const node = contextMenu.node
+                    setContextMenu(null)
+                    setNewDocName('')
+                    setCreateDocModal({ parentDir: node.path })
+                  }}
+                >
+                  在此新建文档
+                </Menu.Item>
+                <Menu.Item
+                  leftSection={<IconFolderPlus size={14} />}
+                  style={{ whiteSpace: 'nowrap' }}
+                  onClick={() => {
+                    const node = contextMenu.node
+                    setContextMenu(null)
+                    setNewDirName('')
+                    setCreateDirModal({ parentDir: node.path })
+                  }}
+                >
+                  在此新建子文件夹
+                </Menu.Item>
+                <Menu.Item
+                  leftSection={<IconUpload size={14} />}
+                  style={{ whiteSpace: 'nowrap' }}
+                  onClick={() => {
+                    const node = contextMenu.node
+                    setContextMenu(null)
+                    uploadTargetDirRef.current = node.path
+                    uploadInputRef.current?.click()
+                  }}
+                >
+                  上传文件到此目录
+                </Menu.Item>
+                <Menu.Divider />
+              </>
+            )}
+            {!isOffice &&
+              !contextMenu.node.is_dir &&
               isSqlFilePath(contextMenu.node.path) &&
               hasActiveDatabaseTool() && (
                 <>
@@ -681,6 +1141,18 @@ export function FileTreeViewer({ artifact, isActive = true }: ViewerContext) {
                   <Menu.Divider />
                 </>
               )}
+            <Menu.Item
+              leftSection={<IconEdit size={14} />}
+              style={{ whiteSpace: 'nowrap' }}
+              onClick={() => {
+                const node = contextMenu.node
+                setContextMenu(null)
+                setRenameTarget(node)
+                setRenameValue(node.name)
+              }}
+            >
+              重命名
+            </Menu.Item>
             <Menu.Item
               leftSection={<IconCopy size={14} />}
               style={{ whiteSpace: 'nowrap' }}
@@ -749,9 +1221,140 @@ export function FileTreeViewer({ artifact, isActive = true }: ViewerContext) {
             >
               复制相对路径
             </Menu.Item>
+            <Menu.Divider />
+            <Menu.Item
+              color="red"
+              leftSection={<IconTrash size={14} />}
+              style={{ whiteSpace: 'nowrap' }}
+              onClick={() => {
+                const node = contextMenu.node
+                setContextMenu(null)
+                setDeleteTarget(node)
+              }}
+            >
+              删除
+            </Menu.Item>
           </Menu.Dropdown>
         )}
       </Menu>
+
+      <Modal
+        opened={createDocModal !== null}
+        onClose={() => setCreateDocModal(null)}
+        title="新建文档"
+        size="sm"
+        withinPortal
+      >
+        <Stack gap="sm" onClick={(e) => e.stopPropagation()}>
+          <TextInput
+            label="文档名称"
+            description="未填扩展名时将自动创建为 Markdown 文档 (.md)"
+            placeholder="例如：Q4 季度汇报方案.md"
+            autoFocus
+            value={newDocName}
+            onChange={(e) => setNewDocName(e.currentTarget.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && newDocName.trim()) {
+                e.preventDefault()
+                void handleCreateDocument()
+              }
+            }}
+          />
+          <Group justify="flex-end" gap="xs">
+            <Button size="xs" variant="subtle" color="gray" onClick={() => setCreateDocModal(null)}>
+              取消
+            </Button>
+            <Button size="xs" loading={mutating} disabled={!newDocName.trim()} onClick={() => void handleCreateDocument()}>
+              创建并打开
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      <Modal
+        opened={createDirModal !== null}
+        onClose={() => setCreateDirModal(null)}
+        title="新建文件夹"
+        size="sm"
+        withinPortal
+      >
+        <Stack gap="sm" onClick={(e) => e.stopPropagation()}>
+          <TextInput
+            label="文件夹名称"
+            placeholder="例如：会议资料"
+            autoFocus
+            value={newDirName}
+            onChange={(e) => setNewDirName(e.currentTarget.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && newDirName.trim()) {
+                e.preventDefault()
+                void handleCreateFolder()
+              }
+            }}
+          />
+          <Group justify="flex-end" gap="xs">
+            <Button size="xs" variant="subtle" color="gray" onClick={() => setCreateDirModal(null)}>
+              取消
+            </Button>
+            <Button size="xs" loading={mutating} disabled={!newDirName.trim()} onClick={() => void handleCreateFolder()}>
+              创建
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      <Modal
+        opened={renameTarget !== null}
+        onClose={() => setRenameTarget(null)}
+        title="重命名"
+        size="sm"
+        withinPortal
+      >
+        <Stack gap="sm" onClick={(e) => e.stopPropagation()}>
+          <TextInput
+            label="新名称"
+            autoFocus
+            value={renameValue}
+            onChange={(e) => setRenameValue(e.currentTarget.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && renameValue.trim()) {
+                e.preventDefault()
+                void handleRenameSubmit()
+              }
+            }}
+          />
+          <Group justify="flex-end" gap="xs">
+            <Button size="xs" variant="subtle" color="gray" onClick={() => setRenameTarget(null)}>
+              取消
+            </Button>
+            <Button size="xs" loading={mutating} disabled={!renameValue.trim()} onClick={() => void handleRenameSubmit()}>
+              确认重命名
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      <Modal
+        opened={deleteTarget !== null}
+        onClose={() => setDeleteTarget(null)}
+        title="确认删除"
+        size="sm"
+        withinPortal
+      >
+        <Stack gap="sm" onClick={(e) => e.stopPropagation()}>
+          <Text size="sm">
+            确定要删除{deleteTarget?.is_dir ? '文件夹及其全部内容' : '文件'} <strong>{deleteTarget?.name}</strong> 吗？此操作无法撤销。
+          </Text>
+          <Group justify="flex-end" gap="xs">
+            <Button size="xs" variant="subtle" color="gray" onClick={() => setDeleteTarget(null)}>
+              取消
+            </Button>
+            <Button size="xs" color="red" loading={mutating} onClick={() => void handleDeleteConfirm()}>
+              确认删除
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
     </div>
   )
 }

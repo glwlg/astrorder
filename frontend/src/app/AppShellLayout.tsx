@@ -18,6 +18,15 @@ import { agySessionEnvironment, AgyQuotaRefreshProvider } from '../features/agen
 import { WORKSPACE_AGENT_ACCOUNTS_PLUGIN_ID } from '../features/plugins/builtinPlugins'
 import { usePluginSettingsStore } from '../features/plugins/pluginSettingsStore'
 import { useIntegrationsStore } from '../features/integrations/integrationStore'
+import { useProjectDbStore } from '../features/dbxExec/projectDbStore'
+import { MeetingFloatingCapsule } from '../features/meetings/MeetingFloatingCapsule'
+import {
+  AI_PROVIDERS_SYNC_KEY,
+  MEETING_SETTINGS_SYNC_KEY,
+  useMeetingSessionStore,
+} from '../features/meetings/meetingSessionStore'
+import { FirstLaunchProfileModal } from '../features/office/FirstLaunchProfileModal'
+import { APP_PROFILE_SYNC_KEY } from '../features/office/appProfile'
 import { PerfProfiler } from '../perf/clientPerf'
 
 const SIDEBAR_WIDTH_KEY = 'astrorder:sidebar_width'
@@ -96,6 +105,8 @@ export function AppShellLayout({ chatReturnPath }: { chatReturnPath: string }) {
   const session = routeCandidates.length === 1 ? routeCandidates[0] : undefined
   const compactNavigation =
     location.pathname.startsWith('/inbox') ||
+    location.pathname.startsWith('/digest') ||
+    location.pathname.startsWith('/meetings') ||
     location.pathname.startsWith('/agent-accounts') ||
     location.pathname.startsWith('/backups') ||
     location.pathname.startsWith('/analytics') ||
@@ -105,12 +116,14 @@ export function AppShellLayout({ chatReturnPath }: { chatReturnPath: string }) {
     let lastHydratedAt = Date.now()
     void usePluginSettingsStore.getState().hydrate()
     void useIntegrationsStore.getState().hydrate()
+    void useProjectDbStore.getState().hydrateBindings()
     const onFocus = () => {
       const now = Date.now()
       if (now - lastHydratedAt < 120_000) return
       lastHydratedAt = now
       void usePluginSettingsStore.getState().hydrate(true)
       void useIntegrationsStore.getState().hydrate(true)
+      void useProjectDbStore.getState().hydrateBindings(true)
     }
     const onStorage = (event: StorageEvent) => {
       if (event.key === 'astrorder:plugin-settings:sync') {
@@ -119,6 +132,10 @@ export function AppShellLayout({ chatReturnPath }: { chatReturnPath: string }) {
       } else if (event.key === 'astrorder:integrations:sync') {
         lastHydratedAt = Date.now()
         void useIntegrationsStore.getState().hydrate(true)
+      } else if (event.key === MEETING_SETTINGS_SYNC_KEY || event.key === AI_PROVIDERS_SYNC_KEY) {
+        void useMeetingSessionStore.getState().refreshSettings()
+      } else if (event.key === APP_PROFILE_SYNC_KEY) {
+        void usePluginSettingsStore.getState().hydrate(true)
       }
     }
     window.addEventListener('focus', onFocus)
@@ -416,6 +433,7 @@ export function AppShellLayout({ chatReturnPath }: { chatReturnPath: string }) {
         <Sidebar sessions={sessions} agents={agents} projects={projects} activeSessionKey={activeSessionKey} chatReturnPath={chatReturnPath} onSelectSession={selectSession} onNavigate={closeMobile} />
       </Drawer>
       <AttentionIsland activeSessionKey={activeSessionKey} />
+      <MeetingFloatingCapsule />
       <CommandPalette
         opened={paletteOpened}
         onClose={() => setPaletteOpened(false)}
@@ -423,6 +441,10 @@ export function AppShellLayout({ chatReturnPath }: { chatReturnPath: string }) {
         onOpenSettings={() => window.dispatchEvent(new CustomEvent('astrorder:open-settings'))}
       />
       <BackgroundTasks />
+      <FirstLaunchProfileModal
+        ready={connection === 'connected' || Object.keys(agents).length > 0}
+        hasExistingData={projects.length > 0 || sessions.length > 0}
+      />
     </AppShell>
   )
 }

@@ -14,10 +14,12 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
+	"astrorder.dev/app-server/internal/aiprovider"
 	"astrorder.dev/app-server/internal/application"
 	"astrorder.dev/app-server/internal/audio"
 	"astrorder.dev/app-server/internal/auth"
@@ -37,6 +39,7 @@ import (
 	"astrorder.dev/app-server/internal/settingsapi"
 	"astrorder.dev/app-server/internal/store"
 	"astrorder.dev/app-server/internal/targetfs"
+	"astrorder.dev/app-server/internal/toolchain"
 	"path/filepath"
 )
 
@@ -240,7 +243,7 @@ func runServer(ctx context.Context, cfg config.Config, ready io.Writer, logger *
 	var audioService *audio.Service
 	var notificationService *notifications.Service
 	var remoteExecutable connections.RemoteExecutableResolver
-	var browserHandler, modelHandler, connectionHandler, settingsHandler, capabilitiesHandler, notificationHandler http.Handler
+	var browserHandler, modelHandler, connectionHandler, settingsHandler, capabilitiesHandler, toolchainHandler, notificationHandler http.Handler
 	if st != nil && client != nil {
 		remoteExecutable = newCachedRemoteExecutableResolver(&connections.NativeRemoteExecutableResolver{}, 30*time.Second)
 		authorizer := auth.New(cfg, &httpapi.StoreOriginLookup{Store: st})
@@ -271,7 +274,16 @@ func runServer(ctx context.Context, cfg config.Config, ready io.Writer, logger *
 				logger.Warn("audio cleanup failed", "error", closeErr)
 			}
 		}()
-		modelHandler, err = modelgateway.NewHandler(modelgateway.Options{Store: st, Client: client, Authorizer: authorizer, Publisher: eventHub, RemoteExecutable: remoteExecutable})
+		modelHandler, err = modelgateway.NewHandler(modelgateway.Options{
+			Store:            st,
+			Client:           client,
+			Authorizer:       authorizer,
+			Publisher:        eventHub,
+			RemoteExecutable: remoteExecutable,
+			OnConfigSaved: func(ctx context.Context, cfg modelgateway.GatewayConfig) {
+				_ = aiprovider.SyncFromModelGateway(ctx, st, cfg)
+			},
+		})
 		if err != nil {
 			return fmt.Errorf("configure model gateway: %w", err)
 		}
@@ -293,13 +305,34 @@ func runServer(ctx context.Context, cfg config.Config, ready io.Writer, logger *
 		settingsHandler = settingsapi.NewHandler(settingsapi.Options{
 			Store: st, Authorizer: authorizer, Port: portNumber, Origins: cfg.AllowedOrigins,
 			PublicURL: os.Getenv("ASTRORDER_PUBLIC_URL"), BrowserSecret: cfg.BrowserSecret,
-			Kernels: kernelcontrol.New(cfg.SourcePath, executable),
+			Kernels:             kernelcontrol.New(cfg.SourcePath, executable),
+			AgentInstalledProbe: toolchain.LocalInstalledProbe(serverContext),
 		})
 		hookResolver := targetfs.NewResolver(targetfs.ResolverOptions{Store: st, HelperAssetsDir: bundledHelperAssetsDir()})
-		capabilityService := capabilities.New(&envtarget.Resolver{Store: st, Remote: hookResolver})
+		envResolver := &envtarget.Resolver{Store: st, Remote: hookResolver}
+		capabilityService := capabilities.New(envResolver)
 		capabilityService.Agents = st
 		capabilityService.CLITransport = capabilities.TransportProvisioner(listenPort, os.Getenv("ASTRORDER_PUBLIC_URL"), cfg.BrowserSecret)
 		capabilitiesHandler = capabilities.NewHandler(capabilityService, authorizer)
+		stateDir := filepath.Dir(cfg.DatabasePath)
+		if daemonCfg := strings.TrimSpace(os.Getenv("ASTRORDER_SESSION_DAEMON_CONFIG")); daemonCfg != "" {
+			stateDir = filepath.Dir(daemonCfg)
+		}
+		toolchainService := toolchain.NewService(toolchain.Options{
+			Resolver:         envResolver,
+			Store:            st,
+			DaemonClient:     client,
+			StateDir:         stateDir,
+			DefaultWorkspace: cfg.DefaultWorkspace,
+		})
+		defer func() {
+			closeContext, cancel := context.WithTimeout(context.Background(), gracefulShutdownTimeout)
+			defer cancel()
+			if err := toolchainService.Close(closeContext); err != nil {
+				log.Printf("close toolchain jobs: %v", err)
+			}
+		}()
+		toolchainHandler = toolchain.NewHandler(toolchainService, authorizer)
 		connHandler, err := connections.NewHandler(connections.Options{Store: st, Client: client, Authorizer: authorizer, Publisher: eventHub, Hooks: connections.NewNativeHookInstaller(hookResolver), RemoteExecutable: remoteExecutable})
 		if err != nil {
 			return fmt.Errorf("configure connections: %w", err)
@@ -335,6 +368,7 @@ func runServer(ctx context.Context, cfg config.Config, ready io.Writer, logger *
 		ModelGateway:     modelHandler,
 		Settings:         settingsHandler,
 		Capabilities:     capabilitiesHandler,
+		Toolchain:        toolchainHandler,
 		Connections:      connectionHandler,
 		Notifications:    notificationHandler,
 		DesktopShutdown:  stopServer,

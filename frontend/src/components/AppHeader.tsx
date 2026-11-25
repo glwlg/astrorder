@@ -7,6 +7,7 @@ import { DecryptedText } from './animations/DecryptedText'
 import { BrandMark } from './BrandMark'
 import { ConnectionBadge } from './Status'
 import { NotificationPermissionControl } from './NotificationPermissionControl'
+import { useIsOfficeProfile } from '../features/office/appProfile'
 
 export function AppHeader({
   connection,
@@ -17,6 +18,7 @@ export function AppHeader({
 }) {
   const { setColorScheme } = useMantineColorScheme()
   const computed = useComputedColorScheme('light', { getInitialValueInEffect: true })
+  const isOfficeProfile = useIsOfficeProfile()
   const toggleTheme = () => setColorScheme(computed === 'dark' ? 'light' : 'dark')
 
   useEffect(() => {
@@ -37,13 +39,17 @@ export function AppHeader({
           <Group gap={8} wrap="nowrap" className="header-brand" align="center">
             <BrandMark className="brand-mark" size={20} />
             <Title order={1} size="h4" style={{ fontSize: '15px', fontWeight: 600, letterSpacing: '-0.01em', margin: 0, whiteSpace: 'nowrap' }}>
-              <DecryptedText text="星序 · Astrorder" speed={30} maxIterations={8} animateOn="hover" />
+              {isOfficeProfile ? (
+                '星序'
+              ) : (
+                <DecryptedText text="星序 · Astrorder" speed={30} maxIterations={8} animateOn="hover" />
+              )}
             </Title>
           </Group>
         </Group>
         <Group gap={4} wrap="nowrap" className="header-actions">
           <NotificationPermissionControl />
-          <ConnectionBadge status={connection} />
+          {!isOfficeProfile && <ConnectionBadge status={connection} />}
           <Tooltip label={computed === 'dark' ? '切换浅色' : '切换深色'}>
             <ActionIcon variant="subtle" onClick={toggleTheme} aria-label="切换主题">
               <AnimatePresence mode="wait" initial={false}>

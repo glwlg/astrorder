@@ -48,6 +48,13 @@ export function HideEmbeddedPage() {
 /**
  * @returns {$CancellablePromise<void>}
  */
+export function HideMeetingCapsule() {
+    return $Call.ByName("main.DesktopService.HideMeetingCapsule");
+}
+
+/**
+ * @returns {$CancellablePromise<void>}
+ */
 export function HideStatistics() {
     return $Call.ByName("main.DesktopService.HideStatistics");
 }
@@ -182,6 +189,14 @@ export function ShowEmbeddedPage(address, bounds, refresh) {
 }
 
 /**
+ * @param {$models.MeetingCapsuleState} state
+ * @returns {$CancellablePromise<void>}
+ */
+export function ShowMeetingCapsule(state) {
+    return $Call.ByName("main.DesktopService.ShowMeetingCapsule", state);
+}
+
+/**
  * @param {string} address
  * @param {$models.StatisticsBounds} bounds
  * @param {boolean} refresh
@@ -196,4 +211,12 @@ export function ShowStatistics(address, bounds, refresh) {
  */
 export function Status() {
     return $Call.ByName("main.DesktopService.Status");
+}
+
+/**
+ * @param {$models.MeetingCapsuleState} state
+ * @returns {$CancellablePromise<void>}
+ */
+export function UpdateMeetingCapsule(state) {
+    return $Call.ByName("main.DesktopService.UpdateMeetingCapsule", state);
 }

@@ -58,6 +58,7 @@ type ShellService struct {
 	smokeReport    string
 	quit           func()
 	preview        *PreviewService
+	meetingCapsule *MeetingCapsuleService
 	statistics     *StatisticsView
 	opMu           sync.Mutex
 	isPackaged     bool

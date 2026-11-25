@@ -144,6 +144,9 @@ func (h *Handler) handleUpdateAnalyticsConfig(w http.ResponseWriter, r *http.Req
 		return
 	}
 	h.invalidateAnalyticsCache()
+	if h.onConfigSaved != nil {
+		h.onConfigSaved(r.Context(), updated)
+	}
 	writeJSON(w, http.StatusOK, updated.ToPublic())
 }
 

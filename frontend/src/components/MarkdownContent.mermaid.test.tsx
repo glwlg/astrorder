@@ -40,7 +40,7 @@ describe('MarkdownContent Mermaid diagrams', () => {
     expect(screen.queryByText('flowchart TB')).not.toBeInTheDocument()
   })
 
-  it('opens Mermaid diagrams and multi-line code blocks directly in the Sidecar canvas', async () => {
+  it('opens Mermaid diagrams in the Sidecar canvas without adding canvas buttons to plain code blocks', async () => {
     useSidecarStore.setState({ tabs: [], activeTabId: '', isOpen: false })
     const code = '```ts\nconst a = 1\nconst b = 2\nconst c = 3\nconst d = 4\nconst e = 5\nconst f = 6\n```'
     const { container } = render(
@@ -51,11 +51,10 @@ describe('MarkdownContent Mermaid diagrams', () => {
 
     await waitFor(() => expect(screen.getByLabelText('rendered-flowchart')).toBeInTheDocument())
     fireEvent.click(container.querySelector('.markdown-mermaid-canvas-btn') as HTMLButtonElement)
-    fireEvent.click(screen.getByRole('button', { name: '在侧边画布查看代码' }))
+    expect(screen.queryByRole('button', { name: '在侧边画布查看代码' })).not.toBeInTheDocument()
 
     const state = useSidecarStore.getState()
     expect(state.isOpen).toBe(true)
     expect(state.tabs.some(t => t.type === 'artifact' && t.viewerId === 'mermaid-viewer' && t.artifact?.metadata?.inlineContent === 'graph LR\nA --> B')).toBe(true)
-    expect(state.tabs.some(t => t.type === 'artifact' && t.viewerId === 'monaco-viewer' && String(t.artifact?.metadata?.inlineContent || '').includes('const f = 6'))).toBe(true)
   })
 })

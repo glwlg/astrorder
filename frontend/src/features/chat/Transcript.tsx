@@ -4,7 +4,7 @@ import { ArtifactReviewCard } from '../../components/ArtifactReviewCard'
 import { collectTurnArtifactReviews, type ArtifactReviewItem } from '../../domain/artifactReview'
 import { IconArrowDown, IconPaperclip, IconRefresh, IconTool, IconVectorTriangle } from '@tabler/icons-react'
 import { ActionIcon, Anchor, Button, Group, Paper, Stack, Text, Tooltip } from '@mantine/core'
-import { IconCheck, IconChecks, IconCopy, IconEdit, IconGitFork, IconHistory, IconShieldCheck, IconX } from '@tabler/icons-react'
+import { IconCheck, IconChecks, IconCopy, IconEdit, IconGitFork, IconHistory, IconPencil, IconShieldCheck, IconX } from '@tabler/icons-react'
 import type { SessionCheckpoint } from '../../api/client'
 import { mapCheckpointsToMessages } from '../../domain/turnCheckpoints'
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
@@ -36,6 +36,16 @@ import { useReducedMotion } from '@mantine/hooks'
 import { motion } from 'motion/react'
 import { WorkbenchMark } from '../../components/WorkbenchMark'
 import { agentKindLabel } from '../../components/AgentBrandIcon'
+import { ExportMenu } from '../office/export/ExportMenu'
+import { useIsOfficeExperience } from '../office/appProfile'
+
+const OFFICE_EMPTY_PROMPTS = [
+  '帮我起草一份本周工作周报',
+  '帮我润色一段发给客户的方案说明',
+  '把讨论要点整理成带负责人的行动清单',
+  '为下周评审会生成 8 页 PPT 演示大纲',
+  '帮我将以下资料整理为结构化对比表',
+]
 
 const zhDateFormatter = new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
 const zhTimeFormatter = new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit' })
@@ -191,6 +201,7 @@ const MessageItem = memo(function MessageItem({
   authorLabel = 'Agent',
   checkpoint,
   onOpenCheckpoint,
+  isOfficeMode = false,
 }: {
   message: Message
   onImageClick?: (url: string) => void
@@ -208,10 +219,11 @@ const MessageItem = memo(function MessageItem({
   authorLabel?: string
   checkpoint?: SessionCheckpoint
   onOpenCheckpoint?: (cp: SessionCheckpoint) => void
+  isOfficeMode?: boolean
 }) {
   const isUser = message.role === 'user'
   const isActivity = isMessageActivity(message)
-  const isReviewMode = isUser && (
+  const isReviewMode = !isOfficeMode && isUser && (
     message.text.includes('检查我未提交的更改') ||
     message.text.includes('审查我的更改') ||
     message.text.startsWith('/review')
@@ -303,6 +315,59 @@ const MessageItem = memo(function MessageItem({
             {copied ? <IconCheck size={13} color="var(--astr-teal, #12b886)" /> : <IconCopy size={13} />}
           </ActionIcon>
         </Tooltip>}
+        {!isUser && message.text && message.text.trim().length >= 32 && (
+          <Tooltip label="在富文档写作台中继续编辑并导出 Word / PPT" position="top" withArrow>
+            <ActionIcon
+              variant="subtle"
+              size="xs"
+              color="gray"
+              aria-label="在写作台编辑"
+              className="message-action-btn"
+              onClick={() => {
+                const firstHeading = message.text
+                  .split('\n')
+                  .map((l) => l.trim())
+                  .find((l) => l.startsWith('#'))
+                  ?.replace(/^#+\s*/, '')
+                  .trim()
+                const baseTitle = firstHeading || session?.title || 'AI 成品文档'
+                const safeName = `${baseTitle.replace(/[<>:"/\\|?*]+/g, '_').slice(0, 40) || 'AI_成品文档'}.md`
+                useSidecarStore.getState().openArtifact(
+                  {
+                    id: `canvas:${message.id}`,
+                    sessionId: session?.id || message.session_id,
+                    agentId: session?.agent_id || message.agent_id,
+                    connectionId: session?.connection_id || undefined,
+                    name: safeName,
+                    kind: 'workspace_file',
+                    readUrl: '',
+                    mediaType: 'text/markdown',
+                    writable: false,
+                    metadata: {
+                      inlineContent: message.text,
+                      inlineEditable: true,
+                      preferRich: true,
+                    },
+                  },
+                  'monaco-viewer',
+                )
+              }}
+            >
+              <IconPencil size={13} />
+            </ActionIcon>
+          </Tooltip>
+        )}
+        {message.text && (
+          <ExportMenu
+            markdown={message.text}
+            title={session?.title || ''}
+            fileName={session?.title || 'document'}
+            variant="icon"
+            workspace={session?.workspace || undefined}
+            sessionId={session?.id}
+            connectionId={session?.connection_id}
+          />
+        )}
         {!isUser && onFork && <Tooltip label={forkActionLabel} position="top" withArrow>
           <ActionIcon variant="subtle" size="xs" color="indigo" onClick={onFork} aria-label="分叉会话" className="message-action-btn message-fork-btn"><IconGitFork size={13} /></ActionIcon>
         </Tooltip>}
@@ -351,7 +416,7 @@ const MessageItem = memo(function MessageItem({
             connectionId={session?.connection_id || undefined}
           />
         )}
-        {message.tool && (
+        {!isOfficeMode && message.tool && (
           <pre className="tool-payload">{JSON.stringify(message.tool, null, 2)}</pre>
         )}
         <AttachmentList attachments={message.attachments} onImageClick={onImageClick} onGalleryClick={onGalleryClick} session={session} />
@@ -508,7 +573,8 @@ export const Transcript = memo(function Transcript({
   const _reducedMotion = useReducedMotion(undefined, { getInitialValueInEffect: false })
   void _reducedMotion
   const agentKind = useAstrorderStore(state => session ? state.agents[session.agent_id]?.kind : undefined)
-  const authorLabel = agentKindLabel(agentKind)
+  const isOfficeMode = useIsOfficeExperience(session)
+  const authorLabel = isOfficeMode ? 'AI 助手' : agentKindLabel(agentKind)
   const liveActivityAt = useAstrorderStore((state) => (
     session ? state.liveActivityAt[scopeKey(session.agent_id, session.id)] : undefined
   ))
@@ -806,8 +872,6 @@ export const Transcript = memo(function Transcript({
         <button
           type="button"
           className="return-bottom"
-            data-liquid-surface="control"
-            data-liquid-snapshot=".chat-workbench"
           aria-label="回到底部"
           onClick={scrollToBottom}
           data-testid="return-bottom"
@@ -878,16 +942,44 @@ export const Transcript = memo(function Transcript({
           {notice || (error && <InlineNotice className="transcript-error" title="暂时无法读取会话" alert actions={onRetry && <Button size="compact-xs" variant="default" onClick={onRetry} leftSection={<IconRefresh size={14} />}>重试</Button>}>{error}</InlineNotice>)}
           {!loading && !error && messages.length === 0 && outbox.length === 0 && (
             <Stack className="transcript-empty" align="center" gap="xs">
-              <IconTool size={25} stroke={1.4} aria-hidden="true" />
-              {session?.handoff_context?.trim() ? (
+              {isOfficeMode && !session?.handoff_context?.trim() ? (
                 <>
-                  <Text c="dimmed" size="sm">会话已转交就绪</Text>
-                  <Text c="dimmed" size="xs">可展开上方「交接摘要」查看背景；发送首条消息时会自动附带给当前 Agent。</Text>
+                  <Text fw={600} size="sm">开始新的办公对话</Text>
+                  <Text c="dimmed" size="xs">选择一个常见场景，或直接在下方输入你的工作需求</Text>
+                  <Group justify="center" gap={6} mt={6} maw={560}>
+                    {OFFICE_EMPTY_PROMPTS.map((starter) => (
+                      <Button
+                        key={starter}
+                        size="compact-xs"
+                        variant="default"
+                        radius="xl"
+                        onClick={() => {
+                          window.dispatchEvent(
+                            new CustomEvent('astrorder:quote-to-composer', {
+                              detail: { agentId: session?.agent_id, sessionId: session?.id, text: starter },
+                            }),
+                          )
+                        }}
+                      >
+                        {starter}
+                      </Button>
+                    ))}
+                  </Group>
                 </>
               ) : (
                 <>
-                  <Text c="dimmed" size="sm">这个会话还没有可显示的记录。</Text>
-                  <Text c="dimmed" size="xs">发送后，只有服务端确认的消息会进入正式记录。</Text>
+                  <IconTool size={25} stroke={1.4} aria-hidden="true" />
+                  {session?.handoff_context?.trim() ? (
+                    <>
+                      <Text c="dimmed" size="sm">会话已转交就绪</Text>
+                      <Text c="dimmed" size="xs">可展开上方「交接摘要」查看背景；发送首条消息时会自动附带给当前 Agent。</Text>
+                    </>
+                  ) : (
+                    <>
+                      <Text c="dimmed" size="sm">这个会话还没有可显示的记录。</Text>
+                      <Text c="dimmed" size="xs">发送后，只有服务端确认的消息会进入正式记录。</Text>
+                    </>
+                  )}
                 </>
               )}
             </Stack>
@@ -958,6 +1050,7 @@ export const Transcript = memo(function Transcript({
                   asyncInput={isAsyncQuestion(message) ? { commands, continued: row.continuedNativeInput, readOnly: session?.control_state === 'readonly' } : undefined}
                   checkpoint={checkpointByMsgId.get(message.id)}
                   onOpenCheckpoint={onOpenCheckpoint}
+                  isOfficeMode={isOfficeMode}
                 />
               </div>
             )

@@ -5,10 +5,10 @@ import { AgentGraphViewer } from './AgentGraphViewer'
 
 export const agentGraphViewer: ArtifactViewer = {
   id: 'agent-graph-viewer',
-  title: 'Agent 决策状态机',
-  description: '全景呈现 Agent 思考链 (CoT)、任务规划堆栈与工具调用 DAG 决策拓扑',
-  version: '1.0.0',
-  badgeLabel: '[决策图]',
+  title: '决策与轨迹',
+  description: '按轮次聚合 Agent 阶段决策、文件影响热图、命令验证与报错自愈追踪',
+  version: '2.0.0',
+  badgeLabel: '[轨迹]',
   tabColor: '#a855f7',
   icon: IconBrain,
   extensions: ['.agentgraph'],

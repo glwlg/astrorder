@@ -1,11 +1,15 @@
-import { Component, Suspense, lazy, useEffect, useState, type ReactNode } from 'react'
-import { Button, Center, Group, Loader, Paper, Stack, Tabs, Text } from '@mantine/core'
-import { IconArrowBackUp, IconPalette, IconPlugConnected } from '@tabler/icons-react'
+import { Component, Suspense, lazy, useCallback, useEffect, useState, type ReactNode } from 'react'
+import { Button, Center, Group, Loader, Paper, SegmentedControl, Stack, Tabs, Text } from '@mantine/core'
+import {
+  IconAdjustmentsHorizontal,
+  IconArrowLeft,
+  IconChevronRight,
+  IconPlugConnected,
+} from '@tabler/icons-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import {
   ChartLineUpIcon,
   CpuIcon,
-  DesktopIcon,
   GlobeHemisphereWestIcon,
   KeyboardIcon,
   LightningIcon,
@@ -20,92 +24,211 @@ import {
 } from '../plugins/builtinPlugins'
 import { usePluginSettingsStore } from '../plugins/pluginSettingsStore'
 import { useIntegrationsStore } from '../integrations/integrationStore'
+import {
+  SettingsModeContext,
+  isAdvancedSettingsTab,
+  readStoredSettingsMode,
+  writeStoredSettingsMode,
+  type SettingsMode,
+} from './settingsMode'
 
+const GeneralSettingsPage = lazy(() => import('./GeneralSettingsPage').then((m) => ({ default: m.GeneralSettingsPage })))
 const AgentsPage = lazy(() => import('../agents/AgentsPage').then((m) => ({ default: m.AgentsPage })))
 const ModelGatewaySettingsPage = lazy(() => import('../services/ModelGatewaySettingsPage').then((m) => ({ default: m.ModelGatewaySettingsPage })))
 const CapabilitiesSettingsCard = lazy(() => import('../services/CapabilitiesSettingsCard').then((m) => ({ default: m.CapabilitiesSettingsCard })))
 const RtkSettingsPage = lazy(() => import('../rtk/RtkSettingsPage').then((m) => ({ default: m.RtkSettingsPage })))
 const NetworkSettingsPage = lazy(() => import('../network/NetworkSettingsPage').then((m) => ({ default: m.NetworkSettingsPage })))
 const ShortcutSettingsPage = lazy(() => import('../shortcuts/ShortcutSettingsPage').then((m) => ({ default: m.ShortcutSettingsPage })))
-const DesktopSettingsPage = lazy(() => import('../services/DesktopSettingsPage').then((m) => ({ default: m.DesktopSettingsPage })))
-const AppearanceSettingsPage = lazy(() => import('../appearance/AppearanceSettingsPage').then((m) => ({ default: m.AppearanceSettingsPage })))
 const IntegrationsSettingsPage = lazy(() => import('../integrations/IntegrationsSettingsPage').then((m) => ({ default: m.IntegrationsSettingsPage })))
 const PluginsPage = lazy(() => import('../plugins/PluginsPage').then((m) => ({ default: m.PluginsPage })))
 
+const TAB_ALIASES: Record<string, string> = {
+  appearance: 'general',
+  desktop: 'general',
+  services: 'models',
+}
+
 const VALID_SETTINGS_TABS = new Set([
-  'connections',
+  'general',
   'models',
+  'integrations',
+  'shortcuts',
+  'plugins',
+  'connections',
   'skills',
   'rtk',
   'network',
-  'shortcuts',
-  'appearance',
-  'desktop',
-  'integrations',
-  'plugins',
 ])
 
 export function normalizeSettingsTab(tab?: string | null): string {
   const clean = (tab || '').trim()
-  return VALID_SETTINGS_TABS.has(clean) ? clean : 'connections'
+  const mapped = TAB_ALIASES[clean] || clean
+  return VALID_SETTINGS_TABS.has(mapped) ? mapped : 'general'
 }
 
 export function SettingsWorkbench({
   tab,
   onTabChange,
+  onBackToMain,
 }: {
   tab: string
   onTabChange: (tab: string) => void
+  onBackToMain?: () => void
 }) {
+  const normalizedTab = normalizeSettingsTab(tab)
   const integrationsPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(SIDEBAR_INTEGRATIONS_PLUGIN_ID))
   const commandCompressionEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(COMMAND_COMPRESSION_PLUGIN_ID))
 
+  const [mode, setModeState] = useState<SettingsMode>(() =>
+    isAdvancedSettingsTab(normalizedTab) ? 'advanced' : readStoredSettingsMode(),
+  )
+
+  const setMode = useCallback(
+    (next: SettingsMode) => {
+      setModeState(next)
+      writeStoredSettingsMode(next)
+      if (next === 'basic' && isAdvancedSettingsTab(normalizedTab)) {
+        onTabChange('general')
+      }
+    },
+    [normalizedTab, onTabChange],
+  )
+
+  // Deep-linking to any advanced tab automatically opens Advanced mode so the user never lands on a hidden panel.
   useEffect(() => {
-    if (!integrationsPluginEnabled && tab === 'integrations') {
+    if (isAdvancedSettingsTab(normalizedTab) && mode !== 'advanced') {
+      setModeState('advanced')
+      writeStoredSettingsMode('advanced')
+    }
+  }, [normalizedTab, mode])
+
+  useEffect(() => {
+    if (!integrationsPluginEnabled && normalizedTab === 'integrations') {
       onTabChange('plugins')
     }
-    if (!commandCompressionEnabled && tab === 'rtk') {
+    if (!commandCompressionEnabled && normalizedTab === 'rtk') {
       onTabChange('plugins')
     }
-  }, [commandCompressionEnabled, integrationsPluginEnabled, onTabChange, tab])
+  }, [commandCompressionEnabled, integrationsPluginEnabled, onTabChange, normalizedTab])
+
+  const showAdvanced = mode === 'advanced'
+  const advancedTabCount = commandCompressionEnabled ? 4 : 3
 
   return (
-    <Suspense fallback={<Center style={{ flex: 1 }}><Loader size="sm" color="violet" /></Center>}>
-      <Tabs value={tab} onChange={(value) => value && onTabChange(value)} orientation="vertical" keepMounted={true} className="settings-tabs">
-        <Tabs.List>
-          <Tabs.Tab value="connections" leftSection={<SlidersHorizontalIcon size={16} />}>连接</Tabs.Tab>
-          <Tabs.Tab value="models" leftSection={<CpuIcon size={16} />}>模型与网关</Tabs.Tab>
-          <Tabs.Tab value="skills" leftSection={<LightningIcon size={16} />}>能力中心</Tabs.Tab>
-          {commandCompressionEnabled && (
-            <Tabs.Tab value="rtk" leftSection={<ChartLineUpIcon size={16} />}>命令压缩</Tabs.Tab>
-          )}
-          <Tabs.Tab value="network" leftSection={<GlobeHemisphereWestIcon size={16} />}>网络与移动端</Tabs.Tab>
-          <Tabs.Tab value="shortcuts" leftSection={<KeyboardIcon size={16} />}>快捷键</Tabs.Tab>
-          <Tabs.Tab value="appearance" leftSection={<IconPalette size={16} />}>外观</Tabs.Tab>
-          <Tabs.Tab value="desktop" leftSection={<DesktopIcon size={16} />}>桌面客户端</Tabs.Tab>
+    <SettingsModeContext.Provider value={{ mode, setMode, managedByWorkbench: true }}>
+      <Suspense fallback={<Center style={{ flex: 1 }}><Loader size="sm" color="dark" /></Center>}>
+        <Tabs
+          value={normalizedTab}
+          onChange={(value) => value && onTabChange(value)}
+          orientation="vertical"
+          keepMounted={true}
+          className="settings-tabs"
+        >
+          <Tabs.List className="settings-nav-list">
+            {onBackToMain && (
+              <button type="button" className="settings-back-btn" onClick={onBackToMain}>
+                <IconArrowLeft size={14} aria-hidden="true" />
+                <span>返回主窗口</span>
+              </button>
+            )}
+
+            <div className="settings-mode-switcher">
+              <SegmentedControl
+                fullWidth
+                size="xs"
+                aria-label="设置模式"
+                value={mode}
+                onChange={(val) => setMode(val === 'advanced' ? 'advanced' : 'basic')}
+                data={[
+                  { value: 'basic', label: '一般配置' },
+                  { value: 'advanced', label: '高级配置' },
+                ]}
+              />
+            </div>
+
+            <Tabs.Tab value="general" leftSection={<IconAdjustmentsHorizontal size={16} stroke={1.7} />}>
+              常规与外观
+            </Tabs.Tab>
+            <Tabs.Tab value="models" leftSection={<CpuIcon size={16} />}>
+              AI 供应商
+            </Tabs.Tab>
+            {integrationsPluginEnabled && (
+              <Tabs.Tab value="integrations" leftSection={<IconPlugConnected size={16} stroke={1.7} />}>
+                常用集成
+              </Tabs.Tab>
+            )}
+            <Tabs.Tab value="shortcuts" leftSection={<KeyboardIcon size={16} />}>
+              快捷键
+            </Tabs.Tab>
+            <Tabs.Tab value="plugins" leftSection={<PuzzlePieceIcon size={16} />}>
+              功能与插件
+            </Tabs.Tab>
+
+            {showAdvanced ? (
+              <>
+                <div className="settings-nav-group-divider" aria-hidden="true" />
+                <div className="settings-nav-group-label">高级与开发配置</div>
+                <Tabs.Tab value="connections" leftSection={<SlidersHorizontalIcon size={16} />}>
+                  环境与 Agent 连接
+                </Tabs.Tab>
+                <Tabs.Tab value="skills" leftSection={<LightningIcon size={16} />}>
+                  能力中心
+                </Tabs.Tab>
+                {commandCompressionEnabled && (
+                  <Tabs.Tab value="rtk" leftSection={<ChartLineUpIcon size={16} />}>
+                    命令输出压缩
+                  </Tabs.Tab>
+                )}
+                <Tabs.Tab value="network" leftSection={<GlobeHemisphereWestIcon size={16} />}>
+                  网络与远程访问
+                </Tabs.Tab>
+              </>
+            ) : (
+              <button
+                type="button"
+                className="settings-expand-advanced-btn"
+                onClick={() => setMode('advanced')}
+              >
+                <span>展开高级与开发配置 ({advancedTabCount})</span>
+                <IconChevronRight size={14} aria-hidden="true" />
+              </button>
+            )}
+          </Tabs.List>
+
+          <Tabs.Panel value="general" className="settings-tab-panel" keepMounted={false}>
+            <GeneralSettingsPage />
+          </Tabs.Panel>
+          <Tabs.Panel value="models" className="settings-tab-panel">
+            <ModelGatewaySettingsPage />
+          </Tabs.Panel>
           {integrationsPluginEnabled && (
-            <Tabs.Tab value="integrations" leftSection={<IconPlugConnected size={16} />}>集成</Tabs.Tab>
+            <Tabs.Panel value="integrations" className="settings-tab-panel" keepMounted={false}>
+              <IntegrationsSettingsPage />
+            </Tabs.Panel>
           )}
-          <Tabs.Tab value="plugins" leftSection={<PuzzlePieceIcon size={16} />}>插件</Tabs.Tab>
-        </Tabs.List>
-        <Tabs.Panel value="connections" className="settings-tab-panel"><AgentsPage /></Tabs.Panel>
-        <Tabs.Panel value="models" className="settings-tab-panel"><ModelGatewaySettingsPage /></Tabs.Panel>
-        <Tabs.Panel value="skills" className="settings-tab-panel" data-tab-panel-skills="true" style={{ overflow: 'hidden' }}>
-          <CapabilitiesSettingsCard />
-        </Tabs.Panel>
-        {commandCompressionEnabled && (
-          <Tabs.Panel value="rtk" className="settings-tab-panel" keepMounted={false}><RtkSettingsPage /></Tabs.Panel>
-        )}
-        <Tabs.Panel value="network" className="settings-tab-panel"><NetworkSettingsPage /></Tabs.Panel>
-        <Tabs.Panel value="shortcuts" className="settings-tab-panel" keepMounted={false}><ShortcutSettingsPage /></Tabs.Panel>
-        <Tabs.Panel value="appearance" className="settings-tab-panel" keepMounted={false}><AppearanceSettingsPage /></Tabs.Panel>
-        <Tabs.Panel value="desktop" className="settings-tab-panel"><DesktopSettingsPage /></Tabs.Panel>
-        {integrationsPluginEnabled && (
-          <Tabs.Panel value="integrations" className="settings-tab-panel" keepMounted={false}><IntegrationsSettingsPage /></Tabs.Panel>
-        )}
-        <Tabs.Panel value="plugins" className="settings-tab-panel"><PluginsPage /></Tabs.Panel>
-      </Tabs>
-    </Suspense>
+          <Tabs.Panel value="shortcuts" className="settings-tab-panel" keepMounted={false}>
+            <ShortcutSettingsPage />
+          </Tabs.Panel>
+          <Tabs.Panel value="plugins" className="settings-tab-panel">
+            <PluginsPage />
+          </Tabs.Panel>
+          <Tabs.Panel value="connections" className="settings-tab-panel">
+            <AgentsPage />
+          </Tabs.Panel>
+          <Tabs.Panel value="skills" className="settings-tab-panel" data-tab-panel-skills="true" style={{ overflow: 'hidden' }}>
+            <CapabilitiesSettingsCard />
+          </Tabs.Panel>
+          {commandCompressionEnabled && (
+            <Tabs.Panel value="rtk" className="settings-tab-panel" keepMounted={false}>
+              <RtkSettingsPage />
+            </Tabs.Panel>
+          )}
+          <Tabs.Panel value="network" className="settings-tab-panel">
+            <NetworkSettingsPage />
+          </Tabs.Panel>
+        </Tabs>
+      </Suspense>
+    </SettingsModeContext.Provider>
   )
 }
 
@@ -209,23 +332,9 @@ export function StandaloneSettingsPage() {
     <SettingsDrawerScope>
       {() => (
         <div className="settings-modal settings-standalone-window" role="main" aria-label="星序设置窗口">
-          <header className="settings-standalone-header">
-            <Group gap="sm">
-              <Text fw={700} size="sm">星序设置</Text>
-              <Text size="xs" c="dimmed">独立窗口 · 可随时切回主会话窗口继续处理事务</Text>
-            </Group>
-            <Button
-              size="compact-xs"
-              variant="default"
-              leftSection={<IconArrowBackUp size={13} />}
-              onClick={handleReturnToChat}
-            >
-              回到会话窗口
-            </Button>
-          </header>
           <div className="settings-standalone-body">
             <SettingsErrorBoundary resetKey={tab}>
-              <SettingsWorkbench tab={tab} onTabChange={setTab} />
+              <SettingsWorkbench tab={tab} onTabChange={setTab} onBackToMain={handleReturnToChat} />
             </SettingsErrorBoundary>
           </div>
         </div>

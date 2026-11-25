@@ -1,13 +1,29 @@
 import { Alert, Button, Card, Group, Kbd, Stack, Text, TextInput, Title } from '@mantine/core'
-import { IconKeyboard } from '@tabler/icons-react'
+import { IconChevronRight, IconInfoCircle, IconKeyboard } from '@tabler/icons-react'
 import { useState } from 'react'
 import { shortcutActions, shortcutFromEvent, useShortcutStore, type ShortcutAction } from './shortcuts'
+import { useSettingsMode } from '../settings/settingsMode'
+
+const ADVANCED_ONLY_SHORTCUT_IDS = new Set<ShortcutAction>([
+  'monitor',
+  'fileTree',
+  'terminal',
+  'blackboard',
+  'memory',
+  'agentGraph',
+])
 
 export function ShortcutSettingsPage() {
   const bindings = useShortcutStore(state => state.bindings)
+  const { mode, setMode, managedByWorkbench } = useSettingsMode()
+  const isBasicMode = managedByWorkbench && mode === 'basic'
   const [editing, setEditing] = useState<ShortcutAction | null>(null)
   const [candidate, setCandidate] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const visibleActions = isBasicMode
+    ? shortcutActions.filter((action) => !ADVANCED_ONLY_SHORTCUT_IDS.has(action.id))
+    : shortcutActions
+  const hiddenCount = shortcutActions.length - visibleActions.length
   const update = (id: ShortcutAction, value: string | null) => {
     const message = useShortcutStore.getState().update(id, value)
     setError(message)
@@ -30,11 +46,26 @@ export function ShortcutSettingsPage() {
         }}>恢复默认快捷键</Button>
       </Group>
       <Text size="sm" c="dimmed">点击修改后直接按下组合键，按 Esc 取消。当前会话操作需要先打开会话；编辑器内的复制、粘贴、保存等快捷键保持原有用法。</Text>
+      {isBasicMode && hiddenCount > 0 && (
+        <div className="st-inline-notice">
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <IconInfoCircle size={14} aria-hidden="true" />
+            <span>已隐藏 {hiddenCount} 项面向开发工具的快捷键</span>
+          </span>
+          <button type="button" className="st-text-link" onClick={() => setMode('advanced')}>
+            <span>在高级配置中查看全部</span>
+            <IconChevronRight size={14} aria-hidden="true" />
+          </button>
+        </div>
+      )}
       {error && <Alert color="red" role="alert">{error}</Alert>}
-      {['通用', '导航', '当前会话'].map(group => (
-        <Stack key={group} gap="sm">
-          <Text size="sm" fw={600}>{group}</Text>
-          {shortcutActions.filter(action => action.group === group).map(action => (
+      {['通用', '导航', '当前会话'].map(group => {
+        const groupActions = visibleActions.filter(action => action.group === group)
+        if (groupActions.length === 0) return null
+        return (
+          <Stack key={group} gap="sm">
+            <Text size="sm" fw={600}>{group}</Text>
+            {groupActions.map(action => (
             <Card withBorder radius="md" p="md" key={action.id}>
               <Group justify="space-between" wrap="wrap" gap="md">
                 <div>
@@ -71,9 +102,10 @@ export function ShortcutSettingsPage() {
                 )}
               </Group>
             </Card>
-          ))}
-        </Stack>
-      ))}
+            ))}
+          </Stack>
+        )
+      })}
     </Stack>
   )
 }

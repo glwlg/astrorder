@@ -71,6 +71,7 @@
   min-height: 36px;
   padding: 4px 8px 4px 12px;
   border-radius: 999px;
+  background: var(--astr-surface);
   border: 1px solid color-mix(in oklab, var(--astr-indigo) 24%, var(--astr-border));
   box-shadow:
     0 10px 28px -8px color-mix(in oklab, var(--astr-indigo) 22%, rgb(16 14 28 / 26%)),
@@ -302,6 +303,7 @@
   overflow-y: auto;
   padding: 12px 14px;
   border-radius: 16px;
+  background: var(--astr-surface);
   border: 1px solid color-mix(in oklab, var(--astr-indigo) 22%, var(--astr-border));
   box-shadow:
     0 20px 44px -12px rgb(16 14 28 / 32%),

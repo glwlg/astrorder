@@ -208,7 +208,7 @@ export function ArtifactReviewCard({
         ? '本轮执行中…'
         : readOnly
           ? '只读会话'
-          : 'Proceed'
+          : '确认执行'
 
   return (
     <section

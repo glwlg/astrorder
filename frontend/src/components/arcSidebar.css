@@ -1,3 +1,31 @@
+.sidebar-primary-nav .sidebar-nav-link {
+  position: relative;
+}
+
+.sidebar-primary-nav .sidebar-nav-link[data-dragging='true'] {
+  opacity: 0.42;
+}
+
+.sidebar-primary-nav .sidebar-nav-link[data-drop-pos='before']::before,
+.sidebar-primary-nav .sidebar-nav-link[data-drop-pos='after']::after {
+  content: '';
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  height: 2.5px;
+  border-radius: 999px;
+  background: var(--astr-indigo);
+  pointer-events: none;
+}
+
+.sidebar-primary-nav .sidebar-nav-link[data-drop-pos='before']::before {
+  top: -5px;
+}
+
+.sidebar-primary-nav .sidebar-nav-link[data-drop-pos='after']::after {
+  bottom: -5px;
+}
+
 /* Phase 1: Arc-style Collapsible Sidebar Panel + Edge Peek Drawer */
 @media (min-width: 62em) {
   .astrorder-shell .desktop-navbar {
@@ -50,7 +78,7 @@
     background: var(--astr-indigo);
   }
 
-  /* Detached Arc-style floating glass drawer when panel is collapsed */
+  /* Detached Arc-style floating drawer when panel is collapsed */
   .workspace-sidebar.is-panel-collapsed > .workspace-sidebar-panel {
     position: fixed;
     top: 8px;
@@ -60,17 +88,10 @@
     z-index: 230;
     border-radius: 15px;
     border: 1px solid color-mix(in oklab, var(--astr-indigo) 24%, var(--astr-border));
-    background: linear-gradient(
-      180deg,
-      color-mix(in oklab, var(--astr-sidebar) 88%, transparent),
-      color-mix(in oklab, var(--astr-surface) 84%, transparent)
-    );
-    backdrop-filter: blur(22px) saturate(165%);
-    -webkit-backdrop-filter: blur(22px) saturate(165%);
+    background: var(--astr-sidebar);
     box-shadow:
       0 22px 48px -12px rgb(20 14 36 / 34%),
-      0 4px 14px rgb(20 14 36 / 10%),
-      inset 0 1px 0 rgb(255 255 255 / 55%);
+      0 4px 14px rgb(20 14 36 / 10%);
     opacity: 0;
     visibility: hidden;
     pointer-events: none;
@@ -83,15 +104,10 @@
   }
 
   :root[data-mantine-color-scheme='dark'] .workspace-sidebar.is-panel-collapsed > .workspace-sidebar-panel {
-    background: linear-gradient(
-      180deg,
-      rgb(27 25 38 / 90%),
-      rgb(20 22 31 / 88%)
-    );
+    background: var(--astr-sidebar);
     box-shadow:
       0 26px 56px -12px rgb(0 0 0 / 62%),
-      0 6px 18px rgb(0 0 0 / 32%),
-      inset 0 1px 0 rgb(238 225 255 / 18%);
+      0 6px 18px rgb(0 0 0 / 32%);
   }
 
   .workspace-sidebar.is-panel-collapsed.is-panel-peeking > .workspace-sidebar-panel {

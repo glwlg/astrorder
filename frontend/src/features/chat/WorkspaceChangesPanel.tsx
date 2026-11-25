@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import type { Agent, Message, Session, SessionSchedule, SessionSwarm } from '../../domain/types'
 import { isAntigravityAgent } from '../../hooks/useSessionSwarm'
-import { GlassPanel } from '../../components/GlassPanel'
+import { useIsOfficeExperience } from '../office/appProfile'
 import { WorkspaceChangesContent } from './WorkspaceChangesContent'
 
 export function WorkspaceChangesPanel({
@@ -33,7 +33,8 @@ export function WorkspaceChangesPanel({
   onOpenSession?: (agentId: string, sessionId: string) => void
   onClose: () => void
 }) {
-  const showSwarm = isAntigravityAgent(agent)
+  const isOfficeMode = useIsOfficeExperience(session)
+  const showSwarm = !isOfficeMode && isAntigravityAgent(agent)
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented) return
@@ -50,26 +51,23 @@ export function WorkspaceChangesPanel({
       id="workspace-changes-panel"
       className="workspace-changes-panel"
       aria-label={showSwarm ? 'Swarm、定时与产物' : '定时与产物'}
-      data-liquid-ignore
     >
-      <GlassPanel active snapshot=".chat-workbench">
-        <WorkspaceChangesContent
-          key={`${session.agent_id}:${session.id}`}
-          session={session}
-          agent={agent}
-          messages={messages}
-          swarm={swarm}
-          swarmLoading={swarmLoading}
-          swarmFetching={swarmFetching}
-          swarmError={swarmError}
-          onRefreshSwarm={onRefreshSwarm}
-          schedules={schedules}
-          schedulesLoading={schedulesLoading}
-          schedulesError={schedulesError}
-          onOpenSession={onOpenSession}
-          onClose={onClose}
-        />
-      </GlassPanel>
+      <WorkspaceChangesContent
+        key={`${session.agent_id}:${session.id}`}
+        session={session}
+        agent={agent}
+        messages={messages}
+        swarm={swarm}
+        swarmLoading={swarmLoading}
+        swarmFetching={swarmFetching}
+        swarmError={swarmError}
+        onRefreshSwarm={onRefreshSwarm}
+        schedules={schedules}
+        schedulesLoading={schedulesLoading}
+        schedulesError={schedulesError}
+        onOpenSession={onOpenSession}
+        onClose={onClose}
+      />
     </aside>
   )
 }

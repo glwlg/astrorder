@@ -1,9 +1,12 @@
 import {
+  IconBriefcase,
   IconChecklist,
   IconCheck,
   IconChevronDown,
   IconChevronUp,
+  IconCode,
   IconCopy,
+  IconDatabase,
   IconDotsVertical,
   IconEdit,
   IconPalette,
@@ -44,8 +47,18 @@ import { NewSessionDialog } from './NewSessionDialog'
 import { HandoffDialog } from './HandoffDialog'
 import { sessionHandoffTargets } from '../domain/handoff'
 import { ForkWorktreeDialog } from './ForkWorktreeDialog'
+import { ProjectDatabaseModal } from '../features/dbxExec/ProjectDatabaseModal'
+import { buildWorkspaceScopeKey, useProjectDbStore } from '../features/dbxExec/projectDbStore'
+import { useDbxDirectExecEnabled } from '../features/dbxExec/useInlineSqlExecutor'
 import { WORKFLOW_GIT_WORKTREE_PLUGIN_ID } from '../features/plugins/builtinPlugins'
 import { usePluginSettingsStore } from '../features/plugins/pluginSettingsStore'
+import {
+  isProjectInOfficeMode,
+  isSessionInOfficeMode,
+  setProjectOfficeMode,
+  useOfficeModeRegistry,
+} from '../features/office/officeWorkspaceMode'
+import { useIsOfficeProfile } from '../features/office/appProfile'
 import { moveProject, reconcileProjectOrder } from './projectOrder'
 import { useWorkspacePreferences } from '../hooks/useWorkspacePreferences'
 import type { Agent, Project, Session, SessionStatus, Task } from '../domain/types'
@@ -144,6 +157,9 @@ export function SessionRail({
   const { preferences, updatePreferences, removeProjectPreferences } = useWorkspacePreferences()
   const { pinned_projects: pinnedProjects, appearance: projectAppearance, session_pins: pinnedSessions, project_order: projectOrder } = preferences
   const [appearanceTarget, setAppearanceTarget] = useState<ProjectGroup | null>(null)
+  const [databaseTarget, setDatabaseTarget] = useState<ProjectGroup | null>(null)
+  const dbxDirectExecEnabled = useDbxDirectExecEnabled()
+  const projectDbBindings = useProjectDbStore((s) => s.bindings)
   const [railMenu, setRailMenu] = useState<{ kind: 'project' | 'session'; key: string } | null>(null)
   const openRailMenu = (event: React.MouseEvent, kind: 'project' | 'session', key: string) => {
     event.preventDefault()
@@ -228,9 +244,15 @@ export function SessionRail({
   }
 
   const worktreeEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKFLOW_GIT_WORKTREE_PLUGIN_ID))
+  const officeModeRegistry = useOfficeModeRegistry()
+  const isOfficeProfile = useIsOfficeProfile()
+
+  const isSessionOffice = (session: Session) =>
+    isOfficeProfile || isSessionInOfficeMode(officeModeRegistry, session)
 
   const forkMenuItems = (session: Session) => {
     const kind = agents[session.agent_id]?.kind
+    const officeSess = isSessionOffice(session)
     if (kind === 'antigravity' || kind === 'antigravity-ssh') {
       return (
         <>
@@ -238,9 +260,9 @@ export function SessionRail({
             leftSection={<IconGitFork size={14} />}
             onClick={() => void handleContextBranch(session)}
           >
-            基于摘要新建交接会话
+            {officeSess ? '基于摘要新建续写对话' : '基于摘要新建交接会话'}
           </Menu.Item>
-          {worktreeEnabled && session.workspace && (
+          {!officeSess && worktreeEnabled && session.workspace && (
             <Menu.Item
               leftSection={<IconGitBranch size={14} />}
               onClick={() => setForkWorktreeTarget(session)}
@@ -252,6 +274,16 @@ export function SessionRail({
       )
     }
     if (kind === 'grok') return null
+    if (officeSess) {
+      return (
+        <Menu.Item
+          leftSection={<IconCopy size={14} />}
+          onClick={() => void handleForkChatBranch(session)}
+        >
+          复制为新对话
+        </Menu.Item>
+      )
+    }
     if (!worktreeEnabled) {
       return (
         <Menu.Item
@@ -497,6 +529,7 @@ export function SessionRail({
   const handoffTargets = (session: Session) => sessionHandoffTargets(session, agents)
 
   const handoffItems = (session: Session) => {
+    if (isSessionOffice(session)) return null
     const source = agents[session.agent_id]
     if (!source || !['codex', 'hermes'].includes(source.kind)) return null
     const available = handoffTargets(session).length > 0
@@ -564,6 +597,9 @@ export function SessionRail({
       })
 
       await removeProjectPreferences(project.key)
+      if (dbxDirectExecEnabled) {
+        void useProjectDbStore.getState().deleteBinding(project.key).catch(() => {})
+      }
 
       if (activeSessionKey && project.sessions.some((s) => scopeKey(s.agent_id, s.id) === activeSessionKey)) {
         const remainingSessions = incomingSessions.filter(
@@ -744,11 +780,11 @@ export function SessionRail({
       <div className="session-search-row">
         <div className="session-search-field">
           <IconSearch size={21} stroke={1.8} aria-hidden="true" />
-          <input ref={searchRef} className="session-search" aria-label="搜索会话" placeholder="搜索会话" value={filter} onChange={event => setFilter(event.currentTarget.value)} />
+          <input ref={searchRef} className="session-search" aria-label={isOfficeProfile ? '搜索对话' : '搜索会话'} placeholder={isOfficeProfile ? '搜索对话' : '搜索会话'} value={filter} onChange={event => setFilter(event.currentTarget.value)} />
           <kbd
             role="button"
             tabIndex={0}
-            title="打开全能星令面板 (Ctrl+K)"
+            title={isOfficeProfile ? '打开快捷搜索面板 (Ctrl+K)' : '打开全能星令面板 (Ctrl+K)'}
             style={{ cursor: 'pointer' }}
             onClick={() => window.dispatchEvent(new CustomEvent('astrorder:open-command-palette'))}
             onKeyDown={(e) => {
@@ -761,13 +797,15 @@ export function SessionRail({
             Ctrl K
           </kbd>
         </div>
-        <Tooltip label="新增项目" position="bottom">
-          <ActionIcon className="session-add-project" variant="subtle" size={30} aria-label="新增项目" onClick={() => setAddProjectOpened(true)}>
+        <Tooltip label={isOfficeProfile ? '新建办公空间' : '新增项目'} position="bottom">
+          <ActionIcon className="session-add-project" variant="subtle" size={30} aria-label={isOfficeProfile ? '新建办公空间' : '新增项目'} onClick={() => setAddProjectOpened(true)}>
             <PlusIcon size={18} aria-hidden="true" />
           </ActionIcon>
         </Tooltip>
       </div>
-      <AgentSessionFilter agents={agents} sessions={sessions} value={agentFilter} onChange={updateAgentFilter} showLabel />
+      {(!isOfficeProfile || Object.values(agents).length > 1) && (
+        <AgentSessionFilter agents={agents} sessions={sessions} value={agentFilter} onChange={updateAgentFilter} showLabel />
+      )}
       <SessionQuickFilters value={statusFilter} onChange={setStatusFilter}>
       <Menu position="bottom-end" width={210} withinPortal>
         <Menu.Target>
@@ -799,6 +837,10 @@ export function SessionRail({
           agents={agents}
           project={createProject}
           initialAgentId={agentFilter}
+          officeMode={
+            isOfficeProfile ||
+            Boolean(createProject && isProjectInOfficeMode(officeModeRegistry, createProject.key, createProject.workspace))
+          }
           onClose={() => setCreateOpened(false)}
           onCreated={session => {
             onSelect(session)
@@ -942,7 +984,7 @@ export function SessionRail({
                   <Menu position="bottom-end" withinPortal opened={railMenu?.kind === 'session' && railMenu.key === key} onChange={(opened) => updateRailMenu(opened, 'session', key)}><Menu.Target><button className="session-action-btn" aria-label="更多操作"><IconDotsVertical size={14} /></button></Menu.Target><Menu.Dropdown>
                     {isUnread(key) && <Menu.Item leftSection={<IconCheck size={14} />} onClick={() => markSessionRead(key)}>标为已读</Menu.Item>}
                     <Menu.Item leftSection={<IconEdit size={14} />} onClick={() => openRenameModal(session)}>重命名</Menu.Item>
-                    <Menu.Item leftSection={<IconCopy size={14} />} onClick={() => copySessionId(session)}>复制 ID</Menu.Item>
+                    {!isSessionOffice(session) && <Menu.Item leftSection={<IconCopy size={14} />} onClick={() => copySessionId(session)}>复制 ID</Menu.Item>}
                     {forkMenuItems(session)}
                     {handoffItems(session)}
                     <Menu.Item color="red" leftSection={<IconTrash size={14} />} onClick={(event) => requestDeleteSession(session, event)}>删除会话</Menu.Item>
@@ -953,11 +995,12 @@ export function SessionRail({
           })}
           </>
         </section>}
-        <div className="session-project-section-heading"><span>项目</span><span>{groups.length}</span></div>
+        <div className="session-project-section-heading"><span>{isOfficeProfile ? '工作空间' : '项目'}</span><span>{groups.length}</span></div>
         {groups.map((project) => {
           const projectCollapseKey = `project:${project.key}`
           const projectCollapsed = collapsed[projectCollapseKey] === true
           const isProjectPinned = pinnedProjects.includes(project.key)
+          const isOfficeProject = isOfficeProfile || isProjectInOfficeMode(officeModeRegistry, project.key, project.workspace)
           const projectCustom = projectAppearance[project.key]
           const visibleCount = expandedCountMap[project.key] ?? 4
           const regularSessions = project.sessions.filter(s => !pinnedSessions[scopeKey(s.agent_id, s.id)])
@@ -1010,6 +1053,18 @@ export function SessionRail({
                     size={16}
                   />
                   <span className="session-project-label">{project.label}</span>
+                  {isOfficeProject && (
+                    <span
+                      className="session-project-source"
+                      title="办公空间模式（已隐藏 Git / 终端 / 数据库等开发工具）"
+                      style={{
+                        background: 'rgba(14, 165, 233, 0.14)',
+                        color: '#0369a1',
+                      }}
+                    >
+                      办公
+                    </span>
+                  )}
                   {project.remoteLabel && (
                     <span className="session-project-source" title={project.remoteLabel}>
                       {project.remoteLabel}
@@ -1052,7 +1107,7 @@ export function SessionRail({
                       {creatingForProject === project.key ? <Loader size={12} /> : <IconPlus size={14} />}
                     </button>
                   </Tooltip>
-                  <Menu position="bottom-end" shadow="md" width={140} withinPortal opened={railMenu?.kind === 'project' && railMenu.key === project.key} onChange={(opened) => updateRailMenu(opened, 'project', project.key)}>
+                  <Menu position="bottom-end" shadow="md" width={168} withinPortal opened={railMenu?.kind === 'project' && railMenu.key === project.key} onChange={(opened) => updateRailMenu(opened, 'project', project.key)}>
                     <Menu.Target>
                       <button
                         type="button"
@@ -1077,12 +1132,57 @@ export function SessionRail({
                         外观设置
                       </Menu.Item>
                       <Menu.Item
+                        leftSection={isOfficeProject ? <IconCode size={14} /> : <IconBriefcase size={14} />}
+                        onClick={() => {
+                          setProjectOfficeMode(
+                            { projectKey: project.key, workspace: project.workspace },
+                            !isOfficeProject,
+                          )
+                          notifications.show({
+                            color: 'teal',
+                            message: isOfficeProject
+                              ? `已将「${project.label}」切换回开发项目`
+                              : `已将「${project.label}」切换为办公空间`,
+                          })
+                        }}
+                      >
+                        {isOfficeProject ? '切换回开发项目' : '切换为办公空间'}
+                      </Menu.Item>
+                      {!isOfficeProject && dbxDirectExecEnabled && (
+                        <Menu.Item
+                          leftSection={<IconDatabase size={14} />}
+                          rightSection={(() => {
+                            const sample = project.sessions[0]
+                            const ownerAgent = project.agentId ? agents[project.agentId] : undefined
+                            const wsKey = buildWorkspaceScopeKey(
+                              project.workspace,
+                              sample?.connection_id || ownerAgent?.connection_id,
+                              sample?.source_id || ownerAgent?.source_id,
+                              ownerAgent,
+                            )
+                            const bound =
+                              projectDbBindings.find((b) => b.project_key === project.key) ||
+                              (wsKey
+                                ? projectDbBindings.find((b) => b.workspace_key?.toLowerCase() === wsKey.toLowerCase())
+                                : undefined)
+                            return bound && bound.targets.length > 0 ? (
+                              <Text size="xs" c="dimmed" fw={600}>
+                                {bound.targets.length}
+                              </Text>
+                            ) : undefined
+                          })()}
+                          onClick={() => setDatabaseTarget(project)}
+                        >
+                          关联数据库
+                        </Menu.Item>
+                      )}
+                      <Menu.Item
                         leftSection={<IconPlus size={14} />}
                         onClick={(e) => void handleCreateSession(project, e)}
                       >
                         新建会话
                       </Menu.Item>
-                      {worktreeEnabled && project.workspace && (
+                      {!isOfficeProject && worktreeEnabled && project.workspace && (
                         <Menu.Item
                           leftSection={<IconGitBranch size={14} />}
                           onClick={() => {
@@ -1225,9 +1325,11 @@ export function SessionRail({
                               >
                                 {isPinned ? '取消置顶' : '置顶会话'}
                               </Menu.Item>
-                              <Menu.Item leftSection={<IconCopy size={14} />} onClick={() => copySessionId(session)}>
-                                复制 ID
-                              </Menu.Item>
+                              {!isOfficeProject && (
+                                <Menu.Item leftSection={<IconCopy size={14} />} onClick={() => copySessionId(session)}>
+                                  复制 ID
+                                </Menu.Item>
+                              )}
                               {forkMenuItems(session)}
                               {handoffItems(session)}
                               <Menu.Divider />
@@ -1321,6 +1423,24 @@ export function SessionRail({
           projectLabel={appearanceTarget.label}
           appearance={projectAppearance}
           onSave={handleSaveAppearance}
+        />
+      )}
+      {databaseTarget && (
+        <ProjectDatabaseModal
+          opened={databaseTarget !== null}
+          onClose={() => setDatabaseTarget(null)}
+          projectKey={databaseTarget.key}
+          workspaceKey={(() => {
+            const sample = databaseTarget.sessions[0]
+            const ownerAgent = databaseTarget.agentId ? agents[databaseTarget.agentId] : undefined
+            return buildWorkspaceScopeKey(
+              databaseTarget.workspace,
+              sample?.connection_id || ownerAgent?.connection_id,
+              sample?.source_id || ownerAgent?.source_id,
+              ownerAgent,
+            )
+          })()}
+          projectLabel={databaseTarget.label}
         />
       )}
       {forkWorktreeTarget && (

@@ -2,11 +2,15 @@ import { useState } from 'react'
 import { Alert, Badge, Button, Group, NativeSelect, Paper, SegmentedControl, Stack, Switch, Text, Title } from '@mantine/core'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../../api/client'
+import { usePluginSettingsStore } from '../plugins/pluginSettingsStore'
 import './rtk.css'
 
 const number = (value: number) => new Intl.NumberFormat('zh-CN', { notation: 'compact', maximumFractionDigits: 1 }).format(value)
 export function RtkSettingsPage() {
   const client = useQueryClient()
+  const enabledPlugins = usePluginSettingsStore((s) => s.enabledPlugins)
+  const isAgentEnabled = usePluginSettingsStore((s) => s.isAgentEnabled)
+  void enabledPlugins
   const [environment, setEnvironment] = useState('local')
   const [days, setDays] = useState('30')
   const [busy, setBusy] = useState<string | null>(null)
@@ -42,7 +46,7 @@ export function RtkSettingsPage() {
           </Paper>
         </>}
       </Paper>
-      <div><Group justify="space-between" mb="sm"><Text size="sm" fw={600}>AGENT</Text><Text size="xs" c="dimmed">切换后需新开对应 Agent 进程；当前会话不会重启</Text></Group><Paper withBorder radius="lg" className="rtk-agents">{data.agents.map(agent => <Group className="rtk-agent" key={agent.kind} justify="space-between" wrap="nowrap"><div><Text fw={600} size="sm">{agent.name}</Text>{agent.detail && <Text size="xs" c="dimmed">{agent.detail}</Text>}</div><Switch aria-label={`${agent.name} RTK`} checked={agent.enabled} disabled={!data.installed || !agent.supported || !!busy} onChange={event => { const enabled = event.currentTarget.checked; void run(agent.kind, () => api.setRtkAgent(environment, agent.kind, enabled)) }} /></Group>)}</Paper></div>
+      <div><Group justify="space-between" mb="sm"><Text size="sm" fw={600}>AGENT</Text><Text size="xs" c="dimmed">切换后需新开对应 Agent 进程；当前会话不会重启</Text></Group><Paper withBorder radius="lg" className="rtk-agents">{data.agents.filter(agent => isAgentEnabled(agent.kind)).map(agent => <Group className="rtk-agent" key={agent.kind} justify="space-between" wrap="nowrap"><div><Text fw={600} size="sm">{agent.name}</Text>{agent.detail && <Text size="xs" c="dimmed">{agent.detail}</Text>}</div><Switch aria-label={`${agent.name} RTK`} checked={agent.enabled} disabled={!data.installed || !agent.supported || !!busy} onChange={event => { const enabled = event.currentTarget.checked; void run(agent.kind, () => api.setRtkAgent(environment, agent.kind, enabled)) }} /></Group>)}</Paper></div>
       <Text size="xs" c="dimmed">统计来自所选环境当前用户的 RTK 记录，是命令输出 token 的估算减少量，不代表模型账单节省，也不区分 Agent。</Text>
     </>}
   </Stack>

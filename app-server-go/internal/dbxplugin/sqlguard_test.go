@@ -74,8 +74,22 @@ func TestClassifySQL(t *testing.T) {
 			wantReadAllowed: false,
 		},
 		{
-			name:            "multi-statement select requires confirmation",
+			name:            "multi-statement pure select is read only",
 			sql:             "SELECT 1; SELECT 2;",
+			wantRisk:        RiskReadOnly,
+			wantStmts:       2,
+			wantReadAllowed: true,
+		},
+		{
+			name:            "transaction block with select requires confirmation",
+			sql:             "BEGIN; SELECT 1; COMMIT;",
+			wantRisk:        RiskWrite,
+			wantStmts:       3,
+			wantReadAllowed: false,
+		},
+		{
+			name:            "start transaction requires confirmation",
+			sql:             "START TRANSACTION; SELECT version FROM migrations;",
 			wantRisk:        RiskWrite,
 			wantStmts:       2,
 			wantReadAllowed: false,

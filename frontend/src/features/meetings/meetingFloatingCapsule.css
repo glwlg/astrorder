@@ -1,0 +1,178 @@
+/* Standalone In-App Draggable Recording Capsule (mirrors desktop native capsule) */
+
+.mtg-float-capsule {
+  position: fixed;
+  top: 76px;
+  right: 24px;
+  z-index: 180;
+  width: 368px;
+  max-width: calc(100vw - 28px);
+  height: 54px;
+  padding: 0 9px 0 18px;
+  border-radius: 999px;
+  background: #f6f7f9;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow:
+    0 12px 30px -6px rgba(15, 23, 42, 0.2),
+    0 2px 8px rgba(15, 23, 42, 0.08);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.mtg-float-capsule:active {
+  cursor: grabbing;
+}
+
+.mtg-float-wave {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2.5px;
+  height: 20px;
+  width: 22px;
+  flex: none;
+}
+
+.mtg-float-wave-bar {
+  width: 2.4px;
+  border-radius: 999px;
+  background: #18181b;
+  transition: height 95ms ease, opacity 150ms ease;
+}
+
+.mtg-float-capsule.is-paused .mtg-float-wave-bar {
+  opacity: 0.36;
+}
+
+.mtg-float-copy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.mtg-float-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: #18181b;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mtg-float-timer {
+  flex: none;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: #8c8c96;
+  font-variant-numeric: tabular-nums;
+  font-family: var(--astr-session-mono-font, ui-monospace, 'Cascadia Mono', Consolas, monospace);
+}
+
+.mtg-float-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+.mtg-float-circle-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid rgba(15, 23, 42, 0.05);
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+.mtg-float-circle-btn:hover:not(:disabled) {
+  box-shadow: 0 3px 9px rgba(15, 23, 42, 0.14);
+  transform: translateY(-0.5px);
+}
+
+.mtg-float-circle-btn:active:not(:disabled) {
+  transform: scale(0.95);
+}
+
+.mtg-float-circle-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.mtg-float-stop-square {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  background: #ff5252;
+}
+
+.mtg-float-expand-icon {
+  width: 15px;
+  height: 15px;
+  stroke: #52525b;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
+}
+
+:root[data-mantine-color-scheme='dark'] .mtg-float-capsule {
+  background: #202532;
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 16px 36px -6px rgba(0, 0, 0, 0.62);
+}
+
+:root[data-mantine-color-scheme='dark'] .mtg-float-wave-bar {
+  background: #f4f4f6;
+}
+
+:root[data-mantine-color-scheme='dark'] .mtg-float-text {
+  color: #f4f4f6;
+}
+
+:root[data-mantine-color-scheme='dark'] .mtg-float-timer {
+  color: #9ca3af;
+}
+
+:root[data-mantine-color-scheme='dark'] .mtg-float-circle-btn {
+  background: #2b3242;
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+}
+
+:root[data-mantine-color-scheme='dark'] .mtg-float-expand-icon {
+  stroke: #d4d4d8;
+}
+
+/* Sidebar live meeting recording dot */
+.sidebar-meeting-rec-dot {
+  position: absolute;
+  top: 5px;
+  right: 8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ff5252;
+  box-shadow: 0 0 0 2px var(--astr-surface, #ffffff);
+  pointer-events: none;
+  animation: mtgSidebarPulse 1.3s ease-in-out infinite;
+}
+
+@keyframes mtgSidebarPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.84); }
+}

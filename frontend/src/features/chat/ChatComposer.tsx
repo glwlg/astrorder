@@ -1,7 +1,6 @@
 import { IconBrain, IconMicrophone, IconPaperclip, IconPlus, IconPlayerStop, IconX } from '@tabler/icons-react'
 import { Badge, Button, Group, Paper, Stack, Text, Textarea } from '@mantine/core'
 import { InlineNotice } from '../../components/InlineNotice'
-import { ComposerGlassSurface, GlassButtonLens } from '../../components/GlassPanel'
 import { useQueryClient } from '@tanstack/react-query'
 import { type ChangeEvent, type ClipboardEvent, type DragEvent, type KeyboardEvent, memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useShallow } from 'zustand/react/shallow'
@@ -17,7 +16,6 @@ import { GoalManager } from './GoalManager'
 import { clipboardFiles } from './composerMedia'
 import { notifySessionSubmitted } from '../../hooks/useSessionOrder'
 import '../agents/agentsLayout.css'
-import './composerGlass.css'
 import { ApprovalModeControl } from './ApprovalModeControl'
 import { sharedServerOutbox } from '../mobile/serverOutbox'
 import type { OutboxEntry } from '../mobile/mobileOutbox'
@@ -32,6 +30,10 @@ import { queueBlockReason } from './queueBlockReason'
 import { UNCOMMITTED_REVIEW_MESSAGE } from './reviewRelay'
 import { VOICE_INPUT_PLUGIN_ID } from '../plugins/builtinPlugins'
 import { usePluginSettingsStore } from '../plugins/pluginSettingsStore'
+import { useIsOfficeExperience } from '../office/appProfile'
+import { OfficeSourcesBar, type PinnedOfficeSource } from '../office/OfficeSourcesBar'
+import { OfficeTemplateModal } from '../office/OfficeTemplateModal'
+import { buildPersonaPromptBlock, readCachedOfficePersona } from '../office/officePersona'
 
 
 export interface InterpretedGatewayError {
@@ -221,7 +223,6 @@ export function ChatComposer({
   usage,
   onHeightChange,
   onPreviewImage,
-  glass = false,
 }: {
   session: Session
   agent?: Agent
@@ -229,7 +230,6 @@ export function ChatComposer({
   usage?: { last_input_tokens: number; context_window: number; context_available?: boolean; source?: string }
   onHeightChange?: (height: number) => void
   onPreviewImage?: (images: string[], index: number) => void
-  glass?: boolean
 }) {
   const queryClient = useQueryClient()
   const draftKey = scopeKey(session.agent_id, session.id)
@@ -270,6 +270,28 @@ export function ChatComposer({
     }
     window.addEventListener('astrorder:quote-to-composer', onQuote)
     return () => window.removeEventListener('astrorder:quote-to-composer', onQuote)
+  }, [session.agent_id, session.id, updateDraft])
+  const submitDirectRef = useRef<((text: string, options?: { preserveDraft?: boolean }) => Promise<void>) | null>(null)
+  const canSendDirectRef = useRef(false)
+  useEffect(() => {
+    const onSendDirect = (event: Event) => {
+      const detail = (event as CustomEvent<{ agentId?: string; sessionId?: string; text?: string }>).detail
+      if (!detail?.text) return
+      if (detail.agentId && detail.agentId !== session.agent_id) return
+      if (detail.sessionId && detail.sessionId !== session.id) return
+      if (canSendDirectRef.current && submitDirectRef.current) {
+        void submitDirectRef.current(detail.text, { preserveDraft: true })
+        return
+      }
+      // Fall back to appending into draft so the user never loses the result if busy/unavailable.
+      updateDraft((current) => {
+        const prefix = current.text.trim() ? `${current.text.replace(/\s+$/, '')}\n` : ''
+        return { ...current, text: `${prefix}${detail.text}` }
+      })
+      requestAnimationFrame(() => textareaRef.current?.focus())
+    }
+    window.addEventListener('astrorder:send-to-composer', onSendDirect)
+    return () => window.removeEventListener('astrorder:send-to-composer', onSendDirect)
   }, [session.agent_id, session.id, updateDraft])
   const [sessionDragOver, setSessionDragOver] = useState(false)
   const [fileDragOver, setFileDragOver] = useState(false)
@@ -322,15 +344,35 @@ export function ChatComposer({
   const sessionRefs = draft.sessionRefs || []
   const hasDraft = isDraftSendable(draft.text, draft.attachments, sessionRefs)
   const hasDraftContent = Boolean(draft.text || draft.attachments.length || sessionRefs.length)
-  const commandMenuOpen = (/^\/[^\s]*$/.test(draft.text) || /^\/(?:review|审查)(?:\s.*)?$/i.test(draft.text)) && dismissedMenuText !== draft.text
+  const isOfficeWorkspace = useIsOfficeExperience(session)
+  const [pinnedSources, setPinnedSources] = useState<PinnedOfficeSource[]>([])
+  const [templateModalOpen, setTemplateModalOpen] = useState(false)
+  useEffect(() => {
+    setPinnedSources([])
+  }, [session.agent_id, session.id])
+  useEffect(() => {
+    const onPinSource = (event: Event) => {
+      const detail = (event as CustomEvent<{ path?: string; name?: string; ext?: string }>).detail
+      if (!detail?.path) return
+      const name = detail.name || detail.path.split(/[/\\]/).pop() || detail.path
+      const ext = detail.ext || (name.includes('.') ? name.split('.').pop() || '' : '')
+      setPinnedSources((prev) => {
+        if (prev.some((item) => item.path === detail.path) || prev.length >= 8) return prev
+        return [...prev, { path: detail.path!, name, ext }]
+      })
+    }
+    window.addEventListener('astrorder:pin-office-source', onPinSource)
+    return () => window.removeEventListener('astrorder:pin-office-source', onPinSource)
+  }, [])
+  const commandMenuOpen = (/^\/[^\s]*$/.test(draft.text) || (!isOfficeWorkspace && /^\/(?:review|审查)(?:\s.*)?$/i.test(draft.text))) && dismissedMenuText !== draft.text
   const resourcesReady = !agent || agent.status === 'ready'
   const commandQuery = useAgentCommands(session, resourcesReady)
-  const gitBranchesQuery = useGitBranches(session, commandMenuOpen && resourcesReady)
+  const gitBranchesQuery = useGitBranches(session, commandMenuOpen && resourcesReady && !isOfficeWorkspace)
   const agentCommands = useMemo(
     () => (commandMenuOpen
-      ? buildCommandMenuItems(commandQuery.data?.items || [], gitBranchesQuery.data || [], draft.text)
+      ? buildCommandMenuItems(commandQuery.data?.items || [], isOfficeWorkspace ? [] : (gitBranchesQuery.data || []), draft.text, { officeMode: isOfficeWorkspace })
       : EMPTY_COMMAND_ITEMS),
-    [commandMenuOpen, commandQuery.data?.items, gitBranchesQuery.data, draft.text],
+    [commandMenuOpen, commandQuery.data?.items, gitBranchesQuery.data, draft.text, isOfficeWorkspace],
   )
   const mentionMatch = draft.text.match(/(?:^|\s)@[^\s@]*$/)
   const mentionMenuOpen = Boolean(mentionMatch) && dismissedMenuText !== draft.text
@@ -342,9 +384,10 @@ export function ChatComposer({
       ? filterAgentMentions(
           [...(mentionQuery.data?.items || []), ...(fileMentionQuery.data || [])],
           draft.text,
+          { officeMode: isOfficeWorkspace },
         )
       : EMPTY_MENTION_ITEMS),
-    [mentionMenuOpen, mentionQuery.data?.items, fileMentionQuery.data, draft.text],
+    [mentionMenuOpen, mentionQuery.data?.items, fileMentionQuery.data, draft.text, isOfficeWorkspace],
   )
   // 执行中且输入为空时停止；有草稿时先排队，由用户显式选择是否立即引导。
   const isStopAction = busy && !hasDraft
@@ -459,7 +502,7 @@ export function ChatComposer({
     }).catch(nextError => setError(errorMessage(nextError)))
   }
 
-  const submitDirectMessage = async (customText: string) => {
+  const submitDirectMessage = async (customText: string, options?: { preserveDraft?: boolean }) => {
     if (submitting || submittingRef.current || !canChat) return
     if (recoveryDraft) { setError('请先核对并恢复上一条消息，再发送新消息。'); return }
     const originalDraft: DraftState = { text: customText, attachments: [], sessionRefs: [] }
@@ -482,7 +525,7 @@ export function ChatComposer({
     store.commitOptimisticSend({
       command,
       optimisticMessage,
-      clearDraft: true,
+      clearDraft: !options?.preserveDraft,
       markRunning: false,
     })
 
@@ -528,10 +571,21 @@ export function ChatComposer({
       setSubmitting(false)
     }
   }
+  useEffect(() => {
+    submitDirectRef.current = submitDirectMessage
+    canSendDirectRef.current = Boolean(canChat && !submitting && !recoveryDraft)
+  })
 
   const selectAgentCommand = (item: CommandMenuItem | import('../../domain/types').AgentCommand) => {
     if ('kind' in item) {
       if (item.kind === 'header') return
+      if (item.kind === 'office_prompt') {
+        setText(item.template)
+        setDismissedMenuText(item.template)
+        setCommandIndex(0)
+        requestAnimationFrame(() => textareaRef.current?.focus())
+        return
+      }
       if (item.kind === 'review_uncommitted') {
         useSidecarStore.getState().openGitDiff(session.id, session.agent_id, session.workspace || undefined, session.connection_id || undefined)
         updateDraft(EMPTY_DRAFT)
@@ -571,7 +625,7 @@ export function ChatComposer({
     const originalDraft = { ...draft, attachments: [...draft.attachments], sessionRefs: [...(draft.sessionRefs || [])] }
     const files = draft.attachments.filter(item => !item.attachment).map((item) => item.file)
     const uploadedAttachments = draft.attachments.flatMap(item => item.attachment ? [item.attachment] : [])
-    const outgoing = composeOutgoingText(draft.text, sessionRefs, `${session.agent_id}::${session.id}`)
+    let outgoing = composeOutgoingText(draft.text, sessionRefs, `${session.agent_id}::${session.id}`)
     if (action === 'send') {
       if (!isDraftSendable(draft.text, draft.attachments, sessionRefs)) return
       if (!canChat) {
@@ -580,6 +634,37 @@ export function ChatComposer({
       }
     }
     if (submitting || submittingRef.current) return
+
+    if (action === 'send' && isOfficeWorkspace) {
+      const personaBlock = buildPersonaPromptBlock(readCachedOfficePersona())
+      if (pinnedSources.length > 0) {
+        submittingRef.current = true
+        setSubmitting(true)
+        setError(null)
+        try {
+          const extracted = await api.extractOfficeSources({
+            paths: pinnedSources.map((s) => s.path),
+            session_id: session.id,
+            connection_id: session.connection_id || undefined,
+          })
+          if (extracted.assembled_context?.trim()) {
+            outgoing = `${extracted.assembled_context.trim()}\n\n请基于以上资料作答，引用具体数据或结论时请标注 [资料 1]、[资料 2] 等出处。\n\n${outgoing}`
+          } else {
+            const refs = pinnedSources.map((s, idx) => `- [资料 ${idx + 1}] ${s.name} (${s.path})`).join('\n')
+            outgoing = `参考工作空间资料：\n${refs}\n\n${outgoing}`
+          }
+        } catch {
+          const refs = pinnedSources.map((s, idx) => `- [资料 ${idx + 1}] ${s.name} (${s.path})`).join('\n')
+          outgoing = `参考工作空间资料：\n${refs}\n\n${outgoing}`
+        } finally {
+          submittingRef.current = false
+          setSubmitting(false)
+        }
+      }
+      if (personaBlock && !outgoing.includes('【个人办公偏好参考')) {
+        outgoing = `${outgoing}\n\n${personaBlock}`
+      }
+    }
 
     if (action === 'send' && nativeBusy) {
       submittingRef.current = true
@@ -802,7 +887,7 @@ ${draft.text}` : entry.payload.text)
     <>
       <Paper
         ref={cardRef}
-        className={`composer-card${glass ? ' composer-glass' : ''}${sessionDragOver ? ' is-session-drag-over' : ''}${fileDragOver ? ' is-file-drag-over' : ''}`}
+        className={`composer-card${sessionDragOver ? ' is-session-drag-over' : ''}${fileDragOver ? ' is-file-drag-over' : ''}`}
         withBorder
         radius="lg"
         onDragOver={handleSessionDragOver}
@@ -814,9 +899,27 @@ ${draft.text}` : entry.payload.text)
         }}
         onDrop={handleSessionDrop}
       >
-        <ComposerGlassSurface active={glass}>
         <MemoGoalManager key={`${session.agent_id}::${session.id}`} session={session} agent={agent} tasks={tasks} />
-        <MemoGitStatusBar session={session} />
+        {!isOfficeWorkspace && <MemoGitStatusBar session={session} />}
+        {isOfficeWorkspace && (
+          <OfficeSourcesBar
+            session={session}
+            pinnedSources={pinnedSources}
+            onChangeSources={setPinnedSources}
+            onSendPromptToChat={(promptText) => {
+              if (canChat && !submitting && !recoveryDraft && !nativeBusy) {
+                void submitDirectMessage(promptText, { preserveDraft: true })
+              } else {
+                updateDraft((current) => ({
+                  ...current,
+                  text: current.text.trim() ? `${current.text.replace(/\s+$/, '')}\n${promptText}` : promptText,
+                }))
+                requestAnimationFrame(() => textareaRef.current?.focus())
+              }
+            }}
+            onOpenTemplateModal={() => setTemplateModalOpen(true)}
+          />
+        )}
         <Stack gap="xs">
         {queuePause && <Text size="xs" c="dimmed" role="status">{queuePause}</Text>}
         {recoveryDraft && <InlineNotice title="有一条发送结果待核对的消息" actions={<Button variant="subtle" size="compact-xs" onClick={() => void restoreUnsentDraft(session.agent_id, session.id, recoveryDraft).then(async detail => {
@@ -952,7 +1055,13 @@ ${draft.text}` : entry.payload.text)
             ref={textareaRef}
             className="composer-input"
             aria-label="消息内容"
-            placeholder={supportsImages ? '随心输入，可粘贴图片' : '随心输入'}
+            placeholder={
+              isOfficeWorkspace
+                ? '输入你的办公任务，输入 / 调出办公指令，或使用上方资料包与场景模板'
+                : supportsImages
+                  ? '随心输入，可粘贴图片'
+                  : '随心输入'
+            }
             variant="unstyled"
             autosize
             minRows={1}
@@ -977,9 +1086,8 @@ ${draft.text}` : entry.payload.text)
             disabled={!canAttach || !canChat || submitting}
             aria-label={canAttach ? '添加附件' : '附件能力未提供'}
           >
-            <GlassButtonLens />
             <IconPlus size={20} />
-            <input ref={fileInputRef} hidden type="file" multiple accept={supportsImages ? undefined : 'text/*,.txt,.md,.json,.csv,.py,.go,.ts,.tsx,.js,.jsx,.html,.css,.yaml,.yml,.toml,.xml,.log,.sh,.bat,.ps1'} onChange={addFiles} />
+            <input ref={fileInputRef} hidden type="file" multiple accept={supportsImages ? undefined : 'text/*,.txt,.md,.docx,.doc,.xlsx,.xls,.pptx,.ppt,.pdf,.wps,.csv,.json,.py,.go,.ts,.tsx,.js,.jsx,.html,.css,.yaml,.yml,.toml,.xml,.log,.sh,.bat,.ps1'} onChange={addFiles} />
           </Button>
           <div style={{ position: 'relative', flexShrink: 0 }}>
             <MemoDraftShelfControl
@@ -994,7 +1102,7 @@ ${draft.text}` : entry.payload.text)
           </div>
           <MemoApprovalModeControl session={session} agentKind={agent?.kind} />
           <span className="composer-toolbar-spacer" />
-          {usage && (
+          {!isOfficeWorkspace && usage && (
             <Badge
               variant="light"
               color="gray"
@@ -1018,7 +1126,6 @@ ${draft.text}` : entry.payload.text)
               loading={voice.status === 'transcribing'}
               onClick={voice.toggle}
             >
-              <GlassButtonLens />
               {voice.status === 'recording' || voice.status === 'requesting' ? <IconPlayerStop size={19} color="var(--mantine-color-red-6)" /> : <IconMicrophone size={19} />}
             </Button>
           )}
@@ -1041,10 +1148,52 @@ ${draft.text}` : entry.payload.text)
         </Group>
 
         </Stack>
-        </ComposerGlassSurface>
       </Paper>
       {voice.error && <div role="alert">{voice.error}</div>}
       {voice.status === 'transcribing' && <div role="status">正在转写…</div>}
+      {isOfficeWorkspace && (
+        <OfficeTemplateModal
+          opened={templateModalOpen}
+          workspace={session.workspace}
+          sessionId={session.id}
+          connectionId={session.connection_id}
+          pinnedSourcePaths={pinnedSources.map((s) => s.path)}
+          onClose={() => setTemplateModalOpen(false)}
+          onSendToChat={(promptText) => {
+            if (canChat && !submitting && !recoveryDraft && !nativeBusy) {
+              void submitDirectMessage(promptText, { preserveDraft: true })
+            } else {
+              updateDraft((current) => ({
+                ...current,
+                text: current.text.trim() ? `${current.text.replace(/\s+$/, '')}\n${promptText}` : promptText,
+              }))
+              requestAnimationFrame(() => textareaRef.current?.focus())
+            }
+          }}
+          onGeneratedDocument={({ title, markdown }) => {
+            const safeName = `${title.replace(/[<>:"/\\|?*]+/g, '_').slice(0, 40) || 'AI_模板文档'}.md`
+            useSidecarStore.getState().openArtifact(
+              {
+                id: `template-doc:${Date.now()}`,
+                sessionId: session.id,
+                agentId: session.agent_id,
+                connectionId: session.connection_id || undefined,
+                name: safeName,
+                kind: 'workspace_file',
+                readUrl: '',
+                mediaType: 'text/markdown',
+                writable: false,
+                metadata: {
+                  inlineContent: markdown,
+                  inlineEditable: true,
+                  preferRich: true,
+                },
+              },
+              'monaco-viewer',
+            )
+          }}
+        />
+      )}
     </>
   )
 }

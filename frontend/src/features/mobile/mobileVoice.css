@@ -1,7 +1,7 @@
 .mobile-voice-hold { display: contents; }
 .mobile-voice-hold:not([data-voice-hold='disabled']) textarea { touch-action: none; -webkit-touch-callout: none; }
 .mobile-voice-hold[data-voice-hold='disabled'] textarea { touch-action: pan-y; -webkit-touch-callout: default; -webkit-user-select: text; user-select: text; }
-.mobile-voice-overlay { position: fixed; inset: 0; z-index: 10000; background: rgba(14, 14, 24, 0.8); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); color: #ffffff; pointer-events: none; user-select: none; -webkit-user-select: none; }
+.mobile-voice-overlay { position: fixed; inset: 0; z-index: 10000; background: rgba(14, 14, 24, 0.88); color: #ffffff; pointer-events: none; user-select: none; -webkit-user-select: none; }
 .mobile-voice-center { position: absolute; left: 50%; top: 48%; transform: translate(-50%, -50%); width: 85%; display: flex; align-items: center; flex-direction: column; gap: 18px; }
 .mobile-voice-bubble { display: flex; align-items: center; gap: 18px; justify-content: center; width: 184px; height: 112px; border-radius: 32px; background: linear-gradient(135deg, color-mix(in oklab, var(--astr-accent, #7540bd) 82%, white), var(--astr-accent, #7540bd)); color: var(--astr-accent-contrast, #ffffff); transition: background 0.15s ease; box-shadow: 0 12px 42px color-mix(in oklab, var(--astr-accent, #7540bd) 42%, transparent); }
 .is-cancel .mobile-voice-bubble { background: linear-gradient(135deg, #f05252, #c53243); box-shadow: 0 12px 42px rgba(197, 50, 67, 0.42); }

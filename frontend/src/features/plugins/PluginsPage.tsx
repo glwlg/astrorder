@@ -5,7 +5,6 @@ import {
   Button,
   Card,
   Collapse,
-  Divider,
   Group,
   Modal,
   NumberInput,
@@ -25,26 +24,42 @@ import {
   IconAdjustments,
   IconArrowUpRight,
   IconChevronDown,
+  IconChevronRight,
   IconChevronUp,
   IconInfoCircle,
   IconMicrophone,
-  IconPuzzle,
   IconSearch,
-  IconSettings,
   IconX,
 } from '@tabler/icons-react'
-import { api, type BrowserEngine, type LocalVoicePluginStatus } from '../../api/client'
+import { api, type BrowserEngine, type LocalVoicePluginStatus, type ToolchainItemStatus } from '../../api/client'
 import { artifactViewerRegistry } from '../sidecar/registry'
 import type { ArtifactViewer, PluginCategory, ViewerConfigOption } from '../sidecar/types'
 import {
   BROWSER_VIEWER_PLUGIN_ID,
+  BUILTIN_AGENT_PLUGINS,
   BUILTIN_SYSTEM_PLUGINS,
   VOICE_INPUT_PLUGIN_ID,
   type SystemPluginDescriptor,
 } from './builtinPlugins'
 import { PLUGIN_CATEGORIES, resolveViewerCategory, type PluginCategoryMeta, type PluginTabId } from './pluginCategories'
 import { usePluginSettingsStore } from './pluginSettingsStore'
+import { AgentEnginePluginCard, ToolchainRuntimeCard } from '../toolchain/ToolchainSectionCard'
+import { useSettingsMode } from '../settings/settingsMode'
 import './PluginsPage.css'
+
+const BASIC_PLUGIN_CATEGORIES = new Set<PluginCategory>(['office', 'workspace', 'diagram', 'media'])
+const BASIC_EXTRA_PLUGIN_IDS = new Set<string>([VOICE_INPUT_PLUGIN_ID])
+const ADVANCED_ONLY_WORKSPACE_IDS = new Set<string>([
+  'workspace-agent-accounts',
+  'workspace-analytics-gateway',
+  'workspace-monitor',
+  'workspace-groups',
+  'workspace-backups',
+  'agent-graph-viewer',
+  'blackboard-viewer',
+  'memory-viewer',
+  'git-worktrees-viewer',
+])
 
 const BROWSER_ENGINE_LABELS: Record<BrowserEngine, string> = {
   browser_use: 'Browser Use',
@@ -260,110 +275,97 @@ function VoiceInputPluginCard() {
   const providerBadge = isLocalR2T2 ? 'R2T2 本地流式' : '云端 Whisper'
 
   return (
-    <Card withBorder radius="md" p="md" style={{ background: 'var(--astr-surface)' }}>
-      <Group justify="space-between" align="flex-start" wrap="nowrap">
-        <Group gap="sm" wrap="nowrap" align="flex-start">
-          <div
-            style={{
-              padding: 8,
-              borderRadius: 8,
-              background: isEnabled && running && isLocalR2T2
-                ? 'rgba(34, 197, 94, 0.12)'
-                : isEnabled
-                  ? 'color-mix(in oklab, var(--astr-accent) 12%, transparent)'
-                  : 'var(--astr-surface-muted)',
-              color: isEnabled && running && isLocalR2T2
-                ? '#16a34a'
-                : isEnabled
-                  ? 'var(--astr-indigo)'
-                  : 'var(--astr-muted)',
-              display: 'flex',
-            }}
-          >
-            <IconMicrophone size={24} />
+    <Card withBorder className="plugins-tile">
+      <div>
+        <div className="plugins-tile-head">
+          <div className="plugins-tile-title-row">
+            <span
+              className={`plugins-tile-icon${isEnabled ? '' : ' is-muted'}`}
+              style={isEnabled && running && isLocalR2T2 ? { color: '#10b981' } : undefined}
+              aria-hidden="true"
+            >
+              <IconMicrophone size={17} />
+            </span>
+            <Text fw={600} size="sm">语音输入与听写</Text>
+            <Badge size="xs" variant="light" color="gray">当前实现: {providerBadge}</Badge>
           </div>
-          <div>
-            <Group gap="xs" wrap="wrap">
-              <Text fw={600} size="sm">语音输入与听写</Text>
-              <Badge size="xs" variant="light" color="teal">当前实现: {providerBadge}</Badge>
-            </Group>
-            <Text size="xs" c="dimmed" mt={4}>
-              为对话与群聊输入框提供语音听写能力，支持在本地流式模型与云端 Whisper 接口间切换；停用后隐藏输入框麦克风按钮。
-            </Text>
-            {isEnabled && isLocalR2T2 && (
-              <Group justify="space-between" align="center" gap="xs" mt={8} wrap="nowrap">
-                <Text size="xs" c={status?.state === 'error' ? 'red' : 'dimmed'}>
-                  R2T2 本地引擎：{status?.error || stateLabel}
-                </Text>
-                <Switch
-                  size="xs"
-                  color="green"
-                  aria-label="启用 R2T2 本地流式听写"
-                  checked={Boolean(status?.enabled)}
-                  disabled={!status || loading}
-                  onChange={() => { void toggleLocalRuntime() }}
-                />
-              </Group>
-            )}
-            {isEnabled && isLocalR2T2 && status?.state === 'installing' && (
-              <Progress value={(status.progress || 0) * 100} size="xs" mt={8} />
-            )}
-          </div>
-        </Group>
-        <Switch
-          aria-label="启用或禁用 语音输入与听写"
-          size="sm"
-          color="indigo"
-          checked={isEnabled}
-          onChange={(e) => togglePlugin(VOICE_INPUT_PLUGIN_ID, e.currentTarget.checked)}
-        />
-      </Group>
+          <Switch
+            aria-label="启用或禁用 语音输入与听写"
+            size="sm"
+            checked={isEnabled}
+            onChange={(e) => togglePlugin(VOICE_INPUT_PLUGIN_ID, e.currentTarget.checked)}
+          />
+        </div>
 
-      <Divider my="sm" />
-      <Group justify="space-between" align="center">
-        <Button
-          variant="subtle"
-          size="compact-xs"
-          color="gray"
-          leftSection={<IconAdjustments size={13} />}
-          rightSection={expanded ? <IconChevronUp size={13} /> : <IconChevronDown size={13} />}
-          onClick={() => setExpanded(!expanded)}
-        >
-          参数配置 (1)
-        </Button>
-        <Text size="xs" c="dimmed">
-          {isEnabled ? '生效中' : '已停用'}
-        </Text>
-      </Group>
+        <div className="plugins-tile-desc">
+          为对话与会议提供语音转文字能力，支持本机离线实时转写或云端语音接口。
+        </div>
 
-      <Collapse expanded={expanded}>
-        <Stack gap="xs" mt="xs" p="xs" style={{ background: 'var(--astr-surface-muted)', borderRadius: 6 }}>
-          <div>
-            <Text size="xs" fw={500} mb={2}>工具实现</Text>
-            <Text size="11px" c="dimmed" mb={4}>
-              选择语音转文字引擎实现：本地 R2T2 流式模型实时回填，云端 Whisper 不占用本机显存
+        {isEnabled && isLocalR2T2 && (
+          <Group justify="space-between" align="center" gap="xs" mt={10} wrap="nowrap">
+            <Text size="xs" c={status?.state === 'error' ? 'red' : 'dimmed'}>
+              本机离线语音引擎：{status?.error || stateLabel}
             </Text>
-            <Select
+            <Switch
               size="xs"
-              allowDeselect={false}
-              aria-label="语音听写实现"
-              value={isLocalR2T2 ? 'local-r2t2' : 'cloud-whisper'}
-              onChange={(val) => {
-                if (val !== null) setPluginConfig(VOICE_INPUT_PLUGIN_ID, 'provider', val)
-              }}
-              data={[
-                { value: 'local-r2t2', label: 'R2T2 本地流式模型' },
-                { value: 'cloud-whisper', label: '云端 Whisper 转写' },
-              ]}
+              aria-label="启用 R2T2 本地流式听写"
+              checked={Boolean(status?.enabled)}
+              disabled={!status || loading}
+              onChange={() => { void toggleLocalRuntime() }}
             />
-          </div>
-          {!isLocalR2T2 && (
-            <Text size="11px" c="dimmed">
-              录音结束后提交至后端 /api/v1/audio/transcriptions，不启动本机 GPU 语音模型。
-            </Text>
-          )}
-        </Stack>
-      </Collapse>
+          </Group>
+        )}
+        {isEnabled && isLocalR2T2 && status?.state === 'installing' && (
+          <Progress value={(status.progress || 0) * 100} size="xs" mt={8} />
+        )}
+      </div>
+
+      <div>
+        <div className="plugins-tile-footer is-split">
+          <Button
+            variant="subtle"
+            size="compact-xs"
+            color="gray"
+            leftSection={<IconAdjustments size={13} />}
+            rightSection={expanded ? <IconChevronUp size={13} /> : <IconChevronDown size={13} />}
+            onClick={() => setExpanded(!expanded)}
+          >
+            参数配置 (1)
+          </Button>
+          <Text size="xs" c="dimmed">
+            {isEnabled ? '生效中' : '已停用'}
+          </Text>
+        </div>
+
+        <Collapse expanded={expanded}>
+          <Stack gap="xs" mt="xs" p="xs" style={{ background: 'var(--st-rail, var(--astr-surface-muted))', borderRadius: 8 }}>
+            <div>
+              <Text size="xs" fw={500} mb={2}>工具实现</Text>
+              <Text size="11px" c="dimmed" mb={4}>
+                选择语音转文字引擎实现：本地 R2T2 流式模型实时回填，云端 Whisper 不占用本机显存
+              </Text>
+              <Select
+                size="xs"
+                allowDeselect={false}
+                aria-label="语音听写实现"
+                value={isLocalR2T2 ? 'local-r2t2' : 'cloud-whisper'}
+                onChange={(val) => {
+                  if (val !== null) setPluginConfig(VOICE_INPUT_PLUGIN_ID, 'provider', val)
+                }}
+                data={[
+                  { value: 'local-r2t2', label: 'R2T2 本地流式模型' },
+                  { value: 'cloud-whisper', label: '云端 Whisper 转写' },
+                ]}
+              />
+            </div>
+            {!isLocalR2T2 && (
+              <Text size="11px" c="dimmed">
+                录音结束后将使用已配置的云端语音接口转写，不占用本机硬件资源。
+              </Text>
+            )}
+          </Stack>
+        </Collapse>
+      </div>
     </Card>
   )
 }
@@ -402,104 +404,81 @@ function SystemPluginCard({ descriptor }: { descriptor: SystemPluginDescriptor }
   })()
 
   return (
-    <Card withBorder radius="md" p="md" style={{ background: 'var(--astr-surface)' }}>
-      <Group justify="space-between" align="flex-start" wrap="nowrap">
-        <Group gap="sm" wrap="nowrap" align="flex-start">
-          <div
-            style={{
-              padding: 8,
-              borderRadius: 8,
-              background: isEnabled ? 'color-mix(in oklab, var(--astr-accent) 12%, transparent)' : 'var(--astr-surface-muted)',
-              color: isEnabled ? 'var(--astr-indigo)' : 'var(--astr-muted)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <Icon size={24} />
-          </div>
-          <div>
-            <Group gap="xs" align="center" wrap="wrap">
-              <Text fw={600} size="sm">{descriptor.title}</Text>
-              {descriptor.capabilitySlot ? (
-                <Badge size="xs" variant="light" color="teal">
-                  {activeProviderLabel ? `当前实现: ${activeProviderLabel}` : `${descriptor.capabilityLabel || descriptor.capabilitySlot}`}
-                </Badge>
-              ) : descriptor.badgeLabel ? (
-                <Badge size="xs" variant="light" color="indigo">{descriptor.badgeLabel}</Badge>
-              ) : null}
-            </Group>
-            <Text size="xs" c="dimmed" mt={4}>
-              {descriptor.description}
-            </Text>
-            {isEnabled && (descriptor.settingsAction || descriptor.routeAction) && (
-              <Group gap="xs" mt={8}>
-                {descriptor.settingsAction && (
-                  <Button
-                    size="compact-xs"
-                    variant="light"
-                    color="violet"
-                    leftSection={<IconSettings size={13} />}
-                    onClick={() => window.dispatchEvent(new CustomEvent('astrorder:open-settings', { detail: { tab: descriptor.settingsAction!.tab } }))}
-                  >
-                    {descriptor.settingsAction.label}
-                  </Button>
-                )}
-                {descriptor.routeAction && (
-                  <Button
-                    size="compact-xs"
-                    variant="subtle"
-                    color="indigo"
-                    rightSection={<IconArrowUpRight size={13} />}
-                    onClick={() => window.dispatchEvent(new CustomEvent('astrorder:navigate', { detail: { to: descriptor.routeAction!.to } }))}
-                  >
-                    {descriptor.routeAction.label}
-                  </Button>
-                )}
-              </Group>
+    <Card withBorder className="plugins-tile">
+      <div>
+        <div className="plugins-tile-head">
+          <div className="plugins-tile-title-row">
+            <span className={`plugins-tile-icon${isEnabled ? '' : ' is-muted'}`} aria-hidden="true">
+              <Icon size={17} />
+            </span>
+            <Text fw={600} size="sm">{descriptor.title}</Text>
+            {descriptor.capabilitySlot && (
+              <Badge size="xs" variant="light" color="gray">
+                {activeProviderLabel ? `当前实现: ${activeProviderLabel}` : `${descriptor.capabilityLabel || descriptor.capabilitySlot}`}
+              </Badge>
             )}
           </div>
-        </Group>
-        <Switch
-          aria-label={`启用 ${descriptor.title}`}
-          size="sm"
-          color="indigo"
-          checked={isEnabled}
-          onChange={(e) => togglePlugin(descriptor.id, e.currentTarget.checked)}
-        />
-      </Group>
+          <Switch
+            aria-label={`启用 ${descriptor.title}`}
+            size="sm"
+            checked={isEnabled}
+            onChange={(e) => togglePlugin(descriptor.id, e.currentTarget.checked)}
+          />
+        </div>
+        <div className="plugins-tile-desc">{descriptor.description}</div>
+      </div>
 
-      {hasOptions && (
+      {(isEnabled && (descriptor.settingsAction || descriptor.routeAction)) || hasOptions ? (
         <>
-          <Divider my="sm" />
-          <Group justify="space-between" align="center">
-            <Button
-              variant="subtle"
-              size="compact-xs"
-              color="gray"
-              leftSection={<IconAdjustments size={13} />}
-              rightSection={expanded ? <IconChevronUp size={13} /> : <IconChevronDown size={13} />}
-              onClick={() => setExpanded(!expanded)}
-            >
-              参数配置 ({visibleOptions.length})
-            </Button>
-            <Text size="xs" c="dimmed">
-              {isEnabled ? '生效中' : '已停用'}
-            </Text>
-          </Group>
-
-          <Collapse expanded={expanded}>
-            <Stack gap="xs" mt="xs" p="xs" style={{ background: 'var(--astr-surface-muted)', borderRadius: 6 }}>
-              <ConfigOptionControls
-                pluginId={descriptor.id}
-                options={visibleOptions}
-                pluginConfigMap={pluginConfigMap}
-                setPluginConfig={setPluginConfig}
-              />
-            </Stack>
-          </Collapse>
+          <div className={`plugins-tile-footer${hasOptions ? ' is-split' : ''}`}>
+            {hasOptions && (
+              <Button
+                variant="subtle"
+                size="compact-xs"
+                color="gray"
+                leftSection={<IconAdjustments size={13} />}
+                rightSection={expanded ? <IconChevronUp size={13} /> : <IconChevronDown size={13} />}
+                onClick={() => setExpanded(!expanded)}
+              >
+                参数配置 ({visibleOptions.length})
+              </Button>
+            )}
+            <Group gap={12}>
+              {isEnabled && descriptor.settingsAction && (
+                <button
+                  type="button"
+                  className="st-text-link is-muted"
+                  onClick={() => window.dispatchEvent(new CustomEvent('astrorder:open-settings', { detail: { tab: descriptor.settingsAction!.tab } }))}
+                >
+                  {descriptor.settingsAction.label}
+                </button>
+              )}
+              {isEnabled && descriptor.routeAction && (
+                <button
+                  type="button"
+                  className="st-text-link is-muted"
+                  onClick={() => window.dispatchEvent(new CustomEvent('astrorder:navigate', { detail: { to: descriptor.routeAction!.to } }))}
+                >
+                  <span>{descriptor.routeAction.label}</span>
+                  <IconArrowUpRight size={13} />
+                </button>
+              )}
+            </Group>
+          </div>
+          {hasOptions && (
+            <Collapse expanded={expanded}>
+              <Stack gap="xs" mt="xs" p="xs" style={{ background: 'var(--st-rail, var(--astr-surface-muted))', borderRadius: 8 }}>
+                <ConfigOptionControls
+                  pluginId={descriptor.id}
+                  options={visibleOptions}
+                  pluginConfigMap={pluginConfigMap}
+                  setPluginConfig={setPluginConfig}
+                />
+              </Stack>
+            </Collapse>
+          )}
         </>
-      )}
+      ) : null}
     </Card>
   )
 }
@@ -573,146 +552,108 @@ function PluginCard({ viewer }: { viewer: ArtifactViewer }) {
   })()
 
   return (
-    <Card withBorder radius="md" p="md" style={{ background: 'var(--astr-surface)' }}>
-      <Group justify="space-between" align="flex-start" wrap="nowrap">
-        <Group gap="sm" wrap="nowrap" align="flex-start">
-          <div
-            style={{
-              padding: 8,
-              borderRadius: 8,
-              background: isEnabled ? 'color-mix(in oklab, var(--astr-accent) 12%, transparent)' : 'var(--astr-surface-muted)',
-              color: isEnabled ? 'var(--astr-indigo)' : 'var(--astr-muted)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <Icon size={24} />
-          </div>
-          <div>
-            <Group gap="xs" align="center" wrap="wrap">
-              <Text fw={600} size="sm">
-                {viewer.title}
-              </Text>
-              {viewer.version && (
-                <Badge size="xs" variant="outline" color="gray">
-                  v{viewer.version}
-                </Badge>
-              )}
-              {viewer.capabilitySlot && (
-                <Badge size="xs" variant="light" color="teal">
-                  {activeProviderLabel ? `当前实现: ${activeProviderLabel}` : `${viewer.capabilityLabel || viewer.capabilitySlot} · 可替换实现`}
-                </Badge>
-              )}
-              {viewer.capabilities.canEdit && (
-                <Badge size="xs" variant="light" color="blue">
-                  支持编辑写回
-                </Badge>
-              )}
-            </Group>
-            <Text size="xs" c="dimmed" mt={4}>
-              {viewer.description || '为工作区提供专有媒体与格式的交互渲染与处理支持。'}
+    <Card withBorder className="plugins-tile">
+      <div>
+        <div className="plugins-tile-head">
+          <div className="plugins-tile-title-row">
+            <span className={`plugins-tile-icon${isEnabled ? '' : ' is-muted'}`} aria-hidden="true">
+              <Icon size={17} />
+            </span>
+            <Text fw={600} size="sm">
+              {viewer.title}
             </Text>
-            {isEnabled && viewer.settingsAction && (
+            {viewer.capabilitySlot && (
+              <Badge size="xs" variant="light" color="gray">
+                {activeProviderLabel ? `当前实现: ${activeProviderLabel}` : `${viewer.capabilityLabel || viewer.capabilitySlot}`}
+              </Badge>
+            )}
+          </div>
+
+          <Group gap={6} wrap="nowrap" align="center">
+            <Tooltip label="查看说明" withArrow>
+              <ActionIcon
+                size="sm"
+                variant="subtle"
+                color="gray"
+                onClick={() => setInfoOpened(true)}
+                aria-label={`查看 ${viewer.title} 说明`}
+              >
+                <IconInfoCircle size={15} />
+              </ActionIcon>
+            </Tooltip>
+
+            <Switch
+              checked={isEnabled}
+              onChange={(e) => togglePlugin(viewer.id, e.currentTarget.checked)}
+              size="sm"
+              aria-label={`启用或禁用 ${viewer.title}`}
+            />
+          </Group>
+        </div>
+
+        <div className="plugins-tile-desc">
+          {viewer.description || '为工作区提供专有媒体与格式的交互渲染与处理支持。'}
+        </div>
+      </div>
+
+      {(hasOptions || (isEnabled && viewer.settingsAction)) && (
+        <>
+          <div className={`plugins-tile-footer${hasOptions ? ' is-split' : ''}`}>
+            {hasOptions && (
               <Button
+                variant="subtle"
                 size="compact-xs"
-                variant="light"
-                color="violet"
-                mt={8}
-                leftSection={<IconSettings size={13} />}
+                color="gray"
+                leftSection={<IconAdjustments size={13} />}
+                rightSection={expanded ? <IconChevronUp size={13} /> : <IconChevronDown size={13} />}
+                onClick={() => setExpanded(!expanded)}
+              >
+                参数配置 ({optionCount})
+              </Button>
+            )}
+            {isEnabled && viewer.settingsAction && (
+              <button
+                type="button"
+                className="st-text-link is-muted"
                 onClick={() => window.dispatchEvent(new CustomEvent('astrorder:open-settings', { detail: { tab: viewer.settingsAction!.tab } }))}
               >
                 {viewer.settingsAction.label}
-              </Button>
-            )}
-            {viewer.id === 'blackboard-viewer' && (
-              <Group gap={6} mt={6}>
-                <Badge size="xs" color="indigo" variant="light">
-                  星序多 Agent 核心总线
-                </Badge>
-                <Badge size="xs" color="cyan" variant="light">
-                  json-render 视觉引擎
-                </Badge>
-                <Badge size="xs" color="teal" variant="light">
-                  星系自动物理隔离
-                </Badge>
-              </Group>
+              </button>
             )}
           </div>
-        </Group>
 
-        <Group gap="xs" wrap="nowrap" align="center">
-          <Tooltip label="查看插件说明与支持能力" withArrow>
-            <ActionIcon
-              size="sm"
-              variant="subtle"
-              color="gray"
-              onClick={() => setInfoOpened(true)}
-              aria-label={`查看 ${viewer.title} 说明`}
-            >
-              <IconInfoCircle size={17} />
-            </ActionIcon>
-          </Tooltip>
-
-          <Switch
-            checked={isEnabled}
-            onChange={(e) => togglePlugin(viewer.id, e.currentTarget.checked)}
-            size="sm"
-            color="indigo"
-            aria-label={`启用或禁用 ${viewer.title}`}
-          />
-        </Group>
-      </Group>
-
-      {hasOptions && (
-        <>
-          <Divider my="sm" />
-          <Group justify="space-between" align="center">
-            <Button
-              variant="subtle"
-              size="compact-xs"
-              color="gray"
-              leftSection={<IconAdjustments size={13} />}
-              rightSection={expanded ? <IconChevronUp size={13} /> : <IconChevronDown size={13} />}
-              onClick={() => setExpanded(!expanded)}
-            >
-              参数配置 ({optionCount})
-            </Button>
-            <Text size="xs" c="dimmed">
-              {isEnabled ? '生效中' : '已停用'}
-            </Text>
-          </Group>
-
-          <Collapse expanded={expanded}>
-            <Stack gap="xs" mt="xs" p="xs" style={{ background: 'var(--astr-surface-muted)', borderRadius: 6 }}>
-              {isBrowserViewer && (
-                <div>
-                  <Text size="xs" fw={500} mb={2}>工具实现</Text>
-                  <Text size="11px" c="dimmed" mb={4}>
-                    选择自动执行网页任务的底层引擎（与「模型与网关」同步生效）
-                  </Text>
-                  <Select
-                    size="xs"
-                    allowDeselect={false}
-                    aria-label="浏览器自动化引擎"
-                    disabled={savingEngine}
-                    value={browserEngine}
-                    onChange={(val) => { void handleBrowserEngineChange(val) }}
-                    data={[
-                      { value: 'browser_use', label: 'Browser Use' },
-                      { value: 'jev_ultrafast', label: 'System One' },
-                    ]}
-                  />
-                </div>
-              )}
-              <ConfigOptionControls
-                pluginId={viewer.id}
-                options={visibleOptions}
-                pluginConfigMap={pluginConfigMap}
-                setPluginConfig={setPluginConfig}
-              />
-            </Stack>
-          </Collapse>
+          {hasOptions && (
+            <Collapse expanded={expanded}>
+              <Stack gap="xs" mt="xs" p="xs" style={{ background: 'var(--st-rail, var(--astr-surface-muted))', borderRadius: 8 }}>
+                {isBrowserViewer && (
+                  <div>
+                    <Text size="xs" fw={500} mb={2}>工具实现</Text>
+                    <Text size="11px" c="dimmed" mb={4}>
+                      选择自动执行网页任务的底层引擎（与「模型与网关」同步生效）
+                    </Text>
+                    <Select
+                      size="xs"
+                      allowDeselect={false}
+                      aria-label="浏览器自动化引擎"
+                      disabled={savingEngine}
+                      value={browserEngine}
+                      onChange={(val) => { void handleBrowserEngineChange(val) }}
+                      data={[
+                        { value: 'browser_use', label: 'Browser Use' },
+                        { value: 'jev_ultrafast', label: 'System One' },
+                      ]}
+                    />
+                  </div>
+                )}
+                <ConfigOptionControls
+                  pluginId={viewer.id}
+                  options={visibleOptions}
+                  pluginConfigMap={pluginConfigMap}
+                  setPluginConfig={setPluginConfig}
+                />
+              </Stack>
+            </Collapse>
+          )}
         </>
       )}
 
@@ -860,6 +801,7 @@ interface CatalogEntry {
   category: PluginCategory
   searchText: string
   isToggleable: boolean
+  fullWidth?: boolean
   render: () => React.ReactNode
 }
 
@@ -873,34 +815,23 @@ function CategorySection({
   enabledPlugins: Record<string, boolean>
 }) {
   if (entries.length === 0) return null
-  const Icon = meta.icon
   const toggleable = entries.filter((entry) => entry.isToggleable)
   const enabledCount = toggleable.filter((entry) => enabledPlugins[entry.id] !== false).length
 
   return (
     <section className="plugins-category-section" aria-label={meta.label}>
       <div className="plugins-category-header">
-        <div className="plugins-category-title-wrap">
-          <span className="plugins-category-icon" aria-hidden="true">
-            <Icon size={16} />
-          </span>
-          <div style={{ minWidth: 0 }}>
-            <Group gap="xs" wrap="nowrap">
-              <Text fw={600} size="sm">{meta.label}</Text>
-              <Badge size="xs" variant="light" color="gray">
-                {toggleable.length > 0 ? `${enabledCount} / ${entries.length}` : `${entries.length} 项`}
-              </Badge>
-            </Group>
-            <Text size="xs" c="dimmed" truncate>
-              {meta.description}
-            </Text>
-          </div>
-        </div>
+        <span className="plugins-category-title">{meta.label}</span>
+        <span className="plugins-category-count">
+          {toggleable.length > 0 ? `${enabledCount} / ${toggleable.length} 已启用` : `${entries.length} 项`}
+        </span>
       </div>
 
-      <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
+      <SimpleGrid cols={{ base: 1, sm: 2 }} spacing={14}>
         {entries.map((entry) => (
-          <div key={entry.id}>{entry.render()}</div>
+          <div key={entry.id} style={entry.fullWidth ? { gridColumn: '1 / -1' } : undefined}>
+            {entry.render()}
+          </div>
         ))}
       </SimpleGrid>
     </section>
@@ -911,18 +842,71 @@ export function PluginsPage() {
   const viewers = useMemo(() => artifactViewerRegistry.getAllViewers(), [])
   const hydrate = usePluginSettingsStore((s) => s.hydrate)
   const enabledPlugins = usePluginSettingsStore((s) => s.enabledPlugins)
+  const { mode, setMode, managedByWorkbench } = useSettingsMode()
+  const isBasicMode = managedByWorkbench && mode === 'basic'
 
   const [activeTab, setActiveTab] = useState<PluginTabId>('all')
   const [query, setQuery] = useState('')
+  const [localToolchain, setLocalToolchain] = useState<Record<string, ToolchainItemStatus>>({})
   const tablistRef = useRef<HTMLDivElement | null>(null)
   const panelRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
+  const refreshLocalToolchain = () => {
+    if (typeof api.getToolchainStatus !== 'function') return
+    void api.getToolchainStatus('local')
+      .then((report) => {
+        const mapped: Record<string, ToolchainItemStatus> = {}
+        for (const item of report.items || []) {
+          mapped[item.id] = item
+        }
+        setLocalToolchain(mapped)
+      })
+      .catch(() => {})
+  }
+
   useEffect(() => {
     void hydrate()
+    refreshLocalToolchain()
   }, [hydrate])
 
   const catalogEntries = useMemo<CatalogEntry[]>(() => {
     const entries: CatalogEntry[] = [
+      ...BUILTIN_AGENT_PLUGINS.map((descriptor) => ({
+        id: descriptor.id,
+        category: 'agent' as PluginCategory,
+        searchText: [
+          descriptor.id,
+          descriptor.kind,
+          descriptor.title,
+          descriptor.description,
+          ...descriptor.searchKeywords,
+        ].join(' ').toLowerCase(),
+        isToggleable: true,
+        render: () => (
+          <AgentEnginePluginCard
+            descriptor={descriptor}
+            localStatus={localToolchain[descriptor.kind]}
+            onRefreshToolchain={refreshLocalToolchain}
+          />
+        ),
+      })),
+      {
+        id: 'toolchain-runtime-panel',
+        category: 'runtime' as PluginCategory,
+        searchText: '常用开发工具链 uv uvx node npm npx git ripgrep rg 安装 体检 工具 路径 runtime toolchain',
+        isToggleable: false,
+        fullWidth: true,
+        render: () => (
+          <ToolchainRuntimeCard
+            onReportUpdated={(envId, report) => {
+              if (envId !== 'local') return
+              const mapped: Record<string, ToolchainItemStatus> = {}
+              for (const item of report.items || []) mapped[item.id] = item
+              setLocalToolchain(mapped)
+            }}
+          />
+        ),
+      },
       ...BUILTIN_SYSTEM_PLUGINS.map((descriptor) => ({
         id: descriptor.id,
         category: descriptor.category,
@@ -940,7 +924,7 @@ export function PluginsPage() {
       })),
       {
         id: VOICE_INPUT_PLUGIN_ID,
-        category: 'runtime',
+        category: 'office',
         searchText: '语音输入与听写 r2t2 本地流式 whisper 云端 语音 模型 录音 voice',
         isToggleable: true,
         render: () => <VoiceInputPluginCard />,
@@ -963,17 +947,29 @@ export function PluginsPage() {
       })),
     ]
     return entries
-  }, [viewers])
+  }, [viewers, localToolchain])
 
   const normalizedQuery = query.trim().toLowerCase()
+  const visibleCatalogEntries = useMemo(() => {
+    if (!isBasicMode || normalizedQuery) return catalogEntries
+    return catalogEntries.filter((entry) => {
+      if (ADVANCED_ONLY_WORKSPACE_IDS.has(entry.id)) return false
+      return BASIC_PLUGIN_CATEGORIES.has(entry.category) || BASIC_EXTRA_PLUGIN_IDS.has(entry.id)
+    })
+  }, [catalogEntries, isBasicMode, normalizedQuery])
+
+  const hiddenAdvancedCount = catalogEntries.length - visibleCatalogEntries.length
+
   const filteredEntries = useMemo(() => {
-    if (!normalizedQuery) return catalogEntries
-    return catalogEntries.filter((entry) => entry.searchText.includes(normalizedQuery))
-  }, [catalogEntries, normalizedQuery])
+    if (!normalizedQuery) return visibleCatalogEntries
+    return visibleCatalogEntries.filter((entry) => entry.searchText.includes(normalizedQuery))
+  }, [visibleCatalogEntries, normalizedQuery])
 
   const entriesByCategory = useMemo(() => {
     const grouped: Record<PluginCategory, CatalogEntry[]> = {
+      agent: [],
       development: [],
+      office: [],
       workspace: [],
       diagram: [],
       media: [],
@@ -985,17 +981,31 @@ export function PluginsPage() {
     return grouped
   }, [filteredEntries])
 
+  const visibleCategories = useMemo(
+    () =>
+      isBasicMode && !normalizedQuery
+        ? PLUGIN_CATEGORIES.filter((cat) => entriesByCategory[cat.id].length > 0)
+        : PLUGIN_CATEGORIES,
+    [entriesByCategory, isBasicMode, normalizedQuery],
+  )
+
   const tabs = useMemo(
     () => [
-      { id: 'all' as PluginTabId, label: '全部', count: filteredEntries.length },
-      ...PLUGIN_CATEGORIES.map((cat) => ({
+      { id: 'all' as PluginTabId, label: isBasicMode && !normalizedQuery ? '常用功能' : '全部', count: filteredEntries.length },
+      ...visibleCategories.map((cat) => ({
         id: cat.id as PluginTabId,
         label: cat.label,
         count: entriesByCategory[cat.id].length,
       })),
     ],
-    [filteredEntries.length, entriesByCategory],
+    [filteredEntries.length, entriesByCategory, visibleCategories, isBasicMode, normalizedQuery],
   )
+
+  useEffect(() => {
+    if (!tabs.some((t) => t.id === activeTab)) {
+      setActiveTab('all')
+    }
+  }, [activeTab, tabs])
 
   const selectTab = (nextId: PluginTabId, scrollTab = true) => {
     setActiveTab(nextId)
@@ -1041,6 +1051,7 @@ export function PluginsPage() {
   }
 
   const allToggleableIds = [
+    ...BUILTIN_AGENT_PLUGINS.map((p) => p.id),
     ...BUILTIN_SYSTEM_PLUGINS.map((p) => p.id),
     VOICE_INPUT_PLUGIN_ID,
     ...viewers.map((v) => v.id),
@@ -1049,57 +1060,40 @@ export function PluginsPage() {
 
   return (
     <div className="route-page plugins-page">
-      <Paper p="md" withBorder radius="lg" mb="md" style={{ background: 'var(--astr-surface)' }}>
-        <Group justify="space-between" align="center" wrap="wrap" gap="sm">
-          <Group gap="sm" wrap="nowrap">
-            <div
-              style={{
-                width: 38,
-                height: 38,
-                borderRadius: 10,
-                background: 'color-mix(in srgb, var(--astr-indigo) 12%, transparent)',
-                color: 'var(--astr-indigo)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                flexShrink: 0,
-              }}
-            >
-              <IconPuzzle size={22} />
-            </div>
-            <div>
-              <Title order={2} size="h3">
-                插件管理
-              </Title>
-              <Text size="xs" c="dimmed" mt={2}>
-                按能力分类管理开发工具、工作台扩展、富媒介渲染器与本地运行时，能力槽位支持按需启停与替换实现。
-              </Text>
-            </div>
-          </Group>
+      <div className="plugins-page-top">
+        <div>
+          <Title order={2} style={{ fontSize: 22, fontWeight: 650, letterSpacing: '-0.025em', color: 'var(--st-ink, var(--astr-text))' }}>
+            插件管理
+          </Title>
+          <Text size="sm" c="dimmed" mt={4}>
+            {isBasicMode ? '按需开关办公与协作功能，保持工作区简洁' : '按能力分类管理全部工作台扩展、开发工具与本地运行时'}
+          </Text>
+        </div>
 
-          <Group gap="xs" wrap="nowrap">
-            <TextInput
-              size="xs"
-              placeholder="搜索插件、实现或文件类型…"
-              aria-label="搜索插件"
-              value={query}
-              onChange={(e) => setQuery(e.currentTarget.value)}
-              leftSection={<IconSearch size={14} />}
-              rightSection={
-                query ? (
-                  <ActionIcon size="xs" variant="subtle" color="gray" aria-label="清空搜索" onClick={() => setQuery('')}>
-                    <IconX size={12} />
-                  </ActionIcon>
-                ) : null
-              }
-              style={{ width: 220 }}
-            />
-            <Badge size="md" variant="light" color="indigo">
+        <div className="plugins-page-search">
+          <TextInput
+            size="xs"
+            placeholder="搜索插件、实现或文件类型…"
+            aria-label="搜索插件"
+            value={query}
+            onChange={(e) => setQuery(e.currentTarget.value)}
+            leftSection={<IconSearch size={14} />}
+            rightSection={
+              query ? (
+                <ActionIcon size="xs" variant="subtle" color="gray" aria-label="清空搜索" onClick={() => setQuery('')}>
+                  <IconX size={12} />
+                </ActionIcon>
+              ) : null
+            }
+            style={{ width: 220 }}
+          />
+          {!isBasicMode && (
+            <Text size="xs" c="dimmed" style={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
               已启用 {enabledCount} / {allToggleableIds.length}
-            </Badge>
-          </Group>
-        </Group>
-      </Paper>
+            </Text>
+          )}
+        </div>
+      </div>
 
       <div className="plugins-tabs-shell">
         <div
@@ -1134,6 +1128,18 @@ export function PluginsPage() {
       </div>
 
       <div className="plugins-panels">
+        {isBasicMode && hiddenAdvancedCount > 0 && !normalizedQuery && (
+          <div className="st-inline-notice">
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <IconInfoCircle size={14} aria-hidden="true" />
+              <span>已隐藏 {hiddenAdvancedCount} 项开发引擎、数据库与命令行底层插件</span>
+            </span>
+            <button type="button" className="st-text-link" onClick={() => setMode('advanced')}>
+              <span>在高级配置中查看全部</span>
+              <IconChevronRight size={14} aria-hidden="true" />
+            </button>
+          </div>
+        )}
         {tabs.map((tab) => {
           const isSelected = activeTab === tab.id
           const sectionsToRender =

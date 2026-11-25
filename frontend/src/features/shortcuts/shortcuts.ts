@@ -14,8 +14,8 @@ export const shortcutActions = [
   { id: 'sideChat', label: '打开侧边聊天', group: '当前会话', defaultKey: 'Ctrl+Alt+S', description: '在侧边栏打开当前会话。' },
   { id: 'blackboard', label: '打开黑板', group: '当前会话', defaultKey: 'Ctrl+Alt+B', description: '显示当前会话黑板。' },
   { id: 'memory', label: '打开知识记忆', group: '当前会话', defaultKey: 'Ctrl+Alt+M', description: '显示当前会话的知识记忆。' },
-  { id: 'agentGraph', label: '打开决策状态机', group: '当前会话', defaultKey: 'Ctrl+Alt+G', description: '显示当前会话的决策状态机。' },
-  { id: 'sidecar', label: '展开或收起侧边栏', group: '当前会话', defaultKey: 'Ctrl+Shift+B', description: '切换右侧工作区的显示状态。' },
+  { id: 'agentGraph', label: '打开决策与轨迹', group: '当前会话', defaultKey: 'Ctrl+Alt+G', description: '显示当前会话的任务轨迹与决策中枢。' },
+  { id: 'sidecar', label: '展开或收起右侧栏', group: '当前会话', defaultKey: 'Ctrl+Shift+B', description: '切换右侧文档与工具工作区的显示状态。' },
 ] as const
 export type ShortcutAction = typeof shortcutActions[number]['id']
 export type ShortcutBindings = Record<ShortcutAction, string | null>

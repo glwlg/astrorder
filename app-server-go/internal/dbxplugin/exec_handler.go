@@ -309,11 +309,12 @@ func (h *handler) handleExecuteQuery(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Server-side safety enforcement:
-	// Non-PROD single read-only query runs directly; PROD or any non-read-only/multi-statement SQL MUST be confirmed.
-	requiresConfirmation := effectiveIsProd || !classification.ReadOnlyAllowed
+	// Pure read-only queries execute directly (including on PROD); any transaction control,
+	// write/DML, DDL, locking SELECT, or unrecognized SQL MUST be confirmed.
+	requiresConfirmation := !classification.ReadOnlyAllowed
 	if requiresConfirmation && !req.Confirmed {
 		writeJSON(w, http.StatusPreconditionRequired, map[string]any{
-			"detail":                "该操作涉及生产环境或写入/多语句 SQL，需要二次确认后才能执行",
+			"detail":                "该 SQL 包含事务控制、写入或 DDL 语句，需要二次确认后才能执行",
 			"confirmation_required": true,
 			"is_prod":               effectiveIsProd,
 			"connection_name":       conn.Name,

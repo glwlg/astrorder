@@ -43,6 +43,7 @@ import {
   IconX,
 } from '@tabler/icons-react'
 import { api, type CapabilityDispatchJob } from '../../api/client'
+import { usePluginSettingsStore } from '../plugins/pluginSettingsStore'
 import './SkillsHub.css'
 
 export interface SkillItem {
@@ -639,7 +640,10 @@ export function CapabilitiesSettingsCard() {
   // ==========================================
   // 真实跨端/跨 Agent 批量后台分发
   // ==========================================
-  const availableSkillAgents = summary?.skill_agents || []
+  const enabledPlugins = usePluginSettingsStore((s) => s.enabledPlugins)
+  const isAgentEnabled = usePluginSettingsStore((s) => s.isAgentEnabled)
+  void enabledPlugins
+  const availableSkillAgents = (summary?.skill_agents || []).filter((ag) => isAgentEnabled(ag.id))
   const allSkills = summary?.skills || []
 
   const openSkillDispatchModal = (skillsToDispatch: SkillItem[], preselectMissingOnly = false) => {
@@ -2065,7 +2069,7 @@ export function CapabilitiesSettingsCard() {
                 { value: 'hermes', label: 'Hermes Agent (~/.hermes/config.yaml)' },
                 { value: 'grok', label: 'xAI Grok (~/.grok/config.toml)' },
                 { value: 'antigravity', label: 'Google Antigravity (~/.gemini/config/mcp_config.json)' },
-              ]}
+              ].filter((opt) => mcpEditing || isAgentEnabled(opt.value))}
               value={mcpFormAgent}
               onChange={(val) => setMcpFormAgent(val || 'codex')}
               disabled={mcpEditing}

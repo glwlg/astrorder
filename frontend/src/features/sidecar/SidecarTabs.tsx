@@ -87,8 +87,6 @@ export function SidecarTabs({
               <motion.div
                 layoutId="sidecar-active-tab-pill"
                 className="sidecar-tab-active"
-                data-liquid-surface="selection"
-                data-liquid-snapshot=".sidecar-header-bar"
                 transition={{ type: 'spring', stiffness: 400, damping: 28 }}
               />
             )}

@@ -68,7 +68,6 @@ func ClassifySQL(sql string) SQLClassification {
 	}
 
 	if len(stmts) > 1 {
-		promote(RiskWrite)
 		addWarning(fmt.Sprintf("多语句脚本（共 %d 条语句）", len(stmts)))
 	}
 
@@ -83,7 +82,7 @@ func ClassifySQL(sql string) SQLClassification {
 		}
 	}
 
-	readOnlyAllowed := len(stmts) == 1 && overallRisk == RiskReadOnly
+	readOnlyAllowed := overallRisk == RiskReadOnly
 	return SQLClassification{
 		RiskLevel:       overallRisk,
 		StatementCount:  len(stmts),
@@ -109,9 +108,13 @@ func classifySingleStatement(toks []sqlToken) (string, string, []string) {
 	var warnings []string
 
 	switch verb {
-	case "DROP", "TRUNCATE", "ALTER", "CREATE", "GRANT", "REVOKE":
-		warnings = append(warnings, fmt.Sprintf("包含结构或权限变更语句（%s）", verb))
+	case "DROP", "TRUNCATE", "ALTER", "CREATE", "GRANT", "REVOKE", "RENAME":
+		warnings = append(warnings, fmt.Sprintf("包含 DDL 或权限变更语句（%s）", verb))
 		return verb, RiskDestructive, warnings
+
+	case "BEGIN", "START", "COMMIT", "ROLLBACK", "SAVEPOINT", "RELEASE", "XA":
+		warnings = append(warnings, fmt.Sprintf("包含事务控制语句（%s）", verb))
+		return verb, RiskWrite, warnings
 
 	case "DELETE", "UPDATE":
 		if !hasTopLevelWord(toks[firstWordIdx+1:], "WHERE") {
@@ -121,7 +124,7 @@ func classifySingleStatement(toks []sqlToken) (string, string, []string) {
 		warnings = append(warnings, fmt.Sprintf("包含数据写入语句（%s）", verb))
 		return verb, RiskWrite, warnings
 
-	case "INSERT", "MERGE", "REPLACE", "UPSERT", "COPY", "LOAD", "CALL", "EXEC", "EXECUTE", "DO", "SET", "RESET", "LOCK", "VACUUM", "ANALYZE", "ANALYSE", "REINDEX", "CLUSTER", "REFRESH", "BEGIN", "START", "COMMIT", "ROLLBACK", "SAVEPOINT", "PREPARE", "DEALLOCATE", "COMMENT", "ATTACH", "DETACH":
+	case "INSERT", "MERGE", "REPLACE", "UPSERT", "COPY", "LOAD", "CALL", "EXEC", "EXECUTE", "DO", "SET", "RESET", "LOCK", "UNLOCK", "VACUUM", "ANALYZE", "ANALYSE", "REINDEX", "CLUSTER", "REFRESH", "PREPARE", "DEALLOCATE", "COMMENT", "ATTACH", "DETACH":
 		warnings = append(warnings, fmt.Sprintf("包含写入或会话变更语句（%s）", verb))
 		return verb, RiskWrite, warnings
 

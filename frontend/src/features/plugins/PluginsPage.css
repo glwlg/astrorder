@@ -11,57 +11,49 @@
 }
 
 .plugins-page {
-  padding: 24px 32px;
-  max-width: 1120px;
+  padding: 0;
+  max-width: 860px;
   margin: 0 auto;
+}
+
+.plugins-page-top {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+
+.plugins-page-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.plugins-page-search .mantine-TextInput-input {
+  border-radius: 999px !important;
+  background: var(--st-rail, var(--astr-surface-muted));
+  border-color: var(--st-hairline, var(--astr-border));
 }
 
 .plugins-tabs-shell {
   margin-bottom: 18px;
-  border-bottom: 1px solid var(--astr-border);
+  border-bottom: 1px solid var(--st-hairline, var(--astr-border));
 }
 
 .plugins-tablist {
   display: flex;
   align-items: center;
   flex-wrap: nowrap;
-  gap: 4px;
+  gap: 18px;
   overflow-x: auto;
   scrollbar-width: none;
   scroll-snap-type: inline proximity;
-  --fade-size: 2rem;
-  --fade-dir: right;
-  --fade-start-pos: 0;
-  --fade-end-pos: 100%;
-  scroll-padding-inline: var(--fade-size);
 }
 
 .plugins-tablist::-webkit-scrollbar {
   display: none;
-}
-
-@supports (animation-timeline: scroll()) {
-  .plugins-tablist {
-    mask:
-      linear-gradient(black, black) no-clip subtract,
-      linear-gradient(to var(--fade-dir), black, transparent) var(--fade-start-pos) 0 / var(--fade-start) 100% no-repeat no-clip,
-      linear-gradient(to var(--fade-dir), transparent, black) var(--fade-end-pos) 0 / var(--fade-end) 100% no-repeat no-clip;
-    animation: plugins-fade-start linear both, plugins-fade-end linear both;
-    animation-timeline: scroll(self inline);
-    animation-range: 0 var(--fade-size), calc(100% - var(--fade-size)) 100%;
-  }
-}
-
-@keyframes plugins-fade-start {
-  to {
-    --fade-start: var(--fade-size);
-  }
-}
-
-@keyframes plugins-fade-end {
-  from {
-    --fade-end: var(--fade-size);
-  }
 }
 
 .plugins-tab {
@@ -71,51 +63,47 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  min-block-size: 40px;
-  padding: 0 12px;
+  min-block-size: 38px;
+  padding: 0 2px;
   border: 0;
   background: transparent;
-  color: var(--astr-muted);
+  color: var(--st-muted, var(--astr-muted));
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
   white-space: nowrap;
+  transition: color 120ms ease;
 }
 
-.plugins-tab:focus-visible {
-  outline: 2px solid var(--astr-indigo, #5b5bd6);
-  outline-offset: -2px;
-  border-radius: 6px;
-}
-
-@media (hover: hover) {
-  .plugins-tab:hover {
-    color: var(--astr-text);
-  }
+.plugins-tab:hover {
+  color: var(--st-ink, var(--astr-text));
 }
 
 .plugins-tab[aria-selected='true'] {
-  color: var(--astr-indigo, #5b5bd6);
+  color: var(--st-ink, var(--astr-text));
+  font-weight: 600;
 }
 
 .plugins-tab[aria-selected='true']::after {
   content: '';
   position: absolute;
-  inset: auto 8px 0;
-  border-block-end: 2.5px solid currentColor;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--st-obsidian, var(--astr-text));
 }
 
 .plugins-tab-count {
-  font-size: 11px;
-  padding: 1px 6px;
-  border-radius: 999px;
-  background: var(--astr-surface-muted);
-  color: var(--astr-muted);
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--st-faint, var(--astr-muted));
+  font-variant-numeric: tabular-nums;
 }
 
 .plugins-tab[aria-selected='true'] .plugins-tab-count {
-  background: color-mix(in srgb, var(--astr-indigo, #5b5bd6) 14%, transparent);
-  color: var(--astr-indigo, #5b5bd6);
+  color: var(--st-muted, var(--astr-muted));
 }
 
 .plugins-panels {
@@ -129,7 +117,7 @@
 .plugins-panel-inner {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 28px;
 }
 
 .plugins-category-section {
@@ -143,43 +131,91 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding-bottom: 6px;
-  border-bottom: 1px dashed var(--astr-border);
 }
 
-.plugins-category-title-wrap {
+.plugins-category-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--st-muted, var(--astr-muted));
+  letter-spacing: 0.01em;
+}
+
+.plugins-category-count {
+  font-size: 12px;
+  color: var(--st-faint, var(--astr-muted));
+  font-variant-numeric: tabular-nums;
+}
+
+.plugins-tile {
+  background: var(--st-paper, var(--astr-surface)) !important;
+  border: 1px solid var(--st-hairline, var(--astr-border)) !important;
+  border-radius: 12px !important;
+  padding: 16px 18px !important;
   display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
+  flex-direction: column;
+  justify-content: space-between;
+  height: 100%;
+  transition: border-color 140ms ease;
 }
 
-.plugins-category-icon {
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--astr-indigo, #5b5bd6) 10%, var(--astr-surface-muted));
-  color: var(--astr-indigo, #5b5bd6);
+.plugins-tile:hover {
+  border-color: color-mix(in oklab, var(--st-ink, #111114) 18%, transparent) !important;
+}
+
+.plugins-tile-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.plugins-tile-title-row {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.plugins-tile-icon {
+  color: var(--st-ink, var(--astr-text));
+  display: inline-flex;
+  align-items: center;
   flex-shrink: 0;
+}
+
+.plugins-tile-icon.is-muted {
+  color: var(--st-faint, var(--astr-muted));
+}
+
+.plugins-tile-desc {
+  margin-top: 8px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--st-muted, var(--astr-muted));
+}
+
+.plugins-tile-footer {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--st-hairline, var(--astr-border));
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.plugins-tile-footer.is-split {
+  justify-content: space-between;
 }
 
 @media (max-width: 640px) {
   .plugins-page {
-    padding: 16px;
+    padding: 0;
   }
 }
 
 @media (pointer: coarse) {
   .plugins-tab {
     min-block-size: 44px;
-  }
-}
-
-@media (forced-colors: active) {
-  .plugins-tab[aria-selected='true'] {
-    color: Highlight;
   }
 }

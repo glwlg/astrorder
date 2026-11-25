@@ -1,0 +1,236 @@
+.docx-viewer-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  position: relative;
+}
+
+.docx-viewer-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+  padding: 8px;
+  gap: 8px;
+}
+
+.docx-outline-panel {
+  width: 220px;
+  flex: none;
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: 10px;
+  background: var(--mantine-color-body);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.docx-outline-header {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--mantine-color-default-border);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--mantine-color-dimmed);
+}
+
+.docx-outline-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.docx-outline-item {
+  border: none;
+  background: transparent;
+  text-align: left;
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 5px 8px;
+  border-radius: 6px;
+  color: var(--mantine-color-text);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.docx-outline-item:hover {
+  background: var(--mantine-color-default-hover);
+}
+
+.docx-canvas-scroll {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  background: var(--astr-surface-subtle, rgba(148, 163, 184, 0.08));
+  border-radius: 10px;
+  padding: 20px;
+  position: relative;
+}
+
+.docx-paper {
+  max-width: 820px;
+  margin: 0 auto;
+  background: #ffffff;
+  color: #1e293b;
+  padding: 40px 48px;
+  border-radius: 8px;
+  box-shadow: 0 2px 12px rgba(15, 23, 42, 0.08);
+  font-family: 'Microsoft YaHei', 'PingFang SC', 'Noto Sans SC', -apple-system, sans-serif;
+  font-size: 14px;
+  line-height: 1.75;
+}
+
+[data-mantine-color-scheme='dark'] .docx-paper {
+  background: #1b1f27;
+  color: #e2e8f0;
+  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.35);
+}
+
+.docx-paper h1 {
+  font-size: 22px;
+  margin: 18px 0 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.35);
+}
+
+.docx-paper h2 {
+  font-size: 18px;
+  margin: 16px 0 8px;
+}
+
+.docx-paper h3 {
+  font-size: 15.5px;
+  margin: 14px 0 6px;
+}
+
+.docx-paper h4,
+.docx-paper h5,
+.docx-paper h6 {
+  font-size: 14px;
+  margin: 12px 0 4px;
+}
+
+.docx-paper p {
+  margin: 0 0 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.docx-paper .docx-list-item {
+  display: flex;
+  gap: 8px;
+  margin: 0 0 6px;
+}
+
+.docx-paper .docx-list-marker {
+  flex: none;
+  opacity: 0.7;
+  user-select: none;
+}
+
+.docx-paper .docx-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  margin: 12px 0;
+}
+
+.docx-paper table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 13px;
+}
+
+.docx-paper th,
+.docx-paper td {
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  padding: 7px 10px;
+  text-align: left;
+  vertical-align: top;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.docx-paper th {
+  background: rgba(148, 163, 184, 0.14);
+  font-weight: 600;
+}
+
+.docx-paper .docx-inline-code {
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 0.9em;
+  background: rgba(148, 163, 184, 0.18);
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+
+.docx-paper .docx-image-wrap {
+  margin: 14px 0;
+  text-align: center;
+}
+
+.docx-paper .docx-image-wrap img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+.docx-selection-bar {
+  position: sticky;
+  top: 0;
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 12px;
+  margin: 0 auto 12px;
+  max-width: 820px;
+  border-radius: 8px;
+  background: var(--mantine-color-indigo-light);
+  border: 1px solid var(--mantine-color-indigo-outline);
+}
+
+.docx-diff-line {
+  padding: 6px 10px;
+  border-radius: 6px;
+  margin-bottom: 6px;
+  font-size: 13.5px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.docx-diff-line.is-added {
+  background: rgba(16, 185, 129, 0.14);
+  border-left: 3px solid #10b981;
+}
+
+.docx-diff-line.is-removed {
+  background: rgba(239, 68, 68, 0.12);
+  border-left: 3px solid #ef4444;
+  text-decoration: line-through;
+  opacity: 0.85;
+}
+
+.docx-diff-line.is-equal {
+  color: inherit;
+  opacity: 0.82;
+}
+
+.docx-block-match {
+  background: rgba(250, 204, 21, 0.22);
+  border-radius: 4px;
+  transition: background-color 140ms ease;
+}
+
+.docx-block-match.is-active {
+  background: rgba(250, 204, 21, 0.42);
+  outline: 2px solid rgba(234, 179, 8, 0.7);
+  outline-offset: 2px;
+}

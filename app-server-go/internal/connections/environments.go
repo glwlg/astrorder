@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"astrorder.dev/app-server/internal/store"
 	sessiondv1 "astrorder.dev/contracts/gen/go/astrorder/sessiond/v1"
 )
 
@@ -457,18 +458,24 @@ func (h *Handler) remoteEnvironmentItem(ctx context.Context, connID string, row 
 // is never downgraded by it.
 func (h *Handler) localEnvironmentItem(ctx context.Context) (map[string]any, error) {
 	cached, discovered := h.discovery.get(discoveryKey("local", nil))
+	enabledPlugins := h.store.ReadEnabledAgentKinds(ctx)
 	agents := make([]map[string]any, 0, len(environmentKinds))
 	for _, kind := range environmentKinds {
 		state, err := h.localConnection(ctx, kind)
 		if err != nil {
 			return nil, err
 		}
-		available := state["available"] == true
+		registeredInDaemon := state["available"] == true
+		available := registeredInDaemon
 		if discovered && cached.Available[kind] {
 			available = true
 		}
+		customExec := h.store.ReadLocalExecutableOverride(ctx, store.AgentPluginID(kind))
 		var executable any
-		if cached.Executables != nil && cached.Executables[kind] != "" {
+		if customExec != "" {
+			executable = customExec
+			available = true
+		} else if cached.Executables != nil && cached.Executables[kind] != "" {
 			executable = cached.Executables[kind]
 		} else if available {
 			if execPath, err := localAgentExecutable(ctx, kind); err == nil && execPath != "" {
@@ -482,8 +489,10 @@ func (h *Handler) localEnvironmentItem(ctx context.Context) (map[string]any, err
 		agents = append(agents, map[string]any{
 			"kind": kind, "available": available, "state": state["state"],
 			"agent_id": state["agent_id"], "detail": state["detail"],
-			"daemon_mode": state["daemon_mode"] == true,
-			"executable":  executable,
+			"daemon_mode":          state["daemon_mode"] == true,
+			"executable":           executable,
+			"registered_in_daemon": registeredInDaemon,
+			"plugin_enabled":       enabledPlugins[kind],
 		})
 	}
 	return map[string]any{

@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"astrorder.dev/app-server/internal/aiprovider"
+	"astrorder.dev/app-server/internal/llmcompat"
 	"astrorder.dev/app-server/internal/store"
 )
 
@@ -145,18 +147,44 @@ func (s *Service) handleTranscribe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 1. Prefer running local R2T2 speech engine when audio format is natively supported (WAV / MP3).
+	if s.plugin != nil && s.plugin.IsRunning() {
+		if localFmt := r2t2FormatForMime(fileMime); localFmt != "" {
+			if text, err := s.plugin.TranscribeAudio(r.Context(), fileData, localFmt); err == nil {
+				writeJSON(w, http.StatusOK, map[string]string{"text": text})
+				return
+			}
+		}
+	}
+
+	// 2. Try OpenCodeX gateway profile when configured, otherwise fall back to any enabled
+	// OpenAI-compatible AI Provider configured in Settings -> AI 供应商.
+	var (
+		targetURL  string
+		authHeader string
+		authValue  string
+		modelName  string
+	)
 	profile := ResolveOpenCodexProfile(r.Context(), s.options.Store)
-	if profile.APIKey == "" || profile.InferenceURL == "" {
-		writeJSONError(w, http.StatusServiceUnavailable, "请先在网关设置中配置 OpenCodex 推理地址和数据密钥。")
+	if profile.APIKey != "" && profile.InferenceURL != "" {
+		targetURL = profile.InferenceURL + "/audio/transcriptions"
+		authHeader = "X-OpenCodex-API-Key"
+		authValue = profile.APIKey
+		modelName = "gpt-4o-transcribe"
+	} else if providerURL, providerKey := resolveOpenAIAudioProvider(r.Context(), s.options.Store); providerURL != "" && providerKey != "" {
+		targetURL = providerURL + "/audio/transcriptions"
+		authHeader = "Authorization"
+		authValue = "Bearer " + providerKey
+		modelName = "whisper-1"
+	} else {
+		writeJSONError(w, http.StatusServiceUnavailable, "未找到可用的语音转写服务。请在「设置 → 功能与插件」开启本地语音听写，或在「设置 → AI 供应商」配置兼容 OpenAI 的接口。")
 		return
 	}
 
-	targetURL := profile.InferenceURL + "/audio/transcriptions"
-
-	// Construct upstream request: multipart/form-data with file and model=gpt-4o-transcribe
+	// Construct upstream request: multipart/form-data with file and model
 	bodyBuf := &bytes.Buffer{}
 	writer := multipart.NewWriter(bodyBuf)
-	_ = writer.WriteField("model", "gpt-4o-transcribe")
+	_ = writer.WriteField("model", modelName)
 
 	fn := fileName
 	if fn == "" {
@@ -186,7 +214,7 @@ func (s *Service) handleTranscribe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Header.Set("Content-Type", writer.FormDataContentType())
-	req.Header.Set("X-OpenCodex-API-Key", profile.APIKey)
+	req.Header.Set(authHeader, authValue)
 
 	client := s.options.HTTPClient
 	if client == nil {
@@ -229,4 +257,53 @@ func (s *Service) handleTranscribe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"text": *result.Text})
+}
+
+func r2t2FormatForMime(mimeType string) string {
+	switch strings.ToLower(strings.TrimSpace(mimeType)) {
+	case "audio/wav", "audio/x-wav":
+		return "wav"
+	case "audio/mpeg":
+		return "mp3"
+	default:
+		return ""
+	}
+}
+
+func resolveOpenAIAudioProvider(ctx context.Context, st *store.Store) (string, string) {
+	if st == nil {
+		return "", ""
+	}
+	cfg, err := aiprovider.LoadConfig(ctx, st)
+	if err != nil || len(cfg.Providers) == 0 {
+		return "", ""
+	}
+	// Prefer the default provider if it is enabled and OpenAI-compatible with key + base_url.
+	for _, p := range cfg.Providers {
+		if p.ID != cfg.DefaultProviderID || !p.Enabled {
+			continue
+		}
+		if llmcompat.NormalizeProtocol(p.Protocol) != llmcompat.ProtocolOpenAI {
+			continue
+		}
+		base := strings.TrimRight(strings.TrimSpace(p.BaseURL), "/")
+		key := strings.TrimSpace(p.APIKey)
+		if base != "" && key != "" {
+			return base, key
+		}
+	}
+	for _, p := range cfg.Providers {
+		if !p.Enabled {
+			continue
+		}
+		if llmcompat.NormalizeProtocol(p.Protocol) != llmcompat.ProtocolOpenAI {
+			continue
+		}
+		base := strings.TrimRight(strings.TrimSpace(p.BaseURL), "/")
+		key := strings.TrimSpace(p.APIKey)
+		if base != "" && key != "" {
+			return base, key
+		}
+	}
+	return "", ""
 }

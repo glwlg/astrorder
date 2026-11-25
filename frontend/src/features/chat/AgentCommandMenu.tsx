@@ -3,7 +3,6 @@ import { useQuery } from '@tanstack/react-query'
 import { useEffect, useRef } from 'react'
 import { api } from '../../api/client'
 import { AgentBrandIcon } from '../../components/AgentBrandIcon'
-import { ComposerGlassMenu } from '../../components/GlassPanel'
 import '../../components/animations/AnimatedList.css'
 import type { Agent, AgentCommand, AgentMention, Session } from '../../domain/types'
 import './AgentMentionMenu.css'
@@ -87,15 +86,42 @@ export type CommandMenuItem =
   | { kind: 'review_uncommitted'; label: string }
   | { kind: 'header'; label: string }
   | { kind: 'review_branch'; branch: string; label: string }
+  | { kind: 'office_prompt'; name: string; description: string; template: string }
   | { kind: 'command'; command: AgentCommand }
+
+const OFFICE_PROMPT_COMMANDS: Array<{ name: string; description: string; template: string }> = [
+  { name: '总结', description: '提炼核心结论、关键数据与后续待办', template: '请帮我总结以下内容的核心结论、关键数据与待办事项：\n' },
+  { name: '润色', description: '优化公文、邮件或汇报方案的语气与表达', template: '请帮我润色以下文稿，使语气更专业、条理更清晰：\n' },
+  { name: '翻译', description: '中英商务文档精准互译，保持专业术语一致', template: '请将以下内容翻译为流畅自然的商务表达（保留原有格式）：\n' },
+  { name: '大纲', description: '为汇报、方案或 PPT 快速生成结构化大纲', template: '请围绕以下主题生成一份清晰的结构化方案/PPT 大纲：\n' },
+  { name: '表格', description: '将零散信息整理成规范的 Markdown 对比表格', template: '请将以下内容整理成结构化表格，并补充简要分析结论：\n' },
+  { name: '脱敏', description: '隐去姓名、账号、地址与内部敏感数据以便对外发送', template: '请对以下文稿进行对外脱敏处理，替换内部敏感信息并保持原意完整：\n' },
+]
+
+const DEV_ONLY_COMMAND_NAMES = new Set(['review', 'diff', 'compact', 'mcp', 'init', 'status', 'memory', 'bug'])
+
+const OFFICE_DOC_EXT_RE = /\.(?:docx?|xlsx?|pptx?|pdf|md|markdown|csv|txt|wps|et|dps)$/i
 
 export function buildCommandMenuItems(
   commands: AgentCommand[],
   branches: string[],
   text: string,
+  options?: { officeMode?: boolean },
 ): CommandMenuItem[] {
   const trimmed = text.trim()
   const lower = trimmed.toLowerCase()
+
+  if (options?.officeMode) {
+    const query = lower.startsWith('/') ? lower.slice(1) : lower
+    const matchedOffice: CommandMenuItem[] = OFFICE_PROMPT_COMMANDS
+      .filter((cmd) => !query || cmd.name.toLowerCase().includes(query) || cmd.description.toLowerCase().includes(query))
+      .map((cmd) => ({ kind: 'office_prompt', ...cmd }))
+    const safeAgentCommands = filterAgentCommands(
+      commands.filter((c) => !DEV_ONLY_COMMAND_NAMES.has(c.name.toLowerCase())),
+      text,
+    ).map((cmd): CommandMenuItem => ({ kind: 'command', command: cmd }))
+    return [...matchedOffice, ...safeAgentCommands]
+  }
 
   // 1. 只有当用户明确输入 /review、/review ... 或 /审查 时，才切入二级分支审查选择菜单
   const isReviewMode = lower === '/review' || lower.startsWith('/review ') || lower === '/审查' || lower.startsWith('/审查 ')
@@ -131,7 +157,11 @@ export function buildCommandMenuItems(
   return filteredNormal.map(cmd => ({ kind: 'command', command: cmd }))
 }
 
-export function filterAgentMentions(items: AgentMention[], text: string): AgentMention[] {
+export function filterAgentMentions(
+  items: AgentMention[],
+  text: string,
+  options?: { officeMode?: boolean },
+): AgentMention[] {
   const query = text.slice(text.lastIndexOf('@') + 1).toLocaleLowerCase()
 
   // 内置星序系统命令
@@ -143,7 +173,7 @@ export function filterAgentMentions(items: AgentMention[], text: string): AgentM
   }
   const browserItem: AgentMention = {
     name: '浏览器',
-    description: '星序浏览器自动执行（支持英文 @browser）',
+    description: options?.officeMode ? '在内置浏览器中打开并辅助浏览网页' : '星序浏览器自动执行（支持英文 @browser）',
     kind: 'skill',
     path: 'system:browser',
   }
@@ -171,15 +201,24 @@ export function filterAgentMentions(items: AgentMention[], text: string): AgentM
     kind: 'skill',
     path: 'system:blackboard:export',
   }
-  const allItems = [
-    swarmItem,
-    browserItem,
-    blackboardItem,
-    bbArchItem,
-    bbChecklistItem,
-    bbExportItem,
-    ...items
-  ]
+  const sortedItems = options?.officeMode
+    ? [...items].sort((a, b) => {
+        const aDoc = a.kind === 'file' && OFFICE_DOC_EXT_RE.test(a.name) ? 1 : 0
+        const bDoc = b.kind === 'file' && OFFICE_DOC_EXT_RE.test(b.name) ? 1 : 0
+        return bDoc - aDoc
+      })
+    : items
+  const allItems = options?.officeMode
+    ? [browserItem, ...sortedItems]
+    : [
+        swarmItem,
+        browserItem,
+        blackboardItem,
+        bbArchItem,
+        bbChecklistItem,
+        bbExportItem,
+        ...sortedItems,
+      ]
 
   return allItems.filter(item =>
     item.name.toLocaleLowerCase().includes(query)
@@ -231,7 +270,6 @@ export function AgentCommandMenu({
       className="astr-animated-list"
       style={{ position: 'absolute', zIndex: 20, left: 0, right: 0, bottom: 'calc(100% + 6px)', maxHeight: 'min(280px, 45vh)', overflowY: 'auto' }}
     >
-      <ComposerGlassMenu active>
       <Stack gap={2}>
         {items.map((item, index) => {
           if (!('kind' in item)) {
@@ -309,6 +347,28 @@ export function AgentCommandMenu({
               </UnstyledButton>
             )
           }
+          if (item.kind === 'office_prompt') {
+            return (
+              <UnstyledButton
+                key={`office-prompt-${item.name}`}
+                className="astr-animated-list-item"
+                role="option"
+                aria-selected={index === activeIndex}
+                onMouseDown={event => event.preventDefault()}
+                onClick={() => onSelect(item)}
+                p="xs"
+                style={{ borderRadius: 8, background: index === activeIndex ? 'var(--mantine-color-default-hover)' : undefined }}
+              >
+                <Group gap="sm" wrap="nowrap">
+                  <div style={{ minWidth: 0 }}>
+                    <Text size="sm" fw={600}>/{item.name}</Text>
+                    <Text size="xs" c="dimmed" lineClamp={1}>{item.description}</Text>
+                  </div>
+                  <Text size="xs" c="dimmed" ml="auto">快捷写作</Text>
+                </Group>
+              </UnstyledButton>
+            )
+          }
           return (
             <UnstyledButton
               key={item.command.name}
@@ -332,7 +392,6 @@ export function AgentCommandMenu({
           )
         })}
       </Stack>
-      </ComposerGlassMenu>
     </Paper>
   )
 }

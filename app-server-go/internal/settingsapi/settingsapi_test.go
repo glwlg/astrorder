@@ -186,3 +186,82 @@ func TestPluginSettingsPersistToStoreAndRespectImportOnly(t *testing.T) {
 		t.Fatalf("unexpected configs map after import_only: %#v", got.Configs)
 	}
 }
+
+func TestAIProvidersCRUDModelsFetchAndTest(t *testing.T) {
+	upstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1/models":
+			_, _ = w.Write([]byte(`{"data":[{"id":"gpt-4.1-mini"},{"id":"qwen-plus"}]}`))
+		case "/v1/chat/completions":
+			_, _ = w.Write([]byte(`{"model":"gpt-4.1-mini","choices":[{"message":{"content":"OK"}}]}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+	srv := httptest.NewServer(upstream)
+	defer srv.Close()
+
+	st, err := store.Open(filepath.Join(t.TempDir(), "providers.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	h := NewHandler(Options{Store: st, HTTPClient: srv.Client()})
+
+	if !Matches(http.MethodGet, "/api/v1/services/providers") ||
+		!Matches(http.MethodPost, "/api/v1/services/providers/models") ||
+		!Matches(http.MethodDelete, "/api/v1/services/providers/prv_123") {
+		t.Fatalf("provider routes not matched")
+	}
+
+	// Create provider
+	create := call(h, http.MethodPost, "/api/v1/services/providers", `{
+		"name":"公司网关",
+		"protocol":"openai",
+		"vendor":"magpie",
+		"base_url":"`+srv.URL+`/v1",
+		"management_url":"`+srv.URL+`",
+		"api_key":"sk-provider-secret-9999",
+		"set_as_default":true
+	}`)
+	if create.Code != 200 {
+		t.Fatalf("create provider failed: %d %s", create.Code, create.Body.String())
+	}
+	var created struct {
+		Provider struct {
+			ID        string `json:"id"`
+			MaskedKey string `json:"masked_key"`
+		} `json:"provider"`
+	}
+	if err := json.Unmarshal(create.Body.Bytes(), &created); err != nil || created.Provider.ID == "" {
+		t.Fatalf("decode create response: %s", create.Body.String())
+	}
+	if strings.Contains(create.Body.String(), "sk-provider-secret-9999") {
+		t.Fatalf("raw key leaked in provider response: %s", create.Body.String())
+	}
+
+	// Fetch models using saved provider_id (omitting api_key)
+	fetch := call(h, http.MethodPost, "/api/v1/services/providers/models", `{"provider_id":"`+created.Provider.ID+`"}`)
+	if fetch.Code != 200 || !strings.Contains(fetch.Body.String(), `"gpt-4.1-mini"`) {
+		t.Fatalf("fetch models failed: %d %s", fetch.Code, fetch.Body.String())
+	}
+
+	// Test connectivity using saved provider_id
+	tested := call(h, http.MethodPost, "/api/v1/services/providers/test", `{"provider_id":"`+created.Provider.ID+`","model":"gpt-4.1-mini"}`)
+	if tested.Code != 200 || !strings.Contains(tested.Body.String(), `"reply":"OK"`) {
+		t.Fatalf("test provider failed: %d %s", tested.Code, tested.Body.String())
+	}
+
+	// Set default model
+	def := call(h, http.MethodPut, "/api/v1/services/providers/default", `{"provider_id":"`+created.Provider.ID+`","model":"qwen-plus","reasoning":"none"}`)
+	if def.Code != 200 || !strings.Contains(def.Body.String(), `"default_model":"qwen-plus"`) {
+		t.Fatalf("set default failed: %d %s", def.Code, def.Body.String())
+	}
+
+	// Delete provider
+	del := call(h, http.MethodDelete, "/api/v1/services/providers/"+created.Provider.ID, "")
+	if del.Code != 200 || !strings.Contains(del.Body.String(), `"providers":[]`) {
+		t.Fatalf("delete provider failed: %d %s", del.Code, del.Body.String())
+	}
+}

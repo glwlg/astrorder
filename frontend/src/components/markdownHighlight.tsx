@@ -102,13 +102,24 @@ const KEYWORDS_BY_FAMILY: Record<string, Set<string>> = {
     'in', 'local', 'readonly', 'return', 'set', 'then', 'unset', 'until', 'while',
   ]),
   sql: new Set([
-    'ADD', 'ALL', 'ALTER', 'AND', 'AS', 'ASC', 'BETWEEN', 'BY', 'CASE', 'CHECK', 'COLUMN',
-    'COMMIT', 'CONFLICT', 'CONSTRAINT', 'CREATE', 'DEFAULT', 'DELETE', 'DESC', 'DISTINCT',
-    'DO', 'DROP', 'ELSE', 'END', 'EXISTS', 'FALSE', 'FOREIGN', 'FROM', 'GROUP', 'HAVING',
-    'IF', 'IN', 'INDEX', 'INNER', 'INSERT', 'INTO', 'IS', 'JOIN', 'KEY', 'LEFT', 'LIKE',
-    'LIMIT', 'NOT', 'NOTHING', 'NULL', 'OFFSET', 'ON', 'OR', 'ORDER', 'OUTER', 'PRIMARY',
-    'REFERENCES', 'RETURNING', 'RIGHT', 'ROLLBACK', 'SELECT', 'SET', 'TABLE', 'THEN',
-    'TRUE', 'UNION', 'UNIQUE', 'UPDATE', 'VALUES', 'WHEN', 'WHERE', 'WITH',
+    'ADD', 'ALL', 'ALTER', 'ALWAYS', 'ANALYZE', 'AND', 'AS', 'ASC', 'BEGIN', 'BETWEEN', 'BY',
+    'CASCADE', 'CASE', 'CAST', 'CHECK', 'COLLATE', 'COLUMN', 'COMMENT', 'COMMIT',
+    'CONCURRENTLY', 'CONFLICT', 'CONSTRAINT', 'CREATE', 'CROSS', 'CURRENT_DATE',
+    'CURRENT_TIME', 'CURRENT_TIMESTAMP', 'DECLARE', 'DEFAULT', 'DEFERRABLE', 'DEFERRED',
+    'DEFINER', 'DELETE', 'DESC', 'DESCRIBE', 'DISTINCT', 'DO', 'DROP', 'ELSE', 'ELSIF', 'END',
+    'ENUM', 'ESCAPE', 'EXCEPT', 'EXCLUDED', 'EXEC', 'EXECUTE', 'EXISTS', 'EXPLAIN',
+    'EXTENSION', 'FALSE', 'FOR', 'FOREIGN', 'FROM', 'FULL', 'FUNCTION', 'GENERATED', 'GRANT',
+    'GROUP', 'HAVING', 'IDENTITY', 'IF', 'ILIKE', 'IMMEDIATE', 'IMMUTABLE', 'IN', 'INDEX',
+    'INITIALLY', 'INNER', 'INSERT', 'INTERSECT', 'INTO', 'INVOKER', 'IS', 'ISNULL', 'JOIN',
+    'KEY', 'LANGUAGE', 'LEFT', 'LIKE', 'LIMIT', 'LOCAL', 'LOCK', 'LOCKED', 'LOOP', 'NATURAL',
+    'NOT', 'NOTHING', 'NOTNULL', 'NOWAIT', 'NULL', 'OFFSET', 'ON', 'ONLY', 'OR', 'ORDER',
+    'OUTER', 'OVER', 'PARTITION', 'PREPARE', 'PRIMARY', 'PROCEDURE', 'RECURSIVE',
+    'REFERENCES', 'RELEASE', 'RENAME', 'REPLACE', 'RESTRICT', 'RETURN', 'RETURNING', 'REVOKE',
+    'RIGHT', 'ROLLBACK', 'SAVEPOINT', 'SCHEMA', 'SECURITY', 'SELECT', 'SEQUENCE', 'SET',
+    'SHARE', 'SHOW', 'SIMILAR', 'SKIP', 'STABLE', 'START', 'STORED', 'STRICT', 'TABLE',
+    'TEMP', 'TEMPORARY', 'THEN', 'TO', 'TRANSACTION', 'TRIGGER', 'TRUE', 'TRUNCATE', 'TYPE',
+    'UNION', 'UNIQUE', 'UNLOGGED', 'UNLOCK', 'UPDATE', 'USE', 'USING', 'VACUUM', 'VALUES',
+    'VIEW', 'VIRTUAL', 'VOLATILE', 'WHEN', 'WHERE', 'WINDOW', 'WITH', 'WITHOUT', 'ZONE',
   ]),
 }
 
@@ -118,6 +129,15 @@ const TYPES_COMMON = new Set([
   'rune', 'set', 'str', 'string', 'tuple', 'uint', 'uint16', 'uint32', 'uint64', 'uint8',
   'unknown', 'void', 'Promise', 'Record', 'Array', 'Map', 'Set', 'Error', 'Context',
   'VARCHAR', 'TEXT', 'INTEGER', 'BOOLEAN', 'DATETIME', 'JSON', 'BIGINT', 'TIMESTAMP',
+])
+
+const SQL_TYPES = new Set([
+  'BIGINT', 'BIGSERIAL', 'BIT', 'BOOL', 'BOOLEAN', 'BYTEA', 'CHAR', 'CHARACTER', 'CIDR',
+  'DATE', 'DATETIME', 'DECIMAL', 'DOUBLE', 'FLOAT', 'FLOAT4', 'FLOAT8', 'INET', 'INT',
+  'INT2', 'INT4', 'INT8', 'INTEGER', 'INTERVAL', 'JSON', 'JSONB', 'MACADDR', 'MONEY',
+  'NUMERIC', 'OID', 'PRECISION', 'REAL', 'REGCLASS', 'SERIAL', 'SMALLINT', 'SMALLSERIAL',
+  'TEXT', 'TIME', 'TIMESTAMP', 'TIMESTAMPTZ', 'TIMETZ', 'TSQUERY', 'TSVECTOR', 'UUID',
+  'VARBIT', 'VARCHAR', 'XML',
 ])
 
 function resolveFamily(langRaw: string): string {
@@ -173,8 +193,11 @@ function buildRules(family: string): TokenRule[] {
     case 'sql':
       return [
         { kind: 'comment', regex: /--[^\n]*|\/\*[\s\S]*?\*\//y },
-        { kind: 'string', regex: /'(?:''|[^'])*'|"(?:\\.|[^"\\\n])*"/y },
+        { kind: 'string', regex: /\$([A-Za-z_][A-Za-z0-9_]*)?\$[\s\S]*?\$\1\$|'(?:''|[^'])*'/y },
+        { kind: 'prop', regex: /"(?:""|[^"\n])*"|`(?:``|[^`\n])*`/y },
+        { kind: 'meta', regex: /\$\d+\b|(?<![:\w]):[A-Za-z_][A-Za-z0-9_]*/y },
         { kind: 'number', regex: /\b\d+(?:\.\d+)?\b/y },
+        { kind: 'func', regex: /\b[A-Za-z_][A-Za-z0-9_]*(?=\s*\()/y },
       ]
     case 'css':
       return [
@@ -220,38 +243,44 @@ function exceedsLineCap(code: string, maxLines: number): boolean {
   return false
 }
 
-export function highlightCode(code: string, language: string): ReactNode {
-  if (!code || code.length > MAX_HIGHLIGHT_CHARS || exceedsLineCap(code, MAX_HIGHLIGHT_LINES)) return code
+interface HighlightSegment {
+  kind: TokenKind | 'plain'
+  text: string
+}
+
+function tokenizeCode(
+  code: string,
+  language: string,
+  options?: { maxChars?: number; maxLines?: number },
+): HighlightSegment[] | null {
+  const maxChars = options?.maxChars ?? MAX_HIGHLIGHT_CHARS
+  const maxLines = options?.maxLines ?? MAX_HIGHLIGHT_LINES
+  if (!code || code.length > maxChars || exceedsLineCap(code, maxLines)) return null
   const family = resolveFamily(language)
-  if (!family) return code
+  if (!family) return null
 
   if (family === 'diff') {
     const lines = code.split('\n')
     return lines.map((line, i) => {
-      const suffix = i < lines.length - 1 ? '\n' : ''
+      const text = i < lines.length - 1 ? `${line}\n` : line
       if (line.startsWith('+++') || line.startsWith('---') || line.startsWith('@@')) {
-        return <span key={i} className="tok-meta">{line}{suffix}</span>
+        return { kind: 'meta', text }
       }
-      if (line.startsWith('+')) {
-        return <span key={i} className="tok-add">{line}{suffix}</span>
-      }
-      if (line.startsWith('-')) {
-        return <span key={i} className="tok-del">{line}{suffix}</span>
-      }
-      return `${line}${suffix}`
+      if (line.startsWith('+')) return { kind: 'add', text }
+      if (line.startsWith('-')) return { kind: 'del', text }
+      return { kind: 'plain', text }
     })
   }
 
   const rules = buildRules(family)
   const keywords = KEYWORDS_BY_FAMILY[family]
-  const out: ReactNode[] = []
+  const out: HighlightSegment[] = []
   let plain = ''
   let pos = 0
-  let key = 0
 
   const flushPlain = () => {
     if (plain) {
-      out.push(plain)
+      out.push({ kind: 'plain', text: plain })
       plain = ''
     }
   }
@@ -266,9 +295,11 @@ export function highlightCode(code: string, language: string): ReactNode {
         let kind: TokenKind = rule.kind
         if (kind === 'func' && keywords && (keywords.has(text) || (family === 'sql' && keywords.has(text.toUpperCase())))) {
           kind = 'keyword'
+        } else if (kind === 'func' && family === 'sql' && SQL_TYPES.has(text.toUpperCase())) {
+          kind = 'type'
         }
         flushPlain()
-        out.push(<span key={key++} className={`tok-${kind}`}>{text}</span>)
+        out.push({ kind, text })
         pos += text.length
         matched = true
         break
@@ -281,11 +312,16 @@ export function highlightCode(code: string, language: string): ReactNode {
       const ident = IDENT_RE.exec(code)
       if (ident && ident[0].length > 0) {
         const word = ident[0]
-        const isKw = family === 'sql' ? keywords.has(word.toUpperCase()) : keywords.has(word)
-        const isType = !isKw && (family === 'c_like' || family === 'python' || family === 'sql') && TYPES_COMMON.has(word)
+        const upper = family === 'sql' ? word.toUpperCase() : word
+        const isKw = family === 'sql' ? keywords.has(upper) : keywords.has(word)
+        const isType = !isKw && (
+          family === 'sql'
+            ? SQL_TYPES.has(upper)
+            : (family === 'c_like' || family === 'python') && TYPES_COMMON.has(word)
+        )
         if (isKw || isType) {
           flushPlain()
-          out.push(<span key={key++} className={isKw ? 'tok-keyword' : 'tok-type'}>{word}</span>)
+          out.push({ kind: isKw ? 'keyword' : 'type', text: word })
         } else {
           plain += word
         }
@@ -300,4 +336,47 @@ export function highlightCode(code: string, language: string): ReactNode {
 
   flushPlain()
   return out
+}
+
+export function highlightCode(
+  code: string,
+  language: string,
+  options?: { maxChars?: number; maxLines?: number },
+): ReactNode {
+  const segments = tokenizeCode(code, language, options)
+  if (!segments) return code
+  return segments.map((seg, i) =>
+    seg.kind === 'plain'
+      ? seg.text
+      : <span key={i} className={`tok-${seg.kind}`}>{seg.text}</span>,
+  )
+}
+
+export function highlightCodeLines(
+  code: string,
+  language: string,
+  options?: { maxChars?: number; maxLines?: number },
+): ReactNode[][] {
+  const normalized = code.replace(/\r\n/g, '\n')
+  const segments = tokenizeCode(normalized, language, options)
+  if (!segments) {
+    return normalized.split('\n').map((line) => (line ? [line] : []))
+  }
+  const lines: ReactNode[][] = [[]]
+  let key = 0
+  for (const seg of segments) {
+    const parts = seg.text.split('\n')
+    for (let i = 0; i < parts.length; i += 1) {
+      if (i > 0) lines.push([])
+      const part = parts[i]
+      if (!part) continue
+      const current = lines[lines.length - 1]
+      current.push(
+        seg.kind === 'plain'
+          ? part
+          : <span key={key++} className={`tok-${seg.kind}`}>{part}</span>,
+      )
+    }
+  }
+  return lines
 }

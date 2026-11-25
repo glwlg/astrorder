@@ -294,7 +294,7 @@ export function fileChangeDiffs(message: Message): FileChangeDiffItem[] {
   return []
 }
 
-function openFileInSidecar(filePath: string, session: Session, line?: number) {
+export function openFileInSidecar(filePath: string, session: Session, line?: number) {
   const artifact = resolveArtifactFromPath(filePath.replace(/%/g, '%25'), session)
   if (line && line > 0) {
     artifact.metadata = { ...(artifact.metadata || {}), line }

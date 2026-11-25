@@ -28,17 +28,23 @@
     --m-danger: var(--astr-red, #c72233);
     --m-success: var(--astr-teal, #087f59);
     --m-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    --m-glass-bg: rgba(255, 255, 255, 0.8);
+    --m-glass-bg: var(--m-surface);
     --m-glass-border: color-mix(in oklab, var(--astr-accent, #7540bd) 14%, transparent);
     --m-glass-shadow: 0 10px 30px rgba(40, 24, 68, 0.1), 0 2px 6px rgba(40, 24, 68, 0.04);
     --m-glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.9);
     --m-surface-2: var(--m-low);
+    --m-header-pad-top: max(env(safe-area-inset-top, 0px), 6px);
+    --m-header-row-height: 44px;
+    --m-header-pad-bottom: 6px;
+    --m-header-height: calc(var(--m-header-pad-top) + var(--m-header-row-height) + var(--m-header-pad-bottom) + 1px);
 
     color-scheme: light;
+    box-sizing: border-box;
     position: fixed;
     inset: 0;
     height: 100dvh;
     min-height: -webkit-fill-available;
+    padding-top: var(--m-header-height);
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -49,6 +55,12 @@
     overscroll-behavior-x: none;
     touch-action: pan-y;
     -webkit-touch-callout: none;
+  }
+
+  @media (display-mode: standalone) {
+    .mobile-workspace {
+      --m-header-pad-top: calc(env(safe-area-inset-top, 0px) + 6px);
+    }
   }
 
   :root[data-mantine-color-scheme='dark'] .mobile-workspace {
@@ -64,7 +76,7 @@
     --m-primary-soft: var(--astr-accent-soft, #34264a);
     --m-danger: var(--astr-red, #ff8993);
     --m-success: var(--astr-teal, #65d6ae);
-    --m-glass-bg: rgba(24, 28, 40, 0.8);
+    --m-glass-bg: var(--m-surface);
     --m-glass-border: color-mix(in oklab, var(--astr-accent, #bc92ff) 18%, transparent);
     --m-glass-shadow: 0 12px 36px rgba(0, 0, 0, 0.42), 0 2px 8px rgba(0, 0, 0, 0.24);
     --m-glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.14);
@@ -141,18 +153,23 @@
 }
 
 @layer mobile-components {
-  /* Top Chrome Header — compact frosted Star-Violet surface */
+  /* Top Chrome Header — viewport-fixed opaque bar so iOS 26+ WebKit
+     detects a fixed top edge container and suppresses its soft top-edge blur
+     over standalone PWA header controls */
   .m-header {
     flex: none;
-    position: relative;
+    position: fixed;
+    top: var(--m-vv-top, 0px);
+    left: 0;
+    right: 0;
+    width: 100%;
     z-index: 30;
+    height: var(--m-header-height);
     min-height: 50px;
-    padding-top: max(env(safe-area-inset-top, 0px), 6px);
-    padding-bottom: 6px;
+    padding-top: var(--m-header-pad-top);
+    padding-bottom: var(--m-header-pad-bottom);
     padding-inline: max(env(safe-area-inset-left, 0px), 10px) max(env(safe-area-inset-right, 0px), 10px);
-    background: color-mix(in srgb, var(--m-surface) 88%, var(--m-bg));
-    backdrop-filter: blur(16px) saturate(150%);
-    -webkit-backdrop-filter: blur(16px) saturate(150%);
+    background-color: var(--m-surface);
     border-bottom: 1px solid color-mix(in srgb, var(--m-border) 75%, transparent);
     display: flex;
     justify-content: space-between;
@@ -224,9 +241,9 @@
     position: relative;
     flex: none;
     min-width: 40px;
-    min-height: 40px;
+    min-height: 44px;
     width: 40px;
-    height: 40px;
+    height: 44px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -256,7 +273,7 @@
 
   .m-inbox-badge {
     position: absolute;
-    top: 4px;
+    top: 6px;
     right: 3px;
     min-width: 16px;
     height: 16px;
@@ -334,9 +351,9 @@
 
   .m-header-actions .mantine-ActionIcon-root {
     width: 40px;
-    height: 40px;
+    height: 44px;
     min-width: 40px;
-    min-height: 40px;
+    min-height: 44px;
     border-radius: 11px;
     color: var(--m-text);
   }
@@ -1001,8 +1018,6 @@
     align-items: center;
     justify-content: center;
     background: var(--m-glass-bg);
-    backdrop-filter: blur(18px) saturate(170%);
-    -webkit-backdrop-filter: blur(18px) saturate(170%);
     border: 1px solid var(--m-glass-border);
     box-shadow: var(--m-glass-shadow), var(--m-glass-highlight);
     z-index: 15;
@@ -1072,8 +1087,6 @@
     padding: 4px 5px;
     border-radius: 26px;
     background: var(--m-glass-bg);
-    backdrop-filter: blur(22px) saturate(180%);
-    -webkit-backdrop-filter: blur(22px) saturate(180%);
     border: 1px solid var(--m-glass-border);
     box-shadow: var(--m-glass-shadow), var(--m-glass-highlight);
     transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
@@ -1202,8 +1215,6 @@
     gap: 8px;
     padding: 7px 12px;
     background: var(--m-glass-bg);
-    backdrop-filter: blur(16px) saturate(160%);
-    -webkit-backdrop-filter: blur(16px) saturate(160%);
     border: 1px solid var(--m-glass-border);
     border-left: 3px solid var(--m-primary);
     border-radius: 12px;
@@ -1480,9 +1491,7 @@
     position: fixed;
     inset: 0;
     z-index: 200;
-    background: rgba(10, 11, 18, 0.46);
-    backdrop-filter: blur(4px);
-    -webkit-backdrop-filter: blur(4px);
+    background: rgba(10, 11, 18, 0.56);
     display: flex;
     align-items: flex-end;
     justify-content: center;
@@ -2689,9 +2698,9 @@
 
 .mobile-workspace .m-header-actions .mantine-ActionIcon-root {
   width: 40px;
-  height: 40px;
+  height: 44px;
   min-width: 40px;
-  min-height: 40px;
+  min-height: 44px;
   border-radius: 11px;
   color: var(--m-text);
   background: transparent;
@@ -2882,8 +2891,6 @@ body:has(.mobile-workspace) .mantine-Notification-root {
   border-radius: 10px;
   border: 1px solid color-mix(in srgb, var(--m-border) 80%, transparent);
   background: var(--m-glass-bg);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
   font-size: 11.5px;
   color: var(--m-muted);
   text-align: center;
@@ -2904,9 +2911,7 @@ body:has(.mobile-workspace) .mantine-Notification-root {
   overflow-y: auto;
   padding: 6px;
   border-radius: 16px;
-  background: color-mix(in srgb, var(--m-surface) 95%, transparent);
-  backdrop-filter: blur(22px) saturate(180%);
-  -webkit-backdrop-filter: blur(22px) saturate(180%);
+  background: var(--m-surface);
   border: 1px solid var(--m-glass-border);
   box-shadow: var(--m-glass-shadow), var(--m-glass-highlight);
   display: flex;
@@ -3083,7 +3088,13 @@ body:has(.mobile-workspace) {
   height: 100%;
   overflow: hidden;
   overscroll-behavior: none;
+  background-color: var(--astr-surface, #ffffff);
   scroll-padding-bottom: calc(68px + env(safe-area-inset-bottom, 0px));
+}
+
+:root[data-mantine-color-scheme='dark']:has(.mobile-workspace),
+:root[data-mantine-color-scheme='dark'] body:has(.mobile-workspace) {
+  background-color: var(--astr-surface, #1a1e28);
 }
 
 .mobile-workspace[data-keyboard-open='true'] {

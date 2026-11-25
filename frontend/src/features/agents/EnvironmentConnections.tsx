@@ -1,6 +1,6 @@
 import { useState, useRef, useMemo, useEffect, type ReactNode } from 'react'
 import { ActionIcon, Badge, Button, Checkbox, Group, Loader, Menu, Modal, Paper, Progress, Stack, Table, Text, TextInput, Title } from '@mantine/core'
-import { IconArrowUpCircle, IconDotsVertical, IconPlayerPlay, IconPlayerStop, IconRefresh, IconTerminal } from '@tabler/icons-react'
+import { IconArrowUpCircle, IconDotsVertical, IconDownload, IconPlayerPlay, IconPlayerStop, IconPuzzle, IconRefresh, IconRocket, IconTerminal } from '@tabler/icons-react'
 import { notifications } from '@mantine/notifications'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
@@ -12,6 +12,10 @@ import { useBackgroundTasks } from '../../state/backgroundTasks'
 import { trackUpgradeJob } from '../../state/upgradeTasks'
 import { useUserIdle } from '../../hooks/useUserIdle'
 import { ForceAgentRestartDialog } from './ForceAgentRestartDialog'
+import { usePluginSettingsStore } from '../plugins/pluginSettingsStore'
+import { canonicalAgentKind, type ManagedAgentKind } from '../plugins/builtinPlugins'
+import { AgentEnableModal } from '../toolchain/AgentEnableModal'
+import { EnvironmentBootstrapModal } from '../toolchain/EnvironmentBootstrapModal'
 
 const blank = { display_name: '', host: '', port: '22', user: '', ssh_config_alias: '', identity_file: '', workspace: '', codex_executable: '', grok_executable: '', antigravity_executable: '' }
 export function EnvironmentConnections({ embedded = false, renderAgentConfiguration }: { embedded?: boolean; renderAgentConfiguration?: (environmentId: string, kind: string) => ReactNode }) {
@@ -27,7 +31,18 @@ export function EnvironmentConnections({ embedded = false, renderAgentConfigurat
   const [configuration, setConfiguration] = useState<{ environmentId: string; kind: string } | null>(null)
   const [configurationOpened, setConfigurationOpened] = useState(false)
   const [forceRestart, setForceRestart] = useState<{ id: string; name: string } | null>(null)
-  const items = query.data?.items ?? []
+  const [toolchainConfig, setToolchainConfig] = useState<{ environmentId: string; kind: ManagedAgentKind } | null>(null)
+  const [bootstrapEnvId, setBootstrapEnvId] = useState<string | null>(null)
+  const enabledPlugins = usePluginSettingsStore((s) => s.enabledPlugins)
+  const isAgentEnabled = usePluginSettingsStore((s) => s.isAgentEnabled)
+  const items = useMemo(
+    () =>
+      (query.data?.items ?? []).map((env) => ({
+        ...env,
+        agents: env.agents.filter((agent) => isAgentEnabled(agent.kind)),
+      })),
+    [query.data?.items, enabledPlugins, isAgentEnabled],
+  )
   const selected = items.find(item => item.id === selectedId) ?? items[0]
 
   // 一键升级与批量升级状态
@@ -99,6 +114,7 @@ export function EnvironmentConnections({ embedded = false, renderAgentConfigurat
   // 待升级的目标列表（根据当前打开的模式 node / all 过滤）
   const displayedTargets = useMemo(() => {
     return upgradeTargets.filter((a) => {
+      if (!isAgentEnabled(a.kind)) return false
       if (batchMode === 'node') {
         if (!selected) return false
         return selected.id === 'local'
@@ -107,7 +123,7 @@ export function EnvironmentConnections({ embedded = false, renderAgentConfigurat
       }
       return true
     })
-  }, [upgradeTargets, batchMode, selected])
+  }, [upgradeTargets, batchMode, selected, enabledPlugins, isAgentEnabled])
 
   // 执行勾选的 Agent 批量升级
   const startSelectedUpgrade = async () => {
@@ -225,6 +241,16 @@ export function EnvironmentConnections({ embedded = false, renderAgentConfigurat
             <Button
               size="xs"
               variant="light"
+              color="teal"
+              leftSection={<IconRocket size={14} />}
+              onClick={() => setBootstrapEnvId(selected.id === 'local' ? 'local' : `ssh:${selected.id}`)}
+              title={`在 [${selected.name}] 上批量检测并安装常用工具与 Agent`}
+            >
+              初始化环境
+            </Button>
+            <Button
+              size="xs"
+              variant="light"
               color="indigo"
               leftSection={<IconArrowUpCircle size={14} />}
               loading={batchUpgrading}
@@ -247,8 +273,10 @@ export function EnvironmentConnections({ embedded = false, renderAgentConfigurat
               <Text size="xs" className="connection-agent-state" data-state={agent.state} data-available={agent.available ? 'true' : undefined} c={agent.state === 'error' ? 'red' : 'dimmed'}>{agent.state === 'connected' ? '已接入' : agent.state === 'error' ? '连接失败' : agent.state === 'authentication_required' ? '需要登录' : agent.state === 'unsupported' ? '暂不支持' : agent.available ? '已发现' : selected.discovered ? '未安装' : '待发现'}</Text>
               <Group gap="xs" wrap="nowrap">
                 {renderAgentConfiguration && <Button size="compact-xs" variant="default" onClick={() => { setConfiguration({ environmentId: selected.id, kind: agent.kind }); setConfigurationOpened(true) }} aria-label={`配置 ${agentKindLabel(agent.kind)}`}>配置</Button>}
+                {!agent.available && <Button size="compact-xs" variant="light" color="indigo" leftSection={<IconDownload size={12} />} onClick={() => setToolchainConfig({ environmentId: selected.id === 'local' ? 'local' : `ssh:${selected.id}`, kind: canonicalAgentKind(agent.kind) as ManagedAgentKind })}>安装/路径</Button>}
                 {agent.state !== 'connected' && <Button size="compact-xs" disabled={!!busy || !agent.available || Boolean(agent.detail?.includes('尚不支持'))} loading={busy === `${selected.id}:${agent.kind}`} onClick={() => void run(`${selected.id}:${agent.kind}`, () => api.changeEnvironmentAgent(selected.id, agent.kind, true))}>接入</Button>}
                 <Menu position="bottom-end" withinPortal><Menu.Target><ActionIcon variant="default" size="sm" aria-label={`${agentKindLabel(agent.kind)} 更多操作`}><IconDotsVertical size={15} /></ActionIcon></Menu.Target><Menu.Dropdown>
+                  <Menu.Item leftSection={<IconDownload size={13} />} onClick={() => setToolchainConfig({ environmentId: selected.id === 'local' ? 'local' : `ssh:${selected.id}`, kind: canonicalAgentKind(agent.kind) as ManagedAgentKind })}>安装 / 路径配置</Menu.Item>
                   <Menu.Item disabled={!!busy || agent.state !== 'connected'} onClick={() => void run(`${selected.id}:${agent.kind}`, () => api.changeEnvironmentAgent(selected.id, agent.kind, false))}>断开</Menu.Item>
                   <Menu.Item disabled={!!busy || (!agent.available && agent.state !== 'connected')} onClick={() => void run(`restart:${selected.id}:${agent.kind}`, () => api.restartEnvironmentAgent(selected.id, agent.kind))}>重启</Menu.Item>
                   {agent.kind === 'antigravity' && (
@@ -257,7 +285,10 @@ export function EnvironmentConnections({ embedded = false, renderAgentConfigurat
                 </Menu.Dropdown></Menu>
               </Group>
             </article>)}
-            {!selected.agents.length && <Text size="sm" c="dimmed" py="lg">尚未发现 Agent，请先验证环境。</Text>}
+            {!selected.agents.length && <Stack gap="xs" py="lg" align="flex-start">
+              <Text size="sm" c="dimmed">当前没有已启用的 Agent 插件，可在插件管理中按需启用或引导安装。</Text>
+              <Button size="xs" variant="light" color="indigo" leftSection={<IconPuzzle size={14} />} onClick={() => { window.dispatchEvent(new CustomEvent('astrorder:open-settings', { detail: { tab: 'plugins' } })) }}>前往插件管理启用 Agent</Button>
+            </Stack>}
           </div>
           {!embedded && <footer className="connection-detail-footer"><Text size="xs" c="dimmed">{hostAddress(selected.id)}</Text>{selected.method === 'ssh' && <Button size="compact-xs" variant="subtle" disabled={!!busy || !selected.agents.some(agent => agent.state === 'connected')} onClick={() => void run(`disconnect:${selected.id}`, async () => { for (const agent of selected.agents) { if (agent.state === 'connected') await api.changeEnvironmentAgent(selected.id, agent.kind, false) } })}>断开环境</Button>}</footer>}
         </> : <Text c="dimmed" p="lg">{query.isLoading ? '正在读取运行环境…' : `${!embedded ? '连接管理 · ' : ''}选择或添加一个运行环境`}</Text>}
@@ -270,6 +301,20 @@ export function EnvironmentConnections({ embedded = false, renderAgentConfigurat
         onConfirm={() => void run(`restart:${forceRestart.id}:antigravity`, () => api.restartEnvironmentAgent(forceRestart.id, 'antigravity', true))}
       />
     )}
+    <AgentEnableModal
+      opened={Boolean(toolchainConfig)}
+      kind={toolchainConfig?.kind || null}
+      initialEnvironmentId={toolchainConfig?.environmentId || 'local'}
+      configureOnly
+      onClose={() => setToolchainConfig(null)}
+      onEnabled={() => { void client.invalidateQueries({ queryKey: ['astrorder'] }) }}
+    />
+    <EnvironmentBootstrapModal
+      opened={Boolean(bootstrapEnvId)}
+      initialEnvironmentId={bootstrapEnvId || 'local'}
+      onClose={() => setBootstrapEnvId(null)}
+      onCompleted={() => { void client.invalidateQueries({ queryKey: ['astrorder'] }) }}
+    />
     <SettingsDrawer closeButtonProps={{ 'aria-label': '关闭运行配置' }} opened={configurationOpened} onClose={() => setConfigurationOpened(false)} onExitTransitionEnd={() => setConfiguration(null)} title={configuration ? `${agentKindLabel(configuration.kind)} · 运行配置` : '运行配置'}>{configuration && renderAgentConfiguration?.(configuration.environmentId, configuration.kind)}</SettingsDrawer>
     <SettingsDrawer closeButtonProps={{ 'aria-label': '关闭 SSH 配置' }} opened={editingOpened} onClose={() => setEditingOpened(false)} onExitTransitionEnd={() => setEditing(null)} title={editing === 'new' ? '配置 SSH 连接' : '修改 SSH 连接'}>
       <Stack>{([['display_name', '连接名称'], ['ssh_config_alias', 'SSH 配置别名'], ['host', '主机'], ['port', '端口'], ['user', '用户'], ['identity_file', '私钥文件引用（不读取或上传）'], ['workspace', '默认远程工作区路径（选填）'], ['codex_executable', 'Codex 远程可执行路径（选填，留空自动探测）'], ['grok_executable', 'Grok 远程可执行路径（选填，留空自动探测）'], ['antigravity_executable', 'Antigravity (agy) 远程可执行路径（选填，留空自动探测）']] as const).map(([field, label]) => <TextInput key={field} label={label} value={form[field]} onChange={event => { const value = event.currentTarget.value; setForm(current => ({ ...current, [field]: value })) }} />)}

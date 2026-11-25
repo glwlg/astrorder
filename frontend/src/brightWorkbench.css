@@ -252,9 +252,8 @@ body { font-family: var(--astr-session-font); font-size: 14px; }
   z-index: 4;
   padding: 2px 3px;
   border-radius: 7px;
-  background: color-mix(in oklab, var(--astr-surface) 88%, transparent);
-  backdrop-filter: blur(12px) saturate(140%);
-  -webkit-backdrop-filter: blur(12px) saturate(140%);
+  background: var(--astr-surface);
+  border: 1px solid color-mix(in oklab, var(--astr-border) 75%, transparent);
   box-shadow: 0 2px 8px rgb(40 27 60 / 12%);
   opacity: 0;
   pointer-events: auto;
@@ -295,13 +294,12 @@ body { font-family: var(--astr-session-font); font-size: 14px; }
   --sidebar-sky-overlay:
     linear-gradient(90deg, rgb(249 246 254 / 42%) 0%, rgb(252 250 255 / 58%) 68%, var(--astr-surface) 100%),
     linear-gradient(180deg, rgb(255 255 255 / 92%) 0%, rgb(250 247 255 / 70%) 160px, rgb(248 244 253 / 54%) 62%, rgb(247 241 252 / 46%) 100%);
-  --sidebar-glass-face: rgb(255 255 255 / 44%);
-  --sidebar-glass-active: rgb(236 225 252 / 78%);
-  --sidebar-glass-hover: rgb(255 255 255 / 64%);
+  --sidebar-glass-face: rgb(255 255 255 / 72%);
+  --sidebar-glass-active: rgb(236 225 252 / 88%);
+  --sidebar-glass-hover: rgb(255 255 255 / 88%);
   --sidebar-glass-rim: rgb(255 255 255 / 86%);
   --sidebar-glass-seam: rgb(117 64 189 / 16%);
-  --sidebar-nav-veil: rgb(247 244 252 / 42%);
-  /* liquidGL uses the nearest sticky or fixed ancestor as the canvas anchor. */
+  --sidebar-nav-veil: rgb(247 244 252 / 48%);
   position: sticky;
   top: 0;
   isolation: isolate;
@@ -316,12 +314,12 @@ body { font-family: var(--astr-session-font); font-size: 14px; }
   --sidebar-sky-position: 65% 24%;
   --sidebar-sky-overlay: linear-gradient(180deg,
     rgb(30 24 32 / 83%), rgb(32 24 32 / 75%) 35%, rgb(26 22 31 / 58%) 65%, rgb(25 23 31 / 72%));
-  --sidebar-glass-face: rgb(255 233 240 / 9%);
-  --sidebar-glass-active: rgb(135 94 184 / 36%);
-  --sidebar-glass-hover: rgb(255 235 242 / 16%);
-  --sidebar-glass-rim: rgb(247 230 241 / 42%);
+  --sidebar-glass-face: rgb(32 27 40 / 62%);
+  --sidebar-glass-active: rgb(135 94 184 / 44%);
+  --sidebar-glass-hover: rgb(48 40 58 / 74%);
+  --sidebar-glass-rim: rgb(247 230 241 / 32%);
   --sidebar-glass-seam: rgb(17 11 18 / 46%);
-  --sidebar-nav-veil: rgb(21 16 24 / 20%);
+  --sidebar-nav-veil: rgb(21 16 24 / 28%);
 }
 .workspace-sidebar-sky {
   position: absolute;
@@ -363,22 +361,10 @@ body { font-family: var(--astr-session-font); font-size: 14px; }
   background: var(--sidebar-glass-hover);
 }
 .workspace-sidebar .session-rail .rail-empty { color: var(--astr-muted); }
-.workspace-sidebar .liquid-surface-layer {
-  background: var(--sidebar-glass-face);
-  backdrop-filter: blur(8px) saturate(145%);
-  -webkit-backdrop-filter: blur(8px) saturate(145%);
-  box-shadow: inset 0 1px 1px var(--sidebar-glass-rim),
-    inset 0 -1px 1px var(--sidebar-glass-seam),
-    0 2px 6px rgb(16 22 33 / 9%);
-}
-.workspace-sidebar .liquid-surface[data-active] > .liquid-surface-layer {
-  background: var(--sidebar-glass-active);
-}
-.workspace-sidebar :is(.session-project-header, .agent-kind-select):is(:hover, :focus-within) > .liquid-surface-layer,
-.workspace-sidebar .agent-connection-control:focus-within > .liquid-surface-layer {
+.workspace-sidebar :is(.session-project-header, .agent-kind-select):is(:hover, :focus-within),
+.workspace-sidebar .agent-connection-control:focus-within {
   background: var(--sidebar-glass-hover);
 }
-.workspace-sidebar .liquid-surface-lens { position: absolute; inset: 0; }
 
 .chat-page { padding: 0; background: var(--astr-surface); }
 .chat-workbench { display: flex; flex-direction: column; height: 100%; min-height: 0; overflow: clip; border: 0; border-radius: 0; background: var(--astr-surface); box-shadow: none; container: workbench / inline-size; }

@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { notifications } from '@mantine/notifications'
 import { api, type PluginSettingsResponse } from '../../api/client'
 import { syncAccentFromPluginConfigs } from '../../themeAccent'
+import { agentPluginIdForKind } from './agentEngineRegistry'
 
 export const SIDEBAR_INTEGRATIONS_PLUGIN_ID = 'sidebar-integrations'
 
@@ -28,6 +29,7 @@ export interface PluginSettingsState {
   setPluginConfig: (pluginId: string, key: string, value: unknown) => void
   setPluginConfigPatch: (pluginId: string, patch: Record<string, unknown>) => void
   isPluginEnabled: (pluginId: string) => boolean
+  isAgentEnabled: (kind?: string | null) => boolean
   getPluginConfig: <T = unknown>(pluginId: string, key: string, fallback?: T) => T
   reset: () => void
 }
@@ -158,6 +160,12 @@ export const usePluginSettingsStore = create<PluginSettingsState>((set, get) => 
     const val = get().enabledPlugins[pluginId]
     // 默认均为开启状态 (true)
     return val !== false
+  },
+
+  isAgentEnabled: (kind?: string | null) => {
+    const pluginId = agentPluginIdForKind(kind)
+    if (!pluginId) return true
+    return get().enabledPlugins[pluginId] !== false
   },
 
   getPluginConfig: <T = unknown>(pluginId: string, key: string, fallback?: T): T => {

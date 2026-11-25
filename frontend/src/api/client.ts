@@ -877,12 +877,23 @@ export const api = {
     jsonRequest<{ configured: boolean; masked_key: string; base_url: string; model: string; reasoning: string }>('/services/llm/config', payload),
   testLlmConnection: (payload: { base_url: string; api_key?: string | null; model: string; reasoning: string }) =>
     jsonRequest<{ ok: boolean; model: string; reply: string }>('/services/llm/test', payload),
+  getAiProviders: () => request<AiProvidersConfig>('/services/providers'),
+  saveAiProvider: (payload: AiProviderPatch) =>
+    jsonRequest<{ config: AiProvidersConfig; provider: AiProvider }>('/services/providers', payload),
+  deleteAiProvider: (id: string) =>
+    request<AiProvidersConfig>(`/services/providers/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  setDefaultAiProvider: (payload: { provider_id: string; model: string; reasoning?: string }) =>
+    jsonRequest<AiProvidersConfig>('/services/providers/default', payload, 'PUT'),
+  fetchAiProviderModels: (payload: { provider_id?: string; protocol?: AiProviderProtocol; base_url?: string; api_key?: string }) =>
+    jsonRequest<AiProviderModelsResponse>('/services/providers/models', payload),
+  testAiProvider: (payload: { provider_id?: string; protocol?: AiProviderProtocol; base_url?: string; api_key?: string; model?: string; reasoning?: string }) =>
+    jsonRequest<AiProviderTestResponse>('/services/providers/test', payload),
   curateHandoffWithSystemOne: (sessionId: string, agentId: string) =>
     jsonRequest<{ ok: boolean; summary: string; phase: string; blocker: string }>('/sessions/handoff-curate', { session_id: sessionId, agent_id: agentId }),
   testSystemOneConnection: (payload: SystemOneConfigPatch) =>
     jsonRequest<{ ok: boolean; details: SystemOneTestDetails }>('/services/jev/test', payload),
   getConnections: () => request<ConnectionsPayload>('/connections'),
-  getEnvironments: () => request<{ items: Array<{ id: string; name: string; method: 'local' | 'ssh'; discovered: boolean; os?: string; agents: Array<{ kind: AgentKind; available: boolean; state: string; detail: string; executable?: string; daemon_mode?: boolean }> }> }>('/environments'),
+  getEnvironments: () => request<{ items: Array<{ id: string; name: string; method: 'local' | 'ssh'; discovered: boolean; os?: string; agents: Array<{ kind: AgentKind; available: boolean; state: string; detail: string; executable?: string; daemon_mode?: boolean; registered_in_daemon?: boolean; plugin_enabled?: boolean }> }> }>('/environments'),
   discoverEnvironment: (id: string) => request(`/environments/${encodeURIComponent(id)}/discover`, { method: 'POST' }),
   changeEnvironmentAgent: (id: string, kind: string, connect: boolean) => request(`/environments/${encodeURIComponent(id)}/agents/${kind}/${connect ? 'connect' : 'disconnect'}`, { method: 'POST' }),
   restartEnvironmentAgent: (id: string, kind: string, confirmActive = false) =>
@@ -1060,6 +1071,8 @@ export const api = {
   getModelQuota: (model: string, agentId?: string) => request<OcxModelQuotaResponse>(`/analytics/model-quota?model=${encodeURIComponent(model)}${agentId ? `&agent_id=${encodeURIComponent(agentId)}` : ''}`),
   writeFile: (payload: { path: string; content: string; session_id: string; connection_id?: string | null }) =>
     jsonRequest<{ status: string; path: string }>('/system/write-file', payload),
+  openFile: (path: string, action: 'open' | 'reveal' = 'open') =>
+    jsonRequest<{ status: string; opened: string }>('/system/open-file', { path, action }),
   searchFiles: (params: { q?: string; sessionId?: string; connectionId?: string; limit?: number }) => {
     const query = new URLSearchParams()
     if (params.q) query.set('q', params.q)
@@ -1077,6 +1090,37 @@ export const api = {
     jsonRequest<{ existing: string[] }>('/files/exists', { workspace, paths, connection_id: connectionId }),
   createDirectory: (parentPath: string, name: string, connectionId?: string | null) =>
     jsonRequest<{ ok: boolean; path: string }>('/files/mkdir', { parent_path: parentPath, name, connection_id: connectionId }),
+  renameFile: (payload: { path: string; name: string; session_id?: string; connection_id?: string | null }) =>
+    jsonRequest<{ ok: boolean; path: string; name: string }>('/files/rename', payload, 'POST'),
+  deleteFile: (payload: { path: string; session_id?: string; connection_id?: string | null }) =>
+    jsonRequest<{ ok: boolean; path: string }>('/files/delete', payload, 'POST'),
+  uploadFile: async (payload: {
+    file: File
+    parent?: string
+    session_id?: string
+    connection_id?: string | null
+    overwrite?: boolean
+  }): Promise<{ ok: boolean; path: string; name: string; size: number }> => {
+    const form = new FormData()
+    form.append('file', payload.file, payload.file.name)
+    if (payload.parent) form.append('parent', payload.parent)
+    if (payload.session_id) form.append('session_id', payload.session_id)
+    if (payload.connection_id) form.append('connection_id', payload.connection_id)
+    if (payload.overwrite) form.append('overwrite', 'true')
+    const response = await authenticatedApiFetch('/api/v1/files/upload', {
+      method: 'POST',
+      body: form,
+    })
+    if (!response.ok) {
+      let detail = `上传文件失败 (${response.status})`
+      try {
+        const parsed = (await response.json()) as { detail?: string }
+        if (parsed.detail) detail = parsed.detail
+      } catch {}
+      throw new ApiError(response.status, detail)
+    }
+    return (await response.json()) as { ok: boolean; path: string; name: string; size: number }
+  },
 
   // 备份管理
   listBackupTargets: () => request<{ items: BackupTarget[]; default_destination_dir: string }>('/backups/targets'),
@@ -1114,6 +1158,35 @@ export const api = {
     configs?: Record<string, Record<string, unknown>>
     import_only?: boolean
   }) => jsonRequest<PluginSettingsResponse>('/plugins/settings', payload, 'PUT'),
+
+  // 工具链与 Agent 体检 / 辅助安装（本机 / WSL / SSH）
+  getToolchainTargets: () => request<{ items: ToolchainTarget[] }>('/toolchain/targets'),
+  getToolchainStatus: (environment = 'local') =>
+    request<ToolchainReport>(`/toolchain/status?environment=${encodeURIComponent(environment)}`),
+  getToolchainAgentEngines: () => request<{ items: ToolchainAgentEngineSpec[] }>('/toolchain/agent-engines'),
+  getToolchainNetwork: () => request<ToolchainNetworkSettings>('/toolchain/network'),
+  saveToolchainNetwork: (payload: { environment_id?: string; proxy_url: string; mirror: string }) =>
+    jsonRequest<ToolchainNetworkSettings>('/toolchain/network', payload, 'PUT'),
+  validateToolchainExecutable: (payload: { environment_id: string; tool_id: string; path: string }) =>
+    jsonRequest<ToolchainValidateResult>('/toolchain/validate', payload, 'POST'),
+  saveToolchainExecutable: (payload: { environment_id: string; tool_id: string; path: string }) =>
+    jsonRequest<ToolchainSaveExecutableResult>('/toolchain/executable', payload, 'PUT'),
+  startToolchainInstallJob: (payload: {
+    environment_id: string
+    tool_ids: string[]
+    recipe_id?: string
+    custom_command?: string
+    include_deps?: boolean
+    proxy_url?: string
+    mirror?: string
+    save_network?: boolean
+    title?: string
+  }) => jsonRequest<ToolchainInstallJob>('/toolchain/install/jobs', payload, 'POST'),
+  getToolchainInstallJobs: () => request<{ items: ToolchainInstallJob[] }>('/toolchain/install/jobs'),
+  getToolchainInstallJob: (id: string) =>
+    request<ToolchainInstallJob>(`/toolchain/install/jobs/${encodeURIComponent(id)}`),
+  cancelToolchainInstallJob: (id: string) =>
+    jsonRequest<ToolchainInstallJob>(`/toolchain/install/jobs/${encodeURIComponent(id)}/cancel`, {}, 'POST'),
 
   // 侧边栏外链集成（数据库持久化）
   listIntegrations: () => request<{ items: IntegrationItem[] }>('/integrations'),
@@ -1169,11 +1242,293 @@ export const api = {
     const params = new URLSearchParams({ q: query, limit: String(limit) })
     return request<{ query: string; items: MessageSearchHit[] }>(`/sessions/search?${params.toString()}`)
   },
+
+  // DBX 项目关联数据库与对话内原地执行 SQL
+  listDbxConnections: () =>
+    request<{ connections: DbxConnectionSummary[] }>('/plugins/dbx-exec/connections'),
+  listDbxDatabases: (connectionId: string) =>
+    request<{ databases: string[] }>(`/plugins/dbx-exec/databases?connection_id=${encodeURIComponent(connectionId)}`),
+  listDbxSchemas: (connectionId: string, database?: string) => {
+    const q = new URLSearchParams({ connection_id: connectionId })
+    if (database) q.set('database', database)
+    return request<{ schemas: string[] }>(`/plugins/dbx-exec/schemas?${q.toString()}`)
+  },
+  getProjectDatabaseBindings: () =>
+    request<{ bindings: ProjectDatabaseBinding[] }>('/plugins/dbx-exec/bindings'),
+  saveProjectDatabaseBinding: (binding: ProjectDatabaseBinding) =>
+    jsonRequest<{ binding: ProjectDatabaseBinding; bindings: ProjectDatabaseBinding[] }>(
+      '/plugins/dbx-exec/bindings',
+      binding,
+      'PUT',
+    ),
+  deleteProjectDatabaseBinding: (projectKey: string) =>
+    request<{ deleted: boolean; bindings: ProjectDatabaseBinding[] }>(
+      `/plugins/dbx-exec/bindings?project_key=${encodeURIComponent(projectKey)}`,
+      { method: 'DELETE' },
+    ),
+  executeDbxSql: (payload: DbxExecuteRequest, signal?: AbortSignal) =>
+    request<DbxExecuteResult>('/plugins/dbx-exec/query', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal,
+    }),
+  cancelDbxSql: (queryId: string) =>
+    jsonRequest<{ ok: boolean; query_id: string }>('/plugins/dbx-exec/cancel', { query_id: queryId }),
+
+  // 办公文档预览（Word / Excel / CSV）
+  previewDocx: (params: { path: string; sessionId?: string; connectionId?: string | null }) => {
+    const q = new URLSearchParams({ path: params.path })
+    if (params.sessionId) q.set('session_id', params.sessionId)
+    if (params.connectionId) q.set('connection_id', params.connectionId)
+    return request<DocxPreviewResponse>(`/office/preview/docx?${q.toString()}`)
+  },
+  previewSheet: (params: {
+    path: string
+    sessionId?: string
+    connectionId?: string | null
+    maxRows?: number
+    maxCols?: number
+  }) => {
+    const q = new URLSearchParams({ path: params.path })
+    if (params.sessionId) q.set('session_id', params.sessionId)
+    if (params.connectionId) q.set('connection_id', params.connectionId)
+    if (params.maxRows) q.set('max_rows', String(params.maxRows))
+    if (params.maxCols) q.set('max_cols', String(params.maxCols))
+    return request<SheetPreviewResponse>(`/office/preview/sheet?${q.toString()}`)
+  },
+  previewPptx: (params: { path: string; sessionId?: string; connectionId?: string | null }) => {
+    const q = new URLSearchParams({ path: params.path })
+    if (params.sessionId) q.set('session_id', params.sessionId)
+    if (params.connectionId) q.set('connection_id', params.connectionId)
+    return request<PptxPreviewResponse>(`/office/preview/pptx?${q.toString()}`)
+  },
+  refineOfficeSelection: (payload: OfficeRefineRequest) =>
+    jsonRequest<OfficeRefineResponse>('/office/refine', payload, 'POST'),
+  saveOfficeExport: (payload: OfficeExportSaveRequest) =>
+    jsonRequest<OfficeExportSaveResponse>('/office/export/save', payload, 'POST'),
+  getOfficeProfile: () =>
+    request<OfficePersonaProfile>('/office/profile'),
+  saveOfficeProfile: (payload: OfficePersonaProfile) =>
+    jsonRequest<OfficePersonaProfile>('/office/profile', payload, 'PUT'),
+  listRecentOfficeDocs: (params?: { workspace?: string; limit?: number }) => {
+    const q = new URLSearchParams()
+    if (params?.workspace) q.set('workspace', params.workspace)
+    if (params?.limit) q.set('limit', String(params.limit))
+    const suffix = q.toString() ? `?${q.toString()}` : ''
+    return request<{ items: RecentOfficeDoc[] }>(`/office/recent-docs${suffix}`)
+  },
+  extractOfficeSources: (payload: OfficeSourcesExtractRequest) =>
+    jsonRequest<OfficeSourcesExtractResponse>('/office/sources/extract', payload, 'POST'),
+  synthesizeOfficeSources: (payload: OfficeSourcesSynthesizeRequest) =>
+    jsonRequest<OfficeSourcesSynthesizeResponse>('/office/sources/synthesize', payload, 'POST'),
+
+  // 个人办公待办（统一待办中心）
+  listTodos: () =>
+    request<{ items: OfficeTodoItem[]; open_count: number }>('/todos'),
+  createTodo: (payload: OfficeTodoCreateRequest) =>
+    jsonRequest<OfficeTodoItem>('/todos', payload, 'POST'),
+  patchTodo: (id: string, payload: OfficeTodoPatchRequest) =>
+    jsonRequest<OfficeTodoItem>(`/todos/${encodeURIComponent(id)}`, payload, 'PATCH'),
+  deleteTodo: (id: string) =>
+    request<{ ok: boolean; id: string }>(`/todos/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
+  // 音频转写（会议录音 / 音频文件上传）
+  transcribeAudioFile: async (file: File | Blob, fileName?: string): Promise<{ text: string }> => {
+    const resolvedName = fileName || (file instanceof File ? file.name : 'recording.webm')
+    const ext = resolvedName.toLowerCase().split('.').pop() || ''
+    const extMimeMap: Record<string, string> = {
+      mp3: 'audio/mpeg',
+      m4a: 'audio/mp4',
+      mp4: 'audio/mp4',
+      wav: 'audio/wav',
+      webm: 'audio/webm',
+      ogg: 'audio/ogg',
+      flac: 'audio/flac',
+      aac: 'audio/aac',
+    }
+    const rawType = (file.type || '').split(';')[0].trim().toLowerCase()
+    const normalizedType = extMimeMap[ext] || (rawType === 'audio/mp3' ? 'audio/mpeg' : rawType) || 'audio/webm'
+    const normalizedBlob = file.type === normalizedType ? file : new Blob([file], { type: normalizedType })
+    const form = new FormData()
+    form.append('file', normalizedBlob, resolvedName)
+    const response = await authenticatedApiFetch('/api/v1/audio/transcriptions', {
+      method: 'POST',
+      body: form,
+    })
+    if (!response.ok) {
+      let detail = `音频转写失败 (${response.status})`
+      try {
+        const parsed = (await response.json()) as { detail?: string }
+        if (parsed.detail) detail = parsed.detail
+      } catch {}
+      throw new ApiError(response.status, detail)
+    }
+    return (await response.json()) as { text: string }
+  },
+
+  // 会议纪要与行动项闭环
+  listMeetings: () =>
+    request<{ items: MeetingRecord[] }>('/meetings'),
+  saveMeeting: (record: Partial<MeetingRecord> & { title: string }) =>
+    jsonRequest<MeetingRecord>('/meetings', record, 'POST'),
+  deleteMeeting: (id: string) =>
+    request<{ ok: boolean; id: string }>(`/meetings?id=${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  summarizeMeeting: (payload: MeetingSummarizeRequest) =>
+    jsonRequest<MeetingSummarizeResponse>('/meetings/summarize', payload, 'POST'),
+  listMeetingActionItems: (status?: 'open' | 'done' | 'all') => {
+    const suffix = status && status !== 'all' ? `?status=${encodeURIComponent(status)}` : ''
+    return request<{ items: MeetingActionItem[]; open_count: number }>(`/meetings/action-items${suffix}`)
+  },
+  patchMeetingActionItem: (payload: MeetingActionItemPatchRequest) =>
+    jsonRequest<MeetingActionItem>('/meetings/action-items', payload, 'PATCH'),
+  getMeetingSettings: () =>
+    request<MeetingSettings>('/meetings/settings'),
+  saveMeetingSettings: (payload: Partial<MeetingSettings>) =>
+    jsonRequest<MeetingSettings>('/meetings/settings', payload, 'PUT'),
+  testMeetingSettings: (payload?: Partial<MeetingSettings>) =>
+    jsonRequest<MeetingSettingsTestResponse>('/meetings/settings/test', payload || {}, 'POST'),
+
+  // 智能工作复盘 / 周报工作台
+  collectDigest: (payload: DigestCollectRequest) =>
+    jsonRequest<DigestBundle>('/digest/collect', payload, 'POST'),
+  generateDigest: (payload: DigestGenerateRequest) =>
+    jsonRequest<DigestGenerateResponse>('/digest/generate', payload, 'POST'),
+  listDigestHistory: () =>
+    request<{ items: DigestHistoryRecord[] }>('/digest/history'),
+  saveDigestHistory: (record: Partial<DigestHistoryRecord> & { title: string; markdown: string }) =>
+    jsonRequest<DigestHistoryRecord>('/digest/history', record, 'POST'),
+  deleteDigestHistory: (id: string) =>
+    request<{ ok: boolean; id: string }>(`/digest/history?id=${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  listDigestTemplates: () =>
+    request<{ items: DigestTemplate[] }>('/digest/templates'),
+  saveDigestTemplate: (template: Partial<DigestTemplate> & { name: string; system_prompt: string }) =>
+    jsonRequest<DigestTemplate>('/digest/templates', template, 'PUT'),
+  deleteDigestTemplate: (id: string) =>
+    request<{ ok: boolean; id: string }>(`/digest/templates?id=${encodeURIComponent(id)}`, { method: 'DELETE' }),
 }
 
 export interface PluginSettingsResponse {
   enabled: Record<string, boolean>
   configs: Record<string, Record<string, unknown>>
+}
+
+export interface ToolchainTarget {
+  id: string
+  kind: 'local' | 'wsl' | 'ssh'
+  name: string
+  connection_id?: string
+  distro?: string
+  state?: string
+}
+
+export interface ToolchainRecipe {
+  id: string
+  label: string
+  mode: 'background' | 'interactive'
+  command: string
+  shell?: string
+  requires_sudo?: boolean
+  note?: string
+}
+
+export interface ToolchainItemStatus {
+  id: string
+  kind: 'tool' | 'agent'
+  group?: 'core' | 'extra'
+  plugin_id?: string
+  name: string
+  description: string
+  installed: boolean
+  in_path?: boolean
+  path_hint?: string
+  readiness?: 'missing' | 'needs_setup' | 'ready'
+  readiness_detail?: string
+  auth_configured?: boolean
+  version?: string
+  executable?: string
+  custom_executable?: string
+  configured_executable?: string
+  registered_in_daemon?: boolean
+  requires_daemon_restart?: boolean
+  dependencies?: string[]
+  missing_dependencies?: string[]
+  auth_command?: string
+  auth_hint?: string
+  docs_url?: string
+  recipes: ToolchainRecipe[]
+  detail?: string
+}
+
+export interface ToolchainNetworkProfile {
+  proxy_url: string
+  mirror: string
+}
+
+export interface ToolchainNetworkSettings {
+  default: ToolchainNetworkProfile
+  by_environment?: Record<string, ToolchainNetworkProfile>
+}
+
+export interface ToolchainAgentEngineSpec {
+  kind: string
+  plugin_id: string
+  name: string
+  short_label: string
+  description: string
+  aliases?: string[]
+  binaries: string[]
+  dependencies?: string[]
+  auth_command?: string
+  auth_hint?: string
+  docs_url?: string
+  related_plugins?: string[]
+  capabilities: {
+    supports_ssh: boolean
+    supports_rtk: boolean
+    supports_session_cli: boolean
+    supports_accounts_pool: boolean
+  }
+}
+
+export interface ToolchainReport {
+  environment_id: string
+  target_kind: 'local' | 'wsl' | 'ssh'
+  target_name: string
+  os: string
+  arch?: string
+  checked_at: string
+  items: ToolchainItemStatus[]
+}
+
+export interface ToolchainValidateResult {
+  valid: boolean
+  resolved_path?: string
+  version?: string
+  output?: string
+  error?: string
+}
+
+export interface ToolchainSaveExecutableResult {
+  saved: boolean
+  requires_daemon_restart: boolean
+  message: string
+  item: ToolchainItemStatus
+}
+
+export interface ToolchainInstallJob {
+  id: string
+  title: string
+  environment_id: string
+  tool_ids: string[]
+  status: 'running' | 'completed' | 'failed' | 'cancelled'
+  detail: string
+  log: string
+  created_at: string
+  current: number
+  total: number
+  target: string
+  report?: ToolchainReport
 }
 
 export type IntegrationIconType = 'auto' | 'builtin' | 'image' | 'emoji'
@@ -1381,6 +1736,667 @@ export interface MessageSearchHit {
   workspace?: string
   agent_kind?: string
   agent_name?: string
+}
+
+export interface DbxConnectionSummary {
+  id: string
+  name: string
+  db_type: string
+  host?: string
+  port?: number
+  database?: string
+  schema?: string
+  environment?: string
+  is_prod: boolean
+  production_databases?: string[]
+  connected?: boolean
+}
+
+export interface ProjectDatabaseTarget {
+  id: string
+  connection_id: string
+  connection_name: string
+  db_type?: string
+  database: string
+  schema?: string
+  label?: string
+  is_prod: boolean
+  is_default: boolean
+}
+
+export interface ProjectDatabaseBinding {
+  project_key: string
+  workspace_key?: string
+  project_label?: string
+  targets: ProjectDatabaseTarget[]
+  updated_at?: string
+}
+
+export interface DbxSqlClassification {
+  risk_level: 'read_only' | 'write' | 'destructive'
+  statement_count: number
+  primary_verb: string
+  warnings?: string[]
+  read_only_allowed: boolean
+}
+
+export interface DbxColumnMeta {
+  name: string
+  data_type?: string
+}
+
+export interface DbxStatementResult {
+  index: number
+  sql?: string
+  columns?: DbxColumnMeta[]
+  rows?: unknown[][]
+  row_count: number
+  affected_rows?: number | null
+  elapsed_ms: number
+  truncated?: boolean
+  message?: string
+  error?: string
+}
+
+export interface DbxExecuteRequest {
+  connection_id: string
+  database?: string
+  schema?: string
+  sql: string
+  source_kind?: 'snippet' | 'file'
+  source_name?: string
+  project_key?: string
+  workspace_key?: string
+  session_id?: string
+  confirmed?: boolean
+  max_rows?: number
+  timeout_secs?: number
+  query_id?: string
+}
+
+export interface DbxExecuteResult {
+  ok: boolean
+  query_id?: string
+  connection_id: string
+  connection_name?: string
+  database?: string
+  schema?: string
+  is_prod: boolean
+  classification: DbxSqlClassification
+  results: DbxStatementResult[]
+  total_elapsed_ms: number
+  truncated?: boolean
+  error?: string
+}
+
+export interface DocxOutlineItem {
+  id: string
+  level: number
+  text: string
+}
+
+export interface DocxRun {
+  text: string
+  bold?: boolean
+  italic?: boolean
+  underline?: boolean
+  strike?: boolean
+  code?: boolean
+  color?: string
+  href?: string
+}
+
+export interface DocxTableCell {
+  runs: DocxRun[]
+  text: string
+  colspan?: number
+  rowspan?: number
+  is_header?: boolean
+}
+
+export interface DocxTableRow {
+  cells: DocxTableCell[]
+  is_header?: boolean
+}
+
+export interface DocxBlock {
+  id: string
+  kind: 'heading' | 'paragraph' | 'list_item' | 'table' | 'image' | 'hr'
+  level?: number
+  ordered?: boolean
+  align?: string
+  runs?: DocxRun[]
+  rows?: DocxTableRow[]
+  image_data_uri?: string
+  image_alt?: string
+}
+
+export interface DocxStats {
+  words: number
+  paragraphs: number
+  tables: number
+  images: number
+  headings: number
+}
+
+export interface DocxPreviewResponse {
+  path: string
+  name: string
+  title: string
+  outline: DocxOutlineItem[]
+  blocks: DocxBlock[]
+  plain_paragraphs: string[]
+  stats: DocxStats
+}
+
+export interface SheetTabPreview {
+  name: string
+  columns: string[]
+  rows: unknown[][]
+  total_rows: number
+  total_cols: number
+  truncated: boolean
+}
+
+export interface SheetPreviewResponse {
+  path: string
+  name: string
+  format: 'xlsx' | 'csv' | 'tsv' | string
+  encoding: string
+  sheets: SheetTabPreview[]
+}
+
+export interface PptxParagraph {
+  text: string
+  level?: number
+  bold?: boolean
+}
+
+export interface PptxTable {
+  rows: string[][]
+}
+
+export interface PptxSlidePreview {
+  index: number
+  title: string
+  paragraphs: PptxParagraph[]
+  tables?: PptxTable[]
+  images?: string[]
+  notes?: string
+}
+
+export interface PptxStats {
+  slide_count: number
+  words: number
+  tables: number
+  images: number
+}
+
+export interface PptxPreviewResponse {
+  path: string
+  name: string
+  title: string
+  slide_count: number
+  slides: PptxSlidePreview[]
+  stats: PptxStats
+}
+
+export interface OfficeRefineRequest {
+  document_title?: string
+  selected_text: string
+  context_before?: string
+  context_after?: string
+  instruction: string
+  mode?: 'llm' | 'prompt_only'
+  provider_id?: string
+  model?: string
+}
+
+export interface OfficeRefineResponse {
+  ok: boolean
+  mode: 'llm' | 'prompt_only' | string
+  llm_configured: boolean
+  model?: string
+  rewritten_text: string
+  assembled_prompt: string
+  message?: string
+}
+
+export interface OfficeExportSaveRequest {
+  format: 'md' | 'docx' | 'pptx' | 'xlsx'
+  workspace?: string
+  session_id?: string
+  connection_id?: string | null
+  sub_dir?: string
+  file_name?: string
+  title?: string
+  subtitle?: string
+  markdown?: string
+  diagrams?: Array<{ index: number; png_base64: string; width: number; height: number }>
+  sheets?: Array<{ name: string; columns: string[]; rows: unknown[][] }>
+  overwrite?: boolean
+}
+
+export interface OfficeExportSaveResponse {
+  ok: boolean
+  path: string
+  name: string
+  size: number
+}
+
+export type OfficeWritingStyle = 'concise_exec' | 'formal_doc' | 'friendly_sync' | 'client_facing'
+
+export interface OfficePersonaProfile {
+  display_name: string
+  role: string
+  department: string
+  default_audience: string
+  writing_style: OfficeWritingStyle | string
+  tone_rules: string
+  glossary: string
+  avoid_words: string
+  auto_inject_chat: boolean
+}
+
+export interface RecentOfficeDoc {
+  path: string
+  name: string
+  ext: string
+  size: number
+  mod_time: string
+  workspace: string
+  project_key?: string
+  project_name?: string
+}
+
+export interface OfficeSourcesExtractRequest {
+  paths: string[]
+  session_id?: string
+  connection_id?: string | null
+  max_chars_per_doc?: number
+}
+
+export interface OfficeExtractedSource {
+  index: number
+  path: string
+  name: string
+  kind: 'docx' | 'sheet' | 'pptx' | 'markdown' | 'text' | 'pdf' | 'unsupported' | string
+  excerpt: string
+  char_count: number
+  truncated: boolean
+  error?: string
+}
+
+export interface OfficeSourcesExtractResponse {
+  ok: boolean
+  sources: OfficeExtractedSource[]
+  assembled_context: string
+}
+
+export interface OfficeSourcesSynthesizeRequest {
+  paths?: string[]
+  action: 'summary' | 'compare' | 'table' | 'ppt_outline' | 'review' | 'draft' | 'custom' | string
+  title?: string
+  instruction?: string
+  session_id?: string
+  connection_id?: string | null
+  provider_id?: string
+  model?: string
+  mode?: 'llm' | 'prompt_only'
+}
+
+export interface OfficeSourcesSynthesizeResponse {
+  ok: boolean
+  mode: 'llm' | 'prompt_only' | string
+  llm_configured: boolean
+  model?: string
+  title: string
+  markdown: string
+  assembled_prompt: string
+  sources: OfficeExtractedSource[]
+  message?: string
+}
+
+export interface OfficeTodoItem {
+  id: string
+  text: string
+  status: 'open' | 'done' | string
+  priority: 'high' | 'medium' | 'low' | string
+  due_date?: string
+  owner?: string
+  project_key?: string
+  note?: string
+  created_at?: string
+  updated_at?: string
+}
+
+export interface OfficeTodoCreateRequest {
+  text: string
+  priority?: 'high' | 'medium' | 'low'
+  due_date?: string
+  owner?: string
+  project_key?: string
+  note?: string
+}
+
+export interface OfficeTodoPatchRequest {
+  text?: string
+  status?: 'open' | 'done'
+  priority?: 'high' | 'medium' | 'low'
+  due_date?: string
+  owner?: string
+  project_key?: string
+  note?: string
+}
+
+export interface MeetingActionItem {
+  id: string
+  meeting_id: string
+  meeting_title: string
+  text: string
+  owner?: string
+  due_date?: string
+  priority?: 'high' | 'medium' | 'low' | string
+  status: 'open' | 'done' | string
+  created_at?: string
+  updated_at?: string
+}
+
+export interface MeetingTranscriptSegment {
+  id: string
+  timestamp: string
+  seconds: number
+  speaker?: string
+  text: string
+  kind?: 'speech' | 'note' | string
+  bookmarked?: boolean
+}
+
+export interface MeetingTopic {
+  timestamp?: string
+  title: string
+  detail: string
+}
+
+export interface MeetingRecord {
+  id: string
+  title: string
+  meeting_date: string
+  duration_seconds?: number
+  project_key?: string
+  workspace?: string
+  participants?: string[]
+  transcript?: string
+  segments?: MeetingTranscriptSegment[]
+  minutes_markdown: string
+  summary?: string
+  topics?: MeetingTopic[]
+  decisions?: string[]
+  risks?: string[]
+  action_items: MeetingActionItem[]
+  model?: string
+  created_at?: string
+  updated_at?: string
+}
+
+export type AiProviderProtocol = 'openai' | 'gemini'
+export type AiProviderVendor = '' | 'magpie' | 'opencodex'
+
+export interface AiProvider {
+  id: string
+  name: string
+  protocol: AiProviderProtocol
+  vendor?: AiProviderVendor | string
+  base_url: string
+  api_key_set: boolean
+  masked_key?: string
+  models: string[]
+  enabled: boolean
+  management_url?: string
+  management_key_set?: boolean
+  masked_management_key?: string
+  statistics_url?: string
+  target_overrides?: Record<string, string>
+}
+
+export interface AiProvidersConfig {
+  providers: AiProvider[]
+  default_provider_id: string
+  default_model: string
+  default_reasoning: 'none' | 'low' | 'medium' | 'high' | string
+  effective_configured: boolean
+  effective_model?: string
+  effective_provider_name?: string
+}
+
+export interface AiProviderPatch {
+  id?: string
+  name: string
+  protocol: AiProviderProtocol
+  vendor?: AiProviderVendor | string
+  base_url: string
+  api_key?: string | null
+  clear_api_key?: boolean
+  models?: string[]
+  enabled?: boolean
+  management_url?: string
+  management_key?: string | null
+  clear_management_key?: boolean
+  statistics_url?: string
+  target_overrides?: Record<string, string>
+  set_as_default?: boolean
+  default_model?: string
+}
+
+export interface AiProviderModelsResponse {
+  ok: boolean
+  models: string[]
+  count: number
+}
+
+export interface AiProviderTestResponse {
+  ok: boolean
+  model?: string
+  reply?: string
+  latency_ms?: number
+}
+
+export interface MeetingSettings {
+  model_source: 'global' | 'provider' | 'custom' | string
+  provider_id?: string
+  provider_name?: string
+  base_url: string
+  api_key?: string
+  api_key_clear?: boolean
+  api_key_set: boolean
+  api_key_preview?: string
+  model: string
+  reasoning?: string
+  auto_summarize: boolean
+  auto_summarize_interval_sec: number
+  summary_style: 'concise' | 'detailed' | 'technical' | string
+  effective_model?: string
+  effective_provider_name?: string
+  effective_configured: boolean
+  global_model?: string
+  global_provider_name?: string
+  global_configured: boolean
+}
+
+export interface MeetingSettingsTestResponse {
+  ok: boolean
+  model?: string
+  latency_ms: number
+  error?: string
+}
+
+export interface MeetingSummarizeRequest {
+  title?: string
+  meeting_date?: string
+  participants?: string[]
+  transcript: string
+  extra_notes?: string
+  mode?: 'llm' | 'prompt_only'
+  summary_style?: string
+  incremental?: boolean
+  new_transcript?: string
+  previous_summary?: string
+  previous_topics?: MeetingTopic[]
+  previous_decisions?: string[]
+  previous_risks?: string[]
+  previous_action_items?: MeetingActionItem[]
+}
+
+export interface MeetingSummarizeResponse {
+  ok: boolean
+  mode: 'llm' | 'prompt_only' | string
+  llm_configured: boolean
+  model?: string
+  title: string
+  summary: string
+  topics?: MeetingTopic[]
+  decisions: string[]
+  risks: string[]
+  action_items: MeetingActionItem[]
+  minutes_markdown: string
+  assembled_prompt: string
+  message?: string
+}
+
+export interface MeetingActionItemPatchRequest {
+  meeting_id?: string
+  item_id: string
+  status?: 'open' | 'done'
+  text?: string
+  owner?: string
+  due_date?: string
+  priority?: 'high' | 'medium' | 'low'
+}
+
+export interface DigestCollectRequest {
+  from?: string
+  to?: string
+  project_keys?: string[]
+  include_sessions?: boolean
+  include_git?: boolean
+  include_tasks?: boolean
+  include_checkpoints?: boolean
+  include_sql_audit?: boolean
+  include_meetings?: boolean
+  include_office_docs?: boolean
+  local_only?: boolean
+}
+
+export interface DigestItem {
+  item_id: string
+  kind: 'session' | 'git_commit' | 'task' | 'checkpoint' | 'sql_audit' | 'meeting' | 'office_doc' | string
+  project_key: string
+  project_name: string
+  title: string
+  summary: string
+  timestamp: string
+  meta?: Record<string, unknown>
+  selected: boolean
+}
+
+export interface DigestProjectOption {
+  project_key: string
+  project_name: string
+  workspace?: string
+}
+
+export interface DigestProjectGroup {
+  project_key: string
+  project_name: string
+  workspace?: string
+  session_count: number
+  commit_count: number
+  task_count: number
+  sql_audit_count: number
+  meeting_count?: number
+  office_doc_count?: number
+  files_changed: number
+  insertions: number
+  deletions: number
+  items: DigestItem[]
+}
+
+export interface DigestSummaryStats {
+  project_count: number
+  session_count: number
+  commit_count: number
+  task_count: number
+  checkpoint_count: number
+  sql_audit_count: number
+  meeting_count?: number
+  office_doc_count?: number
+  files_changed: number
+  insertions: number
+  deletions: number
+}
+
+export interface DigestBundle {
+  from: string
+  to: string
+  generated_at: string
+  llm_configured: boolean
+  llm_model?: string
+  projects: DigestProjectGroup[]
+  available_projects: DigestProjectOption[]
+  stats: DigestSummaryStats
+}
+
+export interface DigestTemplate {
+  id: string
+  name: string
+  description: string
+  audience: string
+  built_in: boolean
+  system_prompt: string
+  updated_at?: string
+}
+
+export interface DigestGenerateRequest {
+  from?: string
+  to?: string
+  template_id: string
+  custom_prompt?: string
+  title?: string
+  items: DigestItem[]
+  manual_notes?: string
+  refine_instruction?: string
+  existing_markdown?: string
+  mode?: 'llm' | 'prompt_only'
+  provider_id?: string
+  model?: string
+}
+
+export interface DigestGenerateResponse {
+  ok: boolean
+  mode: 'llm' | 'prompt_only' | string
+  llm_configured: boolean
+  model?: string
+  template_id: string
+  template_name: string
+  title: string
+  markdown: string
+  assembled_prompt: string
+  message?: string
+}
+
+export interface DigestHistoryRecord {
+  id: string
+  title: string
+  template_id: string
+  template_name: string
+  from: string
+  to: string
+  markdown: string
+  model?: string
+  project_names?: string[]
+  item_count: number
+  created_at: string
+  updated_at: string
 }
 
 export type ApiClient = typeof api

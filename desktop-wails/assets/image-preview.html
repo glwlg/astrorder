@@ -4,15 +4,14 @@
 html,body{margin:0;width:100%;height:100%;background:#0c0d10;color:#fff;overflow:hidden;font:14px "Segoe UI",sans-serif}#stage{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;overflow:hidden}img{max-width:90vw;max-height:85vh;object-fit:contain;user-select:none}button{background:#292d38;color:#fff;border:0;border-radius:8px;padding:10px;cursor:pointer}button:disabled{opacity:.4}#close{position:absolute;right:16px;top:16px}#tools{position:absolute;bottom:18px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:8px;white-space:nowrap}#error{position:absolute;top:20px;left:20px;color:#fca5a5}
 </style>
 <style>
-#tools{padding:7px;border:1px solid #ffffff26;border-radius:16px}
-#tools button{background:#ffffff0d}#tools button:hover{background:#ffffff20}
+#tools{padding:7px;background:#1b1924eb;border:1px solid #ffffff26;border-radius:16px;box-shadow:0 12px 32px #00000073}
+#tools button{background:#ffffff0f}#tools button:hover{background:#ffffff24}
 button:focus-visible{outline:2px solid #c8b8ee;outline-offset:3px}
-#close{border:1px solid #ffffff26}
-#tools .liquid-surface-layer,#close .liquid-surface-layer{background:#1b192480}
+#close{background:#1b1924eb;border:1px solid #ffffff26;box-shadow:0 8px 24px #00000066}
+#close:hover{background:#2d2a3beb}
 </style>
-<div id="stage"><img id="image" draggable="false" alt="图片预览"></div><button id="close" data-liquid-surface="control" aria-label="关闭预览">关闭 (Esc)</button>
-<div id="tools" data-liquid-surface="toolbar"><button id="prev">上一张</button><span id="count"></span><button id="next">下一张</button><button id="out">−</button><button id="reset">100%</button><button id="in">＋</button><button id="copy">复制图片</button><button id="save">保存图片</button></div><div id="error" role="status"></div>
-<script type="module" src="/assets/image-preview-glass.js"></script>
+<div id="stage"><img id="image" draggable="false" alt="图片预览"></div><button id="close" aria-label="关闭预览">关闭 (Esc)</button>
+<div id="tools"><button id="prev">上一张</button><span id="count"></span><button id="next">下一张</button><button id="out">−</button><button id="reset">100%</button><button id="in">＋</button><button id="copy">复制图片</button><button id="save">保存图片</button></div><div id="error" role="status"></div>
 <script type="module">
 import * as svc from '/bindings/astrorder.dev/desktop/previewservice.js';
 let images=[],index=0,scale=1,x=0,y=0,drag=null;

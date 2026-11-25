@@ -3,6 +3,7 @@ import { Menu, Select } from '@mantine/core'
 import { IconAdjustmentsHorizontal, IconChevronDown, IconSparkles } from '@tabler/icons-react'
 import { AgentBrandIcon, agentKindLabel } from './AgentBrandIcon'
 import type { Agent, AgentKind, Session } from '../domain/types'
+import { usePluginSettingsStore } from '../features/plugins/pluginSettingsStore'
 
 function parseFilter(filter: string): { connection: string; kind: AgentKind | 'all' } {
   if (filter === 'all') return { connection: 'all', kind: 'all' }
@@ -33,8 +34,11 @@ export function matchesAgent(session: Session, agents: Record<string, Agent>, fi
 }
 
 export function AgentSessionFilter({ agents, value, onChange, children, showLabel = false }: { agents: Record<string, Agent>; sessions?: Session[]; value: string; onChange: (value: string) => void; children?: ReactNode; showLabel?: boolean }) {
+  const enabledPlugins = usePluginSettingsStore((s) => s.enabledPlugins)
+  const isAgentEnabled = usePluginSettingsStore((s) => s.isAgentEnabled)
+  void enabledPlugins
   const selected = parseFilter(value)
-  const visibleAgents = Object.values(agents).filter(agent => agent.status !== 'disconnected')
+  const visibleAgents = Object.values(agents).filter(agent => agent.status !== 'disconnected' && isAgentEnabled(agent.kind))
   const connections = new Map<string, string>()
   visibleAgents.forEach(agent => {
     const id = agent.connection_id || 'local'

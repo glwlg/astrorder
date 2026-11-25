@@ -1,15 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ActionIcon, Button, Group, LoadingOverlay, Paper, Select, Text, Tooltip } from '@mantine/core'
-import { IconBook2, IconDatabase, IconDeviceFloppy, IconDownload, IconRefresh, IconSparkles, IconCode } from '@tabler/icons-react'
+import { ActionIcon, Button, Group, LoadingOverlay, Paper, SegmentedControl, Select, Stack, Text, Tooltip } from '@mantine/core'
+import { IconBook2, IconDatabase, IconDeviceFloppy, IconDownload, IconExternalLink, IconFileText, IconRefresh, IconSparkles, IconCode } from '@tabler/icons-react'
+import { notifications } from '@mantine/notifications'
 import { BlackboardItemRenderer } from '../../../monitor/BlackboardJsonRender'
-import { MarkdownContent } from '../../../../components/MarkdownContent'
 import Editor from '@monaco-editor/react'
 import { downloadFile } from '../../fileTransfer'
 import type { ViewerContext } from '../../types'
-import { authenticatedApiFetch } from '../../../../api/client'
+import { api, authenticatedApiFetch } from '../../../../api/client'
 import { scopeKey } from '../../../../domain/semantics'
 import { useAstrorderStore } from '../../../../state/store'
 import { isSqlFilePath, openSqlFileInDatabaseTool, useHasDatabaseTool } from '../../databaseTool'
+import { ExportMenu } from '../../../office/export/ExportMenu'
+import { useIsOfficeExperience } from '../../../office/appProfile'
+import { MarkdownRefineView } from './MarkdownRefineView'
+import { RichDocumentEditor } from './RichDocumentEditor'
+
+const LEGACY_OFFICE_EXT_RE = /\.(?:doc|xls|ppt|wps|et|dps)$/i
 
 const EXT_TO_LANG: Record<string, string> = {
   ts: 'typescript',
@@ -66,7 +72,9 @@ export function MonacoViewer({ artifact, session: sourceSession, onSave, onDirty
   const [content, setContent] = useState('')
   const [language, setLanguage] = useState(() => detectLanguage(artifact.name))
   const isMarkdown = /\.(?:md|markdown)$/i.test(artifact.name)
-  const hasDatabaseTool = useHasDatabaseTool()
+  const isLegacyOfficeBinary = LEGACY_OFFICE_EXT_RE.test(artifact.name)
+  const isOfficeMode = useIsOfficeExperience(session)
+  const hasDatabaseTool = useHasDatabaseTool() && !isOfficeMode
   const isSqlDocument = language === 'sql' || isSqlFilePath(artifact.path || artifact.name)
   const targetLine = typeof (artifact.metadata as { line?: unknown } | undefined)?.line === 'number'
     ? (artifact.metadata as { line: number }).line
@@ -74,7 +82,15 @@ export function MonacoViewer({ artifact, session: sourceSession, onSave, onDirty
   const targetEndLine = typeof (artifact.metadata as { endLine?: unknown } | undefined)?.endLine === 'number'
     ? (artifact.metadata as { endLine: number }).endLine
     : undefined
-  const [isReadingMode, setIsReadingMode] = useState(() => isMarkdown && !targetLine)
+  const preferRichStudio = Boolean((artifact.metadata as { preferRich?: unknown } | undefined)?.preferRich)
+  const inlineEditable = Boolean((artifact.metadata as { inlineEditable?: unknown } | undefined)?.inlineEditable)
+  const [mdMode, setMdMode] = useState<'rich' | 'refine' | 'source'>(() => {
+    if (!isMarkdown) return 'source'
+    if (targetLine) return 'source'
+    if (preferRichStudio || isOfficeMode) return 'rich'
+    return 'refine'
+  })
+  const isReadingMode = mdMode !== 'source'
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
   const [encodingReadOnly, setEncodingReadOnly] = useState(false)
@@ -118,11 +134,16 @@ export function MonacoViewer({ artifact, session: sourceSession, onSave, onDirty
   const inlineContent = typeof artifact.metadata?.inlineContent === 'string' ? artifact.metadata.inlineContent : null
 
   const fetchContent = useCallback(async () => {
+    if (isLegacyOfficeBinary) {
+      setLoading(false)
+      setError(null)
+      return
+    }
     setLoading(true)
     setError(null)
     try {
       if (inlineContent !== null) {
-        setEncodingReadOnly(true)
+        setEncodingReadOnly(!inlineEditable)
         setContent(inlineContent)
         initialContentRef.current = inlineContent
         setDirty(false)
@@ -150,7 +171,7 @@ export function MonacoViewer({ artifact, session: sourceSession, onSave, onDirty
     } finally {
       setLoading(false)
     }
-  }, [artifact.readUrl, inlineContent])
+  }, [artifact.readUrl, inlineContent, isLegacyOfficeBinary])
 
   useEffect(() => {
     void fetchContent()
@@ -183,7 +204,7 @@ export function MonacoViewer({ artifact, session: sourceSession, onSave, onDirty
 
   useEffect(() => {
     if (targetLine) {
-      if (isMarkdown) setIsReadingMode(false)
+      if (isMarkdown) setMdMode('source')
       revealTargetLine(editorRef.current, targetLine, targetEndLine)
     }
   }, [isMarkdown, revealTargetLine, targetEndLine, targetLine])
@@ -237,25 +258,27 @@ export function MonacoViewer({ artifact, session: sourceSession, onSave, onDirty
             <Text size="xs" fw={600} truncate title={artifact.name}>
               {artifact.name}
             </Text>
-            <Select
-              size="xs"
-              data={[
-                { value: 'typescript', label: 'TypeScript' },
-                { value: 'javascript', label: 'JavaScript' },
-                { value: 'python', label: 'Python' },
-                { value: 'json', label: 'JSON' },
-                { value: 'rust', label: 'Rust' },
-                { value: 'go', label: 'Go' },
-                { value: 'sql', label: 'SQL' },
-                { value: 'yaml', label: 'YAML' },
-                { value: 'shell', label: 'Shell' },
-                { value: 'markdown', label: 'Markdown' },
-                { value: 'plaintext', label: '纯文本' },
-              ]}
-              value={language}
-              onChange={(val) => val && setLanguage(val)}
-              style={{ width: 110 }}
-            />
+            {!isOfficeMode && !isLegacyOfficeBinary && (
+              <Select
+                size="xs"
+                data={[
+                  { value: 'typescript', label: 'TypeScript' },
+                  { value: 'javascript', label: 'JavaScript' },
+                  { value: 'python', label: 'Python' },
+                  { value: 'json', label: 'JSON' },
+                  { value: 'rust', label: 'Rust' },
+                  { value: 'go', label: 'Go' },
+                  { value: 'sql', label: 'SQL' },
+                  { value: 'yaml', label: 'YAML' },
+                  { value: 'shell', label: 'Shell' },
+                  { value: 'markdown', label: 'Markdown' },
+                  { value: 'plaintext', label: '纯文本' },
+                ]}
+                value={language}
+                onChange={(val) => val && setLanguage(val)}
+                style={{ width: 110 }}
+              />
+            )}
             {dirty && (
               <Text size="xs" c="yellow" fw={500}>
                 ● 未保存
@@ -265,16 +288,39 @@ export function MonacoViewer({ artifact, session: sourceSession, onSave, onDirty
           <Group gap={6} wrap="nowrap">
             {toolbarAction}
             {isMarkdown && (
-              <Tooltip label={isReadingMode ? '编辑 Markdown' : '阅读 Markdown'}>
-                <ActionIcon
-                  variant="subtle"
-                  size="sm"
-                  aria-label={isReadingMode ? '编辑 Markdown' : '阅读 Markdown'}
-                  onClick={() => setIsReadingMode((value) => !value)}
-                >
-                  {isReadingMode ? <IconCode size={14} /> : <IconBook2 size={14} />}
-                </ActionIcon>
-              </Tooltip>
+              <>
+                <SegmentedControl
+                  size="xs"
+                  aria-label="文档视图模式"
+                  value={mdMode}
+                  onChange={(val) => setMdMode(val as 'rich' | 'refine' | 'source')}
+                  data={[
+                    { value: 'rich', label: '富文本写作' },
+                    { value: 'refine', label: '分段精修' },
+                    { value: 'source', label: '源码' },
+                  ]}
+                />
+                <Tooltip label={isReadingMode ? '编辑 Markdown' : '阅读 Markdown'}>
+                  <ActionIcon
+                    variant="subtle"
+                    size="sm"
+                    aria-label={isReadingMode ? '编辑 Markdown' : '阅读 Markdown'}
+                    onClick={() => setMdMode((cur) => (cur === 'source' ? (isOfficeMode ? 'rich' : 'refine') : 'source'))}
+                  >
+                    {isReadingMode ? <IconCode size={14} /> : <IconBook2 size={14} />}
+                  </ActionIcon>
+                </Tooltip>
+                <ExportMenu
+                  markdown={content}
+                  title={artifact.name.replace(/\.(md|markdown)$/i, '')}
+                  fileName={artifact.name.replace(/\.(md|markdown)$/i, '')}
+                  variant="button"
+                  buttonLabel="导出"
+                  workspace={session?.workspace || undefined}
+                  sessionId={artifact.sessionId}
+                  connectionId={artifact.connectionId}
+                />
+              </>
             )}
             {isSqlDocument && hasDatabaseTool && (
               <Tooltip label="将当前 SQL 载入右侧数据库工具查询标签页（不自动执行）">
@@ -314,17 +360,19 @@ export function MonacoViewer({ artifact, session: sourceSession, onSave, onDirty
                 </Button>
               </Tooltip>
             )}
-            <Button
-              size="compact-xs"
-              variant="light"
-              color="teal"
-              leftSection={isVisualMode ? <IconCode size={13} /> : <IconSparkles size={13} />}
-              loading={visualizing}
-              onClick={handleVisualize}
-              title={isVisualMode ? '切换回代码编辑器' : '自动转换为可视化卡片'}
-            >
-              {isVisualMode ? '代码视图' : '视觉化'}
-            </Button>
+            {!isOfficeMode && !isLegacyOfficeBinary && (
+              <Button
+                size="compact-xs"
+                variant="light"
+                color="teal"
+                leftSection={isVisualMode ? <IconCode size={13} /> : <IconSparkles size={13} />}
+                loading={visualizing}
+                onClick={handleVisualize}
+                title={isVisualMode ? '切换回代码编辑器' : '自动转换为可视化卡片'}
+              >
+                {isVisualMode ? '代码视图' : '视觉化'}
+              </Button>
+            )}
             <ActionIcon
               variant="subtle"
               size="sm"
@@ -347,17 +395,84 @@ export function MonacoViewer({ artifact, session: sourceSession, onSave, onDirty
 
       <div style={{ flex: 1, position: 'relative', minHeight: 0 }}>
         <LoadingOverlay visible={loading} />
-        {error ? (
+        {isLegacyOfficeBinary ? (
+          <Stack align="center" justify="center" gap="sm" p="xl" h="100%">
+            <IconFileText size={36} stroke={1.4} color="var(--astr-muted)" />
+            <Text fw={650} size="sm">{artifact.name}</Text>
+            <Text size="xs" c="dimmed" ta="center" maw={340}>
+              传统二进制 Office/WPS 格式（.doc / .xls / .ppt / .wps）暂不支持直接内嵌预览，可使用本机已安装的办公软件打开，或下载后查看。
+            </Text>
+            <Group gap="xs" mt={4}>
+              {artifact.path && (!artifact.connectionId || artifact.connectionId === 'local') && (
+                <Button
+                  size="xs"
+                  color="dark"
+                  leftSection={<IconExternalLink size={14} />}
+                  onClick={() => {
+                    void api.openFile(artifact.path!, 'open').catch((err) => {
+                      notifications.show({
+                        color: 'red',
+                        message: err instanceof Error ? err.message : '用本机应用打开失败',
+                      })
+                    })
+                  }}
+                >
+                  用本机应用打开
+                </Button>
+              )}
+              <Button
+                size="xs"
+                variant="default"
+                leftSection={<IconDownload size={14} />}
+                onClick={() => void downloadFile(`${artifact.readUrl}&download=1`, artifact.name)}
+              >
+                下载文件
+              </Button>
+            </Group>
+          </Stack>
+        ) : error ? (
           <div style={{ padding: 24, textAlign: 'center', color: 'var(--astr-muted)' }}>
             <Text size="sm">{error}</Text>
             <Button size="xs" mt="md" variant="light" onClick={() => void fetchContent()}>
               重试
             </Button>
           </div>
-        ) : isReadingMode && isMarkdown ? (
-          <div style={{ padding: '20px 24px', height: '100%', overflowY: 'auto', background: 'var(--astr-surface)' }}>
-            <MarkdownContent value={content} session={session} />
-          </div>
+        ) : isMarkdown && mdMode === 'rich' ? (
+          <RichDocumentEditor
+            markdown={content}
+            documentTitle={artifact.name.replace(/\.(md|markdown)$/i, '')}
+            session={session}
+            writable={Boolean((artifact.writable || inlineEditable) && !encodingReadOnly)}
+            onChange={(nextMarkdown) => handleEditorChange(nextMarkdown)}
+            onSaveNow={onSave && artifact.writable && !encodingReadOnly ? async (nextMarkdown) => {
+              handleEditorChange(nextMarkdown)
+              const ok = await onSave(nextMarkdown)
+              if (ok) {
+                initialContentRef.current = nextMarkdown
+                setDirty(false)
+                onDirtyChangeRef.current?.(false)
+              }
+              return ok
+            } : undefined}
+          />
+        ) : isMarkdown && mdMode === 'refine' ? (
+          <MarkdownRefineView
+            markdown={content}
+            documentTitle={artifact.name.replace(/\.(md|markdown)$/i, '')}
+            session={session}
+            writable={Boolean(artifact.writable && !encodingReadOnly)}
+            onApplyChange={(nextMarkdown) => handleEditorChange(nextMarkdown)}
+            onSaveNow={onSave && artifact.writable && !encodingReadOnly ? async (nextMarkdown) => {
+              handleEditorChange(nextMarkdown)
+              const ok = await onSave(nextMarkdown)
+              if (ok) {
+                initialContentRef.current = nextMarkdown
+                setDirty(false)
+                onDirtyChangeRef.current?.(false)
+              }
+              return ok
+            } : undefined}
+          />
         ) : isVisualMode && visualRendered ? (
           <div style={{ padding: 16, height: '100%', overflowY: 'auto', background: 'var(--astr-surface)' }}>
             <BlackboardItemRenderer itemKey="visual_preview" itemValue={visualRendered} />
@@ -368,10 +483,10 @@ export function MonacoViewer({ artifact, session: sourceSession, onSave, onDirty
             height="100%"
             language={language}
             value={content}
-            theme="vs-dark"
+            theme={isOfficeMode ? 'light' : 'vs-dark'}
             onChange={handleEditorChange}
             options={{
-              minimap: { enabled: true },
+              minimap: { enabled: !isOfficeMode },
               readOnly: !artifact.writable || encodingReadOnly,
               fontSize: 13,
               scrollBeyondLastLine: false,

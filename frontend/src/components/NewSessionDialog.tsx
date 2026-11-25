@@ -16,6 +16,7 @@ import {
   createInitialWorktreeState,
   saveWorktreePrefs,
 } from './WorktreeConfigSection'
+import { useIsOfficeProfile } from '../features/office/appProfile'
 
 export function agentEnvironment(agent: Agent): string {
   return agent.connection_id || 'local'
@@ -30,6 +31,7 @@ export function NewSessionDialog({
   initialWorkspace,
   initialWorktreeMode = 'none',
   initialWorktreePath,
+  officeMode = false,
   onClose,
   onCreated,
 }: {
@@ -39,22 +41,32 @@ export function NewSessionDialog({
   initialWorkspace?: string
   initialWorktreeMode?: 'none' | 'create' | 'existing'
   initialWorktreePath?: string
+  officeMode?: boolean
   onClose: () => void
   onCreated: (session: Session) => void
 }) {
+  const isOfficeProfile = useIsOfficeProfile()
+  const isOffice = officeMode || isOfficeProfile
+  const enabledPlugins = usePluginSettingsStore((s) => s.enabledPlugins)
+  const isAgentEnabled = usePluginSettingsStore((s) => s.isAgentEnabled)
   const owner = project?.agentId ? agents[project.agentId] : null
-  const choices = Object.values(agents).filter(agent => agent.status === 'ready' && (!project || (owner && agentEnvironment(owner) === agentEnvironment(agent))))
+  const choices = Object.values(agents).filter(agent =>
+    agent.status === 'ready'
+    && isAgentEnabled(agent.kind)
+    && (!project || (owner && agentEnvironment(owner) === agentEnvironment(agent))),
+  )
+  void enabledPlugins
   const [agentId, setAgentId] = useState(() => {
     if (initialAgentId && choices.some(a => a.id === initialAgentId)) return initialAgentId
     const match = choices.find(a => a.kind === initialAgentId)
     if (match) return match.id
-    return choices.length === 1 ? choices[0].id : ''
+    return choices.length >= 1 ? choices[0].id : ''
   })
   const projectWorkspace = initialWorkspace || project?.workspace || project?.sessions?.find(s => s.workspace)?.workspace || ''
   const [workspace, setWorkspace] = useState(projectWorkspace)
   const [title, setTitle] = useState('')
   const [busy, setBusy] = useState(false)
-  const worktreePluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKFLOW_GIT_WORKTREE_PLUGIN_ID))
+  const worktreePluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKFLOW_GIT_WORKTREE_PLUGIN_ID)) && !isOffice
   const allSessionsMap = useAstrorderStore((s) => s.sessions)
   const allSessions = useMemo(() => Object.values(allSessionsMap), [allSessionsMap])
   const [wtState, setWtState] = useState(() =>
@@ -95,24 +107,28 @@ export function NewSessionDialog({
     } catch (error) { notifications.show({ color: 'red', message: error instanceof Error ? error.message : '新建会话未确认' }) }
     finally { setBusy(false) }
   }
-  return <Modal opened onClose={() => { if (!busy) onClose() }} title="新建会话" centered size="md" zIndex={400}>
+  return <Modal opened onClose={() => { if (!busy) onClose() }} title={isOffice ? '新建对话' : '新建会话'} centered size="md" zIndex={400}>
     <Stack>
-      {project && <Text size="sm">项目：{project.label}</Text>}
-      <BrandedSelect
-        label="选择 Agent"
-        placeholder="请选择 Agent"
-        value={agentId}
-        onChange={setAgentId}
-        disabled={busy}
-        options={choices.map(agent => ({
-          value: agent.id,
-          label: agentLabel(agent),
-          icon: <AgentBrandIcon kind={agent.kind} size={15} />,
-        }))}
-      />
-      {!choices.length && <Text size="sm" c="dimmed">该环境暂无已接入 Agent，请先在连接管理中接入。</Text>}
-      <TextInput label="会话名称（选填，留空由 Agent 自动命名）" placeholder="留空由 Agent 自动命名" value={title} onChange={event => setTitle(event.currentTarget.value)} disabled={busy} />
-      <TextInput label="工作区" value={workspace} onChange={event => setWorkspace(event.currentTarget.value)} placeholder="使用所选 Agent 环境的路径" disabled={busy || !!projectWorkspace} />
+      {project && <Text size="sm">{isOffice ? '工作空间' : '项目'}：{project.label}</Text>}
+      {(!isOffice || choices.length > 1) && (
+        <BrandedSelect
+          label={isOffice ? 'AI 助手' : '选择 Agent'}
+          placeholder={isOffice ? '请选择 AI 助手' : '请选择 Agent'}
+          value={agentId}
+          onChange={setAgentId}
+          disabled={busy}
+          options={choices.map(agent => ({
+            value: agent.id,
+            label: agentLabel(agent),
+            icon: <AgentBrandIcon kind={agent.kind} size={15} />,
+          }))}
+        />
+      )}
+      {!choices.length && <Text size="sm" c="dimmed">{isOffice ? '当前暂无可用 AI 助手，请先在设置中检查连接状态。' : '该环境暂无已接入 Agent，请先在连接管理中接入。'}</Text>}
+      <TextInput label={isOffice ? '对话标题（选填，留空自动命名）' : '会话名称（选填，留空由 Agent 自动命名）'} placeholder={isOffice ? '留空自动命名' : '留空由 Agent 自动命名'} value={title} onChange={event => setTitle(event.currentTarget.value)} disabled={busy} />
+      {(!isOffice || !projectWorkspace) && (
+        <TextInput label={isOffice ? '工作文件夹' : '工作区'} value={workspace} onChange={event => setWorkspace(event.currentTarget.value)} placeholder={isOffice ? '选择本机工作目录路径' : '使用所选 Agent 环境的路径'} disabled={busy || !!projectWorkspace} />
+      )}
       {worktreePluginEnabled && workspace.trim() && (
         <WorktreeConfigSection
           workspace={workspace}
@@ -125,7 +141,7 @@ export function NewSessionDialog({
           onRepoLoaded={setRepoInfo}
         />
       )}
-      <Group justify="flex-end"><Button variant="default" onClick={onClose} disabled={busy}>取消</Button><Button onClick={() => void create()} loading={busy} disabled={!agentId || wtInvalid}>{wtState.mode === 'create' ? '创建 Worktree 并新建会话' : '创建会话'}</Button></Group>
+      <Group justify="flex-end"><Button variant="default" onClick={onClose} disabled={busy}>取消</Button><Button onClick={() => void create()} loading={busy} disabled={!agentId || wtInvalid}>{wtState.mode === 'create' ? '创建 Worktree 并新建会话' : isOffice ? '开始对话' : '创建会话'}</Button></Group>
     </Stack>
   </Modal>
 }

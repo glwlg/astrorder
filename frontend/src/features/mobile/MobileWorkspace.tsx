@@ -60,6 +60,7 @@ import { MobileTranscript, type MessageActionAnchor } from './MobileTranscript'
 import { resolveArtifactFromPath } from '../sidecar/resolver'
 import { artifactViewerRegistry } from '../sidecar/registry'
 import { useSidecarStore } from '../sidecar/sidecarStore'
+import { useIsSessionOfficeMode } from '../office/officeWorkspaceMode'
 import { MobileMessageMenu } from './MobileMessageMenu'
 
 import { EnvironmentConnections } from '../agents/EnvironmentConnections'
@@ -184,14 +185,23 @@ export function MobileWorkspace() {
   const { colorScheme, setColorScheme } = useMantineColorScheme()
   const computedColorScheme = useComputedColorScheme('light')
   useEffect(() => {
-    const themeColor = computedColorScheme === 'dark' ? '#11141b' : '#f6f4fa'
-    let meta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]:not([media])')
-    if (!meta) {
-      meta = document.createElement('meta')
+    const fallback = computedColorScheme === 'dark' ? '#1a1e28' : '#ffffff'
+    const headerEl = document.querySelector<HTMLElement>('.mobile-workspace .m-header')
+    const resolvedBg = headerEl ? window.getComputedStyle(headerEl).backgroundColor.trim() : ''
+    const isSolidRgbOrHex = /^(?:#[0-9a-fA-F]{3,8}|rgb\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\))$/.test(resolvedBg)
+    const themeColor = isSolidRgbOrHex ? resolvedBg : fallback
+    const metas = Array.from(document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]'))
+    if (metas.length === 0) {
+      const meta = document.createElement('meta')
       meta.name = 'theme-color'
+      meta.content = themeColor
       document.head.appendChild(meta)
+    } else {
+      for (const meta of metas) {
+        meta.content = themeColor
+      }
     }
-    meta.content = themeColor
+    document.documentElement.style.colorScheme = computedColorScheme
   }, [computedColorScheme])
   const rawSessions = useAstrorderStore(useShallow(selectSessions))
   const sessions = useSessionOrder(rawSessions)
@@ -321,7 +331,8 @@ export function MobileWorkspace() {
   const isAntigravity = selectedAgent?.kind === 'antigravity' || selectedAgent?.kind === 'antigravity-ssh'
   const sessionSwarm = useSessionSwarm(selected, selectedAgent, sheet === 'swarm')
   const sessionSchedules = useSessionSchedules(selected)
-  const sessionCheckpoints = useSessionCheckpoints(selected, Boolean(selected?.workspace))
+  const isOfficeMode = useIsSessionOfficeMode(selected)
+  const sessionCheckpoints = useSessionCheckpoints(selected, Boolean(selected?.workspace) && !isOfficeMode)
   const enabledSchedules = useMemo(
     () => (sessionSchedules.data || []).filter((item) => item.enabled),
     [sessionSchedules.data],
@@ -893,8 +904,9 @@ export function MobileWorkspace() {
       notify(messageError(error), 'red')
     }
   }
+  const agyGuidanceBlocked = isAntigravity && selected?.status === 'waiting_approval'
   const sendQueued = async (entry: OutboxEntry) => {
-    if (!canSubmit || (isAntigravity && nativeBusy) || sending.current || !selected || entry.payload.agent_id !== selected.agent_id || entry.payload.session_id !== selected.id) return
+    if (!canSubmit || agyGuidanceBlocked || sending.current || !selected || entry.payload.agent_id !== selected.agent_id || entry.payload.session_id !== selected.id) return
     sending.current = true
     setSubmitting(true)
     try {
@@ -919,7 +931,7 @@ export function MobileWorkspace() {
     setQueueLift(null)
     if (!hold?.armed) return
     const rawZone = queueSwipeZone(hold.startY, y)
-    const zone = rawZone === 'send' && isAntigravity && nativeBusy ? null : rawZone
+    const zone = rawZone === 'send' && agyGuidanceBlocked ? null : rawZone
     if (zone === 'send' && ['queued', 'failed'].includes(hold.entry.state)) {
       void sendQueued(hold.entry)
     } else if (zone === 'edit') {
@@ -941,7 +953,7 @@ export function MobileWorkspace() {
     const hold = queueHold.current
     if (!hold || hold.pointerId !== event.pointerId) return
     const rawZone = queueSwipeZone(hold.startY, event.clientY)
-    const zone = rawZone === 'send' && isAntigravity && nativeBusy ? null : rawZone
+    const zone = rawZone === 'send' && agyGuidanceBlocked ? null : rawZone
     if (!hold.armed) {
       if (Math.abs(event.clientY - hold.startY) < 8) return
       hold.armed = true
@@ -1291,7 +1303,7 @@ export function MobileWorkspace() {
             <Menu.Item leftSection={<IconNotes size={17} />} onClick={() => setSheet('tasks')}>任务与子代理</Menu.Item>
             {goal && <Menu.Item leftSection={<IconNotes size={17} />} onClick={() => setSheet('goal')}>目标管理</Menu.Item>}
             <Menu.Item leftSection={<IconDeviceDesktop size={17} />} onClick={openWorkbench}>工作区</Menu.Item>
-            {selected.workspace && <Menu.Item leftSection={<IconHistory size={17} />} onClick={() => { setFocusedCheckpointId(null); setSheet('checkpoints') }}>代码检查点{sessionCheckpoints.items.length > 0 ? ` (${sessionCheckpoints.items.length})` : ''}</Menu.Item>}
+            {!isOfficeMode && selected.workspace && <Menu.Item leftSection={<IconHistory size={17} />} onClick={() => { setFocusedCheckpointId(null); setSheet('checkpoints') }}>代码检查点{sessionCheckpoints.items.length > 0 ? ` (${sessionCheckpoints.items.length})` : ''}</Menu.Item>}
             {agentAccountsPluginEnabled && agyEnvironment && <Menu.Item leftSection={<IconSwitchHorizontal size={17} />} onClick={() => setSheet('accounts')}>账号切换</Menu.Item>}
             {blackboardPluginEnabled && <Menu.Item leftSection={<IconChalkboard size={17} />} onClick={() => setSheet('blackboard')}>黑板</Menu.Item>}
             {browserPluginEnabled && <Menu.Item leftSection={<IconWorld size={17} />} onClick={() => setSheet('browser')}>浏览器镜像</Menu.Item>}
@@ -1323,7 +1335,7 @@ export function MobileWorkspace() {
       </div>
       {goal && <button className={`m-goal-summary is-${goal.tone}`} aria-label="目标管理" title={goalSupported ? '管理原生目标' : '查看原生目标'} onClick={() => setSheet('goal')}><IconNotes size={15} /><span>{`${goal.label} · ${goal.title}`}</span></button>}
       {!!visibleTasks.length && <button className="m-task-summary" aria-label="任务与子代理" onClick={() => setSheet('tasks')}>任务与子代理 · {activeTasks.length} 项活动 / {visibleTasks.length} 项记录</button>}
-      <MobileTranscript session={selected} activityBreaks={resources.activityBreaks} readOnly={readOnly} messages={messages} commands={commands} approvals={approvals} onApproval={(approval, action) => void handleApproval(approval, action)} busy={busy || liveActive} loadOlder={() => resources.messages.fetchNextPage()} hasOlder={!!resources.messages.hasNextPage} loadingOlder={resources.messages.isFetchingNextPage} onMessageAction={anchor => setMessageAction({ ...anchor, sessionKey: key })} onImage={openImagePreview} onVideo={openVideoPreview} onFile={openFile} onSqlOpen={openSqlSnippet} workspace={selected?.workspace} connectionId={selected?.connection_id} onSwipe={switchSession} onSwipePreview={setSessionDrag} checkpoints={sessionCheckpoints.items} onOpenCheckpoint={(cp: SessionCheckpoint) => { setFocusedCheckpointId(cp.id); setSheet('checkpoints') }} highlightMessageId={new URLSearchParams(location.search).get('message_id')} />
+      <MobileTranscript session={selected} activityBreaks={resources.activityBreaks} readOnly={readOnly} messages={messages} commands={commands} approvals={approvals} onApproval={(approval, action) => void handleApproval(approval, action)} busy={busy || liveActive} loadOlder={() => resources.messages.fetchNextPage()} hasOlder={!!resources.messages.hasNextPage} loadingOlder={resources.messages.isFetchingNextPage} onMessageAction={anchor => setMessageAction({ ...anchor, sessionKey: key })} onImage={openImagePreview} onVideo={openVideoPreview} onFile={openFile} onSqlOpen={openSqlSnippet} workspace={selected?.workspace} connectionId={selected?.connection_id} onSwipe={switchSession} onSwipePreview={setSessionDrag} checkpoints={!isOfficeMode ? sessionCheckpoints.items : []} onOpenCheckpoint={!isOfficeMode ? (cp: SessionCheckpoint) => { setFocusedCheckpointId(cp.id); setSheet('checkpoints') } : undefined} highlightMessageId={new URLSearchParams(location.search).get('message_id')} />
     </MobileSessionDeck> : <div className="m-empty">从左上角选择会话，或新建会话</div>}</main>
     <section ref={composer} className="m-composer-float">
       {selected && <SessionConnectionNotice key={`connection:${key}`} session={selected} error={(resources.messages.error || resources.commands.error || resources.tasks.error) ? messageError(resources.messages.error || resources.commands.error || resources.tasks.error) : undefined} onRetry={() => Promise.all([resources.messages.refetch(), resources.commands.refetch(), resources.tasks.refetch()])} />}
@@ -1380,7 +1392,7 @@ export function MobileWorkspace() {
             <small>{queueLabels[entry.state]}{entry.attachments.length + entry.files.length > 0 ? ` · ${entry.attachments.length + entry.files.length} 个附件` : ''}</small>
             {entry.error && entry.error !== queuePause && <small role="alert">{entry.error}</small>}
             <div className="m-queue-actions" onPointerDown={event => event.stopPropagation()}>
-              {['queued', 'failed'].includes(entry.state) && <button type="button" disabled={!canSubmit || submitting || (isAntigravity && selected?.status === 'waiting_approval')} aria-label={entry.state === 'failed' ? '重新发送' : nativeBusy ? '立即引导' : '发送待发消息'} onClick={() => void sendQueued(entry)}>{entry.state === 'failed' ? '重新发送' : nativeBusy ? '立即引导' : '发送'}</button>}
+              {['queued', 'failed'].includes(entry.state) && <button type="button" disabled={!canSubmit || submitting || agyGuidanceBlocked} aria-label={entry.state === 'failed' ? '重新发送' : nativeBusy ? '立即引导' : '发送待发消息'} onClick={() => void sendQueued(entry)}>{entry.state === 'failed' ? '重新发送' : nativeBusy ? '立即引导' : '发送'}</button>}
               {['queued', 'failed', 'cancelled'].includes(entry.state) && <button type="button" aria-label="编辑待发消息" onClick={() => void editQueued(entry)}><IconEdit size={16} /></button>}
               {entry.state === 'unknown' && <button type="button" aria-label="核对发送结果" onClick={() => void refresh()}>核对结果</button>}
               {['queued', 'failed', 'unknown'].includes(entry.state) && <button type="button" aria-label="删除" title={entry.state === 'unknown' ? '移除记录不会撤回已发送的消息' : undefined} onClick={() => void (directOutbox.snapshot().some(row => row === entry) ? directOutbox : outbox).remove(entry.payload.agent_id, entry.payload.session_id, entry.payload.id).catch(error => notify(messageError(error), 'red'))}><IconTrash size={16} /></button>}

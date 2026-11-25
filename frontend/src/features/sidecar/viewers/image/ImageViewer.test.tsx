@@ -40,7 +40,7 @@ describe('ImageViewer', () => {
     vi.stubGlobal('fetch', fetchMock)
     const { container } = render(<MantineProvider><ImageViewer artifact={artifact} /></MantineProvider>)
     expect(await screen.findByText('读取图片失败 (404)')).toBeInTheDocument()
-    const toolbar = container.querySelector('[data-liquid-surface="toolbar"]') as HTMLElement | null
+    const toolbar = container.querySelector('.sidecar-image-toolbar') as HTMLElement | null
     expect(toolbar).not.toBeNull()
     expect(toolbar?.style.position).not.toBe('absolute')
     const retryButton = screen.getByRole('button', { name: '重试' })

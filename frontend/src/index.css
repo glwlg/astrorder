@@ -1128,7 +1128,7 @@ a { color: inherit; }
 .attachment-image { display: block; width: 100%; max-height: 260px; object-fit: cover; }
 .markdown-image-button { display: inline-block; max-width: 100%; border: none; background: transparent; padding: 0; cursor: zoom-in; border-radius: 8px; overflow: hidden; }
 .markdown-image-button img { display: block; max-width: 100%; max-height: 380px; object-fit: contain; border-radius: 8px; }
-.desktop-lightbox { position: fixed; inset: 0; z-index: 99999; background: #0a0a0ae6; backdrop-filter: blur(6px); display: flex; align-items: center; justify-content: center; cursor: zoom-out; }
+.desktop-lightbox { position: fixed; inset: 0; z-index: 99999; background: #0a0a0aeb; display: flex; align-items: center; justify-content: center; cursor: zoom-out; }
 .desktop-lightbox-close { position: absolute; top: 48px; right: 24px; background: rgba(255, 255, 255, 0.15); border: none; color: #fff; width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: background 0.2s; z-index: 20; }
 .desktop-lightbox-close:hover { background: rgba(255, 255, 255, 0.3); }
 .desktop-lightbox-nav {
@@ -1166,12 +1166,11 @@ a { color: inherit; }
   transform: translateX(-50%);
   padding: 4px 12px;
   border-radius: 999px;
-  background: rgba(0, 0, 0, 0.6);
+  background: rgba(15, 17, 23, 0.86);
   color: #fff;
   font-size: 13px;
   font-family: var(--mantine-font-family-monospace, monospace);
   letter-spacing: 0.05em;
-  backdrop-filter: blur(8px);
   border: 1px solid rgba(255, 255, 255, 0.15);
 }
 @keyframes confirmPopoverFadeIn {
@@ -2135,7 +2134,6 @@ a { color: inherit; }
   padding: 6px 14px;
   border-radius: 8px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
-  backdrop-filter: blur(8px);
   pointer-events: none;
   border: 1px solid rgba(255, 255, 255, 0.15);
   transition: border-color 0.15s ease, background 0.15s ease;
@@ -2371,8 +2369,7 @@ a { color: inherit; }
   inset: 0;
   top: var(--astr-desktop-titlebar-height, 0px);
   z-index: 900;
-  background: rgba(10, 12, 16, 0.72);
-  backdrop-filter: blur(10px);
+  background: rgba(10, 12, 16, 0.82);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2855,8 +2852,7 @@ a { color: inherit; }
   padding: 4px 9px;
   border-radius: 999px;
   border: 1px solid color-mix(in oklab, var(--astr-indigo) 30%, var(--astr-border));
-  background: color-mix(in oklab, var(--astr-surface) 88%, transparent);
-  backdrop-filter: blur(10px);
+  background: var(--astr-surface);
   color: var(--astr-indigo);
   font-size: 11px;
   font-weight: 600;

@@ -11,6 +11,7 @@ import (
 )
 
 var allowedSettingsTabs = map[string]bool{
+	"general":      true,
 	"connections":  true,
 	"models":       true,
 	"skills":       true,
@@ -67,8 +68,7 @@ func (s *ShellService) OpenSettings(tab string) error {
 	}
 	s.settingsMu.Unlock()
 
-	win.Restore()
-	win.Show().Focus()
+	revealWindow(win)
 	if cleanTab != "" {
 		encoded, _ := json.Marshal(cleanTab)
 		win.ExecJS("window.dispatchEvent(new CustomEvent('astrorder:settings-tab',{detail:{tab:" + string(encoded) + "}}))")
@@ -76,12 +76,24 @@ func (s *ShellService) OpenSettings(tab string) error {
 	return nil
 }
 
+// revealWindow brings a window to the foreground without un-maximizing an
+// already-maximized window (Wails Restore sends SW_RESTORE which strips
+// WS_MAXIMIZE when the window is not minimized).
+func revealWindow(win *application.WebviewWindow) {
+	if win == nil {
+		return
+	}
+	if win.IsMinimised() {
+		win.Restore()
+	}
+	win.Show().Focus()
+}
+
 func (s *ShellService) FocusMain(path string) error {
 	if s.window == nil {
 		return errors.New("main window not available")
 	}
-	s.window.Restore()
-	s.window.Show().Focus()
+	revealWindow(s.window)
 	trimmed := strings.TrimSpace(path)
 	if trimmed != "" && strings.HasPrefix(trimmed, "/") && !strings.HasPrefix(trimmed, "//") {
 		encoded, _ := json.Marshal(trimmed)

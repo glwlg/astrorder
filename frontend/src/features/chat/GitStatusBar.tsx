@@ -16,7 +16,6 @@ import { CaretUpIcon, CheckIcon, GitBranchIcon, PlusIcon } from '../../component
 import type { Session } from '../../domain/types'
 import { useGitStatus } from '../../hooks/useGitStatus'
 import { useSidecarStore } from '../sidecar/sidecarStore'
-import { ComposerGlassMenu, GlassButtonLens } from '../../components/GlassPanel'
 import { WORKFLOW_GIT_WORKTREE_PLUGIN_ID } from '../plugins/builtinPlugins'
 import { usePluginSettingsStore } from '../plugins/pluginSettingsStore'
 import { NewSessionDialog } from '../../components/NewSessionDialog'
@@ -212,7 +211,6 @@ export function GitStatusBar({ session }: GitStatusBarProps) {
               aria-label="切换或创建 Git 分支"
               disabled={statusUnavailable || !branch || switching}
             >
-              <GlassButtonLens />
               <GitBranchIcon size={20} aria-hidden="true" />
               {isLinkedWorktree && (
                 <Badge size="xs" variant="light" color="cyan" px={4} style={{ textTransform: 'none', flexShrink: 0 }}>
@@ -227,7 +225,6 @@ export function GitStatusBar({ session }: GitStatusBarProps) {
           </Menu.Target>
 
           <Menu.Dropdown className="composer-branch-menu">
-            <ComposerGlassMenu active={menuOpened}>
             <Menu.Label>本地分支列表</Menu.Label>
             {branches.map((b) => (
               <Menu.Item
@@ -282,7 +279,6 @@ export function GitStatusBar({ session }: GitStatusBarProps) {
                 </Menu.Item>
               </>
             )}
-            </ComposerGlassMenu>
           </Menu.Dropdown>
         </Menu>
 

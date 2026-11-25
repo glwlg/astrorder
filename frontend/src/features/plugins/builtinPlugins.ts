@@ -6,6 +6,8 @@ import {
   IconHistory,
   IconId,
   IconLayoutGrid,
+  IconMicrophone,
+  IconNotebook,
   IconPlugConnected,
   IconTerminal,
   IconUsers,
@@ -14,6 +16,23 @@ import type { PluginCategory, ViewerConfigOption } from '../sidecar/types'
 import { SIDEBAR_INTEGRATIONS_PLUGIN_ID } from './pluginSettingsStore'
 
 export { SIDEBAR_INTEGRATIONS_PLUGIN_ID }
+
+// 原生 Agent 引擎插件注册表（单一来源见 agentEngineRegistry.ts）
+export {
+  AGENT_ANTIGRAVITY_PLUGIN_ID,
+  AGENT_CODEX_PLUGIN_ID,
+  AGENT_ENGINE_REGISTRY,
+  AGENT_GROK_PLUGIN_ID,
+  AGENT_HERMES_PLUGIN_ID,
+  BUILTIN_AGENT_PLUGINS,
+  agentPluginIdForKind,
+  canonicalAgentKind,
+  isAgentKindEnabled,
+  lookupAgentEngine,
+  type AgentEnginePluginDescriptor,
+  type ManagedAgentKind,
+  type RelatedPluginLink,
+} from './agentEngineRegistry'
 
 // 系统能力与工作流插件 ID
 export const COMMAND_COMPRESSION_PLUGIN_ID = 'command-compression'
@@ -28,6 +47,8 @@ export const WORKSPACE_AGENT_ACCOUNTS_PLUGIN_ID = 'workspace-agent-accounts'
 export const WORKSPACE_ANALYTICS_GATEWAY_PLUGIN_ID = 'workspace-analytics-gateway'
 export const WORKSPACE_GROUPS_PLUGIN_ID = 'workspace-groups'
 export const WORKSPACE_MONITOR_PLUGIN_ID = 'workspace-monitor'
+export const WORKSPACE_DIGEST_PLUGIN_ID = 'workspace-digest'
+export const WORKSPACE_MEETINGS_PLUGIN_ID = 'workspace-meetings'
 
 // 内置 Sidecar 查看器插件 ID 常量
 export const MEMORY_VIEWER_PLUGIN_ID = 'memory-viewer'
@@ -179,5 +200,25 @@ export const BUILTIN_SYSTEM_PLUGINS: SystemPluginDescriptor[] = [
     implementationName: 'Antigravity',
     routeAction: { to: '/agent-accounts', label: '管理账号' },
     searchKeywords: ['accounts', 'quota', 'antigravity', 'agy', '账号', '配额', '额度'],
+  },
+  {
+    id: WORKSPACE_DIGEST_PLUGIN_ID,
+    title: '智能工作复盘与周报',
+    description: '按时间跨度自动汇总跨项目会话、Git 提交、任务检查点与 SQL 变更记录，套用多套汇报模板一键生成日报/周报/技术复盘并导出 Word、PPT 或 PDF',
+    category: 'office',
+    icon: IconNotebook,
+    badgeLabel: '办公工作台',
+    routeAction: { to: '/digest', label: '打开复盘' },
+    searchKeywords: ['digest', 'weekly', 'daily', 'report', '复盘', '周报', '日报', '汇报', '总结', '办公'],
+  },
+  {
+    id: WORKSPACE_MEETINGS_PLUGIN_ID,
+    title: '会议纪要与行动项',
+    description: '本地 R2T2 实时边录边转写与独立悬浮胶囊，在会议页内自由选用已配置的 AI 供应商模型边听边总结，并与待办收件箱联动跟踪',
+    category: 'office',
+    icon: IconMicrophone,
+    badgeLabel: '办公工作台',
+    routeAction: { to: '/meetings', label: '打开会议' },
+    searchKeywords: ['meeting', 'minutes', 'audio', 'action', 'r2t2', 'model', '会议', '纪要', '录音', '总结模型', '行动项', '待办', '办公'],
   },
 ]

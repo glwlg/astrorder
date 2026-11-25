@@ -341,7 +341,7 @@ export const useSidecarStore = create<SidecarState>()(persist((set, get) => ({
     } else {
       const graphArtifact: ArtifactRef = {
         id: tabId,
-        name: '决策状态机',
+        name: '决策与轨迹',
         kind: 'workspace_file',
         mediaType: 'application/x-agent-graph',
         readUrl: '',
@@ -353,7 +353,7 @@ export const useSidecarStore = create<SidecarState>()(persist((set, get) => ({
       const newTab: SidecarTab = {
         id: tabId,
         type: 'artifact',
-        title: '决策状态机',
+        title: '决策与轨迹',
         artifact: graphArtifact,
         viewerId: 'agent-graph-viewer',
         closable: true,

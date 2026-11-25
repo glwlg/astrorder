@@ -17,10 +17,42 @@ import {
   MEMORY_VIEWER_PLUGIN_ID,
   SIDECHAT_VIEWER_PLUGIN_ID,
   WORKFLOW_GIT_WORKTREE_PLUGIN_ID,
+  WORKSPACE_DIGEST_PLUGIN_ID,
+  WORKSPACE_MEETINGS_PLUGIN_ID,
   XTERM_VIEWER_PLUGIN_ID,
 } from '../plugins/builtinPlugins'
 import { usePluginSettingsStore } from '../plugins/pluginSettingsStore'
+import { useIsOfficeExperience } from '../office/appProfile'
 import type { Agent, Approval, Command, Message, Session } from '../../domain/types'
+
+const OFFICE_HIDDEN_VIEWER_IDS = new Set<string>([
+  'xterm-viewer',
+  'dbx-viewer',
+  'agent-graph-viewer',
+  'git-diff-viewer',
+  'git-worktrees-viewer',
+  'diff-viewer',
+  'blackboard-viewer',
+  'memory-viewer',
+])
+
+const OFFICE_HIDDEN_MEDIA_TYPES = new Set<string>([
+  'application/x-terminal',
+  'application/x-dbx',
+  'application/x-agent-graph',
+  'application/x-git-diff',
+  'application/x-git-worktrees',
+  'application/x-diff',
+  'application/x-blackboard',
+  'application/x-memory',
+])
+
+function isDevOnlySidecarTab(tab: { type?: string; viewerId?: string; artifact?: { mediaType?: string } }): boolean {
+  if (tab.type !== 'artifact') return false
+  if (tab.viewerId && OFFICE_HIDDEN_VIEWER_IDS.has(tab.viewerId)) return true
+  if (tab.artifact?.mediaType && OFFICE_HIDDEN_MEDIA_TYPES.has(tab.artifact.mediaType)) return true
+  return false
+}
 
 interface SidecarHostProps {
   session: Session
@@ -62,8 +94,12 @@ export function SidecarHost({
   const blackboardEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(BLACKBOARD_VIEWER_PLUGIN_ID))
   const memoryEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(MEMORY_VIEWER_PLUGIN_ID))
   const worktreeEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKFLOW_GIT_WORKTREE_PLUGIN_ID))
+  const digestEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_DIGEST_PLUGIN_ID))
+  const meetingsEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_MEETINGS_PLUGIN_ID))
+  const isOfficeMode = useIsOfficeExperience(session)
 
-  const activeTab = tabs.find((t) => t.id === activeTabId)
+  const visibleTabs = isOfficeMode ? tabs.filter((t) => !isDevOnlySidecarTab(t)) : tabs
+  const activeTab = visibleTabs.find((t) => t.id === activeTabId)
   const currentSessionKey = `${session.agent_id}:${session.id}`
   useEffect(() => {
     if (activeSessionKey === currentSessionKey && session.workspace) {
@@ -74,11 +110,13 @@ export function SidecarHost({
   }, [activeSessionKey, currentSessionKey, session.id, session.workspace, session.project_name, session.title])
   const tabsOwnerKey = activeSessionKey || currentSessionKey
   const retainedTabs = [
-    ...tabs.map((tab) => [tabsOwnerKey, tab] as const),
+    ...visibleTabs.map((tab) => [tabsOwnerKey, tab] as const),
     ...Object.entries(mountedTabs).flatMap(([ownerSessionKey, ownerTabs]) =>
       ownerSessionKey === tabsOwnerKey
         ? []
-        : ownerTabs.filter((tab) => dirtyTabs[tab.id]).map((tab) => [ownerSessionKey, tab] as const),
+        : ownerTabs
+            .filter((tab) => dirtyTabs[tab.id] && (!isOfficeMode || !isDevOnlySidecarTab(tab)))
+            .map((tab) => [ownerSessionKey, tab] as const),
     ),
   ]
 
@@ -188,8 +226,8 @@ export function SidecarHost({
       }}
     >
       <SidecarHeader
-        tabs={tabs}
-        activeId={activeTabId}
+        tabs={visibleTabs}
+        activeId={activeTab ? activeTab.id : ''}
         dirtyTabs={dirtyTabs}
         onSelect={setActiveTabId}
         onCloseTab={closeTab}
@@ -202,15 +240,18 @@ export function SidecarHost({
         {!activeTab && (
           <SidecarWelcomeMenu
             session={session}
+            isOfficeMode={isOfficeMode}
             onOpenFileTree={fileTreeEnabled ? handleOpenFileTree : undefined}
-            onOpenTerminal={terminalEnabled ? handleOpenTerminal : undefined}
+            onOpenTerminal={!isOfficeMode && terminalEnabled ? handleOpenTerminal : undefined}
             onOpenBrowser={browserEnabled ? handleOpenBrowser : undefined}
-            onOpenDatabase={hasDatabaseTool ? handleOpenDatabase : undefined}
+            onOpenDatabase={!isOfficeMode && hasDatabaseTool ? handleOpenDatabase : undefined}
             onOpenSideChat={sideChatEnabled ? handleOpenSideChat : undefined}
-            onOpenAgentGraph={agentGraphEnabled ? handleOpenAgentGraph : undefined}
-            onOpenBlackboard={blackboardEnabled ? handleOpenBlackboard : undefined}
-            onOpenMemory={memoryEnabled ? handleOpenMemory : undefined}
-            onOpenWorktrees={worktreeEnabled && session.workspace ? handleOpenWorktrees : undefined}
+            onOpenAgentGraph={!isOfficeMode && agentGraphEnabled ? handleOpenAgentGraph : undefined}
+            onOpenBlackboard={!isOfficeMode && blackboardEnabled ? handleOpenBlackboard : undefined}
+            onOpenMemory={!isOfficeMode && memoryEnabled ? handleOpenMemory : undefined}
+            onOpenWorktrees={!isOfficeMode && worktreeEnabled && session.workspace ? handleOpenWorktrees : undefined}
+            onOpenDigest={isOfficeMode && digestEnabled ? () => window.dispatchEvent(new CustomEvent('astrorder:navigate', { detail: { to: '/digest' } })) : undefined}
+            onOpenMeetings={isOfficeMode && meetingsEnabled ? () => window.dispatchEvent(new CustomEvent('astrorder:navigate', { detail: { to: '/meetings' } })) : undefined}
           />
         )}
         {activeTab?.type === 'details' && (
@@ -240,8 +281,13 @@ export function SidecarHost({
                   const quoteArtifactToComposer = () => {
                     const selected = typeof window !== 'undefined' ? window.getSelection()?.toString().trim() || '' : ''
                     const refLabel = artifact.path || artifact.name
+                    const quotedSelection = selected
+                      ? isOfficeMode
+                        ? selected.slice(0, 1200).split('\n').map((line) => `> ${line}`).join('\n')
+                        : `\`\`\`\n${selected.slice(0, 1200)}\n\`\`\``
+                      : ''
                     const text = selected
-                      ? `参考 ${refLabel}：\n\`\`\`\n${selected.slice(0, 1200)}\n\`\`\`\n`
+                      ? `参考 ${artifact.name || refLabel}：\n${quotedSelection}\n`
                       : `参考 \`${refLabel}\` `
                     window.dispatchEvent(
                       new CustomEvent('astrorder:quote-to-composer', {

@@ -1,4 +1,4 @@
-import { ChartLineUpIcon, ChatCircleDotsIcon, GearSixIcon, HardDrivesIcon, IdentificationCardIcon, SquaresFourIcon, TrayIcon, UsersThreeIcon } from './workbenchIcons'
+import { ChartLineUpIcon, ChatCircleDotsIcon, GearSixIcon, HardDrivesIcon, IdentificationCardIcon, MicrophoneIcon, NotebookIcon, SquaresFourIcon, TrayIcon, UsersThreeIcon } from './workbenchIcons'
 import { IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconPin, IconPlus } from '@tabler/icons-react'
 import { ActionIcon, HoverCard, Modal, NavLink, Stack, Text, Tooltip } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
@@ -30,7 +30,9 @@ import {
   WORKSPACE_AGENT_ACCOUNTS_PLUGIN_ID,
   WORKSPACE_ANALYTICS_GATEWAY_PLUGIN_ID,
   WORKSPACE_BACKUPS_PLUGIN_ID,
+  WORKSPACE_DIGEST_PLUGIN_ID,
   WORKSPACE_GROUPS_PLUGIN_ID,
+  WORKSPACE_MEETINGS_PLUGIN_ID,
   WORKSPACE_MONITOR_PLUGIN_ID,
 } from '../features/plugins/builtinPlugins'
 import { usePluginSettingsStore } from '../features/plugins/pluginSettingsStore'
@@ -38,7 +40,18 @@ import { useIntegrationsStore } from '../features/integrations/integrationStore'
 import { IntegrationIcon } from '../features/integrations/integrationIcons'
 import { IntegrationFormModal } from '../features/integrations/IntegrationFormModal'
 import { useActionInbox } from '../features/inbox/useActionInbox'
+import { useMeetingSessionStore } from '../features/meetings/meetingSessionStore'
 import { useUserIdle } from '../hooks/useUserIdle'
+import {
+  DEV_ONLY_PRIMARY_NAV_IDS,
+  setAppProfile,
+  useAppProfile,
+} from '../features/office/appProfile'
+import { IconBriefcase, IconCode } from '@tabler/icons-react'
+
+const SIDEBAR_PRIMARY_NAV_CONFIG_KEY = 'sidebar-primary-nav'
+const SIDEBAR_PRIMARY_NAV_STORAGE_KEY = 'astrorder:sidebar-primary-nav-order'
+const PRIMARY_NAV_DRAG_MIME = 'application/x-astrorder-primary-nav'
 
 const navItems = [
   { to: '/chat', label: '会话', icon: ChatCircleDotsIcon, id: 'chat' },
@@ -48,7 +61,48 @@ const navItems = [
   { to: '/analytics', label: '统计', icon: ChartLineUpIcon, id: 'analytics' },
   { to: '/backups', label: '备份', icon: HardDrivesIcon, id: 'backups' },
   { to: '/agent-accounts', label: '账号', icon: IdentificationCardIcon, id: 'agentAccounts' },
+  { to: '/digest', label: '复盘', icon: NotebookIcon, id: 'digest' },
+  { to: '/meetings', label: '会议', icon: MicrophoneIcon, id: 'meetings' },
 ]
+
+function readStoredPrimaryNavOrder(): string[] {
+  if (typeof localStorage === 'undefined') return []
+  try {
+    const raw = localStorage.getItem(SIDEBAR_PRIMARY_NAV_STORAGE_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+function writeStoredPrimaryNavOrder(order: string[]) {
+  if (typeof localStorage === 'undefined') return
+  try {
+    localStorage.setItem(SIDEBAR_PRIMARY_NAV_STORAGE_KEY, JSON.stringify(order))
+  } catch {}
+}
+
+export function normalizePrimaryNavOrder(savedOrder: string[] | undefined): string[] {
+  const defaultIds = navItems.map((item) => item.id)
+  if (!Array.isArray(savedOrder) || savedOrder.length === 0) return defaultIds
+  const valid = new Set(defaultIds)
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const id of savedOrder) {
+    if (valid.has(id) && !seen.has(id)) {
+      seen.add(id)
+      result.push(id)
+    }
+  }
+  for (const id of defaultIds) {
+    if (!seen.has(id)) {
+      result.push(id)
+    }
+  }
+  return result
+}
 
 function TodayUsagePreview({ data, pending, error, updatedAt }: {
   data?: OcxUsageResponse
@@ -159,24 +213,62 @@ export function Sidebar({
   const navigate = useNavigate()
   const skyId = useId()
   const [settingsOpened, setSettingsOpened] = useState(false)
-  const [settingsTab, setSettingsTab] = useState<string>('connections')
+  const [settingsTab, setSettingsTab] = useState<string>('general')
   const [addIntegrationOpened, setAddIntegrationOpened] = useState(false)
   const [draggingIntegrationId, setDraggingIntegrationId] = useState<string | null>(null)
   const [dragOverIntegration, setDragOverIntegration] = useState<{ id: string; pos: 'before' | 'after' } | null>(null)
+  const [draggingNavId, setDraggingNavId] = useState<string | null>(null)
+  const [dragOverNav, setDragOverNav] = useState<{ id: string; pos: 'before' | 'after' } | null>(null)
+  const [localNavOrder, setLocalNavOrder] = useState<string[]>(() => readStoredPrimaryNavOrder())
+  const configuredNavOrder = usePluginSettingsStore((s) => s.pluginConfigs[SIDEBAR_PRIMARY_NAV_CONFIG_KEY]?.order)
+  const setPluginConfig = usePluginSettingsStore((s) => s.setPluginConfig)
   const integrationsPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(SIDEBAR_INTEGRATIONS_PLUGIN_ID))
   const groupsPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_GROUPS_PLUGIN_ID))
   const monitorPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_MONITOR_PLUGIN_ID))
   const analyticsGatewayEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_ANALYTICS_GATEWAY_PLUGIN_ID))
   const backupsPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_BACKUPS_PLUGIN_ID))
   const agentAccountsEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_AGENT_ACCOUNTS_PLUGIN_ID))
-  const visibleNavItems = navItems.filter((item) => {
-    if (item.id === 'groups') return groupsPluginEnabled
-    if (item.id === 'monitor') return monitorPluginEnabled
-    if (item.id === 'analytics') return analyticsGatewayEnabled
-    if (item.id === 'backups') return backupsPluginEnabled
-    if (item.id === 'agentAccounts') return agentAccountsEnabled
-    return true
-  })
+  const digestPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_DIGEST_PLUGIN_ID))
+  const meetingsPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_MEETINGS_PLUGIN_ID))
+  const appProfile = useAppProfile()
+  const isOfficeProfile = appProfile === 'office'
+
+  const orderedNavIds = normalizePrimaryNavOrder(
+    Array.isArray(configuredNavOrder) && configuredNavOrder.length > 0
+      ? (configuredNavOrder.filter((x): x is string => typeof x === 'string'))
+      : localNavOrder,
+  )
+  const navById = new Map(navItems.map((item) => [item.id, item]))
+  const visibleNavItems = orderedNavIds
+    .map((id) => navById.get(id))
+    .filter((item): item is (typeof navItems)[number] => Boolean(item))
+    .filter((item) => {
+      if (isOfficeProfile && DEV_ONLY_PRIMARY_NAV_IDS.has(item.id)) return false
+      if (item.id === 'digest') return digestPluginEnabled
+      if (item.id === 'meetings') return meetingsPluginEnabled
+      if (item.id === 'groups') return groupsPluginEnabled
+      if (item.id === 'monitor') return monitorPluginEnabled
+      if (item.id === 'analytics') return analyticsGatewayEnabled
+      if (item.id === 'backups') return backupsPluginEnabled
+      if (item.id === 'agentAccounts') return agentAccountsEnabled
+      return true
+    })
+
+  const handlePrimaryNavDrop = (sourceId: string, targetId: string, pos: 'before' | 'after') => {
+    setDraggingNavId(null)
+    setDragOverNav(null)
+    if (!sourceId || !targetId || sourceId === targetId) return
+    const nextIds = [...orderedNavIds]
+    const fromIdx = nextIds.indexOf(sourceId)
+    if (fromIdx < 0) return
+    nextIds.splice(fromIdx, 1)
+    const targetIdx = nextIds.indexOf(targetId)
+    if (targetIdx < 0) return
+    nextIds.splice(pos === 'after' ? targetIdx + 1 : targetIdx, 0, sourceId)
+    setLocalNavOrder(nextIds)
+    writeStoredPrimaryNavOrder(nextIds)
+    setPluginConfig(SIDEBAR_PRIMARY_NAV_CONFIG_KEY, 'order', nextIds)
+  }
   const integrationItems = useIntegrationsStore((s) => s.items)
   const reorderIntegrations = useIntegrationsStore((s) => s.reorder)
   const visibleIntegrations = integrationItems.filter((item) => item.visible)
@@ -244,7 +336,7 @@ export function Sidebar({
   const todayUsage = useQuery({
     queryKey: ['astrorder', 'analytics', 'today-models'],
     queryFn: () => api.getAnalyticsUsage({ range: 'today', surface: 'all' }),
-    enabled: !onNavigate && analyticsGatewayEnabled,
+    enabled: !onNavigate && analyticsGatewayEnabled && !isOfficeProfile,
     staleTime: 180_000,
     refetchInterval: userIdle ? false : 180_000,
     refetchIntervalInBackground: false,
@@ -253,18 +345,23 @@ export function Sidebar({
   })
 
   const isInbox = location.pathname.startsWith('/inbox')
+  const isDigest = location.pathname.startsWith('/digest')
+  const isMeetings = location.pathname.startsWith('/meetings')
   const isGroups = location.pathname.startsWith('/groups') || location.pathname.startsWith('/chat/group-')
   const isMonitorRoute = location.pathname.startsWith('/monitor')
   const isAnalytics = location.pathname.startsWith('/analytics')
   const isBackups = location.pathname.startsWith('/backups')
   const isAgentAccounts = location.pathname.startsWith('/agent-accounts')
   const isIntegrations = location.pathname.startsWith('/integrations/')
-  const isChat = !isInbox && !isGroups && !isMonitorRoute && !isAnalytics && !isBackups && !isAgentAccounts && !isIntegrations
+  const isChat = !isInbox && !isDigest && !isMeetings && !isGroups && !isMonitorRoute && !isAnalytics && !isBackups && !isAgentAccounts && !isIntegrations
   const isInChatSession = isChat && (
     (location.pathname.startsWith('/chat/') && !location.pathname.startsWith('/chat/group-')) ||
     Boolean(activeSessionKey)
   )
   const { totalCount: inboxTotalCount, urgentCount: inboxUrgentCount } = useActionInbox(activeSessionKey)
+  const meetingRecording = useMeetingSessionStore(
+    (s) => s.recordState === 'recording' || s.recordState === 'paused' || s.recordState === 'starting',
+  )
   const groupsBusy = useAstrorderStore(state => Object.values(state.botGroups).some(groupHasActiveTask))
   const connection = useAstrorderStore(state => state.connection)
   const activeSession = sessions.find(session => scopeKey(session.agent_id, session.id) === activeSessionKey)
@@ -272,7 +369,7 @@ export function Sidebar({
   const accountEnvironment = agySessionEnvironment(activeSession, activeAgent)
   const connectionLabel = connection === 'connected' ? '已连接' : connection === 'connecting' ? '连接中' : connection === 'error' ? '连接异常' : '离线'
 
-  const hasSecondaryPanel = !(isInbox || isAgentAccounts || isBackups || isAnalytics || isIntegrations)
+  const hasSecondaryPanel = !(isInbox || isDigest || isMeetings || isAgentAccounts || isBackups || isAnalytics || isIntegrations)
   const isCollapsedDesktop = Boolean(!onNavigate && hasSecondaryPanel && panelCollapsed)
   const isPeekingDesktop = Boolean(isCollapsedDesktop && isPeeking)
 
@@ -296,7 +393,6 @@ export function Sidebar({
     <>
       <div
         className={`workspace-sidebar${isCollapsedDesktop ? ' is-panel-collapsed' : ''}${isPeekingDesktop ? ' is-panel-peeking' : ''}`}
-        data-liquid-snapshot={`[id="${skyId}"]`}
       >
         <div id={skyId} className="workspace-sidebar-sky" aria-hidden="true" />
         <nav className="workspace-navigation" aria-label="主导航">
@@ -305,6 +401,8 @@ export function Sidebar({
               const isThisMonitor = id === 'monitor'
               const isActive =
                 (id === 'inbox' && isInbox) ||
+                (id === 'digest' && isDigest) ||
+                (id === 'meetings' && isMeetings) ||
                 (id === 'groups' && isGroups) ||
                 (id === 'monitor' && isMonitorRoute) ||
                 (id === 'analytics' && isAnalytics) ||
@@ -315,6 +413,8 @@ export function Sidebar({
                 isCollapsedDesktop &&
                 ((id === 'chat' && (isChat || isMonitorRoute)) ||
                   (id === 'groups' && isGroups))
+              const isNavDragging = draggingNavId === id
+              const navDropPos = dragOverNav?.id === id ? dragOverNav.pos : undefined
               const link = (
                 <NavLink
                     component={RouterNavLink}
@@ -327,36 +427,76 @@ export function Sidebar({
                     onMouseEnter={canHoverPeekTab ? onPeekEnter : undefined}
                     data-peek-trigger={canHoverPeekTab ? 'true' : undefined}
                     data-active={isActive ? 'true' : undefined}
+                    data-dragging={isNavDragging ? 'true' : undefined}
+                    data-drop-pos={navDropPos}
+                    draggable
                     aria-current={isActive ? 'page' : undefined}
                     aria-label={id === 'groups' && groupsBusy && !isGroups ? '群聊，有任务进行中' : label}
                     className={`sidebar-nav-link ${isActive ? 'active' : ''} ${isThisMonitor && isMonitorDragOver ? 'is-drag-over' : ''}`}
-                    data-liquid-surface={isActive ? 'selection' : undefined}
-                    onDragOver={isThisMonitor ? (e) => {
-                      e.preventDefault()
-                      e.dataTransfer.dropEffect = 'copy'
-                      setIsMonitorDragOver(true)
-                    } : undefined}
-                    onDragLeave={isThisMonitor ? () => setIsMonitorDragOver(false) : undefined}
-                    onDrop={isThisMonitor ? (e) => {
-                      e.preventDefault()
-                      setIsMonitorDragOver(false)
-                      let key = ''
-                      let title = '会话'
-                      const raw = e.dataTransfer.getData('application/x-astrorder-session')
-                      if (raw) {
-                        try {
-                          const item = JSON.parse(raw)
-                          key = item.key || `${item.agent_id}::${item.id}`
-                          title = item.title || '会话'
-                        } catch {}
+                    onDragStart={(e) => {
+                      setDraggingNavId(id)
+                      e.dataTransfer.effectAllowed = 'move'
+                      e.dataTransfer.setData(PRIMARY_NAV_DRAG_MIME, id)
+                    }}
+                    onDragOver={(e) => {
+                      const isPrimaryNavDrag = Boolean(draggingNavId) || e.dataTransfer.types.includes(PRIMARY_NAV_DRAG_MIME)
+                      if (isPrimaryNavDrag) {
+                        if (draggingNavId === id) return
+                        e.preventDefault()
+                        e.dataTransfer.dropEffect = 'move'
+                        const rect = e.currentTarget.getBoundingClientRect()
+                        const pos: 'before' | 'after' = e.clientY > rect.top + rect.height / 2 ? 'after' : 'before'
+                        setDragOverNav((prev) => (prev?.id === id && prev.pos === pos ? prev : { id, pos }))
+                        return
                       }
-                      if (!key) {
-                        key = e.dataTransfer.getData('text/plain')
+                      if (isThisMonitor && !e.dataTransfer.types.includes('application/x-astrorder-integration')) {
+                        e.preventDefault()
+                        e.dataTransfer.dropEffect = 'copy'
+                        setIsMonitorDragOver(true)
                       }
-                      if (key) {
-                        addSessionToMonitor(key, title)
+                    }}
+                    onDragLeave={(e) => {
+                      if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+                        setDragOverNav((prev) => (prev?.id === id ? null : prev))
                       }
-                    } : undefined}
+                      if (isThisMonitor) {
+                        setIsMonitorDragOver(false)
+                      }
+                    }}
+                    onDrop={(e) => {
+                      const sourceNavId = e.dataTransfer.getData(PRIMARY_NAV_DRAG_MIME) || draggingNavId
+                      if (sourceNavId) {
+                        e.preventDefault()
+                        const rect = e.currentTarget.getBoundingClientRect()
+                        const pos: 'before' | 'after' = e.clientY > rect.top + rect.height / 2 ? 'after' : 'before'
+                        handlePrimaryNavDrop(sourceNavId, id, pos)
+                        return
+                      }
+                      if (isThisMonitor) {
+                        e.preventDefault()
+                        setIsMonitorDragOver(false)
+                        let key = ''
+                        let title = '会话'
+                        const raw = e.dataTransfer.getData('application/x-astrorder-session')
+                        if (raw) {
+                          try {
+                            const item = JSON.parse(raw)
+                            key = item.key || `${item.agent_id}::${item.id}`
+                            title = item.title || '会话'
+                          } catch {}
+                        }
+                        if (!key) {
+                          key = e.dataTransfer.getData('text/plain')
+                        }
+                        if (key) {
+                          addSessionToMonitor(key, title)
+                        }
+                      }
+                    }}
+                    onDragEnd={() => {
+                      setDraggingNavId(null)
+                      setDragOverNav(null)
+                    }}
                 />
               )
               return id === 'inbox' && inboxTotalCount > 0 ? (
@@ -365,6 +505,11 @@ export function Sidebar({
                   <span className={`sidebar-inbox-badge${inboxUrgentCount > 0 ? ' is-urgent' : ''}`} aria-hidden="true">
                     {inboxTotalCount > 99 ? '99+' : inboxTotalCount}
                   </span>
+                </div>
+              ) : id === 'meetings' && meetingRecording ? (
+                <div key={to} className="sidebar-inbox-nav-wrap">
+                  <Tooltip label="会议（实时录制中）" position="right" withArrow openDelay={200}>{link}</Tooltip>
+                  <span className="sidebar-meeting-rec-dot" aria-hidden="true" />
                 </div>
               ) : id === 'groups' && groupsBusy && !isGroups ? (
                 <div key={to} className="group-task-nav-tab">
@@ -388,7 +533,7 @@ export function Sidebar({
           {integrationsPluginEnabled && (
             <>
               <div className="sidebar-integrations-divider" aria-hidden="true" />
-              <div className="sidebar-integrations-nav" aria-label="外链集成">
+              <div className="sidebar-integrations-nav" aria-label={isOfficeProfile ? '常用网站' : '外链集成'}>
                 {visibleIntegrations.map((item) => {
                   const targetPath = `/integrations/${encodeURIComponent(item.id)}`
                   const isItemActive = location.pathname === targetPath
@@ -472,7 +617,6 @@ export function Sidebar({
                       aria-current={isItemActive ? 'page' : undefined}
                       aria-label={tooltipLabel}
                       className={`sidebar-nav-link sidebar-integration-link${isItemActive ? ' active' : ''}${iconOnly ? ' is-icon-only' : ''}`}
-                      data-liquid-surface={isItemActive ? 'selection' : undefined}
                       {...dragProps}
                     />
                   )
@@ -482,11 +626,11 @@ export function Sidebar({
                     </Tooltip>
                   )
                 })}
-                <Tooltip label="添加集成外链" position="right" withArrow openDelay={150}>
+                <Tooltip label={isOfficeProfile ? '添加常用网站' : '添加集成外链'} position="right" withArrow openDelay={150}>
                   <button
                     type="button"
                     className="sidebar-integration-add-btn"
-                    aria-label="添加集成"
+                    aria-label={isOfficeProfile ? '添加常用网站' : '添加集成'}
                     onClick={() => setAddIntegrationOpened(true)}
                   >
                     <IconPlus size={18} stroke={2} aria-hidden="true" />
@@ -542,7 +686,7 @@ export function Sidebar({
             {isPeekingDesktop && onTogglePanelCollapse && (
               <div className="sidebar-peek-header">
                 <Text size="xs" fw={650} c="dimmed">
-                  {isGroups ? '群聊协作' : '项目会话'}
+                  {isGroups ? '群聊协作' : isOfficeProfile ? '工作空间' : '项目会话'}
                 </Text>
                 <Tooltip label="固定侧栏 (Ctrl+B)" position="right" withArrow>
                   <button
@@ -568,7 +712,7 @@ export function Sidebar({
         ) : (
           <>
             <div className="rail-heading">
-              <Text size="xs" fw={700} c="dimmed">项目会话</Text>
+              <Text size="xs" fw={700} c="dimmed">{isOfficeProfile ? '工作空间' : '项目会话'}</Text>
               <div className="rail-heading-actions">
                 <Text size="xs" c="dimmed">{sessions.length}</Text>
               </div>
@@ -587,9 +731,41 @@ export function Sidebar({
           </>
         )}
       </Stack>
-            <footer className="workspace-connection" data-status={connection}>
-              <span className="workspace-connection-dot" aria-hidden="true" />
-              <span>{activeAgent ? `${connectionName(activeAgent)} · ` : ''}{connectionLabel}</span>
+            <footer className="workspace-connection" data-status={connection} style={{ justifyContent: 'space-between' }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <span className="workspace-connection-dot" aria-hidden="true" />
+                <span>{isOfficeProfile ? (connection === 'connected' ? '服务就绪' : connectionLabel) : `${activeAgent ? `${connectionName(activeAgent)} · ` : ''}${connectionLabel}`}</span>
+              </span>
+              <Tooltip label={isOfficeProfile ? '当前为办公模式，点击切换为研发模式' : '当前为研发模式，点击切换为办公模式'} position="top" withArrow>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = isOfficeProfile ? 'developer' : 'office'
+                    setAppProfile(next)
+                    notifications.show({
+                      color: 'teal',
+                      message: next === 'office' ? '已切换至办公模式' : '已切换至研发模式',
+                    })
+                  }}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    padding: '2px 7px',
+                    borderRadius: 999,
+                    border: '1px solid var(--astr-border)',
+                    background: 'transparent',
+                    color: 'var(--astr-muted)',
+                    fontSize: 11,
+                    fontWeight: 550,
+                    cursor: 'pointer',
+                    flexShrink: 0,
+                  }}
+                >
+                  {isOfficeProfile ? <IconBriefcase size={11} /> : <IconCode size={11} />}
+                  <span>{isOfficeProfile ? '办公' : '研发'}</span>
+                </button>
+              </Tooltip>
             </footer>
           </div>
         )}
@@ -603,8 +779,8 @@ export function Sidebar({
         centered
         size="80%"
         styles={{
-          content: { width: '80vw', maxWidth: '1600px', height: '80vh', maxHeight: '1000px', display: 'flex', flexDirection: 'column' },
-          body: { flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', padding: '0 16px 16px' },
+          content: { width: '80vw', maxWidth: '1600px', height: '80vh', maxHeight: '1000px', display: 'flex', flexDirection: 'column', overflow: 'hidden' },
+          body: { flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', padding: 0 },
         }}
       >
         {settingsOpened && (

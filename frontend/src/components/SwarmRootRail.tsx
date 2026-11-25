@@ -72,7 +72,6 @@ export function SwarmRootRail({
               size="compact-xs"
               variant="light"
               color="violet"
-              data-liquid-surface="control"
               onClick={handleLaunchNewStar}
               leftSection={<IconPlus size={13} />}
               style={{ fontWeight: 600 }}
@@ -103,7 +102,6 @@ export function SwarmRootRail({
                 <UnstyledButton
                   key={star.key}
                   className={`session-row ${isSelected ? 'is-active' : ''}`}
-                  data-liquid-surface={isSelected ? 'selection' : undefined}
                   onClick={() => handleSelectStar(star.key)}
                   style={{
                     padding: '8px 10px',

@@ -163,6 +163,76 @@ func (h *Handler) handleListMessages(w http.ResponseWriter, r *http.Request, sid
 	}
 	writeMessagesJSON(w, r, map[string]any{"items": items, "next_cursor": next})
 }
+
+// ReadRecentMessages fetches up to limit recent projected transcript items for
+// (aid, sid) in read-only mode without mutating task projections or waking
+// dormant Codex threads. Used by internal consumers such as Work Digest.
+func (h *Handler) ReadRecentMessages(ctx context.Context, aid, sid string, limit int) ([]map[string]any, error) {
+	if h == nil || h.store == nil || h.client == nil || h.client.Runtime == nil {
+		return nil, nil
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 40
+	}
+	row, err := h.store.GetSession(ctx, aid, sid)
+	if err != nil || row == nil {
+		return nil, err
+	}
+	nativeID := stringValue(row, "source_session_id")
+	if nativeID == "" {
+		nativeID = sid
+	}
+	agent, err := h.store.GetAgent(ctx, aid)
+	if err != nil {
+		return nil, err
+	}
+	kind := stringValue(agent, "kind")
+	connID := stringValue(row, "connection_id")
+
+	// Never wake a dormant Codex thread during background digest collection.
+	if kind == "codex" {
+		if _, readErr := h.client.Runtime.ReadModel(ctx, &pb.ReadModelRequest{
+			Session: buildSessionRef(aid, nativeID, connID),
+		}); readErr != nil {
+			items, _, err := h.readCodexHistoryUnbound(ctx, row, nativeID, "", limit)
+			return items, err
+		}
+	} else {
+		if err := h.ensureNativeBinding(ctx, row); err != nil {
+			return nil, err
+		}
+	}
+
+	page, err := h.client.Runtime.GetHistoryPage(ctx, &pb.HistoryPageRequest{
+		Session: buildSessionRef(aid, nativeID, connID),
+		Limit:   uint32(limit),
+	})
+	if err != nil {
+		if kind == "codex" {
+			items, _, readErr := h.readCodexHistoryUnbound(ctx, row, nativeID, "", limit)
+			if readErr == nil {
+				return items, nil
+			}
+		}
+		return nil, err
+	}
+	if page == nil || page.Session == nil || page.Session.SessionId != nativeID || page.Session.GetAgentId() != aid {
+		return nil, nil
+	}
+	source := stringValue(row, "source_id")
+	if source == "" {
+		source = aid
+	}
+	items := make([]map[string]any, 0, len(page.Items))
+	for _, native := range page.Items {
+		var item map[string]any
+		if parseNativeJSON(native, &item) != nil {
+			continue
+		}
+		items = append(items, projectHistoryItem(item, aid, sid, nativeID, source, kind)...)
+	}
+	return items, nil
+}
 func historyText(value any) string {
 	if text, ok := value.(string); ok {
 		return text

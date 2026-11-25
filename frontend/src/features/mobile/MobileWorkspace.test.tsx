@@ -309,7 +309,7 @@ describe('independent mobile composer', () => {
     fireEvent.click(screen.getByRole('button', { name: '会话操作' }))
     fireEvent.click(await screen.findByRole('menuitem', { name: '工作区' }))
     const dialog = await screen.findByRole('dialog', { name: '会话工作区' })
-    for (const name of ['文件', '终端', '知识记忆', '侧边聊天', '决策状态机', '浏览器']) expect(within(dialog).getByRole('button', { name: new RegExp(`^${name}`) })).toBeVisible()
+    for (const name of ['文件', '终端', '知识记忆', '侧边聊天', '决策与轨迹', '浏览器']) expect(within(dialog).getByRole('button', { name: new RegExp(`^${name}`) })).toBeVisible()
     fireEvent.click(within(dialog).getByRole('button', { name: '关闭工作区' }))
     expect(screen.queryByRole('dialog', { name: '会话工作区' })).not.toBeInTheDocument()
   })
@@ -459,6 +459,34 @@ describe('independent mobile composer', () => {
     fireEvent.click(within(row).getByRole('button', { name: '立即引导' }))
     await waitFor(() => expect(create).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: 'guide', agent_id: session.agent_id, session_id: session.id, action: 'enqueue', text: '立即修正方向' })))
     await waitFor(() => expect(api.sendQueuedCommand).toHaveBeenCalledExactlyOnceWith('guide', session.agent_id, session.id))
+  })
+  it('allows sending guidance to a running Antigravity session via button and swipe-up, while blocking only during waiting_approval', async () => {
+    useAstrorderStore.getState().setConnection('connected')
+    useAstrorderStore.getState().hydrateBootstrap({
+      protocol_version: 1,
+      cursor: 1,
+      agents: [{ id: 'inert', kind: 'antigravity-ssh', name: 'Antigravity · WSL', status: 'ready', capabilities: ['chat', 'stop', 'attachments'], limitation: null }],
+      sessions: [{ ...session, status: 'running' }],
+    })
+    memory.rows = [{ payload: { id: 'agy-guide', agent_id: session.agent_id, session_id: session.id, action: 'send', text: '切到方案二', attachment_ids: [], target_id: null }, files: [], attachments: [], state: 'queued' }]
+    vi.spyOn(api, 'createCommand').mockImplementation(async input => ({ ...input, state: input.action === 'enqueue' ? 'queued' : 'accepted', attachments: [], created_at: session.updated_at, error: null }))
+    mount()
+    const row = await screen.findByLabelText('排队消息')
+    await screen.findByText('bound-model')
+    const guideBtn = within(row).getByRole('button', { name: '立即引导' })
+    expect(guideBtn).toBeEnabled()
+    fireEvent.click(guideBtn)
+    await waitFor(() => expect(api.sendQueuedCommand).toHaveBeenCalledExactlyOnceWith('agy-guide', session.agent_id, session.id))
+
+    // During waiting_approval, Antigravity guidance stays blocked
+    act(() => {
+      useAstrorderStore.setState(state => ({
+        sessions: { ...state.sessions, [scopeKey(session.agent_id, session.id)]: { ...session, status: 'waiting_approval' } },
+      }))
+      useAstrorderStore.getState().mergeCommands([{ id: 'agy-wait', agent_id: session.agent_id, session_id: session.id, action: 'enqueue', state: 'queued', text: '审批后再发', attachments: [], created_at: session.updated_at, error: null }])
+    })
+    const waitRow = await screen.findByText('审批后再发').then(el => el.closest('article')!)
+    expect(within(waitRow).getByRole('button', { name: '立即引导' })).toBeDisabled()
   })
   it('keeps a queued message when the browser cancels its touch gesture', async () => {
     useAstrorderStore.getState().setConnection('connected')
@@ -1078,5 +1106,20 @@ describe('independent mobile composer', () => {
     const homeBtn = screen.getByRole('button', { name: '星序导航' })
     expect(homeBtn).toHaveTextContent('星序')
     expect(view.container.querySelector('.m-brand-mark')).toBeInTheDocument()
+  })
+
+  it('syncs theme-color metas and document colorScheme to match the opaque mobile header surface', () => {
+    const lightMeta = document.createElement('meta')
+    lightMeta.name = 'theme-color'
+    lightMeta.media = '(prefers-color-scheme: light)'
+    lightMeta.content = '#f6f4fa'
+    document.head.appendChild(lightMeta)
+    try {
+      mount()
+      expect(lightMeta.content).toBe('#ffffff')
+      expect(document.documentElement.style.colorScheme).toBe('light')
+    } finally {
+      lightMeta.remove()
+    }
   })
 })

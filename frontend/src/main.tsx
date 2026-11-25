@@ -14,7 +14,6 @@ import './brightWorkbench.css'
 import './themeAccent.css'
 import { applyThemePalette, readStoredThemePalette } from './themeAccent'
 import { theme } from './theme'
-import { LiquidSurfaces } from './components/LiquidSurfaces'
 import { startClientPerf } from './perf/clientPerf'
 import { registerSW } from 'virtual:pwa-register'
 
@@ -133,7 +132,6 @@ createRoot(rootEl).render(
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
           <Notifications position="top-right" zIndex={3000} />
-          <LiquidSurfaces />
           <App />
         </BrowserRouter>
       </QueryClientProvider>

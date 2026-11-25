@@ -15,9 +15,26 @@ import { artifactViewerRegistry } from '../sidecar/registry'
 import { useSidecarStore } from '../sidecar/sidecarStore'
 import { SessionSchedulesView } from './SessionSchedulesView'
 import { SessionSwarmView } from './SessionSwarmView'
+import { useIsOfficeExperience } from '../office/appProfile'
 import './workspaceChanges.css'
 
 type PanelSection = 'swarm' | 'schedules' | 'outputs'
+
+function friendlyMediaTypeLabel(mime?: string, name?: string): string {
+  const m = (mime || '').toLowerCase()
+  const n = (name || '').toLowerCase()
+  if (m.includes('wordprocessingml') || n.endsWith('.docx') || n.endsWith('.doc')) return 'Word 文档'
+  if (m.includes('spreadsheetml') || n.endsWith('.xlsx') || n.endsWith('.xls')) return 'Excel 表格'
+  if (m.includes('presentationml') || n.endsWith('.pptx') || n.endsWith('.ppt')) return 'PPT 演示文稿'
+  if (m === 'application/pdf' || n.endsWith('.pdf')) return 'PDF 文档'
+  if (m === 'text/markdown' || n.endsWith('.md')) return 'Markdown 文档'
+  if (m === 'text/csv' || n.endsWith('.csv')) return 'CSV 数据表'
+  if (m.startsWith('image/')) return '图片'
+  if (m.startsWith('audio/')) return '音频'
+  if (m.startsWith('video/')) return '视频'
+  if (m.startsWith('text/')) return '文本文档'
+  return mime || '文档附件'
+}
 
 export function WorkspaceChangesContent({
   session,
@@ -48,7 +65,8 @@ export function WorkspaceChangesContent({
   onOpenSession?: (agentId: string, sessionId: string) => void
   onClose: () => void
 }) {
-  const showSwarm = isAntigravityAgent(agent)
+  const isOfficeMode = useIsOfficeExperience(session)
+  const showSwarm = !isOfficeMode && isAntigravityAgent(agent)
   const [userPickedSection, setUserPickedSection] = useState(false)
   const [section, setSection] = useState<PanelSection>(() => {
     if (showSwarm && swarm?.available) return 'swarm'
@@ -191,7 +209,7 @@ export function WorkspaceChangesContent({
       ) : (
         <div className="workbench-output-list">
           {outputs.length === 0 ? (
-            <p className="workbench-empty">当前已加载的会话中暂无 Agent 输出附件</p>
+            <p className="workbench-empty">{isOfficeMode ? '当前对话暂无生成的文档或附件' : '当前已加载的会话中暂无 Agent 输出附件'}</p>
           ) : (
             outputs.map((output) => (
               <button
@@ -204,7 +222,7 @@ export function WorkspaceChangesContent({
                   <strong>{output.name}</strong>
                   <ArrowRightIcon size={15} />
                 </span>
-                <span className="workbench-file-path">{output.media_type}</span>
+                <span className="workbench-file-path">{friendlyMediaTypeLabel(output.media_type, output.name)}</span>
               </button>
             ))
           )}

@@ -1,12 +1,15 @@
 import { useRef, useState } from 'react'
 import { Button } from '@mantine/core'
-import { IconPlugConnected, IconRefresh } from '@tabler/icons-react'
+import { IconPlugConnected, IconPuzzle, IconRefresh } from '@tabler/icons-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { ApiError, api } from '../../api/client'
 import { AgentBrandIcon, agentKindLabel } from '../../components/AgentBrandIcon'
 import { InlineNotice } from '../../components/InlineNotice'
 import type { Session } from '../../domain/types'
 import { useAstrorderStore } from '../../state/store'
+import { canonicalAgentKind, type ManagedAgentKind } from '../plugins/builtinPlugins'
+import { usePluginSettingsStore } from '../plugins/pluginSettingsStore'
+import { AgentEnableModal } from '../toolchain/AgentEnableModal'
 
 export function isAgentDisconnectedError(error?: string) {
   return Boolean(error?.includes('主动断联'))
@@ -14,10 +17,15 @@ export function isAgentDisconnectedError(error?: string) {
 
 export function SessionConnectionNotice({ session, error, onRetry }: { session: Session; error?: string; onRetry?: () => unknown }) {
   const agent = useAstrorderStore(state => state.agents[session.agent_id])
+  const enabledPlugins = usePluginSettingsStore((s) => s.enabledPlugins)
+  const isAgentEnabled = usePluginSettingsStore((s) => s.isAgentEnabled)
+  void enabledPlugins
   const client = useQueryClient()
   const inFlight = useRef(false)
   const [connecting, setConnecting] = useState(false)
   const [failure, setFailure] = useState('')
+  const [enableModalOpen, setEnableModalOpen] = useState(false)
+  const pluginDisabled = Boolean(agent?.kind && !isAgentEnabled(agent.kind))
   const disconnected = agent?.status === 'disconnected' || isAgentDisconnectedError(error)
   const connect = async () => {
     if (!agent || inFlight.current) return
@@ -40,6 +48,35 @@ export function SessionConnectionNotice({ session, error, onRetry }: { session: 
       inFlight.current = false
       setConnecting(false)
     }
+  }
+  if (pluginDisabled && agent) {
+    const canonical = canonicalAgentKind(agent.kind) as ManagedAgentKind
+    return <>
+      <InlineNotice
+        className="session-connection-notice"
+        title={`${agentKindLabel(agent.kind)} 插件已停用`}
+        icon={<AgentBrandIcon kind={agent.kind} size={20} />}
+        actions={
+          <Button
+            variant="default"
+            size="compact-sm"
+            leftSection={<IconPuzzle size={14} />}
+            onClick={() => setEnableModalOpen(true)}
+          >
+            重新启用
+          </Button>
+        }
+      >
+        历史会话记录仍可完整只读查看；启用该 Agent 插件后即可继续发送消息。
+      </InlineNotice>
+      <AgentEnableModal
+        opened={enableModalOpen}
+        kind={canonical}
+        initialEnvironmentId={session.connection_id && session.connection_id !== 'local' ? `ssh:${session.connection_id}` : 'local'}
+        onClose={() => setEnableModalOpen(false)}
+        onEnabled={() => { void onRetry?.() }}
+      />
+    </>
   }
   if (!disconnected && !error && !failure) return null
   return <InlineNotice className="session-connection-notice" title={disconnected ? `${agentKindLabel(agent?.kind)} 未连接` : '暂时无法读取会话'} icon={disconnected ? <AgentBrandIcon kind={agent?.kind} size={20} /> : undefined} alert={Boolean(failure) || !disconnected} actions={disconnected && agent

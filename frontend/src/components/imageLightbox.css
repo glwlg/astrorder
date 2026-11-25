@@ -52,13 +52,11 @@ dialog.m-lightbox::backdrop {
   flex: none;
   padding: 2px 8px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.16);
+  background: rgba(20, 22, 32, 0.82);
   color: rgba(255, 255, 255, 0.96);
   font-size: 12px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
 }
 
 .m-lightbox-title {
@@ -78,14 +76,12 @@ dialog.m-lightbox::backdrop {
   min-height: 44px;
   border: none;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.16);
+  background: rgba(20, 22, 32, 0.82);
   color: #ffffff;
   display: grid;
   place-items: center;
   cursor: pointer;
   pointer-events: auto;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
 }
 
 .m-lightbox-stage {
@@ -176,14 +172,12 @@ dialog.m-lightbox::backdrop {
   min-width: 44px;
   min-height: 44px;
   border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(22, 24, 34, 0.78);
+  background: rgba(22, 24, 34, 0.88);
   color: #ffffff;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
 }
 
 .m-lightbox-ctrl-btn:first-child {

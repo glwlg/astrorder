@@ -20,8 +20,12 @@ import { blackboardViewer } from './viewers/blackboard'
 import { memoryViewer } from './viewers/memory'
 import { browserMirrorViewer } from './viewers/browser'
 import { dbxViewer } from './viewers/dbx'
+import { pdfViewer } from './viewers/pdf'
+import { docxViewer } from './viewers/docx'
+import { sheetViewer } from './viewers/sheet'
+import { pptxViewer } from './viewers/pptx'
 
-const NON_PREVIEWABLE_EXTENSIONS = /\.(?:exe|dll|msi|msix|appx|com|bin|so|dylib|a|o|obj|class|jar|war|wasm|zip|7z|rar|gz|bz2|xz|tar|pdf|docx|xlsx|pptx|woff2?|ttf|otf)$/i
+const NON_PREVIEWABLE_EXTENSIONS = /\.(?:exe|dll|msi|msix|appx|com|bin|so|dylib|a|o|obj|class|jar|war|wasm|zip|7z|rar|gz|bz2|xz|tar|woff2?|ttf|otf)$/i
 
 export function isNonPreviewableFile(fileNameOrPath: string): boolean {
   return NON_PREVIEWABLE_EXTENSIONS.test(fileNameOrPath.toLowerCase().split(/[?#]/)[0])
@@ -37,6 +41,10 @@ class ArtifactViewerRegistry {
     this.register(memoryViewer)
     this.register(browserMirrorViewer)
     this.register(dbxViewer)
+    this.register(pdfViewer)
+    this.register(docxViewer)
+    this.register(sheetViewer)
+    this.register(pptxViewer)
     this.register(drawioViewer)
     this.register(mermaidViewer)
     this.register(excalidrawViewer)

@@ -6,11 +6,13 @@ import (
 	"io"
 	"net/http"
 	"strings"
+
+	"astrorder.dev/app-server/internal/store"
 )
 
 const (
-	prefPluginsEnabled = "plugins:enabled"
-	prefPluginsConfig  = "plugins:config"
+	prefPluginsEnabled = store.PrefPluginsEnabled
+	prefPluginsConfig  = store.PrefPluginsConfig
 	maxPluginBody      = 256 * 1024
 )
 
@@ -70,6 +72,9 @@ func (h *handler) loadPluginSettings(ctx context.Context) (pluginSettingsView, e
 
 func (h *handler) getPluginSettings(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
+	if h.Store != nil && h.AgentInstalledProbe != nil {
+		_, _ = h.Store.BootstrapAgentPluginDefaults(r.Context(), h.AgentInstalledProbe)
+	}
 	view, err := h.loadPluginSettings(r.Context())
 	if err != nil {
 		fail(w, http.StatusInternalServerError, "Preference storage is unavailable")

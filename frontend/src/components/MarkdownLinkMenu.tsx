@@ -1,6 +1,6 @@
 import { Menu } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { IconCode, IconCopy, IconDatabase, IconDownload, IconExternalLink, IconFileText, IconFiles } from '@tabler/icons-react'
+import { IconCode, IconCopy, IconDatabase, IconDownload, IconExternalLink, IconFileText, IconFiles, IconPlayerPlay } from '@tabler/icons-react'
 import { request } from '../api/client'
 import type { Session } from '../domain/types'
 import { copyFilesToClipboard, downloadFile, fileDesktop } from '../features/sidecar/fileTransfer'
@@ -13,6 +13,7 @@ import {
   stripSqlLocationSuffix,
   useHasDatabaseTool,
 } from '../features/sidecar/databaseTool'
+import { useIsOfficeExperience } from '../features/office/appProfile'
 
 export type MarkdownLinkMenuTarget = {
   x: number
@@ -61,13 +62,16 @@ function rawDownloadTarget(path: string, session: Session | null | undefined): {
 export function MarkdownLinkMenu({
   target,
   session,
+  onExecuteSqlFile,
   onClose,
 }: {
   target: MarkdownLinkMenuTarget | null
   session?: Session | null
+  onExecuteSqlFile?: (path: string) => void
   onClose: () => void
 }) {
-  const hasDatabaseTool = useHasDatabaseTool()
+  const isOfficeMode = useIsOfficeExperience(session)
+  const hasDatabaseTool = useHasDatabaseTool() && !isOfficeMode
   const canOpenInDatabaseTool = Boolean(target && target.kind === 'file' && hasDatabaseTool && isSqlFilePath(target.value))
 
   const showError = (error: unknown) => notifications.show({
@@ -129,6 +133,16 @@ export function MarkdownLinkMenu({
           <>
             {canOpenInDatabaseTool && (
               <>
+                {onExecuteSqlFile && (
+                  <Menu.Item
+                    leftSection={<IconPlayerPlay size={14} />}
+                    onClick={() => {
+                      onExecuteSqlFile(target.value)
+                    }}
+                  >
+                    原地执行 SQL
+                  </Menu.Item>
+                )}
                 <Menu.Item
                   leftSection={<IconDatabase size={14} />}
                   onClick={() => {

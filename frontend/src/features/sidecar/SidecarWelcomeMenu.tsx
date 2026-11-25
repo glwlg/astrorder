@@ -1,12 +1,13 @@
 import { Text, UnstyledButton } from '@mantine/core'
 import {
-  BrainIcon, BrowserIcon, ChalkboardSimpleIcon, ChatsCircleIcon, DatabaseIcon, FolderSimpleIcon, GitBranchIcon, GraphIcon, SparkleIcon, TerminalWindowIcon,
+  BrainIcon, BrowserIcon, ChalkboardSimpleIcon, ChatsCircleIcon, DatabaseIcon, FolderSimpleIcon, GitBranchIcon, GraphIcon, MicrophoneIcon, NotebookIcon, SparkleIcon, TerminalWindowIcon,
 } from '../../components/workbenchIcons'
 import type { Session } from '../../domain/types'
 import { useShortcutStore } from '../shortcuts/shortcuts'
 
 interface SidecarWelcomeMenuProps {
   session: Session
+  isOfficeMode?: boolean
   onOpenFileTree?: () => void
   onOpenTerminal?: () => void
   onOpenBrowser?: () => void
@@ -16,10 +17,13 @@ interface SidecarWelcomeMenuProps {
   onOpenBlackboard?: () => void
   onOpenMemory?: () => void
   onOpenWorktrees?: () => void
+  onOpenDigest?: () => void
+  onOpenMeetings?: () => void
 }
 
 export function SidecarWelcomeMenu({
   session,
+  isOfficeMode = false,
   onOpenFileTree,
   onOpenTerminal,
   onOpenBrowser,
@@ -29,9 +33,31 @@ export function SidecarWelcomeMenu({
   onOpenBlackboard,
   onOpenMemory,
   onOpenWorktrees,
+  onOpenDigest,
+  onOpenMeetings,
 }: SidecarWelcomeMenuProps) {
   const bindings = useShortcutStore(state => state.bindings)
   const menuItems = [
+    ...(onOpenMeetings
+      ? [
+          {
+            icon: <MicrophoneIcon size={20} weight="duotone" color="#0ea5e9" />,
+            label: '会议纪要',
+            shortcut: '办公',
+            onClick: onOpenMeetings,
+          },
+        ]
+      : []),
+    ...(onOpenDigest
+      ? [
+          {
+            icon: <NotebookIcon size={20} weight="duotone" color="#6366f1" />,
+            label: '工作复盘',
+            shortcut: '办公',
+            onClick: onOpenDigest,
+          },
+        ]
+      : []),
     ...(onOpenBlackboard
       ? [
           {
@@ -86,7 +112,7 @@ export function SidecarWelcomeMenu({
       ? [
           {
             icon: <GraphIcon size={20} weight="duotone" color="var(--astr-blue)" />,
-            label: '决策状态机',
+            label: '决策与轨迹',
             shortcut: bindings.agentGraph || '未设置',
             onClick: onOpenAgentGraph,
           },
@@ -139,8 +165,6 @@ export function SidecarWelcomeMenu({
       <div style={{ width: '100%', maxWidth: '560px' }}>
         <div
           className="sidecar-welcome-list"
-          data-liquid-surface="card"
-          data-liquid-snapshot=".desktop-sidecar"
         >
           {menuItems.length > 0 ? (
             menuItems.map((item) => (
@@ -181,14 +205,12 @@ export function SidecarWelcomeMenu({
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
               <SparkleIcon size={14} color="var(--astr-indigo)" />
               <Text size="xs" fw={600} c="dimmed">
-                推荐工作区
+                {isOfficeMode ? '办公文档目录' : '推荐工作区'}
               </Text>
             </div>
             <UnstyledButton
               onClick={onOpenFileTree}
               className="sidecar-workspace-link"
-              data-liquid-surface="control"
-              data-liquid-snapshot=".desktop-sidecar"
             >
               <Text size="xs" fw={500} truncate title={session.workspace}>
                 {session.project_name ? `${session.project_name} · ` : ''}

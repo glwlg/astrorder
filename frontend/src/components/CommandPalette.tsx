@@ -13,7 +13,9 @@ import {
   IconLayoutGrid,
   IconLayoutSidebarLeftCollapse,
   IconMessageSearch,
+  IconMicrophone,
   IconMoon,
+  IconNotebook,
   IconSearch,
   IconSend,
   IconSettings,
@@ -31,10 +33,13 @@ import {
   WORKSPACE_AGENT_ACCOUNTS_PLUGIN_ID,
   WORKSPACE_ANALYTICS_GATEWAY_PLUGIN_ID,
   WORKSPACE_BACKUPS_PLUGIN_ID,
+  WORKSPACE_DIGEST_PLUGIN_ID,
   WORKSPACE_GROUPS_PLUGIN_ID,
+  WORKSPACE_MEETINGS_PLUGIN_ID,
   WORKSPACE_MONITOR_PLUGIN_ID,
 } from '../features/plugins/builtinPlugins'
 import { usePluginSettingsStore } from '../features/plugins/pluginSettingsStore'
+import { useIsOfficeProfile } from '../features/office/appProfile'
 import { AgentBrandIcon } from './AgentBrandIcon'
 import { displaySessionTitle, formatRelativeTime, sessionActivityStatus } from './sessionRailModel'
 import './commandPalette.css'
@@ -73,6 +78,9 @@ export function CommandPalette({ opened, onClose, onToggleSidebar, onOpenSetting
   const analyticsEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_ANALYTICS_GATEWAY_PLUGIN_ID))
   const backupsEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_BACKUPS_PLUGIN_ID))
   const accountsEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_AGENT_ACCOUNTS_PLUGIN_ID))
+  const meetingsEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_MEETINGS_PLUGIN_ID))
+  const digestEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_DIGEST_PLUGIN_ID))
+  const isOfficeProfile = useIsOfficeProfile()
 
   const [query, setQuery] = useState('')
   const [selectedIndex, setSelectedIndex] = useState(0)
@@ -168,13 +176,15 @@ export function CommandPalette({ opened, onClose, onToggleSidebar, onOpenSetting
 
     // 2. Routes
     const routes: Array<{ id: string; title: string; subtitle: string; to: string; keywords: string; badge?: string }> = [
-      { id: 'route:inbox', title: '待我决策（行动收件箱）', subtitle: '/inbox', to: '/inbox', keywords: 'inbox action todo 待办 决策 审批 收件箱', badge: inboxCount > 0 ? `${inboxCount} 项` : undefined },
-      { id: 'route:welcome', title: '星序指挥台（欢迎页）', subtitle: '/chat', to: '/chat', keywords: 'welcome home 指挥台 欢迎页 首页' },
-      ...(monitorEnabled ? [{ id: 'route:matrix', title: '矩阵（多会话网格）', subtitle: '/monitor', to: '/monitor', keywords: 'matrix monitor 矩阵 监控室 多窗' }] : []),
-      ...(groupsEnabled ? [{ id: 'route:groups', title: '群聊协作', subtitle: '/groups', to: '/groups', keywords: 'groups chat 群聊 接力' }] : []),
-      ...(analyticsEnabled ? [{ id: 'route:analytics', title: '用量统计', subtitle: '/analytics', to: '/analytics', keywords: 'analytics usage token 统计' }] : []),
-      ...(backupsEnabled ? [{ id: 'route:backups', title: '文件与目录备份', subtitle: '/backups', to: '/backups', keywords: 'backups 备份 快照' }] : []),
-      ...(accountsEnabled ? [{ id: 'route:accounts', title: 'Agent 账号管理', subtitle: '/agent-accounts', to: '/agent-accounts', keywords: 'accounts quota 账号 额度' }] : []),
+      { id: 'route:inbox', title: isOfficeProfile ? '待办清单' : '待我决策（行动收件箱）', subtitle: '/inbox', to: '/inbox', keywords: 'inbox action todo 待办 清单 决策 审批 收件箱', badge: inboxCount > 0 ? `${inboxCount} 项` : undefined },
+      ...(meetingsEnabled ? [{ id: 'route:meetings', title: '会议纪要与录音', subtitle: '/meetings', to: '/meetings', keywords: 'meetings audio minutes 会议 录音 纪要 行动项' }] : []),
+      ...(digestEnabled ? [{ id: 'route:digest', title: '工作复盘与周报', subtitle: '/digest', to: '/digest', keywords: 'digest report weekly 复盘 周报 日报 总结' }] : []),
+      { id: 'route:welcome', title: isOfficeProfile ? '首页工作台' : '星序指挥台（欢迎页）', subtitle: '/chat', to: '/chat', keywords: 'welcome home 工作台 指挥台 欢迎页 首页' },
+      ...(!isOfficeProfile && monitorEnabled ? [{ id: 'route:matrix', title: '矩阵（多会话网格）', subtitle: '/monitor', to: '/monitor', keywords: 'matrix monitor 矩阵 监控室 多窗' }] : []),
+      ...(!isOfficeProfile && groupsEnabled ? [{ id: 'route:groups', title: '群聊协作', subtitle: '/groups', to: '/groups', keywords: 'groups chat 群聊 接力' }] : []),
+      ...(!isOfficeProfile && analyticsEnabled ? [{ id: 'route:analytics', title: '用量统计', subtitle: '/analytics', to: '/analytics', keywords: 'analytics usage token 统计' }] : []),
+      ...(!isOfficeProfile && backupsEnabled ? [{ id: 'route:backups', title: '文件与目录备份', subtitle: '/backups', to: '/backups', keywords: 'backups 备份 快照' }] : []),
+      ...(!isOfficeProfile && accountsEnabled ? [{ id: 'route:accounts', title: 'Agent 账号管理', subtitle: '/agent-accounts', to: '/agent-accounts', keywords: 'accounts quota 账号 额度' }] : []),
     ]
     for (const r of routes) {
       items.push({
@@ -196,9 +206,9 @@ export function CommandPalette({ opened, onClose, onToggleSidebar, onOpenSetting
       {
         id: 'action:sidebar',
         category: 'action',
-        title: '展开 / 收起左侧会话栏',
-        subtitle: 'Ctrl+B · Arc 悬浮抽屉模式',
-        keywords: 'sidebar collapse expand 侧栏 收起 展开 arc',
+        title: isOfficeProfile ? '展开 / 收起左侧栏' : '展开 / 收起左侧会话栏',
+        subtitle: 'Ctrl+B · 切换侧栏展开或收起',
+        keywords: 'sidebar collapse expand 侧栏 收起 展开',
         onRun: () => {
           onClose()
           onToggleSidebar()
@@ -207,7 +217,7 @@ export function CommandPalette({ opened, onClose, onToggleSidebar, onOpenSetting
       {
         id: 'action:theme',
         category: 'action',
-        title: computedScheme === 'dark' ? '切换至浅色星雾主题' : '切换至深色星曜主题',
+        title: computedScheme === 'dark' ? '切换至浅色外观' : '切换至深色外观',
         subtitle: '外观主题',
         keywords: 'theme dark light 主题 深色 浅色',
         onRun: () => {
@@ -219,8 +229,8 @@ export function CommandPalette({ opened, onClose, onToggleSidebar, onOpenSetting
         id: 'action:settings',
         category: 'action',
         title: '打开系统设置',
-        subtitle: '连接、模型、快捷键、插件',
-        keywords: 'settings preferences 设置 连接 快捷键',
+        subtitle: isOfficeProfile ? '外观、AI 供应商、常用网站、快捷键' : '连接、模型、快捷键、插件',
+        keywords: 'settings preferences 设置 连接 快捷键 供应商',
         onRun: () => {
           onClose()
           onOpenSettings()
@@ -228,13 +238,32 @@ export function CommandPalette({ opened, onClose, onToggleSidebar, onOpenSetting
       },
     )
 
-    // 4. Projects (open Matrix filtered to project)
-    if (monitorEnabled) {
-      const seenProjects = new Set<string>()
-      for (const project of projects) {
-        const name = (project.project_name || project.workspace?.split(/[/\\]/).filter(Boolean).pop() || '').trim()
-        if (!name || seenProjects.has(name)) continue
-        seenProjects.add(name)
+    // 4. Projects / Workspaces
+    const seenProjects = new Set<string>()
+    for (const project of projects) {
+      const name = (project.project_name || project.workspace?.split(/[/\\]/).filter(Boolean).pop() || '').trim()
+      if (!name || seenProjects.has(name)) continue
+      seenProjects.add(name)
+      const latestSession = sortedSessions.find(
+        (s) =>
+          (project.workspace && s.workspace === project.workspace) ||
+          (project.project_id && s.project_id === project.project_id) ||
+          s.project_name === name,
+      )
+      if (isOfficeProfile || !monitorEnabled) {
+        if (!latestSession) continue
+        items.push({
+          id: `project:${name}`,
+          category: 'project',
+          title: `进入工作空间：${name}`,
+          subtitle: project.workspace || undefined,
+          keywords: `project workspace 工作空间 项目 ${name} ${project.workspace || ''}`,
+          onRun: () => {
+            onClose()
+            navigate(`/chat/${encodeURIComponent(latestSession.id)}?agent_id=${encodeURIComponent(latestSession.agent_id)}`)
+          },
+        })
+      } else {
         items.push({
           id: `project:${name}`,
           category: 'project',
@@ -250,7 +279,7 @@ export function CommandPalette({ opened, onClose, onToggleSidebar, onOpenSetting
     }
 
     return items
-  }, [accountsEnabled, agents, analyticsEnabled, backupsEnabled, computedScheme, groupsEnabled, inboxCount, monitorEnabled, navigate, onClose, onOpenSettings, onToggleSidebar, projects, sessions, setColorScheme])
+  }, [accountsEnabled, agents, analyticsEnabled, backupsEnabled, computedScheme, digestEnabled, groupsEnabled, inboxCount, isOfficeProfile, meetingsEnabled, monitorEnabled, navigate, onClose, onOpenSettings, onToggleSidebar, projects, sessions, setColorScheme])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -400,6 +429,8 @@ export function CommandPalette({ opened, onClose, onToggleSidebar, onOpenSetting
     if (item.category === 'message') return item.agentKind ? <AgentBrandIcon kind={item.agentKind} size={15} /> : <IconMessageSearch size={15} color="var(--astr-indigo)" />
     if (item.category === 'project') return <IconFolder size={15} color="var(--astr-indigo)" />
     if (item.id === 'route:inbox') return <IconInbox size={15} color="var(--astr-indigo)" />
+    if (item.id === 'route:meetings') return <IconMicrophone size={15} color="var(--astr-indigo)" />
+    if (item.id === 'route:digest') return <IconNotebook size={15} color="var(--astr-indigo)" />
     if (item.id === 'route:welcome') return <IconHome size={15} color="var(--astr-indigo)" />
     if (item.id === 'route:matrix') return <IconLayoutGrid size={15} color="var(--astr-indigo)" />
     if (item.id === 'route:groups') return <IconUsers size={15} color="var(--astr-indigo)" />
@@ -424,8 +455,6 @@ export function CommandPalette({ opened, onClose, onToggleSidebar, onOpenSetting
         role="dialog"
         aria-modal="true"
         aria-label="星序全能星令面板"
-        data-liquid-surface="panel"
-        data-liquid-snapshot="#astr-shell-sky"
       >
         {dispatchTarget ? (
           <div className="command-palette-dispatch">
@@ -469,8 +498,8 @@ export function CommandPalette({ opened, onClose, onToggleSidebar, onOpenSetting
                 aria-expanded="true"
                 aria-controls="command-palette-listbox"
                 aria-activedescendant={filtered.length > 0 ? `command-palette-opt-${clampedIndex}` : undefined}
-                aria-label="搜索会话、历史消息、项目、视图或快捷命令"
-                placeholder="搜索会话、历史消息、项目或星令…（选中会话按 Tab 可快发指令）"
+                aria-label="搜索会话、历史消息、工作空间、视图或快捷命令"
+                placeholder={isOfficeProfile ? '搜索对话、历史记录、工作空间或页面…' : '搜索会话、历史消息、项目或快捷命令…（选中会话按 Tab 可快发指令）'}
                 value={query}
                 onChange={(e) => {
                   setQuery(e.target.value)
@@ -492,7 +521,7 @@ export function CommandPalette({ opened, onClose, onToggleSidebar, onOpenSetting
             >
               {filtered.length === 0 ? (
                 <div className="command-palette-empty">
-                  {searchingMessages ? '正在检索跨会话历史消息…' : '未找到匹配的会话、历史消息或星令'}
+                  {searchingMessages ? '正在检索跨会话历史消息…' : '未找到匹配的记录或快捷命令'}
                 </div>
               ) : (
                 filtered.map((item, idx) => {

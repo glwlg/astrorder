@@ -90,12 +90,12 @@ describe('Plugin gating across Sidecar, SessionToolsMenu, and ModelGatewaySettin
   })
 
   it('gates OpenViking, BrowserEngine, and UsageGateway cards in ModelGatewaySettingsPage by plugin state', async () => {
-    vi.spyOn(api, 'getLlmConfig').mockResolvedValue({
-      base_url: '',
-      model: '',
-      reasoning: 'low',
-      configured: false,
-      masked_key: '',
+    vi.spyOn(api, 'getAiProviders').mockResolvedValue({
+      providers: [],
+      default_provider_id: '',
+      default_model: '',
+      default_reasoning: 'low',
+      effective_configured: false,
     })
     vi.spyOn(api, 'getSystemOneConfig').mockResolvedValue({
       mode: 'official',
@@ -127,7 +127,8 @@ describe('Plugin gating across Sidecar, SessionToolsMenu, and ModelGatewaySettin
       </QueryClientProvider>,
     )
 
-    expect(screen.getByText('通用 LLM')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'AI 供应商' })).toBeInTheDocument()
+    expect(screen.getByText('默认通用模型')).toBeInTheDocument()
     expect(screen.getByText('System One 模型服务')).toBeInTheDocument()
     expect(screen.queryByText('LLM 网关与模型同步')).toBeNull()
     expect(screen.queryByText('OpenViking 记忆与知识库网关')).toBeNull()
@@ -168,10 +169,10 @@ describe('Plugin gating across Sidecar, SessionToolsMenu, and ModelGatewaySettin
     expect(screen.queryByRole('link', { name: '账号' })).toBeNull()
     expect(usageSpy).not.toHaveBeenCalled()
 
-    // Opening Settings modal hides the "命令压缩" (RTK) tab when disabled
+    // Opening Settings modal hides the "命令输出压缩" (RTK) tab when disabled
     fireEvent.click(screen.getByRole('button', { name: '打开设置' }))
-    expect(await screen.findByRole('tab', { name: '插件' })).toBeInTheDocument()
-    expect(screen.queryByRole('tab', { name: '命令压缩' })).toBeNull()
+    expect(await screen.findByRole('tab', { name: '功能与插件' })).toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: '命令输出压缩' })).toBeNull()
     expect(screen.queryByRole('tab', { name: 'RTK' })).toBeNull()
   })
 })

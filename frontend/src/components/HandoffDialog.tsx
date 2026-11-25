@@ -15,10 +15,11 @@ import { AgentBrandIcon } from './AgentBrandIcon'
 import { BrandedSelect } from './BrandedSelect'
 import { agentLabel } from './NewSessionDialog'
 import { useBackgroundTasks } from '../state/backgroundTasks'
+import { usePluginSettingsStore } from '../features/plugins/pluginSettingsStore'
 
 export function HandoffDialog({
   source,
-  targets,
+  targets: rawTargets,
   sessions,
   onClose,
   onTransferred,
@@ -31,6 +32,12 @@ export function HandoffDialog({
   onTransferred: (session: Session, target: Agent) => void
   onOpenTransferred: (session: Session) => void
 }) {
+  const enabledPlugins = usePluginSettingsStore((s) => s.enabledPlugins)
+  const isAgentEnabled = usePluginSettingsStore((s) => s.isAgentEnabled)
+  const targets = useMemo(
+    () => rawTargets.filter((agent) => isAgentEnabled(agent.kind)),
+    [rawTargets, enabledPlugins, isAgentEnabled],
+  )
   const initialAgentId = targets.length === 1 ? targets[0].id : ''
   const [agentId, setAgentId] = useState(initialAgentId)
   const [models, setModels] = useState<ModelChoice[]>([])

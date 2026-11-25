@@ -54,6 +54,9 @@ window.astrorderDesktop = Object.freeze({
   hideEmbeddedPage: () => svc.HideEmbeddedPage(),
   showStatistics: (url, bounds, refresh) => svc.ShowStatistics(String(url), { ...bounds, scale: window.devicePixelRatio }, Boolean(refresh)),
   hideStatistics: () => svc.HideStatistics(),
+  showMeetingCapsule: (state) => svc.ShowMeetingCapsule(state || {}),
+  updateMeetingCapsule: (state) => svc.UpdateMeetingCapsule(state || {}),
+  hideMeetingCapsule: () => svc.HideMeetingCapsule(),
 });
 installExternalLinks(window, window.astrorderDesktop.openExternal);
 document.documentElement.classList.add('is-desktop-app');
@@ -139,7 +142,7 @@ func assetHandler(cfg Config) (http.Handler, error) {
 			}
 			proxy.ServeHTTP(w, r)
 			return
-		case r.URL.Path == "/desktop-files.js" || r.URL.Path == "/desktop-links.js" || r.URL.Path == "/image-preview.html":
+		case r.URL.Path == "/desktop-files.js" || r.URL.Path == "/desktop-links.js" || r.URL.Path == "/image-preview.html" || r.URL.Path == "/meeting-capsule.html":
 			static.ServeHTTP(w, r)
 			return
 		case strings.HasPrefix(r.URL.Path, "/bindings/"):

@@ -24,13 +24,12 @@
 }
 
 .turn-minimap-rail:hover {
-  background: color-mix(in oklab, var(--astr-surface) 74%, transparent);
-  backdrop-filter: blur(12px);
+  background: var(--astr-surface);
   box-shadow: 0 6px 20px rgb(30 22 50 / 12%);
 }
 
 :root[data-mantine-color-scheme='dark'] .turn-minimap-rail:hover {
-  background: rgb(26 24 36 / 78%);
+  background: var(--astr-surface);
   box-shadow: 0 8px 24px rgb(0 0 0 / 38%);
 }
 
@@ -99,6 +98,7 @@
   width: 244px;
   padding: 10px 12px;
   border-radius: 12px;
+  background: var(--astr-surface);
   border: 1px solid color-mix(in oklab, var(--astr-indigo) 24%, var(--astr-border));
   box-shadow: 0 14px 34px -8px rgb(24 16 40 / 28%);
   pointer-events: none;

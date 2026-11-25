@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>实时转写</title>
+<style>
+  * {
+    box-sizing: border-box;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  html,
+  body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    background: transparent !important;
+    overflow: hidden;
+    font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", -apple-system, BlinkMacSystemFont, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .stage {
+    width: 100%;
+    height: 100%;
+    padding: 12px 14px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+  }
+
+  .capsule {
+    --wails-draggable: drag;
+    width: 100%;
+    height: 54px;
+    padding: 0 9px 0 18px;
+    border-radius: 999px;
+    background: #f6f7f9;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    box-shadow:
+      0 10px 26px -6px rgba(15, 23, 42, 0.22),
+      0 2px 6px rgba(15, 23, 42, 0.08);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    cursor: grab;
+  }
+
+  .capsule:active {
+    cursor: grabbing;
+  }
+
+  .wave {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 2.5px;
+    height: 20px;
+    width: 22px;
+    flex: none;
+  }
+
+  .wave-bar {
+    width: 2.4px;
+    border-radius: 999px;
+    background: #18181b;
+    transition: height 95ms ease, opacity 150ms ease;
+  }
+
+  .capsule.is-paused .wave-bar {
+    opacity: 0.36;
+  }
+
+  .copy {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+
+  .status-text {
+    flex: 1;
+    min-width: 0;
+    font-size: 14.5px;
+    font-weight: 500;
+    color: #18181b;
+    letter-spacing: -0.01em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .timer {
+    flex: none;
+    font-size: 11.5px;
+    font-weight: 500;
+    color: #8c8c96;
+    font-variant-numeric: tabular-nums;
+    font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  }
+
+  .actions {
+    --wails-draggable: no-drag;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex: none;
+  }
+
+  .circle-btn {
+    --wails-draggable: no-drag;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: 1px solid rgba(15, 23, 42, 0.04);
+    background: #ffffff;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    cursor: pointer;
+    transition: transform 120ms ease, background-color 120ms ease, box-shadow 120ms ease;
+  }
+
+  .circle-btn * {
+    --wails-draggable: no-drag;
+    pointer-events: none;
+  }
+
+  .circle-btn:hover:not(:disabled) {
+    background: #ffffff;
+    box-shadow: 0 3px 9px rgba(15, 23, 42, 0.14);
+    transform: translateY(-0.5px);
+  }
+
+  .circle-btn:active:not(:disabled) {
+    transform: scale(0.95);
+  }
+
+  .circle-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  .stop-square {
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+    background: #ff5252;
+  }
+
+  .expand-icon {
+    width: 15px;
+    height: 15px;
+    stroke: #52525b;
+    stroke-width: 1.9;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    fill: none;
+  }
+</style>
+</head>
+<body>
+  <div class="stage">
+    <div id="capsule" class="capsule" title="拖动调整位置，双击回到实时会议页">
+      <div id="wave" class="wave" aria-hidden="true">
+        <span class="wave-bar" style="height: 14px"></span>
+        <span class="wave-bar" style="height: 7px"></span>
+        <span class="wave-bar" style="height: 13px"></span>
+        <span class="wave-bar" style="height: 9px"></span>
+        <span class="wave-bar" style="height: 12px"></span>
+      </div>
+      <div class="copy">
+        <span id="statusText" class="status-text">实时转写中...</span>
+        <span id="timer" class="timer">00:00</span>
+      </div>
+      <div class="actions">
+        <button id="stopBtn" type="button" class="circle-btn" aria-label="结束录制" title="结束录制并整理纪要">
+          <span class="stop-square"></span>
+        </button>
+        <button id="expandBtn" type="button" class="circle-btn" aria-label="展开会议页面" title="回到实时会议工作台">
+          <svg class="expand-icon" viewBox="0 0 16 16" aria-hidden="true">
+            <polyline points="9.5 2.5 13.5 2.5 13.5 6.5"></polyline>
+            <polyline points="6.5 13.5 2.5 13.5 2.5 9.5"></polyline>
+            <line x1="13.2" y1="2.8" x2="8.8" y2="7.2"></line>
+            <line x1="2.8" y1="13.2" x2="7.2" y2="8.8"></line>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </div>
+  <script type="module">
+    import * as svc from '/bindings/astrorder.dev/desktop/meetingcapsuleservice.js';
+
+    const capsuleEl = document.getElementById('capsule');
+    const statusTextEl = document.getElementById('statusText');
+    const timerEl = document.getElementById('timer');
+    const stopBtn = document.getElementById('stopBtn');
+    const expandBtn = document.getElementById('expandBtn');
+    const barEls = Array.from(document.querySelectorAll('.wave-bar'));
+    const DEFAULT_BARS = [0.72, 0.34, 0.66, 0.44, 0.6];
+
+    function render(state) {
+      if (!state) return;
+      const paused = Boolean(state.paused);
+      const stopping = Boolean(state.stopping);
+      capsuleEl.classList.toggle('is-paused', paused || stopping);
+      stopBtn.disabled = stopping;
+
+      const text = (state.text || '').trim();
+      if (stopping) {
+        statusTextEl.textContent = '正在整理会议纪要...';
+      } else if (paused) {
+        statusTextEl.textContent = text || '录音已暂停';
+      } else {
+        statusTextEl.textContent = text || '实时转写中...';
+      }
+      timerEl.textContent = state.elapsed || '';
+      timerEl.style.display = state.elapsed ? '' : 'none';
+
+      const bars = Array.isArray(state.bars) && state.bars.length >= 5 ? state.bars : DEFAULT_BARS;
+      for (let i = 0; i < barEls.length; i += 1) {
+        const amp = paused || stopping ? 0.22 : Math.max(0.18, Math.min(1, Number(bars[i]) || 0.3));
+        barEls[i].style.height = `${Math.round(4 + amp * 14)}px`;
+      }
+    }
+
+    window.__astrorderUpdateCapsule = render;
+
+    stopBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      stopBtn.disabled = true;
+      statusTextEl.textContent = '正在结束录制...';
+      void svc.Stop();
+    });
+
+    expandBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      void svc.Expand();
+    });
+
+    capsuleEl.addEventListener('dblclick', (e) => {
+      if (e.target && e.target.closest && e.target.closest('.actions')) return;
+      void svc.Expand();
+    });
+
+    async function hydrate() {
+      try {
+        const state = await svc.State();
+        render(state);
+      } catch {
+        // initial push will hydrate state
+      }
+    }
+
+    void hydrate();
+  </script>
+</body>
+</html>

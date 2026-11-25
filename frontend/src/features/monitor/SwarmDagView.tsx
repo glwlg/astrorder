@@ -402,8 +402,6 @@ export function SwarmDagView({
       />
       {/* 顶部左侧：坐标指示与视口控制 HUD */}
       <div
-        data-liquid-surface="toolbar"
-        data-liquid-snapshot=".swarm-dag-backdrop"
         style={{
           position: 'absolute',
           top: 14,
@@ -480,8 +478,6 @@ export function SwarmDagView({
 
       {nodes.length === 0 && (
         <div
-          data-liquid-surface="card"
-          data-liquid-snapshot=".swarm-dag-backdrop"
           style={{
             position: 'absolute',
             top: '50%',
@@ -492,6 +488,7 @@ export function SwarmDagView({
             pointerEvents: 'none',
             padding: '26px 34px',
             borderRadius: 18,
+            background: 'var(--astr-surface)',
             border: '1px solid color-mix(in oklab, var(--astr-indigo) 26%, var(--astr-border))',
             boxShadow: '0 12px 32px color-mix(in oklab, var(--astr-indigo) 14%, transparent)',
           }}
@@ -1030,8 +1027,6 @@ export function SwarmDagView({
       {/* 4. 浮动节点检视舱 (Floating Node Inspector, 默认 460px 宽度，可自由加宽至 680px) */}
       {selectedNode && (
         <aside
-          data-liquid-surface="panel"
-          data-liquid-snapshot=".swarm-dag-backdrop"
           style={{
             position: 'absolute',
             right: 16,
@@ -1266,8 +1261,6 @@ export function SwarmDagView({
 
       {/* 底部 HUD 战术图例栏 */}
       <div
-        data-liquid-surface="toolbar"
-        data-liquid-snapshot=".swarm-dag-backdrop"
         style={{
           position: 'absolute',
           bottom: 14,

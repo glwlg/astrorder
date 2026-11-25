@@ -728,8 +728,27 @@ func findFreePort() (int, error) {
 	return listener.Addr().(*net.TCPAddr).Port, nil
 }
 
+// IsRunning reports whether the local R2T2 llama-server is currently running and ready.
+func (m *LocalR2T2Manager) IsRunning() bool {
+	if m == nil {
+		return false
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.state == "running" && m.port > 0
+}
+
 // TranscribePCM converts raw 16kHz 16-bit mono PCM into WAV, calls llama.cpp server /v1/chat/completions, and removes <asr_text> prefix.
 func (m *LocalR2T2Manager) TranscribePCM(ctx context.Context, pcm []byte) (string, error) {
+	if len(pcm) == 0 {
+		return "", nil
+	}
+	wavBytes := pcmToWav(pcm, 16000, 1, 2)
+	return m.TranscribeAudio(ctx, wavBytes, "wav")
+}
+
+// TranscribeAudio sends encoded audio bytes (e.g. "wav" or "mp3") to the running local R2T2 llama-server.
+func (m *LocalR2T2Manager) TranscribeAudio(ctx context.Context, audioBytes []byte, format string) (string, error) {
 	m.mu.RLock()
 	if m.state != "running" || m.port == 0 {
 		m.mu.RUnlock()
@@ -738,12 +757,15 @@ func (m *LocalR2T2Manager) TranscribePCM(ctx context.Context, pcm []byte) (strin
 	port := m.port
 	m.mu.RUnlock()
 
-	if len(pcm) == 0 {
+	if len(audioBytes) == 0 {
 		return "", nil
 	}
+	fmtName := strings.ToLower(strings.TrimSpace(format))
+	if fmtName == "" {
+		fmtName = "wav"
+	}
 
-	wavBytes := pcmToWav(pcm, 16000, 1, 2)
-	b64Wav := base64.StdEncoding.EncodeToString(wavBytes)
+	b64Audio := base64.StdEncoding.EncodeToString(audioBytes)
 
 	payload := map[string]any{
 		"model": ModelName,
@@ -753,14 +775,14 @@ func (m *LocalR2T2Manager) TranscribePCM(ctx context.Context, pcm []byte) (strin
 				"content": []map[string]any{
 					{"type": "text", "text": "language Chinese"},
 					{"type": "input_audio", "input_audio": map[string]string{
-						"data":   b64Wav,
-						"format": "wav",
+						"data":   b64Audio,
+						"format": fmtName,
 					}},
 				},
 			},
 		},
 		"temperature": 0,
-		"max_tokens":  256,
+		"max_tokens":  512,
 	}
 
 	jsonBytes, err := json.Marshal(payload)

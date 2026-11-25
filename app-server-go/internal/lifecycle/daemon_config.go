@@ -158,3 +158,158 @@ func EnsureDaemonConfig(stateDir, rootDir string) (string, error) {
 
 	return cfgPath, nil
 }
+
+// ReadLocalRuntimeExecutable reads the executable configured in session-daemon.json
+// for a given local runtime kind ("codex" | "hermes" | "grok" | "antigravity").
+func ReadLocalRuntimeExecutable(stateDir, kind string) string {
+	if stateDir == "" || kind == "" {
+		return ""
+	}
+	raw, err := os.ReadFile(filepath.Join(stateDir, "session-daemon.json"))
+	if err != nil {
+		return ""
+	}
+	var cfg daemonConfigJSON
+	if json.Unmarshal(raw, &cfg) != nil {
+		return ""
+	}
+	for _, rt := range cfg.Runtimes {
+		if rt.Type == kind {
+			return rt.Executable
+		}
+	}
+	return ""
+}
+
+// UpsertLocalRuntime atomically inserts or updates one local Agent runtime
+// entry in session-daemon.json without disturbing existing allowed roots or
+// other runtimes. It returns changed=true when the file was modified.
+func UpsertLocalRuntime(stateDir, rootDir, kind, executable string) (bool, error) {
+	if stateDir == "" {
+		return false, fmt.Errorf("stateDir is required")
+	}
+	switch kind {
+	case "codex", "hermes", "grok", "antigravity":
+	default:
+		return false, fmt.Errorf("unsupported local runtime kind: %s", kind)
+	}
+	if executable == "" {
+		return false, fmt.Errorf("executable is required")
+	}
+	absExec, err := filepath.Abs(executable)
+	if err != nil {
+		return false, fmt.Errorf("resolve executable: %w", err)
+	}
+
+	userHome, _ := os.UserHomeDir()
+	if rootDir == "" {
+		rootDir = userHome
+	}
+	if rootDir == "" {
+		rootDir = filepath.Dir(stateDir)
+	}
+
+	cfgPath, err := EnsureDaemonConfig(stateDir, rootDir)
+	if err != nil {
+		return false, err
+	}
+	raw, err := os.ReadFile(cfgPath)
+	if err != nil {
+		return false, fmt.Errorf("read session-daemon.json: %w", err)
+	}
+	var cfg daemonConfigJSON
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return false, fmt.Errorf("parse session-daemon.json: %w", err)
+	}
+
+	resolvedExec := absExec
+	args := []string{}
+	if kind == "hermes" {
+		hermesExec, hermesArgs, resolveErr := resolveHermesRuntime(absExec, probeNativeRuntime)
+		if resolveErr == nil && hermesExec != "" {
+			resolvedExec = hermesExec
+			args = hermesArgs
+		}
+	}
+
+	agentIDs := map[string]string{
+		"codex":       "local-codex",
+		"hermes":      "local-hermes-default",
+		"grok":        "local-grok",
+		"antigravity": "local-antigravity",
+	}
+
+	// Preserve existing allowed roots from any existing runtime entry.
+	var allowed []string
+	var workspace string
+	for _, rt := range cfg.Runtimes {
+		if len(allowed) == 0 && len(rt.Allowed) > 0 {
+			allowed = append([]string(nil), rt.Allowed...)
+		}
+		if workspace == "" && rt.Workspace != "" {
+			workspace = rt.Workspace
+		}
+	}
+	if len(allowed) == 0 {
+		allowed = []string{rootDir}
+		if userHome != "" && userHome != rootDir {
+			allowed = append(allowed, userHome)
+		}
+	}
+	if workspace == "" {
+		workspace = allowed[0]
+	}
+
+	updated := false
+	changed := false
+	for i := range cfg.Runtimes {
+		if cfg.Runtimes[i].Type == kind {
+			updated = true
+			if cfg.Runtimes[i].Executable != resolvedExec || !sameStringSlice(cfg.Runtimes[i].Arguments, args) {
+				cfg.Runtimes[i].Executable = resolvedExec
+				cfg.Runtimes[i].Arguments = args
+				changed = true
+			}
+			break
+		}
+	}
+	if !updated {
+		cfg.Runtimes = append(cfg.Runtimes, daemonRuntimeJSON{
+			Type:       kind,
+			Executable: resolvedExec,
+			Arguments:  args,
+			Workspace:  workspace,
+			Allowed:    allowed,
+			AgentID:    agentIDs[kind],
+		})
+		changed = true
+	}
+	if !changed {
+		return false, nil
+	}
+
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return false, fmt.Errorf("marshal session-daemon.json: %w", err)
+	}
+	data = append(data, '\n')
+	if err := atomicWrite(cfgPath, data, 0o600); err != nil {
+		return false, fmt.Errorf("write session-daemon.json: %w", err)
+	}
+	if runtime.GOOS == "windows" {
+		_ = privateFile(cfgPath)
+	}
+	return true, nil
+}
+
+func sameStringSlice(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}

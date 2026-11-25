@@ -76,8 +76,6 @@ export function BrandedSelect({
         </Menu.Target>
         <Menu.Dropdown
           className="astr-branded-select-dropdown"
-          data-liquid-surface="menu"
-          data-liquid-engine="css"
         >
           <div className="astr-branded-select-scroll">
             {options.map((opt) => {

@@ -1,6 +1,6 @@
 # Wails 3 桌面客户端
 
-本目录是星序当前的 Windows 桌面实现，复用 `frontend/`。Go 桌面壳负责原生窗口、托盘、通知、剪贴板、文件对话框、图片预览和大小内核管理，不维护第二套业务 UI。
+本目录是星序当前的 Windows 桌面实现，复用 `frontend/`。Go 桌面壳负责原生主窗口、独立设置窗口、悬浮会议录音胶囊、托盘、通知、剪贴板、文件对话框、图片预览和大小内核管理，不维护第二套业务 UI。
 
 ## 工具链
 
@@ -35,7 +35,7 @@ node scripts/build-installer.mjs
 
 开发产物为 `desktop-wails/bin/astrorder-desktop-dev.exe`。前端复制到 `assets/app/` 后嵌入 EXE；`bin/`、`assets/app/` 和工具目录不入 Git。正式安装器输出到 `release/`，Go 构件由 `scripts/stage-go-artifacts.js` 校验并暂存到 `.runtime/go-stage/`。
 
-`assets/image-preview.html` 是独立原生图片窗口，其玻璃入口由 Vite 输出为 `assets/image-preview-glass.js`。HTML 与前端资源一起嵌入桌面程序，修改后需要重建 EXE。
+`assets/image-preview.html` 是独立原生图片窗口，`assets/meeting-capsule.html` 是悬浮会议录音胶囊窗口。HTML 与前端资源一起嵌入桌面程序，修改后需要重建 EXE。
 
 ## 中文输入法
 

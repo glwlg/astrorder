@@ -7,8 +7,6 @@ import type { Agent, Message, Session, SessionSchedule, SessionSwarm } from '../
 import { WorkspaceChangesPanel } from './WorkspaceChangesPanel'
 import { useSidecarStore } from '../sidecar/sidecarStore'
 
-vi.mock('liquid-gl', () => ({ default: () => ({ destroy: vi.fn() }) }))
-
 const session: Session = {
   id: 'coord-1',
   agent_id: 'local-antigravity',

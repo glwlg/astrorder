@@ -4,6 +4,7 @@ import { notifications } from '@mantine/notifications'
 import { IconCheck, IconCloudDataConnection, IconRefresh } from '@tabler/icons-react'
 import { api } from '../../api/client'
 import { useBackgroundTasks } from '../../state/backgroundTasks'
+import { usePluginSettingsStore } from '../plugins/pluginSettingsStore'
 
 type Target = { id: string; kind: 'local' | 'wsl' | 'ssh'; name: string; state?: string; agents: string[] }
 type Selection = Record<string, string[]>
@@ -51,18 +52,34 @@ export function UsageGatewaySettingsCard() {
   const [managementKey, setManagementKey] = useState('')
   const [maskedManagementKey, setMaskedManagementKey] = useState('')
   const [overrides, setOverrides] = useState<Record<string, string>>({})
-  const [targets, setTargets] = useState<Target[]>([])
+  const [rawTargets, setTargets] = useState<Target[]>([])
   const [selection, setSelection] = useState<Selection>({})
   const [preview, setPreview] = useState<Preview | null>(null)
   const [jobs, setJobs] = useState<SyncJob[]>([])
   const [busy, setBusy] = useState<'load' | 'save' | 'preview' | null>('load')
+  const enabledPlugins = usePluginSettingsStore((state) => state.enabledPlugins)
+  const isAgentEnabled = usePluginSettingsStore((state) => state.isAgentEnabled)
   const addTask = useBackgroundTasks((state) => state.add)
   const completeTask = useBackgroundTasks((state) => state.complete)
   const failTask = useBackgroundTasks((state) => state.fail)
 
-  const selected = useMemo(() => targets.flatMap((target) => selection[target.id]?.length
-    ? [{ target_id: target.id, agents: selection[target.id] }]
-    : []), [selection, targets])
+  const targets = useMemo(
+    () =>
+      rawTargets.map((target) => ({
+        ...target,
+        agents: target.agents.filter((agent) => isAgentEnabled(agent)),
+      })),
+    [rawTargets, enabledPlugins, isAgentEnabled],
+  )
+
+  const selected = useMemo(
+    () =>
+      targets.flatMap((target) => {
+        const active = (selection[target.id] || []).filter((agent) => target.agents.includes(agent))
+        return active.length ? [{ target_id: target.id, agents: active }] : []
+      }),
+    [selection, targets],
+  )
 
   const load = async () => {
     setBusy('load')
@@ -126,7 +143,17 @@ export function UsageGatewaySettingsCard() {
     } finally { setBusy(null) }
   }
 
-  useEffect(() => { void load() }, [])
+  useEffect(() => {
+    void load()
+    const onProviderSynced = (event: Event) => {
+      const detail = (event as CustomEvent<{ source?: string }>).detail
+      if (detail?.source === 'ai-providers') {
+        void load()
+      }
+    }
+    window.addEventListener('astrorder:gateway-config-changed', onProviderSynced)
+    return () => window.removeEventListener('astrorder:gateway-config-changed', onProviderSynced)
+  }, [])
 
   const handleGatewayTypeChange = (nextType: 'opencodex' | 'magpie') => {
     if (nextType === gatewayType) return
@@ -260,7 +287,9 @@ export function UsageGatewaySettingsCard() {
 
   const syncAll = async () => {
     selectAll()
-    const allPayload = targets.map((t) => ({ target_id: t.id, agents: t.agents }))
+    const allPayload = targets
+      .filter((t) => t.agents.length > 0)
+      .map((t) => ({ target_id: t.id, agents: t.agents }))
     if (!allPayload.length) return
     try {
       await save(false, true)

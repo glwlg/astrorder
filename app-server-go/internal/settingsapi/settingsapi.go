@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 
+	"astrorder.dev/app-server/internal/aiprovider"
 	"astrorder.dev/app-server/internal/auth"
 	"astrorder.dev/app-server/internal/kernelcontrol"
 	"astrorder.dev/app-server/internal/llmcompat"
@@ -44,9 +45,10 @@ type Options struct {
 	BrowserSecret string
 	HTTPClient    *http.Client
 	// CodexDesktop reports Codex Desktop control availability.
-	RestartDaemon func(context.Context, bool) error
-	Kernels       *kernelcontrol.Service
-	CodexDesktop  func(context.Context) (map[string]any, error)
+	RestartDaemon       func(context.Context, bool) error
+	Kernels             *kernelcontrol.Service
+	CodexDesktop        func(context.Context) (map[string]any, error)
+	AgentInstalledProbe func(kind string) bool
 }
 
 type handler struct {
@@ -72,6 +74,12 @@ var paths = map[string][]string{
 func Matches(method, path string) bool {
 	if strings.HasPrefix(path, "/api/v1/services/kernels/") {
 		return matchesKernels(method, path)
+	}
+	if strings.HasPrefix(path, providersBasePath) {
+		return matchesProviders(method, path)
+	}
+	if strings.HasPrefix(path, todosBasePath) {
+		return matchesTodos(method, path)
 	}
 	if path == "/api/v1/services/daemon/restart" {
 		return method == http.MethodPost
@@ -108,6 +116,14 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.HasPrefix(r.URL.Path, "/api/v1/services/daemon/restart") {
 		h.restart(w, r)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, providersBasePath) {
+		h.serveProviders(w, r)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, todosBasePath) {
+		h.serveTodos(w, r)
 		return
 	}
 	switch strings.TrimRight(r.URL.Path, "/") {
@@ -352,6 +368,7 @@ func (h *handler) setLLM(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusInternalServerError, "Preference storage is unavailable")
 		return
 	}
+	_ = aiprovider.SyncFromLegacyLLM(r.Context(), h.Store, config)
 	writeJSON(w, http.StatusOK, llmView(config))
 }
 

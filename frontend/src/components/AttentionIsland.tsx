@@ -31,6 +31,9 @@ import { selectSessions, useAstrorderStore } from '../state/store'
 import { AgentBrandIcon } from './AgentBrandIcon'
 import { displaySessionTitle, sessionActivityStatus } from './sessionRailModel'
 import { isUserInput } from './UserInputCard'
+import { WORKSPACE_MONITOR_PLUGIN_ID } from '../features/plugins/builtinPlugins'
+import { usePluginSettingsStore } from '../features/plugins/pluginSettingsStore'
+import { useIsOfficeProfile } from '../features/office/appProfile'
 import './attentionIsland.css'
 
 const NOTICE_DURATION_COMPLETED_MS = 6500
@@ -166,6 +169,9 @@ export function AttentionIsland({ activeSessionKey }: AttentionIslandProps) {
   const isChatSessionRoute = location.pathname.startsWith('/chat/') && !location.pathname.startsWith('/chat/group-')
   const isMonitorRoute = location.pathname.startsWith('/monitor')
   const isGroupsRoute = location.pathname.startsWith('/groups') || location.pathname.startsWith('/chat/group-')
+  const isOfficeProfile = useIsOfficeProfile()
+  const monitorPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_MONITOR_PLUGIN_ID))
+  const canOpenMatrix = monitorPluginEnabled && !isOfficeProfile
 
   const sessionMap = useMemo(() => {
     const map = new Map<string, Session>()
@@ -405,8 +411,6 @@ export function AttentionIsland({ activeSessionKey }: AttentionIslandProps) {
     >
       <div
         className="attention-island-pill"
-        data-liquid-surface="toolbar"
-        data-liquid-snapshot="#astr-shell-sky"
         style={
           hasNotice
             ? ({ '--island-notice-duration': `${activeNoticeDurationMs}ms` } as CSSProperties)
@@ -651,8 +655,6 @@ export function AttentionIsland({ activeSessionKey }: AttentionIslandProps) {
       {expanded && hasTrayContent && (
         <div
           className="attention-island-tray"
-          data-liquid-surface="panel"
-          data-liquid-snapshot="#astr-shell-sky"
           role="dialog"
           aria-label="跨会话实时动态"
         >
@@ -768,18 +770,20 @@ export function AttentionIsland({ activeSessionKey }: AttentionIslandProps) {
               <div className="attention-tray-section">
                 <Group justify="space-between" mb={6}>
                   <Text size="xs" fw={700} c="dimmed">后台运行中</Text>
-                  <Button
-                    size="compact-xs"
-                    variant="subtle"
-                    color="violet"
-                    leftSection={<IconLayoutGrid size={12} />}
-                    onClick={() => {
-                      setExpanded(false)
-                      navigate('/monitor')
-                    }}
-                  >
-                    进入矩阵
-                  </Button>
+                  {canOpenMatrix && (
+                    <Button
+                      size="compact-xs"
+                      variant="subtle"
+                      color="violet"
+                      leftSection={<IconLayoutGrid size={12} />}
+                      onClick={() => {
+                        setExpanded(false)
+                        navigate('/monitor')
+                      }}
+                    >
+                      进入矩阵
+                    </Button>
+                  )}
                 </Group>
                 <Stack gap={4}>
                   {runningSessions.slice(0, 5).map((session) => (

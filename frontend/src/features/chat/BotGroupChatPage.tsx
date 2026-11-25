@@ -35,7 +35,6 @@ import type {
   GroupMessage,
 } from "../../domain/types";
 import { AgentBrandIcon } from "../../components/AgentBrandIcon";
-import { ComposerGlassSurface, GlassButtonLens } from "../../components/GlassPanel";
 import { useAstrorderStore } from "../../state/store";
 import { useShallow } from "zustand/react/shallow";
 import { groupChatStatus } from "./groupChatStatus";
@@ -924,7 +923,6 @@ export function BotGroupChatPage({
       ) : (
       <footer ref={composerRef} className="group-chat-composer">
         <div className="group-chat-composer-card">
-        <ComposerGlassSurface active snapshot=".bot-group-chat-page">
         {group.members.length > 0 && group.members.every((member) => memberStates[member.id || member.agent_id]?.muted) && (
           <Text size="xs" c="dimmed" px="sm" pt="xs" role="status">全员已禁言，消息仅保存在群聊中</Text>
         )}
@@ -940,8 +938,6 @@ export function BotGroupChatPage({
             role="listbox"
             aria-label="群成员建议"
             className="group-chat-mention-menu"
-            data-liquid-surface="menu"
-            data-liquid-snapshot=".bot-group-chat-page"
             style={{
               position: "absolute",
               zIndex: 50,
@@ -1029,7 +1025,6 @@ export function BotGroupChatPage({
           <div className="group-chat-composer-actions">
             <div className="group-chat-composer-tools">
               <button type="button" className="group-chat-mention-all" onClick={() => insertMentionDirect("all")} aria-label="在消息中提及所有成员">
-                <GlassButtonLens />
                 <IconAt size={16} aria-hidden="true" />所有人
               </button>
               <span className="group-chat-composer-shortcuts">Enter 发送 <span aria-hidden="true">·</span> Shift + Enter 换行</span>
@@ -1044,11 +1039,9 @@ export function BotGroupChatPage({
               loading={submitting}
               disabled={(!input.trim() && !draft.attachments.length) || !historyLoaded || loadFailed}
             >
-              <GlassButtonLens />
               发送
             </Button>
           </div>
-        </ComposerGlassSurface>
         </div>
       </footer>
       )}

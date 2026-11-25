@@ -144,7 +144,7 @@ func TestExecQueryGuardrailsAutoConnectAndAudit(t *testing.T) {
 		t.Fatalf("expected 1 auto-connect call, got %d", connectCalls.Load())
 	}
 
-	// 2. PROD read-only WITHOUT confirmation MUST be rejected with HTTP 428.
+	// 2. PROD pure read-only executes directly without confirmation.
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, newAuthedRequest(http.MethodPost, ExecBasePath+"/query", map[string]any{
 		"connection_id": "conn-prod",
@@ -152,11 +152,22 @@ func TestExecQueryGuardrailsAutoConnectAndAudit(t *testing.T) {
 		"sql":           "SELECT version FROM agent_maintenance_schema_migrations;",
 		"confirmed":     false,
 	}))
-	if rec.Code != http.StatusPreconditionRequired {
-		t.Fatalf("expected 428 for unconfirmed PROD read-only, got %d: %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for PROD pure read-only, got %d: %s", rec.Code, rec.Body.String())
 	}
 
-	// 3. Non-PROD write WITHOUT confirmation MUST be rejected with HTTP 428.
+	// 3. Transaction control or write/DDL WITHOUT confirmation MUST be rejected with HTTP 428.
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, newAuthedRequest(http.MethodPost, ExecBasePath+"/query", map[string]any{
+		"connection_id": "conn-prod",
+		"database":      "ops_metadata",
+		"sql":           "BEGIN; SELECT 1; COMMIT;",
+		"confirmed":     false,
+	}))
+	if rec.Code != http.StatusPreconditionRequired {
+		t.Fatalf("expected 428 for unconfirmed transaction script, got %d: %s", rec.Code, rec.Body.String())
+	}
+
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, newAuthedRequest(http.MethodPost, ExecBasePath+"/query", map[string]any{
 		"connection_id": "conn-local",
@@ -168,28 +179,28 @@ func TestExecQueryGuardrailsAutoConnectAndAudit(t *testing.T) {
 		t.Fatalf("expected 428 for unconfirmed write, got %d: %s", rec.Code, rec.Body.String())
 	}
 
-	// 4. PROD read-only WITH confirmation succeeds.
+	// 4. PROD DDL WITH confirmation succeeds.
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, newAuthedRequest(http.MethodPost, ExecBasePath+"/query", map[string]any{
 		"connection_id": "conn-prod",
 		"database":      "ops_metadata",
-		"sql":           "SELECT version FROM agent_maintenance_schema_migrations;",
+		"sql":           "ALTER TABLE agent_maintenance_nodes ADD COLUMN updated_by text;",
 		"confirmed":     true,
 		"source_kind":   "file",
-		"source_name":   "007_check.sql",
+		"source_name":   "007_audit_updated_by.sql",
 	}))
 	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200 for confirmed PROD query, got %d: %s", rec.Code, rec.Body.String())
+		t.Fatalf("expected 200 for confirmed PROD DDL, got %d: %s", rec.Code, rec.Body.String())
 	}
 
-	// 5. Audit log file recorded both executed runs.
+	// 5. Audit log file recorded all 3 executed runs.
 	auditBytes, err := os.ReadFile(filepath.Join(auditDir, "dbx-sql-audit.jsonl"))
 	if err != nil {
 		t.Fatalf("read audit log: %v", err)
 	}
 	lines := strings.Split(strings.TrimSpace(string(auditBytes)), "\n")
-	if len(lines) != 2 {
-		t.Fatalf("expected 2 audit lines, got %d: %s", len(lines), string(auditBytes))
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 audit lines, got %d: %s", len(lines), string(auditBytes))
 	}
 
 	// 6. Project bindings CRUD locks PROD flag and supports deletion.
@@ -227,17 +238,22 @@ func TestExecQueryGuardrailsAutoConnectAndAudit(t *testing.T) {
 		t.Fatalf("expected DBX-marked PROD target to stay locked is_prod=true")
 	}
 
-	// 7. Manually marked PROD binding blocks unconfirmed SELECT on conn-local too!
+	// 7. Manually marked PROD binding still propagates is_prod=true on 428 write confirmation response.
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, newAuthedRequest(http.MethodPost, ExecBasePath+"/query", map[string]any{
 		"connection_id": "conn-local",
 		"database":      "opscore_dev",
 		"project_key":   "project:local\x00opscore",
-		"sql":           "SELECT 1;",
+		"sql":           "DELETE FROM ops_audit WHERE id = 1;",
 		"confirmed":     false,
 	}))
 	if rec.Code != http.StatusPreconditionRequired {
-		t.Fatalf("expected 428 when project binding manually marks target PROD, got %d", rec.Code)
+		t.Fatalf("expected 428 for unconfirmed delete on manually PROD-marked target, got %d", rec.Code)
+	}
+	var gateResp map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &gateResp)
+	if gateResp["is_prod"] != true {
+		t.Fatalf("expected is_prod=true in 428 response, got %+v", gateResp)
 	}
 
 	// 8. List databases auto-connects when needed.

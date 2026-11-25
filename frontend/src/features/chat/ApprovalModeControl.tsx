@@ -4,8 +4,8 @@ import { IconAlertTriangle, IconCheck, IconClockCheck, IconHandStop } from '@tab
 import { notifications } from '@mantine/notifications'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../../api/client'
-import { ComposerGlassMenu, GlassButtonLens } from '../../components/GlassPanel'
 import type { ApprovalMode, Session } from '../../domain/types'
+import { useIsOfficeExperience } from '../office/appProfile'
 
 export interface ApprovalModeItem {
   key: ApprovalMode
@@ -58,6 +58,7 @@ export function ApprovalModeControl({
   supported?: boolean
 }) {
   const modes = APPROVAL_MODES
+  const isOfficeMode = useIsOfficeExperience(session)
   const queryClient = useQueryClient()
   const [opened, setOpened] = useState(false)
   const { data, isError } = useQuery({
@@ -113,7 +114,7 @@ export function ApprovalModeControl({
           应如何批准操作？
         </Text>
         <Text size="xs" c="dimmed" mt={2}>
-          控制执行系统命令与编辑文件时的权限等级
+          {isOfficeMode ? '控制 AI 助手修改文件或联网查询时的确认方式' : '控制执行系统命令与编辑文件时的权限等级'}
         </Text>
       </div>
 
@@ -191,14 +192,13 @@ export function ApprovalModeControl({
           aria-label={`当前审批模式：${activeItem.label}`}
           title={`审批模式：${activeItem.label}（点击切换）`}
         >
-          <GlassButtonLens />
           <ActiveIcon size={14} className="approval-mode-capsule-icon" />
           <span className="approval-mode-capsule-label">{activeItem.capsuleLabel}</span>
         </button>
       </Popover.Target>
 
       <Popover.Dropdown className="approval-mode-dropdown">
-        <ComposerGlassMenu active={opened}>{options}</ComposerGlassMenu>
+        {options}
       </Popover.Dropdown>
     </Popover>
   )

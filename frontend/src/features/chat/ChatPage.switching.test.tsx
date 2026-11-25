@@ -7,6 +7,8 @@ import { api } from '../../api/client'
 import { selectMessages, useAstrorderStore } from '../../state/store'
 import { ChatPage } from './ChatPage'
 import { useSidecarStore } from '../sidecar/sidecarStore'
+import { usePluginSettingsStore } from '../plugins/pluginSettingsStore'
+import { setProjectOfficeMode } from '../office/officeWorkspaceMode'
 
 function Switcher() {
   const navigate = useNavigate()
@@ -249,5 +251,75 @@ it.each([
   expect(getRuns).toHaveBeenCalledWith(agent_id, source_session_id)
   expect(update).toHaveBeenCalledWith('run-1', { status: 'draft_ready', comment_text: comment })
   expect(update).not.toHaveBeenCalledWith('run-1', { status: 'empty' })
+  client.clear()
+})
+
+it('hides code review and code checkpoints buttons in top-right header when workspace is in office space mode', async () => {
+  localStorage.clear()
+  usePluginSettingsStore.getState().reset()
+  vi.spyOn(usePluginSettingsStore.getState(), 'setPluginConfig').mockImplementation((pluginId, key, value) => {
+    usePluginSettingsStore.setState((state) => ({
+      pluginConfigs: {
+        ...state.pluginConfigs,
+        [pluginId]: { ...(state.pluginConfigs[pluginId] || {}), [key]: value },
+      },
+    }))
+  })
+  useAstrorderStore.getState().resetRuntime()
+  const date = '2026-11-25T10:00:00Z'
+  useAstrorderStore.getState().hydrateBootstrap({
+    protocol_version: 1,
+    cursor: 0,
+    agents: [{ id: 'codex', name: 'Codex', kind: 'codex', status: 'ready', capabilities: ['chat'], limitation: null }],
+    sessions: [{ id: 'office-s1', agent_id: 'codex', title: '季度汇报材料', workspace: 'D:/Work/Docs', status: 'idle', updated_at: date }],
+  })
+  vi.spyOn(api, 'getMessages').mockResolvedValue({ items: [], next_cursor: null })
+  vi.spyOn(api, 'getCommands').mockResolvedValue({ items: [] })
+  vi.spyOn(api, 'getTasks').mockResolvedValue({ items: [] })
+  vi.spyOn(api, 'getSessionModel').mockResolvedValue({ model: 'model', provider: 'provider' })
+  vi.spyOn(api, 'listCheckpoints').mockResolvedValue({ items: [] })
+  vi.spyOn(api, 'getReviewRelayRuns').mockResolvedValue({ items: [] })
+  vi.spyOn(api, 'getConnections').mockResolvedValue({
+    local: { kind: 'hermes', state: 'offline', available: true, version: null, agent_id: null, session_id: null, detail: '' },
+    ssh: { items: [], state: 'unconfigured', settings: null, detail: '' },
+  })
+
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(
+    <MantineProvider>
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={['/chat/office-s1?agent_id=codex']}>
+          <Routes>
+            <Route path="/chat/:sessionId" element={<ChatPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>
+    </MantineProvider>,
+  )
+
+  // In default dev mode, both code review and code checkpoints buttons are present
+  expect(screen.getByRole('button', { name: '请求 Codex 审查' })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: '打开代码检查点' })).toBeInTheDocument()
+
+  // Switching workspace to Office Space mode immediately hides both buttons
+  act(() => {
+    setProjectOfficeMode({ projectKey: 'project:local\u0000office-docs', workspace: 'D:/Work/Docs' }, true)
+  })
+  await waitFor(() => {
+    expect(screen.queryByRole('button', { name: '请求 Codex 审查' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '打开代码检查点' })).toBeNull()
+  })
+
+  // Switching back to dev mode restores both buttons
+  act(() => {
+    setProjectOfficeMode({ projectKey: 'project:local\u0000office-docs', workspace: 'D:/Work/Docs' }, false)
+  })
+  await waitFor(() => {
+    expect(screen.getByRole('button', { name: '请求 Codex 审查' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '打开代码检查点' })).toBeInTheDocument()
+  })
+
+  localStorage.clear()
+  usePluginSettingsStore.getState().reset()
   client.clear()
 })

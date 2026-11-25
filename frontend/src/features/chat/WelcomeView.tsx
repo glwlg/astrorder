@@ -12,7 +12,10 @@ import {
   IconCpu,
   IconFolder,
   IconFolderPlus,
+  IconInbox,
   IconLayoutGrid,
+  IconMicrophone,
+  IconNotebook,
   IconSend,
   IconUsers,
 } from '@tabler/icons-react'
@@ -29,8 +32,20 @@ import { newCommandId, scopeKey } from '../../domain/semantics'
 import type { Agent, Approval, Command, Project, Session } from '../../domain/types'
 import { selectProjects, useAstrorderStore } from '../../state/store'
 import { formatTokens } from '../analytics/usageFormat'
+import { usePluginSettingsStore } from '../plugins/pluginSettingsStore'
 import { useShortcutStore } from '../shortcuts/shortcuts'
+import { useIsOfficeProfile } from '../office/appProfile'
+import { OfficeHomeDashboard } from '../office/OfficeHomeDashboard'
 import './welcomeDeck.css'
+
+const OFFICE_STARTER_PROMPTS = [
+  '帮我起草一份本周工作周报，突出关键交付和下周重点',
+  '帮我润色一段发给客户的方案说明，语气专业简洁',
+  '把这份会议讨论要点整理成带责任人与截止时间的行动清单',
+  '为下周的项目评审会起草一份 8 页 PPT 演示大纲',
+  '帮我将以下杂乱数据整理成结构化对比表格并给出结论',
+  '帮我把这份文档做对外脱敏处理，隐藏内部敏感信息',
+]
 
 interface WelcomeViewProps {
   sessions: Session[]
@@ -56,7 +71,15 @@ function shortAgentLabel(agent: Agent): string {
   return `${kind} · ${env}`
 }
 
-export function WelcomeView({ sessions, agents, onNewSession }: WelcomeViewProps) {
+export function WelcomeView(props: WelcomeViewProps) {
+  const isOfficeProfile = useIsOfficeProfile()
+  if (isOfficeProfile) {
+    return <OfficeHomeDashboard {...props} />
+  }
+  return <DeveloperWelcomeView {...props} />
+}
+
+function DeveloperWelcomeView({ sessions, agents, onNewSession }: WelcomeViewProps) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const inputId = useId()
@@ -64,18 +87,22 @@ export function WelcomeView({ sessions, agents, onNewSession }: WelcomeViewProps
 
   const projects = useAstrorderStore(useShallow(selectProjects))
   const approvalsMap = useAstrorderStore((state) => state.approvals)
+  const enabledPlugins = usePluginSettingsStore((state) => state.enabledPlugins)
+  const isAgentEnabled = usePluginSettingsStore((state) => state.isAgentEnabled)
+  const isOfficeProfile = useIsOfficeProfile()
 
   const todayUsage = useQuery({
     queryKey: ['astrorder', 'analytics', 'today-models'],
     queryFn: () => api.getAnalyticsUsage({ range: 'today', surface: 'all' }),
+    enabled: !isOfficeProfile,
     staleTime: 60_000,
     refetchOnWindowFocus: false,
     retry: false,
   })
 
   const readyAgents = useMemo(
-    () => Object.values(agents).filter((agent) => agent.status === 'ready'),
-    [agents],
+    () => Object.values(agents).filter((agent) => agent.status === 'ready' && isAgentEnabled(agent.kind)),
+    [agents, enabledPlugins, isAgentEnabled],
   )
 
   const workspaceChoices = useMemo<WorkspaceChoice[]>(() => {
@@ -207,13 +234,20 @@ export function WelcomeView({ sessions, agents, onNewSession }: WelcomeViewProps
   }, [todayUsage.data])
 
   const bindings = useShortcutStore((state) => state.bindings)
-  const shortcuts = [
-    { id: 'quickOpen', key: bindings.quickOpen || '未设置', desc: '搜索文件' },
-    { id: 'sidebar', key: bindings.sidebar || '未设置', desc: '收起侧栏' },
-    { id: 'sideChat', key: bindings.sideChat || '未设置', desc: '侧边副会话' },
-    { id: 'terminal', key: bindings.terminal || '未设置', desc: '内置终端' },
-    { id: 'browser', key: bindings.browser || '未设置', desc: '内置浏览器' },
-  ]
+  const shortcuts = isOfficeProfile
+    ? [
+        { id: 'quickOpen', key: bindings.quickOpen || '未设置', desc: '快速找文档' },
+        { id: 'sidebar', key: bindings.sidebar || '未设置', desc: '展开/收起左侧栏' },
+        { id: 'sidecar', key: bindings.sidecar || '未设置', desc: '展开/收起右侧栏' },
+        { id: 'settings', key: bindings.settings || '未设置', desc: '打开设置' },
+      ]
+    : [
+        { id: 'quickOpen', key: bindings.quickOpen || '未设置', desc: '搜索文件' },
+        { id: 'sidebar', key: bindings.sidebar || '未设置', desc: '收起侧栏' },
+        { id: 'sideChat', key: bindings.sideChat || '未设置', desc: '侧边副会话' },
+        { id: 'terminal', key: bindings.terminal || '未设置', desc: '内置终端' },
+        { id: 'browser', key: bindings.browser || '未设置', desc: '内置浏览器' },
+      ]
 
   const handleOmniSubmit = useCallback(
     async (event?: FormEvent<HTMLFormElement>) => {
@@ -341,10 +375,12 @@ export function WelcomeView({ sessions, agents, onNewSession }: WelcomeViewProps
             <BrandMark size={52} className="welcome-logo-img" />
           </div>
           <Title order={1} size="h3" fw={700} style={{ letterSpacing: '-0.01em', margin: 0 }}>
-            <ShinyText text="星序 · 协作指挥台" speed={2.5} />
+            {isOfficeProfile ? '星序 · 智能办公工作台' : <ShinyText text="星序 · 协作指挥台" speed={2.5} />}
           </Title>
           <Text c="dimmed" size="xs" ta="center" maw={480}>
-            群星各有所长，协作自有秩序。直接下达新任务，或从星阵态势切入现场。
+            {isOfficeProfile
+              ? '起草方案、整理会议纪要、生成周报复盘与管理待办，专注高效办公。'
+              : '群星各有所长，协作自有秩序。直接下达新任务，或从星阵态势切入现场。'}
           </Text>
         </Stack>
 
@@ -353,23 +389,23 @@ export function WelcomeView({ sessions, agents, onNewSession }: WelcomeViewProps
           ref={formRef}
           className="welcome-omni-form"
           onSubmit={(event) => void handleOmniSubmit(event)}
-          aria-label="全域任务启动器"
+          aria-label={isOfficeProfile ? '新建办公任务' : '全域任务启动器'}
         >
           <div
             className="welcome-omni-shell"
-            data-liquid-surface="panel"
-            data-liquid-snapshot=".welcome-ambient-backdrop"
           >
             <label htmlFor={inputId} className="welcome-omni-label">
-              输入新任务指令
+              {isOfficeProfile ? '输入你要处理的工作内容' : '输入新任务指令'}
             </label>
             <textarea
               id={inputId}
               className="welcome-omni-textarea"
               placeholder={
                 readyAgents.length > 0
-                  ? '描述你要推进的任务，Enter 直接委派星辰启动会话（Shift+Enter 换行）…'
-                  : '当前暂无就绪 Agent，请先在左下角「设置 → 连接」接入工作环境…'
+                  ? isOfficeProfile
+                    ? '告诉我你要起草的文档、整理的资料或待办事项，按 Enter 直接开始（Shift+Enter 换行）…'
+                    : '描述你要推进的任务，Enter 直接委派星辰启动会话（Shift+Enter 换行）…'
+                  : '当前暂无就绪助手，请先在左下角「设置 → 高级配置 → 连接管理」检查工作环境…'
               }
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
@@ -394,7 +430,7 @@ export function WelcomeView({ sessions, agents, onNewSession }: WelcomeViewProps
                       <IconChevronDown size={12} className="welcome-omni-chevron" aria-hidden="true" />
                     </button>
                   </Menu.Target>
-                  <Menu.Dropdown className="welcome-omni-menu-dropdown" data-liquid-surface="menu" data-liquid-engine="css">
+                  <Menu.Dropdown className="welcome-omni-menu-dropdown">
                     <div className="welcome-omni-menu-scroll">
                       {workspaceChoices.map((choice) => {
                         const selected = choice.key === effectiveWorkspaceKey
@@ -448,7 +484,7 @@ export function WelcomeView({ sessions, agents, onNewSession }: WelcomeViewProps
                       <IconChevronDown size={12} className="welcome-omni-chevron" aria-hidden="true" />
                     </button>
                   </Menu.Target>
-                  <Menu.Dropdown className="welcome-omni-menu-dropdown" data-liquid-surface="menu" data-liquid-engine="css">
+                  <Menu.Dropdown className="welcome-omni-menu-dropdown">
                     <div className="welcome-omni-menu-scroll">
                       {compatibleAgents.map((agent) => {
                         const selected = agent.id === effectiveAgentId
@@ -484,6 +520,72 @@ export function WelcomeView({ sessions, agents, onNewSession }: WelcomeViewProps
           </div>
         </form>
 
+        {/* 办公模式常用场景提示词 + 快捷入口 */}
+        {isOfficeProfile && (
+          <div className="welcome-section" style={{ marginBottom: 18 }}>
+            <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="xs" mb="sm">
+              <UnstyledButton className="welcome-card" onClick={() => navigate('/meetings')} style={{ padding: '12px 14px' }}>
+                <Group gap={8} wrap="nowrap">
+                  <IconMicrophone size={16} color="var(--astr-text)" />
+                  <div style={{ minWidth: 0 }}>
+                    <Text size="xs" fw={650}>开始会议录音</Text>
+                    <Text size="11px" c="dimmed" truncate>实时转写与行动项</Text>
+                  </div>
+                </Group>
+              </UnstyledButton>
+              <UnstyledButton className="welcome-card" onClick={() => navigate('/digest')} style={{ padding: '12px 14px' }}>
+                <Group gap={8} wrap="nowrap">
+                  <IconNotebook size={16} color="var(--astr-text)" />
+                  <div style={{ minWidth: 0 }}>
+                    <Text size="xs" fw={650}>生成工作周报</Text>
+                    <Text size="11px" c="dimmed" truncate>自动汇总与复盘</Text>
+                  </div>
+                </Group>
+              </UnstyledButton>
+              <UnstyledButton className="welcome-card" onClick={() => navigate('/inbox')} style={{ padding: '12px 14px' }}>
+                <Group gap={8} wrap="nowrap">
+                  <IconInbox size={16} color="var(--astr-text)" />
+                  <div style={{ minWidth: 0 }}>
+                    <Text size="xs" fw={650}>查看待办清单</Text>
+                    <Text size="11px" c="dimmed" truncate>个人待办与会议跟进</Text>
+                  </div>
+                </Group>
+              </UnstyledButton>
+              {onNewSession && (
+                <UnstyledButton className="welcome-card" onClick={onNewSession} style={{ padding: '12px 14px' }}>
+                  <Group gap={8} wrap="nowrap">
+                    <IconFolderPlus size={16} color="var(--astr-text)" />
+                    <div style={{ minWidth: 0 }}>
+                      <Text size="xs" fw={650}>新建办公对话</Text>
+                      <Text size="11px" c="dimmed" truncate>起草与润色文档</Text>
+                    </div>
+                  </Group>
+                </UnstyledButton>
+              )}
+            </SimpleGrid>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {OFFICE_STARTER_PROMPTS.map((chip) => (
+                <button
+                  key={chip}
+                  type="button"
+                  onClick={() => setPrompt(chip)}
+                  style={{
+                    border: '1px solid var(--astr-border)',
+                    background: 'var(--astr-surface)',
+                    color: 'var(--astr-text)',
+                    borderRadius: 999,
+                    padding: '4px 11px',
+                    fontSize: 11.5,
+                    cursor: 'pointer',
+                  }}
+                >
+                  {chip}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* 待你介入 (Conditional Needs Attention Strip) */}
         {hasAttentionSection && (
           <div className="welcome-section" style={{ marginBottom: 20 }}>
@@ -510,8 +612,6 @@ export function WelcomeView({ sessions, agents, onNewSession }: WelcomeViewProps
                   <div
                     key={approval.id}
                     className="welcome-card welcome-attention-card"
-                    data-liquid-surface="card"
-                    data-liquid-snapshot=".welcome-ambient-backdrop"
                   >
                     <Group justify="space-between" align="center" gap="sm" wrap="nowrap">
                       <Group gap={8} wrap="nowrap" style={{ minWidth: 0, flex: 1 }}>
@@ -570,8 +670,6 @@ export function WelcomeView({ sessions, agents, onNewSession }: WelcomeViewProps
                 <UnstyledButton
                   key={scopeKey(session.agent_id, session.id)}
                   className={`welcome-card welcome-session-card welcome-attention-card${session.status === 'error' ? ' is-error' : ''}`}
-                  data-liquid-surface="card"
-                  data-liquid-snapshot=".welcome-ambient-backdrop"
                   onClick={() =>
                     navigate(`/chat/${encodeURIComponent(session.id)}?agent_id=${encodeURIComponent(session.agent_id)}`)
                   }
@@ -615,8 +713,6 @@ export function WelcomeView({ sessions, agents, onNewSession }: WelcomeViewProps
                   <UnstyledButton
                     key={scopeKey(session.agent_id, session.id)}
                     className="welcome-card welcome-session-card"
-                    data-liquid-surface="card"
-                    data-liquid-snapshot=".welcome-ambient-backdrop"
                     onClick={() =>
                       navigate(`/chat/${encodeURIComponent(session.id)}?agent_id=${encodeURIComponent(session.agent_id)}`)
                     }
@@ -656,45 +752,45 @@ export function WelcomeView({ sessions, agents, onNewSession }: WelcomeViewProps
           </div>
         )}
 
-        {/* 今日算力脉搏与快速通道 */}
-        <div
-          className="welcome-telemetry-bar"
-          data-liquid-surface="toolbar"
-          data-liquid-snapshot=".welcome-ambient-backdrop"
-        >
-          <div className="welcome-telemetry-metrics">
-            <span className={`welcome-metric${runningCount > 0 ? ' is-highlight' : ''}`}>
-              <span>运行中</span>
-              <strong>{runningCount}</strong>
-            </span>
-            <span className="welcome-metric">
-              <span>就绪 Agent</span>
-              <strong>{readyAgents.length}</strong>
-            </span>
-            {todaySummary && (
-              <>
-                <span className="welcome-metric">
-                  <span>今日请求</span>
-                  <strong>{todaySummary.requests.toLocaleString('zh-CN')}</strong>
-                </span>
-                <span className="welcome-metric">
-                  <span>今日 Token</span>
-                  <strong>{formatTokens(todaySummary.totalTokens)}</strong>
-                </span>
-              </>
-            )}
+        {/* 今日算力脉搏与快速通道（仅研发模式显示 Token/矩阵/群聊遥测） */}
+        {!isOfficeProfile && (
+          <div
+            className="welcome-telemetry-bar"
+          >
+            <div className="welcome-telemetry-metrics">
+              <span className={`welcome-metric${runningCount > 0 ? ' is-highlight' : ''}`}>
+                <span>运行中</span>
+                <strong>{runningCount}</strong>
+              </span>
+              <span className="welcome-metric">
+                <span>就绪 Agent</span>
+                <strong>{readyAgents.length}</strong>
+              </span>
+              {todaySummary && (
+                <>
+                  <span className="welcome-metric">
+                    <span>今日请求</span>
+                    <strong>{todaySummary.requests.toLocaleString('zh-CN')}</strong>
+                  </span>
+                  <span className="welcome-metric">
+                    <span>今日 Token</span>
+                    <strong>{formatTokens(todaySummary.totalTokens)}</strong>
+                  </span>
+                </>
+              )}
+            </div>
+            <div className="welcome-quick-links">
+              <UnstyledButton className="welcome-quick-link" onClick={() => navigate('/monitor')}>
+                <IconLayoutGrid size={13} color="var(--astr-indigo)" />
+                <span>矩阵</span>
+              </UnstyledButton>
+              <UnstyledButton className="welcome-quick-link" onClick={() => navigate('/groups')}>
+                <IconUsers size={13} color="var(--astr-indigo)" />
+                <span>群聊</span>
+              </UnstyledButton>
+            </div>
           </div>
-          <div className="welcome-quick-links">
-            <UnstyledButton className="welcome-quick-link" onClick={() => navigate('/monitor')}>
-              <IconLayoutGrid size={13} color="var(--astr-indigo)" />
-              <span>矩阵</span>
-            </UnstyledButton>
-            <UnstyledButton className="welcome-quick-link" onClick={() => navigate('/groups')}>
-              <IconUsers size={13} color="var(--astr-indigo)" />
-              <span>群聊</span>
-            </UnstyledButton>
-          </div>
-        </div>
+        )}
 
         {/* 精简快捷键提示条 */}
         <div className="welcome-shortcut-strip" aria-label="常用快捷键">

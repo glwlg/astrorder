@@ -1,4 +1,4 @@
-/* Unified Star-Violet Liquid Glass Select Control for Dialogs & Forms */
+/* Unified Star-Violet Select Control for Dialogs & Forms */
 .astr-branded-select {
   display: flex;
   flex-direction: column;
@@ -94,6 +94,7 @@
 .astr-branded-select-dropdown {
   padding: 5px !important;
   border-radius: 12px !important;
+  background: var(--astr-surface) !important;
   border: 1px solid color-mix(in oklab, var(--astr-indigo) 22%, var(--astr-border)) !important;
   box-shadow:
     0 18px 40px -12px rgb(20 14 38 / 28%),

@@ -42,7 +42,7 @@ export function ImageViewer({ artifact, toolbarAction }: ViewerContext) {
 
   return (
     <div className="sidecar-image-viewer" style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, position: 'relative' }}>
-      <Paper p="xs" withBorder data-liquid-surface="toolbar" data-liquid-snapshot=".sidecar-image-viewer" style={{ flex: 'none', margin: '8px 8px 0', zIndex: 10, borderRadius: 10 }}>
+      <Paper p="xs" withBorder className="sidecar-image-toolbar" style={{ flex: 'none', margin: '8px 8px 0', zIndex: 10, borderRadius: 10 }}>
         <Group justify="space-between" wrap="nowrap" gap="xs">
           <Text size="xs" fw={600} truncate title={artifact.path || artifact.name} style={{ minWidth: 0 }}>{artifact.name}</Text>
           <Group gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>

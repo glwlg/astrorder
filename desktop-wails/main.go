@@ -78,6 +78,7 @@ func main() {
 	}
 
 	service.preview = &PreviewService{shell: service}
+	service.meetingCapsule = &MeetingCapsuleService{shell: service}
 	service.statistics = &StatisticsView{shell: service}
 	var quitting atomic.Bool
 	service.quitting = &quitting
@@ -90,7 +91,11 @@ func main() {
 		Name:        "Astrorder",
 		Description: "星序桌面客户端",
 		Icon:        appIcon,
-		Services:    []application.Service{application.NewService(&DesktopService{shell: service}), application.NewService(service.preview)},
+		Services: []application.Service{
+			application.NewService(&DesktopService{shell: service}),
+			application.NewService(service.preview),
+			application.NewService(service.meetingCapsule),
+		},
 		Assets:      application.AssetOptions{Handler: handler, DisableLogging: true},
 		Windows:     windowsOptions,
 		SingleInstance: &application.SingleInstanceOptions{
@@ -98,8 +103,7 @@ func main() {
 			OnSecondInstanceLaunch: func(data application.SecondInstanceData) {
 				if service.window != nil {
 					service.openNotificationFromArgs(data.Args)
-					service.window.Restore()
-					service.window.Show().Focus()
+					revealWindow(service.window)
 				}
 			},
 		},
@@ -145,10 +149,7 @@ func main() {
 	systemTray.SetTooltip("星序 · 正在查询内核状态")
 
 	showMainWindow := func() {
-		if service.window != nil {
-			service.window.Restore()
-			service.window.Show().Focus()
-		}
+		revealWindow(service.window)
 	}
 
 	service.installTray(systemTray, showMainWindow)

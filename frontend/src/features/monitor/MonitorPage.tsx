@@ -1353,7 +1353,7 @@ export function MonitorPage() {
           )}
         </Group>
         <Group gap="sm" wrap="wrap" align="center">
-          <Group className="monitor-summary-bar" data-liquid-surface="toolbar" data-liquid-snapshot=".monitor-ambient-backdrop" gap={6} align="center">
+          <Group className="monitor-summary-bar" gap={6} align="center">
             <Group gap={5} className={`monitor-stat-item ${counts.running > 0 ? 'is-active' : ''}`}>
               <span className="monitor-stat-dot is-running" />
               <Text size="xs" fw={600}>{counts.running}</Text>

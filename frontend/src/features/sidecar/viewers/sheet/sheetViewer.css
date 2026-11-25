@@ -1,0 +1,152 @@
+.sheet-viewer-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  position: relative;
+}
+
+.sheet-grid-container {
+  flex: 1;
+  min-height: 0;
+  margin: 8px 8px 0;
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: 10px;
+  overflow: auto;
+  background: var(--mantine-color-body);
+  position: relative;
+}
+
+.sheet-table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12.5px;
+}
+
+.sheet-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--mantine-color-gray-0);
+  border-bottom: 1px solid var(--mantine-color-default-border);
+  border-right: 1px solid var(--mantine-color-default-border);
+  padding: 7px 10px;
+  text-align: left;
+  font-weight: 600;
+  white-space: nowrap;
+  user-select: none;
+  cursor: pointer;
+}
+
+[data-mantine-color-scheme='dark'] .sheet-table thead th {
+  background: var(--mantine-color-dark-6);
+}
+
+.sheet-table thead th.is-selected-col {
+  background: var(--mantine-color-indigo-light);
+  color: var(--mantine-color-indigo-filled);
+}
+
+.sheet-table tbody td {
+  border-bottom: 1px solid var(--mantine-color-default-border);
+  border-right: 1px solid var(--mantine-color-default-border);
+  padding: 5px 10px;
+  max-width: 340px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.sheet-table tbody td.is-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.sheet-table tbody td.is-selected-col {
+  background: rgba(99, 102, 241, 0.06);
+}
+
+.sheet-table tbody tr:hover td {
+  background: var(--mantine-color-default-hover);
+}
+
+.sheet-table tbody tr.is-row-checked td {
+  background: rgba(99, 102, 241, 0.11);
+}
+
+.sheet-col-check {
+  width: 36px;
+  text-align: center !important;
+  cursor: default !important;
+}
+
+.sheet-col-rownum {
+  width: 48px;
+  text-align: right !important;
+  color: var(--mantine-color-dimmed);
+  font-variant-numeric: tabular-nums;
+  cursor: default !important;
+}
+
+.sheet-footer-bar {
+  flex: none;
+  margin: 6px 8px 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: 10px;
+  background: var(--mantine-color-body);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sheet-tabs-strip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.sheet-tab-btn {
+  border: 1px solid transparent;
+  background: transparent;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--mantine-color-dimmed);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.sheet-tab-btn:hover {
+  background: var(--mantine-color-default-hover);
+  color: var(--mantine-color-text);
+}
+
+.sheet-tab-btn.is-active {
+  background: var(--mantine-color-indigo-light);
+  border-color: var(--mantine-color-indigo-outline);
+  color: var(--mantine-color-indigo-filled);
+  font-weight: 600;
+}
+
+.sheet-stats-strip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--mantine-color-dimmed);
+  font-variant-numeric: tabular-nums;
+}
+
+.sheet-stats-strip strong {
+  color: var(--mantine-color-text);
+  font-weight: 600;
+}

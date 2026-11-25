@@ -49,7 +49,7 @@ func (o *openRecorder) Open(_ context.Context, path, action string) error {
 
 func TestRegistrationsExposeAllOwnedRoutes(t *testing.T) {
 	registrations := Registrations()
-	if len(registrations) != 8 {
+	if len(registrations) != 11 {
 		t.Fatalf("registrations=%d: %#v", len(registrations), registrations)
 	}
 	for _, registration := range registrations {

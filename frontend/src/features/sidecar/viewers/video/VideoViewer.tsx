@@ -75,8 +75,6 @@ export function VideoViewer({ artifact, toolbarAction }: ViewerContext) {
       <Paper
         p="xs"
         withBorder
-        data-liquid-surface="toolbar"
-        data-liquid-snapshot=".sidecar-video-viewer"
         className="sidecar-video-toolbar"
       >
         <div className="sidecar-video-toolbar-row">

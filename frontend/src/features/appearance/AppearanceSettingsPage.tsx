@@ -1,33 +1,24 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActionIcon,
-  Badge,
-  Button,
-  Card,
+  Collapse,
   ColorPicker,
   Group,
   Paper,
   SegmentedControl,
-  Stack,
-  Switch,
   Text,
   TextInput,
   Title,
   Tooltip,
-  useComputedColorScheme,
   useMantineColorScheme,
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import {
   IconCheck,
+  IconChevronDown,
+  IconChevronRight,
   IconColorPicker,
-  IconDeviceDesktop,
-  IconMoon,
-  IconPalette,
   IconRotateClockwise,
-  IconSend,
-  IconSparkles,
-  IconSun,
 } from '@tabler/icons-react'
 import {
   DEFAULT_THEME_PALETTE,
@@ -35,7 +26,6 @@ import {
   THEME_PALETTE_PRESETS,
   THEME_ROLE_DESCRIPTORS,
   applyThemePalette,
-  contrastRatio,
   deriveHarmonyFromPrimary,
   isDefaultThemePalette,
   normalizeHexColor,
@@ -47,6 +37,7 @@ import {
   type ThemeRoleDescriptor,
 } from '../../themeAccent'
 import { usePluginSettingsStore } from '../plugins/pluginSettingsStore'
+import { useSettingsMode } from '../settings/settingsMode'
 import './appearanceSettings.css'
 
 interface RoleColorPickerCardProps {
@@ -184,13 +175,15 @@ const RoleColorPickerCard = memo(function RoleColorPickerCard({
   )
 })
 
-export function AppearanceSettingsPage() {
+export function AppearanceSettingsPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { colorScheme, setColorScheme } = useMantineColorScheme()
-  const computedScheme = useComputedColorScheme('light')
   const palette = useThemePalette()
   const setPluginConfigPatch = usePluginSettingsStore((s) => s.setPluginConfigPatch)
+  const { mode, managedByWorkbench } = useSettingsMode()
 
-  const [previewSwitch, setPreviewSwitch] = useState(true)
+  const [customPickersOpen, setCustomPickersOpen] = useState(false)
+  const showCustomPickers = !managedByWorkbench || mode === 'advanced' || customPickersOpen
+
   const saveTimerRef = useRef<number | null>(null)
   const dragRafRef = useRef<number | null>(null)
   const pendingDragPartialRef = useRef<Partial<ThemePalette> | null>(null)
@@ -267,8 +260,6 @@ export function AppearanceSettingsPage() {
     notifications.show({ color: 'teal', message: '已恢复默认主题配色（星序紫韵）' })
   }
 
-  const primaryInk = useMemo(() => pickContrastInk(palette.primary), [palette.primary])
-  const primaryRatio = useMemo(() => contrastRatio(palette.primary, primaryInk), [palette.primary, primaryInk])
   const matchedPreset = useMemo(
     () =>
       THEME_PALETTE_PRESETS.find(
@@ -283,215 +274,121 @@ export function AppearanceSettingsPage() {
   const isDefault = isDefaultThemePalette(palette)
 
   return (
-    <div className="appearance-settings">
-      <div className="settings-page-heading">
-        <Title order={2}>外观与主题配色</Title>
-        <Text c="dimmed" size="sm">
-          自定义星序的明暗模式与多层级主题色，支持组合预设或分别调节主色调、次级色、选中高亮与表面氛围色，全界面实时生效并跨端同步。
-        </Text>
+    <div className={embedded ? 'appearance-settings is-embedded' : 'appearance-settings'}>
+      {!embedded && (
+        <div className="settings-page-heading">
+          <Title order={2}>外观与主题配色</Title>
+          <Text c="dimmed" size="sm">
+            管理明暗外观模式与界面主题配色
+          </Text>
+        </div>
+      )}
+
+      {/* Row: Light / Dark / Auto */}
+      <div className="st-setting-row">
+        <div className="st-setting-row-copy">
+          <div className="st-setting-row-title">外观模式</div>
+          <div className="st-setting-row-desc">切换浅色、深色或跟随系统自动适配</div>
+        </div>
+        <SegmentedControl
+          size="xs"
+          aria-label="外观模式"
+          value={colorScheme}
+          onChange={(value) => setColorScheme(value as 'light' | 'dark' | 'auto')}
+          data={[
+            { value: 'light', label: '浅色' },
+            { value: 'dark', label: '深色' },
+            { value: 'auto', label: '跟随系统' },
+          ]}
+        />
       </div>
 
-      <Stack gap="md">
-        <Card withBorder radius="md" p="lg">
-          <Group justify="space-between" align="center" wrap="wrap" gap="md">
-            <div>
-              <Text fw={600} size="sm">外观模式</Text>
-              <Text size="xs" c="dimmed" mt={2}>
-                切换浅色、深色或自动跟随系统设置（当前：{computedScheme === 'dark' ? '深色' : '浅色'}）
-              </Text>
-            </div>
-            <SegmentedControl
-              aria-label="外观模式"
-              value={colorScheme}
-              onChange={(value) => setColorScheme(value as 'light' | 'dark' | 'auto')}
-              data={[
-                {
-                  value: 'light',
-                  label: (
-                    <Group gap={6} wrap="nowrap">
-                      <IconSun size={14} aria-hidden="true" />
-                      <span>浅色</span>
-                    </Group>
-                  ),
-                },
-                {
-                  value: 'dark',
-                  label: (
-                    <Group gap={6} wrap="nowrap">
-                      <IconMoon size={14} aria-hidden="true" />
-                      <span>深色</span>
-                    </Group>
-                  ),
-                },
-                {
-                  value: 'auto',
-                  label: (
-                    <Group gap={6} wrap="nowrap">
-                      <IconDeviceDesktop size={14} aria-hidden="true" />
-                      <span>跟随系统</span>
-                    </Group>
-                  ),
-                },
-              ]}
-            />
-          </Group>
-        </Card>
-
-        <Card withBorder radius="md" p="lg">
-          <Group justify="space-between" align="flex-start" wrap="wrap" gap="sm" mb="md">
-            <Group gap="sm" wrap="nowrap">
-              <div className="appearance-header-icon" aria-hidden="true">
-                <IconPalette size={20} />
-              </div>
-              <div>
-                <Group gap="xs" wrap="wrap">
-                  <Text fw={600} size="sm">主题色板与自由搭配</Text>
-                  <Badge size="xs" variant="light" color="violet">
-                    {matchedPreset ? `预设 · ${matchedPreset.name}` : '自定义搭配'}
-                  </Badge>
-                </Group>
-                <Text size="xs" c="dimmed" mt={2}>
-                  选择整套配色方案，或通过下方 4 个独立取色盘自由组合主色、次级、选中高亮与表面氛围。
-                </Text>
-              </div>
-            </Group>
-            <Group gap="xs" wrap="wrap">
-              <Button
-                size="xs"
-                variant="light"
-                color="violet"
-                leftSection={<IconSparkles size={14} />}
-                onClick={handleAutoHarmony}
-              >
-                按主色一键搭配
-              </Button>
-              <Button
-                size="xs"
-                variant="subtle"
-                color="gray"
-                leftSection={<IconRotateClockwise size={14} />}
-                disabled={isDefault}
-                onClick={handleReset}
-              >
-                恢复默认配色
-              </Button>
-            </Group>
-          </Group>
-
-          <Text size="xs" fw={600} c="dimmed" mb={8}>
-            精选配色方案
-          </Text>
-          <div className="appearance-preset-grid" role="group" aria-label="精选配色方案">
-            {THEME_PALETTE_PRESETS.map((preset) => {
-              const selected = matchedPreset?.id === preset.id
-              const checkInk = pickContrastInk(preset.palette.primary)
-              return (
-                <button
-                  key={preset.id}
-                  type="button"
-                  className={`appearance-preset-btn${selected ? ' is-selected' : ''}`}
-                  aria-pressed={selected}
-                  aria-label={`应用主题配色 ${preset.name}`}
-                  onClick={() => handleApplyPalette(preset.palette, true)}
-                >
-                  <span className="appearance-preset-dots" aria-hidden="true">
-                    <span
-                      className="appearance-swatch-dot"
-                      style={{ backgroundColor: preset.palette.primary, color: checkInk }}
-                    >
-                      {selected && <IconCheck size={12} stroke={2.8} />}
-                    </span>
-                    <span
-                      className="appearance-swatch-dot is-sub"
-                      style={{ backgroundColor: preset.palette.secondary }}
-                    />
-                    <span
-                      className="appearance-swatch-dot is-sub"
-                      style={{ backgroundColor: preset.palette.highlight }}
-                    />
-                    <span
-                      className="appearance-swatch-dot is-sub"
-                      style={{ backgroundColor: preset.palette.surface }}
-                    />
-                  </span>
-                  <span className="appearance-preset-name">{preset.name}</span>
-                </button>
-              )
-            })}
+      {/* Section: Minimalist Theme Preset Swatches */}
+      <div className="appearance-theme-section">
+        <div className="appearance-theme-head">
+          <span className="appearance-theme-label">主题配色</span>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 14 }}>
+            {showCustomPickers && (
+              <button type="button" className="st-text-link is-muted" onClick={handleAutoHarmony}>
+                按主色搭配
+              </button>
+            )}
+            <button
+              type="button"
+              className="st-text-link is-muted"
+              disabled={isDefault}
+              onClick={handleReset}
+            >
+              恢复默认配色
+            </button>
           </div>
+        </div>
 
-          <Paper withBorder radius="md" p="md" className="appearance-preview-panel" mb="md">
-            <Group justify="space-between" align="center" mb="sm" wrap="wrap" gap="xs">
-              <Text size="xs" fw={600} c="dimmed">全界面实时效果预览</Text>
-              <Text size="xs" c="dimmed">
-                主按钮对比度 {primaryRatio.toFixed(1)}:1 {primaryRatio >= 4.5 ? '· WCAG AA' : ''}
-              </Text>
-            </Group>
-            <div className="appearance-preview-stage">
-              <div className="appearance-preview-sidebar">
-                <div className="appearance-preview-rail">
-                  <span className="appearance-preview-rail-btn is-active">会话</span>
-                  <span className="appearance-preview-rail-btn">待办</span>
-                </div>
-                <div className="appearance-preview-list">
-                  <div className="appearance-preview-pills">
-                    <span className="appearance-preview-pill is-active">全部</span>
-                    <span className="appearance-preview-pill">运行中</span>
-                  </div>
-                  <div className="appearance-preview-row is-active">
-                    <span className="appearance-preview-row-dot" aria-hidden="true" />
-                    当前激活会话
-                  </div>
-                  <div className="appearance-preview-row">常规会话条目</div>
-                </div>
-              </div>
-
-              <div className="appearance-preview-controls">
-                <Group gap="xs" wrap="wrap">
-                  <Button size="xs" color="violet">主要按钮</Button>
-                  <span className="appearance-preview-send-btn">
-                    <IconSend size={13} aria-hidden="true" />
-                    发送渐变
-                  </span>
-                  <span className="appearance-preview-secondary-tag">次级标签</span>
-                  <Switch
-                    size="sm"
-                    color="indigo"
-                    label="开关控件"
-                    checked={previewSwitch}
-                    onChange={(e) => setPreviewSwitch(e.currentTarget.checked)}
+        <div className="appearance-preset-grid" role="group" aria-label="精选配色方案">
+          {THEME_PALETTE_PRESETS.map((preset) => {
+            const selected = matchedPreset?.id === preset.id
+            return (
+              <button
+                key={preset.id}
+                type="button"
+                className={`appearance-preset-btn${selected ? ' is-selected' : ''}`}
+                aria-pressed={selected}
+                aria-label={`应用主题配色 ${preset.name}`}
+                onClick={() => handleApplyPalette(preset.palette, true)}
+              >
+                <span className="appearance-preset-dots" aria-hidden="true">
+                  <span
+                    className="appearance-swatch-dot"
+                    style={{ backgroundColor: preset.palette.primary }}
                   />
-                </Group>
+                  <span
+                    className="appearance-swatch-dot is-sub"
+                    style={{ backgroundColor: preset.palette.secondary }}
+                  />
+                  <span
+                    className="appearance-swatch-dot is-sub"
+                    style={{ backgroundColor: preset.palette.surface }}
+                  />
+                </span>
+                <span className="appearance-preset-name">{preset.name}</span>
+                {selected && <IconCheck size={14} stroke={2.4} className="appearance-preset-check" aria-hidden="true" />}
+              </button>
+            )
+          })}
+        </div>
+      </div>
 
-                <div className="appearance-preview-focus-box">
-                  <Text size="xs" fw={550}>选中高亮与氛围底色联动</Text>
-                  <Text size="11px" c="dimmed" mt={2}>
-                    主色 <code className="appearance-preview-code">{palette.primary}</code> ·
-                    次级 <code className="appearance-preview-code is-secondary">{palette.secondary}</code> ·
-                    选中 <code className="appearance-preview-code">{palette.highlight}</code> ·
-                    氛围 <code className="appearance-preview-code">{palette.surface}</code>
-                  </Text>
-                </div>
-              </div>
-            </div>
-          </Paper>
+      {/* Disclosure Row: 4-Role Fine-Tuning Pickers */}
+      <button
+        type="button"
+        className="st-disclosure-row"
+        aria-expanded={showCustomPickers}
+        onClick={() => setCustomPickersOpen((v) => !v)}
+      >
+        <div className="st-setting-row-copy">
+          <div className="st-setting-row-title">自定义四层级细调配色</div>
+          <div className="st-setting-row-desc">按主色、次级、高亮与氛围单独微调</div>
+        </div>
+        {showCustomPickers ? (
+          <IconChevronDown size={16} style={{ color: 'var(--st-faint)', flexShrink: 0 }} />
+        ) : (
+          <IconChevronRight size={16} style={{ color: 'var(--st-faint)', flexShrink: 0 }} />
+        )}
+      </button>
 
-          <Text size="xs" fw={600} c="dimmed" mb={8}>
-            独立取色盘（按层级自由搭配）
-          </Text>
-          <div className="appearance-role-grid">
-            {THEME_ROLE_DESCRIPTORS.map((descriptor) => (
-              <RoleColorPickerCard
-                key={descriptor.role}
-                descriptor={descriptor}
-                value={palette[descriptor.role]}
-                defaultValue={DEFAULT_THEME_PALETTE[descriptor.role]}
-                onChange={handleRoleChange}
-              />
-            ))}
-          </div>
-        </Card>
-      </Stack>
+      <Collapse expanded={showCustomPickers}>
+        <div className="appearance-role-grid" style={{ paddingTop: 12 }}>
+          {THEME_ROLE_DESCRIPTORS.map((descriptor) => (
+            <RoleColorPickerCard
+              key={descriptor.role}
+              descriptor={descriptor}
+              value={palette[descriptor.role]}
+              defaultValue={DEFAULT_THEME_PALETTE[descriptor.role]}
+              onChange={handleRoleChange}
+            />
+          ))}
+        </div>
+      </Collapse>
     </div>
   )
 }

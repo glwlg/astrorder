@@ -41,12 +41,15 @@ import (
 	"astrorder.dev/app-server/internal/connector"
 	"astrorder.dev/app-server/internal/daemonclient"
 	"astrorder.dev/app-server/internal/dbxplugin"
+	"astrorder.dev/app-server/internal/digest"
 	"astrorder.dev/app-server/internal/files"
 	"astrorder.dev/app-server/internal/git"
 	"astrorder.dev/app-server/internal/integrations"
+	"astrorder.dev/app-server/internal/meetings"
 	"astrorder.dev/app-server/internal/memory"
 	"astrorder.dev/app-server/internal/modelgateway"
 	"astrorder.dev/app-server/internal/notifications"
+	"astrorder.dev/app-server/internal/office"
 	"astrorder.dev/app-server/internal/preferences"
 	"astrorder.dev/app-server/internal/reviewrelay"
 	"astrorder.dev/app-server/internal/sessions"
@@ -55,6 +58,7 @@ import (
 	"astrorder.dev/app-server/internal/targetfs"
 	"astrorder.dev/app-server/internal/telemetry"
 	"astrorder.dev/app-server/internal/terminal"
+	"astrorder.dev/app-server/internal/toolchain"
 )
 
 const (
@@ -132,6 +136,7 @@ type Options struct {
 	ModelGateway     http.Handler
 	Settings         http.Handler
 	Capabilities     http.Handler
+	Toolchain        http.Handler
 	Connections      http.Handler
 	Notifications    http.Handler
 	Sessions         http.Handler
@@ -139,6 +144,9 @@ type Options struct {
 	Backups          http.Handler
 	Integrations     http.Handler
 	DbxPlugin        http.Handler
+	Office           http.Handler
+	Digest           http.Handler
+	Meetings         http.Handler
 	Telemetry        http.Handler
 	DynamicOrigins   auth.DynamicOriginLookup
 	DesktopShutdown  func()
@@ -172,6 +180,7 @@ type api struct {
 	modelGateway    http.Handler
 	settings        http.Handler
 	capabilities    http.Handler
+	toolchain       http.Handler
 	connections     http.Handler
 	notifications   http.Handler
 	sessions        http.Handler
@@ -182,6 +191,9 @@ type api struct {
 	backups         http.Handler
 	integrations    http.Handler
 	dbxPlugin       http.Handler
+	office          http.Handler
+	digest          http.Handler
+	meetings        http.Handler
 	telemetry       http.Handler
 }
 
@@ -439,14 +451,15 @@ func NewHandlerChecked(options Options) (http.Handler, error) {
 		})
 	}
 
+	dbxAuditDir := ""
+	if options.Config.DatabasePath != "" {
+		if absDB, absErr := filepath.Abs(options.Config.DatabasePath); absErr == nil {
+			dbxAuditDir = filepath.Dir(absDB)
+		}
+	}
+
 	dbxHandler := options.DbxPlugin
 	if dbxHandler == nil {
-		dbxAuditDir := ""
-		if options.Config.DatabasePath != "" {
-			if absDB, absErr := filepath.Abs(options.Config.DatabasePath); absErr == nil {
-				dbxAuditDir = filepath.Dir(absDB)
-			}
-		}
 		dbxHandler = dbxplugin.NewHandler(dbxplugin.Options{
 			Store:         options.Store,
 			Authorizer:    authenticator,
@@ -456,13 +469,46 @@ func NewHandlerChecked(options Options) (http.Handler, error) {
 		})
 	}
 
+	officeHandler := options.Office
+	if officeHandler == nil {
+		officeHandler = office.NewHandler(office.Options{
+			Store:      options.Store,
+			Authorizer: authenticator,
+			Resolver:   resolver,
+		})
+	}
+
+	meetingsHandler := options.Meetings
+	if meetingsHandler == nil {
+		meetingsHandler = meetings.NewHandler(meetings.Options{
+			Store:      options.Store,
+			Authorizer: authenticator,
+			Logger:     logger,
+		})
+	}
+
+	digestHandler := options.Digest
+	if digestHandler == nil {
+		var historyReader digest.SessionHistoryReader
+		if reader, ok := sessionHandler.(interface {
+			ReadRecentMessages(context.Context, string, string, int) ([]map[string]any, error)
+		}); ok {
+			historyReader = reader.ReadRecentMessages
+		}
+		digestHandler = digest.NewHandler(digest.Options{
+			Store:         options.Store,
+			Authorizer:    authenticator,
+			AuditDir:      dbxAuditDir,
+			HistoryReader: historyReader,
+			Logger:        logger,
+		})
+	}
+
 	telemetryHandler := options.Telemetry
 	if telemetryHandler == nil {
 		telemetryDir := ""
-		if options.Config.DatabasePath != "" {
-			if absDB, absErr := filepath.Abs(options.Config.DatabasePath); absErr == nil {
-				telemetryDir = filepath.Join(filepath.Dir(absDB), "telemetry")
-			}
+		if dbxAuditDir != "" {
+			telemetryDir = filepath.Join(dbxAuditDir, "telemetry")
 		}
 		telemetryHandler = telemetry.NewHandler(telemetry.Options{
 			Authorizer:   authenticator,
@@ -489,6 +535,7 @@ func NewHandlerChecked(options Options) (http.Handler, error) {
 		modelGateway:    options.ModelGateway,
 		settings:        options.Settings,
 		capabilities:    options.Capabilities,
+		toolchain:       options.Toolchain,
 		connections:     options.Connections,
 		notifications:   options.Notifications,
 		sessions:        sessionHandler,
@@ -499,6 +546,9 @@ func NewHandlerChecked(options Options) (http.Handler, error) {
 		backups:         backupsHandler,
 		integrations:    integrationsHandler,
 		dbxPlugin:       dbxHandler,
+		office:          officeHandler,
+		digest:          digestHandler,
+		meetings:        meetingsHandler,
 		telemetry:       telemetryHandler,
 	}
 	if options.BotGroups == nil {
@@ -585,6 +635,18 @@ func (a *api) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 		a.dbxPlugin.ServeHTTP(response, request)
 		return
 	}
+	if a.office != nil && office.Matches(request.Method, request.URL.Path) {
+		a.office.ServeHTTP(response, request)
+		return
+	}
+	if a.digest != nil && digest.Matches(request.Method, request.URL.Path) {
+		a.digest.ServeHTTP(response, request)
+		return
+	}
+	if a.meetings != nil && meetings.Matches(request.Method, request.URL.Path) {
+		a.meetings.ServeHTTP(response, request)
+		return
+	}
 	if a.telemetry != nil && telemetry.Matches(request.Method, request.URL.Path) {
 		a.telemetry.ServeHTTP(response, request)
 		return
@@ -615,6 +677,10 @@ func (a *api) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 	}
 	if a.capabilities != nil && capabilities.Matches(request.Method, request.URL.Path) {
 		a.capabilities.ServeHTTP(response, request)
+		return
+	}
+	if a.toolchain != nil && toolchain.Matches(request.Method, request.URL.Path) {
+		a.toolchain.ServeHTTP(response, request)
 		return
 	}
 	if a.settings != nil && settingsapi.Matches(request.Method, request.URL.Path) {
@@ -768,6 +834,9 @@ func isFilesRoute(p string) bool {
 		"/api/v1/files/search",
 		"/api/v1/files/stage",
 		"/api/v1/files/mkdir",
+		"/api/v1/files/rename",
+		"/api/v1/files/delete",
+		"/api/v1/files/upload",
 		"/api/v1/files/exists",
 		"/api/v1/files/raw",
 		"/api/v1/system/open-file",

@@ -17,6 +17,8 @@ import {
 import { notifications } from '@mantine/notifications'
 import {
   IconArrowUp,
+  IconBriefcase,
+  IconCode,
   IconFolder,
   IconFolderPlus,
   IconPlus,
@@ -30,6 +32,8 @@ import { api, authenticatedApiFetch } from '../api/client'
 import type { Agent, SshConnection } from '../domain/types'
 import { AgentBrandIcon } from './AgentBrandIcon'
 import { BrandedSelect } from './BrandedSelect'
+import { useAppProfile } from '../features/office/appProfile'
+import { setProjectOfficeMode } from '../features/office/officeWorkspaceMode'
 const emptyAgents: Record<string, Agent> = {}
 
 interface DirectoryItem {
@@ -63,6 +67,18 @@ export function AddProjectModal({
     navigate = null
   }
   const queryClient = useQueryClient()
+  const appProfile = useAppProfile()
+  const [spaceKind, setSpaceKind] = useState<'office' | 'developer'>(() =>
+    appProfile === 'office' ? 'office' : 'developer',
+  )
+  const isOfficeSpace = spaceKind === 'office'
+
+  useEffect(() => {
+    if (opened) {
+      setSpaceKind(appProfile === 'office' ? 'office' : 'developer')
+      if (appProfile === 'office') setConnectionId('local')
+    }
+  }, [opened, appProfile])
 
   const [connectionId, setConnectionId] = useState<string>('local')
   const [serverList, setServerList] = useState<Array<{ value: string; label: string }>>([
@@ -280,19 +296,27 @@ export function AddProjectModal({
     if (!selectedPath.trim() || submitting) return
     setSubmitting(true)
     try {
-      const finalName = projectName.trim() || selectedPath.replace(/\\/g, '/').split('/').filter(Boolean).pop() || '未命名项目'
+      const finalName = projectName.trim() || selectedPath.replace(/\\/g, '/').split('/').filter(Boolean).pop() || (isOfficeSpace ? '未命名空间' : '未命名项目')
+      const effectiveConn = isOfficeSpace ? null : (connectionId === 'local' ? null : connectionId)
       const res = await api.createProject({
         workspace: selectedPath.trim(),
         name: finalName,
-        connection_id: connectionId === 'local' ? null : connectionId,
+        connection_id: effectiveConn,
         agent_id: selectedAgentId || 'codex',
       })
+
+      if (isOfficeSpace) {
+        const projKey = res.project?.project_id
+          ? `project:${res.project.source_id || 'local'}\u0000${res.project.project_id}`
+          : ''
+        setProjectOfficeMode({ projectKey: projKey, workspace: selectedPath.trim() }, true)
+      }
 
       // 同时自动为该新项目创建一个会话，以便用户直接进入对话
       const sessionRes = await api.createSession({
         agent_id: selectedAgentId || 'codex',
         workspace: selectedPath.trim(),
-        title: '新会话',
+        title: isOfficeSpace ? '新对话' : '新会话',
         project_id: res.project.project_id,
         project_name: finalName,
       })
@@ -304,7 +328,7 @@ export function AddProjectModal({
 
       notifications.show({
         color: 'teal',
-        message: `项目「${finalName}」已成功创建`,
+        message: isOfficeSpace ? `办公空间「${finalName}」已成功创建` : `项目「${finalName}」已成功创建`,
       })
 
       onClose()
@@ -330,7 +354,7 @@ export function AddProjectModal({
       title={
         <Group gap={8}>
           <IconFolderPlus size={20} color="var(--astr-indigo, #5b6cff)" />
-          <Text fw={700} size="md">新增项目</Text>
+          <Text fw={700} size="md">{isOfficeSpace ? '新建办公空间' : '新增项目'}</Text>
         </Group>
       }
       size="lg"
@@ -338,26 +362,85 @@ export function AddProjectModal({
       centered
     >
       <Stack gap="md">
-        {/* Step 1: 先选服务器 */}
-        <BrandedSelect
-          label="1. 选择运行服务器"
-          description="指定项目所在的本地环境或远端 SSH 服务器"
-          options={serverList.map((srv) => ({
-            value: srv.value,
-            label: srv.label,
-            icon: loadingServers ? <Loader size={13} /> : <IconServer size={14} color="var(--astr-indigo)" />,
-          }))}
-          value={connectionId}
-          onChange={setConnectionId}
-          disabled={loadingServers || submitting}
-        />
+        {/* 空间类型：办公空间 vs 开发项目 */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <button
+            type="button"
+            onClick={() => {
+              setSpaceKind('office')
+              setConnectionId('local')
+            }}
+            aria-pressed={isOfficeSpace}
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 10,
+              padding: '10px 12px',
+              borderRadius: 10,
+              cursor: 'pointer',
+              textAlign: 'left',
+              background: isOfficeSpace ? 'var(--astr-surface, #ffffff)' : 'var(--astr-surface-muted, #f8fafc)',
+              border: isOfficeSpace ? '1.5px solid #18181b' : '1px solid var(--astr-border, #e5e7eb)',
+            }}
+          >
+            <IconBriefcase size={16} style={{ marginTop: 2, flexShrink: 0 }} />
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>办公空间</div>
+              <div style={{ fontSize: 11, color: 'var(--astr-muted)', marginTop: 2 }}>
+                文档撰写、资料整理与汇报，隐藏开发工具
+              </div>
+            </div>
+          </button>
+          <button
+            type="button"
+            onClick={() => setSpaceKind('developer')}
+            aria-pressed={!isOfficeSpace}
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 10,
+              padding: '10px 12px',
+              borderRadius: 10,
+              cursor: 'pointer',
+              textAlign: 'left',
+              background: !isOfficeSpace ? 'var(--astr-surface, #ffffff)' : 'var(--astr-surface-muted, #f8fafc)',
+              border: !isOfficeSpace ? '1.5px solid #18181b' : '1px solid var(--astr-border, #e5e7eb)',
+            }}
+          >
+            <IconCode size={16} style={{ marginTop: 2, flexShrink: 0 }} />
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>开发项目</div>
+              <div style={{ fontSize: 11, color: 'var(--astr-muted)', marginTop: 2 }}>
+                代码仓库、Git 分支、终端与远端 SSH 服务器
+              </div>
+            </div>
+          </button>
+        </div>
+
+        {/* Step 1: 先选服务器（仅开发项目展示） */}
+        {!isOfficeSpace && (
+          <BrandedSelect
+            label="1. 选择运行服务器"
+            description="指定项目所在的本地环境或远端 SSH 服务器"
+            options={serverList.map((srv) => ({
+              value: srv.value,
+              label: srv.label,
+              icon: loadingServers ? <Loader size={13} /> : <IconServer size={14} color="var(--astr-indigo)" />,
+            }))}
+            value={connectionId}
+            onChange={setConnectionId}
+            disabled={loadingServers || submitting}
+          />
+        )}
 
         {/* Step 2: 选择文件夹 (复用文件树组件/浏览) */}
         <div>
           <Group justify="space-between" align="flex-end" mb={4}>
             <div>
-              <Text size="sm" fw={500}>2. 选择项目文件夹</Text>
-              <Text size="xs" c="dimmed">在下方浏览并选择该服务器上的代码根目录</Text>
+              <Text size="sm" fw={500}>{isOfficeSpace ? '1. 选择工作文件夹' : '2. 选择项目文件夹'}</Text>
+              <Text size="xs" c="dimmed">
+                {isOfficeSpace ? '选择本机用于存放资料、文档与汇报产出的文件夹' : '在下方浏览并选择该服务器上的代码根目录'}
+              </Text>
             </div>
             <Button
               size="compact-xs"
@@ -547,17 +630,17 @@ export function AddProjectModal({
 
         {/* Step 3: 项目名称 */}
         <TextInput
-          label="3. 项目展示名称"
-          placeholder="例如：my-project"
+          label={isOfficeSpace ? '2. 工作空间名称' : '3. 项目展示名称'}
+          placeholder={isOfficeSpace ? '例如：Q4 市场企划 / 客户方案' : '例如：my-project'}
           value={projectName}
           onChange={(e) => setProjectName(e.currentTarget.value)}
           disabled={submitting}
         />
 
-        {/* Step 4: 默认 Agent */}
-        {agentOptions.length > 0 && (
+        {/* Step 4: 默认 Agent（办公空间单助手自动选用，避免技术干扰） */}
+        {agentOptions.length > (isOfficeSpace ? 1 : 0) && (
           <BrandedSelect
-            label="4. 初始智能体"
+            label={isOfficeSpace ? '3. 默认 AI 助手' : '4. 初始智能体'}
             options={agentOptions.map((opt) => ({
               value: opt.value,
               label: opt.label,
@@ -579,7 +662,7 @@ export function AddProjectModal({
             loading={submitting}
             disabled={!selectedPath.trim() || !projectName.trim()}
           >
-            确定创建项目
+            {isOfficeSpace ? '创建办公空间' : '确定创建项目'}
           </Button>
         </Group>
       </Stack>

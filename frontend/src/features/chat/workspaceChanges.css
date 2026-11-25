@@ -677,6 +677,10 @@
   width: min(420px, calc(100% - 36px));
   height: min(660px, calc(100% - 210px));
   border-radius: 18px;
+  background: var(--astr-surface);
+  border: 1px solid var(--astr-border);
+  overflow-y: auto;
+  scrollbar-width: thin;
   box-shadow: 0 20px 50px -20px rgb(47 25 77 / 35%), 0 3px 12px rgb(47 25 77 / 8%);
 }
 @media (max-width: 62em) {

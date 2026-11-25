@@ -34,6 +34,7 @@ type Options struct {
 	Publisher        Publisher
 	HTTPClient       *http.Client
 	RemoteExecutable connections.RemoteExecutableResolver
+	OnConfigSaved    func(context.Context, GatewayConfig)
 }
 
 // Handler handles model gateway, analytics, quota, and model sync routes.
@@ -44,6 +45,7 @@ type Handler struct {
 	publisher        Publisher
 	httpClient       *http.Client
 	remoteExecutable connections.RemoteExecutableResolver
+	onConfigSaved    func(context.Context, GatewayConfig)
 	jobs             *jobManager
 
 	directRouteMu        sync.Mutex
@@ -100,6 +102,7 @@ func NewHandler(opts Options) (http.Handler, error) {
 		publisher:        opts.Publisher,
 		httpClient:       httpClient,
 		remoteExecutable: opts.RemoteExecutable,
+		onConfigSaved:    opts.OnConfigSaved,
 		jobs:             newJobManager(),
 		bgCtx:            bgCtx,
 		bgCancel:         bgCancel,

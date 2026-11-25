@@ -7,7 +7,10 @@ import { api } from '../../api/client'
 import { resolveArtifactFromPath } from '../sidecar/resolver'
 import { artifactViewerRegistry } from '../sidecar/registry'
 import { useSidecarStore } from '../sidecar/sidecarStore'
+import { useIsOfficeExperience } from '../office/appProfile'
 import type { Session } from '../../domain/types'
+
+const OFFICE_DOC_EXT_RE = /\.(docx?|xlsx?|pptx?|pdf|md|markdown|csv|tsv|wps|et|dps|txt)$/i
 
 interface QuickOpenProps {
   session: Session
@@ -16,6 +19,7 @@ interface QuickOpenProps {
 }
 
 export function QuickOpen({ session, opened, onClose }: QuickOpenProps) {
+  const isOffice = useIsOfficeExperience(session)
   const [query, setQuery] = useState('')
   const [items, setItems] = useState<Array<{ path: string; name: string }>>([])
   const [loading, setLoading] = useState(false)
@@ -45,7 +49,14 @@ export function QuickOpen({ session, opened, onClose }: QuickOpenProps) {
           connectionId: session.connection_id || undefined,
           limit: 30,
         })
-        setItems(data.items)
+        const nextItems = isOffice
+          ? [...data.items].sort((a, b) => {
+              const aOffice = OFFICE_DOC_EXT_RE.test(a.name) ? 0 : 1
+              const bOffice = OFFICE_DOC_EXT_RE.test(b.name) ? 0 : 1
+              return aOffice - bOffice
+            })
+          : data.items
+        setItems(nextItems)
         setActiveIndex(0)
       } catch {
         setItems([])
@@ -53,7 +64,7 @@ export function QuickOpen({ session, opened, onClose }: QuickOpenProps) {
         setLoading(false)
       }
     },
-    [session.id, session.connection_id],
+    [isOffice, session.id, session.connection_id],
   )
 
   const handleQueryChange = (value: string) => {
@@ -104,8 +115,9 @@ export function QuickOpen({ session, opened, onClose }: QuickOpenProps) {
   const emptyHint = useMemo(() => {
     if (loading) return null
     if (items.length) return null
-    return query ? '没有匹配的文件' : '输入文件名快速打开'
-  }, [loading, items.length, query])
+    if (query) return isOffice ? '没有匹配的文档或文件' : '没有匹配的文件'
+    return isOffice ? '输入文档名快速打开' : '输入文件名快速打开'
+  }, [isOffice, loading, items.length, query])
 
   if (!opened) return null
 
@@ -132,7 +144,7 @@ export function QuickOpen({ session, opened, onClose }: QuickOpenProps) {
           leftSection={<IconSearch size={15} />}
           onChange={(e) => handleQueryChange(e.currentTarget.value)}
           onKeyDown={handleKeyDown}
-          placeholder="输入文件名…"
+          placeholder={isOffice ? '搜索办公文档或文件名…' : '输入文件名…'}
           rightSection={loading ? <Loader size={14} /> : null}
           value={query}
         />

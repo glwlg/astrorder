@@ -223,6 +223,13 @@ func (r *Relay) resolve(request *http.Request) (*sessiondv1.OpenTerminal, error)
 		}
 		sid = hex.EncodeToString(bytes[:])
 		agentID = "terminal"
+		envID := strings.TrimSpace(request.URL.Query().Get("environment_id"))
+		if envID != "" && envID != "local" {
+			connectionID = strings.TrimPrefix(envID, "ssh:")
+			if strings.HasPrefix(envID, "wsl:") {
+				connectionID = envID
+			}
+		}
 	}
 	if agentID == "" || len(agentID) > 256 || len(sid) > 256 {
 		return nil, errors.New("Invalid terminal identity")
@@ -230,14 +237,22 @@ func (r *Relay) resolve(request *http.Request) (*sessiondv1.OpenTerminal, error)
 	digest := sha256.Sum256([]byte(agentID + "\x00" + sid))
 	open := &sessiondv1.OpenTerminal{Target: &sessiondv1.RuntimeTarget{Runtime: sessiondv1.RuntimeKind_RUNTIME_KIND_PTY}, Session: &sessiondv1.SessionRef{SessionId: fmt.Sprintf("pty-%x", digest[:24])}, Cwd: workspace, Cols: 80, Rows: 24}
 	if strings.HasPrefix(connectionID, "wsl:") {
-		argv, err := targetfs.BuildWSLCommand(targetfs.WSLConfig{Distro: strings.TrimPrefix(connectionID, "wsl:"), HelperPath: "/bin/sh"})
+		distro := strings.TrimPrefix(connectionID, "wsl:")
+		argv, err := targetfs.BuildWSLCommand(targetfs.WSLConfig{Distro: distro, HelperPath: "/bin/sh"})
 		if err != nil {
 			return nil, err
 		}
 		open.Executable = &argv[0]
-		open.Args = []string{"-d", strings.TrimPrefix(connectionID, "wsl:"), "--cd", workspace, "--exec", "/bin/sh", "-l"}
+		if request.URL.Query().Get("session_id") == "" {
+			open.Args = []string{"-d", distro, "--exec", "/bin/sh", "-l"}
+		} else {
+			open.Args = []string{"-d", distro, "--cd", workspace, "--exec", "/bin/sh", "-l"}
+		}
 		open.Cwd = r.DefaultWorkspace
 	} else if connectionID != "" && connectionID != "local" {
+		if r.Store == nil {
+			return nil, errors.New("Session store is unavailable")
+		}
 		connection, err := r.Store.GetSSHConnection(request.Context(), connectionID)
 		if err != nil {
 			return nil, err
@@ -273,7 +288,15 @@ func (r *Relay) resolve(request *http.Request) (*sessiondv1.OpenTerminal, error)
 		if err != nil {
 			return nil, err
 		}
-		argv[len(argv)-1] = "cd -- '" + strings.ReplaceAll(workspace, "'", "'\\''") + "' && exec \"${SHELL:-/bin/sh}\" -l"
+		remoteWorkspace := workspace
+		if request.URL.Query().Get("session_id") == "" {
+			remoteWorkspace = stringAt("workspace")
+		}
+		if remoteWorkspace != "" {
+			argv[len(argv)-1] = "cd -- '" + strings.ReplaceAll(remoteWorkspace, "'", "'\\''") + "' && exec \"${SHELL:-/bin/sh}\" -l"
+		} else {
+			argv[len(argv)-1] = "exec \"${SHELL:-/bin/sh}\" -l"
+		}
 		open.Executable = &argv[0]
 		open.Args = append([]string{"-tt"}, argv[1:]...)
 		open.Cwd = r.DefaultWorkspace

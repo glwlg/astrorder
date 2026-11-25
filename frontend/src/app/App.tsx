@@ -21,7 +21,9 @@ import {
   WORKSPACE_AGENT_ACCOUNTS_PLUGIN_ID,
   WORKSPACE_ANALYTICS_GATEWAY_PLUGIN_ID,
   WORKSPACE_BACKUPS_PLUGIN_ID,
+  WORKSPACE_DIGEST_PLUGIN_ID,
   WORKSPACE_GROUPS_PLUGIN_ID,
+  WORKSPACE_MEETINGS_PLUGIN_ID,
   WORKSPACE_MONITOR_PLUGIN_ID,
 } from '../features/plugins/builtinPlugins'
 import { usePluginSettingsStore } from '../features/plugins/pluginSettingsStore'
@@ -41,6 +43,8 @@ const MonitorPage = lazyNamed(() => import('../features/monitor/MonitorPage'), '
 const PluginsPage = lazyNamed(() => import('../features/plugins/PluginsPage'), 'PluginsPage')
 const AnalyticsPage = lazyNamed(() => import('../features/analytics/AnalyticsPage'), 'AnalyticsPage')
 const BackupsPage = lazyNamed(() => import('../features/backups/BackupsPage'), 'BackupsPage')
+const DigestPage = lazyNamed(() => import('../features/digest/DigestPage'), 'DigestPage')
+const MeetingsPage = lazyNamed(() => import('../features/meetings/MeetingsPage'), 'MeetingsPage')
 const IntegrationPage = lazyNamed(() => import('../features/integrations/IntegrationPage'), 'IntegrationPage')
 const AgentAccountsLayout = lazyNamed(() => import('../features/agentAccounts/AgentAccountsLayout'), 'AgentAccountsLayout')
 const UnavailablePlatformPage = lazyNamed(() => import('../features/agentAccounts/UnavailablePlatformPage'), 'UnavailablePlatformPage')
@@ -116,6 +120,8 @@ function AuthenticatedApp() {
   const backupsEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_BACKUPS_PLUGIN_ID))
   const accountsEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_AGENT_ACCOUNTS_PLUGIN_ID))
   const integrationsEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(SIDEBAR_INTEGRATIONS_PLUGIN_ID))
+  const digestEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_DIGEST_PLUGIN_ID))
+  const meetingsEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_MEETINGS_PLUGIN_ID))
   const isStandaloneSettings =
     location.pathname === '/settings' || location.pathname.startsWith('/settings/')
   useShortcutHandlers(
@@ -184,6 +190,8 @@ function AuthenticatedApp() {
         <Route path="chat" element={<ChatPage />} />
         <Route path="chat/:sessionId" element={<ChatPage />} />
         <Route path="inbox" element={<Suspense fallback={<RouteSuspenseFallback />}><ActionInboxPage /></Suspense>} />
+        <Route path="digest" element={digestEnabled ? <Suspense fallback={<RouteSuspenseFallback />}><DigestPage /></Suspense> : <Navigate to="/chat" replace />} />
+        <Route path="meetings" element={meetingsEnabled ? <Suspense fallback={<RouteSuspenseFallback />}><MeetingsPage /></Suspense> : <Navigate to="/chat" replace />} />
         <Route path="groups" element={groupsEnabled ? <Suspense fallback={<RouteSuspenseFallback />}><GroupsPage /></Suspense> : <Navigate to="/chat" replace />} />
         <Route path="groups/:groupId" element={groupsEnabled ? <Suspense fallback={<RouteSuspenseFallback />}><GroupsPage /></Suspense> : <Navigate to="/chat" replace />} />
         <Route path="monitor" element={monitorEnabled ? <Suspense fallback={<RouteSuspenseFallback />}><MonitorPage /></Suspense> : <Navigate to="/chat" replace />} />

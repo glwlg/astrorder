@@ -183,7 +183,7 @@ export const useDbxSidecarStore = create<DbxSidecarState>((set, get) => ({
   },
 }))
 
-async function readSqlText(path: string, sessionId?: string, connectionId?: string): Promise<string> {
+export async function readSqlText(path: string, sessionId?: string, connectionId?: string): Promise<string> {
   const query = new URLSearchParams({ path })
   if (sessionId) query.set('session_id', sessionId)
   if (connectionId) query.set('connection_id', connectionId)

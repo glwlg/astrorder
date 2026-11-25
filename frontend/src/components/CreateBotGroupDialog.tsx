@@ -20,6 +20,7 @@ import { api, ApiError } from "../api/client";
 import { scopeKey } from "../domain/semantics";
 import type { Agent, BotGroup, BotGroupMember, Session } from "../domain/types";
 import { useAstrorderStore } from "../state/store";
+import { usePluginSettingsStore } from "../features/plugins/pluginSettingsStore";
 import { AgentBrandIcon } from "./AgentBrandIcon";
 import { REASONING_EFFORTS } from "../features/chat/composerMedia";
 
@@ -106,8 +107,15 @@ export function CreateBotGroupDialog({
   const [formError, setFormError] = useState("");
   const forked = useRef<Record<string, string>>({});
   const projects = useAstrorderStore((state) => state.projects);
+  const enabledPlugins = usePluginSettingsStore((state) => state.enabledPlugins);
+  const isAgentEnabled = usePluginSettingsStore((state) => state.isAgentEnabled);
+  void enabledPlugins;
   const activeAgents = Object.values(agents).filter(
-    (agent) => agent.status === "ready" && agent.kind !== "antigravity" && agent.kind !== "antigravity-ssh",
+    (agent) =>
+      agent.status === "ready" &&
+      isAgentEnabled(agent.kind) &&
+      agent.kind !== "antigravity" &&
+      agent.kind !== "antigravity-ssh",
   );
 
   useEffect(() => {

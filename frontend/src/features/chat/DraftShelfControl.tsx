@@ -5,7 +5,6 @@ import type { DraftState } from '../../domain/types'
 import { newCommandId } from '../../domain/semantics'
 import { ApiError } from '../../api/client'
 import { draftShelfStorage, draftStorage, type StashedDraft } from './draftStorage'
-import { ComposerGlassMenu, GlassButtonLens } from '../../components/GlassPanel'
 
 const emptyDraft = (): DraftState => ({ text: '', attachments: [], sessionRefs: [] })
 const hasContent = (draft: DraftState) => Boolean(draft.text || draft.attachments.length || draft.sessionRefs?.length)
@@ -91,12 +90,10 @@ export function DraftShelfControl({ scope, draft, hasDraftContent, getDraft, dis
           else setOpened(value => !value)
         }}
         onContextMenu={event => { event.preventDefault(); if (!disabled && !busy && ready) setOpened(true) }}>
-        <GlassButtonLens />
         {entries.length > 0 ? <IconArchiveFilled size={19} /> : <IconArchive size={19} />}
       </Button>
     </Popover.Target>
     <Popover.Dropdown className="composer-draft-shelf" p="xs" role="region" aria-label="暂存草稿列表" style={{ maxHeight: 'min(320px, 50dvh)', overflowY: 'auto' }}>
-      <ComposerGlassMenu active={opened}>
       <Stack gap="xs">
         <Text size="xs" c="dimmed">已保存到数据库，双击内容可移回输入框。</Text>
         {entries.length > 0 && <Group justify="flex-end" gap={4}>
@@ -120,7 +117,6 @@ export function DraftShelfControl({ scope, draft, hasDraftContent, getDraft, dis
           </Group>
         </Paper>)}
       </Stack>
-      </ComposerGlassMenu>
     </Popover.Dropdown>
   </Popover>
 }

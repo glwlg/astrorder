@@ -36,6 +36,9 @@ func Registrations() []Registration {
 		{Kind: "http", Method: http.MethodGet, Path: "/api/v1/files/search", Auth: "browser", Owner: "go-app"},
 		{Kind: "http", Method: http.MethodPost, Path: "/api/v1/files/stage", Auth: "browser", Owner: "go-app"},
 		{Kind: "http", Method: http.MethodPost, Path: "/api/v1/files/mkdir", Auth: "browser", Owner: "go-app"},
+		{Kind: "http", Method: http.MethodPost, Path: "/api/v1/files/rename", Auth: "browser", Owner: "go-app"},
+		{Kind: "http", Method: http.MethodPost, Path: "/api/v1/files/delete", Auth: "browser", Owner: "go-app"},
+		{Kind: "http", Method: http.MethodPost, Path: "/api/v1/files/upload", Auth: "browser", Owner: "go-app"},
 		{Kind: "http", Method: http.MethodPost, Path: "/api/v1/files/exists", Auth: "browser", Owner: "go-app"},
 		{Kind: "http", Method: http.MethodGet, Path: "/api/v1/files/raw", Auth: "browser", Owner: "go-app"},
 		{Kind: "http", Method: http.MethodPost, Path: "/api/v1/system/open-file", Auth: "browser", Owner: "go-app"},
@@ -104,6 +107,12 @@ func (h *Handler) ServeHTTP(response http.ResponseWriter, request *http.Request)
 		err = h.stage(response, request)
 	case "/api/v1/files/mkdir":
 		err = h.mkdir(response, request)
+	case "/api/v1/files/rename":
+		err = h.rename(response, request)
+	case "/api/v1/files/delete":
+		err = h.delete(response, request)
+	case "/api/v1/files/upload":
+		err = h.upload(response, request)
 	case "/api/v1/files/exists":
 		err = h.exists(response, request)
 	case "/api/v1/files/raw":
@@ -307,6 +316,18 @@ func (h *Handler) exists(response http.ResponseWriter, request *http.Request) er
 
 func mediaContentTypeFallback(name, detected string) string {
 	switch strings.ToLower(filepath.Ext(name)) {
+	case ".pdf":
+		return "application/pdf"
+	case ".docx":
+		return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+	case ".xlsx":
+		return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+	case ".pptx":
+		return "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+	case ".csv":
+		return "text/csv; charset=utf-8"
+	case ".tsv":
+		return "text/tab-separated-values; charset=utf-8"
 	case ".mp4", ".m4v":
 		return "video/mp4"
 	case ".webm":

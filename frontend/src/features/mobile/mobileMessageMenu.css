@@ -7,9 +7,7 @@
   max-width: calc(100vw - 24px);
   padding: 5px;
   margin: 0;
-  background: rgba(255, 255, 255, 0.86);
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  background: var(--astr-surface, #ffffff);
   border: 1px solid color-mix(in oklab, var(--astr-accent, #7540bd) 16%, transparent);
   box-shadow:
     0 12px 32px rgba(34, 20, 62, 0.14),
@@ -21,7 +19,7 @@
 }
 
 :root[data-mantine-color-scheme='dark'] .m-message-popover {
-  background: rgba(26, 30, 42, 0.88);
+  background: var(--astr-surface, #1a1e2a);
   border: 1px solid color-mix(in oklab, var(--astr-accent, #bc92ff) 20%, transparent);
   color: #e8ebf5;
   box-shadow:

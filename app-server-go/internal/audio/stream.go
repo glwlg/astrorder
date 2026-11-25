@@ -63,6 +63,7 @@ func (s *Service) handleLocalStream(w http.ResponseWriter, r *http.Request) {
 
 	var pcmMu sync.Mutex
 	pcm := make([]byte, 0, 32000*10)
+	pendingCommits := make([][]byte, 0, 4)
 	var transcript string
 	stopping := false
 	changed := make(chan struct{}, 1)
@@ -85,6 +86,41 @@ func (s *Service) handleLocalStream(w http.ResponseWriter, r *http.Request) {
 			case <-ctx.Done():
 				return
 			case <-changed:
+			}
+
+			// 1. Drain any committed segments first (seamless rolling meeting segmentation)
+			for {
+				pcmMu.Lock()
+				var commitBuf []byte
+				if len(pendingCommits) > 0 {
+					commitBuf = pendingCommits[0]
+					pendingCommits = pendingCommits[1:]
+				}
+				pcmMu.Unlock()
+				if commitBuf == nil {
+					break
+				}
+				segText := transcript
+				if len(commitBuf) > 0 {
+					t, err := s.plugin.TranscribePCM(ctx, commitBuf)
+					if err != nil {
+						if ctx.Err() == nil {
+							_ = writeWSJSON(conn, map[string]any{
+								"type":    "error",
+								"message": "本地流式听写失败，请重试。",
+							})
+							_ = conn.Close(1011, "Internal Error")
+						}
+						return
+					}
+					segText = t
+				}
+				lastInferenceSize = 0
+				transcript = ""
+				_ = writeWSJSON(conn, map[string]any{
+					"type": "segment",
+					"text": segText,
+				})
 			}
 
 			pcmMu.Lock()
@@ -113,13 +149,19 @@ func (s *Service) handleLocalStream(w http.ResponseWriter, r *http.Request) {
 				})
 			}
 
-			if isStopping && len(currentPCM) == lastInferenceSize {
-				_ = writeWSJSON(conn, map[string]any{
-					"type": "done",
-					"text": transcript,
-				})
-				_ = conn.Close(websocket.StatusNormalClosure, "Done")
-				return
+			if isStopping {
+				pcmMu.Lock()
+				stillPending := len(pendingCommits) > 0 || len(pcm) != lastInferenceSize
+				pcmMu.Unlock()
+				if !stillPending {
+					_ = writeWSJSON(conn, map[string]any{
+						"type": "done",
+						"text": transcript,
+					})
+					_ = conn.Close(websocket.StatusNormalClosure, "Done")
+					return
+				}
+				signalChanged()
 			}
 		}
 	}()
@@ -167,6 +209,15 @@ func (s *Service) handleLocalStream(w http.ResponseWriter, r *http.Request) {
 				_ = conn.Close(websocket.StatusNormalClosure, "Cancelled")
 				cancel()
 				return
+			}
+			if ctrl.Type == "commit" {
+				pcmMu.Lock()
+				commitBuf := append([]byte(nil), pcm...)
+				pcm = make([]byte, 0, 32000*10)
+				pendingCommits = append(pendingCommits, commitBuf)
+				pcmMu.Unlock()
+				signalChanged()
+				continue
 			}
 			if ctrl.Type == "stop" {
 				pcmMu.Lock()

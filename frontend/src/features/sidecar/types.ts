@@ -26,7 +26,9 @@ export interface ViewerConfigOption {
 }
 
 export type PluginCategory =
+  | 'agent'
   | 'development'
+  | 'office'
   | 'workspace'
   | 'diagram'
   | 'media'

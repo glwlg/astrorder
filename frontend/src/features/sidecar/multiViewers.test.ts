@@ -53,7 +53,7 @@ describe('Multi-Artifact Viewer Suite', () => {
   it('matches the agent decision graph sidecar tab', () => {
     const viewer = artifactViewerRegistry.findViewer({
       id: 'agentgraph:session-multi',
-      name: '决策状态机',
+      name: '决策与轨迹',
       kind: 'workspace_file',
       mediaType: 'application/x-agent-graph',
       readUrl: '',

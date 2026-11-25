@@ -13,7 +13,9 @@ import {
   IconFileDescription,
   IconFlame,
   IconInfoCircle,
+  IconLoader2,
   IconPhoto,
+  IconPlayerPlay,
   IconTextWrap,
 } from '@tabler/icons-react'
 import { Anchor } from '@mantine/core'
@@ -29,11 +31,19 @@ import {
   isSqlLanguage,
   openSqlFileInDatabaseTool,
   openSqlSnippetInDatabaseTool,
+  stripSqlLocationSuffix,
   useHasDatabaseTool,
 } from '../features/sidecar/databaseTool'
+import { InlineSqlActionBar } from '../features/dbxExec/InlineSqlActionBar'
+import { InlineSqlResultCard } from '../features/dbxExec/InlineSqlResultCard'
+import { ProjectDatabaseModal } from '../features/dbxExec/ProjectDatabaseModal'
+import { SqlExecuteConfirmModal } from '../features/dbxExec/SqlExecuteConfirmModal'
+import { formatTargetLabel } from '../features/dbxExec/projectDbStore'
+import { useInlineSqlExecutor } from '../features/dbxExec/useInlineSqlExecutor'
 import { videoMediaType } from '../features/sidecar/viewers/video/formats'
 import { resolveArtifactFromPath } from '../features/sidecar/resolver'
 import { useSidecarStore } from '../features/sidecar/sidecarStore'
+import { useIsOfficeExperience } from '../features/office/appProfile'
 import { useAstrorderStore } from '../state/store'
 import { renderMermaid } from './renderMermaid'
 import { CodexVisualization, extractVisualizations } from './CodexVisualization'
@@ -108,14 +118,16 @@ function MermaidDiagram({ code }: { code: string }) {
 }
 
 const MarkdownSessionContext = createContext<Session | null>(null)
+const MarkdownSqlExecContext = createContext<ReturnType<typeof useInlineSqlExecutor> | null>(null)
 
 function MarkdownCodeBlock({ children }: { children?: ReactNode }) {
   const [copied, setCopied] = useState(false)
   const [wrap, setWrap] = useState(false)
   const codeRef = useRef<HTMLElement>(null)
-  const openArtifact = useSidecarStore((state) => state.openArtifact)
   const session = useContext(MarkdownSessionContext)
-  const hasDatabaseTool = useHasDatabaseTool()
+  const sqlExec = useContext(MarkdownSqlExecContext)
+  const isOfficeMode = useIsOfficeExperience(session)
+  const hasDatabaseTool = useHasDatabaseTool() && !isOfficeMode
 
   let language = ''
   let rawText = ''
@@ -124,14 +136,30 @@ function MarkdownCodeBlock({ children }: { children?: ReactNode }) {
     if (match) language = match[1]
     if (typeof children.props.children === 'string') rawText = children.props.children
   }
-  const lineCount = rawText ? rawText.split('\n').length : 0
   const isSqlBlock = Boolean(language && isSqlLanguage(language))
+  const snippetRunKey = useMemo(
+    () => (isSqlBlock && rawText.trim() ? `snippet:${hashSnippet(rawText.trim())}` : ''),
+    [isSqlBlock, rawText],
+  )
+  const snippetRun = snippetRunKey && sqlExec ? sqlExec.runs[snippetRunKey] : undefined
 
   const handleOpenInDatabaseTool = (e: React.MouseEvent) => {
     e.stopPropagation()
     const text = codeRef.current?.innerText || codeRef.current?.textContent || rawText
     if (!text.trim()) return
     openSqlSnippetInDatabaseTool({ sql: text, session })
+  }
+
+  const handleRunSqlInline = () => {
+    if (!sqlExec) return
+    const text = (codeRef.current?.innerText || codeRef.current?.textContent || rawText).trim()
+    if (!text) return
+    const runKey = snippetRunKey || `snippet:${hashSnippet(text)}`
+    sqlExec.triggerRun({
+      runKey,
+      sql: text,
+      sourceKind: 'snippet',
+    })
   }
 
   const handleCopy = (e: React.MouseEvent) => {
@@ -141,28 +169,6 @@ function MarkdownCodeBlock({ children }: { children?: ReactNode }) {
     void navigator.clipboard.writeText(text)
     setCopied(true)
     setTimeout(() => setCopied(false), 1600)
-  }
-
-  const handleOpenInCanvas = (e: React.MouseEvent) => {
-    e.stopPropagation()
-    const text = codeRef.current?.innerText || codeRef.current?.textContent || rawText
-    if (!text.trim()) return
-    const ext = language ? `.${language.toLowerCase()}` : '.txt'
-    const id = `inline-code:${hashSnippet(text)}`
-    openArtifact(
-      {
-        id,
-        sessionId: 'inline',
-        agentId: '',
-        name: `代码片段${ext}`,
-        kind: 'workspace_file',
-        readUrl: '',
-        mediaType: 'text/plain',
-        writable: false,
-        metadata: { inlineContent: text },
-      },
-      'monaco-viewer',
-    )
   }
 
   const renderedCode = useMemo(
@@ -175,6 +181,19 @@ function MarkdownCodeBlock({ children }: { children?: ReactNode }) {
       <div className="markdown-code-header">
         <span className="markdown-code-lang">{(language || 'code').toUpperCase()}</span>
         <div className="markdown-code-actions">
+          {isSqlBlock && hasDatabaseTool && sqlExec?.enabled && session && (
+            <InlineSqlActionBar
+              targets={sqlExec.targets}
+              activeTarget={sqlExec.activeTarget}
+              running={Boolean(snippetRun?.running)}
+              onSelectTarget={sqlExec.selectTarget}
+              onOpenBindModal={() => sqlExec.setBindModalOpened(true)}
+              onRun={handleRunSqlInline}
+              onCancel={() => {
+                if (snippetRunKey) sqlExec.cancelRun(snippetRunKey)
+              }}
+            />
+          )}
           {isSqlBlock && hasDatabaseTool && (
             <button
               type="button"
@@ -200,18 +219,6 @@ function MarkdownCodeBlock({ children }: { children?: ReactNode }) {
             <IconTextWrap size={12} aria-hidden="true" />
             <span>{wrap ? '滚动' : '换行'}</span>
           </button>
-          {lineCount >= 6 && (
-            <button
-              type="button"
-              className="markdown-code-copy-btn markdown-canvas-btn"
-              onClick={handleOpenInCanvas}
-              aria-label="在侧边画布查看代码"
-              title="在右侧 Monaco 画布中对照查看"
-            >
-              <IconEye size={12} aria-hidden="true" />
-              <span>画布</span>
-            </button>
-          )}
           <button
             type="button"
             className="markdown-code-copy-btn"
@@ -232,6 +239,19 @@ function MarkdownCodeBlock({ children }: { children?: ReactNode }) {
           <code ref={codeRef}>{children}</code>
         )}
       </pre>
+      {snippetRun && sqlExec && (
+        <InlineSqlResultCard
+          record={snippetRun}
+          session={session}
+          onCancel={() => sqlExec.cancelRun(snippetRun.id)}
+          onClose={() => sqlExec.closeRun(snippetRun.id)}
+          onOpenInDbx={
+            hasDatabaseTool
+              ? () => openSqlSnippetInDatabaseTool({ sql: snippetRun.sql, session })
+              : undefined
+          }
+        />
+      )}
     </div>
   )
 }
@@ -299,7 +319,7 @@ function cleanHref(raw: string | undefined): string {
 }
 
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.svg', '.gif', '.bmp', '.ico'])
-const DOC_EXTENSIONS = new Set(['.md', '.markdown', '.txt', '.log', '.pdf', '.docx'])
+const DOC_EXTENSIONS = new Set(['.md', '.markdown', '.txt', '.log', '.pdf', '.docx', '.xlsx', '.pptx', '.csv', '.tsv'])
 const CONFIG_EXTENSIONS = new Set(['.json', '.yaml', '.yml', '.toml', '.ini', '.env', '.conf', '.cfg', '.properties', '.xml'])
 
 function fileExtension(path: string): string {
@@ -493,6 +513,12 @@ export const MarkdownContent = memo(function MarkdownContent({
     return undefined
   })
   const currentSession = session === undefined ? defaultSession : session
+  const isOfficeMode = useIsOfficeExperience(currentSession)
+  const hasSqlCandidate = useMemo(
+    () => !isOfficeMode && /(?:```|~~~)\s*(?:sql|postgres(?:ql)?|pgsql|plpgsql|mysql|mariadb|sqlite|tsql|mssql|plsql|oracle|ddl|dml|clickhouse|duckdb|snowflake|bigquery|hql|hive)\b|\.(?:sql|ddl|psql|plpgsql|plsql|tsql)\b/i.test(value),
+    [isOfficeMode, value],
+  )
+  const sqlExec = useInlineSqlExecutor(currentSession, hasSqlCandidate)
   const openArtifact = useSidecarStore((state) => state.openArtifact)
   const rootKey = !fileSourceScope && session?.workspace ? JSON.stringify([session.id, session.workspace, session.connection_id]) : ''
   const [rootFiles, setRootFiles] = useState<{ key: string; names: Set<string> } | null>(null)
@@ -682,8 +708,11 @@ export const MarkdownContent = memo(function MarkdownContent({
     window.open(`/api/v1/files/raw?path=${encodeURIComponent(fullPath)}&download=1`, '_blank')
   }
 
+  const fileRuns = Object.values(sqlExec.runs).filter((r) => r.sourceKind === 'file')
+
   return (
     <MarkdownSessionContext.Provider value={currentSession ?? null}>
+    <MarkdownSqlExecContext.Provider value={sqlExec}>
     <div className="markdown-content">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
@@ -786,7 +815,7 @@ export const MarkdownContent = memo(function MarkdownContent({
                 void handleOpenLocalFile(cleaned, parsedHref.line, parsedHref.endLine)
               }
 
-              return (
+              const filePillButton = (
                 <button
                   type="button"
                   className={linkClass}
@@ -815,6 +844,51 @@ export const MarkdownContent = memo(function MarkdownContent({
                   )}
                 </button>
               )
+
+              if (sqlExec.enabled && currentSession && isSqlFilePath(fullPath)) {
+                const cleanSqlPath = stripSqlLocationSuffix(fullPath)
+                const fileRunKey = `file:${cleanSqlPath}`
+                const fileRun = sqlExec.runs[fileRunKey]
+                const fileBusy = sqlExec.loadingFileKey === fileRunKey || Boolean(fileRun?.running)
+                const fileOk = Boolean(fileRun && !fileRun.running && !fileRun.error && fileRun.result?.ok)
+                const fileFailed = Boolean(fileRun && !fileRun.running && (fileRun.error || (fileRun.result && !fileRun.result.ok)))
+                const isProdTarget = Boolean(sqlExec.activeTarget?.is_prod)
+                const targetTitle = sqlExec.activeTarget
+                  ? `${formatTargetLabel(sqlExec.activeTarget)}${isProdTarget ? ' [PROD]' : ''}`
+                  : '先关联项目数据库'
+                const btnStateClass = fileOk ? ' is-ok' : fileFailed ? ' is-error' : isProdTarget ? ' is-prod' : ''
+
+                return (
+                  <span className="markdown-sql-file-group">
+                    {filePillButton}
+                    <button
+                      type="button"
+                      className={`markdown-sql-file-run-btn${btnStateClass}`}
+                      disabled={fileBusy}
+                      aria-label={`原地执行 SQL 文件 ${displayName}`}
+                      title={`原地执行 ${displayName}（目标：${targetTitle}）`}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        closeHoverNow()
+                        void sqlExec.triggerFileRun(fullPath)
+                      }}
+                    >
+                      {fileBusy ? (
+                        <IconLoader2 size={11} className="astrorder-spin" aria-hidden="true" />
+                      ) : fileOk ? (
+                        <IconCheck size={11} aria-hidden="true" />
+                      ) : fileFailed ? (
+                        <IconAlertCircle size={11} aria-hidden="true" />
+                      ) : (
+                        <IconPlayerPlay size={10} aria-hidden="true" />
+                      )}
+                      <span>执行</span>
+                    </button>
+                  </span>
+                )
+              }
+
+              return filePillButton
             }
 
             const safe = safeUrl(href)
@@ -913,7 +987,35 @@ export const MarkdownContent = memo(function MarkdownContent({
       >
         {normalizedValue}
       </ReactMarkdown>
-      {linkMenu && <MarkdownLinkMenu target={linkMenu} session={currentSession} onClose={() => setLinkMenu(null)} />}
+      {fileRuns.length > 0 && (
+        <div className="markdown-sql-file-results">
+          {fileRuns.map((run) => (
+            <InlineSqlResultCard
+              key={run.id}
+              record={run}
+              session={currentSession}
+              onCancel={() => sqlExec.cancelRun(run.id)}
+              onClose={() => sqlExec.closeRun(run.id)}
+              onOpenInDbx={
+                hasActiveDatabaseTool() && currentSession
+                  ? () => {
+                      const path = run.id.replace(/^file:/, '')
+                      void openSqlFileInDatabaseTool({ path, session: currentSession })
+                    }
+                  : undefined
+              }
+            />
+          ))}
+        </div>
+      )}
+      {linkMenu && (
+        <MarkdownLinkMenu
+          target={linkMenu}
+          session={currentSession}
+          onExecuteSqlFile={sqlExec.enabled && currentSession ? (path) => void sqlExec.triggerFileRun(path) : undefined}
+          onClose={() => setLinkMenu(null)}
+        />
+      )}
       {hoverTarget && (
         <FileLinkHoverPreview
           target={hoverTarget}
@@ -928,7 +1030,40 @@ export const MarkdownContent = memo(function MarkdownContent({
         />
       )}
       {visualizations.paths.map(path => <CodexVisualization key={path} path={path} session={currentSession} />)}
+      {sqlExec.confirmState && (
+        <SqlExecuteConfirmModal
+          request={sqlExec.confirmState.request}
+          targets={sqlExec.targets}
+          onChangeTarget={sqlExec.changeConfirmTarget}
+          onOpenInDbx={
+            hasActiveDatabaseTool() && currentSession
+              ? () => {
+                  const req = sqlExec.confirmState?.request
+                  if (!req) return
+                  if (req.sourceKind === 'file' && req.sourcePath) {
+                    void openSqlFileInDatabaseTool({ path: req.sourcePath, session: currentSession })
+                  } else {
+                    openSqlSnippetInDatabaseTool({ sql: req.sql, session: currentSession })
+                  }
+                }
+              : undefined
+          }
+          onCancel={() => sqlExec.setConfirmState(null)}
+          onConfirm={sqlExec.confirmAndRun}
+        />
+      )}
+      {sqlExec.bindModalOpened && sqlExec.identity && (
+        <ProjectDatabaseModal
+          opened={sqlExec.bindModalOpened}
+          onClose={() => sqlExec.setBindModalOpened(false)}
+          projectKey={sqlExec.identity.projectKey}
+          workspaceKey={sqlExec.identity.workspaceKey}
+          projectLabel={sqlExec.identity.projectLabel}
+          onSaved={sqlExec.handleBindModalSaved}
+        />
+      )}
     </div>
+    </MarkdownSqlExecContext.Provider>
     </MarkdownSessionContext.Provider>
   )
 })

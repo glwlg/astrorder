@@ -42,7 +42,6 @@ export function ShinyText({
 
   return (
     <span
-      data-liquid-ignore=""
       className={`astr-shiny-text${pauseOnHover ? ' is-pause-hover' : ''}${className ? ` ${className}` : ''}`}
       style={style}
     >

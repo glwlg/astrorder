@@ -188,8 +188,6 @@ export function TurnMinimap({ visibleMessages, activityPacks, approvals, scrolle
         <div
           className={`turn-minimap-preview is-${hoveredNode.kind}`}
           role="tooltip"
-          data-liquid-surface="panel"
-          data-liquid-snapshot="#astr-shell-sky"
         >
           <div className="turn-minimap-preview-head">
             <span className={`turn-minimap-dot is-${hoveredNode.kind}`} aria-hidden="true" />

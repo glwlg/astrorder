@@ -16,6 +16,7 @@ import { artifactViewerRegistry } from '../sidecar/registry'
 import { resolveArtifactFromPath } from '../sidecar/resolver'
 import { useSidecarStore } from '../sidecar/sidecarStore'
 import { isImageFilePath } from './toolPresentation'
+import { useIsOfficeExperience } from '../office/appProfile'
 
 interface SearchResultJson {
   total_count?: number
@@ -284,6 +285,7 @@ export function ToolOutputBlock({
   session?: Session | null
   onImageClick?: (url: string) => void
 }) {
+  const isOfficeMode = useIsOfficeExperience(session)
   const [copied, setCopied] = useState(false)
   const [showRaw, setShowRaw] = useState(false)
   const [showParams, setShowParams] = useState(false)
@@ -376,9 +378,11 @@ export function ToolOutputBlock({
             >
               {copied ? <IconCheck size={12} color="var(--astr-teal, #12b886)" /> : <IconCopy size={12} />}
             </button>
-            <button type="button" className="tool-rich-btn is-muted" onClick={() => setShowRaw(true)}>
-              JSON
-            </button>
+            {!isOfficeMode && (
+              <button type="button" className="tool-rich-btn is-muted" onClick={() => setShowRaw(true)}>
+                JSON
+              </button>
+            )}
           </div>
         </div>
         {rawUrl && !imgFailed ? (
@@ -428,13 +432,15 @@ export function ToolOutputBlock({
             {searchData.truncated && <span className="tool-rich-badge is-warning">已截断</span>}
           </span>
           <div className="tool-rich-actions">
-            <button
-              type="button"
-              className="tool-rich-btn is-muted"
-              onClick={() => setShowRaw(true)}
-            >
-              查看原始 JSON
-            </button>
+            {!isOfficeMode && (
+              <button
+                type="button"
+                className="tool-rich-btn is-muted"
+                onClick={() => setShowRaw(true)}
+              >
+                查看原始 JSON
+              </button>
+            )}
             <button
               type="button"
               className="tool-rich-btn"
@@ -492,13 +498,15 @@ export function ToolOutputBlock({
                 <span>打开</span>
               </button>
             )}
-            <button
-              type="button"
-              className="tool-rich-btn is-muted"
-              onClick={() => setShowRaw(true)}
-            >
-              查看原始 JSON
-            </button>
+            {!isOfficeMode && (
+              <button
+                type="button"
+                className="tool-rich-btn is-muted"
+                onClick={() => setShowRaw(true)}
+              >
+                查看原始 JSON
+              </button>
+            )}
             <button
               type="button"
               className="tool-rich-btn"

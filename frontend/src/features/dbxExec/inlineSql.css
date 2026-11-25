@@ -1,0 +1,487 @@
+/* Project-bound DBX inline SQL execution styles */
+
+@keyframes inline-sql-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.astrorder-spin {
+  animation: inline-sql-spin 0.9s linear infinite;
+}
+
+.inline-sql-target-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 240px;
+  padding: 2px 7px;
+  border-radius: 5px;
+  border: 1px solid color-mix(in oklab, var(--astr-border) 90%, transparent);
+  background: color-mix(in oklab, var(--astr-surface) 88%, transparent);
+  color: var(--astr-text);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.14s ease, background 0.14s ease;
+}
+
+.inline-sql-target-btn:hover {
+  border-color: color-mix(in oklab, var(--astr-indigo) 45%, var(--astr-border));
+  background: color-mix(in oklab, var(--astr-indigo) 7%, var(--astr-surface));
+}
+
+.inline-sql-target-btn.is-prod {
+  border-color: color-mix(in oklab, var(--astr-red) 45%, var(--astr-border));
+  background: color-mix(in oklab, var(--astr-red) 7%, var(--astr-surface));
+}
+
+.inline-sql-target-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inline-sql-prod-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 15px;
+  letter-spacing: 0.03em;
+  background: color-mix(in oklab, var(--astr-red) 16%, transparent);
+  color: var(--astr-red);
+  flex-shrink: 0;
+}
+
+.inline-sql-run-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 5px;
+  border: 1px solid color-mix(in oklab, var(--astr-teal, #12b886) 42%, transparent);
+  background: color-mix(in oklab, var(--astr-teal, #12b886) 11%, transparent);
+  color: var(--astr-teal, #0f766e);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.14s ease, border-color 0.14s ease;
+}
+
+.inline-sql-run-btn:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--astr-teal, #12b886) 20%, transparent);
+  border-color: color-mix(in oklab, var(--astr-teal, #12b886) 65%, transparent);
+}
+
+.inline-sql-run-btn.is-prod {
+  border-color: color-mix(in oklab, var(--astr-red) 42%, transparent);
+  background: color-mix(in oklab, var(--astr-red) 10%, transparent);
+  color: var(--astr-red);
+}
+
+.inline-sql-run-btn.is-prod:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--astr-red) 18%, transparent);
+}
+
+.inline-sql-run-btn.is-running {
+  border-color: color-mix(in oklab, var(--astr-yellow) 45%, transparent);
+  background: color-mix(in oklab, var(--astr-yellow) 12%, transparent);
+  color: var(--astr-yellow);
+}
+
+.inline-sql-run-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* Inline .sql file pill companion action */
+.markdown-sql-file-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  vertical-align: middle;
+  max-width: 100%;
+}
+
+.markdown-sql-file-run-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  height: 21px;
+  padding: 0 6px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in oklab, var(--astr-teal, #12b886) 36%, var(--astr-border));
+  background: color-mix(in oklab, var(--astr-teal, #12b886) 10%, var(--astr-surface));
+  color: var(--astr-teal, #0f766e);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.14s ease, border-color 0.14s ease, transform 0.1s ease;
+}
+
+.markdown-sql-file-run-btn:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--astr-teal, #12b886) 19%, var(--astr-surface));
+  border-color: color-mix(in oklab, var(--astr-teal, #12b886) 60%, var(--astr-border));
+}
+
+.markdown-sql-file-run-btn.is-prod {
+  border-color: color-mix(in oklab, var(--astr-red) 38%, var(--astr-border));
+  background: color-mix(in oklab, var(--astr-red) 8%, var(--astr-surface));
+  color: var(--astr-red);
+}
+
+.markdown-sql-file-run-btn.is-ok {
+  border-color: color-mix(in oklab, var(--astr-teal, #12b886) 55%, var(--astr-border));
+  background: color-mix(in oklab, var(--astr-teal, #12b886) 14%, var(--astr-surface));
+  color: var(--astr-teal, #0f766e);
+}
+
+.markdown-sql-file-run-btn.is-error {
+  border-color: color-mix(in oklab, var(--astr-red) 55%, var(--astr-border));
+  background: color-mix(in oklab, var(--astr-red) 12%, var(--astr-surface));
+  color: var(--astr-red);
+}
+
+.markdown-sql-file-run-btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+/* Inline SQL execution result card */
+.inline-sql-result-card {
+  border-top: 1px solid color-mix(in oklab, var(--astr-border) 82%, transparent);
+  background: color-mix(in oklab, var(--astr-surface) 95%, var(--astr-surface-muted));
+  font-size: 12px;
+}
+
+.markdown-sql-file-results {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.markdown-sql-file-results .inline-sql-result-card {
+  border: 1px solid color-mix(in oklab, var(--astr-border) 88%, transparent);
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgb(16 14 28 / 5%);
+}
+
+.inline-sql-result-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  background: color-mix(in oklab, var(--astr-surface-muted) 65%, var(--astr-surface));
+  border-bottom: 1px solid color-mix(in oklab, var(--astr-border) 68%, transparent);
+  flex-wrap: wrap;
+}
+
+.inline-sql-result-card.is-collapsed .inline-sql-result-header {
+  border-bottom: none;
+}
+
+.inline-sql-result-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex-wrap: wrap;
+  font-size: 11.5px;
+}
+
+.inline-sql-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.inline-sql-status-pill.is-ok {
+  background: color-mix(in oklab, var(--astr-teal, #12b886) 15%, transparent);
+  color: var(--astr-teal, #0f766e);
+}
+
+.inline-sql-status-pill.is-error {
+  background: color-mix(in oklab, var(--astr-red) 14%, transparent);
+  color: var(--astr-red);
+}
+
+.inline-sql-status-pill.is-running {
+  background: color-mix(in oklab, var(--astr-indigo) 14%, transparent);
+  color: var(--astr-indigo);
+}
+
+.inline-sql-source-tag {
+  font-family: var(--astr-session-mono-font, ui-monospace, Consolas, monospace);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--astr-text);
+}
+
+.inline-sql-dim {
+  color: var(--astr-muted);
+  font-size: 11px;
+}
+
+.inline-sql-stmt-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border-bottom: 1px solid color-mix(in oklab, var(--astr-border) 60%, transparent);
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.inline-sql-stmt-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 5px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--astr-muted);
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.inline-sql-stmt-tab.is-active {
+  background: color-mix(in oklab, var(--astr-indigo) 12%, var(--astr-surface));
+  border-color: color-mix(in oklab, var(--astr-indigo) 32%, transparent);
+  color: var(--astr-text);
+  font-weight: 600;
+}
+
+.inline-sql-stmt-tab.is-error {
+  color: var(--astr-red);
+}
+
+.inline-sql-table-wrap {
+  max-height: 280px;
+  overflow: auto;
+  scrollbar-width: thin;
+}
+
+.inline-sql-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--astr-session-mono-font, ui-monospace, Consolas, monospace);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.inline-sql-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  text-align: left;
+  padding: 5px 9px;
+  font-weight: 650;
+  color: var(--astr-text);
+  background: color-mix(in oklab, var(--astr-surface-muted) 92%, var(--astr-surface));
+  border-bottom: 1px solid color-mix(in oklab, var(--astr-border) 85%, transparent);
+  white-space: nowrap;
+}
+
+.inline-sql-table td {
+  padding: 4px 9px;
+  border-bottom: 1px solid color-mix(in oklab, var(--astr-border) 50%, transparent);
+  color: var(--astr-text);
+  white-space: nowrap;
+  max-width: 340px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.inline-sql-table tr:hover td {
+  background: color-mix(in oklab, var(--astr-indigo) 5%, transparent);
+}
+
+.inline-sql-null {
+  color: var(--astr-muted);
+  font-style: italic;
+}
+
+.inline-sql-empty-body {
+  padding: 9px 11px;
+  font-size: 12px;
+  color: var(--astr-muted);
+}
+
+.inline-sql-error-box {
+  margin: 8px 10px;
+  padding: 8px 10px;
+  border-radius: 7px;
+  border: 1px solid color-mix(in oklab, var(--astr-red) 38%, transparent);
+  background: color-mix(in oklab, var(--astr-red) 8%, var(--astr-surface));
+  color: var(--astr-red);
+  font-family: var(--astr-session-mono-font, ui-monospace, Consolas, monospace);
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
+
+.inline-sql-result-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border-top: 1px solid color-mix(in oklab, var(--astr-border) 62%, transparent);
+  background: color-mix(in oklab, var(--astr-surface-muted) 45%, var(--astr-surface));
+  flex-wrap: wrap;
+}
+
+.inline-sql-footer-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.inline-sql-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 5px;
+  border: 1px solid color-mix(in oklab, var(--astr-border) 82%, transparent);
+  background: var(--astr-surface);
+  color: var(--astr-text);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.14s ease, background 0.14s ease;
+}
+
+.inline-sql-action-btn:hover:not(:disabled) {
+  border-color: color-mix(in oklab, var(--astr-indigo) 45%, var(--astr-border));
+  background: color-mix(in oklab, var(--astr-indigo) 8%, var(--astr-surface));
+}
+
+.inline-sql-action-btn.is-primary {
+  border-color: color-mix(in oklab, var(--astr-indigo) 45%, transparent);
+  background: color-mix(in oklab, var(--astr-indigo) 12%, var(--astr-surface));
+  color: var(--astr-indigo);
+  font-weight: 600;
+}
+
+.inline-sql-action-btn.is-primary:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--astr-indigo) 20%, var(--astr-surface));
+}
+
+.inline-sql-action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Confirm modal SQL preview */
+.sql-confirm-modal-content {
+  overscroll-behavior: contain;
+}
+
+.sql-confirm-file-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--astr-session-mono-font, ui-monospace, Consolas, monospace);
+}
+
+.sql-confirm-preview {
+  min-height: 180px;
+  max-height: min(56vh, 520px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  border-radius: 10px;
+  border: 1px solid color-mix(in oklab, var(--astr-border) 92%, transparent);
+  background: color-mix(in oklab, var(--astr-surface-muted) 68%, var(--astr-surface));
+}
+
+:root[data-mantine-color-scheme='dark'] .sql-confirm-preview {
+  background: color-mix(in oklab, var(--astr-bg) 72%, var(--astr-surface));
+}
+
+.sql-confirm-code-pre {
+  margin: 0;
+  padding: 10px 0;
+  min-width: max-content;
+  font-family: var(--astr-session-mono-font, ui-monospace, Consolas, monospace);
+  font-size: 13px;
+  line-height: 1.62;
+  color: var(--astr-text);
+  tab-size: 4;
+}
+
+.sql-confirm-code {
+  display: block;
+  font-family: inherit;
+}
+
+.sql-confirm-line {
+  display: flex;
+  align-items: baseline;
+  min-height: 1.62em;
+  padding-inline-end: 16px;
+}
+
+.sql-confirm-line:hover {
+  background: color-mix(in oklab, var(--astr-indigo) 6%, transparent);
+}
+
+.sql-confirm-line-no {
+  position: sticky;
+  left: 0;
+  flex: none;
+  min-width: 3.4em;
+  padding-inline: 12px 10px;
+  margin-inline-end: 12px;
+  text-align: right;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: color-mix(in oklab, var(--astr-muted) 72%, transparent);
+  background: color-mix(in oklab, var(--astr-surface-muted) 86%, var(--astr-surface));
+  border-right: 1px solid color-mix(in oklab, var(--astr-border) 70%, transparent);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+:root[data-mantine-color-scheme='dark'] .sql-confirm-line-no {
+  background: color-mix(in oklab, var(--astr-bg) 84%, var(--astr-surface));
+}
+
+.sql-confirm-line-code {
+  white-space: pre;
+  user-select: text;
+}
+
+.sql-confirm-prod-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in oklab, var(--astr-red) 50%, transparent);
+  background: color-mix(in oklab, var(--astr-red) 10%, var(--astr-surface));
+  color: var(--astr-red);
+  font-size: 12.5px;
+  font-weight: 600;
+}

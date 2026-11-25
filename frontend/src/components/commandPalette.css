@@ -7,8 +7,7 @@
   align-items: flex-start;
   justify-content: center;
   padding: min(14vh, 110px) 16px 24px;
-  background: rgb(14 12 24 / 28%);
-  backdrop-filter: blur(4px);
+  background: rgb(14 12 24 / 38%);
   animation: palette-fade-in 140ms ease-out;
 }
 
@@ -16,6 +15,7 @@
   position: relative;
   width: min(620px, 100%);
   border-radius: 18px;
+  background: var(--astr-surface);
   border: 1px solid color-mix(in oklab, var(--astr-indigo) 28%, var(--astr-border));
   box-shadow:
     0 28px 64px -16px rgb(16 12 32 / 44%),

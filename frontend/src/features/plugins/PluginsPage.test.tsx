@@ -53,7 +53,7 @@ describe('PluginsPage Component', () => {
     expect(screen.getByText('代码变更比对 (Diff)')).toBeInTheDocument()
     expect(screen.getByText('3D 模型/CAD 预览')).toBeInTheDocument()
     expect(screen.getByText('HTML 页面预览')).toBeInTheDocument()
-    expect(screen.getByText('Agent 决策状态机')).toBeInTheDocument()
+    expect(screen.getByText('决策与轨迹')).toBeInTheDocument()
   })
 
   it('persists plugin toggles to the backend database instead of localStorage', async () => {
@@ -109,6 +109,9 @@ describe('PluginsPage Component', () => {
     fireEvent.click(screen.getByRole('tab', { name: /本地运行时/ }))
     expect(screen.getByText('命令输出压缩')).toBeInTheDocument()
     expect(screen.getByText('当前实现: RTK')).toBeInTheDocument()
+
+    // Voice input & dictation lives under the "办公与文档" category
+    fireEvent.click(screen.getByRole('tab', { name: /办公与文档/ }))
     expect(screen.getByText('当前实现: R2T2 本地流式')).toBeInTheDocument()
 
     const toggle = await screen.findByRole('switch', { name: '启用 R2T2 本地流式听写' })

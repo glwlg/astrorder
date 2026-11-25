@@ -1,9 +1,11 @@
 import type { ComponentType } from 'react'
 import {
+  IconBriefcase,
   IconCode,
   IconCpu,
   IconLayoutGrid,
   IconPhotoVideo,
+  IconRobot,
   IconSitemap,
 } from '@tabler/icons-react'
 import type { ArtifactViewer, PluginCategory } from '../sidecar/types'
@@ -19,10 +21,22 @@ export interface PluginCategoryMeta {
 
 export const PLUGIN_CATEGORIES: PluginCategoryMeta[] = [
   {
+    id: 'agent',
+    label: 'Agent 引擎',
+    description: '按需启用 Antigravity、Codex、Hermes、Grok 等原生 Agent；启用时自动体检、引导安装或指定已有路径',
+    icon: IconRobot,
+  },
+  {
     id: 'development',
     label: '开发与数据',
     description: '数据库工具、代码编辑器、文件浏览、交互终端、代码比对与 Git Worktree',
     icon: IconCode,
+  },
+  {
+    id: 'office',
+    label: '办公与文档',
+    description: 'PDF / Word / Excel / PPT 预览导出、长文档分段精修、智能工作复盘与会议纪要闭环',
+    icon: IconBriefcase,
   },
   {
     id: 'workspace',
@@ -44,8 +58,8 @@ export const PLUGIN_CATEGORIES: PluginCategoryMeta[] = [
   },
   {
     id: 'runtime',
-    label: '本地运行时',
-    description: '语音听写引擎、命令输出压缩等本地算力与工具链加速能力',
+    label: '本地运行时与工具链',
+    description: '常用工具（uv、Node.js/npm、Git、ripgrep）辅助安装、命令输出压缩与本地语音听写引擎',
     icon: IconCpu,
   },
 ]
@@ -56,7 +70,12 @@ const BUILTIN_VIEWER_CATEGORIES: Record<string, PluginCategory> = {
   'filetree-viewer': 'development',
   'xterm-viewer': 'development',
   'git-diff-viewer': 'development',
+  'git-worktrees-viewer': 'development',
   'diff-viewer': 'development',
+  'pdf-viewer': 'office',
+  'docx-viewer': 'office',
+  'sheet-viewer': 'office',
+  'pptx-viewer': 'office',
   'blackboard-viewer': 'workspace',
   'memory-viewer': 'workspace',
   'sidecar-chat-viewer': 'workspace',

@@ -14,7 +14,7 @@ import { useQuery } from '@tanstack/react-query'
 import { api, type OcxModelQuotaResponse } from '../../api/client'
 import type { Session } from '../../domain/types'
 import { useSessionModel } from '../../hooks/useSessionModel'
-import { ComposerGlassMenu, GlassButtonLens } from '../../components/GlassPanel'
+import { useIsOfficeExperience } from '../office/appProfile'
 import {
   availableEffortsForModel,
   effortLabelOf,
@@ -102,6 +102,7 @@ export function ModelQuotaBadge({ modelRoute, agentId, size = 'sm' }: { modelRou
 }
 
 export function SessionModelControl({ session }: { session: Session }) {
+  const isOfficeMode = useIsOfficeExperience(session)
   const model = useSessionModel(session)
   const [opened, setOpened] = useState(false)
   const [view, setView] = useState<'main' | 'models'>('main')
@@ -257,16 +258,14 @@ export function SessionModelControl({ session }: { session: Session }) {
             setView('main')
           }}
         > 
-          <GlassButtonLens />
           <span className="codex-model-pill-text">{displayModelName}</span>
-          <ModelQuotaBadge modelRoute={currentModelRoute} agentId={session.agent_id} size="dot" />
+          {!isOfficeMode && <ModelQuotaBadge modelRoute={currentModelRoute} agentId={session.agent_id} size="dot" />}
           {showPillEffort && <span className="codex-model-pill-effort">{effortLabel}</span>}
           <IconChevronDown size={14} className="codex-model-pill-arrow" />
         </button>
       </Popover.Target>
 
       <Popover.Dropdown className="codex-model-popover-dropdown">
-        <ComposerGlassMenu active={opened}>
         {(model.data?.read_only || model.data?.model_read_only) && <Text size="xs" c="dimmed" p="xs">{model.data.detail || '会话被其他客户端占用，当前只能读取模型信息。释放后点击刷新即可重新检查。'}</Text>}
         {view === 'main' && !modelOnly ? (
           <div className="codex-model-card" style={{ '--effort-color': activeEffortColor } as React.CSSProperties}>
@@ -448,7 +447,7 @@ export function SessionModelControl({ session }: { session: Session }) {
                       disabled={changing || (model.data?.read_only || model.data?.model_read_only)}
                     >
                       <span className="codex-model-menu-item-text" title={item.label}>{item.label}</span>
-                      <ModelQuotaBadge modelRoute={`${item.provider ? `${item.provider}/` : ''}${item.defaultVariant.model}`} agentId={session.agent_id} />
+                      {!isOfficeMode && <ModelQuotaBadge modelRoute={`${item.provider ? `${item.provider}/` : ''}${item.defaultVariant.model}`} agentId={session.agent_id} />}
                       {isSelected && <IconCheck size={16} className="codex-model-check-icon" />}
                     </UnstyledButton>
                   )
@@ -456,7 +455,6 @@ export function SessionModelControl({ session }: { session: Session }) {
             </div>
           </div>
         )}
-        </ComposerGlassMenu>
       </Popover.Dropdown>
     </Popover>
   )

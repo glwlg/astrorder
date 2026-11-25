@@ -158,6 +158,33 @@ func (d *DesktopService) OpenPreview(ctx context.Context, payload PreviewPayload
 	}
 	return d.shell.preview.open(payload)
 }
+func (d *DesktopService) ShowMeetingCapsule(ctx context.Context, state MeetingCapsuleState) error {
+	if err := requireWindow(ctx, d.shell.window); err != nil {
+		return err
+	}
+	if d.shell.meetingCapsule == nil {
+		return errors.New("meeting capsule service not available")
+	}
+	return d.shell.meetingCapsule.show(state)
+}
+func (d *DesktopService) UpdateMeetingCapsule(ctx context.Context, state MeetingCapsuleState) error {
+	if err := requireWindow(ctx, d.shell.window); err != nil {
+		return err
+	}
+	if d.shell.meetingCapsule == nil {
+		return errors.New("meeting capsule service not available")
+	}
+	return d.shell.meetingCapsule.update(state)
+}
+func (d *DesktopService) HideMeetingCapsule(ctx context.Context) error {
+	if err := requireWindow(ctx, d.shell.window); err != nil {
+		return err
+	}
+	if d.shell.meetingCapsule != nil {
+		d.shell.meetingCapsule.hide()
+	}
+	return nil
+}
 func (d *DesktopService) ReportReady(ctx context.Context) error {
 	if err := requireWindow(ctx, d.shell.window); err != nil {
 		return err

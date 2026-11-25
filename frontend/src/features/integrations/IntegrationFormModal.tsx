@@ -221,8 +221,8 @@ export function IntegrationFormModal({
       <Stack gap="md">
         <Group align="flex-end" gap="xs" wrap="nowrap">
           <TextInput
-            label="外链地址"
-            placeholder="http://192.168.1.100:3430 或 https://grafana.example.com"
+            label="网站地址"
+            placeholder="https://feishu.cn 或 https://docs.example.com"
             value={url}
             onChange={(e) => setUrl(e.currentTarget.value)}
             onBlur={() => { void handleFetchMeta(false) }}
@@ -299,10 +299,10 @@ export function IntegrationFormModal({
                   <IntegrationIcon name={name} url={url} iconType="auto" iconValue={autoIconValue} size={28} />
                   <div>
                     <Text size="xs" fw={500}>
-                      {autoIconValue ? '已获取站点 Favicon' : '尚未获取到图标，将自动显示首字母徽章'}
+                      {autoIconValue ? '已获取网站图标' : '尚未获取到图标，将自动显示首字母徽章'}
                     </Text>
                     <Text size="11px" c="dimmed">
-                      图标由后端抓取并缓存在数据库，离线与内网切换均可秒开。
+                      图标自动保存在本机，内网与弱网切换均可快速显示。
                     </Text>
                   </div>
                 </Group>
