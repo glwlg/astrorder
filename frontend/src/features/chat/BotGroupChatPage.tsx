@@ -25,6 +25,7 @@ import {
   IconX,
 } from "@tabler/icons-react";
 import { api } from "../../api/client";
+import { isUserIdle, subscribeUserIdle } from "../../hooks/useUserIdle";
 import type {
   Agent,
   Approval,
@@ -221,8 +222,17 @@ export function BotGroupChatPage({
     setMemberStates(group.member_states || {});
     setCoordination(group.coordination);
     void loadMessages();
-    const timer = setInterval(() => void loadMessages(), 3000);
-    return () => clearInterval(timer);
+    const timer = setInterval(() => {
+      if (isUserIdle()) return;
+      void loadMessages();
+    }, 3000);
+    const unsubscribeIdle = subscribeUserIdle((idle) => {
+      if (!idle) void loadMessages();
+    });
+    return () => {
+      clearInterval(timer);
+      unsubscribeIdle();
+    };
   }, [group.id]);
 
   useEffect(() => {

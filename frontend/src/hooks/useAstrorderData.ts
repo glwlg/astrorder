@@ -14,6 +14,7 @@ import { selectMessages, useAstrorderStore } from '../state/store'
 import { visibleTranscript } from '../domain/visibleTranscript'
 import { loadActivityHistory, refreshActivityHistory, visibleHistoryItems, type HistoryPage } from '../domain/loadActivityHistory'
 import { clientPerf } from '../perf/clientPerf'
+import { isUserIdle, subscribeUserIdle } from './useUserIdle'
 
 type LoadedHistoryPage = HistoryPage & {
   completeActivityGroup: boolean
@@ -112,15 +113,19 @@ export function useSessionResources(session: Session | null, authenticated: bool
   useEffect(() => {
     if (!authenticated || !session || !viewing) return
     const renew = () => {
-      if (document.visibilityState === 'visible') {
+      if (document.visibilityState === 'visible' && !isUserIdle()) {
         void api.renewSessionView(session.id, session.agent_id).catch(() => {})
       }
     }
     renew()
     const timer = window.setInterval(renew, 30_000)
+    const unsubscribeIdle = subscribeUserIdle((idle) => {
+      if (!idle) renew()
+    })
     document.addEventListener('visibilitychange', renew)
     return () => {
       window.clearInterval(timer)
+      unsubscribeIdle()
       document.removeEventListener('visibilitychange', renew)
     }
   }, [authenticated, session?.agent_id, session?.id, viewing])

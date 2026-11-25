@@ -3,6 +3,7 @@ import { ActionIcon, Badge, Button, Group, Modal, Paper, ScrollArea, Stack, Text
 import { IconChalkboard, IconDownload, IconPlus, IconRefresh, IconX } from '@tabler/icons-react'
 import { notifications } from '@mantine/notifications'
 import { api } from '../../api/client'
+import { isUserIdle, subscribeUserIdle } from '../../hooks/useUserIdle'
 import { GroupBlackboardItem as BlackboardItemRenderer } from './GroupBlackboardItem'
 
 const BLACKBOARD_FALLBACK_POLL_MS = 30_000
@@ -83,16 +84,22 @@ export function SidecarBlackboardPanel({
     }
 
     const timer = setInterval(() => {
-      if (document.visibilityState === 'visible') {
+      if (document.visibilityState === 'visible' && !isUserIdle()) {
         void fetchItems()
       }
     }, BLACKBOARD_FALLBACK_POLL_MS)
+    const unsubscribeIdle = subscribeUserIdle((idle) => {
+      if (!idle && Date.now() - lastFetchedAtRef.current >= 10_000) {
+        void fetchItems()
+      }
+    })
 
     window.addEventListener('astrorder:blackboard-change', onBlackboardChange)
     document.addEventListener('visibilitychange', onVisibilityChange)
     return () => {
       clearTimeout(debounceTimer)
       clearInterval(timer)
+      unsubscribeIdle()
       window.removeEventListener('astrorder:blackboard-change', onBlackboardChange)
       document.removeEventListener('visibilitychange', onVisibilityChange)
     }

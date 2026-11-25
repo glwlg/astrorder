@@ -1,5 +1,6 @@
 import { useEffect, useEffectEvent, useMemo } from 'react'
 import { useLocalStorage } from '@mantine/hooks'
+import { isUserIdle, subscribeUserIdle } from '../../hooks/useUserIdle'
 
 export type RefreshScope = 'all' | 'current'
 export type RefreshSettings = Record<RefreshScope, number>
@@ -23,7 +24,7 @@ export function useScheduledRefresh(environment: string, settings: RefreshSettin
     deadlines.set(environment, due)
     function schedule() {
       clearTimeout(timer)
-      if (document.hidden) return
+      if (document.hidden || isUserIdle()) return
       const now = Date.now()
       if (now >= Math.min(due.all, due.current)) {
         const full = now >= due.all
@@ -34,7 +35,8 @@ export function useScheduledRefresh(environment: string, settings: RefreshSettin
       timer = setTimeout(schedule, Math.max(0, Math.min(due.all, due.current) - Date.now()))
     }
     schedule()
+    const unsubscribeIdle = subscribeUserIdle(schedule)
     document.addEventListener('visibilitychange', schedule)
-    return () => { clearTimeout(timer); document.removeEventListener('visibilitychange', schedule) }
+    return () => { clearTimeout(timer); unsubscribeIdle(); document.removeEventListener('visibilitychange', schedule) }
   }, [all, current, deadlines, environment])
 }

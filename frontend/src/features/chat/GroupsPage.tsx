@@ -9,6 +9,7 @@ import { BotGroupChatPage } from "./BotGroupChatPage";
 import { CreateBotGroupDialog } from "../../components/CreateBotGroupDialog";
 import { groupSidecarKey, useSidecarStore } from "../sidecar/sidecarStore";
 import { GroupSidecarPanel } from "./GroupSidecarPanel";
+import { isUserIdle, subscribeUserIdle } from "../../hooks/useUserIdle";
 
 export function GroupsPage({
   routePrefix = "",
@@ -69,10 +70,17 @@ export function GroupsPage({
         navigate(`${routePrefix}/groups/${items[0].id}`, { replace: true });
       }
     });
-    const timer = setInterval(() => void loadGroups(), 10000);
+    const timer = setInterval(() => {
+      if (isUserIdle()) return;
+      void loadGroups();
+    }, 10000);
+    const unsubscribeIdle = subscribeUserIdle((idle) => {
+      if (!idle) void loadGroups();
+    });
     return () => {
       mounted = false;
       clearInterval(timer);
+      unsubscribeIdle();
     };
   }, [groupId, navigate, routePrefix]);
 

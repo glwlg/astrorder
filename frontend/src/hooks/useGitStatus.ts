@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { request } from '../api/client'
 import type { Session } from '../domain/types'
+import { useUserIdle } from './useUserIdle'
 
 export interface GitStatus {
   branch: string
@@ -12,6 +13,7 @@ export interface GitStatus {
 }
 
 export function useGitStatus(session: Session) {
+  const idle = useUserIdle()
   return useQuery({
     queryKey: ['astrorder', 'git-status', session.agent_id, session.id, session.workspace, session.connection_id],
     queryFn: ({ signal }) => {
@@ -23,6 +25,6 @@ export function useGitStatus(session: Session) {
     retry: false,
     staleTime: 45_000,
     refetchIntervalInBackground: false,
-    refetchInterval: () => (typeof document !== 'undefined' && document.visibilityState === 'hidden' ? false : 90_000),
+    refetchInterval: idle ? false : () => (typeof document !== 'undefined' && document.visibilityState === 'hidden' ? false : 90_000),
   })
 }

@@ -23,6 +23,7 @@ import { api } from '../api/client'
 import type { Agent, BotGroup } from '../domain/types'
 import { AgentBrandIcon } from './AgentBrandIcon'
 import { CreateBotGroupDialog } from './CreateBotGroupDialog'
+import { isUserIdle, subscribeUserIdle } from '../hooks/useUserIdle'
 
 export function BotGroupRail({
   agents = {},
@@ -50,8 +51,17 @@ export function BotGroupRail({
 
   useEffect(() => {
     void loadGroups()
-    const timer = setInterval(() => void loadGroups(), 8000)
-    return () => clearInterval(timer)
+    const timer = setInterval(() => {
+      if (isUserIdle()) return
+      void loadGroups()
+    }, 8000)
+    const unsubscribeIdle = subscribeUserIdle((idle) => {
+      if (!idle) void loadGroups()
+    })
+    return () => {
+      clearInterval(timer)
+      unsubscribeIdle()
+    }
   }, [])
 
   const handleDeleteGroup = async (group: BotGroup, e?: React.MouseEvent) => {

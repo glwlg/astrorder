@@ -10,12 +10,14 @@ import { api } from '../../api/client'
 import type { SshConnection } from '../../domain/types'
 import { useBackgroundTasks } from '../../state/backgroundTasks'
 import { trackUpgradeJob } from '../../state/upgradeTasks'
+import { useUserIdle } from '../../hooks/useUserIdle'
 import { ForceAgentRestartDialog } from './ForceAgentRestartDialog'
 
 const blank = { display_name: '', host: '', port: '22', user: '', ssh_config_alias: '', identity_file: '', workspace: '', codex_executable: '', grok_executable: '', antigravity_executable: '' }
 export function EnvironmentConnections({ embedded = false, renderAgentConfiguration }: { embedded?: boolean; renderAgentConfiguration?: (environmentId: string, kind: string) => ReactNode }) {
   const client = useQueryClient()
-  const query = useQuery({ queryKey: ['astrorder', 'environments'], queryFn: api.getEnvironments, retry: false, refetchInterval: 10000 })
+  const userIdle = useUserIdle()
+  const query = useQuery({ queryKey: ['astrorder', 'environments'], queryFn: api.getEnvironments, retry: false, refetchIntervalInBackground: false, refetchInterval: userIdle ? false : 10000 })
   const connections = useQuery({ queryKey: ['astrorder', 'connections'], queryFn: api.getConnections })
   const [busy, setBusy] = useState<string | null>(null)
   const [editing, setEditing] = useState<string | null>(null)

@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../api/client'
 import type { Agent, Session } from '../domain/types'
+import { useUserIdle } from './useUserIdle'
 
 export function isAntigravityAgent(agent?: Pick<Agent, 'kind'> | null): boolean {
   return agent?.kind === 'antigravity' || agent?.kind === 'antigravity-ssh'
@@ -12,6 +13,7 @@ export function useSessionSwarm(
   panelOpen = false,
 ) {
   const supported = Boolean(session && isAntigravityAgent(agent))
+  const idle = useUserIdle()
   return useQuery({
     queryKey: ['astrorder', 'session-swarm', session?.agent_id, session?.id],
     queryFn: () => api.getSessionSwarm(session!.id, session!.agent_id),
@@ -20,7 +22,7 @@ export function useSessionSwarm(
     retry: false,
     refetchOnWindowFocus: false,
     refetchIntervalInBackground: false,
-    refetchInterval: (query) => {
+    refetchInterval: idle ? false : (query) => {
       if (!supported) return false
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return false
       const data = query.state.data
@@ -39,6 +41,7 @@ export function useSessionSwarmMemberPreview(
   enabled = true,
 ) {
   const active = Boolean(enabled && session && isAntigravityAgent(agent) && memberConversationId)
+  const idle = useUserIdle()
   return useQuery({
     queryKey: ['astrorder', 'session-swarm-member', session?.agent_id, session?.id, memberConversationId],
     queryFn: () =>
@@ -50,6 +53,7 @@ export function useSessionSwarmMemberPreview(
     staleTime: 2000,
     retry: false,
     refetchOnWindowFocus: false,
-    refetchInterval: active ? 4000 : false,
+    refetchIntervalInBackground: false,
+    refetchInterval: active && !idle ? () => (typeof document !== 'undefined' && document.visibilityState === 'hidden' ? false : 4000) : false,
   })
 }

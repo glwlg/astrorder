@@ -3,6 +3,7 @@ import { notifications } from '@mantine/notifications'
 import { api } from '../api/client'
 import { loadPinnedProjects, loadProjectAppearance, type ProjectAppearanceMap } from '../components/projectAppearance'
 import { readProjectOrder } from '../components/projectOrder'
+import { isUserIdle, subscribeUserIdle } from './useUserIdle'
 
 export type WorkspacePreferences = {
   appearance: ProjectAppearanceMap
@@ -55,11 +56,14 @@ export function useWorkspacePreferences() {
     }
     refresh()
     const timer = window.setInterval(() => {
-      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+      if ((typeof document !== 'undefined' && document.visibilityState === 'hidden') || isUserIdle()) return
       refresh()
     }, 180_000)
+    const unsubscribeIdle = subscribeUserIdle((idle) => {
+      if (!idle && Date.now() - lastSyncedAt >= 180_000) refresh()
+    })
     window.addEventListener('focus', refreshOnFocus)
-    return () => { mounted.current = false; window.clearInterval(timer); window.removeEventListener('focus', refreshOnFocus) }
+    return () => { mounted.current = false; window.clearInterval(timer); unsubscribeIdle(); window.removeEventListener('focus', refreshOnFocus) }
   }, [accept])
   const updatePreferences = useCallback((patch: PreferencePatch | ((value: WorkspacePreferences) => PreferencePatch)) => {
     const result = queue.current.then(async () => {

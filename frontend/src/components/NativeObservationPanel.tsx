@@ -3,9 +3,11 @@ import { useQuery } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
 import { useState } from 'react'
 import { api } from '../api/client'
+import { useUserIdle } from '../hooks/useUserIdle'
 
 export function NativeObservationPanel({ agentId, sessionId }: { agentId: string; sessionId?: string }) {
-  const query=useQuery({ queryKey:['astrorder','observations',agentId,sessionId],queryFn:()=>api.getObservations(agentId,sessionId),refetchInterval:10000,retry:false })
+  const userIdle = useUserIdle()
+  const query=useQuery({ queryKey:['astrorder','observations',agentId,sessionId],queryFn:()=>api.getObservations(agentId,sessionId),refetchIntervalInBackground:false,refetchInterval:userIdle?false:10000,retry:false })
   const [busy,setBusy]=useState(false)
   const [outcome,setOutcome]=useState<{trusted:boolean;needsReview:boolean}|null>(null)
   const state=query.data?.status

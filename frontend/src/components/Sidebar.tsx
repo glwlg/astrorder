@@ -38,6 +38,7 @@ import { useIntegrationsStore } from '../features/integrations/integrationStore'
 import { IntegrationIcon } from '../features/integrations/integrationIcons'
 import { IntegrationFormModal } from '../features/integrations/IntegrationFormModal'
 import { useActionInbox } from '../features/inbox/useActionInbox'
+import { useUserIdle } from '../hooks/useUserIdle'
 
 const navItems = [
   { to: '/chat', label: '会话', icon: ChatCircleDotsIcon, id: 'chat' },
@@ -239,12 +240,13 @@ export function Sidebar({
     }
   }, [navigate, onNavigate, openSettings])
   const [isMonitorDragOver, setIsMonitorDragOver] = useState(false)
+  const userIdle = useUserIdle()
   const todayUsage = useQuery({
     queryKey: ['astrorder', 'analytics', 'today-models'],
     queryFn: () => api.getAnalyticsUsage({ range: 'today', surface: 'all' }),
     enabled: !onNavigate && analyticsGatewayEnabled,
     staleTime: 180_000,
-    refetchInterval: 180_000,
+    refetchInterval: userIdle ? false : 180_000,
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: false,
     retry: false,

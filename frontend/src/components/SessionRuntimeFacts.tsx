@@ -3,6 +3,7 @@ import type { Agent, Session } from '../domain/types'
 import { api, type OcxModelQuotaAccount, type OcxModelQuotaReport, type OcxQuotaWindow } from '../api/client'
 import { useGitStatus } from '../hooks/useGitStatus'
 import { useSessionModel } from '../hooks/useSessionModel'
+import { useUserIdle } from '../hooks/useUserIdle'
 import { useAstrorderStore } from '../state/store'
 import { AgentBrandIcon, agentKindLabel } from './AgentBrandIcon'
 import { sessionActivityStatus } from './sessionRailModel'
@@ -105,12 +106,13 @@ export function SessionRuntimeFacts({ session, agent }: { session: Session; agen
     : remote?.state || (local?.agent_id === session.agent_id ? local.state : agent?.status)
   const connected = sourceState === 'connected' || sourceState === 'ready'
   const git = useGitStatus(session)
+  const userIdle = useUserIdle()
   const branch = session.workspace
     ? git.isPending ? '读取中…' : git.isError ? '分支不可用' : git.data?.branch || '分支未知'
     : model.data?.branch === undefined ? model.isFetching ? '读取中…' : '原生未返回' : model.data.branch || '非 Git 工作区'
-  const usage = useQuery({ queryKey: ['astrorder', 'session_usage', session.id, session.agent_id], queryFn: () => api.getSessionUsage(session.id, session.agent_id), retry: false, staleTime: 5000, refetchInterval: session.status === 'running' ? 3000 : false })
+  const usage = useQuery({ queryKey: ['astrorder', 'session_usage', session.id, session.agent_id], queryFn: () => api.getSessionUsage(session.id, session.agent_id), retry: false, staleTime: 5000, refetchIntervalInBackground: false, refetchInterval: !userIdle && session.status === 'running' ? 3000 : false })
   const modelRoute = model.data?.model ? `${model.data.provider ? `${model.data.provider}/` : ''}${model.data.model}` : ''
-  const quota = useQuery({ queryKey: ['astrorder', 'model-quota', modelRoute, session.agent_id], queryFn: () => api.getModelQuota(modelRoute, session.agent_id), enabled: Boolean(modelRoute), retry: false, staleTime: 60000, refetchInterval: session.status === 'running' ? 60000 : false })
+  const quota = useQuery({ queryKey: ['astrorder', 'model-quota', modelRoute, session.agent_id], queryFn: () => api.getModelQuota(modelRoute, session.agent_id), enabled: Boolean(modelRoute), retry: false, staleTime: 60000, refetchIntervalInBackground: false, refetchInterval: !userIdle && session.status === 'running' ? 60000 : false })
   const reports = quota.data?.reports || []
   const accounts = (quota.data?.accounts || []).filter(account => !account.paused)
 

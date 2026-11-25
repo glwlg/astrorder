@@ -19,6 +19,7 @@ import { isDisconnectedSessionRoute, LIVE_ACTIVITY_MS, selectApprovals, selectCo
 import { useSessionResources } from '../../hooks/useAstrorderData'
 import { useSessionModel } from '../../hooks/useSessionModel'
 import { useSessionSwarm } from '../../hooks/useSessionSwarm'
+import { useUserIdle } from '../../hooks/useUserIdle'
 import { formatNextRunChip, useSessionSchedules } from '../../hooks/useSessionSchedules'
 import { useSessionCheckpoints } from '../../hooks/useSessionCheckpoints'
 import type { MessageSearchHit, SessionCheckpoint } from '../../api/client'
@@ -313,7 +314,8 @@ export function MobileWorkspace() {
   }, [isGroupRoute, routeId, disconnectedRoute, sessions, navigate])
   const resources = useSessionResources(selected, true)
   const sessionModel = useSessionModel(selected)
-  const sessionUsage = useQuery({ queryKey: ['astrorder', 'session_usage', selected?.id, selected?.agent_id], queryFn: () => api.getSessionUsage(selected!.id, selected!.agent_id), enabled: Boolean(selected), retry: false, staleTime: 5000, refetchInterval: selected?.status === 'running' ? 3000 : false })
+  const userIdle = useUserIdle()
+  const sessionUsage = useQuery({ queryKey: ['astrorder', 'session_usage', selected?.id, selected?.agent_id], queryFn: () => api.getSessionUsage(selected!.id, selected!.agent_id), enabled: Boolean(selected), retry: false, staleTime: 5000, refetchIntervalInBackground: false, refetchInterval: !userIdle && selected?.status === 'running' ? 3000 : false })
   const readOnly = selected?.control_state === 'readonly' || sessionModel.data?.read_only === true
   const selectedAgent = selected ? agents[selected.agent_id] : undefined
   const isAntigravity = selectedAgent?.kind === 'antigravity' || selectedAgent?.kind === 'antigravity-ssh'
