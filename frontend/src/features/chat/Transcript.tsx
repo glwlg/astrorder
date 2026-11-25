@@ -183,6 +183,7 @@ const MessageItem = memo(function MessageItem({
   inlineMeta = false,
   onEdit,
   onFork,
+  forkActionLabel = '从此回复分叉新会话',
   hasAssistantReplied = false,
   isAgentAccepted = false,
   asyncInput,
@@ -199,6 +200,7 @@ const MessageItem = memo(function MessageItem({
   inlineMeta?: boolean
   onEdit?: (text: string) => void
   onFork?: () => void
+  forkActionLabel?: string
   hasAssistantReplied?: boolean
   isAgentAccepted?: boolean
   asyncInput?: { commands: import('../../domain/types').Command[]; continued: boolean; readOnly: boolean }
@@ -301,7 +303,7 @@ const MessageItem = memo(function MessageItem({
             {copied ? <IconCheck size={13} color="var(--astr-teal, #12b886)" /> : <IconCopy size={13} />}
           </ActionIcon>
         </Tooltip>}
-        {!isUser && onFork && <Tooltip label="从此回复分叉新会话" position="top" withArrow>
+        {!isUser && onFork && <Tooltip label={forkActionLabel} position="top" withArrow>
           <ActionIcon variant="subtle" size="xs" color="indigo" onClick={onFork} aria-label="分叉会话" className="message-action-btn message-fork-btn"><IconGitFork size={13} /></ActionIcon>
         </Tooltip>}
         {isUser && onEdit && <Tooltip label="编辑消息" position="top" withArrow>
@@ -473,6 +475,7 @@ export const Transcript = memo(function Transcript({
   commands = [],
   onEditLastUserMessage,
   onForkAtMessage,
+  forkActionLabel,
   checkpoints,
   onOpenCheckpoint,
   highlightMessageId,
@@ -497,6 +500,7 @@ export const Transcript = memo(function Transcript({
   commands?: import('../../domain/types').Command[]
   onEditLastUserMessage?: (text: string) => void
   onForkAtMessage?: (message: Message, turnIndex: number) => void
+  forkActionLabel?: string
   checkpoints?: SessionCheckpoint[]
   onOpenCheckpoint?: (cp: SessionCheckpoint) => void
   highlightMessageId?: string | null
@@ -948,6 +952,7 @@ export const Transcript = memo(function Transcript({
                   authorLabel={authorLabel}
                   onEdit={message.id === lastUserMessageId ? onEditLastUserMessage : undefined}
                   onFork={onForkAtMessage && row.isFinalReply ? getForkCallback(message, idx) : undefined}
+                  forkActionLabel={forkActionLabel}
                   hasAssistantReplied={row.hasAssistantReplied}
                   isAgentAccepted={row.isAgentAccepted}
                   asyncInput={isAsyncQuestion(message) ? { commands, continued: row.continuedNativeInput, readOnly: session?.control_state === 'readonly' } : undefined}

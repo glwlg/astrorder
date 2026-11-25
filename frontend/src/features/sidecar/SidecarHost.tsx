@@ -16,6 +16,7 @@ import {
   FILETREE_VIEWER_PLUGIN_ID,
   MEMORY_VIEWER_PLUGIN_ID,
   SIDECHAT_VIEWER_PLUGIN_ID,
+  WORKFLOW_GIT_WORKTREE_PLUGIN_ID,
   XTERM_VIEWER_PLUGIN_ID,
 } from '../plugins/builtinPlugins'
 import { usePluginSettingsStore } from '../plugins/pluginSettingsStore'
@@ -60,6 +61,7 @@ export function SidecarHost({
   const agentGraphEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(AGENT_GRAPH_VIEWER_PLUGIN_ID))
   const blackboardEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(BLACKBOARD_VIEWER_PLUGIN_ID))
   const memoryEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(MEMORY_VIEWER_PLUGIN_ID))
+  const worktreeEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKFLOW_GIT_WORKTREE_PLUGIN_ID))
 
   const activeTab = tabs.find((t) => t.id === activeTabId)
   const currentSessionKey = `${session.agent_id}:${session.id}`
@@ -131,6 +133,19 @@ export function SidecarHost({
     useSidecarStore.getState().openMemory(session.id)
   }
 
+  const handleOpenWorktrees = () => {
+    if (!session.workspace) {
+      notifications.show({ color: 'yellow', message: '该会话没有可确认的工作区目录。' })
+      return
+    }
+    useSidecarStore.getState().openWorktrees(
+      session.id,
+      session.agent_id,
+      session.worktree_root_workspace || session.workspace || undefined,
+      session.connection_id || undefined,
+    )
+  }
+
   const handleOpenAgentGraph = () => {
     useSidecarStore
       .getState()
@@ -195,6 +210,7 @@ export function SidecarHost({
             onOpenAgentGraph={agentGraphEnabled ? handleOpenAgentGraph : undefined}
             onOpenBlackboard={blackboardEnabled ? handleOpenBlackboard : undefined}
             onOpenMemory={memoryEnabled ? handleOpenMemory : undefined}
+            onOpenWorktrees={worktreeEnabled && session.workspace ? handleOpenWorktrees : undefined}
           />
         )}
         {activeTab?.type === 'details' && (

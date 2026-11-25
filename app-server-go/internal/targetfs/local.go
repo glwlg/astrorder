@@ -878,6 +878,18 @@ func (l *localFileSystem) ExecGit(ctx context.Context, request GitRequest) (GitR
 		return restoreLocalCheckpoint(ctx, l.gitBinary, workspace, l.roots, request.BaseBranch, request.Branch, request.Path)
 	case GitCheckpointDelete:
 		return deleteLocalCheckpoint(ctx, l.gitBinary, workspace, request.Branch)
+	case GitWorktreeList:
+		return listLocalWorktrees(ctx, l.gitBinary, workspace, request.IncludeStatuses)
+	case GitWorktreeAdd:
+		return addLocalWorktree(ctx, l.gitBinary, workspace, l.roots, request)
+	case GitWorktreeRemove:
+		return removeLocalWorktree(ctx, l.gitBinary, workspace, request)
+	case GitWorktreePrune:
+		return pruneLocalWorktrees(ctx, l.gitBinary, workspace)
+	case GitWorktreeMerge:
+		return mergeLocalWorktree(ctx, l.gitBinary, workspace, request)
+	case GitWorktreeBootstrap:
+		return bootstrapLocalWorktree(ctx, l.gitBinary, workspace, request)
 	}
 	args, err := gitArgs(request)
 	if err != nil {

@@ -415,6 +415,15 @@ PRIMARY KEY (scope)
 	created_at DATETIME NOT NULL,
 	PRIMARY KEY (id)
 )`},
+	{Name: "session_worktrees", Create: `CREATE TABLE session_worktrees (
+	agent_id VARCHAR(256) NOT NULL,
+	session_id VARCHAR(256) NOT NULL,
+	root_workspace TEXT NOT NULL DEFAULT '',
+	branch VARCHAR(256) NOT NULL DEFAULT '',
+	managed BOOLEAN DEFAULT '0' NOT NULL,
+	updated_at DATETIME NOT NULL,
+	PRIMARY KEY (agent_id, session_id)
+)`},
 }
 
 var indices = []string{
@@ -440,6 +449,7 @@ var indices = []string{
 	"CREATE INDEX IF NOT EXISTS ix_session_schedules_due ON session_schedules (enabled, next_run_at)",
 	"CREATE INDEX IF NOT EXISTS ix_session_schedules_session ON session_schedules (agent_id, session_id)",
 	"CREATE INDEX IF NOT EXISTS ix_session_checkpoints_session ON session_checkpoints (agent_id, session_id, turn_number, created_at)",
+	"CREATE INDEX IF NOT EXISTS ix_session_worktrees_root ON session_worktrees (root_workspace)",
 	"CREATE INDEX IF NOT EXISTS ix_sessions_agent_id ON sessions (agent_id)",
 	"CREATE INDEX IF NOT EXISTS ix_sessions_connection_id ON sessions (connection_id)",
 	"CREATE INDEX IF NOT EXISTS ix_sessions_handoff_from_agent_id ON sessions (handoff_from_agent_id)",

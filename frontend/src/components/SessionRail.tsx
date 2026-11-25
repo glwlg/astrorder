@@ -34,8 +34,9 @@ import {
   UnstyledButton,
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { useCallback, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { motion } from 'motion/react'
+import { useSidecarStore } from '../features/sidecar/sidecarStore'
 import { useSessionOrder } from '../hooks/useSessionOrder'
 import { useSessionUnread } from '../hooks/useSessionUnread'
 import { AgentSessionFilter, matchesAgent } from './AgentSessionFilter'
@@ -204,11 +205,53 @@ export function SessionRail({
     }
   }
 
+  const handleContextBranch = async (session: Session) => {
+    if (forkLoading) return
+    setForkLoading(true)
+    try {
+      const created = await api.branchSessionWithContext(session.id, {
+        agent_id: session.agent_id,
+      })
+      useAstrorderStore.setState((state) => ({
+        sessions: { ...state.sessions, [scopeKey(created.agent_id, created.id)]: created },
+      }))
+      notifications.show({ color: 'teal', message: '已基于当前会话摘要创建交接会话' })
+      onSelect(created)
+    } catch (err) {
+      notifications.show({
+        color: 'red',
+        message: err instanceof Error ? err.message : '创建交接会话失败，请重试',
+      })
+    } finally {
+      setForkLoading(false)
+    }
+  }
+
   const worktreeEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKFLOW_GIT_WORKTREE_PLUGIN_ID))
 
   const forkMenuItems = (session: Session) => {
     const kind = agents[session.agent_id]?.kind
-    if (kind === 'antigravity' || kind === 'antigravity-ssh') return null
+    if (kind === 'antigravity' || kind === 'antigravity-ssh') {
+      return (
+        <>
+          <Menu.Item
+            leftSection={<IconGitFork size={14} />}
+            onClick={() => void handleContextBranch(session)}
+          >
+            基于摘要新建交接会话
+          </Menu.Item>
+          {worktreeEnabled && session.workspace && (
+            <Menu.Item
+              leftSection={<IconGitBranch size={14} />}
+              onClick={() => setForkWorktreeTarget(session)}
+            >
+              在新工作树中新建交接会话
+            </Menu.Item>
+          )}
+        </>
+      )
+    }
+    if (kind === 'grok') return null
     if (!worktreeEnabled) {
       return (
         <Menu.Item
@@ -349,18 +392,102 @@ export function SessionRail({
     }
   }
 
+  const [deleteRemoveWorktree, setDeleteRemoveWorktree] = useState(false)
+  const [deleteWorktreeBranch, setDeleteWorktreeBranch] = useState(true)
+  const [deleteForceWorktree, setDeleteForceWorktree] = useState(false)
+  const [deleteWorktreeStatus, setDeleteWorktreeStatus] = useState<{ loading: boolean; dirty: boolean; changedFiles: number; otherSessions: number } | null>(null)
+
+  const isLinkedWorktreeSession = (session: Session): boolean =>
+    Boolean(
+      session.worktree_root_workspace
+      && session.workspace
+      && session.worktree_root_workspace.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+        !== session.workspace.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase(),
+    )
+
   const requestDeleteSession = (session: Session, event?: { clientX: number; clientY: number }) => {
+    setDeleteRemoveWorktree(false)
+    setDeleteWorktreeBranch(true)
+    setDeleteForceWorktree(false)
+    if (isLinkedWorktreeSession(session)) {
+      const norm = (v?: string | null) => (v || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+      const otherSessions = sessions.filter(
+        (s) => !(s.agent_id === session.agent_id && s.id === session.id)
+          && (s.connection_id || '') === (session.connection_id || '')
+          && norm(s.workspace) === norm(session.workspace),
+      ).length
+      setDeleteWorktreeStatus({ loading: otherSessions === 0, dirty: false, changedFiles: 0, otherSessions })
+    } else {
+      setDeleteWorktreeStatus(null)
+    }
     setConfirmation({ kind: 'delete-session', session, coords: confirmationCoordinatesFromEvent(event) })
   }
 
+  useEffect(() => {
+    if (confirmation?.kind !== 'delete-session') return
+    const target = confirmation.session
+    if (!isLinkedWorktreeSession(target)) return
+    if (!deleteWorktreeStatus || !deleteWorktreeStatus.loading) return
+    const controller = new AbortController()
+    api.listGitWorktrees(
+      {
+        workspace: target.worktree_root_workspace || target.workspace || undefined,
+        connection_id: target.connection_id || undefined,
+        include_statuses: true,
+      },
+      controller.signal,
+    ).then((res) => {
+      if (controller.signal.aborted) return
+      const norm = (v?: string | null) => (v || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+      const matched = res.worktrees?.find((w) => norm(w.path) === norm(target.workspace))
+      setDeleteWorktreeStatus((prev) => prev ? {
+        ...prev,
+        loading: false,
+        dirty: Boolean(matched?.dirty),
+        changedFiles: matched?.changed_files || 0,
+      } : null)
+    }).catch(() => {
+      if (!controller.signal.aborted) {
+        setDeleteWorktreeStatus((prev) => prev ? { ...prev, loading: false } : null)
+      }
+    })
+    return () => controller.abort()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [confirmation])
+
   const deleteSession = async (session: Session) => {
     try {
-      await api.deleteSession(session.id, session.agent_id)
+      const wantRemoveWT = isLinkedWorktreeSession(session) && deleteRemoveWorktree && (deleteWorktreeStatus?.otherSessions ?? 0) === 0
+      const res = await api.deleteSession(
+        session.id,
+        session.agent_id,
+        wantRemoveWT
+          ? {
+              remove_worktree: true,
+              delete_worktree_branch: deleteWorktreeBranch,
+              force_remove_worktree: deleteForceWorktree,
+            }
+          : undefined,
+      )
       useAstrorderStore.setState((state) => {
         const nextSessions = { ...state.sessions }
         delete nextSessions[scopeKey(session.agent_id, session.id)]
         return { sessions: nextSessions }
       })
+      if (wantRemoveWT) {
+        if (res.worktree_removed) {
+          notifications.show({
+            color: 'teal',
+            message: res.worktree_branch_deleted
+              ? '已删除会话并清理对应 Worktree 与本地分支'
+              : res.worktree_error
+                ? `已清理 Worktree 目录（${res.worktree_error}）`
+                : '已删除会话并清理对应 Worktree 目录',
+          })
+        } else if (res.worktree_error) {
+          notifications.show({ color: 'yellow', message: `会话已删除，但 Worktree 未移除：${res.worktree_error}` })
+        }
+      }
     } catch (err) {
       console.error('删除会话失败', err)
       notifications.show({ color: 'red', message: err instanceof Error ? err.message : '删除会话失败，请重试' })
@@ -773,7 +900,7 @@ export function SessionRail({
                   }}
                 >
                   <span className="session-row-glyph"><AgentKindBadge agent={agents[session.agent_id]} iconOnly /></span>
-                  <span className="session-row-title" title={displaySessionTitle(session)}>
+                  <span className="session-row-title" title={session.worktree_branch && isLinkedWorktreeSession(session) ? `${displaySessionTitle(session)} · Worktree: ${session.worktree_branch} (${session.workspace})` : displaySessionTitle(session)}>
                     {projectCustom?.icon && (
                       <ProjectGlyph
                         iconName={projectCustom.icon}
@@ -783,6 +910,31 @@ export function SessionRail({
                       />
                     )}
                     {displaySessionTitle(session)}
+                    {session.worktree_branch && isLinkedWorktreeSession(session) && (
+                      <span
+                        title={`Git Worktree 分支：${session.worktree_branch}\n路径：${session.workspace}`}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 2,
+                          marginLeft: 6,
+                          padding: '0 5px',
+                          borderRadius: 4,
+                          fontSize: 10,
+                          lineHeight: '16px',
+                          background: 'rgba(14, 165, 233, 0.12)',
+                          color: '#0284c7',
+                          verticalAlign: 'middle',
+                          maxWidth: 110,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        <IconGitBranch size={10} style={{ flexShrink: 0 }} />
+                        {session.worktree_branch}
+                      </span>
+                    )}
                   </span>
                   <SessionRowMeta status={activityStatus} updatedAt={session.updated_at} unread={(session as any).unread} />
                 </UnstyledButton>
@@ -930,6 +1082,25 @@ export function SessionRail({
                       >
                         新建会话
                       </Menu.Item>
+                      {worktreeEnabled && project.workspace && (
+                        <Menu.Item
+                          leftSection={<IconGitBranch size={14} />}
+                          onClick={() => {
+                            const sample = project.sessions[0]
+                            const ownerAgent = project.agentId ? agents[project.agentId] : undefined
+                            const connId = sample?.connection_id || ownerAgent?.connection_id || undefined
+                            if (sample) onSelect(sample)
+                            useSidecarStore.getState().openWorktrees(
+                              sample?.id || project.key,
+                              sample?.agent_id || project.agentId || 'local',
+                              project.workspace || undefined,
+                              connId,
+                            )
+                          }}
+                        >
+                          Worktree 管理
+                        </Menu.Item>
+                      )}
                       <Menu.Divider />
                       <Menu.Item
                         color="red"
@@ -989,8 +1160,33 @@ export function SessionRail({
                           }}
                         >
                           <span className="session-row-glyph"><AgentKindBadge agent={agents[session.agent_id]} iconOnly /></span>
-                          <span className="session-row-title" title={displaySessionTitle(session)}>
+                          <span className="session-row-title" title={session.worktree_branch && isLinkedWorktreeSession(session) ? `${displaySessionTitle(session)} · Worktree: ${session.worktree_branch} (${session.workspace})` : displaySessionTitle(session)}>
                             {displaySessionTitle(session)}
+                            {session.worktree_branch && isLinkedWorktreeSession(session) && (
+                              <span
+                                title={`Git Worktree 分支：${session.worktree_branch}\n路径：${session.workspace}`}
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 2,
+                                  marginLeft: 6,
+                                  padding: '0 5px',
+                                  borderRadius: 4,
+                                  fontSize: 10,
+                                  lineHeight: '16px',
+                                  background: 'rgba(14, 165, 233, 0.12)',
+                                  color: '#0284c7',
+                                  verticalAlign: 'middle',
+                                  maxWidth: 110,
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap',
+                                }}
+                              >
+                                <IconGitBranch size={10} style={{ flexShrink: 0 }} />
+                                {session.worktree_branch}
+                              </span>
+                            )}
                           </span>
                           <SessionRowMeta status={activityStatus} updatedAt={session.updated_at} unread={(session as any).unread} />
                         </UnstyledButton>
@@ -1005,7 +1201,7 @@ export function SessionRail({
                               {isPinned ? <IconPinned size={14} /> : <IconPin size={14} />}
                             </button>
                           </Tooltip>
-                          <Menu position="bottom-end" shadow="md" width={130} withinPortal opened={railMenu?.kind === 'session' && railMenu.key === key} onChange={(opened) => updateRailMenu(opened, 'session', key)}>
+                          <Menu position="bottom-end" shadow="md" width={176} withinPortal opened={railMenu?.kind === 'session' && railMenu.key === key} onChange={(opened) => updateRailMenu(opened, 'session', key)}>
                             <Menu.Target>
                               <button
                                 type="button"
@@ -1153,6 +1349,53 @@ export function SessionRail({
         coords={confirmation?.coords}
         title={confirmationTitle}
         message={confirmationMessage}
+        extraContent={confirmation?.kind === 'delete-session' && deleteWorktreeStatus ? (
+          <Stack gap={6} pt={2}>
+            {deleteWorktreeStatus.otherSessions > 0 ? (
+              <Text size="xs" c="dimmed">
+                该独立 Worktree 仍有其他 {deleteWorktreeStatus.otherSessions} 个会话在使用，将自动保留目录。
+              </Text>
+            ) : (
+              <>
+                <Checkbox
+                  size="xs"
+                  label={`同时移除 Worktree 目录${confirmation.session.worktree_branch ? ` (${confirmation.session.worktree_branch})` : ''}`}
+                  checked={deleteRemoveWorktree}
+                  onChange={(e) => setDeleteRemoveWorktree(e.currentTarget.checked)}
+                  disabled={confirmationLoading}
+                />
+                {deleteRemoveWorktree && confirmation.session.worktree_branch && (
+                  <Checkbox
+                    size="xs"
+                    ml={18}
+                    label={`同时删除本地分支 ${confirmation.session.worktree_branch}`}
+                    checked={deleteWorktreeBranch}
+                    onChange={(e) => setDeleteWorktreeBranch(e.currentTarget.checked)}
+                    disabled={confirmationLoading}
+                  />
+                )}
+                {deleteWorktreeStatus.dirty && (
+                  <>
+                    <Text size="xs" c="orange">
+                      检测到该 Worktree 有 {deleteWorktreeStatus.changedFiles} 处未提交修改。
+                    </Text>
+                    {deleteRemoveWorktree && (
+                      <Checkbox
+                        size="xs"
+                        ml={18}
+                        color="red"
+                        label="强制移除（将丢弃未提交更改）"
+                        checked={deleteForceWorktree}
+                        onChange={(e) => setDeleteForceWorktree(e.currentTarget.checked)}
+                        disabled={confirmationLoading}
+                      />
+                    )}
+                  </>
+                )}
+              </>
+            )}
+          </Stack>
+        ) : undefined}
         confirmLabel="删除"
         loading={confirmationLoading}
         onConfirm={confirmDeletion}

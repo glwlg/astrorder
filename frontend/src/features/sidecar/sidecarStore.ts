@@ -76,6 +76,7 @@ export interface SidecarState {
   openSideChat: (sessionId: string, agentId: string, workspaceName?: string, connectionId?: string) => void
   openAgentGraph: (sessionId: string, agentId: string, workspaceName?: string, connectionId?: string) => void
   openGitDiff: (sessionId: string, agentId: string, workspacePath?: string, connectionId?: string, baseBranch?: string) => void
+  openWorktrees: (sessionId: string, agentId: string, workspacePath?: string, connectionId?: string) => void
   openBrowser: (sessionId: string, agentId: string, initialUrl?: string, connectionId?: string) => void
   openDatabaseWorkbench: (mediaType: string, viewerId: string, sessionId?: string, agentId?: string, connectionId?: string) => void
   openBlackboard: (sessionId?: string, agentId?: string, connectionId?: string) => void
@@ -403,6 +404,62 @@ export const useSidecarStore = create<SidecarState>()(persist((set, get) => ({
         title,
         artifact: gitArtifact,
         viewerId: 'git-diff-viewer',
+        closable: true,
+      }
+      set({
+        isOpen: true,
+        activeTabId: tabId,
+        tabs: [...tabs, newTab],
+      })
+    }
+    if (activeSessionKey) {
+      const curr = get()
+      set({
+        sessionMemories: {
+          ...sessionMemories,
+          [activeSessionKey]: { tabs: curr.tabs, activeTabId: curr.activeTabId, isOpen: true },
+        },
+      })
+    }
+  },
+
+  openWorktrees: (sessionId: string, agentId: string, workspacePath?: string, connectionId?: string) => {
+    const tabId = `gitworktrees:${sessionId || workspacePath || 'repo'}`
+    const { tabs, activeSessionKey, sessionMemories } = get()
+    const existingIndex = tabs.findIndex((t) => t.id === tabId)
+    if (existingIndex >= 0) {
+      const updated = tabs.map((tab, idx) => idx === existingIndex && tab.artifact ? {
+        ...tab,
+        artifact: {
+          ...tab.artifact,
+          path: workspacePath || tab.artifact.path,
+          connectionId: connectionId ?? tab.artifact.connectionId,
+        },
+      } : tab)
+      set({
+        isOpen: true,
+        activeTabId: tabId,
+        tabs: updated,
+      })
+    } else {
+      const wtArtifact: ArtifactRef = {
+        id: tabId,
+        name: 'Worktree 工作区',
+        kind: 'workspace_file',
+        mediaType: 'application/x-git-worktrees',
+        readUrl: '',
+        writable: false,
+        path: workspacePath,
+        sessionId,
+        agentId,
+        connectionId,
+      }
+      const newTab: SidecarTab = {
+        id: tabId,
+        type: 'artifact',
+        title: 'Worktree 工作区',
+        artifact: wtArtifact,
+        viewerId: 'git-worktrees-viewer',
         closable: true,
       }
       set({

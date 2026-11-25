@@ -24,16 +24,17 @@ func (h *Handler) handleListSessions(w http.ResponseWriter, r *http.Request) {
 }
 
 type createSessionPayload struct {
-	AgentID         string `json:"agent_id"`
-	Workspace       string `json:"workspace"`
-	Title           string `json:"title"`
-	ProjectID       string `json:"project_id"`
-	ProjectName     string `json:"project_name"`
-	ParentSessionID string `json:"parent_session_id"`
-	Ephemeral       bool   `json:"ephemeral"`
-	Provider        string `json:"provider"`
-	Model           string `json:"model"`
-	Effort          string `json:"effort"`
+	AgentID         string           `json:"agent_id"`
+	Workspace       string           `json:"workspace"`
+	Title           string           `json:"title"`
+	ProjectID       string           `json:"project_id"`
+	ProjectName     string           `json:"project_name"`
+	ParentSessionID string           `json:"parent_session_id"`
+	Ephemeral       bool             `json:"ephemeral"`
+	Provider        string           `json:"provider"`
+	Model           string           `json:"model"`
+	Effort          string           `json:"effort"`
+	Worktree        *WorktreeOptions `json:"worktree,omitempty"`
 }
 
 func (h *Handler) handleCreateSession(w http.ResponseWriter, r *http.Request) {
@@ -81,6 +82,23 @@ func (h *Handler) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	var prepared *preparedWorktree
+	if payload.Worktree != nil && payload.Worktree.activeMode() != "" {
+		var statusCode int
+		var detail string
+		prepared, statusCode, detail = h.prepareSessionWorktree(ctx, agent, workspace, payload.Worktree)
+		if statusCode != 0 {
+			writeJSONError(w, statusCode, detail)
+			return
+		}
+		workspace = prepared.Workspace
+	}
+	commitWorktree := false
+	defer func() {
+		if !commitWorktree && prepared != nil {
+			h.rollbackPreparedWorktree(ctx, prepared)
+		}
+	}()
 	req := &sessiondv1.CreateSessionRequest{
 		Meta:   newCommandMeta("", ""),
 		Target: target,
@@ -98,12 +116,18 @@ func (h *Handler) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 			},
 		}
 	case "hermes":
+		hermesFields := map[string]any{"cwd": workspace}
+		if t := strings.TrimSpace(payload.Title); t != "" {
+			hermesFields["title"] = t
+		}
+		native, _ := encodeNativeJSON("hermes.create.v1", hermesFields)
 		req.Options = &sessiondv1.CreateSessionRequest_Hermes{
 			Hermes: &sessiondv1.HermesCreateOptions{
 				ParentSessionId: optString(payload.ParentSessionID),
 				Model:           optString(payload.Model),
 				Provider:        optString(payload.Provider),
 				Effort:          optString(payload.Effort),
+				NativeOptions:   native,
 			},
 		}
 	case "antigravity", "antigravity-ssh":
@@ -158,6 +182,10 @@ func (h *Handler) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	if title == "" {
 		title = "New Session"
 	}
+	projectName := payload.ProjectName
+	if projectName == "" && prepared != nil && prepared.isLinked() {
+		projectName = workspaceBase(prepared.RootWorkspace)
+	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	sessionRow := map[string]any{
 		"id":            sessionID,
@@ -166,7 +194,7 @@ func (h *Handler) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		"workspace":     workspace,
 		"status":        status,
 		"project_id":    payload.ProjectID,
-		"project_name":  payload.ProjectName,
+		"project_name":  projectName,
 		"ephemeral":     payload.Ephemeral,
 		"connection_id": agent["connection_id"],
 		"control_state": "owned",
@@ -174,11 +202,18 @@ func (h *Handler) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		"native_kind":   "rpc",
 		"updated_at":    now,
 	}
+	if prepared != nil && prepared.isLinked() {
+		sessionRow["worktree_root_workspace"] = prepared.RootWorkspace
+		sessionRow["worktree_branch"] = prepared.Branch
+		sessionRow["worktree_managed"] = prepared.Managed
+	}
 	upserted, err := h.store.UpsertSession(ctx, sessionRow)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "Failed to persist session: "+err.Error())
 		return
 	}
+	commitWorktree = true
+	h.notifyWorktreesChanged(ctx, prepared)
 	h.publishEvent(ctx, "session.upsert", upserted)
 	writeJSON(w, http.StatusOK, upserted)
 }
@@ -312,7 +347,30 @@ func (h *Handler) handleDeleteSession(w http.ResponseWriter, r *http.Request, se
 		return
 	}
 	h.publishEvent(ctx, "session.delete", map[string]any{"id": sessionID, "agent_id": agentID})
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "id": sessionID})
+	resp := map[string]any{"ok": true, "id": sessionID}
+	q := r.URL.Query()
+	if q.Get("remove_worktree") == "1" || strings.EqualFold(q.Get("remove_worktree"), "true") {
+		connID := stringValue(existing, "connection_id")
+		ws := stringValue(existing, "workspace")
+		otherCount, countErr := h.store.CountOtherSessionsUsingWorkspace(ctx, agentID, sessionID, connID, ws)
+		if countErr != nil {
+			resp["worktree_removed"] = false
+			resp["worktree_error"] = countErr.Error()
+		} else if otherCount > 0 {
+			resp["worktree_removed"] = false
+			resp["worktree_error"] = "仍有其他会话绑定该 Worktree，已保留目录"
+		} else {
+			forceWT := q.Get("force_remove_worktree") == "1" || strings.EqualFold(q.Get("force_remove_worktree"), "true")
+			deleteBranch := q.Get("delete_worktree_branch") == "1" || strings.EqualFold(q.Get("delete_worktree_branch"), "true")
+			removed, branchDeleted, wtErr := h.removeSessionWorktree(ctx, existing, forceWT, deleteBranch)
+			resp["worktree_removed"] = removed
+			resp["worktree_branch_deleted"] = branchDeleted
+			if wtErr != "" {
+				resp["worktree_error"] = wtErr
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func optString(s string) *string {

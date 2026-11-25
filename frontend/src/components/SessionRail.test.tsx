@@ -503,13 +503,35 @@ describe('SessionRail local handoff', () => {
     useAstrorderStore.getState().resetRuntime()
   })
 
-  it('hides unsupported fork actions on Antigravity ACP sessions', async () => {
+  it('hides unsupported native fork actions on Antigravity ACP sessions and offers context-branch handoff instead', async () => {
+    const onSelect = vi.fn()
+    const created: Session = { ...sessions[0], id: 'agy-branch-1', title: 'Session 1 (交接分支)', handoff_context: '摘要' }
+    const branchSpy = vi.spyOn(api, 'branchSessionWithContext').mockResolvedValue(created)
     const agyAgents = { ...agents, [sessions[0].agent_id]: { ...agents[sessions[0].agent_id], kind: 'antigravity' as const } }
-    const view = render(<MantineProvider><SessionRail sessions={[sessions[0]]} agents={agyAgents} onSelect={vi.fn()} /></MantineProvider>)
-    fireEvent.click(view.container.querySelector('button[aria-label="更多操作"]')!)
-    expect(await screen.findByRole('menuitem', { name: '重命名' })).toBeInTheDocument()
-    expect(screen.queryByRole('menuitem', { name: '创建聊天分支' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('menuitem', { name: '在新工作树中创建聊天分支' })).not.toBeInTheDocument()
+    const view = render(<MantineProvider><SessionRail sessions={[sessions[0]]} agents={agyAgents} onSelect={onSelect} /></MantineProvider>)
+    fireEvent.click(view.container.querySelector('.session-row-wrapper button[aria-label="更多操作"]')!)
+    const contextBranchItem = await screen.findByRole('menuitem', { name: '基于摘要新建交接会话' })
+    const menu = contextBranchItem.closest('[role="menu"]') as HTMLElement
+    expect(within(menu).getByRole('menuitem', { name: '重命名', hidden: true })).toBeInTheDocument()
+    expect(within(menu).queryByRole('menuitem', { name: '创建聊天分支', hidden: true })).not.toBeInTheDocument()
+    expect(within(menu).queryByRole('menuitem', { name: '在新工作树中创建聊天分支', hidden: true })).not.toBeInTheDocument()
+    fireEvent.click(contextBranchItem)
+    await waitFor(() => {
+      expect(branchSpy).toHaveBeenCalledWith(sessions[0].id, { agent_id: sessions[0].agent_id })
+      expect(onSelect).toHaveBeenCalledWith(created)
+    })
+    branchSpy.mockRestore()
+    view.unmount()
+  })
+
+  it('hides unsupported native fork actions on Grok sessions', async () => {
+    const grokAgents = { ...agents, [sessions[0].agent_id]: { ...agents[sessions[0].agent_id], kind: 'grok' as const } }
+    const view = render(<MantineProvider><SessionRail sessions={[sessions[0]]} agents={grokAgents} onSelect={vi.fn()} /></MantineProvider>)
+    fireEvent.click(view.container.querySelector('.session-row-wrapper button[aria-label="更多操作"]')!)
+    const renameItem = await screen.findByRole('menuitem', { name: '重命名' })
+    const menu = renameItem.closest('[role="menu"]') as HTMLElement
+    expect(within(menu).queryByRole('menuitem', { name: /分叉/, hidden: true })).not.toBeInTheDocument()
+    expect(within(menu).queryByRole('menuitem', { name: '基于摘要新建交接会话', hidden: true })).not.toBeInTheDocument()
     view.unmount()
   })
 

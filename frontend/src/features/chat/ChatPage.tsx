@@ -12,6 +12,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ApiError, api } from '../../api/client'
+import { messageForkModeForAgent } from '../../domain/handoff'
 import { findSessionHandoff, newCommandId, scopeKey } from '../../domain/semantics'
 import type { Approval, Command, Message, Session, Task } from '../../domain/types'
 import { EmptyState } from '../../components/EmptyState'
@@ -595,17 +596,18 @@ function ChatPageBody() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [selected, agent, queryClient],
   )
+  const forkMode = messageForkModeForAgent(agent?.kind)
   const handleOpenForkCallback = useCallback(
     (message: Message, turnIndex: number) => {
       if (!selected) return
       setForkTargetMessage({ message, turnIndex })
       const baseTitle = selected.title || '新会话'
-      setForkTitle(`${baseTitle} (分叉)`)
+      setForkTitle(forkMode === 'context_branch' ? `${baseTitle} (交接分支)` : `${baseTitle} (分叉)`)
       setForkBranchName(`fork-${Date.now().toString(36)}`)
       setForkWorktree(false)
       setForkModalOpen(true)
     },
-    [selected],
+    [forkMode, selected],
   )
 
   const resourceError = resources.messages.error || resources.commands.error || resources.tasks.error
@@ -652,7 +654,7 @@ function ChatPageBody() {
     if (!selected) return
     setForkTargetMessage({ message, turnIndex })
     const baseTitle = selected.title || '新会话'
-    setForkTitle(`${baseTitle} (分叉)`)
+    setForkTitle(forkMode === 'context_branch' ? `${baseTitle} (交接分支)` : `${baseTitle} (分叉)`)
     setForkBranchName(`fork-${Date.now().toString(36)}`)
     setForkWorktree(false)
     setForkModalOpen(true)
@@ -662,25 +664,41 @@ function ChatPageBody() {
     if (!selected || !forkTargetMessage) return
     setForkLoading(true)
     try {
-      const result = await api.forkSession(selected.id, {
-        agent_id: selected.agent_id,
-        title: forkTitle.trim() || undefined,
-        worktree: worktreeEnabled && forkWorktree,
-        branch_name: worktreeEnabled && forkWorktree && forkBranchName.trim() ? forkBranchName.trim() : undefined,
-        target_message_id: forkTargetMessage.message.id,
-        turn_index: undefined,
-      })
+      const useContextBranchForFork = forkMode === 'context_branch' || (worktreeEnabled && forkWorktree && agent?.kind === 'hermes')
+      const result = useContextBranchForFork
+        ? await api.branchSessionWithContext(selected.id, {
+            agent_id: selected.agent_id,
+            title: forkTitle.trim() || undefined,
+            target_message_id: forkTargetMessage.message.id,
+            ...(worktreeEnabled && forkWorktree ? {
+              create_worktree: true,
+              worktree_branch: forkBranchName.trim() || undefined,
+            } : {}),
+          })
+        : await api.forkSession(selected.id, {
+            agent_id: selected.agent_id,
+            title: forkTitle.trim() || undefined,
+            worktree: worktreeEnabled && forkWorktree,
+            branch_name: worktreeEnabled && forkWorktree && forkBranchName.trim() ? forkBranchName.trim() : undefined,
+            target_message_id: forkTargetMessage.message.id,
+            turn_index: undefined,
+          })
+      useAstrorderStore.setState((state) => ({
+        sessions: { ...state.sessions, [scopeKey(result.agent_id, result.id)]: result },
+      }))
       notifications.show({
         color: 'teal',
-        title: '会话已分叉',
-        message: `成功从此回复分叉新会话：${result.title || result.id}`,
+        title: forkMode === 'context_branch' ? '已创建交接会话' : '会话已分叉',
+        message: forkMode === 'context_branch'
+          ? `已截取截止此回复的上下文摘要并新建会话：${result.title || result.id}`
+          : `成功从此回复分叉新会话：${result.title || result.id}`,
       })
       setForkModalOpen(false)
       navigate(`/chat/${encodeURIComponent(result.id)}?agent_id=${encodeURIComponent(result.agent_id)}`)
     } catch (err) {
       notifications.show({
         color: 'red',
-        title: '分叉失败',
+        title: forkMode === 'context_branch' ? '创建交接会话失败' : '分叉失败',
         message: err instanceof Error ? err.message : '分叉会话出现未知错误',
       })
     } finally {
@@ -826,7 +844,8 @@ function ChatPageBody() {
             notice={connectionNotice}
             onRetry={handleRetryResources}
             commands={commands}
-            onForkAtMessage={handleOpenForkCallback}
+            onForkAtMessage={forkMode !== 'none' ? handleOpenForkCallback : undefined}
+            forkActionLabel={forkMode === 'context_branch' ? '基于此回复新建交接会话' : '从此回复分叉新会话'}
             onEditLastUserMessage={handleEditLastUserMessage}
             checkpoints={sessionCheckpoints.pluginEnabled ? sessionCheckpoints.items : []}
             onOpenCheckpoint={sessionCheckpoints.pluginEnabled ? handleOpenCheckpoint : undefined}
@@ -836,7 +855,7 @@ function ChatPageBody() {
           <SessionComposerGate
             key={`gate:${scopeKey(selected.agent_id, selected.id)}`}
             session={selected}
-            onFork={messages.some(message => message.role === 'assistant' && message.kind !== 'tool') ? () => {
+            onFork={forkMode !== 'none' && messages.some(message => message.role === 'assistant' && message.kind !== 'tool') ? () => {
               const index = messages.findLastIndex(message => message.role === 'assistant' && message.kind !== 'tool')
               handleOpenFork(messages[index], index)
             } : undefined}
@@ -984,14 +1003,16 @@ function ChatPageBody() {
       />
       {selected && <QuickOpen session={selected} opened={quickOpenOpened} onClose={() => setQuickOpenOpened(false)} />}
 
-      {/* 从任意回复分叉会话弹窗 */}
+      {/* 从任意回复分叉 / 新建交接分支弹窗 */}
       <Modal
         opened={forkModalOpen}
         onClose={() => setForkModalOpen(false)}
         title={
           <Group gap={8}>
             <IconGitFork size={18} style={{ color: 'var(--astr-indigo)' }} />
-            <span style={{ fontWeight: 600, fontSize: '14px' }}>从该回复分叉新会话</span>
+            <span style={{ fontWeight: 600, fontSize: '14px' }}>
+              {forkMode === 'context_branch' ? '基于该回复新建交接会话' : '从该回复分叉新会话'}
+            </span>
           </Group>
         }
         centered
@@ -999,24 +1020,28 @@ function ChatPageBody() {
       >
         <Stack gap="md">
           <Text size="xs" c="dimmed">
-            将在当前回复节点创建全新分支，继承此前的完整对话上下文，后续尝试不会影响原会话。
+            {forkMode === 'context_branch'
+              ? 'Antigravity 原生协议暂不支持直接分叉；星序将截取截止到此回复的对话摘要，创建一个同工作区、同模型的全新会话，并在发送首条消息时自动注入背景上下文，不会影响原会话。'
+              : '将在当前回复节点创建全新分支，继承此前的完整对话上下文，后续尝试不会影响原会话。'}
           </Text>
           <TextInput
             label="新会话标题"
-            placeholder="输入分叉会话标题"
+            placeholder={forkMode === 'context_branch' ? '输入交接会话标题' : '输入分叉会话标题'}
             value={forkTitle}
             onChange={(e) => setForkTitle(e.currentTarget.value)}
           />
-          {worktreeEnabled && agent?.kind !== 'antigravity' && <Switch
+          {worktreeEnabled && Boolean(selected.workspace) && <Switch
             label="创建独立 Git Worktree 分支工作区"
-            description="在独立目录签出新 Git 分支，防止两个分支的代码修改互相干扰"
+            description={agent?.kind === 'hermes'
+              ? 'Hermes 将自动通过上下文交接在独立目录签出新 Git 分支，不影响原目录'
+              : '在独立目录签出新 Git 分支，防止两个分支的代码修改互相干扰'}
             checked={forkWorktree}
             onChange={(e) => setForkWorktree(e.currentTarget.checked)}
           />}
-          {worktreeEnabled && forkWorktree && (
+          {worktreeEnabled && Boolean(selected.workspace) && forkWorktree && (
             <TextInput
               label="Git 分支名"
-              placeholder="例如：feature-experimental"
+              placeholder="例如：feat/experimental"
               value={forkBranchName}
               onChange={(e) => setForkBranchName(e.currentTarget.value)}
             />
@@ -1031,7 +1056,7 @@ function ChatPageBody() {
               loading={forkLoading}
               leftSection={<IconGitFork size={15} />}
             >
-              立即分叉
+              {forkMode === 'context_branch' ? '创建交接会话' : '立即分叉'}
             </Button>
           </Group>
         </Stack>

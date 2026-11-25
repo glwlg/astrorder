@@ -68,6 +68,112 @@ export interface Session {
   parent_session_key?: string | null;
   delegation_parent_agent_id?: string | null;
   delegation_parent_session_id?: string | null;
+  worktree_root_workspace?: string | null;
+  worktree_branch?: string | null;
+  worktree_managed?: boolean;
+}
+
+export interface GitWorktreeEntry {
+  path: string;
+  head: string;
+  branch: string;
+  detached: boolean;
+  bare: boolean;
+  is_main: boolean;
+  is_current: boolean;
+  locked: boolean;
+  lock_reason?: string;
+  prunable: boolean;
+  prune_reason?: string;
+  status_loaded: boolean;
+  dirty: boolean;
+  changed_files: number;
+  ahead: number;
+  behind: number;
+}
+
+export interface GitWorktreeBranch {
+  name: string;
+  is_current: boolean;
+  occupied_by_path?: string;
+}
+
+export interface GitWorktreeCopyCandidate {
+  path: string;
+  size: number;
+  source: 'worktreeinclude' | 'default' | string;
+}
+
+export interface GitWorktreeRepoConfig {
+  default_layout?: 'sibling' | 'inside' | string;
+  copy_files?: string[];
+  setup_command?: string;
+}
+
+export interface GitWorktreesResponse {
+  is_git_repo: boolean;
+  workspace: string;
+  main_workspace?: string;
+  is_worktree: boolean;
+  current_branch?: string;
+  default_branch?: string;
+  default_sibling_base?: string;
+  default_inside_base?: string;
+  worktrees: GitWorktreeEntry[];
+  branches: GitWorktreeBranch[];
+  copyable_files: GitWorktreeCopyCandidate[];
+  repo_config?: GitWorktreeRepoConfig | null;
+}
+
+export interface SessionWorktreePayload {
+  mode: 'none' | 'create' | 'existing';
+  branch?: string;
+  base_ref?: string;
+  create_branch?: boolean;
+  path?: string;
+  layout?: 'sibling' | 'inside';
+  copy_files?: string[];
+}
+
+export interface GitWorktreeAddResult {
+  path: string;
+  branch: string;
+  main_workspace: string;
+  head?: string;
+  created_branch: boolean;
+  copied_files: string[];
+  skipped_files?: string[];
+}
+
+export interface GitWorktreeRemoveResult {
+  removed: boolean;
+  path: string;
+  branch?: string;
+  branch_deleted: boolean;
+  branch_delete_error?: string;
+}
+
+export interface GitWorktreePruneResult {
+  pruned_count: number;
+  output: string;
+}
+
+export interface GitWorktreeMergeResult {
+  merged: boolean;
+  conflicted: boolean;
+  aborted: boolean;
+  source_branch: string;
+  target_branch: string;
+  target_path: string;
+  strategy: string;
+  conflict_files?: string[];
+  detail?: string;
+}
+
+export interface GitWorktreeBootstrapResult {
+  target_path: string;
+  copied_files: string[];
+  skipped_files?: string[];
 }
 
 export interface SessionHandoffContext {

@@ -499,7 +499,7 @@ func TestApplyFrameIsRegisteredAtomicContiguousAndReopenSafe(t *testing.T) {
 
 func assertCanonicalSchema(ctx context.Context, t *testing.T, st *Store) error {
 	t.Helper()
-	wantTables := []string{"agent_connection_choices", "agent_invocation_usage", "agents", "attachments", "backup_jobs", "backup_versions", "commands", "connection_history", "daemon_checkpoints", "delegation_edges", "delegation_operations", "draft_shelves", "events", "messages", "projects", "review_relay_bindings", "review_relay_runs", "session_checkpoints", "session_schedules", "sessions", "ssh_connections", "tasks", "token_metrics", "workspace_preferences"}
+	wantTables := []string{"agent_connection_choices", "agent_invocation_usage", "agents", "attachments", "backup_jobs", "backup_versions", "commands", "connection_history", "daemon_checkpoints", "delegation_edges", "delegation_operations", "draft_shelves", "events", "messages", "projects", "review_relay_bindings", "review_relay_runs", "session_checkpoints", "session_schedules", "session_worktrees", "sessions", "ssh_connections", "tasks", "token_metrics", "workspace_preferences"}
 	rows, err := st.QueryRows(ctx, "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
 	if err != nil {
 		return err
@@ -517,7 +517,7 @@ func assertCanonicalSchema(ctx context.Context, t *testing.T, st *Store) error {
 		"ix_connection_history_connection_id", "ix_delegation_edges_parent", "ix_delegation_operations_caller",
 		"ix_events_agent_id", "ix_events_session_id", "ix_messages_agent_id",
 		"ix_messages_session_id", "ix_projects_agent_id", "ix_projects_connection_id", "ix_projects_source_id",
-		"ix_review_relay_runs_source_agent_id", "ix_review_relay_runs_source_session_id", "ix_session_checkpoints_session", "ix_session_schedules_due", "ix_session_schedules_session", "ix_sessions_agent_id",
+		"ix_review_relay_runs_source_agent_id", "ix_review_relay_runs_source_session_id", "ix_session_checkpoints_session", "ix_session_schedules_due", "ix_session_schedules_session", "ix_session_worktrees_root", "ix_sessions_agent_id",
 		"ix_sessions_connection_id", "ix_sessions_handoff_from_agent_id", "ix_sessions_handoff_from_session_id",
 		"ix_sessions_project_id", "ix_sessions_source_id", "ix_sessions_source_session_id", "ix_tasks_agent_id",
 		"ix_tasks_session_id", "ix_token_metrics_agent_id", "ix_token_metrics_date", "ix_token_metrics_model",

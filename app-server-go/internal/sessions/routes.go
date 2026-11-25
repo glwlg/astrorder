@@ -32,6 +32,7 @@ var allRoutes = []Registration{
 	{Method: http.MethodDelete, Path: "/api/v1/sessions/{session_id}"},
 	{Method: http.MethodPost, Path: "/api/v1/sessions/{session_id}/sync"},
 	{Method: http.MethodPost, Path: "/api/v1/sessions/{session_id}/fork"},
+	{Method: http.MethodPost, Path: "/api/v1/sessions/{session_id}/context-branch"},
 	{Method: http.MethodPost, Path: "/api/v1/sessions/{session_id}/handoff"},
 	{Method: http.MethodGet, Path: "/api/v1/sessions/{session_id}/handoff-context"},
 	{Method: http.MethodGet, Path: "/api/v1/sessions/{session_id}/messages"},
@@ -180,6 +181,10 @@ func parseRoute(method, path string) (string, parsedParams) {
 			case "fork":
 				if method == http.MethodPost {
 					return "fork_session", params
+				}
+			case "context-branch":
+				if method == http.MethodPost {
+					return "context_branch_session", params
 				}
 			case "handoff":
 				if method == http.MethodPost {

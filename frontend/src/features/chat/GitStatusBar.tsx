@@ -1,5 +1,7 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
+  Badge,
   Button,
   Group,
   Menu,
@@ -15,6 +17,45 @@ import type { Session } from '../../domain/types'
 import { useGitStatus } from '../../hooks/useGitStatus'
 import { useSidecarStore } from '../sidecar/sidecarStore'
 import { ComposerGlassMenu, GlassButtonLens } from '../../components/GlassPanel'
+import { WORKFLOW_GIT_WORKTREE_PLUGIN_ID } from '../plugins/builtinPlugins'
+import { usePluginSettingsStore } from '../plugins/pluginSettingsStore'
+import { NewSessionDialog } from '../../components/NewSessionDialog'
+import { useAstrorderStore } from '../../state/store'
+
+function WorktreeNewSessionLauncher({
+  session,
+  onClose,
+}: {
+  session: Session
+  onClose: () => void
+}) {
+  const navigate = useNavigate()
+  const agents = useAstrorderStore((s) => s.agents)
+  const rootWorkspace = session.worktree_root_workspace || session.workspace || ''
+  const baseName = rootWorkspace.replace(/\\/g, '/').split('/').filter(Boolean).pop() || rootWorkspace
+  const project = rootWorkspace ? {
+    key: `workspace:${session.connection_id || 'local'}\u0000${rootWorkspace}`,
+    label: session.project_name || baseName,
+    sessions: [session],
+    sessionCount: 1,
+    latestUpdatedAt: session.updated_at,
+    agentId: session.agent_id,
+    workspace: rootWorkspace,
+  } : null
+  return (
+    <NewSessionDialog
+      agents={agents}
+      project={project}
+      initialAgentId={session.agent_id}
+      initialWorkspace={rootWorkspace}
+      initialWorktreeMode="create"
+      onClose={onClose}
+      onCreated={(created) => {
+        navigate(`/chat/${encodeURIComponent(created.id)}?agent_id=${encodeURIComponent(created.agent_id)}`)
+      }}
+    />
+  )
+}
 
 interface GitStatusBarProps {
   session: Session
@@ -22,6 +63,7 @@ interface GitStatusBarProps {
 
 export function GitStatusBar({ session }: GitStatusBarProps) {
   const [createModalOpened, setCreateModalOpened] = useState(false)
+  const [createWorktreeSessionOpened, setCreateWorktreeSessionOpened] = useState(false)
   const [newBranchName, setNewBranchName] = useState('')
   const [switching, setSwitching] = useState(false)
   const [menuOpened, setMenuOpened] = useState(false)
@@ -34,6 +76,14 @@ export function GitStatusBar({ session }: GitStatusBarProps) {
   const deletions = git.data?.deletions || 0
   const changedFiles = git.data?.changed_files || 0
   const openGitDiff = useSidecarStore((s) => s.openGitDiff)
+  const openWorktrees = useSidecarStore((s) => s.openWorktrees)
+  const worktreeEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKFLOW_GIT_WORKTREE_PLUGIN_ID))
+  const isLinkedWorktree = Boolean(
+    session.worktree_root_workspace
+    && session.workspace
+    && session.worktree_root_workspace.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+      !== session.workspace.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase(),
+  )
 
   const handleSwitchBranch = async (targetBranch: string) => {
     if (targetBranch === branch || switching) return
@@ -164,6 +214,11 @@ export function GitStatusBar({ session }: GitStatusBarProps) {
             >
               <GlassButtonLens />
               <GitBranchIcon size={20} aria-hidden="true" />
+              {isLinkedWorktree && (
+                <Badge size="xs" variant="light" color="cyan" px={4} style={{ textTransform: 'none', flexShrink: 0 }}>
+                  WT
+                </Badge>
+              )}
               <Text size="xs" fw={600}>
                 {branch || (statusLoading ? '读取分支…' : '分支未知')}
               </Text>
@@ -200,6 +255,33 @@ export function GitStatusBar({ session }: GitStatusBarProps) {
                 基于当前创建新分支...
               </Text>
             </Menu.Item>
+            {worktreeEnabled && session.workspace && (
+              <>
+                <Menu.Divider />
+                <Menu.Label>Git Worktree 辅助</Menu.Label>
+                <Menu.Item
+                  leftSection={<PlusIcon size={16} color="#0ea5e9" />}
+                  onClick={() => setCreateWorktreeSessionOpened(true)}
+                >
+                  <Text size="xs">
+                    基于当前新建 Worktree 会话...
+                  </Text>
+                </Menu.Item>
+                <Menu.Item
+                  leftSection={<GitBranchIcon size={16} color="#0ea5e9" />}
+                  onClick={() => openWorktrees(
+                    session.id,
+                    session.agent_id,
+                    session.worktree_root_workspace || session.workspace || undefined,
+                    session.connection_id || undefined,
+                  )}
+                >
+                  <Text size="xs">
+                    管理 Git Worktree 工作区...
+                  </Text>
+                </Menu.Item>
+              </>
+            )}
             </ComposerGlassMenu>
           </Menu.Dropdown>
         </Menu>
@@ -285,6 +367,12 @@ export function GitStatusBar({ session }: GitStatusBarProps) {
           </Group>
         </div>
       </Modal>
+      {createWorktreeSessionOpened && (
+        <WorktreeNewSessionLauncher
+          session={session}
+          onClose={() => setCreateWorktreeSessionOpened(false)}
+        />
+      )}
     </>
   )
 }

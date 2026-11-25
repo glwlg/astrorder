@@ -41,11 +41,11 @@ describe('ForkWorktreeDialog', () => {
     const pathInput = screen.getByLabelText(/工作树目录/) as HTMLInputElement
 
     expect(branchInput.value).toMatch(/^branch-/)
-    expect(pathInput.value).toContain('astrorder-worktrees')
+    expect(pathInput.value).toContain('.worktrees')
 
     // Test dynamic update of path when branch changes
     fireEvent.change(branchInput, { target: { value: 'feature/dark-mode' } })
-    expect(pathInput.value).toBe('C:/repos/astrorder-worktrees/feature/dark-mode')
+    expect(pathInput.value).toBe('C:/repos/astrorder/.worktrees/feature/dark-mode')
   })
 
   it('submits fork request with worktree params and calls callbacks', async () => {
@@ -54,7 +54,7 @@ describe('ForkWorktreeDialog', () => {
       agent_id: 'local-codex',
       title: '主线开发任务 (feature/dark-mode)',
       status: 'idle',
-      workspace: 'C:/repos/astrorder-worktrees/feature/dark-mode',
+      workspace: 'C:/repos/astrorder/.worktrees/feature/dark-mode',
       updated_at: '2026-09-17T00:00:00Z',
     }
 
@@ -83,7 +83,7 @@ describe('ForkWorktreeDialog', () => {
         agent_id: 'local-codex',
         worktree: true,
         branch_name: 'feature/dark-mode',
-        worktree_path: 'C:/repos/astrorder-worktrees/feature/dark-mode',
+        worktree_path: 'C:/repos/astrorder/.worktrees/feature/dark-mode',
       })
     })
 
@@ -124,5 +124,48 @@ describe('ForkWorktreeDialog', () => {
 
     forkSpy.mockRestore()
     notifySpy.mockRestore()
+  })
+
+  it('routes Antigravity worktree branching to branchSessionWithContext', async () => {
+    const createdSession: Session = {
+      id: 'agy-wt-1',
+      agent_id: 'local-agy',
+      title: 'AGY (交接分支)',
+      status: 'idle',
+      workspace: 'C:/repos/astrorder/.worktrees/feat/agy-wt',
+      worktree_root_workspace: 'C:/repos/astrorder',
+      worktree_branch: 'feat/agy-wt',
+      updated_at: '2026-11-25T00:00:00Z',
+    }
+    const branchSpy = vi.spyOn(api, 'branchSessionWithContext').mockResolvedValue(createdSession)
+    const onClose = vi.fn()
+    const onCreated = vi.fn()
+
+    render(
+      <MantineProvider>
+        <ForkWorktreeDialog
+          session={{ ...mockSession, agent_id: 'local-agy' }}
+          agent={{ id: 'local-agy', kind: 'antigravity', name: 'Antigravity', status: 'ready', capabilities: [], limitation: null }}
+          onClose={onClose}
+          onCreated={onCreated}
+        />
+      </MantineProvider>,
+    )
+
+    expect(screen.getByRole('dialog', { name: '在新工作树中新建交接会话' })).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText(/分支名称/), { target: { value: 'feat/agy-wt' } })
+    fireEvent.click(screen.getByRole('button', { name: '创建分支' }))
+
+    await waitFor(() => {
+      expect(branchSpy).toHaveBeenCalledWith('session-123', expect.objectContaining({
+        agent_id: 'local-agy',
+        create_worktree: true,
+        worktree_branch: 'feat/agy-wt',
+        worktree_path: 'C:/repos/astrorder/.worktrees/feat/agy-wt',
+      }))
+    })
+    expect(onCreated).toHaveBeenCalledWith(createdSession)
+    expect(onClose).toHaveBeenCalled()
+    branchSpy.mockRestore()
   })
 })

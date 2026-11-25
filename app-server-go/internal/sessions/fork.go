@@ -11,12 +11,17 @@ import (
 // Fork uses the native parent's history; the App never copies projected messages.
 func (h *Handler) handleForkSession(w http.ResponseWriter, r *http.Request, sid string) {
 	var body struct {
-		AgentID         string  `json:"agent_id"`
-		Title           string  `json:"title"`
-		TargetMessageID *string `json:"target_message_id"`
-		TurnIndex       *int    `json:"turn_index"`
-		CreateWorktree  bool    `json:"create_worktree"`
-		WorktreeBranch  *string `json:"worktree_branch"`
+		AgentID           string           `json:"agent_id"`
+		Title             string           `json:"title"`
+		TargetMessageID   *string          `json:"target_message_id"`
+		TurnIndex         *int             `json:"turn_index"`
+		CreateWorktree    bool             `json:"create_worktree"`
+		WorktreeBranch    *string          `json:"worktree_branch"`
+		WorktreePath      *string          `json:"worktree_path"`
+		WorktreeBaseRef   *string          `json:"worktree_base_ref"`
+		WorktreeLayout    string           `json:"worktree_layout"`
+		WorktreeCopyFiles []string         `json:"worktree_copy_files"`
+		Worktree          *WorktreeOptions `json:"worktree"`
 	}
 	if decodeJSON(r.Body, &body) != nil || body.AgentID == "" {
 		writeJSONError(w, 422, "Invalid fork request")
@@ -44,8 +49,17 @@ func (h *Handler) handleForkSession(w http.ResponseWriter, r *http.Request, sid 
 		writeJSONError(w, 422, "This Agent does not support native session forks")
 		return
 	}
-	if body.CreateWorktree {
-		writeJSONError(w, 422, "Creating a Git worktree during a session fork is unavailable")
+	wtOpts := defaultWorktreeOptionsFromLegacy(
+		body.CreateWorktree,
+		derefString(body.WorktreeBranch),
+		derefString(body.WorktreePath),
+		derefString(body.WorktreeBaseRef),
+		body.WorktreeLayout,
+		body.WorktreeCopyFiles,
+		body.Worktree,
+	)
+	if wtOpts != nil && kind == "hermes" {
+		writeJSONError(w, 422, "Hermes 原生分叉不支持切换工作树目录，请改用交接分支或在新建会话时创建 Worktree")
 		return
 	}
 	if body.TurnIndex != nil {
@@ -73,7 +87,25 @@ func (h *Handler) handleForkSession(w http.ResponseWriter, r *http.Request, sid 
 	if title == "" {
 		title = stringValue(parent, "title") + " (分叉)"
 	}
-	fields := map[string]any{"title": title, "cwd": stringValue(parent, "workspace")}
+	effectiveWorkspace := stringValue(parent, "workspace")
+	var prepared *preparedWorktree
+	if wtOpts != nil {
+		var statusCode int
+		var detail string
+		prepared, statusCode, detail = h.prepareSessionWorktree(r.Context(), agent, effectiveWorkspace, wtOpts)
+		if statusCode != 0 {
+			writeJSONError(w, statusCode, detail)
+			return
+		}
+		effectiveWorkspace = prepared.Workspace
+	}
+	commitWorktree := false
+	defer func() {
+		if !commitWorktree && prepared != nil {
+			h.rollbackPreparedWorktree(r.Context(), prepared)
+		}
+	}()
+	fields := map[string]any{"title": title, "cwd": effectiveWorkspace}
 	if body.TargetMessageID != nil && *body.TargetMessageID != "" {
 		if kind == "antigravity" {
 			prefix := "antigravity:" + nativeID + ":"
@@ -110,9 +142,9 @@ func (h *Handler) handleForkSession(w http.ResponseWriter, r *http.Request, sid 
 		native, _ := encodeNativeJSON("hermes.create.v1", fields)
 		req.Options = &pb.CreateSessionRequest_Hermes{Hermes: &pb.HermesCreateOptions{ParentSessionId: &nativeID, NativeOptions: native}}
 	} else if kind == "antigravity" {
-		req.Options = &pb.CreateSessionRequest_Antigravity{Antigravity: &pb.AntigravityCreateOptions{Cwd: stringValue(parent, "workspace"), ParentSessionId: &nativeID, TargetMessageId: body.TargetMessageID}}
+		req.Options = &pb.CreateSessionRequest_Antigravity{Antigravity: &pb.AntigravityCreateOptions{Cwd: effectiveWorkspace, ParentSessionId: &nativeID, TargetMessageId: body.TargetMessageID}}
 	} else {
-		req.Options = &pb.CreateSessionRequest_Codex{Codex: &pb.CodexCreateOptions{Cwd: stringValue(parent, "workspace"), ParentSessionId: &nativeID}}
+		req.Options = &pb.CreateSessionRequest_Codex{Codex: &pb.CodexCreateOptions{Cwd: effectiveWorkspace, ParentSessionId: &nativeID}}
 	}
 	receipt, err := h.client.Session.CreateSession(r.Context(), req)
 	if err == nil {
@@ -131,11 +163,44 @@ func (h *Handler) handleForkSession(w http.ResponseWriter, r *http.Request, sid 
 		writeJSONError(w, 502, err.Error())
 		return
 	}
-	child, err := h.store.UpsertSession(r.Context(), map[string]any{"id": receipt.Session.SessionId, "agent_id": body.AgentID, "title": title, "workspace": parent["workspace"], "connection_id": parent["connection_id"], "handoff_from_session_id": sid, "handoff_from_agent_id": body.AgentID, "updated_at": time.Now().UTC().Format(time.RFC3339Nano), "project_id": parent["project_id"], "project_name": parent["project_name"], "source_session_id": receipt.Session.SessionId, "status": state, "control_state": "owned", "history_state": "available"})
+	childPayload := map[string]any{
+		"id":                      receipt.Session.SessionId,
+		"agent_id":                body.AgentID,
+		"title":                   title,
+		"workspace":               effectiveWorkspace,
+		"connection_id":           parent["connection_id"],
+		"handoff_from_session_id": sid,
+		"handoff_from_agent_id":   body.AgentID,
+		"updated_at":              time.Now().UTC().Format(time.RFC3339Nano),
+		"project_id":              parent["project_id"],
+		"project_name":            parent["project_name"],
+		"source_session_id":       receipt.Session.SessionId,
+		"status":                  state,
+		"control_state":           "owned",
+		"history_state":           "available",
+	}
+	if prepared != nil && prepared.isLinked() {
+		childPayload["worktree_root_workspace"] = prepared.RootWorkspace
+		childPayload["worktree_branch"] = prepared.Branch
+		childPayload["worktree_managed"] = prepared.Managed
+	} else if parent["worktree_root_workspace"] != nil {
+		childPayload["worktree_root_workspace"] = parent["worktree_root_workspace"]
+		childPayload["worktree_branch"] = parent["worktree_branch"]
+	}
+	child, err := h.store.UpsertSession(r.Context(), childPayload)
 	if err != nil {
 		writeJSONError(w, 500, err.Error())
 		return
 	}
+	commitWorktree = true
+	h.notifyWorktreesChanged(r.Context(), prepared)
 	h.publishEvent(r.Context(), "session.upsert", child)
 	writeJSON(w, 200, child)
+}
+
+func derefString(v *string) string {
+	if v == nil {
+		return ""
+	}
+	return *v
 }

@@ -143,16 +143,29 @@ const (
 	GitCheckpointDiff    GitOperation = "checkpoint_diff"
 	GitCheckpointRestore GitOperation = "checkpoint_restore"
 	GitCheckpointDelete  GitOperation = "checkpoint_delete"
+	GitWorktreeList      GitOperation = "worktree_list"
+	GitWorktreeAdd       GitOperation = "worktree_add"
+	GitWorktreeRemove    GitOperation = "worktree_remove"
+	GitWorktreePrune     GitOperation = "worktree_prune"
+	GitWorktreeMerge     GitOperation = "worktree_merge"
+	GitWorktreeBootstrap GitOperation = "worktree_bootstrap"
 )
 
 type GitRequest struct {
-	Operation  GitOperation `json:"operation"`
-	Workspace  string       `json:"workspace"`
-	Path       string       `json:"path,omitempty"`
-	BaseBranch string       `json:"base_branch,omitempty"`
-	Branch     string       `json:"branch,omitempty"`
-	Cached     bool         `json:"cached,omitempty"`
-	Create     bool         `json:"create,omitempty"`
+	Operation       GitOperation `json:"operation"`
+	Workspace       string       `json:"workspace"`
+	Path            string       `json:"path,omitempty"`
+	BaseBranch      string       `json:"base_branch,omitempty"`
+	Branch          string       `json:"branch,omitempty"`
+	Cached          bool         `json:"cached,omitempty"`
+	Create          bool         `json:"create,omitempty"`
+	TargetPath      string       `json:"target_path,omitempty"`
+	Layout          string       `json:"layout,omitempty"`
+	Force           bool         `json:"force,omitempty"`
+	DeleteBranch    bool         `json:"delete_branch,omitempty"`
+	CopyFiles       []string     `json:"copy_files,omitempty"`
+	MergeStrategy   string       `json:"merge_strategy,omitempty"`
+	IncludeStatuses bool         `json:"include_statuses,omitempty"`
 }
 
 type GitResult struct {

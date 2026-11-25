@@ -34,7 +34,7 @@ func (p *eventRecorder) Publish(_ context.Context, name string, _ map[string]any
 
 func TestRegistrationsExposeGitRoutes(t *testing.T) {
 	registrations := Registrations()
-	if len(registrations) != 3 {
+	if len(registrations) != 9 {
 		t.Fatalf("registrations=%#v", registrations)
 	}
 	for _, registration := range registrations {

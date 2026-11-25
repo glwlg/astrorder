@@ -44,3 +44,64 @@ it('uses generic labels and treats Agents without a connection as local', () => 
  expect(agentLabel(agent)).toBe('Claude Code · Claude · 本机')
  expect(agentEnvironment(agent)).toBe('local')
 })
+
+it('allows creating a new Git worktree with ignored env sync when creating a session', async () => {
+ vi.spyOn(api, 'listGitWorktrees').mockResolvedValue({
+  is_git_repo: true,
+  workspace: '/repo/demo',
+  main_workspace: '/repo/demo',
+  is_worktree: false,
+  current_branch: 'main',
+  default_branch: 'main',
+  default_sibling_base: '/repo/demo-worktrees',
+  default_inside_base: '/repo/demo/.worktrees',
+  worktrees: [
+   { path: '/repo/demo', head: 'abc1234', branch: 'main', detached: false, bare: false, is_main: true, is_current: true, locked: false, prunable: false, status_loaded: true, dirty: false, changed_files: 0, ahead: 0, behind: 0 },
+   { path: '/repo/demo-worktrees/feat/existing', head: 'def5678', branch: 'feat/existing', detached: false, bare: false, is_main: false, is_current: false, locked: false, prunable: false, status_loaded: true, dirty: true, changed_files: 2, ahead: 1, behind: 0 },
+  ],
+  branches: [
+   { name: 'main', is_current: true, occupied_by_path: '/repo/demo' },
+   { name: 'feat/existing', is_current: false, occupied_by_path: '/repo/demo-worktrees/feat/existing' },
+  ],
+  copyable_files: [
+   { path: '.env', size: 128, source: 'default' },
+  ],
+ })
+ const created = {
+  id: 'wt-1',
+  agent_id: 'codex',
+  title: 'Worktree Task',
+  workspace: '/repo/demo/.worktrees/feat/wt-new',
+  worktree_root_workspace: '/repo/demo',
+  worktree_branch: 'feat/wt-new',
+  worktree_managed: true,
+  status: 'idle' as const,
+  updated_at: '2026-11-25T00:00:00Z',
+ }
+ const createSpy = vi.spyOn(api, 'createSession').mockResolvedValue(created)
+ const onCreated = vi.fn()
+ const project = { key: 'ws', agentId: 'codex', label: 'demo', workspace: '/repo/demo', sessions: [], sessionCount: 0, latestUpdatedAt: '' }
+
+ render(<MantineProvider><NewSessionDialog agents={agents} project={project} initialAgentId="codex" onClose={() => {}} onCreated={onCreated} /></MantineProvider>)
+
+ expect(await screen.findByText('Git Worktree 工作区')).toBeInTheDocument()
+ fireEvent.click(screen.getByText('新建 Worktree'))
+ const branchInput = await screen.findByLabelText(/新分支名称/)
+ fireEvent.change(branchInput, { target: { value: 'feat/wt-new' } })
+ expect(screen.getByText('.env')).toBeInTheDocument()
+ fireEvent.click(screen.getByRole('button', { name: '创建 Worktree 并新建会话' }))
+
+ await waitFor(() => expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({
+  agent_id: 'codex',
+  workspace: '/repo/demo',
+  worktree: expect.objectContaining({
+   mode: 'create',
+   branch: 'feat/wt-new',
+   create_branch: true,
+   layout: 'inside',
+   path: '/repo/demo/.worktrees/feat/wt-new',
+   copy_files: ['.env'],
+  }),
+ })))
+ expect(onCreated).toHaveBeenCalledWith(created)
+})

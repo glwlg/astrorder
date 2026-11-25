@@ -6,6 +6,7 @@ import { drawioViewer } from './viewers/drawio'
 import { excalidrawViewer } from './viewers/excalidraw'
 import { fileTreeViewer } from './viewers/filetree'
 import { gitDiffViewer } from './viewers/gitdiff'
+import { gitWorktreesViewer } from './viewers/worktrees'
 import { sideChatViewer } from './viewers/sidechat'
 import { agentGraphViewer } from './viewers/agentgraph'
 import { htmlViewer } from './viewers/html'
@@ -48,6 +49,7 @@ class ArtifactViewerRegistry {
     this.register(monacoViewer)
     this.register(fileTreeViewer)
     this.register(gitDiffViewer)
+    this.register(gitWorktreesViewer)
     this.register(sideChatViewer)
     this.register(agentGraphViewer)
   }

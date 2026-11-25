@@ -730,10 +730,12 @@ export const api = {
         version_error?: string
       }>
     }>('/agents/upgrade/targets'),
-  createSession: (payload: { agent_id: string; workspace?: string | null; title?: string | null; project_id?: string | null; project_name?: string | null; parent_session_id?: string | null; ephemeral?: boolean; blackboard_scope?: 'session' | 'swarm' | 'group'; blackboard_scope_id?: string | null }) =>
+  createSession: (payload: { agent_id: string; workspace?: string | null; title?: string | null; project_id?: string | null; project_name?: string | null; parent_session_id?: string | null; ephemeral?: boolean; blackboard_scope?: 'session' | 'swarm' | 'group'; blackboard_scope_id?: string | null; worktree?: import('../domain/types').SessionWorktreePayload | null }) =>
     jsonRequest<Session>('/sessions', payload),
-  forkSession: (sessionId: string, { worktree, branch_name, ...payload }: { agent_id: string; title?: string | null; worktree?: boolean; branch_name?: string | null; worktree_path?: string | null; target_message_id?: string | null; turn_index?: number | null }) =>
+  forkSession: (sessionId: string, { worktree, branch_name, ...payload }: { agent_id: string; title?: string | null; worktree?: boolean; branch_name?: string | null; worktree_path?: string | null; worktree_base_ref?: string | null; worktree_layout?: 'sibling' | 'inside'; worktree_copy_files?: string[]; target_message_id?: string | null; turn_index?: number | null }) =>
     jsonRequest<Session>(`${sessionPath(sessionId)}/fork`, { ...payload, create_worktree: worktree, worktree_branch: branch_name }),
+  branchSessionWithContext: (sessionId: string, payload: { agent_id: string; title?: string | null; target_message_id?: string | null; create_worktree?: boolean; worktree_branch?: string | null; worktree_path?: string | null; worktree_base_ref?: string | null; worktree_layout?: 'sibling' | 'inside'; worktree_copy_files?: string[]; worktree?: import('../domain/types').SessionWorktreePayload | null }) =>
+    jsonRequest<Session>(`${sessionPath(sessionId)}/context-branch`, payload),
   handoffSession: (sessionId: string, sourceAgentId: string, targetAgentId: string, operationId: string, selection: { provider: string; model: string; effort: string }) =>
     jsonRequest<Session>(`${sessionPath(sessionId)}/handoff`, { operation_id: operationId, source_agent_id: sourceAgentId, target_agent_id: targetAgentId, ...selection }),
   getSessionHandoffContext: (sessionId: string, agentId: string) =>
@@ -744,10 +746,33 @@ export const api = {
   },
   updateSession: (sessionId: string, payload: { agent_id: string; title?: string | null; workspace?: string | null; status?: string | null }) =>
     jsonRequest<Session>(sessionPath(sessionId), payload, 'PATCH'),
-  deleteSession: (sessionId: string, agentId: string) =>
-    request<{ ok: boolean; id: string }>(`${sessionPath(sessionId)}?agent_id=${encodeURIComponent(agentId)}`, {
+  deleteSession: (sessionId: string, agentId: string, options?: { remove_worktree?: boolean; delete_worktree_branch?: boolean; force_remove_worktree?: boolean }) => {
+    const params = new URLSearchParams({ agent_id: agentId })
+    if (options?.remove_worktree) params.set('remove_worktree', '1')
+    if (options?.delete_worktree_branch) params.set('delete_worktree_branch', '1')
+    if (options?.force_remove_worktree) params.set('force_remove_worktree', '1')
+    return request<{ ok: boolean; id: string; worktree_removed?: boolean; worktree_branch_deleted?: boolean; worktree_error?: string }>(`${sessionPath(sessionId)}?${params.toString()}`, {
       method: 'DELETE',
-    }),
+    })
+  },
+  listGitWorktrees: (params: { workspace?: string | null; session_id?: string | null; connection_id?: string | null; include_statuses?: boolean }, signal?: AbortSignal) => {
+    const q = new URLSearchParams()
+    if (params.workspace) q.set('workspace', params.workspace)
+    if (params.session_id) q.set('session_id', params.session_id)
+    if (params.connection_id) q.set('connection_id', params.connection_id)
+    if (params.include_statuses === false) q.set('include_statuses', '0')
+    return request<import('../domain/types').GitWorktreesResponse>(`/git/worktrees?${q.toString()}`, { signal })
+  },
+  createGitWorktree: (payload: { workspace?: string | null; session_id?: string | null; connection_id?: string | null; branch: string; base_ref?: string | null; create_branch?: boolean; target_path?: string | null; layout?: 'sibling' | 'inside'; copy_files?: string[] }) =>
+    jsonRequest<import('../domain/types').GitWorktreeAddResult>('/git/worktrees', payload),
+  removeGitWorktree: (payload: { workspace?: string | null; session_id?: string | null; connection_id?: string | null; target_path: string; force?: boolean; delete_branch?: boolean }) =>
+    jsonRequest<import('../domain/types').GitWorktreeRemoveResult>('/git/worktrees/remove', payload),
+  pruneGitWorktrees: (payload: { workspace?: string | null; session_id?: string | null; connection_id?: string | null }) =>
+    jsonRequest<import('../domain/types').GitWorktreePruneResult>('/git/worktrees/prune', payload),
+  mergeGitWorktree: (payload: { workspace?: string | null; session_id?: string | null; connection_id?: string | null; source_branch: string; target_branch?: string | null; strategy?: 'merge' | 'ff_only' | 'squash'; force?: boolean }) =>
+    jsonRequest<import('../domain/types').GitWorktreeMergeResult>('/git/worktrees/merge', payload),
+  bootstrapGitWorktree: (payload: { workspace?: string | null; session_id?: string | null; connection_id?: string | null; target_path?: string | null; copy_files?: string[] }) =>
+    jsonRequest<import('../domain/types').GitWorktreeBootstrapResult>('/git/worktrees/bootstrap', payload),
   getBlackboard: (namespace = 'global') =>
     request<{ namespace: string; items: Record<string, unknown>; count: number }>(`/blackboard?namespace=${encodeURIComponent(namespace)}`),
   setBlackboard: (key: string, value: unknown, namespace = 'global') =>

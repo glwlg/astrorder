@@ -2,6 +2,16 @@ import type { Agent, Session } from './types'
 
 const canonicalKind = (kind: string) => (kind === 'antigravity-ssh' ? 'antigravity' : kind)
 
+export type MessageForkMode = 'native' | 'context_branch' | 'none'
+
+export function messageForkModeForAgent(kind?: string | null): MessageForkMode {
+  if (!kind) return 'none'
+  const normalized = canonicalKind(kind)
+  if (normalized === 'hermes') return 'native'
+  if (normalized === 'antigravity') return 'context_branch'
+  return 'none'
+}
+
 export function sessionHandoffTargets(session: Session, agents: Record<string, Agent>): Agent[] {
   const source = agents[session.agent_id]
   const sourceKind = source ? canonicalKind(source.kind) : ''

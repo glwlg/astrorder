@@ -441,10 +441,17 @@ func NewHandlerChecked(options Options) (http.Handler, error) {
 
 	dbxHandler := options.DbxPlugin
 	if dbxHandler == nil {
+		dbxAuditDir := ""
+		if options.Config.DatabasePath != "" {
+			if absDB, absErr := filepath.Abs(options.Config.DatabasePath); absErr == nil {
+				dbxAuditDir = filepath.Dir(absDB)
+			}
+		}
 		dbxHandler = dbxplugin.NewHandler(dbxplugin.Options{
 			Store:         options.Store,
 			Authorizer:    authenticator,
 			BrowserSecret: options.Config.BrowserSecret,
+			AuditDir:      dbxAuditDir,
 			Logger:        logger,
 		})
 	}
@@ -772,14 +779,12 @@ func isFilesRoute(p string) bool {
 }
 
 func isGitRoute(p string) bool {
-	switch p {
-	case "/api/v1/git/status",
-		"/api/v1/git/branch",
-		"/api/v1/git/diff-raw":
-		return true
-	default:
-		return false
+	for _, reg := range git.Registrations() {
+		if reg.Path == p {
+			return true
+		}
 	}
+	return false
 }
 
 func isAttachmentsRoute(p string) bool {

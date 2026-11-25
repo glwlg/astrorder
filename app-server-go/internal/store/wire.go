@@ -36,6 +36,10 @@ func sessionWire(row map[string]any) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	result["worktree_managed"], err = boolValue(result["worktree_managed"], false)
+	if err != nil {
+		return nil, err
+	}
 	if result["source_id"] == nil || result["source_id"] == "" {
 		result["source_id"] = result["agent_id"]
 	}
@@ -49,6 +53,12 @@ func sessionWire(row map[string]any) (map[string]any, error) {
 	}
 	if result["delegation_parent_agent_id"] == "" {
 		result["delegation_parent_agent_id"] = nil
+	}
+	if result["worktree_root_workspace"] == "" {
+		result["worktree_root_workspace"] = nil
+	}
+	if result["worktree_branch"] == "" {
+		result["worktree_branch"] = nil
 	}
 	return result, nil
 }

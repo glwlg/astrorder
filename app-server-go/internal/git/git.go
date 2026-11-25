@@ -33,6 +33,12 @@ func Registrations() []Registration {
 		{Kind: "http", Method: http.MethodGet, Path: "/api/v1/git/status", Auth: "browser", Owner: "go-app"},
 		{Kind: "http", Method: http.MethodPost, Path: "/api/v1/git/branch", Auth: "browser", Owner: "go-app"},
 		{Kind: "http", Method: http.MethodGet, Path: "/api/v1/git/diff-raw", Auth: "browser", Owner: "go-app"},
+		{Kind: "http", Method: http.MethodGet, Path: "/api/v1/git/worktrees", Auth: "browser", Owner: "go-app"},
+		{Kind: "http", Method: http.MethodPost, Path: "/api/v1/git/worktrees", Auth: "browser", Owner: "go-app"},
+		{Kind: "http", Method: http.MethodPost, Path: "/api/v1/git/worktrees/remove", Auth: "browser", Owner: "go-app"},
+		{Kind: "http", Method: http.MethodPost, Path: "/api/v1/git/worktrees/prune", Auth: "browser", Owner: "go-app"},
+		{Kind: "http", Method: http.MethodPost, Path: "/api/v1/git/worktrees/merge", Auth: "browser", Owner: "go-app"},
+		{Kind: "http", Method: http.MethodPost, Path: "/api/v1/git/worktrees/bootstrap", Auth: "browser", Owner: "go-app"},
 	}
 }
 
@@ -87,6 +93,20 @@ func (h *Handler) ServeHTTP(response http.ResponseWriter, request *http.Request)
 		err = h.branch(response, request)
 	case "/api/v1/git/diff-raw":
 		err = h.diff(response, request)
+	case "/api/v1/git/worktrees":
+		if request.Method == http.MethodGet {
+			err = h.listWorktrees(response, request)
+		} else {
+			err = h.createWorktree(response, request)
+		}
+	case "/api/v1/git/worktrees/remove":
+		err = h.removeWorktree(response, request)
+	case "/api/v1/git/worktrees/prune":
+		err = h.pruneWorktrees(response, request)
+	case "/api/v1/git/worktrees/merge":
+		err = h.mergeWorktree(response, request)
+	case "/api/v1/git/worktrees/bootstrap":
+		err = h.bootstrapWorktree(response, request)
 	}
 	if err != nil {
 		writeTargetError(response, err)

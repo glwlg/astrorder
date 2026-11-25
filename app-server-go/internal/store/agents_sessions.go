@@ -165,11 +165,15 @@ ORDER BY choices.id`)
 	return ids, cursor, rows.Err()
 }
 
-// GetSession resolves only the exact (agentID, sessionID) composite identity.
-func (s *Store) GetSession(ctx context.Context, agentID, sessionID string) (map[string]any, error) {
-	row, err := s.QueryRow(ctx, `SELECT s.*, e.parent_agent_id AS delegation_parent_agent_id, e.parent_session_id AS delegation_parent_session_id
+const sessionSelectJoin = `SELECT s.*, e.parent_agent_id AS delegation_parent_agent_id, e.parent_session_id AS delegation_parent_session_id,
+w.root_workspace AS worktree_root_workspace, w.branch AS worktree_branch, COALESCE(w.managed, 0) AS worktree_managed
 FROM sessions s
 LEFT JOIN delegation_edges e ON s.agent_id=e.child_agent_id AND s.id=e.child_session_id
+LEFT JOIN session_worktrees w ON s.agent_id=w.agent_id AND s.id=w.session_id`
+
+// GetSession resolves only the exact (agentID, sessionID) composite identity.
+func (s *Store) GetSession(ctx context.Context, agentID, sessionID string) (map[string]any, error) {
+	row, err := s.QueryRow(ctx, sessionSelectJoin+`
 WHERE s.agent_id=? AND s.id=?`, agentID, sessionID)
 	if err != nil {
 		return nil, err
@@ -180,9 +184,7 @@ WHERE s.agent_id=? AND s.id=?`, agentID, sessionID)
 // FindSessionByID provides the legacy ambiguous lookup, choosing newest row_id.
 // Callers that know an agent must use GetSession instead.
 func (s *Store) FindSessionByID(ctx context.Context, sessionID string) (map[string]any, error) {
-	row, err := s.QueryRow(ctx, `SELECT s.*, e.parent_agent_id AS delegation_parent_agent_id, e.parent_session_id AS delegation_parent_session_id
-FROM sessions s
-LEFT JOIN delegation_edges e ON s.agent_id=e.child_agent_id AND s.id=e.child_session_id
+	row, err := s.QueryRow(ctx, sessionSelectJoin+`
 WHERE s.id=? ORDER BY s.row_id DESC LIMIT 1`, sessionID)
 	if err != nil {
 		return nil, err
@@ -192,9 +194,7 @@ WHERE s.id=? ORDER BY s.row_id DESC LIMIT 1`, sessionID)
 
 // ListSessions returns sessions newest-first; an empty agentID lists all agents.
 func (s *Store) ListSessions(ctx context.Context, agentID string) ([]map[string]any, error) {
-	query := `SELECT s.*, e.parent_agent_id AS delegation_parent_agent_id, e.parent_session_id AS delegation_parent_session_id
-FROM sessions s
-LEFT JOIN delegation_edges e ON s.agent_id=e.child_agent_id AND s.id=e.child_session_id`
+	query := sessionSelectJoin
 	args := []any{}
 	if agentID != "" {
 		query += " WHERE s.agent_id=?"
@@ -206,6 +206,58 @@ LEFT JOIN delegation_edges e ON s.agent_id=e.child_agent_id AND s.id=e.child_ses
 		return nil, err
 	}
 	return wireRows(rows, sessionWire)
+}
+
+// CountOtherSessionsUsingWorkspace counts sessions other than (excludeAgentID, excludeSessionID)
+// bound to the same connection and workspace path.
+func (s *Store) CountOtherSessionsUsingWorkspace(ctx context.Context, excludeAgentID, excludeSessionID, connectionID, workspace string) (int, error) {
+	normWS := strings.TrimSpace(workspace)
+	if normWS == "" {
+		return 0, nil
+	}
+	normConn := strings.TrimSpace(connectionID)
+	if normConn == "local" {
+		normConn = ""
+	}
+	rows, err := s.QueryRows(ctx, `SELECT agent_id, id, connection_id, workspace FROM sessions WHERE workspace IS NOT NULL AND workspace != ''`)
+	if err != nil {
+		return 0, err
+	}
+	count := 0
+	for _, row := range rows {
+		aid := fmt.Sprint(row["agent_id"])
+		sid := fmt.Sprint(row["id"])
+		if aid == excludeAgentID && sid == excludeSessionID {
+			continue
+		}
+		rowConn := ""
+		if row["connection_id"] != nil {
+			rowConn = strings.TrimSpace(fmt.Sprint(row["connection_id"]))
+			if rowConn == "local" {
+				rowConn = ""
+			}
+		}
+		if rowConn != normConn {
+			continue
+		}
+		rowWS := strings.TrimSpace(fmt.Sprint(row["workspace"]))
+		if sameNormalizedWorkspace(rowWS, normWS) {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func sameNormalizedWorkspace(left, right string) bool {
+	norm := func(v string) string {
+		s := strings.TrimSpace(strings.ReplaceAll(v, "\\", "/"))
+		s = strings.TrimRight(s, "/")
+		if len(s) >= 2 && s[1] == ':' {
+			return strings.ToLower(s)
+		}
+		return s
+	}
+	return norm(left) == norm(right)
 }
 
 // UpsertSession inserts or updates an exact composite session projection.
@@ -231,6 +283,18 @@ func (s *Store) UpsertSession(ctx context.Context, payload map[string]any) (map[
 	ephemeral, err := boolValue(payload["ephemeral"], false)
 	if err != nil {
 		return nil, err
+	}
+	worktreeManaged, err := boolValue(payload["worktree_managed"], false)
+	if err != nil {
+		return nil, err
+	}
+	worktreeRoot := ""
+	if v := optionalString(payload, "worktree_root_workspace"); v != nil {
+		worktreeRoot = strings.TrimSpace(*v)
+	}
+	worktreeBranch := ""
+	if v := optionalString(payload, "worktree_branch"); v != nil {
+		worktreeBranch = strings.TrimSpace(*v)
 	}
 	sourceID := payloadStringDefault(payload, "source_id", agentID)
 	sourceSessionID := payloadStringDefault(payload, "source_session_id", id)
@@ -288,9 +352,20 @@ WHERE agent_id=? AND id=?`, title, workspace, status, sourceID, nullablePayload(
 				return execErr
 			}
 		}
-		rows, queryErr := queryRows(ctx, tx, `SELECT s.*, e.parent_agent_id AS delegation_parent_agent_id, e.parent_session_id AS delegation_parent_session_id
-FROM sessions s
-LEFT JOIN delegation_edges e ON s.agent_id=e.child_agent_id AND s.id=e.child_session_id
+		if worktreeRoot != "" || worktreeBranch != "" || worktreeManaged {
+			_, wtErr := tx.ExecContext(ctx, `INSERT INTO session_worktrees (agent_id, session_id, root_workspace, branch, managed, updated_at)
+VALUES (?, ?, ?, ?, ?, ?)
+ON CONFLICT(agent_id, session_id) DO UPDATE SET
+  root_workspace = CASE WHEN excluded.root_workspace != '' THEN excluded.root_workspace ELSE session_worktrees.root_workspace END,
+  branch = CASE WHEN excluded.branch != '' THEN excluded.branch ELSE session_worktrees.branch END,
+  managed = CASE WHEN excluded.managed != 0 THEN 1 ELSE session_worktrees.managed END,
+  updated_at = excluded.updated_at`,
+				agentID, id, worktreeRoot, worktreeBranch, worktreeManaged, updatedAt)
+			if wtErr != nil {
+				return wtErr
+			}
+		}
+		rows, queryErr := queryRows(ctx, tx, sessionSelectJoin+`
 WHERE s.agent_id=? AND s.id=?`, agentID, id)
 		if queryErr != nil {
 			return queryErr
@@ -372,7 +447,7 @@ func (s *Store) DeleteSession(ctx context.Context, agentID, sessionID string) (b
 
 // DeleteSessionTx shares exact session cleanup with checkpointed event projection.
 func DeleteSessionTx(ctx context.Context, tx *sql.Tx, agentID, sessionID string) (bool, error) {
-	for _, table := range []string{"messages", "commands", "tasks", "session_schedules"} {
+	for _, table := range []string{"messages", "commands", "tasks", "session_schedules", "session_worktrees"} {
 		if _, err := tx.ExecContext(ctx, "DELETE FROM "+table+" WHERE agent_id=? AND session_id=?", agentID, sessionID); err != nil {
 			return false, err
 		}

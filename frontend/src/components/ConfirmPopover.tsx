@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Button, Group, Paper, Stack, Text } from '@mantine/core'
 import { IconAlertTriangle } from '@tabler/icons-react'
@@ -12,6 +12,7 @@ export interface ConfirmPopoverProps {
   coords?: ConfirmationCoordinates
   title?: string
   message: string
+  extraContent?: ReactNode
   confirmLabel?: string
   cancelLabel?: string
   confirmColor?: string
@@ -25,6 +26,7 @@ export function ConfirmPopover({
   coords,
   title = '确认删除',
   message,
+  extraContent,
   confirmLabel = '确认删除',
   cancelLabel = '取消',
   confirmColor = 'red',
@@ -39,8 +41,8 @@ export function ConfirmPopover({
     if (!opened) return
 
     const calculatePosition = () => {
-      const width = 290
-      const estimatedHeight = 150
+      const width = extraContent ? 330 : 290
+      const estimatedHeight = extraContent ? 230 : 150
       const margin = 12
 
       if (coords && typeof coords.x === 'number' && typeof coords.y === 'number' && coords.x >= 0 && coords.y >= 0) {
@@ -118,7 +120,7 @@ export function ConfirmPopover({
           position: 'fixed',
           top: position.top,
           left: position.left,
-          width: 290,
+          width: extraContent ? 330 : 290,
           zIndex: CONFIRM_POPOVER_Z_INDEX,
           boxShadow: '0 8px 30px rgba(0, 0, 0, 0.18), 0 2px 8px rgba(0, 0, 0, 0.08)',
           pointerEvents: 'auto',
@@ -140,6 +142,7 @@ export function ConfirmPopover({
           <Text size="xs" c="dimmed" style={{ whiteSpace: 'pre-line', lineHeight: 1.45 }}>
             {message}
           </Text>
+          {extraContent}
           <Group justify="flex-end" gap={8} mt={4}>
             <Button
               variant="default"

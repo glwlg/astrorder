@@ -1,6 +1,6 @@
 import { Text, UnstyledButton } from '@mantine/core'
 import {
-  BrainIcon, BrowserIcon, ChalkboardSimpleIcon, ChatsCircleIcon, DatabaseIcon, FolderSimpleIcon, GraphIcon, SparkleIcon, TerminalWindowIcon,
+  BrainIcon, BrowserIcon, ChalkboardSimpleIcon, ChatsCircleIcon, DatabaseIcon, FolderSimpleIcon, GitBranchIcon, GraphIcon, SparkleIcon, TerminalWindowIcon,
 } from '../../components/workbenchIcons'
 import type { Session } from '../../domain/types'
 import { useShortcutStore } from '../shortcuts/shortcuts'
@@ -15,6 +15,7 @@ interface SidecarWelcomeMenuProps {
   onOpenAgentGraph?: () => void
   onOpenBlackboard?: () => void
   onOpenMemory?: () => void
+  onOpenWorktrees?: () => void
 }
 
 export function SidecarWelcomeMenu({
@@ -27,6 +28,7 @@ export function SidecarWelcomeMenu({
   onOpenAgentGraph,
   onOpenBlackboard,
   onOpenMemory,
+  onOpenWorktrees,
 }: SidecarWelcomeMenuProps) {
   const bindings = useShortcutStore(state => state.bindings)
   const menuItems = [
@@ -57,6 +59,16 @@ export function SidecarWelcomeMenu({
             label: '文件',
             shortcut: bindings.fileTree || '未设置',
             onClick: onOpenFileTree,
+          },
+        ]
+      : []),
+    ...(onOpenWorktrees
+      ? [
+          {
+            icon: <GitBranchIcon size={20} weight="duotone" color="#0ea5e9" />,
+            label: 'Worktree 工作区',
+            shortcut: '并行分支',
+            onClick: onOpenWorktrees,
           },
         ]
       : []),

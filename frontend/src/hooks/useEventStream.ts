@@ -430,6 +430,10 @@ export function useEventStream(
             queryKey: ["astrorder", "session-schedules"],
           });
         }
+        if (event.type === "git.worktrees.changed" || event.type === "git.branch.changed") {
+          void queryClient.invalidateQueries({ queryKey: ["astrorder", "git-worktrees"] });
+          void queryClient.invalidateQueries({ queryKey: ["astrorder", "git-status"] });
+        }
         if (event.type === "checkpoints.updated") {
           const aid = String(event.data.agent_id || event.agent_id || "");
           const sid = String(event.data.session_id || event.session_id || "");

@@ -225,7 +225,7 @@ export function buildProjectGroups(
     if (!sessionMatches(session, query, filter)) continue
     const source = sourceKey(session.source_id, session.connection_id, session.agent_id, agents)
     const pid = session.project_id
-    const ws = workspaceKey(session.workspace)
+    const ws = workspaceKey(session.worktree_root_workspace || session.workspace)
     const location = connectionScope(source, session.connection_id, agents[session.agent_id])
     const pname = (session.project_name || '').trim().toLowerCase()
 
@@ -247,19 +247,20 @@ export function buildProjectGroups(
       if (groups.has(homeKey)) key = homeKey
     }
 
+    const effectiveProjectWorkspace = session.worktree_root_workspace || session.workspace
     const project = groups.get(key) || {
       key,
-      label: session.project_name || session.workspace || '未标记项目',
+      label: session.project_name || effectiveProjectWorkspace || '未标记项目',
       remoteLabel: remoteLabel(session.source_id, session.connection_id, agents[session.agent_id]),
       sessions: [] as Session[],
       sessionCount: 0,
       latestUpdatedAt: session.updated_at,
       agentId: session.agent_id,
-      workspace: session.workspace,
+      workspace: effectiveProjectWorkspace,
     }
     if (!project.agentId) project.agentId = session.agent_id
-    if (!project.workspace) project.workspace = session.workspace
-    if (project.label === session.workspace && session.project_name) project.label = session.project_name
+    if (!project.workspace) project.workspace = effectiveProjectWorkspace
+    if (project.label === effectiveProjectWorkspace && session.project_name) project.label = session.project_name
     if (!project.remoteLabel) project.remoteLabel = remoteLabel(session.source_id, session.connection_id, agents[session.agent_id])
     project.sessions.push(session)
     project.sessionCount = Math.max(project.sessionCount, project.sessions.length)

@@ -15,6 +15,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"astrorder.dev/app-server/internal/auth"
@@ -24,6 +25,7 @@ import (
 const (
 	BasePath           = "/api/v1/plugins/dbx"
 	StatusPath         = "/api/v1/plugins/dbx-status"
+	ExecBasePath       = "/api/v1/plugins/dbx-exec"
 	DefaultUpstreamURL = "http://127.0.0.1:14224"
 	PluginID           = "dbx-viewer"
 	prefPluginsConfig  = "plugins:config"
@@ -41,6 +43,7 @@ type Options struct {
 	Authorizer      BrowserAuthorizer
 	DefaultUpstream string
 	BrowserSecret   string
+	AuditDir        string
 	Transport       http.RoundTripper
 	HTTPClient      *http.Client
 	Logger          *slog.Logger
@@ -64,9 +67,12 @@ type handler struct {
 	authorizer      BrowserAuthorizer
 	defaultUpstream string
 	browserSecret   string
+	auditDir        string
 	transport       http.RoundTripper
 	httpClient      *http.Client
 	logger          *slog.Logger
+	bindingsMu      sync.Mutex
+	auditMu         sync.Mutex
 }
 
 // NewHandler creates the HTTP handler for /api/v1/plugins/dbx* routes.
@@ -106,6 +112,7 @@ func NewHandler(options Options) http.Handler {
 		authorizer:      options.Authorizer,
 		defaultUpstream: defUpstream,
 		browserSecret:   options.BrowserSecret,
+		auditDir:        strings.TrimSpace(options.AuditDir),
 		transport:       transport,
 		httpClient:      client,
 		logger:          logger,
@@ -116,6 +123,9 @@ func NewHandler(options Options) http.Handler {
 func Matches(method, requestPath string) bool {
 	if requestPath == StatusPath {
 		return method == http.MethodGet
+	}
+	if strings.HasPrefix(requestPath, ExecBasePath+"/") {
+		return true
 	}
 	return requestPath == BasePath || strings.HasPrefix(requestPath, BasePath+"/")
 }
@@ -129,6 +139,10 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == StatusPath {
 		h.serveStatus(w, r)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, ExecBasePath+"/") {
+		h.serveExecAPI(w, r)
 		return
 	}
 	h.serveProxy(w, r)
