@@ -64,6 +64,7 @@ interface SidecarHostProps {
   onCloseSidecar: () => void
   surface?: 'desktop' | 'mobile'
   isVisible?: boolean
+  immersive?: boolean
 }
 
 export function SidecarHost({
@@ -76,6 +77,7 @@ export function SidecarHost({
   onCloseSidecar,
   surface = 'desktop',
   isVisible = true,
+  immersive = false,
 }: SidecarHostProps) {
   const tabs = useSidecarStore((state) => state.tabs)
   const mountedTabs = useSidecarStore((state) => state.mountedTabs)
@@ -216,7 +218,7 @@ export function SidecarHost({
 
   return (
     <aside
-      className={surface === 'mobile' ? 'mobile-sidecar' : 'desktop-sidecar'}
+      className={`${surface === 'mobile' ? 'mobile-sidecar' : 'desktop-sidecar'}${immersive ? ' is-immersive' : ''}`}
       style={{
         display: 'flex',
         flexDirection: 'column',
@@ -225,15 +227,17 @@ export function SidecarHost({
         background: 'var(--astr-surface)',
       }}
     >
-      <SidecarHeader
-        tabs={visibleTabs}
-        activeId={activeTab ? activeTab.id : ''}
-        dirtyTabs={dirtyTabs}
-        onSelect={setActiveTabId}
-        onCloseTab={closeTab}
-        onNewPanel={() => setActiveTabId('')}
-        onClose={surface === 'desktop' ? onCloseSidecar : undefined}
-      />
+      {!immersive && (
+        <SidecarHeader
+          tabs={visibleTabs}
+          activeId={activeTab ? activeTab.id : ''}
+          dirtyTabs={dirtyTabs}
+          onSelect={setActiveTabId}
+          onCloseTab={closeTab}
+          onNewPanel={() => setActiveTabId('')}
+          onClose={surface === 'desktop' ? onCloseSidecar : undefined}
+        />
+      )}
 
       <div style={{ flex: 1, minHeight: 0, overflow: 'auto', position: 'relative' }}>
         {/* 没有活动 Tab 时显示操作菜单；已打开的插件保持挂载，仅切换可见性。 */}
@@ -339,6 +343,7 @@ export function SidecarHost({
                       artifact={artifact}
                       session={ownerSessionKey === currentSessionKey ? session : undefined}
                       isActive={isActive}
+                      surface={surface}
                       toolbarAction={toolbarAction}
                       onDirtyChange={(dirty) => setTabDirty(tab.id, dirty)}
                       onSave={(content) =>

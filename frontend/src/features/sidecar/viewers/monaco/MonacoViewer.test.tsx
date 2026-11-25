@@ -49,6 +49,25 @@ describe('MonacoViewer markdown mode', () => {
     expect(screen.getByTestId('monaco-editor')).toBeInTheDocument()
   })
 
+  it('uses a compact single-row toolbar with overflow menu on mobile surface', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('# 移动端文档\n\n正文段落内容。', { status: 200 })))
+    const artifact: ArtifactRef = {
+      id: 'mobile-md', sessionId: 'session-1', agentId: 'agent-1', name: 'README.md',
+      kind: 'workspace_file', path: '/repo/README.md', readUrl: '/files/readme',
+      mediaType: 'text/markdown', writable: true,
+    }
+
+    render(<MantineProvider><MonacoViewer artifact={artifact} surface="mobile" /></MantineProvider>)
+
+    expect(await screen.findByRole('heading', { name: '移动端文档' })).toBeInTheDocument()
+    // Compact 2-character segment labels and no redundant desktop hover hint
+    expect(screen.getByText('写作')).toBeInTheDocument()
+    expect(screen.getByText('精修')).toBeInTheDocument()
+    expect(screen.getByText('源码')).toBeInTheDocument()
+    expect(screen.queryByText(/悬停任意段落/)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '更多操作' })).toBeInTheDocument()
+  })
+
   it('rejects binary bytes even when the filename has no extension', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(new Uint8Array([127, 69, 76, 70, 0, 1, 2, 3]))))
     const artifact: ArtifactRef = { id: 'binary', sessionId: 's', agentId: 'a', name: 'program', kind: 'workspace_file', path: '/repo/program', readUrl: '/files/program', mediaType: 'text/plain', writable: true }

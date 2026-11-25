@@ -39,12 +39,12 @@ function slideToMarkdown(slide: PptxSlidePreview): string {
   return lines.join('\n')
 }
 
-export function PptxViewer({ artifact, session, toolbarAction, isActive = true }: ViewerContext) {
+export function PptxViewer({ artifact, session, toolbarAction, isActive = true, surface = 'desktop' }: ViewerContext) {
   const [deck, setDeck] = useState<PptxPreviewResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [activeIndex, setActiveIndex] = useState(0)
-  const [showOutline, setShowOutline] = useState(true)
+  const [showOutline, setShowOutline] = useState(() => surface !== 'mobile')
   const [revision, setRevision] = useState(0)
 
   const filePath = artifact.path || artifact.name

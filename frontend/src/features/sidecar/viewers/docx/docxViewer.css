@@ -4,6 +4,7 @@
   height: 100%;
   min-height: 0;
   position: relative;
+  container: docx-viewer / inline-size;
 }
 
 .docx-viewer-body {
@@ -158,6 +159,55 @@
 .docx-paper th {
   background: rgba(148, 163, 184, 0.14);
   font-weight: 600;
+}
+
+@container docx-viewer (inline-size < 560px) {
+  .docx-viewer-shell > .mantine-Paper-root {
+    margin: 0 !important;
+    border-radius: 0 !important;
+    border-inline: none !important;
+    padding: 5px 8px !important;
+  }
+
+  .docx-viewer-shell > .mantine-Paper-root > .mantine-Group-root {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    gap: 6px;
+  }
+
+  .docx-viewer-shell > .mantine-Paper-root > .mantine-Group-root::-webkit-scrollbar {
+    display: none;
+  }
+
+  .docx-viewer-body {
+    padding: 0;
+    gap: 0;
+    position: relative;
+  }
+
+  .docx-outline-panel {
+    position: absolute;
+    inset-block: 0;
+    inset-inline-start: 0;
+    z-index: 20;
+    width: min(260px, 82%);
+    border-radius: 0;
+    box-shadow: 0 12px 32px rgba(15, 23, 42, 0.22);
+  }
+
+  .docx-canvas-scroll {
+    padding: 0;
+    border-radius: 0;
+    background: var(--mantine-color-body);
+  }
+
+  .docx-paper {
+    max-width: none;
+    padding: 14px 16px 40px;
+    border-radius: 0;
+    box-shadow: none;
+  }
 }
 
 .docx-paper .docx-inline-code {

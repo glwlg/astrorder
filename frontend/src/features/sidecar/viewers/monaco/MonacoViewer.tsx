@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ActionIcon, Button, Group, LoadingOverlay, Paper, SegmentedControl, Select, Stack, Text, Tooltip } from '@mantine/core'
-import { IconBook2, IconDatabase, IconDeviceFloppy, IconDownload, IconExternalLink, IconFileText, IconRefresh, IconSparkles, IconCode } from '@tabler/icons-react'
+import { ActionIcon, Button, Group, LoadingOverlay, Menu, Paper, SegmentedControl, Select, Stack, Text, Tooltip } from '@mantine/core'
+import { IconBook2, IconCode, IconDatabase, IconDeviceFloppy, IconDots, IconDownload, IconExternalLink, IconFileText, IconFolderSearch, IconQuote, IconRefresh, IconSparkles } from '@tabler/icons-react'
 import { notifications } from '@mantine/notifications'
 import { BlackboardItemRenderer } from '../../../monitor/BlackboardJsonRender'
 import Editor from '@monaco-editor/react'
@@ -12,6 +12,7 @@ import { useAstrorderStore } from '../../../../state/store'
 import { isSqlFilePath, openSqlFileInDatabaseTool, useHasDatabaseTool } from '../../databaseTool'
 import { ExportMenu } from '../../../office/export/ExportMenu'
 import { useIsOfficeExperience } from '../../../office/appProfile'
+import { useSidecarStore } from '../../sidecarStore'
 import { MarkdownRefineView } from './MarkdownRefineView'
 import { RichDocumentEditor } from './RichDocumentEditor'
 
@@ -61,7 +62,8 @@ function decodeText(bytes: Uint8Array): { text: string; readOnly: boolean } {
   return { text, readOnly: Boolean(utf16) }
 }
 
-export function MonacoViewer({ artifact, session: sourceSession, onSave, onDirtyChange, toolbarAction, isActive = true }: ViewerContext) {
+export function MonacoViewer({ artifact, session: sourceSession, onSave, onDirtyChange, toolbarAction, isActive = true, surface = 'desktop' }: ViewerContext) {
+  const isMobileSurface = surface === 'mobile'
   const storedSession = useAstrorderStore((state) => state.sessions[scopeKey(artifact.agentId, artifact.sessionId)])
   const session = sourceSession === undefined ? storedSession || null : sourceSession
   const onDirtyChangeRef = useRef(onDirtyChange)
@@ -250,15 +252,157 @@ export function MonacoViewer({ artifact, session: sourceSession, onSave, onDirty
     }
   }, [dirty, saving, handleSave, isActive])
 
+  const handleQuoteMobile = () => {
+    const selected = typeof window !== 'undefined' ? window.getSelection()?.toString().trim() || '' : ''
+    const refLabel = artifact.path || artifact.name
+    const quotedSelection = selected
+      ? isOfficeMode
+        ? selected.slice(0, 1200).split('\n').map((line) => `> ${line}`).join('\n')
+        : `\`\`\`\n${selected.slice(0, 1200)}\n\`\`\``
+      : ''
+    const text = selected
+      ? `参考 ${artifact.name || refLabel}：\n${quotedSelection}\n`
+      : `参考 \`${refLabel}\` `
+    window.dispatchEvent(
+      new CustomEvent('astrorder:quote-to-composer', {
+        detail: { agentId: session?.agent_id || artifact.agentId, sessionId: session?.id || artifact.sessionId, text },
+      }),
+    )
+    notifications.show({
+      color: 'violet',
+      message: selected ? `已引用所选片段（${refLabel}）到输入框` : `已引用 ${refLabel} 到输入框`,
+    })
+  }
+
   return (
-    <div className="monaco-viewer-pane" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div className={`monaco-viewer-pane${isMobileSurface ? ' is-mobile-surface' : ''}`} style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {isMobileSurface ? (
+        <div className="monaco-mobile-toolbar">
+          <div className="monaco-mobile-toolbar-main">
+            {isMarkdown ? (
+              <SegmentedControl
+                size="xs"
+                aria-label="文档视图模式"
+                value={mdMode}
+                onChange={(val) => setMdMode(val as 'rich' | 'refine' | 'source')}
+                data={[
+                  { value: 'rich', label: '写作' },
+                  { value: 'refine', label: '精修' },
+                  { value: 'source', label: '源码' },
+                ]}
+              />
+            ) : (
+              <Text size="xs" fw={600} truncate title={artifact.name} style={{ minWidth: 0 }}>
+                {artifact.name}
+              </Text>
+            )}
+            {dirty && (
+              <Text size="xs" c="yellow" fw={600} style={{ flexShrink: 0 }}>
+                ●
+              </Text>
+            )}
+          </div>
+          <div className="monaco-mobile-toolbar-actions">
+            {artifact.writable && !encodingReadOnly && onSave && dirty && (
+              <Button
+                size="compact-xs"
+                variant="filled"
+                color="blue"
+                leftSection={<IconDeviceFloppy size={13} />}
+                loading={saving}
+                onClick={() => void handleSave()}
+              >
+                保存
+              </Button>
+            )}
+            {isMarkdown && (
+              <ExportMenu
+                markdown={content}
+                title={artifact.name.replace(/\.(md|markdown)$/i, '')}
+                fileName={artifact.name.replace(/\.(md|markdown)$/i, '')}
+                variant="button"
+                buttonLabel="导出"
+                workspace={session?.workspace || undefined}
+                sessionId={artifact.sessionId}
+                connectionId={artifact.connectionId}
+              />
+            )}
+            <Menu shadow="md" position="bottom-end" withinPortal>
+              <Menu.Target>
+                <ActionIcon variant="subtle" size="sm" aria-label="更多操作">
+                  <IconDots size={16} />
+                </ActionIcon>
+              </Menu.Target>
+              <Menu.Dropdown>
+                <Menu.Item leftSection={<IconQuote size={14} />} onClick={handleQuoteMobile}>
+                  引用到对话输入框
+                </Menu.Item>
+                {artifact.path && artifact.mediaType !== 'application/x-directory' && (
+                  <Menu.Item
+                    leftSection={<IconFolderSearch size={14} />}
+                    onClick={() =>
+                      useSidecarStore.getState().revealFileInTree(
+                        artifact.sessionId,
+                        artifact.agentId,
+                        artifact.path!,
+                        session?.workspace || undefined,
+                        session?.project_name || session?.title,
+                        artifact.connectionId,
+                      )
+                    }
+                  >
+                    在文件树中定位
+                  </Menu.Item>
+                )}
+                {isSqlDocument && hasDatabaseTool && (
+                  <Menu.Item
+                    leftSection={<IconDatabase size={14} />}
+                    onClick={() => {
+                      void openSqlFileInDatabaseTool({
+                        path: artifact.path || artifact.name,
+                        session,
+                        sessionId: artifact.sessionId,
+                        agentId: artifact.agentId,
+                        connectionId: artifact.connectionId,
+                        content,
+                      })
+                    }}
+                  >
+                    在数据库工具打开
+                  </Menu.Item>
+                )}
+                {!isOfficeMode && !isLegacyOfficeBinary && (
+                  <Menu.Item
+                    leftSection={isVisualMode ? <IconCode size={14} /> : <IconSparkles size={14} />}
+                    onClick={() => void handleVisualize()}
+                  >
+                    {isVisualMode ? '切回代码视图' : '视觉化卡片'}
+                  </Menu.Item>
+                )}
+                <Menu.Divider />
+                <Menu.Item leftSection={<IconRefresh size={14} />} onClick={() => void fetchContent()}>
+                  重新加载
+                </Menu.Item>
+                {artifact.readUrl && (
+                  <Menu.Item
+                    leftSection={<IconDownload size={14} />}
+                    onClick={() => void downloadFile(`${artifact.readUrl}&download=1`, artifact.name)}
+                  >
+                    下载原文件
+                  </Menu.Item>
+                )}
+              </Menu.Dropdown>
+            </Menu>
+          </div>
+        </div>
+      ) : (
       <Paper p="xs" withBorder style={{ borderBottom: '1px solid var(--astr-border)', borderRadius: 0 }}>
         <Group justify="space-between" wrap="nowrap">
           <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
             <Text size="xs" fw={600} truncate title={artifact.name}>
               {artifact.name}
             </Text>
-            {!isOfficeMode && !isLegacyOfficeBinary && (
+            {!isOfficeMode && !isLegacyOfficeBinary && (!isMarkdown || mdMode === 'source') && (
               <Select
                 size="xs"
                 data={[
@@ -392,6 +536,7 @@ export function MonacoViewer({ artifact, session: sourceSession, onSave, onDirty
           </Group>
         </Group>
       </Paper>
+      )}
 
       <div style={{ flex: 1, position: 'relative', minHeight: 0 }}>
         <LoadingOverlay visible={loading} />
@@ -461,6 +606,7 @@ export function MonacoViewer({ artifact, session: sourceSession, onSave, onDirty
             documentTitle={artifact.name.replace(/\.(md|markdown)$/i, '')}
             session={session}
             writable={Boolean(artifact.writable && !encodingReadOnly)}
+            compact={isMobileSurface}
             onApplyChange={(nextMarkdown) => handleEditorChange(nextMarkdown)}
             onSaveNow={onSave && artifact.writable && !encodingReadOnly ? async (nextMarkdown) => {
               handleEditorChange(nextMarkdown)

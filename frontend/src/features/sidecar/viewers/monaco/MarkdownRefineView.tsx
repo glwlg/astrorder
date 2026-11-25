@@ -143,6 +143,7 @@ export interface MarkdownRefineViewProps {
   documentTitle: string
   session: Session | null
   writable: boolean
+  compact?: boolean
   onApplyChange: (nextMarkdown: string) => void
   /** Optional auto-save callback invoked right after applying a refined paragraph */
   onSaveNow?: (nextMarkdown: string) => Promise<boolean>
@@ -153,6 +154,7 @@ export function MarkdownRefineView({
   documentTitle,
   session,
   writable,
+  compact = false,
   onApplyChange,
   onSaveNow,
 }: MarkdownRefineViewProps) {
@@ -161,7 +163,7 @@ export function MarkdownRefineView({
     () => sections.filter((s) => Boolean(s.heading)),
     [sections],
   )
-  const [showOutline, setShowOutline] = useState(outlineItems.length >= 2)
+  const [showOutline, setShowOutline] = useState(() => !compact && outlineItems.length >= 2)
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null)
   const [instruction, setInstruction] = useState('')
   const [refining, setRefining] = useState(false)
@@ -309,30 +311,47 @@ export function MarkdownRefineView({
   }, [candidate])
 
   return (
-    <div className="md-refine-root">
+    <div className={`md-refine-root${compact ? ' is-compact' : ''}`}>
       {showOutline && outlineItems.length > 0 && (
-        <aside className="md-refine-outline" aria-label="文档目录">
-          <div className="md-refine-outline-title">目录大纲</div>
-          {outlineItems.map((sec) => (
-            <button
-              key={sec.id}
-              type="button"
-              className={`md-refine-outline-btn${activeSectionId === sec.id ? ' is-active' : ''}`}
-              style={{ paddingLeft: 8 + Math.max(0, (sec.level || 1) - 1) * 12 }}
-              onClick={() => {
-                setActiveSectionId(sec.id)
-                document.getElementById(`md-refine-${sec.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-              }}
-              title={sec.heading}
-            >
-              {sec.heading}
-            </button>
-          ))}
-        </aside>
+        <>
+          {compact && (
+            <div
+              className="md-refine-outline-backdrop"
+              onClick={() => setShowOutline(false)}
+              aria-hidden="true"
+            />
+          )}
+          <aside className="md-refine-outline" aria-label="文档目录">
+            <Group justify="space-between" align="center" mb={4}>
+              <div className="md-refine-outline-title" style={{ paddingBottom: 0 }}>目录大纲</div>
+              {compact && (
+                <ActionIcon size="xs" variant="subtle" aria-label="关闭目录" onClick={() => setShowOutline(false)}>
+                  <IconX size={14} />
+                </ActionIcon>
+              )}
+            </Group>
+            {outlineItems.map((sec) => (
+              <button
+                key={sec.id}
+                type="button"
+                className={`md-refine-outline-btn${activeSectionId === sec.id ? ' is-active' : ''}`}
+                style={{ paddingLeft: 8 + Math.max(0, (sec.level || 1) - 1) * 12 }}
+                onClick={() => {
+                  setActiveSectionId(sec.id)
+                  if (compact) setShowOutline(false)
+                  document.getElementById(`md-refine-${sec.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                }}
+                title={sec.heading}
+              >
+                {sec.heading}
+              </button>
+            ))}
+          </aside>
+        </>
       )}
 
       <div className="md-refine-scroll">
-        {(outlineItems.length > 0 || lastUndoMarkdown !== null) && (
+        {!compact && (outlineItems.length > 0 || lastUndoMarkdown !== null) && (
           <Group justify="space-between" mb={8} style={{ maxWidth: 820, marginInline: 'auto' }}>
             <Group gap={8}>
               {outlineItems.length > 0 && (
@@ -363,6 +382,32 @@ export function MarkdownRefineView({
               </Button>
             )}
           </Group>
+        )}
+
+        {compact && (outlineItems.length > 0 || lastUndoMarkdown !== null) && (
+          <div className="md-refine-compact-bar">
+            {outlineItems.length > 0 && (
+              <button
+                type="button"
+                className="md-refine-compact-pill"
+                aria-label="切换目录大纲"
+                onClick={() => setShowOutline((v) => !v)}
+              >
+                <IconLayoutSidebar size={13} aria-hidden="true" />
+                <span>目录 ({outlineItems.length})</span>
+              </button>
+            )}
+            {lastUndoMarkdown !== null && (
+              <button
+                type="button"
+                className="md-refine-compact-pill"
+                onClick={() => void handleUndoLastApply()}
+              >
+                <IconArrowBackUp size={13} aria-hidden="true" />
+                <span>撤销替换</span>
+              </button>
+            )}
+          </div>
         )}
 
         <div className="md-refine-paper">

@@ -6,6 +6,7 @@ export interface ViewerContext {
   artifact: ArtifactRef
   session?: Session | null
   isActive?: boolean
+  surface?: 'desktop' | 'mobile'
   toolbarAction?: ReactNode
   onSave?: (content: string) => Promise<boolean>
   onDirtyChange?: (dirty: boolean) => void

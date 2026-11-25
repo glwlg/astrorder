@@ -3,6 +3,7 @@
   flex-direction: column;
   height: 100%;
   min-height: 0;
+  container: rich-studio / inline-size;
   background: var(--astr-canvas-bg, #f8f8fa);
 }
 
@@ -233,4 +234,55 @@
   border: none;
   border-top: 1px solid var(--astr-border);
   margin: 18px 0;
+}
+
+.rich-doc-paper :is(h1, h2, h3) {
+  text-wrap: balance;
+}
+
+.rich-doc-paper :is(p, li) {
+  text-wrap: pretty;
+  overflow-wrap: break-word;
+}
+
+.rich-doc-paper :is(a, code) {
+  overflow-wrap: anywhere;
+}
+
+@container rich-studio (inline-size < 560px) {
+  .rich-doc-toolbar {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    padding: 4px 8px;
+    gap: 4px;
+  }
+
+  .rich-doc-toolbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .rich-doc-toolbar-left,
+  .rich-doc-toolbar-right {
+    flex-wrap: nowrap;
+    flex: none;
+  }
+
+  .rich-doc-scroll {
+    padding: 4px 0 64px;
+    scroll-padding-top: 12px;
+    background: var(--astr-surface, #ffffff);
+  }
+
+  .rich-doc-paper-wrap {
+    max-width: none;
+  }
+
+  .rich-doc-paper {
+    min-height: 100%;
+    padding: 12px 14px 48px;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+  }
 }

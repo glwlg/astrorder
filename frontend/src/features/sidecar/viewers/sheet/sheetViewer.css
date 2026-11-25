@@ -4,6 +4,7 @@
   height: 100%;
   min-height: 0;
   position: relative;
+  container: sheet-viewer / inline-size;
 }
 
 .sheet-grid-container {
@@ -149,4 +150,44 @@
 .sheet-stats-strip strong {
   color: var(--mantine-color-text);
   font-weight: 600;
+}
+
+@container sheet-viewer (inline-size < 560px) {
+  .sheet-viewer-shell > .mantine-Paper-root {
+    margin: 0 !important;
+    border-radius: 0 !important;
+    border-inline: none !important;
+    padding: 5px 8px !important;
+  }
+
+  .sheet-viewer-shell > .mantine-Paper-root > .mantine-Group-root {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    gap: 6px;
+  }
+
+  .sheet-viewer-shell > .mantine-Paper-root > .mantine-Group-root::-webkit-scrollbar {
+    display: none;
+  }
+
+  .sheet-viewer-shell > .mantine-Paper-root > .mantine-Group-root > .mantine-Group-root {
+    flex-wrap: nowrap;
+    flex: none;
+  }
+
+  .sheet-grid-container {
+    margin: 0;
+    border-radius: 0;
+    border-inline: none;
+    border-top: none;
+  }
+
+  .sheet-footer-bar {
+    margin: 0;
+    border-radius: 0;
+    border-inline: none;
+    border-bottom: none;
+    padding: 4px 8px;
+  }
 }

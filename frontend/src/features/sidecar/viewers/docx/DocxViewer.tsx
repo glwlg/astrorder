@@ -81,12 +81,12 @@ function blocksToPlainMarkdown(doc: DocxPreviewResponse): string {
   return lines.join('\n').trim()
 }
 
-export function DocxViewer({ artifact, session, toolbarAction }: ViewerContext) {
+export function DocxViewer({ artifact, session, toolbarAction, surface = 'desktop' }: ViewerContext) {
   const [doc, setDoc] = useState<DocxPreviewResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [revision, setRevision] = useState(0)
-  const [showOutline, setShowOutline] = useState(true)
+  const [showOutline, setShowOutline] = useState(() => surface !== 'mobile')
   const [selectedText, setSelectedText] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
