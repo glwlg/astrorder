@@ -2,6 +2,7 @@ package grpcapi
 
 import (
 	"context"
+	"strings"
 
 	pb "astrorder.dev/contracts/gen/go/astrorder/sessiond/v1"
 	"google.golang.org/grpc/codes"
@@ -183,6 +184,14 @@ func (s *sessionControlService) DeleteSession(ctx context.Context, r *pb.DeleteS
 		return nil, status.Error(codes.InvalidArgument, "delete request is required")
 	}
 	return s.execute(ctx, r, r.Session, r.Meta, controlFields("session.delete", r.Session))
+}
+func (s *sessionControlService) MoveSessionWorkspace(ctx context.Context, r *pb.MoveSessionWorkspaceRequest) (*pb.CommandReceipt, error) {
+	if r == nil || strings.TrimSpace(r.Workspace) == "" {
+		return nil, status.Error(codes.InvalidArgument, "workspace is required")
+	}
+	fields := controlFields("session.move_workspace", r.Session)
+	fields["workspace"] = strings.TrimSpace(r.Workspace)
+	return s.execute(ctx, r, r.Session, r.Meta, fields)
 }
 func (s *sessionControlService) CloseSession(ctx context.Context, r *pb.CloseSessionRequest) (*pb.CommandReceipt, error) {
 	if r == nil {

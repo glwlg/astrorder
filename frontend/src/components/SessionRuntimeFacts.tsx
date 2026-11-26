@@ -255,7 +255,11 @@ export function SessionRuntimeFacts({
             {usage.data?.total_tokens != null && (
               <span>
                 累计产生 {formatTokens(usage.data.total_tokens)} Token
-                {usage.data.speed ? ` · ${usage.data.speed} tok/s` : ''}
+                {usage.data.speed && usage.data.speed > 0 ? (
+                  <span title="最近一轮生成速度（含思考 Token）">
+                    {` · ${Number(usage.data.speed.toFixed(1))} tok/s`}
+                  </span>
+                ) : ''}
               </span>
             )}
           </div>

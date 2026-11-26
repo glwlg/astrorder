@@ -435,4 +435,402 @@ describe('transcript follow mode', () => {
     expect(screen.getByRole('region', { name: '思考与工具' }).querySelector('details')).toBe(details)
     expect(details.open).toBe(false)
   })
+
+  it('opens in-session Ctrl+F find bar, cycles matches, toggles case sensitivity, unfolds older hits, and closes on Esc', async () => {
+    const msgs: Message[] = Array.from({ length: 70 }, (_, idx) => ({
+      ...message,
+      id: `find-m-${idx}`,
+      role: idx % 2 === 0 ? 'user' : 'assistant',
+      text: idx === 2
+        ? '早期记录里包含 Alpha 关键词'
+        : idx === 68
+          ? '最新回复里提到 alpha 和 ALPHA 两次'
+          : `普通对话内容 #${idx}`,
+      created_at: `2026-01-01T00:${String(Math.floor(idx / 60)).padStart(2, '0')}:${String(idx % 60).padStart(2, '0')}Z`,
+    }))
+
+    render(
+      <MantineProvider>
+        <Transcript outbox={[]} messages={msgs} enableFind />
+      </MantineProvider>,
+    )
+
+    // Message #2 is folded behind the 60-row window initially
+    expect(screen.queryByTestId('message-find-m-2')).not.toBeInTheDocument()
+
+    // Trigger Ctrl+F
+    fireEvent.keyDown(window, { key: 'f', ctrlKey: true })
+    const input = await screen.findByRole('searchbox', { name: '搜索会话内容' })
+    expect(input).toHaveFocus()
+
+    // Case-insensitive search matches 3 occurrences (1 in folded m-2, 2 in m-68) and auto-expands m-2
+    fireEvent.change(input, { target: { value: 'alpha' } })
+    await waitFor(() => {
+      expect(screen.getByRole('status')).toHaveTextContent('1 / 3')
+      expect(screen.getByTestId('message-find-m-2')).toBeInTheDocument()
+    })
+
+    // Enter advances to 2 / 3, Shift+Enter returns to 1 / 3
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(screen.getByRole('status')).toHaveTextContent('2 / 3')
+    fireEvent.keyDown(input, { key: 'Enter', shiftKey: true })
+    expect(screen.getByRole('status')).toHaveTextContent('1 / 3')
+
+    // Case-sensitive toggle narrows to only lowercase 'alpha' (1 hit)
+    fireEvent.click(screen.getByRole('button', { name: '区分大小写' }))
+    expect(screen.getByRole('status')).toHaveTextContent('1 / 1')
+
+    // Esc closes find bar
+    fireEvent.keyDown(input, { key: 'Escape' })
+    expect(screen.queryByRole('searchbox', { name: '搜索会话内容' })).not.toBeInTheDocument()
+  })
+
+  it('does not hijack Ctrl+F when focus is inside a Monaco editor', () => {
+    render(
+      <MantineProvider>
+        <div className="monaco-editor">
+          <textarea aria-label="代码编辑器" />
+        </div>
+        <Transcript outbox={[]} messages={[message]} enableFind />
+      </MantineProvider>,
+    )
+
+    const editor = screen.getByLabelText('代码编辑器')
+    editor.focus()
+    fireEvent.keyDown(editor, { key: 'f', ctrlKey: true })
+    expect(screen.queryByRole('searchbox', { name: '搜索会话内容' })).not.toBeInTheDocument()
+  })
+
+  it('expands collapsed activity pack and scrolls via scroller.scrollTo when navigating matches', async () => {
+    const packMessages: Message[] = [
+      {
+        ...message,
+        id: 'pack-think-1',
+        role: 'assistant',
+        kind: 'thinking',
+        text: '正在分析模板结构与字段约束',
+        created_at: '2026-01-01T00:00:00Z',
+        attachments: [],
+      },
+      {
+        ...message,
+        id: 'reply-after-1',
+        role: 'assistant',
+        kind: 'message',
+        text: '已完成处理，详情请看上方分析。',
+        created_at: '2026-01-01T00:01:00Z',
+        attachments: [],
+      },
+      {
+        ...message,
+        id: 'reply-after-2',
+        role: 'assistant',
+        kind: 'message',
+        text: '这是第二处包含模板关键词的普通回复。',
+        created_at: '2026-01-01T00:02:00Z',
+        attachments: [],
+      },
+    ]
+
+    const view = render(
+      <MantineProvider>
+        <Transcript outbox={[]} messages={packMessages} enableFind />
+      </MantineProvider>,
+    )
+
+    const scroller = view.container.querySelector<HTMLDivElement>('.transcript')!
+    const scrollToSpy = vi.fn()
+    scroller.scrollTo = scrollToSpy
+    Object.defineProperty(scroller, 'scrollTop', { value: 1200, writable: true })
+    vi.spyOn(scroller, 'getBoundingClientRect').mockReturnValue({
+      top: 100,
+      bottom: 700,
+      left: 0,
+      right: 800,
+      width: 800,
+      height: 600,
+      x: 0,
+      y: 100,
+      toJSON: () => ({}),
+    })
+
+    // Collapsed pack does not mount inner message article before searching
+    expect(screen.queryByTestId('message-pack-think-1')).not.toBeInTheDocument()
+
+    fireEvent.keyDown(window, { key: 'f', ctrlKey: true })
+    const input = await screen.findByRole('searchbox', { name: '搜索会话内容' })
+    fireEvent.change(input, { target: { value: '模板' } })
+
+    expect(screen.getByRole('status')).toHaveTextContent('1 / 2')
+
+    // Collapsed activity pack and its inner fold auto-expand so the match becomes visible
+    await waitFor(() => {
+      expect(screen.getByTestId('message-pack-think-1')).toBeInTheDocument()
+      expect(screen.getByTestId('message-pack-think-1').querySelector('details')?.open).toBe(true)
+    })
+
+    // Verify scroller.scrollTo is called with non-zero bounding rect calculation
+    const targetMsg = view.container.querySelector<HTMLElement>('[data-turn-id="reply-after-2"]')!
+    vi.spyOn(targetMsg, 'getBoundingClientRect').mockReturnValue({
+      top: 40,
+      bottom: 80,
+      left: 0,
+      right: 500,
+      width: 500,
+      height: 40,
+      x: 0,
+      y: 40,
+      toJSON: () => ({}),
+    })
+    scrollToSpy.mockClear()
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(screen.getByRole('status')).toHaveTextContent('2 / 2')
+    await waitFor(() => {
+      expect(scrollToSpy).toHaveBeenCalled()
+    })
+    const lastCall = scrollToSpy.mock.calls[scrollToSpy.mock.calls.length - 1][0] as { top: number }
+    expect(lastCall.top).toBeCloseTo(1200 + (40 - 100) - 600 * 0.38, 1)
+  })
+
+  it('keeps following bottom when content grows asynchronously without user upward scroll', async () => {
+    render(
+      <MantineProvider>
+        <Transcript messages={[message]} outbox={[]} session={runningSession} />
+      </MantineProvider>,
+    )
+    const transcript = screen.getByRole('log')
+    let currentHeight = 1000
+    let currentTop = 900
+    Object.defineProperties(transcript, {
+      clientHeight: { configurable: true, get: () => 100 },
+      scrollHeight: { configurable: true, get: () => currentHeight },
+      scrollTop: {
+        configurable: true,
+        get: () => currentTop,
+        set: (value: number) => { currentTop = value },
+      },
+    })
+    const scrollTo = vi.fn(({ top }: { top: number }) => { currentTop = Math.max(0, top - 100) })
+    Object.defineProperty(transcript, 'scrollTo', { configurable: true, value: scrollTo })
+
+    await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+    // Establish pinned bottom baseline (scrollTop = 900, scrollHeight = 1000, clientHeight = 100)
+    fireEvent.scroll(transcript)
+    expect(screen.queryByTestId('return-bottom')).not.toBeInTheDocument()
+
+    // Simulate async streaming / ActivityPack growth (+400px) firing a scroll event while scrollTop stayed at 900
+    currentHeight = 1400
+    fireEvent.scroll(transcript)
+
+    expect(screen.queryByTestId('return-bottom')).not.toBeInTheDocument()
+    expect(scrollTo).toHaveBeenLastCalledWith({ top: 1400, behavior: 'auto' })
+    expect(currentTop).toBe(1300)
+  })
+
+  it('keeps the top history slice anchored when appending new messages in long sessions', () => {
+    const initialMessages = Array.from({ length: 70 }, (_, idx) => ({
+      ...message,
+      id: `m-${idx}`,
+      role: (idx % 2 === 0 ? 'user' : 'assistant') as 'user' | 'assistant',
+      text: `消息 ${idx}`,
+      created_at: new Date(Date.UTC(2026, 0, 1, 0, idx)).toISOString(),
+    }))
+    const view = render(
+      <MantineProvider>
+        <Transcript messages={initialMessages} outbox={[]} session={runningSession} />
+      </MantineProvider>,
+    )
+    expect(screen.getByRole('button', { name: '显示更早 10 条记录（共折叠 10 条）' })).toBeInTheDocument()
+    expect(screen.getByTestId('message-m-10')).toBeInTheDocument()
+
+    const appended = [
+      ...initialMessages,
+      { ...message, id: 'm-70', role: 'user' as const, text: '新发送的消息', created_at: '2026-01-01T02:00:00Z' },
+      { ...message, id: 'm-71', role: 'assistant' as const, text: '最新流式输出', created_at: '2026-01-01T02:01:00Z' },
+    ]
+    view.rerender(
+      <MantineProvider>
+        <Transcript messages={appended} outbox={[]} session={runningSession} />
+      </MantineProvider>,
+    )
+    // Appending must NOT evict m-10 from the top or bump folded count from 10 -> 12
+    expect(screen.getByRole('button', { name: '显示更早 10 条记录（共折叠 10 条）' })).toBeInTheDocument()
+    expect(screen.getByTestId('message-m-10')).toBeInTheDocument()
+    expect(screen.getByTestId('message-m-71')).toBeInTheDocument()
+  })
+
+  it('does not yank a user back to the bottom when an acknowledged outbox entry clears', async () => {
+    const view = render(
+      <MantineProvider>
+        <Transcript messages={[message]} outbox={[outbound]} session={runningSession} />
+      </MantineProvider>,
+    )
+    const transcript = screen.getByRole('log')
+    let currentTop = 900
+    Object.defineProperties(transcript, {
+      clientHeight: { configurable: true, value: 100 },
+      scrollHeight: { configurable: true, value: 1000 },
+      scrollTop: {
+        configurable: true,
+        get: () => currentTop,
+        set: (value: number) => { currentTop = value },
+      },
+    })
+    Object.defineProperty(transcript, 'scrollTo', {
+      configurable: true,
+      value: vi.fn(({ top }: { top: number }) => { currentTop = top }),
+    })
+
+    await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+    currentTop = 100
+    fireEvent.scroll(transcript)
+    await waitFor(() => expect(screen.getByTestId('return-bottom')).toBeInTheDocument())
+
+    // Outbox clears once server acknowledges the command — user's manual scroll position must remain paused
+    view.rerender(
+      <MantineProvider>
+        <Transcript messages={[message]} outbox={[]} session={runningSession} />
+      </MantineProvider>,
+    )
+    expect(screen.getByTestId('return-bottom')).toBeInTheDocument()
+    expect(currentTop).toBe(100)
+  })
+
+  it('immediately pauses follow on upward mouse wheel without bouncing back during initial ticks or streaming', async () => {
+    const view = render(
+      <MantineProvider>
+        <Transcript messages={[message]} outbox={[]} session={runningSession} />
+      </MantineProvider>,
+    )
+    const transcript = screen.getByRole('log')
+    let currentHeight = 1000
+    let currentTop = 900
+    Object.defineProperties(transcript, {
+      clientHeight: { configurable: true, get: () => 100 },
+      scrollHeight: { configurable: true, get: () => currentHeight },
+      scrollTop: {
+        configurable: true,
+        get: () => currentTop,
+        set: (value: number) => { currentTop = value },
+      },
+    })
+    const scrollTo = vi.fn(({ top }: { top: number }) => { currentTop = Math.max(0, top - 100) })
+    Object.defineProperty(transcript, 'scrollTo', { configurable: true, value: scrollTo })
+
+    await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+    scrollTo.mockClear()
+
+    // User flicks mouse wheel upward from the bottom; first smooth-scroll frame only moves 15px (< 48px threshold).
+    fireEvent.wheel(transcript, { deltaY: -100 })
+    currentTop = 885
+    fireEvent.scroll(transcript)
+
+    await waitFor(() => expect(screen.getByTestId('return-bottom')).toBeInTheDocument())
+    expect(scrollTo).not.toHaveBeenCalled()
+
+    // Streaming delta arrives right after upward wheel — must NOT yank/bounce the user back to bottom!
+    currentHeight = 1200
+    view.rerender(
+      <MantineProvider>
+        <Transcript
+          messages={[{ ...message, text: `${message.text}\n新增流式输出内容` }]}
+          outbox={[]}
+          session={runningSession}
+        />
+      </MantineProvider>,
+    )
+    expect(screen.getByTestId('return-bottom')).toBeInTheDocument()
+    expect(scrollTo).not.toHaveBeenCalled()
+    expect(currentTop).toBe(885)
+
+    // Rolling wheel back downward to the bottom smoothly re-engages bottom follow.
+    fireEvent.wheel(transcript, { deltaY: 120 })
+    currentTop = 1080
+    fireEvent.scroll(transcript)
+    await waitFor(() => expect(screen.queryByTestId('return-bottom')).not.toBeInTheDocument())
+  })
+
+  it('does not show return-bottom button on upward wheel when transcript does not overflow', () => {
+    render(
+      <MantineProvider>
+        <Transcript messages={[message]} outbox={[]} session={runningSession} />
+      </MantineProvider>,
+    )
+    const transcript = screen.getByRole('log')
+    Object.defineProperties(transcript, {
+      clientHeight: { configurable: true, value: 600 },
+      scrollHeight: { configurable: true, value: 400 },
+      scrollTop: { configurable: true, writable: true, value: 0 },
+    })
+
+    fireEvent.wheel(transcript, { deltaY: -100 })
+    expect(screen.queryByTestId('return-bottom')).not.toBeInTheDocument()
+  })
+
+  it('hides HandoffSummaryCard while loading, unresolved, or after multiple turns, and keeps it for fresh/first-turn handoffs', () => {
+    const handoffSession: Session = {
+      ...runningSession,
+      status: 'idle',
+      handoff_from_agent_id: 'codex-1',
+      handoff_from_session_id: 'src-1',
+      handoff_context: 'native-handoff-v1:{"agent_id":"codex-1","session_id":"src-1"}',
+      handoff_context_consumed: true,
+    }
+    const pendingSession: Session = { ...handoffSession, handoff_context_consumed: false }
+    const oneTurn: Message[] = [
+      { ...message, id: 'u-1', role: 'user', text: '第一轮问题' },
+      { ...message, id: 'a-1', role: 'assistant', text: '第一轮回复' },
+    ]
+    const multiTurn: Message[] = [
+      ...oneTurn,
+      { ...message, id: 'u-2', role: 'user', text: '第二轮问题' },
+      { ...message, id: 'a-2', role: 'assistant', text: '第二轮回复' },
+    ]
+
+    // 1. While initial history is loading or unresolved, never flash HandoffSummaryCard.
+    const view = render(
+      <MantineProvider>
+        <Transcript session={handoffSession} messages={[]} outbox={[]} loading />
+      </MantineProvider>,
+    )
+    expect(screen.getByText('正在读取会话记录…')).toBeInTheDocument()
+    expect(screen.queryByTestId('handoff-summary-card')).not.toBeInTheDocument()
+
+    view.rerender(
+      <MantineProvider>
+        <Transcript session={handoffSession} messages={[]} outbox={[]} historyResolved={false} />
+      </MantineProvider>,
+    )
+    expect(screen.queryByTestId('handoff-summary-card')).not.toBeInTheDocument()
+
+    // 2. Consumed session with empty messages or multiple user turns must not render HandoffSummaryCard even when hasMoreHistory=false.
+    view.rerender(
+      <MantineProvider>
+        <Transcript session={handoffSession} messages={[]} outbox={[]} />
+      </MantineProvider>,
+    )
+    expect(screen.queryByTestId('handoff-summary-card')).not.toBeInTheDocument()
+
+    view.rerender(
+      <MantineProvider>
+        <Transcript session={handoffSession} messages={multiTurn} outbox={[]} />
+      </MantineProvider>,
+    )
+    expect(screen.queryByTestId('handoff-summary-card')).not.toBeInTheDocument()
+
+    // 3. Fresh pending handoff session (0 turns) or first turn after injection still shows it.
+    view.rerender(
+      <MantineProvider>
+        <Transcript session={pendingSession} messages={[]} outbox={[]} />
+      </MantineProvider>,
+    )
+    expect(screen.getByTestId('handoff-summary-card')).toBeInTheDocument()
+
+    view.rerender(
+      <MantineProvider>
+        <Transcript session={handoffSession} messages={oneTurn} outbox={[]} />
+      </MantineProvider>,
+    )
+    expect(screen.getByTestId('handoff-summary-card')).toBeInTheDocument()
+  })
 })

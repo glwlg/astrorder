@@ -509,11 +509,322 @@ func buildCommands() *commandDefinition {
 		},
 	}
 
+	botsList := simple("list", "List registered Specialist Bots", "bots.list")
+	botsInvoke := &commandDefinition{
+		name: "invoke",
+		help: "Invoke a Specialist Bot in its workspace with a clean job session",
+		options: []optionDefinition{
+			{name: "bot", flags: []string{"--bot"}, metavar: "BOT", kind: kindString, required: true, help: "Target Bot id, slug, or name"},
+			{name: "operation_id", flags: []string{"--operation-id"}, metavar: "OPERATION_ID", kind: kindString, required: true, help: "Unique operation ID"},
+			{name: "title", flags: []string{"--title"}, metavar: "TITLE", kind: kindString, help: "Job session title"},
+			{name: "prompt", flags: []string{"--prompt"}, metavar: "PROMPT", kind: kindString, help: "Task brief text"},
+			{name: "prompt_file", flags: []string{"--prompt-file"}, metavar: "PROMPT_FILE", kind: kindString, help: "Read task brief from UTF-8 file"},
+			{name: "attach", flags: []string{"--attach"}, metavar: "PATHS", kind: kindString, help: "Comma-separated file paths to copy into the Bot's inbox/<job-id>/"},
+			{name: "agent_id", flags: []string{"--agent-id", "--agent"}, metavar: "AGENT_ID", kind: kindString, help: "Optional target agent ID override"},
+			{name: "model", flags: []string{"--model"}, metavar: "MODEL", kind: kindString, help: "Optional model name override"},
+			{name: "provider", flags: []string{"--provider"}, metavar: "PROVIDER", kind: kindString, help: "Optional model provider override"},
+			{name: "effort", flags: []string{"--effort"}, metavar: "EFFORT", kind: kindString, help: "Optional reasoning effort level"},
+		},
+		capability: func(values map[string]any, config Config) (string, map[string]any, error) {
+			promptText, err := resolvePrompt(values, config)
+			if err != nil {
+				return "", nil, err
+			}
+			if strings.TrimSpace(promptText) == "" {
+				return "", nil, errors.New("either --prompt or --prompt-file is required")
+			}
+			opID, _ := values["operation_id"].(string)
+			if containsWhitespace(opID) {
+				return "", nil, fmt.Errorf("operation_id contains illegal whitespace: %q", opID)
+			}
+			botRef, _ := values["bot"].(string)
+			payload := map[string]any{
+				"bot":          strings.TrimSpace(botRef),
+				"operation_id": opID,
+				"prompt":       promptText,
+			}
+			for _, key := range []string{"title", "agent_id", "model", "provider", "effort"} {
+				if value, ok := values[key]; ok {
+					if str, ok := value.(string); ok && strings.TrimSpace(str) != "" {
+						payload[key] = strings.TrimSpace(str)
+					}
+				}
+			}
+			if rawAttach, ok := values["attach"].(string); ok && strings.TrimSpace(rawAttach) != "" {
+				var paths []string
+				for _, part := range strings.Split(rawAttach, ",") {
+					if trimmed := strings.TrimSpace(part); trimmed != "" {
+						paths = append(paths, trimmed)
+					}
+				}
+				if len(paths) > 0 {
+					payload["attach_paths"] = paths
+				}
+			}
+			return "bots.invoke", payload, nil
+		},
+	}
+
+	botsCmd := &commandDefinition{
+		name: "bots",
+		help: "Discover and invoke Specialist Bots",
+		children: []*commandDefinition{
+			botsList,
+			botsInvoke,
+		},
+	}
+
+	scheduleSpecOptions := []optionDefinition{
+		{name: "name", flags: []string{"--name"}, metavar: "NAME", kind: kindString, help: "Human-readable schedule name"},
+		{name: "prompt", flags: []string{"--prompt"}, metavar: "PROMPT", kind: kindString, help: "Prompt sent to this session when triggered"},
+		{name: "prompt_file", flags: []string{"--prompt-file"}, metavar: "PROMPT_FILE", kind: kindString, help: "Read prompt from UTF-8 file"},
+		{name: "kind", flags: []string{"--kind"}, metavar: "KIND", kind: kindString, help: "Schedule kind: once, interval, daily, weekly, or cron"},
+		{name: "in", flags: []string{"--in"}, metavar: "DURATION", kind: kindString, help: "One-shot relative delay (e.g. 30s, 10m, 2h, 1d)"},
+		{name: "run_at", flags: []string{"--run-at"}, metavar: "RFC3339", kind: kindString, help: "One-shot RFC3339 timestamp (e.g. 2026-11-26T18:00:00+08:00)"},
+		{name: "interval", flags: []string{"--interval"}, metavar: "MINUTES", kind: kindInteger, help: "Interval in minutes (1..43200)"},
+		{name: "daily", flags: []string{"--daily"}, metavar: "HH:MM", kind: kindString, help: "Daily 24-hour time (e.g. 09:00)"},
+		{name: "weekly", flags: []string{"--weekly"}, metavar: "HH:MM", kind: kindString, help: "Weekly 24-hour time (use with --weekdays)"},
+		{name: "weekdays", flags: []string{"--weekdays"}, metavar: "DAYS", kind: kindString, help: "Weekdays (e.g. mon-fri, weekdays, weekend, 1,3,5, or bitmask 62)"},
+		{name: "cron", flags: []string{"--cron"}, metavar: "EXPR", kind: kindString, help: "5-field cron expression (minute hour day month weekday)"},
+		{name: "timezone", flags: []string{"--timezone"}, metavar: "TZ", kind: kindString, help: "IANA timezone (e.g. Asia/Shanghai) or Local"},
+		{name: "when_busy", flags: []string{"--when-busy"}, metavar: "POLICY", kind: kindString, help: "Behavior when session is busy: skip (default) or queue"},
+		{name: "misfire_policy", flags: []string{"--misfire-policy"}, metavar: "POLICY", kind: kindString, help: "Misfire policy: grace_once (default), skip, or run_once"},
+		{name: "misfire_grace_sec", flags: []string{"--misfire-grace-sec"}, metavar: "SECONDS", kind: kindInteger, help: "Grace window seconds for grace_once"},
+		{name: "enabled", flags: []string{"--enabled"}, metavar: "BOOL", kind: kindString, help: "Whether schedule is enabled (true or false)"},
+	}
+
+	buildSchedulePayload := func(values map[string]any, config Config, requirePrompt bool) (map[string]any, error) {
+		payload := map[string]any{}
+		promptText, err := resolvePrompt(values, config)
+		if err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(promptText) != "" {
+			payload["prompt"] = promptText
+		} else if requirePrompt {
+			return nil, errors.New("either --prompt or --prompt-file is required")
+		}
+		if name, ok := values["name"].(string); ok && strings.TrimSpace(name) != "" {
+			payload["name"] = strings.TrimSpace(name)
+		}
+		if kind, ok := values["kind"].(string); ok && strings.TrimSpace(kind) != "" {
+			payload["schedule_kind"] = strings.TrimSpace(kind)
+		}
+		if rawIn, ok := values["in"].(string); ok && strings.TrimSpace(rawIn) != "" {
+			sec, parseErr := parseScheduleDelaySeconds(rawIn)
+			if parseErr != nil {
+				return nil, parseErr
+			}
+			payload["delay_seconds"] = sec
+			if _, hasKind := payload["schedule_kind"]; !hasKind {
+				payload["schedule_kind"] = "once"
+			}
+		}
+		if runAt, ok := values["run_at"].(string); ok && strings.TrimSpace(runAt) != "" {
+			payload["run_at"] = strings.TrimSpace(runAt)
+			if _, hasKind := payload["schedule_kind"]; !hasKind {
+				payload["schedule_kind"] = "once"
+			}
+		}
+		if interval, ok := values["interval"].(int); ok {
+			payload["interval_minutes"] = interval
+			if _, hasKind := payload["schedule_kind"]; !hasKind {
+				payload["schedule_kind"] = "interval"
+			}
+		}
+		if daily, ok := values["daily"].(string); ok && strings.TrimSpace(daily) != "" {
+			payload["daily_time"] = strings.TrimSpace(daily)
+			if _, hasKind := payload["schedule_kind"]; !hasKind {
+				payload["schedule_kind"] = "daily"
+			}
+		}
+		if weekly, ok := values["weekly"].(string); ok && strings.TrimSpace(weekly) != "" {
+			payload["daily_time"] = strings.TrimSpace(weekly)
+			if _, hasKind := payload["schedule_kind"]; !hasKind {
+				payload["schedule_kind"] = "weekly"
+			}
+		}
+		if weekdays, ok := values["weekdays"].(string); ok && strings.TrimSpace(weekdays) != "" {
+			payload["weekdays"] = strings.TrimSpace(weekdays)
+			if _, hasKind := payload["schedule_kind"]; !hasKind {
+				payload["schedule_kind"] = "weekly"
+			}
+		}
+		if cronExpr, ok := values["cron"].(string); ok && strings.TrimSpace(cronExpr) != "" {
+			payload["cron_expr"] = strings.TrimSpace(cronExpr)
+			if _, hasKind := payload["schedule_kind"]; !hasKind {
+				payload["schedule_kind"] = "cron"
+			}
+		}
+		for _, field := range []string{"timezone", "when_busy", "misfire_policy"} {
+			if str, ok := values[field].(string); ok && strings.TrimSpace(str) != "" {
+				payload[field] = strings.TrimSpace(str)
+			}
+		}
+		if grace, ok := values["misfire_grace_sec"].(int); ok {
+			payload["misfire_grace_sec"] = grace
+		}
+		if rawEnabled, ok := values["enabled"].(string); ok && strings.TrimSpace(rawEnabled) != "" {
+			enabledBool, boolErr := strconv.ParseBool(strings.TrimSpace(rawEnabled))
+			if boolErr != nil {
+				return nil, fmt.Errorf("invalid --enabled value %q (must be true or false)", rawEnabled)
+			}
+			payload["enabled"] = enabledBool
+		}
+		return payload, nil
+	}
+
+	schedulesList := simple("list", "List scheduled tasks bound to the current session", "schedules.list")
+	schedulesCreate := &commandDefinition{
+		name:    "create",
+		help:    "Create a persistent scheduled task bound to the current session",
+		options: scheduleSpecOptions,
+		capability: func(values map[string]any, config Config) (string, map[string]any, error) {
+			payload, err := buildSchedulePayload(values, config, true)
+			if err != nil {
+				return "", nil, err
+			}
+			return "schedules.create", payload, nil
+		},
+	}
+	updateOptions := append([]optionDefinition{
+		{name: "id", flags: []string{"--id"}, metavar: "SCHEDULE_ID", kind: kindString, required: true, help: "Schedule ID to update"},
+	}, scheduleSpecOptions...)
+	schedulesUpdate := &commandDefinition{
+		name:    "update",
+		help:    "Update, pause, or resume a scheduled task bound to the current session",
+		options: updateOptions,
+		capability: func(values map[string]any, config Config) (string, map[string]any, error) {
+			payload, err := buildSchedulePayload(values, config, false)
+			if err != nil {
+				return "", nil, err
+			}
+			id, _ := values["id"].(string)
+			payload["id"] = strings.TrimSpace(id)
+			return "schedules.update", payload, nil
+		},
+	}
+	schedulesDelete := &commandDefinition{
+		name: "delete",
+		help: "Delete a scheduled task bound to the current session",
+		options: []optionDefinition{
+			{name: "id", flags: []string{"--id"}, metavar: "SCHEDULE_ID", kind: kindString, required: true, help: "Schedule ID to delete"},
+		},
+		capability: func(values map[string]any, _ Config) (string, map[string]any, error) {
+			id, _ := values["id"].(string)
+			return "schedules.delete", map[string]any{"id": strings.TrimSpace(id)}, nil
+		},
+	}
+	schedulesCmd := &commandDefinition{
+		name: "schedules",
+		help: "Manage persistent scheduled tasks bound to the current session",
+		children: []*commandDefinition{
+			schedulesList,
+			schedulesCreate,
+			schedulesUpdate,
+			schedulesDelete,
+		},
+	}
+
+	gitlabTargetOptions := []optionDefinition{
+		{name: "project", flags: []string{"--project"}, metavar: "PROJECT_PATH", kind: kindString, help: "GitLab project path override (e.g. group/repo)"},
+		{name: "instance", flags: []string{"--instance"}, metavar: "INSTANCE", kind: kindString, help: "Configured GitLab instance ID or name"},
+		{name: "workspace", flags: []string{"--workspace"}, metavar: "WORKSPACE", kind: kindString, help: "Workspace directory override (defaults to current session workspace)"},
+	}
+
+	gitlabPipelines := &commandDefinition{
+		name: "pipelines",
+		help: "List recent GitLab CI pipelines for the current workspace or project",
+		options: append([]optionDefinition{
+			{name: "ref", flags: []string{"--ref"}, metavar: "REF", kind: kindString, help: "Filter by git branch or tag"},
+			{name: "sha", flags: []string{"--sha"}, metavar: "SHA", kind: kindString, help: "Filter by commit SHA"},
+			{name: "limit", flags: []string{"--limit"}, metavar: "LIMIT", kind: kindInteger, help: "Maximum number of pipelines (default 10, max 30)"},
+		}, gitlabTargetOptions...),
+		capability: func(values map[string]any, _ Config) (string, map[string]any, error) {
+			payload := map[string]any{}
+			for _, k := range []string{"ref", "sha", "project", "workspace"} {
+				if s, ok := values[k].(string); ok && strings.TrimSpace(s) != "" {
+					payload[k] = strings.TrimSpace(s)
+				}
+			}
+			if inst, ok := values["instance"].(string); ok && strings.TrimSpace(inst) != "" {
+				payload["instance_id"] = strings.TrimSpace(inst)
+			}
+			if limit, ok := values["limit"].(int); ok && limit > 0 {
+				payload["limit"] = limit
+			}
+			return "gitlab.pipelines", payload, nil
+		},
+	}
+
+	gitlabStatus := &commandDefinition{
+		name: "status",
+		help: "Inspect detailed stages and jobs of a GitLab CI pipeline (defaults to latest)",
+		options: append([]optionDefinition{
+			{name: "pipeline_id", flags: []string{"--pipeline-id"}, metavar: "PIPELINE_ID", kind: kindInteger, help: "Pipeline ID (omit for latest matching HEAD/branch)"},
+			{name: "ref", flags: []string{"--ref"}, metavar: "REF", kind: kindString, help: "Branch or tag filter when selecting latest pipeline"},
+		}, gitlabTargetOptions...),
+		capability: func(values map[string]any, _ Config) (string, map[string]any, error) {
+			payload := map[string]any{}
+			if pid, ok := values["pipeline_id"].(int); ok && pid > 0 {
+				payload["pipeline_id"] = pid
+			}
+			for _, k := range []string{"ref", "project", "workspace"} {
+				if s, ok := values[k].(string); ok && strings.TrimSpace(s) != "" {
+					payload[k] = strings.TrimSpace(s)
+				}
+			}
+			if inst, ok := values["instance"].(string); ok && strings.TrimSpace(inst) != "" {
+				payload["instance_id"] = strings.TrimSpace(inst)
+			}
+			return "gitlab.pipeline", payload, nil
+		},
+	}
+
+	gitlabLog := &commandDefinition{
+		name: "log",
+		help: "Fetch ANSI-cleaned tail logs of a GitLab CI job",
+		options: append([]optionDefinition{
+			{name: "job_id", flags: []string{"--job-id"}, metavar: "JOB_ID", kind: kindInteger, required: true, help: "GitLab CI job ID"},
+			{name: "tail", flags: []string{"--tail"}, metavar: "LINES", kind: kindInteger, help: "Trailing lines to return (default 200, max 1000)"},
+		}, gitlabTargetOptions...),
+		capability: func(values map[string]any, _ Config) (string, map[string]any, error) {
+			payload := map[string]any{
+				"job_id": values["job_id"],
+			}
+			if tail, ok := values["tail"].(int); ok && tail > 0 {
+				payload["tail"] = tail
+			}
+			for _, k := range []string{"project", "workspace"} {
+				if s, ok := values[k].(string); ok && strings.TrimSpace(s) != "" {
+					payload[k] = strings.TrimSpace(s)
+				}
+			}
+			if inst, ok := values["instance"].(string); ok && strings.TrimSpace(inst) != "" {
+				payload["instance_id"] = strings.TrimSpace(inst)
+			}
+			return "gitlab.job_log", payload, nil
+		},
+	}
+
+	gitlabCmd := &commandDefinition{
+		name: "gitlab",
+		help: "Inspect GitLab CI pipelines, job stages, and job logs",
+		children: []*commandDefinition{
+			gitlabPipelines,
+			gitlabStatus,
+			gitlabLog,
+		},
+	}
+
 	return &commandDefinition{
 		children: []*commandDefinition{
 			catalog,
 			invoke,
 			sessions,
+			schedulesCmd,
+			botsCmd,
+			gitlabCmd,
 			browser,
 			simple("agents", "", "agents.list"),
 			simple("machines", "", "machines.list"),
@@ -1223,6 +1534,30 @@ func containsWhitespace(s string) bool {
 	return strings.IndexFunc(s, unicode.IsSpace) >= 0
 }
 
+func parseScheduleDelaySeconds(raw string) (int, error) {
+	trimmed := strings.ToLower(strings.TrimSpace(raw))
+	if trimmed == "" {
+		return 0, errors.New("--in duration cannot be empty")
+	}
+	// Support shorthand day suffix such as "1d" or "7d".
+	if strings.HasSuffix(trimmed, "d") && !strings.ContainsAny(trimmed[:len(trimmed)-1], "hms") {
+		days, err := strconv.Atoi(trimmed[:len(trimmed)-1])
+		if err != nil || days <= 0 {
+			return 0, fmt.Errorf("invalid --in duration %q", raw)
+		}
+		return days * 86400, nil
+	}
+	d, err := time.ParseDuration(trimmed)
+	if err != nil || d <= 0 {
+		return 0, fmt.Errorf("invalid --in duration %q (examples: 30s, 10m, 2h, 1h30m, 1d)", raw)
+	}
+	sec := int(d.Seconds())
+	if sec < 5 {
+		return 0, errors.New("--in duration must be at least 5s")
+	}
+	return sec, nil
+}
+
 func resolvePrompt(values map[string]any, config Config) (string, error) {
 	if pf, ok := values["prompt_file"].(string); ok && pf != "" {
 		readFile := config.ReadFile
@@ -1568,7 +1903,7 @@ func resolveCaller(envLookup EnvLookup, config Config) (*Caller, error) {
 }
 
 func requiresCaller(capability string) bool {
-	if strings.HasPrefix(capability, "sessions.") || capability == "machines.dispatch" {
+	if strings.HasPrefix(capability, "sessions.") || strings.HasPrefix(capability, "schedules.") || strings.HasPrefix(capability, "gitlab.") || capability == "machines.dispatch" || capability == "bots.invoke" {
 		return true
 	}
 	switch capability {
@@ -1604,6 +1939,8 @@ func applyCallerScope(capability string, payload map[string]any, caller *Caller)
 		return bindCallerField(payload, "owner_key", callerKey, false)
 	case "swarm.sos.escalate":
 		return bindCallerField(payload, "key", callerKey, false)
+	case "schedules.list", "schedules.create", "schedules.update", "schedules.delete":
+		return bindCallerField(payload, "session_key", callerKey, false)
 	case "plugins.open", "plugins.close":
 		// The server already routes an explicit target given as agent_id +
 		// session_id. Do not shadow it with the caller's session_key.

@@ -208,6 +208,7 @@ const (
 	SessionControl_UpdateSettings_FullMethodName        = "/astrorder.sessiond.v1.SessionControl/UpdateSettings"
 	SessionControl_RenameSession_FullMethodName         = "/astrorder.sessiond.v1.SessionControl/RenameSession"
 	SessionControl_DeleteSession_FullMethodName         = "/astrorder.sessiond.v1.SessionControl/DeleteSession"
+	SessionControl_MoveSessionWorkspace_FullMethodName  = "/astrorder.sessiond.v1.SessionControl/MoveSessionWorkspace"
 	SessionControl_CloseSession_FullMethodName          = "/astrorder.sessiond.v1.SessionControl/CloseSession"
 	SessionControl_DetachSession_FullMethodName         = "/astrorder.sessiond.v1.SessionControl/DetachSession"
 	SessionControl_ReportObservedStatus_FullMethodName  = "/astrorder.sessiond.v1.SessionControl/ReportObservedStatus"
@@ -230,6 +231,7 @@ type SessionControlClient interface {
 	UpdateSettings(ctx context.Context, in *UpdateSettingsRequest, opts ...grpc.CallOption) (*CommandReceipt, error)
 	RenameSession(ctx context.Context, in *RenameSessionRequest, opts ...grpc.CallOption) (*CommandReceipt, error)
 	DeleteSession(ctx context.Context, in *DeleteSessionRequest, opts ...grpc.CallOption) (*CommandReceipt, error)
+	MoveSessionWorkspace(ctx context.Context, in *MoveSessionWorkspaceRequest, opts ...grpc.CallOption) (*CommandReceipt, error)
 	CloseSession(ctx context.Context, in *CloseSessionRequest, opts ...grpc.CallOption) (*CommandReceipt, error)
 	DetachSession(ctx context.Context, in *DetachSessionRequest, opts ...grpc.CallOption) (*CommandReceipt, error)
 	ReportObservedStatus(ctx context.Context, in *ReportObservedStatusRequest, opts ...grpc.CallOption) (*SessionReceipt, error)
@@ -355,6 +357,16 @@ func (c *sessionControlClient) DeleteSession(ctx context.Context, in *DeleteSess
 	return out, nil
 }
 
+func (c *sessionControlClient) MoveSessionWorkspace(ctx context.Context, in *MoveSessionWorkspaceRequest, opts ...grpc.CallOption) (*CommandReceipt, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CommandReceipt)
+	err := c.cc.Invoke(ctx, SessionControl_MoveSessionWorkspace_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *sessionControlClient) CloseSession(ctx context.Context, in *CloseSessionRequest, opts ...grpc.CallOption) (*CommandReceipt, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(CommandReceipt)
@@ -420,6 +432,7 @@ type SessionControlServer interface {
 	UpdateSettings(context.Context, *UpdateSettingsRequest) (*CommandReceipt, error)
 	RenameSession(context.Context, *RenameSessionRequest) (*CommandReceipt, error)
 	DeleteSession(context.Context, *DeleteSessionRequest) (*CommandReceipt, error)
+	MoveSessionWorkspace(context.Context, *MoveSessionWorkspaceRequest) (*CommandReceipt, error)
 	CloseSession(context.Context, *CloseSessionRequest) (*CommandReceipt, error)
 	DetachSession(context.Context, *DetachSessionRequest) (*CommandReceipt, error)
 	ReportObservedStatus(context.Context, *ReportObservedStatusRequest) (*SessionReceipt, error)
@@ -467,6 +480,9 @@ func (UnimplementedSessionControlServer) RenameSession(context.Context, *RenameS
 }
 func (UnimplementedSessionControlServer) DeleteSession(context.Context, *DeleteSessionRequest) (*CommandReceipt, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteSession not implemented")
+}
+func (UnimplementedSessionControlServer) MoveSessionWorkspace(context.Context, *MoveSessionWorkspaceRequest) (*CommandReceipt, error) {
+	return nil, status.Error(codes.Unimplemented, "method MoveSessionWorkspace not implemented")
 }
 func (UnimplementedSessionControlServer) CloseSession(context.Context, *CloseSessionRequest) (*CommandReceipt, error) {
 	return nil, status.Error(codes.Unimplemented, "method CloseSession not implemented")
@@ -702,6 +718,24 @@ func _SessionControl_DeleteSession_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
+func _SessionControl_MoveSessionWorkspace_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MoveSessionWorkspaceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SessionControlServer).MoveSessionWorkspace(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SessionControl_MoveSessionWorkspace_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SessionControlServer).MoveSessionWorkspace(ctx, req.(*MoveSessionWorkspaceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _SessionControl_CloseSession_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(CloseSessionRequest)
 	if err := dec(in); err != nil {
@@ -842,6 +876,10 @@ var SessionControl_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteSession",
 			Handler:    _SessionControl_DeleteSession_Handler,
+		},
+		{
+			MethodName: "MoveSessionWorkspace",
+			Handler:    _SessionControl_MoveSessionWorkspace_Handler,
 		},
 		{
 			MethodName: "CloseSession",

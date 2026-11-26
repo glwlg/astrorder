@@ -14,9 +14,11 @@ import (
 	"sync"
 	"time"
 
+	"astrorder.dev/app-server/internal/agentaccounts"
 	"astrorder.dev/app-server/internal/agyaccounts"
 	"astrorder.dev/app-server/internal/auth"
 	"astrorder.dev/app-server/internal/daemonclient"
+	"astrorder.dev/app-server/internal/envtarget"
 	"astrorder.dev/app-server/internal/store"
 	sessiondv1 "astrorder.dev/contracts/gen/go/astrorder/sessiond/v1"
 	"google.golang.org/grpc/codes"
@@ -127,33 +129,42 @@ type Options struct {
 	SSHBinary       string
 	// RemoteExecutable resolves remote codex/grok CLI paths before attach.
 	RemoteExecutable RemoteExecutableResolver
+	// EnvResolver opens local/SSH target environments for platform account vaults.
+	EnvResolver AccountEnvOpener
+	// PlatformQuota overrides isolated Codex/Grok quota probing in tests.
+	PlatformQuota PlatformQuotaQuerier
 	// Hooks installs native Codex hooks; nil keeps the observer endpoint inert.
 	Hooks HookInstaller
 }
 
 // Handler manages /api/v1/connections, /api/v1/environments, and /api/v1/agents endpoints.
 type Handler struct {
-	store          *store.Store
-	client         *daemonclient.Client
-	authorizer     *auth.Authenticator
-	publisher      Publisher
-	versioner      VersionExecutor
-	upgrader       UpgradeExecutor
-	osProber       OSProber
-	sshBinary      string
-	executables    RemoteExecutableResolver
-	hooks          HookInstaller
-	discovery      *discoveryCache
-	restoreMu      sync.Mutex
-	agyVault       *agyaccounts.Vault
-	agyReadCache   agyReadCache
-	autoOnce       sync.Once
-	recovery       sessionRecovery
-	upgradeMu      sync.Mutex
-	upgradeJobs    map[string]*upgradeJob
-	upgradeContext context.Context
-	upgradeCancel  context.CancelFunc
-	upgradeWG      sync.WaitGroup
+	store             *store.Store
+	client            *daemonclient.Client
+	authorizer        *auth.Authenticator
+	publisher         Publisher
+	versioner         VersionExecutor
+	upgrader          UpgradeExecutor
+	osProber          OSProber
+	sshBinary         string
+	executables       RemoteExecutableResolver
+	envResolver       AccountEnvOpener
+	platformQuota     PlatformQuotaQuerier
+	hooks             HookInstaller
+	discovery         *discoveryCache
+	restoreMu         sync.Mutex
+	agyVault          *agyaccounts.Vault
+	agyReadCache      agyReadCache
+	codexVault        *agentaccounts.Vault
+	grokVault         *agentaccounts.Vault
+	platformReadCache platformReadCache
+	autoOnce          sync.Once
+	recovery          sessionRecovery
+	upgradeMu         sync.Mutex
+	upgradeJobs       map[string]*upgradeJob
+	upgradeContext    context.Context
+	upgradeCancel     context.CancelFunc
+	upgradeWG         sync.WaitGroup
 }
 
 // NewHandler creates a new connections HTTP handler.
@@ -177,6 +188,10 @@ func NewHandler(opts Options) (*Handler, error) {
 	if executables == nil {
 		executables = &NativeRemoteExecutableResolver{SSHBinary: opts.SSHBinary}
 	}
+	envResolver := opts.EnvResolver
+	if envResolver == nil {
+		envResolver = &envtarget.Resolver{Store: opts.Store}
+	}
 	upgradeContext, upgradeCancel := context.WithCancel(context.Background())
 	return &Handler{
 		upgradeJobs:    make(map[string]*upgradeJob),
@@ -184,6 +199,8 @@ func NewHandler(opts Options) (*Handler, error) {
 		upgradeCancel:  upgradeCancel,
 		store:          opts.Store,
 		agyVault:       agyaccounts.New(opts.Store.Path() + ".agy-accounts"),
+		codexVault:     agentaccounts.NewVault(opts.Store.Path()+".codex-accounts", "Codex", agentaccounts.CodexIdentity),
+		grokVault:      agentaccounts.NewVault(opts.Store.Path()+".grok-accounts", "Grok", agentaccounts.GrokIdentity),
 		client:         opts.Client,
 		authorizer:     opts.Authorizer,
 		publisher:      opts.Publisher,
@@ -192,6 +209,8 @@ func NewHandler(opts Options) (*Handler, error) {
 		osProber:       osProber,
 		sshBinary:      opts.SSHBinary,
 		executables:    executables,
+		envResolver:    envResolver,
+		platformQuota:  opts.PlatformQuota,
 		hooks:          opts.Hooks,
 		discovery:      newDiscoveryCache(),
 	}, nil
@@ -200,7 +219,7 @@ func NewHandler(opts Options) (*Handler, error) {
 // Matches checks if the method and path match the connections/environments/agents routes.
 func Matches(method, path string) bool {
 	clean := strings.TrimRight(path, "/")
-	if matchesAgyAccounts(clean) {
+	if matchesAgyAccounts(clean) || matchesPlatformAccounts(clean) {
 		return true
 	}
 	if clean == "/api/v1/agents" {
@@ -348,7 +367,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimRight(r.URL.Path, "/")
 	// Serialize user connection changes with automatic reconciliation so a
 	// confirmed disconnect cannot be overtaken by an already queued attach.
-	if r.Method != http.MethodGet && (path == agyAccountsPath || strings.HasPrefix(path, "/api/v1/connections/") ||
+	if r.Method != http.MethodGet && (path == agyAccountsPath || matchesPlatformAccounts(path) || strings.HasPrefix(path, "/api/v1/connections/") ||
 		strings.HasPrefix(path, "/api/v1/environments/") && strings.Contains(path, "/agents/")) {
 		h.restoreMu.Lock()
 		defer h.restoreMu.Unlock()
@@ -356,6 +375,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case matchesAgyAccounts(path):
 		h.handleAgyAccounts(w, r, path)
+	case matchesPlatformAccounts(path):
+		h.handlePlatformAccounts(w, r, path)
 	// Agents
 	case r.Method == http.MethodGet && path == "/api/v1/agents":
 		h.handleListAgents(w, r)

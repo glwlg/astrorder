@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../../api/client'
 import type { Agent, Session } from '../../domain/types'
 import { useAstrorderStore } from '../../state/store'
-import { agyAccountsApi } from '../agentAccounts/agyAccountsApi'
+import { agyAccountsApi, codexAccountsApi } from '../agentAccounts/agyAccountsApi'
 import { MobileWorkspace } from './MobileWorkspace'
 
 const clients: QueryClient[] = []
@@ -144,5 +144,14 @@ describe('Mobile account switching', () => {
     // Switching machine dropdown switches target cleanly
     fireEvent.change(select, { target: { value: 'local' } })
     await waitFor(() => expect(within(list).getByText('主工作号').closest('article')).toHaveTextContent('当前使用'))
+
+    // Switching platform tab to Codex loads Codex targets and accounts
+    vi.spyOn(codexAccountsApi, 'targets').mockResolvedValue({ items: [{ id: 'local', name: 'Codex · 本机' }] })
+    vi.spyOn(codexAccountsApi, 'accounts').mockResolvedValue({ items: [{ id: 'c-1', name: 'Codex 账号' }] })
+    vi.spyOn(codexAccountsApi, 'targetState').mockResolvedValue({ current_account_id: 'c-1', quota_supported: true })
+    const codexTab = within(sheet).getByRole('tab', { name: 'Codex' })
+    fireEvent.click(codexTab)
+    const codexList = await within(sheet).findByRole('list', { name: 'Codex 账号列表' })
+    expect(within(codexList).getByText('Codex 账号')).toBeVisible()
   })
 })

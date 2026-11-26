@@ -153,6 +153,121 @@ func TestAntigravityAsyncQuestionAndAwaitingInputSuppressFalseCompletion(t *test
 	}
 }
 
+func TestAntigravitySteerHandoffSuppressesPrematureCompletionNotice(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name      string
+		agentID   string
+		agentKind string
+		steerAct  string
+	}{
+		{"local send steer", "agy-local", "antigravity", "send"},
+		{"ssh enqueue steer", "agy-ssh", "antigravity-ssh", "enqueue"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := testStore(t)
+			if _, err := st.UpsertAgent(ctx, map[string]any{"id": tc.agentID, "kind": tc.agentKind, "name": "Antigravity", "status": "connected"}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := st.UpsertSession(ctx, map[string]any{"id": "s-steer", "agent_id": tc.agentID, "title": "功能迭代", "status": "running", "updated_at": time.Now().UTC().Format(time.RFC3339Nano)}); err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := st.CreateCommand(ctx, map[string]any{"id": "cmd-1", "agent_id": tc.agentID, "session_id": "s-steer", "action": "send", "text": "初始任务"}, "accepted"); err != nil {
+				t.Fatal(err)
+			}
+			// User sends a steering/guidance message while cmd-1 is running (starts as received, then accepted).
+			if _, _, err := st.CreateCommand(ctx, map[string]any{"id": "cmd-2", "agent_id": tc.agentID, "session_id": "s-steer", "action": tc.steerAct, "text": "引导消息"}, "received"); err != nil {
+				t.Fatal(err)
+			}
+
+			// Prompt #1 immediately resolves completed on handoff while cmd-2 is still received.
+			if _, err := st.SetCommandState(ctx, tc.agentID, "s-steer", "cmd-1", "completed", nil, false); err != nil {
+				t.Fatal(err)
+			}
+			handoffNotices, err := Events(ctx, st.DB(), []store.Event{{
+				ID: "ev-handoff-1", Type: "command.upsert", AgentID: tc.agentID, SessionID: "s-steer",
+				Data: map[string]any{"id": "cmd-1", "action": "send", "state": "completed"},
+			}})
+			if err != nil || len(handoffNotices) != 0 {
+				t.Fatalf("expected no completion notice during steer handoff (cmd-2 received), got %#v err=%v", handoffNotices, err)
+			}
+
+			// Still suppressed when cmd-2 has transitioned to accepted.
+			if _, err := st.SetCommandState(ctx, tc.agentID, "s-steer", "cmd-2", "accepted", nil, false); err != nil {
+				t.Fatal(err)
+			}
+			handoffAccepted, err := Events(ctx, st.DB(), []store.Event{{
+				ID: "ev-handoff-2", Type: "command.upsert", AgentID: tc.agentID, SessionID: "s-steer",
+				Data: map[string]any{"id": "cmd-1", "action": "send", "state": "completed"},
+			}})
+			if err != nil || len(handoffAccepted) != 0 {
+				t.Fatalf("expected no completion notice during steer handoff (cmd-2 accepted), got %#v err=%v", handoffAccepted, err)
+			}
+
+			// A separate unstarted queued draft does not block genuine completion of the final steered prompt.
+			if _, _, err := st.CreateCommand(ctx, map[string]any{"id": "cmd-queued", "agent_id": tc.agentID, "session_id": "s-steer", "action": "enqueue", "text": "后续排队"}, "queued"); err != nil {
+				t.Fatal(err)
+			}
+
+			// Final steered prompt cmd-2 genuinely finishes (sessions.status is still "running" until the next session.upsert frame).
+			if _, err := st.SetCommandState(ctx, tc.agentID, "s-steer", "cmd-2", "completed", nil, false); err != nil {
+				t.Fatal(err)
+			}
+			finalNotices, err := Events(ctx, st.DB(), []store.Event{{
+				ID: "ev-final", Type: "command.upsert", AgentID: tc.agentID, SessionID: "s-steer",
+				Data: map[string]any{"id": "cmd-2", "action": tc.steerAct, "state": "completed"},
+			}})
+			if err != nil || len(finalNotices) != 1 || finalNotices[0].Data["kind"] != "task_completed" || finalNotices[0].Data["title"] != "会话已完成" {
+				t.Fatalf("expected exactly one final completion notice, got %#v err=%v", finalNotices, err)
+			}
+
+			// Cancelling a queued draft must not fire task_failed ("会话未完成").
+			cancelNotices, err := Events(ctx, st.DB(), []store.Event{{
+				ID: "ev-cancel-q", Type: "command.upsert", AgentID: tc.agentID, SessionID: "s-steer",
+				Data: map[string]any{"id": "cmd-queued", "action": "enqueue", "state": "cancelled"},
+			}})
+			if err != nil || len(cancelNotices) != 0 {
+				t.Fatalf("expected no failure notice when cancelling queued draft, got %#v err=%v", cancelNotices, err)
+			}
+		})
+	}
+}
+
+func TestAntigravityFailedSteerWhileOriginalActiveSuppressesFalseFailure(t *testing.T) {
+	ctx := context.Background()
+	st := testStore(t)
+	if _, err := st.UpsertAgent(ctx, map[string]any{"id": "agy", "kind": "antigravity", "name": "Antigravity", "status": "connected"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.UpsertSession(ctx, map[string]any{"id": "s-fail", "agent_id": "agy", "title": "功能迭代", "status": "running", "updated_at": time.Now().UTC().Format(time.RFC3339Nano)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := st.CreateCommand(ctx, map[string]any{"id": "cmd-orig", "agent_id": "agy", "session_id": "s-fail", "action": "send", "text": "原任务"}, "accepted"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := st.CreateCommand(ctx, map[string]any{"id": "cmd-steer", "agent_id": "agy", "session_id": "s-fail", "action": "send", "text": "失败引导"}, "failed"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Failed steer while original turn is still running must not announce session failure.
+	notices, err := Events(ctx, st.DB(), []store.Event{{
+		ID: "ev-steer-fail", Type: "command.upsert", AgentID: "agy", SessionID: "s-fail",
+		Data: map[string]any{"id": "cmd-steer", "action": "send", "state": "failed"},
+	}})
+	if err != nil || len(notices) != 0 {
+		t.Fatalf("expected no failure notice while original prompt is active, got %#v err=%v", notices, err)
+	}
+
+	// Explicit superseded/steered flag also suppresses notices.
+	supersededNotices, err := Events(ctx, st.DB(), []store.Event{{
+		ID: "ev-superseded", Type: "command.upsert", AgentID: "agy", SessionID: "s-fail",
+		Data: map[string]any{"id": "cmd-orig", "action": "send", "state": "completed", "superseded": true},
+	}})
+	if err != nil || len(supersededNotices) != 0 {
+		t.Fatalf("expected no notice for superseded command, got %#v err=%v", supersededNotices, err)
+	}
+}
+
 func browserSubscription(t *testing.T) subscription {
 	t.Helper()
 	key, err := ecdh.P256().GenerateKey(rand.Reader)

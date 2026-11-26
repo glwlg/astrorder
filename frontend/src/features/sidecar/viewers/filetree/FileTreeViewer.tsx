@@ -20,10 +20,13 @@ import {
   IconFolder,
   IconFolderOpen,
   IconFolderPlus,
+  IconMovie,
+  IconMusic,
   IconPhoto,
   IconPresentation,
   IconRefresh,
   IconSearch,
+  IconSubtitles,
   IconTrash,
   IconUpload,
   IconX,
@@ -53,6 +56,15 @@ function renderFileIcon(name: string) {
   }
   if (lower.endsWith('.md') || lower.endsWith('.markdown') || lower.endsWith('.txt')) {
     return <IconFileText size={14} color="#475569" />
+  }
+  if (/\.(mp4|m4v|webm|mov|mkv|ogv)$/i.test(lower)) {
+    return <IconMovie size={14} color="#4f46e5" />
+  }
+  if (/\.(wav|mp3|m4a|ogg|flac|aac|opus)$/i.test(lower)) {
+    return <IconMusic size={14} color="#0d9488" />
+  }
+  if (/\.(srt|vtt)$/i.test(lower)) {
+    return <IconSubtitles size={14} color="#d97706" />
   }
   if (/\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i.test(lower)) {
     return <IconPhoto size={14} color="#7c3aed" />

@@ -395,8 +395,8 @@ func TestMCPIsolationAndRejection(t *testing.T) {
 	if tools := Tools(); len(tools) != 0 {
 		t.Fatalf("expected no MCP tools, got %d", len(tools))
 	}
-	if len(AllCapabilities) != 42 {
-		t.Fatalf("expected 42 HTTP capabilities, got %d", len(AllCapabilities))
+	if len(AllCapabilities) != 51 {
+		t.Fatalf("expected 51 HTTP capabilities, got %d", len(AllCapabilities))
 	}
 
 	// 2. Calling sessions.delegate over MCP tools/call must be rejected

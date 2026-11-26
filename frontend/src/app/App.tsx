@@ -45,6 +45,7 @@ const AnalyticsPage = lazyNamed(() => import('../features/analytics/AnalyticsPag
 const BackupsPage = lazyNamed(() => import('../features/backups/BackupsPage'), 'BackupsPage')
 const DigestPage = lazyNamed(() => import('../features/digest/DigestPage'), 'DigestPage')
 const MeetingsPage = lazyNamed(() => import('../features/meetings/MeetingsPage'), 'MeetingsPage')
+const BotsPage = lazyNamed(() => import('../features/bots/BotsPage'), 'BotsPage')
 const IntegrationPage = lazyNamed(() => import('../features/integrations/IntegrationPage'), 'IntegrationPage')
 const AgentAccountsLayout = lazyNamed(() => import('../features/agentAccounts/AgentAccountsLayout'), 'AgentAccountsLayout')
 const UnavailablePlatformPage = lazyNamed(() => import('../features/agentAccounts/UnavailablePlatformPage'), 'UnavailablePlatformPage')
@@ -189,6 +190,7 @@ function AuthenticatedApp() {
         <Route index element={<Navigate to="/chat" replace />} />
         <Route path="chat" element={<ChatPage />} />
         <Route path="chat/:sessionId" element={<ChatPage />} />
+        <Route path="bots" element={<Suspense fallback={<RouteSuspenseFallback />}><BotsPage /></Suspense>} />
         <Route path="inbox" element={<Suspense fallback={<RouteSuspenseFallback />}><ActionInboxPage /></Suspense>} />
         <Route path="digest" element={digestEnabled ? <Suspense fallback={<RouteSuspenseFallback />}><DigestPage /></Suspense> : <Navigate to="/chat" replace />} />
         <Route path="meetings" element={meetingsEnabled ? <Suspense fallback={<RouteSuspenseFallback />}><MeetingsPage /></Suspense> : <Navigate to="/chat" replace />} />

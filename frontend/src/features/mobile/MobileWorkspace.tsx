@@ -116,7 +116,7 @@ import { useActionInbox } from '../inbox/useActionInbox'
 import { KernelManagementPanel } from './KernelManagementPanel'
 import { MobileAccountsPanel } from './MobileAccountsPanel'
 import { useMobileVisualViewport } from './useMobileVisualViewport'
-import { AgyQuotaRefreshProvider, agySessionEnvironment } from '../agentAccounts/AgyQuotaRefreshProvider'
+import { AgyQuotaRefreshProvider, sessionAccountTarget } from '../agentAccounts/AgyQuotaRefreshProvider'
 import './mobile.css'
 import './mobileParity.css'
 import './mobileConnections.css'
@@ -344,7 +344,7 @@ export function MobileWorkspace() {
     if (withNext.length === 0) return ''
     return formatNextRunChip(withNext[0].next_run_at)
   }, [enabledSchedules])
-  const agyEnvironment = agySessionEnvironment(selected ?? undefined, selectedAgent)
+  const accountTarget = sessionAccountTarget(selected ?? undefined, selectedAgent)
   const modelReadOnly = readOnly || sessionModel.data?.model_read_only === true
   const reasoningReadOnly = modelReadOnly || sessionModel.data?.reasoning_read_only === true
   const messages = resources.visibleMessages
@@ -1233,7 +1233,7 @@ export function MobileWorkspace() {
       || null
   }
 
-  return <AgyQuotaRefreshProvider sessionEnvironment={agyEnvironment}><div ref={workspaceRef} className={`mobile-workspace${isGroupRoute ? ' m-groups-workspace' : ''}`} data-mobile-shell="independent" data-mobile-mode={isGroupRoute ? 'groups' : 'sessions'} data-sheet={sheet || undefined} data-queue-drop={queueLift?.zone || undefined} onContextMenuCapture={(event) => suppressNativeHold(event.nativeEvent)} onTouchStartCapture={handleWorkspaceTouchStart} onTouchMoveCapture={handleWorkspaceTouchMove} onTouchEndCapture={handleWorkspaceTouchEnd} onTouchCancelCapture={() => { edgeTouch.current = null }}>
+  return <AgyQuotaRefreshProvider sessionEnvironment={accountTarget?.environment ?? ''} sessionPlatform={accountTarget?.platform ?? 'antigravity'}><div ref={workspaceRef} className={`mobile-workspace${isGroupRoute ? ' m-groups-workspace' : ''}`} data-mobile-shell="independent" data-mobile-mode={isGroupRoute ? 'groups' : 'sessions'} data-sheet={sheet || undefined} data-queue-drop={queueLift?.zone || undefined} onContextMenuCapture={(event) => suppressNativeHold(event.nativeEvent)} onTouchStartCapture={handleWorkspaceTouchStart} onTouchMoveCapture={handleWorkspaceTouchMove} onTouchEndCapture={handleWorkspaceTouchEnd} onTouchCancelCapture={() => { edgeTouch.current = null }}>
     {addProjectOpened && <AddProjectModal opened={addProjectOpened} onClose={() => setAddProjectOpened(false)} agents={agents} />}
     {createOpened && <NewSessionDialog agents={agents} project={createProject} initialAgentId={agentFilter !== 'all' ? agentFilter : undefined} onClose={() => setCreateOpened(false)} onCreated={session => { setSearch(''); select(session) }} />}
     {createGroupOpened && <CreateBotGroupDialog agents={agents} opened={createGroupOpened} onClose={() => setCreateGroupOpened(false)} onCreated={created => { upsertGroupInCache(created); setCreateGroupOpened(false); setGroupSearch(''); selectGroup(created) }} />}
@@ -1279,7 +1279,7 @@ export function MobileWorkspace() {
             <button className="m-model-chip" aria-label="选择会话模型" title={sessionModel.label} onClick={() => void openModels()}>
               <IconCpu size={13} /><span>{mobileModelChipText}</span>
             </button>
-            <button className="m-usage-chip" aria-label="上下文用量" title={sessionUsage.data?.source === 'native_last_request' ? '原生记录的上次请求输入用量' : '当前上下文用量'} onClick={() => setSheet('status')}>{sessionUsage.data ? sessionUsage.data.context_available === false ? '上下文未取得' : sessionUsage.data.context_window > 0 ? `${(sessionUsage.data.last_input_tokens / 1000).toFixed(1)}k / ${(sessionUsage.data.context_window / 1000).toFixed(0)}k` : `${(sessionUsage.data.last_input_tokens / 1000).toFixed(1)}k` : sessionUsage.isError ? '用量暂不可读' : '读取用量…'}</button>
+            <button className="m-usage-chip" aria-label="上下文用量" title={`${sessionUsage.data?.source === 'native_last_request' ? '原生记录的上次请求输入用量' : '当前上下文用量'}${sessionUsage.data?.speed && sessionUsage.data.speed > 0 ? ` · ${Number(sessionUsage.data.speed.toFixed(1))} tok/s` : ''}`} onClick={() => setSheet('status')}>{sessionUsage.data ? sessionUsage.data.context_available === false ? '上下文未取得' : sessionUsage.data.context_window > 0 ? `${(sessionUsage.data.last_input_tokens / 1000).toFixed(1)}k / ${(sessionUsage.data.context_window / 1000).toFixed(0)}k` : `${(sessionUsage.data.last_input_tokens / 1000).toFixed(1)}k` : sessionUsage.isError ? '用量暂不可读' : '读取用量…'}</button>
             {enabledSchedules.length > 0 && (
               <button
                 className="m-sched-chip"
@@ -1304,7 +1304,7 @@ export function MobileWorkspace() {
             {goal && <Menu.Item leftSection={<IconNotes size={17} />} onClick={() => setSheet('goal')}>目标管理</Menu.Item>}
             <Menu.Item leftSection={<IconDeviceDesktop size={17} />} onClick={openWorkbench}>工作区</Menu.Item>
             {!isOfficeMode && selected.workspace && <Menu.Item leftSection={<IconHistory size={17} />} onClick={() => { setFocusedCheckpointId(null); setSheet('checkpoints') }}>代码检查点{sessionCheckpoints.items.length > 0 ? ` (${sessionCheckpoints.items.length})` : ''}</Menu.Item>}
-            {agentAccountsPluginEnabled && agyEnvironment && <Menu.Item leftSection={<IconSwitchHorizontal size={17} />} onClick={() => setSheet('accounts')}>账号切换</Menu.Item>}
+            {agentAccountsPluginEnabled && accountTarget && <Menu.Item leftSection={<IconSwitchHorizontal size={17} />} onClick={() => setSheet('accounts')}>账号切换</Menu.Item>}
             {blackboardPluginEnabled && <Menu.Item leftSection={<IconChalkboard size={17} />} onClick={() => setSheet('blackboard')}>黑板</Menu.Item>}
             {browserPluginEnabled && <Menu.Item leftSection={<IconWorld size={17} />} onClick={() => setSheet('browser')}>浏览器镜像</Menu.Item>}
             <Menu.Item leftSection={<IconEdit size={17} />} onClick={() => openRename(selected)}>重命名</Menu.Item>
@@ -1335,14 +1335,14 @@ export function MobileWorkspace() {
       </div>
       {goal && <button className={`m-goal-summary is-${goal.tone}`} aria-label="目标管理" title={goalSupported ? '管理原生目标' : '查看原生目标'} onClick={() => setSheet('goal')}><IconNotes size={15} /><span>{`${goal.label} · ${goal.title}`}</span></button>}
       {!!visibleTasks.length && <button className="m-task-summary" aria-label="任务与子代理" onClick={() => setSheet('tasks')}>任务与子代理 · {activeTasks.length} 项活动 / {visibleTasks.length} 项记录</button>}
-      <MobileTranscript session={selected} activityBreaks={resources.activityBreaks} readOnly={readOnly} messages={messages} commands={commands} approvals={approvals} onApproval={(approval, action) => void handleApproval(approval, action)} busy={busy || liveActive} loadOlder={() => resources.messages.fetchNextPage()} hasOlder={!!resources.messages.hasNextPage} loadingOlder={resources.messages.isFetchingNextPage} onMessageAction={anchor => setMessageAction({ ...anchor, sessionKey: key })} onImage={openImagePreview} onVideo={openVideoPreview} onFile={openFile} onSqlOpen={openSqlSnippet} workspace={selected?.workspace} connectionId={selected?.connection_id} onSwipe={switchSession} onSwipePreview={setSessionDrag} checkpoints={!isOfficeMode ? sessionCheckpoints.items : []} onOpenCheckpoint={!isOfficeMode ? (cp: SessionCheckpoint) => { setFocusedCheckpointId(cp.id); setSheet('checkpoints') } : undefined} highlightMessageId={new URLSearchParams(location.search).get('message_id')} />
+      <MobileTranscript session={selected} activityBreaks={resources.activityBreaks} readOnly={readOnly} messages={messages} commands={commands} approvals={approvals} onApproval={(approval, action) => void handleApproval(approval, action)} busy={busy || liveActive} loading={resources.messages.isLoading || resources.messages.isPending || (resources.messages.isFetching && messages.length === 0)} historyResolved={resources.messages.isSuccess || messages.length > 0} loadOlder={() => resources.messages.fetchNextPage()} hasOlder={!!resources.messages.hasNextPage} loadingOlder={resources.messages.isFetchingNextPage} onMessageAction={anchor => setMessageAction({ ...anchor, sessionKey: key })} onImage={openImagePreview} onVideo={openVideoPreview} onFile={openFile} onSqlOpen={openSqlSnippet} workspace={selected?.workspace} connectionId={selected?.connection_id} onSwipe={switchSession} onSwipePreview={setSessionDrag} checkpoints={!isOfficeMode ? sessionCheckpoints.items : []} onOpenCheckpoint={!isOfficeMode ? (cp: SessionCheckpoint) => { setFocusedCheckpointId(cp.id); setSheet('checkpoints') } : undefined} highlightMessageId={new URLSearchParams(location.search).get('message_id')} />
     </MobileSessionDeck> : <div className="m-empty">从左上角选择会话，或新建会话</div>}</main>
     <section ref={composer} className="m-composer-float">
       {selected && <SessionConnectionNotice key={`connection:${key}`} session={selected} error={(resources.messages.error || resources.commands.error || resources.tasks.error) ? messageError(resources.messages.error || resources.commands.error || resources.tasks.error) : undefined} onRetry={() => Promise.all([resources.messages.refetch(), resources.commands.refetch(), resources.tasks.refetch()])} />}
       {visibleError && (
         <InlineNotice alert title={parsedGatewayError?.isKnownGatewayIssue ? parsedGatewayError.title : '请求未完成'} onClose={() => { setSessionError(null); setSubmittedCommandId(null) }}>
           <div>{parsedGatewayError?.description || visibleError}</div>
-          {parsedGatewayError?.type === "quota" && (parsedGatewayError.recommendedModel || agyEnvironment) && selected && (
+          {parsedGatewayError?.type === "quota" && (parsedGatewayError.recommendedModel || accountTarget) && selected && (
             <div className="m-gateway-alert-actions">
               {parsedGatewayError.recommendedModel && (
                 <>
@@ -1368,7 +1368,7 @@ export function MobileWorkspace() {
                   </button>
                 </>
               )}
-              {agyEnvironment && (
+              {accountTarget && (
                 <button
                   type="button"
                   className="m-gateway-rec-btn"
@@ -1436,7 +1436,7 @@ export function MobileWorkspace() {
     {!isGroupRoute && messageAction?.sessionKey === key && <MobileMessageMenu anchor={messageAction} onClose={closeMessageMenu} onCopy={() => void copy(messageAction.text)} onQuote={() => { setQuote(messageAction.text); textarea.current?.focus({ preventScroll: true }) }} />}
     {sheet && <div className={`m-backdrop ${sheet === 'sessions' ? 'm-session-backdrop' : ''}`} onClick={() => setSheet(null)} onTouchStartCapture={handleDrawerTouchStart} onTouchMoveCapture={handleDrawerTouchMove} onTouchEndCapture={handleDrawerTouchEnd} onTouchCancelCapture={handleDrawerTouchCancel}><section ref={node => { drawerSheet.current = node }} style={sheet === 'sessions' && drawerOffset !== null ? { transform: `translate3d(${drawerOffset}px, 0, 0)`, transition: drawerSettling ? 'transform .22s cubic-bezier(.2,.8,.2,1)' : 'none', animation: 'none' } : undefined} className={`m-sheet ${sheet === 'connections' ? 'm-connections-sheet' : sheet === 'accounts' ? 'm-accounts-sheet' : sheet === 'sessions' ? 'm-session-sheet' : sheet === 'blackboard' || sheet === 'browser' ? 'm-blackboard-dialog' : ''}`} role="dialog" aria-label={sheet === 'sessions' ? (drawerTab === 'groups' ? '群聊列表' : '会话列表') : sheet === 'inbox' ? '待办收件箱' : sheet === 'checkpoints' ? '代码检查点' : sheet === 'accounts' ? '账号切换' : sheet === 'swarm' ? 'Swarm 团队' : sheet === 'schedules' ? '定时任务' : sheet === 'blackboard' ? '会话黑板' : sheet === 'browser' ? '浏览器镜像' : sheet === 'kernels' ? '内核管理' : '详情'} onClick={e => e.stopPropagation()} onTouchStart={handleDrawerTouchStart} onTouchMove={handleDrawerTouchMove} onTouchEnd={handleDrawerTouchEnd} onTouchCancel={handleDrawerTouchCancel}><div className="m-handle" /><header><h2>{sheet === 'sessions' ? (drawerTab === 'groups' ? '群聊' : '会话') : ({ inbox: '待我决策', checkpoints: '代码检查点', status: '运行状态', goal: '目标管理', tasks: '任务与子代理', task: '任务详情', swarm: 'Swarm 团队', schedules: '定时任务', models: '选择模型', connections: '连接管理', accounts: '账号切换', gateway: '模型网关', blackboard: '黑板', browser: '浏览器镜像', kernels: '内核管理' })[sheet]}</h2><div className="m-sheet-header-actions">{sheet === 'sessions' && drawerTab === 'sessions' && <><button aria-label="筛选" aria-pressed={filtersOpen} onClick={() => setFiltersOpen(open => !open)}><IconFilter size={18} /></button><button aria-label="新建项目" onClick={() => setAddProjectOpened(true)}><IconPlus size={20} /></button></>}{sheet === 'sessions' && drawerTab === 'groups' && <button aria-label="新建群聊" onClick={() => setCreateGroupOpened(true)}><IconPlus size={20} /></button>}{sheet === 'swarm' && <button aria-label="刷新 Swarm" onClick={() => void sessionSwarm.refetch()}><IconRefresh size={18} /></button>}<button aria-label="关闭面板" onClick={() => setSheet(null)}><IconX size={20} /></button></div></header>
       {sheet === 'connections' && <div className="m-sheet-body m-connections-body"><EnvironmentConnections embedded /></div>}
-      {sheet === 'accounts' && <div className="m-sheet-body m-accounts-body"><MobileAccountsPanel preferredEnvironment={agyEnvironment} /></div>}
+      {sheet === 'accounts' && <div className="m-sheet-body m-accounts-body"><MobileAccountsPanel preferredPlatform={accountTarget?.platform ?? 'antigravity'} preferredEnvironment={accountTarget?.environment ?? ''} /></div>}
       {sheet === 'kernels' && <div className="m-sheet-body"><KernelManagementPanel /></div>}
       {sheet === 'gateway' && <div className="m-sheet-body m-gateway-body"><UsageGatewaySettingsCard /></div>}
       {sheet === 'sessions' && groupsPluginEnabled && <div className="m-drawer-nav" role="tablist" aria-label="移动端模式切换" data-active-tab={drawerTab}>

@@ -1,5 +1,6 @@
 import {
   IconGitFork,
+  IconSearch,
   IconSparkles,
 } from '@tabler/icons-react'
 import { ClockCounterClockwiseIcon, ShieldCheckIcon, SidebarSimpleIcon, SlidersHorizontalIcon, SquaresFourIcon } from '../../components/workbenchIcons'
@@ -814,6 +815,16 @@ function ChatPageBody() {
                     </ActionIcon>
                   </Tooltip>
                 )}
+                <Tooltip label="搜索会话内容 (Ctrl+F)" position="bottom">
+                  <ActionIcon
+                    variant="subtle"
+                    size="sm"
+                    aria-label="搜索会话内容"
+                    onClick={() => window.dispatchEvent(new CustomEvent('astrorder:open-transcript-find'))}
+                  >
+                    <IconSearch size={18} aria-hidden="true" />
+                  </ActionIcon>
+                </Tooltip>
                 <Tooltip label="会话详情" position="bottom">
                   <ActionIcon className="chat-details-button" variant="subtle" size="sm" onClick={openDetails} aria-label="打开会话详情">
                     <SlidersHorizontalIcon size={22} aria-hidden="true" />
@@ -887,7 +898,8 @@ function ChatPageBody() {
             approvals={approvals}
             canApprove={agent?.capabilities.includes('approvals') === true}
             onApproval={handleApprovalCallback}
-            loading={resources.messages.isLoading || resources.commands.isLoading}
+            loading={resources.messages.isLoading || resources.commands.isLoading || resources.messages.isPending}
+            historyResolved={resources.messages.isSuccess || messages.length > 0}
             hasMoreHistory={Boolean(resources.messages.hasNextPage)}
             loadingOlder={resources.messages.isFetchingNextPage}
             onLoadOlder={handleLoadOlder}
@@ -903,6 +915,7 @@ function ChatPageBody() {
             checkpoints={!isOfficeMode && sessionCheckpoints.pluginEnabled ? sessionCheckpoints.items : []}
             onOpenCheckpoint={!isOfficeMode && sessionCheckpoints.pluginEnabled ? handleOpenCheckpoint : undefined}
             highlightMessageId={focusedMessageId || searchParams.get('message_id')}
+            enableFind
           />
           </PerfProfiler>
           <SessionComposerGate

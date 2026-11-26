@@ -346,6 +346,16 @@ func mediaContentTypeFallback(name, detected string) string {
 		return "audio/mp4"
 	case ".ogg":
 		return "audio/ogg"
+	case ".flac":
+		return "audio/flac"
+	case ".aac":
+		return "audio/aac"
+	case ".opus":
+		return "audio/opus"
+	case ".srt":
+		return "text/plain; charset=utf-8"
+	case ".vtt":
+		return "text/vtt; charset=utf-8"
 	}
 	if strings.TrimSpace(detected) != "" {
 		return detected

@@ -41,6 +41,19 @@ var recentOfficeExts = map[string]bool{
 	".tsv":      true,
 	".txt":      true,
 	".wps":      true,
+	".mp4":      true,
+	".m4v":      true,
+	".webm":     true,
+	".mov":      true,
+	".mkv":      true,
+	".wav":      true,
+	".mp3":      true,
+	".m4a":      true,
+	".ogg":      true,
+	".flac":     true,
+	".aac":      true,
+	".srt":      true,
+	".vtt":      true,
 }
 
 var skipScanDirs = map[string]bool{
@@ -365,6 +378,26 @@ func (h *Handler) extractOneSource(ctx context.Context, idx int, filePath, sessi
 		maxBytes = maxPptxBytes
 	case ".md", ".markdown":
 		out.Kind = "markdown"
+	case ".srt", ".vtt":
+		out.Kind = "subtitle"
+	case ".mp4", ".m4v", ".webm", ".mov", ".mkv", ".ogv":
+		out.Kind = "video"
+		sizeLabel := ""
+		if st, err := os.Stat(filePath); err == nil && !st.IsDir() && st.Size() > 0 {
+			sizeLabel = fmt.Sprintf("（大小 %.1f MB）", float64(st.Size())/(1024*1024))
+		}
+		out.Excerpt = fmt.Sprintf("（视频文件 `%s`%s，可在右侧视频审片台逐帧截帧引用、打点批注或结合同目录字幕/脚本进行分析修改）", filePath, sizeLabel)
+		out.CharCount = len([]rune(out.Excerpt))
+		return out
+	case ".wav", ".mp3", ".m4a", ".ogg", ".flac", ".aac", ".opus":
+		out.Kind = "audio"
+		sizeLabel := ""
+		if st, err := os.Stat(filePath); err == nil && !st.IsDir() && st.Size() > 0 {
+			sizeLabel = fmt.Sprintf("（大小 %.2f MB）", float64(st.Size())/(1024*1024))
+		}
+		out.Excerpt = fmt.Sprintf("（音频文件 `%s`%s，可在右侧音频试听器播放、A-B 循环核对或引用精确时间点）", filePath, sizeLabel)
+		out.CharCount = len([]rune(out.Excerpt))
+		return out
 	case ".pdf":
 		out.Kind = "pdf"
 		out.Excerpt = fmt.Sprintf("（PDF 文档 `%s`，可在对话中结合此路径深入查阅完整页面内容）", filePath)
@@ -408,6 +441,8 @@ func (h *Handler) extractOneSource(ctx context.Context, idx int, filePath, sessi
 			return out
 		}
 		text = pptxPreviewToText(preview)
+	case ".srt", ".vtt":
+		text = subtitleBytesToText(raw)
 	default:
 		text = strings.TrimSpace(string(raw))
 	}
@@ -421,6 +456,50 @@ func (h *Handler) extractOneSource(ctx context.Context, idx int, filePath, sessi
 		out.Excerpt = string(runes)
 	}
 	return out
+}
+
+func subtitleBytesToText(raw []byte) string {
+	cleaned := strings.TrimPrefix(string(raw), "\uFEFF")
+	cleaned = strings.ReplaceAll(cleaned, "\r\n", "\n")
+	cleaned = strings.ReplaceAll(cleaned, "\r", "\n")
+	blocks := strings.Split(cleaned, "\n\n")
+	var out strings.Builder
+	for _, block := range blocks {
+		rawLines := strings.Split(block, "\n")
+		lines := make([]string, 0, len(rawLines))
+		for _, l := range rawLines {
+			if t := strings.TrimSpace(l); t != "" {
+				lines = append(lines, t)
+			}
+		}
+		if len(lines) == 0 {
+			continue
+		}
+		upper := strings.ToUpper(lines[0])
+		if strings.HasPrefix(upper, "WEBVTT") || strings.HasPrefix(upper, "NOTE") || strings.HasPrefix(upper, "STYLE") {
+			continue
+		}
+		timingIdx := -1
+		for i := 0; i < len(lines) && i < 3; i++ {
+			if strings.Contains(lines[i], "-->") {
+				timingIdx = i
+				break
+			}
+		}
+		if timingIdx < 0 || timingIdx+1 >= len(lines) {
+			continue
+		}
+		startPart := strings.TrimSpace(strings.Split(lines[timingIdx], "-->")[0])
+		startPart = strings.ReplaceAll(startPart, ",", ".")
+		text := strings.Join(lines[timingIdx+1:], " ")
+		if text != "" {
+			out.WriteString(fmt.Sprintf("[%s] %s\n", startPart, text))
+		}
+	}
+	if out.Len() == 0 {
+		return strings.TrimSpace(cleaned)
+	}
+	return strings.TrimSpace(out.String())
 }
 
 func docxPreviewToText(p *DocxPreviewResponse) string {

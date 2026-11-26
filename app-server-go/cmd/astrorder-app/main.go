@@ -223,8 +223,8 @@ func runServer(ctx context.Context, cfg config.Config, ready io.Writer, logger *
 			<-projectionStopped
 		}()
 		startupTimeout := cfg.Daemon.RequestTimeout
-		if startupTimeout <= 0 {
-			startupTimeout = 10 * time.Second
+		if startupTimeout <= 0 || startupTimeout == 10*time.Second {
+			startupTimeout = 25 * time.Second
 		}
 		timer := time.NewTimer(startupTimeout)
 		defer timer.Stop()
@@ -233,6 +233,9 @@ func runServer(ctx context.Context, cfg config.Config, ready io.Writer, logger *
 		case projectionErr := <-projectionResult:
 			return fmt.Errorf("daemon projection startup: %w", projectionErr)
 		case <-timer.C:
+			if lastErr := eventProjection.LastError(); lastErr != nil {
+				return fmt.Errorf("daemon projection did not reach live-ready before startup timeout (last error: %w)", lastErr)
+			}
 			return errors.New("daemon projection did not reach live-ready before startup timeout")
 		case <-serverContext.Done():
 			return serverContext.Err()
@@ -333,7 +336,7 @@ func runServer(ctx context.Context, cfg config.Config, ready io.Writer, logger *
 			}
 		}()
 		toolchainHandler = toolchain.NewHandler(toolchainService, authorizer)
-		connHandler, err := connections.NewHandler(connections.Options{Store: st, Client: client, Authorizer: authorizer, Publisher: eventHub, Hooks: connections.NewNativeHookInstaller(hookResolver), RemoteExecutable: remoteExecutable})
+		connHandler, err := connections.NewHandler(connections.Options{Store: st, Client: client, Authorizer: authorizer, Publisher: eventHub, Hooks: connections.NewNativeHookInstaller(hookResolver), RemoteExecutable: remoteExecutable, EnvResolver: envResolver})
 		if err != nil {
 			return fmt.Errorf("configure connections: %w", err)
 		}

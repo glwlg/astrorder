@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { prepareWailsImeFix } from './wails-ime-fix.mjs'
+import { verifyFrontendDist } from './verify-frontend-dist.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const desktop = path.join(root, 'desktop-wails')
@@ -75,12 +76,17 @@ async function main() {
   // Must match scripts/desktop-wails.mjs: the shell embeds assets/bindings.
   run(wails, ['generate', 'bindings', '-b', '-i', '-names', '-d', 'assets/bindings', '.'], desktop, windowsEnv)
 
-  // 3. 构建前端
-  console.log('\n[3/7] 构建前端 React SPA...')
-  run(windows ? node : npm, windows ? [npm, 'run', 'build'] : ['run', 'build'], path.join(root, 'frontend'))
+  // 3. 构建桌面内嵌前端（直接输出到 desktop-wails/assets/app，不污染 frontend/dist）
+  console.log('\n[3/7] 构建桌面内嵌前端 React SPA...')
   const embeddedApp = path.join(desktop, 'assets', 'app')
   rmSync(embeddedApp, { recursive: true, force: true })
-  cpSync(path.join(root, 'frontend', 'dist'), embeddedApp, { recursive: true })
+  run(
+    windows ? node : npm,
+    windows ? [npm, 'run', 'build'] : ['run', 'build'],
+    path.join(root, 'frontend'),
+    { ...env, ASTRORDER_OUT_DIR: embeddedApp },
+  )
+  verifyFrontendDist(embeddedApp, { mode: 'desktop' })
 
   // 4. 编译 Wails 正式版 Astrorder.exe
   console.log('\n[4/7] 编译正式版 Wails 桌面客户端 Astrorder.exe...')
@@ -139,14 +145,16 @@ async function main() {
   // separate build without ASTRORDER_WAILS before entering the installer.
   const browserEnv = { ...env }
   delete browserEnv.ASTRORDER_WAILS
+  delete browserEnv.ASTRORDER_OUT_DIR
   run(windows ? node : npm, windows ? [npm, 'run', 'build'] : ['run', 'build'], path.join(root, 'frontend'), browserEnv)
-  if (!existsSync(path.join(root, 'frontend', 'dist', 'sw-astrorder.js'))) throw new Error('Browser PWA worker missing')
-  if (existsSync(path.join(embeddedApp, 'sw-astrorder.js'))) throw new Error('Desktop embeds a PWA worker')
+  verifyFrontendDist(path.join(root, 'frontend', 'dist'), { mode: 'browser' })
+  verifyFrontendDist(embeddedApp, { mode: 'desktop' })
 
   // 5.4 frontend/dist
   const frontDist = path.join(pkgDir, 'server', 'frontend', 'dist')
   mkdirSync(path.dirname(frontDist), { recursive: true })
   cpSync(path.join(root, 'frontend', 'dist'), frontDist, { recursive: true })
+  verifyFrontendDist(frontDist, { mode: 'browser' })
 
   // 5.5 favicon.ico
   const favDest = path.join(pkgDir, 'server', 'frontend', 'public', 'favicon.ico')

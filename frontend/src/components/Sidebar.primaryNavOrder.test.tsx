@@ -41,6 +41,7 @@ describe('Sidebar primary nav core ordering & drag reorder', () => {
   it('orders default primary nav by core workflow with office tools at the end', () => {
     expect(normalizePrimaryNavOrder(undefined)).toEqual([
       'chat',
+      'bots',
       'inbox',
       'monitor',
       'groups',
@@ -72,7 +73,7 @@ describe('Sidebar primary nav core ordering & drag reorder', () => {
         (el) => el.getAttribute('aria-label'),
       )
 
-    expect(getPrimaryLabels()).toEqual(['会话', '待办', '矩阵', '群聊', '统计', '备份', '账号', '复盘', '会议'])
+    expect(getPrimaryLabels()).toEqual(['会话', 'Bot', '待办', '矩阵', '群聊', '统计', '备份', '账号', '复盘', '会议'])
 
     const digestLink = screen.getByRole('link', { name: '复盘' })
     const inboxLink = screen.getByRole('link', { name: '待办' })
@@ -94,9 +95,10 @@ describe('Sidebar primary nav core ordering & drag reorder', () => {
     fireEvent.drop(inboxLink, { dataTransfer: dt, clientY: 110 })
     fireEvent.dragEnd(digestLink)
 
-    expect(getPrimaryLabels()).toEqual(['会话', '复盘', '待办', '矩阵', '群聊', '统计', '备份', '账号', '会议'])
+    expect(getPrimaryLabels()).toEqual(['会话', 'Bot', '复盘', '待办', '矩阵', '群聊', '统计', '备份', '账号', '会议'])
     expect(JSON.parse(localStorage.getItem('astrorder:sidebar-primary-nav-order') || '[]')).toEqual([
       'chat',
+      'bots',
       'digest',
       'inbox',
       'monitor',
@@ -115,6 +117,6 @@ describe('Sidebar primary nav core ordering & drag reorder', () => {
     fireEvent.dragOver(monitorLink, { dataTransfer: sessionDt })
     fireEvent.drop(monitorLink, { dataTransfer: sessionDt })
     expect(JSON.parse(localStorage.getItem('astrorder:monitor-sessions') || '[]')).toEqual(['codex::s-1'])
-    expect(getPrimaryLabels()).toEqual(['会话', '复盘', '待办', '矩阵', '群聊', '统计', '备份', '账号', '会议'])
+    expect(getPrimaryLabels()).toEqual(['会话', 'Bot', '复盘', '待办', '矩阵', '群聊', '统计', '备份', '账号', '会议'])
   })
 })

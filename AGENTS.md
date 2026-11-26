@@ -12,3 +12,4 @@
 - 用户通过系统托盘“小内核 → 更新小内核”手动激活，Agent 不执行小内核的停止、重启或更新。
 - “停止旧内核 → 替换文件 → 启动新内核”由独立控制器完成；星序进程及更新流程不得依赖 Agent 会话或其工具子进程存活。
 - 大内核可以独立发布、重启，必须保持小内核及其托管进程持续运行。
+- 同步 Web / PWA 前端静态资源到已安装目录必须通过完整性门禁（`astrorderctl sync` 或 `node scripts/verify-frontend-dist.mjs --mode browser <dist>`），核验 `index.html`、全部引用 `assets/*` 与 `sw-astrorder.js` 后原子替换，禁止直接拷贝未校验或桌面构建覆盖过的 `frontend/dist`。

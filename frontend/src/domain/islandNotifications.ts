@@ -7,6 +7,7 @@ const MAX_ISLAND_NOTIFICATIONS = 5
 let hostCount = 0
 let queue: EventNotification[] = []
 const listeners = new Set<() => void>()
+const hostListeners = new Set<() => void>()
 
 function emitChange(): void {
   for (const listener of listeners) {
@@ -14,15 +15,34 @@ function emitChange(): void {
   }
 }
 
+function emitHostChange(): void {
+  for (const listener of hostListeners) {
+    listener()
+  }
+}
+
 export function registerIslandNotificationHost(): () => void {
   hostCount += 1
+  emitHostChange()
   return () => {
     hostCount = Math.max(0, hostCount - 1)
+    emitHostChange()
   }
 }
 
 export function hasIslandNotificationHost(): boolean {
   return hostCount > 0
+}
+
+function subscribeHost(listener: () => void): () => void {
+  hostListeners.add(listener)
+  return () => {
+    hostListeners.delete(listener)
+  }
+}
+
+export function useHasIslandNotificationHost(): boolean {
+  return useSyncExternalStore(subscribeHost, hasIslandNotificationHost, hasIslandNotificationHost)
 }
 
 export function pushIslandNotification(notification: EventNotification): void {

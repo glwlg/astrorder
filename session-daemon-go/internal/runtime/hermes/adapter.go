@@ -419,6 +419,8 @@ func (a *Adapter) Command(ctx context.Context, req core.Request) (result core.Re
 		return a.handleRename(ctx, session, req)
 	case "session.delete":
 		return a.handleDelete(ctx, session)
+	case "session.move_workspace":
+		return a.handleMoveWorkspace(ctx, session, req)
 	case "session.close":
 		a.mu.Lock()
 		if session.Status != "idle" || session.sending || len(a.pending) != 0 || len(a.pendingApprovals) != 0 {

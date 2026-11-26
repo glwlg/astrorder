@@ -163,14 +163,19 @@ func Events(ctx context.Context, db queryer, events []store.Event) ([]store.Even
 		case "command.upsert":
 			// Antigravity reports its terminal turn through this receipt. Codex
 			// and Hermes also complete steering receipts before the turn ends.
-			if data["awaiting_input"] == true {
+			if data["awaiting_input"] == true || data["superseded"] == true || data["steered"] == true {
 				continue
 			}
 			turn = text(data, "id")
-			if turn == "" || (text(data, "action") != "send" && text(data, "action") != "enqueue") {
+			action := text(data, "action")
+			if turn == "" || (action != "send" && action != "enqueue") {
 				continue
 			}
-			switch text(data, "state") {
+			state := text(data, "state")
+			if action == "enqueue" && state == "cancelled" {
+				continue
+			}
+			switch state {
 			case "completed":
 				kind, title = "task_completed", "会话已完成"
 			case "failed", "cancelled":
@@ -198,6 +203,19 @@ func Events(ctx context.Context, db queryer, events []store.Event) ([]store.Even
 		if ephemeral || (event.Type == "command.upsert" && agentKind != "antigravity" && agentKind != "antigravity-ssh") ||
 			(event.Type == "hermes.command_complete" && (status == "running" || status == "waiting_approval")) {
 			continue
+		}
+		if event.Type == "command.upsert" {
+			// When steering a running Antigravity turn, agy resolves the prior prompt
+			// immediately on handoff while the steering command is still active
+			// (received/accepted/running). Suppress intermediate handoff receipts until
+			// no other send/enqueue command remains in flight for this session.
+			otherActive, err := hasOtherActiveTurnCommand(ctx, db, event.AgentID, event.SessionID, turn)
+			if err != nil {
+				return nil, err
+			}
+			if otherActive {
+				continue
+			}
 		}
 		if event.Type == "message.upsert" && (agentKind == "antigravity" || agentKind == "antigravity-ssh") {
 			title = "Antigravity 等待你的回答"
@@ -232,6 +250,19 @@ func Events(ctx context.Context, db queryer, events []store.Event) ([]store.Even
 		})
 	}
 	return notices, nil
+}
+
+func hasOtherActiveTurnCommand(ctx context.Context, db queryer, agentID, sessionID, excludeID string) (bool, error) {
+	var count int
+	err := db.QueryRowContext(ctx, `SELECT count(*) FROM commands
+		WHERE agent_id=? AND session_id=? AND id<>?
+			AND action IN ('send','enqueue')
+			AND state IN ('received','accepted','running')`,
+		agentID, sessionID, excludeID).Scan(&count)
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
 }
 
 // Only the exact dedicated session binding changes a notification's identity.

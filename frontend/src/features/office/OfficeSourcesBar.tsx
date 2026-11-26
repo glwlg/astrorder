@@ -9,11 +9,14 @@ import {
   IconFileTypeDocx,
   IconFileTypePdf,
   IconLoader2,
+  IconMovie,
+  IconMusic,
   IconPlus,
   IconPresentation,
   IconSearch,
   IconShieldCheck,
   IconSparkles,
+  IconSubtitles,
   IconTable,
   IconUpload,
   IconX,
@@ -51,6 +54,15 @@ function renderSourceIcon(name: string) {
   }
   if (lower.endsWith('.pdf')) {
     return <IconFileTypePdf size={13} color="#dc2626" />
+  }
+  if (/\.(mp4|m4v|webm|mov|mkv|ogv)$/i.test(lower)) {
+    return <IconMovie size={13} color="#4f46e5" />
+  }
+  if (/\.(wav|mp3|m4a|ogg|flac|aac|opus)$/i.test(lower)) {
+    return <IconMusic size={13} color="#0d9488" />
+  }
+  if (/\.(srt|vtt)$/i.test(lower)) {
+    return <IconSubtitles size={13} color="#d97706" />
   }
   return <IconFileText size={13} color="#52525b" />
 }
@@ -97,7 +109,7 @@ export function OfficeSourcesBar({
         })
         setWorkspaceDocs(
           (res.items || [])
-            .filter((it) => /\.(docx?|xlsx?|pptx?|pdf|md|markdown|csv|txt|wps)$/i.test(it.name))
+            .filter((it) => /\.(docx?|xlsx?|pptx?|pdf|md|markdown|csv|txt|wps|srt|vtt|mp4|m4v|webm|mov|mkv|wav|mp3|m4a|ogg|flac)$/i.test(it.name))
             .map((it) => ({
               path: it.path,
               name: it.name,
@@ -265,7 +277,7 @@ export function OfficeSourcesBar({
         ref={uploadRef}
         type="file"
         multiple
-        accept=".docx,.doc,.xlsx,.xls,.pptx,.ppt,.pdf,.md,.markdown,.csv,.txt,.wps"
+        accept=".docx,.doc,.xlsx,.xls,.pptx,.ppt,.pdf,.md,.markdown,.csv,.txt,.wps,.srt,.vtt,.mp4,.m4v,.webm,.mov,.mkv,.wav,.mp3,.m4a,.ogg,.flac"
         style={{ display: 'none' }}
         onChange={(e) => {
           void handleUploadSource(e.currentTarget.files)
@@ -295,7 +307,7 @@ export function OfficeSourcesBar({
           <IconPlus size={11} />
         </button>
 
-        <Tooltip label="直接上传 Word / Excel / PPT / PDF 到工作空间并加入资料包">
+        <Tooltip label="直接上传文档、字幕或音视频素材到工作空间并加入资料包">
           <button
             type="button"
             className="office-tool-chip"

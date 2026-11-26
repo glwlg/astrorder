@@ -104,7 +104,10 @@ func (c *NativeController) target(ctx context.Context, member Member) (*pb.Runti
 			target.Runtime = pb.RuntimeKind_RUNTIME_KIND_GROK_SSH
 		}
 	case "antigravity", "antigravity-ssh":
-		return nil, "", errors.New("遵循 Google Antigravity 第三方接入规范，不支持多 Agent 自动群聊后台调用")
+		target.Runtime = pb.RuntimeKind_RUNTIME_KIND_ANTIGRAVITY
+		if remote {
+			target.Runtime = pb.RuntimeKind_RUNTIME_KIND_ANTIGRAVITY_SSH
+		}
 	default:
 		return nil, "", errors.New("group Agent runtime is unsupported")
 	}
@@ -139,7 +142,7 @@ func (c *NativeController) target(ctx context.Context, member Member) (*pb.Runti
 			}
 			port = uint32(parsed)
 		}
-		target.Ssh = &pb.SshConnectConfig{Host: stringField("host"), Port: port, User: ptr("user"), SshConfigAlias: ptr("ssh_config_alias"), IdentityFile: ptr("identity_file"), HermesPath: ptr("hermes_path"), CodexExecutable: ptr("codex_executable"), GrokExecutable: ptr("grok_executable")}
+		target.Ssh = &pb.SshConnectConfig{Host: stringField("host"), Port: port, User: ptr("user"), SshConfigAlias: ptr("ssh_config_alias"), IdentityFile: ptr("identity_file"), HermesPath: ptr("hermes_path"), CodexExecutable: ptr("codex_executable"), GrokExecutable: ptr("grok_executable"), AntigravityExecutable: ptr("antigravity_executable")}
 		var selected string
 		if member.Workspace != nil {
 			selected = *member.Workspace
@@ -153,6 +156,8 @@ func (c *NativeController) target(ctx context.Context, member Member) (*pb.Runti
 			target.Ssh.CodexExecutable = connections.RuntimeExecutable(ctx, c.RemoteExecutable, "codex", connection)
 		case "grok", "grok-ssh":
 			target.Ssh.GrokExecutable = connections.RuntimeExecutable(ctx, c.RemoteExecutable, "grok", connection)
+		case "antigravity", "antigravity-ssh":
+			target.Ssh.AntigravityExecutable = connections.RuntimeExecutable(ctx, c.RemoteExecutable, "antigravity", connection)
 		}
 		if profile, ok := connection["profile_name"].(string); ok && profile != "" {
 			target.Ssh.ProfileName = &profile
@@ -321,6 +326,17 @@ func memberModelMatches(provider, model string, state *pb.ModelState) bool {
 
 func (c *NativeController) configureMemberSession(ctx context.Context, turn Turn, ref *pb.SessionRef) error {
 	model, provider, effort := memberValue(turn.Member.ModelName), memberValue(turn.Member.ModelProvider), memberValue(turn.Member.ThinkingEffort)
+	isAntigravity := false
+	if c.Store != nil {
+		if agent, err := c.Store.GetAgent(ctx, turn.Member.AgentID); err == nil && agent != nil {
+			kind, _ := agent["kind"].(string)
+			isAntigravity = kind == "antigravity" || kind == "antigravity-ssh"
+		}
+	}
+	if isAntigravity && model != "" {
+		// Antigravity encodes reasoning effort inside model IDs (e.g. gemini-4-neon-high).
+		effort = ""
+	}
 	if model != "" || effort != "" {
 		if c.Client.Runtime == nil {
 			return errors.New("group model settings are unavailable")
@@ -367,6 +383,9 @@ func (c *NativeController) configureMemberSession(ctx context.Context, turn Turn
 		}
 	}
 	mode := memberValue(turn.Member.ApprovalPolicy)
+	if isAntigravity && mode == "auto" {
+		mode = "manual"
+	}
 	if mode == "" {
 		return nil
 	}
@@ -566,7 +585,8 @@ func (c *NativeController) waitForReply(ctx context.Context, turn Turn, ref *pb.
 			ids := []string{}
 			start := -1
 			for i, message := range messages {
-				if message["role"] == "user" && message["text"] == prompt && !seen[fmt.Sprint(message["id"])] {
+				msgText, _ := message["text"].(string)
+				if message["role"] == "user" && matchesGroupPrompt(msgText, prompt) && !seen[fmt.Sprint(message["id"])] {
 					start = i
 				}
 			}
@@ -768,7 +788,8 @@ func (c *NativeController) historyPages(ctx context.Context, ref *pb.SessionRef,
 		if throughUser != "" {
 			items = append(pageItems, items...)
 			for _, item := range pageItems {
-				if item["role"] == "user" && item["text"] == throughUser {
+				itemText, _ := item["text"].(string)
+				if item["role"] == "user" && matchesGroupPrompt(itemText, throughUser) {
 					return items, nil
 				}
 			}
@@ -797,6 +818,21 @@ func (c *NativeController) historyPages(ctx context.Context, ref *pb.SessionRef,
 		request.Before = &pb.NullableString{State: &pb.NullableString_Value{Value: cursor}}
 	}
 }
+func matchesGroupPrompt(msgText, prompt string) bool {
+	if msgText == prompt {
+		return true
+	}
+	trimmedMsg := strings.TrimSpace(msgText)
+	trimmedPrompt := strings.TrimSpace(prompt)
+	if trimmedPrompt == "" {
+		return false
+	}
+	if trimmedMsg == trimmedPrompt {
+		return true
+	}
+	return strings.HasPrefix(trimmedMsg, trimmedPrompt+"\n\n[Image attached at:")
+}
+
 func (c *NativeController) publishCommand(ctx context.Context, command map[string]any) error {
 	var event store.Event
 	err := c.Store.WithTx(ctx, func(tx *sql.Tx) error {

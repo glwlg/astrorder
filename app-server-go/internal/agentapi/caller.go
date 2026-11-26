@@ -121,10 +121,10 @@ func (h *Handler) ValidateCaller(ctx context.Context, caller *Caller) (map[strin
 		return nil, NewAgentApiError("invalid_caller", fmt.Sprintf("caller agent '%s' not found", caller.AgentID))
 	}
 
-	// 1. Validate runtime kind matches agent kind
+	// 1. Validate runtime kind matches agent kind (allowing <runtime>-ssh variants for remote agents)
 	agentKind, _ := agent["kind"].(string)
 	agentKindClean := strings.TrimSpace(strings.ToLower(agentKind))
-	if caller.Runtime != agentKindClean {
+	if caller.Runtime != agentKindClean && agentKindClean != caller.Runtime+"-ssh" {
 		return nil, NewAgentApiError("invalid_caller", fmt.Sprintf("caller runtime '%s' does not match agent kind '%s'", caller.Runtime, agentKind))
 	}
 

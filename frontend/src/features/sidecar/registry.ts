@@ -7,11 +7,13 @@ import { excalidrawViewer } from './viewers/excalidraw'
 import { fileTreeViewer } from './viewers/filetree'
 import { gitDiffViewer } from './viewers/gitdiff'
 import { gitWorktreesViewer } from './viewers/worktrees'
+import { gitlabCIViewer } from './viewers/gitlabci'
 import { sideChatViewer } from './viewers/sidechat'
 import { agentGraphViewer } from './viewers/agentgraph'
 import { htmlViewer } from './viewers/html'
 import { imageViewer } from './viewers/image'
 import { videoViewer } from './viewers/video'
+import { audioViewer } from './viewers/audio'
 import { mermaidViewer } from './viewers/mermaid'
 import { monacoViewer } from './viewers/monaco'
 import { xtermViewer } from './viewers/terminal'
@@ -53,11 +55,13 @@ class ArtifactViewerRegistry {
     this.register(htmlViewer)
     this.register(imageViewer)
     this.register(videoViewer)
+    this.register(audioViewer)
     this.register(xtermViewer)
     this.register(monacoViewer)
     this.register(fileTreeViewer)
     this.register(gitDiffViewer)
     this.register(gitWorktreesViewer)
+    this.register(gitlabCIViewer)
     this.register(sideChatViewer)
     this.register(agentGraphViewer)
   }

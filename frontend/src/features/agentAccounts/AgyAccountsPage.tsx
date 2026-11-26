@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Alert, Button, Loader, NativeSelect, Table } from '@mantine/core'
+import { ActionIcon, Alert, Button, Loader, NativeSelect, Table } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useQuery } from '@tanstack/react-query'
-import { IconDeviceFloppy, IconPlus, IconRefresh, IconSettings, IconSwitchHorizontal } from '@tabler/icons-react'
-import { agyAccountsApi } from './agyAccountsApi'
+import { IconDeviceFloppy, IconPlus, IconRefresh, IconSettings, IconSwitchHorizontal, IconTrash } from '@tabler/icons-react'
+import { accountPlatformMeta, type AccountPlatform } from './agyAccountsApi'
 import { AgyAccountDialog, type AccountPrompt } from './AgyAccountDialog'
 import { AgyAccountImportDialog } from './AgyAccountImportDialog'
 import { AgyQuotaTiles } from './AgyQuotaTiles'
@@ -12,26 +12,27 @@ import { agyStamp } from './agyQuotaFormat'
 import { AccountRefreshSettings } from './AccountRefreshSettings'
 import { useRefreshSettings } from './accountRefresh'
 import { useAccountPageRefreshTarget } from './AgyQuotaRefreshProvider'
-import { metadataPolicy, useAgyAccountOverview } from './useAgyAccountOverview'
+import { metadataPolicy, platformTargetsOptions, useAgyAccountOverview } from './useAgyAccountOverview'
 import { useAgyAccountMutation } from './useAgyAccountMutation'
 import './AgyAccountsPage.css'
 
-export function AgyAccountsPage() {
+export function PlatformAccountsPage({ platform }: { platform: AccountPlatform }) {
+  const meta = accountPlatformMeta(platform)
   const [params, setParams] = useSearchParams()
   const selection = params.get('environment')
   const [dialog, setDialog] = useState<{ prompt: AccountPrompt; environment: string } | null>(null)
   const [importOpen, setImportOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [settings, setSettings] = useRefreshSettings('antigravity')
-  const targets = useQuery({ ...metadataPolicy, queryKey: ['agy-account-targets'], queryFn: agyAccountsApi.targets })
+  const [settings, setSettings] = useRefreshSettings(platform)
+  const targets = useQuery({ ...metadataPolicy, ...platformTargetsOptions(platform) })
   const target = selection ? targets.data?.items.find(item => item.id === selection) : targets.data?.items[0]
   const environment = target?.id ?? ''
-  const { accounts, state: targetState, currentID, rows, quotas, refreshing, refresh, refreshLibrary } = useAgyAccountOverview(environment)
+  const { accounts, state: targetState, currentID, rows, quotas, refreshing, refresh, refreshLibrary } = useAgyAccountOverview(environment, platform)
   const quotaSupported = targetState.data?.quota_supported
   const prompt = dialog?.environment === environment ? dialog.prompt : null
 
-  const mutation = useAgyAccountMutation(environment)
-  useAccountPageRefreshTarget(environment, Boolean(dialog || importOpen))
+  const mutation = useAgyAccountMutation(environment, platform)
+  useAccountPageRefreshTarget(environment, Boolean(dialog || importOpen), platform)
 
   async function openAction(account?: typeof rows[number]) {
     const latest = await targetState.refetch({ cancelRefetch: false })
@@ -39,16 +40,16 @@ export function AgyAccountsPage() {
     const active = latest.data.current_account_id
     if (account) setDialog({ environment, prompt: { kind: 'switch', account: { ...account, current: active === account.id } } })
     else if (active) setDialog({ environment, prompt: { kind: 'save', name: rows.find(row => row.id === active && active !== 'current')?.name ?? '' } })
-    else notifications.show({ message: '目标 Agent 尚未登录 AGY' })
+    else notifications.show({ message: meta.notLoggedInHint })
   }
 
   return <section className="agy-accounts-page">
     <header className="agy-accounts-toolbar">
-      <div><h2>Antigravity</h2><span className="agy-account-muted">{accounts.data ? `${accounts.data.items.length} 个已保存账号` : '账号库'}</span></div>
+      <div><h2>{meta.label}</h2><span className="agy-account-muted">{accounts.data ? `${accounts.data.items.length} 个已保存账号` : '账号库'}</span></div>
       <div className="agy-accounts-tools">
         {Boolean(targets.data?.items.length) && <div className="agy-target-select">
-          <label htmlFor="agy-account-target">目标 Agent</label>
-          <NativeSelect id="agy-account-target" value={environment} onChange={event => {
+          <label htmlFor={`${platform}-account-target`}>目标 Agent</label>
+          <NativeSelect id={`${platform}-account-target`} value={environment} onChange={event => {
             mutation.reset()
             const next = new URLSearchParams(params)
             next.set('environment', event.currentTarget.value)
@@ -69,12 +70,18 @@ export function AgyAccountsPage() {
     {accounts.isError && <Alert color="red" title="无法读取账号">{accounts.error.message} <Button variant="subtle" size="compact-sm" onClick={() => void accounts.refetch()}>重试</Button></Alert>}
     {targetState.isError && <Alert color="red" title="无法读取目标 Agent 的账号状态">{targetState.error.message} <Button variant="subtle" size="compact-sm" onClick={() => void targetState.refetch()}>重试</Button></Alert>}
     {mutation.isError && <Alert color="red" title="账号操作未完成">{mutation.error.message}</Alert>}
-    {mutation.isPending && <Alert role="status">{mutation.variables?.kind === 'save' ? '正在保存当前账号…' : '正在切换账号并重新接入 AGY…'}</Alert>}
+    {mutation.isPending && <Alert role="status">{
+      mutation.variables?.kind === 'save'
+        ? '正在保存当前账号…'
+        : mutation.variables?.kind === 'delete'
+          ? '正在删除账号…'
+          : `正在切换账号并重新接入 ${meta.shortLabel}…`
+    }</Alert>}
     {accounts.isPending && <div className="agy-account-empty" role="status"><Loader size="xs" /> 正在读取账号</div>}
-    {targets.isSuccess && !target && <Alert>{targets.data.items.length ? '所选目标不可用，请重新选择目标 Agent。' : '接入 AGY Agent 后即可应用账号和查询额度。'}</Alert>}
-    {accounts.isSuccess && !rows.length && <div className="agy-account-empty">暂无已保存账号，可导入 AGY Token JSON 或保存当前账号。</div>}
+    {targets.isSuccess && !target && <Alert>{targets.data.items.length ? '所选目标不可用，请重新选择目标 Agent。' : meta.targetEmptyHint}</Alert>}
+    {accounts.isSuccess && !rows.length && <div className="agy-account-empty">{meta.emptyHint}</div>}
     {accounts.isSuccess && rows.length > 0 && <div className="agy-account-table-wrap">
-      <Table className="agy-account-table" aria-label="AGY 账号额度总览" verticalSpacing="md" horizontalSpacing="md">
+      <Table className="agy-account-table" aria-label={`${meta.shortLabel} 账号额度总览`} verticalSpacing="md" horizontalSpacing="md">
         <colgroup><col className="agy-account-name-col" /><col className="agy-plan-col" /><col /><col className="agy-account-time-col" /><col className="agy-account-actions-col" /></colgroup>
         <Table.Thead><Table.Tr>
           <Table.Th scope="col">账号</Table.Th><Table.Th scope="col">订阅档位</Table.Th><Table.Th scope="col">剩余额度与重置</Table.Th>
@@ -82,9 +89,11 @@ export function AgyAccountsPage() {
         </Table.Tr></Table.Thead>
         <Table.Tbody>{rows.map((account, index) => {
           const quota = quotas[index]
+          const subLabel = quota.data?.account_label || account.email
           return <Table.Tr key={account.id} data-current={account.current || undefined}>
             <Table.Th scope="row">
               <span className="agy-account-name">{account.name}</span>
+              {subLabel && subLabel !== account.name && <span className="agy-account-sublabel">{subLabel}</span>}
               {account.current && <span className="agy-current-badge">当前使用</span>}
             </Table.Th>
             <Table.Td><span className="agy-plan" data-known={Boolean(quota.data?.plan || quota.data?.tier_id)}>{quota.data?.plan || quota.data?.tier_id || (quota.data ? '未返回' : '—')}</span></Table.Td>
@@ -104,17 +113,36 @@ export function AgyAccountsPage() {
                 disabled={mutation.isPending || refreshing} onClick={() => void openAction(account)}>
                 {account.current ? '重新应用' : '切换'}
               </Button>}
+              {meta.canDelete && account.id !== 'current' && <ActionIcon size="sm" variant="subtle" color="red"
+                aria-label={`删除 ${account.name}`} disabled={mutation.isPending || refreshing}
+                onClick={() => setDialog({ environment, prompt: { kind: 'delete', account } })}>
+                <IconTrash size={14} />
+              </ActionIcon>}
             </div></Table.Td>
           </Table.Tr>
         })}</Table.Tbody>
       </Table>
     </div>}
-    {prompt && target && <AgyAccountDialog prompt={prompt} targetName={target.name} unsavedCurrent={currentID === 'current'} onClose={() => setDialog(null)}
-      onSave={name => mutation.mutate({ kind: 'save', name })} onSwitch={(id, force) => mutation.mutate({ kind: 'switch', id, force })} />}
-    {importOpen && <AgyAccountImportDialog onClose={() => setImportOpen(false)} onImported={() => {
+    {prompt && (target || prompt.kind === 'delete') && <AgyAccountDialog prompt={prompt} targetName={target?.name ?? meta.label} unsavedCurrent={currentID === 'current'} onClose={() => setDialog(null)}
+      onSave={name => mutation.mutate({ kind: 'save', name })}
+      onSwitch={(id, force) => mutation.mutate({ kind: 'switch', id, force })}
+      onDelete={id => mutation.mutate({ kind: 'delete', id })} />}
+    {importOpen && <AgyAccountImportDialog platform={platform} onClose={() => setImportOpen(false)} onImported={() => {
       void refreshLibrary()
-      notifications.show({ message: 'AGY 账号已导入', color: 'green' })
+      notifications.show({ message: `${meta.shortLabel} 账号已导入`, color: 'green' })
     }} />}
-    {settingsOpen && <AccountRefreshSettings platform="Antigravity" settings={settings} onChange={setSettings} onClose={() => setSettingsOpen(false)} />}
+    {settingsOpen && <AccountRefreshSettings platform={meta.label} settings={settings} onChange={setSettings} onClose={() => setSettingsOpen(false)} />}
   </section>
+}
+
+export function AgyAccountsPage() {
+  return <PlatformAccountsPage platform="antigravity" />
+}
+
+export function CodexAccountsPage() {
+  return <PlatformAccountsPage platform="codex" />
+}
+
+export function GrokAccountsPage() {
+  return <PlatformAccountsPage platform="grok" />
 }

@@ -77,6 +77,7 @@ export interface SidecarState {
   openAgentGraph: (sessionId: string, agentId: string, workspaceName?: string, connectionId?: string) => void
   openGitDiff: (sessionId: string, agentId: string, workspacePath?: string, connectionId?: string, baseBranch?: string) => void
   openWorktrees: (sessionId: string, agentId: string, workspacePath?: string, connectionId?: string) => void
+  openGitLabCI: (sessionId: string, agentId: string, workspacePath?: string, connectionId?: string, pipelineId?: number) => void
   openBrowser: (sessionId: string, agentId: string, initialUrl?: string, connectionId?: string) => void
   openDatabaseWorkbench: (mediaType: string, viewerId: string, sessionId?: string, agentId?: string, connectionId?: string) => void
   openBlackboard: (sessionId?: string, agentId?: string, connectionId?: string) => void
@@ -460,6 +461,64 @@ export const useSidecarStore = create<SidecarState>()(persist((set, get) => ({
         title: 'Worktree 工作区',
         artifact: wtArtifact,
         viewerId: 'git-worktrees-viewer',
+        closable: true,
+      }
+      set({
+        isOpen: true,
+        activeTabId: tabId,
+        tabs: [...tabs, newTab],
+      })
+    }
+    if (activeSessionKey) {
+      const curr = get()
+      set({
+        sessionMemories: {
+          ...sessionMemories,
+          [activeSessionKey]: { tabs: curr.tabs, activeTabId: curr.activeTabId, isOpen: true },
+        },
+      })
+    }
+  },
+
+  openGitLabCI: (sessionId: string, agentId: string, workspacePath?: string, connectionId?: string, pipelineId?: number) => {
+    const tabId = `gitlabci:${sessionId || workspacePath || 'repo'}`
+    const readUrl = pipelineId && pipelineId > 0 ? `?pipeline_id=${pipelineId}` : ''
+    const { tabs, activeSessionKey, sessionMemories } = get()
+    const existingIndex = tabs.findIndex((t) => t.id === tabId)
+    if (existingIndex >= 0) {
+      const updated = tabs.map((tab, idx) => idx === existingIndex && tab.artifact ? {
+        ...tab,
+        artifact: {
+          ...tab.artifact,
+          path: workspacePath || tab.artifact.path,
+          connectionId: connectionId ?? tab.artifact.connectionId,
+          readUrl: readUrl || tab.artifact.readUrl,
+        },
+      } : tab)
+      set({
+        isOpen: true,
+        activeTabId: tabId,
+        tabs: updated,
+      })
+    } else {
+      const ciArtifact: ArtifactRef = {
+        id: tabId,
+        name: 'GitLab CI',
+        kind: 'workspace_file',
+        mediaType: 'application/x-gitlab-ci',
+        readUrl,
+        writable: false,
+        path: workspacePath,
+        sessionId,
+        agentId,
+        connectionId,
+      }
+      const newTab: SidecarTab = {
+        id: tabId,
+        type: 'artifact',
+        title: 'GitLab CI',
+        artifact: ciArtifact,
+        viewerId: 'gitlab-ci-viewer',
         closable: true,
       }
       set({

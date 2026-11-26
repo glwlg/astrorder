@@ -50,7 +50,8 @@ func scheduleSpecFromStore(item store.SessionSchedule) ScheduleSpec {
 	}
 }
 
-func defaultScheduleName(name, prompt string) string {
+// DefaultScheduleName returns a bounded schedule title, falling back to the first line of prompt.
+func DefaultScheduleName(name, prompt string) string {
 	trimmed := strings.TrimSpace(name)
 	if trimmed != "" {
 		runes := []rune(trimmed)
@@ -71,6 +72,15 @@ func defaultScheduleName(name, prompt string) string {
 		return "定时任务"
 	}
 	return firstLine
+}
+
+func defaultScheduleName(name, prompt string) string {
+	return DefaultScheduleName(name, prompt)
+}
+
+// WakeSchedules nudges the background schedule loop to re-evaluate due tasks immediately.
+func (h *Handler) WakeSchedules() {
+	h.wakeScheduler()
 }
 
 func (h *Handler) wakeScheduler() {

@@ -41,14 +41,7 @@ func TestSyncCommandValidatesRoots(t *testing.T) {
 func TestSyncCommandAtomicCopy(t *testing.T) {
 	devRoot := t.TempDir()
 	installedRoot := t.TempDir()
-
-	srcDist := filepath.Join(devRoot, "frontend", "dist")
-	if err := os.MkdirAll(srcDist, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(srcDist, "index.html"), []byte("<html>v1</html>"), 0644); err != nil {
-		t.Fatal(err)
-	}
+	writeSyncDistFixture(t, devRoot, "v1")
 
 	var output bytes.Buffer
 	code := run([]string{"sync", "--dev-root", devRoot, "--installed-root", installedRoot}, &output)
@@ -58,8 +51,11 @@ func TestSyncCommandAtomicCopy(t *testing.T) {
 
 	destIndex := filepath.Join(installedRoot, "frontend", "dist", "index.html")
 	body, err := os.ReadFile(destIndex)
-	if err != nil || string(body) != "<html>v1</html>" {
+	if err != nil || !strings.Contains(string(body), "index-v1.js") {
 		t.Fatalf("unexpected synced body: %s err: %v", string(body), err)
+	}
+	if _, err := os.Stat(filepath.Join(installedRoot, "frontend", "dist", "sw-astrorder.js")); err != nil {
+		t.Fatalf("expected synced browser worker: %v", err)
 	}
 }
 

@@ -14,7 +14,7 @@ import { ErrorBoundary } from '../components/ErrorBoundary'
 import { Sidebar } from '../components/Sidebar'
 import { BackgroundTasks } from '../components/BackgroundTasks'
 import { useShortcutHandlers } from '../features/shortcuts/shortcuts'
-import { agySessionEnvironment, AgyQuotaRefreshProvider } from '../features/agentAccounts/AgyQuotaRefreshProvider'
+import { sessionAccountTarget, AgyQuotaRefreshProvider } from '../features/agentAccounts/AgyQuotaRefreshProvider'
 import { WORKSPACE_AGENT_ACCOUNTS_PLUGIN_ID } from '../features/plugins/builtinPlugins'
 import { usePluginSettingsStore } from '../features/plugins/pluginSettingsStore'
 import { useIntegrationsStore } from '../features/integrations/integrationStore'
@@ -104,6 +104,7 @@ export function AppShellLayout({ chatReturnPath }: { chatReturnPath: string }) {
   const activeSessionKey = routeCandidates.length === 1 ? scopeKey(routeCandidates[0].agent_id, routeCandidates[0].id) : undefined
   const session = routeCandidates.length === 1 ? routeCandidates[0] : undefined
   const compactNavigation =
+    location.pathname.startsWith('/bots') ||
     location.pathname.startsWith('/inbox') ||
     location.pathname.startsWith('/digest') ||
     location.pathname.startsWith('/meetings') ||
@@ -412,11 +413,17 @@ export function AppShellLayout({ chatReturnPath }: { chatReturnPath: string }) {
       </AppShell.Navbar>
       <AppShell.Main className="shell-main">
         <ErrorBoundary fallbackTitle="会话主区域加载异常">
-          {agentAccountsEnabled ? (
-            <AgyQuotaRefreshProvider sessionEnvironment={agySessionEnvironment(session, session && agents[session.agent_id])}>
-              <Outlet />
-            </AgyQuotaRefreshProvider>
-          ) : (
+          {agentAccountsEnabled ? (() => {
+            const refreshTarget = sessionAccountTarget(session, session && agents[session.agent_id])
+            return (
+              <AgyQuotaRefreshProvider
+                sessionEnvironment={refreshTarget?.environment ?? ''}
+                sessionPlatform={refreshTarget?.platform ?? 'antigravity'}
+              >
+                <Outlet />
+              </AgyQuotaRefreshProvider>
+            )
+          })() : (
             <Outlet />
           )}
         </ErrorBoundary>

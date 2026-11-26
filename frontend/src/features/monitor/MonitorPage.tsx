@@ -8,15 +8,14 @@ import { ShinyText } from '../../components/animations/ShinyText'
 import { MarkdownContent } from '../../components/MarkdownContent'
 import { MessageBody } from '../../components/MessageBody'
 import { LazyDetails } from '../../components/LazyDetails'
-import { ClickSpark } from '../../components/animations/ClickSpark'
 import { useSpotlightSurface } from '../../components/animations/useSpotlightSurface'
 import { SessionModelControl } from '../chat/SessionModelControl'
 import { ApprovalModeControl } from '../chat/ApprovalModeControl'
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type RefObject } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../../api/client'
-import type { Agent, Command, Session } from '../../domain/types'
+import type { Agent, Command, Message, Session } from '../../domain/types'
 import { EmptyState } from '../../components/EmptyState'
 import { isHiddenRailSession } from '../../components/sessionRailModel'
 import { useSessionResources } from '../../hooks/useAstrorderData'
@@ -35,6 +34,138 @@ const EXCLUDED_STORAGE_KEY = 'astrorder:monitor-excluded-sessions'
 const SIZES_STORAGE_KEY = 'astrorder:monitor-slot-sizes'
 const ORDER_STORAGE_KEY = 'astrorder:monitor-slot-order'
 const STALE_AFTER_MS = 30 * 60 * 1000
+const EMPTY_QUEUE_ITEMS: MonitorQueueItem[] = []
+const DEFAULT_SLOT_SIZE: SlotSize = { height: 520 }
+const FOCUSED_SLOT_SIZE: SlotSize = { height: 820 }
+const MONITOR_CARD_INITIAL_ENTRIES = 20
+const MONITOR_FOCUSED_INITIAL_ENTRIES = 40
+const MONITOR_ENTRY_LOAD_STEP = 30
+const MONITOR_TAIL_EAGER_ROWS = 6
+const MONITOR_RESOURCE_OPTIONS = {
+  includeTasks: false,
+  skipBackfill: true,
+  skipIdleSync: true,
+  trackPerf: false,
+} as const
+const NOOP = () => {}
+
+type MonitorDisplayEntry =
+  | { type: 'pack'; key: string; pack: Message[] }
+  | { type: 'message'; key: string; message: Message }
+
+function isActivityMessage(message: Message | null | undefined) {
+  return Boolean(message && (message.kind !== 'message' || message.role === 'tool'))
+}
+
+function useNearViewport(targetRef: RefObject<HTMLDivElement | null>, eager: boolean) {
+  const [near, setNear] = useState(() => eager || typeof IntersectionObserver === 'undefined')
+  useEffect(() => {
+    if (eager || near) {
+      if (!near) setNear(true)
+      return
+    }
+    if (typeof IntersectionObserver === 'undefined') {
+      setNear(true)
+      return
+    }
+    const node = targetRef.current
+    if (!node) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setNear(true)
+          observer.disconnect()
+        }
+      },
+      { rootMargin: '240px 0px' },
+    )
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [eager, near, targetRef])
+  return near
+}
+
+const MonitorActivityPackRow = memo(function MonitorActivityPackRow({
+  pack,
+  deferred,
+}: {
+  pack: Message[]
+  deferred: boolean
+}) {
+  return (
+    <div className={'monitor-activity-pack-row' + (deferred ? ' is-deferred-row' : '')}>
+      <LazyDetails summary={<PackSummary pack={pack} />}>
+        <div className="monitor-activity-pack-details">
+          {pack.map((item) => {
+            const d = describeTool(item)
+            return (
+              <div className="monitor-pack-detail-item" key={item.id}>
+                <ToolLineIcon icon={d.iconKey} size={12} />
+                <span>{d.target || d.fullTitle}</span>
+              </div>
+            )
+          })}
+        </div>
+      </LazyDetails>
+    </div>
+  )
+})
+
+const MonitorMessageRow = memo(function MonitorMessageRow({
+  message,
+  session,
+  onImageClick,
+  deferred,
+}: {
+  message: Message
+  session: Session
+  onImageClick: (url: string) => void
+  deferred: boolean
+}) {
+  const imageAttachmentNames = useMemo(
+    () => message.attachments.filter((att) => att.media_type.startsWith('image/')).map((att) => att.name),
+    [message.attachments],
+  )
+  const imageAttachments = useMemo(
+    () => message.attachments.filter((att) => att.media_type?.startsWith('image/') && att.url),
+    [message.attachments],
+  )
+  const renderMarkdown = useCallback(
+    (value: string) => <MarkdownContent value={value} onImageClick={onImageClick} session={session} />,
+    [onImageClick, session],
+  )
+
+  return (
+    <div className={'monitor-message-row message-' + message.role + (deferred ? ' is-deferred-row' : '')}>
+      <div className="monitor-message-bubble">
+        <MessageBody
+          value={message.text || ''}
+          user={message.role === 'user'}
+          onImageClick={onImageClick}
+          attachmentNames={imageAttachmentNames}
+          renderMarkdown={renderMarkdown}
+          sessionId={session.id}
+          connectionId={session.connection_id || undefined}
+        />
+        {imageAttachments.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+            {imageAttachments.map((att) => (
+              <img
+                key={att.id}
+                src={att.url}
+                alt={att.name}
+                loading="lazy"
+                decoding="async"
+                style={{ maxWidth: '100%', maxHeight: 120, borderRadius: 6, cursor: 'zoom-in', objectFit: 'cover' }}
+                onClick={() => onImageClick(att.url)}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+})
 
 type MonitorQueueItem =
   | { source: 'local'; entry: OutboxEntry; id: string; agentId: string; sessionId: string; text: string }
@@ -146,34 +277,45 @@ interface MonitorCardProps {
   onEditQueued?: (item: MonitorQueueItem) => void
   onDeleteQueued?: (item: MonitorQueueItem) => void
   onToggleFocus?: () => void
-  onOpen: () => void
+  onToggleFocusKey?: (key: string) => void
+  onOpen?: () => void
+  onOpenSession?: (session: Session) => void
   onRemove?: () => void
+  onRemoveKey?: (key: string) => void
   onHeaderMouseDown?: (index: number, e: MouseEvent<HTMLDivElement>, cardEl: HTMLElement | null) => void
   onResizeCornerStart?: (index: number, e: MouseEvent<HTMLDivElement>, wrapperEl: HTMLElement | null) => void
 }
 
-export function MonitorCard({
+export const MonitorCard = memo(function MonitorCard({
   session,
   agent,
   slotIndex = 0,
-  slotSize = { height: 520 },
+  slotSize = DEFAULT_SLOT_SIZE,
   gridColumns = 2,
   isFloating = false,
   isDropTarget = false,
   isFocused = false,
-  queuedItems = [],
+  queuedItems = EMPTY_QUEUE_ITEMS,
   queueBusyId = null,
   onSendQueued,
   onEditQueued,
   onDeleteQueued,
   onToggleFocus,
+  onToggleFocusKey,
   onOpen,
+  onOpenSession,
   onRemove,
+  onRemoveKey,
   onHeaderMouseDown,
   onResizeCornerStart,
 }: MonitorCardProps) {
+  const sessionKey = scopeKey(session.agent_id, session.id)
   const status = session.status === 'idle' && session.live ? 'running' : session.status
-  const resources = useSessionResources(session, true, false)
+  const wrapperRef = useRef<HTMLDivElement>(null)
+  const isBelowFold = !isFloating && !isFocused && slotIndex >= gridColumns * 2
+  const isActiveSession = status === 'running' || status === 'waiting_approval'
+  const nearViewport = useNearViewport(wrapperRef, !isBelowFold || isActiveSession)
+  const resources = useSessionResources(session, nearViewport, false, MONITOR_RESOURCE_OPTIONS)
   const commands = useAstrorderStore(useShallow((state) => selectCommands(state, session.agent_id, session.id)))
   const messages = useAstrorderStore(useShallow((state) => selectMessages(state, session.agent_id, session.id)))
   const isInitialLoading = Boolean((resources?.messages?.isLoading || resources?.messages?.isPending) && messages.length === 0)
@@ -181,8 +323,8 @@ export function MonitorCard({
   const { draft, setDraft } = usePersistentDraft(session.agent_id, session.id)
   const [sending, setSending] = useState(false)
   const [error, setError] = useState('')
+  const [extraVisibleCount, setExtraVisibleCount] = useState(0)
   const scrollRef = useRef<HTMLDivElement>(null)
-  const wrapperRef = useRef<HTMLDivElement>(null)
   const spotlight = useSpotlightSurface()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const previousStatusRef = useRef(status)
@@ -191,6 +333,10 @@ export function MonitorCard({
   const [completionFlash, setCompletionFlash] = useState(false)
   const activeCommand = activeMessageCommand(status, commands)
   const isStopAction = session.status === 'running' && !draft.text.trim() && !draft.attachments.length
+
+  useEffect(() => {
+    setExtraVisibleCount(0)
+  }, [sessionKey])
 
   const addFiles = (files: File[]) => {
     if (!files.length) return
@@ -204,11 +350,45 @@ export function MonitorCard({
     return messages.filter((message) => message.kind !== 'message' || message.role !== 'assistant' || message.text.trim() || message.attachments?.length || message.tool)
   }, [messages])
 
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+  const displayEntries = useMemo<MonitorDisplayEntry[]>(() => {
+    const entries: MonitorDisplayEntry[] = []
+    for (let idx = 0; idx < visibleMessages.length; idx++) {
+      const message = visibleMessages[idx]
+      if (isActivityMessage(message)) {
+        const pack: Message[] = [message]
+        while (idx + 1 < visibleMessages.length && isActivityMessage(visibleMessages[idx + 1])) {
+          idx += 1
+          pack.push(visibleMessages[idx])
+        }
+        entries.push({ type: 'pack', key: `pack:${message.id}`, pack })
+      } else {
+        entries.push({
+          type: 'message',
+          key: `${message.agent_id || ''}:${message.session_id || ''}:${message.id}`,
+          message,
+        })
+      }
     }
-  }, [visibleMessages.length, activeCommand])
+    return entries
+  }, [visibleMessages])
+
+  const visibleEntryLimit = (isFocused ? MONITOR_FOCUSED_INITIAL_ENTRIES : MONITOR_CARD_INITIAL_ENTRIES) + extraVisibleCount
+  const hiddenEntryCount = Math.max(0, displayEntries.length - visibleEntryLimit)
+  const windowedEntries = useMemo(
+    () => (hiddenEntryCount > 0 ? displayEntries.slice(hiddenEntryCount) : displayEntries),
+    [displayEntries, hiddenEntryCount],
+  )
+  const tailSignature = `${visibleMessages.length}:${visibleMessages[visibleMessages.length - 1]?.id || ''}:${activeCommand?.id || ''}`
+
+  useEffect(() => {
+    if (!nearViewport) return
+    const frameId = window.requestAnimationFrame(() => {
+      if (scrollRef.current) {
+        scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+      }
+    })
+    return () => window.cancelAnimationFrame(frameId)
+  }, [nearViewport, tailSignature])
 
   useEffect(() => {
     const previousStatus = previousStatusRef.current
@@ -230,11 +410,26 @@ export function MonitorCard({
     if (completionTimeoutRef.current !== null) window.clearTimeout(completionTimeoutRef.current)
   }, [])
 
-  const scrollToBottom = () => {
+  const scrollToBottom = useCallback(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
     }
-  }
+  }, [])
+
+  const handleOpen = useCallback(() => {
+    if (onOpenSession) onOpenSession(session)
+    else onOpen?.()
+  }, [onOpen, onOpenSession, session])
+
+  const handleRemove = useCallback(() => {
+    if (onRemoveKey) onRemoveKey(sessionKey)
+    else onRemove?.()
+  }, [onRemove, onRemoveKey, sessionKey])
+
+  const handleToggleFocus = useCallback(() => {
+    if (onToggleFocusKey) onToggleFocusKey(sessionKey)
+    else onToggleFocus?.()
+  }, [onToggleFocus, onToggleFocusKey, sessionKey])
 
   const send = async (action: 'send' | 'stop' = 'send') => {
     const text = draft.text.trim()
@@ -262,9 +457,8 @@ export function MonitorCard({
   }
 
   const workspaceShort = session.workspace ? session.workspace.replace(/\\/g, "/").split("/").filter(Boolean).slice(-2).join("/") : ""
-  const isActivity = (message: typeof messages[0] | null) => Boolean(message && (message.kind !== 'message' || message.role === 'tool'))
 
-  const handlePreviewImage = (url: string) => {
+  const handlePreviewImage = useCallback((url: string) => {
     const desktop = (window as unknown as { astrorderDesktop?: { openPreview?: (payload: { images: string[]; index: number }) => Promise<void> } }).astrorderDesktop
     if (desktop?.openPreview) {
       try {
@@ -276,17 +470,24 @@ export function MonitorCard({
     } else {
       window.open(url, '_blank')
     }
-  }
+  }, [])
 
   const cardHeight = slotSize.height || 520
   const cardWidth = slotSize.width
   const defaultColPercent = 100 / gridColumns
+  const canToggleFocus = Boolean(onToggleFocus || onToggleFocusKey)
+  const canRemove = Boolean(onRemove || onRemoveKey)
 
   return (
     <div
       ref={wrapperRef}
       data-slot-index={slotIndex}
-      className={'monitor-card-wrapper' + (isDropTarget ? ' is-drop-target' : '') + (isFloating ? ' is-floating-entity' : '')}
+      className={
+        'monitor-card-wrapper'
+        + (isBelowFold ? ' is-below-fold' : '')
+        + (isDropTarget ? ' is-drop-target' : '')
+        + (isFloating ? ' is-floating-entity' : '')
+      }
       style={{
         width: isFloating ? '100%' : (cardWidth ? cardWidth + 'px' : undefined),
         flex: isFloating ? undefined : (cardWidth ? '0 0 ' + cardWidth + 'px' : `1 1 calc(${defaultColPercent}% - 16px)`),
@@ -338,7 +539,7 @@ export function MonitorCard({
                     </div>
                   )}
                   <Tooltip label="打开此会话" withArrow>
-                    <ActionIcon variant="subtle" color="gray" size="sm" aria-label="打开会话" onClick={onOpen}>
+                    <ActionIcon variant="subtle" color="gray" size="sm" aria-label="打开会话" onClick={handleOpen}>
                       <IconArrowUpRight size={14} />
                     </ActionIcon>
                   </Tooltip>
@@ -347,22 +548,22 @@ export function MonitorCard({
                       <IconArrowDown size={14} />
                     </ActionIcon>
                   </Tooltip>
-                  {onToggleFocus && (
+                  {canToggleFocus && (
                     <Tooltip label={isFocused ? '退出聚焦 (Esc)' : '全屏聚焦'} withArrow>
                       <ActionIcon
                         variant="subtle"
                         color={isFocused ? 'indigo' : 'gray'}
                         size="sm"
                         aria-label={isFocused ? '退出聚焦' : '全屏聚焦'}
-                        onClick={onToggleFocus}
+                        onClick={handleToggleFocus}
                       >
                         {isFocused ? <IconArrowsMinimize size={14} /> : <IconArrowsMaximize size={14} />}
                       </ActionIcon>
                     </Tooltip>
                   )}
-                  {onRemove && (
+                  {canRemove && (
                     <Tooltip label="移出矩阵" withArrow>
-                      <ActionIcon variant="subtle" color="gray" size="sm" aria-label="移出矩阵" onClick={onRemove}>
+                      <ActionIcon variant="subtle" color="gray" size="sm" aria-label="移出矩阵" onClick={handleRemove}>
                         <IconX size={14} />
                       </ActionIcon>
                     </Tooltip>
@@ -381,70 +582,34 @@ export function MonitorCard({
                 </span>
                 <ShinyText text="正在同步会话记录…" speed={2} />
               </div>
-            ) : visibleMessages.length === 0 && !activeCommand ? (
+            ) : windowedEntries.length === 0 && !activeCommand ? (
               <div className="monitor-transcript-empty">
                 <Text size="xs" c="dimmed" style={{ opacity: 0.75 }}>暂无可显示的会话记录</Text>
               </div>
             ) : (
               <div className="monitor-messages-flow">
-                {visibleMessages.map((message, idx) => {
-                  const prevMessage = idx > 0 ? visibleMessages[idx - 1] : null
-                  if (isActivity(message)) {
-                    if (isActivity(prevMessage)) return null
-                    const pack: typeof visibleMessages = []
-                    for (let i = idx; i < visibleMessages.length && isActivity(visibleMessages[i]); i++) {
-                      pack.push(visibleMessages[i])
-                    }
-                    return (
-                      <div className="monitor-activity-pack-row" key={message.id}>
-                        <LazyDetails summary={<PackSummary pack={pack} />}>
-                          <div className="monitor-activity-pack-details">
-                            {pack.map((item) => {
-                              const d = describeTool(item)
-                              return (
-                                <div className="monitor-pack-detail-item" key={item.id}>
-                                  <ToolLineIcon icon={d.iconKey} size={12} />
-                                  <span>{d.target || d.fullTitle}</span>
-                                </div>
-                              )
-                            })}
-                          </div>
-                        </LazyDetails>
-                      </div>
-                    )
+                {hiddenEntryCount > 0 && (
+                  <button
+                    type="button"
+                    className="monitor-load-older-btn"
+                    onClick={() => setExtraVisibleCount((count) => count + MONITOR_ENTRY_LOAD_STEP)}
+                  >
+                    {`显示更早 ${Math.min(hiddenEntryCount, MONITOR_ENTRY_LOAD_STEP)} 条（剩余 ${hiddenEntryCount} 条）`}
+                  </button>
+                )}
+                {windowedEntries.map((entry, idx) => {
+                  const deferred = idx < windowedEntries.length - MONITOR_TAIL_EAGER_ROWS
+                  if (entry.type === 'pack') {
+                    return <MonitorActivityPackRow key={entry.key} pack={entry.pack} deferred={deferred} />
                   }
                   return (
-                    <div key={`${message.agent_id || ''}:${message.session_id || ''}:${message.id}`} className={'monitor-message-row message-' + message.role}>
-                      <div className="monitor-message-bubble">
-                        <MessageBody
-                          value={message.text || ''}
-                          user={message.role === 'user'}
-                          onImageClick={handlePreviewImage}
-                          attachmentNames={message.attachments.filter(att => att.media_type.startsWith('image/')).map(att => att.name)}
-                          renderMarkdown={value => <MarkdownContent value={value} onImageClick={handlePreviewImage} session={session} />}
-                          sessionId={session.id}
-                          connectionId={session.connection_id || undefined}
-                        />
-                        {message.attachments && message.attachments.length > 0 && (
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
-                            {message.attachments.map((att) => {
-                              if (att.media_type?.startsWith('image/') && att.url) {
-                                return (
-                                  <img
-                                    key={att.id}
-                                    src={att.url}
-                                    alt={att.name}
-                                    style={{ maxWidth: '100%', maxHeight: 120, borderRadius: 6, cursor: 'zoom-in', objectFit: 'cover' }}
-                                    onClick={() => handlePreviewImage(att.url)}
-                                  />
-                                )
-                              }
-                              return null
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    </div>
+                    <MonitorMessageRow
+                      key={entry.key}
+                      message={entry.message}
+                      session={session}
+                      onImageClick={handlePreviewImage}
+                      deferred={deferred}
+                    />
                   )
                 })}
                 {activeCommand && (
@@ -556,22 +721,20 @@ export function MonitorCard({
                   <IconPaperclip size={15} />
                 </ActionIcon>
                 <input ref={fileInputRef} hidden type="file" multiple onChange={event => { addFiles(Array.from(event.currentTarget.files || [])); event.currentTarget.value = '' }} />
-                <ApprovalModeControl session={session} compact agentKind={agent?.kind} />
-                <SessionModelControl session={session} />
+                <ApprovalModeControl session={session} compact agentKind={agent?.kind} enabled={nearViewport} />
+                <SessionModelControl session={session} enabled={nearViewport} refetchOnMount={false} showPillQuota={false} />
                 <span style={{ flex: 1 }} />
-                <ClickSpark sparkColor={isStopAction ? '#ef4444' : '#3b82f6'} sparkSize={10} sparkRadius={26}>
-                  <Button
-                    size="xs"
-                    radius="xl"
-                    color={isStopAction ? 'red' : 'indigo'}
-                    aria-label={isStopAction ? '停止' : '发送消息'}
-                    disabled={sending || (!isStopAction && !draft.text.trim() && !draft.attachments.length)}
-                    onClick={() => void send(isStopAction ? 'stop' : 'send')}
-                    className="monitor-send-btn"
-                  >
-                    {isStopAction ? <IconPlayerStop size={14} /> : <IconArrowUp size={14} />}
-                  </Button>
-                </ClickSpark>
+                <Button
+                  size="xs"
+                  radius="xl"
+                  color={isStopAction ? 'red' : 'indigo'}
+                  aria-label={isStopAction ? '停止' : '发送消息'}
+                  disabled={sending || (!isStopAction && !draft.text.trim() && !draft.attachments.length)}
+                  onClick={() => void send(isStopAction ? 'stop' : 'send')}
+                  className="monitor-send-btn"
+                >
+                  {isStopAction ? <IconPlayerStop size={14} /> : <IconArrowUp size={14} />}
+                </Button>
               </div>
             </div>
             {error && <Text size="xs" c="red" px={8}>{error}</Text>}
@@ -588,15 +751,17 @@ export function MonitorCard({
         </Paper>
     </div>
   )
-}
+})
 
 
-function MonitorListRow({
+const MonitorListRow = memo(function MonitorListRow({
   session,
   agent,
   onOpen,
+  onOpenSession,
   onRemove,
-  queuedItems = [],
+  onRemoveKey,
+  queuedItems = EMPTY_QUEUE_ITEMS,
   queueBusyId = null,
   onSendQueued,
   onEditQueued,
@@ -604,23 +769,40 @@ function MonitorListRow({
 }: {
   session: Session
   agent?: Agent
-  onOpen: () => void
+  onOpen?: () => void
+  onOpenSession?: (session: Session) => void
   onRemove?: () => void
+  onRemoveKey?: (key: string) => void
   queuedItems?: MonitorQueueItem[]
   queueBusyId?: string | null
   onSendQueued?: (item: MonitorQueueItem) => void
   onEditQueued?: (item: MonitorQueueItem) => void
   onDeleteQueued?: (item: MonitorQueueItem) => void
 }) {
-  useSessionResources(session, true, false)
+  const sessionKey = scopeKey(session.agent_id, session.id)
+  useSessionResources(session, true, false, MONITOR_RESOURCE_OPTIONS)
   const commands = useAstrorderStore(useShallow((state) => selectCommands(state, session.agent_id, session.id)))
   const messages = useAstrorderStore(useShallow((state) => selectMessages(state, session.agent_id, session.id)))
   const approvals = useAstrorderStore(useShallow((state) => selectApprovals(state, session.agent_id, session.id)))
-  const activities = messages.filter((message) => message.kind === 'thinking' || message.kind === 'tool').slice(-1)
-  const latestActivity = activities[0]
+  const latestActivity = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const message = messages[i]
+      if (message.kind === 'thinking' || message.kind === 'tool') return message
+    }
+    return undefined
+  }, [messages])
   const status = session.status === 'idle' && session.live ? 'running' : session.status
   const activeCommand = activeMessageCommand(status, commands)
   const workspaceShort = session.workspace ? session.workspace.replace(/\\/g, "/").split("/").filter(Boolean).slice(-2).join("/") : ""
+  const handleOpen = useCallback(() => {
+    if (onOpenSession) onOpenSession(session)
+    else onOpen?.()
+  }, [onOpen, onOpenSession, session])
+  const handleRemove = useCallback(() => {
+    if (onRemoveKey) onRemoveKey(sessionKey)
+    else onRemove?.()
+  }, [onRemove, onRemoveKey, sessionKey])
+  const canRemove = Boolean(onRemove || onRemoveKey)
 
   return (
     <Paper
@@ -639,7 +821,7 @@ function MonitorListRow({
             </span>
           </Tooltip>
           <div className='monitor-row-title-block'>
-            <span className='monitor-row-title' onClick={onOpen} title={session.title || '未命名会话'}>
+            <span className='monitor-row-title' onClick={handleOpen} title={session.title || '未命名会话'}>
               {session.title || '未命名会话'}
             </span>
             {session.workspace && (
@@ -692,13 +874,13 @@ function MonitorListRow({
             {new Date(session.updated_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
           </span>
           <Tooltip label='打开会话' withArrow>
-            <ActionIcon variant='subtle' color='gray' size='sm' aria-label='打开会话' onClick={onOpen}>
+            <ActionIcon variant='subtle' color='gray' size='sm' aria-label='打开会话' onClick={handleOpen}>
               <IconArrowUpRight size={15} />
             </ActionIcon>
           </Tooltip>
-          {onRemove && (
+          {canRemove && (
             <Tooltip label='移出矩阵' withArrow>
-              <ActionIcon variant='subtle' color='gray' size='sm' aria-label='移出矩阵' onClick={onRemove}>
+              <ActionIcon variant='subtle' color='gray' size='sm' aria-label='移出矩阵' onClick={handleRemove}>
                 <IconX size={14} />
               </ActionIcon>
             </Tooltip>
@@ -760,7 +942,7 @@ function MonitorListRow({
       )}
     </Paper>
   )
-}
+})
 
 
 export function MonitorPage() {
@@ -836,15 +1018,16 @@ export function MonitorPage() {
 
   const sessions = useAstrorderStore(useShallow((state) => selectSessions(state).filter(session => !isHiddenRailSession(session))))
   const agents = useAstrorderStore((state) => state.agents)
-  const commands = useAstrorderStore(useShallow((state) => Object.values(state.commands)))
-  const messagesBySession = useAstrorderStore((state) => state.messages)
+  const queuedServerCommands = useAstrorderStore(useShallow((state) =>
+    Object.values(state.commands).filter((command) => command.state === 'queued'),
+  ))
 
   const queuedCommands = useMemo<MonitorQueueItem[]>(() => {
     const local = queue.filter(entry => entry.state === 'queued').map(entry => ({ source: 'local' as const, entry, id: entry.payload.id, agentId: entry.payload.agent_id, sessionId: entry.payload.session_id, text: entry.payload.text || '' }))
     const localIds = new Set(local.map(item => `${item.agentId}::${item.sessionId}::${item.id}`))
-    const server = commands.filter(command => command.state === 'queued' && !localIds.has(`${command.agent_id}::${command.session_id}::${command.id}`)).map(command => ({ source: 'server' as const, command, id: command.id, agentId: command.agent_id, sessionId: command.session_id, text: command.text || '' }))
+    const server = queuedServerCommands.filter(command => !localIds.has(`${command.agent_id}::${command.session_id}::${command.id}`)).map(command => ({ source: 'server' as const, command, id: command.id, agentId: command.agent_id, sessionId: command.session_id, text: command.text || '' }))
     return [...local, ...server]
-  }, [commands, queue])
+  }, [queuedServerCommands, queue])
 
   const queuedCommandsBySession = useMemo(() => {
     const map = new Map<string, MonitorQueueItem[]>()
@@ -859,9 +1042,10 @@ export function MonitorPage() {
 
   const queuedSessionKeys = useMemo(() => new Set(queuedCommands.map(item => scopeKey(item.agentId, item.sessionId))), [queuedCommands])
 
-  const sendQueued = async (item: MonitorQueueItem) => {
-    const targetSession = sessions.find(s => s.agent_id === item.agentId && s.id === item.sessionId)
-    if (agents[item.agentId]?.kind === 'antigravity' && (targetSession?.status === 'running' || targetSession?.status === 'waiting_approval')) return
+  const sendQueued = useCallback(async (item: MonitorQueueItem) => {
+    const state = useAstrorderStore.getState()
+    const targetSession = state.sessions[scopeKey(item.agentId, item.sessionId)]
+    if (state.agents[item.agentId]?.kind === 'antigravity' && (targetSession?.status === 'running' || targetSession?.status === 'waiting_approval')) return
     setQueueBusyId(item.id)
     try {
       if (item.source === 'local') await queueOutbox.flush(item.agentId, item.sessionId, item.id)
@@ -873,8 +1057,8 @@ export function MonitorPage() {
     } finally {
       setQueueBusyId(null)
     }
-  }
-  const deleteQueued = async (item: MonitorQueueItem) => {
+  }, [queueOutbox])
+  const deleteQueued = useCallback(async (item: MonitorQueueItem) => {
     setQueueBusyId(item.id)
     try {
       if (item.source === 'local') await queueOutbox.remove(item.agentId, item.sessionId, item.id)
@@ -884,7 +1068,20 @@ export function MonitorPage() {
     } finally {
       setQueueBusyId(null)
     }
-  }
+  }, [queueOutbox])
+  const handleEditQueued = useCallback((item: MonitorQueueItem) => {
+    setEditingQueued(item)
+    setQueuedText(item.text)
+  }, [])
+  const handleOpenSession = useCallback((session: Session) => {
+    navigate('/chat/' + encodeURIComponent(session.id) + '?agent_id=' + encodeURIComponent(session.agent_id))
+  }, [navigate])
+  const handleToggleFocusKey = useCallback((key: string) => {
+    setFocusedKey(key)
+  }, [])
+  const handleClearFocus = useCallback(() => {
+    setFocusedKey(null)
+  }, [])
   const saveQueuedEdit = async () => {
     if (!editingQueued) return
     try {
@@ -1002,32 +1199,32 @@ export function MonitorPage() {
     return sessions.filter(session => !isCompanionSubagentSession(session) && !shown.has(scopeKey(session.agent_id, session.id)) && (!query || (session.title + ' ' + (session.workspace || '') + ' ' + (agents[session.agent_id]?.name || '')).toLowerCase().includes(query)))
   }, [agents, gridVisibleSessions, search, sessions])
 
-  const appendSlotOrder = (keys: string[]) => {
+  const appendSlotOrder = useCallback((keys: string[]) => {
     setSlotOrder((prev) => {
       const merged = Array.from(new Set([...prev, ...keys]))
       try { localStorage.setItem(ORDER_STORAGE_KEY, JSON.stringify(merged)) } catch {}
       return merged
     })
-  }
+  }, [])
 
-  const saveManual = (next: string[]) => {
+  const saveManual = useCallback((next: string[]) => {
     setManualKeys(next)
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(next)) } catch {}
     // 同步固化到 slotOrder，确保无论怎么刷新或触发更新，顺序保持稳定
     appendSlotOrder(next)
-  }
+  }, [appendSlotOrder])
 
-  const saveAutomatic = (next: string[]) => {
+  const saveAutomatic = useCallback((next: string[]) => {
     setAutoKeys(next)
     try { localStorage.setItem(AUTO_STORAGE_KEY, JSON.stringify(next)) } catch {}
     // 同步固化到 slotOrder
     appendSlotOrder(next)
-  }
+  }, [appendSlotOrder])
 
-  const saveExcluded = (next: string[]) => {
+  const saveExcluded = useCallback((next: string[]) => {
     setExcludedKeys(next)
     try { localStorage.setItem(EXCLUDED_STORAGE_KEY, JSON.stringify(next)) } catch {}
-  }
+  }, [])
 
   const addManual = (key: string) => {
     if (!manual.has(key)) saveManual([...manualKeys, key])
@@ -1035,14 +1232,30 @@ export function MonitorPage() {
     if (excluded.has(key)) saveExcluded(excludedKeys.filter(item => item !== key))
   }
 
-  const removeFromMonitor = (key: string) => {
-    if (manual.has(key)) saveManual(manualKeys.filter(item => item !== key))
-    if (automatic.has(key)) saveAutomatic(autoKeys.filter(item => item !== key))
-    if (!excluded.has(key)) saveExcluded([...excludedKeys, key])
-  }
+  const removeFromMonitor = useCallback((key: string) => {
+    setManualKeys((prev) => {
+      if (!prev.includes(key)) return prev
+      const next = prev.filter((item) => item !== key)
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(next)) } catch {}
+      return next
+    })
+    setAutoKeys((prev) => {
+      if (!prev.includes(key)) return prev
+      const next = prev.filter((item) => item !== key)
+      try { localStorage.setItem(AUTO_STORAGE_KEY, JSON.stringify(next)) } catch {}
+      return next
+    })
+    setExcludedKeys((prev) => {
+      if (prev.includes(key)) return prev
+      const next = [...prev, key]
+      try { localStorage.setItem(EXCLUDED_STORAGE_KEY, JSON.stringify(next)) } catch {}
+      return next
+    })
+  }, [])
 
   const cleanStaleAutomaticSessions = () => {
     const now = Date.now()
+    const messagesBySession = useAstrorderStore.getState().messages
     const stale = new Set(sessions.filter(session => {
       const key = scopeKey(session.agent_id, session.id)
       if (!automatic.has(key) || active(session) || queuedSessionKeys.has(key)) return false
@@ -1054,10 +1267,10 @@ export function MonitorPage() {
     notifications.show({ color: stale.size ? 'teal' : 'gray', message: stale.size ? `已清理 ${stale.size} 个过时会话` : '没有可清理的过时会话' })
   }
 
-  const saveSizes = (next: Record<number, SlotSize>) => {
+  const saveSizes = useCallback((next: Record<number, SlotSize>) => {
     setSlotSizes(next)
     try { localStorage.setItem(SIZES_STORAGE_KEY, JSON.stringify(next)) } catch {}
-  }
+  }, [])
 
   // 切换并重排网格列数 (如 1 列, 2 列, 3 列, 4 列)
   const applyGridColumns = (cols: number) => {
@@ -1077,13 +1290,18 @@ export function MonitorPage() {
   }
 
 
-  const saveNewOrder = (next: string[]) => {
+  const saveNewOrder = useCallback((next: string[]) => {
     setSlotOrder(next)
     try { localStorage.setItem(ORDER_STORAGE_KEY, JSON.stringify(next)) } catch {}
-  }
+  }, [])
+
+  const gridVisibleSessionsRef = useRef(gridVisibleSessions)
+  gridVisibleSessionsRef.current = gridVisibleSessions
+  const gridColumnsRef = useRef(gridColumns)
+  gridColumnsRef.current = gridColumns
 
   // Mouse down on header: initiates physical lift
-  const handleHeaderMouseDown = (slotIndex: number, e: MouseEvent<HTMLDivElement>, wrapperEl: HTMLElement | null) => {
+  const handleHeaderMouseDown = useCallback((slotIndex: number, e: MouseEvent<HTMLDivElement>, wrapperEl: HTMLElement | null) => {
     if (e.button !== 0 || !wrapperEl) return
     e.preventDefault()
     const rect = wrapperEl.getBoundingClientRect()
@@ -1125,7 +1343,7 @@ export function MonitorPage() {
       if (active && active.overIndex !== null && active.overIndex !== active.sourceIndex) {
         const from = active.sourceIndex
         const to = active.overIndex
-        const nextList = [...gridVisibleSessions]
+        const nextList = [...gridVisibleSessionsRef.current]
         if (nextList[from] && nextList[to]) {
           const temp = nextList[from]
           nextList[from] = nextList[to]
@@ -1138,10 +1356,10 @@ export function MonitorPage() {
 
     window.addEventListener('mousemove', onMouseMove)
     window.addEventListener('mouseup', onMouseUp)
-  }
+  }, [saveNewOrder])
 
   // Resize bottom-right corner
-  const handleResizeCornerStart = (slotIndex: number, e: MouseEvent<HTMLDivElement>, wrapperEl: HTMLElement | null) => {
+  const handleResizeCornerStart = useCallback((slotIndex: number, e: MouseEvent<HTMLDivElement>, wrapperEl: HTMLElement | null) => {
     e.preventDefault()
     e.stopPropagation()
     const startX = e.clientX
@@ -1153,7 +1371,7 @@ export function MonitorPage() {
     // 获取页面容器宽度，用于计算 50% 等分对齐
     const containerEl = wrapperEl?.parentElement
     const containerW = containerEl ? containerEl.clientWidth : window.innerWidth
-    const defaultColW = Math.round((containerW - (gridColumns - 1) * 16) / gridColumns)
+    const defaultColW = Math.round((containerW - (gridColumnsRef.current - 1) * 16) / gridColumnsRef.current)
     const fullW = Math.round(containerW) // 单列全屏对齐宽度
 
     // 常见标准高度吸附点
@@ -1222,7 +1440,7 @@ export function MonitorPage() {
 
     window.addEventListener('mousemove', onMouseMove)
     window.addEventListener('mouseup', onMouseUp)
-  }
+  }, [saveSizes])
 
   const counts = useMemo(() => ({ running: gridVisibleSessions.filter(active).length, waiting: gridVisibleSessions.filter(session => session.status === 'waiting_approval').length }), [gridVisibleSessions])
 
@@ -1312,9 +1530,9 @@ export function MonitorPage() {
             slotIndex={liftedDrag.sourceIndex}
             slotSize={{ width: liftedDrag.width, height: liftedDrag.height }}
             isFloating={true}
-            queuedItems={queuedCommandsBySession.get(scopeKey(liftedSession.agent_id, liftedSession.id)) || []}
+            queuedItems={queuedCommandsBySession.get(scopeKey(liftedSession.agent_id, liftedSession.id)) || EMPTY_QUEUE_ITEMS}
             queueBusyId={queueBusyId}
-            onOpen={() => {}}
+            onOpen={NOOP}
           />
         </div>
       )}
@@ -1462,18 +1680,20 @@ export function MonitorPage() {
             <Stack gap={8}>
               {gridVisibleSessions.map((session) => {
                 const key = scopeKey(session.agent_id, session.id)
+                const sessionQueued = queuedCommandsBySession.get(key) || EMPTY_QUEUE_ITEMS
+                const rowQueueBusyId = queueBusyId && sessionQueued.some((item) => item.id === queueBusyId) ? queueBusyId : null
                 return (
                   <MonitorListRow
                     key={key}
                     session={session}
                     agent={agents[session.agent_id]}
-                    queuedItems={queuedCommandsBySession.get(key) || []}
-                    queueBusyId={queueBusyId}
+                    queuedItems={sessionQueued}
+                    queueBusyId={rowQueueBusyId}
                     onSendQueued={sendQueued}
-                    onEditQueued={(item) => { setEditingQueued(item); setQueuedText(item.text) }}
+                    onEditQueued={handleEditQueued}
                     onDeleteQueued={deleteQueued}
-                    onOpen={() => navigate('/chat/' + encodeURIComponent(session.id) + '?agent_id=' + encodeURIComponent(session.agent_id))}
-                    onRemove={() => removeFromMonitor(key)}
+                    onOpenSession={handleOpenSession}
+                    onRemoveKey={removeFromMonitor}
                   />
                 )
               })}
@@ -1483,7 +1703,9 @@ export function MonitorPage() {
           <div className="monitor-grid monitor-layout-grid">
             {gridVisibleSessions.map((session, slotIdx) => {
               const key = scopeKey(session.agent_id, session.id)
-              const size = slotSizes[slotIdx] || { height: 520 }
+              const size = slotSizes[slotIdx] || DEFAULT_SLOT_SIZE
+              const sessionQueued = queuedCommandsBySession.get(key) || EMPTY_QUEUE_ITEMS
+              const cardQueueBusyId = queueBusyId && sessionQueued.some((item) => item.id === queueBusyId) ? queueBusyId : null
               const isBeingLifted = liftedDrag?.sourceIndex === slotIdx
               const isOverTarget = liftedDrag?.overIndex === slotIdx && !isBeingLifted
 
@@ -1519,14 +1741,14 @@ export function MonitorPage() {
                   gridColumns={gridColumns}
                   isDropTarget={isOverTarget}
                   isFocused={false}
-                  queuedItems={queuedCommandsBySession.get(key) || []}
-                  queueBusyId={queueBusyId}
+                  queuedItems={sessionQueued}
+                  queueBusyId={cardQueueBusyId}
                   onSendQueued={sendQueued}
-                  onEditQueued={(item) => { setEditingQueued(item); setQueuedText(item.text) }}
+                  onEditQueued={handleEditQueued}
                   onDeleteQueued={deleteQueued}
-                  onToggleFocus={() => setFocusedKey(key)}
-                  onOpen={() => navigate('/chat/' + encodeURIComponent(session.id) + '?agent_id=' + encodeURIComponent(session.agent_id))}
-                  onRemove={() => removeFromMonitor(key)}
+                  onToggleFocusKey={handleToggleFocusKey}
+                  onOpenSession={handleOpenSession}
+                  onRemoveKey={removeFromMonitor}
                   onHeaderMouseDown={handleHeaderMouseDown}
                   onResizeCornerStart={handleResizeCornerStart}
                 />
@@ -1537,7 +1759,7 @@ export function MonitorPage() {
       {focusedSession && (
         <div
           className="monitor-focus-overlay"
-          onClick={() => setFocusedKey(null)}
+          onClick={handleClearFocus}
           role="dialog"
           aria-label="聚焦卡片"
         >
@@ -1549,15 +1771,15 @@ export function MonitorPage() {
               session={focusedSession}
               agent={agents[focusedSession.agent_id]}
               slotIndex={-1}
-              slotSize={{ height: 820 }}
+              slotSize={FOCUSED_SLOT_SIZE}
               isFocused={true}
-              queuedItems={queuedCommandsBySession.get(scopeKey(focusedSession.agent_id, focusedSession.id)) || []}
+              queuedItems={queuedCommandsBySession.get(scopeKey(focusedSession.agent_id, focusedSession.id)) || EMPTY_QUEUE_ITEMS}
               queueBusyId={queueBusyId}
               onSendQueued={sendQueued}
-              onEditQueued={(item) => { setEditingQueued(item); setQueuedText(item.text) }}
+              onEditQueued={handleEditQueued}
               onDeleteQueued={deleteQueued}
-              onToggleFocus={() => setFocusedKey(null)}
-              onOpen={() => navigate('/chat/' + encodeURIComponent(focusedSession.id) + '?agent_id=' + encodeURIComponent(focusedSession.agent_id))}
+              onToggleFocus={handleClearFocus}
+              onOpenSession={handleOpenSession}
             />
           </div>
         </div>

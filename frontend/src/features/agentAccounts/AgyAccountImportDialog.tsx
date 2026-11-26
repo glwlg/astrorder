@@ -1,11 +1,14 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react'
 import { Alert, Button, Group, Radio, Stack, Textarea, TextInput } from '@mantine/core'
-import { agyAccountsApi, agyImportMaxBytes, agyImportPath } from './agyAccountsApi'
+import { accountPlatformMeta, accountsApiFor, agyImportMaxBytes, type AccountPlatform } from './agyAccountsApi'
 
-export function AgyAccountImportDialog({ onClose, onImported }: {
+export function AgyAccountImportDialog({ platform = 'antigravity', onClose, onImported }: {
+  platform?: AccountPlatform
   onClose: () => void
   onImported: () => void
 }) {
+  const meta = accountPlatformMeta(platform)
+  const api = accountsApiFor(platform)
   const title = useId()
   const dialog = useRef<HTMLDialogElement>(null)
   const nameInput = useRef<HTMLInputElement>(null)
@@ -46,7 +49,7 @@ export function AgyAccountImportDialog({ onClose, onImported }: {
     }
     let credential = pasteInput.current?.value ?? ''
     if (!file && (!credential.trim() || new TextEncoder().encode(credential).length > agyImportMaxBytes)) {
-      reject('请输入 1 MB 以内的 AGY Token JSON')
+      reject(`请输入 1 MB 以内的 ${meta.credentialLabel}`)
       return
     }
 
@@ -61,7 +64,7 @@ export function AgyAccountImportDialog({ onClose, onImported }: {
           return
         }
       }
-      await agyAccountsApi.importCredential(name, credential)
+      await api.importCredential(name, credential)
       close()
       onImported()
     } catch (failure) {
@@ -76,8 +79,8 @@ export function AgyAccountImportDialog({ onClose, onImported }: {
       event.preventDefault()
       if (!pending) close()
     }}>
-    <form method="post" action={`/api/v1${agyImportPath}`} aria-labelledby={title} onSubmit={submit} aria-busy={pending}>
-      <h2 id={title}>导入 AGY 账号</h2>
+    <form method="post" action={`/api/v1${api.importPath}`} aria-labelledby={title} onSubmit={submit} aria-busy={pending}>
+      <h2 id={title}>导入 {meta.shortLabel} 账号</h2>
       <Stack gap="md">
         <TextInput ref={nameInput} name="name" label="账号名称" required maxLength={64} readOnly={pending}
           onChange={event => event.currentTarget.setCustomValidity('')} />
@@ -87,10 +90,10 @@ export function AgyAccountImportDialog({ onClose, onImported }: {
             <Radio value="file" label="上传文件" disabled={pending} />
           </Group>
         </Radio.Group>
-        {source === 'paste' ? <Textarea ref={pasteInput} name="credential" label="AGY Token JSON" required minRows={5}
+        {source === 'paste' ? <Textarea ref={pasteInput} name="credential" label={meta.credentialLabel} required minRows={5}
           className="agy-credential-input" autoComplete="off" autoCorrect="off" autoCapitalize="none" spellCheck={false}
           readOnly={pending} onChange={event => { event.currentTarget.setCustomValidity(''); setError('') }} /> :
-          <label className="agy-credential-file">AGY Token 文件（最大 1 MB）
+          <label className="agy-credential-file">{meta.fileLabel}
             <input ref={fileInput} type="file" name="credential_file" accept=".json,application/json" required disabled={pending}
               onChange={event => { event.currentTarget.setCustomValidity(''); setError('') }} />
           </label>}

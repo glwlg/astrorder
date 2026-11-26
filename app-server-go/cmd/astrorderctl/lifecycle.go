@@ -82,6 +82,13 @@ func runAppContext(parent context.Context, args []string, output io.Writer) int 
 			return cliFailure(output, err)
 		}
 	}
+	if operation == "start" || operation == "restart" {
+		if staticDir := strings.TrimSpace(values["ASTRORDER_STATIC_DIR"]); staticDir != "" {
+			if err := lifecycle.ValidateStaticDir(staticDir); err != nil {
+				return cliFailure(output, fmt.Errorf("configured static directory is incomplete: %w", err))
+			}
+		}
+	}
 	executable := values["ASTRORDER_APP_EXECUTABLE"]
 	if !filepath.IsAbs(executable) || !withinRoot(*root, executable) {
 		return cliFailure(output, errors.New("configured App executable must be inside --root"))

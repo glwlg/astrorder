@@ -547,6 +547,12 @@ message DeleteSessionRequest {
   SessionRef session = 2;
 }
 
+message MoveSessionWorkspaceRequest {
+  CommandMeta meta = 1;
+  SessionRef session = 2;
+  string workspace = 3;
+}
+
 message CloseSessionRequest {
   CommandMeta meta = 1;
   SessionRef session = 2;
@@ -1308,6 +1314,7 @@ service SessionControl {
   rpc UpdateSettings(UpdateSettingsRequest) returns (CommandReceipt);
   rpc RenameSession(RenameSessionRequest) returns (CommandReceipt);
   rpc DeleteSession(DeleteSessionRequest) returns (CommandReceipt);
+  rpc MoveSessionWorkspace(MoveSessionWorkspaceRequest) returns (CommandReceipt);
   rpc CloseSession(CloseSessionRequest) returns (CommandReceipt);
   rpc DetachSession(DetachSessionRequest) returns (CommandReceipt);
   rpc ReportObservedStatus(ReportObservedStatusRequest) returns (SessionReceipt);

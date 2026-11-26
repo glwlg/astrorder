@@ -28,6 +28,37 @@ export interface HandoffSummaryCardProps {
   renderMarkdown: (summary: string) => ReactNode
 }
 
+export function shouldShowHandoffSummaryCard(params: {
+  session?: Session | null
+  loading?: boolean
+  historyResolved?: boolean
+  hasMoreHistory?: boolean
+  hiddenRowCount?: number
+  messages: ReadonlyArray<{ role: string; kind: string }>
+}): boolean {
+  const {
+    session,
+    loading = false,
+    historyResolved = true,
+    hasMoreHistory = false,
+    hiddenRowCount = 0,
+    messages,
+  } = params
+  if (!session?.handoff_context?.trim()) return false
+  if (loading || !historyResolved || hasMoreHistory || hiddenRowCount > 0) return false
+  const consumed = Boolean(session.handoff_context_consumed)
+  if (!consumed) return true
+  if (messages.length === 0) return false
+  let userTurns = 0
+  for (const message of messages) {
+    if (message.role === 'user' && message.kind === 'message') {
+      userTurns += 1
+      if (userTurns >= 2) return false
+    }
+  }
+  return true
+}
+
 export function HandoffSummaryCard({ session, compact = false, renderMarkdown }: HandoffSummaryCardProps) {
   const hasHandoffContext = Boolean(session?.handoff_context?.trim())
   const cacheKey = session && hasHandoffContext

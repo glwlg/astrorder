@@ -2,16 +2,22 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type SessionModelBinding } from '../api/client'
 import type { Session } from '../domain/types'
 
-export function useSessionModel(session: Session | null) {
+export interface UseSessionModelOptions {
+  enabled?: boolean
+  refetchOnMount?: boolean | 'always'
+}
+
+export function useSessionModel(session: Session | null, options?: UseSessionModelOptions) {
   const client = useQueryClient()
   const queryKey = ['astrorder', 'session-model', session?.agent_id, session?.id]
   const query = useQuery({
     queryKey,
     queryFn: () => api.getSessionModel(session!.id, session!.agent_id),
-    enabled: Boolean(session),
+    enabled: Boolean(session) && (options?.enabled ?? true),
     retry: false,
     staleTime: 30000,
-    refetchOnMount: 'always',
+    refetchOnMount: options?.refetchOnMount ?? 'always',
+    refetchOnWindowFocus: false,
   })
   const binding = query.data
   const label = binding?.model

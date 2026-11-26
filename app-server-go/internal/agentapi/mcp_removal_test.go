@@ -144,8 +144,8 @@ func TestHTTPCatalogAndInvokeStillExpose42Capabilities(t *testing.T) {
 		t.Fatalf("catalog invalid JSON: %v", err)
 	}
 	items, _ := catalog["items"].([]any)
-	if len(items) != 42 {
-		t.Fatalf("expected 42 catalog items, got %d", len(items))
+	if len(items) != 51 {
+		t.Fatalf("expected 51 catalog items, got %d", len(items))
 	}
 
 	body, _ := json.Marshal(map[string]any{"capability": "catalog.list", "input": map[string]any{}})
@@ -161,8 +161,8 @@ func TestHTTPCatalogAndInvokeStillExpose42Capabilities(t *testing.T) {
 		t.Fatalf("invoke invalid JSON: %v", err)
 	}
 	items, _ = invoked["items"].([]any)
-	if len(items) != 42 {
-		t.Fatalf("expected 42 invoke catalog items, got %d", len(items))
+	if len(items) != 51 {
+		t.Fatalf("expected 51 invoke catalog items, got %d", len(items))
 	}
 }
 

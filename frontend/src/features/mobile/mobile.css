@@ -615,7 +615,7 @@
   }
 
   /* Defer layout/paint strictly for older off-screen messages above the initial fold */
-  .m-transcript > :is(.m-msg, .m-think-pack):nth-last-child(n + 7) {
+  .m-transcript > :is(.m-msg, .m-think-pack):nth-last-child(n + 17) {
     content-visibility: auto;
     contain-intrinsic-size: auto none auto 110px;
   }

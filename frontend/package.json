@@ -11,8 +11,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "verify:dist": "node ../scripts/verify-frontend-dist.mjs --mode browser dist",
     "sync": "astrorderctl sync --dev-root ..",
-    "build:sync": "tsc -b && vite build && astrorderctl sync --dev-root .."
+    "build:sync": "tsc -b && vite build && node ../scripts/verify-frontend-dist.mjs --mode browser dist && astrorderctl sync --dev-root .."
   },
   "dependencies": {
     "@json-render/core": "0.21.0",

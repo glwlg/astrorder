@@ -154,12 +154,12 @@ body { font-family: var(--astr-session-font); font-size: 14px; }
 .agent-connection-dropdown .agent-connection-option[data-combobox-selected] { background: var(--astr-surface-muted); color: var(--astr-text); }
 .agent-connection-dropdown .agent-connection-option[aria-selected='true'],
 .agent-kind-dropdown [aria-current='true'] { background: var(--astr-selected); color: var(--astr-blue); font-weight: 600; }
-.session-quick-filter-row { display: flex; align-items: flex-start; gap: 4px; min-width: 0; }
-.session-quick-filters { display: flex; flex-wrap: wrap; flex: 1; gap: 2px; min-width: 0; padding: 3px; border: 1px solid var(--astr-border); border-radius: 8px; background: color-mix(in oklab, var(--astr-navigation) 65%, transparent); }
-.session-quick-filter { flex: 1 1 auto; min-height: 26px; padding: 3px 5px; border: 0; border-radius: 5px; background: transparent; color: var(--astr-muted); font: 450 11px/1.5 var(--astr-session-font); white-space: nowrap; cursor: pointer; transition: background 120ms ease-out, color 120ms ease-out; }
+.session-quick-filter-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.session-quick-filters { display: flex; flex-wrap: wrap; align-items: center; flex: 1; gap: 2px; min-width: 0; padding: 3px; border: 1px solid var(--astr-border); border-radius: 9px; background: color-mix(in oklab, var(--astr-navigation) 65%, transparent); }
+.session-quick-filter { display: inline-flex; align-items: center; justify-content: center; flex: 1 1 auto; height: 26px; min-height: 26px; padding: 0 6px; margin: 0; border: 0; border-radius: 6px; background: transparent; color: var(--astr-muted); font: 450 11px/1 var(--astr-session-font); white-space: nowrap; cursor: pointer; transition: background 120ms ease-out, color 120ms ease-out; }
 .session-quick-filter:hover { background: color-mix(in oklab, var(--astr-border) 40%, transparent); color: var(--astr-text); }
-.session-quick-filter[aria-pressed='true'] { background: var(--astr-surface); color: var(--astr-blue); font-weight: 650; box-shadow: 0 1px 3px rgb(40 27 60 / 10%); }
-.session-rail-more { display: grid; place-items: center; flex: none; width: 28px; min-height: 34px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--astr-muted); cursor: pointer; }
+.session-quick-filter[aria-pressed='true'] { background: var(--astr-surface); color: var(--astr-blue); font-weight: 650; box-shadow: 0 1px 2px rgb(40 27 60 / 10%); }
+.session-rail-more { display: grid; place-items: center; flex: none; width: 28px; height: 32px; min-height: 32px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--astr-muted); cursor: pointer; }
 .session-rail-more:hover, .session-rail-more[aria-expanded='true'] { background: var(--astr-selected); color: var(--astr-blue); }
 .session-active-filter { display: block; padding: 5px 8px; border: 1px solid var(--astr-blue); border-radius: 6px; background: var(--astr-selected); color: var(--astr-text); font: 0.8125rem/1.4 var(--astr-session-font); text-align: left; cursor: pointer; }
 .workspace-sidebar .session-rail-list { gap: 0; padding: 0 0 14px; }
@@ -355,7 +355,7 @@ body { font-family: var(--astr-session-font); font-size: 14px; }
 .workspace-sidebar .session-search-field kbd { background: var(--sidebar-glass-hover); }
 .workspace-sidebar .session-quick-filter[aria-pressed='true'] {
   background: var(--sidebar-glass-active);
-  box-shadow: inset 0 1px 0 var(--sidebar-glass-rim), 0 1px 3px var(--sidebar-glass-seam);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--astr-border) 45%, transparent), 0 1px 2px var(--sidebar-glass-seam);
 }
 .workspace-sidebar :is(.session-row, .session-quick-filter):not(.is-active, [aria-pressed='true']):hover {
   background: var(--sidebar-glass-hover);
@@ -512,17 +512,41 @@ body { font-family: var(--astr-session-font); font-size: 14px; }
 .composer-git-changes .git-deletions { font: 550 12px/1.4 var(--astr-session-font); }
 .git-insertions { color: var(--astr-green); }
 .git-deletions { color: var(--astr-red); }
+.composer-git-left { display: inline-flex; align-items: center; gap: 6px; min-width: 0; flex-wrap: wrap; }
+.composer-gitlab-pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border-radius: 5px; border: 1px solid var(--astr-border); background: var(--astr-surface-muted); color: var(--astr-text); font: 450 11.5px/1.4 var(--astr-session-font); transition: background-color 120ms ease, border-color 120ms ease; }
+.composer-gitlab-pill:hover { background: var(--astr-card-hover, rgba(0, 0, 0, 0.05)); border-color: var(--astr-input-border); }
+.composer-gitlab-pill.is-failed { border-color: color-mix(in oklab, var(--astr-red) 38%, var(--astr-border)); }
+.composer-gitlab-pill.is-running { border-color: color-mix(in oklab, var(--astr-blue) 42%, var(--astr-border)); }
+.composer-gitlab-dot { width: 7px; height: 7px; border-radius: 999px; flex-shrink: 0; }
+.composer-gitlab-dot.is-pulsing { animation: composer-gitlab-pulse 1.6s ease-in-out infinite; }
+@keyframes composer-gitlab-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.45; transform: scale(0.84); } }
+.composer-gitlab-id { color: var(--astr-muted); font-family: var(--astr-mono-font, ui-monospace, monospace); font-size: 11px; }
 .chat-column .composer-input textarea { min-height: 52px; padding: 7px 2px; color: var(--astr-text); font: 400 14px/1.65 var(--astr-session-font); }
 .chat-column .composer-input textarea::placeholder { color: var(--astr-muted); opacity: 1; }
 .chat-column .composer-row { gap: 7px; min-height: 36px; padding-top: 8px; border-top: 1px solid color-mix(in oklab, var(--astr-border) 65%, transparent); }
 .chat-column .attachment-button { min-width: 27px; height: 28px; padding: 0 3px; color: var(--astr-muted); }
 .chat-column .attachment-button svg { width: 18px; height: 18px; }
 .chat-column .approval-mode-capsule { font-size: 12px; min-height: 28px; padding-inline: 8px; border: 1px solid var(--astr-border); border-radius: 6px; }
-.chat-column .approval-mode-capsule-icon { width: 19px; height: 19px; }
+.chat-column .approval-mode-capsule-icon { width: 19px; height: 19px; display: block; }
 .chat-column .approval-mode-capsule.is-full-access { color: var(--astr-yellow); border-color: color-mix(in oklab, var(--astr-yellow) 36%, var(--astr-border)); background: color-mix(in oklab, var(--astr-yellow) 8%, var(--astr-surface)); }
 .chat-column .approval-mode-capsule.is-full-access .approval-mode-capsule-icon { color: var(--astr-yellow); }
 :root[data-mantine-color-scheme='dark'] .chat-column .approval-mode-capsule.is-full-access { color: #ffbd81; border-color: color-mix(in oklab, #ffbd81 30%, var(--astr-border)); }
 :root[data-mantine-color-scheme='dark'] .chat-column .approval-mode-capsule.is-full-access .approval-mode-capsule-icon { color: #ffbd81; }
+.chat-column .approval-mode-capsule.is-icon-only { width: 28px; min-width: 28px; height: 28px; min-height: 28px; padding: 0; justify-content: center; border-color: transparent; border-radius: 7px; background: transparent; }
+.chat-column .approval-mode-capsule.is-icon-only .approval-mode-capsule-icon { width: 18px; height: 18px; }
+.chat-column .approval-mode-capsule.is-icon-only.is-mode-manual,
+.chat-column .approval-mode-capsule.is-icon-only.is-mode-manual .approval-mode-capsule-icon { color: var(--astr-blue, #228be6); }
+.chat-column .approval-mode-capsule.is-icon-only.is-mode-manual:hover { background: color-mix(in oklab, var(--astr-blue, #228be6) 11%, transparent); }
+.chat-column .approval-mode-capsule.is-icon-only.is-mode-auto,
+.chat-column .approval-mode-capsule.is-icon-only.is-mode-auto .approval-mode-capsule-icon { color: var(--astr-teal, #12b886); }
+.chat-column .approval-mode-capsule.is-icon-only.is-mode-auto:hover { background: color-mix(in oklab, var(--astr-teal, #12b886) 12%, transparent); }
+.chat-column .approval-mode-capsule.is-icon-only.is-full-access,
+.chat-column .approval-mode-capsule.is-icon-only.is-full-access .approval-mode-capsule-icon { color: #e8590c; border-color: transparent; background: transparent; }
+.chat-column .approval-mode-capsule.is-icon-only.is-full-access:hover { background: color-mix(in oklab, #e8590c 12%, transparent); }
+:root[data-mantine-color-scheme='dark'] .chat-column .approval-mode-capsule.is-icon-only.is-full-access,
+:root[data-mantine-color-scheme='dark'] .chat-column .approval-mode-capsule.is-icon-only.is-full-access .approval-mode-capsule-icon { color: #ffbd81; border-color: transparent; background: transparent; }
+:root[data-mantine-color-scheme='dark'] .chat-column .approval-mode-capsule.is-icon-only.is-full-access:hover { background: color-mix(in oklab, #ffbd81 16%, transparent); }
+.chat-column .approval-mode-capsule.is-icon-only:disabled { color: var(--astr-muted); opacity: 0.55; }
 .chat-column .codex-model-pill { height: 28px; font-size: 12px; padding-inline: 8px; border: 0; border-radius: 6px; gap: 8px; background: var(--astr-surface-muted); }
 .chat-column .codex-model-pill-text { font-size: inherit; }
 .chat-column .codex-model-pill-effort { padding-left: 8px; border-left: 1px solid var(--astr-border); font-size: 12px; color: var(--astr-blue); }

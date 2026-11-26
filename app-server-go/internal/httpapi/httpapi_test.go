@@ -353,6 +353,32 @@ func TestStaticRootSymlinkPolicy(t *testing.T) {
 	}
 }
 
+func TestNewHandlerCheckedRejectsIncompleteStaticDir(t *testing.T) {
+	t.Run("missing index.html", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "favicon.ico"), []byte("ico"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cfg := testConfig()
+		cfg.StaticDir = dir
+		if _, err := NewHandlerChecked(Options{Config: cfg}); err == nil || !strings.Contains(err.Error(), "index.html") {
+			t.Fatalf("expected invalid static directory error, got %v", err)
+		}
+	})
+
+	t.Run("missing referenced asset", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte(`<script type="module" src="/assets/index-missing.js"></script>`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cfg := testConfig()
+		cfg.StaticDir = dir
+		if _, err := NewHandlerChecked(Options{Config: cfg}); err == nil || !strings.Contains(err.Error(), "index-missing.js") {
+			t.Fatalf("expected missing asset error, got %v", err)
+		}
+	})
+}
+
 func TestUnknownLegacyRouteIsNotProxied(t *testing.T) {
 	handler := NewHandler(Options{Config: testConfig()})
 	for _, headers := range []map[string]string{nil, {"Authorization": "Bearer browser-secret"}} {

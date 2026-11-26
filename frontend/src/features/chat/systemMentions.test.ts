@@ -52,4 +52,12 @@ describe('system mentions', () => {
   it('does not change ordinary messages', () => {
     expect(expandSystemMentions('普通消息')).toBe('普通消息')
   })
+
+  it('expands @Bot:<slug> mentions into CLI bots invoke directives', () => {
+    const result = expandSystemMentions('帮我叫 @Bot:video-studio 制作 90 秒宣传片', 'antigravity::caller-1')
+    expect(result).toContain('Bot 派单指令（目标 Bot：video-studio）')
+    expect(result).toContain('astrorder-agent bots invoke --bot video-studio')
+    expect(result).toContain('--attach')
+    expect(result).toContain('按需读取或回问')
+  })
 })

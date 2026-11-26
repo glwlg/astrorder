@@ -54,6 +54,8 @@ Call the executable directly in `terminal`, for example `"<skill_dir>/scripts/as
    - `sessions delete --key <KEY>`: delete session and clean up runtime resources.
    - `sessions tree [--key <KEY>]`: query swarm hierarchy and DAG topology.
    - `sessions list` (no options) / `sessions search <QUERY> [--limit <N>]`: discover and search sessions when needed for the user's task.
+   - `schedules list` / `schedules create --in 10m|--interval <MIN>|--daily <HH:MM>|--weekly <HH:MM> --weekdays mon-fri|--cron "<EXPR>" --prompt "<TEXT>"` / `schedules update --id <ID> --enabled <true|false>` / `schedules delete --id <ID>`: manage persistent scheduled tasks bound strictly to the caller's own session.
+   - `gitlab pipelines [--ref <BRANCH>] [--limit 10]` / `gitlab status [--pipeline-id <ID>]` / `gitlab log --job-id <JOB_ID> [--tail 200]`: query self-hosted or cloud GitLab CI pipelines, job stages, and job logs (auto-detects repository from the caller's workspace).
    - `invoke <CAPABILITY> --input '<JSON>'`: invoke arbitrary Astrorder capabilities.
    - `invoke <CAPABILITY> --input-file <PATH>`: read a UTF-8 JSON object without shell quoting or command-line length limits.
 

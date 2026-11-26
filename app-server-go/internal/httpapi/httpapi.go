@@ -32,6 +32,7 @@ import (
 	"astrorder.dev/app-server/internal/auth"
 	"astrorder.dev/app-server/internal/backups"
 	"astrorder.dev/app-server/internal/botgroups"
+	"astrorder.dev/app-server/internal/bots"
 	"astrorder.dev/app-server/internal/browser"
 	"astrorder.dev/app-server/internal/checkpoints"
 	"astrorder.dev/app-server/internal/search"
@@ -44,7 +45,9 @@ import (
 	"astrorder.dev/app-server/internal/digest"
 	"astrorder.dev/app-server/internal/files"
 	"astrorder.dev/app-server/internal/git"
+	"astrorder.dev/app-server/internal/gitlabci"
 	"astrorder.dev/app-server/internal/integrations"
+	"astrorder.dev/app-server/internal/lifecycle"
 	"astrorder.dev/app-server/internal/meetings"
 	"astrorder.dev/app-server/internal/memory"
 	"astrorder.dev/app-server/internal/modelgateway"
@@ -145,6 +148,8 @@ type Options struct {
 	Integrations     http.Handler
 	DbxPlugin        http.Handler
 	Office           http.Handler
+	Bots             http.Handler
+	GitLab           http.Handler
 	Digest           http.Handler
 	Meetings         http.Handler
 	Telemetry        http.Handler
@@ -192,6 +197,8 @@ type api struct {
 	integrations    http.Handler
 	dbxPlugin       http.Handler
 	office          http.Handler
+	bots            http.Handler
+	gitlab          http.Handler
 	digest          http.Handler
 	meetings        http.Handler
 	telemetry       http.Handler
@@ -376,6 +383,10 @@ func NewHandlerChecked(options Options) (http.Handler, error) {
 			}); ok {
 				commandSubmit = submitter.Submit
 			}
+			var wakeScheduler func()
+			if waker, ok := sessionHandler.(interface{ WakeSchedules() }); ok {
+				wakeScheduler = waker.WakeSchedules
+			}
 			var browserInvoke func(context.Context, string, map[string]any) (any, error)
 			if invoker, ok := options.BrowserHandler.(interface {
 				Invoke(context.Context, string, map[string]any) (any, error)
@@ -383,7 +394,7 @@ func NewHandlerChecked(options Options) (http.Handler, error) {
 				browserInvoke = invoker.Invoke
 			}
 			var err error
-			agentHandler, err = agentapi.NewHandler(agentapi.Options{Store: options.Store, Client: options.DaemonClient, Authorizer: authenticator, Publisher: eventHub, Logger: logger, DefaultWorkspace: options.Config.DefaultWorkspace, FileResolver: resolver, RemoteExecutable: options.RemoteExecutable, BrowserInvoke: browserInvoke, CommandSubmit: commandSubmit})
+			agentHandler, err = agentapi.NewHandler(agentapi.Options{Store: options.Store, Client: options.DaemonClient, Authorizer: authenticator, Publisher: eventHub, Logger: logger, DefaultWorkspace: options.Config.DefaultWorkspace, FileResolver: resolver, RemoteExecutable: options.RemoteExecutable, BrowserInvoke: browserInvoke, CommandSubmit: commandSubmit, WakeScheduler: wakeScheduler})
 			if err != nil {
 				return nil, fmt.Errorf("configure agent handler: %w", err)
 			}
@@ -488,13 +499,13 @@ func NewHandlerChecked(options Options) (http.Handler, error) {
 	}
 
 	digestHandler := options.Digest
+	var historyReader digest.SessionHistoryReader
+	if reader, ok := sessionHandler.(interface {
+		ReadRecentMessages(context.Context, string, string, int) ([]map[string]any, error)
+	}); ok {
+		historyReader = reader.ReadRecentMessages
+	}
 	if digestHandler == nil {
-		var historyReader digest.SessionHistoryReader
-		if reader, ok := sessionHandler.(interface {
-			ReadRecentMessages(context.Context, string, string, int) ([]map[string]any, error)
-		}); ok {
-			historyReader = reader.ReadRecentMessages
-		}
 		digestHandler = digest.NewHandler(digest.Options{
 			Store:         options.Store,
 			Authorizer:    authenticator,
@@ -502,6 +513,123 @@ func NewHandlerChecked(options Options) (http.Handler, error) {
 			HistoryReader: historyReader,
 			Logger:        logger,
 		})
+	}
+
+	botsHandler := options.Bots
+	if botsHandler == nil && options.Store != nil {
+		var spawner bots.SessionSpawner
+		if sp, ok := agentHandler.(interface {
+			SpawnForBot(context.Context, map[string]any) (map[string]any, error)
+		}); ok {
+			spawner = func(ctx context.Context, req bots.SpawnRequest) (*bots.SpawnResult, error) {
+				payload := map[string]any{
+					"operation_id":  req.OperationID,
+					"agent_id":      req.AgentID,
+					"title":         req.Title,
+					"workspace":     req.Workspace,
+					"model":         req.Model,
+					"provider":      req.Provider,
+					"effort":        req.Effort,
+					"approval_mode": req.ApprovalMode,
+					"prompt":        req.Prompt,
+				}
+				if req.Caller != nil {
+					payload["caller"] = req.Caller
+				}
+				res, err := sp.SpawnForBot(ctx, payload)
+				if err != nil {
+					return nil, err
+				}
+				out := &bots.SpawnResult{}
+				if sess, ok := res["session"].(map[string]any); ok {
+					out.Session = sess
+				}
+				if receipt, ok := res["receipt"].(map[string]any); ok {
+					out.Receipt = receipt
+				}
+				if opID, ok := res["operation_id"].(string); ok {
+					out.OperationID = opID
+				}
+				if stage, ok := res["stage"].(string); ok {
+					out.Stage = stage
+				}
+				return out, nil
+			}
+		}
+		var botHistory bots.SessionHistoryReader
+		if historyReader != nil {
+			botHistory = bots.SessionHistoryReader(historyReader)
+		}
+		botSvc := bots.NewService(bots.Options{
+			Store:         options.Store,
+			Authorizer:    authenticator,
+			Resolver:      resolver,
+			HistoryReader: botHistory,
+			Spawner:       spawner,
+		})
+		if binder, ok := agentHandler.(interface {
+			SetBotCallbacks(func(context.Context) (any, error), func(context.Context, map[string]any) (any, error))
+		}); ok {
+			binder.SetBotCallbacks(
+				func(ctx context.Context) (any, error) {
+					return botSvc.ListForAgentAPI(ctx)
+				},
+				func(ctx context.Context, payload map[string]any) (any, error) {
+					req := bots.InvokeRequest{}
+					req.Bot, _ = payload["bot"].(string)
+					req.OperationID, _ = payload["operation_id"].(string)
+					req.Title, _ = payload["title"].(string)
+					req.Prompt, _ = payload["prompt"].(string)
+					req.CallerSessionKey, _ = payload["caller_session_key"].(string)
+					req.CallerWorkspace, _ = payload["caller_workspace"].(string)
+					req.CallerConnectionID, _ = payload["caller_connection_id"].(string)
+					req.AgentID, _ = payload["agent_id"].(string)
+					req.Model, _ = payload["model"].(string)
+					req.Provider, _ = payload["provider"].(string)
+					req.Effort, _ = payload["effort"].(string)
+					req.ApprovalMode, _ = payload["approval_mode"].(string)
+					if nc, ok := payload["notify_caller"].(bool); ok {
+						req.NotifyCaller = &nc
+					}
+					if caller, ok := payload["caller"].(map[string]any); ok {
+						req.Caller = caller
+					}
+					switch rawAttach := payload["attach_paths"].(type) {
+					case []any:
+						for _, item := range rawAttach {
+							if s, ok := item.(string); ok && strings.TrimSpace(s) != "" {
+								req.AttachPaths = append(req.AttachPaths, strings.TrimSpace(s))
+							}
+						}
+					case []string:
+						for _, s := range rawAttach {
+							if strings.TrimSpace(s) != "" {
+								req.AttachPaths = append(req.AttachPaths, strings.TrimSpace(s))
+							}
+						}
+					case string:
+						for _, part := range strings.Split(rawAttach, ",") {
+							if strings.TrimSpace(part) != "" {
+								req.AttachPaths = append(req.AttachPaths, strings.TrimSpace(part))
+							}
+						}
+					}
+					return botSvc.Invoke(ctx, req)
+				},
+			)
+		}
+		botsHandler = botSvc
+	}
+
+	gitlabHandler := options.GitLab
+	if gitlabHandler == nil && options.Store != nil {
+		gitlabSvc := gitlabci.NewService(gitlabci.Options{
+			Store:      options.Store,
+			Authorizer: authenticator,
+			Resolver:   resolver,
+		})
+		bindGitLabCallbacks(agentHandler, gitlabSvc)
+		gitlabHandler = gitlabSvc
 	}
 
 	telemetryHandler := options.Telemetry
@@ -547,6 +675,8 @@ func NewHandlerChecked(options Options) (http.Handler, error) {
 		integrations:    integrationsHandler,
 		dbxPlugin:       dbxHandler,
 		office:          officeHandler,
+		bots:            botsHandler,
+		gitlab:          gitlabHandler,
 		digest:          digestHandler,
 		meetings:        meetingsHandler,
 		telemetry:       telemetryHandler,
@@ -569,7 +699,13 @@ func NewHandlerChecked(options Options) (http.Handler, error) {
 		app.connector = &connector.Relay{Client: options.DaemonClient, Store: options.Store, Authorizer: authenticator, Invoke: invoke}
 	}
 	if options.Config.StaticDir != "" {
+		if err := lifecycle.ValidateStaticDir(options.Config.StaticDir); err != nil {
+			return nil, fmt.Errorf("invalid static directory: %w", err)
+		}
 		app.static = newStaticHandler(options.Config.StaticDir)
+		if app.static == nil {
+			return nil, fmt.Errorf("invalid static directory: %s", options.Config.StaticDir)
+		}
 	}
 	return recoverPanics(logger, accessLog(logger, cors(app.auth, gzipResponses(app)))), nil
 }
@@ -637,6 +773,14 @@ func (a *api) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 	}
 	if a.office != nil && office.Matches(request.Method, request.URL.Path) {
 		a.office.ServeHTTP(response, request)
+		return
+	}
+	if a.bots != nil && bots.Matches(request.Method, request.URL.Path) {
+		a.bots.ServeHTTP(response, request)
+		return
+	}
+	if a.gitlab != nil && gitlabci.Matches(request.Method, request.URL.Path) {
+		a.gitlab.ServeHTTP(response, request)
 		return
 	}
 	if a.digest != nil && digest.Matches(request.Method, request.URL.Path) {

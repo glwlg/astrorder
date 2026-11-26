@@ -9,11 +9,13 @@ import {
   IconDatabase,
   IconDotsVertical,
   IconEdit,
+  IconFolderShare,
   IconPalette,
   IconPin,
   IconPinned,
   IconPlus,
   IconRefresh,
+  IconRobot,
   IconSearch,
   IconTrash,
   IconTransfer,
@@ -30,6 +32,7 @@ import {
   Loader,
   Menu,
   Modal,
+  Select,
   Stack,
   Text,
   TextInput,
@@ -59,6 +62,12 @@ import {
   useOfficeModeRegistry,
 } from '../features/office/officeWorkspaceMode'
 import { useIsOfficeProfile } from '../features/office/appProfile'
+import {
+  findBotForWorkspace,
+  storePendingDistillIntent,
+  storePendingHandoffIntent,
+  useBotsOptional,
+} from '../features/bots/useBots'
 import { moveProject, reconcileProjectOrder } from './projectOrder'
 import { useWorkspacePreferences } from '../hooks/useWorkspacePreferences'
 import type { Agent, Project, Session, SessionStatus, Task } from '../domain/types'
@@ -192,6 +201,12 @@ export function SessionRail({
   const [renameTarget, setRenameTarget] = useState<Session | null>(null)
   const [renameTitle, setRenameTitle] = useState('')
   const [renameLoading, setRenameLoading] = useState(false)
+
+  // 移动到其他项目弹窗状态（Antigravity 原生项目迁移）
+  const [moveTarget, setMoveTarget] = useState<Session | null>(null)
+  const [moveWorkspace, setMoveWorkspace] = useState('')
+  const [moveUseCustomPath, setMoveUseCustomPath] = useState(false)
+  const [moveLoading, setMoveLoading] = useState(false)
   const [confirmation, setConfirmation] = useState<PendingConfirmation | null>(null)
   const [confirmationLoading, setConfirmationLoading] = useState(false)
   const [handoffTarget, setHandoffTarget] = useState<Session | null>(null)
@@ -246,6 +261,23 @@ export function SessionRail({
   const worktreeEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKFLOW_GIT_WORKTREE_PLUGIN_ID))
   const officeModeRegistry = useOfficeModeRegistry()
   const isOfficeProfile = useIsOfficeProfile()
+  const registeredBots = useBotsOptional()
+  const [hideBotProjects, setHideBotProjects] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('astrorder:rail-hide-bot-projects') === '1'
+    } catch {
+      return false
+    }
+  })
+  const toggleHideBotProjects = () => {
+    setHideBotProjects((prev) => {
+      const next = !prev
+      try {
+        localStorage.setItem('astrorder:rail-hide-bot-projects', next ? '1' : '0')
+      } catch {}
+      return next
+    })
+  }
 
   const isSessionOffice = (session: Session) =>
     isOfficeProfile || isSessionInOfficeMode(officeModeRegistry, session)
@@ -403,6 +435,165 @@ export function SessionRail({
   const openRenameModal = (session: Session) => {
     setRenameTarget(session)
     setRenameTitle(session.title || '')
+  }
+
+  const normalizeWorkspaceForCompare = (value?: string | null): string => {
+    const raw = (value || '').trim()
+    if (!raw) return ''
+    const slashed = raw.replaceAll('\\', '/').replace(/\/+$/, '') || '/'
+    const isWin = /^[a-zA-Z]:\//.test(slashed) || slashed.startsWith('//')
+    return isWin ? slashed.toLowerCase() : slashed
+  }
+
+  const canMoveSessionProject = (session: Session): boolean => {
+    const kind = agents[session.agent_id]?.kind
+    return (
+      kind === 'antigravity'
+      || kind === 'antigravity-ssh'
+      || kind === 'codex'
+      || kind === 'codex-ssh'
+      || kind === 'hermes'
+      || kind === 'ssh'
+      || kind === 'grok'
+      || kind === 'grok-ssh'
+    )
+  }
+
+  const moveCandidateProjects = useMemo(() => {
+    if (!moveTarget) return [] as Array<{ value: string; label: string; workspace: string; projectKey?: string }>
+    const targetConn = moveTarget.connection_id || agents[moveTarget.agent_id]?.connection_id || ''
+    const currentNorm = normalizeWorkspaceForCompare(moveTarget.workspace)
+    const seen = new Set<string>()
+    const out: Array<{ value: string; label: string; workspace: string; projectKey?: string }> = []
+    const addCandidate = (workspace: string | null | undefined, label: string | null | undefined, conn: string | null | undefined, projectKey?: string) => {
+      const ws = (workspace || '').trim()
+      if (!ws) return
+      const normConn = conn === 'local' ? '' : (conn || '')
+      const targetNormConn = targetConn === 'local' ? '' : targetConn
+      if (normConn !== targetNormConn) return
+      const normWs = normalizeWorkspaceForCompare(ws)
+      if (!normWs || normWs === currentNorm || seen.has(normWs)) return
+      seen.add(normWs)
+      const displayName = (label || '').trim() || ws.replaceAll('\\', '/').split('/').filter(Boolean).pop() || ws
+      out.push({
+        value: ws,
+        label: displayName === ws ? ws : `${displayName} (${ws})`,
+        workspace: ws,
+        projectKey,
+      })
+    }
+
+    for (const p of projects ?? []) {
+      if (p.project_id === '__no_project__') continue
+      const conn = p.connection_id || (p.agent_id ? agents[p.agent_id]?.connection_id : undefined) || ''
+      addCandidate(p.workspace, p.project_name, conn)
+    }
+    for (const g of groups) {
+      const sample = g.sessions[0]
+      const ownerAgent = g.agentId ? agents[g.agentId] : undefined
+      const conn = sample?.connection_id || ownerAgent?.connection_id || ''
+      addCandidate(g.workspace, g.label, conn, g.key)
+    }
+    for (const s of sessions) {
+      const conn = s.connection_id || agents[s.agent_id]?.connection_id || ''
+      addCandidate(s.worktree_root_workspace || s.workspace, s.project_name, conn)
+    }
+    return out.sort((a, b) => a.label.localeCompare(b.label, 'zh-CN', { sensitivity: 'base', numeric: true }))
+  }, [agents, groups, moveTarget, projects, sessions])
+
+  const openMoveProjectModal = (session: Session) => {
+    setMoveTarget(session)
+    setMoveWorkspace('')
+    setMoveUseCustomPath(false)
+  }
+
+  const saveMoveProject = async () => {
+    if (!moveTarget || !moveWorkspace.trim() || moveLoading) return
+    const nextWS = moveWorkspace.trim()
+    setMoveLoading(true)
+    try {
+      const updated = await api.updateSession(moveTarget.id, {
+        agent_id: moveTarget.agent_id,
+        workspace: nextWS,
+      })
+      useAstrorderStore.setState((state) => ({
+        sessions: { ...state.sessions, [scopeKey(updated.agent_id, updated.id)]: updated },
+      }))
+      const matchedCandidate = moveCandidateProjects.find(
+        (item) => normalizeWorkspaceForCompare(item.workspace) === normalizeWorkspaceForCompare(updated.workspace || nextWS),
+      )
+      if (matchedCandidate?.projectKey) {
+        updateCollapsed((current) => ({ ...current, [`project:${matchedCandidate.projectKey}`]: false }))
+      }
+      const targetName = updated.project_name || nextWS.replaceAll('\\', '/').split('/').filter(Boolean).pop() || nextWS
+      notifications.show({ color: 'teal', message: `已将「${displaySessionTitle(updated)}」移动到 ${targetName}` })
+      setMoveTarget(null)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '移动会话项目失败'
+      notifications.show({ color: 'red', message: msg })
+    } finally {
+      setMoveLoading(false)
+    }
+  }
+
+  const moveMenuItem = (session: Session) => {
+    if (!canMoveSessionProject(session)) return null
+    const status = activityStatusFor(session)
+    const busy = status === 'running' || status === 'waiting_approval'
+    return (
+      <Menu.Item
+        leftSection={<IconFolderShare size={14} />}
+        disabled={busy}
+        title={busy ? '会话空闲后可移动项目' : undefined}
+        onClick={() => openMoveProjectModal(session)}
+      >
+        移动到其他项目
+      </Menu.Item>
+    )
+  }
+
+  const distillToBotMenuItem = (session: Session) => (
+    <Menu.Item
+      leftSection={<IconRobot size={14} />}
+      onClick={() => {
+        storePendingDistillIntent({
+          sessionKey: scopeKey(session.agent_id, session.id),
+          sessionTitle: displaySessionTitle(session),
+          workspace: session.workspace || undefined,
+          connectionId: session.connection_id || undefined,
+          agentId: session.agent_id,
+        })
+        window.dispatchEvent(new CustomEvent('astrorder:navigate', { detail: { to: '/bots' } }))
+      }}
+    >
+      沉淀为 Bot
+    </Menu.Item>
+  )
+
+  const handoffToBotMenuItem = (session: Session) => {
+    if (registeredBots.length === 0) return null
+    return (
+      <Menu.Item
+        leftSection={<IconTransfer size={14} />}
+        onClick={() => {
+          const matched = findBotForWorkspace(
+            registeredBots,
+            session.workspace,
+            session.connection_id || agents[session.agent_id]?.connection_id,
+          )
+          storePendingHandoffIntent({
+            callerSessionKey: scopeKey(session.agent_id, session.id),
+            callerTitle: displaySessionTitle(session),
+            callerWorkspace: session.workspace || undefined,
+            callerConnectionId: session.connection_id || agents[session.agent_id]?.connection_id || undefined,
+            sourceBotId: matched?.id,
+          })
+          window.dispatchEvent(new CustomEvent('astrorder:navigate', { detail: { to: '/bots' } }))
+        }}
+      >
+        接力派给 Bot
+      </Menu.Item>
+    )
   }
 
   const saveRename = async () => {
@@ -984,6 +1175,9 @@ export function SessionRail({
                   <Menu position="bottom-end" withinPortal opened={railMenu?.kind === 'session' && railMenu.key === key} onChange={(opened) => updateRailMenu(opened, 'session', key)}><Menu.Target><button className="session-action-btn" aria-label="更多操作"><IconDotsVertical size={14} /></button></Menu.Target><Menu.Dropdown>
                     {isUnread(key) && <Menu.Item leftSection={<IconCheck size={14} />} onClick={() => markSessionRead(key)}>标为已读</Menu.Item>}
                     <Menu.Item leftSection={<IconEdit size={14} />} onClick={() => openRenameModal(session)}>重命名</Menu.Item>
+                    {moveMenuItem(session)}
+                    {handoffToBotMenuItem(session)}
+                    {distillToBotMenuItem(session)}
                     {!isSessionOffice(session) && <Menu.Item leftSection={<IconCopy size={14} />} onClick={() => copySessionId(session)}>复制 ID</Menu.Item>}
                     {forkMenuItems(session)}
                     {handoffItems(session)}
@@ -995,12 +1189,48 @@ export function SessionRail({
           })}
           </>
         </section>}
-        <div className="session-project-section-heading"><span>{isOfficeProfile ? '工作空间' : '项目'}</span><span>{groups.length}</span></div>
-        {groups.map((project) => {
+        {(() => {
+          const botForGroup = (p: ProjectGroup) =>
+            findBotForWorkspace(
+              registeredBots,
+              p.workspace,
+              p.sessions[0]?.connection_id || (p.agentId ? agents[p.agentId]?.connection_id : undefined),
+            )
+          const botProjectCount = groups.filter((p) => Boolean(botForGroup(p))).length
+          const displayedGroups = hideBotProjects && botProjectCount > 0
+            ? groups.filter((p) => !botForGroup(p))
+            : groups
+          return (
+            <>
+              <div className="session-project-section-heading">
+                <span>{isOfficeProfile ? '工作空间' : '项目'}</span>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  {botProjectCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={toggleHideBotProjects}
+                      style={{
+                        border: 'none',
+                        background: 'transparent',
+                        color: 'var(--astr-muted)',
+                        fontSize: 11,
+                        cursor: 'pointer',
+                        padding: '0 4px',
+                      }}
+                      title={hideBotProjects ? '显示已注册为 Bot 的项目目录' : '隐藏已注册为 Bot 的项目（可在左侧 Bot 标签查看）'}
+                    >
+                      {hideBotProjects ? `显示 Bot (${botProjectCount})` : '隐藏 Bot'}
+                    </button>
+                  )}
+                  <span>{displayedGroups.length}</span>
+                </span>
+              </div>
+              {displayedGroups.map((project) => {
           const projectCollapseKey = `project:${project.key}`
           const projectCollapsed = collapsed[projectCollapseKey] === true
           const isProjectPinned = pinnedProjects.includes(project.key)
           const isOfficeProject = isOfficeProfile || isProjectInOfficeMode(officeModeRegistry, project.key, project.workspace)
+          const matchedBot = botForGroup(project)
           const projectCustom = projectAppearance[project.key]
           const visibleCount = expandedCountMap[project.key] ?? 4
           const regularSessions = project.sessions.filter(s => !pinnedSessions[scopeKey(s.agent_id, s.id)])
@@ -1053,6 +1283,18 @@ export function SessionRail({
                     size={16}
                   />
                   <span className="session-project-label">{project.label}</span>
+                  {matchedBot && (
+                    <span
+                      className="session-project-source"
+                      title={`已注册为 Bot：${matchedBot.name}`}
+                      style={{
+                        background: 'rgba(99, 102, 241, 0.14)',
+                        color: '#4f46e5',
+                      }}
+                    >
+                      Bot
+                    </span>
+                  )}
                   {isOfficeProject && (
                     <span
                       className="session-project-source"
@@ -1086,6 +1328,25 @@ export function SessionRail({
                   onDragEnd={() => setDraggedProject(null)}
                 />
                 <div className={`session-project-actions ${isProjectPinned ? 'has-pinned' : ''}`}>
+                  {matchedBot && (
+                    <Tooltip label={`打开 Bot 工作台：${matchedBot.name}`} withArrow position="top">
+                      <button
+                        type="button"
+                        className="session-action-btn"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          window.dispatchEvent(
+                            new CustomEvent('astrorder:navigate', {
+                              detail: { to: `/bots?bot=${encodeURIComponent(matchedBot.id)}` },
+                            }),
+                          )
+                        }}
+                        aria-label={`打开 Bot 工作台：${matchedBot.name}`}
+                      >
+                        <IconRobot size={14} />
+                      </button>
+                    </Tooltip>
+                  )}
                   <Tooltip label={isProjectPinned ? '取消置顶项目' : '置顶项目'} withArrow position="top">
                     <button
                       type="button"
@@ -1119,6 +1380,20 @@ export function SessionRail({
                       </button>
                     </Menu.Target>
                     <Menu.Dropdown onClick={(e) => e.stopPropagation()}>
+                      {matchedBot && (
+                        <Menu.Item
+                          leftSection={<IconRobot size={14} />}
+                          onClick={() => {
+                            window.dispatchEvent(
+                              new CustomEvent('astrorder:navigate', {
+                                detail: { to: `/bots?bot=${encodeURIComponent(matchedBot.id)}` },
+                              }),
+                            )
+                          }}
+                        >
+                          打开 Bot 工作台
+                        </Menu.Item>
+                      )}
                       <Menu.Item
                         leftSection={isProjectPinned ? <IconPinned size={14} /> : <IconPin size={14} />}
                         onClick={() => togglePinProject(project.key)}
@@ -1319,6 +1594,9 @@ export function SessionRail({
                               <Menu.Item leftSection={<IconEdit size={14} />} onClick={() => openRenameModal(session)}>
                                 重命名
                               </Menu.Item>
+                              {moveMenuItem(session)}
+                              {handoffToBotMenuItem(session)}
+                              {distillToBotMenuItem(session)}
                               <Menu.Item
                                 leftSection={isPinned ? <IconPinned size={14} /> : <IconPin size={14} />}
                                 onClick={(e) => togglePin(session, e)}
@@ -1381,6 +1659,9 @@ export function SessionRail({
             </section>
           )
         })}
+            </>
+          )
+        })()}
         </>
       )}
       </div>
@@ -1409,6 +1690,90 @@ export function SessionRail({
             </Button>
             <Button size="xs" onClick={saveRename} loading={renameLoading} disabled={!renameTitle.trim()}>
               保存
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      {/* 移动会话到其他项目模态弹窗 */}
+      <Modal
+        opened={moveTarget !== null}
+        onClose={() => { if (!moveLoading) setMoveTarget(null) }}
+        title="移动会话到其他项目"
+        centered
+        size="md"
+      >
+        <Stack gap="md">
+          {moveTarget && (
+            <Stack gap={4}>
+              <Text size="xs" c="dimmed">
+                会话：{displaySessionTitle(moveTarget)}
+              </Text>
+              {moveTarget.workspace && (
+                <Text size="xs" c="dimmed" style={{ wordBreak: 'break-all' }}>
+                  当前项目：{moveTarget.workspace}
+                </Text>
+              )}
+            </Stack>
+          )}
+
+          {moveCandidateProjects.length > 0 && !moveUseCustomPath ? (
+            <Select
+              label="目标项目"
+              placeholder="选择要移入的目标项目"
+              searchable
+              nothingFoundMessage="未找到匹配项目"
+              data={moveCandidateProjects.map((item) => ({ value: item.value, label: item.label }))}
+              value={moveWorkspace || null}
+              onChange={(val) => setMoveWorkspace(val || '')}
+              disabled={moveLoading}
+              comboboxProps={{ withinPortal: true }}
+            />
+          ) : (
+            <TextInput
+              label="目标项目路径"
+              placeholder={moveTarget?.connection_id ? '例如 /home/user/workspace/project' : '输入目标项目绝对路径'}
+              value={moveWorkspace}
+              onChange={(e) => setMoveWorkspace(e.currentTarget.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') void saveMoveProject()
+              }}
+              disabled={moveLoading}
+              autoFocus
+            />
+          )}
+
+          {moveCandidateProjects.length > 0 && (
+            <Group justify="space-between" align="center">
+              <Button
+                variant="subtle"
+                size="compact-xs"
+                onClick={() => {
+                  setMoveUseCustomPath((v) => !v)
+                  setMoveWorkspace('')
+                }}
+                disabled={moveLoading}
+              >
+                {moveUseCustomPath ? '从已有项目中选择' : '手动输入其他目录路径'}
+              </Button>
+            </Group>
+          )}
+
+          <Text size="xs" c="dimmed">
+            将同步更新原生工作区归属并释放旧会话连接；下次发送消息时将在目标项目目录下继续执行。
+          </Text>
+
+          <Group justify="flex-end" gap="xs">
+            <Button variant="default" size="xs" onClick={() => setMoveTarget(null)} disabled={moveLoading}>
+              取消
+            </Button>
+            <Button
+              size="xs"
+              onClick={saveMoveProject}
+              loading={moveLoading}
+              disabled={!moveWorkspace.trim() || normalizeWorkspaceForCompare(moveWorkspace) === normalizeWorkspaceForCompare(moveTarget?.workspace)}
+            >
+              确认移动
             </Button>
           </Group>
         </Stack>

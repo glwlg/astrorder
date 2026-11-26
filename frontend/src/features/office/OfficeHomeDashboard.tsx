@@ -15,11 +15,14 @@ import {
   IconFolderPlus,
   IconInbox,
   IconMicrophone,
+  IconMovie,
+  IconMusic,
   IconNotebook,
   IconPlus,
   IconPresentation,
   IconSend,
   IconSparkles,
+  IconSubtitles,
   IconUserCog,
 } from '@tabler/icons-react'
 import { useNavigate } from 'react-router-dom'
@@ -66,6 +69,9 @@ function docIcon(ext: string) {
   if (e === 'xlsx' || e === 'xls' || e === 'csv') return <IconFileSpreadsheet size={15} color="#15803d" />
   if (e === 'pptx' || e === 'ppt') return <IconPresentation size={15} color="#ea580c" />
   if (e === 'pdf') return <IconFileTypePdf size={15} color="#dc2626" />
+  if (['mp4', 'm4v', 'webm', 'mov', 'mkv', 'ogv'].includes(e)) return <IconMovie size={15} color="#4f46e5" />
+  if (['wav', 'mp3', 'm4a', 'ogg', 'flac', 'aac', 'opus'].includes(e)) return <IconMusic size={15} color="#0d9488" />
+  if (e === 'srt' || e === 'vtt') return <IconSubtitles size={15} color="#d97706" />
   return <IconFileText size={15} color="#52525b" />
 }
 

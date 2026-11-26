@@ -3,6 +3,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { prepareWailsImeFix } from './wails-ime-fix.mjs'
+import { verifyFrontendDist } from './verify-frontend-dist.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const desktop = path.join(root, 'desktop-wails')
@@ -38,6 +39,7 @@ function frontend() {
     path.join(root, 'frontend'),
     { env: { ...env, ASTRORDER_OUT_DIR: target } },
   )
+  verifyFrontendDist(target, { mode: 'desktop' })
 }
 if (!windows && process.platform !== 'linux') throw new Error('Windows and WSL/Linux build hosts are supported.')
 if (windows) {
@@ -76,7 +78,7 @@ switch (action) {
       }
       run('go', ['vet', '-modfile', fix.modfile, './...'], desktop, { env: fix.env })
     })
-    run(node, ['--test', 'assets/desktop-files.test.mjs', '../scripts/wails-ime-fix.test.mjs'], desktop)
+    run(node, ['--test', 'assets/desktop-files.test.mjs', '../scripts/wails-ime-fix.test.mjs', '../scripts/verify-frontend-dist.test.mjs'], desktop)
     runNpm(['run', 'lint'])
     break
   case 'test': runNpm(['test']); break

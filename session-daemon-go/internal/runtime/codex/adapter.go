@@ -616,6 +616,8 @@ func (a *Adapter) Command(ctx context.Context, r core.Request) (core.Result, err
 		return core.Result{SessionID: r.SessionID, Status: native.Status, Payload: map[string]any{"deleted": r.SessionID}}, nil
 	case "session.disconnect":
 		return core.Result{SessionID: r.SessionID, Status: rt.Status(), Payload: map[string]any{"disconnected": r.SessionID}}, nil
+	case "session.move_workspace":
+		return a.moveSessionWorkspace(ctx, s, rt, r.SessionID, fields)
 	case "session.close":
 		if err := a.confirmSleepSafe(ctx, rt, r.SessionID); err != nil {
 			return core.Result{}, err

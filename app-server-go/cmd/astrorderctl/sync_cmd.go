@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"astrorder.dev/app-server/internal/lifecycle"
 )
 
 func runSync(args []string, output io.Writer) int {
@@ -15,8 +17,30 @@ func runSync(args []string, output io.Writer) int {
 	flags.SetOutput(io.Discard)
 	devRoot := flags.String("dev-root", "", "repository workspace root")
 	installedRoot := flags.String("installed-root", "", "installed server root")
+	verifyOnly := flags.Bool("verify-only", false, "verify installed frontend/dist without copying")
 	if err := flags.Parse(args); err != nil {
 		return cliFailure(output, err)
+	}
+	if flags.NArg() != 0 {
+		return cliFailure(output, fmt.Errorf("unexpected sync arguments: %v", flags.Args()))
+	}
+	if *verifyOnly {
+		if *installedRoot == "" {
+			return cliFailure(output, errors.New("sync --verify-only requires --installed-root"))
+		}
+		absInstalled, err := filepath.Abs(*installedRoot)
+		if err != nil {
+			return cliFailure(output, err)
+		}
+		distDest := filepath.Join(absInstalled, "frontend", "dist")
+		if err := lifecycle.ValidateBrowserDist(distDest); err != nil {
+			return cliFailure(output, fmt.Errorf("installed frontend/dist failed integrity check: %w", err))
+		}
+		return cliSuccess(output, map[string]any{
+			"ok":             true,
+			"verified":       "frontend/dist",
+			"installed_root": absInstalled,
+		})
 	}
 	if *devRoot == "" || *installedRoot == "" {
 		return cliFailure(output, errors.New("sync requires --dev-root and --installed-root"))
@@ -34,9 +58,15 @@ func runSync(args []string, output io.Writer) int {
 	if info, err := os.Stat(distSrc); err != nil || !info.IsDir() {
 		return cliFailure(output, fmt.Errorf("dev frontend/dist not found at %s: build frontend first", distSrc))
 	}
+	if err := lifecycle.ValidateBrowserDist(distSrc); err != nil {
+		return cliFailure(output, fmt.Errorf("dev frontend/dist failed integrity check at %s: %w", distSrc, err))
+	}
 
 	distDest := filepath.Join(absInstalled, "frontend", "dist")
-	if err := copyDirAtomic(distSrc, distDest); err != nil {
+	if pathsOverlap(distSrc, distDest) {
+		return cliFailure(output, errors.New("sync source and destination frontend/dist must not overlap"))
+	}
+	if err := copyDirAtomic(distSrc, distDest, lifecycle.ValidateBrowserDist); err != nil {
 		return cliFailure(output, fmt.Errorf("sync frontend dist: %w", err))
 	}
 
@@ -48,7 +78,7 @@ func runSync(args []string, output io.Writer) int {
 	})
 }
 
-func copyDirAtomic(src, dest string) error {
+func copyDirAtomic(src, dest string, validate func(string) error) error {
 	parent := filepath.Dir(dest)
 	if err := os.MkdirAll(parent, 0o755); err != nil {
 		return err
@@ -63,6 +93,9 @@ func copyDirAtomic(src, dest string) error {
 		if err != nil {
 			return err
 		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("symlink not allowed in frontend/dist: %s", path)
+		}
 		rel, err := filepath.Rel(src, path)
 		if err != nil {
 			return err
@@ -71,10 +104,20 @@ func copyDirAtomic(src, dest string) error {
 		if info.IsDir() {
 			return os.MkdirAll(target, 0o755)
 		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("non-regular file not allowed in frontend/dist: %s", path)
+		}
 		return copyFile(path, target)
 	})
 	if err != nil {
 		return err
+	}
+	// Re-validate the staged copy before swapping so a concurrent frontend
+	// rebuild cannot leave the installed frontend/dist half-written.
+	if validate != nil {
+		if err := validate(tmpDest); err != nil {
+			return fmt.Errorf("staged frontend/dist failed integrity check before swap: %w", err)
+		}
 	}
 
 	backupDest := dest + ".old"
@@ -93,6 +136,21 @@ func copyDirAtomic(src, dest string) error {
 	}
 	_ = os.RemoveAll(backupDest)
 	return nil
+}
+
+func pathsOverlap(a, b string) bool {
+	ca := filepath.Clean(a)
+	cb := filepath.Clean(b)
+	if safeLower(ca) == safeLower(cb) {
+		return true
+	}
+	for _, pair := range [][2]string{{ca, cb}, {cb, ca}} {
+		rel, err := filepath.Rel(pair[0], pair[1])
+		if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel) {
+			return true
+		}
+	}
+	return false
 }
 
 func copyFile(src, dest string) error {

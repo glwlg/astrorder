@@ -201,16 +201,19 @@ export function filterAgentMentions(
     kind: 'skill',
     path: 'system:blackboard:export',
   }
+  const botItems = items.filter((item) => item.kind === 'bot')
+  const nonBotItems = items.filter((item) => item.kind !== 'bot')
   const sortedItems = options?.officeMode
-    ? [...items].sort((a, b) => {
+    ? [...nonBotItems].sort((a, b) => {
         const aDoc = a.kind === 'file' && OFFICE_DOC_EXT_RE.test(a.name) ? 1 : 0
         const bDoc = b.kind === 'file' && OFFICE_DOC_EXT_RE.test(b.name) ? 1 : 0
         return bDoc - aDoc
       })
-    : items
+    : nonBotItems
   const allItems = options?.officeMode
-    ? [browserItem, ...sortedItems]
+    ? [...botItems, browserItem, ...sortedItems]
     : [
+        ...botItems,
         swarmItem,
         browserItem,
         blackboardItem,
@@ -223,6 +226,7 @@ export function filterAgentMentions(
   return allItems.filter(item =>
     item.name.toLocaleLowerCase().includes(query)
     || item.description.toLocaleLowerCase().includes(query)
+    || (item.kind === 'bot' && ('bot'.includes(query) || (item.botSlug || '').toLocaleLowerCase().includes(query)))
     || (item.name.startsWith('黑板') && ('blackboard'.includes(query) || 'bb'.includes(query)))
     || (item.name === '群星' && 'stars'.includes(query))
     || (item.name === '浏览器' && 'browser'.includes(query))
@@ -230,6 +234,7 @@ export function filterAgentMentions(
 }
 
 export function formatAgentMention(item: AgentMention): string {
+  if (item.kind === 'bot') return `@Bot:${item.botSlug || item.name.replace(/^Bot:/i, '')} `
   if (item.path === 'system:swarm') return '@群星 '
   if (item.path === 'system:browser') return '@浏览器 '
   if (item.path === 'system:blackboard') return '@黑板 '
@@ -441,7 +446,9 @@ export function AgentMentionMenu({
                 <Text size="sm" fw={600} truncate>@{item.name}</Text>
                 <Text size="xs" className="agent-mention-menu__meta" lineClamp={1}>{item.description}</Text>
               </div>
-              <Text size="xs" className="agent-mention-menu__meta" ml="auto">{item.kind === 'skill' ? 'Skill' : '文件'}</Text>
+              <Text size="xs" className="agent-mention-menu__meta" ml="auto">
+                {item.kind === 'bot' ? 'Bot' : item.kind === 'skill' ? 'Skill' : '文件'}
+              </Text>
             </Group>
           </UnstyledButton>
         ))}

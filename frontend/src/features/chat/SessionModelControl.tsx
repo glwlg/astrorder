@@ -101,10 +101,23 @@ export function ModelQuotaBadge({ modelRoute, agentId, size = 'sm' }: { modelRou
   )
 }
 
-export function SessionModelControl({ session }: { session: Session }) {
+export function SessionModelControl({
+  session,
+  enabled = true,
+  refetchOnMount = 'always',
+  showPillQuota = true,
+}: {
+  session: Session
+  enabled?: boolean
+  refetchOnMount?: boolean | 'always'
+  showPillQuota?: boolean
+}) {
   const isOfficeMode = useIsOfficeExperience(session)
-  const model = useSessionModel(session)
   const [opened, setOpened] = useState(false)
+  const model = useSessionModel(session, {
+    enabled: enabled || opened,
+    refetchOnMount,
+  })
   const [view, setView] = useState<'main' | 'models'>('main')
   const [search, setSearch] = useState('')
   const [choice, setChoice] = useState<ModelChoice | null>(null)
@@ -259,7 +272,7 @@ export function SessionModelControl({ session }: { session: Session }) {
           }}
         > 
           <span className="codex-model-pill-text">{displayModelName}</span>
-          {!isOfficeMode && <ModelQuotaBadge modelRoute={currentModelRoute} agentId={session.agent_id} size="dot" />}
+          {!isOfficeMode && showPillQuota && <ModelQuotaBadge modelRoute={currentModelRoute} agentId={session.agent_id} size="dot" />}
           {showPillEffort && <span className="codex-model-pill-effort">{effortLabel}</span>}
           <IconChevronDown size={14} className="codex-model-pill-arrow" />
         </button>

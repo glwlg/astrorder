@@ -100,6 +100,7 @@ func (h *Handler) invoke(ctx context.Context, capability string, payload map[str
 		// Distinguish collaboration capabilities (blackboard/telemetry/swarm) from management commands
 		isBlackboard := strings.HasPrefix(capability, "blackboard.")
 		isSwarm := strings.HasPrefix(capability, "swarm.")
+		isSchedules := strings.HasPrefix(capability, "schedules.")
 
 		if isBlackboard {
 			// Only default session_key = callerSK when namespace, session_key, group_id, and parent_key are ALL absent
@@ -151,7 +152,7 @@ func (h *Handler) invoke(ctx context.Context, capability string, payload map[str
 			}
 		}
 
-		if isBlackboard || isSwarm {
+		if isBlackboard || isSwarm || isSchedules {
 			if aid, ok := payload["agent_id"].(string); ok && aid != "" && aid != caller.AgentID {
 				return nil, NewAgentApiError("invalid_caller", fmt.Sprintf("agent_id '%s' conflicts with caller agent '%s'", aid, caller.AgentID))
 			}
@@ -246,6 +247,24 @@ func (h *Handler) invoke(ctx context.Context, capability string, payload map[str
 		return h.swarm.LockRelease(ctx, payload)
 	case "swarm.lock.list":
 		return h.swarm.LockList(ctx)
+	case "bots.list":
+		return h.invokeBotsList(ctx, payload)
+	case "bots.invoke":
+		return h.invokeBotsInvoke(ctx, payload)
+	case "schedules.list":
+		return h.invokeSchedulesList(ctx, payload)
+	case "schedules.create":
+		return h.invokeSchedulesCreate(ctx, payload)
+	case "schedules.update":
+		return h.invokeSchedulesUpdate(ctx, payload)
+	case "schedules.delete":
+		return h.invokeSchedulesDelete(ctx, payload)
+	case "gitlab.pipelines":
+		return h.invokeGitLabPipelines(ctx, payload)
+	case "gitlab.pipeline":
+		return h.invokeGitLabPipeline(ctx, payload)
+	case "gitlab.job_log":
+		return h.invokeGitLabJobLog(ctx, payload)
 	default:
 		return nil, NewAgentApiError("not_found", "Unknown capability")
 	}

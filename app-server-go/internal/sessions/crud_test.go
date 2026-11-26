@@ -39,6 +39,7 @@ type mockDaemonServer struct {
 	statusCb         func() (*sessiondv1.GetStatusResponse, error)
 	protocolMinor    uint32
 	closeCb          func(*sessiondv1.CloseSessionRequest) (*sessiondv1.CommandReceipt, error)
+	moveWorkspaceCb  func(*sessiondv1.MoveSessionWorkspaceRequest) (*sessiondv1.CommandReceipt, error)
 	interruptCb      func(*sessiondv1.InterruptRequest) (*sessiondv1.CommandReceipt, error)
 	queryCb          func(*sessiondv1.NativeQueryRequest) (*sessiondv1.NativeQueryResponse, error)
 }
@@ -146,6 +147,13 @@ func (m *mockDaemonServer) DeleteSession(ctx context.Context, req *sessiondv1.De
 	return &sessiondv1.CommandReceipt{
 		OperationState: sessiondv1.OperationState_OPERATION_STATE_COMPLETED,
 	}, nil
+}
+
+func (m *mockDaemonServer) MoveSessionWorkspace(ctx context.Context, req *sessiondv1.MoveSessionWorkspaceRequest) (*sessiondv1.CommandReceipt, error) {
+	if m.moveWorkspaceCb != nil {
+		return m.moveWorkspaceCb(req)
+	}
+	return m.UnimplementedSessionControlServer.MoveSessionWorkspace(ctx, req)
 }
 
 type mockPublisher struct {

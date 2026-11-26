@@ -1,4 +1,4 @@
-import { IconBrain, IconMicrophone, IconPaperclip, IconPlus, IconPlayerStop, IconX } from '@tabler/icons-react'
+import { IconBolt, IconBrain, IconMicrophone, IconPaperclip, IconPlus, IconPlayerStop, IconX } from '@tabler/icons-react'
 import { Badge, Button, Group, Paper, Stack, Text, Textarea } from '@mantine/core'
 import { InlineNotice } from '../../components/InlineNotice'
 import { useQueryClient } from '@tanstack/react-query'
@@ -21,6 +21,7 @@ import { sharedServerOutbox } from '../mobile/serverOutbox'
 import type { OutboxEntry } from '../mobile/mobileOutbox'
 import { mobileOutboxStorage } from '../mobile/mobileOutboxStorage'
 import { AgentCommandMenu, AgentMentionMenu, buildCommandMenuItems, type CommandMenuItem, filterAgentMentions, formatAgentMention, useAgentCommands, useAgentMentions, useFileMentions, useGitBranches } from './AgentCommandMenu'
+import { useBots } from '../bots/useBots'
 import { useSidecarStore } from '../sidecar/sidecarStore'
 import { expandSystemMentions } from './systemMentions'
 import { draftStorage, usePersistentDraft } from './draftStorage'
@@ -227,7 +228,7 @@ export function ChatComposer({
   session: Session
   agent?: Agent
   tasks?: Task[]
-  usage?: { last_input_tokens: number; context_window: number; context_available?: boolean; source?: string }
+  usage?: { last_input_tokens: number; context_window: number; context_available?: boolean; source?: string; speed?: number | null }
   onHeightChange?: (height: number) => void
   onPreviewImage?: (images: string[], index: number) => void
 }) {
@@ -256,16 +257,24 @@ export function ChatComposer({
   const [commandIndex, setCommandIndex] = useState(0)
   const [dismissedMenuText, setDismissedMenuText] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const quoteAttachRef = useRef<(files: File[]) => void>(() => {})
   useEffect(() => {
     const onQuote = (event: Event) => {
-      const detail = (event as CustomEvent<{ agentId?: string; sessionId?: string; text?: string }>).detail
-      if (!detail?.text) return
-      if (detail.agentId && detail.agentId !== session.agent_id) return
-      if (detail.sessionId && detail.sessionId !== session.id) return
-      updateDraft((current) => {
-        const prefix = current.text.trim() ? `${current.text.replace(/\s+$/, '')}\n` : ''
-        return { ...current, text: `${prefix}${detail.text}` }
-      })
+      const detail = (event as CustomEvent<{ agentId?: string; sessionId?: string; text?: string; files?: File[] }>).detail
+      const hasText = Boolean(detail?.text)
+      const incomingFiles = Array.isArray(detail?.files) ? detail.files.filter((f): f is File => f instanceof File) : []
+      if (!hasText && incomingFiles.length === 0) return
+      if (detail?.agentId && detail.agentId !== session.agent_id) return
+      if (detail?.sessionId && detail.sessionId !== session.id) return
+      if (hasText && detail.text) {
+        updateDraft((current) => {
+          const prefix = current.text.trim() ? `${current.text.replace(/\s+$/, '')}\n` : ''
+          return { ...current, text: `${prefix}${detail.text}` }
+        })
+      }
+      if (incomingFiles.length > 0) {
+        quoteAttachRef.current(incomingFiles)
+      }
       requestAnimationFrame(() => textareaRef.current?.focus())
     }
     window.addEventListener('astrorder:quote-to-composer', onQuote)
@@ -379,15 +388,26 @@ export function ChatComposer({
   const mentionText = mentionMatch?.[0].trim().slice(1) || ''
   const mentionQuery = useAgentMentions(session, resourcesReady)
   const fileMentionQuery = useFileMentions(session, mentionText, mentionMenuOpen && resourcesReady)
+  const botsMentionQuery = useBots(mentionMenuOpen && resourcesReady)
+  const botMentions = useMemo<import('../../domain/types').AgentMention[]>(
+    () => (botsMentionQuery.data?.items || []).map((bot) => ({
+      name: `Bot:${bot.slug}`,
+      description: `${bot.name}${bot.description ? ` · ${bot.description}` : ''}`,
+      kind: 'bot' as const,
+      path: `bot:${bot.slug}`,
+      botSlug: bot.slug,
+    })),
+    [botsMentionQuery.data?.items],
+  )
   const agentMentions = useMemo(
     () => (mentionMenuOpen
       ? filterAgentMentions(
-          [...(mentionQuery.data?.items || []), ...(fileMentionQuery.data || [])],
+          [...botMentions, ...(mentionQuery.data?.items || []), ...(fileMentionQuery.data || [])],
           draft.text,
           { officeMode: isOfficeWorkspace },
         )
       : EMPTY_MENTION_ITEMS),
-    [mentionMenuOpen, mentionQuery.data?.items, fileMentionQuery.data, draft.text, isOfficeWorkspace],
+    [mentionMenuOpen, botMentions, mentionQuery.data?.items, fileMentionQuery.data, draft.text, isOfficeWorkspace],
   )
   // 执行中且输入为空时停止；有草稿时先排队，由用户显式选择是否立即引导。
   const isStopAction = busy && !hasDraft
@@ -475,8 +495,9 @@ export function ChatComposer({
       attachmentKeyRef.current += 1
       return { key: `draft-attachment-${attachmentKeyRef.current}`, file }
     })
-    updateDraft({ ...draft, attachments: [...draft.attachments, ...additions] })
+    updateDraft((current) => ({ ...current, attachments: [...current.attachments, ...additions] }))
   }
+  quoteAttachRef.current = addDroppedFiles
 
   const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
     const files = clipboardFiles(event)
@@ -1100,20 +1121,33 @@ ${draft.text}` : entry.payload.text)
               onReplace={handleDraftShelfReplace}
             />
           </div>
-          <MemoApprovalModeControl session={session} agentKind={agent?.kind} />
+          <MemoApprovalModeControl session={session} agentKind={agent?.kind} iconOnly />
           <span className="composer-toolbar-spacer" />
           {!isOfficeWorkspace && usage && (
-            <Badge
-              variant="light"
-              color="gray"
-              size="sm"
-              leftSection={<IconBrain size={13} />}
-              title={usage.source === 'native_last_request' ? '原生记录的上次请求输入用量' : '当前上下文用量'}
-            >
-              {usage.context_available === false ? '上下文未取得' : usage.context_window && usage.context_window > 0
-                ? `${(usage.last_input_tokens / 1000).toFixed(1)}k / ${(usage.context_window / 1000).toFixed(0)}k`
-                : `${(usage.last_input_tokens / 1000).toFixed(1)}k`}
-            </Badge>
+            <>
+              <Badge
+                variant="light"
+                color="gray"
+                size="sm"
+                leftSection={<IconBrain size={13} />}
+                title={usage.source === 'native_last_request' ? '原生记录的上次请求输入用量' : '当前上下文用量'}
+              >
+                {usage.context_available === false ? '上下文未取得' : usage.context_window && usage.context_window > 0
+                  ? `${(usage.last_input_tokens / 1000).toFixed(1)}k / ${(usage.context_window / 1000).toFixed(0)}k`
+                  : `${(usage.last_input_tokens / 1000).toFixed(1)}k`}
+              </Badge>
+              {usage.speed && usage.speed > 0 && (
+                <Badge
+                  variant="light"
+                  color="gray"
+                  size="sm"
+                  leftSection={<IconBolt size={13} />}
+                  title="最近一轮生成速度（含思考 Token）"
+                >
+                  {`${Number(usage.speed.toFixed(1))} tok/s`}
+                </Badge>
+              )}
+            </>
           )}
           <MemoSessionModelControl key={`model:${draftKey}`} session={session} />
           {voicePluginEnabled && (

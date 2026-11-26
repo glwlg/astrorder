@@ -24,6 +24,22 @@ func desktopWindowsOptions(userDataPath string) (application.WindowsOptions, err
 			if msg == w32.WM_SETICON && wParam == w32.ICON_BIG && lParam != 0 {
 				w32.SendMessage(hwnd, w32.WM_SETICON, w32.ICON_SMALL, small)
 			}
+			// Wails v3.0.0 calls MoveFocus (restoreWebviewFocus) while WM_ACTIVATE
+			// is still being processed, which puts Windows Chinese IME candidate
+			// windows at the top-left screen origin (0, 0) after Alt+Tab / window
+			// switching. Forwarding WM_ACTIVATE directly to DefWindowProc on standard
+			// captioned windows guarantees this fix holds even if someone runs raw
+			// `go build` without scripts/wails-ime-fix.mjs, while preserving WM_SETFOCUS
+			// restoration and frameless window DWM activation handling.
+			if msg == w32.WM_ACTIVATE {
+				state := int(wParam & 0xffff)
+				if state == w32.WA_ACTIVE || state == w32.WA_CLICKACTIVE {
+					style := uint32(w32.GetWindowLong(hwnd, w32.GWL_STYLE))
+					if style&w32.WS_CAPTION == w32.WS_CAPTION {
+						return w32.DefWindowProc(hwnd, msg, wParam, lParam), true
+					}
+				}
+			}
 			return 0, false
 		},
 	}, nil

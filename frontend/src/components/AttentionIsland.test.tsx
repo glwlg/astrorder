@@ -1,6 +1,7 @@
 import { MantineProvider } from '@mantine/core'
+import { notifications } from '@mantine/notifications'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, useLocation } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -8,6 +9,7 @@ import { api } from '../api/client'
 import { clearIslandNotifications, hasIslandNotificationHost, pushIslandNotification } from '../domain/islandNotifications'
 import { useAstrorderStore } from '../state/store'
 import { AttentionIsland } from './AttentionIsland'
+import { DynamicIslandToastHost } from './DynamicIslandToastHost'
 
 function LocationEcho() {
   const location = useLocation()
@@ -32,6 +34,7 @@ describe('AttentionIsland', () => {
   afterEach(() => {
     cleanup()
     clearIslandNotifications()
+    notifications.clean()
     vi.restoreAllMocks()
     useAstrorderStore.getState().resetRuntime()
   })
@@ -237,5 +240,68 @@ describe('AttentionIsland', () => {
     expect(container.querySelector('.attention-island.is-notice.is-notice-error')).not.toBeNull()
     expect(screen.getByText('任务失败')).toBeInTheDocument()
     expect(screen.getByText('+1')).toBeInTheDocument()
+  })
+
+  it('captures global Mantine notifications inside the Dynamic Island, expands taller for rich notices, and deduplicates rapid transient toggles', async () => {
+    useAstrorderStore.getState().hydrateBootstrap({
+      protocol_version: 1,
+      cursor: 7,
+      agents: [{ id: 'codex', name: 'Codex', kind: 'codex', status: 'ready', capabilities: ['chat'], limitation: null }],
+      sessions: [
+        { id: 'active-session', agent_id: 'codex', title: '当前会话', workspace: '/repo', status: 'idle', updated_at: '2026-11-26T08:00:00Z' },
+        { id: 'bg-1', agent_id: 'codex', title: 'Go重构架构师', workspace: '/repo', status: 'running', updated_at: '2026-11-26T08:05:00Z' },
+      ],
+    })
+
+    const { container } = renderIsland()
+    expect(container.querySelector('.attention-island-shell.is-compact-pill')).not.toBeNull()
+
+    // Rapidly fire two transient mode-switch toasts -> latest replaces previous in-place with expanded compact-toast capsule
+    act(() => {
+      notifications.show({ color: 'teal', message: '已切换至办公模式' })
+      notifications.show({ color: 'teal', message: '已切换至研发模式' })
+    })
+
+    await waitFor(() => {
+      const region = screen.getByRole('region', { name: '星序灵动岛' })
+      expect(within(region).getByText('已切换至研发模式')).toBeInTheDocument()
+      expect(within(region).queryByText('已切换至办公模式')).not.toBeInTheDocument()
+      expect(container.querySelector('.attention-island-shell.is-compact-toast')).not.toBeNull()
+    })
+
+    // Fire a rich error notification with title + detail -> morphs into tall rich capsule
+    act(() => {
+      notifications.show({ color: 'red', title: '保存失败', message: '网络连接中断，请检查大内核服务状态后重试' })
+    })
+
+    await waitFor(() => {
+      const region = screen.getByRole('region', { name: '星序灵动岛' })
+      expect(within(region).getByText('保存失败')).toBeInTheDocument()
+      expect(container.querySelector('.attention-island-shell.is-tall.is-notice-error')).not.toBeNull()
+    })
+
+    // Dismissing restores the underlying running capsule smoothly
+    await userEvent.click(screen.getByRole('button', { name: '关闭通知' }))
+    await waitFor(() => {
+      const region = screen.getByRole('region', { name: '星序灵动岛' })
+      expect(within(region).queryByText('保存失败')).not.toBeInTheDocument()
+      expect(within(region).getByText('Go重构架构师')).toBeInTheDocument()
+    })
+  })
+
+  it('renders DynamicIslandToastHost on standalone routes without AttentionIsland and yields when AttentionIsland mounts', async () => {
+    render(
+      <MantineProvider>
+        <DynamicIslandToastHost />
+      </MantineProvider>,
+    )
+
+    act(() => {
+      notifications.show({ color: 'teal', message: '已保存个人办公画像' })
+    })
+
+    const region = await screen.findByRole('region', { name: '通知' })
+    expect(within(region).getByText('已保存个人办公画像')).toBeInTheDocument()
+    expect(document.querySelector('.attention-island.is-standalone')).not.toBeNull()
   })
 })

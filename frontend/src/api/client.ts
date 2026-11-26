@@ -1406,6 +1406,49 @@ export const api = {
     jsonRequest<DigestTemplate>('/digest/templates', template, 'PUT'),
   deleteDigestTemplate: (id: string) =>
     request<{ ok: boolean; id: string }>(`/digest/templates?id=${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
+  // Bot（1 Bot = 1 工作区 + AGENTS.md + Skills）
+  listBots: () =>
+    request<{ items: BotSummary[] }>('/bots'),
+  getBot: (id: string) =>
+    request<{ bot: BotSummary }>(`/bots/${encodeURIComponent(id)}`),
+  createBot: (payload: CreateBotRequest) =>
+    jsonRequest<{ bot: BotSummary; warnings?: string[] }>('/bots', payload, 'POST'),
+  updateBot: (id: string, payload: UpdateBotRequest) =>
+    jsonRequest<{ bot: BotSummary }>(`/bots/${encodeURIComponent(id)}`, payload, 'PATCH'),
+  deleteBot: (id: string) =>
+    request<{ ok: boolean; deleted: string; message?: string }>(`/bots/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  getBotDocs: (id: string) =>
+    request<BotDocsResponse>(`/bots/${encodeURIComponent(id)}/docs`),
+  saveBotAgentsMd: (id: string, content: string) =>
+    jsonRequest<{ ok: boolean; path: string; content: string }>(`/bots/${encodeURIComponent(id)}/agents-md`, { content }, 'PUT'),
+  saveBotSkill: (id: string, skillSlug: string, content: string) =>
+    jsonRequest<{ ok: boolean; skill: BotSkillDoc }>(`/bots/${encodeURIComponent(id)}/skills/${encodeURIComponent(skillSlug)}`, { content }, 'PUT'),
+  optimizeBotConfig: (payload: OptimizeBotRequest) =>
+    jsonRequest<OptimizeBotResponse>('/bots/optimize', payload, 'POST'),
+  distillSessionToBot: (payload: DistillBotRequest) =>
+    jsonRequest<DistillBotResponse>('/bots/distill', payload, 'POST'),
+  invokeBot: (id: string, payload: InvokeBotRequest) =>
+    jsonRequest<InvokeBotResponse>(`/bots/${encodeURIComponent(id)}/invoke`, payload, 'POST'),
+  uploadBotInboxFiles: async (id: string, files: File[]) => {
+    const form = new FormData()
+    for (const file of files) {
+      form.append('files', file, file.name)
+    }
+    const response = await authenticatedApiFetch(`/api/v1/bots/${encodeURIComponent(id)}/upload`, {
+      method: 'POST',
+      body: form,
+    })
+    if (!response.ok) {
+      let detail = `上传素材失败 (${response.status})`
+      try {
+        const parsed = (await response.json()) as { detail?: string }
+        if (parsed.detail) detail = parsed.detail
+      } catch {}
+      throw new ApiError(response.status, detail)
+    }
+    return (await response.json()) as { ok: boolean; files: UploadedBotInboxFile[] }
+  },
 }
 
 export interface PluginSettingsResponse {
@@ -2397,6 +2440,228 @@ export interface DigestHistoryRecord {
   item_count: number
   created_at: string
   updated_at: string
+}
+
+export interface BotSkillSummary {
+  slug: string
+  name: string
+  description: string
+  path: string
+}
+
+export interface BotSkillDoc extends BotSkillSummary {
+  content: string
+  files?: string[]
+}
+
+export interface BotPreset {
+  id: string
+  label: string
+  title?: string
+  prompt: string
+}
+
+export interface UploadedBotInboxFile {
+  name: string
+  path: string
+  size: number
+}
+
+export type BotApprovalMode = 'full_access' | 'auto' | 'manual'
+
+export interface BotProfile {
+  id: string
+  slug: string
+  name: string
+  description: string
+  icon?: string
+  workspace: string
+  connection_id?: string
+  default_agent_id: string
+  default_provider?: string
+  default_model?: string
+  default_effort?: string
+  default_approval_mode?: BotApprovalMode
+  default_notify_caller?: boolean
+  presets?: BotPreset[]
+  office_mode?: boolean
+  tags?: string[]
+  source_session_key?: string
+  source_session_title?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface BotSummary extends BotProfile {
+  has_agents_md: boolean
+  agents_md_excerpt?: string
+  skills: BotSkillSummary[]
+  session_count: number
+  running_count: number
+  last_active_at?: string
+}
+
+export interface BotDocsResponse {
+  bot: BotProfile
+  agents_md_path: string
+  agents_md_exists: boolean
+  agents_md: string
+  skills: BotSkillDoc[]
+  referenced_skills?: string[]
+}
+
+export interface CreateBotRequest {
+  name: string
+  slug?: string
+  description?: string
+  icon?: string
+  workspace: string
+  connection_id?: string
+  default_agent_id: string
+  default_provider?: string
+  default_model?: string
+  default_effort?: string
+  default_approval_mode?: BotApprovalMode
+  default_notify_caller?: boolean
+  presets?: BotPreset[]
+  office_mode?: boolean
+  tags?: string[]
+  source_session_key?: string
+  source_session_title?: string
+  write_agents_md?: boolean
+  agents_md?: string
+  write_skill?: boolean
+  skill_slug?: string
+  skill_md?: string
+}
+
+export interface UpdateBotRequest {
+  name?: string
+  slug?: string
+  description?: string
+  icon?: string
+  workspace?: string
+  connection_id?: string
+  default_agent_id?: string
+  default_provider?: string
+  default_model?: string
+  default_effort?: string
+  default_approval_mode?: BotApprovalMode
+  default_notify_caller?: boolean
+  presets?: BotPreset[]
+  office_mode?: boolean
+  tags?: string[]
+}
+
+export interface OptimizeBotRequest {
+  name: string
+  description?: string
+  instructions?: string
+  workspace?: string
+  default_agent_id?: string
+  existing_agents_md?: string
+  mode?: 'llm' | 'template'
+  provider_id?: string
+  model?: string
+}
+
+export interface OptimizeBotResponse {
+  ok: boolean
+  mode: 'llm' | 'template' | string
+  llm_configured: boolean
+  model?: string
+  suggested_name: string
+  suggested_slug: string
+  suggested_description: string
+  suggested_tags: string[]
+  agents_md: string
+  message?: string
+}
+
+export interface DistillBotRequest {
+  session_key?: string
+  agent_id?: string
+  session_id?: string
+  bot_id?: string
+  name?: string
+  hint?: string
+  max_messages?: number
+  generate_skill?: boolean
+  mode?: 'llm' | 'template'
+  provider_id?: string
+  model?: string
+}
+
+export interface DistillBotResponse {
+  ok: boolean
+  mode: 'llm' | 'template' | string
+  llm_configured: boolean
+  model?: string
+  source_session_key: string
+  source_session_title: string
+  workspace: string
+  connection_id?: string
+  default_agent_id: string
+  suggested_name: string
+  suggested_slug: string
+  suggested_description: string
+  suggested_tags: string[]
+  agents_md: string
+  skill_generated?: boolean
+  skill_slug?: string
+  skill_name?: string
+  skill_description?: string
+  skill_md?: string
+  existing_agents_md?: string
+  has_existing_agents_md: boolean
+  existing_skills: BotSkillSummary[]
+  used_skills?: string[]
+  message_count: number
+  message?: string
+}
+
+export interface StagedBotFile {
+  source_path: string
+  target_path: string
+  name: string
+  size: number
+}
+
+export interface InvokeBotRequest {
+  title?: string
+  prompt: string
+  attach_paths?: string[]
+  caller_session_key?: string
+  caller_workspace?: string
+  caller_connection_id?: string
+  notify_caller?: boolean
+  operation_id?: string
+  agent_id?: string
+  model?: string
+  provider?: string
+  effort?: string
+  approval_mode?: BotApprovalMode
+}
+
+export interface InvokeBotResponse {
+  ok: boolean
+  bot: BotProfile
+  job_id: string
+  inbox_dir?: string
+  staged_files?: StagedBotFile[]
+  session?: {
+    key?: string
+    id?: string
+    agent_id?: string
+    title?: string
+    workspace?: string
+    connection_id?: string
+    status?: string
+  }
+  receipt?: Record<string, unknown>
+  operation_id?: string
+  stage?: string
+  message?: string
 }
 
 export type ApiClient = typeof api

@@ -44,6 +44,47 @@
   background: var(--m-surface);
 }
 
+.mobile-workspace .m-accounts-platforms {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+  gap: 6px;
+  padding: 3px;
+  border-radius: 12px;
+  background: var(--m-low);
+  border: 1px solid var(--m-border);
+}
+
+.mobile-workspace .m-accounts-platform-tab {
+  min-height: 36px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--m-muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 550;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.mobile-workspace .m-accounts-platform-tab[data-active='true'] {
+  background: var(--m-surface);
+  color: var(--m-text);
+  font-weight: 650;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 8%);
+}
+
+.mobile-workspace .m-account-sublabel {
+  display: block;
+  font-size: 11.5px;
+  color: var(--m-muted);
+  overflow-wrap: anywhere;
+}
+
 .mobile-workspace .m-accounts-target-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 44px;

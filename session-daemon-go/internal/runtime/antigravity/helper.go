@@ -154,6 +154,26 @@ func ExecuteHelper(ctx context.Context, req map[string]any) (map[string]any, err
 		}
 		return map[string]any{"confirmed": true}, nil
 
+	case "move_workspace":
+		id := str(req, "conversation_id")
+		if !validID(id) {
+			return nil, &RemoteHelperError{Message: "invalid Antigravity conversation ID", BeforeDispatch: true}
+		}
+		ws := strings.TrimSpace(str(req, "workspace"))
+		if ws == "" {
+			return nil, &RemoteHelperError{Message: "Antigravity target workspace is required", BeforeDispatch: true}
+		}
+		allowJustClosed, _ := req["allow_just_closed"].(bool)
+		cleanWS, targetURI, err := moveWorkspaceForHome(ctx, home, id, ws, true, allowJustClosed)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{
+			"confirmed":     true,
+			"workspace":     cleanWS,
+			"workspace_uri": targetURI,
+		}, nil
+
 	case "session_usage":
 		id := str(req, "conversation_id")
 		if !validID(id) {

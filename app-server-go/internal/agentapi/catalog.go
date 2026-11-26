@@ -346,6 +346,11 @@ var Capabilities = []Capability{
 		Summary: "List all active resource locks across the swarm.",
 		Input:   map[string]any{},
 	},
+	{
+		ID:      "bots.list",
+		Summary: "List registered Specialist Bots (workspace-backed domain bots) available on this Astrorder instance.",
+		Input:   map[string]any{},
+	},
 }
 
 // ExtendedCapabilities contains capabilities exposed via HTTP API but isolated from legacy MCP.
@@ -373,9 +378,127 @@ var ExtendedCapabilities = []Capability{
 			"caller":       "required caller identity {agent_id, connection_id, profile_name, runtime, session_id}",
 		},
 	},
+	{
+		ID:      "bots.invoke",
+		Summary: "Invoke a registered Specialist Bot by spawning a clean job session in the Bot's workspace, optionally staging attached files into its inbox/<job-id>/ directory.",
+		Input: map[string]any{
+			"bot":          "required Bot id, slug, or name (from bots.list)",
+			"operation_id": "required unique client operation id for idempotency",
+			"title":        "optional job session title",
+			"prompt":       "required self-contained task brief for the Bot",
+			"attach_paths": "optional array of file paths from the caller workspace to copy into the Bot's inbox/<job-id>/",
+			"agent_id":     "optional target agent override (defaults to the Bot's default_agent_id)",
+			"model":        "optional model name override",
+			"provider":     "optional provider override",
+			"effort":       "optional reasoning effort override",
+			"caller":       "required caller identity {agent_id, connection_id, profile_name, runtime, session_id}",
+		},
+	},
+	{
+		ID:      "schedules.list",
+		Summary: "List persistent scheduled tasks (timers and recurring crons) bound to the caller's own Astrorder session.",
+		Input: map[string]any{
+			"caller": "required caller identity {agent_id, connection_id, profile_name, runtime, session_id}",
+		},
+	},
+	{
+		ID:      "schedules.create",
+		Summary: "Create a persistent scheduled task (one-shot timer, interval, daily, weekly, or cron) bound strictly to the caller's own Astrorder session (works for both regular sessions and Bot sessions).",
+		Input: map[string]any{
+			"name":              "optional human-readable schedule title",
+			"prompt":            "required prompt text sent back into this session when the schedule fires",
+			"schedule_kind":     "once | interval | daily | weekly | cron (auto-inferred when omitted)",
+			"delay_seconds":     "optional relative delay in seconds for a one-shot timer (alternative to run_at)",
+			"delay_minutes":     "optional relative delay in minutes for a one-shot timer (alternative to run_at)",
+			"run_at":            "RFC3339 timestamp for schedule_kind='once'",
+			"interval_minutes":  "integer 1..43200 for schedule_kind='interval'",
+			"daily_time":        "24-hour HH:MM time for schedule_kind='daily' or 'weekly'",
+			"weekday_mask":      "bitmask 1..127 (Sun=1, Mon=2, Tue=4, Wed=8, Thu=16, Fri=32, Sat=64) for schedule_kind='weekly'",
+			"weekdays":          "optional weekday list such as 'mon-fri', 'weekdays', 'weekend', or '1,3,5'",
+			"cron_expr":         "5-field cron expression (minute hour day month weekday) for schedule_kind='cron'",
+			"timezone":          "optional IANA timezone (e.g. 'Asia/Shanghai') or 'Local'",
+			"when_busy":         "optional 'skip' (default) or 'queue'",
+			"misfire_policy":    "optional 'grace_once' (default), 'skip', or 'run_once'",
+			"misfire_grace_sec": "optional grace window in seconds for grace_once",
+			"enabled":           "optional boolean (default true)",
+			"caller":            "required caller identity {agent_id, connection_id, profile_name, runtime, session_id}",
+		},
+	},
+	{
+		ID:      "schedules.update",
+		Summary: "Update, pause, or resume a scheduled task bound to the caller's own session.",
+		Input: map[string]any{
+			"id":                "required schedule ID (from schedules.list or schedules.create)",
+			"name":              "optional updated title",
+			"prompt":            "optional updated prompt text",
+			"enabled":           "optional boolean to pause (false) or resume (true)",
+			"schedule_kind":     "optional updated schedule kind",
+			"delay_seconds":     "optional relative delay in seconds for once",
+			"delay_minutes":     "optional relative delay in minutes for once",
+			"run_at":            "optional updated RFC3339 run_at",
+			"interval_minutes":  "optional updated interval minutes",
+			"daily_time":        "optional updated HH:MM time",
+			"weekday_mask":      "optional updated weekday bitmask",
+			"weekdays":          "optional updated weekday spec",
+			"cron_expr":         "optional updated 5-field cron expression",
+			"timezone":          "optional updated timezone",
+			"when_busy":         "optional updated 'skip' or 'queue'",
+			"misfire_policy":    "optional updated 'grace_once', 'skip', or 'run_once'",
+			"misfire_grace_sec": "optional updated grace seconds",
+			"caller":            "required caller identity {agent_id, connection_id, profile_name, runtime, session_id}",
+		},
+	},
+	{
+		ID:      "schedules.delete",
+		Summary: "Delete/cancel a scheduled task bound to the caller's own session.",
+		Input: map[string]any{
+			"id":     "required schedule ID to delete",
+			"caller": "required caller identity {agent_id, connection_id, profile_name, runtime, session_id}",
+		},
+	},
+	{
+		ID:      "gitlab.pipelines",
+		Summary: "List recent GitLab CI pipelines for the current workspace repository (auto-detected from .git/config and HEAD) or an explicit GitLab project.",
+		Input: map[string]any{
+			"workspace":     "optional workspace directory (defaults to caller session workspace)",
+			"connection_id": "optional connection id (defaults to caller session connection)",
+			"instance_id":   "optional configured GitLab instance id or name (auto-matched by git remote host when omitted)",
+			"project":       "optional GitLab project path override (e.g. 'group/repo')",
+			"ref":           "optional branch or tag filter",
+			"sha":           "optional commit SHA filter",
+			"limit":         "optional maximum pipelines to return (default 10, max 30)",
+			"caller":        "required caller identity {agent_id, connection_id, profile_name, runtime, session_id}",
+		},
+	},
+	{
+		ID:      "gitlab.pipeline",
+		Summary: "Inspect a GitLab CI pipeline's detailed stages and jobs (defaults to the latest pipeline matching the current workspace HEAD/branch when pipeline_id is omitted).",
+		Input: map[string]any{
+			"pipeline_id":   "optional positive integer pipeline ID (omit to inspect the latest pipeline)",
+			"workspace":     "optional workspace directory (defaults to caller session workspace)",
+			"connection_id": "optional connection id (defaults to caller session connection)",
+			"instance_id":   "optional configured GitLab instance id or name",
+			"project":       "optional GitLab project path override",
+			"ref":           "optional branch or tag filter when picking latest pipeline",
+			"caller":        "required caller identity {agent_id, connection_id, profile_name, runtime, session_id}",
+		},
+	},
+	{
+		ID:      "gitlab.job_log",
+		Summary: "Read the ANSI-cleaned tail of a GitLab CI job's execution log to diagnose build or test failures.",
+		Input: map[string]any{
+			"job_id":        "required positive integer GitLab CI job ID",
+			"tail":          "optional number of trailing log lines to return (default 200, max 1000)",
+			"workspace":     "optional workspace directory (defaults to caller session workspace)",
+			"connection_id": "optional connection id (defaults to caller session connection)",
+			"instance_id":   "optional configured GitLab instance id or name",
+			"project":       "optional GitLab project path override",
+			"caller":        "required caller identity {agent_id, connection_id, profile_name, runtime, session_id}",
+		},
+	},
 }
 
-// AllCapabilities contains all 42 agent capabilities (MCP, standard HTTP, and extended HTTP capabilities).
+// AllCapabilities contains all 51 agent capabilities (MCP, standard HTTP, and extended HTTP capabilities).
 var AllCapabilities = append(append([]Capability{}, Capabilities...), ExtendedCapabilities...)
 
 // KnownPlugins lists the 13 built-in plugins for plugins.list and plugins.configure.

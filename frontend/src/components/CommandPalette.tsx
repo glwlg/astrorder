@@ -176,6 +176,7 @@ export function CommandPalette({ opened, onClose, onToggleSidebar, onOpenSetting
 
     // 2. Routes
     const routes: Array<{ id: string; title: string; subtitle: string; to: string; keywords: string; badge?: string }> = [
+      { id: 'route:bots', title: 'Bot 工作台', subtitle: '/bots', to: '/bots', keywords: 'bot bots 机器人 agents skill 孵化 派单' },
       { id: 'route:inbox', title: isOfficeProfile ? '待办清单' : '待我决策（行动收件箱）', subtitle: '/inbox', to: '/inbox', keywords: 'inbox action todo 待办 清单 决策 审批 收件箱', badge: inboxCount > 0 ? `${inboxCount} 项` : undefined },
       ...(meetingsEnabled ? [{ id: 'route:meetings', title: '会议纪要与录音', subtitle: '/meetings', to: '/meetings', keywords: 'meetings audio minutes 会议 录音 纪要 行动项' }] : []),
       ...(digestEnabled ? [{ id: 'route:digest', title: '工作复盘与周报', subtitle: '/digest', to: '/digest', keywords: 'digest report weekly 复盘 周报 日报 总结' }] : []),

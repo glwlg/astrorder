@@ -58,3 +58,49 @@ func TestTaskbarReceivesSmallIconWhenFrameworkSetsLargeIcon(t *testing.T) {
 		t.Fatalf("small fallback: got %v want %v", got, small)
 	}
 }
+
+func TestActivationInterceptorGuardsCaptionedWindowsAgainstIMEOriginBug(t *testing.T) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	options, err := desktopWindowsOptions(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	instance := w32.GetModuleHandle("")
+	class := w32.MustStringToUTF16Ptr("AstrorderImeActivateGuardRegression")
+	wc := w32.WNDCLASSEX{}
+	wc.Size = uint32(unsafe.Sizeof(wc))
+	wc.Instance = instance
+	wc.ClassName = class
+	wc.WndProc = syscall.NewCallback(func(hwnd w32.HWND, msg uint32, wp, lp uintptr) uintptr {
+		return w32.DefWindowProc(hwnd, msg, wp, lp)
+	})
+	if w32.RegisterClassEx(&wc) == 0 {
+		t.Fatal("register test window class")
+	}
+
+	captioned := w32.CreateWindowEx(0, class, w32.MustStringToUTF16Ptr("Captioned"), w32.WS_OVERLAPPEDWINDOW, 0, 0, 64, 64, 0, 0, instance, nil)
+	if captioned == 0 {
+		t.Fatal("create captioned window")
+	}
+	defer w32.DestroyWindow(captioned)
+
+	if _, handled := options.WndProcInterceptor(captioned, w32.WM_ACTIVATE, w32.WA_ACTIVE, 0); !handled {
+		t.Fatal("expected WA_ACTIVE on captioned window to be intercepted")
+	}
+	if _, handled := options.WndProcInterceptor(captioned, w32.WM_ACTIVATE, w32.WA_CLICKACTIVE, 0); !handled {
+		t.Fatal("expected WA_CLICKACTIVE on captioned window to be intercepted")
+	}
+	if _, handled := options.WndProcInterceptor(captioned, w32.WM_ACTIVATE, w32.WA_INACTIVE, 0); handled {
+		t.Fatal("expected WA_INACTIVE to pass through to Wails")
+	}
+
+	frameless := w32.CreateWindowEx(0, class, w32.MustStringToUTF16Ptr("Frameless"), w32.WS_POPUP, 0, 0, 64, 64, 0, 0, instance, nil)
+	if frameless == 0 {
+		t.Fatal("create frameless window")
+	}
+	defer w32.DestroyWindow(frameless)
+	if _, handled := options.WndProcInterceptor(frameless, w32.WM_ACTIVATE, w32.WA_ACTIVE, 0); handled {
+		t.Fatal("expected frameless window activation to pass through to Wails")
+	}
+}

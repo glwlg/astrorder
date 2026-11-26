@@ -142,3 +142,69 @@ func TestRecentDocsAndSourcesExtractSynthesize(t *testing.T) {
 		t.Fatalf("unexpected synthesize payload: %+v", synthPayload)
 	}
 }
+
+func TestRecentDocsAndExtractVideoAudioSubtitleAssets(t *testing.T) {
+	ws := t.TempDir()
+	srtPath := filepath.Join(ws, "subtitles_zh.srt")
+	mp4Path := filepath.Join(ws, "astrorder-keynote.mp4")
+	wavPath := filepath.Join(ws, "voice_01.wav")
+	if err := os.WriteFile(srtPath, []byte("1\n00:00:00,450 --> 00:00:04,010\n星序 · 群星各有所长，协作自有秩序。\n\n2\n00:00:04,150 --> 00:00:08,000\n原生直连多款智能体。\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(mp4Path, []byte("fake-mp4-bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(wavPath, []byte("RIFFfakewav"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	resolver := targetfs.NewResolver(targetfs.ResolverOptions{
+		AllowedRoots: []string{ws},
+	})
+	h := NewHandler(Options{
+		Authorizer: allowAllAuth{},
+		Resolver:   resolver,
+	})
+
+	recDocsReq := httptest.NewRequest(http.MethodGet, BasePath+"/recent-docs?workspace="+ws, nil)
+	recDocsRes := httptest.NewRecorder()
+	h.ServeHTTP(recDocsRes, recDocsReq)
+	if recDocsRes.Code != http.StatusOK {
+		t.Fatalf("recent-docs status=%d body=%s", recDocsRes.Code, recDocsRes.Body.String())
+	}
+	var docsPayload struct {
+		Items []RecentOfficeDoc `json:"items"`
+	}
+	if err := json.Unmarshal(recDocsRes.Body.Bytes(), &docsPayload); err != nil {
+		t.Fatal(err)
+	}
+	if len(docsPayload.Items) != 3 {
+		t.Fatalf("expected 3 media/subtitle recent docs, got %d: %+v", len(docsPayload.Items), docsPayload.Items)
+	}
+
+	extractBody, _ := json.Marshal(SourcesExtractRequest{
+		Paths: []string{srtPath, mp4Path, wavPath},
+	})
+	extReq := httptest.NewRequest(http.MethodPost, BasePath+"/sources/extract", bytes.NewReader(extractBody))
+	extRes := httptest.NewRecorder()
+	h.ServeHTTP(extRes, extReq)
+	if extRes.Code != http.StatusOK {
+		t.Fatalf("sources/extract status=%d body=%s", extRes.Code, extRes.Body.String())
+	}
+	var extPayload SourcesExtractResponse
+	if err := json.Unmarshal(extRes.Body.Bytes(), &extPayload); err != nil {
+		t.Fatal(err)
+	}
+	if len(extPayload.Sources) != 3 {
+		t.Fatalf("expected 3 extracted sources, got %+v", extPayload.Sources)
+	}
+	if extPayload.Sources[0].Kind != "subtitle" || !strings.Contains(extPayload.Sources[0].Excerpt, "[00:00:00.450] 星序") {
+		t.Fatalf("unexpected subtitle extract: %+v", extPayload.Sources[0])
+	}
+	if extPayload.Sources[1].Kind != "video" || !strings.Contains(extPayload.Sources[1].Excerpt, "视频审片台") {
+		t.Fatalf("unexpected video extract: %+v", extPayload.Sources[1])
+	}
+	if extPayload.Sources[2].Kind != "audio" || !strings.Contains(extPayload.Sources[2].Excerpt, "音频试听器") {
+		t.Fatalf("unexpected audio extract: %+v", extPayload.Sources[2])
+	}
+}

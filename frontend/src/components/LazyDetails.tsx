@@ -10,6 +10,7 @@ export function LazyDetails({
   loading = false,
   defaultOpen = false,
   autoOpen,
+  forceOpen = false,
 }: {
   className?: string
   summary: ReactNode
@@ -17,6 +18,7 @@ export function LazyDetails({
   loading?: boolean
   defaultOpen?: boolean
   autoOpen?: boolean
+  forceOpen?: boolean
 }) {
   const [open, setOpen] = useState(autoOpen ?? defaultOpen)
   const userOverrideRef = useRef<boolean | null>(null)
@@ -32,6 +34,8 @@ export function LazyDetails({
     }
   }, [autoOpen])
 
+  const isOpen = open || forceOpen
+
   const handleToggle = () => {
     setOpen((current) => {
       const next = !current
@@ -40,13 +44,13 @@ export function LazyDetails({
     })
   }
 
-  return <details className={['lazy-details', loading ? 'is-loading-active' : '', className].filter(Boolean).join(' ')} open={open} onToggle={event => { if (event.target === event.currentTarget) setOpen(event.currentTarget.open) }}>
+  return <details className={['lazy-details', loading ? 'is-loading-active' : '', className].filter(Boolean).join(' ')} open={isOpen} onToggle={event => { if (event.target === event.currentTarget) setOpen(event.currentTarget.open) }}>
     <summary onClick={event => { event.preventDefault(); handleToggle() }}>
       <span className={`lazy-details-indicator${loading ? ' is-loading' : ''}`} aria-hidden="true">
         {loading ? <AstrorderLoader size={16} /> : <IconChevronRight size={14} />}
       </span>
       {summary}
     </summary>
-    {open && children}
+    {isOpen && children}
   </details>
 }

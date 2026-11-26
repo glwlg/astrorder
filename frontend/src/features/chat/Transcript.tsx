@@ -22,7 +22,7 @@ import { useOlderMessages } from '../../hooks/useOlderMessages'
 import { activityDuration, activityState, describeTool, extractToolArgs, FileChangeDiffBlock, fileChangeDiffs, formatCommandRowDisplay, PackSummary, ShellOutputBlock, ToolLineIcon, unwrapCommand } from './toolPresentation'
 import { ToolOutputBlock } from './ToolOutputBlock'
 import { isCompactionMessage, CompactionDivider } from './CompactionDivider'
-import { HandoffSummaryCard } from './HandoffSummaryCard'
+import { HandoffSummaryCard, shouldShowHandoffSummaryCard } from './HandoffSummaryCard'
 import { ShinyText } from '../../components/animations/ShinyText'
 import { StarBorder } from '../../components/animations/StarBorder'
 import { GlareHover } from '../../components/animations/GlareHover'
@@ -38,6 +38,12 @@ import { WorkbenchMark } from '../../components/WorkbenchMark'
 import { agentKindLabel } from '../../components/AgentBrandIcon'
 import { ExportMenu } from '../office/export/ExportMenu'
 import { useIsOfficeExperience } from '../office/appProfile'
+import {
+  applyTranscriptCustomHighlights,
+  clearTranscriptCustomHighlights,
+  collectTranscriptMatches,
+  TranscriptFindBar,
+} from './TranscriptFindBar'
 
 const OFFICE_EMPTY_PROMPTS = [
   '帮我起草一份本周工作周报',
@@ -51,6 +57,7 @@ const zhDateFormatter = new Intl.DateTimeFormat('zh-CN', { year: 'numeric', mont
 const zhTimeFormatter = new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit' })
 const INITIAL_VISIBLE_ROWS = 60
 const VISIBLE_ROW_STEP = 60
+const LIVE_UNDEFERRED_TAIL = 16
 
 function formatMessageDate(iso: string): string {
   const ts = Date.parse(iso)
@@ -202,6 +209,7 @@ const MessageItem = memo(function MessageItem({
   checkpoint,
   onOpenCheckpoint,
   isOfficeMode = false,
+  forceOpenActivity = false,
 }: {
   message: Message
   onImageClick?: (url: string) => void
@@ -220,6 +228,7 @@ const MessageItem = memo(function MessageItem({
   checkpoint?: SessionCheckpoint
   onOpenCheckpoint?: (cp: SessionCheckpoint) => void
   isOfficeMode?: boolean
+  forceOpenActivity?: boolean
 }) {
   const isUser = message.role === 'user'
   const isActivity = isMessageActivity(message)
@@ -252,9 +261,9 @@ const MessageItem = memo(function MessageItem({
     const duration = activityDuration(message)
     const foldTitle = desc.target || desc.fullTitle
     return (
-      <article className={`message-activity message-kind-${message.kind}`} data-status={state} data-testid={`message-${message.id}`}>
+      <article className={`message-activity message-kind-${message.kind}${forceOpenActivity ? ' is-find-active' : ''}`} data-status={state} data-testid={`message-${message.id}`}>
         <span className="activity-node" aria-hidden="true">{!isThinking && (state === 'completed' ? <IconCheck /> : state === 'failed' ? <IconX /> : null)}</span>
-        <LazyDetails className={`activity-fold ${desc.isFailed ? 'is-failed' : ''}`} loading={desc.isRunning} summary={
+        <LazyDetails className={`activity-fold ${desc.isFailed ? 'is-failed' : ''}`} loading={desc.isRunning} forceOpen={forceOpenActivity} summary={
           <span className="activity-fold-summary">
             <span className="activity-icon"><ToolLineIcon icon={desc.iconKey} size={14} /></span>
             <span className="activity-title" title={cmdDisplay ? cmdDisplay.tooltip : desc.fullTitle}>
@@ -438,6 +447,7 @@ const ActivityPackSection = memo(function ActivityPackSection({
   onImageClick,
   onGalleryClick,
   session,
+  activeFindMessageId = null,
 }: {
   id: string
   pack: Message[]
@@ -447,9 +457,11 @@ const ActivityPackSection = memo(function ActivityPackSection({
   onImageClick?: (url: string) => void
   onGalleryClick?: (url: string, allImages: string[]) => void
   session?: Session | null
+  activeFindMessageId?: string | null
 }) {
   const [autoOpen, setAutoOpen] = useState(isRunning)
   const packSize = pack.length
+  const hasFindMatch = Boolean(activeFindMessageId)
 
   useEffect(() => {
     if (isRunning) {
@@ -467,12 +479,13 @@ const ActivityPackSection = memo(function ActivityPackSection({
 
   return (
     <section
-      className={`activity-pack${isDeferred ? ' is-deferred-turn' : ''}`}
+      className={`activity-pack${isDeferred && !hasFindMatch ? ' is-deferred-turn' : ''}${hasFindMatch ? ' is-find-active' : ''}`}
       aria-label="思考与工具"
       data-turn-id={id}
     >
       <LazyDetails
         autoOpen={autoOpen}
+        forceOpen={hasFindMatch}
         loading={isRunning}
         summary={<PackSummary pack={pack} isRunning={isRunning} />}
       >
@@ -484,6 +497,7 @@ const ActivityPackSection = memo(function ActivityPackSection({
               onImageClick={onImageClick}
               onGalleryClick={onGalleryClick}
               session={session}
+              forceOpenActivity={activeFindMessageId === item.id}
             />
           ))}
         </div>
@@ -528,6 +542,7 @@ export const Transcript = memo(function Transcript({
   onApproval,
   composerHeight,
   loading,
+  historyResolved = true,
   error,
   notice,
   onRetry,
@@ -544,6 +559,7 @@ export const Transcript = memo(function Transcript({
   checkpoints,
   onOpenCheckpoint,
   highlightMessageId,
+  enableFind = false,
 }: {
   messages: Message[]
   activityBreaks?: readonly string[]
@@ -553,6 +569,7 @@ export const Transcript = memo(function Transcript({
   onApproval?: (approval: Approval, action: 'approve' | 'cancel') => void
   composerHeight?: number
   loading?: boolean
+  historyResolved?: boolean
   error?: string
   notice?: ReactNode
   onRetry?: () => void
@@ -569,6 +586,7 @@ export const Transcript = memo(function Transcript({
   checkpoints?: SessionCheckpoint[]
   onOpenCheckpoint?: (cp: SessionCheckpoint) => void
   highlightMessageId?: string | null
+  enableFind?: boolean
 }) {
   const _reducedMotion = useReducedMotion(undefined, { getInitialValueInEffect: false })
   void _reducedMotion
@@ -601,6 +619,20 @@ export const Transcript = memo(function Transcript({
     }
     return null
   }, [visibleMessages])
+
+  // Freeze the deferred-turn cutoff once initial history loads so live sends/streaming
+  // never toggle content-visibility:auto onto previously rendered turns (which would
+  // collapse their off-screen height from real px to contain-intrinsic-size and jump scroll).
+  const [deferredCutoff, setDeferredCutoff] = useState<number | null>(null)
+  const effectiveDeferredCutoff =
+    deferredCutoff === null
+      ? Math.max(0, visibleMessages.length - LIVE_UNDEFERRED_TAIL)
+      : deferredCutoff
+  useEffect(() => {
+    if (deferredCutoff === null && !loading && visibleMessages.length > 0) {
+      setDeferredCutoff(Math.max(0, visibleMessages.length - LIVE_UNDEFERRED_TAIL))
+    }
+  }, [deferredCutoff, loading, visibleMessages.length])
 
   const visualRows = useMemo<VisualRow[]>(() => {
     const n = visibleMessages.length
@@ -674,7 +706,7 @@ export const Transcript = memo(function Transcript({
         const isPackRunning = Boolean(busy && isLatestActivity && !laterUser)
         const shouldOpen = isPackRunning && !laterFinalReply
         const definitivelyEnded = laterFinalReply || laterUser
-        const isDeferred = !shouldOpen && idx + pack.length < n - 6
+        const isDeferred = !shouldOpen && idx + pack.length < effectiveDeferredCutoff
         rows.push({ kind: 'pack', id: message.id, pack, shouldOpen, definitivelyEnded, isDeferred })
         const packArtifacts = turnArtifacts.byPackStart.get(idx)
         if (packArtifacts) {
@@ -725,7 +757,7 @@ export const Transcript = memo(function Transcript({
         isFinalReply,
         showAuthorMark,
         isLatest: idx === n - 1,
-        isDeferred: idx < n - 6,
+        isDeferred: idx < effectiveDeferredCutoff,
         continuedNativeInput,
       })
       const msgArtifacts = turnArtifacts.byMessageIndex.get(idx)
@@ -738,19 +770,93 @@ export const Transcript = memo(function Transcript({
             continued: entry.continued,
             turnRunning: entry.turnRunning,
             turnEndAt: entry.turnEndAt,
-            isDeferred: idx < n - 6,
+            isDeferred: idx < effectiveDeferredCutoff,
           })
         }
       }
     }
     return rows
-  }, [busy, commands, packs, turnArtifacts, visibleMessages])
+  }, [busy, commands, effectiveDeferredCutoff, packs, turnArtifacts, visibleMessages])
 
-  const [visibleRowLimit, setVisibleRowLimit] = useState(INITIAL_VISIBLE_ROWS)
+  // Anchor the initial hidden row slice once history finishes loading so appending new turns
+  // at the bottom never evicts rows from the top of the DOM (which causes upward scroll jumps).
+  const [hiddenStart, setHiddenStart] = useState<number | null>(null)
   const [activeHighlightId, setActiveHighlightId] = useState<string | null>(null)
   const highlightScrolledRef = useRef<string | null>(null)
   const highlightLoadAttemptsRef = useRef<number>(0)
-  const hiddenRowCount = Math.max(0, visualRows.length - visibleRowLimit)
+
+  // In-session Ctrl+F find state
+  const [findOpen, setFindOpen] = useState(false)
+  const [findQuery, setFindQuery] = useState('')
+  const [findCaseSensitive, setFindCaseSensitive] = useState(false)
+  const [findActiveIdx, setFindActiveIdx] = useState(0)
+  const [findFocusSignal, setFindFocusSignal] = useState(0)
+  const [findNavSeq, setFindNavSeq] = useState(0)
+  const prevFindFocusRef = useRef<HTMLElement | null>(null)
+
+  const findMatches = useMemo(
+    () => (findOpen ? collectTranscriptMatches(visualRows, findQuery, findCaseSensitive) : []),
+    [findCaseSensitive, findOpen, findQuery, visualRows],
+  )
+  const safeFindIndex = findMatches.length > 0 ? ((findActiveIdx % findMatches.length) + findMatches.length) % findMatches.length : 0
+  const activeFindHit = findMatches[safeFindIndex] || null
+
+  const openFindBar = useCallback(() => {
+    const active = document.activeElement
+    if (active instanceof HTMLElement && !active.closest('.transcript-find-bar')) {
+      prevFindFocusRef.current = active
+    }
+    const sel = window.getSelection()?.toString().trim() || ''
+    if (sel && sel.length <= 80 && !sel.includes('\n')) {
+      setFindQuery(sel)
+      setFindActiveIdx(0)
+    }
+    setFindOpen(true)
+    setFindFocusSignal((n) => n + 1)
+    setFindNavSeq((n) => n + 1)
+  }, [])
+
+  const closeFindBar = useCallback(() => {
+    setFindOpen(false)
+    clearTranscriptCustomHighlights()
+    const prev = prevFindFocusRef.current
+    prevFindFocusRef.current = null
+    if (prev && document.contains(prev)) {
+      prev.focus()
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!enableFind) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing || event.altKey || event.shiftKey) return
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'f') return
+      const target = event.target instanceof Element ? event.target : null
+      if (target?.closest('.monaco-editor, .xterm, .agent-graph-root, #session-sidecar')) return
+      if (document.querySelector('[role="dialog"], [role="alertdialog"]')) return
+      event.preventDefault()
+      event.stopPropagation()
+      openFindBar()
+    }
+    const onOpenFindEvent = () => openFindBar()
+    window.addEventListener('keydown', onKeyDown, { capture: true })
+    window.addEventListener('astrorder:open-transcript-find', onOpenFindEvent)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown, { capture: true })
+      window.removeEventListener('astrorder:open-transcript-find', onOpenFindEvent)
+      clearTranscriptCustomHighlights()
+    }
+  }, [enableFind, openFindBar])
+
+  const hiddenRowCount =
+    hiddenStart === null
+      ? Math.max(0, visualRows.length - INITIAL_VISIBLE_ROWS)
+      : Math.min(hiddenStart, Math.max(0, visualRows.length - 1))
+  useEffect(() => {
+    if (hiddenStart === null && !loading && visualRows.length > 0) {
+      setHiddenStart(Math.max(0, visualRows.length - INITIAL_VISIBLE_ROWS))
+    }
+  }, [hiddenStart, loading, visualRows.length])
   const renderedRows = useMemo(
     () => (hiddenRowCount > 0 ? visualRows.slice(hiddenRowCount) : visualRows),
     [hiddenRowCount, visualRows],
@@ -767,15 +873,29 @@ export const Transcript = memo(function Transcript({
   }, [hiddenRowCount, renderedRows, visibleMessages])
 
   const lastMessage = visibleMessages[visibleMessages.length - 1]
-  const outboundVersion = useMemo(() => outbox.map((item) => item.command.id).join(','), [outbox])
-  const contentVersion = `${visibleMessages.length}:${lastMessage?.id ?? ''}:${lastMessage?.text.length ?? 0}|${outbox.map((item) => `${item.command.id}:${item.status}`).join(',')}|${approvals.map((item) => item.id).join(',')}|${composerHeight ?? 0}|${visibleRowLimit}`
+  const isWaiting = Boolean(session?.status === 'running' && (!lastMessage || lastMessage.role === 'user'))
+  const seenOutboxIdsRef = useRef<Set<string>>(new Set())
+  const sendFollowVersionRef = useRef(0)
+  for (const item of outbox) {
+    if (!seenOutboxIdsRef.current.has(item.command.id)) {
+      seenOutboxIdsRef.current.add(item.command.id)
+      sendFollowVersionRef.current += 1
+    }
+  }
+  const sendFollowVersion = sendFollowVersionRef.current
+  const lastToolSig = lastMessage?.tool
+    ? `${lastMessage.tool.status ?? ''}:${typeof lastMessage.tool.output === 'string' ? lastMessage.tool.output.length : 0}`
+    : ''
+  const contentVersion = `${visibleMessages.length}:${visualRows.length}:${lastMessage?.id ?? ''}:${lastMessage?.text.length ?? 0}:${lastToolSig}:${isWaiting ? 1 : 0}|${outbox.map((item) => `${item.command.id}:${item.status}`).join(',')}|${approvals.map((item) => item.id).join(',')}|${composerHeight ?? 0}|${hiddenRowCount}`
   const {
     setContainerRef,
+    setContentRef,
     following,
     onScroll,
     scrollToBottom,
     capturePrependAnchor,
-  } = useStickToBottom<HTMLDivElement>({ contentVersion, forceFollowVersion: outboundVersion })
+    pauseFollow,
+  } = useStickToBottom<HTMLDivElement>({ contentVersion, forceFollowVersion: sendFollowVersion })
   const [scrollerEl, setScrollerEl] = useState<HTMLDivElement | null>(null)
   const bindTranscriptRef = useCallback(
     (node: HTMLDivElement | null) => {
@@ -796,8 +916,18 @@ export const Transcript = memo(function Transcript({
         scrollToBottom()
       }
     }
+    const onSessionSubmitted = (event: Event) => {
+      const key = (event as CustomEvent<string>).detail
+      if (key === sessionKey) {
+        scrollToBottom()
+      }
+    }
     window.addEventListener('astrorder:composer-height', onComposerHeight)
-    return () => window.removeEventListener('astrorder:composer-height', onComposerHeight)
+    window.addEventListener('astrorder:session-submitted', onSessionSubmitted)
+    return () => {
+      window.removeEventListener('astrorder:composer-height', onComposerHeight)
+      window.removeEventListener('astrorder:session-submitted', onSessionSubmitted)
+    }
   }, [scrollToBottom, sessionKey])
 
   const older = useOlderMessages({
@@ -806,7 +936,7 @@ export const Transcript = memo(function Transcript({
     load: () => {
       if (hiddenRowCount > 0) {
         capturePrependAnchor()
-        setVisibleRowLimit((limit) => limit + VISIBLE_ROW_STEP)
+        setHiddenStart((current) => Math.max(0, (current ?? hiddenRowCount) - VISIBLE_ROW_STEP))
         return
       }
       return onLoadOlder?.()
@@ -830,7 +960,7 @@ export const Transcript = memo(function Transcript({
     )
     if (targetRowIdx >= 0) {
       if (targetRowIdx < hiddenRowCount) {
-        setVisibleRowLimit(Math.max(visibleRowLimit, visualRows.length - targetRowIdx + 10))
+        setHiddenStart(Math.max(0, targetRowIdx - 10))
         return
       }
       const container = scrollerEl
@@ -850,10 +980,89 @@ export const Transcript = memo(function Transcript({
       highlightLoadAttemptsRef.current += 1
       void onLoadOlder()
     }
-  }, [hasMoreHistory, hiddenRowCount, highlightMessageId, loadingOlder, onLoadOlder, scrollerEl, visibleRowLimit, visualRows])
+  }, [hasMoreHistory, hiddenRowCount, highlightMessageId, loadingOlder, onLoadOlder, scrollerEl, visualRows])
 
-  const lastVisibleMessage = visibleMessages[visibleMessages.length - 1]
-  const isWaiting = Boolean(session?.status === 'running' && (!lastVisibleMessage || lastVisibleMessage.role === 'user'))
+  // Auto-expand folded rows & collapsed activity packs when navigating to a Ctrl+F hit,
+  // pause auto-follow so live streaming cannot snap back to bottom, apply CSS Custom
+  // Highlights, and scroll the exact matched range into the viewport center.
+  useEffect(() => {
+    if (!findOpen || !findQuery.trim()) {
+      clearTranscriptCustomHighlights()
+      return
+    }
+    if (activeFindHit) {
+      pauseFollow()
+    }
+    if (activeFindHit && activeFindHit.rowIndex < hiddenRowCount) {
+      setHiddenStart(Math.max(0, activeFindHit.rowIndex - 10))
+      return
+    }
+    if (!scrollerEl) return
+    const inner = scrollerEl.querySelector<HTMLElement>('.transcript-inner')
+    if (!inner) return
+
+    let frame2 = 0
+    const locateAndScroll = () => {
+      const activeRange = applyTranscriptCustomHighlights(inner, findQuery, findCaseSensitive, activeFindHit)
+      if (!activeFindHit) return
+      pauseFollow()
+      const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches
+      const behavior: ScrollBehavior = reduced ? 'auto' : 'smooth'
+      const scrollerRect = scrollerEl.getBoundingClientRect()
+
+      if (
+        activeRange &&
+        typeof activeRange.getBoundingClientRect === 'function' &&
+        typeof scrollerEl.scrollTo === 'function' &&
+        scrollerRect.height > 0
+      ) {
+        const rangeRect = activeRange.getBoundingClientRect()
+        if (rangeRect.height > 0 || rangeRect.width > 0) {
+          const targetTop =
+            scrollerEl.scrollTop + (rangeRect.top - scrollerRect.top) - scrollerRect.height * 0.38
+          scrollerEl.scrollTo({
+            top: Math.max(0, targetTop),
+            behavior,
+          })
+          return
+        }
+      }
+
+      const escapeCss = (id: string) =>
+        typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(id) : id.replace(/"/g, '\\"')
+      const escaped = escapeCss(activeFindHit.messageId)
+      const escapedPack = activeFindHit.packId ? escapeCss(activeFindHit.packId) : ''
+      const msgEl =
+        scrollerEl.querySelector<HTMLElement>(`[data-turn-id="${escaped}"], [data-testid="message-${escaped}"]`) ||
+        (escapedPack ? scrollerEl.querySelector<HTMLElement>(`[data-turn-id="${escapedPack}"]`) : null)
+      if (!msgEl) return
+
+      if (typeof scrollerEl.scrollTo === 'function' && scrollerRect.height > 0) {
+        const msgRect = msgEl.getBoundingClientRect()
+        if (msgRect.height > 0) {
+          const targetTop =
+            scrollerEl.scrollTop + (msgRect.top - scrollerRect.top) - scrollerRect.height * 0.38
+          scrollerEl.scrollTo({
+            top: Math.max(0, targetTop),
+            behavior,
+          })
+          return
+        }
+      }
+      msgEl.scrollIntoView({ behavior, block: 'center' })
+    }
+
+    // Two-frame settle guarantees collapsed LazyDetails mounts and content-visibility: visible
+    // layout pass complete before measuring getBoundingClientRect().
+    const frame1 = window.requestAnimationFrame(() => {
+      frame2 = window.requestAnimationFrame(locateAndScroll)
+    })
+    return () => {
+      window.cancelAnimationFrame(frame1)
+      if (frame2) window.cancelAnimationFrame(frame2)
+    }
+  }, [activeFindHit, findCaseSensitive, findNavSeq, findOpen, findQuery, hiddenRowCount, pauseFollow, scrollerEl, visualRows.length])
+
   const forkHandlerRef = useRef(onForkAtMessage)
   forkHandlerRef.current = onForkAtMessage
   const forkCallbackMapRef = useRef(new Map<string, () => void>())
@@ -866,8 +1075,48 @@ export const Transcript = memo(function Transcript({
     }
     return fn
   }, [])
+  const showHandoffCard = shouldShowHandoffSummaryCard({
+    session,
+    loading,
+    historyResolved,
+    hasMoreHistory,
+    hiddenRowCount,
+    messages: visibleMessages,
+  })
   return (
     <section className="transcript-wrap" aria-label="会话记录">
+      {enableFind && (
+        <TranscriptFindBar
+          opened={findOpen}
+          query={findQuery}
+          caseSensitive={findCaseSensitive}
+          activeIndex={safeFindIndex}
+          totalMatches={findMatches.length}
+          hasMoreHistory={hasMoreHistory}
+          loadingOlder={loadingOlder}
+          focusSignal={findFocusSignal}
+          onQueryChange={(val) => {
+            setFindQuery(val)
+            setFindActiveIdx(0)
+            setFindNavSeq((n) => n + 1)
+          }}
+          onToggleCaseSensitive={() => {
+            setFindCaseSensitive((v) => !v)
+            setFindActiveIdx(0)
+            setFindNavSeq((n) => n + 1)
+          }}
+          onPrev={() => {
+            setFindActiveIdx((i) => (findMatches.length > 0 ? (i - 1 + findMatches.length) % findMatches.length : 0))
+            setFindNavSeq((n) => n + 1)
+          }}
+          onNext={() => {
+            setFindActiveIdx((i) => (findMatches.length > 0 ? (i + 1) % findMatches.length : 0))
+            setFindNavSeq((n) => n + 1)
+          }}
+          onLoadOlder={onLoadOlder ? () => void older.request() : undefined}
+          onClose={closeFindBar}
+        />
+      )}
       {!following && (
         <button
           type="button"
@@ -890,8 +1139,8 @@ export const Transcript = memo(function Transcript({
         aria-live="polite"
         aria-relevant="additions text"
       >
-        <div className="transcript-inner">
-          {session?.handoff_context?.trim() && (
+        <div className="transcript-inner" ref={setContentRef}>
+          {showHandoffCard && session && (
             <HandoffSummaryCard
               key={`handoff:${session.agent_id}:${session.id}`}
               session={session}
@@ -908,7 +1157,7 @@ export const Transcript = memo(function Transcript({
                 variant="subtle"
                 onClick={() => {
                   capturePrependAnchor()
-                  setVisibleRowLimit((limit) => limit + VISIBLE_ROW_STEP)
+                  setHiddenStart((current) => Math.max(0, (current ?? hiddenRowCount) - VISIBLE_ROW_STEP))
                 }}
               >
                 {`显示更早 ${Math.min(hiddenRowCount, VISIBLE_ROW_STEP)} 条记录（共折叠 ${hiddenRowCount} 条）`}
@@ -920,7 +1169,7 @@ export const Transcript = memo(function Transcript({
                   color="gray"
                   onClick={() => {
                     capturePrependAnchor()
-                    setVisibleRowLimit(visualRows.length)
+                    setHiddenStart(0)
                   }}
                 >
                   展开全部
@@ -993,6 +1242,7 @@ export const Transcript = memo(function Transcript({
               )
             }
             if (row.kind === 'pack') {
+              const packActiveMsgId = findOpen && activeFindHit?.packId === row.id ? activeFindHit.messageId : null
               return (
                 <ActivityPackSection
                   key={`activity-pack-${row.id}`}
@@ -1000,10 +1250,11 @@ export const Transcript = memo(function Transcript({
                   pack={row.pack}
                   isRunning={row.shouldOpen}
                   definitivelyEnded={row.definitivelyEnded}
-                  isDeferred={row.isDeferred}
+                  isDeferred={row.isDeferred && !packActiveMsgId}
                   onImageClick={onImageClick}
                   onGalleryClick={onGalleryClick}
                   session={session}
+                  activeFindMessageId={packActiveMsgId}
                 />
               )
             }
@@ -1026,8 +1277,9 @@ export const Transcript = memo(function Transcript({
               )
             }
             const { message, idx } = row
+            const isFindActiveMsg = Boolean(findOpen && activeFindHit?.messageId === message.id)
             return (
-              <div className={`transcript-message-entry${row.isDeferred ? ' is-deferred-turn' : ''}${activeHighlightId === message.id ? ' is-search-highlight' : ''}`} data-turn-id={message.id} key={message.id}>
+              <div className={`transcript-message-entry${row.isDeferred && !isFindActiveMsg ? ' is-deferred-turn' : ''}${activeHighlightId === message.id ? ' is-search-highlight' : ''}${isFindActiveMsg ? ' is-find-active' : ''}`} data-turn-id={message.id} key={message.id}>
                 {row.dateDivider && (
                   <div className="transcript-date-divider">
                     <span>{row.dateDivider}</span>

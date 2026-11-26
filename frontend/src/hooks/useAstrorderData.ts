@@ -109,7 +109,31 @@ export function useBootstrap(authenticated: boolean) {
   return query
 }
 
-export function useSessionResources(session: Session | null, authenticated: boolean, viewing = true) {
+export interface SessionResourcesOptions {
+  /** Whether to fetch session tasks (`GET /sessions/:id/tasks`). Defaults to true. */
+  includeTasks?: boolean
+  /** Whether to fetch session commands (`GET /sessions/:id/commands`). Defaults to true. */
+  includeCommands?: boolean
+  /** Whether to skip automatic older-page user-turn backfill. Defaults to false. */
+  skipBackfill?: boolean
+  /** When true, skip `POST /sync` for idle non-live sessions and apply a 30s staleTime on sync. */
+  skipIdleSync?: boolean
+  /** Whether to report single-session switch latency telemetry. Defaults to true. */
+  trackPerf?: boolean
+}
+
+export function useSessionResources(
+  session: Session | null,
+  authenticated: boolean,
+  viewing = true,
+  options?: SessionResourcesOptions,
+) {
+  const includeTasks = options?.includeTasks ?? true
+  const includeCommands = options?.includeCommands ?? true
+  const skipBackfill = options?.skipBackfill ?? false
+  const skipIdleSync = options?.skipIdleSync ?? false
+  const trackPerf = options?.trackPerf ?? true
+
   useEffect(() => {
     if (!authenticated || !session || !viewing) return
     const renew = () => {
@@ -137,16 +161,19 @@ export function useSessionResources(session: Session | null, authenticated: bool
     agentId && sessionId ? selectMessages(state, agentId, sessionId) : EMPTY_STORED_MESSAGES,
   ))
   useEffect(() => {
-    if (!authenticated || !sessionScopeKey) return
+    if (!trackPerf || !authenticated || !sessionScopeKey) return
     const cached = Object.keys(useAstrorderStore.getState().messages[sessionScopeKey] || {}).length > 0
     clientPerf.markSessionSwitchStart(sessionScopeKey, cached)
-  }, [authenticated, sessionScopeKey])
+  }, [authenticated, sessionScopeKey, trackPerf])
+  const sessionIsActive = Boolean(
+    session && (session.status === 'running' || session.status === 'waiting_approval' || session.live === true),
+  )
   const sync = useQuery({
     queryKey: ['astrorder', 'session-sync', session?.agent_id, session?.id],
     queryFn: () => api.syncSession(session!.id, session!.agent_id),
-    enabled: authenticated && Boolean(session),
+    enabled: authenticated && Boolean(session) && (!skipIdleSync || sessionIsActive),
     retry: false,
-    staleTime: 0,
+    staleTime: skipIdleSync ? 30_000 : 0,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
   })
@@ -268,7 +295,7 @@ export function useSessionResources(session: Session | null, authenticated: bool
   const fetchNextPageRef = useRef(fetchNextPage)
   fetchNextPageRef.current = fetchNextPage
   useEffect(() => {
-    if (!session || pages.length === 0 || isFetchingNextPage) return
+    if (skipBackfill || !session || pages.length === 0 || isFetchingNextPage) return
     const sKey = `${session.agent_id}::${session.id}`
     const fetchedCount = autoFetchedRef.current[sKey] || 0
     const allLoaded = pages.flatMap((page) => page.items)
@@ -276,12 +303,12 @@ export function useSessionResources(session: Session | null, authenticated: bool
     if (!needsUserTurnBackfill({ items: allLoaded, hasNextPage, autoFetchedPages: fetchedCount })) return
     autoFetchedRef.current[sKey] = fetchedCount + 1
     void fetchNextPageRef.current()
-  }, [session, pages, hasNextPage, isFetchingNextPage])
+  }, [session, pages, hasNextPage, isFetchingNextPage, skipBackfill])
 
   const commands = useQuery({
     queryKey: ['astrorder', 'commands', session?.agent_id, session?.id],
     queryFn: () => api.getCommands(session!.id, session!.agent_id),
-    enabled: ready,
+    enabled: ready && includeCommands,
     retry: false,
     staleTime: 30_000,
     gcTime: 1000 * 60 * 60 * 24,
@@ -291,7 +318,7 @@ export function useSessionResources(session: Session | null, authenticated: bool
   const tasks = useQuery({
     queryKey: ['astrorder', 'tasks', session?.agent_id, session?.id],
     queryFn: () => api.getTasks(session!.id, session!.agent_id),
-    enabled: ready,
+    enabled: ready && includeTasks,
     retry: false,
     staleTime: 30_000,
     gcTime: 1000 * 60 * 60 * 24,
@@ -346,11 +373,11 @@ export function useSessionResources(session: Session | null, authenticated: bool
     return breaks
   }, [pages])
   useEffect(() => {
-    if (!authenticated || !sessionScopeKey) return
+    if (!trackPerf || !authenticated || !sessionScopeKey) return
     if (messages.isSuccess || stored.length > 0) {
       clientPerf.markSessionSwitchReady(sessionScopeKey, visibleMessages.length)
     }
-  }, [authenticated, sessionScopeKey, messages.isSuccess, stored.length, visibleMessages.length])
+  }, [authenticated, sessionScopeKey, messages.isSuccess, stored.length, visibleMessages.length, trackPerf])
   return { messages, commands, tasks, visibleMessages, activityBreaks }
 }
 

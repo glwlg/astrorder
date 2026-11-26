@@ -57,3 +57,34 @@ it('keeps live logs after settings unmounts and cancels the server batch', async
   act(() => trackUpgradeJob({ ...job, status: 'cancelled', detail: '升级已取消' }))
   expect(useBackgroundTasks.getState().tasks[job.id].status).toBe('cancelled')
 })
+
+it('streams live progress and final logs in standalone settings without BackgroundTasks mounted', async () => {
+  vi.useFakeTimers()
+  try {
+    const initialJob: UpgradeJob = { ...job, current: 0, total: 2, target: '', log: '' }
+    vi.mocked(api.startUpgradeJob).mockResolvedValueOnce(initialJob)
+    vi.mocked(api.getUpgradeJobs)
+      .mockResolvedValueOnce({ items: [{ ...job, current: 1, total: 2, target: '本机 Codex', log: '[1/2] 本机 Codex\n' }] })
+      .mockResolvedValueOnce({ items: [{ ...job, current: 2, total: 2, target: '本机 Hermes', status: 'completed', detail: '升级结束：成功 2，失败 0', log: '[1/2] 本机 Codex\n[DONE] 本机 Hermes 升级成功\n' }] })
+
+    render(<MantineProvider><QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><EnvironmentConnections /></QueryClientProvider></MantineProvider>)
+    fireEvent.click(screen.getByRole('button', { name: '全节点升级' }))
+    await act(async () => { await vi.advanceTimersByTimeAsync(250) })
+    fireEvent.click(screen.getByRole('button', { name: '开始升级选中 Agent (2)' }))
+    await act(async () => {})
+    expect(screen.getByText('正在准备升级队列…')).toBeInTheDocument()
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1200) })
+    expect(screen.getByText('总进度：1 / 2')).toBeInTheDocument()
+    expect(screen.getByText('正在升级: 本机 Codex')).toBeInTheDocument()
+    expect(screen.getByText(/\[1\/2\] 本机 Codex/)).toBeInTheDocument()
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1200) })
+    expect(screen.getByText('总进度：2 / 2')).toBeInTheDocument()
+    expect(screen.getByText('升级结束：成功 2，失败 0')).toBeInTheDocument()
+    expect(screen.getByText(/\[DONE\] 本机 Hermes 升级成功/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '返回列表' })).toBeInTheDocument()
+  } finally {
+    vi.useRealTimers()
+  }
+})

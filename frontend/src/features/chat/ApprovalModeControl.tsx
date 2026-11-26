@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Group, Popover, Stack, Text, UnstyledButton } from '@mantine/core'
+import { Group, Popover, Stack, Text, Tooltip, UnstyledButton } from '@mantine/core'
 import { IconAlertTriangle, IconCheck, IconClockCheck, IconHandStop } from '@tabler/icons-react'
 import { notifications } from '@mantine/notifications'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -46,16 +46,20 @@ export const APPROVAL_MODES: ApprovalModeItem[] = [
 export function ApprovalModeControl({
   session,
   compact = false,
+  iconOnly = false,
   variant = 'capsule',
   disabled = false,
   supported = true,
+  enabled = true,
 }: {
   session: Session
   agentKind?: string
   compact?: boolean
+  iconOnly?: boolean
   variant?: 'capsule' | 'panel'
   disabled?: boolean
   supported?: boolean
+  enabled?: boolean
 }) {
   const modes = APPROVAL_MODES
   const isOfficeMode = useIsOfficeExperience(session)
@@ -68,9 +72,10 @@ export function ApprovalModeControl({
       if (!modes.some(item => item.key === res.mode)) throw new Error('原生审批模式未确认')
       return res.mode
     },
-    enabled: supported,
+    enabled: supported && (enabled || opened),
     retry: false,
     staleTime: 60000,
+    refetchOnWindowFocus: false,
   })
 
   const currentMode = data
@@ -102,6 +107,21 @@ export function ApprovalModeControl({
   if (!supported) return null
   if (!currentMode || isError) {
     const label = isError ? '审批模式读取失败' : '正在读取审批模式'
+    if (iconOnly) {
+      const FallbackIcon = isError ? IconAlertTriangle : IconClockCheck
+      return (
+        <Tooltip label={label} position="top" withArrow>
+          <button
+            type="button"
+            className="approval-mode-capsule is-icon-only"
+            disabled
+            aria-label={label}
+          >
+            <FallbackIcon size={18} className="approval-mode-capsule-icon" aria-hidden="true" />
+          </button>
+        </Tooltip>
+      )
+    }
     return <button type="button" className="approval-mode-capsule" disabled aria-label={label}>{label}</button>
   }
 
@@ -173,6 +193,31 @@ export function ApprovalModeControl({
     return <div className="approval-mode-panel">{options}</div>
   }
 
+  const triggerButton = (
+    <button
+      type="button"
+      className={[
+        'approval-mode-capsule',
+        `is-mode-${activeItem.key}`,
+        isFull ? 'is-full-access' : '',
+        compact ? 'is-compact' : '',
+        iconOnly ? 'is-icon-only' : '',
+      ].filter(Boolean).join(' ')}
+      onClick={() => setOpened((v) => !v)}
+      disabled={disabled || mutation.isPending}
+      aria-label={`当前审批模式：${activeItem.label}`}
+      title={iconOnly ? undefined : `审批模式：${activeItem.label}（点击切换）`}
+    >
+      <ActiveIcon
+        size={iconOnly ? 18 : 14}
+        className="approval-mode-capsule-icon"
+        style={iconOnly ? undefined : { color: activeItem.color }}
+        aria-hidden="true"
+      />
+      {!iconOnly && <span className="approval-mode-capsule-label">{activeItem.capsuleLabel}</span>}
+    </button>
+  )
+
   return (
     <Popover
       opened={opened}
@@ -184,17 +229,13 @@ export function ApprovalModeControl({
       offset={8}
     >
       <Popover.Target>
-        <button
-          type="button"
-          className={`approval-mode-capsule ${isFull ? 'is-full-access' : ''} ${compact ? 'is-compact' : ''}`}
-          onClick={() => setOpened((v) => !v)}
-          disabled={disabled || mutation.isPending}
-          aria-label={`当前审批模式：${activeItem.label}`}
-          title={`审批模式：${activeItem.label}（点击切换）`}
-        >
-          <ActiveIcon size={14} className="approval-mode-capsule-icon" />
-          <span className="approval-mode-capsule-label">{activeItem.capsuleLabel}</span>
-        </button>
+        {iconOnly ? (
+          <Tooltip label={`${activeItem.label} · ${activeItem.description}`} position="top" withArrow disabled={opened}>
+            {triggerButton}
+          </Tooltip>
+        ) : (
+          triggerButton
+        )}
       </Popover.Target>
 
       <Popover.Dropdown className="approval-mode-dropdown">

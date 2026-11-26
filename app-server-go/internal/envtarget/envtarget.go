@@ -248,6 +248,9 @@ func (e *localEnv) Paths(context.Context) (Paths, error) {
 		if value := strings.TrimSpace(os.Getenv("CODEX_HOME")); value != "" {
 			paths.Codex = filepath.ToSlash(value)
 		}
+		if value := strings.TrimSpace(os.Getenv("GROK_HOME")); value != "" {
+			paths.Grok = filepath.ToSlash(value)
+		}
 		if value := strings.TrimSpace(os.Getenv("HERMES_HOME")); value != "" {
 			paths.Hermes = filepath.ToSlash(value)
 		} else if base := os.Getenv("LOCALAPPDATA"); base != "" {

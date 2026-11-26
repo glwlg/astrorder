@@ -56,6 +56,8 @@ func (a *Adapter) canonicalRequest(ctx context.Context, method string, params ma
 		return a.canonicalMutation(ctx, sid, "branch", payload)
 	case "session.delete":
 		return a.canonicalMutation(ctx, sid, "delete", map[string]any{})
+	case "session.move_workspace":
+		return a.canonicalMutation(ctx, sid, "workspace", map[string]any{"cwd": p["cwd"]})
 	case "session.usage":
 		return "session.stats", p, nil
 	case "config.set":

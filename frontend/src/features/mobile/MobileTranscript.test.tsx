@@ -163,3 +163,49 @@ it('renders single tick when received and double ticks when accepted or replied'
   expect(screen.getByText('文本一').closest('article')).toHaveTextContent('已发送')
   expect(screen.getByText('文本二').closest('article')).toHaveTextContent('已接收')
 })
+
+it('hides handoff summary card on mobile while loading, unresolved, or in multi-turn consumed sessions', () => {
+  const handoffSession = {
+    id: 's',
+    agent_id: 'a',
+    title: '统一监控',
+    workspace: '/repo',
+    status: 'idle' as const,
+    updated_at: '2026-01-01T00:00:00Z',
+    handoff_from_agent_id: 'codex-1',
+    handoff_from_session_id: 'src-1',
+    handoff_context: 'native-handoff-v1:{"agent_id":"codex-1","session_id":"src-1"}',
+    handoff_context_consumed: true,
+  }
+  const pendingSession = { ...handoffSession, handoff_context_consumed: false }
+  const u1: Message = { ...row, id: 'u1', role: 'user', kind: 'message', text: '第一轮' }
+  const a1: Message = { ...row, id: 'a1', role: 'assistant', kind: 'message', text: '回复一' }
+  const u2: Message = { ...row, id: 'u2', role: 'user', kind: 'message', text: '第二轮' }
+  const baseProps = {
+    session: handoffSession,
+    messages: [] as Message[],
+    busy: false,
+    loadingOlder: false,
+    loadOlder: vi.fn(),
+    onMessageAction: vi.fn(),
+    onImage: vi.fn(),
+    onSwipe: vi.fn(),
+  }
+  const view = render(<MobileTranscript {...baseProps} loading hasOlder={false} />)
+  expect(screen.queryByTestId('handoff-summary-card')).not.toBeInTheDocument()
+
+  view.rerender(<MobileTranscript {...baseProps} loading={false} historyResolved={false} hasOlder={false} />)
+  expect(screen.queryByTestId('handoff-summary-card')).not.toBeInTheDocument()
+
+  view.rerender(<MobileTranscript {...baseProps} loading={false} hasOlder={false} messages={[]} />)
+  expect(screen.queryByTestId('handoff-summary-card')).not.toBeInTheDocument()
+
+  view.rerender(<MobileTranscript {...baseProps} loading={false} hasOlder={false} messages={[u1, a1, u2]} />)
+  expect(screen.queryByTestId('handoff-summary-card')).not.toBeInTheDocument()
+
+  view.rerender(<MobileTranscript {...baseProps} session={pendingSession} loading={false} hasOlder={false} messages={[]} />)
+  expect(screen.getByTestId('handoff-summary-card')).toBeInTheDocument()
+
+  view.rerender(<MobileTranscript {...baseProps} loading={false} hasOlder={false} messages={[u1, a1]} />)
+  expect(screen.getByTestId('handoff-summary-card')).toBeInTheDocument()
+})

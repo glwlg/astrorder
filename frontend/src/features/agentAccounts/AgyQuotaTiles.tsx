@@ -8,16 +8,22 @@ export function AgyQuotaTiles({ quota }: { quota: AgyQuota }) {
     const label = window && group.name !== window ? `${group.name} · ${window}` : group.name
     return { ...bucket, label, key: `${groupIndex}-${bucket.id}-${index}` }
   }))
-  return <div className="agy-quota-tiles">
-    {tiles.map(({ key, label, remaining_fraction: remaining, reset_at: reset }) => {
-      const percent = percentFormatter.format(remaining)
-      const tone = remaining === 0 ? 'empty' : remaining <= 0.25 ? 'low' : 'available'
-      const resetLabel = reset ? agyStamp(reset) : ''
-      return <div className="agy-quota-tile" key={key} data-tone={tone}>
-        <div className="agy-quota-tile-heading"><span>{label}</span><strong>{percent}</strong></div>
-        <meter min={0} max={1} value={remaining} aria-label={`${label}剩余额度`} aria-valuetext={percent} />
-        {resetLabel && <time dateTime={new Date(reset!).toISOString()}>{resetLabel} 重置</time>}
-      </div>
-    })}
+  if (!tiles.length) {
+    return <span className="agy-account-muted">{quota.detail || quota.account_label || '已认证（暂无周期额度数据）'}</span>
+  }
+  return <div className="agy-quota-tiles-wrap">
+    <div className="agy-quota-tiles">
+      {tiles.map(({ key, label, remaining_fraction: remaining, reset_at: reset }) => {
+        const percent = percentFormatter.format(remaining)
+        const tone = remaining === 0 ? 'empty' : remaining <= 0.25 ? 'low' : 'available'
+        const resetLabel = reset ? agyStamp(reset) : ''
+        return <div className="agy-quota-tile" key={key} data-tone={tone}>
+          <div className="agy-quota-tile-heading"><span>{label}</span><strong>{percent}</strong></div>
+          <meter min={0} max={1} value={remaining} aria-label={`${label}剩余额度`} aria-valuetext={percent} />
+          {resetLabel && <time dateTime={new Date(reset!).toISOString()}>{resetLabel} 重置</time>}
+        </div>
+      })}
+    </div>
+    {quota.detail && <div className="agy-account-muted agy-quota-detail">{quota.detail}</div>}
   </div>
 }

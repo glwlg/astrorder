@@ -1,6 +1,7 @@
 package sessions
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"time"
@@ -272,8 +273,86 @@ func (h *Handler) handleUpdateSession(w http.ResponseWriter, r *http.Request, se
 		}
 		updates["title"] = newTitle
 	}
-	if newWS := stringValue(payload, "workspace"); newWS != "" {
-		updates["workspace"] = newWS
+	if newWS := strings.TrimSpace(stringValue(payload, "workspace")); newWS != "" {
+		currentWS := strings.TrimSpace(stringValue(existing, "workspace"))
+		if !sameWorkspacePath(currentWS, newWS) {
+			agent, agentErr := h.store.GetAgent(ctx, agentID)
+			if agentErr != nil {
+				writeJSONError(w, http.StatusInternalServerError, "Agent storage is unavailable")
+				return
+			}
+			agentKind := stringValue(agent, "kind")
+			if supportsNativeWorkspaceMove(agentKind) {
+				if h.client == nil || h.client.Session == nil {
+					writeJSONError(w, http.StatusServiceUnavailable, "Daemon client is not configured")
+					return
+				}
+				currentStatus := stringValue(existing, "status")
+				if currentStatus == "running" || currentStatus == "waiting_approval" {
+					writeJSONError(w, http.StatusConflict, "请等待会话空闲后再移动到其他项目")
+					return
+				}
+				if agentKind == "antigravity" || agentKind == "antigravity-ssh" {
+					if err := h.ensureNativeBindingForDelete(ctx, existing); err != nil {
+						writeJSONError(w, http.StatusBadGateway, "无法建立原生会话连接："+err.Error())
+						return
+					}
+				} else {
+					if err := h.ensureNativeBinding(ctx, existing); err != nil {
+						writeJSONError(w, http.StatusBadGateway, "无法建立原生会话连接："+err.Error())
+						return
+					}
+				}
+				connID, _ := existing["connection_id"].(string)
+				nativeID := stringValue(existing, "source_session_id")
+				if nativeID == "" {
+					nativeID = sessionID
+				}
+				ref := buildSessionRef(agentID, nativeID, connID)
+				moveReq := &sessiondv1.MoveSessionWorkspaceRequest{
+					Meta:      newCommandMeta("", ""),
+					Session:   ref,
+					Workspace: newWS,
+				}
+				receipt, moveErr := h.client.Session.MoveSessionWorkspace(ctx, moveReq)
+				if moveErr != nil {
+					code := status.Code(moveErr)
+					switch code {
+					case codes.Unimplemented:
+						writeJSONError(w, http.StatusConflict, "当前运行的小内核尚未激活移动项目能力，请先通过系统托盘「小内核 → 更新小内核」完成更新后重试")
+					case codes.InvalidArgument, codes.FailedPrecondition:
+						writeJSONError(w, http.StatusConflict, status.Convert(moveErr).Message())
+					default:
+						writeJSONError(w, http.StatusBadGateway, "移动会话项目失败："+moveErr.Error())
+					}
+					return
+				}
+				if receiptErr := confirmedReceipt(receipt); receiptErr != nil {
+					writeJSONError(w, http.StatusConflict, receiptErr.Error())
+					return
+				}
+				canonicalWS := newWS
+				var nativePayload map[string]any
+				if parseNativeJSON(receipt.GetCompleted().GetNative(), &nativePayload) == nil {
+					if ws, ok := nativePayload["workspace"].(string); ok && strings.TrimSpace(ws) != "" {
+						canonicalWS = strings.TrimSpace(ws)
+					}
+				}
+				updates["workspace"] = canonicalWS
+				updates["control_state"] = "unbound"
+				updates["clear_worktree"] = true
+				projectID, projectName := h.matchCatalogProjectForWorkspace(ctx, connID, canonicalWS)
+				if projectID != "" {
+					updates["project_id"] = projectID
+					updates["project_name"] = projectName
+				} else {
+					updates["project_id"] = nil
+					updates["project_name"] = nil
+				}
+			} else {
+				updates["workspace"] = newWS
+			}
+		}
 	}
 	if len(updates) == 0 {
 		writeJSON(w, http.StatusOK, existing)
@@ -378,4 +457,62 @@ func optString(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+func supportsNativeWorkspaceMove(agentKind string) bool {
+	switch agentKind {
+	case "antigravity", "antigravity-ssh", "codex", "codex-ssh", "hermes", "ssh", "grok", "grok-ssh":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeWorkspaceCompare(raw string) string {
+	ws := strings.TrimSpace(raw)
+	if ws == "" {
+		return ""
+	}
+	slashed := strings.ReplaceAll(ws, "\\", "/")
+	isWin := (len(slashed) >= 2 && ((slashed[0] >= 'a' && slashed[0] <= 'z') || (slashed[0] >= 'A' && slashed[0] <= 'Z')) && slashed[1] == ':') || strings.HasPrefix(slashed, "//")
+	slashed = strings.TrimRight(slashed, "/")
+	if slashed == "" {
+		return "/"
+	}
+	if isWin {
+		return strings.ToLower(slashed)
+	}
+	return slashed
+}
+
+func (h *Handler) matchCatalogProjectForWorkspace(ctx context.Context, connectionID, workspace string) (string, string) {
+	projects, err := h.store.ListProjects(ctx)
+	if err != nil {
+		return "", ""
+	}
+	targetNorm := normalizeWorkspaceCompare(workspace)
+	if targetNorm == "" {
+		return "", ""
+	}
+	connNorm := strings.TrimSpace(connectionID)
+	if connNorm == "local" {
+		connNorm = ""
+	}
+	for _, p := range projects {
+		pid := stringValue(p, "project_id")
+		if pid == "" || pid == "__no_project__" {
+			continue
+		}
+		pConn := stringValue(p, "connection_id")
+		if pConn == "local" {
+			pConn = ""
+		}
+		if pConn != connNorm {
+			continue
+		}
+		if normalizeWorkspaceCompare(stringValue(p, "workspace")) == targetNorm {
+			return pid, stringValue(p, "project_name")
+		}
+	}
+	return "", ""
 }

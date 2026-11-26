@@ -185,6 +185,29 @@ export const OFFICE_DRAFT_TEMPLATES: OfficeDraftTemplate[] = [
     }),
   },
   {
+    id: 'video_treatment',
+    name: '宣传片 / 视频分镜脚本',
+    shortLabel: '视频脚本',
+    category: '演示汇报',
+    description: '生成含时间轴、分镜画面、运镜转场、口播旁白与配乐卡点的完整视频策划脚本',
+    outputExt: 'md',
+    defaultFileNamePrefix: 'TREATMENT',
+    fields: [
+      { key: 'topic', label: '视频主题 / 产品名称', placeholder: '例如：星序 Astrorder 产品发布会宣传片', required: true },
+      { key: 'duration', label: '目标时长', placeholder: '60 秒', options: ['30 秒（快闪预告）', '60 秒（标准宣传片）', '2–3 分钟（深度发布会）'], defaultValue: '60 秒（标准宣传片）' },
+      { key: 'style', label: '视觉风格与基调', placeholder: '暗色科技发布会', options: ['暗色科技发布会（Dark Tech Keynote）', '桌面卡片漫游（Tabletop Flythrough）', '数据叙事（Data Storytelling）', '专业商务演示（自由风格）'], defaultValue: '暗色科技发布会（Dark Tech Keynote）' },
+      { key: 'highlights', label: '核心卖点 / 必须出现的画面或数据', placeholder: '列出需要展示的关键功能、品牌名称、数据亮点或展演场景…', multiline: true },
+    ],
+    buildPrompt: (v) => ({
+      title: `${v.topic?.trim() || '宣传片'}分镜策划脚本`,
+      instruction: [
+        `请为「${v.topic || '产品宣传片'}」撰写一份可直接指导代码渲染/视频制作的分镜策划脚本（TREATMENT），目标时长 ${v.duration || '60 秒'}，视觉风格偏向「${v.style || '暗色科技发布会'}」。`,
+        v.highlights ? `核心卖点与必现画面：\n${v.highlights}` : '',
+        '输出结构要求：1. 创意定位与情绪弧线；2. 逐镜头时间轴表（Markdown 表格：镜号、起止时间、时长、画面构图与动态、转场方式、配乐/音效卡点）；3. 逐镜口播旁白与同步字幕稿（控制语速在每分钟 200–220 字左右，方便直接合成 TTS 与 .srt 字幕）；4. 关键视觉资产与配色/字体清单。',
+      ].filter(Boolean).join('\n'),
+    }),
+  },
+  {
     id: 'retro_summary',
     name: '项目复盘 / 阶段总结',
     shortLabel: '项目复盘',

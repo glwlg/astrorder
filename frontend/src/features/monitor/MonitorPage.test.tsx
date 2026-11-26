@@ -25,7 +25,8 @@ vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom')
   return { ...actual, useNavigate: () => vi.fn() }
 })
-vi.mock('../../hooks/useAstrorderData', () => ({ useSessionResources: () => ({}) }))
+const useSessionResourcesMock = vi.hoisted(() => vi.fn(() => ({})))
+vi.mock('../../hooks/useAstrorderData', () => ({ useSessionResources: useSessionResourcesMock }))
 
 const activeSession = { id: 'session-1', agent_id: 'agent-1', title: '运行中会话', workspace: '/repo', status: 'running' as const, updated_at: '2026-09-07T10:00:00Z' }
 const idleSession = { id: 'session-2', agent_id: 'agent-1', title: '闲置会话', workspace: '/repo', status: 'idle' as const, updated_at: '2026-09-07T09:00:00Z' }
@@ -45,6 +46,7 @@ describe('MonitorPage', () => {
     storage.clear()
     savedDrafts.clear()
     queueMemory.rows = []
+    useSessionResourcesMock.mockClear()
     vi.stubGlobal('localStorage', { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => storage.set(key, value), removeItem: (key: string) => storage.delete(key) })
     vi.spyOn(draftStorage, 'load').mockImplementation(async key => savedDrafts.get(key))
     vi.spyOn(draftStorage, 'save').mockImplementation(async (key, draft) => { savedDrafts.set(key, draft) })
@@ -519,5 +521,65 @@ describe('MonitorPage', () => {
 
     expect(await screen.findByTestId('monitor-card-agent-1-session-stock')).toBeInTheDocument()
     expect(screen.queryByText('项目：OpsCore')).not.toBeInTheDocument()
+  })
+
+  it('windows long monitor card histories to recent entries and expands older entries on demand', async () => {
+    const messages = Array.from({ length: 35 }, (_, idx) => ({
+      id: `msg-${idx + 1}`,
+      agent_id: 'agent-1',
+      session_id: 'session-1',
+      role: (idx % 2 === 0 ? 'user' : 'assistant') as 'user' | 'assistant',
+      kind: 'message' as const,
+      text: `历史消息内容-${idx + 1}`,
+      attachments: [],
+      created_at: `2026-09-07T10:${String(Math.floor(idx / 60)).padStart(2, '0')}:${String(idx % 60).padStart(2, '0')}Z`,
+      command_id: null,
+      tool: null,
+    }))
+    useAstrorderStore.getState().mergeMessages('agent-1', 'session-1', messages)
+    renderPage()
+
+    const card = screen.getByTestId('monitor-card-agent-1-session-1')
+    expect(within(card).getByText('历史消息内容-35')).toBeInTheDocument()
+    expect(within(card).queryByText('历史消息内容-1')).not.toBeInTheDocument()
+
+    const expandBtn = within(card).getByRole('button', { name: '显示更早 15 条（剩余 15 条）' })
+    fireEvent.click(expandBtn)
+
+    expect(within(card).getByText('历史消息内容-1')).toBeInTheDocument()
+    expect(within(card).queryByRole('button', { name: /显示更早/ })).not.toBeInTheDocument()
+  })
+
+  it('passes lightweight monitor resource options and avoids forcing layout on repeated spotlight moves', () => {
+    const media = window.matchMedia('')
+    vi.spyOn(window, 'matchMedia').mockImplementation(query => ({
+      ...media,
+      media: query,
+      matches: query === '(hover: hover) and (pointer: fine)',
+    }))
+    renderPage()
+
+    expect(useSessionResourcesMock).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'session-1', agent_id: 'agent-1' }),
+      true,
+      false,
+      expect.objectContaining({
+        includeTasks: false,
+        skipBackfill: true,
+        skipIdleSync: true,
+        trackPerf: false,
+      }),
+    )
+
+    const card = screen.getByTestId('monitor-card-agent-1-session-1')
+    const rectSpy = vi.spyOn(card, 'getBoundingClientRect').mockReturnValue({ left: 20, top: 30 } as DOMRect)
+    fireEvent.mouseMove(card, { clientX: 120, clientY: 100 })
+    fireEvent.mouseMove(card, { clientX: 140, clientY: 110 })
+    fireEvent.mouseMove(card, { clientX: 160, clientY: 120 })
+    expect(rectSpy).toHaveBeenCalledTimes(1)
+
+    fireEvent.mouseLeave(card)
+    fireEvent.mouseMove(card, { clientX: 150, clientY: 110 })
+    expect(rectSpy).toHaveBeenCalledTimes(2)
   })
 })

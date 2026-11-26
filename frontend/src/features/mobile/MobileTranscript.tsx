@@ -20,14 +20,14 @@ import { sessionSwipeGesture, sessionDragPreview, startsAtSessionDrawerEdge, typ
 import { describeTool, extractToolArgs, FileChangeDiffBlock, fileChangeDiffs, formatCommandRowDisplay, PackSummary, ShellOutputBlock, ToolLineIcon, unwrapCommand } from '../chat/toolPresentation'
 import { ToolOutputBlock } from '../chat/ToolOutputBlock'
 import { isCompactionMessage, CompactionDivider } from '../chat/CompactionDivider'
-import { HandoffSummaryCard } from '../chat/HandoffSummaryCard'
+import { HandoffSummaryCard, shouldShowHandoffSummaryCard } from '../chat/HandoffSummaryCard'
 
 export interface MessageActionAnchor { text: string; x: number; y: number; element: HTMLElement; selectText?: () => void }
 
-export function MobileTranscript({ session, messages, activityBreaks, commands = [], approvals = [], onApproval, busy, loadOlder, hasOlder, loadingOlder, onMessageAction, onImage, onVideo, onFile, onSqlOpen, workspace, connectionId, readOnly = false, onSwipe, onSwipePreview, checkpoints, onOpenCheckpoint, highlightMessageId }: {
+export function MobileTranscript({ session, messages, activityBreaks, commands = [], approvals = [], onApproval, busy, loading = false, historyResolved = true, loadOlder, hasOlder, loadingOlder, onMessageAction, onImage, onVideo, onFile, onSqlOpen, workspace, connectionId, readOnly = false, onSwipe, onSwipePreview, checkpoints, onOpenCheckpoint, highlightMessageId }: {
   session?: Session | null
   messages: Message[]; commands?: import('../../domain/types').Command[]; approvals?: Approval[]; onApproval?: (approval: Approval, action: 'approve' | 'cancel') => void
-  busy: boolean; loadOlder: () => unknown; hasOlder: boolean; loadingOlder: boolean
+  busy: boolean; loading?: boolean; historyResolved?: boolean; loadOlder: () => unknown; hasOlder: boolean; loadingOlder: boolean
   onMessageAction: (anchor: MessageActionAnchor) => void; onImage: (url: string, gallery?: string[]) => void; onVideo?: (url: string, name: string) => void; onFile?: (path: string) => void; onSqlOpen?: (sql: string) => void; workspace?: string | null; connectionId?: string | null; onSwipe: (gesture: SessionSwipeGesture) => void
   readOnly?: boolean
   activityBreaks?: readonly string[]
@@ -108,7 +108,13 @@ export function MobileTranscript({ session, messages, activityBreaks, commands =
       onTouchStart={e => { older.onTouchStart(e); if ((e.target as Element).closest('.m-select-text') || startsAtSessionDrawerEdge(e.touches[0].clientX)) { touch.current = null; onSwipePreview?.(null); return }; touch.current = { x: e.touches[0].clientX, y: e.touches[0].clientY } }}
       onTouchEnd={e => { cancelHold(); onSwipePreview?.(null); if (!touch.current) return; const start = touch.current; const end = e.changedTouches[0]; touch.current = null; const gesture = sessionSwipeGesture(start.x, start.y, end.clientX, end.clientY); if (gesture) onSwipe(gesture) }}
       onTouchMove={e => { cancelHold(); older.onTouchMove(e); if (!touch.current || !onSwipePreview) return; onSwipePreview(sessionDragPreview(e.touches[0].clientX - touch.current.x, e.touches[0].clientY - touch.current.y)) }} onTouchCancel={cancelHold}>
-      {session?.handoff_context?.trim() && (
+      {shouldShowHandoffSummaryCard({
+        session,
+        loading,
+        historyResolved,
+        hasMoreHistory: hasOlder,
+        messages: rows,
+      }) && session && (
         <HandoffSummaryCard
           key={`handoff:${session.agent_id}:${session.id}`}
           session={session}

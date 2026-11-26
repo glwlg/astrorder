@@ -38,8 +38,15 @@
   font-weight: 600;
 }
 .session-account-quotas { display: grid; gap: 3px; }
-.session-account-period { display: grid; grid-template-columns: 3.1em minmax(0, 1fr); gap: 4px; align-items: baseline; font-size: .75rem; }
-.session-account-period-values { display: flex; flex-wrap: wrap; gap: 2px 9px; }
+.session-account-period { display: grid; grid-template-columns: 3.1em minmax(0, 1fr) auto; gap: 4px 8px; align-items: baseline; font-size: .75rem; }
+.session-account-period-values { display: flex; flex-wrap: wrap; gap: 2px 9px; min-width: 0; }
+.session-account-reset {
+  color: var(--astr-muted);
+  font-size: .68rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  justify-self: end;
+}
 .session-account-quota { max-inline-size: 100%; gap: 3px; font-size: .75rem; line-height: 1.4; }
 .session-account-quota > span { overflow-wrap: anywhere; }
 .session-account-quota::before {

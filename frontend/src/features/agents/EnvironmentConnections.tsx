@@ -79,6 +79,9 @@ export function EnvironmentConnections({ embedded = false, renderAgentConfigurat
 
   // 打开批量升级前预先读取当前和最新版本号列表
   const openBatchUpgradeDialog = async (mode: 'node' | 'all') => {
+    if (batchTask?.status !== 'running') {
+      setBatchTaskId(null)
+    }
     setBatchMode(mode)
     setBatchModalOpen(true)
     setTargetsLoading(true)
@@ -483,7 +486,7 @@ export function EnvironmentConnections({ embedded = false, renderAgentConfigurat
                   总进度：{batchProgress.current} / {batchProgress.total}
                 </Text>
                 <Text size="xs" c="dimmed">
-                  {batchUpgrading ? `正在升级: ${batchProgress.currentName}` : batchOutcome}
+                  {batchUpgrading ? (batchProgress.currentName ? `正在升级: ${batchProgress.currentName}` : '正在准备升级队列…') : batchOutcome}
                 </Text>
               </Group>
               <Progress
@@ -491,7 +494,7 @@ export function EnvironmentConnections({ embedded = false, renderAgentConfigurat
                 size="sm"
                 radius="xl"
                 animated={batchUpgrading}
-                color="indigo"
+                color={batchTask?.status === 'failed' ? 'red' : batchTask?.status === 'completed' ? 'teal' : 'indigo'}
               />
             </Paper>
 

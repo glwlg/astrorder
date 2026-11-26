@@ -250,8 +250,9 @@ export interface AgentCommand {
 export interface AgentMention {
   name: string;
   description: string;
-  kind: "skill" | "file";
+  kind: "skill" | "file" | "bot";
   path: string;
+  botSlug?: string;
 }
 
 export interface CommandPayload {

@@ -49,6 +49,12 @@ type Options struct {
 	BrowserManager   BrowserManager
 	BrowserInvoke    func(context.Context, string, map[string]any) (any, error)
 	CommandSubmit    func(context.Context, map[string]any) (map[string]any, error)
+	WakeScheduler    func()
+	BotsList         func(context.Context) (any, error)
+	BotsInvoke       func(context.Context, map[string]any) (any, error)
+	GitLabPipelines  func(context.Context, map[string]any) (any, error)
+	GitLabPipeline   func(context.Context, map[string]any) (any, error)
+	GitLabJobLog     func(context.Context, map[string]any) (any, error)
 	DefaultWorkspace string
 	FileResolver     blackboard.FileResolver
 	RemoteExecutable RemoteExecutableResolver

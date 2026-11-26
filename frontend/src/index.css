@@ -1862,6 +1862,15 @@ a { color: inherit; }
   min-width: 380px;
   max-width: 100%;
 }
+.monitor-card-wrapper.is-below-fold {
+  content-visibility: auto;
+  contain-intrinsic-size: auto none auto 520px;
+}
+@supports not (content-visibility: auto) {
+  .monitor-card-wrapper.is-below-fold {
+    contain: layout style paint;
+  }
+}
 .monitor-card-wrapper.is-drop-target {
   outline: 2px solid var(--astr-indigo);
   outline-offset: 4px;
@@ -1924,6 +1933,7 @@ a { color: inherit; }
   padding: 0 !important;
   overflow: hidden;
   position: relative;
+  contain: layout style paint;
 }
 .monitor-card:hover {
   border-color: color-mix(in srgb, var(--astr-indigo, #5b6cff) 35%, var(--astr-border)) !important;
@@ -2160,6 +2170,24 @@ a { color: inherit; }
   gap: 8px;
   background: color-mix(in srgb, var(--astr-surface-muted) 25%, var(--astr-surface));
   overscroll-behavior: contain;
+  contain: layout style paint;
+}
+.monitor-load-older-btn {
+  align-self: center;
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--astr-border) 75%, transparent);
+  background: var(--astr-surface);
+  color: var(--astr-muted);
+  font-size: 11.5px;
+  line-height: 1.4;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
+}
+.monitor-load-older-btn:hover {
+  color: var(--astr-text);
+  border-color: color-mix(in srgb, var(--astr-indigo, #5b6cff) 45%, var(--astr-border));
+  background: color-mix(in srgb, var(--astr-indigo, #5b6cff) 6%, var(--astr-surface));
 }
 .monitor-transcript-empty {
   text-align: center;
@@ -2193,6 +2221,17 @@ a { color: inherit; }
   display: flex;
   flex-direction: column;
   width: 100%;
+}
+.monitor-message-row.is-deferred-row,
+.monitor-activity-pack-row.is-deferred-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto none auto 72px;
+}
+@supports not (content-visibility: auto) {
+  .monitor-message-row.is-deferred-row,
+  .monitor-activity-pack-row.is-deferred-row {
+    contain: layout style paint;
+  }
 }
 .monitor-message-row.message-user {
   align-items: flex-end;
@@ -2310,6 +2349,7 @@ a { color: inherit; }
   box-shadow: var(--astr-shadow-soft);
   transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
   min-height: 48px;
+  contain: layout style paint;
 }
 .monitor-list-row:hover {
   border-color: color-mix(in srgb, var(--astr-indigo) 35%, var(--astr-border));

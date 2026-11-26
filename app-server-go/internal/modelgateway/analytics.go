@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"sort"
@@ -632,7 +633,7 @@ func (h *Handler) handleGetSessionUsage(w http.ResponseWriter, r *http.Request) 
 			}
 		}
 		result["cache_hit_rate"] = rate
-		result["speed"] = nil
+		result["speed"] = h.readSessionSpeed(r.Context(), fmt.Sprint(result["agent_id"]), sessionID)
 		writeJSON(w, http.StatusOK, result)
 		return
 	}
@@ -650,8 +651,24 @@ func (h *Handler) handleGetSessionUsage(w http.ResponseWriter, r *http.Request) 
 		"cached_tokens":     0,
 		"reasoning_tokens":  0,
 		"cache_hit_rate":    0,
-		"speed":             nil,
+		"speed":             h.readSessionSpeed(r.Context(), agentID, sessionID),
 	})
+}
+
+func (h *Handler) readSessionSpeed(ctx context.Context, agentID, sessionID string) any {
+	if h.store == nil || agentID == "" || sessionID == "" {
+		return nil
+	}
+	pref, err := h.store.GetPreference(ctx, "session_speed:"+agentID+"\x00"+sessionID)
+	if err != nil || !pref.Exists || pref.Value == nil {
+		return nil
+	}
+	if m, ok := pref.Value.(map[string]any); ok {
+		if s, parseErr := strconv.ParseFloat(fmt.Sprint(m["speed"]), 64); parseErr == nil && s > 0 {
+			return math.Round(s*10) / 10
+		}
+	}
+	return nil
 }
 
 // ResolverConfig returns gateway configuration resolved for background workers (e.g., audio/browser dictation).

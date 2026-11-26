@@ -12,9 +12,11 @@ import {
   UnstyledButton,
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
+import { IconBrandGitlab } from '@tabler/icons-react'
 import { CaretUpIcon, CheckIcon, GitBranchIcon, PlusIcon } from '../../components/workbenchIcons'
 import type { Session } from '../../domain/types'
 import { useGitStatus } from '../../hooks/useGitStatus'
+import { gitLabStatusMeta, useGitLabPipelines } from '../../hooks/useGitLabCI'
 import { useSidecarStore } from '../sidecar/sidecarStore'
 import { WORKFLOW_GIT_WORKTREE_PLUGIN_ID } from '../plugins/builtinPlugins'
 import { usePluginSettingsStore } from '../plugins/pluginSettingsStore'
@@ -76,7 +78,16 @@ export function GitStatusBar({ session }: GitStatusBarProps) {
   const changedFiles = git.data?.changed_files || 0
   const openGitDiff = useSidecarStore((s) => s.openGitDiff)
   const openWorktrees = useSidecarStore((s) => s.openWorktrees)
+  const openGitLabCI = useSidecarStore((s) => s.openGitLabCI)
   const worktreeEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKFLOW_GIT_WORKTREE_PLUGIN_ID))
+  const gitlabViewerEnabled = usePluginSettingsStore((s) => s.isPluginEnabled('gitlab-ci-viewer'))
+  const gitlab = useGitLabPipelines(session, {
+    enabled: gitlabViewerEnabled && !statusUnavailable && !statusLoading && Boolean(branch),
+    limit: 6,
+  })
+  const matchedGitLab = Boolean(gitlabViewerEnabled && !statusUnavailable && gitlab.data?.matched)
+  const latestPipeline = matchedGitLab ? gitlab.data?.latest_pipeline || null : null
+  const latestPipelineMeta = latestPipeline ? gitLabStatusMeta(latestPipeline.status) : null
   const isLinkedWorktree = Boolean(
     session.worktree_root_workspace
     && session.workspace
@@ -185,102 +196,161 @@ export function GitStatusBar({ session }: GitStatusBarProps) {
       <div
         className="composer-git-status-bar"
       >
-        {/* 左侧：分支选择器（点击切换/新建分支） */}
-        <Menu opened={menuOpened} onChange={setMenuOpened} shadow="md" width={280} position="top-start" offset={8}
-          middlewares={{
-            flip: false,
-            shift: { padding: 12 },
-            size: {
-              padding: 12,
-              apply: ({ availableHeight, elements }) => {
-                elements.floating.style.setProperty('--branch-menu-available-height', `${availableHeight}px`)
-              },
-            },
-          }}>
-          <Menu.Target>
-            <UnstyledButton
-              className="composer-git-branch"
-              styles={{
-                root: {
-                  '&:hover': {
-                    background: 'var(--astr-card-hover, rgba(0, 0, 0, 0.05))',
-                  },
+        <div className="composer-git-left">
+          {/* 左侧：分支选择器（点击切换/新建分支） */}
+          <Menu opened={menuOpened} onChange={setMenuOpened} shadow="md" width={280} position="top-start" offset={8}
+            middlewares={{
+              flip: false,
+              shift: { padding: 12 },
+              size: {
+                padding: 12,
+                apply: ({ availableHeight, elements }) => {
+                  elements.floating.style.setProperty('--branch-menu-available-height', `${availableHeight}px`)
                 },
-              }}
-              title="点击切换或创建分支"
-              aria-label="切换或创建 Git 分支"
-              disabled={statusUnavailable || !branch || switching}
-            >
-              <GitBranchIcon size={20} aria-hidden="true" />
-              {isLinkedWorktree && (
-                <Badge size="xs" variant="light" color="cyan" px={4} style={{ textTransform: 'none', flexShrink: 0 }}>
-                  WT
-                </Badge>
-              )}
-              <Text size="xs" fw={600}>
-                {branch || (statusLoading ? '读取分支…' : '分支未知')}
-              </Text>
-              <CaretUpIcon className="composer-git-chevron" size={16} aria-hidden="true" />
-            </UnstyledButton>
-          </Menu.Target>
-
-          <Menu.Dropdown className="composer-branch-menu">
-            <Menu.Label>本地分支列表</Menu.Label>
-            {branches.map((b) => (
-              <Menu.Item
-                key={b}
-                leftSection={
-                  b === branch ? (
-                    <CheckIcon size={16} color="var(--astr-green)" />
-                  ) : (
-                    <span style={{ width: 16 }} />
-                  )
-                }
-                onClick={() => void handleSwitchBranch(b)}
+              },
+            }}>
+            <Menu.Target>
+              <UnstyledButton
+                className="composer-git-branch"
+                styles={{
+                  root: {
+                    '&:hover': {
+                      background: 'var(--astr-card-hover, rgba(0, 0, 0, 0.05))',
+                    },
+                  },
+                }}
+                title="点击切换或创建分支"
+                aria-label="切换或创建 Git 分支"
+                disabled={statusUnavailable || !branch || switching}
               >
-                <Text size="xs" fw={b === branch ? 600 : 400}>
-                  {b}
+                <GitBranchIcon size={20} aria-hidden="true" />
+                {isLinkedWorktree && (
+                  <Badge size="xs" variant="light" color="cyan" px={4} style={{ textTransform: 'none', flexShrink: 0 }}>
+                    WT
+                  </Badge>
+                )}
+                <Text size="xs" fw={600}>
+                  {branch || (statusLoading ? '读取分支…' : '分支未知')}
+                </Text>
+                <CaretUpIcon className="composer-git-chevron" size={16} aria-hidden="true" />
+              </UnstyledButton>
+            </Menu.Target>
+
+            <Menu.Dropdown className="composer-branch-menu">
+              <Menu.Label>本地分支列表</Menu.Label>
+              {branches.map((b) => (
+                <Menu.Item
+                  key={b}
+                  leftSection={
+                    b === branch ? (
+                      <CheckIcon size={16} color="var(--astr-green)" />
+                    ) : (
+                      <span style={{ width: 16 }} />
+                    )
+                  }
+                  onClick={() => void handleSwitchBranch(b)}
+                >
+                  <Text size="xs" fw={b === branch ? 600 : 400}>
+                    {b}
+                  </Text>
+                </Menu.Item>
+              ))}
+              <Menu.Divider />
+              <Menu.Item
+                leftSection={<PlusIcon size={16} color="var(--astr-blue)" />}
+                onClick={() => setCreateModalOpened(true)}
+              >
+                <Text size="xs" c="blue">
+                  基于当前创建新分支...
                 </Text>
               </Menu.Item>
-            ))}
-            <Menu.Divider />
-            <Menu.Item
-              leftSection={<PlusIcon size={16} color="var(--astr-blue)" />}
-              onClick={() => setCreateModalOpened(true)}
+              {gitlabViewerEnabled && session.workspace && (
+                <>
+                  <Menu.Divider />
+                  <Menu.Label>CI / CD</Menu.Label>
+                  <Menu.Item
+                    leftSection={<IconBrandGitlab size={16} color="#e24329" />}
+                    onClick={() => openGitLabCI(
+                      session.id,
+                      session.agent_id,
+                      session.workspace || undefined,
+                      session.connection_id || undefined,
+                      latestPipeline?.id,
+                    )}
+                  >
+                    <Text size="xs">
+                      查看 GitLab CI 流水线...
+                    </Text>
+                  </Menu.Item>
+                </>
+              )}
+              {worktreeEnabled && session.workspace && (
+                <>
+                  <Menu.Divider />
+                  <Menu.Label>Git Worktree 辅助</Menu.Label>
+                  <Menu.Item
+                    leftSection={<PlusIcon size={16} color="#0ea5e9" />}
+                    onClick={() => setCreateWorktreeSessionOpened(true)}
+                  >
+                    <Text size="xs">
+                      基于当前新建 Worktree 会话...
+                    </Text>
+                  </Menu.Item>
+                  <Menu.Item
+                    leftSection={<GitBranchIcon size={16} color="#0ea5e9" />}
+                    onClick={() => openWorktrees(
+                      session.id,
+                      session.agent_id,
+                      session.worktree_root_workspace || session.workspace || undefined,
+                      session.connection_id || undefined,
+                    )}
+                  >
+                    <Text size="xs">
+                      管理 Git Worktree 工作区...
+                    </Text>
+                  </Menu.Item>
+                </>
+              )}
+            </Menu.Dropdown>
+          </Menu>
+
+          {/* GitLab CI 实时流水线状态胶囊（仅当当前仓库匹配到已配置 GitLab 实例时展示） */}
+          {matchedGitLab && (
+            <Tooltip
+              label={
+                latestPipeline
+                  ? `${gitlab.data?.repo?.project_path || 'GitLab'} · #${latestPipeline.id} (${latestPipeline.ref} @ ${latestPipeline.short_sha}) — 点击查看 CI 流水线与日志`
+                  : `${gitlab.data?.repo?.project_path || 'GitLab'} — 点击查看 GitLab CI 流水线`
+              }
             >
-              <Text size="xs" c="blue">
-                基于当前创建新分支...
-              </Text>
-            </Menu.Item>
-            {worktreeEnabled && session.workspace && (
-              <>
-                <Menu.Divider />
-                <Menu.Label>Git Worktree 辅助</Menu.Label>
-                <Menu.Item
-                  leftSection={<PlusIcon size={16} color="#0ea5e9" />}
-                  onClick={() => setCreateWorktreeSessionOpened(true)}
-                >
-                  <Text size="xs">
-                    基于当前新建 Worktree 会话...
-                  </Text>
-                </Menu.Item>
-                <Menu.Item
-                  leftSection={<GitBranchIcon size={16} color="#0ea5e9" />}
-                  onClick={() => openWorktrees(
-                    session.id,
-                    session.agent_id,
-                    session.worktree_root_workspace || session.workspace || undefined,
-                    session.connection_id || undefined,
-                  )}
-                >
-                  <Text size="xs">
-                    管理 Git Worktree 工作区...
-                  </Text>
-                </Menu.Item>
-              </>
-            )}
-          </Menu.Dropdown>
-        </Menu>
+              <UnstyledButton
+                className={`composer-gitlab-pill${latestPipelineMeta ? ` is-${latestPipelineMeta.tone}` : ''}`}
+                aria-label="查看 GitLab CI 流水线"
+                onClick={() => openGitLabCI(
+                  session.id,
+                  session.agent_id,
+                  session.workspace || undefined,
+                  session.connection_id || undefined,
+                  latestPipeline?.id,
+                )}
+              >
+                <IconBrandGitlab size={13} color="#e24329" aria-hidden="true" />
+                {latestPipeline && latestPipelineMeta ? (
+                  <>
+                    <span
+                      className={`composer-gitlab-dot${latestPipelineMeta.spinning ? ' is-pulsing' : ''}`}
+                      style={{ backgroundColor: latestPipelineMeta.dotColor }}
+                    />
+                    <span className="composer-gitlab-id">#{latestPipeline.id}</span>
+                    <span>{latestPipelineMeta.label}</span>
+                  </>
+                ) : (
+                  <span>GitLab CI</span>
+                )}
+              </UnstyledButton>
+            </Tooltip>
+          )}
+        </div>
 
         {/* 右侧：代码变更数统计（点击在侧边栏展开 git diff 文件浏览器） */}
         <Tooltip label="点击在侧边栏查看所有修改的文件列表与 Diff">

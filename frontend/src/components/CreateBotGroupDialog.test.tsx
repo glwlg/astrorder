@@ -8,7 +8,8 @@ import type { Agent, BotGroup, Session } from '../domain/types'
 const agents: Record<string, Agent> = {
   codex: { id: 'codex', kind: 'codex', name: 'Codex', status: 'ready', capabilities: ['chat'], limitation: null },
   hermes: { id: 'hermes', kind: 'hermes', name: 'Hermes', status: 'ready', capabilities: ['chat'], limitation: null, connection_id: 'ssh-debian' },
-  agy: { id: 'local-antigravity', kind: 'antigravity', name: 'Antigravity', status: 'ready', capabilities: ['chat'], limitation: null },
+  'local-antigravity': { id: 'local-antigravity', kind: 'antigravity', name: 'Antigravity', status: 'ready', capabilities: ['chat'], limitation: null },
+  'ssh-antigravity-wsl': { id: 'ssh-antigravity-wsl', kind: 'antigravity-ssh', name: 'WSL · Antigravity', status: 'ready', capabilities: ['chat'], limitation: null, connection_id: 'wsl' },
 }
 const parent: Session = { id: 'parent', agent_id: 'codex', title: '已有对话', workspace: '/source', status: 'idle', updated_at: '2026-11-10T00:00:00Z' }
 const child: Session = { ...parent, id: 'child', title: '分叉对话', handoff_from_agent_id: 'codex', handoff_from_session_id: 'parent' }
@@ -41,7 +42,8 @@ describe('CreateBotGroupDialog', () => {
   it('adds the same Agent twice with distinct identities and independently selected workspaces', async () => {
     const create = vi.spyOn(api, 'createBotGroup').mockResolvedValue({ ok: true, group: saved })
     const { onCreated, onClose } = openDialog()
-    expect(screen.queryByRole('button', { name: '添加 Antigravity' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '添加 Antigravity' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '添加 WSL · Antigravity' })).toBeInTheDocument()
     expect(screen.getByLabelText('单次提问最大接力轮数')).toHaveValue('10')
     fireEvent.change(screen.getByLabelText(/群聊名称/), { target: { value: '测试群' } })
     await addCodex()
@@ -122,5 +124,36 @@ describe('CreateBotGroupDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
     await waitFor(() => expect(update).toHaveBeenCalledWith('g', { max_hops: 20 }))
     expect(retry).not.toHaveBeenCalled()
+  })
+  it('supports adding local and SSH Antigravity members with AGY-specific effort and approval options', async () => {
+    const create = vi.spyOn(api, 'createBotGroup').mockResolvedValue({ ok: true, group: saved })
+    vi.spyOn(api, 'getSessions').mockResolvedValue({
+      items: [{ id: 's-agy', agent_id: 'ssh-antigravity-wsl', connection_id: 'wsl', title: 'WSL', workspace: '/srv/app', status: 'idle', updated_at: '' }],
+    })
+    vi.spyOn(api, 'getSessionModels').mockResolvedValue({
+      items: [{ provider: 'antigravity', model: 'gemini-4-neon-high', label: 'Gemini 4 Neon (High)' }],
+    })
+    vi.spyOn(api, 'getSessionModel').mockResolvedValue({ provider: 'antigravity', model: 'gemini-4-neon-high', effort: 'high' })
+
+    openDialog()
+    fireEvent.change(screen.getByLabelText(/群聊名称/), { target: { value: 'AGY 协作群' } })
+    fireEvent.click(screen.getByRole('button', { name: '添加 WSL · Antigravity' }))
+    await waitFor(() => expect(api.getSessions).toHaveBeenCalledWith('ssh-antigravity-wsl'))
+
+    // AGY does not expose unsupported native fork selector and disables separate effort select.
+    expect(screen.queryByRole('combobox', { name: '从已有会话分叉（可选）' })).not.toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: '思考强度' })).toBeDisabled()
+
+    fireEvent.click(screen.getByRole('button', { name: '创建群聊' }))
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1))
+    expect(create.mock.calls[0][0].members[0]).toMatchObject({
+      agent_id: 'ssh-antigravity-wsl',
+      machine_id: 'wsl',
+      workspace: '/srv/app',
+      model_provider: 'antigravity',
+      model_name: 'gemini-4-neon-high',
+      approval_policy: 'manual',
+    })
+    expect(create.mock.calls[0][0].members[0].thinking_effort).toBeUndefined()
   })
 })

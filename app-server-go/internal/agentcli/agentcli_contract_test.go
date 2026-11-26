@@ -57,6 +57,17 @@ func TestCompatibleCommandGrammar(t *testing.T) {
 		{"sessions search", []string{"sessions", "search", "K8s 集群"}, "sessions.search", map[string]any{"q": "K8s 集群", "caller": expectedCaller}},
 		{"sessions read default", []string{"sessions", "read"}, "sessions.read", map[string]any{"limit": json.Number("80"), "caller": expectedCaller}},
 		{"sessions read options", []string{"sessions", "read", "--key", "codex::s1", "--agent-id", "codex", "--session-id", "s1", "--limit", "17"}, "sessions.read", map[string]any{"key": "codex::s1", "agent_id": "codex", "session_id": "s1", "limit": json.Number("17"), "caller": expectedCaller}},
+		{"bots list", []string{"bots", "list"}, "bots.list", map[string]any{}},
+		{"bots invoke", []string{"bots", "invoke", "--bot", "video-studio", "--operation-id", "op-bot-1", "--title", "宣传片", "--prompt", "做个90秒宣传片", "--attach", "brief.md,logo.png"}, "bots.invoke", map[string]any{"bot": "video-studio", "operation_id": "op-bot-1", "title": "宣传片", "prompt": "做个90秒宣传片", "attach_paths": []any{"brief.md", "logo.png"}, "caller": expectedCaller}},
+		{"schedules list", []string{"schedules", "list"}, "schedules.list", map[string]any{"session_key": "hermes::session-1", "caller": expectedCaller}},
+		{"schedules create once", []string{"schedules", "create", "--name", "检查部署", "--in", "10m", "--when-busy", "queue", "--prompt", "检查状态"}, "schedules.create", map[string]any{"name": "检查部署", "prompt": "检查状态", "schedule_kind": "once", "delay_seconds": json.Number("600"), "when_busy": "queue", "session_key": "hermes::session-1", "caller": expectedCaller}},
+		{"schedules create cron", []string{"schedules", "create", "--cron", "0 9 * * 1-5", "--timezone", "Asia/Shanghai", "--prompt", "工作日早报"}, "schedules.create", map[string]any{"prompt": "工作日早报", "schedule_kind": "cron", "cron_expr": "0 9 * * 1-5", "timezone": "Asia/Shanghai", "session_key": "hermes::session-1", "caller": expectedCaller}},
+		{"schedules update", []string{"schedules", "update", "--id", "sched-1", "--enabled", "false"}, "schedules.update", map[string]any{"id": "sched-1", "enabled": false, "session_key": "hermes::session-1", "caller": expectedCaller}},
+		{"schedules delete", []string{"schedules", "delete", "--id", "sched-1"}, "schedules.delete", map[string]any{"id": "sched-1", "session_key": "hermes::session-1", "caller": expectedCaller}},
+		{"gitlab pipelines", []string{"gitlab", "pipelines", "--ref", "main", "--limit", "5"}, "gitlab.pipelines", map[string]any{"ref": "main", "limit": json.Number("5"), "caller": expectedCaller}},
+		{"gitlab status default", []string{"gitlab", "status"}, "gitlab.pipeline", map[string]any{"caller": expectedCaller}},
+		{"gitlab status pipeline", []string{"gitlab", "status", "--pipeline-id", "301", "--project", "team/app"}, "gitlab.pipeline", map[string]any{"pipeline_id": json.Number("301"), "project": "team/app", "caller": expectedCaller}},
+		{"gitlab log", []string{"gitlab", "log", "--job-id", "77", "--tail", "120"}, "gitlab.job_log", map[string]any{"job_id": json.Number("77"), "tail": json.Number("120"), "caller": expectedCaller}},
 		{"agents", []string{"agents"}, "agents.list", map[string]any{}},
 		{"machines", []string{"machines"}, "machines.list", map[string]any{}},
 		{"projects", []string{"projects"}, "projects.list", map[string]any{}},
@@ -263,6 +274,9 @@ func TestHelpUsageAndRegistrationsShareGrammar(t *testing.T) {
 		"sessions list", "sessions search", "sessions read",
 		"sessions spawn", "sessions delegate", "sessions operation",
 		"sessions send", "sessions stop", "sessions delete", "sessions tree",
+		"schedules", "schedules list", "schedules create", "schedules update", "schedules delete",
+		"bots", "bots list", "bots invoke",
+		"gitlab", "gitlab pipelines", "gitlab status", "gitlab log",
 		"browser", "browser eval", "browser screenshot",
 		"agents", "machines", "projects", "bind",
 	}
@@ -298,7 +312,7 @@ func TestHelpUsageAndRegistrationsShareGrammar(t *testing.T) {
 		t.Fatalf("root help exit = %d, stderr = %q", code, stderr.String())
 	}
 	normalizedHelp := strings.Join(strings.Fields(stdout.String()), " ")
-	for _, text := range []string{"usage: astrorder-agent [-h] {catalog,invoke,sessions,browser,agents,machines,projects,bind} ...", "Call Astrorder agent APIs", "catalog", "List capabilities", "invoke", "Call a capability by id"} {
+	for _, text := range []string{"usage: astrorder-agent [-h] {catalog,invoke,sessions,schedules,bots,gitlab,browser,agents,machines,projects,bind} ...", "Call Astrorder agent APIs", "catalog", "List capabilities", "invoke", "Call a capability by id"} {
 		if !strings.Contains(normalizedHelp, text) {
 			t.Fatalf("root help missing %q:\n%s", text, stdout.String())
 		}

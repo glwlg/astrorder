@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, expect, it, vi } from 'vitest'
 import type { Agent, Session } from '../../domain/types'
 import { SessionAccountsHoverCard } from './SessionAccountsHoverCard'
-import { agyAccountsApi } from './agyAccountsApi'
+import { agyAccountsApi, codexAccountsApi, grokAccountsApi } from './agyAccountsApi'
 
 const agent: Agent = { id: 'dev-agy', kind: 'antigravity-ssh', name: 'AGY · 开发机', connection_id: 'dev', status: 'ready', capabilities: [], limitation: null }
 const session: Session = { id: 'chat', title: '会话', agent_id: agent.id, connection_id: 'dev', status: 'idle', workspace: null, updated_at: '' }
@@ -89,11 +89,114 @@ it('loads on hover, uses target snapshots and switches only the selected machine
   expect(quota.mock.calls.map(([target, id]) => [target, id])).toEqual([['dev', 'a'], ['dev', 'b']])
 })
 
-it('shows the session platform without loading AGY accounts on a Codex session', async () => {
+it('shows the session platform without loading accounts on an unsupported Hermes session', async () => {
   const user = userEvent.setup()
   const accounts = vi.spyOn(agyAccountsApi, 'accounts')
-  preview({ ...agent, kind: 'codex' }, session)
+  preview({ ...agent, kind: 'hermes' }, session)
   await user.hover(screen.getByRole('link', { name: '账号' }))
-  expect(await screen.findByText('Codex 尚未接入账号管理。')).toBeVisible()
+  expect(await screen.findByText('Hermes 尚未接入账号管理。')).toBeVisible()
   expect(accounts).not.toHaveBeenCalled()
+})
+
+it('loads Codex accounts, quota with reset times, and switches via codexAccountsApi on a Codex session', async () => {
+  const user = userEvent.setup()
+  const agySpy = vi.spyOn(agyAccountsApi, 'accounts')
+  const resetMs = Date.parse('2026-11-26T08:00:00Z')
+  let active = 'c1'
+  vi.spyOn(codexAccountsApi, 'accounts').mockResolvedValue({
+    items: [
+      { id: 'c1', name: 'Codex 主力', email: 'main@example.com' },
+      { id: 'c2', name: 'Codex 备用' },
+    ],
+  })
+  vi.spyOn(codexAccountsApi, 'targetState').mockImplementation(async () => ({ current_account_id: active, quota_supported: true }))
+  vi.spyOn(codexAccountsApi, 'quota').mockResolvedValue({
+    as_of: '2026-11-26T02:00:00Z',
+    plan: 'ChatGPT Plus',
+    groups: [{ name: 'Codex', buckets: [{ id: '5h', name: '5 小时', window: '5h', remaining_fraction: 0.91, reset_at: resetMs }] }],
+  })
+  const switchSpy = vi.spyOn(codexAccountsApi, 'switch').mockImplementation(async (_, id) => {
+    active = id
+    return { account_id: id, restarted: true }
+  })
+
+  preview({ ...agent, id: 'dev-codex', kind: 'codex-ssh', name: 'Codex · 开发机' }, { ...session, agent_id: 'dev-codex' })
+  await user.hover(screen.getByRole('link', { name: '账号' }))
+  expect(await screen.findByText('Codex 额度')).toBeVisible()
+  expect(agySpy).not.toHaveBeenCalled()
+
+  await user.click(screen.getByRole('button', { name: '刷新额度' }))
+  const list = await screen.findByRole('list', { name: '当前平台的账号' })
+  expect((await within(list).findAllByText('91%')).length).toBeGreaterThan(0)
+  expect((await within(list).findAllByText('Plus')).length).toBeGreaterThan(0)
+  expect((await within(list).findAllByText(/重置$/)).length).toBeGreaterThan(0)
+
+  await user.click(within(list).getByRole('button', { name: '切换到 Codex 备用' }))
+  await waitFor(() => expect(switchSpy).toHaveBeenCalledWith('dev', 'c2', false))
+})
+
+it('loads Grok accounts and subscription summary via grokAccountsApi on a Grok session', async () => {
+  const user = userEvent.setup()
+  const agySpy = vi.spyOn(agyAccountsApi, 'accounts')
+  vi.spyOn(grokAccountsApi, 'accounts').mockResolvedValue({ items: [{ id: 'g1', name: 'Grok 账号' }] })
+  vi.spyOn(grokAccountsApi, 'targetState').mockResolvedValue({ current_account_id: 'g1', quota_supported: true })
+  vi.spyOn(grokAccountsApi, 'quota').mockResolvedValue({
+    as_of: '2026-11-26T02:00:00Z',
+    plan: 'SuperGrok',
+    detail: '已认证（grok@x.ai）',
+    groups: [],
+  })
+
+  preview({ ...agent, id: 'local-grok', kind: 'grok', name: 'Grok', connection_id: 'local' }, { ...session, agent_id: 'local-grok', connection_id: 'local' })
+  await user.hover(screen.getByRole('link', { name: '账号' }))
+  expect(await screen.findByText('Grok 额度')).toBeVisible()
+  expect(agySpy).not.toHaveBeenCalled()
+
+  await user.click(screen.getByRole('button', { name: '刷新额度' }))
+  expect(await screen.findByText('SuperGrok')).toBeVisible()
+  expect(await screen.findByText('已认证（grok@x.ai）')).toBeVisible()
+})
+
+it('displays reset times next to each quota period row when reset_at is present', async () => {
+  const user = userEvent.setup()
+  const fiveHourReset = Date.parse('2026-11-26T06:30:00Z')
+  const weeklyGeminiReset = Date.parse('2026-12-01T00:00:00Z')
+  const weeklyClaudeReset = Date.parse('2026-12-02T00:00:00Z')
+  const snapshot = {
+    as_of: '2026-11-26T01:30:00Z',
+    groups: [
+      {
+        name: 'Gemini Models',
+        buckets: [
+          { id: '5h', name: '5h', window: 'five_hour', remaining_fraction: 0.977, reset_at: fiveHourReset },
+          { id: 'weekly', name: 'Week', window: 'weekly', remaining_fraction: 0.617, reset_at: weeklyGeminiReset },
+        ],
+      },
+      {
+        name: 'Claude and GPT models',
+        buckets: [
+          { id: '5h', name: '5h', window: 'five_hour', remaining_fraction: 1 },
+          { id: 'weekly', name: 'Week', window: 'weekly', remaining_fraction: 1, reset_at: weeklyClaudeReset },
+        ],
+      },
+    ],
+  }
+  vi.spyOn(agyAccountsApi, 'accounts').mockResolvedValue({ items: [{ id: 'u', name: 'guomina1995' }] })
+  vi.spyOn(agyAccountsApi, 'targetState').mockResolvedValue({ current_account_id: 'u', quota_supported: true })
+  localStorage.setItem('astrorder:agy-quota:v2:u', JSON.stringify(snapshot))
+
+  preview(agent, session)
+  await user.hover(screen.getByRole('link', { name: '账号' }))
+  const list = await screen.findByRole('list', { name: '当前平台的账号' })
+  const shortRow = within(await within(list).findByRole('group', { name: '5 小时额度' }))
+  const weeklyRow = within(within(list).getByRole('group', { name: '每周额度' }))
+
+  const shortReset = shortRow.getByText(/重置$/)
+  expect(shortReset).toHaveAttribute('datetime', new Date(fiveHourReset).toISOString())
+
+  // Weekly row has different resets for Gemini (61.7%) and Claude/GPT (100%): prioritizes the consumed Gemini reset and keeps both in tooltip
+  const weeklyReset = weeklyRow.getByText(/重置$/)
+  expect(weeklyReset).toHaveAttribute('datetime', new Date(weeklyGeminiReset).toISOString())
+  expect(weeklyReset.getAttribute('title')).toContain('Gemini')
+  expect(weeklyReset.getAttribute('title')).toContain('Claude / GPT')
 })

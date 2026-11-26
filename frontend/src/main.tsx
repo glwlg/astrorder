@@ -3,7 +3,8 @@ import { createRoot } from 'react-dom/client'
 import '@mantine/core/styles.css'
 import '@mantine/notifications/styles.css'
 import { MantineProvider } from '@mantine/core'
-import { Notifications, notifications } from '@mantine/notifications'
+import { notifications } from '@mantine/notifications'
+import { DynamicIslandToastHost } from './components/DynamicIslandToastHost'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter } from 'react-router-dom'
 import App from './app/App.tsx'
@@ -131,7 +132,7 @@ createRoot(rootEl).render(
     <MantineProvider theme={theme} defaultColorScheme="light">
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
-          <Notifications position="top-right" zIndex={3000} />
+          <DynamicIslandToastHost />
           <App />
         </BrowserRouter>
       </QueryClientProvider>

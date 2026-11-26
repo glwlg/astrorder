@@ -304,6 +304,9 @@ func validateProvisionPaths(options Options) (provisionPaths, error) {
 	if err != nil || !indexInfo.Mode().IsRegular() {
 		return provisionPaths{}, errors.New("root directory must contain frontend/dist/index.html")
 	}
+	if err := ValidateStaticDir(paths.staticDir); err != nil {
+		return provisionPaths{}, fmt.Errorf("root directory frontend/dist is incomplete: %w", err)
+	}
 	resolvedRoot, err := canonicalExistingPath(paths.rootDir)
 	if err != nil {
 		return provisionPaths{}, fmt.Errorf("resolve installation root: %w", err)

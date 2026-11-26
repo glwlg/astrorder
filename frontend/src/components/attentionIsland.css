@@ -45,98 +45,268 @@
   z-index: 1;
 }
 
-.attention-island {
+/* Accessible visually-hidden live announcement node (ariaNotify fallback) */
+.attention-island-sr-live {
   position: fixed;
-  top: 11px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.attention-island {
+  --island-spring: linear(
+    0, 0.012 0.8%, 0.048 1.6%, 0.19 3.4%, 0.56 7%, 0.89 11%,
+    1.07 15%, 1.115 18.5%, 1.11 21%, 1.07 25%, 1.01 32%,
+    0.985 40%, 0.99 52%, 1.004 68%, 1
+  );
+  position: fixed;
+  top: 10px;
   left: calc(var(--astr-shell-rail-width, 352px) + (100vw - var(--astr-shell-rail-width, 352px)) / 2);
   transform: translateX(-50%);
-  z-index: 260;
+  z-index: 3100;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
-  max-width: min(560px, calc(100vw - var(--astr-shell-rail-width, 352px) - 320px));
+  max-width: min(500px, calc(100vw - var(--astr-shell-rail-width, 352px) - 80px));
   pointer-events: none;
   transition: left 220ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.attention-island-pill {
+.attention-island.is-standalone {
+  top: calc(env(safe-area-inset-top, 0px) + 10px);
+  left: 50%;
+  max-width: min(460px, calc(100vw - 24px));
+}
+
+/* Unified single-capsule Dynamic Island surface */
+.attention-island-shell {
   position: relative;
   overflow: hidden;
   pointer-events: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: stretch;
   max-width: 100%;
   min-height: 36px;
-  padding: 4px 8px 4px 12px;
-  border-radius: 999px;
+  padding: 5px 10px 5px 12px;
+  border-radius: 20px;
   background: var(--astr-surface);
-  border: 1px solid color-mix(in oklab, var(--astr-indigo) 24%, var(--astr-border));
+  border: 1px solid color-mix(in oklab, var(--astr-indigo) 22%, var(--astr-border));
   box-shadow:
-    0 10px 28px -8px color-mix(in oklab, var(--astr-indigo) 22%, rgb(16 14 28 / 26%)),
+    0 12px 30px -8px color-mix(in oklab, var(--astr-indigo) 22%, rgb(16 14 28 / 24%)),
     0 2px 6px rgb(16 14 28 / 8%);
+  transform-origin: center top;
   transition:
-    border-color 220ms cubic-bezier(0.22, 1, 0.36, 1),
-    box-shadow 220ms cubic-bezier(0.22, 1, 0.36, 1),
-    padding 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 220ms ease,
+    box-shadow 260ms ease,
+    border-radius 320ms cubic-bezier(0.22, 1, 0.36, 1),
+    padding 300ms cubic-bezier(0.22, 1, 0.36, 1),
+    min-height 300ms cubic-bezier(0.22, 1, 0.36, 1),
+    min-width 300ms cubic-bezier(0.22, 1, 0.36, 1),
     background-color 220ms ease;
-  animation: attention-island-enter 220ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.attention-island.is-attention .attention-island-pill,
-.attention-island.is-notice-attention .attention-island-pill {
-  border-color: color-mix(in oklab, var(--astr-yellow) 52%, var(--astr-border));
+.attention-island-shell svg {
+  display: block;
+}
+
+/* Tier 2: Compact Toast — noticeably taller & wider capsule with tactile pop */
+.attention-island-shell.is-compact-toast {
+  min-height: 48px;
+  min-width: 210px;
+  padding: 10px 12px;
+  border-radius: 24px;
+}
+
+/* Tier 3: Rich Notification / Session Complete / Approval — bold Dynamic Island expanded live activity */
+.attention-island-shell.is-tall {
+  min-height: 62px;
+  min-width: min(320px, calc(100vw - 32px));
+  max-width: min(470px, calc(100vw - 32px));
+  padding: 11px 13px;
+  border-radius: 24px;
+}
+
+/* Tier 4: Unified Expanded Tray Card — same capsule swells into a smooth sheet */
+.attention-island-shell.is-expanded-card {
+  justify-content: flex-start;
+  width: min(440px, calc(100vw - 32px));
+  min-height: 62px;
+  padding: 12px 14px 14px 14px;
+  border-radius: 24px;
   box-shadow:
-    0 12px 30px -8px color-mix(in oklab, var(--astr-yellow) 26%, rgb(16 14 28 / 32%)),
+    0 24px 52px -12px rgb(16 14 28 / 32%),
+    0 4px 14px rgb(16 14 28 / 10%);
+}
+
+/* Semantic borders & ambient glows */
+.attention-island-shell.is-attention,
+.attention-island-shell.is-notice-attention {
+  border-color: color-mix(in oklab, var(--astr-yellow) 54%, var(--astr-border));
+  box-shadow:
+    0 16px 36px -8px color-mix(in oklab, var(--astr-yellow) 26%, rgb(16 14 28 / 30%)),
     0 0 0 1px color-mix(in oklab, var(--astr-yellow) 16%, transparent);
 }
 
-.attention-island.is-notice .attention-island-pill {
-  padding: 5px 9px 6px 10px;
-}
-
-.attention-island.is-notice-success .attention-island-pill {
-  border-color: color-mix(in oklab, var(--astr-teal, #12b886) 52%, var(--astr-border));
+.attention-island-shell.is-notice-success {
+  border-color: color-mix(in oklab, var(--astr-teal, #12b886) 50%, var(--astr-border));
   box-shadow:
-    0 14px 32px -8px color-mix(in oklab, var(--astr-teal, #12b886) 28%, rgb(16 14 28 / 28%)),
-    0 0 0 1px color-mix(in oklab, var(--astr-teal, #12b886) 16%, transparent);
+    0 16px 36px -8px color-mix(in oklab, var(--astr-teal, #12b886) 26%, rgb(16 14 28 / 26%)),
+    0 0 0 1px color-mix(in oklab, var(--astr-teal, #12b886) 15%, transparent);
 }
 
-.attention-island.is-notice-error .attention-island-pill {
+.attention-island-shell.is-notice-error {
   border-color: color-mix(in oklab, var(--astr-red) 55%, var(--astr-border));
   box-shadow:
-    0 14px 32px -8px color-mix(in oklab, var(--astr-red) 28%, rgb(16 14 28 / 30%)),
+    0 16px 36px -8px color-mix(in oklab, var(--astr-red) 28%, rgb(16 14 28 / 30%)),
     0 0 0 1px color-mix(in oklab, var(--astr-red) 16%, transparent);
 }
 
-.attention-island-notice-trigger {
-  animation: attention-island-notice-morph 260ms cubic-bezier(0.22, 1.24, 0.36, 1);
+.attention-island-shell.is-notice-info {
+  border-color: color-mix(in oklab, var(--astr-indigo) 38%, var(--astr-border));
+  box-shadow:
+    0 16px 34px -8px color-mix(in oklab, var(--astr-indigo) 22%, rgb(16 14 28 / 24%)),
+    0 0 0 1px color-mix(in oklab, var(--astr-indigo) 12%, transparent);
 }
 
+/* Elastic spring pulse when content updates (transform only — never opacity) */
+@media (prefers-reduced-motion: no-preference) {
+  .attention-island-shell.is-pop-odd {
+    animation-name: attention-island-spring-pop-odd;
+    animation-duration: 540ms;
+    animation-timing-function: var(--island-spring);
+  }
+
+  .attention-island-shell.is-pop-even {
+    animation-name: attention-island-spring-pop-even;
+    animation-duration: 540ms;
+    animation-timing-function: var(--island-spring);
+  }
+}
+
+@supports not (animation-timing-function: linear(0, 1)) {
+  @media (prefers-reduced-motion: no-preference) {
+    .attention-island-shell.is-pop-odd,
+    .attention-island-shell.is-pop-even {
+      animation-duration: 360ms;
+      animation-timing-function: cubic-bezier(0.34, 1.52, 0.64, 1);
+    }
+  }
+}
+
+.attention-island-header-row {
+  display: flex;
+  align-items: center;
+  min-height: 24px;
+  width: 100%;
+  min-width: 0;
+}
+
+.attention-island-toast-row,
+.attention-island-event-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+}
+
+.attention-island-status-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+}
+
+.attention-island-toast-row.is-rich {
+  align-items: center;
+  gap: 11px;
+}
+
+/* Toast status emblem */
+.attention-island-toast-emblem,
 .attention-island-notice-badge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 21px;
-  height: 21px;
+  width: 26px;
+  height: 26px;
   border-radius: 50%;
   flex: none;
 }
 
+.attention-island-toast-emblem.is-lg,
+.attention-island-notice-badge.is-lg {
+  width: 34px;
+  height: 34px;
+  border-radius: 12px;
+}
+
+.attention-island-toast-emblem.is-success,
 .attention-island-notice-badge.is-notice-success {
-  background: color-mix(in oklab, var(--astr-teal, #12b886) 16%, transparent);
+  background: color-mix(in oklab, var(--astr-teal, #12b886) 15%, transparent);
   color: var(--astr-teal, #12b886);
 }
 
+.attention-island-toast-emblem.is-error,
 .attention-island-notice-badge.is-notice-error {
-  background: color-mix(in oklab, var(--astr-red) 16%, transparent);
+  background: color-mix(in oklab, var(--astr-red) 15%, transparent);
   color: var(--astr-red);
 }
 
+.attention-island-toast-emblem.is-warning,
 .attention-island-notice-badge.is-notice-attention {
   background: color-mix(in oklab, var(--astr-yellow) 18%, transparent);
   color: var(--astr-yellow);
+}
+
+.attention-island-toast-emblem.is-info,
+.attention-island-toast-emblem.is-loading {
+  background: color-mix(in oklab, var(--astr-indigo) 14%, transparent);
+  color: var(--astr-indigo);
+}
+
+.attention-island-toast-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.attention-island-toast-title {
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.3;
+  color: var(--astr-text);
+  overflow-wrap: break-word;
+}
+
+.attention-island-toast-message {
+  font-size: 13px;
+  font-weight: 550;
+  line-height: 1.4;
+  color: var(--astr-text);
+  overflow-wrap: break-word;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.attention-island-toast-message.has-title {
+  font-size: 12px;
+  font-weight: 450;
+  color: var(--astr-muted);
+}
+
+.attention-island-close-btn {
+  flex: none;
 }
 
 .attention-island.is-notice-success .attention-island-count {
@@ -156,15 +326,15 @@
 
 .attention-island-progress {
   position: absolute;
-  left: 14px;
-  right: 14px;
+  left: 18px;
+  right: 18px;
   bottom: 0;
-  height: 2px;
+  height: 2.5px;
   border-radius: 999px;
   transform-origin: left center;
-  opacity: 0.78;
+  opacity: 0.82;
   pointer-events: none;
-  animation: attention-island-countdown var(--island-notice-duration, 6500ms) linear forwards;
+  animation: attention-island-countdown var(--island-notice-duration, 3200ms) linear forwards;
 }
 
 .attention-island.is-paused .attention-island-progress {
@@ -183,16 +353,20 @@
   background: var(--astr-yellow);
 }
 
+.attention-island-progress.is-notice-info {
+  background: var(--astr-indigo);
+}
+
 .attention-island-trigger {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   min-width: 0;
   flex: 1 1 auto;
-  padding: 2px 4px 2px 0;
+  padding: 0;
   color: var(--astr-text);
-  font-size: 12px;
-  line-height: 1.3;
+  font-size: 12.5px;
+  line-height: 1;
   cursor: pointer;
 }
 
@@ -206,18 +380,24 @@
 .attention-island-dot.is-running {
   background: var(--astr-indigo);
   box-shadow: 0 0 0 3px color-mix(in oklab, var(--astr-indigo) 22%, transparent);
-  animation: attention-dot-pulse 2s ease-in-out infinite;
+  @media (prefers-reduced-motion: no-preference) {
+    animation: attention-dot-pulse 2s ease-in-out infinite;
+  }
 }
 
 .attention-island-dot.is-attention {
   background: var(--astr-yellow);
   box-shadow: 0 0 0 3px color-mix(in oklab, var(--astr-yellow) 28%, transparent);
-  animation: attention-dot-pulse 1.5s ease-in-out infinite;
+  @media (prefers-reduced-motion: no-preference) {
+    animation: attention-dot-pulse 1.5s ease-in-out infinite;
+  }
 }
 
 .attention-island-brand {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  line-height: 1;
   flex: none;
 }
 
@@ -240,12 +420,32 @@
   white-space: nowrap;
 }
 
+.attention-island-copy.is-stacked {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  white-space: normal;
+  flex: 1 1 auto;
+}
+
+.attention-island-title-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  min-width: 0;
+}
+
 .attention-island-title {
+  font-size: 13px;
   font-weight: 650;
+  line-height: 1.25;
   color: var(--astr-text);
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 170px;
+  white-space: nowrap;
+  max-width: 210px;
 }
 
 .attention-island-sep {
@@ -257,15 +457,25 @@
   color: var(--astr-muted);
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 200px;
+  max-width: 220px;
+}
+
+.attention-island-detail.is-subline {
+  font-size: 12px;
+  line-height: 1.35;
+  max-width: 100%;
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 
 .attention-island-count {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 18px;
-  height: 18px;
+  min-width: 19px;
+  height: 19px;
   padding: 0 5px;
   border-radius: 999px;
   font-size: 10.5px;
@@ -284,6 +494,8 @@
 .attention-island-chevron {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  line-height: 1;
   color: var(--astr-muted);
   flex: none;
 }
@@ -292,23 +504,18 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  line-height: 1;
   flex: none;
 }
 
+/* Integrated tray inside the morphing island shell */
 .attention-island-tray {
-  position: relative;
-  pointer-events: auto;
-  width: min(440px, calc(100vw - 32px));
-  max-height: min(440px, calc(100vh - 96px));
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in oklab, var(--astr-border) 75%, transparent);
+  max-height: min(400px, calc(100dvh - 140px));
   overflow-y: auto;
-  padding: 12px 14px;
-  border-radius: 16px;
-  background: var(--astr-surface);
-  border: 1px solid color-mix(in oklab, var(--astr-indigo) 22%, var(--astr-border));
-  box-shadow:
-    0 20px 44px -12px rgb(16 14 28 / 32%),
-    0 4px 12px rgb(16 14 28 / 10%);
-  animation: attention-island-enter 180ms cubic-bezier(0.16, 1, 0.3, 1);
+  width: 100%;
 }
 
 .attention-tray-section + .attention-tray-section {
@@ -318,7 +525,7 @@
 
 .attention-tray-item {
   padding: 10px 11px;
-  border-radius: 11px;
+  border-radius: 12px;
   background: color-mix(in oklab, var(--astr-surface-muted) 68%, transparent);
   border: 1px solid color-mix(in oklab, var(--astr-border) 75%, transparent);
 }
@@ -351,7 +558,7 @@
   gap: 8px;
   width: 100%;
   padding: 7px 9px;
-  border-radius: 9px;
+  border-radius: 10px;
   color: var(--astr-text);
   transition: background 120ms ease;
 }
@@ -370,25 +577,21 @@
   border-radius: 999px;
 }
 
-@keyframes attention-island-enter {
-  from {
-    opacity: 0;
-    transform: translateY(-6px) scale(0.97);
+@keyframes attention-island-spring-pop-odd {
+  0% {
+    transform: scale(0.9, 0.78) translateY(-3px);
   }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
+  100% {
+    transform: scale(1, 1) translateY(0);
   }
 }
 
-@keyframes attention-island-notice-morph {
-  from {
-    opacity: 0;
-    transform: translateY(-4px) scale(0.95);
+@keyframes attention-island-spring-pop-even {
+  0% {
+    transform: scale(0.9, 0.78) translateY(-3px);
   }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
+  100% {
+    transform: scale(1, 1) translateY(0);
   }
 }
 
@@ -414,22 +617,21 @@
 
 @media (max-width: 61.999em) {
   .attention-island {
-    top: 10px;
+    top: calc(env(safe-area-inset-top, 0px) + 8px);
     left: 50%;
-    max-width: calc(100vw - 120px);
+    max-width: calc(100vw - 24px);
   }
-  .attention-island:not(.is-notice) .attention-island-detail,
-  .attention-island:not(.is-notice) .attention-island-sep {
+  .attention-island:not(.is-notice):not(.is-attention) .attention-island-detail,
+  .attention-island:not(.is-notice):not(.is-attention) .attention-island-sep {
     display: none;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .attention-island,
-  .attention-island-pill,
+  .attention-island-shell,
   .attention-island-tray,
   .attention-island-dot,
-  .attention-island-notice-trigger,
   .attention-island-progress {
     animation: none;
     transition: none;

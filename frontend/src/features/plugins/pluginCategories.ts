@@ -71,6 +71,7 @@ const BUILTIN_VIEWER_CATEGORIES: Record<string, PluginCategory> = {
   'xterm-viewer': 'development',
   'git-diff-viewer': 'development',
   'git-worktrees-viewer': 'development',
+  'gitlab-ci-viewer': 'development',
   'diff-viewer': 'development',
   'pdf-viewer': 'office',
   'docx-viewer': 'office',
@@ -87,6 +88,7 @@ const BUILTIN_VIEWER_CATEGORIES: Record<string, PluginCategory> = {
   'html-viewer': 'media',
   'image-viewer': 'media',
   'video-viewer': 'media',
+  'audio-viewer': 'media',
   'three-viewer': 'media',
 }
 

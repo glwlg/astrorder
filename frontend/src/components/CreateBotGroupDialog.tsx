@@ -50,6 +50,10 @@ type AgentOptions = {
   error?: string;
 };
 
+function isAntigravityKind(kind?: string | null): boolean {
+  return kind === "antigravity" || kind === "antigravity-ssh";
+}
+
 function machineLabel(connection: string): string {
   if (!connection || connection === "local") return "本机";
   return connection.startsWith("ssh-") ? `SSH ${connection.slice(4)}` : connection;
@@ -113,9 +117,7 @@ export function CreateBotGroupDialog({
   const activeAgents = Object.values(agents).filter(
     (agent) =>
       agent.status === "ready" &&
-      isAgentEnabled(agent.kind) &&
-      agent.kind !== "antigravity" &&
-      agent.kind !== "antigravity-ssh",
+      isAgentEnabled(agent.kind),
   );
 
   useEffect(() => {
@@ -156,7 +158,7 @@ export function CreateBotGroupDialog({
         if (results[1].status === "fulfilled") {
           const binding = results[1].value;
           if (binding.provider && binding.model) model = JSON.stringify([binding.provider, binding.model]);
-          effort = binding.effort || "";
+          effort = isAntigravityKind(agents[agentId]?.kind) ? "" : (binding.effort || "");
         } else {
           error = error ? `${error}；当前模型加载失败` : "当前模型加载失败";
         }
@@ -245,12 +247,14 @@ export function CreateBotGroupDialog({
           }
         }
         const [provider, model] = member.model ? JSON.parse(member.model) as [string, string] : ["", ""];
+        const memberIsAgy = isAntigravityKind(agents[member.agentId]?.kind);
+        const approvalPolicy = memberIsAgy && member.approval === "auto" ? "manual" : member.approval;
         payloadMembers.push({
           id: member.id, machine_id: member.machineId, agent_id: member.agentId, name: member.name,
           alias: member.alias.trim() || undefined, system_role_prompt: member.role.trim() || undefined,
           workspace: member.workspace.trim() || undefined, model_provider: provider || undefined,
-          model_name: model || undefined, thinking_effort: member.effort || undefined,
-          approval_policy: member.approval as BotGroupMember["approval_policy"],
+          model_name: model || undefined, thinking_effort: memberIsAgy ? undefined : (member.effort || undefined),
+          approval_policy: approvalPolicy as BotGroupMember["approval_policy"],
           source_session_id: member.sourceSessionId || undefined, fork_session_id: child || undefined,
         });
       }
@@ -308,7 +312,8 @@ export function CreateBotGroupDialog({
             {members.map((member) => {
               const agent = agents[member.agentId];
               const options = agentOptions[member.agentId];
-              const forkSupported = agent?.kind === "codex" || agent?.kind === "hermes" || agent?.kind === "antigravity";
+              const agyMember = isAntigravityKind(agent?.kind);
+              const forkSupported = agent?.kind === "codex" || agent?.kind === "hermes";
               const candidates = (options?.sessions || []).filter(
                 (session) => (session.connection_id || "local") === member.machineId,
               );
@@ -367,14 +372,14 @@ export function CreateBotGroupDialog({
                     <Group className="bot-group-member-tri" grow gap="xs" align="end">
                       <Select size="xs" label="模型" comboboxProps={{ withinPortal: true, zIndex: 500 }} placeholder="运行时默认" clearable searchable
                         data={selectedModel} value={member.model || null} onChange={(value) => updateMember(member.key, { model: value || "" })} disabled={busy} />
-                      <Select size="xs" label="思考强度" comboboxProps={{ withinPortal: true, zIndex: 500 }} placeholder="运行时默认" clearable
-                        data={REASONING_EFFORTS.map((item) => ({ value: item.value, label: item.label }))} value={member.effort || null}
-                        onChange={(value) => updateMember(member.key, { effort: value || "" })} disabled={busy || agent?.kind === "antigravity"} />
+                      <Select size="xs" label="思考强度" comboboxProps={{ withinPortal: true, zIndex: 500 }} placeholder={agyMember ? "随模型档位" : "运行时默认"} clearable
+                        data={REASONING_EFFORTS.map((item) => ({ value: item.value, label: item.label }))} value={agyMember ? null : (member.effort || null)}
+                        onChange={(value) => updateMember(member.key, { effort: value || "" })} disabled={busy || agyMember} />
                       <Select size="xs" label="审批模式" comboboxProps={{ withinPortal: true, zIndex: 500 }}
-                        data={agent?.kind === "antigravity"
+                        data={agyMember
                           ? [{ value: "manual", label: "每次询问" }, { value: "full_access", label: "完全访问" }]
                           : [{ value: "manual", label: "每次询问" }, { value: "auto", label: "自动审批" }, { value: "full_access", label: "完全访问" }]}
-                        value={agent?.kind === "antigravity" && member.approval === "auto" ? "manual" : member.approval}
+                        value={agyMember && member.approval === "auto" ? "manual" : member.approval}
                         onChange={(value) => updateMember(member.key, { approval: value || "manual" })} disabled={busy} />
                     </Group>
                   </Stack>

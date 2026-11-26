@@ -5,6 +5,7 @@ import http from 'node:http'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { verifyFrontendDist } from './verify-frontend-dist.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const release = path.join(root, 'release')
@@ -29,10 +30,18 @@ function sleep(ms) {
 function probeHttp(url, timeoutMs = 2000) {
   return new Promise((resolve) => {
     const req = http.get(url, { timeout: timeoutMs }, (res) => {
-      resolve({ ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode })
+      const chunks = []
+      res.on('data', chunk => chunks.push(chunk))
+      res.on('end', () => {
+        resolve({
+          ok: res.statusCode >= 200 && res.statusCode < 300,
+          status: res.statusCode,
+          body: Buffer.concat(chunks).toString('utf8'),
+        })
+      })
     })
-    req.on('error', () => resolve({ ok: false, status: 0 }))
-    req.on('timeout', () => { req.destroy(); resolve({ ok: false, status: 0 }) })
+    req.on('error', () => resolve({ ok: false, status: 0, body: '' }))
+    req.on('timeout', () => { req.destroy(); resolve({ ok: false, status: 0, body: '' }) })
   })
 }
 
@@ -119,6 +128,7 @@ async function main() {
     const installed = path.join(testInstallDir, 'server', 'tools', 'browser_extension', file)
     if (!existsSync(installed) || hashFile(source) !== hashFile(installed)) throw new Error(`Browser extension missing or stale: ${file}`)
   }
+  verifyFrontendDist(path.join(testInstallDir, 'server', 'frontend', 'dist'), { mode: 'browser' })
 
   // 2. 覆盖升级验收
   console.log('\n[步骤 2] 覆盖升级验收 (在已有目录重新执行安装器)...')
@@ -149,7 +159,8 @@ async function main() {
     throw new Error('覆盖安装未正确暂存小内核候选')
   }
   rmSync(daemonLink)
-  console.log('覆盖升级验证通过，客户端文件身份已更新，小内核保持原文件并暂存候选。')
+  verifyFrontendDist(path.join(testInstallDir, 'server', 'frontend', 'dist'), { mode: 'browser' })
+  console.log('覆盖升级验证通过，客户端文件身份已更新，小内核保持原文件并暂存候选，Web 前端资源完整。')
 
   // 3. 安装包内运行时与双内核生命周期测试
   console.log('\n[步骤 3] 双内核生命周期隔离验证 (使用安装包提供的构件)...')
@@ -181,6 +192,14 @@ async function main() {
       await sleep(250)
     }
     if (!healthy) throw new Error('Packaged startup did not reach health readiness')
+    const rootPage = await probeHttp('http://127.0.0.1:30102/')
+    if (!rootPage.ok || !rootPage.body.includes('<script type="module"')) {
+      throw new Error(`Packaged App root page invalid: HTTP ${rootPage.status}`)
+    }
+    const swProbe = await probeHttp('http://127.0.0.1:30102/sw-astrorder.js')
+    if (!swProbe.ok) {
+      throw new Error(`Packaged App PWA worker unavailable: HTTP ${swProbe.status}`)
+    }
 
   // 查询 Daemon 状态
   const daemonStat = await getServiceStatus(installedPaths, 'daemon')

@@ -63,8 +63,15 @@ func (h *Handler) bindNativeSessionWithOptions(ctx context.Context, session map[
 		return err
 	}
 	kind := stringValue(agent, "kind")
-	if kind == "antigravity-ssh" {
+	switch kind {
+	case "antigravity-ssh":
 		kind = "antigravity"
+	case "codex-ssh":
+		kind = "codex"
+	case "grok-ssh":
+		kind = "grok"
+	case "ssh":
+		kind = "hermes"
 	}
 	if kind != "hermes" && kind != "codex" && kind != "grok" && kind != "antigravity" {
 		return nil

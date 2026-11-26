@@ -31,6 +31,7 @@ const OFFICE_HIDDEN_VIEWER_IDS = new Set<string>([
   'agent-graph-viewer',
   'git-diff-viewer',
   'git-worktrees-viewer',
+  'gitlab-ci-viewer',
   'diff-viewer',
   'blackboard-viewer',
   'memory-viewer',
@@ -42,6 +43,7 @@ const OFFICE_HIDDEN_MEDIA_TYPES = new Set<string>([
   'application/x-agent-graph',
   'application/x-git-diff',
   'application/x-git-worktrees',
+  'application/x-gitlab-ci',
   'application/x-diff',
   'application/x-blackboard',
   'application/x-memory',
@@ -96,6 +98,7 @@ export function SidecarHost({
   const blackboardEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(BLACKBOARD_VIEWER_PLUGIN_ID))
   const memoryEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(MEMORY_VIEWER_PLUGIN_ID))
   const worktreeEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKFLOW_GIT_WORKTREE_PLUGIN_ID))
+  const gitlabCIEnabled = usePluginSettingsStore((s) => s.isPluginEnabled('gitlab-ci-viewer'))
   const digestEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_DIGEST_PLUGIN_ID))
   const meetingsEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_MEETINGS_PLUGIN_ID))
   const isOfficeMode = useIsOfficeExperience(session)
@@ -186,6 +189,19 @@ export function SidecarHost({
     )
   }
 
+  const handleOpenGitLabCI = () => {
+    if (!session.workspace) {
+      notifications.show({ color: 'yellow', message: '该会话没有可确认的工作区目录。' })
+      return
+    }
+    useSidecarStore.getState().openGitLabCI(
+      session.id,
+      session.agent_id,
+      session.workspace || undefined,
+      session.connection_id || undefined,
+    )
+  }
+
   const handleOpenAgentGraph = () => {
     useSidecarStore
       .getState()
@@ -254,6 +270,7 @@ export function SidecarHost({
             onOpenBlackboard={!isOfficeMode && blackboardEnabled ? handleOpenBlackboard : undefined}
             onOpenMemory={!isOfficeMode && memoryEnabled ? handleOpenMemory : undefined}
             onOpenWorktrees={!isOfficeMode && worktreeEnabled && session.workspace ? handleOpenWorktrees : undefined}
+            onOpenGitLabCI={!isOfficeMode && gitlabCIEnabled && session.workspace ? handleOpenGitLabCI : undefined}
             onOpenDigest={isOfficeMode && digestEnabled ? () => window.dispatchEvent(new CustomEvent('astrorder:navigate', { detail: { to: '/digest' } })) : undefined}
             onOpenMeetings={isOfficeMode && meetingsEnabled ? () => window.dispatchEvent(new CustomEvent('astrorder:navigate', { detail: { to: '/meetings' } })) : undefined}
           />

@@ -17,8 +17,8 @@ import (
 // invoke path for every non-session capability. The MCP tool surface is
 // retired; HTTP catalog/invoke remain the supported automation surface.
 func TestEveryNonSessionCapabilityThroughHTTPInvoke(t *testing.T) {
-	if len(AllCapabilities) != 42 {
-		t.Fatalf("expected 42 HTTP capabilities, got %d", len(AllCapabilities))
+	if len(AllCapabilities) != 51 {
+		t.Fatalf("expected 51 HTTP capabilities, got %d", len(AllCapabilities))
 	}
 	st, err := store.Open(filepath.Join(t.TempDir(), "app.db"))
 	if err != nil {
@@ -90,6 +90,7 @@ func TestEveryNonSessionCapabilityThroughHTTPInvoke(t *testing.T) {
 		"swarm.lock.acquire":          {"owner_key": "a::s", "resource": "audit", "ttl_seconds": 60},
 		"swarm.lock.release":          {"owner_key": "a::s", "resource": "audit"},
 		"swarm.lock.list":             nil,
+		"bots.list":                   nil,
 	}
 	seen := map[string]bool{}
 	for _, cap := range Capabilities {
@@ -117,9 +118,9 @@ func TestEveryNonSessionCapabilityThroughHTTPInvoke(t *testing.T) {
 	}
 	call(t, "swarm.sos.resolve", inputs["swarm.sos.resolve"])
 	seen["swarm.sos.resolve"] = true
-	if len(seen) != 31 {
-		t.Fatalf("tested %d of 31 non-session capabilities", len(seen))
+	if len(seen) != 32 {
+		t.Fatalf("tested %d of 32 non-session capabilities", len(seen))
 	}
-	t.Logf("HTTP invoke coverage: %d/%d", len(seen), 31)
+	t.Logf("HTTP invoke coverage: %d/%d", len(seen), 32)
 }
 func strptr(s string) *string { return &s }

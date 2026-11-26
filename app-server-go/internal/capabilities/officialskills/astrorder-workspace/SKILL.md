@@ -81,6 +81,16 @@ Close a tab or collapse the sidecar:
 {"collapse": true}
 ```
 
+## GitLab CI (`gitlab.*`)
+
+Inspect CI pipelines, stage/job status, and job logs for self-hosted or cloud GitLab repositories configured in Astrorder Settings (workspace remote & HEAD commit are auto-detected from the calling session):
+
+```bash
+astrorder-agent gitlab pipelines [--ref <BRANCH>] [--limit 10]
+astrorder-agent gitlab status [--pipeline-id <ID>]
+astrorder-agent gitlab log --job-id <JOB_ID> [--tail 200]
+```
+
 ## Rules
 
 - Discover before assuming an agent id, machine id or plugin id.

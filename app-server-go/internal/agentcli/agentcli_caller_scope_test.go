@@ -26,6 +26,8 @@ func TestCallerScopeDefaultsOverRealTransport(t *testing.T) {
 		{"sos escalate", "swarm.sos.escalate", `{"reason":"port collision"}`, "key", callerKey, false},
 		{"plugin open", "plugins.open", `{"plugin_id":"browser"}`, "session_key", callerKey, false},
 		{"plugin close", "plugins.close", `{"plugin_id":"browser"}`, "session_key", callerKey, false},
+		{"schedules list", "schedules.list", `{}`, "session_key", callerKey, false},
+		{"schedules create", "schedules.create", `{"prompt":"check","delay_seconds":60}`, "session_key", callerKey, false},
 		{"lock acquire explicit same owner", "swarm.lock.acquire", `{"resource":"git:main","owner_key":"hermes::hermes-session-42"}`, "owner_key", callerKey, false},
 		{"sos escalate explicit same key", "swarm.sos.escalate", `{"reason":"x","key":"hermes::hermes-session-42"}`, "key", callerKey, false},
 		// An explicit plugin target is legitimate: the server already routes it.
@@ -93,6 +95,8 @@ func TestCallerScopeRejectsExplicitBadValuesBeforeHTTP(t *testing.T) {
 		{"plugin open number", "plugins.open", `{"plugin_id":"browser","session_key":42}`, "session_key must be a string"},
 		{"plugin close null", "plugins.close", `{"plugin_id":"browser","session_key":null}`, "session_key must not be null"},
 		{"plugin close empty", "plugins.close", `{"plugin_id":"browser","session_key":""}`, "session_key must not be empty"},
+		{"schedules create conflict", "schedules.create", `{"prompt":"hi","delay_seconds":60,"session_key":"codex::other"}`, "does not match configured caller"},
+		{"schedules delete conflict", "schedules.delete", `{"id":"sched-1","session_key":"codex::other"}`, "does not match configured caller"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -117,7 +121,7 @@ func TestCallerScopeRejectsExplicitBadValuesBeforeHTTP(t *testing.T) {
 
 // Without a resolvable caller these capabilities must fail before any HTTP call.
 func TestCallerScopeRequiresCallerBeforeHTTP(t *testing.T) {
-	for _, capability := range []string{"swarm.lock.acquire", "swarm.lock.release", "swarm.sos.escalate", "plugins.open", "plugins.close"} {
+	for _, capability := range []string{"swarm.lock.acquire", "swarm.lock.release", "swarm.sos.escalate", "plugins.open", "plugins.close", "schedules.list", "schedules.create", "schedules.update", "schedules.delete", "gitlab.pipelines", "gitlab.pipeline", "gitlab.job_log"} {
 		t.Run(capability, func(t *testing.T) {
 			var requests atomic.Int32
 			server := newTestServer(t, &requests, nil)

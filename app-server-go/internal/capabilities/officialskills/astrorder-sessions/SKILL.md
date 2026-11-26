@@ -18,6 +18,7 @@ Caller identity binding (`agent_id`, `connection_id`, `profile_name`, `runtime`)
 - **Grok**: Uses runtime-provided `GROK_SESSION_ID` and caller binding via `ASTRORDER_CALLER_CONFIG`.
   - Bash: `export ASTRORDER_CALLER_CONFIG="{{CALLER_CONFIG_PATH}}"`
   - PowerShell: `$env:ASTRORDER_CALLER_CONFIG="{{CALLER_CONFIG_PATH_WIN}}"`
+- **Antigravity**: Uses runtime-provided `ANTIGRAVITY_CONVERSATION_ID` and resolves caller binding automatically via sibling `astrorder-caller.json`.
 
 Session IDs come dynamically from the runtime. Do not read, print, set, forward, guess, or persist session-ID variables; let the CLI resolve and verify the caller. The four-field caller file is static identity configuration, not authentication. Never copy another Agent's identity or credentials. Missing configuration is an error; do not choose identity by recency, workspace, or the only active session.
 
@@ -83,7 +84,66 @@ astrorder-agent sessions tree [--key <ROOT_KEY>]
 
 Interrupt or delete only within the user's authorized scope. Keep exact composite keys intact; never target unrelated working sessions or restart a runtime to make an operation succeed.
 
-### 7. Other Capabilities via the Same CLI
+### 7. Self-Scheduled Tasks (Session-Bound Timers & Crons)
+Any session (whether a regular session or a Bot session) can create, inspect, pause/resume, or delete persistent Astrorder scheduled tasks bound strictly to **its own current session**. When triggered, Astrorder automatically sends `--prompt` back into this session, persists schedules across restarts, and displays them live in the Astrorder UI.
+
+- List scheduled tasks on this session:
+  ```bash
+  astrorder-agent schedules list
+  ```
+- Create a one-shot relative timer (e.g. remind/check in 10 minutes) or exact timestamp:
+  ```bash
+  astrorder-agent schedules create --name "检查部署结果" --in 10m --when-busy queue --prompt "检查发布状态并向用户汇报"
+  astrorder-agent schedules create --name "定时提醒" --run-at "2026-11-26T18:00:00+08:00" --prompt "执行预定操作"
+  ```
+- Create a recurring interval, daily, weekly, or cron schedule:
+  ```bash
+  astrorder-agent schedules create --name "每30分钟巡检" --interval 30 --when-busy skip --prompt "检查关键指标与告警"
+  astrorder-agent schedules create --name "每日早报" --daily 09:00 --timezone Asia/Shanghai --prompt "汇总昨日进展与今日待办"
+  astrorder-agent schedules create --name "工作日晨检" --weekly 09:30 --weekdays mon-fri --timezone Asia/Shanghai --prompt "执行工作日例行巡检"
+  astrorder-agent schedules create --name "整点巡检" --cron "0 9-18 * * 1-5" --timezone Asia/Shanghai --prompt "执行整点健康检查"
+  ```
+- Pause, resume, or edit an existing schedule on this session:
+  ```bash
+  astrorder-agent schedules update --id <SCHEDULE_ID> --enabled false
+  astrorder-agent schedules update --id <SCHEDULE_ID> --enabled true --interval 60
+  ```
+- Delete / cancel a schedule on this session:
+  ```bash
+  astrorder-agent schedules delete --id <SCHEDULE_ID>
+  ```
+Optional flags on `create`/`update`: `--prompt-file <PATH>`, `--timezone <IANA_OR_Local>`, `--when-busy <skip|queue>`, `--misfire-policy <grace_once|skip|run_once>`, `--misfire-grace-sec <SECONDS>`. Schedules are strictly scoped to the verified caller session and cannot target another session.
+
+### 8. Bots (Workspace-Backed Domain Bots)
+Discover and invoke registered Bots (each Bot owns its dedicated workspace, `AGENTS.md`, and `.agents/skills/`):
+- List registered Bots:
+  ```bash
+  astrorder-agent bots list
+  ```
+- Invoke a Bot (spawns a clean new job session in the Bot's workspace and optionally copies caller files into the Bot's `inbox/<job-id>/`):
+  ```bash
+  astrorder-agent bots invoke --bot <BOT_SLUG_OR_NAME> --operation-id <UNIQUE_OP_ID> --title "<JOB_TITLE>" --prompt "<SELF_CONTAINED_BRIEF>" [--attach "<PATH1>,<PATH2>"]
+  ```
+Give the Bot a concise, self-contained brief and attach key reference files when helpful so it does not have to crawl external projects by default; Astrorder also includes optional caller context pointers so the Bot can still inspect or ask back if it decides more detail is needed. Follow up with `astrorder-agent sessions read --key <BOT_JOB_SESSION_KEY>` until the Bot finishes.
+
+### 9. GitLab CI Status & Logs (Self-Hosted & Cloud)
+Query GitLab CI pipelines, job stages, and failure logs directly from any session without manually managing tokens or curl commands. Astrorder automatically detects the GitLab instance and project path from the current session workspace's `.git/config` and `HEAD`:
+
+- List recent CI pipelines (highlights pipeline matching current HEAD / branch):
+  ```bash
+  astrorder-agent gitlab pipelines [--ref <BRANCH>] [--limit 10]
+  ```
+- Inspect detailed stages and jobs of the latest pipeline (or a specific `--pipeline-id`):
+  ```bash
+  astrorder-agent gitlab status [--pipeline-id <ID>]
+  ```
+- Read the ANSI-cleaned tail of a failed/running job log:
+  ```bash
+  astrorder-agent gitlab log --job-id <JOB_ID> [--tail 200]
+  ```
+Optional override flags: `--project <GROUP/REPO>`, `--instance <ID_OR_NAME>`, `--workspace <PATH>`.
+
+### 10. Other Capabilities via the Same CLI
 Blackboard, swarm coordination, workspace discovery and the monitor room are separate skills, but every one of them calls this same executable with a UTF-8 JSON file:
 
 ```bash

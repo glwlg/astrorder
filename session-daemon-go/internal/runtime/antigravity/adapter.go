@@ -1291,6 +1291,8 @@ func (a *Adapter) Command(ctx context.Context, r core.Request) (core.Result, err
 	switch r.Action {
 	case "session.delete":
 		return a.deleteConversation(ctx, s)
+	case "session.move_workspace":
+		return a.moveConversationWorkspace(ctx, s, str(r.Fields, "workspace"))
 	case "session.interrupt":
 		return a.interrupt(s)
 	case "session.approve":

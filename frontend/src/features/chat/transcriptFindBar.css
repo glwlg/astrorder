@@ -1,0 +1,153 @@
+.transcript-find-bar {
+  position: absolute;
+  top: 10px;
+  right: 18px;
+  z-index: 45;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: min(420px, calc(100% - 24px));
+  padding: 5px 7px 5px 10px;
+  border-radius: 12px;
+  background: var(--astr-surface, #ffffff);
+  border: 1px solid var(--astr-border);
+  box-shadow:
+    0 12px 28px -8px rgb(15 23 42 / 20%),
+    0 2px 6px rgb(15 23 42 / 8%);
+  animation: transcript-find-enter 160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .transcript-find-bar {
+    animation: none;
+  }
+}
+
+@keyframes transcript-find-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.transcript-find-icon {
+  color: var(--astr-muted);
+  flex: none;
+}
+
+.transcript-find-input {
+  flex: 1 1 160px;
+  min-width: 110px;
+  height: 28px;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--astr-text);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.transcript-find-input::placeholder {
+  color: var(--astr-muted);
+}
+
+/* Hide browser default search cancel cross to keep our crisp close control */
+.transcript-find-input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.transcript-find-count {
+  flex: none;
+  min-width: 44px;
+  text-align: right;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--astr-muted);
+  padding-inline: 2px;
+  user-select: none;
+}
+
+.transcript-find-count.is-empty {
+  color: var(--astr-red, #ef4444);
+  font-weight: 550;
+}
+
+.transcript-find-sep {
+  width: 1px;
+  height: 16px;
+  background: var(--astr-border);
+  flex: none;
+  margin-inline: 1px;
+}
+
+.transcript-find-case-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  height: 24px;
+  padding: 0 5px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--astr-muted);
+  font-size: 11.5px;
+  font-weight: 650;
+  cursor: pointer;
+  flex: none;
+  transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.transcript-find-case-btn:hover {
+  background: var(--astr-surface-muted);
+  color: var(--astr-text);
+}
+
+.transcript-find-case-btn.is-active {
+  background: color-mix(in oklab, var(--astr-indigo, #5b6cff) 14%, transparent);
+  border-color: color-mix(in oklab, var(--astr-indigo, #5b6cff) 42%, transparent);
+  color: var(--astr-indigo, #5b6cff);
+}
+
+/* CSS Custom Highlight API — zero DOM mutation, WCAG AA contrast + non-color underline cue */
+::highlight(transcript-find-matches) {
+  background-color: #fde047;
+  color: #18181b;
+  text-decoration: underline rgba(161, 98, 7, 0.55);
+}
+
+::highlight(transcript-find-active) {
+  background-color: #f97316;
+  color: #ffffff;
+  text-decoration: underline rgba(255, 255, 255, 0.85);
+}
+
+[data-mantine-color-scheme='dark'] ::highlight(transcript-find-matches) {
+  background-color: #eab308;
+  color: #09090b;
+  text-decoration: underline rgba(24, 24, 27, 0.65);
+}
+
+[data-mantine-color-scheme='dark'] ::highlight(transcript-find-active) {
+  background-color: #fb923c;
+  color: #09090b;
+  text-decoration: underline rgba(9, 9, 11, 0.75);
+}
+
+/* Fallback / visual accent on the message containing the active search match */
+.transcript-message-entry.is-find-active,
+.activity-pack.is-find-active {
+  content-visibility: visible !important;
+  border-radius: 12px;
+  box-shadow: 0 0 0 2px color-mix(in oklab, #f97316 45%, transparent);
+}
+
+.message-activity.is-find-active {
+  border-radius: 8px;
+  background: color-mix(in oklab, #f97316 8%, transparent);
+}

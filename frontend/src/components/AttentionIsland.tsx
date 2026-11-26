@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { ActionIcon, Badge, Button, Group, Stack, Text, Tooltip, UnstyledButton } from '@mantine/core'
-import { notifications } from '@mantine/notifications'
+import { ActionIcon, Badge, Button, Group, Loader, Stack, Text, Tooltip, UnstyledButton } from '@mantine/core'
+import { useReducedMotion } from '@mantine/hooks'
+import { notifications, useNotifications, type NotificationData } from '@mantine/notifications'
 import { useQueryClient } from '@tanstack/react-query'
 import {
   IconAlertTriangle,
@@ -9,11 +10,13 @@ import {
   IconCheck,
   IconChevronDown,
   IconChevronUp,
+  IconInfoCircle,
   IconLayoutGrid,
   IconMessageQuestion,
   IconUsers,
   IconX,
 } from '@tabler/icons-react'
+import { AnimatePresence, motion } from 'motion/react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useShallow } from 'zustand/react/shallow'
 import { ApiError, api } from '../api/client'
@@ -24,6 +27,15 @@ import {
   registerIslandNotificationHost,
   useIslandNotifications,
 } from '../domain/islandNotifications'
+import {
+  announceIslandMessage,
+  dismissMantineToast,
+  extractPlainText,
+  isRichIslandToast,
+  pruneSupersededTransientToasts,
+  resolveIslandToastDurationMs,
+  resolveIslandToastTone,
+} from '../domain/islandToast'
 import { notificationPath } from '../domain/notifications'
 import { newCommandId, scopeKey } from '../domain/semantics'
 import type { Approval, Command, EventNotification, Session } from '../domain/types'
@@ -40,6 +52,13 @@ const NOTICE_DURATION_COMPLETED_MS = 6500
 const NOTICE_DURATION_ALERT_MS = 8500
 const NOTICE_RESUME_MIN_MS = 1200
 
+const ISLAND_SPRING = {
+  type: 'spring' as const,
+  stiffness: 420,
+  damping: 26,
+  mass: 0.82,
+}
+
 interface AttentionIslandProps {
   activeSessionKey?: string
 }
@@ -47,7 +66,7 @@ interface AttentionIslandProps {
 function approvalSummary(approval: Approval): string {
   const raw = (approval.title || approval.detail || '').replace(/\s+/g, ' ').trim()
   if (!raw) return isUserInput(approval) ? '等待你的回答' : '请求执行授权'
-  return raw.length > 52 ? `${raw.slice(0, 52)}…` : raw
+  return raw.length > 56 ? `${raw.slice(0, 56)}…` : raw
 }
 
 function formatIslandNoticeCopy(
@@ -87,6 +106,7 @@ export function AttentionIsland({ activeSessionKey }: AttentionIslandProps) {
   const navigate = useNavigate()
   const location = useLocation()
   const queryClient = useQueryClient()
+  const reducedMotion = useReducedMotion()
   const rootRef = useRef<HTMLDivElement>(null)
 
   const sessions = useAstrorderStore(useShallow(selectSessions))
@@ -99,13 +119,41 @@ export function AttentionIsland({ activeSessionKey }: AttentionIslandProps) {
   const [expanded, setExpanded] = useState(false)
   const [busyApprovalIds, setBusyApprovalIds] = useState<Record<string, boolean>>({})
   const [dismissedSignature, setDismissedSignature] = useState<string | null>(null)
-  const [noticeHovered, setNoticeHovered] = useState(false)
+  const [hoveredOrFocused, setHoveredOrFocused] = useState(false)
+  const [liveAnnouncement, setLiveAnnouncement] = useState('')
+  const [popSeq, setPopSeq] = useState(0)
+
   const islandNotices = useIslandNotifications()
   const activeNotice = islandNotices[0] || null
+  const { notifications: mantineNotifications } = useNotifications()
+
+  // Prune superseded transient non-error toasts so rapid actions (e.g. mode toggles)
+  // replace in-place with a crisp spring pop instead of replaying stale messages.
+  useEffect(() => {
+    pruneSupersededTransientToasts(mantineNotifications)
+  }, [mantineNotifications])
+
+  const activeToast: NotificationData | null =
+    mantineNotifications.length > 0 ? mantineNotifications[mantineNotifications.length - 1] : null
+  const activeToastKey = activeToast
+    ? `${activeToast.id || 'toast'}:${String(activeToast.title || '')}:${typeof activeToast.message === 'string' ? activeToast.message : 'node'}:${activeToast.loading ? '1' : '0'}`
+    : ''
+
   const noticeTimerRef = useRef<{ key: string; remainingMs: number; startedAt: number } | null>(null)
+  const toastTimerRef = useRef<{ key: string; remainingMs: number; startedAt: number } | null>(null)
   const prevActiveSessionKeyRef = useRef<string | undefined>(activeSessionKey)
+  const prevEventKeyRef = useRef<string>('')
 
   useEffect(() => registerIslandNotificationHost(), [])
+
+  // Trigger subtle spring pop whenever the surfaced toast/event changes
+  const surfacedEventKey = activeToast ? `toast:${activeToastKey}` : activeNotice ? `notice:${activeNotice.key}` : ''
+  useEffect(() => {
+    if (surfacedEventKey && surfacedEventKey !== prevEventKeyRef.current) {
+      setPopSeq((n) => n + 1)
+    }
+    prevEventKeyRef.current = surfacedEventKey
+  }, [surfacedEventKey])
 
   // Dismiss queued island notifications when the user switches into that session.
   useEffect(() => {
@@ -121,16 +169,74 @@ export function AttentionIsland({ activeSessionKey }: AttentionIslandProps) {
     }
   }, [activeSessionKey])
 
+  const activeToastDurationMs = activeToast ? resolveIslandToastDurationMs(activeToast) : null
+  const activeToastTone = activeToast ? resolveIslandToastTone(activeToast) : 'info'
+  const activeToastRich = activeToast ? isRichIslandToast(activeToast) : false
+
   const activeNoticeDurationMs = activeNotice
     ? activeNotice.kind === 'task_completed'
       ? NOTICE_DURATION_COMPLETED_MS
       : NOTICE_DURATION_ALERT_MS
     : 0
-  const noticePaused = noticeHovered || expanded
 
+  const countdownPaused = hoveredOrFocused || expanded
+
+  // Screen reader announcement via ariaNotify() with live-region fallback
   useEffect(() => {
-    if (!activeNotice) {
-      noticeTimerRef.current = null
+    if (activeToast) {
+      const text = [extractPlainText(activeToast.title), extractPlainText(activeToast.message)]
+        .filter(Boolean)
+        .join('：')
+      announceIslandMessage(text, activeToastTone === 'error' ? 'high' : 'normal', setLiveAnnouncement)
+      return
+    }
+    if (activeNotice) {
+      const text = [activeNotice.title, activeNotice.message].filter(Boolean).join('：')
+      announceIslandMessage(
+        `${text}。有可用操作`,
+        activeNotice.kind === 'task_failed' ? 'high' : 'normal',
+        setLiveAnnouncement,
+      )
+    }
+  }, [activeNotice, activeToast, activeToastKey, activeToastTone])
+
+  // Auto-dismiss timer for active Mantine toast
+  useEffect(() => {
+    if (!activeToast || activeToastDurationMs === null) {
+      toastTimerRef.current = null
+      return
+    }
+    let state = toastTimerRef.current
+    if (!state || state.key !== activeToastKey) {
+      state = { key: activeToastKey, remainingMs: activeToastDurationMs, startedAt: Date.now() }
+      toastTimerRef.current = state
+    }
+    if (countdownPaused) return
+    state.startedAt = Date.now()
+    const delay = Math.max(NOTICE_RESUME_MIN_MS, state.remainingMs)
+    const target = activeToast
+    const timer = window.setTimeout(() => {
+      if (toastTimerRef.current?.key === activeToastKey) {
+        toastTimerRef.current = null
+      }
+      dismissMantineToast(target)
+    }, delay)
+    return () => {
+      window.clearTimeout(timer)
+      if (toastTimerRef.current?.key === activeToastKey) {
+        const elapsed = Date.now() - toastTimerRef.current.startedAt
+        toastTimerRef.current.remainingMs = Math.max(
+          NOTICE_RESUME_MIN_MS,
+          toastTimerRef.current.remainingMs - elapsed,
+        )
+      }
+    }
+  }, [activeToast, activeToastDurationMs, activeToastKey, countdownPaused])
+
+  // Auto-dismiss timer for active session event notice (paused while a Mantine toast is foregrounded)
+  useEffect(() => {
+    if (!activeNotice || activeToast) {
+      if (!activeNotice) noticeTimerRef.current = null
       return
     }
     const key = activeNotice.key
@@ -143,7 +249,7 @@ export function AttentionIsland({ activeSessionKey }: AttentionIslandProps) {
       state = { key, remainingMs: baseMs, startedAt: Date.now() }
       noticeTimerRef.current = state
     }
-    if (noticePaused) {
+    if (countdownPaused) {
       return
     }
     state.startedAt = Date.now()
@@ -164,7 +270,7 @@ export function AttentionIsland({ activeSessionKey }: AttentionIslandProps) {
         )
       }
     }
-  }, [activeNotice, noticePaused])
+  }, [activeNotice, activeToast, countdownPaused])
 
   const isChatSessionRoute = location.pathname.startsWith('/chat/') && !location.pathname.startsWith('/chat/group-')
   const isMonitorRoute = location.pathname.startsWith('/monitor')
@@ -227,7 +333,6 @@ export function AttentionIsland({ activeSessionKey }: AttentionIslandProps) {
   const hasAttention = attentionCount > 0
   const hasActivity = activityCount > 0
 
-  // Signature for dismissible running-activity mode; automatically reappears when a new session/group becomes active
   const activitySignature = useMemo(() => {
     if (!hasActivity) return ''
     return [
@@ -236,8 +341,9 @@ export function AttentionIsland({ activeSessionKey }: AttentionIslandProps) {
     ].join('|')
   }, [activeGroups, hasActivity, runningSessions])
 
+  const hasToast = Boolean(activeToast)
   const hasNotice = Boolean(activeNotice)
-  const isVisible = hasNotice || hasAttention || (hasActivity && dismissedSignature !== activitySignature)
+  const isVisible = hasToast || hasNotice || hasAttention || (hasActivity && dismissedSignature !== activitySignature)
 
   // Close expanded tray on Escape or outside click
   useEffect(() => {
@@ -341,7 +447,13 @@ export function AttentionIsland({ activeSessionKey }: AttentionIslandProps) {
     [activeSessionKey, isChatSessionRoute, navigate],
   )
 
-  if (!isVisible) return null
+  if (!isVisible) {
+    return (
+      <div className="attention-island-sr-live" aria-live="polite" aria-atomic="true">
+        {liveAnnouncement}
+      </div>
+    )
+  }
 
   const primaryApproval = pendingApprovals[0] || null
   const primaryWaitingSession = !primaryApproval ? waitingSessions[0] || null : null
@@ -375,6 +487,16 @@ export function AttentionIsland({ activeSessionKey }: AttentionIslandProps) {
       activeSessionKey &&
       scopeKey(activeNotice.agent_id, activeNotice.session_id) === activeSessionKey,
   )
+
+  const toastToneClass =
+    activeToastTone === 'error'
+      ? 'notice-error'
+      : activeToastTone === 'warning'
+        ? 'notice-attention'
+        : activeToastTone === 'success'
+          ? 'notice-success'
+          : 'notice-info'
+
   const noticeTone = activeNotice
     ? activeNotice.kind === 'task_failed'
       ? 'notice-error'
@@ -383,449 +505,600 @@ export function AttentionIsland({ activeSessionKey }: AttentionIslandProps) {
         : 'notice-success'
     : null
 
-  const tone = noticeTone ?? (hasAttention ? 'attention' : 'running')
+  const tone = hasToast ? toastToneClass : (noticeTone ?? (hasAttention ? 'attention' : 'running'))
   const hasTrayContent = hasAttention || hasActivity
 
+  // Determine physical size tier: compact pill (36px) -> compact toast (48px) -> tall rich capsule (62px+) -> unified expanded tray
+  const sizeTierClass = expanded && hasTrayContent
+    ? 'is-expanded-card'
+    : hasToast
+      ? activeToastRich
+        ? 'is-tall'
+        : 'is-compact-toast'
+      : hasNotice || hasAttention
+        ? 'is-tall'
+        : 'is-compact-pill'
+
+  const activeDurationStyle: CSSProperties | undefined = hasToast
+    ? activeToastDurationMs !== null
+      ? ({ '--island-notice-duration': `${activeToastDurationMs}ms` } as CSSProperties)
+      : undefined
+    : hasNotice
+      ? ({ '--island-notice-duration': `${activeNoticeDurationMs}ms` } as CSSProperties)
+      : undefined
+
   return (
-    <div
-      ref={rootRef}
-      className={[
-        'attention-island',
-        `is-${tone}`,
-        hasNotice ? 'is-notice' : '',
-        expanded ? 'is-expanded' : '',
-        noticePaused ? 'is-paused' : '',
-      ]
-        .filter(Boolean)
-        .join(' ')}
-      role="region"
-      aria-label="星序灵动岛"
-      onMouseEnter={() => { if (hasNotice) setNoticeHovered(true) }}
-      onMouseLeave={() => setNoticeHovered(false)}
-      onFocus={() => { if (hasNotice) setNoticeHovered(true) }}
-      onBlur={(event) => {
-        if (!rootRef.current?.contains(event.relatedTarget as Node | null)) {
-          setNoticeHovered(false)
-        }
-      }}
-    >
+    <>
       <div
-        className="attention-island-pill"
-        style={
-          hasNotice
-            ? ({ '--island-notice-duration': `${activeNoticeDurationMs}ms` } as CSSProperties)
-            : undefined
-        }
+        className="attention-island-sr-live"
+        aria-live={tone === 'notice-error' ? 'assertive' : 'polite'}
+        aria-atomic="true"
       >
-        {activeNotice && noticeCopy ? (
-          <>
-            <UnstyledButton
-              key={activeNotice.key}
-              className="attention-island-trigger attention-island-notice-trigger"
-              onClick={() => openNoticeTarget(activeNotice)}
-              aria-label={`${noticeCopy.title} ${noticeCopy.detail}${noticeAlreadyActive ? '' : '，点击跳转'}`}
-            >
-              <span className={`attention-island-notice-badge is-${noticeTone}`} aria-hidden="true">
-                {activeNotice.kind === 'task_failed' ? (
-                  <IconAlertTriangle size={12} stroke={2.2} />
-                ) : activeNotice.kind === 'approval_pending' ? (
-                  <IconMessageQuestion size={12} stroke={2.2} />
-                ) : (
-                  <IconCheck size={12} stroke={2.5} />
-                )}
-              </span>
-              {noticeAgent && !activeNotice.group_id ? (
-                <span className="attention-island-brand" aria-hidden="true">
-                  <AgentBrandIcon kind={noticeAgent.kind} size={14} />
-                </span>
-              ) : activeNotice.group_id ? (
-                <IconUsers size={14} className="attention-island-icon-run" aria-hidden="true" />
-              ) : null}
-
-              <span className="attention-island-copy">
-                <strong className="attention-island-title">{noticeCopy.title}</strong>
-                {noticeCopy.detail && (
-                  <>
-                    <span className="attention-island-sep" aria-hidden="true">·</span>
-                    <span className="attention-island-detail">{noticeCopy.detail}</span>
-                  </>
-                )}
-              </span>
-
-              {islandNotices.length > 1 && (
-                <span className="attention-island-count" aria-label={`还有 ${islandNotices.length - 1} 条通知`}>
-                  +{islandNotices.length - 1}
-                </span>
-              )}
-            </UnstyledButton>
-
-            <div className="attention-island-inline-actions">
-              {!noticeAlreadyActive && (
-                <Button
-                  size="compact-xs"
-                  color={
-                    activeNotice.kind === 'task_failed'
-                      ? 'red'
-                      : activeNotice.kind === 'approval_pending'
-                        ? 'yellow'
-                        : 'teal'
-                  }
-                  variant="light"
-                  radius="xl"
-                  onClick={() => openNoticeTarget(activeNotice)}
-                  rightSection={<IconArrowRight size={12} />}
+        {liveAnnouncement}
+      </div>
+      <div
+        ref={rootRef}
+        className={[
+          'attention-island',
+          `is-${tone}`,
+          hasToast || hasNotice ? 'is-notice' : '',
+          hasToast ? 'is-toast' : '',
+          sizeTierClass,
+          expanded ? 'is-expanded' : '',
+          countdownPaused ? 'is-paused' : '',
+        ]
+          .filter(Boolean)
+          .join(' ')}
+        role="region"
+        aria-label="星序灵动岛"
+        onMouseEnter={() => setHoveredOrFocused(true)}
+        onMouseLeave={() => setHoveredOrFocused(false)}
+        onFocus={() => setHoveredOrFocused(true)}
+        onBlur={(event) => {
+          if (!rootRef.current?.contains(event.relatedTarget as Node | null)) {
+            setHoveredOrFocused(false)
+          }
+        }}
+      >
+        <motion.div
+          layout={!reducedMotion}
+          initial={reducedMotion ? { opacity: 0 } : { opacity: 0, y: -12, scale: 0.82 }}
+          animate={reducedMotion ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 }}
+          transition={reducedMotion ? { duration: 0.14 } : ISLAND_SPRING}
+          data-pop-seq={popSeq}
+          className={[
+            'attention-island-pill',
+            'attention-island-shell',
+            `is-${tone}`,
+            sizeTierClass,
+            popSeq > 0 ? (popSeq % 2 === 0 ? 'is-pop-even' : 'is-pop-odd') : '',
+          ]
+            .filter(Boolean)
+            .join(' ')}
+          style={activeDurationStyle}
+        >
+          <div className="attention-island-header-row">
+            {activeToast ? (
+              <motion.div
+                key={`toast-body:${activeToastKey}:${popSeq}`}
+                initial={reducedMotion ? { opacity: 0 } : { opacity: 0, scale: 0.92, y: -3 }}
+                animate={reducedMotion ? { opacity: 1 } : { opacity: 1, scale: 1, y: 0 }}
+                transition={reducedMotion ? { duration: 0.12 } : ISLAND_SPRING}
+                className={`attention-island-toast-row${activeToastRich ? ' is-rich' : ''}`}
+              >
+                <span
+                  className={`attention-island-toast-emblem is-${activeToastTone}${activeToastRich ? ' is-lg' : ''}`}
+                  aria-hidden="true"
                 >
-                  前往
-                </Button>
-              )}
-              {hasTrayContent && (
-                <Tooltip label={expanded ? '收起后台动态' : '查看后台动态'} withArrow>
-                  <ActionIcon
-                    size="xs"
-                    variant="subtle"
-                    color="gray"
-                    radius="xl"
-                    aria-expanded={expanded}
-                    aria-label={expanded ? '收起后台动态' : '查看后台动态'}
-                    onClick={() => setExpanded((v) => !v)}
+                  {activeToastTone === 'loading' ? (
+                    <Loader size={activeToastRich ? 14 : 12} color="currentColor" />
+                  ) : activeToastTone === 'error' || activeToastTone === 'warning' ? (
+                    <IconAlertTriangle size={activeToastRich ? 16 : 13} stroke={2.2} />
+                  ) : activeToastTone === 'success' ? (
+                    <IconCheck size={activeToastRich ? 16 : 13} stroke={2.5} />
+                  ) : (
+                    <IconInfoCircle size={activeToastRich ? 16 : 13} stroke={2.1} />
+                  )}
+                </span>
+
+                <div className="attention-island-toast-body">
+                  {activeToast.title && (
+                    <div className="attention-island-toast-title">{activeToast.title}</div>
+                  )}
+                  <div className={`attention-island-toast-message${activeToast.title ? ' has-title' : ''}`}>
+                    {activeToast.message}
+                  </div>
+                </div>
+
+                {mantineNotifications.length > 1 && (
+                  <span
+                    className="attention-island-count"
+                    aria-label={`还有 ${mantineNotifications.length - 1} 条通知`}
                   >
-                    {expanded ? <IconChevronUp size={12} /> : <IconChevronDown size={12} />}
-                  </ActionIcon>
-                </Tooltip>
-              )}
-              <Tooltip label="关闭通知" withArrow>
-                <ActionIcon
-                  size="xs"
-                  variant="subtle"
-                  color="gray"
-                  radius="xl"
-                  aria-label="关闭通知"
-                  onClick={() => dismissIslandNotification(activeNotice.key)}
+                    +{mantineNotifications.length - 1}
+                  </span>
+                )}
+
+                <div className="attention-island-inline-actions">
+                  {hasTrayContent && (
+                    <Tooltip label={expanded ? '收起后台动态' : '查看后台动态'} withArrow>
+                      <ActionIcon
+                        size="xs"
+                        variant="subtle"
+                        color="gray"
+                        radius="xl"
+                        aria-expanded={expanded}
+                        aria-label={expanded ? '收起后台动态' : '查看后台动态'}
+                        onClick={() => setExpanded((v) => !v)}
+                      >
+                        {expanded ? <IconChevronUp size={12} /> : <IconChevronDown size={12} />}
+                      </ActionIcon>
+                    </Tooltip>
+                  )}
+                  {activeToast.withCloseButton !== false && (
+                    <Tooltip label="关闭通知" withArrow>
+                      <ActionIcon
+                        size="xs"
+                        variant="subtle"
+                        color="gray"
+                        radius="xl"
+                        aria-label="关闭通知"
+                        onClick={() => dismissMantineToast(activeToast)}
+                      >
+                        <IconX size={12} />
+                      </ActionIcon>
+                    </Tooltip>
+                  )}
+                </div>
+              </motion.div>
+            ) : activeNotice && noticeCopy ? (
+              <motion.div
+                key={`notice-body:${activeNotice.key}`}
+                initial={reducedMotion ? { opacity: 0 } : { opacity: 0, scale: 0.92, y: -3 }}
+                animate={reducedMotion ? { opacity: 1 } : { opacity: 1, scale: 1, y: 0 }}
+                transition={reducedMotion ? { duration: 0.12 } : ISLAND_SPRING}
+                className="attention-island-event-row"
+              >
+                <UnstyledButton
+                  className="attention-island-trigger attention-island-notice-trigger"
+                  onClick={() => openNoticeTarget(activeNotice)}
+                  aria-label={`${noticeCopy.title} ${noticeCopy.detail}${noticeAlreadyActive ? '' : '，点击跳转'}`}
                 >
-                  <IconX size={12} />
-                </ActionIcon>
-              </Tooltip>
-            </div>
+                  <span className={`attention-island-notice-badge is-lg is-${noticeTone}`} aria-hidden="true">
+                    {activeNotice.kind === 'task_failed' ? (
+                      <IconAlertTriangle size={15} stroke={2.2} />
+                    ) : activeNotice.kind === 'approval_pending' ? (
+                      <IconMessageQuestion size={15} stroke={2.2} />
+                    ) : (
+                      <IconCheck size={15} stroke={2.5} />
+                    )}
+                  </span>
+
+                  <span className="attention-island-copy is-stacked">
+                    <span className="attention-island-title-line">
+                      {noticeAgent && !activeNotice.group_id ? (
+                        <span className="attention-island-brand" aria-hidden="true">
+                          <AgentBrandIcon kind={noticeAgent.kind} size={13} />
+                        </span>
+                      ) : activeNotice.group_id ? (
+                        <IconUsers size={13} className="attention-island-icon-run" aria-hidden="true" />
+                      ) : null}
+                      <strong className="attention-island-title">{noticeCopy.title}</strong>
+                    </span>
+                    {noticeCopy.detail && (
+                      <span className="attention-island-detail is-subline">{noticeCopy.detail}</span>
+                    )}
+                  </span>
+
+                  {islandNotices.length > 1 && (
+                    <span className="attention-island-count" aria-label={`还有 ${islandNotices.length - 1} 条通知`}>
+                      +{islandNotices.length - 1}
+                    </span>
+                  )}
+                </UnstyledButton>
+
+                <div className="attention-island-inline-actions">
+                  {!noticeAlreadyActive && (
+                    <Button
+                      size="compact-xs"
+                      color={
+                        activeNotice.kind === 'task_failed'
+                          ? 'red'
+                          : activeNotice.kind === 'approval_pending'
+                            ? 'yellow'
+                            : 'teal'
+                      }
+                      variant="light"
+                      radius="xl"
+                      onClick={() => openNoticeTarget(activeNotice)}
+                      rightSection={<IconArrowRight size={12} />}
+                    >
+                      前往
+                    </Button>
+                  )}
+                  {hasTrayContent && (
+                    <Tooltip label={expanded ? '收起后台动态' : '查看后台动态'} withArrow>
+                      <ActionIcon
+                        size="xs"
+                        variant="subtle"
+                        color="gray"
+                        radius="xl"
+                        aria-expanded={expanded}
+                        aria-label={expanded ? '收起后台动态' : '查看后台动态'}
+                        onClick={() => setExpanded((v) => !v)}
+                      >
+                        {expanded ? <IconChevronUp size={12} /> : <IconChevronDown size={12} />}
+                      </ActionIcon>
+                    </Tooltip>
+                  )}
+                  <Tooltip label="关闭通知" withArrow>
+                    <ActionIcon
+                      size="xs"
+                      variant="subtle"
+                      color="gray"
+                      radius="xl"
+                      aria-label="关闭通知"
+                      onClick={() => dismissIslandNotification(activeNotice.key)}
+                    >
+                      <IconX size={12} />
+                    </ActionIcon>
+                  </Tooltip>
+                </div>
+              </motion.div>
+            ) : (
+              <div className="attention-island-status-row">
+                <UnstyledButton
+                  className="attention-island-trigger"
+                  onClick={() => setExpanded((v) => !v)}
+                  aria-expanded={expanded}
+                  aria-label={hasAttention ? `展开待处理审批，共 ${attentionCount} 项` : `展开运行中会话，共 ${activityCount} 项`}
+                >
+                  {hasAttention ? (
+                    <span className="attention-island-notice-badge is-lg is-notice-attention" aria-hidden="true">
+                      <IconAlertTriangle size={15} stroke={2.2} />
+                    </span>
+                  ) : (
+                    <>
+                      <span className={`attention-island-dot is-${tone}`} aria-hidden="true" />
+                      {primaryAgent ? (
+                        <span className="attention-island-brand" aria-hidden="true">
+                          <AgentBrandIcon kind={primaryAgent.kind} size={14} />
+                        </span>
+                      ) : primaryGroup ? (
+                        <IconUsers size={14} className="attention-island-icon-run" aria-hidden="true" />
+                      ) : (
+                        <IconBolt size={14} className="attention-island-icon-run" aria-hidden="true" />
+                      )}
+                    </>
+                  )}
+
+                  <span className={`attention-island-copy${hasAttention ? ' is-stacked' : ''}`}>
+                    {primaryApproval ? (
+                      <>
+                        <span className="attention-island-title-line">
+                          {primaryAgent && (
+                            <span className="attention-island-brand" aria-hidden="true">
+                              <AgentBrandIcon kind={primaryAgent.kind} size={13} />
+                            </span>
+                          )}
+                          <strong className="attention-island-title">
+                            {primarySession ? displaySessionTitle(primarySession) : '待审批'}
+                          </strong>
+                        </span>
+                        <span className="attention-island-detail is-subline">{approvalSummary(primaryApproval)}</span>
+                      </>
+                    ) : primaryWaitingSession ? (
+                      <>
+                        <strong className="attention-island-title">{displaySessionTitle(primaryWaitingSession)}</strong>
+                        <span className="attention-island-detail is-subline">等待确认</span>
+                      </>
+                    ) : primaryRunning ? (
+                      <>
+                        <strong className="attention-island-title">
+                          {runningSessions.length > 1
+                            ? `${runningSessions.length} 个会话运行中`
+                            : displaySessionTitle(primaryRunning)}
+                        </strong>
+                        {runningSessions.length === 1 && (
+                          <>
+                            <span className="attention-island-sep" aria-hidden="true">·</span>
+                            <span className="attention-island-detail">正在执行</span>
+                          </>
+                        )}
+                      </>
+                    ) : primaryGroup ? (
+                      <>
+                        <strong className="attention-island-title">{primaryGroup.name || '群聊协作'}</strong>
+                        <span className="attention-island-sep" aria-hidden="true">·</span>
+                        <span className="attention-island-detail">接力进行中</span>
+                      </>
+                    ) : null}
+                  </span>
+
+                  {(attentionCount > 1 || (hasAttention && hasActivity)) && (
+                    <span className="attention-island-count">{attentionCount + (hasAttention ? 0 : activityCount)}</span>
+                  )}
+
+                  <span className="attention-island-chevron" aria-hidden="true">
+                    {expanded ? <IconChevronUp size={13} /> : <IconChevronDown size={13} />}
+                  </span>
+                </UnstyledButton>
+
+                <div className="attention-island-inline-actions">
+                  {primaryApproval && primaryCanDecide && (
+                    <>
+                      <Button
+                        size="compact-xs"
+                        color="violet"
+                        variant="filled"
+                        radius="xl"
+                        loading={primaryBusy}
+                        onClick={() => void handleDecision(primaryApproval, 'approve')}
+                        leftSection={<IconCheck size={12} />}
+                      >
+                        批准
+                      </Button>
+                      <Button
+                        size="compact-xs"
+                        color="gray"
+                        variant="subtle"
+                        radius="xl"
+                        disabled={primaryBusy}
+                        onClick={() => void handleDecision(primaryApproval, 'cancel')}
+                      >
+                        拒绝
+                      </Button>
+                    </>
+                  )}
+                  {primaryApproval && !primaryCanDecide && primaryApproval.agent_id && primaryApproval.session_id && (
+                    <Button
+                      size="compact-xs"
+                      color="yellow"
+                      variant="light"
+                      radius="xl"
+                      onClick={() => openSession(primaryApproval.agent_id!, primaryApproval.session_id!)}
+                      rightSection={<IconArrowRight size={12} />}
+                    >
+                      {isUserInput(primaryApproval) ? '回答' : '查看'}
+                    </Button>
+                  )}
+                  {!primaryApproval && primaryWaitingSession && (
+                    <Button
+                      size="compact-xs"
+                      color="yellow"
+                      variant="light"
+                      radius="xl"
+                      onClick={() => openSession(primaryWaitingSession.agent_id, primaryWaitingSession.id)}
+                      rightSection={<IconArrowRight size={12} />}
+                    >
+                      查看
+                    </Button>
+                  )}
+                  {!hasAttention && (
+                    <Tooltip label="暂时收起状态提示" withArrow>
+                      <ActionIcon
+                        size="xs"
+                        variant="subtle"
+                        color="gray"
+                        radius="xl"
+                        aria-label="暂时收起状态提示"
+                        onClick={() => {
+                          setExpanded(false)
+                          setDismissedSignature(activitySignature)
+                        }}
+                      >
+                        <IconX size={12} />
+                      </ActionIcon>
+                    </Tooltip>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Unified single-capsule expanded tray — morphs directly inside the island! */}
+          <AnimatePresence initial={false}>
+            {expanded && hasTrayContent && (
+              <motion.div
+                key="island-tray"
+                initial={reducedMotion ? { opacity: 0 } : { opacity: 0, height: 0 }}
+                animate={reducedMotion ? { opacity: 1 } : { opacity: 1, height: 'auto' }}
+                exit={reducedMotion ? { opacity: 0 } : { opacity: 0, height: 0 }}
+                transition={reducedMotion ? { duration: 0.12 } : { type: 'spring', stiffness: 380, damping: 30 }}
+                style={{ overflow: 'hidden', width: '100%' }}
+              >
+                <div
+                  className="attention-island-tray"
+                  role="dialog"
+                  aria-label="跨会话实时动态"
+                >
+                  <Stack gap="xs">
+                    {pendingApprovals.length > 0 && (
+                      <div className="attention-tray-section">
+                        <Group justify="space-between" mb={6}>
+                          <Text size="xs" fw={700} c="dimmed">待审批请求</Text>
+                          <Badge size="xs" variant="light" color="yellow">{pendingApprovals.length}</Badge>
+                        </Group>
+                        <Stack gap={6}>
+                          {pendingApprovals.map((approval) => {
+                            const session = sessionMap.get(scopeKey(approval.agent_id || '', approval.session_id || ''))
+                            const agent = approval.agent_id ? agents[approval.agent_id] : undefined
+                            const question = isUserInput(approval)
+                            const canDecide = !question && agent?.capabilities.includes('approvals') === true
+                            const busy = Boolean(busyApprovalIds[approval.id])
+                            return (
+                              <div key={approval.id} className="attention-tray-item is-attention">
+                                <Group justify="space-between" align="flex-start" wrap="nowrap" gap="xs">
+                                  <Group gap={6} wrap="nowrap" style={{ minWidth: 0, flex: 1 }}>
+                                    {question ? (
+                                      <IconMessageQuestion size={15} className="attention-island-icon-warn" />
+                                    ) : (
+                                      <AgentBrandIcon kind={agent?.kind} size={14} />
+                                    )}
+                                    <Text size="xs" fw={650} truncate>
+                                      {session ? displaySessionTitle(session) : '会话审批'}
+                                    </Text>
+                                  </Group>
+                                  {approval.agent_id && approval.session_id && (
+                                    <Button
+                                      size="compact-xs"
+                                      variant="subtle"
+                                      color="violet"
+                                      onClick={() => openSession(approval.agent_id!, approval.session_id!)}
+                                    >
+                                      跳转
+                                    </Button>
+                                  )}
+                                </Group>
+                                <Text size="xs" c="dimmed" lineClamp={2} mt={3}>
+                                  {approval.title || approval.detail || '等待授权确认'}
+                                </Text>
+                                {approval.detail && approval.title && approval.detail !== approval.title && (
+                                  <code className="attention-tray-code">{approval.detail}</code>
+                                )}
+                                <Group justify="flex-end" gap={6} mt={6}>
+                                  {canDecide ? (
+                                    <>
+                                      <Button
+                                        size="compact-xs"
+                                        variant="subtle"
+                                        color="gray"
+                                        disabled={busy}
+                                        onClick={() => void handleDecision(approval, 'cancel')}
+                                      >
+                                        拒绝
+                                      </Button>
+                                      <Button
+                                        size="compact-xs"
+                                        color="violet"
+                                        loading={busy}
+                                        leftSection={<IconCheck size={12} />}
+                                        onClick={() => void handleDecision(approval, 'approve')}
+                                      >
+                                        批准执行
+                                      </Button>
+                                    </>
+                                  ) : (
+                                    approval.agent_id && approval.session_id && (
+                                      <Button
+                                        size="compact-xs"
+                                        color="yellow"
+                                        variant="light"
+                                        onClick={() => openSession(approval.agent_id!, approval.session_id!)}
+                                        rightSection={<IconArrowRight size={12} />}
+                                      >
+                                        {question ? '前往回答' : '查看详情'}
+                                      </Button>
+                                    )
+                                  )}
+                                </Group>
+                              </div>
+                            )
+                          })}
+                        </Stack>
+                      </div>
+                    )}
+
+                    {waitingSessions.length > 0 && (
+                      <div className="attention-tray-section">
+                        <Text size="xs" fw={700} c="dimmed" mb={6}>等待确认会话</Text>
+                        <Stack gap={4}>
+                          {waitingSessions.map((session) => (
+                            <UnstyledButton
+                              key={scopeKey(session.agent_id, session.id)}
+                              className="attention-tray-row"
+                              onClick={() => openSession(session.agent_id, session.id)}
+                            >
+                              <Group gap={8} wrap="nowrap" style={{ minWidth: 0, flex: 1 }}>
+                                <AgentBrandIcon kind={agents[session.agent_id]?.kind} size={14} />
+                                <Text size="xs" fw={600} truncate>{displaySessionTitle(session)}</Text>
+                              </Group>
+                              <Badge size="xs" variant="light" color="yellow">待确认</Badge>
+                            </UnstyledButton>
+                          ))}
+                        </Stack>
+                      </div>
+                    )}
+
+                    {(runningSessions.length > 0 || activeGroups.length > 0) && (
+                      <div className="attention-tray-section">
+                        <Group justify="space-between" mb={6}>
+                          <Text size="xs" fw={700} c="dimmed">后台运行中</Text>
+                          {canOpenMatrix && (
+                            <Button
+                              size="compact-xs"
+                              variant="subtle"
+                              color="violet"
+                              leftSection={<IconLayoutGrid size={12} />}
+                              onClick={() => {
+                                setExpanded(false)
+                                navigate('/monitor')
+                              }}
+                            >
+                              进入矩阵
+                            </Button>
+                          )}
+                        </Group>
+                        <Stack gap={4}>
+                          {runningSessions.slice(0, 5).map((session) => (
+                            <UnstyledButton
+                              key={scopeKey(session.agent_id, session.id)}
+                              className="attention-tray-row"
+                              onClick={() => openSession(session.agent_id, session.id)}
+                            >
+                              <Group gap={8} wrap="nowrap" style={{ minWidth: 0, flex: 1 }}>
+                                <AgentBrandIcon kind={agents[session.agent_id]?.kind} size={14} />
+                                <Text size="xs" fw={550} truncate>{displaySessionTitle(session)}</Text>
+                                {session.project_name && (
+                                  <Text size="xs" c="dimmed" truncate style={{ maxWidth: 96 }}>
+                                    {session.project_name}
+                                  </Text>
+                                )}
+                              </Group>
+                              <span className="attention-running-pill">运行中</span>
+                            </UnstyledButton>
+                          ))}
+                          {activeGroups.map((group) => (
+                            <UnstyledButton
+                              key={group.id}
+                              className="attention-tray-row"
+                              onClick={() => {
+                                setExpanded(false)
+                                navigate(`/groups/${encodeURIComponent(group.id)}`)
+                              }}
+                            >
+                              <Group gap={8} wrap="nowrap" style={{ minWidth: 0, flex: 1 }}>
+                                <IconUsers size={14} color="var(--astr-indigo)" />
+                                <Text size="xs" fw={550} truncate>{group.name || '群聊协作'}</Text>
+                              </Group>
+                              <span className="attention-running-pill">接力中</span>
+                            </UnstyledButton>
+                          ))}
+                        </Stack>
+                      </div>
+                    )}
+                  </Stack>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Countdown hairline along the bottom curve */}
+          {hasToast && activeToastDurationMs !== null ? (
+            <span
+              key={`progress:toast:${activeToastKey}:${popSeq}`}
+              className={`attention-island-progress is-${toastToneClass}`}
+              aria-hidden="true"
+            />
+          ) : !hasToast && hasNotice && activeNotice ? (
             <span
               key={`progress:${activeNotice.key}`}
               className={`attention-island-progress is-${noticeTone}`}
               aria-hidden="true"
             />
-          </>
-        ) : (
-          <>
-            <UnstyledButton
-              className="attention-island-trigger"
-              onClick={() => setExpanded((v) => !v)}
-              aria-expanded={expanded}
-              aria-label={hasAttention ? `展开待处理审批，共 ${attentionCount} 项` : `展开运行中会话，共 ${activityCount} 项`}
-            >
-              <span className={`attention-island-dot is-${tone}`} aria-hidden="true" />
-              {primaryAgent ? (
-                <span className="attention-island-brand" aria-hidden="true">
-                  <AgentBrandIcon kind={primaryAgent.kind} size={14} />
-                </span>
-              ) : hasAttention ? (
-                <IconAlertTriangle size={14} className="attention-island-icon-warn" aria-hidden="true" />
-              ) : primaryGroup ? (
-                <IconUsers size={14} className="attention-island-icon-run" aria-hidden="true" />
-              ) : (
-                <IconBolt size={14} className="attention-island-icon-run" aria-hidden="true" />
-              )}
-
-              <span className="attention-island-copy">
-                {primaryApproval ? (
-                  <>
-                    <strong className="attention-island-title">
-                      {primarySession ? displaySessionTitle(primarySession) : '待审批'}
-                    </strong>
-                    <span className="attention-island-sep" aria-hidden="true">·</span>
-                    <span className="attention-island-detail">{approvalSummary(primaryApproval)}</span>
-                  </>
-                ) : primaryWaitingSession ? (
-                  <>
-                    <strong className="attention-island-title">{displaySessionTitle(primaryWaitingSession)}</strong>
-                    <span className="attention-island-sep" aria-hidden="true">·</span>
-                    <span className="attention-island-detail">等待确认</span>
-                  </>
-                ) : primaryRunning ? (
-                  <>
-                    <strong className="attention-island-title">
-                      {runningSessions.length > 1
-                        ? `${runningSessions.length} 个会话运行中`
-                        : displaySessionTitle(primaryRunning)}
-                    </strong>
-                    {runningSessions.length === 1 && (
-                      <>
-                        <span className="attention-island-sep" aria-hidden="true">·</span>
-                        <span className="attention-island-detail">正在执行</span>
-                      </>
-                    )}
-                  </>
-                ) : primaryGroup ? (
-                  <>
-                    <strong className="attention-island-title">{primaryGroup.name || '群聊协作'}</strong>
-                    <span className="attention-island-sep" aria-hidden="true">·</span>
-                    <span className="attention-island-detail">接力进行中</span>
-                  </>
-                ) : null}
-              </span>
-
-              {(attentionCount > 1 || (hasAttention && hasActivity)) && (
-                <span className="attention-island-count">{attentionCount + (hasAttention ? 0 : activityCount)}</span>
-              )}
-
-              <span className="attention-island-chevron" aria-hidden="true">
-                {expanded ? <IconChevronUp size={13} /> : <IconChevronDown size={13} />}
-              </span>
-            </UnstyledButton>
-
-            <div className="attention-island-inline-actions">
-              {primaryApproval && primaryCanDecide && (
-                <>
-                  <Button
-                    size="compact-xs"
-                    color="violet"
-                    variant="filled"
-                    radius="xl"
-                    loading={primaryBusy}
-                    onClick={() => void handleDecision(primaryApproval, 'approve')}
-                    leftSection={<IconCheck size={12} />}
-                  >
-                    批准
-                  </Button>
-                  <Button
-                    size="compact-xs"
-                    color="gray"
-                    variant="subtle"
-                    radius="xl"
-                    disabled={primaryBusy}
-                    onClick={() => void handleDecision(primaryApproval, 'cancel')}
-                  >
-                    拒绝
-                  </Button>
-                </>
-              )}
-              {primaryApproval && !primaryCanDecide && primaryApproval.agent_id && primaryApproval.session_id && (
-                <Button
-                  size="compact-xs"
-                  color="yellow"
-                  variant="light"
-                  radius="xl"
-                  onClick={() => openSession(primaryApproval.agent_id!, primaryApproval.session_id!)}
-                  rightSection={<IconArrowRight size={12} />}
-                >
-                  {isUserInput(primaryApproval) ? '回答' : '查看'}
-                </Button>
-              )}
-              {!primaryApproval && primaryWaitingSession && (
-                <Button
-                  size="compact-xs"
-                  color="yellow"
-                  variant="light"
-                  radius="xl"
-                  onClick={() => openSession(primaryWaitingSession.agent_id, primaryWaitingSession.id)}
-                  rightSection={<IconArrowRight size={12} />}
-                >
-                  查看
-                </Button>
-              )}
-              {!hasAttention && (
-                <Tooltip label="暂时收起状态提示" withArrow>
-                  <ActionIcon
-                    size="xs"
-                    variant="subtle"
-                    color="gray"
-                    radius="xl"
-                    aria-label="暂时收起状态提示"
-                    onClick={() => {
-                      setExpanded(false)
-                      setDismissedSignature(activitySignature)
-                    }}
-                  >
-                    <IconX size={12} />
-                  </ActionIcon>
-                </Tooltip>
-              )}
-            </div>
-          </>
-        )}
+          ) : null}
+        </motion.div>
       </div>
-
-      {expanded && hasTrayContent && (
-        <div
-          className="attention-island-tray"
-          role="dialog"
-          aria-label="跨会话实时动态"
-        >
-          <Stack gap="xs">
-            {pendingApprovals.length > 0 && (
-              <div className="attention-tray-section">
-                <Group justify="space-between" mb={6}>
-                  <Text size="xs" fw={700} c="dimmed">待审批请求</Text>
-                  <Badge size="xs" variant="light" color="yellow">{pendingApprovals.length}</Badge>
-                </Group>
-                <Stack gap={6}>
-                  {pendingApprovals.map((approval) => {
-                    const session = sessionMap.get(scopeKey(approval.agent_id || '', approval.session_id || ''))
-                    const agent = approval.agent_id ? agents[approval.agent_id] : undefined
-                    const question = isUserInput(approval)
-                    const canDecide = !question && agent?.capabilities.includes('approvals') === true
-                    const busy = Boolean(busyApprovalIds[approval.id])
-                    return (
-                      <div key={approval.id} className="attention-tray-item is-attention">
-                        <Group justify="space-between" align="flex-start" wrap="nowrap" gap="xs">
-                          <Group gap={6} wrap="nowrap" style={{ minWidth: 0, flex: 1 }}>
-                            {question ? (
-                              <IconMessageQuestion size={15} className="attention-island-icon-warn" />
-                            ) : (
-                              <AgentBrandIcon kind={agent?.kind} size={14} />
-                            )}
-                            <Text size="xs" fw={650} truncate>
-                              {session ? displaySessionTitle(session) : '会话审批'}
-                            </Text>
-                          </Group>
-                          {approval.agent_id && approval.session_id && (
-                            <Button
-                              size="compact-xs"
-                              variant="subtle"
-                              color="violet"
-                              onClick={() => openSession(approval.agent_id!, approval.session_id!)}
-                            >
-                              跳转
-                            </Button>
-                          )}
-                        </Group>
-                        <Text size="xs" c="dimmed" lineClamp={2} mt={3}>
-                          {approval.title || approval.detail || '等待授权确认'}
-                        </Text>
-                        {approval.detail && approval.title && approval.detail !== approval.title && (
-                          <code className="attention-tray-code">{approval.detail}</code>
-                        )}
-                        <Group justify="flex-end" gap={6} mt={6}>
-                          {canDecide ? (
-                            <>
-                              <Button
-                                size="compact-xs"
-                                variant="subtle"
-                                color="gray"
-                                disabled={busy}
-                                onClick={() => void handleDecision(approval, 'cancel')}
-                              >
-                                拒绝
-                              </Button>
-                              <Button
-                                size="compact-xs"
-                                color="violet"
-                                loading={busy}
-                                leftSection={<IconCheck size={12} />}
-                                onClick={() => void handleDecision(approval, 'approve')}
-                              >
-                                批准执行
-                              </Button>
-                            </>
-                          ) : (
-                            approval.agent_id && approval.session_id && (
-                              <Button
-                                size="compact-xs"
-                                color="yellow"
-                                variant="light"
-                                onClick={() => openSession(approval.agent_id!, approval.session_id!)}
-                                rightSection={<IconArrowRight size={12} />}
-                              >
-                                {question ? '前往回答' : '查看详情'}
-                              </Button>
-                            )
-                          )}
-                        </Group>
-                      </div>
-                    )
-                  })}
-                </Stack>
-              </div>
-            )}
-
-            {waitingSessions.length > 0 && (
-              <div className="attention-tray-section">
-                <Text size="xs" fw={700} c="dimmed" mb={6}>等待确认会话</Text>
-                <Stack gap={4}>
-                  {waitingSessions.map((session) => (
-                    <UnstyledButton
-                      key={scopeKey(session.agent_id, session.id)}
-                      className="attention-tray-row"
-                      onClick={() => openSession(session.agent_id, session.id)}
-                    >
-                      <Group gap={8} wrap="nowrap" style={{ minWidth: 0, flex: 1 }}>
-                        <AgentBrandIcon kind={agents[session.agent_id]?.kind} size={14} />
-                        <Text size="xs" fw={600} truncate>{displaySessionTitle(session)}</Text>
-                      </Group>
-                      <Badge size="xs" variant="light" color="yellow">待确认</Badge>
-                    </UnstyledButton>
-                  ))}
-                </Stack>
-              </div>
-            )}
-
-            {(runningSessions.length > 0 || activeGroups.length > 0) && (
-              <div className="attention-tray-section">
-                <Group justify="space-between" mb={6}>
-                  <Text size="xs" fw={700} c="dimmed">后台运行中</Text>
-                  {canOpenMatrix && (
-                    <Button
-                      size="compact-xs"
-                      variant="subtle"
-                      color="violet"
-                      leftSection={<IconLayoutGrid size={12} />}
-                      onClick={() => {
-                        setExpanded(false)
-                        navigate('/monitor')
-                      }}
-                    >
-                      进入矩阵
-                    </Button>
-                  )}
-                </Group>
-                <Stack gap={4}>
-                  {runningSessions.slice(0, 5).map((session) => (
-                    <UnstyledButton
-                      key={scopeKey(session.agent_id, session.id)}
-                      className="attention-tray-row"
-                      onClick={() => openSession(session.agent_id, session.id)}
-                    >
-                      <Group gap={8} wrap="nowrap" style={{ minWidth: 0, flex: 1 }}>
-                        <AgentBrandIcon kind={agents[session.agent_id]?.kind} size={14} />
-                        <Text size="xs" fw={550} truncate>{displaySessionTitle(session)}</Text>
-                        {session.project_name && (
-                          <Text size="xs" c="dimmed" truncate style={{ maxWidth: 96 }}>
-                            {session.project_name}
-                          </Text>
-                        )}
-                      </Group>
-                      <span className="attention-running-pill">运行中</span>
-                    </UnstyledButton>
-                  ))}
-                  {activeGroups.map((group) => (
-                    <UnstyledButton
-                      key={group.id}
-                      className="attention-tray-row"
-                      onClick={() => {
-                        setExpanded(false)
-                        navigate(`/groups/${encodeURIComponent(group.id)}`)
-                      }}
-                    >
-                      <Group gap={8} wrap="nowrap" style={{ minWidth: 0, flex: 1 }}>
-                        <IconUsers size={14} color="var(--astr-indigo)" />
-                        <Text size="xs" fw={550} truncate>{group.name || '群聊协作'}</Text>
-                      </Group>
-                      <span className="attention-running-pill">接力中</span>
-                    </UnstyledButton>
-                  ))}
-                </Stack>
-              </div>
-            )}
-          </Stack>
-        </div>
-      )}
-    </div>
+    </>
   )
 }

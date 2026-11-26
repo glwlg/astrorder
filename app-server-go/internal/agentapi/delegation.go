@@ -17,6 +17,7 @@ import (
 
 // CanonicalDelegateRequest ensures deterministic JSON serialization for request hashing.
 type CanonicalDelegateRequest struct {
+	ApprovalMode       string `json:"approval_mode,omitempty"`
 	CallerAgentID      string `json:"caller_agent_id"`
 	CallerConnectionID string `json:"caller_connection_id"`
 	CallerProfileName  string `json:"caller_profile_name"`
@@ -33,19 +34,21 @@ type CanonicalDelegateRequest struct {
 
 // DelegateInput is the input payload for sessions.delegate capability.
 type DelegateInput struct {
-	OperationID string  `json:"operation_id"`
-	AgentID     string  `json:"agent_id"`
-	Title       string  `json:"title"`
-	Workspace   string  `json:"workspace"`
-	Model       string  `json:"model"`
-	Provider    string  `json:"provider"`
-	Effort      string  `json:"effort"`
-	Prompt      string  `json:"prompt"`
-	Caller      *Caller `json:"caller"`
+	OperationID  string  `json:"operation_id"`
+	AgentID      string  `json:"agent_id"`
+	Title        string  `json:"title"`
+	Workspace    string  `json:"workspace"`
+	Model        string  `json:"model"`
+	Provider     string  `json:"provider"`
+	Effort       string  `json:"effort"`
+	ApprovalMode string  `json:"approval_mode,omitempty"`
+	Prompt       string  `json:"prompt"`
+	Caller       *Caller `json:"caller"`
 }
 
 func computeRequestHash(input *DelegateInput, caller *Caller) string {
 	canonical := CanonicalDelegateRequest{
+		ApprovalMode:       input.ApprovalMode,
 		CallerAgentID:      caller.AgentID,
 		CallerConnectionID: caller.ConnectionID,
 		CallerProfileName:  caller.ProfileName,
@@ -124,17 +127,26 @@ func ParseDelegateInput(payload map[string]any) (*DelegateInput, error) {
 	if err != nil {
 		return nil, err
 	}
+	rawApprovalMode, err := parseOptionalString("approval_mode")
+	if err != nil {
+		return nil, err
+	}
+	approvalMode, err := normalizeBotApprovalMode(rawApprovalMode)
+	if err != nil {
+		return nil, err
+	}
 
 	return &DelegateInput{
-		OperationID: rawOpID,
-		AgentID:     rawAgentID,
-		Title:       title,
-		Workspace:   workspace,
-		Model:       model,
-		Provider:    provider,
-		Effort:      effort,
-		Prompt:      rawPrompt,
-		Caller:      caller,
+		OperationID:  rawOpID,
+		AgentID:      rawAgentID,
+		Title:        title,
+		Workspace:    workspace,
+		Model:        model,
+		Provider:     provider,
+		Effort:       effort,
+		ApprovalMode: approvalMode,
+		Prompt:       rawPrompt,
+		Caller:       caller,
 	}, nil
 }
 
@@ -332,7 +344,7 @@ func (h *Handler) invokeSessionsDelegate(ctx context.Context, payload map[string
 		if input.Model != "" {
 			antigravityOpt.Model = &input.Model
 		}
-		if input.Effort != "" {
+		if input.Effort != "" && !modelHasEffortSuffix(input.Model) {
 			antigravityOpt.Effort = &input.Effort
 		}
 		createReq.Options = &sessiondv1.CreateSessionRequest_Antigravity{
@@ -340,8 +352,15 @@ func (h *Handler) invokeSessionsDelegate(ctx context.Context, payload map[string
 		}
 
 	case "grok":
+		grokOpt := &sessiondv1.GrokCreateOptions{Cwd: workspace}
+		if input.Model != "" {
+			grokOpt.Model = &input.Model
+		}
+		if input.Effort != "" {
+			grokOpt.Effort = &input.Effort
+		}
 		createReq.Options = &sessiondv1.CreateSessionRequest_Grok{
-			Grok: &sessiondv1.GrokCreateOptions{Cwd: workspace},
+			Grok: grokOpt,
 		}
 
 	default:
@@ -474,6 +493,17 @@ func (h *Handler) invokeSessionsDelegate(ctx context.Context, payload map[string
 		return nil, fmt.Errorf("failed to record delegation edge: %w", edgeErr)
 	}
 
+	// Apply configured approval mode / model / reasoning effort before initial dispatch.
+	connID, _ := targetAgent["connection_id"].(string)
+	if policyErr := h.applySpawnedSessionPolicy(ctx, targetAgent, childSID, connID, input.OperationID, input.Provider, input.Model, input.Effort, input.ApprovalMode); policyErr != nil {
+		errMsg := policyErr.Error()
+		_ = h.options.Store.TransitionDelegationOperation(ctx, input.OperationID, store.OpStageCreating, store.OpStageUncertain, &store.DelegationOperationUpdate{
+			TargetSessionID: &childSID,
+			ErrorMessage:    &errMsg,
+		})
+		return nil, policyErr
+	}
+
 	// Read back canonical child session with joined delegation fields from store and publish
 	canonicalChild, getErr := h.options.Store.GetSession(ctx, input.AgentID, childSID)
 	if getErr == nil && canonicalChild != nil {
@@ -495,7 +525,6 @@ func (h *Handler) invokeSessionsDelegate(ctx context.Context, payload map[string
 	}
 
 	sendOpID := input.OperationID + "-send"
-	connID, _ := targetAgent["connection_id"].(string)
 
 	sendReceipt, sendErr := h.options.Client.Session.Send(ctx, &sessiondv1.SendRequest{
 		Meta:    newCommandMeta(sendOpID, sendOpID),

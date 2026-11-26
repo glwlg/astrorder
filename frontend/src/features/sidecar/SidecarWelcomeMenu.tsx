@@ -1,4 +1,5 @@
 import { Text, UnstyledButton } from '@mantine/core'
+import { IconBrandGitlab } from '@tabler/icons-react'
 import {
   BrainIcon, BrowserIcon, ChalkboardSimpleIcon, ChatsCircleIcon, DatabaseIcon, FolderSimpleIcon, GitBranchIcon, GraphIcon, MicrophoneIcon, NotebookIcon, SparkleIcon, TerminalWindowIcon,
 } from '../../components/workbenchIcons'
@@ -17,6 +18,7 @@ interface SidecarWelcomeMenuProps {
   onOpenBlackboard?: () => void
   onOpenMemory?: () => void
   onOpenWorktrees?: () => void
+  onOpenGitLabCI?: () => void
   onOpenDigest?: () => void
   onOpenMeetings?: () => void
 }
@@ -33,6 +35,7 @@ export function SidecarWelcomeMenu({
   onOpenBlackboard,
   onOpenMemory,
   onOpenWorktrees,
+  onOpenGitLabCI,
   onOpenDigest,
   onOpenMeetings,
 }: SidecarWelcomeMenuProps) {
@@ -95,6 +98,16 @@ export function SidecarWelcomeMenu({
             label: 'Worktree 工作区',
             shortcut: '并行分支',
             onClick: onOpenWorktrees,
+          },
+        ]
+      : []),
+    ...(onOpenGitLabCI
+      ? [
+          {
+            icon: <IconBrandGitlab size={20} color="#e24329" />,
+            label: 'GitLab CI 流水线',
+            shortcut: 'CI / CD',
+            onClick: onOpenGitLabCI,
           },
         ]
       : []),

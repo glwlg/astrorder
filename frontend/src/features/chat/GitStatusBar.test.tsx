@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { Session } from '../../domain/types'
 import userEvent from '@testing-library/user-event'
+import { useSidecarStore } from '../sidecar/sidecarStore'
 import { GitStatusBar } from './GitStatusBar'
 
 const session: Session = {
@@ -97,4 +98,42 @@ it('does not carry a previous session branch into a different workspace', async 
   expect(screen.getByText('读取分支…')).toBeInTheDocument()
   finishSecond(new Response(JSON.stringify({ branch: 'other', branches: ['other'], changed_files: 0 }), { status: 200 }))
   expect(await screen.findByText('other')).toBeInTheDocument()
+})
+
+it('shows live GitLab CI pill for matched repos and opens the GitLab CI viewer on click', async () => {
+  useSidecarStore.getState().resetSessionSidecar()
+  vi.stubGlobal('fetch', vi.fn(async (url: unknown) => {
+    const raw = String(url)
+    if (raw.includes('/api/v1/gitlab/pipelines')) {
+      return new Response(JSON.stringify({
+        configured: true,
+        matched: true,
+        repo: { host: 'gitlab.internal', project_path: 'platform/opscore', branch: 'main', head_sha: 'abcdef123456' },
+        latest_pipeline: {
+          id: 402,
+          status: 'running',
+          ref: 'main',
+          sha: 'abcdef123456',
+          short_sha: 'abcdef12',
+          web_url: 'https://gitlab.internal/platform/opscore/-/pipelines/402',
+          matches_head: true,
+        },
+        pipelines: [],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }
+    return new Response(JSON.stringify({ branch: 'main', branches: ['main'], changed_files: 0 }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }))
+
+  renderStatus()
+  const ciButton = await screen.findByRole('button', { name: '查看 GitLab CI 流水线' })
+  expect(ciButton).toHaveTextContent('#402')
+  expect(ciButton).toHaveTextContent('运行中')
+
+  fireEvent.click(ciButton)
+  const state = useSidecarStore.getState()
+  expect(state.isOpen).toBe(true)
+  expect(state.tabs.some((tab) => tab.viewerId === 'gitlab-ci-viewer' && tab.artifact?.readUrl === '?pipeline_id=402')).toBe(true)
 })

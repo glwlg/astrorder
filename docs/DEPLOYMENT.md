@@ -14,7 +14,7 @@ node scripts/build-installer.mjs
 
 构建注意事项：
 
-- **桌面前端与 Web/PWA 分离**：桌面内嵌前端通过 `ASTRORDER_WAILS=1` 构建（禁用 PWA Service Worker）；Web/PWA 静态资源通过 `npm --prefix frontend run build` 单独构建（包含 `sw-astrorder.js`），两者不可混用。
+- **桌面前端与 Web/PWA 分离**：桌面内嵌前端通过 `ASTRORDER_WAILS=1` 与 `ASTRORDER_OUT_DIR=desktop-wails/assets/app` 直接输出到桌面嵌入目录（禁用 PWA Service Worker，且不污染 `frontend/dist/`）；Web/PWA 静态资源通过 `npm --prefix frontend run build` 单独构建（包含 `sw-astrorder.js`），两者不可混用，构建脚本通过 `scripts/verify-frontend-dist.mjs` 强制校验。
 - **使用项目构建脚本**：桌面程序必须通过 `scripts/desktop-wails.mjs` 构建以保留中文输入法修补；修改原生图片预览 HTML 后需重新构建桌面程序。
 
 ## 2. 安装目录与数据隔离
@@ -46,7 +46,7 @@ $Control = Join-Path $ServerRoot 'bin\astrorderctl.exe'
 
 各组件独立发布边界：
 
-- **Web / PWA 资源**：构建浏览器版 `frontend/dist/` 后，通过 `astrorderctl sync --dev-root <source> --installed-root <server>` 同步（或在 `frontend/` 执行 `npm run build:sync -- --installed-root "$ServerRoot"`）。
+- **Web / PWA 资源**：构建浏览器版 `frontend/dist/` 后，通过 `astrorderctl sync --dev-root <source> --installed-root <server>` 同步（或在 `frontend/` 执行 `npm run build:sync -- --installed-root "$ServerRoot"`）。同步命令会在拷贝前与落盘替换前两次校验 `index.html`、所有被引用的 `assets/*` 及 `sw-astrorder.js`，避免半成品覆盖线上静态目录；也可通过 `astrorderctl sync --verify-only --installed-root "$ServerRoot"` 或 `node scripts/verify-frontend-dist.mjs --mode browser "$ServerRoot/frontend/dist"` 单独核验。
 - **桌面客户端**：仅替换并重启 `Astrorder.exe`，核对 SHA-256 与 `--check`，不影响大内核与小内核进程。
 - **Go 大内核**：可独立替换并重启 `astrorder-app.exe`，发布时同步核对 `helpers/linux-amd64/astrorder-helper` 与 `helpers/linux-arm64/astrorder-helper`；重启后确认健康检查正常且小内核 PID 未变化。
 - **Go 小内核**：将验证后的新版本暂存为同目录的 `astrorder-sessiond.exe.new`，通过 `astrorderctl service daemon update-check` 核对后，由用户在系统托盘 **「小内核 → 更新小内核」** 手动激活，遵循 [`AGENTS.md`](../AGENTS.md) 约束。

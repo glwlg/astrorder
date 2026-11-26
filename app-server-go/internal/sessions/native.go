@@ -50,8 +50,15 @@ func (h *Handler) requireAgentConnection(ctx context.Context, agent map[string]a
 		connID = "local"
 	}
 	kind := stringValue(agent, "kind")
-	if kind == "antigravity-ssh" {
+	switch kind {
+	case "antigravity-ssh":
 		kind = "antigravity"
+	case "codex-ssh":
+		kind = "codex"
+	case "grok-ssh":
+		kind = "grok"
+	case "ssh":
+		kind = "hermes"
 	}
 	enabled, present, err := h.store.GetAgentConnectionChoice(ctx, connID+":"+kind)
 	if err != nil {
@@ -80,14 +87,14 @@ func (h *Handler) resolveRuntimeTarget(ctx context.Context, agent map[string]any
 
 	isSSH := connID != "" && connID != "local"
 	switch kind {
-	case "codex":
-		if isSSH {
+	case "codex", "codex-ssh":
+		if isSSH || kind == "codex-ssh" {
 			target.Runtime = sessiondv1.RuntimeKind_RUNTIME_KIND_CODEX_SSH
 		} else {
 			target.Runtime = sessiondv1.RuntimeKind_RUNTIME_KIND_CODEX
 		}
-	case "hermes":
-		if isSSH {
+	case "hermes", "ssh":
+		if isSSH || kind == "ssh" {
 			target.Runtime = sessiondv1.RuntimeKind_RUNTIME_KIND_SSH_HERMES
 		} else {
 			target.Runtime = sessiondv1.RuntimeKind_RUNTIME_KIND_HERMES
@@ -98,8 +105,8 @@ func (h *Handler) resolveRuntimeTarget(ctx context.Context, agent map[string]any
 		} else {
 			target.Runtime = sessiondv1.RuntimeKind_RUNTIME_KIND_ANTIGRAVITY
 		}
-	case "grok":
-		if isSSH {
+	case "grok", "grok-ssh":
+		if isSSH || kind == "grok-ssh" {
 			target.Runtime = sessiondv1.RuntimeKind_RUNTIME_KIND_GROK_SSH
 		} else {
 			target.Runtime = sessiondv1.RuntimeKind_RUNTIME_KIND_GROK

@@ -560,6 +560,8 @@ func (a *Adapter) Command(ctx context.Context, req core.Request) (core.Result, e
 		return core.Result{SessionID: sessionID, Status: status, Payload: map[string]any{"mode": mode}}, nil
 	case "session.delete":
 		return a.handleDelete(ctx, owned, sessionID)
+	case "session.move_workspace":
+		return a.handleMoveWorkspace(ctx, owned, sessionID, req)
 	case "session.history_page":
 		return a.handleHistoryPage(ctx, owned, sessionID, req)
 	case "session.close":

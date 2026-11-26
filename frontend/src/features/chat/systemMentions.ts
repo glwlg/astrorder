@@ -1,12 +1,15 @@
 const SWARM_MENTION = /(?:^|\s)@(群星|stars)(?=\s|$)/gi
 const BROWSER_MENTION = /(?:^|\s)@(浏览器|browser)(?=\s|$)/gi
 const BLACKBOARD_MENTION = /(?:^|\s)@(黑板|blackboard)(?=\s|$)/gi
+const BOT_MENTION = /(?:^|\s)@Bot:([a-z0-9][a-z0-9_-]*)(?=\s|$)/gi
 
 export function expandSystemMentions(text: string, sessionKey?: string): string {
   const swarm = new RegExp(SWARM_MENTION.source, SWARM_MENTION.flags).test(text)
   const browser = new RegExp(BROWSER_MENTION.source, BROWSER_MENTION.flags).test(text)
   const blackboard = new RegExp(BLACKBOARD_MENTION.source, BLACKBOARD_MENTION.flags).test(text)
-  if (!swarm && !browser && !blackboard) return text
+  const botSlugs = Array.from(text.matchAll(new RegExp(BOT_MENTION.source, BOT_MENTION.flags)), (m) => m[1])
+  const uniqueBotSlugs = [...new Set(botSlugs)]
+  if (!swarm && !browser && !blackboard && uniqueBotSlugs.length === 0) return text
 
   const prompt = text
     .replace(SWARM_MENTION, (match) => match.replace(/@(群星|stars)$/i, '【星序 · 群星多 Agent 协同作战指令】'))
@@ -14,6 +17,16 @@ export function expandSystemMentions(text: string, sessionKey?: string): string 
     .replace(BLACKBOARD_MENTION, (match) => match.replace(/@(黑板|blackboard)$/i, '【星序 · 作战黑板同步指令】'))
     .trim()
   const directives: string[] = []
+  if (uniqueBotSlugs.length > 0) {
+    const slugList = uniqueBotSlugs.join(', ')
+    directives.push(
+      `【星序 · Bot 派单指令（目标 Bot：${slugList}）】`,
+      '1. 加载 astrorder-sessions 技能，使用技能目录内的 astrorder-agent CLI 派单，不手填或猜测当前会话身份：',
+      `   astrorder-agent bots invoke --bot ${uniqueBotSlugs[0]} --operation-id <唯一操作ID> --title "<任务标题>" --prompt "<自包含任务简报>" [--attach "<参考文件1>,<参考文件2>"]`,
+      '2. 请先把当前项目中的关键需求、核心卖点/参数整理为自包含简报，必要时通过 --attach 推送参考素材到目标 Bot 的 inbox 目录，这样 Bot 默认无需跨项目翻找；星序同时会附带当前会话上下文，如 Bot 执行中确需补充信息也可按需读取或回问。',
+      '3. 派单会派生干净的新任务会话；随后请使用 astrorder-agent sessions read --key <返回的session.key> 持续跟进直至拿到最终交付结果并向用户汇报。',
+    )
+  }
   if (swarm) {
     directives.push(
       '【星序 · 群星多 Agent 协同作战指令】',

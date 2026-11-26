@@ -378,9 +378,9 @@ WHERE s.agent_id=? AND s.id=?`, agentID, id)
 
 // UpdateSession applies supported partial updates to an exact session.
 func (s *Store) UpdateSession(ctx context.Context, agentID, sessionID string, updates map[string]any) (map[string]any, error) {
-	sets := make([]string, 0, 5)
-	args := make([]any, 0, 7)
-	for _, key := range []string{"title", "status", "workspace"} {
+	sets := make([]string, 0, 8)
+	args := make([]any, 0, 10)
+	for _, key := range []string{"title", "status", "workspace", "project_id", "project_name", "control_state"} {
 		if value, ok := updates[key]; ok {
 			if key == "title" {
 				text, ok := value.(string)
@@ -393,6 +393,7 @@ func (s *Store) UpdateSession(ctx context.Context, agentID, sessionID string, up
 			args = append(args, value)
 		}
 	}
+	clearWorktree, _ := updates["clear_worktree"].(bool)
 	if value, ok := updates["ephemeral"]; ok {
 		flag, err := boolValue(value, false)
 		if err != nil {
@@ -409,7 +410,7 @@ func (s *Store) UpdateSession(ctx context.Context, agentID, sessionID string, up
 		sets = append(sets, "runtime_owner=?")
 		args = append(args, encoded)
 	}
-	if len(sets) == 0 {
+	if len(sets) == 0 && !clearWorktree {
 		return s.GetSession(ctx, agentID, sessionID)
 	}
 	sets = append(sets, "updated_at=?")
@@ -418,6 +419,11 @@ func (s *Store) UpdateSession(ctx context.Context, agentID, sessionID string, up
 	err := s.WithTx(ctx, func(tx *sql.Tx) error {
 		if _, renamed := updates["title"]; renamed {
 			if _, err := tx.ExecContext(ctx, `DELETE FROM workspace_preferences WHERE "key"=?`, SessionTitleKey(agentID, sessionID)); err != nil {
+				return err
+			}
+		}
+		if clearWorktree {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM session_worktrees WHERE agent_id=? AND session_id=?`, agentID, sessionID); err != nil {
 				return err
 			}
 		}

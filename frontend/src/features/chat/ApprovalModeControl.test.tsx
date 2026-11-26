@@ -154,4 +154,29 @@ describe('ApprovalModeControl', () => {
       expect(screen.getByRole('button', { name: /当前审批模式：请求批准/ })).toBeInTheDocument()
     })
   })
+
+  it('renders icon-only colored button when iconOnly is enabled while keeping popover and aria-label', async () => {
+    vi.spyOn(api, 'getSessionApprovalMode').mockResolvedValue({ mode: 'full_access' })
+    const setSpy = vi.spyOn(api, 'setSessionApprovalMode').mockResolvedValue({ mode: 'auto' })
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <MantineProvider>
+        <QueryClientProvider client={queryClient}>
+          <ApprovalModeControl session={testSession} iconOnly />
+        </QueryClientProvider>
+      </MantineProvider>,
+    )
+
+    const trigger = await screen.findByRole('button', { name: /当前审批模式：完全访问权限/ })
+    expect(trigger).toHaveClass('is-icon-only', 'is-full-access', 'is-mode-full_access')
+    expect(trigger.textContent?.trim()).toBe('')
+
+    fireEvent.click(trigger)
+    fireEvent.click(await screen.findByText('帮我批准'))
+    await waitFor(() => expect(setSpy).toHaveBeenCalledWith(testSession.id, testSession.agent_id, 'auto'))
+
+    const updated = await screen.findByRole('button', { name: /当前审批模式：帮我批准/ })
+    expect(updated).toHaveClass('is-icon-only', 'is-mode-auto')
+    expect(updated.textContent?.trim()).toBe('')
+  })
 })

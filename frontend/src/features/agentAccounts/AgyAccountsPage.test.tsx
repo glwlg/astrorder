@@ -4,8 +4,8 @@ import { MantineProvider } from '@mantine/core'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, expect, it, vi } from 'vitest'
-import { AgyAccountsPage } from './AgyAccountsPage'
-import { agyAccountsApi } from './agyAccountsApi'
+import { AgyAccountsPage, CodexAccountsPage, GrokAccountsPage } from './AgyAccountsPage'
+import { agyAccountsApi, codexAccountsApi, grokAccountsApi } from './agyAccountsApi'
 import { SessionAccountsHoverCard } from './SessionAccountsHoverCard'
 import type { Agent, Session } from '../../domain/types'
 
@@ -88,4 +88,60 @@ it('loads quotas and individual subscription tiers on demand and reopens with th
   render(<MantineProvider><MemoryRouter><QueryClientProvider client={new QueryClient()}><AgyAccountsPage /></QueryClientProvider></MemoryRouter></MantineProvider>)
   expect(await screen.findByText('Google AI Pro')).toBeVisible()
   expect(agyAccountsApi.quota).toHaveBeenCalledTimes(4)
+})
+
+it('renders CodexAccountsPage and GrokAccountsPage with platform quotas and delete support', async () => {
+  HTMLDialogElement.prototype.showModal = function showModal() { this.setAttribute('open', '') }
+  HTMLDialogElement.prototype.close = function close() { this.removeAttribute('open') }
+
+  vi.spyOn(codexAccountsApi, 'targets').mockResolvedValue({ items: [{ id: 'local', name: 'Codex · 本机' }] })
+  vi.spyOn(codexAccountsApi, 'targetState').mockResolvedValue({ current_account_id: 'cx-1', quota_supported: true })
+  vi.spyOn(codexAccountsApi, 'accounts').mockResolvedValue({
+    items: [
+      { id: 'cx-1', name: '主力 Codex', email: 'codex@example.com' },
+      { id: 'cx-2', name: '备用 Codex' },
+    ],
+  })
+  vi.spyOn(codexAccountsApi, 'quota').mockResolvedValue({
+    plan: 'ChatGPT Plus',
+    as_of: '2026-11-26T02:00:00Z',
+    groups: [{ name: 'Codex', buckets: [{ id: '5h', name: '5 小时', window: '5h', remaining_fraction: 0.96, reset_at: Date.parse('2026-11-26T07:00:00Z') }] }],
+  })
+  const delCodex = vi.spyOn(codexAccountsApi, 'deleteAccount').mockResolvedValue({ deleted: true, account_id: 'cx-2' })
+
+  render(<MantineProvider env="test"><MemoryRouter><QueryClientProvider client={new QueryClient()}>
+    <CodexAccountsPage />
+  </QueryClientProvider></MemoryRouter></MantineProvider>)
+
+  const row = within(await screen.findByRole('row', { name: /主力 Codex/ }))
+  expect(row.getByText('codex@example.com')).toBeVisible()
+  fireEvent.click(row.getByRole('button', { name: '刷新 主力 Codex 的额度' }))
+  expect(await row.findByText('96%')).toBeVisible()
+  expect(row.getByText('ChatGPT Plus')).toBeVisible()
+
+  const spareRow = within(screen.getByRole('row', { name: /备用 Codex/ }))
+  fireEvent.click(spareRow.getByRole('button', { name: '删除 备用 Codex' }))
+  fireEvent.click(await screen.findByRole('button', { name: '确认删除' }))
+  await waitFor(() => expect(delCodex).toHaveBeenCalledWith('cx-2'))
+
+  cleanup()
+
+  vi.spyOn(grokAccountsApi, 'targets').mockResolvedValue({ items: [{ id: 'local', name: 'Grok · 本机' }] })
+  vi.spyOn(grokAccountsApi, 'targetState').mockResolvedValue({ current_account_id: 'gk-1', quota_supported: true })
+  vi.spyOn(grokAccountsApi, 'accounts').mockResolvedValue({ items: [{ id: 'gk-1', name: 'Grok 主号' }] })
+  vi.spyOn(grokAccountsApi, 'quota').mockResolvedValue({
+    plan: 'SuperGrok',
+    detail: '已认证（xai@example.com）',
+    as_of: '2026-11-26T02:00:00Z',
+    groups: [],
+  })
+
+  render(<MantineProvider env="test"><MemoryRouter><QueryClientProvider client={new QueryClient()}>
+    <GrokAccountsPage />
+  </QueryClientProvider></MemoryRouter></MantineProvider>)
+
+  const grokRow = within(await screen.findByRole('row', { name: /Grok 主号/ }))
+  fireEvent.click(grokRow.getByRole('button', { name: '刷新 Grok 主号 的额度' }))
+  expect(await grokRow.findByText('SuperGrok')).toBeVisible()
+  expect(grokRow.getByText('已认证（xai@example.com）')).toBeVisible()
 })

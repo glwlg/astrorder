@@ -61,6 +61,8 @@ type Projection struct {
 	mu             sync.Mutex
 	running        bool
 	retiredStreams map[string]bool
+	speeds         *tokenSpeedTracker
+	lastErr        error
 
 	registrarMu sync.RWMutex
 	registrar   func(agentID, nativeID string)
@@ -110,6 +112,7 @@ func New(client *daemonclient.Client, st *store.Store, pub Publisher) (*Projecti
 		minBackoff:     100 * time.Millisecond,
 		maxBackoff:     5 * time.Second,
 		retiredStreams: make(map[string]bool),
+		speeds:         newTokenSpeedTracker(),
 	}
 
 	projName := fmt.Sprintf("daemon-projection-%d", projectionCounter.Add(1))
@@ -160,6 +163,7 @@ func (p *Projection) RunReady(ctx context.Context, ready chan<- struct{}) error 
 
 	var readyOnce sync.Once
 	signalReady := func() {
+		p.setLastError(nil)
 		if ready != nil {
 			readyOnce.Do(func() {
 				select {
@@ -186,6 +190,7 @@ func (p *Projection) RunReady(ctx context.Context, ready chan<- struct{}) error 
 				return gap.err
 			}
 			liveGapAttempts[gap.streamID] = gap.expected
+			p.setLastError(err)
 			slog.WarnContext(ctx, "live event gap; requesting durable replay", "stream_id", gap.streamID, "expected_seq", gap.expected)
 			continue
 		}
@@ -205,13 +210,19 @@ func (p *Projection) RunReady(ctx context.Context, ready chan<- struct{}) error 
 		} else if errors.Is(err, context.Canceled) || status.Code(err) == codes.Canceled {
 			return nil
 		} else if isFatalProjectionError(err) {
+			p.setLastError(err)
 			// Actionable/fatal errors that must not be blindly retried
 			return err
+		} else {
+			p.setLastError(err)
 		}
 
 		// Controlled reconnect with bounded jitter
 		jitter := time.Duration(rand.Int63n(int64(backoff) / 2))
 		sleepDuration := backoff + jitter
+		if err != nil {
+			slog.WarnContext(ctx, "daemon projection subscription error; retrying", "error", err, "backoff", sleepDuration.String())
+		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -223,6 +234,23 @@ func (p *Projection) RunReady(ctx context.Context, ready chan<- struct{}) error 
 			backoff = p.maxBackoff
 		}
 	}
+}
+
+// LastError returns the most recent non-canceled projection subscription error
+// observed before live-ready (or during reconnects).
+func (p *Projection) LastError() error {
+	if p == nil {
+		return nil
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.lastErr
+}
+
+func (p *Projection) setLastError(err error) {
+	p.mu.Lock()
+	p.lastErr = err
+	p.mu.Unlock()
 }
 
 // IsFatalProjectionError tests if an error represents an unrecoverable projection issue.
@@ -521,6 +549,9 @@ func (p *Projection) projectEnvelopeTx(ctx context.Context, tx *sql.Tx, env *ses
 		activityTime = time.UnixMicro(env.GetTimestampUnixMicros()).UTC()
 	}
 	ctx = context.WithValue(ctx, activityTimeKey{}, activityTime)
+	if p.speeds != nil {
+		ctx = context.WithValue(ctx, speedTrackerKey{}, p.speeds)
+	}
 	eventType := env.GetEventType()
 	if eventType == "" {
 		return nil, fmt.Errorf("%w: empty event_type", ErrCorruptedFrame)
@@ -533,6 +564,21 @@ func (p *Projection) projectEnvelopeTx(ctx context.Context, tx *sql.Tx, env *ses
 	if err != nil {
 		return nil, fmt.Errorf("parse native payload: %w", err)
 	}
+
+	events, err := p.dispatchEnvelopeTx(ctx, tx, eventType, streamID, agentID, payloadMap, env)
+	if err == nil && p.speeds != nil && len(events) > 0 {
+		p.speeds.ObserveEvents(events, activityTime)
+	}
+	return events, err
+}
+
+func (p *Projection) dispatchEnvelopeTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	eventType, streamID, agentID string,
+	payloadMap map[string]any,
+	env *sessiondv1.EventEnvelope,
+) ([]store.Event, error) {
 
 	switch eventType {
 	case "connector.hello":
@@ -1310,11 +1356,24 @@ WHERE agent_id=? AND session_id=? AND id=?`, state, data["error"], evAgentID, si
 				return nil, fmt.Errorf("update command tx: %w", err)
 			}
 			cmdRows, err := queryRows(ctx, tx, "SELECT * FROM commands WHERE agent_id=? AND session_id=? AND id=?", evAgentID, sid, cmdID)
-			if err != nil || len(cmdRows) == 0 {
+			if err != nil {
 				return nil, fmt.Errorf("query updated command: %w", err)
+			}
+			if len(cmdRows) == 0 {
+				// Delegated or daemon-originated sends (e.g. sessions spawn,
+				// bots invoke, handoff) dispatch directly through Session Daemon
+				// without inserting a row into App's commands table. Advance the
+				// checkpoint cleanly instead of poison-pilling projection.
+				return nil, nil
 			}
 			if data["awaiting_input"] == true {
 				cmdRows[0]["awaiting_input"] = true
+			}
+			if data["superseded"] == true {
+				cmdRows[0]["superseded"] = true
+			}
+			if data["steered"] == true {
+				cmdRows[0]["steered"] = true
 			}
 			events = append(events, store.Event{
 				ID:        fmt.Sprintf("cmd-%s-%d", cmdID, time.Now().UnixNano()),
@@ -1671,7 +1730,9 @@ func projectCodexNotificationTx(ctx context.Context, tx *sql.Tx, streamID, agent
 			"agent_id": explicitAgent, "session_id": explicitSession, "model": "native",
 			"input_tokens": total["inputTokens"], "output_tokens": total["outputTokens"],
 			"cached_tokens": total["cachedInputTokens"], "reasoning_tokens": total["reasoningOutputTokens"],
-			"total_tokens": total["totalTokens"], "last_input_tokens": last["inputTokens"], "context_window": usage["modelContextWindow"],
+			"total_tokens": total["totalTokens"], "last_input_tokens": last["inputTokens"],
+			"last_output_tokens": last["outputTokens"], "last_reasoning_tokens": last["reasoningOutputTokens"],
+			"context_window": usage["modelContextWindow"],
 		})
 	case "turn/started":
 		if explicitAgent != "" && explicitSession != "" {
@@ -2446,8 +2507,30 @@ func projectTokenMetricsTx(ctx context.Context, tx *sql.Tx, streamID, agentID st
 	totalTokens := getInt("total_tokens")
 	contextWindow := getInt("context_window")
 	lastInputTokens := getInt("last_input_tokens")
+	lastOutputTokens := getInt("last_output_tokens")
+	lastReasoningTokens := getInt("last_reasoning_tokens")
 
 	if model != "" && aid != "" && sid != "" {
+		var prevOut, prevReason int64
+		_ = tx.QueryRowContext(ctx,
+			`SELECT output_tokens, reasoning_tokens
+			 FROM token_metrics WHERE agent_id=? AND session_id=?
+			 ORDER BY updated_at DESC LIMIT 1`,
+			aid, sid,
+		).Scan(&prevOut, &prevReason)
+
+		speedPrefKey := "session_speed:" + aid + "\x00" + sid
+		var prevSpeed float64
+		var rawSpeedPref string
+		if err := tx.QueryRowContext(ctx, `SELECT value FROM workspace_preferences WHERE "key"=?`, speedPrefKey).Scan(&rawSpeedPref); err == nil && rawSpeedPref != "" {
+			var parsed struct {
+				Speed float64 `json:"speed"`
+			}
+			if json.Unmarshal([]byte(rawSpeedPref), &parsed) == nil && parsed.Speed > 0 {
+				prevSpeed = parsed.Speed
+			}
+		}
+
 		if payload["provider"] == "antigravity" {
 			if !hasCum {
 				if err := tx.QueryRowContext(ctx,
@@ -2473,6 +2556,24 @@ func projectTokenMetricsTx(ctx context.Context, tx *sql.Tx, streamID, agentID st
 					payload["last_input_tokens"] = lastInputTokens
 				}
 			}
+		}
+
+		var computedSpeed float64
+		if tracker := speedTrackerFromContext(ctx); tracker != nil {
+			providerStr, _ := payload["provider"].(string)
+			curGen := generatedTokens(outputTokens, reasoningTokens)
+			prevGen := generatedTokens(prevOut, prevReason)
+			explicitDelta := generatedTokens(lastOutputTokens, lastReasoningTokens)
+			if tps, ok := tracker.ObserveUsage(aid, sid, curGen, explicitDelta, prevGen, hasCum, providerStr, activityTimeFromContext(ctx)); ok {
+				computedSpeed = tps
+				payload["speed"] = tps
+				if encoded, mErr := json.Marshal(map[string]any{"speed": tps}); mErr == nil {
+					_, _ = tx.ExecContext(ctx, `INSERT INTO workspace_preferences("key",value) VALUES(?,?) ON CONFLICT("key") DO UPDATE SET value=excluded.value`, speedPrefKey, string(encoded))
+				}
+			}
+		}
+		if computedSpeed == 0 && prevSpeed > 0 {
+			payload["speed"] = prevSpeed
 		}
 
 		nowStr := time.Now().UTC().Format("2006-01-02 15:04:05.000000")

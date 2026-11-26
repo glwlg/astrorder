@@ -1,4 +1,4 @@
-import { ChartLineUpIcon, ChatCircleDotsIcon, GearSixIcon, HardDrivesIcon, IdentificationCardIcon, MicrophoneIcon, NotebookIcon, SquaresFourIcon, TrayIcon, UsersThreeIcon } from './workbenchIcons'
+import { ChartLineUpIcon, ChatCircleDotsIcon, GearSixIcon, HardDrivesIcon, IdentificationCardIcon, MicrophoneIcon, NotebookIcon, RobotIcon, SquaresFourIcon, TrayIcon, UsersThreeIcon } from './workbenchIcons'
 import { IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconPin, IconPlus } from '@tabler/icons-react'
 import { ActionIcon, HoverCard, Modal, NavLink, Stack, Text, Tooltip } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
@@ -24,7 +24,8 @@ import { WorkspaceThemeToggle } from './WorkspaceThemeToggle'
 import { connectionName } from './AgentSessionFilter'
 import { scopeKey } from '../domain/semantics'
 import { SessionAccountsHoverCard } from '../features/agentAccounts/SessionAccountsHoverCard'
-import { agySessionEnvironment } from '../features/agentAccounts/AgyQuotaRefreshProvider'
+import { accountPlatformMeta } from '../features/agentAccounts/agyAccountsApi'
+import { sessionAccountTarget } from '../features/agentAccounts/AgyQuotaRefreshProvider'
 import {
   SIDEBAR_INTEGRATIONS_PLUGIN_ID,
   WORKSPACE_AGENT_ACCOUNTS_PLUGIN_ID,
@@ -55,6 +56,7 @@ const PRIMARY_NAV_DRAG_MIME = 'application/x-astrorder-primary-nav'
 
 const navItems = [
   { to: '/chat', label: '会话', icon: ChatCircleDotsIcon, id: 'chat' },
+  { to: '/bots', label: 'Bot', icon: RobotIcon, id: 'bots' },
   { to: '/inbox', label: '待办', icon: TrayIcon, id: 'inbox' },
   { to: '/monitor', label: '矩阵', icon: SquaresFourIcon, id: 'monitor' },
   { to: '/groups', label: '群聊', icon: UsersThreeIcon, id: 'groups' },
@@ -344,6 +346,7 @@ export function Sidebar({
     retry: false,
   })
 
+  const isBots = location.pathname.startsWith('/bots')
   const isInbox = location.pathname.startsWith('/inbox')
   const isDigest = location.pathname.startsWith('/digest')
   const isMeetings = location.pathname.startsWith('/meetings')
@@ -353,7 +356,7 @@ export function Sidebar({
   const isBackups = location.pathname.startsWith('/backups')
   const isAgentAccounts = location.pathname.startsWith('/agent-accounts')
   const isIntegrations = location.pathname.startsWith('/integrations/')
-  const isChat = !isInbox && !isDigest && !isMeetings && !isGroups && !isMonitorRoute && !isAnalytics && !isBackups && !isAgentAccounts && !isIntegrations
+  const isChat = !isBots && !isInbox && !isDigest && !isMeetings && !isGroups && !isMonitorRoute && !isAnalytics && !isBackups && !isAgentAccounts && !isIntegrations
   const isInChatSession = isChat && (
     (location.pathname.startsWith('/chat/') && !location.pathname.startsWith('/chat/group-')) ||
     Boolean(activeSessionKey)
@@ -366,10 +369,10 @@ export function Sidebar({
   const connection = useAstrorderStore(state => state.connection)
   const activeSession = sessions.find(session => scopeKey(session.agent_id, session.id) === activeSessionKey)
   const activeAgent = activeSession ? agents[activeSession.agent_id] : undefined
-  const accountEnvironment = agySessionEnvironment(activeSession, activeAgent)
+  const accountTarget = sessionAccountTarget(activeSession, activeAgent)
   const connectionLabel = connection === 'connected' ? '已连接' : connection === 'connecting' ? '连接中' : connection === 'error' ? '连接异常' : '离线'
 
-  const hasSecondaryPanel = !(isInbox || isDigest || isMeetings || isAgentAccounts || isBackups || isAnalytics || isIntegrations)
+  const hasSecondaryPanel = !(isBots || isInbox || isDigest || isMeetings || isAgentAccounts || isBackups || isAnalytics || isIntegrations)
   const isCollapsedDesktop = Boolean(!onNavigate && hasSecondaryPanel && panelCollapsed)
   const isPeekingDesktop = Boolean(isCollapsedDesktop && isPeeking)
 
@@ -400,6 +403,7 @@ export function Sidebar({
             {visibleNavItems.map(({ to, label, icon: Icon, id }) => {
               const isThisMonitor = id === 'monitor'
               const isActive =
+                (id === 'bots' && isBots) ||
                 (id === 'inbox' && isInbox) ||
                 (id === 'digest' && isDigest) ||
                 (id === 'meetings' && isMeetings) ||
@@ -418,7 +422,7 @@ export function Sidebar({
               const link = (
                 <NavLink
                     component={RouterNavLink}
-                    to={id === 'agentAccounts' && accountEnvironment ? `${to}?${new URLSearchParams({ environment: accountEnvironment })}` :
+                    to={id === 'agentAccounts' && accountTarget ? `${accountPlatformMeta(accountTarget.platform).routePath}?${new URLSearchParams({ environment: accountTarget.environment })}` :
                       id === 'chat' ? (isInChatSession ? '/chat' : chatReturnPath) : to}
                     state={id === 'chat' && isInChatSession ? { welcome: true } : undefined}
                     label={label}
