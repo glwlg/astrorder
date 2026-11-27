@@ -9,8 +9,10 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter } from 'react-router-dom'
 import App from './app/App.tsx'
 import { bootstrapBuiltinExtensions } from './features/extensions/bootstrapBuiltins'
+import { startEsmPluginLoader } from './features/extensions/esmPluginLoader'
 import { extensionRegistry } from './features/extensions/extensionRegistry'
 import { useExtensionStore } from './features/extensions/extensionStore'
+import { installPluginRuntimeBridge } from './features/extensions/runtimeBridge'
 import {
   EXTERNAL_PLUGIN_PANEL_VIEWER_ID,
   PENDING_PLUGIN_CONFIG_SESSION_KEY,
@@ -28,9 +30,11 @@ import { theme } from './theme'
 import { startClientPerf } from './perf/clientPerf'
 import { registerSW } from 'virtual:pwa-register'
 
+installPluginRuntimeBridge()
 applyThemePalette(readStoredThemePalette(), { persistLocal: false })
 installGlobalNativeHoldBlocker()
 bootstrapBuiltinExtensions()
+startEsmPluginLoader()
 
 if (typeof window !== 'undefined') {
   window.addEventListener('storage', (event) => {

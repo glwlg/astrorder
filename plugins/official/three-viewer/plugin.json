@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "id": "three-viewer",
+  "name": "3D 模型/CAD 预览",
+  "version": "1.0.0",
+  "category": "media",
+  "description": "基于 Three.js WebGL 视口的官方热插拔 3D/CAD 模型预览器，支持 STL、OBJ、GLTF、GLB 实时解析、360° 轨道旋转缩放与线框检视",
+  "author": "Astrorder",
+  "icon": "box",
+  "default_enabled": false,
+  "permissions": [],
+  "backend": {
+    "type": "none"
+  },
+  "settings": {
+    "mode": "none"
+  },
+  "frontend": {
+    "mode": "esm",
+    "entry": "ui/entry.js",
+    "styles": [
+      "ui/entry.css"
+    ],
+    "sdk_version": "^1.0"
+  },
+  "contributes": {
+    "viewers": [
+      {
+        "id": "three-viewer",
+        "title": "3D 模型/CAD 预览",
+        "icon": "box",
+        "badge_label": "[3D]",
+        "tab_color": "#8b5cf6",
+        "category": "media",
+        "extensions": [
+          ".stl",
+          ".obj",
+          ".gltf",
+          ".glb"
+        ],
+        "mime_types": [
+          "model/stl",
+          "model/obj",
+          "model/gltf+json",
+          "model/gltf-binary",
+          "application/sla"
+        ],
+        "hide_in_office_mode": false
+      }
+    ]
+  }
+}

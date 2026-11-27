@@ -1,0 +1,25 @@
+{
+  "name": "@astrorder-plugin/three-viewer",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Official hot-pluggable 3D/CAD viewer ESM plugin powered by Three.js",
+  "type": "module",
+  "scripts": {
+    "build": "node ../../../scripts/build-official-plugins.mjs --plugin three-viewer"
+  },
+  "dependencies": {
+    "three": "0.186.1"
+  },
+  "peerDependencies": {
+    "@mantine/core": "^9.0.0",
+    "@mantine/notifications": "^9.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@astrorder/plugin-sdk": "file:../../../packages/astrorder-plugin-sdk",
+    "@types/three": "0.186.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4"
+  }
+}

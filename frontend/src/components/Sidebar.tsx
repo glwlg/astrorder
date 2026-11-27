@@ -1,9 +1,9 @@
-import { ChartLineUpIcon, ChatCircleDotsIcon, CompassIcon, GearSixIcon, HardDrivesIcon, IdentificationCardIcon, MicrophoneIcon, NotebookIcon, RobotIcon, SquaresFourIcon, TrayIcon, UsersThreeIcon } from './workbenchIcons'
-import { IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconPin, IconPlus } from '@tabler/icons-react'
+import { ChatCircleDotsIcon, GearSixIcon, PuzzlePieceIcon, RobotIcon, TrayIcon } from './workbenchIcons'
+import { IconChevronDown, IconChevronUp, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconPin, IconPlus } from '@tabler/icons-react'
 import { ActionIcon, HoverCard, Modal, NavLink, Stack, Text, Tooltip } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useQuery } from '@tanstack/react-query'
-import { useCallback, useEffect, useId, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useState } from 'react'
 import { NavLink as RouterNavLink, useLocation, useNavigate } from 'react-router-dom'
 import { api, type IntegrationItem, type OcxUsageResponse } from '../api/client'
 import type { Agent, Project, Session } from '../domain/types'
@@ -12,6 +12,7 @@ import './arcSidebar.css'
 import '../features/integrations/integrations.css'
 import { SettingsDrawerScope } from './SettingsDrawer'
 import { SettingsWorkbench, normalizeSettingsTab } from '../features/settings/SettingsWorkbench'
+import { OPEN_ONBOARDING_WIZARD_EVENT } from '../features/office/OnboardingWizard'
 import { useShortcutHandlers } from '../features/shortcuts/shortcuts'
 import { formatTokens, getModelColor } from '../features/analytics/usageFormat'
 import { SessionRail } from './SessionRail'
@@ -19,25 +20,21 @@ import { BotGroupRail } from './BotGroupRail'
 import { useAstrorderStore } from '../state/store'
 import { groupHasActiveTask } from '../domain/groupActivity'
 import { GroupTaskIndicator } from './GroupTaskIndicator'
-import { NotificationPermissionControl } from './NotificationPermissionControl'
 import { WorkspaceThemeToggle } from './WorkspaceThemeToggle'
 import { connectionName } from './AgentSessionFilter'
 import { scopeKey } from '../domain/semantics'
 import { SessionAccountsHoverCard } from '../features/agentAccounts/SessionAccountsHoverCard'
 import { accountPlatformMeta } from '../features/agentAccounts/agyAccountsApi'
 import { sessionAccountTarget } from '../features/agentAccounts/AgyQuotaRefreshProvider'
-import {
-  SIDEBAR_INTEGRATIONS_PLUGIN_ID,
-  WORKSPACE_AGENT_ACCOUNTS_PLUGIN_ID,
-  WORKSPACE_ANALYTICS_GATEWAY_PLUGIN_ID,
-  WORKSPACE_BACKUPS_PLUGIN_ID,
-  WORKSPACE_DIGEST_PLUGIN_ID,
-  WORKSPACE_GROUPS_PLUGIN_ID,
-  WORKSPACE_LEARNING_RADAR_PLUGIN_ID,
-  WORKSPACE_MEETINGS_PLUGIN_ID,
-  WORKSPACE_MONITOR_PLUGIN_ID,
-} from '../features/plugins/builtinPlugins'
+import { SIDEBAR_INTEGRATIONS_PLUGIN_ID } from '../features/plugins/builtinPlugins'
 import { usePluginSettingsStore } from '../features/plugins/pluginSettingsStore'
+import { registerBuiltinWorkspacePages } from '../features/extensions/builtinWorkspacePages'
+import { extensionRegistry, useExtensionRegistryVersion } from '../features/extensions/extensionRegistry'
+import {
+  resolveExtensionPagePath,
+  type ExtensionPageIcon,
+  type ExtensionPageRegistration,
+} from '../features/extensions/types'
 import { useIntegrationsStore } from '../features/integrations/integrationStore'
 import { IntegrationIcon } from '../features/integrations/integrationIcons'
 import { IntegrationFormModal } from '../features/integrations/IntegrationFormModal'
@@ -51,23 +48,75 @@ import {
 } from '../features/office/appProfile'
 import { IconBriefcase, IconCode } from '@tabler/icons-react'
 
+registerBuiltinWorkspacePages()
+
 const SIDEBAR_PRIMARY_NAV_CONFIG_KEY = 'sidebar-primary-nav'
 const SIDEBAR_PRIMARY_NAV_STORAGE_KEY = 'astrorder:sidebar-primary-nav-order'
+const SIDEBAR_PRIMARY_NAV_FOLD_STORAGE_KEY = 'astrorder:sidebar-primary-nav-fold'
 const PRIMARY_NAV_DRAG_MIME = 'application/x-astrorder-primary-nav'
+const COMPACT_VIEWPORT_HEIGHT_PX = 880
+const COLLAPSED_PRIMARY_NAV_LIMIT = 4
 
-const navItems = [
-  { to: '/chat', label: '会话', icon: ChatCircleDotsIcon, id: 'chat' },
-  { to: '/bots', label: 'Bot', icon: RobotIcon, id: 'bots' },
-  { to: '/inbox', label: '待办', icon: TrayIcon, id: 'inbox' },
-  { to: '/monitor', label: '矩阵', icon: SquaresFourIcon, id: 'monitor' },
-  { to: '/groups', label: '群聊', icon: UsersThreeIcon, id: 'groups' },
-  { to: '/analytics', label: '统计', icon: ChartLineUpIcon, id: 'analytics' },
-  { to: '/backups', label: '备份', icon: HardDrivesIcon, id: 'backups' },
-  { to: '/agent-accounts', label: '账号', icon: IdentificationCardIcon, id: 'agentAccounts' },
-  { to: '/digest', label: '复盘', icon: NotebookIcon, id: 'digest' },
-  { to: '/meetings', label: '会议', icon: MicrophoneIcon, id: 'meetings' },
-  { to: '/learning', label: '成长', icon: CompassIcon, id: 'learning' },
+function readStoredNavFold(): 'collapsed' | 'expanded' | null {
+  if (typeof localStorage === 'undefined') return null
+  try {
+    const val = localStorage.getItem(SIDEBAR_PRIMARY_NAV_FOLD_STORAGE_KEY)
+    return val === 'collapsed' || val === 'expanded' ? val : null
+  } catch {
+    return null
+  }
+}
+
+function writeStoredNavFold(val: 'collapsed' | 'expanded') {
+  if (typeof localStorage === 'undefined') return
+  try {
+    localStorage.setItem(SIDEBAR_PRIMARY_NAV_FOLD_STORAGE_KEY, val)
+  } catch {}
+}
+
+function isShortViewportHeight(): boolean {
+  if (typeof window === 'undefined') return false
+  return window.innerHeight > 0 && window.innerHeight <= COMPACT_VIEWPORT_HEIGHT_PX
+}
+
+interface SidebarNavItem {
+  id: string
+  to: string
+  label: string
+  icon: ExtensionPageIcon
+  pluginId?: string
+  hideInOfficeMode?: boolean
+  hasSecondaryPanel?: boolean
+  source?: 'core' | 'builtin' | 'esm'
+}
+
+const CORE_NAV_ITEMS: SidebarNavItem[] = [
+  { id: 'chat', to: '/chat', label: '会话', icon: ChatCircleDotsIcon, hasSecondaryPanel: true, source: 'core' },
+  { id: 'bots', to: '/bots', label: 'Bot', icon: RobotIcon, hideInOfficeMode: true, hasSecondaryPanel: false, source: 'core' },
+  { id: 'inbox', to: '/inbox', label: '待办', icon: TrayIcon, hasSecondaryPanel: false, source: 'core' },
 ]
+
+function extensionPageNavId(page: ExtensionPageRegistration): string {
+  return page.source === 'builtin' ? page.id : `ext:${page.pluginId}:${page.id}`
+}
+
+function buildSidebarNavItems(pages: ExtensionPageRegistration[]): SidebarNavItem[] {
+  const items: SidebarNavItem[] = [...CORE_NAV_ITEMS]
+  for (const page of pages) {
+    if (page.showInSidebar === false) continue
+    items.push({
+      id: extensionPageNavId(page),
+      to: resolveExtensionPagePath(page),
+      label: page.navLabel || page.title,
+      icon: page.icon || PuzzlePieceIcon,
+      pluginId: page.pluginId,
+      hideInOfficeMode: page.hideInOfficeMode,
+      hasSecondaryPanel: page.hasSecondaryPanel,
+      source: page.source || 'esm',
+    })
+  }
+  return items
+}
 
 function readStoredPrimaryNavOrder(): string[] {
   if (typeof localStorage === 'undefined') return []
@@ -88,8 +137,11 @@ function writeStoredPrimaryNavOrder(order: string[]) {
   } catch {}
 }
 
-export function normalizePrimaryNavOrder(savedOrder: string[] | undefined): string[] {
-  const defaultIds = navItems.map((item) => item.id)
+export function normalizePrimaryNavOrder(savedOrder: string[] | undefined, availableIds?: string[]): string[] {
+  const defaultIds =
+    availableIds && availableIds.length > 0
+      ? availableIds
+      : buildSidebarNavItems(extensionRegistry.getAllPages()).map((item) => item.id)
   if (!Array.isArray(savedOrder) || savedOrder.length === 0) return defaultIds
   const valid = new Set(defaultIds)
   const seen = new Set<string>()
@@ -224,40 +276,59 @@ export function Sidebar({
   const [draggingNavId, setDraggingNavId] = useState<string | null>(null)
   const [dragOverNav, setDragOverNav] = useState<{ id: string; pos: 'before' | 'after' } | null>(null)
   const [localNavOrder, setLocalNavOrder] = useState<string[]>(() => readStoredPrimaryNavOrder())
+  const [manualNavFold, setManualNavFold] = useState<'collapsed' | 'expanded' | null>(() => readStoredNavFold())
+  const [shortViewport, setShortViewport] = useState<boolean>(() => isShortViewportHeight())
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const onResize = () => setShortViewport(isShortViewportHeight())
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+  const registryVersion = useExtensionRegistryVersion()
+  const enabledPlugins = usePluginSettingsStore((s) => s.enabledPlugins)
   const configuredNavOrder = usePluginSettingsStore((s) => s.pluginConfigs[SIDEBAR_PRIMARY_NAV_CONFIG_KEY]?.order)
   const setPluginConfig = usePluginSettingsStore((s) => s.setPluginConfig)
   const integrationsPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(SIDEBAR_INTEGRATIONS_PLUGIN_ID))
-  const groupsPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_GROUPS_PLUGIN_ID))
-  const monitorPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_MONITOR_PLUGIN_ID))
-  const analyticsGatewayEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_ANALYTICS_GATEWAY_PLUGIN_ID))
-  const backupsPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_BACKUPS_PLUGIN_ID))
-  const agentAccountsEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_AGENT_ACCOUNTS_PLUGIN_ID))
-  const digestPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_DIGEST_PLUGIN_ID))
-  const meetingsPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_MEETINGS_PLUGIN_ID))
-  const learningPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_LEARNING_RADAR_PLUGIN_ID))
   const appProfile = useAppProfile()
   const isOfficeProfile = appProfile === 'office'
+
+  const allRegisteredPages = useMemo(() => {
+    void registryVersion
+    return extensionRegistry.getAllPages()
+  }, [registryVersion])
+
+  const activeExtensionPages = useMemo(() => {
+    void registryVersion
+    return extensionRegistry.getActivePages({
+      profile: appProfile,
+      enabledPlugins,
+    })
+  }, [appProfile, enabledPlugins, registryVersion])
+
+  const analyticsGatewayEnabled = activeExtensionPages.some((page) => page.id === 'analytics')
+  const activeExtensionNavIds = useMemo(
+    () => new Set(activeExtensionPages.filter((page) => page.showInSidebar !== false).map(extensionPageNavId)),
+    [activeExtensionPages],
+  )
+  const allNavItems = useMemo(() => buildSidebarNavItems(allRegisteredPages), [allRegisteredPages])
 
   const orderedNavIds = normalizePrimaryNavOrder(
     Array.isArray(configuredNavOrder) && configuredNavOrder.length > 0
       ? (configuredNavOrder.filter((x): x is string => typeof x === 'string'))
       : localNavOrder,
+    allNavItems.map((item) => item.id),
   )
-  const navById = new Map(navItems.map((item) => [item.id, item]))
+  const navById = new Map(allNavItems.map((item) => [item.id, item]))
   const visibleNavItems = orderedNavIds
     .map((id) => navById.get(id))
-    .filter((item): item is (typeof navItems)[number] => Boolean(item))
+    .filter((item): item is SidebarNavItem => Boolean(item))
     .filter((item) => {
-      if (isOfficeProfile && DEV_ONLY_PRIMARY_NAV_IDS.has(item.id)) return false
-      if (item.id === 'digest') return digestPluginEnabled
-      if (item.id === 'meetings') return meetingsPluginEnabled
-      if (item.id === 'learning') return learningPluginEnabled
-      if (item.id === 'groups') return groupsPluginEnabled
-      if (item.id === 'monitor') return monitorPluginEnabled
-      if (item.id === 'analytics') return analyticsGatewayEnabled
-      if (item.id === 'backups') return backupsPluginEnabled
-      if (item.id === 'agentAccounts') return agentAccountsEnabled
-      return true
+      if (item.source === 'core') {
+        if (isOfficeProfile && (item.hideInOfficeMode || DEV_ONLY_PRIMARY_NAV_IDS.has(item.id))) return false
+        return true
+      }
+      return activeExtensionNavIds.has(item.id)
     })
 
   const handlePrimaryNavDrop = (sourceId: string, targetId: string, pos: 'before' | 'after') => {
@@ -330,10 +401,12 @@ export function Sidebar({
     }
     window.addEventListener('astrorder:open-settings', onOpenSettings)
     window.addEventListener('astrorder:close-settings', onCloseSettings)
+    window.addEventListener(OPEN_ONBOARDING_WIZARD_EVENT, onCloseSettings)
     window.addEventListener('astrorder:navigate', onNavigateRoute)
     return () => {
       window.removeEventListener('astrorder:open-settings', onOpenSettings)
       window.removeEventListener('astrorder:close-settings', onCloseSettings)
+      window.removeEventListener(OPEN_ONBOARDING_WIZARD_EVENT, onCloseSettings)
       window.removeEventListener('astrorder:navigate', onNavigateRoute)
     }
   }, [navigate, onNavigate, openSettings])
@@ -352,16 +425,19 @@ export function Sidebar({
 
   const isBots = location.pathname.startsWith('/bots')
   const isInbox = location.pathname.startsWith('/inbox')
-  const isDigest = location.pathname.startsWith('/digest')
-  const isMeetings = location.pathname.startsWith('/meetings')
-  const isLearning = location.pathname.startsWith('/learning')
   const isGroups = location.pathname.startsWith('/groups') || location.pathname.startsWith('/chat/group-')
   const isMonitorRoute = location.pathname.startsWith('/monitor')
-  const isAnalytics = location.pathname.startsWith('/analytics')
-  const isBackups = location.pathname.startsWith('/backups')
-  const isAgentAccounts = location.pathname.startsWith('/agent-accounts')
   const isIntegrations = location.pathname.startsWith('/integrations/')
-  const isChat = !isBots && !isInbox && !isDigest && !isMeetings && !isLearning && !isGroups && !isMonitorRoute && !isAnalytics && !isBackups && !isAgentAccounts && !isIntegrations
+  const isPluginsRoute = location.pathname.startsWith('/plugins')
+  const isDynamicExtRoute = location.pathname.startsWith('/ext-page/')
+  const matchesPathPrefix = (target: string) =>
+    location.pathname === target || location.pathname.startsWith(`${target}/`)
+  const activeExtensionPage = allRegisteredPages.find((page) => {
+    if (page.id === 'groups' && location.pathname.startsWith('/chat/group-')) return true
+    const pagePath = resolveExtensionPagePath(page)
+    return matchesPathPrefix(pagePath)
+  })
+  const isChat = !isBots && !isInbox && !isIntegrations && !isPluginsRoute && !isDynamicExtRoute && !activeExtensionPage
   const isInChatSession = isChat && (
     (location.pathname.startsWith('/chat/') && !location.pathname.startsWith('/chat/group-')) ||
     Boolean(activeSessionKey)
@@ -377,7 +453,7 @@ export function Sidebar({
   const accountTarget = sessionAccountTarget(activeSession, activeAgent)
   const connectionLabel = connection === 'connected' ? '已连接' : connection === 'connecting' ? '连接中' : connection === 'error' ? '连接异常' : '离线'
 
-  const hasSecondaryPanel = !(isBots || isInbox || isDigest || isMeetings || isLearning || isAgentAccounts || isBackups || isAnalytics || isIntegrations)
+  const hasSecondaryPanel = isChat || Boolean(activeExtensionPage?.hasSecondaryPanel)
   const isCollapsedDesktop = Boolean(!onNavigate && hasSecondaryPanel && panelCollapsed)
   const isPeekingDesktop = Boolean(isCollapsedDesktop && isPeeking)
 
@@ -397,6 +473,27 @@ export function Sidebar({
     }
   }
 
+  const isNavItemActive = (item: SidebarNavItem) => {
+    if (item.id === 'chat') return isChat
+    if (item.id === 'bots') return isBots
+    if (item.id === 'inbox') return isInbox
+    if (item.id === 'groups') return isGroups
+    return matchesPathPrefix(item.to)
+  }
+
+  const canFoldPrimaryNav = visibleNavItems.length > COLLAPSED_PRIMARY_NAV_LIMIT
+  const isPrimaryNavFolded = canFoldPrimaryNav && (manualNavFold !== null ? manualNavFold === 'collapsed' : shortViewport)
+  const displayedNavItems = isPrimaryNavFolded
+    ? visibleNavItems.filter((item, index) => index < COLLAPSED_PRIMARY_NAV_LIMIT || isNavItemActive(item))
+    : visibleNavItems
+  const hiddenPrimaryNavCount = Math.max(0, visibleNavItems.length - displayedNavItems.length)
+
+  const togglePrimaryNavFold = () => {
+    const next: 'collapsed' | 'expanded' = isPrimaryNavFolded ? 'expanded' : 'collapsed'
+    setManualNavFold(next)
+    writeStoredNavFold(next)
+  }
+
   return (
     <>
       <div
@@ -404,27 +501,22 @@ export function Sidebar({
       >
         <div id={skyId} className="workspace-sidebar-sky" aria-hidden="true" />
         <nav className="workspace-navigation" aria-label="主导航">
+          <div className="workspace-navigation-scroll">
           <div className="sidebar-primary-nav">
-            {visibleNavItems.map(({ to, label, icon: Icon, id }) => {
+            {displayedNavItems.map((navItem) => {
+              const { to, label, icon: Icon, id, source } = navItem
               const isThisMonitor = id === 'monitor'
-              const isActive =
-                (id === 'bots' && isBots) ||
-                (id === 'inbox' && isInbox) ||
-                (id === 'digest' && isDigest) ||
-                (id === 'meetings' && isMeetings) ||
-                (id === 'learning' && isLearning) ||
-                (id === 'groups' && isGroups) ||
-                (id === 'monitor' && isMonitorRoute) ||
-                (id === 'analytics' && isAnalytics) ||
-                (id === 'backups' && isBackups) ||
-                (id === 'agentAccounts' && isAgentAccounts) ||
-                (id === 'chat' && isChat)
+              const isActive = isNavItemActive(navItem)
               const canHoverPeekTab =
                 isCollapsedDesktop &&
                 ((id === 'chat' && (isChat || isMonitorRoute)) ||
                   (id === 'groups' && isGroups))
               const isNavDragging = draggingNavId === id
               const navDropPos = dragOverNav?.id === id ? dragOverNav.pos : undefined
+              const iconEl =
+                source === 'esm'
+                  ? <Icon size={22} aria-hidden="true" />
+                  : <Icon size={25} weight={isActive ? 'duotone' : 'regular'} aria-hidden="true" />
               const link = (
                 <NavLink
                     component={RouterNavLink}
@@ -432,7 +524,7 @@ export function Sidebar({
                       id === 'chat' ? (isInChatSession ? '/chat' : chatReturnPath) : to}
                     state={id === 'chat' && isInChatSession ? { welcome: true } : undefined}
                     label={label}
-                    leftSection={<Icon size={25} weight={isActive ? 'duotone' : 'regular'} aria-hidden="true" />}
+                    leftSection={iconEl}
                     onClick={onNavigate}
                     onMouseEnter={canHoverPeekTab ? onPeekEnter : undefined}
                     data-peek-trigger={canHoverPeekTab ? 'true' : undefined}
@@ -539,6 +631,29 @@ export function Sidebar({
                 <Tooltip key={to} label={id === 'chat' && isInChatSession ? '回到欢迎页' : label} position="right" withArrow openDelay={200}>{link}</Tooltip>
               )
             })}
+            {canFoldPrimaryNav && (
+              <Tooltip
+                label={isPrimaryNavFolded ? `展开其余 ${hiddenPrimaryNavCount} 项导航` : '收起部分导航项'}
+                position="right"
+                withArrow
+                openDelay={150}
+              >
+                <button
+                  type="button"
+                  className="sidebar-nav-fold-btn"
+                  aria-expanded={!isPrimaryNavFolded}
+                  aria-label={isPrimaryNavFolded ? `展开更多导航（${hiddenPrimaryNavCount}项）` : '收起导航按钮'}
+                  onClick={togglePrimaryNavFold}
+                >
+                  {isPrimaryNavFolded ? (
+                    <IconChevronDown size={15} stroke={2} aria-hidden="true" />
+                  ) : (
+                    <IconChevronUp size={15} stroke={2} aria-hidden="true" />
+                  )}
+                  <span>{isPrimaryNavFolded ? `更多` : '收起'}</span>
+                </button>
+              </Tooltip>
+            )}
           </div>
           {integrationsPluginEnabled && (
             <>
@@ -649,6 +764,7 @@ export function Sidebar({
               </div>
             </>
           )}
+          </div>
           <div className="workspace-navigation-tools">
             {!onNavigate && hasSecondaryPanel && onTogglePanelCollapse && (
               <div className="workspace-tool-item sidebar-collapse-tool">
@@ -673,7 +789,6 @@ export function Sidebar({
                 <span aria-hidden="true">{panelCollapsed ? '展开' : '收起'}</span>
               </div>
             )}
-            <div className="workspace-tool-item"><NotificationPermissionControl /><span aria-hidden="true">通知</span></div>
             <div className="workspace-tool-item"><WorkspaceThemeToggle /><span aria-hidden="true">主题</span></div>
             <div className="workspace-tool-item">
             <Tooltip label="设置" position="right">

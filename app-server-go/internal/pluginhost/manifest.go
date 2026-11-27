@@ -21,24 +21,44 @@ var (
 		PermAgentCapabilities: {},
 		PermUISlots:           {},
 		PermSignalsProvide:    {},
+		PermDesktopControl:    {},
 	}
 )
 
-// Manifest describes a builtin or external Astrorder plugin (plugin.json).
+// PluginSignature carries an optional detached cryptographic signature over the
+// normalized manifest and plugin directory contents.
+type PluginSignature struct {
+	Algorithm string `json:"algorithm,omitempty"`
+	KeyID     string `json:"key_id,omitempty"`
+	Value     string `json:"value,omitempty"`
+}
+
+// Manifest describes a builtin, official, or external Astrorder plugin (plugin.json).
 type Manifest struct {
-	SchemaVersion int             `json:"schema_version"`
-	ID            string          `json:"id"`
-	Name          string          `json:"name"`
-	Version       string          `json:"version"`
-	Category      string          `json:"category,omitempty"`
-	Description   string          `json:"description,omitempty"`
-	Author        string          `json:"author,omitempty"`
-	Homepage      string          `json:"homepage,omitempty"`
-	Icon          string          `json:"icon,omitempty"`
-	Permissions   []string        `json:"permissions,omitempty"`
-	Backend       BackendSpec     `json:"backend"`
-	Settings      SettingsSpec    `json:"settings"`
-	Contributes   ContributesSpec `json:"contributes"`
+	SchemaVersion  int              `json:"schema_version"`
+	ID             string           `json:"id"`
+	Name           string           `json:"name"`
+	Version        string           `json:"version"`
+	Category       string           `json:"category,omitempty"`
+	Description    string           `json:"description,omitempty"`
+	Author         string           `json:"author,omitempty"`
+	Homepage       string           `json:"homepage,omitempty"`
+	Icon           string           `json:"icon,omitempty"`
+	DefaultEnabled *bool            `json:"default_enabled,omitempty"`
+	Permissions    []string         `json:"permissions,omitempty"`
+	Signature      *PluginSignature `json:"signature,omitempty"`
+	Frontend       *FrontendSpec    `json:"frontend,omitempty"`
+	Backend        BackendSpec      `json:"backend"`
+	Settings       SettingsSpec     `json:"settings"`
+	Contributes    ContributesSpec  `json:"contributes"`
+}
+
+// FrontendSpec describes how a plugin's frontend module is loaded by the host.
+type FrontendSpec struct {
+	Mode       string   `json:"mode,omitempty"`        // "esm" | "iframe" | "builtin"
+	Entry      string   `json:"entry,omitempty"`       // e.g. "ui/entry.js"
+	Styles     []string `json:"styles,omitempty"`      // e.g. ["ui/entry.css"]
+	SDKVersion string   `json:"sdk_version,omitempty"` // e.g. "^1.0"
 }
 
 // BackendSpec describes how a plugin handles dynamic HTTP / agent / signal calls.
@@ -80,13 +100,43 @@ type SettingField struct {
 	Step         *float64        `json:"step,omitempty"`
 }
 
-// ContributesSpec declares UI slots, sidecar panels, agent capabilities, skills, and signal providers.
+// ContributesSpec declares UI slots, pages, viewers, sidecar panels, agent capabilities, skills, and signal providers.
 type ContributesSpec struct {
 	UISlots           []UISlotContribution          `json:"ui_slots,omitempty"`
+	Pages             []PageContribution            `json:"pages,omitempty"`
+	Viewers           []ViewerContribution          `json:"viewers,omitempty"`
 	SidecarPanels     []SidecarPanelContribution    `json:"sidecar_panels,omitempty"`
 	AgentCapabilities []AgentCapabilityContribution `json:"agent_capabilities,omitempty"`
 	AgentSkills       []string                      `json:"agent_skills,omitempty"`
 	SignalProviders   []SignalProviderContribution  `json:"signal_providers,omitempty"`
+}
+
+// PageContribution declares a workspace page contributed by a plugin.
+type PageContribution struct {
+	ID               string `json:"id"`
+	Title            string `json:"title"`
+	Path             string `json:"path,omitempty"`
+	MobilePath       string `json:"mobile_path,omitempty"`
+	Icon             string `json:"icon,omitempty"`
+	Order            int    `json:"order,omitempty"`
+	Category         string `json:"category,omitempty"`
+	BadgeLabel       string `json:"badge_label,omitempty"`
+	HideInOfficeMode bool   `json:"hide_in_office_mode,omitempty"`
+}
+
+// ViewerContribution declares a Sidecar artifact viewer contributed by a plugin.
+type ViewerContribution struct {
+	ID               string   `json:"id"`
+	Title            string   `json:"title"`
+	Description      string   `json:"description,omitempty"`
+	Extensions       []string `json:"extensions,omitempty"`
+	MimeTypes        []string `json:"mime_types,omitempty"`
+	BadgeLabel       string   `json:"badge_label,omitempty"`
+	TabColor         string   `json:"tab_color,omitempty"`
+	Category         string   `json:"category,omitempty"`
+	Icon             string   `json:"icon,omitempty"`
+	Priority         int      `json:"priority,omitempty"`
+	HideInOfficeMode bool     `json:"hide_in_office_mode,omitempty"`
 }
 
 // UISlotContribution registers a declarative item into an Astrorder UI slot.
@@ -212,6 +262,47 @@ func (m *Manifest) Normalize() {
 	m.Settings.UIEntry = strings.TrimSpace(m.Settings.UIEntry)
 	m.Settings.TestEndpoint = strings.TrimSpace(m.Settings.TestEndpoint)
 
+	if m.Frontend != nil {
+		m.Frontend.Mode = strings.ToLower(strings.TrimSpace(m.Frontend.Mode))
+		m.Frontend.Entry = strings.TrimSpace(m.Frontend.Entry)
+		m.Frontend.SDKVersion = strings.TrimSpace(m.Frontend.SDKVersion)
+		if m.Frontend.Mode == FrontendModeESM && m.Frontend.SDKVersion == "" {
+			m.Frontend.SDKVersion = "^1.0"
+		}
+		if len(m.Frontend.Styles) > 0 {
+			cleanedStyles := make([]string, 0, len(m.Frontend.Styles))
+			for _, st := range m.Frontend.Styles {
+				if trimmed := strings.TrimSpace(st); trimmed != "" {
+					cleanedStyles = append(cleanedStyles, trimmed)
+				}
+			}
+			m.Frontend.Styles = cleanedStyles
+		}
+	}
+
+	for i := range m.Contributes.Pages {
+		p := &m.Contributes.Pages[i]
+		p.ID = strings.TrimSpace(p.ID)
+		p.Title = strings.TrimSpace(p.Title)
+		p.Path = strings.TrimSpace(p.Path)
+		p.MobilePath = strings.TrimSpace(p.MobilePath)
+		p.Icon = strings.TrimSpace(p.Icon)
+		p.Category = strings.TrimSpace(p.Category)
+		p.BadgeLabel = strings.TrimSpace(p.BadgeLabel)
+	}
+	for i := range m.Contributes.Viewers {
+		v := &m.Contributes.Viewers[i]
+		v.ID = strings.TrimSpace(v.ID)
+		v.Title = strings.TrimSpace(v.Title)
+		v.Description = strings.TrimSpace(v.Description)
+		v.BadgeLabel = strings.TrimSpace(v.BadgeLabel)
+		v.TabColor = strings.TrimSpace(v.TabColor)
+		v.Category = strings.TrimSpace(v.Category)
+		v.Icon = strings.TrimSpace(v.Icon)
+		v.Extensions = normalizeLowerStrings(v.Extensions)
+		v.MimeTypes = normalizeLowerStrings(v.MimeTypes)
+	}
+
 	seenPerm := make(map[string]struct{}, len(m.Permissions))
 	deduped := make([]string, 0, len(m.Permissions))
 	for _, p := range m.Permissions {
@@ -303,7 +394,7 @@ func (m Manifest) Validate() error {
 			}
 		}
 	case SettingsModeCustomUI:
-		if m.Backend.Type != BackendTypeBuiltin {
+		if m.Backend.Type != BackendTypeBuiltin && !IsFrontendESM(m) {
 			if m.Settings.UIEntry == "" {
 				return fmt.Errorf("%w: custom_ui settings require ui_entry", ErrInvalid)
 			}
@@ -371,7 +462,157 @@ func (m Manifest) Validate() error {
 		}
 	}
 
+	// Frontend validation.
+	if m.Frontend != nil {
+		switch m.Frontend.Mode {
+		case "":
+			if m.Frontend.Entry != "" || len(m.Frontend.Styles) > 0 {
+				return fmt.Errorf("%w: frontend.mode is required when entry or styles are specified", ErrInvalid)
+			}
+		case FrontendModeESM:
+			if m.Frontend.Entry == "" {
+				return fmt.Errorf("%w: frontend.mode %q requires non-empty entry", ErrInvalid, FrontendModeESM)
+			}
+			cleanEntry, err := ValidateRelativePluginPath(m.Frontend.Entry)
+			if err != nil {
+				return fmt.Errorf("%w: invalid frontend.entry: %v", ErrInvalid, err)
+			}
+			if hasHiddenPathSegment(cleanEntry) {
+				return fmt.Errorf("%w: frontend.entry must not reference hidden files", ErrInvalid)
+			}
+			for _, style := range m.Frontend.Styles {
+				cleanStyle, err := ValidateRelativePluginPath(style)
+				if err != nil {
+					return fmt.Errorf("%w: invalid frontend.styles entry %q: %v", ErrInvalid, style, err)
+				}
+				if hasHiddenPathSegment(cleanStyle) {
+					return fmt.Errorf("%w: frontend.styles entry %q must not reference hidden files", ErrInvalid, style)
+				}
+			}
+		case FrontendModeIframe, FrontendModeBuiltin:
+			if m.Frontend.Entry != "" {
+				cleanEntry, err := ValidateRelativePluginPath(m.Frontend.Entry)
+				if err != nil {
+					return fmt.Errorf("%w: invalid frontend.entry: %v", ErrInvalid, err)
+				}
+				if hasHiddenPathSegment(cleanEntry) {
+					return fmt.Errorf("%w: frontend.entry must not reference hidden files", ErrInvalid)
+				}
+			}
+			for _, style := range m.Frontend.Styles {
+				cleanStyle, err := ValidateRelativePluginPath(style)
+				if err != nil {
+					return fmt.Errorf("%w: invalid frontend.styles entry %q: %v", ErrInvalid, style, err)
+				}
+				if hasHiddenPathSegment(cleanStyle) {
+					return fmt.Errorf("%w: frontend.styles entry %q must not reference hidden files", ErrInvalid, style)
+				}
+			}
+		default:
+			return fmt.Errorf("%w: unsupported frontend mode %q", ErrInvalid, m.Frontend.Mode)
+		}
+	}
+
+	// Contributed pages validation.
+	seenPages := map[string]struct{}{}
+	for _, page := range m.Contributes.Pages {
+		pid := strings.TrimSpace(page.ID)
+		if pid == "" || strings.ContainsAny(pid, "/\\ \t\r\n") {
+			return fmt.Errorf("%w: invalid contributed page id %q", ErrInvalid, page.ID)
+		}
+		if _, dup := seenPages[pid]; dup {
+			return fmt.Errorf("%w: duplicate contributed page id %q", ErrInvalid, pid)
+		}
+		seenPages[pid] = struct{}{}
+		if strings.TrimSpace(page.Title) == "" {
+			return fmt.Errorf("%w: contributed page %q title is required", ErrInvalid, pid)
+		}
+	}
+
+	// Contributed viewers validation.
+	seenViewers := map[string]struct{}{}
+	for _, viewer := range m.Contributes.Viewers {
+		vid := strings.TrimSpace(viewer.ID)
+		if vid == "" || strings.ContainsAny(vid, "/\\ \t\r\n") {
+			return fmt.Errorf("%w: invalid contributed viewer id %q", ErrInvalid, viewer.ID)
+		}
+		if _, dup := seenViewers[vid]; dup {
+			return fmt.Errorf("%w: duplicate contributed viewer id %q", ErrInvalid, vid)
+		}
+		seenViewers[vid] = struct{}{}
+		if strings.TrimSpace(viewer.Title) == "" {
+			return fmt.Errorf("%w: contributed viewer %q title is required", ErrInvalid, vid)
+		}
+	}
+
 	return nil
+}
+
+// ValidateManifestForSource enforces source-scoped manifest rules on top of Manifest.Validate.
+// In particular, backend.type="builtin" is only permitted for in-process builtins or bundled
+// official plugins (OfficialPluginsDir) and is strictly rejected for external plugins.
+func ValidateManifestForSource(source string, m Manifest) error {
+	if err := m.Validate(); err != nil {
+		return err
+	}
+	if source == SourceExternal && m.Backend.Type == BackendTypeBuiltin {
+		return fmt.Errorf("%w: external plugin %q cannot declare backend type %q", ErrInvalid, m.ID, BackendTypeBuiltin)
+	}
+	return nil
+}
+
+// IsFrontendESM reports whether manifest declares an in-page ES module frontend.
+func IsFrontendESM(m Manifest) bool {
+	return m.Frontend != nil && m.Frontend.Mode == FrontendModeESM
+}
+
+// EffectiveDefaultEnabled returns the default enabled state for a plugin when the user
+// has not explicitly persisted a toggle in plugins:enabled.
+func EffectiveDefaultEnabled(source string, m Manifest) bool {
+	switch source {
+	case SourceBuiltin:
+		if m.DefaultEnabled != nil {
+			return *m.DefaultEnabled
+		}
+		return true
+	case SourceOfficial:
+		if m.DefaultEnabled != nil {
+			return *m.DefaultEnabled
+		}
+		return false
+	default:
+		// Security boundary: untrusted external plugins never default to enabled.
+		return false
+	}
+}
+
+func hasHiddenPathSegment(cleanRel string) bool {
+	for _, seg := range strings.Split(cleanRel, "/") {
+		if strings.HasPrefix(seg, ".") {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeLowerStrings(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(in))
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		v := strings.ToLower(strings.TrimSpace(s))
+		if v == "" {
+			continue
+		}
+		if _, dup := seen[v]; dup {
+			continue
+		}
+		seen[v] = struct{}{}
+		out = append(out, v)
+	}
+	return out
 }
 
 // ValidateRelativePluginPath verifies that rel stays strictly inside the plugin directory

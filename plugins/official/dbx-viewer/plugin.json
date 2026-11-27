@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "id": "dbx-viewer",
+  "name": "DBX 数据库工作台",
+  "version": "1.0.0",
+  "category": "development",
+  "description": "在右侧工作台嵌入数据库管理工具，支持点击 .sql 文件与独立 SQL 代码块一键载入查询，由你人工选库核对后执行",
+  "author": "Astrorder",
+  "icon": "database",
+  "default_enabled": true,
+  "permissions": [],
+  "backend": {
+    "type": "none"
+  },
+  "settings": {
+    "mode": "none"
+  },
+  "frontend": {
+    "mode": "esm",
+    "entry": "ui/entry.js",
+    "styles": [
+      "ui/entry.css"
+    ],
+    "sdk_version": "^1.0"
+  },
+  "contributes": {
+    "viewers": [
+      {
+        "id": "dbx-viewer",
+        "title": "DBX 数据库工作台",
+        "icon": "database",
+        "badge_label": "[数据库]",
+        "tab_color": "#0f766e",
+        "category": "development",
+        "mime_types": [
+          "application/x-astrorder-dbx",
+          "application/x-dbx"
+        ],
+        "hide_in_office_mode": true
+      }
+    ]
+  }
+}

@@ -2,6 +2,7 @@ package pluginhost
 
 import (
 	"context"
+	"crypto/ed25519"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -16,6 +17,7 @@ const (
 	BaseAdminPath   = "/api/v1/extensions"
 	BaseHostAPIPath = "/api/v1/plugin-host"
 	SDKBridgePath   = "/api/v1/ext/_sdk/bridge.js"
+	SDKESMDirPath   = "/api/v1/ext/_sdk/"
 
 	PermNetworkOutbound   = "network:outbound"
 	PermWorkspaceGitRead  = "workspace:git.read"
@@ -24,17 +26,23 @@ const (
 	PermAgentCapabilities = "agent:capabilities"
 	PermUISlots           = "ui:slots"
 	PermSignalsProvide    = "signals:provide"
+	PermDesktopControl    = "desktop:control"
 
 	BackendTypeBuiltin = "builtin"
 	BackendTypeProcess = "process"
 	BackendTypeHTTP    = "http"
 	BackendTypeNone    = "none"
 
+	FrontendModeESM     = "esm"
+	FrontendModeIframe  = "iframe"
+	FrontendModeBuiltin = "builtin"
+
 	SettingsModeNone     = "none"
 	SettingsModeSchema   = "schema"
 	SettingsModeCustomUI = "custom_ui"
 
 	SourceBuiltin  = "builtin"
+	SourceOfficial = "official"
 	SourceExternal = "external"
 
 	RuntimeStateBuiltin  = "builtin"
@@ -42,6 +50,12 @@ const (
 	RuntimeStateStopped  = "stopped"
 	RuntimeStateStarting = "starting"
 	RuntimeStateError    = "error"
+
+	AppProfileOffice    = "office"
+	AppProfileDeveloper = "developer"
+
+	NetworkPolicyAllowed = "allowed"
+	NetworkPolicyBlocked = "blocked"
 )
 
 var (
@@ -58,14 +72,41 @@ type BrowserAuthorizer interface {
 	AuthorizeBrowser(*http.Request) *auth.Error
 }
 
+// ExtensionChangeEvent describes a lifecycle or content change in the extension platform.
+type ExtensionChangeEvent struct {
+	Action        string   `json:"action"` // installed | updated | uninstalled | enabled | disabled | reloaded
+	PluginID      string   `json:"plugin_id,omitempty"`
+	Source        string   `json:"source,omitempty"`
+	Enabled       *bool    `json:"enabled,omitempty"`
+	ContentDigest string   `json:"content_digest,omitempty"`
+	ChangedIDs    []string `json:"changed_ids,omitempty"`
+	Timestamp     string   `json:"timestamp"`
+}
+
 // Options configures the extension platform Manager.
 type Options struct {
 	Store       *store.Store
 	Authorizer  BrowserAuthorizer
 	Resolver    *targetfs.Resolver
 	PluginsDir  string
-	HostBaseURL string
-	Logger      *slog.Logger
+	// OfficialPluginsDir optionally points to the read-only bundled official plugins
+	// directory (e.g. <InstallDir>/plugins/official or dev plugins/official-dist).
+	// Plugins discovered here are tagged SourceOfficial and never mixed with PluginsDir.
+	OfficialPluginsDir string
+	// LegacyPluginsDir optionally points to a legacy shared plugins directory
+	// (e.g. <DataDir>/plugins) scanned read-only for pre-existing external plugins
+	// while strictly skipping builtin directories such as r2t2.
+	LegacyPluginsDir string
+	HostBaseURL      string
+	Logger           *slog.Logger
+	// TrustedPublicKeys maps optional key IDs to Ed25519 public keys used to
+	// verify signed external process and ESM plugins under restricted (office/normal) mode.
+	TrustedPublicKeys map[string]ed25519.PublicKey
+	// AppProfileOverride optionally overrides the persisted app-profile ("office" or "developer").
+	AppProfileOverride string
+	// OnChange is invoked whenever plugins are installed, updated, uninstalled, enabled,
+	// disabled, or reloaded so the HTTP layer can broadcast extension.changed events.
+	OnChange func(ExtensionChangeEvent)
 }
 
 // DeclarativePillPayload is the JSON payload returned by a status bar pill endpoint.
@@ -147,7 +188,14 @@ type BuiltinSkillProvider interface {
 	Skills() []PluginSkillEntry
 }
 
-// PluginView is the public wire view of a builtin or external plugin.
+// BuiltinLifecycle is an optional interface that a BuiltinPlugin can implement
+// to react to enable/disable toggles and server shutdown (e.g. stopping managed drivers).
+type BuiltinLifecycle interface {
+	OnEnabledChanged(ctx context.Context, enabled bool)
+	Close(ctx context.Context) error
+}
+
+// PluginView is the public wire view of a builtin, official, or external plugin.
 type PluginView struct {
 	ID                 string          `json:"id"`
 	Name               string          `json:"name"`
@@ -159,6 +207,7 @@ type PluginView struct {
 	Icon               string          `json:"icon,omitempty"`
 	Source             string          `json:"source"`
 	Enabled            bool            `json:"enabled"`
+	DefaultEnabled     bool            `json:"default_enabled"`
 	Permissions        []string        `json:"permissions"`
 	GrantedPermissions []string        `json:"granted_permissions"`
 	PendingPermissions []string        `json:"pending_permissions"`
@@ -166,9 +215,13 @@ type PluginView struct {
 	RuntimeState       string          `json:"runtime_state"`
 	RuntimeError       string          `json:"runtime_error,omitempty"`
 	BackendType        string          `json:"backend_type"`
+	Frontend           *FrontendSpec   `json:"frontend,omitempty"`
+	ContentDigest      string          `json:"content_digest,omitempty"`
+	SignatureVerified  bool            `json:"signature_verified"`
 	Settings           SettingsSpec    `json:"settings"`
 	Contributes        ContributesSpec `json:"contributes"`
 	UIBaseURL          string          `json:"ui_base_url,omitempty"`
+	ESMBaseURL         string          `json:"esm_base_url,omitempty"`
 	APIBaseURL         string          `json:"api_base_url,omitempty"`
 }
 

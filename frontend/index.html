@@ -16,6 +16,21 @@
     <meta name="apple-mobile-web-app-title" content="星序" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
+    <script type="importmap">
+      {
+        "scopes": {
+          "/api/v1/ext/": {
+            "react": "/api/v1/ext/_sdk/react.js",
+            "react/jsx-runtime": "/api/v1/ext/_sdk/jsx-runtime.js",
+            "react-dom": "/api/v1/ext/_sdk/react-dom.js",
+            "react-dom/client": "/api/v1/ext/_sdk/react-dom-client.js",
+            "@mantine/core": "/api/v1/ext/_sdk/mantine-core.js",
+            "@mantine/notifications": "/api/v1/ext/_sdk/mantine-notifications.js",
+            "@astrorder/sdk": "/api/v1/ext/_sdk/sdk.js"
+          }
+        }
+      }
+    </script>
     <link rel="modulepreload" href="/src/main.tsx" />
     <title>星序 · Astrorder</title>
     <style id="astrorder-boot-splash">

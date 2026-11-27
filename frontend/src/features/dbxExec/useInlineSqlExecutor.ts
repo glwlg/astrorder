@@ -5,9 +5,8 @@ import type { Session } from '../../domain/types'
 import { scopeKey } from '../../domain/semantics'
 import { useAstrorderStore } from '../../state/store'
 import { usePluginSettingsStore } from '../plugins/pluginSettingsStore'
-import { DBX_PLUGIN_ID } from '../sidecar/viewers/dbx/DbxViewer'
-import { readSqlText } from '../sidecar/viewers/dbx/dbxStore'
-import { extractSqlFileName, stripSqlLocationSuffix } from '../sidecar/viewers/dbx/sqlFormats'
+import { DBX_PLUGIN_ID, readSqlText } from '../sidecar/databaseTool'
+import { extractSqlFileName, stripSqlLocationSuffix } from '../sidecar/sqlFormats'
 import { classifySql, requiresExecutionConfirmation } from './sqlSafety'
 import {
   resolveProjectDatabaseIdentity,

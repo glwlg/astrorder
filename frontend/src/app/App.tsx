@@ -1,7 +1,7 @@
-﻿import { Suspense, lazy, useEffect, type ComponentType } from 'react'
-import { IconAlertTriangle, IconLoader2 } from '@tabler/icons-react'
-import { Alert, Button, Center, Loader, Paper, Stack, Text, Title } from '@mantine/core'
-import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+﻿import { Suspense, lazy, useEffect, useMemo, type ComponentType } from 'react'
+import { IconAlertTriangle, IconLoader2, IconPuzzle } from '@tabler/icons-react'
+import { Alert, Button, Center, Group, Loader, Paper, Stack, Text, Title } from '@mantine/core'
+import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useMediaQuery } from '@mantine/hooks'
 import { useQueryClient } from '@tanstack/react-query'
 import { ApiError } from '../api/client'
@@ -16,20 +16,17 @@ import { accountPlatforms } from '../features/agentAccounts/accountPlatforms'
 import { AstrorderLoader } from '../components/AnimatedStatus'
 import { ShinyText } from '../components/animations/ShinyText'
 import { useShortcutHandlers } from '../features/shortcuts/shortcuts'
-import {
-  SIDEBAR_INTEGRATIONS_PLUGIN_ID,
-  WORKSPACE_AGENT_ACCOUNTS_PLUGIN_ID,
-  WORKSPACE_ANALYTICS_GATEWAY_PLUGIN_ID,
-  WORKSPACE_BACKUPS_PLUGIN_ID,
-  WORKSPACE_DIGEST_PLUGIN_ID,
-  WORKSPACE_GROUPS_PLUGIN_ID,
-  WORKSPACE_LEARNING_RADAR_PLUGIN_ID,
-  WORKSPACE_MEETINGS_PLUGIN_ID,
-  WORKSPACE_MONITOR_PLUGIN_ID,
-} from '../features/plugins/builtinPlugins'
+import { SIDEBAR_INTEGRATIONS_PLUGIN_ID } from '../features/plugins/builtinPlugins'
 import { usePluginSettingsStore } from '../features/plugins/pluginSettingsStore'
+import { useAppProfile } from '../features/office/appProfile'
+import { registerBuiltinWorkspacePages } from '../features/extensions/builtinWorkspacePages'
+import { extensionRegistry, useExtensionRegistryVersion } from '../features/extensions/extensionRegistry'
 import { useExtensionStore } from '../features/extensions/extensionStore'
+import { PluginErrorBoundary } from '../features/extensions/PluginErrorBoundary'
+import { resolveExtensionPagePath, type ExtensionPageRegistration } from '../features/extensions/types'
 import { clientPerf, PerfProfiler } from '../perf/clientPerf'
+
+registerBuiltinWorkspacePages()
 
 function lazyNamed<T extends ComponentType<any>>(
   loader: () => Promise<Record<string, unknown>>,
@@ -39,18 +36,10 @@ function lazyNamed<T extends ComponentType<any>>(
 }
 
 const MobileWorkspace = lazyNamed(() => import('../features/mobile/MobileWorkspace'), 'MobileWorkspace')
-const GroupsPage = lazyNamed(() => import('../features/chat/GroupsPage'), 'GroupsPage')
 const ActionInboxPage = lazyNamed(() => import('../features/inbox/ActionInboxPage'), 'ActionInboxPage')
-const MonitorPage = lazyNamed(() => import('../features/monitor/MonitorPage'), 'MonitorPage')
 const PluginsPage = lazyNamed(() => import('../features/plugins/PluginsPage'), 'PluginsPage')
-const AnalyticsPage = lazyNamed(() => import('../features/analytics/AnalyticsPage'), 'AnalyticsPage')
-const BackupsPage = lazyNamed(() => import('../features/backups/BackupsPage'), 'BackupsPage')
-const DigestPage = lazyNamed(() => import('../features/digest/DigestPage'), 'DigestPage')
-const MeetingsPage = lazyNamed(() => import('../features/meetings/MeetingsPage'), 'MeetingsPage')
-const LearningRadarPage = lazyNamed(() => import('../features/learning/LearningRadarPage'), 'LearningRadarPage')
 const BotsPage = lazyNamed(() => import('../features/bots/BotsPage'), 'BotsPage')
 const IntegrationPage = lazyNamed(() => import('../features/integrations/IntegrationPage'), 'IntegrationPage')
-const AgentAccountsLayout = lazyNamed(() => import('../features/agentAccounts/AgentAccountsLayout'), 'AgentAccountsLayout')
 const UnavailablePlatformPage = lazyNamed(() => import('../features/agentAccounts/UnavailablePlatformPage'), 'UnavailablePlatformPage')
 const QrAuthorizePage = lazyNamed(() => import('../features/auth/QrAuthorizePage'), 'QrAuthorizePage')
 const QrScanPage = lazyNamed(() => import('../features/auth/QrScanPage'), 'QrScanPage')
@@ -60,6 +49,108 @@ function RouteSuspenseFallback() {
   return (
     <Center style={{ height: '100%', minHeight: 240 }}>
       <Loader size="sm" color="violet" />
+    </Center>
+  )
+}
+
+function renderRegisteredPage(
+  page: ExtensionPageRegistration,
+  registryVersion: number,
+  surface: 'desktop' | 'mobile' = 'desktop',
+) {
+  const PageComponent = surface === 'mobile' && page.mobileComponent ? page.mobileComponent : page.component
+  return (
+    <PluginErrorBoundary
+      pluginId={page.pluginId}
+      pluginName={page.title}
+      resetKey={`${page.pluginId}:${page.id}:${registryVersion}`}
+    >
+      <Suspense fallback={<RouteSuspenseFallback />}>
+        <PageComponent pluginId={page.pluginId} pageId={page.id} surface={surface} />
+      </Suspense>
+    </PluginErrorBoundary>
+  )
+}
+
+function DynamicExtensionPageRoute() {
+  const { pluginId = '', pageId = '' } = useParams<{ pluginId: string; pageId: string }>()
+  const navigate = useNavigate()
+  const registryVersion = useExtensionRegistryVersion()
+  const enabledPlugins = usePluginSettingsStore((s) => s.enabledPlugins)
+  const appProfile = useAppProfile()
+  const extensionsHydrated = useExtensionStore((s) => s.hydrated)
+  const extensionsError = useExtensionStore((s) => s.error)
+  const extensionItem = useExtensionStore((s) => s.items.find((item) => item.id === pluginId))
+  const esmState = useExtensionStore((s) => (pluginId ? s.esmStates[pluginId] : undefined))
+
+  const page = useMemo(() => {
+    void registryVersion
+    if (!pluginId || !pageId) return undefined
+    return extensionRegistry.getPageById(pluginId, pageId)
+  }, [pageId, pluginId, registryVersion])
+
+  if (page) {
+    const disabled = enabledPlugins[page.pluginId] === false
+    const hiddenByOffice = appProfile === 'office' && Boolean(page.hideInOfficeMode)
+    if (disabled || hiddenByOffice) {
+      return <Navigate to="/chat" replace />
+    }
+    return renderRegisteredPage(page, registryVersion, 'desktop')
+  }
+
+  const manifestPage = extensionItem?.contributes?.pages?.find((entry) => entry.id === pageId)
+  const blockedByOfficeManifest = appProfile === 'office' && Boolean(manifestPage?.hide_in_office_mode)
+  const isEligibleEsmPlugin = Boolean(
+    extensionItem &&
+    extensionItem.frontend?.mode === 'esm' &&
+    extensionItem.enabled &&
+    extensionItem.permissions_granted !== false &&
+    !(extensionItem.pending_permissions && extensionItem.pending_permissions.length > 0) &&
+    enabledPlugins[extensionItem.id] !== false &&
+    !blockedByOfficeManifest,
+  )
+  const esmSettled = esmState?.status === 'loaded' || esmState?.status === 'error'
+  const isExtPagePending =
+    (!extensionsHydrated && !extensionsError) ||
+    (isEligibleEsmPlugin && !esmSettled)
+
+  if (isExtPagePending) {
+    return <RouteSuspenseFallback />
+  }
+
+  return (
+    <Center style={{ height: '100%', minHeight: 280, padding: 24 }}>
+      <Paper withBorder radius="md" p="lg" maw={440} w="100%">
+        <Stack align="center" gap="sm" ta="center">
+          <IconPuzzle size={28} color="var(--astr-muted)" />
+          <Title order={4} size="h5">
+            扩展页面暂不可用
+          </Title>
+          <Text size="xs" c="dimmed">
+            {esmState?.status === 'error' && esmState.error
+              ? `插件「${pluginId}」加载失败：${esmState.error}`
+              : `未找到插件「${pluginId}」注册的页面「${pageId}」，可能已停用或卸载。`}
+          </Text>
+          <Group gap="xs" mt={4}>
+            <Button size="xs" variant="light" onClick={() => navigate('/chat')}>
+              返回会话
+            </Button>
+            <Button
+              size="xs"
+              variant="subtle"
+              onClick={() =>
+                window.dispatchEvent(
+                  new CustomEvent('astrorder:open-settings', {
+                    detail: { tab: 'plugins', pluginId: pluginId || undefined },
+                  }),
+                )
+              }
+            >
+              前往插件管理
+            </Button>
+          </Group>
+        </Stack>
+      </Paper>
     </Center>
   )
 }
@@ -86,7 +177,7 @@ function LoadingPage({ label = '正在启动星序工作台…' }: { label?: str
 }
 
 function BootstrapError({ error, retry }: { error: unknown; retry: () => void }) {
-  const detail = error instanceof ApiError ? error.detail : error instanceof Error ? error.message : '服务端未返回工作台数据。'
+  const detail = error instanceof ApiError ? error.detail : error instanceof Error ? error.message : '服务暂时未响应，请稍后重试。'
   return (
     <Center className="loading-page">
       <Paper withBorder radius="lg" p="xl" maw={520}>
@@ -94,8 +185,8 @@ function BootstrapError({ error, retry }: { error: unknown; retry: () => void })
           <IconAlertTriangle className="error-icon" size={34} />
           <Title order={2} size="h3">工作台暂不可用</Title>
           <Text ta="center" c="dimmed">{detail}</Text>
-          <Text ta="center" size="sm" c="dimmed">星序不会用示例数据填充空白。请确认后端认证和 bootstrap 接口已配置。</Text>
-          <Button onClick={retry} variant="light">重新读取</Button>
+          <Text ta="center" size="sm" c="dimmed">请确认本机星序服务正在运行，然后点击下方按钮重新连接。</Text>
+          <Button onClick={retry} variant="light">重新连接</Button>
         </Stack>
       </Paper>
     </Center>
@@ -111,6 +202,10 @@ function checkIsMobileViewport(): boolean {
   return window.matchMedia(MOBILE_MEDIA_QUERY).matches
 }
 
+function toChildRoutePath(path: string): string {
+  return path.replace(/^\/+/, '')
+}
+
 function AuthenticatedApp() {
   const mobileViewport = useMediaQuery(MOBILE_MEDIA_QUERY, checkIsMobileViewport())
   const location = useLocation()
@@ -118,15 +213,31 @@ function AuthenticatedApp() {
   const queryClient = useQueryClient()
   const bootstrap = useBootstrap(true)
   const chatReturnPath = useChatReturnPath()
-  const groupsEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_GROUPS_PLUGIN_ID))
-  const monitorEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_MONITOR_PLUGIN_ID))
-  const analyticsEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_ANALYTICS_GATEWAY_PLUGIN_ID))
-  const backupsEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_BACKUPS_PLUGIN_ID))
-  const accountsEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_AGENT_ACCOUNTS_PLUGIN_ID))
+  const registryVersion = useExtensionRegistryVersion()
+  const enabledPlugins = usePluginSettingsStore((s) => s.enabledPlugins)
   const integrationsEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(SIDEBAR_INTEGRATIONS_PLUGIN_ID))
-  const digestEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_DIGEST_PLUGIN_ID))
-  const meetingsEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_MEETINGS_PLUGIN_ID))
-  const learningEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_LEARNING_RADAR_PLUGIN_ID))
+  const appProfile = useAppProfile()
+
+  const activePages = useMemo(() => {
+    void registryVersion
+    return extensionRegistry.getActivePages({
+      profile: appProfile,
+      enabledPlugins,
+    })
+  }, [appProfile, enabledPlugins, registryVersion])
+
+  const monitorPageActive = activePages.some((page) => page.id === 'monitor')
+  const accountsPage = activePages.find((page) => page.id === 'agentAccounts')
+  const standardPages = useMemo(
+    () =>
+      activePages.filter((page) => {
+        if (page.id === 'agentAccounts') return false
+        const resolved = resolveExtensionPagePath(page)
+        return Boolean(page.path || (page.routePaths && page.routePaths.length > 0)) && !resolved.startsWith('/ext-page/')
+      }),
+    [activePages],
+  )
+
   const isStandaloneSettings =
     location.pathname === '/settings' || location.pathname.startsWith('/settings/')
   useShortcutHandlers(
@@ -134,7 +245,7 @@ function AuthenticatedApp() {
       ? {}
       : {
           chat: () => navigate(chatReturnPath),
-          ...(monitorEnabled ? { monitor: () => navigate('/monitor') } : {}),
+          ...(monitorPageActive ? { monitor: () => navigate('/monitor') } : {}),
         },
   )
   useEventStream(Boolean(bootstrap.data) && !isStandaloneSettings, queryClient, navigate)
@@ -162,7 +273,7 @@ function AuthenticatedApp() {
     clientPerf.setRoute(location.pathname)
   }, [location.pathname])
 
-  if (bootstrap.isLoading) return <LoadingPage label="正在读取已认证工作台…" />
+  if (bootstrap.isLoading) return <LoadingPage label="正在加载工作台…" />
   if (bootstrap.error) return <BootstrapError error={bootstrap.error} retry={() => void bootstrap.refetch()} />
 
   if (isStandaloneSettings) {
@@ -200,21 +311,49 @@ function AuthenticatedApp() {
         <Route path="chat/:sessionId" element={<ChatPage />} />
         <Route path="bots" element={<Suspense fallback={<RouteSuspenseFallback />}><BotsPage /></Suspense>} />
         <Route path="inbox" element={<Suspense fallback={<RouteSuspenseFallback />}><ActionInboxPage /></Suspense>} />
-        <Route path="digest" element={digestEnabled ? <Suspense fallback={<RouteSuspenseFallback />}><DigestPage /></Suspense> : <Navigate to="/chat" replace />} />
-        <Route path="meetings" element={meetingsEnabled ? <Suspense fallback={<RouteSuspenseFallback />}><MeetingsPage /></Suspense> : <Navigate to="/chat" replace />} />
-        <Route path="learning" element={learningEnabled ? <Suspense fallback={<RouteSuspenseFallback />}><LearningRadarPage /></Suspense> : <Navigate to="/chat" replace />} />
-        <Route path="groups" element={groupsEnabled ? <Suspense fallback={<RouteSuspenseFallback />}><GroupsPage /></Suspense> : <Navigate to="/chat" replace />} />
-        <Route path="groups/:groupId" element={groupsEnabled ? <Suspense fallback={<RouteSuspenseFallback />}><GroupsPage /></Suspense> : <Navigate to="/chat" replace />} />
-        <Route path="monitor" element={monitorEnabled ? <Suspense fallback={<RouteSuspenseFallback />}><MonitorPage /></Suspense> : <Navigate to="/chat" replace />} />
         <Route path="swarm" element={<Navigate to="/chat" replace />} />
         <Route path="plugins" element={<Suspense fallback={<RouteSuspenseFallback />}><PluginsPage /></Suspense>} />
-        <Route path="analytics" element={analyticsEnabled ? <Suspense fallback={<RouteSuspenseFallback />}><AnalyticsPage /></Suspense> : <Navigate to="/chat" replace />} />
-        <Route path="backups" element={backupsEnabled ? <Suspense fallback={<RouteSuspenseFallback />}><BackupsPage /></Suspense> : <Navigate to="/chat" replace />} />
-        <Route path="integrations/:integrationId" element={integrationsEnabled ? <Suspense fallback={<RouteSuspenseFallback />}><IntegrationPage /></Suspense> : <Navigate to="/chat" replace />} />
-        <Route path="agent-accounts" element={accountsEnabled ? <Suspense fallback={<RouteSuspenseFallback />}><AgentAccountsLayout /></Suspense> : <Navigate to="/chat" replace />}>
-          {accountPlatforms.map(({ kind, path, Page }) =>
-            <Route key={kind} path={path} element={<Suspense fallback={<RouteSuspenseFallback />}>{Page ? <Page /> : <UnavailablePlatformPage kind={kind} />}</Suspense>} />)}
-        </Route>
+        <Route
+          path="integrations/:integrationId"
+          element={
+            integrationsEnabled ? (
+              <Suspense fallback={<RouteSuspenseFallback />}><IntegrationPage /></Suspense>
+            ) : (
+              <Navigate to="/chat" replace />
+            )
+          }
+        />
+        {standardPages.flatMap((page) => {
+          const paths = page.routePaths && page.routePaths.length > 0
+            ? page.routePaths
+            : [resolveExtensionPagePath(page)]
+          return paths.map((routePath) => (
+            <Route
+              key={`${page.pluginId}:${page.id}:${routePath}`}
+              path={toChildRoutePath(routePath)}
+              element={renderRegisteredPage(page, registryVersion, 'desktop')}
+            />
+          ))
+        })}
+        {accountsPage && (
+          <Route
+            path="agent-accounts"
+            element={renderRegisteredPage(accountsPage, registryVersion, 'desktop')}
+          >
+            {accountPlatforms.map(({ kind, path, Page }) => (
+              <Route
+                key={kind}
+                path={path}
+                element={
+                  <Suspense fallback={<RouteSuspenseFallback />}>
+                    {Page ? <Page /> : <UnavailablePlatformPage kind={kind} />}
+                  </Suspense>
+                }
+              />
+            ))}
+          </Route>
+        )}
+        <Route path="ext-page/:pluginId/:pageId" element={<DynamicExtensionPageRoute />} />
         <Route path="*" element={<Navigate to="/chat" replace />} />
       </Route>
     </Routes>
@@ -270,7 +409,7 @@ export default function App() {
     <>
       {auth.error && !auth.data && (
         <Alert className="auth-service-alert" color="yellow" variant="light" icon={<IconLoader2 size={17} />}>
-          登录接口当前返回错误；仍可尝试建立会话。
+          连接服务时出现异常，你仍可尝试重新登录。
         </Alert>
       )}
       <AuthPage

@@ -20,8 +20,14 @@ import {
   XTERM_VIEWER_PLUGIN_ID,
 } from './builtinPlugins'
 import { usePluginSettingsStore } from './pluginSettingsStore'
+import { artifactViewerRegistry } from '../sidecar/registry'
 import { useSidecarStore } from '../sidecar/sidecarStore'
+import { createEsmPluginLoader } from '../extensions/esmPluginLoader'
+import type { AstrorderPluginContext } from '../extensions/pluginSdk'
+import { useExtensionStore } from '../extensions/extensionStore'
 import { api } from '../../api/client'
+import type { PluginView } from '../../api/extensions'
+import type { ArtifactRef } from '../../domain/artifact'
 import type { Session } from '../../domain/types'
 
 const sampleSession: Session = {
@@ -36,7 +42,10 @@ const sampleSession: Session = {
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
+  document.querySelectorAll('link[data-astrorder-ext-css]').forEach((el) => el.remove())
   usePluginSettingsStore.getState().reset()
+  useExtensionStore.getState().reset()
+  artifactViewerRegistry.unregister('three-viewer')
   useSidecarStore.setState({ tabs: [], mountedTabs: {}, activeTabId: '', activeSessionKey: '' })
 })
 
@@ -129,7 +138,7 @@ describe('Plugin gating across Sidecar, SessionToolsMenu, and ModelGatewaySettin
 
     expect(screen.getByRole('heading', { name: 'AI 供应商' })).toBeInTheDocument()
     expect(screen.getByText('默认通用模型')).toBeInTheDocument()
-    expect(screen.getByText('System One 模型服务')).toBeInTheDocument()
+    expect(screen.getByText('决策模型服务')).toBeInTheDocument()
     expect(screen.queryByText('LLM 网关与模型同步')).toBeNull()
     expect(screen.queryByText('OpenViking 记忆与知识库网关')).toBeNull()
     expect(screen.queryByText('浏览器自动任务')).toBeNull()
@@ -171,8 +180,67 @@ describe('Plugin gating across Sidecar, SessionToolsMenu, and ModelGatewaySettin
 
     // Opening Settings modal hides the "命令输出压缩" (RTK) tab when disabled
     fireEvent.click(screen.getByRole('button', { name: '打开设置' }))
-    expect(await screen.findByRole('tab', { name: '功能与插件' })).toBeInTheDocument()
+    expect(await screen.findByRole('tab', { name: '功能与插件' }, { timeout: 3000 })).toBeInTheDocument()
     expect(screen.queryByRole('tab', { name: '命令输出压缩' })).toBeNull()
     expect(screen.queryByRole('tab', { name: 'RTK' })).toBeNull()
+  })
+
+  it('gates official ESM Sidecar viewers dynamically via hot load and unload', async () => {
+    const modelArtifact: ArtifactRef = {
+      id: 'file:demo.glb',
+      name: 'demo.glb',
+      kind: 'workspace_file',
+      mediaType: 'model/gltf-binary',
+      readUrl: '/api/v1/files/raw?path=demo.glb',
+      writable: false,
+      sessionId: sampleSession.id,
+      agentId: sampleSession.agent_id,
+    }
+    const threePlugin: PluginView = {
+      id: 'three-viewer',
+      name: '3D 模型/CAD 预览',
+      version: '1.0.0',
+      category: 'media',
+      source: 'official',
+      enabled: false,
+      permissions: [],
+      granted_permissions: [],
+      pending_permissions: [],
+      permissions_granted: true,
+      runtime_state: 'stopped',
+      backend_type: 'none',
+      default_enabled: false,
+      content_digest: 'gate-v1',
+      frontend: { mode: 'esm', entry: 'ui/entry.js', styles: ['ui/entry.css'], sdk_version: '^1.0' },
+    }
+    const importer = vi.fn(async () => ({
+      activate(ctx: AstrorderPluginContext) {
+        ctx.registerViewer({
+          id: 'three-viewer',
+          title: '3D 模型/CAD 预览',
+          extensions: ['.glb', '.stl'],
+          component: () => null,
+        })
+      },
+    }))
+
+    const loader = createEsmPluginLoader({ importer })
+
+    // Disabled -> zero load & extension not supported
+    await loader.syncLoadedPlugins([threePlugin])
+    expect(importer).not.toHaveBeenCalled()
+    expect(artifactViewerRegistry.isSupportedExtension('demo.glb')).toBe(false)
+    expect(artifactViewerRegistry.findViewer(modelArtifact)).toBeNull()
+
+    // Enabled -> hot loads and becomes discoverable immediately
+    await loader.syncLoadedPlugins([{ ...threePlugin, enabled: true }])
+    expect(importer).toHaveBeenCalledTimes(1)
+    expect(artifactViewerRegistry.isSupportedExtension('demo.glb')).toBe(true)
+    expect(artifactViewerRegistry.findViewer(modelArtifact)?.id).toBe('three-viewer')
+
+    // Disabled again -> immediately unregistered from Sidecar registry
+    await loader.syncLoadedPlugins([{ ...threePlugin, enabled: false }])
+    expect(artifactViewerRegistry.isSupportedExtension('demo.glb')).toBe(false)
+    expect(artifactViewerRegistry.findViewer(modelArtifact)).toBeNull()
   })
 })

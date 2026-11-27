@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "id": "excalidraw-viewer",
+  "name": "手绘白板",
+  "version": "1.0.0",
+  "category": "diagram",
+  "description": "轻量自由手绘白板，适合头脑风暴、逻辑设计与自由拓扑标注",
+  "author": "Astrorder",
+  "icon": "pencil",
+  "default_enabled": true,
+  "permissions": [],
+  "backend": {
+    "type": "none"
+  },
+  "settings": {
+    "mode": "none"
+  },
+  "frontend": {
+    "mode": "esm",
+    "entry": "ui/entry.js",
+    "styles": [
+      "ui/entry.css"
+    ],
+    "sdk_version": "^1.0"
+  },
+  "contributes": {
+    "viewers": [
+      {
+        "id": "excalidraw-viewer",
+        "title": "手绘白板",
+        "icon": "pencil",
+        "badge_label": "[白板]",
+        "tab_color": "#f59e0b",
+        "category": "diagram",
+        "extensions": [
+          ".excalidraw",
+          ".excalidraw.json",
+          ".excalidraw.svg"
+        ],
+        "mime_types": [
+          "application/vnd.excalidraw+json"
+        ],
+        "priority": 95,
+        "hide_in_office_mode": false
+      }
+    ]
+  }
+}

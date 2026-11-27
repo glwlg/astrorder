@@ -1,6 +1,8 @@
-import { Badge, Button, Group, Modal, Stack, Text } from '@mantine/core'
-import { IconShieldCheck, IconShieldLock } from '@tabler/icons-react'
+import { useEffect, useState } from 'react'
+import { Alert, Badge, Button, Checkbox, Group, Modal, Stack, Text } from '@mantine/core'
+import { IconAlertTriangle, IconShieldCheck, IconShieldLock } from '@tabler/icons-react'
 import type { PluginView } from '../../api/extensions'
+import { useIsOfficeProfile } from '../office/appProfile'
 import { getPermissionMeta } from './types'
 import './extensions.css'
 
@@ -29,6 +31,23 @@ export function PermissionGrantModal({
   onConfirm,
   onClose,
 }: PermissionGrantModalProps) {
+  const isOfficeProfile = useIsOfficeProfile()
+  const [unsignedEsmAcknowledged, setUnsignedEsmAcknowledged] = useState(false)
+
+  useEffect(() => {
+    if (!opened) {
+      setUnsignedEsmAcknowledged(false)
+    }
+  }, [opened, plugin?.id])
+
+  const isUnsignedExternalEsm = Boolean(
+    plugin &&
+      plugin.source === 'external' &&
+      plugin.frontend?.mode === 'esm' &&
+      !plugin.signature_verified,
+  )
+  const blockedInOfficeMode = isOfficeProfile && isUnsignedExternalEsm
+
   const grantedSet = new Set(plugin?.granted_permissions || [])
   const declared = plugin?.permissions || []
   const effectiveList =
@@ -70,6 +89,15 @@ export function PermissionGrantModal({
               <Badge size="xs" variant="light" color="indigo">
                 v{plugin.version}
               </Badge>
+              {plugin.frontend?.mode === 'esm' && (
+                <Badge size="xs" variant="light" color={isUnsignedExternalEsm ? 'red' : 'teal'}>
+                  {plugin.source === 'official'
+                    ? '官方同页脚本'
+                    : plugin.signature_verified
+                      ? '已签名同页脚本'
+                      : '未签名同页脚本'}
+                </Badge>
+              )}
               {plugin.author && (
                 <Text size="xs" c="dimmed">
                   by {plugin.author}
@@ -82,6 +110,33 @@ export function PermissionGrantModal({
                 : '以下是该扩展在 plugin.json 中声明的权限范围及当前授权状态。'}
             </Text>
           </div>
+        )}
+
+        {isUnsignedExternalEsm && (
+          <Alert
+            color="red"
+            variant="light"
+            radius="md"
+            icon={<IconAlertTriangle size={16} />}
+            title="高风险提醒：未签名同页脚本插件拥有完整页面访问权限"
+          >
+            <Stack gap="xs">
+              <Text size="xs" style={{ lineHeight: 1.6 }}>
+                {blockedInOfficeMode
+                  ? '办公模式下已严格禁止启用未签名的同页 ESM 脚本插件。如需调试第三方同页脚本，请切换至研发模式并确认来源可信。'
+                  : '该外部插件声明以同页 ESM 脚本（frontend.mode = "esm"）运行且未通过 Ed25519 官方签名校验。它将在星序主页面同一 JS 上下文中执行，拥有完整页面访问权限（DOM、登录态与前端状态），仅在完全信任源码来源时启用。'}
+              </Text>
+              {mode === 'grant' && !blockedInOfficeMode && (
+                <Checkbox
+                  size="xs"
+                  color="red"
+                  checked={unsignedEsmAcknowledged}
+                  onChange={(e) => setUnsignedEsmAcknowledged(e.currentTarget.checked)}
+                  label="我已了解风险，允许在研发模式下加载未签名同页脚本插件（完全页面权限）"
+                />
+              )}
+            </Stack>
+          </Alert>
         )}
 
         {effectiveList.length === 0 ? (
@@ -137,8 +192,9 @@ export function PermissionGrantModal({
           {mode === 'grant' && onConfirm && (
             <Button
               size="xs"
-              color="indigo"
+              color={isUnsignedExternalEsm ? 'red' : 'indigo'}
               loading={loading}
+              disabled={blockedInOfficeMode || (isUnsignedExternalEsm && !unsignedEsmAcknowledged)}
               onClick={() => onConfirm(permissionsToGrant)}
             >
               授权并启用

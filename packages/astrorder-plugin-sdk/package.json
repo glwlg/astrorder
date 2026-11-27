@@ -1,0 +1,40 @@
+{
+  "name": "@astrorder/plugin-sdk",
+  "version": "1.0.0",
+  "description": "Official TypeScript types and Vite build preset for Astrorder in-page ESM plugins",
+  "type": "module",
+  "main": "./index.mjs",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./index.mjs"
+    },
+    "./ambient": {
+      "types": "./ambient.d.ts"
+    },
+    "./vite-preset": {
+      "types": "./vite-preset.d.ts",
+      "import": "./vite-preset.mjs"
+    },
+    "./vite-preset.mjs": {
+      "types": "./vite-preset.d.ts",
+      "import": "./vite-preset.mjs"
+    }
+  },
+  "files": [
+    "index.mjs",
+    "index.d.ts",
+    "ambient.d.ts",
+    "vite-preset.mjs",
+    "vite-preset.d.ts"
+  ],
+  "keywords": [
+    "astrorder",
+    "plugin",
+    "sdk",
+    "esm",
+    "vite"
+  ],
+  "license": "MIT"
+}

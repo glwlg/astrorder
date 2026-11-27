@@ -227,10 +227,129 @@
   justify-content: space-between;
 }
 
-@media (max-width: 640px) {
+@media (max-width: 767px) {
   .plugins-page {
     padding: 0;
+    min-width: 0;
+    width: 100%;
   }
+
+  .plugins-page-top {
+    margin-bottom: 14px;
+    gap: 12px;
+  }
+
+  .plugins-page-search {
+    width: 100%;
+  }
+
+  .plugins-page-search .mantine-TextInput-root {
+    width: 100% !important;
+    flex: 1 1 100%;
+  }
+
+  .plugins-tabs-shell {
+    margin-bottom: 14px;
+  }
+
+  .plugins-tablist {
+    gap: 14px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .plugins-tab {
+    min-block-size: 40px;
+  }
+
+  .plugins-panel-inner {
+    gap: 20px;
+  }
+
+  .plugins-tile {
+    padding: 13px 14px !important;
+    min-width: 0;
+  }
+
+  .plugins-tile-head {
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .plugins-tile-title-row {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .plugins-tile-footer {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+}
+
+.mobile-workspace .plugins-page {
+  min-width: 0;
+  width: 100%;
+  max-width: none;
+  padding: 0;
+}
+
+.mobile-workspace .m-office-page-main > .plugins-page {
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  padding: 14px 12px calc(28px + env(safe-area-inset-bottom, 0px));
+}
+
+.mobile-workspace .m-office-page-scroll > .plugins-page {
+  padding: 2px 0 calc(24px + env(safe-area-inset-bottom, 0px));
+}
+
+.mobile-workspace .plugins-page-top {
+  margin-bottom: 14px;
+  gap: 12px;
+}
+
+.mobile-workspace .plugins-page-search {
+  width: 100%;
+}
+
+.mobile-workspace .plugins-page-search .mantine-TextInput-root {
+  width: 100% !important;
+  flex: 1 1 100%;
+}
+
+.mobile-workspace .plugins-tablist {
+  gap: 14px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.mobile-workspace .plugins-tab {
+  min-block-size: 40px;
+}
+
+.mobile-workspace .plugins-category-section .mantine-SimpleGrid-root {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+
+.mobile-workspace .plugins-tile {
+  padding: 13px 14px !important;
+  min-width: 0;
+}
+
+.mobile-workspace .plugins-tile-head {
+  gap: 10px;
+  min-width: 0;
+}
+
+.mobile-workspace .plugins-tile-title-row {
+  min-width: 0;
+  flex: 1;
+}
+
+.mobile-workspace .plugins-tile-footer {
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 @media (pointer: coarse) {

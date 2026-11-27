@@ -42,8 +42,11 @@ stitch-*.png
 /scratch-fg-*/
 /.tools/
 /desktop-wails/bin/
+/desktop-wails/*.exe
 /desktop-wails/assets/app/
 /desktop-wails/build-package/
 /desktop-wails/rsrc_windows_*.syso
+/plugins/official-dist/
+/plugins/official/*/dist/
 /bin/
 /release/

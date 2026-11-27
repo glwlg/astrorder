@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "id": "drawio-viewer",
+  "name": "流程图与架构图编辑器",
+  "version": "1.0.0",
+  "category": "diagram",
+  "description": "支持交互式查看与全功能编辑矢量架构图、泳道图及流程图，可切换官方或自托管绘制服务",
+  "author": "Astrorder",
+  "icon": "vector-triangle",
+  "default_enabled": true,
+  "permissions": [],
+  "backend": {
+    "type": "none"
+  },
+  "settings": {
+    "mode": "none"
+  },
+  "frontend": {
+    "mode": "esm",
+    "entry": "ui/entry.js",
+    "styles": [
+      "ui/entry.css"
+    ],
+    "sdk_version": "^1.0"
+  },
+  "contributes": {
+    "viewers": [
+      {
+        "id": "drawio-viewer",
+        "title": "流程图与架构图编辑器",
+        "icon": "vector-triangle",
+        "badge_label": "[流程图]",
+        "tab_color": "var(--astr-indigo)",
+        "category": "diagram",
+        "extensions": [
+          ".drawio",
+          ".drawio.xml",
+          ".drawio.svg",
+          ".drawio.png",
+          ".dio"
+        ],
+        "mime_types": [
+          "application/vnd.jgraph.mxfile",
+          "application/x-drawio"
+        ],
+        "priority": 95,
+        "hide_in_office_mode": false
+      }
+    ]
+  }
+}

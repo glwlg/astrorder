@@ -51,9 +51,15 @@ func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 2. Public static PostMessage bridge SDK (loaded by sandboxed opaque-origin iframes).
+	// 2. Public static SDK modules:
+	//    - /api/v1/ext/_sdk/bridge.js (PostMessage bridge for sandboxed opaque-origin iframes)
+	//    - /api/v1/ext/_sdk/*.js (shared host runtime ESM shims for same-page ESM plugins)
 	if clean == SDKBridgePath {
 		serveBridgeSDK(w, r)
+		return
+	}
+	if strings.HasPrefix(clean, SDKESMDirPath) {
+		serveSDKESMModule(w, r, strings.TrimPrefix(clean, SDKESMDirPath))
 		return
 	}
 
@@ -101,6 +107,14 @@ func (m *Manager) serveExtensionNamespace(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Same-page ES module assets: /api/v1/ext/{id}/_esm/{file...}
+	if hasSub && (subpath == "_esm" || strings.HasPrefix(subpath, "_esm/")) {
+		fileRel := strings.TrimPrefix(subpath, "_esm")
+		fileRel = strings.TrimLeft(fileRel, "/")
+		m.servePluginESM(w, r, pluginID, fileRel)
+		return
+	}
+
 	// Dynamic extension endpoints require browser auth.
 	if !m.authorizeBrowser(w, r) {
 		return
@@ -108,13 +122,9 @@ func (m *Manager) serveExtensionNamespace(w http.ResponseWriter, r *http.Request
 
 	m.mu.RLock()
 	builtin, isB := m.builtins[pluginID]
-	ext, isE := m.externals[pluginID]
-	var extCopy *externalPlugin
-	if isE {
-		cp := *ext
-		extCopy = &cp
-	}
 	m.mu.RUnlock()
+
+	extCopy, isE := m.lookupDiskPlugin(pluginID)
 
 	if !isB && !isE {
 		writeJSONError(w, http.StatusNotFound, fmt.Sprintf("Plugin %q not found", pluginID))
@@ -124,12 +134,17 @@ func (m *Manager) serveExtensionNamespace(w http.ResponseWriter, r *http.Request
 	normalizedSubpath := "/" + strings.TrimLeft(subpath, "/")
 
 	if isB {
-		enabled, err := m.storage.IsEnabled(r.Context(), pluginID, true)
+		bm := builtin.Manifest()
+		bm.Normalize()
+		enabled, err := m.storage.IsEnabled(r.Context(), pluginID, EffectiveDefaultEnabled(SourceBuiltin, bm))
 		if err != nil {
 			writeJSONError(w, http.StatusInternalServerError, "Failed to read plugin state")
 			return
 		}
-		if !enabled {
+		isTestEndpoint := r.Method == http.MethodPost &&
+			bm.Settings.TestEndpoint != "" &&
+			normalizedSubpath == "/"+strings.TrimLeft(bm.Settings.TestEndpoint, "/")
+		if !enabled && !isTestEndpoint {
 			writeJSONError(w, http.StatusForbidden, fmt.Sprintf("Plugin %q is disabled", pluginID))
 			return
 		}
@@ -137,7 +152,7 @@ func (m *Manager) serveExtensionNamespace(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	enabled, err := m.storage.IsEnabled(r.Context(), pluginID, false)
+	enabled, err := m.storage.IsEnabled(r.Context(), pluginID, EffectiveDefaultEnabled(extCopy.source, extCopy.manifest))
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "Failed to read plugin state")
 		return
@@ -169,27 +184,174 @@ func (m *Manager) serveExtensionNamespace(w http.ResponseWriter, r *http.Request
 	}
 }
 
+// explicitESMContentType returns a deterministic MIME type for ESM plugin assets without
+// consulting the host OS or Windows registry (which may mislabel .js as text/plain).
+func explicitESMContentType(ext string) string {
+	switch strings.ToLower(strings.TrimSpace(ext)) {
+	case ".js", ".mjs":
+		return "text/javascript; charset=utf-8"
+	case ".css":
+		return "text/css; charset=utf-8"
+	case ".json", ".map":
+		return "application/json; charset=utf-8"
+	case ".wasm":
+		return "application/wasm"
+	case ".svg":
+		return "image/svg+xml"
+	case ".png":
+		return "image/png"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".webp":
+		return "image/webp"
+	case ".gif":
+		return "image/gif"
+	case ".ico":
+		return "image/x-icon"
+	case ".woff2":
+		return "font/woff2"
+	case ".woff":
+		return "font/woff"
+	case ".ttf":
+		return "font/ttf"
+	case ".txt", ".glsl", ".vert", ".frag", ".wgsl":
+		return "text/plain; charset=utf-8"
+	default:
+		return "application/octet-stream"
+	}
+}
+
+func (m *Manager) servePluginESM(w http.ResponseWriter, r *http.Request, pluginID, fileRel string) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+	if !m.authorizeBrowser(w, r) {
+		return
+	}
+
+	var plug *externalPlugin
+	if builtin, bf, isB := m.lookupBuiltinWithFrontend(pluginID); isB {
+		if bf == nil || bf.source != SourceOfficial || !IsFrontendESM(bf.manifest) {
+			writeJSONError(w, http.StatusNotFound, fmt.Sprintf("Plugin %q does not provide an ESM frontend", pluginID))
+			return
+		}
+		bm := builtin.Manifest()
+		bm.Normalize()
+		enabled, err := m.storage.IsEnabled(r.Context(), pluginID, EffectiveDefaultEnabled(SourceBuiltin, bm))
+		if err != nil || !enabled {
+			writeJSONError(w, http.StatusForbidden, fmt.Sprintf("Plugin %q is disabled", pluginID))
+			return
+		}
+		plug = bf
+	} else {
+		diskPlug, ok := m.lookupDiskPlugin(pluginID)
+		if !ok {
+			writeJSONError(w, http.StatusNotFound, fmt.Sprintf("Plugin %q not found", pluginID))
+			return
+		}
+		if !IsFrontendESM(diskPlug.manifest) {
+			writeJSONError(w, http.StatusNotFound, fmt.Sprintf("Plugin %q does not provide an ESM frontend", pluginID))
+			return
+		}
+
+		enabled, err := m.storage.IsEnabled(r.Context(), pluginID, EffectiveDefaultEnabled(diskPlug.source, diskPlug.manifest))
+		if err != nil || !enabled {
+			writeJSONError(w, http.StatusForbidden, fmt.Sprintf("Plugin %q is disabled", pluginID))
+			return
+		}
+
+		if policyErr := m.checkFrontendESMPolicy(r.Context(), diskPlug.source, diskPlug.manifest, diskPlug.dir); policyErr != nil {
+			writePluginError(w, policyErr)
+			return
+		}
+
+		sigVerified := verifyPluginSignature(diskPlug.manifest, diskPlug.dir, m.trustedPublicKeys)
+		reqPerms := effectiveRequiredPermissions(diskPlug.source, diskPlug.manifest, sigVerified)
+		granted, err := m.storage.GetGrantedPermissions(r.Context(), pluginID)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "Failed to read plugin permissions")
+			return
+		}
+		if _, pending := computePermissionState(reqPerms, granted); len(pending) > 0 {
+			writeJSONError(w, http.StatusForbidden, fmt.Sprintf("Plugin %q has ungranted permissions", pluginID))
+			return
+		}
+		plug = diskPlug
+	}
+
+	cleanRel, err := ValidateRelativePluginPath(fileRel)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Invalid ESM asset path: %v", err))
+		return
+	}
+	if hasHiddenPathSegment(cleanRel) {
+		writeJSONError(w, http.StatusForbidden, "Hidden files are not accessible")
+		return
+	}
+
+	fullPath := filepath.Join(plug.dir, filepath.FromSlash(cleanRel))
+	if !isPathStrictlyInside(plug.dir, fullPath) {
+		writeJSONError(w, http.StatusForbidden, "Path escapes plugin directory")
+		return
+	}
+	realBase, err := filepath.EvalSymlinks(plug.dir)
+	if err != nil {
+		writeJSONError(w, http.StatusNotFound, "Plugin directory unavailable")
+		return
+	}
+	realTarget, err := filepath.EvalSymlinks(fullPath)
+	if err != nil {
+		writeJSONError(w, http.StatusNotFound, "ESM asset not found")
+		return
+	}
+	if !isPathStrictlyInside(realBase, realTarget) {
+		writeJSONError(w, http.StatusForbidden, "Symlink escapes plugin directory")
+		return
+	}
+	resolvedRel, relErr := filepath.Rel(realBase, realTarget)
+	if relErr != nil || hasHiddenPathSegment(filepath.ToSlash(resolvedRel)) {
+		writeJSONError(w, http.StatusForbidden, "Hidden files are not accessible")
+		return
+	}
+
+	info, err := os.Stat(realTarget)
+	if err != nil || info.IsDir() || !info.Mode().IsRegular() {
+		writeJSONError(w, http.StatusNotFound, "ESM asset not found")
+		return
+	}
+
+	f, err := os.Open(realTarget)
+	if err != nil {
+		writeJSONError(w, http.StatusNotFound, "ESM asset not found")
+		return
+	}
+	defer f.Close()
+
+	w.Header().Set("Content-Type", explicitESMContentType(filepath.Ext(realTarget)))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	if v := strings.TrimSpace(r.URL.Query().Get("v")); v != "" && plug.contentDigest != "" && v == plug.contentDigest {
+		w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+	} else {
+		w.Header().Set("Cache-Control", "no-store")
+	}
+	http.ServeContent(w, r, filepath.Base(realTarget), info.ModTime(), f)
+}
+
 func (m *Manager) servePluginStaticUI(w http.ResponseWriter, r *http.Request, pluginID, fileRel string) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
-	m.mu.RLock()
-	ext, isE := m.externals[pluginID]
-	var extCopy *externalPlugin
-	if isE {
-		cp := *ext
-		extCopy = &cp
-	}
-	m.mu.RUnlock()
-
-	if extCopy == nil {
+	extCopy, ok := m.lookupDiskPlugin(pluginID)
+	if !ok || extCopy == nil {
 		writeJSONError(w, http.StatusNotFound, fmt.Sprintf("Plugin %q UI not found", pluginID))
 		return
 	}
 
-	enabled, err := m.storage.IsEnabled(r.Context(), pluginID, false)
+	enabled, err := m.storage.IsEnabled(r.Context(), pluginID, EffectiveDefaultEnabled(extCopy.source, extCopy.manifest))
 	if err != nil || !enabled {
 		writeJSONError(w, http.StatusForbidden, fmt.Sprintf("Plugin %q is disabled", pluginID))
 		return
@@ -210,11 +372,9 @@ func (m *Manager) servePluginStaticUI(w http.ResponseWriter, r *http.Request, pl
 		return
 	}
 	// Block hidden files (e.g. .env) from being served over static UI route.
-	for _, seg := range strings.Split(cleanRel, "/") {
-		if strings.HasPrefix(seg, ".") {
-			writeJSONError(w, http.StatusForbidden, "Hidden files are not accessible")
-			return
-		}
+	if hasHiddenPathSegment(cleanRel) {
+		writeJSONError(w, http.StatusForbidden, "Hidden files are not accessible")
+		return
 	}
 
 	fullPath := filepath.Join(extCopy.dir, filepath.FromSlash(cleanRel))
@@ -236,6 +396,11 @@ func (m *Manager) servePluginStaticUI(w http.ResponseWriter, r *http.Request, pl
 		writeJSONError(w, http.StatusForbidden, "Symlink escapes plugin directory")
 		return
 	}
+	resolvedRel, relErr := filepath.Rel(realBase, realTarget)
+	if relErr != nil || hasHiddenPathSegment(filepath.ToSlash(resolvedRel)) {
+		writeJSONError(w, http.StatusForbidden, "Hidden files are not accessible")
+		return
+	}
 
 	info, err := os.Stat(realTarget)
 	if err != nil || info.IsDir() {
@@ -254,7 +419,12 @@ func (m *Manager) servePluginStaticUI(w http.ResponseWriter, r *http.Request, pl
 			hostOrigin,
 		),
 	)
-	if extType := mime.TypeByExtension(filepath.Ext(realTarget)); extType != "" {
+	ext := strings.ToLower(filepath.Ext(realTarget))
+	if ext == ".html" || ext == ".htm" {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	} else if ct := explicitESMContentType(ext); ct != "application/octet-stream" {
+		w.Header().Set("Content-Type", ct)
+	} else if extType := mime.TypeByExtension(ext); extType != "" {
 		w.Header().Set("Content-Type", extType)
 	}
 	http.ServeFile(w, r, realTarget)

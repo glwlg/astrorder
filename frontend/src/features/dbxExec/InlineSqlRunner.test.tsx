@@ -6,9 +6,8 @@ import type { Session } from '../../domain/types'
 import { MarkdownContent } from '../../components/MarkdownContent'
 import { useAstrorderStore } from '../../state/store'
 import { usePluginSettingsStore } from '../plugins/pluginSettingsStore'
-import '../sidecar/viewers/dbx/index'
-import * as dbxStore from '../sidecar/viewers/dbx/dbxStore'
-import { DBX_PLUGIN_ID } from '../sidecar/viewers/dbx/DbxViewer'
+import * as databaseTool from '../sidecar/databaseTool'
+import { DBX_PLUGIN_ID, databaseToolRegistry } from '../sidecar/databaseTool'
 import { useProjectDbStore } from './projectDbStore'
 
 const sampleSession: Session = {
@@ -25,6 +24,14 @@ const sampleSession: Session = {
 
 describe('Inline SQL execution in MarkdownContent', () => {
   beforeEach(() => {
+    databaseToolRegistry.register({
+      id: DBX_PLUGIN_ID,
+      implementationName: 'DBX',
+      mediaType: 'application/x-astrorder-dbx',
+      openWorkbench: vi.fn(),
+      openSqlFile: vi.fn(async () => {}),
+      openSqlSnippet: vi.fn(),
+    })
     usePluginSettingsStore.setState({
       enabledPlugins: { [DBX_PLUGIN_ID]: true },
       pluginConfigs: { [DBX_PLUGIN_ID]: { provider: 'dbx' } },
@@ -83,6 +90,7 @@ describe('Inline SQL execution in MarkdownContent', () => {
 
   afterEach(() => {
     cleanup()
+    databaseToolRegistry.unregister(DBX_PLUGIN_ID)
     vi.restoreAllMocks()
   })
 
@@ -227,7 +235,7 @@ describe('Inline SQL execution in MarkdownContent', () => {
     vi.spyOn(api, 'checkWorkspaceFiles').mockResolvedValue({
       existing: ['backend/migrations/007_audit_updated_by.sql'],
     })
-    vi.spyOn(dbxStore, 'readSqlText').mockResolvedValue(
+    vi.spyOn(databaseTool, 'readSqlText').mockResolvedValue(
       'ALTER TABLE agent_maintenance_nodes ADD COLUMN IF NOT EXISTS updated_by text;',
     )
     const execSpy = vi.spyOn(api, 'executeDbxSql').mockResolvedValue({
@@ -287,7 +295,7 @@ describe('Inline SQL execution in MarkdownContent', () => {
     vi.spyOn(api, 'checkWorkspaceFiles').mockResolvedValue({
       existing: ['backend/migrations/check.sql'],
     })
-    vi.spyOn(dbxStore, 'readSqlText').mockResolvedValue('SELECT 1 AS ready;')
+    vi.spyOn(databaseTool, 'readSqlText').mockResolvedValue('SELECT 1 AS ready;')
     const execSpy = vi.spyOn(api, 'executeDbxSql').mockResolvedValue({
       ok: true,
       connection_id: 'conn-local',

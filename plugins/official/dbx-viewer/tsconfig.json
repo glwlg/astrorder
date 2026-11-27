@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "verbatimModuleSyntax": true,
+    "typeRoots": [
+      "../../../frontend/node_modules/@types"
+    ],
+    "paths": {
+      "@astrorder/plugin-sdk": ["../../../packages/astrorder-plugin-sdk/index.d.ts"],
+      "@astrorder/sdk": ["../../../packages/astrorder-plugin-sdk/index.d.ts"],
+      "react": ["../../../frontend/node_modules/@types/react/index.d.ts"],
+      "react/jsx-runtime": ["../../../frontend/node_modules/@types/react/jsx-runtime.d.ts"],
+      "@mantine/core": ["../../../frontend/node_modules/@mantine/core/lib/index.d.ts"],
+      "@mantine/notifications": ["../../../frontend/node_modules/@mantine/notifications/lib/index.d.ts"]
+    }
+  },
+  "include": [
+    "src"
+  ]
+}

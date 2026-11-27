@@ -3,6 +3,7 @@ package pluginhost
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -27,50 +28,77 @@ const (
 )
 
 type externalPlugin struct {
-	manifest Manifest
-	dir      string
+	manifest          Manifest
+	dir               string
+	source            string // SourceOfficial or SourceExternal
+	contentDigest     string
+	signatureVerified bool
 }
 
-// Manager coordinates builtin and external plugins, their storage, permissions,
+// Manager coordinates builtin, official, and external plugins, their storage, permissions,
 // subprocesses, UI slots, agent capabilities, signals, and skills.
 type Manager struct {
-	mu              sync.RWMutex
-	builtins        map[string]BuiltinPlugin
-	externals       map[string]*externalPlugin
-	store           *store.Store
-	authorizer      BrowserAuthorizer
-	resolver        *targetfs.Resolver
-	storage         *Storage
-	supervisor      *Supervisor
-	pluginsDir      string
-	logger          *slog.Logger
-	rpcClient       *http.Client
-	onSkillsChanged func()
+	mu                 sync.RWMutex
+	builtins           map[string]BuiltinPlugin
+	builtinFrontends   map[string]*externalPlugin
+	officials          map[string]*externalPlugin
+	externals          map[string]*externalPlugin
+	store              *store.Store
+	authorizer         BrowserAuthorizer
+	resolver           *targetfs.Resolver
+	storage            *Storage
+	supervisor         *Supervisor
+	pluginsDir         string
+	officialPluginsDir string
+	legacyPluginsDir   string
+	trustedPublicKeys  map[string]ed25519.PublicKey
+	appProfileOverride string
+	renameFn           func(oldPath, newPath string) error
+	logger             *slog.Logger
+	rpcClient          *http.Client
+	onSkillsChanged    func()
+	onChange           func(ExtensionChangeEvent)
 }
 
-// NewManager constructs a pluginhost Manager and scans PluginsDir if non-empty.
+// NewManager constructs a pluginhost Manager and scans OfficialPluginsDir / PluginsDir if non-empty.
 func NewManager(opts Options) *Manager {
 	logger := opts.Logger
 	if logger == nil {
 		logger = slog.Default()
 	}
+	var trusted map[string]ed25519.PublicKey
+	if len(opts.TrustedPublicKeys) > 0 {
+		trusted = make(map[string]ed25519.PublicKey, len(opts.TrustedPublicKeys))
+		for k, v := range opts.TrustedPublicKeys {
+			cp := make(ed25519.PublicKey, len(v))
+			copy(cp, v)
+			trusted[k] = cp
+		}
+	}
 	m := &Manager{
-		builtins:   map[string]BuiltinPlugin{},
-		externals:  map[string]*externalPlugin{},
-		store:      opts.Store,
-		authorizer: opts.Authorizer,
-		resolver:   opts.Resolver,
-		storage:    NewStorage(opts.Store, opts.PluginsDir),
-		supervisor: NewSupervisor(opts.HostBaseURL, logger),
-		pluginsDir: strings.TrimSpace(opts.PluginsDir),
-		logger:     logger,
+		builtins:           map[string]BuiltinPlugin{},
+		builtinFrontends:   map[string]*externalPlugin{},
+		officials:          map[string]*externalPlugin{},
+		externals:          map[string]*externalPlugin{},
+		store:              opts.Store,
+		authorizer:         opts.Authorizer,
+		resolver:           opts.Resolver,
+		storage:            NewStorage(opts.Store, opts.PluginsDir),
+		supervisor:         NewSupervisor(opts.HostBaseURL, logger),
+		pluginsDir:         strings.TrimSpace(opts.PluginsDir),
+		officialPluginsDir: strings.TrimSpace(opts.OfficialPluginsDir),
+		legacyPluginsDir:   strings.TrimSpace(opts.LegacyPluginsDir),
+		trustedPublicKeys:  trusted,
+		appProfileOverride: strings.TrimSpace(opts.AppProfileOverride),
+		logger:             logger,
+		onChange:           opts.OnChange,
 		rpcClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
 	}
-	if m.pluginsDir != "" {
-		if err := m.ReloadExternal(context.Background()); err != nil {
-			m.logger.Warn("initial external plugin scan failed", "dir", m.pluginsDir, "error", err)
+	if m.officialPluginsDir != "" || m.pluginsDir != "" || m.legacyPluginsDir != "" {
+		if err := m.reloadDiskPlugins(context.Background(), false); err != nil {
+			m.logger.Warn("initial plugin directory scan failed", "official_dir", m.officialPluginsDir, "dir", m.pluginsDir, "error", err)
 		}
 	}
 	return m
@@ -83,7 +111,24 @@ func (m *Manager) SetHostBaseURL(baseURL string) {
 
 // Close shuts down all running external plugin subprocesses.
 func (m *Manager) Close() {
-	m.supervisor.Close()
+	_ = m.CloseContext(context.Background())
+}
+
+// CloseContext shuts down all running external plugin subprocesses and builtin
+// lifecycle drivers, blocking until shutdown finishes or ctx expires.
+func (m *Manager) CloseContext(ctx context.Context) error {
+	m.mu.RLock()
+	builtins := make([]BuiltinPlugin, 0, len(m.builtins))
+	for _, b := range m.builtins {
+		builtins = append(builtins, b)
+	}
+	m.mu.RUnlock()
+	for _, b := range builtins {
+		if lc, ok := b.(BuiltinLifecycle); ok {
+			_ = lc.Close(ctx)
+		}
+	}
+	return m.supervisor.CloseContext(ctx)
 }
 
 // SetOnSkillsChanged registers a non-blocking callback invoked whenever plugin
@@ -91,6 +136,14 @@ func (m *Manager) Close() {
 func (m *Manager) SetOnSkillsChanged(fn func()) {
 	m.mu.Lock()
 	m.onSkillsChanged = fn
+	m.mu.Unlock()
+}
+
+// SetOnChange registers a callback invoked whenever plugins are installed,
+// updated, uninstalled, enabled, disabled, or reloaded.
+func (m *Manager) SetOnChange(fn func(ExtensionChangeEvent)) {
+	m.mu.Lock()
+	m.onChange = fn
 	m.mu.Unlock()
 }
 
@@ -103,7 +156,21 @@ func (m *Manager) notifySkillsChanged() {
 	}
 }
 
+func (m *Manager) notifyChanged(ev ExtensionChangeEvent) {
+	if ev.Timestamp == "" {
+		ev.Timestamp = time.Now().UTC().Format(time.RFC3339)
+	}
+	m.mu.RLock()
+	fn := m.onChange
+	m.mu.RUnlock()
+	if fn != nil {
+		fn(ev)
+	}
+}
+
 // RegisterBuiltin registers an in-process official plugin with the Manager.
+// If OfficialPluginsDir already discovered a matching official ESM frontend package for
+// the same plugin ID, it is preserved and bound as the builtin's hybrid ESM frontend.
 func (m *Manager) RegisterBuiltin(p BuiltinPlugin) error {
 	if p == nil {
 		return fmt.Errorf("%w: builtin plugin is nil", ErrInvalid)
@@ -118,6 +185,12 @@ func (m *Manager) RegisterBuiltin(p BuiltinPlugin) error {
 	}
 	m.mu.Lock()
 	m.builtins[manifest.ID] = p
+	if off, ok := m.officials[manifest.ID]; ok {
+		if off.source == SourceOfficial && IsFrontendESM(off.manifest) {
+			m.builtinFrontends[manifest.ID] = off
+		}
+		delete(m.officials, manifest.ID)
+	}
 	delete(m.externals, manifest.ID)
 	m.mu.Unlock()
 	return nil
@@ -130,7 +203,78 @@ func (m *Manager) isBuiltin(id string) bool {
 	return ok
 }
 
-// ListPlugins returns sorted PluginViews for all builtin and external plugins.
+func (m *Manager) lookupBuiltinFrontend(id string) (*externalPlugin, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if bf, ok := m.builtinFrontends[id]; ok {
+		cp := *bf
+		return &cp, true
+	}
+	return nil, false
+}
+
+func (m *Manager) lookupBuiltinWithFrontend(id string) (BuiltinPlugin, *externalPlugin, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	b, ok := m.builtins[id]
+	if !ok {
+		return nil, nil, false
+	}
+	if bf, hasBF := m.builtinFrontends[id]; hasBF {
+		cp := *bf
+		return b, &cp, true
+	}
+	return b, nil, true
+}
+
+func (m *Manager) isOfficial(id string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	_, ok := m.officials[id]
+	return ok
+}
+
+func (m *Manager) lookupDiskPlugin(id string) (*externalPlugin, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if off, ok := m.officials[id]; ok {
+		cp := *off
+		return &cp, true
+	}
+	if ext, ok := m.externals[id]; ok {
+		cp := *ext
+		return &cp, true
+	}
+	return nil, false
+}
+
+func (m *Manager) snapshotDiskPlugins() []*externalPlugin {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]*externalPlugin, 0, len(m.officials)+len(m.externals))
+	for _, o := range m.officials {
+		cp := *o
+		out = append(out, &cp)
+	}
+	for _, e := range m.externals {
+		cp := *e
+		out = append(out, &cp)
+	}
+	return out
+}
+
+func sourceSortRank(src string) int {
+	switch src {
+	case SourceBuiltin:
+		return 0
+	case SourceOfficial:
+		return 1
+	default:
+		return 2
+	}
+}
+
+// ListPlugins returns sorted PluginViews for all builtin, official, and external plugins.
 func (m *Manager) ListPlugins(ctx context.Context) ([]PluginView, error) {
 	enabledMap, err := m.storage.GetEnabledMap(ctx)
 	if err != nil {
@@ -143,27 +287,39 @@ func (m *Manager) ListPlugins(ctx context.Context) ([]PluginView, error) {
 
 	m.mu.RLock()
 	builtins := make([]BuiltinPlugin, 0, len(m.builtins))
-	for _, b := range m.builtins {
+	builtinFrontends := make(map[string]*externalPlugin, len(m.builtinFrontends))
+	for id, b := range m.builtins {
 		builtins = append(builtins, b)
+		if bf, ok := m.builtinFrontends[id]; ok {
+			cp := *bf
+			builtinFrontends[id] = &cp
+		}
 	}
-	externals := make([]*externalPlugin, 0, len(m.externals))
+	diskPlugins := make([]*externalPlugin, 0, len(m.officials)+len(m.externals))
+	for _, o := range m.officials {
+		cp := *o
+		diskPlugins = append(diskPlugins, &cp)
+	}
 	for _, e := range m.externals {
 		cp := *e
-		externals = append(externals, &cp)
+		diskPlugins = append(diskPlugins, &cp)
 	}
 	m.mu.RUnlock()
 
-	views := make([]PluginView, 0, len(builtins)+len(externals))
+	views := make([]PluginView, 0, len(builtins)+len(diskPlugins))
 	for _, b := range builtins {
-		views = append(views, m.buildBuiltinView(b, enabledMap))
+		bm := b.Manifest()
+		bm.Normalize()
+		views = append(views, m.buildBuiltinView(b, builtinFrontends[bm.ID], enabledMap))
 	}
-	for _, e := range externals {
-		views = append(views, m.buildExternalView(e, enabledMap, permMap))
+	for _, p := range diskPlugins {
+		views = append(views, m.buildDiskPluginView(p, enabledMap, permMap))
 	}
 
 	sort.Slice(views, func(i, j int) bool {
-		if views[i].Source != views[j].Source {
-			return views[i].Source == SourceBuiltin
+		ri, rj := sourceSortRank(views[i].Source), sourceSortRank(views[j].Source)
+		if ri != rj {
+			return ri < rj
 		}
 		return views[i].ID < views[j].ID
 	})
@@ -181,39 +337,23 @@ func (m *Manager) GetPlugin(ctx context.Context, id string) (PluginView, error) 
 		return PluginView{}, err
 	}
 
-	m.mu.RLock()
-	b, isB := m.builtins[id]
-	e, isE := m.externals[id]
-	var extCopy *externalPlugin
-	if isE {
-		cp := *e
-		extCopy = &cp
+	if b, bf, isB := m.lookupBuiltinWithFrontend(id); isB {
+		return m.buildBuiltinView(b, bf, enabledMap), nil
 	}
-	m.mu.RUnlock()
-
-	if isB {
-		return m.buildBuiltinView(b, enabledMap), nil
-	}
-	if extCopy != nil {
-		return m.buildExternalView(extCopy, enabledMap, permMap), nil
+	if plug, ok := m.lookupDiskPlugin(id); ok {
+		return m.buildDiskPluginView(plug, enabledMap, permMap), nil
 	}
 	return PluginView{}, fmt.Errorf("%w: plugin %q", ErrNotFound, id)
 }
 
-// SetEnabled enables or disables a plugin, enforcing permission grants for external plugins
-// and starting/stopping process backends accordingly.
+// SetEnabled enables or disables a plugin, enforcing permission grants and trust policies
+// for official/external plugins and starting/stopping process backends accordingly.
 func (m *Manager) SetEnabled(ctx context.Context, id string, enabled bool, grantPermissions []string) (PluginView, []string, error) {
-	m.mu.RLock()
-	_, isB := m.builtins[id]
-	ext, isE := m.externals[id]
-	var extCopy *externalPlugin
-	if isE {
-		cp := *ext
-		extCopy = &cp
-	}
-	m.mu.RUnlock()
+	_, bf, isB := m.lookupBuiltinWithFrontend(id)
 
-	if !isB && !isE {
+	plug, isDisk := m.lookupDiskPlugin(id)
+
+	if !isB && !isDisk {
 		return PluginView{}, nil, fmt.Errorf("%w: plugin %q", ErrNotFound, id)
 	}
 
@@ -221,7 +361,28 @@ func (m *Manager) SetEnabled(ctx context.Context, id string, enabled bool, grant
 		if err := m.storage.SetEnabled(ctx, id, enabled); err != nil {
 			return PluginView{}, nil, err
 		}
+		if b, _, ok := m.lookupBuiltinWithFrontend(id); ok {
+			if lc, ok := b.(BuiltinLifecycle); ok {
+				lc.OnEnabledChanged(ctx, enabled)
+			}
+		}
 		m.notifySkillsChanged()
+		action := "disabled"
+		if enabled {
+			action = "enabled"
+		}
+		enabledCopy := enabled
+		digest := ""
+		if bf != nil {
+			digest = bf.contentDigest
+		}
+		m.notifyChanged(ExtensionChangeEvent{
+			Action:        action,
+			PluginID:      id,
+			Source:        SourceBuiltin,
+			Enabled:       &enabledCopy,
+			ContentDigest: digest,
+		})
 		view, err := m.GetPlugin(ctx, id)
 		return view, nil, err
 	}
@@ -232,11 +393,33 @@ func (m *Manager) SetEnabled(ctx context.Context, id string, enabled bool, grant
 		}
 		m.supervisor.Stop(id)
 		m.notifySkillsChanged()
+		enabledCopy := false
+		m.notifyChanged(ExtensionChangeEvent{
+			Action:        "disabled",
+			PluginID:      id,
+			Source:        plug.source,
+			Enabled:       &enabledCopy,
+			ContentDigest: plug.contentDigest,
+		})
 		view, err := m.GetPlugin(ctx, id)
 		return view, nil, err
 	}
 
-	// External enable path: merge any newly granted permissions first.
+	// Disk plugin (official or external) enable path: enforce trust/security policies
+	// BEFORE persisting any granted permissions so a 403 policy rejection has zero side effects.
+	if plug.manifest.Backend.Type == BackendTypeProcess && plug.source == SourceExternal {
+		if policyErr := m.checkExternalProcessPolicy(ctx, plug.manifest, plug.dir); policyErr != nil {
+			view, _ := m.GetPlugin(ctx, id)
+			return view, nil, policyErr
+		}
+	}
+	if IsFrontendESM(plug.manifest) {
+		if policyErr := m.checkFrontendESMPolicy(ctx, plug.source, plug.manifest, plug.dir); policyErr != nil {
+			view, _ := m.GetPlugin(ctx, id)
+			return view, nil, policyErr
+		}
+	}
+
 	currentGranted, err := m.storage.GetGrantedPermissions(ctx, id)
 	if err != nil {
 		return PluginView{}, nil, err
@@ -249,7 +432,9 @@ func (m *Manager) SetEnabled(ctx context.Context, id string, enabled bool, grant
 		currentGranted = merged
 	}
 
-	_, pending := computePermissionState(extCopy.manifest.Permissions, currentGranted)
+	sigVerified := verifyPluginSignature(plug.manifest, plug.dir, m.trustedPublicKeys)
+	reqPerms := effectiveRequiredPermissions(plug.source, plug.manifest, sigVerified)
+	granted, pending := computePermissionState(reqPerms, currentGranted)
 	if len(pending) > 0 {
 		view, _ := m.GetPlugin(ctx, id)
 		return view, pending, ErrPermissionGrantRequired
@@ -259,40 +444,48 @@ func (m *Manager) SetEnabled(ctx context.Context, id string, enabled bool, grant
 		return PluginView{}, nil, err
 	}
 
-	if extCopy.manifest.Backend.Type == BackendTypeProcess {
-		if startErr := m.supervisor.Start(ctx, extCopy.manifest, extCopy.dir); startErr != nil {
+	if plug.manifest.Backend.Type == BackendTypeProcess {
+		if startErr := m.supervisor.Start(ctx, plug.manifest, plug.dir, granted); startErr != nil {
 			m.logger.Warn("plugin process failed to start on enable", "plugin_id", id, "error", startErr)
 		}
 	}
 
 	m.notifySkillsChanged()
+	enabledCopy := true
+	m.notifyChanged(ExtensionChangeEvent{
+		Action:        "enabled",
+		PluginID:      id,
+		Source:        plug.source,
+		Enabled:       &enabledCopy,
+		ContentDigest: plug.contentDigest,
+	})
 	view, err := m.GetPlugin(ctx, id)
 	return view, nil, err
 }
 
-// Restart restarts an enabled external process plugin.
+// Restart restarts an enabled official or external process plugin.
 func (m *Manager) Restart(ctx context.Context, id string) (PluginView, error) {
 	m.mu.RLock()
-	ext, isE := m.externals[id]
-	var extCopy *externalPlugin
-	if isE {
-		cp := *ext
-		extCopy = &cp
-	}
 	_, isB := m.builtins[id]
 	m.mu.RUnlock()
 
 	if isB {
 		return PluginView{}, fmt.Errorf("%w: builtin plugin %q does not have a restartable process", ErrInvalid, id)
 	}
-	if extCopy == nil {
+	plug, ok := m.lookupDiskPlugin(id)
+	if !ok {
 		return PluginView{}, fmt.Errorf("%w: plugin %q", ErrNotFound, id)
 	}
-	if extCopy.manifest.Backend.Type != BackendTypeProcess {
-		return PluginView{}, fmt.Errorf("%w: plugin %q backend type %q cannot be restarted", ErrInvalid, id, extCopy.manifest.Backend.Type)
+	if plug.manifest.Backend.Type != BackendTypeProcess {
+		return PluginView{}, fmt.Errorf("%w: plugin %q backend type %q cannot be restarted", ErrInvalid, id, plug.manifest.Backend.Type)
+	}
+	if plug.source == SourceExternal {
+		if policyErr := m.checkExternalProcessPolicy(ctx, plug.manifest, plug.dir); policyErr != nil {
+			return PluginView{}, policyErr
+		}
 	}
 
-	enabled, err := m.storage.IsEnabled(ctx, id, false)
+	enabled, err := m.storage.IsEnabled(ctx, id, EffectiveDefaultEnabled(plug.source, plug.manifest))
 	if err != nil {
 		return PluginView{}, err
 	}
@@ -303,13 +496,13 @@ func (m *Manager) Restart(ctx context.Context, id string) (PluginView, error) {
 	if err != nil {
 		return PluginView{}, err
 	}
-	_, pending := computePermissionState(extCopy.manifest.Permissions, granted)
+	effectiveGranted, pending := computePermissionState(plug.manifest.Permissions, granted)
 	if len(pending) > 0 {
 		return PluginView{}, ErrPermissionGrantRequired
 	}
 
 	m.supervisor.Stop(id)
-	_ = m.supervisor.Start(ctx, extCopy.manifest, extCopy.dir)
+	_ = m.supervisor.Start(ctx, plug.manifest, plug.dir, effectiveGranted)
 	return m.GetPlugin(ctx, id)
 }
 
@@ -362,19 +555,15 @@ func (m *Manager) ListAgentCapabilities(ctx context.Context) []AgentCapabilityIn
 	for _, b := range m.builtins {
 		builtins = append(builtins, b)
 	}
-	externals := make([]*externalPlugin, 0, len(m.externals))
-	for _, e := range m.externals {
-		cp := *e
-		externals = append(externals, &cp)
-	}
 	m.mu.RUnlock()
+	externals := m.snapshotDiskPlugins()
 
 	out := []AgentCapabilityInfo{}
 
 	for _, b := range builtins {
 		manifest := b.Manifest()
 		manifest.Normalize()
-		if !isPluginEnabledInMap(enabledMap, manifest.ID, true) {
+		if !isPluginEnabledInMap(enabledMap, manifest.ID, EffectiveDefaultEnabled(SourceBuiltin, manifest)) {
 			continue
 		}
 		for _, capItem := range manifest.Contributes.AgentCapabilities {
@@ -393,7 +582,7 @@ func (m *Manager) ListAgentCapabilities(ctx context.Context) []AgentCapabilityIn
 
 	for _, ext := range externals {
 		manifest := ext.manifest
-		if !isPluginEnabledInMap(enabledMap, manifest.ID, false) {
+		if !isPluginEnabledInMap(enabledMap, manifest.ID, EffectiveDefaultEnabled(ext.source, manifest)) {
 			continue
 		}
 		granted, pending := computePermissionState(manifest.Permissions, permMap[manifest.ID])
@@ -428,20 +617,18 @@ func (m *Manager) InvokeAgentCapability(ctx context.Context, pluginID, capID str
 
 	m.mu.RLock()
 	builtin, isB := m.builtins[pluginID]
-	ext, isE := m.externals[pluginID]
-	var extCopy *externalPlugin
-	if isE {
-		cp := *ext
-		extCopy = &cp
-	}
 	m.mu.RUnlock()
+
+	extCopy, isE := m.lookupDiskPlugin(pluginID)
 
 	if !isB && !isE {
 		return nil, fmt.Errorf("%w: plugin %q", ErrNotFound, pluginID)
 	}
 
 	if isB {
-		enabled, err := m.storage.IsEnabled(ctx, pluginID, true)
+		bm := builtin.Manifest()
+		bm.Normalize()
+		enabled, err := m.storage.IsEnabled(ctx, pluginID, EffectiveDefaultEnabled(SourceBuiltin, bm))
 		if err != nil {
 			return nil, err
 		}
@@ -451,8 +638,8 @@ func (m *Manager) InvokeAgentCapability(ctx context.Context, pluginID, capID str
 		return builtin.InvokeCapability(ctx, capID, payload)
 	}
 
-	// External plugin invocation.
-	enabled, err := m.storage.IsEnabled(ctx, pluginID, false)
+	// Official / External disk plugin invocation.
+	enabled, err := m.storage.IsEnabled(ctx, pluginID, EffectiveDefaultEnabled(extCopy.source, extCopy.manifest))
 	if err != nil {
 		return nil, err
 	}
@@ -563,19 +750,15 @@ func (m *Manager) CollectSignals(ctx context.Context, kind string, q SignalQuery
 	for _, b := range m.builtins {
 		builtins = append(builtins, b)
 	}
-	externals := make([]*externalPlugin, 0, len(m.externals))
-	for _, e := range m.externals {
-		cp := *e
-		externals = append(externals, &cp)
-	}
 	m.mu.RUnlock()
+	externals := m.snapshotDiskPlugins()
 
 	results := []SignalItem{}
 
 	for _, b := range builtins {
 		manifest := b.Manifest()
 		manifest.Normalize()
-		if !isPluginEnabledInMap(enabledMap, manifest.ID, true) {
+		if !isPluginEnabledInMap(enabledMap, manifest.ID, EffectiveDefaultEnabled(SourceBuiltin, manifest)) {
 			continue
 		}
 		if kind != "" && !declaresSignalKind(manifest, kind) {
@@ -599,7 +782,7 @@ func (m *Manager) CollectSignals(ctx context.Context, kind string, q SignalQuery
 
 	for _, ext := range externals {
 		manifest := ext.manifest
-		if !isPluginEnabledInMap(enabledMap, manifest.ID, false) {
+		if !isPluginEnabledInMap(enabledMap, manifest.ID, EffectiveDefaultEnabled(ext.source, manifest)) {
 			continue
 		}
 		granted, pending := computePermissionState(manifest.Permissions, permMap[manifest.ID])
@@ -734,12 +917,8 @@ func (m *Manager) ListEnabledSkills(ctx context.Context) []PluginSkillEntry {
 	for _, b := range m.builtins {
 		builtins = append(builtins, b)
 	}
-	externals := make([]*externalPlugin, 0, len(m.externals))
-	for _, e := range m.externals {
-		cp := *e
-		externals = append(externals, &cp)
-	}
 	m.mu.RUnlock()
+	externals := m.snapshotDiskPlugins()
 
 	sort.Slice(builtins, func(i, j int) bool {
 		return builtins[i].Manifest().ID < builtins[j].Manifest().ID
@@ -752,7 +931,7 @@ func (m *Manager) ListEnabledSkills(ctx context.Context) []PluginSkillEntry {
 	for _, b := range builtins {
 		manifest := b.Manifest()
 		manifest.Normalize()
-		if !isPluginEnabledInMap(enabledMap, manifest.ID, true) {
+		if !isPluginEnabledInMap(enabledMap, manifest.ID, EffectiveDefaultEnabled(SourceBuiltin, manifest)) {
 			continue
 		}
 		provider, ok := b.(BuiltinSkillProvider)
@@ -773,7 +952,7 @@ func (m *Manager) ListEnabledSkills(ctx context.Context) []PluginSkillEntry {
 		}
 	}
 	for _, ext := range externals {
-		if !isPluginEnabledInMap(enabledMap, ext.manifest.ID, false) {
+		if !isPluginEnabledInMap(enabledMap, ext.manifest.ID, EffectiveDefaultEnabled(ext.source, ext.manifest)) {
 			continue
 		}
 		_, pending := computePermissionState(ext.manifest.Permissions, permMap[ext.manifest.ID])
@@ -837,13 +1016,30 @@ func (m *Manager) resolveExternalBackendURL(ctx context.Context, ext *externalPl
 		if ext.manifest.Backend.URL == "" {
 			return "", fmt.Errorf("plugin %q has empty http backend url", ext.manifest.ID)
 		}
+		if parsed, err := url.Parse(ext.manifest.Backend.URL); err == nil && !isLoopbackHost(parsed.Hostname()) {
+			granted, _ := m.storage.GetGrantedPermissions(ctx, ext.manifest.ID)
+			if !hasEffectiveNetworkOutbound(ext.manifest, granted) {
+				m.logger.Warn("blocked non-loopback http plugin backend without network:outbound permission", "plugin_id", ext.manifest.ID, "host", parsed.Hostname())
+				return "", fmt.Errorf("%w: plugin %q requires %s permission for non-loopback backend", ErrPermissionDenied, ext.manifest.ID, PermNetworkOutbound)
+			}
+		}
 		return ext.manifest.Backend.URL, nil
 	case BackendTypeProcess:
+		if ext.source == SourceExternal {
+			if policyErr := m.checkExternalProcessPolicy(ctx, ext.manifest, ext.dir); policyErr != nil {
+				m.supervisor.Stop(ext.manifest.ID)
+				return "", policyErr
+			}
+		}
 		st := m.supervisor.Status(ext.manifest.ID)
 		if st.State == RuntimeStateReady && st.BaseURL != "" {
 			return st.BaseURL, nil
 		}
-		if err := m.supervisor.Start(ctx, ext.manifest, ext.dir); err != nil {
+		granted, err := m.storage.GetGrantedPermissions(ctx, ext.manifest.ID)
+		if err != nil {
+			return "", err
+		}
+		if err := m.supervisor.Start(ctx, ext.manifest, ext.dir, granted); err != nil {
 			return "", err
 		}
 		st = m.supervisor.Status(ext.manifest.ID)
@@ -862,54 +1058,142 @@ func (m *Manager) exists(id string) bool {
 	if _, ok := m.builtins[id]; ok {
 		return true
 	}
+	if _, ok := m.officials[id]; ok {
+		return true
+	}
 	_, ok := m.externals[id]
 	return ok
 }
 
-func (m *Manager) buildBuiltinView(b BuiltinPlugin, enabledMap map[string]bool) PluginView {
+func cloneFrontendSpec(spec *FrontendSpec) *FrontendSpec {
+	if spec == nil {
+		return nil
+	}
+	cp := *spec
+	if len(spec.Styles) > 0 {
+		cp.Styles = append([]string(nil), spec.Styles...)
+	}
+	return &cp
+}
+
+func mergeHybridContributes(backend, frontend ContributesSpec) ContributesSpec {
+	merged := ContributesSpec{
+		UISlots:           append([]UISlotContribution(nil), backend.UISlots...),
+		Pages:             append([]PageContribution(nil), backend.Pages...),
+		Viewers:           append([]ViewerContribution(nil), backend.Viewers...),
+		SidecarPanels:     append([]SidecarPanelContribution(nil), backend.SidecarPanels...),
+		AgentCapabilities: append([]AgentCapabilityContribution(nil), backend.AgentCapabilities...),
+		AgentSkills:       append([]string(nil), backend.AgentSkills...),
+		SignalProviders:   append([]SignalProviderContribution(nil), backend.SignalProviders...),
+	}
+
+	if len(frontend.Viewers) > 0 {
+		indexByID := make(map[string]int, len(merged.Viewers))
+		for i, v := range merged.Viewers {
+			indexByID[v.ID] = i
+		}
+		for _, fv := range frontend.Viewers {
+			cp := fv
+			if len(fv.Extensions) > 0 {
+				cp.Extensions = append([]string(nil), fv.Extensions...)
+			}
+			if len(fv.MimeTypes) > 0 {
+				cp.MimeTypes = append([]string(nil), fv.MimeTypes...)
+			}
+			if idx, exists := indexByID[cp.ID]; exists {
+				merged.Viewers[idx] = cp
+			} else {
+				indexByID[cp.ID] = len(merged.Viewers)
+				merged.Viewers = append(merged.Viewers, cp)
+			}
+		}
+	}
+
+	if len(frontend.Pages) > 0 {
+		indexByID := make(map[string]int, len(merged.Pages))
+		for i, p := range merged.Pages {
+			indexByID[p.ID] = i
+		}
+		for _, fp := range frontend.Pages {
+			if idx, exists := indexByID[fp.ID]; exists {
+				merged.Pages[idx] = fp
+			} else {
+				indexByID[fp.ID] = len(merged.Pages)
+				merged.Pages = append(merged.Pages, fp)
+			}
+		}
+	}
+
+	if len(frontend.UISlots) > 0 {
+		seen := make(map[string]struct{}, len(merged.UISlots))
+		for _, s := range merged.UISlots {
+			seen[s.Slot+"\x00"+s.ID] = struct{}{}
+		}
+		for _, fs := range frontend.UISlots {
+			key := fs.Slot + "\x00" + fs.ID
+			if _, exists := seen[key]; !exists {
+				seen[key] = struct{}{}
+				merged.UISlots = append(merged.UISlots, fs)
+			}
+		}
+	}
+
+	if len(frontend.SidecarPanels) > 0 {
+		seen := make(map[string]struct{}, len(merged.SidecarPanels))
+		for _, p := range merged.SidecarPanels {
+			seen[p.ID] = struct{}{}
+		}
+		for _, fp := range frontend.SidecarPanels {
+			if _, exists := seen[fp.ID]; !exists {
+				seen[fp.ID] = struct{}{}
+				merged.SidecarPanels = append(merged.SidecarPanels, fp)
+			}
+		}
+	}
+
+	return merged
+}
+
+func (m *Manager) buildBuiltinView(b BuiltinPlugin, frontend *externalPlugin, enabledMap map[string]bool) PluginView {
 	manifest := b.Manifest()
 	manifest.Normalize()
 	perms := nonNilStrings(manifest.Permissions)
-	return PluginView{
-		ID:                 manifest.ID,
-		Name:               manifest.Name,
-		Version:            manifest.Version,
-		Category:           manifest.Category,
-		Description:        manifest.Description,
-		Author:             manifest.Author,
-		Homepage:           manifest.Homepage,
-		Icon:               manifest.Icon,
-		Source:             SourceBuiltin,
-		Enabled:            isPluginEnabledInMap(enabledMap, manifest.ID, true),
-		Permissions:        perms,
-		GrantedPermissions: append([]string(nil), perms...),
-		PendingPermissions: []string{},
-		PermissionsGranted: true,
-		RuntimeState:       RuntimeStateBuiltin,
-		BackendType:        BackendTypeBuiltin,
-		Settings:           manifest.Settings,
-		Contributes:        manifest.Contributes,
-		APIBaseURL:         BaseExtPath + "/" + url.PathEscape(manifest.ID),
-	}
-}
+	defaultEnabled := EffectiveDefaultEnabled(SourceBuiltin, manifest)
 
-func (m *Manager) buildExternalView(ext *externalPlugin, enabledMap map[string]bool, permMap map[string][]string) PluginView {
-	manifest := ext.manifest
-	enabled := isPluginEnabledInMap(enabledMap, manifest.ID, false)
-	granted, pending := computePermissionState(manifest.Permissions, permMap[manifest.ID])
+	description := manifest.Description
+	author := manifest.Author
+	homepage := manifest.Homepage
+	icon := manifest.Icon
+	frontendSpec := cloneFrontendSpec(manifest.Frontend)
+	settings := manifest.Settings
+	contributes := manifest.Contributes
+	contentDigest := ""
+	esmBaseURL := ""
 
-	runtimeState := RuntimeStateStopped
-	runtimeErr := ""
-	switch manifest.Backend.Type {
-	case BackendTypeProcess:
-		st := m.supervisor.Status(manifest.ID)
-		runtimeState = st.State
-		runtimeErr = st.Error
-	case BackendTypeHTTP, BackendTypeNone:
-		if enabled && len(pending) == 0 {
-			runtimeState = RuntimeStateReady
-		} else {
-			runtimeState = RuntimeStateStopped
+	if frontend != nil && frontend.source == SourceOfficial {
+		fm := frontend.manifest
+		if fm.Frontend != nil {
+			frontendSpec = cloneFrontendSpec(fm.Frontend)
+		}
+		contentDigest = frontend.contentDigest
+		if IsFrontendESM(fm) {
+			esmBaseURL = BaseExtPath + "/" + url.PathEscape(manifest.ID) + "/_esm"
+		}
+		contributes = mergeHybridContributes(manifest.Contributes, fm.Contributes)
+		if settings.Mode == SettingsModeNone && fm.Settings.Mode != SettingsModeNone {
+			settings = fm.Settings
+		}
+		if description == "" {
+			description = fm.Description
+		}
+		if author == "" {
+			author = fm.Author
+		}
+		if homepage == "" {
+			homepage = fm.Homepage
+		}
+		if icon == "" {
+			icon = fm.Icon
 		}
 	}
 
@@ -918,31 +1202,95 @@ func (m *Manager) buildExternalView(ext *externalPlugin, enabledMap map[string]b
 		Name:               manifest.Name,
 		Version:            manifest.Version,
 		Category:           manifest.Category,
+		Description:        description,
+		Author:             author,
+		Homepage:           homepage,
+		Icon:               icon,
+		Source:             SourceBuiltin,
+		Enabled:            isPluginEnabledInMap(enabledMap, manifest.ID, defaultEnabled),
+		DefaultEnabled:     defaultEnabled,
+		Permissions:        perms,
+		GrantedPermissions: append([]string(nil), perms...),
+		PendingPermissions: []string{},
+		PermissionsGranted: true,
+		RuntimeState:       RuntimeStateBuiltin,
+		BackendType:        BackendTypeBuiltin,
+		Frontend:           frontendSpec,
+		ContentDigest:      contentDigest,
+		SignatureVerified:  true,
+		Settings:           settings,
+		Contributes:        contributes,
+		ESMBaseURL:         esmBaseURL,
+		APIBaseURL:         BaseExtPath + "/" + url.PathEscape(manifest.ID),
+	}
+}
+
+func (m *Manager) buildDiskPluginView(ext *externalPlugin, enabledMap map[string]bool, permMap map[string][]string) PluginView {
+	manifest := ext.manifest
+	source := ext.source
+	if source == "" {
+		source = SourceExternal
+	}
+	defaultEnabled := EffectiveDefaultEnabled(source, manifest)
+	enabled := isPluginEnabledInMap(enabledMap, manifest.ID, defaultEnabled)
+	reqPerms := effectiveRequiredPermissions(source, manifest, ext.signatureVerified)
+	granted, pending := computePermissionState(reqPerms, permMap[manifest.ID])
+
+	runtimeState := RuntimeStateStopped
+	runtimeErr := ""
+	switch manifest.Backend.Type {
+	case BackendTypeProcess:
+		st := m.supervisor.Status(manifest.ID)
+		runtimeState = st.State
+		runtimeErr = st.Error
+	case BackendTypeHTTP, BackendTypeNone, BackendTypeBuiltin:
+		if enabled && len(pending) == 0 {
+			runtimeState = RuntimeStateReady
+		} else {
+			runtimeState = RuntimeStateStopped
+		}
+	}
+
+	esmBaseURL := ""
+	if IsFrontendESM(manifest) {
+		esmBaseURL = BaseExtPath + "/" + url.PathEscape(manifest.ID) + "/_esm"
+	}
+
+	return PluginView{
+		ID:                 manifest.ID,
+		Name:               manifest.Name,
+		Version:            manifest.Version,
+		Category:           manifest.Category,
 		Description:        manifest.Description,
 		Author:             manifest.Author,
 		Homepage:           manifest.Homepage,
 		Icon:               manifest.Icon,
-		Source:             SourceExternal,
+		Source:             source,
 		Enabled:            enabled,
-		Permissions:        nonNilStrings(manifest.Permissions),
+		DefaultEnabled:     defaultEnabled,
+		Permissions:        reqPerms,
 		GrantedPermissions: granted,
 		PendingPermissions: pending,
 		PermissionsGranted: len(pending) == 0,
 		RuntimeState:       runtimeState,
 		RuntimeError:       runtimeErr,
 		BackendType:        manifest.Backend.Type,
+		Frontend:           manifest.Frontend,
+		ContentDigest:      ext.contentDigest,
+		SignatureVerified:  ext.signatureVerified,
 		Settings:           manifest.Settings,
 		Contributes:        manifest.Contributes,
 		UIBaseURL:          BaseExtPath + "/" + url.PathEscape(manifest.ID) + "/_ui/",
+		ESMBaseURL:         esmBaseURL,
 		APIBaseURL:         BaseExtPath + "/" + url.PathEscape(manifest.ID),
 	}
 }
 
-func isPluginEnabledInMap(enabledMap map[string]bool, id string, isBuiltin bool) bool {
+func isPluginEnabledInMap(enabledMap map[string]bool, id string, defaultEnabled bool) bool {
 	if flag, exists := enabledMap[id]; exists {
 		return flag
 	}
-	return isBuiltin
+	return defaultEnabled
 }
 
 func computePermissionState(required, storedGranted []string) (granted []string, pending []string) {

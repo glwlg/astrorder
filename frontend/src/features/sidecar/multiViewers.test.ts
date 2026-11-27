@@ -28,12 +28,29 @@ describe('Multi-Artifact Viewer Suite', () => {
     expect(viewer?.capabilities.canEdit).toBe(true)
   })
 
-  it('detects and handles excalidraw files', () => {
-    const artifact = resolveArtifactFromPath('whiteboard.excalidraw', mockSession)
-    const viewer = artifactViewerRegistry.findViewer(artifact)
-    expect(viewer).not.toBeNull()
-    expect(viewer?.id).toBe('excalidraw-viewer')
-    expect(viewer?.capabilities.canEdit).toBe(true)
+  it('does not statically bundle excalidraw-viewer and supports dynamic ESM hot registration', () => {
+    expect(artifactViewerRegistry.getViewerById('excalidraw-viewer')).toBeNull()
+    const disposable = artifactViewerRegistry.register({
+      id: 'excalidraw-viewer',
+      pluginId: 'excalidraw-viewer',
+      source: 'esm',
+      title: '手绘白板',
+      icon: () => null,
+      extensions: ['.excalidraw', '.excalidraw.json', '.excalidraw.svg'],
+      mimeTypes: ['application/vnd.excalidraw+json'],
+      component: () => null,
+      capabilities: { canEdit: true },
+    })
+    try {
+      const artifact = resolveArtifactFromPath('whiteboard.excalidraw', mockSession)
+      const viewer = artifactViewerRegistry.findViewer(artifact)
+      expect(viewer).not.toBeNull()
+      expect(viewer?.id).toBe('excalidraw-viewer')
+      expect(viewer?.capabilities.canEdit).toBe(true)
+    } finally {
+      disposable.dispose()
+    }
+    expect(artifactViewerRegistry.getViewerById('excalidraw-viewer')).toBeNull()
   })
 
   it('detects and handles diff/patch files', () => {
@@ -43,11 +60,33 @@ describe('Multi-Artifact Viewer Suite', () => {
     expect(viewer?.id).toBe('diff-viewer')
   })
 
-  it('detects and handles 3D model files', () => {
+  it('does not statically bundle three-viewer and supports dynamic ESM hot registration for 3D models', () => {
     const artifact = resolveArtifactFromPath('robot.stl', mockSession)
-    const viewer = artifactViewerRegistry.findViewer(artifact)
-    expect(viewer).not.toBeNull()
-    expect(viewer?.id).toBe('three-viewer')
+    expect(artifactViewerRegistry.getViewerById('three-viewer')).toBeNull()
+    expect(artifactViewerRegistry.findViewer(artifact)?.id).not.toBe('three-viewer')
+
+    const disposable = artifactViewerRegistry.register({
+      id: 'three-viewer',
+      pluginId: 'three-viewer',
+      source: 'esm',
+      title: '3D 模型/CAD 预览',
+      icon: () => null,
+      extensions: ['.stl', '.obj', '.gltf', '.glb'],
+      mimeTypes: ['model/gltf+json', 'model/stl'],
+      component: () => null,
+      capabilities: { canEdit: false },
+    })
+
+    try {
+      const matched = artifactViewerRegistry.findViewer(artifact)
+      expect(matched).not.toBeNull()
+      expect(matched?.id).toBe('three-viewer')
+      expect(matched?.source).toBe('esm')
+    } finally {
+      disposable.dispose()
+    }
+
+    expect(artifactViewerRegistry.getViewerById('three-viewer')).toBeNull()
   })
 
   it('matches the agent decision graph sidecar tab', () => {

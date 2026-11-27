@@ -9,8 +9,9 @@ import {
 import type { ArtifactRef } from '../../domain/artifact'
 import type { Session } from '../../domain/types'
 import { usePluginSettingsStore } from '../plugins/pluginSettingsStore'
+import { clearStoredAppProfileForTest, setAppProfile } from '../office/appProfile'
 import { extensionRegistry } from './extensionRegistry'
-import { useExtensionStore } from './extensionStore'
+import { EXTENSION_STORE_SYNC_KEY, useExtensionStore } from './extensionStore'
 import { InstallPluginModal } from './InstallPluginModal'
 import { PermissionGrantModal } from './PermissionGrantModal'
 import { PluginConfigDrawer } from './PluginConfigDrawer'
@@ -118,6 +119,7 @@ afterEach(() => {
   vi.restoreAllMocks()
   localStorage.clear()
   sessionStorage.clear()
+  clearStoredAppProfileForTest()
   usePluginSettingsStore.getState().reset()
   useExtensionStore.getState().reset()
   extensionRegistry.clear()
@@ -157,6 +159,42 @@ describe('Extension API & Store', () => {
     await useExtensionStore.getState().setEnabled(sampleExternalPlugin.id, true, ['ui:slots'])
     expect(usePluginSettingsStore.getState().isPluginEnabled(sampleExternalPlugin.id)).toBe(true)
     expect(useExtensionStore.getState().getById(sampleExternalPlugin.id)?.enabled).toBe(true)
+    expect(localStorage.getItem(EXTENSION_STORE_SYNC_KEY)).toContain(sampleExternalPlugin.id)
+  })
+
+  it('synchronizes extension toggle state across windows via storage events', async () => {
+    useExtensionStore.setState({ items: [{ ...sampleExternalPlugin, enabled: true }], hydrated: true })
+    usePluginSettingsStore.setState({ enabledPlugins: { [sampleExternalPlugin.id]: true } })
+
+    const updatedPlugin: PluginView = {
+      ...sampleExternalPlugin,
+      enabled: false,
+      runtime_state: 'stopped',
+    }
+    const listSpy = vi.spyOn(extensionsApi, 'listExtensions').mockResolvedValue({
+      items: [updatedPlugin],
+    })
+
+    // Simulate another window toggling the extension off via localStorage sync event
+    window.dispatchEvent(
+      new StorageEvent('storage', {
+        key: EXTENSION_STORE_SYNC_KEY,
+        newValue: JSON.stringify({
+          ts: Date.now(),
+          action: 'setEnabled',
+          id: sampleExternalPlugin.id,
+          enabled: false,
+        }),
+      }),
+    )
+
+    // Optimistic update applies synchronously and triggers background rehydration
+    expect(usePluginSettingsStore.getState().isPluginEnabled(sampleExternalPlugin.id)).toBe(false)
+    expect(useExtensionStore.getState().getById(sampleExternalPlugin.id)?.enabled).toBe(false)
+    await waitFor(() => {
+      expect(listSpy).toHaveBeenCalledTimes(1)
+      expect(useExtensionStore.getState().getById(sampleExternalPlugin.id)?.runtime_state).toBe('stopped')
+    })
   })
 })
 
@@ -585,6 +623,53 @@ describe('PluginConfigDrawer, PermissionGrantModal & InstallPluginModal', () => 
     )
   })
 
+  it('highlights full-page risk and requires explicit acknowledgment for unsigned external ESM plugins', () => {
+    const unsignedEsmPlugin: PluginView = {
+      ...sampleExternalPlugin,
+      id: 'acme.unsigned-esm',
+      name: 'Unsigned ESM Tool',
+      signature_verified: false,
+      frontend: { mode: 'esm', entry: 'ui/entry.js', sdk_version: '^1.0' },
+    }
+    const onConfirm = vi.fn()
+    const { rerender } = render(
+      <MantineProvider>
+        <PermissionGrantModal
+          opened
+          plugin={unsignedEsmPlugin}
+          pendingPermissions={['ui:slots']}
+          onConfirm={onConfirm}
+          onClose={vi.fn()}
+        />
+      </MantineProvider>,
+    )
+
+    expect(screen.getByText(/未签名同页脚本插件拥有完整页面访问权限/)).toBeInTheDocument()
+    const confirmBtn = screen.getByRole('button', { name: '授权并启用' })
+    expect(confirmBtn).toBeDisabled()
+
+    fireEvent.click(screen.getByRole('checkbox', { name: /允许在研发模式下加载未签名同页脚本插件/ }))
+    expect(confirmBtn).not.toBeDisabled()
+    fireEvent.click(confirmBtn)
+    expect(onConfirm).toHaveBeenCalled()
+
+    // Office mode must strictly block enabling unsigned external ESM plugins
+    setAppProfile('office', { syncPluginStore: false })
+    rerender(
+      <MantineProvider>
+        <PermissionGrantModal
+          opened
+          plugin={unsignedEsmPlugin}
+          pendingPermissions={['ui:slots']}
+          onConfirm={onConfirm}
+          onClose={vi.fn()}
+        />
+      </MantineProvider>,
+    )
+    expect(screen.getByText(/办公模式下已严格禁止启用未签名的同页 ESM 脚本插件/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '授权并启用' })).toBeDisabled()
+  })
+
   it('installs external plugin from local path in InstallPluginModal and triggers enable handoff', async () => {
     const installed: PluginView = {
       ...sampleExternalPlugin,
@@ -613,5 +698,18 @@ describe('PluginConfigDrawer, PermissionGrantModal & InstallPluginModal', () => 
 
     fireEvent.click(screen.getByRole('button', { name: '查看权限并启用' }))
     expect(onInstalled).toHaveBeenCalledWith(installed, true)
+  })
+
+  it('blocks external process plugin installation inside InstallPluginModal in office profile', () => {
+    setAppProfile('office', { syncPluginStore: false })
+    render(
+      <MantineProvider>
+        <InstallPluginModal opened onClose={vi.fn()} />
+      </MantineProvider>,
+    )
+
+    expect(screen.getByText('办公模式下已禁用外部本地进程插件安装')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '从目录安装' })).toBeNull()
+    expect(screen.queryByLabelText(/插件目录路径/)).toBeNull()
   })
 })

@@ -1,8 +1,42 @@
 import { ApiError, authenticatedApiFetch, request } from './client'
 
 export type PluginRuntimeState = 'builtin' | 'ready' | 'stopped' | 'starting' | 'error'
-export type PluginSource = 'builtin' | 'external'
+export type PluginSource = 'builtin' | 'official' | 'external'
 export type PluginBackendType = 'builtin' | 'process' | 'http' | 'none'
+export type PluginFrontendMode = 'esm' | 'iframe' | 'builtin'
+
+export interface FrontendSpec {
+  mode?: PluginFrontendMode
+  entry?: string
+  styles?: string[]
+  sdk_version?: string
+}
+
+export interface PageContribution {
+  id: string
+  title: string
+  path?: string
+  mobile_path?: string
+  icon?: string
+  category?: string
+  badge_label?: string
+  order?: number
+  hide_in_office_mode?: boolean
+}
+
+export interface ViewerContribution {
+  id: string
+  title: string
+  description?: string
+  extensions?: string[]
+  mime_types?: string[]
+  badge_label?: string
+  tab_color?: string
+  category?: string
+  icon?: string
+  priority?: number
+  hide_in_office_mode?: boolean
+}
 
 export interface BackendSpec {
   type: PluginBackendType
@@ -85,6 +119,8 @@ export interface SignalProviderContribution {
 export interface ContributesSpec {
   ui_slots?: UISlotContribution[]
   sidecar_panels?: SidecarPanelContribution[]
+  pages?: PageContribution[]
+  viewers?: ViewerContribution[]
   agent_capabilities?: AgentCapabilityContribution[]
   agent_skills?: string[]
   signal_providers?: SignalProviderContribution[]
@@ -120,9 +156,14 @@ export interface PluginView {
   runtime_state: PluginRuntimeState
   runtime_error?: string
   backend_type: PluginBackendType
+  frontend?: FrontendSpec
+  content_digest?: string
+  signature_verified?: boolean
+  default_enabled?: boolean
   settings?: SettingsSpec
   contributes?: ContributesSpec
   ui_base_url?: string
+  esm_base_url?: string
   api_base_url?: string
 }
 

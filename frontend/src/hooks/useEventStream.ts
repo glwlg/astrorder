@@ -13,6 +13,8 @@ import {
   pushIslandNotification,
 } from "../domain/islandNotifications";
 import { useAstrorderStore } from "../state/store";
+import { useExtensionStore } from "../features/extensions/extensionStore";
+import { usePluginSettingsStore } from "../features/plugins/pluginSettingsStore";
 import { api } from "../api/client";
 import { nativeActivityEvent } from "./useSessionOrder";
 import { scopeKey } from "../domain/semantics";
@@ -702,6 +704,12 @@ export function useEventStream(
               detail: event.data,
             }),
           );
+        }
+        if (event.type === "extension.changed") {
+          void useExtensionStore.getState().refresh();
+          if (event.data?.action === "settings_updated") {
+            void usePluginSettingsStore.getState().hydrate(true);
+          }
         }
         if (useAstrorderStore.getState().resyncRequired) {
           const now = Date.now();

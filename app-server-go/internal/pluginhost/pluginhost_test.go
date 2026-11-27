@@ -125,6 +125,19 @@ func TestHelperPluginProcess(t *testing.T) {
 			"query_foo":     r.URL.Query().Get("foo"),
 		})
 	})
+	mux.HandleFunc("/echo-env", func(w http.ResponseWriter, _ *http.Request) {
+		envMap := map[string]string{}
+		for _, entry := range os.Environ() {
+			k, v, ok := strings.Cut(entry, "=")
+			if ok {
+				envMap[k] = v
+			}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"pid": pid,
+			"env": envMap,
+		})
+	})
 	mux.HandleFunc("/probe-host", func(w http.ResponseWriter, r *http.Request) {
 		target := r.URL.Query().Get("path")
 		method := r.URL.Query().Get("method")

@@ -216,7 +216,7 @@ export const BUILTIN_SYSTEM_PLUGINS: SystemPluginDescriptor[] = [
   {
     id: WORKSPACE_MEETINGS_PLUGIN_ID,
     title: '会议纪要与行动项',
-    description: '本地 R2T2 实时边录边转写与独立悬浮胶囊，在会议页内自由选用已配置的 AI 供应商模型边听边总结，并与待办收件箱联动跟踪',
+    description: '本机离线实时边录边转写与独立悬浮胶囊，在会议页内自由选用已配置的 AI 供应商模型边听边总结，并与待办收件箱联动跟踪',
     category: 'office',
     icon: IconMicrophone,
     badgeLabel: '办公工作台',

@@ -21,6 +21,7 @@ import {
   IconUpload,
 } from '@tabler/icons-react'
 import type { PluginView } from '../../api/extensions'
+import { useIsOfficeProfile } from '../office/appProfile'
 import { useExtensionStore } from './extensionStore'
 import './extensions.css'
 
@@ -37,6 +38,7 @@ export function InstallPluginModal({
   onInstalled,
   onReloaded,
 }: InstallPluginModalProps) {
+  const isOfficeProfile = useIsOfficeProfile()
   const installFromPath = useExtensionStore((s) => s.installFromPath)
   const installArchive = useExtensionStore((s) => s.installArchive)
   const reload = useExtensionStore((s) => s.reload)
@@ -130,7 +132,23 @@ export function InstallPluginModal({
         </Group>
       }
     >
-      {installedPlugin ? (
+      {isOfficeProfile ? (
+        <Stack gap="md">
+          <Alert color="indigo" variant="light" radius="md" icon={<IconShieldLock size={16} />}>
+            <Text size="sm" fw={600}>
+              办公模式下已禁用外部本地进程插件安装
+            </Text>
+            <Text size="xs" mt={4}>
+              为保障日常办公环境安全与稳定，办公模式仅支持使用官方内置功能开关。如需安装本地外部扩展，请先在「常规与外观」中切换至研发模式。
+            </Text>
+          </Alert>
+          <Group justify="flex-end">
+            <Button size="xs" variant="default" onClick={resetAndClose}>
+              关闭
+            </Button>
+          </Group>
+        </Stack>
+      ) : installedPlugin ? (
         <Stack gap="md">
           <Alert color="teal" variant="light" radius="md" icon={<IconCheck size={16} />}>
             <Text size="sm" fw={600}>

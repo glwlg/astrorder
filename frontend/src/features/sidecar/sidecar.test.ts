@@ -33,13 +33,30 @@ describe('Artifact & Drawio Viewer Integration', () => {
     expect(url.searchParams.get('connection_id')).toBe('ssh-work')
   })
 
-  it.each(['workflow.drawio.xml', 'workflow.drawio.svg'])('should match drawio viewer with high score for %s', (name) => {
-    const artifact = resolveArtifactFromPath(name, mockSession)
-    const viewer = artifactViewerRegistry.findViewer(artifact)
+  it.each(['workflow.drawio.xml', 'workflow.drawio.svg'])('does not statically bundle drawio-viewer and matches dynamically registered drawio viewer for %s', (name) => {
+    expect(artifactViewerRegistry.getViewerById('drawio-viewer')).toBeNull()
+    const disposable = artifactViewerRegistry.register({
+      id: 'drawio-viewer',
+      pluginId: 'drawio-viewer',
+      source: 'esm',
+      title: '矢量流程图',
+      icon: () => null,
+      extensions: ['.drawio', '.drawio.xml', '.drawio.svg'],
+      mimeTypes: ['application/vnd.jgraph.mxfile'],
+      component: () => null,
+      capabilities: { canEdit: true },
+    })
+    try {
+      const artifact = resolveArtifactFromPath(name, mockSession)
+      const viewer = artifactViewerRegistry.findViewer(artifact)
 
-    expect(viewer).not.toBeNull()
-    expect(viewer?.id).toBe('drawio-viewer')
-    expect(viewer?.capabilities.canEdit).toBe(true)
+      expect(viewer).not.toBeNull()
+      expect(viewer?.id).toBe('drawio-viewer')
+      expect(viewer?.capabilities.canEdit).toBe(true)
+    } finally {
+      disposable.dispose()
+    }
+    expect(artifactViewerRegistry.getViewerById('drawio-viewer')).toBeNull()
   })
 
   it.each(['go.mod', 'go.sum', 'Dockerfile', 'Makefile', 'LICENSE', '.npmrc', 'config.custom', 'data.unknown_bin_ext'])('opens %s with the text editor when no dedicated viewer matches', (name) => {

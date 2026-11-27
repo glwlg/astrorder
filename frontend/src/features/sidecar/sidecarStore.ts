@@ -392,9 +392,18 @@ export const useSidecarStore = create<SidecarState>()(persist((set, get) => ({
     const { tabs, activeSessionKey, sessionMemories } = get()
     const existingIndex = tabs.findIndex((t) => t.id === tabId)
     if (existingIndex >= 0) {
+      const updated = tabs.map((tab, idx) => idx === existingIndex && tab.artifact ? {
+        ...tab,
+        artifact: {
+          ...tab.artifact,
+          path: workspacePath || tab.artifact.path,
+          connectionId: connectionId ?? tab.artifact.connectionId,
+        },
+      } : tab)
       set({
         isOpen: true,
         activeTabId: tabId,
+        tabs: updated,
       })
     } else {
       const title = baseBranch ? `审查 (${baseBranch})` : '审查'

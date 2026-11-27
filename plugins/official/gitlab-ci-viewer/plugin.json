@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "id": "gitlab-ci-viewer",
+  "name": "GitLab CI/CD 流水线",
+  "version": "1.0.0",
+  "category": "development",
+  "description": "直连自建或云端 GitLab，在会话底栏与右侧面板实时追踪 CI 流水线、阶段作业与日志，支持重试、取消、手动触发与引用到对话框",
+  "author": "Astrorder",
+  "icon": "gitlab",
+  "default_enabled": true,
+  "permissions": [],
+  "backend": {
+    "type": "builtin"
+  },
+  "settings": {
+    "mode": "custom_ui"
+  },
+  "frontend": {
+    "mode": "esm",
+    "entry": "ui/entry.js",
+    "styles": [
+      "ui/entry.css"
+    ],
+    "sdk_version": "^1.0"
+  },
+  "contributes": {
+    "viewers": [
+      {
+        "id": "gitlab-ci-viewer",
+        "title": "GitLab CI/CD 流水线",
+        "icon": "gitlab",
+        "badge_label": "[GitLab CI]",
+        "tab_color": "#e24329",
+        "category": "development",
+        "mime_types": [
+          "application/x-gitlab-ci"
+        ],
+        "hide_in_office_mode": true
+      }
+    ],
+    "sidecar_panels": [
+      {
+        "id": "ci-panel",
+        "title": "GitLab CI",
+        "badge_label": "[GitLab CI]",
+        "tab_color": "#e24329",
+        "media_type": "application/x-gitlab-ci",
+        "icon": "gitlab"
+      }
+    ]
+  }
+}

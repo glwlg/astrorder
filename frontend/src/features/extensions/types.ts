@@ -1,9 +1,14 @@
-import type { ComponentType, ReactNode } from 'react'
+import type { ComponentType, LazyExoticComponent, ReactNode } from 'react'
 import type { ArtifactRef } from '../../domain/artifact'
 import type { Session } from '../../domain/types'
+import type { AppProfile } from '../office/appProfile'
 
 export const EXTERNAL_PLUGIN_PANEL_VIEWER_ID = 'external-plugin-panel'
 export const PENDING_PLUGIN_CONFIG_SESSION_KEY = 'astrorder:pending-plugin-config'
+
+export interface Disposable {
+  dispose(): void
+}
 
 export interface StatusBarSlotContext {
   session: Session
@@ -60,6 +65,132 @@ export interface BuiltInExtensionRegistration {
   gitMenuItems?: BuiltInGitMenuItem[]
   welcomeMenuItems?: BuiltInWelcomeMenuItem[]
   panels?: Record<string, BuiltInPanelRegistration>
+}
+
+export type ExtensionPageIcon = ComponentType<{
+  size?: number
+  weight?: 'thin' | 'light' | 'regular' | 'bold' | 'fill' | 'duotone'
+  className?: string
+  color?: string
+}>
+
+export interface ExtensionPageComponentProps {
+  pluginId?: string
+  pageId?: string
+  surface?: 'desktop' | 'mobile'
+}
+
+export type ExtensionPageComponent =
+  | ComponentType<ExtensionPageComponentProps>
+  | LazyExoticComponent<ComponentType<ExtensionPageComponentProps>>
+
+export interface ExtensionPageCommandSpec {
+  id?: string
+  title?: string
+  subtitle?: string
+  to?: string
+  keywords?: string
+  icon?: ComponentType<{ size?: number; color?: string; className?: string }>
+  hideInOfficeMode?: boolean
+}
+
+export interface ExtensionPageRegistration {
+  /** 所属插件 ID（内置模块或官方/第三方 ESM 插件 ID） */
+  pluginId: string
+  /** 页面 ID（插件内唯一；用于路由与主导航顺序识别） */
+  id: string
+  /** 页面主标题 */
+  title: string
+  /** 桌面侧边栏紧凑导航文案（缺省使用 title） */
+  navLabel?: string
+  /** 移动端工作台抽屉卡片文案（缺省使用 title） */
+  mobileLabel?: string
+  /** 移动端顶栏标题（缺省使用 mobileLabel ?? title） */
+  mobileHeaderTitle?: string
+  /** 移动端顶栏无障碍标签 */
+  mobileHeaderAriaLabel?: string
+  /** 桌面导航图标（兼容 Phosphor / Tabler / 内联 SVG 组件） */
+  icon?: ExtensionPageIcon
+  /** 移动端导航图标（缺省复用 icon） */
+  mobileIcon?: ComponentType<{ size?: number; color?: string; className?: string }>
+  /** 桌面路由路径（内置如 '/meetings'；动态 ESM 页面缺省为 /ext-page/:pluginId/:pageId） */
+  path?: string
+  /** 附加桌面路由模式（如 '/groups/:groupId'） */
+  routePaths?: string[]
+  /** 移动端路由路径（内置如 '/mobile/meetings'；动态 ESM 页面缺省为 /mobile/ext-page/:pluginId/:pageId） */
+  mobilePath?: string
+  /** 排序权重，越小越靠前（默认 200） */
+  order?: number
+  /** 办公模式下是否隐藏并拦截访问 */
+  hideInOfficeMode?: boolean
+  /** 桌面端该页面是否保留次级侧栏（如会话/群聊列表） */
+  hasSecondaryPanel?: boolean
+  /** 是否在桌面左侧主导航展示（默认 true） */
+  showInSidebar?: boolean
+  /** 是否在移动端工作台导航抽屉展示（默认 true） */
+  showInMobileApps?: boolean
+  /** 桌面/通用页面组件（支持 React.lazy） */
+  component: ExtensionPageComponent
+  /** 移动端专用组件（缺省复用 component） */
+  mobileComponent?: ExtensionPageComponent
+  /** 移动端页面容器布局风格：'office' | 'module' | 'custom' */
+  mobileLayout?: 'office' | 'module' | 'custom'
+  /** 命令面板路由项配置；false 表示不生成，缺省自动生成一条跳转项 */
+  command?: ExtensionPageCommandSpec | ExtensionPageCommandSpec[] | false
+  /** 注册来源 */
+  source?: 'builtin' | 'esm'
+}
+
+export interface ExtensionCommandRegistration {
+  /** 所属插件 ID */
+  pluginId: string
+  /** 命令 ID（插件内唯一） */
+  id: string
+  /** 命令面板展示标题 */
+  title: string
+  /** 副标题或快捷键提示 */
+  subtitle?: string
+  /** 搜索匹配关键词 */
+  keywords?: string
+  /** 角标文案 */
+  badge?: string
+  /** 命令分类，默认 'action' */
+  category?: 'route' | 'action'
+  /** 图标组件 */
+  icon?: ComponentType<{ size?: number; color?: string; className?: string }>
+  /** 办公模式下是否隐藏 */
+  hideInOfficeMode?: boolean
+  /** 排序权重，越小越靠前（默认 200） */
+  order?: number
+  /** 触发执行回调 */
+  run: () => void | Promise<void>
+  /** 注册来源 */
+  source?: 'builtin' | 'esm'
+}
+
+export interface ExtensionQueryOptions {
+  profile?: AppProfile
+  isOfficeMode?: boolean
+  enabledPlugins?: Record<string, boolean>
+  includeDisabled?: boolean
+}
+
+export function extensionPageKey(pluginId: string, pageId: string): string {
+  return `${pluginId}:${pageId}`
+}
+
+export function resolveExtensionPagePath(
+  page: Pick<ExtensionPageRegistration, 'pluginId' | 'id' | 'path'>,
+): string {
+  if (page.path) return page.path
+  return `/ext-page/${encodeURIComponent(page.pluginId)}/${encodeURIComponent(page.id)}`
+}
+
+export function resolveExtensionPageMobilePath(
+  page: Pick<ExtensionPageRegistration, 'pluginId' | 'id' | 'mobilePath'>,
+): string {
+  if (page.mobilePath) return page.mobilePath
+  return `/mobile/ext-page/${encodeURIComponent(page.pluginId)}/${encodeURIComponent(page.id)}`
 }
 
 export interface WelcomeMenuExtraItem {
@@ -192,6 +323,12 @@ export const PERMISSION_CATALOG: Record<string, PermissionMeta> = {
     label: '工作区异常信号上报',
     description: '允许向工作复盘与诊断系统提供失败任务或告警线索',
     risk: 'low',
+  },
+  'desktop:control': {
+    id: 'desktop:control',
+    label: '宿主机桌面控制',
+    description: '允许查看宿主机桌面屏幕与 UI 控件树，并在交互模式下模拟鼠标点击、键盘输入、窗口切换与剪贴板操作',
+    risk: 'high',
   },
 }
 

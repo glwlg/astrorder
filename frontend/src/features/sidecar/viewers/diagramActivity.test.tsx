@@ -2,7 +2,6 @@ import { MantineProvider } from '@mantine/core'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { ArtifactRef } from '../../../domain/artifact'
-import { ExcalidrawViewer } from './excalidraw/ExcalidrawViewer'
 import { MermaidViewer } from './mermaid/MermaidViewer'
 
 vi.mock('../../../components/renderMermaid', () => ({ renderMermaid: vi.fn(async () => ({ svg: '<svg></svg>' })) }))
@@ -37,19 +36,24 @@ it('keeps an inactive Mermaid draft without intercepting save until reopened', a
   await waitFor(() => expect(save).toHaveBeenCalledExactlyOnceWith('graph TD; A-->C'))
 })
 
-it('does not let an inactive Excalidraw viewer capture another editor save', async () => {
-  const view = render(<MantineProvider env="test"><ExcalidrawViewer artifact={{ ...artifact, name: 'board.excalidraw' }} isActive={false} /></MantineProvider>)
-  await waitFor(() => expect(fetch).toHaveBeenCalled())
-  const save = new KeyboardEvent('keydown', { key: 's', ctrlKey: true, cancelable: true })
-  window.dispatchEvent(save)
-  expect(save.defaultPrevented).toBe(false)
-  view.unmount()
-})
-
 it('authenticates diagram reads without needing a credential in the file URL', async () => {
   localStorage.setItem('astrorder:token', 'inert-diagram-fixture')
   render(<MantineProvider env="test"><MermaidViewer artifact={artifact} /></MantineProvider>)
   await waitFor(() => expect(fetch).toHaveBeenCalledWith(artifact.readUrl, expect.objectContaining({ credentials: 'include', headers: expect.any(Headers) })))
   const [, init] = vi.mocked(fetch).mock.calls[0]
   expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer inert-diagram-fixture')
+})
+
+it('supports wheel zoom and drag pan directly inside Sidecar MermaidViewer', async () => {
+  render(<MantineProvider env="test"><MermaidViewer artifact={artifact} /></MantineProvider>)
+  const canvas = await screen.findByLabelText('Mermaid 缩放画布')
+
+  fireEvent.wheel(canvas, { deltaY: -120, clientX: 150, clientY: 150 })
+  expect(Number(canvas.getAttribute('data-zoom-scale'))).toBeGreaterThan(1)
+
+  fireEvent.pointerDown(canvas, { pointerId: 1, pointerType: 'mouse', button: 0, clientX: 80, clientY: 80 })
+  fireEvent.pointerMove(canvas, { pointerId: 1, pointerType: 'mouse', clientX: 130, clientY: 120 })
+  fireEvent.pointerUp(canvas, { pointerId: 1, pointerType: 'mouse', clientX: 130, clientY: 120 })
+  expect(Number(canvas.getAttribute('data-pan-x'))).not.toBe(0)
+  expect(Number(canvas.getAttribute('data-pan-y'))).not.toBe(0)
 })

@@ -1,4 +1,4 @@
-import type { ComponentType, ReactNode } from 'react'
+import type { ComponentType, LazyExoticComponent, ReactNode } from 'react'
 import type { ArtifactRef } from '../../domain/artifact'
 import type { Session } from '../../domain/types'
 
@@ -12,6 +12,10 @@ export interface ViewerContext {
   onDirtyChange?: (dirty: boolean) => void
   onClose?: () => void
 }
+
+export type ArtifactViewerComponent =
+  | ComponentType<ViewerContext>
+  | LazyExoticComponent<ComponentType<ViewerContext>>
 
 export interface ViewerConfigOption {
   key: string
@@ -40,6 +44,8 @@ export interface ArtifactViewer {
   title: string
   description?: string
   version?: string
+  source?: 'builtin' | 'esm'
+  pluginId?: string
   category?: PluginCategory
   capabilitySlot?: string
   capabilityLabel?: string
@@ -48,17 +54,17 @@ export interface ArtifactViewer {
   badgeLabel?: string // 如 "[流程图]"、"[架构图]"、"[白板]"
   tabColor?: string // 标签页图标主色调
   icon: ComponentType<{ size?: number; className?: string }>
-  
+
   /** 声明该插件支持的文件扩展名列表，如 ['.drawio', '.drawio.xml'] */
   extensions?: string[]
-  
+
   /** 声明该插件支持的 MIME 类型列表，如 ['application/vnd.jgraph.mxfile'] */
   mimeTypes?: string[]
 
   /** 返回匹配权重，<=0 表示不支持，越高越优先（默认根据 extensions / mimeTypes 自动打分） */
   supports?: (artifact: ArtifactRef) => number
-  
-  component: ComponentType<ViewerContext>
+
+  component: ArtifactViewerComponent
   renderBadge?: (artifact: ArtifactRef, onOpen: () => void) => ReactNode
   capabilities: {
     canEdit: boolean

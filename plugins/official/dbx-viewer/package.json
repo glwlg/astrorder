@@ -1,0 +1,21 @@
+{
+  "name": "@astrorder-plugin/dbx-viewer",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Official hot-pluggable DBX database workbench ESM plugin",
+  "type": "module",
+  "scripts": {
+    "build": "node ../../../scripts/build-official-plugins.mjs --plugin dbx-viewer"
+  },
+  "peerDependencies": {
+    "@mantine/core": "^9.0.0",
+    "@mantine/notifications": "^9.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@astrorder/plugin-sdk": "file:../../../packages/astrorder-plugin-sdk",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4"
+  }
+}

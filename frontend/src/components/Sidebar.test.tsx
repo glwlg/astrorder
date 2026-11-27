@@ -22,6 +22,7 @@ const zeroSessionProject: Project = {
 
 describe('Sidebar project catalog wiring', () => {
   beforeEach(() => {
+    localStorage.setItem('astrorder:sidebar-primary-nav-fold', 'expanded')
     const now = new Date()
     const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
     vi.spyOn(api, 'getAnalyticsUsage').mockResolvedValue({
@@ -35,7 +36,7 @@ describe('Sidebar project catalog wiring', () => {
       ],
     } as unknown as OcxUsageResponse)
   })
-  afterEach(() => { cleanup(); vi.restoreAllMocks(); useAstrorderStore.getState().resetRuntime() })
+  afterEach(() => { localStorage.removeItem('astrorder:sidebar-primary-nav-fold'); cleanup(); vi.restoreAllMocks(); useAstrorderStore.getState().resetRuntime() })
 
   function renderSidebar(projects: Project[] = []) {
     return render(

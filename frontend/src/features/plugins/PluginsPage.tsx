@@ -26,6 +26,7 @@ import {
   IconChevronDown,
   IconChevronRight,
   IconChevronUp,
+  IconDeviceDesktop,
   IconInfoCircle,
   IconMicrophone,
   IconPackageImport,
@@ -41,7 +42,8 @@ import {
 import { api, type BrowserEngine, type LocalVoicePluginStatus, type ToolchainItemStatus } from '../../api/client'
 import type { PluginView } from '../../api/extensions'
 import { extensionRegistry, useExtensionRegistryVersion } from '../extensions/extensionRegistry'
-import { useExtensionStore } from '../extensions/extensionStore'
+import { esmPluginLoader, isEsmPluginHiddenInOfficeMode } from '../extensions/esmPluginLoader'
+import { useExtensionStore, type EsmPluginRuntimeState } from '../extensions/extensionStore'
 import { InstallPluginModal } from '../extensions/InstallPluginModal'
 import { PermissionGrantModal } from '../extensions/PermissionGrantModal'
 import { PluginConfigDrawer } from '../extensions/PluginConfigDrawer'
@@ -50,7 +52,7 @@ import {
   PENDING_PLUGIN_CONFIG_SESSION_KEY,
   type OpenPluginConfigEventDetail,
 } from '../extensions/types'
-import { artifactViewerRegistry } from '../sidecar/registry'
+import { artifactViewerRegistry, useViewerRegistryVersion } from '../sidecar/registry'
 import type { ArtifactViewer, PluginCategory, ViewerConfigOption } from '../sidecar/types'
 import {
   BROWSER_VIEWER_PLUGIN_ID,
@@ -62,6 +64,7 @@ import {
 import { PLUGIN_CATEGORIES, resolveViewerCategory, type PluginCategoryMeta, type PluginTabId } from './pluginCategories'
 import { usePluginSettingsStore } from './pluginSettingsStore'
 import { AgentEnginePluginCard, ToolchainRuntimeCard } from '../toolchain/ToolchainSectionCard'
+import { useIsOfficeProfile } from '../office/appProfile'
 import { useSettingsMode } from '../settings/settingsMode'
 import './PluginsPage.css'
 
@@ -73,6 +76,7 @@ const ADVANCED_ONLY_WORKSPACE_IDS = new Set<string>([
   'workspace-monitor',
   'workspace-groups',
   'workspace-backups',
+  'workspace-learning-radar',
   'agent-graph-viewer',
   'blackboard-viewer',
   'memory-viewer',
@@ -81,7 +85,7 @@ const ADVANCED_ONLY_WORKSPACE_IDS = new Set<string>([
 
 const BROWSER_ENGINE_LABELS: Record<BrowserEngine, string> = {
   browser_use: 'Browser Use',
-  jev_ultrafast: 'System One',
+  jev_ultrafast: '决策模型极速引擎',
 }
 
 function NumberOptionControl({
@@ -242,6 +246,7 @@ function ConfigOptionControls({
 }
 
 function VoiceInputPluginCard() {
+  const isOfficeProfile = useIsOfficeProfile()
   const isEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(VOICE_INPUT_PLUGIN_ID))
   const togglePlugin = usePluginSettingsStore((s) => s.togglePlugin)
   const setPluginConfig = usePluginSettingsStore((s) => s.setPluginConfig)
@@ -290,7 +295,9 @@ function VoiceInputPluginCard() {
         : status?.state === 'running' ? '流式听写已启用'
           : status?.state === 'error' ? '启动失败'
             : '已停用 · 使用停止后转写'
-  const providerBadge = isLocalR2T2 ? 'R2T2 本地流式' : '云端 Whisper'
+  const providerBadge = isLocalR2T2
+    ? (isOfficeProfile ? '本机离线识别' : 'R2T2 本地流式')
+    : '云端 Whisper'
 
   return (
     <Card withBorder className="plugins-tile">
@@ -326,7 +333,7 @@ function VoiceInputPluginCard() {
             </Text>
             <Switch
               size="xs"
-              aria-label="启用 R2T2 本地流式听写"
+              aria-label={isOfficeProfile ? '启用本机离线实时语音听写' : '启用 R2T2 本地流式听写'}
               checked={Boolean(status?.enabled)}
               disabled={!status || loading}
               onChange={() => { void toggleLocalRuntime() }}
@@ -360,7 +367,9 @@ function VoiceInputPluginCard() {
             <div>
               <Text size="xs" fw={500} mb={2}>工具实现</Text>
               <Text size="11px" c="dimmed" mb={4}>
-                选择语音转文字引擎实现：本地 R2T2 流式模型实时回填，云端 Whisper 不占用本机显存
+                {isOfficeProfile
+                  ? '选择语音转文字方式：本机离线识别可实时回填文字，云端识别不占用本机资源'
+                  : '选择语音转文字引擎实现：本地 R2T2 流式模型实时回填，云端 Whisper 不占用本机显存'}
               </Text>
               <Select
                 size="xs"
@@ -371,7 +380,7 @@ function VoiceInputPluginCard() {
                   if (val !== null) setPluginConfig(VOICE_INPUT_PLUGIN_ID, 'provider', val)
                 }}
                 data={[
-                  { value: 'local-r2t2', label: 'R2T2 本地流式模型' },
+                  { value: 'local-r2t2', label: isOfficeProfile ? '本机离线语音识别' : 'R2T2 本地流式模型' },
                   { value: 'cloud-whisper', label: '云端 Whisper 转写' },
                 ]}
               />
@@ -682,7 +691,7 @@ function PluginCard({
                       onChange={(val) => { void handleBrowserEngineChange(val) }}
                       data={[
                         { value: 'browser_use', label: 'Browser Use' },
-                        { value: 'jev_ultrafast', label: 'System One' },
+                        { value: 'jev_ultrafast', label: '决策模型极速引擎' },
                       ]}
                     />
                   </div>
@@ -855,9 +864,42 @@ function resolveExtensionCategory(raw?: string): PluginCategory {
   return 'workspace'
 }
 
-function getRuntimeStatusBadge(plugin: PluginView): { label: string; color: string } {
+function getRuntimeStatusBadge(
+  plugin: PluginView,
+  esmState?: EsmPluginRuntimeState,
+  isOfficeProfile = false,
+): { label: string; color: string; tooltip?: string } {
+  const isEsm = plugin.frontend?.mode === 'esm'
   if (!plugin.enabled) {
-    return { label: '已停用', color: 'gray' }
+    return isEsm
+      ? { label: '未加载（零占用）', color: 'gray', tooltip: '插件未启用，零网络请求与零内存占用' }
+      : { label: '已停用', color: 'gray' }
+  }
+  if (isEsm) {
+    if (isOfficeProfile && isEsmPluginHiddenInOfficeMode(plugin)) {
+      return {
+        label: '办公态休眠（零占用）',
+        color: 'gray',
+        tooltip: '当前处于办公模式，开发专属插件零加载不占用内存',
+      }
+    }
+    if (esmState?.status === 'error') {
+      return { label: '加载失败', color: 'red', tooltip: esmState.error || '加载失败' }
+    }
+    if (esmState?.status === 'loading') {
+      return { label: '热加载中', color: 'blue', tooltip: '正在按需拉取并激活插件模块' }
+    }
+    if (esmState?.status === 'loaded') {
+      return {
+        label: '已热加载',
+        color: 'teal',
+        tooltip: esmState.digest ? `模块摘要 ${esmState.digest}` : '已同页热加载',
+      }
+    }
+    if (plugin.permissions_granted === false || (plugin.pending_permissions?.length ?? 0) > 0) {
+      return { label: '待授权', color: 'yellow', tooltip: '授予所需权限后自动热加载' }
+    }
+    return { label: '未加载（零占用）', color: 'gray', tooltip: '等待热加载或点击重载' }
   }
   switch (plugin.runtime_state) {
     case 'ready':
@@ -866,32 +908,120 @@ function getRuntimeStatusBadge(plugin: PluginView): { label: string; color: stri
     case 'starting':
       return { label: '启动中', color: 'blue' }
     case 'error':
-      return { label: '异常', color: 'red' }
+      return { label: '异常', color: 'red', tooltip: plugin.runtime_error }
     default:
       return { label: '已停用', color: 'gray' }
   }
 }
 
-function ExternalPluginCard({
+function isOfficialExtensionHiddenInOfficeMode(plugin: PluginView): boolean {
+  if (plugin.frontend?.mode === 'esm') {
+    return isEsmPluginHiddenInOfficeMode(plugin)
+  }
+  const pages = plugin.contributes?.pages || []
+  const viewers = plugin.contributes?.viewers || []
+  const total = pages.length + viewers.length
+  if (total === 0) return false
+  return (
+    pages.every((p) => Boolean(p.hide_in_office_mode)) &&
+    viewers.every((v) => Boolean(v.hide_in_office_mode))
+  )
+}
+
+function ExtensionPluginCard({
   plugin,
+  esmState,
   onToggle,
   onOpenConfig,
   onViewPermissions,
   onRestart,
+  onReloadEsm,
   onRequestUninstall,
 }: {
   plugin: PluginView
+  esmState?: EsmPluginRuntimeState
   onToggle: (plugin: PluginView, nextEnabled: boolean) => Promise<void>
   onOpenConfig: (pluginId: string) => void
   onViewPermissions: (plugin: PluginView) => void
   onRestart: (plugin: PluginView) => Promise<void>
+  onReloadEsm: (plugin: PluginView) => Promise<void>
   onRequestUninstall: (plugin: PluginView) => void
 }) {
+  const isOfficeProfile = useIsOfficeProfile()
+  const viewerRegistryVersion = useViewerRegistryVersion()
+  const extRegistryVersion = useExtensionRegistryVersion()
+  const pluginConfigMap = usePluginSettingsStore((s) => s.pluginConfigs[plugin.id])
+  const setPluginConfig = usePluginSettingsStore((s) => s.setPluginConfig)
   const [busy, setBusy] = useState(false)
   const [restarting, setRestarting] = useState(false)
-  const runtimeBadge = getRuntimeStatusBadge(plugin)
-  const hasSettings = extensionRegistry.hasSettingsDrawer(plugin.id, plugin)
+  const [reloadingEsm, setReloadingEsm] = useState(false)
+  const [expanded, setExpanded] = useState(false)
+  const [infoOpened, setInfoOpened] = useState(false)
+  const isOfficial = plugin.source === 'official' || plugin.source === 'builtin'
+  const isEsm = plugin.frontend?.mode === 'esm'
+  const isUnsignedExternalEsm = !isOfficial && isEsm && !plugin.signature_verified
+  const hiddenInOffice = isEsm && isOfficeProfile && isEsmPluginHiddenInOfficeMode(plugin)
+  const runtimeBadge = getRuntimeStatusBadge(plugin, esmState, isOfficeProfile)
+
+  const loadedViewer = useMemo(() => {
+    void viewerRegistryVersion
+    return (
+      artifactViewerRegistry.getViewerById(plugin.id) ||
+      artifactViewerRegistry.getAllViewers().find((v) => v.pluginId === plugin.id) ||
+      null
+    )
+  }, [viewerRegistryVersion, plugin.id])
+
+  const builtinReg = useMemo(() => {
+    void extRegistryVersion
+    return extensionRegistry.getBuiltin(plugin.id)
+  }, [extRegistryVersion, plugin.id])
+
+  const hasSettings = useMemo(() => {
+    void extRegistryVersion
+    return extensionRegistry.hasSettingsDrawer(plugin.id, plugin)
+  }, [extRegistryVersion, plugin])
+
+  const readOptionValue = (key: string, fallback: unknown) =>
+    pluginConfigMap && pluginConfigMap[key] !== undefined ? pluginConfigMap[key] : fallback
+
+  const defaultByKey = useMemo(() => {
+    const map: Record<string, unknown> = {}
+    for (const opt of loadedViewer?.configOptions || []) map[opt.key] = opt.defaultValue
+    return map
+  }, [loadedViewer?.configOptions])
+
+  const visibleOptions = (loadedViewer?.configOptions || []).filter((opt) => {
+    if (!opt.visibleWhen) return true
+    const current = readOptionValue(opt.visibleWhen.key, defaultByKey[opt.visibleWhen.key])
+    return current === opt.visibleWhen.value
+  })
+  const hasOptions = visibleOptions.length > 0
+
+  const activeProviderLabel = (() => {
+    if (!loadedViewer) return ''
+    if (!loadedViewer.providerConfigKey) return loadedViewer.implementationName || ''
+    const providerOpt = (loadedViewer.configOptions || []).find(
+      (opt) => opt.key === loadedViewer.providerConfigKey,
+    )
+    if (!providerOpt) return loadedViewer.implementationName || ''
+    const current = String(readOptionValue(providerOpt.key, providerOpt.defaultValue) ?? '')
+    return providerOpt.options?.find((choice) => choice.value === current)?.label || current
+  })()
+
+  const ViewerIcon = loadedViewer?.icon
   const canRestart = plugin.backend_type === 'process' && plugin.enabled
+  const canReloadEsm =
+    isEsm &&
+    plugin.enabled &&
+    !hiddenInOffice &&
+    (plugin.source === 'builtin'
+      ? plugin.permissions_granted !== false
+      : plugin.permissions_granted === true)
+  const errorMessage = esmState?.status === 'error' ? esmState.error || plugin.runtime_error : plugin.runtime_error
+  const showPermissionsBtn = !isOfficial || (plugin.permissions && plugin.permissions.length > 0)
+  const showFooter =
+    hasOptions || hasSettings || showPermissionsBtn || canRestart || canReloadEsm || !isOfficial
 
   return (
     <Card withBorder className="plugins-tile">
@@ -899,99 +1029,239 @@ function ExternalPluginCard({
         <div className="plugins-tile-head">
           <div className="plugins-tile-title-row">
             <span className={`plugins-tile-icon${plugin.enabled ? '' : ' is-muted'}`} aria-hidden="true">
-              <IconPuzzle size={17} />
+              {ViewerIcon ? (
+                <ViewerIcon size={17} />
+              ) : plugin.icon === 'device-desktop' ? (
+                <IconDeviceDesktop size={17} />
+              ) : (
+                <IconPuzzle size={17} />
+              )}
             </span>
             <Text fw={600} size="sm">
               {plugin.name}
             </Text>
-            <Badge size="xs" variant="light" color="indigo">
-              第三方
+            <Badge size="xs" variant="light" color={isOfficial ? 'violet' : 'indigo'}>
+              {isOfficial ? (isEsm ? '官方热加载' : '官方内置') : '第三方'}
             </Badge>
+            {loadedViewer?.capabilitySlot && (
+              <Badge size="xs" variant="light" color="gray">
+                {activeProviderLabel
+                  ? `当前实现: ${activeProviderLabel}`
+                  : `${loadedViewer.capabilityLabel || loadedViewer.capabilitySlot}`}
+              </Badge>
+            )}
+            {isUnsignedExternalEsm && (
+              <Badge size="xs" variant="light" color="orange">
+                未签名脚本
+              </Badge>
+            )}
             {plugin.version && (
               <Badge size="xs" variant="outline" color="gray">
                 v{plugin.version}
               </Badge>
             )}
-            <Tooltip label={plugin.runtime_error || runtimeBadge.label} disabled={!plugin.runtime_error} withArrow>
+            <Tooltip
+              label={errorMessage || runtimeBadge.tooltip || runtimeBadge.label}
+              disabled={!errorMessage && !runtimeBadge.tooltip}
+              withArrow
+            >
               <Badge size="xs" variant="light" color={runtimeBadge.color}>
                 {runtimeBadge.label}
               </Badge>
             </Tooltip>
           </div>
 
-          <Switch
-            checked={plugin.enabled}
-            disabled={busy}
-            size="sm"
-            aria-label={`启用或禁用 ${plugin.name}`}
-            onChange={(e) => {
-              const nextChecked = e.currentTarget.checked
-              setBusy(true)
-              void onToggle(plugin, nextChecked).finally(() => setBusy(false))
-            }}
-          />
+          <Group gap={6} wrap="nowrap" align="center">
+            {loadedViewer?.documentation && (
+              <Tooltip label="查看说明" withArrow>
+                <ActionIcon
+                  size="sm"
+                  variant="subtle"
+                  color="gray"
+                  onClick={() => setInfoOpened(true)}
+                  aria-label={`查看 ${plugin.name} 说明`}
+                >
+                  <IconInfoCircle size={15} />
+                </ActionIcon>
+              </Tooltip>
+            )}
+            <Switch
+              checked={plugin.enabled}
+              disabled={busy}
+              size="sm"
+              aria-label={`启用或禁用 ${plugin.name}`}
+              onChange={(e) => {
+                const nextChecked = e.currentTarget.checked
+                setBusy(true)
+                void onToggle(plugin, nextChecked).finally(() => setBusy(false))
+              }}
+            />
+          </Group>
         </div>
 
         <div className="plugins-tile-desc">
-          {plugin.description || '通过 Astrorder 扩展平台安装的第三方插件。'}
+          {plugin.description ||
+            loadedViewer?.description ||
+            (isOfficial
+              ? '星序官方按需热加载插件，关闭时不下载、不解析且不占用页面内存。'
+              : '通过 Astrorder 扩展平台安装的第三方插件。')}
         </div>
 
-        {plugin.runtime_error && (
+        {errorMessage && (
           <div className="plugins-tile-error" role="alert">
-            {plugin.runtime_error}
+            {errorMessage}
           </div>
         )}
       </div>
 
-      <div className="plugins-tile-footer is-split">
-        <div className="plugins-tile-actions">
-          {hasSettings && (
-            <Button
-              size="compact-xs"
-              variant="light"
-              color="indigo"
-              leftSection={<IconSettings size={13} />}
-              onClick={() => onOpenConfig(plugin.id)}
-            >
-              配置
-            </Button>
-          )}
-          <Button
-            size="compact-xs"
-            variant="subtle"
-            color="gray"
-            leftSection={<IconShieldLock size={13} />}
-            onClick={() => onViewPermissions(plugin)}
-          >
-            权限{plugin.permissions && plugin.permissions.length > 0 ? ` (${plugin.permissions.length})` : ''}
-          </Button>
-          {canRestart && (
-            <Button
-              size="compact-xs"
-              variant="subtle"
-              color="gray"
-              loading={restarting}
-              leftSection={<IconRotateClockwise size={13} />}
-              onClick={() => {
-                setRestarting(true)
-                void onRestart(plugin).finally(() => setRestarting(false))
-              }}
-            >
-              重启
-            </Button>
-          )}
-        </div>
+      {showFooter && (
+        <>
+          <div className="plugins-tile-footer is-split">
+            <div className="plugins-tile-actions">
+              {hasOptions && (
+                <Button
+                  variant="subtle"
+                  size="compact-xs"
+                  color="gray"
+                  leftSection={<IconAdjustments size={13} />}
+                  rightSection={expanded ? <IconChevronUp size={13} /> : <IconChevronDown size={13} />}
+                  onClick={() => setExpanded(!expanded)}
+                >
+                  参数配置 ({visibleOptions.length})
+                </Button>
+              )}
+              {hasSettings && (
+                <Button
+                  size="compact-xs"
+                  variant="light"
+                  color="indigo"
+                  leftSection={<IconSettings size={13} />}
+                  onClick={() => onOpenConfig(plugin.id)}
+                >
+                  {builtinReg?.settingsButtonLabel || '配置'}
+                </Button>
+              )}
+              {showPermissionsBtn && (
+                <Button
+                  size="compact-xs"
+                  variant="subtle"
+                  color="gray"
+                  leftSection={<IconShieldLock size={13} />}
+                  onClick={() => onViewPermissions(plugin)}
+                >
+                  权限{plugin.permissions && plugin.permissions.length > 0 ? ` (${plugin.permissions.length})` : ''}
+                </Button>
+              )}
+              {canReloadEsm && (
+                <Button
+                  size="compact-xs"
+                  variant="subtle"
+                  color={esmState?.status === 'error' ? 'red' : 'gray'}
+                  loading={reloadingEsm}
+                  leftSection={<IconRefresh size={13} />}
+                  onClick={() => {
+                    setReloadingEsm(true)
+                    void onReloadEsm(plugin).finally(() => setReloadingEsm(false))
+                  }}
+                >
+                  重载
+                </Button>
+              )}
+              {canRestart && (
+                <Button
+                  size="compact-xs"
+                  variant="subtle"
+                  color="gray"
+                  loading={restarting}
+                  leftSection={<IconRotateClockwise size={13} />}
+                  onClick={() => {
+                    setRestarting(true)
+                    void onRestart(plugin).finally(() => setRestarting(false))
+                  }}
+                >
+                  重启
+                </Button>
+              )}
+            </div>
 
-        <Button
-          size="compact-xs"
-          variant="subtle"
-          color="red"
-          leftSection={<IconTrash size={13} />}
-          onClick={() => onRequestUninstall(plugin)}
+            {!isOfficial && (
+              <Button
+                size="compact-xs"
+                variant="subtle"
+                color="red"
+                leftSection={<IconTrash size={13} />}
+                onClick={() => onRequestUninstall(plugin)}
+              >
+                卸载
+              </Button>
+            )}
+          </div>
+
+          {hasOptions && (
+            <Collapse expanded={expanded}>
+              <Stack gap="xs" mt="xs" p="xs" style={{ background: 'var(--st-rail, var(--astr-surface-muted))', borderRadius: 8 }}>
+                <ConfigOptionControls
+                  pluginId={plugin.id}
+                  options={visibleOptions}
+                  pluginConfigMap={pluginConfigMap}
+                  setPluginConfig={setPluginConfig}
+                />
+              </Stack>
+            </Collapse>
+          )}
+        </>
+      )}
+
+      {loadedViewer?.documentation && (
+        <Modal
+          opened={infoOpened}
+          onClose={() => setInfoOpened(false)}
+          size="lg"
+          radius="lg"
+          centered
+          title={
+            <Group gap="xs">
+              <Text fw={700} size="md">
+                {plugin.name} · 能力说明
+              </Text>
+              {plugin.version && (
+                <Badge size="xs" variant="light" color="indigo">
+                  v{plugin.version}
+                </Badge>
+              )}
+            </Group>
+          }
         >
-          卸载
-        </Button>
-      </div>
+          <Stack gap="md">
+            <Text size="sm" c="dimmed" style={{ lineHeight: 1.6 }}>
+              {loadedViewer.documentation.summary || plugin.description}
+            </Text>
+            {loadedViewer.documentation.sections?.map((sec, idx) => (
+              <div
+                key={idx}
+                style={{
+                  padding: '10px 12px',
+                  borderRadius: 8,
+                  background: 'var(--astr-surface-muted, #F8FAFC)',
+                  border: '1px solid var(--astr-border, #E5E7EB)',
+                }}
+              >
+                <Text size="xs" fw={700} c="var(--astr-text, #1E293B)" mb={4}>
+                  {sec.title}
+                </Text>
+                <Text size="11.5px" c="dimmed" style={{ whiteSpace: 'pre-wrap', lineHeight: 1.55 }}>
+                  {sec.content}
+                </Text>
+              </div>
+            ))}
+            <Group justify="flex-end" mt="xs">
+              <Button size="xs" variant="default" onClick={() => setInfoOpened(false)}>
+                关闭
+              </Button>
+            </Group>
+          </Stack>
+        </Modal>
+      )}
     </Card>
   )
 }
@@ -1001,6 +1271,8 @@ interface CatalogEntry {
   category: PluginCategory
   searchText: string
   isToggleable: boolean
+  isExternal?: boolean
+  hideInOfficeMode?: boolean
   isEnabled?: boolean
   fullWidth?: boolean
   render: () => React.ReactNode
@@ -1042,28 +1314,58 @@ function CategorySection({
 }
 
 export function PluginsPage() {
-  const viewers = useMemo(
-    () =>
-      artifactViewerRegistry
-        .getAllViewers()
-        .filter(
-          (viewer) =>
-            viewer.id !== EXTERNAL_PLUGIN_PANEL_VIEWER_ID &&
-            !(viewer as ArtifactViewer & { hiddenFromCatalog?: boolean }).hiddenFromCatalog,
-        ),
-    [],
-  )
+  const viewerRegistryVersion = useViewerRegistryVersion()
   const hydrate = usePluginSettingsStore((s) => s.hydrate)
   const enabledPlugins = usePluginSettingsStore((s) => s.enabledPlugins)
   const extensionItems = useExtensionStore((s) => s.items)
+  const esmStates = useExtensionStore((s) => s.esmStates)
   const extensionsLoading = useExtensionStore((s) => s.loading)
   const hydrateExtensions = useExtensionStore((s) => s.hydrate)
   const refreshExtensions = useExtensionStore((s) => s.refresh)
   const setExtensionEnabled = useExtensionStore((s) => s.setEnabled)
   const restartExtension = useExtensionStore((s) => s.restart)
   const uninstallExtension = useExtensionStore((s) => s.uninstall)
-  const { mode, setMode, managedByWorkbench } = useSettingsMode()
-  const isBasicMode = managedByWorkbench && mode === 'basic'
+  const managedExtensions = useMemo(() => {
+    void viewerRegistryVersion
+    const staticBuiltinIds = new Set<string>([
+      ...BUILTIN_AGENT_PLUGINS.map((p) => p.id),
+      ...BUILTIN_SYSTEM_PLUGINS.map((p) => p.id),
+      VOICE_INPUT_PLUGIN_ID,
+    ])
+    const viewerOwnedIds = new Set<string>()
+    for (const v of artifactViewerRegistry.getAllViewers()) {
+      viewerOwnedIds.add(v.id)
+      if (v.pluginId) viewerOwnedIds.add(v.pluginId)
+    }
+    return extensionItems.filter((item) => {
+      if (item.source === 'official' || item.source === 'external') return true
+      if (item.source === 'builtin') {
+        if (item.frontend?.mode === 'esm') return true
+        return !staticBuiltinIds.has(item.id) && !viewerOwnedIds.has(item.id)
+      }
+      return false
+    })
+  }, [extensionItems, viewerRegistryVersion])
+  const managedExtensionIds = useMemo(
+    () => new Set(managedExtensions.map((item) => item.id)),
+    [managedExtensions],
+  )
+  const viewers = useMemo(() => {
+    void viewerRegistryVersion
+    return artifactViewerRegistry
+      .getAllViewers()
+      .filter(
+        (viewer) =>
+          viewer.id !== EXTERNAL_PLUGIN_PANEL_VIEWER_ID &&
+          !(viewer as ArtifactViewer & { hiddenFromCatalog?: boolean }).hiddenFromCatalog &&
+          !managedExtensionIds.has(viewer.id) &&
+          !(viewer.pluginId && managedExtensionIds.has(viewer.pluginId)),
+      )
+  }, [viewerRegistryVersion, managedExtensionIds])
+  const isOfficeProfile = useIsOfficeProfile()
+  const { mode, setMode, officeLocked, managedByWorkbench } = useSettingsMode()
+  const isOfficeLocked = isOfficeProfile || Boolean(officeLocked)
+  const isBasicMode = isOfficeLocked || (managedByWorkbench && mode === 'basic')
 
   const [activeTab, setActiveTab] = useState<PluginTabId>('all')
   const [query, setQuery] = useState('')
@@ -1199,6 +1501,21 @@ export function PluginsPage() {
     }
   }, [restartExtension])
 
+  const handleReloadEsmExtension = useCallback(async (plugin: PluginView) => {
+    const result = await esmPluginLoader.reloadPlugin(plugin)
+    if (result.ok) {
+      notifications.show({
+        color: 'teal',
+        message: `已热重载扩展「${plugin.name}」`,
+      })
+    } else {
+      notifications.show({
+        color: 'red',
+        message: result.error || `热重载扩展「${plugin.name}」失败`,
+      })
+    }
+  }, [])
+
   const handleConfirmUninstall = async () => {
     if (!uninstallTarget || uninstalling) return
     const target = uninstallTarget
@@ -1222,11 +1539,6 @@ export function PluginsPage() {
       setUninstalling(false)
     }
   }
-
-  const externalPlugins = useMemo(
-    () => extensionItems.filter((item) => item.source === 'external'),
-    [extensionItems],
-  )
 
   const catalogEntries = useMemo<CatalogEntry[]>(() => {
     const entries: CatalogEntry[] = [
@@ -1304,42 +1616,98 @@ export function PluginsPage() {
         isToggleable: true,
         render: () => <PluginCard viewer={viewer} onOpenConfig={(id) => setConfigPluginId(id)} />,
       })),
-      ...externalPlugins.map((plugin) => ({
-        id: plugin.id,
-        category: resolveExtensionCategory(plugin.category),
-        searchText: [
-          plugin.id,
-          plugin.name,
-          plugin.description || '',
-          plugin.author || '',
-          plugin.category || '',
-          '第三方 外部扩展 external',
-        ].join(' ').toLowerCase(),
-        isToggleable: true,
-        isEnabled: plugin.enabled,
-        render: () => (
-          <ExternalPluginCard
-            plugin={plugin}
-            onToggle={handleToggleExternal}
-            onOpenConfig={(id) => setConfigPluginId(id)}
-            onViewPermissions={(target) => setPermissionModal({ plugin: target, mode: 'view' })}
-            onRestart={handleRestartExternal}
-            onRequestUninstall={(target) => setUninstallTarget(target)}
-          />
-        ),
-      })),
+      ...managedExtensions.map((plugin) => {
+        const isExternal = plugin.source === 'external'
+        const loadedViewer =
+          artifactViewerRegistry.getViewerById(plugin.id) ||
+          artifactViewerRegistry.getAllViewers().find((v) => v.pluginId === plugin.id)
+        const viewerKeywords = (plugin.contributes?.viewers || []).flatMap((v) => [
+          v.id,
+          v.title,
+          v.description || '',
+          ...(v.extensions || []),
+          ...(v.mime_types || []),
+        ])
+        const loadedViewerKeywords = loadedViewer
+          ? [
+              loadedViewer.title,
+              loadedViewer.description || '',
+              loadedViewer.capabilityLabel || '',
+              loadedViewer.implementationName || '',
+              ...(loadedViewer.configOptions || []).flatMap((opt) =>
+                (opt.options || []).map((choice) => choice.label),
+              ),
+              ...(loadedViewer.extensions || []),
+            ]
+          : []
+        const pageKeywords = (plugin.contributes?.pages || []).flatMap((p) => [p.id, p.title])
+        return {
+          id: plugin.id,
+          category: resolveExtensionCategory(plugin.category),
+          searchText: [
+            plugin.id,
+            plugin.name,
+            plugin.description || '',
+            plugin.author || '',
+            plugin.category || '',
+            ...viewerKeywords,
+            ...loadedViewerKeywords,
+            ...pageKeywords,
+            isExternal
+              ? '第三方 外部扩展 external'
+              : plugin.frontend?.mode === 'esm'
+                ? '官方 热加载 official esm'
+                : '官方 内置 official builtin',
+          ].join(' ').toLowerCase(),
+          isToggleable: true,
+          isExternal,
+          hideInOfficeMode: !isExternal && isOfficialExtensionHiddenInOfficeMode(plugin),
+          isEnabled: plugin.enabled,
+          render: () => (
+            <ExtensionPluginCard
+              plugin={plugin}
+              esmState={esmStates[plugin.id]}
+              onToggle={handleToggleExternal}
+              onOpenConfig={(id) => setConfigPluginId(id)}
+              onViewPermissions={(target) => setPermissionModal({ plugin: target, mode: 'view' })}
+              onRestart={handleRestartExternal}
+              onReloadEsm={handleReloadEsmExtension}
+              onRequestUninstall={(target) => setUninstallTarget(target)}
+            />
+          ),
+        }
+      }),
     ]
     return entries
-  }, [viewers, localToolchain, externalPlugins, refreshLocalToolchain, handleToggleExternal, handleRestartExternal])
+  }, [
+    viewers,
+    viewerRegistryVersion,
+    localToolchain,
+    managedExtensions,
+    esmStates,
+    refreshLocalToolchain,
+    handleToggleExternal,
+    handleRestartExternal,
+    handleReloadEsmExtension,
+  ])
 
   const normalizedQuery = query.trim().toLowerCase()
   const visibleCatalogEntries = useMemo(() => {
+    if (isOfficeLocked) {
+      return catalogEntries.filter((entry) => {
+        if (entry.isExternal) return false
+        if (entry.hideInOfficeMode) return false
+        if (ADVANCED_ONLY_WORKSPACE_IDS.has(entry.id)) return false
+        return BASIC_PLUGIN_CATEGORIES.has(entry.category) || BASIC_EXTRA_PLUGIN_IDS.has(entry.id)
+      })
+    }
     if (!isBasicMode || normalizedQuery) return catalogEntries
     return catalogEntries.filter((entry) => {
+      if (entry.hideInOfficeMode) return false
       if (ADVANCED_ONLY_WORKSPACE_IDS.has(entry.id)) return false
       return BASIC_PLUGIN_CATEGORIES.has(entry.category) || BASIC_EXTRA_PLUGIN_IDS.has(entry.id)
     })
-  }, [catalogEntries, isBasicMode, normalizedQuery])
+  }, [catalogEntries, isBasicMode, isOfficeLocked, normalizedQuery])
 
   const hiddenAdvancedCount = catalogEntries.length - visibleCatalogEntries.length
 
@@ -1439,10 +1807,10 @@ export function PluginsPage() {
     VOICE_INPUT_PLUGIN_ID,
     ...viewers.map((v) => v.id),
   ]
-  const totalToggleableCount = builtinToggleableIds.length + externalPlugins.length
+  const totalToggleableCount = builtinToggleableIds.length + managedExtensions.length
   const enabledCount =
     builtinToggleableIds.filter((id) => enabledPlugins[id] !== false).length +
-    externalPlugins.filter((plugin) => plugin.enabled).length
+    managedExtensions.filter((plugin) => plugin.enabled).length
 
   const handleRefreshAll = () => {
     void hydrate(true)
@@ -1455,10 +1823,14 @@ export function PluginsPage() {
       <div className="plugins-page-top">
         <div>
           <Title order={2} style={{ fontSize: 22, fontWeight: 650, letterSpacing: '-0.025em', color: 'var(--st-ink, var(--astr-text))' }}>
-            插件管理
+            {isOfficeLocked ? '内置功能开关' : '插件管理'}
           </Title>
           <Text size="sm" c="dimmed" mt={4}>
-            {isBasicMode ? '按需开关办公与协作功能，保持工作区简洁' : '按能力分类管理全部工作台扩展、开发工具与本地运行时'}
+            {isOfficeLocked
+              ? '当前为办公模式，仅展示安全易懂的官方内置办公与协作功能开关'
+              : isBasicMode
+                ? '按需开关办公与协作功能，保持工作区简洁'
+                : '按能力分类管理全部工作台扩展、开发工具与本地运行时'}
           </Text>
         </div>
 
@@ -1547,12 +1919,18 @@ export function PluginsPage() {
           <div className="st-inline-notice">
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
               <IconInfoCircle size={14} aria-hidden="true" />
-              <span>已隐藏 {hiddenAdvancedCount} 项开发引擎、数据库与命令行底层插件</span>
+              <span>
+                {isOfficeLocked
+                  ? '办公模式下已自动屏蔽外部本地进程插件与开发工具，保障安全与界面简洁'
+                  : `已隐藏 ${hiddenAdvancedCount} 项开发引擎、数据库与命令行底层插件`}
+              </span>
             </span>
-            <button type="button" className="st-text-link" onClick={() => setMode('advanced')}>
-              <span>在高级配置中查看全部</span>
-              <IconChevronRight size={14} aria-hidden="true" />
-            </button>
+            {!isOfficeLocked && (
+              <button type="button" className="st-text-link" onClick={() => setMode('advanced')}>
+                <span>在高级配置中查看全部</span>
+                <IconChevronRight size={14} aria-hidden="true" />
+              </button>
+            )}
           </div>
         )}
         {tabs.map((tab) => {
@@ -1602,15 +1980,17 @@ export function PluginsPage() {
         onClose={() => setConfigPluginId(null)}
       />
 
-      <InstallPluginModal
-        opened={installModalOpened}
-        onClose={() => setInstallModalOpened(false)}
-        onInstalled={(plugin, requestEnable) => {
-          if (requestEnable) {
-            void handleToggleExternal(plugin, true)
-          }
-        }}
-      />
+      {!isOfficeLocked && (
+        <InstallPluginModal
+          opened={installModalOpened}
+          onClose={() => setInstallModalOpened(false)}
+          onInstalled={(plugin, requestEnable) => {
+            if (requestEnable) {
+              void handleToggleExternal(plugin, true)
+            }
+          }}
+        />
+      )}
 
       <PermissionGrantModal
         opened={Boolean(permissionModal)}

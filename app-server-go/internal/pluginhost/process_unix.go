@@ -7,13 +7,22 @@ import (
 	"syscall"
 )
 
+type pluginProcessGuard struct{}
+
 func configurePluginProcess(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Setpgid: true,
 	}
 }
 
-func terminatePluginProcess(cmd *exec.Cmd) {
+func startPluginProcess(cmd *exec.Cmd) (*pluginProcessGuard, error) {
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	return &pluginProcessGuard{}, nil
+}
+
+func (g *pluginProcessGuard) Terminate(cmd *exec.Cmd) {
 	if cmd == nil || cmd.Process == nil {
 		return
 	}
@@ -24,7 +33,7 @@ func terminatePluginProcess(cmd *exec.Cmd) {
 	_ = cmd.Process.Signal(syscall.SIGTERM)
 }
 
-func forceKillPluginProcess(cmd *exec.Cmd) {
+func (g *pluginProcessGuard) ForceKill(cmd *exec.Cmd) {
 	if cmd == nil || cmd.Process == nil {
 		return
 	}
@@ -33,4 +42,8 @@ func forceKillPluginProcess(cmd *exec.Cmd) {
 		_ = syscall.Kill(-pid, syscall.SIGKILL)
 	}
 	_ = cmd.Process.Kill()
+}
+
+func (g *pluginProcessGuard) Release() error {
+	return nil
 }

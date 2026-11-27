@@ -6,11 +6,18 @@ import type { ArtifactRef } from '../../domain/artifact'
 import type { Session } from '../../domain/types'
 import { useSidecarStore } from './sidecarStore'
 
-const viewerLifecycle = vi.hoisted(() => ({ mounts: new Map<string, number>(), unmounts: new Map<string, number>() }))
+const viewerLifecycle = vi.hoisted(() => ({
+  mounts: new Map<string, number>(),
+  unmounts: new Map<string, number>(),
+  crashIds: new Set<string>(),
+}))
 
 vi.mock('./registry', async () => {
   const React = await import('react')
   function StatefulViewer({ artifact, toolbarAction, onSave, isActive }: ViewerContext) {
+    if (viewerLifecycle.crashIds.has(artifact.id)) {
+      throw new Error(`boom:${artifact.id}`)
+    }
     React.useEffect(() => {
       viewerLifecycle.mounts.set(artifact.id, (viewerLifecycle.mounts.get(artifact.id) || 0) + 1)
       return () => { viewerLifecycle.unmounts.set(artifact.id, (viewerLifecycle.unmounts.get(artifact.id) || 0) + 1) }
@@ -18,7 +25,17 @@ vi.mock('./registry', async () => {
     const [value, setValue] = React.useState(artifact.name)
     return <div data-testid={`viewer-${artifact.id}`} data-active={isActive}>{toolbarAction}<input aria-label={artifact.id} value={value} onChange={(event) => setValue(event.currentTarget.value)} /><button onClick={() => void onSave?.(value)}>保存测试文件</button></div>
   }
-  return { artifactViewerRegistry: { findViewer: () => ({ component: StatefulViewer }) } }
+  const LazyViewer = React.lazy(() => Promise.resolve({ default: StatefulViewer }))
+  return {
+    artifactViewerRegistry: {
+      findViewer: (art: ArtifactRef) => ({
+        id: art.id.startsWith('lazy:') ? 'lazy-test-viewer' : 'test-viewer',
+        title: art.id.startsWith('lazy:') ? '懒加载查看器' : '测试查看器',
+        component: art.id.startsWith('lazy:') ? LazyViewer : StatefulViewer,
+      }),
+    },
+    useViewerRegistryVersion: () => 0,
+  }
 })
 
 import { SidecarHost } from './SidecarHost'
@@ -79,6 +96,7 @@ describe('SidecarHost tab keep-alive', () => {
     localStorage.removeItem('astrorder:token')
     viewerLifecycle.mounts.clear()
     viewerLifecycle.unmounts.clear()
+    viewerLifecycle.crashIds.clear()
     useSidecarStore.setState({
       isOpen: false,
       activeTabId: '',
@@ -218,5 +236,30 @@ describe('SidecarHost tab keep-alive', () => {
     view.rerender(host(otherSession))
 
     expect(viewerLifecycle.unmounts.get(first.id)).toBe(1)
+  })
+
+  it('isolates viewer crashes inside PluginErrorBoundary and renders React.lazy viewers inside Suspense', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const crashing = artifact('artifact:crash')
+    const healthy = artifact('lazy:healthy')
+    viewerLifecycle.crashIds.add(crashing.id)
+
+    useSidecarStore.setState({
+      isOpen: true,
+      activeTabId: crashing.id,
+      activeSessionKey: 'agent-keepalive:session-keepalive',
+      tabs: [
+        { id: crashing.id, type: 'artifact', title: 'Crashing', artifact: crashing, viewerId: 'test-viewer', closable: true },
+        { id: healthy.id, type: 'artifact', title: 'Healthy Lazy', artifact: healthy, viewerId: 'lazy-test-viewer', closable: true },
+      ],
+    })
+
+    renderHost()
+    expect(screen.getByRole('alert')).toBeInTheDocument()
+    expect(screen.getByText('boom:artifact:crash')).toBeInTheDocument()
+
+    // Switching to the healthy lazy tab still works cleanly without host crash
+    act(() => useSidecarStore.getState().setActiveTabId(healthy.id))
+    expect(await screen.findByTestId(`viewer-${healthy.id}`)).toHaveAttribute('data-active', 'true')
   })
 })

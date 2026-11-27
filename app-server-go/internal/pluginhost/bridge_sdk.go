@@ -153,7 +153,7 @@ func serveBridgeSDK(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
-	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+	w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.WriteHeader(http.StatusOK)

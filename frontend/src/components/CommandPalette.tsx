@@ -1,27 +1,19 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type KeyboardEvent } from 'react'
 import { useComputedColorScheme, useMantineColorScheme } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import {
   IconArrowRight,
   IconBolt,
-  IconChartBar,
-  IconCompass,
-  IconDatabase,
   IconFolder,
   IconHome,
-  IconId,
   IconInbox,
-  IconLayoutGrid,
   IconLayoutSidebarLeftCollapse,
   IconMessageSearch,
-  IconMicrophone,
   IconMoon,
-  IconNotebook,
   IconSearch,
   IconSend,
   IconSettings,
   IconSun,
-  IconUsers,
 } from '@tabler/icons-react'
 import { useNavigate } from 'react-router-dom'
 import { useShallow } from 'zustand/react/shallow'
@@ -30,21 +22,16 @@ import { newCommandId, scopeKey } from '../domain/semantics'
 import type { Session } from '../domain/types'
 import { selectProjects, selectSessions, useAstrorderStore } from '../state/store'
 import { useActionInbox } from '../features/inbox/useActionInbox'
-import {
-  WORKSPACE_AGENT_ACCOUNTS_PLUGIN_ID,
-  WORKSPACE_ANALYTICS_GATEWAY_PLUGIN_ID,
-  WORKSPACE_BACKUPS_PLUGIN_ID,
-  WORKSPACE_DIGEST_PLUGIN_ID,
-  WORKSPACE_GROUPS_PLUGIN_ID,
-  WORKSPACE_LEARNING_RADAR_PLUGIN_ID,
-  WORKSPACE_MEETINGS_PLUGIN_ID,
-  WORKSPACE_MONITOR_PLUGIN_ID,
-} from '../features/plugins/builtinPlugins'
+import { registerBuiltinWorkspacePages } from '../features/extensions/builtinWorkspacePages'
+import { extensionRegistry, useExtensionRegistryVersion } from '../features/extensions/extensionRegistry'
+import { resolveExtensionPagePath, type ExtensionPageCommandSpec } from '../features/extensions/types'
 import { usePluginSettingsStore } from '../features/plugins/pluginSettingsStore'
 import { useIsOfficeProfile } from '../features/office/appProfile'
 import { AgentBrandIcon } from './AgentBrandIcon'
 import { displaySessionTitle, formatRelativeTime, resolveSessionDisplayTitle, sessionActivityStatus } from './sessionRailModel'
 import './commandPalette.css'
+
+registerBuiltinWorkspacePages()
 
 type PaletteCategory = 'session' | 'message' | 'route' | 'action' | 'project'
 
@@ -58,6 +45,7 @@ interface PaletteItem {
   running?: boolean
   session?: Session
   agentKind?: string
+  icon?: ComponentType<{ size?: number; color?: string; className?: string }>
   onRun: () => void
 }
 
@@ -75,14 +63,8 @@ export function CommandPalette({ opened, onClose, onToggleSidebar, onOpenSetting
   const sessions = useAstrorderStore(useShallow(selectSessions))
   const projects = useAstrorderStore(useShallow(selectProjects))
   const agents = useAstrorderStore((state) => state.agents)
-  const groupsEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_GROUPS_PLUGIN_ID))
-  const monitorEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_MONITOR_PLUGIN_ID))
-  const analyticsEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_ANALYTICS_GATEWAY_PLUGIN_ID))
-  const backupsEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_BACKUPS_PLUGIN_ID))
-  const accountsEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_AGENT_ACCOUNTS_PLUGIN_ID))
-  const meetingsEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_MEETINGS_PLUGIN_ID))
-  const digestEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_DIGEST_PLUGIN_ID))
-  const learningEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_LEARNING_RADAR_PLUGIN_ID))
+  const registryVersion = useExtensionRegistryVersion()
+  const enabledPlugins = usePluginSettingsStore((s) => s.enabledPlugins)
   const isOfficeProfile = useIsOfficeProfile()
 
   const [query, setQuery] = useState('')
@@ -177,23 +159,57 @@ export function CommandPalette({ opened, onClose, onToggleSidebar, onOpenSetting
       })
     }
 
-    // 2. Routes
-    const routes: Array<{ id: string; title: string; subtitle: string; to: string; keywords: string; badge?: string }> = [
-      { id: 'route:bots', title: 'Bot 工作台', subtitle: '/bots', to: '/bots', keywords: 'bot bots 机器人 agents skill 孵化 派单' },
+    // 2. Routes (core + extensionRegistry active pages)
+    void registryVersion
+    const activePages = extensionRegistry.getActivePages({
+      profile: isOfficeProfile ? 'office' : 'developer',
+      enabledPlugins,
+    })
+    const activeCommands = extensionRegistry.getActiveCommands({
+      profile: isOfficeProfile ? 'office' : 'developer',
+      enabledPlugins,
+    })
+    const monitorEnabled = activePages.some((page) => page.id === 'monitor')
+
+    const routes: Array<{
+      id: string
+      title: string
+      subtitle: string
+      to: string
+      keywords: string
+      badge?: string
+      icon?: ComponentType<{ size?: number; color?: string; className?: string }>
+    }> = [
+      ...(!isOfficeProfile ? [{ id: 'route:bots', title: 'Bot 工作台', subtitle: '/bots', to: '/bots', keywords: 'bot bots 机器人 agents skill 孵化 派单' }] : []),
       { id: 'route:inbox', title: isOfficeProfile ? '待办清单' : '待我决策（行动收件箱）', subtitle: '/inbox', to: '/inbox', keywords: 'inbox action todo 待办 清单 决策 审批 收件箱', badge: inboxCount > 0 ? `${inboxCount} 项` : undefined },
-      ...(meetingsEnabled ? [{ id: 'route:meetings', title: '会议纪要与录音', subtitle: '/meetings', to: '/meetings', keywords: 'meetings audio minutes 会议 录音 纪要 行动项' }] : []),
-      ...(digestEnabled ? [{ id: 'route:digest', title: '工作复盘与周报', subtitle: '/digest', to: '/digest', keywords: 'digest report weekly 复盘 周报 日报 总结' }] : []),
-      ...(learningEnabled ? [
-        { id: 'route:learning', title: '成长雷达（知识盲区与导师伴学）', subtitle: '/learning', to: '/learning', keywords: 'learning radar mentor study 成长 雷达 学习 盲区 导师' },
-        { id: 'route:learning-review', title: '成长雷达 · 间隔复习队列', subtitle: '/learning?tab=review', to: '/learning?tab=review', keywords: 'learning review leitner 间隔 复习 记忆 刷卡' },
-      ] : []),
       { id: 'route:welcome', title: isOfficeProfile ? '首页工作台' : '星序指挥台（欢迎页）', subtitle: '/chat', to: '/chat', keywords: 'welcome home 工作台 指挥台 欢迎页 首页' },
-      ...(!isOfficeProfile && monitorEnabled ? [{ id: 'route:matrix', title: '矩阵（多会话网格）', subtitle: '/monitor', to: '/monitor', keywords: 'matrix monitor 矩阵 监控室 多窗' }] : []),
-      ...(!isOfficeProfile && groupsEnabled ? [{ id: 'route:groups', title: '群聊协作', subtitle: '/groups', to: '/groups', keywords: 'groups chat 群聊 接力' }] : []),
-      ...(!isOfficeProfile && analyticsEnabled ? [{ id: 'route:analytics', title: '用量统计', subtitle: '/analytics', to: '/analytics', keywords: 'analytics usage token 统计' }] : []),
-      ...(!isOfficeProfile && backupsEnabled ? [{ id: 'route:backups', title: '文件与目录备份', subtitle: '/backups', to: '/backups', keywords: 'backups 备份 快照' }] : []),
-      ...(!isOfficeProfile && accountsEnabled ? [{ id: 'route:accounts', title: 'Agent 账号管理', subtitle: '/agent-accounts', to: '/agent-accounts', keywords: 'accounts quota 账号 额度' }] : []),
     ]
+    for (const page of activePages) {
+      if (page.command === false) continue
+      const pagePath = resolveExtensionPagePath(page)
+      const specs: ExtensionPageCommandSpec[] = page.command
+        ? (Array.isArray(page.command) ? page.command : [page.command])
+        : [{
+            id: `ext-page:${page.pluginId}:${page.id}`,
+            title: page.title,
+            subtitle: pagePath,
+            to: pagePath,
+            keywords: `${page.title} ${page.navLabel || ''} ${page.pluginId} ${page.id}`,
+            icon: page.mobileIcon || page.icon,
+          }]
+      for (const spec of specs) {
+        if (isOfficeProfile && spec.hideInOfficeMode) continue
+        const target = spec.to || pagePath
+        routes.push({
+          id: spec.id || `ext-page:${page.pluginId}:${page.id}`,
+          title: spec.title || page.title,
+          subtitle: spec.subtitle || target,
+          to: target,
+          keywords: spec.keywords || `${page.title} ${page.navLabel || ''} ${page.pluginId} ${page.id}`,
+          icon: spec.icon || page.mobileIcon || page.icon,
+        })
+      }
+    }
     for (const r of routes) {
       items.push({
         id: r.id,
@@ -202,6 +218,7 @@ export function CommandPalette({ opened, onClose, onToggleSidebar, onOpenSetting
         subtitle: r.subtitle,
         keywords: `${r.title} ${r.keywords}`,
         badge: r.badge,
+        icon: r.icon,
         onRun: () => {
           onClose()
           navigate(r.to, r.to === '/chat' ? { state: { welcome: true } } : undefined)
@@ -209,7 +226,7 @@ export function CommandPalette({ opened, onClose, onToggleSidebar, onOpenSetting
       })
     }
 
-    // 3. Actions
+    // 3. Actions (core + extensionRegistry active commands)
     items.push(
       {
         id: 'action:sidebar',
@@ -245,6 +262,21 @@ export function CommandPalette({ opened, onClose, onToggleSidebar, onOpenSetting
         },
       },
     )
+    for (const cmd of activeCommands) {
+      items.push({
+        id: `ext-cmd:${cmd.pluginId}:${cmd.id}`,
+        category: cmd.category || 'action',
+        title: cmd.title,
+        subtitle: cmd.subtitle,
+        keywords: `${cmd.title} ${cmd.subtitle || ''} ${cmd.keywords || ''} ${cmd.pluginId}`,
+        badge: cmd.badge,
+        icon: cmd.icon,
+        onRun: () => {
+          onClose()
+          void cmd.run()
+        },
+      })
+    }
 
     // 4. Projects / Workspaces
     const seenProjects = new Set<string>()
@@ -287,7 +319,7 @@ export function CommandPalette({ opened, onClose, onToggleSidebar, onOpenSetting
     }
 
     return items
-  }, [accountsEnabled, agents, analyticsEnabled, backupsEnabled, computedScheme, digestEnabled, groupsEnabled, inboxCount, isOfficeProfile, learningEnabled, meetingsEnabled, monitorEnabled, navigate, onClose, onOpenSettings, onToggleSidebar, projects, sessions, setColorScheme])
+  }, [agents, computedScheme, enabledPlugins, inboxCount, isOfficeProfile, navigate, onClose, onOpenSettings, onToggleSidebar, projects, registryVersion, sessions, setColorScheme])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -428,28 +460,32 @@ export function CommandPalette({ opened, onClose, onToggleSidebar, onOpenSetting
 
   if (!opened) return null
 
-  const categoryLabel: Record<PaletteCategory, string> = {
-    session: '会话',
-    message: '消息',
-    route: '视图',
-    action: '动作',
-    project: '项目',
-  }
+  const categoryLabel: Record<PaletteCategory, string> = isOfficeProfile
+    ? {
+        session: '对话',
+        message: '消息',
+        route: '页面',
+        action: '操作',
+        project: '工作空间',
+      }
+    : {
+        session: '会话',
+        message: '消息',
+        route: '视图',
+        action: '动作',
+        project: '项目',
+      }
 
   const renderIcon = (item: PaletteItem) => {
     if (item.category === 'session') return <AgentBrandIcon kind={item.agentKind} size={15} />
     if (item.category === 'message') return item.agentKind ? <AgentBrandIcon kind={item.agentKind} size={15} /> : <IconMessageSearch size={15} color="var(--astr-indigo)" />
     if (item.category === 'project') return <IconFolder size={15} color="var(--astr-indigo)" />
+    if (item.icon) {
+      const CustomIcon = item.icon
+      return <CustomIcon size={15} color="var(--astr-indigo)" />
+    }
     if (item.id === 'route:inbox') return <IconInbox size={15} color="var(--astr-indigo)" />
-    if (item.id === 'route:meetings') return <IconMicrophone size={15} color="var(--astr-indigo)" />
-    if (item.id === 'route:digest') return <IconNotebook size={15} color="var(--astr-indigo)" />
-    if (item.id === 'route:learning' || item.id === 'route:learning-review') return <IconCompass size={15} color="var(--astr-indigo)" />
     if (item.id === 'route:welcome') return <IconHome size={15} color="var(--astr-indigo)" />
-    if (item.id === 'route:matrix') return <IconLayoutGrid size={15} color="var(--astr-indigo)" />
-    if (item.id === 'route:groups') return <IconUsers size={15} color="var(--astr-indigo)" />
-    if (item.id === 'route:analytics') return <IconChartBar size={15} color="var(--astr-indigo)" />
-    if (item.id === 'route:backups') return <IconDatabase size={15} color="var(--astr-indigo)" />
-    if (item.id === 'route:accounts') return <IconId size={15} color="var(--astr-indigo)" />
     if (item.id === 'action:sidebar') return <IconLayoutSidebarLeftCollapse size={15} color="var(--astr-indigo)" />
     if (item.id === 'action:theme') return computedScheme === 'dark' ? <IconSun size={15} color="var(--astr-indigo)" /> : <IconMoon size={15} color="var(--astr-indigo)" />
     if (item.id === 'action:settings') return <IconSettings size={15} color="var(--astr-indigo)" />
@@ -467,13 +503,13 @@ export function CommandPalette({ opened, onClose, onToggleSidebar, onOpenSetting
         className="command-palette-dialog"
         role="dialog"
         aria-modal="true"
-        aria-label="星序全能星令面板"
+        aria-label={isOfficeProfile ? '全局搜索' : '星序全能星令面板'}
       >
         {dispatchTarget ? (
           <div className="command-palette-dispatch">
             <div className="command-palette-dispatch-head">
               <AgentBrandIcon kind={agents[dispatchTarget.agent_id]?.kind} size={15} />
-              <strong>快发后台指令 → {displaySessionTitle(dispatchTarget)}</strong>
+              <strong>{isOfficeProfile ? '快速发送消息' : '快发后台指令'} → {displaySessionTitle(dispatchTarget)}</strong>
               <button type="button" className="command-palette-back" onClick={() => setDispatchTarget(null)}>
                 返回 (Esc)
               </button>
@@ -483,8 +519,8 @@ export function CommandPalette({ opened, onClose, onToggleSidebar, onOpenSetting
               <input
                 ref={dispatchRef}
                 className="command-palette-input"
-                aria-label="输入后台指令内容"
-                placeholder="输入要直接派发给该会话的指令，按 Enter 立即发送…"
+                aria-label={isOfficeProfile ? '输入要发送的消息内容' : '输入后台指令内容'}
+                placeholder={isOfficeProfile ? '输入要发送给该对话的消息，按 Enter 立即发送…' : '输入要直接派发给该会话的指令，按 Enter 立即发送…'}
                 value={dispatchText}
                 onChange={(e) => setDispatchText(e.target.value)}
                 onKeyDown={handleDispatchKeyDown}
@@ -511,7 +547,7 @@ export function CommandPalette({ opened, onClose, onToggleSidebar, onOpenSetting
                 aria-expanded="true"
                 aria-controls="command-palette-listbox"
                 aria-activedescendant={filtered.length > 0 ? `command-palette-opt-${clampedIndex}` : undefined}
-                aria-label="搜索会话、历史消息、工作空间、视图或快捷命令"
+                aria-label={isOfficeProfile ? '搜索对话、历史记录、工作空间或页面' : '搜索会话、历史消息、工作空间、视图或快捷命令'}
                 placeholder={isOfficeProfile ? '搜索对话、历史记录、工作空间或页面…' : '搜索会话、历史消息、项目或快捷命令…（选中会话按 Tab 可快发指令）'}
                 value={query}
                 onChange={(e) => {
@@ -534,7 +570,9 @@ export function CommandPalette({ opened, onClose, onToggleSidebar, onOpenSetting
             >
               {filtered.length === 0 ? (
                 <div className="command-palette-empty">
-                  {searchingMessages ? '正在检索跨会话历史消息…' : '未找到匹配的记录或快捷命令'}
+                  {searchingMessages
+                    ? (isOfficeProfile ? '正在检索历史对话记录…' : '正在检索跨会话历史消息…')
+                    : (isOfficeProfile ? '未找到匹配的对话、文档或页面' : '未找到匹配的记录或快捷命令')}
                 </div>
               ) : (
                 filtered.map((item, idx) => {
@@ -564,7 +602,7 @@ export function CommandPalette({ opened, onClose, onToggleSidebar, onOpenSetting
                         <button
                           type="button"
                           className="command-palette-quick-send"
-                          title="不切换页面直接发指令 (Tab)"
+                          title={isOfficeProfile ? '不切换页面直接发消息 (Tab)' : '不切换页面直接发指令 (Tab)'}
                           onClick={(e) => {
                             e.stopPropagation()
                             setDispatchTarget(item.session!)
@@ -584,8 +622,8 @@ export function CommandPalette({ opened, onClose, onToggleSidebar, onOpenSetting
 
             <div className="command-palette-footer">
               <span><kbd>↑↓</kbd> 选择</span>
-              <span><kbd>Enter</kbd> 执行</span>
-              <span><kbd>Tab</kbd> 原地快发指令</span>
+              <span><kbd>Enter</kbd> {isOfficeProfile ? '打开' : '执行'}</span>
+              <span><kbd>Tab</kbd> {isOfficeProfile ? '原地快发消息' : '原地快发指令'}</span>
               <span><kbd>Ctrl+K</kbd> 唤起</span>
             </div>
           </>

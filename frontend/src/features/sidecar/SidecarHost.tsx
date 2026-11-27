@@ -1,13 +1,13 @@
-import { useEffect } from 'react'
+import { Suspense, useEffect } from 'react'
 import { api } from '../../api/client'
 import { notifications } from '@mantine/notifications'
-import { ActionIcon, Group, Tooltip } from '@mantine/core'
+import { ActionIcon, Center, Group, Loader, Tooltip } from '@mantine/core'
 import { IconFolderSearch, IconQuote } from '@tabler/icons-react'
 import { SidecarHeader } from './SidecarHeader'
 import { displaySessionTitle } from '../../components/sessionRailModel'
 import { SidecarWelcomeMenu } from './SidecarWelcomeMenu'
 import { SessionDetails } from '../chat/SessionDetails'
-import { artifactViewerRegistry } from './registry'
+import { artifactViewerRegistry, useViewerRegistryVersion } from './registry'
 import { useSidecarStore } from './sidecarStore'
 import { openDatabaseWorkbench, useHasDatabaseTool } from './databaseTool'
 import {
@@ -26,6 +26,7 @@ import { usePluginSettingsStore } from '../plugins/pluginSettingsStore'
 import { useIsOfficeExperience } from '../office/appProfile'
 import { extensionRegistry } from '../extensions/extensionRegistry'
 import { useExtensionStore } from '../extensions/extensionStore'
+import { PluginErrorBoundary } from '../extensions/PluginErrorBoundary'
 import { useWelcomeMenuExtensions } from '../extensions/SlotRenderer'
 import {
   EXTERNAL_PLUGIN_PANEL_VIEWER_ID,
@@ -55,6 +56,14 @@ const OFFICE_HIDDEN_MEDIA_TYPES = new Set<string>([
   'application/x-blackboard',
   'application/x-memory',
 ])
+
+function ViewerLoadingState() {
+  return (
+    <Center style={{ height: '100%', minHeight: 160 }} role="status" aria-label="正在加载预览器">
+      <Loader size="sm" color="violet" />
+    </Center>
+  )
+}
 
 function isDevOnlySidecarTab(tab: {
   id?: string
@@ -120,6 +129,10 @@ export function SidecarHost({
   isVisible = true,
   immersive = false,
 }: SidecarHostProps) {
+  const viewerRegistryVersion = useViewerRegistryVersion()
+  const enabledPlugins = usePluginSettingsStore((s) => s.enabledPlugins)
+  void enabledPlugins
+
   const tabs = useSidecarStore((state) => state.tabs)
   const mountedTabs = useSidecarStore((state) => state.mountedTabs)
   const activeSessionKey = useSidecarStore((state) => state.activeSessionKey)
@@ -367,6 +380,7 @@ export function SidecarHost({
               >
                 {viewer ? (() => {
                   const ViewerComponent = viewer.component
+                  const errorPluginId = viewer.pluginId || viewer.id || tab.viewerId || 'unknown-viewer'
                   const quoteArtifactToComposer = () => {
                     const selected = typeof window !== 'undefined' ? window.getSelection()?.toString().trim() || '' : ''
                     const refLabel = artifact.path || artifact.name
@@ -428,23 +442,31 @@ export function SidecarHost({
                     </Group>
                   )
                   return (
-                    <ViewerComponent
-                      artifact={artifact}
-                      session={ownerSessionKey === currentSessionKey ? session : undefined}
-                      isActive={isActive}
-                      surface={surface}
-                      toolbarAction={toolbarAction}
-                      onDirtyChange={(dirty) => setTabDirty(tab.id, dirty)}
-                      onSave={(content) =>
-                        handleSaveContent(
-                          artifact.path,
-                          content,
-                          artifact.sessionId,
-                          artifact.connectionId,
-                        )
-                      }
-                      onClose={() => closeTab(tab.id)}
-                    />
+                    <PluginErrorBoundary
+                      pluginId={errorPluginId}
+                      pluginName={viewer.title}
+                      resetKey={`${ownerSessionKey}:${tab.id}:${viewer.id}:${viewerRegistryVersion}`}
+                    >
+                      <Suspense fallback={<ViewerLoadingState />}>
+                        <ViewerComponent
+                          artifact={artifact}
+                          session={ownerSessionKey === currentSessionKey ? session : undefined}
+                          isActive={isActive}
+                          surface={surface}
+                          toolbarAction={toolbarAction}
+                          onDirtyChange={(dirty) => setTabDirty(tab.id, dirty)}
+                          onSave={(content) =>
+                            handleSaveContent(
+                              artifact.path,
+                              content,
+                              artifact.sessionId,
+                              artifact.connectionId,
+                            )
+                          }
+                          onClose={() => closeTab(tab.id)}
+                        />
+                      </Suspense>
+                    </PluginErrorBoundary>
                   )
                 })() : <div style={{ padding: 16 }}>暂无支持的查看器</div>}
               </div>
